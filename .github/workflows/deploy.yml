@@ -70,7 +70,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          ssh -i ~/.ssh/deploy_key ec2-user@${{ secrets.EC2_HOST }} bash << 'SSHEOF'
+          ssh -i ~/.ssh/deploy_key ec2-user@${{ secrets.EC2_HOST }} "GH_TOKEN='${GH_TOKEN}' bash" << 'SSHEOF'
             set -euo pipefail
             APP_DIR="/opt/pmcopilots"
 
