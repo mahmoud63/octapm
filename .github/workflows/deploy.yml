@@ -30,6 +30,8 @@ jobs:
       - name: Build
         run: npm run build
         working-directory: frontend
+        env:
+          VITE_API_URL: https://octapm.com/api/v1
 
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
