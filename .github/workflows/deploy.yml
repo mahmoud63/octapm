@@ -68,22 +68,25 @@ jobs:
           ssh-keyscan -H ${{ secrets.EC2_HOST }} >> ~/.ssh/known_hosts
 
       - name: Deploy to EC2
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          ssh -i ~/.ssh/deploy_key ec2-user@${{ secrets.EC2_HOST }} 'bash -s' <<'ENDSSH'
+          ssh -i ~/.ssh/deploy_key ec2-user@${{ secrets.EC2_HOST }} "bash -s" << EOF
             set -euo pipefail
             APP_DIR="/opt/pmcopilots"
 
-            if [ ! -d "$APP_DIR/.git" ]; then
-              sudo git clone https://github.com/mahmoud63/octapm.git "$APP_DIR"
-              sudo chown -R ec2-user:ec2-user "$APP_DIR"
+            if [ ! -d "\$APP_DIR/.git" ]; then
+              sudo git clone https://x-access-token:${GH_TOKEN}@github.com/mahmoud63/octapm.git "\$APP_DIR"
+              sudo chown -R ec2-user:ec2-user "\$APP_DIR"
+            else
+              cd "\$APP_DIR"
+              git remote set-url origin https://x-access-token:${GH_TOKEN}@github.com/mahmoud63/octapm.git
+              git pull origin main
             fi
 
-            cd "$APP_DIR"
-            git pull origin main
-
-            cd backend
+            cd "\$APP_DIR/backend"
             npm ci --omit=dev
             npx prisma migrate deploy
             pm2 restart pmcopilots-api || pm2 start src/index.js --name pmcopilots-api
             pm2 save
-          ENDSSH
+          EOF
