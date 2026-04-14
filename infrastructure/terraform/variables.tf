@@ -1,7 +1,7 @@
 variable "aws_region" {
   description = "Primary AWS region"
   type        = string
-  default     = "me-south-1"
+  default     = "us-east-2"
 }
 
 variable "app_name" {
@@ -72,3 +72,10 @@ variable "your_ip_cidr" {
   description = "Your IP CIDR for SSH access (e.g. 1.2.3.4/32)"
   type        = string
 }
+
+variable "github_repo" {
+  description = "GitHub repo allowed to assume deploy role via OIDC (e.g. myorg/pmcopilots)"
+  type        = string
+}
+
+

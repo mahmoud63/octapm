@@ -1,11 +1,11 @@
 # Copy to terraform.tfvars and fill in real values
 # Never commit terraform.tfvars to git
 
-aws_region    = "me-south-1"
+aws_region    = "us-east-2"
 app_name      = "pmcopilots"
 environment   = "prod"
 
-domain_name   = "pmcopilots.com"
+domain_name   = "octapm.com"
 api_subdomain = "api"
 
 db_name     = "pmcopilots"
@@ -26,3 +26,7 @@ ssh_public_key = "ssh-ed25519 AAAA... your-email@example.com"
 
 # Your IP for SSH access (curl ifconfig.me)
 your_ip_cidr = "0.0.0.0/32"
+
+# GitHub Actions OIDC — repo that is allowed to assume the deploy role
+# Format: "org-or-username/repo-name"
+github_repo = "CHANGE_ME/pmcopilots"

@@ -102,7 +102,7 @@ resource "aws_security_group" "ec2" {
   }
 
   ingress {
-    description = "API port from CloudFront (HTTP — TLS terminates at CF)"
+    description = "API port from CloudFront (HTTP - TLS terminates at CF)"
     from_port   = 5000
     to_port     = 5000
     protocol    = "tcp"

@@ -12,3 +12,5 @@ docs/
 .claude/
 *.sh
 CLAUDE.md
+*.tf
+*.tfvars
