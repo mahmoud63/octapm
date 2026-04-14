@@ -1,4 +1,5 @@
 import {
+  FolderKanban,
   Construction,
   LayoutDashboard,
   Monitor,
@@ -22,30 +23,29 @@ import {
   Command,
   GalleryVerticalEnd,
 } from 'lucide-react'
-import { ClerkLogo } from '@/assets/clerk-logo'
 import { type SidebarData } from '../types'
 
 export const sidebarData: SidebarData = {
   user: {
-    name: 'satnaing',
-    email: 'satnaingdev@gmail.com',
+    name: 'Octa PM Team',
+    email: 'admin@octapm.com',
     avatar: '/avatars/shadcn.jpg',
   },
   teams: [
     {
-      name: 'Shadcn Admin',
+      name: 'Octa PM',
       logo: Command,
-      plan: 'Vite + ShadcnUI',
-    },
-    {
-      name: 'Acme Inc',
-      logo: GalleryVerticalEnd,
       plan: 'Enterprise',
     },
     {
-      name: 'Acme Corp.',
+      name: 'Octa Planning',
+      logo: GalleryVerticalEnd,
+      plan: 'Professional',
+    },
+    {
+      name: 'Octa Site Ops',
       logo: AudioWaveform,
-      plan: 'Startup',
+      plan: 'Operations',
     },
   ],
   navGroups: [
@@ -56,6 +56,12 @@ export const sidebarData: SidebarData = {
           title: 'Dashboard',
           url: '/',
           icon: LayoutDashboard,
+        },
+        {
+          title: 'Projects',
+          url: '/projects',
+          badge: 'New',
+          icon: FolderKanban,
         },
         {
           title: 'Tasks',
@@ -77,24 +83,6 @@ export const sidebarData: SidebarData = {
           title: 'Users',
           url: '/users',
           icon: Users,
-        },
-        {
-          title: 'Secured by Clerk',
-          icon: ClerkLogo,
-          items: [
-            {
-              title: 'Sign In',
-              url: '/clerk/sign-in',
-            },
-            {
-              title: 'Sign Up',
-              url: '/clerk/sign-up',
-            },
-            {
-              title: 'User Management',
-              url: '/clerk/user-management',
-            },
-          ],
         },
       ],
     },

@@ -45,6 +45,8 @@ export function UsersTable({ data, search, navigate }: DataTableProps) {
 
   // Synced with URL states (keys/defaults mirror users route search schema)
   const {
+    globalFilter,
+    onGlobalFilterChange,
     columnFilters,
     onColumnFiltersChange,
     pagination,
@@ -53,11 +55,9 @@ export function UsersTable({ data, search, navigate }: DataTableProps) {
   } = useTableUrlState({
     search,
     navigate,
-    pagination: { defaultPage: 1, defaultPageSize: 10 },
-    globalFilter: { enabled: false },
+    pagination: { defaultPage: 1, defaultPageSize: 20 },
+    globalFilter: { enabled: true, key: 'filter' },
     columnFilters: [
-      // username per-column text filter
-      { columnId: 'username', searchKey: 'username', type: 'string' },
       { columnId: 'status', searchKey: 'status', type: 'array' },
       { columnId: 'role', searchKey: 'role', type: 'array' },
     ],
@@ -71,15 +71,38 @@ export function UsersTable({ data, search, navigate }: DataTableProps) {
       sorting,
       pagination,
       rowSelection,
+      globalFilter,
       columnFilters,
       columnVisibility,
     },
     enableRowSelection: true,
     onPaginationChange,
+    onGlobalFilterChange,
     onColumnFiltersChange,
     onRowSelectionChange: setRowSelection,
     onSortingChange: setSorting,
     onColumnVisibilityChange: setColumnVisibility,
+    globalFilterFn: (row, _, filterValue) => {
+      const searchTerm = String(filterValue ?? '')
+        .trim()
+        .toLowerCase()
+
+      if (!searchTerm) {
+        return true
+      }
+
+      return (
+        String(row.original.name ?? '')
+          .toLowerCase()
+          .includes(searchTerm) ||
+        String(row.original.email ?? '')
+          .toLowerCase()
+          .includes(searchTerm) ||
+        String(row.original.phone ?? '')
+          .toLowerCase()
+          .includes(searchTerm)
+      )
+    },
     getPaginationRowModel: getPaginationRowModel(),
     getCoreRowModel: getCoreRowModel(),
     getFilteredRowModel: getFilteredRowModel(),
@@ -101,8 +124,7 @@ export function UsersTable({ data, search, navigate }: DataTableProps) {
     >
       <DataTableToolbar
         table={table}
-        searchPlaceholder='Filter users...'
-        searchKey='username'
+        searchPlaceholder='Search name, email, or phone...'
         filters={[
           {
             columnId: 'status',
@@ -110,8 +132,6 @@ export function UsersTable({ data, search, navigate }: DataTableProps) {
             options: [
               { label: 'Active', value: 'active' },
               { label: 'Inactive', value: 'inactive' },
-              { label: 'Invited', value: 'invited' },
-              { label: 'Suspended', value: 'suspended' },
             ],
           },
           {

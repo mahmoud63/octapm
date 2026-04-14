@@ -1,35 +1,59 @@
-import { Shield, UserCheck, Users, CreditCard } from 'lucide-react'
+import {
+  BarChart3,
+  Calculator,
+  HardHat,
+  Package,
+  Shield,
+  Truck,
+  UserCheck,
+  Wallet,
+} from 'lucide-react'
 import { type UserStatus } from './schema'
 
 export const callTypes = new Map<UserStatus, string>([
   ['active', 'bg-teal-100/30 text-teal-900 dark:text-teal-200 border-teal-200'],
   ['inactive', 'bg-neutral-300/40 border-neutral-300'],
-  ['invited', 'bg-sky-200/40 text-sky-900 dark:text-sky-100 border-sky-300'],
-  [
-    'suspended',
-    'bg-destructive/10 dark:bg-destructive/50 text-destructive dark:text-primary border-destructive/10',
-  ],
 ])
 
 export const roles = [
   {
-    label: 'Superadmin',
-    value: 'superadmin',
+    label: 'Project Manager',
+    value: 'pm',
     icon: Shield,
   },
   {
-    label: 'Admin',
-    value: 'admin',
+    label: 'Planning Engineer',
+    value: 'planning_eng',
+    icon: BarChart3,
+  },
+  {
+    label: 'Quantity Surveyor',
+    value: 'qs',
+    icon: Calculator,
+  },
+  {
+    label: 'Cost Controller',
+    value: 'cost_controller',
+    icon: Wallet,
+  },
+  {
+    label: 'Procurement',
+    value: 'procurement',
+    icon: Truck,
+  },
+  {
+    label: 'Warehouse',
+    value: 'warehouse',
+    icon: Package,
+  },
+  {
+    label: 'Site Engineer',
+    value: 'site_engineer',
     icon: UserCheck,
   },
   {
-    label: 'Manager',
-    value: 'manager',
-    icon: Users,
-  },
-  {
-    label: 'Cashier',
-    value: 'cashier',
-    icon: CreditCard,
+    label: 'Finance',
+    value: 'finance',
+    icon: HardHat,
   },
 ] as const

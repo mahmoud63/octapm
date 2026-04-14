@@ -5,11 +5,16 @@ const helmet = require('helmet');
 const morgan = require('morgan');
 const { createServer } = require('http');
 const { Server } = require('socket.io');
+const authRoutes = require('./routes/auth');
+const projectRoutes = require('./routes/projects');
+const userRoutes = require('./routes/users');
+const { HttpError } = require('./utils/http-error');
+const { sendError } = require('./utils/api-response');
 
 const app = express();
 const httpServer = createServer(app);
 const io = new Server(httpServer, {
-  cors: { origin: process.env.FRONTEND_URL || 'http://localhost:5173' }
+  cors: { origin: process.env.FRONTEND_URL || 'http://localhost:5173' },
 });
 
 // Middleware
@@ -20,21 +25,41 @@ app.use(express.json({ limit: '10mb' }));
 
 // Health check
 app.get('/api/health', (req, res) => {
-  res.json({ success: true, data: { status: 'ok', timestamp: new Date().toISOString() } });
+  res.json({
+    success: true,
+    data: { status: 'ok', timestamp: new Date().toISOString() },
+  });
 });
 
-// TODO: Mount route modules here
-// app.use('/api/v1/auth', require('./routes/auth'));
-// app.use('/api/v1/users', require('./routes/users'));
-// app.use('/api/v1/projects', require('./routes/projects'));
+// API routes
+app.use('/api/v1/auth', authRoutes);
+app.use('/api/v1/projects', projectRoutes);
+app.use('/api/v1/users', userRoutes);
+
+app.use((req, res, next) => {
+  next(
+    new HttpError(
+      404,
+      'NOT_FOUND',
+      `Route not found: ${req.method} ${req.originalUrl}`,
+    ),
+  );
+});
 
 // Global error handler
 app.use((err, req, res, next) => {
+  if (res.headersSent) {
+    return next(err);
+  }
+
   console.error(err.stack);
-  res.status(err.status || 500).json({
-    success: false,
-    error: { code: err.code || 'INTERNAL_ERROR', message: err.message || 'Something went wrong' }
-  });
+  return sendError(
+    res,
+    err.status || 500,
+    err.code || 'INTERNAL_ERROR',
+    err.message || 'Something went wrong',
+    process.env.NODE_ENV === 'production' ? undefined : err.details,
+  );
 });
 
 // Make io accessible in routes

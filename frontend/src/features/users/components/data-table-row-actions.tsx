@@ -1,6 +1,7 @@
 import { DotsHorizontalIcon } from '@radix-ui/react-icons'
 import { type Row } from '@tanstack/react-table'
-import { Trash2, UserPen } from 'lucide-react'
+import { KeyRound, Trash2, UserCheck, UserX } from 'lucide-react'
+import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import {
   DropdownMenu,
@@ -11,6 +12,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { type User } from '../data/schema'
+import { useActivateUserMutation } from '../hooks/use-users'
 import { useUsers } from './users-provider'
 
 type DataTableRowActionsProps = {
@@ -19,45 +21,77 @@ type DataTableRowActionsProps = {
 
 export function DataTableRowActions({ row }: DataTableRowActionsProps) {
   const { setOpen, setCurrentRow } = useUsers()
+  const activateMutation = useActivateUserMutation()
+
+  const onActivate = async () => {
+    try {
+      await activateMutation.mutateAsync(row.original.id)
+      toast.success('Engineer activated successfully.')
+    } catch {
+      toast.error('Failed to activate engineer.')
+    }
+  }
+
+  const onDeactivate = () => {
+    setCurrentRow(row.original)
+    setOpen('deactivate')
+  }
+
   return (
-    <>
-      <DropdownMenu modal={false}>
-        <DropdownMenuTrigger asChild>
-          <Button
-            variant='ghost'
-            className='flex h-8 w-8 p-0 data-[state=open]:bg-muted'
-          >
-            <DotsHorizontalIcon className='h-4 w-4' />
-            <span className='sr-only'>Open menu</span>
-          </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align='end' className='w-[160px]'>
+    <DropdownMenu modal={false}>
+      <DropdownMenuTrigger asChild>
+        <Button
+          variant='ghost'
+          className='flex h-8 w-8 p-0 data-[state=open]:bg-muted'
+        >
+          <DotsHorizontalIcon className='h-4 w-4' />
+          <span className='sr-only'>Open menu</span>
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align='end' className='w-45'>
+        {row.original.status === 'active' ? (
           <DropdownMenuItem
-            onClick={() => {
-              setCurrentRow(row.original)
-              setOpen('edit')
-            }}
+            className='text-destructive!'
+            onClick={onDeactivate}
           >
-            Edit
+            Deactivate
             <DropdownMenuShortcut>
-              <UserPen size={16} />
+              <UserX size={16} />
             </DropdownMenuShortcut>
           </DropdownMenuItem>
-          <DropdownMenuSeparator />
-          <DropdownMenuItem
-            onClick={() => {
-              setCurrentRow(row.original)
-              setOpen('delete')
-            }}
-            className='text-red-500!'
-          >
-            Delete
+        ) : (
+          <DropdownMenuItem onClick={onActivate}>
+            Activate
             <DropdownMenuShortcut>
-              <Trash2 size={16} />
+              <UserCheck size={16} />
             </DropdownMenuShortcut>
           </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
-    </>
+        )}
+
+        <DropdownMenuItem
+          onClick={() => toast.info('Reset password feature coming soon.')}
+        >
+          Reset Password
+          <DropdownMenuShortcut>
+            <KeyRound size={16} />
+          </DropdownMenuShortcut>
+        </DropdownMenuItem>
+
+        <DropdownMenuSeparator />
+
+        <DropdownMenuItem
+          onClick={() => {
+            setCurrentRow(row.original)
+            setOpen('delete')
+          }}
+          className='text-red-500!'
+        >
+          Delete
+          <DropdownMenuShortcut>
+            <Trash2 size={16} />
+          </DropdownMenuShortcut>
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
   )
 }

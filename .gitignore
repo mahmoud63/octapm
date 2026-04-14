@@ -8,3 +8,7 @@ dist/
 .vscode/
 .idea/
 coverage/
+docs/
+.claude/
+*.sh
+CLAUDE.md

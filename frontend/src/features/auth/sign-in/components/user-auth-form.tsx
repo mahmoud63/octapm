@@ -1,13 +1,16 @@
 import { useState } from 'react'
 import { z } from 'zod'
+import { AxiosError } from 'axios'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { Link, useNavigate } from '@tanstack/react-router'
+import { login } from '@/services/auth/api'
+import type { ApiErrorEnvelope } from '@/services/auth/types'
 import { Loader2, LogIn } from 'lucide-react'
 import { toast } from 'sonner'
 import { IconFacebook, IconGithub } from '@/assets/brand-icons'
 import { useAuthStore } from '@/stores/auth-store'
-import { sleep, cn } from '@/lib/utils'
+import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import {
   Form,
@@ -27,7 +30,7 @@ const formSchema = z.object({
   password: z
     .string()
     .min(1, 'Please enter your password')
-    .min(7, 'Password must be at least 7 characters long'),
+    .min(8, 'Password must be at least 8 characters long'),
 })
 
 interface UserAuthFormProps extends React.HTMLAttributes<HTMLFormElement> {
@@ -51,33 +54,39 @@ export function UserAuthForm({
     },
   })
 
+  const getErrorMessage = (error: unknown) => {
+    if (error instanceof AxiosError) {
+      const errorData = error.response?.data as ApiErrorEnvelope | undefined
+      return errorData?.error?.message || 'Unable to sign in'
+    }
+
+    return 'Unable to sign in'
+  }
+
   function onSubmit(data: z.infer<typeof formSchema>) {
     setIsLoading(true)
 
-    toast.promise(sleep(2000), {
+    toast.promise(login(data), {
       loading: 'Signing in...',
-      success: () => {
+      success: (session) => {
         setIsLoading(false)
 
-        // Mock successful authentication with expiry computed at success time
-        const mockUser = {
-          accountNo: 'ACC001',
-          email: data.email,
-          role: ['user'],
-          exp: Date.now() + 24 * 60 * 60 * 1000, // 24 hours from now
-        }
-
-        // Set user and access token
-        auth.setUser(mockUser)
-        auth.setAccessToken('mock-access-token')
+        auth.setSession(
+          session.user,
+          session.tokens.accessToken,
+          session.tokens.refreshToken
+        )
 
         // Redirect to the stored location or default to dashboard
         const targetPath = redirectTo || '/'
         navigate({ to: targetPath, replace: true })
 
-        return `Welcome back, ${data.email}!`
+        return `Welcome back, ${session.user.name}!`
       },
-      error: 'Error',
+      error: (error) => {
+        setIsLoading(false)
+        return getErrorMessage(error)
+      },
     })
   }
 
@@ -113,7 +122,7 @@ export function UserAuthForm({
               <FormMessage />
               <Link
                 to='/forgot-password'
-                className='absolute end-0 -top-0.5 text-sm font-medium text-muted-foreground hover:opacity-75'
+                className='absolute inset-e-0 -top-0.5 text-sm font-medium text-muted-foreground hover:opacity-75'
               >
                 Forgot password?
               </Link>

@@ -6,7 +6,7 @@ import { DataTableColumnHeader } from '@/components/data-table'
 import { LongText } from '@/components/long-text'
 import { callTypes, roles } from '../data/data'
 import { type User } from '../data/schema'
-import { DataTableRowActions } from './data-table-row-actions'
+import { DataTableRowActions } from './data-table-row-actions.tsx'
 
 export const usersColumns: ColumnDef<User>[] = [
   {
@@ -19,7 +19,7 @@ export const usersColumns: ColumnDef<User>[] = [
         }
         onCheckedChange={(value) => table.toggleAllPageRowsSelected(!!value)}
         aria-label='Select all'
-        className='translate-y-[2px]'
+        className='translate-y-0.5'
       />
     ),
     meta: {
@@ -30,19 +30,19 @@ export const usersColumns: ColumnDef<User>[] = [
         checked={row.getIsSelected()}
         onCheckedChange={(value) => row.toggleSelected(!!value)}
         aria-label='Select row'
-        className='translate-y-[2px]'
+        className='translate-y-0.5'
       />
     ),
     enableSorting: false,
     enableHiding: false,
   },
   {
-    accessorKey: 'username',
+    accessorKey: 'name',
     header: ({ column }) => (
-      <DataTableColumnHeader column={column} title='Username' />
+      <DataTableColumnHeader column={column} title='Name' />
     ),
     cell: ({ row }) => (
-      <LongText className='max-w-36 ps-3'>{row.getValue('username')}</LongText>
+      <LongText className='max-w-40 ps-3'>{row.getValue('name')}</LongText>
     ),
     meta: {
       className: cn(
@@ -51,18 +51,6 @@ export const usersColumns: ColumnDef<User>[] = [
       ),
     },
     enableHiding: false,
-  },
-  {
-    id: 'fullName',
-    header: ({ column }) => (
-      <DataTableColumnHeader column={column} title='Name' />
-    ),
-    cell: ({ row }) => {
-      const { firstName, lastName } = row.original
-      const fullName = `${firstName} ${lastName}`
-      return <LongText className='max-w-36'>{fullName}</LongText>
-    },
-    meta: { className: 'w-36' },
   },
   {
     accessorKey: 'email',
@@ -74,11 +62,11 @@ export const usersColumns: ColumnDef<User>[] = [
     ),
   },
   {
-    accessorKey: 'phoneNumber',
+    accessorKey: 'phone',
     header: ({ column }) => (
-      <DataTableColumnHeader column={column} title='Phone Number' />
+      <DataTableColumnHeader column={column} title='Phone' />
     ),
-    cell: ({ row }) => <div>{row.getValue('phoneNumber')}</div>,
+    cell: ({ row }) => <div>{row.getValue('phone') || '—'}</div>,
     enableSorting: false,
   },
   {
@@ -97,11 +85,22 @@ export const usersColumns: ColumnDef<User>[] = [
         </div>
       )
     },
-    filterFn: (row, id, value) => {
-      return value.includes(row.getValue(id))
-    },
+    filterFn: (row, id, value) => value.includes(row.getValue(id)),
     enableHiding: false,
     enableSorting: false,
+  },
+  {
+    accessorKey: 'projectCount',
+    header: ({ column }) => (
+      <DataTableColumnHeader column={column} title='Projects' />
+    ),
+    cell: ({ row }) => (
+      <span className='text-muted-foreground'>
+        {row.getValue('projectCount')}
+      </span>
+    ),
+    enableSorting: true,
+    enableHiding: true,
   },
   {
     accessorKey: 'role',
@@ -125,9 +124,7 @@ export const usersColumns: ColumnDef<User>[] = [
         </div>
       )
     },
-    filterFn: (row, id, value) => {
-      return value.includes(row.getValue(id))
-    },
+    filterFn: (row, id, value) => value.includes(row.getValue(id)),
     enableSorting: false,
     enableHiding: false,
   },
