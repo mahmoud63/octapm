@@ -4,7 +4,7 @@ import { useAuthStore } from '@/stores/auth-store'
 import { AuthenticatedLayout } from '@/components/layout/authenticated-layout'
 
 export const Route = createFileRoute('/_authenticated')({
-  beforeLoad: async ({ location }) => {
+  beforeLoad: async () => {
     const { auth } = useAuthStore.getState()
 
     if (!auth.hasSession()) {
