@@ -9,8 +9,7 @@ export const Route = createFileRoute('/_authenticated')({
 
     if (!auth.hasSession()) {
       throw redirect({
-        to: '/sign-in',
-        search: { redirect: location.href },
+        to: '/landing',
       })
     }
 
@@ -21,8 +20,7 @@ export const Route = createFileRoute('/_authenticated')({
       } catch {
         auth.reset()
         throw redirect({
-          to: '/sign-in',
-          search: { redirect: location.href },
+          to: '/landing',
         })
       }
     }
