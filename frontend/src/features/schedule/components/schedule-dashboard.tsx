@@ -1,10 +1,29 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { apiClient } from '@/services/api/client'
-import { RefreshCw, CheckCircle2 } from 'lucide-react'
+import {
+  RefreshCw,
+  CheckCircle2,
+  ChevronDown,
+  FileUp,
+  MoreHorizontal,
+  Upload,
+  TrendingUp,
+  Lock,
+  Link2,
+} from 'lucide-react'
 import { toast } from 'sonner'
+import { cn } from '@/lib/utils'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import { Input } from '@/components/ui/input'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { LongLeadTable } from '@/features/long-lead/components/long-lead-table'
@@ -277,8 +296,9 @@ export function ScheduleDashboard({
 
   return (
     <div className='space-y-6'>
-      {/* Header: stats + regenerate */}
-      <div className='flex flex-wrap items-center justify-between gap-4'>
+      {/* Header: stats + action toolbar */}
+      <div className='flex flex-col gap-4 sm:flex-row sm:flex-wrap sm:items-start sm:justify-between'>
+        {/* Stat cards */}
         <div className='grid grid-cols-2 gap-3 sm:grid-cols-4'>
           <StatCard label='Total Activities' value={revision.activityCount} />
           <StatCard
@@ -298,100 +318,138 @@ export function ScheduleDashboard({
             color='text-amber-600'
           />
         </div>
-        <div className='w-full max-w-sm space-y-2'>
-          <div className='grid grid-cols-2 gap-2'>
-            <ExportButton projectId={projectId} className='w-full' />
-            <PrintReportButton
-              className='w-full'
-              onClick={() => {
-                setShowPrintReport(true)
-                window.setTimeout(() => window.print(), 250)
-              }}
-            />
-          </div>
-          <Input
-            value={regenLabel}
-            onChange={(e) => setRegenLabel(e.target.value)}
-            placeholder='Revision label (optional)'
-            disabled={regenPending}
-          />
-          <label htmlFor='regen-file'>
-            <Button
-              variant='outline'
-              size='sm'
-              disabled={regenPending}
-              className='w-full'
-              asChild
-            >
-              <span className='cursor-pointer'>
-                <RefreshCw
-                  className={`mr-2 h-4 w-4 ${regenPending ? 'animate-spin' : ''}`}
-                />
-                {regenPending
-                  ? regenStep || 'Regenerating…'
-                  : 'Regenerate from new file'}
-              </span>
-            </Button>
-          </label>
-          <Button
-            variant='outline'
-            size='sm'
-            className='w-full'
-            onClick={handleLockBaseline}
-            disabled={regenPending}
-          >
-            Lock Baseline
-          </Button>
-          <Button
-            variant='outline'
-            size='sm'
-            className='w-full'
-            onClick={() => setImportScheduleOpen(true)}
-            disabled={regenPending}
-          >
-            Import Schedule (P6/MSP)
-          </Button>
-          <Button
-            variant='outline'
-            size='sm'
-            className='w-full'
-            onClick={() => setImportProgressOpen(true)}
-            disabled={regenPending}
-          >
-            Import Progress
-          </Button>
-          <Button
-            variant='outline'
-            size='sm'
-            className='w-full'
-            onClick={() => recalcCpmMutation.mutate()}
-            disabled={regenPending || recalcCpmMutation.isPending}
-          >
-            {recalcCpmMutation.isPending
-              ? 'Recalculating CPM...'
-              : 'Recalculate CPM'}
-          </Button>
-          <Button
-            variant='outline'
-            size='sm'
-            className='w-full'
-            onClick={() => reseedMutation.mutate()}
-            disabled={regenPending || reseedMutation.isPending}
-          >
-            {reseedMutation.isPending ? 'Seeding...' : 'Re-seed Linked Modules'}
-          </Button>
-          <input
-            id='regen-file'
-            type='file'
-            accept='.xlsx,.xls,.csv'
-            className='hidden'
-            onChange={(e) => {
-              const f = e.target.files?.[0]
-              if (f) handleRegen(f)
-              e.target.value = ''
+
+        {/* Action toolbar */}
+        <div className='flex flex-wrap items-center gap-2'>
+          {/* Export actions */}
+          <ExportButton projectId={projectId} />
+          <PrintReportButton
+            onClick={() => {
+              setShowPrintReport(true)
+              window.setTimeout(() => window.print(), 250)
             }}
           />
+
+          <div className='h-6 w-px bg-border' />
+
+          {/* Update Schedule dropdown */}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant='outline' size='sm' disabled={regenPending}>
+                <FileUp className='mr-1.5 h-4 w-4' />
+                Update Schedule
+                <ChevronDown className='ml-1 h-3.5 w-3.5 opacity-60' />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align='end' className='w-64 p-2'>
+              <p className='mb-1.5 px-1 text-xs font-medium text-muted-foreground'>
+                Revision label (optional)
+              </p>
+              <Input
+                value={regenLabel}
+                onChange={(e) => setRegenLabel(e.target.value)}
+                placeholder='e.g. Rev 3 — post-RFI'
+                disabled={regenPending}
+                className='mb-1 h-8 text-sm'
+                onClick={(e) => e.stopPropagation()}
+              />
+              <DropdownMenuSeparator className='my-1.5' />
+              <DropdownMenuItem asChild>
+                <label
+                  htmlFor='regen-file'
+                  className={cn(
+                    'flex cursor-pointer items-center gap-2',
+                    regenPending && 'pointer-events-none opacity-50'
+                  )}
+                >
+                  <RefreshCw
+                    className={cn('h-4 w-4', regenPending && 'animate-spin')}
+                  />
+                  {regenPending
+                    ? regenStep || 'Regenerating…'
+                    : 'Regenerate from BOQ file'}
+                </label>
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onClick={() => setImportScheduleOpen(true)}
+                disabled={regenPending}
+              >
+                <Upload className='h-4 w-4' />
+                Import Schedule (P6/MSP)
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onClick={() => setImportProgressOpen(true)}
+                disabled={regenPending}
+              >
+                <TrendingUp className='h-4 w-4' />
+                Import Progress
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+
+          {/* Maintenance / admin actions */}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant='outline'
+                size='icon'
+                className='size-8'
+                disabled={regenPending}
+              >
+                <MoreHorizontal className='h-4 w-4' />
+                <span className='sr-only'>More actions</span>
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align='end' className='w-52'>
+              <DropdownMenuLabel className='text-xs text-muted-foreground'>
+                Schedule Maintenance
+              </DropdownMenuLabel>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                onClick={handleLockBaseline}
+                disabled={regenPending}
+              >
+                <Lock className='h-4 w-4' />
+                Lock Baseline
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onClick={() => recalcCpmMutation.mutate()}
+                disabled={regenPending || recalcCpmMutation.isPending}
+              >
+                <RefreshCw
+                  className={cn(
+                    'h-4 w-4',
+                    recalcCpmMutation.isPending && 'animate-spin'
+                  )}
+                />
+                {recalcCpmMutation.isPending
+                  ? 'Recalculating...'
+                  : 'Recalculate CPM'}
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onClick={() => reseedMutation.mutate()}
+                disabled={regenPending || reseedMutation.isPending}
+              >
+                <Link2 className='h-4 w-4' />
+                {reseedMutation.isPending
+                  ? 'Seeding...'
+                  : 'Re-seed Linked Modules'}
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
+
+        <input
+          id='regen-file'
+          type='file'
+          accept='.xlsx,.xls,.csv'
+          className='hidden'
+          onChange={(e) => {
+            const f = e.target.files?.[0]
+            if (f) handleRegen(f)
+            e.target.value = ''
+          }}
+        />
       </div>
 
       {regenPending && (

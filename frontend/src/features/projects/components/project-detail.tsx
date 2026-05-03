@@ -1,10 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { ConfigDrawer } from '@/components/config-drawer'
-import { Header } from '@/components/layout/header'
 import { Main } from '@/components/layout/main'
-import { ProfileDropdown } from '@/components/profile-dropdown'
-import { Search } from '@/components/search'
-import { ThemeSwitch } from '@/components/theme-switch'
 import { ActivitiesList } from '@/features/activities/components/activities-list'
 import { CommercialDashboard } from '@/features/commercial/components/commercial-dashboard'
 import { CostDashboard } from '@/features/cost/components/cost-dashboard'
@@ -342,15 +337,6 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
 
   return (
     <>
-      <Header fixed>
-        <Search />
-        <div className='ms-auto flex items-center space-x-4'>
-          <ThemeSwitch />
-          <ConfigDrawer />
-          <ProfileDropdown />
-        </div>
-      </Header>
-
       <Main className='flex flex-1 flex-col gap-4 sm:gap-6'>
         {isLoading ? (
           <div className='py-8 text-center text-muted-foreground'>
@@ -382,7 +368,7 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
             </div>
 
             <div className='mt-2 grid gap-4 lg:grid-cols-[280px_minmax(0,1fr)]'>
-              <aside className='h-fit rounded-md border bg-card p-3 lg:sticky lg:top-20'>
+              <aside className='self-start rounded-md border bg-card p-3 lg:sticky lg:top-[calc(3.5rem+1rem)] lg:max-h-[calc(100vh-3.5rem-2rem)] lg:overflow-y-auto'>
                 <p className='mb-3 text-xs font-semibold tracking-wide text-muted-foreground uppercase'>
                   Project Modules
                 </p>

@@ -9,7 +9,8 @@ import { useAuthStore } from '@/stores/auth-store'
 
 const API_BASE_URL =
   import.meta.env.VITE_API_URL?.replace(/\/$/, '') ||
-  'http://localhost:5000/api/v1'
+  'https://octapm.com/api/v1'
+//'http://localhost:5000/api/v1'
 
 interface RetriableRequestConfig extends AxiosRequestConfig {
   _retry?: boolean
