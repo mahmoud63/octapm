@@ -1,29 +1,43 @@
 const { prisma } = require('../config/db');
 
-const CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // no 0,O,1,I
-
-function generateActivityCode() {
-  let code = 'AC-';
-  for (let i = 0; i < 5; i++) {
-    code += CHARS[Math.floor(Math.random() * CHARS.length)];
+/**
+ * Derive a 2-letter uppercase prefix from a BOQ item description.
+ * Uses the first two alphabetic characters of the first word.
+ * "Concrete Works" -> "CO", "Steel Works" -> "ST", "1.2 Excavation" -> "EX".
+ */
+function deriveActivityPrefix(description) {
+  const words = String(description ?? '').trim().split(/\s+/);
+  for (const word of words) {
+    const letters = word.replace(/[^a-zA-Z]/g, '').toUpperCase();
+    if (letters.length >= 2) return letters.slice(0, 2);
+    if (letters.length === 1) return `${letters}X`;
   }
-  return code;
+  return 'AC';
 }
 
-async function generateUniqueActivityCode(projectId) {
-  let code;
-  let attempts = 0;
-  do {
-    code = generateActivityCode();
-    const existing = await prisma.boqActivity.findFirst({
-      where: { projectId, activityCode: code },
-      select: { id: true },
-    });
-    attempts++;
-    if (attempts > 100) throw new Error('Failed to generate unique activity code');
-    if (!existing) break;
-  } while (true);
-  return code;
+/** Format a code: prefix + zero-padded 3-digit sequence. (CO, 1) -> "CO-001" */
+function formatActivityCode(prefix, sequence) {
+  return `${prefix}-${String(sequence).padStart(3, '0')}`;
 }
 
-module.exports = { generateActivityCode, generateUniqueActivityCode };
+/**
+ * Compute the next sequential activity code for a project, scoped by prefix.
+ * Pass the same `tx` used by surrounding writes so in-flight rows are counted.
+ */
+async function nextActivityCode(projectId, description, tx = prisma) {
+  const prefix = deriveActivityPrefix(description);
+  const existing = await tx.boqActivity.findMany({
+    where: { projectId, activityCode: { startsWith: `${prefix}-` } },
+    select: { activityCode: true },
+  });
+
+  let max = 0;
+  for (const { activityCode } of existing) {
+    const n = parseInt(activityCode.slice(prefix.length + 1), 10);
+    if (Number.isFinite(n) && n > max) max = n;
+  }
+
+  return formatActivityCode(prefix, max + 1);
+}
+
+module.exports = { deriveActivityPrefix, formatActivityCode, nextActivityCode };
