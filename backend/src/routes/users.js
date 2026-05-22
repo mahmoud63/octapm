@@ -89,6 +89,30 @@ router.patch(
   }),
 );
 
+router.post(
+  '/:id/reset-password',
+  requireRoles('pm'),
+  [
+    param('id').isUUID(),
+    body('newPassword')
+      .isString()
+      .isLength({ min: 8 })
+      .matches(/[a-z]/)
+      .withMessage('Password must contain a lowercase letter')
+      .matches(/[0-9]/)
+      .withMessage('Password must contain a number'),
+    validate,
+  ],
+  asyncHandler(async (req, res) => {
+    const result = await userService.resetPassword({
+      orgId: req.user.orgId,
+      userId: req.params.id,
+      newPassword: req.body.newPassword,
+    });
+    return sendSuccess(res, result);
+  }),
+);
+
 router.patch(
   '/:id/deactivate',
   requireRoles('pm'),

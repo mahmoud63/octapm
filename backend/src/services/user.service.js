@@ -169,11 +169,22 @@ const updateUser = async ({ orgId, userId, payload }) => {
   return sanitizeUser(updated);
 };
 
+const resetPassword = async ({ orgId, userId, newPassword }) => {
+  const user = await prisma.user.findFirst({ where: { id: userId, orgId } });
+  if (!user) throw new HttpError(404, 'USER_NOT_FOUND', 'User not found');
+
+  const passwordHash = await bcrypt.hash(newPassword, 12);
+  await prisma.user.update({ where: { id: userId }, data: { passwordHash } });
+
+  return { id: user.id, reset: true };
+};
+
 module.exports = {
   listUsers,
   createUser,
   getUserById,
   updateUser,
+  resetPassword,
   deactivateUser,
   activateUser,
 };
