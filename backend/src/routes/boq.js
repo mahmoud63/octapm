@@ -92,9 +92,9 @@ router.post(
   authenticate,
   CAN_MODIFY,
   asyncHandler(async (req, res) => {
-    const { code, description, quantity, unit, rate, activityName, activityCode } = req.body;
-    if (!code || !description || !quantity || !unit || !rate || !activityName || !activityCode) {
-      throw new HttpError(400, 'MISSING_FIELDS', 'All fields are required');
+    const { code, description, quantity, unit, rate, activityName } = req.body;
+    if (!code || !description || !quantity || !unit || !rate || !activityName) {
+      throw new HttpError(400, 'MISSING_FIELDS', 'code, description, quantity, unit, rate and activityName are required');
     }
     const result = await boqService.createManualBoqItem(req.params.projectId, req.body);
     return sendSuccess(res, result, 201);

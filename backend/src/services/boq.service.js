@@ -4,7 +4,7 @@ const Anthropic = require('@anthropic-ai/sdk');
 const { v4: uuidv4 } = require('uuid');
 const { prisma } = require('../config/db');
 const { HttpError } = require('../utils/http-error');
-const { generateUniqueActivityCode } = require('../utils/activity-code');
+const { nextActivityCode } = require('../utils/activity-code');
 const { calculateFinancials } = require('./boq-calculation.service');
 
 const client = new Anthropic({
@@ -163,6 +163,7 @@ function parseExcelBuffer(buffer) {
 
 function validateBoqRows(rows) {
   const errors = [];
+  const seenCodes = new Map(); // normalized code -> first rowIndex
 
   rows.forEach((row) => {
     const r = row.rowIndex;
@@ -183,6 +184,19 @@ function validateBoqRows(rows) {
 
     if (row.description && row.description.length > 500) {
       errors.push({ row: r, field: 'description', message: 'Description exceeds 500 characters' });
+    }
+
+    if (row.code) {
+      const key = row.code.toString().trim().toLowerCase();
+      if (seenCodes.has(key)) {
+        errors.push({
+          row: r,
+          field: 'code',
+          message: `Duplicate code "${row.code}" — also on row ${seenCodes.get(key)}`,
+        });
+      } else {
+        seenCodes.set(key, r);
+      }
     }
   });
 
@@ -277,21 +291,24 @@ async function processBoqAiAsync(projectId, jobId, items, label) {
     // Fetch saved BOQ items to get their IDs
     const savedItems = await prisma.boqItem.findMany({
       where: { projectId, isManual: false },
-      select: { id: true, code: true },
+      select: { id: true, code: true, description: true },
     });
-    const itemByCode = Object.fromEntries(savedItems.map((i) => [i.code, i.id]));
+    const itemByCode = Object.fromEntries(
+      savedItems.map((i) => [i.code, { id: i.id, description: i.description }]),
+    );
 
     // Track all generated activity codes for predecessor linking
     const allGeneratedCodes = {}; // boqCode -> string[]
 
     for (const boqResult of parsed.boqActivities ?? []) {
-      const boqItemId = itemByCode[boqResult.boqCode];
-      if (!boqItemId) continue;
+      const boqItem = itemByCode[boqResult.boqCode];
+      if (!boqItem) continue;
+      const boqItemId = boqItem.id;
 
       const codes = [];
       for (let i = 0; i < (boqResult.activities ?? []).length; i++) {
         const act = boqResult.activities[i];
-        const activityCode = await generateUniqueActivityCode(projectId);
+        const activityCode = await nextActivityCode(projectId, boqItem.description);
         codes.push(activityCode);
 
         let predecessorCode = null;
@@ -499,12 +516,13 @@ async function createManualBoqItem(projectId, data) {
     },
   });
 
-  // Create the accompanying activity
+  // Activity code is auto-generated, never supplied by the client (BRD rule)
+  const activityCode = await nextActivityCode(projectId, data.description);
   await prisma.boqActivity.create({
     data: {
       boqItemId: item.id,
       projectId,
-      activityCode: data.activityCode,
+      activityCode,
       activityName: data.activityName,
       unit: data.unit,
       quantity: Number(data.quantity),
@@ -548,7 +566,7 @@ async function createActivity(projectId, boqItemId, data) {
   if (!item) throw new HttpError(404, 'BOQ_ITEM_NOT_FOUND', 'BOQ item not found');
 
   const count = await prisma.boqActivity.count({ where: { boqItemId } });
-  const activityCode = await generateUniqueActivityCode(projectId);
+  const activityCode = await nextActivityCode(projectId, item.description);
   const budget = (Number(data.quantity) || 0) * (Number(data.rate) || 0);
 
   const activity = await prisma.boqActivity.create({
@@ -574,7 +592,6 @@ async function createActivity(projectId, boqItemId, data) {
 // ── Update Activity ───────────────────────────────────────────────────────────
 async function updateActivity(projectId, activityId, data) {
   const updateData = {};
-  if (data.activityCode !== undefined) updateData.activityCode = data.activityCode;
   if (data.activityName !== undefined) updateData.activityName = data.activityName;
   if (data.unit !== undefined) updateData.unit = data.unit;
   if (data.quantity !== undefined) updateData.quantity = Number(data.quantity);
