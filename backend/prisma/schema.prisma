@@ -65,6 +65,7 @@ model Project {
   org                 Organisation         @relation(fields: [orgId], references: [id])
   assignments         ProjectAssignment[]
   boqItems            BoqItem[]
+  boqActivities       BoqActivity[]
   activities          Activity[]
   scheduleRevisions   ScheduleRevision[]
   costRecords         CostRecord[]
@@ -127,21 +128,58 @@ model ActivityAssignment {
 
 // ─── BOQ ───
 model BoqItem {
-  id          String  @id @default(uuid())
+  id          String   @id @default(uuid())
   projectId   String
-  ref         String?
+  code        String?  // e.g. "1.1", "2.3" — BOQ item code
+  ref         String?  // legacy field kept for IPC compatibility
   description String
   unit        String?
-  qty         Float   @default(0)
-  rate        Float   @default(0)
-  amount      Float   @default(0)
+  qty         Float    @default(0)
+  rate        Float    @default(0)
+  amount      Float    @default(0)
   section     String?
-  sortOrder   Int     @default(0)
+  isManual    Boolean  @default(false)
+  sortOrder   Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 
-  project  Project   @relation(fields: [projectId], references: [id])
-  ipcItems IpcItem[]
+  project       Project       @relation(fields: [projectId], references: [id])
+  ipcItems      IpcItem[]
+  boqActivities BoqActivity[]
 
   @@index([projectId])
+}
+
+model BoqActivity {
+  id              String   @id @default(uuid())
+  boqItemId       String
+  projectId       String
+  activityCode    String
+  activityName    String
+  unit            String?
+  quantity        Float    @default(0)
+  rate            Float    @default(0)
+  budget          Float    @default(0)
+  dependencyType  String?  // FS, SS, null
+  predecessorCode String?  // activityCode of predecessor
+  isManual        Boolean  @default(false)
+  sortOrder       Int      @default(0)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  boqItem BoqItem @relation(fields: [boqItemId], references: [id], onDelete: Cascade)
+  project Project @relation(fields: [projectId], references: [id])
+
+  @@index([boqItemId])
+  @@index([projectId])
+  @@index([projectId, activityCode])
+}
+
+model ExtraServicesConfig {
+  id         String  @id @default(uuid())
+  label      String
+  percentage Float   @default(0)
+  sortOrder  Int     @default(0)
 }
 
 // ─── Activities (THE CORE — everything links here) ───

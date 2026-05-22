@@ -145,6 +145,7 @@ router.delete(
   }),
 );
 
+router.use('/:projectId/boq', require('./boq'));
 router.use('/:projectId/activities', require('./activities'));
 router.use('/:projectId/equipment', require('./equipment'));
 router.use('/:projectId/schedule', require('./schedule'));

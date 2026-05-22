@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Main } from '@/components/layout/main'
+import { BoqPage } from '@/features/boq/components/boq-page'
 import { ActivitiesList } from '@/features/activities/components/activities-list'
 import { CommercialDashboard } from '@/features/commercial/components/commercial-dashboard'
 import { CostDashboard } from '@/features/cost/components/cost-dashboard'
@@ -25,6 +26,7 @@ type ModuleKey =
   | 'equipment'
   | 'reports'
   | 'overview'
+  | 'boq'
 
 type ModuleChildState = {
   schedule: string
@@ -154,6 +156,7 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
           { key: 'correspondence', label: 'Correspondence' },
         ],
       },
+      { key: 'boq', label: 'BOQ' },
       { key: 'activities', label: 'Activities' },
       { key: 'equipment', label: 'Equipment' },
       { key: 'reports', label: 'Reports' },
@@ -209,6 +212,9 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
         ) : (
           <ScheduleUploadZone projectId={projectId} project={project} />
         )
+
+      case 'boq':
+        return <BoqPage projectId={projectId} embedded />
 
       case 'activities':
         return (

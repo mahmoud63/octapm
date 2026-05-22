@@ -8,6 +8,7 @@ const { Server } = require('socket.io');
 const authRoutes = require('./routes/auth');
 const projectRoutes = require('./routes/projects');
 const userRoutes = require('./routes/users');
+const configRoutes = require('./routes/config');
 const { HttpError } = require('./utils/http-error');
 const { sendError } = require('./utils/api-response');
 
@@ -35,6 +36,7 @@ app.get('/api/health', (req, res) => {
 app.use('/api/v1/auth', authRoutes);
 app.use('/api/v1/projects', projectRoutes);
 app.use('/api/v1/users', userRoutes);
+app.use('/api/v1/config', configRoutes);
 
 app.use((req, res, next) => {
   next(
