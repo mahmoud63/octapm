@@ -25,7 +25,7 @@ import { PasswordInput } from '@/components/password-input'
 import { SelectDropdown } from '@/components/select-dropdown'
 import { roles } from '../data/data'
 import { type User } from '../data/schema'
-import { useCreateUserMutation } from '../hooks/use-users'
+import { useCreateUserMutation, useUpdateUserMutation } from '../hooks/use-users'
 
 const formSchema = z
   .object({
@@ -40,19 +40,24 @@ const formSchema = z
       .transform((value) => value.toLowerCase()),
     phone: z.string().trim().optional(),
     role: z.string().min(1, 'Role is required.'),
-    password: z.string().min(8, 'Password must be at least 8 characters long.'),
+    password: z.string(),
     confirmPassword: z.string(),
     isEdit: z.boolean(),
   })
-  .refine((data) => /[a-z]/.test(data.password), {
+  // Password rules apply only when creating — edit mode never sets a password.
+  .refine((data) => data.isEdit || data.password.length >= 8, {
+    message: 'Password must be at least 8 characters long.',
+    path: ['password'],
+  })
+  .refine((data) => data.isEdit || /[a-z]/.test(data.password), {
     message: 'Password must contain at least one lowercase letter.',
     path: ['password'],
   })
-  .refine((data) => /[0-9]/.test(data.password), {
+  .refine((data) => data.isEdit || /[0-9]/.test(data.password), {
     message: 'Password must contain at least one number.',
     path: ['password'],
   })
-  .refine((data) => data.password === data.confirmPassword, {
+  .refine((data) => data.isEdit || data.password === data.confirmPassword, {
     message: "Passwords don't match.",
     path: ['confirmPassword'],
   })
@@ -72,6 +77,8 @@ export function UsersActionDialog({
 }: UserActionDialogProps) {
   const isEdit = !!currentRow
   const createUserMutation = useCreateUserMutation()
+  const updateUserMutation = useUpdateUserMutation()
+  const isPending = createUserMutation.isPending || updateUserMutation.isPending
 
   const form = useForm<UserForm>({
     resolver: zodResolver(formSchema),
@@ -92,16 +99,29 @@ export function UsersActionDialog({
         | { error?: { message?: string } }
         | undefined
 
-      return errorData?.error?.message ?? 'Failed to create engineer'
+      return errorData?.error?.message ?? 'Something went wrong'
     }
 
-    return 'Failed to create engineer'
+    return 'Something went wrong'
   }
 
   const onSubmit = async (values: UserForm) => {
     if (isEdit) {
-      toast.info('Edit user flow is coming soon.')
-      onOpenChange(false)
+      try {
+        await updateUserMutation.mutateAsync({
+          userId: currentRow!.id,
+          payload: {
+            name: values.name,
+            email: values.email,
+            phone: values.phone,
+            role: values.role,
+          },
+        })
+        toast.success('Engineer updated successfully.')
+        onOpenChange(false)
+      } catch (error) {
+        toast.error(getErrorMessage(error))
+      }
       return
     }
 
@@ -213,46 +233,49 @@ export function UsersActionDialog({
               )}
             />
 
-            <FormField
-              control={form.control}
-              name='password'
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Password</FormLabel>
-                  <FormControl>
-                    <PasswordInput
-                      placeholder='e.g., S3cur3P@ssw0rd'
-                      {...field}
-                    />
-                  </FormControl>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
+            {!isEdit && (
+              <>
+                <FormField
+                  control={form.control}
+                  name='password'
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Password</FormLabel>
+                      <FormControl>
+                        <PasswordInput
+                          placeholder='e.g., S3cur3P@ssw0rd'
+                          {...field}
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
 
-            <FormField
-              control={form.control}
-              name='confirmPassword'
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Confirm Password</FormLabel>
-                  <FormControl>
-                    <PasswordInput placeholder='Repeat password' {...field} />
-                  </FormControl>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
+                <FormField
+                  control={form.control}
+                  name='confirmPassword'
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Confirm Password</FormLabel>
+                      <FormControl>
+                        <PasswordInput
+                          placeholder='Repeat password'
+                          {...field}
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              </>
+            )}
           </form>
         </Form>
 
         <DialogFooter>
-          <Button
-            type='submit'
-            form='user-form'
-            disabled={createUserMutation.isPending}
-          >
-            {createUserMutation.isPending ? 'Saving...' : 'Save changes'}
+          <Button type='submit' form='user-form' disabled={isPending}>
+            {isPending ? 'Saving...' : 'Save changes'}
           </Button>
         </DialogFooter>
       </DialogContent>

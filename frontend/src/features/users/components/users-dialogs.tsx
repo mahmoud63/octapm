@@ -5,6 +5,7 @@ import { UsersDeactivateDialog } from './users-deactivate-dialog'
 import { UsersDeleteDialog } from './users-delete-dialog'
 import { UsersInviteDialog } from './users-invite-dialog'
 import { useUsers } from './users-provider'
+import { UsersResetPasswordDialog } from './users-reset-password-dialog'
 
 export function UsersDialogs() {
   const { open, setOpen, currentRow, setCurrentRow } = useUsers()
@@ -82,6 +83,21 @@ export function UsersDialogs() {
               }
             }}
             currentRow={currentRow}
+          />
+
+          <UsersResetPasswordDialog
+            key={`user-reset-password-${currentRow.id}`}
+            open={open === 'resetPassword'}
+            onOpenChange={(isOpen) => {
+              setOpen(isOpen ? 'resetPassword' : null)
+              if (!isOpen) {
+                setTimeout(() => {
+                  setCurrentRow(null)
+                }, 200)
+              }
+            }}
+            userId={currentRow.id}
+            userName={currentRow.name}
           />
         </>
       )}

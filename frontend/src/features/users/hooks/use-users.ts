@@ -14,6 +14,8 @@ export type UsersQueryParams = {
   status?: string
   search?: string
   role?: string
+  sortBy?: 'name' | 'email' | 'projects' | 'created'
+  sortDir?: 'asc' | 'desc'
 }
 
 export const useUsersQuery = (params: UsersQueryParams = {}) =>
@@ -67,3 +69,34 @@ export const useActivateUserMutation = () => {
     },
   })
 }
+
+export const useUpdateUserMutation = () => {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: ({
+      userId,
+      payload,
+    }: {
+      userId: string
+      payload: { name?: string; email?: string; phone?: string; role?: string }
+    }) => apiClient.patch(`/users/${userId}`, payload).then((r) => r.data.data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['users'] })
+    },
+  })
+}
+
+export const useResetPasswordMutation = () =>
+  useMutation({
+    mutationFn: ({
+      userId,
+      newPassword,
+    }: {
+      userId: string
+      newPassword: string
+    }) =>
+      apiClient
+        .post(`/users/${userId}/reset-password`, { newPassword })
+        .then((r) => r.data.data),
+  })

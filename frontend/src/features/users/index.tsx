@@ -1,4 +1,6 @@
+import { useState } from 'react'
 import { getRouteApi } from '@tanstack/react-router'
+import { type SortingState } from '@tanstack/react-table'
 import { Button } from '@/components/ui/button'
 import { Main } from '@/components/layout/main'
 import { UsersDialogs } from './components/users-dialogs'
@@ -9,14 +11,26 @@ import { useUsersQuery } from './hooks/use-users'
 
 const route = getRouteApi('/_authenticated/users/')
 
+// Maps TanStack column ids to the API's `sortBy` values.
+const SORT_COLUMN_MAP: Record<string, 'name' | 'email' | 'projects'> = {
+  name: 'name',
+  email: 'email',
+  projectCount: 'projects',
+}
+
 export function Users() {
   const search = route.useSearch()
   const navigate = route.useNavigate()
+
+  const [sorting, setSorting] = useState<SortingState>([])
+  const activeSort = sorting[0]
 
   const { data, isLoading } = useUsersQuery({
     status: search.status?.[0],
     role: search.role?.[0],
     search: search.filter || undefined,
+    sortBy: activeSort ? SORT_COLUMN_MAP[activeSort.id] : undefined,
+    sortDir: activeSort ? (activeSort.desc ? 'desc' : 'asc') : undefined,
   })
 
   const users = data?.items ?? []
@@ -44,7 +58,13 @@ export function Users() {
             <AddFirstEngineerButton />
           </div>
         ) : (
-          <UsersTable data={users} search={search} navigate={navigate} />
+          <UsersTable
+            data={users}
+            search={search}
+            navigate={navigate}
+            sorting={sorting}
+            onSortingChange={setSorting}
+          />
         )}
       </Main>
 

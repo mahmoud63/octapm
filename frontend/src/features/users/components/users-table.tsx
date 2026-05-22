@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import {
+  type OnChangeFn,
   type SortingState,
   type VisibilityState,
   flexRender,
@@ -31,13 +32,21 @@ type DataTableProps = {
   data: User[]
   search: Record<string, unknown>
   navigate: NavigateFn
+  // Sorting is lifted to the page so it can drive the server-side query.
+  sorting: SortingState
+  onSortingChange: OnChangeFn<SortingState>
 }
 
-export function UsersTable({ data, search, navigate }: DataTableProps) {
+export function UsersTable({
+  data,
+  search,
+  navigate,
+  sorting,
+  onSortingChange,
+}: DataTableProps) {
   // Local UI-only states
   const [rowSelection, setRowSelection] = useState({})
   const [columnVisibility, setColumnVisibility] = useState<VisibilityState>({})
-  const [sorting, setSorting] = useState<SortingState>([])
 
   // Local state management for table (uncomment to use local-only state, not synced with URL)
   // const [columnFilters, onColumnFiltersChange] = useState<ColumnFiltersState>([])
@@ -80,7 +89,7 @@ export function UsersTable({ data, search, navigate }: DataTableProps) {
     onGlobalFilterChange,
     onColumnFiltersChange,
     onRowSelectionChange: setRowSelection,
-    onSortingChange: setSorting,
+    onSortingChange,
     onColumnVisibilityChange: setColumnVisibility,
     globalFilterFn: (row, _, filterValue) => {
       const searchTerm = String(filterValue ?? '')

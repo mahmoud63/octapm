@@ -1,6 +1,6 @@
 import { DotsHorizontalIcon } from '@radix-ui/react-icons'
 import { type Row } from '@tanstack/react-table'
-import { KeyRound, Trash2, UserCheck, UserX } from 'lucide-react'
+import { KeyRound, Pencil, Trash2, UserCheck, UserX } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import {
@@ -49,6 +49,18 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align='end' className='w-45'>
+        <DropdownMenuItem
+          onClick={() => {
+            setCurrentRow(row.original)
+            setOpen('edit')
+          }}
+        >
+          Edit
+          <DropdownMenuShortcut>
+            <Pencil size={16} />
+          </DropdownMenuShortcut>
+        </DropdownMenuItem>
+
         {row.original.status === 'active' ? (
           <DropdownMenuItem
             className='text-destructive!'
@@ -69,7 +81,10 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
         )}
 
         <DropdownMenuItem
-          onClick={() => toast.info('Reset password feature coming soon.')}
+          onClick={() => {
+            setCurrentRow(row.original)
+            setOpen('resetPassword')
+          }}
         >
           Reset Password
           <DropdownMenuShortcut>
