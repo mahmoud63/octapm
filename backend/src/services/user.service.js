@@ -136,10 +136,44 @@ const activateUser = async ({ orgId, userId }) => {
   return sanitizeUser(updated);
 };
 
+const updateUser = async ({ orgId, userId, payload }) => {
+  const user = await prisma.user.findFirst({ where: { id: userId, orgId } });
+  if (!user) throw new HttpError(404, 'USER_NOT_FOUND', 'User not found');
+
+  const data = {};
+  if (payload.name !== undefined) data.name = payload.name;
+  if (payload.phone !== undefined) data.phone = payload.phone || null;
+
+  if (payload.email !== undefined) {
+    const normalized = payload.email.trim().toLowerCase();
+    if (normalized !== user.email) {
+      const clash = await prisma.user.findUnique({ where: { email: normalized } });
+      if (clash) throw new HttpError(409, 'EMAIL_EXISTS', 'Email already exists');
+      data.email = normalized;
+    }
+  }
+
+  if (payload.role !== undefined) {
+    if (!ALLOWED_ROLES.includes(payload.role)) {
+      throw new HttpError(400, 'INVALID_ROLE', 'Role is invalid');
+    }
+    data.role = payload.role;
+  }
+
+  const updated = await prisma.user.update({
+    where: { id: userId },
+    data,
+    include: { _count: { select: { projectAssignments: true } } },
+  });
+
+  return sanitizeUser(updated);
+};
+
 module.exports = {
   listUsers,
   createUser,
   getUserById,
+  updateUser,
   deactivateUser,
   activateUser,
 };

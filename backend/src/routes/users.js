@@ -69,6 +69,27 @@ router.get(
 );
 
 router.patch(
+  '/:id',
+  requireRoles('pm'),
+  [
+    param('id').isUUID(),
+    body('name').optional().isString().trim().notEmpty(),
+    body('email').optional().isEmail().normalizeEmail(),
+    body('phone').optional().isString().trim(),
+    body('role').optional().isString(),
+    validate,
+  ],
+  asyncHandler(async (req, res) => {
+    const result = await userService.updateUser({
+      orgId: req.user.orgId,
+      userId: req.params.id,
+      payload: req.body,
+    });
+    return sendSuccess(res, result);
+  }),
+);
+
+router.patch(
   '/:id/deactivate',
   requireRoles('pm'),
   [param('id').isUUID(), validate],
