@@ -230,30 +230,23 @@ const ensureActivity = async (projectId, activityId) => {
   return activity;
 };
 
-const assertDates = ({ project, startDate, endDate }) => {
-  if (startDate && project.startDate && startDate < project.startDate) {
-    throw new HttpError(
-      400,
-      'INVALID_DATES',
-      'Activity startDate is before project startDate',
-    );
-  }
-
-  if (endDate && project.endDate && endDate > project.endDate) {
-    throw new HttpError(
-      400,
-      'INVALID_DATES',
-      'Activity endDate is after project endDate',
-    );
-  }
-
+// Hard rule: end must be after start. Throws.
+const assertDates = ({ startDate, endDate }) => {
   if (startDate && endDate && endDate <= startDate) {
-    throw new HttpError(
-      400,
-      'INVALID_DATES',
-      'endDate must be after startDate',
-    );
+    throw new HttpError(400, 'INVALID_DATES', 'endDate must be after startDate');
   }
+};
+
+// Soft rule: project-boundary breaches are warnings, not errors (BRD 2.2).
+const collectDateWarnings = ({ project, startDate, endDate }) => {
+  const warnings = [];
+  if (startDate && project.startDate && startDate < project.startDate) {
+    warnings.push('Activity start date is before the project start date.');
+  }
+  if (endDate && project.endDate && endDate > project.endDate) {
+    warnings.push('Activity end date is after the project end date.');
+  }
+  return warnings;
 };
 
 const listActivities = async ({ orgId, projectId }) => {
@@ -273,7 +266,8 @@ const createActivity = async ({ orgId, projectId, payload }) => {
 
   const startDate = payload.startDate ? new Date(payload.startDate) : null;
   const endDate = payload.endDate ? new Date(payload.endDate) : null;
-  assertDates({ project, startDate, endDate });
+  assertDates({ startDate, endDate });
+  const dateWarnings = collectDateWarnings({ project, startDate, endDate });
 
   const engineerIds = payload.engineerIds ?? [];
   if (!engineerIds.length) {
@@ -326,7 +320,7 @@ const createActivity = async ({ orgId, projectId, payload }) => {
     include: activityInclude,
   });
 
-  return sanitizeActivity(activity);
+  return { ...sanitizeActivity(activity), warnings: dateWarnings };
 };
 
 const getActivityById = async ({ orgId, projectId, activityId }) => {
@@ -336,7 +330,7 @@ const getActivityById = async ({ orgId, projectId, activityId }) => {
 };
 
 const updateActivity = async ({ orgId, projectId, activityId, payload }) => {
-  const project = await ensureProject(orgId, projectId);
+  await ensureProject(orgId, projectId);
   const existing = await ensureActivity(projectId, activityId);
 
   const data = {};
@@ -381,7 +375,7 @@ const updateActivity = async ({ orgId, projectId, activityId, payload }) => {
     data.startDate !== undefined ? data.startDate : existing.startDate;
   const nextEndDate =
     data.endDate !== undefined ? data.endDate : existing.endDate;
-  assertDates({ project, startDate: nextStartDate, endDate: nextEndDate });
+  assertDates({ startDate: nextStartDate, endDate: nextEndDate });
 
   const engineerIds = payload.engineerIds;
   if (engineerIds !== undefined) {
@@ -553,4 +547,5 @@ module.exports = {
   deleteActivity,
   updateProgress,
   bulkUpdateProgress,
+  collectDateWarnings,
 };
