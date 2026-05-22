@@ -18,6 +18,8 @@ router.get(
     query('status').optional().isIn(['active', 'inactive']),
     query('role').optional().isString(),
     query('search').optional().isString().trim(),
+    query('sortBy').optional().isIn(['name', 'email', 'projects', 'created']),
+    query('sortDir').optional().isIn(['asc', 'desc']),
     validate,
   ],
   asyncHandler(async (req, res) => {

@@ -40,11 +40,28 @@ const listUsers = async ({ orgId, query }) => {
     ];
   }
 
+  const SORT_FIELDS = {
+    name: { name: 'asc' },
+    email: { email: 'asc' },
+    projects: { projectAssignments: { _count: 'desc' } },
+    created: { createdAt: 'desc' },
+  };
+  const sortKey = SORT_FIELDS[query.sortBy] ? query.sortBy : 'created';
+  let orderBy = SORT_FIELDS[sortKey];
+  if (query.sortDir === 'desc' && sortKey !== 'projects' && sortKey !== 'created') {
+    orderBy = { [sortKey]: 'desc' };
+  }
+  if (query.sortDir === 'asc' && (sortKey === 'projects' || sortKey === 'created')) {
+    orderBy = sortKey === 'projects'
+      ? { projectAssignments: { _count: 'asc' } }
+      : { createdAt: 'asc' };
+  }
+
   const users = await prisma.user.findMany({
     where,
     take: take + 1,
     include: { _count: { select: { projectAssignments: true } } },
-    orderBy: { createdAt: 'desc' },
+    orderBy,
     ...(query.cursor ? { cursor: { id: query.cursor }, skip: 1 } : {}),
   });
 
