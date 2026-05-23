@@ -1,5 +1,5 @@
 import { Outlet } from '@tanstack/react-router'
-import { Monitor, Bell, Palette, Wrench, UserCog } from 'lucide-react'
+import { Monitor, Bell, Palette, Wrench, UserCog, CreditCard } from 'lucide-react'
 import { Separator } from '@/components/ui/separator'
 import { Main } from '@/components/layout/main'
 import { SidebarNav } from './components/sidebar-nav'
@@ -29,6 +29,11 @@ const sidebarNavItems = [
     title: 'Display',
     href: '/settings/display',
     icon: <Monitor size={18} />,
+  },
+  {
+    title: 'Billing',
+    href: '/settings/billing',
+    icon: <CreditCard size={18} />,
   },
 ]
 
