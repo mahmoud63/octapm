@@ -80,3 +80,6 @@ const PORT = process.env.PORT || 5000;
 httpServer.listen(PORT, () => {
   console.log(`🚀 PMcopilots API running on port ${PORT}`);
 });
+
+const { startBillingScheduler } = require('./jobs/billing-scheduler');
+startBillingScheduler();
