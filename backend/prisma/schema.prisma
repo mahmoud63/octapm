@@ -16,8 +16,10 @@ model Organisation {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  users    User[]
-  projects Project[]
+  users           User[]
+  projects        Project[]
+  subscription    Subscription?
+  enterpriseLeads EnterpriseLead[]
 }
 
 model User {
@@ -920,4 +922,78 @@ model SiteDiary {
   project Project @relation(fields: [projectId], references: [id])
 
   @@index([projectId])
+}
+
+// ─── Subscription & Billing ───
+model Subscription {
+  id                   String    @id @default(uuid())
+  orgId                String    @unique
+  plan                 String    @default("trial") // trial, individual, business, enterprise
+  billingCycle         String? // monthly, annual
+  status               String    @default("incomplete") // incomplete, trialing, active, past_due, canceled, expired
+  seats                Int       @default(1)
+  trialStartsAt        DateTime?
+  trialEndsAt          DateTime?
+  currentPeriodEnd     DateTime?
+  cancelAtPeriodEnd    Boolean   @default(false)
+  canceledAt           DateTime?
+  aiGenerationsUsed    Int       @default(0)
+  periodResetAt        DateTime?
+  reminderDay5SentAt   DateTime?
+  reminderDay7SentAt   DateTime?
+  stripeCustomerId     String?
+  stripeSubscriptionId String?
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+
+  org            Organisation    @relation(fields: [orgId], references: [id])
+  paymentMethods PaymentMethod[]
+  invoices       Invoice[]
+
+  @@index([status])
+  @@index([trialEndsAt])
+}
+
+model PaymentMethod {
+  id                    String   @id @default(uuid())
+  subscriptionId        String
+  stripePaymentMethodId String
+  brand                 String?
+  last4                 String?
+  expMonth              Int?
+  expYear               Int?
+  isDefault             Boolean  @default(true)
+  createdAt             DateTime @default(now())
+
+  subscription Subscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+
+  @@index([subscriptionId])
+}
+
+model Invoice {
+  id              String   @id @default(uuid())
+  subscriptionId  String
+  description     String
+  amount          Float    @default(0)
+  currency        String   @default("USD")
+  status          String   @default("paid") // paid, failed
+  periodLabel     String?
+  stripeInvoiceId String?
+  createdAt       DateTime @default(now())
+
+  subscription Subscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+
+  @@index([subscriptionId])
+}
+
+model EnterpriseLead {
+  id        String   @id @default(uuid())
+  orgId     String
+  seatsBand String // lte_100, gt_100
+  status    String   @default("new") // new, contacted, closed
+  createdAt DateTime @default(now())
+
+  org Organisation @relation(fields: [orgId], references: [id])
+
+  @@index([orgId])
 }
