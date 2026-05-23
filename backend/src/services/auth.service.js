@@ -6,6 +6,7 @@ const {
   createRefreshToken,
   verifyRefreshToken,
 } = require('../utils/tokens');
+const { ensureSubscription } = require('./subscription.service');
 
 const sanitizeUser = (user) => ({
   id: user.id,
@@ -63,6 +64,8 @@ const register = async ({ orgName, name, email, password, phone }) => {
         role: 'pm',
       },
     });
+
+    await ensureSubscription(createdOrg.id, tx);
 
     return { org: createdOrg, user: createdUser };
   });
