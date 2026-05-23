@@ -5,6 +5,7 @@ const { sendSuccess } = require('../utils/api-response');
 const { authenticate } = require('../middleware/auth');
 const { requireRoles } = require('../middleware/rbac');
 const { validate } = require('../middleware/validate');
+const { enforceProjectLimit } = require('../middleware/subscription-gate');
 const projectService = require('../services/project.service');
 
 const router = express.Router();
@@ -33,6 +34,7 @@ router.get(
 router.post(
   '/',
   requireRoles('pm', 'planning_eng'),
+  enforceProjectLimit,
   [
     body('name').isString().trim().notEmpty(),
     body('type').optional().isString(),

@@ -6,6 +6,7 @@ const { prisma } = require('../config/db');
 const { HttpError } = require('../utils/http-error');
 const { nextActivityCode } = require('../utils/activity-code');
 const { calculateFinancials } = require('./boq-calculation.service');
+const { assertAiQuota, incrementAiUsage } = require('../middleware/subscription-gate');
 
 const client = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY,
@@ -205,6 +206,12 @@ function validateBoqRows(rows) {
 
 // ── Main Upload Flow ───────────────────────────────────────────────────────────
 async function processBoqUpload(projectId, fileBuffer, label) {
+  const project = await prisma.project.findUnique({
+    where: { id: projectId }, select: { orgId: true },
+  });
+  if (!project) throw new HttpError(404, 'PROJECT_NOT_FOUND', 'Project not found');
+  await assertAiQuota(project.orgId);
+
   // Step 1: Parse
   const rawRows = parseExcelBuffer(fileBuffer);
   if (rawRows.length === 0) {
@@ -285,6 +292,11 @@ async function processBoqAiAsync(projectId, jobId, items, label) {
     const jsonMatch = rawText.match(/\{[\s\S]*\}/);
     if (!jsonMatch) throw new Error('AI returned non-JSON response');
     const parsed = JSON.parse(jsonMatch[0]);
+
+    const proj = await prisma.project.findUnique({
+      where: { id: projectId }, select: { orgId: true },
+    });
+    if (proj) await incrementAiUsage(proj.orgId);
 
     setBoqJob(jobId, { step: 'Saving activities…', progress: 70 });
 

@@ -39,9 +39,11 @@ app.get('/api/health', (req, res) => {
 });
 
 // API routes
+const { subscriptionGate } = require('./middleware/subscription-gate');
+
 app.use('/api/v1/auth', authRoutes);
-app.use('/api/v1/projects', projectRoutes);
-app.use('/api/v1/users', userRoutes);
+app.use('/api/v1/projects', subscriptionGate, projectRoutes);
+app.use('/api/v1/users', subscriptionGate, userRoutes);
 app.use('/api/v1/config', configRoutes);
 app.use('/api/v1/billing', billingRoutes);
 
