@@ -37,6 +37,7 @@ import { SignOutDialog } from '@/components/sign-out-dialog'
 import { ThemeSwitch } from '@/components/theme-switch'
 import { sidebarData } from './data/sidebar-data'
 import { type NavCollapsible, type NavLink, type NavItem } from './types'
+import { SubscriptionBanner } from '@/features/billing/components/subscription-banner'
 
 // ── Flat list of top-level nav items ──────────────────────────────────────
 // General group items show directly; collapsible items become dropdowns.
@@ -326,6 +327,7 @@ export function TopNavbar() {
         scrolled && 'shadow-sm'
       )}
     >
+      <SubscriptionBanner />
       <div className='flex h-14 items-center gap-4 px-4 lg:px-6'>
         {/* Logo */}
         <Link to='/' className='flex shrink-0 items-center gap-2'>
