@@ -88,8 +88,91 @@ async function getPlansForOrg(orgId) {
   };
 }
 
+async function startTrialSetup(orgId) {
+  const sub = await ensureSubscription(orgId);
+  if (sub.status !== 'incomplete' && sub.status !== 'expired') {
+    throw new HttpError(409, 'TRIAL_NOT_AVAILABLE', 'Trial is not available for this account');
+  }
+
+  const stripe = getStripe();
+  let customerId = sub.stripeCustomerId;
+  if (!customerId) {
+    const org = await prisma.organisation.findUnique({ where: { id: orgId } });
+    const customer = await stripe.customers.create({
+      name: org?.name ?? 'PM Copilots org',
+      metadata: { orgId },
+    });
+    customerId = customer.id;
+    await prisma.subscription.update({
+      where: { id: sub.id },
+      data: { stripeCustomerId: customerId },
+    });
+  }
+
+  const setupIntent = await stripe.setupIntents.create({
+    customer: customerId,
+    payment_method_types: ['card'],
+    usage: 'off_session',
+  });
+
+  return { clientSecret: setupIntent.client_secret };
+}
+
+async function confirmTrial(orgId, stripePaymentMethodId) {
+  const sub = await ensureSubscription(orgId);
+  if (sub.status !== 'incomplete' && sub.status !== 'expired') {
+    throw new HttpError(409, 'TRIAL_NOT_AVAILABLE', 'Trial already started');
+  }
+  if (!stripePaymentMethodId) {
+    throw new HttpError(400, 'PAYMENT_METHOD_REQUIRED', 'A payment method is required');
+  }
+
+  const stripe = getStripe();
+  await stripe.paymentMethods.attach(stripePaymentMethodId, {
+    customer: sub.stripeCustomerId,
+  });
+  const pm = await stripe.paymentMethods.retrieve(stripePaymentMethodId);
+  await stripe.customers.update(sub.stripeCustomerId, {
+    invoice_settings: { default_payment_method: stripePaymentMethodId },
+  });
+
+  const now = new Date();
+  const trialEndsAt = addDays(now, TRIAL_DAYS);
+
+  await prisma.$transaction(async (tx) => {
+    await tx.paymentMethod.deleteMany({ where: { subscriptionId: sub.id } });
+    await tx.paymentMethod.create({
+      data: {
+        subscriptionId: sub.id,
+        stripePaymentMethodId,
+        brand: pm.card?.brand ?? null,
+        last4: pm.card?.last4 ?? null,
+        expMonth: pm.card?.exp_month ?? null,
+        expYear: pm.card?.exp_year ?? null,
+        isDefault: true,
+      },
+    });
+    await tx.subscription.update({
+      where: { id: sub.id },
+      data: {
+        plan: 'trial',
+        status: 'trialing',
+        trialStartsAt: now,
+        trialEndsAt,
+        periodResetAt: trialEndsAt,
+        aiGenerationsUsed: 0,
+        reminderDay5SentAt: null,
+        reminderDay7SentAt: null,
+      },
+    });
+  });
+
+  return getCurrentSubscription(orgId);
+}
+
 module.exports = {
   TRIAL_DAYS, ACCESS_STATUSES, addDays,
   ensureSubscription, isExpired, serializeSubscription,
   getCurrentSubscription, getPlansForOrg,
+  startTrialSetup, confirmTrial,
 };
