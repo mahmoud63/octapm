@@ -170,9 +170,135 @@ async function confirmTrial(orgId, stripePaymentMethodId) {
   return getCurrentSubscription(orgId);
 }
 
+async function orgEmail(orgId) {
+  const user = await prisma.user.findFirst({
+    where: { orgId, role: 'pm' },
+    orderBy: { createdAt: 'asc' },
+  });
+  return user?.email ?? 'unknown@pmcopilots.local';
+}
+
+async function subscribe(orgId, planId, billingCycle) {
+  if (planId === 'enterprise') {
+    throw new HttpError(400, 'ENTERPRISE_VIA_SALES', 'Enterprise plans are arranged via sales');
+  }
+  if (!PLANS[planId] || planId === 'trial') {
+    throw new HttpError(400, 'INVALID_PLAN', 'Unknown plan');
+  }
+  if (!['monthly', 'annual'].includes(billingCycle)) {
+    throw new HttpError(400, 'INVALID_CYCLE', 'billingCycle must be monthly or annual');
+  }
+
+  const sub = await ensureSubscription(orgId);
+  const pm = await prisma.paymentMethod.findFirst({
+    where: { subscriptionId: sub.id, isDefault: true },
+  });
+  if (!sub.stripeCustomerId || !pm) {
+    throw new HttpError(400, 'PAYMENT_METHOD_REQUIRED', 'No payment method on file');
+  }
+
+  if (planRank(planId) < planRank(sub.plan) && sub.status === 'active') {
+    throw new HttpError(400, 'DOWNGRADE_NOT_ALLOWED', 'Downgrades are not supported');
+  }
+
+  const priceId = getStripePriceId(planId, billingCycle);
+  if (!priceId) {
+    throw new HttpError(500, 'CONFIG_ERROR', `Missing Stripe price for ${planId}/${billingCycle}`);
+  }
+
+  const stripe = getStripe();
+  let stripeSub;
+
+  if (sub.stripeSubscriptionId && sub.status === 'active') {
+    const current = await stripe.subscriptions.retrieve(sub.stripeSubscriptionId);
+    stripeSub = await stripe.subscriptions.update(sub.stripeSubscriptionId, {
+      items: [{ id: current.items.data[0].id, price: priceId }],
+      proration_behavior: 'always_invoice',
+      default_payment_method: pm.stripePaymentMethodId,
+    });
+  } else {
+    stripeSub = await stripe.subscriptions.create({
+      customer: sub.stripeCustomerId,
+      items: [{ price: priceId }],
+      default_payment_method: pm.stripePaymentMethodId,
+      payment_behavior: 'error_if_incomplete',
+      expand: ['latest_invoice'],
+    });
+  }
+
+  await prisma.subscription.update({
+    where: { id: sub.id },
+    data: {
+      plan: planId,
+      billingCycle,
+      status: 'active',
+      stripeSubscriptionId: stripeSub.id,
+      currentPeriodEnd: new Date(stripeSub.current_period_end * 1000),
+      cancelAtPeriodEnd: false,
+      canceledAt: null,
+      aiGenerationsUsed: 0,
+      periodResetAt: new Date(stripeSub.current_period_end * 1000),
+    },
+  });
+
+  return getCurrentSubscription(orgId);
+}
+
+async function cancelSubscription(orgId) {
+  const sub = await ensureSubscription(orgId);
+  if (sub.status !== 'active' || !sub.stripeSubscriptionId) {
+    throw new HttpError(400, 'NO_ACTIVE_SUBSCRIPTION', 'No active subscription to cancel');
+  }
+
+  const stripe = getStripe();
+  await stripe.subscriptions.update(sub.stripeSubscriptionId, {
+    cancel_at_period_end: true,
+  });
+
+  const updated = await prisma.subscription.update({
+    where: { id: sub.id },
+    data: { status: 'canceled', cancelAtPeriodEnd: true, canceledAt: new Date() },
+  });
+
+  const org = await prisma.organisation.findUnique({ where: { id: orgId } });
+  const planName = PLANS[updated.plan]?.name ?? updated.plan;
+  const endDate = updated.currentPeriodEnd
+    ? updated.currentPeriodEnd.toISOString().slice(0, 10)
+    : 'the end of the billing period';
+  const tpl = templates.subscriptionCanceled(org?.name ?? 'there', planName, endDate);
+  await sendEmail({ to: await orgEmail(orgId), ...tpl });
+
+  return getCurrentSubscription(orgId);
+}
+
+async function listInvoices(orgId) {
+  const sub = await ensureSubscription(orgId);
+  const invoices = await prisma.invoice.findMany({
+    where: { subscriptionId: sub.id },
+    orderBy: { createdAt: 'desc' },
+  });
+  return invoices.map((i) => ({
+    id: i.id,
+    date: i.createdAt,
+    description: i.description,
+    amount: i.amount,
+    currency: i.currency,
+    status: i.status,
+  }));
+}
+
+async function createEnterpriseLead(orgId, seatsBand) {
+  if (!['lte_100', 'gt_100'].includes(seatsBand)) {
+    throw new HttpError(400, 'INVALID_SEATS_BAND', 'seatsBand must be lte_100 or gt_100');
+  }
+  const lead = await prisma.enterpriseLead.create({ data: { orgId, seatsBand } });
+  return { id: lead.id, seatsBand: lead.seatsBand, status: lead.status };
+}
+
 module.exports = {
   TRIAL_DAYS, ACCESS_STATUSES, addDays,
   ensureSubscription, isExpired, serializeSubscription,
   getCurrentSubscription, getPlansForOrg,
   startTrialSetup, confirmTrial,
+  subscribe, cancelSubscription, listInvoices, createEnterpriseLead,
 };
