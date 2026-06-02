@@ -99,7 +99,9 @@ jobs:
               printf 'NODE_ENV=production\nPORT=5000\nDATABASE_URL=postgresql://pmcopilots:%s@pmcopilots-db.cp8mue6qskud.us-east-2.rds.amazonaws.com:5432/pmcopilots\nJWT_SECRET=%s\nJWT_REFRESH_SECRET=%s\nANTHROPIC_API_KEY=%s\nAWS_REGION=us-east-2\nS3_UPLOADS_BUCKET=pmcopilots-uploads-prod\n' "$DB_PASS" "$JWT" "$JWT_R" "$ANT" > .env
             fi
 
+            npx prisma migrate reset
             npx prisma migrate deploy
+            
             pm2 restart pmcopilots-api || pm2 start src/index.js --name pmcopilots-api
             pm2 save
           SSHEOF
