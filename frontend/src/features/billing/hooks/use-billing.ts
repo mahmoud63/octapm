@@ -28,9 +28,9 @@ export const useConfirmTrial = () => {
 export const useSubscribe = () => {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: ({ plan, billingCycle }: {
-      plan: 'individual' | 'business'; billingCycle: BillingCycle
-    }) => billingApi.subscribe(plan, billingCycle),
+    mutationFn: ({ plan, billingCycle, paymentMethodId }: {
+      plan: 'individual' | 'business'; billingCycle: BillingCycle; paymentMethodId?: string
+    }) => billingApi.subscribe(plan, billingCycle, paymentMethodId),
     onSuccess: () => invalidate(qc),
   })
 }

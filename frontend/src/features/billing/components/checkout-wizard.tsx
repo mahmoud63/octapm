@@ -42,10 +42,10 @@ export function CheckoutWizard({ plan }: { plan: 'individual' | 'business' }) {
     setStep(3)
   }
 
-  const finish = () => {
+  const finish = (paymentMethodId?: string) => {
     setServerError(null)
     subscribe.mutate(
-      { plan, billingCycle: cycle },
+      { plan, billingCycle: cycle, paymentMethodId },
       {
         onSuccess: () => {
           toast.success('Subscription active. Welcome aboard!')

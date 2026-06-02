@@ -74,12 +74,13 @@ router.post(
   [
     body('plan').isIn(['individual', 'business']),
     body('billingCycle').isIn(['monthly', 'annual']),
+    body('paymentMethodId').optional().isString(),
     validate,
   ],
   asyncHandler(async (req, res) => {
     try {
       const data = await subscriptionService.subscribe(
-        req.user.orgId, req.body.plan, req.body.billingCycle,
+        req.user.orgId, req.body.plan, req.body.billingCycle, req.body.paymentMethodId,
       );
       return sendSuccess(res, data);
     } catch (err) {

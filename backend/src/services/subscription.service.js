@@ -178,7 +178,7 @@ async function orgEmail(orgId) {
   return user?.email ?? 'unknown@pmcopilots.local';
 }
 
-async function subscribe(orgId, planId, billingCycle) {
+async function subscribe(orgId, planId, billingCycle, paymentMethodId = null) {
   if (planId === 'enterprise') {
     throw new HttpError(400, 'ENTERPRISE_VIA_SALES', 'Enterprise plans are arranged via sales');
   }
@@ -190,6 +190,37 @@ async function subscribe(orgId, planId, billingCycle) {
   }
 
   const sub = await ensureSubscription(orgId);
+
+  if (paymentMethodId) {
+    const stripe = getStripe();
+    try {
+      await stripe.paymentMethods.attach(paymentMethodId, {
+        customer: sub.stripeCustomerId,
+      });
+    } catch (err) {
+      // Ignore if already attached
+    }
+    const stripePm = await stripe.paymentMethods.retrieve(paymentMethodId);
+    await stripe.customers.update(sub.stripeCustomerId, {
+      invoice_settings: { default_payment_method: paymentMethodId },
+    });
+
+    await prisma.$transaction(async (tx) => {
+      await tx.paymentMethod.deleteMany({ where: { subscriptionId: sub.id } });
+      await tx.paymentMethod.create({
+        data: {
+          subscriptionId: sub.id,
+          stripePaymentMethodId: paymentMethodId,
+          brand: stripePm.card?.brand ?? null,
+          last4: stripePm.card?.last4 ?? null,
+          expMonth: stripePm.card?.exp_month ?? null,
+          expYear: stripePm.card?.exp_year ?? null,
+          isDefault: true,
+        },
+      });
+    });
+  }
+
   const pm = await prisma.paymentMethod.findFirst({
     where: { subscriptionId: sub.id, isDefault: true },
   });

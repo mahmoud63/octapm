@@ -22,8 +22,8 @@ export const confirmTrial = (paymentMethodId: string) =>
     .post('/billing/trial/confirm', { paymentMethodId })
     .then(unwrap<Subscription>)
 
-export const subscribe = (plan: 'individual' | 'business', billingCycle: BillingCycle) =>
-  apiClient.post('/billing/subscribe', { plan, billingCycle }).then(unwrap<Subscription>)
+export const subscribe = (plan: 'individual' | 'business', billingCycle: BillingCycle, paymentMethodId?: string) =>
+  apiClient.post('/billing/subscribe', { plan, billingCycle, paymentMethodId }).then(unwrap<Subscription>)
 
 export const cancelSubscription = () =>
   apiClient.post('/billing/cancel').then(unwrap<Subscription>)

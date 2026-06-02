@@ -36,6 +36,17 @@ export function PaymentForm({
     setConfirming(false)
 
     if (result.error) {
+      if (
+        result.error.code === 'setup_intent_unexpected_state' &&
+        result.error.setup_intent?.status === 'succeeded'
+      ) {
+        const pmId = typeof result.error.setup_intent.payment_method === 'string'
+          ? result.error.setup_intent.payment_method
+          : result.error.setup_intent.payment_method?.id
+        
+        onConfirmed(pmId)
+        return
+      }
       setCardError(result.error.message ?? 'Please check your card details.')
       return
     }
