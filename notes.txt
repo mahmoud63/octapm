@@ -1,0 +1,7 @@
+  1. REVOKE the live sk_live_51TNgdY...EwU key you pasted earlier. Still not confirmed.
+  2. STRIPE_WEBHOOK_SECRET empty in backend/.env. Need it for T8 webhook signature verification. Get it by:
+  stripe listen --forward-to localhost:5000/api/v1/webhooks/stripe
+  2. Copy the printed whsec_... into backend/.env then restart API.
+  3. End-to-end UI smoke not tested yet. Run npm run dev (root), go to /billing, walk the trial → subscribe → cancel flow with Stripe test card 4242 4242 4242 4242 and decline
+  card 4000 0000 0000 0002.
+  4. Embedded Postgres still running in background (ID b3hje9h7i). Stop with Ctrl+C or kill PID when done.
