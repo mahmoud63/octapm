@@ -67,7 +67,7 @@ export function CheckoutWizard({ plan }: { plan: 'individual' | 'business' }) {
   const planName = plan === 'individual' ? 'Individual' : 'Business'
 
   return (
-    <div className='mx-auto max-w-2xl space-y-6 p-6'>
+    <div className='mx-auto max-w-4xl space-y-6 p-6'>
       <h1 className='text-2xl font-bold'>Subscribe to {planName}</h1>
 
       {step === 2 && (
@@ -79,9 +79,8 @@ export function CheckoutWizard({ plan }: { plan: 'individual' | 'business' }) {
                 key={c}
                 type='button'
                 onClick={() => setCycle(c)}
-                className={`w-full rounded-lg border p-4 text-left ${
-                  cycle === c ? 'border-primary ring-primary/30 ring-2' : 'border-border'
-                }`}
+                className={`w-full rounded-lg border p-4 text-left ${cycle === c ? 'border-primary ring-primary/30 ring-2' : 'border-border'
+                  }`}
               >
                 <div className='flex justify-between font-medium'>
                   <span className='capitalize'>{c}</span>
@@ -100,7 +99,7 @@ export function CheckoutWizard({ plan }: { plan: 'individual' | 'business' }) {
       )}
 
       {step === 3 && (
-        <Card>
+        <Card className='w-150'>
           <CardHeader><CardTitle>Step 3 of 3 · Payment</CardTitle></CardHeader>
           <CardContent className='space-y-4'>
             <div className='bg-muted rounded-md p-4 text-sm'>

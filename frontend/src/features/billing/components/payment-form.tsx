@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { CardElement, useElements, useStripe } from '@stripe/react-stripe-js'
 import { Button } from '@/components/ui/button'
 import { Alert, AlertDescription } from '@/components/ui/alert'
+import { useTheme } from '@/context/theme-provider'
 
 type Props = {
   setupClientSecret?: string
@@ -16,8 +17,28 @@ export function PaymentForm({
 }: Props) {
   const stripe = useStripe()
   const elements = useElements()
+  const { resolvedTheme } = useTheme()
   const [cardError, setCardError] = useState<string | null>(null)
   const [confirming, setConfirming] = useState(false)
+
+  const cardOptions = {
+    hidePostalCode: false,
+    style: {
+      base: {
+        color: resolvedTheme === 'dark' ? '#f8fafc' : '#0f172a',
+        fontFamily: '"Inter", system-ui, sans-serif',
+        fontSmoothing: 'antialiased',
+        fontSize: '16px',
+        '::placeholder': {
+          color: resolvedTheme === 'dark' ? '#64748b' : '#94a3b8',
+        },
+      },
+      invalid: {
+        color: '#ef4444',
+        iconColor: '#ef4444',
+      },
+    },
+  }
 
   const handleSubmit = async () => {
     setCardError(null)
@@ -57,10 +78,10 @@ export function PaymentForm({
   }
 
   return (
-    <div className='space-y-4'>
+    <div className='space-y-4 w-full'>
       {setupClientSecret && (
-        <div className='rounded-md border p-3'>
-          <CardElement options={{ hidePostalCode: false }} />
+        <div className='w-full rounded-md border border-input bg-background px-3 py-4 shadow-sm focus-within:ring-1 focus-within:ring-ring'>
+          <CardElement className='w-full' options={cardOptions} />
         </div>
       )}
       {cardError && (
