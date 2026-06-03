@@ -72,8 +72,14 @@ jobs:
       - name: Deploy to EC2
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
+          STRIPE_WEBHOOK_SECRET: ${{ secrets.STRIPE_WEBHOOK_SECRET }}
+          STRIPE_PRICE_INDIVIDUAL_MONTHLY: ${{ secrets.STRIPE_PRICE_INDIVIDUAL_MONTHLY }}
+          STRIPE_PRICE_INDIVIDUAL_ANNUAL: ${{ secrets.STRIPE_PRICE_INDIVIDUAL_ANNUAL }}
+          STRIPE_PRICE_BUSINESS_MONTHLY: ${{ secrets.STRIPE_PRICE_BUSINESS_MONTHLY }}
+          STRIPE_PRICE_BUSINESS_ANNUAL: ${{ secrets.STRIPE_PRICE_BUSINESS_ANNUAL }}
         run: |
-          ssh -i ~/.ssh/deploy_key ec2-user@${{ secrets.EC2_HOST }} "GH_TOKEN='${GH_TOKEN}' bash" << 'SSHEOF'
+          ssh -i ~/.ssh/deploy_key ec2-user@${{ secrets.EC2_HOST }} "GH_TOKEN='${GH_TOKEN}' STRIPE_SECRET_KEY='${STRIPE_SECRET_KEY}' STRIPE_WEBHOOK_SECRET='${STRIPE_WEBHOOK_SECRET}' STRIPE_PRICE_INDIVIDUAL_MONTHLY='${STRIPE_PRICE_INDIVIDUAL_MONTHLY}' STRIPE_PRICE_INDIVIDUAL_ANNUAL='${STRIPE_PRICE_INDIVIDUAL_ANNUAL}' STRIPE_PRICE_BUSINESS_MONTHLY='${STRIPE_PRICE_BUSINESS_MONTHLY}' STRIPE_PRICE_BUSINESS_ANNUAL='${STRIPE_PRICE_BUSINESS_ANNUAL}' bash" << 'SSHEOF'
             set -euo pipefail
             APP_DIR="/opt/pmcopilots"
 
@@ -96,13 +102,8 @@ jobs:
             JWT=$(echo "$SECRET_JSON" | python3 -c "import sys,json; print(json.load(sys.stdin)['JWT_SECRET'])")
             JWT_R=$(echo "$SECRET_JSON" | python3 -c "import sys,json; print(json.load(sys.stdin)['JWT_REFRESH_SECRET'])")
             ANT=$(echo "$SECRET_JSON" | python3 -c "import sys,json; print(json.load(sys.stdin)['ANTHROPIC_API_KEY'])")
-            STRIPE=$(echo "$SECRET_JSON" | python3 -c "import sys,json; print(json.load(sys.stdin).get('STRIPE_SECRET_KEY', ''))")
-            WEBHOOK=$(echo "$SECRET_JSON" | python3 -c "import sys,json; print(json.load(sys.stdin).get('STRIPE_WEBHOOK_SECRET', ''))")
-            PRICE_IND_MO=$(echo "$SECRET_JSON" | python3 -c "import sys,json; print(json.load(sys.stdin).get('STRIPE_PRICE_INDIVIDUAL_MONTHLY', ''))")
-            PRICE_IND_YR=$(echo "$SECRET_JSON" | python3 -c "import sys,json; print(json.load(sys.stdin).get('STRIPE_PRICE_INDIVIDUAL_ANNUAL', ''))")
-            PRICE_BIZ_MO=$(echo "$SECRET_JSON" | python3 -c "import sys,json; print(json.load(sys.stdin).get('STRIPE_PRICE_BUSINESS_MONTHLY', ''))")
-            PRICE_BIZ_YR=$(echo "$SECRET_JSON" | python3 -c "import sys,json; print(json.load(sys.stdin).get('STRIPE_PRICE_BUSINESS_ANNUAL', ''))")
-            printf 'NODE_ENV=production\nPORT=5000\nDATABASE_URL=postgresql://pmcopilots:%s@pmcopilots-db.cp8mue6qskud.us-east-2.rds.amazonaws.com:5432/pmcopilots\nJWT_SECRET=%s\nJWT_REFRESH_SECRET=%s\nANTHROPIC_API_KEY=%s\nSTRIPE_SECRET_KEY=%s\nSTRIPE_WEBHOOK_SECRET=%s\nSTRIPE_PRICE_INDIVIDUAL_MONTHLY=%s\nSTRIPE_PRICE_INDIVIDUAL_ANNUAL=%s\nSTRIPE_PRICE_BUSINESS_MONTHLY=%s\nSTRIPE_PRICE_BUSINESS_ANNUAL=%s\nAWS_REGION=us-east-2\nS3_UPLOADS_BUCKET=pmcopilots-uploads-prod\n' "$DB_PASS" "$JWT" "$JWT_R" "$ANT" "$STRIPE" "$WEBHOOK" "$PRICE_IND_MO" "$PRICE_IND_YR" "$PRICE_BIZ_MO" "$PRICE_BIZ_YR" > .env
+            
+            printf 'NODE_ENV=production\nPORT=5000\nDATABASE_URL=postgresql://pmcopilots:%s@pmcopilots-db.cp8mue6qskud.us-east-2.rds.amazonaws.com:5432/pmcopilots\nJWT_SECRET=%s\nJWT_REFRESH_SECRET=%s\nANTHROPIC_API_KEY=%s\nSTRIPE_SECRET_KEY=%s\nSTRIPE_WEBHOOK_SECRET=%s\nSTRIPE_PRICE_INDIVIDUAL_MONTHLY=%s\nSTRIPE_PRICE_INDIVIDUAL_ANNUAL=%s\nSTRIPE_PRICE_BUSINESS_MONTHLY=%s\nSTRIPE_PRICE_BUSINESS_ANNUAL=%s\nAWS_REGION=us-east-2\nS3_UPLOADS_BUCKET=pmcopilots-uploads-prod\n' "$DB_PASS" "$JWT" "$JWT_R" "$ANT" "$STRIPE_SECRET_KEY" "$STRIPE_WEBHOOK_SECRET" "$STRIPE_PRICE_INDIVIDUAL_MONTHLY" "$STRIPE_PRICE_INDIVIDUAL_ANNUAL" "$STRIPE_PRICE_BUSINESS_MONTHLY" "$STRIPE_PRICE_BUSINESS_ANNUAL" > .env
 
             npx prisma migrate deploy
             
