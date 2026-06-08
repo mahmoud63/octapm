@@ -1,0 +1,15 @@
+node_modules/
+.env
+.env.local
+.env.*.local
+dist/
+*.log
+.DS_Store
+.vscode/
+.idea/
+coverage/
+.claude/
+*.sh
+CLAUDE.md
+*.tf
+*.tfvars

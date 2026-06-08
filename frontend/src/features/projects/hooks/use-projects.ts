@@ -1,0 +1,80 @@
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { apiClient } from '@/services/api/client'
+import type { CreateProjectInput, Project } from '../data/schema'
+
+type ProjectsResponse = {
+  items: Project[]
+  pagination: {
+    limit: number
+    nextCursor: string | null
+  }
+}
+
+export const useProjects = () =>
+  useQuery<ProjectsResponse>({
+    queryKey: ['projects'],
+    queryFn: () =>
+      apiClient.get('/projects').then((response) => response.data.data),
+  })
+
+export const useProject = (projectId: string) =>
+  useQuery<Project>({
+    queryKey: ['project', projectId],
+    queryFn: () =>
+      apiClient
+        .get(`/projects/${projectId}`)
+        .then((response) => response.data.data),
+    enabled: Boolean(projectId),
+  })
+
+export const useCreateProject = () => {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (payload: CreateProjectInput) =>
+      apiClient
+        .post('/projects', payload)
+        .then((response) => response.data.data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['projects'] })
+    },
+  })
+}
+
+export const useUpdateProject = () => {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: ({
+      projectId,
+      payload,
+    }: {
+      projectId: string
+      payload: CreateProjectInput
+    }) =>
+      apiClient
+        .patch(`/projects/${projectId}`, payload)
+        .then((response) => response.data.data),
+    onSuccess: (_, variables) => {
+      queryClient.invalidateQueries({ queryKey: ['projects'] })
+      queryClient.invalidateQueries({
+        queryKey: ['project', variables.projectId],
+      })
+    },
+  })
+}
+
+export const useDeleteProject = () => {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (projectId: string) =>
+      apiClient
+        .delete(`/projects/${projectId}`)
+        .then((response) => response.data.data),
+    onSuccess: (_, projectId) => {
+      queryClient.invalidateQueries({ queryKey: ['projects'] })
+      queryClient.removeQueries({ queryKey: ['project', projectId] })
+    },
+  })
+}
