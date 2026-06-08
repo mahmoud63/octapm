@@ -5,6 +5,7 @@ All notable platform-wide changes should be recorded here. Agents must read this
 ## 2026-06-08
 
 ### Added
+- Added an agent workflow rule requiring the latest `origin/main` to be pulled before committing and the branch to be pushed again after committing.
 - Added FB-001 Activity BOQ Allocation Spine with a new `ActivityBoqAllocation` Prisma model linking BOQ items to official schedule `Activity` records.
 - Added migration `20260608170000_add_activity_boq_allocation` with:
   - `ActivityBoqAllocation` table.

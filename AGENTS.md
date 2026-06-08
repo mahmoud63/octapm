@@ -97,6 +97,7 @@ PM (all access), Planning Engineer, QS, Cost Controller, Procurement, Warehouse,
 
 ## Coding Standards
 - Before starting work, read the root `CHANGELOG.md` to understand recent schema/API/workflow changes. After any meaningful code, schema, API, or workflow change, add a concise entry to `CHANGELOG.md` in the same session.
+- Before creating a commit, pull the latest `origin/main` into the current branch and resolve conflicts. After committing, push the branch again.
 - TypeScript on frontend, JavaScript (or TypeScript) on backend
 - Async/await everywhere, no callbacks
 - All API errors must be caught and returned with structured error codes

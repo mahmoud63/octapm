@@ -96,6 +96,7 @@ PM (all access), Planning Engineer, QS, Cost Controller, Procurement, Warehouse,
 13. Export (XLSX multi-sheet, PDF)
 
 ## Coding Standards
+- Before creating a commit, pull the latest `origin/main` into the current branch and resolve conflicts. After committing, push the branch again.
 - TypeScript on frontend, JavaScript (or TypeScript) on backend
 - Async/await everywhere, no callbacks
 - All API errors must be caught and returned with structured error codes
