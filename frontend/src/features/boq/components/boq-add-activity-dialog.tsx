@@ -1,7 +1,13 @@
 import { useEffect } from 'react'
+import { z } from 'zod'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
-import { z } from 'zod'
+import {
+  hasMoneyPrecision,
+  MONEY_INPUT_STEP,
+  MONEY_PRECISION_MESSAGE,
+} from '@/lib/money'
+import { Button } from '@/components/ui/button'
 import {
   Dialog,
   DialogContent,
@@ -17,6 +23,7 @@ import {
   FormLabel,
   FormMessage,
 } from '@/components/ui/form'
+import { Input } from '@/components/ui/input'
 import {
   Select,
   SelectContent,
@@ -24,18 +31,25 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { Input } from '@/components/ui/input'
-import { Button } from '@/components/ui/button'
 import { useCreateBoqActivity } from '../hooks/use-boq'
 
-const schema = z.object({
-  activityName: z.string().min(1, 'Required').max(255),
-  unit: z.string().min(1, 'Required'),
-  quantity: z.number({ error: 'Must be a positive number' }).positive('Must be > 0'),
-  rate: z.number({ error: 'Must be a non-negative number' }).nonnegative('Must be ≥ 0'),
-  dependencyType: z.enum(['FS', 'SS', 'none']).optional(),
-  predecessorCode: z.string().optional(),
-})
+const schema = z
+  .object({
+    activityName: z.string().min(1, 'Required').max(255),
+    unit: z.string().min(1, 'Required'),
+    quantity: z
+      .number({ error: 'Must be a positive number' })
+      .positive('Must be > 0'),
+    rate: z
+      .number({ error: 'Must be a non-negative number' })
+      .nonnegative('Must be ≥ 0'),
+    dependencyType: z.enum(['FS', 'SS', 'none']).optional(),
+    predecessorCode: z.string().optional(),
+  })
+  .refine((data) => hasMoneyPrecision(data.rate), {
+    message: MONEY_PRECISION_MESSAGE,
+    path: ['rate'],
+  })
 
 type FormValues = z.infer<typeof schema>
 
@@ -87,7 +101,9 @@ export function BoqAddActivityDialog({
             ? values.dependencyType
             : null,
         predecessorCode:
-          values.dependencyType !== 'none' ? values.predecessorCode || null : null,
+          values.dependencyType !== 'none'
+            ? values.predecessorCode || null
+            : null,
       },
     })
     onOpenChange(false)
@@ -97,7 +113,7 @@ export function BoqAddActivityDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className='max-w-md'>
         <DialogHeader>
-          <DialogTitle>Add Activity</DialogTitle>
+          <DialogTitle>Add Schedule Activity</DialogTitle>
         </DialogHeader>
 
         <Form {...form}>
@@ -109,7 +125,10 @@ export function BoqAddActivityDialog({
                 <FormItem>
                   <FormLabel>Activity Name</FormLabel>
                   <FormControl>
-                    <Input placeholder='e.g. Excavation to formation level' {...field} />
+                    <Input
+                      placeholder='e.g. Excavation to formation level'
+                      {...field}
+                    />
                   </FormControl>
                   <FormMessage />
                 </FormItem>
@@ -137,7 +156,13 @@ export function BoqAddActivityDialog({
                   <FormItem>
                     <FormLabel>Quantity</FormLabel>
                     <FormControl>
-                      <Input type='number' step='any' placeholder='0' {...field} onChange={(e) => field.onChange(e.target.valueAsNumber)} />
+                      <Input
+                        type='number'
+                        step='any'
+                        placeholder='0'
+                        {...field}
+                        onChange={(e) => field.onChange(e.target.valueAsNumber)}
+                      />
                     </FormControl>
                     <FormMessage />
                   </FormItem>
@@ -152,7 +177,13 @@ export function BoqAddActivityDialog({
                 <FormItem>
                   <FormLabel>Rate</FormLabel>
                   <FormControl>
-                    <Input type='number' step='any' placeholder='0.00' {...field} onChange={(e) => field.onChange(e.target.valueAsNumber)} />
+                    <Input
+                      type='number'
+                      step={MONEY_INPUT_STEP}
+                      placeholder='0.00'
+                      {...field}
+                      onChange={(e) => field.onChange(e.target.valueAsNumber)}
+                    />
                   </FormControl>
                   <FormMessage />
                 </FormItem>
@@ -182,35 +213,44 @@ export function BoqAddActivityDialog({
               )}
             />
 
-            {depType && depType !== 'none' && existingActivityCodes.length > 0 && (
-              <FormField
-                control={form.control}
-                name='predecessorCode'
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Predecessor Activity</FormLabel>
-                    <Select onValueChange={field.onChange} value={field.value}>
-                      <FormControl>
-                        <SelectTrigger>
-                          <SelectValue placeholder='Select predecessor' />
-                        </SelectTrigger>
-                      </FormControl>
-                      <SelectContent>
-                        {existingActivityCodes.map((code) => (
-                          <SelectItem key={code} value={code}>
-                            {code}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-            )}
+            {depType &&
+              depType !== 'none' &&
+              existingActivityCodes.length > 0 && (
+                <FormField
+                  control={form.control}
+                  name='predecessorCode'
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Predecessor Activity</FormLabel>
+                      <Select
+                        onValueChange={field.onChange}
+                        value={field.value}
+                      >
+                        <FormControl>
+                          <SelectTrigger>
+                            <SelectValue placeholder='Select predecessor' />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          {existingActivityCodes.map((code) => (
+                            <SelectItem key={code} value={code}>
+                              {code}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              )}
 
             <DialogFooter>
-              <Button type='button' variant='outline' onClick={() => onOpenChange(false)}>
+              <Button
+                type='button'
+                variant='outline'
+                onClick={() => onOpenChange(false)}
+              >
                 Cancel
               </Button>
               <Button type='submit' disabled={createActivity.isPending}>

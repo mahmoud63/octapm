@@ -1,4 +1,5 @@
 const { prisma } = require('../config/db');
+const { addMoney, multiplyMoney, toMoneyNumber } = require('../utils/money');
 
 async function getExtraServices() {
   const configs = await prisma.extraServicesConfig.findMany({
@@ -16,14 +17,17 @@ function getDefaultExtraServices() {
   ];
 }
 
-async function calculateFinancials(items) {
-  const subtotal1 = items.reduce((sum, item) => sum + (item.amount ?? 0), 0);
+async function calculateFinancials(items, valueSummary = null) {
+  const subtotal1 = items.reduce(
+    (sum, item) => addMoney(sum, item.amount ?? 0),
+    0,
+  );
   const extraServices = await getExtraServices();
 
   let runningTotal = subtotal1;
   const extraWithValues = extraServices.map((svc) => {
-    const value = (subtotal1 * svc.percentage) / 100;
-    runningTotal += value;
+    const value = multiplyMoney(subtotal1, toMoneyNumber(svc.percentage) / 100);
+    runningTotal = addMoney(runningTotal, value);
     return { label: svc.label, percentage: svc.percentage, value };
   });
 
@@ -35,6 +39,10 @@ async function calculateFinancials(items) {
     extraServices: extraWithValues,
     subtotal2,
     totalProjectCost,
+    scheduledValue: valueSummary?.scheduledValue ?? 0,
+    unscheduledValue: valueSummary?.unscheduledValue ?? subtotal1,
+    earnedValue: valueSummary?.earnedValue ?? 0,
+    certifiedValue: valueSummary?.certifiedValue ?? 0,
   };
 }
 

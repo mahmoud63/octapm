@@ -4,7 +4,6 @@ import type {
   AuthSession,
   AuthUser,
   LoginPayload,
-  RefreshPayload,
   RegisterPayload,
   RegisterResponse,
 } from '@/services/auth/types'
@@ -31,13 +30,16 @@ export const register = async (
   return unwrapData(response)
 }
 
-export const refreshSession = async (
-  payload: RefreshPayload
-): Promise<AuthSession> => {
+export const refreshSession = async (): Promise<AuthSession> => {
   const response = await apiClient.post<ApiSuccess<AuthSession>>(
-    '/auth/refresh',
-    payload
+    '/auth/refresh'
   )
+  return unwrapData(response)
+}
+
+export const logout = async (): Promise<{ revoked: boolean }> => {
+  const response =
+    await apiClient.post<ApiSuccess<{ revoked: boolean }>>('/auth/logout')
   return unwrapData(response)
 }
 

@@ -83,11 +83,7 @@ export function SignUpForm({
       loading: 'Creating your account...',
       success: (result) => {
         setIsLoading(false)
-        auth.setSession(
-          result.user,
-          result.tokens.accessToken,
-          result.tokens.refreshToken
-        )
+        auth.setSession(result.user, result.tokens.accessToken)
 
         navigate({ to: '/', replace: true })
         return `Welcome to PMcopilots, ${result.user.name}!`

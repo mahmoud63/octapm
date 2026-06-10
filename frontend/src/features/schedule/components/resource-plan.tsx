@@ -5,6 +5,36 @@ interface Props {
   projectId: string
 }
 
+type ResourcePlanActivity = {
+  id: string
+  activityId: string
+  name: string
+}
+
+type ResourcePlanResource = {
+  id: string
+  resourceType: string
+  resourceName: string
+  quantity: number
+  unit?: string | null
+  dailyRate?: number | null
+  totalCost?: number | null
+}
+
+type ResourcePlanGroup = {
+  activity: ResourcePlanActivity
+  resources: ResourcePlanResource[]
+}
+
+type ResourcePlanResponse = {
+  resources?: ResourcePlanGroup[]
+  summary?: {
+    totalLaborCost?: number
+    totalEquipmentCost?: number
+    totalMaterialCost?: number
+  }
+}
+
 const TYPE_CLASS: Record<string, string> = {
   labor: 'bg-blue-100 text-blue-800',
   equipment: 'bg-orange-100 text-orange-800',
@@ -17,7 +47,7 @@ const fmt = (value: number) =>
     : `$${value.toLocaleString('en-US', { maximumFractionDigits: 0 })}`
 
 export function ResourcePlan({ projectId }: Props) {
-  const { data, isLoading } = useQuery({
+  const { data, isLoading } = useQuery<ResourcePlanResponse>({
     queryKey: ['schedule-resources', projectId],
     queryFn: () =>
       apiClient
@@ -71,7 +101,7 @@ export function ResourcePlan({ projectId }: Props) {
       </div>
 
       <div className='space-y-2'>
-        {resources.map((group: any) => (
+        {resources.map((group) => (
           <div key={group.activity.id} className='rounded-lg border p-3'>
             <p className='mb-2 text-sm font-medium'>
               <span className='mr-2 font-mono text-xs text-muted-foreground'>
@@ -80,7 +110,7 @@ export function ResourcePlan({ projectId }: Props) {
               {group.activity.name}
             </p>
             <div className='flex flex-wrap gap-2'>
-              {group.resources.map((resource: any) => (
+              {group.resources.map((resource) => (
                 <div
                   key={resource.id}
                   className={[

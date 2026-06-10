@@ -9,9 +9,78 @@ const {
   parseP6Xml,
   hoursToDays: p6HoursToDays,
 } = require('../parsers/p6xml-parser');
-const { parseMspXml, parseDurationDays } = require('../parsers/msp-parser');
-const { applyCpmToProject } = require('./cpm.service');
+const {
+  parseMspXml,
+  parseDurationDays,
+  parseLagDays,
+} = require('../parsers/msp-parser');
+const { applyCpmToProject, dateToWorkingDay } = require('./cpm.service');
 const { runPostImportSeeding } = require('./post-import.service');
+
+const REVISION_STATUS = Object.freeze({
+  DRAFT: 'draft',
+  UNDER_REVIEW: 'under_review',
+  APPROVED: 'approved',
+  REJECTED: 'rejected',
+  BASELINED: 'baselined',
+  SUPERSEDED: 'superseded',
+});
+
+const OPEN_REVISION_STATUSES = [
+  REVISION_STATUS.DRAFT,
+  REVISION_STATUS.UNDER_REVIEW,
+  REVISION_STATUS.APPROVED,
+];
+
+const normalizeRevisionStatus = (status) =>
+  Object.values(REVISION_STATUS).includes(status)
+    ? status
+    : REVISION_STATUS.DRAFT;
+
+const statusTransitionLog = (revision) =>
+  Array.isArray(revision?.statusTransitionLog)
+    ? revision.statusTransitionLog
+    : [];
+
+const appendStatusTransition = (revision, { to, userId, at, comment }) => [
+  ...statusTransitionLog(revision),
+  {
+    from: normalizeRevisionStatus(revision?.status),
+    to,
+    by: userId || null,
+    at: at.toISOString(),
+    comment,
+    reason: null,
+  },
+];
+
+async function supersedeOpenScheduleRevisions(tx, { projectId, userId = null }) {
+  const revisions = await tx.scheduleRevision.findMany({
+    where: {
+      projectId,
+      isActive: false,
+      status: { in: OPEN_REVISION_STATUSES },
+    },
+  });
+
+  const at = new Date();
+  for (const revision of revisions) {
+    await tx.scheduleRevision.update({
+      where: { id: revision.id },
+      data: {
+        status: REVISION_STATUS.SUPERSEDED,
+        supersededBy: userId,
+        supersededAt: at,
+        statusTransitionLog: appendStatusTransition(revision, {
+          to: REVISION_STATUS.SUPERSEDED,
+          userId,
+          at,
+          comment: 'Superseded by an imported schedule revision',
+        }),
+      },
+    });
+  }
+}
 
 async function ensureProject(orgId, projectId) {
   const project = await prisma.project.findFirst({
@@ -32,13 +101,19 @@ function parseMaybeDate(value) {
   return d;
 }
 
-function dayOffset(dateValue, projectStartDate) {
+function dayOffset(dateValue, projectStartDate, calendarOptions = {}) {
   const date = parseMaybeDate(dateValue);
   if (!date || !projectStartDate) return null;
 
+  const workingDayOffset = dateToWorkingDay(
+    projectStartDate,
+    date,
+    calendarOptions,
+  );
+  if (workingDayOffset !== null) return workingDayOffset;
+
   const diffMs = date.getTime() - projectStartDate.getTime();
-  const days = diffMs / (1000 * 60 * 60 * 24);
-  return Math.round(days);
+  return Math.round(diffMs / (1000 * 60 * 60 * 24));
 }
 
 function normalizePct(value) {
@@ -47,140 +122,158 @@ function normalizePct(value) {
   return Math.max(0, Math.min(100, pct));
 }
 
-async function clearExistingScheduleData(tx, projectId) {
-  await tx.activityProgress.deleteMany({ where: { activity: { projectId } } });
-  await tx.costRecord.deleteMany({ where: { projectId } });
-  await tx.longLeadItem.deleteMany({ where: { projectId } });
-  await tx.activityAssignment.deleteMany({
-    where: { activity: { projectId } },
-  });
-  await tx.activityEquipment.deleteMany({ where: { activity: { projectId } } });
-  await tx.activityMaterial.deleteMany({ where: { activity: { projectId } } });
-  await tx.activity.deleteMany({ where: { projectId } });
+const trimOrNull = (value) => {
+  const text = String(value || '').trim();
+  return text || null;
+};
+
+function stagedActivityKey(item, index) {
+  return (
+    trimOrNull(
+      item.sourceActivityId ||
+        item.sourceTaskId ||
+        item.uid ||
+        item.p6ActivityId ||
+        item.wbsCode,
+    ) || `import-${index + 1}`
+  );
 }
 
-function createProgressRecords(rows) {
-  return rows
-    .filter((row) => row.activityId)
-    .map((row) => ({
-      activityId: row.activityId,
-      pctComplete: normalizePct(row.physComplete),
-      actualCost: row.derivedActualCost,
-      notes: 'Imported from schedule source',
-      updatedBy: 'import',
-    }));
+function isoOrNull(value) {
+  const date = parseMaybeDate(value);
+  return date ? date.toISOString() : null;
+}
+
+function buildImportSnapshot({ project, activities, relationships, wbsNodes, source, calendars }) {
+  const projectStart = project.startDate ? new Date(project.startDate) : null;
+  const refToDraftKey = new Map();
+  const seen = new Set();
+
+  const stagedActivities = activities.map((item, index) => {
+    let draftKey = stagedActivityKey(item, index);
+    if (seen.has(draftKey)) draftKey = `${draftKey}#${index + 1}`;
+    seen.add(draftKey);
+
+    const refs = [
+      item.sourceTaskId,
+      item.sourceActivityId,
+      item.uid,
+      item.p6ActivityId,
+      item.wbsCode,
+      draftKey,
+    ];
+    for (const ref of refs) {
+      const key = trimOrNull(ref);
+      if (key && !refToDraftKey.has(key)) refToDraftKey.set(key, draftKey);
+    }
+
+    const duration = Math.max(
+      0,
+      Number(item.originalDuration ?? item.duration ?? 0) || 0,
+    );
+    const calendarId =
+      trimOrNull(item.calendarId) || project.projectCalendar || null;
+    const calendarOptions = {
+      calendarId,
+      projectCalendar: project.projectCalendar,
+    };
+
+    return {
+      draftKey,
+      sourceActivityId: trimOrNull(item.sourceActivityId || item.sourceTaskId),
+      uid: trimOrNull(item.uid),
+      p6ActivityId: trimOrNull(item.p6ActivityId),
+      name: item.name || 'Imported Activity',
+      wbsCode: trimOrNull(item.wbsCode),
+      calendarId,
+      duration,
+      originalDuration:
+        item.originalDuration != null ? Number(item.originalDuration) : null,
+      remainingDuration:
+        item.remainingDuration != null ? Number(item.remainingDuration) : null,
+      physComplete: normalizePct(item.physComplete),
+      earlyStart: dayOffset(item.earlyStartDate, projectStart, calendarOptions),
+      earlyFinish: dayOffset(
+        item.earlyFinishDate,
+        projectStart,
+        calendarOptions,
+      ),
+      lateStart: dayOffset(item.lateStartDate, projectStart, calendarOptions),
+      lateFinish: dayOffset(item.lateFinishDate, projectStart, calendarOptions),
+      totalFloat:
+        item.totalFloat != null ? Math.round(Number(item.totalFloat) || 0) : null,
+      isCritical: Math.round(Number(item.totalFloat) || 0) === 0,
+      startDate: isoOrNull(item.earlyStartDate),
+      endDate: isoOrNull(item.earlyFinishDate),
+      sortOrder: index,
+    };
+  });
+
+  const dependencies = [];
+  for (const rel of relationships) {
+    const succRef = trimOrNull(rel.succTaskId || rel.succId || rel.succUid);
+    const predRef = trimOrNull(rel.predTaskId || rel.predId || rel.predUid);
+    const successorRef = succRef ? refToDraftKey.get(succRef) : null;
+    const predecessorRef = predRef ? refToDraftKey.get(predRef) : null;
+
+    if (!successorRef || !predecessorRef || successorRef === predecessorRef) {
+      continue;
+    }
+
+    dependencies.push({
+      predecessorRef,
+      successorRef,
+      relationshipType: rel.relType || rel.type || 'FS',
+      lagDays: Math.round(Number(rel.lagDays) || 0),
+      source: 'import',
+      importSource: source,
+      externalPredecessorRef: predRef,
+      externalSuccessorRef: succRef,
+      importMetadata: {
+        source,
+        rawRelationship: rel,
+      },
+    });
+  }
+
+  return {
+    source,
+    importedAt: new Date().toISOString(),
+    activityCount: stagedActivities.length,
+    wbs: wbsNodes,
+    calendars,
+    activities: stagedActivities,
+    dependencies,
+  };
 }
 
 async function persistImport({
   project,
-  replaceExisting,
   activities,
   relationships,
   wbsNodes,
   source,
   calendars = [],
+  userId = null,
 }) {
-  const projectStart = project.startDate ? new Date(project.startDate) : null;
+  const snapshot = buildImportSnapshot({
+    project,
+    activities,
+    relationships,
+    wbsNodes,
+    source,
+    calendars,
+  });
+  let revisionId = null;
 
   await prisma.$transaction(async (tx) => {
-    if (replaceExisting) {
-      await clearExistingScheduleData(tx, project.id);
-    }
+    await supersedeOpenScheduleRevisions(tx, {
+      projectId: project.id,
+      userId,
+    });
 
-    const createdRows = [];
-    const referenceMap = new Map();
-
-    for (let i = 0; i < activities.length; i += 1) {
-      const item = activities[i];
-      const duration = Math.max(
-        0,
-        Number(item.originalDuration ?? item.duration ?? 0) || 0,
-      );
-
-      const created = await tx.activity.create({
-        data: {
-          projectId: project.id,
-          name: item.name || 'Imported Activity',
-          p6ActivityId: item.p6ActivityId || null,
-          wbsCode: item.wbsCode || null,
-          calendarId: item.calendarId || null,
-          duration,
-          originalDuration:
-            item.originalDuration != null
-              ? Number(item.originalDuration)
-              : null,
-          remainingDuration:
-            item.remainingDuration != null
-              ? Number(item.remainingDuration)
-              : null,
-          physComplete: normalizePct(item.physComplete),
-          earlyStart: dayOffset(item.earlyStartDate, projectStart),
-          earlyFinish: dayOffset(item.earlyFinishDate, projectStart),
-          lateStart: dayOffset(item.lateStartDate, projectStart),
-          lateFinish: dayOffset(item.lateFinishDate, projectStart),
-          totalFloat:
-            item.totalFloat != null
-              ? Math.round(Number(item.totalFloat) || 0)
-              : null,
-          isCritical: Math.round(Number(item.totalFloat) || 0) === 0,
-          startDate: parseMaybeDate(item.earlyStartDate),
-          endDate: parseMaybeDate(item.earlyFinishDate),
-          sortOrder: i,
-        },
-      });
-
-      createdRows.push({
-        activityId: created.id,
-        physComplete: normalizePct(item.physComplete),
-        derivedActualCost: undefined,
-      });
-
-      if (item.sourceTaskId)
-        referenceMap.set(String(item.sourceTaskId), created.id);
-      if (item.sourceActivityId) {
-        referenceMap.set(String(item.sourceActivityId), created.id);
-      }
-      if (item.uid) referenceMap.set(String(item.uid), created.id);
-      if (item.p6ActivityId)
-        referenceMap.set(String(item.p6ActivityId), created.id);
-      referenceMap.set(created.id, created.id);
-    }
-
-    const predecessorMap = new Map();
-
-    for (const rel of relationships) {
-      const succRef = String(
-        rel.succTaskId || rel.succId || rel.succUid || '',
-      ).trim();
-      const predRef = String(
-        rel.predTaskId || rel.predId || rel.predUid || '',
-      ).trim();
-
-      const succDbId = referenceMap.get(succRef);
-      const predDbId = referenceMap.get(predRef);
-
-      if (!succDbId || !predDbId || succDbId === predDbId) continue;
-
-      const parts = predecessorMap.get(succDbId) || [];
-      parts.push(
-        `${predDbId}:${rel.relType || rel.type || 'FS'}:${Math.round(Number(rel.lagDays) || 0)}`,
-      );
-      predecessorMap.set(succDbId, parts);
-    }
-
-    for (const [activityId, parts] of predecessorMap.entries()) {
-      await tx.activity.update({
-        where: { id: activityId },
-        data: { predecessors: parts.join(',') },
-      });
-    }
-
-    const progressRows = createProgressRecords(createdRows);
-    if (progressRows.length > 0) {
-      await tx.activityProgress.createMany({ data: progressRows });
-    }
-
-    await tx.scheduleRevision.create({
+    const createdAt = new Date();
+    const revision = await tx.scheduleRevision.create({
       data: {
         projectId: project.id,
         label: `${source.toUpperCase()} Import`,
@@ -188,26 +281,35 @@ async function persistImport({
         criticalCount: activities.filter((item) => (item.totalFloat || 0) === 0)
           .length,
         totalBudget: 0,
-        snapshotJson: {
-          source,
-          importedAt: new Date().toISOString(),
-          activityCount: activities.length,
-          wbs: wbsNodes,
-          calendars,
-        },
+        source,
+        isActive: false,
+        status: REVISION_STATUS.DRAFT,
+        snapshotJson: snapshot,
+        statusTransitionLog: [
+          {
+            from: null,
+            to: REVISION_STATUS.DRAFT,
+            by: userId,
+            at: createdAt.toISOString(),
+            comment: 'Staged imported schedule revision created',
+            reason: null,
+          },
+        ],
       },
     });
+    revisionId = revision.id;
   });
 
-  const cpm = await applyCpmToProject(project.id);
-  const seeded = await runPostImportSeeding(project.id);
-
   return {
+    staged: true,
+    revisionId,
     imported: activities.length,
     wbsNodes: wbsNodes.length,
-    criticalActivities: cpm.criticalActivities,
-    costRecordsSeeded: seeded.costSeeded,
-    longLeadItemsSeeded: seeded.longLeadSeeded,
+    criticalActivities: activities.filter((item) => (item.totalFloat || 0) === 0)
+      .length,
+    dependencyCount: snapshot.dependencies.length,
+    message:
+      'Schedule import staged as a draft revision. Activate after mapping review and approval.',
   };
 }
 
@@ -216,6 +318,7 @@ async function importXer({
   orgId,
   xerContent,
   replaceExisting = false,
+  userId = null,
 }) {
   const project = await ensureProject(orgId, projectId);
 
@@ -235,6 +338,7 @@ async function importXer({
     wbsNodes: parsed.wbsNodes,
     calendars: parsed.calendars,
     source: 'xer',
+    userId,
   });
 }
 
@@ -243,6 +347,7 @@ async function importP6Xml({
   orgId,
   xmlContent,
   replaceExisting = false,
+  userId = null,
 }) {
   const project = await ensureProject(orgId, projectId);
   const parsed = await parseP6Xml(xmlContent);
@@ -289,6 +394,7 @@ async function importP6Xml({
     relationships,
     wbsNodes: parsed.wbsNodes,
     source: 'p6xml',
+    userId,
   });
 }
 
@@ -297,6 +403,7 @@ async function importMsp({
   orgId,
   xmlContent,
   replaceExisting = false,
+  userId = null,
 }) {
   const project = await ensureProject(orgId, projectId);
   const parsed = await parseMspXml(xmlContent);
@@ -339,7 +446,7 @@ async function importMsp({
         succUid: task.uid,
         predUid: pred.predUid,
         relType: pred.type,
-        lagDays: parseDurationDays(pred.lagDurationIso),
+        lagDays: parseLagDays(pred.lagDurationIso),
       });
     }
   }
@@ -351,6 +458,7 @@ async function importMsp({
     relationships,
     wbsNodes: [],
     source: 'msp',
+    userId,
   });
 }
 
@@ -382,6 +490,7 @@ async function importProgress({ projectId, orgId, format, content }) {
   const dbActivities = await prisma.activity.findMany({
     where: {
       projectId,
+      isActive: true,
       p6ActivityId: { not: null },
     },
     select: {
@@ -390,7 +499,6 @@ async function importProgress({ projectId, orgId, format, content }) {
       budget: true,
     },
   });
-
   const updates = [];
   const matched = new Set();
 
@@ -399,12 +507,16 @@ async function importProgress({ projectId, orgId, format, content }) {
     if (!progressMap.has(key)) continue;
 
     const pct = normalizePct(progressMap.get(key));
-    const actualCost = (pct / 100) * (Number(activity.budget) || 0) * 1.03;
 
     updates.push({
       activityId: activity.id,
       pctComplete: pct,
-      actualCost,
+      actualCost: null,
+      progressMethod: 'percent_complete',
+      source: 'import',
+      status: 'approved',
+      approvedBy: 'import',
+      approvedAt: new Date(),
       notes: 'Imported from progress file',
       updatedBy: 'import',
     });

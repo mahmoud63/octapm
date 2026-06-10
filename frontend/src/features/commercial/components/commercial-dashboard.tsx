@@ -62,11 +62,11 @@ export function CommercialDashboard({
         </TabsContent>
 
         <TabsContent value='eot'>
-          <EotPanel projectId={projectId} />
+          <EotPanel projectId={projectId} activities={activities} />
         </TabsContent>
 
         <TabsContent value='weather'>
-          <WeatherDelaysPanel projectId={projectId} />
+          <WeatherDelaysPanel projectId={projectId} activities={activities} />
         </TabsContent>
       </Tabs>
     </div>

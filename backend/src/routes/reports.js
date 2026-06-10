@@ -1,187 +1,221 @@
 const express = require('express');
+const { body, param, query } = require('express-validator');
 const { asyncHandler } = require('../utils/async-handler');
 const { sendSuccess } = require('../utils/api-response');
 const { authenticate } = require('../middleware/auth');
-const { HttpError } = require('../utils/http-error');
-const { prisma } = require('../config/db');
+const { requirePermission } = require('../middleware/rbac');
+const { validate } = require('../middleware/validate');
+const { moneyBody } = require('../utils/money');
+const evService = require('../services/earned-value.service');
 
 const router = express.Router({ mergeParams: true });
 
 router.use(authenticate);
 
-function addDays(date, days) {
-  const d = new Date(date);
-  d.setDate(d.getDate() + Number(days || 0));
-  return d;
-}
+const COST_LOADING_STATUSES = [
+  'draft',
+  'submitted',
+  'approved',
+  'rejected',
+  'superseded',
+];
+const COST_LOADING_CREATE_STATUSES = ['draft', 'submitted'];
 
-function buildMonthStart(date) {
-  return new Date(date.getFullYear(), date.getMonth(), 1);
-}
+const COST_LOADING_SOURCES = [
+  'manual',
+  'import',
+  'ai',
+  'migration',
+  'budget_revision',
+];
 
-function formatMonthLabel(date) {
-  return date.toLocaleDateString('en-GB', {
-    month: 'short',
-    year: '2-digit',
-  });
-}
-
-function buildSCurveData(activities, projectStartDate) {
-  if (!projectStartDate || activities.length === 0) return [];
-
-  const plannedDates = activities
-    .filter((row) => row.plannedFinish)
-    .map((row) => row.plannedFinish.getTime());
-
-  if (plannedDates.length === 0) return [];
-
-  const start = buildMonthStart(new Date(projectStartDate));
-  const finish = buildMonthStart(new Date(Math.max(...plannedDates)));
-  const today = new Date();
-
-  const rows = [];
-  const cursor = new Date(start);
-
-  while (cursor <= finish) {
-    const monthEnd = new Date(cursor.getFullYear(), cursor.getMonth() + 1, 0);
-
-    const pv = activities
-      .filter(
-        (activity) =>
-          activity.plannedFinish && activity.plannedFinish <= monthEnd,
-      )
-      .reduce((sum, activity) => sum + activity.budget, 0);
-
-    const ev =
-      monthEnd <= today
-        ? activities
-            .filter(
-              (activity) =>
-                activity.plannedFinish && activity.plannedFinish <= monthEnd,
-            )
-            .reduce((sum, activity) => sum + activity.ev, 0)
-        : null;
-
-    rows.push({
-      label: formatMonthLabel(cursor),
-      pv,
-      ev,
+router.get(
+  '/periods',
+  requirePermission('cost', 'read'),
+  asyncHandler(async (req, res) => {
+    const result = await evService.listReportingPeriods({
+      orgId: req.user.orgId,
+      projectId: req.params.projectId,
     });
+    return sendSuccess(res, result);
+  }),
+);
 
-    cursor.setMonth(cursor.getMonth() + 1);
-  }
+router.post(
+  '/periods',
+  requirePermission('cost', 'create'),
+  [
+    body('code').optional().isString().trim().isLength({ max: 40 }),
+    body('label').optional().isString().trim().isLength({ max: 120 }),
+    body('periodStart').isISO8601(),
+    body('periodEnd').isISO8601(),
+    body('cutoffDate').optional().isISO8601(),
+    validate,
+  ],
+  asyncHandler(async (req, res) => {
+    const result = await evService.createReportingPeriod({
+      orgId: req.user.orgId,
+      projectId: req.params.projectId,
+      userId: req.user.id,
+      payload: req.body,
+    });
+    return sendSuccess(res, result, 201);
+  }),
+);
 
-  return rows;
-}
+router.post(
+  '/periods/:periodId/lock',
+  requirePermission('cost', 'approve'),
+  [param('periodId').isUUID(), validate],
+  asyncHandler(async (req, res) => {
+    const result = await evService.lockReportingPeriod({
+      orgId: req.user.orgId,
+      projectId: req.params.projectId,
+      periodId: req.params.periodId,
+      userId: req.user.id,
+    });
+    return sendSuccess(res, result);
+  }),
+);
+
+router.get(
+  '/cost-loading',
+  requirePermission('cost', 'read'),
+  [
+    query('status').optional().isIn(COST_LOADING_STATUSES),
+    validate,
+  ],
+  asyncHandler(async (req, res) => {
+    const result = await evService.listCostLoadings({
+      orgId: req.user.orgId,
+      projectId: req.params.projectId,
+      status: req.query.status,
+    });
+    return sendSuccess(res, result);
+  }),
+);
+
+router.post(
+  '/cost-loading',
+  requirePermission('cost', 'create'),
+  [
+    body('activityId').isUUID(),
+    body('reportingPeriodId').optional({ nullable: true }).isUUID(),
+    body('plannedDate').isISO8601(),
+    moneyBody('plannedValue', { required: true }),
+    body('source').optional().isIn(COST_LOADING_SOURCES),
+    body('baselineVersion').optional().isString().trim().isLength({ max: 80 }),
+    body('status').optional().isIn(COST_LOADING_CREATE_STATUSES),
+    body('notes').optional().isString().trim(),
+    validate,
+  ],
+  asyncHandler(async (req, res) => {
+    const result = await evService.createCostLoading({
+      orgId: req.user.orgId,
+      projectId: req.params.projectId,
+      userId: req.user.id,
+      userRole: req.user.role,
+      payload: req.body,
+    });
+    return sendSuccess(res, result, 201);
+  }),
+);
+
+router.patch(
+  '/cost-loading/:id',
+  requirePermission('cost', 'update'),
+  [
+    param('id').isUUID(),
+    body('activityId').optional().isUUID(),
+    body('reportingPeriodId').optional({ nullable: true }).isUUID(),
+    body('plannedDate').optional().isISO8601(),
+    moneyBody('plannedValue'),
+    body('source').optional().isIn(COST_LOADING_SOURCES),
+    body('baselineVersion').optional().isString().trim().isLength({ max: 80 }),
+    body('notes').optional().isString().trim(),
+    validate,
+  ],
+  asyncHandler(async (req, res) => {
+    const result = await evService.updateCostLoading({
+      orgId: req.user.orgId,
+      projectId: req.params.projectId,
+      costLoadingId: req.params.id,
+      userId: req.user.id,
+      payload: req.body,
+    });
+    return sendSuccess(res, result);
+  }),
+);
+
+router.post(
+  '/cost-loading/:id/submit',
+  requirePermission('cost', 'submit'),
+  [param('id').isUUID(), validate],
+  asyncHandler(async (req, res) => {
+    const result = await evService.submitCostLoading({
+      orgId: req.user.orgId,
+      projectId: req.params.projectId,
+      costLoadingId: req.params.id,
+      userId: req.user.id,
+      userRole: req.user.role,
+    });
+    return sendSuccess(res, result);
+  }),
+);
+
+router.post(
+  '/cost-loading/:id/approve',
+  requirePermission('cost', 'approve'),
+  [param('id').isUUID(), validate],
+  asyncHandler(async (req, res) => {
+    const result = await evService.approveCostLoading({
+      orgId: req.user.orgId,
+      projectId: req.params.projectId,
+      costLoadingId: req.params.id,
+      userId: req.user.id,
+      userRole: req.user.role,
+    });
+    return sendSuccess(res, result);
+  }),
+);
+
+router.post(
+  '/cost-loading/:id/reject',
+  requirePermission('cost', 'approve'),
+  [
+    param('id').isUUID(),
+    body('reason').isString().trim().notEmpty().isLength({ max: 2000 }),
+    validate,
+  ],
+  asyncHandler(async (req, res) => {
+    const result = await evService.rejectCostLoading({
+      orgId: req.user.orgId,
+      projectId: req.params.projectId,
+      costLoadingId: req.params.id,
+      userId: req.user.id,
+      userRole: req.user.role,
+      reason: req.body.reason,
+    });
+    return sendSuccess(res, result);
+  }),
+);
 
 router.get(
   '/ev',
+  requirePermission('cost', 'read'),
+  [
+    query('periodId').optional().isUUID(),
+    query('cutoffDate').optional().isISO8601(),
+    validate,
+  ],
   asyncHandler(async (req, res) => {
-    const project = await prisma.project.findFirst({
-      where: { id: req.params.projectId, orgId: req.user.orgId },
+    const result = await evService.buildOfficialEvReport({
+      orgId: req.user.orgId,
+      projectId: req.params.projectId,
+      periodId: req.query.periodId || null,
+      cutoffDate: req.query.cutoffDate || null,
     });
-
-    if (!project) {
-      throw new HttpError(404, 'PROJECT_NOT_FOUND', 'Project not found');
-    }
-
-    const [activities, costRecords] = await Promise.all([
-      prisma.activity.findMany({
-        where: { projectId: req.params.projectId },
-        include: {
-          progress: {
-            orderBy: { updatedAt: 'desc' },
-            take: 1,
-          },
-        },
-      }),
-      prisma.costRecord.findMany({
-        where: { projectId: req.params.projectId },
-      }),
-    ]);
-
-    const costByActivity = new Map();
-    costRecords.forEach((row) => {
-      costByActivity.set(row.activityId, Number(row.actual || 0));
-    });
-
-    const normalized = activities.map((activity) => {
-      const budget = Number(activity.budget || 0);
-      const pct = Number(activity.progress[0]?.pctComplete || 0);
-      const fallbackAc = costByActivity.get(activity.id) || 0;
-      const actualCost = Number(
-        activity.progress[0]?.actualCost || fallbackAc || 0,
-      );
-      const plannedFinish = project.startDate
-        ? addDays(project.startDate, activity.earlyFinish)
-        : null;
-      const ev = (pct / 100) * budget;
-
-      return {
-        id: activity.id,
-        activityId: activity.p6ActivityId || activity.wbsCode || activity.id,
-        name: activity.name,
-        budget,
-        pct,
-        actualCost,
-        plannedFinish,
-        status: pct >= 100 ? 'complete' : pct > 0 ? 'in_progress' : 'todo',
-        isCritical: activity.isCritical,
-        ev,
-      };
-    });
-
-    const totalBudget = normalized.reduce((sum, row) => sum + row.budget, 0);
-    const ev = normalized.reduce((sum, row) => sum + row.ev, 0);
-    const ac = normalized.reduce((sum, row) => sum + row.actualCost, 0);
-
-    const today = new Date();
-    const pv = normalized
-      .filter((row) => row.plannedFinish && row.plannedFinish <= today)
-      .reduce((sum, row) => sum + row.budget, 0);
-
-    const spi = pv > 0 ? ev / pv : null;
-    const cpi = ac > 0 ? ev / ac : null;
-    const eac = cpi && cpi > 0 ? totalBudget / cpi : totalBudget;
-    const sv = ev - pv;
-    const cv = ev - ac;
-    const etc = eac - ac;
-
-    const sCurve = buildSCurveData(normalized, project.startDate);
-
-    const activityBreakdown = normalized
-      .slice()
-      .sort((a, b) => b.budget - a.budget)
-      .slice(0, 20)
-      .map((row) => ({
-        activityId: row.activityId,
-        name: row.name,
-        budget: row.budget,
-        ev: row.ev,
-        ac: row.actualCost,
-        pct: Number(row.pct.toFixed(2)),
-        status: row.status,
-        isCritical: row.isCritical,
-      }));
-
-    return sendSuccess(res, {
-      totalBudget,
-      pv,
-      ev,
-      ac,
-      spi,
-      cpi,
-      eac,
-      sv,
-      cv,
-      etc,
-      sCurve,
-      activityBreakdown,
-      alerts: {
-        spiAlert: spi !== null && spi < 0.9,
-        cpiAlert: cpi !== null && cpi < 0.9,
-      },
-    });
+    return sendSuccess(res, result);
   }),
 );
 

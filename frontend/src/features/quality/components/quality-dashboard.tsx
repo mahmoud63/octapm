@@ -1,8 +1,12 @@
 import { useState } from 'react'
 import { toast } from 'sonner'
+import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { WorkflowRecordList } from '@/features/workflows/components/workflow-record-list'
+import { handleServerError } from '@/lib/handle-server-error'
+import { useCanPerform } from '@/lib/permissions'
 import {
   useCreateDefect,
   useCreateItp,
@@ -40,6 +44,8 @@ export function QualityDashboard({
   const createDefect = useCreateDefect(projectId)
   const createSafety = useCreateSafetyIncident(projectId)
   const createTest = useCreateMaterialTest(projectId)
+  const canCreateNcr = useCanPerform('ncr', 'create')
+  const canCreateSafety = useCanPerform('safety', 'create')
 
   const [ncrDescription, setNcrDescription] = useState('')
   const [itpTitle, setItpTitle] = useState('')
@@ -56,7 +62,7 @@ export function QualityDashboard({
 
   return (
     <div className='space-y-3'>
-      <div className='grid grid-cols-2 gap-2 sm:grid-cols-5'>
+      <div className='grid grid-cols-2 gap-2 sm:grid-cols-6'>
         <div className='rounded border p-3'>
           <p className='text-xs text-muted-foreground'>Quality Score</p>
           <p className='text-2xl font-bold'>{metrics?.qualityScore ?? 0}</p>
@@ -77,6 +83,10 @@ export function QualityDashboard({
           <p className='text-xs text-muted-foreground'>Safety Open</p>
           <p className='text-2xl font-bold'>{metrics?.safetyOpen ?? 0}</p>
         </div>
+        <div className='rounded border p-3'>
+          <p className='text-xs text-muted-foreground'>Due Alerts</p>
+          <p className='text-2xl font-bold'>{metrics?.dueAlerts ?? 0}</p>
+        </div>
       </div>
 
       <Tabs {...tabsProps} className='space-y-3'>
@@ -91,36 +101,44 @@ export function QualityDashboard({
         )}
 
         <TabsContent value='ncr' className='space-y-2'>
-          <div className='flex gap-2'>
-            <Input
-              placeholder='New NCR description'
-              value={ncrDescription}
-              onChange={(e) => setNcrDescription(e.target.value)}
-            />
-            <Button
-              disabled={createNcr.isPending || !ncrDescription}
-              onClick={async () => {
-                try {
-                  await createNcr.mutateAsync({ description: ncrDescription })
-                  setNcrDescription('')
-                  toast.success('NCR created')
-                } catch {
-                  toast.error('Failed to create NCR')
-                }
-              }}
-            >
-              Add
-            </Button>
-          </div>
-          <ul className='rounded border p-2 text-sm'>
-            {ncrs?.rows.map((row) => (
-              <li key={row.id} className='border-b p-2 last:border-b-0'>
-                <span className='font-medium'>{row.ref}</span> -{' '}
-                {row.description || 'No description'} ({row.severity}/
-                {row.status})
-              </li>
-            ))}
-          </ul>
+          {canCreateNcr && (
+            <div className='flex gap-2'>
+              <Input
+                placeholder='New NCR description'
+                value={ncrDescription}
+                onChange={(e) => setNcrDescription(e.target.value)}
+              />
+              <Button
+                disabled={createNcr.isPending || !ncrDescription}
+                onClick={async () => {
+                  try {
+                    await createNcr.mutateAsync({ description: ncrDescription })
+                    setNcrDescription('')
+                    toast.success('NCR created')
+                  } catch (error) {
+                    handleServerError(error)
+                  }
+                }}
+              >
+                Add
+              </Button>
+            </div>
+          )}
+          <WorkflowRecordList
+            rows={ncrs?.rows}
+            emptyText='No NCR records'
+            getRef={(row) => row.ref}
+            getTitle={(row) => row.description || 'No description'}
+            getSubtitle={(row) => row.disposition}
+            getStatus={(row) => row.status}
+            renderMeta={(row) => (
+              <div className='flex flex-wrap gap-2'>
+                <Badge variant={row.severity === 'major' ? 'destructive' : 'outline'}>
+                  {row.severity}
+                </Badge>
+              </div>
+            )}
+          />
         </TabsContent>
 
         <TabsContent value='itp' className='space-y-2'>
@@ -145,14 +163,14 @@ export function QualityDashboard({
               Add
             </Button>
           </div>
-          <ul className='rounded border p-2 text-sm'>
-            {itps?.rows.map((row) => (
-              <li key={row.id} className='border-b p-2 last:border-b-0'>
-                <span className='font-medium'>{row.ref}</span> - {row.title} (
-                {row.status})
-              </li>
-            ))}
-          </ul>
+          <WorkflowRecordList
+            rows={itps?.rows}
+            emptyText='No ITP records'
+            getRef={(row) => row.ref}
+            getTitle={(row) => row.title}
+            getSubtitle={(row) => row.pointType}
+            getStatus={(row) => row.status}
+          />
         </TabsContent>
 
         <TabsContent value='defects' className='space-y-2'>
@@ -177,49 +195,58 @@ export function QualityDashboard({
               Add
             </Button>
           </div>
-          <ul className='rounded border p-2 text-sm'>
-            {defects?.rows.map((row) => (
-              <li key={row.id} className='border-b p-2 last:border-b-0'>
-                <span className='font-medium'>{row.ref}</span> - {row.title} (
-                {row.status})
-              </li>
-            ))}
-          </ul>
+          <WorkflowRecordList
+            rows={defects?.rows}
+            emptyText='No defect records'
+            getRef={(row) => row.ref}
+            getTitle={(row) => row.title}
+            getSubtitle={(row) => row.severity}
+            getStatus={(row) => row.status}
+            renderMeta={(row) => (
+              <div className='flex flex-wrap gap-2'>
+                <Badge variant={row.severity === 'critical' ? 'destructive' : 'outline'}>
+                  {row.severity}
+                </Badge>
+              </div>
+            )}
+          />
         </TabsContent>
 
         <TabsContent value='safety' className='space-y-2'>
-          <div className='flex gap-2'>
-            <Input
-              placeholder='Incident title'
-              value={safetyTitle}
-              onChange={(e) => setSafetyTitle(e.target.value)}
-            />
-            <Button
-              disabled={createSafety.isPending || !safetyTitle}
-              onClick={async () => {
-                try {
-                  await createSafety.mutateAsync({
-                    title: safetyTitle,
-                    incidentType: 'near_miss',
-                  })
-                  setSafetyTitle('')
-                  toast.success('Incident logged')
-                } catch {
-                  toast.error('Failed to log incident')
-                }
-              }}
-            >
-              Add
-            </Button>
-          </div>
-          <ul className='rounded border p-2 text-sm'>
-            {safety?.rows.map((row) => (
-              <li key={row.id} className='border-b p-2 last:border-b-0'>
-                <span className='font-medium'>{row.ref}</span> - {row.title} (
-                {row.status})
-              </li>
-            ))}
-          </ul>
+          {canCreateSafety && (
+            <div className='flex gap-2'>
+              <Input
+                placeholder='Incident title'
+                value={safetyTitle}
+                onChange={(e) => setSafetyTitle(e.target.value)}
+              />
+              <Button
+                disabled={createSafety.isPending || !safetyTitle}
+                onClick={async () => {
+                  try {
+                    await createSafety.mutateAsync({
+                      title: safetyTitle,
+                      incidentType: 'near_miss',
+                    })
+                    setSafetyTitle('')
+                    toast.success('Incident logged')
+                  } catch (error) {
+                    handleServerError(error)
+                  }
+                }}
+              >
+                Add
+              </Button>
+            </div>
+          )}
+          <WorkflowRecordList
+            rows={safety?.rows}
+            emptyText='No safety incidents'
+            getRef={(row) => row.ref}
+            getTitle={(row) => row.title}
+            getSubtitle={(row) => `${row.incidentType} / ${row.lostDays} lost days`}
+            getStatus={(row) => row.status}
+          />
         </TabsContent>
 
         <TabsContent value='tests' className='space-y-2'>
@@ -244,14 +271,13 @@ export function QualityDashboard({
               Add
             </Button>
           </div>
-          <ul className='rounded border p-2 text-sm'>
-            {tests?.rows.map((row) => (
-              <li key={row.id} className='border-b p-2 last:border-b-0'>
-                <span className='font-medium'>{row.ref}</span> - {row.testType}{' '}
-                ({row.result})
-              </li>
-            ))}
-          </ul>
+          <WorkflowRecordList
+            rows={tests?.rows}
+            emptyText='No material tests'
+            getRef={(row) => row.ref}
+            getTitle={(row) => row.testType}
+            getStatus={(row) => row.result}
+          />
         </TabsContent>
       </Tabs>
     </div>

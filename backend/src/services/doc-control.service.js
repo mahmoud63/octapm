@@ -1,5 +1,6 @@
 const { prisma } = require('../config/db');
 const { HttpError } = require('../utils/http-error');
+const { dueAlertForRecord } = require('./workflow-support.service');
 
 const ensureProject = async ({ orgId, projectId }) => {
   const project = await prisma.project.findFirst({
@@ -37,6 +38,15 @@ const getDocControlDashboard = async ({ orgId, projectId }) => {
     }, 0);
     return total / closed.length;
   })();
+  const dueAlerts = [
+    ...rfis,
+    ...submittals,
+    ...drawings,
+    ...transmittals,
+    ...correspondence,
+  ]
+    .map(dueAlertForRecord)
+    .filter(Boolean);
 
   return {
     metrics: {
@@ -60,6 +70,8 @@ const getDocControlDashboard = async ({ orgId, projectId }) => {
       ).length,
       contractualNotices: correspondence.filter((row) => row.contractualNotice)
         .length,
+      dueAlerts: dueAlerts.length,
+      overdue: dueAlerts.filter((alert) => alert.severity === 'overdue').length,
     },
   };
 };

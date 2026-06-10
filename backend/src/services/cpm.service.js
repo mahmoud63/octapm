@@ -1,39 +1,266 @@
 const { prisma } = require('../config/db');
+const { HttpError } = require('../utils/http-error');
+const {
+  assertNoDependencyCycle,
+  buildActivityReferenceMap,
+  getActivityDisplayRef,
+  normalizeLagDays,
+  normalizeRelationshipType,
+  parsePredecessors,
+} = require('./activity-dependency.service');
 
-function parsePredecessors(predecessorsStr) {
-  if (!predecessorsStr) return [];
+const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
-  return String(predecessorsStr)
-    .split(',')
-    .map((part) => part.trim())
-    .filter(Boolean)
-    .map((part) => {
-      // Format: <predId>:<relType>:<lagDays>
-      if (part.includes(':')) {
-        const [predRef, relRaw = 'FS', lagRaw = '0'] = part.split(':');
-        const relType = String(relRaw || 'FS').toUpperCase();
-        const lagDays = Number.parseInt(lagRaw, 10) || 0;
-        return { predRef: predRef.trim(), relType, lagDays };
-      }
+const CALENDAR_DEFINITIONS = {
+  five_day: {
+    id: 'five_day',
+    label: 'Five-day workweek',
+    workingDays: new Set([1, 2, 3, 4, 5]),
+  },
+  six_day: {
+    id: 'six_day',
+    label: 'Six-day workweek',
+    workingDays: new Set([1, 2, 3, 4, 5, 6]),
+  },
+  seven_day: {
+    id: 'seven_day',
+    label: 'Seven-day calendar',
+    workingDays: new Set([0, 1, 2, 3, 4, 5, 6]),
+  },
+};
 
-      // Format: <predRef> [FS|SS|FF|SF][+/-lag]
-      const match = part.match(/^(\S+)(?:\s+([FS]{1}[FS]{1})([+-]\d+)?)?/i);
-      const predRef = match?.[1] || part;
-      const relType = String(match?.[2] || 'FS').toUpperCase();
-      const lagDays = Number.parseInt(match?.[3] || '0', 10) || 0;
-      return { predRef, relType, lagDays };
-    });
+const CALENDAR_ALIASES = new Map([
+  ['5_day', 'five_day'],
+  ['5-day', 'five_day'],
+  ['5d', 'five_day'],
+  ['five-day', 'five_day'],
+  ['five_day', 'five_day'],
+  ['standard-5d', 'five_day'],
+  ['standard_5d', 'five_day'],
+  ['mon-fri', 'five_day'],
+  ['monday-friday', 'five_day'],
+  ['6_day', 'six_day'],
+  ['6-day', 'six_day'],
+  ['6d', 'six_day'],
+  ['six-day', 'six_day'],
+  ['six_day', 'six_day'],
+  ['standard-6d', 'six_day'],
+  ['standard_6d', 'six_day'],
+  ['mon-sat', 'six_day'],
+  ['monday-saturday', 'six_day'],
+  ['7_day', 'seven_day'],
+  ['7-day', 'seven_day'],
+  ['7d', 'seven_day'],
+  ['seven-day', 'seven_day'],
+  ['seven_day', 'seven_day'],
+  ['calendar_days', 'seven_day'],
+  ['calendar-days', 'seven_day'],
+  ['24x7', 'seven_day'],
+]);
+
+function startOfUtcDay(value) {
+  const date = value instanceof Date ? new Date(value) : new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return new Date(
+    Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()),
+  );
 }
 
-function buildReferenceMap(activities) {
-  const map = new Map();
-  for (const activity of activities) {
-    map.set(activity.id, activity.id);
-    if (activity.wbsCode) map.set(String(activity.wbsCode), activity.id);
-    if (activity.p6ActivityId)
-      map.set(String(activity.p6ActivityId), activity.id);
+function normalizeCalendarId(calendarId, fallbackCalendarId = 'five_day') {
+  const raw = String(calendarId || '').trim().toLowerCase();
+  const fallbackRaw = String(fallbackCalendarId || '').trim().toLowerCase();
+  const fallback = CALENDAR_ALIASES.get(fallbackRaw) || 'five_day';
+
+  if (!raw || raw === 'custom') return fallback;
+  return CALENDAR_ALIASES.get(raw) || fallback;
+}
+
+function resolveCalendar(calendarId, projectCalendar = 'five_day') {
+  const normalizedId = normalizeCalendarId(calendarId, projectCalendar);
+  return CALENDAR_DEFINITIONS[normalizedId] || CALENDAR_DEFINITIONS.five_day;
+}
+
+function isWorkingDate(dateValue, { calendarId, projectCalendar } = {}) {
+  const date = startOfUtcDay(dateValue);
+  if (!date) return false;
+  return resolveCalendar(calendarId, projectCalendar).workingDays.has(
+    date.getUTCDay(),
+  );
+}
+
+function shiftUtcDate(date, days) {
+  const next = new Date(date);
+  next.setUTCDate(next.getUTCDate() + days);
+  return next;
+}
+
+function nearestWorkingDate(dateValue, options = {}, direction = 1) {
+  let date = startOfUtcDay(dateValue);
+  if (!date) return null;
+  const step = direction < 0 ? -1 : 1;
+  while (!isWorkingDate(date, options)) {
+    date = shiftUtcDate(date, step);
   }
-  return map;
+  return date;
+}
+
+function workingDayToDate(projectStartDate, dayOffset, options = {}) {
+  if (
+    !projectStartDate ||
+    dayOffset === null ||
+    dayOffset === undefined ||
+    dayOffset === ''
+  ) {
+    return null;
+  }
+
+  const offset = Math.round(Number(dayOffset));
+  if (!Number.isFinite(offset)) return null;
+
+  const direction = offset < 0 ? -1 : 1;
+  let date = nearestWorkingDate(projectStartDate, options, direction);
+  if (!date) return null;
+  let remaining = Math.abs(offset);
+
+  while (remaining > 0) {
+    date = shiftUtcDate(date, direction);
+    if (isWorkingDate(date, options)) remaining -= 1;
+  }
+
+  return date;
+}
+
+function dateToWorkingDay(projectStartDate, dateValue, options = {}) {
+  const start = nearestWorkingDate(projectStartDate, options, 1);
+  const rawTarget = startOfUtcDay(dateValue);
+  if (!start || !rawTarget) return null;
+
+  const targetDirection = rawTarget < start ? -1 : 1;
+  const target = nearestWorkingDate(rawTarget, options, targetDirection);
+  if (!target) return null;
+
+  if (target.getTime() === start.getTime()) return 0;
+
+  const direction = target > start ? 1 : -1;
+  let date = start;
+  let offset = 0;
+
+  while (date.getTime() !== target.getTime()) {
+    date = shiftUtcDate(date, direction);
+    if (isWorkingDate(date, options)) offset += direction;
+  }
+
+  return offset;
+}
+
+function collectStructuredDependencies(activities, dependencies) {
+  if (Array.isArray(dependencies)) return dependencies;
+
+  const rows = [];
+  for (const activity of activities || []) {
+    if (Array.isArray(activity.predecessorLinks)) {
+      rows.push(...activity.predecessorLinks);
+    }
+  }
+  return rows;
+}
+
+function buildDependencyLinks(activities, dependencies, { strict = true } = {}) {
+  const refMap = buildActivityReferenceMap(activities);
+  const activityById = new Map(activities.map((activity) => [activity.id, activity]));
+  const structuredRows = collectStructuredDependencies(activities, dependencies);
+  const linksBySuccessor = new Map();
+  const successorsWithStructuredRows = new Set();
+
+  for (const row of structuredRows) {
+    const predecessorId = row.predecessorId;
+    const successorId = row.successorId;
+
+    if (!activityById.has(predecessorId) || !activityById.has(successorId)) {
+      if (!strict) continue;
+      throw new HttpError(
+        400,
+        'INVALID_DEPENDENCY_ACTIVITY',
+        'Dependency references an activity outside this project.',
+        { predecessorId, successorId },
+      );
+    }
+
+    if (predecessorId === successorId) {
+      throw new HttpError(
+        400,
+        'INVALID_DEPENDENCY_SELF_LINK',
+        'An activity cannot depend on itself.',
+        { activityId: successorId },
+      );
+    }
+
+    successorsWithStructuredRows.add(successorId);
+    if (!linksBySuccessor.has(successorId)) linksBySuccessor.set(successorId, []);
+    linksBySuccessor.get(successorId).push({
+      id: row.id,
+      predId: predecessorId,
+      succId: successorId,
+      predecessorId,
+      successorId,
+      relType: normalizeRelationshipType(row.relationshipType || row.relType, {
+        strict,
+      }),
+      relationshipType: normalizeRelationshipType(
+        row.relationshipType || row.relType,
+        { strict },
+      ),
+      lagDays: normalizeLagDays(row.lagDays),
+      source: row.source || null,
+      predecessor: row.predecessor || activityById.get(predecessorId),
+      successor: row.successor || activityById.get(successorId),
+    });
+  }
+
+  for (const activity of activities) {
+    if (successorsWithStructuredRows.has(activity.id)) continue;
+
+    const parsed = parsePredecessors(activity.predecessors, { strict });
+    const resolved = parsed.map((link) => {
+      const predecessor = refMap.get(link.predRef);
+      if (!predecessor) {
+        throw new HttpError(
+          400,
+          'INVALID_DEPENDENCY_PREDECESSOR',
+          'Dependency predecessor activity was not found in this project.',
+          { activityId: activity.id, predecessorRef: link.predRef },
+        );
+      }
+      if (predecessor.id === activity.id) {
+        throw new HttpError(
+          400,
+          'INVALID_DEPENDENCY_SELF_LINK',
+          'An activity cannot depend on itself.',
+          { activityId: activity.id },
+        );
+      }
+
+      return {
+        predId: predecessor.id,
+        succId: activity.id,
+        predecessorId: predecessor.id,
+        successorId: activity.id,
+        relType: link.relType,
+        relationshipType: link.relType,
+        lagDays: link.lagDays,
+        source: 'legacy',
+        predecessor,
+        successor: activity,
+      };
+    });
+
+    if (resolved.length > 0) linksBySuccessor.set(activity.id, resolved);
+  }
+
+  const flatLinks = Array.from(linksBySuccessor.values()).flat();
+  assertNoDependencyCycle(activities, flatLinks);
+
+  return linksBySuccessor;
 }
 
 function topoSort(activities, predecessorLinks) {
@@ -71,40 +298,78 @@ function topoSort(activities, predecessorLinks) {
     }
   }
 
-  // Keep unresolved nodes at the end so cycles are handled gracefully.
-  for (const activity of activities) {
-    if (!sortedIds.includes(activity.id)) sortedIds.push(activity.id);
+  if (sortedIds.length !== activities.length) {
+    throw new HttpError(
+      400,
+      'CPM_DEPENDENCY_CYCLE',
+      'Activity dependencies contain a cycle. Remove one link before recalculating CPM.',
+    );
   }
 
   return { sortedIds, successors };
 }
 
-function runCpm(activities) {
-  if (!activities.length) return {};
+function buildCalendarDateFields(activity, update, options = {}) {
+  const { projectStartDate, projectCalendar } = options;
+  if (!projectStartDate) return {};
 
-  const refMap = buildReferenceMap(activities);
-  const predecessorLinks = new Map();
+  const calendarOptions = {
+    calendarId: activity.calendarId || projectCalendar,
+    projectCalendar,
+  };
 
-  for (const activity of activities) {
-    const parsed = parsePredecessors(activity.predecessors);
-    const resolved = parsed
-      .map((link) => ({
-        predId: refMap.get(link.predRef),
-        relType: link.relType,
-        lagDays: link.lagDays,
-      }))
-      .filter((link) => Boolean(link.predId) && link.predId !== activity.id);
+  return {
+    earlyStartDate: workingDayToDate(
+      projectStartDate,
+      update.earlyStart,
+      calendarOptions,
+    ),
+    earlyFinishDate: workingDayToDate(
+      projectStartDate,
+      update.earlyFinish,
+      calendarOptions,
+    ),
+    lateStartDate: workingDayToDate(
+      projectStartDate,
+      update.lateStart,
+      calendarOptions,
+    ),
+    lateFinishDate: workingDayToDate(
+      projectStartDate,
+      update.lateFinish,
+      calendarOptions,
+    ),
+  };
+}
 
-    predecessorLinks.set(activity.id, resolved);
+function calculateCpm(
+  activities,
+  { dependencies, strict = true, projectStartDate = null, projectCalendar = null } = {},
+) {
+  if (!activities.length) {
+    return {
+      updates: {},
+      sortedIds: [],
+      predecessorLinks: new Map(),
+      successors: new Map(),
+      forwardDrivers: new Map(),
+      backwardDrivers: new Map(),
+      projectEnd: 0,
+    };
   }
 
-  const byId = new Map(activities.map((a) => [a.id, a]));
+  const predecessorLinks = buildDependencyLinks(activities, dependencies, {
+    strict,
+  });
+  const byId = new Map(activities.map((activity) => [activity.id, activity]));
   const { sortedIds, successors } = topoSort(activities, predecessorLinks);
 
   const ES = {};
   const EF = {};
   const LS = {};
   const LF = {};
+  const forwardDrivers = new Map();
+  const backwardDrivers = new Map();
 
   for (const id of sortedIds) {
     const activity = byId.get(id);
@@ -114,23 +379,29 @@ function runCpm(activities) {
     const links = predecessorLinks.get(id) || [];
 
     let es = 0;
+    let driver = null;
     for (const link of links) {
       const predEs = ES[link.predId] ?? 0;
       const predEf = EF[link.predId] ?? 0;
+      let candidate = predEf + link.lagDays;
 
-      if (link.relType === 'FS') es = Math.max(es, predEf + link.lagDays);
-      else if (link.relType === 'SS') es = Math.max(es, predEs + link.lagDays);
-      else if (link.relType === 'FF') {
-        es = Math.max(es, predEf + link.lagDays - duration);
+      if (link.relType === 'SS') {
+        candidate = predEs + link.lagDays;
+      } else if (link.relType === 'FF') {
+        candidate = predEf + link.lagDays - duration;
       } else if (link.relType === 'SF') {
-        es = Math.max(es, predEs + link.lagDays - duration);
-      } else {
-        es = Math.max(es, predEf + link.lagDays);
+        candidate = predEs + link.lagDays - duration;
+      }
+
+      if (candidate >= es) {
+        es = candidate;
+        driver = { ...link, candidateStart: candidate };
       }
     }
 
     ES[id] = Math.max(0, Math.round(es));
     EF[id] = Math.max(0, Math.round(ES[id] + duration));
+    if (driver) forwardDrivers.set(id, driver);
   }
 
   const projectEnd = Math.max(...Object.values(EF), 0);
@@ -144,6 +415,7 @@ function runCpm(activities) {
     const succLinks = successors.get(id) || [];
 
     let lf = projectEnd;
+    let driver = null;
 
     if (succLinks.length > 0) {
       let minLf = Number.POSITIVE_INFINITY;
@@ -152,17 +424,19 @@ function runCpm(activities) {
         const succId = link.succId;
         const succLs = LS[succId] ?? projectEnd;
         const succLf = LF[succId] ?? projectEnd;
+        let candidate = succLs - link.lagDays;
 
-        if (link.relType === 'FS') {
-          minLf = Math.min(minLf, succLs - link.lagDays);
-        } else if (link.relType === 'SS') {
-          minLf = Math.min(minLf, succLs - link.lagDays + duration);
+        if (link.relType === 'SS') {
+          candidate = succLs - link.lagDays + duration;
         } else if (link.relType === 'FF') {
-          minLf = Math.min(minLf, succLf - link.lagDays);
+          candidate = succLf - link.lagDays;
         } else if (link.relType === 'SF') {
-          minLf = Math.min(minLf, succLf - link.lagDays + duration);
-        } else {
-          minLf = Math.min(minLf, succLs - link.lagDays);
+          candidate = succLf - link.lagDays + duration;
+        }
+
+        if (candidate <= minLf) {
+          minLf = candidate;
+          driver = { ...link, candidateLateFinish: candidate };
         }
       }
 
@@ -171,6 +445,7 @@ function runCpm(activities) {
 
     LF[id] = Math.max(0, Math.round(lf));
     LS[id] = Math.max(0, Math.round(LF[id] - duration));
+    if (driver) backwardDrivers.set(id, driver);
   }
 
   const updates = {};
@@ -184,30 +459,226 @@ function runCpm(activities) {
       totalFloat: tf,
       isCritical: tf <= 0,
     };
+    Object.assign(
+      updates[id],
+      buildCalendarDateFields(byId.get(id), updates[id], {
+        projectStartDate,
+        projectCalendar,
+      }),
+    );
   }
 
-  return updates;
+  return {
+    updates,
+    sortedIds,
+    predecessorLinks,
+    successors,
+    forwardDrivers,
+    backwardDrivers,
+    projectEnd,
+  };
 }
 
-async function applyCpmToProject(projectId) {
-  const activities = await prisma.activity.findMany({
-    where: { projectId },
-    orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }],
+function runCpm(activities, options = {}) {
+  return calculateCpm(activities, options).updates;
+}
+
+function driverText(link, byId, direction = 'from') {
+  if (!link) return null;
+  const other =
+    direction === 'to' ? byId.get(link.succId) : byId.get(link.predId);
+  const ref = getActivityDisplayRef(other) || other?.id || 'activity';
+  const lag =
+    link.lagDays === 0
+      ? ''
+      : link.lagDays > 0
+        ? `+${link.lagDays}d`
+        : `${link.lagDays}d`;
+  return `${link.relType}${lag} ${direction} ${ref}`;
+}
+
+function buildCriticalPathExplanation(activities, options = {}) {
+  const cpm = calculateCpm(activities, options);
+  const byId = new Map(
+    activities.map((activity) => [
+      activity.id,
+      { ...activity, ...(cpm.updates[activity.id] || {}) },
+    ]),
+  );
+
+  const criticalIds = cpm.sortedIds.filter((id) => {
+    const activity = byId.get(id);
+    return activity && !activity.isMilestone && cpm.updates[id]?.isCritical;
   });
+
+  const terminalId = criticalIds
+    .slice()
+    .sort(
+      (a, b) =>
+        (cpm.updates[b]?.earlyFinish || 0) - (cpm.updates[a]?.earlyFinish || 0),
+    )[0];
+
+  const reverseChain = [];
+  const seen = new Set();
+  let currentId = terminalId;
+
+  while (currentId && !seen.has(currentId)) {
+    seen.add(currentId);
+    const activity = byId.get(currentId);
+    const driver = cpm.forwardDrivers.get(currentId) || null;
+
+    reverseChain.push({
+      activityId: activity.id,
+      ref: getActivityDisplayRef(activity),
+      name: activity.name,
+      calendarId: activity.calendarId || null,
+      duration: activity.duration,
+      earlyStart: cpm.updates[currentId]?.earlyStart ?? activity.earlyStart,
+      earlyFinish: cpm.updates[currentId]?.earlyFinish ?? activity.earlyFinish,
+      lateStart: cpm.updates[currentId]?.lateStart ?? activity.lateStart,
+      lateFinish: cpm.updates[currentId]?.lateFinish ?? activity.lateFinish,
+      totalFloat: cpm.updates[currentId]?.totalFloat ?? activity.totalFloat,
+      driver: driver
+        ? {
+            predecessorId: driver.predId,
+            predecessorRef: getActivityDisplayRef(byId.get(driver.predId)),
+            relationshipType: driver.relType,
+            lagDays: driver.lagDays,
+            reason: driverText(driver, byId, 'from'),
+          }
+        : {
+            predecessorId: null,
+            predecessorRef: null,
+            relationshipType: null,
+            lagDays: 0,
+            reason: 'No driving predecessor',
+          },
+    });
+
+    if (!driver || !cpm.updates[driver.predId]?.isCritical) break;
+    currentId = driver.predId;
+  }
+
+  const floatDrivers = cpm.sortedIds
+    .filter((id) => {
+      const activity = byId.get(id);
+      return activity && !activity.isMilestone && !cpm.updates[id]?.isCritical;
+    })
+    .map((id) => {
+      const activity = byId.get(id);
+      const driver = cpm.backwardDrivers.get(id) || null;
+      return {
+        activityId: activity.id,
+        ref: getActivityDisplayRef(activity),
+        name: activity.name,
+        calendarId: activity.calendarId || null,
+        totalFloat: cpm.updates[id]?.totalFloat ?? activity.totalFloat,
+        driver: driver
+          ? {
+              successorId: driver.succId,
+              successorRef: getActivityDisplayRef(byId.get(driver.succId)),
+              relationshipType: driver.relType,
+              lagDays: driver.lagDays,
+              reason: driverText(driver, byId, 'to'),
+            }
+          : {
+              successorId: null,
+              successorRef: null,
+              relationshipType: null,
+              lagDays: 0,
+              reason: 'Project finish controls available float',
+            },
+      };
+    })
+    .sort((a, b) => Number(a.totalFloat || 0) - Number(b.totalFloat || 0))
+    .slice(0, 20);
+
+  return {
+    projectFinish: cpm.projectEnd,
+    criticalActivityCount: criticalIds.length,
+    dependencyCount: Array.from(cpm.predecessorLinks.values()).flat().length,
+    calendars: Array.from(
+      new Set(
+        activities
+          .map((activity) => activity.calendarId)
+          .filter((calendarId) => Boolean(calendarId)),
+      ),
+    ),
+    chain: reverseChain.reverse(),
+    floatDrivers,
+  };
+}
+
+function toPersistedCpmUpdate(data) {
+  const {
+    earlyStartDate,
+    earlyFinishDate,
+    lateStartDate: _lateStartDate,
+    lateFinishDate: _lateFinishDate,
+    ...persisted
+  } = data;
+
+  if (earlyStartDate) persisted.startDate = earlyStartDate;
+  if (earlyFinishDate) persisted.endDate = earlyFinishDate;
+
+  return persisted;
+}
+
+async function applyCpmToProject(projectId, db = prisma) {
+  const [project, activities, dependencies] = await Promise.all([
+    db.project.findUnique({
+      where: { id: projectId },
+      select: { startDate: true, projectCalendar: true },
+    }),
+    db.activity.findMany({
+      where: { projectId, isActive: true },
+      orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }],
+    }),
+    db.activityDependency.findMany({
+      where: {
+        projectId,
+        predecessor: { isActive: true },
+        successor: { isActive: true },
+      },
+      include: {
+        predecessor: {
+          select: {
+            id: true,
+            name: true,
+            wbsCode: true,
+            p6ActivityId: true,
+            sortOrder: true,
+          },
+        },
+      },
+      orderBy: [{ successorId: 'asc' }, { createdAt: 'asc' }],
+    }),
+  ]);
 
   if (!activities.length) {
     return { recalculated: 0, criticalActivities: 0 };
   }
 
-  const updates = runCpm(activities);
+  const updates = runCpm(activities, {
+    dependencies,
+    projectStartDate: project?.startDate || null,
+    projectCalendar: project?.projectCalendar || null,
+  });
   const entries = Object.entries(updates);
 
-  if (entries.length > 0) {
-    await prisma.$transaction(
+  if (entries.length > 0 && typeof db.$transaction === 'function') {
+    await db.$transaction(
       entries.map(([id, data]) =>
-        prisma.activity.update({ where: { id }, data }),
+        db.activity.update({ where: { id }, data: toPersistedCpmUpdate(data) }),
       ),
     );
+  } else {
+    for (const [id, data] of entries) {
+      await db.activity.update({
+        where: { id },
+        data: toPersistedCpmUpdate(data),
+      });
+    }
   }
 
   const criticalActivities = entries.filter(
@@ -219,6 +690,13 @@ async function applyCpmToProject(projectId) {
 
 module.exports = {
   parsePredecessors,
+  buildDependencyLinks,
+  calculateCpm,
   runCpm,
+  resolveCalendar,
+  isWorkingDate,
+  workingDayToDate,
+  dateToWorkingDay,
+  buildCriticalPathExplanation,
   applyCpmToProject,
 };

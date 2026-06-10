@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
+import { AuditHistoryPanel } from '@/features/audit/components/audit-history-panel'
 import type { ScheduleActivity } from '@/features/schedule/data/schema'
 import {
   type ChangeOrderRecord,
@@ -13,6 +14,39 @@ import { ChangeOrderForm } from './change-order-form'
 
 const fmtUSD = (value: number) =>
   '$' + Number(value || 0).toLocaleString('en-US', { maximumFractionDigits: 0 })
+
+const traceSummary = (order: ChangeOrderRecord) => {
+  const activityCount =
+    order.activityLinks?.length || (order.activityId || order.activity ? 1 : 0)
+  const allocationCount = order.allocationLinks?.length || 0
+  const evidenceCount =
+    (order.correspondenceLinks?.length || 0) +
+    (order.attachmentRefs?.length || 0)
+  const historyCount = order.approvalHistory?.length || 0
+  const criticalPathImpactDays =
+    order.activityLinks?.reduce(
+      (sum, link) => sum + (Number(link.criticalPathImpactDays) || 0),
+      0
+    ) || 0
+  const costImpact =
+    order.activityLinks?.reduce(
+      (sum, link) => sum + (Number(link.costImpact) || 0),
+      0
+    ) || 0
+  return {
+    activityCount,
+    allocationCount,
+    evidenceCount,
+    historyCount,
+    criticalPathImpactDays,
+    costImpact,
+  }
+}
+
+const approvalReady = (order: ChangeOrderRecord) => {
+  const trace = traceSummary(order)
+  return trace.activityCount > 0 && trace.evidenceCount > 0
+}
 
 function CoBadge({ status }: { status: string }) {
   const map: Record<string, string> = {
@@ -98,6 +132,13 @@ export function ChangeOrderRegister({
         </Button>
       </div>
 
+      <AuditHistoryPanel
+        projectId={projectId}
+        entityType='change_order'
+        title='Change Order Status History'
+        limit={10}
+      />
+
       <div className='overflow-x-auto rounded-md border'>
         <table className='w-full text-sm whitespace-nowrap'>
           <thead className='border-b bg-muted/50'>
@@ -112,13 +153,14 @@ export function ChangeOrderRegister({
               <th className='p-2 text-left font-medium'>Approved</th>
               <th className='p-2 text-left font-medium'>Raised By</th>
               <th className='p-2 text-right font-medium'>Actions</th>
+              <th className='p-2 text-left font-medium'>Trace</th>
             </tr>
           </thead>
           <tbody>
             {orders.length === 0 ? (
               <tr>
                 <td
-                  colSpan={10}
+                  colSpan={11}
                   className='p-6 text-center text-muted-foreground'
                 >
                   No change orders available.
@@ -171,24 +213,30 @@ export function ChangeOrderRegister({
                     <div className='flex justify-end gap-1'>
                       {order.status === 'pending' && (
                         <>
-                          <Button
-                            size='sm'
-                            variant='ghost'
-                            className='text-green-600 hover:text-green-700'
-                            onClick={async () => {
-                              try {
-                                await updateChangeOrder.mutateAsync({
-                                  changeOrderId: order.id,
-                                  payload: { status: 'approved' },
-                                })
-                                toast.success('Change order approved')
-                              } catch {
-                                toast.error('Failed to approve change order')
-                              }
-                            }}
-                          >
-                            Approve
-                          </Button>
+                          {approvalReady(order) ? (
+                            <Button
+                              size='sm'
+                              variant='ghost'
+                              className='text-green-600 hover:text-green-700'
+                              onClick={async () => {
+                                try {
+                                  await updateChangeOrder.mutateAsync({
+                                    changeOrderId: order.id,
+                                    payload: { status: 'approved' },
+                                  })
+                                  toast.success('Change order approved')
+                                } catch {
+                                  toast.error('Failed to approve change order')
+                                }
+                              }}
+                            >
+                              Approve
+                            </Button>
+                          ) : (
+                            <span className='self-center px-2 text-xs text-amber-600'>
+                              Needs proof
+                            </span>
+                          )}
                           <Button
                             size='sm'
                             variant='ghost'
@@ -246,6 +294,34 @@ export function ChangeOrderRegister({
                       >
                         Delete
                       </Button>
+                    </div>
+                  </td>
+                  <td className='p-2 text-xs'>
+                    <div className='flex flex-col gap-1'>
+                      <span className='max-w-44 truncate font-medium'>
+                        {order.activityLinks?.[0]?.activity?.name ||
+                          order.activity?.name ||
+                          'No activity'}
+                      </span>
+                      <span className='text-muted-foreground'>
+                        {traceSummary(order).activityCount} act ·{' '}
+                        {traceSummary(order).allocationCount} alloc ·{' '}
+                        {traceSummary(order).evidenceCount} docs ·{' '}
+                        {traceSummary(order).historyCount} events
+                      </span>
+                      <span className='text-muted-foreground'>
+                        CP {traceSummary(order).criticalPathImpactDays}d ·{' '}
+                        {fmtUSD(traceSummary(order).costImpact)} impact
+                      </span>
+                      <span
+                        className={
+                          approvalReady(order)
+                            ? 'text-green-600'
+                            : 'text-amber-600'
+                        }
+                      >
+                        {approvalReady(order) ? 'Approval ready' : 'Needs proof'}
+                      </span>
                     </div>
                   </td>
                 </tr>

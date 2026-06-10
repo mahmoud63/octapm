@@ -1,6 +1,7 @@
 const express = require('express');
 const { asyncHandler } = require('../utils/async-handler');
 const { authenticate } = require('../middleware/auth');
+const { requirePermission } = require('../middleware/rbac');
 const { generateProjectExport } = require('../services/export.service');
 
 const router = express.Router({ mergeParams: true });
@@ -9,6 +10,7 @@ router.use(authenticate);
 
 router.get(
   '/xlsx',
+  requirePermission('cost', 'export'),
   asyncHandler(async (req, res) => {
     const { workbook, filenameBase } = await generateProjectExport({
       projectId: req.params.projectId,

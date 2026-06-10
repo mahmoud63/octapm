@@ -1,7 +1,9 @@
 name: Deploy
 
 on:
-  push:
+  workflow_run:
+    workflows: [Quality Gates]
+    types: [completed]
     branches: [main]
 
 permissions:
@@ -9,13 +11,33 @@ permissions:
   contents: read
 
 jobs:
-  # ── Job 1: Build React SPA → S3 → CloudFront invalidation ──────
-  deploy-frontend:
-    name: Deploy Frontend
+  deployment-gate:
+    name: Confirm Quality Gates Passed
     runs-on: ubuntu-latest
 
     steps:
+      - name: Stop deployment when validation failed
+        if: ${{ github.event.workflow_run.conclusion != 'success' || github.event.workflow_run.event != 'push' }}
+        run: |
+          echo "::error::Deployments require a successful Quality Gates run from a push to main."
+          echo "Quality Gates conclusion: ${{ github.event.workflow_run.conclusion }}"
+          echo "Triggering event: ${{ github.event.workflow_run.event }}"
+          exit 1
+
+      - name: Confirm validated commit
+        run: |
+          echo "Deploying validated commit ${{ github.event.workflow_run.head_sha }}"
+
+  # Job 1: Build React SPA, sync S3, and invalidate CloudFront.
+  deploy-frontend:
+    name: Deploy Frontend
+    runs-on: ubuntu-latest
+    needs: deployment-gate
+
+    steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
 
       - uses: actions/setup-node@v4
         with:
@@ -55,11 +77,13 @@ jobs:
             --distribution-id ${{ secrets.CF_DISTRIBUTION_ID }} \
             --paths "/*"
 
-  # ── Job 2: SSH → git pull → npm ci → migrate → pm2 restart ─────
+  # Job 2: SSH, fetch the validated commit, install, migrate, and restart PM2.
   deploy-backend:
     name: Deploy Backend
     runs-on: ubuntu-latest
-    needs: deploy-frontend
+    needs:
+      - deployment-gate
+      - deploy-frontend
 
     steps:
       - name: Setup SSH key
@@ -71,6 +95,7 @@ jobs:
 
       - name: Deploy to EC2
         env:
+          DEPLOY_SHA: ${{ github.event.workflow_run.head_sha }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
           STRIPE_WEBHOOK_SECRET: ${{ secrets.STRIPE_WEBHOOK_SECRET }}
@@ -78,19 +103,59 @@ jobs:
           STRIPE_PRICE_INDIVIDUAL_ANNUAL: ${{ secrets.STRIPE_PRICE_INDIVIDUAL_ANNUAL }}
           STRIPE_PRICE_BUSINESS_MONTHLY: ${{ secrets.STRIPE_PRICE_BUSINESS_MONTHLY }}
           STRIPE_PRICE_BUSINESS_ANNUAL: ${{ secrets.STRIPE_PRICE_BUSINESS_ANNUAL }}
+          STRIPE_SECRET_ROTATION_CONFIRMED_AT: ${{ secrets.STRIPE_SECRET_ROTATION_CONFIRMED_AT }}
+          STRIPE_SECRET_ROTATION_TICKET: ${{ secrets.STRIPE_SECRET_ROTATION_TICKET }}
+          FRONTEND_URL: https://octapm.com
+          CORS_ALLOWED_ORIGINS: https://octapm.com
         run: |
-          ssh -i ~/.ssh/deploy_key ec2-user@${{ secrets.EC2_HOST }} "GH_TOKEN='${GH_TOKEN}' STRIPE_SECRET_KEY='${STRIPE_SECRET_KEY}' STRIPE_WEBHOOK_SECRET='${STRIPE_WEBHOOK_SECRET}' STRIPE_PRICE_INDIVIDUAL_MONTHLY='${STRIPE_PRICE_INDIVIDUAL_MONTHLY}' STRIPE_PRICE_INDIVIDUAL_ANNUAL='${STRIPE_PRICE_INDIVIDUAL_ANNUAL}' STRIPE_PRICE_BUSINESS_MONTHLY='${STRIPE_PRICE_BUSINESS_MONTHLY}' STRIPE_PRICE_BUSINESS_ANNUAL='${STRIPE_PRICE_BUSINESS_ANNUAL}' bash" << 'SSHEOF'
+          REMOTE_SECRET_ENV="/tmp/pmcopilots-deploy-secrets.env"
+
+          write_secret_env() {
+            local name="$1"
+            printf '%s=%q\n' "$name" "${!name}"
+          }
+
+          {
+            write_secret_env GH_TOKEN
+            write_secret_env STRIPE_SECRET_KEY
+            write_secret_env STRIPE_WEBHOOK_SECRET
+            write_secret_env STRIPE_PRICE_INDIVIDUAL_MONTHLY
+            write_secret_env STRIPE_PRICE_INDIVIDUAL_ANNUAL
+            write_secret_env STRIPE_PRICE_BUSINESS_MONTHLY
+            write_secret_env STRIPE_PRICE_BUSINESS_ANNUAL
+            write_secret_env STRIPE_SECRET_ROTATION_CONFIRMED_AT
+            write_secret_env STRIPE_SECRET_ROTATION_TICKET
+            write_secret_env FRONTEND_URL
+            write_secret_env CORS_ALLOWED_ORIGINS
+          } | ssh -i ~/.ssh/deploy_key ec2-user@${{ secrets.EC2_HOST }} "umask 077 && cat > '$REMOTE_SECRET_ENV'"
+
+          ssh -i ~/.ssh/deploy_key ec2-user@${{ secrets.EC2_HOST }} "DEPLOY_SHA='${DEPLOY_SHA}' REMOTE_SECRET_ENV='${REMOTE_SECRET_ENV}' bash" << 'SSHEOF'
             set -euo pipefail
+            : "${REMOTE_SECRET_ENV:?}"
+            trap 'rm -f "$REMOTE_SECRET_ENV"' EXIT
+
+            if [ ! -f "$REMOTE_SECRET_ENV" ]; then
+              echo "::error::Deployment secret env file was not received"
+              exit 1
+            fi
+
+            set -a
+            . "$REMOTE_SECRET_ENV"
+            set +a
+
             APP_DIR="/opt/pmcopilots"
 
             if [ ! -d "$APP_DIR/.git" ]; then
               sudo git clone https://x-access-token:$GH_TOKEN@github.com/mahmoud63/octapm.git "$APP_DIR"
               sudo chown -R ec2-user:ec2-user "$APP_DIR"
+              cd "$APP_DIR"
             else
               cd "$APP_DIR"
               git remote set-url origin https://x-access-token:$GH_TOKEN@github.com/mahmoud63/octapm.git
-              git pull origin main
             fi
+
+            git fetch origin main
+            git checkout --force "$DEPLOY_SHA"
 
             cd "$APP_DIR/backend"
             npm ci --omit=dev
@@ -102,11 +167,33 @@ jobs:
             JWT=$(echo "$SECRET_JSON" | python3 -c "import sys,json; print(json.load(sys.stdin)['JWT_SECRET'])")
             JWT_R=$(echo "$SECRET_JSON" | python3 -c "import sys,json; print(json.load(sys.stdin)['JWT_REFRESH_SECRET'])")
             ANT=$(echo "$SECRET_JSON" | python3 -c "import sys,json; print(json.load(sys.stdin)['ANTHROPIC_API_KEY'])")
-            
-            printf 'NODE_ENV=production\nPORT=5000\nDATABASE_URL=postgresql://pmcopilots:%s@pmcopilots-db.cp8mue6qskud.us-east-2.rds.amazonaws.com:5432/pmcopilots\nJWT_SECRET=%s\nJWT_REFRESH_SECRET=%s\nANTHROPIC_API_KEY=%s\nSTRIPE_SECRET_KEY=%s\nSTRIPE_WEBHOOK_SECRET=%s\nSTRIPE_PRICE_INDIVIDUAL_MONTHLY=%s\nSTRIPE_PRICE_INDIVIDUAL_ANNUAL=%s\nSTRIPE_PRICE_BUSINESS_MONTHLY=%s\nSTRIPE_PRICE_BUSINESS_ANNUAL=%s\nAWS_REGION=us-east-2\nS3_UPLOADS_BUCKET=pmcopilots-uploads-prod\n' "$DB_PASS" "$JWT" "$JWT_R" "$ANT" "$STRIPE_SECRET_KEY" "$STRIPE_WEBHOOK_SECRET" "$STRIPE_PRICE_INDIVIDUAL_MONTHLY" "$STRIPE_PRICE_INDIVIDUAL_ANNUAL" "$STRIPE_PRICE_BUSINESS_MONTHLY" "$STRIPE_PRICE_BUSINESS_ANNUAL" > .env
+            CF_ORIGIN_SECRET=$(echo "$SECRET_JSON" | python3 -c "import sys,json; print(json.load(sys.stdin)['CLOUDFRONT_SHARED_SECRET'])")
+
+            require_secret() {
+              local name="$1"
+              local value="${!name:-}"
+              if [ -z "$value" ]; then
+                echo "::error::$name is required for production deployment"
+                exit 1
+              fi
+            }
+
+            for required in DB_PASS JWT JWT_R ANT CF_ORIGIN_SECRET STRIPE_SECRET_KEY STRIPE_WEBHOOK_SECRET STRIPE_PRICE_INDIVIDUAL_MONTHLY STRIPE_PRICE_INDIVIDUAL_ANNUAL STRIPE_PRICE_BUSINESS_MONTHLY STRIPE_PRICE_BUSINESS_ANNUAL STRIPE_SECRET_ROTATION_CONFIRMED_AT STRIPE_SECRET_ROTATION_TICKET FRONTEND_URL CORS_ALLOWED_ORIGINS; do
+              require_secret "$required"
+            done
+
+            if [ "$JWT" = "$JWT_R" ] || [ "$JWT" = "$CF_ORIGIN_SECRET" ] || [ "$JWT_R" = "$CF_ORIGIN_SECRET" ]; then
+              echo "::error::Production shared secrets must be distinct"
+              exit 1
+            fi
+
+            printf 'NODE_ENV=production\nPORT=5000\nDATABASE_URL=postgresql://pmcopilots:%s@pmcopilots-db.cp8mue6qskud.us-east-2.rds.amazonaws.com:5432/pmcopilots\nJWT_SECRET=%s\nJWT_REFRESH_SECRET=%s\nANTHROPIC_API_KEY=%s\nSTRIPE_SECRET_KEY=%s\nSTRIPE_WEBHOOK_SECRET=%s\nSTRIPE_PRICE_INDIVIDUAL_MONTHLY=%s\nSTRIPE_PRICE_INDIVIDUAL_ANNUAL=%s\nSTRIPE_PRICE_BUSINESS_MONTHLY=%s\nSTRIPE_PRICE_BUSINESS_ANNUAL=%s\nSTRIPE_SECRET_ROTATION_CONFIRMED_AT=%s\nSTRIPE_SECRET_ROTATION_TICKET=%s\nFRONTEND_URL=%s\nCORS_ALLOWED_ORIGINS=%s\nCLOUDFRONT_SHARED_SECRET=%s\nAWS_REGION=us-east-2\nS3_UPLOADS_BUCKET=pmcopilots-uploads-prod\n' "$DB_PASS" "$JWT" "$JWT_R" "$ANT" "$STRIPE_SECRET_KEY" "$STRIPE_WEBHOOK_SECRET" "$STRIPE_PRICE_INDIVIDUAL_MONTHLY" "$STRIPE_PRICE_INDIVIDUAL_ANNUAL" "$STRIPE_PRICE_BUSINESS_MONTHLY" "$STRIPE_PRICE_BUSINESS_ANNUAL" "$STRIPE_SECRET_ROTATION_CONFIRMED_AT" "$STRIPE_SECRET_ROTATION_TICKET" "$FRONTEND_URL" "$CORS_ALLOWED_ORIGINS" "$CF_ORIGIN_SECRET" > .env
+
+            node -r dotenv/config -e "require('./src/config/security').validateProductionEnv()"
 
             npx prisma migrate deploy
-            
-            pm2 restart pmcopilots-api || pm2 start src/index.js --name pmcopilots-api
+
+            pm2 restart pmcopilots-api --update-env || pm2 start src/index.js --name pmcopilots-api
+            SMOKE_BASE_URL=http://127.0.0.1:5000 SMOKE_CLOUDFRONT_SECRET="$CF_ORIGIN_SECRET" SMOKE_STRIPE_WEBHOOK_SECRET="$STRIPE_WEBHOOK_SECRET" npm run smoke:deploy
             pm2 save
           SSHEOF

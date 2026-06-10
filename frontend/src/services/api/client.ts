@@ -28,11 +28,13 @@ let isRefreshing = false
 const authlessClient = axios.create({
   baseURL: API_BASE_URL,
   timeout: 15000,
+  withCredentials: true,
 })
 
 export const apiClient = axios.create({
   baseURL: API_BASE_URL,
   timeout: 15000,
+  withCredentials: true,
 })
 
 const flushPendingRequests = (error: unknown, token?: string) => {
@@ -71,18 +73,14 @@ apiClient.interceptors.response.use(
     const isAuthRequest =
       requestUrl.includes('/auth/login') ||
       requestUrl.includes('/auth/register') ||
-      requestUrl.includes('/auth/refresh')
+      requestUrl.includes('/auth/refresh') ||
+      requestUrl.includes('/auth/logout')
 
     if (originalRequest._retry || isAuthRequest) {
       return Promise.reject(error)
     }
 
     const { auth } = useAuthStore.getState()
-    if (!auth.refreshToken) {
-      auth.reset()
-      return Promise.reject(error)
-    }
-
     if (isRefreshing) {
       return new Promise((resolve, reject) => {
         pendingRequests.push({
@@ -102,16 +100,10 @@ apiClient.interceptors.response.use(
     try {
       const refreshResponse = await authlessClient.post<
         ApiSuccess<AuthSession>
-      >('/auth/refresh', {
-        refreshToken: auth.refreshToken,
-      })
+      >('/auth/refresh')
 
       const session = refreshResponse.data.data
-      auth.setSession(
-        session.user,
-        session.tokens.accessToken,
-        session.tokens.refreshToken
-      )
+      auth.setSession(session.user, session.tokens.accessToken)
 
       flushPendingRequests(null, session.tokens.accessToken)
 

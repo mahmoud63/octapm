@@ -16,10 +16,12 @@ model Organisation {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  users           User[]
-  projects        Project[]
-  subscription    Subscription?
-  enterpriseLeads EnterpriseLead[]
+  users            User[]
+  refreshSessions  RefreshSession[]
+  projects         Project[]
+  projectDocuments ProjectDocument[]
+  subscription     Subscription?
+  enterpriseLeads  EnterpriseLead[]
 }
 
 model User {
@@ -38,7 +40,9 @@ model User {
   org                 Organisation         @relation(fields: [orgId], references: [id])
   projectAssignments  ProjectAssignment[]
   activityAssignments ActivityAssignment[]
+  refreshSessions     RefreshSession[]
   dailyReports        DailyReport[]
+  siteDiaries         SiteDiary[]
 
   @@index([orgId])
   @@index([email])
@@ -46,59 +50,104 @@ model User {
 
 // ─── Projects ───
 model Project {
-  id                   String    @id @default(uuid())
-  orgId                String
-  name                 String
-  type                 String?
-  location             String?
-  startDate            DateTime?
-  endDate              DateTime?
-  completionDate       DateTime?
-  duration             Int?
-  durationUnit         String    @default("months")
-  contractValue        Float?
-  ldRatePerDay         Float     @default(0)
-  weatherAllowanceDays Int       @default(20)
-  currency             String    @default("USD")
-  status               String    @default("active")
-  createdAt            DateTime  @default(now())
-  updatedAt            DateTime  @updatedAt
+  id                    String    @id @default(uuid())
+  orgId                 String
+  name                  String
+  type                  String?
+  location              String?
+  clientName            String?
+  consultantName        String?
+  contractorName        String?
+  contractType          String?
+  contractNumber        String?
+  startDate             DateTime?
+  endDate               DateTime?
+  completionDate        DateTime?
+  baselineDate          DateTime?
+  revisedCompletionDate DateTime?
+  duration              Int?
+  durationUnit          String    @default("months")
+  contractValue         Decimal?  @db.Decimal(18, 2)
+  defaultRetentionRate  Float?
+  ldRatePerDay          Decimal   @default(0) @db.Decimal(18, 2)
+  weatherAllowanceDays  Int       @default(20)
+  projectCalendar       String?
+  reportingCutoffDay    Int?
+  currency              String    @default("USD")
+  status                String    @default("active")
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
 
-  org                 Organisation         @relation(fields: [orgId], references: [id])
-  assignments         ProjectAssignment[]
-  boqItems            BoqItem[]
-  boqActivities       BoqActivity[]
-  activities          Activity[]
-  scheduleRevisions   ScheduleRevision[]
-  costRecords         CostRecord[]
-  burnRateEntries     BurnRateEntry[]
-  risks               Risk[]
-  longLeadItems       LongLeadItem[]
-  changeOrders        ChangeOrder[]
-  ipcItems            IpcItem[]
-  ipcCertificates     IpcCertificate[]
-  subValuations       SubValuation[]
-  budgetRevisions     BudgetRevision[]
-  cashFlowEntries     CashFlowEntry[]
-  eotClaims           EotClaim[]
-  weatherDelays       WeatherDelay[]
-  procurementOrders   ProcurementOrder[]
-  materialMaster      MaterialMaster[]
-  equipment           Equipment[]
-  itpRecords          ItpRecord[]
-  ncrRecords          NcrRecord[]
-  defectRecords       DefectRecord[]
-  safetyIncidents     SafetyIncident[]
-  materialTests       MaterialTest[]
-  rfis                Rfi[]
-  submittals          Submittal[]
-  drawingRecords      DrawingRecord[]
-  transmittals        Transmittal[]
-  correspondences     Correspondence[]
-  dailyReports        DailyReport[]
-  siteDiary           SiteDiary[]
-  weeklyReports       WeeklyReport[]
-  resourceAllocations ResourceAllocation[]
+  org                           Organisation                   @relation(fields: [orgId], references: [id])
+  assignments                   ProjectAssignment[]
+  boqRevisions                  BoqRevision[]
+  boqItems                      BoqItem[]
+  boqActivities                 BoqActivity[]
+  activityBoqAllocations        ActivityBoqAllocation[]
+  activities                    Activity[]
+  activityDependencies          ActivityDependency[]
+  scheduleRevisions             ScheduleRevision[]
+  costRecords                   CostRecord[]
+  burnRateEntries               BurnRateEntry[]
+  risks                         Risk[]
+  longLeadItems                 LongLeadItem[]
+  procurementSuppliers          ProcurementSupplier[]
+  procurementPackages           ProcurementPackage[]
+  procurementPoLines            ProcurementPoLine[]
+  deliveryReceipts              DeliveryReceipt[]
+  deliveryReceiptLines          DeliveryReceiptLine[]
+  activityMaterialUsages        ActivityMaterialUsage[]
+  procurementLeadTimeAlerts     ProcurementLeadTimeAlert[]
+  changeOrders                  ChangeOrder[]
+  changeOrderActivityLinks      ChangeOrderActivityLink[]
+  changeOrderAllocationLinks    ChangeOrderAllocationLink[]
+  ipcItems                      IpcItem[]
+  ipcItemProgressLinks          IpcItemProgressLink[]
+  ipcCertificates               IpcCertificate[]
+  ipcInvoices                   IpcInvoice[]
+  ipcPayments                   IpcPayment[]
+  ipcRetentionReleases          IpcRetentionRelease[]
+  subValuations                 SubValuation[]
+  subValuationActivityLinks     SubValuationActivityLink[]
+  subValuationAllocationLinks   SubValuationAllocationLink[]
+  budgetRevisions               BudgetRevision[]
+  reportingPeriods              ReportingPeriod[]
+  activityCostLoadings          ActivityCostLoading[]
+  evPeriodSnapshots             EvPeriodSnapshot[]
+  activityProgressMethods       ActivityProgressMethod[]
+  progressSubmissions           ProgressSubmission[]
+  cashFlowEntries               CashFlowEntry[]
+  eotClaims                     EotClaim[]
+  eotClaimActivityLinks         EotClaimActivityLink[]
+  eotClaimWeatherDelayLinks     EotClaimWeatherDelayLink[]
+  weatherDelays                 WeatherDelay[]
+  weatherDelayActivityLinks     WeatherDelayActivityLink[]
+  procurementOrders             ProcurementOrder[]
+  materialMaster                MaterialMaster[]
+  equipment                     Equipment[]
+  itpRecords                    ItpRecord[]
+  ncrRecords                    NcrRecord[]
+  defectRecords                 DefectRecord[]
+  safetyIncidents               SafetyIncident[]
+  materialTests                 MaterialTest[]
+  rfis                          Rfi[]
+  submittals                    Submittal[]
+  drawingRecords                DrawingRecord[]
+  transmittals                  Transmittal[]
+  correspondences               Correspondence[]
+  workflowAttachments           WorkflowAttachment[]
+  workflowStatusHistory         WorkflowStatusHistory[]
+  approvalWorkflowEvents        ApprovalWorkflowEvent[]
+  workflowActivityLinks         WorkflowActivityLink[]
+  documentRevisions             DocumentRevision[]
+  projectDocuments              ProjectDocument[]
+  commercialCorrespondenceLinks CommercialCorrespondenceLink[]
+  commercialAttachmentRefs      CommercialAttachmentRef[]
+  dailyReports                  DailyReport[]
+  siteDiary                     SiteDiary[]
+  weeklyReports                 WeeklyReport[]
+  resourceAllocations           ResourceAllocation[]
+  activityMaterials             ActivityMaterial[]
 
   @@index([orgId])
 }
@@ -113,6 +162,85 @@ model ProjectAssignment {
   user    User    @relation(fields: [userId], references: [id])
 
   @@unique([projectId, userId])
+  @@index([userId, projectId])
+}
+
+model RefreshSession {
+  id                  String    @id @default(uuid())
+  userId              String
+  orgId               String
+  tokenHash           String    @unique
+  userAgent           String?
+  ipAddress           String?
+  expiresAt           DateTime
+  revokedAt           DateTime?
+  replacedBySessionId String?
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  user User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  org  Organisation @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([orgId])
+  @@index([orgId, userId])
+  @@index([expiresAt])
+  @@index([revokedAt])
+}
+
+model AuditEvent {
+  id              String   @id @default(uuid())
+  orgId           String
+  projectId       String
+  entityType      String
+  entityId        String
+  action          String
+  actorId         String?
+  actorRole       String?
+  occurredAt      DateTime @default(now())
+  oldStatus       String?
+  newStatus       String?
+  reason          String?
+  oldSummaryJson  Json?
+  newSummaryJson  Json?
+  summaryJson     Json     @default("{}")
+  attachmentsJson Json     @default("[]")
+  metadataJson    Json     @default("{}")
+  createdAt       DateTime @default(now())
+
+  @@index([orgId])
+  @@index([projectId])
+  @@index([orgId, projectId, occurredAt])
+  @@index([projectId, entityType, entityId, occurredAt])
+  @@index([entityType, entityId])
+}
+
+model RecordHistorySnapshot {
+  id                   String   @id @default(uuid())
+  orgId                String
+  projectId            String
+  entityType           String
+  entityId             String
+  action               String
+  actorId              String?
+  actorRole            String?
+  auditEventId         String?
+  occurredAt           DateTime @default(now())
+  oldStatus            String?
+  newStatus            String?
+  reason               String?
+  previousSnapshotJson Json?
+  snapshotJson         Json     @default("{}")
+  changeSetJson        Json     @default("{}")
+  metadataJson         Json     @default("{}")
+  createdAt            DateTime @default(now())
+
+  @@unique([auditEventId])
+  @@index([orgId])
+  @@index([projectId])
+  @@index([orgId, projectId, occurredAt])
+  @@index([projectId, entityType, entityId, occurredAt])
+  @@index([entityType, entityId])
 }
 
 model ActivityAssignment {
@@ -130,58 +258,153 @@ model ActivityAssignment {
 
 // ─── BOQ ───
 model BoqItem {
-  id          String   @id @default(uuid())
-  projectId   String
-  code        String?  // e.g. "1.1", "2.3" — BOQ item code
-  ref         String?  // legacy field kept for IPC compatibility
-  description String
-  unit        String?
-  qty         Float    @default(0)
-  rate        Float    @default(0)
-  amount      Float    @default(0)
-  section     String?
-  isManual    Boolean  @default(false)
-  sortOrder   Int      @default(0)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id                     String    @id @default(uuid())
+  projectId              String
+  revisionId             String?
+  code                   String? // e.g. "1.1", "2.3" — BOQ item code
+  ref                    String? // legacy field kept for IPC compatibility
+  description            String
+  unit                   String?
+  qty                    Float     @default(0)
+  rate                   Decimal   @default(0) @db.Decimal(18, 2)
+  amount                 Decimal   @default(0) @db.Decimal(18, 2)
+  section                String?
+  isManual               Boolean   @default(false)
+  isActive               Boolean   @default(true)
+  baselineLocked         Boolean   @default(false)
+  supersededAt           DateTime?
+  supersededByRevisionId String?
+  supersededReason       String?
+  sortOrder              Int       @default(0)
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @updatedAt
 
-  project       Project       @relation(fields: [projectId], references: [id])
-  ipcItems      IpcItem[]
-  boqActivities BoqActivity[]
+  project                 Project                      @relation(fields: [projectId], references: [id])
+  boqRevision             BoqRevision?                 @relation(fields: [revisionId], references: [id], onDelete: SetNull)
+  ipcItems                IpcItem[]
+  boqActivities           BoqActivity[]
+  activityBoqAllocations  ActivityBoqAllocation[]
+  changeOrderAllocations  ChangeOrderAllocationLink[]
+  subValuationAllocations SubValuationAllocationLink[]
 
   @@index([projectId])
+  @@index([projectId, isActive])
+  @@index([projectId, code])
+  @@index([revisionId])
+}
+
+model BoqRevision {
+  id               String    @id @default(uuid())
+  projectId        String
+  revisionNumber   Int
+  label            String?
+  source           String    @default("upload")
+  status           String    @default("imported") // imported, comparison_only, baselined, superseded
+  baselineLocked   Boolean   @default(false)
+  lockedBy         String?
+  lockedAt         DateTime?
+  itemCount        Int       @default(0)
+  addedCount       Int       @default(0)
+  updatedCount     Int       @default(0)
+  removedCount     Int       @default(0)
+  unchangedCount   Int       @default(0)
+  blockedCount     Int       @default(0)
+  totalAmount      Decimal   @default(0) @db.Decimal(18, 2)
+  importedRowsJson Json      @default("[]")
+  compareJson      Json      @default("{}")
+  createdBy        String?
+  sourceDocumentId String?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  project        Project          @relation(fields: [projectId], references: [id])
+  sourceDocument ProjectDocument? @relation(fields: [sourceDocumentId], references: [id], onDelete: SetNull)
+  boqItems       BoqItem[]
+
+  @@unique([projectId, revisionNumber])
+  @@index([projectId])
+  @@index([projectId, status])
+  @@index([projectId, baselineLocked])
+  @@index([sourceDocumentId])
+}
+
+model ProjectDocument {
+  id                 String    @id @default(uuid())
+  orgId              String
+  projectId          String
+  documentType       String
+  linkedEntityType   String?
+  linkedEntityId     String?
+  originalName       String
+  fileName           String
+  mimeType           String
+  sizeBytes          Int
+  sha256             String
+  storageProvider    String
+  bucket             String?
+  objectKey          String
+  storageKey         String    @unique
+  storageVersionId   String?
+  scanStatus         String    @default("clean")
+  scannedAt          DateTime?
+  status             String    @default("available")
+  retentionPolicy    String?
+  retentionExpiresAt DateTime?
+  uploadedBy         String?
+  uploadedAt         DateTime  @default(now())
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  org                      Organisation              @relation(fields: [orgId], references: [id])
+  project                  Project                   @relation(fields: [projectId], references: [id])
+  boqRevisions             BoqRevision[]
+  commercialAttachmentRefs CommercialAttachmentRef[]
+
+  @@index([orgId])
+  @@index([projectId])
+  @@index([orgId, projectId, documentType])
+  @@index([projectId, linkedEntityType, linkedEntityId])
+  @@index([storageProvider, bucket])
+  @@index([retentionExpiresAt])
 }
 
 model BoqActivity {
-  id              String   @id @default(uuid())
-  boqItemId       String
-  projectId       String
-  activityCode    String
-  activityName    String
-  unit            String?
-  quantity        Float    @default(0)
-  rate            Float    @default(0)
-  budget          Float    @default(0)
-  dependencyType  String?  // FS, SS, null
-  predecessorCode String?  // activityCode of predecessor
-  isManual        Boolean  @default(false)
-  sortOrder       Int      @default(0)
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  id                 String    @id @default(uuid())
+  boqItemId          String
+  projectId          String
+  activityCode       String
+  activityName       String
+  unit               String?
+  quantity           Float     @default(0)
+  rate               Decimal   @default(0) @db.Decimal(18, 2)
+  budget             Decimal   @default(0) @db.Decimal(18, 2)
+  dependencyType     String? // FS, SS, null
+  predecessorCode    String? // activityCode of predecessor
+  isManual           Boolean   @default(false)
+  status             String    @default("draft_suggestion") // draft_suggestion, accepted, rejected
+  acceptedActivityId String?
+  acceptedAt         DateTime?
+  acceptedBy         String?
+  sortOrder          Int       @default(0)
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
 
-  boqItem BoqItem @relation(fields: [boqItemId], references: [id], onDelete: Cascade)
-  project Project @relation(fields: [projectId], references: [id])
+  boqItem          BoqItem   @relation(fields: [boqItemId], references: [id], onDelete: Cascade)
+  project          Project   @relation(fields: [projectId], references: [id])
+  acceptedActivity Activity? @relation(fields: [acceptedActivityId], references: [id], onDelete: SetNull)
 
+  @@unique([projectId, activityCode])
   @@index([boqItemId])
   @@index([projectId])
-  @@index([projectId, activityCode])
+  @@index([projectId, status])
+  @@index([acceptedActivityId])
 }
 
 model ExtraServicesConfig {
-  id         String  @id @default(uuid())
+  id         String @id @default(uuid())
   label      String
-  percentage Float   @default(0)
-  sortOrder  Int     @default(0)
+  percentage Float  @default(0)
+  sortOrder  Int    @default(0)
 }
 
 // ─── Activities (THE CORE — everything links here) ───
@@ -206,71 +429,270 @@ model Activity {
   lateStart         Int?
   lateFinish        Int?
   totalFloat        Int?
-  budget            Float     @default(0)
+  budget            Decimal   @default(0) @db.Decimal(18, 2)
   isMilestone       Boolean   @default(false)
   isCritical        Boolean   @default(false)
   predecessors      String? // comma-separated: "ACT-01 FS, ACT-02 SS+2"
   batchId           String? // for chunked generation: B1, B2, etc.
+  isActive          Boolean   @default(true)
+  retiredAt         DateTime?
+  retiredBy         String?
+  retiredReason     String?
+  retiredRevisionId String?
   sortOrder         Int       @default(0)
   createdAt         DateTime  @default(now())
   updatedAt         DateTime  @updatedAt
 
-  project             Project              @relation(fields: [projectId], references: [id])
-  progress            ActivityProgress[]
-  costRecords         CostRecord[]
-  longLeadItems       LongLeadItem[]
-  changeOrders        ChangeOrder[]
-  itpRecords          ItpRecord[]
-  procurementOrders   ProcurementOrder[]
-  ncrRecords          NcrRecord[]
-  defectRecords       DefectRecord[]
-  safetyIncidents     SafetyIncident[]
-  materialTests       MaterialTest[]
-  rfis                Rfi[]
-  submittals          Submittal[]
-  drawingRecords      DrawingRecord[]
-  correspondences     Correspondence[]
-  dailyReports        DailyReport[]
-  assignments         ActivityAssignment[]
-  materials           ActivityMaterial[]
-  activityEquipment   ActivityEquipment[]
-  resourceAllocations ResourceAllocation[]
+  project                Project                    @relation(fields: [projectId], references: [id])
+  progress               ActivityProgress[]
+  costRecords            CostRecord[]
+  longLeadItems          LongLeadItem[]
+  procurementPackages    ProcurementPackage[]
+  changeOrders           ChangeOrder[]
+  changeOrderLinks       ChangeOrderActivityLink[]
+  itpRecords             ItpRecord[]
+  procurementOrders      ProcurementOrder[]
+  procurementPoLines     ProcurementPoLine[]
+  deliveryReceiptLines   DeliveryReceiptLine[]
+  materialUsages         ActivityMaterialUsage[]
+  leadTimeAlerts         ProcurementLeadTimeAlert[]
+  ncrRecords             NcrRecord[]
+  defectRecords          DefectRecord[]
+  safetyIncidents        SafetyIncident[]
+  materialTests          MaterialTest[]
+  rfis                   Rfi[]
+  submittals             Submittal[]
+  drawingRecords         DrawingRecord[]
+  correspondences        Correspondence[]
+  workflowLinks          WorkflowActivityLink[]
+  dailyReports           DailyReport[]
+  assignments            ActivityAssignment[]
+  materials              ActivityMaterial[]
+  activityEquipment      ActivityEquipment[]
+  resourceAllocations    ResourceAllocation[]
+  boqActivitySuggestions BoqActivity[]
+  boqAllocations         ActivityBoqAllocation[]
+  costLoadings           ActivityCostLoading[]
+  progressMethod         ActivityProgressMethod?
+  progressSubmissions    ProgressSubmission[]
+  ipcProgressLinks       IpcItemProgressLink[]
+  subValuationLinks      SubValuationActivityLink[]
+  eotClaimLinks          EotClaimActivityLink[]
+  weatherDelayLinks      WeatherDelayActivityLink[]
+  predecessorLinks       ActivityDependency[]       @relation("ActivityDependencySuccessor")
+  successorLinks         ActivityDependency[]       @relation("ActivityDependencyPredecessor")
 
   @@index([projectId])
+  @@index([projectId, isActive])
+  @@index([projectId, isActive, sortOrder])
+  @@index([projectId, isActive, category])
   @@index([projectId, isCritical])
   @@index([projectId, p6ActivityId])
+  @@index([projectId, wbsCode])
+}
+
+model ActivityDependency {
+  id                     String   @id @default(uuid())
+  projectId              String
+  predecessorId          String
+  successorId            String
+  relationshipType       String   @default("FS") // FS, SS, FF, SF
+  lagDays                Int      @default(0) // negative values represent lead
+  source                 String   @default("manual") // manual, import, ai, migration
+  importSource           String?
+  externalPredecessorRef String?
+  externalSuccessorRef   String?
+  importMetadata         Json?
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+
+  project     Project  @relation(fields: [projectId], references: [id])
+  predecessor Activity @relation("ActivityDependencyPredecessor", fields: [predecessorId], references: [id], onDelete: Cascade)
+  successor   Activity @relation("ActivityDependencySuccessor", fields: [successorId], references: [id], onDelete: Cascade)
+
+  @@unique([projectId, predecessorId, successorId])
+  @@index([projectId])
+  @@index([predecessorId])
+  @@index([successorId])
+  @@index([projectId, successorId])
+}
+
+model ActivityBoqAllocation {
+  id             String    @id @default(uuid())
+  projectId      String
+  boqItemId      String
+  activityId     String
+  quantity       Float     @default(0)
+  amount         Decimal   @default(0) @db.Decimal(18, 2)
+  weight         Float     @default(0)
+  source         String    @default("manual") // manual, import, ai, migration
+  status         String    @default("draft") // draft, submitted, approved, rejected
+  isActive       Boolean   @default(true)
+  notes          String?
+  submittedBy    String?
+  submittedAt    DateTime?
+  approvedBy     String?
+  approvedAt     DateTime?
+  rejectedBy     String?
+  rejectedAt     DateTime?
+  rejectedReason String?
+  createdBy      String?
+  updatedBy      String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  project           Project                      @relation(fields: [projectId], references: [id])
+  boqItem           BoqItem                      @relation(fields: [boqItemId], references: [id], onDelete: Cascade)
+  activity          Activity                     @relation(fields: [activityId], references: [id], onDelete: Cascade)
+  ipcItems          IpcItem[]
+  changeOrderLinks  ChangeOrderAllocationLink[]
+  ipcProgressLinks  IpcItemProgressLink[]
+  subValuationLinks SubValuationAllocationLink[]
+
+  @@index([projectId])
+  @@index([boqItemId])
+  @@index([activityId])
+  @@index([projectId, status])
 }
 
 model ActivityProgress {
-  id           String    @id @default(uuid())
-  activityId   String
-  pctComplete  Float     @default(0)
-  actualCost   Float?
-  actualStart  DateTime?
-  actualFinish DateTime?
-  notes        String?
-  updatedBy    String?
-  updatedAt    DateTime  @default(now())
+  id                    String    @id @default(uuid())
+  activityId            String
+  submissionId          String?   @unique
+  pctComplete           Float     @default(0)
+  actualCost            Decimal?  @db.Decimal(18, 2)
+  actualStart           DateTime?
+  actualFinish          DateTime?
+  progressMethod        String    @default("percent_complete")
+  source                String    @default("manual")
+  quantityComplete      Float?
+  quantityPlanned       Float?
+  quantityUnit          String?
+  milestoneProgressJson Json?
+  inspectionStatus      String?
+  evidenceJson          Json?
+  status                String    @default("approved")
+  approvedBy            String?
+  approvedAt            DateTime?
+  notes                 String?
+  updatedBy             String?
+  updatedAt             DateTime  @default(now())
 
-  activity Activity @relation(fields: [activityId], references: [id])
+  activity   Activity              @relation(fields: [activityId], references: [id])
+  submission ProgressSubmission?   @relation(fields: [submissionId], references: [id], onDelete: SetNull)
+  ipcLinks   IpcItemProgressLink[]
 
   @@index([activityId])
+  @@index([activityId, status, updatedAt])
+}
+
+model ActivityProgressMethod {
+  id                   String   @id @default(uuid())
+  projectId            String
+  activityId           String   @unique
+  method               String   @default("percent")
+  plannedQuantity      Float?
+  quantityUnit         String?
+  milestoneWeightsJson Json?
+  inspectionRequired   Boolean  @default(false)
+  evidenceRequired     Boolean  @default(false)
+  notes                String?
+  createdBy            String?
+  updatedBy            String?
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  project  Project  @relation(fields: [projectId], references: [id])
+  activity Activity @relation(fields: [activityId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+  @@index([projectId, method])
+}
+
+model ProgressSubmission {
+  id                    String    @id @default(uuid())
+  projectId             String
+  activityId            String
+  dailyReportId         String?
+  method                String    @default("percent")
+  source                String    @default("manual")
+  pctComplete           Float     @default(0)
+  quantityComplete      Float?
+  quantityPlanned       Float?
+  quantityUnit          String?
+  milestoneProgressJson Json?
+  inspectionStatus      String?
+  actualCost            Decimal?  @db.Decimal(18, 2)
+  actualStart           DateTime?
+  actualFinish          DateTime?
+  notes                 String?
+  evidenceJson          Json?
+  status                String    @default("submitted") // draft, submitted, approved, rejected
+  submittedBy           String?
+  submittedAt           DateTime?
+  reviewedBy            String?
+  reviewedAt            DateTime?
+  rejectionReason       String?
+  createdBy             String?
+  updatedBy             String?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  project          Project           @relation(fields: [projectId], references: [id])
+  activity         Activity          @relation(fields: [activityId], references: [id], onDelete: Cascade)
+  dailyReport      DailyReport?      @relation(fields: [dailyReportId], references: [id], onDelete: SetNull)
+  approvedProgress ActivityProgress?
+
+  @@index([projectId])
+  @@index([activityId])
+  @@index([projectId, status])
+  @@index([dailyReportId])
 }
 
 // ─── Schedule Revisions ───
 model ScheduleRevision {
-  id            String   @id @default(uuid())
-  projectId     String
-  label         String?
-  activityCount Int      @default(0)
-  criticalCount Int      @default(0)
-  totalBudget   Float    @default(0)
-  snapshotJson  Json?
-  createdAt     DateTime @default(now())
+  id                       String    @id @default(uuid())
+  projectId                String
+  label                    String?
+  activityCount            Int       @default(0)
+  criticalCount            Int       @default(0)
+  totalBudget              Decimal   @default(0) @db.Decimal(18, 2)
+  snapshotJson             Json?
+  source                   String?
+  isActive                 Boolean   @default(false)
+  status                   String    @default("draft") // draft, under_review, approved, rejected, baselined, superseded
+  submittedBy              String?
+  submittedAt              DateTime?
+  reviewComment            String?
+  approvedBy               String?
+  approvedAt               DateTime?
+  approvalComment          String?
+  rejectedBy               String?
+  rejectedAt               DateTime?
+  rejectionReason          String?
+  baselinedBy              String?
+  baselinedAt              DateTime?
+  baselineComment          String?
+  supersededBy             String?
+  supersededAt             DateTime?
+  activatedBy              String?
+  activatedAt              DateTime?
+  activationComment        String?
+  previousActiveRevisionId String?
+  rolledBackBy             String?
+  rolledBackAt             DateTime?
+  rollbackReason           String?
+  mappingJson              Json?
+  activationAuditJson      Json?
+  readinessJson            Json?
+  statusTransitionLog      Json      @default("[]")
+  createdAt                DateTime  @default(now())
 
   project Project @relation(fields: [projectId], references: [id])
 
   @@index([projectId])
+  @@index([projectId, status])
+  @@index([projectId, isActive])
 }
 
 model WeeklyReport {
@@ -303,98 +725,386 @@ model WeeklyReport {
 
 // ─── Cost Control ───
 model CostRecord {
-  id          String   @id @default(uuid())
-  activityId  String
-  projectId   String
-  labour      Float    @default(0)
-  material    Float    @default(0)
-  equipment   Float    @default(0)
-  subcontract Float    @default(0)
-  indirect    Float    @default(0)
-  overhead    Float    @default(0)
-  contingency Float    @default(0)
-  budget      Float    @default(0)
-  committed   Float    @default(0)
-  actual      Float    @default(0)
-  forecast    Float    @default(0)
-  updatedAt   DateTime @default(now()) @updatedAt
+  id                String    @id @default(uuid())
+  activityId        String
+  projectId         String
+  labour            Decimal   @default(0) @db.Decimal(18, 2)
+  material          Decimal   @default(0) @db.Decimal(18, 2)
+  equipment         Decimal   @default(0) @db.Decimal(18, 2)
+  subcontract       Decimal   @default(0) @db.Decimal(18, 2)
+  indirect          Decimal   @default(0) @db.Decimal(18, 2)
+  overhead          Decimal   @default(0) @db.Decimal(18, 2)
+  contingency       Decimal   @default(0) @db.Decimal(18, 2)
+  budget            Decimal   @default(0) @db.Decimal(18, 2)
+  committed         Decimal   @default(0) @db.Decimal(18, 2)
+  actual            Decimal   @default(0) @db.Decimal(18, 2)
+  actualThroughDate DateTime?
+  forecast          Decimal   @default(0) @db.Decimal(18, 2)
+  updatedAt         DateTime  @default(now()) @updatedAt
 
   activity Activity @relation(fields: [activityId], references: [id])
   project  Project  @relation(fields: [projectId], references: [id])
 
   @@index([activityId])
   @@index([projectId])
+  @@index([projectId, updatedAt])
+  @@index([projectId, actualThroughDate])
+  @@index([projectId, actual])
+  @@index([projectId, forecast])
+}
+
+model ReportingPeriod {
+  id          String    @id @default(uuid())
+  projectId   String
+  code        String
+  label       String?
+  periodStart DateTime
+  periodEnd   DateTime
+  cutoffDate  DateTime
+  status      String    @default("open") // open, locked
+  lockedBy    String?
+  lockedAt    DateTime?
+  createdBy   String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  project      Project               @relation(fields: [projectId], references: [id])
+  costLoadings ActivityCostLoading[]
+  evSnapshot   EvPeriodSnapshot?
+
+  @@unique([projectId, code])
+  @@index([projectId])
+  @@index([projectId, cutoffDate])
+  @@index([projectId, status])
+}
+
+model ActivityCostLoading {
+  id                String    @id @default(uuid())
+  projectId         String
+  activityId        String
+  reportingPeriodId String?
+  plannedDate       DateTime
+  plannedValue      Decimal   @default(0) @db.Decimal(18, 2)
+  source            String    @default("manual") // manual, import, ai, migration, budget_revision
+  baselineVersion   String?
+  status            String    @default("draft") // draft, submitted, approved, rejected, superseded
+  notes             String?
+  submittedBy       String?
+  submittedAt       DateTime?
+  approvedBy        String?
+  approvedAt        DateTime?
+  rejectedBy        String?
+  rejectedAt        DateTime?
+  rejectedReason    String?
+  createdBy         String?
+  updatedBy         String?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  project         Project          @relation(fields: [projectId], references: [id])
+  activity        Activity         @relation(fields: [activityId], references: [id], onDelete: Cascade)
+  reportingPeriod ReportingPeriod? @relation(fields: [reportingPeriodId], references: [id])
+
+  @@index([projectId])
+  @@index([activityId])
+  @@index([reportingPeriodId])
+  @@index([projectId, status, plannedDate])
+}
+
+model EvPeriodSnapshot {
+  id                    String   @id @default(uuid())
+  projectId             String
+  reportingPeriodId     String   @unique
+  cutoffDate            DateTime
+  formulaVersion        String   @default("ev.v2")
+  totalBudget           Decimal  @default(0) @db.Decimal(18, 2)
+  pv                    Decimal  @default(0) @db.Decimal(18, 2)
+  ev                    Decimal  @default(0) @db.Decimal(18, 2)
+  ac                    Decimal  @default(0) @db.Decimal(18, 2)
+  spi                   Float?
+  cpi                   Float?
+  eac                   Decimal? @db.Decimal(18, 2)
+  sv                    Decimal  @default(0) @db.Decimal(18, 2)
+  cv                    Decimal  @default(0) @db.Decimal(18, 2)
+  etc                   Decimal? @db.Decimal(18, 2)
+  basisJson             Json     @default("{}")
+  sCurveJson            Json     @default("[]")
+  activityBreakdownJson Json     @default("[]")
+  lockedBy              String?
+  lockedAt              DateTime @default(now())
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  project         Project         @relation(fields: [projectId], references: [id])
+  reportingPeriod ReportingPeriod @relation(fields: [reportingPeriodId], references: [id])
+
+  @@index([projectId])
+  @@index([cutoffDate])
 }
 
 // ─── Commercial ───
 model ChangeOrder {
-  id             String    @id @default(uuid())
-  projectId      String
-  activityId     String?
-  ref            String
-  description    String
-  category       String?
-  value          Float     @default(0)
-  status         String    @default("pending") // pending, approved, rejected
-  scheduleImpact Int       @default(0)
-  submittedDate  DateTime?
-  approvedDate   DateTime?
-  rejectedReason String?
-  raisedBy       String?
-  createdAt      DateTime  @default(now())
-  updatedAt      DateTime  @updatedAt
+  id              String    @id @default(uuid())
+  projectId       String
+  activityId      String?
+  ref             String
+  description     String
+  category        String?
+  value           Decimal   @default(0) @db.Decimal(18, 2)
+  status          String    @default("pending") // pending, approved, rejected
+  scheduleImpact  Int       @default(0)
+  submittedDate   DateTime?
+  approvedDate    DateTime?
+  rejectedReason  String?
+  raisedBy        String?
+  createdBy       String?
+  updatedBy       String?
+  approvedBy      String?
+  approvedAt      DateTime?
+  approvalComment String?
+  rejectedBy      String?
+  rejectedAt      DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
 
-  project  Project   @relation(fields: [projectId], references: [id])
-  activity Activity? @relation(fields: [activityId], references: [id], onDelete: SetNull)
+  project         Project                     @relation(fields: [projectId], references: [id])
+  activity        Activity?                   @relation(fields: [activityId], references: [id], onDelete: SetNull)
+  activityLinks   ChangeOrderActivityLink[]
+  allocationLinks ChangeOrderAllocationLink[]
 
   @@index([projectId])
+}
+
+model ChangeOrderActivityLink {
+  id                         String    @id @default(uuid())
+  projectId                  String
+  changeOrderId              String
+  activityId                 String
+  relationType               String    @default("affected") // affected, scope, delay, cost
+  scheduleImpactDays         Int       @default(0)
+  floatImpactDays            Int       @default(0)
+  criticalPathImpact         Boolean   @default(false)
+  criticalPathImpactDays     Int       @default(0)
+  costImpact                 Decimal   @default(0) @db.Decimal(18, 2)
+  approvedScheduleImpactDays Int       @default(0)
+  approvedCostImpact         Decimal   @default(0) @db.Decimal(18, 2)
+  baselineStart              DateTime?
+  baselineFinish             DateTime?
+  impactedStart              DateTime?
+  impactedFinish             DateTime?
+  impactBasis                String?
+  cpmSnapshotJson            Json      @default("{}")
+  notes                      String?
+  createdAt                  DateTime  @default(now())
+  updatedAt                  DateTime  @updatedAt
+
+  project     Project     @relation(fields: [projectId], references: [id])
+  changeOrder ChangeOrder @relation(fields: [changeOrderId], references: [id], onDelete: Cascade)
+  activity    Activity    @relation(fields: [activityId], references: [id], onDelete: Cascade)
+
+  @@unique([changeOrderId, activityId, relationType])
+  @@index([projectId])
+  @@index([activityId])
+  @@index([projectId, changeOrderId])
+}
+
+model ChangeOrderAllocationLink {
+  id            String   @id @default(uuid())
+  projectId     String
+  changeOrderId String
+  allocationId  String?
+  boqItemId     String?
+  quantity      Float    @default(0)
+  amount        Decimal  @default(0) @db.Decimal(18, 2)
+  notes         String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  project     Project                @relation(fields: [projectId], references: [id])
+  changeOrder ChangeOrder            @relation(fields: [changeOrderId], references: [id], onDelete: Cascade)
+  allocation  ActivityBoqAllocation? @relation(fields: [allocationId], references: [id], onDelete: SetNull)
+  boqItem     BoqItem?               @relation(fields: [boqItemId], references: [id], onDelete: SetNull)
+
+  @@unique([changeOrderId, allocationId])
+  @@index([projectId])
+  @@index([allocationId])
+  @@index([boqItemId])
+  @@index([projectId, changeOrderId])
 }
 
 model IpcItem {
   id               String    @id @default(uuid())
   projectId        String
   boqItemId        String
+  allocationId     String?
   ipcCertificateId String?
   ipcPeriod        String    @default("IPC-1")
   qty              Float     @default(0)
-  rate             Float     @default(0)
-  previousCert     Float     @default(0)
-  currentCert      Float     @default(0)
-  cumulativeCert   Float     @default(0)
+  rate             Decimal   @default(0) @db.Decimal(18, 2)
+  previousCert     Decimal   @default(0) @db.Decimal(18, 2)
+  currentCert      Decimal   @default(0) @db.Decimal(18, 2)
+  cumulativeCert   Decimal   @default(0) @db.Decimal(18, 2)
   retentionRate    Float     @default(5)
-  retention        Float     @default(0)
-  netPayable       Float     @default(0)
+  retention        Decimal   @default(0) @db.Decimal(18, 2)
+  netPayable       Decimal   @default(0) @db.Decimal(18, 2)
   status           String    @default("draft") // draft, submitted, certified, paid
   certDate         DateTime?
   updatedAt        DateTime  @updatedAt
 
-  project        Project         @relation(fields: [projectId], references: [id])
-  boqItem        BoqItem         @relation(fields: [boqItemId], references: [id])
-  ipcCertificate IpcCertificate? @relation(fields: [ipcCertificateId], references: [id])
+  project        Project                @relation(fields: [projectId], references: [id])
+  boqItem        BoqItem                @relation(fields: [boqItemId], references: [id])
+  allocation     ActivityBoqAllocation? @relation(fields: [allocationId], references: [id], onDelete: SetNull)
+  ipcCertificate IpcCertificate?        @relation(fields: [ipcCertificateId], references: [id])
+  progressLinks  IpcItemProgressLink[]
 
   @@index([projectId])
+  @@index([allocationId])
   @@index([ipcCertificateId])
 }
 
-model IpcCertificate {
-  id          String    @id @default(uuid())
-  projectId   String
-  period      String
-  issueDate   DateTime?
-  dueDate     DateTime?
-  totalCert   Float     @default(0)
-  totalRet    Float     @default(0)
-  netPayable  Float     @default(0)
-  status      String    @default("draft") // draft, submitted, certified, paid
-  submittedBy String?
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+model IpcItemProgressLink {
+  id                       String    @id @default(uuid())
+  projectId                String
+  ipcItemId                String
+  allocationId             String?
+  activityId               String?
+  progressId               String?
+  approvedPctComplete      Float     @default(0)
+  approvedQuantityComplete Float?
+  certifiedQuantity        Float     @default(0)
+  certifiedAmount          Decimal   @default(0) @db.Decimal(18, 2)
+  previousCertifiedAmount  Decimal   @default(0) @db.Decimal(18, 2)
+  cutoffDate               DateTime?
+  createdAt                DateTime  @default(now())
+  updatedAt                DateTime  @updatedAt
 
-  project Project   @relation(fields: [projectId], references: [id])
-  items   IpcItem[]
+  project    Project                @relation(fields: [projectId], references: [id])
+  ipcItem    IpcItem                @relation(fields: [ipcItemId], references: [id], onDelete: Cascade)
+  allocation ActivityBoqAllocation? @relation(fields: [allocationId], references: [id], onDelete: SetNull)
+  activity   Activity?              @relation(fields: [activityId], references: [id], onDelete: SetNull)
+  progress   ActivityProgress?      @relation(fields: [progressId], references: [id], onDelete: SetNull)
+
+  @@unique([ipcItemId, progressId])
+  @@index([projectId])
+  @@index([allocationId])
+  @@index([activityId])
+  @@index([progressId])
+}
+
+model IpcCertificate {
+  id                   String    @id @default(uuid())
+  projectId            String
+  period               String
+  issueDate            DateTime?
+  dueDate              DateTime?
+  totalCert            Decimal   @default(0) @db.Decimal(18, 2)
+  totalRet             Decimal   @default(0) @db.Decimal(18, 2)
+  netPayable           Decimal   @default(0) @db.Decimal(18, 2)
+  status               String    @default("draft") // draft, submitted, certified, paid
+  invoiceStatus        String    @default("not_issued") // not_issued, issued, void
+  paymentStatus        String    @default("unpaid") // unpaid, partially_paid, paid
+  retentionStatus      String    @default("held") // held, partially_released, released
+  amountPaid           Decimal   @default(0) @db.Decimal(18, 2)
+  retentionReleased    Decimal   @default(0) @db.Decimal(18, 2)
+  balanceDue           Decimal   @default(0) @db.Decimal(18, 2)
+  submittedBy          String?
+  submittedAt          DateTime?
+  certifiedBy          String?
+  certifiedAt          DateTime?
+  certificationComment String?
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+
+  project           Project               @relation(fields: [projectId], references: [id])
+  items             IpcItem[]
+  invoices          IpcInvoice[]
+  payments          IpcPayment[]
+  retentionReleases IpcRetentionRelease[]
 
   @@unique([projectId, period])
   @@index([projectId])
+  @@index([projectId, invoiceStatus])
+  @@index([projectId, paymentStatus])
+}
+
+model IpcInvoice {
+  id                String    @id @default(uuid())
+  projectId         String
+  ipcCertificateId  String
+  invoiceNumber     String
+  invoiceDate       DateTime  @default(now())
+  dueDate           DateTime?
+  grossAmount       Decimal   @default(0) @db.Decimal(18, 2)
+  retentionHeld     Decimal   @default(0) @db.Decimal(18, 2)
+  retentionReleased Decimal   @default(0) @db.Decimal(18, 2)
+  netAmount         Decimal   @default(0) @db.Decimal(18, 2)
+  amountPaid        Decimal   @default(0) @db.Decimal(18, 2)
+  balanceDue        Decimal   @default(0) @db.Decimal(18, 2)
+  status            String    @default("issued") // issued, partially_paid, paid, void
+  issuedBy          String?
+  issuedAt          DateTime  @default(now())
+  voidedBy          String?
+  voidedAt          DateTime?
+  voidReason        String?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  project        Project        @relation(fields: [projectId], references: [id])
+  ipcCertificate IpcCertificate @relation(fields: [ipcCertificateId], references: [id], onDelete: Cascade)
+  payments       IpcPayment[]
+
+  @@unique([projectId, invoiceNumber])
+  @@unique([ipcCertificateId])
+  @@index([projectId])
+  @@index([projectId, status])
+}
+
+model IpcPayment {
+  id               String   @id @default(uuid())
+  projectId        String
+  ipcCertificateId String
+  invoiceId        String?
+  paymentReference String
+  paymentDate      DateTime
+  amount           Decimal  @default(0) @db.Decimal(18, 2)
+  paymentMethod    String?
+  notes            String?
+  receivedBy       String?
+  receivedAt       DateTime @default(now())
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  project        Project        @relation(fields: [projectId], references: [id])
+  ipcCertificate IpcCertificate @relation(fields: [ipcCertificateId], references: [id], onDelete: Cascade)
+  invoice        IpcInvoice?    @relation(fields: [invoiceId], references: [id], onDelete: SetNull)
+
+  @@unique([projectId, paymentReference])
+  @@index([projectId])
+  @@index([ipcCertificateId])
+  @@index([invoiceId])
+  @@index([projectId, paymentDate])
+}
+
+model IpcRetentionRelease {
+  id               String   @id @default(uuid())
+  projectId        String
+  ipcCertificateId String
+  releaseReference String
+  releaseDate      DateTime @default(now())
+  amount           Decimal  @default(0) @db.Decimal(18, 2)
+  reason           String?
+  releasedBy       String?
+  releasedAt       DateTime @default(now())
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  project        Project        @relation(fields: [projectId], references: [id])
+  ipcCertificate IpcCertificate @relation(fields: [ipcCertificateId], references: [id], onDelete: Cascade)
+
+  @@unique([projectId, releaseReference])
+  @@index([projectId])
+  @@index([ipcCertificateId])
+  @@index([projectId, releaseDate])
 }
 
 model Risk {
@@ -418,30 +1128,39 @@ model Risk {
 }
 
 model LongLeadItem {
-  id          String   @id @default(uuid())
-  projectId   String
-  activityId  String?
-  item        String
-  leadWeeks   Int      @default(0)
-  orderBy     String?
-  criticality String?
-  risk        String?
-  status      String   @default("not_ordered") // not_ordered, ordered, delivered
-  supplier    String?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id                   String    @id @default(uuid())
+  projectId            String
+  activityId           String?
+  item                 String
+  leadWeeks            Int       @default(0)
+  requiredTiming       String    @default("activity_start") // activity_start, activity_finish
+  needOffsetDays       Int       @default(0)
+  bufferDays           Int       @default(14)
+  orderBy              String?
+  expectedDeliveryDate DateTime?
+  deliveredAt          DateTime?
+  warehouseStatus      String    @default("not_received") // not_received, partial, received, issued
+  criticality          String?
+  risk                 String?
+  status               String    @default("not_ordered") // not_ordered, ordered, delivered
+  supplier             String?
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
 
   project  Project   @relation(fields: [projectId], references: [id])
   activity Activity? @relation(fields: [activityId], references: [id], onDelete: SetNull)
 
   @@index([projectId])
+  @@index([activityId])
+  @@index([projectId, status])
+  @@index([projectId, warehouseStatus])
 }
 
 model BurnRateEntry {
   id        String   @id @default(uuid())
   projectId String
   date      DateTime
-  amount    Float    @default(0)
+  amount    Decimal  @default(0) @db.Decimal(18, 2)
   category  String?
   note      String?
 
@@ -457,13 +1176,13 @@ model SubValuation {
   ref             String
   subcontractor   String
   period          String
-  workDone        Float     @default(0)
-  materialsOnSite Float     @default(0)
-  grossPayable    Float     @default(0)
+  workDone        Decimal   @default(0) @db.Decimal(18, 2)
+  materialsOnSite Decimal   @default(0) @db.Decimal(18, 2)
+  grossPayable    Decimal   @default(0) @db.Decimal(18, 2)
   retentionRate   Float     @default(5)
-  retention       Float     @default(0)
-  backCharges     Float     @default(0)
-  netPayable      Float     @default(0)
+  retention       Decimal   @default(0) @db.Decimal(18, 2)
+  backCharges     Decimal   @default(0) @db.Decimal(18, 2)
+  netPayable      Decimal   @default(0) @db.Decimal(18, 2)
   status          String    @default("draft")
   submittedDate   DateTime?
   certDate        DateTime?
@@ -471,10 +1190,60 @@ model SubValuation {
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
 
-  project Project @relation(fields: [projectId], references: [id])
+  project         Project                      @relation(fields: [projectId], references: [id])
+  activityLinks   SubValuationActivityLink[]
+  allocationLinks SubValuationAllocationLink[]
 
   @@unique([projectId, ref])
   @@index([projectId])
+}
+
+model SubValuationActivityLink {
+  id             String   @id @default(uuid())
+  projectId      String
+  subValuationId String
+  activityId     String
+  relationType   String   @default("work_scope") // work_scope, material, backcharge
+  quantity       Float    @default(0)
+  amount         Decimal  @default(0) @db.Decimal(18, 2)
+  notes          String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  project      Project      @relation(fields: [projectId], references: [id])
+  subValuation SubValuation @relation(fields: [subValuationId], references: [id], onDelete: Cascade)
+  activity     Activity     @relation(fields: [activityId], references: [id], onDelete: Cascade)
+
+  @@unique([subValuationId, activityId, relationType])
+  @@index([projectId])
+  @@index([activityId])
+  @@index([projectId, subValuationId])
+}
+
+model SubValuationAllocationLink {
+  id                    String   @id @default(uuid())
+  projectId             String
+  subValuationId        String
+  allocationId          String?
+  boqItemId             String?
+  quantity              Float    @default(0)
+  workDoneAmount        Decimal  @default(0) @db.Decimal(18, 2)
+  materialsOnSiteAmount Decimal  @default(0) @db.Decimal(18, 2)
+  retentionAmount       Decimal  @default(0) @db.Decimal(18, 2)
+  notes                 String?
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  project      Project                @relation(fields: [projectId], references: [id])
+  subValuation SubValuation           @relation(fields: [subValuationId], references: [id], onDelete: Cascade)
+  allocation   ActivityBoqAllocation? @relation(fields: [allocationId], references: [id], onDelete: SetNull)
+  boqItem      BoqItem?               @relation(fields: [boqItemId], references: [id], onDelete: SetNull)
+
+  @@unique([subValuationId, allocationId])
+  @@index([projectId])
+  @@index([allocationId])
+  @@index([boqItemId])
+  @@index([projectId, subValuationId])
 }
 
 model BudgetRevision {
@@ -483,10 +1252,13 @@ model BudgetRevision {
   ref               String
   title             String
   changeType        String    @default("addition") // addition, deduction
-  amount            Float     @default(0)
+  amount            Decimal   @default(0) @db.Decimal(18, 2)
   linkedChangeOrder String?
   effectiveDate     DateTime?
-  cumulativeBudget  Float     @default(0)
+  cumulativeBudget  Decimal   @default(0) @db.Decimal(18, 2)
+  status            String    @default("approved") // draft, submitted, approved, rejected
+  approvedBy        String?
+  approvedAt        DateTime?
   notes             String?
   createdAt         DateTime  @default(now())
   updatedAt         DateTime  @updatedAt
@@ -495,14 +1267,15 @@ model BudgetRevision {
 
   @@unique([projectId, ref])
   @@index([projectId])
+  @@index([projectId, status, effectiveDate])
 }
 
 model CashFlowEntry {
   id        String   @id @default(uuid())
   projectId String
   period    String // YYYY-MM
-  inflow    Float    @default(0)
-  outflow   Float    @default(0)
+  inflow    Decimal  @default(0) @db.Decimal(18, 2)
+  outflow   Decimal  @default(0) @db.Decimal(18, 2)
   note      String?
   source    String   @default("manual") // manual, system
   createdAt DateTime @default(now())
@@ -521,8 +1294,8 @@ model EotClaim {
   eventType          String?
   delayDays          Int      @default(0)
   eotDaysGranted     Int      @default(0)
-  ldRatePerDay       Float    @default(0)
-  ldLiability        Float    @default(0)
+  ldRatePerDay       Decimal  @default(0) @db.Decimal(18, 2)
+  ldLiability        Decimal  @default(0) @db.Decimal(18, 2)
   affectedActivities Json?
   analysis           String?
   claimLetter        String?
@@ -530,10 +1303,67 @@ model EotClaim {
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt
 
-  project Project @relation(fields: [projectId], references: [id])
+  project           Project                    @relation(fields: [projectId], references: [id])
+  activityLinks     EotClaimActivityLink[]
+  weatherDelayLinks EotClaimWeatherDelayLink[]
 
   @@unique([projectId, ref])
   @@index([projectId])
+}
+
+model EotClaimActivityLink {
+  id                     String    @id @default(uuid())
+  projectId              String
+  eotClaimId             String
+  activityId             String
+  delayStart             DateTime?
+  delayEnd               DateTime?
+  delayDays              Int       @default(0)
+  floatDays              Int       @default(0)
+  isCritical             Boolean   @default(false)
+  criticalPathImpactDays Int       @default(0)
+  approvedEotDays        Int       @default(0)
+  ldExposure             Decimal   @default(0) @db.Decimal(18, 2)
+  baselineStart          DateTime?
+  baselineFinish         DateTime?
+  impactedStart          DateTime?
+  impactedFinish         DateTime?
+  impactBasis            String?
+  cpmSnapshotJson        Json      @default("{}")
+  notes                  String?
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @updatedAt
+
+  project  Project  @relation(fields: [projectId], references: [id])
+  eotClaim EotClaim @relation(fields: [eotClaimId], references: [id], onDelete: Cascade)
+  activity Activity @relation(fields: [activityId], references: [id], onDelete: Cascade)
+
+  @@unique([eotClaimId, activityId])
+  @@index([projectId])
+  @@index([activityId])
+  @@index([projectId, eotClaimId])
+}
+
+model EotClaimWeatherDelayLink {
+  id             String    @id @default(uuid())
+  projectId      String
+  eotClaimId     String
+  weatherDelayId String
+  delayStart     DateTime?
+  delayEnd       DateTime?
+  delayDays      Int       @default(0)
+  notes          String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  project      Project      @relation(fields: [projectId], references: [id])
+  eotClaim     EotClaim     @relation(fields: [eotClaimId], references: [id], onDelete: Cascade)
+  weatherDelay WeatherDelay @relation(fields: [weatherDelayId], references: [id], onDelete: Cascade)
+
+  @@unique([eotClaimId, weatherDelayId])
+  @@index([projectId])
+  @@index([weatherDelayId])
+  @@index([projectId, eotClaimId])
 }
 
 model WeatherDelay {
@@ -547,46 +1377,291 @@ model WeatherDelay {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  project Project @relation(fields: [projectId], references: [id])
+  project       Project                    @relation(fields: [projectId], references: [id])
+  activityLinks WeatherDelayActivityLink[]
+  eotClaimLinks EotClaimWeatherDelayLink[]
 
   @@index([projectId])
 }
 
 // ─── Procurement ───
-model ProcurementOrder {
-  id           String    @id @default(uuid())
-  projectId    String
-  activityId   String?
-  ref          String
-  item         String
-  supplier     String?
-  status       String    @default("planned")
-  leadWeeks    Int       @default(0)
-  value        Float     @default(0)
-  deliveryDate DateTime?
+model WeatherDelayActivityLink {
+  id             String    @id @default(uuid())
+  projectId      String
+  weatherDelayId String
+  activityId     String
+  delayStart     DateTime?
+  delayEnd       DateTime?
+  delayDays      Int       @default(0)
+  floatDays      Int       @default(0)
+  isCritical     Boolean   @default(false)
+  notes          String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
 
-  project  Project   @relation(fields: [projectId], references: [id])
-  activity Activity? @relation(fields: [activityId], references: [id])
+  project      Project      @relation(fields: [projectId], references: [id])
+  weatherDelay WeatherDelay @relation(fields: [weatherDelayId], references: [id], onDelete: Cascade)
+  activity     Activity     @relation(fields: [activityId], references: [id], onDelete: Cascade)
+
+  @@unique([weatherDelayId, activityId])
+  @@index([projectId])
+  @@index([activityId])
+  @@index([projectId, weatherDelayId])
+}
+
+model ProcurementSupplier {
+  id                  String   @id @default(uuid())
+  projectId           String
+  code                String?
+  name                String
+  contactName         String?
+  email               String?
+  phone               String?
+  address             String?
+  tradeCategories     Json     @default("[]")
+  status              String   @default("approved") // approved, pending, on_hold, blocked
+  leadTimeReliability Float?
+  notes               String?
+  createdBy           String?
+  updatedBy           String?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  project           Project              @relation(fields: [projectId], references: [id])
+  packages          ProcurementPackage[]
+  orders            ProcurementOrder[]
+  poLines           ProcurementPoLine[]
+  deliveryReceipts  DeliveryReceipt[]
+  materialMaster    MaterialMaster[]
+  activityMaterials ActivityMaterial[]
+
+  @@unique([projectId, name])
+  @@index([projectId])
+  @@index([projectId, status])
+}
+
+model ProcurementPackage {
+  id                 String    @id @default(uuid())
+  projectId          String
+  supplierId         String?
+  activityId         String?
+  packageNumber      String
+  title              String
+  description        String?
+  status             String    @default("planning") // planning, tendering, awarded, in_delivery, closed, cancelled
+  buyer              String?
+  plannedAwardDate   DateTime?
+  requiredOnSiteDate DateTime?
+  leadWeeks          Int       @default(0)
+  bufferDays         Int       @default(14)
+  notes              String?
+  createdBy          String?
+  updatedBy          String?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  project           Project                    @relation(fields: [projectId], references: [id])
+  supplier          ProcurementSupplier?       @relation(fields: [supplierId], references: [id], onDelete: SetNull)
+  activity          Activity?                  @relation(fields: [activityId], references: [id], onDelete: SetNull)
+  orders            ProcurementOrder[]
+  poLines           ProcurementPoLine[]
+  deliveryReceipts  DeliveryReceipt[]
+  activityMaterials ActivityMaterial[]
+  leadTimeAlerts    ProcurementLeadTimeAlert[]
+
+  @@unique([projectId, packageNumber])
+  @@index([projectId])
+  @@index([supplierId])
+  @@index([activityId])
+  @@index([projectId, status])
+}
+
+model ProcurementOrder {
+  id              String    @id @default(uuid())
+  projectId       String
+  activityId      String?
+  packageId       String?
+  supplierId      String?
+  ref             String
+  item            String
+  supplier        String?
+  status          String    @default("planned") // planned, draft, issued, partial, received, closed, cancelled
+  leadWeeks       Int       @default(0)
+  requiredTiming  String    @default("activity_start") // activity_start, activity_finish
+  needOffsetDays  Int       @default(0)
+  bufferDays      Int       @default(14)
+  value           Decimal   @default(0) @db.Decimal(18, 2)
+  currency        String    @default("USD")
+  orderDate       DateTime?
+  requiredBy      DateTime?
+  promisedDate    DateTime?
+  deliveryDate    DateTime?
+  warehouseStatus String    @default("not_received") // not_received, partial, received, issued
+  receivedAt      DateTime?
+  issuedAt        DateTime?
+  buyer           String?
+  notes           String?
+  createdBy       String?
+  updatedBy       String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  project              Project                    @relation(fields: [projectId], references: [id])
+  activity             Activity?                  @relation(fields: [activityId], references: [id], onDelete: SetNull)
+  package              ProcurementPackage?        @relation(fields: [packageId], references: [id], onDelete: SetNull)
+  supplierRef          ProcurementSupplier?       @relation(fields: [supplierId], references: [id], onDelete: SetNull)
+  lines                ProcurementPoLine[]
+  deliveryReceipts     DeliveryReceipt[]
+  leadTimeAlerts       ProcurementLeadTimeAlert[]
+  deliveryReceiptLines DeliveryReceiptLine[]
 
   @@index([projectId])
+  @@index([activityId])
+  @@index([packageId])
+  @@index([supplierId])
+  @@index([projectId, status])
+  @@index([projectId, warehouseStatus])
+}
+
+model ProcurementPoLine {
+  id                 String    @id @default(uuid())
+  projectId          String
+  orderId            String
+  packageId          String?
+  supplierId         String?
+  activityId         String
+  activityMaterialId String?
+  materialMasterId   String?
+  lineNumber         Int
+  itemCode           String?
+  description        String
+  spec               String?
+  unit               String
+  orderedQty         Float     @default(0)
+  receivedQty        Float     @default(0)
+  rejectedQty        Float     @default(0)
+  issuedQty          Float     @default(0)
+  consumedQty        Float     @default(0)
+  unitCost           Decimal   @default(0) @db.Decimal(18, 2)
+  status             String    @default("ordered") // draft, ordered, partial, received, issued, consumed, cancelled
+  leadWeeks          Int       @default(0)
+  requiredTiming     String    @default("activity_start")
+  needOffsetDays     Int       @default(0)
+  bufferDays         Int       @default(14)
+  requiredDate       DateTime?
+  promisedDate       DateTime?
+  notes              String?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  project          Project                    @relation(fields: [projectId], references: [id])
+  order            ProcurementOrder           @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  package          ProcurementPackage?        @relation(fields: [packageId], references: [id], onDelete: SetNull)
+  supplier         ProcurementSupplier?       @relation(fields: [supplierId], references: [id], onDelete: SetNull)
+  activity         Activity                   @relation(fields: [activityId], references: [id], onDelete: Cascade)
+  activityMaterial ActivityMaterial?          @relation(fields: [activityMaterialId], references: [id], onDelete: SetNull)
+  materialMaster   MaterialMaster?            @relation(fields: [materialMasterId], references: [id], onDelete: SetNull)
+  receiptLines     DeliveryReceiptLine[]
+  usages           ActivityMaterialUsage[]
+  leadTimeAlerts   ProcurementLeadTimeAlert[]
+
+  @@unique([orderId, lineNumber])
+  @@index([projectId])
+  @@index([orderId])
+  @@index([packageId])
+  @@index([supplierId])
+  @@index([activityId])
+  @@index([activityMaterialId])
+  @@index([projectId, status])
+  @@index([projectId, requiredDate])
+  @@index([projectId, promisedDate])
+}
+
+model DeliveryReceipt {
+  id                String   @id @default(uuid())
+  projectId         String
+  orderId           String
+  packageId         String?
+  supplierId        String?
+  receiptNumber     String
+  receivedAt        DateTime @default(now())
+  receivedBy        String?
+  warehouseLocation String?
+  deliveryNote      String?
+  status            String   @default("posted") // draft, posted, void
+  notes             String?
+  createdBy         String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  project  Project               @relation(fields: [projectId], references: [id])
+  order    ProcurementOrder      @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  package  ProcurementPackage?   @relation(fields: [packageId], references: [id], onDelete: SetNull)
+  supplier ProcurementSupplier?  @relation(fields: [supplierId], references: [id], onDelete: SetNull)
+  lines    DeliveryReceiptLine[]
+
+  @@unique([projectId, receiptNumber])
+  @@index([projectId])
+  @@index([orderId])
+  @@index([packageId])
+  @@index([supplierId])
+  @@index([projectId, receivedAt])
+}
+
+model DeliveryReceiptLine {
+  id                 String   @id @default(uuid())
+  projectId          String
+  receiptId          String
+  orderId            String
+  poLineId           String
+  activityId         String
+  activityMaterialId String?
+  acceptedQty        Float    @default(0)
+  rejectedQty        Float    @default(0)
+  issuedQty          Float    @default(0)
+  notes              String?
+  createdAt          DateTime @default(now())
+
+  project          Project                 @relation(fields: [projectId], references: [id])
+  receipt          DeliveryReceipt         @relation(fields: [receiptId], references: [id], onDelete: Cascade)
+  order            ProcurementOrder        @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  poLine           ProcurementPoLine       @relation(fields: [poLineId], references: [id], onDelete: Cascade)
+  activity         Activity                @relation(fields: [activityId], references: [id], onDelete: Cascade)
+  activityMaterial ActivityMaterial?       @relation(fields: [activityMaterialId], references: [id], onDelete: SetNull)
+  usages           ActivityMaterialUsage[]
+
+  @@index([projectId])
+  @@index([receiptId])
+  @@index([orderId])
+  @@index([poLineId])
+  @@index([activityId])
+  @@index([activityMaterialId])
 }
 
 model MaterialMaster {
-  id           String  @id @default(uuid())
+  id           String   @id @default(uuid())
   projectId    String
+  supplierId   String?
   code         String
   name         String
   spec         String?
   unit         String
   category     String?
   supplier     String?
-  leadWeeks    Int     @default(0)
-  unitCost     Float   @default(0)
-  reorderPoint Float   @default(0)
+  leadWeeks    Int      @default(0)
+  unitCost     Decimal  @default(0) @db.Decimal(18, 2)
+  reorderPoint Float    @default(0)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 
-  project Project @relation(fields: [projectId], references: [id])
+  project           Project              @relation(fields: [projectId], references: [id])
+  supplierRef       ProcurementSupplier? @relation(fields: [supplierId], references: [id], onDelete: SetNull)
+  activityMaterials ActivityMaterial[]
+  poLines           ProcurementPoLine[]
 
   @@index([projectId])
+  @@index([supplierId])
+  @@index([projectId, code])
 }
 
 // ─── Equipment ───
@@ -595,7 +1670,7 @@ model Equipment {
   projectId String
   name      String
   rateType  String
-  rate      Float    @default(0)
+  rate      Decimal  @default(0) @db.Decimal(18, 2)
   createdAt DateTime @default(now())
 
   project           Project             @relation(fields: [projectId], references: [id])
@@ -618,16 +1693,122 @@ model ActivityEquipment {
 }
 
 model ActivityMaterial {
-  id         String   @id @default(uuid())
-  activityId String
-  name       String
-  unit       String
-  qty        Float    @default(0)
-  createdAt  DateTime @default(now())
+  id                   String    @id @default(uuid())
+  projectId            String
+  activityId           String
+  materialMasterId     String?
+  supplierId           String?
+  procurementPackageId String?
+  code                 String?
+  name                 String
+  spec                 String?
+  unit                 String
+  qty                  Float     @default(0)
+  plannedQty           Float     @default(0)
+  requiredDate         DateTime?
+  requiredTiming       String    @default("activity_start")
+  needOffsetDays       Int       @default(0)
+  leadWeeks            Int       @default(0)
+  bufferDays           Int       @default(14)
+  orderByDate          DateTime?
+  receivedQty          Float     @default(0)
+  issuedQty            Float     @default(0)
+  consumedQty          Float     @default(0)
+  wasteQty             Float     @default(0)
+  status               String    @default("planned") // planned, ordered, partial, received, issued, consumed, cancelled
+  notes                String?
+  createdBy            String?
+  updatedBy            String?
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
 
-  activity Activity @relation(fields: [activityId], references: [id], onDelete: Cascade)
+  project            Project                    @relation(fields: [projectId], references: [id])
+  activity           Activity                   @relation(fields: [activityId], references: [id], onDelete: Cascade)
+  materialMaster     MaterialMaster?            @relation(fields: [materialMasterId], references: [id], onDelete: SetNull)
+  supplier           ProcurementSupplier?       @relation(fields: [supplierId], references: [id], onDelete: SetNull)
+  procurementPackage ProcurementPackage?        @relation(fields: [procurementPackageId], references: [id], onDelete: SetNull)
+  poLines            ProcurementPoLine[]
+  receiptLines       DeliveryReceiptLine[]
+  usages             ActivityMaterialUsage[]
+  leadTimeAlerts     ProcurementLeadTimeAlert[]
 
+  @@index([projectId])
   @@index([activityId])
+  @@index([projectId, activityId])
+  @@index([materialMasterId])
+  @@index([supplierId])
+  @@index([procurementPackageId])
+  @@index([projectId, status])
+  @@index([projectId, requiredDate])
+}
+
+model ActivityMaterialUsage {
+  id                 String   @id @default(uuid())
+  projectId          String
+  activityId         String
+  activityMaterialId String
+  poLineId           String?
+  receiptLineId      String?
+  usedQty            Float    @default(0)
+  wasteQty           Float    @default(0)
+  usageDate          DateTime @default(now())
+  installedLocation  String?
+  recordedBy         String?
+  notes              String?
+  createdAt          DateTime @default(now())
+
+  project          Project              @relation(fields: [projectId], references: [id])
+  activity         Activity             @relation(fields: [activityId], references: [id], onDelete: Cascade)
+  activityMaterial ActivityMaterial     @relation(fields: [activityMaterialId], references: [id], onDelete: Cascade)
+  poLine           ProcurementPoLine?   @relation(fields: [poLineId], references: [id], onDelete: SetNull)
+  receiptLine      DeliveryReceiptLine? @relation(fields: [receiptLineId], references: [id], onDelete: SetNull)
+
+  @@index([projectId])
+  @@index([activityId])
+  @@index([activityMaterialId])
+  @@index([poLineId])
+  @@index([receiptLineId])
+  @@index([projectId, usageDate])
+}
+
+model ProcurementLeadTimeAlert {
+  id                   String    @id @default(uuid())
+  projectId            String
+  activityId           String?
+  packageId            String?
+  orderId              String?
+  poLineId             String?
+  activityMaterialId   String?
+  severity             String
+  reason               String
+  status               String    @default("open") // open, acknowledged, resolved
+  daysAtRisk           Int       @default(0)
+  needDate             DateTime?
+  orderByDate          DateTime?
+  expectedDeliveryDate DateTime?
+  acknowledgedBy       String?
+  acknowledgedAt       DateTime?
+  resolvedBy           String?
+  resolvedAt           DateTime?
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+
+  project          Project             @relation(fields: [projectId], references: [id])
+  activity         Activity?           @relation(fields: [activityId], references: [id], onDelete: SetNull)
+  package          ProcurementPackage? @relation(fields: [packageId], references: [id], onDelete: SetNull)
+  order            ProcurementOrder?   @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  poLine           ProcurementPoLine?  @relation(fields: [poLineId], references: [id], onDelete: Cascade)
+  activityMaterial ActivityMaterial?   @relation(fields: [activityMaterialId], references: [id], onDelete: Cascade)
+
+  @@unique([projectId, poLineId])
+  @@unique([projectId, activityMaterialId])
+  @@index([projectId])
+  @@index([activityId])
+  @@index([packageId])
+  @@index([orderId])
+  @@index([poLineId])
+  @@index([activityMaterialId])
+  @@index([projectId, severity, status])
 }
 
 model ResourceAllocation {
@@ -638,8 +1819,8 @@ model ResourceAllocation {
   resourceName String
   quantity     Float    @default(1)
   unit         String?
-  dailyRate    Float?
-  totalCost    Float?
+  dailyRate    Decimal? @db.Decimal(18, 2)
+  totalCost    Decimal? @db.Decimal(18, 2)
   notes        String?
   createdAt    DateTime @default(now())
 
@@ -660,6 +1841,9 @@ model NcrRecord {
   description String?
   disposition String?
   status      String    @default("open")
+  owner       String?
+  reviewer    String?
+  approver    String?
   responsible String?
   dueDate     DateTime?
   closedDate  DateTime?
@@ -680,6 +1864,10 @@ model ItpRecord {
   title          String
   pointType      String    @default("hold") // hold, witness, review
   status         String    @default("pending") // pending, passed, failed, waived
+  owner          String?
+  reviewer       String?
+  approver       String?
+  dueDate        DateTime?
   inspectionDate DateTime?
   inspector      String?
   notes          String?
@@ -703,7 +1891,11 @@ model DefectRecord {
   location      String?
   severity      String    @default("minor") // minor, major, critical
   status        String    @default("open") // open, in_progress, closed
+  owner         String?
+  reviewer      String?
+  approver      String?
   assignee      String?
+  dueDate       DateTime?
   targetCloseBy DateTime?
   closedDate    DateTime?
   notes         String?
@@ -718,7 +1910,7 @@ model DefectRecord {
 }
 
 model SafetyIncident {
-  id            String   @id @default(uuid())
+  id            String    @id @default(uuid())
   projectId     String
   activityId    String?
   ref           String
@@ -726,11 +1918,16 @@ model SafetyIncident {
   severity      String? // low, medium, high, critical
   title         String
   date          DateTime
-  lostDays      Int      @default(0)
-  status        String   @default("open") // open, investigating, closed
+  lostDays      Int       @default(0)
+  status        String    @default("open") // open, investigating, closed
+  owner         String?
+  reviewer      String?
+  approver      String?
+  dueDate       DateTime?
+  closedDate    DateTime?
   investigation String?
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
 
   project  Project   @relation(fields: [projectId], references: [id])
   activity Activity? @relation(fields: [activityId], references: [id], onDelete: SetNull)
@@ -748,6 +1945,10 @@ model MaterialTest {
   specValue   String?
   actualValue String?
   result      String    @default("pending") // pass, fail, pending
+  owner       String?
+  reviewer    String?
+  approver    String?
+  dueDate     DateTime?
   testDate    DateTime?
   labName     String?
   millCertRef String?
@@ -775,6 +1976,9 @@ model Rfi {
   priority           String    @default("normal")
   status             String    @default("open") // open, answered, closed
   scheduleImpact     Int       @default(0)
+  owner              String?
+  reviewer           String?
+  approver           String?
   raisedBy           String?
   answeredBy         String?
   raisedDate         DateTime?
@@ -789,6 +1993,10 @@ model Rfi {
 
   @@unique([projectId, ref])
   @@index([projectId])
+  @@index([projectId, status, createdAt])
+  @@index([projectId, priority, createdAt])
+  @@index([projectId, dueDate])
+  @@index([projectId, updatedAt])
 }
 
 model Submittal {
@@ -801,6 +2009,9 @@ model Submittal {
   revision    String    @default("A")
   specRef     String?
   status      String    @default("pending") // pending, under_review, approved, resubmit, rejected
+  owner       String?
+  reviewer    String?
+  approver    String?
   submittedOn DateTime?
   dueDate     DateTime?
   reviewedOn  DateTime?
@@ -813,6 +2024,9 @@ model Submittal {
 
   @@unique([projectId, ref])
   @@index([projectId])
+  @@index([projectId, status, createdAt])
+  @@index([projectId, dueDate])
+  @@index([projectId, updatedAt])
 }
 
 model DrawingRecord {
@@ -826,6 +2040,11 @@ model DrawingRecord {
   revision      String    @default("0")
   purpose       String? // IFT, IFC, as-built
   status        String    @default("active") // active, superseded, cancelled
+  owner         String?
+  reviewer      String?
+  approver      String?
+  dueDate       DateTime?
+  reviewedOn    DateTime?
   issueDate     DateTime?
   fileUrl       String?
   createdAt     DateTime  @default(now())
@@ -838,6 +2057,119 @@ model DrawingRecord {
   @@index([projectId])
 }
 
+model WorkflowAttachment {
+  id          String   @id @default(uuid())
+  projectId   String
+  recordType  String
+  recordId    String
+  fileName    String?
+  fileUrl     String?
+  storageKey  String?
+  mimeType    String?
+  sizeBytes   Int?
+  description String?
+  uploadedBy  String?
+  uploadedAt  DateTime @default(now())
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  project Project @relation(fields: [projectId], references: [id])
+
+  @@index([projectId])
+  @@index([projectId, recordType, recordId])
+}
+
+model WorkflowStatusHistory {
+  id         String   @id @default(uuid())
+  projectId  String
+  recordType String
+  recordId   String
+  oldStatus  String?
+  newStatus  String?
+  comment    String?
+  createdBy  String?
+  actorRole  String?
+  createdAt  DateTime @default(now())
+
+  project Project @relation(fields: [projectId], references: [id])
+
+  @@index([projectId])
+  @@index([projectId, recordType, recordId, createdAt])
+}
+
+model ApprovalWorkflowEvent {
+  id           String   @id @default(uuid())
+  orgId        String
+  projectId    String
+  recordType   String
+  recordId     String
+  workflowType String
+  action       String
+  fromStatus   String?
+  toStatus     String?
+  actorId      String?
+  actorRole    String?
+  decision     String?
+  reason       String?
+  comment      String?
+  metadataJson Json     @default("{}")
+  createdAt    DateTime @default(now())
+
+  project Project @relation(fields: [projectId], references: [id])
+
+  @@index([orgId])
+  @@index([projectId])
+  @@index([orgId, projectId, createdAt])
+  @@index([projectId, recordType, recordId, createdAt])
+  @@index([projectId, workflowType, toStatus])
+  @@index([actorId, createdAt])
+}
+
+model WorkflowActivityLink {
+  id                 String   @id @default(uuid())
+  projectId          String
+  recordType         String
+  recordId           String
+  activityId         String
+  relationType       String   @default("affected")
+  scheduleImpactDays Int      @default(0)
+  notes              String?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  project  Project  @relation(fields: [projectId], references: [id])
+  activity Activity @relation(fields: [activityId], references: [id], onDelete: Cascade)
+
+  @@unique([recordType, recordId, activityId, relationType])
+  @@index([projectId])
+  @@index([activityId])
+  @@index([projectId, recordType, recordId])
+}
+
+model DocumentRevision {
+  id         String   @id @default(uuid())
+  projectId  String
+  recordType String
+  recordId   String
+  revision   String
+  status     String?
+  title      String?
+  fileName   String?
+  fileUrl    String?
+  storageKey String?
+  issuedBy   String?
+  issuedAt   DateTime @default(now())
+  notes      String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  project Project @relation(fields: [projectId], references: [id])
+
+  @@unique([recordType, recordId, revision])
+  @@index([projectId])
+  @@index([projectId, recordType, recordId])
+}
+
 model Transmittal {
   id             String    @id @default(uuid())
   projectId      String
@@ -847,6 +2179,10 @@ model Transmittal {
   recipient      String
   method         String    @default("email") // email, courier, hand
   status         String    @default("pending_ack") // pending_ack, acknowledged
+  owner          String?
+  reviewer       String?
+  approver       String?
+  dueDate        DateTime?
   transmittedOn  DateTime?
   acknowledgedOn DateTime?
   documentsJson  Json?
@@ -871,57 +2207,149 @@ model Correspondence {
   body               String?
   contractualNotice  Boolean   @default(false)
   date               DateTime
+  owner              String?
+  reviewer           String?
+  approver           String?
+  dueDate            DateTime?
   responseRequiredBy DateTime?
   responseDate       DateTime?
   status             String    @default("open") // open, closed
   createdAt          DateTime  @default(now())
   updatedAt          DateTime  @updatedAt
 
-  project  Project   @relation(fields: [projectId], references: [id])
-  activity Activity? @relation(fields: [activityId], references: [id], onDelete: SetNull)
+  project         Project                        @relation(fields: [projectId], references: [id])
+  activity        Activity?                      @relation(fields: [activityId], references: [id], onDelete: SetNull)
+  commercialLinks CommercialCorrespondenceLink[]
 
   @@unique([projectId, ref])
   @@index([projectId])
 }
 
 // ─── Mobile: Daily Reports ───
+model CommercialCorrespondenceLink {
+  id               String   @id @default(uuid())
+  projectId        String
+  recordType       String
+  recordId         String
+  correspondenceId String
+  relationType     String   @default("supporting") // supporting, notice, response
+  notes            String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  project        Project        @relation(fields: [projectId], references: [id])
+  correspondence Correspondence @relation(fields: [correspondenceId], references: [id], onDelete: Cascade)
+
+  @@unique([recordType, recordId, correspondenceId])
+  @@index([projectId])
+  @@index([projectId, recordType, recordId])
+  @@index([correspondenceId])
+}
+
+model CommercialAttachmentRef {
+  id          String   @id @default(uuid())
+  projectId   String
+  recordType  String
+  recordId    String
+  documentId  String?
+  fileName    String?
+  fileUrl     String?
+  storageKey  String?
+  mimeType    String?
+  sizeBytes   Int?
+  sha256      String?
+  scanStatus  String?
+  description String?
+  uploadedBy  String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  project         Project          @relation(fields: [projectId], references: [id])
+  projectDocument ProjectDocument? @relation(fields: [documentId], references: [id], onDelete: SetNull)
+
+  @@index([projectId])
+  @@index([projectId, recordType, recordId])
+  @@index([documentId])
+}
+
 model DailyReport {
-  id            String   @id @default(uuid())
-  projectId     String
-  activityId    String
-  engineerId    String
-  date          DateTime
-  pctProgress   Float    @default(0)
-  notes         String?
-  photosJson    Json? // array of photo URLs
-  materialsJson Json? // array of { materialId, qty, unit }
-  equipmentJson Json? // array of { equipmentId, hours }
-  createdAt     DateTime @default(now())
+  id              String    @id @default(uuid())
+  projectId       String
+  activityId      String
+  engineerId      String
+  date            DateTime
+  shift           String    @default("day")
+  pctProgress     Float     @default(0)
+  weatherJson     Json?
+  manpowerJson    Json? // array of { trade, workers, hours }
+  materialsJson   Json? // array of { materialId, name, qty, unit }
+  equipmentJson   Json? // array of { equipmentId, name, hours }
+  issuesJson      Json?
+  photosJson      Json? // array of photo evidence metadata
+  notes           String?
+  clientRequestId String?
+  clientCreatedAt DateTime?
+  deviceId        String?
+  status          String    @default("submitted") // draft, submitted, approved, rejected
+  submittedAt     DateTime?
+  reviewedBy      String?
+  reviewedAt      DateTime?
+  rejectionReason String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
 
-  project  Project  @relation(fields: [projectId], references: [id])
-  activity Activity @relation(fields: [activityId], references: [id])
-  engineer User     @relation(fields: [engineerId], references: [id])
+  project             Project              @relation(fields: [projectId], references: [id])
+  activity            Activity             @relation(fields: [activityId], references: [id])
+  engineer            User                 @relation(fields: [engineerId], references: [id])
+  progressSubmissions ProgressSubmission[]
 
+  @@unique([projectId, clientRequestId])
   @@index([projectId])
   @@index([activityId])
   @@index([engineerId])
+  @@index([projectId, date])
+  @@index([projectId, status])
 }
 
 // ─── Site Operations ───
 model SiteDiary {
-  id           String   @id @default(uuid())
-  projectId    String
-  date         DateTime
-  weather      String?
-  workers      Int      @default(0)
-  visitors     String?
-  workDone     String?
-  issues       String?
-  instructions String?
+  id              String    @id @default(uuid())
+  projectId       String
+  engineerId      String?
+  date            DateTime
+  shift           String    @default("day")
+  weather         String?
+  weatherJson     Json?
+  workers         Int       @default(0)
+  visitors        String?
+  workDone        String?
+  issues          String?
+  issuesJson      Json?
+  instructions    String?
+  manpowerJson    Json?
+  materialsJson   Json?
+  equipmentJson   Json?
+  photosJson      Json?
+  notes           String?
+  clientRequestId String?
+  clientCreatedAt DateTime?
+  deviceId        String?
+  status          String    @default("draft") // draft, submitted, approved, rejected
+  submittedAt     DateTime?
+  reviewedBy      String?
+  reviewedAt      DateTime?
+  rejectionReason String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
 
-  project Project @relation(fields: [projectId], references: [id])
+  project  Project @relation(fields: [projectId], references: [id])
+  engineer User?   @relation(fields: [engineerId], references: [id], onDelete: SetNull)
 
+  @@unique([projectId, clientRequestId])
   @@index([projectId])
+  @@index([engineerId])
+  @@index([projectId, date])
+  @@index([projectId, status])
 }
 
 // ─── Subscription & Billing ───
@@ -974,7 +2402,7 @@ model Invoice {
   id              String   @id @default(uuid())
   subscriptionId  String
   description     String
-  amount          Float    @default(0)
+  amount          Decimal  @default(0) @db.Decimal(18, 2)
   currency        String   @default("USD")
   status          String   @default("paid") // paid, failed
   periodLabel     String?

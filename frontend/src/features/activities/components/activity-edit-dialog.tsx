@@ -1,5 +1,5 @@
 import { useEffect } from 'react'
-import { z } from 'zod'
+import type { z } from 'zod'
 import { AxiosError } from 'axios'
 import { Controller, useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'

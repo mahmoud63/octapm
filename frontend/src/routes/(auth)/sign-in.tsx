@@ -12,10 +12,6 @@ export const Route = createFileRoute('/(auth)/sign-in')({
   beforeLoad: async () => {
     const { auth } = useAuthStore.getState()
 
-    if (!auth.hasSession()) {
-      return
-    }
-
     if (!auth.user) {
       try {
         const profile = await getMyProfile()

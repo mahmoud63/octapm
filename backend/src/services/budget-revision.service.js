@@ -1,5 +1,6 @@
 const { prisma } = require('../config/db');
 const { HttpError } = require('../utils/http-error');
+const { addMoney, subtractMoney, toMoneyNumber } = require('../utils/money');
 
 const ensureProject = async ({ orgId, projectId }) => {
   const project = await prisma.project.findFirst({
@@ -14,20 +15,20 @@ const ensureProject = async ({ orgId, projectId }) => {
 };
 
 const computeDelta = (changeType, amount) => {
-  const value = Number(amount) || 0;
-  return changeType === 'deduction' ? -value : value;
+  const value = toMoneyNumber(amount);
+  return changeType === 'deduction' ? subtractMoney(0, value) : value;
 };
 
 const recomputeCumulative = async ({ projectId, baseBudget }) => {
   const rows = await prisma.budgetRevision.findMany({
-    where: { projectId },
+    where: { projectId, status: 'approved' },
     orderBy: [{ effectiveDate: 'asc' }, { createdAt: 'asc' }],
   });
 
-  let running = Number(baseBudget) || 0;
+  let running = toMoneyNumber(baseBudget);
 
   for (const row of rows) {
-    running += computeDelta(row.changeType, row.amount);
+    running = addMoney(running, computeDelta(row.changeType, row.amount));
     await prisma.budgetRevision.update({
       where: { id: row.id },
       data: { cumulativeBudget: running },
@@ -43,19 +44,20 @@ const listBudgetRevisions = async ({ orgId, projectId }) => {
     orderBy: [{ effectiveDate: 'desc' }, { createdAt: 'desc' }],
   });
 
-  const netChange = rows.reduce((sum, row) => {
+  const approvedRows = rows.filter((row) => row.status === 'approved');
+  const netChange = approvedRows.reduce((sum, row) => {
     return sum + computeDelta(row.changeType, row.amount);
   }, 0);
 
-  const currentBudget = (Number(project.contractValue) || 0) + netChange;
+  const currentBudget = addMoney(project.contractValue, netChange);
 
-  const waterfall = rows
+  const waterfall = approvedRows
     .slice()
     .reverse()
     .reduce(
       (acc, row) => {
         const delta = computeDelta(row.changeType, row.amount);
-        const next = acc.current + delta;
+        const next = addMoney(acc.current, delta);
         acc.points.push({
           ref: row.ref,
           title: row.title,
@@ -66,7 +68,7 @@ const listBudgetRevisions = async ({ orgId, projectId }) => {
         return acc;
       },
       {
-        current: Number(project.contractValue) || 0,
+        current: toMoneyNumber(project.contractValue),
         points: [],
       },
     ).points;
@@ -74,7 +76,7 @@ const listBudgetRevisions = async ({ orgId, projectId }) => {
   return {
     rows,
     summary: {
-      originalBudget: Number(project.contractValue) || 0,
+      originalBudget: toMoneyNumber(project.contractValue),
       netChange,
       currentBudget,
     },
@@ -82,19 +84,23 @@ const listBudgetRevisions = async ({ orgId, projectId }) => {
   };
 };
 
-const createBudgetRevision = async ({ orgId, projectId, payload }) => {
+const createBudgetRevision = async ({ orgId, projectId, userId, payload }) => {
   const project = await ensureProject({ orgId, projectId });
 
   const count = await prisma.budgetRevision.count({ where: { projectId } });
   const ref = `BR-${String(count + 1).padStart(2, '0')}`;
 
   const last = await prisma.budgetRevision.findFirst({
-    where: { projectId },
+    where: { projectId, status: 'approved' },
     orderBy: [{ effectiveDate: 'desc' }, { createdAt: 'desc' }],
   });
 
-  const baseline = last?.cumulativeBudget ?? Number(project.contractValue) ?? 0;
-  const delta = computeDelta(payload.changeType || 'addition', payload.amount);
+  const baseline = toMoneyNumber(last?.cumulativeBudget ?? project.contractValue);
+  const status = payload.status || 'approved';
+  const delta =
+    status === 'approved'
+      ? computeDelta(payload.changeType || 'addition', payload.amount)
+      : 0;
 
   return prisma.budgetRevision.create({
     data: {
@@ -102,12 +108,15 @@ const createBudgetRevision = async ({ orgId, projectId, payload }) => {
       ref,
       title: payload.title,
       changeType: payload.changeType || 'addition',
-      amount: Number(payload.amount) || 0,
+      amount: toMoneyNumber(payload.amount),
       linkedChangeOrder: payload.linkedChangeOrder?.trim() || null,
       effectiveDate: payload.effectiveDate
         ? new Date(payload.effectiveDate)
         : new Date(),
-      cumulativeBudget: baseline + delta,
+      cumulativeBudget: addMoney(baseline, delta),
+      status,
+      approvedBy: status === 'approved' ? userId || null : null,
+      approvedAt: status === 'approved' ? new Date() : null,
       notes: payload.notes?.trim() || null,
     },
   });
@@ -117,6 +126,7 @@ const updateBudgetRevision = async ({
   orgId,
   projectId,
   revisionId,
+  userId,
   payload,
 }) => {
   const project = await ensureProject({ orgId, projectId });
@@ -140,7 +150,7 @@ const updateBudgetRevision = async ({
       changeType: payload.changeType ?? existing.changeType,
       amount:
         payload.amount !== undefined
-          ? Number(payload.amount) || 0
+          ? toMoneyNumber(payload.amount)
           : existing.amount,
       linkedChangeOrder:
         payload.linkedChangeOrder !== undefined
@@ -152,6 +162,19 @@ const updateBudgetRevision = async ({
             ? new Date(payload.effectiveDate)
             : null
           : existing.effectiveDate,
+      status: payload.status ?? existing.status,
+      approvedBy:
+        payload.status === 'approved' && existing.status !== 'approved'
+          ? userId || null
+          : payload.status && payload.status !== 'approved'
+            ? null
+          : existing.approvedBy,
+      approvedAt:
+        payload.status === 'approved' && existing.status !== 'approved'
+          ? new Date()
+          : payload.status && payload.status !== 'approved'
+            ? null
+          : existing.approvedAt,
       notes:
         payload.notes !== undefined
           ? payload.notes?.trim() || null
@@ -161,7 +184,7 @@ const updateBudgetRevision = async ({
 
   await recomputeCumulative({
     projectId,
-    baseBudget: Number(project.contractValue) || 0,
+    baseBudget: project.contractValue,
   });
 
   return updated;
@@ -185,7 +208,7 @@ const deleteBudgetRevision = async ({ orgId, projectId, revisionId }) => {
   await prisma.budgetRevision.delete({ where: { id: revisionId } });
   await recomputeCumulative({
     projectId,
-    baseBudget: Number(project.contractValue) || 0,
+    baseBudget: project.contractValue,
   });
 
   return { deleted: true };

@@ -1,6 +1,11 @@
 const ExcelJS = require('exceljs');
 const { prisma } = require('../config/db');
 const { HttpError } = require('../utils/http-error');
+const {
+  computeProcurementRisk,
+  serializeDate,
+} = require('./procurement-risk.service');
+const { workingDayToDate } = require('./cpm.service');
 
 const HEADER_FILL = {
   type: 'pattern',
@@ -31,18 +36,6 @@ function styleHeaders(sheet, columns) {
 function formatDate(value) {
   if (!value) return '—';
   return new Date(value).toLocaleDateString('en-GB');
-}
-
-function workingDayToDate(projectStartDate, dayOffset) {
-  if (!projectStartDate || dayOffset === null || dayOffset === undefined) {
-    return null;
-  }
-
-  const date = new Date(projectStartDate);
-  if (Number.isNaN(date.getTime())) return null;
-
-  date.setDate(date.getDate() + Number(dayOffset));
-  return date;
 }
 
 function parseAssumptions(snapshotJson) {
@@ -89,6 +82,7 @@ async function generateProjectExport({ projectId, orgId }) {
       where: { projectId },
       include: {
         progress: {
+          where: { status: 'approved' },
           orderBy: { updatedAt: 'desc' },
           take: 1,
         },
@@ -103,7 +97,21 @@ async function generateProjectExport({ projectId, orgId }) {
       where: { projectId },
       include: {
         activity: {
-          select: { name: true, wbsCode: true },
+          select: {
+            id: true,
+            name: true,
+            wbsCode: true,
+            startDate: true,
+            endDate: true,
+            earlyStart: true,
+            earlyFinish: true,
+            baselineStart: true,
+            baselineFinish: true,
+            lateStart: true,
+            lateFinish: true,
+            isCritical: true,
+            totalFloat: true,
+          },
         },
       },
       orderBy: [{ createdAt: 'asc' }],
@@ -126,10 +134,30 @@ async function generateProjectExport({ projectId, orgId }) {
     const progress = activity.progress[0] || null;
     const pctComplete = Number(progress?.pctComplete || 0);
 
-    const esDate = workingDayToDate(project.startDate, activity.earlyStart);
-    const efDate = workingDayToDate(project.startDate, activity.earlyFinish);
-    const lsDate = workingDayToDate(project.startDate, activity.lateStart);
-    const lfDate = workingDayToDate(project.startDate, activity.lateFinish);
+    const calendarOptions = {
+      calendarId: activity.calendarId || project.projectCalendar,
+      projectCalendar: project.projectCalendar,
+    };
+    const esDate = workingDayToDate(
+      project.startDate,
+      activity.earlyStart,
+      calendarOptions,
+    );
+    const efDate = workingDayToDate(
+      project.startDate,
+      activity.earlyFinish,
+      calendarOptions,
+    );
+    const lsDate = workingDayToDate(
+      project.startDate,
+      activity.lateStart,
+      calendarOptions,
+    );
+    const lfDate = workingDayToDate(
+      project.startDate,
+      activity.lateFinish,
+      calendarOptions,
+    );
 
     return {
       activity,
@@ -245,20 +273,41 @@ async function generateProjectExport({ projectId, orgId }) {
   styleHeaders(longLeadSheet, [
     { header: 'Item', key: 'item', width: 32 },
     { header: 'Lead Weeks', key: 'leadWeeks', width: 12 },
+    { header: 'Buffer Days', key: 'bufferDays', width: 12 },
+    { header: 'Need Date', key: 'needDate', width: 14 },
     { header: 'Order By', key: 'orderBy', width: 14 },
+    { header: 'Expected Delivery', key: 'expectedDeliveryDate', width: 18 },
+    { header: 'Warehouse', key: 'warehouseStatus', width: 16 },
     { header: 'Criticality', key: 'criticality', width: 14 },
-    { header: 'Risk', key: 'risk', width: 22 },
+    { header: 'Risk Severity', key: 'riskSeverity', width: 14 },
+    { header: 'Risk Reason', key: 'riskReason', width: 24 },
+    { header: 'Days At Risk', key: 'daysAtRisk', width: 14 },
+    { header: 'Risk Note', key: 'risk', width: 22 },
     { header: 'Status', key: 'status', width: 14 },
     { header: 'Supplier', key: 'supplier', width: 20 },
     { header: 'Activity', key: 'activity', width: 24 },
   ]);
 
   longLead.forEach((item) => {
+    const procurementRisk = computeProcurementRisk(item, { project });
+    const needDate = serializeDate(procurementRisk.needDate);
+    const orderByDate = serializeDate(procurementRisk.orderByDate);
+    const expectedDeliveryDate = serializeDate(
+      procurementRisk.expectedDeliveryDate,
+    );
+
     longLeadSheet.addRow({
       item: item.item,
       leadWeeks: item.leadWeeks,
-      orderBy: item.orderBy || '—',
+      bufferDays: item.bufferDays,
+      needDate: formatDate(needDate),
+      orderBy: orderByDate ? formatDate(orderByDate) : item.orderBy || '—',
+      expectedDeliveryDate: formatDate(expectedDeliveryDate),
+      warehouseStatus: item.warehouseStatus || '—',
       criticality: item.criticality || '—',
+      riskSeverity: procurementRisk.severity,
+      riskReason: procurementRisk.reason,
+      daysAtRisk: procurementRisk.daysAtRisk,
       risk: item.risk || '—',
       status: item.status,
       supplier: item.supplier || '—',

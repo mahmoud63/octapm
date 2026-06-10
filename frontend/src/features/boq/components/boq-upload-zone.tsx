@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Upload, FileSpreadsheet, AlertCircle, Download } from 'lucide-react'
+import { Upload, FileSpreadsheet, AlertCircle, Download, Lock } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -14,6 +14,12 @@ interface Props {
     startDate?: string | null
     duration?: number | null
   }
+  hasExistingBoq?: boolean
+  baseline?: {
+    locked: boolean
+    source: 'schedule_baseline' | 'boq_revision' | null
+    lockedAt: string | null
+  }
   onUploadSuccess: () => void
 }
 
@@ -23,7 +29,15 @@ interface ValidationError {
   message: string
 }
 
-export function BoqUploadZone({ projectId, project, onUploadSuccess }: Props) {
+const MAX_BOQ_UPLOAD_BYTES = 50 * 1024 * 1024
+
+export function BoqUploadZone({
+  projectId,
+  project,
+  hasExistingBoq = false,
+  baseline,
+  onUploadSuccess,
+}: Props) {
   const fileRef = useRef<HTMLInputElement>(null)
   const [revisionLabel, setRevisionLabel] = useState('')
   const [jobId, setJobId] = useState<string | null>(null)
@@ -41,11 +55,15 @@ export function BoqUploadZone({ projectId, project, onUploadSuccess }: Props) {
 
   useEffect(() => {
     if (isDone) {
-      toast.success('BOQ processed — activities generated!')
+      if (job?.mode === 'comparison_only') {
+        toast.success('BOQ revision comparison saved')
+      } else {
+        toast.success('BOQ processed - activities generated')
+      }
       onUploadSuccess()
       setJobId(null)
     }
-  }, [isDone, onUploadSuccess])
+  }, [isDone, job?.mode, onUploadSuccess])
 
   useEffect(() => {
     if (isError) {
@@ -61,18 +79,35 @@ export function BoqUploadZone({ projectId, project, onUploadSuccess }: Props) {
         toast.error('Supported formats: .xlsx, .xls')
         return
       }
+      if (file.size > MAX_BOQ_UPLOAD_BYTES) {
+        setLocalError('The selected workbook is larger than the 50 MB upload limit.')
+        return
+      }
       setLocalError(null)
       try {
         const result = await upload.mutateAsync({ file, label: revisionLabel })
         setJobId(result.jobId)
       } catch (err: unknown) {
         const axiosErr = err as {
-          response?: { data?: { error?: { message?: string; errors?: ValidationError[] } } }
+          response?: {
+            data?: {
+              error?: {
+                code?: string
+                message?: string
+                errors?: ValidationError[]
+              }
+            }
+          }
         }
         const errData = axiosErr?.response?.data?.error
         if (errData?.errors?.length) {
           setValidationErrors(errData.errors)
           setShowValidation(true)
+        } else if (
+          errData?.code === 'FILE_VIRUS_DETECTED' ||
+          errData?.code === 'FILE_TYPE_MISMATCH'
+        ) {
+          setLocalError(errData.message ?? 'File security check failed')
         } else {
           setLocalError(errData?.message ?? 'Upload failed')
         }
@@ -106,10 +141,11 @@ export function BoqUploadZone({ projectId, project, onUploadSuccess }: Props) {
   if (!project.duration || project.duration <= 0) readinessIssues.push('Project duration missing — edit project to set it')
 
   const progress = job?.progress ?? (upload.isPending ? 20 : 0)
-  const stepLabel = job?.step ?? (upload.isPending ? 'Uploading file…' : '')
+  const stepLabel = job?.step ?? (upload.isPending ? 'Uploading and checking file...' : '')
+  const baselineLocked = Boolean(baseline?.locked)
 
   return (
-    <div className='flex flex-col items-center justify-center py-12'>
+    <div className='flex flex-col items-center justify-center py-6'>
       {/* Label input */}
       <div className='mb-4 w-full max-w-lg'>
         <label className='mb-1 block text-xs font-semibold tracking-wide text-muted-foreground uppercase'>
@@ -122,6 +158,19 @@ export function BoqUploadZone({ projectId, project, onUploadSuccess }: Props) {
           disabled={isPending}
         />
       </div>
+
+      {baselineLocked && (
+        <div className='mb-4 flex w-full max-w-lg items-start gap-3 rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-950/30 dark:text-amber-200'>
+          <Lock className='mt-0.5 h-4 w-4 flex-shrink-0' />
+          <div>
+            <p className='font-semibold'>Baseline locked</p>
+            <p className='mt-1 text-xs leading-5'>
+              Uploads are saved as revision comparisons. Current BOQ rows,
+              allocations, progress, IPC, and reports stay unchanged.
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* Readiness warnings */}
       {readinessIssues.length > 0 && (
@@ -193,7 +242,9 @@ export function BoqUploadZone({ projectId, project, onUploadSuccess }: Props) {
                 Drag & drop or click to browse
               </p>
               <p className='mt-1 text-xs text-muted-foreground'>
-                .xlsx &nbsp;·&nbsp; .xls &nbsp;— AI generates activities automatically
+                {hasExistingBoq
+                  ? '.xlsx or .xls - compared against the current BOQ'
+                  : '.xlsx or .xls - AI generates activities automatically'}
               </p>
             </div>
           </>

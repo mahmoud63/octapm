@@ -1,7 +1,9 @@
 import { Main } from '@/components/layout/main'
+import { AuditHistoryPanel } from '@/features/audit/components/audit-history-panel'
 import { useProject } from '@/features/projects/hooks/use-projects'
 import { useProjectBoq } from '../hooks/use-boq'
 import { BoqUploadZone } from './boq-upload-zone'
+import { BoqAllocationPanel } from './boq-allocation-panel'
 import { BoqEditableGrid } from './boq-editable-grid'
 import { BoqFinancialSummary } from './boq-financial-summary'
 
@@ -39,16 +41,34 @@ function BoqContent({ projectId }: { projectId: string }) {
             startDate: project?.startDate,
             duration: project?.duration,
           }}
+          baseline={boq?.baseline}
           onUploadSuccess={() => refetch()}
         />
       ) : (
         <>
+          <BoqUploadZone
+            projectId={projectId}
+            project={{
+              name: project?.name,
+              startDate: project?.startDate,
+              duration: project?.duration,
+            }}
+            hasExistingBoq
+            baseline={boq.baseline}
+            onUploadSuccess={() => refetch()}
+          />
           <BoqEditableGrid
             projectId={projectId}
             items={boq.items}
             financial={boq.financial}
             currency={project?.currency ?? 'USD'}
+            baselineLocked={Boolean(boq.baseline?.locked)}
             onDataChange={() => refetch()}
+          />
+          <BoqAllocationPanel
+            projectId={projectId}
+            items={boq.items}
+            currency={project?.currency ?? 'USD'}
           />
           {boq.financial && (
             <BoqFinancialSummary
@@ -56,6 +76,20 @@ function BoqContent({ projectId }: { projectId: string }) {
               currency={project?.currency ?? 'USD'}
             />
           )}
+          <div className='grid gap-3 lg:grid-cols-2'>
+            <AuditHistoryPanel
+              projectId={projectId}
+              entityType='boq_revision'
+              title='BOQ Revision History'
+              limit={8}
+            />
+            <AuditHistoryPanel
+              projectId={projectId}
+              entityType='boq_item'
+              title='BOQ Row History'
+              limit={8}
+            />
+          </div>
         </>
       )}
     </div>

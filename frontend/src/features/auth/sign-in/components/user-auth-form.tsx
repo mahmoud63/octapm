@@ -71,11 +71,7 @@ export function UserAuthForm({
       success: (session) => {
         setIsLoading(false)
 
-        auth.setSession(
-          session.user,
-          session.tokens.accessToken,
-          session.tokens.refreshToken
-        )
+        auth.setSession(session.user, session.tokens.accessToken)
 
         // Redirect to the stored location or default to dashboard
         const targetPath = redirectTo || '/'

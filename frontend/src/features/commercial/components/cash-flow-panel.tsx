@@ -9,6 +9,12 @@ import {
   YAxis,
 } from 'recharts'
 import { toast } from 'sonner'
+import {
+  hasMoneyPrecision,
+  MONEY_INPUT_STEP,
+  MONEY_PRECISION_MESSAGE,
+  toMoneyNumber,
+} from '@/lib/money'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import {
@@ -74,6 +80,7 @@ export function CashFlowPanel({ projectId }: { projectId: string }) {
         <Input
           type='number'
           min={0}
+          step={MONEY_INPUT_STEP}
           placeholder='Inflow'
           value={inflow}
           onChange={(e) => setInflow(e.target.value)}
@@ -81,6 +88,7 @@ export function CashFlowPanel({ projectId }: { projectId: string }) {
         <Input
           type='number'
           min={0}
+          step={MONEY_INPUT_STEP}
           placeholder='Outflow'
           value={outflow}
           onChange={(e) => setOutflow(e.target.value)}
@@ -89,11 +97,16 @@ export function CashFlowPanel({ projectId }: { projectId: string }) {
           <Button
             disabled={createMutation.isPending || !period}
             onClick={async () => {
+              if (!hasMoneyPrecision(inflow) || !hasMoneyPrecision(outflow)) {
+                toast.error(MONEY_PRECISION_MESSAGE)
+                return
+              }
+
               try {
                 await createMutation.mutateAsync({
                   period,
-                  inflow: Number(inflow) || 0,
-                  outflow: Number(outflow) || 0,
+                  inflow: toMoneyNumber(inflow),
+                  outflow: toMoneyNumber(outflow),
                 })
                 setPeriod('')
                 setInflow('')

@@ -1,9 +1,22 @@
 import { useMemo, useState } from 'react'
 import { Loader2 } from 'lucide-react'
+import { toast } from 'sonner'
+import { useCanPerform } from '@/lib/permissions'
+import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
+import { Textarea } from '@/components/ui/textarea'
 import type { ScheduleActivity, ScheduleRevision } from '../data/schema'
 import {
   useScheduleRevision,
+  useScheduleRevisionMapping,
+  useScheduleRevisionWorkflow,
   useScheduleRevisions,
   type ScheduleRevisionDetail,
 } from '../hooks/use-revisions'
@@ -18,6 +31,36 @@ function fmtUSD(n: number) {
   return (
     '$' + Number(n || 0).toLocaleString('en-US', { maximumFractionDigits: 0 })
   )
+}
+
+const getApiErrorMessage = (error: unknown, fallback: string) =>
+  typeof error === 'object' &&
+  error !== null &&
+  'response' in error &&
+  typeof (error as { response?: { data?: { error?: { message?: unknown } } } })
+    .response?.data?.error?.message === 'string'
+    ? String(
+        (error as { response?: { data?: { error?: { message?: unknown } } } })
+          .response?.data?.error?.message
+      )
+    : fallback
+
+const STATUS_LABELS: Record<string, string> = {
+  draft: 'Draft',
+  under_review: 'Under review',
+  approved: 'Approved',
+  rejected: 'Rejected',
+  baselined: 'Baselined',
+  superseded: 'Superseded',
+}
+
+const STATUS_CLASS: Record<string, string> = {
+  draft: 'border-slate-300 bg-slate-100 text-slate-700',
+  under_review: 'border-amber-300 bg-amber-100 text-amber-800',
+  approved: 'border-emerald-300 bg-emerald-100 text-emerald-800',
+  rejected: 'border-rose-300 bg-rose-100 text-rose-800',
+  baselined: 'border-blue-300 bg-blue-100 text-blue-800',
+  superseded: 'border-zinc-300 bg-zinc-100 text-zinc-700',
 }
 
 function getSnapshotActivities(detail?: ScheduleRevisionDetail | null) {
@@ -41,16 +84,37 @@ export function RevisionHistoryPanel({
   currentRevision,
   currentActivities,
 }: Props) {
+  const canActivateRevision = useCanPerform(
+    'schedule',
+    'approve',
+    'revision.activate'
+  )
+  const canRollbackRevision = useCanPerform(
+    'schedule',
+    'approve',
+    'revision.rollback'
+  )
   const { data: revisions, isLoading } = useScheduleRevisions(projectId)
   const [viewRevisionId, setViewRevisionId] = useState<string | null>(null)
   const [compareRevisionId, setCompareRevisionId] = useState<string | null>(
     null
   )
+  const [activateRevisionId, setActivateRevisionId] = useState<string | null>(
+    null
+  )
+  const [rollbackRevisionId, setRollbackRevisionId] = useState<string | null>(
+    null
+  )
+  const [removalReason, setRemovalReason] = useState('')
+  const [rollbackReason, setRollbackReason] = useState('')
 
   const { data: viewedRevision, isLoading: loadingViewed } =
     useScheduleRevision(projectId, viewRevisionId)
   const { data: comparedRevision, isLoading: loadingCompared } =
     useScheduleRevision(projectId, compareRevisionId)
+  const { data: activationMapping, isLoading: loadingActivationMapping } =
+    useScheduleRevisionMapping(projectId, activateRevisionId)
+  const workflow = useScheduleRevisionWorkflow(projectId)
 
   const currentNames = useMemo(() => {
     return new Set(
@@ -80,6 +144,66 @@ export function RevisionHistoryPanel({
     return { added, removed }
   }, [comparedRevision, currentNames])
 
+  const closeActivation = () => {
+    setActivateRevisionId(null)
+    setRemovalReason('')
+  }
+
+  const closeRollback = () => {
+    setRollbackRevisionId(null)
+    setRollbackReason('')
+  }
+
+  const handleActivate = async () => {
+    if (!activateRevisionId || !activationMapping) return
+    const reason = removalReason.trim()
+    if (activationMapping.unmappedExisting.length > 0 && !reason) {
+      toast.error('Removal reason is required')
+      return
+    }
+
+    try {
+      await workflow.activate.mutateAsync({
+        revisionId: activateRevisionId,
+        mappings: activationMapping.suggestedMappings.map((mapping) => ({
+          oldActivityId: mapping.oldActivityId,
+          newActivityKey: mapping.newActivityKey,
+        })),
+        unmappedRemovals: activationMapping.unmappedExisting
+          .filter((activity) => activity.id)
+          .map((activity) => ({
+            oldActivityId: String(activity.id),
+            reason,
+          })),
+        comment: reason || 'Approved schedule activation',
+      })
+      toast.success('Schedule revision activated')
+      closeActivation()
+    } catch (error) {
+      toast.error(getApiErrorMessage(error, 'Failed to activate revision'))
+    }
+  }
+
+  const handleRollback = async () => {
+    if (!rollbackRevisionId) return
+    const reason = rollbackReason.trim()
+    if (!reason) {
+      toast.error('Rollback reason is required')
+      return
+    }
+
+    try {
+      await workflow.rollback.mutateAsync({
+        revisionId: rollbackRevisionId,
+        reason,
+      })
+      toast.success('Schedule revision rolled back')
+      closeRollback()
+    } catch (error) {
+      toast.error(getApiErrorMessage(error, 'Failed to roll back revision'))
+    }
+  }
+
   return (
     <div className='space-y-4'>
       <div className='rounded-md border'>
@@ -91,6 +215,7 @@ export function RevisionHistoryPanel({
               <th className='p-2 text-right font-medium'>Activities</th>
               <th className='p-2 text-right font-medium'>Critical</th>
               <th className='p-2 text-right font-medium'>Budget</th>
+              <th className='p-2 text-left font-medium'>Status</th>
               <th className='p-2 text-right font-medium'>Actions</th>
             </tr>
           </thead>
@@ -98,7 +223,7 @@ export function RevisionHistoryPanel({
             {isLoading ? (
               <tr>
                 <td
-                  colSpan={6}
+                  colSpan={7}
                   className='p-3 text-center text-muted-foreground'
                 >
                   Loading revisions...
@@ -107,64 +232,115 @@ export function RevisionHistoryPanel({
             ) : !revisions?.length ? (
               <tr>
                 <td
-                  colSpan={6}
+                  colSpan={7}
                   className='p-3 text-center text-muted-foreground'
                 >
                   No revisions yet.
                 </td>
               </tr>
             ) : (
-              revisions.map((rev) => (
-                <tr
-                  key={rev.id}
-                  className={[
-                    'border-b hover:bg-muted/25',
-                    rev.id === currentRevision.id ? 'bg-primary/5' : '',
-                  ].join(' ')}
-                >
-                  <td className='p-2 text-xs'>
-                    {new Date(rev.createdAt).toLocaleString()}
-                  </td>
-                  <td className='p-2'>
-                    <span className='font-medium'>
-                      {rev.label || 'AI Generated'}
-                    </span>
-                    {rev.id === currentRevision.id && (
-                      <span className='ms-2 rounded-full bg-primary/15 px-2 py-0.5 text-[10px] font-semibold text-primary'>
-                        Current
+              revisions.map((rev) => {
+                const status = rev.status || 'draft'
+                const statusDate =
+                  rev.baselinedAt ||
+                  rev.approvedAt ||
+                  rev.rejectedAt ||
+                  rev.submittedAt ||
+                  null
+
+                return (
+                  <tr
+                    key={rev.id}
+                    className={[
+                      'border-b hover:bg-muted/25',
+                      rev.isActive || rev.id === currentRevision.id
+                        ? 'bg-primary/5'
+                        : '',
+                    ].join(' ')}
+                  >
+                    <td className='p-2 text-xs'>
+                      {new Date(rev.createdAt).toLocaleString()}
+                    </td>
+                    <td className='p-2'>
+                      <span className='font-medium'>
+                        {rev.label || 'AI Generated'}
                       </span>
-                    )}
-                  </td>
-                  <td className='p-2 text-right font-mono text-xs'>
-                    {rev.activityCount}
-                  </td>
-                  <td className='p-2 text-right font-mono text-xs'>
-                    {rev.criticalCount}
-                  </td>
-                  <td className='p-2 text-right text-xs'>
-                    {fmtUSD(rev.totalBudget)}
-                  </td>
-                  <td className='p-2 text-right'>
-                    <div className='inline-flex gap-2'>
-                      <Button
-                        size='sm'
+                      {(rev.isActive || rev.id === currentRevision.id) && (
+                        <span className='ms-2 rounded-full bg-primary/15 px-2 py-0.5 text-[10px] font-semibold text-primary'>
+                          Active
+                        </span>
+                      )}
+                      {rev.rejectionReason && (
+                        <p className='mt-1 max-w-72 truncate text-xs text-rose-600'>
+                          {rev.rejectionReason}
+                        </p>
+                      )}
+                    </td>
+                    <td className='p-2 text-right font-mono text-xs'>
+                      {rev.activityCount}
+                    </td>
+                    <td className='p-2 text-right font-mono text-xs'>
+                      {rev.criticalCount}
+                    </td>
+                    <td className='p-2 text-right text-xs'>
+                      {fmtUSD(rev.totalBudget)}
+                    </td>
+                    <td className='p-2'>
+                      <Badge
                         variant='outline'
-                        onClick={() => setViewRevisionId(rev.id)}
+                        className={STATUS_CLASS[status] ?? STATUS_CLASS.draft}
                       >
-                        View
-                      </Button>
-                      <Button
-                        size='sm'
-                        variant='outline'
-                        onClick={() => setCompareRevisionId(rev.id)}
-                        disabled={rev.id === currentRevision.id}
-                      >
-                        Compare
-                      </Button>
-                    </div>
-                  </td>
-                </tr>
-              ))
+                        {STATUS_LABELS[status] ?? 'Draft'}
+                      </Badge>
+                      {statusDate && (
+                        <p className='mt-1 text-[11px] text-muted-foreground'>
+                          {new Date(statusDate).toLocaleString()}
+                        </p>
+                      )}
+                    </td>
+                    <td className='p-2 text-right'>
+                      <div className='inline-flex gap-2'>
+                        <Button
+                          size='sm'
+                          variant='outline'
+                          onClick={() => setViewRevisionId(rev.id)}
+                        >
+                          View
+                        </Button>
+                        <Button
+                          size='sm'
+                          variant='outline'
+                          onClick={() => setCompareRevisionId(rev.id)}
+                          disabled={rev.id === currentRevision.id}
+                        >
+                          Compare
+                        </Button>
+                        {canActivateRevision &&
+                          rev.status === 'approved' &&
+                          !rev.isActive && (
+                            <Button
+                              size='sm'
+                              onClick={() => setActivateRevisionId(rev.id)}
+                            >
+                              Activate
+                            </Button>
+                          )}
+                        {canRollbackRevision &&
+                          rev.isActive &&
+                          rev.previousActiveRevisionId && (
+                            <Button
+                              size='sm'
+                              variant='outline'
+                              onClick={() => setRollbackRevisionId(rev.id)}
+                            >
+                              Rollback
+                            </Button>
+                          )}
+                      </div>
+                    </td>
+                  </tr>
+                )
+              })
             )}
           </tbody>
         </table>
@@ -200,6 +376,25 @@ export function RevisionHistoryPanel({
                 <span className='text-muted-foreground'>Budget:</span>{' '}
                 <strong>{fmtUSD(viewedRevision.totalBudget)}</strong>
               </p>
+              <p>
+                <span className='text-muted-foreground'>Status:</span>{' '}
+                <strong>
+                  {STATUS_LABELS[viewedRevision.status || 'draft'] ?? 'Draft'}
+                </strong>
+                {viewedRevision.isActive ? ' · Active' : ''}
+              </p>
+              {viewedRevision.activatedAt && (
+                <p>
+                  <span className='text-muted-foreground'>Activated:</span>{' '}
+                  {new Date(viewedRevision.activatedAt).toLocaleString()}
+                </p>
+              )}
+              {viewedRevision.rejectionReason && (
+                <p className='text-rose-700 dark:text-rose-300'>
+                  <span className='text-muted-foreground'>Reason:</span>{' '}
+                  {viewedRevision.rejectionReason}
+                </p>
+              )}
 
               <div className='mt-3 rounded-md border bg-muted/20 p-2'>
                 <p className='mb-1 text-xs font-semibold tracking-wide text-muted-foreground uppercase'>
@@ -310,6 +505,155 @@ export function RevisionHistoryPanel({
           )}
         </div>
       </div>
+
+      <Dialog
+        open={Boolean(activateRevisionId)}
+        onOpenChange={(open) => {
+          if (!open) closeActivation()
+        }}
+      >
+        <DialogContent className='sm:max-w-2xl'>
+          <DialogHeader>
+            <DialogTitle>Activate Revision</DialogTitle>
+          </DialogHeader>
+          {loadingActivationMapping ? (
+            <div className='flex items-center gap-2 text-sm text-muted-foreground'>
+              <Loader2 className='h-4 w-4 animate-spin' />
+              Loading mapping...
+            </div>
+          ) : activationMapping ? (
+            <div className='space-y-4'>
+              <div className='grid grid-cols-3 gap-2 text-sm'>
+                <div className='rounded-md border p-2'>
+                  <p className='text-xs text-muted-foreground'>Mapped</p>
+                  <p className='text-lg font-semibold'>
+                    {activationMapping.counts.suggestedMappings}
+                  </p>
+                </div>
+                <div className='rounded-md border p-2'>
+                  <p className='text-xs text-muted-foreground'>New</p>
+                  <p className='text-lg font-semibold'>
+                    {activationMapping.counts.newActivities}
+                  </p>
+                </div>
+                <div className='rounded-md border p-2'>
+                  <p className='text-xs text-muted-foreground'>Retiring</p>
+                  <p className='text-lg font-semibold'>
+                    {activationMapping.counts.unmappedExisting}
+                  </p>
+                </div>
+              </div>
+
+              <div className='max-h-44 overflow-auto rounded-md border'>
+                <table className='w-full text-xs'>
+                  <thead className='border-b bg-muted/50'>
+                    <tr>
+                      <th className='p-2 text-left font-medium'>Current</th>
+                      <th className='p-2 text-left font-medium'>Staged</th>
+                      <th className='p-2 text-left font-medium'>Match</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {activationMapping.suggestedMappings
+                      .slice(0, 12)
+                      .map((mapping) => (
+                        <tr key={mapping.oldActivityId} className='border-b'>
+                          <td className='p-2'>{mapping.oldActivity.name}</td>
+                          <td className='p-2'>{mapping.newActivity.name}</td>
+                          <td className='p-2'>
+                            {mapping.matchType.replace(/_/g, ' ')}
+                          </td>
+                        </tr>
+                      ))}
+                    {activationMapping.suggestedMappings.length === 0 && (
+                      <tr>
+                        <td
+                          colSpan={3}
+                          className='p-3 text-center text-muted-foreground'
+                        >
+                          No mapped activities
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+
+              {activationMapping.unmappedExisting.length > 0 && (
+                <div className='space-y-2'>
+                  <p className='text-sm font-medium'>
+                    Removal reason for unmapped activities
+                  </p>
+                  <Textarea
+                    value={removalReason}
+                    onChange={(event) => setRemovalReason(event.target.value)}
+                    rows={3}
+                  />
+                  <div className='max-h-24 overflow-auto rounded-md border p-2 text-xs text-muted-foreground'>
+                    {activationMapping.unmappedExisting
+                      .slice(0, 12)
+                      .map((activity) => (
+                        <p key={activity.id}>{activity.name}</p>
+                      ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          ) : (
+            <p className='text-sm text-muted-foreground'>
+              Mapping unavailable.
+            </p>
+          )}
+          <DialogFooter>
+            <Button variant='outline' onClick={closeActivation}>
+              Cancel
+            </Button>
+            <Button
+              onClick={handleActivate}
+              disabled={
+                workflow.activate.isPending ||
+                loadingActivationMapping ||
+                !activationMapping
+              }
+            >
+              {workflow.activate.isPending ? 'Activating...' : 'Activate'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={Boolean(rollbackRevisionId)}
+        onOpenChange={(open) => {
+          if (!open) closeRollback()
+        }}
+      >
+        <DialogContent className='sm:max-w-lg'>
+          <DialogHeader>
+            <DialogTitle>Rollback Revision</DialogTitle>
+          </DialogHeader>
+          <div className='space-y-2'>
+            <p className='text-sm font-medium'>Rollback reason</p>
+            <Textarea
+              value={rollbackReason}
+              onChange={(event) => setRollbackReason(event.target.value)}
+              rows={4}
+            />
+          </div>
+          <DialogFooter>
+            <Button variant='outline' onClick={closeRollback}>
+              Cancel
+            </Button>
+            <Button
+              variant='destructive'
+              onClick={handleRollback}
+              disabled={workflow.rollback.isPending}
+            >
+              {workflow.rollback.isPending ? 'Rolling back...' : 'Rollback'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

@@ -26,7 +26,7 @@ function isProcurementActivity(name) {
 
 async function seedCostRecords(projectId) {
   const activities = await prisma.activity.findMany({
-    where: { projectId },
+    where: { projectId, isActive: true },
     select: { id: true },
   });
 
@@ -73,7 +73,7 @@ function formatOrderBy(earlyStart) {
 
 async function seedLongLeadItems(projectId) {
   const activities = await prisma.activity.findMany({
-    where: { projectId },
+    where: { projectId, isActive: true },
     select: { id: true, name: true, earlyStart: true },
   });
 
@@ -103,7 +103,11 @@ async function seedLongLeadItems(projectId) {
       activityId: activity.id,
       item: activity.name,
       leadWeeks: 0,
+      requiredTiming: 'activity_start',
+      needOffsetDays: 0,
+      bufferDays: 14,
       orderBy: formatOrderBy(activity.earlyStart),
+      warehouseStatus: 'not_received',
       criticality: 'medium',
       risk: 'Auto-seeded from imported schedule',
       status: 'not_ordered',

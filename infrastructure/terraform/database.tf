@@ -8,6 +8,16 @@ resource "aws_db_subnet_group" "main" {
   tags = { Name = "${var.app_name}-db-subnet-group" }
 }
 
+resource "random_id" "db_final_snapshot_suffix" {
+  byte_length = 4
+
+  keepers = {
+    app_name    = var.app_name
+    environment = var.environment
+    db_name     = var.db_name
+  }
+}
+
 ################################
 # RDS PostgreSQL — db.t3.micro single-AZ
 ################################
@@ -30,17 +40,34 @@ resource "aws_db_instance" "main" {
   db_subnet_group_name   = aws_db_subnet_group.main.name
   vpc_security_group_ids = [aws_security_group.rds.id]
 
-  multi_az               = false  # single-AZ to stay within $100/mo budget
-  publicly_accessible    = false
-  deletion_protection    = true
-  skip_final_snapshot    = false
-  final_snapshot_identifier = "${var.app_name}-db-final-snapshot"
+  multi_az            = false # single-AZ limits availability, but backups remain mandatory
+  publicly_accessible = false
 
-  backup_retention_period = 0  # free tier allows 0 only
-  backup_window           = "02:00-03:00"
+  deletion_protection       = true
+  skip_final_snapshot       = false
+  final_snapshot_identifier = "${var.app_name}-${var.environment}-db-final-${random_id.db_final_snapshot_suffix.hex}"
+  delete_automated_backups  = false
+  copy_tags_to_snapshot     = true
+
+  backup_retention_period = var.rds_backup_retention_days
+  backup_window           = var.rds_backup_window
   maintenance_window      = "sun:04:00-sun:05:00"
 
-  performance_insights_enabled = false  # extra cost; enable when budget allows
+  performance_insights_enabled = false # extra cost; enable when budget allows
 
-  tags = { Name = "${var.app_name}-db" }
+  lifecycle {
+    precondition {
+      condition     = var.rds_backup_retention_days >= 7
+      error_message = "F-007 production blocker: rds_backup_retention_days must be at least 7."
+    }
+  }
+
+  tags = {
+    Name                = "${var.app_name}-db"
+    Environment         = var.environment
+    BackupRetentionDays = tostring(var.rds_backup_retention_days)
+    RPOHours            = tostring(var.rds_recovery_rpo_hours)
+    RTOHours            = tostring(var.rds_recovery_rto_hours)
+    ProductionBlocker   = "F-007"
+  }
 }

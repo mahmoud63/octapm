@@ -1,25 +1,71 @@
 const express = require('express');
+const crypto = require('crypto');
 const multer = require('multer');
+const path = require('path');
 const { asyncHandler } = require('../utils/async-handler');
-const { sendSuccess, sendError } = require('../utils/api-response');
+const { sendSuccess } = require('../utils/api-response');
 const { HttpError } = require('../utils/http-error');
 const { authenticate } = require('../middleware/auth');
 const { requireRoles } = require('../middleware/rbac');
 const boqService = require('../services/boq.service');
+const fileStorageService = require('../services/file-storage.service');
+const { assertMoneyInput } = require('../utils/money');
 
 const router = express.Router({ mergeParams: true });
 
 const upload = multer({
-  storage: multer.memoryStorage(),
+  storage: multer.diskStorage({
+    destination: (_req, _file, cb) => {
+      try {
+        cb(null, fileStorageService.ensureTempUploadDirSync());
+      } catch (error) {
+        cb(error);
+      }
+    },
+    filename: (_req, file, cb) => {
+      cb(null, `${crypto.randomUUID()}${path.extname(file.originalname || '').toLowerCase()}`);
+    },
+  }),
   limits: { fileSize: 50 * 1024 * 1024 },
   fileFilter: (_req, file, cb) => {
     const ext = '.' + file.originalname.split('.').pop().toLowerCase();
-    if (['.xlsx', '.xls'].includes(ext)) cb(null, true);
+    if (
+      ['.xlsx', '.xls'].includes(ext) &&
+      fileStorageService.isAllowedOriginalNameForType(
+        fileStorageService.DOCUMENT_TYPES.BOQ_UPLOAD,
+        file.originalname,
+      )
+    ) cb(null, true);
     else cb(new HttpError(400, 'UNSUPPORTED_FORMAT', 'Only .xlsx and .xls files are allowed'));
   },
 });
 
 const CAN_MODIFY = requireRoles('pm', 'planning_eng', 'qs');
+
+function assertPositiveNumber(value, field) {
+  if (!Number.isFinite(Number(value)) || Number(value) <= 0) {
+    throw new HttpError(
+      400,
+      'VALIDATION_ERROR',
+      `${field} must be a positive number`,
+    );
+  }
+}
+
+function assertPositiveMoney(value, field) {
+  assertMoneyInput(field, value, { min: 0.01 });
+}
+
+function assertValidDependencyType(value) {
+  if (value === undefined || value === null || value === '') return;
+  if (!['FS', 'SS'].includes(value)) {
+    throw new HttpError(
+      400,
+      'VALIDATION_ERROR',
+      'dependencyType must be FS, SS, or null',
+    );
+  }
+}
 
 // GET /projects/:projectId/boq/template
 router.get(
@@ -46,8 +92,47 @@ router.post(
     const { projectId } = req.params;
     const label = req.body?.label || null;
 
-    const result = await boqService.processBoqUpload(projectId, req.file.buffer, label);
-    return sendSuccess(res, result);
+    try {
+      const document = await fileStorageService.uploadBoqFile({
+        orgId: req.user.orgId,
+        projectId,
+        userId: req.user.id,
+        file: req.file,
+      });
+      const result = await boqService.processBoqUpload(
+        projectId,
+        { path: req.file.path },
+        label,
+        {
+          orgId: req.user.orgId,
+          userId: req.user.id,
+          userRole: req.user.role,
+          documentId: document.documentId,
+        },
+      );
+      return sendSuccess(res, { ...result, document });
+    } finally {
+      await fileStorageService.cleanupTempFiles(req.file);
+    }
+  }),
+);
+
+// GET /projects/:projectId/boq/uploads/:documentId
+router.get(
+  '/uploads/:documentId',
+  authenticate,
+  CAN_MODIFY,
+  asyncHandler(async (req, res) => {
+    const file = await fileStorageService.getBoqUploadFile({
+      orgId: req.user.orgId,
+      projectId: req.params.projectId,
+      key: req.params.documentId,
+    });
+    if (file.redirectUrl) {
+      return res.redirect(302, file.redirectUrl);
+    }
+    res.type(file.mimeType);
+    return res.sendFile(file.path);
   }),
 );
 
@@ -70,7 +155,9 @@ router.get(
   '/',
   authenticate,
   asyncHandler(async (req, res) => {
-    const data = await boqService.getProjectBoq(req.params.projectId);
+    const data = await boqService.getProjectBoq(req.params.projectId, {
+      orgId: req.user.orgId,
+    });
     return sendSuccess(res, data);
   }),
 );
@@ -81,7 +168,12 @@ router.patch(
   authenticate,
   CAN_MODIFY,
   asyncHandler(async (req, res) => {
-    const result = await boqService.updateBoqItem(req.params.projectId, req.params.itemId, req.body);
+    const result = await boqService.updateBoqItem(
+      req.params.projectId,
+      req.params.itemId,
+      req.body,
+      { orgId: req.user.orgId, userId: req.user.id, userRole: req.user.role },
+    );
     return sendSuccess(res, result);
   }),
 );
@@ -96,7 +188,13 @@ router.post(
     if (!code || !description || !quantity || !unit || !rate || !activityName) {
       throw new HttpError(400, 'MISSING_FIELDS', 'code, description, quantity, unit, rate and activityName are required');
     }
-    const result = await boqService.createManualBoqItem(req.params.projectId, req.body);
+    assertPositiveNumber(quantity, 'quantity');
+    assertPositiveMoney(rate, 'rate');
+    const result = await boqService.createManualBoqItem(
+      req.params.projectId,
+      req.body,
+      { orgId: req.user.orgId, userId: req.user.id, userRole: req.user.role },
+    );
     return sendSuccess(res, result, 201);
   }),
 );
@@ -107,7 +205,11 @@ router.delete(
   authenticate,
   CAN_MODIFY,
   asyncHandler(async (req, res) => {
-    const result = await boqService.deleteBoqItem(req.params.projectId, req.params.itemId);
+    const result = await boqService.deleteBoqItem(
+      req.params.projectId,
+      req.params.itemId,
+      { orgId: req.user.orgId, userId: req.user.id, userRole: req.user.role },
+    );
     return sendSuccess(res, result);
   }),
 );
@@ -122,7 +224,15 @@ router.post(
     if (!activityName || !unit || quantity === undefined || rate === undefined) {
       throw new HttpError(400, 'MISSING_FIELDS', 'activityName, unit, quantity, and rate are required');
     }
-    const result = await boqService.createActivity(req.params.projectId, req.params.itemId, req.body);
+    assertPositiveNumber(quantity, 'quantity');
+    assertPositiveMoney(rate, 'rate');
+    assertValidDependencyType(req.body.dependencyType);
+    const result = await boqService.createActivity(
+      req.params.projectId,
+      req.params.itemId,
+      req.body,
+      { orgId: req.user.orgId, userId: req.user.id, userRole: req.user.role },
+    );
     return sendSuccess(res, result, 201);
   }),
 );
@@ -133,7 +243,19 @@ router.patch(
   authenticate,
   CAN_MODIFY,
   asyncHandler(async (req, res) => {
-    const result = await boqService.updateActivity(req.params.projectId, req.params.activityId, req.body);
+    if (req.body.quantity !== undefined) {
+      assertPositiveNumber(req.body.quantity, 'quantity');
+    }
+    if (req.body.rate !== undefined) {
+      assertPositiveMoney(req.body.rate, 'rate');
+    }
+    assertValidDependencyType(req.body.dependencyType);
+    const result = await boqService.updateActivity(
+      req.params.projectId,
+      req.params.activityId,
+      req.body,
+      { orgId: req.user.orgId, userId: req.user.id, userRole: req.user.role },
+    );
     return sendSuccess(res, result);
   }),
 );
@@ -144,7 +266,16 @@ router.delete(
   authenticate,
   CAN_MODIFY,
   asyncHandler(async (req, res) => {
-    await boqService.deleteActivity(req.params.projectId, req.params.activityId);
+    await boqService.deleteActivity(
+      req.params.projectId,
+      req.params.activityId,
+      {
+        orgId: req.user.orgId,
+        userId: req.user.id,
+        userRole: req.user.role,
+        allocationId: req.body?.allocationId || req.query?.allocationId || null,
+      },
+    );
     return sendSuccess(res, null);
   }),
 );

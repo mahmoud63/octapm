@@ -2,18 +2,26 @@ import { useState } from 'react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import type { ScheduleActivity } from '@/features/schedule/data/schema'
 import {
   useCreateWeatherDelay,
   useWeatherDelays,
 } from '../hooks/use-commercial'
 
-export function WeatherDelaysPanel({ projectId }: { projectId: string }) {
+export function WeatherDelaysPanel({
+  projectId,
+  activities = [],
+}: {
+  projectId: string
+  activities?: ScheduleActivity[]
+}) {
   const { data } = useWeatherDelays(projectId)
   const createMutation = useCreateWeatherDelay(projectId)
 
   const [date, setDate] = useState('')
   const [description, setDescription] = useState('')
   const [delayDays, setDelayDays] = useState('')
+  const [activityIds, setActivityIds] = useState<string[]>([])
 
   return (
     <div className='space-y-3'>
@@ -73,10 +81,16 @@ export function WeatherDelaysPanel({ projectId }: { projectId: string }) {
                 description,
                 delayDays: Number(delayDays) || 0,
                 contractual: true,
+                affectedActivityIds: activityIds,
+                activityLinks: activityIds.map((activityId) => ({
+                  activityId,
+                  delayDays: Number(delayDays) || 0,
+                })),
               })
               setDate('')
               setDescription('')
               setDelayDays('')
+              setActivityIds([])
               toast.success('Weather delay logged')
             } catch {
               toast.error('Failed to log delay')
@@ -85,6 +99,33 @@ export function WeatherDelaysPanel({ projectId }: { projectId: string }) {
         >
           Add Delay
         </Button>
+        <div className='sm:col-span-4'>
+          <div className='grid max-h-32 gap-1 overflow-y-auto rounded-md border p-2 sm:grid-cols-2'>
+            {activities.map((activity) => (
+              <label
+                key={activity.id}
+                className='flex items-start gap-2 rounded-sm px-2 py-1 text-xs hover:bg-muted/60'
+              >
+                <input
+                  type='checkbox'
+                  className='mt-0.5'
+                  checked={activityIds.includes(activity.id)}
+                  onChange={(e) => {
+                    setActivityIds((prev) =>
+                      e.target.checked
+                        ? [...prev, activity.id]
+                        : prev.filter((id) => id !== activity.id)
+                    )
+                  }}
+                />
+                <span className='min-w-0 truncate'>
+                  {activity.wbsCode ? `${activity.wbsCode} - ` : ''}
+                  {activity.name}
+                </span>
+              </label>
+            ))}
+          </div>
+        </div>
       </div>
 
       <div className='overflow-x-auto rounded-md border'>
@@ -94,6 +135,7 @@ export function WeatherDelaysPanel({ projectId }: { projectId: string }) {
               <th className='p-2 text-left'>Date</th>
               <th className='p-2 text-left'>Description</th>
               <th className='p-2 text-right'>Days</th>
+              <th className='p-2 text-left'>Activities</th>
               <th className='p-2 text-left'>Type</th>
             </tr>
           </thead>
@@ -105,6 +147,13 @@ export function WeatherDelaysPanel({ projectId }: { projectId: string }) {
                 </td>
                 <td className='p-2 text-xs'>{row.description}</td>
                 <td className='p-2 text-right text-xs'>{row.delayDays}</td>
+                <td className='max-w-56 truncate p-2 text-xs'>
+                  {row.activityLinks?.length
+                    ? row.activityLinks
+                        .map((link) => link.activity?.name || link.activityId)
+                        .join(', ')
+                    : '-'}
+                </td>
                 <td className='p-2 text-xs'>
                   {row.contractual ? 'Contractual' : 'Non-contractual'}
                 </td>

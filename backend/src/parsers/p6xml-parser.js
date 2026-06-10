@@ -51,6 +51,12 @@ function hoursToDays(hours) {
   return Math.max(0, Math.round(n / 8));
 }
 
+function lagHoursToDays(hours) {
+  const n = Number.parseFloat(hours);
+  if (!Number.isFinite(n)) return 0;
+  return Math.round(n / 8);
+}
+
 function mapP6Status(status) {
   const normalized = String(status || '')
     .trim()
@@ -127,7 +133,7 @@ async function parseP6Xml(content) {
     succId: pick(r, ['SuccessorActivityObjectId', 'SuccessorActivityId']),
     predId: pick(r, ['PredecessorActivityObjectId', 'PredecessorActivityId']),
     type: mapRelType(pick(r, ['Type'])),
-    lagDays: hoursToDays(pick(r, ['Lag', 'LagHours'])),
+    lagDays: lagHoursToDays(pick(r, ['Lag', 'LagHours'])),
   }));
 
   const wbsNodes = wbsNodesRaw.map((w) => ({
@@ -143,5 +149,6 @@ async function parseP6Xml(content) {
 module.exports = {
   parseP6Xml,
   hoursToDays,
+  lagHoursToDays,
   mapRelType,
 };

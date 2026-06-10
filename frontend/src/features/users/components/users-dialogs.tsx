@@ -1,4 +1,5 @@
 import { toast } from 'sonner'
+import { getServerErrorMessage } from '@/lib/handle-server-error'
 import { useDeactivateUserMutation } from '../hooks/use-users'
 import { UsersActionDialog } from './users-action-dialog'
 import { UsersDeactivateDialog } from './users-deactivate-dialog'
@@ -21,8 +22,8 @@ export function UsersDialogs() {
       toast.success('Engineer deactivated successfully.')
       setOpen(null)
       setCurrentRow(null)
-    } catch {
-      toast.error('Failed to deactivate engineer.')
+    } catch (error) {
+      toast.error(getServerErrorMessage(error, 'Failed to deactivate engineer.'))
     }
   }
 

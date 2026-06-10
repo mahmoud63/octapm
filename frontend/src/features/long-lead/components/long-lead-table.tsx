@@ -1,6 +1,8 @@
-import { useState } from 'react'
-import { AlertTriangle } from 'lucide-react'
+import { useMemo, useState } from 'react'
+import { AlertTriangle, Pencil, Plus, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
+import { cn } from '@/lib/utils'
+import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -30,24 +32,96 @@ type Props = {
 type FormState = {
   item: string
   leadWeeks: number
+  requiredTiming: 'activity_start' | 'activity_finish'
+  needOffsetDays: number
+  bufferDays: number
   orderBy: string
+  expectedDeliveryDate: string
   criticality: string
   risk: string
   supplier: string
   status: 'not_ordered' | 'ordered' | 'delivered'
+  warehouseStatus: 'not_received' | 'partial' | 'received' | 'issued'
   activityId: string
 }
+
+type RiskSeverity = NonNullable<
+  LongLeadItemRecord['procurementRisk']
+>['severity']
 
 const defaultForm: FormState = {
   item: '',
   leadWeeks: 0,
+  requiredTiming: 'activity_start',
+  needOffsetDays: 0,
+  bufferDays: 14,
   orderBy: '',
+  expectedDeliveryDate: '',
   criticality: '',
   risk: '',
   supplier: '',
   status: 'not_ordered',
+  warehouseStatus: 'not_received',
   activityId: '',
 }
+
+const severityRank: Record<RiskSeverity, number> = {
+  none: 0,
+  low: 1,
+  medium: 2,
+  high: 3,
+  critical: 4,
+}
+
+const severityClassMap: Record<RiskSeverity, string> = {
+  none: 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/40 dark:bg-emerald-950/20 dark:text-emerald-300',
+  low: 'border-slate-200 bg-slate-50 text-slate-700 dark:border-slate-800 dark:bg-slate-950/20 dark:text-slate-300',
+  medium:
+    'border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-900/40 dark:bg-amber-950/20 dark:text-amber-300',
+  high: 'border-orange-200 bg-orange-50 text-orange-800 dark:border-orange-900/40 dark:bg-orange-950/20 dark:text-orange-300',
+  critical:
+    'border-red-200 bg-red-50 text-red-800 dark:border-red-900/40 dark:bg-red-950/20 dark:text-red-300',
+}
+
+const rowRiskClassMap: Partial<Record<RiskSeverity, string>> = {
+  medium: 'bg-amber-50/60 dark:bg-amber-950/15',
+  high: 'bg-orange-50/70 dark:bg-orange-950/20',
+  critical: 'bg-red-50/70 dark:bg-red-950/20',
+}
+
+const statusLabels: Record<FormState['status'], string> = {
+  not_ordered: 'Not Ordered',
+  ordered: 'Ordered',
+  delivered: 'Delivered',
+}
+
+const warehouseLabels: Record<FormState['warehouseStatus'], string> = {
+  not_received: 'Not Received',
+  partial: 'Partial',
+  received: 'Received',
+  issued: 'Issued',
+}
+
+const formatDate = (value: string | null | undefined) => {
+  if (!value) return '-'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value
+  return date.toLocaleDateString()
+}
+
+const toDateInput = (value: string | null | undefined) => {
+  if (!value) return ''
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return ''
+  return date.toISOString().slice(0, 10)
+}
+
+const riskLabel = (reason: string | undefined) =>
+  reason ? reason.replace(/_/g, ' ') : 'on track'
+
+const mutationErrorMessage = (error: unknown, fallback: string) =>
+  (error as { response?: { data?: { error?: { message?: string } } } })
+    ?.response?.data?.error?.message ?? fallback
 
 export function LongLeadTable({ projectId, activities }: Props) {
   const { data: items = [], isLoading } = useLongLeadItems(projectId)
@@ -61,6 +135,24 @@ export function LongLeadTable({ projectId, activities }: Props) {
   )
   const [form, setForm] = useState<FormState>(defaultForm)
 
+  const atRiskItems = useMemo(
+    () => items.filter((item) => item.procurementRisk?.isAtRisk),
+    [items]
+  )
+  const topRiskItems = useMemo(
+    () =>
+      [...atRiskItems].sort((a, b) => {
+        const aRisk = a.procurementRisk
+        const bRisk = b.procurementRisk
+        const severityDelta =
+          severityRank[bRisk?.severity ?? 'none'] -
+          severityRank[aRisk?.severity ?? 'none']
+        if (severityDelta !== 0) return severityDelta
+        return (bRisk?.daysAtRisk ?? 0) - (aRisk?.daysAtRisk ?? 0)
+      }),
+    [atRiskItems]
+  )
+
   const setFormFromItem = (item: LongLeadItemRecord | null) => {
     if (!item) {
       setForm(defaultForm)
@@ -69,11 +161,16 @@ export function LongLeadTable({ projectId, activities }: Props) {
     setForm({
       item: item.item,
       leadWeeks: item.leadWeeks,
+      requiredTiming: item.requiredTiming || 'activity_start',
+      needOffsetDays: item.needOffsetDays || 0,
+      bufferDays: item.bufferDays ?? 14,
       orderBy: item.orderBy || '',
+      expectedDeliveryDate: toDateInput(item.expectedDeliveryDate),
       criticality: item.criticality || '',
       risk: item.risk || '',
       supplier: item.supplier || '',
       status: item.status,
+      warehouseStatus: item.warehouseStatus || 'not_received',
       activityId: item.activityId || '',
     })
   }
@@ -81,26 +178,39 @@ export function LongLeadTable({ projectId, activities }: Props) {
   const toPayload = (): LongLeadPayload => ({
     item: form.item,
     leadWeeks: Number(form.leadWeeks) || 0,
+    requiredTiming: form.requiredTiming,
+    needOffsetDays: Number(form.needOffsetDays) || 0,
+    bufferDays: Number(form.bufferDays) || 0,
     orderBy: form.orderBy,
+    expectedDeliveryDate: form.expectedDeliveryDate || null,
     criticality: form.criticality,
     risk: form.risk,
     supplier: form.supplier,
     status: form.status,
+    warehouseStatus: form.warehouseStatus,
     activityId: form.activityId || null,
   })
 
   if (isLoading) {
     return (
       <p className='py-8 text-center text-muted-foreground'>
-        Loading long lead items…
+        Loading long lead items...
       </p>
     )
   }
 
   return (
     <div className='space-y-3'>
-      <div className='flex items-center justify-between'>
-        <h3 className='text-sm font-semibold'>Long Lead Register</h3>
+      <div className='flex items-center justify-between gap-3'>
+        <div>
+          <h3 className='text-sm font-semibold'>Long Lead Register</h3>
+          {atRiskItems.length > 0 && (
+            <p className='text-xs text-muted-foreground'>
+              {atRiskItems.length} schedule-linked procurement alert
+              {atRiskItems.length === 1 ? '' : 's'}
+            </p>
+          )}
+        </div>
         <Button
           size='sm'
           onClick={() => {
@@ -109,22 +219,50 @@ export function LongLeadTable({ projectId, activities }: Props) {
             setFormOpen(true)
           }}
         >
+          <Plus className='mr-1.5 h-4 w-4' />
           Add Item
         </Button>
       </div>
+
+      {topRiskItems.length > 0 && (
+        <div className='rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-900/40 dark:bg-amber-950/20 dark:text-amber-200'>
+          <div className='flex items-start gap-2'>
+            <AlertTriangle className='mt-0.5 h-4 w-4 shrink-0' />
+            <div className='min-w-0 space-y-1'>
+              {topRiskItems.slice(0, 3).map((item) => {
+                const risk = item.procurementRisk
+                return (
+                  <p key={item.id} className='text-xs'>
+                    <span className='font-semibold'>{item.item}</span>
+                    {' - '}
+                    {riskLabel(risk?.reason)}
+                    {risk?.daysAtRisk
+                      ? ` (${risk.daysAtRisk}d at risk)`
+                      : ''}
+                    {risk?.impactedActivity
+                      ? ` - ${risk.impactedActivity.wbsCode ? `${risk.impactedActivity.wbsCode} ` : ''}${risk.impactedActivity.name}`
+                      : ''}
+                  </p>
+                )
+              })}
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className='overflow-x-auto rounded-md border'>
         <table className='w-full text-sm whitespace-nowrap'>
           <thead className='border-b bg-muted/50'>
             <tr>
               <th className='p-2 text-left font-medium'>Item</th>
-              <th className='p-2 text-right font-medium'>Lead Weeks</th>
+              <th className='p-2 text-left font-medium'>Need Date</th>
+              <th className='p-2 text-right font-medium'>Lead + Buffer</th>
               <th className='p-2 text-left font-medium'>Order By</th>
+              <th className='p-2 text-left font-medium'>Delivery</th>
+              <th className='p-2 text-left font-medium'>Warehouse</th>
               <th className='p-2 text-left font-medium'>Activity</th>
-              <th className='p-2 text-left font-medium'>Criticality</th>
-              <th className='p-2 text-left font-medium'>Risk Note</th>
+              <th className='p-2 text-left font-medium'>Risk</th>
               <th className='p-2 text-left font-medium'>Supplier</th>
-              <th className='p-2 text-center font-medium'>Status</th>
               <th className='p-2 text-right font-medium'>Actions</th>
             </tr>
           </thead>
@@ -132,7 +270,7 @@ export function LongLeadTable({ projectId, activities }: Props) {
             {items.length === 0 ? (
               <tr>
                 <td
-                  colSpan={9}
+                  colSpan={10}
                   className='p-6 text-center text-muted-foreground'
                 >
                   No long lead items available.
@@ -140,57 +278,65 @@ export function LongLeadTable({ projectId, activities }: Props) {
               </tr>
             ) : (
               items.map((item) => {
-                const urgent = item.leadWeeks >= 12
+                const risk = item.procurementRisk
+                const severity = risk?.severity ?? 'none'
+                const computedOrderBy = risk?.orderByDate || item.orderBy
                 return (
                   <tr
                     key={item.id}
-                    className={`border-b hover:bg-muted/25 ${urgent ? 'bg-orange-50/70 dark:bg-orange-950/20' : ''}`}
+                    className={cn(
+                      'border-b hover:bg-muted/25',
+                      rowRiskClassMap[severity]
+                    )}
                   >
-                    <td className='p-2'>
-                      <div className='flex items-center gap-1.5'>
-                        {urgent && (
-                          <AlertTriangle className='h-3.5 w-3.5 text-orange-600' />
+                    <td className='max-w-64 p-2'>
+                      <div className='flex min-w-0 items-center gap-1.5'>
+                        {risk?.isAtRisk && (
+                          <AlertTriangle className='h-3.5 w-3.5 shrink-0 text-amber-600' />
                         )}
-                        <span className='font-medium'>{item.item}</span>
+                        <div className='min-w-0'>
+                          <p className='truncate font-medium'>{item.item}</p>
+                          {item.criticality && (
+                            <p className='text-xs text-muted-foreground'>
+                              {item.criticality}
+                            </p>
+                          )}
+                        </div>
                       </div>
                     </td>
-                    <td className='p-2 text-right'>{item.leadWeeks}</td>
-                    <td className='p-2 text-muted-foreground'>
-                      {item.orderBy || '—'}
+                    <td className='p-2'>
+                      <p>{formatDate(risk?.needDate)}</p>
+                      {risk?.needSlackDays !== null &&
+                        risk?.needSlackDays !== undefined && (
+                          <p className='text-xs text-muted-foreground'>
+                            {risk.needSlackDays >= 0
+                              ? `${risk.needSlackDays}d left`
+                              : `${Math.abs(risk.needSlackDays)}d late`}
+                          </p>
+                        )}
+                    </td>
+                    <td className='p-2 text-right font-mono text-xs'>
+                      {item.leadWeeks}w + {item.bufferDays ?? 14}d
                     </td>
                     <td className='p-2'>
-                      {item.activity ? (
-                        <button
-                          className='rounded-full border px-2 py-0.5 text-xs text-blue-700 hover:bg-blue-50 dark:text-blue-300'
-                          onClick={() => {
-                            const encoded = encodeURIComponent(
-                              item.activity?.id || ''
-                            )
-                            window.location.hash = `activity-${encoded}`
-                          }}
-                        >
-                          {item.activity.wbsCode
-                            ? `${item.activity.wbsCode} · `
-                            : ''}
-                          {item.activity.name}
-                        </button>
-                      ) : (
-                        <span className='text-muted-foreground'>—</span>
-                      )}
+                      <p>{formatDate(computedOrderBy)}</p>
+                      {risk?.orderBySlackDays !== null &&
+                        risk?.orderBySlackDays !== undefined && (
+                          <p
+                            className={cn(
+                              'text-xs',
+                              risk.orderBySlackDays < 0
+                                ? 'font-semibold text-red-600'
+                                : 'text-muted-foreground'
+                            )}
+                          >
+                            {risk.orderBySlackDays >= 0
+                              ? `${risk.orderBySlackDays}d left`
+                              : `${Math.abs(risk.orderBySlackDays)}d late`}
+                          </p>
+                        )}
                     </td>
-                    <td className='p-2 text-muted-foreground'>
-                      {item.criticality || '—'}
-                    </td>
-                    <td
-                      className='max-w-60 truncate p-2 text-muted-foreground'
-                      title={item.risk || ''}
-                    >
-                      {item.risk || '—'}
-                    </td>
-                    <td className='p-2 text-muted-foreground'>
-                      {item.supplier || '—'}
-                    </td>
-                    <td className='p-2 text-center'>
+                    <td className='p-2'>
                       <select
                         className='h-8 rounded-md border bg-background px-2 text-xs'
                         value={item.status}
@@ -203,16 +349,93 @@ export function LongLeadTable({ projectId, activities }: Props) {
                                   .value as LongLeadPayload['status'],
                               },
                             })
-                            toast.success('Status updated')
-                          } catch {
-                            toast.error('Failed to update status')
+                            toast.success('Delivery status updated')
+                          } catch (error) {
+                            toast.error(
+                              mutationErrorMessage(
+                                error,
+                                'Failed to update status'
+                              )
+                            )
                           }
                         }}
                       >
-                        <option value='not_ordered'>Not Ordered</option>
-                        <option value='ordered'>Ordered</option>
-                        <option value='delivered'>Delivered</option>
+                        {Object.entries(statusLabels).map(([value, label]) => (
+                          <option key={value} value={value}>
+                            {label}
+                          </option>
+                        ))}
                       </select>
+                      <p className='mt-1 text-xs text-muted-foreground'>
+                        ETA {formatDate(risk?.expectedDeliveryDate)}
+                      </p>
+                    </td>
+                    <td className='p-2'>
+                      <select
+                        className='h-8 rounded-md border bg-background px-2 text-xs'
+                        value={item.warehouseStatus}
+                        onChange={async (e) => {
+                          try {
+                            await updateItem.mutateAsync({
+                              itemId: item.id,
+                              payload: {
+                                warehouseStatus: e.target
+                                  .value as LongLeadPayload['warehouseStatus'],
+                              },
+                            })
+                            toast.success('Warehouse status updated')
+                          } catch (error) {
+                            toast.error(
+                              mutationErrorMessage(
+                                error,
+                                'Failed to update warehouse status'
+                              )
+                            )
+                          }
+                        }}
+                      >
+                        {Object.entries(warehouseLabels).map(
+                          ([value, label]) => (
+                            <option key={value} value={value}>
+                              {label}
+                            </option>
+                          )
+                        )}
+                      </select>
+                    </td>
+                    <td className='max-w-72 p-2'>
+                      {item.activity ? (
+                        <button
+                          className='max-w-64 truncate rounded-full border px-2 py-0.5 text-xs text-blue-700 hover:bg-blue-50 dark:text-blue-300'
+                          onClick={() => {
+                            const encoded = encodeURIComponent(
+                              item.activity?.id || ''
+                            )
+                            window.location.hash = `activity-${encoded}`
+                          }}
+                        >
+                          {item.activity.wbsCode
+                            ? `${item.activity.wbsCode} - `
+                            : ''}
+                          {item.activity.name}
+                        </button>
+                      ) : (
+                        <span className='text-muted-foreground'>-</span>
+                      )}
+                    </td>
+                    <td className='max-w-56 p-2'>
+                      <Badge className={severityClassMap[severity]}>
+                        {severity}
+                      </Badge>
+                      <p
+                        className='mt-1 truncate text-xs text-muted-foreground'
+                        title={item.risk || riskLabel(risk?.reason)}
+                      >
+                        {riskLabel(risk?.reason)}
+                      </p>
+                    </td>
+                    <td className='p-2 text-muted-foreground'>
+                      {item.supplier || '-'}
                     </td>
                     <td className='p-2 text-right'>
                       <div className='flex justify-end gap-1'>
@@ -225,6 +448,7 @@ export function LongLeadTable({ projectId, activities }: Props) {
                             setFormOpen(true)
                           }}
                         >
+                          <Pencil className='mr-1.5 h-3.5 w-3.5' />
                           Edit
                         </Button>
                         <Button
@@ -240,11 +464,17 @@ export function LongLeadTable({ projectId, activities }: Props) {
                             try {
                               await deleteItem.mutateAsync(item.id)
                               toast.success('Item deleted')
-                            } catch {
-                              toast.error('Failed to delete item')
+                            } catch (error) {
+                              toast.error(
+                                mutationErrorMessage(
+                                  error,
+                                  'Failed to delete item'
+                                )
+                              )
                             }
                           }}
                         >
+                          <Trash2 className='mr-1.5 h-3.5 w-3.5' />
                           Delete
                         </Button>
                       </div>
@@ -269,7 +499,7 @@ export function LongLeadTable({ projectId, activities }: Props) {
             </DialogDescription>
           </DialogHeader>
 
-          <div className='grid grid-cols-2 gap-3'>
+          <div className='grid grid-cols-1 gap-3 sm:grid-cols-2'>
             <div className='grid gap-1.5'>
               <Label htmlFor='ll-item'>Item</Label>
               <Input
@@ -279,6 +509,25 @@ export function LongLeadTable({ projectId, activities }: Props) {
                   setForm((prev) => ({ ...prev, item: e.target.value }))
                 }
               />
+            </div>
+            <div className='grid gap-1.5'>
+              <Label htmlFor='ll-activity'>Linked Activity</Label>
+              <select
+                id='ll-activity'
+                className='h-9 rounded-md border bg-background px-2 text-sm'
+                value={form.activityId}
+                onChange={(e) =>
+                  setForm((prev) => ({ ...prev, activityId: e.target.value }))
+                }
+              >
+                <option value=''>None</option>
+                {activities.map((activity) => (
+                  <option key={activity.id} value={activity.id}>
+                    {activity.wbsCode ? `${activity.wbsCode} - ` : ''}
+                    {activity.name}
+                  </option>
+                ))}
+              </select>
             </div>
             <div className='grid gap-1.5'>
               <Label htmlFor='ll-lead-weeks'>Lead Weeks</Label>
@@ -296,7 +545,69 @@ export function LongLeadTable({ projectId, activities }: Props) {
               />
             </div>
             <div className='grid gap-1.5'>
-              <Label htmlFor='ll-order-by'>Order By</Label>
+              <Label htmlFor='ll-buffer-days'>Order Buffer Days</Label>
+              <Input
+                id='ll-buffer-days'
+                type='number'
+                min={0}
+                value={form.bufferDays}
+                onChange={(e) =>
+                  setForm((prev) => ({
+                    ...prev,
+                    bufferDays: Number(e.target.value) || 0,
+                  }))
+                }
+              />
+            </div>
+            <div className='grid gap-1.5'>
+              <Label htmlFor='ll-required-timing'>Need Basis</Label>
+              <select
+                id='ll-required-timing'
+                className='h-9 rounded-md border bg-background px-2 text-sm'
+                value={form.requiredTiming}
+                onChange={(e) =>
+                  setForm((prev) => ({
+                    ...prev,
+                    requiredTiming: e.target
+                      .value as FormState['requiredTiming'],
+                  }))
+                }
+              >
+                <option value='activity_start'>Activity Start</option>
+                <option value='activity_finish'>Activity Finish</option>
+              </select>
+            </div>
+            <div className='grid gap-1.5'>
+              <Label htmlFor='ll-need-offset'>Need Offset Days</Label>
+              <Input
+                id='ll-need-offset'
+                type='number'
+                min={0}
+                value={form.needOffsetDays}
+                onChange={(e) =>
+                  setForm((prev) => ({
+                    ...prev,
+                    needOffsetDays: Number(e.target.value) || 0,
+                  }))
+                }
+              />
+            </div>
+            <div className='grid gap-1.5'>
+              <Label htmlFor='ll-expected-delivery'>Expected Delivery</Label>
+              <Input
+                id='ll-expected-delivery'
+                type='date'
+                value={form.expectedDeliveryDate}
+                onChange={(e) =>
+                  setForm((prev) => ({
+                    ...prev,
+                    expectedDeliveryDate: e.target.value,
+                  }))
+                }
+              />
+            </div>
+            <div className='grid gap-1.5'>
+              <Label htmlFor='ll-order-by'>Order Note</Label>
               <Input
                 id='ll-order-by'
                 value={form.orderBy}
@@ -326,7 +637,7 @@ export function LongLeadTable({ projectId, activities }: Props) {
               />
             </div>
             <div className='grid gap-1.5'>
-              <Label htmlFor='ll-status'>Status</Label>
+              <Label htmlFor='ll-status'>Delivery Status</Label>
               <select
                 id='ll-status'
                 className='h-9 rounded-md border bg-background px-2 text-sm'
@@ -338,31 +649,35 @@ export function LongLeadTable({ projectId, activities }: Props) {
                   }))
                 }
               >
-                <option value='not_ordered'>Not Ordered</option>
-                <option value='ordered'>Ordered</option>
-                <option value='delivered'>Delivered</option>
-              </select>
-            </div>
-            <div className='col-span-2 grid gap-1.5'>
-              <Label htmlFor='ll-activity'>Linked Activity</Label>
-              <select
-                id='ll-activity'
-                className='h-9 rounded-md border bg-background px-2 text-sm'
-                value={form.activityId}
-                onChange={(e) =>
-                  setForm((prev) => ({ ...prev, activityId: e.target.value }))
-                }
-              >
-                <option value=''>None</option>
-                {activities.map((activity) => (
-                  <option key={activity.id} value={activity.id}>
-                    {activity.wbsCode ? `${activity.wbsCode} · ` : ''}
-                    {activity.name}
+                {Object.entries(statusLabels).map(([value, label]) => (
+                  <option key={value} value={value}>
+                    {label}
                   </option>
                 ))}
               </select>
             </div>
-            <div className='col-span-2 grid gap-1.5'>
+            <div className='grid gap-1.5'>
+              <Label htmlFor='ll-warehouse-status'>Warehouse Receipt</Label>
+              <select
+                id='ll-warehouse-status'
+                className='h-9 rounded-md border bg-background px-2 text-sm'
+                value={form.warehouseStatus}
+                onChange={(e) =>
+                  setForm((prev) => ({
+                    ...prev,
+                    warehouseStatus: e.target
+                      .value as FormState['warehouseStatus'],
+                  }))
+                }
+              >
+                {Object.entries(warehouseLabels).map(([value, label]) => (
+                  <option key={value} value={value}>
+                    {label}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className='grid gap-1.5 sm:col-span-2'>
               <Label htmlFor='ll-risk'>Risk Note</Label>
               <Input
                 id='ll-risk'
@@ -399,8 +714,10 @@ export function LongLeadTable({ projectId, activities }: Props) {
 
                   setFormOpen(false)
                   setEditingItem(null)
-                } catch {
-                  toast.error('Failed to save long lead item')
+                } catch (error) {
+                  toast.error(
+                    mutationErrorMessage(error, 'Failed to save long lead item')
+                  )
                 }
               }}
             >

@@ -1,14 +1,18 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { apiClient } from '@/services/api/client'
+import { projectSetupReadinessKey } from '@/features/projects/hooks/use-projects'
 import type { ProjectSchedule } from '../data/schema'
 
-export const useProjectSchedule = (projectId: string) =>
+export const useProjectSchedule = (
+  projectId: string,
+  options: { enabled?: boolean } = {}
+) =>
   useQuery<ProjectSchedule | null>({
     queryKey: ['schedule', projectId],
     queryFn: () =>
       apiClient.get(`/projects/${projectId}/schedule`).then((r) => r.data.data),
-    enabled: !!projectId,
+    enabled: !!projectId && (options.enabled ?? true),
   })
 
 export interface GenerateJob {
@@ -76,6 +80,7 @@ export function useGenerateSchedule(projectId: string) {
     qc.invalidateQueries({ queryKey: ['schedule', projectId] })
     qc.invalidateQueries({ queryKey: ['activities', projectId] })
     qc.invalidateQueries({ queryKey: ['schedule-revisions', projectId] })
+    qc.invalidateQueries({ queryKey: projectSetupReadinessKey(projectId) })
     setJobId(null)
   }, [qc, projectId])
 

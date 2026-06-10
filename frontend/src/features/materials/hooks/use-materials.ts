@@ -1,6 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { apiClient } from '@/services/api/client'
-import type { AddMaterialInput, Material } from '../data/schema'
+import type {
+  AddMaterialInput,
+  Material,
+  MaterialUsageInput,
+} from '../data/schema'
 
 const materialsKey = (projectId: string, activityId: string) => [
   'materials',
@@ -26,6 +30,34 @@ export const useAddMaterial = (projectId: string, activityId: string) => {
       apiClient
         .post(
           `/projects/${projectId}/activities/${activityId}/materials`,
+          payload
+        )
+        .then((response) => response.data.data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({
+        queryKey: materialsKey(projectId, activityId),
+      })
+    },
+  })
+}
+
+export const useRecordMaterialUsage = (
+  projectId: string,
+  activityId: string
+) => {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: ({
+      materialId,
+      payload,
+    }: {
+      materialId: string
+      payload: MaterialUsageInput
+    }) =>
+      apiClient
+        .post(
+          `/projects/${projectId}/activities/${activityId}/materials/${materialId}/usage`,
           payload
         )
         .then((response) => response.data.data),

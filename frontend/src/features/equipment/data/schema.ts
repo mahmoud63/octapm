@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { hasMoneyPrecision, MONEY_PRECISION_MESSAGE } from '@/lib/money'
 
 export const equipmentSchema = z.object({
   id: z.string().uuid(),
@@ -15,6 +16,7 @@ export const addEquipmentSchema = z.object({
   rate: z
     .number({ error: 'Rate must be a number' })
     .min(0, 'Rate must be zero or positive')
+    .refine(hasMoneyPrecision, MONEY_PRECISION_MESSAGE)
     .optional(),
 })
 

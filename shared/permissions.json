@@ -1,0 +1,310 @@
+{
+  "version": "2026-06-10-f019-procurement-material-workflow",
+  "actions": [
+    "read",
+    "create",
+    "update",
+    "delete",
+    "submit",
+    "approve",
+    "certify",
+    "baseline",
+    "export"
+  ],
+  "roles": [
+    { "id": "pm", "label": "PM" },
+    { "id": "planning_eng", "label": "Planning Engineer" },
+    { "id": "qs", "label": "QS" },
+    { "id": "cost_controller", "label": "Cost Controller" },
+    { "id": "procurement", "label": "Procurement" },
+    { "id": "warehouse", "label": "Warehouse" },
+    { "id": "site_engineer", "label": "Site Engineer" },
+    { "id": "finance", "label": "Finance" }
+  ],
+  "modules": {
+    "schedule": {
+      "label": "Schedule",
+      "actions": {
+        "read": [
+          "pm",
+          "planning_eng",
+          "qs",
+          "cost_controller",
+          "procurement",
+          "warehouse",
+          "site_engineer",
+          "finance"
+        ],
+        "create": ["pm", "planning_eng"],
+        "update": ["pm", "planning_eng"],
+        "delete": ["pm", "planning_eng"],
+        "submit": ["pm", "planning_eng"],
+        "approve": ["pm"],
+        "certify": [],
+        "baseline": ["pm"],
+        "export": ["pm", "planning_eng", "qs", "cost_controller"]
+      },
+      "transitions": {
+        "revision.activate": ["pm"],
+        "revision.rollback": ["pm"],
+        "revision.submit_review": ["pm", "planning_eng"],
+        "revision.approve": ["pm"],
+        "revision.reject": ["pm"],
+        "revision.baseline": ["pm"]
+      }
+    },
+    "progress": {
+      "label": "Progress",
+      "actions": {
+        "read": [
+          "pm",
+          "planning_eng",
+          "qs",
+          "cost_controller",
+          "site_engineer",
+          "finance"
+        ],
+        "create": ["pm", "planning_eng", "site_engineer"],
+        "update": ["pm", "planning_eng"],
+        "delete": [],
+        "submit": ["pm", "planning_eng", "site_engineer"],
+        "approve": ["pm", "planning_eng", "qs"],
+        "certify": [],
+        "baseline": [],
+        "export": ["pm", "planning_eng", "qs", "cost_controller"]
+      },
+      "transitions": {
+        "submission.submit": ["pm", "planning_eng", "site_engineer"],
+        "submission.approve": ["pm", "planning_eng", "qs"],
+        "submission.reject": ["pm", "planning_eng", "qs"],
+        "method.configure": ["pm", "planning_eng"],
+        "daily_report.update": ["pm", "planning_eng", "site_engineer"],
+        "daily_report.submit": ["pm", "planning_eng", "site_engineer"],
+        "daily_report.approve": ["pm"],
+        "daily_report.reject": ["pm"],
+        "daily_report.review": ["pm"],
+        "site_diary.update": ["pm", "planning_eng", "site_engineer"],
+        "site_diary.submit": ["pm", "planning_eng", "site_engineer"],
+        "site_diary.approve": ["pm"],
+        "site_diary.reject": ["pm"],
+        "site_reporting.upload": ["pm", "planning_eng", "site_engineer"]
+      }
+    },
+    "ipc": {
+      "label": "IPC",
+      "actions": {
+        "read": ["pm", "qs", "cost_controller", "finance"],
+        "create": ["pm", "qs"],
+        "update": ["pm", "qs"],
+        "delete": ["pm"],
+        "submit": ["pm", "qs"],
+        "approve": ["pm", "finance"],
+        "certify": ["pm", "finance"],
+        "baseline": [],
+        "export": ["pm", "qs", "cost_controller", "finance"]
+      },
+      "transitions": {
+        "period.create": ["pm", "qs"],
+        "period.submit": ["pm", "qs"],
+        "period.certify": ["pm", "finance"],
+        "item.update": ["pm", "qs"],
+        "invoice.issue": ["pm", "finance"],
+        "payment.record": ["pm", "finance"],
+        "retention.release": ["pm", "finance"]
+      }
+    },
+    "cost": {
+      "label": "Cost Control",
+      "actions": {
+        "read": ["pm", "planning_eng", "qs", "cost_controller", "finance"],
+        "create": ["pm", "qs", "cost_controller"],
+        "update": ["pm", "qs", "cost_controller"],
+        "delete": ["pm", "cost_controller"],
+        "submit": ["pm", "qs", "cost_controller"],
+        "approve": ["pm", "finance"],
+        "certify": [],
+        "baseline": [],
+        "export": ["pm", "planning_eng", "qs", "cost_controller", "finance"]
+      },
+      "transitions": {
+        "burn_rate.create": ["pm", "qs", "cost_controller"],
+        "activity_cost.upsert": ["pm", "qs", "cost_controller"],
+        "activity_cost.update": ["pm", "qs", "cost_controller"]
+      }
+    },
+    "procurement": {
+      "label": "Procurement",
+      "actions": {
+        "read": [
+          "pm",
+          "planning_eng",
+          "qs",
+          "cost_controller",
+          "procurement",
+          "warehouse",
+          "site_engineer",
+          "finance"
+        ],
+        "create": ["pm", "planning_eng", "procurement"],
+        "update": ["pm", "planning_eng", "procurement"],
+        "delete": ["pm", "planning_eng"],
+        "submit": ["pm", "procurement", "warehouse", "site_engineer"],
+        "approve": ["pm"],
+        "certify": [],
+        "baseline": [],
+        "export": ["pm", "planning_eng", "qs", "cost_controller", "procurement", "finance"]
+      },
+      "transitions": {
+        "supplier.manage": ["pm", "procurement"],
+        "package.manage": ["pm", "planning_eng", "procurement"],
+        "po.issue": ["pm", "procurement"],
+        "receipt.post": ["pm", "procurement", "warehouse"],
+        "material.plan": ["pm", "planning_eng", "procurement"],
+        "material.use": ["pm", "warehouse", "site_engineer"],
+        "alert.acknowledge": ["pm", "planning_eng", "procurement", "warehouse"],
+        "alert.resolve": ["pm", "planning_eng", "procurement", "warehouse"]
+      }
+    },
+    "user_management": {
+      "label": "User Management",
+      "actions": {
+        "read": ["pm", "planning_eng", "qs"],
+        "create": ["pm"],
+        "update": ["pm"],
+        "delete": ["pm"],
+        "submit": ["pm"],
+        "approve": ["pm"],
+        "certify": [],
+        "baseline": [],
+        "export": ["pm"]
+      },
+      "transitions": {
+        "user.invite": ["pm"],
+        "user.activate": ["pm"],
+        "user.deactivate": ["pm"],
+        "user.reset_password": ["pm"],
+        "user.assign_role": ["pm"]
+      }
+    },
+    "audit": {
+      "label": "Audit History",
+      "actions": {
+        "read": [
+          "pm",
+          "planning_eng",
+          "qs",
+          "cost_controller",
+          "procurement",
+          "warehouse",
+          "site_engineer",
+          "finance"
+        ],
+        "create": [],
+        "update": [],
+        "delete": [],
+        "submit": [],
+        "approve": [],
+        "certify": [],
+        "baseline": [],
+        "export": ["pm", "planning_eng", "qs", "cost_controller", "finance"]
+      },
+      "transitions": {}
+    },
+    "rfi": {
+      "label": "RFI",
+      "actions": {
+        "read": [
+          "pm",
+          "planning_eng",
+          "qs",
+          "cost_controller",
+          "procurement",
+          "warehouse",
+          "site_engineer",
+          "finance"
+        ],
+        "create": ["pm", "planning_eng", "site_engineer"],
+        "update": ["pm", "planning_eng", "site_engineer"],
+        "delete": ["pm"],
+        "submit": [],
+        "approve": [],
+        "certify": [],
+        "baseline": [],
+        "export": ["pm", "planning_eng", "qs", "cost_controller"]
+      },
+      "transitions": {}
+    },
+    "submittal": {
+      "label": "Submittal",
+      "actions": {
+        "read": [
+          "pm",
+          "planning_eng",
+          "qs",
+          "cost_controller",
+          "procurement",
+          "warehouse",
+          "site_engineer",
+          "finance"
+        ],
+        "create": ["pm", "planning_eng", "site_engineer"],
+        "update": ["pm", "planning_eng", "site_engineer"],
+        "delete": ["pm"],
+        "submit": [],
+        "approve": [],
+        "certify": [],
+        "baseline": [],
+        "export": ["pm", "planning_eng", "qs", "cost_controller"]
+      },
+      "transitions": {}
+    },
+    "ncr": {
+      "label": "NCR",
+      "actions": {
+        "read": [
+          "pm",
+          "planning_eng",
+          "qs",
+          "cost_controller",
+          "procurement",
+          "warehouse",
+          "site_engineer",
+          "finance"
+        ],
+        "create": ["pm", "planning_eng", "site_engineer"],
+        "update": ["pm", "planning_eng", "site_engineer"],
+        "delete": ["pm"],
+        "submit": [],
+        "approve": [],
+        "certify": [],
+        "baseline": [],
+        "export": ["pm", "planning_eng", "qs", "cost_controller"]
+      },
+      "transitions": {}
+    },
+    "safety": {
+      "label": "Safety",
+      "actions": {
+        "read": [
+          "pm",
+          "planning_eng",
+          "qs",
+          "cost_controller",
+          "procurement",
+          "warehouse",
+          "site_engineer",
+          "finance"
+        ],
+        "create": ["pm", "site_engineer"],
+        "update": ["pm", "site_engineer"],
+        "delete": ["pm"],
+        "submit": [],
+        "approve": [],
+        "certify": [],
+        "baseline": [],
+        "export": ["pm", "planning_eng", "qs", "cost_controller"]
+      },
+      "transitions": {}
+    }
+  }
+}

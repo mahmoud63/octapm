@@ -1,5 +1,7 @@
+const { normalizeMoneyTree } = require('./money');
+
 const sendSuccess = (res, data, status = 200) => {
-  return res.status(status).json({ success: true, data });
+  return res.status(status).json({ success: true, data: normalizeMoneyTree(data) });
 };
 
 const sendError = (res, status, code, message, details) => {

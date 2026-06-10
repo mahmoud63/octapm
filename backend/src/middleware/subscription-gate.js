@@ -8,7 +8,11 @@ const subscriptionGate = async (req, res, next) => {
     if (req.method === 'GET' || req.method === 'HEAD' || req.method === 'OPTIONS') {
       return next();
     }
-    if (!req.user) return next();
+    if (!req.user) {
+      return next(
+        new HttpError(401, 'AUTH_REQUIRED', 'Authentication is required'),
+      );
+    }
 
     const sub = await ensureSubscription(req.user.orgId);
     if (isExpired(sub)) {

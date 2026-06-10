@@ -3,16 +3,18 @@ const { body, param, query } = require('express-validator');
 const { asyncHandler } = require('../utils/async-handler');
 const { sendSuccess } = require('../utils/api-response');
 const { authenticate } = require('../middleware/auth');
-const { requireRoles } = require('../middleware/rbac');
+const { requirePermission } = require('../middleware/rbac');
+const { subscriptionGate } = require('../middleware/subscription-gate');
 const { validate } = require('../middleware/validate');
 const userService = require('../services/user.service');
 
 const router = express.Router();
 router.use(authenticate);
+router.use(subscriptionGate);
 
 router.get(
   '/',
-  requireRoles('pm', 'planning_eng', 'qs'),
+  requirePermission('user_management', 'read'),
   [
     query('cursor').optional().isUUID(),
     query('status').optional().isIn(['active', 'inactive']),
@@ -33,7 +35,7 @@ router.get(
 
 router.post(
   '/',
-  requireRoles('pm'),
+  requirePermission('user_management', 'create'),
   [
     body('name').isString().trim().notEmpty(),
     body('email').isEmail().normalizeEmail(),
@@ -59,7 +61,7 @@ router.post(
 
 router.get(
   '/:id',
-  requireRoles('pm', 'planning_eng', 'qs'),
+  requirePermission('user_management', 'read'),
   [param('id').isUUID(), validate],
   asyncHandler(async (req, res) => {
     const result = await userService.getUserById({
@@ -72,7 +74,9 @@ router.get(
 
 router.patch(
   '/:id',
-  requireRoles('pm'),
+  requirePermission('user_management', 'update', {
+    transition: 'user.assign_role',
+  }),
   [
     param('id').isUUID(),
     body('name').optional().isString().trim().notEmpty(),
@@ -93,7 +97,9 @@ router.patch(
 
 router.post(
   '/:id/reset-password',
-  requireRoles('pm'),
+  requirePermission('user_management', 'update', {
+    transition: 'user.reset_password',
+  }),
   [
     param('id').isUUID(),
     body('newPassword')
@@ -117,7 +123,9 @@ router.post(
 
 router.patch(
   '/:id/deactivate',
-  requireRoles('pm'),
+  requirePermission('user_management', 'update', {
+    transition: 'user.deactivate',
+  }),
   [param('id').isUUID(), validate],
   asyncHandler(async (req, res) => {
     const result = await userService.deactivateUser({
@@ -130,7 +138,9 @@ router.patch(
 
 router.patch(
   '/:id/activate',
-  requireRoles('pm'),
+  requirePermission('user_management', 'update', {
+    transition: 'user.activate',
+  }),
   [param('id').isUUID(), validate],
   asyncHandler(async (req, res) => {
     const result = await userService.activateUser({

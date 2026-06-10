@@ -22,7 +22,7 @@ variable "domain_name" {
 }
 
 variable "api_subdomain" {
-  description = "Subdomain for API (e.g. api.pmcopilots.com)"
+  description = "Deprecated compatibility variable. Direct API DNS is disabled; API traffic must use the primary domain /api/* CloudFront path."
   type        = string
   default     = "api"
 }
@@ -45,6 +45,67 @@ variable "db_password" {
   sensitive   = true
 }
 
+variable "rds_backup_retention_days" {
+  description = "RDS automated backup retention in days. Production must retain at least seven days; AWS allows up to 35 days."
+  type        = number
+  default     = 7
+
+  validation {
+    condition     = var.rds_backup_retention_days >= 7 && var.rds_backup_retention_days <= 35
+    error_message = "rds_backup_retention_days must be between 7 and 35 so production backups cannot be disabled."
+  }
+}
+
+variable "rds_backup_window" {
+  description = "Preferred UTC window for RDS automated backups."
+  type        = string
+  default     = "02:00-03:00"
+}
+
+variable "rds_recovery_rpo_hours" {
+  description = "Documented production recovery point objective in hours for release readiness evidence."
+  type        = number
+  default     = 24
+
+  validation {
+    condition     = var.rds_recovery_rpo_hours > 0 && var.rds_recovery_rpo_hours <= 24
+    error_message = "rds_recovery_rpo_hours must be greater than 0 and no more than 24."
+  }
+}
+
+variable "rds_recovery_rto_hours" {
+  description = "Documented production recovery time objective in hours for release readiness evidence."
+  type        = number
+  default     = 4
+
+  validation {
+    condition     = var.rds_recovery_rto_hours > 0 && var.rds_recovery_rto_hours <= 24
+    error_message = "rds_recovery_rto_hours must be greater than 0 and no more than 24."
+  }
+}
+
+variable "upload_document_retention_days" {
+  description = "Retention period for private project document uploads before S3 lifecycle expiration."
+  type        = number
+  default     = 2555
+
+  validation {
+    condition     = var.upload_document_retention_days >= 365
+    error_message = "upload_document_retention_days must retain project documents for at least one year."
+  }
+}
+
+variable "upload_document_noncurrent_retention_days" {
+  description = "Retention period for noncurrent private upload object versions."
+  type        = number
+  default     = 365
+
+  validation {
+    condition     = var.upload_document_noncurrent_retention_days >= 90
+    error_message = "upload_document_noncurrent_retention_days must retain noncurrent upload versions for at least 90 days."
+  }
+}
+
 variable "anthropic_api_key" {
   description = "Anthropic API key — set via TF_VAR_anthropic_api_key env var"
   type        = string
@@ -61,6 +122,17 @@ variable "jwt_refresh_secret" {
   description = "JWT refresh token secret — set via TF_VAR_jwt_refresh_secret env var"
   type        = string
   sensitive   = true
+}
+
+variable "cloudfront_origin_secret" {
+  description = "Dedicated CloudFront-to-origin shared secret — set via TF_VAR_cloudfront_origin_secret env var; do not reuse JWT material"
+  type        = string
+  sensitive   = true
+
+  validation {
+    condition     = length(var.cloudfront_origin_secret) >= 32 && var.cloudfront_origin_secret != "CHANGE_ME"
+    error_message = "cloudfront_origin_secret must be a dedicated non-placeholder value at least 32 characters long."
+  }
 }
 
 variable "ssh_public_key" {

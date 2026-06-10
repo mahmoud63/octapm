@@ -3,7 +3,7 @@ const { body, param } = require('express-validator');
 const { asyncHandler } = require('../utils/async-handler');
 const { sendSuccess } = require('../utils/api-response');
 const { authenticate } = require('../middleware/auth');
-const { requireRoles } = require('../middleware/rbac');
+const { requirePermission } = require('../middleware/rbac');
 const { validate } = require('../middleware/validate');
 const materialService = require('../services/material.service');
 
@@ -26,6 +26,7 @@ router.use(authenticate);
 
 router.get(
   '/',
+  requirePermission('procurement', 'read'),
   asyncHandler(async (req, res) => {
     const result = await materialService.listMaterials({
       orgId: req.user.orgId,
@@ -38,9 +39,15 @@ router.get(
 
 router.post(
   '/',
-  requireRoles('pm', 'planning_eng'),
+  requirePermission('procurement', 'create', { transition: 'material.plan' }),
   [
     body('name').isString().trim().notEmpty(),
+    body('code').optional({ nullable: true }).isString().trim(),
+    body('spec').optional({ nullable: true }).isString().trim(),
+    body('supplierId').optional({ nullable: true }).isUUID(),
+    body('supplierName').optional({ nullable: true }).isString().trim(),
+    body('supplierContact').optional({ nullable: true }).isString().trim(),
+    body('procurementPackageId').optional({ nullable: true }).isUUID(),
     body('unit')
       .isIn(UNITS)
       .withMessage(`Unit must be one of: ${UNITS.join(', ')}`),
@@ -48,6 +55,16 @@ router.post(
       .isFloat({ min: 0.001 })
       .toFloat()
       .withMessage('Quantity must be positive'),
+    body('plannedQty').optional().isFloat({ min: 0.001 }).toFloat(),
+    body('requiredDate').optional({ nullable: true }).isISO8601().toDate(),
+    body('requiredTiming')
+      .optional()
+      .isIn(['activity_start', 'activity_finish']),
+    body('needOffsetDays').optional().isInt({ min: 0 }).toInt(),
+    body('leadWeeks').optional().isInt({ min: 0 }).toInt(),
+    body('bufferDays').optional().isInt({ min: 0 }).toInt(),
+    body('orderByDate').optional({ nullable: true }).isISO8601().toDate(),
+    body('notes').optional({ nullable: true }).isString().trim(),
     validate,
   ],
   asyncHandler(async (req, res) => {
@@ -56,6 +73,7 @@ router.post(
       projectId: req.params.projectId,
       activityId: req.params.activityId,
       payload: req.body,
+      actor: req.user,
     });
 
     return sendSuccess(res, result, 201);
@@ -64,12 +82,31 @@ router.post(
 
 router.patch(
   '/:materialId',
-  requireRoles('pm', 'planning_eng'),
+  requirePermission('procurement', 'update', { transition: 'material.plan' }),
   [
     param('materialId').isUUID(),
     body('name').optional().isString().trim().notEmpty(),
+    body('code').optional({ nullable: true }).isString().trim(),
+    body('spec').optional({ nullable: true }).isString().trim(),
+    body('supplierId').optional({ nullable: true }).isUUID(),
+    body('supplierName').optional({ nullable: true }).isString().trim(),
+    body('supplierContact').optional({ nullable: true }).isString().trim(),
+    body('procurementPackageId').optional({ nullable: true }).isUUID(),
     body('unit').optional().isIn(UNITS),
     body('qty').optional().isFloat({ min: 0.001 }).toFloat(),
+    body('plannedQty').optional().isFloat({ min: 0.001 }).toFloat(),
+    body('requiredDate').optional({ nullable: true }).isISO8601().toDate(),
+    body('requiredTiming')
+      .optional()
+      .isIn(['activity_start', 'activity_finish']),
+    body('needOffsetDays').optional().isInt({ min: 0 }).toInt(),
+    body('leadWeeks').optional().isInt({ min: 0 }).toInt(),
+    body('bufferDays').optional().isInt({ min: 0 }).toInt(),
+    body('orderByDate').optional({ nullable: true }).isISO8601().toDate(),
+    body('status')
+      .optional()
+      .isIn(['planned', 'ordered', 'partial', 'received', 'issued', 'consumed', 'cancelled']),
+    body('notes').optional({ nullable: true }).isString().trim(),
     validate,
   ],
   asyncHandler(async (req, res) => {
@@ -79,15 +116,47 @@ router.patch(
       activityId: req.params.activityId,
       materialId: req.params.materialId,
       payload: req.body,
+      actor: req.user,
     });
 
     return sendSuccess(res, result);
   }),
 );
 
+router.post(
+  '/:materialId/usage',
+  requirePermission('procurement', 'submit', { transition: 'material.use' }),
+  [
+    param('materialId').isUUID(),
+    body('usedQty')
+      .isFloat({ min: 0.001 })
+      .toFloat()
+      .withMessage('Used quantity must be positive'),
+    body('wasteQty').optional().isFloat({ min: 0 }).toFloat(),
+    body('usageDate').optional({ nullable: true }).isISO8601().toDate(),
+    body('poLineId').optional({ nullable: true }).isUUID(),
+    body('receiptLineId').optional({ nullable: true }).isUUID(),
+    body('installedLocation').optional({ nullable: true }).isString().trim(),
+    body('notes').optional({ nullable: true }).isString().trim(),
+    validate,
+  ],
+  asyncHandler(async (req, res) => {
+    const result = await materialService.recordMaterialUsage({
+      orgId: req.user.orgId,
+      projectId: req.params.projectId,
+      activityId: req.params.activityId,
+      materialId: req.params.materialId,
+      payload: req.body,
+      actor: req.user,
+    });
+
+    return sendSuccess(res, result, 201);
+  }),
+);
+
 router.delete(
   '/:materialId',
-  requireRoles('pm', 'planning_eng'),
+  requirePermission('procurement', 'delete'),
   [param('materialId').isUUID(), validate],
   asyncHandler(async (req, res) => {
     const result = await materialService.deleteMaterial({

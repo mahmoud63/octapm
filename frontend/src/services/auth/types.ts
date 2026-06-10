@@ -13,8 +13,8 @@ export interface AuthUser {
 
 export interface AuthTokens {
   accessToken: string
-  refreshToken: string
   tokenType: 'Bearer'
+  expiresIn: number
 }
 
 export interface AuthSession {
@@ -42,10 +42,6 @@ export interface RegisterResponse extends AuthSession {
 export interface LoginPayload {
   email: string
   password: string
-}
-
-export interface RefreshPayload {
-  refreshToken: string
 }
 
 export interface ApiSuccess<T> {

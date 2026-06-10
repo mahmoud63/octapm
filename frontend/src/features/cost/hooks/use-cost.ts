@@ -15,6 +15,7 @@ export interface CostRecord {
   budget: number
   committed: number
   actual: number
+  actualThroughDate: string | null
   forecast: number
   updatedAt: string
   activity?: {
@@ -55,16 +56,61 @@ export interface BurnRateSummary {
   data: Array<{ date: string; actual: number; budget: number }>
 }
 
+export interface CursorPagination {
+  limit: number
+  nextCursor: string | null
+}
+
+export interface CostRecordListQuery {
+  cursor?: string | null
+  limit?: number
+  activityId?: string
+  category?: string
+  search?: string
+  sortBy?:
+    | 'activity'
+    | 'phase'
+    | 'updated'
+    | 'labour'
+    | 'material'
+    | 'equipment'
+    | 'subcontract'
+    | 'committed'
+    | 'actual'
+    | 'forecast'
+  sortDir?: 'asc' | 'desc'
+}
+
+export interface CostRecordPage {
+  rows: CostRecord[]
+  pagination?: CursorPagination
+}
+
 const costKey = (projectId: string) => ['cost-records', projectId]
+const costListKey = (projectId: string, query: CostRecordListQuery) => [
+  ...costKey(projectId),
+  query,
+]
 const costSummaryKey = (projectId: string) => ['cost-summary', projectId]
 const burnRateKey = (projectId: string) => ['burn-rate', projectId]
 
-export const useCostRecords = (projectId: string) =>
-  useQuery<CostRecord[]>({
-    queryKey: costKey(projectId),
+const cleanListParams = (query: CostRecordListQuery) =>
+  Object.fromEntries(
+    Object.entries(query).filter(([, value]) => {
+      if (value === undefined || value === null || value === '') return false
+      return value !== 'all'
+    })
+  )
+
+export const useCostRecords = (
+  projectId: string,
+  query: CostRecordListQuery = {}
+) =>
+  useQuery<CostRecordPage>({
+    queryKey: costListKey(projectId, query),
     queryFn: () =>
       apiClient
-        .get(`/projects/${projectId}/cost`)
+        .get(`/projects/${projectId}/cost`, { params: cleanListParams(query) })
         .then((response) => response.data.data),
     enabled: Boolean(projectId),
   })
@@ -106,6 +152,10 @@ export const useUpsertCostRecord = (projectId: string) => {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: costKey(projectId) })
       qc.invalidateQueries({ queryKey: costSummaryKey(projectId) })
+      qc.invalidateQueries({ queryKey: ['audit-events', projectId] })
+      qc.invalidateQueries({ queryKey: ['ev-report', projectId] })
+      qc.invalidateQueries({ queryKey: ['health', projectId] })
+      qc.invalidateQueries({ queryKey: ['workspace-dashboard'] })
     },
   })
 }
@@ -127,6 +177,10 @@ export const useUpdateCostRecord = (projectId: string) => {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: costKey(projectId) })
       qc.invalidateQueries({ queryKey: costSummaryKey(projectId) })
+      qc.invalidateQueries({ queryKey: ['audit-events', projectId] })
+      qc.invalidateQueries({ queryKey: ['ev-report', projectId] })
+      qc.invalidateQueries({ queryKey: ['health', projectId] })
+      qc.invalidateQueries({ queryKey: ['workspace-dashboard'] })
     },
   })
 }
@@ -146,6 +200,7 @@ export const useAddBurnRateEntry = (projectId: string) => {
         .then((response) => response.data.data),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: burnRateKey(projectId) })
+      qc.invalidateQueries({ queryKey: ['audit-events', projectId] })
     },
   })
 }

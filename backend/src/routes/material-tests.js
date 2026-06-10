@@ -28,7 +28,20 @@ router.post(
   [
     body('testType').trim().notEmpty(),
     body('result').optional().isIn(['pass', 'fail', 'pending']),
-    body('testDate').optional().isISO8601(),
+    body('owner').optional().isString().trim(),
+    body('reviewer').optional().isString().trim(),
+    body('approver').optional().isString().trim(),
+    body('activityId').optional({ nullable: true }).isUUID(),
+    body('activityIds').optional().isArray(),
+    body('activityIds.*').optional().isUUID(),
+    body('activityLinks').optional().isArray(),
+    body('activityLinks.*.activityId').optional().isUUID(),
+    body('attachments').optional().isArray(),
+    body('attachmentRefs').optional().isArray(),
+    body('comment').optional().isString().trim(),
+    body('statusComment').optional().isString().trim(),
+    body('dueDate').optional({ nullable: true }).isISO8601(),
+    body('testDate').optional({ nullable: true }).isISO8601(),
     validate,
   ],
   async (req, res, next) => {
@@ -37,6 +50,8 @@ router.post(
         orgId: req.user.orgId,
         projectId: req.params.projectId,
         payload: req.body,
+        userId: req.user.id,
+        userRole: req.user.role,
       });
 
       return res.status(201).json({ success: true, data: row });
@@ -51,7 +66,20 @@ router.patch(
   [
     param('testId').isUUID(),
     body('result').optional().isIn(['pass', 'fail', 'pending']),
-    body('testDate').optional().isISO8601(),
+    body('owner').optional().isString().trim(),
+    body('reviewer').optional().isString().trim(),
+    body('approver').optional().isString().trim(),
+    body('activityId').optional({ nullable: true }).isUUID(),
+    body('activityIds').optional().isArray(),
+    body('activityIds.*').optional().isUUID(),
+    body('activityLinks').optional().isArray(),
+    body('activityLinks.*.activityId').optional().isUUID(),
+    body('attachments').optional().isArray(),
+    body('attachmentRefs').optional().isArray(),
+    body('comment').optional().isString().trim(),
+    body('statusComment').optional().isString().trim(),
+    body('dueDate').optional({ nullable: true }).isISO8601(),
+    body('testDate').optional({ nullable: true }).isISO8601(),
     validate,
   ],
   async (req, res, next) => {
@@ -61,6 +89,8 @@ router.patch(
         projectId: req.params.projectId,
         testId: req.params.testId,
         payload: req.body,
+        userId: req.user.id,
+        userRole: req.user.role,
       });
 
       return res.json({ success: true, data: row });

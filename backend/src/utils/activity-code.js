@@ -26,14 +26,22 @@ function formatActivityCode(prefix, sequence) {
  */
 async function nextActivityCode(projectId, description, tx = prisma) {
   const prefix = deriveActivityPrefix(description);
-  const existing = await tx.boqActivity.findMany({
-    where: { projectId, activityCode: { startsWith: `${prefix}-` } },
-    select: { activityCode: true },
+  const existing = await tx.activity.findMany({
+    where: {
+      projectId,
+      isActive: true,
+      OR: [
+        { wbsCode: { startsWith: `${prefix}-` } },
+        { p6ActivityId: { startsWith: `${prefix}-` } },
+      ],
+    },
+    select: { wbsCode: true, p6ActivityId: true },
   });
 
   let max = 0;
-  for (const { activityCode } of existing) {
-    const n = parseInt(activityCode.slice(prefix.length + 1), 10);
+  for (const activity of existing) {
+    const code = activity.wbsCode || activity.p6ActivityId || '';
+    const n = parseInt(code.slice(prefix.length + 1), 10);
     if (Number.isFinite(n) && n > max) max = n;
   }
 

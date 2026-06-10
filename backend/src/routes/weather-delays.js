@@ -30,6 +30,18 @@ router.post(
     body('date').optional().isISO8601(),
     body('delayDays').isFloat({ min: 0 }),
     body('contractual').optional().isBoolean(),
+    body('affectedActivityIds').optional().isArray(),
+    body('affectedActivityIds.*').optional().isUUID(),
+    body('activityLinks').optional().isArray(),
+    body('activityLinks.*.activityId').optional().isUUID(),
+    body('activityLinks.*.delayStart').optional({ nullable: true }).isISO8601(),
+    body('activityLinks.*.delayEnd').optional({ nullable: true }).isISO8601(),
+    body('activityLinks.*.delayDays').optional().isFloat({ min: 0 }),
+    body('correspondenceIds').optional().isArray(),
+    body('correspondenceIds.*').optional().isUUID(),
+    body('correspondenceLinks').optional().isArray(),
+    body('correspondenceLinks.*.correspondenceId').optional().isUUID(),
+    body('attachmentRefs').optional().isArray(),
     validate,
   ],
   async (req, res, next) => {
@@ -37,6 +49,7 @@ router.post(
       const row = await createWeatherDelay({
         orgId: req.user.orgId,
         projectId: req.params.projectId,
+        userId: req.user.id,
         payload: req.body,
       });
 
@@ -54,6 +67,18 @@ router.patch(
     body('date').optional().isISO8601(),
     body('delayDays').optional().isFloat({ min: 0 }),
     body('contractual').optional().isBoolean(),
+    body('affectedActivityIds').optional().isArray(),
+    body('affectedActivityIds.*').optional().isUUID(),
+    body('activityLinks').optional().isArray(),
+    body('activityLinks.*.activityId').optional().isUUID(),
+    body('activityLinks.*.delayStart').optional({ nullable: true }).isISO8601(),
+    body('activityLinks.*.delayEnd').optional({ nullable: true }).isISO8601(),
+    body('activityLinks.*.delayDays').optional().isFloat({ min: 0 }),
+    body('correspondenceIds').optional().isArray(),
+    body('correspondenceIds.*').optional().isUUID(),
+    body('correspondenceLinks').optional().isArray(),
+    body('correspondenceLinks.*.correspondenceId').optional().isUUID(),
+    body('attachmentRefs').optional().isArray(),
     validate,
   ],
   async (req, res, next) => {
@@ -62,6 +87,7 @@ router.patch(
         orgId: req.user.orgId,
         projectId: req.params.projectId,
         weatherId: req.params.weatherId,
+        userId: req.user.id,
         payload: req.body,
       });
 
@@ -81,6 +107,7 @@ router.delete(
         orgId: req.user.orgId,
         projectId: req.params.projectId,
         weatherId: req.params.weatherId,
+        userId: req.user.id,
       });
 
       return res.json({ success: true, data });

@@ -1,6 +1,132 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { apiClient } from '@/services/api/client'
 
+export interface TraceActivity {
+  id: string
+  name: string
+  p6ActivityId?: string | null
+  wbsCode: string | null
+  totalFloat?: number | null
+  isCritical?: boolean | null
+}
+
+export interface TraceBoqItem {
+  id: string
+  code: string | null
+  ref: string | null
+  description: string
+  unit: string | null
+  qty: number
+  rate: number
+  amount?: number
+}
+
+export interface TraceAllocation {
+  id: string
+  quantity: number
+  amount: number
+  weight: number
+  status?: string
+  boqItem?: TraceBoqItem
+  activity?: TraceActivity
+}
+
+export interface CommercialCorrespondenceLink {
+  id: string
+  recordType: string
+  recordId: string
+  correspondenceId: string
+  relationType: string
+  correspondence?: {
+    id: string
+    ref: string
+    direction: string
+    type: string
+    subject: string
+    contractualNotice: boolean
+    date: string
+    status: string
+  }
+}
+
+export interface CommercialAttachmentRef {
+  id: string
+  documentId?: string | null
+  fileName: string | null
+  fileUrl: string | null
+  storageKey: string | null
+  mimeType: string | null
+  sizeBytes?: number | null
+  sha256?: string | null
+  scanStatus?: string | null
+  description: string | null
+  projectDocument?: {
+    id: string
+    fileName: string
+    originalName: string
+    mimeType: string
+    sizeBytes: number
+    scanStatus: string
+    uploadedAt: string
+  } | null
+}
+
+export interface ApprovalHistoryEvent {
+  id: string | null
+  action: string
+  oldStatus: string | null
+  newStatus: string | null
+  occurredAt: string
+  reason: string | null
+  decision?: string | null
+  fromStatus?: string | null
+  toStatus?: string | null
+  actorId?: string | null
+  actorRole?: string | null
+  comment?: string | null
+  createdAt?: string | null
+}
+
+export interface ActivityTraceLink {
+  id?: string
+  activityId: string
+  relationType?: string
+  scheduleImpactDays?: number
+  floatImpactDays?: number
+  criticalPathImpact?: boolean
+  criticalPathImpactDays?: number
+  costImpact?: number
+  approvedScheduleImpactDays?: number
+  approvedCostImpact?: number
+  baselineStart?: string | null
+  baselineFinish?: string | null
+  impactedStart?: string | null
+  impactedFinish?: string | null
+  impactBasis?: string | null
+  cpmSnapshotJson?: Record<string, unknown>
+  delayStart?: string | null
+  delayEnd?: string | null
+  delayDays?: number
+  floatDays?: number
+  isCritical?: boolean
+  approvedEotDays?: number
+  ldExposure?: number
+  activity?: TraceActivity
+}
+
+export interface AllocationTraceLink {
+  id?: string
+  allocationId: string | null
+  boqItemId: string | null
+  quantity?: number
+  amount?: number
+  workDoneAmount?: number
+  materialsOnSiteAmount?: number
+  retentionAmount?: number
+  allocation?: TraceAllocation | null
+  boqItem?: TraceBoqItem | null
+}
+
 export interface ChangeOrderRecord {
   id: string
   projectId: string
@@ -15,11 +141,25 @@ export interface ChangeOrderRecord {
   approvedDate: string | null
   raisedBy: string | null
   rejectedReason: string | null
+  createdBy?: string | null
+  updatedBy?: string | null
+  approvedBy?: string | null
+  approvedAt?: string | null
+  approvalComment?: string | null
+  rejectedBy?: string | null
+  rejectedAt?: string | null
   activity?: {
     id: string
     name: string
     wbsCode: string | null
   } | null
+  activityLinks?: ActivityTraceLink[]
+  allocationLinks?: AllocationTraceLink[]
+  correspondenceLinks?: CommercialCorrespondenceLink[]
+  attachmentRefs?: CommercialAttachmentRef[]
+  supportingDocumentIds?: string[]
+  documentIds?: string[]
+  approvalHistory?: ApprovalHistoryEvent[]
 }
 
 export interface ChangeOrderSummary {
@@ -39,15 +179,71 @@ export interface IpcCertificate {
   totalRet: number
   netPayable: number
   status: 'draft' | 'submitted' | 'certified' | 'paid'
+  invoiceStatus: 'not_issued' | 'issued' | 'void'
+  paymentStatus: 'unpaid' | 'partially_paid' | 'paid'
+  retentionStatus: 'held' | 'partially_released' | 'released'
+  amountPaid: number
+  retentionReleased: number
+  balanceDue: number
   submittedBy: string | null
+  submittedAt?: string | null
+  certifiedBy?: string | null
+  certifiedAt?: string | null
+  certificationComment?: string | null
   createdAt: string
   updatedAt: string
+}
+
+export interface IpcPayment {
+  id: string
+  projectId: string
+  ipcCertificateId: string
+  invoiceId: string | null
+  paymentReference: string
+  paymentDate: string
+  amount: number
+  paymentMethod: string | null
+  notes: string | null
+  receivedBy: string | null
+  receivedAt: string
+}
+
+export interface IpcInvoice {
+  id: string
+  projectId: string
+  ipcCertificateId: string
+  invoiceNumber: string
+  invoiceDate: string
+  dueDate: string | null
+  grossAmount: number
+  retentionHeld: number
+  retentionReleased: number
+  netAmount: number
+  amountPaid: number
+  balanceDue: number
+  status: 'issued' | 'partially_paid' | 'paid' | 'void'
+  issuedBy: string | null
+  issuedAt: string
+  payments?: IpcPayment[]
+}
+
+export interface IpcRetentionRelease {
+  id: string
+  projectId: string
+  ipcCertificateId: string
+  releaseReference: string
+  releaseDate: string
+  amount: number
+  reason: string | null
+  releasedBy: string | null
+  releasedAt: string
 }
 
 export interface IpcPeriodDetail extends IpcCertificate {
   items: Array<{
     id: string
     boqItemId: string
+    allocationId: string | null
     ipcPeriod: string
     qty: number
     rate: number
@@ -61,13 +257,50 @@ export interface IpcPeriodDetail extends IpcCertificate {
     certDate: string | null
     boqItem: {
       id: string
+      code: string | null
       ref: string | null
       description: string
       unit: string | null
       qty: number
       rate: number
     }
+    allocation: {
+      id: string
+      quantity: number
+      amount: number
+      weight: number
+      activity: {
+        id: string
+        name: string
+        p6ActivityId: string | null
+        wbsCode: string | null
+      }
+    } | null
+    progressLinks?: Array<{
+      id: string
+      approvedPctComplete: number
+      approvedQuantityComplete: number | null
+      certifiedQuantity: number
+      certifiedAmount: number
+      previousCertifiedAmount: number
+      cutoffDate: string | null
+      activity?: TraceActivity | null
+      progress?: {
+        id: string
+        pctComplete: number
+        quantityComplete: number | null
+        quantityPlanned: number | null
+        quantityUnit: string | null
+        progressMethod: string
+        status: string
+        approvedAt: string | null
+        updatedAt: string
+      } | null
+    }>
   }>
+  invoices?: IpcInvoice[]
+  payments?: IpcPayment[]
+  retentionReleases?: IpcRetentionRelease[]
 }
 
 const coKey = (projectId: string) => ['change-orders', projectId]
@@ -97,6 +330,7 @@ export const useCreateChangeOrder = (projectId: string) => {
         .then((response) => response.data.data as ChangeOrderRecord),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: coKey(projectId) })
+      qc.invalidateQueries({ queryKey: ['audit-events', projectId] })
     },
   })
 }
@@ -116,6 +350,7 @@ export const useUpdateChangeOrder = (projectId: string) => {
         .then((response) => response.data.data as ChangeOrderRecord),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: coKey(projectId) })
+      qc.invalidateQueries({ queryKey: ['audit-events', projectId] })
     },
   })
 }
@@ -129,6 +364,7 @@ export const useDeleteChangeOrder = (projectId: string) => {
         .then((response) => response.data.data),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: coKey(projectId) })
+      qc.invalidateQueries({ queryKey: ['audit-events', projectId] })
     },
   })
 }
@@ -180,7 +416,6 @@ export const useUpdateIpcItem = (projectId: string) => {
         qty?: number
         rate?: number
         retentionRate?: number
-        status?: 'draft' | 'submitted' | 'certified' | 'paid'
       }
     }) =>
       apiClient
@@ -205,6 +440,7 @@ export const useSubmitIpcPeriod = (projectId: string) => {
     onSuccess: (_, period) => {
       qc.invalidateQueries({ queryKey: ipcDetailKey(projectId, period) })
       qc.invalidateQueries({ queryKey: ipcKey(projectId) })
+      qc.invalidateQueries({ queryKey: ['audit-events', projectId] })
     },
   })
 }
@@ -219,6 +455,92 @@ export const useCertifyIpcPeriod = (projectId: string) => {
     onSuccess: (_, period) => {
       qc.invalidateQueries({ queryKey: ipcDetailKey(projectId, period) })
       qc.invalidateQueries({ queryKey: ipcKey(projectId) })
+      qc.invalidateQueries({ queryKey: ['audit-events', projectId] })
+    },
+  })
+}
+
+export const useIssueIpcInvoice = (projectId: string) => {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({
+      period,
+      payload,
+    }: {
+      period: string
+      payload: {
+        invoiceNumber?: string
+        invoiceDate?: string
+        dueDate?: string
+      }
+    }) =>
+      apiClient
+        .post(`/projects/${projectId}/ipc/${period}/invoice/issue`, payload)
+        .then((response) => response.data.data as IpcInvoice),
+    onSuccess: (_, variables) => {
+      qc.invalidateQueries({
+        queryKey: ipcDetailKey(projectId, variables.period),
+      })
+      qc.invalidateQueries({ queryKey: ipcKey(projectId) })
+      qc.invalidateQueries({ queryKey: ['audit-events', projectId] })
+    },
+  })
+}
+
+export const useRecordIpcPayment = (projectId: string) => {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({
+      period,
+      payload,
+    }: {
+      period: string
+      payload: {
+        amount: number
+        paymentReference?: string
+        paymentDate?: string
+        paymentMethod?: string
+        notes?: string
+      }
+    }) =>
+      apiClient
+        .post(`/projects/${projectId}/ipc/${period}/payments`, payload)
+        .then((response) => response.data.data),
+    onSuccess: (_, variables) => {
+      qc.invalidateQueries({
+        queryKey: ipcDetailKey(projectId, variables.period),
+      })
+      qc.invalidateQueries({ queryKey: ipcKey(projectId) })
+      qc.invalidateQueries({ queryKey: cashFlowKey(projectId) })
+      qc.invalidateQueries({ queryKey: ['audit-events', projectId] })
+    },
+  })
+}
+
+export const useReleaseIpcRetention = (projectId: string) => {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({
+      period,
+      payload,
+    }: {
+      period: string
+      payload: {
+        amount: number
+        releaseReference?: string
+        releaseDate?: string
+        reason?: string
+      }
+    }) =>
+      apiClient
+        .post(`/projects/${projectId}/ipc/${period}/retention-release`, payload)
+        .then((response) => response.data.data),
+    onSuccess: (_, variables) => {
+      qc.invalidateQueries({
+        queryKey: ipcDetailKey(projectId, variables.period),
+      })
+      qc.invalidateQueries({ queryKey: ipcKey(projectId) })
+      qc.invalidateQueries({ queryKey: ['audit-events', projectId] })
     },
   })
 }
@@ -240,6 +562,11 @@ export interface SubValuationRecord {
   submittedDate: string | null
   certDate: string | null
   payDate: string | null
+  activityLinks?: ActivityTraceLink[]
+  allocationLinks?: AllocationTraceLink[]
+  correspondenceLinks?: CommercialCorrespondenceLink[]
+  attachmentRefs?: CommercialAttachmentRef[]
+  approvalHistory?: ApprovalHistoryEvent[]
 }
 
 export interface BudgetRevisionRecord {
@@ -278,6 +605,18 @@ export interface EotClaim {
   analysis: string | null
   claimLetter: string | null
   status: 'draft' | 'submitted' | 'approved' | 'rejected'
+  activityLinks?: ActivityTraceLink[]
+  weatherDelayLinks?: Array<{
+    id: string
+    weatherDelayId: string
+    delayStart: string | null
+    delayEnd: string | null
+    delayDays: number
+    weatherDelay?: WeatherDelayRecord
+  }>
+  correspondenceLinks?: CommercialCorrespondenceLink[]
+  attachmentRefs?: CommercialAttachmentRef[]
+  approvalHistory?: ApprovalHistoryEvent[]
 }
 
 export interface WeatherDelayRecord {
@@ -288,6 +627,18 @@ export interface WeatherDelayRecord {
   delayDays: number
   contractual: boolean
   monthKey: string | null
+  activityLinks?: ActivityTraceLink[]
+  eotClaimLinks?: Array<{
+    id: string
+    eotClaimId: string
+    eotClaim?: Pick<
+      EotClaim,
+      'id' | 'ref' | 'eventName' | 'status' | 'delayDays' | 'eotDaysGranted'
+    >
+  }>
+  correspondenceLinks?: CommercialCorrespondenceLink[]
+  attachmentRefs?: CommercialAttachmentRef[]
+  approvalHistory?: ApprovalHistoryEvent[]
 }
 
 const subValKey = (projectId: string) => ['sub-valuations', projectId]
@@ -453,6 +804,17 @@ export const useCalculateEot = (projectId: string) =>
       eotDaysGranted?: number
       ldRatePerDay?: number
       affectedActivityIds?: string[]
+      activityLinks?: Array<{
+        activityId: string
+        delayDays?: number
+        delayStart?: string | null
+        delayEnd?: string | null
+        baselineStart?: string | null
+        baselineFinish?: string | null
+        impactedStart?: string | null
+        impactedFinish?: string | null
+        impactBasis?: string | null
+      }>
       analysis?: string
     }) =>
       apiClient
@@ -470,7 +832,28 @@ export const useCreateEotClaim = (projectId: string) => {
       eotDaysGranted?: number
       ldRatePerDay?: number
       affectedActivityIds?: string[]
+      activityLinks?: Array<{
+        activityId: string
+        delayDays?: number
+        delayStart?: string | null
+        delayEnd?: string | null
+        baselineStart?: string | null
+        baselineFinish?: string | null
+        impactedStart?: string | null
+        impactedFinish?: string | null
+        impactBasis?: string | null
+      }>
+      weatherDelayIds?: string[]
+      weatherDelayLinks?: Array<{
+        weatherDelayId: string
+        delayDays?: number
+        delayStart?: string | null
+        delayEnd?: string | null
+      }>
       analysis?: string
+      attachmentRefs?: Array<{ documentId: string; description?: string }>
+      supportingDocumentIds?: string[]
+      documentIds?: string[]
       status?: 'draft' | 'submitted' | 'approved' | 'rejected'
     }) =>
       apiClient
@@ -478,6 +861,30 @@ export const useCreateEotClaim = (projectId: string) => {
         .then((response) => response.data.data as EotClaim),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: eotKey(projectId) })
+    },
+  })
+}
+
+export const useUpdateEotClaim = (projectId: string) => {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({
+      claimId,
+      payload,
+    }: {
+      claimId: string
+      payload: Partial<EotClaim> & {
+        supportingDocumentIds?: string[]
+        documentIds?: string[]
+        attachmentRefs?: Array<{ documentId: string; description?: string }>
+      }
+    }) =>
+      apiClient
+        .patch(`/projects/${projectId}/eot/${claimId}`, payload)
+        .then((response) => response.data.data as EotClaim),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: eotKey(projectId) })
+      qc.invalidateQueries({ queryKey: ['audit-events', projectId] })
     },
   })
 }
@@ -514,6 +921,13 @@ export const useCreateWeatherDelay = (projectId: string) => {
       date?: string
       delayDays: number
       contractual?: boolean
+      affectedActivityIds?: string[]
+      activityLinks?: Array<{
+        activityId: string
+        delayDays?: number
+        delayStart?: string | null
+        delayEnd?: string | null
+      }>
     }) =>
       apiClient
         .post(`/projects/${projectId}/weather-delays`, payload)

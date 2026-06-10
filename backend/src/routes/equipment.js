@@ -5,6 +5,7 @@ const { sendSuccess } = require('../utils/api-response');
 const { authenticate } = require('../middleware/auth');
 const { requireRoles } = require('../middleware/rbac');
 const { validate } = require('../middleware/validate');
+const { moneyBody } = require('../utils/money');
 const equipmentService = require('../services/equipment.service');
 
 const router = express.Router({ mergeParams: true });
@@ -27,7 +28,7 @@ router.post(
   [
     body('name').isString().trim().notEmpty(),
     body('rateType').isIn(['hourly', 'daily']),
-    body('rate').optional().isFloat({ min: 0 }).toFloat(),
+    moneyBody('rate'),
     validate,
   ],
   asyncHandler(async (req, res) => {
@@ -47,7 +48,7 @@ router.patch(
     param('equipmentId').isUUID(),
     body('name').optional().isString().trim().notEmpty(),
     body('rateType').optional().isIn(['hourly', 'daily']),
-    body('rate').optional().isFloat({ min: 0 }).toFloat(),
+    moneyBody('rate'),
     validate,
   ],
   asyncHandler(async (req, res) => {

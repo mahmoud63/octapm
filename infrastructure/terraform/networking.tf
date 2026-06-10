@@ -16,6 +16,10 @@ data "aws_availability_zones" "available" {
   state = "available"
 }
 
+data "aws_ec2_managed_prefix_list" "cloudfront_origin_facing" {
+  name = "com.amazonaws.global.cloudfront.origin-facing"
+}
+
 resource "aws_subnet" "public_a" {
   vpc_id                  = aws_vpc.main.id
   cidr_block              = "10.0.1.0/24"
@@ -87,7 +91,7 @@ resource "aws_route_table_association" "public_b" {
 # Security Groups
 ################################
 
-# EC2 — allows HTTPS from CloudFront + SSH from your IP
+# EC2 - allows API traffic from CloudFront + SSH from your IP
 resource "aws_security_group" "ec2" {
   name        = "${var.app_name}-ec2-sg"
   description = "EC2 app server security group"
@@ -102,11 +106,11 @@ resource "aws_security_group" "ec2" {
   }
 
   ingress {
-    description = "API port from CloudFront (HTTP - TLS terminates at CF)"
-    from_port   = 5000
-    to_port     = 5000
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"] # CloudFront IPs are dynamic; restrict via CF custom header in production
+    description     = "API port from CloudFront origin-facing edge locations"
+    from_port       = 5000
+    to_port         = 5000
+    protocol        = "tcp"
+    prefix_list_ids = [data.aws_ec2_managed_prefix_list.cloudfront_origin_facing.id]
   }
 
   egress {

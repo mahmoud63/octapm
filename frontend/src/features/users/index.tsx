@@ -1,8 +1,10 @@
 import { useState } from 'react'
 import { getRouteApi } from '@tanstack/react-router'
 import { type SortingState } from '@tanstack/react-table'
+import { useCanPerform } from '@/lib/permissions'
 import { Button } from '@/components/ui/button'
 import { Main } from '@/components/layout/main'
+import { useSubscription } from '@/features/billing/hooks/use-billing'
 import { UsersDialogs } from './components/users-dialogs'
 import { UsersPrimaryButtons } from './components/users-primary-buttons'
 import { useUsers, UsersProvider } from './components/users-provider'
@@ -75,6 +77,11 @@ export function Users() {
 
 function AddFirstEngineerButton() {
   const { setOpen } = useUsers()
+  const canCreateUser = useCanPerform('user_management', 'create')
+  const { data: subscription } = useSubscription()
+  const subscriptionAllowsWrites = subscription?.hasAccess !== false
+
+  if (!canCreateUser || !subscriptionAllowsWrites) return null
 
   return <Button onClick={() => setOpen('add')}>+ Add Engineer</Button>
 }

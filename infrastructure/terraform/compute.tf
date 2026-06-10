@@ -42,7 +42,7 @@ resource "aws_instance" "app" {
     encrypted             = true
   }
 
-  user_data = base64encode(templatefile("${path.module}/templates/user-data.sh", {
+  user_data_base64 = base64encode(templatefile("${path.module}/templates/user-data.sh", {
     app_name   = var.app_name
     aws_region = var.aws_region
     db_host    = aws_db_instance.main.address

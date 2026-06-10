@@ -1,13 +1,25 @@
 import { useState } from 'react'
 import { useNavigate } from '@tanstack/react-router'
 import { Elements } from '@stripe/react-stripe-js'
-import { stripePromise } from '@/lib/stripe'
+import { isStripeConfigured, stripePromise } from '@/lib/stripe'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
+import { Alert, AlertDescription } from '@/components/ui/alert'
 import { toast } from 'sonner'
 import { PaymentForm } from './payment-form'
 import { useSubscription, useSubscribe, useStartTrial } from '../hooks/use-billing'
 import type { BillingCycle } from '@/services/billing/types'
+
+type PaymentError = {
+  response?: {
+    data?: {
+      error?: {
+        code?: string
+        message?: string
+      }
+    }
+  }
+}
 
 const PRICES = {
   individual: { monthly: 49, annual: 39 },
@@ -51,9 +63,10 @@ export function CheckoutWizard({ plan }: { plan: 'individual' | 'business' }) {
           toast.success('Subscription active. Welcome aboard!')
           navigate({ to: '/settings/billing' })
         },
-        onError: (err: any) => {
-          const code = err?.response?.data?.error?.code
-          const msg = err?.response?.data?.error?.message
+        onError: (err: unknown) => {
+          const apiError = err as PaymentError
+          const code = apiError.response?.data?.error?.code
+          const msg = apiError.response?.data?.error?.message
           setServerError(
             code === 'CARD_DECLINED'
               ? 'Your card was declined. Please contact your card issuer.'
@@ -65,6 +78,22 @@ export function CheckoutWizard({ plan }: { plan: 'individual' | 'business' }) {
   }
 
   const planName = plan === 'individual' ? 'Individual' : 'Business'
+
+  if (!isStripeConfigured) {
+    return (
+      <div className='mx-auto max-w-4xl space-y-6 p-6'>
+        <h1 className='text-2xl font-bold'>Subscribe to {planName}</h1>
+        <Alert variant='destructive'>
+          <AlertDescription>
+            Billing setup is unavailable. Ask an administrator to complete Stripe configuration before accepting payments.
+          </AlertDescription>
+        </Alert>
+        <Button variant='secondary' onClick={() => navigate({ to: '/billing' })}>
+          Back to plans
+        </Button>
+      </div>
+    )
+  }
 
   return (
     <div className='mx-auto max-w-4xl space-y-6 p-6'>

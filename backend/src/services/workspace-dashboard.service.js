@@ -1,0 +1,877 @@
+const { prisma } = require('../config/db');
+const evService = require('./earned-value.service');
+const {
+  SEVERITY_RANK,
+  computeProcurementRisk,
+  serializeDate,
+} = require('./procurement-risk.service');
+const { getProjectAccessWhere } = require('./project-authorization.service');
+
+const ACTION_LIMIT = 5;
+const HEALTH_DIMENSIONS = [
+  { key: 'schedule', label: 'Schedule' },
+  { key: 'cost', label: 'Cost' },
+  { key: 'commercial', label: 'Commercial' },
+  { key: 'supplyChain', label: 'Supply Chain' },
+  { key: 'quality', label: 'Quality' },
+  { key: 'safety', label: 'Safety' },
+  { key: 'docControl', label: 'Doc Control' },
+];
+
+const CLOSED_STATUSES = new Set(['closed', 'complete', 'completed', 'paid']);
+const RFI_CLOSED_STATUSES = new Set(['answered', 'closed']);
+
+function clampScore(value) {
+  return Math.max(0, Math.min(100, Math.round(value)));
+}
+
+function scoreByIndex(index) {
+  if (index >= 1) return 100;
+  if (index >= 0.9) return 80;
+  if (index >= 0.75) return 60;
+  return 40;
+}
+
+function toNumber(value, fallback = 0) {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : fallback;
+}
+
+function toIso(value) {
+  return value ? new Date(value).toISOString() : null;
+}
+
+function addDays(date, days) {
+  const result = new Date(date);
+  result.setDate(result.getDate() + Number(days || 0));
+  return result;
+}
+
+function lower(value) {
+  return String(value || '').trim().toLowerCase();
+}
+
+function isOpenStatus(value, closedStatuses = CLOSED_STATUSES) {
+  return !closedStatuses.has(lower(value));
+}
+
+function average(values, fallback = 0) {
+  const valid = values.filter((value) => Number.isFinite(value));
+  if (!valid.length) return fallback;
+  return valid.reduce((sum, value) => sum + value, 0) / valid.length;
+}
+
+function groupByProject(rows) {
+  return rows.reduce((map, row) => {
+    const existing = map.get(row.projectId) || [];
+    existing.push(row);
+    map.set(row.projectId, existing);
+    return map;
+  }, new Map());
+}
+
+function countByProject(rows, predicate = () => true) {
+  return rows.reduce((map, row) => {
+    if (!predicate(row)) return map;
+    map.set(row.projectId, (map.get(row.projectId) || 0) + 1);
+    return map;
+  }, new Map());
+}
+
+function getPlannedFinish(project, activity) {
+  if (
+    project?.startDate &&
+    activity.earlyFinish !== null &&
+    activity.earlyFinish !== undefined
+  ) {
+    return addDays(project.startDate, activity.earlyFinish);
+  }
+
+  return activity.endDate || null;
+}
+
+function isDelayedActivity({ project, activity, today }) {
+  const finish = getPlannedFinish(project, activity);
+  if (!finish) return false;
+
+  const pct = toNumber(activity.progress?.[0]?.pctComplete);
+  return new Date(finish) < today && pct < 100;
+}
+
+function buildEmptyDashboard() {
+  return {
+    generatedAt: new Date().toISOString(),
+    summary: {
+      totalProjects: 0,
+      activeProjects: 0,
+      totalContractValue: 0,
+      portfolioHealthScore: null,
+      delayedActivities: 0,
+      criticalActivities: 0,
+      approvalQueueCount: 0,
+      procurementAtRisk: 0,
+      overdueNcrRfi: 0,
+    },
+    healthDimensions: HEALTH_DIMENSIONS.map((dimension) => ({
+      ...dimension,
+      score: null,
+      detail: 'No project data yet',
+      count: 0,
+    })),
+    workflowQueues: [],
+    projectHealth: [],
+    emptyState: {
+      title: 'No projects yet',
+      message:
+        'Create a project to start tracking schedule, cost, approvals, procurement, quality, and document-control health.',
+      action: { label: 'Create Project', target: { module: 'projects' } },
+    },
+  };
+}
+
+function queueTarget(projectId, module, child) {
+  return { projectId, module, child };
+}
+
+function buildQueueItem({
+  id,
+  projectId,
+  projectName,
+  title,
+  meta,
+  severity = 'attention',
+  module,
+  child,
+  dueDate = null,
+}) {
+  return {
+    id,
+    projectId,
+    projectName,
+    title,
+    meta,
+    severity,
+    dueDate: toIso(dueDate),
+    target: queueTarget(projectId, module, child),
+  };
+}
+
+function buildQueue({ key, label, count, description, items, module, child }) {
+  return {
+    key,
+    label,
+    count,
+    description,
+    items,
+    defaultTarget: items[0]
+      ? items[0].target
+      : { projectId: null, module, child },
+  };
+}
+
+function summarizeRiskRows({ rows, projectById, today }) {
+  const bySeverity = {
+    critical: 0,
+    high: 0,
+    medium: 0,
+    low: 0,
+    none: 0,
+  };
+
+  let daysAtRisk = 0;
+
+  const risks = rows.map((row) => {
+    const risk = computeProcurementRisk(row, {
+      project: projectById.get(row.projectId),
+      today,
+    });
+
+    bySeverity[risk.severity] += 1;
+    daysAtRisk += risk.daysAtRisk || 0;
+
+    return { row, risk };
+  });
+
+  const penalty =
+    bySeverity.critical * 25 +
+    bySeverity.high * 15 +
+    bySeverity.medium * 8 +
+    bySeverity.low * 3;
+
+  const atRiskItems =
+    bySeverity.critical + bySeverity.high + bySeverity.medium;
+
+  const topRisks = risks
+    .filter(({ risk }) => risk.isAtRisk)
+    .sort((a, b) => {
+      const severityDelta =
+        SEVERITY_RANK[b.risk.severity] - SEVERITY_RANK[a.risk.severity];
+      if (severityDelta !== 0) return severityDelta;
+      return (b.risk.daysAtRisk || 0) - (a.risk.daysAtRisk || 0);
+    })
+    .slice(0, ACTION_LIMIT)
+    .map(({ row, risk }) => ({
+      id: row.id,
+      projectId: row.projectId,
+      projectName: projectById.get(row.projectId)?.name || 'Project',
+      item: row.item,
+      source: row.ref ? 'procurement_order' : 'long_lead',
+      ref: row.ref || null,
+      severity: risk.severity,
+      reason: risk.reason,
+      daysAtRisk: risk.daysAtRisk,
+      needDate: serializeDate(risk.needDate),
+      orderByDate: serializeDate(risk.orderByDate),
+      expectedDeliveryDate: serializeDate(risk.expectedDeliveryDate),
+      impactedActivity: risk.impactedActivity,
+    }));
+
+  return {
+    bySeverity,
+    atRiskItems,
+    daysAtRisk,
+    penalty,
+    topRisks,
+    risks,
+  };
+}
+
+async function getEvReports({ orgId, projects }) {
+  const settled = await Promise.allSettled(
+    projects.map(async (project) => {
+      const report = await evService.buildOfficialEvReport({
+        orgId,
+        projectId: project.id,
+      });
+      return [project.id, report];
+    }),
+  );
+
+  return settled.reduce((map, result) => {
+    if (result.status === 'fulfilled') {
+      const [projectId, report] = result.value;
+      map.set(projectId, report);
+    }
+    return map;
+  }, new Map());
+}
+
+async function getWorkspaceDashboard({ orgId, userId, role }) {
+  const projects = await prisma.project.findMany({
+    where: {
+      orgId,
+      ...getProjectAccessWhere({ userId, role }),
+    },
+    orderBy: [{ status: 'asc' }, { updatedAt: 'desc' }],
+    select: {
+      id: true,
+      name: true,
+      status: true,
+      startDate: true,
+      endDate: true,
+      contractValue: true,
+      currency: true,
+      updatedAt: true,
+    },
+  });
+
+  if (!projects.length) {
+    return buildEmptyDashboard();
+  }
+
+  const projectIds = projects.map((project) => project.id);
+  const projectIdFilter = { in: projectIds };
+  const today = new Date();
+  const projectById = new Map(projects.map((project) => [project.id, project]));
+
+  const [
+    activities,
+    scheduleApprovalCount,
+    scheduleApprovals,
+    progressSubmissionCount,
+    progressSubmissions,
+    dailyReportCount,
+    siteDiaryCount,
+    ipcCertificateCount,
+    ipcItemCount,
+    ipcCertificates,
+    ipcItems,
+    procurementOrders,
+    longLeadItems,
+    ncrRecords,
+    itpRecords,
+    safetyIncidents,
+    rfis,
+    submittals,
+    pendingChangeOrders,
+  ] = await Promise.all([
+    prisma.activity.findMany({
+      where: { projectId: projectIdFilter, isActive: true },
+      select: {
+        id: true,
+        projectId: true,
+        name: true,
+        wbsCode: true,
+        earlyFinish: true,
+        endDate: true,
+        isCritical: true,
+        isMilestone: true,
+        progress: {
+          where: { status: 'approved' },
+          orderBy: { updatedAt: 'desc' },
+          take: 1,
+          select: { pctComplete: true },
+        },
+      },
+    }),
+    prisma.scheduleRevision.count({
+      where: { projectId: projectIdFilter, status: 'under_review' },
+    }),
+    prisma.scheduleRevision.findMany({
+      where: { projectId: projectIdFilter, status: 'under_review' },
+      take: ACTION_LIMIT,
+      orderBy: [{ submittedAt: 'desc' }, { createdAt: 'desc' }],
+      select: {
+        id: true,
+        projectId: true,
+        label: true,
+        activityCount: true,
+        submittedAt: true,
+        createdAt: true,
+        project: { select: { name: true } },
+      },
+    }),
+    prisma.progressSubmission.count({
+      where: { projectId: projectIdFilter, status: 'submitted' },
+    }),
+    prisma.progressSubmission.findMany({
+      where: { projectId: projectIdFilter, status: 'submitted' },
+      take: ACTION_LIMIT,
+      orderBy: [{ submittedAt: 'desc' }, { createdAt: 'desc' }],
+      select: {
+        id: true,
+        projectId: true,
+        pctComplete: true,
+        submittedAt: true,
+        activity: { select: { name: true, wbsCode: true } },
+        project: { select: { name: true } },
+      },
+    }),
+    prisma.dailyReport.count({
+      where: { projectId: projectIdFilter, status: 'submitted' },
+    }),
+    prisma.siteDiary.count({
+      where: { projectId: projectIdFilter, status: 'submitted' },
+    }),
+    prisma.ipcCertificate.count({
+      where: { projectId: projectIdFilter, status: 'submitted' },
+    }),
+    prisma.ipcItem.count({
+      where: { projectId: projectIdFilter, status: 'submitted' },
+    }),
+    prisma.ipcCertificate.findMany({
+      where: { projectId: projectIdFilter, status: 'submitted' },
+      take: ACTION_LIMIT,
+      orderBy: [{ submittedAt: 'desc' }, { updatedAt: 'desc' }],
+      select: {
+        id: true,
+        projectId: true,
+        period: true,
+        totalCert: true,
+        netPayable: true,
+        submittedAt: true,
+        project: { select: { name: true, currency: true } },
+      },
+    }),
+    prisma.ipcItem.findMany({
+      where: { projectId: projectIdFilter, status: 'submitted' },
+      take: ACTION_LIMIT,
+      orderBy: [{ updatedAt: 'desc' }],
+      select: {
+        id: true,
+        projectId: true,
+        ipcPeriod: true,
+        netPayable: true,
+        project: { select: { name: true, currency: true } },
+      },
+    }),
+    prisma.procurementOrder.findMany({
+      where: { projectId: projectIdFilter },
+      include: {
+        activity: {
+          select: {
+            id: true,
+            name: true,
+            wbsCode: true,
+            startDate: true,
+            endDate: true,
+            earlyStart: true,
+            earlyFinish: true,
+            baselineStart: true,
+            baselineFinish: true,
+            lateStart: true,
+            lateFinish: true,
+            isCritical: true,
+            totalFloat: true,
+          },
+        },
+      },
+    }),
+    prisma.longLeadItem.findMany({
+      where: { projectId: projectIdFilter },
+      include: {
+        activity: {
+          select: {
+            id: true,
+            name: true,
+            wbsCode: true,
+            startDate: true,
+            endDate: true,
+            earlyStart: true,
+            earlyFinish: true,
+            baselineStart: true,
+            baselineFinish: true,
+            lateStart: true,
+            lateFinish: true,
+            isCritical: true,
+            totalFloat: true,
+          },
+        },
+      },
+    }),
+    prisma.ncrRecord.findMany({
+      where: { projectId: projectIdFilter },
+      select: {
+        id: true,
+        projectId: true,
+        ref: true,
+        severity: true,
+        description: true,
+        status: true,
+        dueDate: true,
+        project: { select: { name: true } },
+      },
+    }),
+    prisma.itpRecord.findMany({
+      where: { projectId: projectIdFilter },
+      select: {
+        id: true,
+        projectId: true,
+        status: true,
+        dueDate: true,
+      },
+    }),
+    prisma.safetyIncident.findMany({
+      where: { projectId: projectIdFilter },
+      select: {
+        id: true,
+        projectId: true,
+        incidentType: true,
+        status: true,
+        dueDate: true,
+      },
+    }),
+    prisma.rfi.findMany({
+      where: { projectId: projectIdFilter },
+      select: {
+        id: true,
+        projectId: true,
+        ref: true,
+        subject: true,
+        status: true,
+        dueDate: true,
+        responseRequiredBy: true,
+        project: { select: { name: true } },
+      },
+    }),
+    prisma.submittal.findMany({
+      where: { projectId: projectIdFilter },
+      select: {
+        id: true,
+        projectId: true,
+        status: true,
+        dueDate: true,
+      },
+    }),
+    prisma.changeOrder.findMany({
+      where: { projectId: projectIdFilter, status: 'pending' },
+      select: { id: true, projectId: true },
+    }),
+  ]);
+
+  const evReports = await getEvReports({ orgId, projects });
+  const activitiesByProject = groupByProject(activities);
+  const ncrsByProject = groupByProject(ncrRecords);
+  const itpsByProject = groupByProject(itpRecords);
+  const incidentsByProject = groupByProject(safetyIncidents);
+  const rfisByProject = groupByProject(rfis);
+  const submittalsByProject = groupByProject(submittals);
+  const changeOrdersByProject = groupByProject(pendingChangeOrders);
+  const procurementRows = [...procurementOrders, ...longLeadItems];
+  const procurementSummary = summarizeRiskRows({
+    rows: procurementRows,
+    projectById,
+    today,
+  });
+  const procurementRisksByProject = countByProject(
+    procurementSummary.risks.map(({ row, risk }) => ({ ...row, risk })),
+    (row) => row.risk.isAtRisk,
+  );
+
+  const delayedActivities = activities.filter((activity) =>
+    isDelayedActivity({
+      project: projectById.get(activity.projectId),
+      activity,
+      today,
+    }),
+  );
+  const delayedByProject = countByProject(delayedActivities);
+  const criticalActivities = activities.filter(
+    (activity) => activity.isCritical && !activity.isMilestone,
+  );
+
+  const overdueNcrs = ncrRecords.filter(
+    (row) => row.dueDate && new Date(row.dueDate) < today && isOpenStatus(row.status),
+  );
+  const overdueRfis = rfis.filter((row) => {
+    const dueDate = row.responseRequiredBy || row.dueDate;
+    return (
+      dueDate &&
+      new Date(dueDate) < today &&
+      isOpenStatus(row.status, RFI_CLOSED_STATUSES)
+    );
+  });
+  const pendingSubmittals = submittals.filter((row) =>
+    ['pending', 'under_review', 'resubmit'].includes(lower(row.status)),
+  );
+
+  const overdueNcrsByProject = countByProject(overdueNcrs);
+  const overdueRfisByProject = countByProject(overdueRfis);
+  const scheduleApprovalsByProject = countByProject(scheduleApprovals);
+  const progressApprovalsByProject = countByProject(progressSubmissions);
+  const ipcActionsByProject = countByProject([...ipcCertificates, ...ipcItems]);
+
+  const projectHealth = projects.map((project) => {
+    const projectActivities = activitiesByProject.get(project.id) || [];
+    const projectNcrs = ncrsByProject.get(project.id) || [];
+    const projectItps = itpsByProject.get(project.id) || [];
+    const projectIncidents = incidentsByProject.get(project.id) || [];
+    const projectRfis = rfisByProject.get(project.id) || [];
+    const projectSubmittals = submittalsByProject.get(project.id) || [];
+    const projectChangeOrders = changeOrdersByProject.get(project.id) || [];
+    const evReport = evReports.get(project.id) || {};
+    const spi = evReport.spi;
+    const cpi = evReport.cpi;
+
+    const scheduleScore =
+      spi === null || spi === undefined
+        ? 60
+        : clampScore(scoreByIndex(Number(spi)));
+    const costScore =
+      cpi === null || cpi === undefined
+        ? 60
+        : clampScore(scoreByIndex(Number(cpi)));
+    const commercialScore = clampScore(100 - projectChangeOrders.length * 10);
+    const supplyChainScore = clampScore(
+      100 - toNumber(procurementRisksByProject.get(project.id)) * 12,
+    );
+
+    const majorNCRs = projectNcrs.filter(
+      (row) => lower(row.severity) === 'major',
+    ).length;
+    const minorNCRs = projectNcrs.filter(
+      (row) => lower(row.severity) === 'minor',
+    ).length;
+    const failedITPs = projectItps.filter(
+      (row) => lower(row.status) === 'failed',
+    ).length;
+    const qualityScore = clampScore(
+      100 - majorNCRs * 20 - minorNCRs * 8 - failedITPs * 15,
+    );
+
+    const ltiCount = projectIncidents.filter(
+      (row) => lower(row.incidentType) === 'lti',
+    ).length;
+    const fatalityCount = projectIncidents.filter(
+      (row) => lower(row.incidentType) === 'fatality',
+    ).length;
+    const openInvestigations = projectIncidents.filter((row) =>
+      isOpenStatus(row.status),
+    ).length;
+    const safetyScore = clampScore(
+      100 - fatalityCount * 100 - ltiCount * 20 - openInvestigations * 5,
+    );
+
+    const projectOverdueRfis = projectRfis.filter((row) => {
+      const dueDate = row.responseRequiredBy || row.dueDate;
+      return (
+        dueDate &&
+        new Date(dueDate) < today &&
+        isOpenStatus(row.status, RFI_CLOSED_STATUSES)
+      );
+    }).length;
+    const projectPendingSubmittals = projectSubmittals.filter((row) =>
+      ['pending', 'under_review', 'resubmit'].includes(lower(row.status)),
+    ).length;
+    const docControlScore = clampScore(
+      100 - projectOverdueRfis * 10 - projectPendingSubmittals * 5,
+    );
+
+    const dimensions = {
+      schedule: scheduleScore,
+      cost: costScore,
+      commercial: commercialScore,
+      supplyChain: supplyChainScore,
+      quality: qualityScore,
+      safety: safetyScore,
+      docControl: docControlScore,
+    };
+
+    const overallScore = clampScore(
+      average(Object.values(dimensions), projectActivities.length ? 60 : 50),
+    );
+    const workflowActions =
+      toNumber(scheduleApprovalsByProject.get(project.id)) +
+      toNumber(progressApprovalsByProject.get(project.id)) +
+      toNumber(ipcActionsByProject.get(project.id)) +
+      toNumber(procurementRisksByProject.get(project.id)) +
+      toNumber(overdueNcrsByProject.get(project.id)) +
+      toNumber(overdueRfisByProject.get(project.id));
+    const weakestDimension = Object.entries(dimensions).sort(
+      (a, b) => a[1] - b[1],
+    )[0];
+
+    return {
+      id: project.id,
+      name: project.name,
+      status: project.status,
+      currency: project.currency,
+      contractValue: toNumber(project.contractValue),
+      startDate: toIso(project.startDate),
+      endDate: toIso(project.endDate),
+      overallScore,
+      dimensions,
+      weakestDimension: {
+        key: weakestDimension[0],
+        label:
+          HEALTH_DIMENSIONS.find((item) => item.key === weakestDimension[0])
+            ?.label || weakestDimension[0],
+        score: weakestDimension[1],
+      },
+      delayedActivities: toNumber(delayedByProject.get(project.id)),
+      workflowActions,
+      procurementRisks: toNumber(procurementRisksByProject.get(project.id)),
+      overdueNcrRfi:
+        toNumber(overdueNcrsByProject.get(project.id)) +
+        toNumber(overdueRfisByProject.get(project.id)),
+      target: queueTarget(project.id, 'overview'),
+    };
+  });
+
+  const healthDimensions = HEALTH_DIMENSIONS.map((dimension) => {
+    const scores = projectHealth.map(
+      (project) => project.dimensions[dimension.key],
+    );
+
+    const detailByKey = {
+      schedule: `${delayedActivities.length} delayed activities`,
+      cost: `${projectHealth.filter((project) => project.dimensions.cost < 80).length} CPI watch projects`,
+      commercial: `${pendingChangeOrders.length} pending change orders`,
+      supplyChain: `${procurementSummary.atRiskItems} procurement risks`,
+      quality: `${overdueNcrs.length} overdue NCRs`,
+      safety: `${safetyIncidents.filter((row) => isOpenStatus(row.status)).length} open investigations`,
+      docControl: `${overdueRfis.length} overdue RFIs`,
+    };
+
+    return {
+      ...dimension,
+      score: clampScore(average(scores, 60)),
+      detail: detailByKey[dimension.key],
+      count: scores.length,
+    };
+  });
+
+  const progressApprovalCount =
+    progressSubmissionCount + dailyReportCount + siteDiaryCount;
+  const ipcActionCount = ipcCertificateCount + ipcItemCount;
+
+  const workflowQueues = [
+    buildQueue({
+      key: 'scheduleApprovals',
+      label: 'Schedule approvals',
+      count: scheduleApprovalCount,
+      description: 'Revisions waiting for PM or planning review',
+      module: 'schedule',
+      child: 'revisions',
+      items: scheduleApprovals.map((row) =>
+        buildQueueItem({
+          id: row.id,
+          projectId: row.projectId,
+          projectName: row.project.name,
+          title: row.label || 'Schedule revision',
+          meta: `${row.activityCount} activities`,
+          module: 'schedule',
+          child: 'revisions',
+          dueDate: row.submittedAt || row.createdAt,
+        }),
+      ),
+    }),
+    buildQueue({
+      key: 'progressApprovals',
+      label: 'Progress approvals',
+      count: progressApprovalCount,
+      description: 'Submitted progress, daily reports, and site diaries',
+      module: 'schedule',
+      child: 'progress',
+      items: progressSubmissions.map((row) =>
+        buildQueueItem({
+          id: row.id,
+          projectId: row.projectId,
+          projectName: row.project.name,
+          title: row.activity?.name || 'Progress submission',
+          meta: `${toNumber(row.pctComplete).toFixed(1)}% complete`,
+          module: 'schedule',
+          child: 'progress',
+          dueDate: row.submittedAt,
+        }),
+      ),
+    }),
+    buildQueue({
+      key: 'ipcActions',
+      label: 'IPC actions',
+      count: ipcActionCount,
+      description: 'Payment certificates and submitted IPC items',
+      module: 'commercial',
+      child: 'ipc',
+      items: [
+        ...ipcCertificates.map((row) =>
+          buildQueueItem({
+            id: row.id,
+            projectId: row.projectId,
+            projectName: row.project.name,
+            title: row.period,
+            meta: `${row.project.currency} ${toNumber(row.netPayable || row.totalCert).toLocaleString()}`,
+            module: 'commercial',
+            child: 'ipc',
+            dueDate: row.submittedAt,
+          }),
+        ),
+        ...ipcItems.map((row) =>
+          buildQueueItem({
+            id: row.id,
+            projectId: row.projectId,
+            projectName: row.project.name,
+            title: row.ipcPeriod,
+            meta: `${row.project.currency} ${toNumber(row.netPayable).toLocaleString()}`,
+            module: 'commercial',
+            child: 'ipc',
+          }),
+        ),
+      ].slice(0, ACTION_LIMIT),
+    }),
+    buildQueue({
+      key: 'procurementRisks',
+      label: 'Procurement risks',
+      count: procurementSummary.atRiskItems,
+      description: 'Long-lead and purchase-order dates at risk',
+      module: 'schedule',
+      child: 'longLead',
+      items: procurementSummary.topRisks.map((risk) =>
+        buildQueueItem({
+          id: risk.id,
+          projectId: risk.projectId,
+          projectName: risk.projectName,
+          title: risk.item,
+          meta: `${risk.severity} - ${risk.reason.replaceAll('_', ' ')}`,
+          severity: risk.severity,
+          module: 'schedule',
+          child: 'longLead',
+          dueDate: risk.needDate,
+        }),
+      ),
+    }),
+    buildQueue({
+      key: 'overdueNcrs',
+      label: 'Overdue NCRs',
+      count: overdueNcrs.length,
+      description: 'Quality records past due date',
+      module: 'quality',
+      child: 'ncr',
+      items: overdueNcrs.slice(0, ACTION_LIMIT).map((row) =>
+        buildQueueItem({
+          id: row.id,
+          projectId: row.projectId,
+          projectName: row.project.name,
+          title: row.ref,
+          meta: row.description || `${row.severity} NCR`,
+          severity: lower(row.severity) === 'major' ? 'critical' : 'attention',
+          module: 'quality',
+          child: 'ncr',
+          dueDate: row.dueDate,
+        }),
+      ),
+    }),
+    buildQueue({
+      key: 'overdueRfis',
+      label: 'Overdue RFIs',
+      count: overdueRfis.length,
+      description: 'Document-control responses past due',
+      module: 'docControl',
+      child: 'rfi',
+      items: overdueRfis.slice(0, ACTION_LIMIT).map((row) =>
+        buildQueueItem({
+          id: row.id,
+          projectId: row.projectId,
+          projectName: row.project.name,
+          title: row.ref,
+          meta: row.subject,
+          severity: 'attention',
+          module: 'docControl',
+          child: 'rfi',
+          dueDate: row.responseRequiredBy || row.dueDate,
+        }),
+      ),
+    }),
+  ];
+
+  const atRiskProjects = [...projectHealth]
+    .sort((a, b) => {
+      if (a.overallScore !== b.overallScore) {
+        return a.overallScore - b.overallScore;
+      }
+      return b.workflowActions - a.workflowActions;
+    })
+    .slice(0, 6);
+
+  const approvalQueueCount =
+    scheduleApprovalCount + progressApprovalCount + ipcActionCount;
+
+  return {
+    generatedAt: new Date().toISOString(),
+    summary: {
+      totalProjects: projects.length,
+      activeProjects: projects.filter((project) => project.status === 'active')
+        .length,
+      totalContractValue: projects.reduce(
+        (sum, project) => sum + toNumber(project.contractValue),
+        0,
+      ),
+      portfolioHealthScore: clampScore(
+        average(projectHealth.map((project) => project.overallScore), 60),
+      ),
+      delayedActivities: delayedActivities.length,
+      criticalActivities: criticalActivities.length,
+      approvalQueueCount,
+      procurementAtRisk: procurementSummary.atRiskItems,
+      overdueNcrRfi: overdueNcrs.length + overdueRfis.length,
+    },
+    healthDimensions,
+    workflowQueues,
+    projectHealth: atRiskProjects,
+    emptyState: null,
+  };
+}
+
+module.exports = {
+  getWorkspaceDashboard,
+};

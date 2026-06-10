@@ -29,6 +29,34 @@ export function BoqFinancialSummary({ financial, currency }: Props) {
           </span>
         </div>
 
+        <div className='flex items-center justify-between text-sm text-muted-foreground'>
+          <span>Scheduled Value</span>
+          <span className='tabular-nums'>
+            {fmt(financial.scheduledValue ?? 0, currency)}
+          </span>
+        </div>
+
+        <div className='flex items-center justify-between text-sm text-muted-foreground'>
+          <span>Unscheduled Value</span>
+          <span className='tabular-nums'>
+            {fmt(financial.unscheduledValue ?? financial.subtotal1, currency)}
+          </span>
+        </div>
+
+        <div className='flex items-center justify-between text-sm text-muted-foreground'>
+          <span>Earned Value</span>
+          <span className='tabular-nums'>
+            {fmt(financial.earnedValue ?? 0, currency)}
+          </span>
+        </div>
+
+        <div className='flex items-center justify-between text-sm text-muted-foreground'>
+          <span>Certified Value</span>
+          <span className='tabular-nums'>
+            {fmt(financial.certifiedValue ?? 0, currency)}
+          </span>
+        </div>
+
         {/* Extra services */}
         {financial.extraServices.map((svc) => (
           <div key={svc.label} className='flex items-center justify-between text-sm text-muted-foreground'>
