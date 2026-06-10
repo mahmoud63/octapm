@@ -1,0 +1,221 @@
+name: Quality Gates
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: quality-gates-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend-tests:
+    name: Backend package - test
+    runs-on: ubuntu-latest
+
+    env:
+      NODE_ENV: test
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/pmcopilots_ci
+      JWT_SECRET: ci-access-secret
+      JWT_REFRESH_SECRET: ci-refresh-secret
+      ANTHROPIC_API_KEY: ci-anthropic-key
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install workspace dependencies
+        run: npm ci
+
+      - name: Run backend Jest suite
+        run: npm test --workspace=backend -- --forceExit
+
+  prisma-validate:
+    name: Backend package - Prisma validate
+    runs-on: ubuntu-latest
+
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/pmcopilots_ci
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install workspace dependencies
+        run: npm ci
+
+      - name: Validate Prisma schema
+        run: npm run prisma:validate --workspace=backend
+
+  openapi-validate:
+    name: Backend package - OpenAPI validate
+    runs-on: ubuntu-latest
+
+    env:
+      NODE_ENV: test
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/pmcopilots_ci
+      JWT_SECRET: ci-access-secret
+      JWT_REFRESH_SECRET: ci-refresh-secret
+      ANTHROPIC_API_KEY: ci-anthropic-key
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install workspace dependencies
+        run: npm ci
+
+      - name: Validate OpenAPI contract
+        run: npm run openapi:validate --workspace=backend
+
+      - name: Run OpenAPI smoke tests
+        run: npm test --workspace=backend -- --runTestsByPath src/openapi/__tests__/openapi.test.js --runInBand --forceExit
+
+  frontend-checks:
+    name: Frontend package - lint and build
+    runs-on: ubuntu-latest
+
+    env:
+      CI: true
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install workspace dependencies
+        run: npm ci
+
+      - name: Run frontend lint
+        run: npm run lint --workspace=frontend
+
+      - name: Run frontend production build
+        run: npm run build --workspace=frontend
+
+  infrastructure-checks:
+    name: Infrastructure - security and resilience validation
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: '1.7.5'
+
+      - name: Validate EC2 user data test fixtures
+        run: npm run infra:test:ec2-user-data
+
+      - name: Validate API origin security test fixtures
+        run: npm run infra:test:api-origin
+
+      - name: Validate secret hygiene test fixtures
+        run: npm run security:test:secret-hygiene
+
+      - name: Validate tracked source secret hygiene
+        run: npm run security:validate:secret-hygiene
+
+      - name: Validate live API origin security policy
+        run: npm run infra:validate:api-origin
+
+      - name: Validate live EC2 user data policy
+        run: npm run infra:validate:ec2-user-data
+
+      - name: Validate RDS backup policy test fixtures
+        run: npm run infra:test:rds-backups
+
+      - name: Validate live RDS backup policy
+        run: npm run infra:validate:rds-backups
+
+      - name: Initialize Terraform without backend
+        run: terraform init -backend=false
+        working-directory: infrastructure/terraform
+
+      - name: Validate Terraform configuration
+        run: terraform validate -no-color
+        working-directory: infrastructure/terraform
+
+  deployment-readiness:
+    name: Deployment readiness - required checks
+    runs-on: ubuntu-latest
+    if: always()
+    needs:
+      - backend-tests
+      - prisma-validate
+      - openapi-validate
+      - frontend-checks
+      - infrastructure-checks
+
+    env:
+      BACKEND_TESTS_RESULT: ${{ needs.backend-tests.result }}
+      PRISMA_VALIDATE_RESULT: ${{ needs.prisma-validate.result }}
+      OPENAPI_VALIDATE_RESULT: ${{ needs.openapi-validate.result }}
+      FRONTEND_CHECKS_RESULT: ${{ needs.frontend-checks.result }}
+      INFRASTRUCTURE_CHECKS_RESULT: ${{ needs.infrastructure-checks.result }}
+
+    steps:
+      - name: Confirm required checks passed
+        run: |
+          set -euo pipefail
+
+          failed=0
+
+          check_result() {
+            local label="$1"
+            local result="$2"
+
+            if [ "$result" = "success" ]; then
+              echo "$label: passed"
+              return
+            fi
+
+            echo "::error::$label finished with result: $result"
+            failed=1
+          }
+
+          check_result "Backend package - test" "$BACKEND_TESTS_RESULT"
+          check_result "Backend package - Prisma validate" "$PRISMA_VALIDATE_RESULT"
+          check_result "Backend package - OpenAPI validate" "$OPENAPI_VALIDATE_RESULT"
+          check_result "Frontend package - lint and build" "$FRONTEND_CHECKS_RESULT"
+          check_result "Infrastructure - security and resilience validation" "$INFRASTRUCTURE_CHECKS_RESULT"
+
+          if [ "$failed" -ne 0 ]; then
+            exit 1
+          fi
+
+          {
+            echo "## Deployment readiness"
+            echo ""
+            echo "All required Quality Gates checks passed."
+          } >> "$GITHUB_STEP_SUMMARY"

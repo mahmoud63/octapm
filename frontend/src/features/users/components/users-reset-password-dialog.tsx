@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { toast } from 'sonner'
+import { getServerErrorMessage } from '@/lib/handle-server-error'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -41,7 +42,8 @@ export function UsersResetPasswordDialog({
           setPassword('')
           onOpenChange(false)
         },
-        onError: () => toast.error('Could not reset password'),
+        onError: (error) =>
+          toast.error(getServerErrorMessage(error, 'Could not reset password')),
       }
     )
   }

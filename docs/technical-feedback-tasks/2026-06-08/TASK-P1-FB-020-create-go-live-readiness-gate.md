@@ -25,11 +25,11 @@ Production readiness cannot be verified from code alone. Critical gaps in schedu
 
 ## Required Changes
 
-- [ ] Define go-live acceptance criteria by module and workflow.
-- [ ] List pilot-only restrictions and production-blocking tasks.
-- [ ] Create QA scenarios for BOQ -> Activity -> Progress -> EV -> Commercial -> Dashboard.
-- [ ] Require signoff from Product, QA, Security, Backend, Frontend, and Business owners.
-- [ ] Connect release checklist to CI/smoke testing.
+- [x] Define go-live acceptance criteria by module and workflow.
+- [x] List pilot-only restrictions and production-blocking tasks.
+- [x] Create QA scenarios for BOQ -> Activity -> Progress -> EV -> Commercial -> Dashboard.
+- [x] Require signoff from Product, QA, Security, Backend, Frontend, and Business owners.
+- [x] Connect release checklist to CI/smoke testing.
 
 ## Suggested Technical Approach
 
@@ -37,11 +37,11 @@ Create a readiness matrix that maps workflow, blocker, task file, owner, validat
 
 ## Acceptance Criteria
 
-- [ ] A go-live readiness document exists with owners and gates.
-- [ ] P0 blockers are linked and cannot be ignored without formal risk acceptance.
-- [ ] QA has executable end-to-end scenarios.
-- [ ] Pilot/demo limitations are documented.
-- [ ] Production rollout requires recorded signoff.
+- [x] A go-live readiness document exists with owners and gates.
+- [x] P0 blockers are linked and cannot be ignored without formal risk acceptance.
+- [x] QA has executable end-to-end scenarios.
+- [x] Pilot/demo limitations are documented.
+- [x] Production rollout requires recorded signoff.
 
 ## Testing Requirements
 
@@ -61,3 +61,9 @@ S
 ## Notes
 
 Status is `Cannot verify` because live readiness needs acceptance evidence, not only code inspection.
+
+## Implementation Status - 2026-06-09
+
+- Added `docs/qa/go-live-readiness-gate.md` with the go-live rule, readiness matrix, module acceptance criteria, pilot restrictions, production-blocking conditions, executable QA scenarios, required evidence commands, signoff record, and risk acceptance record.
+- Updated `docs/release-checklist.md` so production source-of-truth rollout depends on the go-live readiness gate in addition to CI and deployment smoke checks.
+- Live readiness still requires actual evidence, stakeholder signoff, and any required risk acceptance for the target release.

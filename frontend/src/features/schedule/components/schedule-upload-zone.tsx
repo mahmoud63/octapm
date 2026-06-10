@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Upload, FileSpreadsheet, AlertCircle } from 'lucide-react'
 import { toast } from 'sonner'
+import { useCanPerform } from '@/lib/permissions'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { useGenerateSchedule } from '../hooks/use-schedule'
@@ -17,6 +18,7 @@ interface Props {
 }
 
 export function ScheduleUploadZone({ projectId, project }: Props) {
+  const canCreateSchedule = useCanPerform('schedule', 'create')
   const fileRef = useRef<HTMLInputElement>(null)
   const [revisionLabel, setRevisionLabel] = useState('')
   const [isImportScheduleOpen, setImportScheduleOpen] = useState(false)
@@ -64,6 +66,7 @@ export function ScheduleUploadZone({ projectId, project }: Props) {
 
   const onDrop = (e: React.DragEvent) => {
     e.preventDefault()
+    if (!canCreateSchedule) return
     const file = e.dataTransfer.files[0]
     if (file) handleFile(file)
   }
@@ -84,7 +87,7 @@ export function ScheduleUploadZone({ projectId, project }: Props) {
           value={revisionLabel}
           onChange={(e) => setRevisionLabel(e.target.value)}
           placeholder='Rev 2 - Updated Electrical'
-          disabled={isPending}
+          disabled={isPending || !canCreateSchedule}
         />
       </div>
 
@@ -102,10 +105,12 @@ export function ScheduleUploadZone({ projectId, project }: Props) {
       <div
         onDragOver={(e) => e.preventDefault()}
         onDrop={onDrop}
-        onClick={() => !isPending && fileRef.current?.click()}
+        onClick={() =>
+          !isPending && canCreateSchedule && fileRef.current?.click()
+        }
         className={[
           'flex w-full max-w-lg cursor-pointer flex-col items-center gap-4 rounded-xl border-2 border-dashed p-10 text-center transition-colors',
-          isPending
+          isPending || !canCreateSchedule
             ? 'pointer-events-none border-primary/40 bg-primary/5'
             : 'border-muted-foreground/25 hover:border-primary/50 hover:bg-muted/30',
         ].join(' ')}
@@ -154,6 +159,16 @@ export function ScheduleUploadZone({ projectId, project }: Props) {
               </p>
             )}
           </div>
+        ) : !canCreateSchedule ? (
+          <>
+            <AlertCircle className='h-10 w-10 text-muted-foreground' />
+            <div>
+              <p className='font-semibold'>Schedule upload unavailable</p>
+              <p className='mt-1 text-sm text-muted-foreground'>
+                Your role can view this schedule but cannot create revisions.
+              </p>
+            </div>
+          </>
         ) : error ? (
           <>
             <AlertCircle className='h-10 w-10 text-destructive' />
@@ -203,7 +218,7 @@ export function ScheduleUploadZone({ projectId, project }: Props) {
         </div>
       )}
 
-      {!isPending && (
+      {!isPending && canCreateSchedule && (
         <Button
           variant='outline'
           size='sm'
@@ -215,7 +230,7 @@ export function ScheduleUploadZone({ projectId, project }: Props) {
         </Button>
       )}
 
-      {!isPending && (
+      {!isPending && canCreateSchedule && (
         <Button
           variant='outline'
           size='sm'

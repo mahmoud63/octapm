@@ -1,8 +1,8 @@
 import { z } from 'zod'
-import { AxiosError } from 'axios'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { toast } from 'sonner'
+import { getServerErrorMessage } from '@/lib/handle-server-error'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -93,18 +93,6 @@ export function UsersActionDialog({
     },
   })
 
-  const getErrorMessage = (error: unknown) => {
-    if (error instanceof AxiosError) {
-      const errorData = error.response?.data as
-        | { error?: { message?: string } }
-        | undefined
-
-      return errorData?.error?.message ?? 'Something went wrong'
-    }
-
-    return 'Something went wrong'
-  }
-
   const onSubmit = async (values: UserForm) => {
     if (isEdit) {
       try {
@@ -120,7 +108,7 @@ export function UsersActionDialog({
         toast.success('Engineer updated successfully.')
         onOpenChange(false)
       } catch (error) {
-        toast.error(getErrorMessage(error))
+        toast.error(getServerErrorMessage(error))
       }
       return
     }
@@ -145,7 +133,7 @@ export function UsersActionDialog({
       })
       onOpenChange(false)
     } catch (error) {
-      toast.error(getErrorMessage(error))
+      toast.error(getServerErrorMessage(error))
     }
   }
 

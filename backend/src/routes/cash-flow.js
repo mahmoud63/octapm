@@ -1,6 +1,8 @@
 const express = require('express');
 const { body, param } = require('express-validator');
 const { validate } = require('../middleware/validate');
+const { sendSuccess } = require('../utils/api-response');
+const { moneyBody } = require('../utils/money');
 const {
   listCashFlow,
   createManualCashFlowEntry,
@@ -17,7 +19,7 @@ router.get('/', async (req, res, next) => {
       projectId: req.params.projectId,
     });
 
-    return res.json({ success: true, data });
+    return sendSuccess(res, data);
   } catch (error) {
     return next(error);
   }
@@ -27,8 +29,8 @@ router.post(
   '/',
   [
     body('period').matches(/^\d{4}-\d{2}$/),
-    body('inflow').optional().isFloat({ min: 0 }),
-    body('outflow').optional().isFloat({ min: 0 }),
+    moneyBody('inflow'),
+    moneyBody('outflow'),
     validate,
   ],
   async (req, res, next) => {
@@ -39,7 +41,7 @@ router.post(
         payload: req.body,
       });
 
-      return res.status(201).json({ success: true, data: row });
+      return sendSuccess(res, row, 201);
     } catch (error) {
       return next(error);
     }
@@ -53,7 +55,7 @@ router.post('/rebuild', async (req, res, next) => {
       projectId: req.params.projectId,
     });
 
-    return res.json({ success: true, data });
+    return sendSuccess(res, data);
   } catch (error) {
     return next(error);
   }
@@ -70,7 +72,7 @@ router.delete(
         entryId: req.params.entryId,
       });
 
-      return res.json({ success: true, data });
+      return sendSuccess(res, data);
     } catch (error) {
       return next(error);
     }

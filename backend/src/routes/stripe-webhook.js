@@ -1,16 +1,19 @@
 const express = require('express');
-const { getStripe } = require('../config/stripe');
+const { getStripe, getStripeWebhookSecret } = require('../config/stripe');
 const { prisma } = require('../config/db');
+const { asyncHandler } = require('../utils/async-handler');
+const { divideMoney } = require('../utils/money');
 
 const router = express.Router();
 
-router.post('/', async (req, res) => {
+router.post('/', asyncHandler(async (req, res) => {
+  const webhookSecret = getStripeWebhookSecret();
   const stripe = getStripe();
   const sig = req.headers['stripe-signature'];
   let event;
   try {
     event = stripe.webhooks.constructEvent(
-      req.body, sig, process.env.STRIPE_WEBHOOK_SECRET,
+      req.body, sig, webhookSecret,
     );
   } catch (err) {
     console.error('[stripe-webhook] signature verification failed:', err.message);
@@ -29,7 +32,7 @@ router.post('/', async (req, res) => {
           data: {
             subscriptionId: sub.id,
             description: obj.lines?.data?.[0]?.description || 'Subscription payment',
-            amount: (obj.amount_paid ?? 0) / 100,
+            amount: divideMoney(obj.amount_paid ?? 0, 100),
             currency: (obj.currency ?? 'usd').toUpperCase(),
             status: 'paid',
             periodLabel: obj.lines?.data?.[0]?.period
@@ -59,7 +62,7 @@ router.post('/', async (req, res) => {
           data: {
             subscriptionId: sub.id,
             description: 'Failed subscription payment',
-            amount: (obj.amount_due ?? 0) / 100,
+            amount: divideMoney(obj.amount_due ?? 0, 100),
             currency: (obj.currency ?? 'usd').toUpperCase(),
             status: 'failed',
             stripeInvoiceId: obj.id,
@@ -87,6 +90,6 @@ router.post('/', async (req, res) => {
   }
 
   return res.json({ received: true });
-});
+}));
 
 module.exports = router;

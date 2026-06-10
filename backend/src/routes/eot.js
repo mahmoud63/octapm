@@ -1,6 +1,9 @@
 const express = require('express');
 const { body, param } = require('express-validator');
+const { requireRoles } = require('../middleware/rbac');
 const { validate } = require('../middleware/validate');
+const { sendSuccess } = require('../utils/api-response');
+const { moneyBody } = require('../utils/money');
 const {
   calculateEot,
   listEotClaims,
@@ -17,7 +20,7 @@ router.get('/', async (req, res, next) => {
       projectId: req.params.projectId,
     });
 
-    return res.json({ success: true, data });
+    return sendSuccess(res, data);
   } catch (error) {
     return next(error);
   }
@@ -25,12 +28,26 @@ router.get('/', async (req, res, next) => {
 
 router.post(
   '/calculate',
+  requireRoles('pm', 'planning_eng', 'qs'),
   [
     body('eventName').trim().notEmpty(),
+    body('eventType').optional({ nullable: true }).isString().trim(),
     body('delayDays').isFloat({ min: 0 }),
     body('eotDaysGranted').optional().isFloat({ min: 0 }),
-    body('ldRatePerDay').optional().isFloat({ min: 0 }),
+    moneyBody('ldRatePerDay'),
     body('affectedActivityIds').optional().isArray(),
+    body('affectedActivityIds.*').optional().isUUID(),
+    body('activityLinks').optional().isArray(),
+    body('activityLinks.*.activityId').optional().isUUID(),
+    body('activityLinks.*.delayStart').optional({ nullable: true }).isISO8601(),
+    body('activityLinks.*.delayEnd').optional({ nullable: true }).isISO8601(),
+    body('activityLinks.*.delayDays').optional().isFloat({ min: 0 }),
+    body('activityLinks.*.baselineStart').optional({ nullable: true }).isISO8601(),
+    body('activityLinks.*.baselineFinish').optional({ nullable: true }).isISO8601(),
+    body('activityLinks.*.impactedStart').optional({ nullable: true }).isISO8601(),
+    body('activityLinks.*.impactedFinish').optional({ nullable: true }).isISO8601(),
+    body('activityLinks.*.impactBasis').optional({ nullable: true }).isString().trim(),
+    body('analysis').optional({ nullable: true }).isString().trim(),
     validate,
   ],
   async (req, res, next) => {
@@ -44,10 +61,11 @@ router.post(
         eotDaysGranted: req.body.eotDaysGranted,
         ldRatePerDay: req.body.ldRatePerDay,
         affectedActivityIds: req.body.affectedActivityIds,
+        activityLinks: req.body.activityLinks,
         analysis: req.body.analysis,
       });
 
-      return res.json({ success: true, data });
+      return sendSuccess(res, data);
     } catch (error) {
       return next(error);
     }
@@ -56,15 +74,53 @@ router.post(
 
 router.post(
   '/',
+  requireRoles('pm', 'planning_eng', 'qs'),
   [
     body('eventName').trim().notEmpty(),
+    body('eventType').optional({ nullable: true }).isString().trim(),
     body('delayDays').isFloat({ min: 0 }),
     body('eotDaysGranted').optional().isFloat({ min: 0 }),
-    body('ldRatePerDay').optional().isFloat({ min: 0 }),
+    moneyBody('ldRatePerDay'),
     body('affectedActivityIds').optional().isArray(),
+    body('affectedActivityIds.*').optional().isUUID(),
+    body('activityLinks').optional().isArray(),
+    body('activityLinks.*.activityId').optional().isUUID(),
+    body('activityLinks.*.delayStart').optional({ nullable: true }).isISO8601(),
+    body('activityLinks.*.delayEnd').optional({ nullable: true }).isISO8601(),
+    body('activityLinks.*.delayDays').optional().isFloat({ min: 0 }),
+    body('activityLinks.*.baselineStart').optional({ nullable: true }).isISO8601(),
+    body('activityLinks.*.baselineFinish').optional({ nullable: true }).isISO8601(),
+    body('activityLinks.*.impactedStart').optional({ nullable: true }).isISO8601(),
+    body('activityLinks.*.impactedFinish').optional({ nullable: true }).isISO8601(),
+    body('activityLinks.*.impactBasis').optional({ nullable: true }).isString().trim(),
+    body('weatherDelayIds').optional().isArray(),
+    body('weatherDelayIds.*').optional().isUUID(),
+    body('weatherDelayLinks').optional().isArray(),
+    body('weatherDelayLinks.*.weatherDelayId').optional().isUUID(),
+    body('weatherDelayLinks.*.delayStart')
+      .optional({ nullable: true })
+      .isISO8601(),
+    body('weatherDelayLinks.*.delayEnd')
+      .optional({ nullable: true })
+      .isISO8601(),
+    body('weatherDelayLinks.*.delayDays').optional().isFloat({ min: 0 }),
+    body('correspondenceIds').optional().isArray(),
+    body('correspondenceIds.*').optional().isUUID(),
+    body('correspondenceLinks').optional().isArray(),
+    body('correspondenceLinks.*.correspondenceId').optional().isUUID(),
+    body('attachmentRefs').optional().isArray(),
+    body('attachmentRefs.*.documentId').optional({ nullable: true }).isUUID(),
+    body('supportingDocumentIds').optional().isArray(),
+    body('supportingDocumentIds.*').optional().isUUID(),
+    body('documentIds').optional().isArray(),
+    body('documentIds.*').optional().isUUID(),
+    body('analysis').optional({ nullable: true }).isString().trim(),
+    body('comment').optional({ nullable: true }).isString().trim(),
+    body('statusComment').optional({ nullable: true }).isString().trim(),
+    body('rejectionReason').optional({ nullable: true }).isString().trim(),
     body('status')
       .optional()
-      .isIn(['draft', 'submitted', 'approved', 'rejected']),
+      .isIn(['draft', 'submitted']),
     validate,
   ],
   async (req, res, next) => {
@@ -72,10 +128,12 @@ router.post(
       const row = await createEotClaim({
         orgId: req.user.orgId,
         projectId: req.params.projectId,
+        userId: req.user.id,
+        userRole: req.user.role,
         payload: req.body,
       });
 
-      return res.status(201).json({ success: true, data: row });
+      return sendSuccess(res, row, 201);
     } catch (error) {
       return next(error);
     }
@@ -84,12 +142,55 @@ router.post(
 
 router.patch(
   '/:claimId',
+  requireRoles('pm', 'planning_eng', 'qs'),
   [
     param('claimId').isUUID(),
+    body('eventName').optional().trim().notEmpty(),
+    body('eventType').optional({ nullable: true }).isString().trim(),
+    body('delayDays').optional().isFloat({ min: 0 }),
     body('status')
       .optional()
       .isIn(['draft', 'submitted', 'approved', 'rejected']),
     body('eotDaysGranted').optional().isFloat({ min: 0 }),
+    moneyBody('ldRatePerDay'),
+    body('affectedActivityIds').optional().isArray(),
+    body('affectedActivityIds.*').optional().isUUID(),
+    body('activityLinks').optional().isArray(),
+    body('activityLinks.*.activityId').optional().isUUID(),
+    body('activityLinks.*.delayStart').optional({ nullable: true }).isISO8601(),
+    body('activityLinks.*.delayEnd').optional({ nullable: true }).isISO8601(),
+    body('activityLinks.*.delayDays').optional().isFloat({ min: 0 }),
+    body('activityLinks.*.baselineStart').optional({ nullable: true }).isISO8601(),
+    body('activityLinks.*.baselineFinish').optional({ nullable: true }).isISO8601(),
+    body('activityLinks.*.impactedStart').optional({ nullable: true }).isISO8601(),
+    body('activityLinks.*.impactedFinish').optional({ nullable: true }).isISO8601(),
+    body('activityLinks.*.impactBasis').optional({ nullable: true }).isString().trim(),
+    body('weatherDelayIds').optional().isArray(),
+    body('weatherDelayIds.*').optional().isUUID(),
+    body('weatherDelayLinks').optional().isArray(),
+    body('weatherDelayLinks.*.weatherDelayId').optional().isUUID(),
+    body('weatherDelayLinks.*.delayStart')
+      .optional({ nullable: true })
+      .isISO8601(),
+    body('weatherDelayLinks.*.delayEnd')
+      .optional({ nullable: true })
+      .isISO8601(),
+    body('weatherDelayLinks.*.delayDays').optional().isFloat({ min: 0 }),
+    body('correspondenceIds').optional().isArray(),
+    body('correspondenceIds.*').optional().isUUID(),
+    body('correspondenceLinks').optional().isArray(),
+    body('correspondenceLinks.*.correspondenceId').optional().isUUID(),
+    body('attachmentRefs').optional().isArray(),
+    body('attachmentRefs.*.documentId').optional({ nullable: true }).isUUID(),
+    body('supportingDocumentIds').optional().isArray(),
+    body('supportingDocumentIds.*').optional().isUUID(),
+    body('documentIds').optional().isArray(),
+    body('documentIds.*').optional().isUUID(),
+    body('analysis').optional({ nullable: true }).isString().trim(),
+    body('claimLetter').optional({ nullable: true }).isString().trim(),
+    body('comment').optional({ nullable: true }).isString().trim(),
+    body('statusComment').optional({ nullable: true }).isString().trim(),
+    body('rejectionReason').optional({ nullable: true }).isString().trim(),
     validate,
   ],
   async (req, res, next) => {
@@ -98,10 +199,12 @@ router.patch(
         orgId: req.user.orgId,
         projectId: req.params.projectId,
         claimId: req.params.claimId,
+        userId: req.user.id,
+        userRole: req.user.role,
         payload: req.body,
       });
 
-      return res.json({ success: true, data: row });
+      return sendSuccess(res, row);
     } catch (error) {
       return next(error);
     }

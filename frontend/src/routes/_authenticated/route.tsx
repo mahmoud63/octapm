@@ -7,12 +7,6 @@ export const Route = createFileRoute('/_authenticated')({
   beforeLoad: async () => {
     const { auth } = useAuthStore.getState()
 
-    if (!auth.hasSession()) {
-      throw redirect({
-        to: '/landing',
-      })
-    }
-
     if (!auth.user) {
       try {
         const profile = await getMyProfile()

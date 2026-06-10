@@ -1,9 +1,10 @@
 import { useState } from 'react'
-import { AxiosError } from 'axios'
 import { useNavigate } from '@tanstack/react-router'
 import { FolderOpen } from 'lucide-react'
 import { toast } from 'sonner'
+import { getServerErrorMessage } from '@/lib/handle-server-error'
 import { Button } from '@/components/ui/button'
+import { useSubscription } from '@/features/billing/hooks/use-billing'
 import type { Project } from '../data/schema'
 import { useDeleteProject, useProjects } from '../hooks/use-projects'
 import { ProjectCreateDialog } from './project-create-dialog'
@@ -39,6 +40,8 @@ export function ProjectsList() {
   const deleteProject = useDeleteProject()
 
   const { data, isLoading } = useProjects()
+  const { data: subscription } = useSubscription()
+  const subscriptionAllowsWrites = subscription?.hasAccess !== false
   const projects = data?.items ?? []
 
   const onDelete = async () => {
@@ -51,16 +54,7 @@ export function ProjectsList() {
       toast.success('Project deleted successfully.')
       setDeletingProject(null)
     } catch (error) {
-      if (error instanceof AxiosError) {
-        const errorData = error.response?.data as
-          | { error?: { message?: string } }
-          | undefined
-
-        toast.error(errorData?.error?.message ?? 'Failed to delete project')
-        return
-      }
-
-      toast.error('Failed to delete project')
+      toast.error(getServerErrorMessage(error, 'Failed to delete project'))
     }
   }
 
@@ -81,14 +75,34 @@ export function ProjectsList() {
             Manage portfolio projects and open details.
           </p>
         </div>
-        <Button onClick={() => setCreateOpen(true)}>+ New Project</Button>
+        <Button
+          disabled={!subscriptionAllowsWrites}
+          title={
+            subscriptionAllowsWrites
+              ? undefined
+              : 'Subscribe to continue changing projects.'
+          }
+          onClick={() => setCreateOpen(true)}
+        >
+          + New Project
+        </Button>
       </div>
 
       {projects.length === 0 ? (
         <div className='mt-4 flex flex-col items-center justify-center rounded-md border py-20 text-center'>
           <FolderOpen className='mb-3 h-10 w-10 text-muted-foreground' />
           <p className='mb-4 text-muted-foreground'>No projects yet.</p>
-          <Button onClick={() => setCreateOpen(true)}>+ Create Project</Button>
+          <Button
+            disabled={!subscriptionAllowsWrites}
+            title={
+              subscriptionAllowsWrites
+                ? undefined
+                : 'Subscribe to continue changing projects.'
+            }
+            onClick={() => setCreateOpen(true)}
+          >
+            + Create Project
+          </Button>
         </div>
       ) : (
         <div className='mt-4 overflow-hidden rounded-md border'>
@@ -136,6 +150,7 @@ export function ProjectsList() {
                       <Button
                         variant='ghost'
                         size='sm'
+                        disabled={!subscriptionAllowsWrites}
                         onClick={() => setEditingProject(project)}
                       >
                         Edit
@@ -144,6 +159,7 @@ export function ProjectsList() {
                         variant='ghost'
                         size='sm'
                         className='text-destructive hover:text-destructive'
+                        disabled={!subscriptionAllowsWrites}
                         onClick={() => setDeletingProject(project)}
                       >
                         Delete

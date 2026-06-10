@@ -1,5 +1,6 @@
 const { prisma } = require('../config/db');
 const { HttpError } = require('../utils/http-error');
+const { toMoneyNumber } = require('../utils/money');
 
 const RATE_TYPES = ['hourly', 'daily'];
 
@@ -37,7 +38,7 @@ const addEquipment = async ({ orgId, projectId, payload }) => {
       projectId,
       name: payload.name,
       rateType: payload.rateType,
-      rate: payload.rate ?? 0,
+      rate: toMoneyNumber(payload.rate),
     },
   });
 };
@@ -63,7 +64,7 @@ const updateEquipment = async ({ orgId, projectId, equipmentId, payload }) => {
     }
     data.rateType = payload.rateType;
   }
-  if (payload.rate !== undefined) data.rate = payload.rate;
+  if (payload.rate !== undefined) data.rate = toMoneyNumber(payload.rate);
 
   return prisma.equipment.update({ where: { id: equipmentId }, data });
 };

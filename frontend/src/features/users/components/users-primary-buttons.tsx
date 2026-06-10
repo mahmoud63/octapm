@@ -1,9 +1,17 @@
 import { MailPlus, UserPlus } from 'lucide-react'
+import { useCanPerform } from '@/lib/permissions'
 import { Button } from '@/components/ui/button'
+import { useSubscription } from '@/features/billing/hooks/use-billing'
 import { useUsers } from './users-provider'
 
 export function UsersPrimaryButtons() {
   const { setOpen } = useUsers()
+  const canCreateUser = useCanPerform('user_management', 'create')
+  const { data: subscription } = useSubscription()
+  const subscriptionAllowsWrites = subscription?.hasAccess !== false
+
+  if (!canCreateUser || !subscriptionAllowsWrites) return null
+
   return (
     <div className='flex gap-2'>
       <Button

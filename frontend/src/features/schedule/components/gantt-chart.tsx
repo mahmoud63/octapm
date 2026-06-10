@@ -68,6 +68,9 @@ const barColor = (a: ScheduleActivity) =>
         ? COLOR.nearCrit
         : COLOR.normal
 
+const formatCalendarDate = (value?: string | null) =>
+  value ? new Date(value).toLocaleDateString() : '—'
+
 type DragState = {
   id: string
   startX: number
@@ -96,6 +99,7 @@ export function GanttChart({
   const [editingId, setEditingId] = useState<string | null>(null)
   const [showBaseline, setBaseline] = useState(false)
   const [px, setPx] = useState(DEFAULT_PX)
+  const canEditActivities = Boolean(onActivityUpdate || onActivityDelete)
 
   // Merge drag overrides into displayed activities
   const displayed = useMemo(
@@ -166,9 +170,15 @@ export function GanttChart({
     }
     const lines: Arrow[] = []
     displayed.forEach((succ, si) => {
-      if (!succ.predecessors) return
-      succ.predecessors.split(',').forEach((raw) => {
-        const predCode = raw.trim().split(/\s+/)[0]
+      const dependencyRefs =
+        succ.dependencies?.length > 0
+          ? succ.dependencies.map((dependency) => dependency.predecessorId)
+          : (succ.predecessors ?? '')
+              .split(',')
+              .map((raw) => raw.trim().split(/\s+/)[0])
+              .filter(Boolean)
+
+      dependencyRefs.forEach((predCode) => {
         const pred = actMap.get(predCode)
         if (!pred) return
         const { act: pa, idx: pi } = pred
@@ -241,7 +251,7 @@ export function GanttChart({
 
   // ── Context menu actions ───────────────────────────────────────────────────
   const openCtx = (e: React.MouseEvent, a: ScheduleActivity) => {
-    if (!editMode) return
+    if (!editMode || !canEditActivities) return
     e.preventDefault()
     const rect = containerRef.current?.getBoundingClientRect()
     setCtxMenu({
@@ -318,19 +328,21 @@ export function GanttChart({
       <div className='flex flex-wrap items-center justify-between gap-2 rounded-xl border bg-card px-4 py-3'>
         {/* Left: actions */}
         <div className='flex items-center gap-2'>
-          <Button
-            size='sm'
-            variant={editMode ? 'default' : 'outline'}
-            onClick={() => {
-              setEditMode((p) => !p)
-              setCtxMenu(null)
-              setDragging(null)
-            }}
-            disabled={!!savingId}
-          >
-            <GripHorizontal className='mr-1.5 h-3.5 w-3.5' />
-            {editMode ? 'Done Editing' : 'Edit'}
-          </Button>
+          {canEditActivities && (
+            <Button
+              size='sm'
+              variant={editMode ? 'default' : 'outline'}
+              onClick={() => {
+                setEditMode((p) => !p)
+                setCtxMenu(null)
+                setDragging(null)
+              }}
+              disabled={!!savingId}
+            >
+              <GripHorizontal className='mr-1.5 h-3.5 w-3.5' />
+              {editMode ? 'Done Editing' : 'Edit'}
+            </Button>
+          )}
           <Button
             size='sm'
             variant={showBaseline ? 'secondary' : 'outline'}
@@ -939,9 +951,17 @@ export function GanttChart({
                   <span className='font-mono font-medium'>
                     d{tooltip.activity.earlyStart ?? '—'}
                   </span>
+                  <span className='text-muted-foreground'>Start Date</span>
+                  <span className='font-mono font-medium'>
+                    {formatCalendarDate(tooltip.activity.earlyStartDate)}
+                  </span>
                   <span className='text-muted-foreground'>Finish</span>
                   <span className='font-mono font-medium'>
                     d{tooltip.activity.earlyFinish ?? '—'}
+                  </span>
+                  <span className='text-muted-foreground'>Finish Date</span>
+                  <span className='font-mono font-medium'>
+                    {formatCalendarDate(tooltip.activity.earlyFinishDate)}
                   </span>
                   <span className='text-muted-foreground'>Duration</span>
                   <span className='font-mono font-medium'>
@@ -999,7 +1019,7 @@ export function GanttChart({
         </div>
 
         {/* ── Context menu ──────────────────────────────────────────────────── */}
-        {ctxMenu && (
+        {ctxMenu && canEditActivities && (
           <div
             className='absolute z-50 min-w-44 rounded-lg border bg-popover py-1 shadow-xl'
             style={{ top: ctxMenu.y, left: ctxMenu.x }}
@@ -1008,28 +1028,36 @@ export function GanttChart({
             <p className='px-3 py-1 text-[10px] font-semibold tracking-wide text-muted-foreground uppercase'>
               Actions
             </p>
-            <button
-              className='flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs transition-colors hover:bg-muted'
-              onClick={() => {
-                setEditingId(ctxMenu.id)
-                setCtxMenu(null)
-              }}
-            >
-              Edit details
-            </button>
-            <button
-              className='flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs transition-colors hover:bg-muted'
-              onClick={() => handleMilestone(ctxMenu.id)}
-            >
-              Mark as milestone
-            </button>
-            <div className='my-1 border-t' />
-            <button
-              className='flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-red-600 transition-colors hover:bg-red-50'
-              onClick={() => handleDelete(ctxMenu.id)}
-            >
-              Delete activity
-            </button>
+            {onActivityUpdate && (
+              <>
+                <button
+                  className='flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs transition-colors hover:bg-muted'
+                  onClick={() => {
+                    setEditingId(ctxMenu.id)
+                    setCtxMenu(null)
+                  }}
+                >
+                  Edit details
+                </button>
+                <button
+                  className='flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs transition-colors hover:bg-muted'
+                  onClick={() => handleMilestone(ctxMenu.id)}
+                >
+                  Mark as milestone
+                </button>
+              </>
+            )}
+            {onActivityUpdate && onActivityDelete && (
+              <div className='my-1 border-t' />
+            )}
+            {onActivityDelete && (
+              <button
+                className='flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-red-600 transition-colors hover:bg-red-50'
+                onClick={() => handleDelete(ctxMenu.id)}
+              >
+                Delete activity
+              </button>
+            )}
           </div>
         )}
       </div>
@@ -1070,16 +1098,19 @@ export function GanttChart({
       </div>
 
       {/* ── Edit dialog ─────────────────────────────────────────────────────── */}
-      <ActivityInlineEditDialog
-        key={editingActivity?.id ?? 'none'}
-        open={!!editingActivity}
-        onOpenChange={(open) => {
-          if (!open) setEditingId(null)
-        }}
-        activity={editingActivity}
-        onSave={handleDialogSave}
-        isSaving={!!savingId}
-      />
+      {onActivityUpdate && (
+        <ActivityInlineEditDialog
+          key={editingActivity?.id ?? 'none'}
+          open={!!editingActivity}
+          onOpenChange={(open) => {
+            if (!open) setEditingId(null)
+          }}
+          activity={editingActivity}
+          activities={displayed}
+          onSave={handleDialogSave}
+          isSaving={!!savingId}
+        />
+      )}
     </div>
   )
 }

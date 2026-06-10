@@ -54,6 +54,9 @@ export function EvDashboard({
     const spi = pv > 0 ? ev / pv : 1
     const cpi = ac > 0 ? ev / ac : 1
     const eac = cpi > 0 ? totalBudget / cpi : totalBudget
+    const missingActualCount = activities.filter(
+      (activity) => activity.actualCost == null
+    ).length
 
     return {
       ev,
@@ -64,6 +67,7 @@ export function EvDashboard({
       eac,
       sv: ev - pv,
       cv: ev - ac,
+      missingActualCount,
     }
   }, [activities, todayWorkingDay, totalBudget])
 
@@ -99,19 +103,19 @@ export function EvDashboard({
 
   const cards = [
     {
-      label: 'SPI',
+      label: 'SPI Est.',
       value: metrics.spi.toFixed(2),
       color: metrics.spi < 0.9 ? 'text-red-600' : 'text-green-600',
-      sub: metrics.spi < 1 ? 'Behind schedule' : 'On schedule',
+      sub: metrics.spi < 1 ? 'Estimate: behind' : 'Estimate: on schedule',
     },
     {
-      label: 'CPI',
+      label: 'CPI Est.',
       value: metrics.cpi.toFixed(2),
       color: metrics.cpi < 0.9 ? 'text-red-600' : 'text-green-600',
-      sub: metrics.cpi < 1 ? 'Over budget' : 'Under budget',
+      sub: metrics.cpi < 1 ? 'Estimate: over' : 'Estimate: under',
     },
     {
-      label: 'EAC',
+      label: 'EAC Est.',
       value: fmtUSD(metrics.eac),
       color: 'text-amber-600',
       sub: 'Estimate at completion',
@@ -122,9 +126,9 @@ export function EvDashboard({
       color: metrics.sv < 0 ? 'text-red-600' : 'text-green-600',
       sub: 'Schedule variance',
     },
-    { label: 'EV', value: fmtUSD(metrics.ev), sub: 'Earned value' },
-    { label: 'PV', value: fmtUSD(metrics.pv), sub: 'Planned value' },
-    { label: 'AC', value: fmtUSD(metrics.ac), sub: 'Actual cost' },
+    { label: 'EV Est.', value: fmtUSD(metrics.ev), sub: 'Earned value' },
+    { label: 'PV Est.', value: fmtUSD(metrics.pv), sub: 'Planned value' },
+    { label: 'AC Est.', value: fmtUSD(metrics.ac), sub: 'Actual cost estimate' },
     {
       label: 'CV',
       value: fmtUSD(metrics.cv),
@@ -160,7 +164,9 @@ export function EvDashboard({
       )}
 
       <div className='rounded-md border p-3'>
-        <p className='mb-2 text-sm font-semibold'>S-Curve (PV vs EV vs AC)</p>
+        <p className='mb-2 text-sm font-semibold'>
+          Estimate S-Curve (PV vs EV vs AC)
+        </p>
         <ResponsiveContainer width='100%' height={280}>
           <LineChart data={sCurveData}>
             <CartesianGrid strokeDasharray='3 3' />
@@ -201,6 +207,12 @@ export function EvDashboard({
           </LineChart>
         </ResponsiveContainer>
       </div>
+
+      <p className='text-xs text-muted-foreground'>
+        Schedule EV is live estimate guidance. Missing actuals are estimated for{' '}
+        {metrics.missingActualCount} activities; official EV is produced from
+        reporting periods, approved cost loading, and cost records.
+      </p>
 
       <BulkProgressUpdate projectId={projectId} activities={activities} />
     </div>

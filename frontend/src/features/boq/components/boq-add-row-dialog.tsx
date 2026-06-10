@@ -1,7 +1,13 @@
 import { useEffect } from 'react'
+import { z } from 'zod'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
-import { z } from 'zod'
+import {
+  hasMoneyPrecision,
+  MONEY_INPUT_STEP,
+  MONEY_PRECISION_MESSAGE,
+} from '@/lib/money'
+import { Button } from '@/components/ui/button'
 import {
   Dialog,
   DialogContent,
@@ -19,17 +25,20 @@ import {
   FormMessage,
 } from '@/components/ui/form'
 import { Input } from '@/components/ui/input'
-import { Button } from '@/components/ui/button'
 import { useCreateBoqItem } from '../hooks/use-boq'
 
 const schema = z.object({
   code: z.string().min(1, 'Required'),
   description: z.string().min(1, 'Required').max(255),
-  quantity: z.number({ error: 'Must be a positive number' }).positive('Must be > 0'),
+  quantity: z
+    .number({ error: 'Must be a positive number' })
+    .positive('Must be > 0'),
   unit: z.string().min(1, 'Required'),
-  rate: z.number({ error: 'Must be a positive number' }).positive('Must be > 0'),
+  rate: z
+    .number({ error: 'Must be a positive number' })
+    .positive('Must be > 0')
+    .refine(hasMoneyPrecision, MONEY_PRECISION_MESSAGE),
   activityName: z.string().min(1, 'Required').max(255),
-  activityCode: z.string().min(1, 'Required').max(20),
 })
 
 type FormValues = z.infer<typeof schema>
@@ -52,7 +61,6 @@ export function BoqAddRowDialog({ open, onOpenChange, projectId }: Props) {
       unit: '',
       rate: undefined,
       activityName: '',
-      activityCode: '',
     },
   })
 
@@ -71,8 +79,8 @@ export function BoqAddRowDialog({ open, onOpenChange, projectId }: Props) {
         <DialogHeader>
           <DialogTitle>Add BOQ Row</DialogTitle>
           <DialogDescription className='text-xs text-muted-foreground'>
-            This row will not be processed by AI. Enter the Activity Name and
-            Activity Code manually.
+            This creates a schedule activity and draft BOQ allocation with an
+            automatically generated activity code.
           </DialogDescription>
         </DialogHeader>
 
@@ -129,7 +137,13 @@ export function BoqAddRowDialog({ open, onOpenChange, projectId }: Props) {
                   <FormItem>
                     <FormLabel>Quantity</FormLabel>
                     <FormControl>
-                      <Input type='number' step='any' placeholder='0' {...field} onChange={(e) => field.onChange(e.target.valueAsNumber)} />
+                      <Input
+                        type='number'
+                        step='any'
+                        placeholder='0'
+                        {...field}
+                        onChange={(e) => field.onChange(e.target.valueAsNumber)}
+                      />
                     </FormControl>
                     <FormMessage />
                   </FormItem>
@@ -142,7 +156,13 @@ export function BoqAddRowDialog({ open, onOpenChange, projectId }: Props) {
                   <FormItem>
                     <FormLabel>Rate</FormLabel>
                     <FormControl>
-                      <Input type='number' step='any' placeholder='0.00' {...field} onChange={(e) => field.onChange(e.target.valueAsNumber)} />
+                      <Input
+                        type='number'
+                        step={MONEY_INPUT_STEP}
+                        placeholder='0.00'
+                        {...field}
+                        onChange={(e) => field.onChange(e.target.valueAsNumber)}
+                      />
                     </FormControl>
                     <FormMessage />
                   </FormItem>
@@ -151,25 +171,10 @@ export function BoqAddRowDialog({ open, onOpenChange, projectId }: Props) {
             </div>
 
             <div className='rounded-md border border-dashed p-3'>
-              <p className='mb-2 text-xs font-medium text-muted-foreground uppercase tracking-wide'>
-                Activity (no AI)
+              <p className='mb-2 text-xs font-medium tracking-wide text-muted-foreground uppercase'>
+                Schedule Activity
               </p>
-              <div className='grid grid-cols-2 gap-3'>
-                <FormField
-                  control={form.control}
-                  name='activityCode'
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Activity Code</FormLabel>
-                      <FormControl>
-                        <Input placeholder='AC-XXXXX' {...field} />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-              </div>
-              <div className='mt-3'>
+              <div>
                 <FormField
                   control={form.control}
                   name='activityName'
@@ -177,7 +182,10 @@ export function BoqAddRowDialog({ open, onOpenChange, projectId }: Props) {
                     <FormItem>
                       <FormLabel>Activity Name</FormLabel>
                       <FormControl>
-                        <Input placeholder='e.g. Fabricate and erect steelwork' {...field} />
+                        <Input
+                          placeholder='e.g. Fabricate and erect steelwork'
+                          {...field}
+                        />
                       </FormControl>
                       <FormMessage />
                     </FormItem>
@@ -187,7 +195,11 @@ export function BoqAddRowDialog({ open, onOpenChange, projectId }: Props) {
             </div>
 
             <DialogFooter>
-              <Button type='button' variant='outline' onClick={() => onOpenChange(false)}>
+              <Button
+                type='button'
+                variant='outline'
+                onClick={() => onOpenChange(false)}
+              >
                 Cancel
               </Button>
               <Button type='submit' disabled={createItem.isPending}>

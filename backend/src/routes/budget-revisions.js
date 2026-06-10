@@ -1,6 +1,8 @@
 const express = require('express');
 const { body, param } = require('express-validator');
 const { validate } = require('../middleware/validate');
+const { sendSuccess } = require('../utils/api-response');
+const { moneyBody } = require('../utils/money');
 const {
   listBudgetRevisions,
   createBudgetRevision,
@@ -17,7 +19,7 @@ router.get('/', async (req, res, next) => {
       projectId: req.params.projectId,
     });
 
-    return res.json({ success: true, data });
+    return sendSuccess(res, data);
   } catch (error) {
     return next(error);
   }
@@ -28,8 +30,9 @@ router.post(
   [
     body('title').trim().notEmpty(),
     body('changeType').isIn(['addition', 'deduction']),
-    body('amount').isFloat({ min: 0 }),
+    moneyBody('amount', { required: true }),
     body('effectiveDate').optional().isISO8601(),
+    body('status').optional().isIn(['draft', 'submitted', 'approved', 'rejected']),
     validate,
   ],
   async (req, res, next) => {
@@ -37,10 +40,11 @@ router.post(
       const row = await createBudgetRevision({
         orgId: req.user.orgId,
         projectId: req.params.projectId,
+        userId: req.user.id,
         payload: req.body,
       });
 
-      return res.status(201).json({ success: true, data: row });
+      return sendSuccess(res, row, 201);
     } catch (error) {
       return next(error);
     }
@@ -52,8 +56,9 @@ router.patch(
   [
     param('revisionId').isUUID(),
     body('changeType').optional().isIn(['addition', 'deduction']),
-    body('amount').optional().isFloat({ min: 0 }),
+    moneyBody('amount'),
     body('effectiveDate').optional().isISO8601(),
+    body('status').optional().isIn(['draft', 'submitted', 'approved', 'rejected']),
     validate,
   ],
   async (req, res, next) => {
@@ -62,10 +67,11 @@ router.patch(
         orgId: req.user.orgId,
         projectId: req.params.projectId,
         revisionId: req.params.revisionId,
+        userId: req.user.id,
         payload: req.body,
       });
 
-      return res.json({ success: true, data: row });
+      return sendSuccess(res, row);
     } catch (error) {
       return next(error);
     }
@@ -83,7 +89,7 @@ router.delete(
         revisionId: req.params.revisionId,
       });
 
-      return res.json({ success: true, data });
+      return sendSuccess(res, data);
     } catch (error) {
       return next(error);
     }

@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { apiClient } from '@/services/api/client'
 import { toast } from 'sonner'
+import { useCanPerform } from '@/lib/permissions'
 import { Button } from '@/components/ui/button'
 
 interface Props {
@@ -9,7 +10,10 @@ interface Props {
 }
 
 export function ExportButton({ projectId, className }: Props) {
+  const canExportProject = useCanPerform('cost', 'export')
   const [loading, setLoading] = useState(false)
+
+  if (!canExportProject) return null
 
   const handleExport = async () => {
     setLoading(true)

@@ -1,18 +1,176 @@
 import { z } from 'zod'
 
+export const dependencyRelationshipSchema = z.enum(['FS', 'SS', 'FF', 'SF'])
+
+export const progressMethodSchema = z.enum([
+  'percent',
+  'quantity',
+  'weighted_milestone',
+  'inspection',
+  'manual',
+])
+
+export const progressMethodConfigSchema = z
+  .object({
+    id: z.string().uuid().optional(),
+    projectId: z.string().uuid().optional(),
+    activityId: z.string().uuid().optional(),
+    method: progressMethodSchema,
+    plannedQuantity: z.number().nullable().optional(),
+    quantityUnit: z.string().nullable().optional(),
+    milestoneWeights: z.array(z.any()).optional(),
+    inspectionRequired: z.boolean().optional(),
+    evidenceRequired: z.boolean().optional(),
+    notes: z.string().nullable().optional(),
+    updatedAt: z.string().nullable().optional(),
+  })
+  .nullable()
+  .optional()
+
+export const progressSubmissionSchema = z
+  .object({
+    id: z.string().uuid(),
+    projectId: z.string().uuid(),
+    activityId: z.string().uuid(),
+    dailyReportId: z.string().uuid().nullable().optional(),
+    method: progressMethodSchema,
+    source: z.string(),
+    pctComplete: z.number(),
+    quantityComplete: z.number().nullable().optional(),
+    quantityPlanned: z.number().nullable().optional(),
+    quantityUnit: z.string().nullable().optional(),
+    milestoneProgress: z.unknown().nullable().optional(),
+    inspectionStatus: z.string().nullable().optional(),
+    actualCost: z.number().nullable().optional(),
+    actualStart: z.string().nullable().optional(),
+    actualFinish: z.string().nullable().optional(),
+    notes: z.string().nullable().optional(),
+    evidence: z.unknown().nullable().optional(),
+    status: z.enum(['draft', 'submitted', 'approved', 'rejected']),
+    submittedBy: z.string().nullable().optional(),
+    submittedAt: z.string().nullable().optional(),
+    reviewedBy: z.string().nullable().optional(),
+    reviewedAt: z.string().nullable().optional(),
+    rejectionReason: z.string().nullable().optional(),
+    createdAt: z.string().nullable().optional(),
+    updatedAt: z.string().nullable().optional(),
+    activity: z
+      .object({
+        id: z.string().uuid(),
+        name: z.string(),
+        wbsCode: z.string().nullable(),
+        p6ActivityId: z.string().nullable().optional(),
+      })
+      .optional(),
+  })
+  .nullable()
+  .optional()
+
+export const activityDependencySchema = z.object({
+  id: z.string().optional(),
+  projectId: z.string().uuid().optional(),
+  predecessorId: z.string().uuid(),
+  successorId: z.string().uuid(),
+  relationshipType: dependencyRelationshipSchema,
+  lagDays: z.number().int(),
+  source: z.string().nullable().optional(),
+  importSource: z.string().nullable().optional(),
+  externalPredecessorRef: z.string().nullable().optional(),
+  externalSuccessorRef: z.string().nullable().optional(),
+  importMetadata: z.unknown().nullable().optional(),
+  predecessor: z
+    .object({
+      id: z.string().uuid(),
+      name: z.string(),
+      wbsCode: z.string().nullable(),
+      p6ActivityId: z.string().nullable().optional(),
+    })
+    .nullable()
+    .optional(),
+})
+
+export const criticalPathExplanationSchema = z
+  .object({
+    projectFinish: z.number().optional(),
+    criticalActivityCount: z.number().optional(),
+    dependencyCount: z.number().optional(),
+    calendars: z.array(z.string()).optional(),
+    chain: z
+      .array(
+        z.object({
+          activityId: z.string(),
+          ref: z.string().nullable(),
+          name: z.string(),
+          calendarId: z.string().nullable().optional(),
+          duration: z.number().nullable().optional(),
+          earlyStart: z.number().nullable().optional(),
+          earlyFinish: z.number().nullable().optional(),
+          lateStart: z.number().nullable().optional(),
+          lateFinish: z.number().nullable().optional(),
+          totalFloat: z.number().nullable().optional(),
+          driver: z
+            .object({
+              predecessorId: z.string().nullable().optional(),
+              predecessorRef: z.string().nullable().optional(),
+              relationshipType: z.string().nullable().optional(),
+              lagDays: z.number().nullable().optional(),
+              reason: z.string(),
+            })
+            .optional(),
+        })
+      )
+      .optional(),
+    floatDrivers: z
+      .array(
+        z.object({
+          activityId: z.string(),
+          ref: z.string().nullable(),
+          name: z.string(),
+          calendarId: z.string().nullable().optional(),
+          totalFloat: z.number().nullable().optional(),
+          driver: z
+            .object({
+              successorId: z.string().nullable().optional(),
+              successorRef: z.string().nullable().optional(),
+              relationshipType: z.string().nullable().optional(),
+              lagDays: z.number().nullable().optional(),
+              reason: z.string(),
+            })
+            .optional(),
+        })
+      )
+      .optional(),
+    error: z
+      .object({
+        code: z.string(),
+        message: z.string(),
+      })
+      .optional(),
+  })
+  .nullable()
+  .optional()
+
 export const scheduleActivitySchema = z.object({
   id: z.string().uuid(),
   projectId: z.string().uuid(),
   name: z.string(),
+  p6ActivityId: z.string().nullable().optional(),
   wbsCode: z.string().nullable(),
+  calendarId: z.string().nullable().optional(),
   category: z.string().nullable(),
   duration: z.number(),
   earlyStart: z.number().nullable(),
   earlyFinish: z.number().nullable(),
+  earlyStartDate: z.string().nullable().optional(),
+  earlyFinishDate: z.string().nullable().optional(),
   baselineStart: z.number().int().nullable().optional(),
   baselineFinish: z.number().int().nullable().optional(),
+  baselineStartDate: z.string().nullable().optional(),
+  baselineFinishDate: z.string().nullable().optional(),
   lateStart: z.number().nullable(),
   lateFinish: z.number().nullable(),
+  lateStartDate: z.string().nullable().optional(),
+  lateFinishDate: z.string().nullable().optional(),
   totalFloat: z.number().nullable(),
   actualCost: z.number().nullable().optional(),
   actualStart: z.string().nullable().optional(),
@@ -26,8 +184,15 @@ export const scheduleActivitySchema = z.object({
   isMilestone: z.boolean(),
   isCritical: z.boolean(),
   predecessors: z.string().nullable(),
+  dependencies: z.array(activityDependencySchema).default([]),
   batchId: z.string().nullable().optional(),
   pctComplete: z.number(),
+  approvedProgressUpdatedAt: z.string().nullable().optional(),
+  approvedProgressSource: z.string().nullable().optional(),
+  progressMethod: z.string().optional(),
+  progressMethodConfig: progressMethodConfigSchema,
+  pendingProgress: progressSubmissionSchema,
+  progressApprovalStatus: z.string().optional(),
   status: z.enum(['todo', 'in_progress', 'complete', 'delayed']),
   sortOrder: z.number(),
   createdAt: z.string(),
@@ -61,6 +226,62 @@ export const scheduleRevisionSchema = z.object({
   totalBudget: z.number(),
   generatedTotalBudget: z.number().optional(),
   unallocatedBoqAmount: z.number().optional(),
+  source: z.string().nullable().optional(),
+  isActive: z.boolean().optional(),
+  status: z
+    .enum([
+      'draft',
+      'under_review',
+      'approved',
+      'rejected',
+      'baselined',
+      'superseded',
+    ])
+    .default('draft'),
+  submittedBy: z.string().nullable().optional(),
+  submittedAt: z.string().nullable().optional(),
+  reviewComment: z.string().nullable().optional(),
+  approvedBy: z.string().nullable().optional(),
+  approvedAt: z.string().nullable().optional(),
+  approvalComment: z.string().nullable().optional(),
+  rejectedBy: z.string().nullable().optional(),
+  rejectedAt: z.string().nullable().optional(),
+  rejectionReason: z.string().nullable().optional(),
+  baselinedBy: z.string().nullable().optional(),
+  baselinedAt: z.string().nullable().optional(),
+  baselineComment: z.string().nullable().optional(),
+  supersededBy: z.string().nullable().optional(),
+  supersededAt: z.string().nullable().optional(),
+  activatedBy: z.string().nullable().optional(),
+  activatedAt: z.string().nullable().optional(),
+  activationComment: z.string().nullable().optional(),
+  previousActiveRevisionId: z.string().nullable().optional(),
+  rolledBackBy: z.string().nullable().optional(),
+  rolledBackAt: z.string().nullable().optional(),
+  rollbackReason: z.string().nullable().optional(),
+  mapping: z.record(z.string(), z.unknown()).nullable().optional(),
+  activationAudit: z.record(z.string(), z.unknown()).nullable().optional(),
+  readiness: z
+    .object({
+      revisionId: z.string().nullable(),
+      status: z.string(),
+      ready: z.boolean(),
+      checkedAt: z.string(),
+      blockingCount: z.number(),
+      checks: z.array(
+        z.object({
+          key: z.string(),
+          label: z.string(),
+          passed: z.boolean(),
+          severity: z.string(),
+          message: z.string(),
+          details: z.record(z.string(), z.unknown()).optional(),
+        })
+      ),
+    })
+    .nullable()
+    .optional(),
+  statusTransitionLog: z.array(z.any()).optional(),
   createdAt: z.string(),
   projectSummary: z.any().nullable(),
   risks: z.array(z.any()).nullable(),
@@ -70,6 +291,7 @@ export const scheduleRevisionSchema = z.object({
   longLeadItems: z.array(z.any()).nullable(),
   assumptions: z.array(z.any()).nullable(),
   criticalPath: z.array(z.any()).nullable(),
+  criticalPathExplanation: criticalPathExplanationSchema,
 })
 
 export const projectScheduleSchema = z.object({
@@ -78,6 +300,15 @@ export const projectScheduleSchema = z.object({
 })
 
 export type ScheduleActivity = z.infer<typeof scheduleActivitySchema>
+export type ProgressMethod = z.infer<typeof progressMethodSchema>
+export type ProgressSubmission = z.infer<typeof progressSubmissionSchema>
+export type ActivityDependency = z.infer<typeof activityDependencySchema>
+export type DependencyRelationship = z.infer<
+  typeof dependencyRelationshipSchema
+>
+export type CriticalPathExplanation = z.infer<
+  typeof criticalPathExplanationSchema
+>
 export type ScheduleRevision = z.infer<typeof scheduleRevisionSchema>
 export type ProjectSchedule = z.infer<typeof projectScheduleSchema>
 export type Risk = z.infer<typeof riskSchema>

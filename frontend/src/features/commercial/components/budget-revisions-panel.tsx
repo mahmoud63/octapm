@@ -1,5 +1,11 @@
 import { useState } from 'react'
 import { toast } from 'sonner'
+import {
+  hasMoneyPrecision,
+  MONEY_INPUT_STEP,
+  MONEY_PRECISION_MESSAGE,
+  toMoneyNumber,
+} from '@/lib/money'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import {
@@ -41,6 +47,7 @@ export function BudgetRevisionsPanel({ projectId }: { projectId: string }) {
         <Input
           type='number'
           min={0}
+          step={MONEY_INPUT_STEP}
           placeholder='Amount'
           value={amount}
           onChange={(e) => setAmount(e.target.value)}
@@ -48,11 +55,16 @@ export function BudgetRevisionsPanel({ projectId }: { projectId: string }) {
         <Button
           disabled={createMutation.isPending || !title || !amount}
           onClick={async () => {
+            if (!hasMoneyPrecision(amount)) {
+              toast.error(MONEY_PRECISION_MESSAGE)
+              return
+            }
+
             try {
               await createMutation.mutateAsync({
                 title,
                 changeType,
-                amount: Number(amount) || 0,
+                amount: toMoneyNumber(amount),
               })
               setTitle('')
               setAmount('')

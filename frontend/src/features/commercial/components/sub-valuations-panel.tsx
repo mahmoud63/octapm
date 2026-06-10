@@ -1,5 +1,11 @@
 import { useState } from 'react'
 import { toast } from 'sonner'
+import {
+  hasMoneyPrecision,
+  MONEY_INPUT_STEP,
+  MONEY_PRECISION_MESSAGE,
+  toMoneyNumber,
+} from '@/lib/money'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import {
@@ -36,6 +42,7 @@ export function SubValuationsPanel({ projectId }: { projectId: string }) {
         <Input
           type='number'
           min={0}
+          step={MONEY_INPUT_STEP}
           placeholder='Work Done'
           value={workDone}
           onChange={(e) => setWorkDone(e.target.value)}
@@ -43,11 +50,16 @@ export function SubValuationsPanel({ projectId }: { projectId: string }) {
         <Button
           disabled={createMutation.isPending || !subcontractor || !period}
           onClick={async () => {
+            if (!hasMoneyPrecision(workDone)) {
+              toast.error(MONEY_PRECISION_MESSAGE)
+              return
+            }
+
             try {
               await createMutation.mutateAsync({
                 subcontractor,
                 period,
-                workDone: Number(workDone) || 0,
+                workDone: toMoneyNumber(workDone),
               })
               setSubcontractor('')
               setPeriod('')
@@ -98,6 +110,7 @@ export function SubValuationsPanel({ projectId }: { projectId: string }) {
               <th className='p-2 text-left'>Period</th>
               <th className='p-2 text-right'>Net</th>
               <th className='p-2 text-left'>Status</th>
+              <th className='p-2 text-left'>Trace</th>
               <th className='p-2 text-right'>Action</th>
             </tr>
           </thead>
@@ -105,7 +118,7 @@ export function SubValuationsPanel({ projectId }: { projectId: string }) {
             {!isLoading && data?.rows.length === 0 && (
               <tr>
                 <td
-                  colSpan={6}
+                  colSpan={7}
                   className='p-3 text-center text-muted-foreground'
                 >
                   No sub valuations yet.
@@ -122,6 +135,13 @@ export function SubValuationsPanel({ projectId }: { projectId: string }) {
                 </td>
                 <td className='p-2 text-xs capitalize'>
                   {row.status.replace('_', ' ')}
+                </td>
+                <td className='p-2 text-xs text-muted-foreground'>
+                  {row.activityLinks?.length || 0} act ·{' '}
+                  {row.allocationLinks?.length || 0} alloc ·{' '}
+                  {(row.attachmentRefs?.length || 0) +
+                    (row.correspondenceLinks?.length || 0)}{' '}
+                  docs
                 </td>
                 <td className='p-2 text-right'>
                   <Button

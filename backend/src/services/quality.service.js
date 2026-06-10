@@ -1,5 +1,6 @@
 const { prisma } = require('../config/db');
 const { HttpError } = require('../utils/http-error');
+const { dueAlertForRecord } = require('./workflow-support.service');
 
 const ensureProject = async ({ orgId, projectId }) => {
   const project = await prisma.project.findFirst({
@@ -36,6 +37,9 @@ const getQualityDashboard = async ({ orgId, projectId }) => {
   const openDefects = defects.filter((row) => row.status !== 'closed').length;
   const testsPassed = tests.filter((row) => row.result === 'pass').length;
   const testsFailed = tests.filter((row) => row.result === 'fail').length;
+  const dueAlerts = [...ncrs, ...itps, ...defects, ...tests, ...safety]
+    .map(dueAlertForRecord)
+    .filter(Boolean);
 
   return {
     metrics: {
@@ -48,6 +52,8 @@ const getQualityDashboard = async ({ orgId, projectId }) => {
       testsFailed,
       safetyIncidents: safety.length,
       safetyOpen: safety.filter((row) => row.status !== 'closed').length,
+      dueAlerts: dueAlerts.length,
+      overdue: dueAlerts.filter((alert) => alert.severity === 'overdue').length,
     },
     trend: {
       ncrOpen: ncrs.filter((row) => row.status !== 'closed').length,

@@ -7,6 +7,7 @@ const { authenticate } = require('../middleware/auth');
 const { requireRoles } = require('../middleware/rbac');
 const { validate } = require('../middleware/validate');
 const { prisma } = require('../config/db');
+const { workingDayToDate } = require('../services/cpm.service');
 
 const router = express.Router({ mergeParams: true });
 
@@ -26,16 +27,6 @@ function endOfWeekMonday(date) {
   end.setDate(end.getDate() + 6);
   end.setHours(23, 59, 59, 999);
   return end;
-}
-
-function workingDayToDate(projectStartDate, dayOffset) {
-  if (!projectStartDate || dayOffset === null || dayOffset === undefined) {
-    return null;
-  }
-
-  const d = new Date(projectStartDate);
-  d.setDate(d.getDate() + Number(dayOffset));
-  return d;
 }
 
 router.get(
@@ -82,7 +73,11 @@ router.get(
       const activities = await prisma.activity.findMany({
         where: { projectId: req.params.projectId },
         include: {
-          progress: { orderBy: { updatedAt: 'desc' }, take: 1 },
+          progress: {
+            where: { status: 'approved' },
+            orderBy: { updatedAt: 'desc' },
+            take: 1,
+          },
         },
       });
 
@@ -104,6 +99,10 @@ router.get(
         const plannedFinish = workingDayToDate(
           project.startDate,
           activity.earlyFinish,
+          {
+            calendarId: activity.calendarId || project.projectCalendar,
+            projectCalendar: project.projectCalendar,
+          },
         );
         if (
           plannedFinish &&

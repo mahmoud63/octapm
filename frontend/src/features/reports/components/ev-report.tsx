@@ -1,3 +1,4 @@
+import { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { apiClient } from '@/services/api/client'
 import {
@@ -12,6 +13,13 @@ import {
 } from 'recharts'
 import { Badge } from '@/components/ui/badge'
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
+import {
   Table,
   TableBody,
   TableCell,
@@ -22,6 +30,61 @@ import {
 
 interface Props {
   projectId: string
+}
+
+type ReportingPeriod = {
+  id: string | null
+  code: string
+  label: string
+  cutoffDate: string
+  status: string
+}
+
+type EvActivityBreakdownRow = {
+  activityId: string
+  name: string
+  budget: number | null
+  pv: number | null
+  ev: number | null
+  ac: number | null
+  actualCostSource?: string | null
+  officialActualThroughDate?: string | null
+  pct: number
+  status: string
+  isCritical?: boolean
+}
+
+type EvReportResponse = {
+  pv: number | null
+  ev: number | null
+  ac: number | null
+  spi: number | null
+  cpi: number | null
+  eac: number | null
+  sv: number
+  cv: number
+  etc: number | null
+  totalBudget: number | null
+  sCurve?: Record<string, string | number | null>[]
+  activityBreakdown?: EvActivityBreakdownRow[]
+  alerts: {
+    spiAlert?: boolean
+    cpiAlert?: boolean
+  }
+  reporting?: {
+    period?: Pick<ReportingPeriod, 'label' | 'code'> | null
+    cutoffDate?: string | null
+    isSnapshot?: boolean
+  }
+  sourceSummary?: {
+    pv?: { approvedRows?: number }
+    ac?: { officialActualActivities?: number }
+  }
+  basisWarnings?: string[]
+  estimates?: {
+    estimatedPv?: number | null
+    estimatedAc?: number | null
+  }
 }
 
 function fmt(value: number | null | undefined) {
@@ -73,11 +136,28 @@ function MetricCard({
 }
 
 export function EvReport({ projectId }: Props) {
-  const { data, isLoading } = useQuery({
-    queryKey: ['ev-report', projectId],
+  const [selectedPeriodId, setSelectedPeriodId] = useState<string | null>(null)
+  const { data: periodData } = useQuery<{ periods?: ReportingPeriod[] }>({
+    queryKey: ['ev-report-periods', projectId],
     queryFn: () =>
       apiClient
-        .get(`/projects/${projectId}/reports/ev`)
+        .get(`/projects/${projectId}/reports/periods`)
+        .then((r) => r.data.data),
+  })
+  const periods: ReportingPeriod[] = useMemo(
+    () => periodData?.periods || [],
+    [periodData]
+  )
+
+  const effectivePeriodId = selectedPeriodId || periods[0]?.id || null
+
+  const { data, isLoading } = useQuery<EvReportResponse>({
+    queryKey: ['ev-report', projectId, effectivePeriodId],
+    queryFn: () =>
+      apiClient
+        .get(`/projects/${projectId}/reports/ev`, {
+          params: effectivePeriodId ? { periodId: effectivePeriodId } : {},
+        })
         .then((r) => r.data.data),
     refetchInterval: 60000,
   })
@@ -102,10 +182,60 @@ export function EvReport({ projectId }: Props) {
     sCurve,
     activityBreakdown,
     alerts,
+    reporting,
+    sourceSummary,
+    basisWarnings,
+    estimates,
   } = data
+  const selectedPeriod = reporting?.period
+  const isSnapshot = Boolean(reporting?.isSnapshot)
 
   return (
     <div className='space-y-6'>
+      <div className='flex flex-col gap-3 rounded-lg border p-3 sm:flex-row sm:items-center sm:justify-between'>
+        <div>
+          <p className='text-sm font-semibold'>Official EV Basis</p>
+          <p className='text-xs text-muted-foreground'>
+            {selectedPeriod?.label || 'Ad hoc current cutoff'} - cutoff{' '}
+            {reporting?.cutoffDate
+              ? new Date(reporting.cutoffDate).toLocaleDateString()
+              : '-'}
+          </p>
+        </div>
+        <div className='flex flex-wrap items-center gap-2'>
+          <Badge variant={isSnapshot ? 'default' : 'secondary'}>
+            {isSnapshot ? 'Locked snapshot' : 'Open calculation'}
+          </Badge>
+          {periods.length > 0 && (
+            <Select
+              value={effectivePeriodId || ''}
+              onValueChange={(value) => setSelectedPeriodId(value)}
+            >
+              <SelectTrigger className='w-[220px]'>
+                <SelectValue placeholder='Select period' />
+              </SelectTrigger>
+              <SelectContent>
+                {periods
+                  .filter((period) => period.id)
+                  .map((period) => (
+                    <SelectItem key={period.id || period.code} value={period.id!}>
+                      {period.label || period.code}
+                    </SelectItem>
+                  ))}
+              </SelectContent>
+            </Select>
+          )}
+        </div>
+      </div>
+
+      {(basisWarnings || []).length > 0 && (
+        <div className='rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-900/40 dark:bg-amber-950/20 dark:text-amber-300'>
+          {(basisWarnings || []).map((warning: string) => (
+            <p key={warning}>{warning}</p>
+          ))}
+        </div>
+      )}
+
       {(alerts.spiAlert || alerts.cpiAlert) && (
         <div className='rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700'>
           Alert:{' '}
@@ -117,7 +247,11 @@ export function EvReport({ projectId }: Props) {
 
       <div className='grid grid-cols-2 gap-3 lg:grid-cols-4'>
         <MetricCard label='Total Budget (BAC)' value={fmt(totalBudget)} />
-        <MetricCard label='Planned Value (PV)' value={fmt(pv)} />
+        <MetricCard
+          label='Planned Value (PV)'
+          value={fmt(pv)}
+          sub={`${sourceSummary?.pv?.approvedRows ?? 0} approved load rows`}
+        />
         <MetricCard
           label='Earned Value (EV)'
           value={fmt(ev)}
@@ -126,6 +260,7 @@ export function EvReport({ projectId }: Props) {
         <MetricCard
           label='Actual Cost (AC)'
           value={fmt(ac)}
+          sub={`${sourceSummary?.ac?.officialActualActivities ?? 0} official actual rows`}
           color='text-orange-600'
         />
       </div>
@@ -161,6 +296,21 @@ export function EvReport({ projectId }: Props) {
           color={cv >= 0 ? 'text-green-600' : 'text-red-600'}
         />
       </div>
+
+      {estimates && (
+        <div className='grid grid-cols-1 gap-3 sm:grid-cols-2'>
+          <MetricCard
+            label='PV Estimate'
+            value={fmt(estimates.estimatedPv)}
+            sub='Prototype schedule guidance'
+          />
+          <MetricCard
+            label='AC Estimate'
+            value={fmt(estimates.estimatedAc)}
+            sub='Excluded from official AC'
+          />
+        </div>
+      )}
 
       <div className='rounded-lg border p-4'>
         <h3 className='mb-3 font-semibold'>S-Curve (Cumulative)</h3>
@@ -209,8 +359,11 @@ export function EvReport({ projectId }: Props) {
                   'ID',
                   'Name',
                   'Budget',
+                  'PV',
                   'EV',
                   'AC',
+                  'Actual Through',
+                  'AC Source',
                   '%',
                   'Status',
                   'Critical',
@@ -223,7 +376,7 @@ export function EvReport({ projectId }: Props) {
             </TableHeader>
 
             <TableBody>
-              {(activityBreakdown || []).map((row: any) => (
+              {(activityBreakdown || []).map((row) => (
                 <TableRow
                   key={row.activityId}
                   className={
@@ -239,11 +392,27 @@ export function EvReport({ projectId }: Props) {
                     {row.name}
                   </TableCell>
                   <TableCell className='px-3'>{fmt(row.budget)}</TableCell>
+                  <TableCell className='px-3'>{fmt(row.pv)}</TableCell>
                   <TableCell className='px-3 text-primary'>
                     {fmt(row.ev)}
                   </TableCell>
                   <TableCell className='px-3 text-muted-foreground'>
                     {fmt(row.ac)}
+                  </TableCell>
+                  <TableCell className='px-3 text-xs text-muted-foreground'>
+                    {row.officialActualThroughDate
+                      ? new Date(
+                          row.officialActualThroughDate
+                        ).toLocaleDateString()
+                      : '-'}
+                  </TableCell>
+                  <TableCell className='px-3'>
+                    <Badge variant='outline' className='text-xs'>
+                      {row.actualCostSource ===
+                      'cost_record.actual_through_date'
+                        ? 'official'
+                        : 'missing'}
+                    </Badge>
                   </TableCell>
                   <TableCell className='px-3'>{row.pct}%</TableCell>
                   <TableCell className='px-3'>

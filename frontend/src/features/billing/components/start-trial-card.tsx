@@ -1,7 +1,8 @@
 import { useState } from 'react'
 import { Elements } from '@stripe/react-stripe-js'
-import { stripePromise } from '@/lib/stripe'
+import { isStripeConfigured, stripePromise } from '@/lib/stripe'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Alert, AlertDescription } from '@/components/ui/alert'
 import { toast } from 'sonner'
 import { PaymentForm } from './payment-form'
 import { useStartTrial, useConfirmTrial } from '../hooks/use-billing'
@@ -12,6 +13,11 @@ export function StartTrialCard() {
   const [secret, setSecret] = useState<string | undefined>(undefined)
 
   const begin = async () => {
+    if (!isStripeConfigured) {
+      toast.error('Billing setup is unavailable.')
+      return
+    }
+
     try {
       const { clientSecret } = await startTrial.mutateAsync()
       setSecret(clientSecret)
@@ -28,11 +34,18 @@ export function StartTrialCard() {
           Your card will not be charged during the trial. You can cancel any time
           before day 7 at no cost.
         </p>
+        {!isStripeConfigured && (
+          <Alert variant='destructive'>
+            <AlertDescription>
+              Billing setup is unavailable. Ask an administrator to complete Stripe configuration before starting a trial.
+            </AlertDescription>
+          </Alert>
+        )}
         {!secret ? (
           <button
             className='bg-primary text-primary-foreground w-full rounded-md py-2'
             onClick={begin}
-            disabled={startTrial.isPending}
+            disabled={startTrial.isPending || !isStripeConfigured}
           >
             {startTrial.isPending ? 'Preparing…' : 'Add card & start trial'}
           </button>

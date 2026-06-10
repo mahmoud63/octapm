@@ -1,12 +1,12 @@
 import { useMemo, useState } from 'react'
+import { Check, CircleDollarSign, Link2, Pencil, Send, X } from 'lucide-react'
+import { toast } from 'sonner'
 import {
-  Check,
-  CircleDollarSign,
-  Link2,
-  Pencil,
-  Send,
-  X,
-} from 'lucide-react'
+  hasMoneyPrecision,
+  MONEY_INPUT_STEP,
+  MONEY_PRECISION_MESSAGE,
+  toMoneyNumber,
+} from '@/lib/money'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -89,12 +89,16 @@ export function BoqAllocationPanel({ projectId, items, currency }: Props) {
 
   const handleCreate = async () => {
     if (!boqItemId || !activityId || !quantity) return
+    if (amount.trim() !== '' && !hasMoneyPrecision(amount)) {
+      toast.error(MONEY_PRECISION_MESSAGE)
+      return
+    }
 
     const qty = Number(quantity)
     const resolvedAmount =
       amount.trim() !== ''
-        ? Number(amount)
-        : qty * Number(selectedBoqItem?.rate || 0)
+        ? toMoneyNumber(amount)
+        : toMoneyNumber(qty * Number(selectedBoqItem?.rate || 0))
 
     await createAllocation.mutateAsync({
       boqItemId,
@@ -107,18 +111,26 @@ export function BoqAllocationPanel({ projectId, items, currency }: Props) {
     resetForm()
   }
 
-  const handleEdit = (allocationId: string, currentQty: number, currentAmount: number) => {
+  const handleEdit = (
+    allocationId: string,
+    currentQty: number,
+    currentAmount: number
+  ) => {
     const nextQty = window.prompt('Quantity', String(currentQty))
     if (nextQty === null) return
 
     const nextAmount = window.prompt('Amount', String(currentAmount))
     if (nextAmount === null) return
+    if (!hasMoneyPrecision(nextAmount)) {
+      toast.error(MONEY_PRECISION_MESSAGE)
+      return
+    }
 
     updateAllocation.mutate({
       allocationId,
       data: {
         quantity: Number(nextQty),
-        amount: Number(nextAmount),
+        amount: toMoneyNumber(nextAmount),
       },
     })
   }
@@ -199,6 +211,7 @@ export function BoqAllocationPanel({ projectId, items, currency }: Props) {
         <Input
           type='number'
           min='0'
+          step={MONEY_INPUT_STEP}
           value={amount}
           onChange={(event) => setAmount(event.target.value)}
           placeholder='Amount'

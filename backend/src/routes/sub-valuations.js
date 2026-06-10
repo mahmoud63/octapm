@@ -1,6 +1,8 @@
 const express = require('express');
 const { body, param } = require('express-validator');
 const { validate } = require('../middleware/validate');
+const { sendSuccess } = require('../utils/api-response');
+const { moneyBody } = require('../utils/money');
 const {
   listSubValuations,
   createSubValuation,
@@ -17,7 +19,7 @@ router.get('/', async (req, res, next) => {
       projectId: req.params.projectId,
     });
 
-    return res.json({ success: true, data });
+    return sendSuccess(res, data);
   } catch (error) {
     return next(error);
   }
@@ -28,10 +30,26 @@ router.post(
   [
     body('subcontractor').trim().notEmpty(),
     body('period').trim().notEmpty(),
-    body('workDone').optional().isFloat({ min: 0 }),
-    body('materialsOnSite').optional().isFloat({ min: 0 }),
+    moneyBody('workDone'),
+    moneyBody('materialsOnSite'),
     body('retentionRate').optional().isFloat({ min: 0, max: 100 }),
-    body('backCharges').optional().isFloat({ min: 0 }),
+    moneyBody('backCharges'),
+    body('activityLinks').optional().isArray(),
+    body('activityLinks.*.activityId').optional().isUUID(),
+    body('activityLinks.*.relationType').optional().isString().trim(),
+    body('activityLinks.*.quantity').optional().isFloat({ min: 0 }),
+    moneyBody('activityLinks.*.amount'),
+    body('allocationLinks').optional().isArray(),
+    body('allocationLinks.*.allocationId').optional({ nullable: true }).isUUID(),
+    body('allocationLinks.*.boqItemId').optional({ nullable: true }).isUUID(),
+    body('allocationLinks.*.quantity').optional().isFloat({ min: 0 }),
+    moneyBody('allocationLinks.*.workDoneAmount'),
+    moneyBody('allocationLinks.*.materialsOnSiteAmount'),
+    body('correspondenceIds').optional().isArray(),
+    body('correspondenceIds.*').optional().isUUID(),
+    body('correspondenceLinks').optional().isArray(),
+    body('correspondenceLinks.*.correspondenceId').optional().isUUID(),
+    body('attachmentRefs').optional().isArray(),
     body('status').optional().isIn(['draft', 'submitted', 'certified', 'paid']),
     validate,
   ],
@@ -40,10 +58,11 @@ router.post(
       const row = await createSubValuation({
         orgId: req.user.orgId,
         projectId: req.params.projectId,
+        userId: req.user.id,
         payload: req.body,
       });
 
-      return res.status(201).json({ success: true, data: row });
+      return sendSuccess(res, row, 201);
     } catch (error) {
       return next(error);
     }
@@ -54,10 +73,26 @@ router.patch(
   '/:valuationId',
   [
     param('valuationId').isUUID(),
-    body('workDone').optional().isFloat({ min: 0 }),
-    body('materialsOnSite').optional().isFloat({ min: 0 }),
+    moneyBody('workDone'),
+    moneyBody('materialsOnSite'),
     body('retentionRate').optional().isFloat({ min: 0, max: 100 }),
-    body('backCharges').optional().isFloat({ min: 0 }),
+    moneyBody('backCharges'),
+    body('activityLinks').optional().isArray(),
+    body('activityLinks.*.activityId').optional().isUUID(),
+    body('activityLinks.*.relationType').optional().isString().trim(),
+    body('activityLinks.*.quantity').optional().isFloat({ min: 0 }),
+    moneyBody('activityLinks.*.amount'),
+    body('allocationLinks').optional().isArray(),
+    body('allocationLinks.*.allocationId').optional({ nullable: true }).isUUID(),
+    body('allocationLinks.*.boqItemId').optional({ nullable: true }).isUUID(),
+    body('allocationLinks.*.quantity').optional().isFloat({ min: 0 }),
+    moneyBody('allocationLinks.*.workDoneAmount'),
+    moneyBody('allocationLinks.*.materialsOnSiteAmount'),
+    body('correspondenceIds').optional().isArray(),
+    body('correspondenceIds.*').optional().isUUID(),
+    body('correspondenceLinks').optional().isArray(),
+    body('correspondenceLinks.*.correspondenceId').optional().isUUID(),
+    body('attachmentRefs').optional().isArray(),
     body('status').optional().isIn(['draft', 'submitted', 'certified', 'paid']),
     validate,
   ],
@@ -67,10 +102,11 @@ router.patch(
         orgId: req.user.orgId,
         projectId: req.params.projectId,
         valuationId: req.params.valuationId,
+        userId: req.user.id,
         payload: req.body,
       });
 
-      return res.json({ success: true, data: row });
+      return sendSuccess(res, row);
     } catch (error) {
       return next(error);
     }
@@ -86,9 +122,10 @@ router.delete(
         orgId: req.user.orgId,
         projectId: req.params.projectId,
         valuationId: req.params.valuationId,
+        userId: req.user.id,
       });
 
-      return res.json({ success: true, data });
+      return sendSuccess(res, data);
     } catch (error) {
       return next(error);
     }

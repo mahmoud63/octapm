@@ -7,6 +7,14 @@ import {
   Lock,
   MoreHorizontal,
 } from 'lucide-react'
+import { toast } from 'sonner'
+import {
+  hasMoneyPrecision,
+  MONEY_INPUT_STEP,
+  MONEY_PRECISION_MESSAGE,
+  toMoneyNumber,
+} from '@/lib/money'
+import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import {
   DropdownMenu,
@@ -14,7 +22,6 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
-import { cn } from '@/lib/utils'
 import type { BoqItemWithActivities, BoqFinancialSummary } from '../data/schema'
 import {
   useUpdateBoqItem,
@@ -30,6 +37,7 @@ interface Props {
   items: BoqItemWithActivities[]
   financial: BoqFinancialSummary | null
   currency: string
+  baselineLocked?: boolean
   onDataChange: () => void
 }
 
@@ -43,6 +51,14 @@ const fmt = (n: number) =>
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   }).format(n)
+
+const moneyFields = new Set([
+  'rate',
+  'amount',
+  'budget',
+  'scheduledValue',
+  'unscheduledValue',
+])
 
 function EditableCell({
   rowId,
@@ -66,11 +82,34 @@ function EditableCell({
   className?: string
 }) {
   const isEditing = editingCell?.rowId === rowId && editingCell?.field === field
+  const isMoneyField = moneyFields.has(field)
   const [localValue, setLocalValue] = useState<string | number>(value)
+
+  const saveLocalValue = () => {
+    if (type === 'number' && isMoneyField && !hasMoneyPrecision(localValue)) {
+      toast.error(MONEY_PRECISION_MESSAGE)
+      return
+    }
+
+    const nextValue =
+      type === 'number'
+        ? isMoneyField
+          ? toMoneyNumber(localValue)
+          : Number(localValue) || 0
+        : localValue
+
+    onSave(nextValue)
+    setEditingCell(null)
+  }
 
   if (readOnly) {
     return (
-      <span className={cn('block truncate px-1 py-0.5 text-muted-foreground', className)}>
+      <span
+        className={cn(
+          'block truncate px-1 py-0.5 text-muted-foreground',
+          className
+        )}
+      >
         {type === 'number' ? fmt(Number(value)) : value}
       </span>
     )
@@ -81,24 +120,21 @@ function EditableCell({
       <input
         autoFocus
         type={type}
+        step={type === 'number' && isMoneyField ? MONEY_INPUT_STEP : undefined}
         value={localValue}
-        onChange={(e) =>
-          setLocalValue(type === 'number' ? Number(e.target.value) : e.target.value)
-        }
+        onChange={(e) => setLocalValue(e.target.value)}
         onBlur={() => {
-          onSave(localValue)
-          setEditingCell(null)
+          saveLocalValue()
         }}
         onKeyDown={(e) => {
           if (e.key === 'Enter') {
-            onSave(localValue)
-            setEditingCell(null)
+            saveLocalValue()
           }
           if (e.key === 'Escape') setEditingCell(null)
         }}
         className={cn(
           'w-full rounded border border-primary bg-background px-2 py-1 text-sm outline-none',
-          className,
+          className
         )}
       />
     )
@@ -108,7 +144,7 @@ function EditableCell({
     <span
       className={cn(
         'block cursor-text truncate rounded px-1 py-0.5 hover:bg-muted/50',
-        className,
+        className
       )}
       onClick={() => {
         setLocalValue(value)
@@ -123,13 +159,16 @@ function EditableCell({
 export function BoqEditableGrid({
   projectId,
   items,
+  baselineLocked = false,
   onDataChange,
 }: Props) {
   const [expandedRows, setExpandedRows] = useState<Set<string>>(
-    () => new Set(items.map((item) => item.id)),
+    () => new Set(items.map((item) => item.id))
   )
   const [editingCell, setEditingCell] = useState<EditingCell | null>(null)
-  const [addActivityForItem, setAddActivityForItem] = useState<string | null>(null)
+  const [addActivityForItem, setAddActivityForItem] = useState<string | null>(
+    null
+  )
   const [showAddRow, setShowAddRow] = useState(false)
 
   const updateItem = useUpdateBoqItem(projectId)
@@ -140,42 +179,65 @@ export function BoqEditableGrid({
   const toggleRow = (id: string) => {
     setExpandedRows((prev) => {
       const next = new Set(prev)
-      next.has(id) ? next.delete(id) : next.add(id)
+      if (next.has(id)) {
+        next.delete(id)
+      } else {
+        next.add(id)
+      }
       return next
     })
   }
 
-  const handleUpdateItem = (itemId: string, field: string, value: string | number) => {
-    updateItem.mutate({ itemId, data: { [field]: value } }, { onSuccess: onDataChange })
+  const handleUpdateItem = (
+    itemId: string,
+    field: string,
+    value: string | number
+  ) => {
+    updateItem.mutate(
+      { itemId, data: { [field]: value } },
+      { onSuccess: onDataChange }
+    )
   }
 
   const handleUpdateActivity = (
     activityId: string,
+    allocationId: string | undefined,
     field: string,
-    value: string | number,
+    value: string | number
   ) => {
     updateActivity.mutate(
-      { activityId, data: { [field]: value } },
-      { onSuccess: onDataChange },
+      {
+        activityId,
+        data: { [field]: value, ...(allocationId ? { allocationId } : {}) },
+      },
+      { onSuccess: onDataChange }
     )
   }
 
   const allActivityCodes = items.flatMap((item) =>
-    item.activities.map((a) => a.activityCode),
+    item.activities.map((a) => a.activityCode)
   )
 
   return (
     <div className='rounded-lg border bg-card'>
+      {baselineLocked && (
+        <div className='flex items-center gap-2 border-b bg-muted/40 px-3 py-2 text-xs text-muted-foreground'>
+          <Lock className='h-3.5 w-3.5' />
+          Current BOQ baseline is locked. Upload a revised BOQ to save a
+          comparison without changing these rows.
+        </div>
+      )}
       {/* Header */}
-      <div className='flex items-center border-b bg-muted/30 px-3 py-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground'>
+      <div className='flex items-center border-b bg-muted/30 px-3 py-2 text-xs font-semibold tracking-wide text-muted-foreground uppercase'>
         <div className='w-8' />
         <div className='w-24'>Code</div>
-        <div className='flex-1 min-w-0'>Description</div>
+        <div className='min-w-0 flex-1'>Description</div>
         <div className='w-20 text-right'>Qty</div>
         <div className='w-16'>Unit</div>
         <div className='w-24 text-right'>Rate</div>
         <div className='w-28 text-right'>Amount</div>
-        <div className='w-28 text-right'>Unalloc.</div>
+        <div className='w-28 text-right'>Scheduled</div>
+        <div className='w-28 text-right'>Unsched.</div>
         <div className='w-24' />
       </div>
 
@@ -202,27 +264,30 @@ export function BoqEditableGrid({
                   rowId={item.id}
                   field='code'
                   value={item.code}
+                  readOnly={baselineLocked}
                   editingCell={editingCell}
                   setEditingCell={setEditingCell}
                   onSave={(v) => handleUpdateItem(item.id, 'code', v)}
                 />
               </div>
-              <div className='flex-1 min-w-0 text-sm'>
+              <div className='min-w-0 flex-1 text-sm'>
                 <EditableCell
                   rowId={item.id}
                   field='description'
                   value={item.description}
+                  readOnly={baselineLocked}
                   editingCell={editingCell}
                   setEditingCell={setEditingCell}
                   onSave={(v) => handleUpdateItem(item.id, 'description', v)}
                 />
               </div>
-              <div className='w-20 text-sm text-right'>
+              <div className='w-20 text-right text-sm'>
                 <EditableCell
                   rowId={item.id}
                   field='quantity'
                   value={item.quantity}
                   type='number'
+                  readOnly={baselineLocked}
                   editingCell={editingCell}
                   setEditingCell={setEditingCell}
                   onSave={(v) => handleUpdateItem(item.id, 'quantity', v)}
@@ -233,23 +298,25 @@ export function BoqEditableGrid({
                   rowId={item.id}
                   field='unit'
                   value={item.unit ?? ''}
+                  readOnly={baselineLocked}
                   editingCell={editingCell}
                   setEditingCell={setEditingCell}
                   onSave={(v) => handleUpdateItem(item.id, 'unit', v)}
                 />
               </div>
-              <div className='w-24 text-sm text-right'>
+              <div className='w-24 text-right text-sm'>
                 <EditableCell
                   rowId={item.id}
                   field='rate'
                   value={item.rate}
                   type='number'
+                  readOnly={baselineLocked}
                   editingCell={editingCell}
                   setEditingCell={setEditingCell}
                   onSave={(v) => handleUpdateItem(item.id, 'rate', v)}
                 />
               </div>
-              <div className='w-28 text-sm text-right'>
+              <div className='w-28 text-right text-sm'>
                 <EditableCell
                   rowId={item.id}
                   field='amount'
@@ -261,18 +328,39 @@ export function BoqEditableGrid({
                   onSave={() => {}}
                 />
               </div>
-              <div className='w-28 text-sm text-right'>
+              <div className='w-28 text-right text-sm'>
                 <EditableCell
                   rowId={item.id}
-                  field='unallocatedAmount'
-                  value={item.unallocatedAmount ?? item.amount}
+                  field='scheduledValue'
+                  value={
+                    item.scheduledValue ?? item.approvedAllocatedAmount ?? 0
+                  }
+                  type='number'
+                  readOnly
+                  editingCell={editingCell}
+                  setEditingCell={setEditingCell}
+                  onSave={() => {}}
+                  className='text-green-600'
+                />
+              </div>
+              <div className='w-28 text-right text-sm'>
+                <EditableCell
+                  rowId={item.id}
+                  field='unscheduledValue'
+                  value={
+                    item.unscheduledValue ??
+                    item.unallocatedAmount ??
+                    item.amount
+                  }
                   type='number'
                   readOnly
                   editingCell={editingCell}
                   setEditingCell={setEditingCell}
                   onSave={() => {}}
                   className={
-                    (item.unallocatedAmount ?? item.amount) > 0
+                    (item.unscheduledValue ??
+                      item.unallocatedAmount ??
+                      item.amount) > 0
                       ? 'font-medium text-amber-600'
                       : 'text-green-600'
                   }
@@ -285,6 +373,7 @@ export function BoqEditableGrid({
                   variant='ghost'
                   size='sm'
                   className='h-7 px-2 text-xs'
+                  disabled={baselineLocked}
                   onClick={() => setAddActivityForItem(item.id)}
                 >
                   <Plus className='mr-1 h-3.5 w-3.5' />
@@ -297,11 +386,18 @@ export function BoqEditableGrid({
                     </Button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align='end'>
-                    {item.isManual ? (
+                    {baselineLocked ? (
+                      <DropdownMenuItem disabled>
+                        <Lock className='mr-2 h-4 w-4' />
+                        Baseline locked
+                      </DropdownMenuItem>
+                    ) : item.isManual ? (
                       <DropdownMenuItem
                         className='text-destructive focus:text-destructive'
                         onClick={() =>
-                          deleteItem.mutate(item.id, { onSuccess: onDataChange })
+                          deleteItem.mutate(item.id, {
+                            onSuccess: onDataChange,
+                          })
                         }
                       >
                         <Trash2 className='mr-2 h-4 w-4' />
@@ -327,7 +423,7 @@ export function BoqEditableGrid({
                     <div className='w-8' />
                     <div className='w-8 flex-shrink-0' />
                     <div className='w-24'>Act. Code</div>
-                    <div className='flex-1 min-w-0'>Activity Name</div>
+                    <div className='min-w-0 flex-1'>Activity Name</div>
                     <div className='w-16'>Unit</div>
                     <div className='w-20 text-right'>Qty</div>
                     <div className='w-24 text-right'>Rate</div>
@@ -338,103 +434,148 @@ export function BoqEditableGrid({
                   </div>
                 )}
 
-                {item.activities.map((act) => (
-                  <div
-                    key={act.id}
-                    className='flex items-center gap-1 px-3 py-1 text-sm hover:bg-muted/20'
-                  >
-                    <div className='w-8 flex-shrink-0' />
-                    <div className='w-8 flex-shrink-0 text-muted-foreground/40 text-xs'>└</div>
-                    <div className='w-24 font-mono text-xs'>
-                      <EditableCell
-                        rowId={act.id}
-                        field='activityCode'
-                        value={act.activityCode}
-                        editingCell={editingCell}
-                        setEditingCell={setEditingCell}
-                        onSave={(v) =>
-                          handleUpdateActivity(act.id, 'activityCode', v)
-                        }
-                      />
+                {item.activities.map((act) => {
+                  const isDraftAllocation =
+                    (act.allocationStatus ?? 'draft') === 'draft'
+                  const activityReadOnly = baselineLocked || !isDraftAllocation
+
+                  return (
+                    <div
+                      key={act.id}
+                      className='flex items-center gap-1 px-3 py-1 text-sm hover:bg-muted/20'
+                    >
+                      <div className='w-8 flex-shrink-0' />
+                      <div className='w-8 flex-shrink-0 text-xs text-muted-foreground/40'>
+                        └
+                      </div>
+                      <div className='w-24 font-mono text-xs'>
+                        <EditableCell
+                          rowId={act.id}
+                          field='activityCode'
+                          value={act.activityCode}
+                          readOnly
+                          editingCell={editingCell}
+                          setEditingCell={setEditingCell}
+                          onSave={() => {}}
+                        />
+                      </div>
+                      <div className='min-w-0 flex-1'>
+                        <EditableCell
+                          rowId={act.id}
+                          field='activityName'
+                          value={act.activityName}
+                          readOnly={activityReadOnly}
+                          editingCell={editingCell}
+                          setEditingCell={setEditingCell}
+                          onSave={(v) =>
+                            handleUpdateActivity(
+                              act.id,
+                              act.allocationId,
+                              'activityName',
+                              v
+                            )
+                          }
+                        />
+                        <div className='px-1 text-[11px] text-muted-foreground'>
+                          Allocation {act.allocationStatus ?? 'draft'}
+                        </div>
+                      </div>
+                      <div className='w-16'>
+                        <EditableCell
+                          rowId={act.id}
+                          field='unit'
+                          value={act.unit ?? ''}
+                          readOnly={activityReadOnly}
+                          editingCell={editingCell}
+                          setEditingCell={setEditingCell}
+                          onSave={(v) =>
+                            handleUpdateActivity(
+                              act.id,
+                              act.allocationId,
+                              'unit',
+                              v
+                            )
+                          }
+                        />
+                      </div>
+                      <div className='w-20 text-right'>
+                        <EditableCell
+                          rowId={act.id}
+                          field='quantity'
+                          value={act.quantity}
+                          type='number'
+                          readOnly={activityReadOnly}
+                          editingCell={editingCell}
+                          setEditingCell={setEditingCell}
+                          onSave={(v) =>
+                            handleUpdateActivity(
+                              act.id,
+                              act.allocationId,
+                              'quantity',
+                              v
+                            )
+                          }
+                        />
+                      </div>
+                      <div className='w-24 text-right'>
+                        <EditableCell
+                          rowId={act.id}
+                          field='rate'
+                          value={act.rate}
+                          type='number'
+                          readOnly={activityReadOnly}
+                          editingCell={editingCell}
+                          setEditingCell={setEditingCell}
+                          onSave={(v) =>
+                            handleUpdateActivity(
+                              act.id,
+                              act.allocationId,
+                              'rate',
+                              v
+                            )
+                          }
+                        />
+                      </div>
+                      <div className='w-28 text-right'>
+                        <EditableCell
+                          rowId={act.id}
+                          field='budget'
+                          value={act.budget}
+                          type='number'
+                          readOnly
+                          editingCell={editingCell}
+                          setEditingCell={setEditingCell}
+                          onSave={() => {}}
+                        />
+                      </div>
+                      <div className='w-16 text-xs text-muted-foreground'>
+                        {act.dependencyType ?? '—'}
+                      </div>
+                      <div className='w-24 truncate font-mono text-xs text-muted-foreground'>
+                        {act.predecessorCode ?? '—'}
+                      </div>
+                      <div className='flex w-10 justify-end'>
+                        <Button
+                          variant='ghost'
+                          size='icon'
+                          className='size-7 text-muted-foreground hover:text-destructive'
+                          disabled={activityReadOnly}
+                          onClick={() =>
+                            deleteActivity.mutate(
+                              {
+                                activityId: act.id,
+                                allocationId: act.allocationId,
+                              },
+                              { onSuccess: onDataChange }
+                            )
+                          }
+                        >
+                          <Trash2 className='h-3.5 w-3.5' />
+                        </Button>
+                      </div>
                     </div>
-                    <div className='flex-1 min-w-0'>
-                      <EditableCell
-                        rowId={act.id}
-                        field='activityName'
-                        value={act.activityName}
-                        editingCell={editingCell}
-                        setEditingCell={setEditingCell}
-                        onSave={(v) =>
-                          handleUpdateActivity(act.id, 'activityName', v)
-                        }
-                      />
-                    </div>
-                    <div className='w-16'>
-                      <EditableCell
-                        rowId={act.id}
-                        field='unit'
-                        value={act.unit ?? ''}
-                        editingCell={editingCell}
-                        setEditingCell={setEditingCell}
-                        onSave={(v) => handleUpdateActivity(act.id, 'unit', v)}
-                      />
-                    </div>
-                    <div className='w-20 text-right'>
-                      <EditableCell
-                        rowId={act.id}
-                        field='quantity'
-                        value={act.quantity}
-                        type='number'
-                        editingCell={editingCell}
-                        setEditingCell={setEditingCell}
-                        onSave={(v) =>
-                          handleUpdateActivity(act.id, 'quantity', v)
-                        }
-                      />
-                    </div>
-                    <div className='w-24 text-right'>
-                      <EditableCell
-                        rowId={act.id}
-                        field='rate'
-                        value={act.rate}
-                        type='number'
-                        editingCell={editingCell}
-                        setEditingCell={setEditingCell}
-                        onSave={(v) => handleUpdateActivity(act.id, 'rate', v)}
-                      />
-                    </div>
-                    <div className='w-28 text-right'>
-                      <EditableCell
-                        rowId={act.id}
-                        field='budget'
-                        value={act.budget}
-                        type='number'
-                        readOnly
-                        editingCell={editingCell}
-                        setEditingCell={setEditingCell}
-                        onSave={() => {}}
-                      />
-                    </div>
-                    <div className='w-16 text-xs text-muted-foreground'>
-                      {act.dependencyType ?? '—'}
-                    </div>
-                    <div className='w-24 font-mono text-xs text-muted-foreground truncate'>
-                      {act.predecessorCode ?? '—'}
-                    </div>
-                    <div className='w-10 flex justify-end'>
-                      <Button
-                        variant='ghost'
-                        size='icon'
-                        className='size-7 text-muted-foreground hover:text-destructive'
-                        onClick={() =>
-                          deleteActivity.mutate(act.id, { onSuccess: onDataChange })
-                        }
-                      >
-                        <Trash2 className='h-3.5 w-3.5' />
-                      </Button>
-                    </div>
-                  </div>
-                ))}
+                  )
+                })}
 
                 {/* Empty state for activities */}
                 {item.activities.length === 0 && (
@@ -454,6 +595,7 @@ export function BoqEditableGrid({
           variant='ghost'
           size='sm'
           className='text-muted-foreground'
+          disabled={baselineLocked}
           onClick={() => setShowAddRow(true)}
         >
           <Plus className='mr-1.5 h-4 w-4' />

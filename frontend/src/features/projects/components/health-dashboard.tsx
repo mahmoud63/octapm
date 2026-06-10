@@ -13,6 +13,32 @@ interface Props {
   projectId: string
 }
 
+type HealthRisk = {
+  id: string
+  item: string
+  reason: string
+  impactedActivity?: {
+    wbsCode?: string | null
+    name: string
+  } | null
+}
+
+type HealthDimensionDetail = Record<string, unknown> & {
+  topRisks?: HealthRisk[]
+}
+
+type HealthDimension = {
+  key: string
+  label: string
+  score: number
+  detail?: HealthDimensionDetail
+}
+
+type HealthResponse = {
+  overallScore?: number
+  dimensions?: HealthDimension[]
+}
+
 function scoreColor(score: number) {
   if (score >= 80) return '#22c55e'
   if (score >= 60) return '#f59e0b'
@@ -32,9 +58,12 @@ function DimensionCard({
 }: {
   label: string
   score: number
-  detail: Record<string, unknown>
+  detail: HealthDimensionDetail
 }) {
   const color = scoreColor(score)
+  const topRisks = Array.isArray(detail.topRisks)
+    ? detail.topRisks.slice(0, 2)
+    : []
   return (
     <div className='space-y-2 rounded-lg border p-3'>
       <div className='flex items-center justify-between'>
@@ -55,6 +84,7 @@ function DimensionCard({
       <div className='flex items-center justify-between gap-2'>
         <p className='text-xs text-muted-foreground'>
           {Object.entries(detail)
+            .filter(([key]) => key !== 'topRisks')
             .slice(0, 2)
             .map(([k, v]) => `${k}: ${v}`)
             .join(' · ')}
@@ -63,12 +93,28 @@ function DimensionCard({
           {score}
         </p>
       </div>
+      {topRisks.length > 0 && (
+        <div className='space-y-1 border-t pt-2'>
+          {topRisks.map((risk) => (
+            <p
+              key={risk.id}
+              className='truncate text-xs text-muted-foreground'
+              title={`${risk.item} - ${risk.reason}`}
+            >
+              <span className='font-medium text-foreground'>{risk.item}</span>
+              {risk.impactedActivity
+                ? ` -> ${risk.impactedActivity.wbsCode ? `${risk.impactedActivity.wbsCode} ` : ''}${risk.impactedActivity.name}`
+                : ''}
+            </p>
+          ))}
+        </div>
+      )}
     </div>
   )
 }
 
 export function HealthDashboard({ projectId }: Props) {
-  const { data, isLoading } = useQuery({
+  const { data, isLoading } = useQuery<HealthResponse>({
     queryKey: ['health', projectId],
     queryFn: () =>
       apiClient.get(`/projects/${projectId}/health`).then((r) => r.data.data),
@@ -85,7 +131,7 @@ export function HealthDashboard({ projectId }: Props) {
 
   const overallScore = Number(data.overallScore || 0)
   const dimensions = data.dimensions || []
-  const radarData = dimensions.map((d: any) => ({
+  const radarData = dimensions.map((d) => ({
     subject: d.label,
     score: d.score,
   }))
@@ -122,7 +168,7 @@ export function HealthDashboard({ projectId }: Props) {
       </div>
 
       <div className='grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4'>
-        {dimensions.map((d: any) => (
+        {dimensions.map((d) => (
           <DimensionCard
             key={d.key}
             label={d.label}

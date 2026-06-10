@@ -28,7 +28,20 @@ router.post(
     body('item').isString().trim().notEmpty(),
     body('activityId').optional({ nullable: true }).isUUID(),
     body('leadWeeks').optional().isInt({ min: 0 }).toInt(),
+    body('requiredTiming')
+      .optional()
+      .isIn(['activity_start', 'activity_finish']),
+    body('needOffsetDays').optional().isInt({ min: 0 }).toInt(),
+    body('bufferDays').optional().isInt({ min: 0 }).toInt(),
     body('orderBy').optional().isString().trim(),
+    body('expectedDeliveryDate')
+      .optional({ nullable: true })
+      .isISO8601()
+      .toDate(),
+    body('deliveredAt').optional({ nullable: true }).isISO8601().toDate(),
+    body('warehouseStatus')
+      .optional()
+      .isIn(['not_received', 'partial', 'received', 'issued']),
     body('criticality').optional().isString().trim(),
     body('risk').optional().isString().trim(),
     body('status').optional().isIn(['not_ordered', 'ordered', 'delivered']),
@@ -47,13 +60,26 @@ router.post(
 
 router.patch(
   '/:id',
-  requireRoles('pm', 'planning_eng', 'procurement'),
+  requireRoles('pm', 'planning_eng', 'procurement', 'warehouse'),
   [
     param('id').isUUID(),
     body('item').optional().isString().trim().notEmpty(),
     body('activityId').optional({ nullable: true }).isUUID(),
     body('leadWeeks').optional().isInt({ min: 0 }).toInt(),
+    body('requiredTiming')
+      .optional()
+      .isIn(['activity_start', 'activity_finish']),
+    body('needOffsetDays').optional().isInt({ min: 0 }).toInt(),
+    body('bufferDays').optional().isInt({ min: 0 }).toInt(),
     body('orderBy').optional().isString().trim(),
+    body('expectedDeliveryDate')
+      .optional({ nullable: true })
+      .isISO8601()
+      .toDate(),
+    body('deliveredAt').optional({ nullable: true }).isISO8601().toDate(),
+    body('warehouseStatus')
+      .optional()
+      .isIn(['not_received', 'partial', 'received', 'issued']),
     body('criticality').optional().isString().trim(),
     body('risk').optional().isString().trim(),
     body('status').optional().isIn(['not_ordered', 'ordered', 'delivered']),

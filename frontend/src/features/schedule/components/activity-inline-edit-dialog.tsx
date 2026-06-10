@@ -1,4 +1,5 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
+import { Plus, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import {
@@ -10,37 +11,116 @@ import {
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import type { ScheduleActivity } from '../data/schema'
+import type {
+  DependencyRelationship,
+  ScheduleActivity,
+} from '../data/schema'
 
 type EditablePatch = Partial<
   Pick<
     ScheduleActivity,
-    'name' | 'duration' | 'predecessors' | 'earlyStart' | 'isMilestone'
+    | 'name'
+    | 'duration'
+    | 'dependencies'
+    | 'earlyStart'
+    | 'isMilestone'
   >
 >
+
+type EditableDependency = {
+  predecessorId: string
+  relationshipType: DependencyRelationship
+  lagDays: number
+}
 
 interface Props {
   open: boolean
   onOpenChange: (open: boolean) => void
   activity: ScheduleActivity | null
+  activities: ScheduleActivity[]
   onSave: (patch: EditablePatch) => Promise<void>
   isSaving?: boolean
+}
+
+const RELATIONSHIP_OPTIONS: DependencyRelationship[] = ['FS', 'SS', 'FF', 'SF']
+
+function activityLabel(activity: ScheduleActivity) {
+  const ref = activity.p6ActivityId || activity.wbsCode || activity.id.slice(0, 8)
+  return `${ref} - ${activity.name}`
 }
 
 export function ActivityInlineEditDialog({
   open,
   onOpenChange,
   activity,
+  activities,
   onSave,
   isSaving = false,
 }: Props) {
   const [name, setName] = useState(activity?.name ?? '')
   const [duration, setDuration] = useState(String(activity?.duration ?? 0))
-  const [predecessors, setPredecessors] = useState(activity?.predecessors ?? '')
+  const [dependencies, setDependencies] = useState<EditableDependency[]>(
+    () =>
+      (activity?.dependencies ?? []).map((dependency) => ({
+        predecessorId: dependency.predecessorId,
+        relationshipType: dependency.relationshipType,
+        lagDays: dependency.lagDays,
+      }))
+  )
   const [earlyStart, setEarlyStart] = useState(
     String(activity?.earlyStart ?? 0)
   )
   const [isMilestone, setIsMilestone] = useState(Boolean(activity?.isMilestone))
+
+  const predecessorOptions = useMemo(
+    () => activities.filter((item) => item.id !== activity?.id),
+    [activities, activity?.id]
+  )
+
+  const duplicatePredecessors = useMemo(() => {
+    const seen = new Set<string>()
+    for (const dependency of dependencies) {
+      if (!dependency.predecessorId) continue
+      if (seen.has(dependency.predecessorId)) return true
+      seen.add(dependency.predecessorId)
+    }
+    return false
+  }, [dependencies])
+
+  const dependencyError =
+    dependencies.some((dependency) => !dependency.predecessorId) ||
+    duplicatePredecessors
+
+  const addDependency = () => {
+    const next = predecessorOptions.find(
+      (option) =>
+        !dependencies.some(
+          (dependency) => dependency.predecessorId === option.id
+        )
+    )
+    if (!next) return
+    setDependencies((current) => [
+      ...current,
+      { predecessorId: next.id, relationshipType: 'FS', lagDays: 0 },
+    ])
+  }
+
+  const updateDependency = (
+    index: number,
+    patch: Partial<EditableDependency>
+  ) => {
+    setDependencies((current) =>
+      current.map((dependency, itemIndex) =>
+        itemIndex === index ? { ...dependency, ...patch } : dependency
+      )
+    )
+  }
+
+  const removeDependency = (index: number) => {
+    setDependencies((current) =>
+      current.filter((_dependency, itemIndex) => itemIndex !== index)
+    )
+  }
 
   const handleSave = async () => {
     if (!activity) return
@@ -48,7 +128,14 @@ export function ActivityInlineEditDialog({
     const patch: EditablePatch = {
       name: name.trim(),
       duration: Math.max(0, Number(duration) || 0),
-      predecessors: predecessors.trim(),
+      dependencies: dependencies.map((dependency) => ({
+        id: `${activity.id}:${dependency.predecessorId}`,
+        projectId: activity.projectId,
+        predecessorId: dependency.predecessorId,
+        successorId: activity.id,
+        relationshipType: dependency.relationshipType,
+        lagDays: Math.round(Number(dependency.lagDays) || 0),
+      })),
       earlyStart: Math.max(0, Number(earlyStart) || 0),
       isMilestone,
     }
@@ -102,15 +189,103 @@ export function ActivityInlineEditDialog({
             </div>
           </div>
 
-          <div className='grid gap-1.5'>
-            <Label htmlFor='inline-preds'>Predecessors</Label>
-            <Input
-              id='inline-preds'
-              value={predecessors}
-              onChange={(e) => setPredecessors(e.target.value)}
-              placeholder='Comma-separated WBS codes'
-              disabled={isSaving}
-            />
+          <div className='grid gap-2'>
+            <div className='flex items-center justify-between gap-3'>
+              <Label>Dependencies</Label>
+              <Button
+                type='button'
+                variant='outline'
+                size='sm'
+                onClick={addDependency}
+                disabled={
+                  isSaving ||
+                  predecessorOptions.length === 0 ||
+                  dependencies.length >= predecessorOptions.length
+                }
+              >
+                <Plus className='h-4 w-4' />
+                Add
+              </Button>
+            </div>
+
+            <div className='grid gap-2'>
+              {dependencies.map((dependency, index) => (
+                <div
+                  key={`${dependency.predecessorId}-${index}`}
+                  className='grid gap-2 rounded-md border bg-muted/20 p-2 sm:grid-cols-[1fr_78px_92px_32px]'
+                >
+                  <select
+                    className='h-9 min-w-0 rounded-md border bg-background px-2 text-sm'
+                    value={dependency.predecessorId}
+                    onChange={(event) =>
+                      updateDependency(index, {
+                        predecessorId: event.target.value,
+                      })
+                    }
+                    disabled={isSaving}
+                  >
+                    {predecessorOptions.map((option) => (
+                      <option key={option.id} value={option.id}>
+                        {activityLabel(option)}
+                      </option>
+                    ))}
+                  </select>
+
+                  <select
+                    className='h-9 rounded-md border bg-background px-2 text-sm'
+                    value={dependency.relationshipType}
+                    onChange={(event) =>
+                      updateDependency(index, {
+                        relationshipType: event.target
+                          .value as DependencyRelationship,
+                      })
+                    }
+                    disabled={isSaving}
+                  >
+                    {RELATIONSHIP_OPTIONS.map((type) => (
+                      <option key={type} value={type}>
+                        {type}
+                      </option>
+                    ))}
+                  </select>
+
+                  <Input
+                    type='number'
+                    value={dependency.lagDays}
+                    aria-label='Lag or lead days'
+                    onChange={(event) =>
+                      updateDependency(index, {
+                        lagDays: Math.round(Number(event.target.value) || 0),
+                      })
+                    }
+                    disabled={isSaving}
+                  />
+
+                  <Button
+                    type='button'
+                    variant='ghost'
+                    size='icon'
+                    className='size-8'
+                    onClick={() => removeDependency(index)}
+                    disabled={isSaving}
+                    aria-label='Remove dependency'
+                  >
+                    <Trash2 className='h-4 w-4' />
+                  </Button>
+                </div>
+              ))}
+              {dependencies.length === 0 && (
+                <div className='rounded-md border border-dashed px-3 py-2 text-sm text-muted-foreground'>
+                  No predecessors
+                </div>
+              )}
+            </div>
+
+            {dependencyError && (
+              <p className='text-xs font-medium text-destructive'>
+                Select each predecessor once.
+              </p>
+            )}
           </div>
 
           <div className='flex items-center gap-2'>
@@ -132,7 +307,10 @@ export function ActivityInlineEditDialog({
           >
             Cancel
           </Button>
-          <Button onClick={handleSave} disabled={isSaving || !name.trim()}>
+          <Button
+            onClick={handleSave}
+            disabled={isSaving || !name.trim() || dependencyError}
+          >
             {isSaving ? 'Saving...' : 'Save'}
           </Button>
         </DialogFooter>

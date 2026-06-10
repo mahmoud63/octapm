@@ -43,6 +43,12 @@ function hoursToDays(hours) {
   return Math.max(0, Math.round(n / 8));
 }
 
+function lagHoursToDays(hours) {
+  const n = Number.parseFloat(hours);
+  if (!Number.isFinite(n)) return 0;
+  return Math.round(n / 8);
+}
+
 function parseMaybeDate(value) {
   if (!value) return null;
   const d = new Date(value);
@@ -148,7 +154,7 @@ function extractRelationships(tables) {
     succTaskId: String(p.task_id || '').trim(),
     predTaskId: String(p.pred_task_id || '').trim(),
     relType: mapRelType(p.pred_type),
-    lagDays: hoursToDays(p.lag_hr_cnt),
+    lagDays: lagHoursToDays(p.lag_hr_cnt),
   }));
 }
 
@@ -159,5 +165,6 @@ module.exports = {
   extractWbs,
   extractCalendars,
   hoursToDays,
+  lagHoursToDays,
   mapRelType,
 };

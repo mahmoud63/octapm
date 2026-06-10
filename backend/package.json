@@ -10,6 +10,9 @@
     "db:migrate": "npx prisma migrate dev",
     "db:seed": "node prisma/seed.js",
     "db:studio": "npx prisma studio",
+    "prisma:validate": "prisma validate --schema prisma/schema.prisma",
+    "openapi:validate": "node scripts/validate-openapi.js",
+    "smoke:deploy": "node scripts/deployment-smoke.js",
     "test": "jest --runInBand",
     "test:watch": "jest --watch"
   },
@@ -28,10 +31,12 @@
     "multer": "^1.4.5-lts.1",
     "socket.io": "^4.8.0",
     "stripe": "^22.1.1",
+    "swagger-ui-express": "^5.0.1",
     "xlsx": "^0.18.5",
     "xml2js": "^0.6.0"
   },
   "devDependencies": {
+    "@apidevtools/swagger-parser": "^12.1.0",
     "embedded-postgres": "^18.3.0-beta.17",
     "jest": "^29.7.0",
     "nodemon": "^3.1.0",

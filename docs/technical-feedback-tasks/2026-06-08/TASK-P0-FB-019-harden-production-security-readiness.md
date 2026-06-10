@@ -64,3 +64,9 @@ M
 ## Notes
 
 This task intentionally avoids storing or repeating any secret values.
+
+## Implementation Status - 2026-06-09
+
+- Completed in code: production CORS allowlisting for Express and Socket.IO, production startup/deploy secret validation, Stripe webhook configuration fail-fast handling, dedicated CloudFront shared-secret variable, CloudFront origin guard, safe deployment smoke script, and focused backend tests.
+- Documented in `docs/security/production-security-readiness.md`: secret-rotation confirmation process, required production settings, and smoke-check execution steps.
+- Requires external confirmation: Security/DevOps must verify suspect Stripe live key revocation or rotation in the approved secret-management or incident-tracking system without storing secret values in this repository.

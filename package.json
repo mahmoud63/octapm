@@ -10,7 +10,15 @@
     "dev": "concurrently \"npm run dev --workspace=backend\" \"npm run dev --workspace=frontend\" --names \"API,WEB\" --prefix-colors \"blue,green\"",
     "dev:backend": "npm run dev --workspace=backend",
     "dev:frontend": "npm run dev --workspace=frontend",
-    "build": "npm run build --workspaces --if-present"
+    "build": "npm run build --workspaces --if-present",
+    "security:test:secret-hygiene": "node infrastructure/scripts/validate-secret-hygiene.mjs --self-test",
+    "security:validate:secret-hygiene": "node infrastructure/scripts/validate-secret-hygiene.mjs",
+    "infra:test:api-origin": "node infrastructure/scripts/validate-api-origin-security.mjs --self-test",
+    "infra:validate:api-origin": "node infrastructure/scripts/validate-api-origin-security.mjs",
+    "infra:test:rds-backups": "node infrastructure/scripts/validate-rds-backups.mjs --self-test",
+    "infra:validate:rds-backups": "node infrastructure/scripts/validate-rds-backups.mjs",
+    "infra:test:ec2-user-data": "node infrastructure/scripts/validate-ec2-user-data.mjs --self-test",
+    "infra:validate:ec2-user-data": "node infrastructure/scripts/validate-ec2-user-data.mjs"
   },
   "devDependencies": {
     "concurrently": "^9.1.0"

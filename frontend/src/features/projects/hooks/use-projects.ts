@@ -1,6 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { apiClient } from '@/services/api/client'
-import type { CreateProjectInput, Project } from '../data/schema'
+import type {
+  CreateProjectInput,
+  Project,
+  ProjectSetupReadiness,
+} from '../data/schema'
 
 type ProjectsResponse = {
   items: Project[]
@@ -9,6 +13,11 @@ type ProjectsResponse = {
     nextCursor: string | null
   }
 }
+
+export const projectSetupReadinessKey = (projectId: string) => [
+  'project-setup-readiness',
+  projectId,
+]
 
 export const useProjects = () =>
   useQuery<ProjectsResponse>({
@@ -25,6 +34,19 @@ export const useProject = (projectId: string) =>
         .get(`/projects/${projectId}`)
         .then((response) => response.data.data),
     enabled: Boolean(projectId),
+  })
+
+export const useProjectSetupReadiness = (
+  projectId: string,
+  options: { enabled?: boolean } = {}
+) =>
+  useQuery<ProjectSetupReadiness>({
+    queryKey: projectSetupReadinessKey(projectId),
+    queryFn: () =>
+      apiClient
+        .get(`/projects/${projectId}/setup-readiness`)
+        .then((response) => response.data.data),
+    enabled: Boolean(projectId) && (options.enabled ?? true),
   })
 
 export const useCreateProject = () => {

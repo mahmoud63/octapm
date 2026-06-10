@@ -7,7 +7,13 @@ export interface LongLeadItemRecord {
   activityId: string | null
   item: string
   leadWeeks: number
+  requiredTiming: 'activity_start' | 'activity_finish'
+  needOffsetDays: number
+  bufferDays: number
   orderBy: string | null
+  expectedDeliveryDate: string | null
+  deliveredAt: string | null
+  warehouseStatus: 'not_received' | 'partial' | 'received' | 'issued'
   criticality: string | null
   risk: string | null
   status: 'not_ordered' | 'ordered' | 'delivered'
@@ -19,13 +25,39 @@ export interface LongLeadItemRecord {
     name: string
     wbsCode: string | null
   } | null
+  procurementRisk?: {
+    severity: 'none' | 'low' | 'medium' | 'high' | 'critical'
+    reason: string
+    isAtRisk: boolean
+    daysAtRisk: number
+    deliverySlipDays: number
+    orderBySlackDays: number | null
+    needSlackDays: number | null
+    needDate: string | null
+    orderByDate: string | null
+    expectedDeliveryDate: string | null
+    flags: string[]
+    impactedActivity: {
+      id: string
+      name: string
+      wbsCode: string | null
+      isCritical: boolean
+      totalFloat: number | null
+    } | null
+  }
 }
 
 export interface LongLeadPayload {
   activityId?: string | null
   item: string
   leadWeeks: number
+  requiredTiming?: 'activity_start' | 'activity_finish'
+  needOffsetDays?: number
+  bufferDays?: number
   orderBy?: string
+  expectedDeliveryDate?: string | null
+  deliveredAt?: string | null
+  warehouseStatus?: 'not_received' | 'partial' | 'received' | 'issued'
   criticality?: string
   risk?: string
   status?: 'not_ordered' | 'ordered' | 'delivered'

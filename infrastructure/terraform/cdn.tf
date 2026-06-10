@@ -81,7 +81,7 @@ resource "aws_cloudfront_distribution" "main" {
     # Shared secret header so EC2 can reject direct requests
     custom_header {
       name  = "X-CloudFront-Secret"
-      value = var.jwt_secret  # reuse JWT_SECRET as CF shared secret
+      value = var.cloudfront_origin_secret
     }
   }
 

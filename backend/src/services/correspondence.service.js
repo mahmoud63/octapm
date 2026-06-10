@@ -1,5 +1,14 @@
 const { prisma } = require('../config/db');
 const { HttpError } = require('../utils/http-error');
+const {
+  RECORD_TYPES,
+  assignmentData,
+  attachWorkflowDetailsToRecords,
+  primaryActivityIdFromPayload,
+  recordDocumentRevisions,
+  recordWorkflowHistory,
+  syncWorkflowReferences,
+} = require('./workflow-support.service');
 
 const ensureProject = async ({ orgId, projectId }) => {
   const project = await prisma.project.findFirst({
@@ -16,9 +25,14 @@ const ensureProject = async ({ orgId, projectId }) => {
 const listCorrespondence = async ({ orgId, projectId }) => {
   await ensureProject({ orgId, projectId });
 
-  const rows = await prisma.correspondence.findMany({
+  const records = await prisma.correspondence.findMany({
     where: { projectId },
     orderBy: [{ date: 'desc' }, { createdAt: 'desc' }],
+  });
+  const rows = await attachWorkflowDetailsToRecords({
+    projectId,
+    recordType: RECORD_TYPES.CORRESPONDENCE,
+    records,
   });
 
   return {
@@ -37,27 +51,63 @@ const createCorrespondence = async ({ orgId, projectId, payload }) => {
   await ensureProject({ orgId, projectId });
 
   const count = await prisma.correspondence.count({ where: { projectId } });
+  const activityId = primaryActivityIdFromPayload(payload);
 
-  return prisma.correspondence.create({
-    data: {
+  const row = await prisma.$transaction(async (tx) => {
+    const created = await tx.correspondence.create({
+      data: {
+        projectId,
+        activityId,
+        ref: payload.ref || `COR-${String(count + 1).padStart(3, '0')}`,
+        direction: payload.direction,
+        type: payload.type,
+        subject: payload.subject,
+        body: payload.body?.trim() || null,
+        contractualNotice: Boolean(payload.contractualNotice),
+        date: payload.date ? new Date(payload.date) : new Date(),
+        ...assignmentData(payload),
+        dueDate: payload.dueDate ? new Date(payload.dueDate) : null,
+        responseRequiredBy: payload.responseRequiredBy
+          ? new Date(payload.responseRequiredBy)
+          : null,
+        responseDate: payload.responseDate
+          ? new Date(payload.responseDate)
+          : null,
+        status: payload.status || 'open',
+      },
+    });
+    await syncWorkflowReferences({
+      tx,
       projectId,
-      activityId: payload.activityId || null,
-      ref: payload.ref || `COR-${String(count + 1).padStart(3, '0')}`,
-      direction: payload.direction,
-      type: payload.type,
-      subject: payload.subject,
-      body: payload.body?.trim() || null,
-      contractualNotice: Boolean(payload.contractualNotice),
-      date: payload.date ? new Date(payload.date) : new Date(),
-      responseRequiredBy: payload.responseRequiredBy
-        ? new Date(payload.responseRequiredBy)
-        : null,
-      responseDate: payload.responseDate
-        ? new Date(payload.responseDate)
-        : null,
-      status: payload.status || 'open',
-    },
+      recordType: RECORD_TYPES.CORRESPONDENCE,
+      recordId: created.id,
+      payload,
+    });
+    await recordWorkflowHistory({
+      tx,
+      projectId,
+      recordType: RECORD_TYPES.CORRESPONDENCE,
+      recordId: created.id,
+      newStatus: created.status,
+      comment: payload.comment || payload.statusComment || payload.body,
+      force: true,
+    });
+    await recordDocumentRevisions({
+      tx,
+      projectId,
+      recordType: RECORD_TYPES.CORRESPONDENCE,
+      record: created,
+      payload,
+    });
+    return created;
   });
+
+  const [enriched] = await attachWorkflowDetailsToRecords({
+    projectId,
+    recordType: RECORD_TYPES.CORRESPONDENCE,
+    records: [row],
+  });
+  return enriched;
 };
 
 const updateCorrespondence = async ({
@@ -65,6 +115,8 @@ const updateCorrespondence = async ({
   projectId,
   correspondenceId,
   payload,
+  userId,
+  userRole,
 }) => {
   await ensureProject({ orgId, projectId });
 
@@ -80,45 +132,89 @@ const updateCorrespondence = async ({
     );
   }
 
-  return prisma.correspondence.update({
-    where: { id: correspondenceId },
-    data: {
-      activityId:
-        payload.activityId !== undefined
-          ? payload.activityId
-          : existing.activityId,
-      direction: payload.direction ?? existing.direction,
-      type: payload.type ?? existing.type,
-      subject: payload.subject ?? existing.subject,
-      body:
-        payload.body !== undefined
-          ? payload.body?.trim() || null
-          : existing.body,
-      contractualNotice:
-        payload.contractualNotice !== undefined
-          ? Boolean(payload.contractualNotice)
-          : existing.contractualNotice,
-      date:
-        payload.date !== undefined
-          ? payload.date
-            ? new Date(payload.date)
-            : null
-          : existing.date,
-      responseRequiredBy:
-        payload.responseRequiredBy !== undefined
-          ? payload.responseRequiredBy
-            ? new Date(payload.responseRequiredBy)
-            : null
-          : existing.responseRequiredBy,
-      responseDate:
-        payload.responseDate !== undefined
-          ? payload.responseDate
-            ? new Date(payload.responseDate)
-            : null
-          : existing.responseDate,
-      status: payload.status ?? existing.status,
-    },
+  const nextStatus = payload.status ?? existing.status;
+  const activityId = primaryActivityIdFromPayload(payload, existing.activityId);
+
+  const row = await prisma.$transaction(async (tx) => {
+    const updated = await tx.correspondence.update({
+      where: { id: correspondenceId },
+      data: {
+        activityId,
+        direction: payload.direction ?? existing.direction,
+        type: payload.type ?? existing.type,
+        subject: payload.subject ?? existing.subject,
+        body:
+          payload.body !== undefined
+            ? payload.body?.trim() || null
+            : existing.body,
+        contractualNotice:
+          payload.contractualNotice !== undefined
+            ? Boolean(payload.contractualNotice)
+            : existing.contractualNotice,
+        date:
+          payload.date !== undefined
+            ? payload.date
+              ? new Date(payload.date)
+              : null
+            : existing.date,
+        ...assignmentData(payload, existing),
+        dueDate:
+          payload.dueDate !== undefined
+            ? payload.dueDate
+              ? new Date(payload.dueDate)
+              : null
+            : existing.dueDate,
+        responseRequiredBy:
+          payload.responseRequiredBy !== undefined
+            ? payload.responseRequiredBy
+              ? new Date(payload.responseRequiredBy)
+              : null
+            : existing.responseRequiredBy,
+        responseDate:
+          payload.responseDate !== undefined
+            ? payload.responseDate
+              ? new Date(payload.responseDate)
+              : null
+            : existing.responseDate,
+        status: nextStatus,
+      },
+    });
+    await syncWorkflowReferences({
+      tx,
+      projectId,
+      recordType: RECORD_TYPES.CORRESPONDENCE,
+      recordId: correspondenceId,
+      payload,
+      userId,
+    });
+    await recordWorkflowHistory({
+      tx,
+      projectId,
+      recordType: RECORD_TYPES.CORRESPONDENCE,
+      recordId: correspondenceId,
+      oldStatus: existing.status,
+      newStatus: updated.status,
+      comment: payload.comment || payload.statusComment || payload.body,
+      userId,
+      userRole,
+    });
+    await recordDocumentRevisions({
+      tx,
+      projectId,
+      recordType: RECORD_TYPES.CORRESPONDENCE,
+      record: updated,
+      payload,
+      userId,
+    });
+    return updated;
   });
+
+  const [enriched] = await attachWorkflowDetailsToRecords({
+    projectId,
+    recordType: RECORD_TYPES.CORRESPONDENCE,
+    records: [row],
+  });
+  return enriched;
 };
 
 const deleteCorrespondence = async ({ orgId, projectId, correspondenceId }) => {

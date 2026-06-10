@@ -1,27 +1,95 @@
 import { useMemo, useState } from 'react'
+import {
+  Banknote,
+  FileCheck2,
+  LockKeyhole,
+  ReceiptText,
+  ShieldCheck,
+} from 'lucide-react'
 import { toast } from 'sonner'
+import {
+  hasMoneyPrecision,
+  MONEY_INPUT_STEP,
+  MONEY_PRECISION_MESSAGE,
+  toMoneyNumber,
+} from '@/lib/money'
+import { useCanPerform } from '@/lib/permissions'
+import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { Textarea } from '@/components/ui/textarea'
+import { AuditHistoryPanel } from '@/features/audit/components/audit-history-panel'
 import {
   useCertifyIpcPeriod,
   useCreateIpcPeriod,
   useIpcPeriod,
   useIpcPeriods,
+  useIssueIpcInvoice,
+  useRecordIpcPayment,
+  useReleaseIpcRetention,
   useSubmitIpcPeriod,
   useUpdateIpcItem,
 } from '../hooks/use-commercial'
 
 const fmtUSD = (value: number) =>
-  '$' + Number(value || 0).toLocaleString('en-US', { maximumFractionDigits: 0 })
+  '$' +
+  Number(value || 0).toLocaleString('en-US', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })
+
+function statusTone(status?: string) {
+  if (status === 'paid' || status === 'released' || status === 'issued') {
+    return 'border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300'
+  }
+  if (
+    status === 'submitted' ||
+    status === 'certified' ||
+    status === 'partially_paid'
+  ) {
+    return 'border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-300'
+  }
+  return 'border-muted-foreground/30 bg-muted text-muted-foreground'
+}
+
+function StatusBadge({ label, value }: { label: string; value?: string }) {
+  return (
+    <Badge variant='outline' className={statusTone(value)}>
+      {label}: {(value || 'none').replace(/_/g, ' ')}
+    </Badge>
+  )
+}
 
 export function IpcWorkbook({ projectId }: { projectId: string }) {
   const { data: periods = [], isLoading } = useIpcPeriods(projectId)
+  const canCreateIpc = useCanPerform('ipc', 'create', 'period.create')
+  const canUpdateIpc = useCanPerform('ipc', 'update', 'item.update')
+  const canSubmitIpc = useCanPerform('ipc', 'submit', 'period.submit')
+  const canCertifyIpc = useCanPerform('ipc', 'certify', 'period.certify')
+  const canIssueInvoice = useCanPerform('ipc', 'approve', 'invoice.issue')
+  const canRecordPayment = useCanPerform('ipc', 'approve', 'payment.record')
+  const canReleaseRetention = useCanPerform(
+    'ipc',
+    'approve',
+    'retention.release'
+  )
   const createPeriod = useCreateIpcPeriod(projectId)
   const updateItem = useUpdateIpcItem(projectId)
   const submitPeriod = useSubmitIpcPeriod(projectId)
   const certifyPeriod = useCertifyIpcPeriod(projectId)
+  const issueInvoice = useIssueIpcInvoice(projectId)
+  const recordPayment = useRecordIpcPayment(projectId)
+  const releaseRetention = useReleaseIpcRetention(projectId)
 
   const [selectedPeriod, setSelectedPeriod] = useState('')
+  const [invoiceNumber, setInvoiceNumber] = useState('')
+  const [invoiceDueDate, setInvoiceDueDate] = useState('')
+  const [paymentAmount, setPaymentAmount] = useState('')
+  const [paymentReference, setPaymentReference] = useState('')
+  const [paymentDate, setPaymentDate] = useState('')
+  const [retentionAmount, setRetentionAmount] = useState('')
+  const [retentionReference, setRetentionReference] = useState('')
+  const [retentionReason, setRetentionReason] = useState('')
   const activePeriod = selectedPeriod || periods[0]?.period || ''
 
   const { data: detail } = useIpcPeriod(projectId, activePeriod)
@@ -31,8 +99,44 @@ export function IpcWorkbook({ projectId }: { projectId: string }) {
       totalCert: detail?.totalCert || 0,
       totalRet: detail?.totalRet || 0,
       netPayable: detail?.netPayable || 0,
+      amountPaid: detail?.amountPaid || 0,
+      retentionReleased: detail?.retentionReleased || 0,
+      balanceDue: detail?.balanceDue || 0,
     }),
-    [detail?.netPayable, detail?.totalCert, detail?.totalRet]
+    [
+      detail?.amountPaid,
+      detail?.balanceDue,
+      detail?.netPayable,
+      detail?.retentionReleased,
+      detail?.totalCert,
+      detail?.totalRet,
+    ]
+  )
+  const issuedInvoice =
+    detail?.invoices?.find((invoice) => invoice.status !== 'void') ||
+    detail?.invoices?.[0]
+  const retainedBalance = Math.max(
+    0,
+    totals.totalRet - totals.retentionReleased
+  )
+  const canEditItems = Boolean(canUpdateIpc && detail?.status === 'draft')
+  const showIssueInvoice = Boolean(
+    detail &&
+    canIssueInvoice &&
+    ['certified', 'paid'].includes(detail.status) &&
+    detail.invoiceStatus !== 'issued'
+  )
+  const showPaymentForm = Boolean(
+    detail &&
+    canRecordPayment &&
+    detail.invoiceStatus === 'issued' &&
+    totals.balanceDue > 0
+  )
+  const showRetentionForm = Boolean(
+    detail &&
+    canReleaseRetention &&
+    detail.invoiceStatus === 'issued' &&
+    retainedBalance > 0
   )
 
   if (isLoading) {
@@ -62,24 +166,27 @@ export function IpcWorkbook({ projectId }: { projectId: string }) {
         </div>
 
         <div className='flex gap-2'>
-          <Button
-            size='sm'
-            variant='outline'
-            disabled={createPeriod.isPending}
-            onClick={async () => {
-              try {
-                const created = await createPeriod.mutateAsync({})
-                setSelectedPeriod(created.period)
-                toast.success(`Created ${created.period}`)
-              } catch {
-                toast.error('Failed to create IPC period')
-              }
-            }}
-          >
-            + New IPC Period
-          </Button>
+          {canCreateIpc && (
+            <Button
+              size='sm'
+              variant='outline'
+              disabled={createPeriod.isPending}
+              onClick={async () => {
+                try {
+                  const created = await createPeriod.mutateAsync({})
+                  setSelectedPeriod(created.period)
+                  toast.success(`Created ${created.period}`)
+                } catch {
+                  toast.error('Failed to create IPC period')
+                }
+              }}
+            >
+              <FileCheck2 className='mr-1.5 size-4' />
+              New IPC Period
+            </Button>
+          )}
 
-          {detail && detail.status === 'draft' && (
+          {canSubmitIpc && detail && detail.status === 'draft' && (
             <Button
               size='sm'
               onClick={async () => {
@@ -91,11 +198,12 @@ export function IpcWorkbook({ projectId }: { projectId: string }) {
                 }
               }}
             >
+              <ShieldCheck className='mr-1.5 size-4' />
               Submit IPC
             </Button>
           )}
 
-          {detail && detail.status === 'submitted' && (
+          {canCertifyIpc && detail && detail.status === 'submitted' && (
             <Button
               size='sm'
               onClick={async () => {
@@ -107,13 +215,231 @@ export function IpcWorkbook({ projectId }: { projectId: string }) {
                 }
               }}
             >
+              <FileCheck2 className='mr-1.5 size-4' />
               Certify IPC
             </Button>
           )}
         </div>
       </div>
 
-      <div className='grid grid-cols-1 gap-3 sm:grid-cols-3'>
+      {detail && (
+        <AuditHistoryPanel
+          projectId={projectId}
+          entityType='ipc_certificate'
+          entityId={detail.id}
+          title={`${activePeriod} Status History`}
+        />
+      )}
+
+      {detail && (
+        <div className='flex flex-wrap gap-2'>
+          <StatusBadge label='Period' value={detail.status} />
+          <StatusBadge label='Invoice' value={detail.invoiceStatus} />
+          <StatusBadge label='Payment' value={detail.paymentStatus} />
+          <StatusBadge label='Retention' value={detail.retentionStatus} />
+          {!canEditItems && (
+            <Badge variant='outline' className='gap-1 text-muted-foreground'>
+              <LockKeyhole className='size-3.5' />
+              Lines locked
+            </Badge>
+          )}
+        </div>
+      )}
+
+      {detail && (
+        <div className='grid gap-3 rounded-md border bg-muted/20 p-3 lg:grid-cols-3'>
+          <div className='space-y-2'>
+            <div className='flex items-center gap-2 text-sm font-medium'>
+              <ReceiptText className='size-4 text-muted-foreground' />
+              Invoice
+            </div>
+            {issuedInvoice ? (
+              <div className='space-y-1 text-xs'>
+                <p className='font-medium'>{issuedInvoice.invoiceNumber}</p>
+                <p className='text-muted-foreground'>
+                  {issuedInvoice.status} - Due{' '}
+                  {issuedInvoice.dueDate
+                    ? new Date(issuedInvoice.dueDate).toLocaleDateString()
+                    : 'not set'}
+                </p>
+              </div>
+            ) : (
+              <div className='grid gap-2 sm:grid-cols-[1fr_9rem_auto]'>
+                <Input
+                  placeholder='Invoice #'
+                  value={invoiceNumber}
+                  onChange={(e) => setInvoiceNumber(e.target.value)}
+                  disabled={!showIssueInvoice || issueInvoice.isPending}
+                />
+                <Input
+                  type='date'
+                  value={invoiceDueDate}
+                  onChange={(e) => setInvoiceDueDate(e.target.value)}
+                  disabled={!showIssueInvoice || issueInvoice.isPending}
+                />
+                <Button
+                  type='button'
+                  size='sm'
+                  disabled={!showIssueInvoice || issueInvoice.isPending}
+                  onClick={async () => {
+                    try {
+                      await issueInvoice.mutateAsync({
+                        period: activePeriod,
+                        payload: {
+                          invoiceNumber: invoiceNumber.trim() || undefined,
+                          dueDate: invoiceDueDate || undefined,
+                        },
+                      })
+                      setInvoiceNumber('')
+                      setInvoiceDueDate('')
+                      toast.success('IPC invoice issued')
+                    } catch {
+                      toast.error('Failed to issue IPC invoice')
+                    }
+                  }}
+                >
+                  <ReceiptText className='mr-1.5 size-4' />
+                  Issue
+                </Button>
+              </div>
+            )}
+          </div>
+
+          <div className='space-y-2'>
+            <div className='flex items-center gap-2 text-sm font-medium'>
+              <Banknote className='size-4 text-muted-foreground' />
+              Payment
+            </div>
+            <div className='grid gap-2 sm:grid-cols-[1fr_1fr_9rem_auto]'>
+              <Input
+                type='number'
+                min={0}
+                step={MONEY_INPUT_STEP}
+                placeholder='Amount'
+                value={paymentAmount}
+                onChange={(e) => setPaymentAmount(e.target.value)}
+                disabled={!showPaymentForm || recordPayment.isPending}
+              />
+              <Input
+                placeholder='Reference'
+                value={paymentReference}
+                onChange={(e) => setPaymentReference(e.target.value)}
+                disabled={!showPaymentForm || recordPayment.isPending}
+              />
+              <Input
+                type='date'
+                value={paymentDate}
+                onChange={(e) => setPaymentDate(e.target.value)}
+                disabled={!showPaymentForm || recordPayment.isPending}
+              />
+              <Button
+                type='button'
+                size='sm'
+                disabled={!showPaymentForm || recordPayment.isPending}
+                onClick={async () => {
+                  if (!hasMoneyPrecision(paymentAmount)) {
+                    toast.error(MONEY_PRECISION_MESSAGE)
+                    return
+                  }
+                  const amount = toMoneyNumber(paymentAmount)
+                  if (amount <= 0 || amount > totals.balanceDue) {
+                    toast.error('Payment must fit the outstanding balance')
+                    return
+                  }
+                  try {
+                    await recordPayment.mutateAsync({
+                      period: activePeriod,
+                      payload: {
+                        amount,
+                        paymentReference: paymentReference.trim() || undefined,
+                        paymentDate: paymentDate || undefined,
+                      },
+                    })
+                    setPaymentAmount('')
+                    setPaymentReference('')
+                    setPaymentDate('')
+                    toast.success('Payment recorded')
+                  } catch {
+                    toast.error('Failed to record payment')
+                  }
+                }}
+              >
+                <Banknote className='mr-1.5 size-4' />
+                Record
+              </Button>
+            </div>
+          </div>
+
+          <div className='space-y-2'>
+            <div className='flex items-center gap-2 text-sm font-medium'>
+              <ShieldCheck className='size-4 text-muted-foreground' />
+              Retention Release
+            </div>
+            <div className='grid gap-2 sm:grid-cols-[1fr_1fr_auto]'>
+              <Input
+                type='number'
+                min={0}
+                step={MONEY_INPUT_STEP}
+                placeholder='Amount'
+                value={retentionAmount}
+                onChange={(e) => setRetentionAmount(e.target.value)}
+                disabled={!showRetentionForm || releaseRetention.isPending}
+              />
+              <Input
+                placeholder='Reference'
+                value={retentionReference}
+                onChange={(e) => setRetentionReference(e.target.value)}
+                disabled={!showRetentionForm || releaseRetention.isPending}
+              />
+              <Button
+                type='button'
+                size='sm'
+                disabled={!showRetentionForm || releaseRetention.isPending}
+                onClick={async () => {
+                  if (!hasMoneyPrecision(retentionAmount)) {
+                    toast.error(MONEY_PRECISION_MESSAGE)
+                    return
+                  }
+                  const amount = toMoneyNumber(retentionAmount)
+                  if (amount <= 0 || amount > retainedBalance) {
+                    toast.error('Release must fit retained balance')
+                    return
+                  }
+                  try {
+                    await releaseRetention.mutateAsync({
+                      period: activePeriod,
+                      payload: {
+                        amount,
+                        releaseReference:
+                          retentionReference.trim() || undefined,
+                        reason: retentionReason.trim() || undefined,
+                      },
+                    })
+                    setRetentionAmount('')
+                    setRetentionReference('')
+                    setRetentionReason('')
+                    toast.success('Retention released')
+                  } catch {
+                    toast.error('Failed to release retention')
+                  }
+                }}
+              >
+                <ShieldCheck className='mr-1.5 size-4' />
+                Release
+              </Button>
+            </div>
+            <Textarea
+              rows={2}
+              placeholder='Release reason'
+              value={retentionReason}
+              onChange={(e) => setRetentionReason(e.target.value)}
+              disabled={!showRetentionForm || releaseRetention.isPending}
+            />
+          </div>
+        </div>
+      )}
+
+      <div className='grid grid-cols-1 gap-3 sm:grid-cols-3 lg:grid-cols-6'>
         <div className='rounded-lg border p-3'>
           <p className='text-xs text-muted-foreground'>Total Certified</p>
           <p className='text-xl font-bold'>{fmtUSD(totals.totalCert)}</p>
@@ -130,6 +456,22 @@ export function IpcWorkbook({ projectId }: { projectId: string }) {
             {fmtUSD(totals.netPayable)}
           </p>
         </div>
+        <div className='rounded-lg border p-3'>
+          <p className='text-xs text-muted-foreground'>Paid</p>
+          <p className='text-xl font-bold'>{fmtUSD(totals.amountPaid)}</p>
+        </div>
+        <div className='rounded-lg border p-3'>
+          <p className='text-xs text-muted-foreground'>Retention Released</p>
+          <p className='text-xl font-bold text-sky-600'>
+            {fmtUSD(totals.retentionReleased)}
+          </p>
+        </div>
+        <div className='rounded-lg border p-3'>
+          <p className='text-xs text-muted-foreground'>Balance Due</p>
+          <p className='text-xl font-bold text-rose-600'>
+            {fmtUSD(totals.balanceDue)}
+          </p>
+        </div>
       </div>
 
       <div className='overflow-x-auto rounded-md border'>
@@ -138,6 +480,7 @@ export function IpcWorkbook({ projectId }: { projectId: string }) {
             <tr>
               <th className='p-2 text-left font-medium'>BOQ Ref</th>
               <th className='p-2 text-left font-medium'>Activity</th>
+              <th className='p-2 text-left font-medium'>Approved Progress</th>
               <th className='p-2 text-left font-medium'>Description</th>
               <th className='p-2 text-left font-medium'>Unit</th>
               <th className='p-2 text-right font-medium'>Total Qty</th>
@@ -155,7 +498,7 @@ export function IpcWorkbook({ projectId }: { projectId: string }) {
             {!detail || detail.items.length === 0 ? (
               <tr>
                 <td
-                  colSpan={13}
+                  colSpan={14}
                   className='p-6 text-center text-muted-foreground'
                 >
                   {activePeriod
@@ -173,6 +516,27 @@ export function IpcWorkbook({ projectId }: { projectId: string }) {
                     {item.allocation?.activity
                       ? `${item.allocation.activity.wbsCode || item.allocation.activity.p6ActivityId || item.allocation.activity.id.slice(0, 8)} - ${item.allocation.activity.name}`
                       : '-'}
+                  </td>
+                  <td className='p-2 text-xs'>
+                    {item.progressLinks?.[0] ? (
+                      <div className='flex flex-col gap-0.5'>
+                        <span className='font-medium'>
+                          {Number(
+                            item.progressLinks[0].approvedPctComplete || 0
+                          ).toFixed(1)}
+                          %
+                        </span>
+                        <span className='text-muted-foreground'>
+                          {item.progressLinks[0].cutoffDate
+                            ? new Date(
+                                item.progressLinks[0].cutoffDate
+                              ).toLocaleDateString()
+                            : 'approved'}
+                        </span>
+                      </div>
+                    ) : (
+                      <span className='text-muted-foreground'>Pending</span>
+                    )}
                   </td>
                   <td
                     className='max-w-80 truncate p-2'
@@ -196,6 +560,7 @@ export function IpcWorkbook({ projectId }: { projectId: string }) {
                       min={0}
                       className='h-8 w-24 text-right text-xs'
                       value={item.qty}
+                      disabled={!canEditItems}
                       onChange={async (e) => {
                         try {
                           await updateItem.mutateAsync({
@@ -219,8 +584,10 @@ export function IpcWorkbook({ projectId }: { projectId: string }) {
                     <Input
                       type='number'
                       min={0}
+                      step={MONEY_INPUT_STEP}
                       className='h-8 w-20 text-right text-xs'
                       value={item.retentionRate}
+                      disabled={!canEditItems}
                       onChange={async (e) => {
                         try {
                           await updateItem.mutateAsync({
@@ -251,7 +618,7 @@ export function IpcWorkbook({ projectId }: { projectId: string }) {
             <tfoot>
               <tr className='bg-muted/40'>
                 <td
-                  colSpan={8}
+                  colSpan={9}
                   className='p-2 text-right text-xs font-semibold'
                 >
                   Totals:

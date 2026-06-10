@@ -7,11 +7,11 @@ export function SubscriptionBanner() {
   const navigate = useNavigate()
   if (!sub) return null
 
-  if (sub.status === 'expired' || sub.status === 'incomplete') {
+  if (!sub.hasAccess) {
     const msg =
       sub.status === 'incomplete'
         ? 'Start your free trial to begin using PM Copilots.'
-        : 'Your free trial has ended. Subscribe to continue using PM Copilots.'
+        : 'Your trial or subscription has ended. Subscribe to continue using PM Copilots.'
     return (
       <div className='bg-destructive text-destructive-foreground flex items-center justify-between gap-4 px-4 py-2 text-sm'>
         <span>{msg}</span>

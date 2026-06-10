@@ -5,6 +5,7 @@ const { sendSuccess } = require('../utils/api-response');
 const { authenticate } = require('../middleware/auth');
 const { requireRoles } = require('../middleware/rbac');
 const { validate } = require('../middleware/validate');
+const { moneyBody } = require('../utils/money');
 const allocationService = require('../services/activity-boq-allocation.service');
 
 const router = express.Router({ mergeParams: true });
@@ -45,7 +46,7 @@ router.post(
     body('boqItemId').isUUID(),
     body('activityId').isUUID(),
     body('quantity').isFloat({ gt: 0 }).toFloat(),
-    body('amount').optional().isFloat({ gt: 0 }).toFloat(),
+    moneyBody('amount', { min: 0.01 }),
     body('weight').optional().isFloat({ min: 0 }).toFloat(),
     body('source').optional().isIn(['manual', 'import', 'ai', 'migration']),
     body('notes').optional({ nullable: true }).isString().trim(),
@@ -71,7 +72,7 @@ router.patch(
     body('boqItemId').optional().isUUID(),
     body('activityId').optional().isUUID(),
     body('quantity').optional().isFloat({ gt: 0 }).toFloat(),
-    body('amount').optional().isFloat({ gt: 0 }).toFloat(),
+    moneyBody('amount', { min: 0.01 }),
     body('weight').optional().isFloat({ min: 0 }).toFloat(),
     body('source').optional().isIn(['manual', 'import', 'ai', 'migration']),
     body('notes').optional({ nullable: true }).isString().trim(),

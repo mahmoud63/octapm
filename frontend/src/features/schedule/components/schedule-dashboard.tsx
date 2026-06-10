@@ -9,10 +9,11 @@ import {
   MoreHorizontal,
   Upload,
   TrendingUp,
-  Lock,
   Link2,
+  AlertTriangle,
 } from 'lucide-react'
 import { toast } from 'sonner'
+import { useCanPerform } from '@/lib/permissions'
 import { cn } from '@/lib/utils'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -26,12 +27,17 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { Input } from '@/components/ui/input'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { AuditHistoryPanel } from '@/features/audit/components/audit-history-panel'
 import { LongLeadTable } from '@/features/long-lead/components/long-lead-table'
-import { useProject } from '@/features/projects/hooks/use-projects'
+import { useLongLeadItems } from '@/features/long-lead/hooks/use-long-lead'
+import {
+  projectSetupReadinessKey,
+  useProject,
+} from '@/features/projects/hooks/use-projects'
 import { RisksTable } from '@/features/risks/components/risks-table'
 import type { ProjectSchedule, ScheduleActivity } from '../data/schema'
 import { useGenerateSchedule } from '../hooks/use-schedule'
-import { EvDashboard } from './ev-dashboard'
+import { EvReport } from '@/features/reports/components/ev-report'
 import { ExportButton } from './export-button'
 import { GanttChart } from './gantt-chart'
 import { GenerationProgress } from './generation-progress'
@@ -42,6 +48,7 @@ import { PrintReportButton } from './print-report-button'
 import { ProgressTab } from './progress-tab'
 import { ResourcePlan } from './resource-plan'
 import { RevisionHistoryPanel } from './revision-history-panel'
+import { ScheduleReviewPanel } from './schedule-review-panel'
 import { WbsTree } from './wbs-tree'
 
 interface Props {
@@ -60,12 +67,55 @@ const fmtUSD = (n: number) =>
 const fmtDate = (value: string | null | undefined) =>
   value ? new Date(value).toLocaleDateString() : '—'
 
+const formatLag = (lagDays: number) => {
+  if (!lagDays) return ''
+  return lagDays > 0 ? `+${lagDays}` : String(lagDays)
+}
+
+const formatActivityDependencies = (activity: ScheduleActivity) => {
+  if (activity.dependencies?.length) {
+    return activity.dependencies
+      .map((dependency) => {
+        const predecessor = dependency.predecessor
+        const ref =
+          predecessor?.p6ActivityId ||
+          predecessor?.wbsCode ||
+          dependency.predecessorId.slice(0, 8)
+        return `${ref} ${dependency.relationshipType}${formatLag(
+          dependency.lagDays
+        )}`
+      })
+      .join(', ')
+  }
+
+  return activity.predecessors || '-'
+}
+
 const isNearCritical = (a: ScheduleActivity) =>
   !a.isCritical &&
   !a.isMilestone &&
   a.totalFloat != null &&
   a.totalFloat >= 1 &&
   a.totalFloat <= 5
+
+const procurementSeverityRank = {
+  none: 0,
+  low: 1,
+  medium: 2,
+  high: 3,
+  critical: 4,
+}
+
+const procurementRiskClassMap = {
+  none: 'bg-emerald-100 text-emerald-800',
+  low: 'bg-slate-100 text-slate-700',
+  medium: 'bg-amber-100 text-amber-800',
+  high: 'bg-orange-100 text-orange-800',
+  critical: 'bg-red-100 text-red-800',
+}
+
+const formatProcurementReason = (reason: string | undefined) =>
+  reason ? reason.replace(/_/g, ' ') : 'on track'
 
 function ActivityStatusBadge({
   status,
@@ -116,8 +166,17 @@ export function ScheduleDashboard({
   onTabChange,
   showTabList = true,
 }: Props) {
+  const canCreateSchedule = useCanPerform('schedule', 'create')
+  const canUpdateSchedule = useCanPerform('schedule', 'update')
+  const canDeleteSchedule = useCanPerform('schedule', 'delete')
+  const canSubmitProgress = useCanPerform(
+    'progress',
+    'submit',
+    'submission.submit'
+  )
   const queryClient = useQueryClient()
   const { data: project } = useProject(projectId)
+  const { data: procurementItems = [] } = useLongLeadItems(projectId)
   const { revision, activities } = schedule
   const [nowMs] = useState(() => Date.now())
   const [regenLabel, setRegenLabel] = useState('')
@@ -174,6 +233,46 @@ export function ScheduleDashboard({
   const milestones = activities.filter((a) => a.isMilestone)
   const milestoneCards = revision.milestones || milestones
   const totalBudget = revision.totalBudget
+  const procurementAlerts = useMemo(
+    () =>
+      procurementItems
+        .filter((item) => item.procurementRisk?.isAtRisk)
+        .sort((a, b) => {
+          const aRisk = a.procurementRisk
+          const bRisk = b.procurementRisk
+          const severityDelta =
+            procurementSeverityRank[bRisk?.severity ?? 'none'] -
+            procurementSeverityRank[aRisk?.severity ?? 'none']
+          if (severityDelta !== 0) return severityDelta
+          return (bRisk?.daysAtRisk ?? 0) - (aRisk?.daysAtRisk ?? 0)
+        }),
+    [procurementItems]
+  )
+  const procurementRiskByActivity = useMemo(() => {
+    const riskByActivity = new Map<
+      string,
+      NonNullable<(typeof procurementItems)[number]['procurementRisk']>
+    >()
+
+    procurementItems.forEach((item) => {
+      const risk = item.procurementRisk
+      if (!item.activityId || !risk?.isAtRisk) return
+
+      const existing = riskByActivity.get(item.activityId)
+      if (
+        !existing ||
+        procurementSeverityRank[risk.severity] >
+          procurementSeverityRank[existing.severity] ||
+        (procurementSeverityRank[risk.severity] ===
+          procurementSeverityRank[existing.severity] &&
+          risk.daysAtRisk > existing.daysAtRisk)
+      ) {
+        riskByActivity.set(item.activityId, risk)
+      }
+    })
+
+    return riskByActivity
+  }, [procurementItems])
   const todayWorkingDay = useMemo(() => {
     const startDate = revision.projectSummary?.startDate
     if (!startDate) return 0
@@ -220,23 +319,15 @@ export function ScheduleDashboard({
     }
   }
 
-  const handleLockBaseline = async () => {
-    const confirmed = window.confirm(
-      'Lock current schedule as baseline? This overwrites the previous baseline.'
-    )
-    if (!confirmed) return
-
-    await apiClient.post(`/projects/${projectId}/schedule/baseline`)
-    toast.success('Baseline locked')
-    await refreshScheduleData()
-  }
-
   const refreshScheduleData = async () => {
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: ['schedule', projectId] }),
       queryClient.invalidateQueries({ queryKey: ['activities', projectId] }),
       queryClient.invalidateQueries({
         queryKey: ['schedule-revisions', projectId],
+      }),
+      queryClient.invalidateQueries({
+        queryKey: projectSetupReadinessKey(projectId),
       }),
     ])
   }
@@ -293,13 +384,14 @@ export function ScheduleDashboard({
     activeTab !== undefined
       ? { value: activeTab, onValueChange: onTabChange }
       : { defaultValue: 'gantt' }
+  const showUpdateScheduleActions = canCreateSchedule || canSubmitProgress
 
   return (
     <div className='space-y-6'>
       {/* Header: stats + action toolbar */}
       <div className='flex flex-col gap-4 sm:flex-row sm:flex-wrap sm:items-start sm:justify-between'>
         {/* Stat cards */}
-        <div className='grid grid-cols-2 gap-3 sm:grid-cols-4'>
+        <div className='grid grid-cols-2 gap-3 sm:grid-cols-5'>
           <StatCard label='Total Activities' value={revision.activityCount} />
           <StatCard
             label='Critical Path'
@@ -317,6 +409,14 @@ export function ScheduleDashboard({
             value={fmtUSD(totalBudget)}
             color='text-amber-600'
           />
+          <StatCard
+            label='Proc Risk'
+            value={procurementAlerts.length}
+            color={
+              procurementAlerts.length > 0 ? 'text-orange-600' : 'text-green-600'
+            }
+            sub='alerts'
+          />
         </div>
 
         {/* Action toolbar */}
@@ -333,123 +433,123 @@ export function ScheduleDashboard({
           <div className='h-6 w-px bg-border' />
 
           {/* Update Schedule dropdown */}
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant='outline' size='sm' disabled={regenPending}>
-                <FileUp className='mr-1.5 h-4 w-4' />
-                Update Schedule
-                <ChevronDown className='ml-1 h-3.5 w-3.5 opacity-60' />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align='end' className='w-64 p-2'>
-              <p className='mb-1.5 px-1 text-xs font-medium text-muted-foreground'>
-                Revision label (optional)
-              </p>
-              <Input
-                value={regenLabel}
-                onChange={(e) => setRegenLabel(e.target.value)}
-                placeholder='e.g. Rev 3 — post-RFI'
-                disabled={regenPending}
-                className='mb-1 h-8 text-sm'
-                onClick={(e) => e.stopPropagation()}
-              />
-              <DropdownMenuSeparator className='my-1.5' />
-              <DropdownMenuItem asChild>
-                <label
-                  htmlFor='regen-file'
-                  className={cn(
-                    'flex cursor-pointer items-center gap-2',
-                    regenPending && 'pointer-events-none opacity-50'
-                  )}
+          {showUpdateScheduleActions && (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant='outline' size='sm' disabled={regenPending}>
+                  <FileUp className='mr-1.5 h-4 w-4' />
+                  Update Schedule
+                  <ChevronDown className='ml-1 h-3.5 w-3.5 opacity-60' />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align='end' className='w-64 p-2'>
+                <p className='mb-1.5 px-1 text-xs font-medium text-muted-foreground'>
+                  Revision label (optional)
+                </p>
+                <Input
+                  value={regenLabel}
+                  onChange={(e) => setRegenLabel(e.target.value)}
+                  placeholder='e.g. Rev 3 — post-RFI'
+                  disabled={regenPending || !canCreateSchedule}
+                  className='mb-1 h-8 text-sm'
+                  onClick={(e) => e.stopPropagation()}
+                />
+                <DropdownMenuSeparator className='my-1.5' />
+                <DropdownMenuItem asChild>
+                  <label
+                    htmlFor={canCreateSchedule ? 'regen-file' : undefined}
+                    className={cn(
+                      'flex cursor-pointer items-center gap-2',
+                      (regenPending || !canCreateSchedule) &&
+                        'pointer-events-none opacity-50'
+                    )}
+                  >
+                    <RefreshCw
+                      className={cn('h-4 w-4', regenPending && 'animate-spin')}
+                    />
+                    {regenPending
+                      ? regenStep || 'Regenerating…'
+                      : 'Regenerate from BOQ file'}
+                  </label>
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onClick={() => setImportScheduleOpen(true)}
+                  disabled={regenPending || !canCreateSchedule}
                 >
-                  <RefreshCw
-                    className={cn('h-4 w-4', regenPending && 'animate-spin')}
-                  />
-                  {regenPending
-                    ? regenStep || 'Regenerating…'
-                    : 'Regenerate from BOQ file'}
-                </label>
-              </DropdownMenuItem>
-              <DropdownMenuItem
-                onClick={() => setImportScheduleOpen(true)}
-                disabled={regenPending}
-              >
-                <Upload className='h-4 w-4' />
-                Import Schedule (P6/MSP)
-              </DropdownMenuItem>
-              <DropdownMenuItem
-                onClick={() => setImportProgressOpen(true)}
-                disabled={regenPending}
-              >
-                <TrendingUp className='h-4 w-4' />
-                Import Progress
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+                  <Upload className='h-4 w-4' />
+                  Import Schedule (P6/MSP)
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onClick={() => setImportProgressOpen(true)}
+                  disabled={regenPending || !canSubmitProgress}
+                >
+                  <TrendingUp className='h-4 w-4' />
+                  Import Progress
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
 
           {/* Maintenance / admin actions */}
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button
-                variant='outline'
-                size='icon'
-                className='size-8'
-                disabled={regenPending}
-              >
-                <MoreHorizontal className='h-4 w-4' />
-                <span className='sr-only'>More actions</span>
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align='end' className='w-52'>
-              <DropdownMenuLabel className='text-xs text-muted-foreground'>
-                Schedule Maintenance
-              </DropdownMenuLabel>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem
-                onClick={handleLockBaseline}
-                disabled={regenPending}
-              >
-                <Lock className='h-4 w-4' />
-                Lock Baseline
-              </DropdownMenuItem>
-              <DropdownMenuItem
-                onClick={() => recalcCpmMutation.mutate()}
-                disabled={regenPending || recalcCpmMutation.isPending}
-              >
-                <RefreshCw
-                  className={cn(
-                    'h-4 w-4',
-                    recalcCpmMutation.isPending && 'animate-spin'
-                  )}
-                />
-                {recalcCpmMutation.isPending
-                  ? 'Recalculating...'
-                  : 'Recalculate CPM'}
-              </DropdownMenuItem>
-              <DropdownMenuItem
-                onClick={() => reseedMutation.mutate()}
-                disabled={regenPending || reseedMutation.isPending}
-              >
-                <Link2 className='h-4 w-4' />
-                {reseedMutation.isPending
-                  ? 'Seeding...'
-                  : 'Re-seed Linked Modules'}
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+          {canUpdateSchedule && (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant='outline'
+                  size='icon'
+                  className='size-8'
+                  disabled={regenPending}
+                >
+                  <MoreHorizontal className='h-4 w-4' />
+                  <span className='sr-only'>More actions</span>
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align='end' className='w-52'>
+                <DropdownMenuLabel className='text-xs text-muted-foreground'>
+                  Schedule Maintenance
+                </DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  onClick={() => recalcCpmMutation.mutate()}
+                  disabled={regenPending || recalcCpmMutation.isPending}
+                >
+                  <RefreshCw
+                    className={cn(
+                      'h-4 w-4',
+                      recalcCpmMutation.isPending && 'animate-spin'
+                    )}
+                  />
+                  {recalcCpmMutation.isPending
+                    ? 'Recalculating...'
+                    : 'Recalculate CPM'}
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onClick={() => reseedMutation.mutate()}
+                  disabled={regenPending || reseedMutation.isPending}
+                >
+                  <Link2 className='h-4 w-4' />
+                  {reseedMutation.isPending
+                    ? 'Seeding...'
+                    : 'Re-seed Linked Modules'}
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
         </div>
 
-        <input
-          id='regen-file'
-          type='file'
-          accept='.xlsx,.xls,.csv'
-          className='hidden'
-          onChange={(e) => {
-            const f = e.target.files?.[0]
-            if (f) handleRegen(f)
-            e.target.value = ''
-          }}
-        />
+        {canCreateSchedule && (
+          <input
+            id='regen-file'
+            type='file'
+            accept='.xlsx,.xls,.csv'
+            className='hidden'
+            onChange={(e) => {
+              const f = e.target.files?.[0]
+              if (f) handleRegen(f)
+              e.target.value = ''
+            }}
+          />
+        )}
       </div>
 
       {regenPending && (
@@ -461,6 +561,14 @@ export function ScheduleDashboard({
           step={job?.step ?? regenStep ?? 'Processing...'}
         />
       )}
+
+      <ScheduleReviewPanel projectId={projectId} revision={revision} />
+      <AuditHistoryPanel
+        projectId={projectId}
+        entityType='schedule_revision'
+        entityId={revision.id}
+        title='Schedule Status History'
+      />
 
       {/* Project summary from AI */}
       {revision.projectSummary && (
@@ -490,6 +598,46 @@ export function ScheduleDashboard({
                 {revision.projectSummary.type || '—'}
               </strong>
             </span>
+          </div>
+        </div>
+      )}
+
+      {procurementAlerts.length > 0 && (
+        <div className='rounded-lg border border-orange-300 bg-orange-50 p-3 text-sm text-orange-900 dark:border-orange-900/40 dark:bg-orange-950/20 dark:text-orange-200'>
+          <div className='flex items-start gap-2'>
+            <AlertTriangle className='mt-0.5 h-4 w-4 shrink-0' />
+            <div className='min-w-0 space-y-1'>
+              <p className='font-semibold'>
+                {procurementAlerts.length} procurement schedule risk
+                {procurementAlerts.length === 1 ? '' : 's'}
+              </p>
+              <div className='flex flex-wrap gap-2'>
+                {procurementAlerts.slice(0, 3).map((item) => {
+                  const risk = item.procurementRisk
+                  const activity = risk?.impactedActivity
+                  return (
+                    <span
+                      key={item.id}
+                      className='inline-flex max-w-full items-center gap-1 rounded-full border border-orange-300 bg-background/70 px-2 py-0.5 text-xs'
+                    >
+                      <Badge
+                        className={
+                          procurementRiskClassMap[risk?.severity ?? 'none']
+                        }
+                      >
+                        {risk?.severity ?? 'none'}
+                      </Badge>
+                      <span className='truncate'>
+                        {item.item}
+                        {activity
+                          ? ` -> ${activity.wbsCode ? `${activity.wbsCode} ` : ''}${activity.name}`
+                          : ''}
+                      </span>
+                    </span>
+                  )
+                })}
+              </div>
+            </div>
           </div>
         </div>
       )}
@@ -524,8 +672,12 @@ export function ScheduleDashboard({
         <TabsContent value='gantt' className='mt-4'>
           <GanttChart
             activities={activities}
-            onActivityUpdate={handleActivityUpdate}
-            onActivityDelete={handleActivityDelete}
+            onActivityUpdate={
+              canUpdateSchedule ? handleActivityUpdate : undefined
+            }
+            onActivityDelete={
+              canDeleteSchedule ? handleActivityDelete : undefined
+            }
           />
         </TabsContent>
 
@@ -538,6 +690,7 @@ export function ScheduleDashboard({
                   <th className='p-2 text-left font-medium'>Batch</th>
                   <th className='p-2 text-left font-medium'>WBS</th>
                   <th className='p-2 text-left font-medium'>Activity</th>
+                  <th className='p-2 text-left font-medium'>Proc Risk</th>
                   <th className='p-2 text-left font-medium'>Phase</th>
                   <th className='p-2 text-right font-medium'>Duration</th>
                   <th className='p-2 text-right font-medium'>ES</th>
@@ -582,22 +735,55 @@ export function ScheduleDashboard({
                         <span className='truncate font-medium'>{a.name}</span>
                       </div>
                     </td>
+                    <td
+                      className='p-2'
+                      title={formatProcurementReason(
+                        procurementRiskByActivity.get(a.id)?.reason
+                      )}
+                    >
+                      {procurementRiskByActivity.get(a.id) ? (
+                        <Badge
+                          className={
+                            procurementRiskClassMap[
+                              procurementRiskByActivity.get(a.id)?.severity ??
+                                'none'
+                            ]
+                          }
+                        >
+                          {procurementRiskByActivity.get(a.id)?.severity}
+                        </Badge>
+                      ) : (
+                        <span className='text-xs text-muted-foreground'>-</span>
+                      )}
+                    </td>
                     <td className='p-2 text-xs text-muted-foreground'>
                       {a.category || '—'}
                     </td>
                     <td className='p-2 text-right text-xs'>
                       {a.isMilestone ? '—' : `${a.duration}d`}
                     </td>
-                    <td className='p-2 text-right font-mono text-xs'>
+                    <td
+                      className='p-2 text-right font-mono text-xs'
+                      title={fmtDate(a.earlyStartDate)}
+                    >
                       {a.earlyStart ?? '—'}
                     </td>
-                    <td className='p-2 text-right font-mono text-xs'>
+                    <td
+                      className='p-2 text-right font-mono text-xs'
+                      title={fmtDate(a.earlyFinishDate)}
+                    >
                       {a.earlyFinish ?? '—'}
                     </td>
-                    <td className='p-2 text-right font-mono text-xs'>
+                    <td
+                      className='p-2 text-right font-mono text-xs'
+                      title={fmtDate(a.lateStartDate)}
+                    >
                       {a.lateStart ?? '—'}
                     </td>
-                    <td className='p-2 text-right font-mono text-xs'>
+                    <td
+                      className='p-2 text-right font-mono text-xs'
+                      title={fmtDate(a.lateFinishDate)}
+                    >
                       {a.lateFinish ?? '—'}
                     </td>
                     <td className='p-2 text-right text-xs'>
@@ -617,9 +803,9 @@ export function ScheduleDashboard({
                     </td>
                     <td
                       className='max-w-35 truncate p-2 text-xs text-muted-foreground'
-                      title={a.predecessors ?? ''}
+                      title={formatActivityDependencies(a)}
                     >
-                      {a.predecessors || '—'}
+                      {formatActivityDependencies(a)}
                     </td>
                     <td className='p-2 text-right text-xs'>
                       {a.budget ? fmtUSD(a.budget) : '—'}
@@ -648,12 +834,7 @@ export function ScheduleDashboard({
         </TabsContent>
 
         <TabsContent value='ev' className='mt-4'>
-          <EvDashboard
-            projectId={projectId}
-            activities={activities}
-            totalBudget={revision.totalBudget}
-            todayWorkingDay={todayWorkingDay}
-          />
+          <EvReport projectId={projectId} />
         </TabsContent>
 
         {/* Critical path tab */}
@@ -891,7 +1072,7 @@ export function ScheduleDashboard({
       {/* Generation metadata */}
       <p className='text-xs text-muted-foreground'>
         <CheckCircle2 className='mr-1 inline h-3 w-3 text-green-500' />
-        AI-generated schedule · {revision.label} ·{' '}
+        Schedule revision · {revision.label} · {revision.status} ·{' '}
         {new Date(revision.createdAt).toLocaleString()}
       </p>
 

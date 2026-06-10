@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { apiClient } from '@/services/api/client'
 import { toast } from 'sonner'
+import { useCanPerform } from '@/lib/permissions'
 import { Button } from '@/components/ui/button'
 import type { ScheduleActivity } from '../data/schema'
 
@@ -11,6 +12,11 @@ type Props = {
 }
 
 export function BulkProgressUpdate({ projectId, activities }: Props) {
+  const canSubmitProgress = useCanPerform(
+    'progress',
+    'submit',
+    'submission.submit'
+  )
   const qc = useQueryClient()
   const [selectedIds, setSelectedIds] = useState<string[]>([])
   const [pctComplete, setPctComplete] = useState(0)
@@ -27,12 +33,14 @@ export function BulkProgressUpdate({ projectId, activities }: Props) {
     )
   }
 
+  if (!canSubmitProgress) return null
+
   return (
     <div className='space-y-3 rounded-md border p-3'>
       <div className='flex flex-wrap items-center justify-between gap-2'>
-        <p className='text-sm font-semibold'>Bulk Progress Update</p>
+        <p className='text-sm font-semibold'>Bulk Progress Submission</p>
         <p className='text-xs text-muted-foreground'>
-          Select multiple activities and apply one progress value.
+          Select multiple activities and submit one progress value.
         </p>
       </div>
 
@@ -56,7 +64,7 @@ export function BulkProgressUpdate({ projectId, activities }: Props) {
                   />
                 </td>
                 <td className='p-2 text-xs'>
-                  {activity.wbsCode ? `${activity.wbsCode} · ` : ''}
+                  {activity.wbsCode ? `${activity.wbsCode} - ` : ''}
                   {activity.name}
                 </td>
                 <td className='p-2 text-right font-mono text-xs'>
@@ -97,21 +105,25 @@ export function BulkProgressUpdate({ projectId, activities }: Props) {
                 }
               )
 
-              toast.success('Bulk progress updated')
+              toast.success('Bulk progress submitted')
               setSelectedIds([])
 
               await Promise.all([
                 qc.invalidateQueries({ queryKey: ['schedule', projectId] }),
                 qc.invalidateQueries({ queryKey: ['activities', projectId] }),
+                qc.invalidateQueries({
+                  queryKey: ['progress-submissions', projectId],
+                }),
+                qc.invalidateQueries({ queryKey: ['ev-report', projectId] }),
               ])
             } catch {
-              toast.error('Failed to update progress in bulk')
+              toast.error('Failed to submit progress in bulk')
             } finally {
               setSaving(false)
             }
           }}
         >
-          {saving ? 'Applying...' : 'Apply to Selected'}
+          {saving ? 'Submitting...' : 'Submit Selected'}
         </Button>
       </div>
     </div>

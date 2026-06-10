@@ -1,7 +1,15 @@
 const { prisma } = require('../config/db');
 const { HttpError } = require('../utils/http-error');
+const {
+  addMoney,
+  multiplyMoney,
+  subtractMoney,
+  toMoneyNumber,
+} = require('../utils/money');
+const approvalWorkflowService = require('./approval-workflow.service');
 
 const ACTIVE_STATUSES = ['draft', 'submitted', 'approved'];
+const CERTIFIED_IPC_STATUSES = ['certified', 'paid'];
 const VALID_SOURCES = ['manual', 'import', 'ai', 'migration'];
 const EPSILON = 0.000001;
 const MONEY_EPSILON = 0.01;
@@ -92,10 +100,10 @@ const toNumber = (value, fallback = 0) => {
 
 const computeDefaultAmount = ({ quantity, amount, boqItem }) => {
   if (amount !== undefined && amount !== null && amount !== '') {
-    return toNumber(amount);
+    return toMoneyNumber(amount);
   }
 
-  return toNumber(quantity) * toNumber(boqItem.rate);
+  return multiplyMoney(quantity, boqItem.rate);
 };
 
 const computeDefaultWeight = ({ weight, amount, boqItem }) => {
@@ -127,7 +135,7 @@ const getActiveTotalsForBoqItem = async (
   return allocations.reduce(
     (acc, allocation) => {
       acc.quantity += toNumber(allocation.quantity);
-      acc.amount += toNumber(allocation.amount);
+      acc.amount = addMoney(acc.amount, allocation.amount);
       return acc;
     },
     { quantity: 0, amount: 0 },
@@ -141,7 +149,7 @@ const assertAllocationCapacity = ({
   nextAmount,
 }) => {
   const totalQuantity = existingTotals.quantity + toNumber(nextQuantity);
-  const totalAmount = existingTotals.amount + toNumber(nextAmount);
+  const totalAmount = addMoney(existingTotals.amount, nextAmount);
 
   if (totalQuantity > toNumber(boqItem.qty) + EPSILON) {
     throw new HttpError(
@@ -244,9 +252,9 @@ const mapAllocation = (allocation) => ({
 });
 
 const buildAllocationSummary = async ({ projectId }, tx = prisma) => {
-  const [boqItems, allocations] = await Promise.all([
+  const [boqItems, allocations, certifiedItems] = await Promise.all([
     tx.boqItem.findMany({
-      where: { projectId },
+      where: { projectId, isActive: true },
       orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }],
       select: {
         id: true,
@@ -258,12 +266,43 @@ const buildAllocationSummary = async ({ projectId }, tx = prisma) => {
       },
     }),
     tx.activityBoqAllocation.findMany({
-      where: { projectId, isActive: true },
+      where: {
+        projectId,
+        isActive: true,
+        activity: { isActive: true },
+      },
       select: {
         boqItemId: true,
         quantity: true,
         amount: true,
         status: true,
+        activity: {
+          select: {
+            progress: {
+              where: { status: 'approved' },
+              orderBy: { updatedAt: 'desc' },
+              take: 1,
+              select: { pctComplete: true },
+            },
+          },
+        },
+      },
+    }),
+    tx.ipcItem.findMany({
+      where: {
+        projectId,
+        allocationId: { not: null },
+        status: { in: CERTIFIED_IPC_STATUSES },
+        allocation: {
+          is: {
+            status: 'approved',
+            isActive: true,
+          },
+        },
+      },
+      select: {
+        boqItemId: true,
+        currentCert: true,
       },
     }),
   ]);
@@ -276,22 +315,36 @@ const buildAllocationSummary = async ({ projectId }, tx = prisma) => {
       approvedQuantity: 0,
       approvedAmount: 0,
       pendingAmount: 0,
+      earnedValue: 0,
     };
 
     const quantity = toNumber(allocation.quantity);
-    const amount = toNumber(allocation.amount);
+    const amount = toMoneyNumber(allocation.amount);
     current.activeQuantity += quantity;
-    current.activeAmount += amount;
+    current.activeAmount = addMoney(current.activeAmount, amount);
 
     if (allocation.status === 'approved') {
       current.approvedQuantity += quantity;
-      current.approvedAmount += amount;
+      current.approvedAmount = addMoney(current.approvedAmount, amount);
+      const pctComplete = toNumber(
+        allocation.activity?.progress?.[0]?.pctComplete,
+      );
+      current.earnedValue = addMoney(
+        current.earnedValue,
+        multiplyMoney(amount, Math.min(100, Math.max(0, pctComplete)) / 100),
+      );
     } else if (ACTIVE_STATUSES.includes(allocation.status)) {
-      current.pendingAmount += amount;
+      current.pendingAmount = addMoney(current.pendingAmount, amount);
     }
 
     byBoqItem.set(allocation.boqItemId, current);
   }
+
+  const certifiedByBoqItem = certifiedItems.reduce((map, item) => {
+    const current = map.get(item.boqItemId) || 0;
+    map.set(item.boqItemId, addMoney(current, item.currentCert));
+    return map;
+  }, new Map());
 
   const items = boqItems.map((item) => {
     const totals = byBoqItem.get(item.id) || {
@@ -300,41 +353,70 @@ const buildAllocationSummary = async ({ projectId }, tx = prisma) => {
       approvedQuantity: 0,
       approvedAmount: 0,
       pendingAmount: 0,
+      earnedValue: 0,
     };
+    const quantity = toNumber(item.qty);
+    const amount = toMoneyNumber(item.amount);
+    const unscheduledQuantity = Math.max(0, quantity - totals.approvedQuantity);
+    const unscheduledValue = Math.max(
+      0,
+      subtractMoney(amount, totals.approvedAmount),
+    );
 
     return {
       boqItemId: item.id,
       code: item.code || item.ref || '',
       description: item.description,
-      quantity: toNumber(item.qty),
-      amount: toNumber(item.amount),
+      quantity,
+      amount,
       activeAllocatedQuantity: totals.activeQuantity,
       activeAllocatedAmount: totals.activeAmount,
       approvedAllocatedQuantity: totals.approvedQuantity,
       approvedAllocatedAmount: totals.approvedAmount,
       pendingAllocatedAmount: totals.pendingAmount,
-      unallocatedQuantity: Math.max(
-        0,
-        toNumber(item.qty) - totals.approvedQuantity,
-      ),
-      unallocatedAmount: Math.max(
-        0,
-        toNumber(item.amount) - totals.approvedAmount,
-      ),
+      scheduledQuantity: totals.approvedQuantity,
+      scheduledValue: totals.approvedAmount,
+      unscheduledQuantity,
+      unscheduledValue,
+      earnedValue: totals.earnedValue,
+      certifiedValue: certifiedByBoqItem.get(item.id) || 0,
+      unallocatedQuantity: unscheduledQuantity,
+      unallocatedAmount: unscheduledValue,
     };
   });
 
   return items.reduce(
     (acc, item) => {
       acc.totalBoqQuantity += item.quantity;
-      acc.totalBoqAmount += item.amount;
+      acc.totalBoqAmount = addMoney(acc.totalBoqAmount, item.amount);
       acc.activeAllocatedQuantity += item.activeAllocatedQuantity;
-      acc.activeAllocatedAmount += item.activeAllocatedAmount;
+      acc.activeAllocatedAmount = addMoney(
+        acc.activeAllocatedAmount,
+        item.activeAllocatedAmount,
+      );
       acc.approvedAllocatedQuantity += item.approvedAllocatedQuantity;
-      acc.approvedAllocatedAmount += item.approvedAllocatedAmount;
-      acc.pendingAllocatedAmount += item.pendingAllocatedAmount;
+      acc.approvedAllocatedAmount = addMoney(
+        acc.approvedAllocatedAmount,
+        item.approvedAllocatedAmount,
+      );
+      acc.pendingAllocatedAmount = addMoney(
+        acc.pendingAllocatedAmount,
+        item.pendingAllocatedAmount,
+      );
+      acc.scheduledQuantity += item.scheduledQuantity;
+      acc.scheduledValue = addMoney(acc.scheduledValue, item.scheduledValue);
+      acc.unscheduledQuantity += item.unscheduledQuantity;
+      acc.unscheduledValue = addMoney(
+        acc.unscheduledValue,
+        item.unscheduledValue,
+      );
+      acc.earnedValue = addMoney(acc.earnedValue, item.earnedValue);
+      acc.certifiedValue = addMoney(acc.certifiedValue, item.certifiedValue);
       acc.unallocatedQuantity += item.unallocatedQuantity;
-      acc.unallocatedAmount += item.unallocatedAmount;
+      acc.unallocatedAmount = addMoney(
+        acc.unallocatedAmount,
+        item.unallocatedAmount,
+      );
       acc.items.push(item);
       return acc;
     },
@@ -346,6 +428,12 @@ const buildAllocationSummary = async ({ projectId }, tx = prisma) => {
       approvedAllocatedQuantity: 0,
       approvedAllocatedAmount: 0,
       pendingAllocatedAmount: 0,
+      scheduledQuantity: 0,
+      scheduledValue: 0,
+      unscheduledQuantity: 0,
+      unscheduledValue: 0,
+      earnedValue: 0,
+      certifiedValue: 0,
       unallocatedQuantity: 0,
       unallocatedAmount: 0,
       items: [],
@@ -465,6 +553,23 @@ const createAllocation = async ({ orgId, projectId, userId, payload }) =>
       include: allocationInclude,
     });
 
+    await approvalWorkflowService.recordTransition({
+      tx,
+      orgId,
+      projectId,
+      recordType: approvalWorkflowService.RECORD_TYPES.BOQ_ALLOCATION,
+      recordId: allocation.id,
+      fromStatus: null,
+      toStatus: allocation.status,
+      actorId: userId,
+      metadata: {
+        boqItemId: allocation.boqItemId,
+        activityId: allocation.activityId,
+        quantity,
+        amount,
+      },
+    });
+
     return mapAllocation(allocation);
   });
 
@@ -576,6 +681,23 @@ const updateAllocation = async ({
       include: allocationInclude,
     });
 
+    await approvalWorkflowService.recordTransition({
+      tx,
+      orgId,
+      projectId,
+      recordType: approvalWorkflowService.RECORD_TYPES.BOQ_ALLOCATION,
+      recordId: allocationId,
+      fromStatus: existing.status,
+      toStatus: updated.status,
+      actorId: userId,
+      metadata: {
+        boqItemId: existing.boqItemId,
+        activityId: existing.activityId,
+        quantity: existing.quantity,
+        amount: existing.amount,
+      },
+    });
+
     return mapAllocation(updated);
   });
 
@@ -611,11 +733,11 @@ const approveAllocation = async ({ orgId, projectId, allocationId, userId }) =>
     await ensureProject({ orgId, projectId }, tx);
     const existing = await ensureAllocation({ projectId, allocationId }, tx);
 
-    if (!['draft', 'submitted'].includes(existing.status)) {
+    if (existing.status !== 'submitted') {
       throw new HttpError(
         400,
         'INVALID_ALLOCATION_STATUS',
-        'Only draft or submitted allocations can be approved',
+        'Only submitted allocations can be approved',
       );
     }
 
@@ -649,6 +771,23 @@ const approveAllocation = async ({ orgId, projectId, allocationId, userId }) =>
       include: allocationInclude,
     });
 
+    await approvalWorkflowService.recordTransition({
+      tx,
+      orgId,
+      projectId,
+      recordType: approvalWorkflowService.RECORD_TYPES.BOQ_ALLOCATION,
+      recordId: allocationId,
+      fromStatus: existing.status,
+      toStatus: updated.status,
+      actorId: userId,
+      metadata: {
+        boqItemId: existing.boqItemId,
+        activityId: existing.activityId,
+        quantity: existing.quantity,
+        amount: existing.amount,
+      },
+    });
+
     return mapAllocation(updated);
   });
 
@@ -663,11 +802,11 @@ const rejectAllocation = async ({
     await ensureProject({ orgId, projectId }, tx);
     const existing = await ensureAllocation({ projectId, allocationId }, tx);
 
-    if (!['draft', 'submitted'].includes(existing.status)) {
+    if (existing.status !== 'submitted') {
       throw new HttpError(
         400,
         'INVALID_ALLOCATION_STATUS',
-        'Only draft or submitted allocations can be rejected',
+        'Only submitted allocations can be rejected',
       );
     }
 
@@ -692,12 +831,48 @@ const rejectAllocation = async ({
       include: allocationInclude,
     });
 
+    await approvalWorkflowService.recordTransition({
+      tx,
+      orgId,
+      projectId,
+      recordType: approvalWorkflowService.RECORD_TYPES.BOQ_ALLOCATION,
+      recordId: allocationId,
+      fromStatus: existing.status,
+      toStatus: updated.status,
+      actorId: userId,
+      reason: String(reason).trim(),
+      metadata: {
+        boqItemId: existing.boqItemId,
+        activityId: existing.activityId,
+        quantity: existing.quantity,
+        amount: existing.amount,
+      },
+    });
+
     return mapAllocation(updated);
   });
 
-const getApprovedActivityAllocationTotals = async ({ projectId }, tx = prisma) => {
+const getApprovedActivityAllocationTotals = async (
+  { projectId, activityIds = null },
+  tx = prisma,
+) => {
+  if (Array.isArray(activityIds) && activityIds.length === 0) {
+    return new Map();
+  }
+
+  const where = {
+    projectId,
+    status: 'approved',
+    isActive: true,
+    activity: { isActive: true },
+  };
+
+  if (Array.isArray(activityIds)) {
+    where.activityId = { in: activityIds };
+  }
+
   const rows = await tx.activityBoqAllocation.findMany({
-    where: { projectId, status: 'approved', isActive: true },
+    where,
     select: {
       activityId: true,
       quantity: true,
@@ -715,7 +890,7 @@ const getApprovedActivityAllocationTotals = async ({ projectId }, tx = prisma) =
     };
 
     current.quantity += toNumber(row.quantity);
-    current.amount += toNumber(row.amount);
+    current.amount = addMoney(current.amount, row.amount);
     current.weight += toNumber(row.weight);
     current.count += 1;
     map.set(row.activityId, current);

@@ -1,0 +1,32 @@
+name: OpenAPI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  validate-openapi:
+    name: Validate Backend OpenAPI
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Validate OpenAPI contract
+        run: npm run openapi:validate --workspace=backend
+
+      - name: Run OpenAPI smoke tests
+        run: npm test --workspace=backend -- --runTestsByPath src/openapi/__tests__/openapi.test.js --runInBand --forceExit

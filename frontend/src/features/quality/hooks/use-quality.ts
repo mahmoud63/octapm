@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { apiClient } from '@/services/api/client'
+import type { WorkflowRecordMeta } from '@/features/workflows/components/workflow-record-list'
 
 export interface QualityDashboardData {
   metrics: {
@@ -12,46 +13,55 @@ export interface QualityDashboardData {
     testsFailed: number
     safetyIncidents: number
     safetyOpen: number
+    dueAlerts: number
+    overdue: number
   }
 }
 
-export interface NcrRecord {
+export interface NcrRecord extends WorkflowRecordMeta {
   id: string
   ref: string
   severity: 'major' | 'minor'
   status: 'open' | 'closed'
   description: string | null
+  disposition?: string | null
+  dueDate?: string | null
 }
 
-export interface ItpRecord {
+export interface ItpRecord extends WorkflowRecordMeta {
   id: string
   ref: string
   title: string
   status: 'pending' | 'passed' | 'failed' | 'waived'
+  pointType?: 'hold' | 'witness' | 'review'
+  dueDate?: string | null
 }
 
-export interface DefectRecord {
+export interface DefectRecord extends WorkflowRecordMeta {
   id: string
   ref: string
   title: string
   severity: 'minor' | 'major' | 'critical'
   status: 'open' | 'in_progress' | 'closed'
+  dueDate?: string | null
 }
 
-export interface SafetyIncident {
+export interface SafetyIncident extends WorkflowRecordMeta {
   id: string
   ref: string
   incidentType: 'near_miss' | 'first_aid' | 'lti' | 'fatality'
   title: string
   status: 'open' | 'investigating' | 'closed'
   lostDays: number
+  dueDate?: string | null
 }
 
-export interface MaterialTest {
+export interface MaterialTest extends WorkflowRecordMeta {
   id: string
   ref: string
   testType: string
   result: 'pass' | 'fail' | 'pending'
+  dueDate?: string | null
 }
 
 const qDashKey = (projectId: string) => ['quality-dashboard', projectId]
@@ -87,6 +97,8 @@ export const useCreateNcr = (projectId: string) => {
     mutationFn: (payload: {
       description?: string
       severity?: 'major' | 'minor'
+      owner?: string
+      dueDate?: string
     }) =>
       apiClient
         .post(`/projects/${projectId}/ncr`, payload)
@@ -111,7 +123,7 @@ export const useItps = (projectId: string) =>
 export const useCreateItp = (projectId: string) => {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: (payload: { title: string }) =>
+    mutationFn: (payload: { title: string; owner?: string; dueDate?: string }) =>
       apiClient
         .post(`/projects/${projectId}/itp`, payload)
         .then((response) => response.data.data as ItpRecord),
@@ -138,6 +150,8 @@ export const useCreateDefect = (projectId: string) => {
     mutationFn: (payload: {
       title: string
       severity?: 'minor' | 'major' | 'critical'
+      owner?: string
+      dueDate?: string
     }) =>
       apiClient
         .post(`/projects/${projectId}/defects`, payload)
@@ -165,6 +179,8 @@ export const useCreateSafetyIncident = (projectId: string) => {
     mutationFn: (payload: {
       title: string
       incidentType: 'near_miss' | 'first_aid' | 'lti' | 'fatality'
+      owner?: string
+      dueDate?: string
     }) =>
       apiClient
         .post(`/projects/${projectId}/safety`, payload)
@@ -189,7 +205,7 @@ export const useMaterialTests = (projectId: string) =>
 export const useCreateMaterialTest = (projectId: string) => {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: (payload: { testType: string }) =>
+    mutationFn: (payload: { testType: string; owner?: string; dueDate?: string }) =>
       apiClient
         .post(`/projects/${projectId}/material-tests`, payload)
         .then((response) => response.data.data as MaterialTest),

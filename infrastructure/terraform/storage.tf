@@ -72,12 +72,20 @@ resource "aws_s3_bucket_lifecycle_configuration" "uploads" {
   bucket = aws_s3_bucket.uploads.id
 
   rule {
-    id     = "expire-old-uploads"
+    id     = "retain-private-project-documents"
     status = "Enabled"
 
-    filter { prefix = "boq/" }
+    filter {}
 
-    expiration { days = 90 }
+    expiration { days = var.upload_document_retention_days }
+
+    noncurrent_version_expiration {
+      noncurrent_days = var.upload_document_noncurrent_retention_days
+    }
+
+    abort_incomplete_multipart_upload {
+      days_after_initiation = 7
+    }
   }
 }
 
@@ -89,4 +97,33 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "uploads" {
       sse_algorithm = "AES256"
     }
   }
+}
+
+data "aws_iam_policy_document" "uploads_bucket_policy" {
+  statement {
+    sid     = "DenyInsecureTransport"
+    effect  = "Deny"
+    actions = ["s3:*"]
+
+    principals {
+      type        = "*"
+      identifiers = ["*"]
+    }
+
+    resources = [
+      aws_s3_bucket.uploads.arn,
+      "${aws_s3_bucket.uploads.arn}/*",
+    ]
+
+    condition {
+      test     = "Bool"
+      variable = "aws:SecureTransport"
+      values   = ["false"]
+    }
+  }
+}
+
+resource "aws_s3_bucket_policy" "uploads" {
+  bucket = aws_s3_bucket.uploads.id
+  policy = data.aws_iam_policy_document.uploads_bucket_policy.json
 }

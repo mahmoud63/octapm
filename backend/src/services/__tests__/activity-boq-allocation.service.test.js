@@ -9,6 +9,7 @@ const mockPrisma = {
     create: jest.fn(),
     update: jest.fn(),
   },
+  ipcItem: { findMany: jest.fn() },
 };
 
 jest.mock('../../config/db', () => ({ prisma: mockPrisma }));
@@ -18,6 +19,7 @@ const service = require('../activity-boq-allocation.service');
 describe('activity BOQ allocation service', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    mockPrisma.ipcItem.findMany.mockResolvedValue([]);
   });
 
   it('rejects totals above the BOQ quantity', () => {
@@ -138,6 +140,7 @@ describe('activity BOQ allocation service', () => {
           projectId: 'project-1',
           status: 'approved',
           isActive: true,
+          activity: { isActive: true },
         },
       }),
     );
@@ -147,5 +150,65 @@ describe('activity BOQ allocation service', () => {
       weight: 55,
       count: 2,
     });
+  });
+
+  it('builds scheduled, unscheduled, earned, and certified BOQ value states', async () => {
+    mockPrisma.boqItem.findMany.mockResolvedValue([
+      {
+        id: 'boq-1',
+        code: '1.1',
+        ref: null,
+        description: 'Excavation',
+        qty: 10,
+        amount: 1000,
+      },
+    ]);
+    mockPrisma.activityBoqAllocation.findMany.mockResolvedValue([
+      {
+        boqItemId: 'boq-1',
+        quantity: 6,
+        amount: 600,
+        status: 'approved',
+        activity: { progress: [{ pctComplete: 50 }] },
+      },
+      {
+        boqItemId: 'boq-1',
+        quantity: 1,
+        amount: 100,
+        status: 'submitted',
+        activity: { progress: [{ pctComplete: 100 }] },
+      },
+    ]);
+    mockPrisma.ipcItem.findMany.mockResolvedValue([
+      { boqItemId: 'boq-1', currentCert: 250 },
+    ]);
+
+    const summary = await service.buildAllocationSummary({
+      projectId: 'project-1',
+    });
+
+    expect(summary).toMatchObject({
+      scheduledQuantity: 6,
+      scheduledValue: 600,
+      unscheduledQuantity: 4,
+      unscheduledValue: 400,
+      earnedValue: 300,
+      certifiedValue: 250,
+    });
+    expect(summary.items[0]).toMatchObject({
+      scheduledValue: 600,
+      unscheduledValue: 400,
+      earnedValue: 300,
+      certifiedValue: 250,
+      pendingAllocatedAmount: 100,
+    });
+    expect(mockPrisma.ipcItem.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          projectId: 'project-1',
+          status: { in: ['certified', 'paid'] },
+        }),
+      }),
+    );
   });
 });

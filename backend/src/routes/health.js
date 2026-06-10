@@ -4,10 +4,10 @@ const { sendSuccess } = require('../utils/api-response');
 const { authenticate } = require('../middleware/auth');
 const { HttpError } = require('../utils/http-error');
 const { prisma } = require('../config/db');
+const evService = require('../services/earned-value.service');
 const {
-  buildAllocationSummary,
-  getApprovedActivityAllocationTotals,
-} = require('../services/activity-boq-allocation.service');
+  summarizeProcurementRisks,
+} = require('../services/procurement-risk.service');
 
 const router = express.Router({ mergeParams: true });
 
@@ -37,7 +37,6 @@ router.get(
 
     const [
       activities,
-      costRecords,
       ncrs,
       itps,
       incidents,
@@ -45,16 +44,20 @@ router.get(
       submittals,
       drawings,
       procurement,
+      procurementLines,
+      longLeadItems,
       pendingChangeOrders,
-      allocationTotals,
-      allocationSummary,
+      evReport,
     ] = await Promise.all([
       prisma.activity.findMany({
         where: { projectId: req.params.projectId },
-        include: { progress: { orderBy: { updatedAt: 'desc' }, take: 1 } },
-      }),
-      prisma.costRecord.findMany({
-        where: { projectId: req.params.projectId },
+        include: {
+          progress: {
+            where: { status: 'approved' },
+            orderBy: { updatedAt: 'desc' },
+            take: 1,
+          },
+        },
       }),
       prisma.ncrRecord.findMany({ where: { projectId: req.params.projectId } }),
       prisma.itpRecord.findMany({ where: { projectId: req.params.projectId } }),
@@ -68,55 +71,85 @@ router.get(
       }),
       prisma.procurementOrder.findMany({
         where: { projectId: req.params.projectId },
+        include: {
+          activity: {
+            select: {
+              id: true,
+              name: true,
+              wbsCode: true,
+              startDate: true,
+              endDate: true,
+              earlyStart: true,
+              earlyFinish: true,
+              baselineStart: true,
+              baselineFinish: true,
+              lateStart: true,
+              lateFinish: true,
+              isCritical: true,
+              totalFloat: true,
+            },
+          },
+        },
+      }),
+      prisma.procurementPoLine.findMany({
+        where: { projectId: req.params.projectId },
+        include: {
+          order: { select: { id: true, ref: true, status: true } },
+          activity: {
+            select: {
+              id: true,
+              name: true,
+              wbsCode: true,
+              startDate: true,
+              endDate: true,
+              earlyStart: true,
+              earlyFinish: true,
+              baselineStart: true,
+              baselineFinish: true,
+              lateStart: true,
+              lateFinish: true,
+              isCritical: true,
+              totalFloat: true,
+            },
+          },
+        },
+      }),
+      prisma.longLeadItem.findMany({
+        where: { projectId: req.params.projectId },
+        include: {
+          activity: {
+            select: {
+              id: true,
+              name: true,
+              wbsCode: true,
+              startDate: true,
+              endDate: true,
+              earlyStart: true,
+              earlyFinish: true,
+              baselineStart: true,
+              baselineFinish: true,
+              lateStart: true,
+              lateFinish: true,
+              isCritical: true,
+              totalFloat: true,
+            },
+          },
+        },
       }),
       prisma.changeOrder.count({
         where: { projectId: req.params.projectId, status: 'pending' },
       }),
-      getApprovedActivityAllocationTotals({
+      evService.buildOfficialEvReport({
+        orgId: req.user.orgId,
         projectId: req.params.projectId,
       }),
-      buildAllocationSummary({ projectId: req.params.projectId }),
     ]);
 
-    const costMap = new Map();
-    costRecords.forEach((row) => {
-      costMap.set(row.activityId, Number(row.actual || 0));
-    });
-
-    const ev = activities.reduce((sum, activity) => {
-      const budget = Number(allocationTotals.get(activity.id)?.amount || 0);
-      const pct = Number(activity.progress[0]?.pctComplete || 0);
-      return sum + (budget * pct) / 100;
-    }, 0);
-
-    const ac = activities.reduce((sum, activity) => {
-      const fromProgress = Number(activity.progress[0]?.actualCost || 0);
-      const fallback = costMap.get(activity.id) || 0;
-      return sum + (fromProgress || fallback);
-    }, 0);
-
     const today = new Date();
-    const pv = activities
-      .filter((activity) => {
-        if (
-          !project.startDate ||
-          activity.earlyFinish === null ||
-          activity.earlyFinish === undefined
-        ) {
-          return false;
-        }
-        const finish = new Date(project.startDate);
-        finish.setDate(finish.getDate() + Number(activity.earlyFinish));
-        return finish <= today;
-      })
-      .reduce(
-        (sum, activity) =>
-          sum + Number(allocationTotals.get(activity.id)?.amount || 0),
-        0,
-      );
-
-    const spi = pv > 0 ? ev / pv : 1;
-    const cpi = ac > 0 ? ev / ac : 1;
+    const ev = Number(evReport.ev || 0);
+    const ac = Number(evReport.ac || 0);
+    const spi = evReport.spi;
+    const cpi = evReport.cpi;
 
     const delayedCount = activities.filter((activity) => {
       if (
@@ -132,16 +165,51 @@ router.get(
       return finish < today && pct < 100;
     }).length;
 
-    const scheduleScore = clampScore(scoreByIndex(spi));
-    const costScore = clampScore(scoreByIndex(cpi));
+    const scheduleScore =
+      spi === null ? 60 : clampScore(scoreByIndex(Number(spi)));
+    const costScore =
+      cpi === null ? 60 : clampScore(scoreByIndex(Number(cpi)));
 
     const commercialScore = clampScore(100 - pendingChangeOrders * 10);
 
-    const overduePO = procurement.filter((row) => {
+    const procurementLineRows = procurementLines.map((line) => {
+      const orderedQty = Number(line.orderedQty || 0);
+      const receivedQty = Number(line.receivedQty || 0);
+      const issuedQty = Number(line.issuedQty || 0);
+      const warehouseStatus =
+        issuedQty >= orderedQty && orderedQty > 0
+          ? 'issued'
+          : receivedQty >= orderedQty && orderedQty > 0
+            ? 'received'
+            : receivedQty > 0 || issuedQty > 0
+              ? 'partial'
+              : 'not_received';
+
+      return {
+        ...line,
+        item: line.description,
+        ref: line.order?.ref || null,
+        expectedDeliveryDate: line.promisedDate,
+        deliveryDate: line.promisedDate,
+        warehouseStatus,
+      };
+    });
+
+    const overduePO = [...procurement, ...procurementLineRows].filter((row) => {
       if (!row.deliveryDate) return false;
-      return new Date(row.deliveryDate) < today && row.status !== 'delivered';
+      const status = String(row.status || '').toLowerCase();
+      const warehouseStatus = String(row.warehouseStatus || '').toLowerCase();
+      const isClear =
+        ['delivered', 'received', 'issued', 'complete', 'closed'].includes(
+          status,
+        ) || ['received', 'issued'].includes(warehouseStatus);
+      return new Date(row.deliveryDate) < today && !isClear;
     }).length;
-    const supplyChainScore = clampScore(100 - overduePO * 15);
+    const procurementRisk = summarizeProcurementRisks(
+      [...procurement, ...procurementLineRows, ...longLeadItems],
+      { project, today },
+    );
+    const supplyChainScore = clampScore(100 - procurementRisk.penalty);
 
     const majorNCRs = ncrs.filter((row) => row.severity === 'major').length;
     const minorNCRs = ncrs.filter((row) => row.severity === 'minor').length;
@@ -187,8 +255,9 @@ router.get(
         label: 'Schedule',
         score: scheduleScore,
         detail: {
-          spi: Number(spi.toFixed(2)),
+          spi: spi === null ? null : Number(spi.toFixed(2)),
           delayedActivities: delayedCount,
+          basisWarnings: evReport.basisWarnings,
         },
       },
       {
@@ -196,12 +265,13 @@ router.get(
         label: 'Cost',
         score: costScore,
         detail: {
-          cpi: Number(cpi.toFixed(2)),
+          cpi: cpi === null ? null : Number(cpi.toFixed(2)),
           ac: Number(ac.toFixed(0)),
           ev: Number(ev.toFixed(0)),
           unallocatedBoqAmount: Number(
-            allocationSummary.unallocatedAmount.toFixed(0),
+            Number(evReport.unallocatedBoqAmount || 0).toFixed(0),
           ),
+          acSource: evReport.sourceSummary?.ac || null,
         },
       },
       {
@@ -218,6 +288,12 @@ router.get(
         score: supplyChainScore,
         detail: {
           overduePOs: overduePO,
+          atRiskItems: procurementRisk.atRiskItems,
+          criticalRisks: procurementRisk.bySeverity.critical,
+          highRisks: procurementRisk.bySeverity.high,
+          mediumRisks: procurementRisk.bySeverity.medium,
+          daysAtRisk: procurementRisk.daysAtRisk,
+          topRisks: procurementRisk.topRisks,
         },
       },
       {

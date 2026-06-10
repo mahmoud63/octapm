@@ -1,5 +1,13 @@
 const { prisma } = require('../config/db');
 const { HttpError } = require('../utils/http-error');
+const {
+  RECORD_TYPES,
+  assignmentData,
+  attachWorkflowDetailsToRecords,
+  primaryActivityIdFromPayload,
+  recordWorkflowHistory,
+  syncWorkflowReferences,
+} = require('./workflow-support.service');
 
 const ensureProject = async ({ orgId, projectId }) => {
   const project = await prisma.project.findFirst({
@@ -16,9 +24,14 @@ const ensureProject = async ({ orgId, projectId }) => {
 const listDefects = async ({ orgId, projectId }) => {
   await ensureProject({ orgId, projectId });
 
-  const rows = await prisma.defectRecord.findMany({
+  const records = await prisma.defectRecord.findMany({
     where: { projectId },
     orderBy: [{ createdAt: 'desc' }],
+  });
+  const rows = await attachWorkflowDetailsToRecords({
+    projectId,
+    recordType: RECORD_TYPES.DEFECT,
+    records,
   });
 
   return {
@@ -38,33 +51,62 @@ const createDefect = async ({ orgId, projectId, payload }) => {
   await ensureProject({ orgId, projectId });
 
   const count = await prisma.defectRecord.count({ where: { projectId } });
+  const activityId = primaryActivityIdFromPayload(payload);
 
-  return prisma.defectRecord.create({
-    data: {
-      projectId,
-      activityId: payload.activityId || null,
-      ref: payload.ref || `DEF-${String(count + 1).padStart(3, '0')}`,
-      title: payload.title,
-      trade: payload.trade?.trim() || null,
-      location: payload.location?.trim() || null,
-      severity: payload.severity || 'minor',
-      status: payload.status || 'open',
-      assignee: payload.assignee?.trim() || null,
-      targetCloseBy: payload.targetCloseBy
-        ? new Date(payload.targetCloseBy)
-        : null,
-      closedDate:
-        payload.status === 'closed'
-          ? payload.closedDate
-            ? new Date(payload.closedDate)
-            : new Date()
+  const row = await prisma.$transaction(async (tx) => {
+    const created = await tx.defectRecord.create({
+      data: {
+        projectId,
+        activityId,
+        ref: payload.ref || `DEF-${String(count + 1).padStart(3, '0')}`,
+        title: payload.title,
+        trade: payload.trade?.trim() || null,
+        location: payload.location?.trim() || null,
+        severity: payload.severity || 'minor',
+        status: payload.status || 'open',
+        ...assignmentData(payload),
+        assignee: payload.assignee?.trim() || null,
+        dueDate: payload.dueDate ? new Date(payload.dueDate) : null,
+        targetCloseBy: payload.targetCloseBy
+          ? new Date(payload.targetCloseBy)
           : null,
-      notes: payload.notes?.trim() || null,
-    },
+        closedDate:
+          payload.status === 'closed'
+            ? payload.closedDate
+              ? new Date(payload.closedDate)
+              : new Date()
+            : null,
+        notes: payload.notes?.trim() || null,
+      },
+    });
+    await syncWorkflowReferences({
+      tx,
+      projectId,
+      recordType: RECORD_TYPES.DEFECT,
+      recordId: created.id,
+      payload,
+    });
+    await recordWorkflowHistory({
+      tx,
+      projectId,
+      recordType: RECORD_TYPES.DEFECT,
+      recordId: created.id,
+      newStatus: created.status,
+      comment: payload.comment || payload.statusComment || payload.notes,
+      force: true,
+    });
+    return created;
   });
+
+  const [enriched] = await attachWorkflowDetailsToRecords({
+    projectId,
+    recordType: RECORD_TYPES.DEFECT,
+    records: [row],
+  });
+  return enriched;
 };
 
-const updateDefect = async ({ orgId, projectId, defectId, payload }) => {
+const updateDefect = async ({ orgId, projectId, defectId, payload, userId, userRole }) => {
   await ensureProject({ orgId, projectId });
 
   const existing = await prisma.defectRecord.findFirst({
@@ -76,47 +118,81 @@ const updateDefect = async ({ orgId, projectId, defectId, payload }) => {
   }
 
   const nextStatus = payload.status ?? existing.status;
+  const activityId = primaryActivityIdFromPayload(payload, existing.activityId);
 
-  return prisma.defectRecord.update({
-    where: { id: defectId },
-    data: {
-      activityId:
-        payload.activityId !== undefined
-          ? payload.activityId
-          : existing.activityId,
-      title: payload.title ?? existing.title,
-      trade:
-        payload.trade !== undefined
-          ? payload.trade?.trim() || null
-          : existing.trade,
-      location:
-        payload.location !== undefined
-          ? payload.location?.trim() || null
-          : existing.location,
-      severity: payload.severity ?? existing.severity,
-      status: nextStatus,
-      assignee:
-        payload.assignee !== undefined
-          ? payload.assignee?.trim() || null
-          : existing.assignee,
-      targetCloseBy:
-        payload.targetCloseBy !== undefined
-          ? payload.targetCloseBy
-            ? new Date(payload.targetCloseBy)
-            : null
-          : existing.targetCloseBy,
-      closedDate:
-        nextStatus === 'closed'
-          ? payload.closedDate
-            ? new Date(payload.closedDate)
-            : existing.closedDate || new Date()
-          : null,
-      notes:
-        payload.notes !== undefined
-          ? payload.notes?.trim() || null
-          : existing.notes,
-    },
+  const row = await prisma.$transaction(async (tx) => {
+    const updated = await tx.defectRecord.update({
+      where: { id: defectId },
+      data: {
+        activityId,
+        title: payload.title ?? existing.title,
+        trade:
+          payload.trade !== undefined
+            ? payload.trade?.trim() || null
+            : existing.trade,
+        location:
+          payload.location !== undefined
+            ? payload.location?.trim() || null
+            : existing.location,
+        severity: payload.severity ?? existing.severity,
+        status: nextStatus,
+        ...assignmentData(payload, existing),
+        assignee:
+          payload.assignee !== undefined
+            ? payload.assignee?.trim() || null
+            : existing.assignee,
+        dueDate:
+          payload.dueDate !== undefined
+            ? payload.dueDate
+              ? new Date(payload.dueDate)
+              : null
+            : existing.dueDate,
+        targetCloseBy:
+          payload.targetCloseBy !== undefined
+            ? payload.targetCloseBy
+              ? new Date(payload.targetCloseBy)
+              : null
+            : existing.targetCloseBy,
+        closedDate:
+          nextStatus === 'closed'
+            ? payload.closedDate
+              ? new Date(payload.closedDate)
+              : existing.closedDate || new Date()
+            : null,
+        notes:
+          payload.notes !== undefined
+            ? payload.notes?.trim() || null
+            : existing.notes,
+      },
+    });
+    await syncWorkflowReferences({
+      tx,
+      projectId,
+      recordType: RECORD_TYPES.DEFECT,
+      recordId: defectId,
+      payload,
+      userId,
+    });
+    await recordWorkflowHistory({
+      tx,
+      projectId,
+      recordType: RECORD_TYPES.DEFECT,
+      recordId: defectId,
+      oldStatus: existing.status,
+      newStatus: updated.status,
+      comment: payload.comment || payload.statusComment,
+      userId,
+      userRole,
+    });
+    return updated;
   });
+
+  const [enriched] = await attachWorkflowDetailsToRecords({
+    projectId,
+    recordType: RECORD_TYPES.DEFECT,
+    records: [row],
+  });
+  return enriched;
 };
 
 const deleteDefect = async ({ orgId, projectId, defectId }) => {

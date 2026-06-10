@@ -9,7 +9,7 @@ output "cloudfront_distribution_id" {
 }
 
 output "ec2_public_ip" {
-  description = "EC2 Elastic IP — SSH target and direct API access"
+  description = "EC2 Elastic IP for SSH and CloudFront origin use; direct API ingress is blocked"
   value       = aws_eip.app.public_ip
 }
 

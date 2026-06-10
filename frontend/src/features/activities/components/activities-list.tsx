@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { AxiosError } from 'axios'
 import { toast } from 'sonner'
+import { useCanPerform } from '@/lib/permissions'
 import { Button } from '@/components/ui/button'
 import {
   Sheet,
@@ -41,6 +42,9 @@ export function ActivitiesList({
   projectStartDate,
   projectEndDate,
 }: ActivitiesListProps) {
+  const canCreateActivity = useCanPerform('schedule', 'create')
+  const canUpdateActivity = useCanPerform('schedule', 'update')
+  const canDeleteActivity = useCanPerform('schedule', 'delete')
   const [createOpen, setCreateOpen] = useState(false)
   const [editActivity, setEditActivity] = useState<Activity | null>(null)
   const [deleteActivity, setDeleteActivity] = useState<Activity | null>(null)
@@ -89,17 +93,21 @@ export function ActivitiesList({
     <>
       <div className='flex items-center justify-between'>
         <h2 className='text-lg font-semibold'>Activities</h2>
-        <Button size='sm' onClick={() => setCreateOpen(true)}>
-          + Add Activity
-        </Button>
+        {canCreateActivity && (
+          <Button size='sm' onClick={() => setCreateOpen(true)}>
+            + Add Activity
+          </Button>
+        )}
       </div>
 
       {activities.length === 0 ? (
         <div className='mt-4 flex flex-col items-center justify-center rounded-md border py-16 text-center'>
           <p className='mb-3 text-muted-foreground'>No activities yet.</p>
-          <Button size='sm' onClick={() => setCreateOpen(true)}>
-            + Add Activity
-          </Button>
+          {canCreateActivity && (
+            <Button size='sm' onClick={() => setCreateOpen(true)}>
+              + Add Activity
+            </Button>
+          )}
         </div>
       ) : (
         <div className='mt-4 overflow-hidden rounded-md border'>
@@ -114,7 +122,9 @@ export function ActivitiesList({
                 <th className='p-3 text-right font-medium'>BOQ Value</th>
                 <th className='p-3 text-left font-medium'>Status</th>
                 <th className='p-3 text-left font-medium'>Engineers</th>
-                <th className='p-3 text-left font-medium'>Actions</th>
+                {(canUpdateActivity || canDeleteActivity) && (
+                  <th className='p-3 text-left font-medium'>Actions</th>
+                )}
               </tr>
             </thead>
             <tbody>
@@ -163,31 +173,37 @@ export function ActivitiesList({
                       .map((engineer) => engineer.name)
                       .join(', ') || '-'}
                   </td>
-                  <td className='p-3'>
-                    <div className='flex items-center gap-1'>
-                      <Button
-                        size='sm'
-                        variant='ghost'
-                        onClick={(event) => {
-                          event.stopPropagation()
-                          setEditActivity(activity)
-                        }}
-                      >
-                        Edit
-                      </Button>
-                      <Button
-                        size='sm'
-                        variant='ghost'
-                        className='text-destructive hover:text-destructive'
-                        onClick={(event) => {
-                          event.stopPropagation()
-                          setDeleteActivity(activity)
-                        }}
-                      >
-                        Delete
-                      </Button>
-                    </div>
-                  </td>
+                  {(canUpdateActivity || canDeleteActivity) && (
+                    <td className='p-3'>
+                      <div className='flex items-center gap-1'>
+                        {canUpdateActivity && (
+                          <Button
+                            size='sm'
+                            variant='ghost'
+                            onClick={(event) => {
+                              event.stopPropagation()
+                              setEditActivity(activity)
+                            }}
+                          >
+                            Edit
+                          </Button>
+                        )}
+                        {canDeleteActivity && (
+                          <Button
+                            size='sm'
+                            variant='ghost'
+                            className='text-destructive hover:text-destructive'
+                            onClick={(event) => {
+                              event.stopPropagation()
+                              setDeleteActivity(activity)
+                            }}
+                          >
+                            Delete
+                          </Button>
+                        )}
+                      </div>
+                    </td>
+                  )}
                 </tr>
               ))}
             </tbody>

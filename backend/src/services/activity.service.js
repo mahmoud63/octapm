@@ -3,6 +3,13 @@ const { HttpError } = require('../utils/http-error');
 const {
   getApprovedActivityAllocationTotals,
 } = require('./activity-boq-allocation.service');
+const { applyCpmToProject, workingDayToDate } = require('./cpm.service');
+const {
+  replaceActivityDependencies,
+  serializeDependencyDto,
+} = require('./activity-dependency.service');
+const { toMoneyNumber } = require('../utils/money');
+const progressService = require('./progress.service');
 
 const VALID_CATEGORIES = [
   'civil',
@@ -26,155 +33,88 @@ const computeStatus = (latestProgress, endDate) => {
 };
 
 const activityInclude = {
-  progress: { orderBy: { updatedAt: 'desc' }, take: 1 },
+  progress: {
+    where: { status: 'approved' },
+    orderBy: { updatedAt: 'desc' },
+    take: 1,
+  },
   assignments: {
     include: { user: { select: { id: true, name: true, email: true } } },
   },
-};
-
-const parsePredecessorRefs = (predecessors) => {
-  if (!predecessors) return [];
-  return String(predecessors)
-    .split(',')
-    .map((p) => p.trim())
-    .filter(Boolean)
-    .map((p) => p.split(/\s+/)[0]?.trim())
-    .filter(Boolean);
-};
-
-async function recalculateCpm(projectId, tx) {
-  const acts = await tx.activity.findMany({
-    where: { projectId },
-    orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }],
-  });
-
-  if (acts.length === 0) return;
-
-  const byId = new Map();
-  const byRef = new Map();
-
-  for (const act of acts) {
-    const node = {
-      ...act,
-      duration: Math.max(0, Number(act.duration) || 0),
-      predecessorsRefs: parsePredecessorRefs(act.predecessors),
-      predecessorIds: new Set(),
-      successorIds: new Set(),
-      es: null,
-      ef: null,
-      ls: null,
-      lf: null,
-    };
-    byId.set(act.id, node);
-    byRef.set(act.id, act.id);
-    if (act.wbsCode) byRef.set(act.wbsCode, act.id);
-  }
-
-  for (const node of byId.values()) {
-    for (const ref of node.predecessorsRefs) {
-      const predId = byRef.get(ref);
-      if (!predId || predId === node.id) continue;
-      node.predecessorIds.add(predId);
-      byId.get(predId)?.successorIds.add(node.id);
-    }
-  }
-
-  const indegree = new Map();
-  for (const node of byId.values()) {
-    indegree.set(node.id, node.predecessorIds.size);
-  }
-
-  const queue = [];
-  for (const node of byId.values()) {
-    if (indegree.get(node.id) === 0) queue.push(node.id);
-  }
-
-  const topoOrder = [];
-  while (queue.length > 0) {
-    const id = queue.shift();
-    topoOrder.push(id);
-
-    const current = byId.get(id);
-    if (!current) continue;
-
-    for (const succId of current.successorIds) {
-      const next = (indegree.get(succId) || 0) - 1;
-      indegree.set(succId, next);
-      if (next === 0) queue.push(succId);
-    }
-  }
-
-  for (const node of byId.values()) {
-    if (topoOrder.includes(node.id)) continue;
-    topoOrder.push(node.id);
-  }
-
-  for (const id of topoOrder) {
-    const node = byId.get(id);
-    if (!node) continue;
-
-    let es = Number(node.earlyStart) || 0;
-    for (const predId of node.predecessorIds) {
-      const pred = byId.get(predId);
-      const predEf =
-        pred?.ef != null ? pred.ef : Number(pred?.earlyFinish) || 0;
-      if (predEf > es) es = predEf;
-    }
-
-    node.es = Math.max(0, Math.round(es));
-    node.ef = Math.max(0, Math.round(node.es + node.duration));
-  }
-
-  const projectFinish = topoOrder.reduce((max, id) => {
-    const node = byId.get(id);
-    return Math.max(max, node?.ef || 0);
-  }, 0);
-
-  for (let i = topoOrder.length - 1; i >= 0; i -= 1) {
-    const id = topoOrder[i];
-    const node = byId.get(id);
-    if (!node) continue;
-
-    let lf;
-    if (node.successorIds.size === 0) {
-      lf = projectFinish;
-    } else {
-      let minLs = Infinity;
-      for (const succId of node.successorIds) {
-        const succ = byId.get(succId);
-        const succLs =
-          succ?.ls != null ? succ.ls : Number(succ?.lateStart) || projectFinish;
-        if (succLs < minLs) minLs = succLs;
-      }
-      lf = Number.isFinite(minLs) ? minLs : projectFinish;
-    }
-
-    node.lf = Math.max(0, Math.round(lf));
-    node.ls = Math.max(0, Math.round(node.lf - node.duration));
-  }
-
-  for (const node of byId.values()) {
-    const totalFloat = Math.max(0, (node.lf ?? 0) - (node.ef ?? 0));
-    node.totalFloat = totalFloat;
-    node.isCritical = totalFloat === 0;
-  }
-
-  for (const node of byId.values()) {
-    await tx.activity.update({
-      where: { id: node.id },
-      data: {
-        earlyStart: node.es,
-        earlyFinish: node.ef,
-        lateStart: node.ls,
-        lateFinish: node.lf,
-        totalFloat: node.totalFloat,
-        isCritical: node.isCritical,
+  predecessorLinks: {
+    include: {
+      predecessor: {
+        select: {
+          id: true,
+          name: true,
+          wbsCode: true,
+          p6ActivityId: true,
+          sortOrder: true,
+        },
       },
-    });
-  }
-}
+    },
+    orderBy: { createdAt: 'asc' },
+  },
+  progressMethod: true,
+  progressSubmissions: {
+    where: { status: { in: ['draft', 'submitted'] } },
+    orderBy: { updatedAt: 'desc' },
+    take: 1,
+  },
+};
 
-const sanitizeActivity = (activity, allocationTotals = null) => {
+const buildPlannedDateFields = (activity, project = null) => {
+  if (!project?.startDate) {
+    return {
+      earlyStartDate: null,
+      earlyFinishDate: null,
+      lateStartDate: null,
+      lateFinishDate: null,
+      baselineStartDate: null,
+      baselineFinishDate: null,
+    };
+  }
+
+  const options = {
+    calendarId: activity.calendarId || project.projectCalendar,
+    projectCalendar: project.projectCalendar,
+  };
+
+  return {
+    earlyStartDate: workingDayToDate(
+      project.startDate,
+      activity.earlyStart,
+      options,
+    ),
+    earlyFinishDate: workingDayToDate(
+      project.startDate,
+      activity.earlyFinish,
+      options,
+    ),
+    lateStartDate: workingDayToDate(
+      project.startDate,
+      activity.lateStart,
+      options,
+    ),
+    lateFinishDate: workingDayToDate(
+      project.startDate,
+      activity.lateFinish,
+      options,
+    ),
+    baselineStartDate: workingDayToDate(
+      project.startDate,
+      activity.baselineStart,
+      options,
+    ),
+    baselineFinishDate: workingDayToDate(
+      project.startDate,
+      activity.baselineFinish,
+      options,
+    ),
+  };
+};
+
+const sanitizeActivity = (activity, allocationTotals = null, project = null) => {
   const latestProgress = activity.progress?.[0] ?? null;
   const approvedAllocation = allocationTotals || {
     quantity: 0,
@@ -195,6 +135,10 @@ const sanitizeActivity = (activity, allocationTotals = null) => {
     lateFinish: activity.lateFinish,
     totalFloat: activity.totalFloat,
     predecessors: activity.predecessors,
+    dependencies:
+      activity.predecessorLinks?.map((row) => serializeDependencyDto(row)) ??
+      [],
+    ...buildPlannedDateFields(activity, project),
     startDate: activity.startDate,
     endDate: activity.endDate,
     duration: activity.duration,
@@ -210,6 +154,22 @@ const sanitizeActivity = (activity, allocationTotals = null) => {
     actualCost: latestProgress?.actualCost ?? null,
     actualStart: latestProgress?.actualStart ?? null,
     actualFinish: latestProgress?.actualFinish ?? null,
+    approvedProgressUpdatedAt: latestProgress?.updatedAt ?? null,
+    approvedProgressSource: latestProgress?.source ?? null,
+    progressMethod:
+      activity.progressMethod?.method ||
+      latestProgress?.progressMethod ||
+      'percent',
+    progressMethodConfig:
+      progressService.serializeMethodConfig(activity.progressMethod),
+    pendingProgress:
+      progressService.serializeSubmission(activity.progressSubmissions?.[0]) ||
+      null,
+    progressApprovalStatus: activity.progressSubmissions?.[0]
+      ? activity.progressSubmissions[0].status
+      : latestProgress
+        ? 'approved'
+        : 'missing',
     status: computeStatus(latestProgress, activity.endDate),
     assignedEngineers:
       activity.assignments?.map((a) => ({
@@ -246,7 +206,11 @@ const ensureActivity = async (projectId, activityId) => {
 // Hard rule: end must be after start. Throws.
 const assertDates = ({ startDate, endDate }) => {
   if (startDate && endDate && endDate <= startDate) {
-    throw new HttpError(400, 'INVALID_DATES', 'endDate must be after startDate');
+    throw new HttpError(
+      400,
+      'INVALID_DATES',
+      'endDate must be after startDate',
+    );
   }
 };
 
@@ -263,11 +227,11 @@ const collectDateWarnings = ({ project, startDate, endDate }) => {
 };
 
 const listActivities = async ({ orgId, projectId }) => {
-  await ensureProject(orgId, projectId);
+  const project = await ensureProject(orgId, projectId);
 
   const [activities, allocationTotals] = await Promise.all([
     prisma.activity.findMany({
-      where: { projectId },
+      where: { projectId, isActive: true },
       include: activityInclude,
       orderBy: { sortOrder: 'asc' },
     }),
@@ -275,7 +239,7 @@ const listActivities = async ({ orgId, projectId }) => {
   ]);
 
   return activities.map((activity) =>
-    sanitizeActivity(activity, allocationTotals.get(activity.id)),
+    sanitizeActivity(activity, allocationTotals.get(activity.id), project),
   );
 };
 
@@ -320,38 +284,78 @@ const createActivity = async ({ orgId, projectId, payload }) => {
     );
   }
 
-  const activity = await prisma.activity.create({
-    data: {
-      projectId,
-      name: payload.name,
-      wbsCode: payload.wbsCode ?? null,
-      category: payload.category ?? null,
-      startDate,
-      endDate,
-      budget: payload.budget ?? 0,
-      isMilestone: payload.isMilestone ?? false,
-      sortOrder: payload.sortOrder ?? 0,
-      assignments: {
-        create: engineerIds.map((userId) => ({ userId })),
+  const shouldRecalculateCpm = [
+    'earlyStart',
+    'earlyFinish',
+    'lateStart',
+    'lateFinish',
+    'totalFloat',
+    'duration',
+    'predecessors',
+    'dependencies',
+    'isCritical',
+  ].some((key) => payload[key] !== undefined);
+
+  const activity = await prisma.$transaction(async (tx) => {
+    const created = await tx.activity.create({
+      data: {
+        projectId,
+        name: payload.name,
+        wbsCode: payload.wbsCode ?? null,
+        calendarId: project.projectCalendar ?? null,
+        category: payload.category ?? null,
+        startDate,
+        endDate,
+        duration: payload.duration ?? 0,
+        earlyStart: payload.earlyStart ?? null,
+        earlyFinish: payload.earlyFinish ?? null,
+        lateStart: payload.lateStart ?? null,
+        lateFinish: payload.lateFinish ?? null,
+        totalFloat: payload.totalFloat ?? null,
+        budget: toMoneyNumber(payload.budget),
+        isMilestone: payload.isMilestone ?? false,
+        isCritical: payload.isCritical ?? false,
+        sortOrder: payload.sortOrder ?? 0,
+        assignments: {
+          create: engineerIds.map((userId) => ({ userId })),
+        },
       },
-    },
-    include: activityInclude,
+    });
+
+    if (payload.dependencies !== undefined || payload.predecessors !== undefined) {
+      await replaceActivityDependencies(tx, {
+        projectId,
+        successorId: created.id,
+        dependencies: payload.dependencies,
+        predecessors: payload.predecessors,
+        source: 'manual',
+      });
+    }
+
+    if (shouldRecalculateCpm) {
+      await applyCpmToProject(projectId, tx);
+    }
+
+    return tx.activity.findFirst({
+      where: { id: created.id, projectId },
+      include: activityInclude,
+    });
   });
 
-  return { ...sanitizeActivity(activity), warnings: dateWarnings };
+  return { ...sanitizeActivity(activity, null, project), warnings: dateWarnings };
 };
 
 const getActivityById = async ({ orgId, projectId, activityId }) => {
-  await ensureProject(orgId, projectId);
+  const project = await ensureProject(orgId, projectId);
   const [activity, allocationTotals] = await Promise.all([
     ensureActivity(projectId, activityId),
     getApprovedActivityAllocationTotals({ projectId }),
   ]);
-  return sanitizeActivity(activity, allocationTotals.get(activity.id));
+  return sanitizeActivity(activity, allocationTotals.get(activity.id), project);
 };
 
 const updateActivity = async ({ orgId, projectId, activityId, payload }) => {
-  await ensureProject(orgId, projectId);
+  const project = await ensureProject(orgId, projectId);
   const existing = await ensureActivity(projectId, activityId);
 
   const data = {};
@@ -383,12 +387,9 @@ const updateActivity = async ({ orgId, projectId, activityId, payload }) => {
   if (payload.lateFinish !== undefined) data.lateFinish = payload.lateFinish;
   if (payload.totalFloat !== undefined) data.totalFloat = payload.totalFloat;
   if (payload.duration !== undefined) data.duration = payload.duration;
-  if (payload.predecessors !== undefined) {
-    data.predecessors = payload.predecessors?.trim() || null;
-  }
   if (payload.isCritical !== undefined) data.isCritical = payload.isCritical;
 
-  if (payload.budget !== undefined) data.budget = payload.budget;
+  if (payload.budget !== undefined) data.budget = toMoneyNumber(payload.budget);
   if (payload.isMilestone !== undefined) data.isMilestone = payload.isMilestone;
   if (payload.sortOrder !== undefined) data.sortOrder = payload.sortOrder;
 
@@ -433,6 +434,7 @@ const updateActivity = async ({ orgId, projectId, activityId, payload }) => {
     'totalFloat',
     'duration',
     'predecessors',
+    'dependencies',
     'isCritical',
   ].some((key) => payload[key] !== undefined);
 
@@ -449,8 +451,18 @@ const updateActivity = async ({ orgId, projectId, activityId, payload }) => {
       });
     }
 
+    if (payload.dependencies !== undefined || payload.predecessors !== undefined) {
+      await replaceActivityDependencies(tx, {
+        projectId,
+        successorId: activityId,
+        dependencies: payload.dependencies,
+        predecessors: payload.predecessors,
+        source: 'manual',
+      });
+    }
+
     if (shouldRecalculateCpm) {
-      await recalculateCpm(projectId, tx);
+      await applyCpmToProject(projectId, tx);
     }
 
     return tx.activity.findFirst({
@@ -463,11 +475,11 @@ const updateActivity = async ({ orgId, projectId, activityId, payload }) => {
     throw new HttpError(404, 'ACTIVITY_NOT_FOUND', 'Activity not found');
   }
 
-  return sanitizeActivity(updated);
+  return sanitizeActivity(updated, null, project);
 };
 
 const deleteActivity = async ({ orgId, projectId, activityId }) => {
-  await ensureProject(orgId, projectId);
+  const project = await ensureProject(orgId, projectId);
   await ensureActivity(projectId, activityId);
 
   await prisma.activity.delete({ where: { id: activityId } });
@@ -481,46 +493,22 @@ const updateProgress = async ({
   userId,
   payload,
 }) => {
-  await ensureProject(orgId, projectId);
-  const activity = await ensureActivity(projectId, activityId);
+  const project = await ensureProject(orgId, projectId);
+  await ensureActivity(projectId, activityId);
 
-  const pctComplete = Math.max(
-    0,
-    Math.min(100, Number(payload.pctComplete) || 0),
-  );
-  const allocationTotals = await getApprovedActivityAllocationTotals({
+  const submission = await progressService.createProgressSubmission({
+    orgId,
     projectId,
-  });
-  const approvedBudget = allocationTotals.get(activityId)?.amount || 0;
-  const derivedCost =
-    payload.actualCost != null
-      ? payload.actualCost
-      : (pctComplete / 100) * approvedBudget * 1.03;
-
-  const progressData = {
     activityId,
-    pctComplete,
-    actualCost: derivedCost,
-    notes: payload.notes?.trim() || null,
-    updatedBy: userId || null,
-  };
-
-  if (payload.actualStart !== undefined) {
-    progressData.actualStart = payload.actualStart
-      ? new Date(payload.actualStart)
-      : null;
-  }
-
-  if (payload.actualFinish !== undefined) {
-    progressData.actualFinish = payload.actualFinish
-      ? new Date(payload.actualFinish)
-      : null;
-  }
-
-  await prisma.activityProgress.create({ data: progressData });
+    userId,
+    payload,
+  });
 
   const updated = await ensureActivity(projectId, activityId);
-  return sanitizeActivity(updated);
+  return {
+    activity: sanitizeActivity(updated, null, project),
+    submission,
+  };
 };
 
 const bulkUpdateProgress = async ({ orgId, projectId, userId, updates }) => {
@@ -531,42 +519,26 @@ const bulkUpdateProgress = async ({ orgId, projectId, userId, updates }) => {
     where: { projectId, id: { in: activityIds } },
     select: { id: true, budget: true },
   });
-  const allocationTotals = await getApprovedActivityAllocationTotals({
-    projectId,
-  });
   const activityMap = new Map(
     activities.map((activity) => [activity.id, activity]),
   );
 
-  const records = [];
+  const submissions = [];
   for (const update of updates || []) {
     const activity = activityMap.get(update.activityId);
     if (!activity) continue;
 
-    const pctComplete = Math.max(
-      0,
-      Math.min(100, Number(update.pctComplete) || 0),
-    );
-    const actualCost =
-      update.actualCost != null
-        ? Number(update.actualCost) || 0
-        : (pctComplete / 100) *
-          (allocationTotals.get(update.activityId)?.amount || 0) *
-          1.03;
-
-    records.push({
+    const submission = await progressService.createProgressSubmission({
+      orgId,
+      projectId,
       activityId: update.activityId,
-      pctComplete,
-      actualCost,
-      updatedBy: userId || null,
+      userId,
+      payload: update,
     });
+    submissions.push(submission);
   }
 
-  if (records.length > 0) {
-    await prisma.activityProgress.createMany({ data: records });
-  }
-
-  return { updated: records.length };
+  return { submitted: submissions.length, submissions };
 };
 
 module.exports = {

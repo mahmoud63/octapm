@@ -41,6 +41,21 @@ function parseDurationDays(input) {
   return Math.max(0, Math.round(total));
 }
 
+function parseLagDays(input) {
+  const raw = String(input || '').trim();
+  if (!raw) return 0;
+
+  if (/^[-+]?\d+(?:\.\d+)?$/.test(raw)) {
+    const minutes = Number.parseFloat(raw);
+    if (!Number.isFinite(minutes)) return 0;
+    return Math.round(minutes / 480);
+  }
+
+  const sign = raw.startsWith('-') ? -1 : 1;
+  const unsigned = raw.replace(/^[-+]/, '');
+  return sign * parseDurationDays(unsigned);
+}
+
 function mapMspRelType(type) {
   const map = {
     0: 'FF',
@@ -98,5 +113,6 @@ async function parseMspXml(content) {
 module.exports = {
   parseMspXml,
   parseDurationDays,
+  parseLagDays,
   mapMspRelType,
 };

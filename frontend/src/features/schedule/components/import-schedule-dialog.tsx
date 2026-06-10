@@ -25,11 +25,13 @@ const FORMAT_CONFIG: Record<
 }
 
 type ImportResult = {
+  staged?: boolean
+  revisionId?: string
   imported: number
   wbsNodes?: number
   criticalActivities?: number
-  costRecordsSeeded?: number
-  longLeadItemsSeeded?: number
+  dependencyCount?: number
+  message?: string
 }
 
 interface Props {
@@ -42,7 +44,6 @@ export function ImportScheduleDialog({ projectId, open, onOpenChange }: Props) {
   const queryClient = useQueryClient()
   const [format, setFormat] = useState<ImportFormat>('xer')
   const [file, setFile] = useState<File | null>(null)
-  const [replaceExisting, setReplaceExisting] = useState(false)
   const [result, setResult] = useState<ImportResult | null>(null)
 
   const importMutation = useMutation({
@@ -51,7 +52,6 @@ export function ImportScheduleDialog({ projectId, open, onOpenChange }: Props) {
 
       const formData = new FormData()
       formData.append('file', file)
-      formData.append('replaceExisting', String(replaceExisting))
 
       const response = await apiClient.post(
         `/projects/${projectId}/import/${FORMAT_CONFIG[format].endpoint}`,
@@ -74,7 +74,7 @@ export function ImportScheduleDialog({ projectId, open, onOpenChange }: Props) {
           queryKey: ['schedule-revisions', projectId],
         }),
       ])
-      toast.success('Schedule imported successfully')
+      toast.success('Schedule import staged for review')
     },
     onError: (error: unknown) => {
       const message =
@@ -94,7 +94,6 @@ export function ImportScheduleDialog({ projectId, open, onOpenChange }: Props) {
   const reset = () => {
     setFile(null)
     setResult(null)
-    setReplaceExisting(false)
     setFormat('xer')
   }
 
@@ -121,8 +120,8 @@ export function ImportScheduleDialog({ projectId, open, onOpenChange }: Props) {
               <p>Activities imported: {result.imported}</p>
               <p>WBS nodes: {result.wbsNodes ?? 0}</p>
               <p>Critical activities: {result.criticalActivities ?? 0}</p>
-              <p>Cost records seeded: {result.costRecordsSeeded ?? 0}</p>
-              <p>Long-lead items seeded: {result.longLeadItemsSeeded ?? 0}</p>
+              <p>Relationships staged: {result.dependencyCount ?? 0}</p>
+              {result.revisionId && <p>Revision: {result.revisionId}</p>}
             </div>
             <Button className='w-full' onClick={() => onOpenChange(false)}>
               Close
@@ -157,15 +156,6 @@ export function ImportScheduleDialog({ projectId, open, onOpenChange }: Props) {
                 onChange={(e) => setFile(e.target.files?.[0] ?? null)}
               />
             </div>
-
-            <label className='flex items-center gap-2 text-sm'>
-              <input
-                type='checkbox'
-                checked={replaceExisting}
-                onChange={(e) => setReplaceExisting(e.target.checked)}
-              />
-              Replace existing activities before import
-            </label>
 
             <div className='flex gap-2'>
               <Button

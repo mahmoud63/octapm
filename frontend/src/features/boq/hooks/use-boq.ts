@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import type { AxiosError } from 'axios'
 import { apiClient } from '@/services/api/client'
+import { projectSetupReadinessKey } from '@/features/projects/hooks/use-projects'
 import type {
   ProjectBoq,
   ActivityBoqAllocation,
@@ -10,6 +11,29 @@ import type {
   CreateBoqActivityInput,
   UpdateBoqActivityInput,
 } from '../data/schema'
+
+type BoqUploadResponse = {
+  jobId: string
+  revisionId: string
+  mode: 'imported' | 'comparison_only'
+  baselineLocked: boolean
+  comparison?: {
+    added: number
+    updated: number
+    unchanged: number
+    removed: number
+    blocked: number
+  } | null
+  document?: {
+    documentId: string
+    downloadUrl: string
+    filename: string
+    mimeType: string
+    sizeBytes: number
+    scanStatus: 'clean'
+    retentionExpiresAt?: string | null
+  }
+}
 
 type AllocationPayload = {
   boqItemId: string
@@ -24,6 +48,15 @@ type AllocationPayload = {
 type AllocationListResponse = {
   allocations: ActivityBoqAllocation[]
   summary: AllocationSummary
+}
+
+type ApiErrorResponse = { error?: { message?: string } }
+
+function apiErrorMessage(
+  err: AxiosError<ApiErrorResponse>,
+  fallback: string,
+) {
+  return err.response?.data?.error?.message ?? fallback
 }
 
 const allocationKey = (projectId: string) => [
@@ -41,6 +74,8 @@ const invalidateAllocationConsumers = async (
     qc.invalidateQueries({ queryKey: ['schedule', projectId] }),
     qc.invalidateQueries({ queryKey: ['activities', projectId] }),
     qc.invalidateQueries({ queryKey: ['cost-summary', projectId] }),
+    qc.invalidateQueries({ queryKey: ['audit-events', projectId] }),
+    qc.invalidateQueries({ queryKey: projectSetupReadinessKey(projectId) }),
   ])
 }
 
@@ -63,6 +98,7 @@ export const useActivityBoqAllocations = (projectId: string) =>
   })
 
 export function useBoqUpload(projectId: string) {
+  const qc = useQueryClient()
   return useMutation({
     mutationFn: ({ file, label }: { file: File; label?: string }) => {
       const fd = new FormData()
@@ -72,7 +108,10 @@ export function useBoqUpload(projectId: string) {
         .post(`/projects/${projectId}/boq/upload`, fd, {
           headers: { 'Content-Type': 'multipart/form-data' },
         })
-        .then((r) => r.data.data as { jobId: string })
+        .then((r) => r.data.data as BoqUploadResponse)
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['audit-events', projectId] })
     },
   })
 }
@@ -105,7 +144,13 @@ export function useUpdateBoqItem(projectId: string) {
       apiClient
         .patch(`/projects/${projectId}/boq/items/${itemId}`, data)
         .then((r) => r.data.data),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['boq', projectId] }),
+    onSuccess: async () => {
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: ['boq', projectId] }),
+        qc.invalidateQueries({ queryKey: ['audit-events', projectId] }),
+        qc.invalidateQueries({ queryKey: projectSetupReadinessKey(projectId) }),
+      ])
+    },
     onError: () => toast.error('Failed to update row'),
   })
 }
@@ -117,11 +162,13 @@ export function useCreateBoqItem(projectId: string) {
       apiClient
         .post(`/projects/${projectId}/boq/items`, data)
         .then((r) => r.data.data),
-    onSuccess: () => {
-      toast.success('BOQ row added')
-      qc.invalidateQueries({ queryKey: ['boq', projectId] })
+    onSuccess: async () => {
+      toast.success('BOQ row added with draft activity allocation')
+      await invalidateAllocationConsumers(qc, projectId)
     },
-    onError: () => toast.error('Failed to add row'),
+    onError: (err: AxiosError<ApiErrorResponse>) => {
+      toast.error(apiErrorMessage(err, 'Failed to add row'))
+    },
   })
 }
 
@@ -132,14 +179,16 @@ export function useDeleteBoqItem(projectId: string) {
       apiClient
         .delete(`/projects/${projectId}/boq/items/${itemId}`)
         .then((r) => r.data.data),
-    onSuccess: () => {
+    onSuccess: async () => {
       toast.success('Row deleted')
-      qc.invalidateQueries({ queryKey: ['boq', projectId] })
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: ['boq', projectId] }),
+        qc.invalidateQueries({ queryKey: ['audit-events', projectId] }),
+        qc.invalidateQueries({ queryKey: projectSetupReadinessKey(projectId) }),
+      ])
     },
-    onError: (err: AxiosError<{ error: { message: string } }>) => {
-      toast.error(
-        err.response?.data?.error?.message ?? 'Cannot delete this row',
-      )
+    onError: (err: AxiosError<ApiErrorResponse>) => {
+      toast.error(apiErrorMessage(err, 'Cannot delete this row'))
     },
   })
 }
@@ -157,11 +206,13 @@ export function useCreateBoqActivity(projectId: string) {
       apiClient
         .post(`/projects/${projectId}/boq/items/${boqItemId}/activities`, data)
         .then((r) => r.data.data),
-    onSuccess: () => {
-      toast.success('Activity added')
-      qc.invalidateQueries({ queryKey: ['boq', projectId] })
+    onSuccess: async () => {
+      toast.success('Schedule activity added with draft allocation')
+      await invalidateAllocationConsumers(qc, projectId)
     },
-    onError: () => toast.error('Failed to add activity'),
+    onError: (err: AxiosError<ApiErrorResponse>) => {
+      toast.error(apiErrorMessage(err, 'Failed to add activity'))
+    },
   })
 }
 
@@ -178,23 +229,38 @@ export function useUpdateBoqActivity(projectId: string) {
       apiClient
         .patch(`/projects/${projectId}/boq/activities/${activityId}`, data)
         .then((r) => r.data.data),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['boq', projectId] }),
-    onError: () => toast.error('Failed to update activity'),
+    onSuccess: async () => {
+      await invalidateAllocationConsumers(qc, projectId)
+    },
+    onError: (err: AxiosError<ApiErrorResponse>) => {
+      toast.error(apiErrorMessage(err, 'Failed to update activity'))
+    },
   })
 }
 
 export function useDeleteBoqActivity(projectId: string) {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: (activityId: string) =>
-      apiClient
-        .delete(`/projects/${projectId}/boq/activities/${activityId}`)
-        .then((r) => r.data.data),
-    onSuccess: () => {
-      toast.success('Activity deleted')
-      qc.invalidateQueries({ queryKey: ['boq', projectId] })
+    mutationFn: (
+      input: string | { activityId: string; allocationId?: string | null }
+    ) => {
+      const activityId = typeof input === 'string' ? input : input.activityId
+      const allocationId =
+        typeof input === 'string' ? null : input.allocationId
+
+      return apiClient
+        .delete(`/projects/${projectId}/boq/activities/${activityId}`, {
+          data: allocationId ? { allocationId } : undefined,
+        })
+        .then((r) => r.data.data)
     },
-    onError: () => toast.error('Failed to delete activity'),
+    onSuccess: async () => {
+      toast.success('Draft activity allocation removed')
+      await invalidateAllocationConsumers(qc, projectId)
+    },
+    onError: (err: AxiosError<ApiErrorResponse>) => {
+      toast.error(apiErrorMessage(err, 'Failed to delete activity'))
+    },
   })
 }
 
