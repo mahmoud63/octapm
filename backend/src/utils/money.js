@@ -1,12 +1,14 @@
 const { Prisma } = require('@prisma/client');
+const { Decimal: PrismaRuntimeDecimal } = require('@prisma/client/runtime/library');
 const { body } = require('express-validator');
 const { HttpError } = require('./http-error');
 
 const MONEY_SCALE = 2;
 const MONEY_PRECISION = 18;
 const MONEY_MAX = '9999999999999999.99';
-const MONEY_MAX_DECIMAL = new Prisma.Decimal(MONEY_MAX);
 const NUMERIC_TEXT_RE = /^[-+]?(?:\d+|\d*\.\d+)$/;
+const Decimal =
+  typeof Prisma?.Decimal === 'function' ? Prisma.Decimal : PrismaRuntimeDecimal;
 
 const isBlank = (value) =>
   value === undefined || value === null || value === '';
@@ -15,19 +17,19 @@ const isPrismaDecimal = (value) =>
   Boolean(
     value &&
       typeof value === 'object' &&
-      (Prisma.Decimal.isDecimal?.(value) ||
+      ((typeof Decimal.isDecimal === 'function' && Decimal.isDecimal(value)) ||
         (typeof value.toDecimalPlaces === 'function' &&
           typeof value.decimalPlaces === 'function')),
   );
 
 const decimalFrom = (value, fallback = 0) => {
-  if (isBlank(value)) return new Prisma.Decimal(fallback);
+  if (isBlank(value)) return new Decimal(fallback);
   if (isPrismaDecimal(value)) return value;
 
   try {
-    return new Prisma.Decimal(value);
+    return new Decimal(value);
   } catch (_error) {
-    return new Prisma.Decimal(fallback);
+    return new Decimal(fallback);
   }
 };
 
@@ -112,7 +114,7 @@ const addMoney = (...values) =>
   toMoneyNumber(
     values.reduce(
       (total, value) => total.plus(decimalFrom(value)),
-      new Prisma.Decimal(0),
+      new Decimal(0),
     ),
   );
 

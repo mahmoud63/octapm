@@ -16,6 +16,8 @@ All notable platform-wide changes should be recorded here. Agents must read this
 ### Changed
 
 - Replaced backend `xlsx` parser usage with `@e965/xlsx` and upgraded `concurrently` to remove high/critical dependency audit findings without force-upgrading breaking packages.
+- Made money utilities fall back to Prisma's runtime Decimal implementation when the generated Prisma client does not expose a constructible `Prisma.Decimal`, unblocking CI OpenAPI and backend test module loading.
+- Hardened EC2 user-data template resolution diagnostics for Terraform `${path.module}` template references.
 - Updated EC2 user-data bootstrap and validation to install and verify the repository-pinned Node.js 24/npm 11 runtime instead of Node.js 20.
 - Updated GitHub Actions setup-node steps to read the pinned `.nvmrc` version and removed tracked PID/TanStack temp artifacts from source control.
 - Linked the release checklist, go-live gate, UAT documentation, and rate-limit QA notes to the new evidence and runtime scale-blocker checklists.
@@ -28,6 +30,7 @@ All notable platform-wide changes should be recorded here. Agents must read this
 ### Verification
 
 - Dependency audit remediation reduced root and backend install-path audit output to 3 moderate findings; focused BOQ parser/import tests passed against `@e965/xlsx`; EC2 user-data self-test and live validator passed.
+- OpenAPI validation passed for 255 documented paths after the Decimal fallback fix; backend Jest passed with 75 suites and 1069 tests; EC2 user-data self-test and live validator passed.
 - Exact npm release matrix passed from the repository root: Node `v24.14.0`, npm `11.9.0`, Prisma validate, OpenAPI validate, backend Jest with 75 suites and 1068 tests, frontend ESLint with 22 warnings and 0 errors, frontend TypeScript/Vite build, secret hygiene validation, private storage validation, API origin validation, RDS backup validation, deployment readiness validation, and UAT manifest validation.
 - Focused RFI/submittal party-access regression tests passed for company-party workflow access, project-object authorization, and contractual audit; focused risk closeout and approval-workflow tests passed.
 - Prisma validate passed for `backend/prisma/schema.prisma`; backend OpenAPI validation passed for 255 documented paths; backend Jest passed with 75 suites and 1068 tests; frontend ESLint passed with warnings only; frontend TypeScript/Vite production build passed with existing Vite deprecation/plugin/chunk-size warnings; secret hygiene validation and self-test passed; private runtime storage validation passed.
