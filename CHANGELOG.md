@@ -2,6 +2,13 @@
 
 All notable platform-wide changes should be recorded here. Agents must read this file before starting work and add a concise entry for every meaningful code, schema, API, or workflow change.
 
+## 2026-06-14
+
+### Changed
+
+- Made `backend/src/config/db.js` lazy-initialize PrismaClient via a Proxy so that importing the module at require-time does not throw when `prisma generate` has not been run. This fixes the OpenAPI validation CI step which imports the full Express app tree but never makes database calls.
+- Added a `prisma generate` step to both `.github/workflows/openapi.yml` and `.github/workflows/quality-gates.yml` (openapi-validate job) before the `openapi:validate` command, as a belt-and-suspenders safeguard.
+
 ## 2026-06-13
 
 ### Added
