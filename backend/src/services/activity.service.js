@@ -10,6 +10,7 @@ const {
 } = require('./activity-dependency.service');
 const { toMoneyNumber } = require('../utils/money');
 const progressService = require('./progress.service');
+const { summarizeRiskActivityLinks } = require('./risk.service');
 
 const VALID_CATEGORIES = [
   'civil',
@@ -32,6 +33,41 @@ const computeStatus = (latestProgress, endDate) => {
   return 'todo';
 };
 
+const normalizeActivityCode = (value) => {
+  if (value === null) return null;
+  if (value === undefined) return undefined;
+  const trimmed = String(value).trim();
+  return trimmed || null;
+};
+
+const assertUniqueActivityCode = async ({
+  projectId,
+  activityCode,
+  excludeActivityId = null,
+  tx = prisma,
+}) => {
+  if (!activityCode) return;
+
+  const existing = await tx.activity.findFirst({
+    where: {
+      projectId,
+      isActive: true,
+      activityCode,
+      ...(excludeActivityId ? { id: { not: excludeActivityId } } : {}),
+    },
+    select: { id: true },
+  });
+
+  if (existing) {
+    throw new HttpError(
+      409,
+      'ACTIVITY_CODE_CONFLICT',
+      'Activity code must be unique among active activities in this project.',
+      { activityCode },
+    );
+  }
+};
+
 const activityInclude = {
   progress: {
     where: { status: 'approved' },
@@ -47,6 +83,7 @@ const activityInclude = {
         select: {
           id: true,
           name: true,
+          activityCode: true,
           wbsCode: true,
           p6ActivityId: true,
           sortOrder: true,
@@ -54,6 +91,23 @@ const activityInclude = {
       },
     },
     orderBy: { createdAt: 'asc' },
+  },
+  riskLinks: {
+    include: {
+      risk: {
+        select: {
+          id: true,
+          ref: true,
+          description: true,
+          severity: true,
+          status: true,
+          owner: true,
+          dueDate: true,
+          escalationLevel: true,
+        },
+      },
+    },
+    orderBy: [{ createdAt: 'asc' }],
   },
   progressMethod: true,
   progressSubmissions: {
@@ -127,6 +181,7 @@ const sanitizeActivity = (activity, allocationTotals = null, project = null) => 
     id: activity.id,
     projectId: activity.projectId,
     name: activity.name,
+    activityCode: activity.activityCode ?? null,
     wbsCode: activity.wbsCode,
     category: activity.category,
     earlyStart: activity.earlyStart,
@@ -165,6 +220,7 @@ const sanitizeActivity = (activity, allocationTotals = null, project = null) => 
     pendingProgress:
       progressService.serializeSubmission(activity.progressSubmissions?.[0]) ||
       null,
+    projectRiskSummary: summarizeRiskActivityLinks(activity.riskLinks || []),
     progressApprovalStatus: activity.progressSubmissions?.[0]
       ? activity.progressSubmissions[0].status
       : latestProgress
@@ -250,6 +306,8 @@ const createActivity = async ({ orgId, projectId, payload }) => {
   const endDate = payload.endDate ? new Date(payload.endDate) : null;
   assertDates({ startDate, endDate });
   const dateWarnings = collectDateWarnings({ project, startDate, endDate });
+  const activityCode = normalizeActivityCode(payload.activityCode);
+  await assertUniqueActivityCode({ projectId, activityCode });
 
   const engineerIds = payload.engineerIds ?? [];
   if (!engineerIds.length) {
@@ -301,6 +359,7 @@ const createActivity = async ({ orgId, projectId, payload }) => {
       data: {
         projectId,
         name: payload.name,
+        activityCode,
         wbsCode: payload.wbsCode ?? null,
         calendarId: project.projectCalendar ?? null,
         category: payload.category ?? null,
@@ -361,6 +420,14 @@ const updateActivity = async ({ orgId, projectId, activityId, payload }) => {
   const data = {};
 
   if (payload.name !== undefined) data.name = payload.name;
+  if (payload.activityCode !== undefined) {
+    data.activityCode = normalizeActivityCode(payload.activityCode);
+    await assertUniqueActivityCode({
+      projectId,
+      activityCode: data.activityCode,
+      excludeActivityId: activityId,
+    });
+  }
   if (payload.wbsCode !== undefined) data.wbsCode = payload.wbsCode;
   if (payload.category !== undefined) {
     if (payload.category && !VALID_CATEGORIES.includes(payload.category)) {
@@ -491,6 +558,7 @@ const updateProgress = async ({
   projectId,
   activityId,
   userId,
+  userRole,
   payload,
 }) => {
   const project = await ensureProject(orgId, projectId);
@@ -501,6 +569,7 @@ const updateProgress = async ({
     projectId,
     activityId,
     userId,
+    userRole,
     payload,
   });
 
@@ -511,7 +580,13 @@ const updateProgress = async ({
   };
 };
 
-const bulkUpdateProgress = async ({ orgId, projectId, userId, updates }) => {
+const bulkUpdateProgress = async ({
+  orgId,
+  projectId,
+  userId,
+  userRole,
+  updates,
+}) => {
   await ensureProject(orgId, projectId);
 
   const activityIds = [...new Set((updates || []).map((u) => u.activityId))];
@@ -522,6 +597,12 @@ const bulkUpdateProgress = async ({ orgId, projectId, userId, updates }) => {
   const activityMap = new Map(
     activities.map((activity) => [activity.id, activity]),
   );
+  await progressService.assertProgressSubmitAllowed({
+    projectId,
+    activityIds: activities.map((activity) => activity.id),
+    userId,
+    userRole,
+  });
 
   const submissions = [];
   for (const update of updates || []) {
@@ -533,6 +614,7 @@ const bulkUpdateProgress = async ({ orgId, projectId, userId, updates }) => {
       projectId,
       activityId: update.activityId,
       userId,
+      userRole,
       payload: update,
     });
     submissions.push(submission);

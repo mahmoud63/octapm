@@ -1,37 +1,37 @@
-const express = require('express');
-const { body, param, query } = require('express-validator');
-const { asyncHandler } = require('../utils/async-handler');
-const { sendSuccess } = require('../utils/api-response');
-const { authenticate } = require('../middleware/auth');
-const { requirePermission } = require('../middleware/rbac');
-const { validate } = require('../middleware/validate');
-const { moneyBody } = require('../utils/money');
-const evService = require('../services/earned-value.service');
+const express = require("express");
+const { body, param, query } = require("express-validator");
+const { asyncHandler } = require("../utils/async-handler");
+const { sendSuccess } = require("../utils/api-response");
+const { authenticate } = require("../middleware/auth");
+const { getEffectiveRole, requirePermission } = require("../middleware/rbac");
+const { validate } = require("../middleware/validate");
+const { moneyBody } = require("../utils/money");
+const evService = require("../services/earned-value.service");
 
 const router = express.Router({ mergeParams: true });
 
 router.use(authenticate);
 
 const COST_LOADING_STATUSES = [
-  'draft',
-  'submitted',
-  'approved',
-  'rejected',
-  'superseded',
+  "draft",
+  "submitted",
+  "approved",
+  "rejected",
+  "superseded",
 ];
-const COST_LOADING_CREATE_STATUSES = ['draft', 'submitted'];
+const COST_LOADING_CREATE_STATUSES = ["draft", "submitted"];
 
 const COST_LOADING_SOURCES = [
-  'manual',
-  'import',
-  'ai',
-  'migration',
-  'budget_revision',
+  "manual",
+  "import",
+  "ai",
+  "migration",
+  "budget_revision",
 ];
 
 router.get(
-  '/periods',
-  requirePermission('cost', 'read'),
+  "/periods",
+  requirePermission("cost", "read"),
   asyncHandler(async (req, res) => {
     const result = await evService.listReportingPeriods({
       orgId: req.user.orgId,
@@ -42,14 +42,14 @@ router.get(
 );
 
 router.post(
-  '/periods',
-  requirePermission('cost', 'create'),
+  "/periods",
+  requirePermission("cost", "create"),
   [
-    body('code').optional().isString().trim().isLength({ max: 40 }),
-    body('label').optional().isString().trim().isLength({ max: 120 }),
-    body('periodStart').isISO8601(),
-    body('periodEnd').isISO8601(),
-    body('cutoffDate').optional().isISO8601(),
+    body("code").optional().isString().trim().isLength({ max: 40 }),
+    body("label").optional().isString().trim().isLength({ max: 120 }),
+    body("periodStart").isISO8601(),
+    body("periodEnd").isISO8601(),
+    body("cutoffDate").optional().isISO8601(),
     validate,
   ],
   asyncHandler(async (req, res) => {
@@ -64,27 +64,36 @@ router.post(
 );
 
 router.post(
-  '/periods/:periodId/lock',
-  requirePermission('cost', 'approve'),
-  [param('periodId').isUUID(), validate],
+  "/periods/:periodId/lock",
+  requirePermission("cost", "approve", {
+    transition: "reporting_period.lock",
+  }),
+  [
+    param("periodId").isUUID(),
+    body("overrideReason")
+      .optional({ nullable: true })
+      .isString()
+      .trim()
+      .isLength({ max: 2000 }),
+    validate,
+  ],
   asyncHandler(async (req, res) => {
     const result = await evService.lockReportingPeriod({
       orgId: req.user.orgId,
       projectId: req.params.projectId,
       periodId: req.params.periodId,
       userId: req.user.id,
+      userRole: getEffectiveRole(req),
+      overrideReason: req.body?.overrideReason || null,
     });
     return sendSuccess(res, result);
   }),
 );
 
 router.get(
-  '/cost-loading',
-  requirePermission('cost', 'read'),
-  [
-    query('status').optional().isIn(COST_LOADING_STATUSES),
-    validate,
-  ],
+  "/cost-loading",
+  requirePermission("cost", "read"),
+  [query("status").optional().isIn(COST_LOADING_STATUSES), validate],
   asyncHandler(async (req, res) => {
     const result = await evService.listCostLoadings({
       orgId: req.user.orgId,
@@ -96,17 +105,17 @@ router.get(
 );
 
 router.post(
-  '/cost-loading',
-  requirePermission('cost', 'create'),
+  "/cost-loading",
+  requirePermission("cost", "create"),
   [
-    body('activityId').isUUID(),
-    body('reportingPeriodId').optional({ nullable: true }).isUUID(),
-    body('plannedDate').isISO8601(),
-    moneyBody('plannedValue', { required: true }),
-    body('source').optional().isIn(COST_LOADING_SOURCES),
-    body('baselineVersion').optional().isString().trim().isLength({ max: 80 }),
-    body('status').optional().isIn(COST_LOADING_CREATE_STATUSES),
-    body('notes').optional().isString().trim(),
+    body("activityId").isUUID(),
+    body("reportingPeriodId").optional({ nullable: true }).isUUID(),
+    body("plannedDate").isISO8601(),
+    moneyBody("plannedValue", { required: true }),
+    body("source").optional().isIn(COST_LOADING_SOURCES),
+    body("baselineVersion").optional().isString().trim().isLength({ max: 80 }),
+    body("status").optional().isIn(COST_LOADING_CREATE_STATUSES),
+    body("notes").optional().isString().trim(),
     validate,
   ],
   asyncHandler(async (req, res) => {
@@ -122,17 +131,17 @@ router.post(
 );
 
 router.patch(
-  '/cost-loading/:id',
-  requirePermission('cost', 'update'),
+  "/cost-loading/:id",
+  requirePermission("cost", "update"),
   [
-    param('id').isUUID(),
-    body('activityId').optional().isUUID(),
-    body('reportingPeriodId').optional({ nullable: true }).isUUID(),
-    body('plannedDate').optional().isISO8601(),
-    moneyBody('plannedValue'),
-    body('source').optional().isIn(COST_LOADING_SOURCES),
-    body('baselineVersion').optional().isString().trim().isLength({ max: 80 }),
-    body('notes').optional().isString().trim(),
+    param("id").isUUID(),
+    body("activityId").optional().isUUID(),
+    body("reportingPeriodId").optional({ nullable: true }).isUUID(),
+    body("plannedDate").optional().isISO8601(),
+    moneyBody("plannedValue"),
+    body("source").optional().isIn(COST_LOADING_SOURCES),
+    body("baselineVersion").optional().isString().trim().isLength({ max: 80 }),
+    body("notes").optional().isString().trim(),
     validate,
   ],
   asyncHandler(async (req, res) => {
@@ -148,9 +157,9 @@ router.patch(
 );
 
 router.post(
-  '/cost-loading/:id/submit',
-  requirePermission('cost', 'submit'),
-  [param('id').isUUID(), validate],
+  "/cost-loading/:id/submit",
+  requirePermission("cost", "submit"),
+  [param("id").isUUID(), validate],
   asyncHandler(async (req, res) => {
     const result = await evService.submitCostLoading({
       orgId: req.user.orgId,
@@ -164,9 +173,9 @@ router.post(
 );
 
 router.post(
-  '/cost-loading/:id/approve',
-  requirePermission('cost', 'approve'),
-  [param('id').isUUID(), validate],
+  "/cost-loading/:id/approve",
+  requirePermission("cost", "approve"),
+  [param("id").isUUID(), validate],
   asyncHandler(async (req, res) => {
     const result = await evService.approveCostLoading({
       orgId: req.user.orgId,
@@ -180,11 +189,11 @@ router.post(
 );
 
 router.post(
-  '/cost-loading/:id/reject',
-  requirePermission('cost', 'approve'),
+  "/cost-loading/:id/reject",
+  requirePermission("cost", "approve"),
   [
-    param('id').isUUID(),
-    body('reason').isString().trim().notEmpty().isLength({ max: 2000 }),
+    param("id").isUUID(),
+    body("reason").isString().trim().notEmpty().isLength({ max: 2000 }),
     validate,
   ],
   asyncHandler(async (req, res) => {
@@ -201,11 +210,11 @@ router.post(
 );
 
 router.get(
-  '/ev',
-  requirePermission('cost', 'read'),
+  "/ev",
+  requirePermission("cost", "read"),
   [
-    query('periodId').optional().isUUID(),
-    query('cutoffDate').optional().isISO8601(),
+    query("periodId").optional().isUUID(),
+    query("cutoffDate").optional().isISO8601(),
     validate,
   ],
   asyncHandler(async (req, res) => {

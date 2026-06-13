@@ -41,6 +41,8 @@ import {
 } from '@/components/ui/select'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Textarea } from '@/components/ui/textarea'
+import { HistoryPanel } from '@/features/audit/components/audit-history-panel'
+import { useEquipment } from '@/features/equipment/hooks/use-equipment'
 import type { ScheduleActivity } from '@/features/schedule/data/schema'
 import {
   type DailyReport,
@@ -58,7 +60,7 @@ type Props = {
 }
 
 type CrewRow = { trade: string; workers: string; hours: string }
-type EquipmentRow = { name: string; hours: string }
+type EquipmentRow = { equipmentId: string; name: string; hours: string }
 type MaterialRow = { name: string; qty: string; unit: string }
 type ShiftValue = 'day' | 'night' | 'swing'
 type RejectTarget = {
@@ -94,8 +96,13 @@ type DiaryDraft = {
 }
 
 const today = () => new Date().toISOString().slice(0, 10)
+const UNLISTED_EQUIPMENT_VALUE = '__unlisted__'
 const blankCrew = (): CrewRow => ({ trade: '', workers: '', hours: '8' })
-const blankEquipment = (): EquipmentRow => ({ name: '', hours: '' })
+const blankEquipment = (): EquipmentRow => ({
+  equipmentId: '',
+  name: '',
+  hours: '',
+})
 const blankMaterial = (): MaterialRow => ({ name: '', qty: '', unit: '' })
 
 const statusClasses: Record<ReportStatus, string> = {
@@ -203,6 +210,7 @@ export function SiteReportingDashboard({ projectId, activities }: Props) {
   )
   const dailyReports = useDailyReports(projectId)
   const siteDiaries = useSiteDiaries(projectId)
+  const { data: equipmentMaster = [] } = useEquipment(projectId)
   const uploadPhotos = useUploadSitePhotos(projectId)
   const refreshSiteReporting = useRefreshSiteReporting(projectId)
 
@@ -470,8 +478,9 @@ export function SiteReportingDashboard({ projectId, activities }: Props) {
               hours: Number(row.hours || 0),
             })),
           equipment: dailyEquipment
-            .filter((row) => row.name || row.hours)
+            .filter((row) => row.equipmentId || row.name || row.hours)
             .map((row) => ({
+              equipmentId: row.equipmentId || undefined,
               name: row.name || 'site equipment',
               hours: Number(row.hours || 0),
             })),
@@ -547,8 +556,9 @@ export function SiteReportingDashboard({ projectId, activities }: Props) {
               hours: Number(row.hours || 0),
             })),
           equipment: diaryEquipment
-            .filter((row) => row.name || row.hours)
+            .filter((row) => row.equipmentId || row.name || row.hours)
             .map((row) => ({
+              equipmentId: row.equipmentId || undefined,
               name: row.name || 'site equipment',
               hours: Number(row.hours || 0),
             })),
@@ -665,6 +675,7 @@ export function SiteReportingDashboard({ projectId, activities }: Props) {
           type='button'
           size='sm'
           variant='outline'
+          className='min-h-10'
           onClick={() => setRows([...rows, blankCrew()])}
         >
           <Plus className='mr-1.5 h-4 w-4' />
@@ -705,6 +716,7 @@ export function SiteReportingDashboard({ projectId, activities }: Props) {
             type='button'
             size='icon'
             variant='ghost'
+            className='size-10 sm:size-9'
             title='Remove row'
             aria-label='Remove manpower row'
             onClick={() => setRows(rows.filter((_, i) => i !== index))}
@@ -728,6 +740,7 @@ export function SiteReportingDashboard({ projectId, activities }: Props) {
           type='button'
           size='sm'
           variant='outline'
+          className='min-h-10'
           onClick={() => setRows([...rows, blankEquipment()])}
         >
           <Plus className='mr-1.5 h-4 w-4' />
@@ -737,11 +750,42 @@ export function SiteReportingDashboard({ projectId, activities }: Props) {
       {rows.map((row, index) => (
         <div
           key={index}
-          className='grid gap-2 sm:grid-cols-[minmax(0,1fr)_120px_36px]'
+          className='grid gap-2 sm:grid-cols-[minmax(0,0.9fr)_minmax(0,1fr)_96px_36px]'
         >
+          <Select
+            value={row.equipmentId || UNLISTED_EQUIPMENT_VALUE}
+            onValueChange={(value) => {
+              if (value === UNLISTED_EQUIPMENT_VALUE) {
+                updateEquipment(rows, setRows, index, {
+                  equipmentId: '',
+                  name: '',
+                })
+                return
+              }
+
+              const selected = equipmentMaster.find((item) => item.id === value)
+              updateEquipment(rows, setRows, index, {
+                equipmentId: value,
+                name: selected?.name || row.name,
+              })
+            }}
+          >
+            <SelectTrigger>
+              <SelectValue placeholder='Equipment' />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={UNLISTED_EQUIPMENT_VALUE}>Unlisted</SelectItem>
+              {equipmentMaster.map((item) => (
+                <SelectItem key={item.id} value={item.id}>
+                  {item.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
           <Input
             placeholder='Name'
             value={row.name}
+            readOnly={Boolean(row.equipmentId)}
             onChange={(event) =>
               updateEquipment(rows, setRows, index, {
                 name: event.target.value,
@@ -763,6 +807,7 @@ export function SiteReportingDashboard({ projectId, activities }: Props) {
             type='button'
             size='icon'
             variant='ghost'
+            className='size-10 sm:size-9'
             title='Remove row'
             aria-label='Remove equipment row'
             onClick={() => setRows(rows.filter((_, i) => i !== index))}
@@ -786,6 +831,7 @@ export function SiteReportingDashboard({ projectId, activities }: Props) {
           type='button'
           size='sm'
           variant='outline'
+          className='min-h-10'
           onClick={() => setRows([...rows, blankMaterial()])}
         >
           <Plus className='mr-1.5 h-4 w-4' />
@@ -824,6 +870,7 @@ export function SiteReportingDashboard({ projectId, activities }: Props) {
             type='button'
             size='icon'
             variant='ghost'
+            className='size-10 sm:size-9'
             title='Remove row'
             aria-label='Remove material row'
             onClick={() => setRows(rows.filter((_, i) => i !== index))}
@@ -885,6 +932,7 @@ export function SiteReportingDashboard({ projectId, activities }: Props) {
               {kind === 'report' && canApproveDailyReport && (
                 <Button
                   size='sm'
+                  className='min-h-10 w-full sm:w-auto'
                   onClick={() => approveReport.mutate(record.id)}
                   disabled={approveReport.isPending}
                 >
@@ -896,6 +944,7 @@ export function SiteReportingDashboard({ projectId, activities }: Props) {
                 <Button
                   size='sm'
                   variant='outline'
+                  className='min-h-10 w-full sm:w-auto'
                   onClick={() =>
                     setRejectTarget({ kind: 'report', id: record.id, title })
                   }
@@ -908,6 +957,7 @@ export function SiteReportingDashboard({ projectId, activities }: Props) {
               {kind === 'diary' && canApproveSiteDiary && (
                 <Button
                   size='sm'
+                  className='min-h-10 w-full sm:w-auto'
                   onClick={() => approveDiary.mutate(record.id)}
                   disabled={approveDiary.isPending}
                 >
@@ -919,6 +969,7 @@ export function SiteReportingDashboard({ projectId, activities }: Props) {
                 <Button
                   size='sm'
                   variant='outline'
+                  className='min-h-10 w-full sm:w-auto'
                   onClick={() =>
                     setRejectTarget({ kind: 'diary', id: record.id, title })
                   }
@@ -933,6 +984,16 @@ export function SiteReportingDashboard({ projectId, activities }: Props) {
               )}
             </div>
           )}
+        </div>
+        <div className='mt-3'>
+          <HistoryPanel
+            projectId={projectId}
+            entityType={kind === 'report' ? 'daily_report' : 'site_diary'}
+            entityId={record.id}
+            title={`${kind === 'report' ? 'Daily Report' : 'Site Diary'} History`}
+            limit={12}
+            showFilters={false}
+          />
         </div>
       </div>
     )
@@ -963,15 +1024,24 @@ export function SiteReportingDashboard({ projectId, activities }: Props) {
 
       <Tabs defaultValue='activity' className='space-y-4'>
         <TabsList className='grid h-auto w-full grid-cols-3'>
-          <TabsTrigger value='activity'>
+          <TabsTrigger
+            value='activity'
+            className='min-h-11 flex-col gap-1 py-2 text-xs sm:flex-row sm:text-sm'
+          >
             <Camera className='h-4 w-4' />
             Activity
           </TabsTrigger>
-          <TabsTrigger value='diary'>
+          <TabsTrigger
+            value='diary'
+            className='min-h-11 flex-col gap-1 py-2 text-xs sm:flex-row sm:text-sm'
+          >
             <CloudSun className='h-4 w-4' />
             Diary
           </TabsTrigger>
-          <TabsTrigger value='review'>
+          <TabsTrigger
+            value='review'
+            className='min-h-11 flex-col gap-1 py-2 text-xs sm:flex-row sm:text-sm'
+          >
             <ClipboardCheck className='h-4 w-4' />
             Review
           </TabsTrigger>
@@ -1040,13 +1110,16 @@ export function SiteReportingDashboard({ projectId, activities }: Props) {
                     max={100}
                     value={dailyPct}
                     className='min-h-9 flex-1'
+                    aria-label='Activity progress percent'
                     onChange={(event) => setDailyPct(event.target.value)}
                   />
                   <Input
                     type='number'
+                    inputMode='numeric'
                     min={0}
                     max={100}
                     value={dailyPct}
+                    aria-label='Activity progress percent value'
                     onChange={(event) => setDailyPct(event.target.value)}
                     className='w-20'
                   />
@@ -1060,21 +1133,29 @@ export function SiteReportingDashboard({ projectId, activities }: Props) {
                 />
               </div>
               <div className='md:col-span-2'>
-                <Label className='text-xs'>Photos</Label>
+                <Label htmlFor='daily-report-photo-input' className='text-xs'>
+                  Photos
+                </Label>
                 <Input
+                  id='daily-report-photo-input'
+                  className='min-h-10'
                   type='file'
-                  accept='image/*'
+                  accept='image/*,.heic,.heif'
                   multiple
                   capture='environment'
+                  aria-describedby='daily-report-photo-status'
                   onChange={(event) =>
                     setDailyPhotoFiles(Array.from(event.target.files ?? []))
                   }
                 />
-                {dailyPhotoFiles.length > 0 && (
-                  <p className='mt-1 text-xs text-muted-foreground'>
-                    {dailyPhotoFiles.length} selected
-                  </p>
-                )}
+                <p
+                  id='daily-report-photo-status'
+                  className='mt-1 text-xs text-muted-foreground'
+                >
+                  {dailyPhotoFiles.length
+                    ? `${dailyPhotoFiles.length} selected`
+                    : 'No photos selected'}
+                </p>
               </div>
             </div>
 
@@ -1120,6 +1201,7 @@ export function SiteReportingDashboard({ projectId, activities }: Props) {
             <div className='mt-4 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end'>
               <Button
                 variant='outline'
+                className='min-h-10 w-full sm:w-auto'
                 disabled={!canSubmitDailyReport || dailyMutation.isPending}
                 onClick={() => runDailyAction('draft')}
               >
@@ -1127,6 +1209,7 @@ export function SiteReportingDashboard({ projectId, activities }: Props) {
                 Save Draft
               </Button>
               <Button
+                className='min-h-10 w-full sm:w-auto'
                 disabled={
                   !canSubmitDailyReport ||
                   !dailyActivityId ||
@@ -1203,21 +1286,29 @@ export function SiteReportingDashboard({ projectId, activities }: Props) {
                 />
               </div>
               <div className='md:col-span-2'>
-                <Label className='text-xs'>Photos</Label>
+                <Label htmlFor='site-diary-photo-input' className='text-xs'>
+                  Photos
+                </Label>
                 <Input
+                  id='site-diary-photo-input'
+                  className='min-h-10'
                   type='file'
-                  accept='image/*'
+                  accept='image/*,.heic,.heif'
                   multiple
                   capture='environment'
+                  aria-describedby='site-diary-photo-status'
                   onChange={(event) =>
                     setDiaryPhotoFiles(Array.from(event.target.files ?? []))
                   }
                 />
-                {diaryPhotoFiles.length > 0 && (
-                  <p className='mt-1 text-xs text-muted-foreground'>
-                    {diaryPhotoFiles.length} selected
-                  </p>
-                )}
+                <p
+                  id='site-diary-photo-status'
+                  className='mt-1 text-xs text-muted-foreground'
+                >
+                  {diaryPhotoFiles.length
+                    ? `${diaryPhotoFiles.length} selected`
+                    : 'No photos selected'}
+                </p>
               </div>
             </div>
 
@@ -1284,6 +1375,7 @@ export function SiteReportingDashboard({ projectId, activities }: Props) {
             <div className='mt-4 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end'>
               <Button
                 variant='outline'
+                className='min-h-10 w-full sm:w-auto'
                 disabled={!canSubmitSiteDiary || diaryMutation.isPending}
                 onClick={() => runDiaryAction('draft')}
               >
@@ -1291,6 +1383,7 @@ export function SiteReportingDashboard({ projectId, activities }: Props) {
                 Save Draft
               </Button>
               <Button
+                className='min-h-10 w-full sm:w-auto'
                 disabled={
                   !canSubmitSiteDiary ||
                   isOffline ||
@@ -1364,6 +1457,7 @@ export function SiteReportingDashboard({ projectId, activities }: Props) {
           <DialogFooter>
             <Button
               variant='outline'
+              className='min-h-10'
               onClick={() => {
                 setRejectTarget(null)
                 setRejectReason('')
@@ -1373,6 +1467,7 @@ export function SiteReportingDashboard({ projectId, activities }: Props) {
             </Button>
             <Button
               variant='destructive'
+              className='min-h-10'
               disabled={
                 !rejectReason.trim() ||
                 rejectReport.isPending ||

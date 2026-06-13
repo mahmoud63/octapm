@@ -113,7 +113,7 @@ export function BoqAddActivityDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className='max-w-md'>
         <DialogHeader>
-          <DialogTitle>Add Schedule Activity</DialogTitle>
+          <DialogTitle>Add Draft Allocation Link</DialogTitle>
         </DialogHeader>
 
         <Form {...form}>
@@ -254,7 +254,7 @@ export function BoqAddActivityDialog({
                 Cancel
               </Button>
               <Button type='submit' disabled={createActivity.isPending}>
-                {createActivity.isPending ? 'Adding…' : 'Add Activity'}
+                {createActivity.isPending ? 'Adding...' : 'Add Draft Link'}
               </Button>
             </DialogFooter>
           </form>

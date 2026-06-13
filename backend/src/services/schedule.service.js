@@ -20,6 +20,15 @@ const {
 } = require("./activity-dependency.service");
 const auditService = require("./audit.service");
 const approvalWorkflowService = require("./approval-workflow.service");
+const { summarizeRiskActivityLinks } = require("./risk.service");
+
+const PROCUREMENT_SEVERITY_RANK = {
+  none: 0,
+  low: 1,
+  medium: 2,
+  high: 3,
+  critical: 4,
+};
 
 const client = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY,
@@ -254,6 +263,10 @@ const buildScheduleReadiness = ({
     activityById.set(activity.id, activity);
     refs.add(activity.id);
     refToActivity.set(activity.id, activity);
+    if (activity.activityCode) {
+      refs.add(activity.activityCode);
+      refToActivity.set(activity.activityCode, activity);
+    }
     if (activity.wbsCode) {
       refs.add(activity.wbsCode);
       refToActivity.set(activity.wbsCode, activity);
@@ -304,6 +317,7 @@ const buildScheduleReadiness = ({
       const ref = predecessor.predRef;
       const isSelf =
         ref === activity.id ||
+        ref === activity.activityCode ||
         ref === activity.wbsCode ||
         ref === activity.p6ActivityId;
       const predecessorActivity = refToActivity.get(ref);
@@ -614,6 +628,7 @@ const getReadinessForRevision = async ({ project, revision }) => {
               select: {
                 id: true,
                 name: true,
+                activityCode: true,
                 wbsCode: true,
                 p6ActivityId: true,
                 sortOrder: true,
@@ -728,6 +743,7 @@ function normalizeSnapshotActivity(raw, index, project = {}) {
   const p6ActivityId = trimOrNull(
     raw?.p6ActivityId || raw?.activityId || raw?.id || raw?.uid,
   );
+  const activityCode = trimOrNull(raw?.activityCode);
   const wbsCode = trimOrNull(raw?.wbsCode || raw?.wbs);
   const earlyStart = numberOrNull(raw?.earlyStart);
   const earlyFinish = numberOrNull(raw?.earlyFinish);
@@ -737,6 +753,7 @@ function normalizeSnapshotActivity(raw, index, project = {}) {
     sourceActivityId: trimOrNull(raw?.sourceActivityId || raw?.sourceTaskId),
     uid: trimOrNull(raw?.uid),
     name: String(raw?.name || "Activity"),
+    activityCode,
     p6ActivityId,
     wbsCode,
     calendarId: trimOrNull(raw?.calendarId) || project.projectCalendar || null,
@@ -794,6 +811,7 @@ function buildStagedReferenceMap(stagedActivities) {
       activity.draftKey,
       activity.sourceActivityId,
       activity.uid,
+      activity.activityCode,
       activity.p6ActivityId,
       activity.wbsCode,
       activity.name,
@@ -883,6 +901,7 @@ function activityIdentity(activity) {
   return {
     id: activity.id,
     name: activity.name,
+    activityCode: activity.activityCode || null,
     p6ActivityId: activity.p6ActivityId || null,
     wbsCode: activity.wbsCode || null,
     sortOrder: activity.sortOrder ?? null,
@@ -893,6 +912,7 @@ function stagedIdentity(activity) {
   return {
     key: activity.draftKey,
     name: activity.name,
+    activityCode: activity.activityCode || null,
     p6ActivityId: activity.p6ActivityId || null,
     wbsCode: activity.wbsCode || null,
     sortOrder: activity.sortOrder ?? null,
@@ -904,10 +924,14 @@ function suggestActivityMappings(existingActivities, stagedActivities) {
     stagedActivities.map((activity) => activity.draftKey),
   );
   const byP6 = new Map();
+  const byActivityCode = new Map();
   const byWbs = new Map();
   const byName = new Map();
 
   for (const staged of stagedActivities) {
+    if (staged.activityCode && !byActivityCode.has(staged.activityCode)) {
+      byActivityCode.set(staged.activityCode, staged);
+    }
     if (staged.p6ActivityId && !byP6.has(staged.p6ActivityId)) {
       byP6.set(staged.p6ActivityId, staged);
     }
@@ -921,6 +945,13 @@ function suggestActivityMappings(existingActivities, stagedActivities) {
   const mappings = [];
   for (const existing of existingActivities) {
     const candidates = [
+      {
+        staged: existing.activityCode
+          ? byActivityCode.get(existing.activityCode)
+          : null,
+        matchType: "activity_code",
+        confidence: 1,
+      },
       {
         staged: existing.p6ActivityId ? byP6.get(existing.p6ActivityId) : null,
         matchType: "p6_activity_id",
@@ -973,6 +1004,7 @@ function activityDataFromStaged(staged, projectId) {
   return {
     projectId,
     name: staged.name,
+    activityCode: staged.activityCode,
     p6ActivityId: staged.p6ActivityId,
     wbsCode: staged.wbsCode,
     calendarId: staged.calendarId,
@@ -1019,6 +1051,8 @@ function buildGeneratedRevisionSnapshot({ scheduleJson, boqRows, project }) {
           normalizeSnapshotActivity(
             {
               ...activity,
+              activityCode:
+                activity.activityCode || activity.activityId || activity.id || null,
               p6ActivityId: activity.p6ActivityId || activity.id,
               wbsCode: activity.wbsCode || activity.wbs,
               category: activity.category || activity.phase,
@@ -1407,7 +1441,8 @@ async function allocateResources({
   onRetry,
 }) {
   const activityList = activities.slice(0, 80).map((activity) => ({
-    activityId: activity.p6ActivityId || activity.wbsCode || activity.id,
+    activityId:
+      activity.activityCode || activity.p6ActivityId || activity.id,
     name: activity.name,
     duration: activity.duration,
     discipline: activity.category || "general",
@@ -1447,6 +1482,7 @@ async function saveResourceAllocations(projectId, allocations) {
     select: {
       id: true,
       duration: true,
+      activityCode: true,
       p6ActivityId: true,
       wbsCode: true,
       name: true,
@@ -1456,6 +1492,7 @@ async function saveResourceAllocations(projectId, allocations) {
   const lookup = new Map();
   for (const activity of activities) {
     lookup.set(activity.id, activity);
+    if (activity.activityCode) lookup.set(activity.activityCode, activity);
     if (activity.p6ActivityId) lookup.set(activity.p6ActivityId, activity);
     if (activity.wbsCode) lookup.set(activity.wbsCode, activity);
     lookup.set(activity.name, activity);
@@ -2025,6 +2062,73 @@ const startGenerateJob = async ({
   return { jobId };
 };
 
+const toIso = (value) =>
+  value instanceof Date ? value.toISOString() : value || null;
+
+const procurementAlertItem = (alert) => ({
+  id: alert.id,
+  status: alert.status,
+  severity: alert.severity,
+  reason: alert.reason,
+  daysAtRisk: alert.daysAtRisk || 0,
+  needDate: toIso(alert.needDate),
+  orderByDate: toIso(alert.orderByDate),
+  expectedDeliveryDate: toIso(alert.expectedDeliveryDate),
+  source: alert.poLineId
+    ? "po_line"
+    : alert.activityMaterialId
+      ? "activity_material"
+      : alert.packageId
+        ? "procurement_package"
+        : "procurement_order",
+  item:
+    alert.poLine?.description ||
+    alert.activityMaterial?.name ||
+    alert.package?.title ||
+    alert.order?.item ||
+    alert.order?.ref ||
+    "Procurement item",
+  ref:
+    alert.poLine?.itemCode ||
+    alert.package?.packageNumber ||
+    alert.order?.ref ||
+    null,
+});
+
+const summarizeProcurementAlerts = (alerts = []) => {
+  const activeAlerts = alerts.filter((alert) =>
+    ["open", "acknowledged"].includes(alert.status),
+  );
+  if (!activeAlerts.length) return null;
+
+  const items = activeAlerts
+    .map(procurementAlertItem)
+    .sort((a, b) => {
+      const severityDelta =
+        PROCUREMENT_SEVERITY_RANK[b.severity] -
+        PROCUREMENT_SEVERITY_RANK[a.severity];
+      if (severityDelta !== 0) return severityDelta;
+      return (b.daysAtRisk || 0) - (a.daysAtRisk || 0);
+    });
+  const top = items[0];
+
+  return {
+    atRiskCount: items.filter(
+      (item) => PROCUREMENT_SEVERITY_RANK[item.severity] >= 2,
+    ).length,
+    openCount: items.filter((item) => item.status === "open").length,
+    acknowledgedCount: items.filter((item) => item.status === "acknowledged")
+      .length,
+    highestSeverity: top.severity,
+    reason: top.reason,
+    daysAtRisk: top.daysAtRisk,
+    needDate: top.needDate,
+    orderByDate: top.orderByDate,
+    expectedDeliveryDate: top.expectedDeliveryDate,
+    items,
+  };
+};
+
 const getProjectSchedule = async ({ orgId, projectId }) => {
   const project = await prisma.project.findFirst({
     where: { id: projectId, orgId },
@@ -2053,6 +2157,7 @@ const getProjectSchedule = async ({ orgId, projectId }) => {
               select: {
                 id: true,
                 name: true,
+                activityCode: true,
                 wbsCode: true,
                 p6ActivityId: true,
                 sortOrder: true,
@@ -2060,6 +2165,41 @@ const getProjectSchedule = async ({ orgId, projectId }) => {
             },
           },
           orderBy: { createdAt: "asc" },
+        },
+        leadTimeAlerts: {
+          where: { status: { in: ["open", "acknowledged"] } },
+          include: {
+            package: {
+              select: { id: true, packageNumber: true, title: true },
+            },
+            order: {
+              select: { id: true, ref: true, item: true },
+            },
+            poLine: {
+              select: { id: true, itemCode: true, description: true },
+            },
+            activityMaterial: {
+              select: { id: true, code: true, name: true },
+            },
+          },
+          orderBy: [{ severity: "desc" }, { daysAtRisk: "desc" }],
+        },
+        riskLinks: {
+          include: {
+            risk: {
+              select: {
+                id: true,
+                ref: true,
+                description: true,
+                severity: true,
+                status: true,
+                owner: true,
+                dueDate: true,
+                escalationLevel: true,
+              },
+            },
+          },
+          orderBy: [{ createdAt: "asc" }],
         },
       },
       orderBy: { sortOrder: "asc" },
@@ -2091,7 +2231,9 @@ const getProjectSchedule = async ({ orgId, projectId }) => {
   }
 
   return {
+    dataDate: project.dataDate ?? null,
     revision: serializeRevision(revision, {
+      dataDate: project.dataDate ?? null,
       totalBudget: allocationSummary.approvedAllocatedAmount,
       generatedTotalBudget: revision.totalBudget,
       unallocatedBoqAmount: allocationSummary.unallocatedAmount,
@@ -2124,7 +2266,13 @@ const getProjectSchedule = async ({ orgId, projectId }) => {
       else if (activity.endDate && new Date() > new Date(activity.endDate))
         status = "delayed";
 
-      const { progress, predecessorLinks, ...activityWithoutProgress } =
+      const {
+        progress,
+        predecessorLinks,
+        leadTimeAlerts,
+        riskLinks,
+        ...activityWithoutProgress
+      } =
         activity;
       return {
         ...activityWithoutProgress,
@@ -2138,6 +2286,8 @@ const getProjectSchedule = async ({ orgId, projectId }) => {
         allocatedBoqAmount: approvedAllocation.amount,
         allocatedBoqWeight: approvedAllocation.weight,
         approvedAllocationCount: approvedAllocation.count,
+        procurementRiskSummary: summarizeProcurementAlerts(leadTimeAlerts),
+        projectRiskSummary: summarizeRiskActivityLinks(riskLinks || []),
         pctComplete: pct,
         actualCost,
         actualStart,
@@ -2189,6 +2339,7 @@ const getRevisionMapping = async ({ orgId, projectId, revisionId }) => {
       select: {
         id: true,
         name: true,
+        activityCode: true,
         p6ActivityId: true,
         wbsCode: true,
         sortOrder: true,
@@ -3153,6 +3304,7 @@ const getResourcePlan = async ({ orgId, projectId }) => {
         select: {
           id: true,
           name: true,
+          activityCode: true,
           p6ActivityId: true,
           wbsCode: true,
         },
@@ -3168,8 +3320,8 @@ const getResourcePlan = async ({ orgId, projectId }) => {
         activity: {
           id: row.activity.id,
           activityId:
+            row.activity.activityCode ||
             row.activity.p6ActivityId ||
-            row.activity.wbsCode ||
             row.activity.id,
           name: row.activity.name,
         },

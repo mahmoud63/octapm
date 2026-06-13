@@ -5,6 +5,7 @@ const path = require('path');
 const { asyncHandler } = require('../utils/async-handler');
 const { sendSuccess } = require('../utils/api-response');
 const { HttpError } = require('../utils/http-error');
+const { uploadLimiter } = require('../middleware/rate-limit');
 const fileStorageService = require('../services/file-storage.service');
 
 const router = express.Router({ mergeParams: true });
@@ -48,6 +49,7 @@ const upload = multer({
 
 router.post(
   '/uploads',
+  uploadLimiter,
   upload.array('files', 10),
   asyncHandler(async (req, res) => {
     try {

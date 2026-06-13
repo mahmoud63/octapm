@@ -4,7 +4,7 @@ const { addMoney } = require("../utils/money");
 const { buildAllocationSummary } = require("./activity-boq-allocation.service");
 const { buildScheduleReadiness } = require("./schedule.service");
 
-const RULESET_VERSION = "fb-015-v1";
+const RULESET_VERSION = "fb-015-v2";
 const MONEY_EPSILON = 0.01;
 
 const STATUS = {
@@ -23,7 +23,32 @@ const TARGETS = {
   scheduleEv: { module: "schedule", child: "ev" },
   activities: { module: "activities" },
   cost: { module: "cost", child: "overview" },
+  reports: { module: "reports" },
 };
+
+const OFFICIAL_EV_INPUTS = [
+  {
+    key: "approved_allocations",
+    label: "Approved allocations",
+    source: "ActivityBoqAllocation",
+    requiredStatus: "approved",
+    target: TARGETS.boq,
+  },
+  {
+    key: "approved_progress",
+    label: "Approved progress",
+    source: "ActivityProgress",
+    requiredStatus: "approved",
+    target: TARGETS.scheduleProgress,
+  },
+  {
+    key: "approved_cost_loading",
+    label: "Approved cost loading",
+    source: "ActivityCostLoading",
+    requiredStatus: "approved",
+    target: TARGETS.scheduleEv,
+  },
+];
 
 const toNumber = (value) => {
   const number = Number(value);
@@ -108,7 +133,20 @@ const addStepContext = (steps) =>
     step.blockers.map((blocker) => ({
       stepKey: step.key,
       stepLabel: step.label,
+      actionLabel: step.action.label,
+      target: step.action.target,
       ...blocker,
+    })),
+  );
+
+const addStepWarningContext = (steps) =>
+  steps.flatMap((step) =>
+    step.warnings.map((warning) => ({
+      stepKey: step.key,
+      stepLabel: step.label,
+      actionLabel: step.action.label,
+      target: step.action.target,
+      ...warning,
     })),
   );
 
@@ -348,23 +386,23 @@ const getSetupReadiness = async ({ orgId, projectId }) => {
       ),
   ];
 
+  const costBlockers = [
+    approvedCostLoadingCount === 0 &&
+      issue(
+        "NO_APPROVED_COST_LOADING",
+        "No approved time-phased cost loading rows are available for official EV.",
+      ),
+    reportingPeriodCount === 0 &&
+      issue(
+        "NO_REPORTING_PERIODS",
+        "No EV reporting periods have been created for official reporting.",
+      ),
+  ];
   const costWarnings = [
     costRecordCount === 0 &&
       issue(
         "NO_COST_RECORDS",
         "No activity cost records are available for cost control review.",
-        "warning",
-      ),
-    approvedCostLoadingCount === 0 &&
-      issue(
-        "NO_APPROVED_COST_LOADING",
-        "No approved time-phased cost loading rows are available for official EV.",
-        "warning",
-      ),
-    reportingPeriodCount === 0 &&
-      issue(
-        "NO_REPORTING_PERIODS",
-        "No EV reporting periods have been created.",
         "warning",
       ),
   ];
@@ -447,13 +485,24 @@ const getSetupReadiness = async ({ orgId, projectId }) => {
     ...assignmentWarnings,
   ];
 
+  const progressMethodBlockers = [
+    progressActivityCount > 0 &&
+      progressMethodCount < progressActivityCount &&
+      issue(
+        "PROGRESS_METHODS_INCOMPLETE",
+        "Configure progress methods before locking official EV/reporting snapshots.",
+        "blocking",
+        { progressMethodCount, progressActivityCount },
+      ),
+  ];
+
   const steps = [
     buildStep({
       key: "project_profile",
       label: "Project Profile",
       description: "Core contract dates and project metadata.",
       action: { label: "Review Profile", target: TARGETS.overview },
-      requiredFor: ["baseline", "progress"],
+      requiredFor: ["baseline", "progress", "reporting"],
       complete: profileBlockers.filter(Boolean).length === 0,
       blockers: profileBlockers,
       warnings: profileWarnings,
@@ -469,7 +518,7 @@ const getSetupReadiness = async ({ orgId, projectId }) => {
       label: "BOQ Upload",
       description: "Measured BOQ rows are loaded for schedule and cost setup.",
       action: { label: "Open BOQ", target: TARGETS.boq },
-      requiredFor: ["baseline", "progress"],
+      requiredFor: ["baseline", "progress", "reporting"],
       complete: boqBlockers.filter(Boolean).length === 0,
       blockers: boqBlockers,
       counts: {
@@ -483,7 +532,7 @@ const getSetupReadiness = async ({ orgId, projectId }) => {
       label: "Schedule Generation",
       description: "AI/P6/MSP schedule activities are available.",
       action: { label: "Open Schedule", target: TARGETS.schedule },
-      requiredFor: ["baseline", "progress"],
+      requiredFor: ["baseline", "progress", "reporting"],
       complete:
         scheduleBlockers.filter(Boolean).length === 0 &&
         (activeActivityCount > 0 ||
@@ -505,7 +554,7 @@ const getSetupReadiness = async ({ orgId, projectId }) => {
       label: "BOQ Allocation",
       description: "BOQ value is approved and linked to schedule activities.",
       action: { label: "Map Allocations", target: TARGETS.boq },
-      requiredFor: ["baseline", "progress"],
+      requiredFor: ["baseline", "progress", "reporting"],
       complete: allocationBlockers.filter(Boolean).length === 0,
       blockers: allocationBlockers,
       warnings: allocationWarnings,
@@ -523,10 +572,12 @@ const getSetupReadiness = async ({ orgId, projectId }) => {
       description:
         "Cost records and official EV cost loading basis are checked.",
       action: { label: "Review EV Basis", target: TARGETS.scheduleEv },
+      requiredFor: ["reporting"],
       complete:
         costRecordCount > 0 &&
         approvedCostLoadingCount > 0 &&
         reportingPeriodCount > 0,
+      blockers: costBlockers,
       warnings: costWarnings,
       counts: {
         costRecords: costRecordCount,
@@ -551,11 +602,28 @@ const getSetupReadiness = async ({ orgId, projectId }) => {
       successMessage: "Field engineer assignments are complete.",
     }),
     buildStep({
+      key: "progress_method_configuration",
+      label: "Progress Methods",
+      description:
+        "Progress activities have explicit measurement methods for official EV.",
+      action: { label: "Configure Methods", target: TARGETS.scheduleProgress },
+      requiredFor: ["reporting"],
+      complete:
+        progressActivityCount === 0 ||
+        progressMethodCount >= progressActivityCount,
+      blockers: progressMethodBlockers,
+      counts: {
+        progressMethodCount,
+        progressActivities: progressActivityCount,
+      },
+      successMessage: "Progress methods are configured.",
+    }),
+    buildStep({
       key: "schedule_approval",
       label: "Schedule Approval",
       description: "Schedule revision has passed PM approval.",
       action: { label: "Open Review", target: TARGETS.scheduleRevisions },
-      requiredFor: ["baseline", "progress"],
+      requiredFor: ["baseline", "progress", "reporting"],
       complete: approvalBlockers.filter(Boolean).length === 0,
       blockers: approvalBlockers,
       counts: {
@@ -570,7 +638,7 @@ const getSetupReadiness = async ({ orgId, projectId }) => {
       label: "Baseline Readiness",
       description: "Approved schedule passes baseline lock checks.",
       action: { label: "Lock Baseline", target: TARGETS.scheduleRevisions },
-      requiredFor: ["baseline", "progress"],
+      requiredFor: ["baseline", "progress", "reporting"],
       complete: baselineLocked,
       blockers: scheduleApproved ? readinessBlockers : [],
       warnings: baselineLocked
@@ -604,7 +672,7 @@ const getSetupReadiness = async ({ orgId, projectId }) => {
       label: "Progress Readiness",
       description: "Progress entry has the baseline and field setup it needs.",
       action: { label: "Open Progress", target: TARGETS.scheduleProgress },
-      requiredFor: ["progress"],
+      requiredFor: ["progress", "reporting"],
       complete:
         progressBlockers.filter(Boolean).length === 0 &&
         progressWarnings.filter(Boolean).length === 0,
@@ -626,6 +694,12 @@ const getSetupReadiness = async ({ orgId, projectId }) => {
   const progressBlockerDetails = addStepContext(
     steps.filter((step) => step.requiredFor.includes("progress")),
   );
+  const reportingBlockerDetails = addStepContext(
+    steps.filter((step) => step.requiredFor.includes("reporting")),
+  );
+  const reportingWarningDetails = addStepWarningContext(
+    steps.filter((step) => step.requiredFor.includes("reporting")),
+  );
   const nextStep = firstNextAction(steps);
 
   return {
@@ -646,6 +720,7 @@ const getSetupReadiness = async ({ orgId, projectId }) => {
       readyForBaseline:
         revisionStatus === "approved" && baselineBlockers.length === 0,
       readyForProgress: progressBlockerDetails.length === 0,
+      readyForReporting: reportingBlockerDetails.length === 0,
       nextAction: nextStep
         ? {
             stepKey: nextStep.key,
@@ -687,6 +762,17 @@ const getSetupReadiness = async ({ orgId, projectId }) => {
             ? "Progress is available with setup warnings until PM/Product signs off final hard gates."
             : "Progress setup checks are clear.",
       },
+      reporting: {
+        mode: "block",
+        ready: reportingBlockerDetails.length === 0,
+        blockers: reportingBlockerDetails,
+        warnings: reportingWarningDetails,
+        overrideAllowedRoles: ["pm"],
+        message:
+          reportingBlockerDetails.length > 0
+            ? "Resolve official reporting blockers before locking EV snapshots, or record a PM override reason."
+            : "Official reporting prerequisites are clear.",
+      },
     },
     context: {
       currentRevision: currentRevision
@@ -706,12 +792,20 @@ const getSetupReadiness = async ({ orgId, projectId }) => {
         unallocatedAmount,
       },
       scheduleReadiness,
+      officialEvInputs: OFFICIAL_EV_INPUTS,
     },
     steps,
   };
 };
 
+const getOfficialReportingGate = async ({ orgId, projectId }) => {
+  const readiness = await getSetupReadiness({ orgId, projectId });
+  return readiness.gates.reporting;
+};
+
 module.exports = {
   getSetupReadiness,
+  getOfficialReportingGate,
+  OFFICIAL_EV_INPUTS,
   RULESET_VERSION,
 };

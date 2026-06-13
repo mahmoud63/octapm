@@ -11,6 +11,7 @@ const approvalWorkflowService = require('./approval-workflow.service');
 const ACTIVE_STATUSES = ['draft', 'submitted', 'approved'];
 const CERTIFIED_IPC_STATUSES = ['certified', 'paid'];
 const VALID_SOURCES = ['manual', 'import', 'ai', 'migration'];
+const APPROVED_STATUS = 'approved';
 const EPSILON = 0.000001;
 const MONEY_EPSILON = 0.01;
 
@@ -85,6 +86,7 @@ const allocationInclude = {
     select: {
       id: true,
       name: true,
+      activityCode: true,
       p6ActivityId: true,
       wbsCode: true,
       category: true,
@@ -117,13 +119,14 @@ const computeDefaultWeight = ({ weight, amount, boqItem }) => {
 };
 
 const getActiveTotalsForBoqItem = async (
-  { boqItemId, excludeAllocationId = null },
+  { boqItemId, excludeAllocationId = null, statuses = null },
   tx = prisma,
 ) => {
   const allocations = await tx.activityBoqAllocation.findMany({
     where: {
       boqItemId,
       isActive: true,
+      status: Array.isArray(statuses) ? { in: statuses } : undefined,
       id: excludeAllocationId ? { not: excludeAllocationId } : undefined,
     },
     select: {
@@ -141,6 +144,13 @@ const getActiveTotalsForBoqItem = async (
     { quantity: 0, amount: 0 },
   );
 };
+
+const duplicateActiveAllocationError = () =>
+  new HttpError(
+    400,
+    'DUPLICATE_ACTIVE_ALLOCATION',
+    'An active allocation already exists for this BOQ item and activity',
+  );
 
 const assertAllocationCapacity = ({
   boqItem,
@@ -193,12 +203,28 @@ const assertNoDuplicateActiveAllocation = async (
   });
 
   if (duplicate) {
-    throw new HttpError(
-      400,
-      'DUPLICATE_ACTIVE_ALLOCATION',
-      'An active allocation already exists for this BOQ item and activity',
-    );
+    throw duplicateActiveAllocationError();
   }
+};
+
+const handleAllocationWriteError = (error) => {
+  if (error?.code !== 'P2002') throw error;
+
+  const target = Array.isArray(error.meta?.target)
+    ? error.meta.target
+    : [String(error.meta?.target || '')];
+  const targetText = target.join(' ').toLowerCase();
+  const isActivePair =
+    targetText.includes('activityboqallocation_active_pair_key') ||
+    (targetText.includes('projectid') &&
+      targetText.includes('boqitemid') &&
+      targetText.includes('activityid'));
+
+  if (isActivePair) {
+    throw duplicateActiveAllocationError();
+  }
+
+  throw error;
 };
 
 const mapAllocation = (allocation) => ({
@@ -240,9 +266,10 @@ const mapAllocation = (allocation) => ({
     ? {
         id: allocation.activity.id,
         activityId:
+          allocation.activity.activityCode ||
           allocation.activity.p6ActivityId ||
-          allocation.activity.wbsCode ||
           allocation.activity.id,
+        activityCode: allocation.activity.activityCode,
         name: allocation.activity.name,
         wbsCode: allocation.activity.wbsCode,
         category: allocation.activity.category,
@@ -536,22 +563,27 @@ const createAllocation = async ({ orgId, projectId, userId, payload }) =>
       nextAmount: amount,
     });
 
-    const allocation = await tx.activityBoqAllocation.create({
-      data: {
-        projectId,
-        boqItemId: payload.boqItemId,
-        activityId: payload.activityId,
-        quantity,
-        amount,
-        weight,
-        source,
-        status: 'draft',
-        notes: payload.notes?.trim() || null,
-        createdBy: userId || null,
-        updatedBy: userId || null,
-      },
-      include: allocationInclude,
-    });
+    let allocation;
+    try {
+      allocation = await tx.activityBoqAllocation.create({
+        data: {
+          projectId,
+          boqItemId: payload.boqItemId,
+          activityId: payload.activityId,
+          quantity,
+          amount,
+          weight,
+          source,
+          status: 'draft',
+          notes: payload.notes?.trim() || null,
+          createdBy: userId || null,
+          updatedBy: userId || null,
+        },
+        include: allocationInclude,
+      });
+    } catch (error) {
+      handleAllocationWriteError(error);
+    }
 
     await approvalWorkflowService.recordTransition({
       tx,
@@ -663,23 +695,28 @@ const updateAllocation = async ({
       nextAmount: amount,
     });
 
-    const updated = await tx.activityBoqAllocation.update({
-      where: { id: allocationId },
-      data: {
-        boqItemId: nextBoqItemId,
-        activityId: nextActivityId,
-        quantity,
-        amount,
-        weight,
-        source: payload.source || existing.source,
-        notes:
-          payload.notes !== undefined
-            ? payload.notes?.trim() || null
-            : existing.notes,
-        updatedBy: userId || null,
-      },
-      include: allocationInclude,
-    });
+    let updated;
+    try {
+      updated = await tx.activityBoqAllocation.update({
+        where: { id: allocationId },
+        data: {
+          boqItemId: nextBoqItemId,
+          activityId: nextActivityId,
+          quantity,
+          amount,
+          weight,
+          source: payload.source || existing.source,
+          notes:
+            payload.notes !== undefined
+              ? payload.notes?.trim() || null
+              : existing.notes,
+          updatedBy: userId || null,
+        },
+        include: allocationInclude,
+      });
+    } catch (error) {
+      handleAllocationWriteError(error);
+    }
 
     await approvalWorkflowService.recordTransition({
       tx,
@@ -714,6 +751,16 @@ const submitAllocation = async ({ orgId, projectId, allocationId, userId }) =>
       );
     }
 
+    await assertNoDuplicateActiveAllocation(
+      {
+        projectId,
+        boqItemId: existing.boqItemId,
+        activityId: existing.activityId,
+        excludeAllocationId: allocationId,
+      },
+      tx,
+    );
+
     const updated = await tx.activityBoqAllocation.update({
       where: { id: allocationId },
       data: {
@@ -723,6 +770,23 @@ const submitAllocation = async ({ orgId, projectId, allocationId, userId }) =>
         updatedBy: userId || null,
       },
       include: allocationInclude,
+    });
+
+    await approvalWorkflowService.recordTransition({
+      tx,
+      orgId,
+      projectId,
+      recordType: approvalWorkflowService.RECORD_TYPES.BOQ_ALLOCATION,
+      recordId: allocationId,
+      fromStatus: existing.status,
+      toStatus: updated.status,
+      actorId: userId,
+      metadata: {
+        boqItemId: existing.boqItemId,
+        activityId: existing.activityId,
+        quantity: existing.quantity,
+        amount: existing.amount,
+      },
     });
 
     return mapAllocation(updated);
@@ -741,12 +805,26 @@ const approveAllocation = async ({ orgId, projectId, allocationId, userId }) =>
       );
     }
 
+    await assertNoDuplicateActiveAllocation(
+      {
+        projectId,
+        boqItemId: existing.boqItemId,
+        activityId: existing.activityId,
+        excludeAllocationId: allocationId,
+      },
+      tx,
+    );
+
     const boqItem = await ensureBoqItem(
       { projectId, boqItemId: existing.boqItemId },
       tx,
     );
     const existingTotals = await getActiveTotalsForBoqItem(
-      { boqItemId: existing.boqItemId, excludeAllocationId: allocationId },
+      {
+        boqItemId: existing.boqItemId,
+        excludeAllocationId: allocationId,
+        statuses: [APPROVED_STATUS],
+      },
       tx,
     );
     assertAllocationCapacity({

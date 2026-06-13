@@ -1,11 +1,13 @@
 const { prisma } = require('../config/db');
+const { normalizePartyRoleId, normalizeRoleId } = require('../config/permissions');
 const { HttpError } = require('../utils/http-error');
 
 const PROJECT_ACCESS_DENIED_CODE = 'PROJECT_ACCESS_DENIED';
 const PROJECT_ACCESS_DENIED_MESSAGE = 'You are not assigned to this project';
 const ORG_WIDE_PROJECT_ACCESS_ROLES = new Set(['pm', 'super_admin']);
 
-const canAccessAllProjects = (role) => ORG_WIDE_PROJECT_ACCESS_ROLES.has(role);
+const canAccessAllProjects = (role) =>
+  ORG_WIDE_PROJECT_ACCESS_ROLES.has(normalizeRoleId(role));
 
 const projectAccessDenied = () =>
   new HttpError(
@@ -24,13 +26,79 @@ const getProjectAccessWhere = ({ userId, role }) => {
   }
 
   return {
-    assignments: {
-      some: {
-        userId,
+    OR: [
+      {
+        assignments: {
+          some: {
+            userId,
+          },
+        },
       },
-    },
+      {
+        parties: {
+          some: {
+            status: 'active',
+            members: {
+              some: {
+                userId,
+                status: 'active',
+              },
+            },
+          },
+        },
+      },
+    ],
   };
 };
+
+const projectPartyAccessSelect = (userId) => ({
+  where: {
+    status: 'active',
+    members: {
+      some: {
+        userId,
+        status: 'active',
+      },
+    },
+  },
+  select: {
+    id: true,
+    companyId: true,
+    role: true,
+    accessLevel: true,
+    permissionProfile: true,
+    company: {
+      select: {
+        id: true,
+        name: true,
+        status: true,
+      },
+    },
+    members: {
+      where: {
+        userId,
+        status: 'active',
+      },
+      select: {
+        id: true,
+        role: true,
+        status: true,
+      },
+      take: 1,
+    },
+  },
+});
+
+const serializePartyAccess = (parties = []) =>
+  parties.map((party) => ({
+    projectPartyId: party.id,
+    companyId: party.companyId,
+    companyName: party.company?.name || null,
+    role: normalizePartyRoleId(party.role),
+    accessLevel: party.accessLevel || 'collaborator',
+    permissionProfile: party.permissionProfile || null,
+    memberRole: party.members?.[0]?.role || null,
+  }));
 
 const throwProjectNotFoundOrAccessDenied = async ({ orgId, projectId }) => {
   const projectExists = await prisma.project.findFirst({
@@ -62,6 +130,7 @@ const assertProjectAccess = async ({ orgId, projectId, userId, role }) => {
       select: { role: true },
       take: 1,
     };
+    select.parties = projectPartyAccessSelect(userId);
   }
 
   const project = await prisma.project.findFirst({
@@ -77,10 +146,20 @@ const assertProjectAccess = async ({ orgId, projectId, userId, role }) => {
     await throwProjectNotFoundOrAccessDenied({ orgId, projectId });
   }
 
+  const assignmentRole = normalizeRoleId(project.assignments?.[0]?.role) || null;
+  const partyAccess = serializePartyAccess(project.parties);
+
   return {
     id: project.id,
     orgId: project.orgId,
-    role: project.assignments?.[0]?.role || role,
+    role: assignmentRole || (partyAccess.length ? 'external_party' : normalizeRoleId(role)),
+    assignmentRole,
+    partyAccess,
+    scope: assignmentRole
+      ? 'assignment'
+      : partyAccess.length
+        ? 'party'
+        : 'org',
   };
 };
 
@@ -90,5 +169,7 @@ module.exports = {
   assertProjectAccess,
   canAccessAllProjects,
   getProjectAccessWhere,
+  projectPartyAccessSelect,
+  serializePartyAccess,
   throwProjectNotFoundOrAccessDenied,
 };

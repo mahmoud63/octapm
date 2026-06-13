@@ -22,9 +22,11 @@ export interface NcrRecord extends WorkflowRecordMeta {
   id: string
   ref: string
   severity: 'major' | 'minor'
-  status: 'open' | 'closed'
+  status: 'open' | 'submitted' | 'closed'
   description: string | null
   disposition?: string | null
+  responsible?: string | null
+  closureComment?: string | null
   dueDate?: string | null
 }
 
@@ -51,8 +53,10 @@ export interface SafetyIncident extends WorkflowRecordMeta {
   ref: string
   incidentType: 'near_miss' | 'first_aid' | 'lti' | 'fatality'
   title: string
-  status: 'open' | 'investigating' | 'closed'
+  status: 'open' | 'investigating' | 'submitted' | 'closed'
   lostDays: number
+  responsible?: string | null
+  closureComment?: string | null
   dueDate?: string | null
 }
 
@@ -71,6 +75,43 @@ const defectKey = (projectId: string) => ['defects', projectId]
 const safetyKey = (projectId: string) => ['safety', projectId]
 const materialTestKey = (projectId: string) => ['material-tests', projectId]
 
+type CloseoutPayload = {
+  responsible: string
+  dueDate: string
+  closureComment: string
+  attachmentRefs: Array<{
+    fileName?: string
+    fileUrl?: string
+    storageKey?: string
+    mimeType?: string
+    description?: string
+  }>
+}
+
+export type WorkflowAttachmentUpload = {
+  documentId?: string
+  key?: string
+  storageKey?: string
+  url?: string
+  fileUrl?: string
+  downloadUrl?: string
+  filename?: string
+  fileName?: string
+  originalName?: string
+  mimeType?: string
+  size?: number
+  sizeBytes?: number
+}
+
+const invalidateQuality = (
+  qc: ReturnType<typeof useQueryClient>,
+  projectId: string
+) => {
+  qc.invalidateQueries({ queryKey: qDashKey(projectId) })
+  qc.invalidateQueries({ queryKey: ['workspace-dashboard'] })
+  qc.invalidateQueries({ queryKey: ['audit-events', projectId] })
+}
+
 export const useQualityDashboard = (projectId: string) =>
   useQuery<QualityDashboardData>({
     queryKey: qDashKey(projectId),
@@ -79,6 +120,19 @@ export const useQualityDashboard = (projectId: string) =>
         .get(`/projects/${projectId}/quality/dashboard`)
         .then((response) => response.data.data),
     enabled: Boolean(projectId),
+  })
+
+export const useUploadWorkflowAttachments = (projectId: string) =>
+  useMutation({
+    mutationFn: (files: File[]) => {
+      const fd = new FormData()
+      files.forEach((file) => fd.append('files', file))
+      return apiClient
+        .post(`/projects/${projectId}/workflow/uploads`, fd, {
+          headers: { 'Content-Type': 'multipart/form-data' },
+        })
+        .then((response) => response.data.data as WorkflowAttachmentUpload[])
+    },
   })
 
 export const useNcrs = (projectId: string) =>
@@ -106,6 +160,71 @@ export const useCreateNcr = (projectId: string) => {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ncrKey(projectId) })
       qc.invalidateQueries({ queryKey: qDashKey(projectId) })
+      qc.invalidateQueries({ queryKey: ['audit-events', projectId] })
+    },
+  })
+}
+
+export const useCloseNcr = (projectId: string) => {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({
+      ncrId,
+      payload,
+    }: {
+      ncrId: string
+      payload: CloseoutPayload
+    }) =>
+      apiClient
+        .post(`/projects/${projectId}/ncr/${ncrId}/close`, payload)
+        .then((response) => response.data.data as NcrRecord),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ncrKey(projectId) })
+      invalidateQuality(qc, projectId)
+    },
+  })
+}
+
+export const useApproveNcr = (projectId: string) => {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ ncrId, comment }: { ncrId: string; comment?: string }) =>
+      apiClient
+        .post(`/projects/${projectId}/ncr/${ncrId}/approve`, { comment })
+        .then((response) => response.data.data as NcrRecord),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ncrKey(projectId) })
+      qc.invalidateQueries({ queryKey: qDashKey(projectId) })
+      qc.invalidateQueries({ queryKey: ['audit-events', projectId] })
+    },
+  })
+}
+
+export const useRejectNcr = (projectId: string) => {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ ncrId, reason }: { ncrId: string; reason: string }) =>
+      apiClient
+        .post(`/projects/${projectId}/ncr/${ncrId}/reject`, { reason })
+        .then((response) => response.data.data as NcrRecord),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ncrKey(projectId) })
+      qc.invalidateQueries({ queryKey: qDashKey(projectId) })
+      qc.invalidateQueries({ queryKey: ['audit-events', projectId] })
+    },
+  })
+}
+
+export const useReopenNcr = (projectId: string) => {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ ncrId, reason }: { ncrId: string; reason: string }) =>
+      apiClient
+        .post(`/projects/${projectId}/ncr/${ncrId}/reopen`, { reason })
+        .then((response) => response.data.data as NcrRecord),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ncrKey(projectId) })
+      invalidateQuality(qc, projectId)
     },
   })
 }
@@ -123,13 +242,18 @@ export const useItps = (projectId: string) =>
 export const useCreateItp = (projectId: string) => {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: (payload: { title: string; owner?: string; dueDate?: string }) =>
+    mutationFn: (payload: {
+      title: string
+      owner?: string
+      dueDate?: string
+    }) =>
       apiClient
         .post(`/projects/${projectId}/itp`, payload)
         .then((response) => response.data.data as ItpRecord),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: itpKey(projectId) })
       qc.invalidateQueries({ queryKey: qDashKey(projectId) })
+      qc.invalidateQueries({ queryKey: ['audit-events', projectId] })
     },
   })
 }
@@ -159,6 +283,7 @@ export const useCreateDefect = (projectId: string) => {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: defectKey(projectId) })
       qc.invalidateQueries({ queryKey: qDashKey(projectId) })
+      qc.invalidateQueries({ queryKey: ['audit-events', projectId] })
     },
   })
 }
@@ -188,6 +313,93 @@ export const useCreateSafetyIncident = (projectId: string) => {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: safetyKey(projectId) })
       qc.invalidateQueries({ queryKey: qDashKey(projectId) })
+      qc.invalidateQueries({ queryKey: ['audit-events', projectId] })
+    },
+  })
+}
+
+export const useCloseSafetyIncident = (projectId: string) => {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({
+      incidentId,
+      payload,
+    }: {
+      incidentId: string
+      payload: CloseoutPayload
+    }) =>
+      apiClient
+        .post(`/projects/${projectId}/safety/${incidentId}/close`, payload)
+        .then((response) => response.data.data as SafetyIncident),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: safetyKey(projectId) })
+      invalidateQuality(qc, projectId)
+    },
+  })
+}
+
+export const useApproveSafetyIncident = (projectId: string) => {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({
+      incidentId,
+      comment,
+    }: {
+      incidentId: string
+      comment?: string
+    }) =>
+      apiClient
+        .post(`/projects/${projectId}/safety/${incidentId}/approve`, {
+          comment,
+        })
+        .then((response) => response.data.data as SafetyIncident),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: safetyKey(projectId) })
+      qc.invalidateQueries({ queryKey: qDashKey(projectId) })
+      qc.invalidateQueries({ queryKey: ['audit-events', projectId] })
+    },
+  })
+}
+
+export const useRejectSafetyIncident = (projectId: string) => {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({
+      incidentId,
+      reason,
+    }: {
+      incidentId: string
+      reason: string
+    }) =>
+      apiClient
+        .post(`/projects/${projectId}/safety/${incidentId}/reject`, { reason })
+        .then((response) => response.data.data as SafetyIncident),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: safetyKey(projectId) })
+      qc.invalidateQueries({ queryKey: qDashKey(projectId) })
+      qc.invalidateQueries({ queryKey: ['audit-events', projectId] })
+    },
+  })
+}
+
+export const useReopenSafetyIncident = (projectId: string) => {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({
+      incidentId,
+      reason,
+    }: {
+      incidentId: string
+      reason: string
+    }) =>
+      apiClient
+        .post(`/projects/${projectId}/safety/${incidentId}/reopen`, {
+          reason,
+        })
+        .then((response) => response.data.data as SafetyIncident),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: safetyKey(projectId) })
+      invalidateQuality(qc, projectId)
     },
   })
 }
@@ -205,13 +417,18 @@ export const useMaterialTests = (projectId: string) =>
 export const useCreateMaterialTest = (projectId: string) => {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: (payload: { testType: string; owner?: string; dueDate?: string }) =>
+    mutationFn: (payload: {
+      testType: string
+      owner?: string
+      dueDate?: string
+    }) =>
       apiClient
         .post(`/projects/${projectId}/material-tests`, payload)
         .then((response) => response.data.data as MaterialTest),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: materialTestKey(projectId) })
       qc.invalidateQueries({ queryKey: qDashKey(projectId) })
+      qc.invalidateQueries({ queryKey: ['audit-events', projectId] })
     },
   })
 }

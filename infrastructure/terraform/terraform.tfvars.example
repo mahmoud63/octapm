@@ -13,8 +13,12 @@ db_username = "pmcopilots"
 # Production recovery policy
 rds_backup_retention_days = 7
 rds_backup_window         = "02:00-03:00"
+rds_multi_az              = true
 rds_recovery_rpo_hours    = 24
 rds_recovery_rto_hours    = 4
+
+# Production monitoring
+alarm_notification_email = "devops-alerts@example.com"
 
 # Secrets — set via environment variables instead of this file:
 #   export TF_VAR_db_password="..."

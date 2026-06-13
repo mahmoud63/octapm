@@ -6,21 +6,25 @@ TASK-P0-database-unify-boq-activity-spine blocks source-of-truth release until B
 
 ## Migration Controls
 
-1. Take a database backup before applying `20260610070000_unify_boq_activity_spine`.
+1. Take a database backup before applying `20260610070000_unify_boq_activity_spine` and `20260611040000_lock_boq_activity_allocation_spine`.
 2. Dry-run the migration on a production copy and record counts for `BoqActivity`, `Activity`, and `ActivityBoqAllocation` before and after.
 3. Confirm every accepted legacy `BoqActivity.acceptedActivityId` points to an `Activity` in the same project.
 4. Confirm backfilled allocation totals do not exceed each `BoqItem.qty` or `BoqItem.amount`.
-5. Rollback strategy: restore the pre-migration backup if activity or allocation counts do not reconcile, then re-run after fixing the source data.
+5. Confirm `ActivityBoqAllocation_active_pair_key` exists as a partial unique index on active `projectId`/`boqItemId`/`activityId` pairs.
+6. Rollback strategy: restore the pre-migration backup if activity or allocation counts do not reconcile, then re-run after fixing the source data.
 
 ## Manual QA
 
 1. Create a BOQ row from the BOQ grid.
-2. Confirm a real schedule activity appears in the schedule/activity list with the generated code as `wbsCode`.
+2. Confirm a real schedule activity appears in the schedule/activity list with the generated code as `activityCode`, while `wbsCode` remains reserved for WBS grouping.
 3. Confirm the BOQ row shows an activity with `Allocation draft`.
-4. Submit and approve the allocation in the Activity BOQ Allocation panel.
-5. Add approved progress to the activity and confirm BOQ earned value and EV reports use the same `Activity.id`.
-6. Attempt to edit or delete the approved BOQ activity helper row and confirm the UI disables the action or the API returns `ALLOCATION_NOT_EDITABLE`.
-7. Attempt an over-allocation and confirm the API returns a structured capacity error.
+4. Confirm the BOQ screen shows allocated, approved EV/IPC, pending, and unallocated values separately.
+5. Submit and approve the allocation in the BOQ Allocation Workflow panel.
+6. Attempt to create a second active allocation for the same BOQ item and schedule activity and confirm the API returns `DUPLICATE_ACTIVE_ALLOCATION`.
+7. Confirm draft and rejected allocations remain excluded from official EV reports and new IPC period line creation.
+8. Attempt to approve an over-capacity allocation and confirm the API returns `ALLOCATION_QUANTITY_EXCEEDED` or `ALLOCATION_AMOUNT_EXCEEDED`.
+9. Add approved progress to the activity and confirm BOQ earned value and EV reports use the same `Activity.id`.
+10. Attempt to edit or delete the approved BOQ activity helper row and confirm the UI disables the action or the API returns `ALLOCATION_NOT_EDITABLE`.
 
 ## Acceptance Evidence
 

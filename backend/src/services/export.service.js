@@ -162,7 +162,7 @@ async function generateProjectExport({ projectId, orgId }) {
     return {
       activity,
       row: {
-        id: activity.p6ActivityId || activity.wbsCode || activity.id,
+        id: activity.activityCode || activity.p6ActivityId || activity.id,
         activityName: activity.name,
         duration: activity.duration,
         earlyStart: formatDate(esDate),

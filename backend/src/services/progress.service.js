@@ -13,6 +13,7 @@ const PROGRESS_METHODS = [
 
 const SUBMISSION_STATUSES = ['draft', 'submitted', 'approved', 'rejected'];
 const APPROVABLE_STATUSES = ['draft', 'submitted'];
+const PROGRESS_ASSIGNMENT_OVERRIDE_ROLES = new Set(['pm', 'planning_eng']);
 
 const METHOD_ALIASES = {
   percent_complete: 'percent',
@@ -258,6 +259,53 @@ const ensureActivity = async ({ projectId, activityId }, tx = prisma) => {
   return activity;
 };
 
+const canOverrideProgressAssignment = (userRole) =>
+  PROGRESS_ASSIGNMENT_OVERRIDE_ROLES.has(String(userRole || '').toLowerCase());
+
+const assertProgressSubmitAllowed = async ({
+  projectId,
+  activityIds,
+  userId,
+  userRole,
+  tx = prisma,
+}) => {
+  const uniqueActivityIds = [...new Set((activityIds || []).filter(Boolean))];
+  if (!uniqueActivityIds.length || canOverrideProgressAssignment(userRole)) {
+    return;
+  }
+
+  if (!userId) {
+    throw new HttpError(
+      403,
+      'ACTIVITY_PROGRESS_ASSIGNMENT_REQUIRED',
+      'Progress can only be submitted by assigned activity users or PM/planning overrides',
+      { activityIds: uniqueActivityIds },
+    );
+  }
+
+  const assignments = await tx.activityAssignment.findMany({
+    where: {
+      userId,
+      activityId: { in: uniqueActivityIds },
+      activity: { projectId },
+    },
+    select: { activityId: true },
+  });
+  const assignedIds = new Set(assignments.map((row) => row.activityId));
+  const missing = uniqueActivityIds.filter(
+    (activityId) => !assignedIds.has(activityId),
+  );
+
+  if (missing.length) {
+    throw new HttpError(
+      403,
+      'ACTIVITY_PROGRESS_ASSIGNMENT_REQUIRED',
+      'Progress can only be submitted by assigned activity users or PM/planning overrides',
+      { activityIds: missing },
+    );
+  }
+};
+
 const getMethodConfigRow = async ({ projectId, activityId }, tx = prisma) =>
   tx.activityProgressMethod.findFirst({
     where: { projectId, activityId },
@@ -426,6 +474,7 @@ const createProgressSubmission = async ({
   projectId,
   activityId,
   userId,
+  userRole,
   payload,
   dailyReportId = null,
   fallbackPhotos = null,
@@ -434,6 +483,13 @@ const createProgressSubmission = async ({
   const runner = async (client) => {
     await ensureProject({ orgId, projectId }, client);
     await ensureActivity({ projectId, activityId }, client);
+    await assertProgressSubmitAllowed({
+      projectId,
+      activityIds: [activityId],
+      userId,
+      userRole,
+      tx: client,
+    });
     const data = await buildSubmissionData({
       projectId,
       activityId,
@@ -444,6 +500,34 @@ const createProgressSubmission = async ({
       tx: client,
     });
     const row = await client.progressSubmission.create({ data });
+    await auditService.recordEvent({
+      tx: client,
+      orgId,
+      projectId,
+      entityType: auditService.ENTITY_TYPES.PROGRESS_SUBMISSION,
+      entityId: row.id,
+      action: auditService.ACTIONS.CREATED,
+      actorId: userId,
+      newStatus: row.status,
+      newSummary: {
+        activityId: row.activityId,
+        status: row.status,
+        pctComplete: row.pctComplete,
+        method: row.method,
+        source: row.source,
+      },
+      summary: {
+        transition:
+          row.status === 'draft'
+            ? 'submission.create_draft'
+            : 'submission.submit',
+        activityId: row.activityId,
+        pctComplete: row.pctComplete,
+        method: row.method,
+        source: row.source,
+      },
+      attachments: getEvidenceAttachments(row.evidenceJson),
+    });
     return serializeSubmission(row);
   };
 
@@ -714,6 +798,7 @@ module.exports = {
   getProgressMethod,
   upsertProgressMethod,
   createProgressSubmission,
+  assertProgressSubmitAllowed,
   listProgressSubmissions,
   approveProgressSubmissionWithClient,
   approveProgressSubmission,

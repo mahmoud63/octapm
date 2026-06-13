@@ -27,8 +27,8 @@ Technical deployment to production infrastructure is not the same as go-live. CI
 | GL-P0-001 | BOQ to activity allocation spine is the official value basis. | [FB-001](../technical-feedback-tasks/2026-06-08/TASK-P0-FB-001-add-activity-boq-allocation.md), [BOQ spine QA](boq-activity-spine.md) | Backend, Product, QA | Approved allocation model/API evidence, BOQ-created work stored as `Activity` + `ActivityBoqAllocation`, over-allocation rejection, unallocated value report, EV/IPC using approved allocations only, scenario `GL-QA-002`. | Evidence pending | Required |
 | GL-P0-002 | Schedule generation/import preserves active operational history. | [FB-006](../technical-feedback-tasks/2026-06-08/TASK-P0-FB-006-control-schedule-regeneration-history.md), [FB-004](../technical-feedback-tasks/2026-06-08/TASK-P1-FB-004-add-schedule-review-approval-baseline.md), [FB-010](../technical-feedback-tasks/2026-06-08/TASK-P1-FB-010-add-audit-history.md) | Backend, Frontend, QA | Staged revision review, mapping, approval, activation, rollback, audit history, and no deletion of linked progress, costs, procurement, risks, assignments, or allocations; scenario `GL-QA-003`. | Evidence pending | Required |
 | GL-P0-003 | Production security readiness is externally confirmed. | [FB-019](../technical-feedback-tasks/2026-06-08/TASK-P0-FB-019-harden-production-security-readiness.md), [auth refresh QA](auth-refresh-sessions.md), [billing/Stripe QA](billing-stripe-webhook.md), [security checklist](../security/production-security-readiness.md) | Security, Backend, DevOps | Secret rotation/revocation ticket, required production env validation with live Stripe key, webhook secret, price IDs, non-secret rotation ticket/date, HTTPS CORS allowlist with credentials, distinct JWT/CloudFront secrets, tracked-source secret hygiene scan, server-side refresh sessions with rotation/replay rejection, Stripe webhook signature tests, deployment smoke output. | Evidence pending | Required |
-| GL-P0-004 | Automated quality gates and deployment smoke checks pass for the rollout commit. | [FB-018](../technical-feedback-tasks/2026-06-08/TASK-P1-FB-018-add-ci-quality-gates.md), [release checklist](../release-checklist.md) | QA, Backend, Frontend, DevOps | `Quality Gates` workflow URL for the commit, deploy workflow URL, backend smoke output with authenticated smoke user, OpenAPI validation, frontend lint/build. | Evidence pending | Required |
-| GL-P0-005 | Production database backup and recovery readiness is accepted. | [TASK-P0-devops-enable-rds-backups-and-recovery](../technical-feedback-tasks/2026-06-09/TASK-P0-devops-enable-rds-backups-and-recovery.md), [RDS recovery runbook](../runbooks/rds-backup-recovery.md) | DevOps, Database, QA | Terraform backup validation job, automated backup retention evidence, retained automated backups, unique final snapshot setting, restore rehearsal, RPO/RTO evidence, rollback procedure, construction scenario smoke. | Evidence pending | Required |
+| GL-P0-004 | Automated quality gates and deployment smoke checks pass for the rollout commit. | [FB-018](../technical-feedback-tasks/2026-06-08/TASK-P1-FB-018-add-ci-quality-gates.md), [release checklist](../release-checklist.md) | QA, Backend, Frontend, DevOps | `Quality Gates` workflow URL for the commit, deploy workflow URL, parameterized deployment readiness validator output, backend smoke output with authenticated smoke user, OpenAPI validation, frontend lint/build. | Evidence pending | Required |
+| GL-P0-005 | Production database backup and recovery readiness is accepted. | [TASK-P0-devops-enable-rds-backups-and-recovery](../technical-feedback-tasks/2026-06-09/TASK-P0-devops-enable-rds-backups-and-recovery.md), [RDS recovery runbook](../runbooks/rds-backup-recovery.md), [backup/restore checklist](../ops/backup-restore-evidence-checklist.md), [rollback checklist](../ops/rollback-evidence-checklist.md), [monitoring checklist](../ops/monitoring-alert-evidence-checklist.md) | DevOps, Database, QA | Terraform backup validation job, automated backup retention evidence, retained automated backups, Multi-AZ production plan, unique final snapshot setting, restore rehearsal, RPO/RTO evidence, rollback rehearsal, monitoring alert evidence, construction scenario smoke. | Evidence pending | Required |
 | GL-P0-006 | Project-level object authorization blocks cross-project access. | [Project access QA](project-access-authorization.md) | Security, Backend, Frontend, QA | Assigned-project list filtering, direct project and nested-route `403 PROJECT_ACCESS_DENIED` evidence for unassigned users, PM org-wide access regression, frontend restricted state evidence. | Evidence pending | Required |
 | GL-P1-005 | Earned value basis is official, approved, period-based, and lockable. | [FB-007](../technical-feedback-tasks/2026-06-08/TASK-P1-FB-007-harden-earned-value-basis.md), [Official EV QA](earned-value-official-engine.md) | Product, Backend, QA, Business | PV from approved cost loading, EV from approved progress and allocations, AC from `CostRecord.actualThroughDate`, budget revision handling, locked period snapshot, scenario `GL-QA-005`. | Evidence pending | Required |
 | GL-P1-006 | Module/action permissions are enforced by backend and reflected in frontend. | [FB-009](../technical-feedback-tasks/2026-06-08/TASK-P1-FB-009-add-module-action-permissions.md), [role matrix](role-permission-matrix.md) | Security, Backend, Frontend, QA | Role matrix review, backend authorization tests for all eight roles, frontend disabled/hidden actions, scenario `GL-QA-008`. | Evidence pending | Required |
@@ -36,12 +36,15 @@ Technical deployment to production infrastructure is not the same as go-live. CI
 | GL-P1-008 | Commercial records trace to approved activities and BOQ allocations. | [FB-012](../technical-feedback-tasks/2026-06-08/TASK-P1-FB-012-strengthen-commercial-traceability.md) | Business, Backend, Frontend, QA | Change order, IPC, sub valuation, EOT, weather delay, correspondence, and attachment traceability evidence; scenario `GL-QA-006`. | Evidence pending | Required |
 | GL-P1-009 | Project setup readiness prevents premature progress and baseline use. | [FB-015](../technical-feedback-tasks/2026-06-08/TASK-P2-FB-015-guided-project-setup-wizard.md) | Product, Frontend, Backend, QA | Setup readiness endpoint, wizard evidence, blockers for missing BOQ, schedule approval, allocations, baseline, and progress readiness. | Evidence pending | Required |
 | GL-P2-010 | Procurement, quality, document-control, and dashboard workflows are activity-linked and reviewable. | [FB-013](../technical-feedback-tasks/2026-06-08/TASK-P2-FB-013-procurement-need-date-risk-alerts.md), [FB-014](../technical-feedback-tasks/2026-06-08/TASK-P2-FB-014-quality-doc-workflow-maturity.md), [FB-016](../technical-feedback-tasks/2026-06-08/TASK-P2-FB-016-replace-generic-dashboard.md) | Product, Frontend, Backend, QA | Need-date risk alerts, quality/document assignment and evidence history, seven-dimension dashboard fed by official workflow state. | Evidence pending | Required |
+| GL-P2-011 | Launch documentation, onboarding, support, known limitations, and API publication are ready for customer use. | [Documentation readiness QA](documentation-readiness.md), [Help Center docs](../help-center/README.md), [API docs guide](../help-center/api-docs.md) | Product, QA, Support, Backend, Frontend, Business | In-app Help Center evidence, admin guide walkthrough, role guide UAT notes, support runbook tabletop, Swagger/OpenAPI validation, onboarding checklist review, known-limitation acceptance. | Evidence pending | Required |
 
 ## Pilot-Only Restrictions
 
 Until all P0 gates pass or are formally risk accepted:
 
 - PMcopilots may be used for demos, sandbox pilots, training, and parallel-run validation only.
+- Live UAT must be recorded with `docs/qa/live-uat-evidence-checklist.md` before any controlled pilot expands beyond sandbox/demo use.
+- Runtime scale blockers in `docs/ops/runtime-state-and-scale-blockers.md` must be accepted for a single-instance pilot or fixed before multi-instance/paid production use.
 - It must not be named as the contractual system of record for schedule, cost, IPC, EOT, procurement, quality, or dashboard reporting.
 - Customer-facing exports and dashboards must be treated as draft/pilot evidence and reconciled against the current official tools before decisions.
 - Schedule generation/import must be tested on pilot projects or approved rollout copies before touching a live project schedule.
@@ -78,6 +81,7 @@ Any of these conditions blocks source-of-truth rollout:
 | Dashboards and reports | Project and workspace dashboards use official workflow data, show seven-dimension health, and match backend reports/export outputs for the same cutoff. |
 | API and mobile readiness | OpenAPI is current, mobile-facing endpoints are documented, auth/error/pagination envelopes match the standard, and unsupported mobile UI scope is documented. |
 | Operations and security | Production env validation, CORS, CloudFront origin guard, no direct API DNS/origin bypass, Stripe webhook signatures, S3 upload settings, RDS backup/restore rehearsal, smoke checks, and incident/rollback process are accepted. |
+| Documentation and support | Admin, role user, support, onboarding, API, release-note, and known-limitation docs are published in the Help Center and reviewed through the documentation readiness checklist. |
 
 ## End-to-End QA Scenarios
 
@@ -192,14 +196,20 @@ npm run test:auth-token-storage --workspace=frontend
 
 ## Signoff Record
 
+Current operational signoff packet status: `Repo controls ready; external cloud evidence and named owner signatures required before source-of-truth approval`.
+
 | Role | Required Decision | Minimum Evidence | Signer | Date | Status |
 |---|---|---|---|---|---|
-| Product owner | The release meets MVP scope and pilot restrictions are lifted or accepted. | Readiness matrix review, scenario evidence, release notes. | TBD | TBD | Not signed |
-| QA owner | End-to-end scenarios passed or risks are accepted. | Scenario run log, screenshots/API evidence, defect list. | TBD | TBD | Not signed |
-| Security owner | Production security checklist passed. | Secret-rotation confirmation ticket, env validation, CORS/webhook evidence. | TBD | TBD | Not signed |
-| Backend owner | APIs, data model, calculations, audit, and tenant scoping are production-ready. | Backend tests, OpenAPI validation, smoke output, blocker review. | TBD | TBD | Not signed |
-| Frontend owner | User workflows, permissions, dashboard, and responsive smoke paths are production-ready. | Lint/build, frontend assertions, browser smoke evidence. | TBD | TBD | Not signed |
-| Business owner | PM/commercial process can rely on the system as the official source of truth. | EV/commercial reconciliation, pilot closeout, risk acceptance if any. | TBD | TBD | Not signed |
+| Product owner | The release meets MVP scope and pilot restrictions are lifted or accepted. | Readiness matrix review, scenario evidence, release notes. | Named Product owner required | Pending owner review | Awaiting evidence |
+| QA owner | End-to-end scenarios passed or risks are accepted. | Scenario run log, screenshots/API evidence, defect list. | Named QA owner required | Pending owner review | Awaiting evidence |
+| Security owner | Production security checklist passed. | Secret-rotation confirmation ticket, env validation, CORS/webhook evidence. | Named Security owner required | Pending owner review | Awaiting evidence |
+| Backend owner | APIs, data model, calculations, audit, and tenant scoping are production-ready. | Backend tests, OpenAPI validation, smoke output, blocker review. | Named Backend owner required | Pending owner review | Awaiting evidence |
+| Frontend owner | User workflows, permissions, dashboard, and responsive smoke paths are production-ready. | Lint/build, frontend assertions, browser smoke evidence. | Named Frontend owner required | Pending owner review | Awaiting evidence |
+| Business owner | PM/commercial process can rely on the system as the official source of truth. | EV/commercial reconciliation, pilot closeout, risk acceptance if any. | Named Business owner required | Pending owner review | Awaiting evidence |
+| DevOps owner | Deployment, rollback, monitoring, and operational runbooks are production-ready. | Parameterized deploy workflow, staging deploy rehearsal, rollback rehearsal, CloudWatch/SNS alert evidence. | Named DevOps owner required | Pending owner review | Awaiting cloud evidence |
+| Database owner | Backup, restore, migration, and RPO/RTO controls are production-ready. | RDS retention/Multi-AZ evidence, restore drill timings, migration rollback rehearsal, restored construction scenario smoke. | Named Database owner required | Pending owner review | Awaiting restore evidence |
+| Support owner | Support runbook, severity model, escalation, customer communication, and onboarding handoff are production-ready. | Support runbook tabletop, escalation owner list, documentation readiness QA, known-limitation acceptance. | Named Support owner required | Pending owner review | Awaiting evidence |
+| Documentation owner | Admin, role user, API, onboarding, release-note, and limitation docs match the release workflow. | Documentation readiness QA, Help Center screenshot, OpenAPI validation, UAT reviewer notes. | Named Documentation owner required | Pending owner review | Awaiting evidence |
 
 ## Risk Acceptance Record
 
@@ -207,10 +217,10 @@ Use this table only when a gate cannot pass before rollout.
 
 | Risk ID | Gate ID | Issue | Impact | Compensating Control | Expiry Date | Rollback Plan | Required Approvers | Status |
 |---|---|---|---|---|---|---|---|---|
-| TBD | TBD | TBD | TBD | TBD | TBD | TBD | Product, QA, Security, Backend, Frontend, Business | Not accepted |
+| No active risk acceptance | Not applicable | No P0/P1 go-live risk has been accepted in this gate. | Not applicable | Not applicable | Not applicable | Not applicable | Product, QA, Security, Backend, Frontend, Business | Not accepted |
 
 ## Release Decision
 
 | Release | Commit SHA | Environment | Decision | Decision Date | Notes |
 |---|---|---|---|---|---|
-| TBD | TBD | TBD | Pilot/demo only | TBD | Replace this row only after the readiness matrix and signoff record are complete. |
+| TASK-P1-DEVOPS-001 repository controls | Current branch commit pending final SHA | Staging and production evidence pending | Pilot/demo only | Pending owner review | Deployment parameterization, RDS Multi-AZ guard, and monitoring subscription controls are implemented in repo; source-of-truth go-live still requires cloud rehearsal evidence and named signoffs. |

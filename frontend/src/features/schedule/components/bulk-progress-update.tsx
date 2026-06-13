@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { apiClient } from '@/services/api/client'
 import { toast } from 'sonner'
+import { useAuthStore } from '@/stores/auth-store'
 import { useCanPerform } from '@/lib/permissions'
 import { Button } from '@/components/ui/button'
 import type { ScheduleActivity } from '../data/schema'
@@ -11,20 +12,59 @@ type Props = {
   activities: ScheduleActivity[]
 }
 
+const PROGRESS_ASSIGNMENT_OVERRIDE_ROLES = new Set(['pm', 'planning_eng'])
+
+const isProgressAssignmentOverride = (role?: string | null) =>
+  PROGRESS_ASSIGNMENT_OVERRIDE_ROLES.has(String(role || '').toLowerCase())
+
+const errorCodeFrom = (error: unknown) =>
+  (
+    error as {
+      response?: { data?: { error?: { code?: string } } }
+    }
+  )?.response?.data?.error?.code
+
 export function BulkProgressUpdate({ projectId, activities }: Props) {
   const canSubmitProgress = useCanPerform(
     'progress',
     'submit',
     'submission.submit'
   )
+  const currentUser = useAuthStore((state) => state.auth.user)
   const qc = useQueryClient()
   const [selectedIds, setSelectedIds] = useState<string[]>([])
   const [pctComplete, setPctComplete] = useState(0)
   const [saving, setSaving] = useState(false)
+  const currentUserId = currentUser?.id ?? ''
+  const currentUserRole = currentUser?.role ?? ''
+  const assignmentOverride = useMemo(
+    () => isProgressAssignmentOverride(currentUserRole),
+    [currentUserRole]
+  )
 
-  const selectableActivities = useMemo(
-    () => activities.filter((activity) => !activity.isMilestone),
-    [activities]
+  const selectableActivities = useMemo(() => {
+    const editableActivities = activities.filter(
+      (activity) => !activity.isMilestone
+    )
+    if (assignmentOverride) return editableActivities
+    if (!currentUserId) return []
+
+    return editableActivities.filter((activity) =>
+      activity.assignedEngineers?.some(
+        (engineer) => engineer.id === currentUserId
+      )
+    )
+  }, [activities, assignmentOverride, currentUserId])
+  const selectableActivityIds = useMemo(
+    () => new Set(selectableActivities.map((activity) => activity.id)),
+    [selectableActivities]
+  )
+  const selectedSelectableIds = useMemo(
+    () =>
+      selectedIds.filter((activityId) =>
+        selectableActivityIds.has(activityId)
+      ),
+    [selectableActivityIds, selectedIds]
   )
 
   const toggle = (id: string) => {
@@ -54,6 +94,16 @@ export function BulkProgressUpdate({ projectId, activities }: Props) {
             </tr>
           </thead>
           <tbody>
+            {selectableActivities.length === 0 && (
+              <tr>
+                <td
+                  colSpan={3}
+                  className='p-3 text-center text-xs text-muted-foreground'
+                >
+                  No assigned activities available
+                </td>
+              </tr>
+            )}
             {selectableActivities.map((activity) => (
               <tr key={activity.id} className='border-b'>
                 <td className='p-2'>
@@ -91,14 +141,14 @@ export function BulkProgressUpdate({ projectId, activities }: Props) {
         </div>
 
         <Button
-          disabled={saving || selectedIds.length === 0}
+          disabled={saving || selectedSelectableIds.length === 0}
           onClick={async () => {
             setSaving(true)
             try {
               await apiClient.post(
                 `/projects/${projectId}/activities/bulk-progress`,
                 {
-                  updates: selectedIds.map((activityId) => ({
+                  updates: selectedSelectableIds.map((activityId) => ({
                     activityId,
                     pctComplete,
                   })),
@@ -116,8 +166,12 @@ export function BulkProgressUpdate({ projectId, activities }: Props) {
                 }),
                 qc.invalidateQueries({ queryKey: ['ev-report', projectId] }),
               ])
-            } catch {
-              toast.error('Failed to submit progress in bulk')
+            } catch (error) {
+              toast.error(
+                errorCodeFrom(error) === 'ACTIVITY_PROGRESS_ASSIGNMENT_REQUIRED'
+                  ? 'Only assigned users can submit progress for selected activities'
+                  : 'Failed to submit progress in bulk'
+              )
             } finally {
               setSaving(false)
             }

@@ -111,6 +111,7 @@ export interface ActivityTraceLink {
   isCritical?: boolean
   approvedEotDays?: number
   ldExposure?: number
+  notes?: string | null
   activity?: TraceActivity
 }
 
@@ -135,8 +136,10 @@ export interface ChangeOrderRecord {
   description: string
   category: string | null
   value: number
-  status: 'pending' | 'approved' | 'rejected'
+  status: 'draft' | 'pending' | 'approved' | 'rejected' | 'archived'
   scheduleImpact: number
+  scheduleImpactSummary?: string | null
+  costImpactSummary?: string | null
   submittedDate: string | null
   approvedDate: string | null
   raisedBy: string | null
@@ -148,6 +151,8 @@ export interface ChangeOrderRecord {
   approvalComment?: string | null
   rejectedBy?: string | null
   rejectedAt?: string | null
+  archivedAt?: string | null
+  archivedBy?: string | null
   activity?: {
     id: string
     name: string
@@ -190,8 +195,36 @@ export interface IpcCertificate {
   certifiedBy?: string | null
   certifiedAt?: string | null
   certificationComment?: string | null
+  earnedValueAtCertification?: number
+  approvedLimitAtCertification?: number
+  overCertificationAmount?: number
+  certificationOverrideReason?: string | null
+  certificationOverrideBy?: string | null
+  certificationOverrideAt?: string | null
   createdAt: string
   updatedAt: string
+}
+
+export interface IpcCertificationReview {
+  currentClaimedAmount: number
+  previousCertifiedAmount: number
+  cumulativeCertifiedAmount: number
+  earnedAmount: number
+  approvedLimitAmount: number
+  approvedLimitQuantity?: number
+  approvedVariationAmount?: number
+  approvedVariationQuantity?: number
+  overEarnedAmount: number
+  overApprovedLimitAmount: number
+  overApprovedQuantity?: number
+  latestApprovedProgressId?: string | null
+  latestApprovedPctComplete?: number | null
+  requiresOverride?: boolean
+  requiresPmOverride?: boolean
+  missingProgressEvidence?: boolean
+  hasMissingProgressEvidence?: boolean
+  overrideLineCount?: number
+  missingProgressEvidenceCount?: number
 }
 
 export interface IpcPayment {
@@ -297,10 +330,12 @@ export interface IpcPeriodDetail extends IpcCertificate {
         updatedAt: string
       } | null
     }>
+    certificationReview?: IpcCertificationReview
   }>
   invoices?: IpcInvoice[]
   payments?: IpcPayment[]
   retentionReleases?: IpcRetentionRelease[]
+  certificationReview?: IpcCertificationReview
 }
 
 const coKey = (projectId: string) => ['change-orders', projectId]
@@ -355,7 +390,96 @@ export const useUpdateChangeOrder = (projectId: string) => {
   })
 }
 
-export const useDeleteChangeOrder = (projectId: string) => {
+export const useSubmitChangeOrder = (projectId: string) => {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({
+      changeOrderId,
+      comment,
+    }: {
+      changeOrderId: string
+      comment?: string
+    }) =>
+      apiClient
+        .post(`/projects/${projectId}/change-orders/${changeOrderId}/submit`, {
+          comment,
+        })
+        .then((response) => response.data.data as ChangeOrderRecord),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: coKey(projectId) })
+      qc.invalidateQueries({ queryKey: ['audit-events', projectId] })
+    },
+  })
+}
+
+export const useApproveChangeOrder = (projectId: string) => {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({
+      changeOrderId,
+      comment,
+    }: {
+      changeOrderId: string
+      comment?: string
+    }) =>
+      apiClient
+        .post(`/projects/${projectId}/change-orders/${changeOrderId}/approve`, {
+          comment,
+        })
+        .then((response) => response.data.data as ChangeOrderRecord),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: coKey(projectId) })
+      qc.invalidateQueries({ queryKey: budgetRevKey(projectId) })
+      qc.invalidateQueries({ queryKey: ['audit-events', projectId] })
+    },
+  })
+}
+
+export const useRejectChangeOrder = (projectId: string) => {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({
+      changeOrderId,
+      reason,
+    }: {
+      changeOrderId: string
+      reason: string
+    }) =>
+      apiClient
+        .post(`/projects/${projectId}/change-orders/${changeOrderId}/reject`, {
+          reason,
+        })
+        .then((response) => response.data.data as ChangeOrderRecord),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: coKey(projectId) })
+      qc.invalidateQueries({ queryKey: ['audit-events', projectId] })
+    },
+  })
+}
+
+export const useReopenChangeOrder = (projectId: string) => {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({
+      changeOrderId,
+      comment,
+    }: {
+      changeOrderId: string
+      comment?: string
+    }) =>
+      apiClient
+        .post(`/projects/${projectId}/change-orders/${changeOrderId}/reopen`, {
+          comment,
+        })
+        .then((response) => response.data.data as ChangeOrderRecord),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: coKey(projectId) })
+      qc.invalidateQueries({ queryKey: ['audit-events', projectId] })
+    },
+  })
+}
+
+export const useArchiveChangeOrder = (projectId: string) => {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: (changeOrderId: string) =>
@@ -448,11 +572,29 @@ export const useSubmitIpcPeriod = (projectId: string) => {
 export const useCertifyIpcPeriod = (projectId: string) => {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: (period: string) =>
-      apiClient
-        .post(`/projects/${projectId}/ipc/${period}/certify`)
-        .then((response) => response.data.data),
-    onSuccess: (_, period) => {
+    mutationFn: (
+      input:
+        | string
+        | {
+            period: string
+            comment?: string
+            overrideReason?: string
+          }
+    ) => {
+      const period = typeof input === 'string' ? input : input.period
+      const payload =
+        typeof input === 'string'
+          ? {}
+          : {
+              comment: input.comment || undefined,
+              overrideReason: input.overrideReason || undefined,
+            }
+      return apiClient
+        .post(`/projects/${projectId}/ipc/${period}/certify`, payload)
+        .then((response) => response.data.data)
+    },
+    onSuccess: (_, input) => {
+      const period = typeof input === 'string' ? input : input.period
       qc.invalidateQueries({ queryKey: ipcDetailKey(projectId, period) })
       qc.invalidateQueries({ queryKey: ipcKey(projectId) })
       qc.invalidateQueries({ queryKey: ['audit-events', projectId] })
@@ -605,6 +747,26 @@ export interface EotClaim {
   analysis: string | null
   claimLetter: string | null
   status: 'draft' | 'submitted' | 'approved' | 'rejected'
+  submittedBy?: string | null
+  submittedAt?: string | null
+  approvedBy?: string | null
+  approvedAt?: string | null
+  rejectedBy?: string | null
+  rejectedAt?: string | null
+  rejectionReason?: string | null
+  officialAt?: string | null
+  revisedCompletionRecommendation?: string | null
+  cumulativeApprovedEotDays?: number
+  entitlementSummaryJson?: {
+    claimedDelayDays?: number
+    criticalPathImpactDays?: number
+    effectiveDelayDays?: number
+    requestedEotDays?: number
+    recommendedEotDays?: number
+    nonCompensableDelayDays?: number
+    ldApplicableDays?: number
+    revisedCompletionRecommendation?: string | null
+  }
   activityLinks?: ActivityTraceLink[]
   weatherDelayLinks?: Array<{
     id: string
@@ -854,7 +1016,7 @@ export const useCreateEotClaim = (projectId: string) => {
       attachmentRefs?: Array<{ documentId: string; description?: string }>
       supportingDocumentIds?: string[]
       documentIds?: string[]
-      status?: 'draft' | 'submitted' | 'approved' | 'rejected'
+      status?: 'draft' | 'submitted'
     }) =>
       apiClient
         .post(`/projects/${projectId}/eot`, payload)
@@ -873,7 +1035,8 @@ export const useUpdateEotClaim = (projectId: string) => {
       payload,
     }: {
       claimId: string
-      payload: Partial<EotClaim> & {
+      payload: Omit<Partial<EotClaim>, 'status'> & {
+        status?: 'draft'
         supportingDocumentIds?: string[]
         documentIds?: string[]
         attachmentRefs?: Array<{ documentId: string; description?: string }>
@@ -881,6 +1044,48 @@ export const useUpdateEotClaim = (projectId: string) => {
     }) =>
       apiClient
         .patch(`/projects/${projectId}/eot/${claimId}`, payload)
+        .then((response) => response.data.data as EotClaim),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: eotKey(projectId) })
+      qc.invalidateQueries({ queryKey: ['audit-events', projectId] })
+    },
+  })
+}
+
+export const useSubmitEotClaim = (projectId: string) => {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ claimId, comment }: { claimId: string; comment?: string }) =>
+      apiClient
+        .post(`/projects/${projectId}/eot/${claimId}/submit`, { comment })
+        .then((response) => response.data.data as EotClaim),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: eotKey(projectId) })
+      qc.invalidateQueries({ queryKey: ['audit-events', projectId] })
+    },
+  })
+}
+
+export const useApproveEotClaim = (projectId: string) => {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ claimId, comment }: { claimId: string; comment?: string }) =>
+      apiClient
+        .post(`/projects/${projectId}/eot/${claimId}/approve`, { comment })
+        .then((response) => response.data.data as EotClaim),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: eotKey(projectId) })
+      qc.invalidateQueries({ queryKey: ['audit-events', projectId] })
+    },
+  })
+}
+
+export const useRejectEotClaim = (projectId: string) => {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ claimId, reason }: { claimId: string; reason: string }) =>
+      apiClient
+        .post(`/projects/${projectId}/eot/${claimId}/reject`, { reason })
         .then((response) => response.data.data as EotClaim),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: eotKey(projectId) })

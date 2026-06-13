@@ -14,6 +14,7 @@ Security/DevOps must complete and record these confirmations in the approved sec
 - JWT access, JWT refresh, and CloudFront origin shared secrets are generated independently and are not reused.
 - Terraform is applied with `TF_VAR_cloudfront_origin_secret` set to a dedicated value that is different from JWT secrets.
 - Refresh sessions are server-side records only; browser clients receive the refresh token only through the `HttpOnly` `pmc_refresh_token` cookie and never in JSON response bodies.
+- Auth/login/refresh, upload, AI generation, billing, and Stripe webhook throttles are enabled in the backend. Security/DevOps owns production tuning for the `RATE_LIMIT_*` variables and must verify `TRUST_PROXY_HOPS` matches the CloudFront/origin proxy chain.
 
 ## API Origin Lockdown
 
@@ -44,6 +45,7 @@ Backend startup validates these settings when `NODE_ENV=production`:
 - `STRIPE_SECRET_ROTATION_TICKET`
 - `CLOUDFRONT_SHARED_SECRET`
 - `CORS_ALLOWED_ORIGINS` or `FRONTEND_URL`
+- Optional `RATE_LIMIT_*` overrides and `TRUST_PROXY_HOPS` when production traffic passes through a trusted proxy.
 
 Production CORS origins must be explicit HTTPS origins. Wildcards, localhost, and path-bearing URLs are rejected.
 
@@ -57,6 +59,8 @@ Production startup also validates Stripe setup:
 - Rotation evidence must be present as date and ticket metadata only.
 
 Tracked repository files are scanned in Quality Gates for live Stripe secret-key patterns. The scan reports only path, line, and finding type.
+
+Private runtime upload storage is also checked in Quality Gates. Files under `backend/storage/private-documents/` or `storage/private-documents/` must remain untracked; see `docs/security/private-runtime-storage.md` for the source-control policy and history cleanup requirement.
 
 ## Deployment Smoke Checks
 
@@ -93,6 +97,8 @@ Manual QA before live rollout:
 
 - Sign in with the approved smoke user.
 - Confirm login sets an `HttpOnly` `pmc_refresh_token` cookie and the response body does not include a refresh token.
+- Confirm repeated invalid logins trigger `429 LOGIN_BACKOFF` and then `429 LOGIN_TEMPORARILY_LOCKED`, with no account-existence leak.
+- Confirm upload, AI generation, billing, and Stripe webhook throttles return structured `429` responses with `Retry-After` when lowered in staging.
 - Confirm `/api/v1/auth/refresh` rotates the cookie, rejects body-only refresh tokens, and rejects replay of the previous cookie.
 - Confirm sign-out calls `/api/v1/auth/logout`, revokes the server refresh session, and clears the refresh cookie.
 - Load the project list and one project detail page.

@@ -134,10 +134,18 @@ const queryParam = (name, description, schema) => ({
 
 const projectIdParam = pathParam(
   "projectId",
-  "Project UUID scoped to the authenticated organization and, for non-PM roles, an assigned project membership.",
+  "Project UUID scoped to the authenticated organization and, for non-PM roles, an assigned ProjectAssignment or active ProjectParty membership.",
 );
 const activityIdParam = pathParam("activityId", "Activity UUID.");
 const idParam = pathParam("id", "Record UUID.");
+const partyIdParam = pathParam(
+  "partyId",
+  "ProjectParty UUID scoped to the project.",
+);
+const userIdParam = pathParam(
+  "userId",
+  "User UUID scoped to the organization.",
+);
 
 const cursorParams = [
   queryParam("cursor", "Opaque cursor returned by the previous page.", {
@@ -155,7 +163,7 @@ const cursorParams = [
 const authenticatedOnly = {
   auth: "bearer",
   roles: ROLE_IDS,
-  note: "Authenticated users are tenant-scoped by org_id middleware/service filters. Project routes also require an assigned ProjectAssignment unless the caller has org-wide PM access.",
+  note: "Authenticated users are tenant-scoped by org_id middleware/service filters. Project routes also require an assigned ProjectAssignment, active ProjectParty membership, or org-wide PM access.",
 };
 
 const rolesPermission = (...roles) => ({
@@ -178,14 +186,18 @@ const commonErrorResponses = {
     "Subscription, trial, plan limit, payment method, or card state blocks the request.",
   ),
   403: errorResponse(
-    "Authenticated user lacks the required role, module/action permission, or project assignment.",
+    "Authenticated user lacks the required role, module/action permission, project assignment, or project-party access.",
   ),
   404: errorResponse("Record, route, or async job was not found."),
   409: errorResponse(
     "Business rule conflict, such as duplicate or capacity violations.",
   ),
   422: errorResponse("Semantically invalid payload."),
+  429: errorResponse(
+    "Rate limit, login backoff, account lockout, or abuse-protection quota exceeded. Responses may include Retry-After and RateLimit-* headers.",
+  ),
   500: errorResponse("Unexpected server error."),
+  502: errorResponse("Upstream provider failure, such as email delivery."),
 };
 
 const operation = ({
@@ -239,6 +251,11 @@ const add = (path, method, spec) => {
 
 const projectParams = [projectIdParam];
 const projectRecordParams = [projectIdParam, idParam];
+const includeArchivedParam = queryParam(
+  "includeArchived",
+  "Include archived records in list results. Defaults to false.",
+  { type: "boolean", default: false },
+);
 
 const dateString = { type: "string", format: "date-time" };
 const nullableDateString = {
@@ -285,6 +302,88 @@ const components = {
     GenericObject: freeObject(
       "Module-specific response object. See endpoint summary and source route for current fields.",
     ),
+    GlobalSearchResult: objectSchema(
+      {
+        id: uuid,
+        type: {
+          type: "string",
+          enum: [
+            "project",
+            "activity",
+            "boq",
+            "rfi",
+            "submittal",
+            "drawing",
+            "document",
+            "change_order",
+            "ipc",
+            "risk",
+            "procurement",
+            "long_lead",
+            "meeting",
+            "task",
+          ],
+        },
+        typeLabel: { type: "string" },
+        module: { type: "string" },
+        projectId: uuid,
+        projectName: { type: "string" },
+        title: { type: "string" },
+        subtitle: { type: "string", nullable: true },
+        identifier: { type: "string", nullable: true },
+        status: { type: "string", nullable: true },
+        date: nullableDateString,
+        url: { type: "string" },
+        score: { type: "number" },
+        metadata: freeObject("Entity-specific lightweight metadata."),
+      },
+      [
+        "id",
+        "type",
+        "typeLabel",
+        "module",
+        "projectId",
+        "projectName",
+        "title",
+        "url",
+        "score",
+      ],
+    ),
+    GlobalSearchResponse: objectSchema(
+      {
+        query: { type: "string", nullable: true },
+        items: arrayOf(ref("GlobalSearchResult")),
+        groups: arrayOf(
+          objectSchema(
+            {
+              type: { type: "string" },
+              label: { type: "string" },
+              count: { type: "integer", minimum: 0 },
+            },
+            ["type", "label", "count"],
+          ),
+        ),
+        filters: freeObject("Applied type, project, status, and date filters."),
+        meta: objectSchema(
+          {
+            limit: { type: "integer", minimum: 1, maximum: 50 },
+            total: { type: "integer", minimum: 0 },
+            authorizedProjectCount: { type: "integer", minimum: 0 },
+            searchableTypes: arrayOf(
+              objectSchema(
+                {
+                  type: { type: "string" },
+                  label: { type: "string" },
+                },
+                ["type", "label"],
+              ),
+            ),
+          },
+          ["limit", "total", "authorizedProjectCount", "searchableTypes"],
+        ),
+      },
+      ["query", "items", "groups", "filters", "meta"],
+    ),
     SuccessEnvelope: successEnvelope(),
     ErrorEnvelope: objectSchema(
       {
@@ -292,6 +391,297 @@ const components = {
         error: ref("ApiError"),
       },
       ["success", "error"],
+    ),
+    UserSummary: objectSchema({
+      id: uuid,
+      name: { type: "string" },
+      email: { type: "string", format: "email" },
+      role: { type: "string" },
+    }),
+    AuthUser: objectSchema(
+      {
+        id: uuid,
+        orgId: uuid,
+        name: { type: "string" },
+        email: { type: "string", format: "email" },
+        phone: { type: "string", nullable: true },
+        role: { type: "string" },
+        status: { type: "string" },
+        lastLogin: nullableDateString,
+        createdAt: nullableDateString,
+        updatedAt: nullableDateString,
+      },
+      ["id", "orgId", "name", "email", "role", "status"],
+    ),
+    UserSettingsProfile: objectSchema(
+      {
+        username: { type: "string", minLength: 2, maxLength: 30 },
+        email: { type: "string", format: "email" },
+        bio: { type: "string", maxLength: 160 },
+        urls: arrayOf(
+          objectSchema(
+            {
+              value: { type: "string", format: "uri", maxLength: 2048 },
+            },
+            ["value"],
+          ),
+        ),
+      },
+      ["username", "email", "bio", "urls"],
+    ),
+    UserSettingsAccount: objectSchema(
+      {
+        name: { type: "string", minLength: 2, maxLength: 30 },
+        dob: nullableDateString,
+        language: {
+          type: "string",
+          enum: ["en", "fr", "de", "es", "pt", "ru", "ja", "ko", "zh"],
+        },
+      },
+      ["name", "language"],
+    ),
+    UserSettingsAppearance: objectSchema(
+      {
+        theme: { type: "string", enum: ["light", "dark", "system"] },
+        font: { type: "string", enum: ["inter", "manrope", "system"] },
+      },
+      ["theme", "font"],
+    ),
+    UserSettingsDisplay: objectSchema(
+      {
+        items: arrayOf({
+          type: "string",
+          enum: [
+            "dashboard",
+            "projects",
+            "tasks",
+            "apps",
+            "chats",
+            "users",
+            "help-center",
+          ],
+        }),
+      },
+      ["items"],
+    ),
+    UserSettingsResponse: objectSchema(
+      {
+        user: ref("AuthUser"),
+        profile: ref("UserSettingsProfile"),
+        account: ref("UserSettingsAccount"),
+        appearance: ref("UserSettingsAppearance"),
+        display: ref("UserSettingsDisplay"),
+      },
+      ["user", "profile", "account", "appearance", "display"],
+    ),
+    UserSettingsProfileUpdateRequest: objectSchema(
+      {
+        username: { type: "string", minLength: 2, maxLength: 30 },
+        bio: { type: "string", nullable: true, maxLength: 160 },
+        urls: arrayOf(
+          objectSchema(
+            {
+              value: { type: "string", format: "uri", maxLength: 2048 },
+            },
+            ["value"],
+          ),
+        ),
+      },
+      ["username"],
+    ),
+    UserSettingsAccountUpdateRequest: objectSchema(
+      {
+        name: { type: "string", minLength: 2, maxLength: 30 },
+        dob: nullableDateString,
+        language: {
+          type: "string",
+          enum: ["en", "fr", "de", "es", "pt", "ru", "ja", "ko", "zh"],
+        },
+      },
+      ["name", "language"],
+    ),
+    ArchiveResponse: objectSchema(
+      {
+        id: { type: "string" },
+        status: { type: "string", enum: ["archived"] },
+        archived: { type: "boolean", enum: [true] },
+        deleted: { type: "boolean", enum: [false] },
+        archivedAt: nullableDateString,
+      },
+      ["id", "status", "archived", "deleted", "archivedAt"],
+    ),
+    NotificationDeliveryAttempt: objectSchema(
+      {
+        id: uuid,
+        notificationId: uuid,
+        channel: { type: "string", enum: ["email"] },
+        provider: { type: "string", nullable: true },
+        status: {
+          type: "string",
+          enum: ["pending", "sent", "failed", "skipped"],
+        },
+        attemptNumber: { type: "integer", minimum: 1 },
+        errorCode: { type: "string", nullable: true },
+        errorMessage: { type: "string", nullable: true },
+        nextAttemptAt: nullableDateString,
+        sentAt: nullableDateString,
+        metadata: freeObject("Provider response or retry metadata."),
+        createdAt: dateString,
+        updatedAt: dateString,
+      },
+      ["id", "notificationId", "channel", "status", "attemptNumber"],
+    ),
+    Notification: objectSchema(
+      {
+        id: uuid,
+        orgId: uuid,
+        projectId: nullableUuid,
+        recipientUserId: uuid,
+        actorId: nullableUuid,
+        type: { type: "string" },
+        category: {
+          type: "string",
+          enum: [
+            "assignment",
+            "due",
+            "overdue",
+            "approval",
+            "commercial",
+            "quality",
+            "safety",
+            "task",
+            "workflow",
+          ],
+        },
+        event: { type: "string" },
+        title: { type: "string" },
+        message: { type: "string" },
+        priority: {
+          type: "string",
+          enum: ["low", "normal", "high", "urgent"],
+        },
+        status: { type: "string", enum: ["unread", "read", "archived"] },
+        readAt: nullableDateString,
+        archivedAt: nullableDateString,
+        dueAt: nullableDateString,
+        actionUrl: { type: "string", nullable: true },
+        entityType: { type: "string", nullable: true },
+        entityId: { type: "string", nullable: true },
+        metadata: freeObject("Workflow, source entity, and delivery context."),
+        deliveryAttempts: arrayOf(ref("NotificationDeliveryAttempt")),
+        createdAt: dateString,
+        updatedAt: dateString,
+      },
+      [
+        "id",
+        "orgId",
+        "recipientUserId",
+        "type",
+        "category",
+        "event",
+        "title",
+        "message",
+        "priority",
+        "status",
+      ],
+    ),
+    NotificationListResponse: objectSchema(
+      {
+        rows: arrayOf(ref("Notification")),
+        pagination: objectSchema({
+          limit: { type: "integer" },
+          nextCursor: { type: "string", nullable: true },
+        }),
+      },
+      ["rows", "pagination"],
+    ),
+    NotificationSummary: objectSchema(
+      {
+        unread: { type: "integer", minimum: 0 },
+        read: { type: "integer", minimum: 0 },
+        archived: { type: "integer", minimum: 0 },
+        recent: arrayOf(ref("Notification")),
+      },
+      ["unread", "read", "archived", "recent"],
+    ),
+    NotificationPreference: objectSchema(
+      {
+        id: { type: "string", nullable: true },
+        category: {
+          type: "string",
+          enum: [
+            "assignment",
+            "due",
+            "overdue",
+            "approval",
+            "commercial",
+            "quality",
+            "safety",
+            "task",
+            "workflow",
+          ],
+        },
+        inAppEnabled: { type: "boolean" },
+        emailEnabled: { type: "boolean" },
+        digestEnabled: { type: "boolean" },
+        dueSoonDays: { type: "integer", minimum: 1, maximum: 30 },
+        quietHoursStart: { type: "string", nullable: true },
+        quietHoursEnd: { type: "string", nullable: true },
+        updatedAt: nullableDateString,
+      },
+      [
+        "category",
+        "inAppEnabled",
+        "emailEnabled",
+        "digestEnabled",
+        "dueSoonDays",
+      ],
+    ),
+    NotificationPreferencesResponse: objectSchema(
+      {
+        preferences: arrayOf(ref("NotificationPreference")),
+      },
+      ["preferences"],
+    ),
+    NotificationPreferencesUpdateRequest: objectSchema(
+      {
+        preferences: arrayOf(ref("NotificationPreference")),
+      },
+      ["preferences"],
+    ),
+    NotificationMarkAllReadResponse: objectSchema(
+      {
+        updated: { type: "integer", minimum: 0 },
+      },
+      ["updated"],
+    ),
+    NotificationDeliveryRetryResponse: objectSchema(
+      {
+        sent: { type: "integer", minimum: 0 },
+        failed: { type: "integer", minimum: 0 },
+        skipped: { type: "integer", minimum: 0 },
+        processed: { type: "integer", minimum: 0 },
+      },
+      ["sent", "failed", "skipped", "processed"],
+    ),
+    NotificationRetryResponse: objectSchema(
+      {
+        queued: { type: "boolean" },
+        reason: { type: "string", nullable: true },
+        delivery: ref("NotificationDeliveryRetryResponse"),
+      },
+      ["queued"],
+    ),
+    NotificationDueScanRequest: objectSchema({
+      projectId: nullableUuid,
+      horizonDays: { type: "integer", minimum: 1, maximum: 30, default: 3 },
+    }),
+    NotificationDueScanResponse: objectSchema(
+      {
+        projects: { type: "integer", minimum: 0 },
+        created: { type: "integer", minimum: 0 },
+      },
+      ["projects", "created"],
     ),
     ApiError: objectSchema(
       {
@@ -307,10 +697,15 @@ const components = {
       type: "string",
       enum: [
         "ACTIVITY_NOT_FOUND",
+        "ACTIVITY_PROGRESS_ASSIGNMENT_REQUIRED",
         "AI_LIMIT_REACHED",
         "ALLOCATION_NOT_EDITABLE",
+        "ALLOCATION_AMOUNT_EXCEEDED",
+        "ALLOCATION_NOT_FOUND",
+        "ALLOCATION_QUANTITY_EXCEEDED",
         "ALREADY_ACTIVE",
         "ALREADY_INACTIVE",
+        "ACCOUNT_LOCKED",
         "AUTH_REQUIRED",
         "BOQ_ITEM_CODE_REQUIRED",
         "BOQ_BASELINE_LOCKED",
@@ -320,19 +715,42 @@ const components = {
         "BOQ_ITEM_NOT_FOUND",
         "BOQ_VALIDATION_FAILED",
         "CARD_DECLINED",
+        "CHANGE_ORDER_APPROVED_LOCKED",
+        "CHANGE_ORDER_ARCHIVED",
+        "CHANGE_ORDER_IMPACT_SUMMARY_REQUIRED",
+        "CHANGE_ORDER_WORKFLOW_ACTION_REQUIRED",
+        "COMPANY_EXISTS",
+        "COMPANY_NAME_REQUIRED",
+        "COMPANY_NOT_FOUND",
+        "COMPANY_REQUIRED",
         "CONFIG_ERROR",
         "CONFLICT",
         "COST_RECORD_NOT_FOUND",
         "CPM_DEPENDENCY_CYCLE",
+        "DAILY_REPORT_LINK_INVALID",
         "DAILY_REPORT_NOT_FOUND",
         "DEFECT_NOT_FOUND",
+        "DOCUMENT_RECORD_NOT_FOUND",
+        "DOCUMENT_RECORD_TYPE_UNSUPPORTED",
+        "DOCUMENT_REVISION_EXISTS",
+        "DOCUMENT_REVISION_FILE_REQUIRED",
+        "DOCUMENT_REVISION_NOT_FOUND",
+        "DOCUMENT_REVISION_REQUIRED",
+        "DOCUMENT_REVISION_SUPERSEDE_REASON_REQUIRED",
+        "DOCUMENT_REVISION_SUPERSEDED_READ_ONLY",
         "DOWNGRADE_NOT_ALLOWED",
         "DRAWING_NOT_FOUND",
+        "DUPLICATE_BOQ_ITEM_CODE",
+        "DUPLICATE_ACTIVE_ALLOCATION",
+        "EMAIL_DELIVERY_FAILED",
         "EMAIL_EXISTS",
+        "EMAIL_MESSAGE_INVALID",
         "EMPTY_FILE",
         "ENTERPRISE_VIA_SALES",
         "EOT_CLAIM_NOT_FOUND",
+        "EOT_WORKFLOW_ACTION_REQUIRED",
         "EQUIPMENT_NOT_FOUND",
+        "EQUIPMENT_USAGE_LINK_INVALID",
         "FILE_NOT_AVAILABLE",
         "FILE_NOT_FOUND",
         "FILE_PARSE_ERROR",
@@ -342,6 +760,8 @@ const components = {
         "FORBIDDEN",
         "INTERNAL_ERROR",
         "INVALID_ALLOCATION_VALUES",
+        "INVALID_ALLOCATION_SOURCE",
+        "INVALID_ALLOCATION_STATUS",
         "INVALID_CYCLE",
         "INVALID_DATE",
         "INVALID_DEPENDENCY_ACTIVITY",
@@ -354,13 +774,19 @@ const components = {
         "INVALID_SHIFT",
         "INVALID_SITE_PHOTO_REFERENCE",
         "INVALID_PLAN",
+        "INVITATION_EMAIL_IN_OTHER_ORG",
+        "INVITATION_PASSWORD_REQUIRED",
+        "INVITATION_TOKEN_INVALID",
         "INVALID_REFRESH_TOKEN",
         "INVALID_ROLE",
+        "INVALID_PROJECT_PARTY_ACCESS_LEVEL",
+        "INVALID_PROJECT_PARTY_ROLE",
         "INVALID_SEATS_BAND",
         "INVALID_TOKEN",
         "INVALID_UNIT",
         "IPC_ITEM_NOT_FOUND",
         "IPC_ALLOCATION_AMOUNT_EXCEEDED",
+        "IPC_ALLOCATION_NOT_APPROVED",
         "IPC_ALLOCATION_QTY_EXCEEDED",
         "IPC_APPROVED_PROGRESS_EXCEEDED",
         "IPC_APPROVED_PROGRESS_REQUIRED",
@@ -375,32 +801,65 @@ const components = {
         "IPC_PERIOD_EXISTS",
         "IPC_PERIOD_NOT_FOUND",
         "IPC_PERIOD_NOT_EDITABLE",
+        "IPC_PM_OVERRIDE_REASON_REQUIRED",
+        "IPC_PM_OVERRIDE_REQUIRED",
         "IPC_RETENTION_RELEASE_AMOUNT_REQUIRED",
         "IPC_RETENTION_RELEASE_EXCEEDS_HELD",
         "ISSUED_QTY_EXCEEDS_RECEIVED",
         "ITP_NOT_FOUND",
         "JOB_ACCESS_DENIED",
         "JOB_NOT_FOUND",
+        "LOGIN_BACKOFF",
         "LONG_LEAD_NOT_FOUND",
         "MATERIAL_HAS_PROCUREMENT_ACTIVITY",
         "MATERIAL_NOT_FOUND",
         "MATERIAL_USAGE_EXCEEDS_ISSUED_QTY",
         "MISSING_FIELDS",
+        "NCR_CLOSEOUT_EVIDENCE_REQUIRED",
+        "NCR_CLOSEOUT_REQUIRED_FIELDS",
+        "NCR_NOT_READY_FOR_APPROVAL",
+        "NCR_NOT_READY_FOR_CLOSEOUT",
+        "NCR_NOT_READY_FOR_REJECTION",
+        "NCR_NOT_READY_FOR_REOPEN",
         "NCR_NOT_FOUND",
+        "NCR_REOPEN_REASON_REQUIRED",
+        "NCR_WORKFLOW_ACTION_REQUIRED",
+        "NOTIFICATION_NOT_FOUND",
+        "NOTIFICATION_PREFERENCE_INVALID",
         "NO_ACTIVE_SUBSCRIPTION",
         "NO_FILE",
         "NOT_FOUND",
         "PARSE_ERROR",
         "PAYMENT_METHOD_REQUIRED",
+        "PASSWORD_RESET_TOKEN_INVALID",
         "PROJECT_LIMIT_REACHED",
+        "ORG_NOT_FOUND",
         "PROJECT_ACCESS_DENIED",
+        "PROJECT_ARCHIVED",
+        "PROJECT_ARCHIVE_ACTION_REQUIRED",
         "PROJECT_NOT_FOUND",
+        "PROJECT_PARTY_MEMBER_NOT_FOUND",
+        "PROJECT_PARTY_NOT_FOUND",
+        "PROJECT_PARTY_PROJECT_REQUIRED",
+        "PROJECT_PARTY_RECORD_ACCESS_DENIED",
         "PO_LINE_NOT_FOUND",
         "PO_LINES_REQUIRED",
         "PROCUREMENT_ACTIVITY_REQUIRED",
+        "PROCUREMENT_ALERT_ALREADY_RESOLVED",
         "PROCUREMENT_ALERT_NOT_FOUND",
+        "PROCUREMENT_ALERT_WORKFLOW_ENDPOINT_REQUIRED",
         "PROCUREMENT_ORDER_NOT_FOUND",
         "PROCUREMENT_PACKAGE_NOT_FOUND",
+        "SAFETY_CLOSEOUT_EVIDENCE_REQUIRED",
+        "SAFETY_CLOSEOUT_REQUIRED_FIELDS",
+        "SAFETY_INCIDENT_ARCHIVED",
+        "SAFETY_INCIDENT_NOT_FOUND",
+        "SAFETY_INCIDENT_NOT_READY_FOR_APPROVAL",
+        "SAFETY_NOT_READY_FOR_CLOSEOUT",
+        "SAFETY_NOT_READY_FOR_REJECTION",
+        "SAFETY_NOT_READY_FOR_REOPEN",
+        "SAFETY_REOPEN_REASON_REQUIRED",
+        "SAFETY_WORKFLOW_ACTION_REQUIRED",
         "REVISION_NOT_FOUND",
         "RECEIPT_LINE_NOT_FOUND",
         "RECEIPT_LINES_REQUIRED",
@@ -408,10 +867,29 @@ const components = {
         "REFRESH_SESSION_REQUIRED",
         "REFRESH_TOKEN_EXPIRED",
         "REFRESH_TOKEN_REUSED",
+        "RFI_ALREADY_CLOSED",
+        "RFI_ALREADY_OPEN",
+        "RFI_ARCHIVED",
+        "RFI_ARCHIVE_ACTION_REQUIRED",
+        "RFI_CLOSE_COMMENT_REQUIRED",
         "RFI_NOT_FOUND",
+        "RFI_REOPEN_REASON_REQUIRED",
+        "RFI_RESPONSE_REQUIRED",
+        "RATE_LIMIT_EXCEEDED",
+        "RISK_ARCHIVED",
         "RISK_NOT_FOUND",
         "SITE_DIARY_NOT_FOUND",
+        "SUBMITTAL_ARCHIVED",
+        "SUBMITTAL_ARCHIVE_ACTION_REQUIRED",
+        "SUBMITTAL_NOT_READY_FOR_APPROVAL",
+        "SUBMITTAL_NOT_READY_FOR_REJECTION",
+        "SUBMITTAL_NOT_READY_FOR_RESUBMISSION",
+        "SUBMITTAL_NOT_READY_FOR_SUBMISSION",
+        "SUBMITTAL_NOT_UNDER_REVIEW",
         "SUBMITTAL_NOT_FOUND",
+        "SUBMITTAL_RESUBMIT_REASON_REQUIRED",
+        "SUBMITTAL_REVIEW_COMMENT_REQUIRED",
+        "SUBMITTAL_REVISION_REQUIRED",
         "SUBSCRIPTION_REQUIRED",
         "SUPPLIER_NOT_FOUND",
         "TOKEN_EXPIRED",
@@ -421,9 +899,12 @@ const components = {
         "UNSUPPORTED_DOCUMENT_TYPE",
         "UNSUPPORTED_SITE_PHOTO",
         "UNSUPPORTED_WORKFLOW_ATTACHMENT",
+        "UNPROCESSABLE_ENTITY",
         "USER_INACTIVE",
         "USER_NOT_FOUND",
         "VALIDATION_ERROR",
+        "WORKFLOW_ACTIVITY_NOT_FOUND",
+        "WORKFLOW_PROJECT_PARTY_NOT_FOUND",
       ],
     },
     CursorPage: objectSchema({
@@ -454,38 +935,68 @@ const components = {
             "boq_revision",
             "cost_record",
             "burn_rate_entry",
+            "activity_boq_allocation",
             "procurement_supplier",
             "procurement_package",
             "procurement_order",
             "delivery_receipt",
             "activity_material_usage",
+            "activity_equipment_usage",
             "procurement_alert",
+            "project",
             "rfi",
             "submittal",
+            "document_revision",
+            "ncr",
+            "safety_incident",
+            "project_setup_readiness",
           ],
         },
         entityId: { type: "string" },
+        recordType: { type: "string" },
+        recordId: { type: "string" },
+        source: {
+          type: "string",
+          enum: ["audit", "approval", "status"],
+          description:
+            "History source: central audit event, approval workflow event, or workflow status-history row.",
+        },
+        rawId: { type: "string" },
+        workflowType: { type: "string", nullable: true },
         action: {
           type: "string",
           enum: [
             "created",
             "updated",
             "status_changed",
+            "submitted",
+            "answered",
+            "reviewed",
             "approved",
             "rejected",
+            "resubmit_required",
             "baseline_locked",
             "certified",
+            "paid",
+            "closed",
+            "reopened",
+            "archived",
             "deleted",
             "superseded",
             "imported",
+            "overridden",
           ],
         },
+        decision: { type: "string", nullable: true },
         actorId: { type: "string", nullable: true },
         actorRole: { type: "string", nullable: true },
         occurredAt: dateString,
         oldStatus: { type: "string", nullable: true },
         newStatus: { type: "string", nullable: true },
+        fromStatus: { type: "string", nullable: true },
+        toStatus: { type: "string", nullable: true },
         reason: { type: "string", nullable: true },
+        comment: { type: "string", nullable: true },
         oldSummary: {
           type: "object",
           nullable: true,
@@ -511,6 +1022,10 @@ const components = {
         "projectId",
         "entityType",
         "entityId",
+        "recordType",
+        "recordId",
+        "source",
+        "rawId",
         "action",
         "occurredAt",
         "summary",
@@ -557,6 +1072,131 @@ const components = {
         password: { type: "string", format: "password" },
       },
       ["email", "password"],
+    ),
+    AuthForgotPasswordRequest: objectSchema(
+      {
+        email: { type: "string", format: "email" },
+      },
+      ["email"],
+    ),
+    AuthForgotPasswordResponse: objectSchema(
+      {
+        sent: { type: "boolean" },
+      },
+      ["sent"],
+    ),
+    AuthResetPasswordRequest: objectSchema(
+      {
+        token: { type: "string" },
+        password: { type: "string", format: "password", minLength: 8 },
+      },
+      ["token", "password"],
+    ),
+    AuthResetPasswordResponse: objectSchema(
+      {
+        reset: { type: "boolean" },
+      },
+      ["reset"],
+    ),
+    InvitationPreview: objectSchema(
+      {
+        email: { type: "string", format: "email" },
+        role: { type: "string", enum: ROLE_IDS },
+        org: objectSchema({
+          id: uuid,
+          name: { type: "string" },
+        }),
+        project: {
+          nullable: true,
+          oneOf: [
+            objectSchema({
+              id: uuid,
+              name: { type: "string" },
+            }),
+          ],
+        },
+        company: {
+          nullable: true,
+          oneOf: [
+            objectSchema({
+              id: uuid,
+              name: { type: "string" },
+            }),
+          ],
+        },
+        projectParty: {
+          nullable: true,
+          oneOf: [
+            objectSchema({
+              id: uuid,
+              role: {
+                type: "string",
+                enum: ["owner", "consultant", "contractor", "subcontractor"],
+              },
+              company: objectSchema({
+                id: uuid,
+                name: { type: "string" },
+              }),
+            }),
+          ],
+        },
+        expiresAt: dateString,
+        existingUser: { type: "boolean" },
+        requiresPassword: { type: "boolean" },
+      },
+      [
+        "email",
+        "role",
+        "org",
+        "project",
+        "expiresAt",
+        "existingUser",
+        "requiresPassword",
+      ],
+    ),
+    InvitationAcceptRequest: objectSchema(
+      {
+        token: { type: "string" },
+        name: { type: "string" },
+        password: { type: "string", format: "password", minLength: 8 },
+        phone: { type: "string" },
+      },
+      ["token", "name"],
+    ),
+    UserInvitationRequest: objectSchema(
+      {
+        email: { type: "string", format: "email" },
+        role: { type: "string", enum: ROLE_IDS },
+        projectId: nullableUuid,
+        companyId: nullableUuid,
+        projectPartyId: nullableUuid,
+        note: { type: "string", maxLength: 1000 },
+      },
+      ["email", "role"],
+    ),
+    UserInvitationResponse: objectSchema(
+      {
+        id: uuid,
+        email: { type: "string", format: "email" },
+        role: { type: "string", enum: ROLE_IDS },
+        status: { type: "string", enum: ["pending", "accepted", "revoked"] },
+        projectId: nullableUuid,
+        companyId: nullableUuid,
+        projectPartyId: nullableUuid,
+        invitedById: nullableUuid,
+        expiresAt: dateString,
+        createdAt: dateString,
+      },
+      [
+        "id",
+        "email",
+        "role",
+        "status",
+        "projectId",
+        "invitedById",
+        "expiresAt",
+        "createdAt",
+      ],
     ),
     AuthTokens: objectSchema(
       {
@@ -696,6 +1336,134 @@ const components = {
       },
       ["received"],
     ),
+    Company: objectSchema(
+      {
+        id: uuid,
+        orgId: uuid,
+        name: { type: "string" },
+        legalName: { type: "string", nullable: true },
+        tradeName: { type: "string", nullable: true },
+        registrationNumber: { type: "string", nullable: true },
+        taxNumber: { type: "string", nullable: true },
+        type: { type: "string", enum: ["internal", "external"] },
+        email: { type: "string", format: "email", nullable: true },
+        phone: { type: "string", nullable: true },
+        website: { type: "string", nullable: true },
+        address: { type: "string", nullable: true },
+        status: { type: "string", enum: ["active", "inactive"] },
+        createdAt: dateString,
+        updatedAt: dateString,
+      },
+      ["id", "orgId", "name", "type", "status"],
+    ),
+    CompanyMutation: objectSchema(
+      {
+        name: { type: "string", maxLength: 255 },
+        legalName: { type: "string", nullable: true, maxLength: 255 },
+        tradeName: { type: "string", nullable: true, maxLength: 255 },
+        registrationNumber: { type: "string", nullable: true, maxLength: 120 },
+        taxNumber: { type: "string", nullable: true, maxLength: 120 },
+        type: { type: "string", enum: ["internal", "external"] },
+        email: { type: "string", format: "email", nullable: true },
+        phone: { type: "string", nullable: true, maxLength: 80 },
+        website: { type: "string", nullable: true, maxLength: 255 },
+        address: { type: "string", nullable: true, maxLength: 1000 },
+        status: { type: "string", enum: ["active", "inactive"] },
+      },
+      ["name"],
+    ),
+    CompaniesResponse: objectSchema(
+      {
+        items: arrayOf(ref("Company")),
+        pagination: ref("CursorPagination"),
+      },
+      ["items", "pagination"],
+    ),
+    ProjectPartyMember: objectSchema(
+      {
+        id: uuid,
+        userId: uuid,
+        companyMembershipId: nullableUuid,
+        role: { type: "string" },
+        status: { type: "string", enum: ["active", "inactive", "pending"] },
+        invitedAt: nullableDateString,
+        acceptedAt: nullableDateString,
+        user: {
+          nullable: true,
+          oneOf: [
+            objectSchema({
+              id: uuid,
+              name: { type: "string", nullable: true },
+              email: { type: "string", format: "email" },
+              role: { type: "string", enum: ROLE_IDS },
+              status: { type: "string", enum: ["active", "inactive"] },
+            }),
+          ],
+        },
+      },
+      ["id", "userId", "role", "status"],
+    ),
+    ProjectParty: objectSchema(
+      {
+        id: uuid,
+        projectId: uuid,
+        companyId: uuid,
+        role: {
+          type: "string",
+          enum: ["owner", "consultant", "contractor", "subcontractor"],
+        },
+        roleLabel: { type: "string", nullable: true },
+        contactName: { type: "string", nullable: true },
+        contactEmail: { type: "string", format: "email", nullable: true },
+        contactPhone: { type: "string", nullable: true },
+        accessLevel: {
+          type: "string",
+          enum: ["read_only", "collaborator", "reviewer", "admin"],
+        },
+        permissionProfile: { type: "string", nullable: true },
+        permissionPolicy: ref("GenericObject"),
+        status: { type: "string", enum: ["active", "inactive"] },
+        company: { allOf: [ref("Company")], nullable: true },
+        members: arrayOf(ref("ProjectPartyMember")),
+        createdAt: dateString,
+        updatedAt: dateString,
+      },
+      ["id", "projectId", "companyId", "role", "accessLevel", "status"],
+    ),
+    ProjectPartyMutation: objectSchema({
+      partyId: nullableUuid,
+      role: {
+        type: "string",
+        enum: ["owner", "consultant", "contractor", "subcontractor"],
+      },
+      companyId: nullableUuid,
+      companyName: { type: "string", nullable: true, maxLength: 255 },
+      name: { type: "string", nullable: true, maxLength: 255 },
+      contactName: { type: "string", nullable: true, maxLength: 255 },
+      contactEmail: { type: "string", format: "email", nullable: true },
+      contactPhone: { type: "string", nullable: true, maxLength: 80 },
+      accessLevel: {
+        type: "string",
+        enum: ["read_only", "collaborator", "reviewer", "admin"],
+      },
+      permissionProfile: { type: "string", nullable: true, maxLength: 120 },
+      status: { type: "string", enum: ["active", "inactive"] },
+    }),
+    ProjectPartiesResponse: objectSchema(
+      {
+        items: arrayOf(ref("ProjectParty")),
+      },
+      ["items"],
+    ),
+    ProjectPartyMemberMutation: objectSchema(
+      {
+        userId: uuid,
+        role: { type: "string", default: "member" },
+        invitedAt: nullableDateString,
+        acceptedAt: nullableDateString,
+      },
+      ["userId"],
+    ),
     ProjectMutation: objectSchema({
       name: { type: "string" },
       type: { type: "string", nullable: true },
@@ -721,6 +1489,7 @@ const components = {
       endDate: nullableDateString,
       completionDate: nullableDateString,
       baselineDate: nullableDateString,
+      dataDate: nullableDateString,
       revisedCompletionDate: nullableDateString,
       duration: { type: "integer", minimum: 0, nullable: true },
       durationUnit: { type: "string", enum: ["days", "weeks", "months"] },
@@ -744,6 +1513,7 @@ const components = {
         type: "string",
         enum: ["active", "on_hold", "completed", "cancelled"],
       },
+      parties: arrayOf(ref("ProjectPartyMutation")),
     }),
     BoqItemMutation: objectSchema(
       {
@@ -758,7 +1528,11 @@ const components = {
     ),
     BoqActivityMutation: objectSchema(
       {
-        activityName: { type: "string" },
+        activityName: {
+          type: "string",
+          description:
+            "Draft helper label for an official schedule Activity. Legacy BoqActivity records are suggestion/history only.",
+        },
         unit: { type: "string" },
         quantity: nonNegativeNumber,
         rate: money,
@@ -766,6 +1540,21 @@ const components = {
         predecessorCode: { type: "string", nullable: true },
       },
       ["activityName", "unit", "quantity", "rate"],
+    ),
+    ActivityBoqAllocationMutation: objectSchema(
+      {
+        boqItemId: uuid,
+        activityId: uuid,
+        quantity: nonNegativeNumber,
+        amount: money,
+        weight: percent,
+        source: {
+          type: "string",
+          enum: ["manual", "import", "ai", "migration"],
+        },
+        notes: { type: "string", nullable: true },
+      },
+      ["boqItemId", "activityId", "quantity"],
     ),
     ProjectDocumentUpload: objectSchema(
       {
@@ -899,14 +1688,175 @@ const components = {
         ...objectSchema({
           id: uuid,
           name: { type: "string" },
+          activityCode: { type: "string", nullable: true },
           wbsCode: { type: "string", nullable: true },
           p6ActivityId: { type: "string", nullable: true },
         }),
         nullable: true,
       },
     }),
+    ScheduleProcurementRiskItem: objectSchema({
+      id: uuid,
+      status: {
+        type: "string",
+        enum: ["open", "acknowledged", "resolved"],
+      },
+      severity: {
+        type: "string",
+        enum: ["none", "low", "medium", "high", "critical"],
+      },
+      reason: { type: "string" },
+      daysAtRisk: { type: "integer", minimum: 0 },
+      needDate: nullableDateString,
+      orderByDate: nullableDateString,
+      expectedDeliveryDate: nullableDateString,
+      source: { type: "string" },
+      item: { type: "string" },
+      ref: { type: "string", nullable: true },
+    }),
+    ScheduleProcurementRiskSummary: objectSchema({
+      atRiskCount: { type: "integer", minimum: 0 },
+      openCount: { type: "integer", minimum: 0 },
+      acknowledgedCount: { type: "integer", minimum: 0 },
+      highestSeverity: {
+        type: "string",
+        enum: ["none", "low", "medium", "high", "critical"],
+      },
+      reason: { type: "string" },
+      daysAtRisk: { type: "integer", minimum: 0 },
+      needDate: nullableDateString,
+      orderByDate: nullableDateString,
+      expectedDeliveryDate: nullableDateString,
+      items: arrayOf(ref("ScheduleProcurementRiskItem")),
+    }),
+    ScheduleRiskItem: objectSchema({
+      id: uuid,
+      linkId: uuid,
+      ref: { type: "string" },
+      description: { type: "string" },
+      severity: { type: "string", enum: ["LOW", "MEDIUM", "HIGH", "CRITICAL"] },
+      status: { type: "string", enum: ["open", "monitoring", "submitted"] },
+      owner: { type: "string", nullable: true },
+      dueDate: nullableDateString,
+      escalationLevel: { type: "string", enum: ["none", "watch", "escalated"] },
+      relationType: { type: "string" },
+      scheduleImpactDays: { type: "integer" },
+      costImpact: money,
+      notes: { type: "string", nullable: true },
+      isOverdue: { type: "boolean" },
+    }),
+    ScheduleRiskSummary: objectSchema({
+      count: { type: "integer", minimum: 0 },
+      openCount: { type: "integer", minimum: 0 },
+      monitoringCount: { type: "integer", minimum: 0 },
+      submittedCount: { type: "integer", minimum: 0 },
+      overdueCount: { type: "integer", minimum: 0 },
+      highestSeverity: {
+        type: "string",
+        enum: ["LOW", "MEDIUM", "HIGH", "CRITICAL"],
+      },
+      escalationLevel: { type: "string", enum: ["none", "watch", "escalated"] },
+      dueDate: nullableDateString,
+      items: arrayOf(ref("ScheduleRiskItem")),
+    }),
+    RiskActivityLink: objectSchema({
+      id: uuid,
+      projectId: uuid,
+      riskId: uuid,
+      activityId: uuid,
+      relationType: { type: "string" },
+      scheduleImpactDays: { type: "integer" },
+      costImpact: money,
+      notes: { type: "string", nullable: true },
+      activity: ref("GenericObject"),
+      createdAt: nullableDateString,
+      updatedAt: nullableDateString,
+    }),
+    RiskMutation: objectSchema({
+      description: { type: "string" },
+      probability: { type: "string", enum: ["low", "medium", "high"] },
+      impact: { type: "string", enum: ["low", "medium", "high"] },
+      severity: { type: "string", enum: ["LOW", "MEDIUM", "HIGH", "CRITICAL"] },
+      mitigation: { type: "string", nullable: true },
+      responsePlan: { type: "string", nullable: true },
+      residualProbability: {
+        type: "string",
+        enum: ["low", "medium", "high"],
+      },
+      residualImpact: { type: "string", enum: ["low", "medium", "high"] },
+      residualSeverity: {
+        type: "string",
+        enum: ["LOW", "MEDIUM", "HIGH", "CRITICAL"],
+      },
+      residualDescription: { type: "string", nullable: true },
+      phase: { type: "string", nullable: true },
+      owner: { type: "string", nullable: true },
+      dueDate: nullableDateString,
+      escalationLevel: { type: "string", enum: ["none", "watch", "escalated"] },
+      escalationNotes: { type: "string", nullable: true },
+      status: { type: "string", enum: ["open", "monitoring"] },
+      activityId: nullableUuid,
+      activityIds: arrayOf(uuid),
+      activityLinks: arrayOf(ref("ActivityLinkInput")),
+      comment: { type: "string", nullable: true },
+    }),
+    RiskCloseoutPayload: objectSchema({
+      dueDate: nullableDateString,
+      responsePlan: { type: "string", nullable: true },
+      closeoutComment: { type: "string", nullable: true },
+      comment: { type: "string", nullable: true },
+      reason: { type: "string", nullable: true },
+    }),
+    RiskRecord: objectSchema({
+      id: uuid,
+      projectId: uuid,
+      ref: { type: "string" },
+      description: { type: "string" },
+      probability: { type: "string", enum: ["low", "medium", "high"] },
+      impact: { type: "string", enum: ["low", "medium", "high"] },
+      severity: { type: "string", enum: ["LOW", "MEDIUM", "HIGH", "CRITICAL"] },
+      mitigation: { type: "string", nullable: true },
+      responsePlan: { type: "string", nullable: true },
+      residualProbability: {
+        type: "string",
+        enum: ["low", "medium", "high"],
+      },
+      residualImpact: { type: "string", enum: ["low", "medium", "high"] },
+      residualSeverity: {
+        type: "string",
+        enum: ["LOW", "MEDIUM", "HIGH", "CRITICAL"],
+      },
+      residualDescription: { type: "string", nullable: true },
+      phase: { type: "string", nullable: true },
+      owner: { type: "string", nullable: true },
+      dueDate: nullableDateString,
+      escalationLevel: { type: "string", enum: ["none", "watch", "escalated"] },
+      escalationNotes: { type: "string", nullable: true },
+      status: {
+        type: "string",
+        enum: ["open", "monitoring", "submitted", "closed", "archived"],
+      },
+      closeoutComment: { type: "string", nullable: true },
+      closeoutSubmittedBy: { type: "string", nullable: true },
+      closeoutSubmittedAt: nullableDateString,
+      closedBy: { type: "string", nullable: true },
+      closedAt: nullableDateString,
+      rejectedBy: { type: "string", nullable: true },
+      rejectedAt: nullableDateString,
+      rejectionReason: { type: "string", nullable: true },
+      reopenedBy: { type: "string", nullable: true },
+      reopenedAt: nullableDateString,
+      archivedAt: nullableDateString,
+      archivedBy: { type: "string", nullable: true },
+      activityLinks: arrayOf(ref("RiskActivityLink")),
+      activityIds: arrayOf(uuid),
+      approvalHistory: arrayOf(ref("GenericObject")),
+      createdAt: nullableDateString,
+      updatedAt: nullableDateString,
+    }),
     ActivityMutation: objectSchema({
       name: { type: "string" },
+      activityCode: { type: "string", nullable: true },
       category: {
         type: "string",
         enum: [
@@ -943,6 +1893,7 @@ const components = {
       id: uuid,
       projectId: uuid,
       name: { type: "string" },
+      activityCode: { type: "string", nullable: true },
       p6ActivityId: { type: "string", nullable: true },
       wbsCode: { type: "string", nullable: true },
       calendarId: { type: "string", nullable: true },
@@ -971,6 +1922,14 @@ const components = {
       allocatedBoqAmount: money,
       allocatedBoqWeight: nonNegativeNumber,
       approvedAllocationCount: { type: "integer", minimum: 0 },
+      procurementRiskSummary: {
+        ...ref("ScheduleProcurementRiskSummary"),
+        nullable: true,
+      },
+      projectRiskSummary: {
+        ...ref("ScheduleRiskSummary"),
+        nullable: true,
+      },
       isMilestone: { type: "boolean" },
       isCritical: { type: "boolean" },
       pctComplete: percent,
@@ -982,6 +1941,7 @@ const components = {
       createdAt: dateString,
     }),
     ProjectSchedule: objectSchema({
+      dataDate: nullableDateString,
       revision: ref("GenericObject"),
       activities: arrayOf(ref("Activity")),
     }),
@@ -1060,6 +2020,10 @@ const components = {
     CommentRequest: objectSchema({
       comment: { type: "string", maxLength: 2000, nullable: true },
     }),
+    IpcCertifyRequest: objectSchema({
+      comment: { type: "string", maxLength: 2000, nullable: true },
+      overrideReason: { type: "string", maxLength: 2000, nullable: true },
+    }),
     RejectRequest: objectSchema(
       {
         reason: { type: "string", maxLength: 2000 },
@@ -1097,6 +2061,14 @@ const components = {
       },
       ["periodStart", "periodEnd"],
     ),
+    ReportingPeriodLockRequest: objectSchema({
+      overrideReason: {
+        type: "string",
+        maxLength: 2000,
+        description:
+          "Required from a Project Manager when official reporting readiness blockers are still open.",
+      },
+    }),
     CostLoadingRequest: objectSchema(
       {
         activityId: uuid,
@@ -1161,6 +2133,46 @@ const components = {
       },
       forecast: money,
     }),
+    ActivityEquipmentUsage: objectSchema({
+      id: uuid,
+      projectId: uuid,
+      activityId: uuid,
+      equipmentId: nullableUuid,
+      dailyReportId: nullableUuid,
+      sourceLineIndex: { type: "integer", nullable: true },
+      equipmentName: { type: "string" },
+      hours: { type: "number", minimum: 0 },
+      rateType: {
+        type: "string",
+        enum: ["hourly", "daily"],
+        nullable: true,
+      },
+      rate: money,
+      costAmount: money,
+      usageDate: dateString,
+      status: { type: "string", enum: ["approved"] },
+      recordedBy: { type: "string", nullable: true },
+      approvedBy: { type: "string", nullable: true },
+      approvedAt: nullableDateString,
+      notes: { type: "string", nullable: true },
+      activity: ref("GenericObject"),
+      equipment: ref("GenericObject"),
+      dailyReport: ref("GenericObject"),
+    }),
+    EquipmentUtilizationReport: objectSchema({
+      totals: objectSchema({
+        hours: { type: "number", minimum: 0 },
+        costAmount: money,
+        unpricedHours: { type: "number", minimum: 0 },
+        pricedHours: { type: "number", minimum: 0 },
+        usageCount: { type: "integer", minimum: 0 },
+        activityCount: { type: "integer", minimum: 0 },
+        equipmentCount: { type: "integer", minimum: 0 },
+      }),
+      byActivity: arrayOf(ref("GenericObject")),
+      byEquipment: arrayOf(ref("GenericObject")),
+      recentUsage: arrayOf(ref("ActivityEquipmentUsage")),
+    }),
     EarnedValueActivityBreakdown: objectSchema({
       activityId: { type: "string" },
       name: { type: "string" },
@@ -1195,6 +2207,12 @@ const components = {
         sourceSummary: ref("GenericObject"),
         estimates: ref("GenericObject"),
         basisWarnings: arrayOf({ type: "string" }),
+        readinessGate: ref("GenericObject"),
+        readinessOverride: {
+          ...ref("GenericObject"),
+          nullable: true,
+        },
+        officialDataInputs: arrayOf(ref("GenericObject")),
         unallocatedBoqAmount: money,
         approvedAllocatedAmount: money,
         approvedBudgetRevisionDelta: signedMoney,
@@ -1217,6 +2235,7 @@ const components = {
         "reporting",
         "sourceSummary",
         "basisWarnings",
+        "officialDataInputs",
         "activityBreakdown",
         "alerts",
         "official",
@@ -1322,6 +2341,137 @@ const components = {
       description: { type: "string" },
       uploadedAt: dateString,
     }),
+    DocumentRevision: objectSchema({
+      id: uuid,
+      projectId: uuid,
+      projectDocumentId: nullableUuid,
+      recordType: {
+        type: "string",
+        enum: ["rfi", "submittal", "drawing", "transmittal", "correspondence"],
+      },
+      recordId: uuid,
+      revision: { type: "string" },
+      status: {
+        type: "string",
+        enum: ["uploaded", "submitted", "approved", "superseded", "rejected"],
+        nullable: true,
+      },
+      title: { type: "string", nullable: true },
+      documentNumber: { type: "string", nullable: true },
+      category: { type: "string", nullable: true },
+      folderPath: { type: "string", nullable: true },
+      folderKey: { type: "string", nullable: true },
+      discipline: { type: "string", nullable: true },
+      mimeType: { type: "string", nullable: true },
+      sizeBytes: { type: "integer", minimum: 0, nullable: true },
+      fileName: { type: "string", nullable: true },
+      fileUrl: { type: "string", nullable: true },
+      downloadUrl: { type: "string", nullable: true },
+      previewUrl: { type: "string", nullable: true },
+      storageKey: { type: "string", nullable: true },
+      isLatest: { type: "boolean" },
+      issuedBy: { type: "string", nullable: true },
+      issuedAt: dateString,
+      submittedBy: { type: "string", nullable: true },
+      submittedAt: nullableDateString,
+      reviewDueAt: nullableDateString,
+      approvedBy: { type: "string", nullable: true },
+      approvedAt: nullableDateString,
+      supersededBy: { type: "string", nullable: true },
+      supersededAt: nullableDateString,
+      notes: { type: "string", nullable: true },
+      readOnly: { type: "boolean" },
+      createdAt: dateString,
+      updatedAt: dateString,
+    }),
+    DocumentRegisterRow: objectSchema({
+      id: { type: "string" },
+      recordType: {
+        type: "string",
+        enum: ["rfi", "submittal", "drawing", "transmittal", "correspondence"],
+      },
+      recordId: uuid,
+      ref: { type: "string" },
+      title: { type: "string" },
+      documentNumber: { type: "string", nullable: true },
+      category: { type: "string", nullable: true },
+      folderPath: { type: "string", nullable: true },
+      folderKey: { type: "string", nullable: true },
+      restrictedToCurrentRevision: { type: "boolean" },
+      status: { type: "string", nullable: true },
+      currentRevision: { type: "string", nullable: true },
+      latestRevision: { allOf: [ref("DocumentRevision")], nullable: true },
+      revisions: arrayOf(ref("DocumentRevision")),
+      revisionCount: { type: "integer", minimum: 0 },
+      supersededRevisionCount: { type: "integer", minimum: 0 },
+      dueDate: nullableDateString,
+      dueAlert: ref("GenericObject"),
+      activityId: nullableUuid,
+      activityLinks: arrayOf(ref("GenericObject")),
+      attachments: arrayOf(ref("WorkflowAttachmentRef")),
+      attachmentCount: { type: "integer", minimum: 0 },
+      owner: { type: "string", nullable: true },
+      reviewer: { type: "string", nullable: true },
+      approver: { type: "string", nullable: true },
+      ownerParty: { allOf: [ref("ProjectParty")], nullable: true },
+      reviewerParty: { allOf: [ref("ProjectParty")], nullable: true },
+      approverParty: { allOf: [ref("ProjectParty")], nullable: true },
+      linkedEntities: ref("GenericObject"),
+      updatedAt: nullableDateString,
+    }),
+    DocumentRegisterFolder: objectSchema({
+      key: { type: "string" },
+      label: { type: "string" },
+      recordTypes: arrayOf({ type: "string" }),
+      count: { type: "integer", minimum: 0 },
+    }),
+    DocumentRegisterResponse: objectSchema(
+      {
+        rows: arrayOf(ref("DocumentRegisterRow")),
+        folders: arrayOf(ref("DocumentRegisterFolder")),
+        summary: ref("GenericObject"),
+      },
+      ["rows", "folders", "summary"],
+    ),
+    DocumentRevisionUploadRequest: objectSchema(
+      {
+        revision: { type: "string", maxLength: 40 },
+        projectDocumentId: nullableUuid,
+        documentId: nullableUuid,
+        storageKey: { type: "string" },
+        key: { type: "string" },
+        title: { type: "string", nullable: true, maxLength: 255 },
+        fileName: { type: "string", nullable: true, maxLength: 255 },
+        documentNumber: { type: "string", nullable: true, maxLength: 120 },
+        category: { type: "string", nullable: true, maxLength: 120 },
+        folderPath: { type: "string", nullable: true, maxLength: 255 },
+        discipline: { type: "string", nullable: true, maxLength: 120 },
+        confidentiality: { type: "string", nullable: true, maxLength: 80 },
+        reviewDueAt: nullableDateString,
+        status: { type: "string", enum: ["uploaded", "submitted", "approved"] },
+        issuedBy: { type: "string", nullable: true, maxLength: 120 },
+        issuedAt: nullableDateString,
+        notes: { type: "string", nullable: true, maxLength: 2000 },
+      },
+      ["revision"],
+    ),
+    DocumentRevisionUploadResponse: objectSchema(
+      {
+        revision: ref("DocumentRevision"),
+        document: ref("WorkflowAttachmentRef"),
+      },
+      ["revision", "document"],
+    ),
+    DocumentRevisionSubmitReviewRequest: objectSchema({
+      comment: { type: "string", nullable: true, maxLength: 2000 },
+      reviewDueAt: nullableDateString,
+    }),
+    SupersedeRevisionRequest: objectSchema(
+      {
+        reason: { type: "string", maxLength: 2000 },
+      },
+      ["reason"],
+    ),
     ApprovalWorkflowEvent: objectSchema({
       id: { type: "string", nullable: true },
       orgId: { type: "string" },
@@ -1342,6 +2492,569 @@ const components = {
       metadata: ref("GenericObject"),
       createdAt: dateString,
       occurredAt: dateString,
+    }),
+    ApprovalDecisionRequest: objectSchema({
+      comment: { type: "string", nullable: true },
+    }),
+    RejectionDecisionRequest: objectSchema(
+      {
+        reason: { type: "string" },
+      },
+      ["reason"],
+    ),
+    MeetingAttendee: objectSchema({
+      id: uuid,
+      meetingId: uuid,
+      activityId: nullableUuid,
+      activity: { allOf: [ref("Activity")], nullable: true },
+      userId: nullableUuid,
+      user: { allOf: [ref("UserSummary")], nullable: true },
+      projectPartyId: nullableUuid,
+      projectParty: { allOf: [ref("GenericObject")], nullable: true },
+      name: { type: "string", nullable: true },
+      email: { type: "string", nullable: true },
+      companyName: { type: "string", nullable: true },
+      role: { type: "string" },
+      attendanceStatus: {
+        type: "string",
+        enum: ["invited", "attended", "absent", "apology"],
+      },
+      distributionRequired: { type: "boolean" },
+      attendedAt: nullableDateString,
+      createdAt: dateString,
+      updatedAt: dateString,
+    }),
+    MeetingAgendaItem: objectSchema({
+      id: uuid,
+      meetingId: uuid,
+      activityId: nullableUuid,
+      activity: { allOf: [ref("Activity")], nullable: true },
+      presenterId: nullableUuid,
+      presenter: { allOf: [ref("UserSummary")], nullable: true },
+      sortOrder: { type: "integer" },
+      title: { type: "string" },
+      notes: { type: "string", nullable: true },
+      status: { type: "string", enum: ["open", "covered", "deferred"] },
+      createdAt: dateString,
+      updatedAt: dateString,
+    }),
+    MeetingDecision: objectSchema({
+      id: uuid,
+      meetingId: uuid,
+      activityId: nullableUuid,
+      activity: { allOf: [ref("Activity")], nullable: true },
+      decidedById: nullableUuid,
+      decidedBy: { allOf: [ref("UserSummary")], nullable: true },
+      title: { type: "string" },
+      decision: { type: "string" },
+      impact: { type: "string", nullable: true },
+      decidedAt: dateString,
+      createdAt: dateString,
+      updatedAt: dateString,
+    }),
+    MeetingActionItem: objectSchema({
+      id: uuid,
+      meetingId: uuid,
+      activityId: nullableUuid,
+      activity: { allOf: [ref("Activity")], nullable: true },
+      taskId: nullableUuid,
+      task: { allOf: [ref("GenericObject")], nullable: true },
+      itemNumber: { type: "string" },
+      title: { type: "string" },
+      description: { type: "string", nullable: true },
+      ownerId: nullableUuid,
+      owner: { allOf: [ref("UserSummary")], nullable: true },
+      ownerName: { type: "string", nullable: true },
+      ownerEmail: { type: "string", nullable: true },
+      dueDate: dateString,
+      priority: { type: "string", enum: ["low", "medium", "high", "critical"] },
+      status: {
+        type: "string",
+        enum: ["open", "in_progress", "closed", "canceled"],
+      },
+      createdAt: dateString,
+      updatedAt: dateString,
+    }),
+    MeetingDistribution: objectSchema({
+      id: uuid,
+      meetingId: uuid,
+      activityId: nullableUuid,
+      activity: { allOf: [ref("Activity")], nullable: true },
+      recipientUserId: nullableUuid,
+      recipientUser: { allOf: [ref("UserSummary")], nullable: true },
+      projectPartyId: nullableUuid,
+      projectParty: { allOf: [ref("GenericObject")], nullable: true },
+      recipientName: { type: "string", nullable: true },
+      recipientEmail: { type: "string", nullable: true },
+      companyName: { type: "string", nullable: true },
+      channel: { type: "string" },
+      status: { type: "string" },
+      message: { type: "string", nullable: true },
+      sentById: nullableUuid,
+      sentBy: { allOf: [ref("UserSummary")], nullable: true },
+      sentAt: dateString,
+      metadata: ref("GenericObject"),
+      createdAt: dateString,
+      updatedAt: dateString,
+    }),
+    MeetingComment: objectSchema({
+      id: uuid,
+      meetingId: uuid,
+      activityId: nullableUuid,
+      activity: { allOf: [ref("Activity")], nullable: true },
+      authorId: nullableUuid,
+      author: { allOf: [ref("UserSummary")], nullable: true },
+      body: { type: "string" },
+      createdAt: dateString,
+      updatedAt: dateString,
+    }),
+    MeetingRecord: objectSchema(
+      {
+        id: uuid,
+        orgId: uuid,
+        projectId: uuid,
+        project: ref("GenericObject"),
+        activityId: nullableUuid,
+        activity: { allOf: [ref("Activity")], nullable: true },
+        meetingNumber: { type: "string" },
+        title: { type: "string" },
+        meetingType: {
+          type: "string",
+          enum: [
+            "coordination",
+            "progress",
+            "commercial",
+            "quality",
+            "safety",
+            "design",
+            "client",
+            "other",
+          ],
+        },
+        location: { type: "string", nullable: true },
+        scheduledAt: nullableDateString,
+        startedAt: nullableDateString,
+        endedAt: nullableDateString,
+        status: {
+          type: "string",
+          enum: ["draft", "finalized", "distributed", "archived"],
+        },
+        objective: { type: "string", nullable: true },
+        minutesText: { type: "string", nullable: true },
+        nextMeetingAt: nullableDateString,
+        chairId: nullableUuid,
+        chair: { allOf: [ref("UserSummary")], nullable: true },
+        distributedAt: nullableDateString,
+        distributedById: nullableUuid,
+        distributedBy: { allOf: [ref("UserSummary")], nullable: true },
+        attendees: arrayOf(ref("MeetingAttendee")),
+        agendaItems: arrayOf(ref("MeetingAgendaItem")),
+        decisions: arrayOf(ref("MeetingDecision")),
+        actionItems: arrayOf(ref("MeetingActionItem")),
+        distributions: arrayOf(ref("MeetingDistribution")),
+        comments: arrayOf(ref("MeetingComment")),
+        attendeeCount: { type: "integer", minimum: 0 },
+        decisionCount: { type: "integer", minimum: 0 },
+        actionItemCount: { type: "integer", minimum: 0 },
+        openActionItemCount: { type: "integer", minimum: 0 },
+        distributionCount: { type: "integer", minimum: 0 },
+        createdAt: dateString,
+        updatedAt: dateString,
+      },
+      ["id", "projectId", "meetingNumber", "title", "meetingType", "status"],
+    ),
+    MeetingListResponse: objectSchema(
+      {
+        rows: arrayOf(ref("MeetingRecord")),
+        pagination: objectSchema({
+          limit: { type: "integer" },
+          nextCursor: { type: "string", nullable: true },
+        }),
+        summary: objectSchema({
+          total: { type: "integer", minimum: 0 },
+          draft: { type: "integer", minimum: 0 },
+          distributed: { type: "integer", minimum: 0 },
+          openActionItems: { type: "integer", minimum: 0 },
+        }),
+      },
+      ["rows", "pagination", "summary"],
+    ),
+    MeetingAttendeeInput: objectSchema({
+      activityId: nullableUuid,
+      userId: nullableUuid,
+      projectPartyId: nullableUuid,
+      name: { type: "string", nullable: true, maxLength: 255 },
+      email: { type: "string", nullable: true, format: "email" },
+      companyName: { type: "string", nullable: true, maxLength: 255 },
+      role: { type: "string", maxLength: 80 },
+      attendanceStatus: {
+        type: "string",
+        enum: ["invited", "attended", "absent", "apology"],
+      },
+      distributionRequired: { type: "boolean" },
+      attendedAt: nullableDateString,
+    }),
+    MeetingAgendaItemInput: objectSchema({
+      activityId: nullableUuid,
+      presenterId: nullableUuid,
+      sortOrder: { type: "integer", minimum: 0 },
+      title: { type: "string", maxLength: 500 },
+      notes: { type: "string", nullable: true, maxLength: 4000 },
+      status: { type: "string", enum: ["open", "covered", "deferred"] },
+    }),
+    MeetingDecisionInput: objectSchema({
+      activityId: nullableUuid,
+      decidedById: nullableUuid,
+      title: { type: "string", maxLength: 500 },
+      decision: { type: "string", maxLength: 6000 },
+      impact: { type: "string", nullable: true, maxLength: 4000 },
+      decidedAt: nullableDateString,
+    }),
+    MeetingActionItemInput: objectSchema({
+      activityId: nullableUuid,
+      taskId: nullableUuid,
+      itemNumber: { type: "string", nullable: true, maxLength: 50 },
+      title: { type: "string", maxLength: 500 },
+      description: { type: "string", nullable: true, maxLength: 4000 },
+      ownerId: nullableUuid,
+      ownerName: { type: "string", nullable: true, maxLength: 255 },
+      ownerEmail: { type: "string", nullable: true, format: "email" },
+      dueDate: dateString,
+      priority: { type: "string", enum: ["low", "medium", "high", "critical"] },
+      status: {
+        type: "string",
+        enum: ["open", "in_progress", "closed", "canceled"],
+      },
+      createTask: { type: "boolean", default: true },
+    }),
+    MeetingMutation: objectSchema(
+      {
+        activityId: nullableUuid,
+        chairId: nullableUuid,
+        title: { type: "string", maxLength: 255 },
+        meetingType: {
+          type: "string",
+          enum: [
+            "coordination",
+            "progress",
+            "commercial",
+            "quality",
+            "safety",
+            "design",
+            "client",
+            "other",
+          ],
+        },
+        status: {
+          type: "string",
+          enum: ["draft", "finalized", "distributed"],
+        },
+        location: { type: "string", nullable: true, maxLength: 500 },
+        objective: { type: "string", nullable: true, maxLength: 4000 },
+        minutesText: { type: "string", nullable: true, maxLength: 20000 },
+        scheduledAt: nullableDateString,
+        startedAt: nullableDateString,
+        endedAt: nullableDateString,
+        nextMeetingAt: nullableDateString,
+        attendees: arrayOf(ref("MeetingAttendeeInput")),
+        agendaItems: arrayOf(ref("MeetingAgendaItemInput")),
+        decisions: arrayOf(ref("MeetingDecisionInput")),
+        actionItems: arrayOf(ref("MeetingActionItemInput")),
+      },
+      ["title"],
+    ),
+    MeetingPatch: objectSchema({
+      activityId: nullableUuid,
+      chairId: nullableUuid,
+      title: { type: "string", maxLength: 255 },
+      meetingType: {
+        type: "string",
+        enum: [
+          "coordination",
+          "progress",
+          "commercial",
+          "quality",
+          "safety",
+          "design",
+          "client",
+          "other",
+        ],
+      },
+      status: { type: "string", enum: ["draft", "finalized", "distributed"] },
+      location: { type: "string", nullable: true, maxLength: 500 },
+      objective: { type: "string", nullable: true, maxLength: 4000 },
+      minutesText: { type: "string", nullable: true, maxLength: 20000 },
+      scheduledAt: nullableDateString,
+      startedAt: nullableDateString,
+      endedAt: nullableDateString,
+      nextMeetingAt: nullableDateString,
+      attendees: arrayOf(ref("MeetingAttendeeInput")),
+      agendaItems: arrayOf(ref("MeetingAgendaItemInput")),
+      decisions: arrayOf(ref("MeetingDecisionInput")),
+      actionItems: arrayOf(ref("MeetingActionItemInput")),
+    }),
+    MeetingDistributionRecipientInput: objectSchema({
+      name: { type: "string", nullable: true, maxLength: 255 },
+      email: { type: "string", nullable: true, format: "email" },
+      companyName: { type: "string", nullable: true, maxLength: 255 },
+    }),
+    MeetingDistributionRequest: objectSchema({
+      message: { type: "string", nullable: true, maxLength: 4000 },
+      includeAttendees: { type: "boolean", default: true },
+      recipientUserIds: arrayOf(uuid),
+      projectPartyIds: arrayOf(uuid),
+      recipients: arrayOf(ref("MeetingDistributionRecipientInput")),
+    }),
+    MeetingDistributionResponse: objectSchema(
+      {
+        meeting: ref("MeetingRecord"),
+        distributionCount: { type: "integer", minimum: 0 },
+      },
+      ["meeting", "distributionCount"],
+    ),
+    MeetingCommentRequest: objectSchema(
+      {
+        body: { type: "string", maxLength: 4000 },
+        activityId: nullableUuid,
+      },
+      ["body"],
+    ),
+    TaskAttachment: objectSchema({
+      id: uuid,
+      projectDocumentId: nullableUuid,
+      fileName: { type: "string", nullable: true },
+      fileUrl: { type: "string", nullable: true },
+      storageKey: { type: "string", nullable: true },
+      mimeType: { type: "string", nullable: true },
+      uploadedById: nullableUuid,
+      uploadedBy: { allOf: [ref("UserSummary")], nullable: true },
+      createdAt: dateString,
+    }),
+    TaskComment: objectSchema({
+      id: uuid,
+      taskId: uuid,
+      body: { type: "string" },
+      authorId: nullableUuid,
+      author: { allOf: [ref("UserSummary")], nullable: true },
+      createdAt: dateString,
+      updatedAt: dateString,
+    }),
+    TaskHistory: objectSchema({
+      id: uuid,
+      taskId: uuid,
+      action: { type: "string" },
+      actorId: nullableUuid,
+      actorRole: { type: "string", nullable: true },
+      actor: { allOf: [ref("UserSummary")], nullable: true },
+      fromStatus: { type: "string", nullable: true },
+      toStatus: { type: "string", nullable: true },
+      comment: { type: "string", nullable: true },
+      metadata: ref("GenericObject"),
+      createdAt: dateString,
+    }),
+    TaskRecord: objectSchema(
+      {
+        id: uuid,
+        orgId: uuid,
+        projectId: uuid,
+        project: ref("GenericObject"),
+        activityId: nullableUuid,
+        activity: { allOf: [ref("Activity")], nullable: true },
+        taskNumber: { type: "string" },
+        title: { type: "string" },
+        description: { type: "string", nullable: true },
+        label: {
+          type: "string",
+          enum: [
+            "action",
+            "field",
+            "procurement",
+            "quality",
+            "safety",
+            "commercial",
+            "document",
+          ],
+        },
+        priority: {
+          type: "string",
+          enum: ["low", "medium", "high", "critical"],
+        },
+        status: {
+          type: "string",
+          enum: ["todo", "in_progress", "blocked", "done", "canceled"],
+        },
+        dueDate: nullableDateString,
+        isOverdue: { type: "boolean" },
+        assigneeId: nullableUuid,
+        assignee: { allOf: [ref("UserSummary")], nullable: true },
+        assigneeName: { type: "string", nullable: true },
+        comments: arrayOf(ref("TaskComment")),
+        commentCount: { type: "integer", minimum: 0 },
+        attachments: arrayOf(ref("TaskAttachment")),
+        attachmentCount: { type: "integer", minimum: 0 },
+        history: arrayOf(ref("TaskHistory")),
+        closedAt: nullableDateString,
+        archivedAt: nullableDateString,
+        createdAt: dateString,
+        updatedAt: dateString,
+      },
+      [
+        "id",
+        "projectId",
+        "taskNumber",
+        "title",
+        "label",
+        "priority",
+        "status",
+        "isOverdue",
+      ],
+    ),
+    TaskListResponse: objectSchema(
+      {
+        rows: arrayOf(ref("TaskRecord")),
+        pagination: objectSchema({
+          limit: { type: "integer" },
+          nextCursor: { type: "string", nullable: true },
+        }),
+        summary: objectSchema({
+          open: { type: "integer", minimum: 0 },
+          overdue: { type: "integer", minimum: 0 },
+        }),
+      },
+      ["rows", "pagination", "summary"],
+    ),
+    TaskAttachmentInput: objectSchema({
+      projectDocumentId: nullableUuid,
+      documentId: nullableUuid,
+      fileName: { type: "string", nullable: true, maxLength: 255 },
+      fileUrl: { type: "string", nullable: true, maxLength: 2000 },
+      storageKey: { type: "string", nullable: true, maxLength: 1000 },
+    }),
+    TaskMutation: objectSchema(
+      {
+        projectId: nullableUuid,
+        activityId: nullableUuid,
+        assigneeId: nullableUuid,
+        title: { type: "string", maxLength: 255 },
+        description: { type: "string", nullable: true, maxLength: 4000 },
+        label: {
+          type: "string",
+          enum: [
+            "action",
+            "field",
+            "procurement",
+            "quality",
+            "safety",
+            "commercial",
+            "document",
+          ],
+        },
+        priority: {
+          type: "string",
+          enum: ["low", "medium", "high", "critical"],
+        },
+        status: {
+          type: "string",
+          enum: ["todo", "in_progress", "blocked", "done", "canceled"],
+        },
+        dueDate: nullableDateString,
+        comment: { type: "string", nullable: true, maxLength: 4000 },
+        attachments: arrayOf(ref("TaskAttachmentInput")),
+      },
+      ["title"],
+    ),
+    TaskPatch: objectSchema({
+      projectId: nullableUuid,
+      activityId: nullableUuid,
+      assigneeId: nullableUuid,
+      title: { type: "string", maxLength: 255 },
+      description: { type: "string", nullable: true, maxLength: 4000 },
+      label: {
+        type: "string",
+        enum: [
+          "action",
+          "field",
+          "procurement",
+          "quality",
+          "safety",
+          "commercial",
+          "document",
+        ],
+      },
+      priority: {
+        type: "string",
+        enum: ["low", "medium", "high", "critical"],
+      },
+      status: {
+        type: "string",
+        enum: ["todo", "in_progress", "blocked", "done", "canceled"],
+      },
+      dueDate: nullableDateString,
+      comment: { type: "string", nullable: true, maxLength: 4000 },
+      attachments: arrayOf(ref("TaskAttachmentInput")),
+    }),
+    TaskCommentRequest: objectSchema(
+      {
+        body: { type: "string", maxLength: 4000 },
+      },
+      ["body"],
+    ),
+    TaskAttachmentRequest: objectSchema(
+      {
+        attachments: arrayOf(ref("TaskAttachmentInput")),
+      },
+      ["attachments"],
+    ),
+    RfiSubmitRequest: objectSchema({
+      comment: { type: "string", nullable: true },
+    }),
+    RfiAnswerRequest: objectSchema(
+      {
+        response: { type: "string" },
+        answeredBy: { type: "string", nullable: true },
+        answeredDate: nullableDateString,
+        activityId: nullableUuid,
+        activityIds: arrayOf(uuid),
+        activityLinks: arrayOf(ref("ActivityLinkInput")),
+        attachments: arrayOf(ref("WorkflowAttachmentRef")),
+        attachmentRefs: arrayOf(ref("WorkflowAttachmentRef")),
+        revisions: arrayOf(ref("GenericObject")),
+        revision: { type: "string" },
+        projectDocumentId: nullableUuid,
+        documentId: nullableUuid,
+        storageKey: { type: "string" },
+        comment: { type: "string", nullable: true },
+        ownerPartyId: nullableUuid,
+        reviewerPartyId: nullableUuid,
+        approverPartyId: nullableUuid,
+      },
+      ["response"],
+    ),
+    RfiCloseRequest: objectSchema(
+      {
+        comment: { type: "string" },
+      },
+      ["comment"],
+    ),
+    SubmittalWorkflowRequest: objectSchema({
+      activityId: nullableUuid,
+      activityIds: arrayOf(uuid),
+      activityLinks: arrayOf(ref("ActivityLinkInput")),
+      attachments: arrayOf(ref("WorkflowAttachmentRef")),
+      attachmentRefs: arrayOf(ref("WorkflowAttachmentRef")),
+      revisions: arrayOf(ref("GenericObject")),
+      revision: { type: "string" },
+      projectDocumentId: nullableUuid,
+      documentId: nullableUuid,
+      storageKey: { type: "string" },
+      remarks: { type: "string", nullable: true },
+      comment: { type: "string", nullable: true },
+      reason: { type: "string", nullable: true },
+      submittedOn: nullableDateString,
+      reviewedOn: nullableDateString,
+      ownerPartyId: nullableUuid,
+      reviewerPartyId: nullableUuid,
+      approverPartyId: nullableUuid,
     }),
     ActivityLinkInput: objectSchema({
       activityId: uuid,
@@ -1385,8 +3098,14 @@ const components = {
         documentIds: arrayOf(uuid),
         category: { type: "string" },
         value: money,
-        status: { type: "string", enum: ["pending", "approved", "rejected"] },
+        status: { type: "string", enum: ["draft"] },
         scheduleImpact: { type: "integer" },
+        scheduleImpactSummary: {
+          type: "string",
+          nullable: true,
+          maxLength: 4000,
+        },
+        costImpactSummary: { type: "string", nullable: true, maxLength: 4000 },
         submittedDate: dateString,
         raisedBy: { type: "string" },
         rejectedReason: { type: "string" },
@@ -1454,7 +3173,7 @@ const components = {
         claimLetter: { type: "string", nullable: true },
         status: {
           type: "string",
-          enum: ["draft", "submitted", "approved", "rejected"],
+          enum: ["draft", "submitted"],
         },
       },
       ["eventName", "delayDays"],
@@ -1532,8 +3251,14 @@ const components = {
         buyer: { type: "string", nullable: true },
         plannedAwardDate: nullableDateString,
         requiredOnSiteDate: nullableDateString,
+        requiredTiming: {
+          type: "string",
+          enum: ["activity_start", "activity_finish"],
+        },
+        needOffsetDays: { type: "integer", minimum: 0 },
         leadWeeks: { type: "integer", minimum: 0 },
         bufferDays: { type: "integer", minimum: 0 },
+        latestOrderDate: nullableDateString,
         notes: { type: "string", nullable: true },
       },
       ["packageNumber", "title"],
@@ -1606,6 +3331,7 @@ const components = {
     DeliveryReceiptLineRequest: objectSchema(
       {
         poLineId: uuid,
+        dailyReportId: nullableUuid,
         acceptedQty: { type: "number", minimum: 0.001 },
         rejectedQty: nonNegativeNumber,
         issuedQty: nonNegativeNumber,
@@ -1620,6 +3346,7 @@ const components = {
         receivedBy: { type: "string", nullable: true },
         warehouseLocation: { type: "string", nullable: true },
         deliveryNote: { type: "string", nullable: true },
+        dailyReportId: nullableUuid,
         issueToActivity: { type: "boolean" },
         notes: { type: "string", nullable: true },
         lines: arrayOf(ref("DeliveryReceiptLineRequest")),
@@ -1670,16 +3397,20 @@ const components = {
         usageDate: nullableDateString,
         poLineId: nullableUuid,
         receiptLineId: nullableUuid,
+        dailyReportId: nullableUuid,
         installedLocation: { type: "string", nullable: true },
         notes: { type: "string", nullable: true },
       },
       ["usedQty"],
     ),
+    ProcurementLeadTimeAlertWorkflowRequest: objectSchema({
+      note: { type: "string", nullable: true },
+    }),
     ProcurementLeadTimeAlertUpdateRequest: objectSchema(
       {
         status: {
           type: "string",
-          enum: ["open", "acknowledged", "resolved"],
+          enum: ["acknowledged"],
         },
       },
       ["status"],
@@ -1714,19 +3445,34 @@ const components = {
     ),
     NcrRequest: objectSchema({
       severity: { type: "string", enum: ["major", "minor"] },
-      status: { type: "string", enum: ["open", "closed"] },
+      status: { type: "string", enum: ["open"] },
       owner: { type: "string" },
       reviewer: { type: "string" },
       approver: { type: "string" },
+      responsible: { type: "string" },
       activityId: nullableUuid,
       activityIds: arrayOf(uuid),
       activityLinks: arrayOf(ref("ActivityLinkInput")),
       attachments: arrayOf(ref("WorkflowAttachmentRef")),
       attachmentRefs: arrayOf(ref("WorkflowAttachmentRef")),
       comment: { type: "string" },
+      closureComment: { type: "string" },
       statusComment: { type: "string" },
       dueDate: nullableDateString,
       closedDate: nullableDateString,
+    }),
+    QaCloseoutRequest: objectSchema({
+      responsible: { type: "string" },
+      owner: { type: "string" },
+      dueDate: nullableDateString,
+      closureComment: { type: "string" },
+      comment: { type: "string" },
+      statusComment: { type: "string" },
+      activityId: nullableUuid,
+      activityIds: arrayOf(uuid),
+      activityLinks: arrayOf(ref("ActivityLinkInput")),
+      attachments: arrayOf(ref("WorkflowAttachmentRef")),
+      attachmentRefs: arrayOf(ref("WorkflowAttachmentRef")),
     }),
     RfiRequest: objectSchema(
       {
@@ -1736,6 +3482,10 @@ const components = {
         owner: { type: "string" },
         reviewer: { type: "string" },
         approver: { type: "string" },
+        ownerPartyId: nullableUuid,
+        reviewerPartyId: nullableUuid,
+        approverPartyId: nullableUuid,
+        responsible: { type: "string" },
         activityId: nullableUuid,
         activityIds: arrayOf(uuid),
         activityLinks: arrayOf(ref("ActivityLinkInput")),
@@ -1761,6 +3511,9 @@ const components = {
         owner: { type: "string" },
         reviewer: { type: "string" },
         approver: { type: "string" },
+        ownerPartyId: nullableUuid,
+        reviewerPartyId: nullableUuid,
+        approverPartyId: nullableUuid,
         activityId: nullableUuid,
         activityIds: arrayOf(uuid),
         activityLinks: arrayOf(ref("ActivityLinkInput")),
@@ -1791,12 +3544,13 @@ const components = {
         attachments: arrayOf(ref("WorkflowAttachmentRef")),
         attachmentRefs: arrayOf(ref("WorkflowAttachmentRef")),
         comment: { type: "string" },
+        closureComment: { type: "string" },
         statusComment: { type: "string" },
         date: nullableDateString,
         dueDate: nullableDateString,
         closedDate: nullableDateString,
         lostDays: { type: "integer", minimum: 0 },
-        status: { type: "string", enum: ["open", "investigating", "closed"] },
+        status: { type: "string", enum: ["open", "investigating"] },
       },
       ["incidentType", "title"],
     ),
@@ -1834,6 +3588,79 @@ add(
     requestBody: jsonBody(ref("AuthLoginRequest"), "Login credentials."),
     responses: {
       200: authSessionResponse("Authenticated."),
+    },
+  }),
+);
+
+add(
+  "/auth/forgot-password",
+  "post",
+  operation({
+    tag: "Auth",
+    summary: "Request a password reset email.",
+    description:
+      "Always returns a neutral success payload. When the email belongs to an active user, a hashed one-time reset token is stored and a reset link is sent by the configured email provider.",
+    operationId: "requestPasswordReset",
+    security: false,
+    requestBody: jsonBody(
+      ref("AuthForgotPasswordRequest"),
+      "Password reset request payload.",
+    ),
+    responseSchema: ref("AuthForgotPasswordResponse"),
+  }),
+);
+
+add(
+  "/auth/reset-password",
+  "post",
+  operation({
+    tag: "Auth",
+    summary: "Complete a password reset with a one-time token.",
+    description:
+      "Validates the hashed reset token, enforces expiry and single-use, updates the password, revokes other reset tokens, and revokes active refresh sessions for the user.",
+    operationId: "resetPassword",
+    security: false,
+    requestBody: jsonBody(
+      ref("AuthResetPasswordRequest"),
+      "Password reset completion payload.",
+    ),
+    responseSchema: ref("AuthResetPasswordResponse"),
+  }),
+);
+
+add(
+  "/auth/invitations/{token}",
+  "get",
+  operation({
+    tag: "Auth",
+    summary: "Preview a pending invitation.",
+    description:
+      "Validates an invitation token without accepting it and returns the invited org, project, role, expiry, and whether the user needs to choose a password.",
+    operationId: "getInvitationPreview",
+    security: false,
+    parameters: [
+      pathParam("token", "Opaque invitation token from the email link.", null),
+    ],
+    responseSchema: ref("InvitationPreview"),
+  }),
+);
+
+add(
+  "/auth/invitations/accept",
+  "post",
+  operation({
+    tag: "Auth",
+    summary: "Accept an invitation and start a session.",
+    description:
+      "Creates a user or links an existing same-organization user, assigns the invitation role/project, marks the token accepted, audits the event, and issues the normal refresh cookie plus access token response.",
+    operationId: "acceptInvitation",
+    security: false,
+    requestBody: jsonBody(
+      ref("InvitationAcceptRequest"),
+      "Invitation acceptance payload.",
+    ),
+    responses: {
+      200: authSessionResponse("Invitation accepted and authenticated."),
     },
   }),
 );
@@ -1885,7 +3712,78 @@ add(
     tag: "Auth",
     summary: "Return the authenticated user profile.",
     operationId: "getCurrentUser",
-    responseSchema: ref("GenericObject"),
+    responseSchema: ref("AuthUser"),
+  }),
+);
+
+add(
+  "/auth/me/settings",
+  "get",
+  operation({
+    tag: "Auth",
+    summary: "Return persisted settings for the authenticated user.",
+    operationId: "getCurrentUserSettings",
+    responseSchema: ref("UserSettingsResponse"),
+  }),
+);
+
+add(
+  "/auth/me/profile",
+  "patch",
+  operation({
+    tag: "Auth",
+    summary: "Update the authenticated user's profile settings.",
+    operationId: "updateCurrentUserProfileSettings",
+    requestBody: jsonBody(
+      ref("UserSettingsProfileUpdateRequest"),
+      "Profile settings payload.",
+    ),
+    responseSchema: ref("UserSettingsResponse"),
+  }),
+);
+
+add(
+  "/auth/me/account",
+  "patch",
+  operation({
+    tag: "Auth",
+    summary: "Update the authenticated user's account settings.",
+    operationId: "updateCurrentUserAccountSettings",
+    requestBody: jsonBody(
+      ref("UserSettingsAccountUpdateRequest"),
+      "Account settings payload.",
+    ),
+    responseSchema: ref("UserSettingsResponse"),
+  }),
+);
+
+add(
+  "/auth/me/appearance",
+  "patch",
+  operation({
+    tag: "Auth",
+    summary: "Update the authenticated user's appearance preferences.",
+    operationId: "updateCurrentUserAppearanceSettings",
+    requestBody: jsonBody(
+      ref("UserSettingsAppearance"),
+      "Appearance settings payload.",
+    ),
+    responseSchema: ref("UserSettingsResponse"),
+  }),
+);
+
+add(
+  "/auth/me/display",
+  "patch",
+  operation({
+    tag: "Auth",
+    summary: "Update the authenticated user's top-navigation preferences.",
+    operationId: "updateCurrentUserDisplaySettings",
+    requestBody: jsonBody(
+      ref("UserSettingsDisplay"),
+      "Display settings payload.",
+    ),
+    responseSchema: ref("UserSettingsResponse"),
   }),
 );
 
@@ -2012,17 +3910,95 @@ add(
 );
 
 add(
+  "/search",
+  "get",
+  operation({
+    tag: "Search",
+    summary: "Search authorized records across projects and modules.",
+    description:
+      "Returns lightweight grouped results for the command menu. The service first scopes projects to the authenticated user's organization and project assignments or active project-party memberships, then applies each module's read permission and record-level visibility rules before returning titles.",
+    operationId: "globalSearch",
+    parameters: [
+      queryParam("q", "Search text matched against entity identifiers, titles, and short descriptions.", {
+        type: "string",
+        maxLength: 120,
+      }),
+      queryParam("type", "Comma-separated result types. Examples: rfi, submittal, document, drawing, change_order, task.", {
+        type: "string",
+      }),
+      queryParam("projectId", "Restrict results to one accessible project.", uuid),
+      queryParam("status", "Comma-separated status values matched against result types that support status filtering.", {
+        type: "string",
+      }),
+      queryParam("dateFrom", "Return records updated on or after this date.", dateString),
+      queryParam("dateTo", "Return records updated on or before this date.", dateString),
+      queryParam("includeArchived", "Include archived records where the entity supports archive visibility.", {
+        type: "boolean",
+        default: false,
+      }),
+      queryParam("limit", "Maximum global results to return.", {
+        type: "integer",
+        minimum: 1,
+        maximum: 50,
+        default: 20,
+      }),
+    ],
+    permissions: authenticatedOnly,
+    responseSchema: ref("GlobalSearchResponse"),
+  }),
+);
+
+add(
+  "/companies",
+  "get",
+  operation({
+    tag: "Companies",
+    summary: "List managed companies in the authenticated organization.",
+    description:
+      "Returns reusable company records for owners, consultants, contractors, subcontractors, and internal organizations.",
+    operationId: "listCompanies",
+    parameters: [
+      ...cursorParams,
+      queryParam("status", "Filter companies by status.", {
+        type: "string",
+        enum: ["active", "inactive"],
+      }),
+      queryParam("search", "Search company name or registration fields.", {
+        type: "string",
+      }),
+    ],
+    permissions: modulePermission("project_parties", "read"),
+    responseSchema: ref("CompaniesResponse"),
+  }),
+);
+
+add(
+  "/companies",
+  "post",
+  operation({
+    tag: "Companies",
+    summary: "Create a managed company.",
+    operationId: "createCompany",
+    permissions: modulePermission("project_parties", "create"),
+    requestBody: jsonBody(ref("CompanyMutation"), "Company payload."),
+    responseSchema: ref("Company"),
+    status: 201,
+  }),
+);
+
+add(
   "/projects",
   "get",
   operation({
     tag: "Projects",
     summary: "List projects accessible to the authenticated user.",
     description:
-      "PM users receive all projects in their organization. Other roles receive only projects where they have a ProjectAssignment row.",
+      "PM users receive all projects in their organization. Other roles receive projects where they have a ProjectAssignment row or active ProjectParty membership.",
     operationId: "listProjects",
     parameters: [
       ...cursorParams,
       queryParam("status", "Filter by project status.", { type: "string" }),
+      includeArchivedParam,
       queryParam("search", "Search project name or metadata.", {
         type: "string",
       }),
@@ -2054,7 +4030,7 @@ add(
     tag: "Projects",
     summary: "Get workspace-level construction health and workflow queues.",
     description:
-      "Aggregates all organization projects for PM users and only assigned projects for non-PM users.",
+      "Aggregates all organization projects for PM users and only assigned projects for non-PM users. Returns officialKpis with sourceRule, sourceStatus, cutoffDate, and drill-through targets. Draft/rejected/cancelled records are excluded from official KPI cards; submitted/pending workflow values are returned separately under pendingReview.",
     operationId: "getWorkspaceDashboard",
     responseSchema: ref("GenericObject"),
   }),
@@ -2093,10 +4069,116 @@ add(
   "delete",
   operation({
     tag: "Projects",
-    summary: "Delete a project.",
+    summary: "Archive a project while retaining project history.",
     operationId: "deleteProject",
     parameters: projectParams,
     permissions: rolesPermission("pm", "planning_eng"),
+    responseSchema: ref("ArchiveResponse"),
+  }),
+);
+
+add(
+  "/projects/{projectId}/parties",
+  "get",
+  operation({
+    tag: "Project Parties",
+    summary: "List companies assigned to a project by contractual role.",
+    operationId: "listProjectParties",
+    parameters: [
+      ...projectParams,
+      queryParam("role", "Filter by project party role.", {
+        type: "string",
+        enum: ["owner", "consultant", "contractor", "subcontractor", "all"],
+      }),
+      queryParam("status", "Filter by active/inactive status.", {
+        type: "string",
+        enum: ["active", "inactive", "all"],
+      }),
+    ],
+    permissions: modulePermission("project_parties", "read"),
+    responseSchema: ref("ProjectPartiesResponse"),
+  }),
+);
+
+add(
+  "/projects/{projectId}/parties",
+  "post",
+  operation({
+    tag: "Project Parties",
+    summary: "Assign or upsert a company as a project party.",
+    description:
+      "Creates a reusable company when companyName is supplied, links it to the project with a party role, and syncs legacy project party name fields for backward compatibility.",
+    operationId: "upsertProjectParty",
+    parameters: projectParams,
+    permissions: modulePermission("project_parties", "create"),
+    requestBody: jsonBody(
+      ref("ProjectPartyMutation"),
+      "Project party payload.",
+    ),
+    responseSchema: ref("ProjectParty"),
+    status: 201,
+  }),
+);
+
+add(
+  "/projects/{projectId}/parties/{partyId}",
+  "patch",
+  operation({
+    tag: "Project Parties",
+    summary: "Update a project party relationship.",
+    operationId: "updateProjectParty",
+    parameters: [...projectParams, partyIdParam],
+    permissions: modulePermission("project_parties", "update"),
+    requestBody: jsonBody(
+      ref("ProjectPartyMutation"),
+      "Partial project party payload.",
+      false,
+    ),
+    responseSchema: ref("ProjectParty"),
+  }),
+);
+
+add(
+  "/projects/{projectId}/parties/{partyId}",
+  "delete",
+  operation({
+    tag: "Project Parties",
+    summary: "Deactivate a project party relationship.",
+    operationId: "removeProjectParty",
+    parameters: [...projectParams, partyIdParam],
+    permissions: modulePermission("project_parties", "delete"),
+    responseSchema: ref("ProjectParty"),
+  }),
+);
+
+add(
+  "/projects/{projectId}/parties/{partyId}/members",
+  "post",
+  operation({
+    tag: "Project Parties",
+    summary: "Add an existing organization user to a project party company.",
+    operationId: "addProjectPartyMember",
+    parameters: [...projectParams, partyIdParam],
+    permissions: modulePermission("project_parties", "submit"),
+    requestBody: jsonBody(
+      ref("ProjectPartyMemberMutation"),
+      "Project party member payload.",
+    ),
+    responseSchema: ref("GenericObject"),
+    status: 201,
+  }),
+);
+
+add(
+  "/projects/{projectId}/parties/{partyId}/members/{userId}",
+  "delete",
+  operation({
+    tag: "Project Parties",
+    summary: "Remove a user from a project party company.",
+    operationId: "removeProjectPartyMember",
+    parameters: [...projectParams, partyIdParam, userIdParam],
+    permissions: modulePermission("project_parties", "delete"),
+    responseSchema: ref("GenericObject"),
   }),
 );
 
@@ -2211,7 +4293,7 @@ add(
     summary:
       "Create a manual BOQ item, schedule activity, and draft BOQ allocation.",
     description:
-      "Creates a BOQ item, an official schedule Activity with a generated wbsCode, and a draft ActivityBoqAllocation. The allocation must be approved before it contributes to official EV, IPC, and reporting value.",
+      "Creates a BOQ item, an official schedule Activity with a generated activityCode, and a draft ActivityBoqAllocation. The allocation must be approved before it contributes to official EV, IPC, and reporting value.",
     operationId: "createBoqItem",
     parameters: projectParams,
     permissions: rolesPermission("pm", "planning_eng", "qs"),
@@ -2618,6 +4700,8 @@ add(
   operation({
     tag: "Progress",
     summary: "Submit progress updates for multiple activities.",
+    description:
+      "Submits draft/submitted progress rows for several activities. Non-PM/planning users must be assigned to every activity in the batch; otherwise the API returns 403 ACTIVITY_PROGRESS_ASSIGNMENT_REQUIRED with the blocked activityIds. PM and Planning Engineer project roles may override assignment.",
     operationId: "submitBulkProgress",
     parameters: projectParams,
     permissions: modulePermission("progress", "submit", "submission.submit"),
@@ -2652,6 +4736,8 @@ add(
   operation({
     tag: "Progress",
     summary: "Submit progress for an activity. EV updates only after approval.",
+    description:
+      "Creates a progress submission for one activity. Site and field users must be assigned to the activity before submitting; PM and Planning Engineer project roles may override assignment. Unassigned users receive 403 ACTIVITY_PROGRESS_ASSIGNMENT_REQUIRED and EV remains unchanged until an authorized submission is approved.",
     operationId: "submitActivityProgress",
     parameters: projectRecordParams,
     permissions: modulePermission("progress", "submit", "submission.submit"),
@@ -2893,7 +4979,12 @@ add(
       ...projectParams,
       pathParam("periodId", "Reporting period UUID."),
     ],
-    permissions: modulePermission("cost", "approve"),
+    permissions: modulePermission("cost", "approve", "reporting_period.lock"),
+    requestBody: jsonBody(
+      ref("ReportingPeriodLockRequest"),
+      "Optional PM override reason for unresolved official-reporting readiness blockers.",
+      false,
+    ),
   }),
 );
 
@@ -3014,7 +5105,14 @@ add(
     summary:
       "List change orders with activity, BOQ allocation, correspondence, and attachment traceability.",
     operationId: "listChangeOrders",
-    parameters: projectParams,
+    parameters: [
+      ...projectParams,
+      queryParam("status", "Filter by change order status.", {
+        type: "string",
+        enum: ["draft", "pending", "approved", "rejected", "archived"],
+      }),
+      includeArchivedParam,
+    ],
   }),
 );
 
@@ -3050,14 +5148,119 @@ add(
 );
 
 add(
+  "/projects/{projectId}/change-orders/{id}/submit",
+  "post",
+  operation({
+    tag: "Commercial",
+    summary:
+      "Submit a draft change order for PM approval after impact proof is complete.",
+    operationId: "submitChangeOrder",
+    parameters: projectRecordParams,
+    permissions: modulePermission(
+      "change_order",
+      "submit",
+      "change_order.submit",
+    ),
+    requestBody: jsonBody(
+      ref("ApprovalDecisionRequest"),
+      "Optional submission comment.",
+      false,
+    ),
+  }),
+);
+
+add(
+  "/projects/{projectId}/change-orders/{id}/approve",
+  "post",
+  operation({
+    tag: "Commercial",
+    summary: "Approve a change order through the canonical PM workflow.",
+    operationId: "approveChangeOrder",
+    parameters: projectRecordParams,
+    permissions: modulePermission(
+      "change_order",
+      "approve",
+      "change_order.approve",
+    ),
+    requestBody: jsonBody(
+      ref("ApprovalDecisionRequest"),
+      "Optional approval comment.",
+      false,
+    ),
+  }),
+);
+
+add(
+  "/projects/{projectId}/change-orders/{id}/reject",
+  "post",
+  operation({
+    tag: "Commercial",
+    summary: "Reject a change order through the canonical PM workflow.",
+    operationId: "rejectChangeOrder",
+    parameters: projectRecordParams,
+    permissions: modulePermission(
+      "change_order",
+      "approve",
+      "change_order.reject",
+    ),
+    requestBody: jsonBody(
+      ref("RejectionDecisionRequest"),
+      "Required rejection reason.",
+    ),
+  }),
+);
+
+add(
+  "/projects/{projectId}/change-orders/{id}/disapprove",
+  "post",
+  operation({
+    tag: "Commercial",
+    summary: "Disapprove a change order through the canonical PM workflow.",
+    operationId: "disapproveChangeOrder",
+    parameters: projectRecordParams,
+    permissions: modulePermission(
+      "change_order",
+      "approve",
+      "change_order.reject",
+    ),
+    requestBody: jsonBody(
+      ref("RejectionDecisionRequest"),
+      "Required disapproval reason.",
+    ),
+  }),
+);
+
+add(
+  "/projects/{projectId}/change-orders/{id}/reopen",
+  "post",
+  operation({
+    tag: "Commercial",
+    summary: "Reopen a rejected change order to draft for rework.",
+    operationId: "reopenChangeOrder",
+    parameters: projectRecordParams,
+    permissions: modulePermission(
+      "change_order",
+      "submit",
+      "change_order.reopen",
+    ),
+    requestBody: jsonBody(
+      ref("ApprovalDecisionRequest"),
+      "Optional reopen comment.",
+      false,
+    ),
+  }),
+);
+
+add(
   "/projects/{projectId}/change-orders/{id}",
   "delete",
   operation({
     tag: "Commercial",
-    summary: "Delete a change order.",
+    summary: "Archive a non-approved change order while retaining history.",
     operationId: "deleteChangeOrder",
     parameters: projectRecordParams,
     permissions: rolesPermission("pm"),
+    responseSchema: ref("ArchiveResponse"),
   }),
 );
 
@@ -3142,7 +5345,7 @@ add(
     "Certify an IPC period.",
     "certify",
     "period.certify",
-    ref("CommentRequest"),
+    ref("IpcCertifyRequest"),
   ],
 ].forEach(([suffix, operationId, summary, action, transition, bodySchema]) => {
   add(
@@ -3356,6 +5559,68 @@ add(
 );
 
 add(
+  "/projects/{projectId}/eot/{id}/submit",
+  "post",
+  operation({
+    tag: "Commercial",
+    summary: "Submit an EOT claim for PM approval.",
+    operationId: "submitEotClaim",
+    parameters: [...projectParams, idParam],
+    permissions: modulePermission("eot", "submit", "eot.submit"),
+    requestBody: jsonBody(ref("CommentRequest"), "Submission comment.", false),
+  }),
+);
+
+add(
+  "/projects/{projectId}/eot/{id}/approve",
+  "post",
+  operation({
+    tag: "Commercial",
+    summary: "Approve an EOT claim through the canonical PM workflow.",
+    operationId: "approveEotClaim",
+    parameters: projectRecordParams,
+    permissions: modulePermission("eot", "approve", "eot.approve"),
+    requestBody: jsonBody(
+      ref("ApprovalDecisionRequest"),
+      "Optional approval comment.",
+      false,
+    ),
+  }),
+);
+
+add(
+  "/projects/{projectId}/eot/{id}/reject",
+  "post",
+  operation({
+    tag: "Commercial",
+    summary: "Reject an EOT claim through the canonical PM workflow.",
+    operationId: "rejectEotClaim",
+    parameters: projectRecordParams,
+    permissions: modulePermission("eot", "approve", "eot.reject"),
+    requestBody: jsonBody(
+      ref("RejectionDecisionRequest"),
+      "Required rejection reason.",
+    ),
+  }),
+);
+
+add(
+  "/projects/{projectId}/eot/{id}/disapprove",
+  "post",
+  operation({
+    tag: "Commercial",
+    summary: "Disapprove an EOT claim through the canonical PM workflow.",
+    operationId: "disapproveEotClaim",
+    parameters: projectRecordParams,
+    permissions: modulePermission("eot", "approve", "eot.reject"),
+    requestBody: jsonBody(
+      ref("RejectionDecisionRequest"),
+      "Required disapproval reason.",
+    ),
+  }),
+);
+
+add(
   "/projects/{projectId}/weather-delays",
   "get",
   operation({
@@ -3472,11 +5737,7 @@ add(
     summary: "Create or reuse a project supplier.",
     operationId: "createProcurementSupplier",
     parameters: projectParams,
-    permissions: modulePermission(
-      "procurement",
-      "create",
-      "supplier.manage",
-    ),
+    permissions: modulePermission("procurement", "create", "supplier.manage"),
     requestBody: jsonBody(
       ref("ProcurementSupplierRequest"),
       "Supplier payload.",
@@ -3548,7 +5809,8 @@ add(
   "post",
   operation({
     tag: "Procurement",
-    summary: "Post a delivery receipt and optionally issue received quantities to activities.",
+    summary:
+      "Post a delivery receipt and optionally issue received quantities to activities.",
     operationId: "postProcurementDeliveryReceipt",
     parameters: [
       ...projectParams,
@@ -3568,7 +5830,8 @@ add(
   "get",
   operation({
     tag: "Procurement",
-    summary: "List lead-time alerts generated from activity need dates and delivery commitments.",
+    summary:
+      "List lead-time alerts generated from activity need dates and delivery commitments.",
     operationId: "listProcurementLeadTimeAlerts",
     parameters: [
       ...projectParams,
@@ -3586,20 +5849,56 @@ add(
   "patch",
   operation({
     tag: "Procurement",
-    summary: "Acknowledge or resolve a procurement lead-time alert.",
+    summary: "Legacy acknowledgement update for a procurement lead-time alert.",
     operationId: "updateProcurementLeadTimeAlert",
     parameters: [
       ...projectParams,
       pathParam("alertId", "Procurement lead-time alert UUID."),
     ],
-    permissions: modulePermission(
-      "procurement",
-      "update",
-      "alert.acknowledge",
-    ),
+    permissions: modulePermission("procurement", "update", "alert.acknowledge"),
     requestBody: jsonBody(
       ref("ProcurementLeadTimeAlertUpdateRequest"),
       "Lead-time alert status payload.",
+    ),
+  }),
+);
+
+add(
+  "/projects/{projectId}/procurement/lead-time-alerts/{alertId}/acknowledge",
+  "patch",
+  operation({
+    tag: "Procurement",
+    summary: "Acknowledge a procurement lead-time alert with audit history.",
+    operationId: "acknowledgeProcurementLeadTimeAlert",
+    parameters: [
+      ...projectParams,
+      pathParam("alertId", "Procurement lead-time alert UUID."),
+    ],
+    permissions: modulePermission("procurement", "update", "alert.acknowledge"),
+    requestBody: jsonBody(
+      ref("ProcurementLeadTimeAlertWorkflowRequest"),
+      "Optional acknowledgement note.",
+      false,
+    ),
+  }),
+);
+
+add(
+  "/projects/{projectId}/procurement/lead-time-alerts/{alertId}/resolve",
+  "patch",
+  operation({
+    tag: "Procurement",
+    summary: "Resolve a procurement lead-time alert with audit history.",
+    operationId: "resolveProcurementLeadTimeAlert",
+    parameters: [
+      ...projectParams,
+      pathParam("alertId", "Procurement lead-time alert UUID."),
+    ],
+    permissions: modulePermission("procurement", "update", "alert.resolve"),
+    requestBody: jsonBody(
+      ref("ProcurementLeadTimeAlertWorkflowRequest"),
+      "Optional resolution note.",
+      false,
     ),
   }),
 );
@@ -3726,14 +6025,21 @@ const rfiListParams = [
   ...cursorParams,
   queryParam("status", "Filter by RFI status.", {
     type: "string",
-    enum: ["open", "answered", "closed"],
+    enum: ["open", "answered", "closed", "archived"],
   }),
+  includeArchivedParam,
   queryParam("priority", "Filter by RFI priority.", {
     type: "string",
     enum: ["low", "normal", "high", "urgent"],
   }),
   queryParam("activityId", "Filter RFIs linked to an activity.", uuid),
   queryParam("owner", "Filter by owner text.", { type: "string" }),
+  queryParam("ownerPartyId", "Filter RFIs owned by a project party.", uuid),
+  queryParam(
+    "partyId",
+    "Filter RFIs routed to a project party as owner, reviewer, or approver.",
+    uuid,
+  ),
   queryParam(
     "search",
     "Search ref, subject, question, response, discipline, or assignees.",
@@ -3774,10 +6080,28 @@ const submittalListParams = [
   ...cursorParams,
   queryParam("status", "Filter by submittal status.", {
     type: "string",
-    enum: ["pending", "under_review", "approved", "resubmit", "rejected"],
+    enum: [
+      "pending",
+      "under_review",
+      "approved",
+      "resubmit",
+      "rejected",
+      "archived",
+    ],
   }),
+  includeArchivedParam,
   queryParam("activityId", "Filter submittals linked to an activity.", uuid),
   queryParam("owner", "Filter by owner text.", { type: "string" }),
+  queryParam(
+    "ownerPartyId",
+    "Filter submittals owned by a project party.",
+    uuid,
+  ),
+  queryParam(
+    "partyId",
+    "Filter submittals routed to a project party as owner, reviewer, or approver.",
+    uuid,
+  ),
   queryParam(
     "search",
     "Search ref, title, discipline, spec ref, remarks, or assignees.",
@@ -3816,6 +6140,15 @@ const submittalListParams = [
   }),
 ];
 
+const safetyListParams = [
+  ...projectParams,
+  queryParam("status", "Filter by safety incident status.", {
+    type: "string",
+    enum: ["open", "investigating", "submitted", "closed", "archived"],
+  }),
+  includeArchivedParam,
+];
+
 [
   ["ncr", "Quality", "NCR", "NcrRequest", "ncrId", "ncr", "Ncr"],
   [
@@ -3851,7 +6184,9 @@ const submittalListParams = [
             ? rfiListParams
             : base === "submittals"
               ? submittalListParams
-              : projectParams,
+              : base === "safety"
+                ? safetyListParams
+                : projectParams,
         permissions: modulePermission(moduleName, "read"),
         responseSchema:
           base === "rfi" || base === "submittals"
@@ -3889,18 +6224,222 @@ const submittalListParams = [
       }),
     );
     add(
+      `/projects/{projectId}/${base}/{${idName}}/approve`,
+      "post",
+      operation({
+        tag: apiTag,
+        summary: `Approve a ${label} record through the canonical PM workflow.`,
+        operationId: `approve${operationBase}Record`,
+        parameters: [...projectParams, pathParam(idName, `${label} UUID.`)],
+        permissions: modulePermission(
+          moduleName,
+          "approve",
+          `${moduleName}.approve`,
+        ),
+        requestBody: jsonBody(
+          ref("ApprovalDecisionRequest"),
+          "Optional approval comment.",
+          false,
+        ),
+      }),
+    );
+    add(
+      `/projects/{projectId}/${base}/{${idName}}/reject`,
+      "post",
+      operation({
+        tag: apiTag,
+        summary: `Reject a ${label} record through the canonical PM workflow.`,
+        operationId: `reject${operationBase}Record`,
+        parameters: [...projectParams, pathParam(idName, `${label} UUID.`)],
+        permissions: modulePermission(
+          moduleName,
+          "approve",
+          `${moduleName}.reject`,
+        ),
+        requestBody: jsonBody(
+          ref("RejectionDecisionRequest"),
+          "Required rejection reason.",
+        ),
+      }),
+    );
+    add(
+      `/projects/{projectId}/${base}/{${idName}}/disapprove`,
+      "post",
+      operation({
+        tag: apiTag,
+        summary: `Disapprove a ${label} record through the canonical PM workflow.`,
+        operationId: `disapprove${operationBase}Record`,
+        parameters: [...projectParams, pathParam(idName, `${label} UUID.`)],
+        permissions: modulePermission(
+          moduleName,
+          "approve",
+          `${moduleName}.reject`,
+        ),
+        requestBody: jsonBody(
+          ref("RejectionDecisionRequest"),
+          "Required disapproval reason.",
+        ),
+      }),
+    );
+    add(
       `/projects/{projectId}/${base}/{${idName}}`,
       "delete",
       operation({
         tag: apiTag,
-        summary: `Delete a ${label} record.`,
+        summary: ["rfi", "submittals", "safety"].includes(base)
+          ? `Archive a ${label} record while retaining audit history.`
+          : `Delete a ${label} record.`,
         operationId: `delete${operationBase}Record`,
         parameters: [...projectParams, pathParam(idName, `${label} UUID.`)],
         permissions: modulePermission(moduleName, "delete"),
+        responseSchema: ["rfi", "submittals", "safety"].includes(base)
+          ? ref("ArchiveResponse")
+          : undefined,
       }),
     );
   },
 );
+
+[
+  ["ncr", "NCR", "ncrId", "ncr", "Ncr"],
+  ["safety", "Safety incident", "incidentId", "safety", "SafetyIncident"],
+].forEach(([base, label, idName, moduleName, operationBase]) => {
+  [
+    [
+      "submit",
+      "submit",
+      `Submit a ${label} closeout for PM approval.`,
+      "QaCloseoutRequest",
+    ],
+    [
+      "close",
+      "submit",
+      `Submit a ${label} closeout package with required evidence.`,
+      "QaCloseoutRequest",
+    ],
+    [
+      "reopen",
+      "approve",
+      `Reopen a closed ${label} record with a required reason.`,
+      "RejectionDecisionRequest",
+    ],
+  ].forEach(([suffix, action, summary, schemaName]) => {
+    add(
+      `/projects/{projectId}/${base}/{${idName}}/${suffix}`,
+      "post",
+      operation({
+        tag: "Quality",
+        summary,
+        operationId: `${suffix}${operationBase}Record`,
+        parameters: [...projectParams, pathParam(idName, `${label} UUID.`)],
+        permissions: modulePermission(
+          moduleName,
+          action,
+          `${moduleName}.${suffix}`,
+        ),
+        requestBody: jsonBody(
+          ref(schemaName),
+          suffix === "reopen"
+            ? "Required reopen reason."
+            : "Closeout payload with responsible party, due date, closure comment, and evidence.",
+        ),
+      }),
+    );
+  });
+});
+
+[
+  [
+    "submit",
+    "submitRfiRecord",
+    "Submit an RFI for response and record the submit event.",
+    "submit",
+    "rfi.submit",
+    "RfiSubmitRequest",
+  ],
+  [
+    "answer",
+    "answerRfiRecord",
+    "Answer an RFI with a required response, optional files, and activity links.",
+    "submit",
+    "rfi.answer",
+    "RfiAnswerRequest",
+  ],
+  [
+    "close",
+    "closeRfiRecord",
+    "Close an RFI with a required PM close comment.",
+    "approve",
+    "rfi.close",
+    "RfiCloseRequest",
+  ],
+  [
+    "reopen",
+    "reopenRfiRecord",
+    "Reopen a closed or answered RFI with a required reason.",
+    "approve",
+    "rfi.reopen",
+    "RejectionDecisionRequest",
+  ],
+].forEach(([suffix, operationId, summary, action, transition, schemaName]) => {
+  add(
+    `/projects/{projectId}/rfi/{rfiId}/${suffix}`,
+    "post",
+    operation({
+      tag: "Document Control",
+      summary,
+      operationId,
+      parameters: [...projectParams, pathParam("rfiId", "RFI UUID.")],
+      permissions: modulePermission("rfi", action, transition),
+      requestBody: jsonBody(
+        ref(schemaName),
+        `${summary} payload.`,
+        suffix === "submit" ? false : true,
+      ),
+    }),
+  );
+});
+
+[
+  [
+    "submit",
+    "submitSubmittalRecord",
+    "Submit a submittal revision for consultant/PM review.",
+    "submittal.submit",
+  ],
+  [
+    "review",
+    "reviewSubmittalRecord",
+    "Record consultant or PM review comments while keeping the submittal under review.",
+    "submittal.review",
+  ],
+  [
+    "resubmit",
+    "resubmitSubmittalRecord",
+    "Request resubmission or submit a revised submittal package.",
+    "submittal.resubmit",
+  ],
+].forEach(([suffix, operationId, summary, transition]) => {
+  add(
+    `/projects/{projectId}/submittals/{submittalId}/${suffix}`,
+    "post",
+    operation({
+      tag: "Document Control",
+      summary,
+      operationId,
+      parameters: [
+        ...projectParams,
+        pathParam("submittalId", "Submittal UUID."),
+      ],
+      permissions: modulePermission("submittal", "submit", transition),
+      requestBody: jsonBody(
+        ref("SubmittalWorkflowRequest"),
+        `${summary} payload.`,
+        suffix !== "review",
+      ),
+    }),
+  );
+});
 
 add(
   "/projects/{projectId}/doc-control/dashboard",
@@ -3911,6 +6450,235 @@ add(
       "Get document-control dashboard, RFI/submittal/drawing/transmittal/correspondence metrics, due alerts, and revisions.",
     operationId: "getDocControlDashboard",
     parameters: projectParams,
+    permissions: modulePermission("document_control", "read"),
+  }),
+);
+
+add(
+  "/projects/{projectId}/doc-control/register",
+  "get",
+  operation({
+    tag: "Document Control",
+    summary:
+      "List the document register with latest approved revisions, superseded history, attachments, activity links, and linked RFI/submittal/drawing/transmittal records.",
+    operationId: "listDocumentRegister",
+    parameters: [
+      ...projectParams,
+      queryParam("recordType", "Filter by document-control record type.", {
+        type: "string",
+        enum: ["rfi", "submittal", "drawing", "transmittal", "correspondence"],
+      }),
+      queryParam("folder", "Filter by document-library folder key.", {
+        type: "string",
+      }),
+      queryParam("category", "Filter by document category.", {
+        type: "string",
+      }),
+      queryParam("status", "Filter by record or latest revision status.", {
+        type: "string",
+      }),
+      queryParam(
+        "search",
+        "Search register references, titles, revisions, and files.",
+        {
+          type: "string",
+        },
+      ),
+    ],
+    permissions: modulePermission("document_control", "read"),
+    responseSchema: ref("DocumentRegisterResponse"),
+  }),
+);
+
+add(
+  "/projects/{projectId}/doc-control/{recordType}/{recordId}/revisions",
+  "post",
+  operation({
+    tag: "Document Control",
+    summary:
+      "Upload/link a private project document as a new record revision. The uploaded file must already exist as a ProjectDocument from workflow uploads.",
+    operationId: "uploadDocumentRevision",
+    parameters: [
+      ...projectParams,
+      pathParam("recordType", "Document-control record type.", null),
+      pathParam("recordId", "RFI, submittal, drawing, or transmittal UUID."),
+    ],
+    permissions: modulePermission(
+      "document_control",
+      "submit",
+      "document.revision.upload",
+    ),
+    requestBody: jsonBody(
+      ref("DocumentRevisionUploadRequest"),
+      "Revision upload/link payload.",
+    ),
+    responseSchema: ref("DocumentRevision"),
+    status: 201,
+  }),
+);
+
+add(
+  "/projects/{projectId}/doc-control/{recordType}/{recordId}/revisions/upload",
+  "post",
+  operation({
+    tag: "Document Control",
+    summary:
+      "Upload a file and create a document-control revision with folder/category metadata in one request.",
+    operationId: "uploadDocumentRevisionFile",
+    parameters: [
+      ...projectParams,
+      pathParam("recordType", "Document-control record type.", null),
+      pathParam("recordId", "RFI, submittal, drawing, or transmittal UUID."),
+    ],
+    permissions: modulePermission(
+      "document_control",
+      "submit",
+      "document.revision.upload",
+    ),
+    requestBody: fileUploadBody({
+      fieldName: "file",
+      description: "Document-control revision upload.",
+      accepted: "PDF, images, Word, Excel, CSV, or text files up to 25 MB.",
+      extraProperties: {
+        revision: { type: "string", maxLength: 40 },
+        title: { type: "string", maxLength: 255 },
+        documentNumber: { type: "string", maxLength: 120 },
+        category: { type: "string", maxLength: 120 },
+        folderPath: { type: "string", maxLength: 255 },
+        discipline: { type: "string", maxLength: 120 },
+        reviewDueAt: { type: "string", format: "date-time" },
+        status: { type: "string", enum: ["uploaded", "submitted"] },
+        notes: { type: "string", maxLength: 2000 },
+      },
+      required: ["file", "revision"],
+    }),
+    responseSchema: ref("DocumentRevisionUploadResponse"),
+    status: 201,
+  }),
+);
+
+add(
+  "/projects/{projectId}/doc-control/revisions/{revisionId}/submit-review",
+  "post",
+  operation({
+    tag: "Document Control",
+    summary: "Submit an uploaded document revision for review.",
+    operationId: "submitDocumentRevisionForReview",
+    parameters: [
+      ...projectParams,
+      pathParam("revisionId", "DocumentRevision UUID."),
+    ],
+    permissions: modulePermission(
+      "document_control",
+      "submit",
+      "document.revision.submit_review",
+    ),
+    requestBody: jsonBody(
+      ref("DocumentRevisionSubmitReviewRequest"),
+      "Optional review submission comment and due date.",
+      false,
+    ),
+    responseSchema: ref("DocumentRevision"),
+  }),
+);
+
+add(
+  "/projects/{projectId}/doc-control/revisions/{revisionId}/approve",
+  "post",
+  operation({
+    tag: "Document Control",
+    summary:
+      "Approve a document revision, mark it as the latest, and supersede the prior latest revision.",
+    operationId: "approveDocumentRevision",
+    parameters: [
+      ...projectParams,
+      pathParam("revisionId", "DocumentRevision UUID."),
+    ],
+    permissions: modulePermission(
+      "document_control",
+      "approve",
+      "document.revision.approve",
+    ),
+    requestBody: jsonBody(
+      ref("ApprovalDecisionRequest"),
+      "Optional approval comment.",
+      false,
+    ),
+    responseSchema: ref("DocumentRevision"),
+  }),
+);
+
+add(
+  "/projects/{projectId}/doc-control/revisions/{revisionId}/supersede",
+  "post",
+  operation({
+    tag: "Document Control",
+    summary:
+      "Supersede a document revision and keep it read-only with an audit reason.",
+    operationId: "supersedeDocumentRevision",
+    parameters: [
+      ...projectParams,
+      pathParam("revisionId", "DocumentRevision UUID."),
+    ],
+    permissions: modulePermission(
+      "document_control",
+      "approve",
+      "document.revision.supersede",
+    ),
+    requestBody: jsonBody(
+      ref("SupersedeRevisionRequest"),
+      "Required supersede reason.",
+    ),
+    responseSchema: ref("DocumentRevision"),
+  }),
+);
+
+add(
+  "/projects/{projectId}/doc-control/revisions/{revisionId}/download",
+  "get",
+  operation({
+    tag: "Document Control",
+    summary: "Permission-check and download a private document revision file.",
+    operationId: "downloadDocumentRevision",
+    parameters: [
+      ...projectParams,
+      pathParam("revisionId", "DocumentRevision UUID."),
+    ],
+    permissions: modulePermission("document_control", "read"),
+    responses: {
+      200: binaryResponse(
+        "Document revision stream when local storage is used.",
+        "application/octet-stream",
+      ),
+      302: redirectResponse(
+        "Redirects to a short-lived private S3 presigned URL when object storage is used.",
+      ),
+    },
+  }),
+);
+
+add(
+  "/projects/{projectId}/doc-control/revisions/{revisionId}/preview",
+  "get",
+  operation({
+    tag: "Document Control",
+    summary:
+      "Permission-check and stream a private document revision file inline for browser preview.",
+    operationId: "previewDocumentRevision",
+    parameters: [
+      ...projectParams,
+      pathParam("revisionId", "DocumentRevision UUID."),
+    ],
+    permissions: modulePermission("document_control", "read"),
+    responses: {
+      200: binaryResponse(
+        "Document revision inline stream when local storage is used.",
+        "application/octet-stream",
+      ),
+      302: redirectResponse(
+        "Redirects to a short-lived private S3 presigned URL when object storage is used.",
+      ),
+    },
   }),
 );
 
@@ -4002,7 +6770,9 @@ const activityMaterialRecordParams = [
   {
     method: "get",
     path: "/projects/{projectId}/activity-boq-allocations",
-    summary: "List activity BOQ allocations.",
+    summary: "List BOQ-to-activity allocation workflow records.",
+    description:
+      "Returns draft, submitted, approved, and rejected BOQ-to-activity allocation records. Only approved active allocations are official EV, IPC, dashboard, and reporting basis; draft/submitted values are pending and rejected/inactive values are excluded.",
     operationId: "listActivityBoqAllocations",
     parameters: [
       ...projectParams,
@@ -4021,24 +6791,37 @@ const activityMaterialRecordParams = [
     method: "post",
     path: "/projects/{projectId}/activity-boq-allocations",
     summary: "Create a draft activity BOQ allocation.",
+    description:
+      "Creates a draft allocation for a BOQ item and official schedule Activity. The API and database reject duplicate active BOQ item/activity pairs; the allocation must be submitted and approved before EV or IPC can use it.",
     operationId: "createActivityBoqAllocation",
     permissions: rolesPermission("pm", "planning_eng", "qs"),
-    requestBody: genericPayloadBody("Allocation payload.", true),
+    requestBody: jsonBody(
+      ref("ActivityBoqAllocationMutation"),
+      "Draft allocation payload.",
+    ),
     status: 201,
   },
   {
     method: "patch",
     path: "/projects/{projectId}/activity-boq-allocations/{id}",
     summary: "Update a draft activity BOQ allocation.",
+    description:
+      "Updates draft-only allocation quantity/value/linkage. Submitted, approved, rejected, or inactive allocations must move through the allocation lifecycle instead of direct edits.",
     operationId: "updateActivityBoqAllocation",
     parameters: projectRecordParams,
     permissions: rolesPermission("pm", "planning_eng", "qs"),
-    requestBody: genericPayloadBody("Partial allocation payload."),
+    requestBody: jsonBody(
+      ref("ActivityBoqAllocationMutation"),
+      "Partial allocation payload.",
+      false,
+    ),
   },
   {
     method: "post",
     path: "/projects/{projectId}/activity-boq-allocations/{id}/submit",
     summary: "Submit an activity BOQ allocation for approval.",
+    description:
+      "Moves a draft allocation to submitted. Submitted rows are pending only and remain excluded from official EV and IPC until approved.",
     operationId: "submitActivityBoqAllocation",
     parameters: projectRecordParams,
     permissions: rolesPermission("pm", "planning_eng", "qs"),
@@ -4047,6 +6830,8 @@ const activityMaterialRecordParams = [
     method: "post",
     path: "/projects/{projectId}/activity-boq-allocations/{id}/approve",
     summary: "Approve an activity BOQ allocation.",
+    description:
+      "Approves a submitted allocation after duplicate active-pair and BOQ item capacity checks. Approved active allocations are the only allocation rows used by official EV and IPC.",
     operationId: "approveActivityBoqAllocation",
     parameters: projectRecordParams,
     permissions: rolesPermission("pm", "qs"),
@@ -4055,6 +6840,8 @@ const activityMaterialRecordParams = [
     method: "post",
     path: "/projects/{projectId}/activity-boq-allocations/{id}/reject",
     summary: "Reject an activity BOQ allocation.",
+    description:
+      "Rejects a submitted allocation, marks it inactive, and excludes it from official EV, IPC, dashboards, and allocation capacity totals.",
     operationId: "rejectActivityBoqAllocation",
     parameters: projectRecordParams,
     permissions: rolesPermission("pm", "qs"),
@@ -4107,7 +6894,8 @@ const activityMaterialRecordParams = [
   {
     method: "post",
     path: "/projects/{projectId}/activities/{activityId}/materials/{materialId}/usage",
-    summary: "Record activity material usage or waste against issued quantities.",
+    summary:
+      "Record activity material usage or waste against issued quantities.",
     operationId: "recordActivityMaterialUsage",
     parameters: activityMaterialRecordParams,
     permissions: modulePermission("procurement", "submit", "material.use"),
@@ -4190,6 +6978,31 @@ addGenericRoute({
     operationId: "listEquipment",
   },
   {
+    method: "get",
+    path: "/projects/{projectId}/equipment/usage",
+    summary: "Get approved equipment utilization by activity and equipment.",
+    description:
+      "Returns approved-only equipment usage posted from daily-report approval, including cost impact and traceability back to source daily-report lines.",
+    operationId: "getEquipmentUtilization",
+    parameters: [
+      ...projectParams,
+      queryParam(
+        "activityId",
+        "Filter utilization to one activity UUID.",
+        uuid,
+      ),
+      queryParam(
+        "equipmentId",
+        "Filter utilization to one equipment UUID.",
+        uuid,
+      ),
+      queryParam("from", "Usage start date.", dateString),
+      queryParam("to", "Usage end date.", dateString),
+    ],
+    permissions: modulePermission("cost", "read"),
+    responseSchema: ref("EquipmentUtilizationReport"),
+  },
+  {
     method: "post",
     path: "/projects/{projectId}/equipment",
     summary: "Create project equipment.",
@@ -4237,6 +7050,11 @@ addGenericRoute({
     }),
     queryParam("entityId", "Filter by audited entity id.", { type: "string" }),
     queryParam("action", "Filter by audit action.", { type: "string" }),
+    queryParam("source", "Filter by history source.", {
+      type: "string",
+      enum: ["all", "audit", "approval", "status"],
+      default: "all",
+    }),
     queryParam("cursor", "Opaque cursor returned by the previous page.", {
       type: "string",
     }),
@@ -4255,6 +7073,138 @@ addGenericRoute({
   permissions: modulePermission("audit", "read"),
   responseSchema: ref("AuditEventsResponse"),
 });
+
+const meetingListQueryParams = [
+  ...cursorParams,
+  queryParam("status", "Filter by comma-separated meeting status values.", {
+    type: "string",
+  }),
+  queryParam("meetingType", "Filter by meeting type.", {
+    type: "string",
+    enum: [
+      "coordination",
+      "progress",
+      "commercial",
+      "quality",
+      "safety",
+      "design",
+      "client",
+      "other",
+    ],
+  }),
+  queryParam("activityId", "Filter by linked activity UUID.", uuid),
+  includeArchivedParam,
+  queryParam(
+    "search",
+    "Search meeting number, title, objective, minutes, or location.",
+    { type: "string" },
+  ),
+  queryParam("sortBy", "Sort field.", {
+    type: "string",
+    enum: ["created", "updated", "scheduled", "status", "type"],
+  }),
+  queryParam("sortDir", "Sort direction.", {
+    type: "string",
+    enum: ["asc", "desc"],
+  }),
+];
+
+[
+  {
+    method: "get",
+    path: "/projects/{projectId}/meetings",
+    summary: "List project meeting minutes.",
+    description:
+      "Lists project-scoped meeting minutes with agenda, attendee, decision, action-item, distribution, and comment counts. Action items are activity-linked and can be backed by persisted project tasks.",
+    operationId: "listProjectMeetings",
+    parameters: [...projectParams, ...meetingListQueryParams],
+    permissions: modulePermission("meeting", "read"),
+    responseSchema: ref("MeetingListResponse"),
+  },
+  {
+    method: "post",
+    path: "/projects/{projectId}/meetings",
+    summary: "Create meeting minutes.",
+    description:
+      "Creates meeting minutes with attendees, agenda items, decisions, and action items. Action items with owners and due dates create linked project tasks unless createTask is false.",
+    operationId: "createProjectMeeting",
+    parameters: projectParams,
+    permissions: modulePermission("meeting", "create"),
+    requestBody: jsonBody(
+      ref("MeetingMutation"),
+      "Meeting minutes payload.",
+      true,
+    ),
+    responseSchema: ref("MeetingRecord"),
+    status: 201,
+  },
+  {
+    method: "get",
+    path: "/projects/{projectId}/meetings/{id}",
+    summary: "Get meeting minutes detail.",
+    operationId: "getProjectMeeting",
+    parameters: projectRecordParams,
+    permissions: modulePermission("meeting", "read"),
+    responseSchema: ref("MeetingRecord"),
+  },
+  {
+    method: "patch",
+    path: "/projects/{projectId}/meetings/{id}",
+    summary: "Update meeting minutes detail.",
+    description:
+      "Updates meeting header fields and, when provided, replaces attendees, agenda items, decisions, or action items as complete minutes sections.",
+    operationId: "updateProjectMeeting",
+    parameters: projectRecordParams,
+    permissions: modulePermission("meeting", "update"),
+    requestBody: jsonBody(ref("MeetingPatch"), "Partial meeting payload."),
+    responseSchema: ref("MeetingRecord"),
+  },
+  {
+    method: "post",
+    path: "/projects/{projectId}/meetings/{id}/distribute",
+    summary: "Distribute meeting minutes.",
+    description:
+      "Creates distribution-history rows, marks the meeting distributed, sends durable notifications to user recipients, and writes a central audit event.",
+    operationId: "distributeProjectMeeting",
+    parameters: projectRecordParams,
+    permissions: modulePermission("meeting", "submit", "meeting.distribute"),
+    requestBody: jsonBody(
+      ref("MeetingDistributionRequest"),
+      "Distribution recipients and message.",
+      false,
+    ),
+    responseSchema: ref("MeetingDistributionResponse"),
+  },
+  {
+    method: "post",
+    path: "/projects/{projectId}/meetings/{id}/comments",
+    summary: "Comment on meeting minutes.",
+    operationId: "commentProjectMeeting",
+    parameters: projectRecordParams,
+    permissions: modulePermission("meeting", "submit", "meeting.comment"),
+    requestBody: jsonBody(
+      ref("MeetingCommentRequest"),
+      "Comment payload.",
+      true,
+    ),
+    responseSchema: ref("MeetingComment"),
+    status: 201,
+  },
+  {
+    method: "delete",
+    path: "/projects/{projectId}/meetings/{id}",
+    summary: "Archive meeting minutes.",
+    operationId: "archiveProjectMeeting",
+    parameters: projectRecordParams,
+    permissions: modulePermission("meeting", "delete"),
+    responseSchema: ref("ArchiveResponse"),
+  },
+].forEach((route) =>
+  addGenericRoute({
+    tag: "Meetings",
+    ...route,
+  }),
+);
 
 [
   {
@@ -4307,24 +7257,298 @@ addGenericRoute({
   method: "get",
   tag: "Health",
   summary: "Get seven-dimension project health scoring.",
+  description:
+    "Returns official project health dimensions with sourceRule, cutoffDate, and drill-through targets, plus a separate pendingReview block for submitted progress, IPC, change orders, and submittals that do not feed official scores.",
   operationId: "getProjectHealth",
+});
+
+const taskListQueryParams = [
+  ...cursorParams,
+  queryParam("status", "Filter by comma-separated task status values.", {
+    type: "string",
+  }),
+  queryParam("priority", "Filter by comma-separated priority values.", {
+    type: "string",
+  }),
+  queryParam("assignee", "Filter to the authenticated user's assignments.", {
+    type: "string",
+    enum: ["me"],
+  }),
+  queryParam("assigneeId", "Filter by assignee user UUID.", uuid),
+  queryParam("overdue", "Only return open tasks past due date.", {
+    type: "boolean",
+  }),
+  includeArchivedParam,
+  queryParam(
+    "search",
+    "Search task number, title, description, project, or activity.",
+    {
+      type: "string",
+    },
+  ),
+  queryParam("sortBy", "Sort field.", {
+    type: "string",
+    enum: ["created", "updated", "due", "priority", "status"],
+  }),
+  queryParam("sortDir", "Sort direction.", {
+    type: "string",
+    enum: ["asc", "desc"],
+  }),
+];
+
+const addTaskRoutes = ({ basePath, idParameters, prefix }) => {
+  add(
+    basePath,
+    "get",
+    operation({
+      tag: "Tasks",
+      summary:
+        prefix === "project"
+          ? "List persisted project tasks."
+          : "List persisted tasks across visible projects.",
+      operationId:
+        prefix === "project" ? "listProjectTasks" : "listWorkspaceTasks",
+      parameters: [
+        ...(prefix === "project" ? projectParams : []),
+        ...taskListQueryParams,
+      ],
+      permissions: modulePermission("task", "read"),
+      responseSchema: ref("TaskListResponse"),
+    }),
+  );
+  add(
+    basePath,
+    "post",
+    operation({
+      tag: "Tasks",
+      summary:
+        prefix === "project"
+          ? "Create a persisted project task."
+          : "Create a persisted task in a visible project.",
+      operationId:
+        prefix === "project" ? "createProjectTask" : "createWorkspaceTask",
+      parameters: prefix === "project" ? projectParams : [],
+      permissions: modulePermission("task", "create", "task.assign"),
+      requestBody: jsonBody(ref("TaskMutation"), "Task payload.", true),
+      responseSchema: ref("TaskRecord"),
+      status: 201,
+    }),
+  );
+  add(
+    `${basePath}/{id}`,
+    "get",
+    operation({
+      tag: "Tasks",
+      summary:
+        "Get one persisted task with comments, attachments, and history.",
+      operationId: prefix === "project" ? "getProjectTask" : "getWorkspaceTask",
+      parameters: idParameters,
+      permissions: modulePermission("task", "read"),
+      responseSchema: ref("TaskRecord"),
+    }),
+  );
+  add(
+    `${basePath}/{id}`,
+    "patch",
+    operation({
+      tag: "Tasks",
+      summary:
+        "Update task status, assignment, due date, activity, or details.",
+      operationId:
+        prefix === "project" ? "updateProjectTask" : "updateWorkspaceTask",
+      parameters: idParameters,
+      permissions: modulePermission("task", "update"),
+      requestBody: jsonBody(ref("TaskPatch"), "Partial task payload."),
+      responseSchema: ref("TaskRecord"),
+    }),
+  );
+  add(
+    `${basePath}/{id}/close`,
+    "post",
+    operation({
+      tag: "Tasks",
+      summary: "Close a task as done and record optional closeout comment.",
+      operationId:
+        prefix === "project" ? "closeProjectTask" : "closeWorkspaceTask",
+      parameters: idParameters,
+      permissions: modulePermission("task", "update", "task.close"),
+      requestBody: jsonBody(
+        objectSchema({
+          comment: { type: "string", nullable: true, maxLength: 4000 },
+        }),
+        "Optional closeout comment.",
+        false,
+      ),
+      responseSchema: ref("TaskRecord"),
+    }),
+  );
+  add(
+    `${basePath}/{id}/comments`,
+    "post",
+    operation({
+      tag: "Tasks",
+      summary: "Add a comment to a visible task.",
+      operationId:
+        prefix === "project"
+          ? "addProjectTaskComment"
+          : "addWorkspaceTaskComment",
+      parameters: idParameters,
+      permissions: modulePermission("task", "submit", "task.comment"),
+      requestBody: jsonBody(
+        ref("TaskCommentRequest"),
+        "Comment payload.",
+        true,
+      ),
+      responseSchema: ref("TaskComment"),
+      status: 201,
+    }),
+  );
+  add(
+    `${basePath}/{id}/attachments`,
+    "post",
+    operation({
+      tag: "Tasks",
+      summary: "Attach existing project document references to a task.",
+      operationId:
+        prefix === "project"
+          ? "addProjectTaskAttachment"
+          : "addWorkspaceTaskAttachment",
+      parameters: idParameters,
+      permissions: modulePermission("task", "update"),
+      requestBody: jsonBody(
+        ref("TaskAttachmentRequest"),
+        "Task attachment references.",
+        true,
+      ),
+      responseSchema: ref("TaskRecord"),
+      status: 201,
+    }),
+  );
+  add(
+    `${basePath}/{id}`,
+    "delete",
+    operation({
+      tag: "Tasks",
+      summary:
+        "Archive a task while retaining comments, attachments, and history.",
+      operationId:
+        prefix === "project" ? "deleteProjectTask" : "deleteWorkspaceTask",
+      parameters: idParameters,
+      permissions: modulePermission("task", "delete"),
+      responseSchema: ref("ArchiveResponse"),
+    }),
+  );
+};
+
+addTaskRoutes({
+  basePath: "/tasks",
+  idParameters: [idParam],
+  prefix: "workspace",
+});
+
+addTaskRoutes({
+  basePath: "/projects/{projectId}/tasks",
+  idParameters: projectRecordParams,
+  prefix: "project",
 });
 
 [
   {
     method: "get",
     path: "/projects/{projectId}/risks",
-    summary: "List project risks.",
+    summary:
+      "List project risks with activity impact links and closeout history.",
     operationId: "listRisks",
+    parameters: [
+      ...projectParams,
+      queryParam("status", "Filter by risk status.", {
+        type: "string",
+        enum: ["open", "monitoring", "submitted", "closed", "archived"],
+      }),
+      includeArchivedParam,
+    ],
+    permissions: modulePermission("risk", "read"),
+    responseSchema: arrayOf(ref("RiskRecord")),
   },
   {
     method: "post",
     path: "/projects/{projectId}/risks",
-    summary: "Create a project risk.",
+    summary: "Create a project risk with optional linked activities.",
     operationId: "createRisk",
-    permissions: rolesPermission("pm", "planning_eng", "qs"),
-    requestBody: genericPayloadBody("Risk payload.", true),
+    permissions: modulePermission("risk", "create"),
+    requestBody: jsonBody(ref("RiskMutation"), "Risk payload.", true),
+    responseSchema: ref("RiskRecord"),
     status: 201,
+  },
+  {
+    method: "post",
+    path: "/projects/{projectId}/risks/{id}/submit",
+    summary: "Submit a risk mitigation closeout for PM review.",
+    operationId: "submitRiskCloseout",
+    parameters: projectRecordParams,
+    permissions: modulePermission("risk", "submit", "risk.submit"),
+    requestBody: jsonBody(
+      ref("RiskCloseoutPayload"),
+      "Mitigation closeout payload.",
+    ),
+    responseSchema: ref("RiskRecord"),
+  },
+  {
+    method: "post",
+    path: "/projects/{projectId}/risks/{id}/close",
+    summary: "Alias for submitting a risk mitigation closeout.",
+    operationId: "closeRisk",
+    parameters: projectRecordParams,
+    permissions: modulePermission("risk", "submit", "risk.submit"),
+    requestBody: jsonBody(
+      ref("RiskCloseoutPayload"),
+      "Mitigation closeout payload.",
+    ),
+    responseSchema: ref("RiskRecord"),
+  },
+  {
+    method: "post",
+    path: "/projects/{projectId}/risks/{id}/approve",
+    summary: "Approve a submitted risk closeout.",
+    operationId: "approveRiskCloseout",
+    parameters: projectRecordParams,
+    permissions: modulePermission("risk", "approve", "risk.approve"),
+    requestBody: jsonBody(
+      ref("RiskCloseoutPayload"),
+      "Optional PM closeout approval comment.",
+      false,
+    ),
+    responseSchema: ref("RiskRecord"),
+  },
+  {
+    method: "post",
+    path: "/projects/{projectId}/risks/{id}/reject",
+    summary: "Reject a submitted risk closeout.",
+    operationId: "rejectRiskCloseout",
+    parameters: projectRecordParams,
+    permissions: modulePermission("risk", "approve", "risk.reject"),
+    requestBody: jsonBody(ref("RiskCloseoutPayload"), "PM rejection reason."),
+    responseSchema: ref("RiskRecord"),
+  },
+  {
+    method: "post",
+    path: "/projects/{projectId}/risks/{id}/disapprove",
+    summary: "Alias for rejecting a submitted risk closeout.",
+    operationId: "disapproveRiskCloseout",
+    parameters: projectRecordParams,
+    permissions: modulePermission("risk", "approve", "risk.reject"),
+    requestBody: jsonBody(ref("RiskCloseoutPayload"), "PM rejection reason."),
+    responseSchema: ref("RiskRecord"),
+  },
+  {
+    method: "post",
+    path: "/projects/{projectId}/risks/{id}/reopen",
+    summary: "Reopen a closed risk into monitoring.",
+    operationId: "reopenRisk",
+    parameters: projectRecordParams,
+    permissions: modulePermission("risk", "approve", "risk.reopen"),
+    requestBody: jsonBody(ref("RiskCloseoutPayload"), "Reopen reason."),
+    responseSchema: ref("RiskRecord"),
   },
   {
     method: "patch",
@@ -4332,16 +7556,18 @@ addGenericRoute({
     summary: "Update a project risk.",
     operationId: "updateRisk",
     parameters: projectRecordParams,
-    permissions: rolesPermission("pm", "planning_eng", "qs"),
-    requestBody: genericPayloadBody("Partial risk payload."),
+    permissions: modulePermission("risk", "update"),
+    requestBody: jsonBody(ref("RiskMutation"), "Partial risk payload."),
+    responseSchema: ref("RiskRecord"),
   },
   {
     method: "delete",
     path: "/projects/{projectId}/risks/{id}",
-    summary: "Delete a project risk.",
+    summary: "Archive a project risk while retaining history.",
     operationId: "deleteRisk",
     parameters: projectRecordParams,
-    permissions: rolesPermission("pm", "planning_eng"),
+    permissions: modulePermission("risk", "delete"),
+    responseSchema: ref("ArchiveResponse"),
   },
 ].forEach((route) =>
   addGenericRoute({
@@ -4633,6 +7859,22 @@ add(
   }),
 );
 
+add(
+  "/users/invitations",
+  "post",
+  operation({
+    tag: "Users",
+    summary: "Invite a user to the organization or a project.",
+    description:
+      "PM-only onboarding flow. Stores a hashed invitation token, sends an email invite, and audits the invitation. The invite can optionally assign a project role when accepted.",
+    operationId: "inviteUser",
+    permissions: modulePermission("user_management", "submit", "user.invite"),
+    requestBody: jsonBody(ref("UserInvitationRequest"), "Invitation payload."),
+    responseSchema: ref("UserInvitationResponse"),
+    status: 201,
+  }),
+);
+
 [
   {
     method: "post",
@@ -4705,6 +7947,195 @@ add(
   }),
 );
 
+const notificationIdParam = pathParam(
+  "notificationId",
+  "Notification UUID scoped to the authenticated user.",
+);
+
+add(
+  "/notifications/summary",
+  "get",
+  operation({
+    tag: "Notifications",
+    summary: "Get notification counts and recent items.",
+    operationId: "getNotificationSummary",
+    responseSchema: ref("NotificationSummary"),
+    permissions: authenticatedOnly,
+  }),
+);
+
+add(
+  "/notifications/preferences",
+  "get",
+  operation({
+    tag: "Notifications",
+    summary: "Get the authenticated user's notification preferences.",
+    operationId: "getNotificationPreferences",
+    responseSchema: ref("NotificationPreferencesResponse"),
+    permissions: authenticatedOnly,
+  }),
+);
+
+add(
+  "/notifications/preferences",
+  "put",
+  operation({
+    tag: "Notifications",
+    summary: "Update notification channel preferences.",
+    operationId: "updateNotificationPreferences",
+    requestBody: jsonBody(
+      ref("NotificationPreferencesUpdateRequest"),
+      "Preference rows to upsert.",
+    ),
+    responseSchema: ref("NotificationPreferencesResponse"),
+    permissions: authenticatedOnly,
+  }),
+);
+
+add(
+  "/notifications",
+  "get",
+  operation({
+    tag: "Notifications",
+    summary: "List in-app notifications for the authenticated user.",
+    operationId: "listNotifications",
+    parameters: [
+      ...cursorParams,
+      queryParam("status", "Notification read/archive filter.", {
+        type: "string",
+        enum: ["active", "all", "unread", "read", "archived"],
+      }),
+      queryParam("category", "Notification category filter.", {
+        type: "string",
+        enum: [
+          "assignment",
+          "due",
+          "overdue",
+          "approval",
+          "commercial",
+          "quality",
+          "safety",
+          "task",
+          "workflow",
+        ],
+      }),
+      queryParam("projectId", "Optional project UUID filter.", uuid),
+    ],
+    responseSchema: ref("NotificationListResponse"),
+    permissions: authenticatedOnly,
+  }),
+);
+
+add(
+  "/notifications/mark-read",
+  "post",
+  operation({
+    tag: "Notifications",
+    summary: "Mark all visible notifications as read.",
+    operationId: "markAllNotificationsRead",
+    responseSchema: ref("NotificationMarkAllReadResponse"),
+    permissions: authenticatedOnly,
+  }),
+);
+
+add(
+  "/notifications/deliveries/retry",
+  "post",
+  operation({
+    tag: "Notifications",
+    summary:
+      "Retry pending email delivery attempts for the authenticated user.",
+    operationId: "retryOwnNotificationDeliveries",
+    requestBody: jsonBody(
+      objectSchema({
+        limit: { type: "integer", minimum: 1, maximum: 100, default: 25 },
+      }),
+      "Optional delivery retry limit.",
+      false,
+    ),
+    responseSchema: ref("NotificationDeliveryRetryResponse"),
+    permissions: authenticatedOnly,
+  }),
+);
+
+add(
+  "/notifications/scan-due",
+  "post",
+  operation({
+    tag: "Notifications",
+    summary: "Create due and overdue notifications for open workflow records.",
+    operationId: "scanDueNotifications",
+    requestBody: jsonBody(
+      ref("NotificationDueScanRequest"),
+      "Optional project and horizon filters.",
+      false,
+    ),
+    responseSchema: ref("NotificationDueScanResponse"),
+    status: 201,
+    permissions: rolesPermission("pm", "planning_eng"),
+  }),
+);
+
+add(
+  "/notifications/{notificationId}",
+  "get",
+  operation({
+    tag: "Notifications",
+    summary: "Get a notification and delivery audit attempts.",
+    operationId: "getNotification",
+    parameters: [notificationIdParam],
+    responseSchema: ref("Notification"),
+    permissions: authenticatedOnly,
+  }),
+);
+
+add(
+  "/notifications/{notificationId}/read",
+  "patch",
+  operation({
+    tag: "Notifications",
+    summary: "Mark one notification read or unread.",
+    operationId: "markNotificationRead",
+    parameters: [notificationIdParam],
+    requestBody: jsonBody(
+      objectSchema({
+        read: { type: "boolean", default: true },
+      }),
+      "Read state update.",
+      false,
+    ),
+    responseSchema: ref("Notification"),
+    permissions: authenticatedOnly,
+  }),
+);
+
+add(
+  "/notifications/{notificationId}/archive",
+  "patch",
+  operation({
+    tag: "Notifications",
+    summary: "Archive one notification.",
+    operationId: "archiveNotification",
+    parameters: [notificationIdParam],
+    responseSchema: ref("Notification"),
+    permissions: authenticatedOnly,
+  }),
+);
+
+add(
+  "/notifications/{notificationId}/retry-email",
+  "post",
+  operation({
+    tag: "Notifications",
+    summary: "Queue and process an email retry for one notification.",
+    operationId: "retryNotificationEmail",
+    parameters: [notificationIdParam],
+    responseSchema: ref("NotificationRetryResponse"),
+    status: 202,
+    permissions: authenticatedOnly,
+  }),
+);
+
 add(
   "/config/extra-services",
   "get",
@@ -4752,8 +8183,18 @@ const openApiSpec = {
       description: "Signature-verified provider webhooks.",
     },
     {
+      name: "Companies",
+      description:
+        "Reusable organization company records for external and internal parties.",
+    },
+    {
       name: "Projects",
       description: "Project CRUD, setup readiness, and workspace dashboard.",
+    },
+    {
+      name: "Project Parties",
+      description:
+        "Owner, consultant, contractor, and subcontractor project relationships and scoped users.",
     },
     {
       name: "BOQ",
@@ -4799,6 +8240,16 @@ const openApiSpec = {
         "Earned value periods, cost loading, official EV, and reporting APIs.",
     },
     {
+      name: "Tasks",
+      description:
+        "Persisted task assignments, comments, attachments, due dates, and closeout workflow.",
+    },
+    {
+      name: "Meetings",
+      description:
+        "Meeting minutes, attendees, agenda, decisions, action items, distribution history, comments, notifications, and audit workflows.",
+    },
+    {
       name: "Weekly Reports",
       description: "Weekly progress report records and current-week helper.",
     },
@@ -4832,11 +8283,17 @@ const openApiSpec = {
     },
     {
       name: "Equipment",
-      description: "Project equipment master data.",
+      description:
+        "Project equipment master data and approved daily-report utilization.",
     },
     {
       name: "Audit",
       description: "Project audit history and workflow timeline APIs.",
+    },
+    {
+      name: "Notifications",
+      description:
+        "In-app notification state, user preferences, and auditable email delivery attempts.",
     },
     {
       name: "Health",

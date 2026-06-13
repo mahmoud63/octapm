@@ -1,25 +1,91 @@
-const { prisma } = require('../config/db');
-const evService = require('./earned-value.service');
+const { prisma } = require("../config/db");
+const evService = require("./earned-value.service");
 const {
   SEVERITY_RANK,
   computeProcurementRisk,
   serializeDate,
-} = require('./procurement-risk.service');
-const { getProjectAccessWhere } = require('./project-authorization.service');
+} = require("./procurement-risk.service");
+const {
+  ACTIVITY_SELECT,
+  buildLineRiskRow,
+  buildMaterialRiskRow,
+  buildPackageRiskRow,
+} = require("./procurement.service");
+const { getProjectAccessWhere } = require("./project-authorization.service");
 
 const ACTION_LIMIT = 5;
 const HEALTH_DIMENSIONS = [
-  { key: 'schedule', label: 'Schedule' },
-  { key: 'cost', label: 'Cost' },
-  { key: 'commercial', label: 'Commercial' },
-  { key: 'supplyChain', label: 'Supply Chain' },
-  { key: 'quality', label: 'Quality' },
-  { key: 'safety', label: 'Safety' },
-  { key: 'docControl', label: 'Doc Control' },
+  { key: "schedule", label: "Schedule" },
+  { key: "cost", label: "Cost" },
+  { key: "commercial", label: "Commercial" },
+  { key: "supplyChain", label: "Supply Chain" },
+  { key: "quality", label: "Quality" },
+  { key: "safety", label: "Safety" },
+  { key: "docControl", label: "Doc Control" },
 ];
 
-const CLOSED_STATUSES = new Set(['closed', 'complete', 'completed', 'paid']);
-const RFI_CLOSED_STATUSES = new Set(['answered', 'closed']);
+const CLOSED_STATUSES = new Set(["closed", "complete", "completed", "paid"]);
+const RFI_CLOSED_STATUSES = new Set(["answered", "closed"]);
+const EXCLUDED_OFFICIAL_STATUSES = new Set([
+  "draft",
+  "rejected",
+  "cancelled",
+  "canceled",
+  "void",
+]);
+const OFFICIAL_SOURCE_STATUS = "approved-or-official";
+
+const KPI_SOURCE_RULES = Object.freeze({
+  portfolioHealth: {
+    source: "Workspace project health dimensions",
+    formula:
+      "Average of project health scores. Schedule and cost dimensions use official EV from approved allocations, approved progress, approved cost loading, and CostRecord.actualThroughDate through cutoff.",
+    officialOnly: true,
+  },
+  activeProjects: {
+    source: "Project.status",
+    formula:
+      "Count projects in the authenticated workspace scope with status=active over all visible projects.",
+    officialOnly: true,
+  },
+  criticalActivities: {
+    source: "Activity.isCritical",
+    formula:
+      "Count active non-milestone activities flagged critical in the current accepted schedule. Delayed count uses latest approved ActivityProgress only.",
+    officialOnly: true,
+  },
+  costActuals: {
+    source: "CostRecord.actualThroughDate",
+    formula:
+      "Count official actual-cost rows included by the EV engine where actualThroughDate is on or before the reporting cutoff.",
+    officialOnly: true,
+  },
+  procurementAtRisk: {
+    source:
+      "Procurement orders, packages, PO lines, activity materials, and long-lead items",
+    formula:
+      "Count official procurement records whose need/order/delivery dates are at risk. Draft, rejected, cancelled, and void records are excluded.",
+    officialOnly: true,
+  },
+  overdueDocQuality: {
+    source: "NCR, RFI, and Submittal records",
+    formula:
+      "Count open overdue NCRs, safety actions, RFIs, and active submittal reviews. Rejected records are excluded from official KPI counts.",
+    officialOnly: true,
+  },
+  openTasks: {
+    source: "Persisted Task records",
+    formula:
+      "Count non-archived project tasks from the authenticated workspace scope. Overdue tasks are open tasks with dueDate before the dashboard date.",
+    officialOnly: true,
+  },
+  pendingReview: {
+    source: "Submitted or pending workflow records",
+    formula:
+      "Separate queue of schedule revisions, progress submissions, IPC submissions, payment/retention actions, change orders, QA/safety closeouts, and submittal reviews waiting for action. These values do not feed official KPI cards.",
+    officialOnly: false,
+  },
+});
 
 function clampScore(value) {
   return Math.max(0, Math.min(100, Math.round(value)));
@@ -41,6 +107,18 @@ function toIso(value) {
   return value ? new Date(value).toISOString() : null;
 }
 
+function latestIso(values) {
+  const latest = values.reduce((current, value) => {
+    if (!value) return current;
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return current;
+    if (!current || date > current) return date;
+    return current;
+  }, null);
+
+  return toIso(latest);
+}
+
 function addDays(date, days) {
   const result = new Date(date);
   result.setDate(result.getDate() + Number(days || 0));
@@ -48,11 +126,17 @@ function addDays(date, days) {
 }
 
 function lower(value) {
-  return String(value || '').trim().toLowerCase();
+  return String(value || "")
+    .trim()
+    .toLowerCase();
 }
 
 function isOpenStatus(value, closedStatuses = CLOSED_STATUSES) {
   return !closedStatuses.has(lower(value));
+}
+
+function isOfficialStatus(value) {
+  return !EXCLUDED_OFFICIAL_STATUSES.has(lower(value));
 }
 
 function average(values, fallback = 0) {
@@ -99,8 +183,17 @@ function isDelayedActivity({ project, activity, today }) {
 }
 
 function buildEmptyDashboard() {
+  const generatedAt = new Date().toISOString();
+
   return {
-    generatedAt: new Date().toISOString(),
+    generatedAt,
+    dataFreshness: {
+      generatedAt,
+      cutoffDate: null,
+      sourceUpdatedAt: null,
+      note: "No source records available yet.",
+    },
+    kpiSourceRules: KPI_SOURCE_RULES,
     summary: {
       totalProjects: 0,
       activeProjects: 0,
@@ -111,26 +204,41 @@ function buildEmptyDashboard() {
       approvalQueueCount: 0,
       procurementAtRisk: 0,
       overdueNcrRfi: 0,
+      openTasks: 0,
+      overdueTasks: 0,
+    },
+    officialKpis: [],
+    pendingReview: {
+      total: 0,
+      metrics: [],
+      sourceRule: KPI_SOURCE_RULES.pendingReview,
     },
     healthDimensions: HEALTH_DIMENSIONS.map((dimension) => ({
       ...dimension,
       score: null,
-      detail: 'No project data yet',
+      detail: "No project data yet",
       count: 0,
+      sourceRule: KPI_SOURCE_RULES.portfolioHealth,
+      cutoffDate: null,
     })),
     workflowQueues: [],
     projectHealth: [],
     emptyState: {
-      title: 'No projects yet',
+      title: "No projects yet",
       message:
-        'Create a project to start tracking schedule, cost, approvals, procurement, quality, and document-control health.',
-      action: { label: 'Create Project', target: { module: 'projects' } },
+        "Create a project to start tracking schedule, cost, approvals, procurement, quality, and document-control health.",
+      action: { label: "Create Project", target: { module: "projects" } },
     },
   };
 }
 
-function queueTarget(projectId, module, child) {
-  return { projectId, module, child };
+function queueTarget(projectId, module, child, filters = {}) {
+  return {
+    projectId,
+    module,
+    ...(child ? { child } : {}),
+    ...filters,
+  };
 }
 
 function buildQueueItem({
@@ -139,9 +247,10 @@ function buildQueueItem({
   projectName,
   title,
   meta,
-  severity = 'attention',
+  severity = "attention",
   module,
   child,
+  targetFilters = {},
   dueDate = null,
 }) {
   return {
@@ -152,7 +261,10 @@ function buildQueueItem({
     meta,
     severity,
     dueDate: toIso(dueDate),
-    target: queueTarget(projectId, module, child),
+    target: queueTarget(projectId, module, child, {
+      recordId: id,
+      ...targetFilters,
+    }),
   };
 }
 
@@ -166,6 +278,53 @@ function buildQueue({ key, label, count, description, items, module, child }) {
     defaultTarget: items[0]
       ? items[0].target
       : { projectId: null, module, child },
+  };
+}
+
+function buildKpi({
+  key,
+  label,
+  value,
+  detail,
+  sourceRule,
+  cutoffDate,
+  generatedAt,
+  target,
+  unit = "count",
+}) {
+  return {
+    key,
+    label,
+    value,
+    unit,
+    detail,
+    sourceRule,
+    sourceStatus: OFFICIAL_SOURCE_STATUS,
+    cutoffDate,
+    generatedAt,
+    target,
+  };
+}
+
+function buildPendingMetric({
+  key,
+  label,
+  count,
+  detail,
+  target,
+  source,
+  cutoffDate,
+}) {
+  return {
+    key,
+    label,
+    count,
+    detail,
+    source,
+    sourceStatus: "pending-review",
+    excludedFromOfficialKpis: true,
+    cutoffDate,
+    target,
   };
 }
 
@@ -198,8 +357,7 @@ function summarizeRiskRows({ rows, projectById, today }) {
     bySeverity.medium * 8 +
     bySeverity.low * 3;
 
-  const atRiskItems =
-    bySeverity.critical + bySeverity.high + bySeverity.medium;
+  const atRiskItems = bySeverity.critical + bySeverity.high + bySeverity.medium;
 
   const topRisks = risks
     .filter(({ risk }) => risk.isAtRisk)
@@ -213,9 +371,9 @@ function summarizeRiskRows({ rows, projectById, today }) {
     .map(({ row, risk }) => ({
       id: row.id,
       projectId: row.projectId,
-      projectName: projectById.get(row.projectId)?.name || 'Project',
+      projectName: projectById.get(row.projectId)?.name || "Project",
       item: row.item,
-      source: row.ref ? 'procurement_order' : 'long_lead',
+      source: row.ref ? "procurement_order" : "long_lead",
       ref: row.ref || null,
       severity: risk.severity,
       reason: risk.reason,
@@ -248,7 +406,7 @@ async function getEvReports({ orgId, projects }) {
   );
 
   return settled.reduce((map, result) => {
-    if (result.status === 'fulfilled') {
+    if (result.status === "fulfilled") {
       const [projectId, report] = result.value;
       map.set(projectId, report);
     }
@@ -260,15 +418,17 @@ async function getWorkspaceDashboard({ orgId, userId, role }) {
   const projects = await prisma.project.findMany({
     where: {
       orgId,
+      archivedAt: null,
       ...getProjectAccessWhere({ userId, role }),
     },
-    orderBy: [{ status: 'asc' }, { updatedAt: 'desc' }],
+    orderBy: [{ status: "asc" }, { updatedAt: "desc" }],
     select: {
       id: true,
       name: true,
       status: true,
       startDate: true,
       endDate: true,
+      dataDate: true,
       contractValue: true,
       currency: true,
       updatedAt: true,
@@ -296,14 +456,21 @@ async function getWorkspaceDashboard({ orgId, userId, role }) {
     ipcItemCount,
     ipcCertificates,
     ipcItems,
+    ipcPaymentCertificateCount,
+    ipcPaymentCertificates,
     procurementOrders,
+    procurementPackages,
+    procurementLines,
+    activityMaterials,
     longLeadItems,
     ncrRecords,
     itpRecords,
     safetyIncidents,
     rfis,
     submittals,
-    pendingChangeOrders,
+    changeOrders,
+    risks,
+    tasks,
   ] = await Promise.all([
     prisma.activity.findMany({
       where: { projectId: projectIdFilter, isActive: true },
@@ -317,20 +484,20 @@ async function getWorkspaceDashboard({ orgId, userId, role }) {
         isCritical: true,
         isMilestone: true,
         progress: {
-          where: { status: 'approved' },
-          orderBy: { updatedAt: 'desc' },
+          where: { status: "approved" },
+          orderBy: { updatedAt: "desc" },
           take: 1,
           select: { pctComplete: true },
         },
       },
     }),
     prisma.scheduleRevision.count({
-      where: { projectId: projectIdFilter, status: 'under_review' },
+      where: { projectId: projectIdFilter, status: "under_review" },
     }),
     prisma.scheduleRevision.findMany({
-      where: { projectId: projectIdFilter, status: 'under_review' },
+      where: { projectId: projectIdFilter, status: "under_review" },
       take: ACTION_LIMIT,
-      orderBy: [{ submittedAt: 'desc' }, { createdAt: 'desc' }],
+      orderBy: [{ submittedAt: "desc" }, { createdAt: "desc" }],
       select: {
         id: true,
         projectId: true,
@@ -342,12 +509,12 @@ async function getWorkspaceDashboard({ orgId, userId, role }) {
       },
     }),
     prisma.progressSubmission.count({
-      where: { projectId: projectIdFilter, status: 'submitted' },
+      where: { projectId: projectIdFilter, status: "submitted" },
     }),
     prisma.progressSubmission.findMany({
-      where: { projectId: projectIdFilter, status: 'submitted' },
+      where: { projectId: projectIdFilter, status: "submitted" },
       take: ACTION_LIMIT,
-      orderBy: [{ submittedAt: 'desc' }, { createdAt: 'desc' }],
+      orderBy: [{ submittedAt: "desc" }, { createdAt: "desc" }],
       select: {
         id: true,
         projectId: true,
@@ -358,21 +525,21 @@ async function getWorkspaceDashboard({ orgId, userId, role }) {
       },
     }),
     prisma.dailyReport.count({
-      where: { projectId: projectIdFilter, status: 'submitted' },
+      where: { projectId: projectIdFilter, status: "submitted" },
     }),
     prisma.siteDiary.count({
-      where: { projectId: projectIdFilter, status: 'submitted' },
+      where: { projectId: projectIdFilter, status: "submitted" },
     }),
     prisma.ipcCertificate.count({
-      where: { projectId: projectIdFilter, status: 'submitted' },
+      where: { projectId: projectIdFilter, status: "submitted" },
     }),
     prisma.ipcItem.count({
-      where: { projectId: projectIdFilter, status: 'submitted' },
+      where: { projectId: projectIdFilter, status: "submitted" },
     }),
     prisma.ipcCertificate.findMany({
-      where: { projectId: projectIdFilter, status: 'submitted' },
+      where: { projectId: projectIdFilter, status: "submitted" },
       take: ACTION_LIMIT,
-      orderBy: [{ submittedAt: 'desc' }, { updatedAt: 'desc' }],
+      orderBy: [{ submittedAt: "desc" }, { updatedAt: "desc" }],
       select: {
         id: true,
         projectId: true,
@@ -384,9 +551,9 @@ async function getWorkspaceDashboard({ orgId, userId, role }) {
       },
     }),
     prisma.ipcItem.findMany({
-      where: { projectId: projectIdFilter, status: 'submitted' },
+      where: { projectId: projectIdFilter, status: "submitted" },
       take: ACTION_LIMIT,
-      orderBy: [{ updatedAt: 'desc' }],
+      orderBy: [{ updatedAt: "desc" }],
       select: {
         id: true,
         projectId: true,
@@ -395,26 +562,67 @@ async function getWorkspaceDashboard({ orgId, userId, role }) {
         project: { select: { name: true, currency: true } },
       },
     }),
+    prisma.ipcCertificate.count({
+      where: {
+        projectId: projectIdFilter,
+        status: { in: ["certified", "paid"] },
+        OR: [
+          { paymentStatus: { in: ["unpaid", "partially_paid"] } },
+          { retentionStatus: { in: ["held", "partially_released"] } },
+        ],
+      },
+    }),
+    prisma.ipcCertificate.findMany({
+      where: {
+        projectId: projectIdFilter,
+        status: { in: ["certified", "paid"] },
+        OR: [
+          { paymentStatus: { in: ["unpaid", "partially_paid"] } },
+          { retentionStatus: { in: ["held", "partially_released"] } },
+        ],
+      },
+      take: ACTION_LIMIT,
+      orderBy: [{ certifiedAt: "desc" }, { updatedAt: "desc" }],
+      select: {
+        id: true,
+        projectId: true,
+        period: true,
+        netPayable: true,
+        balanceDue: true,
+        paymentStatus: true,
+        retentionStatus: true,
+        certifiedAt: true,
+        dueDate: true,
+        project: { select: { name: true, currency: true } },
+      },
+    }),
     prisma.procurementOrder.findMany({
       where: { projectId: projectIdFilter },
       include: {
-        activity: {
-          select: {
-            id: true,
-            name: true,
-            wbsCode: true,
-            startDate: true,
-            endDate: true,
-            earlyStart: true,
-            earlyFinish: true,
-            baselineStart: true,
-            baselineFinish: true,
-            lateStart: true,
-            lateFinish: true,
-            isCritical: true,
-            totalFloat: true,
-          },
+        activity: { select: ACTIVITY_SELECT },
+      },
+    }),
+    prisma.procurementPackage.findMany({
+      where: { projectId: projectIdFilter },
+      include: {
+        activity: { select: ACTIVITY_SELECT },
+      },
+    }),
+    prisma.procurementPoLine.findMany({
+      where: { projectId: projectIdFilter },
+      include: {
+        order: { select: { id: true, ref: true, status: true } },
+        activity: { select: ACTIVITY_SELECT },
+      },
+    }),
+    prisma.activityMaterial.findMany({
+      where: { projectId: projectIdFilter },
+      include: {
+        poLines: {
+          orderBy: { createdAt: "desc" },
+          take: 5,
         },
+        activity: { select: ACTIVITY_SELECT },
       },
     }),
     prisma.longLeadItem.findMany({
@@ -457,22 +665,29 @@ async function getWorkspaceDashboard({ orgId, userId, role }) {
       select: {
         id: true,
         projectId: true,
+        ref: true,
+        title: true,
         status: true,
         dueDate: true,
+        project: { select: { name: true } },
       },
     }),
     prisma.safetyIncident.findMany({
-      where: { projectId: projectIdFilter },
+      where: { projectId: projectIdFilter, archivedAt: null },
       select: {
         id: true,
         projectId: true,
+        ref: true,
+        title: true,
         incidentType: true,
+        severity: true,
         status: true,
         dueDate: true,
+        project: { select: { name: true } },
       },
     }),
     prisma.rfi.findMany({
-      where: { projectId: projectIdFilter },
+      where: { projectId: projectIdFilter, archivedAt: null },
       select: {
         id: true,
         projectId: true,
@@ -485,29 +700,135 @@ async function getWorkspaceDashboard({ orgId, userId, role }) {
       },
     }),
     prisma.submittal.findMany({
-      where: { projectId: projectIdFilter },
+      where: { projectId: projectIdFilter, archivedAt: null },
       select: {
         id: true,
         projectId: true,
+        ref: true,
+        title: true,
         status: true,
         dueDate: true,
+        project: { select: { name: true } },
       },
     }),
     prisma.changeOrder.findMany({
-      where: { projectId: projectIdFilter, status: 'pending' },
-      select: { id: true, projectId: true },
+      where: {
+        projectId: projectIdFilter,
+        archivedAt: null,
+        status: { in: ["pending", "approved"] },
+      },
+      select: {
+        id: true,
+        projectId: true,
+        ref: true,
+        description: true,
+        value: true,
+        scheduleImpact: true,
+        status: true,
+        submittedDate: true,
+        approvedAt: true,
+        updatedAt: true,
+        project: { select: { name: true, currency: true } },
+      },
+    }),
+    prisma.risk.findMany({
+      where: { projectId: projectIdFilter, archivedAt: null },
+      select: {
+        id: true,
+        projectId: true,
+        ref: true,
+        description: true,
+        severity: true,
+        status: true,
+        owner: true,
+        dueDate: true,
+        escalationLevel: true,
+        closeoutSubmittedAt: true,
+        updatedAt: true,
+        project: { select: { name: true } },
+        activityLinks: {
+          select: {
+            activityId: true,
+            scheduleImpactDays: true,
+            activity: {
+              select: { id: true, name: true, activityCode: true, wbsCode: true },
+            },
+          },
+          take: 3,
+          orderBy: [{ createdAt: "asc" }],
+        },
+      },
+    }),
+    prisma.task.findMany({
+      where: { projectId: projectIdFilter, archivedAt: null },
+      select: {
+        id: true,
+        projectId: true,
+        taskNumber: true,
+        title: true,
+        status: true,
+        priority: true,
+        dueDate: true,
+        updatedAt: true,
+        assignee: { select: { id: true, name: true } },
+        activity: { select: { id: true, name: true, wbsCode: true } },
+        project: { select: { name: true } },
+      },
     }),
   ]);
 
   const evReports = await getEvReports({ orgId, projects });
+  const generatedAt = new Date().toISOString();
+  const cutoffDate =
+    latestIso([
+      ...projects.map((project) => project.dataDate),
+      ...[...evReports.values()].map((report) => report?.reporting?.cutoffDate),
+    ]) || generatedAt;
+  const sourceUpdatedAt =
+    latestIso([
+      ...projects.map((project) => project.updatedAt),
+      ...changeOrders.map((row) => row.updatedAt),
+      ...risks.map((row) => row.updatedAt),
+      ...tasks.map((row) => row.updatedAt),
+    ]) || generatedAt;
   const activitiesByProject = groupByProject(activities);
   const ncrsByProject = groupByProject(ncrRecords);
   const itpsByProject = groupByProject(itpRecords);
   const incidentsByProject = groupByProject(safetyIncidents);
   const rfisByProject = groupByProject(rfis);
   const submittalsByProject = groupByProject(submittals);
-  const changeOrdersByProject = groupByProject(pendingChangeOrders);
-  const procurementRows = [...procurementOrders, ...longLeadItems];
+  const risksByProject = groupByProject(risks);
+  const tasksByProject = groupByProject(tasks);
+  const pendingChangeOrders = changeOrders.filter(
+    (row) => lower(row.status) === "pending",
+  );
+  const approvedChangeOrders = changeOrders.filter(
+    (row) => lower(row.status) === "approved",
+  );
+  const pendingChangeOrdersByProject = groupByProject(pendingChangeOrders);
+  const approvedChangeOrdersByProject = groupByProject(approvedChangeOrders);
+  const procurementPackageRows = procurementPackages.map((row) => ({
+    ...buildPackageRiskRow(row),
+    projectId: row.projectId,
+    source: "procurement_package",
+  }));
+  const procurementLineRows = procurementLines.map((row) => ({
+    ...buildLineRiskRow(row),
+    projectId: row.projectId,
+    source: "po_line",
+  }));
+  const activityMaterialRows = activityMaterials.map((row) => ({
+    ...buildMaterialRiskRow(row),
+    projectId: row.projectId,
+    source: "activity_material",
+  }));
+  const procurementRows = [
+    ...procurementOrders,
+    ...procurementPackageRows,
+    ...procurementLineRows,
+    ...activityMaterialRows,
+    ...longLeadItems,
+  ].filter((row) => isOfficialStatus(row.status));
   const procurementSummary = summarizeRiskRows({
     rows: procurementRows,
     projectById,
@@ -531,7 +852,12 @@ async function getWorkspaceDashboard({ orgId, userId, role }) {
   );
 
   const overdueNcrs = ncrRecords.filter(
-    (row) => row.dueDate && new Date(row.dueDate) < today && isOpenStatus(row.status),
+    (row) =>
+      row.dueDate && new Date(row.dueDate) < today && isOpenStatus(row.status),
+  );
+  const overdueSafety = safetyIncidents.filter(
+    (row) =>
+      row.dueDate && new Date(row.dueDate) < today && isOpenStatus(row.status),
   );
   const overdueRfis = rfis.filter((row) => {
     const dueDate = row.responseRequiredBy || row.dueDate;
@@ -542,14 +868,52 @@ async function getWorkspaceDashboard({ orgId, userId, role }) {
     );
   });
   const pendingSubmittals = submittals.filter((row) =>
-    ['pending', 'under_review', 'resubmit'].includes(lower(row.status)),
+    ["pending", "under_review", "resubmit"].includes(lower(row.status)),
+  );
+  const pendingNcrCloseouts = ncrRecords.filter(
+    (row) => lower(row.status) === "submitted",
+  );
+  const pendingSafetyCloseouts = safetyIncidents.filter(
+    (row) => lower(row.status) === "submitted",
+  );
+  const submittedRiskCloseouts = risks.filter(
+    (row) => lower(row.status) === "submitted",
+  );
+  const overdueRiskMitigations = risks.filter(
+    (row) =>
+      row.dueDate &&
+      new Date(row.dueDate) < today &&
+      ["open", "monitoring"].includes(lower(row.status)),
+  );
+  const overdueSubmittals = pendingSubmittals.filter(
+    (row) => row.dueDate && new Date(row.dueDate) < today,
+  );
+  const openTasks = tasks.filter((row) => isOpenStatus(row.status));
+  const overdueTasks = openTasks.filter(
+    (row) => row.dueDate && new Date(row.dueDate) < today,
   );
 
   const overdueNcrsByProject = countByProject(overdueNcrs);
+  const overdueSafetyByProject = countByProject(overdueSafety);
   const overdueRfisByProject = countByProject(overdueRfis);
+  const overdueSubmittalsByProject = countByProject(overdueSubmittals);
+  const openTasksByProject = countByProject(openTasks);
+  const overdueTasksByProject = countByProject(overdueTasks);
   const scheduleApprovalsByProject = countByProject(scheduleApprovals);
   const progressApprovalsByProject = countByProject(progressSubmissions);
-  const ipcActionsByProject = countByProject([...ipcCertificates, ...ipcItems]);
+  const qaCloseoutsByProject = countByProject([
+    ...pendingNcrCloseouts,
+    ...pendingSafetyCloseouts,
+  ]);
+  const riskActionsByProject = countByProject([
+    ...submittedRiskCloseouts,
+    ...overdueRiskMitigations,
+  ]);
+  const ipcActionsByProject = countByProject([
+    ...ipcCertificates,
+    ...ipcItems,
+    ...ipcPaymentCertificates,
+  ]);
 
   const projectHealth = projects.map((project) => {
     const projectActivities = activitiesByProject.get(project.id) || [];
@@ -558,42 +922,61 @@ async function getWorkspaceDashboard({ orgId, userId, role }) {
     const projectIncidents = incidentsByProject.get(project.id) || [];
     const projectRfis = rfisByProject.get(project.id) || [];
     const projectSubmittals = submittalsByProject.get(project.id) || [];
-    const projectChangeOrders = changeOrdersByProject.get(project.id) || [];
+    const projectRisks = risksByProject.get(project.id) || [];
+    const projectTasks = tasksByProject.get(project.id) || [];
+    const projectPendingChangeOrders =
+      pendingChangeOrdersByProject.get(project.id) || [];
+    const projectApprovedChangeOrders =
+      approvedChangeOrdersByProject.get(project.id) || [];
     const evReport = evReports.get(project.id) || {};
     const spi = evReport.spi;
     const cpi = evReport.cpi;
 
-    const scheduleScore =
-      spi === null || spi === undefined
-        ? 60
-        : clampScore(scoreByIndex(Number(spi)));
+    const projectOverdueRiskMitigations = projectRisks.filter(
+      (row) =>
+        row.dueDate &&
+        new Date(row.dueDate) < today &&
+        ["open", "monitoring"].includes(lower(row.status)),
+    ).length;
+    const scheduleScore = clampScore(
+      (spi === null || spi === undefined ? 60 : scoreByIndex(Number(spi))) -
+        projectOverdueRiskMitigations * 5,
+    );
     const costScore =
       cpi === null || cpi === undefined
         ? 60
         : clampScore(scoreByIndex(Number(cpi)));
-    const commercialScore = clampScore(100 - projectChangeOrders.length * 10);
+    const approvedScheduleImpactDays = projectApprovedChangeOrders.reduce(
+      (sum, row) => sum + Math.max(0, toNumber(row.scheduleImpact)),
+      0,
+    );
+    const commercialScore = clampScore(
+      100 -
+        projectApprovedChangeOrders.length * 2 -
+        approvedScheduleImpactDays * 0.5,
+    );
     const supplyChainScore = clampScore(
       100 - toNumber(procurementRisksByProject.get(project.id)) * 12,
     );
 
     const majorNCRs = projectNcrs.filter(
-      (row) => lower(row.severity) === 'major',
+      (row) => lower(row.severity) === "major",
     ).length;
     const minorNCRs = projectNcrs.filter(
-      (row) => lower(row.severity) === 'minor',
+      (row) => lower(row.severity) === "minor",
     ).length;
     const failedITPs = projectItps.filter(
-      (row) => lower(row.status) === 'failed',
+      (row) => lower(row.status) === "failed",
     ).length;
     const qualityScore = clampScore(
       100 - majorNCRs * 20 - minorNCRs * 8 - failedITPs * 15,
     );
 
     const ltiCount = projectIncidents.filter(
-      (row) => lower(row.incidentType) === 'lti',
+      (row) => lower(row.incidentType) === "lti",
     ).length;
     const fatalityCount = projectIncidents.filter(
-      (row) => lower(row.incidentType) === 'fatality',
+      (row) => lower(row.incidentType) === "fatality",
     ).length;
     const openInvestigations = projectIncidents.filter((row) =>
       isOpenStatus(row.status),
@@ -611,10 +994,19 @@ async function getWorkspaceDashboard({ orgId, userId, role }) {
       );
     }).length;
     const projectPendingSubmittals = projectSubmittals.filter((row) =>
-      ['pending', 'under_review', 'resubmit'].includes(lower(row.status)),
+      ["pending", "under_review", "resubmit"].includes(lower(row.status)),
+    ).length;
+    const projectOverdueSubmittals = projectSubmittals.filter(
+      (row) =>
+        row.dueDate &&
+        new Date(row.dueDate) < today &&
+        ["pending", "under_review", "resubmit"].includes(lower(row.status)),
     ).length;
     const docControlScore = clampScore(
-      100 - projectOverdueRfis * 10 - projectPendingSubmittals * 5,
+      100 -
+        projectOverdueRfis * 10 -
+        projectOverdueSubmittals * 10 -
+        projectPendingSubmittals * 5,
     );
 
     const dimensions = {
@@ -633,10 +1025,16 @@ async function getWorkspaceDashboard({ orgId, userId, role }) {
     const workflowActions =
       toNumber(scheduleApprovalsByProject.get(project.id)) +
       toNumber(progressApprovalsByProject.get(project.id)) +
+      toNumber(qaCloseoutsByProject.get(project.id)) +
       toNumber(ipcActionsByProject.get(project.id)) +
+      toNumber(riskActionsByProject.get(project.id)) +
+      projectPendingChangeOrders.length +
       toNumber(procurementRisksByProject.get(project.id)) +
       toNumber(overdueNcrsByProject.get(project.id)) +
-      toNumber(overdueRfisByProject.get(project.id));
+      toNumber(overdueSafetyByProject.get(project.id)) +
+      toNumber(overdueRfisByProject.get(project.id)) +
+      toNumber(overdueSubmittalsByProject.get(project.id)) +
+      toNumber(overdueTasksByProject.get(project.id));
     const weakestDimension = Object.entries(dimensions).sort(
       (a, b) => a[1] - b[1],
     )[0];
@@ -660,11 +1058,17 @@ async function getWorkspaceDashboard({ orgId, userId, role }) {
       },
       delayedActivities: toNumber(delayedByProject.get(project.id)),
       workflowActions,
+      riskMitigations: toNumber(riskActionsByProject.get(project.id)),
       procurementRisks: toNumber(procurementRisksByProject.get(project.id)),
+      pendingChangeOrders: projectPendingChangeOrders.length,
       overdueNcrRfi:
         toNumber(overdueNcrsByProject.get(project.id)) +
-        toNumber(overdueRfisByProject.get(project.id)),
-      target: queueTarget(project.id, 'overview'),
+        toNumber(overdueSafetyByProject.get(project.id)) +
+        toNumber(overdueRfisByProject.get(project.id)) +
+        toNumber(overdueSubmittalsByProject.get(project.id)),
+      openTasks: projectTasks.filter((row) => isOpenStatus(row.status)).length,
+      overdueTasks: toNumber(overdueTasksByProject.get(project.id)),
+      target: queueTarget(project.id, "overview"),
     };
   });
 
@@ -674,13 +1078,13 @@ async function getWorkspaceDashboard({ orgId, userId, role }) {
     );
 
     const detailByKey = {
-      schedule: `${delayedActivities.length} delayed activities`,
+      schedule: `${delayedActivities.length} delayed activities, ${overdueRiskMitigations.length} overdue risk mitigations, ${overdueTasks.length} overdue tasks`,
       cost: `${projectHealth.filter((project) => project.dimensions.cost < 80).length} CPI watch projects`,
-      commercial: `${pendingChangeOrders.length} pending change orders`,
+      commercial: `${approvedChangeOrders.length} approved change orders`,
       supplyChain: `${procurementSummary.atRiskItems} procurement risks`,
       quality: `${overdueNcrs.length} overdue NCRs`,
-      safety: `${safetyIncidents.filter((row) => isOpenStatus(row.status)).length} open investigations`,
-      docControl: `${overdueRfis.length} overdue RFIs`,
+      safety: `${safetyIncidents.filter((row) => isOpenStatus(row.status)).length} open investigations, ${overdueSafety.length} overdue actions`,
+      docControl: `${overdueRfis.length} overdue RFIs, ${overdueSubmittals.length} overdue submittals`,
     };
 
     return {
@@ -688,61 +1092,100 @@ async function getWorkspaceDashboard({ orgId, userId, role }) {
       score: clampScore(average(scores, 60)),
       detail: detailByKey[dimension.key],
       count: scores.length,
+      sourceRule:
+        dimension.key === "schedule" || dimension.key === "cost"
+          ? KPI_SOURCE_RULES.portfolioHealth
+          : KPI_SOURCE_RULES[
+              dimension.key === "supplyChain"
+                ? "procurementAtRisk"
+                : dimension.key === "docControl"
+                  ? "overdueDocQuality"
+                  : "portfolioHealth"
+            ],
+      cutoffDate,
+      target:
+        dimension.key === "cost"
+          ? queueTarget(projectHealth[0]?.id || null, "cost", "activity", {
+              status: "official",
+              source: "cost_record.actual_through_date",
+            })
+          : dimension.key === "docControl"
+            ? queueTarget(
+                overdueRfis[0]?.projectId ||
+                  overdueSubmittals[0]?.projectId ||
+                  null,
+                "docControl",
+                overdueRfis[0] ? "rfi" : "submittals",
+                {
+                  status: overdueRfis[0] ? "open" : "under_review",
+                  source: overdueRfis[0] ? "rfi" : "submittal",
+                },
+              )
+            : queueTarget(projectHealth[0]?.id || null, "overview"),
     };
   });
 
   const progressApprovalCount =
     progressSubmissionCount + dailyReportCount + siteDiaryCount;
-  const ipcActionCount = ipcCertificateCount + ipcItemCount;
+  const ipcActionCount =
+    ipcCertificateCount + ipcItemCount + ipcPaymentCertificateCount;
 
   const workflowQueues = [
     buildQueue({
-      key: 'scheduleApprovals',
-      label: 'Schedule approvals',
+      key: "scheduleApprovals",
+      label: "Schedule approvals",
       count: scheduleApprovalCount,
-      description: 'Revisions waiting for PM or planning review',
-      module: 'schedule',
-      child: 'revisions',
+      description: "Revisions waiting for PM or planning review",
+      module: "schedule",
+      child: "revisions",
       items: scheduleApprovals.map((row) =>
         buildQueueItem({
           id: row.id,
           projectId: row.projectId,
           projectName: row.project.name,
-          title: row.label || 'Schedule revision',
+          title: row.label || "Schedule revision",
           meta: `${row.activityCount} activities`,
-          module: 'schedule',
-          child: 'revisions',
+          module: "schedule",
+          child: "revisions",
+          targetFilters: {
+            status: "under_review",
+            source: "schedule_revision",
+          },
           dueDate: row.submittedAt || row.createdAt,
         }),
       ),
     }),
     buildQueue({
-      key: 'progressApprovals',
-      label: 'Progress approvals',
+      key: "progressApprovals",
+      label: "Progress approvals",
       count: progressApprovalCount,
-      description: 'Submitted progress, daily reports, and site diaries',
-      module: 'schedule',
-      child: 'progress',
+      description: "Submitted progress, daily reports, and site diaries",
+      module: "schedule",
+      child: "progress",
       items: progressSubmissions.map((row) =>
         buildQueueItem({
           id: row.id,
           projectId: row.projectId,
           projectName: row.project.name,
-          title: row.activity?.name || 'Progress submission',
+          title: row.activity?.name || "Progress submission",
           meta: `${toNumber(row.pctComplete).toFixed(1)}% complete`,
-          module: 'schedule',
-          child: 'progress',
+          module: "schedule",
+          child: "progress",
+          targetFilters: {
+            status: "submitted",
+            source: "progress_submission",
+          },
           dueDate: row.submittedAt,
         }),
       ),
     }),
     buildQueue({
-      key: 'ipcActions',
-      label: 'IPC actions',
+      key: "ipcActions",
+      label: "IPC actions",
       count: ipcActionCount,
-      description: 'Payment certificates and submitted IPC items',
-      module: 'commercial',
-      child: 'ipc',
+      description: "Submitted IPC plus open payment and retention status",
+      module: "commercial",
+      child: "ipc",
       items: [
         ...ipcCertificates.map((row) =>
           buildQueueItem({
@@ -751,9 +1194,33 @@ async function getWorkspaceDashboard({ orgId, userId, role }) {
             projectName: row.project.name,
             title: row.period,
             meta: `${row.project.currency} ${toNumber(row.netPayable || row.totalCert).toLocaleString()}`,
-            module: 'commercial',
-            child: 'ipc',
+            module: "commercial",
+            child: "ipc",
+            targetFilters: {
+              status: "submitted",
+              source: "ipc_certificate",
+            },
             dueDate: row.submittedAt,
+          }),
+        ),
+        ...ipcPaymentCertificates.map((row) =>
+          buildQueueItem({
+            id: `payment-${row.id}`,
+            projectId: row.projectId,
+            projectName: row.project.name,
+            title: `${row.period} payment status`,
+            meta: `${row.project.currency} ${toNumber(row.balanceDue).toLocaleString()} balance - payment ${row.paymentStatus.replaceAll("_", " ")} - retention ${row.retentionStatus.replaceAll("_", " ")}`,
+            severity:
+              toNumber(row.balanceDue) > 0 || row.retentionStatus !== "released"
+                ? "attention"
+                : "low",
+            module: "commercial",
+            child: "ipc",
+            targetFilters: {
+              status: "certified",
+              source: "ipc_certificate",
+            },
+            dueDate: row.dueDate || row.certifiedAt,
           }),
         ),
         ...ipcItems.map((row) =>
@@ -763,40 +1230,207 @@ async function getWorkspaceDashboard({ orgId, userId, role }) {
             projectName: row.project.name,
             title: row.ipcPeriod,
             meta: `${row.project.currency} ${toNumber(row.netPayable).toLocaleString()}`,
-            module: 'commercial',
-            child: 'ipc',
+            module: "commercial",
+            child: "ipc",
+            targetFilters: {
+              status: "submitted",
+              source: "ipc_item",
+            },
           }),
         ),
       ].slice(0, ACTION_LIMIT),
     }),
     buildQueue({
-      key: 'procurementRisks',
-      label: 'Procurement risks',
+      key: "pendingChangeOrders",
+      label: "Change order review",
+      count: pendingChangeOrders.length,
+      description: "Submitted change orders awaiting PM approval",
+      module: "commercial",
+      child: "change-orders",
+      items: pendingChangeOrders.slice(0, ACTION_LIMIT).map((row) =>
+        buildQueueItem({
+          id: row.id,
+          projectId: row.projectId,
+          projectName: row.project.name,
+          title: row.ref,
+          meta: `${row.project.currency} ${toNumber(row.value).toLocaleString()} - ${row.description || "Pending change order"}`,
+          severity: "attention",
+          module: "commercial",
+          child: "change-orders",
+          targetFilters: {
+            status: "pending",
+            source: "change_order",
+          },
+          dueDate: row.submittedDate || row.updatedAt,
+        }),
+      ),
+    }),
+    buildQueue({
+      key: "riskCloseouts",
+      label: "Risk closeout review",
+      count: submittedRiskCloseouts.length,
+      description: "Mitigation closeouts awaiting PM approval",
+      module: "schedule",
+      child: "risks",
+      items: submittedRiskCloseouts.slice(0, ACTION_LIMIT).map((row) => {
+        const activity = row.activityLinks?.[0]?.activity;
+        return buildQueueItem({
+          id: row.id,
+          projectId: row.projectId,
+          projectName: row.project.name,
+          title: row.ref,
+          meta: `${row.owner || "Unassigned"} - ${row.description}${
+            activity
+              ? ` - ${activity.activityCode || activity.wbsCode || activity.name}`
+              : ""
+          }`,
+          severity: lower(row.severity),
+          module: "schedule",
+          child: "risks",
+          targetFilters: {
+            status: "submitted",
+            source: "risk",
+          },
+          dueDate: row.closeoutSubmittedAt || row.dueDate,
+        });
+      }),
+    }),
+    buildQueue({
+      key: "qaSafetyCloseouts",
+      label: "QA/Safety closeout review",
+      count: pendingNcrCloseouts.length + pendingSafetyCloseouts.length,
+      description: "Submitted NCR and safety closeouts awaiting PM approval",
+      module: "quality",
+      child: "ncr",
+      items: [
+        ...pendingNcrCloseouts.map((row) =>
+          buildQueueItem({
+            id: row.id,
+            projectId: row.projectId,
+            projectName: row.project.name,
+            title: row.ref,
+            meta: row.description || `${row.severity} NCR closeout`,
+            severity:
+              lower(row.severity) === "major" ? "critical" : "attention",
+            module: "quality",
+            child: "ncr",
+            targetFilters: {
+              status: row.status,
+              source: "ncr",
+            },
+            dueDate: row.dueDate,
+          }),
+        ),
+        ...pendingSafetyCloseouts.map((row) =>
+          buildQueueItem({
+            id: row.id,
+            projectId: row.projectId,
+            projectName: row.project.name,
+            title: row.ref || row.title,
+            meta: `${row.incidentType.replaceAll("_", " ")} closeout`,
+            severity: ["fatality", "critical", "high"].includes(
+              lower(row.severity || row.incidentType),
+            )
+              ? "critical"
+              : "attention",
+            module: "quality",
+            child: "safety",
+            targetFilters: {
+              status: row.status,
+              source: "safety_incident",
+            },
+            dueDate: row.dueDate,
+          }),
+        ),
+      ].slice(0, ACTION_LIMIT),
+    }),
+    buildQueue({
+      key: "procurementRisks",
+      label: "Procurement risks",
       count: procurementSummary.atRiskItems,
-      description: 'Long-lead and purchase-order dates at risk',
-      module: 'schedule',
-      child: 'longLead',
+      description: "Long-lead and purchase-order dates at risk",
+      module: "schedule",
+      child: "longLead",
       items: procurementSummary.topRisks.map((risk) =>
         buildQueueItem({
           id: risk.id,
           projectId: risk.projectId,
           projectName: risk.projectName,
           title: risk.item,
-          meta: `${risk.severity} - ${risk.reason.replaceAll('_', ' ')}`,
+          meta: `${risk.severity} - ${risk.reason.replaceAll("_", " ")}`,
           severity: risk.severity,
-          module: 'schedule',
-          child: 'longLead',
+          module: "schedule",
+          child: "longLead",
+          targetFilters: {
+            status: "official",
+            source: risk.source,
+          },
           dueDate: risk.needDate,
         }),
       ),
     }),
     buildQueue({
-      key: 'overdueNcrs',
-      label: 'Overdue NCRs',
+      key: "overdueRiskMitigations",
+      label: "Overdue Risk Mitigations",
+      count: overdueRiskMitigations.length,
+      description: "Open mitigation actions past due date",
+      module: "schedule",
+      child: "risks",
+      items: overdueRiskMitigations.slice(0, ACTION_LIMIT).map((row) => {
+        const activity = row.activityLinks?.[0]?.activity;
+        return buildQueueItem({
+          id: row.id,
+          projectId: row.projectId,
+          projectName: row.project.name,
+          title: row.ref,
+          meta: `${row.owner || "Unassigned"} - ${row.description}${
+            activity
+              ? ` - ${activity.activityCode || activity.wbsCode || activity.name}`
+              : ""
+          }`,
+          severity:
+            lower(row.severity) === "critical" ? "critical" : "attention",
+          module: "schedule",
+          child: "risks",
+          targetFilters: {
+            status: "overdue",
+            source: "risk",
+          },
+          dueDate: row.dueDate,
+        });
+      }),
+    }),
+    buildQueue({
+      key: "overdueTasks",
+      label: "Overdue Tasks",
+      count: overdueTasks.length,
+      description: "Assigned project tasks past due date",
+      module: "tasks",
+      items: overdueTasks.slice(0, ACTION_LIMIT).map((row) =>
+        buildQueueItem({
+          id: row.id,
+          projectId: row.projectId,
+          projectName: row.project.name,
+          title: row.taskNumber,
+          meta: `${row.title}${row.assignee?.name ? ` - ${row.assignee.name}` : ""}`,
+          severity: row.priority === "critical" ? "critical" : "attention",
+          module: "tasks",
+          targetFilters: {
+            status: row.status,
+            source: "task",
+            taskId: row.id,
+          },
+          dueDate: row.dueDate,
+        }),
+      ),
+    }),
+    buildQueue({
+      key: "overdueNcrs",
+      label: "Overdue NCRs",
       count: overdueNcrs.length,
-      description: 'Quality records past due date',
-      module: 'quality',
-      child: 'ncr',
+      description: "Quality records past due date",
+      module: "quality",
+      child: "ncr",
       items: overdueNcrs.slice(0, ACTION_LIMIT).map((row) =>
         buildQueueItem({
           id: row.id,
@@ -804,20 +1438,53 @@ async function getWorkspaceDashboard({ orgId, userId, role }) {
           projectName: row.project.name,
           title: row.ref,
           meta: row.description || `${row.severity} NCR`,
-          severity: lower(row.severity) === 'major' ? 'critical' : 'attention',
-          module: 'quality',
-          child: 'ncr',
+          severity: lower(row.severity) === "major" ? "critical" : "attention",
+          module: "quality",
+          child: "ncr",
+          targetFilters: {
+            status: row.status,
+            source: "ncr",
+          },
           dueDate: row.dueDate,
         }),
       ),
     }),
     buildQueue({
-      key: 'overdueRfis',
-      label: 'Overdue RFIs',
+      key: "overdueSafety",
+      label: "Overdue Safety Actions",
+      count: overdueSafety.length,
+      description: "Safety investigations and closeout actions past due",
+      module: "quality",
+      child: "safety",
+      items: overdueSafety.slice(0, ACTION_LIMIT).map((row) =>
+        buildQueueItem({
+          id: row.id,
+          projectId: row.projectId,
+          projectName: row.project.name,
+          title: row.ref || row.title,
+          meta: `${row.incidentType.replaceAll("_", " ")} - ${row.title}`,
+          severity: ["fatality", "critical", "high"].includes(
+            lower(row.severity || row.incidentType),
+          )
+            ? "critical"
+            : "attention",
+          module: "quality",
+          child: "safety",
+          targetFilters: {
+            status: row.status,
+            source: "safety_incident",
+          },
+          dueDate: row.dueDate,
+        }),
+      ),
+    }),
+    buildQueue({
+      key: "overdueRfis",
+      label: "Overdue RFIs",
       count: overdueRfis.length,
-      description: 'Document-control responses past due',
-      module: 'docControl',
-      child: 'rfi',
+      description: "Document-control responses past due",
+      module: "docControl",
+      child: "rfi",
       items: overdueRfis.slice(0, ACTION_LIMIT).map((row) =>
         buildQueueItem({
           id: row.id,
@@ -825,10 +1492,39 @@ async function getWorkspaceDashboard({ orgId, userId, role }) {
           projectName: row.project.name,
           title: row.ref,
           meta: row.subject,
-          severity: 'attention',
-          module: 'docControl',
-          child: 'rfi',
+          severity: "attention",
+          module: "docControl",
+          child: "rfi",
+          targetFilters: {
+            status: row.status,
+            source: "rfi",
+          },
           dueDate: row.responseRequiredBy || row.dueDate,
+        }),
+      ),
+    }),
+    buildQueue({
+      key: "overdueSubmittals",
+      label: "Overdue Submittals",
+      count: overdueSubmittals.length,
+      description: "Submittal reviews past due date",
+      module: "docControl",
+      child: "submittals",
+      items: overdueSubmittals.slice(0, ACTION_LIMIT).map((row) =>
+        buildQueueItem({
+          id: row.id,
+          projectId: row.projectId,
+          projectName: row.project.name,
+          title: row.ref,
+          meta: row.title,
+          severity: "attention",
+          module: "docControl",
+          child: "submittals",
+          targetFilters: {
+            status: row.status,
+            source: "submittal",
+          },
+          dueDate: row.dueDate,
         }),
       ),
     }),
@@ -844,26 +1540,348 @@ async function getWorkspaceDashboard({ orgId, userId, role }) {
     .slice(0, 6);
 
   const approvalQueueCount =
-    scheduleApprovalCount + progressApprovalCount + ipcActionCount;
+    scheduleApprovalCount +
+    progressApprovalCount +
+    pendingNcrCloseouts.length +
+    pendingSafetyCloseouts.length +
+    submittedRiskCloseouts.length +
+    ipcActionCount +
+    pendingChangeOrders.length;
+  const officialCostActualRows = [...evReports.values()].reduce(
+    (sum, report) =>
+      sum + toNumber(report?.sourceSummary?.ac?.officialActualActivities),
+    0,
+  );
+  const officialCostMissingRows = [...evReports.values()].reduce(
+    (sum, report) =>
+      sum + toNumber(report?.sourceSummary?.ac?.missingActualActivities),
+    0,
+  );
+  const firstHealthProject = atRiskProjects[0] || projectHealth[0] || null;
+  const firstDelayedActivity = delayedActivities[0] || null;
+  const firstCriticalActivity = criticalActivities[0] || null;
+  const firstDocQualityProjectId =
+    overdueSafety[0]?.projectId ||
+    overdueRfis[0]?.projectId ||
+    overdueSubmittals[0]?.projectId ||
+    overdueNcrs[0]?.projectId ||
+    null;
+  const firstDocQualityChild = overdueSafety[0]
+    ? "safety"
+    : overdueRfis[0]
+      ? "rfi"
+      : overdueSubmittals[0]
+        ? "submittals"
+        : "ncr";
+  const firstDocQualityModule =
+    firstDocQualityChild === "ncr" || firstDocQualityChild === "safety"
+      ? "quality"
+      : "docControl";
+  const firstDocQualitySource = overdueSafety[0]
+    ? "safety_incident"
+    : overdueRfis[0]
+      ? "rfi"
+      : overdueSubmittals[0]
+        ? "submittal"
+        : "ncr";
+  const officialKpis = [
+    buildKpi({
+      key: "portfolioHealth",
+      label: "Portfolio Health",
+      value:
+        projectHealth.length > 0
+          ? clampScore(
+              average(
+                projectHealth.map((project) => project.overallScore),
+                60,
+              ),
+            )
+          : null,
+      unit: "score",
+      detail: "Approved EV, official workflow records, and active source data",
+      sourceRule: KPI_SOURCE_RULES.portfolioHealth,
+      cutoffDate,
+      generatedAt,
+      target: queueTarget(firstHealthProject?.id || null, "overview", null, {
+        status: "official",
+        source: "project_health",
+      }),
+    }),
+    buildKpi({
+      key: "activeProjects",
+      label: "Active Projects",
+      value: projects.filter((project) => project.status === "active").length,
+      detail: `${projects.length} visible projects`,
+      sourceRule: KPI_SOURCE_RULES.activeProjects,
+      cutoffDate,
+      generatedAt,
+      target: queueTarget(null, "projects", null, {
+        status: "active",
+        source: "project",
+      }),
+    }),
+    buildKpi({
+      key: "openTasks",
+      label: "Open Tasks",
+      value: openTasks.length,
+      detail: `${overdueTasks.length} overdue persisted tasks`,
+      sourceRule: KPI_SOURCE_RULES.openTasks,
+      cutoffDate,
+      generatedAt,
+      target: queueTarget(overdueTasks[0]?.projectId || null, "tasks", null, {
+        status: overdueTasks[0]?.status || "open",
+        source: "task",
+      }),
+    }),
+    buildKpi({
+      key: "criticalActivities",
+      label: "Critical Activities",
+      value: criticalActivities.length,
+      detail: `${delayedActivities.length} delayed by latest approved progress`,
+      sourceRule: KPI_SOURCE_RULES.criticalActivities,
+      cutoffDate,
+      generatedAt,
+      target: queueTarget(
+        firstCriticalActivity?.projectId ||
+          firstDelayedActivity?.projectId ||
+          firstHealthProject?.id ||
+          null,
+        "schedule",
+        firstCriticalActivity ? "critical" : "progress",
+        {
+          status: "official",
+          source: "activity",
+        },
+      ),
+    }),
+    buildKpi({
+      key: "costActuals",
+      label: "Official Cost Actuals",
+      value: officialCostActualRows,
+      detail: `${officialCostMissingRows} active activities missing actual-through cost`,
+      sourceRule: KPI_SOURCE_RULES.costActuals,
+      cutoffDate,
+      generatedAt,
+      target: queueTarget(firstHealthProject?.id || null, "cost", "activity", {
+        status: "official",
+        source: "cost_record.actual_through_date",
+      }),
+    }),
+    buildKpi({
+      key: "procurementAtRisk",
+      label: "Procurement Risks",
+      value: procurementSummary.atRiskItems,
+      detail: "Draft, rejected, cancelled, and void records excluded",
+      sourceRule: KPI_SOURCE_RULES.procurementAtRisk,
+      cutoffDate,
+      generatedAt,
+      target: queueTarget(
+        procurementSummary.topRisks[0]?.projectId ||
+          firstHealthProject?.id ||
+          null,
+        "schedule",
+        "longLead",
+        {
+          status: "official",
+          source: procurementSummary.topRisks[0]?.source || "procurement",
+        },
+      ),
+    }),
+    buildKpi({
+      key: "overdueDocQuality",
+      label: "Overdue QA/Safety/Docs",
+      value:
+        overdueNcrs.length +
+        overdueSafety.length +
+        overdueRfis.length +
+        overdueSubmittals.length,
+      detail: "Open overdue NCR, safety, RFI, and active submittal records",
+      sourceRule: KPI_SOURCE_RULES.overdueDocQuality,
+      cutoffDate,
+      generatedAt,
+      target: queueTarget(
+        firstDocQualityProjectId,
+        firstDocQualityModule,
+        firstDocQualityChild,
+        {
+          status:
+            firstDocQualityChild === "safety"
+              ? overdueSafety[0]?.status || "open"
+              : "open",
+          source: firstDocQualitySource,
+        },
+      ),
+    }),
+  ];
+  const pendingReviewMetrics = [
+    buildPendingMetric({
+      key: "scheduleApprovals",
+      label: "Schedule revisions",
+      count: scheduleApprovalCount,
+      detail: "Under review",
+      source: "schedule_revision",
+      cutoffDate,
+      target: queueTarget(
+        scheduleApprovals[0]?.projectId || null,
+        "schedule",
+        "revisions",
+        {
+          status: "under_review",
+          source: "schedule_revision",
+        },
+      ),
+    }),
+    buildPendingMetric({
+      key: "progressApprovals",
+      label: "Progress submissions",
+      count: progressApprovalCount,
+      detail: "Submitted progress, daily reports, and site diaries",
+      source: "progress_submission",
+      cutoffDate,
+      target: queueTarget(
+        progressSubmissions[0]?.projectId || null,
+        "schedule",
+        "progress",
+        {
+          status: "submitted",
+          source: "progress_submission",
+        },
+      ),
+    }),
+    buildPendingMetric({
+      key: "ipcActions",
+      label: "IPC/payment actions",
+      count: ipcActionCount,
+      detail: "Submitted IPC plus certified payment/retention follow-up",
+      source: "ipc_certificate",
+      cutoffDate,
+      target: queueTarget(
+        ipcCertificates[0]?.projectId ||
+          ipcPaymentCertificates[0]?.projectId ||
+          null,
+        "commercial",
+        "ipc",
+        {
+          status: "submitted",
+          source: "ipc_certificate",
+        },
+      ),
+    }),
+    buildPendingMetric({
+      key: "changeOrders",
+      label: "Change orders",
+      count: pendingChangeOrders.length,
+      detail: "Pending PM approval",
+      source: "change_order",
+      cutoffDate,
+      target: queueTarget(
+        pendingChangeOrders[0]?.projectId || null,
+        "commercial",
+        "change-orders",
+        {
+          status: "pending",
+          source: "change_order",
+        },
+      ),
+    }),
+    buildPendingMetric({
+      key: "riskCloseouts",
+      label: "Risk closeouts",
+      count: submittedRiskCloseouts.length,
+      detail: "Submitted mitigation closeouts",
+      source: "risk",
+      cutoffDate,
+      target: queueTarget(
+        submittedRiskCloseouts[0]?.projectId || null,
+        "schedule",
+        "risks",
+        {
+          status: "submitted",
+          source: "risk",
+        },
+      ),
+    }),
+    buildPendingMetric({
+      key: "qaSafetyCloseouts",
+      label: "QA/safety closeouts",
+      count: pendingNcrCloseouts.length + pendingSafetyCloseouts.length,
+      detail: "Submitted NCR and safety closeouts",
+      source: "ncr,safety_incident",
+      cutoffDate,
+      target: queueTarget(
+        pendingNcrCloseouts[0]?.projectId ||
+          pendingSafetyCloseouts[0]?.projectId ||
+          null,
+        "quality",
+        pendingSafetyCloseouts[0] && !pendingNcrCloseouts[0] ? "safety" : "ncr",
+        {
+          status: "submitted",
+          source:
+            pendingSafetyCloseouts[0] && !pendingNcrCloseouts[0]
+              ? "safety_incident"
+              : "ncr",
+        },
+      ),
+    }),
+    buildPendingMetric({
+      key: "submittals",
+      label: "Submittal reviews",
+      count: pendingSubmittals.length,
+      detail: "Pending, under review, or resubmit",
+      source: "submittal",
+      cutoffDate,
+      target: queueTarget(
+        pendingSubmittals[0]?.projectId || null,
+        "docControl",
+        "submittals",
+        {
+          status: pendingSubmittals[0]?.status || "under_review",
+          source: "submittal",
+        },
+      ),
+    }),
+  ];
 
   return {
-    generatedAt: new Date().toISOString(),
+    generatedAt,
+    dataFreshness: {
+      generatedAt,
+      cutoffDate,
+      sourceUpdatedAt,
+      note: "Official KPI cards use approved or active source records through cutoff; pending-review metrics are displayed separately.",
+    },
+    kpiSourceRules: KPI_SOURCE_RULES,
     summary: {
       totalProjects: projects.length,
-      activeProjects: projects.filter((project) => project.status === 'active')
+      activeProjects: projects.filter((project) => project.status === "active")
         .length,
       totalContractValue: projects.reduce(
         (sum, project) => sum + toNumber(project.contractValue),
         0,
       ),
       portfolioHealthScore: clampScore(
-        average(projectHealth.map((project) => project.overallScore), 60),
+        average(
+          projectHealth.map((project) => project.overallScore),
+          60,
+        ),
       ),
       delayedActivities: delayedActivities.length,
       criticalActivities: criticalActivities.length,
       approvalQueueCount,
       procurementAtRisk: procurementSummary.atRiskItems,
-      overdueNcrRfi: overdueNcrs.length + overdueRfis.length,
+      overdueNcrRfi:
+        overdueNcrs.length +
+        overdueSafety.length +
+        overdueRfis.length +
+        overdueSubmittals.length,
+      openTasks: openTasks.length,
+      overdueTasks: overdueTasks.length,
+    },
+    officialKpis,
+    pendingReview: {
+      total: pendingReviewMetrics.reduce((sum, item) => sum + item.count, 0),
+      metrics: pendingReviewMetrics,
+      sourceRule: KPI_SOURCE_RULES.pendingReview,
     },
     healthDimensions,
     workflowQueues,

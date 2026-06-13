@@ -47,7 +47,12 @@ SET
     0,
     COALESCE(link."scheduleImpactDays", 0) - GREATEST(0, COALESCE(link."floatImpactDays", activity."totalFloat", 0))
   ),
-  "costImpact" = COALESCE(allocations."amount", 0),
+  "costImpact" = COALESCE((
+    SELECT SUM(coa."amount")
+    FROM "ChangeOrderAllocationLink" coa
+    WHERE coa."projectId" = link."projectId"
+      AND coa."changeOrderId" = link."changeOrderId"
+  ), 0),
   "cpmSnapshotJson" = jsonb_build_object(
     'totalFloat', activity."totalFloat",
     'isCritical', activity."isCritical",
@@ -58,16 +63,15 @@ SET
       0,
       COALESCE(link."scheduleImpactDays", 0) - GREATEST(0, COALESCE(link."floatImpactDays", activity."totalFloat", 0))
     ),
-    'costImpact', COALESCE(allocations."amount", 0),
+    'costImpact', COALESCE((
+      SELECT SUM(coa."amount")
+      FROM "ChangeOrderAllocationLink" coa
+      WHERE coa."projectId" = link."projectId"
+        AND coa."changeOrderId" = link."changeOrderId"
+    ), 0),
     'backfill', true
   )
 FROM "Activity" activity
-LEFT JOIN LATERAL (
-  SELECT COALESCE(SUM(coa."amount"), 0) AS "amount"
-  FROM "ChangeOrderAllocationLink" coa
-  WHERE coa."projectId" = link."projectId"
-    AND coa."changeOrderId" = link."changeOrderId"
-) allocations ON true
 WHERE activity."id" = link."activityId"
   AND activity."projectId" = link."projectId";
 

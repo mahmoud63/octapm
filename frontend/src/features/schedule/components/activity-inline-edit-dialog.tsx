@@ -45,8 +45,14 @@ interface Props {
 const RELATIONSHIP_OPTIONS: DependencyRelationship[] = ['FS', 'SS', 'FF', 'SF']
 
 function activityLabel(activity: ScheduleActivity) {
-  const ref = activity.p6ActivityId || activity.wbsCode || activity.id.slice(0, 8)
+  const ref =
+    activity.activityCode || activity.p6ActivityId || activity.id.slice(0, 8)
   return `${ref} - ${activity.name}`
+}
+
+const formatLag = (lagDays: number) => {
+  if (!lagDays) return '0'
+  return lagDays > 0 ? `+${lagDays}` : String(lagDays)
 }
 
 export function ActivityInlineEditDialog({
@@ -76,6 +82,19 @@ export function ActivityInlineEditDialog({
     () => activities.filter((item) => item.id !== activity?.id),
     [activities, activity?.id]
   )
+
+  const successorRows = useMemo(() => {
+    if (!activity) return []
+    return activities.flatMap((item) =>
+      (item.dependencies ?? [])
+        .filter((dependency) => dependency.predecessorId === activity.id)
+        .map((dependency) => ({
+          successor: item,
+          relationshipType: dependency.relationshipType,
+          lagDays: dependency.lagDays,
+        }))
+    )
+  }, [activities, activity])
 
   const duplicatePredecessors = useMemo(() => {
     const seen = new Set<string>()
@@ -191,7 +210,7 @@ export function ActivityInlineEditDialog({
 
           <div className='grid gap-2'>
             <div className='flex items-center justify-between gap-3'>
-              <Label>Dependencies</Label>
+              <Label>Relationship Grid</Label>
               <Button
                 type='button'
                 variant='outline'
@@ -209,6 +228,9 @@ export function ActivityInlineEditDialog({
             </div>
 
             <div className='grid gap-2'>
+              <p className='text-xs font-medium text-muted-foreground'>
+                Predecessors
+              </p>
               {dependencies.map((dependency, index) => (
                 <div
                   key={`${dependency.predecessorId}-${index}`}
@@ -286,6 +308,33 @@ export function ActivityInlineEditDialog({
                 Select each predecessor once.
               </p>
             )}
+
+            <div className='grid gap-2 pt-1'>
+              <p className='text-xs font-medium text-muted-foreground'>
+                Successors
+              </p>
+              {successorRows.map((row) => (
+                <div
+                  key={`${row.successor.id}-${row.relationshipType}-${row.lagDays}`}
+                  className='grid gap-2 rounded-md border bg-muted/20 p-2 text-sm sm:grid-cols-[1fr_78px_92px]'
+                >
+                  <span className='min-w-0 truncate'>
+                    {activityLabel(row.successor)}
+                  </span>
+                  <span className='font-mono text-xs'>
+                    {row.relationshipType}
+                  </span>
+                  <span className='font-mono text-xs'>
+                    Lag {formatLag(row.lagDays)}d
+                  </span>
+                </div>
+              ))}
+              {successorRows.length === 0 && (
+                <div className='rounded-md border border-dashed px-3 py-2 text-sm text-muted-foreground'>
+                  No successors
+                </div>
+              )}
+            </div>
           </div>
 
           <div className='flex items-center gap-2'>

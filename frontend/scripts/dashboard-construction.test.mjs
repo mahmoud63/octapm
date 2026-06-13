@@ -10,43 +10,54 @@ const projectRoute = read('src/routes/_authenticated/projects/$projectId.tsx')
 const projectPage = read(
   'src/features/projects/components/project-detail-page.tsx'
 )
-const projectDetail = read('src/features/projects/components/project-detail.tsx')
-const workspaceService = read('../backend/src/services/workspace-dashboard.service.js')
+const projectDetail = read(
+  'src/features/projects/components/project-detail.tsx'
+)
+const workspaceService = read(
+  '../backend/src/services/workspace-dashboard.service.js'
+)
 
 assert.match(
   dashboard,
   /\/projects\/workspace-dashboard/,
   'dashboard loads the workspace aggregate endpoint'
 )
-
 ;[
   'Portfolio Health',
   'Active Projects',
   'Critical Activities',
   'Approval Queue',
   'Procurement Risks',
-  'Overdue NCR/RFI',
+  'Overdue QA/Safety/Docs',
   'Workflow Queues',
   'Health Dimensions',
   'Project Health Watchlist',
+  'Official KPIs',
+  'Pending Review',
+  'Source:',
+  'Cutoff:',
 ].forEach((label) => {
   assert.ok(dashboard.includes(label), `dashboard includes ${label}`)
 })
-
 ;[
   'Schedule approvals',
   'Progress approvals',
   'IPC actions',
+  'Change order review',
+  'Risk closeout review',
+  'QA/Safety closeout review',
   'Procurement risks',
+  'Overdue Risk Mitigations',
   'Overdue NCRs',
+  'Overdue Safety Actions',
   'Overdue RFIs',
+  'Overdue Submittals',
 ].forEach((label) => {
   assert.ok(
     workspaceService.includes(label),
     `workspace endpoint includes queue ${label}`
   )
 })
-
 ;[
   ['Total', 'Revenue'].join(' '),
   ['Sub', 'scriptions'].join(''),
@@ -76,14 +87,32 @@ assert.ok(
   'project detail applies dashboard module targets'
 )
 assert.ok(
-  dashboard.includes('search={{ module: item.target.module') &&
-    workspaceService.includes("module: 'schedule'") &&
-    workspaceService.includes("child: 'revisions'") &&
-    workspaceService.includes("child: 'progress'") &&
-    workspaceService.includes("module: 'commercial'") &&
-    workspaceService.includes("module: 'quality'") &&
-    workspaceService.includes("module: 'docControl'"),
+  dashboard.includes('targetSearch(target)') &&
+    dashboard.includes('recordId: target.recordId') &&
+    workspaceService.includes('module: "schedule"') &&
+    workspaceService.includes('child: "revisions"') &&
+    workspaceService.includes('child: "progress"') &&
+    workspaceService.includes('module: "commercial"') &&
+    workspaceService.includes('child: "change-orders"') &&
+    workspaceService.includes('source: "cost_record.actual_through_date"') &&
+    workspaceService.includes('module: "quality"') &&
+    workspaceService.includes('module: "docControl"') &&
+    workspaceService.includes('child: "risks"') &&
+    workspaceService.includes('source: "risk"'),
   'dashboard queue links target construction modules'
+)
+assert.ok(
+  workspaceService.includes('officialKpis') &&
+    workspaceService.includes('pendingReview') &&
+    workspaceService.includes('kpiSourceRules') &&
+    workspaceService.includes('cutoffDate'),
+  'workspace endpoint exposes official KPI source rules and cutoff freshness'
+)
+assert.ok(
+  dashboard.includes('data.pendingReview?.metrics') &&
+    dashboard.includes("sourceStatus === 'pending-review'") &&
+    dashboard.includes('formatCutoff'),
+  'dashboard visually separates pending-review metrics from official KPIs'
 )
 
 console.log('Dashboard construction assertions passed')

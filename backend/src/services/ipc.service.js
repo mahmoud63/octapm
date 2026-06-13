@@ -1,5 +1,6 @@
 const { prisma } = require("../config/db");
 const { HttpError } = require("../utils/http-error");
+const { normalizeRoleId } = require("../config/permissions");
 const {
   addMoney,
   divideMoney,
@@ -346,6 +347,7 @@ const assertApprovedProgressBasis = ({
   progress,
   cumulativeCert,
   amountLimit = null,
+  allowOverride = false,
 }) => {
   if (!allocation || Number(cumulativeCert) <= MONEY_EPSILON) return;
   if (!progress) {
@@ -357,13 +359,222 @@ const assertApprovedProgressBasis = ({
   }
 
   const cap = approvedProgressCap({ allocation, progress, amountLimit });
-  if (cap !== null && Number(cumulativeCert) > cap + MONEY_EPSILON) {
+  if (
+    cap !== null &&
+    Number(cumulativeCert) > cap + MONEY_EPSILON &&
+    !allowOverride
+  ) {
     throw new HttpError(
       400,
       "IPC_APPROVED_PROGRESS_EXCEEDED",
       "IPC cumulative certification cannot exceed approved progress on the linked allocation",
     );
   }
+};
+
+const assertIpcItemWithinApprovedLimit = ({
+  limit,
+  qty,
+  cumulativeCert,
+  allowOverride = false,
+}) => {
+  if (!limit || allowOverride) return;
+
+  if (Number(qty) > Number(limit.quantity || 0) + QTY_EPSILON) {
+    throw new HttpError(
+      400,
+      "IPC_ALLOCATION_QTY_EXCEEDED",
+      "IPC quantity cannot exceed the approved BOQ allocation plus approved variation quantity",
+    );
+  }
+  if (Number(cumulativeCert) > toMoneyNumber(limit.amount) + MONEY_EPSILON) {
+    throw new HttpError(
+      400,
+      "IPC_ALLOCATION_AMOUNT_EXCEEDED",
+      "IPC cumulative certification cannot exceed approved BOQ allocation and approved variation value",
+    );
+  }
+};
+
+const assertApprovedActiveAllocation = (allocation) => {
+  if (!allocation) return;
+
+  if (allocation.status !== "approved" || allocation.isActive !== true) {
+    throw new HttpError(
+      409,
+      "IPC_ALLOCATION_NOT_APPROVED",
+      "IPC certification can only use approved active BOQ allocations",
+    );
+  }
+};
+
+const buildIpcItemCertificationReview = async ({
+  tx,
+  projectId,
+  item,
+  previousCert = null,
+}) => {
+  const allocation = item.allocation || null;
+  const currentCert = toMoneyNumber(item.currentCert);
+  const resolvedPreviousCert =
+    previousCert === null || previousCert === undefined
+      ? toMoneyNumber(item.previousCert)
+      : toMoneyNumber(previousCert);
+  const cumulativeCert = addMoney(resolvedPreviousCert, currentCert);
+
+  if (!allocation) {
+    return {
+      currentClaimedAmount: currentCert,
+      previousCertifiedAmount: resolvedPreviousCert,
+      cumulativeCertifiedAmount: cumulativeCert,
+      earnedAmount: 0,
+      approvedLimitAmount: 0,
+      approvedLimitQuantity: 0,
+      approvedVariationAmount: 0,
+      approvedVariationQuantity: 0,
+      overEarnedAmount: currentCert > MONEY_EPSILON ? currentCert : 0,
+      overApprovedLimitAmount: 0,
+      overApprovedQuantity: 0,
+      latestApprovedProgressId: null,
+      latestApprovedPctComplete: null,
+      requiresOverride: currentCert > MONEY_EPSILON,
+      missingProgressEvidence: currentCert > MONEY_EPSILON,
+    };
+  }
+
+  const [limit, progress] = await Promise.all([
+    getCertificationLimit({
+      tx,
+      projectId,
+      allocation,
+      boqItemId: item.boqItemId,
+    }),
+    findLatestApprovedProgress(tx, allocation.activityId),
+  ]);
+
+  const approvedLimitAmount = toMoneyNumber(limit?.amount || 0);
+  const approvedLimitQuantity = Number(limit?.quantity || 0);
+  const earnedAmount = progress
+    ? approvedProgressCap({
+        allocation,
+        progress,
+        amountLimit: approvedLimitAmount,
+      })
+    : 0;
+  const overApprovedLimitAmount = Math.max(
+    0,
+    subtractMoney(cumulativeCert, approvedLimitAmount),
+  );
+  const overEarnedAmount = Math.max(0, subtractMoney(cumulativeCert, earnedAmount));
+  const overApprovedQuantity = Math.max(
+    0,
+    (Number(item.qty) || 0) - approvedLimitQuantity,
+  );
+
+  return {
+    currentClaimedAmount: currentCert,
+    previousCertifiedAmount: resolvedPreviousCert,
+    cumulativeCertifiedAmount: cumulativeCert,
+    earnedAmount,
+    approvedLimitAmount,
+    approvedLimitQuantity,
+    approvedVariationAmount: toMoneyNumber(limit?.variationAmount || 0),
+    approvedVariationQuantity: Number(limit?.variationQuantity || 0),
+    overEarnedAmount,
+    overApprovedLimitAmount,
+    overApprovedQuantity,
+    latestApprovedProgressId: progress?.id || null,
+    latestApprovedPctComplete:
+      progress?.pctComplete === null || progress?.pctComplete === undefined
+        ? null
+        : Number(progress.pctComplete),
+    requiresOverride:
+      overApprovedLimitAmount > MONEY_EPSILON ||
+      overEarnedAmount > MONEY_EPSILON ||
+      overApprovedQuantity > QTY_EPSILON,
+    missingProgressEvidence: currentCert > MONEY_EPSILON && !progress,
+  };
+};
+
+const summarizeIpcCertificationReview = (itemReviews) => {
+  const totals = itemReviews.reduce(
+    (acc, review) => {
+      acc.currentClaimedAmount = addMoney(
+        acc.currentClaimedAmount,
+        review.currentClaimedAmount,
+      );
+      acc.previousCertifiedAmount = addMoney(
+        acc.previousCertifiedAmount,
+        review.previousCertifiedAmount,
+      );
+      acc.cumulativeCertifiedAmount = addMoney(
+        acc.cumulativeCertifiedAmount,
+        review.cumulativeCertifiedAmount,
+      );
+      acc.earnedAmount = addMoney(acc.earnedAmount, review.earnedAmount);
+      acc.approvedLimitAmount = addMoney(
+        acc.approvedLimitAmount,
+        review.approvedLimitAmount,
+      );
+      acc.overEarnedAmount = addMoney(
+        acc.overEarnedAmount,
+        review.overEarnedAmount,
+      );
+      acc.overApprovedLimitAmount = addMoney(
+        acc.overApprovedLimitAmount,
+        review.overApprovedLimitAmount,
+      );
+      acc.overApprovedQuantity += Number(review.overApprovedQuantity) || 0;
+      if (review.requiresOverride) acc.overrideLineCount += 1;
+      if (review.missingProgressEvidence) acc.missingProgressEvidenceCount += 1;
+      return acc;
+    },
+    {
+      currentClaimedAmount: 0,
+      previousCertifiedAmount: 0,
+      cumulativeCertifiedAmount: 0,
+      earnedAmount: 0,
+      approvedLimitAmount: 0,
+      overEarnedAmount: 0,
+      overApprovedLimitAmount: 0,
+      overApprovedQuantity: 0,
+      overrideLineCount: 0,
+      missingProgressEvidenceCount: 0,
+    },
+  );
+
+  return {
+    ...totals,
+    requiresPmOverride: totals.overrideLineCount > 0,
+    hasMissingProgressEvidence: totals.missingProgressEvidenceCount > 0,
+  };
+};
+
+const enrichIpcCertificateReview = async ({ tx = prisma, projectId, certificate }) => {
+  if (!certificate?.items?.length) {
+    return {
+      ...certificate,
+      certificationReview: summarizeIpcCertificationReview([]),
+    };
+  }
+
+  const items = [];
+  const reviews = [];
+  for (const item of certificate.items) {
+    const review = await buildIpcItemCertificationReview({
+      tx,
+      projectId,
+      item,
+    });
+    reviews.push(review);
+    items.push({ ...item, certificationReview: review });
+  }
+
+  return {
+    ...certificate,
+    items,
+    certificationReview: summarizeIpcCertificationReview(reviews),
+  };
 };
 
 const syncIpcProgressLink = async ({
@@ -424,9 +635,13 @@ const getIpcPeriod = async ({ orgId, projectId, period }) => {
           allocation: {
             select: {
               id: true,
+              boqItemId: true,
+              activityId: true,
               quantity: true,
               amount: true,
               weight: true,
+              status: true,
+              isActive: true,
               activity: {
                 select: {
                   id: true,
@@ -462,7 +677,7 @@ const getIpcPeriod = async ({ orgId, projectId, period }) => {
     throw new HttpError(404, "IPC_PERIOD_NOT_FOUND", "IPC period not found");
   }
 
-  return certificate;
+  return enrichIpcCertificateReview({ projectId, certificate });
 };
 
 const createIpcPeriod = async ({
@@ -491,7 +706,12 @@ const createIpcPeriod = async ({
   }
 
   const allocations = await prisma.activityBoqAllocation.findMany({
-    where: { projectId, status: "approved", isActive: true },
+    where: {
+      projectId,
+      status: "approved",
+      isActive: true,
+      activity: { isActive: true },
+    },
     include: {
       boqItem: true,
       activity: {
@@ -607,6 +827,7 @@ const updateIpcItem = async ({ orgId, projectId, period, itemId, payload }) => {
   if (!existing) {
     throw new HttpError(404, "IPC_ITEM_NOT_FOUND", "IPC item not found");
   }
+  assertApprovedActiveAllocation(existing.allocation);
 
   const qty = Number(payload.qty ?? existing.qty) || 0;
   const rate = toMoneyNumber(payload.rate ?? existing.rate);
@@ -618,47 +839,28 @@ const updateIpcItem = async ({ orgId, projectId, period, itemId, payload }) => {
   const netPayable = subtractMoney(currentCert, retention);
   const cumulativeCert = addMoney(existing.previousCert, currentCert);
 
-  if (existing.allocation) {
-    const limit = await getCertificationLimit({
-      tx: prisma,
-      projectId,
-      allocation: existing.allocation,
-      boqItemId: existing.boqItemId,
-    });
+  const [certificationLimit, latestProgress] = existing.allocation
+    ? await Promise.all([
+        getCertificationLimit({
+          tx: prisma,
+          projectId,
+          allocation: existing.allocation,
+          boqItemId: existing.boqItemId,
+        }),
+        findLatestApprovedProgress(prisma, existing.allocation.activityId),
+      ])
+    : [null, null];
 
-    if (qty > Number(limit.quantity || 0) + QTY_EPSILON) {
-      throw new HttpError(
-        400,
-        "IPC_ALLOCATION_QTY_EXCEEDED",
-        "IPC quantity cannot exceed the approved BOQ allocation plus approved variation quantity",
-      );
-    }
-
-    if (cumulativeCert > toMoneyNumber(limit.amount) + MONEY_EPSILON) {
-      throw new HttpError(
-        400,
-        "IPC_ALLOCATION_AMOUNT_EXCEEDED",
-        "IPC cumulative certification cannot exceed approved BOQ allocation and approved variation value",
-      );
-    }
-  }
-
-  const latestProgress = existing.allocation
-    ? await findLatestApprovedProgress(prisma, existing.allocation.activityId)
-    : null;
-  const limit = existing.allocation
-    ? await getCertificationLimit({
-        tx: prisma,
-        projectId,
-        allocation: existing.allocation,
-        boqItemId: existing.boqItemId,
-      })
-    : null;
+  assertIpcItemWithinApprovedLimit({
+    limit: certificationLimit,
+    qty,
+    cumulativeCert,
+  });
   assertApprovedProgressBasis({
     allocation: existing.allocation,
     progress: latestProgress,
     cumulativeCert,
-    amountLimit: limit?.amount ?? null,
+    amountLimit: certificationLimit?.amount ?? null,
   });
 
   const updatedItem = await prisma.$transaction(async (tx) => {
@@ -856,6 +1058,7 @@ const certifyIpcPeriod = async ({
   userId = null,
   userRole = null,
   comment = null,
+  overrideReason = null,
 }) => {
   await ensureProject({ orgId, projectId });
 
@@ -875,19 +1078,59 @@ const certifyIpcPeriod = async ({
 
   return prisma.$transaction(async (tx) => {
     const now = new Date();
+    const normalizedOverrideReason = trimOrNull(overrideReason);
+    const normalizedRole = normalizeRoleId(userRole);
     const items = await tx.ipcItem.findMany({
       where: { projectId, ipcPeriod: period },
       include: { allocation: true },
     });
 
-    let progressLinkCount = 0;
+    const reviewedItems = [];
     for (const item of items) {
+      assertApprovedActiveAllocation(item.allocation);
       const previousCert = await getPreviousCertifiedAmount({
         tx,
         projectId,
         item,
       });
-      const cumulativeCert = addMoney(previousCert, item.currentCert);
+      const review = await buildIpcItemCertificationReview({
+        tx,
+        projectId,
+        item,
+        previousCert,
+      });
+      reviewedItems.push({
+        item,
+        previousCert,
+        cumulativeCert: review.cumulativeCertifiedAmount,
+        review,
+      });
+    }
+
+    const certificationReview = summarizeIpcCertificationReview(
+      reviewedItems.map(({ review }) => review),
+    );
+    const requiresOverride = certificationReview.requiresPmOverride;
+    if (requiresOverride && !normalizedOverrideReason) {
+      throw new HttpError(
+        400,
+        "IPC_PM_OVERRIDE_REASON_REQUIRED",
+        "A PM override reason is required when IPC certification exceeds earned or approved value",
+        certificationReview,
+      );
+    }
+    if (requiresOverride && normalizedRole !== "pm") {
+      throw new HttpError(
+        403,
+        "IPC_PM_OVERRIDE_REQUIRED",
+        "Only a Project Manager can certify an IPC period with over-limit values",
+        certificationReview,
+      );
+    }
+    const allowOverride = requiresOverride && normalizedRole === "pm";
+
+    let progressLinkCount = 0;
+    for (const { item, previousCert, cumulativeCert } of reviewedItems) {
       const limit = item.allocation
         ? await getCertificationLimit({
             tx,
@@ -896,26 +1139,12 @@ const certifyIpcPeriod = async ({
             boqItemId: item.boqItemId,
           })
         : null;
-      if (
-        limit &&
-        Number(item.qty) > Number(limit.quantity || 0) + QTY_EPSILON
-      ) {
-        throw new HttpError(
-          400,
-          "IPC_ALLOCATION_QTY_EXCEEDED",
-          "IPC quantity cannot exceed the approved BOQ allocation plus approved variation quantity",
-        );
-      }
-      if (
-        limit &&
-        cumulativeCert > toMoneyNumber(limit.amount) + MONEY_EPSILON
-      ) {
-        throw new HttpError(
-          400,
-          "IPC_ALLOCATION_AMOUNT_EXCEEDED",
-          "IPC cumulative certification cannot exceed approved BOQ allocation and approved variation value",
-        );
-      }
+      assertIpcItemWithinApprovedLimit({
+        limit,
+        qty: item.qty,
+        cumulativeCert,
+        allowOverride,
+      });
       const latestProgress = item.allocation
         ? await findLatestApprovedProgress(tx, item.allocation.activityId)
         : null;
@@ -924,6 +1153,7 @@ const certifyIpcPeriod = async ({
         progress: latestProgress,
         cumulativeCert,
         amountLimit: limit?.amount ?? null,
+        allowOverride,
       });
       if (previousCert !== toMoneyNumber(item.previousCert)) {
         await tx.ipcItem.update({
@@ -969,6 +1199,17 @@ const certifyIpcPeriod = async ({
         certifiedBy: userId || null,
         certifiedAt: now,
         certificationComment: comment?.trim() || null,
+        earnedValueAtCertification: certificationReview.earnedAmount,
+        approvedLimitAtCertification: certificationReview.approvedLimitAmount,
+        overCertificationAmount: Math.max(
+          certificationReview.overApprovedLimitAmount,
+          certificationReview.overEarnedAmount,
+        ),
+        certificationOverrideReason: requiresOverride
+          ? normalizedOverrideReason
+          : null,
+        certificationOverrideBy: requiresOverride ? userId || null : null,
+        certificationOverrideAt: requiresOverride ? now : null,
         balanceDue: certificate.netPayable,
         paymentStatus: "unpaid",
         retentionStatus:
@@ -1012,6 +1253,8 @@ const certifyIpcPeriod = async ({
         totalRet: updated.totalRet,
         netPayable: updated.netPayable,
         progressLinks: progressLinkCount,
+        certificationReview,
+        overrideReason: requiresOverride ? normalizedOverrideReason : null,
       },
     });
     await approvalWorkflowService.recordTransition({
@@ -1031,6 +1274,8 @@ const certifyIpcPeriod = async ({
         totalRet: updated.totalRet,
         netPayable: updated.netPayable,
         progressLinks: progressLinkCount,
+        certificationReview,
+        overrideReason: requiresOverride ? normalizedOverrideReason : null,
       },
     });
 

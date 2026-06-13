@@ -18,6 +18,10 @@ router.get(
     query('entityType').optional().isString().trim().isLength({ max: 80 }),
     query('entityId').optional().isString().trim().isLength({ max: 120 }),
     query('action').optional().isString().trim().isLength({ max: 80 }),
+    query('source')
+      .optional()
+      .isIn(['all', 'audit', 'approval', 'status'])
+      .withMessage('source must be all, audit, approval, or status'),
     query('cursor').optional().isString().trim().isLength({ max: 120 }),
     query('limit').optional().isInt({ min: 1, max: 100 }).toInt(),
     query('order').optional().isIn(['asc', 'desc']),
@@ -30,6 +34,7 @@ router.get(
       entityType: req.query.entityType || null,
       entityId: req.query.entityId || null,
       action: req.query.action || null,
+      source: req.query.source || 'all',
       cursor: req.query.cursor || null,
       limit: req.query.limit || 50,
       order: req.query.order || 'asc',

@@ -11,6 +11,9 @@ const mockPrisma = {
     findFirst: jest.fn(),
     create: jest.fn(),
   },
+  dailyReport: {
+    findFirst: jest.fn(),
+  },
   procurementOrder: {
     findMany: jest.fn(),
     findFirst: jest.fn(),
@@ -83,6 +86,7 @@ beforeEach(() => {
   jest.clearAllMocks();
   mockPrisma.project.findFirst.mockResolvedValue(project);
   mockPrisma.activity.findFirst.mockResolvedValue(activity);
+  mockPrisma.dailyReport.findFirst.mockResolvedValue(null);
   mockPrisma.auditEvent.create.mockResolvedValue({
     id: 'audit-1',
     orgId: 'org-1',
@@ -99,6 +103,57 @@ beforeEach(() => {
 });
 
 describe('procurement service material workflow controls', () => {
+  test('derives package required-on-site and latest-order dates from linked activity', async () => {
+    mockPrisma.procurementSupplier.findFirst.mockResolvedValue(null);
+    mockPrisma.procurementPackage.create.mockResolvedValue({
+      id: 'pkg-1',
+      projectId: 'project-1',
+      supplierId: null,
+      activityId: activity.id,
+      packageNumber: 'PKG-001',
+      title: 'Switchgear package',
+      status: 'planning',
+      requiredTiming: 'activity_start',
+      needOffsetDays: 5,
+      leadWeeks: 8,
+      bufferDays: 10,
+      requiredOnSiteDate: new Date('2026-07-27T00:00:00.000Z'),
+      latestOrderDate: new Date('2026-05-22T00:00:00.000Z'),
+    });
+    mockPrisma.procurementLeadTimeAlert.findFirst.mockResolvedValue(null);
+    mockPrisma.procurementLeadTimeAlert.create.mockResolvedValue({
+      id: 'alert-1',
+      status: 'open',
+    });
+
+    const row = await procurementService.createPackage({
+      orgId: 'org-1',
+      projectId: 'project-1',
+      actor: { id: 'proc-1', role: 'procurement' },
+      payload: {
+        packageNumber: 'PKG-001',
+        title: 'Switchgear package',
+        activityId: activity.id,
+        requiredTiming: 'activity_start',
+        needOffsetDays: 5,
+        leadWeeks: 8,
+        bufferDays: 10,
+      },
+    });
+
+    expect(mockPrisma.procurementPackage.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          requiredOnSiteDate: new Date('2026-07-27T00:00:00.000Z'),
+          latestOrderDate: new Date('2026-05-22T00:00:00.000Z'),
+        }),
+      }),
+    );
+    expect(row.procurementRisk.orderByDate).toEqual(
+      new Date('2026-05-22T00:00:00.000Z'),
+    );
+  });
+
   test('requires every PO line to be linked to an activity', async () => {
     await expect(
       procurementService.createPurchaseOrder({
@@ -280,6 +335,119 @@ describe('procurement service material workflow controls', () => {
       expect.objectContaining({
         where: { id: 'po-1' },
         data: expect.objectContaining({ status: 'partial' }),
+      }),
+    );
+  });
+
+  test('links material usage to the matching daily report for traceability', async () => {
+    mockPrisma.activityMaterial.findFirst.mockResolvedValue({
+      id: 'mat-1',
+      projectId: 'project-1',
+      activityId: activity.id,
+      name: 'Rebar',
+      issuedQty: 40,
+      consumedQty: 10,
+      wasteQty: 0,
+    });
+    mockPrisma.dailyReport.findFirst.mockResolvedValue({
+      id: 'report-1',
+      projectId: 'project-1',
+      activityId: activity.id,
+      status: 'approved',
+    });
+    mockPrisma.activityMaterialUsage.create.mockResolvedValue({
+      id: 'usage-1',
+      dailyReportId: 'report-1',
+      usedQty: 5,
+      wasteQty: 0,
+    });
+    mockPrisma.activityMaterial.update.mockResolvedValue({
+      id: 'mat-1',
+      consumedQty: 15,
+      wasteQty: 0,
+      status: 'issued',
+    });
+
+    await procurementService.recordActivityMaterialUsage({
+      orgId: 'org-1',
+      projectId: 'project-1',
+      activityId: activity.id,
+      materialId: 'mat-1',
+      actor: { id: 'site-1', role: 'site_engineer' },
+      payload: { usedQty: 5, wasteQty: 0, dailyReportId: 'report-1' },
+    });
+
+    expect(mockPrisma.activityMaterialUsage.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          dailyReportId: 'report-1',
+          activityId: activity.id,
+        }),
+      }),
+    );
+  });
+
+  test('resolves lead-time alerts with audited workflow metadata', async () => {
+    mockPrisma.procurementLeadTimeAlert.findFirst.mockResolvedValue({
+      id: 'alert-1',
+      projectId: 'project-1',
+      activityId: activity.id,
+      packageId: 'pkg-1',
+      poLineId: null,
+      activityMaterialId: null,
+      status: 'acknowledged',
+      severity: 'critical',
+      reason: 'order_by_missed',
+      needDate: new Date('2026-07-27T00:00:00.000Z'),
+      orderByDate: new Date('2026-05-22T00:00:00.000Z'),
+      expectedDeliveryDate: null,
+    });
+    mockPrisma.procurementLeadTimeAlert.update.mockResolvedValue({
+      id: 'alert-1',
+      projectId: 'project-1',
+      activityId: activity.id,
+      packageId: 'pkg-1',
+      poLineId: null,
+      activityMaterialId: null,
+      status: 'resolved',
+      severity: 'critical',
+      reason: 'order_by_missed',
+      needDate: new Date('2026-07-27T00:00:00.000Z'),
+      orderByDate: new Date('2026-05-22T00:00:00.000Z'),
+      expectedDeliveryDate: null,
+    });
+
+    await procurementService.resolveLeadTimeAlert({
+      orgId: 'org-1',
+      projectId: 'project-1',
+      alertId: 'alert-1',
+      actor: { id: 'pm-1', role: 'pm' },
+      payload: { note: 'PO recovered with expediting plan' },
+    });
+
+    expect(mockPrisma.procurementLeadTimeAlert.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'alert-1' },
+        data: expect.objectContaining({
+          status: 'resolved',
+          resolvedBy: 'pm-1',
+          resolvedAt: expect.any(Date),
+        }),
+      }),
+    );
+    expect(mockPrisma.auditEvent.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          entityType: 'procurement_alert',
+          action: 'status_changed',
+          oldStatus: 'acknowledged',
+          newStatus: 'resolved',
+          reason: 'PO recovered with expediting plan',
+          summaryJson: expect.objectContaining({
+            transition: 'alert.resolve',
+            packageId: 'pkg-1',
+          }),
+        }),
       }),
     );
   });

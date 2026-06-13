@@ -6,9 +6,33 @@ const projectStatusSchema = z.enum([
   'on_hold',
   'completed',
   'cancelled',
+  'archived',
 ])
 
 const durationUnitSchema = z.enum(['days', 'weeks', 'months'])
+const projectAccessSchema = z
+  .object({
+    role: z.string().nullable().optional(),
+    effectiveRole: z.string().nullable().optional(),
+    assignmentRole: z.string().nullable().optional(),
+    orgRole: z.string().nullable().optional(),
+    scope: z.string().nullable().optional(),
+    partyRole: z.string().nullable().optional(),
+    partyAccess: z
+      .array(
+        z.object({
+          projectPartyId: z.string(),
+          companyId: z.string(),
+          companyName: z.string().nullable().optional(),
+          role: z.string(),
+          accessLevel: z.string().optional(),
+          permissionProfile: z.string().nullable().optional(),
+          memberRole: z.string().nullable().optional(),
+        })
+      )
+      .optional(),
+  })
+  .optional()
 
 export const contractTypeValues = [
   'lump_sum',
@@ -34,6 +58,81 @@ const optionalTextSchema = z.string().trim().optional()
 
 const optionalDateSchema = z.string().optional()
 
+export const projectPartyRoleValues = [
+  'owner',
+  'consultant',
+  'contractor',
+  'subcontractor',
+] as const
+
+export const projectPartyRoleSchema = z.enum(projectPartyRoleValues)
+
+export const companySchema = z.object({
+  id: z.string().uuid(),
+  orgId: z.string().uuid(),
+  name: z.string(),
+  legalName: z.string().nullable().optional(),
+  tradeName: z.string().nullable().optional(),
+  registrationNumber: z.string().nullable().optional(),
+  taxNumber: z.string().nullable().optional(),
+  type: z.string(),
+  email: z.string().nullable().optional(),
+  phone: z.string().nullable().optional(),
+  website: z.string().nullable().optional(),
+  address: z.string().nullable().optional(),
+  status: z.string(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+})
+
+export const projectPartySchema = z.object({
+  id: z.string().uuid(),
+  projectId: z.string().uuid(),
+  companyId: z.string().uuid(),
+  role: projectPartyRoleSchema,
+  roleLabel: z.string().nullable().optional(),
+  contactName: z.string().nullable().optional(),
+  contactEmail: z.string().nullable().optional(),
+  contactPhone: z.string().nullable().optional(),
+  accessLevel: z.string(),
+  permissionProfile: z.string().nullable().optional(),
+  permissionPolicy: z.unknown().optional(),
+  status: z.string(),
+  company: companySchema.nullable().optional(),
+  members: z
+    .array(
+      z.object({
+        id: z.string().uuid(),
+        userId: z.string().uuid(),
+        role: z.string(),
+        status: z.string(),
+        user: z
+          .object({
+            id: z.string().uuid(),
+            name: z.string(),
+            email: z.string(),
+            role: z.string(),
+            status: z.string(),
+          })
+          .nullable()
+          .optional(),
+      })
+    )
+    .optional(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+})
+
+const partyInputSchema = z.object({
+  role: projectPartyRoleSchema,
+  companyId: z.string().uuid().optional(),
+  companyName: z.string().trim().optional(),
+  contactName: z.string().trim().optional(),
+  contactEmail: z.string().trim().optional(),
+  contactPhone: z.string().trim().optional(),
+  accessLevel: z.enum(['read_only', 'collaborator', 'reviewer', 'admin']).optional(),
+})
+
 export const projectSchema = z.object({
   id: z.string().uuid(),
   orgId: z.string().uuid(),
@@ -49,6 +148,7 @@ export const projectSchema = z.object({
   endDate: z.string().nullable(),
   completionDate: z.string().nullable().optional(),
   baselineDate: z.string().nullable().optional(),
+  dataDate: z.string().nullable().optional(),
   revisedCompletionDate: z.string().nullable().optional(),
   contractValue: z.number().nullable(),
   defaultRetentionRate: z.number().nullable().optional(),
@@ -60,11 +160,19 @@ export const projectSchema = z.object({
   reportingCutoffDay: z.number().int().nullable().optional(),
   currency: z.string().default('USD'),
   status: projectStatusSchema,
+  archivedAt: z.string().nullable().optional(),
+  archivedBy: z.string().nullable().optional(),
+  parties: z.array(projectPartySchema).optional(),
+  projectAccess: projectAccessSchema,
+  effectiveRole: z.string().nullable().optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
 })
 
 export type Project = z.infer<typeof projectSchema>
+export type Company = z.infer<typeof companySchema>
+export type ProjectParty = z.infer<typeof projectPartySchema>
+export type ProjectPartyRole = z.infer<typeof projectPartyRoleSchema>
 
 export type ProjectSetupIssue = {
   code: string
@@ -73,11 +181,16 @@ export type ProjectSetupIssue = {
   details?: Record<string, unknown>
   stepKey?: string
   stepLabel?: string
+  actionLabel?: string
+  target?: ProjectSetupTarget
 }
 
 export type ProjectSetupTarget = {
   module: string
   child?: string
+  status?: string
+  source?: string
+  recordId?: string
 }
 
 export type ProjectSetupStep = {
@@ -111,6 +224,7 @@ export type ProjectSetupReadiness = {
     warningCount: number
     readyForBaseline: boolean
     readyForProgress: boolean
+    readyForReporting?: boolean
     nextAction: {
       stepKey: string
       label: string
@@ -133,6 +247,14 @@ export type ProjectSetupReadiness = {
       warnings: ProjectSetupIssue[]
       message: string
     }
+    reporting?: {
+      mode: 'warn' | 'block' | string
+      ready: boolean
+      blockers: ProjectSetupIssue[]
+      warnings: ProjectSetupIssue[]
+      overrideAllowedRoles?: string[]
+      message: string
+    }
   }
   context?: Record<string, unknown>
   steps: ProjectSetupStep[]
@@ -148,10 +270,17 @@ export const createProjectSchema = z
     clientName: optionalTextSchema,
     consultantName: optionalTextSchema,
     contractorName: optionalTextSchema,
+    clientCompanyId: optionalTextSchema,
+    consultantCompanyId: optionalTextSchema,
+    contractorCompanyId: optionalTextSchema,
+    subcontractorCompanyId: optionalTextSchema,
+    subcontractorName: optionalTextSchema,
+    parties: z.array(partyInputSchema).optional(),
     contractType: contractTypeSchema.optional(),
     contractNumber: optionalTextSchema,
     completionDate: optionalDateSchema,
     baselineDate: optionalDateSchema,
+    dataDate: optionalDateSchema,
     revisedCompletionDate: optionalDateSchema,
     contractValue: z
       .number({ error: 'Contract value must be a number' })

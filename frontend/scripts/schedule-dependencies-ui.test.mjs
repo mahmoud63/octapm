@@ -29,9 +29,16 @@ for (const field of [
 
 assert.ok(
   gantt.includes('formatCalendarDate') &&
-    gantt.includes('tooltip.activity.earlyStartDate') &&
-    gantt.includes('tooltip.activity.earlyFinishDate'),
+    gantt.includes('activity.earlyStartDate') &&
+    gantt.includes('activity.earlyFinishDate'),
   'Gantt tooltip shows calendar-aware planned dates',
+)
+
+assert.ok(
+  gantt.includes('formatActivityDependencies') &&
+    gantt.includes('relationshipSides') &&
+    gantt.includes('dependency.predecessor?.activityCode'),
+  'Gantt renders structured dependency labels and relationship-aware connectors',
 )
 
 assert.ok(
@@ -43,7 +50,9 @@ assert.ok(
 assert.ok(
   editDialog.includes("['FS', 'SS', 'FF', 'SF']") &&
     editDialog.includes('lagDays') &&
-    editDialog.includes('duplicatePredecessors'),
+    editDialog.includes('duplicatePredecessors') &&
+    editDialog.includes('successorRows') &&
+    editDialog.includes('Relationship Grid'),
   'Activity editor keeps structured dependency controls and validation',
 )
 

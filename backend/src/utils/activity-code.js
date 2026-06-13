@@ -31,16 +31,18 @@ async function nextActivityCode(projectId, description, tx = prisma) {
       projectId,
       isActive: true,
       OR: [
-        { wbsCode: { startsWith: `${prefix}-` } },
+        { activityCode: { startsWith: `${prefix}-` } },
         { p6ActivityId: { startsWith: `${prefix}-` } },
+        { wbsCode: { startsWith: `${prefix}-` } },
       ],
     },
-    select: { wbsCode: true, p6ActivityId: true },
+    select: { activityCode: true, p6ActivityId: true, wbsCode: true },
   });
 
   let max = 0;
   for (const activity of existing) {
-    const code = activity.wbsCode || activity.p6ActivityId || '';
+    const code =
+      activity.activityCode || activity.p6ActivityId || activity.wbsCode || '';
     const n = parseInt(code.slice(prefix.length + 1), 10);
     if (Number.isFinite(n) && n > max) max = n;
   }

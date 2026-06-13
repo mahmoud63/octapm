@@ -11,6 +11,7 @@ const permissions = read('../../shared/permissions.json')
 ;[
   'Supplier',
   'Need Date',
+  'Order By',
   'Lead Weeks',
   'Buffer Days',
   'PO',
@@ -41,6 +42,16 @@ assert.match(
   schema,
   /poLines/,
   'material schema exposes PO line traceability'
+)
+assert.match(
+  schema,
+  /receiptLines/,
+  'material schema exposes receipt traceability'
+)
+assert.match(
+  schema,
+  /dailyReportId/,
+  'material schema exposes daily report traceability'
 )
 assert.match(
   permissions,

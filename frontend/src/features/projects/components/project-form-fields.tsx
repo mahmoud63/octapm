@@ -1,5 +1,5 @@
 import type { z } from 'zod'
-import type { UseFormReturn } from 'react-hook-form'
+import type { FieldPath, UseFormReturn } from 'react-hook-form'
 import {
   FormControl,
   FormField,
@@ -21,11 +21,14 @@ import {
   projectCalendarValues,
   type CreateProjectInput,
   type Project,
+  type projectPartyRoleValues,
 } from '../data/schema'
+import { useCompanies } from '../hooks/use-projects'
 
 export type ProjectFormValues = z.input<typeof createProjectSchema>
 
 const NONE_VALUE = '__none'
+const NEW_COMPANY_VALUE = '__new_company'
 
 const contractTypeLabels = {
   lump_sum: 'Lump Sum',
@@ -44,6 +47,13 @@ const projectCalendarLabels = {
   custom: 'Custom',
 } satisfies Record<(typeof projectCalendarValues)[number], string>
 
+const partyRoleLabels = {
+  owner: 'Client / Owner',
+  consultant: 'Consultant',
+  contractor: 'Contractor',
+  subcontractor: 'Subcontractor',
+} satisfies Record<(typeof projectPartyRoleValues)[number], string>
+
 const asDateInput = (value: string | null | undefined) =>
   value ? value.slice(0, 10) : ''
 
@@ -54,12 +64,18 @@ export const projectFormDefaultValues = {
   type: '',
   location: '',
   clientName: '',
+  clientCompanyId: NEW_COMPANY_VALUE,
   consultantName: '',
+  consultantCompanyId: NEW_COMPANY_VALUE,
   contractorName: '',
+  contractorCompanyId: NEW_COMPANY_VALUE,
+  subcontractorName: '',
+  subcontractorCompanyId: NEW_COMPANY_VALUE,
   contractType: undefined,
   contractNumber: '',
   completionDate: '',
   baselineDate: '',
+  dataDate: '',
   revisedCompletionDate: '',
   contractValue: undefined,
   defaultRetentionRate: 5,
@@ -79,12 +95,18 @@ export const getProjectFormValues = (project: Project): ProjectFormValues => ({
   type: project.type ?? '',
   location: project.location ?? '',
   clientName: project.clientName ?? '',
+  clientCompanyId: NEW_COMPANY_VALUE,
   consultantName: project.consultantName ?? '',
+  consultantCompanyId: NEW_COMPANY_VALUE,
   contractorName: project.contractorName ?? '',
+  contractorCompanyId: NEW_COMPANY_VALUE,
+  subcontractorName: '',
+  subcontractorCompanyId: NEW_COMPANY_VALUE,
   contractType: project.contractType ?? undefined,
   contractNumber: project.contractNumber ?? '',
   completionDate: asDateInput(project.completionDate),
   baselineDate: asDateInput(project.baselineDate),
+  dataDate: asDateInput(project.dataDate),
   revisedCompletionDate: asDateInput(project.revisedCompletionDate),
   contractValue: project.contractValue ?? undefined,
   defaultRetentionRate: project.defaultRetentionRate ?? 5,
@@ -101,9 +123,47 @@ export const buildProjectPayload = (
   values: ProjectFormValues
 ): CreateProjectInput => {
   const parsed = createProjectSchema.parse(values)
+  const {
+    clientCompanyId,
+    consultantCompanyId,
+    contractorCompanyId,
+    subcontractorCompanyId,
+    subcontractorName,
+    ...projectFields
+  } = parsed
+
+  const companyIdOrUndefined = (value?: string) =>
+    value && value !== NEW_COMPANY_VALUE ? value : undefined
+
+  const partyEntries: NonNullable<CreateProjectInput['parties']> = [
+    {
+      role: 'owner' as const,
+      companyId: companyIdOrUndefined(clientCompanyId),
+      companyName: parsed.clientName?.trim() || undefined,
+    },
+    {
+      role: 'consultant' as const,
+      companyId: companyIdOrUndefined(consultantCompanyId),
+      companyName: parsed.consultantName?.trim() || undefined,
+    },
+    {
+      role: 'contractor' as const,
+      companyId: companyIdOrUndefined(contractorCompanyId),
+      companyName: parsed.contractorName?.trim() || undefined,
+    },
+  ]
+
+  const subcontractorCompany = companyIdOrUndefined(subcontractorCompanyId)
+  if (subcontractorCompany || subcontractorName?.trim()) {
+    partyEntries.push({
+      role: 'subcontractor',
+      companyId: subcontractorCompany,
+      companyName: subcontractorName?.trim() || undefined,
+    })
+  }
 
   return {
-    ...parsed,
+    ...projectFields,
     type: parsed.type?.trim() || undefined,
     location: parsed.location?.trim() || undefined,
     clientName: parsed.clientName?.trim() || undefined,
@@ -112,13 +172,24 @@ export const buildProjectPayload = (
     contractNumber: parsed.contractNumber?.trim() || undefined,
     completionDate: parsed.completionDate || undefined,
     baselineDate: parsed.baselineDate || undefined,
+    dataDate: parsed.dataDate || undefined,
     revisedCompletionDate: parsed.revisedCompletionDate || undefined,
     currency: parsed.currency.toUpperCase(),
+    parties: partyEntries,
   }
 }
 
 type ProjectFormFieldsProps = {
   form: UseFormReturn<ProjectFormValues>
+}
+
+type CompanyPartySelectorProps = {
+  form: UseFormReturn<ProjectFormValues>
+  label: string
+  companyIdField: FieldPath<ProjectFormValues>
+  companyNameField: FieldPath<ProjectFormValues>
+  companies: Array<{ id: string; name: string }>
+  isPending?: boolean
 }
 
 function NumberInput({
@@ -153,7 +224,90 @@ function NumberInput({
   )
 }
 
+function CompanyPartySelector({
+  form,
+  label,
+  companyIdField,
+  companyNameField,
+  companies,
+  isPending,
+}: CompanyPartySelectorProps) {
+  const selectedCompanyId = form.watch(companyIdField)
+  const isExistingCompany =
+    typeof selectedCompanyId === 'string' &&
+    selectedCompanyId !== NEW_COMPANY_VALUE
+
+  return (
+    <div className='space-y-2'>
+      <FormField
+        control={form.control}
+        name={companyIdField}
+        render={({ field }) => (
+          <FormItem>
+            <FormLabel>{label}</FormLabel>
+            <Select
+              disabled={isPending}
+              value={(field.value as string | undefined) || NEW_COMPANY_VALUE}
+              onValueChange={(value) => {
+                field.onChange(value)
+                if (value !== NEW_COMPANY_VALUE) {
+                  const company = companies.find((item) => item.id === value)
+                  if (company) {
+                    form.setValue(companyNameField, company.name as never, {
+                      shouldDirty: true,
+                      shouldValidate: true,
+                    })
+                  }
+                }
+              }}
+            >
+              <FormControl>
+                <SelectTrigger>
+                  <SelectValue placeholder='Select company' />
+                </SelectTrigger>
+              </FormControl>
+              <SelectContent>
+                <SelectItem value={NEW_COMPANY_VALUE}>New company</SelectItem>
+                {companies.map((company) => (
+                  <SelectItem key={company.id} value={company.id}>
+                    {company.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <FormMessage />
+          </FormItem>
+        )}
+      />
+
+      <FormField
+        control={form.control}
+        name={companyNameField}
+        render={({ field }) => (
+          <FormItem>
+            <FormControl>
+              <Input
+                autoComplete='off'
+                placeholder={
+                  isExistingCompany ? 'Selected company' : `${label} company`
+                }
+                disabled={isExistingCompany}
+                {...field}
+                value={(field.value as string | undefined) ?? ''}
+              />
+            </FormControl>
+            <FormMessage />
+          </FormItem>
+        )}
+      />
+    </div>
+  )
+}
+
 export function ProjectFormFields({ form }: ProjectFormFieldsProps) {
+  const companiesQuery = useCompanies({ status: 'active' })
+  const companies = companiesQuery.data?.items ?? []
+
   return (
     <>
       <section className='space-y-3'>
@@ -247,47 +401,41 @@ export function ProjectFormFields({ form }: ProjectFormFieldsProps) {
 
       <section className='space-y-3'>
         <h3 className='text-sm font-semibold'>Contract Parties</h3>
-        <div className='grid grid-cols-1 gap-4 sm:grid-cols-3'>
-          <FormField
-            control={form.control}
-            name='clientName'
-            render={({ field }) => (
-              <FormItem>
-                <FormLabel>Client</FormLabel>
-                <FormControl>
-                  <Input autoComplete='off' {...field} />
-                </FormControl>
-                <FormMessage />
-              </FormItem>
-            )}
+        <div className='grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4'>
+          <CompanyPartySelector
+            form={form}
+            label={partyRoleLabels.owner}
+            companyIdField='clientCompanyId'
+            companyNameField='clientName'
+            companies={companies}
+            isPending={companiesQuery.isPending}
           />
 
-          <FormField
-            control={form.control}
-            name='consultantName'
-            render={({ field }) => (
-              <FormItem>
-                <FormLabel>Consultant</FormLabel>
-                <FormControl>
-                  <Input autoComplete='off' {...field} />
-                </FormControl>
-                <FormMessage />
-              </FormItem>
-            )}
+          <CompanyPartySelector
+            form={form}
+            label={partyRoleLabels.consultant}
+            companyIdField='consultantCompanyId'
+            companyNameField='consultantName'
+            companies={companies}
+            isPending={companiesQuery.isPending}
           />
 
-          <FormField
-            control={form.control}
-            name='contractorName'
-            render={({ field }) => (
-              <FormItem>
-                <FormLabel>Contractor</FormLabel>
-                <FormControl>
-                  <Input autoComplete='off' {...field} />
-                </FormControl>
-                <FormMessage />
-              </FormItem>
-            )}
+          <CompanyPartySelector
+            form={form}
+            label={partyRoleLabels.contractor}
+            companyIdField='contractorCompanyId'
+            companyNameField='contractorName'
+            companies={companies}
+            isPending={companiesQuery.isPending}
+          />
+
+          <CompanyPartySelector
+            form={form}
+            label={partyRoleLabels.subcontractor}
+            companyIdField='subcontractorCompanyId'
+            companyNameField='subcontractorName'
+            companies={companies}
+            isPending={companiesQuery.isPending}
           />
         </div>
       </section>
@@ -362,6 +510,20 @@ export function ProjectFormFields({ form }: ProjectFormFieldsProps) {
             render={({ field }) => (
               <FormItem>
                 <FormLabel>Baseline Date</FormLabel>
+                <FormControl>
+                  <Input type='date' {...field} />
+                </FormControl>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
+
+          <FormField
+            control={form.control}
+            name='dataDate'
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel>Data Date</FormLabel>
                 <FormControl>
                   <Input type='date' {...field} />
                 </FormControl>

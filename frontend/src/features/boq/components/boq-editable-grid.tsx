@@ -56,8 +56,9 @@ const moneyFields = new Set([
   'rate',
   'amount',
   'budget',
-  'scheduledValue',
-  'unscheduledValue',
+  'approvedAllocatedAmount',
+  'pendingAllocatedAmount',
+  'unallocatedAmount',
 ])
 
 function EditableCell({
@@ -236,8 +237,9 @@ export function BoqEditableGrid({
         <div className='w-16'>Unit</div>
         <div className='w-24 text-right'>Rate</div>
         <div className='w-28 text-right'>Amount</div>
-        <div className='w-28 text-right'>Scheduled</div>
-        <div className='w-28 text-right'>Unsched.</div>
+        <div className='w-28 text-right'>Approved</div>
+        <div className='w-28 text-right'>Pending</div>
+        <div className='w-28 text-right'>Unalloc.</div>
         <div className='w-24' />
       </div>
 
@@ -331,9 +333,9 @@ export function BoqEditableGrid({
               <div className='w-28 text-right text-sm'>
                 <EditableCell
                   rowId={item.id}
-                  field='scheduledValue'
+                  field='approvedAllocatedAmount'
                   value={
-                    item.scheduledValue ?? item.approvedAllocatedAmount ?? 0
+                    item.approvedAllocatedAmount ?? item.scheduledValue ?? 0
                   }
                   type='number'
                   readOnly
@@ -346,10 +348,27 @@ export function BoqEditableGrid({
               <div className='w-28 text-right text-sm'>
                 <EditableCell
                   rowId={item.id}
-                  field='unscheduledValue'
+                  field='pendingAllocatedAmount'
+                  value={item.pendingAllocatedAmount ?? 0}
+                  type='number'
+                  readOnly
+                  editingCell={editingCell}
+                  setEditingCell={setEditingCell}
+                  onSave={() => {}}
+                  className={
+                    (item.pendingAllocatedAmount ?? 0) > 0
+                      ? 'font-medium text-sky-600'
+                      : 'text-muted-foreground'
+                  }
+                />
+              </div>
+              <div className='w-28 text-right text-sm'>
+                <EditableCell
+                  rowId={item.id}
+                  field='unallocatedAmount'
                   value={
-                    item.unscheduledValue ??
                     item.unallocatedAmount ??
+                    item.unscheduledValue ??
                     item.amount
                   }
                   type='number'
@@ -358,8 +377,8 @@ export function BoqEditableGrid({
                   setEditingCell={setEditingCell}
                   onSave={() => {}}
                   className={
-                    (item.unscheduledValue ??
-                      item.unallocatedAmount ??
+                    (item.unallocatedAmount ??
+                      item.unscheduledValue ??
                       item.amount) > 0
                       ? 'font-medium text-amber-600'
                       : 'text-green-600'
@@ -377,7 +396,7 @@ export function BoqEditableGrid({
                   onClick={() => setAddActivityForItem(item.id)}
                 >
                   <Plus className='mr-1 h-3.5 w-3.5' />
-                  Activity
+                  Draft Link
                 </Button>
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
@@ -477,7 +496,7 @@ export function BoqEditableGrid({
                           }
                         />
                         <div className='px-1 text-[11px] text-muted-foreground'>
-                          Allocation {act.allocationStatus ?? 'draft'}
+                          Draft allocation link: {act.allocationStatus ?? 'draft'}
                         </div>
                       </div>
                       <div className='w-16'>
@@ -580,7 +599,7 @@ export function BoqEditableGrid({
                 {/* Empty state for activities */}
                 {item.activities.length === 0 && (
                   <div className='px-16 py-2 text-xs text-muted-foreground italic'>
-                    No activities — click "+ Activity" to add one
+                    No draft allocation links. Use "Draft Link" to add one.
                   </div>
                 )}
               </div>

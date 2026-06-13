@@ -7,6 +7,7 @@ const { asyncHandler } = require('../utils/async-handler');
 const { sendSuccess } = require('../utils/api-response');
 const { HttpError } = require('../utils/http-error');
 const { authenticate } = require('../middleware/auth');
+const { uploadLimiter } = require('../middleware/rate-limit');
 const { requirePermission } = require('../middleware/rbac');
 const importService = require('../services/import.service');
 const fileStorageService = require('../services/file-storage.service');
@@ -56,6 +57,7 @@ router.use(authenticate);
 router.post(
   '/xer',
   requirePermission('schedule', 'create'),
+  uploadLimiter,
   upload.single('file'),
   asyncHandler(async (req, res) => {
     if (!req.file) throw new HttpError(400, 'NO_FILE', 'No file uploaded');
@@ -102,6 +104,7 @@ router.post(
 router.post(
   '/p6xml',
   requirePermission('schedule', 'create'),
+  uploadLimiter,
   upload.single('file'),
   asyncHandler(async (req, res) => {
     if (!req.file) throw new HttpError(400, 'NO_FILE', 'No file uploaded');
@@ -148,6 +151,7 @@ router.post(
 router.post(
   '/msp',
   requirePermission('schedule', 'create'),
+  uploadLimiter,
   upload.single('file'),
   asyncHandler(async (req, res) => {
     if (!req.file) throw new HttpError(400, 'NO_FILE', 'No file uploaded');
@@ -196,6 +200,7 @@ router.post(
   requirePermission('progress', 'submit', {
     transition: 'submission.submit',
   }),
+  uploadLimiter,
   upload.single('file'),
   asyncHandler(async (req, res) => {
     if (!req.file) throw new HttpError(400, 'NO_FILE', 'No file uploaded');

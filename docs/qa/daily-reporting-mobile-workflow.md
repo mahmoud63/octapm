@@ -2,6 +2,8 @@
 
 Scope: daily activity reports, site diaries, photo evidence, PM review, and offline/mobile retry behavior.
 
+Related field-device matrix: `docs/qa/field-device-ux-support-matrix.md`.
+
 ## Automated Coverage
 
 - Backend daily-report service tests cover structured manpower/material/equipment/photo persistence, linked progress approval, duplicate `clientRequestId` replay, and rejection of cross-project photo keys.
@@ -15,6 +17,7 @@ Scope: daily activity reports, site diaries, photo evidence, PM review, and offl
 1. Sign in as Site Engineer assigned to Project A.
 2. Open Project A Site Reporting on a phone-sized viewport.
 3. Upload one site photo through `/site-reporting/uploads`, create a daily activity report with activity, shift, progress, manpower, equipment, materials, weather, issue, notes, and the uploaded photo, then submit it.
+   - On iOS/Android, capture at least one camera photo and confirm JPEG/PNG/WebP/HEIC/HEIF image selection is accepted.
 4. Repeat the same request body with the same `clientRequestId`. Confirm the API returns the original report ID and does not create a duplicate record or duplicate progress submission.
 5. Try to submit a report with a photo key uploaded to another project. Confirm the API returns `400 INVALID_SITE_PHOTO_REFERENCE`.
 6. Switch the browser offline, edit a daily report draft, and click Save Draft. Reload the page while still offline and confirm the typed field data is restored. Re-select photos after reconnecting, then submit.

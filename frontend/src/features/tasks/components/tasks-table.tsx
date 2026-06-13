@@ -82,11 +82,16 @@ export function TasksTable({ data }: DataTableProps) {
     onSortingChange: setSorting,
     onColumnVisibilityChange: setColumnVisibility,
     globalFilterFn: (row, _columnId, filterValue) => {
-      const id = String(row.getValue('id')).toLowerCase()
+      const id = String(row.getValue('taskNumber')).toLowerCase()
       const title = String(row.getValue('title')).toLowerCase()
+      const project = String(row.original.project?.name || '').toLowerCase()
       const searchValue = String(filterValue).toLowerCase()
 
-      return id.includes(searchValue) || title.includes(searchValue)
+      return (
+        id.includes(searchValue) ||
+        title.includes(searchValue) ||
+        project.includes(searchValue)
+      )
     },
     getCoreRowModel: getCoreRowModel(),
     getFilteredRowModel: getFilteredRowModel(),

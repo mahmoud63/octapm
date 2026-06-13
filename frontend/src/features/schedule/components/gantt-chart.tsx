@@ -1,5 +1,8 @@
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
+  AlertTriangle,
+  ChevronDown,
+  ChevronRight,
   GripHorizontal,
   Layers,
   RotateCcw,
@@ -7,12 +10,24 @@ import {
   ZoomOut,
 } from 'lucide-react'
 import { toast } from 'sonner'
+import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
-import type { ScheduleActivity } from '../data/schema'
+import type {
+  ActivityDependency,
+  DependencyRelationship,
+  ScheduleActivity,
+} from '../data/schema'
 import { ActivityInlineEditDialog } from './activity-inline-edit-dialog'
+
+type GanttActivity = ScheduleActivity & {
+  activityCode?: string | null
+}
 
 interface Props {
   activities: ScheduleActivity[]
+  projectStartDate?: string | null
+  projectEndDate?: string | null
+  dataDate?: string | null
   onActivityUpdate?: (
     id: string,
     patch: Partial<ScheduleActivity>
@@ -20,190 +35,883 @@ interface Props {
   onActivityDelete?: (id: string) => Promise<void>
 }
 
-// ── Layout constants ──────────────────────────────────────────────────────────
-const ROW_H = 40
-const BAR_H = 18
-const LABEL_W = 300
-const TIMESCALE_H = 52 // two-row header
-const MIN_PX = 3
-const MAX_PX = 16
-const DEFAULT_PX = 6
-const DAYS_PER_MON = 22 // working days ≈ 1 month
-
-// ── Semantic colours (plain hex — safe for SVG fill/stroke attributes) ────────
-// Structural colours (bg, text, borders) use CSS variables via style prop
-const COLOR = {
-  critical: '#EF4444',
-  nearCrit: '#F97316',
-  normal: '#3B82F6',
-  milestone: '#A855F7',
-  float: '#14B8A6',
-  today: '#F59E0B',
-  baseline: '#94A3B8',
-}
-
-// CSS-variable shorthands for use in style={{ }} props on SVG elements
-const CSS = {
-  border: 'hsl(var(--border))',
-  muted: 'hsl(var(--muted))',
-  fg: 'hsl(var(--foreground))',
-  mutedFg: 'hsl(var(--muted-foreground))',
-  card: 'hsl(var(--card))',
-}
-
-// ── Helper ────────────────────────────────────────────────────────────────────
-const isNearCritical = (a: ScheduleActivity) =>
-  !a.isCritical &&
-  !a.isMilestone &&
-  a.totalFloat != null &&
-  a.totalFloat >= 1 &&
-  a.totalFloat <= 5
-
-const barColor = (a: ScheduleActivity) =>
-  a.isMilestone
-    ? COLOR.milestone
-    : a.isCritical
-      ? COLOR.critical
-      : isNearCritical(a)
-        ? COLOR.nearCrit
-        : COLOR.normal
-
-const formatCalendarDate = (value?: string | null) =>
-  value ? new Date(value).toLocaleDateString() : '—'
-
 type DragState = {
   id: string
   startX: number
   origStart: number
   currentStart: number
 }
-type ContextMenu = { id: string; x: number; y: number }
-type Tooltip = { activity: ScheduleActivity; x: number; y: number }
 
-// ── Component ─────────────────────────────────────────────────────────────────
+type ContextMenu = { id: string; x: number; y: number }
+type Tooltip = { activity: GanttActivity; x: number; y: number }
+
+type WbsNode = {
+  key: string
+  code: string
+  name: string
+  level: number
+  children: Map<string, WbsNode>
+  activities: GanttActivity[]
+  allActivities: GanttActivity[]
+  minOrder: number
+}
+
+type ActivityRow = {
+  type: 'activity'
+  id: string
+  level: number
+  activity: GanttActivity
+  activityCode: string
+  name: string
+  duration: number
+  startDate: Date | null
+  finishDate: Date | null
+  baselineStartDate: Date | null
+  baselineFinishDate: Date | null
+  pctComplete: number
+  isCritical: boolean
+  isMilestone: boolean
+  totalFloat: number | null
+}
+
+type SummaryRow = {
+  type: 'summary'
+  id: string
+  key: string
+  level: number
+  code: string
+  name: string
+  expanded: boolean
+  activityCount: number
+  duration: number
+  startDate: Date | null
+  finishDate: Date | null
+  baselineStartDate: Date | null
+  baselineFinishDate: Date | null
+  pctComplete: number
+  isCritical: boolean
+}
+
+type ScheduleRow = ActivityRow | SummaryRow
+type IndexedRow = ScheduleRow & { index: number }
+
+type DateTick = {
+  key: string
+  date: Date
+  x: number
+  width?: number
+}
+
+type TimeScale = 'day' | 'week' | 'month' | 'quarter'
+
+type TimelineModel = {
+  start: Date
+  end: Date
+  totalDays: number
+  width: number
+  dataDate: Date
+  scale: TimeScale
+  monthTicks: DateTick[]
+  weekTicks: DateTick[]
+  dayTicks: DateTick[]
+  weekendBands: DateTick[]
+}
+
+type ActivityGeometry = {
+  activity: GanttActivity
+  row: IndexedRow
+  startX: number
+  finishX: number
+  y: number
+}
+
+type Connector = {
+  key: string
+  path: string
+  color: string
+  marker: string
+}
+
+type ConnectorDependency = Pick<
+  ActivityDependency,
+  'predecessorId' | 'relationshipType' | 'lagDays'
+> & {
+  predecessor?: ActivityDependency['predecessor']
+}
+
+const ROW_H = 32
+const BAR_H = 14
+const HEADER_H = 76
+const OVERSCAN = 16
+const MIN_PX = 3
+const MAX_PX = 24
+const DEFAULT_SCALE: TimeScale = 'week'
+const SCALE_SETTINGS = {
+  day: { label: 'Day', pxPerDay: 18, dayStep: 1, weekStep: 1 },
+  week: { label: 'Week', pxPerDay: 10, dayStep: 2, weekStep: 1 },
+  month: { label: 'Month', pxPerDay: 5, dayStep: 7, weekStep: 1 },
+  quarter: { label: 'Quarter', pxPerDay: 3, dayStep: 14, weekStep: 4 },
+} satisfies Record<
+  TimeScale,
+  { label: string; pxPerDay: number; dayStep: number; weekStep: number }
+>
+const DEFAULT_PX = SCALE_SETTINGS[DEFAULT_SCALE].pxPerDay
+const DAY_MS = 24 * 60 * 60 * 1000
+
+const GRID_COLUMNS = [
+  { key: 'id', label: 'Activity ID', width: 120 },
+  { key: 'name', label: 'Activity Name', width: 280 },
+  { key: 'procurement', label: 'Proc Risk', width: 112 },
+  { key: 'duration', label: 'Original Duration', width: 96 },
+  { key: 'start', label: 'Start', width: 94 },
+  { key: 'finish', label: 'Finish', width: 94 },
+  { key: 'baselineStart', label: 'BL Project Start', width: 103 },
+  { key: 'baselineFinish', label: 'BL Project Finish', width: 103 },
+] as const
+
+const GRID_W = GRID_COLUMNS.reduce((sum, column) => sum + column.width, 0)
+const GRID_TEMPLATE = GRID_COLUMNS.map((col) => `${col.width}px`).join(' ')
+
+const MONTHS_SHORT = [
+  'Jan',
+  'Feb',
+  'Mar',
+  'Apr',
+  'May',
+  'Jun',
+  'Jul',
+  'Aug',
+  'Sep',
+  'Oct',
+  'Nov',
+  'Dec',
+]
+
+const COLORS = {
+  critical: '#dc2626',
+  nearCritical: '#ea580c',
+  normal: '#2563eb',
+  progress: '#16a34a',
+  milestone: '#7c3aed',
+  baseline: '#64748b',
+  dataDate: '#0284c7',
+  connector: '#64748b',
+  float: '#14b8a6',
+  procurement: '#f97316',
+}
+
+const PROCUREMENT_RISK_BADGE = {
+  none: 'border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300',
+  low: 'border-slate-500/30 bg-slate-500/10 text-slate-700 dark:text-slate-300',
+  medium:
+    'border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300',
+  high: 'border-orange-500/30 bg-orange-500/10 text-orange-700 dark:text-orange-300',
+  critical: 'border-red-500/30 bg-red-500/10 text-red-700 dark:text-red-300',
+} as const
+
+const CSS = {
+  border: 'var(--border)',
+  muted: 'var(--muted)',
+  mutedFg: 'var(--muted-foreground)',
+  fg: 'var(--foreground)',
+  card: 'var(--card)',
+  background: 'var(--background)',
+}
+
+const isNearCritical = (activity: GanttActivity) =>
+  !activity.isCritical &&
+  !activity.isMilestone &&
+  activity.totalFloat != null &&
+  activity.totalFloat >= 1 &&
+  activity.totalFloat <= 5
+
+const barColor = (activity: GanttActivity) =>
+  activity.isMilestone
+    ? COLORS.milestone
+    : activity.isCritical
+      ? COLORS.critical
+      : isNearCritical(activity)
+        ? COLORS.nearCritical
+        : COLORS.normal
+
+const startOfDay = (value: Date) =>
+  new Date(value.getFullYear(), value.getMonth(), value.getDate())
+
+const parseDate = (value?: string | null) => {
+  if (!value) return null
+  const parsed = new Date(value)
+  if (Number.isNaN(parsed.getTime())) return null
+  return startOfDay(parsed)
+}
+
+const toIsoDate = (date: Date) => date.toISOString().slice(0, 10)
+
+const addDays = (date: Date, days: number) =>
+  new Date(date.getFullYear(), date.getMonth(), date.getDate() + days)
+
+const addMonths = (date: Date, months: number) =>
+  new Date(date.getFullYear(), date.getMonth() + months, 1)
+
+const diffDays = (start: Date, end: Date) =>
+  Math.round((startOfDay(end).getTime() - startOfDay(start).getTime()) / DAY_MS)
+
+const minDate = (dates: Array<Date | null>) => {
+  const valid = dates.filter(Boolean) as Date[]
+  if (!valid.length) return null
+  return valid.reduce((min, date) => (date < min ? date : min), valid[0])
+}
+
+const maxDate = (dates: Array<Date | null>) => {
+  const valid = dates.filter(Boolean) as Date[]
+  if (!valid.length) return null
+  return valid.reduce((max, date) => (date > max ? date : max), valid[0])
+}
+
+const startOfWeek = (date: Date) => {
+  const day = date.getDay()
+  const mondayOffset = (day + 6) % 7
+  return addDays(date, -mondayOffset)
+}
+
+const endOfWeek = (date: Date) => addDays(startOfWeek(date), 6)
+
+const startOfMonth = (date: Date) =>
+  new Date(date.getFullYear(), date.getMonth(), 1)
+
+const formatGridDate = (date: Date | null) => {
+  if (!date) return '-'
+  const mm = String(date.getMonth() + 1).padStart(2, '0')
+  const dd = String(date.getDate()).padStart(2, '0')
+  return `${mm}/${dd}/${date.getFullYear()}`
+}
+
+const formatMonthLabel = (date: Date) =>
+  `${MONTHS_SHORT[date.getMonth()]} ${date.getFullYear()}`
+
+const formatWeekLabel = (date: Date) =>
+  `${MONTHS_SHORT[date.getMonth()]} ${String(date.getDate()).padStart(2, '0')}`
+
+const formatDayLabel = (date: Date) => String(date.getDate())
+
+const formatCalendarDate = (value?: string | null) =>
+  formatGridDate(parseDate(value))
+
+const titleCase = (value: string) =>
+  value
+    .replace(/[_-]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/\w\S*/g, (word) => word.charAt(0).toUpperCase() + word.slice(1))
+
+const formatProcurementReason = (value?: string | null) =>
+  value ? titleCase(value) : 'On Track'
+
+const getProcurementRisk = (activity: GanttActivity) => {
+  const risk = activity.procurementRiskSummary
+  if (!risk || risk.atRiskCount <= 0) return null
+  return risk
+}
+
+const getActivityCode = (activity: GanttActivity, index = 0) =>
+  activity.activityCode ||
+  activity.p6ActivityId ||
+  `ACT-${String(index + 1).padStart(4, '0')}`
+
+const formatLagLabel = (lagDays?: number | null) => {
+  const lag = Math.round(Number(lagDays) || 0)
+  if (lag === 0) return ''
+  return lag > 0 ? `+${lag}d` : `${lag}d`
+}
+
+const dependencyRef = (dependency: ConnectorDependency) =>
+  dependency.predecessor?.activityCode ||
+  dependency.predecessor?.p6ActivityId ||
+  dependency.predecessorId.slice(0, 8)
+
+const formatDependencyLabel = (dependency: ConnectorDependency) =>
+  `${dependencyRef(dependency)} ${dependency.relationshipType}${formatLagLabel(
+    dependency.lagDays
+  )}`
+
+const formatActivityDependencies = (activity: GanttActivity) => {
+  if (activity.dependencies?.length) {
+    return activity.dependencies.map(formatDependencyLabel).join(', ')
+  }
+  return activity.predecessors || '-'
+}
+
+const getActivityStart = (activity: GanttActivity, projectStart: Date | null) =>
+  parseDate(activity.earlyStartDate) ||
+  (projectStart && activity.earlyStart != null
+    ? addDays(projectStart, activity.earlyStart)
+    : null)
+
+const getActivityFinish = (
+  activity: GanttActivity,
+  projectStart: Date | null
+) =>
+  parseDate(activity.earlyFinishDate) ||
+  (projectStart && activity.earlyFinish != null
+    ? addDays(projectStart, activity.earlyFinish)
+    : null) ||
+  (projectStart && activity.earlyStart != null
+    ? addDays(
+        projectStart,
+        activity.earlyStart + Math.max(1, activity.duration)
+      )
+    : null)
+
+const getBaselineStart = (activity: GanttActivity, projectStart: Date | null) =>
+  parseDate(activity.baselineStartDate) ||
+  (projectStart && activity.baselineStart != null
+    ? addDays(projectStart, activity.baselineStart)
+    : null)
+
+const getBaselineFinish = (
+  activity: GanttActivity,
+  projectStart: Date | null
+) =>
+  parseDate(activity.baselineFinishDate) ||
+  (projectStart && activity.baselineFinish != null
+    ? addDays(projectStart, activity.baselineFinish)
+    : null)
+
+const resolveProjectStart = (
+  activities: GanttActivity[],
+  projectStartDate?: string | null
+) =>
+  parseDate(projectStartDate) ||
+  minDate(
+    activities.flatMap((activity) => [
+      parseDate(activity.earlyStartDate),
+      parseDate(activity.baselineStartDate),
+      parseDate(activity.actualStart),
+    ])
+  )
+
+const resolveDataDateCandidate = (
+  _activities: GanttActivity[],
+  dataDate?: string | null
+) =>
+  parseDate(dataDate) || startOfDay(new Date())
+
+const resolveDisplayDataDate = (
+  candidate: Date,
+  rangeStart: Date,
+  rangeEnd: Date
+) => {
+  if (candidate >= rangeStart && candidate <= rangeEnd) return candidate
+
+  const today = startOfDay(new Date())
+  if (today >= rangeStart && today <= rangeEnd) return today
+
+  const span = Math.max(1, diffDays(rangeStart, rangeEnd))
+  return addDays(rangeStart, Math.min(30, Math.floor(span * 0.35)))
+}
+
+const wbsSegmentsFor = (activity: GanttActivity) => {
+  const rawWbs = activity.wbsCode?.trim()
+  if (rawWbs && rawWbs.includes('.')) {
+    const parts = rawWbs.split('.').filter(Boolean)
+    const summaryParts = parts.length > 1 ? parts.slice(0, -1) : parts
+    return summaryParts.map((_, index) => {
+      const code = parts.slice(0, index + 1).join('.')
+      return { code, name: `WBS ${code}` }
+    })
+  }
+
+  const category = activity.category?.trim()
+  if (category) {
+    return [{ code: category, name: titleCase(category) }]
+  }
+
+  if (rawWbs) {
+    return [{ code: rawWbs, name: `WBS ${rawWbs}` }]
+  }
+
+  return [{ code: 'project-work', name: 'Project Work' }]
+}
+
+const createWbsNode = (
+  key: string,
+  code: string,
+  name: string,
+  level: number
+): WbsNode => ({
+  key,
+  code,
+  name,
+  level,
+  children: new Map(),
+  activities: [],
+  allActivities: [],
+  minOrder: Number.POSITIVE_INFINITY,
+})
+
+const sortActivities = (activities: GanttActivity[]) =>
+  [...activities].sort((a, b) => {
+    const orderDelta = (a.sortOrder ?? 0) - (b.sortOrder ?? 0)
+    if (orderDelta !== 0) return orderDelta
+    return (a.earlyStart ?? 0) - (b.earlyStart ?? 0)
+  })
+
+const insertActivity = (
+  root: WbsNode,
+  activity: GanttActivity,
+  activityIndex: number
+) => {
+  const order = activity.sortOrder ?? activityIndex
+  const chain = wbsSegmentsFor(activity)
+  let node = root
+
+  root.allActivities.push(activity)
+  root.minOrder = Math.min(root.minOrder, order)
+
+  chain.forEach((segment, index) => {
+    const key = `${node.key}/${segment.code}`
+    if (!node.children.has(key)) {
+      node.children.set(
+        key,
+        createWbsNode(key, segment.code, segment.name, index + 1)
+      )
+    }
+    const child = node.children.get(key)
+    if (!child) return
+    child.allActivities.push(activity)
+    child.minOrder = Math.min(child.minOrder, order)
+    node = child
+  })
+
+  node.activities.push(activity)
+}
+
+const buildActivityRow = (
+  activity: GanttActivity,
+  level: number,
+  projectStart: Date | null,
+  activityIndex: number
+): ActivityRow => ({
+  type: 'activity',
+  id: `activity:${activity.id}`,
+  level,
+  activity,
+  activityCode: getActivityCode(activity, activityIndex),
+  name: activity.name,
+  duration: activity.duration,
+  startDate: getActivityStart(activity, projectStart),
+  finishDate: getActivityFinish(activity, projectStart),
+  baselineStartDate: getBaselineStart(activity, projectStart),
+  baselineFinishDate: getBaselineFinish(activity, projectStart),
+  pctComplete: activity.pctComplete ?? 0,
+  isCritical: activity.isCritical,
+  isMilestone: activity.isMilestone,
+  totalFloat: activity.totalFloat ?? null,
+})
+
+const buildSummaryRow = (
+  node: WbsNode,
+  collapsedRows: Set<string>,
+  projectStart: Date | null
+): SummaryRow => {
+  const starts = node.allActivities.map((activity) =>
+    getActivityStart(activity, projectStart)
+  )
+  const finishes = node.allActivities.map((activity) =>
+    getActivityFinish(activity, projectStart)
+  )
+  const baselineStarts = node.allActivities.map((activity) =>
+    getBaselineStart(activity, projectStart)
+  )
+  const baselineFinishes = node.allActivities.map((activity) =>
+    getBaselineFinish(activity, projectStart)
+  )
+  const pctTotal = node.allActivities.reduce(
+    (sum, activity) => sum + (activity.pctComplete ?? 0),
+    0
+  )
+  const id = `summary:${node.key}`
+
+  return {
+    type: 'summary',
+    id,
+    key: node.key,
+    level: node.level,
+    code: node.code,
+    name: node.name,
+    expanded: !collapsedRows.has(id),
+    activityCount: node.allActivities.length,
+    duration: node.allActivities.reduce(
+      (sum, activity) => sum + (activity.duration ?? 0),
+      0
+    ),
+    startDate: minDate(starts),
+    finishDate: maxDate(finishes),
+    baselineStartDate: minDate(baselineStarts),
+    baselineFinishDate: maxDate(baselineFinishes),
+    pctComplete: node.allActivities.length
+      ? Math.round(pctTotal / node.allActivities.length)
+      : 0,
+    isCritical: node.allActivities.some(
+      (activity) => activity.isCritical && !activity.isMilestone
+    ),
+  }
+}
+
+const buildRows = (
+  activities: GanttActivity[],
+  collapsedRows: Set<string>,
+  projectStart: Date | null
+) => {
+  const sortedActivities = sortActivities(activities)
+  const root = createWbsNode('root', 'PROJECT', 'Project Schedule', 0)
+
+  sortedActivities.forEach((activity, index) =>
+    insertActivity(root, activity, index)
+  )
+
+  const rows: ScheduleRow[] = []
+  const activityIndex = new Map<string, number>()
+  sortedActivities.forEach((activity, index) =>
+    activityIndex.set(activity.id, index)
+  )
+
+  const visit = (node: WbsNode) => {
+    const summary = buildSummaryRow(node, collapsedRows, projectStart)
+    rows.push(summary)
+    if (!summary.expanded) return
+
+    const children = [...node.children.values()].sort(
+      (a, b) => a.minOrder - b.minOrder
+    )
+    children.forEach(visit)
+
+    sortActivities(node.activities).forEach((activity) => {
+      rows.push(
+        buildActivityRow(
+          activity,
+          node.level + 1,
+          projectStart,
+          activityIndex.get(activity.id) ?? 0
+        )
+      )
+    })
+  }
+
+  visit(root)
+
+  return rows
+}
+
+const buildTicks = (
+  start: Date,
+  end: Date,
+  pxPerDay: number,
+  width: number,
+  scale: TimeScale
+) => {
+  const settings = SCALE_SETTINGS[scale]
+  const monthTicks: DateTick[] = []
+  for (let date = startOfMonth(start); date <= end; date = addMonths(date, 1)) {
+    const next = addMonths(date, 1)
+    const x = Math.max(0, diffDays(start, date) * pxPerDay)
+    const x2 = Math.min(width, diffDays(start, next) * pxPerDay)
+    monthTicks.push({
+      key: `month:${date.getFullYear()}-${date.getMonth()}`,
+      date,
+      x,
+      width: Math.max(1, x2 - x),
+    })
+  }
+
+  const weekTicks: DateTick[] = []
+  for (
+    let date = startOfWeek(start);
+    date <= end;
+    date = addDays(date, 7 * settings.weekStep)
+  ) {
+    const x = Math.max(0, diffDays(start, date) * pxPerDay)
+    weekTicks.push({ key: `week:${toIsoDate(date)}`, date, x })
+  }
+
+  const dayTicks: DateTick[] = []
+  for (let date = start; date <= end; date = addDays(date, settings.dayStep)) {
+    dayTicks.push({
+      key: `day:${toIsoDate(date)}`,
+      date,
+      x: diffDays(start, date) * pxPerDay,
+    })
+  }
+
+  const weekendBands: DateTick[] = []
+  for (let date = start; date <= end; date = addDays(date, 1)) {
+    if (date.getDay() === 0 || date.getDay() === 6) {
+      weekendBands.push({
+        key: `weekend:${toIsoDate(date)}`,
+        date,
+        x: diffDays(start, date) * pxPerDay,
+        width: pxPerDay,
+      })
+    }
+  }
+
+  return { monthTicks, weekTicks, dayTicks, weekendBands }
+}
+
+const buildTimeline = (
+  activities: GanttActivity[],
+  projectStart: Date | null,
+  projectEndDate: string | null | undefined,
+  dataDateCandidate: Date,
+  pxPerDay: number,
+  scale: TimeScale
+): TimelineModel => {
+  const starts = activities.flatMap((activity) => [
+    getActivityStart(activity, projectStart),
+    getBaselineStart(activity, projectStart),
+  ])
+  const finishes = activities.flatMap((activity) => [
+    getActivityFinish(activity, projectStart),
+    getBaselineFinish(activity, projectStart),
+  ])
+  const rangeStart =
+    minDate([projectStart, ...starts]) || startOfDay(new Date())
+  const rangeFinish =
+    maxDate([parseDate(projectEndDate), ...finishes]) || addDays(rangeStart, 90)
+  const displayDataDate = resolveDisplayDataDate(
+    dataDateCandidate,
+    rangeStart,
+    rangeFinish
+  )
+  const start = startOfWeek(
+    addDays(minDate([rangeStart, displayDataDate]) || rangeStart, -3)
+  )
+  const finishBase = maxDate([rangeFinish, displayDataDate]) || rangeFinish
+  let end = endOfWeek(addDays(finishBase, 14))
+
+  if (diffDays(start, end) < 45) {
+    end = addDays(start, 60)
+  }
+
+  const totalDays = Math.max(1, diffDays(start, end) + 1)
+  const width = Math.max(720, totalDays * pxPerDay)
+  return {
+    start,
+    end,
+    totalDays,
+    width,
+    dataDate: displayDataDate,
+    scale,
+    ...buildTicks(start, end, pxPerDay, width, scale),
+  }
+}
+
+const dateToX = (
+  timeline: TimelineModel,
+  date: Date | null,
+  pxPerDay: number
+) => (date ? diffDays(timeline.start, date) * pxPerDay : 0)
+
+const getBarWidth = (
+  start: Date | null,
+  finish: Date | null,
+  pxPerDay: number,
+  fallbackDuration = 1
+) => {
+  if (start && finish) {
+    return Math.max(8, (diffDays(start, finish) + 1) * pxPerDay)
+  }
+  return Math.max(8, Math.max(1, fallbackDuration) * pxPerDay)
+}
+
+const parsePredecessorRefs = (activity: GanttActivity) =>
+  (activity.predecessors ?? '')
+    .split(',')
+    .map((raw) => raw.trim().split(/\s+/)[0])
+    .filter(Boolean)
+
+const endpointX = (geometry: ActivityGeometry, side: 'start' | 'finish') =>
+  side === 'start' ? geometry.startX : geometry.finishX
+
+const relationshipSides = (
+  relationship: DependencyRelationship
+): { predecessor: 'start' | 'finish'; successor: 'start' | 'finish' } => {
+  if (relationship === 'SS') return { predecessor: 'start', successor: 'start' }
+  if (relationship === 'FF')
+    return { predecessor: 'finish', successor: 'finish' }
+  if (relationship === 'SF')
+    return { predecessor: 'start', successor: 'finish' }
+  return { predecessor: 'finish', successor: 'start' }
+}
+
+const connectorPath = (x1: number, y1: number, x2: number, y2: number) => {
+  const runout = x2 >= x1 ? 14 : -14
+  const mid = x2 >= x1 ? Math.max(x1 + runout, (x1 + x2) / 2) : x1 + runout
+  return `M${x1},${y1} H${mid} V${y2} H${x2}`
+}
+
+const buildConnectors = (geometries: ActivityGeometry[]) => {
+  const byRef = new Map<string, ActivityGeometry>()
+  geometries.forEach((geometry) => {
+    const activity = geometry.activity
+    ;[
+      activity.id,
+      activity.activityCode,
+      activity.p6ActivityId,
+      activity.wbsCode,
+    ].forEach((ref) => {
+      if (ref) byRef.set(ref, geometry)
+    })
+  })
+
+  const connectors: Connector[] = []
+  geometries.forEach((successorGeometry) => {
+    const successor = successorGeometry.activity
+    const structured = successor.dependencies ?? []
+    const refs: ConnectorDependency[] =
+      structured.length > 0
+        ? structured
+        : parsePredecessorRefs(successor).map(
+            (ref): ConnectorDependency => ({
+              predecessorId: ref,
+              relationshipType: 'FS',
+              lagDays: 0,
+            })
+          )
+
+    refs.forEach((dependency, index) => {
+      const predecessorGeometry =
+        byRef.get(dependency.predecessorId) ||
+        byRef.get(dependency.predecessor?.activityCode ?? '') ||
+        byRef.get(dependency.predecessor?.p6ActivityId ?? '') ||
+        byRef.get(dependency.predecessor?.wbsCode ?? '')
+      if (!predecessorGeometry) return
+
+      const sides = relationshipSides(dependency.relationshipType)
+      const x1 = endpointX(predecessorGeometry, sides.predecessor)
+      const x2 = endpointX(successorGeometry, sides.successor)
+      const y1 = predecessorGeometry.y
+      const y2 = successorGeometry.y
+      const critical =
+        predecessorGeometry.activity.isCritical && successor.isCritical
+
+      connectors.push({
+        key: `${predecessorGeometry.activity.id}:${successor.id}:${index}`,
+        path: connectorPath(x1, y1, x2, y2),
+        color: critical ? COLORS.critical : COLORS.connector,
+        marker: critical ? 'url(#arrow-critical)' : 'url(#arrow-normal)',
+      })
+    })
+  })
+
+  return connectors
+}
+
 export function GanttChart({
   activities,
+  projectStartDate,
+  projectEndDate,
+  dataDate,
   onActivityUpdate,
   onActivityDelete,
 }: Props) {
-  const containerRef = useRef<HTMLDivElement>(null)
-  const [hoveredId, setHoveredId] = useState<string | null>(null)
+  const viewportRef = useRef<HTMLDivElement>(null)
+  const [hoveredRowId, setHoveredRowId] = useState<string | null>(null)
+  const [selectedRowId, setSelectedRowId] = useState<string | null>(null)
   const [tooltip, setTooltip] = useState<Tooltip | null>(null)
   const [editMode, setEditMode] = useState(false)
   const [dragging, setDragging] = useState<DragState | null>(null)
-  const [localOverrides, setLocal] = useState<
+  const [localOverrides, setLocalOverrides] = useState<
     Record<string, { earlyStart: number }>
   >({})
   const [savingId, setSavingId] = useState<string | null>(null)
   const [ctxMenu, setCtxMenu] = useState<ContextMenu | null>(null)
   const [editingId, setEditingId] = useState<string | null>(null)
-  const [showBaseline, setBaseline] = useState(false)
-  const [px, setPx] = useState(DEFAULT_PX)
+  const [showBaseline, setShowBaseline] = useState(true)
+  const [timeScale, setTimeScale] = useState<TimeScale>(DEFAULT_SCALE)
+  const [pxPerDay, setPxPerDay] = useState(DEFAULT_PX)
+  const [collapsedRows, setCollapsedRows] = useState<Set<string>>(
+    () => new Set()
+  )
+  const [scrollTop, setScrollTop] = useState(0)
+  const [scrollLeft, setScrollLeft] = useState(0)
+  const [viewportHeight, setViewportHeight] = useState(640)
   const canEditActivities = Boolean(onActivityUpdate || onActivityDelete)
+  const sourceActivities = activities as GanttActivity[]
+  const dataDateMissing = !parseDate(dataDate)
 
-  // Merge drag overrides into displayed activities
+  const projectStart = useMemo(
+    () => resolveProjectStart(sourceActivities, projectStartDate),
+    [projectStartDate, sourceActivities]
+  )
+
   const displayed = useMemo(
     () =>
-      activities.map((a) => {
-        const ov = localOverrides[a.id]
-        if (!ov) return a
+      sourceActivities.map((activity) => {
+        const override = localOverrides[activity.id]
+        if (!override) return activity
+
+        const earlyStart = override.earlyStart
+        const earlyFinish = earlyStart + (activity.duration || 0)
         return {
-          ...a,
-          earlyStart: ov.earlyStart,
-          earlyFinish: ov.earlyStart + (a.duration || 0),
+          ...activity,
+          earlyStart,
+          earlyFinish,
+          earlyStartDate: projectStart
+            ? toIsoDate(addDays(projectStart, earlyStart))
+            : activity.earlyStartDate,
+          earlyFinishDate: projectStart
+            ? toIsoDate(addDays(projectStart, earlyFinish))
+            : activity.earlyFinishDate,
         }
       }),
-    [activities, localOverrides]
+    [localOverrides, projectStart, sourceActivities]
   )
 
-  const maxDay = useMemo(
-    () => Math.max(...displayed.map((a) => a.earlyFinish ?? 0), 30),
-    [displayed]
+  const dataDateCandidate = useMemo(
+    () => resolveDataDateCandidate(displayed, dataDate),
+    [dataDate, displayed]
   )
-  const chartW = maxDay * px + 80
-  const totalH = displayed.length * ROW_H
 
-  // Stats
-  const nCritical = displayed.filter(
-    (a) => a.isCritical && !a.isMilestone
-  ).length
-  const nNearCrit = displayed.filter(isNearCritical).length
-  const nMilestone = displayed.filter((a) => a.isMilestone).length
+  const rows = useMemo(
+    () => buildRows(displayed, collapsedRows, projectStart),
+    [collapsedRows, displayed, projectStart]
+  )
 
-  // Timescale ticks
-  const monthTicks = useMemo(() => {
-    const t: number[] = []
-    for (let d = 0; d <= maxDay + DAYS_PER_MON; d += DAYS_PER_MON) t.push(d)
-    return t
-  }, [maxDay])
+  const timeline = useMemo(
+    () =>
+      buildTimeline(
+        displayed,
+        projectStart,
+        projectEndDate,
+        dataDateCandidate,
+        pxPerDay,
+        timeScale
+      ),
+    [
+      dataDateCandidate,
+      displayed,
+      projectEndDate,
+      projectStart,
+      pxPerDay,
+      timeScale,
+    ]
+  )
 
-  const weekTicks = useMemo(() => {
-    const t: number[] = []
-    for (let d = 0; d <= maxDay + 5; d += 5) t.push(d)
-    return t
-  }, [maxDay])
+  const totalHeight = rows.length * ROW_H
+  const contentWidth = GRID_W + timeline.width
 
-  // Geometry helpers
-  const bx = (a: ScheduleActivity) => (a.earlyStart ?? 0) * px
-  const bw = (a: ScheduleActivity) => Math.max(8, (a.duration || 0) * px)
-  const by = (i: number) => TIMESCALE_H + i * ROW_H + (ROW_H - BAR_H) / 2
+  const visibleRows = useMemo(() => {
+    const bodyTop = Math.max(0, scrollTop - HEADER_H)
+    const first = Math.max(0, Math.floor(bodyTop / ROW_H) - OVERSCAN)
+    const last = Math.min(
+      rows.length,
+      Math.ceil((bodyTop + viewportHeight) / ROW_H) + OVERSCAN
+    )
 
-  // Activity id → index map for arrows
-  const actMap = useMemo(() => {
-    const m = new Map<string, { act: ScheduleActivity; idx: number }>()
-    displayed.forEach((a, idx) => {
-      m.set(a.id, { act: a, idx })
-      if (a.wbsCode) m.set(a.wbsCode, { act: a, idx })
-    })
-    return m
-  }, [displayed])
-
-  // Dependency arrows
-  const arrows = useMemo(() => {
-    type Arrow = {
-      x1: number
-      y1: number
-      x2: number
-      y2: number
-      color: string
-      marker: string
-    }
-    const lines: Arrow[] = []
-    displayed.forEach((succ, si) => {
-      const dependencyRefs =
-        succ.dependencies?.length > 0
-          ? succ.dependencies.map((dependency) => dependency.predecessorId)
-          : (succ.predecessors ?? '')
-              .split(',')
-              .map((raw) => raw.trim().split(/\s+/)[0])
-              .filter(Boolean)
-
-      dependencyRefs.forEach((predCode) => {
-        const pred = actMap.get(predCode)
-        if (!pred) return
-        const { act: pa, idx: pi } = pred
-        const x1 =
-          (pa.earlyStart ?? 0) * px + Math.max(8, (pa.duration || 0) * px)
-        const y1 = TIMESCALE_H + pi * ROW_H + ROW_H / 2
-        const x2 = (succ.earlyStart ?? 0) * px
-        const y2 = TIMESCALE_H + si * ROW_H + ROW_H / 2
-        const color =
-          succ.isCritical && pa.isCritical
-            ? COLOR.critical
-            : isNearCritical(succ) && isNearCritical(pa)
-              ? COLOR.nearCrit
-              : COLOR.normal
-        const marker =
-          succ.isCritical && pa.isCritical
-            ? 'url(#mk-crit)'
-            : isNearCritical(succ)
-              ? 'url(#mk-near)'
-              : 'url(#mk-fs)'
-        lines.push({ x1, y1, x2, y2, color, marker })
-      })
-    })
-    return lines
-  }, [displayed, actMap, px])
+    return rows
+      .slice(first, last)
+      .map((row, offset) => ({ ...row, index: first + offset }))
+  }, [rows, scrollTop, viewportHeight])
 
   const editingActivity = useMemo(
     () =>
@@ -211,21 +919,39 @@ export function GanttChart({
     [displayed, editingId]
   )
 
-  // ── Drag handlers ──────────────────────────────────────────────────────────
+  const nCritical = displayed.filter(
+    (activity) => activity.isCritical && !activity.isMilestone
+  ).length
+  const nNearCritical = displayed.filter(isNearCritical).length
+  const nMilestone = displayed.filter((activity) => activity.isMilestone).length
+
+  useEffect(() => {
+    const element = viewportRef.current
+    if (!element) return
+
+    const update = () => setViewportHeight(element.clientHeight || 640)
+    update()
+
+    const resizeObserver = new ResizeObserver(update)
+    resizeObserver.observe(element)
+    return () => resizeObserver.disconnect()
+  }, [])
+
   const commitDrag = async (state: DragState) => {
     if (!onActivityUpdate || state.currentStart === state.origStart) return
-    const base = activities.find((a) => a.id === state.id)
+    const base = sourceActivities.find((activity) => activity.id === state.id)
     if (!base) return
+
     setSavingId(state.id)
     try {
       await onActivityUpdate(state.id, {
         earlyStart: state.currentStart,
         earlyFinish: state.currentStart + (base.duration || 0),
       })
-      setLocal((prev) => {
-        const n = { ...prev }
-        delete n[state.id]
-        return n
+      setLocalOverrides((prev) => {
+        const next = { ...prev }
+        delete next[state.id]
+        return next
       })
     } catch {
       toast.error('Failed to update activity')
@@ -234,30 +960,49 @@ export function GanttChart({
     }
   }
 
-  const onMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
+  const handleMouseMove = (event: React.MouseEvent<HTMLDivElement>) => {
     if (!dragging || !editMode) return
-    const deltaDays = Math.round((e.clientX - dragging.startX) / px)
+    const deltaDays = Math.round((event.clientX - dragging.startX) / pxPerDay)
     const nextStart = Math.max(0, dragging.origStart + deltaDays)
     setDragging((prev) => (prev ? { ...prev, currentStart: nextStart } : prev))
-    setLocal((prev) => ({ ...prev, [dragging.id]: { earlyStart: nextStart } }))
+    setLocalOverrides((prev) => ({
+      ...prev,
+      [dragging.id]: { earlyStart: nextStart },
+    }))
   }
 
-  const onMouseUp = async () => {
+  const handleMouseUp = async () => {
     if (!dragging) return
     const state = dragging
     setDragging(null)
     await commitDrag(state)
   }
 
-  // ── Context menu actions ───────────────────────────────────────────────────
-  const openCtx = (e: React.MouseEvent, a: ScheduleActivity) => {
+  const openContextMenu = (
+    event: React.MouseEvent,
+    activity: GanttActivity
+  ) => {
     if (!editMode || !canEditActivities) return
-    e.preventDefault()
-    const rect = containerRef.current?.getBoundingClientRect()
+    event.preventDefault()
+    const rect = viewportRef.current?.getBoundingClientRect()
+    setSelectedRowId(`activity:${activity.id}`)
     setCtxMenu({
-      id: a.id,
-      x: e.clientX - (rect?.left ?? 0),
-      y: e.clientY - (rect?.top ?? 0),
+      id: activity.id,
+      x: event.clientX - (rect?.left ?? 0) + scrollLeft,
+      y: event.clientY - (rect?.top ?? 0) + scrollTop,
+    })
+  }
+
+  const showTooltip = (
+    event: React.MouseEvent<SVGElement>,
+    activity: GanttActivity
+  ) => {
+    const rect = viewportRef.current?.getBoundingClientRect()
+    if (!rect) return
+    setTooltip({
+      activity,
+      x: event.clientX - rect.left + scrollLeft + 12,
+      y: event.clientY - rect.top + scrollTop - 8,
     })
   }
 
@@ -267,7 +1012,7 @@ export function GanttChart({
     try {
       await onActivityUpdate(id, { isMilestone: true })
     } catch {
-      toast.error('Failed')
+      toast.error('Failed to update activity')
     } finally {
       setSavingId(null)
       setCtxMenu(null)
@@ -280,7 +1025,7 @@ export function GanttChart({
     try {
       await onActivityDelete(id)
     } catch {
-      toast.error('Failed')
+      toast.error('Failed to delete activity')
     } finally {
       setSavingId(null)
       setCtxMenu(null)
@@ -294,46 +1039,39 @@ export function GanttChart({
       await onActivityUpdate(editingActivity.id, patch)
       setEditingId(null)
     } catch {
-      toast.error('Failed to save')
+      toast.error('Failed to save activity')
     } finally {
       setSavingId(null)
     }
   }
 
-  // ── Tooltip handler ────────────────────────────────────────────────────────
-  const showTooltip = (
-    e: React.MouseEvent<SVGElement>,
-    a: ScheduleActivity
-  ) => {
-    const rect = containerRef.current?.getBoundingClientRect()
-    if (!rect) return
-    setTooltip({
-      activity: a,
-      x: e.clientX - rect.left + 12,
-      y: e.clientY - rect.top - 8,
+  const toggleSummaryRow = (rowId: string) => {
+    setCollapsedRows((prev) => {
+      const next = new Set(prev)
+      if (next.has(rowId)) next.delete(rowId)
+      else next.add(rowId)
+      return next
     })
   }
 
   if (displayed.length === 0) {
     return (
-      <div className='flex items-center justify-center py-16 text-sm text-muted-foreground'>
+      <div className='flex items-center justify-center rounded-md border bg-card py-16 text-sm text-muted-foreground'>
         No activities to display.
       </div>
     )
   }
 
   return (
-    <div className='flex flex-col gap-3'>
-      {/* ── Toolbar ─────────────────────────────────────────────────────────── */}
-      <div className='flex flex-wrap items-center justify-between gap-2 rounded-xl border bg-card px-4 py-3'>
-        {/* Left: actions */}
-        <div className='flex items-center gap-2'>
+    <div className='space-y-3'>
+      <div className='flex flex-wrap items-center justify-between gap-3 rounded-md border bg-card px-3 py-2'>
+        <div className='flex flex-wrap items-center gap-2'>
           {canEditActivities && (
             <Button
               size='sm'
               variant={editMode ? 'default' : 'outline'}
               onClick={() => {
-                setEditMode((p) => !p)
+                setEditMode((prev) => !prev)
                 setCtxMenu(null)
                 setDragging(null)
               }}
@@ -346,63 +1084,93 @@ export function GanttChart({
           <Button
             size='sm'
             variant={showBaseline ? 'secondary' : 'outline'}
-            onClick={() => setBaseline((p) => !p)}
+            onClick={() => setShowBaseline((prev) => !prev)}
           >
             <Layers className='mr-1.5 h-3.5 w-3.5' />
             Baseline
           </Button>
+          <div className='flex items-center gap-1 rounded-md border bg-muted/30 p-1'>
+            {(Object.keys(SCALE_SETTINGS) as TimeScale[]).map((scale) => (
+              <Button
+                key={scale}
+                type='button'
+                size='sm'
+                variant={timeScale === scale ? 'secondary' : 'ghost'}
+                className='h-7 px-2 text-xs'
+                onClick={() => {
+                  setTimeScale(scale)
+                  setPxPerDay(SCALE_SETTINGS[scale].pxPerDay)
+                }}
+              >
+                {SCALE_SETTINGS[scale].label}
+              </Button>
+            ))}
+          </div>
+          {dataDateMissing && (
+            <span className='inline-flex items-center gap-1 rounded-md border border-blue-500/30 bg-blue-500/10 px-2 py-1 text-xs font-medium text-blue-700 dark:text-blue-300'>
+              <AlertTriangle className='h-3.5 w-3.5' />
+              Data date not set; using today
+            </span>
+          )}
         </div>
 
-        {/* Centre: stats */}
-        <div className='flex items-center gap-1'>
+        <div className='flex flex-wrap items-center gap-1.5'>
           {[
+            { label: 'Activities', value: displayed.length, className: '' },
+            { label: 'Critical', value: nCritical, className: 'text-red-600' },
             {
-              label: 'Total',
-              value: displayed.length,
-              color: 'text-foreground',
+              label: 'Near Crit',
+              value: nNearCritical,
+              className: 'text-orange-600',
             },
-            { label: 'Critical', value: nCritical, color: 'text-red-500' },
-            { label: 'Near-Crit', value: nNearCrit, color: 'text-orange-500' },
             {
               label: 'Milestones',
               value: nMilestone,
-              color: 'text-purple-500',
+              className: 'text-purple-600',
             },
-          ].map((s) => (
+          ].map((stat) => (
             <div
-              key={s.label}
-              className='flex min-w-15 flex-col items-center rounded-lg border bg-muted/30 px-3 py-1'
+              key={stat.label}
+              className='min-w-20 rounded-md border bg-muted/25 px-2 py-1 text-center'
             >
-              <span className={`text-sm font-bold tabular-nums ${s.color}`}>
-                {s.value}
-              </span>
-              <span className='text-[10px] text-muted-foreground'>
-                {s.label}
-              </span>
+              <div
+                className={cn(
+                  'text-sm font-semibold tabular-nums',
+                  stat.className
+                )}
+              >
+                {stat.value}
+              </div>
+              <div className='text-[10px] text-muted-foreground'>
+                {stat.label}
+              </div>
             </div>
           ))}
         </div>
 
-        {/* Right: zoom */}
-        <div className='flex items-center gap-1 rounded-lg border bg-muted/40 p-1'>
+        <div className='flex items-center gap-1 rounded-md border bg-muted/30 p-1'>
           <Button
             size='icon'
             variant='ghost'
             className='h-7 w-7'
-            disabled={px <= MIN_PX}
-            onClick={() => setPx((v) => Math.max(MIN_PX, v - 1))}
+            disabled={pxPerDay <= MIN_PX}
+            onClick={() => setPxPerDay((value) => Math.max(MIN_PX, value - 1))}
+            aria-label='Zoom out'
+            title='Zoom out'
           >
             <ZoomOut className='h-3.5 w-3.5' />
           </Button>
-          <span className='w-14 text-center text-[11px] font-medium text-muted-foreground select-none'>
-            {px}px/day
+          <span className='w-16 text-center font-mono text-[11px] text-muted-foreground'>
+            {pxPerDay}px/day
           </span>
           <Button
             size='icon'
             variant='ghost'
             className='h-7 w-7'
-            disabled={px >= MAX_PX}
-            onClick={() => setPx((v) => Math.min(MAX_PX, v + 1))}
+            disabled={pxPerDay >= MAX_PX}
+            onClick={() => setPxPerDay((value) => Math.min(MAX_PX, value + 1))}
+            aria-label='Zoom in'
+            title='Zoom in'
           >
             <ZoomIn className='h-3.5 w-3.5' />
           </Button>
@@ -410,620 +1178,110 @@ export function GanttChart({
             size='icon'
             variant='ghost'
             className='h-7 w-7'
-            onClick={() => setPx(DEFAULT_PX)}
+            onClick={() => {
+              setTimeScale(DEFAULT_SCALE)
+              setPxPerDay(DEFAULT_PX)
+            }}
+            aria-label='Reset zoom'
+            title='Reset zoom'
           >
             <RotateCcw className='h-3.5 w-3.5' />
           </Button>
         </div>
       </div>
 
-      {editMode && (
-        <p className='px-1 text-xs text-muted-foreground'>
-          Drag bars to shift start day · Right-click for quick actions
-        </p>
-      )}
-
-      {/* ── Chart container ──────────────────────────────────────────────────── */}
       <div
-        ref={containerRef}
-        className='relative overflow-auto rounded-xl border bg-card'
-        style={{ maxHeight: 620 }}
-        onMouseMove={onMouseMove}
-        onMouseUp={onMouseUp}
+        ref={viewportRef}
+        data-testid='primavera-gantt-viewport'
+        className='relative overflow-auto rounded-md border bg-card shadow-sm'
+        style={{ maxHeight: 680 }}
+        onScroll={(event) => {
+          setScrollTop(event.currentTarget.scrollTop)
+          setScrollLeft(event.currentTarget.scrollLeft)
+          setCtxMenu(null)
+        }}
+        onMouseMove={handleMouseMove}
+        onMouseUp={handleMouseUp}
         onMouseLeave={() => {
-          onMouseUp()
+          void handleMouseUp()
           setTooltip(null)
         }}
         onClick={() => setCtxMenu(null)}
       >
-        <div style={{ display: 'flex', minWidth: LABEL_W + chartW }}>
-          {/* ── Left label panel ─────────────────────────────────────────────── */}
+        <div
+          className='relative flex'
+          style={{
+            minWidth: contentWidth,
+            height: HEADER_H + totalHeight,
+          }}
+        >
+          <ScheduleGrid
+            rows={visibleRows}
+            totalHeight={totalHeight}
+            hoveredRowId={hoveredRowId}
+            selectedRowId={selectedRowId}
+            savingId={savingId}
+            canEditActivities={canEditActivities}
+            onHover={setHoveredRowId}
+            onSelect={setSelectedRowId}
+            onToggleSummary={toggleSummaryRow}
+            onEditActivity={setEditingId}
+            onContextMenu={openContextMenu}
+          />
+
           <div
-            className='sticky left-0 z-20 bg-card'
-            style={{
-              width: LABEL_W,
-              flexShrink: 0,
-              borderRight: `1px solid ${CSS.border}`,
-            }}
+            className='relative shrink-0'
+            style={{ width: timeline.width, height: HEADER_H + totalHeight }}
           >
-            {/* Header row */}
-            <div
-              className='flex items-center justify-between border-b bg-muted/50 px-3'
-              style={{ height: TIMESCALE_H }}
-            >
-              <span className='text-[10px] font-semibold tracking-widest text-muted-foreground uppercase'>
-                Activity / WBS
-              </span>
-              <span className='font-mono text-[10px] text-muted-foreground'>
-                dur · %
-              </span>
-            </div>
-
-            {/* Rows */}
-            {displayed.map((a, i) => {
-              const hov = hoveredId === a.id
-              const color = a.isMilestone
-                ? 'text-purple-600 dark:text-purple-400'
-                : a.isCritical
-                  ? 'text-red-600 dark:text-red-400'
-                  : isNearCritical(a)
-                    ? 'text-orange-600 dark:text-orange-400'
-                    : 'text-foreground'
-
-              return (
-                <div
-                  key={a.id}
-                  onMouseEnter={() => setHoveredId(a.id)}
-                  onMouseLeave={() => setHoveredId(null)}
-                  style={{
-                    height: ROW_H,
-                    borderBottom: `1px solid ${CSS.border}`,
-                  }}
-                  className={`flex items-center gap-2 px-2 transition-colors ${hov ? 'bg-blue-50/60 dark:bg-blue-950/20' : i % 2 === 0 ? '' : 'bg-muted/20'}`}
-                >
-                  {/* type indicator dot */}
-                  <span className='shrink-0'>
-                    {a.isMilestone ? (
-                      <span className='text-xs leading-none text-purple-500'>
-                        ◆
-                      </span>
-                    ) : a.isCritical ? (
-                      <span className='inline-block h-2 w-2 rounded-full bg-red-500' />
-                    ) : isNearCritical(a) ? (
-                      <span className='inline-block h-2 w-2 rounded-full bg-orange-400' />
-                    ) : (
-                      <span className='inline-block h-2 w-2 rounded-full bg-blue-400/50' />
-                    )}
-                  </span>
-
-                  {/* Name + WBS */}
-                  <div className='min-w-0 flex-1'>
-                    <p
-                      className={`truncate text-[11px] leading-tight font-semibold ${color}`}
-                      title={a.name}
-                    >
-                      {a.name}
-                    </p>
-                    <p className='truncate text-[10px] text-muted-foreground'>
-                      {a.wbsCode ?? '—'}
-                    </p>
-                  </div>
-
-                  {/* Duration + % */}
-                  <div className='shrink-0 text-right'>
-                    <p className='font-mono text-[10px] font-medium text-foreground'>
-                      {a.duration}d
-                    </p>
-                    <p className='text-[10px] text-muted-foreground'>
-                      {a.pctComplete}%
-                    </p>
-                  </div>
-                </div>
-              )
-            })}
-          </div>
-
-          {/* ── SVG chart area ──────────────────────────────────────────────── */}
-          <div style={{ position: 'relative', flex: 1, minWidth: 0 }}>
-            <svg
-              width={chartW}
-              height={TIMESCALE_H + totalH + 4}
-              style={{ display: 'block', userSelect: 'none' }}
-            >
-              <defs>
-                {/* Arrow markers */}
-                {[
-                  { id: 'mk-fs', fill: COLOR.normal },
-                  { id: 'mk-crit', fill: COLOR.critical },
-                  { id: 'mk-near', fill: COLOR.nearCrit },
-                ].map(({ id, fill }) => (
-                  <marker
-                    key={id}
-                    id={id}
-                    markerWidth='6'
-                    markerHeight='6'
-                    refX='5'
-                    refY='3'
-                    orient='auto'
-                  >
-                    <path d='M0,0 L0,6 L6,3 z' fill={fill} opacity='0.85' />
-                  </marker>
-                ))}
-
-                {/* Critical diagonal stripe */}
-                <pattern
-                  id='stripe-crit'
-                  patternUnits='userSpaceOnUse'
-                  width='6'
-                  height='6'
-                  patternTransform='rotate(40)'
-                >
-                  <line
-                    x1='0'
-                    y1='0'
-                    x2='0'
-                    y2='6'
-                    stroke='white'
-                    strokeWidth='2'
-                    opacity='0.18'
-                  />
-                </pattern>
-
-                {/* Bar gradients */}
-                {[
-                  { id: 'grad-crit', from: '#F87171', to: '#DC2626' },
-                  { id: 'grad-near', from: '#FB923C', to: '#EA580C' },
-                  { id: 'grad-normal', from: '#60A5FA', to: '#2563EB' },
-                  { id: 'grad-ms', from: '#C084FC', to: '#9333EA' },
-                ].map(({ id, from, to }) => (
-                  <linearGradient key={id} id={id} x1='0' y1='0' x2='0' y2='1'>
-                    <stop offset='0%' stopColor={from} />
-                    <stop offset='100%' stopColor={to} />
-                  </linearGradient>
-                ))}
-              </defs>
-
-              {/* ── Timescale background ── */}
-              <rect
-                x={0}
-                y={0}
-                width={chartW}
-                height={TIMESCALE_H}
-                style={{ fill: CSS.muted }}
-              />
-
-              {/* Week band shading */}
-              {weekTicks.map((d, i) =>
-                i % 2 === 1 ? (
-                  <rect
-                    key={`wb-${d}`}
-                    x={d * px}
-                    y={TIMESCALE_H}
-                    width={5 * px}
-                    height={totalH}
-                    fill='rgba(0,0,0,0.018)'
-                  />
-                ) : null
-              )}
-
-              {/* Month columns + labels */}
-              {monthTicks.map((d, i) => (
-                <g key={`mt-${i}`}>
-                  {/* Separator */}
-                  <line
-                    x1={d * px}
-                    y1={0}
-                    x2={d * px}
-                    y2={TIMESCALE_H + totalH}
-                    style={{ stroke: CSS.border }}
-                    strokeWidth={i === 0 ? 0 : 1}
-                  />
-
-                  {/* Month label (top row) */}
-                  <rect
-                    x={d * px}
-                    y={0}
-                    width={DAYS_PER_MON * px}
-                    height={26}
-                    fill='transparent'
-                  />
-                  <text
-                    x={d * px + (DAYS_PER_MON * px) / 2}
-                    y={17}
-                    textAnchor='middle'
-                    fontSize={10}
-                    fontWeight={600}
-                    style={{ fill: CSS.fg }}
-                    fontFamily='system-ui, sans-serif'
-                  >
-                    Month {i + 1}
-                  </text>
-
-                  {/* Separator between rows */}
-                  <line
-                    x1={d * px}
-                    y1={26}
-                    x2={d * px + DAYS_PER_MON * px}
-                    y2={26}
-                    style={{ stroke: CSS.border }}
-                    strokeWidth={0.5}
-                  />
-
-                  {/* Week sub-ticks (bottom row) */}
-                  {[0, 5, 10, 15, 20].map((offset) => {
-                    const wd = d + offset
-                    if (wd > maxDay + 5) return null
-                    return (
-                      <g key={`wk-${wd}`}>
-                        <line
-                          x1={wd * px}
-                          y1={27}
-                          x2={wd * px}
-                          y2={TIMESCALE_H}
-                          style={{ stroke: CSS.border }}
-                          strokeWidth={0.5}
-                        />
-                        <text
-                          x={wd * px + 3}
-                          y={TIMESCALE_H - 5}
-                          fontSize={8}
-                          style={{ fill: CSS.mutedFg }}
-                          fontFamily='monospace'
-                        >
-                          W{Math.floor(wd / 5) + 1}
-                        </text>
-                      </g>
-                    )
-                  })}
-                </g>
-              ))}
-
-              {/* Timescale bottom border */}
-              <line
-                x1={0}
-                y1={TIMESCALE_H}
-                x2={chartW}
-                y2={TIMESCALE_H}
-                style={{ stroke: CSS.border }}
-                strokeWidth={1.5}
-              />
-
-              {/* Row dividers */}
-              {displayed.map((_, i) => (
-                <line
-                  key={`rd-${i}`}
-                  x1={0}
-                  y1={TIMESCALE_H + (i + 1) * ROW_H}
-                  x2={chartW}
-                  y2={TIMESCALE_H + (i + 1) * ROW_H}
-                  style={{ stroke: CSS.border }}
-                  strokeWidth={0.5}
-                />
-              ))}
-
-              {/* Today line */}
-              {maxDay > 30 && (
-                <g>
-                  <rect
-                    x={30 * px - 1}
-                    y={TIMESCALE_H}
-                    width={2}
-                    height={totalH}
-                    fill={COLOR.today}
-                    opacity={0.5}
-                  />
-                  <rect
-                    x={30 * px - 18}
-                    y={TIMESCALE_H + 2}
-                    width={36}
-                    height={14}
-                    fill={COLOR.today}
-                    rx={3}
-                    opacity={0.9}
-                  />
-                  <text
-                    x={30 * px}
-                    y={TIMESCALE_H + 12}
-                    textAnchor='middle'
-                    fontSize={8}
-                    fontWeight={700}
-                    fill='white'
-                    fontFamily='system-ui'
-                  >
-                    TODAY
-                  </text>
-                </g>
-              )}
-
-              {/* Dependency arrows */}
-              {arrows.map((ln, i) => {
-                const mid = Math.max(ln.x1 + 8, (ln.x1 + ln.x2) / 2)
-                const d = `M${ln.x1},${ln.y1} H${mid} V${ln.y2} H${ln.x2}`
-                return (
-                  <path
-                    key={i}
-                    d={d}
-                    fill='none'
-                    stroke={ln.color}
-                    strokeWidth={1.2}
-                    opacity={0.45}
-                    markerEnd={ln.marker}
-                  />
-                )
-              })}
-
-              {/* Activity bars */}
-              {displayed.map((a, i) => {
-                const x = bx(a)
-                const w = bw(a)
-                const y = by(i)
-                const hov = hoveredId === a.id
-                const tf = a.totalFloat ?? 0
-
-                const gradId = a.isMilestone
-                  ? 'grad-ms'
-                  : a.isCritical
-                    ? 'grad-crit'
-                    : isNearCritical(a)
-                      ? 'grad-near'
-                      : 'grad-normal'
-
-                // Milestone diamond
-                if (a.isMilestone) {
-                  const mx = (a.earlyStart ?? 0) * px
-                  const my = TIMESCALE_H + i * ROW_H + ROW_H / 2
-                  const s = hov ? 9 : 7
-                  return (
-                    <g
-                      key={a.id}
-                      onMouseEnter={() => setHoveredId(a.id)}
-                      onMouseLeave={() => {
-                        setHoveredId(null)
-                        setTooltip(null)
-                      }}
-                      onMouseMove={(e) => showTooltip(e, a)}
-                      onContextMenu={(e) => openCtx(e, a)}
-                      style={{ cursor: 'pointer' }}
-                    >
-                      <polygon
-                        points={`${mx},${my - s} ${mx + s},${my} ${mx},${my + s} ${mx - s},${my}`}
-                        fill={`url(#grad-ms)`}
-                        stroke='white'
-                        strokeWidth={1.2}
-                        opacity={hov ? 1 : 0.9}
-                      />
-                    </g>
-                  )
+            <TimelineHeader timeline={timeline} pxPerDay={pxPerDay} />
+            <GanttCanvas
+              rows={visibleRows}
+              totalHeight={totalHeight}
+              timeline={timeline}
+              pxPerDay={pxPerDay}
+              showBaseline={showBaseline}
+              hoveredRowId={hoveredRowId}
+              selectedRowId={selectedRowId}
+              savingId={savingId}
+              editMode={editMode}
+              canUpdateActivities={Boolean(onActivityUpdate)}
+              draggingId={dragging?.id ?? null}
+              onHover={setHoveredRowId}
+              onSelect={setSelectedRowId}
+              onTooltip={showTooltip}
+              onContextMenu={openContextMenu}
+              onDragStart={(event, activity) => {
+                if (!editMode || !onActivityUpdate || activity.isMilestone) {
+                  return
                 }
-
-                return (
-                  <g
-                    key={a.id}
-                    onMouseEnter={() => setHoveredId(a.id)}
-                    onMouseLeave={() => {
-                      setHoveredId(null)
-                      setTooltip(null)
-                    }}
-                    onMouseMove={(e) => showTooltip(e, a)}
-                    onMouseDown={(e) => {
-                      if (!editMode || !onActivityUpdate || a.isMilestone)
-                        return
-                      e.preventDefault()
-                      e.stopPropagation()
-                      setDragging({
-                        id: a.id,
-                        startX: e.clientX,
-                        origStart: a.earlyStart ?? 0,
-                        currentStart: a.earlyStart ?? 0,
-                      })
-                    }}
-                    onContextMenu={(e) => openCtx(e, a)}
-                    style={{
-                      cursor:
-                        editMode && onActivityUpdate && !a.isMilestone
-                          ? dragging?.id === a.id
-                            ? 'grabbing'
-                            : 'grab'
-                          : 'default',
-                    }}
-                  >
-                    {/* Baseline strip */}
-                    {showBaseline && a.baselineStart != null && (
-                      <rect
-                        x={(a.baselineStart ?? 0) * px}
-                        y={y - 6}
-                        width={Math.max(
-                          4,
-                          ((a.baselineFinish ?? 0) - (a.baselineStart ?? 0)) *
-                            px
-                        )}
-                        height={4}
-                        fill={COLOR.baseline}
-                        opacity={0.65}
-                        rx={1}
-                      />
-                    )}
-
-                    {/* Float bar */}
-                    {tf > 0 && (
-                      <rect
-                        x={x + w}
-                        y={y + 4}
-                        width={tf * px}
-                        height={BAR_H - 8}
-                        fill={COLOR.float}
-                        opacity={0.25}
-                        rx={2}
-                      />
-                    )}
-
-                    {/* Progress underlay */}
-                    {a.pctComplete > 0 && (
-                      <rect
-                        x={x}
-                        y={y}
-                        width={w * (a.pctComplete / 100)}
-                        height={BAR_H}
-                        fill={barColor(a)}
-                        opacity={0.35}
-                        rx={3}
-                      />
-                    )}
-
-                    {/* Main bar */}
-                    <rect
-                      x={x}
-                      y={y}
-                      width={w}
-                      height={BAR_H}
-                      fill={`url(#${gradId})`}
-                      stroke='rgba(255,255,255,0.25)'
-                      strokeWidth={0.8}
-                      opacity={hov ? 1 : 0.82}
-                      rx={3}
-                    />
-
-                    {/* Critical stripe overlay */}
-                    {a.isCritical && (
-                      <rect
-                        x={x}
-                        y={y}
-                        width={w}
-                        height={BAR_H}
-                        fill='url(#stripe-crit)'
-                        rx={3}
-                      />
-                    )}
-
-                    {/* Duration label */}
-                    {w > 30 && (
-                      <text
-                        x={x + w / 2}
-                        y={y + BAR_H / 2 + 4}
-                        textAnchor='middle'
-                        fontSize={8}
-                        fontWeight={700}
-                        fontFamily='monospace'
-                        fill='white'
-                        style={{ pointerEvents: 'none' }}
-                      >
-                        {a.duration}d
-                      </text>
-                    )}
-
-                    {/* Saving spinner dots */}
-                    {savingId === a.id && (
-                      <text
-                        x={x + w + 4}
-                        y={y + BAR_H / 2 + 3}
-                        fontSize={9}
-                        style={{ fill: CSS.mutedFg }}
-                      >
-                        ⋯
-                      </text>
-                    )}
-                  </g>
-                )
-              })}
-            </svg>
-
-            {/* ── HTML Tooltip overlay ──────────────────────────────────────── */}
-            {tooltip && !dragging && (
-              <div
-                className='pointer-events-none absolute z-50 max-w-55 rounded-lg border bg-popover text-popover-foreground shadow-xl'
-                style={{
-                  left: Math.min(tooltip.x, chartW - 230),
-                  top: Math.max(4, tooltip.y - 80),
-                }}
-              >
-                <div className='border-b px-3 py-2'>
-                  <p className='line-clamp-2 text-[11px] leading-tight font-semibold'>
-                    {tooltip.activity.name}
-                  </p>
-                  {tooltip.activity.wbsCode && (
-                    <p className='mt-0.5 font-mono text-[10px] text-muted-foreground'>
-                      {tooltip.activity.wbsCode}
-                    </p>
-                  )}
-                </div>
-                <div className='grid grid-cols-2 gap-x-4 gap-y-1 px-3 py-2 text-[10px]'>
-                  <span className='text-muted-foreground'>Start</span>
-                  <span className='font-mono font-medium'>
-                    d{tooltip.activity.earlyStart ?? '—'}
-                  </span>
-                  <span className='text-muted-foreground'>Start Date</span>
-                  <span className='font-mono font-medium'>
-                    {formatCalendarDate(tooltip.activity.earlyStartDate)}
-                  </span>
-                  <span className='text-muted-foreground'>Finish</span>
-                  <span className='font-mono font-medium'>
-                    d{tooltip.activity.earlyFinish ?? '—'}
-                  </span>
-                  <span className='text-muted-foreground'>Finish Date</span>
-                  <span className='font-mono font-medium'>
-                    {formatCalendarDate(tooltip.activity.earlyFinishDate)}
-                  </span>
-                  <span className='text-muted-foreground'>Duration</span>
-                  <span className='font-mono font-medium'>
-                    {tooltip.activity.duration}d
-                  </span>
-                  <span className='text-muted-foreground'>Float</span>
-                  <span
-                    className={`font-mono font-medium ${tooltip.activity.isCritical ? 'text-red-500' : isNearCritical(tooltip.activity) ? 'text-orange-500' : ''}`}
-                  >
-                    {tooltip.activity.isCritical
-                      ? '0d ⚠'
-                      : isNearCritical(tooltip.activity)
-                        ? `${tooltip.activity.totalFloat}d ⚠`
-                        : `${tooltip.activity.totalFloat ?? '—'}d`}
-                  </span>
-                  <span className='text-muted-foreground'>Progress</span>
-                  <span className='font-mono font-medium'>
-                    {tooltip.activity.pctComplete}%
-                  </span>
-                  {tooltip.activity.budget != null &&
-                    tooltip.activity.budget > 0 && (
-                      <>
-                        <span className='text-muted-foreground'>Budget</span>
-                        <span className='font-mono font-medium'>
-                          ${tooltip.activity.budget.toLocaleString()}
-                        </span>
-                      </>
-                    )}
-                </div>
-                {/* Status pill */}
-                <div className='border-t px-3 py-1.5'>
-                  <span
-                    className={`inline-flex items-center rounded-full px-2 py-0.5 text-[9px] font-semibold ${
-                      tooltip.activity.isCritical
-                        ? 'bg-red-100 text-red-700'
-                        : isNearCritical(tooltip.activity)
-                          ? 'bg-orange-100 text-orange-700'
-                          : tooltip.activity.isMilestone
-                            ? 'bg-purple-100 text-purple-700'
-                            : 'bg-blue-100 text-blue-700'
-                    }`}
-                  >
-                    {tooltip.activity.isCritical
-                      ? 'CRITICAL'
-                      : isNearCritical(tooltip.activity)
-                        ? 'NEAR-CRITICAL'
-                        : tooltip.activity.isMilestone
-                          ? 'MILESTONE'
-                          : 'NON-CRITICAL'}
-                  </span>
-                </div>
-              </div>
-            )}
+                event.preventDefault()
+                event.stopPropagation()
+                setSelectedRowId(`activity:${activity.id}`)
+                setDragging({
+                  id: activity.id,
+                  startX: event.clientX,
+                  origStart: activity.earlyStart ?? 0,
+                  currentStart: activity.earlyStart ?? 0,
+                })
+              }}
+            />
           </div>
         </div>
 
-        {/* ── Context menu ──────────────────────────────────────────────────── */}
+        {tooltip && !dragging && (
+          <ActivityTooltip
+            tooltip={tooltip}
+            chartWidth={timeline.width}
+            scrollLeft={scrollLeft}
+            viewportWidth={viewportRef.current?.clientWidth ?? 900}
+          />
+        )}
+
         {ctxMenu && canEditActivities && (
           <div
-            className='absolute z-50 min-w-44 rounded-lg border bg-popover py-1 shadow-xl'
+            className='absolute z-50 min-w-44 rounded-md border bg-popover py-1 text-popover-foreground shadow-xl'
             style={{ top: ctxMenu.y, left: ctxMenu.x }}
-            onClick={(e) => e.stopPropagation()}
+            onClick={(event) => event.stopPropagation()}
           >
             <p className='px-3 py-1 text-[10px] font-semibold tracking-wide text-muted-foreground uppercase'>
               Actions
@@ -1052,7 +1310,7 @@ export function GanttChart({
             )}
             {onActivityDelete && (
               <button
-                className='flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-red-600 transition-colors hover:bg-red-50'
+                className='flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-red-600 transition-colors hover:bg-red-50 dark:hover:bg-red-950/30'
                 onClick={() => handleDelete(ctxMenu.id)}
               >
                 Delete activity
@@ -1062,42 +1320,8 @@ export function GanttChart({
         )}
       </div>
 
-      {/* ── Legend ──────────────────────────────────────────────────────────── */}
-      <div className='flex flex-wrap items-center gap-2 rounded-xl border bg-card px-4 py-2.5'>
-        {[
-          { color: COLOR.critical, label: 'Critical Path' },
-          { color: COLOR.nearCrit, label: 'Near-Critical (TF 1-5d)' },
-          { color: COLOR.normal, label: 'Non-Critical' },
-          { color: COLOR.milestone, label: 'Milestone' },
-          { color: COLOR.float, label: 'Total Float' },
-          { color: COLOR.today, label: 'Today' },
-          ...(showBaseline
-            ? [{ color: COLOR.baseline, label: 'Baseline' }]
-            : []),
-        ].map(({ color, label }) => (
-          <span
-            key={label}
-            className='flex items-center gap-1.5 text-[11px] text-muted-foreground'
-          >
-            <span
-              style={{
-                background: color,
-                width: 10,
-                height: 10,
-                borderRadius: 2,
-                display: 'inline-block',
-                flexShrink: 0,
-              }}
-            />
-            {label}
-          </span>
-        ))}
-        <span className='ml-auto text-[11px] text-muted-foreground italic'>
-          Hover for details
-        </span>
-      </div>
+      <GanttLegend showBaseline={showBaseline} dataDate={timeline.dataDate} />
 
-      {/* ── Edit dialog ─────────────────────────────────────────────────────── */}
       {onActivityUpdate && (
         <ActivityInlineEditDialog
           key={editingActivity?.id ?? 'none'}
@@ -1111,6 +1335,1066 @@ export function GanttChart({
           isSaving={!!savingId}
         />
       )}
+    </div>
+  )
+}
+
+function ScheduleGrid({
+  rows,
+  totalHeight,
+  hoveredRowId,
+  selectedRowId,
+  savingId,
+  canEditActivities,
+  onHover,
+  onSelect,
+  onToggleSummary,
+  onEditActivity,
+  onContextMenu,
+}: {
+  rows: IndexedRow[]
+  totalHeight: number
+  hoveredRowId: string | null
+  selectedRowId: string | null
+  savingId: string | null
+  canEditActivities: boolean
+  onHover: (id: string | null) => void
+  onSelect: (id: string) => void
+  onToggleSummary: (id: string) => void
+  onEditActivity: (id: string) => void
+  onContextMenu: (event: React.MouseEvent, activity: GanttActivity) => void
+}) {
+  return (
+    <div
+      data-testid='primavera-gantt-grid'
+      className='sticky left-0 z-30 shrink-0 border-r bg-card shadow-[8px_0_18px_rgba(15,23,42,0.08)]'
+      style={{ width: GRID_W, height: HEADER_H + totalHeight }}
+    >
+      <div
+        className='sticky top-0 z-40 grid border-b bg-muted/70 text-[10px] font-semibold tracking-wide text-muted-foreground uppercase backdrop-blur'
+        style={{ gridTemplateColumns: GRID_TEMPLATE, height: HEADER_H }}
+      >
+        {GRID_COLUMNS.map((column) => (
+          <div
+            key={column.key}
+            className='flex items-end border-r px-2 pb-2 last:border-r-0'
+          >
+            {column.label}
+          </div>
+        ))}
+      </div>
+
+      <div className='relative' style={{ height: totalHeight }}>
+        {rows.map((row) => (
+          <ScheduleGridRow
+            key={row.id}
+            row={row}
+            hovered={hoveredRowId === row.id}
+            selected={selectedRowId === row.id}
+            saving={row.type === 'activity' && savingId === row.activity.id}
+            canEditActivities={canEditActivities}
+            onHover={onHover}
+            onSelect={onSelect}
+            onToggleSummary={onToggleSummary}
+            onEditActivity={onEditActivity}
+            onContextMenu={onContextMenu}
+          />
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function ScheduleGridRow({
+  row,
+  hovered,
+  selected,
+  saving,
+  canEditActivities,
+  onHover,
+  onSelect,
+  onToggleSummary,
+  onEditActivity,
+  onContextMenu,
+}: {
+  row: IndexedRow
+  hovered: boolean
+  selected: boolean
+  saving: boolean
+  canEditActivities: boolean
+  onHover: (id: string | null) => void
+  onSelect: (id: string) => void
+  onToggleSummary: (id: string) => void
+  onEditActivity: (id: string) => void
+  onContextMenu: (event: React.MouseEvent, activity: GanttActivity) => void
+}) {
+  const rowClass = cn(
+    'absolute left-0 grid border-b text-xs transition-colors',
+    row.type === 'summary'
+      ? 'bg-muted/55 font-semibold text-foreground'
+      : row.index % 2 === 0
+        ? 'bg-card'
+        : 'bg-muted/15',
+    hovered && 'bg-blue-50 dark:bg-blue-950/25',
+    selected && 'bg-amber-50 dark:bg-amber-950/25'
+  )
+
+  return (
+    <div
+      className={rowClass}
+      style={{
+        top: row.index * ROW_H,
+        height: ROW_H,
+        width: GRID_W,
+        gridTemplateColumns: GRID_TEMPLATE,
+      }}
+      onMouseEnter={() => onHover(row.id)}
+      onMouseLeave={() => onHover(null)}
+      onClick={() => onSelect(row.id)}
+      onDoubleClick={() => {
+        if (row.type === 'activity' && canEditActivities) {
+          onEditActivity(row.activity.id)
+        }
+      }}
+      onContextMenu={(event) => {
+        if (row.type === 'activity') onContextMenu(event, row.activity)
+      }}
+    >
+      <GridCell className='font-mono text-[11px] text-muted-foreground'>
+        {row.type === 'summary' ? row.code : row.activityCode}
+      </GridCell>
+      <GridCell>
+        <div
+          className='flex min-w-0 items-center gap-1.5'
+          style={{ paddingLeft: Math.min(row.level * 16, 64) }}
+        >
+          {row.type === 'summary' ? (
+            <button
+              type='button'
+              className='flex h-5 w-5 shrink-0 items-center justify-center rounded-sm hover:bg-background'
+              onClick={(event) => {
+                event.stopPropagation()
+                onToggleSummary(row.id)
+              }}
+              aria-label={row.expanded ? 'Collapse WBS row' : 'Expand WBS row'}
+              title={row.expanded ? 'Collapse WBS row' : 'Expand WBS row'}
+            >
+              {row.expanded ? (
+                <ChevronDown className='h-3.5 w-3.5' />
+              ) : (
+                <ChevronRight className='h-3.5 w-3.5' />
+              )}
+            </button>
+          ) : (
+            <span
+              className={cn(
+                'h-2 w-2 shrink-0 rounded-sm',
+                row.isMilestone
+                  ? 'rotate-45 bg-purple-600'
+                  : row.isCritical
+                    ? 'bg-red-600'
+                    : isNearCritical(row.activity)
+                      ? 'bg-orange-500'
+                      : 'bg-blue-600'
+              )}
+            />
+          )}
+          <span className='truncate' title={row.name}>
+            {row.name}
+          </span>
+          {row.type === 'summary' && (
+            <span className='ml-auto shrink-0 font-mono text-[10px] text-muted-foreground'>
+              {row.activityCount}
+            </span>
+          )}
+          {saving && (
+            <span className='font-mono text-[10px] text-muted-foreground'>
+              ...
+            </span>
+          )}
+        </div>
+      </GridCell>
+      <GridCell>
+        {row.type === 'activity' && getProcurementRisk(row.activity) ? (
+          <span
+            className={cn(
+              'inline-flex max-w-full items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-semibold',
+              PROCUREMENT_RISK_BADGE[
+                getProcurementRisk(row.activity)?.highestSeverity ?? 'none'
+              ]
+            )}
+            title={formatProcurementReason(
+              getProcurementRisk(row.activity)?.reason
+            )}
+          >
+            <AlertTriangle className='h-3 w-3 shrink-0' />
+            <span className='truncate'>
+              {getProcurementRisk(row.activity)?.highestSeverity}
+              {getProcurementRisk(row.activity)?.atRiskCount
+                ? ` (${getProcurementRisk(row.activity)?.atRiskCount})`
+                : ''}
+            </span>
+          </span>
+        ) : (
+          <span className='text-[10px] text-muted-foreground'>-</span>
+        )}
+      </GridCell>
+      <GridCell className='justify-end font-mono text-[11px]'>
+        {row.duration}d
+      </GridCell>
+      <GridCell className='font-mono text-[11px]'>
+        {formatGridDate(row.startDate)}
+      </GridCell>
+      <GridCell className='font-mono text-[11px]'>
+        {formatGridDate(row.finishDate)}
+      </GridCell>
+      <GridCell className='font-mono text-[11px] text-muted-foreground'>
+        {formatGridDate(row.baselineStartDate)}
+      </GridCell>
+      <GridCell className='font-mono text-[11px] text-muted-foreground'>
+        {formatGridDate(row.baselineFinishDate)}
+      </GridCell>
+    </div>
+  )
+}
+
+function GridCell({
+  children,
+  className,
+}: {
+  children: React.ReactNode
+  className?: string
+}) {
+  return (
+    <div
+      className={cn(
+        'flex min-w-0 items-center border-r px-2 last:border-r-0',
+        className
+      )}
+    >
+      {children}
+    </div>
+  )
+}
+
+function TimelineHeader({
+  timeline,
+  pxPerDay,
+}: {
+  timeline: TimelineModel
+  pxPerDay: number
+}) {
+  return (
+    <div
+      data-testid='primavera-gantt-timeline-header'
+      className='sticky top-0 z-20 border-b bg-card'
+      style={{ height: HEADER_H, width: timeline.width }}
+    >
+      <svg width={timeline.width} height={HEADER_H} className='block'>
+        <rect
+          width={timeline.width}
+          height={HEADER_H}
+          style={{ fill: CSS.card }}
+        />
+
+        {timeline.monthTicks.map((tick, index) => (
+          <g key={tick.key}>
+            <rect
+              x={tick.x}
+              y={0}
+              width={tick.width}
+              height={26}
+              style={{ fill: index % 2 ? CSS.muted : CSS.card }}
+              opacity={index % 2 ? 0.55 : 1}
+            />
+            <line
+              x1={tick.x}
+              y1={0}
+              x2={tick.x}
+              y2={HEADER_H}
+              style={{ stroke: CSS.border }}
+              strokeWidth={1}
+            />
+            <text
+              x={tick.x + Math.max(8, (tick.width ?? 0) / 2)}
+              y={17}
+              textAnchor={(tick.width ?? 0) > 72 ? 'middle' : 'start'}
+              fontSize={11}
+              fontWeight={700}
+              style={{ fill: CSS.fg }}
+              fontFamily='system-ui, sans-serif'
+            >
+              {formatMonthLabel(tick.date)}
+            </text>
+          </g>
+        ))}
+
+        {timeline.weekTicks.map((tick) => (
+          <g key={tick.key}>
+            <line
+              x1={tick.x}
+              y1={26}
+              x2={tick.x}
+              y2={HEADER_H}
+              style={{ stroke: CSS.border }}
+              strokeWidth={0.8}
+            />
+            <text
+              x={tick.x + 4}
+              y={43}
+              fontSize={9}
+              style={{ fill: CSS.mutedFg }}
+              fontFamily='ui-monospace, SFMono-Regular, Menlo, monospace'
+            >
+              {formatWeekLabel(tick.date)}
+            </text>
+          </g>
+        ))}
+
+        {timeline.dayTicks.map((tick) => (
+          <g key={tick.key}>
+            <line
+              x1={tick.x}
+              y1={52}
+              x2={tick.x}
+              y2={HEADER_H}
+              style={{ stroke: CSS.border }}
+              strokeWidth={0.5}
+              opacity={0.75}
+            />
+            <text
+              x={tick.x + Math.max(2, pxPerDay / 2)}
+              y={69}
+              textAnchor='middle'
+              fontSize={8}
+              style={{ fill: CSS.mutedFg }}
+              fontFamily='ui-monospace, SFMono-Regular, Menlo, monospace'
+            >
+              {formatDayLabel(tick.date)}
+            </text>
+          </g>
+        ))}
+
+        <line
+          x1={0}
+          y1={26}
+          x2={timeline.width}
+          y2={26}
+          style={{ stroke: CSS.border }}
+          strokeWidth={1}
+        />
+        <line
+          x1={0}
+          y1={52}
+          x2={timeline.width}
+          y2={52}
+          style={{ stroke: CSS.border }}
+          strokeWidth={1}
+        />
+      </svg>
+    </div>
+  )
+}
+
+function GanttCanvas({
+  rows,
+  totalHeight,
+  timeline,
+  pxPerDay,
+  showBaseline,
+  hoveredRowId,
+  selectedRowId,
+  savingId,
+  editMode,
+  canUpdateActivities,
+  draggingId,
+  onHover,
+  onSelect,
+  onTooltip,
+  onContextMenu,
+  onDragStart,
+}: {
+  rows: IndexedRow[]
+  totalHeight: number
+  timeline: TimelineModel
+  pxPerDay: number
+  showBaseline: boolean
+  hoveredRowId: string | null
+  selectedRowId: string | null
+  savingId: string | null
+  editMode: boolean
+  canUpdateActivities: boolean
+  draggingId: string | null
+  onHover: (id: string | null) => void
+  onSelect: (id: string) => void
+  onTooltip: (
+    event: React.MouseEvent<SVGElement>,
+    activity: GanttActivity
+  ) => void
+  onContextMenu: (event: React.MouseEvent, activity: GanttActivity) => void
+  onDragStart: (
+    event: React.MouseEvent<SVGGElement>,
+    activity: GanttActivity
+  ) => void
+}) {
+  const geometries = useMemo(
+    () =>
+      rows
+        .filter(
+          (row): row is IndexedRow & ActivityRow => row.type === 'activity'
+        )
+        .map((row) => {
+          const startX = dateToX(timeline, row.startDate, pxPerDay)
+          const width = row.isMilestone
+            ? 0
+            : getBarWidth(row.startDate, row.finishDate, pxPerDay, row.duration)
+          return {
+            activity: row.activity,
+            row,
+            startX,
+            finishX: startX + Math.max(8, width),
+            y: row.index * ROW_H + ROW_H / 2,
+          }
+        }),
+    [pxPerDay, rows, timeline]
+  )
+
+  const connectors = useMemo(() => buildConnectors(geometries), [geometries])
+  const dataDateX = dateToX(timeline, timeline.dataDate, pxPerDay)
+
+  return (
+    <svg
+      data-testid='primavera-gantt-canvas'
+      width={timeline.width}
+      height={totalHeight}
+      className='absolute left-0 block'
+      style={{ top: HEADER_H, background: CSS.background }}
+    >
+      <defs>
+        <marker
+          id='arrow-normal'
+          markerWidth='8'
+          markerHeight='8'
+          refX='7'
+          refY='4'
+          orient='auto'
+          markerUnits='strokeWidth'
+        >
+          <path d='M0,0 L8,4 L0,8 z' fill={COLORS.connector} />
+        </marker>
+        <marker
+          id='arrow-critical'
+          markerWidth='8'
+          markerHeight='8'
+          refX='7'
+          refY='4'
+          orient='auto'
+          markerUnits='strokeWidth'
+        >
+          <path d='M0,0 L8,4 L0,8 z' fill={COLORS.critical} />
+        </marker>
+      </defs>
+
+      <TimelineGrid timeline={timeline} totalHeight={totalHeight} />
+      <SelectionLayer
+        rows={rows}
+        width={timeline.width}
+        hoveredRowId={hoveredRowId}
+        selectedRowId={selectedRowId}
+      />
+      <DependencyLayer connectors={connectors} />
+
+      {rows.map((row) => (
+        <GanttRowBar
+          key={row.id}
+          row={row}
+          timeline={timeline}
+          pxPerDay={pxPerDay}
+          showBaseline={showBaseline}
+          saving={row.type === 'activity' && savingId === row.activity.id}
+          editMode={editMode}
+          canUpdateActivities={canUpdateActivities}
+          dragging={row.type === 'activity' && draggingId === row.activity.id}
+          onHover={onHover}
+          onSelect={onSelect}
+          onTooltip={onTooltip}
+          onContextMenu={onContextMenu}
+          onDragStart={onDragStart}
+        />
+      ))}
+
+      {dataDateX >= 0 && dataDateX <= timeline.width && (
+        <g pointerEvents='none'>
+          <line
+            x1={dataDateX}
+            y1={0}
+            x2={dataDateX}
+            y2={totalHeight}
+            stroke={COLORS.dataDate}
+            strokeWidth={2}
+            strokeDasharray='6 4'
+          />
+          <rect
+            x={Math.max(2, dataDateX - 34)}
+            y={4}
+            width={68}
+            height={18}
+            rx={3}
+            fill={COLORS.dataDate}
+          />
+          <text
+            x={dataDateX}
+            y={17}
+            textAnchor='middle'
+            fontSize={9}
+            fontWeight={700}
+            fill='white'
+            fontFamily='system-ui, sans-serif'
+          >
+            Data Date
+          </text>
+        </g>
+      )}
+    </svg>
+  )
+}
+
+function TimelineGrid({
+  timeline,
+  totalHeight,
+}: {
+  timeline: TimelineModel
+  totalHeight: number
+}) {
+  return (
+    <g pointerEvents='none'>
+      {timeline.weekendBands.map((band) => (
+        <rect
+          key={band.key}
+          x={band.x}
+          y={0}
+          width={band.width}
+          height={totalHeight}
+          style={{ fill: CSS.muted }}
+          opacity={0.22}
+        />
+      ))}
+
+      {timeline.weekTicks.map((tick) => (
+        <line
+          key={tick.key}
+          x1={tick.x}
+          y1={0}
+          x2={tick.x}
+          y2={totalHeight}
+          style={{ stroke: CSS.border }}
+          strokeWidth={0.7}
+        />
+      ))}
+
+      {timeline.monthTicks.map((tick) => (
+        <line
+          key={tick.key}
+          x1={tick.x}
+          y1={0}
+          x2={tick.x}
+          y2={totalHeight}
+          style={{ stroke: CSS.border }}
+          strokeWidth={1.2}
+        />
+      ))}
+    </g>
+  )
+}
+
+function SelectionLayer({
+  rows,
+  width,
+  hoveredRowId,
+  selectedRowId,
+}: {
+  rows: IndexedRow[]
+  width: number
+  hoveredRowId: string | null
+  selectedRowId: string | null
+}) {
+  return (
+    <g pointerEvents='none'>
+      {rows.map((row) => (
+        <g key={row.id}>
+          <rect
+            x={0}
+            y={row.index * ROW_H}
+            width={width}
+            height={ROW_H}
+            style={{
+              fill:
+                row.id === selectedRowId
+                  ? 'rgba(245, 158, 11, 0.12)'
+                  : row.id === hoveredRowId
+                    ? 'rgba(37, 99, 235, 0.09)'
+                    : row.type === 'summary'
+                      ? 'rgba(100, 116, 139, 0.12)'
+                      : row.index % 2 === 0
+                        ? 'transparent'
+                        : 'rgba(100, 116, 139, 0.05)',
+            }}
+          />
+          <line
+            x1={0}
+            y1={(row.index + 1) * ROW_H}
+            x2={width}
+            y2={(row.index + 1) * ROW_H}
+            style={{ stroke: CSS.border }}
+            strokeWidth={0.6}
+          />
+        </g>
+      ))}
+    </g>
+  )
+}
+
+function DependencyLayer({ connectors }: { connectors: Connector[] }) {
+  return (
+    <g fill='none' pointerEvents='none'>
+      {connectors.map((connector) => (
+        <path
+          key={connector.key}
+          d={connector.path}
+          stroke={connector.color}
+          strokeWidth={1.25}
+          strokeLinejoin='round'
+          strokeLinecap='round'
+          opacity={0.72}
+          markerEnd={connector.marker}
+        />
+      ))}
+    </g>
+  )
+}
+
+function GanttRowBar({
+  row,
+  timeline,
+  pxPerDay,
+  showBaseline,
+  saving,
+  editMode,
+  canUpdateActivities,
+  dragging,
+  onHover,
+  onSelect,
+  onTooltip,
+  onContextMenu,
+  onDragStart,
+}: {
+  row: IndexedRow
+  timeline: TimelineModel
+  pxPerDay: number
+  showBaseline: boolean
+  saving: boolean
+  editMode: boolean
+  canUpdateActivities: boolean
+  dragging: boolean
+  onHover: (id: string | null) => void
+  onSelect: (id: string) => void
+  onTooltip: (
+    event: React.MouseEvent<SVGElement>,
+    activity: GanttActivity
+  ) => void
+  onContextMenu: (event: React.MouseEvent, activity: GanttActivity) => void
+  onDragStart: (
+    event: React.MouseEvent<SVGGElement>,
+    activity: GanttActivity
+  ) => void
+}) {
+  const y = row.index * ROW_H + ROW_H / 2
+  const startX = dateToX(timeline, row.startDate, pxPerDay)
+  const width =
+    row.type === 'activity' && row.isMilestone
+      ? 0
+      : getBarWidth(row.startDate, row.finishDate, pxPerDay, row.duration)
+  const baselineStartX = dateToX(timeline, row.baselineStartDate, pxPerDay)
+  const baselineWidth = getBarWidth(
+    row.baselineStartDate,
+    row.baselineFinishDate,
+    pxPerDay,
+    row.duration
+  )
+
+  if (row.type === 'summary') {
+    return (
+      <g
+        onMouseEnter={() => onHover(row.id)}
+        onMouseLeave={() => onHover(null)}
+        onClick={() => onSelect(row.id)}
+      >
+        {showBaseline && row.baselineStartDate && row.baselineFinishDate && (
+          <rect
+            x={baselineStartX}
+            y={y + 8}
+            width={baselineWidth}
+            height={3}
+            fill={COLORS.baseline}
+            opacity={0.65}
+            rx={1}
+          />
+        )}
+        {row.startDate && row.finishDate && (
+          <g>
+            <rect
+              x={startX}
+              y={y - 5}
+              width={width}
+              height={8}
+              style={{ fill: CSS.fg }}
+              opacity={0.92}
+              rx={1}
+            />
+            <rect
+              x={startX}
+              y={y - 8}
+              width={2}
+              height={14}
+              style={{ fill: CSS.fg }}
+              opacity={0.92}
+            />
+            <rect
+              x={startX + width - 2}
+              y={y - 8}
+              width={2}
+              height={14}
+              style={{ fill: CSS.fg }}
+              opacity={0.92}
+            />
+            {row.pctComplete > 0 && (
+              <rect
+                x={startX}
+                y={y - 3}
+                width={Math.max(2, width * (row.pctComplete / 100))}
+                height={4}
+                fill={COLORS.progress}
+                rx={1}
+              />
+            )}
+          </g>
+        )}
+      </g>
+    )
+  }
+
+  const activity = row.activity
+  const currentColor = barColor(activity)
+  const progressWidth = Math.max(0, width * ((activity.pctComplete ?? 0) / 100))
+  const procurementRisk = getProcurementRisk(activity)
+
+  if (row.isMilestone) {
+    const size = 8
+    return (
+      <g
+        onMouseEnter={() => onHover(row.id)}
+        onMouseLeave={() => {
+          onHover(null)
+        }}
+        onMouseMove={(event) => onTooltip(event, activity)}
+        onClick={() => onSelect(row.id)}
+        onContextMenu={(event) => onContextMenu(event, activity)}
+        style={{ cursor: 'pointer' }}
+      >
+        {showBaseline && row.baselineStartDate && (
+          <polygon
+            points={`${baselineStartX},${y + 10 - 5} ${baselineStartX + 5},${y + 10} ${baselineStartX},${y + 10 + 5} ${baselineStartX - 5},${y + 10}`}
+            fill={COLORS.baseline}
+            opacity={0.62}
+          />
+        )}
+        <polygon
+          points={`${startX},${y - size} ${startX + size},${y} ${startX},${y + size} ${startX - size},${y}`}
+          fill={currentColor}
+          stroke='white'
+          strokeWidth={1}
+          opacity={activity.pctComplete >= 100 ? 1 : 0.92}
+        />
+        {procurementRisk && (
+          <g pointerEvents='none'>
+            <circle
+              cx={startX + 16}
+              cy={y}
+              r={6}
+              fill={COLORS.procurement}
+              stroke='white'
+              strokeWidth={1}
+            />
+            <text
+              x={startX + 16}
+              y={y + 3.5}
+              textAnchor='middle'
+              fontSize={9}
+              fontWeight={800}
+              fill='white'
+              fontFamily='system-ui, sans-serif'
+            >
+              !
+            </text>
+          </g>
+        )}
+      </g>
+    )
+  }
+
+  return (
+    <g
+      onMouseEnter={() => onHover(row.id)}
+      onMouseLeave={() => onHover(null)}
+      onMouseMove={(event) => onTooltip(event, activity)}
+      onMouseDown={(event) => onDragStart(event, activity)}
+      onClick={() => onSelect(row.id)}
+      onContextMenu={(event) => onContextMenu(event, activity)}
+      style={{
+        cursor:
+          editMode && canUpdateActivities
+            ? dragging
+              ? 'grabbing'
+              : 'grab'
+            : 'pointer',
+      }}
+    >
+      {showBaseline && row.baselineStartDate && row.baselineFinishDate && (
+        <rect
+          x={baselineStartX}
+          y={y + 8}
+          width={baselineWidth}
+          height={4}
+          fill={COLORS.baseline}
+          opacity={0.65}
+          rx={1}
+        />
+      )}
+
+      {row.totalFloat != null && row.totalFloat > 0 && (
+        <rect
+          x={startX + width}
+          y={y + 3}
+          width={row.totalFloat * pxPerDay}
+          height={3}
+          fill={COLORS.float}
+          opacity={0.32}
+          rx={1}
+        />
+      )}
+
+      <rect
+        x={startX}
+        y={y - BAR_H / 2}
+        width={width}
+        height={BAR_H}
+        fill={currentColor}
+        opacity={0.9}
+        rx={2}
+      />
+      {progressWidth > 0 && (
+        <rect
+          x={startX}
+          y={y - BAR_H / 2 + 3}
+          width={progressWidth}
+          height={BAR_H - 6}
+          fill={COLORS.progress}
+          opacity={0.9}
+          rx={1}
+        />
+      )}
+      {activity.isCritical && (
+        <line
+          x1={startX}
+          y1={y + BAR_H / 2 - 1}
+          x2={startX + width}
+          y2={y + BAR_H / 2 - 1}
+          stroke='#7f1d1d'
+          strokeWidth={2}
+          opacity={0.55}
+        />
+      )}
+      {procurementRisk && (
+        <g pointerEvents='none'>
+          <circle
+            cx={startX + width + 10}
+            cy={y}
+            r={6}
+            fill={COLORS.procurement}
+            stroke='white'
+            strokeWidth={1}
+          />
+          <text
+            x={startX + width + 10}
+            y={y + 3.5}
+            textAnchor='middle'
+            fontSize={9}
+            fontWeight={800}
+            fill='white'
+            fontFamily='system-ui, sans-serif'
+          >
+            !
+          </text>
+        </g>
+      )}
+      {width > 54 && (
+        <text
+          x={startX + width / 2}
+          y={y + 3}
+          textAnchor='middle'
+          fontSize={9}
+          fontWeight={700}
+          fill='white'
+          fontFamily='ui-monospace, SFMono-Regular, Menlo, monospace'
+          pointerEvents='none'
+        >
+          {activity.pctComplete ?? 0}%
+        </text>
+      )}
+      {saving && (
+        <text
+          x={startX + width + 5}
+          y={y + 4}
+          fontSize={10}
+          style={{ fill: CSS.mutedFg }}
+          fontFamily='ui-monospace, SFMono-Regular, Menlo, monospace'
+        >
+          ...
+        </text>
+      )}
+    </g>
+  )
+}
+
+function ActivityTooltip({
+  tooltip,
+  chartWidth,
+  scrollLeft,
+  viewportWidth,
+}: {
+  tooltip: Tooltip
+  chartWidth: number
+  scrollLeft: number
+  viewportWidth: number
+}) {
+  const activity = tooltip.activity
+  const procurementRisk = getProcurementRisk(activity)
+  const left = Math.min(
+    tooltip.x,
+    scrollLeft + Math.min(viewportWidth - 260, chartWidth - 260)
+  )
+
+  return (
+    <div
+      className='pointer-events-none absolute z-50 w-64 rounded-md border bg-popover text-popover-foreground shadow-xl'
+      style={{
+        left: Math.max(scrollLeft + 8, left),
+        top: Math.max(8, tooltip.y - (procurementRisk ? 154 : 116)),
+      }}
+    >
+      <div className='border-b px-3 py-2'>
+        <p className='line-clamp-2 text-xs leading-tight font-semibold'>
+          {activity.name}
+        </p>
+        <p className='mt-0.5 font-mono text-[10px] text-muted-foreground'>
+          {getActivityCode(activity)}
+        </p>
+      </div>
+      <div className='grid grid-cols-2 gap-x-4 gap-y-1 px-3 py-2 text-[10px]'>
+        <span className='text-muted-foreground'>Start</span>
+        <span className='font-mono font-medium'>
+          {formatCalendarDate(activity.earlyStartDate)}
+        </span>
+        <span className='text-muted-foreground'>Finish</span>
+        <span className='font-mono font-medium'>
+          {formatCalendarDate(activity.earlyFinishDate)}
+        </span>
+        <span className='text-muted-foreground'>BL Start</span>
+        <span className='font-mono font-medium'>
+          {formatCalendarDate(activity.baselineStartDate)}
+        </span>
+        <span className='text-muted-foreground'>BL Finish</span>
+        <span className='font-mono font-medium'>
+          {formatCalendarDate(activity.baselineFinishDate)}
+        </span>
+        <span className='text-muted-foreground'>Duration</span>
+        <span className='font-mono font-medium'>{activity.duration}d</span>
+        <span className='text-muted-foreground'>Float</span>
+        <span
+          className={cn(
+            'font-mono font-medium',
+            activity.isCritical
+              ? 'text-red-600'
+              : isNearCritical(activity)
+                ? 'text-orange-600'
+                : ''
+          )}
+        >
+          {activity.totalFloat ?? '-'}d
+        </span>
+        <span className='text-muted-foreground'>Progress</span>
+        <span className='font-mono font-medium'>{activity.pctComplete}%</span>
+        <span className='text-muted-foreground'>Predecessors</span>
+        <span
+          className='truncate font-mono font-medium'
+          title={formatActivityDependencies(activity)}
+        >
+          {formatActivityDependencies(activity)}
+        </span>
+        {procurementRisk && (
+          <>
+            <span className='text-muted-foreground'>Proc Risk</span>
+            <span className='font-mono font-medium text-orange-600'>
+              {procurementRisk.highestSeverity} ({procurementRisk.atRiskCount})
+            </span>
+            <span className='text-muted-foreground'>Need</span>
+            <span className='font-mono font-medium'>
+              {formatCalendarDate(procurementRisk.needDate)}
+            </span>
+            <span className='text-muted-foreground'>Order By</span>
+            <span className='font-mono font-medium'>
+              {formatCalendarDate(procurementRisk.orderByDate)}
+            </span>
+          </>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function GanttLegend({
+  showBaseline,
+  dataDate,
+}: {
+  showBaseline: boolean
+  dataDate: Date
+}) {
+  const items = [
+    { color: COLORS.critical, label: 'Critical Path' },
+    { color: COLORS.nearCritical, label: 'Near Critical' },
+    { color: COLORS.normal, label: 'Current Activity' },
+    { color: COLORS.progress, label: 'Progress' },
+    { color: COLORS.milestone, label: 'Milestone' },
+    { color: COLORS.float, label: 'Total Float' },
+    { color: COLORS.procurement, label: 'Procurement Risk' },
+    { color: COLORS.dataDate, label: `Data Date ${formatGridDate(dataDate)}` },
+    ...(showBaseline ? [{ color: COLORS.baseline, label: 'Baseline' }] : []),
+  ]
+
+  return (
+    <div className='flex flex-wrap items-center gap-x-4 gap-y-2 rounded-md border bg-card px-3 py-2'>
+      {items.map((item) => (
+        <span
+          key={item.label}
+          className='flex items-center gap-1.5 text-[11px] text-muted-foreground'
+        >
+          <span
+            className='inline-block h-2.5 w-2.5 shrink-0 rounded-sm'
+            style={{ background: item.color }}
+          />
+          {item.label}
+        </span>
+      ))}
     </div>
   )
 }

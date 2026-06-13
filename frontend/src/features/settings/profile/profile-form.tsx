@@ -1,9 +1,12 @@
+import { useEffect } from 'react'
 import { z } from 'zod'
 import { useFieldArray, useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
-import { Link } from '@tanstack/react-router'
-import { showSubmittedData } from '@/lib/show-submitted-data'
+import { X } from 'lucide-react'
+import { toast } from 'sonner'
+import { getServerErrorMessage } from '@/lib/handle-server-error'
 import { cn } from '@/lib/utils'
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import {
   Form,
@@ -15,65 +18,104 @@ import {
   FormMessage,
 } from '@/components/ui/form'
 import { Input } from '@/components/ui/input'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
+import { Skeleton } from '@/components/ui/skeleton'
 import { Textarea } from '@/components/ui/textarea'
+import {
+  useUpdateProfileSettings,
+  useUserSettings,
+} from '../hooks/use-user-settings'
 
 const profileFormSchema = z.object({
   username: z
-    .string('Please enter your username.')
+    .string()
     .min(2, 'Username must be at least 2 characters.')
     .max(30, 'Username must not be longer than 30 characters.'),
-  email: z.email({
-    error: (iss) =>
-      iss.input === undefined
-        ? 'Please select an email to display.'
-        : undefined,
-  }),
-  bio: z.string().max(160).min(4),
+  email: z.email(),
+  bio: z.string().max(160, 'Bio must be 160 characters or less.').optional(),
   urls: z
     .array(
       z.object({
         value: z.url('Please enter a valid URL.'),
       })
     )
+    .max(10, 'You can add up to 10 links.')
     .optional(),
 })
 
 type ProfileFormValues = z.infer<typeof profileFormSchema>
 
-// This can come from your database or API.
-const defaultValues: Partial<ProfileFormValues> = {
-  bio: 'I own a computer.',
-  urls: [
-    { value: 'https://shadcn.com' },
-    { value: 'http://twitter.com/shadcn' },
-  ],
+const defaultValues: ProfileFormValues = {
+  username: '',
+  email: '',
+  bio: '',
+  urls: [],
 }
 
 export function ProfileForm() {
+  const settingsQuery = useUserSettings()
+  const updateProfile = useUpdateProfileSettings()
   const form = useForm<ProfileFormValues>({
     resolver: zodResolver(profileFormSchema),
     defaultValues,
     mode: 'onChange',
   })
 
-  const { fields, append } = useFieldArray({
+  const { fields, append, remove } = useFieldArray({
     name: 'urls',
     control: form.control,
   })
 
+  useEffect(() => {
+    if (!settingsQuery.data) return
+
+    form.reset({
+      username: settingsQuery.data.profile.username,
+      email: settingsQuery.data.profile.email,
+      bio: settingsQuery.data.profile.bio,
+      urls: settingsQuery.data.profile.urls,
+    })
+  }, [form, settingsQuery.data])
+
+  async function onSubmit(values: ProfileFormValues) {
+    try {
+      await updateProfile.mutateAsync({
+        username: values.username,
+        bio: values.bio || '',
+        urls: values.urls?.filter((url) => url.value.trim()) ?? [],
+      })
+      toast.success('Profile settings updated')
+    } catch (error) {
+      toast.error(getServerErrorMessage(error, 'Unable to update profile.'))
+    }
+  }
+
+  if (settingsQuery.isLoading) {
+    return (
+      <div className='space-y-4'>
+        <Skeleton className='h-20 w-full' />
+        <Skeleton className='h-24 w-full' />
+        <Skeleton className='h-10 w-40' />
+      </div>
+    )
+  }
+
+  if (settingsQuery.isError) {
+    return (
+      <Alert variant='destructive'>
+        <AlertTitle>Profile unavailable</AlertTitle>
+        <AlertDescription>
+          {getServerErrorMessage(
+            settingsQuery.error,
+            'Unable to load profile settings.'
+          )}
+        </AlertDescription>
+      </Alert>
+    )
+  }
+
   return (
     <Form {...form}>
-      <form
-        onSubmit={form.handleSubmit((data) => showSubmittedData(data))}
-        className='space-y-8'
-      >
+      <form onSubmit={form.handleSubmit(onSubmit)} className='space-y-8'>
         <FormField
           control={form.control}
           name='username'
@@ -81,11 +123,10 @@ export function ProfileForm() {
             <FormItem>
               <FormLabel>Username</FormLabel>
               <FormControl>
-                <Input placeholder='shadcn' {...field} />
+                <Input placeholder='Project manager' {...field} />
               </FormControl>
               <FormDescription>
-                This is your public display name. It can be your real name or a
-                pseudonym. You can only change this once every 30 days.
+                This is your public display name inside the workspace.
               </FormDescription>
               <FormMessage />
             </FormItem>
@@ -97,21 +138,11 @@ export function ProfileForm() {
           render={({ field }) => (
             <FormItem>
               <FormLabel>Email</FormLabel>
-              <Select onValueChange={field.onChange} defaultValue={field.value}>
-                <FormControl>
-                  <SelectTrigger>
-                    <SelectValue placeholder='Select a verified email to display' />
-                  </SelectTrigger>
-                </FormControl>
-                <SelectContent>
-                  <SelectItem value='m@example.com'>m@example.com</SelectItem>
-                  <SelectItem value='m@google.com'>m@google.com</SelectItem>
-                  <SelectItem value='m@support.com'>m@support.com</SelectItem>
-                </SelectContent>
-              </Select>
+              <FormControl>
+                <Input type='email' readOnly disabled {...field} />
+              </FormControl>
               <FormDescription>
-                You can manage verified email addresses in your{' '}
-                <Link to='/'>email settings</Link>.
+                Sign-in email changes require a verified account-change flow.
               </FormDescription>
               <FormMessage />
             </FormItem>
@@ -125,20 +156,17 @@ export function ProfileForm() {
               <FormLabel>Bio</FormLabel>
               <FormControl>
                 <Textarea
-                  placeholder='Tell us a little bit about yourself'
+                  placeholder='Tell the team a little bit about your project role.'
                   className='resize-none'
                   {...field}
                 />
               </FormControl>
-              <FormDescription>
-                You can <span>@mention</span> other users and organizations to
-                link to them.
-              </FormDescription>
+              <FormDescription>Shown on your profile card.</FormDescription>
               <FormMessage />
             </FormItem>
           )}
         />
-        <div>
+        <div className='space-y-3'>
           {fields.map((field, index) => (
             <FormField
               control={form.control}
@@ -147,14 +175,26 @@ export function ProfileForm() {
               render={({ field }) => (
                 <FormItem>
                   <FormLabel className={cn(index !== 0 && 'sr-only')}>
-                    URLs
+                    Links
                   </FormLabel>
-                  <FormDescription className={cn(index !== 0 && 'sr-only')}>
-                    Add links to your website, blog, or social media profiles.
-                  </FormDescription>
-                  <FormControl className={cn(index !== 0 && 'mt-1.5')}>
-                    <Input {...field} />
-                  </FormControl>
+                  <div className='flex gap-2'>
+                    <FormControl>
+                      <Input
+                        placeholder='https://example.com'
+                        className='flex-1'
+                        {...field}
+                      />
+                    </FormControl>
+                    <Button
+                      type='button'
+                      variant='outline'
+                      size='icon'
+                      onClick={() => remove(index)}
+                      aria-label='Remove link'
+                    >
+                      <X className='size-4' />
+                    </Button>
+                  </div>
                   <FormMessage />
                 </FormItem>
               )}
@@ -164,13 +204,14 @@ export function ProfileForm() {
             type='button'
             variant='outline'
             size='sm'
-            className='mt-2'
             onClick={() => append({ value: '' })}
           >
-            Add URL
+            Add link
           </Button>
         </div>
-        <Button type='submit'>Update profile</Button>
+        <Button type='submit' disabled={updateProfile.isPending}>
+          {updateProfile.isPending ? 'Updating...' : 'Update profile'}
+        </Button>
       </form>
     </Form>
   )

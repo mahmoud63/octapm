@@ -29,7 +29,7 @@ function BoqContent({ projectId }: { projectId: string }) {
       <div>
         <h2 className='text-2xl font-bold tracking-tight'>BOQ Management</h2>
         <p className='text-sm text-muted-foreground'>
-          Bill of Quantities — upload, validate, and manage activities
+          Bill of Quantities - draft activity suggestions, allocation approval, and official EV/IPC value
         </p>
       </div>
 

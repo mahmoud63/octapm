@@ -76,9 +76,7 @@ const countLabels: Record<string, string> = {
 function labelFor(key: string) {
   return (
     countLabels[key] ||
-    key
-      .replace(/([A-Z])/g, ' $1')
-      .replace(/^./, (char) => char.toUpperCase())
+    key.replace(/([A-Z])/g, ' $1').replace(/^./, (char) => char.toUpperCase())
   )
 }
 
@@ -208,6 +206,7 @@ export function ProjectSetupWizard({
   const nextAction = readiness.summary.nextAction
   const progressGate = readiness.gates.progress
   const baselineGate = readiness.gates.baseline
+  const reportingGate = readiness.gates.reporting
 
   return (
     <section className='rounded-md border bg-card p-4'>
@@ -226,6 +225,20 @@ export function ProjectSetupWizard({
             >
               {progressGate.ready ? 'Ready for progress' : 'Setup in progress'}
             </Badge>
+            {reportingGate && (
+              <Badge
+                variant='outline'
+                className={
+                  reportingGate.ready
+                    ? 'border-emerald-300 bg-emerald-50 text-emerald-800'
+                    : 'border-rose-300 bg-rose-50 text-rose-800'
+                }
+              >
+                {reportingGate.ready
+                  ? 'Official reporting ready'
+                  : 'Reporting gated'}
+              </Badge>
+            )}
             {baselineGate.alreadyLocked ? (
               <Badge variant='secondary'>
                 <Lock className='h-3.5 w-3.5' />
@@ -250,7 +263,9 @@ export function ProjectSetupWizard({
             </span>
             <span>{readiness.summary.blockingCount} blockers</span>
             <span>{readiness.summary.warningCount} warnings</span>
-            <span>Checked {new Date(readiness.checkedAt).toLocaleString()}</span>
+            <span>
+              Checked {new Date(readiness.checkedAt).toLocaleString()}
+            </span>
           </div>
 
           <div className='h-2 max-w-xl rounded-full bg-muted'>

@@ -3,7 +3,7 @@ const { body, param, query } = require('express-validator');
 const { asyncHandler } = require('../utils/async-handler');
 const { sendSuccess } = require('../utils/api-response');
 const { authenticate } = require('../middleware/auth');
-const { requirePermission } = require('../middleware/rbac');
+const { getEffectiveRole, requirePermission } = require('../middleware/rbac');
 const { validate } = require('../middleware/validate');
 const { moneyBody } = require('../utils/money');
 const activityService = require('../services/activity.service');
@@ -57,6 +57,11 @@ router.post(
   [
     body('name').isString().trim().notEmpty(),
     body('category').optional().isIn(VALID_CATEGORIES),
+    body('activityCode')
+      .optional({ nullable: true })
+      .isString()
+      .trim()
+      .isLength({ max: 64 }),
     body('wbsCode').optional().isString().trim(),
     body('startDate').optional().isISO8601(),
     body('endDate').optional().isISO8601(),
@@ -124,6 +129,7 @@ router.post(
       orgId: req.user.orgId,
       projectId: req.params.projectId,
       userId: req.user.id,
+      userRole: getEffectiveRole(req),
       updates: req.body.updates,
     });
     return sendSuccess(res, result);
@@ -170,6 +176,11 @@ router.patch(
     param('id').isUUID(),
     body('name').optional().isString().trim().notEmpty(),
     body('category').optional().isIn(VALID_CATEGORIES),
+    body('activityCode')
+      .optional({ nullable: true })
+      .isString()
+      .trim()
+      .isLength({ max: 64 }),
     body('wbsCode').optional().isString().trim(),
     body('startDate').optional().isISO8601(),
     body('endDate').optional().isISO8601(),
@@ -244,6 +255,7 @@ router.put(
       projectId: req.params.projectId,
       activityId: req.params.id,
       userId: req.user.id,
+      userRole: getEffectiveRole(req),
       payload: req.body,
     });
     return sendSuccess(res, result);

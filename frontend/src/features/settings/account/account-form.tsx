@@ -1,9 +1,12 @@
+import { useEffect } from 'react'
 import { z } from 'zod'
 import { useForm } from 'react-hook-form'
 import { CaretSortIcon, CheckIcon } from '@radix-ui/react-icons'
 import { zodResolver } from '@hookform/resolvers/zod'
-import { showSubmittedData } from '@/lib/show-submitted-data'
+import { toast } from 'sonner'
+import { getServerErrorMessage } from '@/lib/handle-server-error'
 import { cn } from '@/lib/utils'
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import {
   Command,
@@ -28,45 +31,87 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from '@/components/ui/popover'
+import { Skeleton } from '@/components/ui/skeleton'
 import { DatePicker } from '@/components/date-picker'
-
-const languages = [
-  { label: 'English', value: 'en' },
-  { label: 'French', value: 'fr' },
-  { label: 'German', value: 'de' },
-  { label: 'Spanish', value: 'es' },
-  { label: 'Portuguese', value: 'pt' },
-  { label: 'Russian', value: 'ru' },
-  { label: 'Japanese', value: 'ja' },
-  { label: 'Korean', value: 'ko' },
-  { label: 'Chinese', value: 'zh' },
-] as const
+import {
+  languages,
+  type UserLanguage,
+  useUpdateAccountSettings,
+  useUserSettings,
+} from '../hooks/use-user-settings'
 
 const accountFormSchema = z.object({
   name: z
     .string()
-    .min(1, 'Please enter your name.')
     .min(2, 'Name must be at least 2 characters.')
     .max(30, 'Name must not be longer than 30 characters.'),
-  dob: z.date('Please select your date of birth.'),
-  language: z.string('Please select a language.'),
+  dob: z.date().nullable(),
+  language: z.enum(['en', 'fr', 'de', 'es', 'pt', 'ru', 'ja', 'ko', 'zh']),
 })
 
 type AccountFormValues = z.infer<typeof accountFormSchema>
 
-// This can come from your database or API.
-const defaultValues: Partial<AccountFormValues> = {
+const defaultValues: AccountFormValues = {
   name: '',
+  dob: null,
+  language: 'en',
 }
 
 export function AccountForm() {
+  const settingsQuery = useUserSettings()
+  const updateAccount = useUpdateAccountSettings()
   const form = useForm<AccountFormValues>({
     resolver: zodResolver(accountFormSchema),
     defaultValues,
   })
 
-  function onSubmit(data: AccountFormValues) {
-    showSubmittedData(data)
+  useEffect(() => {
+    if (!settingsQuery.data) return
+
+    form.reset({
+      name: settingsQuery.data.account.name,
+      dob: settingsQuery.data.account.dob
+        ? new Date(settingsQuery.data.account.dob)
+        : null,
+      language: settingsQuery.data.account.language,
+    })
+  }, [form, settingsQuery.data])
+
+  async function onSubmit(data: AccountFormValues) {
+    try {
+      await updateAccount.mutateAsync({
+        name: data.name,
+        dob: data.dob ? data.dob.toISOString() : null,
+        language: data.language as UserLanguage,
+      })
+      toast.success('Account settings updated')
+    } catch (error) {
+      toast.error(getServerErrorMessage(error, 'Unable to update account.'))
+    }
+  }
+
+  if (settingsQuery.isLoading) {
+    return (
+      <div className='space-y-4'>
+        <Skeleton className='h-20 w-full' />
+        <Skeleton className='h-20 w-full' />
+        <Skeleton className='h-10 w-40' />
+      </div>
+    )
+  }
+
+  if (settingsQuery.isError) {
+    return (
+      <Alert variant='destructive'>
+        <AlertTitle>Account unavailable</AlertTitle>
+        <AlertDescription>
+          {getServerErrorMessage(
+            settingsQuery.error,
+            'Unable to load account settings.'
+          )}
+        </AlertDescription>
+      </Alert>
+    )
   }
 
   return (
@@ -82,8 +127,7 @@ export function AccountForm() {
                 <Input placeholder='Your name' {...field} />
               </FormControl>
               <FormDescription>
-                This is the name that will be displayed on your profile and in
-                emails.
+                This is the name shown in navigation, records, and emails.
               </FormDescription>
               <FormMessage />
             </FormItem>
@@ -95,10 +139,11 @@ export function AccountForm() {
           render={({ field }) => (
             <FormItem className='flex flex-col'>
               <FormLabel>Date of birth</FormLabel>
-              <DatePicker selected={field.value} onSelect={field.onChange} />
-              <FormDescription>
-                Your date of birth is used to calculate your age.
-              </FormDescription>
+              <DatePicker
+                selected={field.value ?? undefined}
+                onSelect={(date) => field.onChange(date ?? null)}
+              />
+              <FormDescription>Stored on your account profile.</FormDescription>
               <FormMessage />
             </FormItem>
           )}
@@ -160,13 +205,15 @@ export function AccountForm() {
                 </PopoverContent>
               </Popover>
               <FormDescription>
-                This is the language that will be used in the dashboard.
+                This language preference is saved with your account.
               </FormDescription>
               <FormMessage />
             </FormItem>
           )}
         />
-        <Button type='submit'>Update account</Button>
+        <Button type='submit' disabled={updateAccount.isPending}>
+          {updateAccount.isPending ? 'Updating...' : 'Update account'}
+        </Button>
       </form>
     </Form>
   )

@@ -16,12 +16,31 @@ model Organisation {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  users            User[]
-  refreshSessions  RefreshSession[]
-  projects         Project[]
-  projectDocuments ProjectDocument[]
-  subscription     Subscription?
-  enterpriseLeads  EnterpriseLead[]
+  users               User[]
+  refreshSessions     RefreshSession[]
+  passwordResetTokens PasswordResetToken[]
+  invitationTokens    InvitationToken[]
+  authAuditEvents     AuthAuditEvent[]
+  notifications       Notification[]
+  notificationPrefs   NotificationPreference[]
+  companies           Company[]
+  companyMemberships  CompanyMembership[]
+  projects            Project[]
+  meetings            Meeting[]
+  meetingAttendees    MeetingAttendee[]
+  meetingAgendaItems  MeetingAgendaItem[]
+  meetingDecisions    MeetingDecision[]
+  meetingActionItems  MeetingActionItem[]
+  meetingDistributions MeetingDistribution[]
+  meetingComments     MeetingComment[]
+  tasks               Task[]
+  taskComments        TaskComment[]
+  taskAttachments     TaskAttachment[]
+  taskHistoryEvents   TaskHistory[]
+  projectDocuments    ProjectDocument[]
+  userSettings        UserSetting[]
+  subscription        Subscription?
+  enterpriseLeads     EnterpriseLead[]
 }
 
 model User {
@@ -37,18 +56,125 @@ model User {
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
 
-  org                 Organisation         @relation(fields: [orgId], references: [id])
-  projectAssignments  ProjectAssignment[]
-  activityAssignments ActivityAssignment[]
-  refreshSessions     RefreshSession[]
-  dailyReports        DailyReport[]
-  siteDiaries         SiteDiary[]
+  org                     Organisation         @relation(fields: [orgId], references: [id])
+  projectAssignments      ProjectAssignment[]
+  activityAssignments     ActivityAssignment[]
+  refreshSessions         RefreshSession[]
+  passwordResetTokens     PasswordResetToken[]
+  sentInvitations         InvitationToken[]    @relation("InvitationInvitedBy")
+  acceptedInvitations     InvitationToken[]    @relation("InvitationAcceptedBy")
+  authAuditEvents         AuthAuditEvent[]     @relation("AuthAuditUser")
+  authoredAuthAuditEvents AuthAuditEvent[]     @relation("AuthAuditActor")
+  settings                UserSetting?
+  dailyReports            DailyReport[]
+  siteDiaries             SiteDiary[]
+  notifications           Notification[]      @relation("NotificationRecipient")
+  actedNotifications      Notification[]      @relation("NotificationActor")
+  notificationPrefs       NotificationPreference[]
+  companyMemberships      CompanyMembership[]
+  projectPartyMemberships ProjectPartyMember[]
+  chairedMeetings         Meeting[]              @relation("MeetingChair")
+  createdMeetings         Meeting[]              @relation("MeetingCreatedBy")
+  updatedMeetings         Meeting[]              @relation("MeetingUpdatedBy")
+  distributedMeetings     Meeting[]              @relation("MeetingDistributedBy")
+  meetingAttendees        MeetingAttendee[]      @relation("MeetingAttendeeUser")
+  meetingAgendaItems      MeetingAgendaItem[]    @relation("MeetingAgendaPresenter")
+  meetingDecisions        MeetingDecision[]      @relation("MeetingDecisionDecidedBy")
+  meetingActionItems      MeetingActionItem[]    @relation("MeetingActionOwner")
+  meetingDistributionRecipients MeetingDistribution[] @relation("MeetingDistributionRecipient")
+  sentMeetingDistributions      MeetingDistribution[] @relation("MeetingDistributionSender")
+  meetingComments         MeetingComment[]       @relation("MeetingCommentAuthor")
+  assignedTasks           Task[]              @relation("TaskAssignee")
+  createdTasks            Task[]              @relation("TaskCreatedBy")
+  updatedTasks            Task[]              @relation("TaskUpdatedBy")
+  closedTasks             Task[]              @relation("TaskClosedBy")
+  taskComments            TaskComment[]       @relation("TaskCommentAuthor")
+  taskAttachments         TaskAttachment[]    @relation("TaskAttachmentUploader")
+  taskHistoryEvents       TaskHistory[]       @relation("TaskHistoryActor")
 
   @@index([orgId])
   @@index([email])
 }
 
 // ─── Projects ───
+model UserSetting {
+  id                String    @id @default(uuid())
+  orgId             String
+  userId            String    @unique
+  profileUsername   String?
+  profileBio        String?
+  profileUrls       Json      @default("[]")
+  dateOfBirth       DateTime?
+  language          String    @default("en")
+  appearanceTheme   String    @default("dark")
+  appearanceFont    String    @default("inter")
+  displayItems      Json      @default("[\"dashboard\",\"projects\",\"tasks\",\"apps\",\"chats\",\"users\",\"help-center\"]")
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  org  Organisation @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  user User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([orgId])
+  @@index([orgId, userId])
+}
+
+enum ProjectPartyRole {
+  owner
+  consultant
+  contractor
+  subcontractor
+}
+
+model Company {
+  id                 String   @id @default(uuid())
+  orgId              String
+  name               String
+  legalName          String?
+  tradeName          String?
+  registrationNumber String?
+  taxNumber          String?
+  type               String   @default("external")
+  email              String?
+  phone              String?
+  website            String?
+  address            String?
+  status             String   @default("active")
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  org              Organisation        @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  memberships      CompanyMembership[]
+  projectParties   ProjectParty[]
+  invitationTokens InvitationToken[]
+
+  @@unique([orgId, name])
+  @@index([orgId])
+  @@index([orgId, status])
+}
+
+model CompanyMembership {
+  id        String   @id @default(uuid())
+  orgId     String
+  companyId String
+  userId    String
+  role      String   @default("member")
+  status    String   @default("active")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  org                 Organisation         @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  company             Company              @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  user                User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  projectPartyMembers ProjectPartyMember[]
+
+  @@unique([companyId, userId])
+  @@index([orgId])
+  @@index([orgId, userId])
+  @@index([companyId])
+  @@index([userId])
+}
+
 model Project {
   id                    String    @id @default(uuid())
   orgId                 String
@@ -64,6 +190,7 @@ model Project {
   endDate               DateTime?
   completionDate        DateTime?
   baselineDate          DateTime?
+  dataDate              DateTime?
   revisedCompletionDate DateTime?
   duration              Int?
   durationUnit          String    @default("months")
@@ -75,11 +202,16 @@ model Project {
   reportingCutoffDay    Int?
   currency              String    @default("USD")
   status                String    @default("active")
+  archivedAt            DateTime?
+  archivedBy            String?
   createdAt             DateTime  @default(now())
   updatedAt             DateTime  @updatedAt
 
   org                           Organisation                   @relation(fields: [orgId], references: [id])
   assignments                   ProjectAssignment[]
+  parties                       ProjectParty[]
+  invitationTokens              InvitationToken[]
+  authAuditEvents               AuthAuditEvent[]
   boqRevisions                  BoqRevision[]
   boqItems                      BoqItem[]
   boqActivities                 BoqActivity[]
@@ -90,6 +222,7 @@ model Project {
   costRecords                   CostRecord[]
   burnRateEntries               BurnRateEntry[]
   risks                         Risk[]
+  riskActivityLinks             RiskActivityLink[]
   longLeadItems                 LongLeadItem[]
   procurementSuppliers          ProcurementSupplier[]
   procurementPackages           ProcurementPackage[]
@@ -97,6 +230,7 @@ model Project {
   deliveryReceipts              DeliveryReceipt[]
   deliveryReceiptLines          DeliveryReceiptLine[]
   activityMaterialUsages        ActivityMaterialUsage[]
+  activityEquipmentUsages       ActivityEquipmentUsage[]
   procurementLeadTimeAlerts     ProcurementLeadTimeAlert[]
   changeOrders                  ChangeOrder[]
   changeOrderActivityLinks      ChangeOrderActivityLink[]
@@ -148,8 +282,78 @@ model Project {
   weeklyReports                 WeeklyReport[]
   resourceAllocations           ResourceAllocation[]
   activityMaterials             ActivityMaterial[]
+  meetings                      Meeting[]
+  meetingAttendees              MeetingAttendee[]
+  meetingAgendaItems            MeetingAgendaItem[]
+  meetingDecisions              MeetingDecision[]
+  meetingActionItems            MeetingActionItem[]
+  meetingDistributions          MeetingDistribution[]
+  meetingComments               MeetingComment[]
+  tasks                         Task[]
+  taskComments                  TaskComment[]
+  taskAttachments               TaskAttachment[]
+  taskHistoryEvents             TaskHistory[]
+  notifications                 Notification[]
 
   @@index([orgId])
+  @@index([orgId, status, archivedAt])
+}
+
+model ProjectParty {
+  id                   String           @id @default(uuid())
+  projectId            String
+  companyId            String
+  role                 ProjectPartyRole
+  contactName          String?
+  contactEmail         String?
+  contactPhone         String?
+  accessLevel          String           @default("collaborator")
+  permissionProfile    String?
+  permissionsJson      Json             @default("{}")
+  status               String           @default("active")
+  createdAt            DateTime         @default(now())
+  updatedAt            DateTime         @updatedAt
+
+  project                       Project              @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  company                       Company              @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  members                       ProjectPartyMember[]
+  invitationTokens              InvitationToken[]
+  rfiOwnerAssignments           Rfi[]                @relation("RfiOwnerParty")
+  rfiReviewerAssignments        Rfi[]                @relation("RfiReviewerParty")
+  rfiApproverAssignments        Rfi[]                @relation("RfiApproverParty")
+  submittalOwnerAssignments     Submittal[]          @relation("SubmittalOwnerParty")
+  submittalReviewerAssignments  Submittal[]          @relation("SubmittalReviewerParty")
+  submittalApproverAssignments  Submittal[]          @relation("SubmittalApproverParty")
+  meetingAttendees              MeetingAttendee[]
+  meetingDistributions          MeetingDistribution[]
+
+  @@unique([projectId, companyId, role])
+  @@index([projectId])
+  @@index([projectId, role])
+  @@index([companyId])
+  @@index([status])
+}
+
+model ProjectPartyMember {
+  id                  String    @id @default(uuid())
+  projectPartyId      String
+  userId              String
+  companyMembershipId String?
+  role                String    @default("member")
+  status              String    @default("active")
+  invitedAt           DateTime?
+  acceptedAt          DateTime?
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  projectParty      ProjectParty       @relation(fields: [projectPartyId], references: [id], onDelete: Cascade)
+  user              User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  companyMembership CompanyMembership? @relation(fields: [companyMembershipId], references: [id], onDelete: SetNull)
+
+  @@unique([projectPartyId, userId])
+  @@index([userId, projectPartyId])
+  @@index([companyMembershipId])
+  @@index([status])
 }
 
 model ProjectAssignment {
@@ -186,6 +390,102 @@ model RefreshSession {
   @@index([orgId, userId])
   @@index([expiresAt])
   @@index([revokedAt])
+}
+
+model PasswordResetToken {
+  id        String    @id @default(uuid())
+  userId    String
+  orgId     String
+  email     String
+  tokenHash String    @unique
+  userAgent String?
+  ipAddress String?
+  expiresAt DateTime
+  usedAt    DateTime?
+  revokedAt DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  user User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  org  Organisation @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([orgId])
+  @@index([orgId, email])
+  @@index([expiresAt])
+  @@index([usedAt])
+  @@index([revokedAt])
+}
+
+model InvitationToken {
+  id           String    @id @default(uuid())
+  orgId        String
+  projectId    String?
+  companyId    String?
+  projectPartyId String?
+  email        String
+  role         String
+  tokenHash    String    @unique
+  note         String?
+  status       String    @default("pending")
+  invitedById  String?
+  acceptedById String?
+  userAgent    String?
+  ipAddress    String?
+  expiresAt    DateTime
+  acceptedAt   DateTime?
+  revokedAt    DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  org        Organisation @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  project    Project?     @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  company    Company?     @relation(fields: [companyId], references: [id], onDelete: SetNull)
+  projectParty ProjectParty? @relation(fields: [projectPartyId], references: [id], onDelete: SetNull)
+  invitedBy  User?        @relation("InvitationInvitedBy", fields: [invitedById], references: [id], onDelete: SetNull)
+  acceptedBy User?        @relation("InvitationAcceptedBy", fields: [acceptedById], references: [id], onDelete: SetNull)
+
+  @@index([orgId])
+  @@index([projectId])
+  @@index([companyId])
+  @@index([projectPartyId])
+  @@index([orgId, email])
+  @@index([orgId, status])
+  @@index([invitedById])
+  @@index([acceptedById])
+  @@index([expiresAt])
+  @@index([acceptedAt])
+  @@index([revokedAt])
+}
+
+model AuthAuditEvent {
+  id           String   @id @default(uuid())
+  orgId        String?
+  projectId    String?
+  userId       String?
+  actorId      String?
+  actorRole    String?
+  entityType   String
+  entityId     String?
+  action       String
+  email        String?
+  ipAddress    String?
+  userAgent    String?
+  metadataJson Json     @default("{}")
+  createdAt    DateTime @default(now())
+
+  org     Organisation? @relation(fields: [orgId], references: [id], onDelete: SetNull)
+  project Project?      @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  user    User?         @relation("AuthAuditUser", fields: [userId], references: [id], onDelete: SetNull)
+  actor   User?         @relation("AuthAuditActor", fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([orgId])
+  @@index([projectId])
+  @@index([userId])
+  @@index([actorId])
+  @@index([entityType, entityId])
+  @@index([email])
+  @@index([createdAt])
 }
 
 model AuditEvent {
@@ -257,10 +557,368 @@ model ActivityAssignment {
 }
 
 // ─── BOQ ───
+// Tasks
+model Task {
+  id          String    @id @default(uuid())
+  orgId       String
+  projectId   String
+  activityId  String?
+  taskNumber  String
+  title       String
+  description String?
+  label       String    @default("action")
+  priority    String    @default("medium")
+  status      String    @default("todo")
+  dueDate     DateTime?
+  assigneeId  String?
+  createdById String?
+  updatedById String?
+  closedById  String?
+  closedAt    DateTime?
+  archivedAt  DateTime?
+  archivedBy  String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  org         Organisation    @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  project     Project         @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  activity    Activity?       @relation(fields: [activityId], references: [id], onDelete: SetNull)
+  assignee    User?           @relation("TaskAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
+  createdBy   User?           @relation("TaskCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  updatedBy   User?           @relation("TaskUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+  closedBy    User?           @relation("TaskClosedBy", fields: [closedById], references: [id], onDelete: SetNull)
+  comments    TaskComment[]
+  attachments TaskAttachment[]
+  history     TaskHistory[]
+  meetingActionItems MeetingActionItem[]
+
+  @@unique([projectId, taskNumber])
+  @@index([orgId])
+  @@index([projectId])
+  @@index([projectId, status, dueDate])
+  @@index([projectId, assigneeId, status])
+  @@index([activityId])
+  @@index([assigneeId])
+  @@index([createdById])
+  @@index([archivedAt])
+}
+
+model TaskComment {
+  id        String   @id @default(uuid())
+  orgId     String
+  projectId String
+  taskId    String
+  authorId  String?
+  body      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  org     Organisation @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  project Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  task    Task         @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  author  User?        @relation("TaskCommentAuthor", fields: [authorId], references: [id], onDelete: SetNull)
+
+  @@index([orgId])
+  @@index([projectId])
+  @@index([taskId, createdAt])
+  @@index([authorId])
+}
+
+model TaskAttachment {
+  id                String   @id @default(uuid())
+  orgId             String
+  projectId         String
+  taskId            String
+  projectDocumentId String?
+  fileName          String?
+  fileUrl           String?
+  storageKey        String?
+  uploadedById      String?
+  createdAt         DateTime @default(now())
+
+  org             Organisation     @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  project         Project          @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  task            Task             @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  projectDocument ProjectDocument? @relation(fields: [projectDocumentId], references: [id], onDelete: SetNull)
+  uploadedBy      User?            @relation("TaskAttachmentUploader", fields: [uploadedById], references: [id], onDelete: SetNull)
+
+  @@index([orgId])
+  @@index([projectId])
+  @@index([taskId])
+  @@index([projectDocumentId])
+  @@index([uploadedById])
+}
+
+model TaskHistory {
+  id           String   @id @default(uuid())
+  orgId        String
+  projectId    String
+  taskId       String
+  action       String
+  actorId      String?
+  actorRole    String?
+  fromStatus   String?
+  toStatus     String?
+  comment      String?
+  metadataJson Json     @default("{}")
+  createdAt    DateTime @default(now())
+
+  org     Organisation @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  project Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  task    Task         @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  actor   User?        @relation("TaskHistoryActor", fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([orgId])
+  @@index([projectId])
+  @@index([taskId, createdAt])
+  @@index([actorId])
+}
+
+// Meetings & Minutes
+model Meeting {
+  id              String    @id @default(uuid())
+  orgId           String
+  projectId       String
+  activityId      String?
+  meetingNumber   String
+  title           String
+  meetingType     String    @default("coordination")
+  location        String?
+  scheduledAt     DateTime?
+  startedAt       DateTime?
+  endedAt         DateTime?
+  status          String    @default("draft")
+  objective       String?
+  minutesText     String?
+  nextMeetingAt   DateTime?
+  chairId         String?
+  createdById     String?
+  updatedById     String?
+  distributedById String?
+  distributedAt   DateTime?
+  archivedAt      DateTime?
+  archivedBy      String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  org             Organisation          @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  project         Project               @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  activity        Activity?             @relation(fields: [activityId], references: [id], onDelete: SetNull)
+  chair           User?                 @relation("MeetingChair", fields: [chairId], references: [id], onDelete: SetNull)
+  createdBy       User?                 @relation("MeetingCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  updatedBy       User?                 @relation("MeetingUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+  distributedBy   User?                 @relation("MeetingDistributedBy", fields: [distributedById], references: [id], onDelete: SetNull)
+  attendees       MeetingAttendee[]
+  agendaItems     MeetingAgendaItem[]
+  decisions       MeetingDecision[]
+  actionItems     MeetingActionItem[]
+  distributions   MeetingDistribution[]
+  comments        MeetingComment[]
+
+  @@unique([projectId, meetingNumber])
+  @@index([orgId])
+  @@index([projectId])
+  @@index([projectId, status, scheduledAt])
+  @@index([projectId, meetingType])
+  @@index([activityId])
+  @@index([chairId])
+  @@index([createdById])
+  @@index([distributedAt])
+  @@index([archivedAt])
+}
+
+model MeetingAttendee {
+  id                   String   @id @default(uuid())
+  orgId                String
+  projectId            String
+  meetingId            String
+  activityId           String?
+  userId               String?
+  projectPartyId       String?
+  name                 String?
+  email                String?
+  companyName          String?
+  role                 String   @default("attendee")
+  attendanceStatus     String   @default("invited")
+  distributionRequired Boolean  @default(true)
+  attendedAt           DateTime?
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  org          Organisation @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  project      Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  meeting      Meeting      @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+  activity     Activity?    @relation(fields: [activityId], references: [id], onDelete: SetNull)
+  user         User?        @relation("MeetingAttendeeUser", fields: [userId], references: [id], onDelete: SetNull)
+  projectParty ProjectParty? @relation(fields: [projectPartyId], references: [id], onDelete: SetNull)
+
+  @@index([orgId])
+  @@index([projectId])
+  @@index([meetingId])
+  @@index([activityId])
+  @@index([userId])
+  @@index([projectPartyId])
+  @@index([meetingId, attendanceStatus])
+}
+
+model MeetingAgendaItem {
+  id          String   @id @default(uuid())
+  orgId       String
+  projectId   String
+  meetingId   String
+  activityId  String?
+  presenterId String?
+  sortOrder   Int      @default(0)
+  title       String
+  notes       String?
+  status      String   @default("open")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  org       Organisation @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  project   Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  meeting   Meeting      @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+  activity  Activity?    @relation(fields: [activityId], references: [id], onDelete: SetNull)
+  presenter User?        @relation("MeetingAgendaPresenter", fields: [presenterId], references: [id], onDelete: SetNull)
+
+  @@index([orgId])
+  @@index([projectId])
+  @@index([meetingId, sortOrder])
+  @@index([activityId])
+  @@index([presenterId])
+}
+
+model MeetingDecision {
+  id          String   @id @default(uuid())
+  orgId       String
+  projectId   String
+  meetingId   String
+  activityId  String?
+  decidedById String?
+  title       String
+  decision    String
+  impact      String?
+  decidedAt   DateTime @default(now())
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  org       Organisation @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  project   Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  meeting   Meeting      @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+  activity  Activity?    @relation(fields: [activityId], references: [id], onDelete: SetNull)
+  decidedBy User?        @relation("MeetingDecisionDecidedBy", fields: [decidedById], references: [id], onDelete: SetNull)
+
+  @@index([orgId])
+  @@index([projectId])
+  @@index([meetingId])
+  @@index([activityId])
+  @@index([decidedById])
+  @@index([decidedAt])
+}
+
+model MeetingActionItem {
+  id          String    @id @default(uuid())
+  orgId       String
+  projectId   String
+  meetingId   String
+  activityId  String?
+  taskId      String?
+  itemNumber  String
+  title       String
+  description String?
+  ownerId     String?
+  ownerName   String?
+  ownerEmail  String?
+  dueDate     DateTime
+  priority    String    @default("medium")
+  status      String    @default("open")
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  org      Organisation @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  project  Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  meeting  Meeting      @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+  activity Activity?    @relation(fields: [activityId], references: [id], onDelete: SetNull)
+  task     Task?        @relation(fields: [taskId], references: [id], onDelete: SetNull)
+  owner    User?        @relation("MeetingActionOwner", fields: [ownerId], references: [id], onDelete: SetNull)
+
+  @@unique([meetingId, itemNumber])
+  @@index([orgId])
+  @@index([projectId])
+  @@index([meetingId])
+  @@index([activityId])
+  @@index([taskId])
+  @@index([ownerId])
+  @@index([projectId, status, dueDate])
+}
+
+model MeetingDistribution {
+  id              String   @id @default(uuid())
+  orgId           String
+  projectId       String
+  meetingId       String
+  activityId      String?
+  recipientUserId String?
+  projectPartyId  String?
+  recipientName   String?
+  recipientEmail  String?
+  companyName     String?
+  channel         String   @default("email")
+  status          String   @default("sent")
+  message         String?
+  sentById        String?
+  sentAt          DateTime @default(now())
+  metadataJson    Json     @default("{}")
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  org           Organisation @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  project       Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  meeting       Meeting      @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+  activity      Activity?    @relation(fields: [activityId], references: [id], onDelete: SetNull)
+  recipientUser User?        @relation("MeetingDistributionRecipient", fields: [recipientUserId], references: [id], onDelete: SetNull)
+  projectParty  ProjectParty? @relation(fields: [projectPartyId], references: [id], onDelete: SetNull)
+  sentBy        User?        @relation("MeetingDistributionSender", fields: [sentById], references: [id], onDelete: SetNull)
+
+  @@index([orgId])
+  @@index([projectId])
+  @@index([meetingId])
+  @@index([activityId])
+  @@index([recipientUserId])
+  @@index([projectPartyId])
+  @@index([sentAt])
+}
+
+model MeetingComment {
+  id         String   @id @default(uuid())
+  orgId      String
+  projectId  String
+  meetingId  String
+  activityId String?
+  authorId   String?
+  body       String
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  org      Organisation @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  project  Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  meeting  Meeting      @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+  activity Activity?    @relation(fields: [activityId], references: [id], onDelete: SetNull)
+  author   User?        @relation("MeetingCommentAuthor", fields: [authorId], references: [id], onDelete: SetNull)
+
+  @@index([orgId])
+  @@index([projectId])
+  @@index([meetingId, createdAt])
+  @@index([activityId])
+  @@index([authorId])
+}
+
+// BOQ
 model BoqItem {
   id                     String    @id @default(uuid())
   projectId              String
   revisionId             String?
+  activeCodeKey          String?
   code                   String? // e.g. "1.1", "2.3" — BOQ item code
   ref                    String? // legacy field kept for IPC compatibility
   description            String
@@ -287,6 +945,7 @@ model BoqItem {
   changeOrderAllocations  ChangeOrderAllocationLink[]
   subValuationAllocations SubValuationAllocationLink[]
 
+  @@unique([projectId, activeCodeKey])
   @@index([projectId])
   @@index([projectId, isActive])
   @@index([projectId, code])
@@ -328,6 +987,20 @@ model BoqRevision {
   @@index([sourceDocumentId])
 }
 
+model BoqItemCodeIntegrityReport {
+  id              String   @id @default(uuid())
+  projectId       String
+  normalizedCode  String
+  activeItemCount Int
+  activeItemIds   Json
+  codeVariants    Json
+  reason          String
+  createdAt       DateTime @default(now())
+
+  @@index([projectId])
+  @@index([createdAt])
+}
+
 model ProjectDocument {
   id                 String    @id @default(uuid())
   orgId              String
@@ -335,6 +1008,12 @@ model ProjectDocument {
   documentType       String
   linkedEntityType   String?
   linkedEntityId     String?
+  title              String?
+  documentNumber     String?
+  category           String?
+  folderPath         String?
+  discipline         String?
+  confidentiality    String    @default("project")
   originalName       String
   fileName           String
   mimeType           String
@@ -359,10 +1038,14 @@ model ProjectDocument {
   project                  Project                   @relation(fields: [projectId], references: [id])
   boqRevisions             BoqRevision[]
   commercialAttachmentRefs CommercialAttachmentRef[]
+  documentRevisions        DocumentRevision[]
+  taskAttachments          TaskAttachment[]
 
   @@index([orgId])
   @@index([projectId])
   @@index([orgId, projectId, documentType])
+  @@index([projectId, category])
+  @@index([projectId, folderPath])
   @@index([projectId, linkedEntityType, linkedEntityId])
   @@index([storageProvider, bucket])
   @@index([retentionExpiresAt])
@@ -412,6 +1095,7 @@ model Activity {
   id                String    @id @default(uuid())
   projectId         String
   name              String
+  activityCode      String?
   p6ActivityId      String?
   wbsCode           String?
   calendarId        String?
@@ -455,6 +1139,7 @@ model Activity {
   procurementPoLines     ProcurementPoLine[]
   deliveryReceiptLines   DeliveryReceiptLine[]
   materialUsages         ActivityMaterialUsage[]
+  equipmentUsages        ActivityEquipmentUsage[]
   leadTimeAlerts         ProcurementLeadTimeAlert[]
   ncrRecords             NcrRecord[]
   defectRecords          DefectRecord[]
@@ -465,6 +1150,7 @@ model Activity {
   drawingRecords         DrawingRecord[]
   correspondences        Correspondence[]
   workflowLinks          WorkflowActivityLink[]
+  riskLinks              RiskActivityLink[]
   dailyReports           DailyReport[]
   assignments            ActivityAssignment[]
   materials              ActivityMaterial[]
@@ -479,6 +1165,14 @@ model Activity {
   subValuationLinks      SubValuationActivityLink[]
   eotClaimLinks          EotClaimActivityLink[]
   weatherDelayLinks      WeatherDelayActivityLink[]
+  meetings               Meeting[]
+  meetingAttendees       MeetingAttendee[]
+  meetingAgendaItems     MeetingAgendaItem[]
+  meetingDecisions       MeetingDecision[]
+  meetingActionItems     MeetingActionItem[]
+  meetingDistributions   MeetingDistribution[]
+  meetingComments        MeetingComment[]
+  tasks                  Task[]
   predecessorLinks       ActivityDependency[]       @relation("ActivityDependencySuccessor")
   successorLinks         ActivityDependency[]       @relation("ActivityDependencyPredecessor")
 
@@ -487,6 +1181,7 @@ model Activity {
   @@index([projectId, isActive, sortOrder])
   @@index([projectId, isActive, category])
   @@index([projectId, isCritical])
+  @@index([projectId, activityCode])
   @@index([projectId, p6ActivityId])
   @@index([projectId, wbsCode])
 }
@@ -549,9 +1244,13 @@ model ActivityBoqAllocation {
   ipcProgressLinks  IpcItemProgressLink[]
   subValuationLinks SubValuationAllocationLink[]
 
+  // Active pair uniqueness is enforced by the partial unique index
+  // ActivityBoqAllocation_active_pair_key in SQL migrations because Prisma
+  // schema cannot express partial unique indexes with isActive = true.
   @@index([projectId])
   @@index([boqItemId])
   @@index([activityId])
+  @@index([projectId, boqItemId, activityId])
   @@index([projectId, status])
 }
 
@@ -602,7 +1301,7 @@ model ActivityProgressMethod {
   createdAt            DateTime @default(now())
   updatedAt            DateTime @updatedAt
 
-  project  Project  @relation(fields: [projectId], references: [id])
+  project  Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
   activity Activity @relation(fields: [activityId], references: [id], onDelete: Cascade)
 
   @@index([projectId])
@@ -844,28 +1543,32 @@ model EvPeriodSnapshot {
 
 // ─── Commercial ───
 model ChangeOrder {
-  id              String    @id @default(uuid())
-  projectId       String
-  activityId      String?
-  ref             String
-  description     String
-  category        String?
-  value           Decimal   @default(0) @db.Decimal(18, 2)
-  status          String    @default("pending") // pending, approved, rejected
-  scheduleImpact  Int       @default(0)
-  submittedDate   DateTime?
-  approvedDate    DateTime?
-  rejectedReason  String?
-  raisedBy        String?
-  createdBy       String?
-  updatedBy       String?
-  approvedBy      String?
-  approvedAt      DateTime?
-  approvalComment String?
-  rejectedBy      String?
-  rejectedAt      DateTime?
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
+  id                    String    @id @default(uuid())
+  projectId             String
+  activityId            String?
+  ref                   String
+  description           String
+  category              String?
+  value                 Decimal   @default(0) @db.Decimal(18, 2)
+  status                String    @default("draft") // draft, pending, approved, rejected
+  scheduleImpact        Int       @default(0)
+  scheduleImpactSummary String?
+  costImpactSummary     String?
+  submittedDate         DateTime?
+  approvedDate          DateTime?
+  rejectedReason        String?
+  raisedBy              String?
+  createdBy             String?
+  updatedBy             String?
+  approvedBy            String?
+  approvedAt            DateTime?
+  approvalComment       String?
+  rejectedBy            String?
+  rejectedAt            DateTime?
+  archivedAt            DateTime?
+  archivedBy            String?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
 
   project         Project                     @relation(fields: [projectId], references: [id])
   activity        Activity?                   @relation(fields: [activityId], references: [id], onDelete: SetNull)
@@ -873,6 +1576,7 @@ model ChangeOrder {
   allocationLinks ChangeOrderAllocationLink[]
 
   @@index([projectId])
+  @@index([projectId, status, archivedAt])
 }
 
 model ChangeOrderActivityLink {
@@ -992,28 +1696,34 @@ model IpcItemProgressLink {
 }
 
 model IpcCertificate {
-  id                   String    @id @default(uuid())
-  projectId            String
-  period               String
-  issueDate            DateTime?
-  dueDate              DateTime?
-  totalCert            Decimal   @default(0) @db.Decimal(18, 2)
-  totalRet             Decimal   @default(0) @db.Decimal(18, 2)
-  netPayable           Decimal   @default(0) @db.Decimal(18, 2)
-  status               String    @default("draft") // draft, submitted, certified, paid
-  invoiceStatus        String    @default("not_issued") // not_issued, issued, void
-  paymentStatus        String    @default("unpaid") // unpaid, partially_paid, paid
-  retentionStatus      String    @default("held") // held, partially_released, released
-  amountPaid           Decimal   @default(0) @db.Decimal(18, 2)
-  retentionReleased    Decimal   @default(0) @db.Decimal(18, 2)
-  balanceDue           Decimal   @default(0) @db.Decimal(18, 2)
-  submittedBy          String?
-  submittedAt          DateTime?
-  certifiedBy          String?
-  certifiedAt          DateTime?
-  certificationComment String?
-  createdAt            DateTime  @default(now())
-  updatedAt            DateTime  @updatedAt
+  id                           String    @id @default(uuid())
+  projectId                    String
+  period                       String
+  issueDate                    DateTime?
+  dueDate                      DateTime?
+  totalCert                    Decimal   @default(0) @db.Decimal(18, 2)
+  totalRet                     Decimal   @default(0) @db.Decimal(18, 2)
+  netPayable                   Decimal   @default(0) @db.Decimal(18, 2)
+  status                       String    @default("draft") // draft, submitted, certified, paid
+  invoiceStatus                String    @default("not_issued") // not_issued, issued, void
+  paymentStatus                String    @default("unpaid") // unpaid, partially_paid, paid
+  retentionStatus              String    @default("held") // held, partially_released, released
+  amountPaid                   Decimal   @default(0) @db.Decimal(18, 2)
+  retentionReleased            Decimal   @default(0) @db.Decimal(18, 2)
+  balanceDue                   Decimal   @default(0) @db.Decimal(18, 2)
+  submittedBy                  String?
+  submittedAt                  DateTime?
+  certifiedBy                  String?
+  certifiedAt                  DateTime?
+  certificationComment         String?
+  earnedValueAtCertification   Decimal   @default(0) @db.Decimal(18, 2)
+  approvedLimitAtCertification Decimal   @default(0) @db.Decimal(18, 2)
+  overCertificationAmount      Decimal   @default(0) @db.Decimal(18, 2)
+  certificationOverrideReason  String?
+  certificationOverrideBy      String?
+  certificationOverrideAt      DateTime?
+  createdAt                    DateTime  @default(now())
+  updatedAt                    DateTime  @updatedAt
 
   project           Project               @relation(fields: [projectId], references: [id])
   items             IpcItem[]
@@ -1108,23 +1818,70 @@ model IpcRetentionRelease {
 }
 
 model Risk {
-  id          String   @id @default(uuid())
-  projectId   String
-  ref         String
-  description String
-  probability String   @default("medium") // low, medium, high
-  impact      String   @default("medium") // low, medium, high
-  severity    String   @default("MEDIUM") // LOW, MEDIUM, HIGH, CRITICAL
-  mitigation  String?
-  phase       String?
-  owner       String?
-  status      String   @default("open") // open, closed, monitoring
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id                  String    @id @default(uuid())
+  projectId           String
+  ref                 String
+  description         String
+  probability         String    @default("medium") // low, medium, high
+  impact              String    @default("medium") // low, medium, high
+  severity            String    @default("MEDIUM") // LOW, MEDIUM, HIGH, CRITICAL
+  mitigation          String?
+  responsePlan        String?
+  residualProbability String    @default("medium")
+  residualImpact      String    @default("medium")
+  residualSeverity    String    @default("MEDIUM")
+  residualDescription String?
+  phase               String?
+  owner               String?
+  dueDate             DateTime?
+  escalationLevel     String    @default("none") // none, watch, escalated
+  escalationNotes     String?
+  status              String    @default("open") // open, monitoring, submitted, closed
+  closeoutComment     String?
+  closeoutSubmittedBy String?
+  closeoutSubmittedAt DateTime?
+  closedBy            String?
+  closedAt            DateTime?
+  rejectedBy          String?
+  rejectedAt          DateTime?
+  rejectionReason     String?
+  reopenedBy          String?
+  reopenedAt          DateTime?
+  archivedAt          DateTime?
+  archivedBy          String?
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
 
-  project Project @relation(fields: [projectId], references: [id])
+  project       Project            @relation(fields: [projectId], references: [id])
+  activityLinks RiskActivityLink[]
 
   @@index([projectId])
+  @@index([projectId, status])
+  @@index([projectId, status, archivedAt])
+  @@index([projectId, dueDate])
+}
+
+model RiskActivityLink {
+  id                 String   @id @default(uuid())
+  projectId          String
+  riskId             String
+  activityId         String
+  relationType       String   @default("affected")
+  scheduleImpactDays Int      @default(0)
+  costImpact         Decimal  @default(0) @db.Decimal(18, 2)
+  notes              String?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  project  Project  @relation(fields: [projectId], references: [id])
+  risk     Risk     @relation(fields: [riskId], references: [id], onDelete: Cascade)
+  activity Activity @relation(fields: [activityId], references: [id], onDelete: Cascade)
+
+  @@unique([riskId, activityId, relationType])
+  @@index([projectId])
+  @@index([riskId])
+  @@index([activityId])
+  @@index([projectId, activityId])
 }
 
 model LongLeadItem {
@@ -1268,6 +2025,7 @@ model BudgetRevision {
   @@unique([projectId, ref])
   @@index([projectId])
   @@index([projectId, status, effectiveDate])
+  @@index([projectId, linkedChangeOrder])
 }
 
 model CashFlowEntry {
@@ -1287,21 +2045,32 @@ model CashFlowEntry {
 }
 
 model EotClaim {
-  id                 String   @id @default(uuid())
-  projectId          String
-  ref                String
-  eventName          String
-  eventType          String?
-  delayDays          Int      @default(0)
-  eotDaysGranted     Int      @default(0)
-  ldRatePerDay       Decimal  @default(0) @db.Decimal(18, 2)
-  ldLiability        Decimal  @default(0) @db.Decimal(18, 2)
-  affectedActivities Json?
-  analysis           String?
-  claimLetter        String?
-  status             String   @default("draft") // draft, submitted, approved, rejected
-  createdAt          DateTime @default(now())
-  updatedAt          DateTime @updatedAt
+  id                              String    @id @default(uuid())
+  projectId                       String
+  ref                             String
+  eventName                       String
+  eventType                       String?
+  delayDays                       Int       @default(0)
+  eotDaysGranted                  Int       @default(0)
+  ldRatePerDay                    Decimal   @default(0) @db.Decimal(18, 2)
+  ldLiability                     Decimal   @default(0) @db.Decimal(18, 2)
+  affectedActivities              Json?
+  analysis                        String?
+  claimLetter                     String?
+  status                          String    @default("draft") // draft, submitted, approved, rejected
+  submittedBy                     String?
+  submittedAt                     DateTime?
+  approvedBy                      String?
+  approvedAt                      DateTime?
+  rejectedBy                      String?
+  rejectedAt                      DateTime?
+  rejectionReason                 String?
+  officialAt                      DateTime?
+  revisedCompletionRecommendation DateTime?
+  cumulativeApprovedEotDays       Int       @default(0)
+  entitlementSummaryJson          Json      @default("{}")
+  createdAt                       DateTime  @default(now())
+  updatedAt                       DateTime  @updatedAt
 
   project           Project                    @relation(fields: [projectId], references: [id])
   activityLinks     EotClaimActivityLink[]
@@ -1309,6 +2078,7 @@ model EotClaim {
 
   @@unique([projectId, ref])
   @@index([projectId])
+  @@index([projectId, status])
 }
 
 model EotClaimActivityLink {
@@ -1452,8 +2222,11 @@ model ProcurementPackage {
   buyer              String?
   plannedAwardDate   DateTime?
   requiredOnSiteDate DateTime?
+  requiredTiming     String    @default("activity_start")
+  needOffsetDays     Int       @default(0)
   leadWeeks          Int       @default(0)
   bufferDays         Int       @default(14)
+  latestOrderDate    DateTime?
   notes              String?
   createdBy          String?
   updatedBy          String?
@@ -1474,6 +2247,8 @@ model ProcurementPackage {
   @@index([supplierId])
   @@index([activityId])
   @@index([projectId, status])
+  @@index([projectId, requiredOnSiteDate])
+  @@index([projectId, latestOrderDate])
 }
 
 model ProcurementOrder {
@@ -1583,6 +2358,7 @@ model DeliveryReceipt {
   orderId           String
   packageId         String?
   supplierId        String?
+  dailyReportId     String?
   receiptNumber     String
   receivedAt        DateTime @default(now())
   receivedBy        String?
@@ -1594,17 +2370,19 @@ model DeliveryReceipt {
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 
-  project  Project               @relation(fields: [projectId], references: [id])
-  order    ProcurementOrder      @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  package  ProcurementPackage?   @relation(fields: [packageId], references: [id], onDelete: SetNull)
-  supplier ProcurementSupplier?  @relation(fields: [supplierId], references: [id], onDelete: SetNull)
-  lines    DeliveryReceiptLine[]
+  project     Project               @relation(fields: [projectId], references: [id])
+  order       ProcurementOrder      @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  package     ProcurementPackage?   @relation(fields: [packageId], references: [id], onDelete: SetNull)
+  supplier    ProcurementSupplier?  @relation(fields: [supplierId], references: [id], onDelete: SetNull)
+  dailyReport DailyReport?          @relation(fields: [dailyReportId], references: [id], onDelete: SetNull)
+  lines       DeliveryReceiptLine[]
 
   @@unique([projectId, receiptNumber])
   @@index([projectId])
   @@index([orderId])
   @@index([packageId])
   @@index([supplierId])
+  @@index([dailyReportId])
   @@index([projectId, receivedAt])
 }
 
@@ -1616,6 +2394,7 @@ model DeliveryReceiptLine {
   poLineId           String
   activityId         String
   activityMaterialId String?
+  dailyReportId      String?
   acceptedQty        Float    @default(0)
   rejectedQty        Float    @default(0)
   issuedQty          Float    @default(0)
@@ -1628,6 +2407,7 @@ model DeliveryReceiptLine {
   poLine           ProcurementPoLine       @relation(fields: [poLineId], references: [id], onDelete: Cascade)
   activity         Activity                @relation(fields: [activityId], references: [id], onDelete: Cascade)
   activityMaterial ActivityMaterial?       @relation(fields: [activityMaterialId], references: [id], onDelete: SetNull)
+  dailyReport      DailyReport?            @relation(fields: [dailyReportId], references: [id], onDelete: SetNull)
   usages           ActivityMaterialUsage[]
 
   @@index([projectId])
@@ -1636,6 +2416,7 @@ model DeliveryReceiptLine {
   @@index([poLineId])
   @@index([activityId])
   @@index([activityMaterialId])
+  @@index([dailyReportId])
 }
 
 model MaterialMaster {
@@ -1673,8 +2454,9 @@ model Equipment {
   rate      Decimal  @default(0) @db.Decimal(18, 2)
   createdAt DateTime @default(now())
 
-  project           Project             @relation(fields: [projectId], references: [id])
+  project           Project                  @relation(fields: [projectId], references: [id])
   activityEquipment ActivityEquipment[]
+  usages            ActivityEquipmentUsage[]
 
   @@index([projectId])
 }
@@ -1690,6 +2472,41 @@ model ActivityEquipment {
   @@unique([activityId, equipmentId])
   @@index([activityId])
   @@index([equipmentId])
+}
+
+model ActivityEquipmentUsage {
+  id              String    @id @default(uuid())
+  projectId       String
+  activityId      String
+  equipmentId     String?
+  dailyReportId   String?
+  sourceLineIndex Int?
+  equipmentName   String
+  hours           Float     @default(0)
+  rateType        String?
+  rate            Decimal   @default(0) @db.Decimal(18, 2)
+  costAmount      Decimal   @default(0) @db.Decimal(18, 2)
+  usageDate       DateTime  @default(now())
+  status          String    @default("approved")
+  recordedBy      String?
+  approvedBy      String?
+  approvedAt      DateTime?
+  notes           String?
+  createdAt       DateTime  @default(now())
+
+  project     Project      @relation(fields: [projectId], references: [id])
+  activity    Activity     @relation(fields: [activityId], references: [id], onDelete: Cascade)
+  equipment   Equipment?   @relation(fields: [equipmentId], references: [id], onDelete: SetNull)
+  dailyReport DailyReport? @relation(fields: [dailyReportId], references: [id], onDelete: SetNull)
+
+  @@unique([dailyReportId, sourceLineIndex])
+  @@index([projectId])
+  @@index([activityId])
+  @@index([equipmentId])
+  @@index([dailyReportId])
+  @@index([projectId, activityId])
+  @@index([projectId, usageDate])
+  @@index([projectId, status])
 }
 
 model ActivityMaterial {
@@ -1749,6 +2566,7 @@ model ActivityMaterialUsage {
   activityMaterialId String
   poLineId           String?
   receiptLineId      String?
+  dailyReportId      String?
   usedQty            Float    @default(0)
   wasteQty           Float    @default(0)
   usageDate          DateTime @default(now())
@@ -1762,12 +2580,14 @@ model ActivityMaterialUsage {
   activityMaterial ActivityMaterial     @relation(fields: [activityMaterialId], references: [id], onDelete: Cascade)
   poLine           ProcurementPoLine?   @relation(fields: [poLineId], references: [id], onDelete: SetNull)
   receiptLine      DeliveryReceiptLine? @relation(fields: [receiptLineId], references: [id], onDelete: SetNull)
+  dailyReport      DailyReport?         @relation(fields: [dailyReportId], references: [id], onDelete: SetNull)
 
   @@index([projectId])
   @@index([activityId])
   @@index([activityMaterialId])
   @@index([poLineId])
   @@index([receiptLineId])
+  @@index([dailyReportId])
   @@index([projectId, usageDate])
 }
 
@@ -1802,6 +2622,7 @@ model ProcurementLeadTimeAlert {
 
   @@unique([projectId, poLineId])
   @@unique([projectId, activityMaterialId])
+  @@unique([projectId, packageId])
   @@index([projectId])
   @@index([activityId])
   @@index([packageId])
@@ -1833,27 +2654,35 @@ model ResourceAllocation {
 
 // ─── Quality ───
 model NcrRecord {
-  id          String    @id @default(uuid())
-  projectId   String
-  activityId  String?
-  ref         String
-  severity    String // major, minor
-  description String?
-  disposition String?
-  status      String    @default("open")
-  owner       String?
-  reviewer    String?
-  approver    String?
-  responsible String?
-  dueDate     DateTime?
-  closedDate  DateTime?
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+  id                 String    @id @default(uuid())
+  projectId          String
+  activityId         String?
+  ref                String
+  severity           String // major, minor
+  description        String?
+  disposition        String?
+  status             String    @default("open")
+  owner              String?
+  reviewer           String?
+  approver           String?
+  responsible        String?
+  dueDate            DateTime?
+  closureComment     String?
+  closureSubmittedBy String?
+  closureSubmittedAt DateTime?
+  closureApprovedBy  String?
+  closureApprovedAt  DateTime?
+  reopenedBy         String?
+  reopenedAt         DateTime?
+  closedDate         DateTime?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
 
   project  Project   @relation(fields: [projectId], references: [id])
   activity Activity? @relation(fields: [activityId], references: [id])
 
   @@index([projectId])
+  @@index([projectId, status, dueDate])
 }
 
 model ItpRecord {
@@ -1910,30 +2739,42 @@ model DefectRecord {
 }
 
 model SafetyIncident {
-  id            String    @id @default(uuid())
-  projectId     String
-  activityId    String?
-  ref           String
-  incidentType  String // near_miss, first_aid, lti, fatality
-  severity      String? // low, medium, high, critical
-  title         String
-  date          DateTime
-  lostDays      Int       @default(0)
-  status        String    @default("open") // open, investigating, closed
-  owner         String?
-  reviewer      String?
-  approver      String?
-  dueDate       DateTime?
-  closedDate    DateTime?
-  investigation String?
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
+  id                 String    @id @default(uuid())
+  projectId          String
+  activityId         String?
+  ref                String
+  incidentType       String // near_miss, first_aid, lti, fatality
+  severity           String? // low, medium, high, critical
+  title              String
+  date               DateTime
+  lostDays           Int       @default(0)
+  status             String    @default("open") // open, investigating, submitted, closed
+  owner              String?
+  reviewer           String?
+  approver           String?
+  responsible        String?
+  dueDate            DateTime?
+  closedDate         DateTime?
+  closureComment     String?
+  closureSubmittedBy String?
+  closureSubmittedAt DateTime?
+  closureApprovedBy  String?
+  closureApprovedAt  DateTime?
+  reopenedBy         String?
+  reopenedAt         DateTime?
+  investigation      String?
+  archivedAt         DateTime?
+  archivedBy         String?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
 
   project  Project   @relation(fields: [projectId], references: [id])
   activity Activity? @relation(fields: [activityId], references: [id], onDelete: SetNull)
 
   @@unique([projectId, ref])
   @@index([projectId])
+  @@index([projectId, status, archivedAt])
+  @@index([projectId, status, dueDate])
 }
 
 model MaterialTest {
@@ -1977,26 +2818,38 @@ model Rfi {
   status             String    @default("open") // open, answered, closed
   scheduleImpact     Int       @default(0)
   owner              String?
+  ownerPartyId       String?
   reviewer           String?
+  reviewerPartyId    String?
   approver           String?
+  approverPartyId    String?
   raisedBy           String?
   answeredBy         String?
   raisedDate         DateTime?
   dueDate            DateTime?
   responseRequiredBy DateTime?
   answeredDate       DateTime?
+  archivedAt         DateTime?
+  archivedBy         String?
   createdAt          DateTime  @default(now())
   updatedAt          DateTime  @updatedAt
 
   project  Project   @relation(fields: [projectId], references: [id])
   activity Activity? @relation(fields: [activityId], references: [id], onDelete: SetNull)
+  ownerParty    ProjectParty? @relation("RfiOwnerParty", fields: [ownerPartyId], references: [id], onDelete: SetNull)
+  reviewerParty ProjectParty? @relation("RfiReviewerParty", fields: [reviewerPartyId], references: [id], onDelete: SetNull)
+  approverParty ProjectParty? @relation("RfiApproverParty", fields: [approverPartyId], references: [id], onDelete: SetNull)
 
   @@unique([projectId, ref])
   @@index([projectId])
+  @@index([projectId, status, archivedAt])
   @@index([projectId, status, createdAt])
   @@index([projectId, priority, createdAt])
   @@index([projectId, dueDate])
   @@index([projectId, updatedAt])
+  @@index([ownerPartyId])
+  @@index([reviewerPartyId])
+  @@index([approverPartyId])
 }
 
 model Submittal {
@@ -2010,23 +2863,35 @@ model Submittal {
   specRef     String?
   status      String    @default("pending") // pending, under_review, approved, resubmit, rejected
   owner       String?
+  ownerPartyId String?
   reviewer    String?
+  reviewerPartyId String?
   approver    String?
+  approverPartyId String?
   submittedOn DateTime?
   dueDate     DateTime?
   reviewedOn  DateTime?
   remarks     String?
+  archivedAt  DateTime?
+  archivedBy  String?
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
 
   project  Project   @relation(fields: [projectId], references: [id])
   activity Activity? @relation(fields: [activityId], references: [id], onDelete: SetNull)
+  ownerParty    ProjectParty? @relation("SubmittalOwnerParty", fields: [ownerPartyId], references: [id], onDelete: SetNull)
+  reviewerParty ProjectParty? @relation("SubmittalReviewerParty", fields: [reviewerPartyId], references: [id], onDelete: SetNull)
+  approverParty ProjectParty? @relation("SubmittalApproverParty", fields: [approverPartyId], references: [id], onDelete: SetNull)
 
   @@unique([projectId, ref])
   @@index([projectId])
+  @@index([projectId, status, archivedAt])
   @@index([projectId, status, createdAt])
   @@index([projectId, dueDate])
   @@index([projectId, updatedAt])
+  @@index([ownerPartyId])
+  @@index([reviewerPartyId])
+  @@index([approverPartyId])
 }
 
 model DrawingRecord {
@@ -2125,6 +2990,93 @@ model ApprovalWorkflowEvent {
   @@index([actorId, createdAt])
 }
 
+model Notification {
+  id              String    @id @default(uuid())
+  orgId           String
+  projectId       String?
+  recipientUserId String
+  actorId         String?
+  type            String
+  category        String
+  event           String
+  title           String
+  message         String
+  priority        String    @default("normal")
+  inAppVisible    Boolean   @default(true)
+  readAt          DateTime?
+  archivedAt      DateTime?
+  dueAt           DateTime?
+  actionUrl       String?
+  entityType      String?
+  entityId        String?
+  dedupeKey       String?   @unique
+  metadataJson    Json      @default("{}")
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  org              Organisation                  @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  project          Project?                      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  recipient        User                          @relation("NotificationRecipient", fields: [recipientUserId], references: [id], onDelete: Cascade)
+  actor            User?                         @relation("NotificationActor", fields: [actorId], references: [id], onDelete: SetNull)
+  deliveryAttempts NotificationDeliveryAttempt[]
+
+  @@index([orgId])
+  @@index([projectId])
+  @@index([recipientUserId])
+  @@index([orgId, recipientUserId, createdAt])
+  @@index([orgId, recipientUserId, readAt, archivedAt])
+  @@index([orgId, recipientUserId, category, createdAt])
+  @@index([entityType, entityId])
+  @@index([dueAt])
+}
+
+model NotificationPreference {
+  id              String   @id @default(uuid())
+  orgId           String
+  userId          String
+  category        String
+  inAppEnabled    Boolean  @default(true)
+  emailEnabled    Boolean  @default(true)
+  digestEnabled   Boolean  @default(false)
+  dueSoonDays     Int      @default(3)
+  quietHoursStart String?
+  quietHoursEnd   String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  org  Organisation @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  user User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, category])
+  @@index([orgId])
+  @@index([orgId, userId])
+}
+
+model NotificationDeliveryAttempt {
+  id             String    @id @default(uuid())
+  notificationId String
+  orgId          String
+  userId         String
+  channel        String
+  provider       String?
+  status         String    @default("pending")
+  attemptNumber  Int       @default(1)
+  errorCode      String?
+  errorMessage   String?
+  nextAttemptAt  DateTime?
+  sentAt         DateTime?
+  metadataJson   Json      @default("{}")
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  notification Notification @relation(fields: [notificationId], references: [id], onDelete: Cascade)
+
+  @@index([notificationId])
+  @@index([orgId, userId, createdAt])
+  @@index([status, nextAttemptAt])
+  @@index([channel, status])
+}
+
 model WorkflowActivityLink {
   id                 String   @id @default(uuid())
   projectId          String
@@ -2147,27 +3099,48 @@ model WorkflowActivityLink {
 }
 
 model DocumentRevision {
-  id         String   @id @default(uuid())
-  projectId  String
-  recordType String
-  recordId   String
-  revision   String
-  status     String?
-  title      String?
-  fileName   String?
-  fileUrl    String?
-  storageKey String?
-  issuedBy   String?
-  issuedAt   DateTime @default(now())
-  notes      String?
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  id                String    @id @default(uuid())
+  projectId         String
+  projectDocumentId String?
+  recordType        String
+  recordId          String
+  revision          String
+  status            String?
+  title             String?
+  documentNumber    String?
+  category          String?
+  folderPath        String?
+  discipline        String?
+  mimeType          String?
+  sizeBytes         Int?
+  fileName          String?
+  fileUrl           String?
+  storageKey        String?
+  isLatest          Boolean   @default(false)
+  issuedBy          String?
+  issuedAt          DateTime  @default(now())
+  submittedBy       String?
+  submittedAt       DateTime?
+  reviewDueAt       DateTime?
+  approvedBy        String?
+  approvedAt        DateTime?
+  supersededBy      String?
+  supersededAt      DateTime?
+  notes             String?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
 
-  project Project @relation(fields: [projectId], references: [id])
+  project         Project          @relation(fields: [projectId], references: [id])
+  projectDocument ProjectDocument? @relation(fields: [projectDocumentId], references: [id], onDelete: SetNull)
 
   @@unique([recordType, recordId, revision])
   @@index([projectId])
+  @@index([projectId, category])
+  @@index([projectId, folderPath])
+  @@index([projectId, status])
   @@index([projectId, recordType, recordId])
+  @@index([projectId, recordType, recordId, isLatest])
+  @@index([projectDocumentId])
 }
 
 model Transmittal {
@@ -2298,10 +3271,14 @@ model DailyReport {
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
 
-  project             Project              @relation(fields: [projectId], references: [id])
-  activity            Activity             @relation(fields: [activityId], references: [id])
-  engineer            User                 @relation(fields: [engineerId], references: [id])
-  progressSubmissions ProgressSubmission[]
+  project              Project                  @relation(fields: [projectId], references: [id])
+  activity             Activity                 @relation(fields: [activityId], references: [id])
+  engineer             User                     @relation(fields: [engineerId], references: [id])
+  progressSubmissions  ProgressSubmission[]
+  deliveryReceipts     DeliveryReceipt[]
+  deliveryReceiptLines DeliveryReceiptLine[]
+  materialUsages       ActivityMaterialUsage[]
+  equipmentUsages      ActivityEquipmentUsage[]
 
   @@unique([projectId, clientRequestId])
   @@index([projectId])

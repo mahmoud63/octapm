@@ -1,6 +1,7 @@
 import type { ComponentProps, ComponentType, ReactNode } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Link } from '@tanstack/react-router'
+import { apiClient } from '@/services/api/client'
 import {
   Activity,
   AlertTriangle,
@@ -15,6 +16,7 @@ import {
   TrendingDown,
   WalletCards,
 } from 'lucide-react'
+import { cn } from '@/lib/utils'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
@@ -25,13 +27,45 @@ import {
   CardTitle,
 } from '@/components/ui/card'
 import { Main } from '@/components/layout/main'
-import { apiClient } from '@/services/api/client'
-import { cn } from '@/lib/utils'
 
 type DashboardTarget = {
   projectId: string | null
   module: string
   child?: string
+  status?: string
+  source?: string
+  recordId?: string
+}
+
+type KpiSourceRule = {
+  source: string
+  formula: string
+  officialOnly: boolean
+}
+
+type DashboardKpi = {
+  key: string
+  label: string
+  value: number | null
+  unit?: string
+  detail: string
+  sourceRule: KpiSourceRule
+  sourceStatus: string
+  cutoffDate: string | null
+  generatedAt: string
+  target: DashboardTarget
+}
+
+type PendingReviewMetric = {
+  key: string
+  label: string
+  count: number
+  detail: string
+  source: string
+  sourceStatus: string
+  excludedFromOfficialKpis: boolean
+  cutoffDate: string | null
+  target: DashboardTarget
 }
 
 type HealthDimension = {
@@ -40,6 +74,9 @@ type HealthDimension = {
   score: number | null
   detail: string
   count: number
+  sourceRule?: KpiSourceRule
+  cutoffDate?: string | null
+  target?: DashboardTarget
 }
 
 type WorkflowItem = {
@@ -83,6 +120,12 @@ type ProjectHealth = {
 
 type WorkspaceDashboard = {
   generatedAt: string
+  dataFreshness?: {
+    generatedAt: string
+    cutoffDate: string | null
+    sourceUpdatedAt: string | null
+    note: string
+  }
   summary: {
     totalProjects: number
     activeProjects: number
@@ -93,6 +136,12 @@ type WorkspaceDashboard = {
     approvalQueueCount: number
     procurementAtRisk: number
     overdueNcrRfi: number
+  }
+  officialKpis?: DashboardKpi[]
+  pendingReview?: {
+    total: number
+    metrics: PendingReviewMetric[]
+    sourceRule: KpiSourceRule
   }
   healthDimensions: HealthDimension[]
   workflowQueues: WorkflowQueue[]
@@ -137,7 +186,7 @@ const summaryCards = [
   },
   {
     key: 'overdue',
-    label: 'Overdue NCR/RFI',
+    label: 'Overdue QA/Safety/Docs',
     icon: FileWarning,
     tone: 'red',
   },
@@ -175,6 +224,69 @@ function formatDate(value: string | null) {
     month: 'short',
     day: 'numeric',
   })
+}
+
+function formatCutoff(value: string | null | undefined) {
+  if (!value) return 'No cutoff'
+  return new Date(value).toLocaleDateString(undefined, {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+  })
+}
+
+function targetSearch(target: DashboardTarget) {
+  return {
+    module: target.module,
+    child: target.child,
+    status: target.status,
+    source: target.source,
+    recordId: target.recordId,
+  }
+}
+
+function formatKpiValue(kpi: DashboardKpi) {
+  if (kpi.value === null || kpi.value === undefined) return '-'
+  if (kpi.unit === 'score') return String(kpi.value)
+  return formatNumber(kpi.value)
+}
+
+function kpiIcon(key: string) {
+  const icons: Record<string, ComponentType<{ className?: string }>> = {
+    health: ShieldCheck,
+    active: FolderKanban,
+    critical: Activity,
+    procurement: PackageSearch,
+    overdue: FileWarning,
+    approvals: ClipboardCheck,
+    portfolioHealth: ShieldCheck,
+    activeProjects: FolderKanban,
+    criticalActivities: Activity,
+    costActuals: WalletCards,
+    procurementAtRisk: PackageSearch,
+    overdueDocQuality: FileWarning,
+  }
+
+  return icons[key] || ClipboardCheck
+}
+
+function kpiTone(key: string) {
+  const tones: Record<string, string> = {
+    health: 'emerald',
+    active: 'sky',
+    critical: 'violet',
+    procurement: 'rose',
+    overdue: 'red',
+    approvals: 'amber',
+    portfolioHealth: 'emerald',
+    activeProjects: 'sky',
+    criticalActivities: 'violet',
+    costActuals: 'amber',
+    procurementAtRisk: 'rose',
+    overdueDocQuality: 'red',
+  }
+
+  return tones[key] || 'sky'
 }
 
 function formatStatus(value: string) {
@@ -280,7 +392,7 @@ function ModuleLink({
       <Link
         to='/projects/$projectId'
         params={{ projectId: target.projectId }}
-        search={{ module: target.module, child: target.child }}
+        search={targetSearch(target)}
       >
         {children}
       </Link>
@@ -294,17 +406,38 @@ function MetricCard({
   detail,
   tone,
   icon: Icon,
+  target,
+  source,
+  cutoffDate,
+  sourceStatus = 'official',
 }: {
   label: string
   value: string
   detail: string
   tone: string
   icon: ComponentType<{ className?: string }>
+  target?: DashboardTarget
+  source?: string
+  cutoffDate?: string | null
+  sourceStatus?: string
 }) {
-  return (
-    <Card className='min-h-32'>
+  const card = (
+    <Card className='h-full min-h-44 transition-colors hover:bg-muted/30'>
       <CardHeader className='flex flex-row items-start justify-between space-y-0 pb-2'>
-        <CardTitle className='text-sm font-medium'>{label}</CardTitle>
+        <div className='min-w-0 space-y-1'>
+          <CardTitle className='text-sm font-medium'>{label}</CardTitle>
+          <Badge
+            variant='outline'
+            className={cn(
+              'text-[10px]',
+              sourceStatus === 'pending-review'
+                ? 'border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300'
+                : 'border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300'
+            )}
+          >
+            {sourceStatus === 'pending-review' ? 'Pending' : 'Official'}
+          </Badge>
+        </div>
         <span className={cn('rounded-md p-2', toneClasses(tone))}>
           <Icon className='h-4 w-4' />
         </span>
@@ -312,8 +445,42 @@ function MetricCard({
       <CardContent>
         <div className='text-2xl font-bold tabular-nums'>{value}</div>
         <p className='mt-1 text-xs text-muted-foreground'>{detail}</p>
+        <div className='mt-3 space-y-1 border-t pt-2 text-[11px] text-muted-foreground'>
+          <p className='line-clamp-1'>
+            <span className='font-medium text-foreground'>Source:</span>{' '}
+            {source || 'Dashboard source'}
+          </p>
+          <p>
+            <span className='font-medium text-foreground'>Cutoff:</span>{' '}
+            {formatCutoff(cutoffDate)}
+          </p>
+        </div>
       </CardContent>
     </Card>
+  )
+
+  if (!target) return card
+
+  if (!target.projectId) {
+    return (
+      <Link
+        to='/projects'
+        className='block h-full focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none'
+      >
+        {card}
+      </Link>
+    )
+  }
+
+  return (
+    <Link
+      to='/projects/$projectId'
+      params={{ projectId: target.projectId }}
+      search={targetSearch(target)}
+      className='block h-full focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none'
+    >
+      {card}
+    </Link>
   )
 }
 
@@ -338,10 +505,22 @@ function HealthDimensionRow({ dimension }: { dimension: HealthDimension }) {
         </Badge>
       </div>
       <div className='h-2 overflow-hidden rounded-full bg-muted'>
-        <div className={cn('h-full rounded-full', tone.bar)} style={{ width }} />
+        <div
+          className={cn('h-full rounded-full', tone.bar)}
+          style={{ width }}
+        />
       </div>
-      <p className={cn('text-right text-sm font-semibold tabular-nums', tone.text)}>
+      <p
+        className={cn(
+          'text-right text-sm font-semibold tabular-nums',
+          tone.text
+        )}
+      >
         {dimension.score ?? '-'}
+      </p>
+      <p className='text-[11px] text-muted-foreground'>
+        {dimension.sourceRule?.source || 'Official source'} through{' '}
+        {formatCutoff(dimension.cutoffDate)}
       </p>
     </div>
   )
@@ -373,8 +552,8 @@ function WorkflowQueueCard({ queue }: { queue: WorkflowQueue }) {
                 key={item.id}
                 to='/projects/$projectId'
                 params={{ projectId: item.projectId }}
-                search={{ module: item.target.module, child: item.target.child }}
-                className='block rounded-md border p-3 transition-colors hover:bg-muted/50 focus-visible:ring-ring focus-visible:ring-2 focus-visible:outline-none'
+                search={targetSearch(item.target)}
+                className='block rounded-md border p-3 transition-colors hover:bg-muted/50 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none'
               >
                 <div className='flex items-start justify-between gap-3'>
                   <div className='min-w-0'>
@@ -419,8 +598,8 @@ function ProjectHealthRow({ project }: { project: ProjectHealth }) {
     <Link
       to='/projects/$projectId'
       params={{ projectId: project.id }}
-      search={{ module: project.target.module, child: project.target.child }}
-      className='block rounded-md border p-4 transition-colors hover:bg-muted/50 focus-visible:ring-ring focus-visible:ring-2 focus-visible:outline-none'
+      search={targetSearch(project.target)}
+      className='block rounded-md border p-4 transition-colors hover:bg-muted/50 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none'
     >
       <div className='flex flex-col gap-4 lg:flex-row lg:items-center'>
         <div className='min-w-0 flex-1'>
@@ -436,7 +615,7 @@ function ProjectHealthRow({ project }: { project: ProjectHealth }) {
         <div className='grid min-w-0 flex-1 grid-cols-3 gap-2 text-xs text-muted-foreground'>
           <span>{project.workflowActions} actions</span>
           <span>{project.procurementRisks} procurement</span>
-          <span>{project.overdueNcrRfi} NCR/RFI</span>
+          <span>{project.overdueNcrRfi} doc/quality</span>
         </div>
         <div className='w-full lg:w-48'>
           <div className='mb-1 flex items-center justify-between text-xs'>
@@ -539,10 +718,33 @@ export function Dashboard() {
     health: scoreLabel(summary.portfolioHealthScore),
     active: `${formatCompactMoney(summary.totalContractValue)} contract value`,
     critical: `${formatNumber(summary.delayedActivities)} delayed activities`,
-    approvals: 'Schedule, progress, and IPC',
+    approvals: 'Schedule, progress, IPC, and payment status',
     procurement: 'Long-lead and PO date risk',
     overdue: 'Quality and document-control follow-up',
   }
+  const officialKpis: DashboardKpi[] =
+    data.officialKpis && data.officialKpis.length > 0
+      ? data.officialKpis
+      : summaryCards.map((card) => ({
+          key: card.key,
+          label: card.label,
+          value:
+            card.key === 'health'
+              ? summary.portfolioHealthScore
+              : Number(cardValues[card.key].replace(/[^0-9.-]/g, '')) || 0,
+          detail: cardDetails[card.key],
+          sourceRule: {
+            source: 'Workspace dashboard',
+            formula: cardDetails[card.key],
+            officialOnly: card.key !== 'approvals',
+          },
+          sourceStatus:
+            card.key === 'approvals' ? 'pending-review' : 'official',
+          cutoffDate: data.dataFreshness?.cutoffDate || data.generatedAt,
+          generatedAt: data.generatedAt,
+          target: { projectId: null, module: 'projects' },
+        }))
+  const pendingMetrics = data.pendingReview?.metrics || []
 
   return (
     <Main>
@@ -554,6 +756,16 @@ export function Dashboard() {
             </h1>
             <p className='text-sm text-muted-foreground'>
               Construction health, approval queues, and project risk signals.
+            </p>
+            <p className='mt-1 text-xs text-muted-foreground'>
+              Official cutoff {formatCutoff(data.dataFreshness?.cutoffDate)} |
+              refreshed{' '}
+              {new Date(
+                data.dataFreshness?.generatedAt || data.generatedAt
+              ).toLocaleTimeString([], {
+                hour: '2-digit',
+                minute: '2-digit',
+              })}
             </p>
           </div>
           <Button asChild>
@@ -568,18 +780,62 @@ export function Dashboard() {
           <EmptyWorkspace data={data} />
         ) : (
           <>
-            <div className='grid gap-4 sm:grid-cols-2 xl:grid-cols-6'>
-              {summaryCards.map((card) => (
-                <MetricCard
-                  key={card.key}
-                  label={card.label}
-                  value={cardValues[card.key]}
-                  detail={cardDetails[card.key]}
-                  tone={card.tone}
-                  icon={card.icon}
-                />
-              ))}
-            </div>
+            <section className='space-y-3'>
+              <div>
+                <h2 className='text-lg font-semibold'>Official KPIs</h2>
+                <p className='text-sm text-muted-foreground'>
+                  Approved source values with drill-through to source records
+                </p>
+              </div>
+              <div className='grid gap-4 sm:grid-cols-2 xl:grid-cols-6'>
+                {officialKpis.map((kpi) => (
+                  <MetricCard
+                    key={kpi.key}
+                    label={kpi.label}
+                    value={formatKpiValue(kpi)}
+                    detail={kpi.detail}
+                    tone={kpiTone(kpi.key)}
+                    icon={kpiIcon(kpi.key)}
+                    target={kpi.target}
+                    source={kpi.sourceRule?.source}
+                    cutoffDate={kpi.cutoffDate}
+                    sourceStatus={kpi.sourceStatus}
+                  />
+                ))}
+              </div>
+            </section>
+
+            {pendingMetrics.length > 0 && (
+              <section className='space-y-3'>
+                <div className='flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between'>
+                  <div>
+                    <h2 className='text-lg font-semibold'>Pending Review</h2>
+                    <p className='text-sm text-muted-foreground'>
+                      Submitted values shown separately from official KPIs
+                    </p>
+                  </div>
+                  <Badge variant='outline' className='w-fit'>
+                    {formatNumber(data.pendingReview?.total || 0)} items
+                  </Badge>
+                </div>
+                <div className='grid gap-3 sm:grid-cols-2 xl:grid-cols-5'>
+                  {pendingMetrics.map((metric) => (
+                    <MetricCard
+                      key={metric.key}
+                      label={metric.label}
+                      value={formatNumber(metric.count)}
+                      detail={metric.detail}
+                      tone='amber'
+                      icon={ClipboardCheck}
+                      target={metric.target}
+                      source={metric.source}
+                      cutoffDate={metric.cutoffDate}
+                      sourceStatus='pending-review'
+                    />
+                  ))}
+                </div>
+              </section>
+            )}
 
             <div className='grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]'>
               <section className='space-y-3'>

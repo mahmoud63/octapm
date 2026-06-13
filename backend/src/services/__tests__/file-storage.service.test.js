@@ -25,9 +25,18 @@ describe('site reporting file storage', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     createdDocuments = [];
-    mockPrisma.project.findFirst.mockResolvedValue({
-      id: 'project-1',
-      orgId: 'org-1',
+    mockPrisma.project.findFirst.mockImplementation(({ where }) => {
+      const allowedProjects = new Set([
+        'org-1:project-1',
+        'org-1:project-2',
+        'org-2:project-2',
+      ]);
+      const key = `${where?.orgId}:${where?.id}`;
+      return Promise.resolve(
+        allowedProjects.has(key)
+          ? { id: where.id, orgId: where.orgId }
+          : null,
+      );
     });
     mockPrisma.projectDocument.create.mockImplementation(({ data }) => {
       const document = {
@@ -41,10 +50,23 @@ describe('site reporting file storage', () => {
     });
     mockPrisma.projectDocument.findFirst.mockImplementation(({ where }) => {
       const publicKeys = (where?.OR || []).map((entry) => entry.id || entry.storageKey);
+      const documentTypeMatches = (document) => {
+        if (!where?.documentType) return true;
+        if (Array.isArray(where.documentType.in)) {
+          return where.documentType.in.includes(document.documentType);
+        }
+        return document.documentType === where.documentType;
+      };
       return Promise.resolve(
-        createdDocuments.find((document) =>
-          [where?.id, where?.storageKey, ...publicKeys].includes(document.id) ||
-          [where?.id, where?.storageKey, ...publicKeys].includes(document.storageKey),
+        createdDocuments.find(
+          (document) =>
+            document.orgId === where?.orgId &&
+            document.projectId === where?.projectId &&
+            documentTypeMatches(document) &&
+            ([where?.id, where?.storageKey, ...publicKeys].includes(document.id) ||
+              [where?.id, where?.storageKey, ...publicKeys].includes(
+                document.storageKey,
+              )),
         ) || null,
       );
     });
@@ -166,6 +188,68 @@ describe('site reporting file storage', () => {
     });
     expect(stored.mimeType).toBe('application/pdf');
     await expect(fs.stat(stored.path)).resolves.toBeTruthy();
+  });
+
+  it('does not return a private document key through another project', async () => {
+    const [attachment] = await fileStorageService.uploadWorkflowFiles({
+      orgId: 'org-1',
+      projectId: 'project-1',
+      userId: 'user-1',
+      files: [
+        {
+          originalname: 'claim narrative.pdf',
+          mimetype: 'application/pdf',
+          size: 8,
+          buffer: Buffer.from('%PDF-1.7'),
+        },
+      ],
+    });
+
+    await expect(
+      fileStorageService.getWorkflowFile({
+        orgId: 'org-1',
+        projectId: 'project-2',
+        key: attachment.key,
+      }),
+    ).rejects.toMatchObject({ code: 'FILE_NOT_FOUND' });
+
+    expect(mockPrisma.projectDocument.findFirst).toHaveBeenLastCalledWith({
+      where: expect.objectContaining({
+        orgId: 'org-1',
+        projectId: 'project-2',
+      }),
+    });
+  });
+
+  it('does not return a private document key through another org', async () => {
+    const [attachment] = await fileStorageService.uploadWorkflowFiles({
+      orgId: 'org-1',
+      projectId: 'project-1',
+      userId: 'user-1',
+      files: [
+        {
+          originalname: 'commercial evidence.pdf',
+          mimetype: 'application/pdf',
+          size: 8,
+          buffer: Buffer.from('%PDF-1.7'),
+        },
+      ],
+    });
+
+    await expect(
+      fileStorageService.getWorkflowFile({
+        orgId: 'org-2',
+        projectId: 'project-2',
+        key: attachment.key,
+      }),
+    ).rejects.toMatchObject({ code: 'FILE_NOT_FOUND' });
+
+    expect(mockPrisma.projectDocument.findFirst).toHaveBeenLastCalledWith({
+      where: expect.objectContaining({
+        orgId: 'org-2',
+        projectId: 'project-2',
+      }),
+    });
   });
 
   it('rejects malware signatures before creating document metadata', async () => {

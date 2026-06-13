@@ -4,6 +4,18 @@ const mockPrisma = {
     create: jest.fn(),
     findMany: jest.fn(),
   },
+  approvalWorkflowEvent: {
+    findMany: jest.fn(),
+  },
+  workflowStatusHistory: {
+    findMany: jest.fn(),
+  },
+  workflowAttachment: {
+    findMany: jest.fn(),
+  },
+  commercialAttachmentRef: {
+    findMany: jest.fn(),
+  },
   recordHistorySnapshot: {
     create: jest.fn(),
   },
@@ -16,6 +28,10 @@ const auditService = require('../audit.service');
 describe('audit service', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    mockPrisma.approvalWorkflowEvent.findMany.mockResolvedValue([]);
+    mockPrisma.workflowStatusHistory.findMany.mockResolvedValue([]);
+    mockPrisma.workflowAttachment.findMany.mockResolvedValue([]);
+    mockPrisma.commercialAttachmentRef.findMany.mockResolvedValue([]);
   });
 
   it('records compact structured events and redacts sensitive summary keys', async () => {
@@ -189,6 +205,124 @@ describe('audit service', () => {
         },
         orderBy: [{ occurredAt: 'asc' }, { id: 'asc' }],
         take: 21,
+      }),
+    );
+  });
+
+  it('combines audit, approval, status, and attachment history for a record', async () => {
+    const auditAt = new Date('2026-06-09T11:00:00.000Z');
+    const approvalAt = new Date('2026-06-09T12:00:00.000Z');
+    const statusAt = new Date('2026-06-09T10:00:00.000Z');
+    mockPrisma.project.findFirst.mockResolvedValue({ id: 'project-1' });
+    mockPrisma.auditEvent.findMany.mockResolvedValue([
+      {
+        id: 'audit-1',
+        orgId: 'org-1',
+        projectId: 'project-1',
+        entityType: 'change_order',
+        entityId: 'co-1',
+        action: 'updated',
+        actorId: 'qs-1',
+        actorRole: 'qs',
+        occurredAt: auditAt,
+        createdAt: auditAt,
+        oldStatus: 'draft',
+        newStatus: 'pending',
+        summaryJson: { ref: 'VO-01' },
+        attachmentsJson: [],
+        metadataJson: {},
+      },
+    ]);
+    mockPrisma.approvalWorkflowEvent.findMany.mockResolvedValue([
+      {
+        id: 'approval-1',
+        orgId: 'org-1',
+        projectId: 'project-1',
+        recordType: 'change_order',
+        recordId: 'co-1',
+        workflowType: 'change_order',
+        action: 'approved',
+        decision: 'approved',
+        fromStatus: 'pending',
+        toStatus: 'approved',
+        actorId: 'pm-1',
+        actorRole: 'pm',
+        reason: 'Owner instruction accepted',
+        comment: 'Approved for baseline update',
+        metadataJson: { ref: 'VO-01' },
+        createdAt: approvalAt,
+      },
+    ]);
+    mockPrisma.workflowStatusHistory.findMany.mockResolvedValue([
+      {
+        id: 'status-1',
+        projectId: 'project-1',
+        recordType: 'change_order',
+        recordId: 'co-1',
+        oldStatus: null,
+        newStatus: 'draft',
+        comment: 'Created as draft',
+        createdBy: 'qs-1',
+        actorRole: 'qs',
+        createdAt: statusAt,
+      },
+    ]);
+    mockPrisma.commercialAttachmentRef.findMany.mockResolvedValue([
+      {
+        id: 'attach-1',
+        projectId: 'project-1',
+        recordType: 'change_order',
+        recordId: 'co-1',
+        documentId: 'doc-1',
+        fileName: 'owner-instruction.pdf',
+        fileUrl: '/download/doc-1',
+        storageKey: 'org/project/doc-1.pdf',
+        mimeType: 'application/pdf',
+        sizeBytes: 1200,
+        description: 'Owner instruction',
+        uploadedBy: 'qs-1',
+        createdAt: auditAt,
+      },
+    ]);
+
+    const result = await auditService.listEvents({
+      orgId: 'org-1',
+      projectId: 'project-1',
+      entityType: 'change_order',
+      entityId: 'co-1',
+      limit: 10,
+      order: 'asc',
+    });
+
+    expect(result.events.map((event) => event.source)).toEqual([
+      'status',
+      'audit',
+      'approval',
+    ]);
+    expect(result.events[2]).toEqual(
+      expect.objectContaining({
+        source: 'approval',
+        actorId: 'pm-1',
+        actorRole: 'pm',
+        decision: 'approved',
+        reason: 'Owner instruction accepted',
+        comment: 'Approved for baseline update',
+      }),
+    );
+    expect(result.events[2].attachments).toEqual([
+      expect.objectContaining({
+        id: 'attach-1',
+        fileName: 'owner-instruction.pdf',
+      }),
+    ]);
+    expect(mockPrisma.approvalWorkflowEvent.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          orgId: 'org-1',
+          projectId: 'project-1',
+          recordType: 'change_order',
+          recordId: 'co-1',
+        }),
       }),
     );
   });

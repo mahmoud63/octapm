@@ -58,7 +58,7 @@ export function BoqUploadZone({
       if (job?.mode === 'comparison_only') {
         toast.success('BOQ revision comparison saved')
       } else {
-        toast.success('BOQ processed - activities generated')
+        toast.success('BOQ processed - draft allocation links generated')
       }
       onUploadSuccess()
       setJobId(null)
@@ -217,7 +217,7 @@ export function BoqUploadZone({
               />
             </div>
             <p className='text-xs text-muted-foreground'>
-              AI is analysing your BOQ and generating activities…
+              AI is analysing your BOQ and generating draft allocation links...
             </p>
           </div>
         ) : localError ? (
@@ -244,7 +244,7 @@ export function BoqUploadZone({
               <p className='mt-1 text-xs text-muted-foreground'>
                 {hasExistingBoq
                   ? '.xlsx or .xls - compared against the current BOQ'
-                  : '.xlsx or .xls - AI generates activities automatically'}
+                  : '.xlsx or .xls - AI generates draft allocation links'}
               </p>
             </div>
           </>

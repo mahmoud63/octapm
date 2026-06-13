@@ -6,6 +6,8 @@ const {
   recordEvent,
 } = require('./audit.service');
 const {
+  calculateNeedDate,
+  calculateOrderByDate,
   computeProcurementRisk,
 } = require('./procurement-risk.service');
 const { toMoneyDecimal, toMoneyNumber } = require('../utils/money');
@@ -54,6 +56,8 @@ const trimOrNull = (value) => {
   const text = String(value).trim();
   return text || null;
 };
+
+const lower = (value) => String(value || '').trim().toLowerCase();
 
 const asInt = (value, fallback = 0) => {
   const number = Number(value);
@@ -126,6 +130,41 @@ const ensureActivity = async ({ tx = prisma, projectId, activityId }) => {
   }
 
   return activity;
+};
+
+const ensureDailyReport = async ({
+  tx = prisma,
+  projectId,
+  dailyReportId,
+  activityId = null,
+}) => {
+  if (!dailyReportId) return null;
+
+  const report = await tx.dailyReport.findFirst({
+    where: {
+      id: dailyReportId,
+      projectId,
+      ...(activityId ? { activityId } : {}),
+    },
+    select: {
+      id: true,
+      activityId: true,
+      date: true,
+      status: true,
+    },
+  });
+
+  if (!report) {
+    throw new HttpError(
+      400,
+      'DAILY_REPORT_LINK_INVALID',
+      activityId
+        ? 'Daily report must belong to the same project activity'
+        : 'Daily report must belong to the project',
+    );
+  }
+
+  return report;
 };
 
 const ensureSupplier = async ({ tx = prisma, projectId, supplierId }) => {
@@ -230,6 +269,7 @@ const recordAudit = async ({
   actor,
   oldStatus = null,
   newStatus = null,
+  reason = null,
   summary = {},
   metadata = {},
 }) => {
@@ -245,6 +285,7 @@ const recordAudit = async ({
     actorRole: actor?.role || null,
     oldStatus,
     newStatus,
+    reason,
     summary,
     metadata,
   });
@@ -315,10 +356,77 @@ const buildMaterialRiskRow = (material) => {
   };
 };
 
-const normalizeAlertData = ({ projectId, risk, line = null, material = null }) => ({
+const packageRiskStatus = (status) => {
+  const normalized = lower(status);
+  if (['closed'].includes(normalized)) return 'delivered';
+  if (['planning', 'tendering'].includes(normalized)) return 'not_ordered';
+  if (['cancelled', 'canceled'].includes(normalized)) return 'cancelled';
+  return 'ordered';
+};
+
+const packageWarehouseStatus = (status) =>
+  lower(status) === 'closed' ? 'received' : 'not_received';
+
+const buildPackageRiskRow = (row) => ({
+  id: row.id,
+  ref: row.packageNumber,
+  activityId: row.activityId,
+  activity: row.activity,
+  item: row.title,
+  leadWeeks: row.leadWeeks,
+  requiredTiming: row.requiredTiming,
+  needOffsetDays: row.needOffsetDays,
+  bufferDays: row.bufferDays,
+  requiredDate: row.requiredOnSiteDate,
+  expectedDeliveryDate: row.expectedDeliveryDate || null,
+  status: packageRiskStatus(row.status),
+  warehouseStatus: packageWarehouseStatus(row.status),
+});
+
+const deriveScheduleNeedDates = ({
+  activity,
+  project,
+  explicitNeedDate = null,
+  requiredTiming = 'activity_start',
+  needOffsetDays = 0,
+  leadWeeks = 0,
+  bufferDays = 14,
+}) => {
+  const needDate =
+    explicitNeedDate ||
+    calculateNeedDate(
+      {
+        activity,
+        requiredTiming,
+        needOffsetDays,
+      },
+      project,
+    );
+
+  return {
+    requiredOnSiteDate: needDate,
+    latestOrderDate: calculateOrderByDate({
+      needDate,
+      leadWeeks,
+      bufferDays,
+    }),
+  };
+};
+
+const normalizeAlertData = ({
   projectId,
-  activityId: line?.activityId || material?.activityId || null,
-  packageId: line?.packageId || material?.procurementPackageId || null,
+  risk,
+  line = null,
+  material = null,
+  packageRow = null,
+}) => ({
+  projectId,
+  activityId: line?.activityId || material?.activityId || packageRow?.activityId || null,
+  packageId:
+    line?.packageId ||
+    material?.procurementPackageId ||
+    packageRow?.id ||
+    null,
   orderId: line?.orderId || null,
   poLineId: line?.id || null,
   activityMaterialId: material?.id || line?.activityMaterialId || null,
@@ -330,19 +438,40 @@ const normalizeAlertData = ({ projectId, risk, line = null, material = null }) =
   expectedDeliveryDate: risk.expectedDeliveryDate || null,
 });
 
-const syncLeadTimeAlert = async ({ tx = prisma, projectId, project, line, material }) => {
+const syncLeadTimeAlert = async ({
+  tx = prisma,
+  projectId,
+  project,
+  line = null,
+  material = null,
+  packageRow = null,
+}) => {
   if (!tx.procurementLeadTimeAlert?.findFirst) return null;
 
-  const riskRow = line ? buildLineRiskRow(line) : buildMaterialRiskRow(material);
+  const riskRow = line
+    ? buildLineRiskRow(line)
+    : material
+      ? buildMaterialRiskRow(material)
+      : buildPackageRiskRow(packageRow);
   const risk = computeProcurementRisk(riskRow, { project });
   const where = {
     projectId,
-    ...(line ? { poLineId: line.id } : { activityMaterialId: material.id }),
+    ...(line
+      ? { poLineId: line.id }
+      : material
+        ? { activityMaterialId: material.id }
+        : { packageId: packageRow.id }),
   };
   const existing = await tx.procurementLeadTimeAlert.findFirst({ where });
 
   if (risk.isAtRisk) {
-    const data = normalizeAlertData({ projectId, risk, line, material });
+    const data = normalizeAlertData({
+      projectId,
+      risk,
+      line,
+      material,
+      packageRow,
+    });
     if (existing) {
       return tx.procurementLeadTimeAlert.update({
         where: { id: existing.id },
@@ -383,6 +512,32 @@ const enrichPoLine = (line, project) => ({
   ...line,
   procurementRisk: computeProcurementRisk(buildLineRiskRow(line), { project }),
 });
+
+const enrichPackage = (row, project) => {
+  const dates = deriveScheduleNeedDates({
+    activity: row.activity,
+    project,
+    explicitNeedDate: row.requiredOnSiteDate || null,
+    requiredTiming: row.requiredTiming,
+    needOffsetDays: row.needOffsetDays,
+    leadWeeks: row.leadWeeks,
+    bufferDays: row.bufferDays,
+  });
+  const source = {
+    ...row,
+    requiredOnSiteDate: dates.requiredOnSiteDate,
+    latestOrderDate: row.latestOrderDate || dates.latestOrderDate,
+  };
+
+  return {
+    ...source,
+    requiredOnSiteDate: dates.requiredOnSiteDate,
+    latestOrderDate: source.latestOrderDate,
+    procurementRisk: computeProcurementRisk(buildPackageRiskRow(source), {
+      project,
+    }),
+  };
+};
 
 const listSuppliers = async ({ orgId, projectId }) => {
   await ensureProject({ orgId, projectId });
@@ -445,23 +600,48 @@ const createSupplier = async ({ orgId, projectId, actor, payload }) => {
 };
 
 const listPackages = async ({ orgId, projectId }) => {
-  await ensureProject({ orgId, projectId });
-  return prisma.procurementPackage.findMany({
+  const project = await ensureProject({ orgId, projectId });
+  const rows = await prisma.procurementPackage.findMany({
     where: { projectId },
     include: {
       supplier: true,
       activity: { select: ACTIVITY_SELECT },
+      leadTimeAlerts: {
+        where: { status: { in: ['open', 'acknowledged'] } },
+        orderBy: { updatedAt: 'desc' },
+      },
     },
     orderBy: [{ status: 'asc' }, { packageNumber: 'asc' }],
   });
+
+  return rows.map((row) => enrichPackage(row, project));
 };
 
 const createPackage = async ({ orgId, projectId, actor, payload }) => {
-  await ensureProject({ orgId, projectId });
+  const project = await ensureProject({ orgId, projectId });
   await ensureSupplier({ projectId, supplierId: payload.supplierId });
+  let activity = null;
   if (payload.activityId) {
-    await ensureActivity({ projectId, activityId: payload.activityId });
+    activity = await ensureActivity({ projectId, activityId: payload.activityId });
   }
+
+  const requiredTiming = VALID_REQUIRED_TIMINGS.has(payload.requiredTiming)
+    ? payload.requiredTiming
+    : 'activity_start';
+  const needOffsetDays = asInt(payload.needOffsetDays);
+  const leadWeeks = asInt(payload.leadWeeks);
+  const bufferDays = asInt(payload.bufferDays, 14);
+  const explicitRequiredOnSiteDate =
+    parseNullableDate(payload.requiredOnSiteDate, 'requiredOnSiteDate') || null;
+  const dates = deriveScheduleNeedDates({
+    activity,
+    project,
+    explicitNeedDate: explicitRequiredOnSiteDate,
+    requiredTiming,
+    needOffsetDays,
+    leadWeeks,
+    bufferDays,
+  });
 
   return prisma.$transaction(async (tx) => {
     const row = await tx.procurementPackage.create({
@@ -477,15 +657,24 @@ const createPackage = async ({ orgId, projectId, actor, payload }) => {
         plannedAwardDate:
           parseNullableDate(payload.plannedAwardDate, 'plannedAwardDate') ||
           null,
-        requiredOnSiteDate:
-          parseNullableDate(payload.requiredOnSiteDate, 'requiredOnSiteDate') ||
-          null,
-        leadWeeks: asInt(payload.leadWeeks),
-        bufferDays: asInt(payload.bufferDays, 14),
+        requiredOnSiteDate: dates.requiredOnSiteDate,
+        requiredTiming,
+        needOffsetDays,
+        leadWeeks,
+        bufferDays,
+        latestOrderDate: dates.latestOrderDate,
         notes: trimOrNull(payload.notes),
         createdBy: actor?.id || null,
         updatedBy: actor?.id || null,
       },
+    });
+
+    const enrichedRow = { ...row, activity };
+    await syncLeadTimeAlert({
+      tx,
+      projectId,
+      project,
+      packageRow: enrichedRow,
     });
 
     await recordAudit({
@@ -497,10 +686,16 @@ const createPackage = async ({ orgId, projectId, actor, payload }) => {
       action: ACTIONS.CREATED,
       actor,
       newStatus: row.status,
-      summary: { packageNumber: row.packageNumber, title: row.title },
+      summary: {
+        packageNumber: row.packageNumber,
+        title: row.title,
+        activityId: row.activityId,
+        requiredOnSiteDate: serializeDate(row.requiredOnSiteDate),
+        latestOrderDate: serializeDate(row.latestOrderDate),
+      },
     });
 
-    return row;
+    return enrichPackage(enrichedRow, project);
   });
 };
 
@@ -772,6 +967,10 @@ const recordDeliveryReceipt = async ({
 }) => {
   const project = await ensureProject({ orgId, projectId });
   const order = await ensureOrder({ projectId, orderId });
+  await ensureDailyReport({
+    projectId,
+    dailyReportId: payload.dailyReportId,
+  });
   if (!Array.isArray(payload.lines) || payload.lines.length === 0) {
     throw new HttpError(
       400,
@@ -786,6 +985,12 @@ const recordDeliveryReceipt = async ({
       projectId,
       orderId,
       poLineId: rawLine.poLineId,
+    });
+    const dailyReportId = rawLine.dailyReportId || payload.dailyReportId || null;
+    await ensureDailyReport({
+      projectId,
+      dailyReportId,
+      activityId: line.activityId,
     });
     const acceptedQty = asPositive('acceptedQty', rawLine.acceptedQty);
     const rejectedQty = asNonNegative(rawLine.rejectedQty);
@@ -811,7 +1016,14 @@ const recordDeliveryReceipt = async ({
       );
     }
 
-    receiptLines.push({ line, acceptedQty, rejectedQty, issuedQty, rawLine });
+    receiptLines.push({
+      line,
+      acceptedQty,
+      rejectedQty,
+      issuedQty,
+      dailyReportId,
+      rawLine,
+    });
   }
 
   return prisma.$transaction(async (tx) => {
@@ -821,6 +1033,7 @@ const recordDeliveryReceipt = async ({
         orderId,
         packageId: order.packageId || null,
         supplierId: order.supplierId || null,
+        dailyReportId: payload.dailyReportId || null,
         receiptNumber: payload.receiptNumber,
         receivedAt: parseNullableDate(payload.receivedAt, 'receivedAt') || new Date(),
         receivedBy: trimOrNull(payload.receivedBy) || actor?.id || null,
@@ -833,7 +1046,14 @@ const recordDeliveryReceipt = async ({
     });
 
     const createdReceiptLines = [];
-    for (const { line, acceptedQty, rejectedQty, issuedQty, rawLine } of receiptLines) {
+    for (const {
+      line,
+      acceptedQty,
+      rejectedQty,
+      issuedQty,
+      dailyReportId,
+      rawLine,
+    } of receiptLines) {
       const receiptLine = await tx.deliveryReceiptLine.create({
         data: {
           projectId,
@@ -842,6 +1062,7 @@ const recordDeliveryReceipt = async ({
           poLineId: line.id,
           activityId: line.activityId,
           activityMaterialId: line.activityMaterialId || null,
+          dailyReportId,
           acceptedQty,
           rejectedQty,
           issuedQty,
@@ -976,6 +1197,11 @@ const recordActivityMaterialUsage = async ({
       materialId: material.id,
     });
   }
+  await ensureDailyReport({
+    projectId,
+    dailyReportId: payload.dailyReportId,
+    activityId: material.activityId,
+  });
 
   return prisma.$transaction(async (tx) => {
     const usage = await tx.activityMaterialUsage.create({
@@ -985,6 +1211,7 @@ const recordActivityMaterialUsage = async ({
         activityMaterialId: material.id,
         poLineId: payload.poLineId || null,
         receiptLineId: payload.receiptLineId || null,
+        dailyReportId: payload.dailyReportId || null,
         usedQty,
         wasteQty,
         usageDate: parseNullableDate(payload.usageDate, 'usageDate') || new Date(),
@@ -1080,8 +1307,33 @@ const updateLeadTimeAlert = async ({
   actor,
   payload,
 }) => {
+  if (payload.status !== 'acknowledged') {
+    throw new HttpError(
+      400,
+      'PROCUREMENT_ALERT_WORKFLOW_ENDPOINT_REQUIRED',
+      'Use the acknowledge or resolve alert workflow endpoint for this status change',
+    );
+  }
+
+  return acknowledgeLeadTimeAlert({
+    orgId,
+    projectId,
+    alertId,
+    actor,
+    payload,
+  });
+};
+
+const transitionLeadTimeAlert = async ({
+  orgId,
+  projectId,
+  alertId,
+  actor,
+  payload,
+  status,
+  transition,
+}) => {
   await ensureProject({ orgId, projectId });
-  const status = payload.status;
   if (!ALERT_STATUSES.has(status)) {
     throw new HttpError(400, 'VALIDATION_ERROR', 'Invalid alert status');
   }
@@ -1096,6 +1348,16 @@ const updateLeadTimeAlert = async ({
       'Procurement lead-time alert not found',
     );
   }
+
+  if (existing.status === 'resolved' && status !== 'resolved') {
+    throw new HttpError(
+      409,
+      'PROCUREMENT_ALERT_ALREADY_RESOLVED',
+      'Resolved procurement lead-time alerts cannot be acknowledged again',
+    );
+  }
+
+  if (existing.status === status) return existing;
 
   const data = { status };
   if (status === 'acknowledged') {
@@ -1123,18 +1385,56 @@ const updateLeadTimeAlert = async ({
       actor,
       oldStatus: existing.status,
       newStatus: row.status,
-      summary: { reason: row.reason, severity: row.severity },
+      reason: trimOrNull(payload.note),
+      summary: {
+        transition,
+        reason: row.reason,
+        severity: row.severity,
+        activityId: row.activityId,
+        packageId: row.packageId,
+        poLineId: row.poLineId,
+        activityMaterialId: row.activityMaterialId,
+      },
+      metadata: {
+        needDate: serializeDate(row.needDate),
+        orderByDate: serializeDate(row.orderByDate),
+        expectedDeliveryDate: serializeDate(row.expectedDeliveryDate),
+      },
     });
 
     return row;
   });
 };
 
+const acknowledgeLeadTimeAlert = (options) =>
+  transitionLeadTimeAlert({
+    ...options,
+    status: 'acknowledged',
+    transition: 'alert.acknowledge',
+  });
+
+const resolveLeadTimeAlert = (options) =>
+  transitionLeadTimeAlert({
+    ...options,
+    status: 'resolved',
+    transition: 'alert.resolve',
+  });
+
 const getProcurementOverview = async ({ orgId, projectId }) => {
-  await ensureProject({ orgId, projectId });
+  const project = await ensureProject({ orgId, projectId });
   const [suppliers, packages, orders, alerts] = await Promise.all([
     prisma.procurementSupplier.findMany({ where: { projectId } }),
-    prisma.procurementPackage.findMany({ where: { projectId } }),
+    prisma.procurementPackage.findMany({
+      where: { projectId },
+      include: {
+        supplier: true,
+        activity: { select: ACTIVITY_SELECT },
+        leadTimeAlerts: {
+          where: { status: { in: ['open', 'acknowledged'] } },
+          orderBy: { updatedAt: 'desc' },
+        },
+      },
+    }),
     prisma.procurementOrder.findMany({ where: { projectId } }),
     prisma.procurementLeadTimeAlert.findMany({
       where: { projectId, status: { in: ['open', 'acknowledged'] } },
@@ -1143,7 +1443,7 @@ const getProcurementOverview = async ({ orgId, projectId }) => {
 
   return {
     suppliers,
-    packages,
+    packages: packages.map((row) => enrichPackage(row, project)),
     orders,
     alerts,
     summary: {
@@ -1170,7 +1470,9 @@ const enrichActivityMaterials = (materials, project) =>
 
 module.exports = {
   ACTIVITY_SELECT,
+  acknowledgeLeadTimeAlert,
   buildMaterialRiskRow,
+  buildPackageRiskRow,
   buildLineRiskRow,
   createPackage,
   createPurchaseOrder,
@@ -1184,5 +1486,7 @@ module.exports = {
   listSuppliers,
   recordActivityMaterialUsage,
   recordDeliveryReceipt,
+  resolveLeadTimeAlert,
   syncLeadTimeAlert,
+  updateLeadTimeAlert,
 };

@@ -7,8 +7,9 @@ metadata only to hide or disable actions before a request is sent.
 
 Project object access is enforced before module/action permissions. PM users can
 see all projects in their organization. All other roles must have a
-`ProjectAssignment` row for the requested project; otherwise project detail and
-nested module routes return `403 PROJECT_ACCESS_DENIED`.
+`ProjectAssignment` row or active `ProjectPartyMember` row for the requested
+project; otherwise project detail and nested module routes return
+`403 PROJECT_ACCESS_DENIED`.
 
 ## Roles
 
@@ -50,15 +51,27 @@ nested module routes return `403 PROJECT_ACCESS_DENIED`.
 | Cost export                          | Y   | Y       | Y   | Y    | -    | -   | -    | Y       |
 | RFI/Submittal read                   | Y   | Y       | Y   | Y    | Y    | Y   | Y    | Y       |
 | RFI/Submittal create/update          | Y   | Y       | -   | -    | -    | -   | Y    | -       |
-| RFI/Submittal delete                 | Y   | -       | -   | -    | -    | -   | -    | -       |
+| RFI/Submittal archive                | Y   | -       | -   | -    | -    | -   | -    | -       |
 | NCR read                             | Y   | Y       | Y   | Y    | Y    | Y   | Y    | Y       |
 | NCR create/update                    | Y   | Y       | -   | -    | -    | -   | Y    | -       |
 | NCR delete                           | Y   | -       | -   | -    | -    | -   | -    | -       |
 | Safety read                          | Y   | Y       | Y   | Y    | Y    | Y   | Y    | Y       |
 | Safety create/update                 | Y   | -       | -   | -    | -    | -   | Y    | -       |
-| Safety delete                        | Y   | -       | -   | -    | -    | -   | -    | -       |
+| Safety archive                       | Y   | -       | -   | -    | -    | -   | -    | -       |
 | User management read                 | Y   | Y       | Y   | -    | -    | -   | -    | -       |
 | User management create/update/delete | Y   | -       | -   | -    | -    | -   | -    | -       |
+
+## Project Party Roles
+
+External company access is additive to the user's organization role and is
+scoped to the specific project party membership.
+
+| Party role     | Core scoped access |
+| -------------- | ------------------ |
+| Owner          | Project and workflow read; answer routed RFIs |
+| Consultant     | Project and workflow read; answer RFIs; review/approve/reject routed submittals |
+| Contractor     | Project and workflow read; create/update/submit routed RFIs and submittals |
+| Subcontractor  | Project and workflow read; create/update/submit routed RFIs and submittals |
 
 ## Manual QA Walkthrough
 
@@ -90,3 +103,8 @@ nested module routes return `403 PROJECT_ACCESS_DENIED`.
     Project B in the project list, and receives `403 PROJECT_ACCESS_DENIED` for
     direct calls to `/projects/:projectBId` and
     `/projects/:projectBId/schedule`.
+12. Verify an external consultant invited through a ProjectParty can open only
+    that project, answer routed RFIs, and review routed submittals.
+13. Verify an external subcontractor cannot view or update another company's
+    routed RFI/submittal and direct API calls return
+    `PROJECT_PARTY_RECORD_ACCESS_DENIED`.

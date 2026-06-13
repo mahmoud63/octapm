@@ -62,6 +62,12 @@ variable "rds_backup_window" {
   default     = "02:00-03:00"
 }
 
+variable "rds_multi_az" {
+  description = "Enable Multi-AZ RDS deployment. Production must keep this enabled for release readiness."
+  type        = bool
+  default     = true
+}
+
 variable "rds_recovery_rpo_hours" {
   description = "Documented production recovery point objective in hours for release readiness evidence."
   type        = number
@@ -148,6 +154,17 @@ variable "your_ip_cidr" {
 variable "github_repo" {
   description = "GitHub repo allowed to assume deploy role via OIDC (e.g. myorg/pmcopilots)"
   type        = string
+}
+
+variable "alarm_notification_email" {
+  description = "Email endpoint subscribed to the CloudWatch alarm SNS topic. Required for production."
+  type        = string
+  default     = ""
+
+  validation {
+    condition     = trimspace(var.alarm_notification_email) == "" || can(regex("^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$", var.alarm_notification_email))
+    error_message = "alarm_notification_email must be empty or a valid email address."
+  }
 }
 
 

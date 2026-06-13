@@ -1,15 +1,38 @@
 const express = require('express');
-const { body, param } = require('express-validator');
+const { body, param, query } = require('express-validator');
 const { asyncHandler } = require('../utils/async-handler');
 const { sendSuccess } = require('../utils/api-response');
 const { authenticate } = require('../middleware/auth');
-const { requireRoles } = require('../middleware/rbac');
+const { requirePermission, requireRoles } = require('../middleware/rbac');
 const { validate } = require('../middleware/validate');
 const { moneyBody } = require('../utils/money');
 const equipmentService = require('../services/equipment.service');
 
 const router = express.Router({ mergeParams: true });
 router.use(authenticate);
+
+router.get(
+  '/usage',
+  requirePermission('cost', 'read'),
+  [
+    query('activityId').optional().isUUID(),
+    query('equipmentId').optional().isUUID(),
+    query('from').optional().isISO8601(),
+    query('to').optional().isISO8601(),
+    validate,
+  ],
+  asyncHandler(async (req, res) => {
+    const result = await equipmentService.getEquipmentUtilization({
+      orgId: req.user.orgId,
+      projectId: req.params.projectId,
+      activityId: req.query.activityId || null,
+      equipmentId: req.query.equipmentId || null,
+      from: req.query.from || null,
+      to: req.query.to || null,
+    });
+    return sendSuccess(res, result);
+  }),
+);
 
 router.get(
   '/',

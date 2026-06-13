@@ -95,6 +95,7 @@ function buildActivityReferenceMap(activities) {
 
   for (const activity of activities || []) {
     map.set(activity.id, activity);
+    if (activity.activityCode) map.set(String(activity.activityCode), activity);
     if (activity.wbsCode) map.set(String(activity.wbsCode), activity);
     if (activity.p6ActivityId) map.set(String(activity.p6ActivityId), activity);
   }
@@ -104,7 +105,7 @@ function buildActivityReferenceMap(activities) {
 
 function getActivityDisplayRef(activity) {
   if (!activity) return null;
-  return activity.p6ActivityId || activity.wbsCode || activity.id;
+  return activity.activityCode || activity.p6ActivityId || activity.id;
 }
 
 function formatLag(lagDays) {
@@ -337,6 +338,7 @@ async function replaceActivityDependencies(tx, {
     select: {
       id: true,
       name: true,
+      activityCode: true,
       wbsCode: true,
       p6ActivityId: true,
       sortOrder: true,
@@ -408,6 +410,7 @@ async function createProjectDependencies(tx, {
     select: {
       id: true,
       name: true,
+      activityCode: true,
       wbsCode: true,
       p6ActivityId: true,
       sortOrder: true,
@@ -490,6 +493,7 @@ function serializeDependencyDto(row) {
       ? {
           id: row.predecessor.id,
           name: row.predecessor.name,
+          activityCode: row.predecessor.activityCode,
           wbsCode: row.predecessor.wbsCode,
           p6ActivityId: row.predecessor.p6ActivityId,
         }

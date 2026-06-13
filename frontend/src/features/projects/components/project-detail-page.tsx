@@ -12,7 +12,13 @@ export function ProjectDetailPage() {
       projectId={projectId}
       initialTarget={
         search.module
-          ? { module: search.module, child: search.child }
+          ? {
+              module: search.module,
+              child: search.child,
+              status: search.status,
+              source: search.source,
+              recordId: search.recordId,
+            }
           : undefined
       }
     />

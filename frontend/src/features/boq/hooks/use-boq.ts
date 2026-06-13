@@ -163,7 +163,7 @@ export function useCreateBoqItem(projectId: string) {
         .post(`/projects/${projectId}/boq/items`, data)
         .then((r) => r.data.data),
     onSuccess: async () => {
-      toast.success('BOQ row added with draft activity allocation')
+      toast.success('BOQ row added with a draft allocation link')
       await invalidateAllocationConsumers(qc, projectId)
     },
     onError: (err: AxiosError<ApiErrorResponse>) => {
@@ -207,7 +207,7 @@ export function useCreateBoqActivity(projectId: string) {
         .post(`/projects/${projectId}/boq/items/${boqItemId}/activities`, data)
         .then((r) => r.data.data),
     onSuccess: async () => {
-      toast.success('Schedule activity added with draft allocation')
+      toast.success('Draft allocation link added')
       await invalidateAllocationConsumers(qc, projectId)
     },
     onError: (err: AxiosError<ApiErrorResponse>) => {
@@ -255,7 +255,7 @@ export function useDeleteBoqActivity(projectId: string) {
         .then((r) => r.data.data)
     },
     onSuccess: async () => {
-      toast.success('Draft activity allocation removed')
+      toast.success('Draft allocation link removed')
       await invalidateAllocationConsumers(qc, projectId)
     },
     onError: (err: AxiosError<ApiErrorResponse>) => {

@@ -67,7 +67,7 @@ describe('activity BOQ allocation service', () => {
 
   it('approves submitted allocations with audit fields', async () => {
     mockPrisma.project.findFirst.mockResolvedValue({ id: 'project-1' });
-    mockPrisma.activityBoqAllocation.findFirst.mockResolvedValue({
+    mockPrisma.activityBoqAllocation.findFirst.mockResolvedValueOnce({
       id: 'allocation-1',
       projectId: 'project-1',
       boqItemId: 'boq-1',
@@ -78,6 +78,7 @@ describe('activity BOQ allocation service', () => {
       status: 'submitted',
       isActive: true,
     });
+    mockPrisma.activityBoqAllocation.findFirst.mockResolvedValueOnce(null);
     mockPrisma.boqItem.findFirst.mockResolvedValue({
       id: 'boq-1',
       projectId: 'project-1',
@@ -121,6 +122,85 @@ describe('activity BOQ allocation service', () => {
         }),
       }),
     );
+    expect(mockPrisma.activityBoqAllocation.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          boqItemId: 'boq-1',
+          isActive: true,
+          status: { in: ['approved'] },
+          id: { not: 'allocation-1' },
+        }),
+      }),
+    );
+  });
+
+  it('rejects duplicate active BOQ item and activity pairs before create', async () => {
+    mockPrisma.project.findFirst.mockResolvedValue({ id: 'project-1' });
+    mockPrisma.boqItem.findFirst.mockResolvedValue({
+      id: 'boq-1',
+      projectId: 'project-1',
+      qty: 10,
+      rate: 25,
+      amount: 250,
+    });
+    mockPrisma.activity.findFirst.mockResolvedValue({
+      id: 'activity-1',
+      projectId: 'project-1',
+    });
+    mockPrisma.activityBoqAllocation.findFirst.mockResolvedValue({
+      id: 'existing-allocation',
+    });
+
+    await expect(
+      service.createAllocation({
+        orgId: 'org-1',
+        projectId: 'project-1',
+        userId: 'user-1',
+        payload: {
+          boqItemId: 'boq-1',
+          activityId: 'activity-1',
+          quantity: 1,
+          amount: 25,
+        },
+      }),
+    ).rejects.toMatchObject({ code: 'DUPLICATE_ACTIVE_ALLOCATION' });
+
+    expect(mockPrisma.activityBoqAllocation.create).not.toHaveBeenCalled();
+  });
+
+  it('normalizes active pair unique-index conflicts to a duplicate allocation error', async () => {
+    mockPrisma.project.findFirst.mockResolvedValue({ id: 'project-1' });
+    mockPrisma.boqItem.findFirst.mockResolvedValue({
+      id: 'boq-1',
+      projectId: 'project-1',
+      qty: 10,
+      rate: 25,
+      amount: 250,
+    });
+    mockPrisma.activity.findFirst.mockResolvedValue({
+      id: 'activity-1',
+      projectId: 'project-1',
+    });
+    mockPrisma.activityBoqAllocation.findFirst.mockResolvedValue(null);
+    mockPrisma.activityBoqAllocation.findMany.mockResolvedValue([]);
+    mockPrisma.activityBoqAllocation.create.mockRejectedValue({
+      code: 'P2002',
+      meta: { target: 'ActivityBoqAllocation_active_pair_key' },
+    });
+
+    await expect(
+      service.createAllocation({
+        orgId: 'org-1',
+        projectId: 'project-1',
+        userId: 'user-1',
+        payload: {
+          boqItemId: 'boq-1',
+          activityId: 'activity-1',
+          quantity: 1,
+          amount: 25,
+        },
+      }),
+    ).rejects.toMatchObject({ code: 'DUPLICATE_ACTIVE_ALLOCATION' });
   });
 
   it('rolls up only approved active allocation totals by activity', async () => {

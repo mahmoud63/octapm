@@ -37,6 +37,8 @@ const mockPrisma = {
 const mockAuditService = {
   ACTIONS: {
     CREATED: 'created',
+    APPROVED: 'approved',
+    REJECTED: 'rejected',
     STATUS_CHANGED: 'status_changed',
     UPDATED: 'updated',
   },
@@ -257,6 +259,7 @@ describe('EOT traceability', () => {
       projectId: 'project-1',
       claimId: 'eot-1',
       userId: 'pm-1',
+      workflowAction: 'submit',
       payload: {
         status: 'submitted',
         delayDays: 8,
@@ -293,6 +296,133 @@ describe('EOT traceability', () => {
             ldExposure: 4000,
           }),
         ],
+      }),
+    );
+  });
+
+  it('submits EOT claims through the workflow endpoint and blocks direct approvals', async () => {
+    mockPrisma.eotClaim.findFirst.mockResolvedValue({
+      id: 'eot-1',
+      projectId: 'project-1',
+      ref: 'EOT-01',
+      eventName: 'Storm shutdown',
+      eventType: null,
+      delayDays: 5,
+      eotDaysGranted: 2,
+      ldRatePerDay: 1000,
+      ldLiability: 3000,
+      analysis: null,
+      claimLetter: null,
+      status: 'draft',
+      activityLinks: [{ activityId: 'activity-1' }],
+      weatherDelayLinks: [],
+    });
+    mockPrisma.eotClaim.update.mockResolvedValue({
+      id: 'eot-1',
+      projectId: 'project-1',
+      ref: 'EOT-01',
+      eventName: 'Storm shutdown',
+      status: 'submitted',
+      delayDays: 5,
+      eotDaysGranted: 2,
+      ldLiability: 3000,
+      activityLinks: [{ activityId: 'activity-1' }],
+      weatherDelayLinks: [],
+    });
+    mockPrisma.commercialAttachmentRef.findMany.mockResolvedValue([
+      { id: 'att-1', recordId: 'eot-1' },
+    ]);
+
+    await eotService.submitEotClaim({
+      orgId: 'org-1',
+      projectId: 'project-1',
+      claimId: 'eot-1',
+      userId: 'planner-1',
+      userRole: 'planning_eng',
+    });
+
+    expect(mockPrisma.eotClaim.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          status: 'submitted',
+          submittedBy: 'planner-1',
+          submittedAt: expect.any(Date),
+        }),
+      }),
+    );
+
+    await expect(
+      eotService.updateEotClaim({
+        orgId: 'org-1',
+        projectId: 'project-1',
+        claimId: 'eot-1',
+        userId: 'pm-1',
+        payload: { status: 'approved' },
+      }),
+    ).rejects.toMatchObject({ code: 'EOT_WORKFLOW_ACTION_REQUIRED' });
+  });
+
+  it('approves submitted EOT claims with revised completion recommendation metadata', async () => {
+    mockPrisma.project.findFirst.mockResolvedValue({
+      id: 'project-1',
+      orgId: 'org-1',
+      name: 'Tower',
+      completionDate: new Date('2026-12-31T00:00:00Z'),
+      ldRatePerDay: 1000,
+    });
+    mockPrisma.eotClaim.findFirst.mockResolvedValue({
+      id: 'eot-1',
+      projectId: 'project-1',
+      ref: 'EOT-01',
+      eventName: 'Storm shutdown',
+      eventType: null,
+      delayDays: 5,
+      eotDaysGranted: 2,
+      ldRatePerDay: 1000,
+      ldLiability: 3000,
+      analysis: null,
+      claimLetter: null,
+      status: 'submitted',
+      activityLinks: [{ activityId: 'activity-1', criticalPathImpactDays: 5 }],
+      weatherDelayLinks: [],
+    });
+    mockPrisma.eotClaim.findMany.mockResolvedValue([{ eotDaysGranted: 3 }]);
+    mockPrisma.eotClaim.update.mockResolvedValue({
+      id: 'eot-1',
+      projectId: 'project-1',
+      ref: 'EOT-01',
+      eventName: 'Storm shutdown',
+      status: 'approved',
+      delayDays: 5,
+      eotDaysGranted: 2,
+      ldLiability: 3000,
+      revisedCompletionRecommendation: new Date('2027-01-05T00:00:00Z'),
+      cumulativeApprovedEotDays: 5,
+      activityLinks: [{ activityId: 'activity-1', criticalPathImpactDays: 5 }],
+      weatherDelayLinks: [],
+    });
+    mockPrisma.commercialAttachmentRef.findMany.mockResolvedValue([
+      { id: 'att-1', recordId: 'eot-1' },
+    ]);
+
+    await eotService.approveEotClaim({
+      orgId: 'org-1',
+      projectId: 'project-1',
+      claimId: 'eot-1',
+      comment: 'Critical path proof accepted',
+      userId: 'pm-1',
+      userRole: 'pm',
+    });
+
+    expect(mockPrisma.eotClaim.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          status: 'approved',
+          approvedBy: 'pm-1',
+          officialAt: expect.any(Date),
+          cumulativeApprovedEotDays: 5,
+          revisedCompletionRecommendation: new Date('2027-01-05T00:00:00Z'),
+        }),
       }),
     );
   });

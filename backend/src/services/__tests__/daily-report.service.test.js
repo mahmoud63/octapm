@@ -2,6 +2,7 @@ const mockPrisma = {
   $transaction: jest.fn((fn) => fn(mockPrisma)),
   project: { findFirst: jest.fn() },
   activity: { findFirst: jest.fn() },
+  activityAssignment: { findMany: jest.fn() },
   dailyReport: {
     create: jest.fn(),
     findFirst: jest.fn(),
@@ -24,6 +25,18 @@ const mockPrisma = {
     findMany: jest.fn(),
     updateMany: jest.fn(),
   },
+  equipment: {
+    findMany: jest.fn(),
+  },
+  activityEquipmentUsage: {
+    findMany: jest.fn(),
+    create: jest.fn(),
+  },
+  costRecord: {
+    findFirst: jest.fn(),
+    create: jest.fn(),
+    update: jest.fn(),
+  },
 };
 
 jest.mock('../../config/db', () => ({ prisma: mockPrisma }));
@@ -42,6 +55,9 @@ describe('daily report service', () => {
       projectId: 'project-1',
       isActive: true,
     });
+    mockPrisma.activityAssignment.findMany.mockResolvedValue([
+      { activityId: 'activity-1' },
+    ]);
     mockPrisma.activityProgressMethod.findFirst.mockResolvedValue({
       projectId: 'project-1',
       activityId: 'activity-1',
@@ -61,6 +77,30 @@ describe('daily report service', () => {
     );
     mockPrisma.projectDocument.findMany.mockResolvedValue([]);
     mockPrisma.projectDocument.updateMany.mockResolvedValue({ count: 0 });
+    mockPrisma.equipment.findMany.mockResolvedValue([]);
+    mockPrisma.activityEquipmentUsage.findMany.mockResolvedValue([]);
+    mockPrisma.activityEquipmentUsage.create.mockImplementation(({ data }) =>
+      Promise.resolve({
+        id: `usage-${data.sourceLineIndex ?? 1}`,
+        createdAt: new Date('2026-01-01T00:00:00.000Z'),
+        ...data,
+      }),
+    );
+    mockPrisma.costRecord.findFirst.mockResolvedValue(null);
+    mockPrisma.costRecord.create.mockImplementation(({ data }) =>
+      Promise.resolve({
+        id: 'cost-1',
+        updatedAt: new Date('2026-01-01T00:00:00.000Z'),
+        ...data,
+      }),
+    );
+    mockPrisma.costRecord.update.mockImplementation(({ data }) =>
+      Promise.resolve({
+        id: 'cost-1',
+        updatedAt: new Date('2026-01-01T00:00:00.000Z'),
+        ...data,
+      }),
+    );
   });
 
   it('stores manpower, materials, equipment, photos, and linked progress evidence', async () => {
@@ -124,6 +164,7 @@ describe('daily report service', () => {
       orgId: 'org-1',
       projectId: 'project-1',
       userId: 'user-1',
+      userRole: 'site_engineer',
       payload: {
         activityId: 'activity-1',
         date: '2026-01-01',
@@ -137,6 +178,7 @@ describe('daily report service', () => {
     });
 
     expect(report.photos).toHaveLength(1);
+    expect(mockPrisma.activityEquipmentUsage.create).not.toHaveBeenCalled();
     expect(mockPrisma.progressSubmission.create).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
@@ -333,6 +375,141 @@ describe('daily report service', () => {
           submissionId: 'submission-1',
           pctComplete: 40,
           status: 'approved',
+        }),
+      }),
+    );
+  });
+
+  it('posts approved equipment usage to activity history and cost', async () => {
+    const reportDate = new Date('2026-01-03T00:00:00.000Z');
+    const reviewedAt = new Date('2026-01-04T00:00:00.000Z');
+    mockPrisma.dailyReport.findFirst.mockResolvedValueOnce({
+      id: 'report-1',
+      projectId: 'project-1',
+      activityId: 'activity-1',
+      engineerId: 'site-1',
+      date: reportDate,
+      pctProgress: 0,
+      manpowerJson: [],
+      materialsJson: [],
+      equipmentJson: [
+        { equipmentId: 'equip-1', name: 'Tower crane', hours: 4 },
+      ],
+      photosJson: [],
+      notes: 'crane lift approved',
+      status: 'submitted',
+      submittedAt: reportDate,
+      reviewedBy: null,
+      reviewedAt: null,
+      rejectionReason: null,
+      createdAt: reportDate,
+      updatedAt: reportDate,
+      activity: { id: 'activity-1', name: 'Foundations' },
+      progressSubmissions: [],
+      equipmentUsages: [],
+    });
+    mockPrisma.dailyReport.update.mockResolvedValue({
+      id: 'report-1',
+      projectId: 'project-1',
+      activityId: 'activity-1',
+      engineerId: 'site-1',
+      date: reportDate,
+      pctProgress: 0,
+      manpowerJson: [],
+      materialsJson: [],
+      equipmentJson: [
+        { equipmentId: 'equip-1', name: 'Tower crane', hours: 4 },
+      ],
+      photosJson: [],
+      notes: 'crane lift approved',
+      status: 'approved',
+      submittedAt: reportDate,
+      reviewedBy: 'pm-1',
+      reviewedAt,
+      rejectionReason: null,
+      createdAt: reportDate,
+      updatedAt: reviewedAt,
+      activity: { id: 'activity-1', name: 'Foundations' },
+      progressSubmissions: [],
+      equipmentUsages: [],
+    });
+    mockPrisma.equipment.findMany.mockResolvedValue([
+      {
+        id: 'equip-1',
+        projectId: 'project-1',
+        name: 'Tower crane',
+        rateType: 'daily',
+        rate: 800,
+      },
+    ]);
+    mockPrisma.costRecord.findFirst.mockResolvedValue({
+      id: 'cost-1',
+      projectId: 'project-1',
+      activityId: 'activity-1',
+      labour: 0,
+      material: 0,
+      equipment: 100,
+      subcontract: 0,
+      indirect: 0,
+      overhead: 0,
+      contingency: 0,
+      budget: 1000,
+      committed: 0,
+      actual: 250,
+      actualThroughDate: new Date('2026-01-02T00:00:00.000Z'),
+      forecast: 1000,
+      updatedAt: reportDate,
+    });
+
+    const report = await dailyReportService.approveDailyReport({
+      orgId: 'org-1',
+      projectId: 'project-1',
+      reportId: 'report-1',
+      userId: 'pm-1',
+      userRole: 'pm',
+    });
+
+    expect(report.status).toBe('approved');
+    expect(mockPrisma.activityEquipmentUsage.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          projectId: 'project-1',
+          activityId: 'activity-1',
+          equipmentId: 'equip-1',
+          dailyReportId: 'report-1',
+          sourceLineIndex: 0,
+          equipmentName: 'Tower crane',
+          hours: 4,
+          rateType: 'daily',
+          rate: 800,
+          costAmount: 400,
+          status: 'approved',
+          approvedBy: 'pm-1',
+          approvedAt: reviewedAt,
+        }),
+      }),
+    );
+    expect(mockPrisma.costRecord.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'cost-1' },
+        data: expect.objectContaining({
+          equipment: 500,
+          actual: 650,
+          actualThroughDate: reportDate,
+        }),
+      }),
+    );
+    expect(mockPrisma.auditEvent.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          entityType: 'activity_equipment_usage',
+          entityId: 'usage-0',
+          action: 'created',
+          newStatus: 'approved',
+          summaryJson: expect.objectContaining({
+            transition: 'daily_report.equipment_usage.post',
+            dailyReportId: 'report-1',
+          }),
         }),
       }),
     );

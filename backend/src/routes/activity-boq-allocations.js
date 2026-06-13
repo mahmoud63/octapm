@@ -3,19 +3,33 @@ const { body, param, query } = require('express-validator');
 const { asyncHandler } = require('../utils/async-handler');
 const { sendSuccess } = require('../utils/api-response');
 const { authenticate } = require('../middleware/auth');
-const { requireRoles } = require('../middleware/rbac');
+const { requirePermission } = require('../middleware/rbac');
 const { validate } = require('../middleware/validate');
 const { moneyBody } = require('../utils/money');
 const allocationService = require('../services/activity-boq-allocation.service');
 
 const router = express.Router({ mergeParams: true });
-const CAN_EDIT = requireRoles('pm', 'planning_eng', 'qs');
-const CAN_APPROVE = requireRoles('pm', 'qs');
+const CAN_CREATE = requirePermission('boq', 'create', {
+  transition: 'allocation.create',
+});
+const CAN_UPDATE = requirePermission('boq', 'update', {
+  transition: 'allocation.update',
+});
+const CAN_SUBMIT = requirePermission('boq', 'submit', {
+  transition: 'allocation.submit',
+});
+const CAN_APPROVE = requirePermission('boq', 'approve', {
+  transition: 'allocation.approve',
+});
+const CAN_REJECT = requirePermission('boq', 'approve', {
+  transition: 'allocation.reject',
+});
 
 router.use(authenticate);
 
 router.get(
   '/',
+  requirePermission('boq', 'read'),
   [
     query('status')
       .optional()
@@ -41,7 +55,7 @@ router.get(
 
 router.post(
   '/',
-  CAN_EDIT,
+  CAN_CREATE,
   [
     body('boqItemId').isUUID(),
     body('activityId').isUUID(),
@@ -66,7 +80,7 @@ router.post(
 
 router.patch(
   '/:id',
-  CAN_EDIT,
+  CAN_UPDATE,
   [
     param('id').isUUID(),
     body('boqItemId').optional().isUUID(),
@@ -93,7 +107,7 @@ router.patch(
 
 router.post(
   '/:id/submit',
-  CAN_EDIT,
+  CAN_SUBMIT,
   [param('id').isUUID(), validate],
   asyncHandler(async (req, res) => {
     const result = await allocationService.submitAllocation({
@@ -125,7 +139,7 @@ router.post(
 
 router.post(
   '/:id/reject',
-  CAN_APPROVE,
+  CAN_REJECT,
   [
     param('id').isUUID(),
     body('reason').isString().trim().notEmpty(),

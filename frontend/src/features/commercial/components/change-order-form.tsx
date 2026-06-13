@@ -32,6 +32,8 @@ type Props = {
     category?: string
     value?: number
     scheduleImpact?: number
+    scheduleImpactSummary?: string | null
+    costImpactSummary?: string | null
     activityId?: string | null
     activityLinks?: Array<{
       activityId: string
@@ -57,6 +59,8 @@ type FormState = {
   category: string
   value: string
   scheduleImpact: string
+  scheduleImpactSummary: string
+  costImpactSummary: string
   activityIds: string[]
   activityImpacts: Record<string, ActivityImpactState>
   supportingDocumentIds: string
@@ -69,6 +73,8 @@ const defaultState: FormState = {
   category: '',
   value: '0',
   scheduleImpact: '0',
+  scheduleImpactSummary: '',
+  costImpactSummary: '',
   activityIds: [],
   activityImpacts: {},
   supportingDocumentIds: '',
@@ -97,6 +103,8 @@ const toFormState = (initial?: ChangeOrderRecord | null): FormState => {
     category: initial.category || '',
     value: String(initial.value || 0),
     scheduleImpact: String(initial.scheduleImpact || 0),
+    scheduleImpactSummary: initial.scheduleImpactSummary || '',
+    costImpactSummary: initial.costImpactSummary || '',
     activityIds: activityLinks.length
       ? activityLinks.map((link) => link.activityId).filter(Boolean)
       : initial.activityId
@@ -219,6 +227,34 @@ export function ChangeOrderForm({
               value={form.scheduleImpact}
               onChange={(e) =>
                 setForm((prev) => ({ ...prev, scheduleImpact: e.target.value }))
+              }
+            />
+          </div>
+
+          <div className='col-span-2 grid gap-1.5 sm:col-span-1'>
+            <Label htmlFor='co-schedule-summary'>Schedule Impact Summary</Label>
+            <Textarea
+              id='co-schedule-summary'
+              value={form.scheduleImpactSummary}
+              onChange={(e) =>
+                setForm((prev) => ({
+                  ...prev,
+                  scheduleImpactSummary: e.target.value,
+                }))
+              }
+            />
+          </div>
+
+          <div className='col-span-2 grid gap-1.5 sm:col-span-1'>
+            <Label htmlFor='co-cost-summary'>Cost Impact Summary</Label>
+            <Textarea
+              id='co-cost-summary'
+              value={form.costImpactSummary}
+              onChange={(e) =>
+                setForm((prev) => ({
+                  ...prev,
+                  costImpactSummary: e.target.value,
+                }))
               }
             />
           </div>
@@ -393,7 +429,8 @@ export function ChangeOrderForm({
                 return
               }
               const invalidImpact = form.activityIds.some(
-                (activityId) => !hasMoneyPrecision(impactFor(activityId).costImpact)
+                (activityId) =>
+                  !hasMoneyPrecision(impactFor(activityId).costImpact)
               )
               if (invalidImpact) {
                 toast.error(MONEY_PRECISION_MESSAGE)
@@ -405,14 +442,16 @@ export function ChangeOrderForm({
                 category: form.category || undefined,
                 value: toMoneyNumber(form.value),
                 scheduleImpact: Number(form.scheduleImpact) || 0,
+                scheduleImpactSummary:
+                  form.scheduleImpactSummary.trim() || null,
+                costImpactSummary: form.costImpactSummary.trim() || null,
                 activityId: form.activityIds[0] || null,
                 activityLinks: form.activityIds.map((activityId) => {
                   const impact = impactFor(activityId)
                   return {
                     activityId,
                     relationType: 'affected',
-                    scheduleImpactDays:
-                      Number(impact.scheduleImpactDays) || 0,
+                    scheduleImpactDays: Number(impact.scheduleImpactDays) || 0,
                     costImpact: toMoneyNumber(impact.costImpact),
                     impactBasis: impact.impactBasis || null,
                   }

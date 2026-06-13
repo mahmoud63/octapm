@@ -35,14 +35,24 @@ import { ConfigDrawer } from '@/components/config-drawer'
 import { Search } from '@/components/search'
 import { SignOutDialog } from '@/components/sign-out-dialog'
 import { ThemeSwitch } from '@/components/theme-switch'
+import { SubscriptionBanner } from '@/features/billing/components/subscription-banner'
+import { NotificationCenter } from '@/features/notifications/components/notification-center'
+import {
+  displayNavigationItems,
+  type DisplayNavigationItemId,
+  useUserSettings,
+} from '@/features/settings/hooks/use-user-settings'
+import { useAuthStore } from '@/stores/auth-store'
 import { sidebarData } from './data/sidebar-data'
 import { type NavCollapsible, type NavLink, type NavItem } from './types'
-import { SubscriptionBanner } from '@/features/billing/components/subscription-banner'
 
 // ── Flat list of top-level nav items ──────────────────────────────────────
 // General group items show directly; collapsible items become dropdowns.
 const generalItems = sidebarData.navGroups[0].items // Dashboard, Projects, Tasks, …
 const otherItems = sidebarData.navGroups[2].items // Settings (collapsible), Help Center
+
+const defaultDisplayItemIds: DisplayNavigationItemId[] =
+  displayNavigationItems.map((item) => item.id)
 
 function isNavLink(item: NavItem): item is NavLink {
   return !('items' in item) || !item.items
@@ -52,6 +62,37 @@ function isNavCollapsible(item: NavItem): item is NavCollapsible {
 }
 
 // ── Desktop nav link ──────────────────────────────────────────────────────
+function displayIdForTitle(title: string): DisplayNavigationItemId | null {
+  const normalized = title.toLowerCase().replace(/\s+/g, '-')
+  return displayNavigationItems.some((item) => item.id === normalized)
+    ? (normalized as DisplayNavigationItemId)
+    : null
+}
+
+function filterDisplayItems(
+  items: NavItem[],
+  visibleItems: Set<DisplayNavigationItemId>
+) {
+  return items.filter((item) => {
+    if (isNavCollapsible(item)) return true
+
+    const displayId = displayIdForTitle(item.title)
+    return displayId ? visibleItems.has(displayId) : true
+  })
+}
+
+function getInitials(name: string) {
+  return (
+    name
+      .split(/\s+/)
+      .filter(Boolean)
+      .map((part) => part[0])
+      .join('')
+      .slice(0, 2)
+      .toUpperCase() || 'U'
+  )
+}
+
 function NavLinkItem({ item, href }: { item: NavLink; href: string }) {
   const active = href === item.url || href.split('?')[0] === item.url
   return (
@@ -133,7 +174,14 @@ function NavDropdownItem({
 
 // ── User avatar dropdown ──────────────────────────────────────────────────
 function UserDropdown() {
-  const { user } = sidebarData
+  const authUser = useAuthStore((state) => state.auth.user)
+  const user = authUser
+    ? {
+        name: authUser.name,
+        email: authUser.email,
+        avatar: '',
+      }
+    : sidebarData.user
   const [open, setOpen] = useDialogState()
 
   return (
@@ -148,7 +196,7 @@ function UserDropdown() {
             <Avatar className='size-8 rounded-full'>
               <AvatarImage src={user.avatar} alt={user.name} />
               <AvatarFallback className='rounded-full text-xs'>
-                {user.name.slice(0, 2).toUpperCase()}
+                {getInitials(user.name)}
               </AvatarFallback>
             </Avatar>
           </Button>
@@ -163,7 +211,7 @@ function UserDropdown() {
               <Avatar className='size-8 rounded-lg'>
                 <AvatarImage src={user.avatar} alt={user.name} />
                 <AvatarFallback className='rounded-lg text-xs'>
-                  {user.name.slice(0, 2).toUpperCase()}
+                  {getInitials(user.name)}
                 </AvatarFallback>
               </Avatar>
               <div className='grid flex-1 text-sm leading-tight'>
@@ -215,9 +263,8 @@ function UserDropdown() {
 }
 
 // ── Mobile sheet nav ──────────────────────────────────────────────────────
-function MobileNav({ href }: { href: string }) {
+function MobileNav({ href, items }: { href: string; items: NavItem[] }) {
   const [open, setOpen] = React.useState(false)
-  const allItems = [...generalItems, ...otherItems]
 
   return (
     <Sheet open={open} onOpenChange={setOpen}>
@@ -243,7 +290,7 @@ function MobileNav({ href }: { href: string }) {
           </SheetTitle>
         </SheetHeader>
         <nav className='flex flex-col gap-0.5 p-3'>
-          {allItems.map((item) => {
+          {items.map((item) => {
             if (isNavLink(item)) {
               const active =
                 href === item.url || href.split('?')[0] === item.url
@@ -313,6 +360,24 @@ function MobileNav({ href }: { href: string }) {
 export function TopNavbar() {
   const href = useLocation({ select: (l) => l.href })
   const [scrolled, setScrolled] = React.useState(false)
+  const settingsQuery = useUserSettings()
+  const displayItems = settingsQuery.data?.display.items ?? defaultDisplayItemIds
+  const visibleDisplayItems = React.useMemo<Set<DisplayNavigationItemId>>(
+    () => new Set(displayItems),
+    [displayItems]
+  )
+  const visibleGeneralItems = React.useMemo(
+    () => filterDisplayItems(generalItems, visibleDisplayItems),
+    [visibleDisplayItems]
+  )
+  const visibleOtherItems = React.useMemo(
+    () => filterDisplayItems(otherItems, visibleDisplayItems),
+    [visibleDisplayItems]
+  )
+  const visibleMobileItems = React.useMemo(
+    () => [...visibleGeneralItems, ...visibleOtherItems],
+    [visibleGeneralItems, visibleOtherItems]
+  )
 
   React.useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 4)
@@ -339,7 +404,7 @@ export function TopNavbar() {
 
         {/* Desktop nav */}
         <nav className='hidden flex-1 items-center gap-0.5 md:flex'>
-          {generalItems.map((item) =>
+          {visibleGeneralItems.map((item) =>
             isNavLink(item) ? (
               <NavLinkItem key={item.title} item={item} href={href} />
             ) : isNavCollapsible(item) ? (
@@ -347,7 +412,7 @@ export function TopNavbar() {
             ) : null
           )}
           <div className='mx-1 h-4 w-px bg-border' />
-          {otherItems.map((item) =>
+          {visibleOtherItems.map((item) =>
             isNavLink(item) ? (
               <NavLinkItem key={item.title} item={item} href={href} />
             ) : isNavCollapsible(item) ? (
@@ -359,10 +424,11 @@ export function TopNavbar() {
         {/* Right actions */}
         <div className='ms-auto flex items-center gap-2'>
           <Search className='hidden sm:flex' />
+          <NotificationCenter />
           <ConfigDrawer />
           <ThemeSwitch />
           <UserDropdown />
-          <MobileNav href={href} />
+          <MobileNav href={href} items={visibleMobileItems} />
         </div>
       </div>
     </header>

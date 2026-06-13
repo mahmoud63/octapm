@@ -3,7 +3,7 @@ const { body, param, query } = require('express-validator');
 const { asyncHandler } = require('../utils/async-handler');
 const { sendSuccess } = require('../utils/api-response');
 const { authenticate } = require('../middleware/auth');
-const { requirePermission } = require('../middleware/rbac');
+const { getEffectiveRole, requirePermission } = require('../middleware/rbac');
 const { validate } = require('../middleware/validate');
 const { moneyBody } = require('../utils/money');
 const dailyReportService = require('../services/daily-report.service');
@@ -135,6 +135,7 @@ router.post(
       orgId: req.user.orgId,
       projectId: req.params.projectId,
       userId: req.user.id,
+      userRole: getEffectiveRole(req),
       payload: req.body,
     });
     return sendSuccess(res, result, 201);
@@ -185,6 +186,7 @@ router.post(
       projectId: req.params.projectId,
       reportId: req.params.reportId,
       userId: req.user.id,
+      userRole: getEffectiveRole(req),
     });
     return sendSuccess(res, result);
   }),
@@ -202,6 +204,7 @@ router.post(
       projectId: req.params.projectId,
       reportId: req.params.reportId,
       userId: req.user.id,
+      userRole: getEffectiveRole(req),
     });
     return sendSuccess(res, result);
   }),
@@ -223,6 +226,7 @@ router.post(
       projectId: req.params.projectId,
       reportId: req.params.reportId,
       userId: req.user.id,
+      userRole: getEffectiveRole(req),
       reason: req.body.reason,
     });
     return sendSuccess(res, result);
@@ -241,6 +245,7 @@ router.post(
       projectId: req.params.projectId,
       reportId: req.params.reportId,
       userId: req.user.id,
+      userRole: getEffectiveRole(req),
     });
     return sendSuccess(res, result);
   }),

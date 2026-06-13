@@ -1,23 +1,19 @@
-import { showSubmittedData } from '@/lib/show-submitted-data'
+import { toast } from 'sonner'
 import { ConfirmDialog } from '@/components/confirm-dialog'
-import { TasksImportDialog } from './tasks-import-dialog'
 import { TasksMutateDrawer } from './tasks-mutate-drawer'
 import { useTasks } from './tasks-provider'
+import { useDeleteTask } from '../hooks/use-tasks'
 
 export function TasksDialogs() {
   const { open, setOpen, currentRow, setCurrentRow } = useTasks()
+  const deleteTask = useDeleteTask()
+
   return (
     <>
       <TasksMutateDrawer
         key='task-create'
         open={open === 'create'}
-        onOpenChange={() => setOpen('create')}
-      />
-
-      <TasksImportDialog
-        key='tasks-import'
-        open={open === 'import'}
-        onOpenChange={() => setOpen('import')}
+        onOpenChange={(isOpen) => setOpen(isOpen ? 'create' : null)}
       />
 
       {currentRow && (
@@ -25,11 +21,13 @@ export function TasksDialogs() {
           <TasksMutateDrawer
             key={`task-update-${currentRow.id}`}
             open={open === 'update'}
-            onOpenChange={() => {
-              setOpen('update')
-              setTimeout(() => {
-                setCurrentRow(null)
-              }, 500)
+            onOpenChange={(isOpen) => {
+              setOpen(isOpen ? 'update' : null)
+              if (!isOpen) {
+                setTimeout(() => {
+                  setCurrentRow(null)
+                }, 500)
+              }
             }}
             currentRow={currentRow}
           />
@@ -38,32 +36,40 @@ export function TasksDialogs() {
             key='task-delete'
             destructive
             open={open === 'delete'}
-            onOpenChange={() => {
-              setOpen('delete')
-              setTimeout(() => {
-                setCurrentRow(null)
-              }, 500)
+            onOpenChange={(isOpen) => {
+              setOpen(isOpen ? 'delete' : null)
+              if (!isOpen) {
+                setTimeout(() => {
+                  setCurrentRow(null)
+                }, 500)
+              }
             }}
-            handleConfirm={() => {
-              setOpen(null)
-              setTimeout(() => {
-                setCurrentRow(null)
-              }, 500)
-              showSubmittedData(
-                currentRow,
-                'The following task has been deleted:'
-              )
+            handleConfirm={async () => {
+              try {
+                await deleteTask.mutateAsync(currentRow.id)
+                toast.success(`${currentRow.taskNumber} archived`)
+                setOpen(null)
+                setTimeout(() => {
+                  setCurrentRow(null)
+                }, 500)
+              } catch (error) {
+                const message =
+                  error instanceof Error
+                    ? error.message
+                    : 'Task could not be archived.'
+                toast.error(message)
+              }
             }}
             className='max-w-md'
-            title={`Delete this task: ${currentRow.id} ?`}
+            title={`Archive ${currentRow.taskNumber}?`}
             desc={
               <>
-                You are about to delete a task with the ID{' '}
-                <strong>{currentRow.id}</strong>. <br />
-                This action cannot be undone.
+                You are about to archive{' '}
+                <strong>{currentRow.taskNumber}</strong>. Comments,
+                attachments, and history will be retained.
               </>
             }
-            confirmText='Delete'
+            confirmText='Archive'
           />
         </>
       )}

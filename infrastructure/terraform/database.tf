@@ -19,7 +19,7 @@ resource "random_id" "db_final_snapshot_suffix" {
 }
 
 ################################
-# RDS PostgreSQL — db.t3.micro single-AZ
+# RDS PostgreSQL - production-ready Multi-AZ by default
 ################################
 resource "aws_db_instance" "main" {
   identifier = "${var.app_name}-db"
@@ -40,7 +40,7 @@ resource "aws_db_instance" "main" {
   db_subnet_group_name   = aws_db_subnet_group.main.name
   vpc_security_group_ids = [aws_security_group.rds.id]
 
-  multi_az            = false # single-AZ limits availability, but backups remain mandatory
+  multi_az            = var.rds_multi_az
   publicly_accessible = false
 
   deletion_protection       = true
@@ -60,6 +60,11 @@ resource "aws_db_instance" "main" {
       condition     = var.rds_backup_retention_days >= 7
       error_message = "F-007 production blocker: rds_backup_retention_days must be at least 7."
     }
+
+    precondition {
+      condition     = !contains(["prod", "production"], var.environment) || var.rds_multi_az
+      error_message = "TASK-P1-DEVOPS-001 production blocker: rds_multi_az must be true for production."
+    }
   }
 
   tags = {
@@ -68,6 +73,7 @@ resource "aws_db_instance" "main" {
     BackupRetentionDays = tostring(var.rds_backup_retention_days)
     RPOHours            = tostring(var.rds_recovery_rpo_hours)
     RTOHours            = tostring(var.rds_recovery_rto_hours)
+    MultiAZ             = tostring(var.rds_multi_az)
     ProductionBlocker   = "F-007"
   }
 }

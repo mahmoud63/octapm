@@ -93,6 +93,8 @@ describe("IPC allocation impact", () => {
         activityId: "activity-1",
         quantity: 4,
         amount: 200,
+        status: "approved",
+        isActive: true,
         boqItem: { id: "boq-1", rate: 60, sortOrder: 1 },
         activity: { id: "activity-1", name: "Excavate", sortOrder: 1 },
       },
@@ -114,6 +116,7 @@ describe("IPC allocation impact", () => {
           projectId: "project-1",
           status: "approved",
           isActive: true,
+          activity: { isActive: true },
         },
       }),
     );
@@ -155,6 +158,8 @@ describe("IPC allocation impact", () => {
         activityId: "activity-1",
         quantity: 2,
         amount: 100,
+        status: "approved",
+        isActive: true,
         boqItem: { id: "boq-1", rate: 50, sortOrder: 1 },
         activity: { id: "activity-1", name: "Excavate", sortOrder: 1 },
       },
@@ -260,6 +265,8 @@ describe("IPC allocation impact", () => {
         activityId: "activity-1",
         quantity: 10,
         amount: 1000,
+        status: "approved",
+        isActive: true,
       },
     };
     const progress = {
@@ -325,6 +332,54 @@ describe("IPC allocation impact", () => {
         }),
       }),
     );
+  });
+
+  it("rejects IPC item updates when the linked allocation is not approved and active", async () => {
+    mockPrisma.project.findFirst.mockResolvedValue({ id: "project-1" });
+    mockPrisma.ipcCertificate.findFirst.mockResolvedValue({
+      id: "ipc-1",
+      projectId: "project-1",
+      period: "IPC-1",
+      status: "draft",
+    });
+    mockPrisma.ipcItem.findFirst.mockResolvedValue({
+      id: "item-1",
+      projectId: "project-1",
+      boqItemId: "boq-1",
+      allocationId: "allocation-1",
+      ipcPeriod: "IPC-1",
+      qty: 0,
+      rate: 100,
+      previousCert: 0,
+      currentCert: 0,
+      cumulativeCert: 0,
+      retentionRate: 5,
+      retention: 0,
+      netPayable: 0,
+      status: "draft",
+      allocation: {
+        id: "allocation-1",
+        activityId: "activity-1",
+        boqItemId: "boq-1",
+        quantity: 10,
+        amount: 1000,
+        status: "draft",
+        isActive: true,
+      },
+    });
+
+    await expect(
+      ipcService.updateIpcItem({
+        orgId: "org-1",
+        projectId: "project-1",
+        period: "IPC-1",
+        itemId: "item-1",
+        payload: { qty: 1, rate: 100 },
+      }),
+    ).rejects.toMatchObject({ code: "IPC_ALLOCATION_NOT_APPROVED" });
+
+    expect(mockPrisma.activityProgress.findFirst).not.toHaveBeenCalled();
+    expect(mockPrisma.ipcItem.update).not.toHaveBeenCalled();
   });
 
   it("rejects direct item status changes outside the period workflow", async () => {
@@ -393,6 +448,134 @@ describe("IPC allocation impact", () => {
     expect(mockPrisma.ipcCertificate.update).not.toHaveBeenCalled();
   });
 
+  it("requires a PM override reason before certifying above earned or approved value", async () => {
+    const certificate = {
+      id: "ipc-1",
+      projectId: "project-1",
+      period: "IPC-1",
+      status: "submitted",
+      totalCert: 1100,
+      totalRet: 55,
+      netPayable: 1045,
+    };
+    const item = {
+      id: "item-1",
+      projectId: "project-1",
+      boqItemId: "boq-1",
+      allocationId: "allocation-1",
+      ipcPeriod: "IPC-1",
+      qty: 11,
+      currentCert: 1100,
+      previousCert: 0,
+      cumulativeCert: 1100,
+      allocation: {
+        id: "allocation-1",
+        activityId: "activity-1",
+        boqItemId: "boq-1",
+        quantity: 10,
+        amount: 1000,
+        status: "approved",
+        isActive: true,
+      },
+    };
+
+    mockPrisma.project.findFirst.mockResolvedValue({ id: "project-1" });
+    mockPrisma.ipcCertificate.findFirst.mockResolvedValue(certificate);
+    mockPrisma.ipcItem.findMany
+      .mockResolvedValueOnce([item])
+      .mockResolvedValueOnce([]);
+    mockPrisma.activityProgress.findFirst.mockResolvedValue({
+      id: "progress-1",
+      pctComplete: 100,
+      updatedAt: new Date("2026-06-01T00:00:00Z"),
+      status: "approved",
+    });
+
+    await expect(
+      ipcService.certifyIpcPeriod({
+        orgId: "org-1",
+        projectId: "project-1",
+        period: "IPC-1",
+        userId: "finance-1",
+        userRole: "finance",
+      }),
+    ).rejects.toMatchObject({ code: "IPC_PM_OVERRIDE_REASON_REQUIRED" });
+
+    expect(mockPrisma.ipcCertificate.update).not.toHaveBeenCalled();
+  });
+
+  it("records PM override metadata for over-limit IPC certification", async () => {
+    const certificate = {
+      id: "ipc-1",
+      projectId: "project-1",
+      period: "IPC-1",
+      status: "submitted",
+      totalCert: 1100,
+      totalRet: 55,
+      netPayable: 1045,
+    };
+    const item = {
+      id: "item-1",
+      projectId: "project-1",
+      boqItemId: "boq-1",
+      allocationId: "allocation-1",
+      ipcPeriod: "IPC-1",
+      qty: 11,
+      currentCert: 1100,
+      previousCert: 0,
+      cumulativeCert: 1100,
+      allocation: {
+        id: "allocation-1",
+        activityId: "activity-1",
+        boqItemId: "boq-1",
+        quantity: 10,
+        amount: 1000,
+        status: "approved",
+        isActive: true,
+      },
+    };
+
+    mockPrisma.project.findFirst.mockResolvedValue({ id: "project-1" });
+    mockPrisma.ipcCertificate.findFirst.mockResolvedValue(certificate);
+    mockPrisma.ipcItem.findMany
+      .mockResolvedValueOnce([item])
+      .mockResolvedValueOnce([]);
+    mockPrisma.activityProgress.findFirst.mockResolvedValue({
+      id: "progress-1",
+      pctComplete: 100,
+      updatedAt: new Date("2026-06-01T00:00:00Z"),
+      status: "approved",
+    });
+    mockPrisma.ipcItem.updateMany.mockResolvedValue({ count: 1 });
+    mockPrisma.ipcCertificate.update.mockImplementation(({ data }) =>
+      Promise.resolve({ ...certificate, ...data }),
+    );
+
+    await ipcService.certifyIpcPeriod({
+      orgId: "org-1",
+      projectId: "project-1",
+      period: "IPC-1",
+      userId: "pm-1",
+      userRole: "pm",
+      overrideReason: "Client-agreed acceleration works pending VO signature",
+    });
+
+    expect(mockPrisma.ipcCertificate.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          status: "certified",
+          earnedValueAtCertification: 1000,
+          approvedLimitAtCertification: 1000,
+          overCertificationAmount: 100,
+          certificationOverrideReason:
+            "Client-agreed acceleration works pending VO signature",
+          certificationOverrideBy: "pm-1",
+          certificationOverrideAt: expect.any(Date),
+        }),
+      }),
+    );
+  });
+
   it("includes approved variation allowance when enforcing IPC item limits", async () => {
     const certificate = {
       id: "ipc-1",
@@ -421,6 +604,8 @@ describe("IPC allocation impact", () => {
         boqItemId: "boq-1",
         quantity: 10,
         amount: 1000,
+        status: "approved",
+        isActive: true,
       },
     };
     const progress = {
@@ -482,6 +667,185 @@ describe("IPC allocation impact", () => {
         where: expect.objectContaining({
           projectId: "project-1",
           changeOrder: { status: "approved" },
+        }),
+      }),
+    );
+  });
+
+  it.each(["pending", "rejected"])(
+    "ignores %s variation allowance when enforcing IPC item limits",
+    async (changeOrderStatus) => {
+      const certificate = {
+        id: "ipc-1",
+        projectId: "project-1",
+        period: "IPC-1",
+        status: "draft",
+      };
+      const existingItem = {
+        id: "item-1",
+        projectId: "project-1",
+        boqItemId: "boq-1",
+        allocationId: "allocation-1",
+        ipcPeriod: "IPC-1",
+        qty: 0,
+        rate: 100,
+        previousCert: 900,
+        currentCert: 0,
+        cumulativeCert: 900,
+        retentionRate: 5,
+        retention: 0,
+        netPayable: 0,
+        status: "draft",
+        allocation: {
+          id: "allocation-1",
+          activityId: "activity-1",
+          boqItemId: "boq-1",
+          quantity: 10,
+          amount: 1000,
+          status: "approved",
+          isActive: true,
+        },
+      };
+      const progress = {
+        id: "progress-1",
+        pctComplete: 100,
+        status: "approved",
+        updatedAt: new Date("2026-06-01T00:00:00Z"),
+      };
+
+      mockPrisma.project.findFirst.mockResolvedValue({ id: "project-1" });
+      mockPrisma.ipcCertificate.findFirst.mockResolvedValue(certificate);
+      mockPrisma.ipcItem.findFirst.mockResolvedValue(existingItem);
+      mockPrisma.activityProgress.findFirst.mockResolvedValue(progress);
+      mockPrisma.changeOrderAllocationLink.findMany.mockImplementation(
+        ({ where }) =>
+          Promise.resolve(
+            where.changeOrder?.status === changeOrderStatus
+              ? [
+                  {
+                    allocationId: "allocation-1",
+                    boqItemId: "boq-1",
+                    quantity: 2,
+                    amount: 200,
+                  },
+                ]
+              : [],
+          ),
+      );
+
+      await expect(
+        ipcService.updateIpcItem({
+          orgId: "org-1",
+          projectId: "project-1",
+          period: "IPC-1",
+          itemId: "item-1",
+          payload: { qty: 2, rate: 100 },
+        }),
+      ).rejects.toMatchObject({ code: "IPC_ALLOCATION_AMOUNT_EXCEEDED" });
+
+      expect(
+        mockPrisma.changeOrderAllocationLink.findMany,
+      ).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            projectId: "project-1",
+            changeOrder: { status: "approved" },
+          }),
+        }),
+      );
+      expect(mockPrisma.ipcItem.update).not.toHaveBeenCalled();
+    },
+  );
+
+  it("allows only the partially allocated approved variation allowance", async () => {
+    const certificate = {
+      id: "ipc-1",
+      projectId: "project-1",
+      period: "IPC-1",
+      status: "draft",
+    };
+    const existingItem = {
+      id: "item-1",
+      projectId: "project-1",
+      boqItemId: "boq-1",
+      allocationId: "allocation-1",
+      ipcPeriod: "IPC-1",
+      qty: 0,
+      rate: 100,
+      previousCert: 1000,
+      currentCert: 0,
+      cumulativeCert: 1000,
+      retentionRate: 5,
+      retention: 0,
+      netPayable: 0,
+      status: "draft",
+      allocation: {
+        id: "allocation-1",
+        activityId: "activity-1",
+        boqItemId: "boq-1",
+        quantity: 10,
+        amount: 1000,
+        status: "approved",
+        isActive: true,
+      },
+    };
+    const progress = {
+      id: "progress-1",
+      pctComplete: 100,
+      quantityComplete: null,
+      quantityPlanned: null,
+      quantityUnit: null,
+      progressMethod: "percent_complete",
+      status: "approved",
+      approvedAt: new Date("2026-06-01T00:00:00Z"),
+      updatedAt: new Date("2026-06-01T00:00:00Z"),
+    };
+    const updatedItem = {
+      ...existingItem,
+      qty: 0.5,
+      currentCert: 50,
+      cumulativeCert: 1050,
+      retention: 2.5,
+      netPayable: 47.5,
+      progressLinks: [{ id: "link-1", progress }],
+    };
+
+    mockPrisma.project.findFirst.mockResolvedValue({ id: "project-1" });
+    mockPrisma.ipcCertificate.findFirst.mockResolvedValue(certificate);
+    mockPrisma.ipcItem.findFirst
+      .mockResolvedValueOnce(existingItem)
+      .mockResolvedValueOnce(updatedItem);
+    mockPrisma.activityProgress.findFirst.mockResolvedValue(progress);
+    mockPrisma.changeOrderAllocationLink.findMany.mockResolvedValue([
+      {
+        allocationId: "allocation-1",
+        boqItemId: "boq-1",
+        quantity: 0.5,
+        amount: 50,
+      },
+    ]);
+    mockPrisma.ipcItem.update.mockResolvedValue(updatedItem);
+    mockPrisma.ipcItem.findMany.mockResolvedValue([updatedItem]);
+    mockPrisma.ipcCertificate.update.mockResolvedValue(certificate);
+    mockPrisma.ipcItemProgressLink.create.mockResolvedValue({
+      id: "link-1",
+      progress,
+    });
+
+    const result = await ipcService.updateIpcItem({
+      orgId: "org-1",
+      projectId: "project-1",
+      period: "IPC-1",
+      itemId: "item-1",
+      payload: { qty: 0.5, rate: 100 },
+    });
+
+    expect(result.cumulativeCert).toBe(1050);
+    expect(mockPrisma.ipcItem.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          currentCert: 50,
+          cumulativeCert: 1050,
         }),
       }),
     );

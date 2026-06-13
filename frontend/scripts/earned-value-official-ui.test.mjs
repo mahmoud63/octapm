@@ -44,5 +44,15 @@ assert.ok(
   evReport.includes('cost_record.actual_through_date'),
   'official EV UI recognizes the AC source used by the backend engine'
 )
+assert.ok(
+  evReport.includes('Official reporting readiness') &&
+    evReport.includes('PM override reason required to lock'),
+  'official EV UI shows setup-readiness reporting gate'
+)
+assert.ok(
+  evReport.includes('officialDataInputs') &&
+    evReport.includes('requiredStatus'),
+  'official EV UI renders approved-only data input requirements'
+)
 
 console.log('Official earned value UI assertions passed')

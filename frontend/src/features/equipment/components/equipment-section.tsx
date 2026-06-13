@@ -1,7 +1,8 @@
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
-import { Trash2 } from 'lucide-react'
+import { BadgeDollarSign, Clock3, Layers3, Trash2, Wrench } from 'lucide-react'
 import { toast } from 'sonner'
+import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
   Form,
@@ -17,14 +18,45 @@ import {
   useAddEquipment,
   useDeleteEquipment,
   useEquipment,
+  useEquipmentUtilization,
 } from '../hooks/use-equipment'
 
 type EquipmentSectionProps = {
   projectId: string
 }
 
+const fmtMoney = (value: number) =>
+  '$' + Number(value || 0).toLocaleString('en-US', { maximumFractionDigits: 0 })
+
+const fmtHours = (value: number) =>
+  `${Number(value || 0).toLocaleString('en-US', {
+    maximumFractionDigits: 1,
+  })} h`
+
+function UtilizationTile({
+  label,
+  value,
+  icon: Icon,
+}: {
+  label: string
+  value: string | number
+  icon: typeof Clock3
+}) {
+  return (
+    <div className='rounded-md border bg-card p-3'>
+      <div className='flex items-center justify-between gap-2'>
+        <p className='text-xs font-medium text-muted-foreground'>{label}</p>
+        <Icon className='h-4 w-4 text-muted-foreground' />
+      </div>
+      <p className='mt-2 text-xl font-semibold'>{value}</p>
+    </div>
+  )
+}
+
 export function EquipmentSection({ projectId }: EquipmentSectionProps) {
   const { data: equipment = [], isLoading } = useEquipment(projectId)
+  const { data: utilization, isLoading: utilizationLoading } =
+    useEquipmentUtilization(projectId)
   const addEquipment = useAddEquipment(projectId)
   const deleteEquipment = useDeleteEquipment(projectId)
 
@@ -62,7 +94,19 @@ export function EquipmentSection({ projectId }: EquipmentSectionProps) {
 
   return (
     <div className='space-y-4'>
-      <h2 className='text-lg font-semibold'>Equipment</h2>
+      <div className='flex flex-wrap items-center justify-between gap-2'>
+        <div>
+          <h2 className='text-lg font-semibold'>Equipment</h2>
+          <p className='text-xs text-muted-foreground'>
+            Master rates and approved activity utilization
+          </p>
+        </div>
+        {utilization?.totals.unpricedHours ? (
+          <Badge variant='outline' className='border-amber-300 text-amber-700'>
+            {fmtHours(utilization.totals.unpricedHours)} unpriced
+          </Badge>
+        ) : null}
+      </div>
 
       {isLoading ? (
         <p className='text-sm text-muted-foreground'>Loading equipment...</p>
@@ -77,7 +121,7 @@ export function EquipmentSection({ projectId }: EquipmentSectionProps) {
                 <p className='text-sm font-medium'>{item.name}</p>
                 <p className='text-xs text-muted-foreground capitalize'>
                   {item.rateType} rate
-                  {item.rate > 0 ? ` | ${item.rate}` : ''}
+                  {item.rate > 0 ? ` | ${fmtMoney(item.rate)}` : ''}
                 </p>
               </div>
 
@@ -165,6 +209,146 @@ export function EquipmentSection({ projectId }: EquipmentSectionProps) {
           </Button>
         </form>
       </Form>
+
+      <section className='space-y-3'>
+        <div className='grid gap-3 sm:grid-cols-2 xl:grid-cols-4'>
+          <UtilizationTile
+            label='Approved Hours'
+            value={fmtHours(utilization?.totals.hours ?? 0)}
+            icon={Clock3}
+          />
+          <UtilizationTile
+            label='Equipment Cost'
+            value={fmtMoney(utilization?.totals.costAmount ?? 0)}
+            icon={BadgeDollarSign}
+          />
+          <UtilizationTile
+            label='Activities'
+            value={utilization?.totals.activityCount ?? 0}
+            icon={Layers3}
+          />
+          <UtilizationTile
+            label='Equipment Used'
+            value={utilization?.totals.equipmentCount ?? 0}
+            icon={Wrench}
+          />
+        </div>
+
+        <div className='grid gap-3 xl:grid-cols-[minmax(0,1.15fr)_minmax(0,0.85fr)]'>
+          <div className='rounded-md border'>
+            <div className='flex items-center justify-between gap-2 border-b p-3'>
+              <h3 className='text-sm font-semibold'>Utilization by Activity</h3>
+              <Badge variant='outline'>
+                {utilization?.byActivity.length ?? 0}
+              </Badge>
+            </div>
+            <div className='overflow-x-auto'>
+              <table className='w-full text-sm'>
+                <thead className='bg-muted/50 text-xs text-muted-foreground'>
+                  <tr>
+                    <th className='p-2 text-left font-medium'>Activity</th>
+                    <th className='p-2 text-right font-medium'>Hours</th>
+                    <th className='p-2 text-right font-medium'>Cost</th>
+                    <th className='p-2 text-right font-medium'>Lines</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {utilizationLoading ? (
+                    <tr>
+                      <td
+                        colSpan={4}
+                        className='p-4 text-center text-sm text-muted-foreground'
+                      >
+                        Loading utilization...
+                      </td>
+                    </tr>
+                  ) : utilization?.byActivity.length ? (
+                    utilization.byActivity.map((row) => (
+                      <tr key={row.activityId} className='border-t'>
+                        <td className='p-2'>
+                          <p className='text-xs font-medium'>
+                            {row.wbsCode ? `${row.wbsCode} - ` : ''}
+                            {row.activityName}
+                          </p>
+                          <p className='text-xs text-muted-foreground'>
+                            {row.category || 'General'}
+                          </p>
+                        </td>
+                        <td className='p-2 text-right text-xs'>
+                          {fmtHours(row.hours)}
+                        </td>
+                        <td className='p-2 text-right text-xs'>
+                          {fmtMoney(row.costAmount)}
+                        </td>
+                        <td className='p-2 text-right text-xs'>
+                          {row.usageCount}
+                        </td>
+                      </tr>
+                    ))
+                  ) : (
+                    <tr>
+                      <td
+                        colSpan={4}
+                        className='p-4 text-center text-sm text-muted-foreground'
+                      >
+                        No approved equipment usage yet.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div className='rounded-md border'>
+            <div className='flex items-center justify-between gap-2 border-b p-3'>
+              <h3 className='text-sm font-semibold'>Recent Approved Usage</h3>
+              <Badge variant='outline'>
+                {utilization?.recentUsage.length ?? 0}
+              </Badge>
+            </div>
+            <div className='divide-y'>
+              {utilizationLoading ? (
+                <p className='p-4 text-sm text-muted-foreground'>
+                  Loading usage...
+                </p>
+              ) : utilization?.recentUsage.length ? (
+                utilization.recentUsage.slice(0, 8).map((usage) => (
+                  <div
+                    key={usage.id}
+                    className='flex items-start justify-between gap-3 p-3'
+                  >
+                    <div className='min-w-0'>
+                      <p className='truncate text-sm font-medium'>
+                        {usage.equipmentName}
+                      </p>
+                      <p className='text-xs text-muted-foreground'>
+                        {usage.activity?.wbsCode
+                          ? `${usage.activity.wbsCode} - `
+                          : ''}
+                        {usage.activity?.name || 'Activity'}
+                      </p>
+                      <p className='text-xs text-muted-foreground'>
+                        Daily report {usage.dailyReportId?.slice(0, 8) || '-'}
+                      </p>
+                    </div>
+                    <div className='text-right text-xs'>
+                      <p className='font-medium'>{fmtHours(usage.hours)}</p>
+                      <p className='text-muted-foreground'>
+                        {fmtMoney(usage.costAmount)}
+                      </p>
+                    </div>
+                  </div>
+                ))
+              ) : (
+                <p className='p-4 text-sm text-muted-foreground'>
+                  Approved daily reports will appear here.
+                </p>
+              )}
+            </div>
+          </div>
+        </div>
+      </section>
     </div>
   )
 }

@@ -5,11 +5,13 @@ Scope: BOQ uploads, schedule generation uploads, P6/MSP/progress imports, workfl
 ## Automated Checks
 
 1. Run focused backend regression:
-   `node ../node_modules/jest/bin/jest.js --runTestsByPath src/services/__tests__/file-storage.service.test.js src/services/__tests__/boq.service.test.js src/routes/__tests__/boq-upload-storage.test.js --runInBand`
+   `node ../node_modules/jest/bin/jest.js --runTestsByPath src/services/__tests__/file-storage.service.test.js src/services/__tests__/document-control.service.test.js src/routes/__tests__/project-object-authorization.test.js src/services/__tests__/boq.service.test.js src/routes/__tests__/boq-upload-storage.test.js --runInBand`
 2. Run Prisma validation:
    `npx prisma validate --schema prisma/schema.prisma`
 3. Run OpenAPI validation:
    `node scripts/validate-openapi.js`
+4. Run repository storage hygiene:
+   `npm run security:test:private-storage && npm run security:validate:private-storage`
 
 Expected:
 
@@ -18,6 +20,8 @@ Expected:
 - EICAR test strings return `FILE_VIRUS_DETECTED` and create no clean document row.
 - Claimed Excel/PDF/image/XML types with mismatched magic bytes return `FILE_TYPE_MISMATCH`.
 - BOQ revisions store `sourceDocumentId` and link the document to the created revision.
+- Cross-project and cross-org requests for a valid private document key return not-found/denied responses and do not stream or redirect the file.
+- Files under `backend/storage/private-documents/` or `storage/private-documents/` are ignored and are blocked by Quality Gates if tracked.
 
 ## Manual QA
 
@@ -27,3 +31,4 @@ Expected:
 4. Upload P6 XER, P6 XML, MSP XML, and progress import files. Confirm imports still stage revisions or progress submissions and create private document metadata.
 5. Upload site-reporting photos from a site engineer account and workflow evidence from an allowed role. Confirm downloads work through authenticated API URLs and S3-backed environments redirect to short-lived presigned URLs.
 6. Check S3 bucket settings in production: public access blocked, versioning enabled, TLS-only bucket policy present, server-side encryption enabled, and lifecycle retention matches release policy.
+7. Run `git ls-files backend/storage/private-documents storage/private-documents` and confirm it returns no files before release sign-off.

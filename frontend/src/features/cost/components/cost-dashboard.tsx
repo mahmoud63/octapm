@@ -18,7 +18,6 @@ import {
 import { useCanPerform } from '@/lib/permissions'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { AuditHistoryPanel } from '@/features/audit/components/audit-history-panel'
 import {
   Select,
   SelectContent,
@@ -27,6 +26,9 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { AuditHistoryPanel } from '@/features/audit/components/audit-history-panel'
+import { useEquipmentUtilization } from '@/features/equipment/hooks/use-equipment'
+import type { ProjectSetupTarget } from '@/features/projects/data/schema'
 import {
   type CostRecord,
   type CostRecordListQuery,
@@ -82,16 +84,19 @@ export function CostDashboard({
   activeTab,
   onTabChange,
   showTabList = true,
+  initialTarget,
 }: {
   projectId: string
   activeTab?: string
   onTabChange?: (value: string) => void
   showTabList?: boolean
+  initialTarget?: ProjectSetupTarget
 }) {
   const canUpdateCost = useCanPerform('cost', 'update', 'activity_cost.update')
   const canCreateBurnRate = useCanPerform('cost', 'create', 'burn_rate.create')
   const { data: summary, isLoading } = useCostSummary(projectId)
   const { data: burnRate } = useBurnRate(projectId)
+  const { data: equipmentUtilization } = useEquipmentUtilization(projectId)
   const updateCostRecord = useUpdateCostRecord(projectId)
   const addBurnRateEntry = useAddBurnRateEntry(projectId)
 
@@ -101,10 +106,16 @@ export function CostDashboard({
   const [burnRateAmount, setBurnRateAmount] = useState('')
   const [costSearch, setCostSearch] = useState('')
   const [costCategory, setCostCategory] = useState('all')
-  const [costSortBy, setCostSortBy] =
-    useState<CostRecordListQuery['sortBy']>('activity')
-  const [costSortDir, setCostSortDir] =
-    useState<CostRecordListQuery['sortDir']>('asc')
+  const [costSortBy, setCostSortBy] = useState<CostRecordListQuery['sortBy']>(
+    initialTarget?.source === 'cost_record.actual_through_date'
+      ? 'actual'
+      : 'activity'
+  )
+  const [costSortDir, setCostSortDir] = useState<
+    CostRecordListQuery['sortDir']
+  >(
+    initialTarget?.source === 'cost_record.actual_through_date' ? 'desc' : 'asc'
+  )
   const [costCursor, setCostCursor] = useState<string | null>(null)
 
   const costQuery = useMemo<CostRecordListQuery>(
@@ -159,6 +170,7 @@ export function CostDashboard({
             <TabsTrigger value='overview'>Overview</TabsTrigger>
             <TabsTrigger value='activity'>By Activity</TabsTrigger>
             <TabsTrigger value='phase'>By Phase</TabsTrigger>
+            <TabsTrigger value='equipment'>Equipment</TabsTrigger>
             <TabsTrigger value='burn'>Burn Rate</TabsTrigger>
           </TabsList>
         )}
@@ -289,9 +301,7 @@ export function CostDashboard({
                   <th className='p-2 text-right font-medium'>Budget</th>
                   <th className='p-2 text-right font-medium'>Committed</th>
                   <th className='p-2 text-right font-medium'>Actual</th>
-                  <th className='p-2 text-right font-medium'>
-                    Actual Through
-                  </th>
+                  <th className='p-2 text-right font-medium'>Actual Through</th>
                   <th className='p-2 text-right font-medium'>Forecast</th>
                   <th className='p-2 text-right font-medium'>Variance</th>
                   {canUpdateCost && (
@@ -364,8 +374,7 @@ export function CostDashboard({
                                   onChange={(e) =>
                                     setDraft((prev) => ({
                                       ...prev,
-                                      actualThroughDate:
-                                        e.target.value || null,
+                                      actualThroughDate: e.target.value || null,
                                     }))
                                   }
                                 />
@@ -414,8 +423,7 @@ export function CostDashboard({
                                     const moneyPayload = Object.fromEntries(
                                       editableFields
                                         .filter(
-                                          (field) =>
-                                            draft[field] !== undefined
+                                          (field) => draft[field] !== undefined
                                         )
                                         .map((field) => [
                                           field,
@@ -539,6 +547,101 @@ export function CostDashboard({
               </tbody>
             </table>
           </div>
+        </TabsContent>
+
+        <TabsContent value='equipment' className='space-y-3'>
+          <div className='grid grid-cols-1 gap-3 sm:grid-cols-4'>
+            <div className='rounded-md border bg-card p-3'>
+              <p className='text-xs text-muted-foreground'>Approved Hours</p>
+              <p className='mt-1 text-lg font-bold'>
+                {Number(
+                  equipmentUtilization?.totals.hours || 0
+                ).toLocaleString(undefined, { maximumFractionDigits: 1 })}
+              </p>
+            </div>
+            <div className='rounded-md border bg-card p-3'>
+              <p className='text-xs text-muted-foreground'>Posted Cost</p>
+              <p className='mt-1 text-lg font-bold'>
+                {fmtUSD(equipmentUtilization?.totals.costAmount || 0)}
+              </p>
+            </div>
+            <div className='rounded-md border bg-card p-3'>
+              <p className='text-xs text-muted-foreground'>Activities</p>
+              <p className='mt-1 text-lg font-bold'>
+                {equipmentUtilization?.totals.activityCount || 0}
+              </p>
+            </div>
+            <div className='rounded-md border bg-card p-3'>
+              <p className='text-xs text-muted-foreground'>Unpriced Hours</p>
+              <p className='mt-1 text-lg font-bold'>
+                {Number(
+                  equipmentUtilization?.totals.unpricedHours || 0
+                ).toLocaleString(undefined, { maximumFractionDigits: 1 })}
+              </p>
+            </div>
+          </div>
+
+          <div className='overflow-x-auto rounded-md border'>
+            <table className='w-full text-sm'>
+              <thead className='border-b bg-muted/50'>
+                <tr>
+                  <th className='p-2 text-left font-medium'>Activity</th>
+                  <th className='p-2 text-left font-medium'>Equipment</th>
+                  <th className='p-2 text-right font-medium'>Hours</th>
+                  <th className='p-2 text-right font-medium'>Cost</th>
+                  <th className='p-2 text-right font-medium'>Daily Reports</th>
+                </tr>
+              </thead>
+              <tbody>
+                {equipmentUtilization?.byActivity.length ? (
+                  equipmentUtilization.byActivity.map((row) => (
+                    <tr key={row.activityId} className='border-b'>
+                      <td className='p-2 text-xs'>
+                        {row.wbsCode ? `${row.wbsCode} - ` : ''}
+                        {row.activityName}
+                      </td>
+                      <td className='p-2 text-xs text-muted-foreground'>
+                        {Array.from(
+                          new Set(
+                            row.equipment.map((item) => item.equipmentName)
+                          )
+                        )
+                          .slice(0, 3)
+                          .join(', ') || '-'}
+                      </td>
+                      <td className='p-2 text-right text-xs'>
+                        {Number(row.hours).toLocaleString(undefined, {
+                          maximumFractionDigits: 1,
+                        })}
+                      </td>
+                      <td className='p-2 text-right text-xs'>
+                        {fmtUSD(row.costAmount)}
+                      </td>
+                      <td className='p-2 text-right text-xs'>
+                        {row.usageCount}
+                      </td>
+                    </tr>
+                  ))
+                ) : (
+                  <tr>
+                    <td
+                      className='p-4 text-center text-sm text-muted-foreground'
+                      colSpan={5}
+                    >
+                      No approved equipment usage has posted to cost yet.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+
+          <AuditHistoryPanel
+            projectId={projectId}
+            entityType='activity_equipment_usage'
+            title='Equipment Usage History'
+            limit={8}
+          />
         </TabsContent>
 
         <TabsContent value='burn' className='space-y-3'>

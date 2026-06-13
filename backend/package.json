@@ -3,6 +3,10 @@
   "version": "1.0.0",
   "description": "PMcopilots Express.js REST API",
   "main": "src/index.js",
+  "engines": {
+    "node": ">=24.14.0 <25",
+    "npm": ">=11.9.0 <12"
+  },
   "scripts": {
     "dev": "nodemon src/index.js",
     "db:dev": "node scripts/dev-db.mjs",

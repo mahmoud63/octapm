@@ -44,6 +44,58 @@ export interface LoginPayload {
   password: string
 }
 
+export interface ForgotPasswordPayload {
+  email: string
+}
+
+export interface ForgotPasswordResponse {
+  sent: boolean
+}
+
+export interface ResetPasswordPayload {
+  token: string
+  password: string
+}
+
+export interface ResetPasswordResponse {
+  reset: boolean
+}
+
+export interface InvitationPreview {
+  email: string
+  role: string
+  org: {
+    id: string
+    name: string
+  }
+  project: {
+    id: string
+    name: string
+  } | null
+  company?: {
+    id: string
+    name: string
+  } | null
+  projectParty?: {
+    id: string
+    role: string
+    company: {
+      id: string
+      name: string
+    }
+  } | null
+  expiresAt: string
+  existingUser: boolean
+  requiresPassword: boolean
+}
+
+export interface AcceptInvitationPayload {
+  token: string
+  name: string
+  password?: string
+  phone?: string
+}
+
 export interface ApiSuccess<T> {
   success: true
   data: T

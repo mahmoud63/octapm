@@ -1,65 +1,133 @@
-const { prisma } = require('../config/db');
-const { HttpError } = require('../utils/http-error');
-const { toMoneyNumber } = require('../utils/money');
+const { prisma } = require("../config/db");
+const { normalizeRoleId } = require("../config/permissions");
+const { HttpError } = require("../utils/http-error");
+const { toMoneyNumber } = require("../utils/money");
 const {
+  canAccessAllProjects,
   getProjectAccessWhere,
+  projectPartyAccessSelect,
+  serializePartyAccess,
   throwProjectNotFoundOrAccessDenied,
-} = require('./project-authorization.service');
+} = require("./project-authorization.service");
+const companyPartyService = require("./company-party.service");
+const auditService = require("./audit.service");
+const {
+  ARCHIVED_STATUS,
+  applyArchiveVisibility,
+  assertNotArchived,
+  archiveResult,
+} = require("./archive-policy.service");
 
 const DEFAULT_RETENTION_RATE = 5;
 const DEFAULT_REPORTING_CUTOFF_DAY = 25;
 
 const cleanOptionalString = (value) => {
   if (value === null) return null;
-  const trimmed = String(value || '').trim();
+  const trimmed = String(value || "").trim();
   return trimmed || null;
 };
 
 const parseOptionalDate = (value) => {
-  if (value === null || value === '') return null;
+  if (value === null || value === "") return null;
   return value !== undefined ? new Date(value) : undefined;
 };
 
 const parseOptionalNumber = (value) => {
-  if (value === null || value === '') return null;
+  if (value === null || value === "") return null;
   return value !== undefined ? Number(value) : undefined;
 };
 
 const parseOptionalMoney = (value) => {
-  if (value === null || value === '') return null;
+  if (value === null || value === "") return null;
   return value !== undefined ? toMoneyNumber(value) : undefined;
 };
 
-const sanitizeProject = (project) => ({
-  id: project.id,
-  orgId: project.orgId,
+const getProjectAssignmentRole = (project) =>
+  normalizeRoleId(project.assignments?.[0]?.role) || null;
+
+const getProjectPartyAccess = (project) => serializePartyAccess(project.parties);
+
+const buildProjectAccess = ({ project, role }) => {
+  const orgRole = normalizeRoleId(role) || null;
+  const assignmentRole = getProjectAssignmentRole(project);
+  const partyAccess = getProjectPartyAccess(project);
+  const effectiveRole = canAccessAllProjects(orgRole)
+    ? orgRole
+    : assignmentRole || (partyAccess.length ? "external_party" : orgRole);
+
+  return {
+    role: effectiveRole,
+    effectiveRole,
+    assignmentRole,
+    orgRole,
+    scope: assignmentRole
+      ? "assignment"
+      : partyAccess.length
+        ? "party"
+        : canAccessAllProjects(orgRole)
+          ? "org"
+          : "assignment",
+    partyRole: partyAccess[0]?.role || null,
+    partyAccess,
+  };
+};
+
+const projectAuditSummary = (project) => ({
   name: project.name,
-  type: project.type,
-  location: project.location,
-  clientName: project.clientName ?? null,
-  consultantName: project.consultantName ?? null,
-  contractorName: project.contractorName ?? null,
-  contractType: project.contractType ?? null,
-  contractNumber: project.contractNumber ?? null,
-  startDate: project.startDate,
-  endDate: project.endDate,
-  completionDate: project.completionDate ?? null,
-  baselineDate: project.baselineDate ?? null,
-  revisedCompletionDate: project.revisedCompletionDate ?? null,
-  duration: project.duration,
-  durationUnit: project.durationUnit,
-  contractValue: project.contractValue,
-  defaultRetentionRate: project.defaultRetentionRate ?? DEFAULT_RETENTION_RATE,
-  ldRatePerDay: project.ldRatePerDay,
-  weatherAllowanceDays: project.weatherAllowanceDays,
-  projectCalendar: project.projectCalendar ?? null,
-  reportingCutoffDay:
-    project.reportingCutoffDay ?? DEFAULT_REPORTING_CUTOFF_DAY,
-  currency: project.currency,
+  type: project.type || null,
+  clientName: project.clientName || null,
+  contractNumber: project.contractNumber || null,
   status: project.status,
-  createdAt: project.createdAt,
-  updatedAt: project.updatedAt,
+  archivedAt: project.archivedAt || null,
+  archivedBy: project.archivedBy || null,
 });
+
+const sanitizeProject = (project, options = {}) => {
+  const projectAccess = buildProjectAccess({
+    project,
+    role: options.role,
+  });
+
+  return {
+    id: project.id,
+    orgId: project.orgId,
+    name: project.name,
+    type: project.type,
+    location: project.location,
+    clientName: project.clientName ?? null,
+    consultantName: project.consultantName ?? null,
+    contractorName: project.contractorName ?? null,
+    contractType: project.contractType ?? null,
+    contractNumber: project.contractNumber ?? null,
+    startDate: project.startDate,
+    endDate: project.endDate,
+    completionDate: project.completionDate ?? null,
+    baselineDate: project.baselineDate ?? null,
+    dataDate: project.dataDate ?? null,
+    revisedCompletionDate: project.revisedCompletionDate ?? null,
+    duration: project.duration,
+    durationUnit: project.durationUnit,
+    contractValue: project.contractValue,
+    defaultRetentionRate:
+      project.defaultRetentionRate ?? DEFAULT_RETENTION_RATE,
+    ldRatePerDay: project.ldRatePerDay,
+    weatherAllowanceDays: project.weatherAllowanceDays,
+    projectCalendar: project.projectCalendar ?? null,
+    reportingCutoffDay:
+      project.reportingCutoffDay ?? DEFAULT_REPORTING_CUTOFF_DAY,
+    currency: project.currency,
+    status: project.status,
+    archivedAt: project.archivedAt ?? null,
+    archivedBy: project.archivedBy ?? null,
+    parties: (project.parties || [])
+      .filter((party) => party.createdAt && party.company)
+      .map((party) => companyPartyService.sanitizeProjectParty(party)),
+    projectAccess,
+    effectiveRole: projectAccess.effectiveRole,
+    createdAt: project.createdAt,
+    updatedAt: project.updatedAt,
+  };
+};
 
 const buildProjectData = (payload) => {
   const data = {};
@@ -86,6 +154,8 @@ const buildProjectData = (payload) => {
     data.completionDate = parseOptionalDate(payload.completionDate);
   if (payload.baselineDate !== undefined)
     data.baselineDate = parseOptionalDate(payload.baselineDate);
+  if (payload.dataDate !== undefined)
+    data.dataDate = parseOptionalDate(payload.dataDate);
   if (payload.revisedCompletionDate !== undefined)
     data.revisedCompletionDate = parseOptionalDate(
       payload.revisedCompletionDate,
@@ -114,6 +184,37 @@ const buildProjectData = (payload) => {
   return data;
 };
 
+const extractPartySyncPayload = (payload = {}) => {
+  if (payload.parties !== undefined) return payload.parties;
+
+  const entries = [];
+  if (payload.clientName !== undefined) {
+    entries.push({ role: "owner", companyName: payload.clientName });
+  }
+  if (payload.consultantName !== undefined) {
+    entries.push({ role: "consultant", companyName: payload.consultantName });
+  }
+  if (payload.contractorName !== undefined) {
+    entries.push({ role: "contractor", companyName: payload.contractorName });
+  }
+
+  return entries.length ? entries : null;
+};
+
+const includeUserProjectAccess = (userId) =>
+  userId
+    ? {
+        include: {
+          assignments: {
+            where: { userId },
+            select: { role: true },
+            take: 1,
+          },
+          parties: projectPartyAccessSelect(userId),
+        },
+      }
+    : {};
+
 const validateProjectDates = ({
   startDate,
   endDate,
@@ -123,37 +224,45 @@ const validateProjectDates = ({
   if (startDate && endDate && endDate <= startDate) {
     throw new HttpError(
       400,
-      'INVALID_DATES',
-      'endDate must be after startDate',
+      "INVALID_DATES",
+      "endDate must be after startDate",
     );
   }
 
   if (startDate && completionDate && completionDate < startDate) {
     throw new HttpError(
       400,
-      'INVALID_DATES',
-      'completionDate must be on or after startDate',
+      "INVALID_DATES",
+      "completionDate must be on or after startDate",
     );
   }
 
   if (startDate && revisedCompletionDate && revisedCompletionDate < startDate) {
     throw new HttpError(
       400,
-      'INVALID_DATES',
-      'revisedCompletionDate must be on or after startDate',
+      "INVALID_DATES",
+      "revisedCompletionDate must be on or after startDate",
     );
   }
 };
 
 const createProject = async ({ orgId, userId, role, payload }) => {
   const data = buildProjectData(payload);
+  const partySyncPayload = extractPartySyncPayload(payload);
+  if (data.status === ARCHIVED_STATUS) {
+    throw new HttpError(
+      400,
+      "PROJECT_ARCHIVE_ACTION_REQUIRED",
+      "Projects cannot be created as archived",
+    );
+  }
   data.orgId = orgId;
 
   if (userId) {
     data.assignments = {
       create: {
         userId,
-        role: role || 'project_member',
+        role: role || "project_member",
       },
     };
   }
@@ -165,8 +274,24 @@ const createProject = async ({ orgId, userId, role, payload }) => {
     revisedCompletionDate: data.revisedCompletionDate,
   });
 
-  const project = await prisma.project.create({ data });
-  return sanitizeProject(project);
+  const created = await prisma.$transaction(async (tx) => {
+    const project = await tx.project.create({ data });
+    if (partySyncPayload) {
+      await companyPartyService.syncProjectParties({
+        tx,
+        orgId,
+        projectId: project.id,
+        parties: partySyncPayload,
+      });
+    }
+    return project;
+  });
+
+  const project = await prisma.project.findFirst({
+    where: { id: created.id, orgId },
+    ...includeUserProjectAccess(userId),
+  });
+  return sanitizeProject(project, { role });
 };
 
 const findAccessibleProject = async ({ orgId, projectId, userId, role }) => {
@@ -176,6 +301,7 @@ const findAccessibleProject = async ({ orgId, projectId, userId, role }) => {
       orgId,
       ...getProjectAccessWhere({ userId, role }),
     },
+    ...includeUserProjectAccess(userId),
   });
 
   if (!project) {
@@ -196,11 +322,12 @@ const listProjects = async ({ orgId, userId, role, query }) => {
   if (query.status) {
     where.status = query.status;
   }
+  applyArchiveVisibility(where, query);
 
   if (query.search) {
     where.name = {
       contains: query.search,
-      mode: 'insensitive',
+      mode: "insensitive",
     };
   }
 
@@ -208,8 +335,9 @@ const listProjects = async ({ orgId, userId, role, query }) => {
     where,
     take: take + 1,
     orderBy: {
-      id: 'asc',
+      id: "asc",
     },
+    ...includeUserProjectAccess(userId),
     ...(query.cursor
       ? {
           cursor: { id: query.cursor },
@@ -225,7 +353,7 @@ const listProjects = async ({ orgId, userId, role, query }) => {
   }
 
   return {
-    items: projects.map(sanitizeProject),
+    items: projects.map((project) => sanitizeProject(project, { role })),
     pagination: {
       limit: take,
       nextCursor,
@@ -241,7 +369,7 @@ const getProjectById = async ({ orgId, projectId, userId, role }) => {
     role,
   });
 
-  return sanitizeProject(project);
+  return sanitizeProject(project, { role });
 };
 
 const updateProject = async ({ orgId, projectId, userId, role, payload }) => {
@@ -251,13 +379,26 @@ const updateProject = async ({ orgId, projectId, userId, role, payload }) => {
     userId,
     role,
   });
+  assertNotArchived(existingProject, {
+    code: "PROJECT_ARCHIVED",
+    message:
+      "Archived projects cannot be updated through normal project edit actions",
+  });
 
   const data = buildProjectData(payload);
-  if (Object.keys(data).length === 0) {
+  const partySyncPayload = extractPartySyncPayload(payload);
+  if (data.status === ARCHIVED_STATUS) {
     throw new HttpError(
       400,
-      'NO_UPDATES',
-      'No valid fields provided for update',
+      "PROJECT_ARCHIVE_ACTION_REQUIRED",
+      "Use the archive/delete endpoint to archive a project",
+    );
+  }
+  if (Object.keys(data).length === 0 && !partySyncPayload) {
+    throw new HttpError(
+      400,
+      "NO_UPDATES",
+      "No valid fields provided for update",
     );
   }
 
@@ -280,39 +421,85 @@ const updateProject = async ({ orgId, projectId, userId, role, payload }) => {
     revisedCompletionDate: nextRevisedCompletionDate,
   });
 
-  const updatedProject = await prisma.project.update({
-    where: { id: projectId },
-    data,
+  await prisma.$transaction(async (tx) => {
+    if (Object.keys(data).length > 0) {
+      await tx.project.update({
+        where: { id: projectId },
+        data,
+      });
+    }
+
+    if (partySyncPayload) {
+      await companyPartyService.syncProjectParties({
+        tx,
+        orgId,
+        projectId,
+        parties: partySyncPayload,
+      });
+    }
   });
 
-  return sanitizeProject(updatedProject);
+  const updatedProject = await prisma.project.findFirst({
+    where: { id: projectId, orgId },
+    ...includeUserProjectAccess(userId),
+  });
+
+  return sanitizeProject(updatedProject, { role });
 };
 
 const deleteProject = async ({ orgId, projectId, userId, role }) => {
-  await findAccessibleProject({
+  const existingProject = await findAccessibleProject({
     orgId,
     projectId,
     userId,
     role,
   });
 
-  try {
-    await prisma.project.delete({
+  if (
+    existingProject.status === ARCHIVED_STATUS ||
+    existingProject.archivedAt
+  ) {
+    return archiveResult({
+      id: projectId,
+      status: ARCHIVED_STATUS,
+      archivedAt: existingProject.archivedAt,
+    });
+  }
+
+  const now = new Date();
+  await prisma.$transaction(async (tx) => {
+    const archived = await tx.project.update({
       where: { id: projectId },
+      data: {
+        status: ARCHIVED_STATUS,
+        archivedAt: now,
+        archivedBy: userId || null,
+      },
     });
 
-    return { deleted: true };
-  } catch (error) {
-    if (error?.code === 'P2003' || error?.code === 'P2014') {
-      throw new HttpError(
-        409,
-        'PROJECT_HAS_DEPENDENCIES',
-        'Project cannot be deleted while linked records still exist',
-      );
-    }
+    await auditService.recordEvent({
+      tx,
+      orgId,
+      projectId,
+      entityType: auditService.ENTITY_TYPES.PROJECT,
+      entityId: projectId,
+      action: auditService.ACTIONS.ARCHIVED,
+      actorId: userId,
+      actorRole: role,
+      oldStatus: existingProject.status,
+      newStatus: archived.status,
+      oldSummary: projectAuditSummary(existingProject),
+      newSummary: projectAuditSummary(archived),
+      summary: {
+        transition: "project.archive",
+        name: archived.name,
+        status: archived.status,
+      },
+      metadata: { source: "project.archive" },
+    });
+  });
 
-    throw error;
-  }
+  return archiveResult({ id: projectId, archivedAt: now });
 };
 
 module.exports = {

@@ -1,12 +1,16 @@
+import { useEffect } from 'react'
 import { z } from 'zod'
 import { useForm } from 'react-hook-form'
 import { ChevronDownIcon } from '@radix-ui/react-icons'
+import { Monitor } from 'lucide-react'
 import { zodResolver } from '@hookform/resolvers/zod'
+import { toast } from 'sonner'
 import { fonts } from '@/config/fonts'
-import { showSubmittedData } from '@/lib/show-submitted-data'
+import { getServerErrorMessage } from '@/lib/handle-server-error'
 import { cn } from '@/lib/utils'
 import { useFont } from '@/context/font-provider'
 import { useTheme } from '@/context/theme-provider'
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button, buttonVariants } from '@/components/ui/button'
 import {
   Form,
@@ -18,34 +22,102 @@ import {
   FormMessage,
 } from '@/components/ui/form'
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
+import { Skeleton } from '@/components/ui/skeleton'
+import {
+  type UserFont,
+  type UserTheme,
+  useUpdateAppearanceSettings,
+  useUserSettings,
+} from '../hooks/use-user-settings'
 
 const appearanceFormSchema = z.object({
-  theme: z.enum(['light', 'dark']),
+  theme: z.enum(['light', 'dark', 'system']),
   font: z.enum(fonts),
 })
 
 type AppearanceFormValues = z.infer<typeof appearanceFormSchema>
 
+const themeOptions: Array<{
+  value: UserTheme
+  label: string
+  description: string
+}> = [
+  {
+    value: 'light',
+    label: 'Light',
+    description: 'Bright workspace surfaces.',
+  },
+  {
+    value: 'dark',
+    label: 'Dark',
+    description: 'Low-glare dashboard surfaces.',
+  },
+  {
+    value: 'system',
+    label: 'System',
+    description: 'Follow this device setting.',
+  },
+]
+
+const defaultValues: AppearanceFormValues = {
+  theme: 'dark',
+  font: fonts[0],
+}
+
 export function AppearanceForm() {
   const { font, setFont } = useFont()
   const { theme, setTheme } = useTheme()
-
-  // This can come from your database or API.
-  const defaultValues: Partial<AppearanceFormValues> = {
-    theme: theme as 'light' | 'dark',
-    font,
-  }
-
+  const settingsQuery = useUserSettings()
+  const updateAppearance = useUpdateAppearanceSettings()
   const form = useForm<AppearanceFormValues>({
     resolver: zodResolver(appearanceFormSchema),
     defaultValues,
   })
 
-  function onSubmit(data: AppearanceFormValues) {
-    if (data.font != font) setFont(data.font)
-    if (data.theme != theme) setTheme(data.theme)
+  useEffect(() => {
+    if (!settingsQuery.data) return
 
-    showSubmittedData(data)
+    form.reset(settingsQuery.data.appearance)
+  }, [form, settingsQuery.data])
+
+  async function onSubmit(data: AppearanceFormValues) {
+    try {
+      await updateAppearance.mutateAsync({
+        theme: data.theme as UserTheme,
+        font: data.font as UserFont,
+      })
+      if (data.font !== font) setFont(data.font as UserFont)
+      if (data.theme !== theme) setTheme(data.theme as UserTheme)
+      toast.success('Appearance preferences updated')
+    } catch (error) {
+      toast.error(
+        getServerErrorMessage(error, 'Unable to update appearance.')
+      )
+    }
+  }
+
+  if (settingsQuery.isLoading) {
+    return (
+      <div className='space-y-4'>
+        <Skeleton className='h-20 w-full' />
+        <Skeleton className='h-28 w-full' />
+        <Skeleton className='h-10 w-40' />
+      </div>
+    )
+  }
+
+  if (settingsQuery.isError) {
+    return (
+      <Alert variant='destructive'>
+        <AlertTitle>Appearance unavailable</AlertTitle>
+        <AlertDescription>
+          {getServerErrorMessage(
+            settingsQuery.error,
+            'Unable to load appearance settings.'
+          )}
+        </AlertDescription>
+      </Alert>
+    )
   }
 
   return (
@@ -77,7 +149,7 @@ export function AppearanceForm() {
                 <ChevronDownIcon className='absolute end-3 top-2.5 h-4 w-4 opacity-50' />
               </div>
               <FormDescription className='font-manrope'>
-                Set the font you want to use in the dashboard.
+                Saved as your workspace font preference.
               </FormDescription>
               <FormMessage />
             </FormItem>
@@ -90,72 +162,43 @@ export function AppearanceForm() {
             <FormItem>
               <FormLabel>Theme</FormLabel>
               <FormDescription>
-                Select the theme for the dashboard.
+                Saved as your workspace theme preference.
               </FormDescription>
               <FormMessage />
               <RadioGroup
                 onValueChange={field.onChange}
-                defaultValue={field.value}
-                className='grid max-w-md grid-cols-2 gap-8 pt-2'
+                value={field.value}
+                className='grid max-w-2xl gap-3 pt-2 sm:grid-cols-3'
               >
-                <FormItem>
-                  <FormLabel className='[&:has([data-state=checked])>div]:border-primary'>
-                    <FormControl>
-                      <RadioGroupItem value='light' className='sr-only' />
-                    </FormControl>
-                    <div className='items-center rounded-md border-2 border-muted p-1 hover:border-accent'>
-                      <div className='space-y-2 rounded-sm bg-[#ecedef] p-2'>
-                        <div className='space-y-2 rounded-md bg-white p-2 shadow-xs'>
-                          <div className='h-2 w-[80px] rounded-lg bg-[#ecedef]' />
-                          <div className='h-2 w-[100px] rounded-lg bg-[#ecedef]' />
+                {themeOptions.map((option) => (
+                  <FormItem key={option.value}>
+                    <FormLabel className='[&:has([data-state=checked])>div]:border-primary'>
+                      <FormControl>
+                        <RadioGroupItem
+                          value={option.value}
+                          className='sr-only'
+                        />
+                      </FormControl>
+                      <div className='min-h-28 rounded-md border-2 border-muted p-3 hover:border-accent'>
+                        <div className='mb-3 flex items-center justify-between'>
+                          <span className='font-medium'>{option.label}</span>
+                          <Monitor className='size-4 text-muted-foreground' />
                         </div>
-                        <div className='flex items-center space-x-2 rounded-md bg-white p-2 shadow-xs'>
-                          <div className='h-4 w-4 rounded-full bg-[#ecedef]' />
-                          <div className='h-2 w-[100px] rounded-lg bg-[#ecedef]' />
-                        </div>
-                        <div className='flex items-center space-x-2 rounded-md bg-white p-2 shadow-xs'>
-                          <div className='h-4 w-4 rounded-full bg-[#ecedef]' />
-                          <div className='h-2 w-[100px] rounded-lg bg-[#ecedef]' />
-                        </div>
+                        <p className='text-sm font-normal text-muted-foreground'>
+                          {option.description}
+                        </p>
                       </div>
-                    </div>
-                    <span className='block w-full p-2 text-center font-normal'>
-                      Light
-                    </span>
-                  </FormLabel>
-                </FormItem>
-                <FormItem>
-                  <FormLabel className='[&:has([data-state=checked])>div]:border-primary'>
-                    <FormControl>
-                      <RadioGroupItem value='dark' className='sr-only' />
-                    </FormControl>
-                    <div className='items-center rounded-md border-2 border-muted bg-popover p-1 hover:bg-accent hover:text-accent-foreground'>
-                      <div className='space-y-2 rounded-sm bg-slate-950 p-2'>
-                        <div className='space-y-2 rounded-md bg-slate-800 p-2 shadow-xs'>
-                          <div className='h-2 w-[80px] rounded-lg bg-slate-400' />
-                          <div className='h-2 w-[100px] rounded-lg bg-slate-400' />
-                        </div>
-                        <div className='flex items-center space-x-2 rounded-md bg-slate-800 p-2 shadow-xs'>
-                          <div className='h-4 w-4 rounded-full bg-slate-400' />
-                          <div className='h-2 w-[100px] rounded-lg bg-slate-400' />
-                        </div>
-                        <div className='flex items-center space-x-2 rounded-md bg-slate-800 p-2 shadow-xs'>
-                          <div className='h-4 w-4 rounded-full bg-slate-400' />
-                          <div className='h-2 w-[100px] rounded-lg bg-slate-400' />
-                        </div>
-                      </div>
-                    </div>
-                    <span className='block w-full p-2 text-center font-normal'>
-                      Dark
-                    </span>
-                  </FormLabel>
-                </FormItem>
+                    </FormLabel>
+                  </FormItem>
+                ))}
               </RadioGroup>
             </FormItem>
           )}
         />
 
-        <Button type='submit'>Update preferences</Button>
+        <Button type='submit' disabled={updateAppearance.isPending}>
+          {updateAppearance.isPending ? 'Updating...' : 'Update preferences'}
+        </Button>
       </form>
     </Form>
   )

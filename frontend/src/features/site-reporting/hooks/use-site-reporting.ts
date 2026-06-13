@@ -78,6 +78,19 @@ export type DailyReport = {
   reviewedBy: string | null
   reviewedAt: string | null
   rejectionReason: string | null
+  equipmentUsagePostings?: Array<{
+    id: string
+    equipmentId: string | null
+    equipmentName: string
+    hours: number
+    rateType: 'hourly' | 'daily' | null
+    rate: number
+    costAmount: number
+    usageDate: string
+    status: string
+    dailyReportId: string | null
+    sourceLineIndex: number | null
+  }>
   activity?: {
     id: string
     name: string
@@ -160,5 +173,13 @@ export const useRefreshSiteReporting = (projectId: string) => {
       }),
       queryClient.invalidateQueries({ queryKey: ['schedule', projectId] }),
       queryClient.invalidateQueries({ queryKey: ['audit-events', projectId] }),
+      queryClient.invalidateQueries({
+        queryKey: ['equipment-utilization', projectId],
+      }),
+      queryClient.invalidateQueries({ queryKey: ['cost-records', projectId] }),
+      queryClient.invalidateQueries({ queryKey: ['cost-summary', projectId] }),
+      queryClient.invalidateQueries({ queryKey: ['ev-report', projectId] }),
+      queryClient.invalidateQueries({ queryKey: ['health', projectId] }),
+      queryClient.invalidateQueries({ queryKey: ['workspace-dashboard'] }),
     ])
 }

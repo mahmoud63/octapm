@@ -484,7 +484,7 @@ function summarizeProcurementRisks(rows, options = {}) {
     .map(({ row, risk }) => ({
       id: row.id,
       item: row.item,
-      source: row.ref ? 'procurement_order' : 'long_lead',
+      source: row.source || (row.ref ? 'procurement_order' : 'long_lead'),
       ref: row.ref || null,
       severity: risk.severity,
       reason: risk.reason,

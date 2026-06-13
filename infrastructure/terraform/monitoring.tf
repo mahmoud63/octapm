@@ -13,10 +13,21 @@ resource "aws_cloudwatch_log_group" "api" {
 ################################
 resource "aws_sns_topic" "alarms" {
   name = "${var.app_name}-alarms"
+
+  lifecycle {
+    precondition {
+      condition     = !contains(["prod", "production"], var.environment) || trimspace(var.alarm_notification_email) != ""
+      error_message = "TASK-P1-DEVOPS-001 production blocker: alarm_notification_email must be set for production monitoring."
+    }
+  }
 }
 
-# Subscribe an email address via CLI after apply:
-# aws sns subscribe --topic-arn <arn> --protocol email --notification-endpoint you@example.com
+resource "aws_sns_topic_subscription" "alarm_email" {
+  count     = trimspace(var.alarm_notification_email) == "" ? 0 : 1
+  topic_arn = aws_sns_topic.alarms.arn
+  protocol  = "email"
+  endpoint  = var.alarm_notification_email
+}
 
 ################################
 # CloudWatch Alarms (5 core alarms)
