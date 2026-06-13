@@ -1,5 +1,5 @@
 const Anthropic = require("@anthropic-ai/sdk");
-const XLSX = require("xlsx");
+const XLSX = require("@e965/xlsx");
 const { prisma } = require("../config/db");
 const { HttpError } = require("../utils/http-error");
 const { addMoney, multiplyMoney, toMoneyNumber } = require("../utils/money");

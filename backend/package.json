@@ -22,6 +22,7 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.88.0",
+    "@e965/xlsx": "^0.20.3",
     "@prisma/client": "^6.0.0",
     "bcryptjs": "^2.4.3",
     "cors": "^2.8.5",
@@ -36,7 +37,6 @@
     "socket.io": "^4.8.0",
     "stripe": "^22.1.1",
     "swagger-ui-express": "^5.0.1",
-    "xlsx": "^0.18.5",
     "xml2js": "^0.6.0"
   },
   "devDependencies": {

@@ -1,4 +1,4 @@
-const XLSX = require("xlsx");
+const XLSX = require("@e965/xlsx");
 const { HttpError } = require("../../utils/http-error");
 const { assertMoneyInput } = require("../../utils/money");
 const { normalizeBoqCode } = require("../../utils/boq-code");

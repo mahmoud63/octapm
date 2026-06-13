@@ -1,4 +1,4 @@
-const XLSX = require("xlsx");
+const XLSX = require("@e965/xlsx");
 const { parseExcelInput, validateBoqRows } = require("../excel-parser");
 
 const makeWorkbookBuffer = (rows) => {

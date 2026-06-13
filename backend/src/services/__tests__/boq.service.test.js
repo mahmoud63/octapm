@@ -107,7 +107,7 @@ jest.mock("../boq-calculation.service", () => ({
 }));
 jest.mock("../audit.service", () => mockAuditService);
 
-const XLSX = require("xlsx");
+const XLSX = require("@e965/xlsx");
 const service = require("../boq.service");
 
 function makeBoqWorkbookBuffer(rows) {

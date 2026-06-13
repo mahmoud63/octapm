@@ -34,6 +34,6 @@
     "test:e2e:uat": "node e2e/uat/run-uat-regression.mjs"
   },
   "devDependencies": {
-    "concurrently": "^9.1.0"
+    "concurrently": "^10.0.3"
   }
 }

@@ -8,12 +8,15 @@ All notable platform-wide changes should be recorded here. Agents must read this
 
 - Added `.nvmrc`, root setup documentation, workspace engine metadata, and npm package-manager metadata so local and CI release gates use Node.js 24.14.0 with npm 11.
 - Added live UAT, backup/restore, rollback, monitoring/alert, and runtime scale-blocker evidence checklists to keep pilot/production gaps explicit.
+- Added dependency audit triage, calculation certification, performance test, and controlled-pilot decision documents for the release evidence package.
 - Added a safe `frontend/.env.production.example` placeholder and expanded release hygiene ignore rules for runtime env files, logs, PID files, local DB data, upload folders, and private storage artifacts.
 - Added `SECURITY_ROTATION_REQUIRED.md` with path/category-only rotation guidance for runtime env files reported in the audit archive.
 - Added regression coverage for null project-party access in workflow visibility helpers and invalid risk closeout approval before submission.
 
 ### Changed
 
+- Replaced backend `xlsx` parser usage with `@e965/xlsx` and upgraded `concurrently` to remove high/critical dependency audit findings without force-upgrading breaking packages.
+- Updated EC2 user-data bootstrap and validation to install and verify the repository-pinned Node.js 24/npm 11 runtime instead of Node.js 20.
 - Updated GitHub Actions setup-node steps to read the pinned `.nvmrc` version and removed tracked PID/TanStack temp artifacts from source control.
 - Linked the release checklist, go-live gate, UAT documentation, and rate-limit QA notes to the new evidence and runtime scale-blocker checklists.
 - Fixed party-scoped RFI/submittal workflow helpers to treat null project access as non-party-scoped instead of throwing a runtime `scope` error.
@@ -24,6 +27,7 @@ All notable platform-wide changes should be recorded here. Agents must read this
 
 ### Verification
 
+- Dependency audit remediation reduced root and backend install-path audit output to 3 moderate findings; focused BOQ parser/import tests passed against `@e965/xlsx`; EC2 user-data self-test and live validator passed.
 - Exact npm release matrix passed from the repository root: Node `v24.14.0`, npm `11.9.0`, Prisma validate, OpenAPI validate, backend Jest with 75 suites and 1068 tests, frontend ESLint with 22 warnings and 0 errors, frontend TypeScript/Vite build, secret hygiene validation, private storage validation, API origin validation, RDS backup validation, deployment readiness validation, and UAT manifest validation.
 - Focused RFI/submittal party-access regression tests passed for company-party workflow access, project-object authorization, and contractual audit; focused risk closeout and approval-workflow tests passed.
 - Prisma validate passed for `backend/prisma/schema.prisma`; backend OpenAPI validation passed for 255 documented paths; backend Jest passed with 75 suites and 1068 tests; frontend ESLint passed with warnings only; frontend TypeScript/Vite production build passed with existing Vite deprecation/plugin/chunk-size warnings; secret hygiene validation and self-test passed; private runtime storage validation passed.
