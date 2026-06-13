@@ -1,5 +1,5 @@
-const { prisma } = require('../config/db');
-const { HttpError } = require('../utils/http-error');
+const { prisma } = require("../config/db");
+const { HttpError } = require("../utils/http-error");
 const {
   containsInsensitive,
   cursorArgs,
@@ -7,18 +7,29 @@ const {
   normalizeListQuery,
   toCursorPage,
   trimToNull,
-} = require('../utils/list-query');
+} = require("../utils/list-query");
 const {
   RECORD_TYPES,
-  assignmentData,
   attachWorkflowDetailsToRecords,
   primaryActivityIdFromPayload,
   recordDocumentRevisions,
   recordWorkflowHistory,
   syncWorkflowReferences,
-} = require('./workflow-support.service');
-const auditService = require('./audit.service');
-const approvalWorkflowService = require('./approval-workflow.service');
+  workflowPartyAssignmentData,
+} = require("./workflow-support.service");
+const {
+  applyPartyWorkflowVisibility,
+  assertPartyWorkflowAccess,
+  withDefaultOwnerParty,
+} = require("./company-party.service");
+const auditService = require("./audit.service");
+const approvalWorkflowService = require("./approval-workflow.service");
+const {
+  ARCHIVED_STATUS,
+  applyArchiveVisibility,
+  assertNotArchived,
+  archiveResult,
+} = require("./archive-policy.service");
 
 const ensureProject = async ({ orgId, projectId }) => {
   const project = await prisma.project.findFirst({
@@ -26,28 +37,34 @@ const ensureProject = async ({ orgId, projectId }) => {
   });
 
   if (!project) {
-    throw new HttpError(404, 'PROJECT_NOT_FOUND', 'Project not found');
+    throw new HttpError(404, "PROJECT_NOT_FOUND", "Project not found");
   }
 
   return project;
 };
 
-const RFI_STATUSES = ['open', 'answered', 'closed'];
-const RFI_PRIORITIES = ['low', 'normal', 'high', 'urgent'];
+const RFI_STATUSES = ["open", "answered", "closed", ARCHIVED_STATUS];
+const RFI_PRIORITIES = ["low", "normal", "high", "urgent"];
 const RFI_SORT_FIELDS = {
-  created: 'createdAt',
-  updated: 'updatedAt',
-  dueDate: 'dueDate',
-  raisedDate: 'raisedDate',
-  responseRequiredBy: 'responseRequiredBy',
-  answeredDate: 'answeredDate',
-  priority: 'priority',
-  status: 'status',
-  ref: 'ref',
+  created: "createdAt",
+  updated: "updatedAt",
+  dueDate: "dueDate",
+  raisedDate: "raisedDate",
+  responseRequiredBy: "responseRequiredBy",
+  answeredDate: "answeredDate",
+  priority: "priority",
+  status: "status",
+  ref: "ref",
 };
 
-const dateSummary = (value) =>
-  value ? new Date(value).toISOString() : null;
+const dateSummary = (value) => (value ? new Date(value).toISOString() : null);
+
+const decisionText = (payload = {}) =>
+  payload.reason ||
+  payload.rejectedReason ||
+  payload.comment ||
+  payload.statusComment ||
+  null;
 
 const rfiAuditSummary = (record) => ({
   ref: record.ref,
@@ -60,25 +77,34 @@ const rfiAuditSummary = (record) => ({
   status: record.status,
   scheduleImpact: Number(record.scheduleImpact || 0),
   owner: record.owner || null,
+  ownerPartyId: record.ownerPartyId || null,
   reviewer: record.reviewer || null,
+  reviewerPartyId: record.reviewerPartyId || null,
   approver: record.approver || null,
+  approverPartyId: record.approverPartyId || null,
   raisedBy: record.raisedBy || null,
   answeredBy: record.answeredBy || null,
   raisedDate: dateSummary(record.raisedDate),
   dueDate: dateSummary(record.dueDate),
   responseRequiredBy: dateSummary(record.responseRequiredBy),
   answeredDate: dateSummary(record.answeredDate),
+  archivedAt: dateSummary(record.archivedAt),
+  archivedBy: record.archivedBy || null,
 });
 
 const buildRfiWhere = ({ projectId, query = {} }) => {
   const where = { projectId };
 
   if (RFI_STATUSES.includes(query.status)) where.status = query.status;
+  applyArchiveVisibility(where, query);
   if (RFI_PRIORITIES.includes(query.priority)) where.priority = query.priority;
-  if (trimToNull(query.activityId)) where.activityId = trimToNull(query.activityId);
+  if (trimToNull(query.activityId))
+    where.activityId = trimToNull(query.activityId);
 
   const owner = trimToNull(query.owner);
   if (owner) where.owner = containsInsensitive(owner);
+  if (trimToNull(query.ownerPartyId))
+    where.ownerPartyId = trimToNull(query.ownerPartyId);
 
   const dueDate = dateRangeFilter({
     after: trimToNull(query.dueAfter),
@@ -100,6 +126,23 @@ const buildRfiWhere = ({ projectId, query = {} }) => {
     ];
   }
 
+  if (trimToNull(query.partyId)) {
+    const partyId = trimToNull(query.partyId);
+    const partyClause = {
+      OR: [
+        { ownerPartyId: partyId },
+        { reviewerPartyId: partyId },
+        { approverPartyId: partyId },
+      ],
+    };
+    if (where.OR) {
+      where.AND = [...(where.AND || []), { OR: where.OR }, partyClause];
+      delete where.OR;
+    } else {
+      where.OR = partyClause.OR;
+    }
+  }
+
   return where;
 };
 
@@ -112,15 +155,18 @@ const countByStatus = (counts, statuses) =>
     Object.fromEntries(statuses.map((status) => [status, 0])),
   );
 
-const listRfis = async ({ orgId, projectId, query = {} }) => {
+const listRfis = async ({ orgId, projectId, query = {}, projectAccess = null }) => {
   await ensureProject({ orgId, projectId });
 
   const listQuery = normalizeListQuery(query, {
     allowedSorts: Object.keys(RFI_SORT_FIELDS),
-    defaultSortBy: 'created',
-    defaultSortDir: 'desc',
+    defaultSortBy: "created",
+    defaultSortDir: "desc",
   });
-  const where = buildRfiWhere({ projectId, query });
+  const where = applyPartyWorkflowVisibility(
+    buildRfiWhere({ projectId, query }),
+    projectAccess,
+  );
   const orderBy = [
     { [RFI_SORT_FIELDS[listQuery.sortBy]]: listQuery.sortDir },
     { id: listQuery.sortDir },
@@ -134,7 +180,7 @@ const listRfis = async ({ orgId, projectId, query = {} }) => {
       ...cursorArgs(listQuery.cursor),
     }),
     prisma.rfi.groupBy({
-      by: ['status'],
+      by: ["status"],
       where,
       _count: { _all: true },
     }),
@@ -157,6 +203,7 @@ const listRfis = async ({ orgId, projectId, query = {} }) => {
       open: summaryCounts.open,
       answered: summaryCounts.answered,
       closed: summaryCounts.closed,
+      archived: summaryCounts.archived,
       scheduleImpactDays: Number(impact._sum?.scheduleImpact || 0),
     },
     pagination: page.pagination,
@@ -169,26 +216,33 @@ const createRfi = async ({
   payload,
   userId = null,
   userRole = null,
+  projectAccess = null,
 }) => {
   await ensureProject({ orgId, projectId });
 
   const count = await prisma.rfi.count({ where: { projectId } });
   const activityId = primaryActivityIdFromPayload(payload);
+  const assignmentPayload = withDefaultOwnerParty(payload, projectAccess);
 
   const row = await prisma.$transaction(async (tx) => {
+    const assignments = await workflowPartyAssignmentData({
+      tx,
+      projectId,
+      payload: assignmentPayload,
+    });
     const created = await tx.rfi.create({
       data: {
         projectId,
         activityId,
-        ref: payload.ref || `RFI-${String(count + 1).padStart(3, '0')}`,
+        ref: payload.ref || `RFI-${String(count + 1).padStart(3, "0")}`,
         subject: payload.subject,
         question: payload.question?.trim() || null,
         response: payload.response?.trim() || null,
         discipline: payload.discipline?.trim() || null,
-        priority: payload.priority || 'normal',
-        status: payload.status || 'open',
+        priority: payload.priority || "normal",
+        status: payload.status || "open",
         scheduleImpact: Number(payload.scheduleImpact) || 0,
-        ...assignmentData(payload),
+        ...assignments,
         raisedBy: payload.raisedBy?.trim() || null,
         answeredBy: payload.answeredBy?.trim() || null,
         raisedDate: payload.raisedDate
@@ -264,7 +318,7 @@ const createRfi = async ({
         status: created.status,
         scheduleImpact: Number(created.scheduleImpact || 0),
       },
-      metadata: { source: 'document_control.rfi' },
+      metadata: { source: "document_control.rfi" },
     });
     return created;
   });
@@ -277,7 +331,15 @@ const createRfi = async ({
   return enriched;
 };
 
-const updateRfi = async ({ orgId, projectId, rfiId, payload, userId, userRole }) => {
+const requireDecisionText = (value, code, message) => {
+  const text = decisionText({ comment: value, reason: value });
+  if (!text) {
+    throw new HttpError(400, code, message);
+  }
+  return text;
+};
+
+const getRfiForWorkflow = async ({ orgId, projectId, rfiId }) => {
   await ensureProject({ orgId, projectId });
 
   const existing = await prisma.rfi.findFirst({
@@ -285,13 +347,54 @@ const updateRfi = async ({ orgId, projectId, rfiId, payload, userId, userRole })
   });
 
   if (!existing) {
-    throw new HttpError(404, 'RFI_NOT_FOUND', 'RFI not found');
+    throw new HttpError(404, "RFI_NOT_FOUND", "RFI not found");
   }
 
+  return existing;
+};
+
+const updateRfi = async ({
+  orgId,
+  projectId,
+  rfiId,
+  payload,
+  userId,
+  userRole,
+  forceWorkflowEvent = false,
+  projectAccess = null,
+}) => {
+  await ensureProject({ orgId, projectId });
+
+  const existing = await prisma.rfi.findFirst({
+    where: { id: rfiId, projectId },
+  });
+
+  if (!existing) {
+    throw new HttpError(404, "RFI_NOT_FOUND", "RFI not found");
+  }
+  assertPartyWorkflowAccess({ projectAccess, record: existing });
+  assertNotArchived(existing, {
+    code: "RFI_ARCHIVED",
+    message: "Archived RFIs cannot be updated through normal workflow actions",
+  });
+
   const nextStatus = payload.status ?? existing.status;
+  if (nextStatus === ARCHIVED_STATUS && existing.status !== ARCHIVED_STATUS) {
+    throw new HttpError(
+      400,
+      "RFI_ARCHIVE_ACTION_REQUIRED",
+      "Use the archive/delete endpoint to archive an RFI",
+    );
+  }
   const activityId = primaryActivityIdFromPayload(payload, existing.activityId);
 
   const row = await prisma.$transaction(async (tx) => {
+    const assignments = await workflowPartyAssignmentData({
+      tx,
+      projectId,
+      payload,
+      existing,
+    });
     const updated = await tx.rfi.update({
       where: { id: rfiId },
       data: {
@@ -315,7 +418,7 @@ const updateRfi = async ({ orgId, projectId, rfiId, payload, userId, userRole })
           payload.scheduleImpact !== undefined
             ? Number(payload.scheduleImpact) || 0
             : existing.scheduleImpact,
-        ...assignmentData(payload, existing),
+        ...assignments,
         raisedBy:
           payload.raisedBy !== undefined
             ? payload.raisedBy?.trim() || null
@@ -368,6 +471,7 @@ const updateRfi = async ({ orgId, projectId, rfiId, payload, userId, userRole })
       comment: payload.comment || payload.statusComment || payload.response,
       userId,
       userRole,
+      force: forceWorkflowEvent,
     });
     await approvalWorkflowService.recordTransition({
       tx,
@@ -379,7 +483,9 @@ const updateRfi = async ({ orgId, projectId, rfiId, payload, userId, userRole })
       toStatus: updated.status,
       actorId: userId,
       actorRole: userRole,
+      reason: decisionText(payload),
       comment: payload.comment || payload.statusComment || payload.response,
+      force: forceWorkflowEvent,
       metadata: {
         ref: updated.ref,
         subject: updated.subject,
@@ -418,7 +524,7 @@ const updateRfi = async ({ orgId, projectId, rfiId, payload, userId, userRole })
         status: updated.status,
         scheduleImpact: Number(updated.scheduleImpact || 0),
       },
-      metadata: { source: 'document_control.rfi' },
+      metadata: { source: "document_control.rfi" },
     });
     return updated;
   });
@@ -429,6 +535,250 @@ const updateRfi = async ({ orgId, projectId, rfiId, payload, userId, userRole })
     records: [row],
   });
   return enriched;
+};
+
+const submitRfi = async ({
+  orgId,
+  projectId,
+  rfiId,
+  comment = null,
+  userId = null,
+  userRole = null,
+  projectAccess = null,
+}) => {
+  const existing = await getRfiForWorkflow({ orgId, projectId, rfiId });
+  if (existing.status === "closed") {
+    throw new HttpError(
+      409,
+      "RFI_ALREADY_CLOSED",
+      "Closed RFIs must be reopened before submission",
+    );
+  }
+
+  return updateRfi({
+    orgId,
+    projectId,
+    rfiId,
+    payload: {
+      status: "open",
+      comment: comment || "RFI submitted for response",
+      statusComment: comment || "RFI submitted for response",
+    },
+    userId,
+    userRole,
+    projectAccess,
+    forceWorkflowEvent: true,
+  });
+};
+
+const answerRfi = async ({
+  orgId,
+  projectId,
+  rfiId,
+  payload = {},
+  userId = null,
+  userRole = null,
+  projectAccess = null,
+}) => {
+  const response = requireDecisionText(
+    payload.response || payload.comment,
+    "RFI_RESPONSE_REQUIRED",
+    "A response is required to answer an RFI",
+  );
+  const existing = await getRfiForWorkflow({ orgId, projectId, rfiId });
+  if (existing.status === "closed") {
+    throw new HttpError(
+      409,
+      "RFI_ALREADY_CLOSED",
+      "Closed RFIs must be reopened before answer updates",
+    );
+  }
+  assertPartyWorkflowAccess({ projectAccess, record: existing });
+
+  return updateRfi({
+    orgId,
+    projectId,
+    rfiId,
+    payload: {
+      ...payload,
+      status: "answered",
+      response,
+      answeredBy: payload.answeredBy || userId,
+      answeredDate: payload.answeredDate || new Date().toISOString(),
+      comment: payload.comment || response,
+      statusComment: payload.statusComment || payload.comment || response,
+    },
+    userId,
+    userRole,
+    projectAccess,
+  });
+};
+
+const closeRfi = async ({
+  orgId,
+  projectId,
+  rfiId,
+  comment,
+  userId = null,
+  userRole = null,
+  projectAccess = null,
+}) => {
+  const closeComment = requireDecisionText(
+    comment,
+    "RFI_CLOSE_COMMENT_REQUIRED",
+    "A close comment is required",
+  );
+  const existing = await getRfiForWorkflow({ orgId, projectId, rfiId });
+  if (existing.status === "closed") {
+    throw new HttpError(409, "RFI_ALREADY_CLOSED", "RFI is already closed");
+  }
+  assertPartyWorkflowAccess({ projectAccess, record: existing });
+
+  return updateRfi({
+    orgId,
+    projectId,
+    rfiId,
+    payload: {
+      status: "closed",
+      comment: closeComment,
+      statusComment: closeComment,
+    },
+    userId,
+    userRole,
+    projectAccess,
+  });
+};
+
+const reopenRfi = async ({
+  orgId,
+  projectId,
+  rfiId,
+  reason,
+  userId = null,
+  userRole = null,
+  projectAccess = null,
+}) => {
+  const reopenReason = requireDecisionText(
+    reason,
+    "RFI_REOPEN_REASON_REQUIRED",
+    "A reason is required to reopen an RFI",
+  );
+  const existing = await getRfiForWorkflow({ orgId, projectId, rfiId });
+  if (existing.status === "open") {
+    throw new HttpError(409, "RFI_ALREADY_OPEN", "RFI is already open");
+  }
+  assertPartyWorkflowAccess({ projectAccess, record: existing });
+
+  return updateRfi({
+    orgId,
+    projectId,
+    rfiId,
+    payload: {
+      status: "open",
+      reason: reopenReason,
+      comment: reopenReason,
+      statusComment: reopenReason,
+    },
+    userId,
+    userRole,
+    projectAccess,
+  });
+};
+
+const approveRfi = async ({
+  orgId,
+  projectId,
+  rfiId,
+  comment = null,
+  userId = null,
+  userRole = null,
+  projectAccess = null,
+}) => {
+  await ensureProject({ orgId, projectId });
+
+  const existing = await prisma.rfi.findFirst({
+    where: { id: rfiId, projectId },
+  });
+
+  if (!existing) {
+    throw new HttpError(404, "RFI_NOT_FOUND", "RFI not found");
+  }
+  assertPartyWorkflowAccess({ projectAccess, record: existing });
+
+  if (existing.status !== "answered") {
+    throw new HttpError(
+      409,
+      "RFI_NOT_READY_FOR_APPROVAL",
+      "Only answered RFIs can be approved",
+    );
+  }
+
+  return updateRfi({
+    orgId,
+    projectId,
+    rfiId,
+    payload: {
+      status: "closed",
+      statusComment: comment,
+      comment,
+    },
+    userId,
+    userRole,
+    projectAccess,
+  });
+};
+
+const rejectRfi = async ({
+  orgId,
+  projectId,
+  rfiId,
+  reason,
+  userId = null,
+  userRole = null,
+  projectAccess = null,
+}) => {
+  const rejectionReason = decisionText({ reason });
+  if (!rejectionReason) {
+    throw new HttpError(
+      400,
+      "APPROVAL_WORKFLOW_REASON_REQUIRED",
+      "A reason is required for this workflow decision",
+    );
+  }
+
+  await ensureProject({ orgId, projectId });
+
+  const existing = await prisma.rfi.findFirst({
+    where: { id: rfiId, projectId },
+  });
+
+  if (!existing) {
+    throw new HttpError(404, "RFI_NOT_FOUND", "RFI not found");
+  }
+  assertPartyWorkflowAccess({ projectAccess, record: existing });
+
+  if (existing.status !== "answered") {
+    throw new HttpError(
+      409,
+      "RFI_NOT_READY_FOR_REJECTION",
+      "Only answered RFIs can be rejected",
+    );
+  }
+
+  return updateRfi({
+    orgId,
+    projectId,
+    rfiId,
+    payload: {
+      status: "open",
+      reason: rejectionReason,
+      statusComment: rejectionReason,
+      comment: rejectionReason,
+    },
+    userId,
+    userRole,
+    projectAccess,
+  });
 };
 
 const deleteRfi = async ({
@@ -445,37 +795,90 @@ const deleteRfi = async ({
   });
 
   if (!existing) {
-    throw new HttpError(404, 'RFI_NOT_FOUND', 'RFI not found');
+    throw new HttpError(404, "RFI_NOT_FOUND", "RFI not found");
   }
 
+  if (existing.status === ARCHIVED_STATUS || existing.archivedAt) {
+    return archiveResult({
+      id: rfiId,
+      status: ARCHIVED_STATUS,
+      archivedAt: existing.archivedAt,
+    });
+  }
+
+  const now = new Date();
   await prisma.$transaction(async (tx) => {
-    await tx.rfi.delete({ where: { id: rfiId } });
+    const archived = await tx.rfi.update({
+      where: { id: rfiId },
+      data: {
+        status: ARCHIVED_STATUS,
+        archivedAt: now,
+        archivedBy: userId || null,
+      },
+    });
+    await recordWorkflowHistory({
+      tx,
+      projectId,
+      recordType: RECORD_TYPES.RFI,
+      recordId: rfiId,
+      oldStatus: existing.status,
+      newStatus: ARCHIVED_STATUS,
+      comment: "RFI archived",
+      userId,
+      userRole,
+      force: true,
+    });
+    await approvalWorkflowService.recordTransition({
+      tx,
+      orgId,
+      projectId,
+      recordType: approvalWorkflowService.RECORD_TYPES.RFI,
+      recordId: rfiId,
+      fromStatus: existing.status,
+      toStatus: ARCHIVED_STATUS,
+      actorId: userId,
+      actorRole: userRole,
+      comment: "RFI archived",
+      metadata: {
+        ref: existing.ref,
+        subject: existing.subject,
+        archivedAt: now.toISOString(),
+      },
+    });
     await auditService.recordEvent({
       tx,
       orgId,
       projectId,
       entityType: auditService.ENTITY_TYPES.RFI,
       entityId: rfiId,
-      action: auditService.ACTIONS.DELETED,
+      action: auditService.ACTIONS.ARCHIVED,
       actorId: userId,
       actorRole: userRole,
       oldStatus: existing.status,
-      newStatus: null,
+      newStatus: ARCHIVED_STATUS,
       oldSummary: rfiAuditSummary(existing),
+      newSummary: rfiAuditSummary(archived),
       summary: {
+        transition: "rfi.archive",
         ref: existing.ref,
         subject: existing.subject,
-        status: existing.status,
+        status: ARCHIVED_STATUS,
       },
-      metadata: { source: 'document_control.rfi' },
+      metadata: { source: "document_control.rfi" },
     });
   });
-  return { deleted: true };
+  return archiveResult({ id: rfiId, archivedAt: now });
 };
 
 module.exports = {
   listRfis,
   createRfi,
   updateRfi,
+  submitRfi,
+  answerRfi,
+  closeRfi,
+  reopenRfi,
+  approveRfi,
+  rejectRfi,
   deleteRfi,
 };

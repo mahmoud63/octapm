@@ -1,5 +1,5 @@
 {
-  "version": "2026-06-10-f019-procurement-material-workflow",
+  "version": "2026-06-12-v6-meeting-minutes",
   "actions": [
     "read",
     "create",
@@ -12,7 +12,7 @@
     "export"
   ],
   "roles": [
-    { "id": "pm", "label": "PM" },
+    { "id": "pm", "label": "Project Manager" },
     { "id": "planning_eng", "label": "Planning Engineer" },
     { "id": "qs", "label": "QS" },
     { "id": "cost_controller", "label": "Cost Controller" },
@@ -20,6 +20,12 @@
     { "id": "warehouse", "label": "Warehouse" },
     { "id": "site_engineer", "label": "Site Engineer" },
     { "id": "finance", "label": "Finance" }
+  ],
+  "partyRoles": [
+    { "id": "owner", "label": "Owner / Client" },
+    { "id": "consultant", "label": "Consultant" },
+    { "id": "contractor", "label": "Contractor" },
+    { "id": "subcontractor", "label": "Subcontractor" }
   ],
   "modules": {
     "schedule": {
@@ -90,6 +96,36 @@
         "site_reporting.upload": ["pm", "planning_eng", "site_engineer"]
       }
     },
+    "boq": {
+      "label": "BOQ",
+      "actions": {
+        "read": [
+          "pm",
+          "planning_eng",
+          "qs",
+          "cost_controller",
+          "procurement",
+          "warehouse",
+          "site_engineer",
+          "finance"
+        ],
+        "create": ["pm", "planning_eng", "qs"],
+        "update": ["pm", "planning_eng", "qs"],
+        "delete": ["pm"],
+        "submit": ["pm", "planning_eng", "qs"],
+        "approve": ["pm", "qs"],
+        "certify": [],
+        "baseline": [],
+        "export": ["pm", "planning_eng", "qs", "cost_controller"]
+      },
+      "transitions": {
+        "allocation.create": ["pm", "planning_eng", "qs"],
+        "allocation.update": ["pm", "planning_eng", "qs"],
+        "allocation.submit": ["pm", "planning_eng", "qs"],
+        "allocation.approve": ["pm", "qs"],
+        "allocation.reject": ["pm", "qs"]
+      }
+    },
     "ipc": {
       "label": "IPC",
       "actions": {
@@ -109,8 +145,8 @@
         "period.certify": ["pm", "finance"],
         "item.update": ["pm", "qs"],
         "invoice.issue": ["pm", "finance"],
-        "payment.record": ["pm", "finance"],
-        "retention.release": ["pm", "finance"]
+        "payment.record": ["finance"],
+        "retention.release": ["finance"]
       }
     },
     "cost": {
@@ -127,6 +163,8 @@
         "export": ["pm", "planning_eng", "qs", "cost_controller", "finance"]
       },
       "transitions": {
+        "reporting_period.lock": ["pm", "finance"],
+        "reporting_period.override": ["pm"],
         "burn_rate.create": ["pm", "qs", "cost_controller"],
         "activity_cost.upsert": ["pm", "qs", "cost_controller"],
         "activity_cost.update": ["pm", "qs", "cost_controller"]
@@ -152,7 +190,14 @@
         "approve": ["pm"],
         "certify": [],
         "baseline": [],
-        "export": ["pm", "planning_eng", "qs", "cost_controller", "procurement", "finance"]
+        "export": [
+          "pm",
+          "planning_eng",
+          "qs",
+          "cost_controller",
+          "procurement",
+          "finance"
+        ]
       },
       "transitions": {
         "supplier.manage": ["pm", "procurement"],
@@ -163,6 +208,35 @@
         "material.use": ["pm", "warehouse", "site_engineer"],
         "alert.acknowledge": ["pm", "planning_eng", "procurement", "warehouse"],
         "alert.resolve": ["pm", "planning_eng", "procurement", "warehouse"]
+      }
+    },
+    "risk": {
+      "label": "Risk Register",
+      "actions": {
+        "read": [
+          "pm",
+          "planning_eng",
+          "qs",
+          "cost_controller",
+          "procurement",
+          "warehouse",
+          "site_engineer",
+          "finance"
+        ],
+        "create": ["pm", "planning_eng", "qs"],
+        "update": ["pm", "planning_eng", "qs"],
+        "delete": ["pm", "planning_eng"],
+        "submit": ["pm", "planning_eng", "qs"],
+        "approve": ["pm"],
+        "certify": [],
+        "baseline": [],
+        "export": ["pm", "planning_eng", "qs", "cost_controller"]
+      },
+      "transitions": {
+        "risk.submit": ["pm", "planning_eng", "qs"],
+        "risk.approve": ["pm"],
+        "risk.reject": ["pm"],
+        "risk.reopen": ["pm"]
       }
     },
     "user_management": {
@@ -184,6 +258,27 @@
         "user.deactivate": ["pm"],
         "user.reset_password": ["pm"],
         "user.assign_role": ["pm"]
+      }
+    },
+    "project_parties": {
+      "label": "Project Parties",
+      "actions": {
+        "read": ["pm", "planning_eng", "qs"],
+        "create": ["pm", "planning_eng"],
+        "update": ["pm", "planning_eng"],
+        "delete": ["pm"],
+        "submit": ["pm", "planning_eng"],
+        "approve": ["pm"],
+        "certify": [],
+        "baseline": [],
+        "export": ["pm", "planning_eng", "qs"]
+      },
+      "transitions": {
+        "party.assign": ["pm", "planning_eng"],
+        "party.update": ["pm", "planning_eng"],
+        "party.remove": ["pm"],
+        "party.member.add": ["pm", "planning_eng"],
+        "party.member.remove": ["pm"]
       }
     },
     "audit": {
@@ -210,6 +305,39 @@
       },
       "transitions": {}
     },
+    "document_control": {
+      "label": "Document Control",
+      "actions": {
+        "read": [
+          "pm",
+          "planning_eng",
+          "qs",
+          "cost_controller",
+          "procurement",
+          "warehouse",
+          "site_engineer",
+          "finance"
+        ],
+        "create": ["pm", "planning_eng", "site_engineer"],
+        "update": ["pm", "planning_eng"],
+        "delete": [],
+        "submit": ["pm", "planning_eng", "site_engineer"],
+        "approve": ["pm"],
+        "certify": [],
+        "baseline": [],
+        "export": ["pm", "planning_eng", "qs", "cost_controller"]
+      },
+      "transitions": {
+        "document.revision.upload": ["pm", "planning_eng", "site_engineer"],
+        "document.revision.submit_review": [
+          "pm",
+          "planning_eng",
+          "site_engineer"
+        ],
+        "document.revision.approve": ["pm"],
+        "document.revision.supersede": ["pm"]
+      }
+    },
     "rfi": {
       "label": "RFI",
       "actions": {
@@ -226,13 +354,20 @@
         "create": ["pm", "planning_eng", "site_engineer"],
         "update": ["pm", "planning_eng", "site_engineer"],
         "delete": ["pm"],
-        "submit": [],
-        "approve": [],
+        "submit": ["pm", "planning_eng", "site_engineer"],
+        "approve": ["pm"],
         "certify": [],
         "baseline": [],
         "export": ["pm", "planning_eng", "qs", "cost_controller"]
       },
-      "transitions": {}
+      "transitions": {
+        "rfi.submit": ["pm", "planning_eng", "site_engineer"],
+        "rfi.answer": ["pm", "planning_eng", "site_engineer"],
+        "rfi.close": ["pm"],
+        "rfi.reopen": ["pm"],
+        "rfi.approve": ["pm"],
+        "rfi.reject": ["pm"]
+      }
     },
     "submittal": {
       "label": "Submittal",
@@ -250,13 +385,19 @@
         "create": ["pm", "planning_eng", "site_engineer"],
         "update": ["pm", "planning_eng", "site_engineer"],
         "delete": ["pm"],
-        "submit": [],
-        "approve": [],
+        "submit": ["pm", "planning_eng", "site_engineer"],
+        "approve": ["pm"],
         "certify": [],
         "baseline": [],
         "export": ["pm", "planning_eng", "qs", "cost_controller"]
       },
-      "transitions": {}
+      "transitions": {
+        "submittal.submit": ["pm", "planning_eng", "site_engineer"],
+        "submittal.review": ["pm", "planning_eng", "qs"],
+        "submittal.resubmit": ["pm", "planning_eng", "site_engineer"],
+        "submittal.approve": ["pm"],
+        "submittal.reject": ["pm"]
+      }
     },
     "ncr": {
       "label": "NCR",
@@ -274,13 +415,19 @@
         "create": ["pm", "planning_eng", "site_engineer"],
         "update": ["pm", "planning_eng", "site_engineer"],
         "delete": ["pm"],
-        "submit": [],
-        "approve": [],
+        "submit": ["pm", "planning_eng", "site_engineer"],
+        "approve": ["pm"],
         "certify": [],
         "baseline": [],
         "export": ["pm", "planning_eng", "qs", "cost_controller"]
       },
-      "transitions": {}
+      "transitions": {
+        "ncr.submit": ["pm", "planning_eng", "site_engineer"],
+        "ncr.close": ["pm", "planning_eng", "site_engineer"],
+        "ncr.approve": ["pm"],
+        "ncr.reject": ["pm"],
+        "ncr.reopen": ["pm"]
+      }
     },
     "safety": {
       "label": "Safety",
@@ -298,13 +445,304 @@
         "create": ["pm", "site_engineer"],
         "update": ["pm", "site_engineer"],
         "delete": ["pm"],
-        "submit": [],
-        "approve": [],
+        "submit": ["pm", "site_engineer"],
+        "approve": ["pm"],
         "certify": [],
         "baseline": [],
         "export": ["pm", "planning_eng", "qs", "cost_controller"]
       },
-      "transitions": {}
+      "transitions": {
+        "safety.submit": ["pm", "site_engineer"],
+        "safety.close": ["pm", "site_engineer"],
+        "safety.approve": ["pm"],
+        "safety.reject": ["pm"],
+        "safety.reopen": ["pm"]
+      }
+    },
+    "change_order": {
+      "label": "Change Order",
+      "actions": {
+        "read": ["pm", "planning_eng", "qs", "cost_controller", "finance"],
+        "create": ["pm", "qs"],
+        "update": ["pm", "qs"],
+        "delete": ["pm"],
+        "submit": ["pm", "qs"],
+        "approve": ["pm"],
+        "certify": [],
+        "baseline": [],
+        "export": ["pm", "qs", "cost_controller", "finance"]
+      },
+      "transitions": {
+        "change_order.submit": ["pm", "qs"],
+        "change_order.approve": ["pm"],
+        "change_order.reject": ["pm"],
+        "change_order.reopen": ["pm", "qs"]
+      }
+    },
+    "eot": {
+      "label": "EOT",
+      "actions": {
+        "read": ["pm", "planning_eng", "qs", "cost_controller", "finance"],
+        "create": ["pm", "planning_eng", "qs"],
+        "update": ["pm", "planning_eng", "qs"],
+        "delete": [],
+        "submit": ["pm", "planning_eng", "qs"],
+        "approve": ["pm"],
+        "certify": [],
+        "baseline": [],
+        "export": ["pm", "planning_eng", "qs", "cost_controller", "finance"]
+      },
+      "transitions": {
+        "eot.submit": ["pm", "planning_eng", "qs"],
+        "eot.approve": ["pm"],
+        "eot.reject": ["pm"]
+      }
+    },
+    "meeting": {
+      "label": "Meetings",
+      "actions": {
+        "read": [
+          "pm",
+          "planning_eng",
+          "qs",
+          "cost_controller",
+          "procurement",
+          "warehouse",
+          "site_engineer",
+          "finance"
+        ],
+        "create": ["pm", "planning_eng", "site_engineer"],
+        "update": ["pm", "planning_eng", "site_engineer"],
+        "delete": ["pm", "planning_eng"],
+        "submit": [
+          "pm",
+          "planning_eng",
+          "qs",
+          "cost_controller",
+          "procurement",
+          "warehouse",
+          "site_engineer",
+          "finance"
+        ],
+        "approve": ["pm", "planning_eng"],
+        "certify": [],
+        "baseline": [],
+        "export": ["pm", "planning_eng", "qs", "cost_controller"]
+      },
+      "transitions": {
+        "meeting.distribute": ["pm", "planning_eng"],
+        "meeting.comment": [
+          "pm",
+          "planning_eng",
+          "qs",
+          "cost_controller",
+          "procurement",
+          "warehouse",
+          "site_engineer",
+          "finance"
+        ]
+      }
+    },
+    "task": {
+      "label": "Tasks",
+      "actions": {
+        "read": [
+          "pm",
+          "planning_eng",
+          "qs",
+          "cost_controller",
+          "procurement",
+          "warehouse",
+          "site_engineer",
+          "finance"
+        ],
+        "create": ["pm", "planning_eng", "site_engineer"],
+        "update": ["pm", "planning_eng", "site_engineer"],
+        "delete": ["pm", "planning_eng"],
+        "submit": [
+          "pm",
+          "planning_eng",
+          "qs",
+          "cost_controller",
+          "procurement",
+          "warehouse",
+          "site_engineer",
+          "finance"
+        ],
+        "approve": ["pm", "planning_eng"],
+        "certify": [],
+        "baseline": [],
+        "export": ["pm", "planning_eng", "qs", "cost_controller"]
+      },
+      "transitions": {
+        "task.assign": ["pm", "planning_eng", "site_engineer"],
+        "task.comment": [
+          "pm",
+          "planning_eng",
+          "qs",
+          "cost_controller",
+          "procurement",
+          "warehouse",
+          "site_engineer",
+          "finance"
+        ],
+        "task.close": ["pm", "planning_eng", "site_engineer"]
+      }
+    }
+  },
+  "partyPermissions": {
+    "owner": {
+      "modules": {
+        "schedule": { "actions": ["read", "export"], "transitions": [] },
+        "progress": { "actions": ["read", "export"], "transitions": [] },
+        "boq": { "actions": ["read", "export"], "transitions": [] },
+        "ipc": { "actions": ["read", "export"], "transitions": [] },
+        "cost": { "actions": ["read", "export"], "transitions": [] },
+        "procurement": { "actions": ["read", "export"], "transitions": [] },
+        "risk": { "actions": ["read", "export"], "transitions": [] },
+        "audit": { "actions": ["read"], "transitions": [] },
+        "document_control": {
+          "actions": ["read", "export"],
+          "transitions": []
+        },
+        "project_parties": { "actions": ["read"], "transitions": [] },
+        "rfi": {
+          "actions": ["read", "submit"],
+          "transitions": ["rfi.answer"]
+        },
+        "submittal": { "actions": ["read"], "transitions": [] },
+        "change_order": { "actions": ["read", "export"], "transitions": [] },
+        "eot": { "actions": ["read", "export"], "transitions": [] },
+        "meeting": {
+          "actions": ["read", "submit"],
+          "transitions": ["meeting.comment"]
+        },
+        "task": {
+          "actions": ["read", "submit"],
+          "transitions": ["task.comment"]
+        }
+      }
+    },
+    "consultant": {
+      "modules": {
+        "schedule": { "actions": ["read", "export"], "transitions": [] },
+        "progress": { "actions": ["read"], "transitions": [] },
+        "boq": { "actions": ["read"], "transitions": [] },
+        "risk": { "actions": ["read"], "transitions": [] },
+        "audit": { "actions": ["read"], "transitions": [] },
+        "document_control": {
+          "actions": ["read", "create", "submit"],
+          "transitions": [
+            "document.revision.upload",
+            "document.revision.submit_review"
+          ]
+        },
+        "project_parties": { "actions": ["read"], "transitions": [] },
+        "rfi": {
+          "actions": ["read", "submit"],
+          "transitions": ["rfi.answer"]
+        },
+        "submittal": {
+          "actions": ["read", "submit", "approve"],
+          "transitions": [
+            "submittal.review",
+            "submittal.approve",
+            "submittal.reject"
+          ]
+        },
+        "change_order": { "actions": ["read"], "transitions": [] },
+        "eot": { "actions": ["read"], "transitions": [] },
+        "meeting": {
+          "actions": ["read", "create", "update", "submit"],
+          "transitions": ["meeting.comment", "meeting.distribute"]
+        },
+        "task": {
+          "actions": ["read", "submit"],
+          "transitions": ["task.comment"]
+        }
+      }
+    },
+    "contractor": {
+      "modules": {
+        "schedule": { "actions": ["read", "export"], "transitions": [] },
+        "progress": {
+          "actions": ["read", "create", "submit"],
+          "transitions": [
+            "submission.submit",
+            "daily_report.submit",
+            "site_reporting.upload"
+          ]
+        },
+        "boq": { "actions": ["read"], "transitions": [] },
+        "procurement": { "actions": ["read"], "transitions": [] },
+        "risk": { "actions": ["read"], "transitions": [] },
+        "audit": { "actions": ["read"], "transitions": [] },
+        "document_control": {
+          "actions": ["read", "create", "submit"],
+          "transitions": [
+            "document.revision.upload",
+            "document.revision.submit_review"
+          ]
+        },
+        "project_parties": { "actions": ["read"], "transitions": [] },
+        "rfi": {
+          "actions": ["read", "create", "update", "submit"],
+          "transitions": ["rfi.submit"]
+        },
+        "submittal": {
+          "actions": ["read", "create", "update", "submit"],
+          "transitions": ["submittal.submit", "submittal.resubmit"]
+        },
+        "change_order": { "actions": ["read"], "transitions": [] },
+        "eot": { "actions": ["read"], "transitions": [] },
+        "meeting": {
+          "actions": ["read", "create", "update", "submit"],
+          "transitions": ["meeting.comment"]
+        },
+        "task": {
+          "actions": ["read", "create", "update", "submit"],
+          "transitions": ["task.assign", "task.comment", "task.close"]
+        }
+      }
+    },
+    "subcontractor": {
+      "modules": {
+        "schedule": { "actions": ["read"], "transitions": [] },
+        "progress": {
+          "actions": ["read", "create", "submit"],
+          "transitions": [
+            "submission.submit",
+            "daily_report.submit",
+            "site_reporting.upload"
+          ]
+        },
+        "boq": { "actions": ["read"], "transitions": [] },
+        "audit": { "actions": ["read"], "transitions": [] },
+        "document_control": {
+          "actions": ["read", "create", "submit"],
+          "transitions": [
+            "document.revision.upload",
+            "document.revision.submit_review"
+          ]
+        },
+        "project_parties": { "actions": ["read"], "transitions": [] },
+        "rfi": {
+          "actions": ["read", "create", "update", "submit"],
+          "transitions": ["rfi.submit"]
+        },
+        "submittal": {
+          "actions": ["read", "create", "update", "submit"],
+          "transitions": ["submittal.submit", "submittal.resubmit"]
+        },
+        "meeting": {
+          "actions": ["read", "submit"],
+          "transitions": ["meeting.comment"]
+        },
+        "task": {
+          "actions": ["read", "create", "update", "submit"],
+          "transitions": ["task.assign", "task.comment", "task.close"]
+        }
+      }
     }
   }
 }

@@ -32,11 +32,13 @@ export const tasksColumns: ColumnDef<Task>[] = [
     enableHiding: false,
   },
   {
-    accessorKey: 'id',
+    accessorKey: 'taskNumber',
     header: ({ column }) => (
       <DataTableColumnHeader column={column} title='Task' />
     ),
-    cell: ({ row }) => <div className='w-[80px]'>{row.getValue('id')}</div>,
+    cell: ({ row }) => (
+      <div className='w-[90px] font-medium'>{row.getValue('taskNumber')}</div>
+    ),
     enableSorting: false,
     enableHiding: false,
   },
@@ -53,10 +55,51 @@ export const tasksColumns: ColumnDef<Task>[] = [
       const label = labels.find((label) => label.value === row.original.label)
 
       return (
-        <div className='flex space-x-2'>
+        <div className='flex min-w-0 items-center gap-2'>
           {label && <Badge variant='outline'>{label.label}</Badge>}
-          <span className='truncate font-medium'>{row.getValue('title')}</span>
+          <div className='min-w-0'>
+            <p className='truncate font-medium'>{row.getValue('title')}</p>
+            <p className='truncate text-xs text-muted-foreground'>
+              {row.original.project?.name || 'Project'}{' '}
+              {row.original.activity?.activityCode
+                ? `- ${row.original.activity.activityCode}`
+                : ''}
+            </p>
+          </div>
         </div>
+      )
+    },
+  },
+  {
+    accessorKey: 'assigneeName',
+    header: ({ column }) => (
+      <DataTableColumnHeader column={column} title='Assignee' />
+    ),
+    meta: { className: 'ps-1', tdClassName: 'ps-4' },
+    cell: ({ row }) => (
+      <span className='text-sm'>
+        {row.original.assignee?.name || row.original.assigneeName || 'Unassigned'}
+      </span>
+    ),
+  },
+  {
+    accessorKey: 'dueDate',
+    header: ({ column }) => (
+      <DataTableColumnHeader column={column} title='Due' />
+    ),
+    meta: { className: 'ps-1', tdClassName: 'ps-4' },
+    cell: ({ row }) => {
+      const dueDate = row.original.dueDate
+      if (!dueDate) return <span className='text-muted-foreground'>No date</span>
+      const label = new Date(dueDate).toLocaleDateString()
+      return (
+        <span
+          className={
+            row.original.isOverdue ? 'font-medium text-destructive' : undefined
+          }
+        >
+          {label}
+        </span>
       )
     },
   },

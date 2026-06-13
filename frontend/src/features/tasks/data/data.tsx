@@ -6,31 +6,48 @@ import {
   CheckCircle,
   AlertCircle,
   Timer,
-  HelpCircle,
+  PauseCircle,
+  ClipboardCheck,
+  FileText,
+  Hammer,
+  ShieldCheck,
+  Truck,
+  BadgeDollarSign,
   CircleOff,
 } from 'lucide-react'
 
 export const labels = [
   {
-    value: 'bug',
-    label: 'Bug',
+    value: 'action',
+    label: 'Action',
   },
   {
-    value: 'feature',
-    label: 'Feature',
+    value: 'field',
+    label: 'Field',
   },
   {
-    value: 'documentation',
-    label: 'Documentation',
+    value: 'procurement',
+    label: 'Procurement',
+  },
+  {
+    value: 'quality',
+    label: 'Quality',
+  },
+  {
+    value: 'safety',
+    label: 'Safety',
+  },
+  {
+    value: 'commercial',
+    label: 'Commercial',
+  },
+  {
+    value: 'document',
+    label: 'Document',
   },
 ]
 
 export const statuses = [
-  {
-    label: 'Backlog',
-    value: 'backlog' as const,
-    icon: HelpCircle,
-  },
   {
     label: 'Todo',
     value: 'todo' as const,
@@ -38,8 +55,13 @@ export const statuses = [
   },
   {
     label: 'In Progress',
-    value: 'in progress' as const,
+    value: 'in_progress' as const,
     icon: Timer,
+  },
+  {
+    label: 'Blocked',
+    value: 'blocked' as const,
+    icon: PauseCircle,
   },
   {
     label: 'Done',
@@ -52,6 +74,16 @@ export const statuses = [
     icon: CircleOff,
   },
 ]
+
+export const labelIcons = {
+  action: ClipboardCheck,
+  field: Hammer,
+  procurement: Truck,
+  quality: ShieldCheck,
+  safety: AlertCircle,
+  commercial: BadgeDollarSign,
+  document: FileText,
+}
 
 export const priorities = [
   {

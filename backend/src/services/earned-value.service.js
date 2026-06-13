@@ -1,38 +1,62 @@
-const { prisma } = require('../config/db');
-const { HttpError } = require('../utils/http-error');
+const { prisma } = require("../config/db");
+const { HttpError } = require("../utils/http-error");
 const {
   addMoney,
   divideMoney,
   multiplyMoney,
   subtractMoney,
   toMoneyNumber,
-} = require('../utils/money');
+} = require("../utils/money");
 const {
   buildAllocationSummary,
   getApprovedActivityAllocationTotals,
-} = require('./activity-boq-allocation.service');
-const approvalWorkflowService = require('./approval-workflow.service');
+} = require("./activity-boq-allocation.service");
+const approvalWorkflowService = require("./approval-workflow.service");
+const auditService = require("./audit.service");
+const setupReadinessService = require("./project-setup-readiness.service");
+const { normalizeRoleId } = require("../config/permissions");
 
-const FORMULA_VERSION = 'ev.v2';
-const APPROVED = 'approved';
-const OPEN_PERIOD = 'open';
-const LOCKED_PERIOD = 'locked';
+const FORMULA_VERSION = "ev.v2";
+const APPROVED = "approved";
+const OPEN_PERIOD = "open";
+const LOCKED_PERIOD = "locked";
+
+const OFFICIAL_DATA_INPUTS = Object.freeze([
+  {
+    key: "approved_allocations",
+    label: "Approved allocations",
+    source: "ActivityBoqAllocation",
+    requiredStatus: APPROVED,
+  },
+  {
+    key: "approved_progress",
+    label: "Approved progress",
+    source: "ActivityProgress",
+    requiredStatus: APPROVED,
+  },
+  {
+    key: "approved_cost_loading",
+    label: "Approved cost loading",
+    source: "ActivityCostLoading",
+    requiredStatus: APPROVED,
+  },
+]);
 
 const EV_FORMULAS = Object.freeze({
-  pv: 'PV = sum(approved ActivityCostLoading.plannedValue where plannedDate <= cutoffDate)',
-  ev: 'EV = sum(approved ActivityBoqAllocation.amount * latest approved ActivityProgress.pctComplete approved on/before cutoffDate / 100)',
-  ac: 'AC = sum(latest CostRecord.actual by activity where CostRecord.actualThroughDate <= cutoffDate)',
-  spi: 'SPI = EV / PV when PV > 0; otherwise null',
-  cpi: 'CPI = EV / AC when AC > 0; otherwise null',
-  eac: 'EAC = revised BAC / CPI when CPI > 0; otherwise revised BAC',
+  pv: "PV = sum(approved ActivityCostLoading.plannedValue where plannedDate <= cutoffDate)",
+  ev: "EV = sum(approved ActivityBoqAllocation.amount * latest approved ActivityProgress.pctComplete approved on/before cutoffDate / 100)",
+  ac: "AC = sum(latest CostRecord.actual by activity where CostRecord.actualThroughDate <= cutoffDate)",
+  spi: "SPI = EV / PV when PV > 0; otherwise null",
+  cpi: "CPI = EV / AC when AC > 0; otherwise null",
+  eac: "EAC = revised BAC / CPI when CPI > 0; otherwise revised BAC",
   cutoff:
-    'A reporting period cutoffDate is authoritative. Ad hoc cutoffDate is allowed for open calculations but is not a locked snapshot.',
+    "A reporting period cutoffDate is authoritative. Ad hoc cutoffDate is allowed for open calculations but is not a locked snapshot.",
   budgetRevisions:
-    'Approved BudgetRevision rows effective on/before cutoffDate adjust revised BAC. PV still requires approved time-phased cost loading.',
+    "Approved BudgetRevision rows effective on/before cutoffDate adjust revised BAC. PV still requires approved time-phased cost loading.",
   progressMethods:
-    'Official EV uses approved ActivityProgress.pctComplete. Quantity, weighted milestone, inspection, manual, and percent submissions are calculated at approval time and do not affect EV while draft, submitted, or rejected.',
+    "Official EV uses approved ActivityProgress.pctComplete. Quantity, weighted milestone, inspection, manual, and percent submissions are calculated at approval time and do not affect EV while draft, submitted, or rejected.",
   actualCosts:
-    'Official AC requires CostRecord.actualThroughDate. Progress actualCost fields are shown as estimates only and are excluded from official CPI/EAC.',
+    "Official AC requires CostRecord.actualThroughDate. Progress actualCost fields are shown as estimates only and are excluded from official CPI/EAC.",
 });
 
 const toNumber = (value, fallback = 0) => {
@@ -42,10 +66,10 @@ const toNumber = (value, fallback = 0) => {
 
 const clampPercent = (value) => Math.max(0, Math.min(100, toNumber(value)));
 
-const parseDate = (value, field = 'date') => {
+const parseDate = (value, field = "date") => {
   const date = value instanceof Date ? new Date(value) : new Date(value);
   if (Number.isNaN(date.getTime())) {
-    throw new HttpError(400, 'INVALID_DATE', `${field} is invalid`);
+    throw new HttpError(400, "INVALID_DATE", `${field} is invalid`);
   }
   return date;
 };
@@ -66,7 +90,8 @@ const isOnOrBefore = (value, cutoffDate) => {
   return !Number.isNaN(date.getTime()) && date <= cutoffDate;
 };
 
-const progressEffectiveDate = (row) => row?.approvedAt || row?.updatedAt || null;
+const progressEffectiveDate = (row) =>
+  row?.approvedAt || row?.updatedAt || null;
 
 const selectApprovedProgressForCutoff = (rows = [], cutoffDate) => {
   const candidates = rows
@@ -94,7 +119,7 @@ const buildMonthStart = (date) =>
   new Date(date.getFullYear(), date.getMonth(), 1);
 
 const formatMonthLabel = (date) =>
-  date.toLocaleDateString('en-GB', { month: 'short', year: '2-digit' });
+  date.toLocaleDateString("en-GB", { month: "short", year: "2-digit" });
 
 const addDays = (date, days) => {
   const next = new Date(date);
@@ -110,7 +135,12 @@ const resolveReportingCutoffDay = (project) => {
 
 const computeBudgetRevisionDelta = (row) => {
   const amount = toMoneyNumber(row.amount);
-  return row.changeType === 'deduction' ? -amount : amount;
+  return row.changeType === "deduction" ? -amount : amount;
+};
+
+const trimOrNull = (value) => {
+  const text = String(value || "").trim();
+  return text || null;
 };
 
 const computeEvMetrics = ({ totalBudget, pv, ev, ac }) => {
@@ -147,7 +177,7 @@ const ensureProject = async ({ orgId, projectId }, tx = prisma) => {
   });
 
   if (!project) {
-    throw new HttpError(404, 'PROJECT_NOT_FOUND', 'Project not found');
+    throw new HttpError(404, "PROJECT_NOT_FOUND", "Project not found");
   }
 
   return project;
@@ -200,8 +230,8 @@ const resolveReportingPeriod = async (
     if (!period) {
       throw new HttpError(
         404,
-        'REPORTING_PERIOD_NOT_FOUND',
-        'Reporting period not found',
+        "REPORTING_PERIOD_NOT_FOUND",
+        "Reporting period not found",
       );
     }
 
@@ -211,13 +241,13 @@ const resolveReportingPeriod = async (
   if (cutoffDate) {
     return buildVirtualPeriod({
       project,
-      cutoffDate: parseDate(cutoffDate, 'cutoffDate'),
+      cutoffDate: parseDate(cutoffDate, "cutoffDate"),
     });
   }
 
   const latest = await tx.reportingPeriod.findFirst({
     where: { projectId: project.id },
-    orderBy: [{ cutoffDate: 'desc' }, { createdAt: 'desc' }],
+    orderBy: [{ cutoffDate: "desc" }, { createdAt: "desc" }],
     include: { evSnapshot: true },
   });
 
@@ -234,7 +264,7 @@ const getApprovedBudgetRevisions = async (
       status: APPROVED,
       OR: [{ effectiveDate: null }, { effectiveDate: { lte: cutoffDate } }],
     },
-    orderBy: [{ effectiveDate: 'asc' }, { createdAt: 'asc' }],
+    orderBy: [{ effectiveDate: "asc" }, { createdAt: "asc" }],
   });
 
 const getApprovedCostLoadings = async (
@@ -248,8 +278,41 @@ const getApprovedCostLoadings = async (
       plannedDate: { lte: cutoffDate },
       activity: { isActive: true },
     },
-    orderBy: [{ plannedDate: 'asc' }, { createdAt: 'asc' }],
+    orderBy: [{ plannedDate: "asc" }, { createdAt: "asc" }],
   });
+
+const buildOfficialDataInputs = ({
+  approvedAllocatedAmount,
+  approvedProgressCount,
+  costLoadingCount,
+}) =>
+  OFFICIAL_DATA_INPUTS.map((input) => {
+    if (input.key === "approved_allocations") {
+      return {
+        ...input,
+        appliedAmount: toMoneyNumber(approvedAllocatedAmount),
+      };
+    }
+
+    if (input.key === "approved_progress") {
+      return {
+        ...input,
+        appliedCount: Number(approvedProgressCount || 0),
+      };
+    }
+
+    if (input.key === "approved_cost_loading") {
+      return {
+        ...input,
+        appliedCount: Number(costLoadingCount || 0),
+      };
+    }
+
+    return input;
+  });
+
+const getReportingGate = async ({ orgId, projectId }) =>
+  setupReadinessService.getOfficialReportingGate({ orgId, projectId });
 
 const getOfficialActualCostMap = async (
   { projectId, cutoffDate },
@@ -261,7 +324,7 @@ const getOfficialActualCostMap = async (
       actualThroughDate: { not: null, lte: cutoffDate },
       activity: { isActive: true },
     },
-    orderBy: [{ actualThroughDate: 'desc' }, { updatedAt: 'desc' }],
+    orderBy: [{ actualThroughDate: "desc" }, { updatedAt: "desc" }],
   });
 
   return rows.reduce((map, row) => {
@@ -272,7 +335,7 @@ const getOfficialActualCostMap = async (
     if (!map.has(row.activityId)) {
       map.set(row.activityId, {
         amount: toMoneyNumber(row.actual),
-        source: 'cost_record.actual_through_date',
+        source: "cost_record.actual_through_date",
         actualThroughDate: row.actualThroughDate,
         updatedAt: row.updatedAt,
       });
@@ -283,7 +346,10 @@ const getOfficialActualCostMap = async (
 
 const buildPvByActivity = (costLoadings) =>
   costLoadings.reduce((map, row) => {
-    map.set(row.activityId, addMoney(map.get(row.activityId) || 0, row.plannedValue));
+    map.set(
+      row.activityId,
+      addMoney(map.get(row.activityId) || 0, row.plannedValue),
+    );
     return map;
   }, new Map());
 
@@ -312,7 +378,7 @@ const buildOfficialSCurveData = ({ costLoadings, cutoffDate, ev }) => {
 
   while (cursor <= finish) {
     const monthEnd = new Date(cursor.getFullYear(), cursor.getMonth() + 1, 0);
-      const pv = costLoadings
+    const pv = costLoadings
       .filter((row) => new Date(row.plannedDate) <= monthEnd)
       .reduce((sum, row) => addMoney(sum, row.plannedValue), 0);
 
@@ -328,7 +394,12 @@ const buildOfficialSCurveData = ({ costLoadings, cutoffDate, ev }) => {
   return rows;
 };
 
-const buildEstimateValues = ({ project, activities, cutoffDate, allocationTotals }) =>
+const buildEstimateValues = ({
+  project,
+  activities,
+  cutoffDate,
+  allocationTotals,
+}) =>
   activities.reduce(
     (acc, activity) => {
       const budget = toNumber(allocationTotals.get(activity.id)?.amount);
@@ -395,10 +466,12 @@ const snapshotToReport = ({ snapshot, period }) => {
     sourceSummary: basisJson.sourceSummary || {},
     estimates: basisJson.estimates || {},
     basisWarnings: basisJson.basisWarnings || [],
+    readinessGate: basisJson.readinessGate || null,
+    readinessOverride: basisJson.readinessOverride || null,
+    officialDataInputs: basisJson.officialDataInputs || OFFICIAL_DATA_INPUTS,
     unallocatedBoqAmount: basisJson.unallocatedBoqAmount || 0,
     approvedAllocatedAmount: basisJson.approvedAllocatedAmount || 0,
-    approvedBudgetRevisionDelta:
-      basisJson.approvedBudgetRevisionDelta || 0,
+    approvedBudgetRevisionDelta: basisJson.approvedBudgetRevisionDelta || 0,
     sCurve: snapshot.sCurveJson || [],
     activityBreakdown: snapshot.activityBreakdownJson || [],
     alerts: basisJson.alerts || {
@@ -415,6 +488,7 @@ const buildOfficialEvReport = async ({
   periodId = null,
   cutoffDate = null,
   useLockedSnapshot = true,
+  includeReadiness = true,
   tx = prisma,
 }) => {
   const project = await ensureProject({ orgId, projectId }, tx);
@@ -435,6 +509,7 @@ const buildOfficialEvReport = async ({
     costLoadings,
     actualCostMap,
     budgetRevisions,
+    reportingGate,
   ] = await Promise.all([
     tx.activity.findMany({
       where: { projectId, isActive: true },
@@ -450,11 +525,11 @@ const buildOfficialEvReport = async ({
               },
             ],
           },
-          orderBy: [{ approvedAt: 'desc' }, { updatedAt: 'desc' }],
+          orderBy: [{ approvedAt: "desc" }, { updatedAt: "desc" }],
           take: 5,
         },
       },
-      orderBy: { sortOrder: 'asc' },
+      orderBy: { sortOrder: "asc" },
     }),
     getApprovedActivityAllocationTotals({ projectId }, tx),
     buildAllocationSummary({ projectId }, tx),
@@ -464,6 +539,7 @@ const buildOfficialEvReport = async ({
       { projectId, cutoffDate: resolvedCutoffDate },
       tx,
     ),
+    includeReadiness ? getReportingGate({ orgId, projectId }) : null,
   ]);
 
   const pvByActivity = buildPvByActivity(costLoadings);
@@ -511,29 +587,29 @@ const buildOfficialEvReport = async ({
 
     return {
       activityDbId: activity.id,
-      activityId: activity.p6ActivityId || activity.wbsCode || activity.id,
+      activityId: activity.activityCode || activity.p6ActivityId || activity.id,
       name: activity.name,
       budget,
       pv: activityPv,
       ev: activityEv,
       ac: actualCost,
-      actualCostSource: officialActual?.source || 'missing_official_actual',
+      actualCostSource: officialActual?.source || "missing_official_actual",
       officialActualThroughDate: toIso(officialActual?.actualThroughDate),
       officialActualUpdatedAt: toIso(officialActual?.updatedAt),
       estimatedActualCost,
       estimatedActualCostSource:
         progress?.actualCost !== null && progress?.actualCost !== undefined
-          ? 'activity_progress.actualCost_estimate'
-          : 'progress_percent_budget_1.03_estimate',
+          ? "activity_progress.actualCost_estimate"
+          : "progress_percent_budget_1.03_estimate",
       pct: Number(pct.toFixed(2)),
-      progressMethod: progress?.progressMethod || 'percent_complete',
-      progressStatus: progress?.status || 'missing',
+      progressMethod: progress?.progressMethod || "percent_complete",
+      progressStatus: progress?.status || "missing",
       quantityComplete: progress?.quantityComplete ?? null,
       quantityPlanned: progress?.quantityPlanned ?? null,
       quantityUnit: progress?.quantityUnit ?? null,
       inspectionStatus: progress?.inspectionStatus ?? null,
       hasEvidence: Boolean(progress?.evidenceJson),
-      status: pct >= 100 ? 'complete' : pct > 0 ? 'in_progress' : 'todo',
+      status: pct >= 100 ? "complete" : pct > 0 ? "in_progress" : "todo",
       isCritical: activity.isCritical,
     };
   });
@@ -545,7 +621,10 @@ const buildOfficialEvReport = async ({
   const approvedAllocatedAmount = toMoneyNumber(
     allocationSummary.approvedAllocatedAmount,
   );
-  const totalBudget = addMoney(approvedAllocatedAmount, approvedBudgetRevisionDelta);
+  const totalBudget = addMoney(
+    approvedAllocatedAmount,
+    approvedBudgetRevisionDelta,
+  );
   const metrics = computeEvMetrics({ totalBudget, pv, ev, ac });
   const estimates = buildEstimateValues({
     project,
@@ -565,9 +644,15 @@ const buildOfficialEvReport = async ({
   }));
   const basisWarnings = [];
 
+  if (reportingGate && !reportingGate.ready) {
+    basisWarnings.push(
+      `Official reporting readiness is incomplete: ${reportingGate.message}`,
+    );
+  }
+
   if (costLoadings.length === 0 && approvedAllocatedAmount > 0) {
     basisWarnings.push(
-      'No approved time-phased cost loading is available through this cutoff; official PV is zero.',
+      "No approved time-phased cost loading is available through this cutoff; official PV is zero.",
     );
   }
 
@@ -585,42 +670,47 @@ const buildOfficialEvReport = async ({
 
   if (period.isVirtual) {
     basisWarnings.push(
-      'This is an open ad hoc calculation, not a locked reporting-period snapshot.',
+      "This is an open ad hoc calculation, not a locked reporting-period snapshot.",
     );
   }
 
   if (approvedBudgetRevisionDelta !== 0) {
     basisWarnings.push(
-      'Approved budget revisions adjust revised BAC; distribute revisions through approved cost loading and allocations to affect PV/EV.',
+      "Approved budget revisions adjust revised BAC; distribute revisions through approved cost loading and allocations to affect PV/EV.",
     );
   }
 
   const sourceSummary = {
     pv: {
-      source: 'approved_time_phased_cost_loading',
+      source: "approved_time_phased_cost_loading",
       approvedRows: costLoadings.length,
       plannedValueThroughCutoff: pv,
     },
     ev: {
-      source: 'approved_progress_x_approved_allocations',
+      source: "approved_progress_x_approved_allocations",
       approvedProgressActivities: approvedProgressCount,
       missingProgressActivities: missingProgressCount,
       legacyProgressDateFallbackActivities,
     },
     ac: {
-      officialSourcePriority: ['cost_record.actual_through_date'],
+      officialSourcePriority: ["cost_record.actual_through_date"],
       officialActualActivities,
       missingActualActivities,
       estimatesExcludedFromOfficialAc: true,
     },
     budget: {
-      source: 'approved_allocations_plus_approved_budget_revisions',
+      source: "approved_allocations_plus_approved_budget_revisions",
       approvedAllocatedAmount,
       approvedBudgetRevisionDelta,
       revisedBudgetAtCutoff: totalBudget,
       appliedBudgetRevisions,
     },
   };
+  const officialDataInputs = buildOfficialDataInputs({
+    approvedAllocatedAmount,
+    approvedProgressCount,
+    costLoadingCount: costLoadings.length,
+  });
   const alerts = {
     spiAlert: metrics.spi !== null && metrics.spi < 0.9,
     cpiAlert: metrics.cpi !== null && metrics.cpi < 0.9,
@@ -642,11 +732,14 @@ const buildOfficialEvReport = async ({
     estimates: {
       ...estimates,
       labels: {
-        pv: 'Prototype schedule estimate; not official PV',
-        ac: 'Prototype AC estimate; excluded from official AC',
+        pv: "Prototype schedule estimate; not official PV",
+        ac: "Prototype AC estimate; excluded from official AC",
       },
     },
     basisWarnings,
+    readinessGate: reportingGate,
+    readinessOverride: null,
+    officialDataInputs,
     unallocatedBoqAmount: toMoneyNumber(allocationSummary.unallocatedAmount),
     approvedAllocatedAmount,
     approvedBudgetRevisionDelta,
@@ -698,7 +791,7 @@ const listReportingPeriods = async ({ orgId, projectId }) => {
         },
       },
     },
-    orderBy: [{ cutoffDate: 'desc' }, { createdAt: 'desc' }],
+    orderBy: [{ cutoffDate: "desc" }, { createdAt: "desc" }],
   });
 
   return {
@@ -722,17 +815,19 @@ const listReportingPeriods = async ({ orgId, projectId }) => {
 
 const createReportingPeriod = async ({ orgId, projectId, userId, payload }) => {
   await ensureProject({ orgId, projectId });
-  const periodStart = parseDate(payload.periodStart, 'periodStart');
-  const periodEnd = parseDate(payload.periodEnd, 'periodEnd');
+  const periodStart = parseDate(payload.periodStart, "periodStart");
+  const periodEnd = parseDate(payload.periodEnd, "periodEnd");
   const cutoffDate = endOfDay(
-    payload.cutoffDate ? parseDate(payload.cutoffDate, 'cutoffDate') : periodEnd,
+    payload.cutoffDate
+      ? parseDate(payload.cutoffDate, "cutoffDate")
+      : periodEnd,
   );
 
   if (periodEnd < periodStart) {
     throw new HttpError(
       400,
-      'INVALID_REPORTING_PERIOD_DATES',
-      'periodEnd must be on or after periodStart',
+      "INVALID_REPORTING_PERIOD_DATES",
+      "periodEnd must be on or after periodStart",
     );
   }
 
@@ -740,7 +835,7 @@ const createReportingPeriod = async ({ orgId, projectId, userId, payload }) => {
     payload.code?.trim() ||
     `${cutoffDate.getFullYear()}-${String(cutoffDate.getMonth() + 1).padStart(
       2,
-      '0',
+      "0",
     )}`;
 
   return prisma.reportingPeriod.create({
@@ -760,8 +855,8 @@ const ensurePeriodEditable = (period) => {
   if (period?.status === LOCKED_PERIOD) {
     throw new HttpError(
       409,
-      'REPORTING_PERIOD_LOCKED',
-      'Reporting period is locked',
+      "REPORTING_PERIOD_LOCKED",
+      "Reporting period is locked",
     );
   }
 };
@@ -775,8 +870,8 @@ const ensureCostLoading = async ({ projectId, costLoadingId }, tx = prisma) => {
   if (!row) {
     throw new HttpError(
       404,
-      'COST_LOADING_NOT_FOUND',
-      'Activity cost loading not found',
+      "COST_LOADING_NOT_FOUND",
+      "Activity cost loading not found",
     );
   }
 
@@ -812,14 +907,15 @@ const listCostLoadings = async ({ orgId, projectId, status }) => {
   await ensureProject({ orgId, projectId });
   const rows = await prisma.activityCostLoading.findMany({
     where: { projectId, status: status || undefined },
-    orderBy: [{ plannedDate: 'asc' }, { createdAt: 'asc' }],
+    orderBy: [{ plannedDate: "asc" }, { createdAt: "asc" }],
   });
 
-  const approvalHistoryById = await approvalWorkflowService.listEventsForRecords({
-    projectId,
-    recordType: approvalWorkflowService.RECORD_TYPES.ACTIVITY_COST_LOADING,
-    recordIds: rows.map((row) => row.id),
-  });
+  const approvalHistoryById =
+    await approvalWorkflowService.listEventsForRecords({
+      projectId,
+      recordType: approvalWorkflowService.RECORD_TYPES.ACTIVITY_COST_LOADING,
+      recordIds: rows.map((row) => row.id),
+    });
 
   return rows.map((row) =>
     serializeCostLoading(row, {
@@ -828,19 +924,25 @@ const listCostLoadings = async ({ orgId, projectId, status }) => {
   );
 };
 
-const assertActivityInProject = async ({ projectId, activityId }, tx = prisma) => {
+const assertActivityInProject = async (
+  { projectId, activityId },
+  tx = prisma,
+) => {
   const activity = await tx.activity.findFirst({
     where: { id: activityId, projectId, isActive: true },
   });
 
   if (!activity) {
-    throw new HttpError(404, 'ACTIVITY_NOT_FOUND', 'Activity not found');
+    throw new HttpError(404, "ACTIVITY_NOT_FOUND", "Activity not found");
   }
 
   return activity;
 };
 
-const ensurePeriodInProject = async ({ projectId, reportingPeriodId }, tx = prisma) => {
+const ensurePeriodInProject = async (
+  { projectId, reportingPeriodId },
+  tx = prisma,
+) => {
   if (!reportingPeriodId) return null;
 
   const period = await tx.reportingPeriod.findFirst({
@@ -850,8 +952,8 @@ const ensurePeriodInProject = async ({ projectId, reportingPeriodId }, tx = pris
   if (!period) {
     throw new HttpError(
       404,
-      'REPORTING_PERIOD_NOT_FOUND',
-      'Reporting period not found',
+      "REPORTING_PERIOD_NOT_FOUND",
+      "Reporting period not found",
     );
   }
 
@@ -877,21 +979,21 @@ const createCostLoading = async ({
       tx,
     );
 
-    const status = payload.status || 'draft';
+    const status = payload.status || "draft";
     const now = new Date();
     const row = await tx.activityCostLoading.create({
       data: {
         projectId,
         activityId: payload.activityId,
         reportingPeriodId: payload.reportingPeriodId || null,
-        plannedDate: parseDate(payload.plannedDate, 'plannedDate'),
+        plannedDate: parseDate(payload.plannedDate, "plannedDate"),
         plannedValue: toMoneyNumber(payload.plannedValue),
-        source: payload.source || 'manual',
+        source: payload.source || "manual",
         baselineVersion: payload.baselineVersion?.trim() || null,
         status,
         notes: payload.notes?.trim() || null,
-        submittedBy: status === 'submitted' ? userId || null : null,
-        submittedAt: status === 'submitted' ? now : null,
+        submittedBy: status === "submitted" ? userId || null : null,
+        submittedAt: status === "submitted" ? now : null,
         approvedBy: status === APPROVED ? userId || null : null,
         approvedAt: status === APPROVED ? now : null,
         createdBy: userId || null,
@@ -934,8 +1036,8 @@ const updateCostLoading = async ({
     if (existing.status === APPROVED) {
       throw new HttpError(
         400,
-        'COST_LOADING_NOT_EDITABLE',
-        'Approved cost loading cannot be edited',
+        "COST_LOADING_NOT_EDITABLE",
+        "Approved cost loading cannot be edited",
       );
     }
 
@@ -945,7 +1047,10 @@ const updateCostLoading = async ({
         ? payload.reportingPeriodId || null
         : existing.reportingPeriodId;
 
-    await assertActivityInProject({ projectId, activityId: nextActivityId }, tx);
+    await assertActivityInProject(
+      { projectId, activityId: nextActivityId },
+      tx,
+    );
     await ensurePeriodInProject(
       { projectId, reportingPeriodId: nextPeriodId },
       tx,
@@ -958,7 +1063,7 @@ const updateCostLoading = async ({
         reportingPeriodId: nextPeriodId,
         plannedDate:
           payload.plannedDate !== undefined
-            ? parseDate(payload.plannedDate, 'plannedDate')
+            ? parseDate(payload.plannedDate, "plannedDate")
             : existing.plannedDate,
         plannedValue:
           payload.plannedValue !== undefined
@@ -992,11 +1097,11 @@ const submitCostLoading = async ({
     const existing = await ensureCostLoading({ projectId, costLoadingId }, tx);
     ensurePeriodEditable(existing.reportingPeriod);
 
-    if (!['draft', 'rejected'].includes(existing.status)) {
+    if (!["draft", "rejected"].includes(existing.status)) {
       throw new HttpError(
         400,
-        'INVALID_COST_LOADING_STATUS',
-        'Only draft or rejected cost loading can be submitted',
+        "INVALID_COST_LOADING_STATUS",
+        "Only draft or rejected cost loading can be submitted",
       );
     }
 
@@ -1004,7 +1109,7 @@ const submitCostLoading = async ({
     const row = await tx.activityCostLoading.update({
       where: { id: costLoadingId },
       data: {
-        status: 'submitted',
+        status: "submitted",
         submittedBy: userId || null,
         submittedAt: now,
         rejectedBy: null,
@@ -1051,11 +1156,11 @@ const approveCostLoading = async ({
       return serializeCostLoading(existing);
     }
 
-    if (existing.status !== 'submitted') {
+    if (existing.status !== "submitted") {
       throw new HttpError(
         400,
-        'INVALID_COST_LOADING_STATUS',
-        'Only submitted cost loading can be approved',
+        "INVALID_COST_LOADING_STATUS",
+        "Only submitted cost loading can be approved",
       );
     }
 
@@ -1106,20 +1211,20 @@ const rejectCostLoading = async ({
     const existing = await ensureCostLoading({ projectId, costLoadingId }, tx);
     ensurePeriodEditable(existing.reportingPeriod);
 
-    const rejectionReason = String(reason || '').trim();
+    const rejectionReason = String(reason || "").trim();
     if (!rejectionReason) {
       throw new HttpError(
         400,
-        'REJECT_REASON_REQUIRED',
-        'A rejection reason is required',
+        "REJECT_REASON_REQUIRED",
+        "A rejection reason is required",
       );
     }
 
-    if (existing.status !== 'submitted') {
+    if (existing.status !== "submitted") {
       throw new HttpError(
         400,
-        'INVALID_COST_LOADING_STATUS',
-        'Only submitted cost loading can be rejected',
+        "INVALID_COST_LOADING_STATUS",
+        "Only submitted cost loading can be rejected",
       );
     }
 
@@ -1127,7 +1232,7 @@ const rejectCostLoading = async ({
     const row = await tx.activityCostLoading.update({
       where: { id: costLoadingId },
       data: {
-        status: 'rejected',
+        status: "rejected",
         rejectedBy: userId || null,
         rejectedAt: now,
         rejectedReason,
@@ -1157,7 +1262,53 @@ const rejectCostLoading = async ({
     return serializeCostLoading(row);
   });
 
-const lockReportingPeriod = async ({ orgId, projectId, periodId, userId }) =>
+const resolveReportingReadinessOverride = async ({
+  orgId,
+  projectId,
+  userId,
+  userRole,
+  overrideReason,
+}) => {
+  const gate = await getReportingGate({ orgId, projectId });
+  if (!gate || gate.ready) {
+    return { gate, override: null };
+  }
+
+  const reason = trimOrNull(overrideReason);
+  if (!reason) {
+    throw new HttpError(409, "REPORTING_READINESS_BLOCKED", gate.message, {
+      gate,
+    });
+  }
+
+  if (normalizeRoleId(userRole) !== "pm") {
+    throw new HttpError(
+      403,
+      "REPORTING_READINESS_OVERRIDE_FORBIDDEN",
+      "Only the Project Manager can override official reporting readiness gates.",
+      { gate },
+    );
+  }
+
+  return {
+    gate,
+    override: {
+      reason,
+      actorId: userId || null,
+      actorRole: normalizeRoleId(userRole) || userRole || null,
+      overriddenAt: new Date().toISOString(),
+    },
+  };
+};
+
+const lockReportingPeriod = async ({
+  orgId,
+  projectId,
+  periodId,
+  userId,
+  userRole = null,
+  overrideReason = null,
+}) =>
   prisma.$transaction(async (tx) => {
     const project = await ensureProject({ orgId, projectId }, tx);
     const period = await tx.reportingPeriod.findFirst({
@@ -1168,8 +1319,8 @@ const lockReportingPeriod = async ({ orgId, projectId, periodId, userId }) =>
     if (!period) {
       throw new HttpError(
         404,
-        'REPORTING_PERIOD_NOT_FOUND',
-        'Reporting period not found',
+        "REPORTING_PERIOD_NOT_FOUND",
+        "Reporting period not found",
       );
     }
 
@@ -1177,20 +1328,45 @@ const lockReportingPeriod = async ({ orgId, projectId, periodId, userId }) =>
       return snapshotToReport({ snapshot: period.evSnapshot, period });
     }
 
+    const { gate: readinessGate, override: readinessOverride } =
+      await resolveReportingReadinessOverride({
+        orgId,
+        projectId,
+        userId,
+        userRole,
+        overrideReason,
+      });
+
     const report = await buildOfficialEvReport({
       orgId,
       projectId,
       periodId,
       useLockedSnapshot: false,
+      includeReadiness: false,
       tx,
     });
+    const snapshotBasis = {
+      reporting: report.reporting,
+      basis: report.basis,
+      sourceSummary: report.sourceSummary,
+      estimates: report.estimates,
+      basisWarnings: report.basisWarnings,
+      alerts: report.alerts,
+      unallocatedBoqAmount: report.unallocatedBoqAmount,
+      approvedAllocatedAmount: report.approvedAllocatedAmount,
+      approvedBudgetRevisionDelta: report.approvedBudgetRevisionDelta,
+      projectCalendar: project.projectCalendar || null,
+      readinessGate,
+      readinessOverride,
+      officialDataInputs: report.officialDataInputs,
+    };
     const now = new Date();
     const snapshot = await tx.evPeriodSnapshot.upsert({
       where: { reportingPeriodId: periodId },
       create: {
         projectId,
         reportingPeriodId: periodId,
-        cutoffDate: parseDate(report.reporting.cutoffDate, 'cutoffDate'),
+        cutoffDate: parseDate(report.reporting.cutoffDate, "cutoffDate"),
         formulaVersion: FORMULA_VERSION,
         totalBudget: report.totalBudget,
         pv: report.pv,
@@ -1202,25 +1378,14 @@ const lockReportingPeriod = async ({ orgId, projectId, periodId, userId }) =>
         sv: report.sv,
         cv: report.cv,
         etc: report.etc,
-        basisJson: {
-          reporting: report.reporting,
-          basis: report.basis,
-          sourceSummary: report.sourceSummary,
-          estimates: report.estimates,
-          basisWarnings: report.basisWarnings,
-          alerts: report.alerts,
-          unallocatedBoqAmount: report.unallocatedBoqAmount,
-          approvedAllocatedAmount: report.approvedAllocatedAmount,
-          approvedBudgetRevisionDelta: report.approvedBudgetRevisionDelta,
-          projectCalendar: project.projectCalendar || null,
-        },
+        basisJson: snapshotBasis,
         sCurveJson: report.sCurve,
         activityBreakdownJson: report.activityBreakdown,
         lockedBy: userId || null,
         lockedAt: now,
       },
       update: {
-        cutoffDate: parseDate(report.reporting.cutoffDate, 'cutoffDate'),
+        cutoffDate: parseDate(report.reporting.cutoffDate, "cutoffDate"),
         formulaVersion: FORMULA_VERSION,
         totalBudget: report.totalBudget,
         pv: report.pv,
@@ -1232,18 +1397,7 @@ const lockReportingPeriod = async ({ orgId, projectId, periodId, userId }) =>
         sv: report.sv,
         cv: report.cv,
         etc: report.etc,
-        basisJson: {
-          reporting: report.reporting,
-          basis: report.basis,
-          sourceSummary: report.sourceSummary,
-          estimates: report.estimates,
-          basisWarnings: report.basisWarnings,
-          alerts: report.alerts,
-          unallocatedBoqAmount: report.unallocatedBoqAmount,
-          approvedAllocatedAmount: report.approvedAllocatedAmount,
-          approvedBudgetRevisionDelta: report.approvedBudgetRevisionDelta,
-          projectCalendar: project.projectCalendar || null,
-        },
+        basisJson: snapshotBasis,
         sCurveJson: report.sCurve,
         activityBreakdownJson: report.activityBreakdown,
         lockedBy: userId || null,
@@ -1260,6 +1414,37 @@ const lockReportingPeriod = async ({ orgId, projectId, periodId, userId }) =>
       },
     });
 
+    if (readinessOverride) {
+      await auditService.recordEvent({
+        tx,
+        orgId,
+        projectId,
+        entityType: auditService.ENTITY_TYPES.PROJECT_SETUP_READINESS,
+        entityId: projectId,
+        action: auditService.ACTIONS.OVERRIDDEN,
+        actorId: userId,
+        actorRole: userRole,
+        occurredAt: now,
+        oldStatus: "blocked",
+        newStatus: "overridden",
+        reason: readinessOverride.reason,
+        summary: {
+          transition: "reporting_period.lock.override",
+          periodId,
+          blockerCount: readinessGate?.blockers?.length || 0,
+          blockers: (readinessGate?.blockers || []).map((blocker) => ({
+            code: blocker.code,
+            stepKey: blocker.stepKey,
+            stepLabel: blocker.stepLabel,
+          })),
+        },
+        metadata: {
+          readinessGate,
+          readinessOverride,
+        },
+      });
+    }
+
     return snapshotToReport({
       snapshot,
       period: { ...lockedPeriod, evSnapshot: snapshot },
@@ -1269,6 +1454,7 @@ const lockReportingPeriod = async ({ orgId, projectId, periodId, userId }) =>
 module.exports = {
   FORMULA_VERSION,
   EV_FORMULAS,
+  OFFICIAL_DATA_INPUTS,
   computeEvMetrics,
   computeBudgetRevisionDelta,
   buildOfficialEvReport,

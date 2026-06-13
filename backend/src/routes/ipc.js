@@ -3,7 +3,7 @@ const { body, param } = require("express-validator");
 const { asyncHandler } = require("../utils/async-handler");
 const { sendSuccess } = require("../utils/api-response");
 const { authenticate } = require("../middleware/auth");
-const { requirePermission } = require("../middleware/rbac");
+const { getEffectiveRole, requirePermission } = require("../middleware/rbac");
 const { validate } = require("../middleware/validate");
 const { moneyBody } = require("../utils/money");
 const ipcService = require("../services/ipc.service");
@@ -35,7 +35,7 @@ router.post(
       projectId: req.params.projectId,
       period: req.body.period,
       userId: req.user.id,
-      userRole: req.user.role,
+      userRole: getEffectiveRole(req),
     });
     return sendSuccess(res, result, 201);
   }),
@@ -94,7 +94,7 @@ router.post(
       projectId: req.params.projectId,
       period: req.params.period,
       userId: req.user.id,
-      userRole: req.user.role,
+      userRole: getEffectiveRole(req),
     });
     return sendSuccess(res, result);
   }),
@@ -110,6 +110,13 @@ router.post(
     body("comment").optional({ nullable: true }).isString().trim().isLength({
       max: 2000,
     }),
+    body("overrideReason")
+      .optional({ nullable: true })
+      .isString()
+      .trim()
+      .isLength({
+        max: 2000,
+      }),
     validate,
   ],
   asyncHandler(async (req, res) => {
@@ -118,8 +125,9 @@ router.post(
       projectId: req.params.projectId,
       period: req.params.period,
       userId: req.user.id,
-      userRole: req.user.role,
+      userRole: getEffectiveRole(req),
       comment: req.body?.comment || null,
+      overrideReason: req.body?.overrideReason || null,
     });
     return sendSuccess(res, result);
   }),
@@ -144,7 +152,7 @@ router.post(
       period: req.params.period,
       payload: req.body || {},
       userId: req.user.id,
-      userRole: req.user.role,
+      userRole: getEffectiveRole(req),
     });
     return sendSuccess(res, result, 201);
   }),
@@ -183,7 +191,7 @@ router.post(
       period: req.params.period,
       payload: req.body || {},
       userId: req.user.id,
-      userRole: req.user.role,
+      userRole: getEffectiveRole(req),
     });
     return sendSuccess(res, result, 201);
   }),
@@ -215,7 +223,7 @@ router.post(
       period: req.params.period,
       payload: req.body || {},
       userId: req.user.id,
-      userRole: req.user.role,
+      userRole: getEffectiveRole(req),
     });
     return sendSuccess(res, result, 201);
   }),

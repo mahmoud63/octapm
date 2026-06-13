@@ -19,6 +19,18 @@ const mockProjectService = {
 
 const mockScheduleService = {
   getProjectSchedule: jest.fn(),
+  approveRevision: jest.fn(),
+};
+
+const mockDocControlService = {
+  approveDocumentRevision: jest.fn(),
+  getDocControlDashboard: jest.fn(),
+  getRevisionDownloadFile: jest.fn(),
+  getRevisionPreviewFile: jest.fn(),
+  listDocumentRegister: jest.fn(),
+  submitDocumentRevisionForReview: jest.fn(),
+  supersedeDocumentRevision: jest.fn(),
+  uploadDocumentRevision: jest.fn(),
 };
 
 const mockSubscriptionService = {
@@ -41,19 +53,53 @@ jest.mock('../../middleware/auth', () => ({
 }));
 jest.mock('../../services/project.service', () => mockProjectService);
 jest.mock('../../services/schedule.service', () => mockScheduleService);
+jest.mock('../../services/doc-control.service', () => mockDocControlService);
 jest.mock('../../services/subscription.service', () => mockSubscriptionService);
 
 const { createApp } = require('../../app');
 
-function projectRecord(id = projectId) {
-  return { id, orgId: 'org-1' };
+function projectRecord(id = projectId, overrides = {}) {
+  return { id, orgId: 'org-1', ...overrides };
 }
 
-function mockProjectAccess({ assigned = true, exists = true } = {}) {
+function mockProjectAccess({
+  assigned = true,
+  exists = true,
+  assignmentRole = null,
+  party = false,
+  partyRole = 'consultant',
+} = {}) {
   mockPrisma.project.findFirst.mockImplementation(({ where }) => {
-    const isMembershipCheck = Boolean(where.assignments);
+    const isMembershipCheck = Boolean(where.OR);
     if (isMembershipCheck) {
-      return Promise.resolve(assigned ? projectRecord(where.id) : null);
+      if (!assigned && !party) return Promise.resolve(null);
+
+      return Promise.resolve(
+        projectRecord(where.id, {
+          assignments: assigned
+            ? assignmentRole
+              ? [{ role: assignmentRole }]
+              : [{ role: 'site_engineer' }]
+            : [],
+          parties: party
+            ? [
+                {
+                  id: '33333333-3333-4333-8333-333333333331',
+                  companyId: '33333333-3333-4333-8333-333333333332',
+                  role: partyRole,
+                  accessLevel: 'reviewer',
+                  permissionProfile: `default_${partyRole}`,
+                  company: {
+                    id: '33333333-3333-4333-8333-333333333332',
+                    name: 'Consultant Co',
+                    status: 'active',
+                  },
+                  members: [{ id: 'member-1', role: 'member', status: 'active' }],
+                },
+              ]
+            : [],
+        }),
+      );
     }
     return Promise.resolve(exists ? projectRecord(where.id) : null);
   });
@@ -155,6 +201,111 @@ describe('project object authorization', () => {
     expect(res.status).toBe(403);
     expect(res.body.error.code).toBe('PROJECT_ACCESS_DENIED');
     expect(mockScheduleService.getProjectSchedule).not.toHaveBeenCalled();
+  });
+
+  it('allows an active project-party member to access the project route', async () => {
+    mockProjectAccess({ assigned: false, party: true });
+
+    const res = await request(app)
+      .get(`/api/v1/projects/${projectId}/schedule`)
+      .set('x-user-id', 'consultant-1')
+      .set('x-role', 'finance');
+
+    expect(res.status).toBe(200);
+    expect(mockScheduleService.getProjectSchedule).toHaveBeenCalledWith({
+      orgId: 'org-1',
+      projectId,
+    });
+  });
+
+  it('blocks approval calls for an unassigned project before services run', async () => {
+    mockProjectAccess({ assigned: false, exists: true });
+
+    const res = await request(app)
+      .post(
+        `/api/v1/projects/${otherProjectId}/schedule/revisions/33333333-3333-4333-8333-333333333333/approve`,
+      )
+      .set('x-user-id', 'site-1')
+      .set('x-role', 'site_engineer')
+      .send({ comment: 'Trying to approve another project' });
+
+    expect(res.status).toBe(403);
+    expect(res.body.error.code).toBe('PROJECT_ACCESS_DENIED');
+    expect(mockScheduleService.approveRevision).not.toHaveBeenCalled();
+  });
+
+  it('blocks document revision downloads for an unassigned project before services run', async () => {
+    mockProjectAccess({ assigned: false, exists: true });
+
+    const res = await request(app)
+      .get(
+        `/api/v1/projects/${otherProjectId}/doc-control/revisions/33333333-3333-4333-8333-333333333333/download`,
+      )
+      .set('x-user-id', 'site-1')
+      .set('x-role', 'site_engineer');
+
+    expect(res.status).toBe(403);
+    expect(res.body.error.code).toBe('PROJECT_ACCESS_DENIED');
+    expect(mockDocControlService.getRevisionDownloadFile).not.toHaveBeenCalled();
+  });
+
+  it('blocks document revision previews for an unassigned project before services run', async () => {
+    mockProjectAccess({ assigned: false, exists: true });
+
+    const res = await request(app)
+      .get(
+        `/api/v1/projects/${otherProjectId}/doc-control/revisions/33333333-3333-4333-8333-333333333333/preview`,
+      )
+      .set('x-user-id', 'site-1')
+      .set('x-role', 'site_engineer');
+
+    expect(res.status).toBe(403);
+    expect(res.body.error.code).toBe('PROJECT_ACCESS_DENIED');
+    expect(mockDocControlService.getRevisionPreviewFile).not.toHaveBeenCalled();
+  });
+
+  it('blocks document revision uploads for an unassigned project before services run', async () => {
+    mockProjectAccess({ assigned: false, exists: true });
+
+    const res = await request(app)
+      .post(
+        `/api/v1/projects/${otherProjectId}/doc-control/rfi/66666666-6666-4666-8666-666666666666/revisions`,
+      )
+      .set('x-user-id', 'site-1')
+      .set('x-role', 'site_engineer')
+      .send({
+        revision: 'A',
+        projectDocumentId: '33333333-3333-4333-8333-333333333333',
+      });
+
+    expect(res.status).toBe(403);
+    expect(res.body.error.code).toBe('PROJECT_ACCESS_DENIED');
+    expect(mockDocControlService.uploadDocumentRevision).not.toHaveBeenCalled();
+  });
+
+  it('allows a project-assigned PM to approve within that project', async () => {
+    mockProjectAccess({ assigned: true, assignmentRole: 'Project Manager' });
+    mockScheduleService.approveRevision.mockResolvedValue({
+      id: '33333333-3333-4333-8333-333333333333',
+      status: 'approved',
+    });
+
+    const res = await request(app)
+      .post(
+        `/api/v1/projects/${projectId}/schedule/revisions/33333333-3333-4333-8333-333333333333/approve`,
+      )
+      .set('x-user-id', 'site-1')
+      .set('x-role', 'site_engineer')
+      .send({ comment: 'Approved on Project A' });
+
+    expect(res.status).toBe(200);
+    expect(mockScheduleService.approveRevision).toHaveBeenCalledWith(
+      expect.objectContaining({
+        projectId,
+        userId: 'site-1',
+        userRole: 'pm',
+      }),
+    );
   });
 
   it('allows PM users to access org projects without assignment rows', async () => {

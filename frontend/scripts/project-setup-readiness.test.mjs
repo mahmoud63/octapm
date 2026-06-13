@@ -32,6 +32,8 @@ assert.ok(
 ;[
   'Setup Readiness',
   'Ready for progress',
+  'Official reporting ready',
+  'Reporting gated',
   'Baseline ready',
   'Gate:',
   'ProjectSetupReadiness',
@@ -50,6 +52,11 @@ assert.ok(
 assert.ok(
   progressTab.includes('Progress setup warnings'),
   'progress setup warnings are visible'
+)
+assert.ok(
+  progressTab.includes('Official approved progress') &&
+    progressTab.includes('Pending progress review'),
+  'progress tab separates official approved progress from pending review'
 )
 assert.ok(
   progressTab.includes('projectSetupReadinessKey'),

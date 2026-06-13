@@ -1,8 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { apiClient } from '@/services/api/client'
 import type {
+  Company,
   CreateProjectInput,
   Project,
+  ProjectParty,
   ProjectSetupReadiness,
 } from '../data/schema'
 
@@ -12,6 +14,18 @@ type ProjectsResponse = {
     limit: number
     nextCursor: string | null
   }
+}
+
+type CompaniesResponse = {
+  items: Company[]
+  pagination: {
+    limit: number
+    nextCursor: string | null
+  }
+}
+
+type ProjectPartiesResponse = {
+  items: ProjectParty[]
 }
 
 export const projectSetupReadinessKey = (projectId: string) => [
@@ -26,12 +40,36 @@ export const useProjects = () =>
       apiClient.get('/projects').then((response) => response.data.data),
   })
 
+export const useCompanies = (params: { search?: string; status?: string } = {}) =>
+  useQuery<CompaniesResponse>({
+    queryKey: ['companies', params],
+    queryFn: () =>
+      apiClient
+        .get('/companies', { params })
+        .then((response) => response.data.data),
+  })
+
 export const useProject = (projectId: string) =>
   useQuery<Project>({
     queryKey: ['project', projectId],
     queryFn: () =>
       apiClient
         .get(`/projects/${projectId}`)
+        .then((response) => response.data.data),
+    enabled: Boolean(projectId),
+  })
+
+export const projectPartiesKey = (projectId: string) => [
+  'project-parties',
+  projectId,
+]
+
+export const useProjectParties = (projectId: string) =>
+  useQuery<ProjectPartiesResponse>({
+    queryKey: projectPartiesKey(projectId),
+    queryFn: () =>
+      apiClient
+        .get(`/projects/${projectId}/parties`)
         .then((response) => response.data.data),
     enabled: Boolean(projectId),
   })
@@ -59,6 +97,7 @@ export const useCreateProject = () => {
         .then((response) => response.data.data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['projects'] })
+      queryClient.invalidateQueries({ queryKey: ['companies'] })
     },
   })
 }
@@ -82,11 +121,43 @@ export const useUpdateProject = () => {
       queryClient.invalidateQueries({
         queryKey: ['project', variables.projectId],
       })
+      queryClient.invalidateQueries({
+        queryKey: projectPartiesKey(variables.projectId),
+      })
+      queryClient.invalidateQueries({ queryKey: ['companies'] })
     },
   })
 }
 
-export const useDeleteProject = () => {
+export const useUpsertProjectParty = (projectId: string) => {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (payload: {
+      id?: string
+      role: string
+      companyId?: string
+      companyName?: string
+      contactName?: string
+      contactEmail?: string
+      contactPhone?: string
+      accessLevel?: string
+    }) => {
+      const { id, ...body } = payload
+      const request = id
+        ? apiClient.patch(`/projects/${projectId}/parties/${id}`, body)
+        : apiClient.post(`/projects/${projectId}/parties`, body)
+      return request.then((response) => response.data.data as ProjectParty)
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: projectPartiesKey(projectId) })
+      queryClient.invalidateQueries({ queryKey: ['companies'] })
+      queryClient.invalidateQueries({ queryKey: ['project', projectId] })
+    },
+  })
+}
+
+export const useArchiveProject = () => {
   const queryClient = useQueryClient()
 
   return useMutation({

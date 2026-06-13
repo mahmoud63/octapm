@@ -11,26 +11,26 @@ const mockPrisma = {
 const mockBuildAllocationSummary = jest.fn();
 const mockBuildScheduleReadiness = jest.fn();
 
-jest.mock('../../config/db', () => ({ prisma: mockPrisma }));
-jest.mock('../activity-boq-allocation.service', () => ({
+jest.mock("../../config/db", () => ({ prisma: mockPrisma }));
+jest.mock("../activity-boq-allocation.service", () => ({
   buildAllocationSummary: mockBuildAllocationSummary,
 }));
-jest.mock('../schedule.service', () => ({
+jest.mock("../schedule.service", () => ({
   buildScheduleReadiness: mockBuildScheduleReadiness,
 }));
 
-const setupReadinessService = require('../project-setup-readiness.service');
+const setupReadinessService = require("../project-setup-readiness.service");
 
 const project = {
-  id: 'project-1',
-  orgId: 'org-1',
-  name: 'Tower',
-  startDate: new Date('2026-01-01T00:00:00.000Z'),
-  endDate: new Date('2026-12-31T00:00:00.000Z'),
+  id: "project-1",
+  orgId: "org-1",
+  name: "Tower",
+  startDate: new Date("2026-01-01T00:00:00.000Z"),
+  endDate: new Date("2026-12-31T00:00:00.000Z"),
   duration: 12,
   contractValue: 100,
-  clientName: 'Client',
-  contractorName: 'Contractor',
+  clientName: "Client",
+  contractorName: "Contractor",
 };
 
 const emptyAllocationSummary = {
@@ -40,7 +40,7 @@ const emptyAllocationSummary = {
   unallocatedAmount: 0,
 };
 
-describe('project setup readiness service', () => {
+describe("project setup readiness service", () => {
   beforeEach(() => {
     jest.clearAllMocks();
     mockPrisma.project.findFirst.mockResolvedValue(project);
@@ -61,21 +61,23 @@ describe('project setup readiness service', () => {
     });
   });
 
-  it('surfaces critical blockers for an empty project', async () => {
+  it("surfaces critical blockers for an empty project", async () => {
     const result = await setupReadinessService.getSetupReadiness({
-      orgId: 'org-1',
-      projectId: 'project-1',
+      orgId: "org-1",
+      projectId: "project-1",
     });
 
-    expect(result.rulesetVersion).toBe('fb-015-v1');
+    expect(result.rulesetVersion).toBe("fb-015-v2");
     expect(result.summary.readyForProgress).toBe(false);
+    expect(result.summary.readyForReporting).toBe(false);
     expect(result.summary.blockedSteps).toBeGreaterThan(0);
     expect(result.gates.progress.ready).toBe(false);
-    expect(result.steps.find((step) => step.key === 'boq_upload')).toEqual(
+    expect(result.gates.reporting.ready).toBe(false);
+    expect(result.steps.find((step) => step.key === "boq_upload")).toEqual(
       expect.objectContaining({
-        status: 'blocked',
+        status: "blocked",
         blockers: expect.arrayContaining([
-          expect.objectContaining({ code: 'NO_BOQ' }),
+          expect.objectContaining({ code: "NO_BOQ" }),
         ]),
       }),
     );
@@ -83,27 +85,42 @@ describe('project setup readiness service', () => {
       result.gates.progress.blockers.map((blocker) => blocker.code),
     ).toEqual(
       expect.arrayContaining([
-        'NO_BOQ',
-        'NO_SCHEDULE',
-        'NO_SCHEDULE_REVISION',
-        'BASELINE_NOT_LOCKED',
+        "NO_BOQ",
+        "NO_SCHEDULE",
+        "NO_SCHEDULE_REVISION",
+        "BASELINE_NOT_LOCKED",
       ]),
+    );
+    expect(
+      result.gates.reporting.blockers.map((blocker) => blocker.code),
+    ).toEqual(
+      expect.arrayContaining([
+        "NO_BOQ",
+        "NO_SCHEDULE",
+        "NO_APPROVED_COST_LOADING",
+        "NO_REPORTING_PERIODS",
+      ]),
+    );
+    expect(result.gates.reporting.blockers[0]).toEqual(
+      expect.objectContaining({
+        target: expect.objectContaining({ module: expect.any(String) }),
+      }),
     );
     expect(mockBuildScheduleReadiness).not.toHaveBeenCalled();
   });
 
-  it('reports ready-for-progress after BOQ, allocation, baseline, assignments, and EV basis are complete', async () => {
+  it("reports ready-for-progress after BOQ, allocation, baseline, assignments, and EV basis are complete", async () => {
     const baselinedRevision = {
-      id: 'revision-1',
-      label: 'Baseline',
-      status: 'baselined',
+      id: "revision-1",
+      label: "Baseline",
+      status: "baselined",
       isActive: true,
       activityCount: 1,
-      approvedAt: new Date('2026-02-01T00:00:00.000Z'),
-      baselinedAt: new Date('2026-02-02T00:00:00.000Z'),
+      approvedAt: new Date("2026-02-01T00:00:00.000Z"),
+      baselinedAt: new Date("2026-02-02T00:00:00.000Z"),
     };
     mockPrisma.boqItem.findMany.mockResolvedValue([
-      { id: 'boq-1', qty: 10, amount: 100 },
+      { id: "boq-1", qty: 10, amount: 100 },
     ]);
     mockBuildAllocationSummary.mockResolvedValue({
       totalBoqAmount: 100,
@@ -113,12 +130,12 @@ describe('project setup readiness service', () => {
     });
     mockPrisma.activity.findMany.mockResolvedValue([
       {
-        id: 'activity-1',
-        name: 'Foundations',
+        id: "activity-1",
+        name: "Foundations",
         isMilestone: false,
         isCritical: true,
-        assignments: [{ id: 'assignment-1' }],
-        progressMethod: { id: 'method-1', method: 'quantity' },
+        assignments: [{ id: "assignment-1" }],
+        progressMethod: { id: "method-1", method: "quantity" },
         predecessorLinks: [],
       },
     ]);
@@ -135,39 +152,41 @@ describe('project setup readiness service', () => {
       blockingCount: 0,
       checks: [
         {
-          key: 'predecessors',
-          label: 'Predecessor logic',
+          key: "predecessors",
+          label: "Predecessor logic",
           passed: true,
-          severity: 'blocking',
-          message: 'Predecessor references are valid.',
+          severity: "blocking",
+          message: "Predecessor references are valid.",
         },
       ],
     });
 
     const result = await setupReadinessService.getSetupReadiness({
-      orgId: 'org-1',
-      projectId: 'project-1',
+      orgId: "org-1",
+      projectId: "project-1",
     });
 
     expect(result.summary.readyForProgress).toBe(true);
+    expect(result.summary.readyForReporting).toBe(true);
     expect(result.gates.progress.ready).toBe(true);
+    expect(result.gates.reporting.ready).toBe(true);
     expect(result.gates.baseline.alreadyLocked).toBe(true);
     expect(result.summary.blockingCount).toBe(0);
-    expect(result.steps.every((step) => step.status === 'complete')).toBe(true);
+    expect(result.steps.every((step) => step.status === "complete")).toBe(true);
   });
 
-  it('opens the baseline gate when the approved schedule has no readiness blockers', async () => {
+  it("opens the baseline gate when the approved schedule has no readiness blockers", async () => {
     const approvedRevision = {
-      id: 'revision-2',
-      label: 'Rev A',
-      status: 'approved',
+      id: "revision-2",
+      label: "Rev A",
+      status: "approved",
       isActive: true,
       activityCount: 1,
-      approvedAt: new Date('2026-02-01T00:00:00.000Z'),
+      approvedAt: new Date("2026-02-01T00:00:00.000Z"),
       baselinedAt: null,
     };
     mockPrisma.boqItem.findMany.mockResolvedValue([
-      { id: 'boq-1', qty: 10, amount: 100 },
+      { id: "boq-1", qty: 10, amount: 100 },
     ]);
     mockBuildAllocationSummary.mockResolvedValue({
       totalBoqAmount: 100,
@@ -177,12 +196,12 @@ describe('project setup readiness service', () => {
     });
     mockPrisma.activity.findMany.mockResolvedValue([
       {
-        id: 'activity-1',
-        name: 'Foundations',
+        id: "activity-1",
+        name: "Foundations",
         isMilestone: false,
         isCritical: true,
-        assignments: [{ id: 'assignment-1' }],
-        progressMethod: { id: 'method-1', method: 'quantity' },
+        assignments: [{ id: "assignment-1" }],
+        progressMethod: { id: "method-1", method: "quantity" },
         predecessorLinks: [],
       },
     ]);
@@ -201,16 +220,17 @@ describe('project setup readiness service', () => {
     });
 
     const result = await setupReadinessService.getSetupReadiness({
-      orgId: 'org-1',
-      projectId: 'project-1',
+      orgId: "org-1",
+      projectId: "project-1",
     });
 
     expect(result.summary.readyForBaseline).toBe(true);
     expect(result.gates.baseline.ready).toBe(true);
     expect(result.gates.progress.ready).toBe(false);
+    expect(result.gates.reporting.ready).toBe(false);
     expect(result.gates.progress.blockers).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ code: 'BASELINE_NOT_LOCKED' }),
+        expect.objectContaining({ code: "BASELINE_NOT_LOCKED" }),
       ]),
     );
   });

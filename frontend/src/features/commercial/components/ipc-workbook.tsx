@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react'
 import {
+  AlertTriangle,
   Banknote,
   FileCheck2,
   LockKeyhole,
@@ -60,7 +61,15 @@ function StatusBadge({ label, value }: { label: string; value?: string }) {
   )
 }
 
-export function IpcWorkbook({ projectId }: { projectId: string }) {
+export function IpcWorkbook({
+  projectId,
+  initialStatus,
+  initialRecordId,
+}: {
+  projectId: string
+  initialStatus?: string
+  initialRecordId?: string
+}) {
   const { data: periods = [], isLoading } = useIpcPeriods(projectId)
   const canCreateIpc = useCanPerform('ipc', 'create', 'period.create')
   const canUpdateIpc = useCanPerform('ipc', 'update', 'item.update')
@@ -90,7 +99,14 @@ export function IpcWorkbook({ projectId }: { projectId: string }) {
   const [retentionAmount, setRetentionAmount] = useState('')
   const [retentionReference, setRetentionReference] = useState('')
   const [retentionReason, setRetentionReason] = useState('')
-  const activePeriod = selectedPeriod || periods[0]?.period || ''
+  const [certificationComment, setCertificationComment] = useState('')
+  const [overrideReason, setOverrideReason] = useState('')
+  const dashboardPeriod =
+    periods.find((period) => period.id === initialRecordId)?.period ||
+    periods.find((period) => period.status === initialStatus)?.period ||
+    ''
+  const activePeriod =
+    selectedPeriod || dashboardPeriod || periods[0]?.period || ''
 
   const { data: detail } = useIpcPeriod(projectId, activePeriod)
 
@@ -118,6 +134,11 @@ export function IpcWorkbook({ projectId }: { projectId: string }) {
   const retainedBalance = Math.max(
     0,
     totals.totalRet - totals.retentionReleased
+  )
+  const certificationReview = detail?.certificationReview
+  const requiresOverride = Boolean(certificationReview?.requiresPmOverride)
+  const hasReviewWarning = Boolean(
+    requiresOverride || certificationReview?.hasMissingProgressEvidence
   )
   const canEditItems = Boolean(canUpdateIpc && detail?.status === 'draft')
   const showIssueInvoice = Boolean(
@@ -206,9 +227,19 @@ export function IpcWorkbook({ projectId }: { projectId: string }) {
           {canCertifyIpc && detail && detail.status === 'submitted' && (
             <Button
               size='sm'
+              disabled={
+                certifyPeriod.isPending ||
+                (requiresOverride && !overrideReason.trim())
+              }
               onClick={async () => {
                 try {
-                  await certifyPeriod.mutateAsync(activePeriod)
+                  await certifyPeriod.mutateAsync({
+                    period: activePeriod,
+                    comment: certificationComment.trim() || undefined,
+                    overrideReason: overrideReason.trim() || undefined,
+                  })
+                  setCertificationComment('')
+                  setOverrideReason('')
                   toast.success('IPC certified')
                 } catch {
                   toast.error('Failed to certify IPC')
@@ -242,6 +273,69 @@ export function IpcWorkbook({ projectId }: { projectId: string }) {
               <LockKeyhole className='size-3.5' />
               Lines locked
             </Badge>
+          )}
+        </div>
+      )}
+
+      {detail && certificationReview && (
+        <div className='grid gap-3 rounded-md border p-3 lg:grid-cols-[repeat(5,minmax(0,1fr))]'>
+          <div className='text-xs'>
+            <p className='text-muted-foreground'>Earned Value Basis</p>
+            <p className='text-lg font-semibold'>
+              {fmtUSD(certificationReview.earnedAmount)}
+            </p>
+          </div>
+          <div className='text-xs'>
+            <p className='text-muted-foreground'>Current Claimed</p>
+            <p className='text-lg font-semibold'>
+              {fmtUSD(certificationReview.currentClaimedAmount)}
+            </p>
+          </div>
+          <div className='text-xs'>
+            <p className='text-muted-foreground'>Approved Limit</p>
+            <p className='text-lg font-semibold'>
+              {fmtUSD(certificationReview.approvedLimitAmount)}
+            </p>
+          </div>
+          <div className='text-xs'>
+            <p className='text-muted-foreground'>Over Earned</p>
+            <p className='text-lg font-semibold text-amber-600'>
+              {fmtUSD(certificationReview.overEarnedAmount)}
+            </p>
+          </div>
+          <div className='text-xs'>
+            <p className='text-muted-foreground'>Over Approved</p>
+            <p className='text-lg font-semibold text-rose-600'>
+              {fmtUSD(certificationReview.overApprovedLimitAmount)}
+            </p>
+          </div>
+          {detail.status === 'submitted' && (
+            <div className='space-y-2 lg:col-span-5'>
+              {hasReviewWarning && (
+                <div className='flex items-start gap-2 rounded-md border border-amber-500/30 bg-amber-500/10 p-2 text-xs text-amber-700 dark:text-amber-300'>
+                  <AlertTriangle className='mt-0.5 size-4 shrink-0' />
+                  <span>
+                    PM override is required when certification exceeds earned
+                    progress or approved BOQ/variation value.
+                  </span>
+                </div>
+              )}
+              <div className='grid gap-2 md:grid-cols-2'>
+                <Textarea
+                  rows={2}
+                  placeholder='Certification comment'
+                  value={certificationComment}
+                  onChange={(e) => setCertificationComment(e.target.value)}
+                />
+                <Textarea
+                  rows={2}
+                  placeholder='PM override reason'
+                  value={overrideReason}
+                  onChange={(e) => setOverrideReason(e.target.value)}
+                  disabled={!requiresOverride}
+                />
+              </div>
+            </div>
           )}
         </div>
       )}
@@ -439,6 +533,73 @@ export function IpcWorkbook({ projectId }: { projectId: string }) {
         </div>
       )}
 
+      {detail && (
+        <div className='grid gap-3 lg:grid-cols-2'>
+          <div className='rounded-md border p-3'>
+            <div className='mb-2 flex items-center justify-between gap-2'>
+              <p className='text-sm font-medium'>Payment History</p>
+              <Badge variant='outline'>{detail.payments?.length || 0}</Badge>
+            </div>
+            <div className='space-y-2'>
+              {detail.payments?.length ? (
+                detail.payments.map((payment) => (
+                  <div
+                    key={payment.id}
+                    className='flex items-center justify-between gap-2 rounded-md border p-2 text-xs'
+                  >
+                    <div>
+                      <p className='font-medium'>{payment.paymentReference}</p>
+                      <p className='text-muted-foreground'>
+                        {new Date(payment.paymentDate).toLocaleDateString()}
+                        {payment.paymentMethod
+                          ? ` - ${payment.paymentMethod}`
+                          : ''}
+                      </p>
+                    </div>
+                    <p className='font-semibold'>{fmtUSD(payment.amount)}</p>
+                  </div>
+                ))
+              ) : (
+                <p className='rounded-md border border-dashed p-3 text-center text-xs text-muted-foreground'>
+                  No payments recorded
+                </p>
+              )}
+            </div>
+          </div>
+          <div className='rounded-md border p-3'>
+            <div className='mb-2 flex items-center justify-between gap-2'>
+              <p className='text-sm font-medium'>Retention Release History</p>
+              <Badge variant='outline'>
+                {detail.retentionReleases?.length || 0}
+              </Badge>
+            </div>
+            <div className='space-y-2'>
+              {detail.retentionReleases?.length ? (
+                detail.retentionReleases.map((release) => (
+                  <div
+                    key={release.id}
+                    className='flex items-center justify-between gap-2 rounded-md border p-2 text-xs'
+                  >
+                    <div>
+                      <p className='font-medium'>{release.releaseReference}</p>
+                      <p className='text-muted-foreground'>
+                        {new Date(release.releaseDate).toLocaleDateString()}
+                        {release.reason ? ` - ${release.reason}` : ''}
+                      </p>
+                    </div>
+                    <p className='font-semibold'>{fmtUSD(release.amount)}</p>
+                  </div>
+                ))
+              ) : (
+                <p className='rounded-md border border-dashed p-3 text-center text-xs text-muted-foreground'>
+                  No retention releases recorded
+                </p>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className='grid grid-cols-1 gap-3 sm:grid-cols-3 lg:grid-cols-6'>
         <div className='rounded-lg border p-3'>
           <p className='text-xs text-muted-foreground'>Total Certified</p>
@@ -481,6 +642,8 @@ export function IpcWorkbook({ projectId }: { projectId: string }) {
               <th className='p-2 text-left font-medium'>BOQ Ref</th>
               <th className='p-2 text-left font-medium'>Activity</th>
               <th className='p-2 text-left font-medium'>Approved Progress</th>
+              <th className='p-2 text-right font-medium'>Earned Cap</th>
+              <th className='p-2 text-left font-medium'>Review</th>
               <th className='p-2 text-left font-medium'>Description</th>
               <th className='p-2 text-left font-medium'>Unit</th>
               <th className='p-2 text-right font-medium'>Total Qty</th>
@@ -498,7 +661,7 @@ export function IpcWorkbook({ projectId }: { projectId: string }) {
             {!detail || detail.items.length === 0 ? (
               <tr>
                 <td
-                  colSpan={14}
+                  colSpan={16}
                   className='p-6 text-center text-muted-foreground'
                 >
                   {activePeriod
@@ -536,6 +699,21 @@ export function IpcWorkbook({ projectId }: { projectId: string }) {
                       </div>
                     ) : (
                       <span className='text-muted-foreground'>Pending</span>
+                    )}
+                  </td>
+                  <td className='p-2 text-right text-xs'>
+                    {fmtUSD(item.certificationReview?.earnedAmount || 0)}
+                  </td>
+                  <td className='p-2 text-xs'>
+                    {item.certificationReview?.requiresOverride ? (
+                      <Badge
+                        variant='outline'
+                        className='border-amber-500/40 text-amber-700 dark:text-amber-300'
+                      >
+                        Override
+                      </Badge>
+                    ) : (
+                      <span className='text-muted-foreground'>OK</span>
                     )}
                   </td>
                   <td
@@ -618,7 +796,7 @@ export function IpcWorkbook({ projectId }: { projectId: string }) {
             <tfoot>
               <tr className='bg-muted/40'>
                 <td
-                  colSpan={9}
+                  colSpan={11}
                   className='p-2 text-right text-xs font-semibold'
                 >
                   Totals:

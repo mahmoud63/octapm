@@ -7,7 +7,11 @@ const { asyncHandler } = require('../utils/async-handler');
 const { sendSuccess } = require('../utils/api-response');
 const { HttpError } = require('../utils/http-error');
 const { authenticate } = require('../middleware/auth');
-const { requirePermission } = require('../middleware/rbac');
+const {
+  aiGenerationLimiter,
+  uploadLimiter,
+} = require('../middleware/rate-limit');
+const { getEffectiveRole, requirePermission } = require('../middleware/rbac');
 const { validate } = require('../middleware/validate');
 const scheduleService = require('../services/schedule.service');
 const fileStorageService = require('../services/file-storage.service');
@@ -216,7 +220,7 @@ router.post(
       projectId: req.params.projectId,
       revisionId: req.params.revisionId,
       userId: req.user.id,
-      userRole: req.user.role,
+      userRole: getEffectiveRole(req),
       comment: req.body?.comment || null,
     });
     return sendSuccess(res, result);
@@ -242,7 +246,7 @@ router.post(
       projectId: req.params.projectId,
       revisionId: req.params.revisionId,
       userId: req.user.id,
-      userRole: req.user.role,
+      userRole: getEffectiveRole(req),
       comment: req.body?.comment || null,
     });
     return sendSuccess(res, result);
@@ -266,7 +270,7 @@ router.post(
       projectId: req.params.projectId,
       revisionId: req.params.revisionId,
       userId: req.user.id,
-      userRole: req.user.role,
+      userRole: getEffectiveRole(req),
       reason: req.body.reason,
     });
     return sendSuccess(res, result);
@@ -292,7 +296,7 @@ router.post(
       projectId: req.params.projectId,
       revisionId: req.params.revisionId,
       userId: req.user.id,
-      userRole: req.user.role,
+      userRole: getEffectiveRole(req),
       comment: req.body?.comment || null,
     });
     return sendSuccess(res, result);
@@ -318,7 +322,7 @@ router.post(
       projectId: req.params.projectId,
       revisionId: req.body?.revisionId || null,
       userId: req.user.id,
-      userRole: req.user.role,
+      userRole: getEffectiveRole(req),
       comment: req.body?.comment || null,
     });
     return sendSuccess(res, result);
@@ -329,6 +333,8 @@ router.post(
 router.post(
   '/generate',
   requirePermission('schedule', 'create'),
+  aiGenerationLimiter,
+  uploadLimiter,
   upload.single('file'),
   asyncHandler(async (req, res) => {
     if (!req.file) throw new HttpError(400, 'NO_FILE', 'No file uploaded');

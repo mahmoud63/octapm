@@ -1,48 +1,52 @@
-const ExcelJS = require('exceljs');
-const XLSX = require('xlsx');
-const Anthropic = require('@anthropic-ai/sdk');
-const { v4: uuidv4 } = require('uuid');
-const { prisma } = require('../config/db');
-const { HttpError } = require('../utils/http-error');
-const { nextActivityCode } = require('../utils/activity-code');
+const Anthropic = require("@anthropic-ai/sdk");
+const { v4: uuidv4 } = require("uuid");
+const { prisma } = require("../config/db");
+const { HttpError } = require("../utils/http-error");
+const { nextActivityCode } = require("../utils/activity-code");
+const { activeBoqCodeKey, normalizeBoqCode } = require("../utils/boq-code");
 const {
   addMoney,
-  assertMoneyInput,
   divideMoney,
   multiplyMoney,
   toMoneyNumber,
-} = require('../utils/money');
-const { calculateFinancials } = require('./boq-calculation.service');
-const { assertAiQuota, incrementAiUsage } = require('../middleware/subscription-gate');
+} = require("../utils/money");
+const { calculateFinancials } = require("./boq-calculation.service");
+const {
+  assertAiQuota,
+  incrementAiUsage,
+} = require("../middleware/subscription-gate");
 const {
   assertAllocationCapacity,
   buildAllocationSummary,
   computeDefaultWeight,
-} = require('./activity-boq-allocation.service');
+} = require("./activity-boq-allocation.service");
 const {
   replaceActivityDependencies,
-} = require('./activity-dependency.service');
-const fileStorageService = require('./file-storage.service');
-const auditService = require('./audit.service');
-const approvalWorkflowService = require('./approval-workflow.service');
+} = require("./activity-dependency.service");
+const fileStorageService = require("./file-storage.service");
+const auditService = require("./audit.service");
+const approvalWorkflowService = require("./approval-workflow.service");
+const { getBoqJob, setBoqJob } = require("./boq/job-store");
+const { parseExcelInput, validateBoqRows } = require("./boq/excel-parser");
+const { generateBoqTemplate } = require("./boq/template");
 
 const BOQ_REVISION_STATUS = Object.freeze({
-  IMPORTED: 'imported',
-  COMPARISON_ONLY: 'comparison_only',
+  IMPORTED: "imported",
+  COMPARISON_ONLY: "comparison_only",
 });
 
 const BOQ_BASELINE_LOCK_REASON =
-  'Pending BOQ revision comparison; baseline is locked';
+  "Pending BOQ revision comparison; baseline is locked";
 
 const client = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY,
   timeout: 120_000,
 });
 
-const normalizeCode = (value) => String(value ?? '').trim();
-const activeStatuses = ['draft', 'submitted', 'approved'];
+const normalizeCode = normalizeBoqCode;
+const activeStatuses = ["draft", "submitted", "approved"];
 const trimOrNull = (value) => {
-  const text = String(value ?? '').trim();
+  const text = String(value ?? "").trim();
   return text || null;
 };
 
@@ -51,8 +55,7 @@ const toNumber = (value) => {
   return Number.isFinite(number) ? number : 0;
 };
 
-const dateSummary = (value) =>
-  value ? new Date(value).toISOString() : null;
+const dateSummary = (value) => (value ? new Date(value).toISOString() : null);
 
 const boqItemAuditSummary = (item) => ({
   code: item.code || null,
@@ -72,7 +75,7 @@ const boqRevisionAuditSummary = (revision) => ({
   revisionNumber: revision.revisionNumber,
   label: revision.label || null,
   status: revision.status,
-  source: revision.source || 'upload',
+  source: revision.source || "upload",
   baselineLocked: Boolean(revision.baselineLocked),
   itemCount: Number(revision.itemCount || 0),
   addedCount: Number(revision.addedCount || 0),
@@ -101,7 +104,7 @@ const rowCodeKey = (code) => normalizeCode(code).toLowerCase();
 function duplicateBoqItemCodeError(code) {
   return new HttpError(
     400,
-    'DUPLICATE_BOQ_ITEM_CODE',
+    "DUPLICATE_BOQ_ITEM_CODE",
     `BOQ item code "${code}" already exists for this project`,
   );
 }
@@ -109,24 +112,29 @@ function duplicateBoqItemCodeError(code) {
 function duplicateBoqActivityCodeError(code) {
   return new HttpError(
     400,
-    'DUPLICATE_BOQ_ACTIVITY_CODE',
+    "DUPLICATE_BOQ_ACTIVITY_CODE",
     `BOQ activity code "${code}" already exists for this project`,
   );
 }
 
 function handleBoqUniqueError(error) {
-  if (error?.code !== 'P2002') throw error;
+  if (error?.code !== "P2002") throw error;
 
   const target = Array.isArray(error.meta?.target)
     ? error.meta.target
-    : [String(error.meta?.target || '')];
+    : [String(error.meta?.target || "")];
+  const targetText = target.join(" ").toLowerCase();
 
-  if (target.includes('activityCode')) {
-    throw duplicateBoqActivityCodeError('generated');
+  if (targetText.includes("activitycode")) {
+    throw duplicateBoqActivityCodeError("generated");
   }
 
-  if (target.includes('code')) {
-    throw duplicateBoqItemCodeError('submitted');
+  if (
+    targetText.includes("activecodekey") ||
+    targetText.includes("boqitem_projectid_active") ||
+    targetText.includes("code")
+  ) {
+    throw duplicateBoqItemCodeError("submitted");
   }
 
   throw error;
@@ -140,10 +148,14 @@ async function assertUniqueBoqItemCode(
 ) {
   const normalizedCode = normalizeCode(code);
   if (!normalizedCode) {
-    throw new HttpError(400, 'BOQ_ITEM_CODE_REQUIRED', 'BOQ item code is required');
+    throw new HttpError(
+      400,
+      "BOQ_ITEM_CODE_REQUIRED",
+      "BOQ item code is required",
+    );
   }
 
-  const where = { projectId, code: normalizedCode, isActive: true };
+  const where = { projectId, activeCodeKey: normalizedCode, isActive: true };
   if (excludeItemId) where.id = { not: excludeItemId };
 
   const duplicate = await tx.boqItem.findFirst({
@@ -165,7 +177,7 @@ async function assertNoManualCodeConflicts(projectId, codes, tx = prisma) {
       projectId,
       isManual: true,
       isActive: true,
-      code: { in: normalizedCodes },
+      activeCodeKey: { in: normalizedCodes },
     },
     select: { code: true },
   });
@@ -174,6 +186,9 @@ async function assertNoManualCodeConflicts(projectId, codes, tx = prisma) {
     throw duplicateBoqItemCodeError(conflicts[0].code);
   }
 }
+
+const findBoqItemInProject = (projectId, itemId, tx = prisma) =>
+  tx.boqItem.findFirst({ where: { id: itemId, projectId } });
 
 function allocationMap(summary) {
   return new Map((summary?.items || []).map((item) => [item.boqItemId, item]));
@@ -207,7 +222,7 @@ async function getBoqBaselineLock(projectId, tx = prisma) {
     tx.boqRevision?.findFirst
       ? tx.boqRevision.findFirst({
           where: { projectId, baselineLocked: true },
-          orderBy: [{ lockedAt: 'desc' }, { createdAt: 'desc' }],
+          orderBy: [{ lockedAt: "desc" }, { createdAt: "desc" }],
           select: {
             id: true,
             revisionNumber: true,
@@ -218,8 +233,8 @@ async function getBoqBaselineLock(projectId, tx = prisma) {
       : null,
     tx.scheduleRevision?.findFirst
       ? tx.scheduleRevision.findFirst({
-          where: { projectId, status: 'baselined' },
-          orderBy: [{ baselinedAt: 'desc' }, { createdAt: 'desc' }],
+          where: { projectId, status: "baselined" },
+          orderBy: [{ baselinedAt: "desc" }, { createdAt: "desc" }],
           select: { id: true, baselinedAt: true },
         })
       : null,
@@ -229,18 +244,16 @@ async function getBoqBaselineLock(projectId, tx = prisma) {
   return {
     locked,
     source: baselinedSchedule
-      ? 'schedule_baseline'
+      ? "schedule_baseline"
       : lockedBoqRevision
-        ? 'boq_revision'
+        ? "boq_revision"
         : null,
     scheduleRevisionId: baselinedSchedule?.id ?? null,
     boqRevisionId: lockedBoqRevision?.id ?? null,
     revisionNumber: lockedBoqRevision?.revisionNumber ?? null,
     label: lockedBoqRevision?.label ?? null,
     lockedAt:
-      baselinedSchedule?.baselinedAt ??
-      lockedBoqRevision?.lockedAt ??
-      null,
+      baselinedSchedule?.baselinedAt ?? lockedBoqRevision?.lockedAt ?? null,
   };
 }
 
@@ -249,8 +262,8 @@ async function assertBoqEditable(projectId, tx = prisma) {
   if (baseline.locked) {
     throw new HttpError(
       409,
-      'BOQ_BASELINE_LOCKED',
-      'BOQ baseline is locked. Upload a revision for comparison instead of editing current baseline rows.',
+      "BOQ_BASELINE_LOCKED",
+      "BOQ baseline is locked. Upload a revision for comparison instead of editing current baseline rows.",
       { baseline },
     );
   }
@@ -264,7 +277,7 @@ async function assertProjectAccess(projectId, orgId, tx = prisma) {
     select: { id: true, orgId: true },
   });
   if (!project) {
-    throw new HttpError(404, 'PROJECT_NOT_FOUND', 'Project not found');
+    throw new HttpError(404, "PROJECT_NOT_FOUND", "Project not found");
   }
   return project;
 }
@@ -272,8 +285,8 @@ async function assertProjectAccess(projectId, orgId, tx = prisma) {
 function rowChanged(existing, incoming) {
   return (
     normalizeCode(existing.code) !== normalizeCode(incoming.code) ||
-    String(existing.description ?? '') !== String(incoming.description ?? '') ||
-    String(existing.unit ?? '') !== String(incoming.unit ?? '') ||
+    String(existing.description ?? "") !== String(incoming.description ?? "") ||
+    String(existing.unit ?? "") !== String(incoming.unit ?? "") ||
     !quantityEquals(existing.qty, incoming.qty) ||
     !moneyEquals(existing.rate, incoming.rate) ||
     !moneyEquals(existing.amount, incoming.amount)
@@ -329,7 +342,10 @@ function buildBoqComparison(existingItems, incomingItems) {
   }
 
   const removed = existingItems
-    .filter((item) => normalizeCode(item.code) && !incomingKeys.has(rowCodeKey(item.code)))
+    .filter(
+      (item) =>
+        normalizeCode(item.code) && !incomingKeys.has(rowCodeKey(item.code)),
+    )
     .map(summarizeRow);
 
   return {
@@ -348,18 +364,21 @@ function buildBoqComparison(existingItems, incomingItems) {
   };
 }
 
-async function createBoqRevision(tx, {
-  projectId,
-  label,
-  status,
-  importedRows,
-  comparison,
-  sourceDocumentId = null,
-  createdBy = null,
-}) {
+async function createBoqRevision(
+  tx,
+  {
+    projectId,
+    label,
+    status,
+    importedRows,
+    comparison,
+    sourceDocumentId = null,
+    createdBy = null,
+  },
+) {
   const latest = await tx.boqRevision.findFirst({
     where: { projectId },
-    orderBy: { revisionNumber: 'desc' },
+    orderBy: { revisionNumber: "desc" },
     select: { revisionNumber: true },
   });
   const revisionNumber = (latest?.revisionNumber ?? 0) + 1;
@@ -391,23 +410,28 @@ async function createBoqRevision(tx, {
 }
 
 function boqItemData(projectId, revisionId, item, overrides = {}) {
+  const isActive = overrides.isActive ?? true;
+  const code = normalizeCode(item.code);
   return {
     projectId,
     revisionId,
-    code: item.code,
+    code,
+    activeCodeKey: activeBoqCodeKey(code, isActive),
     description: item.description,
     qty: item.qty,
     unit: item.unit,
     rate: item.rate,
     amount: item.amount,
     isManual: false,
+    isActive,
     sortOrder: item.sortOrder,
     ...overrides,
   };
 }
 
 async function calculateProjectFinancials(projectId, items, summary = null) {
-  const allocationSummary = summary || (await buildAllocationSummary({ projectId }));
+  const allocationSummary =
+    summary || (await buildAllocationSummary({ projectId }));
   return calculateFinancials(items, allocationSummary);
 }
 
@@ -422,6 +446,7 @@ const boqItemActivityAllocationInclude = {
         id: true,
         projectId: true,
         name: true,
+        activityCode: true,
         p6ActivityId: true,
         wbsCode: true,
         predecessors: true,
@@ -432,18 +457,19 @@ const boqItemActivityAllocationInclude = {
               select: {
                 id: true,
                 name: true,
+                activityCode: true,
                 p6ActivityId: true,
                 wbsCode: true,
                 sortOrder: true,
               },
             },
           },
-          orderBy: { createdAt: 'asc' },
+          orderBy: { createdAt: "asc" },
         },
       },
     },
   },
-  orderBy: { createdAt: 'asc' },
+  orderBy: { createdAt: "asc" },
 };
 
 const boqItemInclude = {
@@ -451,7 +477,7 @@ const boqItemInclude = {
 };
 
 function activityDisplayCode(activity) {
-  return activity?.p6ActivityId || activity?.wbsCode || activity?.id || '';
+  return activity?.activityCode || activity?.p6ActivityId || activity?.id || "";
 }
 
 function dependencyDisplay(activity) {
@@ -503,8 +529,8 @@ function assertPositiveAllocationValues({ quantity, amount }) {
   if (quantity <= 0 || amount <= 0) {
     throw new HttpError(
       400,
-      'INVALID_ALLOCATION_VALUES',
-      'Activity allocation quantity and amount must be greater than zero',
+      "INVALID_ALLOCATION_VALUES",
+      "Activity allocation quantity and amount must be greater than zero",
     );
   }
 }
@@ -523,7 +549,7 @@ async function createOfficialBoqActivityAllocation(
     projectId,
     boqItem,
     payload,
-    source = 'manual',
+    source = "manual",
     userId = null,
     calendarId = null,
   },
@@ -534,14 +560,10 @@ async function createOfficialBoqActivityAllocation(
     payload.amount !== undefined && payload.amount !== null
       ? toMoneyNumber(payload.amount)
       : multiplyMoney(quantity, rate);
-  const activityName = String(payload.activityName || '').trim();
+  const activityName = String(payload.activityName || "").trim();
 
   if (!activityName) {
-    throw new HttpError(
-      400,
-      'MISSING_FIELDS',
-      'activityName is required',
-    );
+    throw new HttpError(400, "MISSING_FIELDS", "activityName is required");
   }
   assertPositiveAllocationValues({ quantity, amount });
 
@@ -566,14 +588,15 @@ async function createOfficialBoqActivityAllocation(
   const dependencyType = payload.dependencyType || null;
   const predecessorCode = trimOrNull(payload.predecessorCode);
   const predecessorText = predecessorCode
-    ? `${predecessorCode} ${dependencyType || 'FS'}`
+    ? `${predecessorCode} ${dependencyType || "FS"}`
     : null;
 
   const activity = await tx.activity.create({
     data: {
       projectId,
       name: activityName,
-      wbsCode: activityCode,
+      activityCode,
+      wbsCode: trimOrNull(payload.wbsCode),
       calendarId,
       category: payload.category || null,
       duration: Number(payload.duration) || 0,
@@ -602,7 +625,7 @@ async function createOfficialBoqActivityAllocation(
       amount,
       weight: computeDefaultWeight({ amount, boqItem }),
       source,
-      status: payload.status || 'draft',
+      status: payload.status || "draft",
       notes: trimOrNull(payload.notes),
       createdBy: userId || null,
       updatedBy: userId || null,
@@ -612,220 +635,6 @@ async function createOfficialBoqActivityAllocation(
   return mapActivityAllocation({ ...allocation, activity }, boqItem);
 }
 
-// ── In-memory job store ───────────────────────────────────────────────────────
-const boqJobs = new Map();
-
-function setBoqJob(jobId, data) {
-  boqJobs.set(jobId, { ...boqJobs.get(jobId), ...data, updatedAt: Date.now() });
-}
-
-function getBoqJob(jobId) {
-  return boqJobs.get(jobId) || null;
-}
-
-// Clean up jobs older than 2 hours
-const boqJobCleanupTimer = setInterval(() => {
-  const cutoff = Date.now() - 2 * 60 * 60 * 1000;
-  for (const [id, job] of boqJobs) {
-    if (job.updatedAt < cutoff) boqJobs.delete(id);
-  }
-}, 30 * 60 * 1000);
-boqJobCleanupTimer.unref?.();
-
-// ── Excel Template ────────────────────────────────────────────────────────────
-async function generateBoqTemplate() {
-  const workbook = new ExcelJS.Workbook();
-  const sheet = workbook.addWorksheet('BOQ');
-
-  sheet.columns = [
-    { header: 'Code', key: 'code', width: 12 },
-    { header: 'Description', key: 'description', width: 45 },
-    { header: 'Quantity', key: 'quantity', width: 12 },
-    { header: 'Unit', key: 'unit', width: 10 },
-    { header: 'Rate', key: 'rate', width: 14 },
-    { header: 'Amount', key: 'amount', width: 16 },
-  ];
-
-  // Style header row
-  const headerRow = sheet.getRow(1);
-  headerRow.font = { bold: true, color: { argb: 'FFFFFFFF' } };
-  headerRow.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1E40AF' } };
-  headerRow.alignment = { vertical: 'middle', horizontal: 'center' };
-  headerRow.height = 22;
-
-  // Example rows
-  const examples = [
-    { code: '1.1', description: 'Site Clearance and Demolition', quantity: 1200, unit: 'm²', rate: 15, amount: 18000 },
-    { code: '1.2', description: 'Bulk Excavation', quantity: 3500, unit: 'm³', rate: 22, amount: 77000 },
-    { code: '2.1', description: 'Reinforced Concrete Foundation', quantity: 450, unit: 'm³', rate: 350, amount: 157500 },
-  ];
-
-  examples.forEach((row) => {
-    const r = sheet.addRow(row);
-    r.getCell('amount').numFmt = '#,##0.00';
-    r.getCell('rate').numFmt = '#,##0.00';
-    r.getCell('quantity').numFmt = '#,##0.##';
-  });
-
-  // Note row
-  sheet.addRow([]);
-  const noteRow = sheet.addRow(['Note: The "Amount" column is auto-calculated (Quantity × Rate). You may leave it blank.']);
-  noteRow.font = { italic: true, color: { argb: 'FF6B7280' } };
-  sheet.mergeCells(`A${noteRow.number}:F${noteRow.number}`);
-
-  return workbook;
-}
-
-// ── Excel Parsing & Validation ────────────────────────────────────────────────
-const REQUIRED_HEADERS = ['code', 'description', 'quantity', 'unit', 'rate'];
-const HEADER_ALIASES = {
-  'item no': 'code',
-  'item number': 'code',
-  'item code': 'code',
-  'no': 'code',
-  'no.': 'code',
-  'desc': 'description',
-  'item description': 'description',
-  'work description': 'description',
-  qty: 'quantity',
-  'qty.': 'quantity',
-  'unit rate': 'rate',
-  'unit price': 'rate',
-  'total': 'amount',
-  'total amount': 'amount',
-  'line total': 'amount',
-};
-
-function normalizeHeader(h) {
-  return (h ?? '').toString().toLowerCase().trim().replace(/\s+/g, ' ');
-}
-
-function parseWorkbookRows(wb) {
-  const sheetName = wb.SheetNames[0];
-  const sheet = wb.Sheets[sheetName];
-  const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
-
-  if (rows.length < 2) throw new HttpError(400, 'BOQ_VALIDATION_FAILED', 'File appears empty');
-
-  // Find header row (first row with recognizable columns)
-  let headerRowIdx = 0;
-  let columnMap = {};
-
-  for (let i = 0; i < Math.min(5, rows.length); i++) {
-    const rowHeaders = rows[i].map(normalizeHeader);
-    const map = {};
-    rowHeaders.forEach((h, idx) => {
-      const canonical = HEADER_ALIASES[h] || h;
-      if (REQUIRED_HEADERS.includes(canonical)) map[canonical] = idx;
-    });
-    if (Object.keys(map).length >= 3) {
-      headerRowIdx = i;
-      columnMap = map;
-      break;
-    }
-  }
-
-  const missing = REQUIRED_HEADERS.filter((h) => columnMap[h] === undefined && h !== 'amount');
-  if (missing.length > 0) {
-    throw new HttpError(400, 'BOQ_VALIDATION_FAILED', `Missing required columns: ${missing.join(', ')}`, {
-      errors: [{ code: 'MISSING_COLUMNS', message: `Columns not found: ${missing.join(', ')}` }],
-    });
-  }
-
-  const dataRows = rows.slice(headerRowIdx + 1);
-  const parsed = [];
-
-  for (let i = 0; i < dataRows.length; i++) {
-    const row = dataRows[i];
-    const rawCode = row[columnMap.code];
-    const rawDesc = row[columnMap.description];
-    const rawQty = row[columnMap.quantity];
-    const rawUnit = row[columnMap.unit];
-    const rawRate = row[columnMap.rate];
-
-    // Skip empty rows
-    if (!rawCode && !rawDesc && !rawQty && !rawUnit && !rawRate) continue;
-    // Skip section header rows (only code/description, no numeric data)
-    if (!rawQty && !rawRate) continue;
-
-    parsed.push({
-      rowIndex: i + headerRowIdx + 2,
-      code: rawCode?.toString().trim() || '',
-      description: rawDesc?.toString().trim() || '',
-      quantity: rawQty,
-      unit: rawUnit?.toString().trim() || '',
-      rate: rawRate,
-    });
-  }
-
-  return parsed;
-}
-
-function parseExcelBuffer(buffer) {
-  return parseWorkbookRows(XLSX.read(buffer, { type: 'buffer' }));
-}
-
-function parseExcelFile(filePath) {
-  return parseWorkbookRows(XLSX.readFile(filePath));
-}
-
-function parseExcelInput(input) {
-  if (Buffer.isBuffer(input)) return parseExcelBuffer(input);
-  if (typeof input === 'string') return parseExcelFile(input);
-  if (input?.path) return parseExcelFile(input.path);
-  if (Buffer.isBuffer(input?.buffer)) return parseExcelBuffer(input.buffer);
-  throw new HttpError(400, 'NO_FILE', 'No file uploaded');
-}
-
-function validateBoqRows(rows) {
-  const errors = [];
-  const seenCodes = new Map(); // normalized code -> first rowIndex
-
-  rows.forEach((row) => {
-    const r = row.rowIndex;
-
-    if (!row.code) errors.push({ row: r, field: 'code', message: 'Code is required' });
-    if (!row.description) errors.push({ row: r, field: 'description', message: 'Description is required' });
-    if (!row.unit) errors.push({ row: r, field: 'unit', message: 'Unit is required' });
-
-    const qty = Number(row.quantity);
-    if (isNaN(qty) || qty <= 0) {
-      errors.push({ row: r, field: 'quantity', message: 'Quantity must be a positive number' });
-    }
-
-    const rate = Number(row.rate);
-    if (isNaN(rate) || rate < 0) {
-      errors.push({ row: r, field: 'rate', message: 'Rate must be a non-negative number' });
-    } else {
-      try {
-        assertMoneyInput('rate', row.rate);
-      } catch (error) {
-        errors.push({ row: r, field: 'rate', message: error.message });
-      }
-    }
-
-    if (row.description && row.description.length > 500) {
-      errors.push({ row: r, field: 'description', message: 'Description exceeds 500 characters' });
-    }
-
-    if (row.code) {
-      const key = row.code.toString().trim().toLowerCase();
-      if (seenCodes.has(key)) {
-        errors.push({
-          row: r,
-          field: 'code',
-          message: `Duplicate code "${row.code}" — also on row ${seenCodes.get(key)}`,
-        });
-      } else {
-        seenCodes.set(key, r);
-      }
-    }
-  });
-
-  return { valid: errors.length === 0, errors };
-}
-
-// ── Main Upload Flow ───────────────────────────────────────────────────────────
 async function processBoqUpload(projectId, fileBuffer, label, options = {}) {
   const project = options.orgId
     ? await prisma.project.findFirst({
@@ -836,7 +645,8 @@ async function processBoqUpload(projectId, fileBuffer, label, options = {}) {
         where: { id: projectId },
         select: { orgId: true },
       });
-  if (!project) throw new HttpError(404, 'PROJECT_NOT_FOUND', 'Project not found');
+  if (!project)
+    throw new HttpError(404, "PROJECT_NOT_FOUND", "Project not found");
   await assertAiQuota(project.orgId);
 
   let itemsWithAmounts;
@@ -844,15 +654,24 @@ async function processBoqUpload(projectId, fileBuffer, label, options = {}) {
     // Step 1: Parse
     const rawRows = parseExcelInput(fileBuffer);
     if (rawRows.length === 0) {
-      throw new HttpError(400, 'BOQ_VALIDATION_FAILED', 'No data rows found in file');
+      throw new HttpError(
+        400,
+        "BOQ_VALIDATION_FAILED",
+        "No data rows found in file",
+      );
     }
 
     // Step 2: Validate
     const validation = validateBoqRows(rawRows);
     if (!validation.valid) {
-      throw new HttpError(400, 'BOQ_VALIDATION_FAILED', 'BOQ file contains validation errors', {
-        errors: validation.errors,
-      });
+      throw new HttpError(
+        400,
+        "BOQ_VALIDATION_FAILED",
+        "BOQ file contains validation errors",
+        {
+          errors: validation.errors,
+        },
+      );
     }
 
     // Step 3: Calculate amounts
@@ -868,11 +687,13 @@ async function processBoqUpload(projectId, fileBuffer, label, options = {}) {
     }));
   } catch (error) {
     if (options.documentId) {
-      await fileStorageService.markDocumentRejected({
-        documentId: options.documentId,
-        code: error.code || 'BOQ_UPLOAD_FAILED',
-        message: error.message,
-      }).catch(() => {});
+      await fileStorageService
+        .markDocumentRejected({
+          documentId: options.documentId,
+          code: error.code || "BOQ_UPLOAD_FAILED",
+          message: error.message,
+        })
+        .catch(() => {});
     }
     throw error;
   }
@@ -925,8 +746,8 @@ async function processBoqUpload(projectId, fileBuffer, label, options = {}) {
         await trx.projectDocument.update({
           where: { id: options.documentId },
           data: {
-            status: 'linked',
-            linkedEntityType: 'boq_revision',
+            status: "linked",
+            linkedEntityType: "boq_revision",
             linkedEntityId: revision.id,
           },
         });
@@ -972,7 +793,7 @@ async function processBoqUpload(projectId, fileBuffer, label, options = {}) {
             blockedCount: revision.blockedCount,
           },
           metadata: {
-            source: 'boq.upload',
+            source: "boq.upload",
             sourceDocumentId: options.documentId || null,
             baseline,
           },
@@ -1009,6 +830,8 @@ async function processBoqUpload(projectId, fileBuffer, label, options = {}) {
             where: { id: existing.id },
             data: {
               revisionId: revision.id,
+              code: item.code,
+              activeCodeKey: activeBoqCodeKey(item.code, true),
               description: item.description,
               qty: item.qty,
               unit: item.unit,
@@ -1048,7 +871,7 @@ async function processBoqUpload(projectId, fileBuffer, label, options = {}) {
           removedCount: revision.removedCount,
         },
         metadata: {
-          source: 'boq.upload',
+          source: "boq.upload",
           sourceDocumentId: options.documentId || null,
           baseline,
         },
@@ -1078,11 +901,13 @@ async function processBoqUpload(projectId, fileBuffer, label, options = {}) {
     });
   } catch (error) {
     if (options.documentId) {
-      await fileStorageService.markDocumentRejected({
-        documentId: options.documentId,
-        code: error.code || 'BOQ_UPLOAD_FAILED',
-        message: error.message,
-      }).catch(() => {});
+      await fileStorageService
+        .markDocumentRejected({
+          documentId: options.documentId,
+          code: error.code || "BOQ_UPLOAD_FAILED",
+          message: error.message,
+        })
+        .catch(() => {});
     }
     handleBoqUniqueError(error);
   }
@@ -1091,8 +916,8 @@ async function processBoqUpload(projectId, fileBuffer, label, options = {}) {
   const jobId = uuidv4();
   if (baseline?.locked) {
     setBoqJob(jobId, {
-      status: 'done',
-      step: 'BOQ revision comparison saved; baseline rows were not changed.',
+      status: "done",
+      step: "BOQ revision comparison saved; baseline rows were not changed.",
       progress: 100,
       projectId,
       mode,
@@ -1112,8 +937,8 @@ async function processBoqUpload(projectId, fileBuffer, label, options = {}) {
   }
 
   setBoqJob(jobId, {
-    status: 'processing',
-    step: 'Preparing BOQ data...',
+    status: "processing",
+    step: "Preparing BOQ data...",
     progress: 10,
     projectId,
     mode,
@@ -1123,13 +948,9 @@ async function processBoqUpload(projectId, fileBuffer, label, options = {}) {
     error: null,
   });
 
-  processBoqAiAsync(
-    projectId,
-    jobId,
-    itemsWithAmounts,
-    label,
-    { revisionId: revision.id },
-  ).catch(() => {});
+  processBoqAiAsync(projectId, jobId, itemsWithAmounts, label, {
+    revisionId: revision.id,
+  }).catch(() => {});
 
   return {
     jobId,
@@ -1142,7 +963,11 @@ async function processBoqUpload(projectId, fileBuffer, label, options = {}) {
 
 async function processBoqAiAsync(projectId, jobId, items, label, options = {}) {
   try {
-    setBoqJob(jobId, { status: 'running', step: 'Calling AI to generate activities...', progress: 30 });
+    setBoqJob(jobId, {
+      status: "running",
+      step: "Calling AI to generate activities...",
+      progress: 30,
+    });
 
     const project = await prisma.project.findUnique({
       where: { id: projectId },
@@ -1160,22 +985,23 @@ async function processBoqAiAsync(projectId, jobId, items, label, options = {}) {
     const prompt = buildBoqActivityPrompt(project, items);
 
     const message = await client.messages.create({
-      model: 'claude-sonnet-4-6',
+      model: "claude-sonnet-4-6",
       max_tokens: 8192,
-      messages: [{ role: 'user', content: prompt }],
+      messages: [{ role: "user", content: prompt }],
     });
 
-    const rawText = message.content[0]?.text ?? '';
+    const rawText = message.content[0]?.text ?? "";
     const jsonMatch = rawText.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) throw new Error('AI returned non-JSON response');
+    if (!jsonMatch) throw new Error("AI returned non-JSON response");
     const parsed = JSON.parse(jsonMatch[0]);
 
     const proj = await prisma.project.findUnique({
-      where: { id: projectId }, select: { orgId: true },
+      where: { id: projectId },
+      select: { orgId: true },
     });
     if (proj) await incrementAiUsage(proj.orgId);
 
-    setBoqJob(jobId, { step: 'Saving activities...', progress: 70 });
+    setBoqJob(jobId, { step: "Saving activities...", progress: 70 });
 
     // Fetch saved BOQ items to get their IDs. Existing rows keep their
     // generated activity breakdowns; only rows without activities are expanded.
@@ -1225,7 +1051,7 @@ async function processBoqAiAsync(projectId, jobId, items, label, options = {}) {
 
       const codes = [];
       const activities = (boqResult.activities ?? []).filter((act) =>
-        String(act?.activityName || '').trim(),
+        String(act?.activityName || "").trim(),
       );
       const boqQuantity = toNumber(boqItem.qty);
       const totalSuggestedQuantity = activities.reduce(
@@ -1244,9 +1070,15 @@ async function processBoqAiAsync(projectId, jobId, items, label, options = {}) {
         if (allocatedQuantity <= 0) continue;
 
         let predecessorCode = null;
-        if (act.predecessorIndex !== null && act.predecessorIndex !== undefined) {
+        if (
+          act.predecessorIndex !== null &&
+          act.predecessorIndex !== undefined
+        ) {
           predecessorCode = codes[act.predecessorIndex] || null;
-        } else if (act.predecessorBoqCode && act.predecessorActivityIndex !== null) {
+        } else if (
+          act.predecessorBoqCode &&
+          act.predecessorActivityIndex !== null
+        ) {
           const prevCodes = allGeneratedCodes[act.predecessorBoqCode] || [];
           predecessorCode = prevCodes[act.predecessorActivityIndex] || null;
         }
@@ -1264,7 +1096,7 @@ async function processBoqAiAsync(projectId, jobId, items, label, options = {}) {
               predecessorCode,
               sortOrder: i,
             },
-            source: 'ai',
+            source: "ai",
             userId: options.userId || null,
             calendarId: project?.projectCalendar ?? null,
           }),
@@ -1274,21 +1106,23 @@ async function processBoqAiAsync(projectId, jobId, items, label, options = {}) {
       allGeneratedCodes[boqResult.boqCode] = codes;
     }
 
-    setBoqJob(jobId, { status: 'done', step: 'Complete', progress: 100 });
+    setBoqJob(jobId, { status: "done", step: "Complete", progress: 100 });
   } catch (err) {
-    console.error('[boq] AI async error:', err);
+    console.error("[boq] AI async error:", err);
     setBoqJob(jobId, {
-      status: 'error',
-      step: 'AI processing failed',
-      error: err.message || 'AI processing failed. Please try uploading again.',
+      status: "error",
+      step: "AI processing failed",
+      error: err.message || "AI processing failed. Please try uploading again.",
     });
   }
 }
 
 // ── AI Prompt ─────────────────────────────────────────────────────────────────
 function buildBoqActivityPrompt(project, boqItems) {
-  const startDate = project?.startDate ? new Date(project.startDate).toISOString().split('T')[0] : 'TBD';
-  const currency = project?.currency ?? 'USD';
+  const startDate = project?.startDate
+    ? new Date(project.startDate).toISOString().split("T")[0]
+    : "TBD";
+  const currency = project?.currency ?? "USD";
   const totalBudget = project?.contractValue ?? 0;
 
   return `You are a construction project planning expert. Break down each BOQ item into specific construction activities and define logical dependencies between them.
@@ -1306,13 +1140,24 @@ RULES:
 7. Quantities across activities under one BOQ item should logically relate to the BOQ item's total quantity
 
 PROJECT CONTEXT:
-- Name: ${project?.name ?? 'Construction Project'}
+- Name: ${project?.name ?? "Construction Project"}
 - Start Date: ${startDate}
-- Duration: ${project?.duration ?? 12} ${project?.durationUnit ?? 'months'}
+- Duration: ${project?.duration ?? 12} ${project?.durationUnit ?? "months"}
 - Total Budget: ${currency} ${totalBudget.toLocaleString()}
 
 BOQ ITEMS:
-${JSON.stringify(boqItems.map((i) => ({ code: i.code, description: i.description, quantity: i.qty, unit: i.unit, rate: i.rate, amount: i.amount })), null, 2)}
+${JSON.stringify(
+  boqItems.map((i) => ({
+    code: i.code,
+    description: i.description,
+    quantity: i.qty,
+    unit: i.unit,
+    rate: i.rate,
+    amount: i.amount,
+  })),
+  null,
+  2,
+)}
 
 Respond ONLY with valid JSON matching this exact structure:
 {
@@ -1344,13 +1189,13 @@ async function getProjectBoq(projectId, options = {}) {
   const [items, allocationSummary, revisions, baseline] = await Promise.all([
     prisma.boqItem.findMany({
       where: { projectId, isActive: true },
-      orderBy: { sortOrder: 'asc' },
+      orderBy: { sortOrder: "asc" },
       include: boqItemInclude,
     }),
     buildAllocationSummary({ projectId }),
     prisma.boqRevision.findMany({
       where: { projectId },
-      orderBy: [{ revisionNumber: 'desc' }, { createdAt: 'desc' }],
+      orderBy: [{ revisionNumber: "desc" }, { createdAt: "desc" }],
       take: 10,
     }),
     getBoqBaselineLock(projectId),
@@ -1358,8 +1203,9 @@ async function getProjectBoq(projectId, options = {}) {
 
   const serializedRevisions = revisions.map(serializeBoqRevision);
   const currentRevision =
-    serializedRevisions.find((revision) => revision.status === BOQ_REVISION_STATUS.IMPORTED) ||
-    null;
+    serializedRevisions.find(
+      (revision) => revision.status === BOQ_REVISION_STATUS.IMPORTED,
+    ) || null;
   const latestRevision = serializedRevisions[0] || null;
 
   if (items.length === 0) {
@@ -1384,8 +1230,10 @@ async function getProjectBoq(projectId, options = {}) {
   );
   const allocationByItem = allocationMap(allocationSummary);
 
-  const latestItem = items.reduce((latest, item) =>
-    !latest || item.createdAt > latest.createdAt ? item : latest, null
+  const latestItem = items.reduce(
+    (latest, item) =>
+      !latest || item.createdAt > latest.createdAt ? item : latest,
+    null,
   );
 
   return {
@@ -1405,7 +1253,7 @@ async function getProjectBoq(projectId, options = {}) {
 function mapBoqItem(item, allocationTotals = null) {
   return {
     id: item.id,
-    code: item.code || item.ref || '',
+    code: item.code || item.ref || "",
     description: item.description,
     quantity: item.qty,
     unit: item.unit,
@@ -1451,14 +1299,17 @@ function mapActivityAllocation(allocation, boqItem) {
     allocationId: allocation.id,
     boqItemId: allocation.boqItemId,
     activityCode: activityDisplayCode(allocation.activity),
-    activityName: allocation.activity?.name ?? '',
+    activityName: allocation.activity?.name ?? "",
     unit: boqItem.unit ?? null,
     quantity,
-    rate: quantity > 0 ? divideMoney(amount, quantity) : toMoneyNumber(boqItem.rate),
+    rate:
+      quantity > 0
+        ? divideMoney(amount, quantity)
+        : toMoneyNumber(boqItem.rate),
     budget: amount,
     dependencyType: dependency.dependencyType,
     predecessorCode: dependency.predecessorCode,
-    isManual: allocation.source === 'manual',
+    isManual: allocation.source === "manual",
     source: allocation.source,
     allocationStatus: allocation.status,
     sortOrder: allocation.activity?.sortOrder ?? boqItem.sortOrder ?? 0,
@@ -1469,15 +1320,14 @@ function mapActivityAllocation(allocation, boqItem) {
 async function updateBoqItem(projectId, itemId, data, options = {}) {
   await assertProjectAccess(projectId, options.orgId);
   await assertBoqEditable(projectId);
-  const existing = await prisma.boqItem.findFirst({
-    where: { id: itemId, projectId },
-  });
-  if (!existing) throw new HttpError(404, 'BOQ_ITEM_NOT_FOUND', 'BOQ item not found');
+  const existing = await findBoqItemInProject(projectId, itemId);
+  if (!existing)
+    throw new HttpError(404, "BOQ_ITEM_NOT_FOUND", "BOQ item not found");
   if (existing.isActive === false) {
     throw new HttpError(
       409,
-      'BOQ_ITEM_INACTIVE',
-      'Historical BOQ rows cannot be edited from the current BOQ grid',
+      "BOQ_ITEM_INACTIVE",
+      "Historical BOQ rows cannot be edited from the current BOQ grid",
     );
   }
 
@@ -1488,6 +1338,10 @@ async function updateBoqItem(projectId, itemId, data, options = {}) {
       await assertUniqueBoqItemCode(projectId, code, prisma, itemId);
     }
     updateData.code = code;
+    updateData.activeCodeKey = activeBoqCodeKey(
+      code,
+      existing.isActive !== false,
+    );
   }
   if (data.description !== undefined) updateData.description = data.description;
   if (data.quantity !== undefined) {
@@ -1527,7 +1381,7 @@ async function updateBoqItem(projectId, itemId, data, options = {}) {
           description: row.description,
           amount: toMoneyNumber(row.amount),
         },
-        metadata: { source: 'boq.manual_grid' },
+        metadata: { source: "boq.manual_grid" },
       });
       return row;
     });
@@ -1546,7 +1400,10 @@ async function updateBoqItem(projectId, itemId, data, options = {}) {
   );
   const allocationByItem = allocationMap(allocationSummary);
 
-  return { item: mapBoqItem(updated, allocationByItem.get(updated.id)), financial };
+  return {
+    item: mapBoqItem(updated, allocationByItem.get(updated.id)),
+    financial,
+  };
 }
 
 // ── Create Manual BOQ Row ─────────────────────────────────────────────────────
@@ -1567,6 +1424,7 @@ async function createManualBoqItem(projectId, data, options = {}) {
         data: {
           projectId,
           code,
+          activeCodeKey: activeBoqCodeKey(code, true),
           description: data.description,
           qty: Number(data.quantity),
           unit: data.unit,
@@ -1585,7 +1443,7 @@ async function createManualBoqItem(projectId, data, options = {}) {
           quantity: Number(data.quantity),
           rate: toMoneyNumber(data.rate),
         },
-        source: 'manual',
+        source: "manual",
         userId: options.userId || null,
         calendarId,
       });
@@ -1604,14 +1462,14 @@ async function createManualBoqItem(projectId, data, options = {}) {
         actorId: options.userId || null,
         actorRole: options.userRole || null,
         oldStatus: null,
-        newStatus: 'draft',
+        newStatus: "draft",
         newSummary: boqItemAuditSummary(row),
         summary: {
           code: row.code || null,
           description: row.description,
           amount: toMoneyNumber(row.amount),
         },
-        metadata: { source: 'boq.manual_grid' },
+        metadata: { source: "boq.manual_grid" },
       });
       return row;
     });
@@ -1643,31 +1501,38 @@ async function createManualBoqItem(projectId, data, options = {}) {
 async function deleteBoqItem(projectId, itemId, options = {}) {
   await assertProjectAccess(projectId, options.orgId);
   await assertBoqEditable(projectId);
-  const item = await prisma.boqItem.findFirst({ where: { id: itemId, projectId } });
-  if (!item) throw new HttpError(404, 'BOQ_ITEM_NOT_FOUND', 'BOQ item not found');
+  const item = await findBoqItemInProject(projectId, itemId);
+  if (!item)
+    throw new HttpError(404, "BOQ_ITEM_NOT_FOUND", "BOQ item not found");
   if (item.isActive === false) {
     throw new HttpError(
       409,
-      'BOQ_ITEM_INACTIVE',
-      'Historical BOQ rows cannot be deleted',
+      "BOQ_ITEM_INACTIVE",
+      "Historical BOQ rows cannot be deleted",
     );
   }
   if (!item.isManual) {
-    throw new HttpError(403, 'BOQ_ITEM_NOT_DELETABLE', 'Uploaded BOQ rows cannot be deleted');
+    throw new HttpError(
+      403,
+      "BOQ_ITEM_NOT_DELETABLE",
+      "Uploaded BOQ rows cannot be deleted",
+    );
   }
 
   const allocations = await prisma.activityBoqAllocation.findMany({
     where: { projectId, boqItemId: itemId, isActive: true },
     select: { id: true, activityId: true, status: true },
   });
-  const protectedAllocation = allocations.find((allocation) =>
-    activeStatuses.includes(allocation.status) && allocation.status !== 'draft',
+  const protectedAllocation = allocations.find(
+    (allocation) =>
+      activeStatuses.includes(allocation.status) &&
+      allocation.status !== "draft",
   );
   if (protectedAllocation) {
     throw new HttpError(
       409,
-      'BOQ_ITEM_HAS_LINKED_ALLOCATIONS',
-      'BOQ rows with submitted or approved activity allocations must be revised through the allocation workflow.',
+      "BOQ_ITEM_HAS_LINKED_ALLOCATIONS",
+      "BOQ rows with submitted or approved activity allocations must be revised through the allocation workflow.",
     );
   }
 
@@ -1676,21 +1541,23 @@ async function deleteBoqItem(projectId, itemId, options = {}) {
       await tx.activityBoqAllocation.updateMany({
         where: { id: { in: allocations.map((allocation) => allocation.id) } },
         data: {
-          status: 'rejected',
+          status: "rejected",
           isActive: false,
           rejectedBy: options.userId || null,
           rejectedAt: new Date(),
-          rejectedReason: 'Manual BOQ row deleted before allocation approval',
+          rejectedReason: "Manual BOQ row deleted before allocation approval",
           updatedBy: options.userId || null,
         },
       });
       await tx.activity.updateMany({
-        where: { id: { in: allocations.map((allocation) => allocation.activityId) } },
+        where: {
+          id: { in: allocations.map((allocation) => allocation.activityId) },
+        },
         data: {
           isActive: false,
           retiredAt: new Date(),
           retiredBy: options.userId || null,
-          retiredReason: 'Manual BOQ row deleted before allocation approval',
+          retiredReason: "Manual BOQ row deleted before allocation approval",
         },
       });
     }
@@ -1705,7 +1572,7 @@ async function deleteBoqItem(projectId, itemId, options = {}) {
       action: auditService.ACTIONS.DELETED,
       actorId: options.userId || null,
       actorRole: options.userRole || null,
-      oldStatus: item.isActive === false ? 'inactive' : 'active',
+      oldStatus: item.isActive === false ? "inactive" : "active",
       newStatus: null,
       oldSummary: boqItemAuditSummary(item),
       summary: {
@@ -1714,7 +1581,7 @@ async function deleteBoqItem(projectId, itemId, options = {}) {
         amount: toMoneyNumber(item.amount),
       },
       metadata: {
-        source: 'boq.manual_grid',
+        source: "boq.manual_grid",
         retiredAllocationIds: allocations.map((allocation) => allocation.id),
       },
     });
@@ -1737,13 +1604,14 @@ async function deleteBoqItem(projectId, itemId, options = {}) {
 async function createActivity(projectId, boqItemId, data, options = {}) {
   await assertProjectAccess(projectId, options.orgId);
   await assertBoqEditable(projectId);
-  const item = await prisma.boqItem.findFirst({ where: { id: boqItemId, projectId } });
-  if (!item) throw new HttpError(404, 'BOQ_ITEM_NOT_FOUND', 'BOQ item not found');
+  const item = await findBoqItemInProject(projectId, boqItemId);
+  if (!item)
+    throw new HttpError(404, "BOQ_ITEM_NOT_FOUND", "BOQ item not found");
   if (item.isActive === false) {
     throw new HttpError(
       409,
-      'BOQ_ITEM_INACTIVE',
-      'Historical BOQ rows cannot receive new activities',
+      "BOQ_ITEM_INACTIVE",
+      "Historical BOQ rows cannot receive new activities",
     );
   }
 
@@ -1766,7 +1634,7 @@ async function createActivity(projectId, boqItemId, data, options = {}) {
           predecessorCode: data.predecessorCode || null,
           sortOrder: count,
         },
-        source: 'manual',
+        source: "manual",
         userId: options.userId || null,
         calendarId,
       });
@@ -1778,7 +1646,12 @@ async function createActivity(projectId, boqItemId, data, options = {}) {
   return { activity };
 }
 
-function findAllocationForBoqActivity(projectId, activityId, allocationId = null, tx = prisma) {
+function findAllocationForBoqActivity(
+  projectId,
+  activityId,
+  allocationId = null,
+  tx = prisma,
+) {
   return tx.activityBoqAllocation.findFirst({
     where: {
       projectId,
@@ -1796,13 +1669,14 @@ function findAllocationForBoqActivity(projectId, activityId, allocationId = null
                 select: {
                   id: true,
                   name: true,
+                  activityCode: true,
                   p6ActivityId: true,
                   wbsCode: true,
                   sortOrder: true,
                 },
               },
             },
-            orderBy: { createdAt: 'asc' },
+            orderBy: { createdAt: "asc" },
           },
         },
       },
@@ -1819,17 +1693,20 @@ async function updateActivity(projectId, activityId, data, options = {}) {
     activityId,
     data?.allocationId || null,
   );
-  if (!existing) throw new HttpError(404, 'ACTIVITY_NOT_FOUND', 'Activity not found');
-  if (existing.status !== 'draft') {
+  if (!existing)
+    throw new HttpError(404, "ACTIVITY_NOT_FOUND", "Activity not found");
+  if (existing.status !== "draft") {
     throw new HttpError(
       409,
-      'ALLOCATION_NOT_EDITABLE',
-      'Only draft activity BOQ allocations can be edited from the BOQ grid',
+      "ALLOCATION_NOT_EDITABLE",
+      "Only draft activity BOQ allocations can be edited from the BOQ grid",
     );
   }
 
   const quantity =
-    data.quantity !== undefined ? toNumber(data.quantity) : toNumber(existing.quantity);
+    data.quantity !== undefined
+      ? toNumber(data.quantity)
+      : toNumber(existing.quantity);
   const rate =
     data.rate !== undefined
       ? toMoneyNumber(data.rate)
@@ -1856,11 +1733,14 @@ async function updateActivity(projectId, activityId, data, options = {}) {
   const updated = await prisma.$transaction(async (tx) => {
     const activityData = {};
     if (data.activityName !== undefined) {
-      activityData.name = String(data.activityName || '').trim();
+      activityData.name = String(data.activityName || "").trim();
     }
-    if (data.dependencyType !== undefined || data.predecessorCode !== undefined) {
+    if (
+      data.dependencyType !== undefined ||
+      data.predecessorCode !== undefined
+    ) {
       const predecessorCode = trimOrNull(data.predecessorCode);
-      const dependencyType = data.dependencyType || 'FS';
+      const dependencyType = data.dependencyType || "FS";
       activityData.predecessors = predecessorCode
         ? `${predecessorCode} ${dependencyType}`
         : null;
@@ -1876,7 +1756,7 @@ async function updateActivity(projectId, activityId, data, options = {}) {
             projectId,
             successorId: existing.activityId,
             predecessors: activityData.predecessors,
-            source: existing.source || 'manual',
+            source: existing.source || "manual",
           });
         } else {
           await tx.activityDependency.deleteMany({
@@ -1922,8 +1802,8 @@ async function deleteActivity(projectId, activityId, options = {}) {
     if (activeAllocations.length > 1) {
       throw new HttpError(
         409,
-        'ALLOCATION_NOT_EDITABLE',
-        'This schedule activity has multiple BOQ allocations. Remove the specific allocation from the allocation workflow.',
+        "ALLOCATION_NOT_EDITABLE",
+        "This schedule activity has multiple BOQ allocations. Remove the specific allocation from the allocation workflow.",
       );
     }
   }
@@ -1933,12 +1813,13 @@ async function deleteActivity(projectId, activityId, options = {}) {
     activityId,
     options.allocationId || null,
   );
-  if (!allocation) throw new HttpError(404, 'ACTIVITY_NOT_FOUND', 'Activity not found');
-  if (allocation.status !== 'draft') {
+  if (!allocation)
+    throw new HttpError(404, "ACTIVITY_NOT_FOUND", "Activity not found");
+  if (allocation.status !== "draft") {
     throw new HttpError(
       409,
-      'ALLOCATION_NOT_EDITABLE',
-      'Submitted or approved activity allocations must be rejected or revised before removing the schedule activity',
+      "ALLOCATION_NOT_EDITABLE",
+      "Submitted or approved activity allocations must be rejected or revised before removing the schedule activity",
     );
   }
 
@@ -1946,11 +1827,12 @@ async function deleteActivity(projectId, activityId, options = {}) {
     await tx.activityBoqAllocation.update({
       where: { id: allocation.id },
       data: {
-        status: 'rejected',
+        status: "rejected",
         isActive: false,
         rejectedBy: options.userId || null,
         rejectedAt: new Date(),
-        rejectedReason: 'BOQ helper activity deleted before allocation approval',
+        rejectedReason:
+          "BOQ helper activity deleted before allocation approval",
         updatedBy: options.userId || null,
       },
     });
@@ -1960,7 +1842,7 @@ async function deleteActivity(projectId, activityId, options = {}) {
         isActive: false,
         retiredAt: new Date(),
         retiredBy: options.userId || null,
-        retiredReason: 'BOQ helper activity deleted before allocation approval',
+        retiredReason: "BOQ helper activity deleted before allocation approval",
       },
     });
   });

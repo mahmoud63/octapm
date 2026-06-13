@@ -17,6 +17,7 @@ const mockPrisma = {
     count: jest.fn(),
     create: jest.fn(),
     update: jest.fn(),
+    delete: jest.fn(),
     deleteMany: jest.fn(),
     createMany: jest.fn(),
   },
@@ -53,32 +54,32 @@ const mockAssertAiQuota = jest.fn();
 const mockAnthropicMessagesCreate = jest.fn();
 const mockAuditService = {
   ENTITY_TYPES: {
-    BOQ_ITEM: 'boq_item',
-    BOQ_REVISION: 'boq_revision',
+    BOQ_ITEM: "boq_item",
+    BOQ_REVISION: "boq_revision",
   },
   ACTIONS: {
-    CREATED: 'created',
-    UPDATED: 'updated',
-    DELETED: 'deleted',
-    IMPORTED: 'imported',
+    CREATED: "created",
+    UPDATED: "updated",
+    DELETED: "deleted",
+    IMPORTED: "imported",
   },
   recordEvent: jest.fn(),
 };
 
-jest.mock('../../config/db', () => ({ prisma: mockPrisma }));
-jest.mock('@anthropic-ai/sdk', () =>
+jest.mock("../../config/db", () => ({ prisma: mockPrisma }));
+jest.mock("@anthropic-ai/sdk", () =>
   jest.fn().mockImplementation(() => ({
     messages: { create: mockAnthropicMessagesCreate },
   })),
 );
-jest.mock('../../utils/activity-code', () => ({
+jest.mock("../../utils/activity-code", () => ({
   nextActivityCode: mockNextActivityCode,
 }));
-jest.mock('../../middleware/subscription-gate', () => ({
+jest.mock("../../middleware/subscription-gate", () => ({
   assertAiQuota: mockAssertAiQuota,
   incrementAiUsage: jest.fn(),
 }));
-jest.mock('../activity-boq-allocation.service', () => ({
+jest.mock("../activity-boq-allocation.service", () => ({
   assertAllocationCapacity: mockAssertAllocationCapacity,
   buildAllocationSummary: mockBuildAllocationSummary,
   computeDefaultWeight: jest.fn(({ amount, boqItem }) =>
@@ -87,7 +88,7 @@ jest.mock('../activity-boq-allocation.service', () => ({
       : 0,
   ),
 }));
-jest.mock('../boq-calculation.service', () => ({
+jest.mock("../boq-calculation.service", () => ({
   calculateFinancials: jest.fn((items, summary) =>
     Promise.resolve({
       subtotal1: items.reduce((sum, item) => sum + Number(item.amount || 0), 0),
@@ -104,29 +105,29 @@ jest.mock('../boq-calculation.service', () => ({
     }),
   ),
 }));
-jest.mock('../audit.service', () => mockAuditService);
+jest.mock("../audit.service", () => mockAuditService);
 
-const XLSX = require('xlsx');
-const service = require('../boq.service');
+const XLSX = require("@e965/xlsx");
+const service = require("../boq.service");
 
 function makeBoqWorkbookBuffer(rows) {
   const worksheet = XLSX.utils.aoa_to_sheet([
-    ['Code', 'Description', 'Quantity', 'Unit', 'Rate'],
+    ["Code", "Description", "Quantity", "Unit", "Rate"],
     ...rows,
   ]);
   const workbook = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(workbook, worksheet, 'BOQ');
-  return XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' });
+  XLSX.utils.book_append_sheet(workbook, worksheet, "BOQ");
+  return XLSX.write(workbook, { type: "buffer", bookType: "xlsx" });
 }
 
-describe('BOQ service integrity', () => {
+describe("BOQ service integrity", () => {
   beforeEach(() => {
     jest.clearAllMocks();
     mockAssertAiQuota.mockResolvedValue();
     mockAnthropicMessagesCreate.mockResolvedValue({
       content: [{ text: '{"boqActivities":[]}' }],
     });
-    mockNextActivityCode.mockResolvedValue('EX-001');
+    mockNextActivityCode.mockResolvedValue("EX-001");
     mockAssertAllocationCapacity.mockImplementation(() => {});
     mockPrisma.activityBoqAllocation.findMany.mockResolvedValue([]);
     mockBuildAllocationSummary.mockResolvedValue({
@@ -136,37 +137,37 @@ describe('BOQ service integrity', () => {
       certifiedValue: 0,
       items: [],
     });
-    mockPrisma.projectDocument.update.mockResolvedValue({ id: 'doc-1' });
-    mockAuditService.recordEvent.mockResolvedValue({ id: 'audit-1' });
+    mockPrisma.projectDocument.update.mockResolvedValue({ id: "doc-1" });
+    mockAuditService.recordEvent.mockResolvedValue({ id: "audit-1" });
   });
 
-  it('rejects duplicate BOQ item codes before update', async () => {
+  it("rejects duplicate BOQ item codes before update", async () => {
     mockPrisma.boqItem.findFirst
       .mockResolvedValueOnce({
-        id: 'boq-1',
-        projectId: 'project-1',
-        code: '1.1',
+        id: "boq-1",
+        projectId: "project-1",
+        code: "1.1",
         qty: 5,
         rate: 100,
       })
-      .mockResolvedValueOnce({ id: 'boq-2', code: '1.2' });
+      .mockResolvedValueOnce({ id: "boq-2", code: "1.2" });
 
     await expect(
-      service.updateBoqItem('project-1', 'boq-1', { code: '1.2' }),
-    ).rejects.toMatchObject({ code: 'DUPLICATE_BOQ_ITEM_CODE' });
+      service.updateBoqItem("project-1", "boq-1", { code: "1.2" }),
+    ).rejects.toMatchObject({ code: "DUPLICATE_BOQ_ITEM_CODE" });
 
     expect(mockPrisma.boqItem.update).not.toHaveBeenCalled();
     expect(mockAuditService.recordEvent).not.toHaveBeenCalled();
   });
 
-  it('records BOQ item edits in the central audit history with old and new snapshots', async () => {
+  it("scopes BOQ item update lookup by project before updating by primary id", async () => {
     const existing = {
-      id: 'boq-1',
-      projectId: 'project-1',
-      code: '1.1',
-      description: 'Excavation',
+      id: "boq-1",
+      projectId: "project-1",
+      code: "1.1",
+      description: "Excavation",
       qty: 5,
-      unit: 'm3',
+      unit: "m3",
       rate: 100,
       amount: 500,
       isManual: true,
@@ -175,15 +176,13 @@ describe('BOQ service integrity', () => {
     };
     const updated = {
       ...existing,
-      description: 'Excavation revised',
-      rate: 120,
-      amount: 600,
+      unit: "m",
       activityBoqAllocations: [],
     };
 
     mockPrisma.project.findFirst.mockResolvedValue({
-      id: 'project-1',
-      orgId: 'org-1',
+      id: "project-1",
+      orgId: "org-1",
     });
     mockPrisma.boqRevision.findFirst.mockResolvedValue(null);
     mockPrisma.scheduleRevision.findFirst.mockResolvedValue(null);
@@ -192,150 +191,282 @@ describe('BOQ service integrity', () => {
     mockPrisma.boqItem.findMany.mockResolvedValue([updated]);
 
     await service.updateBoqItem(
-      'project-1',
-      'boq-1',
-      { description: 'Excavation revised', rate: 120 },
-      { orgId: 'org-1', userId: 'qs-1', userRole: 'qs' },
+      "project-1",
+      "boq-1",
+      { unit: "m" },
+      { orgId: "org-1", userId: "qs-1", userRole: "qs" },
+    );
+
+    expect(mockPrisma.boqItem.findFirst).toHaveBeenCalledWith({
+      where: { id: "boq-1", projectId: "project-1" },
+    });
+    expect(mockPrisma.boqItem.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: "boq-1" },
+      }),
+    );
+    expect(mockPrisma.boqItem.findUnique).not.toHaveBeenCalled();
+  });
+
+  it("records BOQ item edits in the central audit history with old and new snapshots", async () => {
+    const existing = {
+      id: "boq-1",
+      projectId: "project-1",
+      code: "1.1",
+      description: "Excavation",
+      qty: 5,
+      unit: "m3",
+      rate: 100,
+      amount: 500,
+      isManual: true,
+      isActive: true,
+      sortOrder: 0,
+    };
+    const updated = {
+      ...existing,
+      description: "Excavation revised",
+      rate: 120,
+      amount: 600,
+      activityBoqAllocations: [],
+    };
+
+    mockPrisma.project.findFirst.mockResolvedValue({
+      id: "project-1",
+      orgId: "org-1",
+    });
+    mockPrisma.boqRevision.findFirst.mockResolvedValue(null);
+    mockPrisma.scheduleRevision.findFirst.mockResolvedValue(null);
+    mockPrisma.boqItem.findFirst.mockResolvedValue(existing);
+    mockPrisma.boqItem.update.mockResolvedValue(updated);
+    mockPrisma.boqItem.findMany.mockResolvedValue([updated]);
+
+    await service.updateBoqItem(
+      "project-1",
+      "boq-1",
+      { description: "Excavation revised", rate: 120 },
+      { orgId: "org-1", userId: "qs-1", userRole: "qs" },
     );
 
     expect(mockAuditService.recordEvent).toHaveBeenCalledWith(
       expect.objectContaining({
-        orgId: 'org-1',
-        projectId: 'project-1',
-        entityType: 'boq_item',
-        entityId: 'boq-1',
-        action: 'updated',
-        actorId: 'qs-1',
-        actorRole: 'qs',
+        orgId: "org-1",
+        projectId: "project-1",
+        entityType: "boq_item",
+        entityId: "boq-1",
+        action: "updated",
+        actorId: "qs-1",
+        actorRole: "qs",
         oldSummary: expect.objectContaining({
-          code: '1.1',
-          description: 'Excavation',
+          code: "1.1",
+          description: "Excavation",
           amount: 500,
         }),
         newSummary: expect.objectContaining({
-          code: '1.1',
-          description: 'Excavation revised',
+          code: "1.1",
+          description: "Excavation revised",
           amount: 600,
         }),
       }),
     );
   });
 
-  it('creates manual BOQ rows on the official Activity allocation spine', async () => {
+  it("scopes BOQ item delete lookup by project before deleting by primary id", async () => {
+    const item = {
+      id: "boq-1",
+      projectId: "project-1",
+      code: "1.1",
+      description: "Excavation",
+      qty: 5,
+      unit: "m3",
+      rate: 100,
+      amount: 500,
+      isManual: true,
+      isActive: true,
+      sortOrder: 0,
+    };
+
+    mockPrisma.project.findFirst.mockResolvedValue({
+      id: "project-1",
+      orgId: "org-1",
+    });
+    mockPrisma.boqRevision.findFirst.mockResolvedValue(null);
+    mockPrisma.scheduleRevision.findFirst.mockResolvedValue(null);
+    mockPrisma.boqItem.findFirst.mockResolvedValue(item);
+    mockPrisma.boqItem.findMany.mockResolvedValue([]);
+
+    await service.deleteBoqItem("project-1", "boq-1", {
+      orgId: "org-1",
+      userId: "qs-1",
+      userRole: "qs",
+    });
+
+    expect(mockPrisma.boqItem.findFirst).toHaveBeenCalledWith({
+      where: { id: "boq-1", projectId: "project-1" },
+    });
+    expect(mockPrisma.boqItem.delete).toHaveBeenCalledWith({
+      where: { id: "boq-1" },
+    });
+    expect(mockPrisma.boqItem.findUnique).not.toHaveBeenCalled();
+  });
+
+  it("creates manual BOQ rows on the official Activity allocation spine", async () => {
     const createdActivity = {
-      id: 'activity-1',
-      projectId: 'project-1',
-      name: 'Excavate',
-      wbsCode: 'EX-001',
+      id: "activity-1",
+      projectId: "project-1",
+      name: "Excavate",
+      activityCode: "EX-001",
+      wbsCode: null,
       p6ActivityId: null,
       predecessors: null,
       sortOrder: 0,
     };
     const createdAllocation = {
-      id: 'allocation-1',
-      projectId: 'project-1',
-      boqItemId: 'boq-1',
-      activityId: 'activity-1',
+      id: "allocation-1",
+      projectId: "project-1",
+      boqItemId: "boq-1",
+      activityId: "activity-1",
       quantity: 5,
       amount: 500,
       weight: 100,
-      source: 'manual',
-      status: 'draft',
+      source: "manual",
+      status: "draft",
       isActive: true,
       activity: createdActivity,
     };
     const itemWithActivities = {
-      id: 'boq-1',
-      projectId: 'project-1',
-      code: '1.1',
-      description: 'Excavation',
+      id: "boq-1",
+      projectId: "project-1",
+      code: "1.1",
+      description: "Excavation",
       qty: 5,
-      unit: 'm3',
+      unit: "m3",
       rate: 100,
       amount: 500,
       isManual: true,
       sortOrder: 0,
-      createdAt: new Date('2026-06-08T00:00:00.000Z'),
+      createdAt: new Date("2026-06-08T00:00:00.000Z"),
       activityBoqAllocations: [createdAllocation],
     };
 
     mockPrisma.boqItem.findFirst.mockResolvedValue(null);
     mockPrisma.boqItem.count.mockResolvedValue(0);
     mockPrisma.boqItem.create.mockResolvedValue({
-      id: 'boq-1',
-      projectId: 'project-1',
-      code: '1.1',
-      description: 'Excavation',
+      id: "boq-1",
+      projectId: "project-1",
+      code: "1.1",
+      description: "Excavation",
       qty: 5,
-      unit: 'm3',
+      unit: "m3",
       rate: 100,
       amount: 500,
     });
     mockPrisma.activity.count.mockResolvedValue(0);
     mockPrisma.activity.create.mockResolvedValue(createdActivity);
-    mockPrisma.activityBoqAllocation.create.mockResolvedValue(createdAllocation);
+    mockPrisma.activityBoqAllocation.create.mockResolvedValue(
+      createdAllocation,
+    );
     mockPrisma.boqItem.findUnique.mockResolvedValue(itemWithActivities);
     mockPrisma.boqItem.findMany.mockResolvedValue([itemWithActivities]);
 
-    await service.createManualBoqItem('project-1', {
-      code: '1.1',
-      description: 'Excavation',
+    await service.createManualBoqItem("project-1", {
+      code: "1.1",
+      description: "Excavation",
       quantity: 5,
-      unit: 'm3',
+      unit: "m3",
       rate: 100,
-      activityName: 'Excavate',
-      activityCode: 'CLIENT-999',
+      activityName: "Excavate",
+      activityCode: "CLIENT-999",
     });
 
+    expect(mockPrisma.boqItem.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        projectId: "project-1",
+        code: "1.1",
+        activeCodeKey: "1.1",
+        isManual: true,
+      }),
+    });
     expect(mockNextActivityCode).toHaveBeenCalledWith(
-      'project-1',
-      'Excavation',
+      "project-1",
+      "Excavation",
       mockPrisma,
     );
     expect(mockPrisma.activity.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
-        projectId: 'project-1',
-        name: 'Excavate',
-        wbsCode: 'EX-001',
+        projectId: "project-1",
+        name: "Excavate",
+        activityCode: "EX-001",
+        wbsCode: null,
         budget: 500,
       }),
     });
     expect(mockPrisma.activityBoqAllocation.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
-        projectId: 'project-1',
-        boqItemId: 'boq-1',
-        activityId: 'activity-1',
+        projectId: "project-1",
+        boqItemId: "boq-1",
+        activityId: "activity-1",
         quantity: 5,
         amount: 500,
-        status: 'draft',
-        source: 'manual',
+        status: "draft",
+        source: "manual",
       }),
     });
     expect(mockPrisma.boqActivity.create).not.toHaveBeenCalledWith(
       expect.objectContaining({
-        data: expect.objectContaining({ activityCode: 'CLIENT-999' }),
+        data: expect.objectContaining({ activityCode: "CLIENT-999" }),
       }),
     );
     expect(mockPrisma.boqActivity.create).not.toHaveBeenCalled();
   });
 
-  it('adds BOQ activity helpers as real schedule activities with draft allocations', async () => {
+  it("normalizes manual BOQ codes and maps concurrent DB duplicates to the BOQ duplicate error", async () => {
+    mockPrisma.boqRevision.findFirst.mockResolvedValue(null);
+    mockPrisma.scheduleRevision.findFirst.mockResolvedValue(null);
+    mockPrisma.boqItem.findFirst.mockResolvedValue(null);
+    mockPrisma.boqItem.count.mockResolvedValue(0);
+    mockPrisma.boqItem.create.mockRejectedValue({
+      code: "P2002",
+      meta: { target: ["projectId", "activeCodeKey"] },
+    });
+
+    await expect(
+      service.createManualBoqItem("project-1", {
+        code: " a   01 ",
+        description: "Excavation",
+        quantity: 5,
+        unit: "m3",
+        rate: 100,
+        activityName: "Excavate",
+      }),
+    ).rejects.toMatchObject({ code: "DUPLICATE_BOQ_ITEM_CODE" });
+
+    expect(mockPrisma.boqItem.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        code: "A 01",
+        activeCodeKey: "A 01",
+      }),
+    });
+    expect(mockPrisma.activity.create).not.toHaveBeenCalled();
+  });
+
+  it("adds BOQ activity helpers as real schedule activities with draft allocations", async () => {
     const boqItem = {
-      id: 'boq-1',
-      projectId: 'project-1',
-      code: '1.1',
-      description: 'Excavation',
+      id: "boq-1",
+      projectId: "project-1",
+      code: "1.1",
+      description: "Excavation",
       qty: 10,
-      unit: 'm3',
+      unit: "m3",
       rate: 100,
       amount: 1000,
       isActive: true,
     };
     const createdActivity = {
-      id: 'activity-2',
-      projectId: 'project-1',
-      name: 'Excavate north zone',
-      wbsCode: 'EX-002',
+      id: "activity-2",
+      projectId: "project-1",
+      name: "Excavate north zone",
+      activityCode: "EX-001",
+      wbsCode: null,
       p6ActivityId: null,
       predecessors: null,
       sortOrder: 1,
@@ -347,22 +478,22 @@ describe('BOQ service integrity', () => {
     mockPrisma.activityBoqAllocation.findMany.mockResolvedValue([]);
     mockPrisma.activity.create.mockResolvedValue(createdActivity);
     mockPrisma.activityBoqAllocation.create.mockResolvedValue({
-      id: 'allocation-2',
-      projectId: 'project-1',
-      boqItemId: 'boq-1',
-      activityId: 'activity-2',
+      id: "allocation-2",
+      projectId: "project-1",
+      boqItemId: "boq-1",
+      activityId: "activity-2",
       quantity: 4,
       amount: 400,
       weight: 40,
-      source: 'manual',
-      status: 'draft',
+      source: "manual",
+      status: "draft",
       isActive: true,
       activity: createdActivity,
     });
 
-    const result = await service.createActivity('project-1', 'boq-1', {
-      activityName: 'Excavate north zone',
-      unit: 'm3',
+    const result = await service.createActivity("project-1", "boq-1", {
+      activityName: "Excavate north zone",
+      unit: "m3",
       quantity: 4,
       rate: 100,
       dependencyType: null,
@@ -371,42 +502,43 @@ describe('BOQ service integrity', () => {
 
     expect(mockPrisma.activity.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
-        projectId: 'project-1',
-        name: 'Excavate north zone',
-        wbsCode: 'EX-001',
+        projectId: "project-1",
+        name: "Excavate north zone",
+        activityCode: "EX-001",
+        wbsCode: null,
         budget: 400,
       }),
     });
     expect(mockPrisma.activityBoqAllocation.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
-        boqItemId: 'boq-1',
-        activityId: 'activity-2',
+        boqItemId: "boq-1",
+        activityId: "activity-2",
         quantity: 4,
         amount: 400,
-        status: 'draft',
+        status: "draft",
       }),
     });
     expect(mockPrisma.boqActivity.create).not.toHaveBeenCalled();
     expect(result.activity).toMatchObject({
-      id: 'activity-2',
-      allocationId: 'allocation-2',
-      activityCode: 'EX-002',
-      activityName: 'Excavate north zone',
+      id: "activity-2",
+      allocationId: "allocation-2",
+      activityCode: "EX-001",
+      activityName: "Excavate north zone",
       quantity: 4,
       budget: 400,
-      allocationStatus: 'draft',
+      allocationStatus: "draft",
     });
   });
 
-  it('renders BOQ activities from official allocations and schedule activities', async () => {
-    const createdAt = new Date('2026-06-08T00:00:00.000Z');
+  it("renders BOQ activities from official allocations and schedule activities", async () => {
+    const createdAt = new Date("2026-06-08T00:00:00.000Z");
     const boqItem = {
-      id: 'boq-1',
-      projectId: 'project-1',
-      code: '1.1',
-      description: 'Excavation',
+      id: "boq-1",
+      projectId: "project-1",
+      code: "1.1",
+      description: "Excavation",
       qty: 5,
-      unit: 'm3',
+      unit: "m3",
       rate: 100,
       amount: 500,
       isManual: true,
@@ -415,21 +547,22 @@ describe('BOQ service integrity', () => {
       updatedAt: createdAt,
       activityBoqAllocations: [
         {
-          id: 'allocation-1',
-          projectId: 'project-1',
-          boqItemId: 'boq-1',
-          activityId: 'activity-1',
+          id: "allocation-1",
+          projectId: "project-1",
+          boqItemId: "boq-1",
+          activityId: "activity-1",
           quantity: 5,
           amount: 500,
           weight: 100,
-          source: 'manual',
-          status: 'approved',
+          source: "manual",
+          status: "approved",
           isActive: true,
           activity: {
-            id: 'activity-1',
-            projectId: 'project-1',
-            name: 'Excavate',
-            wbsCode: 'EX-001',
+            id: "activity-1",
+            projectId: "project-1",
+            name: "Excavate",
+            activityCode: "EX-001",
+            wbsCode: null,
             p6ActivityId: null,
             predecessors: null,
             sortOrder: 0,
@@ -444,7 +577,7 @@ describe('BOQ service integrity', () => {
     mockPrisma.boqRevision.findFirst.mockResolvedValue(null);
     mockPrisma.scheduleRevision.findFirst.mockResolvedValue(null);
 
-    const result = await service.getProjectBoq('project-1');
+    const result = await service.getProjectBoq("project-1");
 
     expect(mockPrisma.boqItem.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -455,49 +588,102 @@ describe('BOQ service integrity', () => {
     );
     expect(result.items[0].activities).toEqual([
       expect.objectContaining({
-        id: 'activity-1',
-        allocationId: 'allocation-1',
-        activityCode: 'EX-001',
-        activityName: 'Excavate',
-        allocationStatus: 'approved',
+        id: "activity-1",
+        allocationId: "allocation-1",
+        activityCode: "EX-001",
+        activityName: "Excavate",
+        allocationStatus: "approved",
       }),
     ]);
   });
 
-  it('rejects BOQ uploads that duplicate an existing manual BOQ item code', async () => {
-    const buffer = makeBoqWorkbookBuffer([
-      ['1.1', 'Excavation', 5, 'm3', 100],
-    ]);
+  it("rejects BOQ uploads that duplicate an existing manual BOQ item code", async () => {
+    const buffer = makeBoqWorkbookBuffer([["1.1", "Excavation", 5, "m3", 100]]);
 
-    mockPrisma.project.findUnique.mockResolvedValue({ orgId: 'org-1' });
-    mockPrisma.project.findFirst.mockResolvedValue({ orgId: 'org-1' });
-    mockPrisma.boqItem.findMany.mockResolvedValueOnce([{ code: '1.1' }]);
+    mockPrisma.project.findUnique.mockResolvedValue({ orgId: "org-1" });
+    mockPrisma.project.findFirst.mockResolvedValue({ orgId: "org-1" });
+    mockPrisma.boqItem.findMany.mockResolvedValueOnce([{ code: "1.1" }]);
 
     await expect(
-      service.processBoqUpload('project-1', buffer, null),
-    ).rejects.toMatchObject({ code: 'DUPLICATE_BOQ_ITEM_CODE' });
+      service.processBoqUpload("project-1", buffer, null),
+    ).rejects.toMatchObject({ code: "DUPLICATE_BOQ_ITEM_CODE" });
 
     expect(mockPrisma.boqItem.deleteMany).not.toHaveBeenCalled();
     expect(mockPrisma.boqItem.createMany).not.toHaveBeenCalled();
+    expect(mockPrisma.boqItem.findMany).toHaveBeenCalledWith({
+      where: {
+        projectId: "project-1",
+        isManual: true,
+        isActive: true,
+        activeCodeKey: { in: ["1.1"] },
+      },
+      select: { code: true },
+    });
   });
 
-  it('imports a revised BOQ without deleting existing uploaded rows', async () => {
+  it("maps concurrent upload BOQ code unique violations to the duplicate code error", async () => {
     const buffer = makeBoqWorkbookBuffer([
-      ['1.1', 'Excavation revised', 6, 'm3', 100],
-      ['1.2', 'Backfill', 4, 'm3', 80],
+      [" a   01 ", "Excavation", 5, "m3", 100],
     ]);
 
-    mockPrisma.project.findUnique.mockResolvedValue({ orgId: 'org-1' });
-    mockPrisma.project.findFirst.mockResolvedValue({ orgId: 'org-1' });
+    mockPrisma.project.findUnique.mockResolvedValue({ orgId: "org-1" });
+    mockPrisma.project.findFirst.mockResolvedValue({ orgId: "org-1" });
+    mockPrisma.boqItem.findMany
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([]);
+    mockPrisma.boqRevision.findFirst.mockResolvedValue(null);
+    mockPrisma.scheduleRevision.findFirst.mockResolvedValue(null);
+    mockPrisma.boqRevision.create.mockResolvedValue({
+      id: "rev-1",
+      projectId: "project-1",
+      revisionNumber: 1,
+      label: "Rev 1",
+      status: "imported",
+      baselineLocked: false,
+      itemCount: 1,
+      addedCount: 1,
+      updatedCount: 0,
+      removedCount: 0,
+      unchangedCount: 0,
+      blockedCount: 0,
+      totalAmount: 500,
+      createdAt: new Date("2026-06-09T00:00:00.000Z"),
+    });
+    mockPrisma.boqItem.create.mockRejectedValue({
+      code: "P2002",
+      meta: { target: ["projectId", "activeCodeKey"] },
+    });
+
+    await expect(
+      service.processBoqUpload("project-1", buffer, "Rev 1"),
+    ).rejects.toMatchObject({ code: "DUPLICATE_BOQ_ITEM_CODE" });
+
+    expect(mockPrisma.boqItem.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        code: "A 01",
+        activeCodeKey: "A 01",
+        isActive: true,
+      }),
+    });
+  });
+
+  it("imports a revised BOQ without deleting existing uploaded rows", async () => {
+    const buffer = makeBoqWorkbookBuffer([
+      ["1.1", "Excavation revised", 6, "m3", 100],
+      ["1.2", "Backfill", 4, "m3", 80],
+    ]);
+
+    mockPrisma.project.findUnique.mockResolvedValue({ orgId: "org-1" });
+    mockPrisma.project.findFirst.mockResolvedValue({ orgId: "org-1" });
     mockPrisma.boqItem.findMany
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce([
         {
-          id: 'boq-1',
-          code: '1.1',
-          description: 'Excavation',
+          id: "boq-1",
+          code: "1.1",
+          description: "Excavation",
           qty: 5,
-          unit: 'm3',
+          unit: "m3",
           rate: 100,
           amount: 500,
           sortOrder: 0,
@@ -507,11 +693,11 @@ describe('BOQ service integrity', () => {
     mockPrisma.boqRevision.findFirst.mockResolvedValue(null);
     mockPrisma.scheduleRevision.findFirst.mockResolvedValue(null);
     mockPrisma.boqRevision.create.mockResolvedValue({
-      id: 'rev-1',
-      projectId: 'project-1',
+      id: "rev-1",
+      projectId: "project-1",
       revisionNumber: 1,
-      label: 'Rev 1',
-      status: 'imported',
+      label: "Rev 1",
+      status: "imported",
       baselineLocked: false,
       itemCount: 2,
       addedCount: 1,
@@ -520,29 +706,36 @@ describe('BOQ service integrity', () => {
       unchangedCount: 0,
       blockedCount: 0,
       totalAmount: 920,
-      createdAt: new Date('2026-06-09T00:00:00.000Z'),
+      createdAt: new Date("2026-06-09T00:00:00.000Z"),
     });
-    mockPrisma.boqItem.update.mockResolvedValue({ id: 'boq-1' });
-    mockPrisma.boqItem.create.mockResolvedValue({ id: 'boq-2' });
+    mockPrisma.boqItem.update.mockResolvedValue({ id: "boq-1" });
+    mockPrisma.boqItem.create.mockResolvedValue({ id: "boq-2" });
 
-    const result = await service.processBoqUpload('project-1', buffer, 'Rev 1', {
-      documentId: 'doc-1',
-      orgId: 'org-1',
-      userId: 'user-1',
-    });
+    const result = await service.processBoqUpload(
+      "project-1",
+      buffer,
+      "Rev 1",
+      {
+        documentId: "doc-1",
+        orgId: "org-1",
+        userId: "user-1",
+      },
+    );
 
     expect(result).toMatchObject({
-      revisionId: 'rev-1',
-      mode: 'imported',
+      revisionId: "rev-1",
+      mode: "imported",
       baselineLocked: false,
     });
     expect(mockPrisma.boqItem.deleteMany).not.toHaveBeenCalled();
     expect(mockPrisma.boqItem.createMany).not.toHaveBeenCalled();
     expect(mockPrisma.boqItem.update).toHaveBeenCalledWith({
-      where: { id: 'boq-1' },
+      where: { id: "boq-1" },
       data: expect.objectContaining({
-        revisionId: 'rev-1',
-        description: 'Excavation revised',
+        revisionId: "rev-1",
+        code: "1.1",
+        activeCodeKey: "1.1",
+        description: "Excavation revised",
         qty: 6,
         amount: 600,
         isActive: true,
@@ -550,45 +743,46 @@ describe('BOQ service integrity', () => {
     });
     expect(mockPrisma.boqItem.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
-        projectId: 'project-1',
-        revisionId: 'rev-1',
-        code: '1.2',
-        description: 'Backfill',
+        projectId: "project-1",
+        revisionId: "rev-1",
+        code: "1.2",
+        activeCodeKey: "1.2",
+        description: "Backfill",
         isActive: true,
       }),
     });
     expect(mockPrisma.boqRevision.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
-        sourceDocumentId: 'doc-1',
-        createdBy: 'user-1',
+        sourceDocumentId: "doc-1",
+        createdBy: "user-1",
       }),
     });
     expect(mockPrisma.projectDocument.update).toHaveBeenCalledWith({
-      where: { id: 'doc-1' },
+      where: { id: "doc-1" },
       data: expect.objectContaining({
-        status: 'linked',
-        linkedEntityType: 'boq_revision',
-        linkedEntityId: 'rev-1',
+        status: "linked",
+        linkedEntityType: "boq_revision",
+        linkedEntityId: "rev-1",
       }),
     });
   });
 
-  it('saves a comparison-only BOQ revision when the baseline is locked', async () => {
+  it("saves a comparison-only BOQ revision when the baseline is locked", async () => {
     const buffer = makeBoqWorkbookBuffer([
-      ['1.1', 'Excavation revised', 6, 'm3', 100],
-      ['2.1', 'Concrete', 3, 'm3', 250],
+      ["1.1", "Excavation revised", 6, "m3", 100],
+      ["2.1", "Concrete", 3, "m3", 250],
     ]);
 
-    mockPrisma.project.findUnique.mockResolvedValue({ orgId: 'org-1' });
+    mockPrisma.project.findUnique.mockResolvedValue({ orgId: "org-1" });
     mockPrisma.boqItem.findMany
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce([
         {
-          id: 'boq-1',
-          code: '1.1',
-          description: 'Excavation',
+          id: "boq-1",
+          code: "1.1",
+          description: "Excavation",
           qty: 5,
-          unit: 'm3',
+          unit: "m3",
           rate: 100,
           amount: 500,
           sortOrder: 0,
@@ -599,16 +793,16 @@ describe('BOQ service integrity', () => {
       .mockResolvedValueOnce(null)
       .mockResolvedValueOnce({ revisionNumber: 2 });
     mockPrisma.scheduleRevision.findFirst.mockResolvedValue({
-      id: 'schedule-baseline-1',
-      status: 'baselined',
-      baselinedAt: new Date('2026-06-01T00:00:00.000Z'),
+      id: "schedule-baseline-1",
+      status: "baselined",
+      baselinedAt: new Date("2026-06-01T00:00:00.000Z"),
     });
     mockPrisma.boqRevision.create.mockResolvedValue({
-      id: 'rev-3',
-      projectId: 'project-1',
+      id: "rev-3",
+      projectId: "project-1",
       revisionNumber: 3,
-      label: 'Client Rev B',
-      status: 'comparison_only',
+      label: "Client Rev B",
+      status: "comparison_only",
       baselineLocked: false,
       itemCount: 2,
       addedCount: 1,
@@ -617,28 +811,29 @@ describe('BOQ service integrity', () => {
       unchangedCount: 0,
       blockedCount: 0,
       totalAmount: 1350,
-      createdAt: new Date('2026-06-09T00:00:00.000Z'),
+      createdAt: new Date("2026-06-09T00:00:00.000Z"),
     });
-    mockPrisma.boqItem.create.mockResolvedValue({ id: 'candidate-1' });
+    mockPrisma.boqItem.create.mockResolvedValue({ id: "candidate-1" });
 
     const result = await service.processBoqUpload(
-      'project-1',
+      "project-1",
       buffer,
-      'Client Rev B',
+      "Client Rev B",
     );
 
     expect(result).toMatchObject({
-      revisionId: 'rev-3',
-      mode: 'comparison_only',
+      revisionId: "rev-3",
+      mode: "comparison_only",
       baselineLocked: true,
     });
     expect(mockPrisma.boqItem.deleteMany).not.toHaveBeenCalled();
     expect(mockPrisma.boqItem.update).not.toHaveBeenCalled();
     expect(mockPrisma.boqItem.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
-        revisionId: 'rev-3',
+        revisionId: "rev-3",
         isActive: false,
-        supersededReason: expect.stringContaining('baseline is locked'),
+        activeCodeKey: null,
+        supersededReason: expect.stringContaining("baseline is locked"),
       }),
     });
   });

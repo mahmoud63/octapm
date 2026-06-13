@@ -1,4 +1,5 @@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import type { ProjectSetupTarget } from '@/features/projects/data/schema'
 import type { ScheduleActivity } from '@/features/schedule/data/schema'
 import { BudgetRevisionsPanel } from './budget-revisions-panel'
 import { CashFlowPanel } from './cash-flow-panel'
@@ -14,12 +15,14 @@ export function CommercialDashboard({
   activeTab,
   onTabChange,
   showTabList = true,
+  initialTarget,
 }: {
   projectId: string
   activities: ScheduleActivity[]
   activeTab?: string
   onTabChange?: (value: string) => void
   showTabList?: boolean
+  initialTarget?: ProjectSetupTarget
 }) {
   const tabsProps =
     activeTab !== undefined
@@ -42,11 +45,36 @@ export function CommercialDashboard({
         )}
 
         <TabsContent value='change-orders'>
-          <ChangeOrderRegister projectId={projectId} activities={activities} />
+          <ChangeOrderRegister
+            projectId={projectId}
+            activities={activities}
+            initialStatus={
+              initialTarget?.source === 'change_order'
+                ? initialTarget.status
+                : undefined
+            }
+            initialRecordId={
+              initialTarget?.source === 'change_order'
+                ? initialTarget.recordId
+                : undefined
+            }
+          />
         </TabsContent>
 
         <TabsContent value='ipc'>
-          <IpcWorkbook projectId={projectId} />
+          <IpcWorkbook
+            projectId={projectId}
+            initialStatus={
+              initialTarget?.source === 'ipc_certificate'
+                ? initialTarget.status
+                : undefined
+            }
+            initialRecordId={
+              initialTarget?.source === 'ipc_certificate'
+                ? initialTarget.recordId
+                : undefined
+            }
+          />
         </TabsContent>
 
         <TabsContent value='sub-valuations'>

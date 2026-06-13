@@ -6,6 +6,9 @@
 -- 4. Rollback strategy: restore the pg_dump backup, or reverse these ALTER COLUMN statements to
 --    DOUBLE PRECISION USING column::double precision if a restore is not required.
 
+DROP TRIGGER IF EXISTS "BoqItem_allocation_capacity_validate" ON "BoqItem";
+DROP TRIGGER IF EXISTS "ActivityBoqAllocation_validate" ON "ActivityBoqAllocation";
+
 ALTER TABLE "Project"
   ALTER COLUMN "contractValue" TYPE DECIMAL(18, 2) USING ROUND("contractValue"::numeric, 2),
   ALTER COLUMN "ldRatePerDay" TYPE DECIMAL(18, 2) USING ROUND("ldRatePerDay"::numeric, 2);
@@ -131,6 +134,18 @@ ALTER TABLE "ResourceAllocation"
 
 ALTER TABLE "Invoice"
   ALTER COLUMN "amount" TYPE DECIMAL(18, 2) USING ROUND("amount"::numeric, 2);
+
+CREATE TRIGGER "ActivityBoqAllocation_validate"
+AFTER INSERT OR UPDATE OF "projectId", "boqItemId", "activityId", "quantity", "amount", "isActive"
+ON "ActivityBoqAllocation"
+FOR EACH ROW
+EXECUTE FUNCTION validate_activity_boq_allocation();
+
+CREATE TRIGGER "BoqItem_allocation_capacity_validate"
+AFTER UPDATE OF "qty", "amount"
+ON "BoqItem"
+FOR EACH ROW
+EXECUTE FUNCTION validate_boq_item_allocation_capacity();
 
 ALTER TABLE "Project"
   ADD CONSTRAINT "Project_contractValue_money_nonnegative" CHECK ("contractValue" IS NULL OR "contractValue" >= 0) NOT VALID,

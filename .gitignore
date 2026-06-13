@@ -1,15 +1,35 @@
 node_modules/
 .env
-.env.local
-.env.*.local
+.env.*
+!.env.example
+!.env.*.example
 dist/
 *.log
+*.pid
+.tanstack/tmp/
+**/.tanstack/tmp/
+.logs/
+.pgdata/
+.codex-*.log
+.codex-*.pid
 .DS_Store
 .vscode/
 .idea/
 coverage/
 .claude/
 *.sh
+!infrastructure/terraform/templates/
+!infrastructure/terraform/templates/user-data.sh
 CLAUDE.md
 *.tf
 *.tfvars
+
+# Private runtime uploads must never be tracked in source control.
+backend/storage/private-documents/
+storage/private-documents/
+backend/uploads/
+uploads/
+
+# Generated UAT evidence is uploaded as CI artifact; keep only the archive README.
+docs/release-readiness-audit/evidence/*.json
+docs/release-readiness-audit/evidence/screenshots/

@@ -89,6 +89,7 @@ export function UserAuthForm({
   return (
     <Form {...form}>
       <form
+        data-testid='uat-sign-in-form'
         onSubmit={form.handleSubmit(onSubmit)}
         className={cn('grid gap-3', className)}
         {...props}
@@ -100,7 +101,11 @@ export function UserAuthForm({
             <FormItem>
               <FormLabel>Email</FormLabel>
               <FormControl>
-                <Input placeholder='name@example.com' {...field} />
+                <Input
+                  data-testid='uat-sign-in-email'
+                  placeholder='name@example.com'
+                  {...field}
+                />
               </FormControl>
               <FormMessage />
             </FormItem>
@@ -113,7 +118,11 @@ export function UserAuthForm({
             <FormItem className='relative'>
               <FormLabel>Password</FormLabel>
               <FormControl>
-                <PasswordInput placeholder='********' {...field} />
+                <PasswordInput
+                  data-testid='uat-sign-in-password'
+                  placeholder='********'
+                  {...field}
+                />
               </FormControl>
               <FormMessage />
               <Link
@@ -125,7 +134,11 @@ export function UserAuthForm({
             </FormItem>
           )}
         />
-        <Button className='mt-2' disabled={isLoading}>
+        <Button
+          data-testid='uat-sign-in-submit'
+          className='mt-2'
+          disabled={isLoading}
+        >
           {isLoading ? <Loader2 className='animate-spin' /> : <LogIn />}
           Sign in
         </Button>

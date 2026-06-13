@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Link } from '@tanstack/react-router'
 import { AxiosError } from 'axios'
+import { Link } from '@tanstack/react-router'
+import { ProjectPermissionProvider } from '@/lib/permissions'
 import { Main } from '@/components/layout/main'
 import { ActivitiesList } from '@/features/activities/components/activities-list'
 import { BoqPage } from '@/features/boq/components/boq-page'
@@ -8,8 +9,10 @@ import { CommercialDashboard } from '@/features/commercial/components/commercial
 import { CostDashboard } from '@/features/cost/components/cost-dashboard'
 import { DocControlDashboard } from '@/features/doc-control/components/doc-control-dashboard'
 import { EquipmentSection } from '@/features/equipment/components/equipment-section'
+import { MeetingsDashboard } from '@/features/meetings/components/meetings-dashboard'
 import {
   useProject,
+  useProjectParties,
   useProjectSetupReadiness,
 } from '@/features/projects/hooks/use-projects'
 import { QualityDashboard } from '@/features/quality/components/quality-dashboard'
@@ -19,10 +22,10 @@ import { ScheduleDashboard } from '@/features/schedule/components/schedule-dashb
 import { ScheduleUploadZone } from '@/features/schedule/components/schedule-upload-zone'
 import { useProjectSchedule } from '@/features/schedule/hooks/use-schedule'
 import { SiteReportingDashboard } from '@/features/site-reporting/components/site-reporting-dashboard'
+import type { ProjectSetupTarget } from '../data/schema'
 import { HealthDashboard } from './health-dashboard'
 import { ProjectSetupWizard } from './project-setup-wizard'
 import { ProjectStatusBadge } from './project-status-badge'
-import type { ProjectSetupTarget } from '../data/schema'
 
 type ModuleKey =
   | 'schedule'
@@ -31,6 +34,7 @@ type ModuleKey =
   | 'commercial'
   | 'quality'
   | 'docControl'
+  | 'meetings'
   | 'activities'
   | 'equipment'
   | 'reports'
@@ -140,6 +144,21 @@ function DetailItem({
   )
 }
 
+function PartyDetailItem({
+  label,
+  value,
+}: {
+  label: string
+  value: string | null | undefined
+}) {
+  return (
+    <div>
+      <p className='text-xs text-muted-foreground'>{label}</p>
+      <p className='mt-1 text-sm font-medium text-foreground'>{value || '-'}</p>
+    </div>
+  )
+}
+
 export function ProjectDetail({
   projectId,
   initialTarget,
@@ -147,19 +166,32 @@ export function ProjectDetail({
   projectId: string
   initialTarget?: ProjectSetupTarget
 }) {
-  const { data: project, isLoading, error: projectError } = useProject(projectId)
+  const {
+    data: project,
+    isLoading,
+    error: projectError,
+  } = useProject(projectId)
   const canLoadProjectModules = Boolean(project)
   const isProjectAccessDenied =
     projectError instanceof AxiosError && projectError.response?.status === 403
   const { data: setupReadiness, isLoading: setupReadinessLoading } =
     useProjectSetupReadiness(projectId, { enabled: canLoadProjectModules })
-  const { data: schedule, isLoading: scheduleLoading } =
-    useProjectSchedule(projectId, { enabled: canLoadProjectModules })
+  const { data: projectParties } = useProjectParties(projectId)
+  const { data: schedule, isLoading: scheduleLoading } = useProjectSchedule(
+    projectId,
+    { enabled: canLoadProjectModules }
+  )
   const [activeModule, setActiveModule] = useState<ModuleKey>('schedule')
   const [childState, setChildState] =
     useState<ModuleChildState>(DEFAULT_CHILD_STATE)
+  const projectEffectiveRole =
+    project?.projectAccess?.effectiveRole ??
+    project?.effectiveRole ??
+    project?.projectAccess?.role ??
+    null
 
   const scheduleActivitiesCount = schedule?.activities?.length ?? 0
+  const activeProjectParties = projectParties?.items ?? []
   const scheduleCriticalCount =
     schedule?.activities?.filter((a) => a.isCritical && !a.isMilestone)
       .length ?? 0
@@ -195,6 +227,7 @@ export function ProjectDetail({
           { key: 'overview', label: 'Overview' },
           { key: 'activity', label: 'By Activity' },
           { key: 'phase', label: 'By Phase' },
+          { key: 'equipment', label: 'Equipment' },
           { key: 'burn', label: 'Burn Rate' },
         ],
       },
@@ -233,6 +266,7 @@ export function ProjectDetail({
           { key: 'correspondence', label: 'Correspondence' },
         ],
       },
+      { key: 'meetings', label: 'Meetings' },
       { key: 'boq', label: 'BOQ' },
       { key: 'activities', label: 'Activities' },
       { key: 'equipment', label: 'Equipment' },
@@ -246,9 +280,12 @@ export function ProjectDetail({
     scheduleMilestonesCount,
   ])
 
-  const setModuleChild = useCallback((module: ModuleWithChildren, child: string) => {
-    setChildState((prev) => ({ ...prev, [module]: child }))
-  }, [])
+  const setModuleChild = useCallback(
+    (module: ModuleWithChildren, child: string) => {
+      setChildState((prev) => ({ ...prev, [module]: child }))
+    },
+    []
+  )
 
   useEffect(() => {
     if (!hasWbs && childState.schedule === 'wbs') {
@@ -313,6 +350,7 @@ export function ProjectDetail({
             activeTab={childState.schedule}
             onTabChange={(value) => setModuleChild('schedule', value)}
             showTabList={false}
+            initialTarget={initialTarget}
           />
         ) : (
           <ScheduleUploadZone projectId={projectId} project={project} />
@@ -345,6 +383,7 @@ export function ProjectDetail({
             activeTab={childState.cost}
             onTabChange={(value) => setModuleChild('cost', value)}
             showTabList={false}
+            initialTarget={initialTarget}
           />
         ) : (
           <div className='rounded-md border p-6 text-sm text-muted-foreground'>
@@ -360,6 +399,7 @@ export function ProjectDetail({
             activeTab={childState.commercial}
             onTabChange={(value) => setModuleChild('commercial', value)}
             showTabList={false}
+            initialTarget={initialTarget}
           />
         ) : (
           <div className='rounded-md border p-6 text-sm text-muted-foreground'>
@@ -388,11 +428,17 @@ export function ProjectDetail({
             activeTab={childState.docControl}
             onTabChange={(value) => setModuleChild('docControl', value)}
             showTabList={false}
+            initialTarget={initialTarget}
           />
         ) : (
           <div className='rounded-md border p-6 text-sm text-muted-foreground'>
             Generate a schedule first to access document control workflows.
           </div>
+        )
+
+      case 'meetings':
+        return (
+          <MeetingsDashboard projectId={projectId} initialTarget={initialTarget} />
         )
 
       case 'equipment':
@@ -408,7 +454,11 @@ export function ProjectDetail({
 
             <div className='rounded-md border p-4'>
               <h3 className='mb-3 text-base font-semibold'>Earned Value</h3>
-              <EvReport projectId={projectId} />
+              <EvReport
+                projectId={projectId}
+                readiness={setupReadiness}
+                onNavigate={handleSetupNavigate}
+              />
             </div>
           </div>
         )
@@ -446,23 +496,48 @@ export function ProjectDetail({
                     label='Baseline Date'
                     value={formatDate(project.baselineDate ?? null)}
                   />
+                  <DetailItem
+                    label='Data Date'
+                    value={formatDate(project.dataDate ?? null)}
+                  />
                 </div>
               </section>
 
               <section className='rounded-md border p-4'>
                 <h3 className='mb-3 text-sm font-semibold'>Contract Parties</h3>
-                <div className='grid gap-4 sm:grid-cols-3'>
-                  <DetailItem
-                    label='Client'
-                    value={project.clientName ?? '-'}
+                <div className='grid gap-4 sm:grid-cols-2 lg:grid-cols-4'>
+                  <PartyDetailItem
+                    label='Client / Owner'
+                    value={
+                      activeProjectParties.find((party) => party.role === 'owner')
+                        ?.company?.name ?? project.clientName
+                    }
                   />
-                  <DetailItem
+                  <PartyDetailItem
                     label='Consultant'
-                    value={project.consultantName ?? '-'}
+                    value={
+                      activeProjectParties.find(
+                        (party) => party.role === 'consultant'
+                      )?.company?.name ?? project.consultantName
+                    }
                   />
-                  <DetailItem
+                  <PartyDetailItem
                     label='Contractor'
-                    value={project.contractorName ?? '-'}
+                    value={
+                      activeProjectParties.find(
+                        (party) => party.role === 'contractor'
+                      )?.company?.name ?? project.contractorName
+                    }
+                  />
+                  <PartyDetailItem
+                    label='Subcontractors'
+                    value={
+                      activeProjectParties
+                        .filter((party) => party.role === 'subcontractor')
+                        .map((party) => party.company?.name)
+                        .filter(Boolean)
+                        .join(', ') || null
+                    }
                   />
                 </div>
               </section>
@@ -537,6 +612,10 @@ export function ProjectDetail({
                     label='Cutoff Day'
                     value={formatNumber(project.reportingCutoffDay)}
                   />
+                  <DetailItem
+                    label='Data Date'
+                    value={formatDate(project.dataDate ?? null)}
+                  />
                 </div>
               </section>
             </div>
@@ -550,7 +629,10 @@ export function ProjectDetail({
 
   return (
     <>
-      <Main className='flex flex-1 flex-col gap-4 sm:gap-6'>
+      <Main
+        data-testid='uat-project-detail'
+        className='flex flex-1 flex-col gap-4 sm:gap-6'
+      >
         {isLoading ? (
           <div className='py-8 text-center text-muted-foreground'>
             Loading project...
@@ -573,7 +655,11 @@ export function ProjectDetail({
             Project not found.
           </div>
         ) : (
-          <>
+          <ProjectPermissionProvider
+            role={project.projectAccess?.role}
+            effectiveRole={projectEffectiveRole}
+            partyAccess={project.projectAccess?.partyAccess}
+          >
             <div className='flex flex-wrap items-end justify-between gap-2'>
               <div>
                 <h2 className='text-2xl font-bold tracking-tight'>
@@ -586,7 +672,7 @@ export function ProjectDetail({
                 <p className='text-xs text-muted-foreground'>
                   Contract Value:{' '}
                   {formatMoney(project.currency, project.contractValue)}
-                  {' · '}Duration:{' '}
+                  {' - '}Duration:{' '}
                   {formatDuration(project.duration, project.durationUnit)}
                 </p>
               </div>
@@ -613,6 +699,7 @@ export function ProjectDetail({
                     return (
                       <div key={item.key}>
                         <button
+                          data-testid={`uat-project-module-${item.key}`}
                           type='button'
                           onClick={() => handleModuleSelect(item)}
                           className={[
@@ -635,6 +722,7 @@ export function ProjectDetail({
 
                               return (
                                 <button
+                                  data-testid={`uat-project-module-${item.key}-${child.key}`}
                                   key={child.key}
                                   type='button'
                                   onClick={() => {
@@ -660,9 +748,14 @@ export function ProjectDetail({
                 </nav>
               </aside>
 
-              <section className='min-w-0'>{renderContent()}</section>
+              <section
+                data-testid={`uat-project-content-${activeModule}`}
+                className='min-w-0'
+              >
+                {renderContent()}
+              </section>
             </div>
-          </>
+          </ProjectPermissionProvider>
         )}
       </Main>
     </>

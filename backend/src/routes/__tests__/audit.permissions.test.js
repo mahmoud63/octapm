@@ -52,6 +52,7 @@ describe('audit route permissions', () => {
       .query({
         entityType: 'schedule_revision',
         entityId: 'revision-1',
+        source: 'approval',
         limit: 10,
         order: 'asc',
       })
@@ -64,6 +65,7 @@ describe('audit route permissions', () => {
       entityType: 'schedule_revision',
       entityId: 'revision-1',
       action: null,
+      source: 'approval',
       cursor: null,
       limit: 10,
       order: 'asc',

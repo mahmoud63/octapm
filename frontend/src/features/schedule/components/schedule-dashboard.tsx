@@ -34,10 +34,11 @@ import {
   projectSetupReadinessKey,
   useProject,
 } from '@/features/projects/hooks/use-projects'
+import type { ProjectSetupTarget } from '@/features/projects/data/schema'
+import { EvReport } from '@/features/reports/components/ev-report'
 import { RisksTable } from '@/features/risks/components/risks-table'
 import type { ProjectSchedule, ScheduleActivity } from '../data/schema'
 import { useGenerateSchedule } from '../hooks/use-schedule'
-import { EvReport } from '@/features/reports/components/ev-report'
 import { ExportButton } from './export-button'
 import { GanttChart } from './gantt-chart'
 import { GenerationProgress } from './generation-progress'
@@ -57,6 +58,7 @@ interface Props {
   activeTab?: string
   onTabChange?: (value: string) => void
   showTabList?: boolean
+  initialTarget?: ProjectSetupTarget
 }
 
 const fmtUSD = (n: number) =>
@@ -78,8 +80,8 @@ const formatActivityDependencies = (activity: ScheduleActivity) => {
       .map((dependency) => {
         const predecessor = dependency.predecessor
         const ref =
+          predecessor?.activityCode ||
           predecessor?.p6ActivityId ||
-          predecessor?.wbsCode ||
           dependency.predecessorId.slice(0, 8)
         return `${ref} ${dependency.relationshipType}${formatLag(
           dependency.lagDays
@@ -95,8 +97,13 @@ const isNearCritical = (a: ScheduleActivity) =>
   !a.isCritical &&
   !a.isMilestone &&
   a.totalFloat != null &&
-  a.totalFloat >= 1 &&
-  a.totalFloat <= 5
+    a.totalFloat >= 1 &&
+    a.totalFloat <= 5
+
+const formatActivityCode = (activity: ScheduleActivity, index = 0) =>
+  activity.activityCode ||
+  activity.p6ActivityId ||
+  `ACT-${String(index + 1).padStart(4, '0')}`
 
 const procurementSeverityRank = {
   none: 0,
@@ -114,8 +121,39 @@ const procurementRiskClassMap = {
   critical: 'bg-red-100 text-red-800',
 }
 
+const projectRiskClassMap = {
+  LOW: 'bg-green-100 text-green-800',
+  MEDIUM: 'bg-yellow-100 text-yellow-800',
+  HIGH: 'bg-orange-100 text-orange-800',
+  CRITICAL: 'bg-red-100 text-red-800',
+}
+
 const formatProcurementReason = (reason: string | undefined) =>
   reason ? reason.replace(/_/g, ' ') : 'on track'
+
+type ProcurementAlertDisplay = {
+  id: string
+  item: string
+  activityId: string | null
+  alertId?: string
+  alertStatus?: 'open' | 'acknowledged' | 'resolved'
+  procurementRisk?: {
+    severity: keyof typeof procurementSeverityRank
+    reason: string
+    isAtRisk: boolean
+    daysAtRisk: number
+    needDate: string | null
+    orderByDate: string | null
+    expectedDeliveryDate: string | null
+    impactedActivity: {
+      id: string
+      name: string
+      wbsCode: string | null
+      isCritical?: boolean
+      totalFloat?: number | null
+    } | null
+  }
+}
 
 function ActivityStatusBadge({
   status,
@@ -165,6 +203,7 @@ export function ScheduleDashboard({
   activeTab,
   onTabChange,
   showTabList = true,
+  initialTarget,
 }: Props) {
   const canCreateSchedule = useCanPerform('schedule', 'create')
   const canUpdateSchedule = useCanPerform('schedule', 'update')
@@ -174,11 +213,27 @@ export function ScheduleDashboard({
     'submit',
     'submission.submit'
   )
+  const canAcknowledgeProcurementRisk = useCanPerform(
+    'procurement',
+    'update',
+    'alert.acknowledge'
+  )
+  const canResolveProcurementRisk = useCanPerform(
+    'procurement',
+    'update',
+    'alert.resolve'
+  )
   const queryClient = useQueryClient()
   const { data: project } = useProject(projectId)
   const { data: procurementItems = [] } = useLongLeadItems(projectId)
   const { revision, activities } = schedule
   const [nowMs] = useState(() => Date.now())
+  const scheduleDataDate =
+    schedule.dataDate ||
+    revision.dataDate ||
+    project?.dataDate ||
+    revision.projectSummary?.dataDate ||
+    null
   const [regenLabel, setRegenLabel] = useState('')
   const [isImportScheduleOpen, setImportScheduleOpen] = useState(false)
   const [isImportProgressOpen, setImportProgressOpen] = useState(false)
@@ -228,16 +283,93 @@ export function ScheduleDashboard({
     onError: () => toast.error('Failed to seed linked modules'),
   })
 
+  const procurementAlertMutation = useMutation({
+    mutationFn: ({
+      alertId,
+      action,
+    }: {
+      alertId: string
+      action: 'acknowledge' | 'resolve'
+    }) =>
+      apiClient.patch(
+        `/projects/${projectId}/procurement/lead-time-alerts/${alertId}/${action}`,
+        {}
+      ),
+    onSuccess: async (_response, variables) => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['schedule', projectId] }),
+        queryClient.invalidateQueries({ queryKey: ['long-lead', projectId] }),
+        queryClient.invalidateQueries({ queryKey: ['health', projectId] }),
+      ])
+      toast.success(
+        variables.action === 'acknowledge'
+          ? 'Procurement risk acknowledged'
+          : 'Procurement risk resolved'
+      )
+    },
+    onError: () => toast.error('Failed to update procurement risk'),
+  })
+
   const critActs = activities.filter((a) => a.isCritical && !a.isMilestone)
   const nearCriticalActs = activities.filter((a) => isNearCritical(a))
   const milestones = activities.filter((a) => a.isMilestone)
   const milestoneCards = revision.milestones || milestones
   const totalBudget = revision.totalBudget
-  const procurementAlerts = useMemo(
+  const projectRiskActivities = useMemo(
+    () => activities.filter((activity) => (activity.projectRiskSummary?.count ?? 0) > 0),
+    [activities]
+  )
+  const overdueProjectRisks = useMemo(
     () =>
-      procurementItems
-        .filter((item) => item.procurementRisk?.isAtRisk)
-        .sort((a, b) => {
+      activities.reduce(
+        (sum, activity) => sum + (activity.projectRiskSummary?.overdueCount ?? 0),
+        0
+      ),
+    [activities]
+  )
+  const scheduleProcurementAlerts = useMemo<ProcurementAlertDisplay[]>(
+    () =>
+      activities.flatMap((activity) =>
+        (activity.procurementRiskSummary?.items ?? [])
+          .filter(
+            (item) =>
+              procurementSeverityRank[item.severity] >=
+              procurementSeverityRank.medium
+          )
+          .map((item) => ({
+            id: item.id,
+            item: item.item,
+            activityId: activity.id,
+            alertId: item.id,
+            alertStatus: item.status,
+            procurementRisk: {
+              severity: item.severity,
+              reason: item.reason,
+              isAtRisk: true,
+              daysAtRisk: item.daysAtRisk,
+              needDate: item.needDate,
+              orderByDate: item.orderByDate,
+              expectedDeliveryDate: item.expectedDeliveryDate,
+              impactedActivity: {
+                id: activity.id,
+                name: activity.name,
+                wbsCode: activity.wbsCode,
+                isCritical: activity.isCritical,
+                totalFloat: activity.totalFloat,
+              },
+            },
+          }))
+      ),
+    [activities]
+  )
+  const procurementAlerts = useMemo<ProcurementAlertDisplay[]>(
+    () =>
+      [
+        ...procurementItems.filter(
+          (item) => item.procurementRisk?.isAtRisk
+        ),
+        ...scheduleProcurementAlerts,
+      ].sort((a, b) => {
           const aRisk = a.procurementRisk
           const bRisk = b.procurementRisk
           const severityDelta =
@@ -246,15 +378,15 @@ export function ScheduleDashboard({
           if (severityDelta !== 0) return severityDelta
           return (bRisk?.daysAtRisk ?? 0) - (aRisk?.daysAtRisk ?? 0)
         }),
-    [procurementItems]
+    [procurementItems, scheduleProcurementAlerts]
   )
   const procurementRiskByActivity = useMemo(() => {
     const riskByActivity = new Map<
       string,
-      NonNullable<(typeof procurementItems)[number]['procurementRisk']>
+      NonNullable<ProcurementAlertDisplay['procurementRisk']>
     >()
 
-    procurementItems.forEach((item) => {
+    procurementAlerts.forEach((item) => {
       const risk = item.procurementRisk
       if (!item.activityId || !risk?.isAtRisk) return
 
@@ -272,7 +404,7 @@ export function ScheduleDashboard({
     })
 
     return riskByActivity
-  }, [procurementItems])
+  }, [procurementAlerts])
   const todayWorkingDay = useMemo(() => {
     const startDate = revision.projectSummary?.startDate
     if (!startDate) return 0
@@ -280,9 +412,15 @@ export function ScheduleDashboard({
     const startMs = new Date(startDate).getTime()
     if (Number.isNaN(startMs)) return 0
 
-    const calDays = Math.floor((nowMs - startMs) / (1000 * 60 * 60 * 24))
+    const dataDateMs = scheduleDataDate
+      ? new Date(scheduleDataDate).getTime()
+      : nowMs
+    const effectiveNowMs = Number.isNaN(dataDateMs) ? nowMs : dataDateMs
+    const calDays = Math.floor(
+      (effectiveNowMs - startMs) / (1000 * 60 * 60 * 24)
+    )
     return Math.max(0, Math.floor((calDays * 5) / 7))
-  }, [revision.projectSummary?.startDate, nowMs])
+  }, [revision.projectSummary?.startDate, scheduleDataDate, nowMs])
 
   const slippageOf = (a: ScheduleActivity): number => {
     if (a.pctComplete >= 100) return 0
@@ -391,7 +529,7 @@ export function ScheduleDashboard({
       {/* Header: stats + action toolbar */}
       <div className='flex flex-col gap-4 sm:flex-row sm:flex-wrap sm:items-start sm:justify-between'>
         {/* Stat cards */}
-        <div className='grid grid-cols-2 gap-3 sm:grid-cols-5'>
+        <div className='grid grid-cols-2 gap-3 sm:grid-cols-6'>
           <StatCard label='Total Activities' value={revision.activityCount} />
           <StatCard
             label='Critical Path'
@@ -413,9 +551,19 @@ export function ScheduleDashboard({
             label='Proc Risk'
             value={procurementAlerts.length}
             color={
-              procurementAlerts.length > 0 ? 'text-orange-600' : 'text-green-600'
+              procurementAlerts.length > 0
+                ? 'text-orange-600'
+                : 'text-green-600'
             }
             sub='alerts'
+          />
+          <StatCard
+            label='Project Risk'
+            value={projectRiskActivities.length}
+            color={
+              overdueProjectRisks > 0 ? 'text-red-600' : 'text-amber-600'
+            }
+            sub={`${overdueProjectRisks} overdue`}
           />
         </div>
 
@@ -633,6 +781,84 @@ export function ScheduleDashboard({
                           ? ` -> ${activity.wbsCode ? `${activity.wbsCode} ` : ''}${activity.name}`
                           : ''}
                       </span>
+                      {item.alertId &&
+                        item.alertStatus === 'open' &&
+                        canAcknowledgeProcurementRisk && (
+                          <Button
+                            type='button'
+                            variant='ghost'
+                            size='sm'
+                            className='h-6 px-2 text-xs'
+                            disabled={procurementAlertMutation.isPending}
+                            onClick={() =>
+                              procurementAlertMutation.mutate({
+                                alertId: item.alertId as string,
+                                action: 'acknowledge',
+                              })
+                            }
+                          >
+                            Ack
+                          </Button>
+                        )}
+                      {item.alertId &&
+                        item.alertStatus !== 'resolved' &&
+                        canResolveProcurementRisk && (
+                          <Button
+                            type='button'
+                            variant='ghost'
+                            size='sm'
+                            className='h-6 px-2 text-xs'
+                            disabled={procurementAlertMutation.isPending}
+                            onClick={() =>
+                              procurementAlertMutation.mutate({
+                                alertId: item.alertId as string,
+                                action: 'resolve',
+                              })
+                            }
+                          >
+                            Resolve
+                          </Button>
+                        )}
+                    </span>
+                  )
+                })}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {projectRiskActivities.length > 0 && (
+        <div className='rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-900/40 dark:bg-amber-950/20 dark:text-amber-200'>
+          <div className='flex items-start gap-2'>
+            <AlertTriangle className='mt-0.5 h-4 w-4 shrink-0' />
+            <div className='min-w-0 space-y-1'>
+              <p className='font-semibold'>
+                {projectRiskActivities.length} activity-linked project risk
+                {projectRiskActivities.length === 1 ? '' : 's'}
+              </p>
+              <div className='flex flex-wrap gap-2'>
+                {projectRiskActivities.slice(0, 3).map((activity) => {
+                  const risk = activity.projectRiskSummary
+                  const top = risk?.items?.[0]
+                  return (
+                    <span
+                      key={activity.id}
+                      className='inline-flex max-w-full items-center gap-1 rounded-full border border-amber-300 bg-background/70 px-2 py-0.5 text-xs'
+                    >
+                      {top && (
+                        <Badge className={projectRiskClassMap[top.severity]}>
+                          {top.severity}
+                        </Badge>
+                      )}
+                      <span className='truncate'>
+                        {top?.ref || 'Risk'} - {formatActivityCode(activity)}
+                      </span>
+                      {risk?.overdueCount ? (
+                        <Badge className='bg-red-100 text-red-800'>
+                          {risk.overdueCount} overdue
+                        </Badge>
+                      ) : null}
                     </span>
                   )
                 })}
@@ -672,6 +898,13 @@ export function ScheduleDashboard({
         <TabsContent value='gantt' className='mt-4'>
           <GanttChart
             activities={activities}
+            projectStartDate={
+              project?.startDate || revision.projectSummary?.startDate || null
+            }
+            projectEndDate={
+              project?.endDate || revision.projectSummary?.endDate || null
+            }
+            dataDate={scheduleDataDate}
             onActivityUpdate={
               canUpdateSchedule ? handleActivityUpdate : undefined
             }
@@ -688,9 +921,11 @@ export function ScheduleDashboard({
               <thead className='border-b bg-muted/50'>
                 <tr>
                   <th className='p-2 text-left font-medium'>Batch</th>
+                  <th className='p-2 text-left font-medium'>Activity ID</th>
                   <th className='p-2 text-left font-medium'>WBS</th>
                   <th className='p-2 text-left font-medium'>Activity</th>
                   <th className='p-2 text-left font-medium'>Proc Risk</th>
+                  <th className='p-2 text-left font-medium'>Risk</th>
                   <th className='p-2 text-left font-medium'>Phase</th>
                   <th className='p-2 text-right font-medium'>Duration</th>
                   <th className='p-2 text-right font-medium'>ES</th>
@@ -707,7 +942,7 @@ export function ScheduleDashboard({
                 </tr>
               </thead>
               <tbody>
-                {activities.map((a) => (
+                {activities.map((a, index) => (
                   <tr
                     key={a.id}
                     className={[
@@ -720,6 +955,9 @@ export function ScheduleDashboard({
                   >
                     <td className='p-2 text-xs font-semibold text-muted-foreground'>
                       {a.batchId || '—'}
+                    </td>
+                    <td className='p-2 font-mono text-xs'>
+                      {formatActivityCode(a, index)}
                     </td>
                     <td className='p-2 font-mono text-xs text-muted-foreground'>
                       {a.wbsCode || '—'}
@@ -752,6 +990,31 @@ export function ScheduleDashboard({
                         >
                           {procurementRiskByActivity.get(a.id)?.severity}
                         </Badge>
+                      ) : (
+                        <span className='text-xs text-muted-foreground'>-</span>
+                      )}
+                    </td>
+                    <td
+                      className='p-2'
+                      title={a.projectRiskSummary?.items?.[0]?.description}
+                    >
+                      {a.projectRiskSummary ? (
+                        <div className='flex items-center gap-1'>
+                          <Badge
+                            className={
+                              projectRiskClassMap[
+                                a.projectRiskSummary.highestSeverity
+                              ]
+                            }
+                          >
+                            {a.projectRiskSummary.highestSeverity}
+                          </Badge>
+                          {a.projectRiskSummary.overdueCount > 0 && (
+                            <Badge className='bg-red-100 text-red-800'>
+                              {a.projectRiskSummary.overdueCount}
+                            </Badge>
+                          )}
+                        </div>
                       ) : (
                         <span className='text-xs text-muted-foreground'>-</span>
                       )}
@@ -879,8 +1142,9 @@ export function ScheduleDashboard({
                     <div className='min-w-0 flex-1'>
                       <p className='truncate font-medium'>{a.name}</p>
                       <p className='text-xs text-muted-foreground'>
-                        {a.wbsCode} · {a.category} · {a.duration}d · d
-                        {a.earlyStart}→d{a.earlyFinish}
+                        {formatActivityCode(a)} · WBS {a.wbsCode || '-'} ·{' '}
+                        {a.category} · {a.duration}d · d{a.earlyStart}→d
+                        {a.earlyFinish}
                       </p>
                       <div className='mt-1 flex items-center gap-2'>
                         <div className='h-1.5 flex-1 rounded-full bg-red-200'>
@@ -1045,7 +1309,7 @@ export function ScheduleDashboard({
 
         {/* Risks tab */}
         <TabsContent value='risks' className='mt-4'>
-          <RisksTable projectId={projectId} />
+          <RisksTable projectId={projectId} initialTarget={initialTarget} />
         </TabsContent>
 
         {/* Long Lead tab */}

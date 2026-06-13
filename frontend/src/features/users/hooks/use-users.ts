@@ -46,6 +46,25 @@ export const useCreateUserMutation = () => {
   })
 }
 
+export const useInviteUserMutation = () => {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (payload: {
+      email: string
+      role: string
+      projectId?: string
+      companyId?: string
+      projectPartyId?: string
+      note?: string
+    }) =>
+      apiClient.post('/users/invitations', payload).then((r) => r.data.data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['users'] })
+    },
+  })
+}
+
 export const useDeactivateUserMutation = () => {
   const queryClient = useQueryClient()
 

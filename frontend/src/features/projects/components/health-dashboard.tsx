@@ -31,12 +31,41 @@ type HealthDimension = {
   key: string
   label: string
   score: number
+  sourceRule?: {
+    source?: string
+    formula?: string
+    officialOnly?: boolean
+  }
+  cutoffDate?: string | null
   detail?: HealthDimensionDetail
+  target?: {
+    module: string
+    child?: string
+    status?: string
+    source?: string
+  }
 }
 
 type HealthResponse = {
+  generatedAt?: string
+  dataFreshness?: {
+    generatedAt?: string
+    cutoffDate?: string | null
+    sourceUpdatedAt?: string | null
+    note?: string
+  }
   overallScore?: number
   dimensions?: HealthDimension[]
+  pendingReview?: {
+    total: number
+    metrics: Array<{
+      key: string
+      label: string
+      count: number
+      source: string
+      cutoffDate?: string | null
+    }>
+  }
 }
 
 function scoreColor(score: number) {
@@ -51,14 +80,27 @@ function scoreLabel(score: number) {
   return 'Poor'
 }
 
+function formatDate(value?: string | null) {
+  if (!value) return 'No cutoff'
+  return new Date(value).toLocaleDateString(undefined, {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+  })
+}
+
 function DimensionCard({
   label,
   score,
   detail,
+  sourceRule,
+  cutoffDate,
 }: {
   label: string
   score: number
   detail: HealthDimensionDetail
+  sourceRule?: HealthDimension['sourceRule']
+  cutoffDate?: string | null
 }) {
   const color = scoreColor(score)
   const topRisks = Array.isArray(detail.topRisks)
@@ -92,6 +134,12 @@ function DimensionCard({
         <p className='text-lg font-bold' style={{ color }}>
           {score}
         </p>
+      </div>
+      <div className='rounded-md bg-muted/40 px-2 py-1 text-[11px] text-muted-foreground'>
+        <span className='font-medium text-foreground'>
+          {sourceRule?.source || 'Official source'}
+        </span>{' '}
+        through {formatDate(cutoffDate)}
       </div>
       {topRisks.length > 0 && (
         <div className='space-y-1 border-t pt-2'>
@@ -131,6 +179,8 @@ export function HealthDashboard({ projectId }: Props) {
 
   const overallScore = Number(data.overallScore || 0)
   const dimensions = data.dimensions || []
+  const pendingReview = data.pendingReview?.metrics || []
+  const freshness = data.dataFreshness
   const radarData = dimensions.map((d) => ({
     subject: d.label,
     score: d.score,
@@ -147,6 +197,9 @@ export function HealthDashboard({ projectId }: Props) {
           </p>
           <p className='text-sm font-medium' style={{ color: overallColor }}>
             {scoreLabel(overallScore)}
+          </p>
+          <p className='mt-2 text-xs text-muted-foreground'>
+            Cutoff {formatDate(freshness?.cutoffDate)}
           </p>
         </div>
 
@@ -174,9 +227,34 @@ export function HealthDashboard({ projectId }: Props) {
             label={d.label}
             score={d.score}
             detail={d.detail || {}}
+            sourceRule={
+              d.sourceRule ||
+              (d.detail?.sourceRule as HealthDimension['sourceRule'])
+            }
+            cutoffDate={d.cutoffDate || (d.detail?.cutoffDate as string | null)}
           />
         ))}
       </div>
+
+      {pendingReview.length > 0 && (
+        <div className='grid gap-3 md:grid-cols-2 xl:grid-cols-4'>
+          {pendingReview.map((metric) => (
+            <div
+              key={metric.key}
+              className='rounded-md border border-amber-500/30 bg-amber-500/5 p-3'
+            >
+              <p className='text-xs font-medium text-amber-700 dark:text-amber-300'>
+                Pending review
+              </p>
+              <p className='mt-1 text-sm font-semibold'>{metric.label}</p>
+              <p className='text-2xl font-bold tabular-nums'>{metric.count}</p>
+              <p className='text-xs text-muted-foreground'>
+                {metric.source} through {formatDate(metric.cutoffDate)}
+              </p>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   )
 }

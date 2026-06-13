@@ -1,0 +1,223 @@
+{
+  "taskId": "TASK-P1-QA-001",
+  "suite": "construction-uat-regression",
+  "version": 1,
+  "releaseEvidence": {
+    "defaultDirectory": "docs/release-readiness-audit/evidence",
+    "artifactPrefix": "TASK-P1-QA-001-uat-regression",
+    "signoffTemplate": "docs/qa/uat-signoff-template.md"
+  },
+  "seed": {
+    "script": "e2e/uat/seed-uat-fixtures.mjs",
+    "password": "UatPassw0rd!",
+    "organisation": "PMcopilots UAT Fixtures",
+    "project": "UAT Regression Tower",
+    "restrictedProject": "UAT Restricted Project"
+  },
+  "personas": [
+    {
+      "id": "pm",
+      "name": "Project Manager",
+      "role": "pm",
+      "email": "uat.pm@pmcopilots.test",
+      "required": true,
+      "ownsFlows": [
+        "auth-project-setup",
+        "commercial-ipc-payment",
+        "approvals-dashboard"
+      ]
+    },
+    {
+      "id": "planning",
+      "name": "Planning Engineer",
+      "role": "planning_eng",
+      "email": "uat.planning@pmcopilots.test",
+      "required": true,
+      "ownsFlows": ["schedule-progress"]
+    },
+    {
+      "id": "qs",
+      "name": "Quantity Surveyor",
+      "role": "qs",
+      "email": "uat.qs@pmcopilots.test",
+      "required": true,
+      "ownsFlows": ["boq-cost"]
+    },
+    {
+      "id": "costController",
+      "name": "Cost Controller",
+      "role": "cost_controller",
+      "email": "uat.cost@pmcopilots.test",
+      "required": true,
+      "ownsFlows": ["cost-control"]
+    },
+    {
+      "id": "procurement",
+      "name": "Procurement",
+      "role": "procurement",
+      "email": "uat.procurement@pmcopilots.test",
+      "required": true,
+      "ownsFlows": ["procurement-smoke"]
+    },
+    {
+      "id": "warehouse",
+      "name": "Warehouse",
+      "role": "warehouse",
+      "email": "uat.warehouse@pmcopilots.test",
+      "required": true,
+      "ownsFlows": ["material-smoke"]
+    },
+    {
+      "id": "siteEngineer",
+      "name": "Site Engineer",
+      "role": "site_engineer",
+      "email": "uat.site@pmcopilots.test",
+      "required": true,
+      "ownsFlows": ["field-daily-report", "qa-safety-mobile"]
+    },
+    {
+      "id": "finance",
+      "name": "Finance",
+      "role": "finance",
+      "email": "uat.finance@pmcopilots.test",
+      "required": true,
+      "ownsFlows": ["invoice-payment"]
+    }
+  ],
+  "flows": [
+    {
+      "id": "auth-project-setup",
+      "persona": "pm",
+      "modules": ["auth", "project"],
+      "apiAssertions": [
+        "register-or-login",
+        "project-create-or-find",
+        "project-detail-visible"
+      ],
+      "browserAssertions": [
+        "desktop-login",
+        "workspace-dashboard-visible",
+        "project-list-visible"
+      ]
+    },
+    {
+      "id": "document-rfi-submittal",
+      "persona": "pm",
+      "modules": ["document_control", "rfi", "submittal"],
+      "apiAssertions": [
+        "rfi-create-submit-answer-approve-close",
+        "submittal-create-submit-review-approve",
+        "document-revision-upload-submit-approve",
+        "document-register-contains-revision"
+      ],
+      "browserAssertions": ["project-doc-control-route-visible"]
+    },
+    {
+      "id": "schedule-progress-cost-ipc",
+      "persona": "pm",
+      "modules": ["boq", "schedule", "progress", "cost", "ipc"],
+      "apiAssertions": [
+        "boq-allocation-approved",
+        "progress-submitted-and-approved",
+        "daily-report-submitted-and-approved",
+        "cost-record-created",
+        "ipc-created-certified-invoiced-paid"
+      ],
+      "browserAssertions": [
+        "project-schedule-route-visible",
+        "project-commercial-route-visible"
+      ]
+    },
+    {
+      "id": "qa-safety-closeout",
+      "persona": "pm",
+      "modules": ["ncr", "safety"],
+      "apiAssertions": [
+        "ncr-create-submit-approve",
+        "safety-create-submit-approve"
+      ],
+      "browserAssertions": ["tablet-project-visible", "mobile-project-visible"]
+    },
+    {
+      "id": "meeting-minutes",
+      "persona": "pm",
+      "modules": ["meeting", "task", "notification", "audit"],
+      "apiAssertions": [
+        "meeting-create-with-minutes",
+        "meeting-action-linked-task",
+        "meeting-distribute-history-audit",
+        "meeting-comment-persisted"
+      ],
+      "browserAssertions": ["project-meetings-route-visible"]
+    }
+  ],
+  "permissionNegativeTests": [
+    {
+      "id": "anonymous-project-denied",
+      "persona": "anonymous",
+      "expectedStatuses": [401]
+    },
+    {
+      "id": "unassigned-project-denied",
+      "persona": "siteEngineer",
+      "expectedStatuses": [403]
+    },
+    {
+      "id": "cross-org-project-denied",
+      "persona": "externalPm",
+      "expectedStatuses": [403, 404]
+    }
+  ],
+  "responsiveSmoke": [
+    {
+      "id": "desktop",
+      "width": 1440,
+      "height": 1000,
+      "routes": ["/", "/projects"]
+    },
+    {
+      "id": "tablet",
+      "width": 1024,
+      "height": 768,
+      "routes": [
+        "/projects",
+        "/projects/{projectId}",
+        "/projects/{projectId}?module=siteReporting",
+        "/projects/{projectId}?module=quality&child=ncr",
+        "/projects/{projectId}?module=quality&child=safety"
+      ]
+    },
+    {
+      "id": "mobile",
+      "width": 390,
+      "height": 844,
+      "routes": [
+        "/projects",
+        "/projects/{projectId}",
+        "/projects/{projectId}?module=siteReporting",
+        "/projects/{projectId}?module=quality&child=ncr",
+        "/projects/{projectId}?module=quality&child=safety"
+      ]
+    }
+  ],
+  "requiredCoverage": [
+    "auth",
+    "project",
+    "document_control",
+    "rfi",
+    "submittal",
+    "schedule",
+    "cost",
+    "ipc",
+    "qa",
+    "safety",
+    "meeting",
+    "task",
+    "notification",
+    "audit",
+    "permission_negative",
+    "tablet",
+    "mobile",
+    "release_evidence"
+  ]
+}

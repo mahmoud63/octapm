@@ -5,43 +5,157 @@ on:
     workflows: [Quality Gates]
     types: [completed]
     branches: [main]
+  workflow_dispatch:
+    inputs:
+      deploy_environment:
+        description: GitHub Environment containing deploy vars/secrets
+        required: true
+        default: staging
 
 permissions:
   id-token: write # required for OIDC
   contents: read
 
+concurrency:
+  group: deploy-${{ github.event.inputs.deploy_environment || vars.DEPLOY_ENVIRONMENT || 'production' }}
+  cancel-in-progress: false
+
+env:
+  DEPLOY_ENVIRONMENT: ${{ github.event.inputs.deploy_environment || vars.DEPLOY_ENVIRONMENT || 'production' }}
+  DEPLOY_REF: ${{ github.event.workflow_run.head_branch || github.ref_name }}
+  DEPLOY_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+
 jobs:
   deployment-gate:
-    name: Confirm Quality Gates Passed
+    name: Confirm Deployment Inputs
     runs-on: ubuntu-latest
+    environment: ${{ github.event.inputs.deploy_environment || vars.DEPLOY_ENVIRONMENT || 'production' }}
 
     steps:
       - name: Stop deployment when validation failed
-        if: ${{ github.event.workflow_run.conclusion != 'success' || github.event.workflow_run.event != 'push' }}
+        if: ${{ github.event_name == 'workflow_run' && (github.event.workflow_run.conclusion != 'success' || github.event.workflow_run.event != 'push') }}
         run: |
           echo "::error::Deployments require a successful Quality Gates run from a push to main."
           echo "Quality Gates conclusion: ${{ github.event.workflow_run.conclusion }}"
           echo "Triggering event: ${{ github.event.workflow_run.event }}"
           exit 1
 
-      - name: Confirm validated commit
+      - name: Stop manual production deployment
+        if: ${{ github.event_name == 'workflow_dispatch' && (github.event.inputs.deploy_environment == 'production' || github.event.inputs.deploy_environment == 'prod') }}
         run: |
-          echo "Deploying validated commit ${{ github.event.workflow_run.head_sha }}"
+          echo "::error::Manual deployment is reserved for staging rehearsal. Production deploys require a successful Quality Gates workflow_run from a push to main."
+          exit 1
+
+      - name: Confirm deploy source
+        run: |
+          echo "Deploy environment: $DEPLOY_ENVIRONMENT"
+          echo "Deploy ref: $DEPLOY_REF"
+          echo "Deploy commit: $DEPLOY_SHA"
+
+      - name: Validate deployment configuration
+        env:
+          AWS_REGION: ${{ vars.AWS_REGION }}
+          AWS_ROLE_ARN: ${{ secrets.AWS_ROLE_ARN }}
+          VITE_API_URL: ${{ vars.VITE_API_URL }}
+          FRONTEND_URL: ${{ vars.FRONTEND_URL }}
+          CORS_ALLOWED_ORIGINS: ${{ vars.CORS_ALLOWED_ORIGINS }}
+          S3_SPA_BUCKET: ${{ vars.S3_SPA_BUCKET }}
+          S3_UPLOADS_BUCKET: ${{ vars.S3_UPLOADS_BUCKET }}
+          CF_DISTRIBUTION_ID: ${{ vars.CF_DISTRIBUTION_ID }}
+          EC2_HOST: ${{ secrets.EC2_HOST }}
+          EC2_SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
+          EC2_USER: ${{ vars.EC2_USER }}
+          EC2_APP_DIR: ${{ vars.EC2_APP_DIR }}
+          APP_SECRETS_ARN: ${{ vars.APP_SECRETS_ARN }}
+          DB_HOST: ${{ vars.DB_HOST }}
+          DB_NAME: ${{ vars.DB_NAME }}
+          DB_USERNAME: ${{ vars.DB_USERNAME }}
+          DB_PORT: ${{ vars.DB_PORT }}
+          BACKEND_PORT: ${{ vars.BACKEND_PORT }}
+          PM2_APP_NAME: ${{ vars.PM2_APP_NAME }}
+          SMOKE_BASE_URL: ${{ vars.SMOKE_BASE_URL }}
+          SMOKE_REQUIRE_AUTHENTICATED: ${{ vars.SMOKE_REQUIRE_AUTHENTICATED }}
+          SMOKE_EMAIL: ${{ vars.SMOKE_EMAIL }}
+          SMOKE_PASSWORD: ${{ secrets.SMOKE_PASSWORD }}
+          SMOKE_PROJECT_ID: ${{ vars.SMOKE_PROJECT_ID }}
+          STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
+          STRIPE_WEBHOOK_SECRET: ${{ secrets.STRIPE_WEBHOOK_SECRET }}
+          STRIPE_PRICE_INDIVIDUAL_MONTHLY: ${{ secrets.STRIPE_PRICE_INDIVIDUAL_MONTHLY }}
+          STRIPE_PRICE_INDIVIDUAL_ANNUAL: ${{ secrets.STRIPE_PRICE_INDIVIDUAL_ANNUAL }}
+          STRIPE_PRICE_BUSINESS_MONTHLY: ${{ secrets.STRIPE_PRICE_BUSINESS_MONTHLY }}
+          STRIPE_PRICE_BUSINESS_ANNUAL: ${{ secrets.STRIPE_PRICE_BUSINESS_ANNUAL }}
+          STRIPE_SECRET_ROTATION_CONFIRMED_AT: ${{ secrets.STRIPE_SECRET_ROTATION_CONFIRMED_AT }}
+          STRIPE_SECRET_ROTATION_TICKET: ${{ secrets.STRIPE_SECRET_ROTATION_TICKET }}
+        run: |
+          set -euo pipefail
+
+          required=(
+            AWS_REGION
+            AWS_ROLE_ARN
+            VITE_API_URL
+            FRONTEND_URL
+            CORS_ALLOWED_ORIGINS
+            S3_SPA_BUCKET
+            S3_UPLOADS_BUCKET
+            CF_DISTRIBUTION_ID
+            EC2_HOST
+            EC2_SSH_KEY
+            EC2_USER
+            EC2_APP_DIR
+            APP_SECRETS_ARN
+            DB_HOST
+            DB_NAME
+            DB_USERNAME
+            DB_PORT
+            BACKEND_PORT
+            PM2_APP_NAME
+            SMOKE_BASE_URL
+            STRIPE_SECRET_KEY
+            STRIPE_WEBHOOK_SECRET
+            STRIPE_PRICE_INDIVIDUAL_MONTHLY
+            STRIPE_PRICE_INDIVIDUAL_ANNUAL
+            STRIPE_PRICE_BUSINESS_MONTHLY
+            STRIPE_PRICE_BUSINESS_ANNUAL
+            STRIPE_SECRET_ROTATION_CONFIRMED_AT
+            STRIPE_SECRET_ROTATION_TICKET
+          )
+
+          for name in "${required[@]}"; do
+            if [ -z "${!name:-}" ]; then
+              echo "::error::$name must be configured in the selected GitHub Environment."
+              exit 1
+            fi
+          done
+
+          if { [ "${DEPLOY_ENVIRONMENT}" = "production" ] || [ "${DEPLOY_ENVIRONMENT}" = "prod" ]; } && [ "${SMOKE_REQUIRE_AUTHENTICATED:-}" != "true" ]; then
+            echo "::error::Production deploys must set SMOKE_REQUIRE_AUTHENTICATED=true."
+            exit 1
+          fi
+
+          if [ "${SMOKE_REQUIRE_AUTHENTICATED:-}" = "true" ]; then
+            for name in SMOKE_EMAIL SMOKE_PASSWORD SMOKE_PROJECT_ID; do
+              if [ -z "${!name:-}" ]; then
+                echo "::error::$name is required when authenticated smoke checks are enabled."
+                exit 1
+              fi
+            done
+          fi
 
   # Job 1: Build React SPA, sync S3, and invalidate CloudFront.
   deploy-frontend:
     name: Deploy Frontend
     runs-on: ubuntu-latest
+    environment: ${{ github.event.inputs.deploy_environment || vars.DEPLOY_ENVIRONMENT || 'production' }}
     needs: deployment-gate
 
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.workflow_run.head_sha }}
+          ref: ${{ env.DEPLOY_SHA }}
 
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version-file: '.nvmrc'
           cache: npm
           cache-dependency-path: frontend/package-lock.json
 
@@ -53,50 +167,81 @@ jobs:
         run: npm run build
         working-directory: frontend
         env:
-          VITE_API_URL: https://octapm.com/api/v1
+          VITE_API_URL: ${{ vars.VITE_API_URL }}
           VITE_STRIPE_PUBLISHABLE_KEY: ${{ secrets.VITE_STRIPE_PUBLISHABLE_KEY }}
 
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
-          aws-region: ${{ secrets.AWS_REGION }}
+          aws-region: ${{ vars.AWS_REGION }}
 
       - name: Sync to S3
         run: |
-          aws s3 sync frontend/dist s3://${{ secrets.S3_SPA_BUCKET }} \
+          aws s3 sync frontend/dist "s3://${S3_SPA_BUCKET}" \
             --delete \
             --cache-control "public,max-age=31536000,immutable" \
             --exclude "index.html"
-          aws s3 cp frontend/dist/index.html s3://${{ secrets.S3_SPA_BUCKET }}/index.html \
+          aws s3 cp frontend/dist/index.html "s3://${S3_SPA_BUCKET}/index.html" \
             --cache-control "no-cache,no-store,must-revalidate"
+        env:
+          S3_SPA_BUCKET: ${{ vars.S3_SPA_BUCKET }}
 
       - name: Invalidate CloudFront cache
         run: |
           aws cloudfront create-invalidation \
-            --distribution-id ${{ secrets.CF_DISTRIBUTION_ID }} \
+            --distribution-id "$CF_DISTRIBUTION_ID" \
             --paths "/*"
+        env:
+          CF_DISTRIBUTION_ID: ${{ vars.CF_DISTRIBUTION_ID }}
 
   # Job 2: SSH, fetch the validated commit, install, migrate, and restart PM2.
   deploy-backend:
     name: Deploy Backend
     runs-on: ubuntu-latest
+    environment: ${{ github.event.inputs.deploy_environment || vars.DEPLOY_ENVIRONMENT || 'production' }}
     needs:
       - deployment-gate
       - deploy-frontend
 
     steps:
       - name: Setup SSH key
+        env:
+          EC2_HOST: ${{ secrets.EC2_HOST }}
+          EC2_SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
         run: |
+          set -euo pipefail
           mkdir -p ~/.ssh
-          echo "${{ secrets.EC2_SSH_KEY }}" > ~/.ssh/deploy_key
+          printf '%s\n' "$EC2_SSH_KEY" > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
-          ssh-keyscan -H ${{ secrets.EC2_HOST }} >> ~/.ssh/known_hosts
+          ssh-keyscan -H "$EC2_HOST" >> ~/.ssh/known_hosts
 
       - name: Deploy to EC2
         env:
-          DEPLOY_SHA: ${{ github.event.workflow_run.head_sha }}
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DEPLOY_ENVIRONMENT: ${{ env.DEPLOY_ENVIRONMENT }}
+          DEPLOY_REF: ${{ env.DEPLOY_REF }}
+          DEPLOY_SHA: ${{ env.DEPLOY_SHA }}
+          GH_TOKEN: ${{ github.token }}
+          GH_REPOSITORY: ${{ github.repository }}
+          AWS_REGION: ${{ vars.AWS_REGION }}
+          APP_SECRETS_ARN: ${{ vars.APP_SECRETS_ARN }}
+          DB_HOST: ${{ vars.DB_HOST }}
+          DB_NAME: ${{ vars.DB_NAME }}
+          DB_USERNAME: ${{ vars.DB_USERNAME }}
+          DB_PORT: ${{ vars.DB_PORT }}
+          EC2_HOST: ${{ secrets.EC2_HOST }}
+          EC2_USER: ${{ vars.EC2_USER }}
+          EC2_APP_DIR: ${{ vars.EC2_APP_DIR }}
+          PM2_APP_NAME: ${{ vars.PM2_APP_NAME }}
+          BACKEND_PORT: ${{ vars.BACKEND_PORT }}
+          FRONTEND_URL: ${{ vars.FRONTEND_URL }}
+          CORS_ALLOWED_ORIGINS: ${{ vars.CORS_ALLOWED_ORIGINS }}
+          S3_UPLOADS_BUCKET: ${{ vars.S3_UPLOADS_BUCKET }}
+          SMOKE_BASE_URL: ${{ vars.SMOKE_BASE_URL }}
+          SMOKE_REQUIRE_AUTHENTICATED: ${{ vars.SMOKE_REQUIRE_AUTHENTICATED }}
+          SMOKE_EMAIL: ${{ vars.SMOKE_EMAIL }}
+          SMOKE_PASSWORD: ${{ secrets.SMOKE_PASSWORD }}
+          SMOKE_PROJECT_ID: ${{ vars.SMOKE_PROJECT_ID }}
           STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
           STRIPE_WEBHOOK_SECRET: ${{ secrets.STRIPE_WEBHOOK_SECRET }}
           STRIPE_PRICE_INDIVIDUAL_MONTHLY: ${{ secrets.STRIPE_PRICE_INDIVIDUAL_MONTHLY }}
@@ -105,10 +250,11 @@ jobs:
           STRIPE_PRICE_BUSINESS_ANNUAL: ${{ secrets.STRIPE_PRICE_BUSINESS_ANNUAL }}
           STRIPE_SECRET_ROTATION_CONFIRMED_AT: ${{ secrets.STRIPE_SECRET_ROTATION_CONFIRMED_AT }}
           STRIPE_SECRET_ROTATION_TICKET: ${{ secrets.STRIPE_SECRET_ROTATION_TICKET }}
-          FRONTEND_URL: https://octapm.com
-          CORS_ALLOWED_ORIGINS: https://octapm.com
         run: |
+          set -euo pipefail
+
           REMOTE_SECRET_ENV="/tmp/pmcopilots-deploy-secrets.env"
+          REMOTE_TARGET="${EC2_USER}@${EC2_HOST}"
 
           write_secret_env() {
             local name="$1"
@@ -116,7 +262,28 @@ jobs:
           }
 
           {
+            write_secret_env DEPLOY_ENVIRONMENT
+            write_secret_env DEPLOY_REF
+            write_secret_env DEPLOY_SHA
             write_secret_env GH_TOKEN
+            write_secret_env GH_REPOSITORY
+            write_secret_env AWS_REGION
+            write_secret_env APP_SECRETS_ARN
+            write_secret_env DB_HOST
+            write_secret_env DB_NAME
+            write_secret_env DB_USERNAME
+            write_secret_env DB_PORT
+            write_secret_env EC2_APP_DIR
+            write_secret_env PM2_APP_NAME
+            write_secret_env BACKEND_PORT
+            write_secret_env FRONTEND_URL
+            write_secret_env CORS_ALLOWED_ORIGINS
+            write_secret_env S3_UPLOADS_BUCKET
+            write_secret_env SMOKE_BASE_URL
+            write_secret_env SMOKE_REQUIRE_AUTHENTICATED
+            write_secret_env SMOKE_EMAIL
+            write_secret_env SMOKE_PASSWORD
+            write_secret_env SMOKE_PROJECT_ID
             write_secret_env STRIPE_SECRET_KEY
             write_secret_env STRIPE_WEBHOOK_SECRET
             write_secret_env STRIPE_PRICE_INDIVIDUAL_MONTHLY
@@ -125,11 +292,9 @@ jobs:
             write_secret_env STRIPE_PRICE_BUSINESS_ANNUAL
             write_secret_env STRIPE_SECRET_ROTATION_CONFIRMED_AT
             write_secret_env STRIPE_SECRET_ROTATION_TICKET
-            write_secret_env FRONTEND_URL
-            write_secret_env CORS_ALLOWED_ORIGINS
-          } | ssh -i ~/.ssh/deploy_key ec2-user@${{ secrets.EC2_HOST }} "umask 077 && cat > '$REMOTE_SECRET_ENV'"
+          } | ssh -i ~/.ssh/deploy_key "$REMOTE_TARGET" "umask 077 && cat > '$REMOTE_SECRET_ENV'"
 
-          ssh -i ~/.ssh/deploy_key ec2-user@${{ secrets.EC2_HOST }} "DEPLOY_SHA='${DEPLOY_SHA}' REMOTE_SECRET_ENV='${REMOTE_SECRET_ENV}' bash" << 'SSHEOF'
+          ssh -i ~/.ssh/deploy_key "$REMOTE_TARGET" "REMOTE_SECRET_ENV='${REMOTE_SECRET_ENV}' bash" << 'SSHEOF'
             set -euo pipefail
             : "${REMOTE_SECRET_ENV:?}"
             trap 'rm -f "$REMOTE_SECRET_ENV"' EXIT
@@ -143,42 +308,57 @@ jobs:
             . "$REMOTE_SECRET_ENV"
             set +a
 
-            APP_DIR="/opt/pmcopilots"
+            require_secret() {
+              local name="$1"
+              local value="${!name:-}"
+              if [ -z "$value" ]; then
+                echo "::error::$name is required for deployment"
+                exit 1
+              fi
+            }
+
+            for required in DEPLOY_ENVIRONMENT DEPLOY_REF DEPLOY_SHA GH_TOKEN GH_REPOSITORY AWS_REGION APP_SECRETS_ARN DB_HOST DB_NAME DB_USERNAME DB_PORT EC2_APP_DIR PM2_APP_NAME BACKEND_PORT FRONTEND_URL CORS_ALLOWED_ORIGINS S3_UPLOADS_BUCKET SMOKE_BASE_URL STRIPE_SECRET_KEY STRIPE_WEBHOOK_SECRET STRIPE_PRICE_INDIVIDUAL_MONTHLY STRIPE_PRICE_INDIVIDUAL_ANNUAL STRIPE_PRICE_BUSINESS_MONTHLY STRIPE_PRICE_BUSINESS_ANNUAL STRIPE_SECRET_ROTATION_CONFIRMED_AT STRIPE_SECRET_ROTATION_TICKET; do
+              require_secret "$required"
+            done
+
+            if [ "${SMOKE_REQUIRE_AUTHENTICATED:-}" = "true" ]; then
+              for required in SMOKE_EMAIL SMOKE_PASSWORD SMOKE_PROJECT_ID; do
+                require_secret "$required"
+              done
+            fi
+
+            APP_DIR="$EC2_APP_DIR"
+            REPOSITORY_URL="https://github.com/${GH_REPOSITORY}.git"
+            GIT_AUTH_HEADER="AUTHORIZATION: bearer ${GH_TOKEN}"
 
             if [ ! -d "$APP_DIR/.git" ]; then
-              sudo git clone https://x-access-token:$GH_TOKEN@github.com/mahmoud63/octapm.git "$APP_DIR"
-              sudo chown -R ec2-user:ec2-user "$APP_DIR"
+              sudo mkdir -p "$APP_DIR"
+              sudo chown -R "$(id -un):$(id -gn)" "$APP_DIR"
+              git -c http.https://github.com/.extraheader="$GIT_AUTH_HEADER" clone "$REPOSITORY_URL" "$APP_DIR"
               cd "$APP_DIR"
             else
               cd "$APP_DIR"
-              git remote set-url origin https://x-access-token:$GH_TOKEN@github.com/mahmoud63/octapm.git
+              git remote set-url origin "$REPOSITORY_URL"
             fi
 
-            git fetch origin main
+            git -c http.https://github.com/.extraheader="$GIT_AUTH_HEADER" fetch origin "$DEPLOY_REF"
             git checkout --force "$DEPLOY_SHA"
 
             cd "$APP_DIR/backend"
-            npm ci --omit=dev
+            npm ci
 
             SECRET_JSON=$(aws secretsmanager get-secret-value \
-              --secret-id arn:aws:secretsmanager:us-east-2:016647419431:secret:pmcopilots/prod/app-secrets-mzZ2Pf \
-              --region us-east-2 --query SecretString --output text)
+              --secret-id "$APP_SECRETS_ARN" \
+              --region "$AWS_REGION" \
+              --query SecretString \
+              --output text)
             DB_PASS=$(echo "$SECRET_JSON" | python3 -c "import sys,json; print(json.load(sys.stdin)['DB_PASSWORD'])")
             JWT=$(echo "$SECRET_JSON" | python3 -c "import sys,json; print(json.load(sys.stdin)['JWT_SECRET'])")
             JWT_R=$(echo "$SECRET_JSON" | python3 -c "import sys,json; print(json.load(sys.stdin)['JWT_REFRESH_SECRET'])")
             ANT=$(echo "$SECRET_JSON" | python3 -c "import sys,json; print(json.load(sys.stdin)['ANTHROPIC_API_KEY'])")
             CF_ORIGIN_SECRET=$(echo "$SECRET_JSON" | python3 -c "import sys,json; print(json.load(sys.stdin)['CLOUDFRONT_SHARED_SECRET'])")
 
-            require_secret() {
-              local name="$1"
-              local value="${!name:-}"
-              if [ -z "$value" ]; then
-                echo "::error::$name is required for production deployment"
-                exit 1
-              fi
-            }
-
-            for required in DB_PASS JWT JWT_R ANT CF_ORIGIN_SECRET STRIPE_SECRET_KEY STRIPE_WEBHOOK_SECRET STRIPE_PRICE_INDIVIDUAL_MONTHLY STRIPE_PRICE_INDIVIDUAL_ANNUAL STRIPE_PRICE_BUSINESS_MONTHLY STRIPE_PRICE_BUSINESS_ANNUAL STRIPE_SECRET_ROTATION_CONFIRMED_AT STRIPE_SECRET_ROTATION_TICKET FRONTEND_URL CORS_ALLOWED_ORIGINS; do
+            for required in DB_PASS JWT JWT_R ANT CF_ORIGIN_SECRET; do
               require_secret "$required"
             done
 
@@ -187,13 +367,55 @@ jobs:
               exit 1
             fi
 
-            printf 'NODE_ENV=production\nPORT=5000\nDATABASE_URL=postgresql://pmcopilots:%s@pmcopilots-db.cp8mue6qskud.us-east-2.rds.amazonaws.com:5432/pmcopilots\nJWT_SECRET=%s\nJWT_REFRESH_SECRET=%s\nANTHROPIC_API_KEY=%s\nSTRIPE_SECRET_KEY=%s\nSTRIPE_WEBHOOK_SECRET=%s\nSTRIPE_PRICE_INDIVIDUAL_MONTHLY=%s\nSTRIPE_PRICE_INDIVIDUAL_ANNUAL=%s\nSTRIPE_PRICE_BUSINESS_MONTHLY=%s\nSTRIPE_PRICE_BUSINESS_ANNUAL=%s\nSTRIPE_SECRET_ROTATION_CONFIRMED_AT=%s\nSTRIPE_SECRET_ROTATION_TICKET=%s\nFRONTEND_URL=%s\nCORS_ALLOWED_ORIGINS=%s\nCLOUDFRONT_SHARED_SECRET=%s\nAWS_REGION=us-east-2\nS3_UPLOADS_BUCKET=pmcopilots-uploads-prod\n' "$DB_PASS" "$JWT" "$JWT_R" "$ANT" "$STRIPE_SECRET_KEY" "$STRIPE_WEBHOOK_SECRET" "$STRIPE_PRICE_INDIVIDUAL_MONTHLY" "$STRIPE_PRICE_INDIVIDUAL_ANNUAL" "$STRIPE_PRICE_BUSINESS_MONTHLY" "$STRIPE_PRICE_BUSINESS_ANNUAL" "$STRIPE_SECRET_ROTATION_CONFIRMED_AT" "$STRIPE_SECRET_ROTATION_TICKET" "$FRONTEND_URL" "$CORS_ALLOWED_ORIGINS" "$CF_ORIGIN_SECRET" > .env
+            DATABASE_URL=$(DB_USERNAME="$DB_USERNAME" DB_PASS="$DB_PASS" DB_HOST="$DB_HOST" DB_PORT="$DB_PORT" DB_NAME="$DB_NAME" python3 - <<'PY'
+          import os
+          from urllib.parse import quote
+
+          user = quote(os.environ["DB_USERNAME"], safe="")
+          password = quote(os.environ["DB_PASS"], safe="")
+          host = os.environ["DB_HOST"]
+          port = os.environ["DB_PORT"]
+          name = quote(os.environ["DB_NAME"], safe="")
+          print(f"postgresql://{user}:{password}@{host}:{port}/{name}")
+          PY
+          )
+
+            {
+              printf 'NODE_ENV=production\n'
+              printf 'PORT=%s\n' "$BACKEND_PORT"
+              printf 'DATABASE_URL=%s\n' "$DATABASE_URL"
+              printf 'JWT_SECRET=%s\n' "$JWT"
+              printf 'JWT_REFRESH_SECRET=%s\n' "$JWT_R"
+              printf 'ANTHROPIC_API_KEY=%s\n' "$ANT"
+              printf 'STRIPE_SECRET_KEY=%s\n' "$STRIPE_SECRET_KEY"
+              printf 'STRIPE_WEBHOOK_SECRET=%s\n' "$STRIPE_WEBHOOK_SECRET"
+              printf 'STRIPE_PRICE_INDIVIDUAL_MONTHLY=%s\n' "$STRIPE_PRICE_INDIVIDUAL_MONTHLY"
+              printf 'STRIPE_PRICE_INDIVIDUAL_ANNUAL=%s\n' "$STRIPE_PRICE_INDIVIDUAL_ANNUAL"
+              printf 'STRIPE_PRICE_BUSINESS_MONTHLY=%s\n' "$STRIPE_PRICE_BUSINESS_MONTHLY"
+              printf 'STRIPE_PRICE_BUSINESS_ANNUAL=%s\n' "$STRIPE_PRICE_BUSINESS_ANNUAL"
+              printf 'STRIPE_SECRET_ROTATION_CONFIRMED_AT=%s\n' "$STRIPE_SECRET_ROTATION_CONFIRMED_AT"
+              printf 'STRIPE_SECRET_ROTATION_TICKET=%s\n' "$STRIPE_SECRET_ROTATION_TICKET"
+              printf 'FRONTEND_URL=%s\n' "$FRONTEND_URL"
+              printf 'CORS_ALLOWED_ORIGINS=%s\n' "$CORS_ALLOWED_ORIGINS"
+              printf 'CLOUDFRONT_SHARED_SECRET=%s\n' "$CF_ORIGIN_SECRET"
+              printf 'AWS_REGION=%s\n' "$AWS_REGION"
+              printf 'S3_UPLOADS_BUCKET=%s\n' "$S3_UPLOADS_BUCKET"
+            } > .env
+            chmod 600 .env
 
             node -r dotenv/config -e "require('./src/config/security').validateProductionEnv()"
 
             npx prisma migrate deploy
+            npm prune --omit=dev
 
-            pm2 restart pmcopilots-api --update-env || pm2 start src/index.js --name pmcopilots-api
-            SMOKE_BASE_URL=http://127.0.0.1:5000 SMOKE_CLOUDFRONT_SECRET="$CF_ORIGIN_SECRET" SMOKE_STRIPE_WEBHOOK_SECRET="$STRIPE_WEBHOOK_SECRET" npm run smoke:deploy
+            pm2 restart "$PM2_APP_NAME" --update-env || pm2 start src/index.js --name "$PM2_APP_NAME"
+            SMOKE_BASE_URL="$SMOKE_BASE_URL" \
+              SMOKE_CLOUDFRONT_SECRET="$CF_ORIGIN_SECRET" \
+              SMOKE_STRIPE_WEBHOOK_SECRET="$STRIPE_WEBHOOK_SECRET" \
+              SMOKE_REQUIRE_AUTHENTICATED="${SMOKE_REQUIRE_AUTHENTICATED:-false}" \
+              SMOKE_EMAIL="${SMOKE_EMAIL:-}" \
+              SMOKE_PASSWORD="${SMOKE_PASSWORD:-}" \
+              SMOKE_PROJECT_ID="${SMOKE_PROJECT_ID:-}" \
+              npm run smoke:deploy
             pm2 save
           SSHEOF

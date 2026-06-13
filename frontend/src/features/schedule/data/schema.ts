@@ -58,6 +58,7 @@ export const progressSubmissionSchema = z
       .object({
         id: z.string().uuid(),
         name: z.string(),
+        activityCode: z.string().nullable().optional(),
         wbsCode: z.string().nullable(),
         p6ActivityId: z.string().nullable().optional(),
       })
@@ -82,12 +83,83 @@ export const activityDependencySchema = z.object({
     .object({
       id: z.string().uuid(),
       name: z.string(),
+      activityCode: z.string().nullable().optional(),
       wbsCode: z.string().nullable(),
       p6ActivityId: z.string().nullable().optional(),
     })
     .nullable()
     .optional(),
 })
+
+export const procurementRiskSeveritySchema = z.enum([
+  'none',
+  'low',
+  'medium',
+  'high',
+  'critical',
+])
+
+export const scheduleProcurementRiskSummarySchema = z
+  .object({
+    atRiskCount: z.number(),
+    openCount: z.number(),
+    acknowledgedCount: z.number(),
+    highestSeverity: procurementRiskSeveritySchema,
+    reason: z.string(),
+    daysAtRisk: z.number(),
+    needDate: z.string().nullable(),
+    orderByDate: z.string().nullable(),
+    expectedDeliveryDate: z.string().nullable(),
+    items: z.array(
+      z.object({
+        id: z.string().uuid(),
+        status: z.enum(['open', 'acknowledged', 'resolved']),
+        severity: procurementRiskSeveritySchema,
+        reason: z.string(),
+        daysAtRisk: z.number(),
+        needDate: z.string().nullable(),
+        orderByDate: z.string().nullable(),
+        expectedDeliveryDate: z.string().nullable(),
+        source: z.string(),
+        item: z.string(),
+        ref: z.string().nullable(),
+      })
+    ),
+  })
+  .nullable()
+  .optional()
+
+export const scheduleRiskSummarySchema = z
+  .object({
+    count: z.number(),
+    openCount: z.number(),
+    monitoringCount: z.number(),
+    submittedCount: z.number(),
+    overdueCount: z.number(),
+    highestSeverity: z.enum(['LOW', 'MEDIUM', 'HIGH', 'CRITICAL']),
+    escalationLevel: z.enum(['none', 'watch', 'escalated']),
+    dueDate: z.string().nullable(),
+    items: z.array(
+      z.object({
+        id: z.string().uuid(),
+        linkId: z.string().uuid().optional(),
+        ref: z.string(),
+        description: z.string(),
+        severity: z.enum(['LOW', 'MEDIUM', 'HIGH', 'CRITICAL']),
+        status: z.enum(['open', 'monitoring', 'submitted']),
+        owner: z.string().nullable(),
+        dueDate: z.string().nullable(),
+        escalationLevel: z.enum(['none', 'watch', 'escalated']),
+        relationType: z.string(),
+        scheduleImpactDays: z.number(),
+        costImpact: z.number(),
+        notes: z.string().nullable(),
+        isOverdue: z.boolean(),
+      })
+    ),
+  })
+  .nullable()
+  .optional()
 
 export const criticalPathExplanationSchema = z
   .object({
@@ -154,6 +226,7 @@ export const scheduleActivitySchema = z.object({
   id: z.string().uuid(),
   projectId: z.string().uuid(),
   name: z.string(),
+  activityCode: z.string().nullable(),
   p6ActivityId: z.string().nullable().optional(),
   wbsCode: z.string().nullable(),
   calendarId: z.string().nullable().optional(),
@@ -191,8 +264,19 @@ export const scheduleActivitySchema = z.object({
   approvedProgressSource: z.string().nullable().optional(),
   progressMethod: z.string().optional(),
   progressMethodConfig: progressMethodConfigSchema,
+  procurementRiskSummary: scheduleProcurementRiskSummarySchema,
+  projectRiskSummary: scheduleRiskSummarySchema,
   pendingProgress: progressSubmissionSchema,
   progressApprovalStatus: z.string().optional(),
+  assignedEngineers: z
+    .array(
+      z.object({
+        id: z.string().uuid(),
+        name: z.string(),
+        email: z.string(),
+      })
+    )
+    .default([]),
   status: z.enum(['todo', 'in_progress', 'complete', 'delayed']),
   sortOrder: z.number(),
   createdAt: z.string(),
@@ -224,6 +308,7 @@ export const scheduleRevisionSchema = z.object({
   activityCount: z.number(),
   criticalCount: z.number(),
   totalBudget: z.number(),
+  dataDate: z.string().nullable().optional(),
   generatedTotalBudget: z.number().optional(),
   unallocatedBoqAmount: z.number().optional(),
   source: z.string().nullable().optional(),
@@ -295,6 +380,7 @@ export const scheduleRevisionSchema = z.object({
 })
 
 export const projectScheduleSchema = z.object({
+  dataDate: z.string().nullable().optional(),
   revision: scheduleRevisionSchema,
   activities: z.array(scheduleActivitySchema),
 })

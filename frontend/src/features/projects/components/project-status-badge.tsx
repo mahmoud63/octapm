@@ -25,6 +25,11 @@ const statusConfig: Record<
     label: 'Cancelled',
     className: 'bg-red-100/50 text-red-900 dark:text-red-200 border-red-300',
   },
+  archived: {
+    label: 'Archived',
+    className:
+      'bg-zinc-100/70 text-zinc-800 dark:text-zinc-200 border-zinc-300',
+  },
 }
 
 export function ProjectStatusBadge({ status }: { status: Project['status'] }) {

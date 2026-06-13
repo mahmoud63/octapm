@@ -29,10 +29,10 @@ export function ProjectDeleteDialog({
     <AlertDialog open={open} onOpenChange={onOpenChange}>
       <AlertDialogContent>
         <AlertDialogHeader>
-          <AlertDialogTitle>Delete {project?.name}?</AlertDialogTitle>
+          <AlertDialogTitle>Archive {project?.name}?</AlertDialogTitle>
           <AlertDialogDescription>
-            This action cannot be undone. The project and all linked planning
-            context may become unavailable.
+            The project will be hidden from active lists, but its linked
+            planning, cost, and workflow history will be retained.
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
@@ -42,7 +42,7 @@ export function ProjectDeleteDialog({
             disabled={isDeleting}
             onClick={onConfirm}
           >
-            {isDeleting ? 'Deleting...' : 'Delete'}
+            {isDeleting ? 'Archiving...' : 'Archive'}
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>

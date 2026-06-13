@@ -30,14 +30,14 @@ export function BoqFinancialSummary({ financial, currency }: Props) {
         </div>
 
         <div className='flex items-center justify-between text-sm text-muted-foreground'>
-          <span>Scheduled Value</span>
+          <span>Approved Allocation Value</span>
           <span className='tabular-nums'>
             {fmt(financial.scheduledValue ?? 0, currency)}
           </span>
         </div>
 
         <div className='flex items-center justify-between text-sm text-muted-foreground'>
-          <span>Unscheduled Value</span>
+          <span>Unallocated Value</span>
           <span className='tabular-nums'>
             {fmt(financial.unscheduledValue ?? financial.subtotal1, currency)}
           </span>

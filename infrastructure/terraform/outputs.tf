@@ -49,6 +49,11 @@ output "secrets_manager_arn" {
 }
 
 output "sns_alarms_topic_arn" {
-  description = "SNS topic ARN — subscribe your email to receive CloudWatch alerts"
+  description = "SNS topic ARN for CloudWatch alert notifications"
   value       = aws_sns_topic.alarms.arn
+}
+
+output "sns_alarm_notification_email" {
+  description = "Configured email endpoint for CloudWatch alarm notifications"
+  value       = var.alarm_notification_email
 }

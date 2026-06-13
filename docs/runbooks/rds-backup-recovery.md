@@ -15,11 +15,38 @@ TASK-P0-devops-enable-rds-backups-and-recovery / F-007 is a production blocker. 
 
 - `aws_db_instance.main.backup_retention_period = var.rds_backup_retention_days`.
 - `rds_backup_retention_days` rejects values below 7 and above 35.
+- `aws_db_instance.main.multi_az = var.rds_multi_az`.
+- Production Terraform plans fail when `environment` is `prod` or `production` and `rds_multi_az` is disabled.
 - `delete_automated_backups = false` preserves automated backups after instance deletion.
 - `skip_final_snapshot = false` requires a final snapshot before deletion.
 - `final_snapshot_identifier` includes `random_id.db_final_snapshot_suffix.hex`.
 - `copy_tags_to_snapshot = true` keeps environment, RPO, RTO, and blocker tags on snapshots.
-- `Quality Gates / Infrastructure - RDS backup validation` runs the positive/negative policy self-test and validates the live Terraform.
+- `alarm_notification_email` subscribes the DevOps alert mailbox to the CloudWatch alarm SNS topic.
+- Production Terraform plans fail when `environment` is `prod` or `production` and `alarm_notification_email` is empty.
+- `Quality Gates / Infrastructure - security and resilience validation` runs RDS backup validation and deployment readiness validation.
+
+## Deployment Rehearsal Inputs
+
+Configure these GitHub Environment values before staging or production deploys. Use Terraform outputs for the AWS resource identifiers and host values.
+
+| Name | Source | Notes |
+|---|---|---|
+| `AWS_REGION` | Terraform variable/output | Primary runtime region. |
+| `AWS_ROLE_ARN` | Terraform `github_actions_role_arn` output | Store as an environment secret. |
+| `VITE_API_URL` | Release environment | Public API URL injected into the SPA build. |
+| `FRONTEND_URL` | Release environment | Public app origin used by backend CORS/security validation. |
+| `CORS_ALLOWED_ORIGINS` | Release environment | Comma-separated approved HTTPS origins. |
+| `S3_SPA_BUCKET` | Terraform `s3_spa_bucket` output | Static SPA deployment target. |
+| `S3_UPLOADS_BUCKET` | Terraform `s3_uploads_bucket` output | Runtime private upload bucket. |
+| `CF_DISTRIBUTION_ID` | Terraform `cloudfront_distribution_id` output | Cache invalidation target. |
+| `APP_SECRETS_ARN` | Terraform `secrets_manager_arn` output | Runtime app secret; ARN is configured as an environment variable, secret values stay in AWS Secrets Manager. |
+| `DB_HOST` | Terraform `rds_endpoint` output | Host only, no password. |
+| `DB_NAME`, `DB_USERNAME`, `DB_PORT` | Terraform variables/outputs | Used to assemble `DATABASE_URL` during deploy. |
+| `EC2_HOST`, `EC2_SSH_KEY` | EC2 output and deploy key | Store both as environment secrets when host disclosure is restricted. |
+| `EC2_USER`, `EC2_APP_DIR`, `PM2_APP_NAME`, `BACKEND_PORT`, `SMOKE_BASE_URL` | Release environment | Environment-specific backend deploy settings. |
+| `SMOKE_REQUIRE_AUTHENTICATED`, `SMOKE_EMAIL`, `SMOKE_PASSWORD`, `SMOKE_PROJECT_ID` | Smoke-test project | Production must set authenticated smoke to `true`; password is an environment secret. |
+
+Run staging rehearsal through the manual `Deploy` workflow with `deploy_environment = staging` and record the workflow URL, commit SHA, smoke output, and rollback result below before promoting the same commit to production.
 
 ## Pre-Release Restore Rehearsal
 
@@ -62,6 +89,36 @@ aws rds delete-db-instance \
   --delete-automated-backups
 ```
 
+## Deployment and Migration Rollback Plan
+
+Use this plan for a failed deployment, failed post-deploy smoke, or failed migration rehearsal.
+
+1. Stop external traffic by disabling the CloudFront distribution behavior or placing the backend in maintenance mode.
+2. Preserve evidence: record deploy workflow URL, commit SHA, failed command output, CloudWatch alarm state, and application logs.
+3. For staging application-only failure, rerun the manual `Deploy` workflow against the last known-good commit and the same staging GitHub Environment. For production, redeploy only through the approved `Quality Gates` to `Deploy` workflow path, or rerun an already validated production deployment for the last known-good commit.
+4. For migration failure before writes resume, stop the PM2 backend, restore the pre-deploy RDS snapshot or point-in-time restore to a replacement instance, and update `DB_HOST` only after DevOps and Database owners accept the restored state.
+5. Run `npx prisma migrate status`, backend production env validation, and authenticated `npm run smoke:deploy --workspace=backend` against the restored or rolled-back backend.
+6. Re-enable traffic only after smoke checks pass and Product/QA confirm no source-of-truth records were lost.
+7. Record the rollback start time, recovery time, commit restored, DB restore identifier if used, smoke result, and owner signoff in the evidence packet.
+
+## Monitoring and Alerting Validation
+
+CloudWatch alarms managed in Terraform:
+
+- EC2 CPU high.
+- EC2 status check failure.
+- RDS CPU high.
+- RDS free storage low.
+- CloudFront 5xx error rate high.
+
+Release readiness requires:
+
+1. `alarm_notification_email` is set in production Terraform variables.
+2. The SNS email subscription is confirmed by the DevOps mailbox owner after `terraform apply`.
+3. A test alarm or temporary threshold exercise reaches the alert mailbox.
+4. CloudWatch log group `/pmcopilots/api` is receiving backend logs after deployment.
+5. Evidence is attached in the go-live gate with alarm name, timestamp, recipient, and screenshot or AWS CLI output.
+
 ## Corruption or Operator-Error Recovery
 
 1. Freeze writes by stopping the backend service or putting the API behind maintenance mode.
@@ -73,21 +130,38 @@ aws rds delete-db-instance \
 7. Update the production database endpoint or secret owner record only after DevOps and Database owners accept the restored state.
 8. Restart the backend, run authenticated deployment smoke, and record any data gap against the RPO.
 
-## Acceptance Evidence Template
+## Acceptance Evidence Packet
 
-| Field | Value |
+Repository-controlled controls completed by `TASK-P1-DEVOPS-001`:
+
+| Control | Evidence |
 |---|---|
-| Rollout commit SHA | TBD |
-| Quality Gates run URL | TBD |
-| Terraform plan/apply evidence | TBD |
-| Backup retention from AWS | TBD |
-| Latest restorable time | TBD |
-| Restore-test DB identifier | TBD |
-| Restore started at | TBD |
-| Restore available at | TBD |
-| Smoke passed at | TBD |
-| RPO observed | TBD |
-| RTO observed | TBD |
-| Construction scenario checked | TBD |
-| DevOps owner signoff | TBD |
-| Database owner signoff | TBD |
+| Deployment workflow parameterization | `.github/workflows/deploy.yml` reads deploy URLs, AWS identifiers, DB host/name/user/port, bucket names, PM2 name, app directory, smoke settings, and app secret ARN from the selected GitHub Environment. |
+| Hardcoded Secrets Manager ARN removed | Deploy workflow uses `APP_SECRETS_ARN` and `AWS_REGION` instead of an inline ARN/region. |
+| Environment-specific `.env` generation parameterized | Runtime `DATABASE_URL`, CORS, frontend URL, AWS region, and upload bucket are built from deploy variables plus AWS Secrets Manager values. |
+| Deployment smoke guard | Production deploys fail unless `SMOKE_REQUIRE_AUTHENTICATED=true`; smoke user/project values are required when enabled. |
+| RDS availability guard | `rds_multi_az` defaults to `true`; production Terraform plans fail if it is disabled. |
+| Monitoring guard | `alarm_notification_email` is a Terraform-managed SNS email subscription; production Terraform plans fail if it is omitted. |
+| Quality Gate guard | `npm run infra:validate:deployment-readiness` validates the deployment workflow, RDS Multi-AZ guard, and monitoring subscription policy. |
+
+Cloud evidence required before production source-of-truth approval:
+
+| Field | Required Recorded Value |
+|---|---|
+| Rollout commit SHA | Exact commit deployed from `Quality Gates`. |
+| Quality Gates run URL | Successful run URL for the rollout commit. |
+| Deploy workflow URL | Staging rehearsal and production deploy workflow URLs. |
+| Terraform plan/apply evidence | Plan/apply showing backup retention, Multi-AZ, final snapshot, alarm email subscription, and no public RDS access. |
+| Backup retention from AWS | AWS CLI output showing retention is at least seven days. |
+| Latest restorable time | AWS CLI output from `describe-db-instances`. |
+| Restore-test DB identifier | Unique restore-test identifier. |
+| Restore started at | UTC timestamp. |
+| Restore available at | UTC timestamp. |
+| Smoke passed at | UTC timestamp and smoke command output. |
+| RPO observed | Difference between selected recovery point and latest accepted write. |
+| RTO observed | Restore start to smoke-test pass duration. |
+| Construction scenario checked | Project, BOQ, allocation, progress approval, EV report, IPC, and document/claim verification evidence. |
+| Rollback rehearsal result | Last known-good commit or DB restore rehearsal result with timing. |
+| Monitoring alert evidence | SNS subscription confirmation and alert receipt evidence. |
+| DevOps owner signoff | Named owner, date, decision, and evidence link. |
+| Database owner signoff | Named owner, date, decision, and evidence link. |

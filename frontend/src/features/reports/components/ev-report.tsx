@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { apiClient } from '@/services/api/client'
+import { AlertTriangle, ArrowRight, CheckCircle2 } from 'lucide-react'
 import {
   CartesianGrid,
   ComposedChart,
@@ -12,6 +13,7 @@ import {
   YAxis,
 } from 'recharts'
 import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
 import {
   Select,
   SelectContent,
@@ -27,9 +29,16 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
+import type {
+  ProjectSetupReadiness,
+  ProjectSetupTarget,
+} from '@/features/projects/data/schema'
+import { useProjectSetupReadiness } from '@/features/projects/hooks/use-projects'
 
 interface Props {
   projectId: string
+  readiness?: ProjectSetupReadiness
+  onNavigate?: (target: ProjectSetupTarget) => void
 }
 
 type ReportingPeriod = {
@@ -81,6 +90,15 @@ type EvReportResponse = {
     ac?: { officialActualActivities?: number }
   }
   basisWarnings?: string[]
+  readinessGate?: ProjectSetupReadiness['gates']['reporting'] | null
+  officialDataInputs?: Array<{
+    key: string
+    label: string
+    source: string
+    requiredStatus: string
+    appliedAmount?: number
+    appliedCount?: number
+  }>
   estimates?: {
     estimatedPv?: number | null
     estimatedAc?: number | null
@@ -135,8 +153,11 @@ function MetricCard({
   )
 }
 
-export function EvReport({ projectId }: Props) {
+export function EvReport({ projectId, readiness, onNavigate }: Props) {
   const [selectedPeriodId, setSelectedPeriodId] = useState<string | null>(null)
+  const { data: fetchedReadiness } = useProjectSetupReadiness(projectId, {
+    enabled: !readiness,
+  })
   const { data: periodData } = useQuery<{ periods?: ReportingPeriod[] }>({
     queryKey: ['ev-report-periods', projectId],
     queryFn: () =>
@@ -185,10 +206,17 @@ export function EvReport({ projectId }: Props) {
     reporting,
     sourceSummary,
     basisWarnings,
+    readinessGate: reportReadinessGate,
+    officialDataInputs,
     estimates,
   } = data
   const selectedPeriod = reporting?.period
   const isSnapshot = Boolean(reporting?.isSnapshot)
+  const readinessGate =
+    reportReadinessGate ||
+    readiness?.gates.reporting ||
+    fetchedReadiness?.gates.reporting
+  const readinessBlockers = readinessGate?.blockers ?? []
 
   return (
     <div className='space-y-6'>
@@ -218,7 +246,10 @@ export function EvReport({ projectId }: Props) {
                 {periods
                   .filter((period) => period.id)
                   .map((period) => (
-                    <SelectItem key={period.id || period.code} value={period.id!}>
+                    <SelectItem
+                      key={period.id || period.code}
+                      value={period.id!}
+                    >
                       {period.label || period.code}
                     </SelectItem>
                   ))}
@@ -227,6 +258,60 @@ export function EvReport({ projectId }: Props) {
           )}
         </div>
       </div>
+
+      {readinessGate && (
+        <div
+          className={[
+            'rounded-lg border p-3 text-sm',
+            readinessGate.ready
+              ? 'border-emerald-200 bg-emerald-50 text-emerald-900 dark:border-emerald-900/40 dark:bg-emerald-950/20 dark:text-emerald-200'
+              : 'border-amber-200 bg-amber-50 text-amber-900 dark:border-amber-900/40 dark:bg-amber-950/20 dark:text-amber-200',
+          ].join(' ')}
+        >
+          <div className='flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between'>
+            <div className='min-w-0'>
+              <div className='flex items-center gap-2 font-semibold'>
+                {readinessGate.ready ? (
+                  <CheckCircle2 className='h-4 w-4' />
+                ) : (
+                  <AlertTriangle className='h-4 w-4' />
+                )}
+                Official reporting readiness
+              </div>
+              <p className='mt-1 text-xs opacity-90'>{readinessGate.message}</p>
+              {readinessBlockers.length > 0 && (
+                <div className='mt-2 flex flex-wrap gap-2'>
+                  {readinessBlockers.slice(0, 4).map((blocker) => (
+                    <Button
+                      key={`${blocker.stepKey}-${blocker.code}`}
+                      type='button'
+                      size='sm'
+                      variant='outline'
+                      className='h-auto min-h-8 max-w-full justify-start bg-background/70 px-2 py-1 text-xs'
+                      onClick={() =>
+                        blocker.target && onNavigate?.(blocker.target)
+                      }
+                      disabled={!blocker.target || !onNavigate}
+                    >
+                      <span className='truncate'>
+                        {blocker.stepLabel}: {blocker.message}
+                      </span>
+                      {blocker.target && onNavigate && (
+                        <ArrowRight className='h-3.5 w-3.5 shrink-0' />
+                      )}
+                    </Button>
+                  ))}
+                </div>
+              )}
+            </div>
+            {!readinessGate.ready && (
+              <Badge variant='outline' className='w-fit shrink-0'>
+                PM override reason required to lock
+              </Badge>
+            )}
+          </div>
+        </div>
+      )}
 
       {(basisWarnings || []).length > 0 && (
         <div className='rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-900/40 dark:bg-amber-950/20 dark:text-amber-300'>
@@ -264,6 +349,28 @@ export function EvReport({ projectId }: Props) {
           color='text-orange-600'
         />
       </div>
+
+      {(officialDataInputs || []).length > 0 && (
+        <div className='grid grid-cols-1 gap-3 md:grid-cols-3'>
+          {(officialDataInputs || []).map((input) => (
+            <div key={input.key} className='rounded-lg border p-3'>
+              <p className='text-xs tracking-wide text-muted-foreground uppercase'>
+                {input.label}
+              </p>
+              <p className='mt-1 text-sm font-semibold'>{input.source}</p>
+              <p className='mt-1 text-xs text-muted-foreground'>
+                Status: {input.requiredStatus}
+                {input.appliedAmount !== undefined
+                  ? ` - ${fmt(input.appliedAmount)} applied`
+                  : ''}
+                {input.appliedCount !== undefined
+                  ? ` - ${input.appliedCount.toLocaleString()} rows`
+                  : ''}
+              </p>
+            </div>
+          ))}
+        </div>
+      )}
 
       <div className='grid grid-cols-2 gap-3 lg:grid-cols-4'>
         <MetricCard

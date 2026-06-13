@@ -80,6 +80,7 @@ describe('activity dependency route validation', () => {
       .post(`/projects/${ids.project}/activities`)
       .send({
         name: 'Pour slab',
+        activityCode: 'ACT-200',
         duration: 2,
         engineerIds: [ids.engineer],
         dependencies: [
@@ -104,6 +105,7 @@ describe('activity dependency route validation', () => {
               lagDays: -1,
             }),
           ],
+          activityCode: 'ACT-200',
         }),
       }),
     );

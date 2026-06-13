@@ -8,6 +8,7 @@ export type AuditEntityType =
   | 'site_diary'
   | 'ipc_certificate'
   | 'ipc_item'
+  | 'activity_boq_allocation'
   | 'change_order'
   | 'sub_valuation'
   | 'eot_claim'
@@ -16,22 +17,37 @@ export type AuditEntityType =
   | 'boq_revision'
   | 'cost_record'
   | 'burn_rate_entry'
+  | 'activity_equipment_usage'
+  | 'document_revision'
+  | 'ncr'
+  | 'safety_incident'
   | 'rfi'
   | 'submittal'
 
+export type AuditHistorySource = 'all' | 'audit' | 'approval' | 'status'
+
 export interface AuditEvent {
   id: string
+  rawId?: string
+  source?: Exclude<AuditHistorySource, 'all'>
   orgId: string
   projectId: string
   entityType: AuditEntityType | string
   entityId: string
+  recordType?: AuditEntityType | string
+  recordId?: string
+  workflowType?: string | null
   action: string
+  decision?: string | null
   actorId: string | null
   actorRole: string | null
   occurredAt: string
   oldStatus: string | null
   newStatus: string | null
+  fromStatus?: string | null
+  toStatus?: string | null
   reason: string | null
+  comment?: string | null
   oldSummary: Record<string, unknown> | null
   newSummary: Record<string, unknown> | null
   summary: Record<string, unknown>
@@ -49,6 +65,7 @@ export interface AuditEventFilters {
   entityType?: AuditEntityType | string | null
   entityId?: string | null
   action?: string | null
+  source?: AuditHistorySource | null
   limit?: number
   order?: 'asc' | 'desc'
 }
@@ -71,6 +88,7 @@ export function useAuditEvents(
             entityType: filters.entityType || undefined,
             entityId: filters.entityId || undefined,
             action: filters.action || undefined,
+            source: filters.source || undefined,
             limit: filters.limit || 20,
             order: filters.order || 'desc',
           },

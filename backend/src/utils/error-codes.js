@@ -1,0 +1,384 @@
+const ERROR_CODE_CATALOG = Object.freeze({
+  VALIDATION_ERROR: {
+    status: 400,
+    category: "validation",
+    message: "Request validation failed",
+  },
+  AUTH_REQUIRED: {
+    status: 401,
+    category: "auth",
+    message: "Authentication is required",
+  },
+  INVALID_TOKEN: {
+    status: 401,
+    category: "auth",
+    message: "Access token is invalid",
+  },
+  PASSWORD_RESET_TOKEN_INVALID: {
+    status: 400,
+    category: "auth",
+    message: "Password reset token is invalid, expired, or already used",
+  },
+  INVITATION_TOKEN_INVALID: {
+    status: 400,
+    category: "auth",
+    message: "Invitation token is invalid, expired, or already used",
+  },
+  INVITATION_EMAIL_IN_OTHER_ORG: {
+    status: 409,
+    category: "auth",
+    message: "Email is already registered to another organization",
+  },
+  INVITATION_PASSWORD_REQUIRED: {
+    status: 400,
+    category: "auth",
+    message: "A password is required to accept this invitation",
+  },
+  TOKEN_EXPIRED: {
+    status: 401,
+    category: "auth",
+    message: "Access token has expired",
+  },
+  SUBSCRIPTION_REQUIRED: {
+    status: 402,
+    category: "billing",
+    message: "Subscription access is required",
+  },
+  FORBIDDEN: {
+    status: 403,
+    category: "authz",
+    message: "Permission denied",
+  },
+  PROJECT_ACCESS_DENIED: {
+    status: 403,
+    category: "authz",
+    message: "Project access is denied",
+  },
+  ACTIVITY_PROGRESS_ASSIGNMENT_REQUIRED: {
+    status: 403,
+    category: "authz",
+    message:
+      "Progress can only be submitted by assigned activity users or PM/planning overrides",
+  },
+  NOT_FOUND: {
+    status: 404,
+    category: "routing",
+    message: "Resource was not found",
+  },
+  PROJECT_NOT_FOUND: {
+    status: 404,
+    category: "project",
+    message: "Project not found",
+  },
+  PROJECT_ARCHIVED: {
+    status: 409,
+    category: "project",
+    message: "Archived projects cannot be updated",
+  },
+  PROJECT_ARCHIVE_ACTION_REQUIRED: {
+    status: 400,
+    category: "project",
+    message: "Use the archive endpoint to archive a project",
+  },
+  ORG_NOT_FOUND: {
+    status: 404,
+    category: "org",
+    message: "Organization not found",
+  },
+  CONFLICT: {
+    status: 409,
+    category: "conflict",
+    message: "Request conflicts with current state",
+  },
+  UNPROCESSABLE_ENTITY: {
+    status: 422,
+    category: "validation",
+    message: "Payload is semantically invalid",
+  },
+  RATE_LIMIT_EXCEEDED: {
+    status: 429,
+    category: "abuse_protection",
+    message: "Rate limit exceeded",
+  },
+  LOGIN_BACKOFF: {
+    status: 429,
+    category: "abuse_protection",
+    message: "Too many failed login attempts",
+  },
+  ACCOUNT_LOCKED: {
+    status: 429,
+    category: "abuse_protection",
+    message: "Account is temporarily locked",
+  },
+  INTERNAL_ERROR: {
+    status: 500,
+    category: "system",
+    message: "Unexpected server error",
+  },
+  CONFIG_ERROR: {
+    status: 500,
+    category: "system",
+    message: "Server configuration error",
+  },
+  DUPLICATE_BOQ_ITEM_CODE: {
+    status: 400,
+    category: "boq",
+    message: "BOQ item code already exists for this project",
+  },
+  DUPLICATE_ACTIVE_ALLOCATION: {
+    status: 400,
+    category: "boq",
+    message:
+      "An active allocation already exists for this BOQ item and activity",
+  },
+  EMAIL_MESSAGE_INVALID: {
+    status: 400,
+    category: "notification",
+    message: "Email message payload is invalid",
+  },
+  EMAIL_DELIVERY_FAILED: {
+    status: 502,
+    category: "notification",
+    message: "Email delivery failed",
+  },
+  NOTIFICATION_NOT_FOUND: {
+    status: 404,
+    category: "notification",
+    message: "Notification not found",
+  },
+  NOTIFICATION_PREFERENCE_INVALID: {
+    status: 400,
+    category: "notification",
+    message: "Notification preference is invalid",
+  },
+  ALLOCATION_AMOUNT_EXCEEDED: {
+    status: 400,
+    category: "boq",
+    message: "Allocation totals cannot exceed the BOQ item amount",
+  },
+  ALLOCATION_QUANTITY_EXCEEDED: {
+    status: 400,
+    category: "boq",
+    message: "Allocation totals cannot exceed the BOQ item quantity",
+  },
+  IPC_ALLOCATION_NOT_APPROVED: {
+    status: 409,
+    category: "ipc",
+    message: "IPC certification can only use approved active BOQ allocations",
+  },
+  IPC_PM_OVERRIDE_REASON_REQUIRED: {
+    status: 400,
+    category: "ipc",
+    message:
+      "A PM override reason is required for over-limit IPC certification",
+  },
+  IPC_PM_OVERRIDE_REQUIRED: {
+    status: 403,
+    category: "ipc",
+    message: "Only a Project Manager can override over-limit IPC certification",
+  },
+  EOT_WORKFLOW_ACTION_REQUIRED: {
+    status: 400,
+    category: "commercial",
+    message: "EOT status changes must use workflow endpoints",
+  },
+  CHANGE_ORDER_WORKFLOW_ACTION_REQUIRED: {
+    status: 400,
+    category: "commercial",
+    message: "Change order status changes must use workflow endpoints",
+  },
+  CHANGE_ORDER_IMPACT_SUMMARY_REQUIRED: {
+    status: 400,
+    category: "commercial",
+    message:
+      "Schedule and cost impact summaries are required before change order approval",
+  },
+  CHANGE_ORDER_APPROVED_LOCKED: {
+    status: 409,
+    category: "commercial",
+    message: "Approved change order impacts are locked",
+  },
+  CHANGE_ORDER_ARCHIVED: {
+    status: 409,
+    category: "commercial",
+    message: "Archived change orders cannot be updated",
+  },
+  NCR_WORKFLOW_ACTION_REQUIRED: {
+    status: 400,
+    category: "quality",
+    message: "NCR closeout status changes must use workflow endpoints",
+  },
+  NCR_CLOSEOUT_REQUIRED_FIELDS: {
+    status: 400,
+    category: "quality",
+    message:
+      "NCR closeout requires a responsible party, due date, and closure comment",
+  },
+  NCR_CLOSEOUT_EVIDENCE_REQUIRED: {
+    status: 400,
+    category: "quality",
+    message: "NCR closeout requires at least one evidence attachment",
+  },
+  NCR_NOT_READY_FOR_CLOSEOUT: {
+    status: 409,
+    category: "quality",
+    message: "NCR is not ready for closeout submission",
+  },
+  NCR_NOT_READY_FOR_APPROVAL: {
+    status: 409,
+    category: "quality",
+    message: "NCR closeout is not ready for approval",
+  },
+  NCR_NOT_READY_FOR_REJECTION: {
+    status: 409,
+    category: "quality",
+    message: "NCR closeout is not ready for rejection",
+  },
+  NCR_REOPEN_REASON_REQUIRED: {
+    status: 400,
+    category: "quality",
+    message: "A reason is required to reopen an NCR",
+  },
+  NCR_NOT_READY_FOR_REOPEN: {
+    status: 409,
+    category: "quality",
+    message: "NCR is not ready to reopen",
+  },
+  SAFETY_WORKFLOW_ACTION_REQUIRED: {
+    status: 400,
+    category: "safety",
+    message: "Safety closeout status changes must use workflow endpoints",
+  },
+  SAFETY_CLOSEOUT_REQUIRED_FIELDS: {
+    status: 400,
+    category: "safety",
+    message:
+      "Safety closeout requires a responsible party, due date, and closure comment",
+  },
+  SAFETY_CLOSEOUT_EVIDENCE_REQUIRED: {
+    status: 400,
+    category: "safety",
+    message: "Safety closeout requires at least one evidence attachment",
+  },
+  SAFETY_INCIDENT_NOT_FOUND: {
+    status: 404,
+    category: "safety",
+    message: "Safety incident not found",
+  },
+  SAFETY_INCIDENT_ARCHIVED: {
+    status: 409,
+    category: "safety",
+    message: "Archived safety incidents cannot be updated",
+  },
+  SAFETY_NOT_READY_FOR_CLOSEOUT: {
+    status: 409,
+    category: "safety",
+    message: "Safety incident is not ready for closeout submission",
+  },
+  SAFETY_INCIDENT_NOT_READY_FOR_APPROVAL: {
+    status: 409,
+    category: "safety",
+    message: "Safety closeout is not ready for approval",
+  },
+  SAFETY_NOT_READY_FOR_REJECTION: {
+    status: 409,
+    category: "safety",
+    message: "Safety closeout is not ready for rejection",
+  },
+  SAFETY_REOPEN_REASON_REQUIRED: {
+    status: 400,
+    category: "safety",
+    message: "A reason is required to reopen a safety incident",
+  },
+  SAFETY_NOT_READY_FOR_REOPEN: {
+    status: 409,
+    category: "safety",
+    message: "Safety incident is not ready to reopen",
+  },
+  RFI_ARCHIVED: {
+    status: 409,
+    category: "document_control",
+    message: "Archived RFIs cannot be updated",
+  },
+  RFI_ARCHIVE_ACTION_REQUIRED: {
+    status: 400,
+    category: "document_control",
+    message: "Use the archive endpoint to archive an RFI",
+  },
+  SUBMITTAL_ARCHIVED: {
+    status: 409,
+    category: "document_control",
+    message: "Archived submittals cannot be updated",
+  },
+  SUBMITTAL_ARCHIVE_ACTION_REQUIRED: {
+    status: 400,
+    category: "document_control",
+    message: "Use the archive endpoint to archive a submittal",
+  },
+  RISK_ARCHIVED: {
+    status: 409,
+    category: "risk",
+    message: "Archived risks cannot be updated",
+  },
+  DAILY_REPORT_LINK_INVALID: {
+    status: 400,
+    category: "procurement",
+    message: "Daily report link is invalid for this project activity",
+  },
+  EQUIPMENT_USAGE_LINK_INVALID: {
+    status: 400,
+    category: "equipment",
+    message: "Daily report equipment usage must reference project equipment",
+  },
+  PROCUREMENT_ALERT_WORKFLOW_ENDPOINT_REQUIRED: {
+    status: 400,
+    category: "procurement",
+    message: "Procurement alert status changes must use workflow endpoints",
+  },
+  PROCUREMENT_ALERT_ALREADY_RESOLVED: {
+    status: 409,
+    category: "procurement",
+    message: "Procurement alert is already resolved",
+  },
+});
+
+const DEFAULT_CODE_BY_STATUS = Object.freeze({
+  400: "VALIDATION_ERROR",
+  401: "AUTH_REQUIRED",
+  402: "SUBSCRIPTION_REQUIRED",
+  403: "FORBIDDEN",
+  404: "NOT_FOUND",
+  409: "CONFLICT",
+  422: "UNPROCESSABLE_ENTITY",
+  429: "RATE_LIMIT_EXCEEDED",
+  500: "INTERNAL_ERROR",
+});
+
+const normalizeStatus = (status) => {
+  const parsed = Number(status);
+  if (Number.isInteger(parsed) && parsed >= 400 && parsed <= 599) {
+    return parsed;
+  }
+  return 500;
+};
+
+const defaultCodeForStatus = (status) =>
+  DEFAULT_CODE_BY_STATUS[normalizeStatus(status)] || "INTERNAL_ERROR";
+
+const catalogEntryFor = (code) => ERROR_CODE_CATALOG[code] || null;
+
+const normalizeErrorCode = (code, status) => {
+  if (typeof code === "string" && code.trim()) {
+    return code.trim();
+  }
+  return defaultCodeForStatus(status);
+};
+
+module.exports = {
+  ERROR_CODE_CATALOG,
+  DEFAULT_CODE_BY_STATUS,
+  catalogEntryFor,
+  defaultCodeForStatus,
+  normalizeErrorCode,
+  normalizeStatus,
+};

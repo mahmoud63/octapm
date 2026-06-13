@@ -6,6 +6,7 @@ const { asyncHandler } = require('../utils/async-handler');
 const { sendSuccess } = require('../utils/api-response');
 const { HttpError } = require('../utils/http-error');
 const { authenticate } = require('../middleware/auth');
+const { uploadLimiter } = require('../middleware/rate-limit');
 const { requirePermission } = require('../middleware/rbac');
 const fileStorageService = require('../services/file-storage.service');
 
@@ -55,6 +56,7 @@ router.post(
   requirePermission('progress', 'submit', {
     transition: 'site_reporting.upload',
   }),
+  uploadLimiter,
   upload.array('files', 10),
   asyncHandler(async (req, res) => {
     try {

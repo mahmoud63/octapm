@@ -944,6 +944,18 @@ const uploadWorkflowFiles = ({ orgId, projectId, userId, files = [] }) =>
     routeBase: 'workflow/uploads',
   });
 
+const uploadDocumentControlFile = async ({ orgId, projectId, userId, file }) => {
+  const rows = await uploadFilesForType({
+    orgId,
+    projectId,
+    userId,
+    files: file ? [file] : [],
+    documentType: DOCUMENT_TYPES.WORKFLOW_ATTACHMENT,
+    routeBase: 'doc-control/uploads',
+  });
+  return rows[0];
+};
+
 const getDocumentByPublicKey = async ({ orgId, projectId, documentType, key }) =>
   prisma.projectDocument.findFirst({
     where: {
@@ -1141,6 +1153,7 @@ module.exports = {
   markDocumentLinked,
   markDocumentRejected,
   uploadBoqFile,
+  uploadDocumentControlFile,
   uploadProgressImportFile,
   uploadProjectDocument,
   uploadScheduleGenerationFile,

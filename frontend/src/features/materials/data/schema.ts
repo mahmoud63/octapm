@@ -96,10 +96,49 @@ export const materialSchema = z.object({
     .array(
       z.object({
         id: z.string().uuid(),
+        dailyReportId: z.string().uuid().nullable().optional(),
         usedQty: z.number(),
         wasteQty: z.number(),
         usageDate: z.string(),
         installedLocation: z.string().nullable().optional(),
+        dailyReport: z
+          .object({
+            id: z.string().uuid(),
+            date: z.string(),
+            shift: z.string(),
+            status: z.string(),
+          })
+          .nullable()
+          .optional(),
+      })
+    )
+    .optional(),
+  receiptLines: z
+    .array(
+      z.object({
+        id: z.string().uuid(),
+        dailyReportId: z.string().uuid().nullable().optional(),
+        acceptedQty: z.number(),
+        rejectedQty: z.number(),
+        issuedQty: z.number(),
+        createdAt: z.string(),
+        receipt: z
+          .object({
+            id: z.string().uuid(),
+            receiptNumber: z.string(),
+            receivedAt: z.string(),
+            status: z.string(),
+          })
+          .optional(),
+        dailyReport: z
+          .object({
+            id: z.string().uuid(),
+            date: z.string(),
+            shift: z.string(),
+            status: z.string(),
+          })
+          .nullable()
+          .optional(),
       })
     )
     .optional(),
@@ -144,6 +183,7 @@ export const materialUsageSchema = z.object({
   wasteQty: z.number().min(0),
   usageDate: z.string().optional(),
   installedLocation: z.string().optional(),
+  dailyReportId: z.string().optional(),
   notes: z.string().optional(),
 })
 

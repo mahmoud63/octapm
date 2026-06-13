@@ -33,19 +33,6 @@ data "aws_iam_policy_document" "ec2_permissions" {
     ]
   }
 
-  # S3 SPA bucket — write (CI/CD deploys build artifacts here)
-  statement {
-    actions = [
-      "s3:PutObject",
-      "s3:DeleteObject",
-      "s3:ListBucket",
-    ]
-    resources = [
-      aws_s3_bucket.spa.arn,
-      "${aws_s3_bucket.spa.arn}/*",
-    ]
-  }
-
   # Secrets Manager — read app secrets
   statement {
     actions   = ["secretsmanager:GetSecretValue"]
@@ -63,11 +50,6 @@ data "aws_iam_policy_document" "ec2_permissions" {
     resources = ["arn:aws:logs:*:*:*"]
   }
 
-  # CloudFront — invalidate cache on deploy
-  statement {
-    actions   = ["cloudfront:CreateInvalidation"]
-    resources = [aws_cloudfront_distribution.main.arn]
-  }
 }
 
 resource "aws_iam_role_policy" "ec2" {

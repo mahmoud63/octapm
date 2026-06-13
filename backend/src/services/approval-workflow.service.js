@@ -1,53 +1,57 @@
-const { prisma } = require('../config/db');
-const { HttpError } = require('../utils/http-error');
+const { prisma } = require("../config/db");
+const { HttpError } = require("../utils/http-error");
+const notificationService = require("./notification.service");
 
 const RECORD_TYPES = Object.freeze({
-  BOQ_REVISION: 'boq_revision',
-  BOQ_ALLOCATION: 'activity_boq_allocation',
-  SCHEDULE_REVISION: 'schedule_revision',
-  ACTIVITY_COST_LOADING: 'activity_cost_loading',
-  RFI: 'rfi',
-  SUBMITTAL: 'submittal',
-  CHANGE_ORDER: 'change_order',
-  IPC_CERTIFICATE: 'ipc_certificate',
-  EOT_CLAIM: 'eot_claim',
-  NCR: 'ncr',
-  SAFETY_INCIDENT: 'safety_incident',
+  BOQ_REVISION: "boq_revision",
+  BOQ_ALLOCATION: "activity_boq_allocation",
+  SCHEDULE_REVISION: "schedule_revision",
+  ACTIVITY_COST_LOADING: "activity_cost_loading",
+  RFI: "rfi",
+  SUBMITTAL: "submittal",
+  CHANGE_ORDER: "change_order",
+  IPC_CERTIFICATE: "ipc_certificate",
+  EOT_CLAIM: "eot_claim",
+  NCR: "ncr",
+  SAFETY_INCIDENT: "safety_incident",
+  RISK: "risk",
 });
 
 const ACTIONS = Object.freeze({
-  CREATED: 'created',
-  IMPORTED: 'imported',
-  SUBMITTED: 'submitted',
-  ANSWERED: 'answered',
-  REVIEWED: 'reviewed',
-  APPROVED: 'approved',
-  REJECTED: 'rejected',
-  RESUBMIT_REQUIRED: 'resubmit_required',
-  CERTIFIED: 'certified',
-  PAID: 'paid',
-  CLOSED: 'closed',
-  BASELINE_LOCKED: 'baseline_locked',
-  SUPERSEDED: 'superseded',
-  REOPENED: 'reopened',
-  STATUS_CHANGED: 'status_changed',
+  CREATED: "created",
+  IMPORTED: "imported",
+  SUBMITTED: "submitted",
+  ANSWERED: "answered",
+  REVIEWED: "reviewed",
+  APPROVED: "approved",
+  REJECTED: "rejected",
+  RESUBMIT_REQUIRED: "resubmit_required",
+  CERTIFIED: "certified",
+  PAID: "paid",
+  CLOSED: "closed",
+  BASELINE_LOCKED: "baseline_locked",
+  SUPERSEDED: "superseded",
+  REOPENED: "reopened",
+  STATUS_CHANGED: "status_changed",
+  ARCHIVED: "archived",
 });
 
 const DECISIONS = Object.freeze({
-  CREATED: 'created',
-  SUBMITTED: 'submitted',
-  REVIEWED: 'reviewed',
-  APPROVED: 'approved',
-  REJECTED: 'rejected',
-  CERTIFIED: 'certified',
-  CLOSED: 'closed',
-  SUPERSEDED: 'superseded',
-  REOPENED: 'reopened',
-  PAID: 'paid',
-  STATUS_CHANGED: 'status_changed',
+  CREATED: "created",
+  SUBMITTED: "submitted",
+  REVIEWED: "reviewed",
+  APPROVED: "approved",
+  REJECTED: "rejected",
+  CERTIFIED: "certified",
+  CLOSED: "closed",
+  SUPERSEDED: "superseded",
+  REOPENED: "reopened",
+  PAID: "paid",
+  STATUS_CHANGED: "status_changed",
+  ARCHIVED: "archived",
 });
 
-const ANY = Symbol('any');
+const ANY = Symbol("any");
 
 const toArray = (value) => (Array.isArray(value) ? value : [value]);
 
@@ -61,20 +65,14 @@ const compactJson = (value) => {
   if (value === null || value === undefined) return {};
   if (value instanceof Date) return value.toISOString();
   if (Array.isArray(value)) return value.map(compactJson);
-  if (typeof value !== 'object') return value;
+  if (typeof value !== "object") return value;
   return Object.entries(value).reduce((acc, [key, raw]) => {
     acc[key] = compactJson(raw);
     return acc;
   }, {});
 };
 
-const rule = ({
-  from,
-  to,
-  action,
-  decision,
-  requireReason = false,
-}) => ({
+const rule = ({ from, to, action, decision, requireReason = false }) => ({
   from: from === ANY ? ANY : toArray(from).map((value) => value ?? null),
   to: to === ANY ? ANY : toArray(to).map((value) => value ?? null),
   action,
@@ -86,19 +84,19 @@ const TRANSITIONS = Object.freeze({
   [RECORD_TYPES.BOQ_REVISION]: [
     rule({
       from: null,
-      to: ['imported', 'comparison_only'],
+      to: ["imported", "comparison_only"],
       action: ACTIONS.IMPORTED,
       decision: DECISIONS.CREATED,
     }),
     rule({
-      from: ['imported', 'comparison_only'],
-      to: 'baselined',
+      from: ["imported", "comparison_only"],
+      to: "baselined",
       action: ACTIONS.BASELINE_LOCKED,
       decision: DECISIONS.APPROVED,
     }),
     rule({
-      from: ['imported', 'comparison_only', 'baselined'],
-      to: 'superseded',
+      from: ["imported", "comparison_only", "baselined"],
+      to: "superseded",
       action: ACTIONS.SUPERSEDED,
       decision: DECISIONS.SUPERSEDED,
     }),
@@ -106,25 +104,25 @@ const TRANSITIONS = Object.freeze({
   [RECORD_TYPES.BOQ_ALLOCATION]: [
     rule({
       from: null,
-      to: 'draft',
+      to: "draft",
       action: ACTIONS.CREATED,
       decision: DECISIONS.CREATED,
     }),
     rule({
-      from: ['draft', 'rejected'],
-      to: 'submitted',
+      from: ["draft", "rejected"],
+      to: "submitted",
       action: ACTIONS.SUBMITTED,
       decision: DECISIONS.SUBMITTED,
     }),
     rule({
-      from: 'submitted',
-      to: 'approved',
+      from: "submitted",
+      to: "approved",
       action: ACTIONS.APPROVED,
       decision: DECISIONS.APPROVED,
     }),
     rule({
-      from: 'submitted',
-      to: 'rejected',
+      from: "submitted",
+      to: "rejected",
       action: ACTIONS.REJECTED,
       decision: DECISIONS.REJECTED,
       requireReason: true,
@@ -133,38 +131,38 @@ const TRANSITIONS = Object.freeze({
   [RECORD_TYPES.SCHEDULE_REVISION]: [
     rule({
       from: null,
-      to: ['draft', 'under_review'],
+      to: ["draft", "under_review"],
       action: ACTIONS.CREATED,
       decision: DECISIONS.CREATED,
     }),
     rule({
-      from: ['draft', 'rejected'],
-      to: 'under_review',
+      from: ["draft", "rejected"],
+      to: "under_review",
       action: ACTIONS.SUBMITTED,
       decision: DECISIONS.SUBMITTED,
     }),
     rule({
-      from: 'under_review',
-      to: 'approved',
+      from: "under_review",
+      to: "approved",
       action: ACTIONS.APPROVED,
       decision: DECISIONS.APPROVED,
     }),
     rule({
-      from: 'under_review',
-      to: 'rejected',
+      from: "under_review",
+      to: "rejected",
       action: ACTIONS.REJECTED,
       decision: DECISIONS.REJECTED,
       requireReason: true,
     }),
     rule({
-      from: 'approved',
-      to: 'baselined',
+      from: "approved",
+      to: "baselined",
       action: ACTIONS.BASELINE_LOCKED,
       decision: DECISIONS.APPROVED,
     }),
     rule({
-      from: ['draft', 'under_review', 'approved', 'baselined'],
-      to: 'superseded',
+      from: ["draft", "under_review", "approved", "baselined"],
+      to: "superseded",
       action: ACTIONS.SUPERSEDED,
       decision: DECISIONS.SUPERSEDED,
     }),
@@ -172,38 +170,38 @@ const TRANSITIONS = Object.freeze({
   [RECORD_TYPES.ACTIVITY_COST_LOADING]: [
     rule({
       from: null,
-      to: 'draft',
+      to: "draft",
       action: ACTIONS.CREATED,
       decision: DECISIONS.CREATED,
     }),
     rule({
       from: null,
-      to: 'submitted',
+      to: "submitted",
       action: ACTIONS.SUBMITTED,
       decision: DECISIONS.SUBMITTED,
     }),
     rule({
-      from: 'draft',
-      to: 'submitted',
+      from: "draft",
+      to: "submitted",
       action: ACTIONS.SUBMITTED,
       decision: DECISIONS.SUBMITTED,
     }),
     rule({
-      from: 'submitted',
-      to: 'approved',
+      from: "submitted",
+      to: "approved",
       action: ACTIONS.APPROVED,
       decision: DECISIONS.APPROVED,
     }),
     rule({
-      from: 'submitted',
-      to: 'rejected',
+      from: "submitted",
+      to: "rejected",
       action: ACTIONS.REJECTED,
       decision: DECISIONS.REJECTED,
       requireReason: true,
     }),
     rule({
-      from: ['draft', 'submitted', 'approved'],
-      to: 'superseded',
+      from: ["draft", "submitted", "approved"],
+      to: "superseded",
       action: ACTIONS.SUPERSEDED,
       decision: DECISIONS.SUPERSEDED,
     }),
@@ -211,131 +209,173 @@ const TRANSITIONS = Object.freeze({
   [RECORD_TYPES.RFI]: [
     rule({
       from: null,
-      to: ['open', 'answered', 'closed'],
+      to: ["open", "answered", "closed"],
       action: ACTIONS.CREATED,
       decision: DECISIONS.CREATED,
     }),
     rule({
-      from: 'open',
-      to: 'answered',
+      from: "open",
+      to: "open",
+      action: ACTIONS.SUBMITTED,
+      decision: DECISIONS.SUBMITTED,
+    }),
+    rule({
+      from: "open",
+      to: "answered",
       action: ACTIONS.ANSWERED,
       decision: DECISIONS.REVIEWED,
     }),
     rule({
-      from: ['open', 'answered'],
-      to: 'closed',
+      from: "answered",
+      to: "closed",
+      action: ACTIONS.APPROVED,
+      decision: DECISIONS.APPROVED,
+    }),
+    rule({
+      from: "answered",
+      to: "open",
+      action: ACTIONS.REJECTED,
+      decision: DECISIONS.REJECTED,
+      requireReason: true,
+    }),
+    rule({
+      from: ["open", "answered"],
+      to: "closed",
       action: ACTIONS.CLOSED,
       decision: DECISIONS.CLOSED,
     }),
     rule({
-      from: ['answered', 'closed'],
-      to: 'open',
+      from: ["answered", "closed"],
+      to: "open",
       action: ACTIONS.REOPENED,
       decision: DECISIONS.REOPENED,
+    }),
+    rule({
+      from: ["open", "answered", "closed"],
+      to: "archived",
+      action: ACTIONS.ARCHIVED,
+      decision: DECISIONS.ARCHIVED,
     }),
   ],
   [RECORD_TYPES.SUBMITTAL]: [
     rule({
       from: null,
-      to: 'pending',
+      to: "pending",
       action: ACTIONS.CREATED,
       decision: DECISIONS.CREATED,
     }),
     rule({
       from: null,
-      to: 'under_review',
+      to: "under_review",
       action: ACTIONS.SUBMITTED,
       decision: DECISIONS.SUBMITTED,
     }),
     rule({
-      from: ['pending', 'resubmit', 'rejected'],
-      to: 'under_review',
+      from: ["pending", "resubmit", "rejected"],
+      to: "under_review",
       action: ACTIONS.SUBMITTED,
       decision: DECISIONS.SUBMITTED,
     }),
     rule({
-      from: 'under_review',
-      to: 'approved',
+      from: "under_review",
+      to: "under_review",
+      action: ACTIONS.REVIEWED,
+      decision: DECISIONS.REVIEWED,
+    }),
+    rule({
+      from: "under_review",
+      to: "approved",
       action: ACTIONS.APPROVED,
       decision: DECISIONS.APPROVED,
     }),
     rule({
-      from: 'under_review',
-      to: 'resubmit',
+      from: "under_review",
+      to: "resubmit",
       action: ACTIONS.RESUBMIT_REQUIRED,
       decision: DECISIONS.REJECTED,
       requireReason: true,
     }),
     rule({
-      from: 'under_review',
-      to: 'rejected',
+      from: "under_review",
+      to: "rejected",
       action: ACTIONS.REJECTED,
       decision: DECISIONS.REJECTED,
       requireReason: true,
+    }),
+    rule({
+      from: ["pending", "under_review", "approved", "resubmit", "rejected"],
+      to: "archived",
+      action: ACTIONS.ARCHIVED,
+      decision: DECISIONS.ARCHIVED,
     }),
   ],
   [RECORD_TYPES.CHANGE_ORDER]: [
     rule({
       from: null,
-      to: 'pending',
+      to: "draft",
       action: ACTIONS.CREATED,
       decision: DECISIONS.CREATED,
     }),
     rule({
       from: null,
-      to: 'approved',
+      to: "pending",
+      action: ACTIONS.CREATED,
+      decision: DECISIONS.CREATED,
+    }),
+    rule({
+      from: "draft",
+      to: "pending",
+      action: ACTIONS.SUBMITTED,
+      decision: DECISIONS.SUBMITTED,
+    }),
+    rule({
+      from: "pending",
+      to: "approved",
       action: ACTIONS.APPROVED,
       decision: DECISIONS.APPROVED,
     }),
     rule({
-      from: null,
-      to: 'rejected',
+      from: "pending",
+      to: "rejected",
       action: ACTIONS.REJECTED,
       decision: DECISIONS.REJECTED,
       requireReason: true,
     }),
     rule({
-      from: 'pending',
-      to: 'approved',
-      action: ACTIONS.APPROVED,
-      decision: DECISIONS.APPROVED,
-    }),
-    rule({
-      from: 'pending',
-      to: 'rejected',
-      action: ACTIONS.REJECTED,
-      decision: DECISIONS.REJECTED,
-      requireReason: true,
-    }),
-    rule({
-      from: 'rejected',
-      to: 'pending',
+      from: "rejected",
+      to: "draft",
       action: ACTIONS.REOPENED,
       decision: DECISIONS.REOPENED,
+    }),
+    rule({
+      from: ["draft", "pending", "rejected"],
+      to: "archived",
+      action: ACTIONS.ARCHIVED,
+      decision: DECISIONS.ARCHIVED,
     }),
   ],
   [RECORD_TYPES.IPC_CERTIFICATE]: [
     rule({
       from: null,
-      to: 'draft',
+      to: "draft",
       action: ACTIONS.CREATED,
       decision: DECISIONS.CREATED,
     }),
     rule({
-      from: 'draft',
-      to: 'submitted',
+      from: "draft",
+      to: "submitted",
       action: ACTIONS.SUBMITTED,
       decision: DECISIONS.SUBMITTED,
     }),
     rule({
-      from: 'submitted',
-      to: 'certified',
+      from: "submitted",
+      to: "certified",
       action: ACTIONS.CERTIFIED,
       decision: DECISIONS.CERTIFIED,
     }),
     rule({
-      from: 'certified',
-      to: 'paid',
+      from: "certified",
+      to: "paid",
       action: ACTIONS.PAID,
       decision: DECISIONS.PAID,
     }),
@@ -343,31 +383,31 @@ const TRANSITIONS = Object.freeze({
   [RECORD_TYPES.EOT_CLAIM]: [
     rule({
       from: null,
-      to: 'draft',
+      to: "draft",
       action: ACTIONS.CREATED,
       decision: DECISIONS.CREATED,
     }),
     rule({
       from: null,
-      to: 'submitted',
+      to: "submitted",
       action: ACTIONS.SUBMITTED,
       decision: DECISIONS.SUBMITTED,
     }),
     rule({
-      from: ['draft', 'rejected'],
-      to: 'submitted',
+      from: ["draft", "rejected"],
+      to: "submitted",
       action: ACTIONS.SUBMITTED,
       decision: DECISIONS.SUBMITTED,
     }),
     rule({
-      from: 'submitted',
-      to: 'approved',
+      from: "submitted",
+      to: "approved",
       action: ACTIONS.APPROVED,
       decision: DECISIONS.APPROVED,
     }),
     rule({
-      from: 'submitted',
-      to: 'rejected',
+      from: "submitted",
+      to: "rejected",
       action: ACTIONS.REJECTED,
       decision: DECISIONS.REJECTED,
       requireReason: true,
@@ -376,25 +416,32 @@ const TRANSITIONS = Object.freeze({
   [RECORD_TYPES.NCR]: [
     rule({
       from: null,
-      to: 'open',
+      to: "open",
       action: ACTIONS.CREATED,
       decision: DECISIONS.CREATED,
     }),
     rule({
-      from: null,
-      to: 'closed',
-      action: ACTIONS.CLOSED,
+      from: "open",
+      to: "submitted",
+      action: ACTIONS.SUBMITTED,
+      decision: DECISIONS.SUBMITTED,
+    }),
+    rule({
+      from: "submitted",
+      to: "closed",
+      action: ACTIONS.APPROVED,
       decision: DECISIONS.APPROVED,
     }),
     rule({
-      from: 'open',
-      to: 'closed',
-      action: ACTIONS.CLOSED,
-      decision: DECISIONS.APPROVED,
+      from: "submitted",
+      to: "open",
+      action: ACTIONS.REJECTED,
+      decision: DECISIONS.REJECTED,
+      requireReason: true,
     }),
     rule({
-      from: 'closed',
-      to: 'open',
+      from: "closed",
+      to: "open",
       action: ACTIONS.REOPENED,
       decision: DECISIONS.REOPENED,
     }),
@@ -402,33 +449,85 @@ const TRANSITIONS = Object.freeze({
   [RECORD_TYPES.SAFETY_INCIDENT]: [
     rule({
       from: null,
-      to: ['open', 'investigating'],
+      to: ["open", "investigating"],
       action: ACTIONS.CREATED,
       decision: DECISIONS.CREATED,
     }),
     rule({
-      from: null,
-      to: 'closed',
-      action: ACTIONS.CLOSED,
-      decision: DECISIONS.APPROVED,
-    }),
-    rule({
-      from: 'open',
-      to: 'investigating',
+      from: "open",
+      to: "investigating",
       action: ACTIONS.REVIEWED,
       decision: DECISIONS.REVIEWED,
     }),
     rule({
-      from: ['open', 'investigating'],
-      to: 'closed',
-      action: ACTIONS.CLOSED,
+      from: ["open", "investigating"],
+      to: "submitted",
+      action: ACTIONS.SUBMITTED,
+      decision: DECISIONS.SUBMITTED,
+    }),
+    rule({
+      from: "submitted",
+      to: "closed",
+      action: ACTIONS.APPROVED,
       decision: DECISIONS.APPROVED,
     }),
     rule({
-      from: 'closed',
-      to: 'investigating',
+      from: "submitted",
+      to: "investigating",
+      action: ACTIONS.REJECTED,
+      decision: DECISIONS.REJECTED,
+      requireReason: true,
+    }),
+    rule({
+      from: "closed",
+      to: "investigating",
       action: ACTIONS.REOPENED,
       decision: DECISIONS.REOPENED,
+    }),
+    rule({
+      from: ["open", "investigating", "submitted", "closed"],
+      to: "archived",
+      action: ACTIONS.ARCHIVED,
+      decision: DECISIONS.ARCHIVED,
+    }),
+  ],
+  [RECORD_TYPES.RISK]: [
+    rule({
+      from: null,
+      to: ["open", "monitoring"],
+      action: ACTIONS.CREATED,
+      decision: DECISIONS.CREATED,
+    }),
+    rule({
+      from: ["open", "monitoring"],
+      to: "submitted",
+      action: ACTIONS.SUBMITTED,
+      decision: DECISIONS.SUBMITTED,
+    }),
+    rule({
+      from: "submitted",
+      to: "closed",
+      action: ACTIONS.APPROVED,
+      decision: DECISIONS.APPROVED,
+    }),
+    rule({
+      from: "submitted",
+      to: "monitoring",
+      action: ACTIONS.REJECTED,
+      decision: DECISIONS.REJECTED,
+      requireReason: true,
+    }),
+    rule({
+      from: "closed",
+      to: "monitoring",
+      action: ACTIONS.REOPENED,
+      decision: DECISIONS.REOPENED,
+    }),
+    rule({
+      from: ["open", "monitoring", "submitted", "closed"],
+      to: "archived",
+      action: ACTIONS.ARCHIVED,
+      decision: DECISIONS.ARCHIVED,
     }),
   ],
 });
@@ -460,12 +559,10 @@ const assertAllowedTransition = ({
   if (!normalizedRecordType || !TRANSITIONS[normalizedRecordType]) {
     throw new HttpError(
       400,
-      'APPROVAL_WORKFLOW_UNSUPPORTED_RECORD',
-      'Approval workflow record type is not supported',
+      "APPROVAL_WORKFLOW_UNSUPPORTED_RECORD",
+      "Approval workflow record type is not supported",
     );
   }
-
-  if (normalizedFrom === normalizedTo) return null;
 
   const transition = resolveTransitionRule({
     recordType: normalizedRecordType,
@@ -473,11 +570,13 @@ const assertAllowedTransition = ({
     toStatus: normalizedTo,
   });
 
+  if (normalizedFrom === normalizedTo && !transition) return null;
+
   if (!transition) {
     throw new HttpError(
       409,
-      'APPROVAL_WORKFLOW_INVALID_TRANSITION',
-      `Invalid ${normalizedRecordType} workflow transition from ${normalizedFrom || 'new'} to ${normalizedTo || 'none'}`,
+      "APPROVAL_WORKFLOW_INVALID_TRANSITION",
+      `Invalid ${normalizedRecordType} workflow transition from ${normalizedFrom || "new"} to ${normalizedTo || "none"}`,
       {
         recordType: normalizedRecordType,
         fromStatus: normalizedFrom,
@@ -489,8 +588,8 @@ const assertAllowedTransition = ({
   if (transition.requireReason && !trimOrNull(reason || comment)) {
     throw new HttpError(
       400,
-      'APPROVAL_WORKFLOW_REASON_REQUIRED',
-      'A reason is required for this workflow decision',
+      "APPROVAL_WORKFLOW_REASON_REQUIRED",
+      "A reason is required for this workflow decision",
       {
         recordType: normalizedRecordType,
         fromStatus: normalizedFrom,
@@ -560,8 +659,8 @@ const recordTransition = async ({
   if (!orgId || !projectId || !recordId) {
     throw new HttpError(
       400,
-      'APPROVAL_WORKFLOW_EVENT_INVALID',
-      'Approval workflow events require org, project, and record metadata',
+      "APPROVAL_WORKFLOW_EVENT_INVALID",
+      "Approval workflow events require org, project, and record metadata",
     );
   }
 
@@ -591,6 +690,16 @@ const recordTransition = async ({
     data: eventPayload,
   });
 
+  try {
+    await notificationService.createWorkflowNotifications({
+      tx,
+      workflowEvent: serializeWorkflowEvent(event),
+    });
+  } catch (error) {
+    // Notification fanout must not block the source workflow transition.
+    console.error("[notification-workflow-fanout]", error);
+  }
+
   return serializeWorkflowEvent(event);
 };
 
@@ -609,7 +718,7 @@ const listEventsForRecords = async ({
       recordType,
       recordId: { in: ids },
     },
-    orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+    orderBy: [{ createdAt: "asc" }, { id: "asc" }],
   });
 
   return events.reduce((acc, event) => {

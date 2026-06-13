@@ -38,7 +38,11 @@ function resolveTemplatePath(templatePath, moduleDir) {
 
 export function validateEc2UserData(computeSource, options = {}) {
   const moduleDir = options.terraformDir ?? terraformDir
+  const hasCustomTemplateExists = Boolean(options.templateExists)
   const templateExists = options.templateExists ?? ((templatePath) => existsSync(templatePath))
+  const readTemplate = options.readTemplate ?? (
+    hasCustomTemplateExists ? null : ((templatePath) => readFileSync(templatePath, 'utf8'))
+  )
   const failures = []
   const appInstance = extractBlock(
     computeSource,
@@ -76,6 +80,23 @@ export function validateEc2UserData(computeSource, options = {}) {
     const resolvedTemplatePath = resolveTemplatePath(templateRef, moduleDir)
     if (!templateExists(resolvedTemplatePath)) {
       failures.push(`EC2 user data template does not exist: ${templateRef}`)
+      continue
+    }
+
+    if (readTemplate) {
+      const templateSource = readTemplate(resolvedTemplatePath)
+      if (/setup_20\.x/.test(templateSource)) {
+        failures.push('EC2 user data must not install the old Node.js 20 runtime.')
+      }
+      if (!/setup_\$NODE_MAJOR\.x/.test(templateSource) && !/setup_24\.x/.test(templateSource)) {
+        failures.push('EC2 user data must install the repository runtime from the Node.js 24 package source.')
+      }
+      if (!/NODE_MAJOR=24/.test(templateSource) || !/node --version \| grep -Eq "\^v\$NODE_MAJOR\\\\\."/.test(templateSource)) {
+        failures.push('EC2 user data must verify Node.js major version 24 after installation.')
+      }
+      if (!/NPM_VERSION=11\.9\.0/.test(templateSource) || !templateSource.includes("npm --version | grep -Eq '^11\\.'")) {
+        failures.push('EC2 user data must verify npm major version 11 after installation.')
+      }
     }
   }
 
@@ -134,6 +155,35 @@ resource "aws_instance" "app" {
   })
   if (goodPlainFailures.length > 0) {
     throw new Error(`Self-test expected plain user_data to pass: ${goodPlainFailures.join('; ')}`)
+  }
+
+  const goodNode24Template = `
+NODE_MAJOR=24
+NPM_VERSION=11.9.0
+curl -fsSL "https://rpm.nodesource.com/setup_$NODE_MAJOR.x" | bash -
+node --version | grep -Eq "^v$NODE_MAJOR\\\\."
+npm --version | grep -Eq '^11\\.'
+`
+  const goodRuntimeFailures = validateEc2UserData(goodPlain, {
+    terraformDir: '/tmp/terraform',
+    templateExists: () => true,
+    readTemplate: () => goodNode24Template,
+  })
+  if (goodRuntimeFailures.length > 0) {
+    throw new Error(`Self-test expected Node 24 bootstrap template to pass: ${goodRuntimeFailures.join('; ')}`)
+  }
+
+  const badNode20Template = `
+curl -fsSL https://rpm.nodesource.com/setup_20.x | bash -
+node --version | grep -Eq '^v20\\\\.'
+`
+  const badRuntimeFailures = validateEc2UserData(goodPlain, {
+    terraformDir: '/tmp/terraform',
+    templateExists: () => true,
+    readTemplate: () => badNode20Template,
+  })
+  if (!badRuntimeFailures.some((failure) => failure.includes('old Node.js 20'))) {
+    throw new Error('Self-test expected Node 20 bootstrap template to fail.')
   }
 }
 

@@ -1,75 +1,127 @@
-const express = require('express');
-const { body, param } = require('express-validator');
-const { asyncHandler } = require('../utils/async-handler');
-const { sendSuccess } = require('../utils/api-response');
-const { authenticate } = require('../middleware/auth');
-const { requireRoles } = require('../middleware/rbac');
-const { validate } = require('../middleware/validate');
-const { moneyBody } = require('../utils/money');
-const changeOrderService = require('../services/change-order.service');
+const express = require("express");
+const { body, param, query } = require("express-validator");
+const { asyncHandler } = require("../utils/async-handler");
+const { sendSuccess } = require("../utils/api-response");
+const { authenticate } = require("../middleware/auth");
+const {
+  getEffectiveRole,
+  requirePermission,
+  requireRoles,
+} = require("../middleware/rbac");
+const { validate } = require("../middleware/validate");
+const { moneyBody } = require("../utils/money");
+const changeOrderService = require("../services/change-order.service");
 
 const router = express.Router({ mergeParams: true });
 router.use(authenticate);
 
 router.get(
-  '/',
+  "/",
+  [
+    query("status")
+      .optional()
+      .isIn(["draft", "pending", "approved", "rejected", "archived"]),
+    query("includeArchived").optional().isBoolean().toBoolean(),
+    validate,
+  ],
   asyncHandler(async (req, res) => {
     const result = await changeOrderService.listChangeOrders({
       orgId: req.user.orgId,
       projectId: req.params.projectId,
+      query: req.query,
     });
     return sendSuccess(res, result);
   }),
 );
 
 router.post(
-  '/',
-  requireRoles('pm', 'qs'),
+  "/",
+  requireRoles("pm", "qs"),
   [
-    body('description').isString().trim().notEmpty(),
-    body('activityId').optional({ nullable: true }).isUUID(),
-    body('activityLinks').optional().isArray(),
-    body('activityLinks.*.activityId').optional().isUUID(),
-    body('activityLinks.*.relationType').optional().isString().trim(),
-    body('activityLinks.*.scheduleImpactDays').optional().isInt().toInt(),
-    body('activityLinks.*.approvedScheduleImpactDays').optional().isInt().toInt(),
-    moneyBody('activityLinks.*.costImpact'),
-    moneyBody('activityLinks.*.approvedCostImpact'),
-    body('activityLinks.*.baselineStart').optional({ nullable: true }).isISO8601(),
-    body('activityLinks.*.baselineFinish').optional({ nullable: true }).isISO8601(),
-    body('activityLinks.*.impactedStart').optional({ nullable: true }).isISO8601(),
-    body('activityLinks.*.impactedFinish').optional({ nullable: true }).isISO8601(),
-    body('activityLinks.*.impactBasis').optional({ nullable: true }).isString().trim(),
-    body('activityLinks.*.notes').optional({ nullable: true }).isString().trim(),
-    body('affectedActivityIds').optional().isArray(),
-    body('affectedActivityIds.*').optional().isUUID(),
-    body('allocationLinks').optional().isArray(),
-    body('allocationLinks.*.allocationId').optional({ nullable: true }).isUUID(),
-    body('allocationLinks.*.boqItemId').optional({ nullable: true }).isUUID(),
-    body('allocationLinks.*.quantity').optional().isFloat({ min: 0 }).toFloat(),
-    moneyBody('allocationLinks.*.amount'),
-    body('allocationLinks.*.notes').optional({ nullable: true }).isString().trim(),
-    body('correspondenceIds').optional().isArray(),
-    body('correspondenceIds.*').optional().isUUID(),
-    body('correspondenceLinks').optional().isArray(),
-    body('correspondenceLinks.*.correspondenceId').optional().isUUID(),
-    body('correspondenceLinks.*.relationType').optional().isString().trim(),
-    body('attachmentRefs').optional().isArray(),
-    body('attachmentRefs.*.documentId').optional({ nullable: true }).isUUID(),
-    body('supportingDocumentIds').optional().isArray(),
-    body('supportingDocumentIds.*').optional().isUUID(),
-    body('documentIds').optional().isArray(),
-    body('documentIds.*').optional().isUUID(),
-    body('category').optional().isString().trim(),
-    moneyBody('value'),
-    body('status').optional().isIn(['pending', 'approved', 'rejected']),
-    body('scheduleImpact').optional().isInt().toInt(),
-    body('submittedDate').optional().isISO8601(),
-    body('raisedBy').optional().isString().trim(),
-    body('rejectedReason').optional().isString().trim(),
-    body('approvalComment').optional({ nullable: true }).isString().trim().isLength({
-      max: 2000,
-    }),
+    body("description").isString().trim().notEmpty(),
+    body("activityId").optional({ nullable: true }).isUUID(),
+    body("activityLinks").optional().isArray(),
+    body("activityLinks.*.activityId").optional().isUUID(),
+    body("activityLinks.*.relationType").optional().isString().trim(),
+    body("activityLinks.*.scheduleImpactDays").optional().isInt().toInt(),
+    body("activityLinks.*.approvedScheduleImpactDays")
+      .optional()
+      .isInt()
+      .toInt(),
+    moneyBody("activityLinks.*.costImpact"),
+    moneyBody("activityLinks.*.approvedCostImpact"),
+    body("activityLinks.*.baselineStart")
+      .optional({ nullable: true })
+      .isISO8601(),
+    body("activityLinks.*.baselineFinish")
+      .optional({ nullable: true })
+      .isISO8601(),
+    body("activityLinks.*.impactedStart")
+      .optional({ nullable: true })
+      .isISO8601(),
+    body("activityLinks.*.impactedFinish")
+      .optional({ nullable: true })
+      .isISO8601(),
+    body("activityLinks.*.impactBasis")
+      .optional({ nullable: true })
+      .isString()
+      .trim(),
+    body("activityLinks.*.notes")
+      .optional({ nullable: true })
+      .isString()
+      .trim(),
+    body("affectedActivityIds").optional().isArray(),
+    body("affectedActivityIds.*").optional().isUUID(),
+    body("allocationLinks").optional().isArray(),
+    body("allocationLinks.*.allocationId")
+      .optional({ nullable: true })
+      .isUUID(),
+    body("allocationLinks.*.boqItemId").optional({ nullable: true }).isUUID(),
+    body("allocationLinks.*.quantity").optional().isFloat({ min: 0 }).toFloat(),
+    moneyBody("allocationLinks.*.amount"),
+    body("allocationLinks.*.notes")
+      .optional({ nullable: true })
+      .isString()
+      .trim(),
+    body("correspondenceIds").optional().isArray(),
+    body("correspondenceIds.*").optional().isUUID(),
+    body("correspondenceLinks").optional().isArray(),
+    body("correspondenceLinks.*.correspondenceId").optional().isUUID(),
+    body("correspondenceLinks.*.relationType").optional().isString().trim(),
+    body("attachmentRefs").optional().isArray(),
+    body("attachmentRefs.*.documentId").optional({ nullable: true }).isUUID(),
+    body("supportingDocumentIds").optional().isArray(),
+    body("supportingDocumentIds.*").optional().isUUID(),
+    body("documentIds").optional().isArray(),
+    body("documentIds.*").optional().isUUID(),
+    body("category").optional().isString().trim(),
+    moneyBody("value"),
+    body("status").optional().isIn(["draft"]),
+    body("scheduleImpact").optional().isInt().toInt(),
+    body("scheduleImpactSummary")
+      .optional({ nullable: true })
+      .isString()
+      .trim()
+      .isLength({
+        max: 4000,
+      }),
+    body("costImpactSummary")
+      .optional({ nullable: true })
+      .isString()
+      .trim()
+      .isLength({
+        max: 4000,
+      }),
+    body("submittedDate").optional().isISO8601(),
+    body("raisedBy").optional().isString().trim(),
+    body("rejectedReason").optional().isString().trim(),
+    body("approvalComment")
+      .optional({ nullable: true })
+      .isString()
+      .trim()
+      .isLength({
+        max: 2000,
+      }),
     validate,
   ],
   asyncHandler(async (req, res) => {
@@ -77,7 +129,7 @@ router.post(
       orgId: req.user.orgId,
       projectId: req.params.projectId,
       userId: req.user.id,
-      userRole: req.user.role,
+      userRole: getEffectiveRole(req),
       payload: req.body,
     });
     return sendSuccess(res, result, 201);
@@ -85,54 +137,96 @@ router.post(
 );
 
 router.patch(
-  '/:id',
-  requireRoles('pm', 'qs'),
+  "/:id",
+  requireRoles("pm", "qs"),
   [
-    param('id').isUUID(),
-    body('description').optional().isString().trim().notEmpty(),
-    body('activityId').optional({ nullable: true }).isUUID(),
-    body('activityLinks').optional().isArray(),
-    body('activityLinks.*.activityId').optional().isUUID(),
-    body('activityLinks.*.relationType').optional().isString().trim(),
-    body('activityLinks.*.scheduleImpactDays').optional().isInt().toInt(),
-    body('activityLinks.*.approvedScheduleImpactDays').optional().isInt().toInt(),
-    moneyBody('activityLinks.*.costImpact'),
-    moneyBody('activityLinks.*.approvedCostImpact'),
-    body('activityLinks.*.baselineStart').optional({ nullable: true }).isISO8601(),
-    body('activityLinks.*.baselineFinish').optional({ nullable: true }).isISO8601(),
-    body('activityLinks.*.impactedStart').optional({ nullable: true }).isISO8601(),
-    body('activityLinks.*.impactedFinish').optional({ nullable: true }).isISO8601(),
-    body('activityLinks.*.impactBasis').optional({ nullable: true }).isString().trim(),
-    body('activityLinks.*.notes').optional({ nullable: true }).isString().trim(),
-    body('affectedActivityIds').optional().isArray(),
-    body('affectedActivityIds.*').optional().isUUID(),
-    body('allocationLinks').optional().isArray(),
-    body('allocationLinks.*.allocationId').optional({ nullable: true }).isUUID(),
-    body('allocationLinks.*.boqItemId').optional({ nullable: true }).isUUID(),
-    body('allocationLinks.*.quantity').optional().isFloat({ min: 0 }).toFloat(),
-    moneyBody('allocationLinks.*.amount'),
-    body('allocationLinks.*.notes').optional({ nullable: true }).isString().trim(),
-    body('correspondenceIds').optional().isArray(),
-    body('correspondenceIds.*').optional().isUUID(),
-    body('correspondenceLinks').optional().isArray(),
-    body('correspondenceLinks.*.correspondenceId').optional().isUUID(),
-    body('correspondenceLinks.*.relationType').optional().isString().trim(),
-    body('attachmentRefs').optional().isArray(),
-    body('attachmentRefs.*.documentId').optional({ nullable: true }).isUUID(),
-    body('supportingDocumentIds').optional().isArray(),
-    body('supportingDocumentIds.*').optional().isUUID(),
-    body('documentIds').optional().isArray(),
-    body('documentIds.*').optional().isUUID(),
-    body('category').optional().isString().trim(),
-    moneyBody('value'),
-    body('status').optional().isIn(['pending', 'approved', 'rejected']),
-    body('scheduleImpact').optional().isInt().toInt(),
-    body('submittedDate').optional().isISO8601(),
-    body('raisedBy').optional().isString().trim(),
-    body('rejectedReason').optional().isString().trim(),
-    body('approvalComment').optional({ nullable: true }).isString().trim().isLength({
-      max: 2000,
-    }),
+    param("id").isUUID(),
+    body("description").optional().isString().trim().notEmpty(),
+    body("activityId").optional({ nullable: true }).isUUID(),
+    body("activityLinks").optional().isArray(),
+    body("activityLinks.*.activityId").optional().isUUID(),
+    body("activityLinks.*.relationType").optional().isString().trim(),
+    body("activityLinks.*.scheduleImpactDays").optional().isInt().toInt(),
+    body("activityLinks.*.approvedScheduleImpactDays")
+      .optional()
+      .isInt()
+      .toInt(),
+    moneyBody("activityLinks.*.costImpact"),
+    moneyBody("activityLinks.*.approvedCostImpact"),
+    body("activityLinks.*.baselineStart")
+      .optional({ nullable: true })
+      .isISO8601(),
+    body("activityLinks.*.baselineFinish")
+      .optional({ nullable: true })
+      .isISO8601(),
+    body("activityLinks.*.impactedStart")
+      .optional({ nullable: true })
+      .isISO8601(),
+    body("activityLinks.*.impactedFinish")
+      .optional({ nullable: true })
+      .isISO8601(),
+    body("activityLinks.*.impactBasis")
+      .optional({ nullable: true })
+      .isString()
+      .trim(),
+    body("activityLinks.*.notes")
+      .optional({ nullable: true })
+      .isString()
+      .trim(),
+    body("affectedActivityIds").optional().isArray(),
+    body("affectedActivityIds.*").optional().isUUID(),
+    body("allocationLinks").optional().isArray(),
+    body("allocationLinks.*.allocationId")
+      .optional({ nullable: true })
+      .isUUID(),
+    body("allocationLinks.*.boqItemId").optional({ nullable: true }).isUUID(),
+    body("allocationLinks.*.quantity").optional().isFloat({ min: 0 }).toFloat(),
+    moneyBody("allocationLinks.*.amount"),
+    body("allocationLinks.*.notes")
+      .optional({ nullable: true })
+      .isString()
+      .trim(),
+    body("correspondenceIds").optional().isArray(),
+    body("correspondenceIds.*").optional().isUUID(),
+    body("correspondenceLinks").optional().isArray(),
+    body("correspondenceLinks.*.correspondenceId").optional().isUUID(),
+    body("correspondenceLinks.*.relationType").optional().isString().trim(),
+    body("attachmentRefs").optional().isArray(),
+    body("attachmentRefs.*.documentId").optional({ nullable: true }).isUUID(),
+    body("supportingDocumentIds").optional().isArray(),
+    body("supportingDocumentIds.*").optional().isUUID(),
+    body("documentIds").optional().isArray(),
+    body("documentIds.*").optional().isUUID(),
+    body("category").optional().isString().trim(),
+    moneyBody("value"),
+    body("status")
+      .optional()
+      .isIn(["draft", "pending", "approved", "rejected"]),
+    body("scheduleImpact").optional().isInt().toInt(),
+    body("scheduleImpactSummary")
+      .optional({ nullable: true })
+      .isString()
+      .trim()
+      .isLength({
+        max: 4000,
+      }),
+    body("costImpactSummary")
+      .optional({ nullable: true })
+      .isString()
+      .trim()
+      .isLength({
+        max: 4000,
+      }),
+    body("submittedDate").optional().isISO8601(),
+    body("raisedBy").optional().isString().trim(),
+    body("rejectedReason").optional().isString().trim(),
+    body("approvalComment")
+      .optional({ nullable: true })
+      .isString()
+      .trim()
+      .isLength({
+        max: 2000,
+      }),
     validate,
   ],
   asyncHandler(async (req, res) => {
@@ -141,26 +235,137 @@ router.patch(
       projectId: req.params.projectId,
       coId: req.params.id,
       userId: req.user.id,
-      userRole: req.user.role,
+      userRole: getEffectiveRole(req),
       payload: req.body,
     });
     return sendSuccess(res, result);
   }),
 );
 
-router.delete(
-  '/:id',
-  requireRoles('pm'),
-  [param('id').isUUID(), validate],
+router.post(
+  "/:id/submit",
+  requirePermission("change_order", "submit", {
+    transition: "change_order.submit",
+  }),
+  [
+    param("id").isUUID(),
+    body("comment").optional({ nullable: true }).isString().trim().isLength({
+      max: 2000,
+    }),
+    validate,
+  ],
   asyncHandler(async (req, res) => {
-    await changeOrderService.deleteChangeOrder({
+    const result = await changeOrderService.submitChangeOrder({
       orgId: req.user.orgId,
       projectId: req.params.projectId,
       coId: req.params.id,
       userId: req.user.id,
-      userRole: req.user.role,
+      userRole: getEffectiveRole(req),
+      comment: req.body.comment,
     });
-    return sendSuccess(res, { deleted: true });
+    return sendSuccess(res, result);
+  }),
+);
+
+router.post(
+  "/:id/approve",
+  requirePermission("change_order", "approve", {
+    transition: "change_order.approve",
+  }),
+  [
+    param("id").isUUID(),
+    body("comment").optional({ nullable: true }).isString().trim().isLength({
+      max: 2000,
+    }),
+    validate,
+  ],
+  asyncHandler(async (req, res) => {
+    const result = await changeOrderService.approveChangeOrder({
+      orgId: req.user.orgId,
+      projectId: req.params.projectId,
+      coId: req.params.id,
+      userId: req.user.id,
+      userRole: getEffectiveRole(req),
+      comment: req.body.comment,
+    });
+    return sendSuccess(res, result);
+  }),
+);
+
+const rejectChangeOrderRoute = asyncHandler(async (req, res) => {
+  const result = await changeOrderService.rejectChangeOrder({
+    orgId: req.user.orgId,
+    projectId: req.params.projectId,
+    coId: req.params.id,
+    userId: req.user.id,
+    userRole: getEffectiveRole(req),
+    reason: req.body.reason,
+  });
+  return sendSuccess(res, result);
+});
+
+const rejectChangeOrderValidators = [
+  param("id").isUUID(),
+  body("reason").trim().notEmpty().isLength({ max: 2000 }),
+  validate,
+];
+
+router.post(
+  "/:id/reject",
+  requirePermission("change_order", "approve", {
+    transition: "change_order.reject",
+  }),
+  rejectChangeOrderValidators,
+  rejectChangeOrderRoute,
+);
+
+router.post(
+  "/:id/disapprove",
+  requirePermission("change_order", "approve", {
+    transition: "change_order.reject",
+  }),
+  rejectChangeOrderValidators,
+  rejectChangeOrderRoute,
+);
+
+router.post(
+  "/:id/reopen",
+  requirePermission("change_order", "submit", {
+    transition: "change_order.reopen",
+  }),
+  [
+    param("id").isUUID(),
+    body("comment").optional({ nullable: true }).isString().trim().isLength({
+      max: 2000,
+    }),
+    validate,
+  ],
+  asyncHandler(async (req, res) => {
+    const result = await changeOrderService.reopenChangeOrder({
+      orgId: req.user.orgId,
+      projectId: req.params.projectId,
+      coId: req.params.id,
+      userId: req.user.id,
+      userRole: getEffectiveRole(req),
+      comment: req.body.comment,
+    });
+    return sendSuccess(res, result);
+  }),
+);
+
+router.delete(
+  "/:id",
+  requireRoles("pm"),
+  [param("id").isUUID(), validate],
+  asyncHandler(async (req, res) => {
+    const result = await changeOrderService.deleteChangeOrder({
+      orgId: req.user.orgId,
+      projectId: req.params.projectId,
+      coId: req.params.id,
+      userId: req.user.id,
+      userRole: getEffectiveRole(req),
+    });
+    return sendSuccess(res, result);
   }),
 );
 

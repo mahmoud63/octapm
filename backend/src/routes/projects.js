@@ -1,19 +1,19 @@
-const express = require('express');
-const { body, param, query } = require('express-validator');
-const { asyncHandler } = require('../utils/async-handler');
-const { sendSuccess } = require('../utils/api-response');
-const { authenticate } = require('../middleware/auth');
-const { requireProjectAccess } = require('../middleware/project-access');
-const { requireRoles } = require('../middleware/rbac');
-const { validate } = require('../middleware/validate');
+const express = require("express");
+const { body, param, query } = require("express-validator");
+const { asyncHandler } = require("../utils/async-handler");
+const { sendSuccess } = require("../utils/api-response");
+const { authenticate } = require("../middleware/auth");
+const { requireProjectAccess } = require("../middleware/project-access");
+const { requireRoles } = require("../middleware/rbac");
+const { validate } = require("../middleware/validate");
 const {
   enforceProjectLimit,
   subscriptionGate,
-} = require('../middleware/subscription-gate');
-const { moneyBody } = require('../utils/money');
-const projectService = require('../services/project.service');
-const setupReadinessService = require('../services/project-setup-readiness.service');
-const workspaceDashboardService = require('../services/workspace-dashboard.service');
+} = require("../middleware/subscription-gate");
+const { moneyBody } = require("../utils/money");
+const projectService = require("../services/project.service");
+const setupReadinessService = require("../services/project-setup-readiness.service");
+const workspaceDashboardService = require("../services/workspace-dashboard.service");
 
 const router = express.Router();
 
@@ -21,20 +21,20 @@ router.use(authenticate);
 router.use(subscriptionGate);
 
 const CONTRACT_TYPES = [
-  'lump_sum',
-  'unit_rate',
-  'remeasurement',
-  'cost_plus',
-  'design_build',
-  'epc',
-  'other',
+  "lump_sum",
+  "unit_rate",
+  "remeasurement",
+  "cost_plus",
+  "design_build",
+  "epc",
+  "other",
 ];
 
-const PROJECT_CALENDARS = ['five_day', 'six_day', 'seven_day', 'custom'];
+const PROJECT_CALENDARS = ["five_day", "six_day", "seven_day", "custom"];
 const nestedProjectAccess = [
-  param('projectId').isUUID(),
+  param("projectId").isUUID(),
   validate,
-  requireProjectAccess('projectId'),
+  requireProjectAccess("projectId"),
 ];
 
 const emptyStringToNull = (value) => {
@@ -62,48 +62,79 @@ const optionalEnum = (field, values) =>
 
 const projectPayloadValidators = ({ requireName = false } = {}) => [
   requireName
-    ? body('name').isString().trim().notEmpty()
-    : body('name').optional().isString().trim().notEmpty(),
-  optionalText('type'),
-  optionalText('location'),
-  optionalText('clientName'),
-  optionalText('consultantName'),
-  optionalText('contractorName'),
-  optionalEnum('contractType', CONTRACT_TYPES),
-  optionalText('contractNumber'),
-  body('startDate').optional({ nullable: true }).isISO8601(),
-  body('endDate').optional({ nullable: true }).isISO8601(),
-  body('completionDate').optional({ nullable: true }).isISO8601(),
-  body('baselineDate').optional({ nullable: true }).isISO8601(),
-  body('revisedCompletionDate').optional({ nullable: true }).isISO8601(),
-  body('duration').optional({ nullable: true }).isInt({ min: 0 }).toInt(),
-  body('durationUnit').optional().isIn(['days', 'weeks', 'months']),
-  moneyBody('contractValue'),
-  body('defaultRetentionRate')
+    ? body("name").isString().trim().notEmpty()
+    : body("name").optional().isString().trim().notEmpty(),
+  optionalText("type"),
+  optionalText("location"),
+  optionalText("clientName"),
+  optionalText("consultantName"),
+  optionalText("contractorName"),
+  optionalEnum("contractType", CONTRACT_TYPES),
+  optionalText("contractNumber"),
+  body("startDate").optional({ nullable: true }).isISO8601(),
+  body("endDate").optional({ nullable: true }).isISO8601(),
+  body("completionDate").optional({ nullable: true }).isISO8601(),
+  body("baselineDate").optional({ nullable: true }).isISO8601(),
+  body("dataDate").optional({ nullable: true }).isISO8601(),
+  body("revisedCompletionDate").optional({ nullable: true }).isISO8601(),
+  body("duration").optional({ nullable: true }).isInt({ min: 0 }).toInt(),
+  body("durationUnit").optional().isIn(["days", "weeks", "months"]),
+  moneyBody("contractValue"),
+  body("defaultRetentionRate")
     .optional({ nullable: true })
     .isFloat({ min: 0, max: 100 })
     .toFloat(),
-  moneyBody('ldRatePerDay'),
-  body('weatherAllowanceDays').optional().isInt({ min: 0 }).toInt(),
-  optionalEnum('projectCalendar', PROJECT_CALENDARS),
-  body('reportingCutoffDay')
+  moneyBody("ldRatePerDay"),
+  body("weatherAllowanceDays").optional().isInt({ min: 0 }).toInt(),
+  optionalEnum("projectCalendar", PROJECT_CALENDARS),
+  body("reportingCutoffDay")
     .optional({ nullable: true })
     .isInt({ min: 1, max: 31 })
     .toInt(),
-  body('currency')
+  body("currency")
     .optional()
     .isString()
     .isLength({ min: 3, max: 3 })
     .customSanitizer((value) => value.toUpperCase()),
-  body('status')
+  body("status")
     .optional()
-    .isIn(['active', 'on_hold', 'completed', 'cancelled']),
-  body('endDate')
+    .isIn(["active", "on_hold", "completed", "cancelled"]),
+  body("parties").optional().custom((value) => {
+    if (Array.isArray(value) || typeof value === "object") return true;
+    throw new Error("parties must be an object or array");
+  }),
+  body("parties.*.role")
+    .optional()
+    .isIn(["owner", "consultant", "contractor", "subcontractor"]),
+  body("parties.*.companyId").optional({ nullable: true }).isUUID(),
+  body("parties.*.companyName")
+    .optional({ nullable: true })
+    .isString()
+    .trim()
+    .isLength({ max: 255 }),
+  body("parties.*.contactName")
+    .optional({ nullable: true })
+    .isString()
+    .trim()
+    .isLength({ max: 255 }),
+  body("parties.*.contactEmail")
+    .optional({ nullable: true })
+    .isEmail()
+    .normalizeEmail(),
+  body("parties.*.contactPhone")
+    .optional({ nullable: true })
+    .isString()
+    .trim()
+    .isLength({ max: 80 }),
+  body("parties.*.accessLevel")
+    .optional()
+    .isIn(["read_only", "collaborator", "reviewer", "admin"]),
+  body("endDate")
     .optional({ nullable: true })
     .custom((endDate, { req }) => {
       if (endDate && req.body.startDate) {
         if (new Date(endDate) <= new Date(req.body.startDate)) {
-          throw new Error('endDate must be after startDate');
+          throw new Error("endDate must be after startDate");
         }
       }
 
@@ -112,12 +143,13 @@ const projectPayloadValidators = ({ requireName = false } = {}) => [
 ];
 
 router.get(
-  '/',
+  "/",
   [
-    query('cursor').optional().isUUID(),
-    query('limit').optional().isInt({ min: 1, max: 100 }).toInt(),
-    query('status').optional().isString(),
-    query('search').optional().isString().trim(),
+    query("cursor").optional().isUUID(),
+    query("limit").optional().isInt({ min: 1, max: 100 }).toInt(),
+    query("status").optional().isString(),
+    query("includeArchived").optional().isBoolean().toBoolean(),
+    query("search").optional().isString().trim(),
     validate,
   ],
   asyncHandler(async (req, res) => {
@@ -133,7 +165,7 @@ router.get(
 );
 
 router.get(
-  '/workspace-dashboard',
+  "/workspace-dashboard",
   asyncHandler(async (req, res) => {
     const result = await workspaceDashboardService.getWorkspaceDashboard({
       orgId: req.user.orgId,
@@ -146,8 +178,8 @@ router.get(
 );
 
 router.post(
-  '/',
-  requireRoles('pm', 'planning_eng'),
+  "/",
+  requireRoles("pm", "planning_eng"),
   enforceProjectLimit,
   [...projectPayloadValidators({ requireName: true }), validate],
   asyncHandler(async (req, res) => {
@@ -163,8 +195,8 @@ router.post(
 );
 
 router.get(
-  '/:id',
-  [param('id').isUUID(), validate, requireProjectAccess('id')],
+  "/:id",
+  [param("id").isUUID(), validate, requireProjectAccess("id")],
   asyncHandler(async (req, res) => {
     const result = await projectService.getProjectById({
       orgId: req.user.orgId,
@@ -178,8 +210,8 @@ router.get(
 );
 
 router.get(
-  '/:id/setup-readiness',
-  [param('id').isUUID(), validate, requireProjectAccess('id')],
+  "/:id/setup-readiness",
+  [param("id").isUUID(), validate, requireProjectAccess("id")],
   asyncHandler(async (req, res) => {
     const result = await setupReadinessService.getSetupReadiness({
       orgId: req.user.orgId,
@@ -191,13 +223,13 @@ router.get(
 );
 
 router.patch(
-  '/:id',
-  requireRoles('pm', 'planning_eng'),
+  "/:id",
+  requireRoles("pm", "planning_eng"),
   [
-    param('id').isUUID(),
+    param("id").isUUID(),
     ...projectPayloadValidators(),
     validate,
-    requireProjectAccess('id'),
+    requireProjectAccess("id"),
   ],
   asyncHandler(async (req, res) => {
     const result = await projectService.updateProject({
@@ -213,9 +245,9 @@ router.patch(
 );
 
 router.delete(
-  '/:id',
-  requireRoles('pm', 'planning_eng'),
-  [param('id').isUUID(), validate, requireProjectAccess('id')],
+  "/:id",
+  requireRoles("pm", "planning_eng"),
+  [param("id").isUUID(), validate, requireProjectAccess("id")],
   asyncHandler(async (req, res) => {
     const result = await projectService.deleteProject({
       orgId: req.user.orgId,
@@ -228,95 +260,130 @@ router.delete(
   }),
 );
 
-router.use('/:projectId/boq', nestedProjectAccess, require('./boq'));
+router.use("/:projectId/boq", nestedProjectAccess, require("./boq"));
 router.use(
-  '/:projectId/activity-boq-allocations',
+  "/:projectId/activity-boq-allocations",
   nestedProjectAccess,
-  require('./activity-boq-allocations'),
-);
-router.use('/:projectId/activities', nestedProjectAccess, require('./activities'));
-router.use(
-  '/:projectId/daily-reports',
-  nestedProjectAccess,
-  require('./daily-reports'),
+  require("./activity-boq-allocations"),
 );
 router.use(
-  '/:projectId/site-diaries',
+  "/:projectId/parties",
   nestedProjectAccess,
-  require('./site-diaries'),
+  require("./project-parties"),
 );
 router.use(
-  '/:projectId/site-reporting',
+  "/:projectId/activities",
   nestedProjectAccess,
-  require('./site-reporting'),
-);
-router.use('/:projectId/workflow', nestedProjectAccess, require('./workflow-uploads'));
-router.use('/:projectId/equipment', nestedProjectAccess, require('./equipment'));
-router.use('/:projectId/audit', nestedProjectAccess, require('./audit'));
-router.use('/:projectId/schedule', nestedProjectAccess, require('./schedule'));
-router.use('/:projectId/import', nestedProjectAccess, require('./import'));
-router.use('/:projectId/export', nestedProjectAccess, require('./export'));
-router.use(
-  '/:projectId/weekly-reports',
-  nestedProjectAccess,
-  require('./weekly-reports'),
-);
-router.use('/:projectId/reports', nestedProjectAccess, require('./reports'));
-router.use('/:projectId/health', nestedProjectAccess, require('./health'));
-router.use('/:projectId/risks', nestedProjectAccess, require('./risks'));
-router.use('/:projectId/long-lead', nestedProjectAccess, require('./long-lead'));
-router.use(
-  '/:projectId/procurement',
-  nestedProjectAccess,
-  require('./procurement'),
-);
-router.use('/:projectId/cost', nestedProjectAccess, require('./cost'));
-router.use(
-  '/:projectId/change-orders',
-  nestedProjectAccess,
-  require('./change-orders'),
-);
-router.use('/:projectId/ipc', nestedProjectAccess, require('./ipc'));
-router.use(
-  '/:projectId/sub-valuations',
-  nestedProjectAccess,
-  require('./sub-valuations'),
+  require("./activities"),
 );
 router.use(
-  '/:projectId/budget-revisions',
+  "/:projectId/daily-reports",
   nestedProjectAccess,
-  require('./budget-revisions'),
-);
-router.use('/:projectId/cash-flow', nestedProjectAccess, require('./cash-flow'));
-router.use('/:projectId/eot', nestedProjectAccess, require('./eot'));
-router.use(
-  '/:projectId/weather-delays',
-  nestedProjectAccess,
-  require('./weather-delays'),
-);
-router.use('/:projectId/quality', nestedProjectAccess, require('./quality'));
-router.use('/:projectId/ncr', nestedProjectAccess, require('./ncr'));
-router.use('/:projectId/itp', nestedProjectAccess, require('./itp'));
-router.use('/:projectId/defects', nestedProjectAccess, require('./defects'));
-router.use('/:projectId/safety', nestedProjectAccess, require('./safety'));
-router.use(
-  '/:projectId/material-tests',
-  nestedProjectAccess,
-  require('./material-tests'),
-);
-router.use('/:projectId/doc-control', nestedProjectAccess, require('./doc-control'));
-router.use('/:projectId/rfi', nestedProjectAccess, require('./rfi'));
-router.use('/:projectId/submittals', nestedProjectAccess, require('./submittals'));
-router.use('/:projectId/drawings', nestedProjectAccess, require('./drawings'));
-router.use(
-  '/:projectId/transmittals',
-  nestedProjectAccess,
-  require('./transmittals'),
+  require("./daily-reports"),
 );
 router.use(
-  '/:projectId/correspondence',
+  "/:projectId/site-diaries",
   nestedProjectAccess,
-  require('./correspondence'),
+  require("./site-diaries"),
+);
+router.use(
+  "/:projectId/site-reporting",
+  nestedProjectAccess,
+  require("./site-reporting"),
+);
+router.use(
+  "/:projectId/workflow",
+  nestedProjectAccess,
+  require("./workflow-uploads"),
+);
+router.use(
+  "/:projectId/equipment",
+  nestedProjectAccess,
+  require("./equipment"),
+);
+router.use("/:projectId/audit", nestedProjectAccess, require("./audit"));
+router.use("/:projectId/schedule", nestedProjectAccess, require("./schedule"));
+router.use("/:projectId/import", nestedProjectAccess, require("./import"));
+router.use("/:projectId/export", nestedProjectAccess, require("./export"));
+router.use(
+  "/:projectId/weekly-reports",
+  nestedProjectAccess,
+  require("./weekly-reports"),
+);
+router.use("/:projectId/reports", nestedProjectAccess, require("./reports"));
+router.use("/:projectId/health", nestedProjectAccess, require("./health"));
+router.use("/:projectId/meetings", nestedProjectAccess, require("./meetings"));
+router.use("/:projectId/tasks", nestedProjectAccess, require("./tasks"));
+router.use("/:projectId/risks", nestedProjectAccess, require("./risks"));
+router.use(
+  "/:projectId/long-lead",
+  nestedProjectAccess,
+  require("./long-lead"),
+);
+router.use(
+  "/:projectId/procurement",
+  nestedProjectAccess,
+  require("./procurement"),
+);
+router.use("/:projectId/cost", nestedProjectAccess, require("./cost"));
+router.use(
+  "/:projectId/change-orders",
+  nestedProjectAccess,
+  require("./change-orders"),
+);
+router.use("/:projectId/ipc", nestedProjectAccess, require("./ipc"));
+router.use(
+  "/:projectId/sub-valuations",
+  nestedProjectAccess,
+  require("./sub-valuations"),
+);
+router.use(
+  "/:projectId/budget-revisions",
+  nestedProjectAccess,
+  require("./budget-revisions"),
+);
+router.use(
+  "/:projectId/cash-flow",
+  nestedProjectAccess,
+  require("./cash-flow"),
+);
+router.use("/:projectId/eot", nestedProjectAccess, require("./eot"));
+router.use(
+  "/:projectId/weather-delays",
+  nestedProjectAccess,
+  require("./weather-delays"),
+);
+router.use("/:projectId/quality", nestedProjectAccess, require("./quality"));
+router.use("/:projectId/ncr", nestedProjectAccess, require("./ncr"));
+router.use("/:projectId/itp", nestedProjectAccess, require("./itp"));
+router.use("/:projectId/defects", nestedProjectAccess, require("./defects"));
+router.use("/:projectId/safety", nestedProjectAccess, require("./safety"));
+router.use(
+  "/:projectId/material-tests",
+  nestedProjectAccess,
+  require("./material-tests"),
+);
+router.use(
+  "/:projectId/doc-control",
+  nestedProjectAccess,
+  require("./doc-control"),
+);
+router.use("/:projectId/rfi", nestedProjectAccess, require("./rfi"));
+router.use(
+  "/:projectId/submittals",
+  nestedProjectAccess,
+  require("./submittals"),
+);
+router.use("/:projectId/drawings", nestedProjectAccess, require("./drawings"));
+router.use(
+  "/:projectId/transmittals",
+  nestedProjectAccess,
+  require("./transmittals"),
+);
+router.use(
+  "/:projectId/correspondence",
+  nestedProjectAccess,
+  require("./correspondence"),
 );
 
 module.exports = router;

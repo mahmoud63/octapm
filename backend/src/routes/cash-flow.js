@@ -1,82 +1,73 @@
-const express = require('express');
-const { body, param } = require('express-validator');
-const { validate } = require('../middleware/validate');
-const { sendSuccess } = require('../utils/api-response');
-const { moneyBody } = require('../utils/money');
+const express = require("express");
+const { asyncHandler } = require("../utils/async-handler");
+const { body, param } = require("express-validator");
+const { validate } = require("../middleware/validate");
+const { sendSuccess } = require("../utils/api-response");
+const { moneyBody } = require("../utils/money");
 const {
   listCashFlow,
   createManualCashFlowEntry,
   rebuildCashFlow,
   deleteCashFlowEntry,
-} = require('../services/cash-flow.service');
+} = require("../services/cash-flow.service");
 
 const router = express.Router({ mergeParams: true });
 
-router.get('/', async (req, res, next) => {
-  try {
+router.get(
+  "/",
+  asyncHandler(async (req, res) => {
     const data = await listCashFlow({
       orgId: req.user.orgId,
       projectId: req.params.projectId,
     });
 
     return sendSuccess(res, data);
-  } catch (error) {
-    return next(error);
-  }
-});
-
-router.post(
-  '/',
-  [
-    body('period').matches(/^\d{4}-\d{2}$/),
-    moneyBody('inflow'),
-    moneyBody('outflow'),
-    validate,
-  ],
-  async (req, res, next) => {
-    try {
-      const row = await createManualCashFlowEntry({
-        orgId: req.user.orgId,
-        projectId: req.params.projectId,
-        payload: req.body,
-      });
-
-      return sendSuccess(res, row, 201);
-    } catch (error) {
-      return next(error);
-    }
-  },
+  }),
 );
 
-router.post('/rebuild', async (req, res, next) => {
-  try {
+router.post(
+  "/",
+  [
+    body("period").matches(/^\d{4}-\d{2}$/),
+    moneyBody("inflow"),
+    moneyBody("outflow"),
+    validate,
+  ],
+  asyncHandler(async (req, res) => {
+    const row = await createManualCashFlowEntry({
+      orgId: req.user.orgId,
+      projectId: req.params.projectId,
+      payload: req.body,
+    });
+
+    return sendSuccess(res, row, 201);
+  }),
+);
+
+router.post(
+  "/rebuild",
+  asyncHandler(async (req, res) => {
     const data = await rebuildCashFlow({
       orgId: req.user.orgId,
       projectId: req.params.projectId,
     });
 
     return sendSuccess(res, data);
-  } catch (error) {
-    return next(error);
-  }
-});
+  }),
+);
 
 router.delete(
-  '/:entryId',
-  [param('entryId').isUUID(), validate],
-  async (req, res, next) => {
-    try {
-      const data = await deleteCashFlowEntry({
-        orgId: req.user.orgId,
-        projectId: req.params.projectId,
-        entryId: req.params.entryId,
-      });
+  "/:entryId",
+  [param("entryId").isUUID(), validate],
+  asyncHandler(async (req, res) => {
+    const data = await deleteCashFlowEntry({
+      orgId: req.user.orgId,
+      projectId: req.params.projectId,
+      entryId: req.params.entryId,
+    });
 
-      return sendSuccess(res, data);
-    } catch (error) {
-      return next(error);
-    }
-  },
+    return sendSuccess(res, data);
+  }),
 );
 
 module.exports = router;

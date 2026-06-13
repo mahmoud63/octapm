@@ -1,5 +1,13 @@
 import { useMemo, useState } from 'react'
-import { Check, CircleDollarSign, Link2, Pencil, Send, X } from 'lucide-react'
+import {
+  Check,
+  CircleDollarSign,
+  History,
+  Link2,
+  Pencil,
+  Send,
+  X,
+} from 'lucide-react'
 import { toast } from 'sonner'
 import {
   hasMoneyPrecision,
@@ -7,6 +15,7 @@ import {
   MONEY_PRECISION_MESSAGE,
   toMoneyNumber,
 } from '@/lib/money'
+import { useCanPerform } from '@/lib/permissions'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -19,6 +28,7 @@ import {
 } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
 import { useActivities } from '@/features/activities/hooks/use-activities'
+import { HistoryPanel } from '@/features/audit/components/audit-history-panel'
 import type { BoqItemWithActivities } from '../data/schema'
 import {
   useActivityBoqAllocations,
@@ -55,6 +65,13 @@ const statusVariant: Record<
   rejected: 'destructive',
 }
 
+const statusLabel: Record<string, string> = {
+  draft: 'Draft',
+  submitted: 'Submitted',
+  approved: 'Approved',
+  rejected: 'Rejected',
+}
+
 export function BoqAllocationPanel({ projectId, items, currency }: Props) {
   const { data: activities = [] } = useActivities(projectId)
   const { data, isLoading } = useActivityBoqAllocations(projectId)
@@ -63,12 +80,40 @@ export function BoqAllocationPanel({ projectId, items, currency }: Props) {
   const submitAllocation = useSubmitActivityBoqAllocation(projectId)
   const approveAllocation = useApproveActivityBoqAllocation(projectId)
   const rejectAllocation = useRejectActivityBoqAllocation(projectId)
+  const canCreateAllocation = useCanPerform(
+    'boq',
+    'create',
+    'allocation.create'
+  )
+  const canUpdateAllocation = useCanPerform(
+    'boq',
+    'update',
+    'allocation.update'
+  )
+  const canSubmitAllocation = useCanPerform(
+    'boq',
+    'submit',
+    'allocation.submit'
+  )
+  const canApproveAllocation = useCanPerform(
+    'boq',
+    'approve',
+    'allocation.approve'
+  )
+  const canRejectAllocation = useCanPerform(
+    'boq',
+    'approve',
+    'allocation.reject'
+  )
 
   const [boqItemId, setBoqItemId] = useState('')
   const [activityId, setActivityId] = useState('')
   const [quantity, setQuantity] = useState('')
   const [amount, setAmount] = useState('')
   const [notes, setNotes] = useState('')
+  const [historyAllocationId, setHistoryAllocationId] = useState<string | null>(
+    null
+  )
 
   const selectedBoqItem = useMemo(
     () => items.find((item) => item.id === boqItemId) ?? null,
@@ -77,6 +122,10 @@ export function BoqAllocationPanel({ projectId, items, currency }: Props) {
 
   const summary = data?.summary
   const allocations = data?.allocations ?? []
+  const selectedHistoryAllocation =
+    allocations.find((allocation) => allocation.id === historyAllocationId) ||
+    allocations[0] ||
+    null
   const hasActivities = activities.length > 0
 
   const resetForm = () => {
@@ -147,13 +196,21 @@ export function BoqAllocationPanel({ projectId, items, currency }: Props) {
         <div>
           <div className='flex items-center gap-2'>
             <Link2 className='h-4 w-4 text-primary' />
-            <h3 className='text-base font-semibold'>Activity BOQ Allocation</h3>
+            <h3 className='text-base font-semibold'>
+              BOQ Allocation Workflow
+            </h3>
           </div>
         </div>
 
-        <div className='grid grid-cols-3 gap-2 text-right text-sm'>
+        <div className='grid grid-cols-2 gap-2 text-right text-sm lg:grid-cols-4'>
           <div className='rounded-md border px-3 py-2'>
-            <p className='text-xs text-muted-foreground'>Approved</p>
+            <p className='text-xs text-muted-foreground'>Allocated</p>
+            <p className='font-semibold'>
+              {fmtMoney(currency, summary?.activeAllocatedAmount ?? 0)}
+            </p>
+          </div>
+          <div className='rounded-md border px-3 py-2'>
+            <p className='text-xs text-muted-foreground'>Approved EV/IPC</p>
             <p className='font-semibold'>
               {fmtMoney(currency, summary?.approvedAllocatedAmount ?? 0)}
             </p>
@@ -231,11 +288,12 @@ export function BoqAllocationPanel({ projectId, items, currency }: Props) {
             !activityId ||
             !quantity ||
             !hasActivities ||
+            !canCreateAllocation ||
             createAllocation.isPending
           }
         >
           <CircleDollarSign className='h-4 w-4' />
-          Allocate
+          Create Draft
         </Button>
       </div>
 
@@ -293,68 +351,103 @@ export function BoqAllocationPanel({ projectId, items, currency }: Props) {
                   </td>
                   <td className='px-3 py-2 text-center'>
                     <Badge variant={statusVariant[allocation.status]}>
-                      {allocation.status}
+                      {statusLabel[allocation.status] ?? allocation.status}
                     </Badge>
                   </td>
                   <td className='px-3 py-2'>
                     <div className='flex justify-end gap-1'>
                       {allocation.status === 'draft' && (
                         <>
-                          <Button
-                            variant='ghost'
-                            size='icon'
-                            className='size-8'
-                            onClick={() =>
-                              handleEdit(
-                                allocation.id,
-                                allocation.quantity,
-                                allocation.amount
-                              )
-                            }
-                          >
-                            <Pencil className='h-4 w-4' />
-                          </Button>
-                          <Button
-                            variant='ghost'
-                            size='icon'
-                            className='size-8'
-                            onClick={() =>
-                              submitAllocation.mutate(allocation.id)
-                            }
-                          >
-                            <Send className='h-4 w-4' />
-                          </Button>
+                          {canUpdateAllocation && (
+                            <Button
+                              variant='ghost'
+                              size='icon'
+                              className='size-8'
+                              onClick={() =>
+                                handleEdit(
+                                  allocation.id,
+                                  allocation.quantity,
+                                  allocation.amount
+                                )
+                              }
+                              title='Edit allocation'
+                            >
+                              <Pencil className='h-4 w-4' />
+                            </Button>
+                          )}
+                          {canSubmitAllocation && (
+                            <Button
+                              variant='ghost'
+                              size='icon'
+                              className='size-8'
+                              onClick={() =>
+                                submitAllocation.mutate(allocation.id)
+                              }
+                              title='Submit allocation'
+                            >
+                              <Send className='h-4 w-4' />
+                            </Button>
+                          )}
                         </>
                       )}
-                      {(allocation.status === 'draft' ||
-                        allocation.status === 'submitted') && (
+                      {allocation.status === 'submitted' && (
                         <>
-                          <Button
-                            variant='ghost'
-                            size='icon'
-                            className='size-8 text-green-600'
-                            onClick={() =>
-                              approveAllocation.mutate(allocation.id)
-                            }
-                          >
-                            <Check className='h-4 w-4' />
-                          </Button>
-                          <Button
-                            variant='ghost'
-                            size='icon'
-                            className='size-8 text-destructive'
-                            onClick={() => handleReject(allocation.id)}
-                          >
-                            <X className='h-4 w-4' />
-                          </Button>
+                          {canApproveAllocation && (
+                            <Button
+                              variant='ghost'
+                              size='icon'
+                              className='size-8 text-green-600'
+                              onClick={() =>
+                                approveAllocation.mutate(allocation.id)
+                              }
+                              title='Approve allocation'
+                            >
+                              <Check className='h-4 w-4' />
+                            </Button>
+                          )}
+                          {canRejectAllocation && (
+                            <Button
+                              variant='ghost'
+                              size='icon'
+                              className='size-8 text-destructive'
+                              onClick={() => handleReject(allocation.id)}
+                              title='Reject allocation'
+                            >
+                              <X className='h-4 w-4' />
+                            </Button>
+                          )}
                         </>
                       )}
+                      <Button
+                        variant={
+                          selectedHistoryAllocation?.id === allocation.id
+                            ? 'secondary'
+                            : 'ghost'
+                        }
+                        size='icon'
+                        className='size-8'
+                        onClick={() => setHistoryAllocationId(allocation.id)}
+                        title='Allocation history'
+                      >
+                        <History className='h-4 w-4' />
+                      </Button>
                     </div>
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
+        </div>
+      )}
+      {selectedHistoryAllocation && (
+        <div className='border-t p-4'>
+          <HistoryPanel
+            projectId={projectId}
+            entityType='activity_boq_allocation'
+            entityId={selectedHistoryAllocation.id}
+            title={`Allocation ${selectedHistoryAllocation.id.slice(0, 8)} History`}
+            limit={30}
+          />
         </div>
       )}
     </div>

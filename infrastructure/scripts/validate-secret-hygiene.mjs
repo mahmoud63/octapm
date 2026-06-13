@@ -2,6 +2,7 @@
 
 import { execFileSync } from 'node:child_process'
 import {
+  existsSync,
   mkdtempSync,
   readFileSync,
   readdirSync,
@@ -31,6 +32,9 @@ const SKIP_DIRS = new Set([
   'coverage',
   '.next',
   '.turbo',
+  '.logs',
+  '.pgdata',
+  'storage',
 ])
 
 const TEXT_FILE_EXTENSIONS = new Set([
@@ -57,6 +61,8 @@ const TEXT_FILE_EXTENSIONS = new Set([
 
 const hasTextExtension = (file) => {
   const lower = file.toLowerCase()
+  const name = lower.split(/[\\/]/).pop()
+  if (name === '.env' || name?.startsWith('.env.')) return true
   if (lower.endsWith('.tfvars.example')) return true
   const dotIndex = lower.lastIndexOf('.')
   return dotIndex >= 0 && TEXT_FILE_EXTENSIONS.has(lower.slice(dotIndex))
@@ -78,7 +84,7 @@ const walkFiles = (root, dir = root, files = []) => {
   return files
 }
 
-const listCandidateFiles = (root) => {
+const listGitFiles = (root) => {
   try {
     const output = execFileSync('git', ['ls-files', '-z'], {
       cwd: root,
@@ -88,10 +94,42 @@ const listCandidateFiles = (root) => {
     return output
       .split('\0')
       .filter(Boolean)
-      .filter(hasTextExtension)
   } catch (_error) {
-    return walkFiles(root)
+    return null
   }
+}
+
+const listCandidateFiles = (root) => {
+  const gitFiles = listGitFiles(root)
+  if (gitFiles) {
+    return gitFiles.filter(hasTextExtension)
+  }
+  return walkFiles(root)
+}
+
+const isAllowedEnvExample = (file) => {
+  const name = file.toLowerCase().split(/[\\/]/).pop()
+  return (
+    name === '.env.example' ||
+    Boolean(name?.startsWith('.env.') && name.endsWith('.example'))
+  )
+}
+
+const isRuntimeEnvFile = (file) => {
+  const name = file.toLowerCase().split(/[\\/]/).pop()
+  return (
+    Boolean(name) &&
+    (name === '.env' || name.startsWith('.env.')) &&
+    !isAllowedEnvExample(file)
+  )
+}
+
+const listTrackedRuntimeEnvFiles = (root) => {
+  const gitFiles = listGitFiles(root)
+  if (gitFiles) {
+    return gitFiles.filter(isRuntimeEnvFile)
+  }
+  return walkFiles(root).filter(isRuntimeEnvFile)
 }
 
 const lineNumberForIndex = (text, index) =>
@@ -117,6 +155,7 @@ const scanText = (text, file = '<inline>') => {
 const scanRepository = (root) =>
   listCandidateFiles(root).flatMap((file) => {
     const fullPath = join(root, file)
+    if (!existsSync(fullPath)) return []
     const text = readFileSync(fullPath, 'utf8')
     if (text.includes('\0')) return []
     return scanText(text, file)
@@ -143,6 +182,14 @@ const runSelfTest = () => {
     if (scanRepository(tmp).length !== 1) {
       throw new Error('self-test repository scan did not detect unsafe fixture')
     }
+    writeFileSync(join(tmp, '.env.production'), 'VITE_API_URL=https://example.test\n')
+    if (!listTrackedRuntimeEnvFiles(tmp).includes('.env.production')) {
+      throw new Error('self-test expected runtime env file detection')
+    }
+    writeFileSync(join(tmp, '.env.production.example'), 'VITE_API_URL=https://api.example.com\n')
+    if (listTrackedRuntimeEnvFiles(tmp).includes('.env.production.example')) {
+      throw new Error('self-test should allow env example files')
+    }
   } finally {
     rmSync(tmp, { recursive: true, force: true })
   }
@@ -157,6 +204,18 @@ const main = () => {
   }
 
   const root = resolve(import.meta.dirname, '..', '..')
+  const runtimeEnvFiles = listTrackedRuntimeEnvFiles(root)
+  if (runtimeEnvFiles.length > 0) {
+    console.error(
+      `${runtimeEnvFiles.length} tracked runtime environment file(s) found. Values are intentionally not printed.`,
+    )
+    for (const file of runtimeEnvFiles) {
+      console.error(`- ${file}: tracked runtime env file`)
+    }
+    process.exitCode = 1
+    return
+  }
+
   const findings = scanRepository(root)
   if (findings.length > 0) {
     console.error(

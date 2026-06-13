@@ -4,12 +4,14 @@ const { asyncHandler } = require('../utils/async-handler');
 const { sendSuccess } = require('../utils/api-response');
 const { HttpError } = require('../utils/http-error');
 const { authenticate } = require('../middleware/auth');
+const { billingLimiter } = require('../middleware/rate-limit');
 const { requireRoles } = require('../middleware/rbac');
 const { validate } = require('../middleware/validate');
 const subscriptionService = require('../services/subscription.service');
 
 const router = express.Router();
 router.use(authenticate);
+router.use(billingLimiter);
 
 const handleStripeError = (err) => {
   if (err?.type === 'StripeCardError') {

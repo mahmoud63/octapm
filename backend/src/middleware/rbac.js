@@ -1,7 +1,23 @@
 const { HttpError } = require('../utils/http-error');
-const { can } = require('../config/permissions');
+const { can, canParty, normalizeRoleId } = require('../config/permissions');
 
-const getEffectiveRole = (req) => req.projectAccess?.role || req.user?.role;
+const getEffectiveRole = (req) =>
+  normalizeRoleId(req.projectAccess?.role || req.user?.role);
+
+const getPartyAccessList = (req) =>
+  Array.isArray(req.projectAccess?.partyAccess)
+    ? req.projectAccess.partyAccess
+    : [];
+
+const canPartyAccess = (req, moduleName, action, transition) =>
+  getPartyAccessList(req).some((partyAccess) =>
+    canParty({
+      partyRole: partyAccess.role,
+      module: moduleName,
+      action,
+      transition,
+    }),
+  );
 
 const requireRoles = (...allowedRoles) => {
   return (req, res, next) => {
@@ -41,7 +57,8 @@ const requirePermission = (moduleName, action, options = {}) => {
         module: moduleName,
         action,
         transition,
-      })
+      }) &&
+      !canPartyAccess(req, moduleName, action, transition)
     ) {
       const error = new HttpError(
         403,
@@ -56,4 +73,4 @@ const requirePermission = (moduleName, action, options = {}) => {
   };
 };
 
-module.exports = { requirePermission, requireRoles };
+module.exports = { getEffectiveRole, requirePermission, requireRoles };

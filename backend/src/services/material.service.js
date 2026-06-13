@@ -49,7 +49,29 @@ const listMaterials = async ({ orgId, projectId, activityId }) => {
         orderBy: { createdAt: 'desc' },
       },
       usages: {
+        include: {
+          dailyReport: {
+            select: { id: true, date: true, shift: true, status: true },
+          },
+        },
         orderBy: { usageDate: 'desc' },
+        take: 10,
+      },
+      receiptLines: {
+        include: {
+          receipt: {
+            select: {
+              id: true,
+              receiptNumber: true,
+              receivedAt: true,
+              status: true,
+            },
+          },
+          dailyReport: {
+            select: { id: true, date: true, shift: true, status: true },
+          },
+        },
+        orderBy: { createdAt: 'desc' },
         take: 10,
       },
       leadTimeAlerts: true,
@@ -219,6 +241,7 @@ const addMaterial = async ({ orgId, projectId, activityId, payload, actor }) => 
         materialMaster: true,
         poLines: true,
         usages: true,
+        receiptLines: true,
         leadTimeAlerts: true,
         activity: { select: procurementService.ACTIVITY_SELECT },
       },
@@ -276,6 +299,7 @@ const updateMaterial = async ({
         materialMaster: true,
         poLines: true,
         usages: true,
+        receiptLines: true,
         leadTimeAlerts: true,
         activity: { select: procurementService.ACTIVITY_SELECT },
       },

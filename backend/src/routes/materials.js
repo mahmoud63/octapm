@@ -136,6 +136,7 @@ router.post(
     body('usageDate').optional({ nullable: true }).isISO8601().toDate(),
     body('poLineId').optional({ nullable: true }).isUUID(),
     body('receiptLineId').optional({ nullable: true }).isUUID(),
+    body('dailyReportId').optional({ nullable: true }).isUUID(),
     body('installedLocation').optional({ nullable: true }).isString().trim(),
     body('notes').optional({ nullable: true }).isString().trim(),
     validate,

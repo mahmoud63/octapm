@@ -8,6 +8,7 @@ const table = read('../src/features/long-lead/components/long-lead-table.tsx')
 const schedule = read(
   '../src/features/schedule/components/schedule-dashboard.tsx'
 )
+const gantt = read('../src/features/schedule/components/gantt-chart.tsx')
 const health = read('../src/features/projects/components/health-dashboard.tsx')
 
 assert.match(hook, /procurementRisk/, 'long-lead hook exposes risk envelope')
@@ -38,6 +39,19 @@ assert.match(
 )
 assert.ok(schedule.includes('Proc Risk'), 'schedule activities show risk column')
 assert.ok(schedule.includes('procurementAlerts'), 'schedule alert list exists')
+assert.ok(
+  schedule.includes("action: 'acknowledge'") &&
+    schedule.includes("action: 'resolve'"),
+  'schedule risk banner wires alert acknowledgement and resolution actions'
+)
+assert.ok(
+  gantt.includes('procurementRiskSummary'),
+  'Gantt consumes schedule procurement risk summaries'
+)
+assert.ok(
+  gantt.includes('Procurement Risk'),
+  'Gantt legend renders procurement risk marker'
+)
 assert.ok(health.includes('topRisks'), 'health dashboard renders top risks')
 
 console.log('Procurement risk UI assertions passed')

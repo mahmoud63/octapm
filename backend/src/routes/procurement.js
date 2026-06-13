@@ -101,6 +101,10 @@ router.post(
     body('buyer').optional({ nullable: true }).isString().trim(),
     optionalDate('plannedAwardDate'),
     optionalDate('requiredOnSiteDate'),
+    body('requiredTiming')
+      .optional()
+      .isIn(['activity_start', 'activity_finish']),
+    body('needOffsetDays').optional().isInt({ min: 0 }).toInt(),
     body('leadWeeks').optional().isInt({ min: 0 }).toInt(),
     body('bufferDays').optional().isInt({ min: 0 }).toInt(),
     body('notes').optional({ nullable: true }).isString().trim(),
@@ -200,10 +204,12 @@ router.post(
     body('receivedBy').optional({ nullable: true }).isString().trim(),
     body('warehouseLocation').optional({ nullable: true }).isString().trim(),
     body('deliveryNote').optional({ nullable: true }).isString().trim(),
+    optionalUuid('dailyReportId'),
     body('issueToActivity').optional().isBoolean().toBoolean(),
     body('notes').optional({ nullable: true }).isString().trim(),
     body('lines').isArray({ min: 1 }),
     body('lines.*.poLineId').isUUID(),
+    optionalUuid('lines.*.dailyReportId'),
     body('lines.*.acceptedQty').isFloat({ min: 0.001 }).toFloat(),
     body('lines.*.rejectedQty').optional().isFloat({ min: 0 }).toFloat(),
     body('lines.*.issuedQty').optional().isFloat({ min: 0 }).toFloat(),
@@ -253,6 +259,50 @@ router.patch(
   ],
   asyncHandler(async (req, res) => {
     const result = await procurementService.updateLeadTimeAlert({
+      orgId: req.user.orgId,
+      projectId: req.params.projectId,
+      alertId: req.params.alertId,
+      actor: req.user,
+      payload: req.body,
+    });
+    return sendSuccess(res, result);
+  }),
+);
+
+router.patch(
+  '/lead-time-alerts/:alertId/acknowledge',
+  requirePermission('procurement', 'update', {
+    transition: 'alert.acknowledge',
+  }),
+  [
+    param('alertId').isUUID(),
+    body('note').optional({ nullable: true }).isString().trim(),
+    validate,
+  ],
+  asyncHandler(async (req, res) => {
+    const result = await procurementService.acknowledgeLeadTimeAlert({
+      orgId: req.user.orgId,
+      projectId: req.params.projectId,
+      alertId: req.params.alertId,
+      actor: req.user,
+      payload: req.body,
+    });
+    return sendSuccess(res, result);
+  }),
+);
+
+router.patch(
+  '/lead-time-alerts/:alertId/resolve',
+  requirePermission('procurement', 'update', {
+    transition: 'alert.resolve',
+  }),
+  [
+    param('alertId').isUUID(),
+    body('note').optional({ nullable: true }).isString().trim(),
+    validate,
+  ],
+  asyncHandler(async (req, res) => {
+    const result = await procurementService.resolveLeadTimeAlert({
       orgId: req.user.orgId,
       projectId: req.params.projectId,
       alertId: req.params.alertId,

@@ -53,6 +53,9 @@ const mockWorkflow = {
   recordDocumentRevisions: jest.fn(),
   recordWorkflowHistory: jest.fn(),
   syncWorkflowReferences: jest.fn(),
+  workflowPartyAssignmentData: jest.fn(({ payload, existing }) =>
+    Promise.resolve(mockWorkflow.assignmentData(payload, existing)),
+  ),
 };
 
 const mockGetApprovedActivityAllocationTotals = jest.fn();

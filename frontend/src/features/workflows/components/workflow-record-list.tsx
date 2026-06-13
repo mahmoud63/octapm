@@ -2,6 +2,7 @@ import { useMemo, useState, type ReactNode } from 'react'
 import {
   AlertTriangle,
   CalendarClock,
+  Download,
   FileClock,
   FileText,
   GitBranch,
@@ -11,9 +12,10 @@ import {
   ShieldCheck,
   UserRound,
 } from 'lucide-react'
+import { cn } from '@/lib/utils'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { cn } from '@/lib/utils'
+import { HistoryPanel } from '@/features/audit/components/audit-history-panel'
 
 export interface WorkflowAttachment {
   id?: string
@@ -70,12 +72,28 @@ export interface WorkflowApprovalEntry {
 
 export interface WorkflowRevision {
   id?: string
+  projectDocumentId?: string | null
   revision: string
   status?: string | null
   title?: string | null
+  documentNumber?: string | null
+  category?: string | null
+  folderPath?: string | null
+  folderKey?: string | null
+  discipline?: string | null
+  mimeType?: string | null
+  sizeBytes?: number | null
   fileName?: string | null
   fileUrl?: string | null
+  downloadUrl?: string | null
+  previewUrl?: string | null
+  isLatest?: boolean | null
+  readOnly?: boolean | null
   issuedAt?: string | null
+  submittedAt?: string | null
+  reviewDueAt?: string | null
+  approvedAt?: string | null
+  supersededAt?: string | null
   notes?: string | null
 }
 
@@ -88,6 +106,7 @@ export interface WorkflowRecordMeta {
   owner?: string | null
   reviewer?: string | null
   approver?: string | null
+  responsible?: string | null
   dueDate?: string | null
   dueAlert?: WorkflowDueAlert | null
   attachmentRefs?: WorkflowAttachment[]
@@ -98,7 +117,9 @@ export interface WorkflowRecordMeta {
   revisions?: WorkflowRevision[]
 }
 
-interface WorkflowRecordListProps<T extends WorkflowRecordMeta & { id: string }> {
+interface WorkflowRecordListProps<
+  T extends WorkflowRecordMeta & { id: string },
+> {
   rows?: T[]
   emptyText: string
   getTitle: (row: T) => string
@@ -106,6 +127,9 @@ interface WorkflowRecordListProps<T extends WorkflowRecordMeta & { id: string }>
   getRef: (row: T) => string
   getStatus: (row: T) => string
   renderMeta?: (row: T) => ReactNode
+  renderActions?: (row: T) => ReactNode
+  projectId?: string
+  recordType?: string | ((row: T) => string)
 }
 
 const formatDate = (value?: string | null) => {
@@ -130,13 +154,14 @@ const attachmentUrl = (attachment: WorkflowAttachment) =>
 
 function AssignmentGrid({ row }: { row: WorkflowRecordMeta }) {
   const assignments = [
+    ['Responsible', row.responsible],
     ['Owner', row.owner],
     ['Reviewer', row.reviewer],
     ['Approver', row.approver],
   ]
 
   return (
-    <div className='grid gap-2 sm:grid-cols-3'>
+    <div className='grid gap-2 sm:grid-cols-4'>
       {assignments.map(([label, value]) => (
         <div key={label} className='min-w-0 rounded border px-3 py-2'>
           <div className='flex items-center gap-2 text-xs text-muted-foreground'>
@@ -162,7 +187,9 @@ function DueBadge({ row }: { row: WorkflowRecordMeta }) {
   return (
     <Badge
       variant={alert?.severity === 'overdue' ? 'destructive' : 'outline'}
-      className={cn(alert?.severity === 'due_soon' && 'border-amber-500 text-amber-600')}
+      className={cn(
+        alert?.severity === 'due_soon' && 'border-amber-500 text-amber-600'
+      )}
     >
       <CalendarClock className='mr-1 h-3 w-3' />
       {label}
@@ -184,12 +211,16 @@ function ActivityLinks({ links = [] }: { links?: WorkflowActivityLink[] }) {
         >
           <GitBranch className='h-4 w-4 text-muted-foreground' />
           <span className='font-medium'>
-            {link.activity?.p6ActivityId || link.activity?.wbsCode || link.activityId}
+            {link.activity?.p6ActivityId ||
+              link.activity?.wbsCode ||
+              link.activityId}
           </span>
           <span className='min-w-0 flex-1 truncate'>
             {link.activity?.name || 'Linked activity'}
           </span>
-          {link.activity?.isCritical && <Badge variant='destructive'>Critical</Badge>}
+          {link.activity?.isCritical && (
+            <Badge variant='destructive'>Critical</Badge>
+          )}
           <Badge variant='outline'>{statusLabel(link.relationType)}</Badge>
         </div>
       ))}
@@ -197,7 +228,11 @@ function ActivityLinks({ links = [] }: { links?: WorkflowActivityLink[] }) {
   )
 }
 
-function AttachmentList({ attachments = [] }: { attachments?: WorkflowAttachment[] }) {
+function AttachmentList({
+  attachments = [],
+}: {
+  attachments?: WorkflowAttachment[]
+}) {
   if (!attachments.length) {
     return <p className='text-sm text-muted-foreground'>No evidence attached</p>
   }
@@ -214,7 +249,10 @@ function AttachmentList({ attachments = [] }: { attachments?: WorkflowAttachment
           >
             <Paperclip className='h-4 w-4 text-muted-foreground' />
             {url ? (
-              <a className='truncate font-medium underline-offset-4 hover:underline' href={url}>
+              <a
+                className='truncate font-medium underline-offset-4 hover:underline'
+                href={url}
+              >
                 {label}
               </a>
             ) : (
@@ -234,27 +272,49 @@ function AttachmentList({ attachments = [] }: { attachments?: WorkflowAttachment
 
 function RevisionList({ revisions = [] }: { revisions?: WorkflowRevision[] }) {
   if (!revisions.length) {
-    return <p className='text-sm text-muted-foreground'>No revision snapshots</p>
+    return (
+      <p className='text-sm text-muted-foreground'>No revision snapshots</p>
+    )
   }
 
   return (
     <div className='space-y-2'>
-      {revisions.map((revision) => (
-        <div
-          key={revision.id || revision.revision}
-          className='flex flex-wrap items-center gap-2 rounded border px-3 py-2 text-sm'
-        >
-          <FileClock className='h-4 w-4 text-muted-foreground' />
-          <span className='font-medium'>Rev {revision.revision}</span>
-          {revision.status && <Badge variant='outline'>{statusLabel(revision.status)}</Badge>}
-          <span className='min-w-0 flex-1 truncate'>
-            {revision.title || revision.fileName || 'Revision snapshot'}
-          </span>
-          <span className='text-xs text-muted-foreground'>
-            {formatDate(revision.issuedAt)}
-          </span>
-        </div>
-      ))}
+      {revisions.map((revision) => {
+        const downloadUrl = revision.downloadUrl || revision.fileUrl
+        const isSuperseded =
+          revision.readOnly || statusLabel(revision.status) === 'superseded'
+
+        return (
+          <div
+            key={revision.id || revision.revision}
+            className='flex flex-wrap items-center gap-2 rounded border px-3 py-2 text-sm'
+          >
+            <FileClock className='h-4 w-4 text-muted-foreground' />
+            <span className='font-medium'>Rev {revision.revision}</span>
+            {revision.isLatest && <Badge>Latest</Badge>}
+            {revision.status && (
+              <Badge variant={isSuperseded ? 'secondary' : 'outline'}>
+                {statusLabel(revision.status)}
+              </Badge>
+            )}
+            {isSuperseded && <Badge variant='outline'>Read-only</Badge>}
+            <span className='min-w-0 flex-1 truncate'>
+              {revision.title || revision.fileName || 'Revision snapshot'}
+            </span>
+            <span className='text-xs text-muted-foreground'>
+              {formatDate(revision.approvedAt || revision.issuedAt)}
+            </span>
+            {downloadUrl && (
+              <Button asChild variant='outline' size='sm'>
+                <a href={downloadUrl} download>
+                  <Download className='mr-2 h-4 w-4' />
+                  Download
+                </a>
+              </Button>
+            )}
+          </div>
+        )
+      })}
     </div>
   )
 }
@@ -273,14 +333,18 @@ function HistoryList({ history = [] }: { history?: WorkflowHistoryEntry[] }) {
         >
           <div className='flex flex-wrap items-center gap-2'>
             <History className='h-4 w-4 text-muted-foreground' />
-            <span className='font-medium'>{statusLabel(entry.oldStatus) || 'created'}</span>
+            <span className='font-medium'>
+              {statusLabel(entry.oldStatus) || 'created'}
+            </span>
             <span className='text-muted-foreground'>to</span>
             <Badge variant='outline'>{statusLabel(entry.newStatus)}</Badge>
             <span className='ml-auto text-xs text-muted-foreground'>
               {formatDate(entry.createdAt)}
             </span>
           </div>
-          {entry.comment && <p className='mt-1 text-muted-foreground'>{entry.comment}</p>}
+          {entry.comment && (
+            <p className='mt-1 text-muted-foreground'>{entry.comment}</p>
+          )}
         </div>
       ))}
     </div>
@@ -289,7 +353,9 @@ function HistoryList({ history = [] }: { history?: WorkflowHistoryEntry[] }) {
 
 function ApprovalList({ history = [] }: { history?: WorkflowApprovalEntry[] }) {
   if (!history.length) {
-    return <p className='text-sm text-muted-foreground'>No approval decisions</p>
+    return (
+      <p className='text-sm text-muted-foreground'>No approval decisions</p>
+    )
   }
 
   return (
@@ -308,7 +374,8 @@ function ApprovalList({ history = [] }: { history?: WorkflowApprovalEntry[] }) {
               <Badge variant='outline'>{statusLabel(entry.action)}</Badge>
               {entry.decision && <Badge>{statusLabel(entry.decision)}</Badge>}
               <span className='text-xs text-muted-foreground'>
-                {statusLabel(fromStatus) || 'created'} {'->'} {statusLabel(toStatus) || 'open'}
+                {statusLabel(fromStatus) || 'created'} {'->'}{' '}
+                {statusLabel(toStatus) || 'open'}
               </span>
               <span className='ml-auto text-xs text-muted-foreground'>
                 {formatDate(entry.createdAt || entry.occurredAt)}
@@ -316,7 +383,9 @@ function ApprovalList({ history = [] }: { history?: WorkflowApprovalEntry[] }) {
             </div>
             <div className='mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground'>
               {entry.actorRole && <span>{statusLabel(entry.actorRole)}</span>}
-              {entry.actorId && <span className='font-mono'>{entry.actorId}</span>}
+              {entry.actorId && (
+                <span className='font-mono'>{entry.actorId}</span>
+              )}
             </div>
             {note && <p className='mt-1 text-muted-foreground'>{note}</p>}
           </div>
@@ -326,7 +395,9 @@ function ApprovalList({ history = [] }: { history?: WorkflowApprovalEntry[] }) {
   )
 }
 
-export function WorkflowRecordList<T extends WorkflowRecordMeta & { id: string }>({
+export function WorkflowRecordList<
+  T extends WorkflowRecordMeta & { id: string },
+>({
   rows,
   emptyText,
   getTitle,
@@ -334,15 +405,24 @@ export function WorkflowRecordList<T extends WorkflowRecordMeta & { id: string }
   getRef,
   getStatus,
   renderMeta,
+  renderActions,
+  projectId,
+  recordType,
 }: WorkflowRecordListProps<T>) {
-  const [selectedId, setSelectedId] = useState<string | null>(rows?.[0]?.id || null)
+  const [selectedId, setSelectedId] = useState<string | null>(
+    rows?.[0]?.id || null
+  )
   const selected = useMemo(
     () => rows?.find((row) => row.id === selectedId) || rows?.[0],
-    [rows, selectedId],
+    [rows, selectedId]
   )
 
   if (!rows?.length) {
-    return <div className='rounded border p-4 text-sm text-muted-foreground'>{emptyText}</div>
+    return (
+      <div className='rounded border p-4 text-sm text-muted-foreground'>
+        {emptyText}
+      </div>
+    )
   }
 
   return (
@@ -353,7 +433,10 @@ export function WorkflowRecordList<T extends WorkflowRecordMeta & { id: string }
         return (
           <div
             key={row.id}
-            className={cn('rounded border bg-background', isSelected && 'border-primary/60')}
+            className={cn(
+              'rounded border bg-background',
+              isSelected && 'border-primary/60'
+            )}
           >
             <div className='flex flex-col gap-3 p-3 sm:flex-row sm:items-center'>
               <div className='min-w-0 flex-1'>
@@ -375,6 +458,7 @@ export function WorkflowRecordList<T extends WorkflowRecordMeta & { id: string }
                 )}
               </div>
               <div className='flex flex-wrap items-center gap-2'>
+                {renderActions?.(row)}
                 <DueBadge row={row} />
                 <Badge variant='outline'>
                   <GitBranch className='mr-1 h-3 w-3' />
@@ -425,20 +509,38 @@ export function WorkflowRecordList<T extends WorkflowRecordMeta & { id: string }
                     </h4>
                     <RevisionList revisions={row.revisions} />
                   </section>
-                  <section className='space-y-2'>
-                    <h4 className='flex items-center gap-2 text-sm font-semibold'>
-                      <History className='h-4 w-4' />
-                      History
-                    </h4>
-                    <HistoryList history={row.history} />
-                  </section>
-                  <section className='space-y-2'>
-                    <h4 className='flex items-center gap-2 text-sm font-semibold'>
-                      <ShieldCheck className='h-4 w-4' />
-                      Approvals
-                    </h4>
-                    <ApprovalList history={row.approvalHistory} />
-                  </section>
+                  {projectId && recordType ? (
+                    <div className='lg:col-span-2'>
+                      <HistoryPanel
+                        projectId={projectId}
+                        entityType={
+                          typeof recordType === 'function'
+                            ? recordType(row)
+                            : recordType
+                        }
+                        entityId={row.id}
+                        title={`${getRef(row)} History`}
+                        limit={30}
+                      />
+                    </div>
+                  ) : (
+                    <>
+                      <section className='space-y-2'>
+                        <h4 className='flex items-center gap-2 text-sm font-semibold'>
+                          <History className='h-4 w-4' />
+                          History
+                        </h4>
+                        <HistoryList history={row.history} />
+                      </section>
+                      <section className='space-y-2'>
+                        <h4 className='flex items-center gap-2 text-sm font-semibold'>
+                          <ShieldCheck className='h-4 w-4' />
+                          Approvals
+                        </h4>
+                        <ApprovalList history={row.approvalHistory} />
+                      </section>
+                    </>
+                  )}
                 </div>
               </div>
             )}

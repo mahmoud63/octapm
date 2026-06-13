@@ -6,7 +6,11 @@ const { asyncHandler } = require('../utils/async-handler');
 const { sendSuccess } = require('../utils/api-response');
 const { HttpError } = require('../utils/http-error');
 const { authenticate } = require('../middleware/auth');
-const { requireRoles } = require('../middleware/rbac');
+const {
+  aiGenerationLimiter,
+  uploadLimiter,
+} = require('../middleware/rate-limit');
+const { getEffectiveRole, requireRoles } = require('../middleware/rbac');
 const boqService = require('../services/boq.service');
 const fileStorageService = require('../services/file-storage.service');
 const { assertMoneyInput } = require('../utils/money');
@@ -86,6 +90,8 @@ router.post(
   '/upload',
   authenticate,
   CAN_MODIFY,
+  uploadLimiter,
+  aiGenerationLimiter,
   upload.single('file'),
   asyncHandler(async (req, res) => {
     if (!req.file) throw new HttpError(400, 'NO_FILE', 'No file uploaded');
@@ -106,7 +112,7 @@ router.post(
         {
           orgId: req.user.orgId,
           userId: req.user.id,
-          userRole: req.user.role,
+          userRole: getEffectiveRole(req),
           documentId: document.documentId,
         },
       );
@@ -172,7 +178,11 @@ router.patch(
       req.params.projectId,
       req.params.itemId,
       req.body,
-      { orgId: req.user.orgId, userId: req.user.id, userRole: req.user.role },
+      {
+        orgId: req.user.orgId,
+        userId: req.user.id,
+        userRole: getEffectiveRole(req),
+      },
     );
     return sendSuccess(res, result);
   }),
@@ -193,7 +203,11 @@ router.post(
     const result = await boqService.createManualBoqItem(
       req.params.projectId,
       req.body,
-      { orgId: req.user.orgId, userId: req.user.id, userRole: req.user.role },
+      {
+        orgId: req.user.orgId,
+        userId: req.user.id,
+        userRole: getEffectiveRole(req),
+      },
     );
     return sendSuccess(res, result, 201);
   }),
@@ -208,7 +222,11 @@ router.delete(
     const result = await boqService.deleteBoqItem(
       req.params.projectId,
       req.params.itemId,
-      { orgId: req.user.orgId, userId: req.user.id, userRole: req.user.role },
+      {
+        orgId: req.user.orgId,
+        userId: req.user.id,
+        userRole: getEffectiveRole(req),
+      },
     );
     return sendSuccess(res, result);
   }),
@@ -231,7 +249,11 @@ router.post(
       req.params.projectId,
       req.params.itemId,
       req.body,
-      { orgId: req.user.orgId, userId: req.user.id, userRole: req.user.role },
+      {
+        orgId: req.user.orgId,
+        userId: req.user.id,
+        userRole: getEffectiveRole(req),
+      },
     );
     return sendSuccess(res, result, 201);
   }),
@@ -254,7 +276,11 @@ router.patch(
       req.params.projectId,
       req.params.activityId,
       req.body,
-      { orgId: req.user.orgId, userId: req.user.id, userRole: req.user.role },
+      {
+        orgId: req.user.orgId,
+        userId: req.user.id,
+        userRole: getEffectiveRole(req),
+      },
     );
     return sendSuccess(res, result);
   }),
@@ -272,7 +298,7 @@ router.delete(
       {
         orgId: req.user.orgId,
         userId: req.user.id,
-        userRole: req.user.role,
+        userRole: getEffectiveRole(req),
         allocationId: req.body?.allocationId || req.query?.allocationId || null,
       },
     );

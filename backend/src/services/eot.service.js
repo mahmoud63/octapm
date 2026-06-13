@@ -7,7 +7,14 @@ const {
   attachEvidenceToRecords,
   syncEvidenceReferences,
 } = require('./commercial-traceability.service');
+const { recordWorkflowHistory } = require('./workflow-support.service');
 const approvalWorkflowService = require('./approval-workflow.service');
+
+const EOT_WORKFLOW_ACTIONS = Object.freeze({
+  SUBMIT: 'submit',
+  APPROVE: 'approve',
+  REJECT: 'reject',
+});
 
 const activityTraceSelect = {
   id: true,
@@ -71,6 +78,29 @@ const trimOrNull = (value) => {
   return text || null;
 };
 
+const approvalDecisionNote = (payload = {}) =>
+  trimOrNull(
+    payload.reason ||
+      payload.rejectionReason ||
+      payload.rejectedReason ||
+      payload.comment ||
+      payload.statusComment,
+  );
+
+const addDays = (value, days) => {
+  if (!value) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  date.setDate(date.getDate() + Number(days || 0));
+  return date;
+};
+
+const dateIsoOrNull = (value) => {
+  if (!value) return null;
+  const date = value instanceof Date ? value : new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date.toISOString();
+};
+
 const summarizeEotClaim = (claim) => ({
   ref: claim.ref,
   eventName: claim.eventName,
@@ -79,6 +109,11 @@ const summarizeEotClaim = (claim) => ({
   delayDays: claim.delayDays,
   eotDaysGranted: claim.eotDaysGranted,
   ldLiability: claim.ldLiability,
+  revisedCompletionRecommendation: dateIsoOrNull(
+    claim.revisedCompletionRecommendation,
+  ),
+  cumulativeApprovedEotDays: claim.cumulativeApprovedEotDays || 0,
+  officialAt: dateIsoOrNull(claim.officialAt),
   criticalPathImpactDays:
     claim.activityLinks?.reduce(
       (sum, link) => sum + (Number(link.criticalPathImpactDays) || 0),
@@ -220,6 +255,76 @@ const assertSubmissionProof = async ({
   );
 };
 
+const assertEotWorkflowTransition = ({
+  existingStatus,
+  nextStatus,
+  workflowAction,
+}) => {
+  if (!nextStatus || nextStatus === existingStatus) return;
+
+  const transitionKey = `${existingStatus || 'new'}:${nextStatus}`;
+  const allowedByAction = {
+    'draft:submitted': EOT_WORKFLOW_ACTIONS.SUBMIT,
+    'rejected:submitted': EOT_WORKFLOW_ACTIONS.SUBMIT,
+    'submitted:approved': EOT_WORKFLOW_ACTIONS.APPROVE,
+    'submitted:rejected': EOT_WORKFLOW_ACTIONS.REJECT,
+  };
+  const expectedAction = allowedByAction[transitionKey];
+
+  if (workflowAction && workflowAction === expectedAction) return;
+
+  throw new HttpError(
+    400,
+    'EOT_WORKFLOW_ACTION_REQUIRED',
+    'EOT status changes must use the submit, approve, or reject workflow endpoint',
+    {
+      fromStatus: existingStatus,
+      toStatus: nextStatus,
+    },
+  );
+};
+
+const buildApprovedCompletionRecommendation = async ({
+  tx,
+  projectId,
+  project,
+  claimId,
+  eotDaysGranted,
+}) => {
+  const baseCompletionDate = project.completionDate || project.endDate;
+  if (!baseCompletionDate) {
+    return {
+      cumulativeApprovedEotDays: Number(eotDaysGranted) || 0,
+      revisedCompletionRecommendation: null,
+    };
+  }
+
+  const approvedClaims = tx.eotClaim?.findMany
+    ? await tx.eotClaim.findMany({
+        where: {
+          projectId,
+          status: 'approved',
+          id: { not: claimId },
+        },
+        select: { eotDaysGranted: true },
+      })
+    : [];
+  const priorApprovedDays = approvedClaims.reduce(
+    (sum, claim) => sum + (Number(claim.eotDaysGranted) || 0),
+    0,
+  );
+  const cumulativeApprovedEotDays =
+    priorApprovedDays + (Number(eotDaysGranted) || 0);
+
+  return {
+    cumulativeApprovedEotDays,
+    revisedCompletionRecommendation: addDays(
+      baseCompletionDate,
+      cumulativeApprovedEotDays,
+    ),
+  };
+};
+
 const calculateEot = async ({
   orgId,
   projectId,
@@ -317,6 +422,9 @@ const calculateEot = async ({
     project.completionDate || project.endDate,
   );
   const revisedCompletion = formatDate(project.revisedCompletionDate);
+  const baseCompletionDate =
+    project.revisedCompletionDate || project.completionDate || project.endDate;
+  const revisedCompletionRecommendation = addDays(baseCompletionDate, eot);
 
   const claimLetter = [
     `Subject: Extension of Time Claim - ${eventName}`,
@@ -339,6 +447,23 @@ const calculateEot = async ({
     .filter(Boolean)
     .join('\n');
 
+  const daysEntitlementSummary = {
+    claimedDelayDays: totalDelay,
+    criticalPathImpactDays,
+    floatAbsorbedDays: Math.max(0, totalDelay - effectiveDelay),
+    effectiveDelayDays: effectiveDelay,
+    requestedEotDays: eot,
+    recommendedEotDays: Math.min(eot, effectiveDelay),
+    nonCompensableDelayDays: Math.max(0, effectiveDelay - eot),
+    ldApplicableDays,
+    ldRatePerDay: rate,
+    ldLiability,
+    impactedCriticalActivities: floatSensitive,
+    contractualCompletion,
+    currentRevisedCompletion: revisedCompletion,
+    revisedCompletionRecommendation: formatDate(revisedCompletionRecommendation),
+  };
+
   return {
     eventName,
     eventType: eventType || null,
@@ -352,8 +477,10 @@ const calculateEot = async ({
     ldLiability,
     contractualCompletion,
     revisedCompletion,
+    revisedCompletionRecommendation: formatDate(revisedCompletionRecommendation),
     affectedActivities: affectedActivitiesWithCost,
     analysis: analysis || null,
+    daysEntitlementSummary,
     claimLetter,
   };
 };
@@ -542,6 +669,7 @@ const createEotClaim = async ({
   });
 
   return prisma.$transaction(async (tx) => {
+    const now = new Date();
     const created = await tx.eotClaim.create({
       data: {
         projectId,
@@ -555,7 +683,10 @@ const createEotClaim = async ({
         affectedActivities: calc.affectedActivities,
         analysis: calc.analysis,
         claimLetter: calc.claimLetter,
+        entitlementSummaryJson: calc.daysEntitlementSummary,
         status,
+        submittedBy: status === 'submitted' ? userId || null : null,
+        submittedAt: status === 'submitted' ? now : null,
       },
       include: eotClaimInclude,
     });
@@ -607,6 +738,7 @@ const createEotClaim = async ({
         delayDays: created.delayDays,
         eotDaysGranted: created.eotDaysGranted,
         criticalPathImpactDays: calc.criticalPathImpactDays,
+        daysEntitlementSummary: calc.daysEntitlementSummary,
         activityLinks: activityTrace.count,
         weatherDelayLinks: weatherTrace?.count ?? 0,
         correspondenceLinks: evidence.correspondenceCount,
@@ -629,6 +761,7 @@ const createEotClaim = async ({
         ref: created.ref,
         delayDays: created.delayDays,
         eotDaysGranted: created.eotDaysGranted,
+        daysEntitlementSummary: calc.daysEntitlementSummary,
         activityLinks: activityTrace.count,
         weatherDelayLinks: weatherTrace?.count ?? 0,
       },
@@ -655,8 +788,9 @@ const updateEotClaim = async ({
   payload,
   userId = null,
   userRole = null,
+  workflowAction = null,
 }) => {
-  await ensureProject({ orgId, projectId });
+  const project = await ensureProject({ orgId, projectId });
 
   const existing = await prisma.eotClaim.findFirst({
     where: { id: claimId, projectId },
@@ -687,8 +821,25 @@ const updateEotClaim = async ({
       })
     : null;
   const nextStatus = payload.status ?? existing.status;
+  assertEotWorkflowTransition({
+    existingStatus: existing.status,
+    nextStatus,
+    workflowAction,
+  });
 
   return prisma.$transaction(async (tx) => {
+    const now = new Date();
+    const approvalRecommendation =
+      nextStatus === 'approved' && existing.status !== 'approved'
+        ? await buildApprovedCompletionRecommendation({
+            tx,
+            projectId,
+            project,
+            claimId,
+            eotDaysGranted: calc?.eotDaysGranted ?? existing.eotDaysGranted,
+          })
+        : null;
+    const decisionNote = approvalDecisionNote(payload);
     const updated = await tx.eotClaim.update({
       where: { id: claimId },
       data: {
@@ -702,6 +853,48 @@ const updateEotClaim = async ({
         affectedActivities: calc?.affectedActivities ?? existing.affectedActivities,
         analysis: calc?.analysis ?? payload.analysis ?? existing.analysis,
         claimLetter: payload.claimLetter ?? calc?.claimLetter ?? existing.claimLetter,
+        entitlementSummaryJson:
+          calc?.daysEntitlementSummary ?? existing.entitlementSummaryJson ?? {},
+        submittedBy:
+          nextStatus === 'submitted' && existing.status !== 'submitted'
+            ? userId || null
+            : existing.submittedBy,
+        submittedAt:
+          nextStatus === 'submitted' && existing.status !== 'submitted'
+            ? now
+            : existing.submittedAt,
+        approvedBy:
+          nextStatus === 'approved' && existing.status !== 'approved'
+            ? userId || null
+            : existing.approvedBy,
+        approvedAt:
+          nextStatus === 'approved' && existing.status !== 'approved'
+            ? now
+            : existing.approvedAt,
+        officialAt:
+          nextStatus === 'approved' && existing.status !== 'approved'
+            ? now
+            : existing.officialAt,
+        rejectedBy:
+          nextStatus === 'rejected' && existing.status !== 'rejected'
+            ? userId || null
+            : existing.rejectedBy,
+        rejectedAt:
+          nextStatus === 'rejected' && existing.status !== 'rejected'
+            ? now
+            : existing.rejectedAt,
+        rejectionReason:
+          nextStatus === 'rejected'
+            ? decisionNote
+            : nextStatus === 'submitted'
+              ? null
+              : existing.rejectionReason,
+        revisedCompletionRecommendation:
+          approvalRecommendation?.revisedCompletionRecommendation ??
+          existing.revisedCompletionRecommendation,
+        cumulativeApprovedEotDays:
+          approvalRecommendation?.cumulativeApprovedEotDays ??
+          existing.cumulativeApprovedEotDays,
       },
       include: eotClaimInclude,
     });
@@ -748,11 +941,16 @@ const updateEotClaim = async ({
       entityId: updated.id,
       action:
         updated.status !== existing.status
-          ? auditService.ACTIONS.STATUS_CHANGED
+          ? updated.status === 'approved'
+            ? auditService.ACTIONS.APPROVED
+            : updated.status === 'rejected'
+              ? auditService.ACTIONS.REJECTED
+              : auditService.ACTIONS.STATUS_CHANGED
           : auditService.ACTIONS.UPDATED,
       actorId: userId,
       oldStatus: existing.status,
       newStatus: updated.status,
+      reason: decisionNote,
       oldSummary: summarizeEotClaim(existing),
       newSummary: summarizeEotClaim(updated),
       summary: {
@@ -763,6 +961,11 @@ const updateEotClaim = async ({
         ref: updated.ref,
         delayDays: updated.delayDays,
         eotDaysGranted: updated.eotDaysGranted,
+        revisedCompletionRecommendation: dateIsoOrNull(
+          updated.revisedCompletionRecommendation,
+        ),
+        cumulativeApprovedEotDays: updated.cumulativeApprovedEotDays,
+        daysEntitlementSummary: updated.entitlementSummaryJson,
         criticalPathImpactDays:
           calc?.criticalPathImpactDays ??
           updated.activityLinks?.reduce(
@@ -779,6 +982,23 @@ const updateEotClaim = async ({
       },
       attachments: evidence.attachments,
     });
+    if (
+      updated.status !== existing.status &&
+      ['approved', 'rejected'].includes(updated.status)
+    ) {
+      await recordWorkflowHistory({
+        tx,
+        projectId,
+        recordType: approvalWorkflowService.RECORD_TYPES.EOT_CLAIM,
+        recordId: updated.id,
+        oldStatus: existing.status,
+        newStatus: updated.status,
+        comment: decisionNote,
+        userId,
+        userRole,
+        force: true,
+      });
+    }
     await approvalWorkflowService.recordTransition({
       tx,
       orgId,
@@ -789,17 +1009,17 @@ const updateEotClaim = async ({
       toStatus: updated.status,
       actorId: userId,
       actorRole: userRole,
-      reason:
-        payload.rejectionReason ||
-        payload.reason ||
-        payload.comment ||
-        payload.statusComment ||
-        null,
+      reason: decisionNote,
       comment: payload.comment || payload.statusComment || null,
       metadata: {
         ref: updated.ref,
         delayDays: updated.delayDays,
         eotDaysGranted: updated.eotDaysGranted,
+        revisedCompletionRecommendation: dateIsoOrNull(
+          updated.revisedCompletionRecommendation,
+        ),
+        cumulativeApprovedEotDays: updated.cumulativeApprovedEotDays,
+        daysEntitlementSummary: updated.entitlementSummaryJson,
         criticalPathImpactDays:
           calc?.criticalPathImpactDays ??
           updated.activityLinks?.reduce(
@@ -824,9 +1044,92 @@ const updateEotClaim = async ({
   });
 };
 
+const approveEotClaim = async ({
+  orgId,
+  projectId,
+  claimId,
+  comment = null,
+  userId = null,
+  userRole = null,
+}) => {
+  return updateEotClaim({
+    orgId,
+    projectId,
+    claimId,
+    userId,
+    userRole,
+    payload: {
+      status: 'approved',
+      comment: trimOrNull(comment),
+      statusComment: trimOrNull(comment),
+    },
+    workflowAction: EOT_WORKFLOW_ACTIONS.APPROVE,
+  });
+};
+
+const submitEotClaim = async ({
+  orgId,
+  projectId,
+  claimId,
+  comment = null,
+  userId = null,
+  userRole = null,
+}) => {
+  return updateEotClaim({
+    orgId,
+    projectId,
+    claimId,
+    userId,
+    userRole,
+    payload: {
+      status: 'submitted',
+      comment: trimOrNull(comment),
+      statusComment: trimOrNull(comment),
+    },
+    workflowAction: EOT_WORKFLOW_ACTIONS.SUBMIT,
+  });
+};
+
+const rejectEotClaim = async ({
+  orgId,
+  projectId,
+  claimId,
+  reason,
+  userId = null,
+  userRole = null,
+}) => {
+  const rejectionReason = approvalDecisionNote({ reason });
+  if (!rejectionReason) {
+    throw new HttpError(
+      400,
+      'APPROVAL_WORKFLOW_REASON_REQUIRED',
+      'A reason is required for this workflow decision',
+    );
+  }
+
+  return updateEotClaim({
+    orgId,
+    projectId,
+    claimId,
+    userId,
+    userRole,
+    payload: {
+      status: 'rejected',
+      reason: rejectionReason,
+      rejectionReason,
+      comment: rejectionReason,
+      statusComment: rejectionReason,
+    },
+    workflowAction: EOT_WORKFLOW_ACTIONS.REJECT,
+  });
+};
+
 module.exports = {
   calculateEot,
   listEotClaims,
   createEotClaim,
   updateEotClaim,
+  submitEotClaim,
+  approveEotClaim,
+  rejectEotClaim,
 };

@@ -5,23 +5,20 @@ import {
   AlertTriangle,
   Camera,
   CheckCircle2,
+  Clock3,
   ClipboardCheck,
   Save,
   Send,
   XCircle,
 } from 'lucide-react'
 import { toast } from 'sonner'
+import { useAuthStore } from '@/stores/auth-store'
 import { useCanPerform } from '@/lib/permissions'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { AuditHistoryPanel } from '@/features/audit/components/audit-history-panel'
-import {
-  projectSetupReadinessKey,
-  useProjectSetupReadiness,
-} from '@/features/projects/hooks/use-projects'
 import {
   Select,
   SelectContent,
@@ -30,6 +27,11 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
+import { AuditHistoryPanel } from '@/features/audit/components/audit-history-panel'
+import {
+  projectSetupReadinessKey,
+  useProjectSetupReadiness,
+} from '@/features/projects/hooks/use-projects'
 import type {
   ProgressMethod,
   ProgressSubmission,
@@ -79,10 +81,22 @@ const DEFAULT_MILESTONES = [
   { id: 'finish', name: 'Finished', weight: 30 },
 ]
 
+const PROGRESS_ASSIGNMENT_OVERRIDE_ROLES = new Set(['pm', 'planning_eng'])
+
 const fmtUSD = (n: number) =>
   '$' + Number(n || 0).toLocaleString('en-US', { maximumFractionDigits: 0 })
 
 const today = () => new Date().toISOString().slice(0, 10)
+
+const isProgressAssignmentOverride = (role?: string | null) =>
+  PROGRESS_ASSIGNMENT_OVERRIDE_ROLES.has(String(role || '').toLowerCase())
+
+const errorCodeFrom = (error: unknown) =>
+  (
+    error as {
+      response?: { data?: { error?: { code?: string } } }
+    }
+  )?.response?.data?.error?.code
 
 const asProgressMethod = (
   method: string | null | undefined
@@ -135,6 +149,7 @@ const buildDefaultDraft = (activity: ScheduleActivity): RowDraft => ({
 
 export function ProgressTab({ activities, projectId }: Props) {
   const queryClient = useQueryClient()
+  const currentUser = useAuthStore((state) => state.auth.user)
   const { data: setupReadiness } = useProjectSetupReadiness(projectId)
   const canConfigureProgressMethod = useCanPerform(
     'progress',
@@ -162,9 +177,7 @@ export function ProgressTab({ activities, projectId }: Props) {
     'daily_report.submit'
   )
   const [drafts, setDrafts] = useState<Record<string, Partial<RowDraft>>>({})
-  const [dailyActivityId, setDailyActivityId] = useState(
-    activities.find((activity) => !activity.isMilestone)?.id ?? ''
-  )
+  const [dailyActivityId, setDailyActivityId] = useState('')
   const [dailyDate, setDailyDate] = useState(today())
   const [dailyPct, setDailyPct] = useState(0)
   const [dailyWorkers, setDailyWorkers] = useState('')
@@ -178,6 +191,43 @@ export function ProgressTab({ activities, projectId }: Props) {
     () => activities.filter((activity) => !activity.isMilestone),
     [activities]
   )
+  const currentUserId = currentUser?.id ?? ''
+  const currentUserRole = currentUser?.role ?? ''
+  const assignmentOverride = useMemo(
+    () => isProgressAssignmentOverride(currentUserRole),
+    [currentUserRole]
+  )
+  const assignmentAllowedActivities = useMemo(() => {
+    if (assignmentOverride) return selectableActivities
+    if (!currentUserId) return []
+
+    return selectableActivities.filter((activity) =>
+      activity.assignedEngineers?.some(
+        (engineer) => engineer.id === currentUserId
+      )
+    )
+  }, [assignmentOverride, currentUserId, selectableActivities])
+  const assignmentAllowedActivityIds = useMemo(
+    () => new Set(assignmentAllowedActivities.map((activity) => activity.id)),
+    [assignmentAllowedActivities]
+  )
+  const dailyReportActivities = useMemo(
+    () => (canSubmitDailyReport ? assignmentAllowedActivities : []),
+    [assignmentAllowedActivities, canSubmitDailyReport]
+  )
+  const dailyReportActivityIds = useMemo(
+    () => new Set(dailyReportActivities.map((activity) => activity.id)),
+    [dailyReportActivities]
+  )
+  const selectedDailyActivityId = dailyReportActivityIds.has(dailyActivityId)
+    ? dailyActivityId
+    : (dailyReportActivities[0]?.id ?? '')
+  const dailyCanSubmitSelectedActivity = Boolean(
+    selectedDailyActivityId &&
+      dailyReportActivityIds.has(selectedDailyActivityId)
+  )
+  const dailyReportDisabled =
+    !canSubmitDailyReport || !dailyCanSubmitSelectedActivity
 
   const pendingQuery = useQuery<SubmissionRow[]>({
     queryKey: ['progress-submissions', projectId, 'submitted'],
@@ -282,7 +332,12 @@ export function ProgressTab({ activities, projectId }: Props) {
       toast.success('Progress submitted')
       await refreshProgress()
     },
-    onError: () => toast.error('Failed to submit progress'),
+    onError: (error) =>
+      toast.error(
+        errorCodeFrom(error) === 'ACTIVITY_PROGRESS_ASSIGNMENT_REQUIRED'
+          ? 'Only assigned users can submit progress for that activity'
+          : 'Failed to submit progress'
+      ),
   })
 
   const approveSubmission = useMutation({
@@ -324,7 +379,7 @@ export function ProgressTab({ activities, projectId }: Props) {
     mutationFn: () =>
       apiClient
         .post(`/projects/${projectId}/daily-reports`, {
-          activityId: dailyActivityId,
+          activityId: selectedDailyActivityId,
           date: dailyDate,
           pctProgress: dailyPct,
           manpower: dailyWorkers
@@ -357,7 +412,12 @@ export function ProgressTab({ activities, projectId }: Props) {
       setDailyNotes('')
       await refreshProgress()
     },
-    onError: () => toast.error('Failed to submit daily report'),
+    onError: (error) =>
+      toast.error(
+        errorCodeFrom(error) === 'ACTIVITY_PROGRESS_ASSIGNMENT_REQUIRED'
+          ? 'Only assigned users can submit reports for that activity'
+          : 'Failed to submit daily report'
+      ),
   })
 
   const ev = useMemo(() => {
@@ -393,6 +453,12 @@ export function ProgressTab({ activities, projectId }: Props) {
 
   const progressGate = setupReadiness?.gates.progress
   const progressBlockers = progressGate?.blockers ?? []
+  const officialProgressCount = selectableActivities.filter(
+    (activity) => activity.progressApprovalStatus === 'approved'
+  ).length
+  const pendingProgressCount = selectableActivities.filter(
+    (activity) => activity.pendingProgress
+  ).length
 
   const patchDraft = (activityId: string, patch: Partial<RowDraft>) => {
     setDrafts((prev) => ({
@@ -443,9 +509,7 @@ export function ProgressTab({ activities, projectId }: Props) {
             <AlertTriangle className='mt-0.5 h-4 w-4 shrink-0' />
             <div className='min-w-0 flex-1'>
               <p className='font-semibold'>Progress setup warnings</p>
-              <p className='mt-1 text-xs opacity-90'>
-                {progressGate?.message}
-              </p>
+              <p className='mt-1 text-xs opacity-90'>{progressGate?.message}</p>
               <ul className='mt-2 list-inside list-disc space-y-1 text-xs'>
                 {progressBlockers.slice(0, 4).map((blocker) => (
                   <li key={`${blocker.stepKey}-${blocker.code}`}>
@@ -457,6 +521,29 @@ export function ProgressTab({ activities, projectId }: Props) {
           </div>
         </div>
       )}
+
+      <div className='grid gap-3 sm:grid-cols-2'>
+        <div className='rounded-md border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-900 dark:border-emerald-900/40 dark:bg-emerald-950/20 dark:text-emerald-100'>
+          <div className='flex items-center gap-2 font-semibold'>
+            <CheckCircle2 className='h-4 w-4' />
+            Official approved progress
+          </div>
+          <p className='mt-1 text-xs opacity-90'>
+            {officialProgressCount.toLocaleString()} activities have approved
+            progress included in official EV.
+          </p>
+        </div>
+        <div className='rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-900/40 dark:bg-amber-950/20 dark:text-amber-100'>
+          <div className='flex items-center gap-2 font-semibold'>
+            <Clock3 className='h-4 w-4' />
+            Pending progress review
+          </div>
+          <p className='mt-1 text-xs opacity-90'>
+            {pendingProgressCount.toLocaleString()} activities have draft or
+            submitted progress held outside official EV.
+          </p>
+        </div>
+      </div>
 
       <AuditHistoryPanel
         projectId={projectId}
@@ -540,6 +627,10 @@ export function ProgressTab({ activities, projectId }: Props) {
         {selectableActivities.map((activity) => {
           const draft = draftFor(activity)
           const milestones = milestoneRowsFor(activity)
+          const assignmentAllowed = assignmentAllowedActivityIds.has(
+            activity.id
+          )
+          const canSubmitThisActivity = canSubmitProgress && assignmentAllowed
           return (
             <div key={activity.id} className='space-y-3 p-3'>
               <div className='flex flex-col gap-2 lg:flex-row lg:items-start lg:justify-between'>
@@ -553,6 +644,13 @@ export function ProgressTab({ activities, projectId }: Props) {
                     </Badge>
                     {activity.pendingProgress && (
                       <Badge variant='secondary'>Pending</Badge>
+                    )}
+                    {canSubmitProgress && !assignmentOverride && (
+                      <Badge
+                        variant={assignmentAllowed ? 'secondary' : 'outline'}
+                      >
+                        {assignmentAllowed ? 'Assigned to you' : 'Not assigned'}
+                      </Badge>
                     )}
                   </div>
                   <p className='text-xs text-muted-foreground'>
@@ -604,6 +702,7 @@ export function ProgressTab({ activities, projectId }: Props) {
                       <Input
                         type='number'
                         min={0}
+                        disabled={!canSubmitThisActivity}
                         value={draft.quantityComplete}
                         onChange={(e) =>
                           patchDraft(activity.id, {
@@ -617,6 +716,7 @@ export function ProgressTab({ activities, projectId }: Props) {
                       <Input
                         type='number'
                         min={0}
+                        disabled={!canSubmitThisActivity}
                         value={draft.quantityPlanned}
                         onChange={(e) =>
                           patchDraft(activity.id, {
@@ -628,6 +728,7 @@ export function ProgressTab({ activities, projectId }: Props) {
                     <div>
                       <Label className='text-xs'>Unit</Label>
                       <Input
+                        disabled={!canSubmitThisActivity}
                         value={draft.quantityUnit}
                         onChange={(e) =>
                           patchDraft(activity.id, {
@@ -645,6 +746,7 @@ export function ProgressTab({ activities, projectId }: Props) {
                         className='flex items-center gap-2 rounded-md border px-3 py-2 text-sm'
                       >
                         <Checkbox
+                          disabled={!canSubmitThisActivity}
                           checked={Boolean(draft.milestoneChecks[milestone.id])}
                           onCheckedChange={(checked) =>
                             patchDraft(activity.id, {
@@ -667,6 +769,7 @@ export function ProgressTab({ activities, projectId }: Props) {
                       <Label className='text-xs'>Inspection</Label>
                       <Select
                         value={draft.inspectionStatus}
+                        disabled={!canSubmitThisActivity}
                         onValueChange={(value) =>
                           patchDraft(activity.id, { inspectionStatus: value })
                         }
@@ -689,6 +792,7 @@ export function ProgressTab({ activities, projectId }: Props) {
                         type='number'
                         min={0}
                         max={100}
+                        disabled={!canSubmitThisActivity}
                         value={draft.pctComplete}
                         onChange={(e) =>
                           patchDraft(activity.id, {
@@ -708,6 +812,7 @@ export function ProgressTab({ activities, projectId }: Props) {
                         max={100}
                         step={1}
                         value={draft.pctComplete}
+                        disabled={!canSubmitThisActivity}
                         className='flex-1'
                         onChange={(e) =>
                           patchDraft(activity.id, {
@@ -726,7 +831,7 @@ export function ProgressTab({ activities, projectId }: Props) {
                   <Label className='text-xs'>Photo URL</Label>
                   <Input
                     value={draft.evidenceUrl}
-                    disabled={!canSubmitProgress}
+                    disabled={!canSubmitThisActivity}
                     onChange={(e) =>
                       patchDraft(activity.id, { evidenceUrl: e.target.value })
                     }
@@ -748,7 +853,14 @@ export function ProgressTab({ activities, projectId }: Props) {
                 {canSubmitProgress && (
                   <Button
                     onClick={() => submitProgress.mutate({ activity, draft })}
-                    disabled={submitProgress.isPending}
+                    disabled={
+                      submitProgress.isPending || !canSubmitThisActivity
+                    }
+                    title={
+                      canSubmitThisActivity
+                        ? undefined
+                        : 'Only assigned users can submit progress for this activity'
+                    }
                   >
                     <Send className='mr-1.5 h-4 w-4' />
                     Submit
@@ -768,17 +880,28 @@ export function ProgressTab({ activities, projectId }: Props) {
         <div className='grid gap-3 md:grid-cols-4'>
           <div>
             <Label className='text-xs'>Activity</Label>
-            <Select value={dailyActivityId} onValueChange={setDailyActivityId}>
+            <Select
+              value={selectedDailyActivityId}
+              disabled={
+                !canSubmitDailyReport || dailyReportActivities.length === 0
+              }
+              onValueChange={setDailyActivityId}
+            >
               <SelectTrigger>
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                {selectableActivities.map((activity) => (
+                {dailyReportActivities.map((activity) => (
                   <SelectItem key={activity.id} value={activity.id}>
                     {activity.wbsCode ? `${activity.wbsCode} - ` : ''}
                     {activity.name}
                   </SelectItem>
                 ))}
+                {dailyReportActivities.length === 0 && (
+                  <div className='px-2 py-1.5 text-xs text-muted-foreground'>
+                    No assigned activities
+                  </div>
+                )}
               </SelectContent>
             </Select>
           </div>
@@ -786,6 +909,7 @@ export function ProgressTab({ activities, projectId }: Props) {
             <Label className='text-xs'>Date</Label>
             <Input
               type='date'
+              disabled={dailyReportDisabled}
               value={dailyDate}
               onChange={(e) => setDailyDate(e.target.value)}
             />
@@ -796,6 +920,7 @@ export function ProgressTab({ activities, projectId }: Props) {
               type='number'
               min={0}
               max={100}
+              disabled={dailyReportDisabled}
               value={dailyPct}
               onChange={(e) => setDailyPct(Number(e.target.value))}
             />
@@ -805,6 +930,7 @@ export function ProgressTab({ activities, projectId }: Props) {
             <Input
               type='number'
               min={0}
+              disabled={dailyReportDisabled}
               value={dailyWorkers}
               onChange={(e) => setDailyWorkers(e.target.value)}
             />
@@ -814,6 +940,7 @@ export function ProgressTab({ activities, projectId }: Props) {
             <Input
               type='number'
               min={0}
+              disabled={dailyReportDisabled}
               value={dailyEquipmentHours}
               onChange={(e) => setDailyEquipmentHours(e.target.value)}
             />
@@ -821,6 +948,7 @@ export function ProgressTab({ activities, projectId }: Props) {
           <div>
             <Label className='text-xs'>Material</Label>
             <Input
+              disabled={dailyReportDisabled}
               value={dailyMaterial}
               onChange={(e) => setDailyMaterial(e.target.value)}
             />
@@ -830,6 +958,7 @@ export function ProgressTab({ activities, projectId }: Props) {
             <Input
               type='number'
               min={0}
+              disabled={dailyReportDisabled}
               value={dailyMaterialQty}
               onChange={(e) => setDailyMaterialQty(e.target.value)}
             />
@@ -837,6 +966,7 @@ export function ProgressTab({ activities, projectId }: Props) {
           <div>
             <Label className='text-xs'>Photo URL</Label>
             <Input
+              disabled={dailyReportDisabled}
               value={dailyPhotoUrl}
               onChange={(e) => setDailyPhotoUrl(e.target.value)}
             />
@@ -846,6 +976,7 @@ export function ProgressTab({ activities, projectId }: Props) {
           <div>
             <Label className='text-xs'>Notes</Label>
             <Textarea
+              disabled={dailyReportDisabled}
               value={dailyNotes}
               onChange={(e) => setDailyNotes(e.target.value)}
               className='min-h-20'
@@ -854,8 +985,14 @@ export function ProgressTab({ activities, projectId }: Props) {
           <Button
             disabled={
               !canSubmitDailyReport ||
-              !dailyActivityId ||
+              !selectedDailyActivityId ||
+              !dailyCanSubmitSelectedActivity ||
               createDailyReport.isPending
+            }
+            title={
+              dailyCanSubmitSelectedActivity
+                ? undefined
+                : 'Only assigned users can submit reports for this activity'
             }
             onClick={() => createDailyReport.mutate()}
           >

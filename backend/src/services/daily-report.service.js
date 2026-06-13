@@ -1,6 +1,7 @@
 const { prisma } = require('../config/db');
 const { HttpError } = require('../utils/http-error');
 const auditService = require('./audit.service');
+const equipmentService = require('./equipment.service');
 const progressService = require('./progress.service');
 
 const REPORT_STATUSES = ['draft', 'submitted', 'approved', 'rejected'];
@@ -218,6 +219,22 @@ const reportInclude = {
     },
   },
   progressSubmissions: true,
+  equipmentUsages: {
+    select: {
+      id: true,
+      equipmentId: true,
+      equipmentName: true,
+      hours: true,
+      rateType: true,
+      rate: true,
+      costAmount: true,
+      usageDate: true,
+      status: true,
+      dailyReportId: true,
+      sourceLineIndex: true,
+    },
+    orderBy: { sourceLineIndex: 'asc' },
+  },
 };
 
 const ensureProject = async ({ orgId, projectId }, tx = prisma) => {
@@ -285,6 +302,20 @@ const serializeDailyReport = (row) =>
         progressSubmissions:
           row.progressSubmissions?.map(progressService.serializeSubmission) ||
           [],
+        equipmentUsagePostings:
+          row.equipmentUsages?.map((usage) => ({
+            id: usage.id,
+            equipmentId: usage.equipmentId || null,
+            equipmentName: usage.equipmentName,
+            hours: usage.hours,
+            rateType: usage.rateType || null,
+            rate: Number(usage.rate || 0),
+            costAmount: Number(usage.costAmount || 0),
+            usageDate: toIso(usage.usageDate),
+            status: usage.status,
+            dailyReportId: usage.dailyReportId || null,
+            sourceLineIndex: usage.sourceLineIndex ?? null,
+          })) || [],
       }
     : null;
 
@@ -352,6 +383,7 @@ const createLinkedProgress = async ({
   orgId,
   projectId,
   userId,
+  userRole,
   report,
   progressPayload = null,
   status = 'submitted',
@@ -369,6 +401,7 @@ const createLinkedProgress = async ({
     projectId,
     activityId: report.activityId,
     userId,
+    userRole,
     payload: {
       ...progressData,
       method:
@@ -430,7 +463,13 @@ const listDailyReports = async ({
   return rows.map(serializeDailyReport);
 };
 
-const createDailyReport = async ({ orgId, projectId, userId, payload }) =>
+const createDailyReport = async ({
+  orgId,
+  projectId,
+  userId,
+  userRole,
+  payload,
+}) =>
   prisma.$transaction(async (tx) => {
     await ensureProject({ orgId, projectId }, tx);
 
@@ -488,6 +527,7 @@ const createDailyReport = async ({ orgId, projectId, userId, payload }) =>
       orgId,
       projectId,
       userId,
+      userRole,
       report,
       progressPayload: payload.progress || null,
       status: status === 'submitted' ? 'submitted' : 'draft',
@@ -604,7 +644,13 @@ const updateDailyReport = async ({
     return serializeDailyReport(row);
   });
 
-const submitDailyReport = async ({ orgId, projectId, reportId, userId }) =>
+const submitDailyReport = async ({
+  orgId,
+  projectId,
+  reportId,
+  userId,
+  userRole,
+}) =>
   prisma.$transaction(async (tx) => {
     await ensureProject({ orgId, projectId }, tx);
     const existing = await getReportOrThrow({ projectId, reportId }, tx);
@@ -639,6 +685,7 @@ const submitDailyReport = async ({ orgId, projectId, reportId, userId }) =>
         orgId,
         projectId,
         userId,
+        userRole,
         report: row,
         status: 'submitted',
       });
@@ -667,7 +714,13 @@ const submitDailyReport = async ({ orgId, projectId, reportId, userId }) =>
     );
   });
 
-const approveDailyReport = async ({ orgId, projectId, reportId, userId }) =>
+const approveDailyReport = async ({
+  orgId,
+  projectId,
+  reportId,
+  userId,
+  userRole,
+}) =>
   prisma.$transaction(async (tx) => {
     await ensureProject({ orgId, projectId }, tx);
     const existing = await getReportOrThrow({ projectId, reportId }, tx);
@@ -689,6 +742,7 @@ const approveDailyReport = async ({ orgId, projectId, reportId, userId }) =>
         orgId,
         projectId,
         userId,
+        userRole,
         report: existing,
         status: 'submitted',
       });
@@ -720,6 +774,16 @@ const approveDailyReport = async ({ orgId, projectId, reportId, userId }) =>
       include: reportInclude,
     });
 
+    const equipmentPosting =
+      await equipmentService.postDailyReportEquipmentUsage({
+        tx,
+        orgId,
+        projectId,
+        report: row,
+        actorId: userId,
+        actorRole: userRole,
+      });
+
     await auditService.recordEvent({
       tx,
       orgId,
@@ -734,8 +798,13 @@ const approveDailyReport = async ({ orgId, projectId, reportId, userId }) =>
       newSummary: {
         activityId: row.activityId,
         pctProgress: row.pctProgress,
+        equipmentUsageCount: equipmentPosting.usages.length,
+        equipmentCostPosted: equipmentPosting.equipmentCost,
       },
-      summary: { transition: 'daily_report.approve' },
+      summary: {
+        transition: 'daily_report.approve',
+        equipmentUsagePosted: equipmentPosting.posted,
+      },
       attachments: photoAttachments(row.photosJson),
     });
 
@@ -747,6 +816,7 @@ const rejectDailyReport = async ({
   projectId,
   reportId,
   userId,
+  userRole,
   reason,
 }) =>
   prisma.$transaction(async (tx) => {
@@ -811,6 +881,7 @@ const rejectDailyReport = async ({
       entityId: row.id,
       action: auditService.ACTIONS.REJECTED,
       actorId: userId,
+      actorRole: userRole,
       occurredAt: now,
       oldStatus: existing.status,
       newStatus: 'rejected',

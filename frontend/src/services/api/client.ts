@@ -8,9 +8,7 @@ import type { AuthSession, ApiSuccess } from '@/services/auth/types'
 import { useAuthStore } from '@/stores/auth-store'
 
 const API_BASE_URL =
-  import.meta.env.VITE_API_URL?.replace(/\/$/, '') ||
-  'https://octapm.com/api/v1'
-//'http://localhost:5000/api/v1'
+  import.meta.env.VITE_API_URL?.replace(/\/$/, '') || '/api/v1'
 
 interface RetriableRequestConfig extends AxiosRequestConfig {
   _retry?: boolean

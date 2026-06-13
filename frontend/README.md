@@ -24,8 +24,8 @@ It is built with Vite, TanStack Router, TanStack Query, and a Shadcn-based compo
 
 ## Prerequisites
 
-- Node.js 20+
-- npm 10+
+- Node.js 24.14.0, matching the repository `.nvmrc`
+- npm 11.9.0 or newer within npm 11
 - Backend API running (default expected API base: http://localhost:5000/api/v1)
 
 ## Environment

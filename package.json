@@ -2,6 +2,11 @@
   "name": "pmcopilots",
   "version": "1.0.0",
   "private": true,
+  "packageManager": "npm@11.9.0",
+  "engines": {
+    "node": ">=24.14.0 <25",
+    "npm": ">=11.9.0 <12"
+  },
   "workspaces": [
     "backend",
     "frontend"
@@ -13,14 +18,22 @@
     "build": "npm run build --workspaces --if-present",
     "security:test:secret-hygiene": "node infrastructure/scripts/validate-secret-hygiene.mjs --self-test",
     "security:validate:secret-hygiene": "node infrastructure/scripts/validate-secret-hygiene.mjs",
+    "security:test:private-storage": "node infrastructure/scripts/validate-private-storage.mjs --self-test",
+    "security:validate:private-storage": "node infrastructure/scripts/validate-private-storage.mjs",
+    "security:validate:private-storage:staged": "node infrastructure/scripts/validate-private-storage.mjs --staged",
     "infra:test:api-origin": "node infrastructure/scripts/validate-api-origin-security.mjs --self-test",
     "infra:validate:api-origin": "node infrastructure/scripts/validate-api-origin-security.mjs",
     "infra:test:rds-backups": "node infrastructure/scripts/validate-rds-backups.mjs --self-test",
     "infra:validate:rds-backups": "node infrastructure/scripts/validate-rds-backups.mjs",
+    "infra:test:deployment-readiness": "node infrastructure/scripts/validate-deployment-readiness.mjs --self-test",
+    "infra:validate:deployment-readiness": "node infrastructure/scripts/validate-deployment-readiness.mjs",
     "infra:test:ec2-user-data": "node infrastructure/scripts/validate-ec2-user-data.mjs --self-test",
-    "infra:validate:ec2-user-data": "node infrastructure/scripts/validate-ec2-user-data.mjs"
+    "infra:validate:ec2-user-data": "node infrastructure/scripts/validate-ec2-user-data.mjs",
+    "test:e2e:uat:validate": "node e2e/uat/run-uat-regression.mjs --validate",
+    "test:e2e:uat:seed": "node e2e/uat/seed-uat-fixtures.mjs",
+    "test:e2e:uat": "node e2e/uat/run-uat-regression.mjs"
   },
   "devDependencies": {
-    "concurrently": "^9.1.0"
+    "concurrently": "^10.0.3"
   }
 }

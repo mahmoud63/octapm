@@ -68,6 +68,20 @@ const formatDate = (value: string | null | undefined) => {
 const riskLabel = (value: string | undefined) =>
   value ? value.replace(/_/g, ' ') : 'on track'
 
+const dailyReportLabel = (
+  report:
+    | {
+        date?: string | null
+        shift?: string | null
+        status?: string | null
+      }
+    | null
+    | undefined
+) =>
+  report?.date
+    ? `DR ${formatDate(report.date)}${report.shift ? ` ${report.shift}` : ''}`
+    : null
+
 const serverMessage = (error: unknown, fallback: string) =>
   (error as { response?: { data?: { error?: { message?: string } } } })
     ?.response?.data?.error?.message ?? fallback
@@ -274,6 +288,12 @@ export function MaterialsSection({
                   const risk = material.procurementRisk
                   const severity = risk?.severity ?? 'none'
                   const latestPoLine = material.poLines?.[0]
+                  const latestReceiptLine = material.receiptLines?.[0]
+                  const latestUsage = material.usages?.[0]
+                  const receiptReport = dailyReportLabel(
+                    latestReceiptLine?.dailyReport
+                  )
+                  const usageReport = dailyReportLabel(latestUsage?.dailyReport)
 
                   return (
                     <tr
@@ -308,8 +328,10 @@ export function MaterialsSection({
                           {formatDate(risk?.needDate ?? material.requiredDate)}
                         </p>
                         <p className='text-xs text-muted-foreground'>
-                          {material.leadWeeks ?? 0}w +{' '}
-                          {material.bufferDays ?? 14}d
+                          Order By{' '}
+                          {formatDate(
+                            risk?.orderByDate ?? material.orderByDate
+                          )}
                         </p>
                       </td>
                       <td className='max-w-48 p-2'>
@@ -340,13 +362,19 @@ export function MaterialsSection({
                       <td className='p-2 text-right'>
                         <p>{formatQty(balance.received)}</p>
                         <p className='text-xs text-muted-foreground'>
-                          Issued {formatQty(balance.issued)}
+                          {latestReceiptLine?.receipt?.receiptNumber ??
+                            `Issued ${formatQty(balance.issued)}`}
                         </p>
+                        {receiptReport && (
+                          <p className='text-xs text-muted-foreground'>
+                            {receiptReport}
+                          </p>
+                        )}
                       </td>
                       <td className='p-2 text-right'>
                         <p>{formatQty(balance.consumed)}</p>
                         <p className='text-xs text-muted-foreground'>
-                          Avail {formatQty(balance.available)}
+                          {usageReport ?? `Avail ${formatQty(balance.available)}`}
                         </p>
                       </td>
                       <td className='max-w-40 p-2'>

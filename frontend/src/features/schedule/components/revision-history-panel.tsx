@@ -4,6 +4,7 @@ import { toast } from 'sonner'
 import { useCanPerform } from '@/lib/permissions'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { HistoryPanel } from '@/features/audit/components/audit-history-panel'
 import {
   Dialog,
   DialogContent,
@@ -407,9 +408,16 @@ export function RevisionHistoryPanel({
                       <p key={a.name} className='text-xs'>
                         {a.name}
                       </p>
-                    ))}
+                  ))}
                 </div>
               </div>
+              <HistoryPanel
+                projectId={projectId}
+                entityType='schedule_revision'
+                entityId={viewedRevision.id}
+                title='Revision History'
+                limit={30}
+              />
             </div>
           ) : (
             <p className='text-sm text-muted-foreground'>Revision not found.</p>

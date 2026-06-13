@@ -2,6 +2,7 @@ const mockPrisma = {
   $transaction: jest.fn((fn) => fn(mockPrisma)),
   project: { findFirst: jest.fn() },
   activity: { findFirst: jest.fn() },
+  activityAssignment: { findMany: jest.fn() },
   activityProgressMethod: {
     findFirst: jest.fn(),
     upsert: jest.fn(),
@@ -16,7 +17,7 @@ const mockPrisma = {
   },
 };
 const mockAuditService = {
-  ACTIONS: { APPROVED: 'approved', REJECTED: 'rejected' },
+  ACTIONS: { APPROVED: 'approved', CREATED: 'created', REJECTED: 'rejected' },
   ENTITY_TYPES: { PROGRESS_SUBMISSION: 'progress_submission' },
   recordEvent: jest.fn(),
 };
@@ -34,6 +35,9 @@ describe('progress service', () => {
     jest.clearAllMocks();
     mockPrisma.project.findFirst.mockResolvedValue(project);
     mockPrisma.activity.findFirst.mockResolvedValue(activity);
+    mockPrisma.activityAssignment.findMany.mockResolvedValue([
+      { activityId: 'activity-1' },
+    ]);
     mockPrisma.activityProgressMethod.findFirst.mockResolvedValue(null);
   });
 
@@ -78,6 +82,7 @@ describe('progress service', () => {
       projectId: 'project-1',
       activityId: 'activity-1',
       userId: 'user-1',
+      userRole: 'site_engineer',
       payload: {
         method: 'percent',
         pctComplete: 35,
@@ -87,6 +92,72 @@ describe('progress service', () => {
     expect(submission.status).toBe('submitted');
     expect(submission.pctComplete).toBe(35);
     expect(mockPrisma.activityProgress.create).not.toHaveBeenCalled();
+    expect(mockAuditService.recordEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        orgId: 'org-1',
+        projectId: 'project-1',
+        entityType: 'progress_submission',
+        entityId: 'submission-1',
+        action: 'created',
+        actorId: 'user-1',
+        newStatus: 'submitted',
+        summary: expect.objectContaining({
+          transition: 'submission.submit',
+          activityId: 'activity-1',
+          pctComplete: 35,
+        }),
+      }),
+    );
+  });
+
+  it('blocks progress submissions from unassigned field users', async () => {
+    mockPrisma.activityAssignment.findMany.mockResolvedValue([]);
+
+    await expect(
+      progressService.createProgressSubmission({
+        orgId: 'org-1',
+        projectId: 'project-1',
+        activityId: 'activity-1',
+        userId: 'site-2',
+        userRole: 'site_engineer',
+        payload: {
+          method: 'percent',
+          pctComplete: 35,
+        },
+      }),
+    ).rejects.toMatchObject({
+      status: 403,
+      code: 'ACTIVITY_PROGRESS_ASSIGNMENT_REQUIRED',
+      details: { activityIds: ['activity-1'] },
+    });
+    expect(mockPrisma.progressSubmission.create).not.toHaveBeenCalled();
+  });
+
+  it('allows PM and planning overrides without an activity assignment row', async () => {
+    mockPrisma.activityAssignment.findMany.mockResolvedValue([]);
+    mockPrisma.progressSubmission.create.mockImplementation(({ data }) =>
+      Promise.resolve({
+        id: 'submission-override',
+        createdAt: new Date('2026-01-01T00:00:00.000Z'),
+        updatedAt: new Date('2026-01-01T00:00:00.000Z'),
+        ...data,
+      }),
+    );
+
+    const submission = await progressService.createProgressSubmission({
+      orgId: 'org-1',
+      projectId: 'project-1',
+      activityId: 'activity-1',
+      userId: 'pm-1',
+      userRole: 'pm',
+      payload: {
+        method: 'percent',
+        pctComplete: 50,
+      },
+    });
+
+    expect(submission.id).toBe('submission-override');
+    expect(mockPrisma.activityAssignment.findMany).not.toHaveBeenCalled();
   });
 
   it('requires evidence when the activity method configuration requires it', async () => {
@@ -107,6 +178,7 @@ describe('progress service', () => {
         projectId: 'project-1',
         activityId: 'activity-1',
         userId: 'user-1',
+        userRole: 'site_engineer',
         payload: {
           method: 'percent',
           pctComplete: 35,
