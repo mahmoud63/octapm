@@ -8,6 +8,7 @@ All notable platform-wide changes should be recorded here. Agents must read this
 
 - Made `backend/src/config/db.js` lazy-initialize PrismaClient via a Proxy so that importing the module at require-time does not throw when `prisma generate` has not been run. This fixes the OpenAPI validation CI step which imports the full Express app tree but never makes database calls.
 - Added a `prisma generate` step to both `.github/workflows/openapi.yml` and `.github/workflows/quality-gates.yml` (openapi-validate job) before the `openapi:validate` command, as a belt-and-suspenders safeguard.
+- Fixed `money.test.js` to import `Decimal` from `@prisma/client/runtime/library` instead of `Prisma.Decimal` from `@prisma/client`, which is only available after `prisma generate`. The test now matches the resilient import pattern already used by the `money.js` utility itself.
 
 ## 2026-06-13
 

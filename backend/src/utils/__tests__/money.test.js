@@ -1,4 +1,4 @@
-const { Prisma } = require('@prisma/client');
+const { Decimal } = require('@prisma/client/runtime/library');
 const {
   addMoney,
   assertMoneyInput,
@@ -33,9 +33,9 @@ describe('money utilities', () => {
 
   it('normalizes Prisma Decimal values to two-decimal API numbers', () => {
     const payload = normalizeMoneyTree({
-      totalCert: new Prisma.Decimal('1000.10'),
+      totalCert: new Decimal('1000.10'),
       nested: {
-        netPayable: new Prisma.Decimal('950.095'),
+        netPayable: new Decimal('950.095'),
       },
     });
 
