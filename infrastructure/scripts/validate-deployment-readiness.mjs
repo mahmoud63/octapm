@@ -110,13 +110,13 @@ export function validateDeploymentReadiness({
     failures,
     'Frontend build must read VITE_API_URL from GitHub Environment vars.',
     deploySource,
-    /VITE_API_URL:\s*\$\{\{\s*vars\.VITE_API_URL\s*\}\}/,
+    /VITE_API_URL:\s*\$\{\{\s*vars\.VITE_API_URL(?:\s*\|\|\s*secrets\.VITE_API_URL)?\s*\}\}/,
   )
   requirePattern(
     failures,
     'Backend deploy must read the app secret ARN from GitHub Environment vars.',
     deploySource,
-    /APP_SECRETS_ARN:\s*\$\{\{\s*vars\.APP_SECRETS_ARN\s*\}\}/,
+    /APP_SECRETS_ARN:\s*\$\{\{\s*vars\.APP_SECRETS_ARN(?:\s*\|\|\s*secrets\.APP_SECRETS_ARN)?\s*\}\}/,
   )
   requirePattern(
     failures,
