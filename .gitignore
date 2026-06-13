@@ -18,6 +18,8 @@ dist/
 coverage/
 .claude/
 *.sh
+!infrastructure/terraform/templates/
+!infrastructure/terraform/templates/user-data.sh
 CLAUDE.md
 *.tf
 *.tfvars
