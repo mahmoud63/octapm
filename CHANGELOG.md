@@ -9,6 +9,8 @@ All notable platform-wide changes should be recorded here. Agents must read this
 - Made `backend/src/config/db.js` lazy-initialize PrismaClient via a Proxy so that importing the module at require-time does not throw when `prisma generate` has not been run. This fixes the OpenAPI validation CI step which imports the full Express app tree but never makes database calls.
 - Added a `prisma generate` step to both `.github/workflows/openapi.yml` and `.github/workflows/quality-gates.yml` (openapi-validate job) before the `openapi:validate` command, as a belt-and-suspenders safeguard.
 - Fixed `money.test.js` to import `Decimal` from `@prisma/client/runtime/library` instead of `Prisma.Decimal` from `@prisma/client`, which is only available after `prisma generate`. The test now matches the resilient import pattern already used by the `money.js` utility itself.
+- Updated `.github/workflows/deploy.yml` to gracefully fall back to `secrets.*` if GitHub Environment variables (`vars.*`) are missing, preventing deployment validation failures for configuration values like `AWS_REGION` and `S3_SPA_BUCKET` during the migration from secrets to variables.
+- Fixed `validate-deployment-readiness.mjs` to tolerate the newly added `|| secrets.*` fallback syntax in `deploy.yml` when checking for `VITE_API_URL` and `APP_SECRETS_ARN`.
 
 ## 2026-06-13
 
