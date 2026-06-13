@@ -7,7 +7,7 @@ import { useNavigate } from '@tanstack/react-router'
 import { register } from '@/services/auth/api'
 import type { ApiErrorEnvelope } from '@/services/auth/types'
 import { toast } from 'sonner'
-import { IconFacebook, IconGithub } from '@/assets/brand-icons'
+
 import { useAuthStore } from '@/stores/auth-store'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
