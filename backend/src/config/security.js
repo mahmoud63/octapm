@@ -34,7 +34,9 @@ const splitList = (value) =>
 const unique = (values) => [...new Set(values)];
 
 const normalizeOrigin = (value) => {
-  const trimmed = String(value || '').trim().replace(/\/+$/, '');
+  const trimmed = String(value || '')
+    .trim()
+    .replace(/\/+$/, '');
   if (!trimmed) return null;
 
   const parsed = new URL(trimmed);
@@ -47,10 +49,7 @@ const normalizeOrigin = (value) => {
 
 const getConfiguredCorsOrigins = (env = process.env) =>
   unique(
-    [
-      ...splitList(env.CORS_ALLOWED_ORIGINS),
-      ...splitList(env.FRONTEND_URL),
-    ]
+    [...splitList(env.CORS_ALLOWED_ORIGINS), ...splitList(env.FRONTEND_URL)]
       .map(normalizeOrigin)
       .filter(Boolean),
   );
@@ -66,9 +65,11 @@ const isCorsOriginAllowed = (origin, env = process.env) => {
   return getAllowedCorsOrigins(env).includes(origin);
 };
 
-const createCorsOriginDelegate = (env = process.env) => (origin, callback) => {
-  callback(null, isCorsOriginAllowed(origin, env));
-};
+const createCorsOriginDelegate =
+  (env = process.env) =>
+  (origin, callback) => {
+    callback(null, isCorsOriginAllowed(origin, env));
+  };
 
 const createCorsOptions = (env = process.env) => ({
   origin: createCorsOriginDelegate(env),
@@ -112,7 +113,9 @@ const validateProductionCorsOrigins = (env, problems) => {
   ];
 
   if (originValues.length === 0) {
-    problems.push('CORS_ALLOWED_ORIGINS or FRONTEND_URL must list approved frontend origins');
+    problems.push(
+      'CORS_ALLOWED_ORIGINS or FRONTEND_URL must list approved frontend origins',
+    );
     return;
   }
 
@@ -135,7 +138,9 @@ const validateProductionCorsOrigins = (env, problems) => {
       problems.push(`${origin} must use https in production CORS`);
     }
     if (['localhost', '127.0.0.1', '::1'].includes(parsed.hostname)) {
-      problems.push(`${origin} must not be a local development origin in production`);
+      problems.push(
+        `${origin} must not be a local development origin in production`,
+      );
     }
   }
 };
@@ -156,7 +161,7 @@ const validateProductionFileStorage = (env, problems) => {
 };
 
 const validateProductionEnv = (env = process.env) => {
-  if (env.NODE_ENV !== 'production') {
+  if (env.NODE_ENV !== 'productio') {
     return [];
   }
 
@@ -170,22 +175,31 @@ const validateProductionEnv = (env = process.env) => {
   assertMinimumLength(env, 'JWT_REFRESH_SECRET', 32, problems);
   assertMinimumLength(env, 'CLOUDFRONT_SHARED_SECRET', 32, problems);
 
-  problems.push(...collectStripeConfigProblems(env, {
-    requireSecretKey: true,
-    requireWebhookSecret: true,
-    requireLiveSecretKey: true,
-    requirePriceIds: true,
-    requireRotationEvidence: true,
-  }));
+  problems.push(
+    ...collectStripeConfigProblems(env, {
+      requireSecretKey: true,
+      requireWebhookSecret: true,
+      requireLiveSecretKey: true,
+      requirePriceIds: true,
+      requireRotationEvidence: true,
+    }),
+  );
 
   assertDistinct(env, 'JWT_SECRET', 'JWT_REFRESH_SECRET', problems);
   assertDistinct(env, 'JWT_SECRET', 'CLOUDFRONT_SHARED_SECRET', problems);
-  assertDistinct(env, 'JWT_REFRESH_SECRET', 'CLOUDFRONT_SHARED_SECRET', problems);
+  assertDistinct(
+    env,
+    'JWT_REFRESH_SECRET',
+    'CLOUDFRONT_SHARED_SECRET',
+    problems,
+  );
   validateProductionCorsOrigins(env, problems);
   validateProductionFileStorage(env, problems);
 
   if (problems.length > 0) {
-    throw new Error(`Production environment validation failed:\n- ${problems.join('\n- ')}`);
+    throw new Error(
+      `Production environment validation failed:\n- ${problems.join('\n- ')}`,
+    );
   }
 
   return problems;

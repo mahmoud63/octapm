@@ -17,6 +17,7 @@ All notable platform-wide changes should be recorded here. Agents must read this
 - Fixed AWS IAM role trust policy in `infrastructure/terraform/iam.tf` to allow OIDC assumption from GitHub Actions jobs running within an `environment:*` context. This resolves the `sts:AssumeRoleWithWebIdentity` authorization failure.
 - Fixed git authentication in the EC2 deployment script by embedding the GitHub token directly in the repository URL (`x-access-token`), replacing the `.extraheader` approach which failed on some git versions.
 - Added automatic whitespace and quote sanitization (`tr -d`) for `APP_SECRETS_ARN` and `AWS_REGION` in the EC2 deploy script to prevent `ValidationException: Invalid name` errors if the user accidentally pasted spaces, line breaks, or quotes into their GitHub Secrets.
+- Commented out all environment variable validation gates, secret validation checks, and post-deployment smoke tests in `.github/workflows/deploy.yml` to bypass strict CI checks and force deployments through, as requested by the user.
 
 ## 2026-06-13
 
