@@ -13,6 +13,7 @@ All notable platform-wide changes should be recorded here. Agents must read this
 - Fixed `validate-deployment-readiness.mjs` to tolerate the newly added `|| secrets.*` fallback syntax in `deploy.yml` when checking for `VITE_API_URL` and `APP_SECRETS_ARN`.
 - Removed Facebook and GitHub sign-in/sign-up options from authentication forms and added a link to the sign-up page within the sign-in form. Also removed their unused component imports to resolve frontend lint errors.
 - Added `|| vars.*` fallbacks to all Stripe and Smoke Test configuration variables in `.github/workflows/deploy.yml` to prevent validation errors if they were defined as variables instead of secrets.
+- Hardcoded test Stripe keys and price IDs directly into `.github/workflows/deploy.yml` as requested by the user, bypassing GitHub Environment Secrets. Added a placeholder for the empty webhook secret.
 
 ## 2026-06-13
 
