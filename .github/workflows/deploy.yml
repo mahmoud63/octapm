@@ -348,9 +348,12 @@ jobs:
             cd "$APP_DIR/backend"
             npm ci
 
+            CLEAN_ARN=$(echo "$APP_SECRETS_ARN" | tr -d '[:space:]"' | tr -d "'")
+            CLEAN_REGION=$(echo "$AWS_REGION" | tr -d '[:space:]"' | tr -d "'")
+
             SECRET_JSON=$(aws secretsmanager get-secret-value \
-              --secret-id "$APP_SECRETS_ARN" \
-              --region "$AWS_REGION" \
+              --secret-id "$CLEAN_ARN" \
+              --region "$CLEAN_REGION" \
               --query SecretString \
               --output text)
             DB_PASS=$(echo "$SECRET_JSON" | python3 -c "import sys,json; print(json.load(sys.stdin)['DB_PASSWORD'])")

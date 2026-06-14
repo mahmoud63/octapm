@@ -16,6 +16,7 @@ All notable platform-wide changes should be recorded here. Agents must read this
 - Hardcoded test Stripe keys and price IDs directly into `.github/workflows/deploy.yml` as requested by the user, bypassing GitHub Environment Secrets. Added a placeholder for the empty webhook secret.
 - Fixed AWS IAM role trust policy in `infrastructure/terraform/iam.tf` to allow OIDC assumption from GitHub Actions jobs running within an `environment:*` context. This resolves the `sts:AssumeRoleWithWebIdentity` authorization failure.
 - Fixed git authentication in the EC2 deployment script by embedding the GitHub token directly in the repository URL (`x-access-token`), replacing the `.extraheader` approach which failed on some git versions.
+- Added automatic whitespace and quote sanitization (`tr -d`) for `APP_SECRETS_ARN` and `AWS_REGION` in the EC2 deploy script to prevent `ValidationException: Invalid name` errors if the user accidentally pasted spaces, line breaks, or quotes into their GitHub Secrets.
 
 ## 2026-06-13
 
