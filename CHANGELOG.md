@@ -14,6 +14,8 @@ All notable platform-wide changes should be recorded here. Agents must read this
 - Removed Facebook and GitHub sign-in/sign-up options from authentication forms and added a link to the sign-up page within the sign-in form. Also removed their unused component imports to resolve frontend lint errors.
 - Added `|| vars.*` fallbacks to all Stripe and Smoke Test configuration variables in `.github/workflows/deploy.yml` to prevent validation errors if they were defined as variables instead of secrets.
 - Hardcoded test Stripe keys and price IDs directly into `.github/workflows/deploy.yml` as requested by the user, bypassing GitHub Environment Secrets. Added a placeholder for the empty webhook secret.
+- Fixed AWS IAM role trust policy in `infrastructure/terraform/iam.tf` to allow OIDC assumption from GitHub Actions jobs running within an `environment:*` context. This resolves the `sts:AssumeRoleWithWebIdentity` authorization failure.
+- Fixed git authentication in the EC2 deployment script by embedding the GitHub token directly in the repository URL (`x-access-token`), replacing the `.extraheader` approach which failed on some git versions.
 
 ## 2026-06-13
 
