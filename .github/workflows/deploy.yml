@@ -1,9 +1,7 @@
 name: Deploy
 
 on:
-  workflow_run:
-    workflows: [Quality Gates]
-    types: [completed]
+  push:
     branches: [main]
   workflow_dispatch:
     inputs:
@@ -32,13 +30,7 @@ jobs:
     environment: ${{ github.event.inputs.deploy_environment || vars.DEPLOY_ENVIRONMENT || 'production' }}
 
     steps:
-      - name: Stop deployment when validation failed
-        if: ${{ github.event_name == 'workflow_run' && (github.event.workflow_run.conclusion != 'success' || github.event.workflow_run.event != 'push') }}
-        run: |
-          echo "::error::Deployments require a successful Quality Gates run from a push to main."
-          echo "Quality Gates conclusion: ${{ github.event.workflow_run.conclusion }}"
-          echo "Triggering event: ${{ github.event.workflow_run.event }}"
-          exit 1
+
 
       - name: Stop manual production deployment
         if: ${{ github.event_name == 'workflow_dispatch' && (github.event.inputs.deploy_environment == 'production' || github.event.inputs.deploy_environment == 'prod') }}

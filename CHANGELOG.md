@@ -18,6 +18,7 @@ All notable platform-wide changes should be recorded here. Agents must read this
 - Fixed git authentication in the EC2 deployment script by embedding the GitHub token directly in the repository URL (`x-access-token`), replacing the `.extraheader` approach which failed on some git versions.
 - Added automatic whitespace and quote sanitization (`tr -d`) for `APP_SECRETS_ARN` and `AWS_REGION` in the EC2 deploy script to prevent `ValidationException: Invalid name` errors if the user accidentally pasted spaces, line breaks, or quotes into their GitHub Secrets.
 - Commented out all environment variable validation gates, secret validation checks, and post-deployment smoke tests in `.github/workflows/deploy.yml` to bypass strict CI checks and force deployments through, as requested by the user.
+- Deleted the `quality-gates.yml` and `openapi.yml` GitHub Actions workflows, and updated `deploy.yml` to trigger directly on `push` to `main`, removing all CI/CD blockers as requested.
 
 ## 2026-06-13
 
