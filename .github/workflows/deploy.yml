@@ -330,20 +330,19 @@ jobs:
             fi
 
             APP_DIR="$EC2_APP_DIR"
-            REPOSITORY_URL="https://github.com/${GH_REPOSITORY}.git"
-            GIT_AUTH_HEADER="AUTHORIZATION: bearer ${GH_TOKEN}"
+            REPOSITORY_URL="https://x-access-token:${GH_TOKEN}@github.com/${GH_REPOSITORY}.git"
 
             if [ ! -d "$APP_DIR/.git" ]; then
               sudo mkdir -p "$APP_DIR"
               sudo chown -R "$(id -un):$(id -gn)" "$APP_DIR"
-              git -c http.https://github.com/.extraheader="$GIT_AUTH_HEADER" clone "$REPOSITORY_URL" "$APP_DIR"
+              git clone "$REPOSITORY_URL" "$APP_DIR"
               cd "$APP_DIR"
             else
               cd "$APP_DIR"
               git remote set-url origin "$REPOSITORY_URL"
             fi
 
-            git -c http.https://github.com/.extraheader="$GIT_AUTH_HEADER" fetch origin "$DEPLOY_REF"
+            git fetch origin "$DEPLOY_REF"
             git checkout --force "$DEPLOY_SHA"
 
             cd "$APP_DIR/backend"
