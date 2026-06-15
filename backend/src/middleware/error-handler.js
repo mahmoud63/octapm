@@ -17,7 +17,10 @@ const errorHandler = (err, _req, res, next) => {
   }
 
   if (process.env.NODE_ENV !== "test") {
-    console.error(err.stack || err);
+    // Suppress logging for expected client errors (like 401 Unauthorized or 404 Not Found)
+    if (!err.status || err.status >= 500) {
+      console.error(err.stack || err);
+    }
   }
 
   return sendError(res, err, undefined, undefined, undefined, {
