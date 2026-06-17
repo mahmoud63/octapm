@@ -47,6 +47,17 @@ resource "aws_cloudfront_origin_access_control" "spa" {
 }
 
 ################################
+# CloudFront Function for SPA Routing
+################################
+resource "aws_cloudfront_function" "spa_router" {
+  name    = "${var.app_name}-spa-router-${var.environment}"
+  runtime = "cloudfront-js-1.0"
+  comment = "SPA router for default behavior"
+  publish = true
+  code    = file("${path.module}/spa-router.js")
+}
+
+################################
 # CloudFront Distribution
 # - Origin 1: S3 SPA (default /**)
 # - Origin 2: EC2 API (/api/*)
@@ -107,22 +118,13 @@ resource "aws_cloudfront_distribution" "main" {
     compress               = true
 
     cache_policy_id = "658327ea-f89d-4fab-a63d-7e88639e58f6"  # CachingOptimized managed policy
+
+    function_association {
+      event_type   = "viewer-request"
+      function_arn = aws_cloudfront_function.spa_router.arn
+    }
   }
 
-  # ── SPA fallback: 403/404 → index.html (React Router) ────────
-  custom_error_response {
-    error_code            = 403
-    response_code         = 200
-    response_page_path    = "/index.html"
-    error_caching_min_ttl = 0
-  }
-
-  custom_error_response {
-    error_code            = 404
-    response_code         = 200
-    response_page_path    = "/index.html"
-    error_caching_min_ttl = 0
-  }
 
   restrictions {
     geo_restriction { restriction_type = "none" }
