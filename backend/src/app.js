@@ -14,9 +14,6 @@ const billingRoutes = require("./routes/billing");
 const notificationRoutes = require("./routes/notifications");
 const taskRoutes = require("./routes/tasks");
 const searchRoutes = require("./routes/search");
-const {
-  requireCloudFrontOriginSecret,
-} = require("./middleware/cloudfront-origin");
 const { errorHandler, notFoundHandler } = require("./middleware/error-handler");
 const {
   apiRateLimiter,
@@ -57,7 +54,6 @@ const createApp = () => {
   if (process.env.NODE_ENV !== "test") {
     app.use(morgan("dev"));
   }
-  app.use(requireCloudFrontOriginSecret);
 
   app.get("/api/v1/openapi.json", (_req, res) => {
     res.json(openApiSpec);
