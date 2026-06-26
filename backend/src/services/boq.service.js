@@ -1130,7 +1130,7 @@ function buildBoqActivityPrompt(project, boqItems) {
   // undefined/NaN/null fields with no visibility.
   const sanitizedBoqItems = boqItems.map((i, idx) => ({
     code: i.code ?? `UNKNOWN_${idx}`,
-    description: i.description ?? '',
+    description: i.description ? i.description.substring(0, 300) : '',
     quantity: Number.isFinite(Number(i.qty)) ? Number(i.qty) : 0,
     unit: i.unit ?? 'unit',
     rate: Number.isFinite(Number(i.rate)) ? Number(i.rate) : 0,
@@ -1143,6 +1143,7 @@ RULES:
 
 1. ACTIVITY COUNT
    - Generate 1-5 specific construction activities per BOQ item.
+   - For non-construction items (e.g. Preliminaries, Legal Clauses, Administrative, Health & Safety), generate EXACTLY 1 summary activity or "Level of Effort" task. Do not invent construction tasks for legal clauses.
    - Simple or low-complexity BOQ items (e.g. supply-and-fix of small components, minor fittings) may have as few as 1 activity. Do NOT pad trivial items with artificial steps just to reach a higher count.
 
 2. ACTIVITY QUALITY
