@@ -55,8 +55,11 @@ assert.match(compare, /of the page changed/, 'diff reports the changed share')
 
 // ── Viewer integration ──────────────────────────────────────────────────
 const viewer = read('src/features/drawings/components/sheet-viewer.tsx')
-;['uat-sheet-mode-markup', 'uat-sheet-mode-pins', 'uat-sheet-mode-compare', 'uat-markup-tools', 'uat-markup-publish', 'uat-markup-layers', 'uat-sheet-set-scale'].forEach((id) =>
+;['uat-sheet-mode-${value}', 'uat-markup-tool-${value}', 'uat-markup-tools', 'uat-markup-publish', 'uat-markup-layers', 'uat-sheet-set-scale', 'uat-sheet-toggle-pins'].forEach((id) =>
   assert.ok(viewer.includes(id), `viewer exposes ${id}`)
+)
+;["'markup'", "'pins'", "'compare'"].forEach((mode) =>
+  assert.ok(viewer.includes(mode), `viewer offers mode ${mode}`)
 )
 assert.match(viewer, /AUTOSAVE_MS/, 'personal layer auto-saves')
 assert.match(viewer, /<MarkupLayer/, 'viewer mounts the markup layer over the canvas')
