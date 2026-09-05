@@ -44,6 +44,12 @@ const RECORD_SOURCES = Object.freeze({
   ncr: { model: "ncrRecord", label: "NCR", title: ["ref", "description"] },
   itp: { model: "itpRecord", label: "ITP", title: ["ref", "title"] },
   defect: { model: "defectRecord", label: "Defect", title: ["ref", "title"] },
+  punch_item: {
+    model: "punchItem",
+    label: "Punch item",
+    title: ["ref", "title"],
+    extraRefs: ["managerUserId", "finalApproverUserId", "createdBy"],
+  },
   material_test: {
     model: "materialTest",
     label: "Material test",

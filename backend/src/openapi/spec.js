@@ -2950,6 +2950,121 @@ const components = {
       pin: ref("Pin"),
       created: { nullable: true, ...objectSchema({ id: uuid, ref: { type: "string", nullable: true } }) },
     }),
+    PunchPerson: objectSchema({ id: uuid, name: { type: "string" }, email: { type: "string", nullable: true } }),
+    PunchItem: objectSchema({
+      id: uuid,
+      projectId: uuid,
+      number: { type: "integer" },
+      ref: { type: "string", description: "PL-001 …" },
+      title: { type: "string" },
+      description: { type: "string", nullable: true },
+      status: { type: "string", enum: ["draft", "open", "ready_for_review", "closed", "in_dispute", "void"] },
+      priority: { type: "string", enum: ["low", "normal", "high", "urgent"] },
+      trade: { type: "string", nullable: true },
+      activityId: nullableUuid,
+      activity: { nullable: true, ...objectSchema({ id: uuid, name: { type: "string" }, code: { type: "string", nullable: true } }) },
+      locationId: nullableUuid,
+      location: { nullable: true, ...objectSchema({ id: uuid, name: { type: "string" }, code: { type: "string", nullable: true }, path: { type: "string" } }) },
+      locationText: { type: "string", nullable: true },
+      sheetId: nullableUuid,
+      sheet: { nullable: true, ...objectSchema({ id: uuid, number: { type: "string" }, title: { type: "string" } }) },
+      assigneeCompanyId: nullableUuid,
+      assigneeCompany: { nullable: true, ...objectSchema({ id: uuid, name: { type: "string" } }) },
+      assigneeUserId: nullableUuid,
+      assigneeUser: { ...ref("PunchPerson"), nullable: true },
+      managerUserId: nullableUuid,
+      managerUser: { ...ref("PunchPerson"), nullable: true },
+      finalApproverUserId: nullableUuid,
+      finalApproverUser: { ...ref("PunchPerson"), nullable: true },
+      ballInCourtUserId: nullableUuid,
+      ballInCourtUser: { nullable: true, ...objectSchema({ id: uuid, name: { type: "string" } }) },
+      dueDate: nullableDateString,
+      isOverdue: { type: "boolean" },
+      daysOverdue: { type: "integer" },
+      openedAt: nullableDateString,
+      readyAt: nullableDateString,
+      closedAt: nullableDateString,
+      closedBy: nullableUuid,
+      reopenCount: { type: "integer" },
+      disputeReason: { type: "string", nullable: true },
+      distributedAt: nullableDateString,
+      legacyDefectId: nullableUuid,
+      createdBy: nullableUuid,
+      createdAt: dateString,
+      updatedAt: dateString,
+      path: { type: "string", nullable: true },
+      attachments: arrayOf(ref("GenericObject")),
+      activityLinks: arrayOf(ref("GenericObject")),
+      history: arrayOf(ref("GenericObject")),
+      events: arrayOf(
+        objectSchema({
+          id: uuid,
+          action: { type: "string" },
+          fromStatus: { type: "string", nullable: true },
+          toStatus: { type: "string", nullable: true },
+          reason: { type: "string", nullable: true },
+          actorId: nullableUuid,
+          actorName: { type: "string", nullable: true },
+          actorRole: { type: "string", nullable: true },
+          metadata: { type: "object", nullable: true },
+          createdAt: dateString,
+        }),
+      ),
+    }),
+    PunchItemInput: objectSchema({
+      title: { type: "string", maxLength: 200 },
+      description: { type: "string", nullable: true, maxLength: 4000 },
+      priority: { type: "string", enum: ["low", "normal", "high", "urgent"] },
+      trade: { type: "string", nullable: true, maxLength: 80 },
+      locationText: { type: "string", nullable: true, maxLength: 200 },
+      locationId: nullableUuid,
+      sheetId: nullableUuid,
+      activityId: nullableUuid,
+      assigneeCompanyId: nullableUuid,
+      assigneeUserId: nullableUuid,
+      managerUserId: nullableUuid,
+      finalApproverUserId: nullableUuid,
+      dueDate: nullableDateString,
+      status: { type: "string", enum: ["draft", "open"], description: "Create as draft (default) or open straight away." },
+      activityIds: arrayOf(uuid),
+      attachmentRefs: arrayOf(ref("GenericObject")),
+    }),
+    PunchListResponse: objectSchema({
+      items: arrayOf(ref("PunchItem")),
+      summary: objectSchema({
+        total: { type: "integer" },
+        open: { type: "integer" },
+        overdue: { type: "integer" },
+        byStatus: { type: "object" },
+        byCompany: arrayOf(objectSchema({ company: { type: "string" }, total: { type: "integer" }, open: { type: "integer" }, overdue: { type: "integer" } })),
+        byTrade: arrayOf(objectSchema({ trade: { type: "string" }, count: { type: "integer" } })),
+      }),
+    }),
+    PunchBulkRequest: objectSchema(
+      {
+        items: { ...arrayOf(ref("PunchItemInput")), minItems: 1, maxItems: 100 },
+        defaults: { ...ref("PunchItemInput"), description: "Applied to every item unless the item sets the field." },
+      },
+      ["items"],
+    ),
+    PunchTransitionRequest: objectSchema(
+      {
+        action: { type: "string", enum: ["open", "ready_for_review", "close", "reopen", "dispute", "resolve_dispute", "void"] },
+        reason: { type: "string", nullable: true, maxLength: 2000, description: "Required for reopen, dispute and void." },
+      },
+      ["action"],
+    ),
+    PunchDistributeRequest: objectSchema({
+      itemIds: { ...arrayOf(uuid), description: "Specific items; defaults to every open item for the companies." },
+      companyIds: arrayOf(uuid),
+      userIds: arrayOf(uuid),
+      message: { type: "string", nullable: true, maxLength: 2000 },
+    }),
+    PunchDistributeResponse: objectSchema({
+      items: { type: "integer" },
+      recipients: arrayOf(objectSchema({ userId: uuid, email: { type: "string" }, delivered: { type: "boolean" }, error: { type: "string", nullable: true } })),
+      distributedAt: dateString,
+    }),
     SheetOfflineManifest: objectSchema({
       generatedAt: dateString,
       items: arrayOf(
@@ -10569,6 +10684,165 @@ add(
   }),
 );
 
+// ─── Punch list ─────────────────────────────────────────────────────────
+const punchItemIdParam = pathParam("itemId", "Punch item UUID.");
+const punchFilterParams = [
+  queryParam("status", "Status, comma list, or `all` (void items hidden by default).", { type: "string" }),
+  queryParam("assigneeCompanyId", "Assigned company.", uuid),
+  queryParam("assigneeUserId", "Assigned user.", uuid),
+  queryParam("managerUserId", "Manager.", uuid),
+  queryParam("finalApproverUserId", "Final approver.", uuid),
+  queryParam("ballInCourtUserId", "Ball in court user id, or `me`.", { type: "string" }),
+  queryParam("locationId", "Location id; includes descendants.", uuid),
+  queryParam("sheetId", "Sheet the item was raised on.", uuid),
+  queryParam("trade", "Trade.", { type: "string" }),
+  queryParam("priority", "Priority.", { type: "string", enum: ["low", "normal", "high", "urgent"] }),
+  queryParam("overdue", "Only overdue open items.", { type: "boolean" }),
+  queryParam("search", "Ref, title, description or location contains.", { type: "string" }),
+  queryParam("limit", "Maximum rows (default 1000).", { type: "integer", minimum: 1, maximum: 1000 }),
+];
+const punchScopedNote = "Users who join through a project party (subcontractors) only see items assigned to their company or raised by them.";
+
+add(
+  "/projects/{projectId}/punch",
+  "get",
+  operation({
+    tag: "Punch List",
+    summary: "Punch items with filters and a summary by status, company and trade.",
+    operationId: "listPunchItems",
+    parameters: [...projectParams, ...punchFilterParams],
+    permissions: { ...modulePermission("punch", "read"), note: punchScopedNote },
+    responseSchema: ref("PunchListResponse"),
+  }),
+);
+
+add(
+  "/projects/{projectId}/punch",
+  "post",
+  operation({
+    tag: "Punch List",
+    summary: "Create a punch item (draft, or open immediately with `status: open`). Assignees, the company's project members and the manager are notified when it opens.",
+    operationId: "createPunchItem",
+    parameters: projectParams,
+    permissions: modulePermission("punch", "create"),
+    requestBody: jsonBody(ref("PunchItemInput"), "Punch item."),
+    responseSchema: ref("PunchItem"),
+    status: 201,
+  }),
+);
+
+[
+  {
+    method: "post",
+    path: "/projects/{projectId}/punch/bulk",
+    summary: "Create up to 100 punch items in one go with shared defaults (assignee, location, due date…).",
+    operationId: "bulkCreatePunchItems",
+    permissions: modulePermission("punch", "create"),
+    requestBody: jsonBody(ref("PunchBulkRequest"), "Items and defaults."),
+    responseSchema: objectSchema({ items: arrayOf(ref("PunchItem")), created: { type: "integer" } }),
+    status: 201,
+  },
+  {
+    method: "post",
+    path: "/projects/{projectId}/punch/distribute",
+    summary: "Email the punch list to companies / users (their active project members) and record the distribution on each item.",
+    operationId: "distributePunchItems",
+    permissions: modulePermission("punch", "submit", "punch.distribute"),
+    requestBody: jsonBody(ref("PunchDistributeRequest"), "Who receives which items."),
+    responseSchema: ref("PunchDistributeResponse"),
+  },
+].forEach((route) => addGenericRoute({ tag: "Punch List", parameters: projectParams, ...route }));
+
+add(
+  "/projects/{projectId}/punch/export.pdf",
+  "get",
+  operation({
+    tag: "Punch List",
+    summary: "Punch list PDF grouped by company (one section per subcontractor) or by location, optionally with JPEG photos.",
+    operationId: "exportPunchListPdf",
+    parameters: [
+      ...projectParams,
+      ...punchFilterParams,
+      queryParam("groupBy", "Grouping.", { type: "string", enum: ["company", "location", "none"] }),
+      queryParam("includePhotos", "Embed up to two JPEG photos per item (max 40).", { type: "boolean" }),
+    ],
+    permissions: modulePermission("punch", "export"),
+    responses: { 200: binaryResponse("PDF file.", "application/pdf") },
+  }),
+);
+
+add(
+  "/projects/{projectId}/punch/export.csv",
+  "get",
+  operation({
+    tag: "Punch List",
+    summary: "Punch list as CSV with the same filters as the list.",
+    operationId: "exportPunchListCsv",
+    parameters: [...projectParams, ...punchFilterParams],
+    permissions: modulePermission("punch", "export"),
+    responses: { 200: binaryResponse("CSV file.", "text/csv") },
+  }),
+);
+
+[
+  {
+    method: "get",
+    path: "/projects/{projectId}/punch/{itemId}",
+    summary: "One punch item with its event ledger.",
+    operationId: "getPunchItem",
+    parameters: [projectIdParam, punchItemIdParam],
+    permissions: { ...modulePermission("punch", "read"), note: punchScopedNote },
+    responseSchema: ref("PunchItem"),
+  },
+  {
+    method: "patch",
+    path: "/projects/{projectId}/punch/{itemId}",
+    summary: "Edit an item that is not closed or void; assignment changes re-notify.",
+    operationId: "updatePunchItem",
+    parameters: [projectIdParam, punchItemIdParam],
+    permissions: modulePermission("punch", "update"),
+    requestBody: jsonBody(ref("PunchItemInput"), "Fields to change."),
+    responseSchema: ref("PunchItem"),
+  },
+  {
+    method: "delete",
+    path: "/projects/{projectId}/punch/{itemId}",
+    summary: "Delete a draft item (use void for anything that was opened).",
+    operationId: "deletePunchItem",
+    parameters: [projectIdParam, punchItemIdParam],
+    permissions: modulePermission("punch", "delete"),
+    responseSchema: objectSchema({ deleted: { type: "boolean" }, id: uuid }),
+  },
+  {
+    method: "post",
+    path: "/projects/{projectId}/punch/{itemId}/transition",
+    summary:
+      "Move an item through draft → open → ready_for_review → closed (in_dispute from open / ready; void from anything not closed). Each action maps to a `punch.*` transition; only the final approver (when set) may close; reopen, dispute and void need a reason.",
+    operationId: "transitionPunchItem",
+    parameters: [projectIdParam, punchItemIdParam],
+    permissions: {
+      auth: "bearer",
+      roles: ROLE_IDS,
+      note: "open/ready_for_review/reopen/dispute/resolve_dispute → punch.* submit transitions; close → punch.close (approve); void → punch.void (approve).",
+    },
+    requestBody: jsonBody(ref("PunchTransitionRequest"), "Action and reason."),
+    responseSchema: ref("PunchItem"),
+  },
+].forEach((route) => addGenericRoute({ tag: "Punch List", ...route }));
+
+add(
+  "/projects/{projectId}/drawings/sheets/{sheetId}/qr.svg",
+  "get",
+  operation({
+    tag: "Drawings",
+    summary: "Printable QR code for a sheet; scanning it opens the punch list with the sheet pre-selected for quick-create.",
+    operationId: "getSheetQr",
+    parameters: [projectIdParam, sheetIdParam],
+    permissions: modulePermission("document_control", "read"),
+    responses: { 200: binaryResponse("SVG image.", "image/svg+xml") },
+  }),
+);
+
 // ─── Sheet markups and pins ─────────────────────────────────────────────
 const markupIdParam = pathParam("markupId", "Markup UUID.");
 const pinIdParam = pathParam("pinId", "Pin UUID.");
@@ -11095,6 +11369,11 @@ const openApiSpec = {
       name: "Comments",
       description:
         "Comments with explicit @mentions on every record type, plus record subscriptions (follow / unfollow). Comments also appear in the record history feed (`GET /projects/{projectId}/audit?source=comment`). See docs/qa/comments-subscriptions.md.",
+    },
+    {
+      name: "Punch List",
+      description:
+        "Punch items with a draft → open → ready_for_review → closed state machine (plus in_dispute and void), an event ledger, company-scoped visibility for subcontractors, bulk create, email distribution, and PDF / CSV export per subcontractor or location. Replaces the legacy defect register (rows migrated). See docs/qa/punch-list.md.",
     },
     {
       name: "Drawings",

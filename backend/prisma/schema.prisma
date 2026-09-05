@@ -59,6 +59,8 @@ model Organisation {
   sheetRevisions      SheetRevision[]
   markups             Markup[]
   pins                Pin[]
+  punchItems          PunchItem[]
+  punchItemEvents     PunchItemEvent[]
 }
 
 model User {
@@ -137,6 +139,10 @@ model User {
   defectApprover          DefectRecord[]      @relation("DefectApproverUser")
   defectAssignee          DefectRecord[]      @relation("DefectAssigneeUser")
   defectBallInCourt       DefectRecord[]      @relation("DefectBallInCourtUser")
+  punchAssignee           PunchItem[]         @relation("PunchAssigneeUser")
+  punchManager            PunchItem[]         @relation("PunchManagerUser")
+  punchFinalApprover      PunchItem[]         @relation("PunchFinalApproverUser")
+  punchBallInCourt        PunchItem[]         @relation("PunchBallInCourtUser")
   safetyOwner             SafetyIncident[]    @relation("SafetyOwnerUser")
   safetyReviewer          SafetyIncident[]    @relation("SafetyReviewerUser")
   safetyApprover          SafetyIncident[]    @relation("SafetyApproverUser")
@@ -239,6 +245,7 @@ model Company {
   ncrAssignments            NcrRecord[]      @relation("NcrAssigneeCompany")
   itpAssignments            ItpRecord[]      @relation("ItpAssigneeCompany")
   defectAssignments         DefectRecord[]   @relation("DefectAssigneeCompany")
+  punchAssignments          PunchItem[]      @relation("PunchAssigneeCompany")
   safetyAssignments         SafetyIncident[] @relation("SafetyAssigneeCompany")
   materialTestAssignments   MaterialTest[]   @relation("MaterialTestAssigneeCompany")
   rfiAssignments            Rfi[]            @relation("RfiAssigneeCompany")
@@ -410,6 +417,8 @@ model Project {
   sheetRevisions                SheetRevision[]
   markups                       Markup[]
   pins                          Pin[]
+  punchItems                    PunchItem[]
+  punchItemEvents               PunchItemEvent[]
 
   @@index([orgId])
   @@index([orgId, status, archivedAt])
@@ -1269,6 +1278,7 @@ model Activity {
   leadTimeAlerts         ProcurementLeadTimeAlert[]
   ncrRecords             NcrRecord[]
   defectRecords          DefectRecord[]
+  punchItems             PunchItem[]
   safetyIncidents        SafetyIncident[]
   materialTests          MaterialTest[]
   rfis                   Rfi[]
@@ -3758,9 +3768,10 @@ model Location {
   org      Organisation @relation(fields: [orgId], references: [id], onDelete: Cascade)
   project  Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
   parent   Location?    @relation("LocationChildren", fields: [parentId], references: [id], onDelete: Restrict)
-  children Location[]   @relation("LocationChildren")
-  photos   Photo[]
-  sheets   Sheet[]
+  children   Location[]   @relation("LocationChildren")
+  photos     Photo[]
+  sheets     Sheet[]
+  punchItems PunchItem[]
 
   @@unique([projectId, code])
   @@index([orgId])
@@ -3963,9 +3974,10 @@ model Sheet {
   org       Organisation    @relation(fields: [orgId], references: [id], onDelete: Cascade)
   project   Project         @relation(fields: [projectId], references: [id], onDelete: Cascade)
   location  Location?       @relation(fields: [locationId], references: [id], onDelete: SetNull)
-  revisions SheetRevision[]
-  markups   Markup[]
-  pins      Pin[]
+  revisions  SheetRevision[]
+  markups    Markup[]
+  pins       Pin[]
+  punchItems PunchItem[]
 
   @@unique([projectId, number])
   @@index([orgId])
@@ -4020,6 +4032,91 @@ model SheetRevision {
   @@index([sheetId, status])
   @@index([documentId])
   @@index([supersededById])
+}
+
+// ─── Punch list (OCTA-FLD-PUNCH-013) ───
+model PunchItem {
+  id                  String    @id @default(uuid())
+  orgId               String
+  projectId           String
+  number              Int
+  ref                 String
+  title               String
+  description         String?
+  status              String    @default("draft") // draft, open, ready_for_review, closed, in_dispute, void
+  priority            String    @default("normal") // low, normal, high, urgent
+  trade               String?
+  activityId          String?
+  locationId          String?
+  locationText        String?
+  sheetId             String?
+  assigneeCompanyId   String?
+  assigneeUserId      String?
+  managerUserId       String?
+  finalApproverUserId String?
+  ballInCourtUserId   String?
+  dueDate             DateTime?
+  openedAt            DateTime?
+  readyAt             DateTime?
+  closedAt            DateTime?
+  closedBy            String?
+  reopenCount         Int       @default(0)
+  disputeReason       String?
+  distributedAt       DateTime?
+  legacyDefectId      String?   @unique
+  createdBy           String?
+  updatedBy           String?
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  org               Organisation     @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  project           Project          @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  activity          Activity?        @relation(fields: [activityId], references: [id], onDelete: SetNull)
+  location          Location?        @relation(fields: [locationId], references: [id], onDelete: SetNull)
+  sheet             Sheet?           @relation(fields: [sheetId], references: [id], onDelete: SetNull)
+  assigneeCompany   Company?         @relation("PunchAssigneeCompany", fields: [assigneeCompanyId], references: [id], onDelete: SetNull)
+  assigneeUser      User?            @relation("PunchAssigneeUser", fields: [assigneeUserId], references: [id], onDelete: SetNull)
+  managerUser       User?            @relation("PunchManagerUser", fields: [managerUserId], references: [id], onDelete: SetNull)
+  finalApproverUser User?            @relation("PunchFinalApproverUser", fields: [finalApproverUserId], references: [id], onDelete: SetNull)
+  ballInCourtUser   User?            @relation("PunchBallInCourtUser", fields: [ballInCourtUserId], references: [id], onDelete: SetNull)
+  events            PunchItemEvent[]
+
+  @@unique([projectId, ref])
+  @@unique([projectId, number])
+  @@index([orgId])
+  @@index([projectId, status])
+  @@index([projectId, assigneeCompanyId, status])
+  @@index([projectId, locationId])
+  @@index([projectId, dueDate])
+  @@index([sheetId])
+  @@index([assigneeUserId])
+  @@index([managerUserId])
+  @@index([finalApproverUserId])
+  @@index([ballInCourtUserId])
+}
+
+/** Ledger of everything that happened to a punch item. */
+model PunchItemEvent {
+  id           String   @id @default(uuid())
+  orgId        String
+  projectId    String
+  punchItemId  String
+  action       String // created, migrated, updated, assigned, opened, ready_for_review, closed, reopened, disputed, dispute_resolved, voided, distributed
+  fromStatus   String?
+  toStatus     String?
+  reason       String?
+  actorId      String?
+  actorRole    String?
+  metadataJson Json?
+  createdAt    DateTime @default(now())
+
+  org       Organisation @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  project   Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  punchItem PunchItem    @relation(fields: [punchItemId], references: [id], onDelete: Cascade)
+
+  @@index([orgId])
+  @@index([punchItemId, createdAt])
+  @@index([projectId, createdAt])
 }
 
 // ─── Sheet markups and pins (OCTA-DWG-MARKUP-012) ───

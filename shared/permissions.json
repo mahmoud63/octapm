@@ -616,11 +616,44 @@
         "location.archive": ["pm", "planning_eng"],
         "location.restore": ["pm", "planning_eng"]
       }
+    },
+    "punch": {
+      "label": "Punch List",
+      "actions": {
+        "read": [
+          "pm",
+          "planning_eng",
+          "qs",
+          "cost_controller",
+          "procurement",
+          "warehouse",
+          "site_engineer",
+          "finance"
+        ],
+        "create": ["pm", "planning_eng", "site_engineer", "qs"],
+        "update": ["pm", "planning_eng", "site_engineer"],
+        "delete": ["pm"],
+        "submit": ["pm", "planning_eng", "site_engineer"],
+        "approve": ["pm"],
+        "certify": [],
+        "baseline": [],
+        "export": ["pm", "planning_eng", "qs", "site_engineer", "cost_controller"]
+      },
+      "transitions": {
+        "punch.open": ["pm", "planning_eng", "site_engineer"],
+        "punch.ready_for_review": ["pm", "planning_eng", "site_engineer"],
+        "punch.close": ["pm"],
+        "punch.reopen": ["pm", "planning_eng", "site_engineer"],
+        "punch.dispute": ["pm", "planning_eng", "site_engineer"],
+        "punch.void": ["pm"],
+        "punch.distribute": ["pm", "planning_eng", "site_engineer"]
+      }
     }
   },
   "partyPermissions": {
     "owner": {
       "modules": {
+        "punch": { "actions": ["read", "export"], "transitions": [] },
         "schedule": { "actions": ["read", "export"], "transitions": [] },
         "progress": { "actions": ["read", "export"], "transitions": [] },
         "boq": { "actions": ["read", "export"], "transitions": [] },
@@ -654,6 +687,10 @@
     },
     "consultant": {
       "modules": {
+        "punch": {
+          "actions": ["read", "create", "submit", "approve", "export"],
+          "transitions": ["punch.open", "punch.close", "punch.reopen"]
+        },
         "schedule": { "actions": ["read", "export"], "transitions": [] },
         "progress": { "actions": ["read"], "transitions": [] },
         "boq": { "actions": ["read"], "transitions": [] },
@@ -694,6 +731,15 @@
     },
     "contractor": {
       "modules": {
+        "punch": {
+          "actions": ["read", "create", "update", "submit", "export"],
+          "transitions": [
+            "punch.open",
+            "punch.ready_for_review",
+            "punch.dispute",
+            "punch.distribute"
+          ]
+        },
         "schedule": { "actions": ["read", "export"], "transitions": [] },
         "progress": {
           "actions": ["read", "create", "submit"],
@@ -738,6 +784,10 @@
     },
     "subcontractor": {
       "modules": {
+        "punch": {
+          "actions": ["read", "update", "submit", "export"],
+          "transitions": ["punch.ready_for_review", "punch.dispute"]
+        },
         "schedule": { "actions": ["read"], "transitions": [] },
         "progress": {
           "actions": ["read", "create", "submit"],

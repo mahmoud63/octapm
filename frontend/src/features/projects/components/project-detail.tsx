@@ -252,7 +252,7 @@ export function ProjectDetail({
         children: [
           { key: 'ncr', label: 'NCR' },
           { key: 'itp', label: 'ITP' },
-          { key: 'defects', label: 'Defects' },
+          { key: 'defects', label: 'Punch list' },
           { key: 'safety', label: 'Safety' },
           { key: 'tests', label: 'Material Tests' },
         ],
@@ -437,6 +437,7 @@ export function ProjectDetail({
             activeTab={childState.quality}
             onTabChange={(value: string) => setModuleChild('quality', value)}
             showTabList={false}
+            initialTarget={initialTarget}
           />
         ) : (
           <div className='rounded-md border p-6 text-sm text-muted-foreground'>

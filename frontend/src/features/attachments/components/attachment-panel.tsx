@@ -40,6 +40,7 @@ const RECORD_MODULES: Record<string, PermissionModule> = {
   ncr: 'ncr',
   itp: 'ncr',
   defect: 'ncr',
+  punch_item: 'punch',
   material_test: 'ncr',
   safety_incident: 'safety',
   rfi: 'rfi',

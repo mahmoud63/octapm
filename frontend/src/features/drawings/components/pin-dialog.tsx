@@ -25,8 +25,10 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
+import { CompanyPicker } from '@/components/user-picker'
 import { useUploadAttachments } from '@/features/attachments/hooks/use-attachments'
 import { useRfis } from '@/features/doc-control/hooks/use-doc-control'
+import { usePunchItems } from '@/features/punch/hooks/use-punch'
 import { useDefects } from '@/features/quality/hooks/use-quality'
 import {
   useCreatePin,
@@ -35,18 +37,27 @@ import {
   type Pin,
 } from '../hooks/use-markups'
 
-type Mode = 'new_rfi' | 'link_rfi' | 'link_defect' | 'photo'
+type Mode =
+  | 'new_punch'
+  | 'link_punch'
+  | 'new_rfi'
+  | 'link_rfi'
+  | 'link_defect'
+  | 'photo'
 
 const MODE_LABEL: Record<Mode, string> = {
+  new_punch: 'Raise a punch item here',
+  link_punch: 'Link a punch item',
   new_rfi: 'Raise an RFI here',
   link_rfi: 'Link an existing RFI',
-  link_defect: 'Link a defect',
+  link_defect: 'Link a legacy defect',
   photo: 'Attach a photo here',
 }
 
 /**
- * Drops a pin at a point: raises an RFI on the spot, links an existing RFI
- * or defect, or attaches a photo to the sheet and pins it.
+ * Drops a pin at a point: raises a punch item or an RFI on the spot, links
+ * an existing punch item, RFI or defect, or attaches a photo to the sheet
+ * and pins it.
  */
 export function PinCreateDialog({
   projectId,
@@ -63,15 +74,21 @@ export function PinCreateDialog({
   point: MarkupPoint | null
   onOpenChange: (open: boolean) => void
 }) {
+  const canCreatePunch = useCanPerform('punch', 'create')
+  const canReadPunch = useCanPerform('punch', 'read')
   const canCreateRfi = useCanPerform('rfi', 'create')
   const canReadRfi = useCanPerform('rfi', 'read')
   const canReadDefects = useCanPerform('ncr', 'read')
   const createPin = useCreatePin(projectId, sheetId)
   const upload = useUploadAttachments(projectId)
-  const [mode, setMode] = useState<Mode>(canCreateRfi ? 'new_rfi' : 'photo')
+  const [mode, setMode] = useState<Mode>(
+    canCreatePunch ? 'new_punch' : canCreateRfi ? 'new_rfi' : 'photo'
+  )
   const [subject, setSubject] = useState('')
   const [question, setQuestion] = useState('')
   const [priority, setPriority] = useState('normal')
+  const [punchCompanyId, setPunchCompanyId] = useState<string | null>(null)
+  const [punchId, setPunchId] = useState('')
   const [rfiId, setRfiId] = useState('')
   const [defectId, setDefectId] = useState('')
   const [file, setFile] = useState<File | null>(null)
@@ -80,10 +97,17 @@ export function PinCreateDialog({
 
   const { data: rfis } = useRfis(projectId, { limit: 100 })
   const { data: defects } = useDefects(projectId)
+  const { data: punch } = usePunchItems(
+    projectId,
+    { limit: 500 },
+    { enabled: open && canReadPunch }
+  )
 
   const reset = () => {
     setSubject('')
     setQuestion('')
+    setPunchCompanyId(null)
+    setPunchId('')
     setRfiId('')
     setDefectId('')
     setFile(null)
@@ -93,7 +117,32 @@ export function PinCreateDialog({
   const submit = async () => {
     if (!point) return
     try {
-      if (mode === 'new_rfi') {
+      if (mode === 'new_punch') {
+        const result = await createPin.mutateAsync({
+          x: point.x,
+          y: point.y,
+          recordType: 'punch_item',
+          sheetRevisionId,
+          create: {
+            title: subject.trim(),
+            description: question.trim() || undefined,
+            priority,
+            assigneeCompanyId: punchCompanyId || undefined,
+          },
+        })
+        toast.success(
+          `${result.created?.ref ?? 'Punch item'} raised on sheet ${sheetNumber}`
+        )
+      } else if (mode === 'link_punch') {
+        await createPin.mutateAsync({
+          x: point.x,
+          y: point.y,
+          recordType: 'punch_item',
+          recordId: punchId,
+          sheetRevisionId,
+        })
+        toast.success('Punch item pinned')
+      } else if (mode === 'new_rfi') {
         const result = await createPin.mutateAsync({
           x: point.x,
           y: point.y,
@@ -154,6 +203,8 @@ export function PinCreateDialog({
   }
 
   const canSubmit =
+    (mode === 'new_punch' && subject.trim().length > 0) ||
+    (mode === 'link_punch' && Boolean(punchId)) ||
     (mode === 'new_rfi' && subject.trim().length > 0) ||
     (mode === 'link_rfi' && Boolean(rfiId)) ||
     (mode === 'link_defect' && Boolean(defectId)) ||
@@ -186,6 +237,16 @@ export function PinCreateDialog({
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
+                {canCreatePunch && (
+                  <SelectItem value='new_punch'>
+                    {MODE_LABEL.new_punch}
+                  </SelectItem>
+                )}
+                {canReadPunch && (
+                  <SelectItem value='link_punch'>
+                    {MODE_LABEL.link_punch}
+                  </SelectItem>
+                )}
                 {canCreateRfi && (
                   <SelectItem value='new_rfi'>{MODE_LABEL.new_rfi}</SelectItem>
                 )}
@@ -203,6 +264,79 @@ export function PinCreateDialog({
               </SelectContent>
             </Select>
           </div>
+
+          {mode === 'new_punch' && (
+            <>
+              <div className='space-y-1'>
+                <Label htmlFor='pin-punch-title'>What needs fixing</Label>
+                <Input
+                  id='pin-punch-title'
+                  value={subject}
+                  onChange={(event) => setSubject(event.target.value)}
+                  placeholder='e.g. Cracked tile at threshold'
+                  maxLength={200}
+                  data-testid='uat-pin-punch-title'
+                />
+              </div>
+              <div className='space-y-1'>
+                <Label htmlFor='pin-punch-details'>Details</Label>
+                <Textarea
+                  id='pin-punch-details'
+                  value={question}
+                  onChange={(event) => setQuestion(event.target.value)}
+                  rows={2}
+                  placeholder='Optional'
+                />
+              </div>
+              <div className='grid gap-3 sm:grid-cols-2'>
+                <div className='space-y-1'>
+                  <Label>Priority</Label>
+                  <Select value={priority} onValueChange={setPriority}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {['low', 'normal', 'high', 'urgent'].map((value) => (
+                        <SelectItem key={value} value={value}>
+                          {value.charAt(0).toUpperCase() + value.slice(1)}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className='space-y-1'>
+                  <Label>Responsible company</Label>
+                  <CompanyPicker
+                    projectId={projectId}
+                    value={punchCompanyId}
+                    onChange={setPunchCompanyId}
+                    placeholder='Decide later'
+                  />
+                </div>
+              </div>
+              <p className='text-xs text-muted-foreground'>
+                The item opens straight away and the pin links it to this spot.
+              </p>
+            </>
+          )}
+
+          {mode === 'link_punch' && (
+            <div className='space-y-1'>
+              <Label>Punch item</Label>
+              <Select value={punchId} onValueChange={setPunchId}>
+                <SelectTrigger data-testid='uat-pin-punch-select'>
+                  <SelectValue placeholder='Choose an item' />
+                </SelectTrigger>
+                <SelectContent>
+                  {(punch?.items ?? []).map((item) => (
+                    <SelectItem key={item.id} value={item.id}>
+                      {item.ref} · {item.title}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
 
           {mode === 'new_rfi' && (
             <>

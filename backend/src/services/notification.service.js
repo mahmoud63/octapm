@@ -213,6 +213,15 @@ const DUE_RECORDS = Object.freeze({
     statusField: "status",
     closedStatuses: ["closed"],
   },
+  punch_item: {
+    model: "punchItem",
+    label: "Punch item",
+    moduleCategory: NOTIFICATION_CATEGORIES.QUALITY,
+    assignmentFields: ["assigneeUserId", "managerUserId", "finalApproverUserId", "createdBy"],
+    dueFields: ["dueDate"],
+    statusField: "status",
+    closedStatuses: ["closed", "void"],
+  },
   material_test: {
     model: "materialTest",
     label: "Material test",

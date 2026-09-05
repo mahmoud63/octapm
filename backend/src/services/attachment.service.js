@@ -37,6 +37,7 @@ const RECORD_TYPE_MODULES = Object.freeze({
   ncr: "ncr",
   itp: "ncr",
   defect: "ncr",
+  punch_item: "punch",
   material_test: "ncr",
   safety_incident: "safety",
   rfi: "rfi",

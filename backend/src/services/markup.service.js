@@ -37,6 +37,7 @@ const COLOR_PATTERN = /^#[0-9a-f]{3,8}$/i;
 /** Record types a pin can point at and how they are created / displayed. */
 const PIN_TARGETS = Object.freeze({
   rfi: { label: "RFI", module: "rfi", create: true },
+  punch_item: { label: "Punch item", module: "punch", create: true },
   defect: { label: "Defect", module: "ncr", create: true },
   photo: { label: "Photo", module: "document_control", create: false },
   ncr: { label: "NCR", module: "ncr", create: false },
@@ -411,6 +412,31 @@ const createLinkedRecord = async ({ orgId, projectId, recordType, create, sheet,
       projectAccess: actor?.projectAccess || null,
     });
     return row;
+  }
+  if (recordType === "punch_item") {
+    const punchService = require("./punch.service");
+    const title = trimOrNull(create.title) || trimOrNull(create.subject);
+    if (!title) throw new HttpError(400, "PIN_TITLE_REQUIRED", "Give the punch item a title");
+    return punchService.createPunchItem({
+      orgId,
+      projectId,
+      payload: {
+        title,
+        description: trimOrNull(create.description) || null,
+        priority: create.priority || "normal",
+        trade: trimOrNull(create.trade) || null,
+        locationText: trimOrNull(create.location) || origin,
+        locationId: create.locationId || null,
+        sheetId: sheet.id,
+        dueDate: create.dueDate || null,
+        assigneeCompanyId: create.assigneeCompanyId || null,
+        assigneeUserId: create.assigneeUserId || null,
+        managerUserId: create.managerUserId || null,
+        finalApproverUserId: create.finalApproverUserId || null,
+        status: create.status || "open",
+      },
+      actor,
+    });
   }
   if (recordType === "defect") {
     const defectService = require("./defect.service");

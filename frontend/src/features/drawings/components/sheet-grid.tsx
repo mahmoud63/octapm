@@ -1,5 +1,11 @@
 import { useMemo, useState } from 'react'
-import { CloudDownload, FileWarning, Loader2, Search } from 'lucide-react'
+import {
+  CloudDownload,
+  FileWarning,
+  Loader2,
+  QrCode,
+  Search,
+} from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
@@ -22,8 +28,10 @@ import {
   formatBytes,
   useOfflineManifest,
   useSheets,
+  type Sheet,
   type SheetFilters,
 } from '../hooks/use-drawings'
+import { SheetQrDialog } from './sheet-qr-dialog'
 import { SheetThumbnail } from './sheet-thumbnail'
 
 const ALL = '__all'
@@ -106,6 +114,7 @@ export function SheetGrid({
     'current'
   )
   const [offlineOpen, setOfflineOpen] = useState(false)
+  const [qrSheet, setQrSheet] = useState<Sheet | null>(null)
 
   const filters = useMemo<SheetFilters>(
     () => ({
@@ -207,7 +216,22 @@ export function SheetGrid({
           {sheets.map((sheet) => {
             const revision = sheet.currentRevision
             return (
-              <li key={sheet.id}>
+              <li key={sheet.id} className='relative'>
+                <Button
+                  type='button'
+                  size='icon'
+                  variant='ghost'
+                  className='absolute top-3 right-3 z-10 h-7 w-7 bg-background/80 hover:bg-background'
+                  title='QR label for site'
+                  aria-label={`QR label for sheet ${sheet.number}`}
+                  onClick={(event) => {
+                    event.stopPropagation()
+                    setQrSheet(sheet)
+                  }}
+                  data-testid='uat-sheet-qr'
+                >
+                  <QrCode className='h-4 w-4' />
+                </Button>
                 <button
                   type='button'
                   className='w-full space-y-2 rounded-md border bg-background p-2 text-left transition hover:border-primary/60'
@@ -268,6 +292,13 @@ export function SheetGrid({
         projectId={projectId}
         open={offlineOpen}
         onOpenChange={setOfflineOpen}
+      />
+      <SheetQrDialog
+        projectId={projectId}
+        sheet={qrSheet}
+        onOpenChange={(open) => {
+          if (!open) setQrSheet(null)
+        }}
       />
     </div>
   )

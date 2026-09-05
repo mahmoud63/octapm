@@ -54,6 +54,7 @@ export interface Markup {
 export const PIN_RECORD_TYPES = [
   'rfi',
   'defect',
+  'punch_item',
   'photo',
   'ncr',
   'submittal',

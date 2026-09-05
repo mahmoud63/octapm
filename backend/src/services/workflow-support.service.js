@@ -6,6 +6,7 @@ const RECORD_TYPES = Object.freeze({
   NCR: "ncr",
   ITP: "itp",
   DEFECT: "defect",
+  PUNCH_ITEM: "punch_item",
   SAFETY_INCIDENT: "safety_incident",
   MATERIAL_TEST: "material_test",
   RFI: "rfi",

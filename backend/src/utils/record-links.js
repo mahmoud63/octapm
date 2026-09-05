@@ -14,6 +14,7 @@ const RECORD_WORKSPACE = Object.freeze({
   ncr: { module: "quality", child: "ncr" },
   itp: { module: "quality", child: "itp" },
   defect: { module: "quality", child: "defects" },
+  punch_item: { module: "quality", child: "defects" },
   material_test: { module: "quality", child: "tests" },
   safety_incident: { module: "quality", child: "safety" },
   rfi: { module: "doc-control", child: "rfi" },

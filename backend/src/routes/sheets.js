@@ -139,6 +139,31 @@ router.patch(
   }),
 );
 
+/**
+ * Printable QR code for a sheet: scanning it opens the punch list with the
+ * sheet pre-selected so site staff can raise items against it.
+ */
+router.get(
+  "/:sheetId/qr.svg",
+  requirePermission("document_control", "read"),
+  [param("sheetId").isUUID(), validate],
+  asyncHandler(async (req, res) => {
+    const sheet = await drawingSetService.getSheet({
+      orgId: req.user.orgId,
+      projectId: req.params.projectId,
+      sheetId: req.params.sheetId,
+      includeSuperseded: false,
+    });
+    const baseUrl = (process.env.WEB_APP_URL || process.env.FRONTEND_URL || "").replace(/\/$/, "");
+    const target = `${baseUrl}/projects/${req.params.projectId}/quality/defects?source=sheet_qr&recordId=${sheet.id}`;
+    const { qrToSvg } = require("../utils/qr");
+    const svg = qrToSvg(target, { moduleSize: 6, label: `${sheet.number} · ${sheet.title}`.slice(0, 60) });
+    res.setHeader("Content-Type", "image/svg+xml");
+    res.setHeader("Cache-Control", "private, max-age=3600");
+    return res.send(svg);
+  }),
+);
+
 router.get(
   "/:sheetId/revisions",
   requirePermission("document_control", "read"),

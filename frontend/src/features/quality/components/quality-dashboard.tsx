@@ -24,6 +24,8 @@ import { Label } from '@/components/ui/label'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Textarea } from '@/components/ui/textarea'
 import { UserPicker } from '@/components/user-picker'
+import type { ProjectSetupTarget } from '@/features/projects/data/schema'
+import { PunchModule } from '@/features/punch/components/punch-module'
 import {
   WorkflowDecisionDialog,
   type WorkflowDecisionMode,
@@ -285,11 +287,13 @@ export function QualityDashboard({
   activeTab,
   onTabChange,
   showTabList = true,
+  initialTarget,
 }: {
   projectId: string
   activeTab?: string
   onTabChange?: (value: string) => void
   showTabList?: boolean
+  initialTarget?: ProjectSetupTarget
 }) {
   const { data: dashboard } = useQualityDashboard(projectId)
   const { data: ncrs } = useNcrs(projectId)
@@ -461,7 +465,7 @@ export function QualityDashboard({
               ITP
             </TabsTrigger>
             <TabsTrigger className='min-h-10' value='defects'>
-              Defects
+              Punch list
             </TabsTrigger>
             <TabsTrigger className='min-h-10' value='safety'>
               Safety
@@ -651,49 +655,60 @@ export function QualityDashboard({
         </TabsContent>
 
         <TabsContent value='defects' className='space-y-2'>
-          <div className='flex flex-col gap-2 sm:flex-row'>
-            <Input
-              aria-label='Defect title'
-              placeholder='Defect title'
-              value={defectTitle}
-              onChange={(e) => setDefectTitle(e.target.value)}
-            />
-            <Button
-              className='min-h-10 w-full sm:w-auto'
-              disabled={createDefect.isPending || !defectTitle}
-              onClick={async () => {
-                try {
-                  await createDefect.mutateAsync({ title: defectTitle })
-                  setDefectTitle('')
-                  toast.success('Defect created')
-                } catch {
-                  toast.error('Failed to create defect')
-                }
-              }}
-            >
-              Add
-            </Button>
-          </div>
-          <WorkflowRecordList
+          <PunchModule
+            key={`${initialTarget?.source ?? ''}:${initialTarget?.recordId ?? ''}`}
             projectId={projectId}
-            recordType='defect'
-            rows={defects?.rows}
-            emptyText='No defect records'
-            getRef={(row) => row.ref}
-            getTitle={(row) => row.title}
-            getSubtitle={(row) => row.severity}
-            getStatus={(row) => row.status}
-            renderMeta={(row) => (
-              <div className='flex flex-wrap gap-2'>
-                <Badge
-                  variant={
-                    row.severity === 'critical' ? 'destructive' : 'outline'
-                  }
-                >
-                  {row.severity}
-                </Badge>
-              </div>
-            )}
+            initialTarget={initialTarget}
+            legacy={
+              <>
+                <div className='flex flex-col gap-2 sm:flex-row'>
+                  <Input
+                    aria-label='Defect title'
+                    placeholder='Defect title'
+                    value={defectTitle}
+                    onChange={(e) => setDefectTitle(e.target.value)}
+                  />
+                  <Button
+                    className='min-h-10 w-full sm:w-auto'
+                    disabled={createDefect.isPending || !defectTitle}
+                    onClick={async () => {
+                      try {
+                        await createDefect.mutateAsync({ title: defectTitle })
+                        setDefectTitle('')
+                        toast.success('Defect created')
+                      } catch {
+                        toast.error('Failed to create defect')
+                      }
+                    }}
+                  >
+                    Add
+                  </Button>
+                </div>
+                <WorkflowRecordList
+                  projectId={projectId}
+                  recordType='defect'
+                  rows={defects?.rows}
+                  emptyText='No defect records'
+                  getRef={(row) => row.ref}
+                  getTitle={(row) => row.title}
+                  getSubtitle={(row) => row.severity}
+                  getStatus={(row) => row.status}
+                  renderMeta={(row) => (
+                    <div className='flex flex-wrap gap-2'>
+                      <Badge
+                        variant={
+                          row.severity === 'critical'
+                            ? 'destructive'
+                            : 'outline'
+                        }
+                      >
+                        {row.severity}
+                      </Badge>
+                    </div>
+                  )}
+                />
+              </>
+            }
           />
         </TabsContent>
 

@@ -34,6 +34,7 @@ export type PermissionModule =
   | 'meeting'
   | 'task'
   | 'location'
+  | 'punch'
 
 export type RoleId =
   | 'pm'
