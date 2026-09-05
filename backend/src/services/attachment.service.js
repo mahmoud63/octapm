@@ -45,6 +45,8 @@ const RECORD_TYPE_MODULES = Object.freeze({
   drawing_set: "document_control",
   sheet: "document_control",
   sheet_revision: "document_control",
+  markup: "document_control",
+  pin: "document_control",
   transmittal: "document_control",
   correspondence: "document_control",
   document: "document_control",

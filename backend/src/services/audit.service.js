@@ -40,6 +40,8 @@ const ENTITY_TYPES = Object.freeze({
   DRAWING_SET: "drawing_set",
   SHEET: "sheet",
   SHEET_REVISION: "sheet_revision",
+  MARKUP: "markup",
+  PIN: "pin",
 });
 
 const ACTIONS = Object.freeze({

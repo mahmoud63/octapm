@@ -130,7 +130,9 @@ const partyInputSchema = z.object({
   contactName: z.string().trim().optional(),
   contactEmail: z.string().trim().optional(),
   contactPhone: z.string().trim().optional(),
-  accessLevel: z.enum(['read_only', 'collaborator', 'reviewer', 'admin']).optional(),
+  accessLevel: z
+    .enum(['read_only', 'collaborator', 'reviewer', 'admin'])
+    .optional(),
 })
 
 export const projectSchema = z.object({
@@ -191,6 +193,8 @@ export type ProjectSetupTarget = {
   status?: string
   source?: string
   recordId?: string
+  /** Pin to highlight when the target is a sheet (drawings deep link). */
+  pin?: string
 }
 
 export type ProjectSetupStep = {

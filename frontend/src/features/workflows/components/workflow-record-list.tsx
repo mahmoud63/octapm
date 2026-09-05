@@ -18,6 +18,7 @@ import { Button } from '@/components/ui/button'
 import { AttachmentPanel } from '@/features/attachments/components/attachment-panel'
 import { HistoryPanel } from '@/features/audit/components/audit-history-panel'
 import { CommentThread } from '@/features/comments/components/comment-thread'
+import { RecordPins } from '@/features/drawings/components/record-pins'
 
 export interface WorkflowAttachment {
   id?: string
@@ -539,6 +540,17 @@ export function WorkflowRecordList<
               <div className='space-y-4 border-t p-3'>
                 {renderMeta?.(row)}
                 <AssignmentGrid row={row} />
+                {projectId && recordType ? (
+                  <RecordPins
+                    projectId={projectId}
+                    recordType={
+                      typeof recordType === 'function'
+                        ? recordType(row)
+                        : recordType
+                    }
+                    recordId={row.id}
+                  />
+                ) : null}
                 <div className='grid gap-4 lg:grid-cols-2'>
                   <section className='space-y-2'>
                     <h4 className='flex items-center gap-2 text-sm font-semibold'>

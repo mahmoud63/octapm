@@ -90,6 +90,8 @@ export interface Sheet {
   } | null
   status: SheetStatus
   obsoleteReason: string | null
+  /** Drawing scale denominator (100 for 1:100) used by the measure tool. */
+  scaleRatio: number | null
   currentRevisionId: string | null
   currentRevision: SheetRevision | null
   revisionCount?: number
@@ -457,6 +459,7 @@ export const useUpdateSheet = (projectId: string) => {
       locationId?: string | null
       status?: SheetStatus
       obsoleteReason?: string | null
+      scaleRatio?: number | null
     }) => {
       const { data } = await apiClient.patch<{ data: Sheet }>(
         `/projects/${projectId}/drawings/sheets/${sheetId}`,

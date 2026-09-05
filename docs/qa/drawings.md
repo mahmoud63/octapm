@@ -124,12 +124,82 @@ rendered; bytes are fetched through the authenticated API client.
 6. Site engineer cannot see the Publish button (403 on the API).
 7. Offline list shows every current sheet with file sizes.
 
+## Markups, pins and compare (OCTA-DWG-MARKUP-012)
+
+| Table | Purpose |
+| --- | --- |
+| `Markup` | A vector layer on a sheet: `visibility` personal (author only) or published (everyone), `shapesJson` (rect, ellipse, cloud, arrow, line, polyline, highlight, text, measure — all with 0..1 page-normalised coordinates), `shapeCount`, `sheetRevisionId` it was drawn on, `publishedAt`. |
+| `Pin` | A point (`x`, `y` normalised) tied to a record (`recordType`, `recordId`: rfi, defect, photo, ncr, submittal, task, safety_incident, itp, correspondence) with optional `label` / `color`. |
+| `Sheet.scaleRatio` | Drawing scale denominator (100 for 1:100) used by the measure tool. |
+
+Because coordinates are normalised, layers and pins drawn on rev A appear
+in the same place on rev B without any migration.
+
+API (all under `/projects/:id/drawings`):
+
+| Method | Path | Permission |
+| --- | --- | --- |
+| GET | `/sheets/:sheetId/markups` | document_control.read — published layers + the caller's personal layer |
+| GET / PUT | `/sheets/:sheetId/markups/mine` | document_control.read — the caller's personal layer (created on first use); `PUT` replaces shapes (auto-save) |
+| PATCH / DELETE | `/sheets/:sheetId/markups/:markupId` | author, or document_control.update for published layers |
+| POST | `/sheets/:sheetId/markups/:markupId/publish` | document_control.create (PM, planning, site engineer); audited on the sheet as `markup_published` |
+| GET / POST | `/sheets/:sheetId/pins` | document_control.read; dropping a pin also needs `create` on the target module when creating the record (`create: {…}` for RFI or defect) or `read` when linking (`recordId`) |
+| GET | `/pins?recordType&recordId` | which sheets a record is pinned on |
+| DELETE | `/pins/:pinId` | the person who dropped it, or document_control.update |
+
+Shapes are validated server-side (`normalizeShapes`: known types only,
+coordinates clamped, ≤ 500 shapes, ≤ 2 000 points, ≤ 500 text chars). A pin
+that creates an RFI calls `rfi.service.createRfi` with the sheet named in the
+question and leaves a comment ("Raised on sheet A-101 rev B") on the new
+record; linking an existing record leaves "Pinned on sheet …". Every markup
+publish / removal and pin add / remove is an audit event on the sheet, so the
+sheet's activity feed doubles as the markup feed.
+
+Frontend (viewer modes):
+
+- **Markup** — tools: select, rectangle, ellipse, revision cloud, arrow,
+  line, freehand, highlight, text, measure; colours and stroke; Delete /
+  Backspace removes the selected shape, Escape returns to select. The
+  personal layer auto-saves 0.8 s after the last edit and is invisible to
+  others until **Publish to project** (needs document_control.create).
+  Published layers of other users appear in the **Layers** row with
+  show / hide and (for their author or a document controller) remove.
+- **Pins** — click the sheet to raise an RFI on the spot, link an existing
+  RFI or defect, or take / attach a photo (uploaded against the sheet, then
+  pinned). Pin markers are coloured by record type and dimmed once the
+  record is closed / answered; clicking one shows the record state with an
+  **Open** link. Records list their pins as "On drawings · A-101" chips
+  that open the viewer with the pin highlighted
+  (`?recordId=<sheetId>&source=sheet&pin=<pinId>`).
+- **Measure** — with a sheet scale (Scale button, document controllers)
+  labels read real lengths (mm / m) derived from the PDF page size and the
+  scale; without one they read the paper length.
+- **Compare** — choose Before / After from the sheet's revisions (superseded
+  ones for document controllers): side by side, tinted overlay (red =
+  before only, blue = after only, dark = unchanged, with a "before" opacity
+  slider) or **Changes** (per-pixel difference painted red with the changed
+  share of the page). Rendering and the diff run in the browser with
+  PDF.js; no server rasteriser is needed.
+
+QA additions:
+
+1. Draw a cloud and a text note as user A → user B on the same sheet sees
+   nothing; A publishes → B sees the layer in "Layers" and can hide it.
+2. Drop a pin → "Raise an RFI here" → the RFI opens from the pin dialog,
+   its discussion shows "Raised on sheet A-101 rev B", and its record card
+   shows "On drawings · A-101".
+3. Publish rev C of the sheet → the pin and published layers still sit on
+   the same feature; Compare › Changes highlights the revised area.
+4. Set scale 1:100 → a measure across a 5 m bay reads "5.00 m".
+
 ## Known limits / follow-ups
 
 - Title-block reading uses the PDF text layer; scanned sets come back as
   "No text" and are entered manually (OCR is a later card).
 - No server-side per-page split or tiles: the viewer renders the page of
-  the set PDF client-side, which is what MARKUP-012 builds on.
-- QR codes per sheet and the raster revision compare are part of
-  MARKUP-012.
+  the set PDF client-side (also how markups and compare work).
+- Pins currently target RFIs, defects, photos and existing quality /
+  submittal / task records; punch items and observations plug in with
+  PUNCH-013 / OBS-015.
+- QR codes per sheet (quick-create from the field) come with PUNCH-013.
 - Very large sets (>250 MB) must be split by the issuer.

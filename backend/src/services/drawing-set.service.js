@@ -153,6 +153,7 @@ const serializeSheet = (sheet, { currentRevision = null } = {}) => ({
     : null,
   status: sheet.status,
   obsoleteReason: sheet.obsoleteReason || null,
+  scaleRatio: sheet.scaleRatio ?? null,
   currentRevisionId: sheet.currentRevisionId || null,
   currentRevision: currentRevision ? serializeRevision(currentRevision) : null,
   revisionCount: sheet._count?.revisions ?? (Array.isArray(sheet.revisions) ? sheet.revisions.length : undefined),
@@ -942,6 +943,13 @@ const updateSheet = async ({ orgId, projectId, sheetId, payload = {}, userId = n
     }
     data.status = payload.status;
     data.obsoleteReason = payload.status === SHEET_STATUS.OBSOLETE ? trimOrNull(payload.obsoleteReason) : null;
+  }
+  if (payload.scaleRatio !== undefined) {
+    const ratio = payload.scaleRatio === null || payload.scaleRatio === "" ? null : Number(payload.scaleRatio);
+    if (ratio !== null && (!Number.isFinite(ratio) || ratio <= 0 || ratio > 100000)) {
+      throw new HttpError(400, "SHEET_SCALE_INVALID", "Scale must be the denominator of the drawing scale, e.g. 100 for 1:100");
+    }
+    data.scaleRatio = ratio;
   }
   const updated = await prisma.sheet.update({
     where: { id: sheet.id },

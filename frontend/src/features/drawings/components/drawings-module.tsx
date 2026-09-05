@@ -47,6 +47,11 @@ export function DrawingsModule({
       <SheetViewer
         projectId={projectId}
         sheetId={view.sheetId}
+        initialPinId={
+          initialTarget?.recordId === view.sheetId
+            ? (initialTarget?.pin ?? null)
+            : null
+        }
         onBack={() => setView({ kind: 'sheets' })}
       />
     )

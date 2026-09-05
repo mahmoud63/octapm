@@ -16,6 +16,7 @@ export function ProjectDetailPage() {
     status?: string
     source?: string
     recordId?: string
+    pin?: string
   }
 
   const hasDeepLink = Boolean(search.status || search.source || search.recordId)
@@ -33,6 +34,7 @@ export function ProjectDetailPage() {
               status: search.status,
               source: search.source,
               recordId: search.recordId,
+              pin: search.pin,
             }
           : undefined
       }

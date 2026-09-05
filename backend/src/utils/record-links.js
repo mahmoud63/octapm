@@ -22,6 +22,8 @@ const RECORD_WORKSPACE = Object.freeze({
   drawing_set: { module: "doc-control", child: "drawings" },
   sheet: { module: "doc-control", child: "drawings" },
   sheet_revision: { module: "doc-control", child: "drawings" },
+  markup: { module: "doc-control", child: "drawings" },
+  pin: { module: "doc-control", child: "drawings" },
   transmittal: { module: "doc-control", child: "transmittals" },
   correspondence: { module: "doc-control", child: "correspondence" },
   document: { module: "doc-control", child: "drawings" },

@@ -124,6 +124,7 @@ router.patch(
     body("locationId").optional({ nullable: true }).isUUID(),
     body("status").optional().isIn(["current", "obsolete"]),
     body("obsoleteReason").optional({ nullable: true }).isString().trim().isLength({ max: 500 }),
+    body("scaleRatio").optional({ nullable: true }).isFloat({ gt: 0, max: 100000 }),
     validate,
   ],
   asyncHandler(async (req, res) => {

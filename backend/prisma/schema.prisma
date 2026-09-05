@@ -57,6 +57,8 @@ model Organisation {
   drawingSets         DrawingSet[]
   sheets              Sheet[]
   sheetRevisions      SheetRevision[]
+  markups             Markup[]
+  pins                Pin[]
 }
 
 model User {
@@ -406,6 +408,8 @@ model Project {
   drawingSets                   DrawingSet[]
   sheets                        Sheet[]
   sheetRevisions                SheetRevision[]
+  markups                       Markup[]
+  pins                          Pin[]
 
   @@index([orgId])
   @@index([orgId, status, archivedAt])
@@ -3951,6 +3955,7 @@ model Sheet {
   obsoleteReason    String?
   currentRevisionId String?
   drawingRecordId   String? // legacy DrawingRecord this sheet was migrated from
+  scaleRatio        Float? // drawing scale denominator, e.g. 100 for 1:100 (measure tool)
   sortKey           String
   createdAt         DateTime  @default(now())
   updatedAt         DateTime  @updatedAt
@@ -3959,6 +3964,8 @@ model Sheet {
   project   Project         @relation(fields: [projectId], references: [id], onDelete: Cascade)
   location  Location?       @relation(fields: [locationId], references: [id], onDelete: SetNull)
   revisions SheetRevision[]
+  markups   Markup[]
+  pins      Pin[]
 
   @@unique([projectId, number])
   @@index([orgId])
@@ -4013,6 +4020,56 @@ model SheetRevision {
   @@index([sheetId, status])
   @@index([documentId])
   @@index([supersededById])
+}
+
+// ─── Sheet markups and pins (OCTA-DWG-MARKUP-012) ───
+model Markup {
+  id              String    @id @default(uuid())
+  orgId           String
+  projectId       String
+  sheetId         String
+  sheetRevisionId String? // revision the markup was drawn on (shown on every revision by normalised coordinates)
+  authorId        String?
+  visibility      String    @default("personal") // personal (author only), published (everyone on the project)
+  name            String?
+  shapesJson      Json      @default("[]") // vector shapes with 0..1 normalised coordinates
+  shapeCount      Int       @default(0)
+  publishedAt     DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  org     Organisation @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  project Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  sheet   Sheet        @relation(fields: [sheetId], references: [id], onDelete: Cascade)
+
+  @@index([orgId])
+  @@index([projectId, sheetId, visibility])
+  @@index([sheetId, authorId, visibility])
+}
+
+model Pin {
+  id              String   @id @default(uuid())
+  orgId           String
+  projectId       String
+  sheetId         String
+  sheetRevisionId String? // revision the pin was dropped on
+  x               Float // 0..1 of page width
+  y               Float // 0..1 of page height
+  recordType      String // rfi, defect, photo, punch_item, observation, …
+  recordId        String
+  label           String?
+  color           String?
+  createdBy       String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  org     Organisation @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  project Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  sheet   Sheet        @relation(fields: [sheetId], references: [id], onDelete: Cascade)
+
+  @@index([orgId])
+  @@index([projectId, sheetId])
+  @@index([projectId, recordType, recordId])
 }
 
 // ─── Document text, chunks and embeddings (OCTA-DOC-TEXT-010) ───

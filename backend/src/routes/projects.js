@@ -413,6 +413,21 @@ router.use(
   nestedProjectAccess,
   require("./drawing-sets"),
 );
+router.use(
+  "/:projectId/drawings/sheets/:sheetId/markups",
+  nestedProjectAccess,
+  require("./markups"),
+);
+router.use(
+  "/:projectId/drawings/sheets/:sheetId/pins",
+  nestedProjectAccess,
+  require("./pins"),
+);
+router.use(
+  "/:projectId/drawings/pins",
+  nestedProjectAccess,
+  require("./record-pins"),
+);
 router.use("/:projectId/drawings/sheets", nestedProjectAccess, require("./sheets"));
 router.use("/:projectId/drawings", nestedProjectAccess, require("./drawings"));
 router.use(
