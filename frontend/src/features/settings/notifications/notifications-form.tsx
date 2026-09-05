@@ -18,6 +18,7 @@ import {
 import { Input } from '@/components/ui/input'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Switch } from '@/components/ui/switch'
+import { PushDeviceCard } from '@/features/notifications/components/push-device-card'
 import {
   type NotificationPreference,
   notificationCategories,
@@ -28,6 +29,7 @@ import {
 const categorySchema = z.object({
   inAppEnabled: z.boolean(),
   emailEnabled: z.boolean(),
+  pushEnabled: z.boolean(),
 })
 
 const notificationsFormSchema = z.object({
@@ -114,13 +116,14 @@ const categoryCopy: Array<{
 const defaultCategory = {
   inAppEnabled: true,
   emailEnabled: true,
+  pushEnabled: true,
 }
 
 const buildDefaultValues = (): NotificationsFormValues => ({
   dueSoonDays: 3,
   assignment: { ...defaultCategory },
   mention: { ...defaultCategory },
-  comment: { inAppEnabled: true, emailEnabled: false },
+  comment: { inAppEnabled: true, emailEnabled: false, pushEnabled: true },
   due: { ...defaultCategory },
   overdue: { ...defaultCategory },
   approval: { ...defaultCategory },
@@ -128,7 +131,7 @@ const buildDefaultValues = (): NotificationsFormValues => ({
   quality: { ...defaultCategory },
   safety: { ...defaultCategory },
   task: { ...defaultCategory },
-  workflow: { inAppEnabled: true, emailEnabled: false },
+  workflow: { inAppEnabled: true, emailEnabled: false, pushEnabled: false },
 })
 
 const defaultValues = buildDefaultValues()
@@ -145,6 +148,7 @@ function toFormValues(
     values[category] = {
       inAppEnabled: pref.inAppEnabled,
       emailEnabled: pref.emailEnabled,
+      pushEnabled: pref.pushEnabled ?? true,
     }
   })
 
@@ -163,6 +167,7 @@ function toPreferencePayload(
     category,
     inAppEnabled: values[category].inAppEnabled,
     emailEnabled: values[category].emailEnabled,
+    pushEnabled: values[category].pushEnabled,
     digestEnabled: false,
     dueSoonDays: values.dueSoonDays,
     quietHoursStart: null,
@@ -249,6 +254,8 @@ export function NotificationsForm() {
           )}
         />
 
+        <PushDeviceCard />
+
         <div className='space-y-3'>
           {categoryCopy.map(({ category, label, description }) => (
             <div key={category} className='rounded-lg border p-4'>
@@ -256,7 +263,7 @@ export function NotificationsForm() {
                 <h3 className='text-sm font-medium'>{label}</h3>
                 <p className='text-sm text-muted-foreground'>{description}</p>
               </div>
-              <div className='grid gap-4 sm:grid-cols-2'>
+              <div className='grid gap-4 sm:grid-cols-3'>
                 <FormField
                   control={form.control}
                   name={`${category}.inAppEnabled` as const}
@@ -286,6 +293,24 @@ export function NotificationsForm() {
                         <Switch
                           checked={field.value}
                           onCheckedChange={field.onChange}
+                        />
+                      </FormControl>
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={form.control}
+                  name={`${category}.pushEnabled` as const}
+                  render={({ field }) => (
+                    <FormItem className='flex items-center justify-between gap-4 rounded-md border bg-muted/20 px-3 py-2'>
+                      <FormLabel className='text-sm font-normal'>
+                        Push
+                      </FormLabel>
+                      <FormControl>
+                        <Switch
+                          checked={field.value}
+                          onCheckedChange={field.onChange}
+                          data-testid={`uat-push-pref-${category}`}
                         />
                       </FormControl>
                     </FormItem>

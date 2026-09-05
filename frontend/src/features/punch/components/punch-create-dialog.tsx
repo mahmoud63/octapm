@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { ListPlus, Loader2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { getServerErrorMessage } from '@/lib/handle-server-error'
+import { isQueued } from '@/lib/offline/outbox'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -69,8 +70,15 @@ export function PunchCreateDialog({
           kind,
           status: openNow ? 'open' : 'draft',
         })
-        toast.success(`${item.ref} ${openNow ? 'opened' : 'saved as draft'}`)
-        onCreated?.([item])
+        if (isQueued(item)) {
+          toast.success(
+            'Saved to the outbox — it uploads when you are back online'
+          )
+          onCreated?.([])
+        } else {
+          toast.success(`${item.ref} ${openNow ? 'opened' : 'saved as draft'}`)
+          onCreated?.([item])
+        }
       } else {
         const result = await createMany.mutateAsync({
           items: bulkItems,
@@ -84,10 +92,17 @@ export function PunchCreateDialog({
             status: openNow ? 'open' : 'draft',
           },
         })
-        toast.success(
-          `${result.created} item${result.created === 1 ? '' : 's'} ${openNow ? 'opened' : 'saved as drafts'}`
-        )
-        onCreated?.(result.items)
+        if (isQueued(result)) {
+          toast.success(
+            `${bulkItems.length} items saved to the outbox — they upload when you are back online`
+          )
+          onCreated?.([])
+        } else {
+          toast.success(
+            `${result.created} item${result.created === 1 ? '' : 's'} ${openNow ? 'opened' : 'saved as drafts'}`
+          )
+          onCreated?.(result.items)
+        }
       }
       onOpenChange(false)
     } catch (error) {

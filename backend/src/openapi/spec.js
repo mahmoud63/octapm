@@ -629,6 +629,7 @@ const components = {
         },
         inAppEnabled: { type: "boolean" },
         emailEnabled: { type: "boolean" },
+        pushEnabled: { type: "boolean", description: "Web Push to the user's registered devices (default true)." },
         digestEnabled: { type: "boolean" },
         dueSoonDays: { type: "integer", minimum: 1, maximum: 30 },
         quietHoursStart: { type: "string", nullable: true },
@@ -3260,6 +3261,7 @@ const components = {
     }),
     PunchItemInput: objectSchema({
       title: { type: "string", maxLength: 200 },
+      clientRequestId: { type: "string", nullable: true, maxLength: 120, description: "Offline idempotency key (unique per project). Replays return the original item with `replayed: true`." },
       description: { type: "string", nullable: true, maxLength: 4000 },
       priority: { type: "string", enum: ["low", "normal", "high", "urgent"] },
       trade: { type: "string", nullable: true, maxLength: 80 },
@@ -9961,6 +9963,83 @@ add(
   }),
 );
 
+// ─── Web Push (OCTA-MOB-PWA-018) ───────────────────────────────────────────
+const pushSubscriptionSchema = objectSchema({
+  id: uuid,
+  endpoint: { type: "string" },
+  userAgent: { type: "string", nullable: true },
+  platform: { type: "string", nullable: true, enum: ["ios", "android", "windows", "macos", "linux", null] },
+  failureCount: { type: "integer" },
+  lastUsedAt: nullableDateString,
+  createdAt: nullableDateString,
+});
+
+add(
+  "/notifications/push/public-key",
+  "get",
+  operation({
+    tag: "Notifications",
+    summary: "VAPID public key for `PushManager.subscribe`; `configured` is false when the server has no keys.",
+    operationId: "getPushPublicKey",
+    responseSchema: objectSchema({ configured: { type: "boolean" }, publicKey: { type: "string", nullable: true } }),
+    permissions: authenticatedOnly,
+  }),
+);
+
+add(
+  "/notifications/push/subscriptions",
+  "get",
+  operation({
+    tag: "Notifications",
+    summary: "The caller's registered push devices.",
+    operationId: "listPushSubscriptions",
+    responseSchema: objectSchema({ configured: { type: "boolean" }, publicKey: { type: "string", nullable: true }, items: arrayOf(pushSubscriptionSchema) }),
+    permissions: authenticatedOnly,
+  }),
+);
+
+add(
+  "/notifications/push/subscriptions",
+  "post",
+  operation({
+    tag: "Notifications",
+    summary: "Register (or refresh) this browser's push subscription. Upserts on endpoint.",
+    operationId: "createPushSubscription",
+    requestBody: jsonBody(
+      objectSchema({ endpoint: { type: "string" }, keys: objectSchema({ p256dh: { type: "string" }, auth: { type: "string" } }, ["p256dh", "auth"]) }, ["endpoint", "keys"]),
+      "The `PushSubscription.toJSON()` of the browser.",
+    ),
+    responseSchema: pushSubscriptionSchema,
+    permissions: authenticatedOnly,
+    status: 201,
+  }),
+);
+
+add(
+  "/notifications/push/subscriptions",
+  "delete",
+  operation({
+    tag: "Notifications",
+    summary: "Forget a push subscription by endpoint.",
+    operationId: "deletePushSubscription",
+    requestBody: jsonBody(objectSchema({ endpoint: { type: "string" } }, ["endpoint"]), "Endpoint to remove."),
+    responseSchema: objectSchema({ removed: { type: "integer" } }),
+    permissions: authenticatedOnly,
+  }),
+);
+
+add(
+  "/notifications/push/test",
+  "post",
+  operation({
+    tag: "Notifications",
+    summary: "Send a test push to every device of the caller (503 when push is not configured).",
+    operationId: "sendPushTest",
+    responseSchema: objectSchema({ sent: { type: "integer" }, failed: { type: "integer" }, removed: { type: "integer" } }),
+    permissions: authenticatedOnly,
+  }),
+);
+
 add(
   "/notifications/preferences",
   "get",
@@ -10597,6 +10676,7 @@ add(
         caption: { type: "string", maxLength: 500 },
         locationId: { type: "string", format: "uuid" },
         tags: { type: "string", description: "Comma-separated tags for photos." },
+        clientRequestId: { type: "string", maxLength: 120, description: "Offline idempotency key for the whole upload; a replay returns the attachments already created." },
         documentIds: {
           type: "string",
           description: "JSON array or comma-separated ProjectDocument ids to link.",

@@ -38,6 +38,7 @@ const itemValidators = (partial = false) => [
   body("description").optional({ nullable: true }).isString().trim().isLength({ max: 4000 }),
   body("priority").optional().isIn(punchService.PRIORITIES),
   body("kind").optional().isIn(punchService.KINDS),
+  body("clientRequestId").optional({ nullable: true }).isString().trim().isLength({ max: 120 }),
   body("observationType").optional({ nullable: true }).isIn(punchService.OBSERVATION_TYPES),
   body("hazard").optional({ nullable: true }).isString().trim().isLength({ max: 120 }),
   body("contributingCondition").optional({ nullable: true }).isString().trim().isLength({ max: 2000 }),
@@ -176,6 +177,7 @@ router.post(
   [
     body("items").isArray({ min: 1, max: punchService.MAX_BULK }),
     body("items.*.title").isString().trim().isLength({ min: 1, max: 200 }),
+    body("items.*.clientRequestId").optional({ nullable: true }).isString().trim().isLength({ max: 120 }),
     body("defaults").optional().isObject(),
     validate,
   ],

@@ -1,5 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { apiClient } from '@/services/api/client'
+import { newClientRequestId, type QueuedResult } from '@/lib/offline/outbox'
+import { sendOrQueue } from '@/lib/offline/queue-request'
 
 export const FORM_TYPES = ['inspection', 'itp', 'form', 'talk'] as const
 export type FormType = (typeof FORM_TYPES)[number]
@@ -564,15 +566,25 @@ export const useActivityHoldPoints = (
     staleTime: 30_000,
   })
 
+/** Schedules an instance; offline, it waits in the outbox (OCTA-MOB-PWA-018). */
 export const useCreateFormInstance = (projectId: string) => {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: async (payload: FormInstanceInput) => {
-      const { data } = await apiClient.post<{ data: FormInstance }>(
-        `/projects/${projectId}/forms`,
-        payload
-      )
-      return data.data
+    mutationFn: async (
+      payload: FormInstanceInput
+    ): Promise<FormInstance | QueuedResult> => {
+      const clientRequestId =
+        payload.clientRequestId ?? newClientRequestId('form')
+      return sendOrQueue<FormInstance>({
+        projectId,
+        kind: 'form',
+        label: `Inspection: ${payload.title ?? 'from template'}`,
+        method: 'POST',
+        url: `/projects/${projectId}/forms`,
+        body: { ...payload, clientRequestId },
+        clientRequestId,
+        parse: (data) => (data as { data: FormInstance }).data,
+      })
     },
     onSuccess: () => invalidateForms(queryClient, projectId),
   })

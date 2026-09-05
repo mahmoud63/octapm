@@ -23,6 +23,7 @@ model Organisation {
   authAuditEvents     AuthAuditEvent[]
   notifications       Notification[]
   notificationPrefs   NotificationPreference[]
+  pushSubscriptions   PushSubscription[]
   companies           Company[]
   companyMemberships  CompanyMembership[]
   projects            Project[]
@@ -97,6 +98,7 @@ model User {
   notifications           Notification[]      @relation("NotificationRecipient")
   actedNotifications      Notification[]      @relation("NotificationActor")
   notificationPrefs       NotificationPreference[]
+  pushSubscriptions       PushSubscription[]
   companyMemberships      CompanyMembership[]
   projectPartyMemberships ProjectPartyMember[]
   chairedMeetings         Meeting[]              @relation("MeetingChair")
@@ -3443,6 +3445,7 @@ model NotificationPreference {
   category        String
   inAppEnabled    Boolean  @default(true)
   emailEnabled    Boolean  @default(true)
+  pushEnabled     Boolean  @default(true)
   digestEnabled   Boolean  @default(false)
   dueSoonDays     Int      @default(3)
   quietHoursStart String?
@@ -3456,6 +3459,28 @@ model NotificationPreference {
   @@unique([userId, category])
   @@index([orgId])
   @@index([orgId, userId])
+}
+
+/** A browser / device registered for Web Push (OCTA-MOB-PWA-018). */
+model PushSubscription {
+  id           String    @id @default(uuid())
+  orgId        String
+  userId       String
+  endpoint     String    @unique
+  p256dh       String
+  auth         String
+  userAgent    String?
+  platform     String?
+  failureCount Int       @default(0)
+  lastUsedAt   DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  org  Organisation @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  user User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([orgId])
+  @@index([userId])
 }
 
 model NotificationDeliveryAttempt {
@@ -3970,6 +3995,7 @@ model Attachment {
   caption    String?
   sortOrder  Int      @default(0)
   source     String   @default("upload") // upload, link, migrated_workflow, migrated_commercial, migrated_task, migrated_photos
+  clientRequestId String? // offline idempotency key shared by the files of one upload (OCTA-MOB-PWA-018)
   uploadedBy String?
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
@@ -3982,6 +4008,7 @@ model Attachment {
   @@index([orgId])
   @@index([projectId, recordType, recordId])
   @@index([projectId, documentId])
+  @@index([projectId, clientRequestId])
   @@index([documentId])
 }
 
@@ -4174,6 +4201,7 @@ model PunchItem {
   disputeReason       String?
   distributedAt       DateTime?
   legacyDefectId      String?   @unique
+  clientRequestId     String? // offline idempotency key (OCTA-MOB-PWA-018)
   createdBy           String?
   updatedBy           String?
   createdAt           DateTime  @default(now())
@@ -4193,6 +4221,7 @@ model PunchItem {
 
   @@unique([projectId, ref])
   @@unique([projectId, kind, number])
+  @@unique([projectId, clientRequestId])
   @@index([orgId])
   @@index([projectId, status])
   @@index([projectId, kind, status])

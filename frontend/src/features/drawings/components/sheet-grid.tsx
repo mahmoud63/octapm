@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import {
   CloudDownload,
   FileWarning,
@@ -6,6 +7,7 @@ import {
   QrCode,
   Search,
 } from 'lucide-react'
+import { toast } from 'sonner'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
@@ -31,6 +33,12 @@ import {
   type Sheet,
   type SheetFilters,
 } from '../hooks/use-drawings'
+import {
+  cachedManifestCount,
+  cachesAvailable,
+  saveManifestOffline,
+  type SaveProgress,
+} from '../lib/offline-sheets'
 import { SheetQrDialog } from './sheet-qr-dialog'
 import { SheetThumbnail } from './sheet-thumbnail'
 
@@ -46,14 +54,37 @@ function OfflineListDialog({
   onOpenChange: (open: boolean) => void
 }) {
   const { data, isLoading } = useOfflineManifest(projectId, { enabled: open })
+  const [progress, setProgress] = useState<SaveProgress | null>(null)
+  const cached = useQuery({
+    queryKey: ['offline-sheets-cached', projectId, data],
+    queryFn: () => (data ? cachedManifestCount(data) : { cached: 0, total: 0 }),
+    enabled: Boolean(data) && cachesAvailable(),
+  })
+  const saving = Boolean(progress && progress.done < progress.total)
+  const saveAll = async () => {
+    if (!data) return
+    setProgress({ done: 0, total: 1, bytes: 0, failed: [] })
+    const result = await saveManifestOffline(data, setProgress)
+    setProgress(result)
+    void cached.refetch()
+    if (result.failed.length) {
+      toast.error(
+        `${result.failed.length} file${result.failed.length === 1 ? '' : 's'} could not be saved`
+      )
+    } else {
+      toast.success(
+        `${result.total} file${result.total === 1 ? '' : 's'} saved for offline use`
+      )
+    }
+  }
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className='max-h-[80vh] overflow-y-auto sm:max-w-2xl'>
         <DialogHeader>
           <DialogTitle>Sheets for offline use</DialogTitle>
           <DialogDescription>
-            The current set as of now. Site devices cache these files; the list
-            refreshes whenever a set is published.
+            The current set as of now. Save it to this device to open sheets
+            without signal; the list refreshes whenever a set is published.
           </DialogDescription>
         </DialogHeader>
         {isLoading || !data ? (
@@ -62,11 +93,37 @@ function OfflineListDialog({
           </div>
         ) : (
           <div className='space-y-2 text-sm'>
-            <p className='text-muted-foreground'>
-              {data.totals.sheets} sheets in {data.totals.documents} file
-              {data.totals.documents === 1 ? '' : 's'} ·{' '}
-              {formatBytes(data.totals.bytes)}
-            </p>
+            <div className='flex flex-wrap items-center gap-2'>
+              <p className='text-muted-foreground'>
+                {data.totals.sheets} sheets in {data.totals.documents} file
+                {data.totals.documents === 1 ? '' : 's'} ·{' '}
+                {formatBytes(data.totals.bytes)}
+                {cached.data
+                  ? ` · ${cached.data.cached} of ${cached.data.total} on this device`
+                  : ''}
+              </p>
+              <Button
+                size='sm'
+                className='ml-auto'
+                disabled={saving || !cachesAvailable()}
+                onClick={() => void saveAll()}
+                data-testid='uat-sheet-offline-save'
+              >
+                {saving ? (
+                  <Loader2 className='mr-2 h-4 w-4 animate-spin' />
+                ) : (
+                  <CloudDownload className='mr-2 h-4 w-4' />
+                )}
+                {saving && progress
+                  ? `Saving ${progress.done}/${progress.total}`
+                  : 'Save all to this device'}
+              </Button>
+            </div>
+            {!cachesAvailable() && (
+              <p className='text-xs text-muted-foreground'>
+                This browser cannot store files for offline use.
+              </p>
+            )}
             <ul className='divide-y rounded border'>
               {data.items.map((item) => (
                 <li

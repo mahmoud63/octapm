@@ -48,7 +48,7 @@ assert.match(notificationHooks, /'mention',\s*'comment',/, 'notification categor
 const preferencesForm = read('src/features/settings/notifications/notifications-form.tsx')
 assert.match(preferencesForm, /category: 'mention'/, 'preferences expose Mentions')
 assert.match(preferencesForm, /category: 'comment'/, 'preferences expose Comments')
-assert.match(preferencesForm, /comment: \{ inAppEnabled: true, emailEnabled: false \}/, 'comment emails default off')
+assert.match(preferencesForm, /comment: \{\s*inAppEnabled: true,\s*emailEnabled: false(,\s*pushEnabled: (true|false))?,?\s*\}/, 'comment emails default off')
 
 // ── Backend contract ────────────────────────────────────────────────────
 const service = read('../backend/src/services/comment.service.js')

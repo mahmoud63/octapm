@@ -3,6 +3,7 @@ import { useNavigate, useLocation } from '@tanstack/react-router'
 import { logout } from '@/services/auth/api'
 import { toast } from 'sonner'
 import { useAuthStore } from '@/stores/auth-store'
+import { clearOfflineData } from '@/lib/offline/outbox'
 import { ConfirmDialog } from '@/components/confirm-dialog'
 
 interface SignOutDialogProps {
@@ -21,6 +22,8 @@ export function SignOutDialog({ open, onOpenChange }: SignOutDialogProps) {
     try {
       await logout()
       auth.reset()
+      // Offline caches and the outbox belong to the signed-in user.
+      void clearOfflineData()
       onOpenChange(false)
 
       // Preserve current location for redirect after sign-in

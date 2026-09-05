@@ -102,6 +102,7 @@ router.post(
     body("locationId").optional({ nullable: true }).isUUID(),
     body("tags").optional(),
     body("documentIds").optional(),
+    body("clientRequestId").optional({ nullable: true }).isString().trim().isLength({ max: 120 }),
     validate,
   ],
   asyncHandler(async (req, res) => {
@@ -118,6 +119,7 @@ router.post(
         caption: req.body.caption,
         locationId: req.body.locationId || null,
         tags: req.body.tags,
+        clientRequestId: req.body.clientRequestId || null,
         files: req.files || [],
         documentIds: req.body.documentIds,
       });

@@ -7,7 +7,13 @@ async function runNotificationChecks(now = new Date()) {
     now,
     limit: 100,
   });
-  return { delivery };
+  const push = await require("../services/push.service")
+    .processPendingPushDeliveries({ now, limit: 200 })
+    .catch((error) => {
+      console.error("[push-scheduler]", error);
+      return null;
+    });
+  return { delivery, push };
 }
 
 async function runDailyDueScan(now = new Date()) {

@@ -1,0 +1,137 @@
+import assert from 'node:assert/strict'
+import { existsSync, readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
+
+const root = resolve(import.meta.dirname, '..')
+const read = (path) => readFileSync(resolve(root, path), 'utf8')
+
+// ── Installable app ─────────────────────────────────────────────────────
+const vite = read('vite.config.ts')
+assert.match(vite, /VitePWA\(\{/, 'vite-plugin-pwa configured')
+assert.match(vite, /strategies: 'injectManifest'/, 'own service worker source')
+assert.match(vite, /filename: 'sw\.ts'/, 'sw.ts is the worker')
+assert.match(vite, /display: 'standalone'/, 'standalone display')
+;['icon-192.png', 'icon-512.png', 'icon-maskable-512.png'].forEach((icon) => {
+  assert.ok(vite.includes(`/icons/${icon}`), `manifest lists ${icon}`)
+  assert.ok(existsSync(resolve(root, 'public', 'icons', icon)), `${icon} exists`)
+})
+const html = read('index.html')
+assert.match(html, /apple-mobile-web-app-capable/, 'iOS home-screen meta')
+assert.match(html, /apple-touch-icon/, 'iOS icon')
+assert.match(read('src/vite-env.d.ts'), /vite-plugin-pwa\/client/, 'virtual module types')
+const main = read('src/main.tsx')
+assert.match(main, /registerSW\(\{/, 'service worker registered')
+assert.match(main, /onNeedRefresh/, 'update prompt')
+assert.match(main, /startOutbox\(\)/, 'outbox starts with the app')
+assert.match(main, /onOutboxSynced\(/, 'queries refresh after a sync')
+
+// ── Service worker ──────────────────────────────────────────────────────
+const sw = read('src/sw.ts')
+assert.match(sw, /precacheAndRoute\(self\.__WB_MANIFEST\)/, 'app shell precached')
+assert.match(sw, /NavigationRoute\(createHandlerBoundToURL\('\/index\.html'\)/, 'navigations fall back to the shell')
+assert.match(sw, /denylist: \[\/\^\\\/api\\\/\//, 'API never served the shell')
+assert.match(sw, /cacheName: FILES_CACHE/, 'files cache')
+assert.match(sw, /new CacheFirst\(/, 'files cache-first')
+assert.match(sw, /new NetworkFirst\(/, 'API reads network-first')
+assert.match(sw, /NEVER_CACHE_API = \/\^\\\/api\\\/v1\\\/\(auth\|notifications\|billing\|search\)\//, 'auth and notifications never cached')
+assert.match(sw, /addEventListener\('push'/, 'push handler')
+assert.match(sw, /addEventListener\('notificationclick'/, 'click opens the record')
+assert.match(sw, /showNotification\(title/, 'shows the notification')
+
+// ── Outbox ──────────────────────────────────────────────────────────────
+const db = read('src/lib/offline/db.ts')
+assert.match(db, /indexedDB\.open\(DB_NAME, DB_VERSION\)/, 'IndexedDB store')
+assert.match(db, /createObjectStore\('outbox'/, 'outbox store')
+assert.match(db, /createObjectStore\('idmap'/, 'temp id map store')
+const outbox = read('src/lib/offline/outbox.ts')
+;['enqueue', 'syncOutbox', 'retryOutboxItem', 'removeOutboxItem', 'clearOfflineData', 'onOutboxSynced', 'tempPlaceholder', 'resolveTempId', 'isQueued'].forEach((symbol) =>
+  assert.match(outbox, new RegExp(`export const ${symbol}`), `outbox exports ${symbol}`)
+)
+assert.match(outbox, /clientRequestId: string/, 'every item carries an idempotency key')
+assert.match(outbox, /PendingDependencyError/, 'items wait for the record they depend on')
+assert.match(outbox, /applyConflictRule/, 'server wins on status')
+assert.match(outbox, /if \(isNetworkFailure\(error\)\)[\s\S]*?break/, 'stops at the first network failure')
+assert.match(outbox, /window\.addEventListener\('online'/, 'replays when back online')
+const queue = read('src/lib/offline/queue-request.ts')
+assert.match(queue, /export async function sendOrQueue/, 'send-or-queue helper')
+assert.match(queue, /navigator\.onLine === false/, 'queues when offline')
+assert.match(queue, /axios\.isAxiosError\(error\) && !error\.response\) return queue\(\)/, 'queues on network failure')
+
+// ── Offline-capable writes ──────────────────────────────────────────────
+const punch = read('src/features/punch/hooks/use-punch.ts')
+assert.match(punch, /sendOrQueue<PunchItem>\(/, 'punch items queue offline')
+assert.match(punch, /body: \{ \.\.\.rest, clientRequestId \}/, 'punch create sends the idempotency key')
+assert.match(punch, /sendOrQueue<\{ items: PunchItem\[\]; created: number \}>\(/, 'bulk punch queues offline')
+assert.match(read('src/features/inspections/hooks/use-forms.ts'), /sendOrQueue<FormInstance>\(/, 'inspections queue offline')
+const attachments = read('src/features/attachments/hooks/use-attachments.ts')
+assert.match(attachments, /sendOrQueue<\{ items: AttachmentRecord\[\] \}>\(/, 'uploads queue offline with their files')
+assert.match(attachments, /dependsOn: input\.dependsOn/, 'uploads can wait for a queued record')
+const site = read('src/features/site-reporting/components/site-reporting-dashboard.tsx')
+assert.match(site, /sendOrQueue<DailyReport>\(/, 'daily reports queue offline')
+assert.match(site, /sendOrQueue<SiteDiary>\(/, 'site diaries queue offline')
+assert.match(site, /queuePhotosFor\(\{/, 'photos follow the queued report')
+assert.match(site, /if \(isOffline && status === 'draft'\)/, 'offline drafts stay local; submissions go to the outbox')
+assert.doesNotMatch(site, /Connect to submit daily report/, 'no more "connect to submit"')
+;['punch-create-dialog', 'instance-create-dialog'].forEach((file) => {
+  const source = read(`src/features/${file === 'punch-create-dialog' ? 'punch' : 'inspections'}/components/${file}.tsx`)
+  assert.match(source, /isQueued\(/, `${file} handles a queued result`)
+})
+
+// ── Surfaces ────────────────────────────────────────────────────────────
+const status = read('src/components/outbox-status.tsx')
+;['uat-outbox-status', 'uat-outbox-sync', 'uat-outbox-list'].forEach((id) => assert.ok(status.includes(id), `outbox status exposes ${id}`))
+assert.match(read('src/components/layout/top-navbar.tsx'), /<OutboxStatus \/>/, 'outbox chip in the top bar')
+const capture = read('src/features/capture/components/capture-home.tsx')
+;['uat-capture-home', 'uat-capture-photo', 'uat-capture-outbox', 'uat-capture-online'].forEach((id) =>
+  assert.ok(capture.includes(id), `capture home exposes ${id}`)
+)
+assert.match(capture, /data-testid=\{`uat-capture-\$\{tile\.key\}`\}/, 'tiles expose uat-capture-<key>')
+;['punch', 'observation', 'photo', 'inspection', 'daily', 'drawings'].forEach((key) =>
+  assert.match(capture, new RegExp(`key: '${key}'`), `capture tile ${key}`)
+)
+assert.match(capture, /capture='environment'/, 'camera-first photo input')
+assert.match(capture, /recordId: queued \? tempPlaceholder\(tempId\) : created\.id/, 'photos chain to the queued observation')
+const modules = read('src/features/projects/lib/project-modules.ts')
+assert.match(modules, /capture: 'capture'/, 'capture module slug')
+assert.match(read('src/features/projects/components/project-detail.tsx'), /case 'capture':/, 'capture module renders')
+const sheets = read('src/features/drawings/lib/offline-sheets.ts')
+assert.match(sheets, /caches\.open\(FILES_CACHE\)/, 'sheets saved into the SW file cache')
+assert.match(sheets, /export const saveManifestOffline/, 'save the offline manifest')
+assert.match(read('src/features/drawings/lib/pdf.ts'), /readCachedFile\(fileUrl\)/, 'viewer reads cached sheets offline')
+assert.ok(read('src/features/drawings/components/sheet-grid.tsx').includes('uat-sheet-offline-save'), 'save-all button')
+assert.match(read('src/components/sign-out-dialog.tsx'), /clearOfflineData\(\)/, 'sign-out clears offline data')
+
+// ── Push ────────────────────────────────────────────────────────────────
+const push = read('src/lib/push.ts')
+assert.match(push, /pushManager\.subscribe\(\{/, 'browser subscription')
+assert.match(push, /userVisibleOnly: true/, 'user-visible push')
+const usePush = read('src/features/notifications/hooks/use-push.ts')
+;['/notifications/push/subscriptions', '/notifications/push/test'].forEach((path) => assert.ok(usePush.includes(path), `push hook calls ${path}`))
+const card = read('src/features/notifications/components/push-device-card.tsx')
+;['uat-push-device', 'uat-push-toggle', 'uat-push-test'].forEach((id) => assert.ok(card.includes(id), `push card exposes ${id}`))
+assert.match(card, /Home Screen first \(iOS 16\.4 or later\)/, 'iOS guidance')
+const prefs = read('src/features/settings/notifications/notifications-form.tsx')
+assert.match(prefs, /<PushDeviceCard \/>/, 'device card on the notifications page')
+assert.match(prefs, /pushEnabled: z\.boolean\(\)/, 'per-category push preference')
+assert.match(prefs, /uat-push-pref-\$\{category\}/, 'push switches per category')
+
+// ── Backend contract ────────────────────────────────────────────────────
+const pushService = read('../backend/src/services/push.service.js')
+;['isConfigured', 'subscribe', 'unsubscribe', 'sendToUser', 'processPendingPushDeliveries', 'scheduleFlush', 'GONE_STATUSES'].forEach((symbol) =>
+  assert.ok(pushService.includes(symbol), `push service implements ${symbol}`)
+)
+assert.match(pushService, /require\("web-push"\)/, 'web-push transport')
+const notification = read('../backend/src/services/notification.service.js')
+assert.match(notification, /channel: "push"/, 'push delivery attempts')
+assert.match(notification, /pushEnabled/, 'push preference')
+assert.match(notification, /tx\.pushSubscription\?\.findMany/, 'push only for users with devices')
+const routes = read('../backend/src/routes/notifications.js')
+;['"/push/public-key"', '"/push/subscriptions"', '"/push/test"'].forEach((path) => assert.ok(routes.includes(path), `route ${path}`))
+assert.match(read('../backend/src/services/punch.service.js'), /findByClientRequestId/, 'punch replays are idempotent')
+assert.match(read('../backend/src/services/attachment.service.js'), /clientRequestId: replayKey/, 'attachment replays are idempotent')
+const migration = read('../backend/prisma/migrations/20260906160000_add_push_subscriptions_offline_idempotency/migration.sql')
+;['CREATE TABLE "PushSubscription"', 'ADD COLUMN "pushEnabled"', 'PunchItem_projectId_clientRequestId_key', 'Attachment_projectId_clientRequestId_idx'].forEach((statement) =>
+  assert.ok(migration.includes(statement), `migration has ${statement}`)
+)
+
+console.log('pwa-offline-ui: ok')

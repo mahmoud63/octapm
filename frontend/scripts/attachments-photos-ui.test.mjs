@@ -13,7 +13,7 @@ const hooks = read('src/features/attachments/hooks/use-attachments.ts')
   '/projects/${projectId}/photos',
   '/projects/${projectId}/photos/${photoId}',
 ].forEach((fragment) => assert.ok(hooks.includes(fragment), `hooks call ${fragment}`))
-assert.match(hooks, /form\.append\('files', file\)/, 'uploads are multipart')
+assert.match(hooks, /files: input\.files \?\? \[\]/, 'uploads are multipart (files travel with the request or the outbox)')
 assert.match(hooks, /JSON\.stringify\(input\.documentIds\)/, 'existing documents can be linked')
 assert.match(hooks, /\['attachments', projectId, recordType, recordId\]/, 'query key keeps projectId at index 1')
 

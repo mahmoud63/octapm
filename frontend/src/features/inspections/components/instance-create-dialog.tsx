@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Loader2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { getServerErrorMessage } from '@/lib/handle-server-error'
+import { isQueued } from '@/lib/offline/outbox'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -119,8 +120,14 @@ export function InstanceCreateDialog({
           : null,
         startNow,
       })
-      toast.success(`${instance.ref} ${startNow ? 'started' : 'scheduled'}`)
-      onCreated?.(instance)
+      if (isQueued(instance)) {
+        toast.success(
+          'Saved to the outbox — it uploads when you are back online'
+        )
+      } else {
+        toast.success(`${instance.ref} ${startNow ? 'started' : 'scheduled'}`)
+        onCreated?.(instance)
+      }
       onOpenChange(false)
     } catch (error) {
       toast.error(getServerErrorMessage(error))

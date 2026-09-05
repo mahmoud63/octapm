@@ -6,12 +6,60 @@ const { authenticate } = require("../middleware/auth");
 const { requireRoles } = require("../middleware/rbac");
 const { validate } = require("../middleware/validate");
 const notificationService = require("../services/notification.service");
+const pushService = require("../services/push.service");
 
 const router = express.Router();
 
 router.use(authenticate);
 
 const categories = notificationService.CATEGORY_ORDER;
+
+// ─── Web Push devices (OCTA-MOB-PWA-018) ───────────────────────────────────
+
+router.get(
+  "/push/public-key",
+  asyncHandler(async (_req, res) =>
+    sendSuccess(res, { configured: pushService.isConfigured(), publicKey: pushService.getPublicKey() }),
+  ),
+);
+
+router.get(
+  "/push/subscriptions",
+  asyncHandler(async (req, res) => sendSuccess(res, await pushService.listSubscriptions({ userId: req.user.id }))),
+);
+
+router.post(
+  "/push/subscriptions",
+  [
+    body("endpoint").isString().trim().isLength({ min: 10, max: 2048 }),
+    body("keys.p256dh").isString().trim().notEmpty(),
+    body("keys.auth").isString().trim().notEmpty(),
+    validate,
+  ],
+  asyncHandler(async (req, res) =>
+    sendSuccess(
+      res,
+      await pushService.subscribe({
+        orgId: req.user.orgId,
+        userId: req.user.id,
+        subscription: { endpoint: req.body.endpoint, keys: req.body.keys },
+        userAgent: req.headers["user-agent"] || null,
+      }),
+      201,
+    ),
+  ),
+);
+
+router.delete(
+  "/push/subscriptions",
+  [body("endpoint").isString().trim().notEmpty(), validate],
+  asyncHandler(async (req, res) => sendSuccess(res, await pushService.unsubscribe({ userId: req.user.id, endpoint: req.body.endpoint }))),
+);
+
+router.post(
+  "/push/test",
+  asyncHandler(async (req, res) => sendSuccess(res, await pushService.sendTest({ userId: req.user.id }))),
+);
 
 router.get(
   "/summary",
@@ -42,6 +90,7 @@ router.put(
     body("preferences.*.category").isIn(categories),
     body("preferences.*.inAppEnabled").optional().isBoolean().toBoolean(),
     body("preferences.*.emailEnabled").optional().isBoolean().toBoolean(),
+    body("preferences.*.pushEnabled").optional().isBoolean().toBoolean(),
     body("preferences.*.digestEnabled").optional().isBoolean().toBoolean(),
     body("preferences.*.dueSoonDays")
       .optional()

@@ -318,6 +318,8 @@ const normalizePayload = (payload = {}, { partial = false } = {}) => {
   if (payload.contributingCondition !== undefined) set("contributingCondition", trimOrNull(payload.contributingCondition)?.slice(0, 2000) || null);
   if (!partial && payload.sourceRecordType !== undefined) set("sourceRecordType", trimOrNull(payload.sourceRecordType)?.slice(0, 60) || null);
   if (!partial && payload.sourceRecordId !== undefined) set("sourceRecordId", trimOrNull(payload.sourceRecordId)?.slice(0, 80) || null);
+  // Offline idempotency key (OCTA-MOB-PWA-018): replays return the original item.
+  if (!partial && payload.clientRequestId !== undefined) set("clientRequestId", trimOrNull(payload.clientRequestId)?.slice(0, 120) || null);
   if (payload.description !== undefined) set("description", trimOrNull(payload.description));
   if (payload.priority !== undefined) {
     if (!PRIORITIES.includes(payload.priority)) throw new HttpError(400, "PUNCH_PRIORITY_INVALID", `Priority must be one of ${PRIORITIES.join(", ")}`);
@@ -408,8 +410,20 @@ const afterOpenNotifications = async ({ orgId, projectId, item, actor }) => {
   });
 };
 
+/** Returns the item a previous (offline) request already created, if any. */
+const findByClientRequestId = async ({ projectId, clientRequestId }) => {
+  const key = trimOrNull(clientRequestId);
+  if (!key || !prisma.punchItem?.findFirst) return null;
+  return prisma.punchItem.findFirst({ where: { projectId, clientRequestId: key }, include });
+};
+
 const createPunchItem = async ({ orgId, projectId, payload = {}, actor = null }) => {
   await ensureProject({ orgId, projectId });
+  const replay = await findByClientRequestId({ projectId, clientRequestId: payload.clientRequestId });
+  if (replay) {
+    const [row] = await enrich({ projectId, items: [replay] });
+    return { ...row, replayed: true };
+  }
   const data = normalizePayload(payload);
   await validateReferences({ orgId, projectId, data });
   const initialStatus = payload.status === STATUS.OPEN ? STATUS.OPEN : STATUS.DRAFT;
@@ -427,18 +441,28 @@ const bulkCreatePunchItems = async ({ orgId, projectId, items = [], defaults = {
   await ensureProject({ orgId, projectId });
   if (!Array.isArray(items) || !items.length) throw new HttpError(400, "PUNCH_ITEMS_REQUIRED", "Add at least one item");
   if (items.length > MAX_BULK) throw new HttpError(400, "PUNCH_BULK_TOO_LARGE", `Create at most ${MAX_BULK} items at once`);
-  const prepared = items.map((entry) => normalizePayload({ ...defaults, ...entry }));
+  // Items already created by an earlier replay of this batch are returned, not duplicated.
+  const replayed = [];
+  const fresh = [];
+  for (const entry of items) {
+    const existing = await findByClientRequestId({ projectId, clientRequestId: entry?.clientRequestId });
+    if (existing) replayed.push(existing);
+    else fresh.push(entry);
+  }
+  const prepared = fresh.map((entry) => normalizePayload({ ...defaults, ...entry }));
   await validateReferences({ orgId, projectId, data: normalizePayload({ title: "x", ...defaults }, { partial: true }) });
   const initialStatus = (defaults.status || items[0]?.status) === STATUS.OPEN ? STATUS.OPEN : STATUS.DRAFT;
-  const created = await prisma.$transaction(async (tx) => {
-    const rows = [];
-    for (const data of prepared) rows.push(await createInTx(tx, { orgId, projectId, data, actor, initialStatus }));
-    return rows;
-  });
+  const created = prepared.length
+    ? await prisma.$transaction(async (tx) => {
+        const rows = [];
+        for (const data of prepared) rows.push(await createInTx(tx, { orgId, projectId, data, actor, initialStatus }));
+        return rows;
+      })
+    : [];
   if (initialStatus === STATUS.OPEN) {
     for (const item of created) await afterOpenNotifications({ orgId, projectId, item, actor });
   }
-  return { items: await enrich({ projectId, items: created }), created: created.length };
+  return { items: await enrich({ projectId, items: [...replayed, ...created] }), created: created.length, replayed: replayed.length };
 };
 
 const getPunchItem = async ({ orgId, projectId, itemId, viewer = null }) => {

@@ -308,6 +308,7 @@ const defaultPreferenceFor = (category) => ({
   category,
   inAppEnabled: true,
   emailEnabled: DEFAULT_EMAIL_CATEGORIES.has(category),
+  pushEnabled: true,
   digestEnabled: false,
   dueSoonDays: 3,
   quietHoursStart: null,
@@ -319,6 +320,7 @@ const serializePreference = (preference) => ({
   category: preference.category,
   inAppEnabled: Boolean(preference.inAppEnabled),
   emailEnabled: Boolean(preference.emailEnabled),
+  pushEnabled: preference.pushEnabled === undefined ? true : Boolean(preference.pushEnabled),
   digestEnabled: Boolean(preference.digestEnabled),
   dueSoonDays: Number(preference.dueSoonDays || 3),
   quietHoursStart: preference.quietHoursStart || null,
@@ -460,6 +462,8 @@ const normalizePreferenceUpdate = (entry = {}) => {
       entry.emailEnabled === undefined
         ? defaultPreferenceFor(category).emailEnabled
         : Boolean(entry.emailEnabled),
+    pushEnabled:
+      entry.pushEnabled === undefined ? true : Boolean(entry.pushEnabled),
     digestEnabled: Boolean(entry.digestEnabled),
     dueSoonDays: Math.min(Math.max(Number(entry.dueSoonDays) || 3, 1), 30),
     quietHoursStart: trim(entry.quietHoursStart),
@@ -617,6 +621,20 @@ const createNotifications = async ({
     category,
   });
 
+  // Web Push (OCTA-MOB-PWA-018): only users with a registered device get a
+  // push attempt; the preference can switch it off per category.
+  const pushCandidates = recipients
+    .map((recipient) => recipient.id)
+    .filter((id) => (preferenceByUser.get(id) || defaultPreferenceFor(category)).pushEnabled !== false);
+  const pushDevices = new Set();
+  if (pushCandidates.length && tx.pushSubscription?.findMany) {
+    const rows = await tx.pushSubscription.findMany({
+      where: { userId: { in: pushCandidates } },
+      select: { userId: true },
+    });
+    for (const row of rows) pushDevices.add(row.userId);
+  }
+
   const created = [];
   for (const recipient of recipients) {
     const preference =
@@ -660,10 +678,29 @@ const createNotifications = async ({
         });
       }
 
+      if (pushDevices.has(recipient.id) && tx.notificationDeliveryAttempt?.create) {
+        await tx.notificationDeliveryAttempt.create({
+          data: {
+            notificationId: notification.id,
+            orgId,
+            userId: recipient.id,
+            channel: "push",
+            status: "pending",
+            attemptNumber: 1,
+            nextAttemptAt: new Date(),
+          },
+        });
+      }
+
       created.push(notification);
     } catch (error) {
       if (error?.code !== "P2002") throw error;
     }
+  }
+
+  if (pushDevices.size) {
+    // Sent after the surrounding transaction has had time to commit.
+    require("./push.service").scheduleFlush();
   }
 
   if (created.length) {

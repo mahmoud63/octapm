@@ -32,6 +32,7 @@ import {
   SheetTrigger,
 } from '@/components/ui/sheet'
 import { ConfigDrawer } from '@/components/config-drawer'
+import { OutboxStatus } from '@/components/outbox-status'
 import { RealtimeStatus } from '@/components/realtime-status'
 import { Search } from '@/components/search'
 import { SignOutDialog } from '@/components/sign-out-dialog'
@@ -429,6 +430,7 @@ export function TopNavbar() {
 
         {/* Right actions */}
         <div className='ms-auto flex items-center gap-2'>
+          <OutboxStatus />
           <RealtimeStatus className='hidden sm:inline-flex' />
           <Search className='hidden sm:flex' />
           <NotificationCenter />

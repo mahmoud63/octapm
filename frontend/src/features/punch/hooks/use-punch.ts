@@ -1,5 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { apiClient } from '@/services/api/client'
+import { newClientRequestId, type QueuedResult } from '@/lib/offline/outbox'
+import { sendOrQueue } from '@/lib/offline/queue-request'
 import type { PermissionAction } from '@/lib/permissions'
 
 export const PUNCH_STATUSES = [
@@ -243,6 +245,10 @@ export interface PunchItemInput {
   contributingCondition?: string | null
   sourceRecordType?: string | null
   sourceRecordId?: string | null
+  /** Offline idempotency key; generated when omitted. */
+  clientRequestId?: string
+  /** Temporary id other queued writes (photos) can reference. */
+  tempId?: string | null
 }
 
 export interface PunchDistributeResult {
@@ -323,15 +329,30 @@ const invalidatePunch = (
   queryClient.invalidateQueries({ queryKey: ['sheet-pins', projectId] })
 }
 
+const kindLabel = (payload: PunchItemInput) =>
+  payload.kind === 'observation' ? 'Observation' : 'Punch item'
+
+/** Creates one item; offline, the item waits in the outbox (OCTA-MOB-PWA-018). */
 export const useCreatePunchItem = (projectId: string) => {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: async (payload: PunchItemInput) => {
-      const { data } = await apiClient.post<{ data: PunchItem }>(
-        `/projects/${projectId}/punch`,
-        payload
-      )
-      return data.data
+    mutationFn: async (
+      payload: PunchItemInput
+    ): Promise<PunchItem | QueuedResult> => {
+      const { tempId, ...rest } = payload
+      const clientRequestId =
+        rest.clientRequestId ?? newClientRequestId(rest.kind ?? 'punch')
+      return sendOrQueue<PunchItem>({
+        projectId,
+        kind: rest.kind === 'observation' ? 'observation' : 'punch',
+        label: `${kindLabel(rest)}: ${rest.title ?? ''}`.trim(),
+        method: 'POST',
+        url: `/projects/${projectId}/punch`,
+        body: { ...rest, clientRequestId },
+        clientRequestId,
+        tempId: tempId ?? null,
+        parse: (data) => (data as { data: PunchItem }).data,
+      })
     },
     onSuccess: () => invalidatePunch(queryClient, projectId),
   })
@@ -343,11 +364,24 @@ export const useBulkCreatePunchItems = (projectId: string) => {
     mutationFn: async (input: {
       items: PunchItemInput[]
       defaults?: PunchItemInput
-    }) => {
-      const { data } = await apiClient.post<{
-        data: { items: PunchItem[]; created: number }
-      }>(`/projects/${projectId}/punch/bulk`, input)
-      return data.data
+    }): Promise<{ items: PunchItem[]; created: number } | QueuedResult> => {
+      const kind = input.defaults?.kind ?? input.items[0]?.kind ?? 'punch'
+      const items = input.items.map((item) => ({
+        ...item,
+        clientRequestId: item.clientRequestId ?? newClientRequestId(kind),
+      }))
+      const clientRequestId = newClientRequestId(`${kind}-bulk`)
+      return sendOrQueue<{ items: PunchItem[]; created: number }>({
+        projectId,
+        kind: kind === 'observation' ? 'observation' : 'punch',
+        label: `${items.length} ${kind === 'observation' ? 'observations' : 'punch items'}`,
+        method: 'POST',
+        url: `/projects/${projectId}/punch/bulk`,
+        body: { items, defaults: input.defaults },
+        clientRequestId,
+        parse: (data) =>
+          (data as { data: { items: PunchItem[]; created: number } }).data,
+      })
     },
     onSuccess: () => invalidatePunch(queryClient, projectId),
   })

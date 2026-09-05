@@ -7,6 +7,7 @@ import type { PermissionMatrix, PermissionModule } from '@/lib/permissions'
  * chunk.
  */
 export type ModuleKey =
+  | 'capture'
   | 'schedule'
   | 'siteReporting'
   | 'cost'
@@ -33,6 +34,7 @@ export type ModuleWithChildren =
 export const DEFAULT_MODULE: ModuleKey = 'schedule'
 
 export const MODULE_SLUGS: Record<ModuleKey, string> = {
+  capture: 'capture',
   schedule: 'schedule',
   siteReporting: 'site-reporting',
   cost: 'cost',
@@ -91,6 +93,7 @@ export const slugForModule = (module: ModuleKey) => MODULE_SLUGS[module]
 export const MODULE_PERMISSIONS: Partial<
   Record<ModuleKey, PermissionModule[]>
 > = {
+  capture: ['punch', 'inspection', 'progress'],
   schedule: ['schedule'],
   siteReporting: ['progress'],
   cost: ['cost'],

@@ -4,6 +4,7 @@ import { Camera, ExternalLink, MapPin, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { useAuthStore } from '@/stores/auth-store'
 import { getServerErrorMessage } from '@/lib/handle-server-error'
+import { isQueued } from '@/lib/offline/outbox'
 import { useCanPerform } from '@/lib/permissions'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -210,6 +211,9 @@ export function PinCreateDialog({
           caption: caption.trim() || undefined,
           files: [file],
         })
+        if (isQueued(uploaded)) {
+          throw new Error('Pinning a photo needs a connection; the photo itself is saved to the outbox')
+        }
         const photoId = uploaded.items.find((item) => item.photo?.id)?.photo?.id
         if (!photoId) throw new Error('The file is not an image')
         await createPin.mutateAsync({

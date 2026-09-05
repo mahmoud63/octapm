@@ -114,6 +114,11 @@ const HealthDashboard = lazy(() =>
 const ProjectOverview = lazy(() =>
   import('./project-overview').then((m) => ({ default: m.ProjectOverview }))
 )
+const CaptureHome = lazy(() =>
+  import('@/features/capture/components/capture-home').then((m) => ({
+    default: m.CaptureHome,
+  }))
+)
 
 type MenuChild = {
   key: string
@@ -220,6 +225,7 @@ export function ProjectDetail({
     }
 
     return [
+      { key: 'capture', label: 'Capture' },
       { key: 'schedule', label: 'Schedule', children: scheduleChildren },
       { key: 'siteReporting', label: 'Site Reporting' },
       {
@@ -362,6 +368,19 @@ export function ProjectDetail({
     if (!project) return null
 
     switch (visibleModule) {
+      case 'capture':
+        return (
+          <CaptureHome
+            projectId={projectId}
+            onNavigate={(module, child) =>
+              goTo(
+                module,
+                child && isModuleWithChildren(module) ? child : null
+              )
+            }
+          />
+        )
+
       case 'schedule':
         return scheduleLoading ? (
           <div className='py-8 text-center text-muted-foreground'>

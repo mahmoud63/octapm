@@ -1,5 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { apiClient } from '@/services/api/client'
+import { newClientRequestId, type QueuedResult } from '@/lib/offline/outbox'
+import { sendOrQueue } from '@/lib/offline/queue-request'
 
 export type AttachmentRole = 'attachment' | 'evidence' | 'photo' | 'reference'
 
@@ -122,29 +124,50 @@ export interface UploadAttachmentsInput {
   caption?: string
   locationId?: string | null
   tags?: string[]
+  /** Offline idempotency key for the whole upload; generated when omitted. */
+  clientRequestId?: string
+  /** Temporary id of a queued record the files belong to (`recordId` then holds its placeholder). */
+  dependsOn?: string | null
+  /** Outbox label. */
+  label?: string
 }
 
+/** Uploads files; offline they wait in the outbox with the files kept on the device. */
 export const useUploadAttachments = (projectId: string) => {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: async (input: UploadAttachmentsInput) => {
-      const form = new FormData()
-      form.append('recordType', input.recordType)
-      form.append('recordId', input.recordId)
-      if (input.role) form.append('role', input.role)
-      if (input.caption) form.append('caption', input.caption)
-      if (input.locationId) form.append('locationId', input.locationId)
-      if (input.tags?.length) form.append('tags', input.tags.join(','))
-      if (input.documentIds?.length) {
-        form.append('documentIds', JSON.stringify(input.documentIds))
+    mutationFn: async (
+      input: UploadAttachmentsInput
+    ): Promise<{ items: AttachmentRecord[] } | QueuedResult> => {
+      const clientRequestId =
+        input.clientRequestId ?? newClientRequestId('attachment')
+      const form: Record<string, string> = {
+        recordType: input.recordType,
+        recordId: input.recordId,
+        clientRequestId,
       }
-      for (const file of input.files ?? []) form.append('files', file)
-      const { data } = await apiClient.post<{
-        data: { items: AttachmentRecord[] }
-      }>(`/projects/${projectId}/attachments`, form, {
-        headers: { 'Content-Type': 'multipart/form-data' },
+      if (input.role) form.role = input.role
+      if (input.caption) form.caption = input.caption
+      if (input.locationId) form.locationId = input.locationId
+      if (input.tags?.length) form.tags = input.tags.join(',')
+      if (input.documentIds?.length) {
+        form.documentIds = JSON.stringify(input.documentIds)
+      }
+      const count = input.files?.length ?? 0
+      return sendOrQueue<{ items: AttachmentRecord[] }>({
+        projectId,
+        kind: 'attachment',
+        label:
+          input.label ??
+          `${count} file${count === 1 ? '' : 's'} for ${input.recordType.replace(/_/g, ' ')}`,
+        method: 'POST',
+        url: `/projects/${projectId}/attachments`,
+        form,
+        files: input.files ?? [],
+        clientRequestId,
+        dependsOn: input.dependsOn ?? null,
+        parse: (data) => (data as { data: { items: AttachmentRecord[] } }).data,
       })
-      return data.data
     },
     onSuccess: (_result, input) => {
       invalidateAttachments(queryClient, projectId)

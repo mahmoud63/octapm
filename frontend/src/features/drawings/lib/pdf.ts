@@ -45,19 +45,44 @@ const evictOldest = () => {
   }
 }
 
+/**
+ * Bytes for a sheet file: the offline cache when the device has no signal
+ * (or the network fails), the API otherwise. Files fetched online are kept
+ * by the service worker, so a sheet opened once stays available.
+ */
+const fetchSheetBytes = async (fileUrl: string): Promise<ArrayBuffer> => {
+  const { readCachedFile } = await import('./offline-sheets')
+  const fromCache = async () => {
+    const hit = await readCachedFile(fileUrl)
+    return hit ? hit.arrayBuffer() : null
+  }
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+    const cached = await fromCache()
+    if (cached) return cached
+  }
+  try {
+    const response = await apiClient.get<ArrayBuffer>(toApiPath(fileUrl), {
+      responseType: 'arraybuffer',
+      timeout: 5 * 60 * 1000,
+    })
+    return response.data
+  } catch (error) {
+    const cached = await fromCache()
+    if (cached) return cached
+    throw error
+  }
+}
+
 export const loadSheetDocument = (fileUrl: string) => {
   const cached = documentCache.get(fileUrl)
   if (cached) return cached
   const promise = (async () => {
-    const [pdfjs, response] = await Promise.all([
+    const [pdfjs, bytes] = await Promise.all([
       getPdfjs(),
-      apiClient.get<ArrayBuffer>(toApiPath(fileUrl), {
-        responseType: 'arraybuffer',
-        timeout: 5 * 60 * 1000,
-      }),
+      fetchSheetBytes(fileUrl),
     ])
     // PDF.js transfers the buffer to its worker, so hand it a copy.
-    const data = new Uint8Array(response.data.slice(0))
+    const data = new Uint8Array(bytes.slice(0))
     return pdfjs.getDocument({ data }).promise
   })()
   promise.catch(() => documentCache.delete(fileUrl))

@@ -8,8 +8,10 @@ import {
 } from '@tanstack/react-query'
 import { RouterProvider, createRouter } from '@tanstack/react-router'
 import { toast } from 'sonner'
+import { registerSW } from 'virtual:pwa-register'
 import { useAuthStore } from '@/stores/auth-store'
 import { handleServerError } from '@/lib/handle-server-error'
+import { onOutboxSynced, startOutbox } from '@/lib/offline/outbox'
 import { DirectionProvider } from './context/direction-provider'
 import { FontProvider } from './context/font-provider'
 import { ThemeProvider } from './context/theme-provider'
@@ -86,6 +88,28 @@ declare module '@tanstack/react-router' {
     router: typeof router
   }
 }
+
+// Installable app shell + offline outbox (OCTA-MOB-PWA-018).
+if ('serviceWorker' in navigator && import.meta.env.PROD) {
+  const updateSW = registerSW({
+    immediate: true,
+    onNeedRefresh: () =>
+      toast('A new version of OctaPM is ready', {
+        duration: Infinity,
+        action: { label: 'Reload', onClick: () => void updateSW(true) },
+      }),
+    onOfflineReady: () => toast.success('OctaPM is ready to work offline'),
+  })
+}
+startOutbox()
+onOutboxSynced((projectIds) => {
+  toast.success(
+    projectIds.length === 1
+      ? 'Offline changes uploaded'
+      : `Offline changes uploaded for ${projectIds.length} projects`
+  )
+  void queryClient.invalidateQueries()
+})
 
 // Render the app
 const rootElement = document.getElementById('root')!

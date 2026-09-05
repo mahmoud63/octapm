@@ -303,11 +303,22 @@ const createAttachments = async ({
   tags,
   files = [],
   documentIds = [],
+  clientRequestId = null,
 }) => {
   await ensureProject({ orgId, projectId });
   moduleForRecordType(recordType);
   const id = trimOrNull(recordId);
   if (!id) throw new HttpError(400, "ATTACHMENT_RECORD_ID_REQUIRED", "recordId is required");
+  // Offline replay (OCTA-MOB-PWA-018): the same upload sent twice returns what the first one made.
+  const replayKey = trimOrNull(clientRequestId)?.slice(0, 120) || null;
+  if (replayKey && prisma.attachment?.findMany) {
+    const existing = await prisma.attachment.findMany({
+      where: { projectId, clientRequestId: replayKey },
+      include: attachmentInclude,
+      orderBy: { sortOrder: "asc" },
+    });
+    if (existing.length) return { items: existing.map(serializeAttachment), replayed: true };
+  }
   const ids = parseDocumentIds(documentIds);
   if (!files.length && !ids.length) {
     throw new HttpError(400, "NO_FILE", "Upload at least one file or link a document");
@@ -368,10 +379,12 @@ const createAttachments = async ({
           caption: trimOrNull(caption),
           sortOrder: sortOrder++,
           source: entry.source,
+          clientRequestId: replayKey,
           uploadedBy: userId || null,
         },
         update: {
           role: attachmentRole,
+          ...(replayKey ? { clientRequestId: replayKey } : {}),
           ...(trimOrNull(caption) ? { caption: trimOrNull(caption) } : {}),
         },
         include: attachmentInclude,

@@ -17,7 +17,7 @@ export type NotificationCategory =
 export interface NotificationDeliveryAttempt {
   id: string
   notificationId: string
-  channel: 'email'
+  channel: 'email' | 'push'
   provider?: string | null
   status: 'pending' | 'sent' | 'failed' | 'skipped'
   attemptNumber: number
@@ -54,6 +54,7 @@ export interface NotificationPreference {
   category: NotificationCategory
   inAppEnabled: boolean
   emailEnabled: boolean
+  pushEnabled?: boolean
   digestEnabled: boolean
   dueSoonDays: number
   quietHoursStart?: string | null

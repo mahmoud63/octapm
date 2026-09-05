@@ -10,6 +10,7 @@ import {
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { getServerErrorMessage } from '@/lib/handle-server-error'
+import { isQueued } from '@/lib/offline/outbox'
 import { useCanPerform, type PermissionModule } from '@/lib/permissions'
 import { cn } from '@/lib/utils'
 import { Badge } from '@/components/ui/badge'
@@ -327,9 +328,11 @@ export function AttachmentPanel({
         role,
       })
       toast.success(
-        result.items.length === 1
-          ? 'Attachment added.'
-          : `${result.items.length} attachments added.`
+        isQueued(result)
+          ? `${list.length} file${list.length === 1 ? '' : 's'} saved to the outbox — uploads when you are back online`
+          : result.items.length === 1
+            ? 'Attachment added.'
+            : `${result.items.length} attachments added.`
       )
     } catch (error) {
       toast.error(getServerErrorMessage(error))

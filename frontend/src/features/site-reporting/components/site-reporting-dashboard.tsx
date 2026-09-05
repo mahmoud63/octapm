@@ -19,6 +19,12 @@ import {
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { handleServerError } from '@/lib/handle-server-error'
+import {
+  isQueued,
+  newClientRequestId,
+  tempPlaceholder,
+} from '@/lib/offline/outbox'
+import { sendOrQueue } from '@/lib/offline/queue-request'
 import { useCanPerform } from '@/lib/permissions'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -370,6 +376,34 @@ export function SiteReportingDashboard({ projectId, activities }: Props) {
     return uploadPhotos.mutateAsync(files)
   }
 
+  // Offline: the photos wait in the outbox and attach once the report exists.
+  const queuePhotosFor = ({
+    recordType,
+    tempId,
+    files,
+    label,
+  }: {
+    recordType: 'daily_report' | 'site_diary'
+    tempId: string
+    files: File[]
+    label: string
+  }) =>
+    sendOrQueue<null>({
+      projectId,
+      kind: 'attachment',
+      label,
+      method: 'POST',
+      url: `/projects/${projectId}/attachments`,
+      form: {
+        recordType,
+        recordId: tempPlaceholder(tempId),
+        role: 'photo',
+      },
+      files,
+      dependsOn: tempId,
+      parse: () => null,
+    })
+
   const resetDailyForm = () => {
     setDailyPct('0')
     setDailyWeather('')
@@ -434,24 +468,17 @@ export function SiteReportingDashboard({ projectId, activities }: Props) {
   }
 
   const runDailyAction = (status: 'draft' | 'submitted') => {
-    if (isOffline) {
-      if (status === 'draft') {
-        saveLocalDailyDraft()
-        return
-      }
-      toast.error('Connect to submit daily report')
+    if (isOffline && status === 'draft') {
+      saveLocalDailyDraft()
       return
     }
+    // Submitting offline goes through the outbox (OCTA-MOB-PWA-018).
     dailyMutation.mutate(status)
   }
 
   const runDiaryAction = (status: 'draft' | 'submitted') => {
-    if (isOffline) {
-      if (status === 'draft') {
-        saveLocalDiaryDraft()
-        return
-      }
-      toast.error('Connect to submit site diary')
+    if (isOffline && status === 'draft') {
+      saveLocalDiaryDraft()
       return
     }
     diaryMutation.mutate(status)
@@ -460,9 +487,21 @@ export function SiteReportingDashboard({ projectId, activities }: Props) {
   const dailyMutation = useMutation({
     mutationFn: async (status: 'draft' | 'submitted') => {
       if (!dailyActivityId) throw new Error('Activity is required')
-      const photos = await uploadSelectedPhotos(dailyPhotoFiles)
-      return apiClient
-        .post(`/projects/${projectId}/daily-reports`, {
+      const photos = isOffline
+        ? []
+        : await uploadSelectedPhotos(dailyPhotoFiles)
+      const meta = clientMetadata('daily')
+      const tempId = newClientRequestId('daily-tmp')
+      const result = await sendOrQueue<DailyReport>({
+        projectId,
+        kind: 'daily_report',
+        label: `Daily report ${dailyDate}`,
+        method: 'POST',
+        url: `/projects/${projectId}/daily-reports`,
+        clientRequestId: meta.clientRequestId,
+        tempId,
+        parse: (data) => (data as { data: DailyReport }).data,
+        body: {
           activityId: dailyActivityId,
           date: dailyDate,
           shift: dailyShift,
@@ -503,19 +542,34 @@ export function SiteReportingDashboard({ projectId, activities }: Props) {
           photos,
           notes: dailyNotes,
           status,
-          ...clientMetadata('daily'),
+          ...meta,
           progress: {
             method: 'percent',
             pctComplete: Number(dailyPct || 0),
             evidence: photos.length ? { photos } : undefined,
           },
+        },
+      })
+      if (isQueued(result) && dailyPhotoFiles.length) {
+        await queuePhotosFor({
+          recordType: 'daily_report',
+          tempId,
+          files: dailyPhotoFiles,
+          label: `Photos for daily report ${dailyDate}`,
         })
-        .then((r) => r.data.data as DailyReport)
+      }
+      return result
     },
-    onSuccess: async (_report, status) => {
-      toast.success(
-        status === 'draft' ? 'Daily report saved' : 'Daily report submitted'
-      )
+    onSuccess: async (result, status) => {
+      if (isQueued(result)) {
+        toast.success(
+          'Daily report saved to the outbox — it uploads when you are back online'
+        )
+      } else {
+        toast.success(
+          status === 'draft' ? 'Daily report saved' : 'Daily report submitted'
+        )
+      }
       resetDailyForm()
       clearSiteDraft(projectId, 'daily')
       await refreshSiteReporting()
@@ -525,9 +579,21 @@ export function SiteReportingDashboard({ projectId, activities }: Props) {
 
   const diaryMutation = useMutation({
     mutationFn: async (status: 'draft' | 'submitted') => {
-      const photos = await uploadSelectedPhotos(diaryPhotoFiles)
-      return apiClient
-        .post(`/projects/${projectId}/site-diaries`, {
+      const photos = isOffline
+        ? []
+        : await uploadSelectedPhotos(diaryPhotoFiles)
+      const meta = clientMetadata('diary')
+      const tempId = newClientRequestId('diary-tmp')
+      const result = await sendOrQueue<SiteDiary>({
+        projectId,
+        kind: 'site_diary',
+        label: `Site diary ${diaryDate}`,
+        method: 'POST',
+        url: `/projects/${projectId}/site-diaries`,
+        clientRequestId: meta.clientRequestId,
+        tempId,
+        parse: (data) => (data as { data: SiteDiary }).data,
+        body: {
           date: diaryDate,
           shift: diaryShift,
           weather: diaryWeather,
@@ -572,14 +638,29 @@ export function SiteReportingDashboard({ projectId, activities }: Props) {
           photos,
           notes: diaryNotes,
           status,
-          ...clientMetadata('diary'),
+          ...meta,
+        },
+      })
+      if (isQueued(result) && diaryPhotoFiles.length) {
+        await queuePhotosFor({
+          recordType: 'site_diary',
+          tempId,
+          files: diaryPhotoFiles,
+          label: `Photos for site diary ${diaryDate}`,
         })
-        .then((r) => r.data.data as SiteDiary)
+      }
+      return result
     },
-    onSuccess: async (_diary, status) => {
-      toast.success(
-        status === 'draft' ? 'Site diary saved' : 'Site diary submitted'
-      )
+    onSuccess: async (result, status) => {
+      if (isQueued(result)) {
+        toast.success(
+          'Site diary saved to the outbox — it uploads when you are back online'
+        )
+      } else {
+        toast.success(
+          status === 'draft' ? 'Site diary saved' : 'Site diary submitted'
+        )
+      }
       resetDiaryForm()
       clearSiteDraft(projectId, 'diary')
       await refreshSiteReporting()
