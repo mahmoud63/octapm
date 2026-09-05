@@ -406,6 +406,41 @@
         "workflow.manage": ["pm"]
       }
     },
+    "custom_field": {
+      "label": "Custom fields",
+      "actions": {
+        "read": [
+          "pm",
+          "planning_eng",
+          "qs",
+          "cost_controller",
+          "procurement",
+          "warehouse",
+          "site_engineer",
+          "finance"
+        ],
+        "create": ["pm"],
+        "update": ["pm"],
+        "delete": ["pm"],
+        "submit": [],
+        "approve": [],
+        "certify": [],
+        "baseline": [],
+        "export": [
+          "pm",
+          "planning_eng",
+          "qs",
+          "cost_controller",
+          "procurement",
+          "warehouse",
+          "site_engineer",
+          "finance"
+        ]
+      },
+      "transitions": {
+        "custom_field.manage": ["pm"]
+      }
+    },
     "portfolio": {
       "label": "Portfolio",
       "actions": {
@@ -894,6 +929,7 @@
         "procurement": { "actions": ["read", "export"], "transitions": [] },
         "risk": { "actions": ["read", "export"], "transitions": [] },
         "workflow": { "actions": ["read", "submit"], "transitions": ["workflow.respond"] },
+        "custom_field": { "actions": ["read"], "transitions": [] },
         "report": { "actions": ["read", "export"], "transitions": [] },
         "audit": { "actions": ["read"], "transitions": [] },
         "document_control": {
@@ -942,6 +978,7 @@
         "boq": { "actions": ["read"], "transitions": [] },
         "risk": { "actions": ["read"], "transitions": [] },
         "workflow": { "actions": ["read", "submit"], "transitions": ["workflow.respond"] },
+        "custom_field": { "actions": ["read"], "transitions": [] },
         "report": { "actions": ["read", "export"], "transitions": [] },
         "audit": { "actions": ["read"], "transitions": [] },
         "document_control": {
@@ -1013,6 +1050,7 @@
         "procurement": { "actions": ["read"], "transitions": [] },
         "risk": { "actions": ["read"], "transitions": [] },
         "workflow": { "actions": ["read", "submit"], "transitions": ["workflow.respond"] },
+        "custom_field": { "actions": ["read"], "transitions": [] },
         "report": { "actions": ["read", "create", "update", "export"], "transitions": [] },
         "audit": { "actions": ["read"], "transitions": [] },
         "document_control": {
@@ -1078,6 +1116,7 @@
         },
         "boq": { "actions": ["read"], "transitions": [] },
         "workflow": { "actions": ["read", "submit"], "transitions": ["workflow.respond"] },
+        "custom_field": { "actions": ["read"], "transitions": [] },
         "report": { "actions": ["read", "create", "update", "export"], "transitions": [] },
         "audit": { "actions": ["read"], "transitions": [] },
         "document_control": {

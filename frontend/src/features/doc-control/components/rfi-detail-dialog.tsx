@@ -48,6 +48,7 @@ import { useActivities } from '@/features/activities/hooks/use-activities'
 import { AttachmentPanel } from '@/features/attachments/components/attachment-panel'
 import { HistoryPanel } from '@/features/audit/components/audit-history-panel'
 import { CommentThread } from '@/features/comments/components/comment-thread'
+import { CustomFieldsPanel } from '@/features/custom-fields/components/custom-fields-panel'
 import { RecordPins } from '@/features/drawings/components/record-pins'
 import { LocationPicker } from '@/features/locations/components/location-picker'
 import {
@@ -952,6 +953,14 @@ export function RfiDetailDialog({
             />
 
             <div className='grid gap-4 lg:grid-cols-2'>
+              <div className='lg:col-span-2'>
+                <CustomFieldsPanel
+                  projectId={projectId}
+                  recordType='rfi'
+                  recordId={rfi.id}
+                  context={rfi as unknown as Record<string, unknown>}
+                />
+              </div>
               <section className='space-y-2'>
                 <h4 className='flex items-center gap-2 text-sm font-semibold'>
                   <FileText className='h-4 w-4' /> Attachments

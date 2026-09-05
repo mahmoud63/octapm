@@ -31,7 +31,7 @@ const templateValidators = ({ requireName = false } = {}) => [
 router.get(
   "/tools",
   requirePermission("workflow", "read"),
-  asyncHandler(async (req, res) => sendSuccess(res, { tools: engine.listTools() })),
+  asyncHandler(async (req, res) => sendSuccess(res, { tools: await engine.describeTools({ orgId: req.user.orgId }) })),
 );
 
 router.get(

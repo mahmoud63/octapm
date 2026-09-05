@@ -32,6 +32,7 @@ router.post(
   [
     body("direction").isIn(["incoming", "outgoing"]),
     body("type").isIn(["letter", "email", "memo", "notice"]),
+    body("recordTypeKey").optional({ nullable: true }).isString().trim().isLength({ max: 80 }),
     body("subject").trim().notEmpty(),
     body("owner").optional().isString().trim(),
     body("reviewer").optional().isString().trim(),
@@ -73,6 +74,7 @@ router.patch(
     param("correspondenceId").isUUID(),
     body("direction").optional().isIn(["incoming", "outgoing"]),
     body("type").optional().isIn(["letter", "email", "memo", "notice"]),
+    body("recordTypeKey").optional({ nullable: true }).isString().trim().isLength({ max: 80 }),
     body("owner").optional().isString().trim(),
     body("reviewer").optional().isString().trim(),
     body("approver").optional().isString().trim(),

@@ -64,6 +64,11 @@ model Organisation {
   workflowTemplates   WorkflowTemplate[]
   workflowInstances   WorkflowInstance[]
   workflowStepAssignments WorkflowStepAssignment[]
+  customFieldDefinitions CustomFieldDefinition[]
+  customFieldsets     CustomFieldset[]
+  projectFieldsets    ProjectFieldset[]
+  recordTypeDefinitions RecordTypeDefinition[]
+  customFieldValues   CustomFieldValue[]
   subPayAppLines      SubPayAppLine[]
   subPayAppPayments   SubPayAppPayment[]
   companyEquipment    CompanyEquipment[]
@@ -413,6 +418,9 @@ model Project {
   workflowTemplates             WorkflowTemplate[]
   workflowInstances             WorkflowInstance[]
   workflowStepAssignments       WorkflowStepAssignment[]
+  customFieldDefinitions        CustomFieldDefinition[]
+  projectFieldsets              ProjectFieldset[]
+  customFieldValues             CustomFieldValue[]
   subPayAppLines                SubPayAppLine[]
   subPayAppPayments             SubPayAppPayment[]
   activityCostLoadings          ActivityCostLoading[]
@@ -3686,6 +3694,7 @@ model Correspondence {
   subject            String
   body               String?
   contractualNotice  Boolean   @default(false)
+  recordTypeKey      String? // company-defined record type (OCTA-PLAT-FIELDS-025)
   date               DateTime
   owner              String?
   reviewer           String?
@@ -5745,4 +5754,123 @@ model WorkflowStepAssignment {
   @@index([instanceId, stepKey])
   @@index([userId, status])
   @@index([projectId, status, dueAt])
+}
+
+// ─── Custom fields, fieldsets and record types (OCTA-PLAT-FIELDS-025) ──────
+
+model CustomFieldDefinition {
+  id             String    @id @default(uuid())
+  orgId          String
+  projectId      String? // null = company field shown on every project
+  recordType     String // rfi, submittal, punch_item, change_order …
+  key            String
+  label          String
+  description    String?
+  type           String // text, textarea, number, money, date, boolean, select, multi_select, user, company, url
+  optionsJson    Json? // [{ value, label }] for select / multi_select
+  required       Boolean   @default(false)
+  hidden         Boolean   @default(false)
+  defaultJson    Json?
+  validationJson Json? // { min, max, minLength, maxLength, pattern }
+  conditionJson  Json? // { field, op, value } — shown when the condition holds
+  position       Int       @default(0)
+  status         String    @default("active") // active, archived
+  createdBy      String?
+  updatedBy      String?
+  archivedAt     DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  organisation Organisation       @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  project      Project?           @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  values       CustomFieldValue[]
+
+  @@unique([orgId, recordType, key])
+  @@index([orgId, recordType, status])
+  @@index([projectId])
+}
+
+model CustomFieldset {
+  id          String    @id @default(uuid())
+  orgId       String
+  recordType  String
+  name        String
+  description String?
+  isDefault   Boolean   @default(false)
+  fieldsJson  Json      @default("[]") // [{ fieldId, required, hidden, position }]
+  status      String    @default("active")
+  createdBy   String?
+  updatedBy   String?
+  archivedAt  DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  organisation    Organisation           @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  projectFieldsets ProjectFieldset[]
+  recordTypes     RecordTypeDefinition[]
+
+  @@index([orgId, recordType, status])
+}
+
+model ProjectFieldset {
+  id         String   @id @default(uuid())
+  orgId      String
+  projectId  String
+  recordType String
+  fieldsetId String
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  organisation Organisation   @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  project      Project        @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  fieldset     CustomFieldset @relation(fields: [fieldsetId], references: [id], onDelete: Cascade)
+
+  @@unique([projectId, recordType])
+  @@index([fieldsetId])
+}
+
+model RecordTypeDefinition {
+  id           String    @id @default(uuid())
+  orgId        String
+  tool         String // correspondence …
+  key          String
+  label        String
+  description  String?
+  fieldsetId   String?
+  settingsJson Json? // { defaults: { direction, type } }
+  position     Int       @default(0)
+  status       String    @default("active")
+  createdBy    String?
+  updatedBy    String?
+  archivedAt   DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  organisation Organisation    @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  fieldset     CustomFieldset? @relation(fields: [fieldsetId], references: [id], onDelete: SetNull)
+
+  @@unique([orgId, tool, key])
+  @@index([orgId, tool, status])
+}
+
+model CustomFieldValue {
+  id         String   @id @default(uuid())
+  orgId      String
+  projectId  String
+  recordType String
+  recordId   String
+  fieldId    String
+  valueJson  Json?
+  updatedBy  String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  organisation Organisation          @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  project      Project               @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  field        CustomFieldDefinition @relation(fields: [fieldId], references: [id], onDelete: Cascade)
+
+  @@unique([recordId, fieldId])
+  @@index([projectId, recordType])
+  @@index([orgId, recordType, recordId])
+  @@index([valueJson(ops: JsonbPathOps)], type: Gin)
 }

@@ -50,6 +50,7 @@ import { Route as AuthenticatedCompanyPermissionsRouteImport } from './routes/_a
 import { Route as AuthenticatedCompanyFormTemplatesRouteImport } from './routes/_authenticated/company/form-templates'
 import { Route as AuthenticatedCompanyEquipmentRouteImport } from './routes/_authenticated/company/equipment'
 import { Route as AuthenticatedCompanyDirectoryRouteImport } from './routes/_authenticated/company/directory'
+import { Route as AuthenticatedCompanyCustomFieldsRouteImport } from './routes/_authenticated/company/custom-fields'
 import { Route as AuthenticatedCompanyCostCodesRouteImport } from './routes/_authenticated/company/cost-codes'
 import { Route as AuthenticatedBillingCheckoutRouteImport } from './routes/_authenticated/billing/checkout'
 import { Route as AuthenticatedProjectsProjectIdIndexRouteImport } from './routes/_authenticated/projects/$projectId/index'
@@ -285,6 +286,12 @@ const AuthenticatedCompanyDirectoryRoute =
     path: '/directory',
     getParentRoute: () => AuthenticatedCompanyRouteRoute,
   } as any)
+const AuthenticatedCompanyCustomFieldsRoute =
+  AuthenticatedCompanyCustomFieldsRouteImport.update({
+    id: '/custom-fields',
+    path: '/custom-fields',
+    getParentRoute: () => AuthenticatedCompanyRouteRoute,
+  } as any)
 const AuthenticatedCompanyCostCodesRoute =
   AuthenticatedCompanyCostCodesRouteImport.update({
     id: '/cost-codes',
@@ -334,6 +341,7 @@ export interface FileRoutesByFullPath {
   '/503': typeof errors503Route
   '/billing/checkout': typeof AuthenticatedBillingCheckoutRoute
   '/company/cost-codes': typeof AuthenticatedCompanyCostCodesRoute
+  '/company/custom-fields': typeof AuthenticatedCompanyCustomFieldsRoute
   '/company/directory': typeof AuthenticatedCompanyDirectoryRoute
   '/company/equipment': typeof AuthenticatedCompanyEquipmentRoute
   '/company/form-templates': typeof AuthenticatedCompanyFormTemplatesRoute
@@ -379,6 +387,7 @@ export interface FileRoutesByTo {
   '/': typeof AuthenticatedIndexRoute
   '/billing/checkout': typeof AuthenticatedBillingCheckoutRoute
   '/company/cost-codes': typeof AuthenticatedCompanyCostCodesRoute
+  '/company/custom-fields': typeof AuthenticatedCompanyCustomFieldsRoute
   '/company/directory': typeof AuthenticatedCompanyDirectoryRoute
   '/company/equipment': typeof AuthenticatedCompanyEquipmentRoute
   '/company/form-templates': typeof AuthenticatedCompanyFormTemplatesRoute
@@ -427,6 +436,7 @@ export interface FileRoutesById {
   '/_authenticated/': typeof AuthenticatedIndexRoute
   '/_authenticated/billing/checkout': typeof AuthenticatedBillingCheckoutRoute
   '/_authenticated/company/cost-codes': typeof AuthenticatedCompanyCostCodesRoute
+  '/_authenticated/company/custom-fields': typeof AuthenticatedCompanyCustomFieldsRoute
   '/_authenticated/company/directory': typeof AuthenticatedCompanyDirectoryRoute
   '/_authenticated/company/equipment': typeof AuthenticatedCompanyEquipmentRoute
   '/_authenticated/company/form-templates': typeof AuthenticatedCompanyFormTemplatesRoute
@@ -476,6 +486,7 @@ export interface FileRouteTypes {
     | '/503'
     | '/billing/checkout'
     | '/company/cost-codes'
+    | '/company/custom-fields'
     | '/company/directory'
     | '/company/equipment'
     | '/company/form-templates'
@@ -521,6 +532,7 @@ export interface FileRouteTypes {
     | '/'
     | '/billing/checkout'
     | '/company/cost-codes'
+    | '/company/custom-fields'
     | '/company/directory'
     | '/company/equipment'
     | '/company/form-templates'
@@ -568,6 +580,7 @@ export interface FileRouteTypes {
     | '/_authenticated/'
     | '/_authenticated/billing/checkout'
     | '/_authenticated/company/cost-codes'
+    | '/_authenticated/company/custom-fields'
     | '/_authenticated/company/directory'
     | '/_authenticated/company/equipment'
     | '/_authenticated/company/form-templates'
@@ -903,6 +916,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedCompanyDirectoryRouteImport
       parentRoute: typeof AuthenticatedCompanyRouteRoute
     }
+    '/_authenticated/company/custom-fields': {
+      id: '/_authenticated/company/custom-fields'
+      path: '/custom-fields'
+      fullPath: '/company/custom-fields'
+      preLoaderRoute: typeof AuthenticatedCompanyCustomFieldsRouteImport
+      parentRoute: typeof AuthenticatedCompanyRouteRoute
+    }
     '/_authenticated/company/cost-codes': {
       id: '/_authenticated/company/cost-codes'
       path: '/cost-codes'
@@ -943,6 +963,7 @@ declare module '@tanstack/react-router' {
 
 interface AuthenticatedCompanyRouteRouteChildren {
   AuthenticatedCompanyCostCodesRoute: typeof AuthenticatedCompanyCostCodesRoute
+  AuthenticatedCompanyCustomFieldsRoute: typeof AuthenticatedCompanyCustomFieldsRoute
   AuthenticatedCompanyDirectoryRoute: typeof AuthenticatedCompanyDirectoryRoute
   AuthenticatedCompanyEquipmentRoute: typeof AuthenticatedCompanyEquipmentRoute
   AuthenticatedCompanyFormTemplatesRoute: typeof AuthenticatedCompanyFormTemplatesRoute
@@ -957,6 +978,8 @@ interface AuthenticatedCompanyRouteRouteChildren {
 const AuthenticatedCompanyRouteRouteChildren: AuthenticatedCompanyRouteRouteChildren =
   {
     AuthenticatedCompanyCostCodesRoute: AuthenticatedCompanyCostCodesRoute,
+    AuthenticatedCompanyCustomFieldsRoute:
+      AuthenticatedCompanyCustomFieldsRoute,
     AuthenticatedCompanyDirectoryRoute: AuthenticatedCompanyDirectoryRoute,
     AuthenticatedCompanyEquipmentRoute: AuthenticatedCompanyEquipmentRoute,
     AuthenticatedCompanyFormTemplatesRoute:

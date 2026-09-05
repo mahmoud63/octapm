@@ -8,6 +8,7 @@ import {
   AuditHistoryPanel,
   HistoryPanel,
 } from '@/features/audit/components/audit-history-panel'
+import { CustomFieldsPanel } from '@/features/custom-fields/components/custom-fields-panel'
 import type { ScheduleActivity } from '@/features/schedule/data/schema'
 import {
   WorkflowDecisionDialog,
@@ -673,6 +674,13 @@ export function ChangeOrderRegister({
             projectId={projectId}
             tool='change_order'
             recordId={selectedHistoryOrder.id}
+            className='rounded-md border p-3'
+          />
+          <CustomFieldsPanel
+            projectId={projectId}
+            recordType='change_order'
+            recordId={selectedHistoryOrder.id}
+            context={selectedHistoryOrder as unknown as Record<string, unknown>}
             className='rounded-md border p-3'
           />
           <HistoryPanel

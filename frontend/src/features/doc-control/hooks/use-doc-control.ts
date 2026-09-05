@@ -348,6 +348,7 @@ export interface CorrespondenceRecord extends WorkflowRecordMeta {
   ref: string
   direction: 'incoming' | 'outgoing'
   type: 'letter' | 'email' | 'memo' | 'notice'
+  recordTypeKey?: string | null
   subject: string
   status: 'open' | 'closed'
   dueDate?: string | null
@@ -1598,6 +1599,7 @@ export const useCreateCorrespondence = (projectId: string) => {
     mutationFn: (payload: {
       direction: 'incoming' | 'outgoing'
       type: 'letter' | 'email' | 'memo' | 'notice'
+      recordTypeKey?: string | null
       subject: string
       owner?: string
       dueDate?: string

@@ -41,6 +41,7 @@ export type PermissionModule =
   | 'report'
   | 'portfolio'
   | 'workflow'
+  | 'custom_field'
 
 export type RoleId =
   | 'pm'

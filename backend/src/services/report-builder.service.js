@@ -8,6 +8,47 @@ const { createPdf } = require("../utils/pdf-writer");
 const auditService = require("./audit.service");
 const notificationService = require("./notification.service");
 const sources = require("./report-sources");
+const customFields = require("./custom-field.service");
+
+/** Which custom-field record type each source reads (OCTA-PLAT-FIELDS-025). */
+const SOURCE_RECORD_TYPES = Object.freeze({
+  activity: "activity",
+  rfi: "rfi",
+  submittal: "submittal",
+  punch_item: "punch_item",
+  observation: "punch_item",
+  inspection: "form_instance",
+  ncr: "ncr",
+  safety_incident: "safety_incident",
+  change_order: "change_order",
+  commitment: "commitment",
+  sub_pay_app: "sub_pay_app",
+  task: "task",
+  risk: "risk",
+  procurement_order: "procurement_order",
+  ipc_certificate: "ipc_certificate",
+  daily_log: "daily_log",
+});
+
+/** A source plus the organisation's custom fields as in-memory columns (`custom.<key>`). */
+const resolveSource = async ({ orgId = null, key }) => {
+  const base = getSourceOrThrow(key);
+  const recordType = SOURCE_RECORD_TYPES[base.key];
+  if (!recordType || !orgId) return base;
+  const extra = await customFields.reportColumns({ orgId, recordType }).catch(() => []);
+  if (!extra.length) return base;
+  const columns = extra.map((field) => ({
+    key: `custom.${field.key}`,
+    label: field.label,
+    type: field.reportType,
+    computed: true,
+    custom: true,
+    fieldKey: field.key,
+    enum: field.enum || null,
+    compute: (row) => (row.__custom ? (row.__custom[field.key] ?? null) : null),
+  }));
+  return { ...base, recordType, columns: [...base.columns, ...columns] };
+};
 
 /**
  * Report builder (OCTA-RPT-BUILDER-023).
@@ -148,8 +189,8 @@ const normalizeAggregates = (source, aggregates) => {
   });
 };
 
-const normalizeDefinition = (payload = {}, existing = null) => {
-  const source = getSourceOrThrow(payload.source ?? existing?.source);
+const normalizeDefinition = async ({ orgId = null, payload = {}, existing = null }) => {
+  const source = await resolveSource({ orgId, key: payload.source ?? existing?.source });
   const columns = normalizeColumns(source, payload.columns ?? existing?.columnsJson);
   const filters = normalizeFilters(source, payload.filters ?? existing?.filtersJson);
   const sort = normalizeSort(source, payload.sort ?? existing?.sortJson);
@@ -317,7 +358,7 @@ const projectNameOf = (row, source) => (source.key === "daily_log_manpower" ? nu
  * denied by permission.
  */
 const runQuery = async ({ orgId, user, definition, limit = PREVIEW_LIMIT, offset = 0 }) => {
-  const source = getSourceOrThrow(definition.source);
+  const source = await resolveSource({ orgId, key: definition.source });
   const columns = normalizeColumns(source, definition.columns).map((key) => sources.columnByKey(source, key));
   const filters = normalizeFilters(source, definition.filters);
   const sort = normalizeSort(source, definition.sort);
@@ -357,6 +398,7 @@ const runQuery = async ({ orgId, user, definition, limit = PREVIEW_LIMIT, offset
     const rows = await prisma[source.model].findMany({ where, include: source.include || undefined, take: EXPORT_LIMIT });
     raw.push(...rows);
   }
+  if (source.recordType && raw.length) await customFields.attachValues({ orgId, recordType: source.recordType, rows: raw });
 
   const columnFor = (key) => sources.columnByKey(source, key);
   const allColumns = [...new Set([...columns.map((column) => column.key), ...(sort ? [sort.field] : []), ...(groupBy ? [groupBy.key] : []), ...aggregates.filter((aggregate) => aggregate.field).map((aggregate) => aggregate.field), ...memoryFilters.map(({ column }) => column.key)])].map(columnFor);
@@ -558,7 +600,7 @@ const serializeDefinition = (row, user = null) => ({
   updatedAt: toIso(row.updatedAt),
 });
 
-const listSources = () => sources.SOURCE_KEYS.map((key) => sources.describeSource(sources.getSource(key)));
+const listSources = async ({ orgId = null } = {}) => Promise.all(sources.SOURCE_KEYS.map(async (key) => sources.describeSource(await resolveSource({ orgId, key }))));
 
 const visibleDefinitionsWhere = async ({ orgId, user, projectId = null }) => {
   const projects = await accessibleProjects({ orgId, user });
@@ -595,7 +637,7 @@ const assertManage = ({ user, row }) => {
 const createDefinition = async ({ orgId, user, payload = {} }) => {
   const name = trimOrNull(payload.name);
   if (!name) throw new HttpError(400, "REPORT_NAME_REQUIRED", "Give the report a name");
-  const normalized = normalizeDefinition(payload);
+  const normalized = await normalizeDefinition({ orgId, payload });
   const projectId = trimOrNull(payload.projectId);
   if (projectId) {
     const projects = await accessibleProjects({ orgId, user, projectId });
@@ -626,7 +668,7 @@ const createDefinition = async ({ orgId, user, payload = {} }) => {
 const updateDefinition = async ({ orgId, user, reportId, payload = {} }) => {
   const existing = await getDefinitionRow({ orgId, user, reportId });
   assertManage({ user, row: existing });
-  const normalized = normalizeDefinition(payload, existing);
+  const normalized = await normalizeDefinition({ orgId, payload, existing });
   const data = {
     source: normalized.source,
     columnsJson: normalized.columns,
@@ -667,7 +709,7 @@ const deleteDefinition = async ({ orgId, user, reportId }) => {
 
 /** Ad-hoc run of an unsaved definition (the builder's preview). */
 const preview = async ({ orgId, user, payload = {}, limit = PREVIEW_LIMIT, offset = 0 }) => {
-  const normalized = normalizeDefinition(payload);
+  const normalized = await normalizeDefinition({ orgId, payload });
   const projectId = trimOrNull(payload.projectId);
   return runQuery({ orgId, user, definition: { ...normalized, projectId }, limit: Math.min(MAX_LIMIT, limit), offset });
 };
@@ -683,7 +725,7 @@ const renderDefinition = async ({ orgId, user, reportId = null, definition = nul
   const row = reportId ? await getDefinitionRow({ orgId, user, reportId }) : null;
   const report = row
     ? { id: row.id, name: row.name, description: row.description, source: row.source, columns: row.columnsJson, filters: row.filtersJson, sort: row.sortJson, groupBy: row.groupBy, aggregates: row.aggregatesJson, projectId: row.projectId }
-    : { id: null, name: trimOrNull(definition?.name) || "Report", description: trimOrNull(definition?.description), ...normalizeDefinition(definition || {}), projectId: trimOrNull(definition?.projectId) };
+    : { id: null, name: trimOrNull(definition?.name) || "Report", description: trimOrNull(definition?.description), ...(await normalizeDefinition({ orgId, payload: definition || {} })), projectId: trimOrNull(definition?.projectId) };
   const result = await runQuery({ orgId, user, definition: report, limit: EXPORT_LIMIT });
   const project = report.projectId ? await prisma.project.findFirst({ where: { id: report.projectId, orgId }, select: { id: true, name: true, currency: true } }) : null;
   const base = fileBase(report);

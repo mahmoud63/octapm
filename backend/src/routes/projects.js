@@ -280,6 +280,7 @@ router.use(
   require("./locations"),
 );
 router.use("/:projectId/jobs", nestedProjectAccess, require("./jobs"));
+router.use("/:projectId/custom-fields", nestedProjectAccess, require("./custom-fields"));
 router.use("/:projectId/team", nestedProjectAccess, require("./project-team"));
 router.use(
   "/:projectId/assignments",

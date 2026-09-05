@@ -37,6 +37,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { AttachmentPanel } from '@/features/attachments/components/attachment-panel'
 import { HistoryPanel } from '@/features/audit/components/audit-history-panel'
 import { CommentThread } from '@/features/comments/components/comment-thread'
+import { CustomFieldsPanel } from '@/features/custom-fields/components/custom-fields-panel'
 import { WorkflowInstancePanel } from '@/features/workflows/components/workflow-instance-panel'
 import { useCommitments } from '../hooks/use-commitments'
 import {
@@ -987,6 +988,13 @@ export function PayAppDetailDialog({
                   projectId={projectId}
                   tool='sub_pay_app'
                   recordId={payApp.id}
+                />
+                <CustomFieldsPanel
+                  projectId={projectId}
+                  recordType='sub_pay_app'
+                  recordId={payApp.id}
+                  context={payApp as unknown as Record<string, unknown>}
+                  compact
                 />
                 <AttachmentPanel
                   projectId={projectId}

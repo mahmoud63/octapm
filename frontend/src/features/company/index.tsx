@@ -6,6 +6,7 @@ import {
   GitBranch,
   Hash,
   ShieldCheck,
+  SlidersHorizontal,
   Store,
   Workflow,
   Wrench,
@@ -51,6 +52,11 @@ const navItems = [
     title: 'Workflows',
     href: '/company/workflows',
     icon: <Workflow size={18} />,
+  },
+  {
+    title: 'Custom fields',
+    href: '/company/custom-fields',
+    icon: <SlidersHorizontal size={18} />,
   },
   {
     title: 'Permissions',

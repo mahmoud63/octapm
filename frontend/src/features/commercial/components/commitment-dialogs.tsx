@@ -41,6 +41,7 @@ import { HistoryPanel } from '@/features/audit/components/audit-history-panel'
 import { CommentThread } from '@/features/comments/components/comment-thread'
 import { useVendors } from '@/features/company/hooks/use-company'
 import { useProjectCostCodes } from '@/features/cost/hooks/use-budget'
+import { CustomFieldsPanel } from '@/features/custom-fields/components/custom-fields-panel'
 import { WorkflowInstancePanel } from '@/features/workflows/components/workflow-instance-panel'
 import {
   COMMITMENT_STATUS_LABEL,
@@ -1422,6 +1423,13 @@ export function CommitmentDetailDialog({
                   projectId={projectId}
                   tool='commitment'
                   recordId={commitment.id}
+                />
+                <CustomFieldsPanel
+                  projectId={projectId}
+                  recordType='commitment'
+                  recordId={commitment.id}
+                  context={commitment as unknown as Record<string, unknown>}
+                  compact
                 />
                 <AttachmentPanel
                   projectId={projectId}

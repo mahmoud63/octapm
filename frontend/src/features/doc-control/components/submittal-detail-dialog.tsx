@@ -37,6 +37,7 @@ import { useActivities } from '@/features/activities/hooks/use-activities'
 import { AttachmentPanel } from '@/features/attachments/components/attachment-panel'
 import { HistoryPanel } from '@/features/audit/components/audit-history-panel'
 import { CommentThread } from '@/features/comments/components/comment-thread'
+import { CustomFieldsPanel } from '@/features/custom-fields/components/custom-fields-panel'
 import { RecordPins } from '@/features/drawings/components/record-pins'
 import {
   useApproveSubmittal,
@@ -995,6 +996,13 @@ export function SubmittalDetailDialog({
               </div>
 
               <div className='space-y-4'>
+                <CustomFieldsPanel
+                  projectId={projectId}
+                  recordType='submittal'
+                  recordId={submittal.id}
+                  context={submittal as unknown as Record<string, unknown>}
+                  compact
+                />
                 <AttachmentPanel
                   projectId={projectId}
                   recordType='submittal'

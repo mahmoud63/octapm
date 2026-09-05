@@ -4,6 +4,7 @@ const { normalizeRoleId } = require("../config/permissions");
 const auditService = require("./audit.service");
 const notificationService = require("./notification.service");
 const tools = require("./workflow-tools");
+const customFields = require("./custom-field.service");
 
 /**
  * Configurable workflow engine (OCTA-PLAT-WF-024).
@@ -195,6 +196,23 @@ const evaluateCondition = (context, { field, op, value }) => {
 };
 
 const rulesMatch = (rules, context) => (rules || []).every((rule) => evaluateCondition(context, rule));
+
+/** The tool's context plus the record's custom fields as `custom.<key>` (OCTA-PLAT-FIELDS-025). */
+const contextWithCustomFields = async ({ orgId, tool, record }) => ({
+  ...tool.context(record),
+  ...(await customFields.contextFor({ orgId, recordType: tool.key, recordId: record.id }).catch(() => ({}))),
+});
+
+/** Tool catalogue with the organisation's custom fields appended to each tool's context fields. */
+const describeTools = async ({ orgId }) =>
+  Promise.all(
+    tools.TOOL_KEYS.map(async (key) => {
+      const tool = tools.getTool(key);
+      const described = tools.describeTool(tool);
+      const extra = await customFields.customContextFields({ orgId, recordType: key }).catch(() => []);
+      return { ...described, contextFields: [...described.contextFields, ...extra] };
+    }),
+  );
 
 // ─── templates ─────────────────────────────────────────────────────────────
 
@@ -615,7 +633,7 @@ const startInstance = async ({ orgId, projectId, tool: toolKey, recordId, templa
   const result = await prisma.$transaction(async (tx) => {
     const record = await tool.load({ tx, projectId, recordId });
     if (!record) throw new HttpError(404, "WORKFLOW_RECORD_NOT_FOUND", "Record not found");
-    const context = tool.context(record);
+    const context = await contextWithCustomFields({ orgId, tool, record });
     const running = await findRunning({ tx, projectId, tool: tool.key, recordId });
     if (running) throw new HttpError(409, "WORKFLOW_ALREADY_RUNNING", "A workflow is already running on this record", { instanceId: running.id });
     const template = templateId ? await tx.workflowTemplate.findFirst({ where: { id: templateId, orgId, tool: tool.key, status: "active", OR: [{ projectId }, { projectId: null }] } }) : await pickTemplate({ tx, orgId, projectId, tool: tool.key, context });
@@ -641,7 +659,7 @@ const maybeStart = async ({ orgId, projectId, tool: toolKey, recordId, actor = n
     if (running) return null;
     const record = await tool.load({ tx: prisma, projectId, recordId });
     if (!record) return null;
-    const template = await pickTemplate({ orgId, projectId, tool: tool.key, context: tool.context(record) });
+    const template = await pickTemplate({ orgId, projectId, tool: tool.key, context: await contextWithCustomFields({ orgId, tool, record }) });
     if (!template) return null;
     return await startInstance({ orgId, projectId, tool: tool.key, recordId, templateId: template.id, actor, trigger: "auto" });
   } catch (error) {
@@ -821,6 +839,8 @@ const runEscalationScan = async ({ now = new Date(), limit = 500 } = {}) => {
 };
 
 module.exports = {
+  describeTools,
+  contextWithCustomFields,
   ASSIGNEE_TYPES,
   CONDITION_OPS,
   DEFAULT_TEMPLATES,

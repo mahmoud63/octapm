@@ -32,6 +32,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { AttachmentPanel } from '@/features/attachments/components/attachment-panel'
 import { HistoryPanel } from '@/features/audit/components/audit-history-panel'
 import { CommentThread } from '@/features/comments/components/comment-thread'
+import { CustomFieldsPanel } from '@/features/custom-fields/components/custom-fields-panel'
 import { RecordPins } from '@/features/drawings/components/record-pins'
 import {
   ACTION_LABEL,
@@ -472,6 +473,14 @@ export function PunchItemDetail({
                 </h4>
                 <Ledger events={item.events ?? []} />
               </section>
+              <div className='lg:col-span-2'>
+                <CustomFieldsPanel
+                  projectId={projectId}
+                  recordType='punch_item'
+                  recordId={item.id}
+                  context={item as unknown as Record<string, unknown>}
+                />
+              </div>
               <section className='space-y-2'>
                 <h4 className='flex items-center gap-2 text-sm font-semibold'>
                   <FileText className='h-4 w-4' /> Evidence

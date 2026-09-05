@@ -21,6 +21,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
+import { CustomFieldsAdmin } from '@/features/custom-fields/components/custom-fields-admin'
 import {
   usePermissionTemplates,
   useProjectTeam,
@@ -304,6 +305,18 @@ export function ProjectTeamPanel({ projectId }: { projectId: string }) {
               </TableBody>
             </Table>
           </div>
+        </div>
+      )}
+      {canManage && (
+        <div className='space-y-2 rounded-md border p-4'>
+          <div>
+            <h3 className='text-base font-semibold'>Custom fields</h3>
+            <p className='text-sm text-muted-foreground'>
+              Fields only this project needs, and which company fieldset each
+              record type uses here.
+            </p>
+          </div>
+          <CustomFieldsAdmin projectId={projectId} />
         </div>
       )}
     </div>

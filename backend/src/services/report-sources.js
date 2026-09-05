@@ -601,7 +601,7 @@ const describeSource = (source) => ({
   module: source.module,
   defaultColumns: source.defaultColumns,
   defaultSort: source.defaultSort,
-  columns: source.columns.map((column) => ({ key: column.key, label: column.label, type: column.type, computed: Boolean(column.computed || column.json), enum: column.enum || null })),
+  columns: source.columns.map((column) => ({ key: column.key, label: column.label, type: column.type, computed: Boolean(column.computed || column.json), custom: Boolean(column.custom), enum: column.enum || null })),
 });
 
 module.exports = { SOURCES, SOURCE_KEYS, getSource, columnByKey, describeSource, PROJECT_SELECT, ACTIVITY_SELECT };

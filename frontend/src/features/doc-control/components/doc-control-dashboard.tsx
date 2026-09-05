@@ -28,6 +28,7 @@ import { Switch } from '@/components/ui/switch'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Textarea } from '@/components/ui/textarea'
 import { AuditHistoryPanel } from '@/features/audit/components/audit-history-panel'
+import { useRecordTypes } from '@/features/custom-fields/hooks/use-custom-fields'
 import { DrawingsModule } from '@/features/drawings/components/drawings-module'
 import type { ProjectSetupTarget } from '@/features/projects/data/schema'
 import { useProjectParties } from '@/features/projects/hooks/use-projects'
@@ -224,6 +225,14 @@ export function DocControlDashboard({
   const [drawingTitle, setDrawingTitle] = useState('')
   const [transmittalSubject, setTransmittalSubject] = useState('')
   const [correspondenceSubject, setCorrespondenceSubject] = useState('')
+  const [correspondenceRecordType, setCorrespondenceRecordType] = useState('')
+  const { data: correspondenceRecordTypes } = useRecordTypes('correspondence')
+  const correspondenceTypeLabel = (key?: string | null) =>
+    key
+      ? ((correspondenceRecordTypes?.items ?? []).find(
+          (item) => item.key === key
+        )?.label ?? key)
+      : null
 
   const rfiQuery = useMemo<RfiListQuery>(
     () => ({
@@ -1926,15 +1935,48 @@ export function DocControlDashboard({
               value={correspondenceSubject}
               onChange={(e) => setCorrespondenceSubject(e.target.value)}
             />
+            {(correspondenceRecordTypes?.items ?? []).length > 0 && (
+              <Select
+                value={correspondenceRecordType || '__none__'}
+                onValueChange={(value) =>
+                  setCorrespondenceRecordType(value === '__none__' ? '' : value)
+                }
+              >
+                <SelectTrigger
+                  className='w-56'
+                  aria-label='Correspondence type'
+                  data-testid='uat-correspondence-record-type'
+                >
+                  <SelectValue placeholder='Type' />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value='__none__'>Plain letter</SelectItem>
+                  {(correspondenceRecordTypes?.items ?? []).map((item) => (
+                    <SelectItem key={item.id} value={item.key}>
+                      {item.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
             <Button
               disabled={
                 createCorrespondence.isPending || !correspondenceSubject
               }
               onClick={async () => {
                 try {
+                  const selectedType = (
+                    correspondenceRecordTypes?.items ?? []
+                  ).find((item) => item.key === correspondenceRecordType)
+                  const typeDefaults = (selectedType?.settings?.defaults ??
+                    {}) as {
+                    direction?: 'incoming' | 'outgoing'
+                    type?: 'letter' | 'email' | 'memo' | 'notice'
+                  }
                   await createCorrespondence.mutateAsync({
-                    direction: 'outgoing',
-                    type: 'letter',
+                    direction: typeDefaults.direction ?? 'outgoing',
+                    type: typeDefaults.type ?? 'letter',
+                    recordTypeKey: selectedType?.key ?? null,
                     subject: correspondenceSubject,
                   })
                   setCorrespondenceSubject('')
@@ -1955,7 +1997,9 @@ export function DocControlDashboard({
             emptyText='No correspondence records'
             getRef={(row) => row.ref}
             getTitle={(row) => row.subject}
-            getSubtitle={(row) => `${row.direction} ${row.type}`}
+            getSubtitle={(row) =>
+              `${row.direction} ${row.type}${correspondenceTypeLabel(row.recordTypeKey) ? ` · ${correspondenceTypeLabel(row.recordTypeKey)}` : ''}`
+            }
             getStatus={(row) => row.status}
           />
         </TabsContent>

@@ -47,6 +47,10 @@ const listCorrespondence = async ({ orgId, projectId }) => {
   };
 };
 
+/** Company-defined correspondence types (OCTA-PLAT-FIELDS-025): validated, stored as a key. */
+const resolveRecordTypeKey = async ({ orgId, key }) =>
+  require("./custom-field.service").assertRecordTypeKey({ orgId, tool: "correspondence", key });
+
 const createCorrespondence = async ({ orgId, projectId, payload }) => {
   await ensureProject({ orgId, projectId });
 
@@ -61,6 +65,7 @@ const createCorrespondence = async ({ orgId, projectId, payload }) => {
         ref: payload.ref || `COR-${String(count + 1).padStart(3, '0')}`,
         direction: payload.direction,
         type: payload.type,
+        recordTypeKey: await resolveRecordTypeKey({ orgId, key: payload.recordTypeKey }),
         subject: payload.subject,
         body: payload.body?.trim() || null,
         contractualNotice: Boolean(payload.contractualNotice),
@@ -152,6 +157,10 @@ const updateCorrespondence = async ({
         activityId,
         direction: payload.direction ?? existing.direction,
         type: payload.type ?? existing.type,
+        recordTypeKey:
+          payload.recordTypeKey !== undefined
+            ? await resolveRecordTypeKey({ orgId, key: payload.recordTypeKey })
+            : existing.recordTypeKey,
         subject: payload.subject ?? existing.subject,
         body:
           payload.body !== undefined

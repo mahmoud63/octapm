@@ -70,7 +70,7 @@ const sendFile = (res, file) => {
 router.get(
   "/sources",
   requirePermission("report", "read"),
-  asyncHandler(async (req, res) => sendSuccess(res, { sources: service.listSources() })),
+  asyncHandler(async (req, res) => sendSuccess(res, { sources: await service.listSources({ orgId: req.user.orgId }) })),
 );
 
 router.post(

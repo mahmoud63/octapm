@@ -19,6 +19,7 @@ import { Button } from '@/components/ui/button'
 import { AttachmentPanel } from '@/features/attachments/components/attachment-panel'
 import { HistoryPanel } from '@/features/audit/components/audit-history-panel'
 import { CommentThread } from '@/features/comments/components/comment-thread'
+import { CustomFieldsPanel } from '@/features/custom-fields/components/custom-fields-panel'
 import { RecordPins } from '@/features/drawings/components/record-pins'
 
 export interface WorkflowAttachment {
@@ -598,6 +599,22 @@ export function WorkflowRecordList<
                         : recordType
                     }
                     recordId={row.id}
+                  />
+                ) : null}
+                {projectId && recordType ? (
+                  <CustomFieldsPanel
+                    projectId={projectId}
+                    recordType={
+                      typeof recordType === 'function'
+                        ? recordType(row)
+                        : recordType
+                    }
+                    recordId={row.id}
+                    recordTypeKey={
+                      (row as { recordTypeKey?: string | null })
+                        .recordTypeKey ?? null
+                    }
+                    context={row as unknown as Record<string, unknown>}
                   />
                 ) : null}
                 <div className='grid gap-4 lg:grid-cols-2'>

@@ -108,13 +108,14 @@ describe("report builder", () => {
     expect(staffCall.AND).toEqual([]);
   });
 
-  it("validates definitions", () => {
-    expect(() => service.normalizeDefinition({ source: "nope" })).toThrow(expect.objectContaining({ code: "REPORT_SOURCE_UNKNOWN" }));
-    expect(() => service.normalizeDefinition({ source: "rfi", columns: ["ref", "colour"] })).toThrow(expect.objectContaining({ code: "REPORT_COLUMN_UNKNOWN" }));
-    expect(() => service.normalizeDefinition({ source: "rfi", filters: [{ field: "ref", op: "like", value: "x" }] })).toThrow(expect.objectContaining({ code: "REPORT_FILTER_OP" }));
-    expect(() => service.normalizeDefinition({ source: "rfi", filters: [{ field: "scheduleImpact", op: "gt", value: "many" }] })).toThrow(expect.objectContaining({ code: "REPORT_FILTER_VALUE" }));
-    expect(() => service.normalizeDefinition({ source: "rfi", aggregates: [{ fn: "sum", field: "subject" }] })).toThrow(expect.objectContaining({ code: "REPORT_AGGREGATE_FIELD" }));
-    const normalized = service.normalizeDefinition({ source: "rfi", filters: [{ field: "raisedDate", op: "last_days", value: "7" }], sort: { field: "dueDate", dir: "DESC" }, visibility: "org" });
+  it("validates definitions", async () => {
+    const normalize = (payload) => service.normalizeDefinition({ orgId: "org-1", payload });
+    await expect(normalize({ source: "nope" })).rejects.toMatchObject({ code: "REPORT_SOURCE_UNKNOWN" });
+    await expect(normalize({ source: "rfi", columns: ["ref", "colour"] })).rejects.toMatchObject({ code: "REPORT_COLUMN_UNKNOWN" });
+    await expect(normalize({ source: "rfi", filters: [{ field: "ref", op: "like", value: "x" }] })).rejects.toMatchObject({ code: "REPORT_FILTER_OP" });
+    await expect(normalize({ source: "rfi", filters: [{ field: "scheduleImpact", op: "gt", value: "many" }] })).rejects.toMatchObject({ code: "REPORT_FILTER_VALUE" });
+    await expect(normalize({ source: "rfi", aggregates: [{ fn: "sum", field: "subject" }] })).rejects.toMatchObject({ code: "REPORT_AGGREGATE_FIELD" });
+    const normalized = await normalize({ source: "rfi", filters: [{ field: "raisedDate", op: "last_days", value: "7" }], sort: { field: "dueDate", dir: "DESC" }, visibility: "org" });
     expect(normalized).toMatchObject({ columns: expect.arrayContaining(["ref", "subject"]), filters: [{ field: "raisedDate", op: "last_days", value: 7 }], sort: { field: "dueDate", dir: "desc" }, visibility: "org" });
   });
 

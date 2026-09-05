@@ -446,7 +446,7 @@ const workflowTemplateValidators = ({ requireName = false } = {}) => [
 
 router.get(
   "/workflow-tools",
-  asyncHandler(async (req, res) => sendSuccess(res, { tools: workflowEngine.listTools() })),
+  asyncHandler(async (req, res) => sendSuccess(res, { tools: await workflowEngine.describeTools({ orgId: req.user.orgId }) })),
 );
 
 router.get(
@@ -500,6 +500,130 @@ router.post(
       201,
     ),
   ),
+);
+
+// ─── Custom fields, fieldsets and record types (OCTA-PLAT-FIELDS-025) ─────
+const customFields = require("../services/custom-field.service");
+
+const customFieldValidators = ({ requireLabel = false } = {}) => [
+  requireLabel ? body("label").isString().trim().notEmpty().isLength({ max: 120 }) : body("label").optional().isString().trim().isLength({ min: 1, max: 120 }),
+  body("key").optional().isString().trim().isLength({ max: 60 }),
+  body("type").optional().isIn(customFields.FIELD_TYPES),
+  body("description").optional({ nullable: true }).isString().trim().isLength({ max: 1000 }),
+  body("options").optional({ nullable: true }).isArray({ max: 100 }),
+  body("required").optional().isBoolean().toBoolean(),
+  body("hidden").optional().isBoolean().toBoolean(),
+  body("validation").optional({ nullable: true }).isObject(),
+  body("condition").optional({ nullable: true }),
+  body("position").optional().isInt({ min: 0, max: 10000 }).toInt(),
+  body("status").optional().isIn(["active", "archived"]),
+  validate,
+];
+
+router.get(
+  "/custom-fields/record-types",
+  asyncHandler(async (req, res) => sendSuccess(res, { recordTypes: await customFields.describeRecordTypes({ orgId: req.user.orgId }), fieldTypes: customFields.FIELD_TYPES, conditionOps: customFields.CONDITION_OPS })),
+);
+
+router.get(
+  "/custom-fields",
+  [query("recordType").optional().isIn(customFields.RECORD_TYPE_KEYS), query("includeArchived").optional().isBoolean().toBoolean(), validate],
+  asyncHandler(async (req, res) => sendSuccess(res, { items: await customFields.listDefinitions({ orgId: req.user.orgId, recordType: req.query.recordType || null, includeArchived: Boolean(req.query.includeArchived), scope: "company" }) })),
+);
+
+router.post(
+  "/custom-fields",
+  requireCompanyAdmin,
+  [body("recordType").isIn(customFields.RECORD_TYPE_KEYS), body("type").isIn(customFields.FIELD_TYPES), ...customFieldValidators({ requireLabel: true })],
+  asyncHandler(async (req, res) => sendSuccess(res, await customFields.createDefinition({ orgId: req.user.orgId, projectId: null, recordType: req.body.recordType, payload: req.body, actor: formActor(req) }), 201)),
+);
+
+router.patch(
+  "/custom-fields/:id",
+  requireCompanyAdmin,
+  [param("id").isUUID(), ...customFieldValidators()],
+  asyncHandler(async (req, res) => sendSuccess(res, await customFields.updateDefinition({ orgId: req.user.orgId, projectId: null, definitionId: req.params.id, payload: req.body, actor: formActor(req) }))),
+);
+
+router.delete(
+  "/custom-fields/:id",
+  requireCompanyAdmin,
+  [param("id").isUUID(), validate],
+  asyncHandler(async (req, res) => sendSuccess(res, await customFields.archiveDefinition({ orgId: req.user.orgId, projectId: null, definitionId: req.params.id, actor: formActor(req) }))),
+);
+
+const fieldsetValidators = ({ requireName = false } = {}) => [
+  requireName ? body("name").isString().trim().notEmpty().isLength({ max: 120 }) : body("name").optional().isString().trim().isLength({ min: 1, max: 120 }),
+  body("description").optional({ nullable: true }).isString().trim().isLength({ max: 1000 }),
+  body("isDefault").optional().isBoolean().toBoolean(),
+  body("fields").optional().isArray({ max: 100 }),
+  body("status").optional().isIn(["active", "archived"]),
+  validate,
+];
+
+router.get(
+  "/custom-fieldsets",
+  [query("recordType").optional().isIn(customFields.RECORD_TYPE_KEYS), query("includeArchived").optional().isBoolean().toBoolean(), validate],
+  asyncHandler(async (req, res) => sendSuccess(res, { items: await customFields.listFieldsets({ orgId: req.user.orgId, recordType: req.query.recordType || null, includeArchived: Boolean(req.query.includeArchived) }) })),
+);
+
+router.post(
+  "/custom-fieldsets",
+  requireCompanyAdmin,
+  [body("recordType").isIn(customFields.RECORD_TYPE_KEYS), ...fieldsetValidators({ requireName: true })],
+  asyncHandler(async (req, res) => sendSuccess(res, await customFields.createFieldset({ orgId: req.user.orgId, payload: req.body, actor: formActor(req) }), 201)),
+);
+
+router.patch(
+  "/custom-fieldsets/:id",
+  requireCompanyAdmin,
+  [param("id").isUUID(), ...fieldsetValidators()],
+  asyncHandler(async (req, res) => sendSuccess(res, await customFields.updateFieldset({ orgId: req.user.orgId, fieldsetId: req.params.id, payload: req.body, actor: formActor(req) }))),
+);
+
+router.delete(
+  "/custom-fieldsets/:id",
+  requireCompanyAdmin,
+  [param("id").isUUID(), validate],
+  asyncHandler(async (req, res) => sendSuccess(res, await customFields.archiveFieldset({ orgId: req.user.orgId, fieldsetId: req.params.id, actor: formActor(req) }))),
+);
+
+const recordTypeValidators = ({ requireLabel = false } = {}) => [
+  requireLabel ? body("label").isString().trim().notEmpty().isLength({ max: 120 }) : body("label").optional().isString().trim().isLength({ min: 1, max: 120 }),
+  body("key").optional().isString().trim().isLength({ max: 60 }),
+  body("description").optional({ nullable: true }).isString().trim().isLength({ max: 1000 }),
+  body("fieldsetId").optional({ nullable: true }).isUUID(),
+  body("settings").optional({ nullable: true }).isObject(),
+  body("position").optional().isInt({ min: 0, max: 10000 }).toInt(),
+  body("status").optional().isIn(["active", "archived"]),
+  validate,
+];
+
+router.get(
+  "/record-types",
+  [query("tool").optional().isIn(customFields.TOOLS_WITH_RECORD_TYPES), query("includeArchived").optional().isBoolean().toBoolean(), validate],
+  asyncHandler(async (req, res) => sendSuccess(res, { items: await customFields.listRecordTypes({ orgId: req.user.orgId, tool: req.query.tool || null, includeArchived: Boolean(req.query.includeArchived) }), tools: customFields.TOOLS_WITH_RECORD_TYPES })),
+);
+
+router.post(
+  "/record-types",
+  requireCompanyAdmin,
+  [body("tool").isIn(customFields.TOOLS_WITH_RECORD_TYPES), ...recordTypeValidators({ requireLabel: true })],
+  asyncHandler(async (req, res) => sendSuccess(res, await customFields.createRecordType({ orgId: req.user.orgId, payload: req.body, actor: formActor(req) }), 201)),
+);
+
+router.patch(
+  "/record-types/:id",
+  requireCompanyAdmin,
+  [param("id").isUUID(), ...recordTypeValidators()],
+  asyncHandler(async (req, res) => sendSuccess(res, await customFields.updateRecordType({ orgId: req.user.orgId, recordTypeId: req.params.id, payload: req.body, actor: formActor(req) }))),
+);
+
+router.delete(
+  "/record-types/:id",
+  requireCompanyAdmin,
+  [param("id").isUUID(), validate],
+  asyncHandler(async (req, res) => sendSuccess(res, await customFields.archiveRecordType({ orgId: req.user.orgId, recordTypeId: req.params.id, actor: formActor(req) }))),
 );
 
 module.exports = router;

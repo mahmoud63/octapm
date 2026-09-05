@@ -24,6 +24,15 @@ import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
 import { UserPicker } from '@/components/user-picker'
 import { useActivities } from '@/features/activities/hooks/use-activities'
+import { CustomFieldsForm } from '@/features/custom-fields/components/custom-field-inputs'
+import {
+  defaultValues,
+  hasAnyValue,
+  missingRequired,
+  useCustomFieldSchema,
+  useSetCustomFieldValues,
+  type CustomFieldValues,
+} from '@/features/custom-fields/hooks/use-custom-fields'
 import { LocationPicker } from '@/features/locations/components/location-picker'
 import { useCreateRfi, type RfiRecord } from '../hooks/use-doc-control'
 import { RfiPeopleList } from './rfi-people-list'
@@ -68,8 +77,32 @@ export function RfiCreateDialog({
   const [scheduleImpactFlag, setScheduleImpactFlag] = useState(false)
   const [scheduleImpact, setScheduleImpact] = useState('')
   const [openNow, setOpenNow] = useState(true)
+  const { data: customSchema } = useCustomFieldSchema(projectId, 'rfi')
+  const saveCustomValues = useSetCustomFieldValues(projectId)
+  const [customValues, setCustomValues] = useState<CustomFieldValues>({})
+  const customFields = customSchema?.fields ?? []
+  const effectiveCustomValues: CustomFieldValues = {
+    ...defaultValues(customFields),
+    ...customValues,
+  }
+  const customContext = {
+    priority,
+    discipline,
+    status: openNow ? 'open' : 'draft',
+    costImpact,
+    scheduleImpactFlag,
+  }
 
   const submit = async () => {
+    const missing = missingRequired(
+      customFields,
+      effectiveCustomValues,
+      customContext
+    )
+    if (missing.length) {
+      toast.error(`Fill in: ${missing.join(', ')}`)
+      return
+    }
     try {
       const rfi = await create.mutateAsync({
         subject: subject.trim(),
@@ -94,6 +127,20 @@ export function RfiCreateDialog({
         scheduleImpact: scheduleImpactFlag ? Number(scheduleImpact) || 0 : 0,
         status: openNow ? 'open' : 'draft',
       })
+      if (hasAnyValue(effectiveCustomValues)) {
+        try {
+          await saveCustomValues.mutateAsync({
+            recordType: 'rfi',
+            recordId: rfi.id,
+            values: effectiveCustomValues,
+            context: customContext,
+          })
+        } catch (error) {
+          toast.error(
+            `${rfi.ref} created, but its custom fields were not saved: ${getServerErrorMessage(error)}`
+          )
+        }
+      }
       toast.success(`${rfi.ref} ${openNow ? 'opened' : 'saved as draft'}`)
       onCreated?.(rfi)
       onOpenChange(false)
@@ -322,6 +369,24 @@ export function RfiCreateDialog({
             )}
           </div>
         </div>
+        {customFields.length > 0 && (
+          <div
+            className='space-y-2 rounded border p-3'
+            data-testid='uat-rfi-custom-fields'
+          >
+            <p className='text-sm font-medium'>
+              Additional fields
+              {customSchema?.fieldset ? ` · ${customSchema.fieldset.name}` : ''}
+            </p>
+            <CustomFieldsForm
+              projectId={projectId}
+              fields={customFields}
+              values={effectiveCustomValues}
+              onChange={setCustomValues}
+              context={customContext}
+            />
+          </div>
+        )}
         <DialogFooter className='items-center gap-3 sm:justify-between'>
           <label className='flex items-center gap-2 text-sm'>
             <Switch
