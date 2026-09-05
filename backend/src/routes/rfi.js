@@ -3,7 +3,8 @@ const { asyncHandler } = require("../utils/async-handler");
 const { sendSuccess } = require("../utils/api-response");
 const { body, param, query } = require("express-validator");
 const { authenticate } = require("../middleware/auth");
-const { getEffectiveRole, requirePermission } = require("../middleware/rbac");
+const { HttpError } = require("../utils/http-error");
+const { getEffectiveRole, hasPermission, requirePermission } = require("../middleware/rbac");
 const { validate } = require("../middleware/validate");
 const {
   assignmentReferenceValidators,
@@ -20,9 +21,32 @@ const {
   rejectRfi,
   deleteRfi,
 } = require("../services/rfi.service");
+const rfiWorkflow = require("../services/rfi-workflow.service");
 
 const router = express.Router({ mergeParams: true });
 router.use(authenticate);
+
+// OCTA-PM-RFI-016 fields shared by create and update.
+const upgradeValidators = () => [
+  body("managerUserId").optional({ nullable: true }).isUUID(),
+  body("assigneeUserIds").optional().isArray({ max: rfiWorkflow.MAX_PEOPLE }),
+  body("assigneeUserIds.*").isUUID(),
+  body("distributionUserIds").optional().isArray({ max: rfiWorkflow.MAX_PEOPLE }),
+  body("distributionUserIds.*").isUUID(),
+  body("specSection").optional({ nullable: true }).isString().trim().isLength({ max: 120 }),
+  body("locationId").optional({ nullable: true }).isUUID(),
+  body("costImpact").optional().isBoolean().toBoolean(),
+  body("costImpactAmount").optional({ nullable: true }).isFloat({ min: 0 }),
+  body("scheduleImpactFlag").optional().isBoolean().toBoolean(),
+  body("question").optional({ nullable: true }).isString().trim().isLength({ max: 20000 }),
+  body("discipline").optional({ nullable: true }).isString().trim().isLength({ max: 120 }),
+];
+
+const actorArgs = (req) => ({
+  userId: req.user.id,
+  userRole: getEffectiveRole(req),
+  projectAccess: req.projectAccess,
+});
 
 router.get(
   "/",
@@ -30,13 +54,20 @@ router.get(
   [
     query("cursor").optional().isUUID(),
     query("limit").optional().isInt({ min: 1, max: 100 }).toInt(),
-    query("status").optional().isIn(["open", "answered", "closed", "archived"]),
+    query("status").optional().isIn(["draft", "open", "answered", "closed", "archived"]),
     query("includeArchived").optional().isBoolean().toBoolean(),
     query("priority").optional().isIn(["low", "normal", "high", "urgent"]),
     query("activityId").optional().isUUID(),
     query("owner").optional().isString().trim().isLength({ max: 120 }),
     query("ownerPartyId").optional().isUUID(),
     query("partyId").optional().isUUID(),
+    query("managerUserId").optional({ values: "falsy" }).isUUID(),
+    query("assigneeUserId").optional({ values: "falsy" }).isUUID(),
+    query("ballInCourtUserId")
+      .optional({ values: "falsy" })
+      .matches(/^(me|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i),
+    query("locationId").optional({ values: "falsy" }).isUUID(),
+    query("overdue").optional().isBoolean().toBoolean(),
     query("search").optional().isString().trim().isLength({ max: 120 }),
     query("dueAfter").optional().isISO8601(),
     query("dueBefore").optional().isISO8601(),
@@ -60,8 +91,9 @@ router.get(
     const data = await listRfis({
       orgId: req.user.orgId,
       projectId: req.params.projectId,
-      query: req.query,
+      query: req.query.ballInCourtUserId === "me" ? { ...req.query, ballInCourtUserId: req.user.id } : req.query,
       projectAccess: req.projectAccess,
+      viewerId: req.user.id,
     });
 
     return sendSuccess(res, data);
@@ -74,7 +106,8 @@ router.post(
   [
     body("subject").trim().notEmpty(),
     body("priority").optional().isIn(["low", "normal", "high", "urgent"]),
-    body("status").optional().isIn(["open", "answered", "closed"]),
+    body("status").optional().isIn(["draft", "open", "answered", "closed"]),
+    ...upgradeValidators(),
     body("owner").optional().isString().trim(),
     body("ownerPartyId").optional({ nullable: true }).isUUID(),
     body("reviewer").optional().isString().trim(),
@@ -110,6 +143,145 @@ router.post(
 
     return sendSuccess(res, row, 201);
   }),
+);
+
+// ─── OCTA-PM-RFI-016: detail, people, responses, change event, PDF ────────
+
+router.get(
+  "/:rfiId",
+  requirePermission("rfi", "read"),
+  [param("rfiId").isUUID(), validate],
+  asyncHandler(async (req, res) =>
+    sendSuccess(res, await rfiWorkflow.getRfi({ orgId: req.user.orgId, projectId: req.params.projectId, rfiId: req.params.rfiId, viewerId: req.user.id })),
+  ),
+);
+
+router.get(
+  "/:rfiId/export.pdf",
+  requirePermission("rfi", "export"),
+  [param("rfiId").isUUID(), validate],
+  asyncHandler(async (req, res) => {
+    const result = await rfiWorkflow.exportRfiPdf({ orgId: req.user.orgId, projectId: req.params.projectId, rfiId: req.params.rfiId, viewerId: req.user.id });
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `attachment; filename="${result.fileName}"`);
+    return res.status(200).send(result.buffer);
+  }),
+);
+
+router.put(
+  "/:rfiId/people",
+  requirePermission("rfi", "update"),
+  [
+    param("rfiId").isUUID(),
+    body("managerUserId").optional({ nullable: true }).isUUID(),
+    body("assigneeUserIds").optional().isArray({ max: rfiWorkflow.MAX_PEOPLE }),
+    body("assigneeUserIds.*").isUUID(),
+    body("distributionUserIds").optional().isArray({ max: rfiWorkflow.MAX_PEOPLE }),
+    body("distributionUserIds.*").isUUID(),
+    validate,
+  ],
+  asyncHandler(async (req, res) => {
+    await updateRfi({
+      orgId: req.user.orgId,
+      projectId: req.params.projectId,
+      rfiId: req.params.rfiId,
+      payload: {
+        managerUserId: req.body.managerUserId,
+        assigneeUserIds: req.body.assigneeUserIds,
+        distributionUserIds: req.body.distributionUserIds,
+        comment: "People updated",
+      },
+      ...actorArgs(req),
+    });
+    return sendSuccess(res, await rfiWorkflow.getRfi({ orgId: req.user.orgId, projectId: req.params.projectId, rfiId: req.params.rfiId, viewerId: req.user.id }));
+  }),
+);
+
+router.get(
+  "/:rfiId/responses",
+  requirePermission("rfi", "read"),
+  [param("rfiId").isUUID(), validate],
+  asyncHandler(async (req, res) =>
+    sendSuccess(res, await rfiWorkflow.listResponses({ orgId: req.user.orgId, projectId: req.params.projectId, rfiId: req.params.rfiId, viewerId: req.user.id })),
+  ),
+);
+
+router.post(
+  "/:rfiId/responses",
+  requirePermission("rfi", "submit"),
+  [
+    param("rfiId").isUUID(),
+    body("body").isString().trim().isLength({ min: 1, max: 20000 }),
+    body("isOfficial").optional().isBoolean().toBoolean(),
+    validate,
+  ],
+  asyncHandler(async (req, res) => {
+    if (req.body.isOfficial === true && !hasPermission(req, "rfi", "submit", { transition: "rfi.answer" })) {
+      const forbidden = new HttpError(403, "FORBIDDEN", "You cannot give the official answer on this project");
+      forbidden.details = { module: "rfi", action: "submit", transition: "rfi.answer" };
+      throw forbidden;
+    }
+    return sendSuccess(
+      res,
+      await rfiWorkflow.addResponse({ orgId: req.user.orgId, projectId: req.params.projectId, rfiId: req.params.rfiId, payload: req.body, ...actorArgs(req) }),
+      201,
+    );
+  }),
+);
+
+router.patch(
+  "/:rfiId/responses/:responseId",
+  requirePermission("rfi", "submit"),
+  [param("rfiId").isUUID(), param("responseId").isUUID(), body("body").isString().trim().isLength({ min: 1, max: 20000 }), validate],
+  asyncHandler(async (req, res) =>
+    sendSuccess(
+      res,
+      await rfiWorkflow.updateResponse({ orgId: req.user.orgId, projectId: req.params.projectId, rfiId: req.params.rfiId, responseId: req.params.responseId, payload: req.body, ...actorArgs(req) }),
+    ),
+  ),
+);
+
+router.delete(
+  "/:rfiId/responses/:responseId",
+  requirePermission("rfi", "submit"),
+  [param("rfiId").isUUID(), param("responseId").isUUID(), validate],
+  asyncHandler(async (req, res) =>
+    sendSuccess(
+      res,
+      await rfiWorkflow.deleteResponse({ orgId: req.user.orgId, projectId: req.params.projectId, rfiId: req.params.rfiId, responseId: req.params.responseId, ...actorArgs(req) }),
+    ),
+  ),
+);
+
+router.post(
+  "/:rfiId/responses/:responseId/official",
+  requirePermission("rfi", "submit", { transition: "rfi.answer" }),
+  [param("rfiId").isUUID(), param("responseId").isUUID(), validate],
+  asyncHandler(async (req, res) =>
+    sendSuccess(
+      res,
+      await rfiWorkflow.setOfficialResponse({ orgId: req.user.orgId, projectId: req.params.projectId, rfiId: req.params.rfiId, responseId: req.params.responseId, ...actorArgs(req) }),
+    ),
+  ),
+);
+
+router.post(
+  "/:rfiId/convert-to-change",
+  requirePermission("change_order", "create"),
+  [
+    param("rfiId").isUUID(),
+    body("description").optional({ nullable: true }).isString().trim().isLength({ max: 4000 }),
+    body("category").optional({ nullable: true }).isString().trim().isLength({ max: 80 }),
+    body("value").optional({ nullable: true }).isFloat({ min: 0 }),
+    validate,
+  ],
+  asyncHandler(async (req, res) =>
+    sendSuccess(
+      res,
+      await rfiWorkflow.convertToChangeEvent({ orgId: req.user.orgId, projectId: req.params.projectId, rfiId: req.params.rfiId, payload: req.body, userId: req.user.id, userRole: getEffectiveRole(req) }),
+      201,
+    ),
+  ),
 );
 
 router.post(
@@ -277,7 +449,8 @@ router.patch(
   [
     param("rfiId").isUUID(),
     body("priority").optional().isIn(["low", "normal", "high", "urgent"]),
-    body("status").optional().isIn(["open", "answered", "closed"]),
+    body("status").optional().isIn(["draft", "open", "answered", "closed"]),
+    ...upgradeValidators(),
     body("owner").optional().isString().trim(),
     body("ownerPartyId").optional({ nullable: true }).isUUID(),
     body("reviewer").optional().isString().trim(),

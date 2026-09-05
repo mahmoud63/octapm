@@ -21,22 +21,105 @@ export interface DocControlDashboardData {
   }
 }
 
+export interface RfiPerson {
+  id: string
+  name: string
+  email?: string | null
+}
+
+export interface RfiListedPerson extends RfiPerson {
+  userId: string
+  sortOrder: number
+}
+
+export interface RfiResponse {
+  id: string
+  rfiId: string
+  body: string
+  isOfficial: boolean
+  revision: number
+  authorId: string | null
+  author: RfiPerson | null
+  createdAt: string
+  updatedAt: string
+}
+
+export type RfiStatus = 'draft' | 'open' | 'answered' | 'closed'
+
 export interface RfiRecord extends WorkflowRecordMeta {
   id: string
   ref: string
   subject: string
-  status: 'open' | 'answered' | 'closed'
+  status: RfiStatus
   priority: 'low' | 'normal' | 'high' | 'urgent'
   question?: string | null
   response?: string | null
+  discipline?: string | null
   dueDate?: string | null
   responseRequiredBy?: string | null
+  raisedDate?: string | null
+  answeredDate?: string | null
+  answeredBy?: string | null
+  activityId?: string | null
+  activity?: { id: string; name: string } | null
   ownerPartyId?: string | null
   reviewerPartyId?: string | null
   approverPartyId?: string | null
   ownerParty?: { id: string; role: string; companyName?: string | null } | null
-  reviewerParty?: { id: string; role: string; companyName?: string | null } | null
-  approverParty?: { id: string; role: string; companyName?: string | null } | null
+  reviewerParty?: {
+    id: string
+    role: string
+    companyName?: string | null
+  } | null
+  approverParty?: {
+    id: string
+    role: string
+    companyName?: string | null
+  } | null
+  ballInCourtUserId?: string | null
+  ballInCourtUser?: RfiPerson | null
+  assigneeUser?: RfiPerson | null
+  ownerUser?: RfiPerson | null
+  // OCTA-PM-RFI-016
+  managerUserId?: string | null
+  manager?: RfiPerson | null
+  createdBy?: string | null
+  specSection?: string | null
+  locationId?: string | null
+  location?: { id: string; name: string; code?: string | null } | null
+  costImpact?: boolean
+  costImpactAmount?: number | null
+  scheduleImpactFlag?: boolean
+  scheduleImpact?: number
+  revision?: number
+  officialResponseId?: string | null
+  changeOrderId?: string | null
+  isOverdue?: boolean
+  assignees?: RfiListedPerson[]
+  distribution?: RfiListedPerson[]
+  responses?: RfiResponse[]
+  officialResponse?: RfiResponse | null
+  path?: string | null
+}
+
+export interface RfiUpgradeFields {
+  managerUserId?: string | null
+  assigneeUserIds?: string[]
+  distributionUserIds?: string[]
+  specSection?: string | null
+  locationId?: string | null
+  costImpact?: boolean
+  costImpactAmount?: number | null
+  scheduleImpactFlag?: boolean
+  scheduleImpact?: number
+  question?: string | null
+  discipline?: string | null
+  responseRequiredBy?: string | null
+  dueDate?: string | null
+  activityId?: string | null
+  priority?: RfiRecord['priority']
+  subject?: string
+  status?: 'draft' | 'open'
 }
 
 export interface SubmittalRecord extends WorkflowRecordMeta {
@@ -51,8 +134,16 @@ export interface SubmittalRecord extends WorkflowRecordMeta {
   reviewerPartyId?: string | null
   approverPartyId?: string | null
   ownerParty?: { id: string; role: string; companyName?: string | null } | null
-  reviewerParty?: { id: string; role: string; companyName?: string | null } | null
-  approverParty?: { id: string; role: string; companyName?: string | null } | null
+  reviewerParty?: {
+    id: string
+    role: string
+    companyName?: string | null
+  } | null
+  approverParty?: {
+    id: string
+    role: string
+    companyName?: string | null
+  } | null
 }
 
 export interface DrawingRecord extends WorkflowRecordMeta {
@@ -156,6 +247,12 @@ export interface RfiListQuery {
   status?: RfiRecord['status'] | 'all'
   priority?: RfiRecord['priority'] | 'all'
   search?: string
+  managerUserId?: string | null
+  assigneeUserId?: string | null
+  /** A user id or `me`. */
+  ballInCourtUserId?: string | null
+  locationId?: string | null
+  overdue?: boolean
   sortBy?:
     | 'created'
     | 'updated'
@@ -268,14 +365,16 @@ export const useDocumentRegister = (
 export const useCreateRfi = (projectId: string) => {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: (payload: {
-      subject: string
-      owner?: string
-      ownerPartyId?: string
-      reviewerPartyId?: string
-      approverPartyId?: string
-      dueDate?: string
-    }) =>
+    mutationFn: (
+      payload: {
+        subject: string
+        owner?: string
+        ownerPartyId?: string
+        reviewerPartyId?: string
+        approverPartyId?: string
+        dueDate?: string
+      } & RfiUpgradeFields
+    ) =>
       apiClient
         .post(`/projects/${projectId}/rfi`, payload)
         .then((response) => response.data.data as RfiRecord),
@@ -360,6 +459,206 @@ export const useCloseRfi = (projectId: string) => {
       invalidateDocControl(qc, projectId)
     },
   })
+}
+
+// ─── OCTA-PM-RFI-016: detail, people, responses, change event, PDF ────────
+
+const rfiDetailKey = (projectId: string, rfiId: string) => [
+  'rfi-detail',
+  projectId,
+  rfiId,
+]
+
+const invalidateRfi = (
+  qc: ReturnType<typeof useQueryClient>,
+  projectId: string
+) => {
+  qc.invalidateQueries({ queryKey: rfiKey(projectId) })
+  qc.invalidateQueries({ queryKey: ['rfi-detail', projectId] })
+  qc.invalidateQueries({ queryKey: ['audit-events', projectId] })
+  qc.invalidateQueries({ queryKey: ['change-orders', projectId] })
+  invalidateDocControl(qc, projectId)
+}
+
+export const useRfi = (projectId: string, rfiId: string | null) =>
+  useQuery<RfiRecord>({
+    queryKey: rfiDetailKey(projectId, rfiId ?? ''),
+    queryFn: () =>
+      apiClient
+        .get(`/projects/${projectId}/rfi/${rfiId}`)
+        .then((response) => response.data.data),
+    enabled: Boolean(projectId && rfiId),
+  })
+
+export const useUpdateRfi = (projectId: string) => {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({
+      rfiId,
+      payload,
+    }: {
+      rfiId: string
+      payload: RfiUpgradeFields & { comment?: string }
+    }) =>
+      apiClient
+        .patch(`/projects/${projectId}/rfi/${rfiId}`, payload)
+        .then((response) => response.data.data as RfiRecord),
+    onSuccess: () => invalidateRfi(qc, projectId),
+  })
+}
+
+export const useUpdateRfiPeople = (projectId: string) => {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({
+      rfiId,
+      managerUserId,
+      assigneeUserIds,
+      distributionUserIds,
+    }: {
+      rfiId: string
+      managerUserId?: string | null
+      assigneeUserIds?: string[]
+      distributionUserIds?: string[]
+    }) =>
+      apiClient
+        .put(`/projects/${projectId}/rfi/${rfiId}/people`, {
+          managerUserId,
+          assigneeUserIds,
+          distributionUserIds,
+        })
+        .then((response) => response.data.data as RfiRecord),
+    onSuccess: () => invalidateRfi(qc, projectId),
+  })
+}
+
+export const useAddRfiResponse = (projectId: string) => {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({
+      rfiId,
+      body,
+      isOfficial,
+    }: {
+      rfiId: string
+      body: string
+      isOfficial?: boolean
+    }) =>
+      apiClient
+        .post(`/projects/${projectId}/rfi/${rfiId}/responses`, {
+          body,
+          isOfficial: Boolean(isOfficial),
+        })
+        .then((response) => response.data.data as RfiRecord),
+    onSuccess: () => invalidateRfi(qc, projectId),
+  })
+}
+
+export const useSetOfficialRfiResponse = (projectId: string) => {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({
+      rfiId,
+      responseId,
+    }: {
+      rfiId: string
+      responseId: string
+    }) =>
+      apiClient
+        .post(
+          `/projects/${projectId}/rfi/${rfiId}/responses/${responseId}/official`
+        )
+        .then((response) => response.data.data as RfiRecord),
+    onSuccess: () => invalidateRfi(qc, projectId),
+  })
+}
+
+export const useUpdateRfiResponse = (projectId: string) => {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({
+      rfiId,
+      responseId,
+      body,
+    }: {
+      rfiId: string
+      responseId: string
+      body: string
+    }) =>
+      apiClient
+        .patch(`/projects/${projectId}/rfi/${rfiId}/responses/${responseId}`, {
+          body,
+        })
+        .then((response) => response.data.data as RfiRecord),
+    onSuccess: () => invalidateRfi(qc, projectId),
+  })
+}
+
+export const useDeleteRfiResponse = (projectId: string) => {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({
+      rfiId,
+      responseId,
+    }: {
+      rfiId: string
+      responseId: string
+    }) =>
+      apiClient
+        .delete(`/projects/${projectId}/rfi/${rfiId}/responses/${responseId}`)
+        .then((response) => response.data.data as { deleted: boolean }),
+    onSuccess: () => invalidateRfi(qc, projectId),
+  })
+}
+
+export const useConvertRfiToChange = (projectId: string) => {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({
+      rfiId,
+      description,
+      value,
+    }: {
+      rfiId: string
+      description?: string | null
+      value?: number | null
+    }) =>
+      apiClient
+        .post(`/projects/${projectId}/rfi/${rfiId}/convert-to-change`, {
+          description: description || undefined,
+          value: value ?? undefined,
+        })
+        .then(
+          (response) =>
+            response.data.data as {
+              changeOrder: { id: string; ref: string }
+              rfi: RfiRecord
+            }
+        ),
+    onSuccess: () => invalidateRfi(qc, projectId),
+  })
+}
+
+/** Downloads the RFI (question, official response, thread) as PDF. */
+export const downloadRfiPdf = async (projectId: string, rfiId: string) => {
+  const response = await apiClient.get(
+    `/projects/${projectId}/rfi/${rfiId}/export.pdf`,
+    { responseType: 'blob', timeout: 120_000 }
+  )
+  const disposition = String(response.headers?.['content-disposition'] ?? '')
+  const match = /filename="?([^";]+)"?/.exec(disposition)
+  const fileName = match?.[1] ?? 'rfi.pdf'
+  const url = URL.createObjectURL(
+    new Blob([response.data], { type: 'application/pdf' })
+  )
+  const anchor = document.createElement('a')
+  anchor.href = url
+  anchor.download = fileName
+  document.body.appendChild(anchor)
+  anchor.click()
+  anchor.remove()
+  URL.revokeObjectURL(url)
+  return fileName
 }
 
 export const useReopenRfi = (projectId: string) => {

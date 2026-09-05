@@ -116,6 +116,7 @@ describe("large list API pagination, filtering, search, and sorting", () => {
     expect(result.rows).toHaveLength(2);
     expect(result.pagination).toEqual({ limit: 2, nextCursor: "rfi-3" });
     expect(result.summary).toEqual({
+      draft: 0,
       open: 8,
       answered: 0,
       closed: 0,

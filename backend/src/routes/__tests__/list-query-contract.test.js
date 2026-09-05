@@ -105,6 +105,8 @@ describe('list API query contracts', () => {
         sortBy: 'dueDate',
         sortDir: 'asc',
       }),
+      projectAccess: undefined,
+      viewerId: 'user-1',
     });
   });
 

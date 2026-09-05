@@ -24,6 +24,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import { Switch } from '@/components/ui/switch'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Textarea } from '@/components/ui/textarea'
 import { AuditHistoryPanel } from '@/features/audit/components/audit-history-panel'
@@ -69,6 +70,9 @@ import {
   useTransmittals,
 } from '../hooks/use-doc-control'
 import { DocumentSearchPanel } from './document-search-panel'
+import { RfiCreateDialog } from './rfi-create-dialog'
+import { RfiDetailDialog } from './rfi-detail-dialog'
+import { RfiSavedViews } from './rfi-saved-views'
 
 type DocDecisionTarget =
   | {
@@ -156,6 +160,14 @@ export function DocControlDashboard({
   const [rfiSortBy, setRfiSortBy] = useState<RfiListQuery['sortBy']>('created')
   const [rfiSortDir, setRfiSortDir] = useState<RfiListQuery['sortDir']>('desc')
   const [rfiCursor, setRfiCursor] = useState<string | null>(null)
+  const [rfiBallInCourt, setRfiBallInCourt] = useState<string | null>(null)
+  const [rfiOverdue, setRfiOverdue] = useState(false)
+  const [rfiDetailId, setRfiDetailId] = useState<string | null>(
+    initialTarget?.source === 'rfi' && initialTarget.recordId
+      ? initialTarget.recordId
+      : null
+  )
+  const [rfiCreateOpen, setRfiCreateOpen] = useState(false)
 
   const [submittalTitle, setSubmittalTitle] = useState('')
   const [submittalReviewerPartyId, setSubmittalReviewerPartyId] =
@@ -211,8 +223,19 @@ export function DocControlDashboard({
       priority: rfiPriority,
       sortBy: rfiSortBy,
       sortDir: rfiSortDir,
+      ballInCourtUserId: rfiBallInCourt,
+      overdue: rfiOverdue || undefined,
     }),
-    [rfiCursor, rfiPriority, rfiSearch, rfiSortBy, rfiSortDir, rfiStatus]
+    [
+      rfiBallInCourt,
+      rfiCursor,
+      rfiOverdue,
+      rfiPriority,
+      rfiSearch,
+      rfiSortBy,
+      rfiSortDir,
+      rfiStatus,
+    ]
   )
   const submittalQuery = useMemo<SubmittalListQuery>(
     () => ({
@@ -1087,6 +1110,63 @@ export function DocControlDashboard({
               </Button>
             </div>
           )}
+          <div className='flex flex-wrap items-center justify-between gap-2'>
+            <RfiSavedViews
+              projectId={projectId}
+              current={{
+                status: rfiStatus,
+                priority: rfiPriority,
+                search: rfiSearch,
+                sortBy: rfiSortBy,
+                sortDir: rfiSortDir,
+                ballInCourtUserId: rfiBallInCourt,
+                overdue: rfiOverdue,
+              }}
+              onApply={(view) => {
+                setRfiCursor(null)
+                setRfiStatus(view.status ?? 'all')
+                setRfiPriority(view.priority ?? 'all')
+                setRfiSearch(view.search ?? '')
+                setRfiSortBy(view.sortBy ?? 'created')
+                setRfiSortDir(view.sortDir ?? 'desc')
+                setRfiBallInCourt(view.ballInCourtUserId ?? null)
+                setRfiOverdue(Boolean(view.overdue))
+              }}
+            />
+            <div className='flex flex-wrap items-center gap-2'>
+              <label className='flex h-9 items-center gap-2 text-sm'>
+                <Switch
+                  checked={rfiBallInCourt === 'me'}
+                  onCheckedChange={(checked) => {
+                    setRfiCursor(null)
+                    setRfiBallInCourt(checked ? 'me' : null)
+                  }}
+                  data-testid='uat-rfi-mine'
+                />
+                Waiting on me
+              </label>
+              <label className='flex h-9 items-center gap-2 text-sm'>
+                <Switch
+                  checked={rfiOverdue}
+                  onCheckedChange={(checked) => {
+                    setRfiCursor(null)
+                    setRfiOverdue(checked)
+                  }}
+                  data-testid='uat-rfi-overdue'
+                />
+                Overdue
+              </label>
+              {canCreateRfi && (
+                <Button
+                  size='sm'
+                  onClick={() => setRfiCreateOpen(true)}
+                  data-testid='uat-rfi-new'
+                >
+                  New RFI
+                </Button>
+              )}
+            </div>
+          </div>
           <div className='grid grid-cols-1 gap-2 md:grid-cols-[minmax(0,1fr)_repeat(4,max-content)]'>
             <Input
               placeholder='Search RFI'
@@ -1108,6 +1188,7 @@ export function DocControlDashboard({
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value='all'>All status</SelectItem>
+                <SelectItem value='draft'>Draft</SelectItem>
                 <SelectItem value='open'>Open</SelectItem>
                 <SelectItem value='answered'>Answered</SelectItem>
                 <SelectItem value='closed'>Closed</SelectItem>
@@ -1196,29 +1277,40 @@ export function DocControlDashboard({
               </div>
             )}
             renderActions={(row) =>
+              row.status === 'draft' ||
               row.status === 'open' ||
               row.status === 'answered' ||
               row.status === 'closed' ? (
                 <>
-                  {row.status === 'open' && canSubmitRfi && (
-                    <Button
-                      size='sm'
-                      variant='outline'
-                      onClick={async () => {
-                        try {
-                          await submitRfi.mutateAsync({
-                            rfiId: row.id,
-                            comment: 'Submitted from document control register',
-                          })
-                          toast.success('RFI submitted')
-                        } catch (error) {
-                          handleServerError(error)
-                        }
-                      }}
-                    >
-                      Submit
-                    </Button>
-                  )}
+                  <Button
+                    size='sm'
+                    onClick={() => setRfiDetailId(row.id)}
+                    data-testid='uat-rfi-open'
+                  >
+                    <Eye className='mr-2 h-4 w-4' />
+                    Open
+                  </Button>
+                  {(row.status === 'draft' || row.status === 'open') &&
+                    canSubmitRfi && (
+                      <Button
+                        size='sm'
+                        variant='outline'
+                        onClick={async () => {
+                          try {
+                            await submitRfi.mutateAsync({
+                              rfiId: row.id,
+                              comment:
+                                'Submitted from document control register',
+                            })
+                            toast.success('RFI submitted')
+                          } catch (error) {
+                            handleServerError(error)
+                          }
+                        }}
+                      >
+                        Submit
+                      </Button>
+                    )}
                   {row.status === 'open' && canAnswerRfi && (
                     <Button
                       size='sm'
@@ -1338,6 +1430,23 @@ export function DocControlDashboard({
               </Button>
             </div>
           </div>
+          <RfiCreateDialog
+            key={`rfi-create-${rfiCreateOpen ? 'open' : 'closed'}`}
+            projectId={projectId}
+            open={rfiCreateOpen}
+            onOpenChange={setRfiCreateOpen}
+            partyItems={partyItems
+              .filter((item) => item.id !== NO_PARTY_VALUE)
+              .map((item) => ({ id: item.id, label: item.label }))}
+            onCreated={(rfi) => setRfiDetailId(rfi.id)}
+          />
+          <RfiDetailDialog
+            projectId={projectId}
+            rfiId={rfiDetailId}
+            onOpenChange={(open) => {
+              if (!open) setRfiDetailId(null)
+            }}
+          />
           <AuditHistoryPanel
             projectId={projectId}
             entityType='rfi'

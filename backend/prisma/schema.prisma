@@ -149,6 +149,9 @@ model User {
   formInspector           FormInstance[]      @relation("FormInspectorUser")
   formApprover            FormInstance[]      @relation("FormApproverUser")
   formBallInCourt         FormInstance[]      @relation("FormBallInCourtUser")
+  rfiManaged              Rfi[]               @relation("RfiManagerUser")
+  rfiAssignments          RfiAssignee[]       @relation("RfiAssigneeUser")
+  rfiResponses            RfiResponse[]       @relation("RfiResponseAuthor")
   signatures              Signature[]         @relation("SignatureUser")
   safetyOwner             SafetyIncident[]    @relation("SafetyOwnerUser")
   safetyReviewer          SafetyIncident[]    @relation("SafetyReviewerUser")
@@ -3100,11 +3103,27 @@ model Rfi {
   answeredDate       DateTime?
   archivedAt         DateTime?
   archivedBy         String?
+  // OCTA-PM-RFI-016: manager, references, impacts, official response, revisions.
+  managerUserId      String?
+  createdBy          String?
+  specSection        String?
+  locationId         String?
+  costImpact         Boolean   @default(false)
+  costImpactAmount   Decimal?  @db.Decimal(18, 2)
+  scheduleImpactFlag Boolean   @default(false)
+  officialResponseId String?
+  revision           Int       @default(0)
+  changeOrderId      String?
+  distributedAt      DateTime?
   createdAt          DateTime  @default(now())
   updatedAt          DateTime  @updatedAt
 
   project  Project   @relation(fields: [projectId], references: [id])
   activity Activity? @relation(fields: [activityId], references: [id], onDelete: SetNull)
+  managerUser User?     @relation("RfiManagerUser", fields: [managerUserId], references: [id], onDelete: SetNull)
+  location    Location? @relation(fields: [locationId], references: [id], onDelete: SetNull)
+  assignees   RfiAssignee[]
+  responses   RfiResponse[]
   ownerParty    ProjectParty? @relation("RfiOwnerParty", fields: [ownerPartyId], references: [id], onDelete: SetNull)
   reviewerParty ProjectParty? @relation("RfiReviewerParty", fields: [reviewerPartyId], references: [id], onDelete: SetNull)
   approverParty ProjectParty? @relation("RfiApproverParty", fields: [approverPartyId], references: [id], onDelete: SetNull)
@@ -3131,6 +3150,48 @@ model Rfi {
   @@index([assigneeUserId])
   @@index([ballInCourtUserId])
   @@index([assigneeCompanyId])
+  @@index([managerUserId])
+  @@index([projectId, createdBy])
+  @@index([locationId])
+}
+
+// People on an RFI beyond the single assignee: `assignee` rows answer it,
+// `distribution` rows are kept informed (OCTA-PM-RFI-016).
+model RfiAssignee {
+  id        String   @id @default(uuid())
+  rfiId     String
+  userId    String
+  role      String   @default("assignee") // assignee, distribution
+  sortOrder Int      @default(0)
+  addedBy   String?
+  createdAt DateTime @default(now())
+
+  rfi  Rfi  @relation(fields: [rfiId], references: [id], onDelete: Cascade)
+  user User @relation("RfiAssigneeUser", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([rfiId, userId, role])
+  @@index([userId])
+}
+
+// Response thread; exactly one response is official per revision and
+// mirrors into Rfi.response / officialResponseId.
+model RfiResponse {
+  id         String   @id @default(uuid())
+  orgId      String
+  projectId  String
+  rfiId      String
+  authorId   String?
+  body       String
+  isOfficial Boolean  @default(false)
+  revision   Int      @default(0)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  rfi    Rfi   @relation(fields: [rfiId], references: [id], onDelete: Cascade)
+  author User? @relation("RfiResponseAuthor", fields: [authorId], references: [id], onDelete: SetNull)
+
+  @@index([rfiId, createdAt])
+  @@index([projectId])
 }
 
 model Submittal {
@@ -3785,6 +3846,7 @@ model Location {
   sheets     Sheet[]
   punchItems PunchItem[]
   formInstances FormInstance[]
+  rfis       Rfi[]
 
   @@unique([projectId, code])
   @@index([orgId])

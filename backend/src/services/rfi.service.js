@@ -24,6 +24,7 @@ const {
 } = require("./company-party.service");
 const auditService = require("./audit.service");
 const approvalWorkflowService = require("./approval-workflow.service");
+const rfiWorkflow = require("./rfi-workflow.service");
 const {
   ARCHIVED_STATUS,
   applyArchiveVisibility,
@@ -43,7 +44,33 @@ const ensureProject = async ({ orgId, projectId }) => {
   return project;
 };
 
-const RFI_STATUSES = ["open", "answered", "closed", ARCHIVED_STATUS];
+const RFI_STATUSES = ["draft", "open", "answered", "closed", ARCHIVED_STATUS];
+const RFI_OPEN_STATUSES = ["draft", "open", "answered"];
+
+const toMoney = (value) => {
+  if (value === undefined) return undefined;
+  if (value === null || value === "") return null;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+};
+
+/** Fields added by OCTA-PM-RFI-016, normalised for create / update. */
+const upgradeFields = (payload = {}, existing = null) => {
+  const data = {};
+  if (payload.managerUserId !== undefined) data.managerUserId = payload.managerUserId || null;
+  if (payload.specSection !== undefined) data.specSection = payload.specSection?.trim() || null;
+  if (payload.locationId !== undefined) data.locationId = payload.locationId || null;
+  if (payload.costImpact !== undefined) data.costImpact = Boolean(payload.costImpact);
+  if (payload.costImpactAmount !== undefined) data.costImpactAmount = toMoney(payload.costImpactAmount);
+  if (payload.scheduleImpactFlag !== undefined) data.scheduleImpactFlag = Boolean(payload.scheduleImpactFlag);
+  else if (payload.scheduleImpact !== undefined && !existing) data.scheduleImpactFlag = Number(payload.scheduleImpact) > 0;
+  if (payload.officialResponseId !== undefined) data.officialResponseId = payload.officialResponseId || null;
+  if (payload.bumpRevision) {
+    data.revision = { increment: 1 };
+    data.officialResponseId = null;
+  }
+  return data;
+};
 const RFI_PRIORITIES = ["low", "normal", "high", "urgent"];
 const RFI_SORT_FIELDS = {
   created: "createdAt",
@@ -90,6 +117,14 @@ const rfiAuditSummary = (record) => ({
   answeredDate: dateSummary(record.answeredDate),
   archivedAt: dateSummary(record.archivedAt),
   archivedBy: record.archivedBy || null,
+  managerUserId: record.managerUserId || null,
+  specSection: record.specSection || null,
+  locationId: record.locationId || null,
+  costImpact: Boolean(record.costImpact),
+  costImpactAmount: record.costImpactAmount === null || record.costImpactAmount === undefined ? null : Number(record.costImpactAmount),
+  scheduleImpactFlag: Boolean(record.scheduleImpactFlag),
+  revision: Number(record.revision || 0),
+  officialResponseId: record.officialResponseId || null,
 });
 
 const buildRfiWhere = ({ projectId, query = {} }) => {
@@ -111,6 +146,26 @@ const buildRfiWhere = ({ projectId, query = {} }) => {
     before: trimToNull(query.dueBefore),
   });
   if (dueDate) where.dueDate = dueDate;
+
+  // OCTA-PM-RFI-016 filters: manager, assignees, ball in court, location, overdue.
+  if (trimToNull(query.managerUserId)) where.managerUserId = trimToNull(query.managerUserId);
+  if (trimToNull(query.ballInCourtUserId)) where.ballInCourtUserId = trimToNull(query.ballInCourtUserId);
+  if (trimToNull(query.locationId)) where.locationId = trimToNull(query.locationId);
+  if (trimToNull(query.assigneeUserId)) {
+    const assigneeUserId = trimToNull(query.assigneeUserId);
+    where.AND = [
+      ...(where.AND || []),
+      { OR: [{ assigneeUserId }, { assignees: { some: { userId: assigneeUserId, role: "assignee" } } }] },
+    ];
+  }
+  if (query.overdue === true || query.overdue === "true") {
+    const now = new Date();
+    where.status = where.status && RFI_OPEN_STATUSES.includes(where.status) ? where.status : { in: RFI_OPEN_STATUSES };
+    where.AND = [
+      ...(where.AND || []),
+      { OR: [{ responseRequiredBy: { lt: now } }, { responseRequiredBy: null, dueDate: { lt: now } }] },
+    ];
+  }
 
   const search = trimToNull(query.search);
   if (search) {
@@ -155,7 +210,7 @@ const countByStatus = (counts, statuses) =>
     Object.fromEntries(statuses.map((status) => [status, 0])),
   );
 
-const listRfis = async ({ orgId, projectId, query = {}, projectAccess = null }) => {
+const listRfis = async ({ orgId, projectId, query = {}, projectAccess = null, viewerId = null }) => {
   await ensureProject({ orgId, projectId });
 
   const listQuery = normalizeListQuery(query, {
@@ -163,9 +218,9 @@ const listRfis = async ({ orgId, projectId, query = {}, projectAccess = null }) 
     defaultSortBy: "created",
     defaultSortDir: "desc",
   });
-  const where = applyPartyWorkflowVisibility(
-    buildRfiWhere({ projectId, query }),
-    projectAccess,
+  const where = rfiWorkflow.withDraftVisibility(
+    applyPartyWorkflowVisibility(buildRfiWhere({ projectId, query }), projectAccess),
+    viewerId,
   );
   const orderBy = [
     { [RFI_SORT_FIELDS[listQuery.sortBy]]: listQuery.sortDir },
@@ -198,8 +253,9 @@ const listRfis = async ({ orgId, projectId, query = {}, projectAccess = null }) 
   const summaryCounts = countByStatus(statusCounts, RFI_STATUSES);
 
   return {
-    rows,
+    rows: rows.map((row) => ({ ...row, isOverdue: rfiWorkflow.isOverdue(row) })),
     summary: {
+      draft: summaryCounts.draft,
       open: summaryCounts.open,
       answered: summaryCounts.answered,
       closed: summaryCounts.closed,
@@ -223,8 +279,10 @@ const createRfi = async ({
   const count = await prisma.rfi.count({ where: { projectId } });
   const activityId = primaryActivityIdFromPayload(payload);
   const assignmentPayload = withDefaultOwnerParty(payload, projectAccess);
+  await rfiWorkflow.validateUsers({ orgId, userIds: [payload.managerUserId] });
+  await rfiWorkflow.validateLocation({ projectId, locationId: payload.locationId });
 
-  const row = await prisma.$transaction(async (tx) => {
+  const { row, people } = await prisma.$transaction(async (tx) => {
     const assignments = await workflowPartyAssignmentData({
       tx,
       orgId,
@@ -245,6 +303,8 @@ const createRfi = async ({
         status: payload.status || "open",
         scheduleImpact: Number(payload.scheduleImpact) || 0,
         ...assignments,
+        ...upgradeFields(payload),
+        createdBy: userId || null,
         raisedBy: payload.raisedBy?.trim() || null,
         answeredBy: payload.answeredBy?.trim() || null,
         raisedDate: payload.raisedDate
@@ -322,8 +382,22 @@ const createRfi = async ({
       },
       metadata: { source: "document_control.rfi" },
     });
-    return created;
+    const syncedPeople = await rfiWorkflow.syncPeople({
+      tx,
+      orgId,
+      rfiId: created.id,
+      assigneeUserIds: payload.assigneeUserIds,
+      distributionUserIds: payload.distributionUserIds,
+      actorId: userId,
+    });
+    const withBall = await rfiWorkflow.applyBallInCourt({ tx, rfi: created });
+    return { row: withBall || created, people: syncedPeople };
   });
+
+  if (row.status === "open") {
+    await rfiWorkflow.notifyAssigned({ orgId, projectId, rfi: row, userIds: [...people.assigneesAdded, row.managerUserId], actorId: userId });
+    await rfiWorkflow.notifyDistribution({ orgId, projectId, rfi: row, userIds: people.distributionAdded, actorId: userId });
+  }
 
   const [enriched] = await attachWorkflowDetailsToRecords({
     projectId,
@@ -389,8 +463,10 @@ const updateRfi = async ({
     );
   }
   const activityId = primaryActivityIdFromPayload(payload, existing.activityId);
+  if (payload.managerUserId) await rfiWorkflow.validateUsers({ orgId, userIds: [payload.managerUserId] });
+  if (payload.locationId) await rfiWorkflow.validateLocation({ projectId, locationId: payload.locationId });
 
-  const row = await prisma.$transaction(async (tx) => {
+  const { row, people } = await prisma.$transaction(async (tx) => {
     const assignments = await workflowPartyAssignmentData({
       tx,
       orgId,
@@ -423,6 +499,7 @@ const updateRfi = async ({
             ? Number(payload.scheduleImpact) || 0
             : existing.scheduleImpact,
         ...assignments,
+        ...upgradeFields(payload, existing),
         raisedBy:
           payload.raisedBy !== undefined
             ? payload.raisedBy?.trim() || null
@@ -527,11 +604,32 @@ const updateRfi = async ({
         subject: updated.subject,
         status: updated.status,
         scheduleImpact: Number(updated.scheduleImpact || 0),
+        ...(payload.bumpRevision ? { revision: Number(updated.revision || 0) } : {}),
       },
       metadata: { source: "document_control.rfi" },
     });
-    return updated;
+    const syncedPeople = await rfiWorkflow.syncPeople({
+      tx,
+      orgId,
+      rfiId,
+      assigneeUserIds: payload.assigneeUserIds,
+      distributionUserIds: payload.distributionUserIds,
+      actorId: userId,
+    });
+    const withBall = await rfiWorkflow.applyBallInCourt({ tx, rfi: updated });
+    if (updated.status === "closed" && existing.status !== "closed") {
+      await rfiWorkflow.applyScheduleImpact({ tx, projectId, rfi: updated });
+    }
+    return { row: withBall || updated, people: syncedPeople };
   });
+
+  if (row.status === "open") {
+    const newManager = payload.managerUserId && payload.managerUserId !== existing.managerUserId ? [payload.managerUserId] : [];
+    await rfiWorkflow.notifyAssigned({ orgId, projectId, rfi: row, userIds: [...people.assigneesAdded, ...newManager], actorId: userId });
+  }
+  if (people.distributionAdded.length) {
+    await rfiWorkflow.notifyDistribution({ orgId, projectId, rfi: row, userIds: people.distributionAdded, actorId: userId });
+  }
 
   const [enriched] = await attachWorkflowDetailsToRecords({
     projectId,
@@ -559,7 +657,7 @@ const submitRfi = async ({
     );
   }
 
-  return updateRfi({
+  const row = await updateRfi({
     orgId,
     projectId,
     rfiId,
@@ -573,6 +671,18 @@ const submitRfi = async ({
     projectAccess,
     forceWorkflowEvent: true,
   });
+  if (existing.status === "draft") {
+    const people = await rfiWorkflow.loadPeople({ rfiId });
+    await rfiWorkflow.notifyAssigned({
+      orgId,
+      projectId,
+      rfi: row,
+      userIds: [...people.assignees.map((entry) => entry.userId), row.managerUserId],
+      actorId: userId,
+    });
+    await rfiWorkflow.notifyDistribution({ orgId, projectId, rfi: row, userIds: people.distribution.map((entry) => entry.userId), actorId: userId });
+  }
+  return row;
 };
 
 const answerRfi = async ({
@@ -599,7 +709,7 @@ const answerRfi = async ({
   }
   assertPartyWorkflowAccess({ projectAccess, record: existing });
 
-  return updateRfi({
+  const row = await updateRfi({
     orgId,
     projectId,
     rfiId,
@@ -616,6 +726,21 @@ const answerRfi = async ({
     userRole,
     projectAccess,
   });
+  // The answer is also the official entry of the response thread.
+  if (!payload.officialResponseId) {
+    await rfiWorkflow.recordOfficialResponse({ orgId, projectId, rfi: row, body: response, authorId: userId });
+  }
+  const people = await rfiWorkflow.loadPeople({ rfiId });
+  await rfiWorkflow.notifyDistribution({
+    orgId,
+    projectId,
+    rfi: row,
+    userIds: [row.managerUserId, row.createdBy, ...people.distribution.map((entry) => entry.userId)],
+    actorId: userId,
+    event: "rfi.answered",
+    title: `${row.ref} answered: ${row.subject}`,
+  });
+  return row;
 };
 
 const closeRfi = async ({
@@ -673,7 +798,7 @@ const reopenRfi = async ({
   }
   assertPartyWorkflowAccess({ projectAccess, record: existing });
 
-  return updateRfi({
+  const row = await updateRfi({
     orgId,
     projectId,
     rfiId,
@@ -682,11 +807,22 @@ const reopenRfi = async ({
       reason: reopenReason,
       comment: reopenReason,
       statusComment: reopenReason,
+      // A reopened RFI starts a new revision: the next official answer replaces the old one.
+      bumpRevision: existing.status !== "draft",
     },
     userId,
     userRole,
     projectAccess,
   });
+  const people = await rfiWorkflow.loadPeople({ rfiId });
+  await rfiWorkflow.notifyAssigned({
+    orgId,
+    projectId,
+    rfi: row,
+    userIds: [...people.assignees.map((entry) => entry.userId), row.managerUserId],
+    actorId: userId,
+  });
+  return row;
 };
 
 const approveRfi = async ({
@@ -875,6 +1011,7 @@ const deleteRfi = async ({
 };
 
 module.exports = {
+  RFI_STATUSES,
   listRfis,
   createRfi,
   updateRfi,

@@ -1,0 +1,1074 @@
+import { useState } from 'react'
+import { Link } from '@tanstack/react-router'
+import {
+  AlertTriangle,
+  ArrowRightLeft,
+  CheckCircle2,
+  Download,
+  FileText,
+  History,
+  Loader2,
+  MessageSquareReply,
+  Pencil,
+  RotateCcw,
+  Send,
+  ShieldCheck,
+  Star,
+  Trash2,
+  XCircle,
+} from 'lucide-react'
+import { toast } from 'sonner'
+import { useAuthStore } from '@/stores/auth-store'
+import { getServerErrorMessage } from '@/lib/handle-server-error'
+import { useCanPerform } from '@/lib/permissions'
+import { cn } from '@/lib/utils'
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
+import { Switch } from '@/components/ui/switch'
+import { Textarea } from '@/components/ui/textarea'
+import { UserPicker } from '@/components/user-picker'
+import { useActivities } from '@/features/activities/hooks/use-activities'
+import { AttachmentPanel } from '@/features/attachments/components/attachment-panel'
+import { HistoryPanel } from '@/features/audit/components/audit-history-panel'
+import { CommentThread } from '@/features/comments/components/comment-thread'
+import { RecordPins } from '@/features/drawings/components/record-pins'
+import { LocationPicker } from '@/features/locations/components/location-picker'
+import {
+  downloadRfiPdf,
+  useAddRfiResponse,
+  useApproveRfi,
+  useCloseRfi,
+  useConvertRfiToChange,
+  useDeleteRfiResponse,
+  useRejectRfi,
+  useReopenRfi,
+  useRfi,
+  useSetOfficialRfiResponse,
+  useSubmitRfi,
+  useUpdateRfi,
+  useUpdateRfiPeople,
+  type RfiRecord,
+  type RfiUpgradeFields,
+} from '../hooks/use-doc-control'
+import { RfiPeopleList } from './rfi-people-list'
+
+const NONE = '__none'
+const STATUS_LABEL: Record<string, string> = {
+  draft: 'Draft',
+  open: 'Open',
+  answered: 'Answered',
+  closed: 'Closed',
+  archived: 'Archived',
+}
+
+const formatDate = (value?: string | null) =>
+  value ? new Date(value).toLocaleDateString() : '—'
+
+type EditDraft = {
+  subject: string
+  question: string
+  discipline: string
+  specSection: string
+  priority: RfiRecord['priority']
+  activityId: string
+  locationId: string | null
+  responseRequiredBy: string
+  dueDate: string
+  costImpact: boolean
+  costImpactAmount: string
+  scheduleImpactFlag: boolean
+  scheduleImpact: string
+}
+
+const draftFrom = (rfi: RfiRecord): EditDraft => ({
+  subject: rfi.subject,
+  question: rfi.question ?? '',
+  discipline: rfi.discipline ?? '',
+  specSection: rfi.specSection ?? '',
+  priority: rfi.priority,
+  activityId: rfi.activityId ?? '',
+  locationId: rfi.locationId ?? null,
+  responseRequiredBy: rfi.responseRequiredBy?.slice(0, 10) ?? '',
+  dueDate: rfi.dueDate?.slice(0, 10) ?? '',
+  costImpact: Boolean(rfi.costImpact),
+  costImpactAmount:
+    rfi.costImpactAmount != null ? String(rfi.costImpactAmount) : '',
+  scheduleImpactFlag: Boolean(rfi.scheduleImpactFlag),
+  scheduleImpact: rfi.scheduleImpact != null ? String(rfi.scheduleImpact) : '',
+})
+
+const payloadFrom = (draft: EditDraft): RfiUpgradeFields => ({
+  subject: draft.subject.trim(),
+  question: draft.question.trim() || null,
+  discipline: draft.discipline.trim() || null,
+  specSection: draft.specSection.trim() || null,
+  priority: draft.priority,
+  activityId: draft.activityId || null,
+  locationId: draft.locationId,
+  responseRequiredBy: draft.responseRequiredBy || null,
+  dueDate: draft.dueDate || null,
+  costImpact: draft.costImpact,
+  costImpactAmount:
+    draft.costImpact && draft.costImpactAmount.trim() !== ''
+      ? Number(draft.costImpactAmount)
+      : null,
+  scheduleImpactFlag: draft.scheduleImpactFlag,
+  scheduleImpact: draft.scheduleImpactFlag
+    ? Number(draft.scheduleImpact) || 0
+    : 0,
+})
+
+function Field({
+  label,
+  children,
+}: {
+  label: string
+  children: React.ReactNode
+}) {
+  return (
+    <div className='space-y-0.5'>
+      <p className='text-xs text-muted-foreground'>{label}</p>
+      <div className='text-sm'>{children}</div>
+    </div>
+  )
+}
+
+/**
+ * The RFI workspace: question, official answer, response thread, the
+ * people on it, references and impacts, with inline editing and every
+ * workflow action in one place.
+ */
+export function RfiDetailDialog({
+  projectId,
+  rfiId,
+  onOpenChange,
+}: {
+  projectId: string
+  rfiId: string | null
+  onOpenChange: (open: boolean) => void
+}) {
+  const currentUser = useAuthStore((state) => state.auth.user)
+  const { data: rfi, isLoading } = useRfi(projectId, rfiId)
+  const { data: activities } = useActivities(projectId)
+  const update = useUpdateRfi(projectId)
+  const updatePeople = useUpdateRfiPeople(projectId)
+  const addResponse = useAddRfiResponse(projectId)
+  const setOfficial = useSetOfficialRfiResponse(projectId)
+  const deleteResponse = useDeleteRfiResponse(projectId)
+  const submitRfi = useSubmitRfi(projectId)
+  const approveRfi = useApproveRfi(projectId)
+  const rejectRfi = useRejectRfi(projectId)
+  const closeRfi = useCloseRfi(projectId)
+  const reopenRfi = useReopenRfi(projectId)
+  const convert = useConvertRfiToChange(projectId)
+
+  const canUpdate = useCanPerform('rfi', 'update')
+  const canRespond = useCanPerform('rfi', 'submit')
+  const canSubmit = useCanPerform('rfi', 'submit', 'rfi.submit')
+  const canAnswer = useCanPerform('rfi', 'submit', 'rfi.answer')
+  const canApprove = useCanPerform('rfi', 'approve', 'rfi.approve')
+  const canReject = useCanPerform('rfi', 'approve', 'rfi.reject')
+  const canClose = useCanPerform('rfi', 'approve', 'rfi.close')
+  const canReopen = useCanPerform('rfi', 'approve', 'rfi.reopen')
+  const canExport = useCanPerform('rfi', 'export')
+  const canConvert = useCanPerform('change_order', 'create')
+
+  const [draft, setDraft] = useState<EditDraft | null>(null)
+  const [people, setPeople] = useState<{
+    managerUserId: string | null
+    assigneeUserIds: string[]
+    distributionUserIds: string[]
+  } | null>(null)
+  const [reply, setReply] = useState('')
+  const [decision, setDecision] = useState<
+    'close' | 'reopen' | 'reject' | null
+  >(null)
+  const [decisionText, setDecisionText] = useState('')
+  const [exporting, setExporting] = useState(false)
+
+  const busy =
+    update.isPending ||
+    updatePeople.isPending ||
+    addResponse.isPending ||
+    setOfficial.isPending ||
+    submitRfi.isPending ||
+    approveRfi.isPending ||
+    rejectRfi.isPending ||
+    closeRfi.isPending ||
+    reopenRfi.isPending ||
+    convert.isPending
+
+  const run = async (action: () => Promise<unknown>, success: string) => {
+    try {
+      await action()
+      toast.success(success)
+      setDecision(null)
+      setDecisionText('')
+    } catch (error) {
+      toast.error(getServerErrorMessage(error))
+    }
+  }
+
+  const status = rfi?.status ?? 'open'
+  const closed = status === 'closed' || (status as string) === 'archived'
+  const thread = (rfi?.responses ?? []).filter((row) => !row.isOfficial)
+
+  return (
+    <Dialog
+      open={Boolean(rfiId)}
+      onOpenChange={(next) => (next ? undefined : onOpenChange(false))}
+    >
+      <DialogContent
+        className='max-h-[92vh] overflow-y-auto sm:max-w-5xl'
+        data-testid='uat-rfi-detail'
+      >
+        {isLoading || !rfi ? (
+          <div className='flex items-center gap-2 py-8 text-sm text-muted-foreground'>
+            <Loader2 className='h-4 w-4 animate-spin' /> Loading RFI…
+          </div>
+        ) : (
+          <>
+            <DialogHeader>
+              <DialogTitle className='flex flex-wrap items-center gap-2'>
+                <span className='font-mono'>{rfi.ref}</span>
+                <span className='min-w-0 flex-1 truncate font-normal'>
+                  {rfi.subject}
+                </span>
+                <Badge
+                  variant={
+                    status === 'open'
+                      ? 'default'
+                      : status === 'answered'
+                        ? 'secondary'
+                        : 'outline'
+                  }
+                  data-testid='uat-rfi-status'
+                >
+                  {STATUS_LABEL[status] ?? status}
+                </Badge>
+                <Badge
+                  variant={
+                    rfi.priority === 'urgent' ? 'destructive' : 'outline'
+                  }
+                >
+                  {rfi.priority}
+                </Badge>
+                {(rfi.revision ?? 0) > 0 && (
+                  <Badge variant='outline'>rev {rfi.revision}</Badge>
+                )}
+                {rfi.isOverdue && (
+                  <Badge variant='destructive' className='gap-1'>
+                    <AlertTriangle className='h-3 w-3' /> Overdue
+                  </Badge>
+                )}
+              </DialogTitle>
+              <DialogDescription>
+                {rfi.ballInCourtUser
+                  ? `Ball in court: ${rfi.ballInCourtUser.name}`
+                  : closed
+                    ? 'Resolved'
+                    : 'Nobody is holding this RFI'}
+                {status === 'draft'
+                  ? ' · draft, visible to you and the manager only'
+                  : ''}
+                {rfi.changeOrderId ? ' · converted to a change event' : ''}
+              </DialogDescription>
+            </DialogHeader>
+
+            <div
+              className='flex flex-wrap items-center gap-2'
+              data-testid='uat-rfi-actions'
+            >
+              {(status === 'draft' || status === 'open') && canSubmit && (
+                <Button
+                  size='sm'
+                  disabled={busy}
+                  onClick={() =>
+                    run(
+                      () =>
+                        submitRfi.mutateAsync({
+                          rfiId: rfi.id,
+                          comment:
+                            status === 'draft'
+                              ? 'Draft opened'
+                              : 'Submitted for response',
+                        }),
+                      status === 'draft'
+                        ? `${rfi.ref} opened`
+                        : `${rfi.ref} submitted`
+                    )
+                  }
+                  data-testid='uat-rfi-submit'
+                >
+                  <Send className='mr-1.5 h-4 w-4' />{' '}
+                  {status === 'draft' ? 'Open RFI' : 'Submit'}
+                </Button>
+              )}
+              {status === 'answered' && canApprove && (
+                <Button
+                  size='sm'
+                  disabled={busy}
+                  onClick={() =>
+                    run(
+                      () =>
+                        approveRfi.mutateAsync({
+                          rfiId: rfi.id,
+                          comment: 'Answer accepted',
+                        }),
+                      `${rfi.ref} closed`
+                    )
+                  }
+                  data-testid='uat-rfi-approve'
+                >
+                  <CheckCircle2 className='mr-1.5 h-4 w-4' /> Accept answer
+                  &amp; close
+                </Button>
+              )}
+              {status === 'answered' && canReject && (
+                <Button
+                  size='sm'
+                  variant='outline'
+                  disabled={busy}
+                  onClick={() => setDecision('reject')}
+                >
+                  <XCircle className='mr-1.5 h-4 w-4' /> Not answered
+                </Button>
+              )}
+              {!closed && status !== 'draft' && canClose && (
+                <Button
+                  size='sm'
+                  variant='outline'
+                  disabled={busy}
+                  onClick={() => setDecision('close')}
+                  data-testid='uat-rfi-close'
+                >
+                  <ShieldCheck className='mr-1.5 h-4 w-4' /> Close
+                </Button>
+              )}
+              {status !== 'open' && status !== 'draft' && canReopen && (
+                <Button
+                  size='sm'
+                  variant='outline'
+                  disabled={busy}
+                  onClick={() => setDecision('reopen')}
+                  data-testid='uat-rfi-reopen'
+                >
+                  <RotateCcw className='mr-1.5 h-4 w-4' /> Reopen (new revision)
+                </Button>
+              )}
+              {canConvert && !rfi.changeOrderId && (
+                <Button
+                  size='sm'
+                  variant='outline'
+                  disabled={busy}
+                  onClick={() =>
+                    run(async () => {
+                      const result = await convert.mutateAsync({
+                        rfiId: rfi.id,
+                      })
+                      return result.changeOrder.ref
+                    }, 'Change event created')
+                  }
+                  data-testid='uat-rfi-convert'
+                >
+                  <ArrowRightLeft className='mr-1.5 h-4 w-4' /> Convert to
+                  change event
+                </Button>
+              )}
+              {rfi.changeOrderId && (
+                <Button asChild size='sm' variant='outline'>
+                  <Link
+                    to='/projects/$projectId/$module/$child'
+                    params={{
+                      projectId,
+                      module: 'commercial',
+                      child: 'change-orders',
+                    }}
+                    search={{ recordId: rfi.changeOrderId }}
+                    data-testid='uat-rfi-change-link'
+                  >
+                    <ArrowRightLeft className='mr-1.5 h-4 w-4' /> Open change
+                    event
+                  </Link>
+                </Button>
+              )}
+              {canExport && (
+                <Button
+                  size='sm'
+                  variant='outline'
+                  disabled={exporting}
+                  onClick={async () => {
+                    setExporting(true)
+                    try {
+                      toast.success(
+                        `Downloaded ${await downloadRfiPdf(projectId, rfi.id)}`
+                      )
+                    } catch (error) {
+                      toast.error(getServerErrorMessage(error))
+                    } finally {
+                      setExporting(false)
+                    }
+                  }}
+                  data-testid='uat-rfi-export'
+                >
+                  {exporting ? (
+                    <Loader2 className='mr-1.5 h-4 w-4 animate-spin' />
+                  ) : (
+                    <Download className='mr-1.5 h-4 w-4' />
+                  )}
+                  PDF
+                </Button>
+              )}
+              {canUpdate && !closed && !draft && (
+                <Button
+                  size='sm'
+                  variant='ghost'
+                  onClick={() => setDraft(draftFrom(rfi))}
+                  data-testid='uat-rfi-edit'
+                >
+                  <Pencil className='mr-1.5 h-4 w-4' /> Edit
+                </Button>
+              )}
+            </div>
+
+            {draft ? (
+              <div
+                className='space-y-3 rounded border p-3'
+                data-testid='uat-rfi-edit-form'
+              >
+                <div className='grid gap-3 sm:grid-cols-2'>
+                  <div className='space-y-1 sm:col-span-2'>
+                    <Label htmlFor='rfi-edit-subject'>Subject</Label>
+                    <Input
+                      id='rfi-edit-subject'
+                      value={draft.subject}
+                      onChange={(event) =>
+                        setDraft({ ...draft, subject: event.target.value })
+                      }
+                      maxLength={200}
+                    />
+                  </div>
+                  <div className='space-y-1 sm:col-span-2'>
+                    <Label htmlFor='rfi-edit-question'>Question</Label>
+                    <Textarea
+                      id='rfi-edit-question'
+                      value={draft.question}
+                      onChange={(event) =>
+                        setDraft({ ...draft, question: event.target.value })
+                      }
+                      rows={4}
+                    />
+                  </div>
+                  <div className='space-y-1'>
+                    <Label htmlFor='rfi-edit-discipline'>Discipline</Label>
+                    <Input
+                      id='rfi-edit-discipline'
+                      value={draft.discipline}
+                      onChange={(event) =>
+                        setDraft({ ...draft, discipline: event.target.value })
+                      }
+                      maxLength={120}
+                    />
+                  </div>
+                  <div className='space-y-1'>
+                    <Label htmlFor='rfi-edit-spec'>Spec section</Label>
+                    <Input
+                      id='rfi-edit-spec'
+                      value={draft.specSection}
+                      onChange={(event) =>
+                        setDraft({ ...draft, specSection: event.target.value })
+                      }
+                      maxLength={120}
+                    />
+                  </div>
+                  <div className='space-y-1'>
+                    <Label>Priority</Label>
+                    <Select
+                      value={draft.priority}
+                      onValueChange={(value) =>
+                        setDraft({
+                          ...draft,
+                          priority: value as RfiRecord['priority'],
+                        })
+                      }
+                    >
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {(['low', 'normal', 'high', 'urgent'] as const).map(
+                          (value) => (
+                            <SelectItem key={value} value={value}>
+                              {value}
+                            </SelectItem>
+                          )
+                        )}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className='space-y-1'>
+                    <Label>Activity</Label>
+                    <Select
+                      value={draft.activityId || NONE}
+                      onValueChange={(value) =>
+                        setDraft({
+                          ...draft,
+                          activityId: value === NONE ? '' : value,
+                        })
+                      }
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder='No activity' />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value={NONE}>No activity</SelectItem>
+                        {(activities ?? []).slice(0, 500).map((activity) => (
+                          <SelectItem key={activity.id} value={activity.id}>
+                            {activity.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className='space-y-1'>
+                    <Label>Location</Label>
+                    <LocationPicker
+                      projectId={projectId}
+                      value={draft.locationId}
+                      onChange={(locationId) =>
+                        setDraft({ ...draft, locationId })
+                      }
+                      allowRoot
+                      rootLabel='No location'
+                    />
+                  </div>
+                  <div className='space-y-1'>
+                    <Label htmlFor='rfi-edit-required'>
+                      Response required by
+                    </Label>
+                    <Input
+                      id='rfi-edit-required'
+                      type='date'
+                      value={draft.responseRequiredBy}
+                      onChange={(event) =>
+                        setDraft({
+                          ...draft,
+                          responseRequiredBy: event.target.value,
+                        })
+                      }
+                    />
+                  </div>
+                  <div className='space-y-1'>
+                    <Label htmlFor='rfi-edit-due'>Due</Label>
+                    <Input
+                      id='rfi-edit-due'
+                      type='date'
+                      value={draft.dueDate}
+                      onChange={(event) =>
+                        setDraft({ ...draft, dueDate: event.target.value })
+                      }
+                    />
+                  </div>
+                  <div className='space-y-2 rounded border p-3'>
+                    <label className='flex items-center gap-2 text-sm'>
+                      <Switch
+                        checked={draft.costImpact}
+                        onCheckedChange={(checked) =>
+                          setDraft({ ...draft, costImpact: checked })
+                        }
+                      />{' '}
+                      Cost impact
+                    </label>
+                    {draft.costImpact && (
+                      <Input
+                        type='number'
+                        min={0}
+                        step='0.01'
+                        value={draft.costImpactAmount}
+                        onChange={(event) =>
+                          setDraft({
+                            ...draft,
+                            costImpactAmount: event.target.value,
+                          })
+                        }
+                        placeholder='Amount'
+                        aria-label='Cost impact amount'
+                      />
+                    )}
+                  </div>
+                  <div className='space-y-2 rounded border p-3'>
+                    <label className='flex items-center gap-2 text-sm'>
+                      <Switch
+                        checked={draft.scheduleImpactFlag}
+                        onCheckedChange={(checked) =>
+                          setDraft({ ...draft, scheduleImpactFlag: checked })
+                        }
+                      />{' '}
+                      Schedule impact
+                    </label>
+                    {draft.scheduleImpactFlag && (
+                      <Input
+                        type='number'
+                        min={0}
+                        value={draft.scheduleImpact}
+                        onChange={(event) =>
+                          setDraft({
+                            ...draft,
+                            scheduleImpact: event.target.value,
+                          })
+                        }
+                        placeholder='Days'
+                        aria-label='Schedule impact days'
+                      />
+                    )}
+                  </div>
+                </div>
+                <div className='flex justify-end gap-2'>
+                  <Button variant='ghost' onClick={() => setDraft(null)}>
+                    Cancel
+                  </Button>
+                  <Button
+                    disabled={busy || !draft.subject.trim()}
+                    onClick={() =>
+                      run(async () => {
+                        await update.mutateAsync({
+                          rfiId: rfi.id,
+                          payload: {
+                            ...payloadFrom(draft),
+                            comment: 'Details updated',
+                          },
+                        })
+                        setDraft(null)
+                      }, `${rfi.ref} updated`)
+                    }
+                    data-testid='uat-rfi-save'
+                  >
+                    Save
+                  </Button>
+                </div>
+              </div>
+            ) : (
+              <div className='grid gap-3 rounded border p-3 sm:grid-cols-2 lg:grid-cols-4'>
+                <Field label='Discipline'>{rfi.discipline ?? '—'}</Field>
+                <Field label='Spec section'>{rfi.specSection ?? '—'}</Field>
+                <Field label='Activity'>{rfi.activity?.name ?? '—'}</Field>
+                <Field label='Location'>{rfi.location?.name ?? '—'}</Field>
+                <Field label='Response required by'>
+                  <span className={cn(rfi.isOverdue && 'text-destructive')}>
+                    {formatDate(rfi.responseRequiredBy)}
+                  </span>
+                </Field>
+                <Field label='Due'>{formatDate(rfi.dueDate)}</Field>
+                <Field label='Cost impact'>
+                  {rfi.costImpact
+                    ? `Yes${rfi.costImpactAmount != null ? ` · ${rfi.costImpactAmount.toLocaleString()}` : ''}`
+                    : 'No'}
+                </Field>
+                <Field label='Schedule impact'>
+                  {rfi.scheduleImpactFlag
+                    ? `Yes · ${rfi.scheduleImpact ?? 0} day${(rfi.scheduleImpact ?? 0) === 1 ? '' : 's'}`
+                    : 'No'}
+                </Field>
+              </div>
+            )}
+
+            <section
+              className='space-y-2 rounded border p-3'
+              data-testid='uat-rfi-people'
+            >
+              <div className='flex items-center justify-between'>
+                <h4 className='text-sm font-semibold'>People</h4>
+                {canUpdate && !closed && !people && (
+                  <Button
+                    size='sm'
+                    variant='ghost'
+                    onClick={() =>
+                      setPeople({
+                        managerUserId: rfi.managerUserId ?? null,
+                        assigneeUserIds: (rfi.assignees ?? []).map(
+                          (row) => row.userId
+                        ),
+                        distributionUserIds: (rfi.distribution ?? []).map(
+                          (row) => row.userId
+                        ),
+                      })
+                    }
+                    data-testid='uat-rfi-people-edit'
+                  >
+                    <Pencil className='mr-1.5 h-4 w-4' /> Change
+                  </Button>
+                )}
+              </div>
+              {people ? (
+                <div className='grid gap-3 sm:grid-cols-3'>
+                  <div className='space-y-1'>
+                    <Label>Manager</Label>
+                    <UserPicker
+                      projectId={projectId}
+                      value={people.managerUserId}
+                      onChange={(managerUserId) =>
+                        setPeople({ ...people, managerUserId })
+                      }
+                      placeholder='Manager'
+                    />
+                  </div>
+                  <RfiPeopleList
+                    projectId={projectId}
+                    label='Assignees'
+                    value={people.assigneeUserIds}
+                    onChange={(assigneeUserIds) =>
+                      setPeople({ ...people, assigneeUserIds })
+                    }
+                  />
+                  <RfiPeopleList
+                    projectId={projectId}
+                    label='Distribution'
+                    value={people.distributionUserIds}
+                    onChange={(distributionUserIds) =>
+                      setPeople({ ...people, distributionUserIds })
+                    }
+                  />
+                  <div className='flex justify-end gap-2 sm:col-span-3'>
+                    <Button variant='ghost' onClick={() => setPeople(null)}>
+                      Cancel
+                    </Button>
+                    <Button
+                      disabled={busy}
+                      onClick={() =>
+                        run(async () => {
+                          await updatePeople.mutateAsync({
+                            rfiId: rfi.id,
+                            ...people,
+                          })
+                          setPeople(null)
+                        }, 'People updated')
+                      }
+                      data-testid='uat-rfi-people-save'
+                    >
+                      Save people
+                    </Button>
+                  </div>
+                </div>
+              ) : (
+                <div className='grid gap-3 sm:grid-cols-3'>
+                  <Field label='Manager'>{rfi.manager?.name ?? '—'}</Field>
+                  <Field label='Assignees'>
+                    {(rfi.assignees ?? []).map((row) => row.name).join(', ') ||
+                      rfi.assigneeUser?.name ||
+                      '—'}
+                  </Field>
+                  <Field label='Distribution'>
+                    {(rfi.distribution ?? [])
+                      .map((row) => row.name)
+                      .join(', ') || '—'}
+                  </Field>
+                </div>
+              )}
+            </section>
+
+            <section className='space-y-2'>
+              <h4 className='text-sm font-semibold'>Question</h4>
+              <p className='rounded border p-3 text-sm whitespace-pre-wrap'>
+                {rfi.question || '—'}
+              </p>
+            </section>
+
+            <section className='space-y-2' data-testid='uat-rfi-official'>
+              <h4 className='flex items-center gap-2 text-sm font-semibold'>
+                <Star className='h-4 w-4 text-amber-500' /> Official response
+              </h4>
+              {rfi.officialResponse ? (
+                <div className='rounded border border-amber-500/50 bg-amber-50/50 p-3 text-sm dark:bg-amber-950/20'>
+                  <p className='whitespace-pre-wrap'>
+                    {rfi.officialResponse.body}
+                  </p>
+                  <p className='mt-1 text-xs text-muted-foreground'>
+                    {rfi.officialResponse.author?.name ?? rfi.answeredBy ?? '—'}{' '}
+                    ·{' '}
+                    {new Date(rfi.officialResponse.createdAt).toLocaleString()}{' '}
+                    · rev {rfi.officialResponse.revision}
+                  </p>
+                </div>
+              ) : rfi.response ? (
+                <p className='rounded border p-3 text-sm whitespace-pre-wrap'>
+                  {rfi.response}
+                </p>
+              ) : (
+                <p className='text-sm text-muted-foreground'>
+                  Not answered yet.
+                </p>
+              )}
+            </section>
+
+            <section className='space-y-2' data-testid='uat-rfi-thread'>
+              <h4 className='flex items-center gap-2 text-sm font-semibold'>
+                <MessageSquareReply className='h-4 w-4' /> Responses
+              </h4>
+              {thread.length === 0 ? (
+                <p className='text-sm text-muted-foreground'>
+                  No discussion yet.
+                </p>
+              ) : (
+                <ul className='space-y-2'>
+                  {thread.map((row) => (
+                    <li
+                      key={row.id}
+                      className='rounded border p-3 text-sm'
+                      data-testid='uat-rfi-response'
+                    >
+                      <p className='whitespace-pre-wrap'>{row.body}</p>
+                      <div className='mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground'>
+                        <span>
+                          {row.author?.name ?? '—'} ·{' '}
+                          {new Date(row.createdAt).toLocaleString()}
+                          {row.revision !== (rfi.revision ?? 0)
+                            ? ` · rev ${row.revision}`
+                            : ''}
+                        </span>
+                        {canAnswer && !closed && (
+                          <Button
+                            size='sm'
+                            variant='ghost'
+                            className='h-6 px-2 text-xs'
+                            disabled={busy}
+                            onClick={() =>
+                              run(
+                                () =>
+                                  setOfficial.mutateAsync({
+                                    rfiId: rfi.id,
+                                    responseId: row.id,
+                                  }),
+                                'Marked as the official response'
+                              )
+                            }
+                            data-testid='uat-rfi-make-official'
+                          >
+                            <Star className='mr-1 h-3 w-3' /> Make official
+                          </Button>
+                        )}
+                        {(row.authorId === currentUser?.id ||
+                          currentUser?.role === 'pm') && (
+                          <Button
+                            size='sm'
+                            variant='ghost'
+                            className='h-6 px-2 text-xs text-destructive'
+                            disabled={busy}
+                            onClick={() =>
+                              run(
+                                () =>
+                                  deleteResponse.mutateAsync({
+                                    rfiId: rfi.id,
+                                    responseId: row.id,
+                                  }),
+                                'Response removed'
+                              )
+                            }
+                          >
+                            <Trash2 className='mr-1 h-3 w-3' /> Remove
+                          </Button>
+                        )}
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {canRespond && !closed && (
+                <div className='space-y-2'>
+                  <Textarea
+                    value={reply}
+                    onChange={(event) => setReply(event.target.value)}
+                    rows={3}
+                    placeholder={
+                      canAnswer
+                        ? 'Write a reply, or the official answer'
+                        : 'Write a reply'
+                    }
+                    data-testid='uat-rfi-reply'
+                  />
+                  <div className='flex flex-wrap gap-2'>
+                    <Button
+                      size='sm'
+                      variant='outline'
+                      disabled={busy || !reply.trim()}
+                      onClick={() =>
+                        run(async () => {
+                          await addResponse.mutateAsync({
+                            rfiId: rfi.id,
+                            body: reply.trim(),
+                            isOfficial: false,
+                          })
+                          setReply('')
+                        }, 'Reply added')
+                      }
+                      data-testid='uat-rfi-reply-submit'
+                    >
+                      Reply
+                    </Button>
+                    {canAnswer && status !== 'draft' && (
+                      <Button
+                        size='sm'
+                        disabled={busy || !reply.trim()}
+                        onClick={() =>
+                          run(async () => {
+                            await addResponse.mutateAsync({
+                              rfiId: rfi.id,
+                              body: reply.trim(),
+                              isOfficial: true,
+                            })
+                            setReply('')
+                          }, `${rfi.ref} answered`)
+                        }
+                        data-testid='uat-rfi-answer-official'
+                      >
+                        <Star className='mr-1.5 h-4 w-4' /> Answer officially
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              )}
+            </section>
+
+            <RecordPins
+              projectId={projectId}
+              recordType='rfi'
+              recordId={rfi.id}
+            />
+
+            <div className='grid gap-4 lg:grid-cols-2'>
+              <section className='space-y-2'>
+                <h4 className='flex items-center gap-2 text-sm font-semibold'>
+                  <FileText className='h-4 w-4' /> Attachments
+                </h4>
+                <AttachmentPanel
+                  projectId={projectId}
+                  recordType='rfi'
+                  recordId={rfi.id}
+                  compact
+                />
+              </section>
+              <section className='space-y-2'>
+                <h4 className='flex items-center gap-2 text-sm font-semibold'>
+                  <History className='h-4 w-4' /> History
+                </h4>
+                <HistoryPanel
+                  projectId={projectId}
+                  entityType='rfi'
+                  entityId={rfi.id}
+                  title={`${rfi.ref} History`}
+                  limit={30}
+                  showFilters={false}
+                />
+              </section>
+              <div className='lg:col-span-2'>
+                <CommentThread
+                  projectId={projectId}
+                  recordType='rfi'
+                  recordId={rfi.id}
+                  title='Internal notes'
+                />
+              </div>
+            </div>
+          </>
+        )}
+      </DialogContent>
+
+      {decision && rfi && (
+        <Dialog
+          open
+          onOpenChange={(next) => (next ? undefined : setDecision(null))}
+        >
+          <DialogContent data-testid='uat-rfi-decision'>
+            <DialogHeader>
+              <DialogTitle>
+                {decision === 'close'
+                  ? 'Close RFI'
+                  : decision === 'reopen'
+                    ? 'Reopen RFI'
+                    : 'Send back for a better answer'}
+              </DialogTitle>
+              <DialogDescription>
+                {decision === 'reopen'
+                  ? 'Reopening starts a new revision: the official answer is cleared and the assignees are asked again.'
+                  : decision === 'close'
+                    ? 'A closing comment is recorded in the history.'
+                    : 'Say what is missing; the RFI goes back to open.'}
+              </DialogDescription>
+            </DialogHeader>
+            <div className='space-y-1'>
+              <Label htmlFor='rfi-decision-text'>
+                {decision === 'close' ? 'Comment' : 'Reason'}
+              </Label>
+              <Textarea
+                id='rfi-decision-text'
+                value={decisionText}
+                onChange={(event) => setDecisionText(event.target.value)}
+                rows={3}
+                autoFocus
+              />
+            </div>
+            <DialogFooter>
+              <Button variant='ghost' onClick={() => setDecision(null)}>
+                Cancel
+              </Button>
+              <Button
+                disabled={!decisionText.trim() || busy}
+                onClick={() =>
+                  decision === 'close'
+                    ? run(
+                        () =>
+                          closeRfi.mutateAsync({
+                            rfiId: rfi.id,
+                            comment: decisionText.trim(),
+                          }),
+                        `${rfi.ref} closed`
+                      )
+                    : decision === 'reopen'
+                      ? run(
+                          () =>
+                            reopenRfi.mutateAsync({
+                              rfiId: rfi.id,
+                              reason: decisionText.trim(),
+                            }),
+                          `${rfi.ref} reopened`
+                        )
+                      : run(
+                          () =>
+                            rejectRfi.mutateAsync({
+                              rfiId: rfi.id,
+                              reason: decisionText.trim(),
+                            }),
+                          `${rfi.ref} sent back`
+                        )
+                }
+                data-testid='uat-rfi-decision-submit'
+              >
+                {decision === 'close'
+                  ? 'Close'
+                  : decision === 'reopen'
+                    ? 'Reopen'
+                    : 'Send back'}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
+    </Dialog>
+  )
+}
