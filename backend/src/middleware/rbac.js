@@ -50,6 +50,8 @@ const isCompanyAdmin = (req) => Boolean(req.user?.isCompanyAdmin);
 const hasPermission = (req, moduleName, action, options = {}) => {
   const { transition = null } = options;
   if (!req?.user) return false;
+  // An API key never exceeds its scopes, whatever its owner may do.
+  if (req.apiClient && !require('../services/api-client.service').scopeAllows(req.apiClient, moduleName, action)) return false;
   if (isCompanyAdmin(req) && COMPANY_ADMIN_MODULES.has(moduleName)) return true;
 
   const decided = templateDecision(req, moduleName, action, transition);
@@ -121,6 +123,11 @@ const requireCompanyAdmin = (req, res, next) => {
   if (!req.user) {
     return next(
       new HttpError(401, 'AUTH_REQUIRED', 'Authentication is required'),
+    );
+  }
+  if (req.apiClient) {
+    return next(
+      new HttpError(403, 'API_KEY_FORBIDDEN', 'API keys cannot administer the company'),
     );
   }
   if (isCompanyAdmin(req) || getEffectiveRole(req) === 'pm') {

@@ -28,6 +28,9 @@ const JOB_TYPES = Object.freeze({
   DAILY_LOG_WEATHER: "daily_log.weather",
   DAILY_LOG_DISTRIBUTE: "daily_log.distribute",
   PORTFOLIO_REFRESH: "portfolio.refresh",
+  WEBHOOK_DELIVER: "webhook.deliver",
+  ACCOUNTING_SYNC: "accounting.sync",
+  ACCOUNTING_POLL: "accounting.poll",
 });
 
 const JOB_STATUSES = Object.freeze({

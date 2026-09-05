@@ -37,6 +37,8 @@ startDailyLogScheduler();
 startReportScheduler();
 // Workflow SLA escalation (OCTA-PLAT-WF-024).
 startWorkflowScheduler();
+require('./services/webhook.service').registerWebhookSubscriber();
+require('./jobs/accounting-scheduler').startAccountingScheduler();
 // Durable job worker (BOQ AI, schedule generation). Set JOB_WORKER_ENABLED=false
 // on API instances when running dedicated workers via `npm run worker`.
 startJobWorker();

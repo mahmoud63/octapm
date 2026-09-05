@@ -631,7 +631,8 @@
         "sub_pay_app.approve": ["pm"],
         "sub_pay_app.reject": ["pm", "qs"],
         "sub_pay_app.pay": ["pm", "finance"],
-        "sub_pay_app.void": ["pm"]
+        "sub_pay_app.void": ["pm"],
+        "sub_pay_app.accounting_sync": ["pm", "finance"]
       }
     },
     "ncr": {

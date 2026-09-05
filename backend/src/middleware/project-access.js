@@ -16,6 +16,9 @@ const requireProjectAccess = (paramName = 'projectId') => {
       }
 
       const projectId = req.params[paramName];
+      if (req.apiClient?.projectIds?.length && !req.apiClient.projectIds.includes(projectId)) {
+        return next(new HttpError(403, 'API_KEY_PROJECT', 'This API key is limited to other projects'));
+      }
       const access = await assertProjectAccess({
         orgId: req.user.orgId,
         projectId,

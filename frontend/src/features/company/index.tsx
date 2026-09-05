@@ -5,6 +5,7 @@ import {
   FolderKanban,
   GitBranch,
   Hash,
+  Plug,
   ShieldCheck,
   SlidersHorizontal,
   Store,
@@ -57,6 +58,11 @@ const navItems = [
     title: 'Custom fields',
     href: '/company/custom-fields',
     icon: <SlidersHorizontal size={18} />,
+  },
+  {
+    title: 'Integrations',
+    href: '/company/integrations',
+    icon: <Plug size={18} />,
   },
   {
     title: 'Permissions',

@@ -101,6 +101,7 @@ const createApp = () => {
   app.use("/api/v1/reports", reportBuilderRoutes);
   app.use("/api/v1/portfolio", portfolioRoutes);
   app.use("/api/v1/workflows", workflowInboxRoutes);
+  app.use("/api/v1/integrations", require("./routes/integrations"));
 
   app.use(notFoundHandler);
   app.use(errorHandler);

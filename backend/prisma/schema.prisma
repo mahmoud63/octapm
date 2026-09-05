@@ -69,6 +69,12 @@ model Organisation {
   projectFieldsets    ProjectFieldset[]
   recordTypeDefinitions RecordTypeDefinition[]
   customFieldValues   CustomFieldValue[]
+  apiClients          ApiClient[]
+  webhookSubscriptions WebhookSubscription[]
+  webhookDeliveries   WebhookDelivery[]
+  accountingConnections AccountingConnection[]
+  accountingCodeMappings AccountingCodeMapping[]
+  accountingSyncs     AccountingSync[]
   subPayAppLines      SubPayAppLine[]
   subPayAppPayments   SubPayAppPayment[]
   companyEquipment    CompanyEquipment[]
@@ -219,6 +225,7 @@ model User {
   correspondenceAssignee  Correspondence[]    @relation("CorrespondenceAssigneeUser")
   correspondenceBallInCourt Correspondence[]  @relation("CorrespondenceBallInCourtUser")
 
+  apiClients   ApiClient[]
   @@index([orgId])
   @@index([email])
 }
@@ -421,6 +428,8 @@ model Project {
   customFieldDefinitions        CustomFieldDefinition[]
   projectFieldsets              ProjectFieldset[]
   customFieldValues             CustomFieldValue[]
+  webhookSubscriptions          WebhookSubscription[]
+  accountingSyncs               AccountingSync[]
   subPayAppLines                SubPayAppLine[]
   subPayAppPayments             SubPayAppPayment[]
   activityCostLoadings          ActivityCostLoading[]
@@ -5873,4 +5882,151 @@ model CustomFieldValue {
   @@index([projectId, recordType])
   @@index([orgId, recordType, recordId])
   @@index([valueJson(ops: JsonbPathOps)], type: Gin)
+}
+
+// ─── Public API keys, webhooks and accounting connectors (OCTA-INT-API-026) ─
+
+model ApiClient {
+  id          String    @id @default(uuid())
+  orgId       String
+  userId      String // the key acts as this person, limited by scopes
+  name        String
+  description String?
+  keyPrefix   String
+  keyHash     String    @unique
+  scopes      String[]  @default([])
+  projectIds  String[]  @default([]) // empty = every project the owner can open
+  status      String    @default("active") // active, revoked
+  lastUsedAt  DateTime?
+  expiresAt   DateTime?
+  createdBy   String?
+  revokedAt   DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  organisation Organisation @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([orgId, status])
+  @@index([userId])
+}
+
+model WebhookSubscription {
+  id             String    @id @default(uuid())
+  orgId          String
+  projectId      String?
+  name           String
+  description    String?
+  url            String
+  secret         String
+  eventTypes     String[]  @default([]) // patterns: *, record.changed, rfi.*, rfi.status_changed
+  status         String    @default("active") // active, paused, disabled
+  failureCount   Int       @default(0)
+  lastDeliveryAt DateTime?
+  lastStatus     String?
+  lastError      String?
+  createdBy      String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  organisation Organisation      @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  project      Project?          @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  deliveries   WebhookDelivery[]
+
+  @@index([orgId, status])
+  @@index([projectId])
+}
+
+model WebhookDelivery {
+  id             String    @id @default(uuid())
+  orgId          String
+  subscriptionId String
+  eventId        String
+  eventType      String
+  attempt        Int       @default(0)
+  status         String    @default("pending") // pending, delivered, failed, dead
+  responseStatus Int?
+  responseBody   String?
+  error          String?
+  durationMs     Int?
+  jobId          String?
+  nextAttemptAt  DateTime?
+  deliveredAt    DateTime?
+  payloadJson    Json      @default("{}")
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  organisation Organisation        @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  subscription WebhookSubscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+
+  @@index([subscriptionId, createdAt])
+  @@index([orgId, status])
+  @@index([eventId])
+}
+
+model AccountingConnection {
+  id              String    @id @default(uuid())
+  orgId           String
+  provider        String // qbo, xero
+  status          String    @default("pending") // pending, connected, disconnected, error
+  externalOrgId   String? // QBO realm id / Xero tenant id
+  externalOrgName String?
+  credentialsJson String? // encrypted token bundle (utils/secret-box)
+  autoSyncPayApps Boolean   @default(true)
+  connectedBy     String?
+  connectedAt     DateTime?
+  lastSyncAt      DateTime?
+  lastError       String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  organisation Organisation @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@unique([orgId, provider])
+}
+
+model AccountingCodeMapping {
+  id                  String   @id @default(uuid())
+  orgId               String
+  provider            String
+  costCode            String
+  costCodeId          String?
+  externalAccountId   String?
+  externalAccountName String?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  organisation Organisation @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@unique([orgId, provider, costCode])
+}
+
+model AccountingSync {
+  id               String    @id @default(uuid())
+  orgId            String
+  projectId        String
+  provider         String
+  recordType       String // sub_pay_app
+  recordId         String
+  externalId       String?
+  externalRef      String?
+  externalVendorId String?
+  status           String    @default("pending") // pending, synced, paid, failed
+  amount           Decimal   @default(0) @db.Decimal(18, 2)
+  currency         String?
+  attempts         Int       @default(0)
+  lastError        String?
+  syncedAt         DateTime?
+  paidAt           DateTime?
+  paidAmount       Decimal?  @db.Decimal(18, 2)
+  requestedBy      String?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  organisation Organisation @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  project      Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, recordType, recordId])
+  @@index([orgId, status])
+  @@index([projectId, recordType])
 }

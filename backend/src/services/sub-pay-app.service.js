@@ -522,7 +522,7 @@ const reviewPayApp = ({ orgId, projectId, payAppId, actor, note }) =>
   transition({ orgId, projectId, payAppId, to: STATUS.UNDER_REVIEW, actor, extra: { reviewNote: trimOrNull(note)?.slice(0, 2000) || null } });
 
 /** Approval: compliance gate (insurance on the commitment, waiver when required) and the over-claim check. */
-const approvePayApp = ({ orgId, projectId, payAppId, actor, complianceOverrideReason = null, overClaimOverrideReason = null, viaWorkflow = false }) =>
+const approvePayAppCore = ({ orgId, projectId, payAppId, actor, complianceOverrideReason = null, overClaimOverrideReason = null, viaWorkflow = false }) =>
   transition({
     orgId,
     projectId,
@@ -544,6 +544,15 @@ const approvePayApp = ({ orgId, projectId, payAppId, actor, complianceOverrideRe
       }
     },
   });
+
+/** Approval, then (fire-and-forget) the accounting connectors that auto-sync approved applications (OCTA-INT-API-026). */
+const approvePayApp = async (args) => {
+  const result = await approvePayAppCore(args);
+  require("./accounting.service")
+    .maybeQueueOnApproval({ orgId: args.orgId, projectId: args.projectId, payAppId: args.payAppId, actor: args.actor || null })
+    .catch((error) => console.warn("[sub-pay-app] accounting auto-sync failed", error?.message || error));
+  return result;
+};
 
 const rejectPayApp = async ({ orgId, projectId, payAppId, actor, code, reason, viaWorkflow = false }) => {
   const rejectionCode = REJECTION_CODES.includes(code) ? code : "OTHER";

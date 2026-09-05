@@ -1,5 +1,7 @@
 import { useMemo, useState } from 'react'
-import { Eye, Plus } from 'lucide-react'
+import { Download, Eye, Plus } from 'lucide-react'
+import { toast } from 'sonner'
+import { getServerErrorMessage } from '@/lib/handle-server-error'
 import { useCanPerform } from '@/lib/permissions'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -11,6 +13,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { AuditHistoryPanel } from '@/features/audit/components/audit-history-panel'
+import { downloadAccountingExport } from '@/features/integrations/hooks/use-integrations'
 import { useProject } from '@/features/projects/hooks/use-projects'
 import {
   PAY_APP_STATUS_LABEL,
@@ -50,6 +53,7 @@ export function PayAppsPanel({
   )
   const formatMoney = (value: number) => formatter.format(Number(value) || 0)
   const canCreate = useCanPerform('sub_pay_app', 'create')
+  const canExport = useCanPerform('sub_pay_app', 'export')
   const [status, setStatus] = useState<PayAppStatus | 'all'>('all')
   const { data, isLoading } = usePayApps(projectId, { status })
   const [createOpen, setCreateOpen] = useState(false)
@@ -102,10 +106,25 @@ export function PayAppsPanel({
             Retention held {formatMoney(summary.retentionHeld)}
           </span>
         ) : null}
+        {canExport && (
+          <Button
+            size='sm'
+            variant='outline'
+            className={canCreate ? 'ml-auto' : 'ml-auto'}
+            data-testid='uat-payapp-accounting-export'
+            onClick={() =>
+              downloadAccountingExport({ projectId, format: 'xlsx' }).catch(
+                (error) => toast.error(getServerErrorMessage(error))
+              )
+            }
+          >
+            <Download className='mr-1 h-4 w-4' /> Export for accounting
+          </Button>
+        )}
         {canCreate && (
           <Button
             size='sm'
-            className='ml-auto'
+            className={canExport ? '' : 'ml-auto'}
             data-testid='uat-payapp-new'
             onClick={() => {
               setNonce((n) => n + 1)

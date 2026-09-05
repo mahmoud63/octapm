@@ -34,6 +34,15 @@ const registerAllHandlers = () => {
   registerJobHandler(JOB_TYPES.PORTFOLIO_REFRESH, (context) =>
     require("../../services/portfolio.service").runPortfolioRefreshJob(context),
   );
+  registerJobHandler(JOB_TYPES.WEBHOOK_DELIVER, (context) =>
+    require("../../services/webhook.service").runDeliveryJob(context),
+  );
+  registerJobHandler(JOB_TYPES.ACCOUNTING_SYNC, (context) =>
+    require("../../services/accounting.service").runSyncJob(context),
+  );
+  registerJobHandler(JOB_TYPES.ACCOUNTING_POLL, (context) =>
+    require("../../services/accounting.service").runPollJob(context),
+  );
 };
 
 module.exports = { registerAllHandlers };

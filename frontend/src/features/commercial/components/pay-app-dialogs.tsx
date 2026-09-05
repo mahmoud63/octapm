@@ -38,6 +38,7 @@ import { AttachmentPanel } from '@/features/attachments/components/attachment-pa
 import { HistoryPanel } from '@/features/audit/components/audit-history-panel'
 import { CommentThread } from '@/features/comments/components/comment-thread'
 import { CustomFieldsPanel } from '@/features/custom-fields/components/custom-fields-panel'
+import { PayAppAccounting } from '@/features/integrations/components/pay-app-accounting'
 import { WorkflowInstancePanel } from '@/features/workflows/components/workflow-instance-panel'
 import { useCommitments } from '../hooks/use-commitments'
 import {
@@ -988,6 +989,11 @@ export function PayAppDetailDialog({
                   projectId={projectId}
                   tool='sub_pay_app'
                   recordId={payApp.id}
+                />
+                <PayAppAccounting
+                  projectId={projectId}
+                  payAppId={payApp.id}
+                  status={payApp.status}
                 />
                 <CustomFieldsPanel
                   projectId={projectId}

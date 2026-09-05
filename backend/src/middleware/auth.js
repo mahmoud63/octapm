@@ -1,5 +1,6 @@
 const { verifyAccessToken } = require('../utils/tokens');
 const { HttpError } = require('../utils/http-error');
+const { API_KEY_PREFIX, authenticateApiKey } = require('../services/api-client.service');
 
 const parseBearerToken = (authorizationHeader) => {
   if (!authorizationHeader) {
@@ -25,6 +26,17 @@ const authenticate = (req, res, next) => {
           'Missing or invalid Authorization header',
         ),
       );
+    }
+
+    // Public API keys (OCTA-INT-API-026) act as their owner, limited by scopes.
+    if (token.startsWith(API_KEY_PREFIX)) {
+      return authenticateApiKey(token)
+        .then(({ user, apiClient }) => {
+          req.user = user;
+          req.apiClient = apiClient;
+          return next();
+        })
+        .catch(next);
     }
 
     const payload = verifyAccessToken(token);
