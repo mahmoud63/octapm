@@ -1,0 +1,72 @@
+/**
+ * Where each record type lives in the project workspace
+ * (`/projects/:id/:module[/:child]`, OCTA-FE-ROUTES-008). Used to build
+ * notification and comment links that open the right module with the record
+ * pre-selected (`?recordId=`). Keep in sync with
+ * frontend/src/features/projects/lib/project-modules.ts.
+ */
+const RECORD_WORKSPACE = Object.freeze({
+  risk: { module: "schedule", child: "risks" },
+  activity: { module: "activities" },
+  progress_submission: { module: "schedule", child: "progress" },
+  daily_report: { module: "site-reporting" },
+  site_diary: { module: "site-reporting" },
+  ncr: { module: "quality", child: "ncr" },
+  itp: { module: "quality", child: "itp" },
+  defect: { module: "quality", child: "defects" },
+  material_test: { module: "quality", child: "tests" },
+  safety_incident: { module: "quality", child: "safety" },
+  rfi: { module: "doc-control", child: "rfi" },
+  submittal: { module: "doc-control", child: "submittals" },
+  drawing: { module: "doc-control", child: "drawings" },
+  transmittal: { module: "doc-control", child: "transmittals" },
+  correspondence: { module: "doc-control", child: "correspondence" },
+  document: { module: "doc-control", child: "drawings" },
+  document_revision: { module: "doc-control", child: "drawings" },
+  change_order: { module: "commercial", child: "change-orders" },
+  ipc: { module: "commercial", child: "ipc" },
+  ipc_certificate: { module: "commercial", child: "ipc" },
+  ipc_item: { module: "commercial", child: "ipc" },
+  sub_valuation: { module: "commercial", child: "sub-valuations" },
+  eot: { module: "commercial", child: "eot" },
+  eot_claim: { module: "commercial", child: "eot" },
+  weather_delay: { module: "commercial", child: "weather" },
+  meeting: { module: "meetings" },
+  meeting_action: { module: "meetings" },
+  procurement_order: { module: "schedule", child: "longLead" },
+  procurement_package: { module: "schedule", child: "longLead" },
+  delivery_receipt: { module: "schedule", child: "longLead" },
+  cost_record: { module: "cost", child: "activity" },
+  burn_rate_entry: { module: "cost", child: "burn" },
+  boq_item: { module: "boq" },
+  boq_revision: { module: "boq" },
+  schedule_revision: { module: "schedule", child: "revisions" },
+  equipment: { module: "equipment" },
+  location: { module: "locations" },
+  photo: { module: "photos" },
+  project: { module: "overview" },
+  task: { path: "/tasks" },
+});
+
+const encode = (value) => encodeURIComponent(String(value));
+
+/**
+ * Absolute app path for a record. Unknown record types open the project root
+ * so a link is never broken, only less precise.
+ */
+const recordWorkspacePath = ({ projectId, recordType, recordId = null }) => {
+  if (!projectId) return null;
+  const target = RECORD_WORKSPACE[recordType];
+  if (target?.path) {
+    return recordId ? `${target.path}?recordId=${encode(recordId)}` : target.path;
+  }
+  const base = target
+    ? `/projects/${encode(projectId)}/${target.module}${target.child ? `/${target.child}` : ""}`
+    : `/projects/${encode(projectId)}`;
+  return recordId ? `${base}?recordId=${encode(recordId)}` : base;
+};
+
+module.exports = {
+  RECORD_WORKSPACE,
+  recordWorkspacePath,
+};

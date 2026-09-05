@@ -3,6 +3,8 @@ import { apiClient } from '@/services/api/client'
 
 export type NotificationCategory =
   | 'assignment'
+  | 'mention'
+  | 'comment'
   | 'due'
   | 'overdue'
   | 'approval'
@@ -60,6 +62,8 @@ export interface NotificationPreference {
 
 export const notificationCategories: NotificationCategory[] = [
   'assignment',
+  'mention',
+  'comment',
   'due',
   'overdue',
   'approval',

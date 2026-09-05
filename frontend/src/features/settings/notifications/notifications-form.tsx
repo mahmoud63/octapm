@@ -33,6 +33,8 @@ const categorySchema = z.object({
 const notificationsFormSchema = z.object({
   dueSoonDays: z.number().int().min(1).max(30),
   assignment: categorySchema,
+  mention: categorySchema,
+  comment: categorySchema,
   due: categorySchema,
   overdue: categorySchema,
   approval: categorySchema,
@@ -55,6 +57,17 @@ const categoryCopy: Array<{
     category: 'assignment',
     label: 'Assignments',
     description: 'Owner, reviewer, approver, and task assignment changes.',
+  },
+  {
+    category: 'mention',
+    label: 'Mentions',
+    description: 'Someone @mentioned you in a comment.',
+  },
+  {
+    category: 'comment',
+    label: 'Comments',
+    description:
+      'New comments on records you follow (records you created, commented on, were mentioned on, or are assigned to).',
   },
   {
     category: 'due',
@@ -106,6 +119,8 @@ const defaultCategory = {
 const buildDefaultValues = (): NotificationsFormValues => ({
   dueSoonDays: 3,
   assignment: { ...defaultCategory },
+  mention: { ...defaultCategory },
+  comment: { inAppEnabled: true, emailEnabled: false },
   due: { ...defaultCategory },
   overdue: { ...defaultCategory },
   approval: { ...defaultCategory },

@@ -3,6 +3,7 @@ const { normalizeRoleId } = require("../config/permissions");
 const { sendEmail } = require("./email.service");
 const { HttpError } = require("../utils/http-error");
 const domainEvents = require("../events/bus");
+const { recordWorkspacePath } = require("../utils/record-links");
 const {
   cursorArgs,
   normalizeListQuery,
@@ -15,6 +16,8 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 
 const NOTIFICATION_CATEGORIES = Object.freeze({
   ASSIGNMENT: "assignment",
+  MENTION: "mention",
+  COMMENT: "comment",
   DUE: "due",
   OVERDUE: "overdue",
   APPROVAL: "approval",
@@ -27,6 +30,8 @@ const NOTIFICATION_CATEGORIES = Object.freeze({
 
 const CATEGORY_ORDER = Object.freeze([
   NOTIFICATION_CATEGORIES.ASSIGNMENT,
+  NOTIFICATION_CATEGORIES.MENTION,
+  NOTIFICATION_CATEGORIES.COMMENT,
   NOTIFICATION_CATEGORIES.DUE,
   NOTIFICATION_CATEGORIES.OVERDUE,
   NOTIFICATION_CATEGORIES.APPROVAL,
@@ -37,8 +42,11 @@ const CATEGORY_ORDER = Object.freeze([
   NOTIFICATION_CATEGORIES.WORKFLOW,
 ]);
 
+// Mentions are addressed to a person, so they email by default; new comments
+// on followed records stay in-app unless the user opts in.
 const DEFAULT_EMAIL_CATEGORIES = new Set([
   NOTIFICATION_CATEGORIES.ASSIGNMENT,
+  NOTIFICATION_CATEGORIES.MENTION,
   NOTIFICATION_CATEGORIES.DUE,
   NOTIFICATION_CATEGORIES.OVERDUE,
   NOTIFICATION_CATEGORIES.APPROVAL,
@@ -676,10 +684,10 @@ const recordSubject = (record = {}) =>
   record.ref ||
   "Workflow record";
 
+// Opens the record's own workspace module with the record pre-selected
+// (module routes, OCTA-FE-ROUTES-008).
 const actionUrlFor = ({ projectId, recordType, recordId }) =>
-  projectId
-    ? `/projects/${projectId}?module=notifications&recordType=${encodeURIComponent(recordType)}&recordId=${encodeURIComponent(recordId)}`
-    : null;
+  recordWorkspacePath({ projectId, recordType, recordId });
 
 const USER_REFERENCE_FIELDS = [
   "ownerUserId",

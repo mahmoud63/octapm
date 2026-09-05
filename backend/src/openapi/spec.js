@@ -2449,6 +2449,110 @@ const components = {
       locationId: nullableUuid,
       takenAt: nullableDateString,
     }),
+    CommentAuthor: objectSchema({
+      id: uuid,
+      name: { type: "string" },
+      email: { type: "string", nullable: true },
+    }),
+    CommentMention: objectSchema({
+      userId: uuid,
+      name: { type: "string", nullable: true },
+      email: { type: "string", nullable: true },
+    }),
+    Comment: objectSchema({
+      id: uuid,
+      projectId: uuid,
+      recordType: ref("AttachmentRecordType"),
+      recordId: { type: "string" },
+      parentId: nullableUuid,
+      body: { type: "string", description: "Empty when the comment was removed." },
+      author: { ...ref("CommentAuthor"), nullable: true },
+      authorId: nullableUuid,
+      mentions: arrayOf(ref("CommentMention")),
+      editedAt: nullableDateString,
+      deletedAt: nullableDateString,
+      createdAt: dateString,
+      updatedAt: dateString,
+      canEdit: { type: "boolean", description: "True for the author of a live comment." },
+      canDelete: {
+        type: "boolean",
+        description: "True for the author, project managers and company admins.",
+      },
+    }),
+    CommentListResponse: objectSchema({
+      items: arrayOf(ref("Comment")),
+      pagination: objectSchema({
+        limit: { type: "integer" },
+        nextCursor: nullableUuid,
+      }),
+    }),
+    CommentCreateRequest: objectSchema(
+      {
+        recordType: ref("AttachmentRecordType"),
+        recordId: { type: "string" },
+        body: { type: "string", minLength: 1, maxLength: 5000 },
+        mentionUserIds: {
+          ...arrayOf(uuid),
+          maxItems: 20,
+          description:
+            "Users to @mention. Each must be an active member with access to the project; they are notified and start following the record.",
+        },
+        parentId: { ...nullableUuid, description: "Comment being replied to." },
+      },
+      ["recordType", "recordId", "body"],
+    ),
+    CommentUpdateRequest: objectSchema({
+      body: { type: "string", minLength: 1, maxLength: 5000 },
+      mentionUserIds: {
+        ...arrayOf(uuid),
+        maxItems: 20,
+        description: "Replaces the mention list; newly mentioned users are notified.",
+      },
+    }),
+    RecordSubscription: objectSchema({
+      id: uuid,
+      projectId: uuid,
+      recordType: ref("AttachmentRecordType"),
+      recordId: { type: "string" },
+      userId: uuid,
+      user: { ...ref("CommentAuthor"), nullable: true },
+      reason: {
+        type: "string",
+        enum: ["manual", "created", "commented", "mentioned", "assigned"],
+      },
+      muted: { type: "boolean", description: "Explicit unfollow." },
+      path: {
+        type: "string",
+        nullable: true,
+        description: "App path that opens the record in its workspace module.",
+      },
+      createdAt: dateString,
+      updatedAt: dateString,
+    }),
+    RecordSubscriptionState: objectSchema({
+      recordType: ref("AttachmentRecordType"),
+      recordId: { type: "string" },
+      following: { type: "boolean" },
+      subscription: { ...ref("RecordSubscription"), nullable: true },
+      subscribers: arrayOf(ref("RecordSubscription")),
+      count: { type: "integer" },
+    }),
+    RecordSubscriptionRequest: objectSchema(
+      {
+        recordType: ref("AttachmentRecordType"),
+        recordId: { type: "string" },
+        follow: { type: "boolean" },
+      },
+      ["recordType", "recordId", "follow"],
+    ),
+    MySubscriptionsResponse: objectSchema({
+      items: arrayOf({
+        allOf: [
+          ref("RecordSubscription"),
+          objectSchema({ label: { type: "string" } }),
+        ],
+      }),
+    }),
     CompanyDirectoryEntry: objectSchema({
       id: uuid,
       orgId: uuid,
@@ -9595,6 +9699,131 @@ add(
   }),
 );
 
+// ─── Comments, mentions and record subscriptions ───────────────────────
+const commentRecordPermission = {
+  auth: "bearer",
+  roles: ROLE_IDS,
+  note: "Permission follows the record's module: anyone who can `read` it can read comments, comment, and follow the record. Editing is author-only; removal is author, project manager or company admin.",
+};
+const commentIdParam = pathParam("commentId", "Comment UUID.");
+const commentRecordParams = [
+  ...projectParams,
+  queryParam("recordType", "Record type.", ref("AttachmentRecordType")),
+  queryParam("recordId", "Record id.", { type: "string" }),
+];
+
+add(
+  "/projects/{projectId}/comments",
+  "get",
+  operation({
+    tag: "Comments",
+    summary: "List comments on one record, oldest first by default.",
+    operationId: "listComments",
+    parameters: [
+      ...commentRecordParams,
+      queryParam("cursor", "Comment id cursor.", uuid),
+      queryParam("limit", "Page size (1-200, default 50).", {
+        type: "integer",
+        minimum: 1,
+        maximum: 200,
+      }),
+      queryParam("order", "Sort order.", { type: "string", enum: ["asc", "desc"] }),
+    ],
+    permissions: commentRecordPermission,
+    responseSchema: ref("CommentListResponse"),
+  }),
+);
+
+add(
+  "/projects/{projectId}/comments",
+  "post",
+  operation({
+    tag: "Comments",
+    summary:
+      "Comment on any record. @mentions notify the named users (category `mention`); other followers get a `comment` notification. The author and mentioned users start following the record.",
+    operationId: "createComment",
+    parameters: projectParams,
+    permissions: commentRecordPermission,
+    requestBody: jsonBody(ref("CommentCreateRequest"), "Comment to add."),
+    responseSchema: ref("Comment"),
+    status: 201,
+  }),
+);
+
+add(
+  "/projects/{projectId}/comments/{commentId}",
+  "patch",
+  operation({
+    tag: "Comments",
+    summary: "Edit your own comment (marks it edited; newly mentioned users are notified).",
+    operationId: "updateComment",
+    parameters: [projectIdParam, commentIdParam],
+    permissions: commentRecordPermission,
+    requestBody: jsonBody(ref("CommentUpdateRequest"), "Fields to change."),
+    responseSchema: ref("Comment"),
+  }),
+);
+
+add(
+  "/projects/{projectId}/comments/{commentId}",
+  "delete",
+  operation({
+    tag: "Comments",
+    summary: "Remove a comment (soft delete; the row stays for audit).",
+    operationId: "deleteComment",
+    parameters: [projectIdParam, commentIdParam],
+    permissions: commentRecordPermission,
+    responseSchema: objectSchema({ deleted: { type: "boolean" }, id: uuid }),
+  }),
+);
+
+add(
+  "/projects/{projectId}/subscriptions",
+  "get",
+  operation({
+    tag: "Comments",
+    summary: "Who follows a record, and whether the caller does.",
+    operationId: "getRecordSubscription",
+    parameters: commentRecordParams,
+    permissions: commentRecordPermission,
+    responseSchema: ref("RecordSubscriptionState"),
+  }),
+);
+
+add(
+  "/projects/{projectId}/subscriptions",
+  "put",
+  operation({
+    tag: "Comments",
+    summary:
+      "Follow or unfollow a record. Unfollowing mutes the subscription so automatic rules (created, commented, mentioned, assigned) never re-follow it.",
+    operationId: "setRecordSubscription",
+    parameters: projectParams,
+    permissions: commentRecordPermission,
+    requestBody: jsonBody(ref("RecordSubscriptionRequest"), "Follow state."),
+    responseSchema: ref("RecordSubscriptionState"),
+  }),
+);
+
+add(
+  "/projects/{projectId}/subscriptions/mine",
+  "get",
+  operation({
+    tag: "Comments",
+    summary: "Records the caller follows on this project.",
+    operationId: "listMySubscriptions",
+    parameters: [
+      ...projectParams,
+      queryParam("limit", "Maximum rows (1-500, default 100).", {
+        type: "integer",
+        minimum: 1,
+        maximum: 500,
+      }),
+    ],
+    responseSchema: ref("MySubscriptionsResponse"),
+  }),
+);
+
 // ─── Company workspace ──────────────────────────────────────────────────
 const companyIdParam = pathParam("id", "Record UUID scoped to the organisation.");
 const searchParam = queryParam("search", "Name contains.", { type: "string" });
@@ -10000,6 +10229,11 @@ const openApiSpec = {
       name: "Attachments",
       description:
         "Unified attachments and photos: one link table (Attachment → ProjectDocument) for every record type, a Photo entity with EXIF/GPS/location/tags, and background thumbnails via the photo.thumbnail job. See docs/qa/attachments-photos.md.",
+    },
+    {
+      name: "Comments",
+      description:
+        "Comments with explicit @mentions on every record type, plus record subscriptions (follow / unfollow). Comments also appear in the record history feed (`GET /projects/{projectId}/audit?source=comment`). See docs/qa/comments-subscriptions.md.",
     },
     {
       name: "Assignments",

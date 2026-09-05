@@ -41,6 +41,7 @@ const ACTION_LABELS: Record<string, string> = {
   baseline_locked: 'Baseline locked',
   certified: 'Certified',
   closed: 'Closed',
+  commented: 'Commented',
   created: 'Created',
   archived: 'Archived',
   deleted: 'Deleted',
@@ -61,6 +62,7 @@ const ACTION_CLASS: Record<string, string> = {
   baseline_locked: 'border-blue-300 bg-blue-100 text-blue-800',
   certified: 'border-indigo-300 bg-indigo-100 text-indigo-800',
   closed: 'border-emerald-300 bg-emerald-100 text-emerald-800',
+  commented: 'border-violet-300 bg-violet-100 text-violet-800',
   created: 'border-slate-300 bg-slate-100 text-slate-700',
   archived: 'border-zinc-300 bg-zinc-100 text-zinc-800',
   deleted: 'border-rose-300 bg-rose-100 text-rose-800',
@@ -79,18 +81,29 @@ const SOURCE_LABELS: Record<string, string> = {
   approval: 'Approvals',
   audit: 'Audit',
   status: 'Status',
+  comment: 'Comments',
 }
 
 const SOURCE_CLASS: Record<string, string> = {
   approval: 'border-emerald-500/40 text-emerald-700 dark:text-emerald-300',
   audit: 'border-sky-500/40 text-sky-700 dark:text-sky-300',
   status: 'border-amber-500/40 text-amber-700 dark:text-amber-300',
+  comment: 'border-violet-500/40 text-violet-700 dark:text-violet-300',
 }
+
+const SOURCE_FILTERS = [
+  'all',
+  'audit',
+  'approval',
+  'status',
+  'comment',
+] as const
 
 const ACTION_FILTERS = [
   'all',
   'created',
   'updated',
+  'commented',
   'status_changed',
   'submitted',
   'reviewed',
@@ -153,7 +166,17 @@ function summaryPieces(event: AuditEvent) {
     ['progress', summary.pctComplete ? `${summary.pctComplete}%` : null],
     ['method', summary.method],
     ['decision', event.decision ?? summary.decision],
-    ['comment', event.comment ?? summary.comment],
+    ['author', event.source === 'comment' ? summary.author : null],
+    [
+      'mentions',
+      Array.isArray(summary.mentions) && summary.mentions.length
+        ? summary.mentions.join(', ')
+        : null,
+    ],
+    [
+      'comment',
+      event.source === 'comment' ? null : (event.comment ?? summary.comment),
+    ],
     ['amount', formatMoney(summary.amount)],
     ['actual', formatMoney(summary.actual)],
     ['committed', formatMoney(summary.committed)],
@@ -370,13 +393,11 @@ export function HistoryPanel({
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                {(['all', 'audit', 'approval', 'status'] as const).map(
-                  (value) => (
-                    <SelectItem key={value} value={value}>
-                      {SOURCE_LABELS[value]}
-                    </SelectItem>
-                  )
-                )}
+                {SOURCE_FILTERS.map((value) => (
+                  <SelectItem key={value} value={value}>
+                    {SOURCE_LABELS[value]}
+                  </SelectItem>
+                ))}
               </SelectContent>
             </Select>
             <Select value={action} onValueChange={setAction}>

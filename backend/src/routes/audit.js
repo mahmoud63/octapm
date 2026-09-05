@@ -20,8 +20,8 @@ router.get(
     query('action').optional().isString().trim().isLength({ max: 80 }),
     query('source')
       .optional()
-      .isIn(['all', 'audit', 'approval', 'status'])
-      .withMessage('source must be all, audit, approval, or status'),
+      .isIn(['all', 'audit', 'approval', 'status', 'comment'])
+      .withMessage('source must be all, audit, approval, status, or comment'),
     query('cursor').optional().isString().trim().isLength({ max: 120 }),
     query('limit').optional().isInt({ min: 1, max: 100 }).toInt(),
     query('order').optional().isIn(['asc', 'desc']),

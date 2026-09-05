@@ -58,7 +58,10 @@ const HISTORY_SOURCES = Object.freeze({
   AUDIT: "audit",
   APPROVAL: "approval",
   STATUS: "status",
+  COMMENT: "comment",
 });
+
+const COMMENT_ACTION = "commented";
 
 const SENSITIVE_KEY =
   /(password|secret|token|apikey|api_key|authorization|cookie|credential|hash)/i;
@@ -264,6 +267,46 @@ const serializeStatusHistory = ({ orgId, row }) => ({
   oldSummary: null,
   newSummary: null,
   summary: { comment: row.comment || null },
+  attachments: [],
+  metadata: {},
+  createdAt: toIso(row.createdAt),
+});
+
+// Comments (OCTA-COMM-COMMENT-009) appear in the same feed as audit,
+// approval and status rows so a record's history reads as one conversation.
+const serializeCommentEvent = (row) => ({
+  id: `${HISTORY_SOURCES.COMMENT}:${row.id}`,
+  rawId: row.id,
+  source: HISTORY_SOURCES.COMMENT,
+  orgId: row.orgId,
+  projectId: row.projectId,
+  entityType: row.recordType,
+  entityId: row.recordId,
+  recordType: row.recordType,
+  recordId: row.recordId,
+  workflowType: null,
+  action: COMMENT_ACTION,
+  decision: null,
+  actorId: row.authorId || null,
+  actorRole: null,
+  occurredAt: toIso(row.createdAt),
+  oldStatus: null,
+  newStatus: null,
+  fromStatus: null,
+  toStatus: null,
+  reason: null,
+  comment: row.body || null,
+  oldSummary: null,
+  newSummary: null,
+  summary: {
+    commentId: row.id,
+    author: row.author?.name || null,
+    mentions: toArray(row.mentions).map(
+      (mention) => mention.user?.name || mention.userId,
+    ),
+    edited: Boolean(row.editedAt),
+    parentId: row.parentId || null,
+  },
   attachments: [],
   metadata: {},
   createdAt: toIso(row.createdAt),
@@ -543,10 +586,15 @@ const listEvents = async ({
   if (entityId) statusWhere.recordId = entityId;
 
   const includeStatus = !action || action === ACTIONS.STATUS_CHANGED;
+  const includeComments = !action || action === COMMENT_ACTION;
   const auditOnly =
     sources.size === 1 && sources.has(HISTORY_SOURCES.AUDIT);
 
-  const [auditRows, approvalRows, statusRows] = await Promise.all([
+  const commentWhere = { orgId, projectId, deletedAt: null };
+  if (entityType) commentWhere.recordType = entityType;
+  if (entityId) commentWhere.recordId = entityId;
+
+  const [auditRows, approvalRows, statusRows, commentRows] = await Promise.all([
     sources.has(HISTORY_SOURCES.AUDIT) && prisma.auditEvent?.findMany
       ? prisma.auditEvent.findMany({
           where: auditWhere,
@@ -572,12 +620,28 @@ const listEvents = async ({
           take: safeLimit + 1,
         })
       : Promise.resolve([]),
+    sources.has(HISTORY_SOURCES.COMMENT) &&
+    includeComments &&
+    prisma.comment?.findMany
+      ? prisma.comment.findMany({
+          where: commentWhere,
+          include: {
+            author: { select: { id: true, name: true } },
+            mentions: {
+              include: { user: { select: { id: true, name: true } } },
+            },
+          },
+          orderBy: [{ createdAt: direction }, { id: direction }],
+          take: safeLimit + 1,
+        })
+      : Promise.resolve([]),
   ]);
 
   const combined = [
     ...toArray(auditRows).map(serializeEvent),
     ...toArray(approvalRows).map(serializeApprovalEvent),
     ...toArray(statusRows).map((row) => serializeStatusHistory({ orgId, row })),
+    ...toArray(commentRows).map(serializeCommentEvent),
   ].sort((a, b) => compareTimeline(a, b, direction));
 
   const hasMore = combined.length > safeLimit;
@@ -594,11 +658,13 @@ const listEvents = async ({
 
 module.exports = {
   ACTIONS,
+  COMMENT_ACTION,
   ENTITY_TYPES,
   HISTORY_SOURCES,
   buildChangeSet,
   compactJson,
   listEvents,
   recordEvent,
+  serializeCommentEvent,
   serializeEvent,
 };

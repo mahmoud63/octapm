@@ -24,7 +24,12 @@ export type AuditEntityType =
   | 'rfi'
   | 'submittal'
 
-export type AuditHistorySource = 'all' | 'audit' | 'approval' | 'status'
+export type AuditHistorySource =
+  | 'all'
+  | 'audit'
+  | 'approval'
+  | 'status'
+  | 'comment'
 
 export interface AuditEvent {
   id: string

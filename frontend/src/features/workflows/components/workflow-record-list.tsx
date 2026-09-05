@@ -17,6 +17,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { AttachmentPanel } from '@/features/attachments/components/attachment-panel'
 import { HistoryPanel } from '@/features/audit/components/audit-history-panel'
+import { CommentThread } from '@/features/comments/components/comment-thread'
 
 export interface WorkflowAttachment {
   id?: string
@@ -576,6 +577,19 @@ export function WorkflowRecordList<
                     </h4>
                     <RevisionList revisions={row.revisions} />
                   </section>
+                  {projectId && recordType ? (
+                    <div className='lg:col-span-2'>
+                      <CommentThread
+                        projectId={projectId}
+                        recordType={
+                          typeof recordType === 'function'
+                            ? recordType(row)
+                            : recordType
+                        }
+                        recordId={row.id}
+                      />
+                    </div>
+                  ) : null}
                   {projectId && recordType ? (
                     <div className='lg:col-span-2'>
                       <HistoryPanel

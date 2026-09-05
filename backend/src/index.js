@@ -5,6 +5,7 @@ const { createSocketCorsOptions, validateProductionEnv } = require('./config/sec
 const { startBillingScheduler } = require('./jobs/billing-scheduler');
 const { startNotificationScheduler } = require('./jobs/notification-scheduler');
 const { attachRealtime } = require('./realtime/socket');
+const { registerAutoSubscriptions } = require('./services/comment.service');
 const { startJobWorker, stopJobWorker } = require('./jobs/worker');
 
 validateProductionEnv();
@@ -17,6 +18,8 @@ const io = new Server(httpServer, {
 
 app.set('io', io);
 attachRealtime(io);
+// Record creators and assignees follow their records (comment notifications).
+registerAutoSubscriptions();
 
 const PORT = process.env.PORT || 5000;
 httpServer.listen(PORT, () => {
