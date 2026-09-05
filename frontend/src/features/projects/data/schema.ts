@@ -195,6 +195,8 @@ export type ProjectSetupTarget = {
   recordId?: string
   /** Pin to highlight when the target is a sheet (drawings deep link). */
   pin?: string
+  /** Day to open when the target is the daily log (`YYYY-MM-DD`). */
+  date?: string
 }
 
 export type ProjectSetupStep = {

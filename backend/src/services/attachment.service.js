@@ -57,6 +57,7 @@ const RECORD_TYPE_MODULES = Object.freeze({
   task: "task",
   daily_report: "progress",
   site_diary: "progress",
+  daily_log: "progress",
   progress_submission: "progress",
   activity: "schedule",
   change_order: "change_order",

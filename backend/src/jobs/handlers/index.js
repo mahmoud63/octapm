@@ -22,6 +22,12 @@ const registerAllHandlers = () => {
   registerJobHandler(JOB_TYPES.DRAWING_SET_PROCESS, (context) =>
     require("../../services/drawing-set.service").runDrawingSetJob(context),
   );
+  registerJobHandler(JOB_TYPES.DAILY_LOG_WEATHER, (context) =>
+    require("../../services/daily-log.service").runWeatherJob(context),
+  );
+  registerJobHandler(JOB_TYPES.DAILY_LOG_DISTRIBUTE, (context) =>
+    require("../../services/daily-log.service").runDistributeJob(context),
+  );
 };
 
 module.exports = { registerAllHandlers };

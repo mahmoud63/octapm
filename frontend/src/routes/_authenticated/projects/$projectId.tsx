@@ -18,6 +18,7 @@ type ProjectSearch = {
   source?: string
   recordId?: string
   pin?: string
+  date?: string
 }
 
 export const Route = createFileRoute('/_authenticated/projects/$projectId')({
@@ -28,6 +29,7 @@ export const Route = createFileRoute('/_authenticated/projects/$projectId')({
     source: typeof search.source === 'string' ? search.source : undefined,
     recordId: typeof search.recordId === 'string' ? search.recordId : undefined,
     pin: typeof search.pin === 'string' ? search.pin : undefined,
+    date: typeof search.date === 'string' ? search.date : undefined,
   }),
   beforeLoad: ({ params, search }) => {
     const module = moduleFromSlug(search.module)
@@ -40,6 +42,7 @@ export const Route = createFileRoute('/_authenticated/projects/$projectId')({
       source: search.source,
       recordId: search.recordId,
       pin: search.pin,
+      date: search.date,
     }
     if (child && isModuleWithChildren(module)) {
       throw redirect({

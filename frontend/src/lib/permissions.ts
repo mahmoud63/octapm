@@ -208,6 +208,10 @@ export const useProjectEffectiveRole = () => {
 export const useProjectPermissionMatrix = () =>
   useContext(ProjectPermissionContext)?.matrix ?? null
 
+/** The viewer's party memberships on the open project (empty for staff). */
+export const useProjectPartyAccess = () =>
+  useContext(ProjectPermissionContext)?.partyAccess ?? []
+
 export const canPerform = (
   role: string | null | undefined,
   moduleName: PermissionModule,

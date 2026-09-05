@@ -5,6 +5,7 @@ import {
   Camera,
   CheckCircle2,
   ClipboardCheck,
+  ClipboardList,
   CloudOff,
   CloudSun,
   Image as ImageIcon,
@@ -59,10 +60,13 @@ import {
   useSiteDiaries,
   useUploadSitePhotos,
 } from '../hooks/use-site-reporting'
+import { DailyLogPanel } from './daily-log-panel'
 
 type Props = {
   projectId: string
   activities: ScheduleActivity[]
+  /** Day to open in the daily log (deep link `?date=YYYY-MM-DD`). */
+  initialDate?: string | null
 }
 
 type CrewRow = { trade: string; workers: string; hours: string }
@@ -209,7 +213,11 @@ function EmptyQueue() {
   )
 }
 
-export function SiteReportingDashboard({ projectId, activities }: Props) {
+export function SiteReportingDashboard({
+  projectId,
+  activities,
+  initialDate,
+}: Props) {
   const selectableActivities = useMemo(
     () => activities.filter((activity) => !activity.isMilestone),
     [activities]
@@ -1103,8 +1111,16 @@ export function SiteReportingDashboard({ projectId, activities }: Props) {
         </div>
       )}
 
-      <Tabs defaultValue='activity' className='space-y-4'>
-        <TabsList className='grid h-auto w-full grid-cols-3'>
+      <Tabs defaultValue='log' className='space-y-4'>
+        <TabsList className='grid h-auto w-full grid-cols-4'>
+          <TabsTrigger
+            value='log'
+            className='min-h-11 flex-col gap-1 py-2 text-xs sm:flex-row sm:text-sm'
+            data-testid='uat-site-tab-log'
+          >
+            <ClipboardList className='h-4 w-4' />
+            Daily Log
+          </TabsTrigger>
           <TabsTrigger
             value='activity'
             className='min-h-11 flex-col gap-1 py-2 text-xs sm:flex-row sm:text-sm'
@@ -1127,6 +1143,14 @@ export function SiteReportingDashboard({ projectId, activities }: Props) {
             Review
           </TabsTrigger>
         </TabsList>
+
+        <TabsContent value='log'>
+          <DailyLogPanel
+            projectId={projectId}
+            activities={activities}
+            initialDate={initialDate}
+          />
+        </TabsContent>
 
         <TabsContent value='activity'>
           <section className='rounded-md border bg-card p-3 sm:p-4'>

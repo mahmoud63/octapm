@@ -56,6 +56,7 @@ model Organisation {
   commitmentSovLines  CommitmentSovLine[]
   commitmentChangeOrders CommitmentChangeOrder[]
   subPayApps          SubPayApp[]
+  dailyLogs           DailyLog[]
   subPayAppLines      SubPayAppLine[]
   subPayAppPayments   SubPayAppPayment[]
   companyEquipment    CompanyEquipment[]
@@ -334,6 +335,11 @@ model Project {
   defaultRetentionRate  Float?
   ldRatePerDay          Decimal   @default(0) @db.Decimal(18, 2)
   weatherAllowanceDays  Int       @default(20)
+  // Site coordinates and daily-log preferences (OCTA-FLD-DAILY-022)
+  latitude              Float?
+  longitude             Float?
+  timezone              String?
+  dailyLogSettingsJson  Json      @default("{}")
   projectCalendar       String?
   reportingCutoffDay    Int?
   currency              String    @default("USD")
@@ -394,6 +400,7 @@ model Project {
   commitmentSovLines            CommitmentSovLine[]
   commitmentChangeOrders        CommitmentChangeOrder[]
   subPayApps                    SubPayApp[]
+  dailyLogs                     DailyLog[]
   subPayAppLines                SubPayAppLine[]
   subPayAppPayments             SubPayAppPayment[]
   activityCostLoadings          ActivityCostLoading[]
@@ -1217,6 +1224,7 @@ model ProjectDocument {
   taskAttachments          TaskAttachment[]
   commitmentsExecuted      Commitment[]              @relation("CommitmentExecutedDocument")
   subPayAppWaivers         SubPayApp[]               @relation("SubPayAppWaiverDocument")
+  dailyLogPdfs             DailyLog[]                @relation("DailyLogPdf")
   attachments              Attachment[]
   photo                    Photo?
   text                     DocumentText?
@@ -5263,4 +5271,242 @@ model SubmittalStepAssignment {
 
   @@unique([stepId, userId])
   @@index([userId, status])
+}
+
+// ─── Daily log (OCTA-FLD-DAILY-022) ───
+/**
+ * One log per project per calendar day. Sections are typed tables so manpower
+ * and equipment are reportable across days; weather comes from the feed by
+ * project coordinates or is entered by hand; the evening PDF goes to the
+ * distribution list.
+ */
+model DailyLog {
+  id                      String    @id @default(uuid())
+  orgId                   String
+  projectId               String
+  date                    DateTime  @db.Date
+  status                  String    @default("open") // open, submitted, approved
+  weatherJson             Json?
+  weatherSource           String? // feed, manual
+  weatherFetchedAt        DateTime?
+  summary                 String?
+  submittedAt             DateTime?
+  submittedBy             String?
+  approvedAt              DateTime?
+  approvedBy              String?
+  distributedAt           DateTime?
+  distributionJson        Json?
+  pdfDocumentId           String?
+  autoDistributeQueuedFor DateTime?
+  createdBy               String?
+  createdAt               DateTime  @default(now())
+  updatedAt               DateTime  @updatedAt
+
+  org         Organisation     @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  project     Project          @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  pdfDocument ProjectDocument? @relation("DailyLogPdf", fields: [pdfDocumentId], references: [id], onDelete: SetNull)
+  manpower    DailyLogManpower[]
+  equipment   DailyLogEquipment[]
+  deliveries  DailyLogDelivery[]
+  visitors    DailyLogVisitor[]
+  delays      DailyLogDelay[]
+  notes       DailyLogNote[]
+
+  @@unique([projectId, date])
+  @@index([orgId])
+  @@index([projectId, status])
+}
+
+/** Crew on site: company × trade × head count × hours per head. */
+model DailyLogManpower {
+  id              String    @id @default(uuid())
+  orgId           String
+  projectId       String
+  dailyLogId      String
+  partyId         String?
+  companyId       String?
+  companyName     String?
+  trade           String
+  workers         Int       @default(0)
+  hours           Float     @default(8)
+  activityId      String?
+  locationId      String?
+  notes           String?
+  status          String    @default("approved") // draft, submitted, approved, rejected
+  createdBy       String?
+  submittedAt     DateTime?
+  reviewedBy      String?
+  reviewedAt      DateTime?
+  rejectionReason String?
+  clientRequestId String?
+  sortOrder       Int       @default(0)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  dailyLog DailyLog @relation(fields: [dailyLogId], references: [id], onDelete: Cascade)
+
+  @@unique([projectId, clientRequestId])
+  @@index([dailyLogId])
+  @@index([projectId, companyId])
+  @@index([projectId, trade])
+  @@index([projectId, activityId])
+}
+
+model DailyLogEquipment {
+  id              String    @id @default(uuid())
+  orgId           String
+  projectId       String
+  dailyLogId      String
+  partyId         String?
+  companyId       String?
+  equipmentId     String?
+  name            String
+  count           Int       @default(1)
+  hoursOperated   Float     @default(0)
+  hoursIdle       Float     @default(0)
+  activityId      String?
+  locationId      String?
+  notes           String?
+  status          String    @default("approved")
+  createdBy       String?
+  submittedAt     DateTime?
+  reviewedBy      String?
+  reviewedAt      DateTime?
+  rejectionReason String?
+  clientRequestId String?
+  sortOrder       Int       @default(0)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  dailyLog DailyLog @relation(fields: [dailyLogId], references: [id], onDelete: Cascade)
+
+  @@unique([projectId, clientRequestId])
+  @@index([dailyLogId])
+  @@index([projectId, equipmentId])
+  @@index([projectId, activityId])
+}
+
+model DailyLogDelivery {
+  id              String    @id @default(uuid())
+  orgId           String
+  projectId       String
+  dailyLogId      String
+  partyId         String?
+  companyId       String?
+  supplierName    String?
+  description     String
+  quantity        Float?
+  unit            String?
+  poRef           String?
+  receivedBy      String?
+  deliveredAt     DateTime?
+  activityId      String?
+  notes           String?
+  status          String    @default("approved")
+  createdBy       String?
+  submittedAt     DateTime?
+  reviewedBy      String?
+  reviewedAt      DateTime?
+  rejectionReason String?
+  clientRequestId String?
+  sortOrder       Int       @default(0)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  dailyLog DailyLog @relation(fields: [dailyLogId], references: [id], onDelete: Cascade)
+
+  @@unique([projectId, clientRequestId])
+  @@index([dailyLogId])
+  @@index([projectId, activityId])
+}
+
+model DailyLogVisitor {
+  id              String    @id @default(uuid())
+  orgId           String
+  projectId       String
+  dailyLogId      String
+  partyId         String?
+  name            String
+  company         String?
+  purpose         String?
+  arrivedAt       DateTime?
+  leftAt          DateTime?
+  notes           String?
+  status          String    @default("approved")
+  createdBy       String?
+  submittedAt     DateTime?
+  reviewedBy      String?
+  reviewedAt      DateTime?
+  rejectionReason String?
+  clientRequestId String?
+  sortOrder       Int       @default(0)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  dailyLog DailyLog @relation(fields: [dailyLogId], references: [id], onDelete: Cascade)
+
+  @@unique([projectId, clientRequestId])
+  @@index([dailyLogId])
+}
+
+/** Lost time; `source = weather_feed` rows are suggestions raised by the weather job. */
+model DailyLogDelay {
+  id              String    @id @default(uuid())
+  orgId           String
+  projectId       String
+  dailyLogId      String
+  partyId         String?
+  type            String    @default("other") // weather, access, design, material, labour, equipment, inspection, utility, other
+  description     String
+  hoursLost       Float     @default(0)
+  activityId      String?
+  locationId      String?
+  source          String    @default("manual") // manual, weather_feed
+  weatherDelayId  String?
+  notes           String?
+  status          String    @default("approved")
+  createdBy       String?
+  submittedAt     DateTime?
+  reviewedBy      String?
+  reviewedAt      DateTime?
+  rejectionReason String?
+  clientRequestId String?
+  sortOrder       Int       @default(0)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  dailyLog DailyLog @relation(fields: [dailyLogId], references: [id], onDelete: Cascade)
+
+  @@unique([projectId, clientRequestId])
+  @@index([dailyLogId])
+  @@index([projectId, type])
+  @@index([projectId, activityId])
+}
+
+model DailyLogNote {
+  id              String    @id @default(uuid())
+  orgId           String
+  projectId       String
+  dailyLogId      String
+  partyId         String?
+  kind            String    @default("general") // general, safety, instruction, inspection, issue
+  text            String
+  activityId      String?
+  locationId      String?
+  status          String    @default("approved")
+  createdBy       String?
+  submittedAt     DateTime?
+  reviewedBy      String?
+  reviewedAt      DateTime?
+  rejectionReason String?
+  clientRequestId String?
+  sortOrder       Int       @default(0)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  dailyLog DailyLog @relation(fields: [dailyLogId], references: [id], onDelete: Cascade)
+
+  @@unique([projectId, clientRequestId])
+  @@index([dailyLogId])
+  @@index([projectId, kind])
 }

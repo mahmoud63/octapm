@@ -112,6 +112,11 @@ const RECORD_SOURCES = Object.freeze({
     title: ["date"],
     extraRefs: ["engineerId"],
   },
+  daily_log: {
+    model: "dailyLog",
+    label: "Daily log",
+    title: ["date"],
+  },
   progress_submission: {
     model: "progressSubmission",
     label: "Progress submission",

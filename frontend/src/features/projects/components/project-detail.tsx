@@ -407,6 +407,7 @@ export function ProjectDetail({
           <SiteReportingDashboard
             projectId={projectId}
             activities={schedule?.activities ?? []}
+            initialDate={initialTarget?.date}
           />
         )
 

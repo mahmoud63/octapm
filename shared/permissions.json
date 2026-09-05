@@ -93,7 +93,13 @@
         "site_diary.submit": ["pm", "planning_eng", "site_engineer"],
         "site_diary.approve": ["pm"],
         "site_diary.reject": ["pm"],
-        "site_reporting.upload": ["pm", "planning_eng", "site_engineer"]
+        "site_reporting.upload": ["pm", "planning_eng", "site_engineer"],
+        "daily_log.update": ["pm", "planning_eng", "site_engineer"],
+        "daily_log.submit": ["pm", "planning_eng", "site_engineer"],
+        "daily_log.entry_review": ["pm", "planning_eng", "site_engineer"],
+        "daily_log.approve": ["pm"],
+        "daily_log.distribute": ["pm", "planning_eng", "site_engineer"],
+        "daily_log.configure": ["pm"]
       }
     },
     "boq": {
@@ -847,7 +853,8 @@
           "transitions": [
             "submission.submit",
             "daily_report.submit",
-            "site_reporting.upload"
+            "site_reporting.upload",
+            "daily_log.submit"
           ]
         },
         "boq": { "actions": ["read"], "transitions": [] },
@@ -911,7 +918,8 @@
           "transitions": [
             "submission.submit",
             "daily_report.submit",
-            "site_reporting.upload"
+            "site_reporting.upload",
+            "daily_log.submit"
           ]
         },
         "boq": { "actions": ["read"], "transitions": [] },
