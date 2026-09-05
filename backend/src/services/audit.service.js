@@ -1,5 +1,6 @@
 const { prisma } = require("../config/db");
 const { HttpError } = require("../utils/http-error");
+const domainEvents = require("../events/bus");
 
 const ENTITY_TYPES = Object.freeze({
   SCHEDULE_REVISION: "schedule_revision",
@@ -32,6 +33,7 @@ const ENTITY_TYPES = Object.freeze({
   MEETING: "meeting",
   TASK: "task",
   SAFETY_INCIDENT: "safety_incident",
+  LOCATION: "location",
 });
 
 const ACTIONS = Object.freeze({
@@ -463,6 +465,28 @@ const recordEvent = async ({
         metadataJson,
       },
     });
+  }
+
+  // Fan out a domain event: persist it in the same transaction for the durable
+  // outbound log, then publish (deferred) for realtime subscribers. Neither
+  // step may break the audited business action.
+  try {
+    const domainEvent = domainEvents.buildRecordEvent({
+      orgId,
+      projectId,
+      entityType,
+      entityId,
+      action,
+      actorId,
+      occurredAt,
+      oldStatus,
+      newStatus,
+      summary: newSummaryJson || summaryJson,
+    });
+    await domainEvents.recordOutboundEvent({ tx, event: domainEvent });
+    domainEvents.publish(domainEvent);
+  } catch (error) {
+    console.error("[audit-domain-event]", error);
   }
 
   return serializeEvent(event);

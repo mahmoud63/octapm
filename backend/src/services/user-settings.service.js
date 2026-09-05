@@ -18,8 +18,6 @@ const DISPLAY_ITEMS = new Set([
   "dashboard",
   "projects",
   "tasks",
-  "apps",
-  "chats",
   "users",
   "help-center",
 ]);
@@ -28,8 +26,6 @@ const DEFAULT_DISPLAY_ITEMS = [
   "dashboard",
   "projects",
   "tasks",
-  "apps",
-  "chats",
   "users",
   "help-center",
 ];

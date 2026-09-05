@@ -4,6 +4,7 @@ const { createApp } = require('./app');
 const { createSocketCorsOptions, validateProductionEnv } = require('./config/security');
 const { startBillingScheduler } = require('./jobs/billing-scheduler');
 const { startNotificationScheduler } = require('./jobs/notification-scheduler');
+const { attachRealtime } = require('./realtime/socket');
 
 validateProductionEnv();
 
@@ -14,6 +15,7 @@ const io = new Server(httpServer, {
 });
 
 app.set('io', io);
+attachRealtime(io);
 
 const PORT = process.env.PORT || 5000;
 httpServer.listen(PORT, () => {

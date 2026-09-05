@@ -39,6 +39,7 @@
     "test:site-reporting-mobile": "node scripts/site-reporting-mobile-ui.test.mjs",
     "test:field-ux": "node scripts/field-ux-accessibility.test.mjs",
     "test:equipment-utilization": "node scripts/equipment-utilization-ui.test.mjs",
+    "test:navigation-realtime-locations": "node scripts/navigation-realtime-locations.test.mjs",
     "lint": "eslint .",
     "preview": "vite preview",
     "format:check": "prettier --check .",

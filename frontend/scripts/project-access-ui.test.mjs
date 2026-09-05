@@ -36,13 +36,13 @@ assert.match(
 
 assert.match(
   projectDetail,
-  /useProjectSetupReadiness\(projectId, \{ enabled: canLoadProjectModules \}\)/,
+  /useProjectSetupReadiness\(\s*projectId,\s*\{ enabled: canLoadProjectModules \}\s*\)/,
   'Setup readiness query waits for project access'
 )
 
 assert.match(
   projectDetail,
-  /useProjectSchedule\(projectId, \{ enabled: canLoadProjectModules \}\)/,
+  /useProjectSchedule\(\s*projectId,\s*\{ enabled: canLoadProjectModules \}\s*\)/,
   'Schedule query waits for project access'
 )
 

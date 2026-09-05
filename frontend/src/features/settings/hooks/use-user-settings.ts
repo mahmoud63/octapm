@@ -22,8 +22,6 @@ export const displayNavigationItems = [
   { id: 'dashboard', label: 'Dashboard' },
   { id: 'projects', label: 'Projects' },
   { id: 'tasks', label: 'Tasks' },
-  { id: 'apps', label: 'Apps' },
-  { id: 'chats', label: 'Chats' },
   { id: 'users', label: 'Users' },
   { id: 'help-center', label: 'Help Center' },
 ] as const

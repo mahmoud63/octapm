@@ -272,6 +272,11 @@ router.use(
   require("./project-parties"),
 );
 router.use(
+  "/:projectId/locations",
+  nestedProjectAccess,
+  require("./locations"),
+);
+router.use(
   "/:projectId/activities",
   nestedProjectAccess,
   require("./activities"),

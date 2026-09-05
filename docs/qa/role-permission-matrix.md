@@ -60,6 +60,9 @@ project; otherwise project detail and nested module routes return
 | Safety archive                       | Y   | -       | -   | -    | -    | -   | -    | -       |
 | User management read                 | Y   | Y       | Y   | -    | -    | -   | -    | -       |
 | User management create/update/delete | Y   | -       | -   | -    | -    | -   | -    | -       |
+| Locations read                       | Y   | Y       | Y   | Y    | Y    | Y   | Y    | Y       |
+| Locations create/update/reorder      | Y   | Y       | -   | -    | -    | -   | Y    | -       |
+| Locations archive/restore            | Y   | Y       | -   | -    | -    | -   | -    | -       |
 
 ## Project Party Roles
 

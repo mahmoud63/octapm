@@ -2,6 +2,24 @@
 
 All notable platform-wide changes should be recorded here. Agents must read this file before starting work and add a concise entry for every meaningful code, schema, API, or workflow change.
 
+## 2026-09-05
+
+Sprint 1 of the Procore parity program (P0 foundations). See
+`docs/qa/realtime-events.md` and `docs/qa/locations.md`.
+
+### Added
+
+- Added an in-process domain event bus (`backend/src/events/bus.js`) and an authenticated socket.io realtime layer (`backend/src/realtime/socket.js`). Audit events, approval decisions, and notification creation now publish `domain.event` messages to project rooms (joined only after the REST project-access check) and to recipient user rooms.
+- Added the durable `OutboundEvent` log written inside the audited transaction, as the basis for future webhooks.
+- Added the project `Location` tree (site › building › level › zone › room) with materialized paths, `/projects/{projectId}/locations` CRUD/move/reorder/archive/restore APIs, OpenAPI docs, the `location` permission module (readable by all project-party roles), and a Locations module in the project workspace with a reusable `LocationPicker`.
+- Added frontend realtime hooks (`useRealtimeConnection`, `useProjectRealtime`) that invalidate every project-scoped query on incoming events, a header live-status pill, and a header project switcher.
+- Added `frontend/scripts/navigation-realtime-locations.test.mjs` plus backend tests for the bus, socket auth/rooms, location service, and location routes.
+
+### Changed
+
+- Removed the admin-template placeholders from the authenticated app: Apps, Chats, Sign In (2 Col), the demo Auth/Errors navigation group, the fake team switcher, and the unused sidebar components. Display settings and the `UserSetting.displayItems` default no longer reference `apps`/`chats`.
+- The user menu's dead "Upgrade to Pro" entry now links to Plans & billing.
+
 ## 2026-06-13
 
 ### Added

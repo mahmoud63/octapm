@@ -41,6 +41,7 @@ model Organisation {
   userSettings        UserSetting[]
   subscription        Subscription?
   enterpriseLeads     EnterpriseLead[]
+  locations           Location[]
 }
 
 model User {
@@ -108,7 +109,7 @@ model UserSetting {
   language          String    @default("en")
   appearanceTheme   String    @default("dark")
   appearanceFont    String    @default("inter")
-  displayItems      Json      @default("[\"dashboard\",\"projects\",\"tasks\",\"apps\",\"chats\",\"users\",\"help-center\"]")
+  displayItems      Json      @default("[\"dashboard\",\"projects\",\"tasks\",\"users\",\"help-center\"]")
   createdAt         DateTime  @default(now())
   updatedAt         DateTime  @updatedAt
 
@@ -294,6 +295,7 @@ model Project {
   taskAttachments               TaskAttachment[]
   taskHistoryEvents             TaskHistory[]
   notifications                 Notification[]
+  locations                     Location[]
 
   @@index([orgId])
   @@index([orgId, status, archivedAt])
@@ -3401,4 +3403,61 @@ model EnterpriseLead {
   org Organisation @relation(fields: [orgId], references: [id])
 
   @@index([orgId])
+}
+
+// ─── Locations (spatial key for field records) ───
+model Location {
+  id          String    @id @default(uuid())
+  orgId       String
+  projectId   String
+  parentId    String?
+  name        String
+  code        String?
+  kind        String    @default("area") // site, building, level, zone, room, area, external
+  path        String // materialized path of ids: rootId/childId/grandchildId
+  depth       Int       @default(0)
+  sortOrder   Int       @default(0)
+  status      String    @default("active") // active, archived
+  description String?
+  createdBy   String?
+  updatedBy   String?
+  archivedAt  DateTime?
+  archivedBy  String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  org      Organisation @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  project  Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  parent   Location?    @relation("LocationChildren", fields: [parentId], references: [id], onDelete: Restrict)
+  children Location[]   @relation("LocationChildren")
+
+  @@unique([projectId, code])
+  @@index([orgId])
+  @@index([projectId])
+  @@index([projectId, status])
+  @@index([projectId, parentId, sortOrder])
+  @@index([parentId])
+  @@index([projectId, path])
+}
+
+// ─── Outbound domain events (realtime fan-out and future webhooks) ───
+model OutboundEvent {
+  id               String    @id @default(uuid())
+  orgId            String
+  projectId        String?
+  type             String // record.changed, approval.decided, notification.created, job.progress
+  entityType       String?
+  entityId         String?
+  action           String?
+  actorId          String?
+  occurredAt       DateTime  @default(now())
+  payloadJson      Json      @default("{}")
+  recipientUserIds Json      @default("[]")
+  deliveredAt      DateTime?
+  createdAt        DateTime  @default(now())
+
+  @@index([orgId, createdAt])
+  @@index([projectId, createdAt])
+  @@index([entityType, entityId])
+  @@index([type, createdAt])
 }

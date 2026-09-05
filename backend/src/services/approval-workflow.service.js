@@ -1,6 +1,7 @@
 const { prisma } = require("../config/db");
 const { HttpError } = require("../utils/http-error");
 const notificationService = require("./notification.service");
+const domainEvents = require("../events/bus");
 
 const RECORD_TYPES = Object.freeze({
   BOQ_REVISION: "boq_revision",
@@ -688,6 +689,23 @@ const recordTransition = async ({
 
   const event = await tx.approvalWorkflowEvent.create({
     data: eventPayload,
+  });
+
+  domainEvents.publish({
+    type: domainEvents.EVENT_TYPES.APPROVAL_DECIDED,
+    orgId,
+    projectId,
+    entityType: eventPayload.recordType,
+    entityId: recordId,
+    action: eventPayload.action,
+    actorId,
+    occurredAt,
+    payload: {
+      workflowType: eventPayload.workflowType,
+      decision: eventPayload.decision,
+      fromStatus: normalizedFrom,
+      toStatus: normalizedTo,
+    },
   });
 
   try {

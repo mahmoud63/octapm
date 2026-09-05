@@ -9,6 +9,7 @@ import { CommercialDashboard } from '@/features/commercial/components/commercial
 import { CostDashboard } from '@/features/cost/components/cost-dashboard'
 import { DocControlDashboard } from '@/features/doc-control/components/doc-control-dashboard'
 import { EquipmentSection } from '@/features/equipment/components/equipment-section'
+import { LocationsPanel } from '@/features/locations/components/locations-panel'
 import { MeetingsDashboard } from '@/features/meetings/components/meetings-dashboard'
 import {
   useProject,
@@ -22,6 +23,7 @@ import { ScheduleDashboard } from '@/features/schedule/components/schedule-dashb
 import { ScheduleUploadZone } from '@/features/schedule/components/schedule-upload-zone'
 import { useProjectSchedule } from '@/features/schedule/hooks/use-schedule'
 import { SiteReportingDashboard } from '@/features/site-reporting/components/site-reporting-dashboard'
+import { useProjectRealtime } from '@/hooks/use-realtime'
 import type { ProjectSetupTarget } from '../data/schema'
 import { HealthDashboard } from './health-dashboard'
 import { ProjectSetupWizard } from './project-setup-wizard'
@@ -37,6 +39,7 @@ type ModuleKey =
   | 'meetings'
   | 'activities'
   | 'equipment'
+  | 'locations'
   | 'reports'
   | 'overview'
   | 'boq'
@@ -172,6 +175,7 @@ export function ProjectDetail({
     error: projectError,
   } = useProject(projectId)
   const canLoadProjectModules = Boolean(project)
+  useProjectRealtime(canLoadProjectModules ? projectId : null)
   const isProjectAccessDenied =
     projectError instanceof AxiosError && projectError.response?.status === 403
   const { data: setupReadiness, isLoading: setupReadinessLoading } =
@@ -270,6 +274,7 @@ export function ProjectDetail({
       { key: 'boq', label: 'BOQ' },
       { key: 'activities', label: 'Activities' },
       { key: 'equipment', label: 'Equipment' },
+      { key: 'locations', label: 'Locations' },
       { key: 'reports', label: 'Reports' },
       { key: 'overview', label: 'Overview' },
     ]
@@ -443,6 +448,9 @@ export function ProjectDetail({
 
       case 'equipment':
         return <EquipmentSection projectId={projectId} />
+
+      case 'locations':
+        return <LocationsPanel projectId={projectId} />
 
       case 'reports':
         return (

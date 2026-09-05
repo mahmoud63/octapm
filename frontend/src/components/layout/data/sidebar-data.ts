@@ -1,56 +1,34 @@
 import {
-  FolderKanban,
-  Construction,
-  LayoutDashboard,
-  Monitor,
-  Bug,
-  ListTodo,
-  FileX,
-  HelpCircle,
-  Lock,
   Bell,
-  Package,
+  FolderKanban,
+  HelpCircle,
+  LayoutDashboard,
+  ListTodo,
+  Monitor,
   Palette,
-  ServerOff,
   Settings,
-  Wrench,
   UserCog,
-  UserX,
   Users,
-  MessagesSquare,
-  ShieldCheck,
-  AudioWaveform,
-  Command,
-  GalleryVerticalEnd,
+  Wrench,
 } from 'lucide-react'
 import { type SidebarData } from '../types'
 
+/**
+ * Primary navigation.
+ *
+ * Group 0 ("Work") holds the workspace pages a construction team uses daily;
+ * group 1 ("Account") holds settings and help. Top-level entries can be hidden
+ * per user through Settings › Display (see `displayNavigationItems`).
+ */
 export const sidebarData: SidebarData = {
   user: {
-    name: 'Octa PM Team',
-    email: 'admin@octapm.com',
-    avatar: '/avatars/shadcn.jpg',
+    name: 'OctaPM user',
+    email: '',
+    avatar: '',
   },
-  teams: [
-    {
-      name: 'Octa PM',
-      logo: Command,
-      plan: 'Enterprise',
-    },
-    {
-      name: 'Octa Planning',
-      logo: GalleryVerticalEnd,
-      plan: 'Professional',
-    },
-    {
-      name: 'Octa Site Ops',
-      logo: AudioWaveform,
-      plan: 'Operations',
-    },
-  ],
   navGroups: [
     {
-      title: 'General',
+      title: 'Work',
       items: [
         {
           title: 'Dashboard',
@@ -60,24 +38,12 @@ export const sidebarData: SidebarData = {
         {
           title: 'Projects',
           url: '/projects',
-          badge: 'New',
           icon: FolderKanban,
         },
         {
           title: 'Tasks',
           url: '/tasks',
           icon: ListTodo,
-        },
-        {
-          title: 'Apps',
-          url: '/apps',
-          icon: Package,
-        },
-        {
-          title: 'Chats',
-          url: '/chats',
-          badge: '3',
-          icon: MessagesSquare,
         },
         {
           title: 'Users',
@@ -87,69 +53,7 @@ export const sidebarData: SidebarData = {
       ],
     },
     {
-      title: 'Pages',
-      items: [
-        {
-          title: 'Auth',
-          icon: ShieldCheck,
-          items: [
-            {
-              title: 'Sign In',
-              url: '/sign-in',
-            },
-            {
-              title: 'Sign In (2 Col)',
-              url: '/sign-in-2',
-            },
-            {
-              title: 'Sign Up',
-              url: '/sign-up',
-            },
-            {
-              title: 'Forgot Password',
-              url: '/forgot-password',
-            },
-            {
-              title: 'OTP',
-              url: '/otp',
-            },
-          ],
-        },
-        {
-          title: 'Errors',
-          icon: Bug,
-          items: [
-            {
-              title: 'Unauthorized',
-              url: '/errors/unauthorized',
-              icon: Lock,
-            },
-            {
-              title: 'Forbidden',
-              url: '/errors/forbidden',
-              icon: UserX,
-            },
-            {
-              title: 'Not Found',
-              url: '/errors/not-found',
-              icon: FileX,
-            },
-            {
-              title: 'Internal Server Error',
-              url: '/errors/internal-server-error',
-              icon: ServerOff,
-            },
-            {
-              title: 'Maintenance Error',
-              url: '/errors/maintenance-error',
-              icon: Construction,
-            },
-          ],
-        },
-      ],
-    },
-    {
-      title: 'Other',
+      title: 'Account',
       items: [
         {
           title: 'Settings',

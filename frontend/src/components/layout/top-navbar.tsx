@@ -32,6 +32,7 @@ import {
   SheetTrigger,
 } from '@/components/ui/sheet'
 import { ConfigDrawer } from '@/components/config-drawer'
+import { RealtimeStatus } from '@/components/realtime-status'
 import { Search } from '@/components/search'
 import { SignOutDialog } from '@/components/sign-out-dialog'
 import { ThemeSwitch } from '@/components/theme-switch'
@@ -44,12 +45,13 @@ import {
 } from '@/features/settings/hooks/use-user-settings'
 import { useAuthStore } from '@/stores/auth-store'
 import { sidebarData } from './data/sidebar-data'
+import { ProjectSwitcher } from './project-switcher'
 import { type NavCollapsible, type NavLink, type NavItem } from './types'
 
 // ── Flat list of top-level nav items ──────────────────────────────────────
-// General group items show directly; collapsible items become dropdowns.
-const generalItems = sidebarData.navGroups[0].items // Dashboard, Projects, Tasks, …
-const otherItems = sidebarData.navGroups[2].items // Settings (collapsible), Help Center
+// "Work" group items show directly; collapsible items become dropdowns.
+const generalItems = sidebarData.navGroups[0].items // Dashboard, Projects, Tasks, Users
+const otherItems = sidebarData.navGroups[1].items // Settings (collapsible), Help Center
 
 const defaultDisplayItemIds: DisplayNavigationItemId[] =
   displayNavigationItems.map((item) => item.id)
@@ -224,9 +226,11 @@ function UserDropdown() {
           </DropdownMenuLabel>
           <DropdownMenuSeparator />
           <DropdownMenuGroup>
-            <DropdownMenuItem>
-              <Sparkles className='size-4' />
-              Upgrade to Pro
+            <DropdownMenuItem asChild>
+              <Link to='/billing'>
+                <Sparkles className='size-4' />
+                Plans &amp; billing
+              </Link>
             </DropdownMenuItem>
           </DropdownMenuGroup>
           <DropdownMenuSeparator />
@@ -238,9 +242,9 @@ function UserDropdown() {
               </Link>
             </DropdownMenuItem>
             <DropdownMenuItem asChild>
-              <Link to='/settings'>
+              <Link to='/settings/billing'>
                 <CreditCard className='size-4' />
-                Billing
+                Billing settings
               </Link>
             </DropdownMenuItem>
             <DropdownMenuItem asChild>
@@ -402,6 +406,8 @@ export function TopNavbar() {
           <span className='hidden font-bold sm:inline-block'>OctaPM</span>
         </Link>
 
+        <ProjectSwitcher className='hidden md:inline-flex' />
+
         {/* Desktop nav */}
         <nav className='hidden flex-1 items-center gap-0.5 md:flex'>
           {visibleGeneralItems.map((item) =>
@@ -423,6 +429,7 @@ export function TopNavbar() {
 
         {/* Right actions */}
         <div className='ms-auto flex items-center gap-2'>
+          <RealtimeStatus className='hidden sm:inline-flex' />
           <Search className='hidden sm:flex' />
           <NotificationCenter />
           <ConfigDrawer />

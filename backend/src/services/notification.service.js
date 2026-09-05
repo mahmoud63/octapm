@@ -2,6 +2,7 @@ const { prisma } = require("../config/db");
 const { normalizeRoleId } = require("../config/permissions");
 const { sendEmail } = require("./email.service");
 const { HttpError } = require("../utils/http-error");
+const domainEvents = require("../events/bus");
 const {
   cursorArgs,
   normalizeListQuery,
@@ -635,6 +636,21 @@ const createNotifications = async ({
     } catch (error) {
       if (error?.code !== "P2002") throw error;
     }
+  }
+
+  if (created.length) {
+    // Realtime badge refresh for recipients only; never broadcast to a project room.
+    domainEvents.publish({
+      type: domainEvents.EVENT_TYPES.NOTIFICATION_CREATED,
+      orgId,
+      projectId,
+      entityType,
+      entityId,
+      action: event,
+      actorId,
+      recipientUserIds: created.map((row) => row.recipientUserId),
+      payload: { count: created.length, category, title, event },
+    });
   }
 
   return {

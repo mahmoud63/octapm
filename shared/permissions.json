@@ -1,5 +1,5 @@
 {
-  "version": "2026-06-12-v6-meeting-minutes",
+  "version": "2026-09-05-v7-locations",
   "actions": [
     "read",
     "create",
@@ -588,6 +588,33 @@
         ],
         "task.close": ["pm", "planning_eng", "site_engineer"]
       }
+    },
+    "location": {
+      "label": "Locations",
+      "actions": {
+        "read": [
+          "pm",
+          "planning_eng",
+          "qs",
+          "cost_controller",
+          "procurement",
+          "warehouse",
+          "site_engineer",
+          "finance"
+        ],
+        "create": ["pm", "planning_eng", "site_engineer"],
+        "update": ["pm", "planning_eng", "site_engineer"],
+        "delete": ["pm", "planning_eng"],
+        "submit": [],
+        "approve": [],
+        "certify": [],
+        "baseline": [],
+        "export": ["pm", "planning_eng", "qs", "cost_controller", "site_engineer"]
+      },
+      "transitions": {
+        "location.archive": ["pm", "planning_eng"],
+        "location.restore": ["pm", "planning_eng"]
+      }
     }
   },
   "partyPermissions": {
@@ -620,7 +647,8 @@
         "task": {
           "actions": ["read", "submit"],
           "transitions": ["task.comment"]
-        }
+        },
+        "location": { "actions": ["read"], "transitions": [] }
       }
     },
     "consultant": {
@@ -659,7 +687,8 @@
         "task": {
           "actions": ["read", "submit"],
           "transitions": ["task.comment"]
-        }
+        },
+        "location": { "actions": ["read"], "transitions": [] }
       }
     },
     "contractor": {
@@ -702,7 +731,8 @@
         "task": {
           "actions": ["read", "create", "update", "submit"],
           "transitions": ["task.assign", "task.comment", "task.close"]
-        }
+        },
+        "location": { "actions": ["read"], "transitions": [] }
       }
     },
     "subcontractor": {
@@ -741,7 +771,8 @@
         "task": {
           "actions": ["read", "create", "update", "submit"],
           "transitions": ["task.assign", "task.comment", "task.close"]
-        }
+        },
+        "location": { "actions": ["read"], "transitions": [] }
       }
     }
   }

@@ -1,6 +1,7 @@
 import { Outlet } from '@tanstack/react-router'
 import { SearchProvider } from '@/context/search-provider'
 import { LayoutProvider } from '@/context/layout-provider'
+import { useRealtimeConnection } from '@/hooks/use-realtime'
 import { TopNavbar } from '@/components/layout/top-navbar'
 import { SkipToMain } from '@/components/skip-to-main'
 
@@ -9,6 +10,8 @@ type AuthenticatedLayoutProps = {
 }
 
 export function AuthenticatedLayout({ children }: AuthenticatedLayoutProps) {
+  useRealtimeConnection()
+
   return (
     <SearchProvider>
       <LayoutProvider>

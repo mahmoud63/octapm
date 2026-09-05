@@ -1854,6 +1854,80 @@ const components = {
       createdAt: nullableDateString,
       updatedAt: nullableDateString,
     }),
+    LocationRecord: objectSchema({
+      id: uuid,
+      projectId: uuid,
+      parentId: { type: "string", format: "uuid", nullable: true },
+      name: { type: "string" },
+      code: { type: "string", nullable: true },
+      kind: {
+        type: "string",
+        enum: ["site", "building", "level", "zone", "room", "area", "external"],
+      },
+      path: {
+        type: "string",
+        description: "Materialized path of location ids from the root.",
+      },
+      pathNames: arrayOf({ type: "string" }),
+      fullName: { type: "string" },
+      depth: { type: "integer" },
+      sortOrder: { type: "integer" },
+      status: { type: "string", enum: ["active", "archived"] },
+      description: { type: "string", nullable: true },
+      childCount: { type: "integer" },
+      createdBy: { type: "string", nullable: true },
+      updatedBy: { type: "string", nullable: true },
+      archivedAt: nullableDateString,
+      archivedBy: { type: "string", nullable: true },
+      createdAt: nullableDateString,
+      updatedAt: nullableDateString,
+    }),
+    LocationTreeNode: {
+      allOf: [
+        ref("LocationRecord"),
+        objectSchema({ children: arrayOf(ref("GenericObject")) }),
+      ],
+    },
+    LocationListResponse: objectSchema({
+      items: arrayOf(ref("LocationRecord")),
+      tree: arrayOf(ref("LocationTreeNode")),
+      summary: objectSchema({
+        total: { type: "integer" },
+        active: { type: "integer" },
+        archived: { type: "integer" },
+        roots: { type: "integer" },
+        maxDepth: { type: "integer" },
+      }),
+    }),
+    LocationMutation: objectSchema({
+      name: { type: "string", maxLength: 120 },
+      code: { type: "string", maxLength: 40, nullable: true },
+      kind: {
+        type: "string",
+        enum: ["site", "building", "level", "zone", "room", "area", "external"],
+      },
+      parentId: { type: "string", format: "uuid", nullable: true },
+      description: { type: "string", maxLength: 1000, nullable: true },
+      sortOrder: { type: "integer", minimum: 0, nullable: true },
+    }),
+    LocationReorderPayload: objectSchema(
+      {
+        parentId: { type: "string", format: "uuid", nullable: true },
+        orderedIds: arrayOf(uuid),
+      },
+      ["orderedIds"],
+    ),
+    LocationReasonPayload: objectSchema({
+      reason: { type: "string", maxLength: 500, nullable: true },
+    }),
+    LocationArchiveResponse: objectSchema({
+      id: uuid,
+      status: { type: "string", enum: ["archived"] },
+      archived: { type: "boolean" },
+      deleted: { type: "boolean" },
+      affectedCount: { type: "integer" },
+      affectedIds: arrayOf(uuid),
+    }),
     ActivityMutation: objectSchema({
       name: { type: "string" },
       activityCode: { type: "string", nullable: true },
@@ -8147,6 +8221,86 @@ add(
   }),
 );
 
+[
+  {
+    method: "get",
+    path: "/projects/{projectId}/locations",
+    summary:
+      "List the project location tree (flat ordered rows plus nested tree).",
+    operationId: "listLocations",
+    parameters: [...projectParams, includeArchivedParam],
+    permissions: modulePermission("location", "read"),
+    responseSchema: ref("LocationListResponse"),
+  },
+  {
+    method: "post",
+    path: "/projects/{projectId}/locations",
+    summary: "Create a location under an optional parent.",
+    operationId: "createLocation",
+    permissions: modulePermission("location", "create"),
+    requestBody: jsonBody(ref("LocationMutation"), "Location payload.", true),
+    responseSchema: ref("LocationRecord"),
+    status: 201,
+  },
+  {
+    method: "post",
+    path: "/projects/{projectId}/locations/reorder",
+    summary: "Reorder direct children of one parent.",
+    operationId: "reorderLocations",
+    permissions: modulePermission("location", "update"),
+    requestBody: jsonBody(
+      ref("LocationReorderPayload"),
+      "Ordered sibling ids.",
+      true,
+    ),
+    responseSchema: arrayOf(ref("LocationRecord")),
+  },
+  {
+    method: "patch",
+    path: "/projects/{projectId}/locations/{id}",
+    summary: "Rename, recode, describe, reorder, or move a location.",
+    operationId: "updateLocation",
+    parameters: projectRecordParams,
+    permissions: modulePermission("location", "update"),
+    requestBody: jsonBody(ref("LocationMutation"), "Partial location payload."),
+    responseSchema: ref("LocationRecord"),
+  },
+  {
+    method: "post",
+    path: "/projects/{projectId}/locations/{id}/archive",
+    summary: "Archive a location and its whole subtree.",
+    operationId: "archiveLocation",
+    parameters: projectRecordParams,
+    permissions: modulePermission("location", "delete", "location.archive"),
+    requestBody: jsonBody(ref("LocationReasonPayload"), "Optional reason.", false),
+    responseSchema: ref("LocationArchiveResponse"),
+  },
+  {
+    method: "post",
+    path: "/projects/{projectId}/locations/{id}/restore",
+    summary: "Restore an archived location (parent must be active).",
+    operationId: "restoreLocation",
+    parameters: projectRecordParams,
+    permissions: modulePermission("location", "delete", "location.restore"),
+    requestBody: jsonBody(ref("LocationReasonPayload"), "Optional reason.", false),
+    responseSchema: ref("LocationRecord"),
+  },
+  {
+    method: "delete",
+    path: "/projects/{projectId}/locations/{id}",
+    summary: "Alias for archiving a location subtree.",
+    operationId: "deleteLocation",
+    parameters: projectRecordParams,
+    permissions: modulePermission("location", "delete", "location.archive"),
+    responseSchema: ref("LocationArchiveResponse"),
+  },
+].forEach((route) =>
+  addGenericRoute({
+    tag: "Locations",
+    ...route,
+  }),
+);
+
 const openApiSpec = {
   openapi: "3.0.3",
   info: {
@@ -8316,6 +8470,16 @@ const openApiSpec = {
     {
       name: "Config",
       description: "Shared application configuration endpoints.",
+    },
+    {
+      name: "Locations",
+      description:
+        "Hierarchical project locations (site, building, level, zone, room) used as the spatial key for field records.",
+    },
+    {
+      name: "Realtime",
+      description:
+        "Not a REST surface. Authenticated socket.io transport at the API origin: clients send `project:join { projectId }` (acknowledged after the same project access check as REST) and receive `domain.event` messages of type record.changed, approval.decided, notification.created, or job.progress. See docs/qa/realtime-events.md.",
     },
   ],
   paths,

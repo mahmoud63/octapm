@@ -33,6 +33,7 @@ export type PermissionModule =
   | 'eot'
   | 'meeting'
   | 'task'
+  | 'location'
 
 export type RoleId =
   | 'pm'
