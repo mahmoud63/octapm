@@ -65,7 +65,7 @@ assert.match(dialogs, /<CommentThread[\s\S]*?recordType='commitment'/, 'notes on
 assert.match(read('src/features/commercial/components/commercial-dashboard.tsx'), /<TabsTrigger value='commitments'>Commitments<\/TabsTrigger>/, 'Commitments tab')
 assert.match(read('src/features/projects/components/project-detail.tsx'), /\{ key: 'commitments', label: 'Commitments' \}/, 'Commitments sub-tab')
 assert.match(read('src/lib/permissions.ts'), /\| 'commitment'/, 'commitment permission module typed')
-assert.match(read('src/features/projects/lib/project-modules.ts'), /commercial: \['change_order', 'ipc', 'eot', 'commitment'\]/, 'commercial module backed by commitments')
+assert.match(read('src/features/projects/lib/project-modules.ts'), /commercial: \['change_order', 'ipc', 'eot', 'commitment'(, '[a-z_]+')*\]/, 'commercial module backed by commitments')
 
 // ── Backend contract ────────────────────────────────────────────────────
 const service = read('../backend/src/services/commitment.service.js')

@@ -423,6 +423,28 @@
         "commitment_co.approve": ["pm"]
       }
     },
+    "sub_pay_app": {
+      "label": "Subcontractor payments",
+      "actions": {
+        "read": ["pm", "qs", "cost_controller", "procurement", "finance"],
+        "create": ["pm", "qs"],
+        "update": ["pm", "qs"],
+        "delete": ["pm"],
+        "submit": ["pm", "qs"],
+        "approve": ["pm"],
+        "certify": ["pm", "finance"],
+        "baseline": [],
+        "export": ["pm", "qs", "cost_controller", "finance"]
+      },
+      "transitions": {
+        "sub_pay_app.submit": ["pm", "qs"],
+        "sub_pay_app.review": ["pm", "qs"],
+        "sub_pay_app.approve": ["pm"],
+        "sub_pay_app.reject": ["pm", "qs"],
+        "sub_pay_app.pay": ["pm", "finance"],
+        "sub_pay_app.void": ["pm"]
+      }
+    },
     "ncr": {
       "label": "NCR",
       "actions": {
@@ -729,6 +751,7 @@
         },
         "submittal": { "actions": ["read"], "transitions": [] },
         "commitment": { "actions": ["read"], "transitions": [] },
+        "sub_pay_app": { "actions": ["read"], "transitions": [] },
         "change_order": { "actions": ["read", "export"], "transitions": [] },
         "eot": { "actions": ["read", "export"], "transitions": [] },
         "meeting": {
@@ -784,6 +807,7 @@
           ]
         },
         "commitment": { "actions": ["read"], "transitions": [] },
+        "sub_pay_app": { "actions": ["read"], "transitions": [] },
         "change_order": { "actions": ["read"], "transitions": [] },
         "eot": { "actions": ["read"], "transitions": [] },
         "meeting": {
@@ -850,6 +874,10 @@
           "actions": ["read", "create", "update", "submit", "export"],
           "transitions": ["commitment.submit", "commitment_co.submit"]
         },
+        "sub_pay_app": {
+          "actions": ["read", "create", "update", "submit", "export"],
+          "transitions": ["sub_pay_app.submit"]
+        },
         "change_order": { "actions": ["read"], "transitions": [] },
         "eot": { "actions": ["read"], "transitions": [] },
         "meeting": {
@@ -905,6 +933,10 @@
           "transitions": ["submittal.submit", "submittal.resubmit"]
         },
         "commitment": { "actions": ["read", "export"], "transitions": [] },
+        "sub_pay_app": {
+          "actions": ["read", "create", "update", "submit", "export"],
+          "transitions": ["sub_pay_app.submit"]
+        },
         "meeting": {
           "actions": ["read", "submit"],
           "transitions": ["meeting.comment"]

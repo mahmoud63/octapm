@@ -37,6 +37,7 @@ export type PermissionModule =
   | 'punch'
   | 'inspection'
   | 'commitment'
+  | 'sub_pay_app'
 
 export type RoleId =
   | 'pm'

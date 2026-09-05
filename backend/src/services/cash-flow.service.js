@@ -151,6 +151,17 @@ const rebuildCashFlow = async ({ orgId, projectId }) => {
     merge(period, 0, payable);
   }
 
+  // Subcontractor pay-app payments are outflows in the month they were paid (OCTA-FIN-SUBPAY-021).
+  if (prisma.subPayAppPayment?.findMany) {
+    const payAppPayments = await prisma.subPayAppPayment.findMany({
+      where: { projectId },
+      select: { paidAt: true, amount: true },
+    });
+    for (const payment of payAppPayments) {
+      merge(toMonth(payment.paidAt), 0, toMoneyNumber(payment.amount));
+    }
+  }
+
   await prisma.$transaction(async (tx) => {
     await tx.cashFlowEntry.deleteMany({
       where: { projectId, source: "system" },

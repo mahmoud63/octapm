@@ -12275,6 +12275,107 @@ const commitmentPermission = (action, transition = null) => modulePermission("co
   { method: "get", path: "/projects/{projectId}/commitments/{commitmentId}/export.pdf", summary: "Commitment statement PDF (values, schedule of values, change orders, insurance).", operationId: "exportCommitmentPdf", parameters: [...projectParams, commitmentIdParam], permissions: commitmentPermission("export"), responseSchema: { type: "string", format: "binary" } },
 ].forEach((route) => addGenericRoute({ tag: "Commercial", ...route }));
 
+// ─── Subcontractor payment applications (OCTA-FIN-SUBPAY-021) ─────────────
+const payAppIdParam = pathParam("payAppId", "Payment application UUID.");
+const payAppStatuses = ["draft", "submitted", "under_review", "approved", "paid", "rejected", "void"];
+const payAppRejectionCodes = ["OVER_APPROVED_PROGRESS", "MISSING_COMPLIANCE", "INCORRECT_QUANTITIES", "DUPLICATE_PERIOD", "BACK_CHARGE_DISPUTE", "OTHER"];
+const payAppLineSchema = objectSchema({
+  id: uuid,
+  sovLineId: uuid,
+  lineNumber: { type: "integer", nullable: true },
+  description: { type: "string" },
+  costCode: { type: "string", nullable: true },
+  activityId: nullableUuid,
+  activity: nullableRef("GenericObject"),
+  scheduledAmount: { type: "number" },
+  previousAmount: { type: "number" },
+  thisPeriodAmount: { type: "number" },
+  cumulativeAmount: { type: "number" },
+  cumulativePct: { type: "number" },
+  materialsOnSite: { type: "number" },
+  approvedPct: { type: "number", nullable: true, description: "Latest approved progress of the line's activity." },
+  capAmount: { type: "number", nullable: true, description: "approvedPct × scheduled; null when the line has no activity progress." },
+  overClaimAmount: { type: "number" },
+  balanceToFinish: { type: "number" },
+  notes: { type: "string", nullable: true },
+});
+const payAppSchema = objectSchema({
+  id: uuid,
+  projectId: uuid,
+  commitmentId: uuid,
+  commitment: nullableRef("GenericObject"),
+  number: { type: "integer" },
+  ref: { type: "string", example: "SC-001-PA01" },
+  periodLabel: { type: "string" },
+  periodStart: nullableDateString,
+  periodEnd: nullableDateString,
+  status: { type: "string", enum: payAppStatuses },
+  workThisPeriod: { type: "number" },
+  workCumulative: { type: "number" },
+  materialsOnSite: { type: "number" },
+  grossThisPeriod: { type: "number" },
+  retentionRate: { type: "number" },
+  retentionThisPeriod: { type: "number" },
+  retentionCumulative: { type: "number" },
+  backCharges: { type: "number" },
+  backChargesNote: { type: "string", nullable: true },
+  netThisPeriod: { type: "number" },
+  paidAmount: { type: "number" },
+  outstanding: { type: "number" },
+  overClaimAmount: { type: "number" },
+  waiverRequired: { type: "boolean" },
+  waiverDocumentId: nullableUuid,
+  waiverDocument: nullableRef("GenericObject"),
+  complianceOverrideReason: { type: "string", nullable: true },
+  overClaimOverrideReason: { type: "string", nullable: true },
+  reviewNote: { type: "string", nullable: true },
+  rejectionCode: { type: "string", nullable: true, enum: [...payAppRejectionCodes, null] },
+  rejectedReason: { type: "string", nullable: true },
+  notes: { type: "string", nullable: true },
+  submittedAt: nullableDateString,
+  reviewedAt: nullableDateString,
+  approvedAt: nullableDateString,
+  rejectedAt: nullableDateString,
+  paidAt: nullableDateString,
+  lines: arrayOf(payAppLineSchema),
+  payments: arrayOf(objectSchema({ id: uuid, amount: { type: "number" }, paidAt: nullableDateString, method: { type: "string", nullable: true }, reference: { type: "string", nullable: true }, note: { type: "string", nullable: true } })),
+  path: { type: "string" },
+});
+const payAppLineInput = objectSchema({
+  sovLineId: uuid,
+  thisPeriodAmount: { type: "number", nullable: true },
+  thisPeriodPct: { type: "number", nullable: true, description: "Cumulative % to date; converted to this period." },
+  materialsOnSite: { type: "number", nullable: true },
+  notes: { type: "string", nullable: true },
+});
+const payAppUpdateRequest = objectSchema({
+  periodLabel: { type: "string" },
+  periodStart: nullableDateString,
+  periodEnd: nullableDateString,
+  retentionRate: { type: "number", nullable: true },
+  backCharges: { type: "number", nullable: true },
+  backChargesNote: { type: "string", nullable: true },
+  waiverRequired: { type: "boolean" },
+  waiverDocumentId: nullableUuid,
+  notes: { type: "string", nullable: true },
+  lines: arrayOf(payAppLineInput),
+});
+const payAppPermission = (action, transition = null) => modulePermission("sub_pay_app", action, transition);
+[
+  { method: "get", path: "/projects/{projectId}/pay-apps", summary: "Payment applications with totals; subcontractor party users see only those on their commitments.", operationId: "listSubPayApps", parameters: [...projectParams, queryParam("commitmentId", "Filter by commitment.", uuid), queryParam("status", "Filter by status.", { type: "string", enum: payAppStatuses }), queryParam("includeVoid", "Include void applications.", { type: "boolean" })], permissions: payAppPermission("read"), responseSchema: objectSchema({ items: arrayOf(payAppSchema), summary: ref("GenericObject") }) },
+  { method: "post", path: "/projects/{projectId}/pay-apps", summary: "Start a draft application against an executed commitment: lines are seeded from its schedule of values with previous claims and approved-progress caps. One open application per commitment.", operationId: "createSubPayApp", parameters: projectParams, permissions: payAppPermission("create"), requestBody: jsonBody(objectSchema({ commitmentId: uuid, periodLabel: { type: "string" }, periodStart: nullableDateString, periodEnd: nullableDateString, retentionRate: { type: "number", nullable: true }, waiverRequired: { type: "boolean" }, notes: { type: "string", nullable: true } }, ["commitmentId", "periodLabel"]), "Application."), responseSchema: payAppSchema, status: 201 },
+  { method: "get", path: "/projects/{projectId}/pay-apps/{payAppId}", summary: "One application with lines and payments.", operationId: "getSubPayApp", parameters: [...projectParams, payAppIdParam], permissions: payAppPermission("read"), responseSchema: payAppSchema },
+  { method: "patch", path: "/projects/{projectId}/pay-apps/{payAppId}", summary: "Edit claims (this period amount or cumulative %), materials on site, retention, back-charges and compliance fields while draft / submitted / under review. Cumulative cannot exceed the scheduled amount (400 SUB_PAY_APP_EXCEEDS_SCHEDULED).", operationId: "updateSubPayApp", parameters: [...projectParams, payAppIdParam], permissions: payAppPermission("update"), requestBody: jsonBody(payAppUpdateRequest, "Fields to change.", false), responseSchema: payAppSchema },
+  { method: "delete", path: "/projects/{projectId}/pay-apps/{payAppId}", summary: "Void a draft or rejected application.", operationId: "voidSubPayApp", parameters: [...projectParams, payAppIdParam, queryParam("reason", "Reason.", { type: "string" })], permissions: payAppPermission("delete", "sub_pay_app.void"), responseSchema: payAppSchema },
+  { method: "post", path: "/projects/{projectId}/pay-apps/{payAppId}/submit", summary: "Submit: claims are re-checked against approved progress; an over-claim is rejected with 400 SUB_PAY_APP_OVER_CLAIM and reason code OVER_APPROVED_PROGRESS listing the lines.", operationId: "submitSubPayApp", parameters: [...projectParams, payAppIdParam], permissions: payAppPermission("submit", "sub_pay_app.submit"), responseSchema: payAppSchema },
+  { method: "post", path: "/projects/{projectId}/pay-apps/{payAppId}/review", summary: "QS review: marks the application under review with a note.", operationId: "reviewSubPayApp", parameters: [...projectParams, payAppIdParam], permissions: payAppPermission("submit", "sub_pay_app.review"), requestBody: jsonBody(objectSchema({ note: { type: "string", nullable: true } }), "Review note.", false), responseSchema: payAppSchema },
+  { method: "post", path: "/projects/{projectId}/pay-apps/{payAppId}/approve", summary: "PM approval with the compliance gate (commitment insurance valid, lien waiver on file when required → 409 SUB_PAY_APP_COMPLIANCE) and the over-claim check; both can be overridden with a reason.", operationId: "approveSubPayApp", parameters: [...projectParams, payAppIdParam], permissions: payAppPermission("approve", "sub_pay_app.approve"), requestBody: jsonBody(objectSchema({ complianceOverrideReason: { type: "string", nullable: true }, overClaimOverrideReason: { type: "string", nullable: true } }), "Overrides.", false), responseSchema: payAppSchema },
+  { method: "post", path: "/projects/{projectId}/pay-apps/{payAppId}/reject", summary: "Reject with a reason code and reason.", operationId: "rejectSubPayApp", parameters: [...projectParams, payAppIdParam], permissions: payAppPermission("submit", "sub_pay_app.reject"), requestBody: jsonBody(objectSchema({ code: { type: "string", enum: payAppRejectionCodes }, reason: { type: "string" } }, ["reason"]), "Rejection."), responseSchema: payAppSchema },
+  { method: "post", path: "/projects/{projectId}/pay-apps/{payAppId}/reopen", summary: "Return a rejected application to draft.", operationId: "reopenSubPayApp", parameters: [...projectParams, payAppIdParam], permissions: payAppPermission("update"), responseSchema: payAppSchema },
+  { method: "post", path: "/projects/{projectId}/pay-apps/{payAppId}/payments", summary: "Record a payment (finance). Σ payments cannot exceed the net approved (400 SUB_PAY_APP_PAYMENT_EXCEEDS); paid in full moves the application to paid and the project cash flow is rebuilt.", operationId: "recordSubPayAppPayment", parameters: [...projectParams, payAppIdParam], permissions: payAppPermission("certify", "sub_pay_app.pay"), requestBody: jsonBody(objectSchema({ amount: { type: "number" }, paidAt: nullableDateString, method: { type: "string", nullable: true }, reference: { type: "string", nullable: true }, note: { type: "string", nullable: true } }, ["amount"]), "Payment."), responseSchema: payAppSchema, status: 201 },
+  { method: "get", path: "/projects/{projectId}/pay-apps/{payAppId}/export.pdf", summary: "Application statement PDF.", operationId: "exportSubPayAppPdf", parameters: [...projectParams, payAppIdParam], permissions: payAppPermission("export"), responseSchema: { type: "string", format: "binary" } },
+].forEach((route) => addGenericRoute({ tag: "Commercial", ...route }));
+
 // ─── Punch list ─────────────────────────────────────────────────────────
 const punchItemIdParam = pathParam("itemId", "Punch item UUID.");
 const punchFilterParams = [

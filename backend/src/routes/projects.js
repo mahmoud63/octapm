@@ -360,6 +360,7 @@ router.use(
 router.use("/:projectId/cost", nestedProjectAccess, require("./cost"));
 router.use("/:projectId/budget", nestedProjectAccess, require("./budget"));
 router.use("/:projectId/commitments", nestedProjectAccess, require("./commitments"));
+router.use("/:projectId/pay-apps", nestedProjectAccess, require("./sub-pay-apps"));
 router.use(
   "/:projectId/change-orders",
   nestedProjectAccess,

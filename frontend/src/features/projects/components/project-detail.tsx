@@ -246,8 +246,9 @@ export function ProjectDetail({
         children: [
           { key: 'change-orders', label: 'Change Orders' },
           { key: 'commitments', label: 'Commitments' },
+          { key: 'pay-apps', label: 'Pay Applications' },
           { key: 'ipc', label: 'IPC' },
-          { key: 'sub-valuations', label: 'Sub Valuations' },
+          { key: 'sub-valuations', label: 'Sub Valuations (legacy)' },
           { key: 'budget-revisions', label: 'Budget Revisions' },
           { key: 'cash-flow', label: 'Cash Flow' },
           { key: 'eot', label: 'EOT' },
@@ -375,10 +376,7 @@ export function ProjectDetail({
           <CaptureHome
             projectId={projectId}
             onNavigate={(module, child) =>
-              goTo(
-                module,
-                child && isModuleWithChildren(module) ? child : null
-              )
+              goTo(module, child && isModuleWithChildren(module) ? child : null)
             }
           />
         )

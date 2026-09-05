@@ -7,6 +7,7 @@ import { ChangeOrderRegister } from './change-order-register'
 import { CommitmentsPanel } from './commitments-panel'
 import { EotPanel } from './eot-panel'
 import { IpcWorkbook } from './ipc-workbook'
+import { PayAppsPanel } from './pay-apps-panel'
 import { SubValuationsPanel } from './sub-valuations-panel'
 import { WeatherDelaysPanel } from './weather-delays-panel'
 
@@ -37,8 +38,11 @@ export function CommercialDashboard({
           <TabsList className='flex-wrap'>
             <TabsTrigger value='change-orders'>Change Orders</TabsTrigger>
             <TabsTrigger value='commitments'>Commitments</TabsTrigger>
+            <TabsTrigger value='pay-apps'>Pay Applications</TabsTrigger>
             <TabsTrigger value='ipc'>IPC</TabsTrigger>
-            <TabsTrigger value='sub-valuations'>Sub Valuations</TabsTrigger>
+            <TabsTrigger value='sub-valuations'>
+              Sub Valuations (legacy)
+            </TabsTrigger>
             <TabsTrigger value='budget-revisions'>Budget Revisions</TabsTrigger>
             <TabsTrigger value='cash-flow'>Cash Flow</TabsTrigger>
             <TabsTrigger value='eot'>EOT</TabsTrigger>
@@ -68,6 +72,17 @@ export function CommercialDashboard({
             projectId={projectId}
             initialRecordId={
               initialTarget?.source === 'commitment'
+                ? initialTarget.recordId
+                : undefined
+            }
+          />
+        </TabsContent>
+
+        <TabsContent value='pay-apps'>
+          <PayAppsPanel
+            projectId={projectId}
+            initialRecordId={
+              initialTarget?.source === 'sub_pay_app'
                 ? initialTarget.recordId
                 : undefined
             }

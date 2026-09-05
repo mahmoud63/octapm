@@ -55,6 +55,9 @@ model Organisation {
   commitments         Commitment[]
   commitmentSovLines  CommitmentSovLine[]
   commitmentChangeOrders CommitmentChangeOrder[]
+  subPayApps          SubPayApp[]
+  subPayAppLines      SubPayAppLine[]
+  subPayAppPayments   SubPayAppPayment[]
   companyEquipment    CompanyEquipment[]
   projectTemplates    ProjectTemplate[]
   comments            Comment[]
@@ -390,6 +393,9 @@ model Project {
   commitments                   Commitment[]
   commitmentSovLines            CommitmentSovLine[]
   commitmentChangeOrders        CommitmentChangeOrder[]
+  subPayApps                    SubPayApp[]
+  subPayAppLines                SubPayAppLine[]
+  subPayAppPayments             SubPayAppPayment[]
   activityCostLoadings          ActivityCostLoading[]
   evPeriodSnapshots             EvPeriodSnapshot[]
   activityProgressMethods       ActivityProgressMethod[]
@@ -1210,6 +1216,7 @@ model ProjectDocument {
   documentRevisions        DocumentRevision[]
   taskAttachments          TaskAttachment[]
   commitmentsExecuted      Commitment[]              @relation("CommitmentExecutedDocument")
+  subPayAppWaivers         SubPayApp[]               @relation("SubPayAppWaiverDocument")
   attachments              Attachment[]
   photo                    Photo?
   text                     DocumentText?
@@ -4142,6 +4149,7 @@ model Commitment {
   lines             CommitmentSovLine[]
   changeOrders      CommitmentChangeOrder[]
   procurementOrders ProcurementOrder[]
+  payApps           SubPayApp[]
 
   @@unique([projectId, ref])
   @@unique([projectId, type, number])
@@ -4180,6 +4188,7 @@ model CommitmentSovLine {
   budgetLine BudgetLine?  @relation(fields: [budgetLineId], references: [id], onDelete: SetNull)
   boqItem    BoqItem?     @relation(fields: [boqItemId], references: [id], onDelete: SetNull)
   activity   Activity?    @relation(fields: [activityId], references: [id], onDelete: SetNull)
+  payAppLines SubPayAppLine[]
 
   @@unique([commitmentId, lineNumber])
   @@index([orgId])
@@ -4226,6 +4235,123 @@ model CommitmentChangeOrder {
   @@index([orgId])
   @@index([projectId, status])
   @@index([primeChangeOrderId])
+}
+
+// ─── Subcontractor payment applications (OCTA-FIN-SUBPAY-021) ──────────────
+
+/** A period claim against a commitment's schedule of values. */
+model SubPayApp {
+  id                       String    @id @default(uuid())
+  orgId                    String
+  projectId                String
+  commitmentId             String
+  number                   Int
+  ref                      String
+  periodLabel              String
+  periodStart              DateTime?
+  periodEnd                DateTime?
+  status                   String    @default("draft") // draft, submitted, under_review, approved, paid, rejected, void
+  workThisPeriod           Decimal   @default(0) @db.Decimal(18, 2)
+  workCumulative           Decimal   @default(0) @db.Decimal(18, 2)
+  materialsOnSite          Decimal   @default(0) @db.Decimal(18, 2)
+  grossThisPeriod          Decimal   @default(0) @db.Decimal(18, 2)
+  retentionRate            Float     @default(5)
+  retentionThisPeriod      Decimal   @default(0) @db.Decimal(18, 2)
+  retentionCumulative      Decimal   @default(0) @db.Decimal(18, 2)
+  backCharges              Decimal   @default(0) @db.Decimal(18, 2)
+  backChargesNote          String?
+  netThisPeriod            Decimal   @default(0) @db.Decimal(18, 2)
+  paidAmount               Decimal   @default(0) @db.Decimal(18, 2)
+  overClaimAmount          Decimal   @default(0) @db.Decimal(18, 2)
+  waiverRequired           Boolean   @default(false)
+  waiverDocumentId         String?
+  complianceOverrideReason String?
+  overClaimOverrideReason  String?
+  reviewNote               String?
+  rejectionCode            String?
+  rejectedReason           String?
+  notes                    String?
+  submittedAt              DateTime?
+  submittedBy              String?
+  reviewedAt               DateTime?
+  reviewedBy               String?
+  approvedAt               DateTime?
+  approvedBy               String?
+  rejectedAt               DateTime?
+  rejectedBy               String?
+  paidAt                   DateTime?
+  voidReason               String?
+  createdBy                String?
+  updatedBy                String?
+  createdAt                DateTime  @default(now())
+  updatedAt                DateTime  @updatedAt
+
+  org            Organisation       @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  project        Project            @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  commitment     Commitment         @relation(fields: [commitmentId], references: [id], onDelete: Cascade)
+  waiverDocument ProjectDocument?   @relation("SubPayAppWaiverDocument", fields: [waiverDocumentId], references: [id], onDelete: SetNull)
+  lines          SubPayAppLine[]
+  payments       SubPayAppPayment[]
+
+  @@unique([commitmentId, number])
+  @@unique([projectId, ref])
+  @@index([orgId])
+  @@index([projectId, status])
+  @@index([commitmentId, status])
+}
+
+/** One row per schedule-of-values line: previous, this period, cumulative and the approved-progress cap. */
+model SubPayAppLine {
+  id               String   @id @default(uuid())
+  orgId            String
+  projectId        String
+  payAppId         String
+  sovLineId        String
+  description      String
+  scheduledAmount  Decimal  @default(0) @db.Decimal(18, 2)
+  previousAmount   Decimal  @default(0) @db.Decimal(18, 2)
+  thisPeriodAmount Decimal  @default(0) @db.Decimal(18, 2)
+  cumulativeAmount Decimal  @default(0) @db.Decimal(18, 2)
+  materialsOnSite  Decimal  @default(0) @db.Decimal(18, 2)
+  approvedPct      Float?
+  capAmount        Decimal? @db.Decimal(18, 2)
+  overClaimAmount  Decimal  @default(0) @db.Decimal(18, 2)
+  notes            String?
+  sortOrder        Int      @default(0)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  org     Organisation      @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  project Project           @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  payApp  SubPayApp         @relation(fields: [payAppId], references: [id], onDelete: Cascade)
+  sovLine CommitmentSovLine @relation(fields: [sovLineId], references: [id], onDelete: Cascade)
+
+  @@unique([payAppId, sovLineId])
+  @@index([orgId])
+  @@index([projectId, payAppId])
+  @@index([sovLineId])
+}
+
+model SubPayAppPayment {
+  id        String   @id @default(uuid())
+  orgId     String
+  projectId String
+  payAppId  String
+  amount    Decimal  @default(0) @db.Decimal(18, 2)
+  paidAt    DateTime
+  method    String?
+  reference String?
+  note      String?
+  createdBy String?
+  createdAt DateTime @default(now())
+
+  org     Organisation @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  project Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  payApp  SubPayApp    @relation(fields: [payAppId], references: [id], onDelete: Cascade)
+
+  @@index([orgId])
+  @@index([projectId, paidAt])
+  @@index([payAppId])
 }
 
 model CompanyEquipment {
