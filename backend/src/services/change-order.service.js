@@ -1161,6 +1161,19 @@ const updateChangeOrder = async ({
           })
         : null;
 
+    // Budget by cost code (OCTA-FIN-COSTCODE-019): the approved value lands
+    // on the order's budget line, the lines of its activity, or the
+    // project's "Change orders" line.
+    if (budgetRevision) {
+      await require("./budget.service").applyChangeOrderToBudgetLines({
+        tx,
+        orgId,
+        projectId,
+        order: updated,
+        actorId: userId,
+      });
+    }
+
     await auditService.recordEvent({
       tx,
       orgId,

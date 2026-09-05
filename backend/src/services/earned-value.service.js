@@ -1414,6 +1414,15 @@ const lockReportingPeriod = async ({
       },
     });
 
+    // The budget by cost code is frozen with the period (OCTA-FIN-COSTCODE-019).
+    await require("./budget.service").snapshotForPeriod({
+      tx,
+      orgId,
+      projectId,
+      periodId,
+      userId: userId || null,
+    });
+
     if (readinessOverride) {
       await auditService.recordEvent({
         tx,

@@ -38,6 +38,7 @@ import {
   useCostSummary,
   useUpdateCostRecord,
 } from '../hooks/use-cost'
+import { BudgetPanel } from './budget-panel'
 
 const fmtUSD = (value: number) =>
   '$' + Number(value || 0).toLocaleString('en-US', { maximumFractionDigits: 0 })
@@ -172,6 +173,7 @@ export function CostDashboard({
             <TabsTrigger value='phase'>By Phase</TabsTrigger>
             <TabsTrigger value='equipment'>Equipment</TabsTrigger>
             <TabsTrigger value='burn'>Burn Rate</TabsTrigger>
+            <TabsTrigger value='budget'>Budget</TabsTrigger>
           </TabsList>
         )}
 
@@ -554,9 +556,10 @@ export function CostDashboard({
             <div className='rounded-md border bg-card p-3'>
               <p className='text-xs text-muted-foreground'>Approved Hours</p>
               <p className='mt-1 text-lg font-bold'>
-                {Number(
-                  equipmentUtilization?.totals.hours || 0
-                ).toLocaleString(undefined, { maximumFractionDigits: 1 })}
+                {Number(equipmentUtilization?.totals.hours || 0).toLocaleString(
+                  undefined,
+                  { maximumFractionDigits: 1 }
+                )}
               </p>
             </div>
             <div className='rounded-md border bg-card p-3'>
@@ -722,6 +725,10 @@ export function CostDashboard({
             title='Burn Rate History'
             limit={8}
           />
+        </TabsContent>
+
+        <TabsContent value='budget' className='space-y-3'>
+          <BudgetPanel projectId={projectId} />
         </TabsContent>
       </Tabs>
     </div>

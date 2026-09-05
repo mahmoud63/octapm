@@ -48,6 +48,10 @@ model Organisation {
   attachments         Attachment[]
   photos              Photo[]
   costCodes           CostCode[]
+  projectCostCodes    ProjectCostCode[]
+  budgetLines         BudgetLine[]
+  budgetLineChanges   BudgetLineChange[]
+  budgetSnapshots     BudgetSnapshot[]
   companyEquipment    CompanyEquipment[]
   projectTemplates    ProjectTemplate[]
   comments            Comment[]
@@ -374,6 +378,11 @@ model Project {
   subValuationAllocationLinks   SubValuationAllocationLink[]
   budgetRevisions               BudgetRevision[]
   reportingPeriods              ReportingPeriod[]
+  projectCostCodes              ProjectCostCode[]
+  budgetLines                   BudgetLine[]
+  budgetLineChanges             BudgetLineChange[]
+  budgetLineAllocations         BudgetLineActivityAllocation[]
+  budgetSnapshots               BudgetSnapshot[]
   activityCostLoadings          ActivityCostLoading[]
   evPeriodSnapshots             EvPeriodSnapshot[]
   activityProgressMethods       ActivityProgressMethod[]
@@ -1288,6 +1297,7 @@ model Activity {
   project                Project                    @relation(fields: [projectId], references: [id])
   progress               ActivityProgress[]
   costRecords            CostRecord[]
+  budgetLineAllocations  BudgetLineActivityAllocation[]
   longLeadItems          LongLeadItem[]
   procurementPackages    ProcurementPackage[]
   changeOrders           ChangeOrder[]
@@ -1629,8 +1639,9 @@ model ReportingPeriod {
   updatedAt   DateTime  @updatedAt
 
   project      Project               @relation(fields: [projectId], references: [id])
-  costLoadings ActivityCostLoading[]
-  evSnapshot   EvPeriodSnapshot?
+  costLoadings   ActivityCostLoading[]
+  evSnapshot     EvPeriodSnapshot?
+  budgetSnapshot BudgetSnapshot?
 
   @@unique([projectId, code])
   @@index([projectId])
@@ -1707,6 +1718,7 @@ model ChangeOrder {
   id                    String    @id @default(uuid())
   projectId             String
   activityId            String?
+  budgetLineId          String? // target budget line for the approved value (OCTA-FIN-COSTCODE-019)
   ref                   String
   description           String
   category              String?
@@ -1733,11 +1745,14 @@ model ChangeOrder {
 
   project         Project                     @relation(fields: [projectId], references: [id])
   activity        Activity?                   @relation(fields: [activityId], references: [id], onDelete: SetNull)
+  budgetLine      BudgetLine?                 @relation(fields: [budgetLineId], references: [id], onDelete: SetNull)
   activityLinks   ChangeOrderActivityLink[]
   allocationLinks ChangeOrderAllocationLink[]
+  budgetLineChanges BudgetLineChange[]
 
   @@index([projectId])
   @@index([projectId, status, archivedAt])
+  @@index([budgetLineId])
 }
 
 model ChangeOrderActivityLink {
@@ -3930,10 +3945,136 @@ model CostCode {
   org      Organisation @relation(fields: [orgId], references: [id], onDelete: Cascade)
   parent   CostCode?    @relation("CostCodeChildren", fields: [parentId], references: [id], onDelete: SetNull)
   children CostCode[]   @relation("CostCodeChildren")
+  projectCostCodes ProjectCostCode[]
+  budgetLines      BudgetLine[]
 
   @@unique([orgId, code])
   @@index([orgId, status])
   @@index([parentId])
+}
+
+// ─── Budget by cost code (OCTA-FIN-COSTCODE-019) ───────────────────────────
+
+/** The subset of the organisation's cost codes a project budgets against. */
+model ProjectCostCode {
+  id         String   @id @default(uuid())
+  orgId      String
+  projectId  String
+  costCodeId String
+  status     String   @default("active") // active, archived
+  sortOrder  Int      @default(0)
+  createdBy  String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  org      Organisation @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  project  Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  costCode CostCode     @relation(fields: [costCodeId], references: [id], onDelete: Cascade)
+
+  @@unique([projectId, costCodeId])
+  @@index([orgId])
+  @@index([projectId, status])
+}
+
+/**
+ * One budget line per cost code and cost type. Revised budget = original +
+ * every BudgetLineChange (approved change orders, revisions, transfers).
+ */
+model BudgetLine {
+  id             String   @id @default(uuid())
+  orgId          String
+  projectId      String
+  costCodeId     String
+  costType       String   @default("other") // labour, material, equipment, subcontract, indirect, overhead, contingency, other
+  description    String?
+  originalBudget Decimal  @default(0) @db.Decimal(18, 2)
+  committed      Decimal  @default(0) @db.Decimal(18, 2)
+  actual         Decimal  @default(0) @db.Decimal(18, 2)
+  forecast       Decimal? @db.Decimal(18, 2)
+  status         String   @default("active") // active, archived
+  sortOrder      Int      @default(0)
+  createdBy      String?
+  updatedBy      String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  org         Organisation                   @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  project     Project                        @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  costCode    CostCode                       @relation(fields: [costCodeId], references: [id], onDelete: Restrict)
+  changes     BudgetLineChange[]
+  allocations BudgetLineActivityAllocation[]
+  changeOrders ChangeOrder[]
+
+  @@unique([projectId, costCodeId, costType])
+  @@index([orgId])
+  @@index([projectId, status])
+  @@index([costCodeId])
+}
+
+/** Ledger of amounts added to or moved between budget lines. */
+model BudgetLineChange {
+  id                String   @id @default(uuid())
+  orgId             String
+  projectId         String
+  budgetLineId      String
+  kind              String // change_order, revision, transfer_in, transfer_out
+  amount            Decimal  @default(0) @db.Decimal(18, 2)
+  changeOrderId     String?
+  counterpartLineId String?
+  note              String?
+  createdBy         String?
+  createdAt         DateTime @default(now())
+
+  org         Organisation @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  project     Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  budgetLine  BudgetLine   @relation(fields: [budgetLineId], references: [id], onDelete: Cascade)
+  changeOrder ChangeOrder? @relation(fields: [changeOrderId], references: [id], onDelete: SetNull)
+
+  @@index([orgId])
+  @@index([projectId, budgetLineId])
+  @@index([projectId, changeOrderId])
+}
+
+/** Share of a budget line carried by an activity (weights sum to ≤ 100 per line). */
+model BudgetLineActivityAllocation {
+  id           String   @id @default(uuid())
+  projectId    String
+  budgetLineId String
+  activityId   String
+  weight       Float    @default(0)
+  amount       Decimal  @default(0) @db.Decimal(18, 2)
+  source       String   @default("manual") // manual, boq, even
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  project    Project    @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  budgetLine BudgetLine @relation(fields: [budgetLineId], references: [id], onDelete: Cascade)
+  activity   Activity   @relation(fields: [activityId], references: [id], onDelete: Cascade)
+
+  @@unique([budgetLineId, activityId])
+  @@index([projectId, activityId])
+}
+
+/** Frozen copy of the budget (lines, allocations, reconciliation) — one per locked reporting period. */
+model BudgetSnapshot {
+  id                 String   @id @default(uuid())
+  orgId              String
+  projectId          String
+  reportingPeriodId  String?  @unique
+  label              String
+  takenBy            String?
+  takenAt            DateTime @default(now())
+  totalsJson         Json     @default("{}")
+  linesJson          Json     @default("[]")
+  reconciliationJson Json     @default("{}")
+  createdAt          DateTime @default(now())
+
+  org             Organisation     @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  project         Project          @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  reportingPeriod ReportingPeriod? @relation(fields: [reportingPeriodId], references: [id], onDelete: SetNull)
+
+  @@index([orgId])
+  @@index([projectId, takenAt])
 }
 
 model CompanyEquipment {

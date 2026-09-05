@@ -237,6 +237,7 @@ export function ProjectDetail({
           { key: 'phase', label: 'By Phase' },
           { key: 'equipment', label: 'Equipment' },
           { key: 'burn', label: 'Burn Rate' },
+          { key: 'budget', label: 'Budget' },
         ],
       },
       {
