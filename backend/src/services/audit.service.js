@@ -49,6 +49,8 @@ const ENTITY_TYPES = Object.freeze({
   SUBMITTAL_WORKFLOW_TEMPLATE: "submittal_workflow_template",
   BUDGET_LINE: "budget_line",
   BUDGET_SNAPSHOT: "budget_snapshot",
+  COMMITMENT: "commitment",
+  COMMITMENT_CHANGE_ORDER: "commitment_change_order",
 });
 
 const ACTIONS = Object.freeze({

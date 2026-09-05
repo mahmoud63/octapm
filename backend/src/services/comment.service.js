@@ -68,6 +68,7 @@ const RECORD_SOURCES = Object.freeze({
   },
   rfi: { model: "rfi", label: "RFI", title: ["ref", "subject"] },
   submittal: { model: "submittal", label: "Submittal", title: ["ref", "title"] },
+  commitment: { model: "commitment", label: "Commitment", title: ["ref", "title"] },
   drawing: { model: "drawingRecord", label: "Drawing", title: ["ref", "title"] },
   drawing_set: { model: "drawingSet", label: "Drawing set", title: ["setNumber", "name"] },
   sheet: { model: "sheet", label: "Sheet", title: ["number", "title"] },

@@ -245,6 +245,7 @@ export function ProjectDetail({
         label: 'Commercial',
         children: [
           { key: 'change-orders', label: 'Change Orders' },
+          { key: 'commitments', label: 'Commitments' },
           { key: 'ipc', label: 'IPC' },
           { key: 'sub-valuations', label: 'Sub Valuations' },
           { key: 'budget-revisions', label: 'Budget Revisions' },

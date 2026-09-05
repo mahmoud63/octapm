@@ -400,6 +400,29 @@
         "submittal.reject": ["pm"]
       }
     },
+    "commitment": {
+      "label": "Commitments",
+      "actions": {
+        "read": ["pm", "planning_eng", "qs", "cost_controller", "procurement", "finance"],
+        "create": ["pm", "qs", "procurement"],
+        "update": ["pm", "qs", "procurement"],
+        "delete": ["pm"],
+        "submit": ["pm", "qs", "procurement"],
+        "approve": ["pm", "finance"],
+        "certify": [],
+        "baseline": [],
+        "export": ["pm", "planning_eng", "qs", "cost_controller", "procurement", "finance"]
+      },
+      "transitions": {
+        "commitment.submit": ["pm", "qs", "procurement"],
+        "commitment.approve": ["pm"],
+        "commitment.execute": ["pm", "finance"],
+        "commitment.close": ["pm", "finance"],
+        "commitment.void": ["pm"],
+        "commitment_co.submit": ["pm", "qs", "procurement"],
+        "commitment_co.approve": ["pm"]
+      }
+    },
     "ncr": {
       "label": "NCR",
       "actions": {
@@ -705,6 +728,7 @@
           "transitions": ["rfi.answer"]
         },
         "submittal": { "actions": ["read"], "transitions": [] },
+        "commitment": { "actions": ["read"], "transitions": [] },
         "change_order": { "actions": ["read", "export"], "transitions": [] },
         "eot": { "actions": ["read", "export"], "transitions": [] },
         "meeting": {
@@ -759,6 +783,7 @@
             "submittal.reject"
           ]
         },
+        "commitment": { "actions": ["read"], "transitions": [] },
         "change_order": { "actions": ["read"], "transitions": [] },
         "eot": { "actions": ["read"], "transitions": [] },
         "meeting": {
@@ -821,6 +846,10 @@
           "actions": ["read", "create", "update", "submit"],
           "transitions": ["submittal.submit", "submittal.resubmit"]
         },
+        "commitment": {
+          "actions": ["read", "create", "update", "submit", "export"],
+          "transitions": ["commitment.submit", "commitment_co.submit"]
+        },
         "change_order": { "actions": ["read"], "transitions": [] },
         "eot": { "actions": ["read"], "transitions": [] },
         "meeting": {
@@ -875,6 +904,7 @@
           "actions": ["read", "create", "update", "submit"],
           "transitions": ["submittal.submit", "submittal.resubmit"]
         },
+        "commitment": { "actions": ["read", "export"], "transitions": [] },
         "meeting": {
           "actions": ["read", "submit"],
           "transitions": ["meeting.comment"]

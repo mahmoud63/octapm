@@ -70,6 +70,8 @@ const RECORD_TYPE_MODULES = Object.freeze({
   procurement_order: "procurement",
   procurement_package: "procurement",
   delivery_receipt: "procurement",
+  commitment: "commitment",
+  commitment_change_order: "commitment",
   cost_record: "cost",
   boq_item: "boq",
   location: "location",

@@ -12154,6 +12154,127 @@ const budgetChangeOrderIdParam = pathParam("changeOrderId", "Change order UUID."
   },
 ].forEach((route) => addGenericRoute({ tag: "Cost Control", ...route }));
 
+// ─── Commitments (OCTA-FIN-COMMIT-020) ────────────────────────────────────
+const commitmentIdParam = pathParam("commitmentId", "Commitment UUID.");
+const commitmentCoIdParam = pathParam("changeOrderId", "Commitment change order UUID.");
+const commitmentTypes = ["subcontract", "purchase_order"];
+const commitmentStatuses = ["draft", "pending", "approved", "executed", "closed", "void"];
+const commitmentLineInput = objectSchema({
+  lineNumber: { type: "integer" },
+  description: { type: "string" },
+  costCodeId: nullableUuid,
+  budgetLineId: nullableUuid,
+  boqItemId: nullableUuid,
+  activityId: nullableUuid,
+  unit: { type: "string", nullable: true },
+  qty: { type: "number" },
+  rate: { type: "number", nullable: true },
+  amount: { type: "number", nullable: true, description: "Overrides qty × rate when given." },
+  notes: { type: "string", nullable: true },
+});
+const commitmentInsuranceInput = objectSchema({
+  type: { type: "string", enum: ["general_liability", "workers_compensation", "auto", "umbrella", "professional", "builders_risk", "bond", "other"] },
+  label: { type: "string", nullable: true },
+  required: { type: "boolean" },
+  documentId: nullableUuid,
+  expiresAt: nullableDateString,
+  note: { type: "string", nullable: true },
+});
+const commitmentSchema = objectSchema({
+  id: uuid,
+  projectId: uuid,
+  number: { type: "integer" },
+  ref: { type: "string", example: "SC-001" },
+  type: { type: "string", enum: commitmentTypes },
+  title: { type: "string" },
+  description: { type: "string", nullable: true },
+  status: { type: "string", enum: commitmentStatuses },
+  currency: { type: "string" },
+  vendorCompanyId: nullableUuid,
+  vendor: nullableRef("GenericObject"),
+  projectPartyId: nullableUuid,
+  supplierId: nullableUuid,
+  retentionRate: { type: "number" },
+  paymentTerms: { type: "string", nullable: true },
+  startDate: nullableDateString,
+  endDate: nullableDateString,
+  insurance: arrayOf(objectSchema({ type: { type: "string" }, label: { type: "string", nullable: true }, required: { type: "boolean" }, documentId: nullableUuid, expiresAt: nullableDateString, status: { type: "string", enum: ["ok", "missing", "expired", "optional"] } })),
+  insuranceReady: { type: "boolean" },
+  executedDocument: nullableRef("GenericObject"),
+  executedAt: nullableDateString,
+  submittedAt: nullableDateString,
+  approvedAt: nullableDateString,
+  closedAt: nullableDateString,
+  original: { type: "number", description: "Σ schedule-of-values lines." },
+  approvedChanges: { type: "number" },
+  pendingChanges: { type: "number" },
+  revised: { type: "number", description: "original + approved change orders." },
+  retentionOnRevised: { type: "number" },
+  drawnDown: { type: "number", description: "Σ linked procurement orders." },
+  lines: arrayOf(ref("GenericObject")),
+  changeOrders: arrayOf(ref("GenericObject")),
+  procurementOrders: arrayOf(ref("GenericObject")),
+  path: { type: "string" },
+});
+const commitmentRequest = objectSchema({
+  type: { type: "string", enum: commitmentTypes },
+  title: { type: "string" },
+  description: { type: "string", nullable: true },
+  vendorCompanyId: nullableUuid,
+  supplierId: nullableUuid,
+  retentionRate: { type: "number", nullable: true },
+  paymentTerms: { type: "string", nullable: true },
+  currency: { type: "string", nullable: true },
+  startDate: nullableDateString,
+  endDate: nullableDateString,
+  notes: { type: "string", nullable: true },
+  insurance: arrayOf(commitmentInsuranceInput),
+  lines: arrayOf(commitmentLineInput),
+});
+const commitmentCoSchema = objectSchema({
+  id: uuid,
+  commitmentId: uuid,
+  number: { type: "integer" },
+  ref: { type: "string", example: "SC-001-CO01" },
+  title: { type: "string" },
+  status: { type: "string", enum: ["draft", "pending", "approved", "rejected", "void"] },
+  value: { type: "number" },
+  primeChangeOrderId: nullableUuid,
+  lines: arrayOf(ref("GenericObject")),
+});
+const commitmentCoRequest = objectSchema({
+  title: { type: "string" },
+  description: { type: "string", nullable: true },
+  value: { type: "number", nullable: true, description: "Used when no lines are given." },
+  primeChangeOrderId: nullableUuid,
+  lines: arrayOf(objectSchema({ description: { type: "string" }, costCodeId: nullableUuid, budgetLineId: nullableUuid, activityId: nullableUuid, amount: { type: "number" } })),
+});
+const reasonBody = jsonBody(objectSchema({ reason: { type: "string" } }), "Reason.", false);
+const commitmentPermission = (action, transition = null) => modulePermission("commitment", action, transition);
+[
+  { method: "get", path: "/projects/{projectId}/commitments", summary: "Commitments with derived values; subcontractor party users see only their company's.", operationId: "listCommitments", parameters: [...projectParams, queryParam("type", "Filter by type.", { type: "string", enum: commitmentTypes }), queryParam("status", "Filter by status.", { type: "string", enum: commitmentStatuses }), queryParam("vendorCompanyId", "Filter by vendor.", uuid), queryParam("search", "Ref, title or vendor.", { type: "string" }), queryParam("includeVoid", "Include void commitments.", { type: "boolean" })], permissions: commitmentPermission("read"), responseSchema: objectSchema({ items: arrayOf(commitmentSchema), summary: ref("GenericObject") }) },
+  { method: "post", path: "/projects/{projectId}/commitments", summary: "Create a draft commitment (SC-nnn subcontract or PC-nnn purchase-order commitment) with its schedule of values.", operationId: "createCommitment", parameters: projectParams, permissions: commitmentPermission("create"), requestBody: jsonBody(commitmentRequest, "Commitment."), responseSchema: commitmentSchema, status: 201 },
+  { method: "post", path: "/projects/{projectId}/commitments/change-orders/from-prime", summary: "A prime change order spawns draft change orders on the chosen commitments.", operationId: "spawnCommitmentChangeOrders", parameters: projectParams, permissions: commitmentPermission("create"), requestBody: jsonBody(objectSchema({ primeChangeOrderId: uuid, items: arrayOf(objectSchema({ commitmentId: uuid, title: { type: "string", nullable: true }, value: { type: "number", nullable: true }, lines: arrayOf(ref("GenericObject")) })) }, ["primeChangeOrderId", "items"]), "Targets."), responseSchema: objectSchema({ primeChangeOrder: ref("GenericObject"), items: arrayOf(commitmentCoSchema) }), status: 201 },
+  { method: "patch", path: "/projects/{projectId}/commitments/change-orders/{changeOrderId}", summary: "Edit a draft or pending commitment change order.", operationId: "updateCommitmentChangeOrder", parameters: [...projectParams, commitmentCoIdParam], permissions: commitmentPermission("update"), requestBody: jsonBody(commitmentCoRequest, "Fields to change.", false), responseSchema: commitmentCoSchema },
+  { method: "post", path: "/projects/{projectId}/commitments/change-orders/{changeOrderId}/submit", summary: "Submit a commitment change order.", operationId: "submitCommitmentChangeOrder", parameters: [...projectParams, commitmentCoIdParam], permissions: commitmentPermission("submit", "commitment_co.submit"), responseSchema: commitmentCoSchema },
+  { method: "post", path: "/projects/{projectId}/commitments/change-orders/{changeOrderId}/approve", summary: "Approve a commitment change order; on an executed commitment the value posts to committed cost.", operationId: "approveCommitmentChangeOrder", parameters: [...projectParams, commitmentCoIdParam], permissions: commitmentPermission("approve", "commitment_co.approve"), responseSchema: commitmentCoSchema },
+  { method: "post", path: "/projects/{projectId}/commitments/change-orders/{changeOrderId}/reject", summary: "Reject a commitment change order with a reason.", operationId: "rejectCommitmentChangeOrder", parameters: [...projectParams, commitmentCoIdParam], permissions: commitmentPermission("approve", "commitment_co.approve"), requestBody: reasonBody, responseSchema: commitmentCoSchema },
+  { method: "post", path: "/projects/{projectId}/commitments/change-orders/{changeOrderId}/void", summary: "Void a draft or pending commitment change order.", operationId: "voidCommitmentChangeOrder", parameters: [...projectParams, commitmentCoIdParam], permissions: commitmentPermission("update"), requestBody: reasonBody, responseSchema: commitmentCoSchema },
+  { method: "get", path: "/projects/{projectId}/commitments/{commitmentId}", summary: "One commitment with lines, change orders, insurance and linked purchase orders.", operationId: "getCommitment", parameters: [...projectParams, commitmentIdParam], permissions: commitmentPermission("read"), responseSchema: commitmentSchema },
+  { method: "patch", path: "/projects/{projectId}/commitments/{commitmentId}", summary: "Edit a commitment; title, retention and currency lock once approved.", operationId: "updateCommitment", parameters: [...projectParams, commitmentIdParam], permissions: commitmentPermission("update"), requestBody: jsonBody(commitmentRequest, "Fields to change.", false), responseSchema: commitmentSchema },
+  { method: "delete", path: "/projects/{projectId}/commitments/{commitmentId}", summary: "Void a commitment that is not yet executed.", operationId: "voidCommitment", parameters: [...projectParams, commitmentIdParam, queryParam("reason", "Reason.", { type: "string" })], permissions: commitmentPermission("delete", "commitment.void"), responseSchema: commitmentSchema },
+  { method: "put", path: "/projects/{projectId}/commitments/{commitmentId}/lines", summary: "Replace the schedule of values (draft / pending only).", operationId: "replaceCommitmentLines", parameters: [...projectParams, commitmentIdParam], permissions: commitmentPermission("update"), requestBody: jsonBody(objectSchema({ lines: arrayOf(commitmentLineInput) }, ["lines"]), "Lines."), responseSchema: commitmentSchema },
+  { method: "put", path: "/projects/{projectId}/commitments/{commitmentId}/insurance", summary: "Set insurance requirements (document + expiry per cover).", operationId: "setCommitmentInsurance", parameters: [...projectParams, commitmentIdParam], permissions: commitmentPermission("update"), requestBody: jsonBody(objectSchema({ insurance: arrayOf(commitmentInsuranceInput) }, ["insurance"]), "Requirements."), responseSchema: commitmentSchema },
+  { method: "post", path: "/projects/{projectId}/commitments/{commitmentId}/submit", summary: "Submit for approval (needs lines and a vendor).", operationId: "submitCommitment", parameters: [...projectParams, commitmentIdParam], permissions: commitmentPermission("submit", "commitment.submit"), responseSchema: commitmentSchema },
+  { method: "post", path: "/projects/{projectId}/commitments/{commitmentId}/approve", summary: "Approve a pending commitment.", operationId: "approveCommitment", parameters: [...projectParams, commitmentIdParam], permissions: commitmentPermission("approve", "commitment.approve"), responseSchema: commitmentSchema },
+  { method: "post", path: "/projects/{projectId}/commitments/{commitmentId}/return", summary: "Return a pending or approved commitment to draft with a reason.", operationId: "returnCommitment", parameters: [...projectParams, commitmentIdParam], permissions: commitmentPermission("approve", "commitment.approve"), requestBody: jsonBody(objectSchema({ reason: { type: "string" } }, ["reason"]), "Reason."), responseSchema: commitmentSchema },
+  { method: "post", path: "/projects/{projectId}/commitments/{commitmentId}/execute", summary: "Execute an approved commitment: attach the signed agreement (`file` upload or `documentId`); required insurance must be present and unexpired unless a PM overrides with a reason. Posts committed cost to budget lines and activities.", operationId: "executeCommitment", parameters: [...projectParams, commitmentIdParam], permissions: commitmentPermission("approve", "commitment.execute"), requestBody: fileUploadBody({ fieldName: "file", multiple: false, required: [], description: "Multipart form; `file` may be omitted when `documentId` names an existing document.", accepted: "PDF, Word, Excel, images, text (max 25 MB).", extraProperties: { documentId: { type: "string", format: "uuid" }, override: { type: "boolean" }, overrideReason: { type: "string" } } }), responseSchema: commitmentSchema },
+  { method: "post", path: "/projects/{projectId}/commitments/{commitmentId}/close", summary: "Close an executed commitment.", operationId: "closeCommitment", parameters: [...projectParams, commitmentIdParam], permissions: commitmentPermission("approve", "commitment.close"), responseSchema: commitmentSchema },
+  { method: "get", path: "/projects/{projectId}/commitments/{commitmentId}/change-orders", summary: "Change orders of a commitment.", operationId: "listCommitmentChangeOrders", parameters: [...projectParams, commitmentIdParam], permissions: commitmentPermission("read"), responseSchema: objectSchema({ items: arrayOf(commitmentCoSchema) }) },
+  { method: "post", path: "/projects/{projectId}/commitments/{commitmentId}/change-orders", summary: "Create a draft change order on a commitment (optionally linked to a prime change order).", operationId: "createCommitmentChangeOrder", parameters: [...projectParams, commitmentIdParam], permissions: commitmentPermission("create"), requestBody: jsonBody(commitmentCoRequest, "Change order."), responseSchema: commitmentCoSchema, status: 201 },
+  { method: "get", path: "/projects/{projectId}/commitments/{commitmentId}/export.pdf", summary: "Commitment statement PDF (values, schedule of values, change orders, insurance).", operationId: "exportCommitmentPdf", parameters: [...projectParams, commitmentIdParam], permissions: commitmentPermission("export"), responseSchema: { type: "string", format: "binary" } },
+].forEach((route) => addGenericRoute({ tag: "Commercial", ...route }));
+
 // ─── Punch list ─────────────────────────────────────────────────────────
 const punchItemIdParam = pathParam("itemId", "Punch item UUID.");
 const punchFilterParams = [

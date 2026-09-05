@@ -36,6 +36,7 @@ export type PermissionModule =
   | 'location'
   | 'punch'
   | 'inspection'
+  | 'commitment'
 
 export type RoleId =
   | 'pm'

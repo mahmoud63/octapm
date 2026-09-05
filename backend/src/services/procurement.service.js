@@ -834,6 +834,17 @@ const createPurchaseOrder = async ({ orgId, projectId, actor, payload }) => {
     });
   }
 
+  // A PO may draw down a purchase-order commitment (OCTA-FIN-COMMIT-020).
+  if (payload.commitmentId && prisma.commitment?.findFirst) {
+    const commitment = await prisma.commitment.findFirst({
+      where: { id: payload.commitmentId, projectId },
+      select: { id: true, status: true },
+    });
+    if (!commitment) {
+      throw new HttpError(404, 'COMMITMENT_NOT_FOUND', 'Commitment not found');
+    }
+  }
+
   return prisma.$transaction(async (tx) => {
     const order = await tx.procurementOrder.create({
       data: {
@@ -841,6 +852,7 @@ const createPurchaseOrder = async ({ orgId, projectId, actor, payload }) => {
         activityId: payload.activityId || null,
         packageId: payload.packageId || null,
         supplierId: payload.supplierId || null,
+        commitmentId: payload.commitmentId || null,
         ref: payload.ref,
         item: payload.item || payload.ref,
         supplier: trimOrNull(payload.supplier),

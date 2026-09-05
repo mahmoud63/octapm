@@ -137,7 +137,10 @@ const deriveLine = (line) => {
   const original = toMoneyNumber(line.originalBudget);
   const revised = addMoney(original, addMoney(approvedChanges, revisions));
   const actual = toMoneyNumber(line.actual);
-  const committed = toMoneyNumber(line.committed);
+  // Executed commitments post committed cost (OCTA-FIN-COMMIT-020); the manual
+  // figure only stands while nothing has been committed against the line.
+  const committedFromCommitments = toMoneyNumber(line.committedFromCommitments);
+  const committed = committedFromCommitments > 0 ? committedFromCommitments : toMoneyNumber(line.committed);
   const forecast = line.forecast === null || line.forecast === undefined ? Math.max(revised, actual, committed) : toMoneyNumber(line.forecast);
   const allocations = (line.allocations || []).filter((row) => row.activity?.isActive !== false);
   const allocatedWeight = roundWeight(allocations.reduce((acc, row) => acc + (Number(row.weight) || 0), 0));
@@ -161,6 +164,8 @@ const serializeLine = (line) => {
     revisions: derived.revisions,
     revisedBudget: derived.revised,
     committed: derived.committed,
+    committedManual: toMoneyNumber(line.committed),
+    committedFromCommitments: toMoneyNumber(line.committedFromCommitments),
     actual: derived.actual,
     forecast: derived.forecast,
     forecastIsManual: line.forecast !== null && line.forecast !== undefined,

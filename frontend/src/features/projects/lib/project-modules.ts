@@ -97,7 +97,7 @@ export const MODULE_PERMISSIONS: Partial<
   schedule: ['schedule'],
   siteReporting: ['progress'],
   cost: ['cost'],
-  commercial: ['change_order', 'ipc', 'eot'],
+  commercial: ['change_order', 'ipc', 'eot', 'commitment'],
   quality: ['ncr', 'safety', 'punch', 'inspection'],
   docControl: ['document_control', 'rfi', 'submittal'],
   meetings: ['meeting'],

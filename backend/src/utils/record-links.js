@@ -37,6 +37,8 @@ const RECORD_WORKSPACE = Object.freeze({
   ipc_certificate: { module: "commercial", child: "ipc" },
   ipc_item: { module: "commercial", child: "ipc" },
   sub_valuation: { module: "commercial", child: "sub-valuations" },
+  commitment: { module: "commercial", child: "commitments" },
+  commitment_change_order: { module: "commercial", child: "commitments" },
   eot: { module: "commercial", child: "eot" },
   eot_claim: { module: "commercial", child: "eot" },
   weather_delay: { module: "commercial", child: "weather" },

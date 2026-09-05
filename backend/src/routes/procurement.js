@@ -148,6 +148,7 @@ router.post(
     optionalUuid('activityId'),
     optionalUuid('packageId'),
     optionalUuid('supplierId'),
+    optionalUuid('commitmentId'),
     body('supplier').optional({ nullable: true }).isString().trim(),
     body('status')
       .optional()

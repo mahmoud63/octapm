@@ -4,6 +4,7 @@ import type { ScheduleActivity } from '@/features/schedule/data/schema'
 import { BudgetRevisionsPanel } from './budget-revisions-panel'
 import { CashFlowPanel } from './cash-flow-panel'
 import { ChangeOrderRegister } from './change-order-register'
+import { CommitmentsPanel } from './commitments-panel'
 import { EotPanel } from './eot-panel'
 import { IpcWorkbook } from './ipc-workbook'
 import { SubValuationsPanel } from './sub-valuations-panel'
@@ -35,6 +36,7 @@ export function CommercialDashboard({
         {showTabList && (
           <TabsList className='flex-wrap'>
             <TabsTrigger value='change-orders'>Change Orders</TabsTrigger>
+            <TabsTrigger value='commitments'>Commitments</TabsTrigger>
             <TabsTrigger value='ipc'>IPC</TabsTrigger>
             <TabsTrigger value='sub-valuations'>Sub Valuations</TabsTrigger>
             <TabsTrigger value='budget-revisions'>Budget Revisions</TabsTrigger>
@@ -55,6 +57,17 @@ export function CommercialDashboard({
             }
             initialRecordId={
               initialTarget?.source === 'change_order'
+                ? initialTarget.recordId
+                : undefined
+            }
+          />
+        </TabsContent>
+
+        <TabsContent value='commitments'>
+          <CommitmentsPanel
+            projectId={projectId}
+            initialRecordId={
+              initialTarget?.source === 'commitment'
                 ? initialTarget.recordId
                 : undefined
             }
