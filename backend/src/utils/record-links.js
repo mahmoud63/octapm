@@ -12,6 +12,7 @@ const RECORD_WORKSPACE = Object.freeze({
   daily_report: { module: "site-reporting" },
   site_diary: { module: "site-reporting" },
   daily_log: { module: "site-reporting" },
+  timesheet: { module: "site-reporting" },
   ncr: { module: "quality", child: "ncr" },
   itp: { module: "quality", child: "itp" },
   defect: { module: "quality", child: "defects" },

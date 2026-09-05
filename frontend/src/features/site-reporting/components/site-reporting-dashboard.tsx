@@ -6,6 +6,7 @@ import {
   CheckCircle2,
   ClipboardCheck,
   ClipboardList,
+  Clock,
   CloudOff,
   CloudSun,
   Image as ImageIcon,
@@ -51,6 +52,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { HistoryPanel } from '@/features/audit/components/audit-history-panel'
 import { useEquipment } from '@/features/equipment/hooks/use-equipment'
 import type { ScheduleActivity } from '@/features/schedule/data/schema'
+import { TimesheetsPanel } from '@/features/timesheets/components/timesheets-panel'
 import {
   type DailyReport,
   type ReportStatus,
@@ -67,6 +69,8 @@ type Props = {
   activities: ScheduleActivity[]
   /** Day to open in the daily log (deep link `?date=YYYY-MM-DD`). */
   initialDate?: string | null
+  /** Timesheet to open (deep link `?source=timesheet&recordId=`). */
+  initialTimesheetId?: string | null
 }
 
 type CrewRow = { trade: string; workers: string; hours: string }
@@ -217,6 +221,7 @@ export function SiteReportingDashboard({
   projectId,
   activities,
   initialDate,
+  initialTimesheetId = null,
 }: Props) {
   const selectableActivities = useMemo(
     () => activities.filter((activity) => !activity.isMilestone),
@@ -1111,8 +1116,11 @@ export function SiteReportingDashboard({
         </div>
       )}
 
-      <Tabs defaultValue='log' className='space-y-4'>
-        <TabsList className='grid h-auto w-full grid-cols-4'>
+      <Tabs
+        defaultValue={initialTimesheetId ? 'timesheets' : 'log'}
+        className='space-y-4'
+      >
+        <TabsList className='grid h-auto w-full grid-cols-5'>
           <TabsTrigger
             value='log'
             className='min-h-11 flex-col gap-1 py-2 text-xs sm:flex-row sm:text-sm'
@@ -1120,6 +1128,14 @@ export function SiteReportingDashboard({
           >
             <ClipboardList className='h-4 w-4' />
             Daily Log
+          </TabsTrigger>
+          <TabsTrigger
+            value='timesheets'
+            className='min-h-11 flex-col gap-1 py-2 text-xs sm:flex-row sm:text-sm'
+            data-testid='uat-site-tab-timesheets'
+          >
+            <Clock className='h-4 w-4' />
+            Timesheets
           </TabsTrigger>
           <TabsTrigger
             value='activity'
@@ -1149,6 +1165,14 @@ export function SiteReportingDashboard({
             projectId={projectId}
             activities={activities}
             initialDate={initialDate}
+          />
+        </TabsContent>
+
+        <TabsContent value='timesheets'>
+          <TimesheetsPanel
+            projectId={projectId}
+            activities={selectableActivities}
+            initialTimesheetId={initialTimesheetId}
           />
         </TabsContent>
 

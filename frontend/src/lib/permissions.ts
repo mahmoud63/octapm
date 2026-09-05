@@ -44,6 +44,7 @@ export type PermissionModule =
   | 'custom_field'
   | 'bid'
   | 'assistant'
+  | 'timesheet'
 
 export type RoleId =
   | 'pm'

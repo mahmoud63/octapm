@@ -58,6 +58,7 @@ const RECORD_TYPE_MODULES = Object.freeze({
   daily_report: "progress",
   site_diary: "progress",
   daily_log: "progress",
+  timesheet: "timesheet",
   progress_submission: "progress",
   activity: "schedule",
   change_order: "change_order",

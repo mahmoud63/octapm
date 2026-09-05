@@ -560,6 +560,43 @@ const SOURCES = Object.freeze({
     ],
     projectNameFrom: null,
   },
+  time_entry: {
+    key: "time_entry",
+    label: "Timesheet entries",
+    module: "timesheet",
+    model: "timeEntry",
+    baseWhere: { timesheet: { status: { in: ["submitted", "approved"] } } },
+    include: { project: PROJECT_SELECT, timesheet: { select: { id: true, date: true, status: true, companyId: true, createdBy: true, crew: { select: { id: true, name: true } } } }, worker: { select: { id: true, name: true, trade: true, classification: true, employeeNumber: true, company: { select: { id: true, name: true } } } }, activity: ACTIVITY_SELECT, costCode: { select: { id: true, code: true, name: true } }, location: LOCATION_SELECT },
+    visibility: ({ viewer }) => {
+      const { isPartyScopedAccess } = require("./company-party.service");
+      if (!viewer || !isPartyScopedAccess(viewer.projectAccess || {})) return null;
+      const companyIds = (viewer.projectAccess?.partyAccess || []).map((party) => party.companyId).filter(Boolean);
+      return { timesheet: { OR: [{ companyId: { in: companyIds.length ? companyIds : ["__none__"] } }, { createdBy: viewer.id || "__none__" }] } };
+    },
+    defaultSort: { field: "timesheet.date", dir: "desc" },
+    defaultColumns: ["timesheet.date", "worker.name", "worker.trade", "activity.name", "costCode.code", "timeType", "hours", "amount", "timesheet.status"],
+    columns: [
+      ...projectColumns,
+      col("timesheet.date", "Date", "date"),
+      col("timesheet.status", "Status", "enum", { enum: ["submitted", "approved"] }),
+      col("timesheet.crew.name", "Crew", "string"),
+      col("worker.name", "Worker", "string"),
+      col("worker.employeeNumber", "Employee no", "string"),
+      col("worker.trade", "Trade", "string"),
+      col("worker.classification", "Classification", "string"),
+      col("worker.company.name", "Company", "string"),
+      ...activityColumns,
+      col("costCode.code", "Cost code", "string"),
+      col("costCode.name", "Cost code name", "string"),
+      col("location.name", "Location", "string"),
+      col("timeType", "Time type", "enum", { enum: ["regular", "overtime", "double"] }),
+      col("hours", "Hours", "number"),
+      col("rate", "Rate", "money"),
+      col("amount", "Amount", "money"),
+      col("notes", "Notes", "string"),
+    ],
+    projectNameFrom: "project",
+  },
   daily_log: {
     key: "daily_log",
     label: "Daily logs",

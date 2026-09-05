@@ -412,6 +412,11 @@ export function ProjectDetail({
             projectId={projectId}
             activities={schedule?.activities ?? []}
             initialDate={initialTarget?.date}
+            initialTimesheetId={
+              initialTarget?.source === 'timesheet'
+                ? (initialTarget.recordId ?? null)
+                : null
+            }
           />
         )
 

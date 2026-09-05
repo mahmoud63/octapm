@@ -80,6 +80,10 @@ model Organisation {
   contractProfiles    ContractProfile[]
   sheetReferences     SheetReference[]
   specSections        SpecSection[]
+  workers             Worker[]
+  crews               Crew[]
+  timesheets          Timesheet[]
+  timeEntries         TimeEntry[]
   subPayAppLines      SubPayAppLine[]
   subPayAppPayments   SubPayAppPayment[]
   companyEquipment    CompanyEquipment[]
@@ -133,6 +137,7 @@ model User {
   actedNotifications      Notification[]      @relation("NotificationActor")
   notificationPrefs       NotificationPreference[]
   pushSubscriptions       PushSubscription[]
+  workerProfiles          Worker[]
   companyMemberships      CompanyMembership[]
   projectPartyMemberships ProjectPartyMember[]
   chairedMeetings         Meeting[]              @relation("MeetingChair")
@@ -295,6 +300,8 @@ model Company {
   invitationTokens InvitationToken[]
   procurementSuppliers ProcurementSupplier[]
   commitments          Commitment[]        @relation("CommitmentVendor")
+  workers              Worker[]
+  crews                Crew[]
   riskAssignments           Risk[]           @relation("RiskAssigneeCompany")
   ncrAssignments            NcrRecord[]      @relation("NcrAssigneeCompany")
   itpAssignments            ItpRecord[]      @relation("ItpAssigneeCompany")
@@ -441,6 +448,9 @@ model Project {
   contractProfile               ContractProfile?
   sheetReferences               SheetReference[]
   specSections                  SpecSection[]
+  crews                         Crew[]
+  timesheets                    Timesheet[]
+  timeEntries                   TimeEntry[]
   subPayAppLines                SubPayAppLine[]
   subPayAppPayments             SubPayAppPayment[]
   activityCostLoadings          ActivityCostLoading[]
@@ -1400,6 +1410,7 @@ model Activity {
   progressMethod         ActivityProgressMethod?
   progressSubmissions    ProgressSubmission[]
   ipcProgressLinks       IpcItemProgressLink[]
+  timeEntries            TimeEntry[]
   subValuationLinks      SubValuationActivityLink[]
   eotClaimLinks          EotClaimActivityLink[]
   weatherDelayLinks      WeatherDelayActivityLink[]
@@ -3988,6 +3999,7 @@ model Location {
   punchItems PunchItem[]
   formInstances FormInstance[]
   rfis       Rfi[]
+  timeEntries TimeEntry[]
 
   @@unique([projectId, code])
   @@index([orgId])
@@ -4021,6 +4033,7 @@ model CostCode {
   projectCostCodes ProjectCostCode[]
   budgetLines      BudgetLine[]
   commitmentSovLines CommitmentSovLine[]
+  timeEntries        TimeEntry[]
 
   @@unique([orgId, code])
   @@index([orgId, status])
@@ -4834,6 +4847,157 @@ model SpecSection {
   @@index([orgId])
   @@index([projectId, codeKey])
   @@index([projectId, division])
+}
+
+// ─── Timesheets and crews (OCTA-FLD-TIME-037) ───
+/** A person whose time is recorded — company-level, optionally a platform user. */
+model Worker {
+  id                 String   @id @default(uuid())
+  orgId              String
+  companyId          String?
+  userId             String?
+  name               String
+  employeeNumber     String?
+  trade              String?
+  classification     String?
+  hourlyRate         Decimal? @db.Decimal(18, 2)
+  overtimeMultiplier Float    @default(1.5)
+  status             String   @default("active") // active, inactive
+  notes              String?
+  createdBy          String?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  org         Organisation @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  company     Company?     @relation(fields: [companyId], references: [id], onDelete: SetNull)
+  user        User?        @relation(fields: [userId], references: [id], onDelete: SetNull)
+  crewMembers CrewMember[]
+  timeEntries TimeEntry[]
+
+  @@unique([orgId, employeeNumber])
+  @@index([orgId, status])
+  @@index([companyId])
+  @@index([userId])
+}
+
+/** A project crew: a named group of workers with default cost code / activity. */
+model Crew {
+  id                String   @id @default(uuid())
+  orgId             String
+  projectId         String
+  name              String
+  companyId         String?
+  partyId           String?
+  foremanUserId     String?
+  defaultCostCodeId String?
+  defaultActivityId String?
+  status            String   @default("active") // active, inactive
+  createdBy         String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  org        Organisation @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  project    Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  company    Company?     @relation(fields: [companyId], references: [id], onDelete: SetNull)
+  members    CrewMember[]
+  timesheets Timesheet[]
+
+  @@unique([projectId, name])
+  @@index([orgId])
+  @@index([projectId, status])
+}
+
+model CrewMember {
+  id        String   @id @default(uuid())
+  crewId    String
+  workerId  String
+  role      String   @default("member") // member, foreman
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+
+  crew   Crew   @relation(fields: [crewId], references: [id], onDelete: Cascade)
+  worker Worker @relation(fields: [workerId], references: [id], onDelete: Cascade)
+
+  @@unique([crewId, workerId])
+  @@index([workerId])
+}
+
+/** One day's time for a crew (or a set of workers): draft → submitted → approved (labour cost posted) / rejected. */
+model Timesheet {
+  id              String    @id @default(uuid())
+  orgId           String
+  projectId       String
+  date            DateTime  @db.Date
+  crewId          String?
+  partyId         String?
+  companyId       String?
+  status          String    @default("draft") // draft, submitted, approved, rejected
+  notes           String?
+  regularHours    Float     @default(0)
+  overtimeHours   Float     @default(0)
+  totalCost       Decimal   @default(0) @db.Decimal(18, 2)
+  submittedBy     String?
+  submittedAt     DateTime?
+  approvedBy      String?
+  approvedAt      DateTime?
+  rejectedBy      String?
+  rejectedAt      DateTime?
+  rejectionReason String?
+  postedAt        DateTime?
+  clientRequestId String?
+  createdBy       String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  org     Organisation @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  project Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  crew    Crew?        @relation(fields: [crewId], references: [id], onDelete: SetNull)
+  entries TimeEntry[]
+
+  @@unique([projectId, clientRequestId])
+  @@index([orgId])
+  @@index([projectId, date])
+  @@index([projectId, status])
+  @@index([crewId])
+  @@index([companyId])
+}
+
+/** Hours of one worker on one activity / cost code for the timesheet's day. */
+model TimeEntry {
+  id           String   @id @default(uuid())
+  orgId        String
+  projectId    String
+  timesheetId  String
+  workerId     String
+  activityId   String?
+  costCodeId   String?
+  budgetLineId String?
+  locationId   String?
+  timeType     String   @default("regular") // regular, overtime, double
+  hours        Float    @default(0)
+  startTime    String?
+  endTime      String?
+  rate         Decimal? @db.Decimal(18, 2)
+  amount       Decimal  @default(0) @db.Decimal(18, 2)
+  postedAmount Decimal  @default(0) @db.Decimal(18, 2)
+  notes        String?
+  sortOrder    Int      @default(0)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  org       Organisation @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  project   Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  timesheet Timesheet    @relation(fields: [timesheetId], references: [id], onDelete: Cascade)
+  worker    Worker       @relation(fields: [workerId], references: [id], onDelete: Restrict)
+  activity  Activity?    @relation(fields: [activityId], references: [id], onDelete: SetNull)
+  costCode  CostCode?    @relation(fields: [costCodeId], references: [id], onDelete: SetNull)
+  location  Location?    @relation(fields: [locationId], references: [id], onDelete: SetNull)
+
+  @@index([orgId])
+  @@index([timesheetId])
+  @@index([workerId])
+  @@index([projectId, activityId])
+  @@index([projectId, costCodeId])
 }
 
 // ─── Document text, chunks and embeddings (OCTA-DOC-TEXT-010) ───

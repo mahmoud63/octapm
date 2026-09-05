@@ -949,6 +949,36 @@
         "punch.void": ["pm"],
         "punch.distribute": ["pm", "planning_eng", "site_engineer"]
       }
+    },
+    "timesheet": {
+      "label": "Timesheets",
+      "actions": {
+        "read": [
+          "pm",
+          "planning_eng",
+          "qs",
+          "cost_controller",
+          "procurement",
+          "warehouse",
+          "site_engineer",
+          "finance"
+        ],
+        "create": ["pm", "planning_eng", "site_engineer"],
+        "update": ["pm", "planning_eng", "site_engineer"],
+        "delete": ["pm", "site_engineer"],
+        "submit": ["pm", "planning_eng", "site_engineer"],
+        "approve": ["pm", "cost_controller"],
+        "certify": [],
+        "baseline": [],
+        "export": ["pm", "planning_eng", "qs", "cost_controller", "site_engineer", "finance"]
+      },
+      "transitions": {
+        "timesheet.submit": ["pm", "planning_eng", "site_engineer"],
+        "timesheet.approve": ["pm", "cost_controller"],
+        "timesheet.reject": ["pm", "cost_controller"],
+        "timesheet.reopen": ["pm", "cost_controller"],
+        "timesheet.worker_admin": ["pm", "site_engineer", "cost_controller"]
+      }
     }
   },
   "partyPermissions": {
@@ -956,6 +986,7 @@
       "modules": {
         "inspection": { "actions": ["read", "export"], "transitions": [] },
         "punch": { "actions": ["read", "export"], "transitions": [] },
+        "timesheet": { "actions": ["read", "export"], "transitions": [] },
         "schedule": { "actions": ["read", "export"], "transitions": [] },
         "progress": { "actions": ["read", "export"], "transitions": [] },
         "boq": { "actions": ["read", "export"], "transitions": [] },
@@ -1009,6 +1040,7 @@
           "actions": ["read", "create", "submit", "approve", "export"],
           "transitions": ["punch.open", "punch.close", "punch.reopen"]
         },
+        "timesheet": { "actions": ["read", "export"], "transitions": [] },
         "schedule": { "actions": ["read", "export"], "transitions": [] },
         "progress": { "actions": ["read"], "transitions": [] },
         "boq": { "actions": ["read"], "transitions": [] },
@@ -1072,6 +1104,10 @@
             "punch.dispute",
             "punch.distribute"
           ]
+        },
+        "timesheet": {
+          "actions": ["read", "create", "update", "delete", "submit", "export"],
+          "transitions": ["timesheet.submit", "timesheet.worker_admin"]
         },
         "schedule": { "actions": ["read", "export"], "transitions": [] },
         "progress": {
@@ -1141,6 +1177,10 @@
         "punch": {
           "actions": ["read", "update", "submit", "export"],
           "transitions": ["punch.ready_for_review", "punch.dispute"]
+        },
+        "timesheet": {
+          "actions": ["read", "create", "update", "delete", "submit", "export"],
+          "transitions": ["timesheet.submit", "timesheet.worker_admin"]
         },
         "schedule": { "actions": ["read"], "transitions": [] },
         "progress": {

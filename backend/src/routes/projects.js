@@ -441,6 +441,11 @@ router.use(
   require("./specifications"),
 );
 router.use(
+  "/:projectId/timesheets",
+  nestedProjectAccess,
+  require("./timesheets"),
+);
+router.use(
   "/:projectId/drawings/sets",
   nestedProjectAccess,
   require("./drawing-sets"),
