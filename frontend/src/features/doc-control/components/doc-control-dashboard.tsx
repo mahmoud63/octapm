@@ -32,6 +32,7 @@ import { useRecordTypes } from '@/features/custom-fields/hooks/use-custom-fields
 import { DrawingsModule } from '@/features/drawings/components/drawings-module'
 import type { ProjectSetupTarget } from '@/features/projects/data/schema'
 import { useProjectParties } from '@/features/projects/hooks/use-projects'
+import { SpecificationsPanel } from '@/features/specifications/components/specifications-panel'
 import {
   WorkflowDecisionDialog,
   type WorkflowDecisionMode,
@@ -575,6 +576,7 @@ export function DocControlDashboard({
             <TabsTrigger value='rfi'>RFI</TabsTrigger>
             <TabsTrigger value='submittals'>Submittals</TabsTrigger>
             <TabsTrigger value='drawings'>Drawings</TabsTrigger>
+            <TabsTrigger value='specifications'>Specifications</TabsTrigger>
             <TabsTrigger value='transmittals'>Transmittals</TabsTrigger>
             <TabsTrigger value='correspondence'>Correspondence</TabsTrigger>
             <TabsTrigger value='search'>Search</TabsTrigger>
@@ -583,6 +585,13 @@ export function DocControlDashboard({
 
         <TabsContent value='search'>
           <DocumentSearchPanel projectId={projectId} />
+        </TabsContent>
+
+        <TabsContent value='specifications'>
+          <SpecificationsPanel
+            projectId={projectId}
+            initialTarget={initialTarget}
+          />
         </TabsContent>
 
         <TabsContent value='register' className='space-y-3'>

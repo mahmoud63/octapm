@@ -436,6 +436,11 @@ router.use(
   require("./drawing-assistant"),
 );
 router.use(
+  "/:projectId/specifications",
+  nestedProjectAccess,
+  require("./specifications"),
+);
+router.use(
   "/:projectId/drawings/sets",
   nestedProjectAccess,
   require("./drawing-sets"),

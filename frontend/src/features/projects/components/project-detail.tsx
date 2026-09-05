@@ -277,6 +277,7 @@ export function ProjectDetail({
           { key: 'rfi', label: 'RFI' },
           { key: 'submittals', label: 'Submittals' },
           { key: 'drawings', label: 'Drawings' },
+          { key: 'specifications', label: 'Specifications' },
           { key: 'transmittals', label: 'Transmittals' },
           { key: 'correspondence', label: 'Correspondence' },
           { key: 'search', label: 'Search' },

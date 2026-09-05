@@ -79,6 +79,7 @@ model Organisation {
   assistantConversations AssistantConversation[]
   contractProfiles    ContractProfile[]
   sheetReferences     SheetReference[]
+  specSections        SpecSection[]
   subPayAppLines      SubPayAppLine[]
   subPayAppPayments   SubPayAppPayment[]
   companyEquipment    CompanyEquipment[]
@@ -439,6 +440,7 @@ model Project {
   assistantConversations        AssistantConversation[]
   contractProfile               ContractProfile?
   sheetReferences               SheetReference[]
+  specSections                  SpecSection[]
   subPayAppLines                SubPayAppLine[]
   subPayAppPayments             SubPayAppPayment[]
   activityCostLoadings          ActivityCostLoading[]
@@ -1261,6 +1263,7 @@ model ProjectDocument {
   documentRevisions        DocumentRevision[]
   taskAttachments          TaskAttachment[]
   commitmentsExecuted      Commitment[]              @relation("CommitmentExecutedDocument")
+  specSections             SpecSection[]
   subPayAppWaivers         SubPayApp[]               @relation("SubPayAppWaiverDocument")
   dailyLogPdfs             DailyLog[]                @relation("DailyLogPdf")
   attachments              Attachment[]
@@ -4801,6 +4804,36 @@ model SheetReference {
   @@unique([sheetId, targetNumber])
   @@index([orgId])
   @@index([projectId, targetSheetId])
+}
+
+// ─── Specifications (OCTA-AI-SPEC-036) ───
+/** A section of a specification document found in its extracted text (CSI MasterFormat or generic numbering). */
+model SpecSection {
+  id         String   @id @default(uuid())
+  orgId      String
+  projectId  String
+  documentId String
+  code       String // as printed, e.g. "03 30 00" or "5.3"
+  codeKey    String // comparable form, e.g. "033000" or "5.3"
+  division   String? // "03"
+  title      String
+  charStart  Int
+  charEnd    Int
+  pageFrom   Int?
+  pageTo     Int?
+  wordCount  Int      @default(0)
+  sortOrder  Int      @default(0)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  org      Organisation    @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  project  Project         @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  document ProjectDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@unique([documentId, charStart])
+  @@index([orgId])
+  @@index([projectId, codeKey])
+  @@index([projectId, division])
 }
 
 // ─── Document text, chunks and embeddings (OCTA-DOC-TEXT-010) ───

@@ -296,4 +296,4 @@ const status = () => {
   return { vision: Boolean(provider.enabled && provider.vision), provider: provider.provider, model: provider.model, pageLimit: MAX_PAGES() };
 };
 
-module.exports = { READ_PROMPT, COMPARE_PROMPT, normalizeRead, extractReferences, readTitleBlocks, listReferences, buildSheetReferences, buildSetReferences, compareRevisions, status };
+module.exports = { READ_PROMPT, COMPARE_PROMPT, normalizeRead, extractReferences, pageTextFor, readTitleBlocks, listReferences, buildSheetReferences, buildSetReferences, compareRevisions, status };
