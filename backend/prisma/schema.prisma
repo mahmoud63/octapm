@@ -78,6 +78,7 @@ model Organisation {
   bidPackages         BidPackage[]
   assistantConversations AssistantConversation[]
   contractProfiles    ContractProfile[]
+  sheetReferences     SheetReference[]
   subPayAppLines      SubPayAppLine[]
   subPayAppPayments   SubPayAppPayment[]
   companyEquipment    CompanyEquipment[]
@@ -437,6 +438,7 @@ model Project {
   bidPackages                   BidPackage[]
   assistantConversations        AssistantConversation[]
   contractProfile               ContractProfile?
+  sheetReferences               SheetReference[]
   subPayAppLines                SubPayAppLine[]
   subPayAppPayments             SubPayAppPayment[]
   activityCostLoadings          ActivityCostLoading[]
@@ -4572,6 +4574,8 @@ model Sheet {
   pins       Pin[]
   punchItems PunchItem[]
   formInstances FormInstance[]
+  references   SheetReference[] @relation("SheetReferenceFrom")
+  referencedBy SheetReference[] @relation("SheetReferenceTo")
 
   @@unique([projectId, number])
   @@index([orgId])
@@ -4771,6 +4775,32 @@ model Pin {
   @@index([orgId])
   @@index([projectId, sheetId])
   @@index([projectId, recordType, recordId])
+}
+
+// ─── Drawing intelligence (OCTA-AI-DWG-035) ───
+/** A cross-reference found on a sheet ("SEE S-201", "DETAIL 3/A-501"), resolved to the target sheet when it exists. */
+model SheetReference {
+  id            String   @id @default(uuid())
+  orgId         String
+  projectId     String
+  sheetId       String
+  revisionId    String?
+  targetNumber  String
+  targetSheetId String?
+  count         Int      @default(1)
+  samplesJson   Json     @default("[]")
+  source        String   @default("text") // text, vision, manual
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  org         Organisation @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  project     Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  sheet       Sheet        @relation("SheetReferenceFrom", fields: [sheetId], references: [id], onDelete: Cascade)
+  targetSheet Sheet?       @relation("SheetReferenceTo", fields: [targetSheetId], references: [id], onDelete: SetNull)
+
+  @@unique([sheetId, targetNumber])
+  @@index([orgId])
+  @@index([projectId, targetSheetId])
 }
 
 // ─── Document text, chunks and embeddings (OCTA-DOC-TEXT-010) ───

@@ -53,6 +53,7 @@ export function DrawingsModule({
             : null
         }
         onBack={() => setView({ kind: 'sheets' })}
+        onOpenSheet={(sheetId) => setView({ kind: 'sheet', sheetId })}
       />
     )
   }

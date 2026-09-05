@@ -431,6 +431,11 @@ router.use(
 // Drawing sets and sheets must be mounted before the legacy drawings router,
 // whose `/:drawingId` route would otherwise swallow `/sets` and `/sheets`.
 router.use(
+  "/:projectId/drawings/ai",
+  nestedProjectAccess,
+  require("./drawing-assistant"),
+);
+router.use(
   "/:projectId/drawings/sets",
   nestedProjectAccess,
   require("./drawing-sets"),

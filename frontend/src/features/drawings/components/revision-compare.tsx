@@ -12,6 +12,7 @@ import {
 } from '@/components/ui/select'
 import type { SheetRevision } from '../hooks/use-drawings'
 import { renderSheetPage } from '../lib/pdf'
+import { RevisionChangeSummary } from './revision-change-summary'
 
 type Mode = 'side' | 'overlay' | 'diff'
 
@@ -105,9 +106,14 @@ const revisionLabel = (revision: SheetRevision) =>
 export function RevisionCompare({
   revisions,
   currentRevisionId,
+  projectId,
+  sheetId,
 }: {
   revisions: SheetRevision[]
   currentRevisionId: string | null
+  /** With both, the AI "what changed" summary is offered under the compare. */
+  projectId?: string
+  sheetId?: string
 }) {
   const withFiles = useMemo(
     () => revisions.filter((row) => row.fileUrl),
@@ -314,6 +320,15 @@ export function RevisionCompare({
           )}
         />
       </div>
+
+      {projectId && sheetId && (
+        <RevisionChangeSummary
+          projectId={projectId}
+          sheetId={sheetId}
+          before={a}
+          after={b}
+        />
+      )}
     </div>
   )
 }

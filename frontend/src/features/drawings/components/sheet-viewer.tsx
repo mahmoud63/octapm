@@ -76,6 +76,7 @@ import { renderSheetPage } from '../lib/pdf'
 import { MarkupLayer, type MarkupTool } from './markup-layer'
 import { PinCreateDialog, PinDetailDialog } from './pin-dialog'
 import { RevisionCompare } from './revision-compare'
+import { SheetReferencesPanel } from './sheet-references'
 
 const ZOOM_STEPS = [0.25, 0.5, 0.75, 1, 1.5, 2, 3, 4]
 const AUTOSAVE_MS = 800
@@ -241,11 +242,14 @@ export function SheetViewer({
   sheetId,
   initialPinId = null,
   onBack,
+  onOpenSheet,
 }: {
   projectId: string
   sheetId: string
   initialPinId?: string | null
   onBack: () => void
+  /** Opens another sheet (a cross-reference) in this viewer. */
+  onOpenSheet?: (sheetId: string) => void
 }) {
   const {
     data: sheet,
@@ -1007,10 +1011,20 @@ export function SheetViewer({
         </div>
       )}
 
+      {mode !== 'compare' && (
+        <SheetReferencesPanel
+          projectId={projectId}
+          sheetId={sheet.id}
+          onOpenSheet={onOpenSheet}
+        />
+      )}
+
       {mode === 'compare' ? (
         <RevisionCompare
           revisions={revisions}
           currentRevisionId={sheet.currentRevisionId}
+          projectId={projectId}
+          sheetId={sheet.id}
         />
       ) : (
         <div

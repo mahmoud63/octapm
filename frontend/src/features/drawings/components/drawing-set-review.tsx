@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import {
   ArrowLeft,
   CheckCircle2,
+  Link2,
   Loader2,
   RefreshCw,
   Save,
@@ -15,6 +16,7 @@ import { cn } from '@/lib/utils'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { useBuildSetReferences } from '../hooks/use-drawing-assistant'
 import {
   useDeleteDrawingSet,
   useDrawingSet,
@@ -27,6 +29,7 @@ import {
   type SheetRevision,
 } from '../hooks/use-drawings'
 import { SheetThumbnail } from './sheet-thumbnail'
+import { TitleBlockReader } from './title-block-reader'
 
 type Draft = {
   number: string
@@ -137,6 +140,7 @@ export function DrawingSetReview({
   const reprocess = useReprocessDrawingSet(projectId)
   const updateSet = useUpdateDrawingSet(projectId)
   const deleteSet = useDeleteDrawingSet(projectId)
+  const buildReferences = useBuildSetReferences(projectId)
   // Only the rows the user edited are kept in state; everything else shows
   // the server values, so a background refresh never overwrites an edit.
   const [overrides, setOverrides] = useState<Record<string, Draft>>({})
@@ -180,12 +184,61 @@ export function DrawingSetReview({
   const missingNumbers = revisions.filter(
     (row) => row.status === 'pending_review' && !row.number?.trim()
   ).length
+  // Pages the automatic reader could not settle — worth a look by the
+  // vision provider: no text layer first, then missing numbers, then
+  // low confidence.
+  const aiCandidates = useMemo(
+    () =>
+      revisions
+        .filter(
+          (row) =>
+            row.status === 'pending_review' &&
+            (row.textStatus === 'no_text' ||
+              !row.number?.trim() ||
+              row.confidence < 0.8)
+        )
+        .sort(
+          (a, b) =>
+            Number(b.textStatus === 'no_text') -
+              Number(a.textStatus === 'no_text') ||
+            Number(!b.number) - Number(!a.number) ||
+            a.confidence - b.confidence
+        ),
+    [revisions]
+  )
 
   const setDraft = (id: string, patch: Partial<Draft>) =>
     setOverrides((current) => ({
       ...current,
       [id]: { ...(current[id] ?? drafts[id]), ...patch },
     }))
+
+  /** A vision proposal fills the empty fields of the draft; typed values stay. */
+  const applyProposal = (
+    id: string,
+    proposal: {
+      number: string | null
+      title: string | null
+      revision: string | null
+      discipline: string | null
+    }
+  ) =>
+    setOverrides((current) => {
+      const draft = current[id] ?? drafts[id]
+      if (!draft) return current
+      return {
+        ...current,
+        [id]: {
+          ...draft,
+          number: draft.number.trim() || proposal.number || draft.number,
+          title: draft.title.trim() || proposal.title || draft.title,
+          revision:
+            draft.revision.trim() || proposal.revision || draft.revision,
+          discipline:
+            draft.discipline.trim() || proposal.discipline || draft.discipline,
+        },
+      }
+    })
 
   const save = async () => {
     if (!dirtyRows.length) return
@@ -287,6 +340,46 @@ export function DrawingSetReview({
               <RefreshCw className='mr-2 h-4 w-4' /> Re-read title blocks
             </Button>
           )}
+          {canReview && !processing && (
+            <TitleBlockReader
+              projectId={projectId}
+              setId={setId}
+              candidates={aiCandidates}
+              onProposal={applyProposal}
+            />
+          )}
+          {canReview &&
+            !processing &&
+            set.counts &&
+            set.counts.published > 0 && (
+              <Button
+                size='sm'
+                variant='outline'
+                disabled={buildReferences.isPending}
+                title='Read the sheet numbers and detail callouts on every published page and link the sheets to each other'
+                onClick={() =>
+                  buildReferences.mutate(setId, {
+                    onSuccess: (result) =>
+                      toast.success(
+                        `${result.references} reference${result.references === 1 ? '' : 's'} across ${result.sheetsBuilt} sheet${result.sheetsBuilt === 1 ? '' : 's'}` +
+                          (result.noText
+                            ? ` · ${result.noText} page${result.noText === 1 ? '' : 's'} without text`
+                            : '')
+                      ),
+                    onError: (error) =>
+                      toast.error(getServerErrorMessage(error)),
+                  })
+                }
+                data-testid='uat-drawing-ai-references'
+              >
+                {buildReferences.isPending ? (
+                  <Loader2 className='mr-2 h-4 w-4 animate-spin' />
+                ) : (
+                  <Link2 className='mr-2 h-4 w-4' />
+                )}
+                Link references
+              </Button>
+            )}
           {canManage && set.status !== 'archived' && !processing && (
             <Button
               size='sm'
