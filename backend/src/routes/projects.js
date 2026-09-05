@@ -287,6 +287,12 @@ router.use(
   require("./assignments"),
 );
 router.use(
+  "/:projectId/attachments",
+  nestedProjectAccess,
+  require("./attachments"),
+);
+router.use("/:projectId/photos", nestedProjectAccess, require("./photos"));
+router.use(
   "/:projectId/activities",
   nestedProjectAccess,
   require("./activities"),

@@ -13,6 +13,9 @@ const registerAllHandlers = () => {
   registerJobHandler(JOB_TYPES.BOQ_PARSE, (context) =>
     require("../../services/boq.service").runBoqActivityJob(context),
   );
+  registerJobHandler(JOB_TYPES.PHOTO_THUMBNAIL, (context) =>
+    require("../../services/attachment.service").runPhotoThumbnailJob(context),
+  );
 };
 
 module.exports = { registerAllHandlers };

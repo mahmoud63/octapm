@@ -23,6 +23,7 @@ const JOB_TYPES = Object.freeze({
   DOCUMENT_EXTRACT: "document.extract",
   REPORT_RENDER: "report.render",
   NOTIFICATION_DELIVER: "notification.deliver",
+  PHOTO_THUMBNAIL: "photo.thumbnail",
 });
 
 const JOB_STATUSES = Object.freeze({

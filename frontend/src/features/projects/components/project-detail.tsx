@@ -9,6 +9,7 @@ import {
 import { useProjectRealtime } from '@/hooks/use-realtime'
 import { Main } from '@/components/layout/main'
 import { ActivitiesList } from '@/features/activities/components/activities-list'
+import { PhotoGallery } from '@/features/attachments/components/photo-gallery'
 import { BoqPage } from '@/features/boq/components/boq-page'
 import { CommercialDashboard } from '@/features/commercial/components/commercial-dashboard'
 import { CostDashboard } from '@/features/cost/components/cost-dashboard'
@@ -46,6 +47,7 @@ type ModuleKey =
   | 'activities'
   | 'equipment'
   | 'locations'
+  | 'photos'
   | 'team'
   | 'reports'
   | 'overview'
@@ -68,6 +70,7 @@ const MODULE_PERMISSIONS: Partial<Record<ModuleKey, PermissionModule[]>> = {
   activities: ['schedule'],
   equipment: ['schedule', 'cost'],
   locations: ['location'],
+  photos: ['document_control'],
   reports: ['schedule'],
 }
 
@@ -317,6 +320,7 @@ export function ProjectDetail({
       { key: 'activities', label: 'Activities' },
       { key: 'equipment', label: 'Equipment' },
       { key: 'locations', label: 'Locations' },
+      { key: 'photos', label: 'Photos' },
       { key: 'team', label: 'Team' },
       { key: 'reports', label: 'Reports' },
       { key: 'overview', label: 'Overview' },
@@ -509,6 +513,9 @@ export function ProjectDetail({
 
       case 'team':
         return <ProjectTeamPanel projectId={projectId} />
+
+      case 'photos':
+        return <PhotoGallery projectId={projectId} />
 
       case 'reports':
         return (

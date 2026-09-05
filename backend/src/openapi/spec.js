@@ -2309,6 +2309,146 @@ const components = {
         byType: { type: "object", additionalProperties: { type: "integer" } },
       }),
     }),
+    AttachmentRecordType: {
+      type: "string",
+      description: "Record type an attachment belongs to; permission follows the record's module.",
+      enum: [
+        "risk",
+        "ncr",
+        "itp",
+        "defect",
+        "material_test",
+        "safety_incident",
+        "rfi",
+        "submittal",
+        "drawing",
+        "transmittal",
+        "correspondence",
+        "document",
+        "task",
+        "daily_report",
+        "site_diary",
+        "progress_submission",
+        "activity",
+        "change_order",
+        "ipc",
+        "ipc_certificate",
+        "sub_valuation",
+        "eot",
+        "weather_delay",
+        "meeting",
+        "meeting_action",
+        "procurement_order",
+        "procurement_package",
+        "delivery_receipt",
+        "cost_record",
+        "boq_item",
+        "location",
+        "project",
+      ],
+    },
+    AttachmentDocument: objectSchema({
+      id: uuid,
+      fileName: { type: "string" },
+      originalName: { type: "string", nullable: true },
+      mimeType: { type: "string" },
+      sizeBytes: { type: "integer" },
+      documentType: { type: "string" },
+      uploadedBy: nullableUuid,
+      uploadedAt: nullableDateString,
+      url: { type: "string" },
+    }),
+    Photo: objectSchema({
+      id: uuid,
+      documentId: uuid,
+      locationId: nullableUuid,
+      location: {
+        allOf: [
+          objectSchema({
+            id: uuid,
+            name: { type: "string" },
+            fullName: { type: "string", nullable: true },
+            path: { type: "string" },
+          }),
+        ],
+        nullable: true,
+      },
+      caption: { type: "string", nullable: true },
+      tags: arrayOf({ type: "string" }),
+      takenAt: nullableDateString,
+      latitude: { type: "number", nullable: true },
+      longitude: { type: "number", nullable: true },
+      altitude: { type: "number", nullable: true },
+      cameraMake: { type: "string", nullable: true },
+      cameraModel: { type: "string", nullable: true },
+      width: { type: "integer", nullable: true },
+      height: { type: "integer", nullable: true },
+      orientation: { type: "integer", nullable: true },
+      thumbnailStatus: {
+        type: "string",
+        enum: ["pending", "ready", "unavailable", "failed"],
+      },
+      url: { type: "string" },
+      thumbnailUrl: { type: "string" },
+      uploadedBy: nullableUuid,
+      createdAt: nullableDateString,
+      updatedAt: nullableDateString,
+      document: { allOf: [ref("AttachmentDocument")], nullable: true },
+      records: arrayOf(
+        objectSchema({
+          recordType: ref("AttachmentRecordType"),
+          recordId: { type: "string" },
+          role: { type: "string" },
+        }),
+      ),
+    }),
+    Attachment: objectSchema({
+      id: uuid,
+      projectId: uuid,
+      recordType: ref("AttachmentRecordType"),
+      recordId: { type: "string" },
+      documentId: uuid,
+      role: {
+        type: "string",
+        enum: ["attachment", "evidence", "photo", "reference"],
+      },
+      caption: { type: "string", nullable: true },
+      sortOrder: { type: "integer" },
+      source: { type: "string" },
+      uploadedBy: nullableUuid,
+      createdAt: nullableDateString,
+      document: { allOf: [ref("AttachmentDocument")], nullable: true },
+      photo: { allOf: [ref("Photo")], nullable: true },
+      fileName: { type: "string", nullable: true },
+      fileUrl: { type: "string", nullable: true },
+      mimeType: { type: "string", nullable: true },
+      sizeBytes: { type: "integer", nullable: true },
+    }),
+    AttachmentListResponse: objectSchema({
+      items: arrayOf(ref("Attachment")),
+    }),
+    PhotoListResponse: objectSchema({
+      items: arrayOf(ref("Photo")),
+      pagination: objectSchema({
+        limit: { type: "integer" },
+        nextCursor: nullableUuid,
+      }),
+      summary: objectSchema({
+        total: { type: "integer" },
+        tags: arrayOf(
+          objectSchema({ tag: { type: "string" }, count: { type: "integer" } }),
+        ),
+      }),
+    }),
+    PhotoUpdateRequest: objectSchema({
+      caption: { type: "string", nullable: true, maxLength: 500 },
+      tags: {
+        oneOf: [arrayOf({ type: "string" }), { type: "string" }],
+        description: "Array or comma-separated list; lower-cased and de-duplicated.",
+      },
+      locationId: nullableUuid,
+      takenAt: nullableDateString,
+    }),
     JobStatusView: {
       type: "object",
       additionalProperties: true,
@@ -9053,6 +9193,180 @@ add(
   }),
 );
 
+// ─── Unified attachments and photos ─────────────────────────────────────
+const attachmentRecordPermission = {
+  auth: "bearer",
+  roles: ROLE_IDS,
+  note: "Permission follows the record's module: read needs `read`; adding or removing attachments needs `update`, `submit` or `create` on that module (or a permission template granting it).",
+};
+const attachmentIdParam = pathParam("attachmentId", "Attachment UUID.");
+const photoIdParam = pathParam("photoId", "Photo UUID.");
+const documentIdParam = pathParam("documentId", "ProjectDocument UUID.");
+
+add(
+  "/projects/{projectId}/attachments",
+  "get",
+  operation({
+    tag: "Attachments",
+    summary: "List attachments on one record (or every record of a type).",
+    operationId: "listAttachments",
+    parameters: [
+      ...projectParams,
+      queryParam("recordType", "Record type.", ref("AttachmentRecordType")),
+      queryParam("recordId", "Record id.", { type: "string" }),
+    ],
+    permissions: attachmentRecordPermission,
+    responseSchema: ref("AttachmentListResponse"),
+  }),
+);
+
+add(
+  "/projects/{projectId}/attachments",
+  "post",
+  operation({
+    tag: "Attachments",
+    summary:
+      "Attach uploaded files and/or existing documents to any record. Images become Photos (EXIF, GPS) and get a background thumbnail.",
+    operationId: "createAttachments",
+    parameters: projectParams,
+    permissions: attachmentRecordPermission,
+    requestBody: fileUploadBody({
+      fieldName: "files",
+      multiple: true,
+      required: ["recordType", "recordId"],
+      description:
+        "Multipart form. `files` may be omitted when `documentIds` links existing documents.",
+      accepted: "Images, PDF, Word, Excel, CSV, text (max 25 MB each, 20 files).",
+      extraProperties: {
+        recordType: ref("AttachmentRecordType"),
+        recordId: { type: "string" },
+        role: {
+          type: "string",
+          enum: ["attachment", "evidence", "photo", "reference"],
+        },
+        caption: { type: "string", maxLength: 500 },
+        locationId: { type: "string", format: "uuid" },
+        tags: { type: "string", description: "Comma-separated tags for photos." },
+        documentIds: {
+          type: "string",
+          description: "JSON array or comma-separated ProjectDocument ids to link.",
+        },
+      },
+    }),
+    responseSchema: ref("AttachmentListResponse"),
+    status: 201,
+  }),
+);
+
+add(
+  "/projects/{projectId}/attachments/documents/{documentId}",
+  "get",
+  operation({
+    tag: "Attachments",
+    summary: "Download or redirect to any document attached on the project.",
+    operationId: "getAttachedDocumentFile",
+    parameters: [projectIdParam, documentIdParam],
+    responses: {
+      200: binaryResponse("File contents.", "application/octet-stream"),
+      302: redirectResponse("Redirect to a short-lived presigned URL when stored in S3."),
+    },
+  }),
+);
+
+add(
+  "/projects/{projectId}/attachments/{attachmentId}",
+  "delete",
+  operation({
+    tag: "Attachments",
+    summary: "Unlink a document from a record. The document and its photo remain.",
+    operationId: "deleteAttachment",
+    parameters: [projectIdParam, attachmentIdParam],
+    permissions: attachmentRecordPermission,
+    responseSchema: objectSchema({
+      deleted: { type: "boolean" },
+      id: uuid,
+      recordType: ref("AttachmentRecordType"),
+      recordId: { type: "string" },
+    }),
+  }),
+);
+
+[
+  {
+    method: "get",
+    path: "/projects/{projectId}/photos",
+    summary:
+      "Photo gallery: every image attached on the project, filterable by date, location subtree, tag, record type and caption.",
+    operationId: "listPhotos",
+    parameters: [
+      ...projectParams,
+      queryParam("from", "Taken on or after (ISO-8601).", dateString),
+      queryParam("to", "Taken on or before (ISO-8601).", dateString),
+      queryParam("locationId", "Location id; includes descendants.", uuid),
+      queryParam("tag", "Tag filter.", { type: "string" }),
+      queryParam("recordType", "Only photos attached to this record type.", ref("AttachmentRecordType")),
+      queryParam("recordId", "Only photos attached to this record.", { type: "string" }),
+      queryParam("search", "Caption or file name contains.", { type: "string" }),
+      queryParam("cursor", "Photo id cursor.", uuid),
+      queryParam("limit", "Page size (1-200, default 60).", {
+        type: "integer",
+        minimum: 1,
+        maximum: 200,
+      }),
+    ],
+    permissions: modulePermission("document_control", "read"),
+    responseSchema: ref("PhotoListResponse"),
+  },
+  {
+    method: "patch",
+    path: "/projects/{projectId}/photos/{photoId}",
+    summary: "Update a photo's caption, tags, location or capture time.",
+    operationId: "updatePhoto",
+    parameters: [projectIdParam, photoIdParam],
+    permissions: modulePermission("document_control", "create"),
+    requestBody: jsonBody(ref("PhotoUpdateRequest"), "Fields to change."),
+    responseSchema: ref("Photo"),
+  },
+].forEach((route) =>
+  addGenericRoute({
+    tag: "Attachments",
+    ...route,
+  }),
+);
+
+add(
+  "/projects/{projectId}/photos/{photoId}/file",
+  "get",
+  operation({
+    tag: "Attachments",
+    summary: "Original photo file.",
+    operationId: "getPhotoFile",
+    parameters: [projectIdParam, photoIdParam],
+    permissions: modulePermission("document_control", "read"),
+    responses: {
+      200: binaryResponse("Image bytes.", "image/*"),
+      302: redirectResponse("Redirect to a short-lived presigned URL when stored in S3."),
+    },
+  }),
+);
+
+add(
+  "/projects/{projectId}/photos/{photoId}/thumbnail",
+  "get",
+  operation({
+    tag: "Attachments",
+    summary:
+      "Thumbnail generated by the photo.thumbnail job; falls back to the original until ready.",
+    operationId: "getPhotoThumbnail",
+    parameters: [projectIdParam, photoIdParam],
+    permissions: modulePermission("document_control", "read"),
+    responses: {
+      200: binaryResponse("Image bytes.", "image/jpeg"),
+      302: redirectResponse("Redirect to a short-lived presigned URL when stored in S3."),
+    },
+  }),
+);
+
 const openApiSpec = {
   openapi: "3.0.3",
   info: {
@@ -9242,6 +9556,11 @@ const openApiSpec = {
       name: "Permissions",
       description:
         "Permission templates (per-module level none/read_only/standard/admin plus granular grants) assignable per user per project or per project party, layered over the static role policy in shared/permissions.json. See docs/qa/permission-templates.md.",
+    },
+    {
+      name: "Attachments",
+      description:
+        "Unified attachments and photos: one link table (Attachment → ProjectDocument) for every record type, a Photo entity with EXIF/GPS/location/tags, and background thumbnails via the photo.thumbnail job. See docs/qa/attachments-photos.md.",
     },
     {
       name: "Assignments",

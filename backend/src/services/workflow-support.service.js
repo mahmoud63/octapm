@@ -807,6 +807,7 @@ const attachWorkflowDetailsToRecords = async ({
     approvalHistoryById,
     usersById,
     companiesById,
+    unifiedAttachments,
   ] = await Promise.all([
     tx.workflowAttachment.findMany({
       where: { projectId, recordType, recordId: { in: ids } },
@@ -848,7 +849,43 @@ const attachWorkflowDetailsToRecords = async ({
     }),
     loadReferencedUsers({ tx, rows }),
     loadReferencedCompanies({ tx, rows }),
+    // Unified attachments (OCTA-DOC-ATTACH-006) merged into the evidence list.
+    tx.attachment?.findMany
+      ? tx.attachment
+          .findMany({
+            where: { projectId, recordType, recordId: { in: ids } },
+            include: {
+              document: {
+                include: {
+                  photo: { include: { location: { select: { id: true, name: true, path: true } } } },
+                },
+              },
+            },
+            orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
+          })
+          .catch(() => [])
+      : Promise.resolve([]),
   ]);
+
+  const { serializeAttachment } = require("./attachment.service");
+  const unifiedByRecord = groupByRecordId(
+    unifiedAttachments.map((row) => ({
+      ...serializeAttachment(row, projectId),
+      recordId: row.recordId,
+      attachmentId: row.id,
+      storageKey: row.documentId,
+      description: row.caption || null,
+      uploadedAt: row.createdAt,
+    })),
+  );
+  const mergeAttachments = (recordId, legacy) => {
+    const unified = unifiedByRecord.get(recordId) || [];
+    const unifiedKeys = new Set(unified.map((row) => row.storageKey));
+    return [
+      ...unified,
+      ...legacy.filter((row) => !row.storageKey || !unifiedKeys.has(row.storageKey)),
+    ];
+  };
 
   const attachmentsById = groupByRecordId(attachments);
   const historyById = groupByRecordId(history);
@@ -900,7 +937,7 @@ const attachWorkflowDetailsToRecords = async ({
 
   return rows.map((row) => {
     const dueDate = dueDateForRecord(row);
-    const rowAttachments = attachmentsById.get(row.id) || [];
+    const rowAttachments = mergeAttachments(row.id, attachmentsById.get(row.id) || []);
     return {
       ...row,
       dueDate,

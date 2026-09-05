@@ -44,6 +44,8 @@ model Organisation {
   locations           Location[]
   permissionTemplates PermissionTemplate[]
   projectUserPermissions ProjectUserPermission[]
+  attachments         Attachment[]
+  photos              Photo[]
 }
 
 model User {
@@ -370,6 +372,8 @@ model Project {
   notifications                 Notification[]
   locations                     Location[]
   userPermissions               ProjectUserPermission[]
+  attachments                   Attachment[]
+  photos                        Photo[]
 
   @@index([orgId])
   @@index([orgId, status, archivedAt])
@@ -1119,6 +1123,8 @@ model ProjectDocument {
   commercialAttachmentRefs CommercialAttachmentRef[]
   documentRevisions        DocumentRevision[]
   taskAttachments          TaskAttachment[]
+  attachments              Attachment[]
+  photo                    Photo?
 
   @@index([orgId])
   @@index([projectId])
@@ -3706,6 +3712,7 @@ model Location {
   project  Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
   parent   Location?    @relation("LocationChildren", fields: [parentId], references: [id], onDelete: Restrict)
   children Location[]   @relation("LocationChildren")
+  photos   Photo[]
 
   @@unique([projectId, code])
   @@index([orgId])
@@ -3714,6 +3721,71 @@ model Location {
   @@index([projectId, parentId, sortOrder])
   @@index([parentId])
   @@index([projectId, path])
+}
+
+// ─── Unified attachments and photos (OCTA-DOC-ATTACH-006) ───
+// One polymorphic link table for every record type; the file itself is a
+// ProjectDocument, so a photo can be attached to many records.
+model Attachment {
+  id         String   @id @default(uuid())
+  orgId      String
+  projectId  String
+  recordType String
+  recordId   String
+  documentId String
+  role       String   @default("attachment") // attachment, evidence, photo, reference
+  caption    String?
+  sortOrder  Int      @default(0)
+  source     String   @default("upload") // upload, link, migrated_workflow, migrated_commercial, migrated_task, migrated_photos
+  uploadedBy String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  org      Organisation    @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  project  Project         @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  document ProjectDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@unique([recordType, recordId, documentId])
+  @@index([orgId])
+  @@index([projectId, recordType, recordId])
+  @@index([projectId, documentId])
+  @@index([documentId])
+}
+
+model Photo {
+  id              String    @id @default(uuid())
+  orgId           String
+  projectId       String
+  documentId      String    @unique
+  locationId      String?
+  caption         String?
+  tags            String[]  @default([])
+  takenAt         DateTime?
+  latitude        Float?
+  longitude       Float?
+  altitude        Float?
+  cameraMake      String?
+  cameraModel     String?
+  width           Int?
+  height          Int?
+  orientation     Int?
+  thumbnailKey    String? // ProjectDocument id of the generated thumbnail
+  thumbnailStatus String    @default("pending") // pending, ready, unavailable, failed
+  exifJson        Json?
+  uploadedBy      String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  org      Organisation    @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  project  Project         @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  document ProjectDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  location Location?       @relation(fields: [locationId], references: [id], onDelete: SetNull)
+
+  @@index([orgId])
+  @@index([projectId, takenAt])
+  @@index([projectId, createdAt])
+  @@index([projectId, locationId])
+  @@index([projectId, thumbnailStatus])
 }
 
 // ─── Permission templates (per-tool levels + granular grants) ───

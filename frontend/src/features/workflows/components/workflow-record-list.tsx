@@ -15,6 +15,7 @@ import {
 import { cn } from '@/lib/utils'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { AttachmentPanel } from '@/features/attachments/components/attachment-panel'
 import { HistoryPanel } from '@/features/audit/components/audit-history-panel'
 
 export interface WorkflowAttachment {
@@ -26,6 +27,9 @@ export interface WorkflowAttachment {
   storageKey?: string | null
   mimeType?: string | null
   description?: string | null
+  /** Set when the row comes from the unified Attachment table. */
+  attachmentId?: string | null
+  documentId?: string | null
 }
 
 export interface WorkflowActivityLink {
@@ -547,7 +551,23 @@ export function WorkflowRecordList<
                       <FileText className='h-4 w-4' />
                       Evidence
                     </h4>
-                    <AttachmentList attachments={attachments} />
+                    {projectId && recordType ? (
+                      <AttachmentPanel
+                        projectId={projectId}
+                        recordType={
+                          typeof recordType === 'function'
+                            ? recordType(row)
+                            : recordType
+                        }
+                        recordId={row.id}
+                        legacyAttachments={attachments.filter(
+                          (attachment) => !attachment.attachmentId
+                        )}
+                        compact
+                      />
+                    ) : (
+                      <AttachmentList attachments={attachments} />
+                    )}
                   </section>
                   <section className='space-y-2'>
                     <h4 className='flex items-center gap-2 text-sm font-semibold'>

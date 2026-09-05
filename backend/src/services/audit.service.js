@@ -35,6 +35,8 @@ const ENTITY_TYPES = Object.freeze({
   SAFETY_INCIDENT: "safety_incident",
   LOCATION: "location",
   BACKGROUND_JOB: "background_job",
+  ATTACHMENT: "attachment",
+  PHOTO: "photo",
 });
 
 const ACTIONS = Object.freeze({
