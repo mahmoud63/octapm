@@ -1,0 +1,214 @@
+const { prisma } = require("../config/db");
+const { HttpError } = require("../utils/http-error");
+const aiProvider = require("./ai-provider.service");
+const retrieval = require("./retrieval.service");
+const auditService = require("./audit.service");
+
+/**
+ * Project knowledge assistant with citations (OCTA-AI-ASSIST-028).
+ *
+ * A question is answered only from sources the caller could open by hand
+ * (retrieval.service). The model returns an answer with `[n]` citations
+ * and, optionally, suggested actions (create an RFI or a task, open a
+ * record); every exchange is stored with its sources so answers can be
+ * audited and rated. Without a configured provider the assistant still
+ * returns the matching sources so the feature degrades to search.
+ */
+
+const MAX_HISTORY = 6;
+const MAX_QUESTION = 2000;
+const ACTION_TYPES = Object.freeze(["create_rfi", "create_task", "open"]);
+
+const trimOrNull = (value) => {
+  if (value === null || value === undefined) return null;
+  const text = String(value).trim();
+  return text || null;
+};
+const toIso = (value) => (value ? new Date(value).toISOString() : null);
+const tablesReady = () => Boolean(prisma.assistantConversation?.findFirst && prisma.assistantMessage?.create);
+
+const SYSTEM_PROMPT = `You are OctaPM's project knowledge assistant for a construction project team.
+Answer the user's question using ONLY the numbered sources provided. Every factual statement must cite its source as [n]; you may cite several. If the sources do not contain the answer, say so plainly and suggest where to look or what to ask — never invent records, numbers, dates or people.
+Be concise and concrete: refs, dates, amounts, statuses, names of records. Use short paragraphs or bullet lists. Do not repeat the question.
+When a follow-up record would help — an RFI to resolve an open question, a task to chase an action — suggest it as an action.
+Return ONLY a JSON object with this shape (no markdown fences):
+{"answer": "...markdown allowed, cite like [1]...", "citations": [1, 2], "actions": [{"type": "create_rfi", "label": "Raise RFI about …", "subject": "...", "question": "...", "sourceN": 1}, {"type": "create_task", "label": "...", "title": "...", "description": "...", "sourceN": 2}, {"type": "open", "label": "Open RFI-012", "sourceN": 3}]}
+"actions" may be empty. Keep at most three actions.`;
+
+const serializeMessage = (row) => ({
+  id: row.id,
+  role: row.role,
+  content: row.content,
+  citations: Array.isArray(row.citationsJson) ? row.citationsJson : [],
+  actions: Array.isArray(row.actionsJson) ? row.actionsJson : [],
+  sources: Array.isArray(row.sourcesJson) ? row.sourcesJson : [],
+  usage: row.usageJson || null,
+  provider: row.provider || null,
+  model: row.model || null,
+  feedback: row.feedback || null,
+  feedbackNote: row.feedbackNote || null,
+  createdAt: toIso(row.createdAt),
+});
+
+const serializeConversation = (row, { withMessages = false } = {}) => ({
+  id: row.id,
+  projectId: row.projectId || null,
+  project: row.project ? { id: row.project.id, name: row.project.name } : null,
+  title: row.title,
+  lastMessageAt: toIso(row.lastMessageAt),
+  messageCount: row._count?.messages ?? row.messages?.length ?? null,
+  createdAt: toIso(row.createdAt),
+  updatedAt: toIso(row.updatedAt),
+  ...(withMessages ? { messages: (row.messages || []).map(serializeMessage) } : {}),
+});
+
+const status = () => ({ ...aiProvider.describe(), embeddings: require("./embedding.service").describe() });
+
+const listConversations = async ({ orgId, user, projectId = null, limit = 30 }) => {
+  if (!tablesReady()) return [];
+  const rows = await prisma.assistantConversation.findMany({ where: { orgId, userId: user.id, ...(projectId ? { projectId } : {}) }, include: { project: { select: { id: true, name: true } }, _count: { select: { messages: true } } }, orderBy: [{ lastMessageAt: "desc" }, { createdAt: "desc" }], take: Math.min(100, Math.max(1, Number(limit) || 30)) });
+  return rows.map((row) => serializeConversation(row));
+};
+
+const loadConversation = async ({ orgId, user, conversationId }) => {
+  const row = await prisma.assistantConversation.findFirst({ where: { id: conversationId, orgId, userId: user.id }, include: { project: { select: { id: true, name: true } }, messages: { orderBy: { createdAt: "asc" } } } });
+  if (!row) throw new HttpError(404, "ASSISTANT_CONVERSATION_NOT_FOUND", "Conversation not found");
+  return row;
+};
+
+const getConversation = async ({ orgId, user, conversationId }) => serializeConversation(await loadConversation({ orgId, user, conversationId }), { withMessages: true });
+
+const deleteConversation = async ({ orgId, user, conversationId }) => {
+  const row = await loadConversation({ orgId, user, conversationId });
+  await prisma.assistantConversation.delete({ where: { id: row.id } });
+  return { deleted: true };
+};
+
+const normalizeActions = (actions, sources) =>
+  (Array.isArray(actions) ? actions : [])
+    .filter((action) => action && ACTION_TYPES.includes(action.type))
+    .slice(0, 3)
+    .map((action) => {
+      const source = sources.find((item) => item.n === Number(action.sourceN)) || null;
+      const base = { type: action.type, label: trimOrNull(action.label) || (action.type === "create_rfi" ? "Raise an RFI" : action.type === "create_task" ? "Create a task" : "Open"), sourceN: source ? source.n : null, url: source?.url || null };
+      if (action.type === "create_rfi") return { ...base, subject: trimOrNull(action.subject)?.slice(0, 200) || trimOrNull(action.label)?.slice(0, 200) || "RFI", question: trimOrNull(action.question)?.slice(0, 4000) || null };
+      if (action.type === "create_task") return { ...base, title: trimOrNull(action.title)?.slice(0, 200) || trimOrNull(action.label)?.slice(0, 200) || "Task", description: trimOrNull(action.description)?.slice(0, 4000) || null };
+      return base;
+    });
+
+const citationsFrom = ({ answer, citations, sources }) => {
+  const numbers = new Set((Array.isArray(citations) ? citations : []).map(Number).filter((n) => Number.isInteger(n)));
+  for (const match of String(answer || "").matchAll(/\[(\d+)\]/g)) numbers.add(Number(match[1]));
+  return [...numbers].filter((n) => sources.some((source) => source.n === n)).sort((a, b) => a - b).map((n) => {
+    const source = sources.find((item) => item.n === n);
+    return { n, id: source.id, type: source.type, typeLabel: source.typeLabel, title: source.title, ref: source.ref, projectId: source.projectId, projectName: source.projectName, url: source.url, snippet: source.snippet };
+  });
+};
+
+const fallbackAnswer = ({ sources }) => {
+  if (!sources.length) return "AI answers are not configured on this server, and no matching records or documents were found for that question.";
+  const lines = sources.slice(0, 6).map((source) => `- [${source.n}] ${source.typeLabel}${source.ref ? ` ${source.ref}` : ""}: ${source.title}${source.snippet ? ` — ${source.snippet}` : ""}`);
+  return `AI answers are not configured on this server (set ANTHROPIC_API_KEY, OPENAI_API_KEY or GEMINI_API_KEY). Here is what matched your question:\n${lines.join("\n")}`;
+};
+
+const buildMessages = ({ history, question, sources, projects }) => {
+  const context = projects.length ? `Project context:\n${projects.map((project) => `- ${project.name}${project.status ? ` (${project.status})` : ""}${project.clientName ? `, client ${project.clientName}` : ""}${project.contractValue ? `, contract ${project.contractValue.toLocaleString()} ${project.currency || ""}` : ""}${project.startDate ? `, ${project.startDate} → ${project.endDate || "?"}` : ""}`).join("\n")}\n\n` : "";
+  const sourceBlock = sources.length ? `Sources:\n${retrieval.formatSources(sources)}` : "Sources: none found.";
+  const messages = history.map((message) => ({ role: message.role === "assistant" ? "assistant" : "user", content: message.role === "assistant" ? message.content : message.content }));
+  messages.push({ role: "user", content: `${context}${sourceBlock}\n\nQuestion: ${question}` });
+  return messages;
+};
+
+/**
+ * Answers a question inside a conversation (new when `conversationId` is
+ * null). `transport` lets tests inject a fake model.
+ */
+const ask = async ({ orgId, user, projectId = null, conversationId = null, question, projectAccess = null, transport = null }) => {
+  const text = trimOrNull(question);
+  if (!text) throw new HttpError(400, "ASSISTANT_QUESTION_REQUIRED", "Ask a question");
+  if (text.length > MAX_QUESTION) throw new HttpError(400, "ASSISTANT_QUESTION_TOO_LONG", `Keep the question under ${MAX_QUESTION} characters`);
+  if (!tablesReady()) throw new HttpError(503, "ASSISTANT_UNAVAILABLE", "The assistant tables are not available");
+  let conversation = conversationId ? await loadConversation({ orgId, user, conversationId }) : null;
+  const scopeProjectId = conversation?.projectId ?? projectId ?? null;
+  if (!conversation) {
+    conversation = await prisma.assistantConversation.create({ data: { orgId, projectId: scopeProjectId, userId: user.id, title: text.slice(0, 120), lastMessageAt: new Date() }, include: { project: { select: { id: true, name: true } }, messages: true } });
+  }
+  const history = (conversation.messages || []).slice(-MAX_HISTORY).map((message) => ({ role: message.role, content: message.content }));
+  const userMessage = await prisma.assistantMessage.create({ data: { orgId, conversationId: conversation.id, role: "user", content: text } });
+
+  const retrieved = await retrieval.retrieve({ orgId, user, projectId: scopeProjectId, query: text, projectAccess });
+  const sources = retrieved.sources;
+  let answer;
+  let citations;
+  let actions = [];
+  let usage = null;
+  let provider = null;
+  let model = null;
+  let degraded = false;
+  if (aiProvider.isEnabled() || transport) {
+    try {
+      const completion = await aiProvider.complete({ system: SYSTEM_PROMPT, messages: buildMessages({ history, question: text, sources, projects: retrieved.projects }), maxTokens: 1500, temperature: 0.2, transport });
+      const parsed = aiProvider.parseJsonAnswer(completion.text);
+      answer = trimOrNull(parsed?.answer) || trimOrNull(completion.text) || "I could not produce an answer.";
+      citations = citationsFrom({ answer, citations: parsed?.citations, sources });
+      actions = normalizeActions(parsed?.actions, sources);
+      usage = completion.usage || null;
+      provider = completion.provider || null;
+      model = completion.model || null;
+    } catch (error) {
+      if (error?.code !== "AI_UNAVAILABLE" && error?.code !== "AI_NOT_CONFIGURED") throw error;
+      degraded = true;
+      answer = `${error.message}\n\n${fallbackAnswer({ sources })}`;
+      citations = citationsFrom({ answer: "", citations: sources.map((source) => source.n), sources });
+    }
+  } else {
+    degraded = true;
+    answer = fallbackAnswer({ sources });
+    citations = citationsFrom({ answer: "", citations: sources.map((source) => source.n), sources });
+  }
+  const assistantMessage = await prisma.assistantMessage.create({ data: { orgId, conversationId: conversation.id, role: "assistant", content: answer, citationsJson: citations, actionsJson: actions, sourcesJson: sources.map((source) => ({ n: source.n, id: source.id, type: source.type, title: source.title, ref: source.ref, projectId: source.projectId, url: source.url })), usageJson: usage, provider, model } });
+  await prisma.assistantConversation.update({ where: { id: conversation.id }, data: { lastMessageAt: new Date() } }).catch(() => null);
+  return {
+    conversationId: conversation.id,
+    projectId: scopeProjectId,
+    title: conversation.title,
+    question: serializeMessage(userMessage),
+    message: serializeMessage(assistantMessage),
+    degraded,
+    retrieval: { sources: sources.length, projects: retrieved.projects.map((project) => project.name), mode: retrieved.mode },
+  };
+};
+
+const feedback = async ({ orgId, user, messageId, rating, note = null }) => {
+  if (!["up", "down", null].includes(rating)) throw new HttpError(400, "ASSISTANT_FEEDBACK", "Rating must be up, down or null");
+  const row = await prisma.assistantMessage.findFirst({ where: { id: messageId, orgId, conversation: { userId: user.id } } });
+  if (!row) throw new HttpError(404, "ASSISTANT_MESSAGE_NOT_FOUND", "Message not found");
+  const updated = await prisma.assistantMessage.update({ where: { id: row.id }, data: { feedback: rating, feedbackNote: trimOrNull(note)?.slice(0, 1000) || null } });
+  return serializeMessage(updated);
+};
+
+/**
+ * Runs a suggested action through the record's own service. The route
+ * checks the record module permission before calling this.
+ */
+const executeAction = async ({ orgId, user, projectId, action = {}, projectAccess = null }) => {
+  const type = trimOrNull(action.type);
+  if (type === "create_rfi") {
+    const rfiService = require("./rfi.service");
+    const subject = trimOrNull(action.subject);
+    if (!subject) throw new HttpError(400, "ASSISTANT_ACTION_SUBJECT", "The RFI needs a subject");
+    const created = await rfiService.createRfi({ orgId, projectId, payload: { subject: subject.slice(0, 200), question: trimOrNull(action.question), status: "draft", priority: "normal" }, userId: user.id, userRole: user.role, projectAccess });
+    await auditService.recordEvent({ orgId, projectId, entityType: "rfi", entityId: created.id, action: auditService.ACTIONS.CREATED, actorId: user.id, summary: { ref: created.ref, source: "assistant" } }).catch(() => null);
+    return { type, record: { id: created.id, ref: created.ref, status: created.status }, url: `/projects/${projectId}/doc-control/rfi?recordId=${created.id}` };
+  }
+  if (type === "create_task") {
+    const taskService = require("./task.service");
+    const title = trimOrNull(action.title);
+    if (!title) throw new HttpError(400, "ASSISTANT_ACTION_TITLE", "The task needs a title");
+    const created = await taskService.createTask({ orgId, projectId, payload: { title: title.slice(0, 200), description: trimOrNull(action.description) }, userId: user.id, userRole: user.role, projectAccess });
+    return { type, record: { id: created.id, ref: created.taskNumber ? `T-${created.taskNumber}` : null, status: created.status }, url: `/tasks?taskId=${created.id}` };
+  }
+  throw new HttpError(400, "ASSISTANT_ACTION_UNKNOWN", "Unknown action");
+};
+
+module.exports = { SYSTEM_PROMPT, ACTION_TYPES, status, listConversations, getConversation, deleteConversation, ask, feedback, executeAction, normalizeActions, citationsFrom };

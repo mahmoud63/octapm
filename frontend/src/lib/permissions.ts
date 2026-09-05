@@ -43,6 +43,7 @@ export type PermissionModule =
   | 'workflow'
   | 'custom_field'
   | 'bid'
+  | 'assistant'
 
 export type RoleId =
   | 'pm'

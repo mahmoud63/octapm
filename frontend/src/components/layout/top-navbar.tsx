@@ -10,6 +10,7 @@ import {
   Sparkles,
   Command,
 } from 'lucide-react'
+import { useAuthStore } from '@/stores/auth-store'
 import { cn } from '@/lib/utils'
 import useDialogState from '@/hooks/use-dialog-state'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
@@ -37,6 +38,7 @@ import { RealtimeStatus } from '@/components/realtime-status'
 import { Search } from '@/components/search'
 import { SignOutDialog } from '@/components/sign-out-dialog'
 import { ThemeSwitch } from '@/components/theme-switch'
+import { AssistantButton } from '@/features/assistant/components/assistant-sheet'
 import { SubscriptionBanner } from '@/features/billing/components/subscription-banner'
 import { NotificationCenter } from '@/features/notifications/components/notification-center'
 import {
@@ -44,7 +46,6 @@ import {
   type DisplayNavigationItemId,
   useUserSettings,
 } from '@/features/settings/hooks/use-user-settings'
-import { useAuthStore } from '@/stores/auth-store'
 import { sidebarData } from './data/sidebar-data'
 import { ProjectSwitcher } from './project-switcher'
 import { type NavCollapsible, type NavLink, type NavItem } from './types'
@@ -366,7 +367,8 @@ export function TopNavbar() {
   const href = useLocation({ select: (l) => l.href })
   const [scrolled, setScrolled] = React.useState(false)
   const settingsQuery = useUserSettings()
-  const displayItems = settingsQuery.data?.display.items ?? defaultDisplayItemIds
+  const displayItems =
+    settingsQuery.data?.display.items ?? defaultDisplayItemIds
   const visibleDisplayItems = React.useMemo<Set<DisplayNavigationItemId>>(
     () => new Set(displayItems),
     [displayItems]
@@ -433,6 +435,7 @@ export function TopNavbar() {
           <OutboxStatus />
           <RealtimeStatus className='hidden sm:inline-flex' />
           <Search className='hidden sm:flex' />
+          <AssistantButton />
           <NotificationCenter />
           <ConfigDrawer />
           <ThemeSwitch />
