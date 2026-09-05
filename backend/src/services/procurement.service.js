@@ -539,40 +539,68 @@ const enrichPackage = (row, project) => {
   };
 };
 
+const supplierInclude = {
+  company: { select: { id: true, name: true, isVendor: true, trades: true } },
+};
+
 const listSuppliers = async ({ orgId, projectId }) => {
   await ensureProject({ orgId, projectId });
   return prisma.procurementSupplier.findMany({
     where: { projectId },
+    include: supplierInclude,
     orderBy: [{ status: 'asc' }, { name: 'asc' }],
   });
 };
 
+/**
+ * Suppliers are project records that may point at an org-level vendor
+ * (Company.isVendor, OCTA-ADM-COMPANY-007). Passing `companyId` copies the
+ * vendor's details; a vendor with the same name is linked automatically.
+ */
 const createSupplier = async ({ orgId, projectId, actor, payload }) => {
   await ensureProject({ orgId, projectId });
 
-  const name = trimOrNull(payload.name);
+  let company = null;
+  if (payload.companyId) {
+    company = await prisma.company.findFirst({
+      where: { id: payload.companyId, orgId },
+    });
+    if (!company) {
+      throw new HttpError(404, 'VENDOR_NOT_FOUND', 'Vendor company not found');
+    }
+  }
+
+  const name = trimOrNull(payload.name) || company?.name || null;
   if (!name) {
     throw new HttpError(400, 'VALIDATION_ERROR', 'Supplier name is required');
   }
 
   const existing = await prisma.procurementSupplier.findFirst({
     where: { projectId, name },
+    include: supplierInclude,
   });
   if (existing) return existing;
+
+  if (!company) {
+    company = await prisma.company.findFirst({
+      where: { orgId, name: { equals: name, mode: 'insensitive' } },
+    });
+  }
 
   return prisma.$transaction(async (tx) => {
     const row = await tx.procurementSupplier.create({
       data: {
         projectId,
+        companyId: company?.id || null,
         code: trimOrNull(payload.code),
         name,
-        contactName: trimOrNull(payload.contactName),
-        email: trimOrNull(payload.email),
-        phone: trimOrNull(payload.phone),
-        address: trimOrNull(payload.address),
+        contactName: trimOrNull(payload.contactName) || company?.contactName || null,
+        email: trimOrNull(payload.email) || company?.email || null,
+        phone: trimOrNull(payload.phone) || company?.phone || null,
+        address: trimOrNull(payload.address) || company?.address || null,
         tradeCategories: Array.isArray(payload.tradeCategories)
           ? payload.tradeCategories
-          : [],
+          : company?.trades || [],
         status: payload.status || 'approved',
         leadTimeReliability: isBlank(payload.leadTimeReliability)
           ? null
@@ -581,7 +609,15 @@ const createSupplier = async ({ orgId, projectId, actor, payload }) => {
         createdBy: actor?.id || null,
         updatedBy: actor?.id || null,
       },
+      include: supplierInclude,
     });
+
+    if (company && !company.isVendor && tx.company?.update) {
+      await tx.company.update({
+        where: { id: company.id },
+        data: { isVendor: true },
+      });
+    }
 
     await recordAudit({
       tx,

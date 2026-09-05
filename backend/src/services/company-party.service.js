@@ -349,6 +349,24 @@ const upsertProjectPartyWithTx = async ({
       payload.permissions || payload.permissionsJson || existingById?.permissionsJson || {},
     status: normalizeStatus(payload.status, existingById?.status || "active"),
   };
+  // Permission template (OCTA-ADM-PERM-003): applied to every member of the party.
+  if (payload.permissionTemplateId !== undefined) {
+    const permissionTemplateId = trimToNull(payload.permissionTemplateId);
+    if (permissionTemplateId && tx.permissionTemplate?.findFirst) {
+      const template = await tx.permissionTemplate.findFirst({
+        where: { id: permissionTemplateId, orgId },
+        select: { id: true },
+      });
+      if (!template) {
+        throw new HttpError(
+          404,
+          "PERMISSION_TEMPLATE_NOT_FOUND",
+          "Permission template not found",
+        );
+      }
+    }
+    data.permissionTemplateId = permissionTemplateId;
+  }
 
   if (payload.partyId) {
     return tx.projectParty.update({

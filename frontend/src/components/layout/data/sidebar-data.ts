@@ -1,5 +1,6 @@
 import {
   Bell,
+  Building2,
   FolderKanban,
   HelpCircle,
   LayoutDashboard,
@@ -49,6 +50,11 @@ export const sidebarData: SidebarData = {
           title: 'Users',
           url: '/users',
           icon: Users,
+        },
+        {
+          title: 'Company',
+          url: '/company/directory',
+          icon: Building2,
         },
       ],
     },

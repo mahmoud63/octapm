@@ -1,0 +1,73 @@
+import { Navigate, Outlet } from '@tanstack/react-router'
+import {
+  Building2,
+  FolderKanban,
+  Hash,
+  ShieldCheck,
+  Store,
+  Wrench,
+} from 'lucide-react'
+import { useIsCompanyAdmin } from '@/lib/permissions'
+import { Separator } from '@/components/ui/separator'
+import { Main } from '@/components/layout/main'
+import { SidebarNav } from '@/features/settings/components/sidebar-nav'
+
+const navItems = [
+  {
+    title: 'Directory',
+    href: '/company/directory',
+    icon: <Building2 size={18} />,
+  },
+  { title: 'Vendors', href: '/company/vendors', icon: <Store size={18} /> },
+  {
+    title: 'Cost codes',
+    href: '/company/cost-codes',
+    icon: <Hash size={18} />,
+  },
+  {
+    title: 'Equipment',
+    href: '/company/equipment',
+    icon: <Wrench size={18} />,
+  },
+  {
+    title: 'Project templates',
+    href: '/company/templates',
+    icon: <FolderKanban size={18} />,
+  },
+  {
+    title: 'Permissions',
+    href: '/company/permissions',
+    icon: <ShieldCheck size={18} />,
+  },
+]
+
+/** Company workspace: masters defined once and reused on every project. */
+export function CompanyWorkspace() {
+  const isCompanyAdmin = useIsCompanyAdmin()
+  if (!isCompanyAdmin) {
+    return <Navigate to='/' replace />
+  }
+
+  return (
+    <Main fixed>
+      <div className='space-y-0.5'>
+        <h1 className='text-2xl font-bold tracking-tight md:text-3xl'>
+          Company
+        </h1>
+        <p className='text-muted-foreground'>
+          Vendors, cost codes, equipment, project templates and permissions
+          shared by every project in the organisation.
+        </p>
+      </div>
+      <Separator className='my-4 lg:my-6' />
+      <div className='flex flex-1 flex-col space-y-2 overflow-hidden md:space-y-2 lg:flex-row lg:space-y-0 lg:space-x-12'>
+        <aside className='top-0 lg:sticky lg:w-1/5'>
+          <SidebarNav items={navItems} />
+        </aside>
+        <div className='flex w-full overflow-y-hidden p-1'>
+          <Outlet />
+        </div>
+      </div>
+    </Main>
+  )
+}

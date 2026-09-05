@@ -126,23 +126,51 @@ const listEquipment = async ({ orgId, projectId }) => {
   });
 };
 
+/**
+ * Adds project equipment, optionally from the company equipment list
+ * (OCTA-ADM-COMPANY-007): the master supplies name/rate defaults and the
+ * project row keeps a link so utilisation can roll up per master.
+ */
 const addEquipment = async ({ orgId, projectId, payload }) => {
   await verifyProject(orgId, projectId);
 
-  if (!RATE_TYPES.includes(payload.rateType)) {
+  let master = null;
+  if (payload.companyEquipmentId) {
+    master = await prisma.companyEquipment.findFirst({
+      where: { id: payload.companyEquipmentId, orgId },
+    });
+    if (!master) {
+      throw new HttpError(
+        404,
+        'COMPANY_EQUIPMENT_NOT_FOUND',
+        'Company equipment not found',
+      );
+    }
+  }
+
+  const rateType = payload.rateType || master?.rateType;
+  if (!RATE_TYPES.includes(rateType)) {
     throw new HttpError(
       400,
       'INVALID_RATE_TYPE',
       'rateType must be "hourly" or "daily"',
     );
   }
+  const name = trimOrNull(payload.name) || master?.name || null;
+  if (!name) {
+    throw new HttpError(400, 'VALIDATION_ERROR', 'Equipment name is required');
+  }
 
   return prisma.equipment.create({
     data: {
       projectId,
-      name: payload.name,
-      rateType: payload.rateType,
-      rate: toMoneyNumber(payload.rate),
+      companyEquipmentId: master?.id || null,
+      name,
+      rateType,
+      rate:
+        payload.rate !== undefined && payload.rate !== null
+          ? toMoneyNumber(payload.rate)
+          : toMoneyNumber(master?.rate ?? 0),
     },
   });
 };

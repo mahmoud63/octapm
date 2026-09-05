@@ -13,6 +13,14 @@ import {
   FormMessage,
 } from '@/components/ui/form'
 import { Input } from '@/components/ui/input'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
+import { useCompanyEquipment } from '@/features/company/hooks/use-company'
 import { addEquipmentSchema, type AddEquipmentInput } from '../data/schema'
 import {
   useAddEquipment,
@@ -59,21 +67,38 @@ export function EquipmentSection({ projectId }: EquipmentSectionProps) {
     useEquipmentUtilization(projectId)
   const addEquipment = useAddEquipment(projectId)
   const deleteEquipment = useDeleteEquipment(projectId)
+  const { data: companyEquipment } = useCompanyEquipment()
+  const masters = companyEquipment?.items ?? []
 
   const form = useForm<AddEquipmentInput>({
     resolver: zodResolver(addEquipmentSchema),
     defaultValues: {
+      companyEquipmentId: undefined,
       name: '',
       rateType: 'daily',
       rate: 0,
     },
   })
 
+  // Picking from the company list pre-fills the row; the rate stays editable.
+  const applyMaster = (value: string) => {
+    const master = masters.find((item) => item.id === value)
+    if (!master) {
+      form.setValue('companyEquipmentId', undefined)
+      return
+    }
+    form.setValue('companyEquipmentId', master.id)
+    form.setValue('name', master.name, { shouldValidate: true })
+    form.setValue('rateType', master.rateType)
+    form.setValue('rate', master.rate)
+  }
+
   const onSubmit = async (values: AddEquipmentInput) => {
     try {
       await addEquipment.mutateAsync(values)
       toast.success('Equipment added.')
       form.reset({
+        companyEquipmentId: undefined,
         name: '',
         rateType: 'daily',
         rate: 0,
@@ -145,6 +170,24 @@ export function EquipmentSection({ projectId }: EquipmentSectionProps) {
           onSubmit={form.handleSubmit(onSubmit)}
           className='flex flex-wrap items-end gap-2'
         >
+          {masters.length > 0 && (
+            <div className='w-56 space-y-2'>
+              <p className='text-sm font-medium'>From company list</p>
+              <Select onValueChange={applyMaster}>
+                <SelectTrigger data-testid='uat-equipment-master-picker'>
+                  <SelectValue placeholder='Pick equipment' />
+                </SelectTrigger>
+                <SelectContent>
+                  {masters.map((item) => (
+                    <SelectItem key={item.id} value={item.id}>
+                      {item.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
+
           <FormField
             control={form.control}
             name='name'

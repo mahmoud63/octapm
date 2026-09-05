@@ -24,11 +24,13 @@ import { Route as authOtpRouteImport } from './routes/(auth)/otp'
 import { Route as authForgotPasswordRouteImport } from './routes/(auth)/forgot-password'
 import { Route as authAcceptInviteRouteImport } from './routes/(auth)/accept-invite'
 import { Route as AuthenticatedSettingsRouteRouteImport } from './routes/_authenticated/settings/route'
+import { Route as AuthenticatedCompanyRouteRouteImport } from './routes/_authenticated/company/route'
 import { Route as AuthenticatedUsersIndexRouteImport } from './routes/_authenticated/users/index'
 import { Route as AuthenticatedTasksIndexRouteImport } from './routes/_authenticated/tasks/index'
 import { Route as AuthenticatedSettingsIndexRouteImport } from './routes/_authenticated/settings/index'
 import { Route as AuthenticatedProjectsIndexRouteImport } from './routes/_authenticated/projects/index'
 import { Route as AuthenticatedHelpCenterIndexRouteImport } from './routes/_authenticated/help-center/index'
+import { Route as AuthenticatedCompanyIndexRouteImport } from './routes/_authenticated/company/index'
 import { Route as AuthenticatedBillingIndexRouteImport } from './routes/_authenticated/billing/index'
 import { Route as AuthenticatedSettingsPermissionsRouteImport } from './routes/_authenticated/settings/permissions'
 import { Route as AuthenticatedSettingsNotificationsRouteImport } from './routes/_authenticated/settings/notifications'
@@ -38,6 +40,12 @@ import { Route as AuthenticatedSettingsAppearanceRouteImport } from './routes/_a
 import { Route as AuthenticatedSettingsAccountRouteImport } from './routes/_authenticated/settings/account'
 import { Route as AuthenticatedProjectsProjectIdRouteImport } from './routes/_authenticated/projects/$projectId'
 import { Route as AuthenticatedErrorsErrorRouteImport } from './routes/_authenticated/errors/$error'
+import { Route as AuthenticatedCompanyVendorsRouteImport } from './routes/_authenticated/company/vendors'
+import { Route as AuthenticatedCompanyTemplatesRouteImport } from './routes/_authenticated/company/templates'
+import { Route as AuthenticatedCompanyPermissionsRouteImport } from './routes/_authenticated/company/permissions'
+import { Route as AuthenticatedCompanyEquipmentRouteImport } from './routes/_authenticated/company/equipment'
+import { Route as AuthenticatedCompanyDirectoryRouteImport } from './routes/_authenticated/company/directory'
+import { Route as AuthenticatedCompanyCostCodesRouteImport } from './routes/_authenticated/company/cost-codes'
 import { Route as AuthenticatedBillingCheckoutRouteImport } from './routes/_authenticated/billing/checkout'
 import { Route as AuthenticatedProjectsProjectIdBoqRouteImport } from './routes/_authenticated/projects/$projectId/boq'
 
@@ -116,6 +124,12 @@ const AuthenticatedSettingsRouteRoute =
     path: '/settings',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
+const AuthenticatedCompanyRouteRoute =
+  AuthenticatedCompanyRouteRouteImport.update({
+    id: '/company',
+    path: '/company',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
 const AuthenticatedUsersIndexRoute = AuthenticatedUsersIndexRouteImport.update({
   id: '/users/',
   path: '/users/',
@@ -143,6 +157,12 @@ const AuthenticatedHelpCenterIndexRoute =
     id: '/help-center/',
     path: '/help-center/',
     getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
+const AuthenticatedCompanyIndexRoute =
+  AuthenticatedCompanyIndexRouteImport.update({
+    id: '/',
+    path: '/',
+    getParentRoute: () => AuthenticatedCompanyRouteRoute,
   } as any)
 const AuthenticatedBillingIndexRoute =
   AuthenticatedBillingIndexRouteImport.update({
@@ -198,6 +218,42 @@ const AuthenticatedErrorsErrorRoute =
     path: '/errors/$error',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
+const AuthenticatedCompanyVendorsRoute =
+  AuthenticatedCompanyVendorsRouteImport.update({
+    id: '/vendors',
+    path: '/vendors',
+    getParentRoute: () => AuthenticatedCompanyRouteRoute,
+  } as any)
+const AuthenticatedCompanyTemplatesRoute =
+  AuthenticatedCompanyTemplatesRouteImport.update({
+    id: '/templates',
+    path: '/templates',
+    getParentRoute: () => AuthenticatedCompanyRouteRoute,
+  } as any)
+const AuthenticatedCompanyPermissionsRoute =
+  AuthenticatedCompanyPermissionsRouteImport.update({
+    id: '/permissions',
+    path: '/permissions',
+    getParentRoute: () => AuthenticatedCompanyRouteRoute,
+  } as any)
+const AuthenticatedCompanyEquipmentRoute =
+  AuthenticatedCompanyEquipmentRouteImport.update({
+    id: '/equipment',
+    path: '/equipment',
+    getParentRoute: () => AuthenticatedCompanyRouteRoute,
+  } as any)
+const AuthenticatedCompanyDirectoryRoute =
+  AuthenticatedCompanyDirectoryRouteImport.update({
+    id: '/directory',
+    path: '/directory',
+    getParentRoute: () => AuthenticatedCompanyRouteRoute,
+  } as any)
+const AuthenticatedCompanyCostCodesRoute =
+  AuthenticatedCompanyCostCodesRouteImport.update({
+    id: '/cost-codes',
+    path: '/cost-codes',
+    getParentRoute: () => AuthenticatedCompanyRouteRoute,
+  } as any)
 const AuthenticatedBillingCheckoutRoute =
   AuthenticatedBillingCheckoutRouteImport.update({
     id: '/billing/checkout',
@@ -214,6 +270,7 @@ const AuthenticatedProjectsProjectIdBoqRoute =
 export interface FileRoutesByFullPath {
   '/': typeof AuthenticatedIndexRoute
   '/landing': typeof LandingRoute
+  '/company': typeof AuthenticatedCompanyRouteRouteWithChildren
   '/settings': typeof AuthenticatedSettingsRouteRouteWithChildren
   '/accept-invite': typeof authAcceptInviteRoute
   '/forgot-password': typeof authForgotPasswordRoute
@@ -227,6 +284,12 @@ export interface FileRoutesByFullPath {
   '/500': typeof errors500Route
   '/503': typeof errors503Route
   '/billing/checkout': typeof AuthenticatedBillingCheckoutRoute
+  '/company/cost-codes': typeof AuthenticatedCompanyCostCodesRoute
+  '/company/directory': typeof AuthenticatedCompanyDirectoryRoute
+  '/company/equipment': typeof AuthenticatedCompanyEquipmentRoute
+  '/company/permissions': typeof AuthenticatedCompanyPermissionsRoute
+  '/company/templates': typeof AuthenticatedCompanyTemplatesRoute
+  '/company/vendors': typeof AuthenticatedCompanyVendorsRoute
   '/errors/$error': typeof AuthenticatedErrorsErrorRoute
   '/projects/$projectId': typeof AuthenticatedProjectsProjectIdRouteWithChildren
   '/settings/account': typeof AuthenticatedSettingsAccountRoute
@@ -236,6 +299,7 @@ export interface FileRoutesByFullPath {
   '/settings/notifications': typeof AuthenticatedSettingsNotificationsRoute
   '/settings/permissions': typeof AuthenticatedSettingsPermissionsRoute
   '/billing/': typeof AuthenticatedBillingIndexRoute
+  '/company/': typeof AuthenticatedCompanyIndexRoute
   '/help-center/': typeof AuthenticatedHelpCenterIndexRoute
   '/projects/': typeof AuthenticatedProjectsIndexRoute
   '/settings/': typeof AuthenticatedSettingsIndexRoute
@@ -258,6 +322,12 @@ export interface FileRoutesByTo {
   '/503': typeof errors503Route
   '/': typeof AuthenticatedIndexRoute
   '/billing/checkout': typeof AuthenticatedBillingCheckoutRoute
+  '/company/cost-codes': typeof AuthenticatedCompanyCostCodesRoute
+  '/company/directory': typeof AuthenticatedCompanyDirectoryRoute
+  '/company/equipment': typeof AuthenticatedCompanyEquipmentRoute
+  '/company/permissions': typeof AuthenticatedCompanyPermissionsRoute
+  '/company/templates': typeof AuthenticatedCompanyTemplatesRoute
+  '/company/vendors': typeof AuthenticatedCompanyVendorsRoute
   '/errors/$error': typeof AuthenticatedErrorsErrorRoute
   '/projects/$projectId': typeof AuthenticatedProjectsProjectIdRouteWithChildren
   '/settings/account': typeof AuthenticatedSettingsAccountRoute
@@ -267,6 +337,7 @@ export interface FileRoutesByTo {
   '/settings/notifications': typeof AuthenticatedSettingsNotificationsRoute
   '/settings/permissions': typeof AuthenticatedSettingsPermissionsRoute
   '/billing': typeof AuthenticatedBillingIndexRoute
+  '/company': typeof AuthenticatedCompanyIndexRoute
   '/help-center': typeof AuthenticatedHelpCenterIndexRoute
   '/projects': typeof AuthenticatedProjectsIndexRoute
   '/settings': typeof AuthenticatedSettingsIndexRoute
@@ -278,6 +349,7 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/_authenticated': typeof AuthenticatedRouteRouteWithChildren
   '/landing': typeof LandingRoute
+  '/_authenticated/company': typeof AuthenticatedCompanyRouteRouteWithChildren
   '/_authenticated/settings': typeof AuthenticatedSettingsRouteRouteWithChildren
   '/(auth)/accept-invite': typeof authAcceptInviteRoute
   '/(auth)/forgot-password': typeof authForgotPasswordRoute
@@ -292,6 +364,12 @@ export interface FileRoutesById {
   '/(errors)/503': typeof errors503Route
   '/_authenticated/': typeof AuthenticatedIndexRoute
   '/_authenticated/billing/checkout': typeof AuthenticatedBillingCheckoutRoute
+  '/_authenticated/company/cost-codes': typeof AuthenticatedCompanyCostCodesRoute
+  '/_authenticated/company/directory': typeof AuthenticatedCompanyDirectoryRoute
+  '/_authenticated/company/equipment': typeof AuthenticatedCompanyEquipmentRoute
+  '/_authenticated/company/permissions': typeof AuthenticatedCompanyPermissionsRoute
+  '/_authenticated/company/templates': typeof AuthenticatedCompanyTemplatesRoute
+  '/_authenticated/company/vendors': typeof AuthenticatedCompanyVendorsRoute
   '/_authenticated/errors/$error': typeof AuthenticatedErrorsErrorRoute
   '/_authenticated/projects/$projectId': typeof AuthenticatedProjectsProjectIdRouteWithChildren
   '/_authenticated/settings/account': typeof AuthenticatedSettingsAccountRoute
@@ -301,6 +379,7 @@ export interface FileRoutesById {
   '/_authenticated/settings/notifications': typeof AuthenticatedSettingsNotificationsRoute
   '/_authenticated/settings/permissions': typeof AuthenticatedSettingsPermissionsRoute
   '/_authenticated/billing/': typeof AuthenticatedBillingIndexRoute
+  '/_authenticated/company/': typeof AuthenticatedCompanyIndexRoute
   '/_authenticated/help-center/': typeof AuthenticatedHelpCenterIndexRoute
   '/_authenticated/projects/': typeof AuthenticatedProjectsIndexRoute
   '/_authenticated/settings/': typeof AuthenticatedSettingsIndexRoute
@@ -313,6 +392,7 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/landing'
+    | '/company'
     | '/settings'
     | '/accept-invite'
     | '/forgot-password'
@@ -326,6 +406,12 @@ export interface FileRouteTypes {
     | '/500'
     | '/503'
     | '/billing/checkout'
+    | '/company/cost-codes'
+    | '/company/directory'
+    | '/company/equipment'
+    | '/company/permissions'
+    | '/company/templates'
+    | '/company/vendors'
     | '/errors/$error'
     | '/projects/$projectId'
     | '/settings/account'
@@ -335,6 +421,7 @@ export interface FileRouteTypes {
     | '/settings/notifications'
     | '/settings/permissions'
     | '/billing/'
+    | '/company/'
     | '/help-center/'
     | '/projects/'
     | '/settings/'
@@ -357,6 +444,12 @@ export interface FileRouteTypes {
     | '/503'
     | '/'
     | '/billing/checkout'
+    | '/company/cost-codes'
+    | '/company/directory'
+    | '/company/equipment'
+    | '/company/permissions'
+    | '/company/templates'
+    | '/company/vendors'
     | '/errors/$error'
     | '/projects/$projectId'
     | '/settings/account'
@@ -366,6 +459,7 @@ export interface FileRouteTypes {
     | '/settings/notifications'
     | '/settings/permissions'
     | '/billing'
+    | '/company'
     | '/help-center'
     | '/projects'
     | '/settings'
@@ -376,6 +470,7 @@ export interface FileRouteTypes {
     | '__root__'
     | '/_authenticated'
     | '/landing'
+    | '/_authenticated/company'
     | '/_authenticated/settings'
     | '/(auth)/accept-invite'
     | '/(auth)/forgot-password'
@@ -390,6 +485,12 @@ export interface FileRouteTypes {
     | '/(errors)/503'
     | '/_authenticated/'
     | '/_authenticated/billing/checkout'
+    | '/_authenticated/company/cost-codes'
+    | '/_authenticated/company/directory'
+    | '/_authenticated/company/equipment'
+    | '/_authenticated/company/permissions'
+    | '/_authenticated/company/templates'
+    | '/_authenticated/company/vendors'
     | '/_authenticated/errors/$error'
     | '/_authenticated/projects/$projectId'
     | '/_authenticated/settings/account'
@@ -399,6 +500,7 @@ export interface FileRouteTypes {
     | '/_authenticated/settings/notifications'
     | '/_authenticated/settings/permissions'
     | '/_authenticated/billing/'
+    | '/_authenticated/company/'
     | '/_authenticated/help-center/'
     | '/_authenticated/projects/'
     | '/_authenticated/settings/'
@@ -530,6 +632,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedSettingsRouteRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/_authenticated/company': {
+      id: '/_authenticated/company'
+      path: '/company'
+      fullPath: '/company'
+      preLoaderRoute: typeof AuthenticatedCompanyRouteRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
     '/_authenticated/users/': {
       id: '/_authenticated/users/'
       path: '/users'
@@ -564,6 +673,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/help-center/'
       preLoaderRoute: typeof AuthenticatedHelpCenterIndexRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/company/': {
+      id: '/_authenticated/company/'
+      path: '/'
+      fullPath: '/company/'
+      preLoaderRoute: typeof AuthenticatedCompanyIndexRouteImport
+      parentRoute: typeof AuthenticatedCompanyRouteRoute
     }
     '/_authenticated/billing/': {
       id: '/_authenticated/billing/'
@@ -628,6 +744,48 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedErrorsErrorRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/_authenticated/company/vendors': {
+      id: '/_authenticated/company/vendors'
+      path: '/vendors'
+      fullPath: '/company/vendors'
+      preLoaderRoute: typeof AuthenticatedCompanyVendorsRouteImport
+      parentRoute: typeof AuthenticatedCompanyRouteRoute
+    }
+    '/_authenticated/company/templates': {
+      id: '/_authenticated/company/templates'
+      path: '/templates'
+      fullPath: '/company/templates'
+      preLoaderRoute: typeof AuthenticatedCompanyTemplatesRouteImport
+      parentRoute: typeof AuthenticatedCompanyRouteRoute
+    }
+    '/_authenticated/company/permissions': {
+      id: '/_authenticated/company/permissions'
+      path: '/permissions'
+      fullPath: '/company/permissions'
+      preLoaderRoute: typeof AuthenticatedCompanyPermissionsRouteImport
+      parentRoute: typeof AuthenticatedCompanyRouteRoute
+    }
+    '/_authenticated/company/equipment': {
+      id: '/_authenticated/company/equipment'
+      path: '/equipment'
+      fullPath: '/company/equipment'
+      preLoaderRoute: typeof AuthenticatedCompanyEquipmentRouteImport
+      parentRoute: typeof AuthenticatedCompanyRouteRoute
+    }
+    '/_authenticated/company/directory': {
+      id: '/_authenticated/company/directory'
+      path: '/directory'
+      fullPath: '/company/directory'
+      preLoaderRoute: typeof AuthenticatedCompanyDirectoryRouteImport
+      parentRoute: typeof AuthenticatedCompanyRouteRoute
+    }
+    '/_authenticated/company/cost-codes': {
+      id: '/_authenticated/company/cost-codes'
+      path: '/cost-codes'
+      fullPath: '/company/cost-codes'
+      preLoaderRoute: typeof AuthenticatedCompanyCostCodesRouteImport
+      parentRoute: typeof AuthenticatedCompanyRouteRoute
+    }
     '/_authenticated/billing/checkout': {
       id: '/_authenticated/billing/checkout'
       path: '/billing/checkout'
@@ -644,6 +802,32 @@ declare module '@tanstack/react-router' {
     }
   }
 }
+
+interface AuthenticatedCompanyRouteRouteChildren {
+  AuthenticatedCompanyCostCodesRoute: typeof AuthenticatedCompanyCostCodesRoute
+  AuthenticatedCompanyDirectoryRoute: typeof AuthenticatedCompanyDirectoryRoute
+  AuthenticatedCompanyEquipmentRoute: typeof AuthenticatedCompanyEquipmentRoute
+  AuthenticatedCompanyPermissionsRoute: typeof AuthenticatedCompanyPermissionsRoute
+  AuthenticatedCompanyTemplatesRoute: typeof AuthenticatedCompanyTemplatesRoute
+  AuthenticatedCompanyVendorsRoute: typeof AuthenticatedCompanyVendorsRoute
+  AuthenticatedCompanyIndexRoute: typeof AuthenticatedCompanyIndexRoute
+}
+
+const AuthenticatedCompanyRouteRouteChildren: AuthenticatedCompanyRouteRouteChildren =
+  {
+    AuthenticatedCompanyCostCodesRoute: AuthenticatedCompanyCostCodesRoute,
+    AuthenticatedCompanyDirectoryRoute: AuthenticatedCompanyDirectoryRoute,
+    AuthenticatedCompanyEquipmentRoute: AuthenticatedCompanyEquipmentRoute,
+    AuthenticatedCompanyPermissionsRoute: AuthenticatedCompanyPermissionsRoute,
+    AuthenticatedCompanyTemplatesRoute: AuthenticatedCompanyTemplatesRoute,
+    AuthenticatedCompanyVendorsRoute: AuthenticatedCompanyVendorsRoute,
+    AuthenticatedCompanyIndexRoute: AuthenticatedCompanyIndexRoute,
+  }
+
+const AuthenticatedCompanyRouteRouteWithChildren =
+  AuthenticatedCompanyRouteRoute._addFileChildren(
+    AuthenticatedCompanyRouteRouteChildren,
+  )
 
 interface AuthenticatedSettingsRouteRouteChildren {
   AuthenticatedSettingsAccountRoute: typeof AuthenticatedSettingsAccountRoute
@@ -689,6 +873,7 @@ const AuthenticatedProjectsProjectIdRouteWithChildren =
   )
 
 interface AuthenticatedRouteRouteChildren {
+  AuthenticatedCompanyRouteRoute: typeof AuthenticatedCompanyRouteRouteWithChildren
   AuthenticatedSettingsRouteRoute: typeof AuthenticatedSettingsRouteRouteWithChildren
   AuthenticatedIndexRoute: typeof AuthenticatedIndexRoute
   AuthenticatedBillingCheckoutRoute: typeof AuthenticatedBillingCheckoutRoute
@@ -702,6 +887,7 @@ interface AuthenticatedRouteRouteChildren {
 }
 
 const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
+  AuthenticatedCompanyRouteRoute: AuthenticatedCompanyRouteRouteWithChildren,
   AuthenticatedSettingsRouteRoute: AuthenticatedSettingsRouteRouteWithChildren,
   AuthenticatedIndexRoute: AuthenticatedIndexRoute,
   AuthenticatedBillingCheckoutRoute: AuthenticatedBillingCheckoutRoute,

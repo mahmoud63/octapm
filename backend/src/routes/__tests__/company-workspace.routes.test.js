@@ -1,0 +1,122 @@
+const express = require("express");
+const request = require("supertest");
+
+jest.mock("../../middleware/auth", () => ({
+  authenticate: (req, _res, next) => {
+    req.user = {
+      id: "user-1",
+      orgId: "org-1",
+      role: req.get("x-role") || "site_engineer",
+      isCompanyAdmin: req.get("x-company-admin") === "1",
+    };
+    next();
+  },
+}));
+jest.mock("../../middleware/subscription-gate", () => ({
+  subscriptionGate: (_req, _res, next) => next(),
+}));
+
+const mockWorkspace = {
+  COST_CODE_CATEGORIES: ["labour", "material", "equipment", "subcontract", "indirect", "overhead", "contingency", "other"],
+  RATE_TYPES: ["hourly", "daily"],
+  listDirectory: jest.fn(),
+  listVendors: jest.fn(),
+  vendorMigrationReport: jest.fn(),
+  createVendor: jest.fn(),
+  updateVendor: jest.fn(),
+  listCostCodes: jest.fn(),
+  createCostCode: jest.fn(),
+  importCostCodes: jest.fn(),
+  updateCostCode: jest.fn(),
+  listCompanyEquipment: jest.fn(),
+  createCompanyEquipment: jest.fn(),
+  updateCompanyEquipment: jest.fn(),
+};
+const mockTemplates = {
+  listTemplates: jest.fn(),
+  getTemplate: jest.fn(),
+  createTemplate: jest.fn(),
+  updateTemplate: jest.fn(),
+  archiveTemplate: jest.fn(),
+  createProjectFromTemplate: jest.fn(),
+};
+jest.mock("../../services/company-workspace.service", () => mockWorkspace);
+jest.mock("../../services/project-template.service", () => mockTemplates);
+
+const router = require("../company-workspace");
+
+const ID = "11111111-1111-4111-8111-111111111111";
+
+const buildApp = () => {
+  const app = express();
+  app.use(express.json());
+  app.use("/company", router);
+  app.use((err, _req, res, _next) =>
+    res.status(err.status || 500).json({
+      success: false,
+      error: { code: err.code || "INTERNAL_ERROR", message: err.message },
+    }),
+  );
+  return app;
+};
+
+describe("company workspace routes", () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    for (const fn of Object.values(mockWorkspace)) if (typeof fn === "function") fn.mockResolvedValue({ items: [] });
+    for (const fn of Object.values(mockTemplates)) fn.mockResolvedValue({ id: ID });
+  });
+
+  it("lets every user read masters for pickers", async () => {
+    const app = buildApp();
+    for (const path of ["/company/directory", "/company/vendors?trade=steel", "/company/cost-codes", "/company/equipment", "/company/project-templates"]) {
+      const res = await request(app).get(path).set("x-role", "warehouse");
+      expect(res.status).toBe(200);
+    }
+    expect(mockWorkspace.listVendors).toHaveBeenCalledWith({ orgId: "org-1", query: expect.objectContaining({ trade: "steel" }) });
+  });
+
+  it("gates writes and the migration report to company admins and PMs", async () => {
+    const app = buildApp();
+    const denied = await request(app).post("/company/vendors").set("x-role", "qs").send({ name: "Acme" });
+    expect(denied.status).toBe(403);
+    const deniedReport = await request(app).get("/company/vendors/migration-report").set("x-role", "qs");
+    expect(deniedReport.status).toBe(403);
+
+    const created = await request(app)
+      .post("/company/vendors")
+      .set("x-role", "finance")
+      .set("x-company-admin", "1")
+      .send({ name: "Acme", trades: ["steel"], leadTimeReliability: 90 });
+    expect(created.status).toBe(201);
+    expect(mockWorkspace.createVendor).toHaveBeenCalledWith(
+      expect.objectContaining({ orgId: "org-1", actorId: "user-1", payload: expect.objectContaining({ name: "Acme", leadTimeReliability: 90 }) }),
+    );
+
+    const imported = await request(app)
+      .post("/company/cost-codes/import")
+      .set("x-role", "pm")
+      .send({ rows: [{ code: "01", name: "General" }] });
+    expect(imported.status).toBe(200);
+
+    const fromTemplate = await request(app)
+      .post(`/company/project-templates/${ID}/create-project`)
+      .set("x-role", "pm")
+      .send({ name: "Marina Heights", startDate: "2026-10-01", endDate: "2027-10-01" });
+    expect(fromTemplate.status).toBe(201);
+    expect(mockTemplates.createProjectFromTemplate).toHaveBeenCalledWith(
+      expect.objectContaining({ templateId: ID, userId: "user-1", role: "pm", payload: expect.objectContaining({ name: "Marina Heights" }) }),
+    );
+  });
+
+  it("validates payloads", async () => {
+    const app = buildApp();
+    expect((await request(app).post("/company/vendors").set("x-role", "pm").send({})).status).toBe(400);
+    expect((await request(app).post("/company/cost-codes").set("x-role", "pm").send({ code: "01" })).status).toBe(400);
+    expect((await request(app).post("/company/cost-codes").set("x-role", "pm").send({ code: "01", name: "x", category: "plumbing" })).status).toBe(400);
+    expect((await request(app).post("/company/equipment").set("x-role", "pm").send({ name: "Crane", rateType: "weekly" })).status).toBe(400);
+    expect((await request(app).post("/company/cost-codes/import").set("x-role", "pm").send({ rows: [] })).status).toBe(400);
+    expect((await request(app).post(`/company/project-templates/${ID}/create-project`).set("x-role", "pm").send({})).status).toBe(400);
+    expect((await request(app).patch("/company/vendors/not-a-uuid").set("x-role", "pm").send({ name: "x" })).status).toBe(400);
+  });
+});

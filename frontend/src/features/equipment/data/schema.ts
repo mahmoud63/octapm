@@ -11,6 +11,7 @@ export const equipmentSchema = z.object({
 })
 
 export const addEquipmentSchema = z.object({
+  companyEquipmentId: z.string().optional(),
   name: z.string().min(1, 'Equipment name is required'),
   rateType: z.enum(['hourly', 'daily'], { error: 'Select a rate type' }),
   rate: z

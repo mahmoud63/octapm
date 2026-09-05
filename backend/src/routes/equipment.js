@@ -49,8 +49,17 @@ router.post(
   '/',
   requireRoles('pm', 'planning_eng'),
   [
-    body('name').isString().trim().notEmpty(),
-    body('rateType').isIn(['hourly', 'daily']),
+    body('companyEquipmentId').optional({ nullable: true }).isUUID(),
+    body('name')
+      .if(body('companyEquipmentId').not().exists({ checkFalsy: true }))
+      .isString()
+      .trim()
+      .notEmpty(),
+    body('name').optional({ nullable: true }).isString().trim(),
+    body('rateType')
+      .if(body('companyEquipmentId').not().exists({ checkFalsy: true }))
+      .isIn(['hourly', 'daily']),
+    body('rateType').optional().isIn(['hourly', 'daily']),
     moneyBody('rate'),
     validate,
   ],

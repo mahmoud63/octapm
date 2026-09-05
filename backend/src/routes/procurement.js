@@ -47,7 +47,13 @@ router.post(
     transition: 'supplier.manage',
   }),
   [
-    body('name').isString().trim().notEmpty(),
+    body('companyId').optional({ nullable: true }).isUUID(),
+    body('name')
+      .if(body('companyId').not().exists({ checkFalsy: true }))
+      .isString()
+      .trim()
+      .notEmpty(),
+    body('name').optional({ nullable: true }).isString().trim(),
     body('code').optional({ nullable: true }).isString().trim(),
     body('contactName').optional({ nullable: true }).isString().trim(),
     body('email').optional({ nullable: true }).isEmail().normalizeEmail(),

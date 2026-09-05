@@ -22,6 +22,7 @@ import {
   FormMessage,
 } from '@/components/ui/form'
 import { Input } from '@/components/ui/input'
+import { useVendors } from '@/features/company/hooks/use-company'
 import {
   UNIT_LABELS,
   UNITS,
@@ -125,6 +126,7 @@ export function MaterialsSection({
   const addMaterial = useAddMaterial(projectId, activityId)
   const deleteMaterial = useDeleteMaterial(projectId, activityId)
   const recordUsage = useRecordMaterialUsage(projectId, activityId)
+  const { data: vendors } = useVendors()
   const [usageMaterial, setUsageMaterial] = useState<Material | null>(null)
 
   const totals = useMemo(
@@ -374,7 +376,8 @@ export function MaterialsSection({
                       <td className='p-2 text-right'>
                         <p>{formatQty(balance.consumed)}</p>
                         <p className='text-xs text-muted-foreground'>
-                          {usageReport ?? `Avail ${formatQty(balance.available)}`}
+                          {usageReport ??
+                            `Avail ${formatQty(balance.available)}`}
                         </p>
                       </td>
                       <td className='max-w-40 p-2'>
@@ -605,8 +608,18 @@ export function MaterialsSection({
                 <FormItem>
                   <FormLabel>Supplier</FormLabel>
                   <FormControl>
-                    <Input placeholder='Approved vendor' {...field} />
+                    <Input
+                      placeholder='Approved vendor'
+                      list='company-vendor-names'
+                      {...field}
+                    />
                   </FormControl>
+                  {/* Company vendors (OCTA-ADM-COMPANY-007) suggested on every project. */}
+                  <datalist id='company-vendor-names'>
+                    {vendors?.items.map((vendor) => (
+                      <option key={vendor.id} value={vendor.name} />
+                    ))}
+                  </datalist>
                   <FormMessage />
                 </FormItem>
               )}

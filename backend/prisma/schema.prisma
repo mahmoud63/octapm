@@ -46,6 +46,9 @@ model Organisation {
   projectUserPermissions ProjectUserPermission[]
   attachments         Attachment[]
   photos              Photo[]
+  costCodes           CostCode[]
+  companyEquipment    CompanyEquipment[]
+  projectTemplates    ProjectTemplate[]
 }
 
 model User {
@@ -204,6 +207,12 @@ model Company {
   phone              String?
   website            String?
   address            String?
+  contactName        String?
+  // Vendor profile (OCTA-ADM-COMPANY-007): a company defined once and reused
+  // as a supplier on every project.
+  isVendor           Boolean  @default(false)
+  trades             String[] @default([])
+  vendorProfileJson  Json     @default("{}")
   status             String   @default("active")
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt
@@ -212,6 +221,7 @@ model Company {
   memberships      CompanyMembership[]
   projectParties   ProjectParty[]
   invitationTokens InvitationToken[]
+  procurementSuppliers ProcurementSupplier[]
   riskAssignments           Risk[]           @relation("RiskAssigneeCompany")
   ncrAssignments            NcrRecord[]      @relation("NcrAssigneeCompany")
   itpAssignments            ItpRecord[]      @relation("ItpAssigneeCompany")
@@ -227,6 +237,7 @@ model Company {
   @@unique([orgId, name])
   @@index([orgId])
   @@index([orgId, status])
+  @@index([orgId, isVendor])
 }
 
 model CompanyMembership {
@@ -278,12 +289,15 @@ model Project {
   reportingCutoffDay    Int?
   currency              String    @default("USD")
   status                String    @default("active")
+  templateId            String? // ProjectTemplate the project was created from
+  documentFoldersJson   Json      @default("[]") // predefined document folder paths
   archivedAt            DateTime?
   archivedBy            String?
   createdAt             DateTime  @default(now())
   updatedAt             DateTime  @updatedAt
 
   org                           Organisation                   @relation(fields: [orgId], references: [id])
+  template                      ProjectTemplate?               @relation(fields: [templateId], references: [id], onDelete: SetNull)
   assignments                   ProjectAssignment[]
   parties                       ProjectParty[]
   invitationTokens              InvitationToken[]
@@ -377,6 +391,7 @@ model Project {
 
   @@index([orgId])
   @@index([orgId, status, archivedAt])
+  @@index([templateId])
 }
 
 model ProjectParty {
@@ -2285,6 +2300,7 @@ model WeatherDelayActivityLink {
 model ProcurementSupplier {
   id                  String   @id @default(uuid())
   projectId           String
+  companyId           String? // org-level vendor (Company.isVendor)
   code                String?
   name                String
   contactName         String?
@@ -2301,6 +2317,7 @@ model ProcurementSupplier {
   updatedAt           DateTime @updatedAt
 
   project           Project              @relation(fields: [projectId], references: [id])
+  company           Company?             @relation(fields: [companyId], references: [id], onDelete: SetNull)
   packages          ProcurementPackage[]
   orders            ProcurementOrder[]
   poLines           ProcurementPoLine[]
@@ -2311,6 +2328,7 @@ model ProcurementSupplier {
   @@unique([projectId, name])
   @@index([projectId])
   @@index([projectId, status])
+  @@index([companyId])
 }
 
 model ProcurementPackage {
@@ -2550,18 +2568,21 @@ model MaterialMaster {
 
 // ─── Equipment ───
 model Equipment {
-  id        String   @id @default(uuid())
-  projectId String
-  name      String
-  rateType  String
-  rate      Decimal  @default(0) @db.Decimal(18, 2)
-  createdAt DateTime @default(now())
+  id                 String   @id @default(uuid())
+  projectId          String
+  companyEquipmentId String? // org-level master (CompanyEquipment)
+  name               String
+  rateType           String
+  rate               Decimal  @default(0) @db.Decimal(18, 2)
+  createdAt          DateTime @default(now())
 
   project           Project                  @relation(fields: [projectId], references: [id])
+  companyEquipment  CompanyEquipment?        @relation(fields: [companyEquipmentId], references: [id], onDelete: SetNull)
   activityEquipment ActivityEquipment[]
   usages            ActivityEquipmentUsage[]
 
   @@index([projectId])
+  @@index([companyEquipmentId])
 }
 
 model ActivityEquipment {
@@ -3721,6 +3742,77 @@ model Location {
   @@index([projectId, parentId, sortOrder])
   @@index([parentId])
   @@index([projectId, path])
+}
+
+// ─── Company workspace masters (OCTA-ADM-COMPANY-007) ───
+// Defined once per organisation and reused on every project.
+model CostCode {
+  id          String   @id @default(uuid())
+  orgId       String
+  code        String
+  name        String
+  description String?
+  category    String   @default("other") // labour, material, equipment, subcontract, indirect, overhead, contingency, other
+  parentId    String?
+  sortOrder   Int      @default(0)
+  status      String   @default("active") // active, archived
+  createdBy   String?
+  updatedBy   String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  org      Organisation @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  parent   CostCode?    @relation("CostCodeChildren", fields: [parentId], references: [id], onDelete: SetNull)
+  children CostCode[]   @relation("CostCodeChildren")
+
+  @@unique([orgId, code])
+  @@index([orgId, status])
+  @@index([parentId])
+}
+
+model CompanyEquipment {
+  id        String   @id @default(uuid())
+  orgId     String
+  name      String
+  category  String?
+  rateType  String   @default("daily") // hourly, daily
+  rate      Decimal  @default(0) @db.Decimal(18, 2)
+  notes     String?
+  status    String   @default("active") // active, archived
+  createdBy String?
+  updatedBy String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  org       Organisation @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  equipment Equipment[]
+
+  @@unique([orgId, name])
+  @@index([orgId, status])
+}
+
+model ProjectTemplate {
+  id              String   @id @default(uuid())
+  orgId           String
+  name            String
+  description     String?
+  settingsJson    Json     @default("{}") // project field defaults (type, contractType, currency, calendar, retention, …)
+  partiesJson     Json     @default("[]") // [{ role, companyId?, companyName?, accessLevel?, permissionTemplateId? }]
+  foldersJson     Json     @default("[]") // ["Contract", "Drawings/IFC", …]
+  locationsJson   Json     @default("[]") // [{ name, kind, code?, children: [...] }]
+  assignmentsJson Json     @default("[]") // [{ userId, role, permissionTemplateId? }]
+  isDefault       Boolean  @default(false)
+  status          String   @default("active") // active, archived
+  createdBy       String?
+  updatedBy       String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  org      Organisation @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  projects Project[]
+
+  @@unique([orgId, name])
+  @@index([orgId, status])
 }
 
 // ─── Unified attachments and photos (OCTA-DOC-ATTACH-006) ───

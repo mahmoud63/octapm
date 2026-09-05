@@ -120,6 +120,10 @@ const sanitizeProject = (project, options = {}) => {
       project.reportingCutoffDay ?? DEFAULT_REPORTING_CUTOFF_DAY,
     currency: project.currency,
     status: project.status,
+    templateId: project.templateId ?? null,
+    documentFolders: Array.isArray(project.documentFoldersJson)
+      ? project.documentFoldersJson
+      : [],
     archivedAt: project.archivedAt ?? null,
     archivedBy: project.archivedBy ?? null,
     parties: (project.parties || [])
