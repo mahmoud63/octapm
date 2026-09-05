@@ -28,13 +28,14 @@ import {
 import { Input } from '@/components/ui/input'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { AuditHistoryPanel } from '@/features/audit/components/audit-history-panel'
+import { ForecastPanel } from '@/features/forecast/components/forecast-panel'
 import { LongLeadTable } from '@/features/long-lead/components/long-lead-table'
 import { useLongLeadItems } from '@/features/long-lead/hooks/use-long-lead'
+import type { ProjectSetupTarget } from '@/features/projects/data/schema'
 import {
   projectSetupReadinessKey,
   useProject,
 } from '@/features/projects/hooks/use-projects'
-import type { ProjectSetupTarget } from '@/features/projects/data/schema'
 import { EvReport } from '@/features/reports/components/ev-report'
 import { RisksTable } from '@/features/risks/components/risks-table'
 import type { ProjectSchedule, ScheduleActivity } from '../data/schema'
@@ -97,8 +98,8 @@ const isNearCritical = (a: ScheduleActivity) =>
   !a.isCritical &&
   !a.isMilestone &&
   a.totalFloat != null &&
-    a.totalFloat >= 1 &&
-    a.totalFloat <= 5
+  a.totalFloat >= 1 &&
+  a.totalFloat <= 5
 
 const formatActivityCode = (activity: ScheduleActivity, index = 0) =>
   activity.activityCode ||
@@ -316,13 +317,17 @@ export function ScheduleDashboard({
   const milestoneCards = revision.milestones || milestones
   const totalBudget = revision.totalBudget
   const projectRiskActivities = useMemo(
-    () => activities.filter((activity) => (activity.projectRiskSummary?.count ?? 0) > 0),
+    () =>
+      activities.filter(
+        (activity) => (activity.projectRiskSummary?.count ?? 0) > 0
+      ),
     [activities]
   )
   const overdueProjectRisks = useMemo(
     () =>
       activities.reduce(
-        (sum, activity) => sum + (activity.projectRiskSummary?.overdueCount ?? 0),
+        (sum, activity) =>
+          sum + (activity.projectRiskSummary?.overdueCount ?? 0),
         0
       ),
     [activities]
@@ -365,19 +370,17 @@ export function ScheduleDashboard({
   const procurementAlerts = useMemo<ProcurementAlertDisplay[]>(
     () =>
       [
-        ...procurementItems.filter(
-          (item) => item.procurementRisk?.isAtRisk
-        ),
+        ...procurementItems.filter((item) => item.procurementRisk?.isAtRisk),
         ...scheduleProcurementAlerts,
       ].sort((a, b) => {
-          const aRisk = a.procurementRisk
-          const bRisk = b.procurementRisk
-          const severityDelta =
-            procurementSeverityRank[bRisk?.severity ?? 'none'] -
-            procurementSeverityRank[aRisk?.severity ?? 'none']
-          if (severityDelta !== 0) return severityDelta
-          return (bRisk?.daysAtRisk ?? 0) - (aRisk?.daysAtRisk ?? 0)
-        }),
+        const aRisk = a.procurementRisk
+        const bRisk = b.procurementRisk
+        const severityDelta =
+          procurementSeverityRank[bRisk?.severity ?? 'none'] -
+          procurementSeverityRank[aRisk?.severity ?? 'none']
+        if (severityDelta !== 0) return severityDelta
+        return (bRisk?.daysAtRisk ?? 0) - (aRisk?.daysAtRisk ?? 0)
+      }),
     [procurementItems, scheduleProcurementAlerts]
   )
   const procurementRiskByActivity = useMemo(() => {
@@ -560,9 +563,7 @@ export function ScheduleDashboard({
           <StatCard
             label='Project Risk'
             value={projectRiskActivities.length}
-            color={
-              overdueProjectRisks > 0 ? 'text-red-600' : 'text-amber-600'
-            }
+            color={overdueProjectRisks > 0 ? 'text-red-600' : 'text-amber-600'}
             sub={`${overdueProjectRisks} overdue`}
           />
         </div>
@@ -881,6 +882,7 @@ export function ScheduleDashboard({
               Critical Path ({critActs.length})
             </TabsTrigger>
             <TabsTrigger value='ev'>Earned Value</TabsTrigger>
+            <TabsTrigger value='forecast'>Forecast</TabsTrigger>
             <TabsTrigger value='milestones'>
               Milestones ({milestones.length})
             </TabsTrigger>
@@ -1098,6 +1100,10 @@ export function ScheduleDashboard({
 
         <TabsContent value='ev' className='mt-4'>
           <EvReport projectId={projectId} />
+        </TabsContent>
+
+        <TabsContent value='forecast' className='mt-4'>
+          <ForecastPanel projectId={projectId} />
         </TabsContent>
 
         {/* Critical path tab */}

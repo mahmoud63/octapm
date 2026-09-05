@@ -213,6 +213,7 @@ export function ProjectDetail({
       { key: 'progress', label: 'Progress' },
       { key: 'critical', label: `Critical Path (${scheduleCriticalCount})` },
       { key: 'ev', label: 'Earned Value' },
+      { key: 'forecast', label: 'Forecast' },
       { key: 'milestones', label: `Milestones (${scheduleMilestonesCount})` },
       { key: 'resources', label: 'Resources' },
       { key: 'risks', label: 'Risks' },
