@@ -28,9 +28,33 @@ const resolveProvider = () => {
 
 const isEnabled = () => Boolean(resolveProvider());
 
+const TRANSCRIPTION_MODEL = "whisper-1";
+const transcriptionEnabled = () => Boolean(env("OPENAI_API_KEY")) && (env("AI_TRANSCRIPTION") || "").toLowerCase() !== "off";
+
 const describe = () => {
   const resolved = resolveProvider();
-  return { enabled: Boolean(resolved), provider: resolved?.provider || null, model: resolved?.model || null };
+  return {
+    enabled: Boolean(resolved),
+    provider: resolved?.provider || null,
+    model: resolved?.model || null,
+    // Every supported provider reads images; AI_VISION=off keeps prompts text-only.
+    vision: Boolean(resolved) && (env("AI_VISION") || "").toLowerCase() !== "off",
+    transcription: transcriptionEnabled(),
+    transcriptionModel: transcriptionEnabled() ? env("AI_TRANSCRIPTION_MODEL") || TRANSCRIPTION_MODEL : null,
+  };
+};
+
+/**
+ * Message content is a string or an array of blocks:
+ *   { type: "text", text } | { type: "image", mediaType, data (base64) }
+ * Each provider gets its own wire shape.
+ */
+const toBlocks = (content) => (Array.isArray(content) ? content : [{ type: "text", text: String(content ?? "") }]);
+const providerContent = (provider, content) => {
+  if (!Array.isArray(content)) return provider === "gemini" ? [{ text: String(content ?? "") }] : content;
+  if (provider === "anthropic") return content.map((block) => (block.type === "image" ? { type: "image", source: { type: "base64", media_type: block.mediaType, data: block.data } } : { type: "text", text: String(block.text ?? "") }));
+  if (provider === "openai") return content.map((block) => (block.type === "image" ? { type: "image_url", image_url: { url: `data:${block.mediaType};base64,${block.data}` } } : { type: "text", text: String(block.text ?? "") }));
+  return toBlocks(content).map((block) => (block.type === "image" ? { inlineData: { mimeType: block.mediaType, data: block.data } } : { text: String(block.text ?? "") }));
 };
 
 const statusOf = (error) => Number(error?.status || error?.statusCode || error?.response?.status || 0);
@@ -55,17 +79,17 @@ const anthropicTransport = async ({ apiKey, model, system, messages, maxTokens, 
   }
   if (Anthropic) {
     const client = new Anthropic({ apiKey, timeout: REQUEST_TIMEOUT_MS });
-    const result = await client.messages.create({ model, max_tokens: maxTokens, temperature, system, messages: messages.map((message) => ({ role: message.role, content: message.content })) });
+    const result = await client.messages.create({ model, max_tokens: maxTokens, temperature, system, messages: messages.map((message) => ({ role: message.role, content: providerContent("anthropic", message.content) })) });
     return { text: (result.content || []).filter((block) => block.type === "text").map((block) => block.text).join("\n"), usage: { inputTokens: result.usage?.input_tokens ?? null, outputTokens: result.usage?.output_tokens ?? null }, stopReason: result.stop_reason || null };
   }
-  const response = await fetch("https://api.anthropic.com/v1/messages", { method: "POST", headers: { "x-api-key": apiKey, "anthropic-version": "2023-06-01", "content-type": "application/json" }, body: JSON.stringify({ model, max_tokens: maxTokens, temperature, system, messages }) });
+  const response = await fetch("https://api.anthropic.com/v1/messages", { method: "POST", headers: { "x-api-key": apiKey, "anthropic-version": "2023-06-01", "content-type": "application/json" }, body: JSON.stringify({ model, max_tokens: maxTokens, temperature, system, messages: messages.map((message) => ({ role: message.role, content: providerContent("anthropic", message.content) })) }) });
   const json = await readJson(response);
   if (!response.ok) throw Object.assign(new Error(json?.error?.message || `Anthropic answered ${response.status}`), { status: response.status });
   return { text: (json.content || []).filter((block) => block.type === "text").map((block) => block.text).join("\n"), usage: { inputTokens: json.usage?.input_tokens ?? null, outputTokens: json.usage?.output_tokens ?? null }, stopReason: json.stop_reason || null };
 };
 
 const openaiTransport = async ({ apiKey, model, system, messages, maxTokens, temperature }) => {
-  const response = await fetch("https://api.openai.com/v1/chat/completions", { method: "POST", headers: { authorization: `Bearer ${apiKey}`, "content-type": "application/json" }, body: JSON.stringify({ model, max_tokens: maxTokens, temperature, messages: [{ role: "system", content: system }, ...messages] }) });
+  const response = await fetch("https://api.openai.com/v1/chat/completions", { method: "POST", headers: { authorization: `Bearer ${apiKey}`, "content-type": "application/json" }, body: JSON.stringify({ model, max_tokens: maxTokens, temperature, messages: [{ role: "system", content: system }, ...messages.map((message) => ({ role: message.role, content: providerContent("openai", message.content) }))] }) });
   const json = await readJson(response);
   if (!response.ok) throw Object.assign(new Error(json?.error?.message || `OpenAI answered ${response.status}`), { status: response.status });
   return { text: json.choices?.[0]?.message?.content || "", usage: { inputTokens: json.usage?.prompt_tokens ?? null, outputTokens: json.usage?.completion_tokens ?? null }, stopReason: json.choices?.[0]?.finish_reason || null };
@@ -75,7 +99,7 @@ const geminiTransport = async ({ apiKey, model, system, messages, maxTokens, tem
   const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ systemInstruction: { parts: [{ text: system }] }, contents: messages.map((message) => ({ role: message.role === "assistant" ? "model" : "user", parts: [{ text: message.content }] })), generationConfig: { maxOutputTokens: maxTokens, temperature } }),
+    body: JSON.stringify({ systemInstruction: { parts: [{ text: system }] }, contents: messages.map((message) => ({ role: message.role === "assistant" ? "model" : "user", parts: providerContent("gemini", message.content) })), generationConfig: { maxOutputTokens: maxTokens, temperature } }),
   });
   const json = await readJson(response);
   if (!response.ok) throw Object.assign(new Error(json?.error?.message || `Gemini answered ${response.status}`), { status: response.status });
@@ -129,4 +153,28 @@ const parseJsonAnswer = (text) => {
   }
 };
 
-module.exports = { DEFAULT_MODELS, resolveProvider, isEnabled, describe, complete, parseJsonAnswer };
+/**
+ * Speech to text for voice notes (OCTA-AI-DAILY-030) through OpenAI's
+ * transcription endpoint (`OPENAI_API_KEY`, `AI_TRANSCRIPTION_MODEL`,
+ * `AI_TRANSCRIPTION=off` disables). `fetchImpl` is injectable for tests.
+ */
+const transcribeAudio = async ({ buffer, mimeType = "audio/webm", fileName = "audio.webm", language = null, fetchImpl = null }) => {
+  if (!transcriptionEnabled()) throw new HttpError(503, "AI_TRANSCRIPTION_NOT_CONFIGURED", "Voice transcription is not configured on this server (set OPENAI_API_KEY)");
+  if (!buffer || !buffer.length) throw new HttpError(400, "AI_TRANSCRIPTION_EMPTY", "The recording is empty");
+  const model = env("AI_TRANSCRIPTION_MODEL") || TRANSCRIPTION_MODEL;
+  const form = new FormData();
+  form.append("file", new Blob([buffer], { type: mimeType }), fileName);
+  form.append("model", model);
+  if (language) form.append("language", language);
+  const send = fetchImpl || fetch;
+  const response = await send("https://api.openai.com/v1/audio/transcriptions", { method: "POST", headers: { authorization: `Bearer ${env("OPENAI_API_KEY")}` }, body: form });
+  const json = await readJson(response);
+  if (!response.ok) {
+    const failed = new HttpError(503, "AI_TRANSCRIPTION_FAILED", `Transcription failed: ${json?.error?.message || `OpenAI answered ${response.status}`}`);
+    failed.retryable = [429, 500, 502, 503].includes(Number(response.status));
+    throw failed;
+  }
+  return { text: String(json.text || "").trim(), provider: "openai", model };
+};
+
+module.exports = { DEFAULT_MODELS, resolveProvider, isEnabled, describe, complete, parseJsonAnswer, providerContent, transcribeAudio };

@@ -56,6 +56,7 @@ import {
   type DailyLog,
   type DailyLogEntry,
 } from '../hooks/use-daily-log'
+import { DailyLogDraftAssistant } from './daily-log-ai-draft'
 import { SectionCard } from './daily-log-sections'
 import { DailyLogSettingsDialog } from './daily-log-settings-dialog'
 import { ManpowerReport } from './manpower-report'
@@ -844,6 +845,14 @@ export function DailyLogPanel({
               )}
             </section>
           </div>
+
+          {canUpdate && !locked && (
+            <DailyLogDraftAssistant
+              projectId={projectId}
+              date={date}
+              log={log}
+            />
+          )}
 
           <div className='grid gap-3 xl:grid-cols-2'>
             {DAILY_LOG_SECTIONS.map((section) => (

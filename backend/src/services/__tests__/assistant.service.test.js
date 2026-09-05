@@ -153,7 +153,7 @@ describe("project knowledge assistant", () => {
     expect(outage.degraded).toBe(true);
     expect(outage.message.content).toContain("did not answer");
     expect(failing).toHaveBeenCalledTimes(3);
-    expect(aiProvider.describe()).toEqual({ enabled: false, provider: null, model: null });
+    expect(aiProvider.describe()).toMatchObject({ enabled: false, provider: null, model: null, vision: false });
   });
 
   it("runs suggested actions through the record services as drafts", async () => {

@@ -10,6 +10,8 @@ const service = require("../services/daily-log.service");
 /** Project daily log (OCTA-FLD-DAILY-022): `/projects/:projectId/daily-logs`. */
 const router = express.Router({ mergeParams: true });
 router.use(authenticate);
+// OCTA-AI-DAILY-030: `/ai/*` and `/:date/ai/*` — registered before the day routes.
+router.use(require("./daily-log-assistant"));
 
 const scope = (req) => ({ orgId: req.user.orgId, projectId: req.params.projectId });
 const actor = (req) => ({ id: req.user.id, name: req.user.name, role: getEffectiveRole(req) });
