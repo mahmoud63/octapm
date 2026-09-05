@@ -1,5 +1,6 @@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { BidPackagesPanel } from '@/features/bids/components/bid-packages-panel'
+import { ContractPanel } from '@/features/contract/components/contract-panel'
 import type { ProjectSetupTarget } from '@/features/projects/data/schema'
 import type { ScheduleActivity } from '@/features/schedule/data/schema'
 import { BudgetRevisionsPanel } from './budget-revisions-panel'
@@ -49,6 +50,7 @@ export function CommercialDashboard({
             <TabsTrigger value='cash-flow'>Cash Flow</TabsTrigger>
             <TabsTrigger value='eot'>EOT</TabsTrigger>
             <TabsTrigger value='weather'>Weather Delays</TabsTrigger>
+            <TabsTrigger value='contract'>Contract</TabsTrigger>
           </TabsList>
         )}
 
@@ -136,6 +138,10 @@ export function CommercialDashboard({
 
         <TabsContent value='weather'>
           <WeatherDelaysPanel projectId={projectId} activities={activities} />
+        </TabsContent>
+
+        <TabsContent value='contract'>
+          <ContractPanel projectId={projectId} />
         </TabsContent>
       </Tabs>
     </div>

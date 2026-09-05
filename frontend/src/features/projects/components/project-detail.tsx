@@ -255,6 +255,7 @@ export function ProjectDetail({
           { key: 'cash-flow', label: 'Cash Flow' },
           { key: 'eot', label: 'EOT' },
           { key: 'weather', label: 'Weather Delays' },
+          { key: 'contract', label: 'Contract' },
         ],
       },
       {

@@ -22,6 +22,8 @@ const {
 
 const router = express.Router({ mergeParams: true });
 router.use(authenticate);
+// OCTA-AI-CONTRACT-032: `/:claimId/ai/*` — registered before the claim routes.
+router.use(require("./eot-assistant"));
 
 router.get(
   "/",

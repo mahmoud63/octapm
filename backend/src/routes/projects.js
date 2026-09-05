@@ -285,6 +285,7 @@ router.use("/:projectId/accounting", nestedProjectAccess, require("./project-acc
 router.use("/:projectId/bids", nestedProjectAccess, require("./bids"));
 router.use("/:projectId/assistant", nestedProjectAccess, require("./assistant"));
 router.use("/:projectId/forecast", nestedProjectAccess, require("./forecast"));
+router.use("/:projectId/contract", nestedProjectAccess, require("./contract"));
 router.use("/:projectId/team", nestedProjectAccess, require("./project-team"));
 router.use(
   "/:projectId/assignments",

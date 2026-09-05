@@ -1,19 +1,27 @@
 import { useState } from 'react'
-import { CheckCircle2, FileText, History, Link2, XCircle } from 'lucide-react'
+import {
+  CheckCircle2,
+  FileText,
+  History,
+  Link2,
+  Sparkles,
+  XCircle,
+} from 'lucide-react'
 import { toast } from 'sonner'
+import { handleServerError } from '@/lib/handle-server-error'
+import { useCanPerform } from '@/lib/permissions'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Textarea } from '@/components/ui/textarea'
 import { HistoryPanel } from '@/features/audit/components/audit-history-panel'
+import { EotAssessmentCard } from '@/features/contract/components/eot-assessment-card'
 import type { ScheduleActivity } from '@/features/schedule/data/schema'
 import {
   WorkflowDecisionDialog,
   type WorkflowDecisionMode,
 } from '@/features/workflows/components/workflow-decision-dialog'
-import { handleServerError } from '@/lib/handle-server-error'
-import { useCanPerform } from '@/lib/permissions'
 import {
   useApproveEotClaim,
   useCalculateEot,
@@ -287,7 +295,8 @@ export function EotPanel({
                 </td>
                 <td className='p-2 text-right text-xs'>
                   {claim.activityLinks?.reduce(
-                    (sum, link) => sum + (Number(link.criticalPathImpactDays) || 0),
+                    (sum, link) =>
+                      sum + (Number(link.criticalPathImpactDays) || 0),
                     0
                   ) || 0}
                 </td>
@@ -318,23 +327,23 @@ export function EotPanel({
                     {claim.status === 'draft' &&
                       claimProofReady(claim) &&
                       canSubmitEot && (
-                      <Button
-                        size='sm'
-                        variant='ghost'
-                        disabled={submitMutation.isPending}
-                        onClick={async () => {
-                          try {
-                            await submitMutation.mutateAsync({
-                              claimId: claim.id,
-                            })
-                            toast.success('EOT claim submitted')
-                          } catch {
-                            toast.error('Failed to submit claim')
-                          }
-                        }}
-                      >
-                        Submit
-                      </Button>
+                        <Button
+                          size='sm'
+                          variant='ghost'
+                          disabled={submitMutation.isPending}
+                          onClick={async () => {
+                            try {
+                              await submitMutation.mutateAsync({
+                                claimId: claim.id,
+                              })
+                              toast.success('EOT claim submitted')
+                            } catch {
+                              toast.error('Failed to submit claim')
+                            }
+                          }}
+                        >
+                          Submit
+                        </Button>
                       )}
                   </div>
                 </td>
@@ -389,8 +398,7 @@ export function EotPanel({
         {claims?.map((claim) => {
           const cpImpact =
             claim.activityLinks?.reduce(
-              (sum, link) =>
-                sum + (Number(link.criticalPathImpactDays) || 0),
+              (sum, link) => sum + (Number(link.criticalPathImpactDays) || 0),
               0
             ) || 0
           const historyCount = claim.approvalHistory?.length || 0
@@ -437,6 +445,10 @@ export function EotPanel({
                   <TabsTrigger value='history'>
                     <History className='mr-1.5 size-3.5' />
                     History
+                  </TabsTrigger>
+                  <TabsTrigger value='entitlement'>
+                    <Sparkles className='mr-1.5 size-3.5' />
+                    Entitlement
                   </TabsTrigger>
                 </TabsList>
                 <TabsContent value='impact' className='mt-3 space-y-2'>
@@ -499,7 +511,10 @@ export function EotPanel({
                     </table>
                   </div>
                 </TabsContent>
-                <TabsContent value='evidence' className='mt-3 grid gap-3 md:grid-cols-3'>
+                <TabsContent
+                  value='evidence'
+                  className='mt-3 grid gap-3 md:grid-cols-3'
+                >
                   <div className='rounded-md border p-3 text-xs'>
                     <p className='font-medium'>Weather Delays</p>
                     <p className='mt-1 text-muted-foreground'>
@@ -526,6 +541,13 @@ export function EotPanel({
                     entityId={claim.id}
                     title={`${claim.ref} History`}
                     limit={30}
+                  />
+                </TabsContent>
+                <TabsContent value='entitlement' className='mt-3'>
+                  <EotAssessmentCard
+                    projectId={projectId}
+                    claimId={claim.id}
+                    claimStatus={claim.status}
                   />
                 </TabsContent>
               </Tabs>
