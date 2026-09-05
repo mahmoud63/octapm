@@ -10,6 +10,7 @@ const { moneyBody } = require("../utils/money");
 const companyWorkspaceService = require("../services/company-workspace.service");
 const projectTemplateService = require("../services/project-template.service");
 const formService = require("../services/form.service");
+const submittalWorkflow = require("../services/submittal-workflow.service");
 
 /**
  * Company workspace (OCTA-ADM-COMPANY-007): directory, vendors, cost codes,
@@ -375,6 +376,54 @@ router.post(
       201,
     ),
   ),
+);
+
+// ─── Submittal workflow templates (company library) ────────────────────────
+const submittalTemplateValidators = ({ requireName = false } = {}) => [
+  requireName ? body("name").isString().trim().notEmpty().isLength({ max: 120 }) : body("name").optional().isString().trim().notEmpty().isLength({ max: 120 }),
+  body("description").optional({ nullable: true }).isString().trim().isLength({ max: 1000 }),
+  body("isDefault").optional().isBoolean().toBoolean(),
+  body("status").optional().isIn(["active", "archived"]),
+  body("steps").optional().isArray({ max: 12 }),
+  body("steps.*.mode").optional().isIn(["sequential", "parallel"]),
+  body("steps.*.days").optional().isInt({ min: 0, max: 365 }).toInt(),
+  body("steps.*.assignees").optional().isArray({ max: 20 }),
+  validate,
+];
+
+router.get(
+  "/submittal-workflow-templates",
+  [query("includeArchived").optional().isBoolean().toBoolean(), validate],
+  asyncHandler(async (req, res) => sendSuccess(res, await submittalWorkflow.listTemplates({ orgId: req.user.orgId, projectId: null, query: { ...req.query, scope: "company" } }))),
+);
+
+router.post(
+  "/submittal-workflow-templates",
+  requireCompanyAdmin,
+  submittalTemplateValidators({ requireName: true }),
+  asyncHandler(async (req, res) => sendSuccess(res, await submittalWorkflow.createTemplate({ orgId: req.user.orgId, projectId: null, payload: req.body, actor: formActor(req) }), 201)),
+);
+
+router.post(
+  "/submittal-workflow-templates/starters",
+  requireCompanyAdmin,
+  asyncHandler(async (req, res) => sendSuccess(res, await submittalWorkflow.seedStarterTemplates({ orgId: req.user.orgId, actor: formActor(req) }), 201)),
+);
+
+router.patch(
+  "/submittal-workflow-templates/:id",
+  requireCompanyAdmin,
+  [param("id").isUUID(), ...submittalTemplateValidators()],
+  asyncHandler(async (req, res) =>
+    sendSuccess(res, await submittalWorkflow.updateTemplate({ orgId: req.user.orgId, projectId: null, templateId: req.params.id, payload: req.body, actor: formActor(req) })),
+  ),
+);
+
+router.delete(
+  "/submittal-workflow-templates/:id",
+  requireCompanyAdmin,
+  [param("id").isUUID(), validate],
+  asyncHandler(async (req, res) => sendSuccess(res, await submittalWorkflow.archiveTemplate({ orgId: req.user.orgId, projectId: null, templateId: req.params.id, actor: formActor(req) }))),
 );
 
 router.post(

@@ -48,7 +48,6 @@ import {
   useCreateCorrespondence,
   useCreateDrawing,
   useCreateRfi,
-  useCreateSubmittal,
   useCreateTransmittal,
   useDocumentRegister,
   useDocControlDashboard,
@@ -73,6 +72,10 @@ import { DocumentSearchPanel } from './document-search-panel'
 import { RfiCreateDialog } from './rfi-create-dialog'
 import { RfiDetailDialog } from './rfi-detail-dialog'
 import { RfiSavedViews } from './rfi-saved-views'
+import { SubmittalCreateDialog } from './submittal-create-dialog'
+import { SubmittalDetailDialog } from './submittal-detail-dialog'
+import { SubmittalPackagesPanel } from './submittal-packages-panel'
+import { SubmittalWorkflowList } from './submittal-workflow-editor'
 
 type DocDecisionTarget =
   | {
@@ -169,10 +172,18 @@ export function DocControlDashboard({
   )
   const [rfiCreateOpen, setRfiCreateOpen] = useState(false)
 
-  const [submittalTitle, setSubmittalTitle] = useState('')
-  const [submittalReviewerPartyId, setSubmittalReviewerPartyId] =
-    useState(NO_PARTY_VALUE)
   const [submittalSearch, setSubmittalSearch] = useState('')
+  const [submittalView, setSubmittalView] = useState<
+    'register' | 'packages' | 'workflows'
+  >('register')
+  const [submittalMine, setSubmittalMine] = useState(false)
+  const [submittalLate, setSubmittalLate] = useState(false)
+  const [submittalDetailId, setSubmittalDetailId] = useState<string | null>(
+    initialTarget?.source === 'submittal' && initialTarget.recordId
+      ? initialTarget.recordId
+      : null
+  )
+  const [submittalCreateOpen, setSubmittalCreateOpen] = useState(false)
   const [submittalStatus, setSubmittalStatus] = useState<
     SubmittalListQuery['status']
   >(
@@ -245,9 +256,13 @@ export function DocControlDashboard({
       status: submittalStatus,
       sortBy: submittalSortBy,
       sortDir: submittalSortDir,
+      ballInCourtUserId: submittalMine ? 'me' : null,
+      overdue: submittalLate || undefined,
     }),
     [
       submittalCursor,
+      submittalLate,
+      submittalMine,
       submittalSearch,
       submittalSortBy,
       submittalSortDir,
@@ -276,7 +291,6 @@ export function DocControlDashboard({
   const { data: correspondence } = useCorrespondence(projectId)
 
   const createRfi = useCreateRfi(projectId)
-  const createSubmittal = useCreateSubmittal(projectId)
   const approveRfi = useApproveRfi(projectId)
   const rejectRfi = useRejectRfi(projectId)
   const submitRfi = useSubmitRfi(projectId)
@@ -307,6 +321,7 @@ export function DocControlDashboard({
   ]
   const canCreateRfi = useCanPerform('rfi', 'create')
   const canCreateSubmittal = useCanPerform('submittal', 'create')
+  const canUpdateSubmittal = useCanPerform('submittal', 'update')
   const canApproveRfi = useCanPerform('rfi', 'approve', 'rfi.approve')
   const canRejectRfi = useCanPerform('rfi', 'approve', 'rfi.reject')
   const canSubmitRfi = useCanPerform('rfi', 'submit', 'rfi.submit')
@@ -1456,52 +1471,88 @@ export function DocControlDashboard({
         </TabsContent>
 
         <TabsContent value='submittals' className='space-y-2'>
-          {canCreateSubmittal && (
-            <div className='grid grid-cols-1 gap-2 md:grid-cols-[minmax(0,1fr)_220px_max-content]'>
-              <Input
-                placeholder='Submittal title'
-                value={submittalTitle}
-                onChange={(e) => setSubmittalTitle(e.target.value)}
-              />
-              <Select
-                value={submittalReviewerPartyId}
-                onValueChange={setSubmittalReviewerPartyId}
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {partyItems.map((item) => (
-                    <SelectItem key={item.id} value={item.id}>
-                      {item.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+          <div className='flex flex-wrap items-center gap-2'>
+            <Tabs
+              value={submittalView}
+              onValueChange={(value) =>
+                setSubmittalView(value as typeof submittalView)
+              }
+            >
+              <TabsList>
+                <TabsTrigger value='register'>Register</TabsTrigger>
+                <TabsTrigger
+                  value='packages'
+                  data-testid='uat-sub-packages-tab'
+                >
+                  Packages
+                </TabsTrigger>
+                <TabsTrigger
+                  value='workflows'
+                  data-testid='uat-sub-workflows-tab'
+                >
+                  Workflows
+                </TabsTrigger>
+              </TabsList>
+            </Tabs>
+            {submittalView === 'register' && (
+              <>
+                <div className='flex items-center gap-1'>
+                  <Switch
+                    id='submittal-mine'
+                    checked={submittalMine}
+                    onCheckedChange={(checked) => {
+                      setSubmittalCursor(null)
+                      setSubmittalMine(checked)
+                    }}
+                    data-testid='uat-sub-mine'
+                  />
+                  <Label htmlFor='submittal-mine' className='text-xs'>
+                    Waiting on me
+                  </Label>
+                </div>
+                <div className='flex items-center gap-1'>
+                  <Switch
+                    id='submittal-late'
+                    checked={submittalLate}
+                    onCheckedChange={(checked) => {
+                      setSubmittalCursor(null)
+                      setSubmittalLate(checked)
+                    }}
+                    data-testid='uat-sub-late'
+                  />
+                  <Label htmlFor='submittal-late' className='text-xs'>
+                    Late
+                  </Label>
+                </div>
+              </>
+            )}
+            {canCreateSubmittal && (
               <Button
-                disabled={createSubmittal.isPending || !submittalTitle}
-                onClick={async () => {
-                  try {
-                    await createSubmittal.mutateAsync({
-                      title: submittalTitle,
-                      reviewerPartyId:
-                        submittalReviewerPartyId !== NO_PARTY_VALUE
-                          ? submittalReviewerPartyId
-                          : undefined,
-                    })
-                    setSubmittalTitle('')
-                    setSubmittalReviewerPartyId(NO_PARTY_VALUE)
-                    toast.success('Submittal created')
-                  } catch (error) {
-                    handleServerError(error)
-                  }
-                }}
+                className='ml-auto'
+                size='sm'
+                data-testid='uat-sub-new'
+                onClick={() => setSubmittalCreateOpen(true)}
               >
-                Add
+                New submittal
               </Button>
-            </div>
+            )}
+          </div>
+          {submittalView === 'packages' && (
+            <SubmittalPackagesPanel
+              projectId={projectId}
+              onOpenSubmittal={setSubmittalDetailId}
+            />
           )}
-          <div className='grid grid-cols-1 gap-2 md:grid-cols-[minmax(0,1fr)_repeat(3,max-content)]'>
+          {submittalView === 'workflows' && (
+            <SubmittalWorkflowList
+              projectId={projectId}
+              canEdit={canUpdateSubmittal}
+            />
+          )}
+          <div
+            className='grid grid-cols-1 gap-2 md:grid-cols-[minmax(0,1fr)_repeat(3,max-content)]'
+            hidden={submittalView !== 'register'}
+          >
             <Input
               placeholder='Search submittals'
               value={submittalSearch}
@@ -1563,158 +1614,205 @@ export function DocControlDashboard({
               </SelectContent>
             </Select>
           </div>
-          <WorkflowRecordList
-            projectId={projectId}
-            recordType='submittal'
-            rows={submittals?.rows}
-            emptyText='No submittals'
-            getRef={(row) => row.ref}
-            getTitle={(row) => row.title}
-            getSubtitle={(row) => row.remarks}
-            getStatus={(row) => row.status}
-            renderMeta={(row) => (
-              <div className='flex flex-wrap gap-2'>
-                <Badge variant='outline'>Rev {row.revision}</Badge>
-                {row.reviewerParty?.companyName ? (
-                  <Badge variant='secondary'>
-                    {row.reviewerParty.companyName}
-                  </Badge>
-                ) : null}
-                {row.ownerParty?.companyName ? (
-                  <Badge variant='outline'>{row.ownerParty.companyName}</Badge>
-                ) : null}
-              </div>
-            )}
-            renderActions={(row) =>
-              row.status ? (
-                <>
-                  {['pending', 'resubmit', 'rejected'].includes(row.status) &&
-                    canSubmitSubmittal && (
+          <div hidden={submittalView !== 'register'}>
+            <WorkflowRecordList
+              projectId={projectId}
+              recordType='submittal'
+              rows={submittals?.rows}
+              emptyText='No submittals'
+              getRef={(row) => row.ref}
+              getTitle={(row) => row.title}
+              getSubtitle={(row) => row.remarks}
+              getStatus={(row) => row.status}
+              renderMeta={(row) => (
+                <div className='flex flex-wrap gap-2'>
+                  <Badge variant='outline'>Rev {row.revision}</Badge>
+                  {row.responseCodeLabel ? (
+                    <Badge variant='secondary'>{row.responseCodeLabel}</Badge>
+                  ) : null}
+                  {row.submitBy &&
+                  ['pending', 'resubmit', 'rejected'].includes(row.status) &&
+                  new Date(row.submitBy) < new Date() ? (
+                    <Badge variant='destructive'>Past submit-by</Badge>
+                  ) : row.submitBy &&
+                    ['pending', 'resubmit', 'rejected'].includes(row.status) ? (
+                    <Badge variant='outline'>
+                      Submit by {new Date(row.submitBy).toLocaleDateString()}
+                    </Badge>
+                  ) : null}
+                  {row.reviewerParty?.companyName ? (
+                    <Badge variant='secondary'>
+                      {row.reviewerParty.companyName}
+                    </Badge>
+                  ) : null}
+                  {row.ownerParty?.companyName ? (
+                    <Badge variant='outline'>
+                      {row.ownerParty.companyName}
+                    </Badge>
+                  ) : null}
+                </div>
+              )}
+              renderActions={(row) =>
+                row.status ? (
+                  <>
+                    <Button
+                      size='sm'
+                      variant='outline'
+                      data-testid='uat-sub-open'
+                      onClick={() => setSubmittalDetailId(row.id)}
+                    >
+                      <Eye className='mr-2 h-4 w-4' />
+                      Open
+                    </Button>
+                    {['pending', 'resubmit', 'rejected'].includes(row.status) &&
+                      canSubmitSubmittal && (
+                        <Button
+                          size='sm'
+                          variant='outline'
+                          onClick={async () => {
+                            const revision =
+                              window.prompt('Revision code', row.revision) ||
+                              row.revision
+                            try {
+                              await submitSubmittal.mutateAsync({
+                                submittalId: row.id,
+                                payload: { revision },
+                              })
+                              toast.success('Submittal submitted')
+                            } catch (error) {
+                              handleServerError(error)
+                            }
+                          }}
+                        >
+                          Submit
+                        </Button>
+                      )}
+                    {row.status === 'under_review' && canReviewSubmittal && (
                       <Button
                         size='sm'
                         variant='outline'
                         onClick={async () => {
-                          const revision =
-                            window.prompt('Revision code', row.revision) ||
-                            row.revision
+                          const comment = window.prompt('Review comment')
+                          if (!comment) return
                           try {
-                            await submitSubmittal.mutateAsync({
+                            await reviewSubmittal.mutateAsync({
                               submittalId: row.id,
-                              payload: { revision },
+                              comment,
                             })
-                            toast.success('Submittal submitted')
+                            toast.success('Review recorded')
                           } catch (error) {
                             handleServerError(error)
                           }
                         }}
                       >
-                        Submit
+                        Review
                       </Button>
                     )}
-                  {row.status === 'under_review' && canReviewSubmittal && (
-                    <Button
-                      size='sm'
-                      variant='outline'
-                      onClick={async () => {
-                        const comment = window.prompt('Review comment')
-                        if (!comment) return
-                        try {
-                          await reviewSubmittal.mutateAsync({
-                            submittalId: row.id,
-                            comment,
+                    {row.status === 'under_review' && canResubmitSubmittal && (
+                      <Button
+                        size='sm'
+                        variant='outline'
+                        onClick={async () => {
+                          const reason = window.prompt('Resubmit reason')
+                          if (!reason) return
+                          try {
+                            await resubmitSubmittal.mutateAsync({
+                              submittalId: row.id,
+                              payload: { reason },
+                            })
+                            toast.success('Resubmission requested')
+                          } catch (error) {
+                            handleServerError(error)
+                          }
+                        }}
+                      >
+                        Resubmit
+                      </Button>
+                    )}
+                    {row.status === 'under_review' && canApproveSubmittal && (
+                      <Button
+                        size='sm'
+                        variant='outline'
+                        onClick={() =>
+                          setDecisionTarget({
+                            kind: 'submittal',
+                            mode: 'approve',
+                            id: row.id,
+                            label: row.ref,
                           })
-                          toast.success('Review recorded')
-                        } catch (error) {
-                          handleServerError(error)
                         }
-                      }}
-                    >
-                      Review
-                    </Button>
-                  )}
-                  {row.status === 'under_review' && canResubmitSubmittal && (
-                    <Button
-                      size='sm'
-                      variant='outline'
-                      onClick={async () => {
-                        const reason = window.prompt('Resubmit reason')
-                        if (!reason) return
-                        try {
-                          await resubmitSubmittal.mutateAsync({
-                            submittalId: row.id,
-                            payload: { reason },
+                      >
+                        <CheckCircle2 className='mr-2 h-4 w-4' />
+                        Approve
+                      </Button>
+                    )}
+                    {row.status === 'under_review' && canRejectSubmittal && (
+                      <Button
+                        size='sm'
+                        variant='outline'
+                        onClick={() =>
+                          setDecisionTarget({
+                            kind: 'submittal',
+                            mode: 'reject',
+                            id: row.id,
+                            label: row.ref,
                           })
-                          toast.success('Resubmission requested')
-                        } catch (error) {
-                          handleServerError(error)
                         }
-                      }}
-                    >
-                      Resubmit
-                    </Button>
-                  )}
-                  {row.status === 'under_review' && canApproveSubmittal && (
-                    <Button
-                      size='sm'
-                      variant='outline'
-                      onClick={() =>
-                        setDecisionTarget({
-                          kind: 'submittal',
-                          mode: 'approve',
-                          id: row.id,
-                          label: row.ref,
-                        })
-                      }
-                    >
-                      <CheckCircle2 className='mr-2 h-4 w-4' />
-                      Approve
-                    </Button>
-                  )}
-                  {row.status === 'under_review' && canRejectSubmittal && (
-                    <Button
-                      size='sm'
-                      variant='outline'
-                      onClick={() =>
-                        setDecisionTarget({
-                          kind: 'submittal',
-                          mode: 'reject',
-                          id: row.id,
-                          label: row.ref,
-                        })
-                      }
-                    >
-                      <XCircle className='mr-2 h-4 w-4' />
-                      Disapprove
-                    </Button>
-                  )}
-                </>
-              ) : null
-            }
-          />
-          <div className='flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground'>
-            <span>{submittals?.rows?.length ?? 0} submittals</span>
-            <div className='flex gap-2'>
-              {submittalCursor && (
+                      >
+                        <XCircle className='mr-2 h-4 w-4' />
+                        Disapprove
+                      </Button>
+                    )}
+                  </>
+                ) : null
+              }
+            />
+            <div className='flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground'>
+              <span>{submittals?.rows?.length ?? 0} submittals</span>
+              <div className='flex gap-2'>
+                {submittalCursor && (
+                  <Button
+                    size='sm'
+                    variant='outline'
+                    onClick={() => setSubmittalCursor(null)}
+                  >
+                    First page
+                  </Button>
+                )}
                 <Button
                   size='sm'
                   variant='outline'
-                  onClick={() => setSubmittalCursor(null)}
+                  disabled={!submittals?.pagination?.nextCursor}
+                  onClick={() =>
+                    setSubmittalCursor(
+                      submittals?.pagination?.nextCursor ?? null
+                    )
+                  }
                 >
-                  First page
+                  Next page
                 </Button>
-              )}
-              <Button
-                size='sm'
-                variant='outline'
-                disabled={!submittals?.pagination?.nextCursor}
-                onClick={() =>
-                  setSubmittalCursor(submittals?.pagination?.nextCursor ?? null)
-                }
-              >
-                Next page
-              </Button>
+              </div>
             </div>
           </div>
+          {submittalCreateOpen && (
+            <SubmittalCreateDialog
+              key={`submittal-create-${submittalCreateOpen ? 'open' : 'closed'}`}
+              projectId={projectId}
+              open={submittalCreateOpen}
+              onOpenChange={setSubmittalCreateOpen}
+              partyItems={partyItems
+                .filter((item) => item.id !== NO_PARTY_VALUE)
+                .map((item) => ({ id: item.id, label: item.label }))}
+              onCreated={(submittal) => setSubmittalDetailId(submittal.id)}
+            />
+          )}
+          <SubmittalDetailDialog
+            projectId={projectId}
+            submittalId={submittalDetailId}
+            onOpenChange={(open) => {
+              if (!open) setSubmittalDetailId(null)
+            }}
+          />
           <AuditHistoryPanel
             projectId={projectId}
             entityType='submittal'

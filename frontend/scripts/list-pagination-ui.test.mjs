@@ -32,7 +32,7 @@ assert.match(
 
 assert.match(
   docDashboard,
-  /setSubmittalCursor\(submittals\?\.pagination\?\.nextCursor \?\? null\)/,
+  /setSubmittalCursor\(\s*submittals\?\.pagination\?\.nextCursor \?\? null\s*\)/,
   'Submittal UI exposes cursor-based next-page navigation'
 )
 

@@ -19,9 +19,48 @@ const {
   rejectSubmittal,
   deleteSubmittal,
 } = require("../services/submittal.service");
+const submittalWorkflow = require("../services/submittal-workflow.service");
 
 const router = express.Router({ mergeParams: true });
 router.use(authenticate);
+
+const actorArgs = (req) => ({ userId: req.user.id, userRole: getEffectiveRole(req), projectAccess: req.projectAccess });
+const actor = (req) => ({ id: req.user.id, name: req.user.name, role: getEffectiveRole(req) });
+const scope = (req) => ({ orgId: req.user.orgId, projectId: req.params.projectId });
+
+// OCTA-PM-SUB-017 fields shared by create and update.
+const upgradeValidators = () => [
+  body("packageId").optional({ nullable: true }).isUUID(),
+  body("workflowTemplateId").optional({ nullable: true }).isUUID(),
+  body("leadTimeWeeks").optional({ nullable: true }).isInt({ min: 0, max: 104 }),
+  body("reviewDays").optional({ nullable: true }).isInt({ min: 0, max: 365 }),
+  body("requiredOnSite").optional({ nullable: true }).isISO8601(),
+  body("managerUserId").optional({ nullable: true }).isUUID(),
+  body("distributionUserIds").optional().isArray({ max: 20 }),
+  body("distributionUserIds.*").isUUID(),
+  body("discipline").optional({ nullable: true }).isString().trim().isLength({ max: 120 }),
+  body("specRef").optional({ nullable: true }).isString().trim().isLength({ max: 120 }),
+  body("revision").optional({ nullable: true }).isString().trim().isLength({ max: 20 }),
+];
+
+const templateValidators = ({ requireName = false } = {}) => [
+  requireName ? body("name").isString().trim().notEmpty().isLength({ max: 120 }) : body("name").optional().isString().trim().notEmpty().isLength({ max: 120 }),
+  body("description").optional({ nullable: true }).isString().trim().isLength({ max: 1000 }),
+  body("isDefault").optional().isBoolean().toBoolean(),
+  body("status").optional().isIn(["active", "archived"]),
+  body("steps").optional().isArray({ max: 12 }),
+  body("steps.*.name").optional().isString(),
+  body("steps.*.mode").optional().isIn(["sequential", "parallel"]),
+  body("steps.*.days").optional().isInt({ min: 0, max: 365 }).toInt(),
+  body("steps.*.assignees").optional().isArray({ max: 20 }),
+];
+
+const decisionValidators = [
+  body("decision").isIn(["approve", "reject"]),
+  body("responseCode").optional().isIn(["approved", "approved_as_noted", "revise_resubmit", "rejected", "custom"]),
+  body("responseCodeLabel").optional({ nullable: true }).isString().trim().isLength({ max: 120 }),
+  body("comment").optional({ nullable: true }).isString().trim().isLength({ max: 4000 }),
+];
 
 router.get(
   "/",
@@ -29,6 +68,14 @@ router.get(
   [
     query("cursor").optional().isUUID(),
     query("limit").optional().isInt({ min: 1, max: 100 }).toInt(),
+    query("packageId").optional({ values: "falsy" }).isUUID(),
+    query("managerUserId").optional({ values: "falsy" }).isUUID(),
+    query("workflowTemplateId").optional({ values: "falsy" }).isUUID(),
+    query("ballInCourtUserId")
+      .optional({ values: "falsy" })
+      .matches(/^(me|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i),
+    query("responseCode").optional().isIn(["approved", "approved_as_noted", "revise_resubmit", "rejected", "custom"]),
+    query("overdue").optional().isBoolean().toBoolean(),
     query("status")
       .optional()
       .isIn([
@@ -66,12 +113,115 @@ router.get(
     const data = await listSubmittals({
       orgId: req.user.orgId,
       projectId: req.params.projectId,
-      query: req.query,
+      query: req.query.ballInCourtUserId === "me" ? { ...req.query, ballInCourtUserId: req.user.id } : req.query,
       projectAccess: req.projectAccess,
     });
 
     return sendSuccess(res, data);
   }),
+);
+
+// ─── OCTA-PM-SUB-017: packages and workflow templates (static paths first) ──
+
+router.get(
+  "/packages",
+  requirePermission("submittal", "read"),
+  [query("status").optional().isIn(["open", "submitted", "closed"]), validate],
+  asyncHandler(async (req, res) => sendSuccess(res, await submittalWorkflow.listPackages({ ...scope(req), query: req.query }))),
+);
+
+router.post(
+  "/packages",
+  requirePermission("submittal", "create"),
+  [
+    body("name").isString().trim().notEmpty().isLength({ max: 160 }),
+    body("description").optional({ nullable: true }).isString().trim().isLength({ max: 2000 }),
+    body("activityId").optional({ nullable: true }).isUUID(),
+    body("requiredOnSite").optional({ nullable: true }).isISO8601(),
+    body("managerUserId").optional({ nullable: true }).isUUID(),
+    body("submittalIds").optional().isArray({ max: 200 }),
+    body("submittalIds.*").isUUID(),
+    validate,
+  ],
+  asyncHandler(async (req, res) => sendSuccess(res, await submittalWorkflow.createPackage({ ...scope(req), payload: req.body, actor: actor(req) }), 201)),
+);
+
+router.get(
+  "/packages/:packageId",
+  requirePermission("submittal", "read"),
+  [param("packageId").isUUID(), validate],
+  asyncHandler(async (req, res) => sendSuccess(res, await submittalWorkflow.getPackage({ ...scope(req), packageId: req.params.packageId }))),
+);
+
+router.patch(
+  "/packages/:packageId",
+  requirePermission("submittal", "update"),
+  [
+    param("packageId").isUUID(),
+    body("name").optional().isString().trim().notEmpty().isLength({ max: 160 }),
+    body("description").optional({ nullable: true }).isString().trim().isLength({ max: 2000 }),
+    body("activityId").optional({ nullable: true }).isUUID(),
+    body("requiredOnSite").optional({ nullable: true }).isISO8601(),
+    body("managerUserId").optional({ nullable: true }).isUUID(),
+    validate,
+  ],
+  asyncHandler(async (req, res) => sendSuccess(res, await submittalWorkflow.updatePackage({ ...scope(req), packageId: req.params.packageId, payload: req.body, actor: actor(req) }))),
+);
+
+router.post(
+  "/packages/:packageId/items",
+  requirePermission("submittal", "update"),
+  [param("packageId").isUUID(), body("submittalIds").isArray({ min: 1, max: 200 }), body("submittalIds.*").isUUID(), validate],
+  asyncHandler(async (req, res) => sendSuccess(res, await submittalWorkflow.addPackageItems({ ...scope(req), packageId: req.params.packageId, submittalIds: req.body.submittalIds, actor: actor(req) }))),
+);
+
+router.delete(
+  "/packages/:packageId/items/:submittalId",
+  requirePermission("submittal", "update"),
+  [param("packageId").isUUID(), param("submittalId").isUUID(), validate],
+  asyncHandler(async (req, res) => sendSuccess(res, await submittalWorkflow.removePackageItem({ ...scope(req), packageId: req.params.packageId, submittalId: req.params.submittalId, actor: actor(req) }))),
+);
+
+router.post(
+  "/packages/:packageId/submit",
+  requirePermission("submittal", "submit", { transition: "submittal.submit" }),
+  [param("packageId").isUUID(), body("comment").optional({ nullable: true }).isString().trim().isLength({ max: 2000 }), validate],
+  asyncHandler(async (req, res) => sendSuccess(res, await submittalWorkflow.submitPackage({ ...scope(req), packageId: req.params.packageId, payload: req.body, ...actorArgs(req) }))),
+);
+
+router.post(
+  "/packages/:packageId/decide",
+  requirePermission("submittal", "submit", { transition: "submittal.review" }),
+  [param("packageId").isUUID(), ...decisionValidators, validate],
+  asyncHandler(async (req, res) => sendSuccess(res, await submittalWorkflow.decidePackage({ ...scope(req), packageId: req.params.packageId, payload: req.body, userId: req.user.id, userRole: getEffectiveRole(req) }))),
+);
+
+router.get(
+  "/workflow-templates",
+  requirePermission("submittal", "read"),
+  [query("scope").optional().isIn(["all", "project", "company"]), query("includeArchived").optional().isBoolean().toBoolean(), validate],
+  asyncHandler(async (req, res) => sendSuccess(res, await submittalWorkflow.listTemplates({ ...scope(req), query: req.query }))),
+);
+
+router.post(
+  "/workflow-templates",
+  requirePermission("submittal", "update"),
+  [...templateValidators({ requireName: true }), validate],
+  asyncHandler(async (req, res) => sendSuccess(res, await submittalWorkflow.createTemplate({ ...scope(req), payload: req.body, actor: actor(req) }), 201)),
+);
+
+router.patch(
+  "/workflow-templates/:templateId",
+  requirePermission("submittal", "update"),
+  [param("templateId").isUUID(), ...templateValidators(), validate],
+  asyncHandler(async (req, res) => sendSuccess(res, await submittalWorkflow.updateTemplate({ ...scope(req), templateId: req.params.templateId, payload: req.body, actor: actor(req) }))),
+);
+
+router.delete(
+  "/workflow-templates/:templateId",
+  requirePermission("submittal", "update"),
+  [param("templateId").isUUID(), validate],
+  asyncHandler(async (req, res) => sendSuccess(res, await submittalWorkflow.archiveTemplate({ ...scope(req), templateId: req.params.templateId, actor: actor(req) }))),
 );
 
 router.post(
@@ -82,6 +232,7 @@ router.post(
     body("status")
       .optional()
       .isIn(["pending", "under_review", "approved", "resubmit", "rejected"]),
+    ...upgradeValidators(),
     body("owner").optional().isString().trim(),
     body("ownerPartyId").optional({ nullable: true }).isUUID(),
     body("reviewer").optional().isString().trim(),
@@ -139,6 +290,43 @@ const submittalEvidenceValidators = [
   body("submittedOn").optional({ nullable: true }).isISO8601(),
   body("reviewedOn").optional({ nullable: true }).isISO8601(),
 ];
+
+router.get(
+  "/:submittalId",
+  requirePermission("submittal", "read"),
+  [param("submittalId").isUUID(), validate],
+  asyncHandler(async (req, res) => sendSuccess(res, await submittalWorkflow.getSubmittal({ ...scope(req), submittalId: req.params.submittalId }))),
+);
+
+router.post(
+  "/:submittalId/decide",
+  requirePermission("submittal", "submit", { transition: "submittal.review" }),
+  [param("submittalId").isUUID(), ...decisionValidators, validate],
+  asyncHandler(async (req, res) =>
+    sendSuccess(res, await submittalWorkflow.decideStep({ ...scope(req), submittalId: req.params.submittalId, payload: req.body, userId: req.user.id, userRole: getEffectiveRole(req) })),
+  ),
+);
+
+router.put(
+  "/:submittalId/people",
+  requirePermission("submittal", "update"),
+  [
+    param("submittalId").isUUID(),
+    body("managerUserId").optional({ nullable: true }).isUUID(),
+    body("distributionUserIds").optional().isArray({ max: 20 }),
+    body("distributionUserIds.*").isUUID(),
+    validate,
+  ],
+  asyncHandler(async (req, res) => {
+    await updateSubmittal({
+      ...scope(req),
+      submittalId: req.params.submittalId,
+      payload: { managerUserId: req.body.managerUserId, distributionUserIds: req.body.distributionUserIds, comment: "People updated" },
+      ...actorArgs(req),
+    });
+    return sendSuccess(res, await submittalWorkflow.getSubmittal({ ...scope(req), submittalId: req.params.submittalId }));
+  }),
+);
 
 router.post(
   "/:submittalId/submit",
@@ -285,6 +473,7 @@ router.patch(
     body("status")
       .optional()
       .isIn(["pending", "under_review", "approved", "resubmit", "rejected"]),
+    ...upgradeValidators(),
     body("owner").optional().isString().trim(),
     body("ownerPartyId").optional({ nullable: true }).isUUID(),
     body("reviewer").optional().isString().trim(),

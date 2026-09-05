@@ -42,6 +42,7 @@ import { Route as AuthenticatedProjectsProjectIdRouteImport } from './routes/_au
 import { Route as AuthenticatedErrorsErrorRouteImport } from './routes/_authenticated/errors/$error'
 import { Route as AuthenticatedCompanyVendorsRouteImport } from './routes/_authenticated/company/vendors'
 import { Route as AuthenticatedCompanyTemplatesRouteImport } from './routes/_authenticated/company/templates'
+import { Route as AuthenticatedCompanySubmittalWorkflowsRouteImport } from './routes/_authenticated/company/submittal-workflows'
 import { Route as AuthenticatedCompanyPermissionsRouteImport } from './routes/_authenticated/company/permissions'
 import { Route as AuthenticatedCompanyFormTemplatesRouteImport } from './routes/_authenticated/company/form-templates'
 import { Route as AuthenticatedCompanyEquipmentRouteImport } from './routes/_authenticated/company/equipment'
@@ -233,6 +234,12 @@ const AuthenticatedCompanyTemplatesRoute =
     path: '/templates',
     getParentRoute: () => AuthenticatedCompanyRouteRoute,
   } as any)
+const AuthenticatedCompanySubmittalWorkflowsRoute =
+  AuthenticatedCompanySubmittalWorkflowsRouteImport.update({
+    id: '/submittal-workflows',
+    path: '/submittal-workflows',
+    getParentRoute: () => AuthenticatedCompanyRouteRoute,
+  } as any)
 const AuthenticatedCompanyPermissionsRoute =
   AuthenticatedCompanyPermissionsRouteImport.update({
     id: '/permissions',
@@ -310,6 +317,7 @@ export interface FileRoutesByFullPath {
   '/company/equipment': typeof AuthenticatedCompanyEquipmentRoute
   '/company/form-templates': typeof AuthenticatedCompanyFormTemplatesRoute
   '/company/permissions': typeof AuthenticatedCompanyPermissionsRoute
+  '/company/submittal-workflows': typeof AuthenticatedCompanySubmittalWorkflowsRoute
   '/company/templates': typeof AuthenticatedCompanyTemplatesRoute
   '/company/vendors': typeof AuthenticatedCompanyVendorsRoute
   '/errors/$error': typeof AuthenticatedErrorsErrorRoute
@@ -351,6 +359,7 @@ export interface FileRoutesByTo {
   '/company/equipment': typeof AuthenticatedCompanyEquipmentRoute
   '/company/form-templates': typeof AuthenticatedCompanyFormTemplatesRoute
   '/company/permissions': typeof AuthenticatedCompanyPermissionsRoute
+  '/company/submittal-workflows': typeof AuthenticatedCompanySubmittalWorkflowsRoute
   '/company/templates': typeof AuthenticatedCompanyTemplatesRoute
   '/company/vendors': typeof AuthenticatedCompanyVendorsRoute
   '/errors/$error': typeof AuthenticatedErrorsErrorRoute
@@ -395,6 +404,7 @@ export interface FileRoutesById {
   '/_authenticated/company/equipment': typeof AuthenticatedCompanyEquipmentRoute
   '/_authenticated/company/form-templates': typeof AuthenticatedCompanyFormTemplatesRoute
   '/_authenticated/company/permissions': typeof AuthenticatedCompanyPermissionsRoute
+  '/_authenticated/company/submittal-workflows': typeof AuthenticatedCompanySubmittalWorkflowsRoute
   '/_authenticated/company/templates': typeof AuthenticatedCompanyTemplatesRoute
   '/_authenticated/company/vendors': typeof AuthenticatedCompanyVendorsRoute
   '/_authenticated/errors/$error': typeof AuthenticatedErrorsErrorRoute
@@ -440,6 +450,7 @@ export interface FileRouteTypes {
     | '/company/equipment'
     | '/company/form-templates'
     | '/company/permissions'
+    | '/company/submittal-workflows'
     | '/company/templates'
     | '/company/vendors'
     | '/errors/$error'
@@ -481,6 +492,7 @@ export interface FileRouteTypes {
     | '/company/equipment'
     | '/company/form-templates'
     | '/company/permissions'
+    | '/company/submittal-workflows'
     | '/company/templates'
     | '/company/vendors'
     | '/errors/$error'
@@ -524,6 +536,7 @@ export interface FileRouteTypes {
     | '/_authenticated/company/equipment'
     | '/_authenticated/company/form-templates'
     | '/_authenticated/company/permissions'
+    | '/_authenticated/company/submittal-workflows'
     | '/_authenticated/company/templates'
     | '/_authenticated/company/vendors'
     | '/_authenticated/errors/$error'
@@ -795,6 +808,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedCompanyTemplatesRouteImport
       parentRoute: typeof AuthenticatedCompanyRouteRoute
     }
+    '/_authenticated/company/submittal-workflows': {
+      id: '/_authenticated/company/submittal-workflows'
+      path: '/submittal-workflows'
+      fullPath: '/company/submittal-workflows'
+      preLoaderRoute: typeof AuthenticatedCompanySubmittalWorkflowsRouteImport
+      parentRoute: typeof AuthenticatedCompanyRouteRoute
+    }
     '/_authenticated/company/permissions': {
       id: '/_authenticated/company/permissions'
       path: '/permissions'
@@ -867,6 +887,7 @@ interface AuthenticatedCompanyRouteRouteChildren {
   AuthenticatedCompanyEquipmentRoute: typeof AuthenticatedCompanyEquipmentRoute
   AuthenticatedCompanyFormTemplatesRoute: typeof AuthenticatedCompanyFormTemplatesRoute
   AuthenticatedCompanyPermissionsRoute: typeof AuthenticatedCompanyPermissionsRoute
+  AuthenticatedCompanySubmittalWorkflowsRoute: typeof AuthenticatedCompanySubmittalWorkflowsRoute
   AuthenticatedCompanyTemplatesRoute: typeof AuthenticatedCompanyTemplatesRoute
   AuthenticatedCompanyVendorsRoute: typeof AuthenticatedCompanyVendorsRoute
   AuthenticatedCompanyIndexRoute: typeof AuthenticatedCompanyIndexRoute
@@ -880,6 +901,8 @@ const AuthenticatedCompanyRouteRouteChildren: AuthenticatedCompanyRouteRouteChil
     AuthenticatedCompanyFormTemplatesRoute:
       AuthenticatedCompanyFormTemplatesRoute,
     AuthenticatedCompanyPermissionsRoute: AuthenticatedCompanyPermissionsRoute,
+    AuthenticatedCompanySubmittalWorkflowsRoute:
+      AuthenticatedCompanySubmittalWorkflowsRoute,
     AuthenticatedCompanyTemplatesRoute: AuthenticatedCompanyTemplatesRoute,
     AuthenticatedCompanyVendorsRoute: AuthenticatedCompanyVendorsRoute,
     AuthenticatedCompanyIndexRoute: AuthenticatedCompanyIndexRoute,

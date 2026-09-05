@@ -62,6 +62,8 @@ model Organisation {
   punchItems          PunchItem[]
   formTemplates       FormTemplate[]
   formInstances       FormInstance[]
+  submittalPackages   SubmittalPackage[]
+  submittalWorkflowTemplates SubmittalWorkflowTemplate[]
   punchItemEvents     PunchItemEvent[]
 }
 
@@ -152,6 +154,9 @@ model User {
   rfiManaged              Rfi[]               @relation("RfiManagerUser")
   rfiAssignments          RfiAssignee[]       @relation("RfiAssigneeUser")
   rfiResponses            RfiResponse[]       @relation("RfiResponseAuthor")
+  submittalsManaged       Submittal[]         @relation("SubmittalManagerUser")
+  submittalPackagesManaged SubmittalPackage[] @relation("SubmittalPackageManager")
+  submittalStepAssignments SubmittalStepAssignment[] @relation("SubmittalStepAssignee")
   signatures              Signature[]         @relation("SignatureUser")
   safetyOwner             SafetyIncident[]    @relation("SafetyOwnerUser")
   safetyReviewer          SafetyIncident[]    @relation("SafetyReviewerUser")
@@ -431,6 +436,8 @@ model Project {
   punchItems                    PunchItem[]
   formTemplates                 FormTemplate[]
   formInstances                 FormInstance[]
+  submittalPackages             SubmittalPackage[]
+  submittalWorkflowTemplates    SubmittalWorkflowTemplate[]
   punchItemEvents               PunchItemEvent[]
 
   @@index([orgId])
@@ -1294,6 +1301,7 @@ model Activity {
   defectRecords          DefectRecord[]
   punchItems             PunchItem[]
   formInstances          FormInstance[]
+  submittalPackages      SubmittalPackage[]
   safetyIncidents        SafetyIncident[]
   materialTests          MaterialTest[]
   rfis                   Rfi[]
@@ -3222,11 +3230,31 @@ model Submittal {
   remarks     String?
   archivedAt  DateTime?
   archivedBy  String?
+  // OCTA-PM-SUB-017: packages, workflow templates, response codes, lead-time due dates.
+  packageId          String?
+  workflowTemplateId String?
+  currentStepId      String?
+  responseCode       String? // approved, approved_as_noted, revise_resubmit, rejected, custom
+  responseCodeLabel  String?
+  leadTimeWeeks      Int?
+  reviewDays         Int?
+  requiredOnSite     DateTime?
+  submitBy           DateTime? // requiredOnSite − leadTimeWeeks − reviewDays
+  revisionNumber     Int       @default(0)
+  scheduleImpactDays Int       @default(0)
+  managerUserId      String?
+  createdBy          String?
+  distributionJson   Json      @default("[]")
+  distributedAt      DateTime?
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
 
   project  Project   @relation(fields: [projectId], references: [id])
   activity Activity? @relation(fields: [activityId], references: [id], onDelete: SetNull)
+  package          SubmittalPackage?          @relation(fields: [packageId], references: [id], onDelete: SetNull)
+  workflowTemplate SubmittalWorkflowTemplate? @relation(fields: [workflowTemplateId], references: [id], onDelete: SetNull)
+  managerUser      User?                      @relation("SubmittalManagerUser", fields: [managerUserId], references: [id], onDelete: SetNull)
+  steps            SubmittalStep[]
   ownerParty    ProjectParty? @relation("SubmittalOwnerParty", fields: [ownerPartyId], references: [id], onDelete: SetNull)
   reviewerParty ProjectParty? @relation("SubmittalReviewerParty", fields: [reviewerPartyId], references: [id], onDelete: SetNull)
   approverParty ProjectParty? @relation("SubmittalApproverParty", fields: [approverPartyId], references: [id], onDelete: SetNull)
@@ -4696,4 +4724,96 @@ model Signature {
   @@index([recordType, recordId])
   @@index([projectId])
   @@index([instanceId])
+}
+
+// ─── Submittal packages, workflow templates and steps (OCTA-PM-SUB-017) ───
+model SubmittalPackage {
+  id             String    @id @default(uuid())
+  orgId          String
+  projectId      String
+  number         Int
+  ref            String // PKG-001
+  name           String
+  description    String?
+  status         String    @default("open") // open, submitted, closed
+  activityId     String?
+  requiredOnSite DateTime?
+  managerUserId  String?
+  createdBy      String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  org         Organisation @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  project     Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  activity    Activity?    @relation(fields: [activityId], references: [id], onDelete: SetNull)
+  managerUser User?        @relation("SubmittalPackageManager", fields: [managerUserId], references: [id], onDelete: SetNull)
+  submittals  Submittal[]
+
+  @@unique([projectId, ref])
+  @@index([projectId, status])
+  @@index([orgId])
+}
+
+// A review route: ordered steps, each sequential (one approver) or parallel
+// (everyone must approve; the first rejection stops the step), assigned to
+// users, party roles or project roles, with days allowed per step.
+model SubmittalWorkflowTemplate {
+  id          String   @id @default(uuid())
+  orgId       String
+  projectId   String?
+  name        String
+  description String?
+  isDefault   Boolean  @default(false)
+  status      String   @default("active") // active, archived
+  stepsJson   Json     @default("[]") // [{ name, mode, days, assignees: [{ type: user|party_role|role, userId?, role? }] }]
+  createdBy   String?
+  updatedBy   String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  org        Organisation @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  project    Project?     @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  submittals Submittal[]
+
+  @@index([orgId, projectId, status])
+}
+
+model SubmittalStep {
+  id             String    @id @default(uuid())
+  submittalId    String
+  revisionNumber Int       @default(0)
+  sortOrder      Int       @default(0)
+  name           String
+  mode           String    @default("sequential") // sequential, parallel
+  days           Int       @default(7)
+  status         String    @default("pending") // pending, active, approved, rejected, skipped
+  startedAt      DateTime?
+  dueAt          DateTime?
+  completedAt    DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  submittal   Submittal                 @relation(fields: [submittalId], references: [id], onDelete: Cascade)
+  assignments SubmittalStepAssignment[]
+
+  @@index([submittalId, revisionNumber, sortOrder])
+  @@index([status, dueAt])
+}
+
+model SubmittalStepAssignment {
+  id           String    @id @default(uuid())
+  stepId       String
+  userId       String
+  role         String? // how the person was resolved: user, consultant, pm…
+  status       String    @default("pending") // pending, approved, rejected, skipped
+  responseCode String?
+  comment      String?
+  decidedAt    DateTime?
+  createdAt    DateTime  @default(now())
+
+  step SubmittalStep @relation(fields: [stepId], references: [id], onDelete: Cascade)
+  user User          @relation("SubmittalStepAssignee", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([stepId, userId])
+  @@index([userId, status])
 }

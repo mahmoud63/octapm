@@ -24,12 +24,45 @@ const {
 } = require("./company-party.service");
 const auditService = require("./audit.service");
 const approvalWorkflowService = require("./approval-workflow.service");
+const submittalWorkflow = require("./submittal-workflow.service");
 const {
   ARCHIVED_STATUS,
   applyArchiveVisibility,
   assertNotArchived,
   archiveResult,
 } = require("./archive-policy.service");
+
+/** Fields added by OCTA-PM-SUB-017 (packages, workflow, lead time, people). */
+const upgradeFields = (payload = {}) => {
+  const data = {};
+  const optionalDate = (value) => (value ? new Date(value) : null);
+  if (payload.packageId !== undefined) data.packageId = payload.packageId || null;
+  if (payload.workflowTemplateId !== undefined) data.workflowTemplateId = payload.workflowTemplateId || null;
+  if (payload.currentStepId !== undefined) data.currentStepId = payload.currentStepId || null;
+  if (payload.responseCode !== undefined) data.responseCode = payload.responseCode || null;
+  if (payload.responseCodeLabel !== undefined) data.responseCodeLabel = payload.responseCodeLabel || null;
+  if (payload.leadTimeWeeks !== undefined) data.leadTimeWeeks = payload.leadTimeWeeks === null || payload.leadTimeWeeks === "" ? null : Number(payload.leadTimeWeeks) || 0;
+  if (payload.reviewDays !== undefined) data.reviewDays = payload.reviewDays === null || payload.reviewDays === "" ? null : Number(payload.reviewDays) || 0;
+  if (payload.requiredOnSite !== undefined) data.requiredOnSite = optionalDate(payload.requiredOnSite);
+  if (payload.managerUserId !== undefined) data.managerUserId = payload.managerUserId || null;
+  if (payload.distributionUserIds !== undefined) data.distributionJson = Array.isArray(payload.distributionUserIds) ? [...new Set(payload.distributionUserIds.filter(Boolean))] : [];
+  return data;
+};
+
+/** Recomputes submitBy from the activity / required-on-site date, lead time and review days. */
+const submitByFor = async ({ tx = prisma, projectId, record }) => {
+  let reviewDays = record.reviewDays;
+  if ((reviewDays === null || reviewDays === undefined) && record.workflowTemplateId && tx.submittalWorkflowTemplate?.findFirst) {
+    const template = await tx.submittalWorkflowTemplate.findFirst({ where: { id: record.workflowTemplateId }, select: { stepsJson: true } });
+    reviewDays = template ? submittalWorkflow.reviewDaysFor(template.stepsJson) : 0;
+  }
+  let activityStart = null;
+  if (!record.requiredOnSite && record.activityId && tx.activity?.findFirst) {
+    const activity = await tx.activity.findFirst({ where: { id: record.activityId, projectId }, select: { startDate: true } });
+    activityStart = activity?.startDate || null;
+  }
+  return submittalWorkflow.computeSubmitBy({ requiredOnSite: record.requiredOnSite, activityStart, leadTimeWeeks: record.leadTimeWeeks, reviewDays });
+};
 
 const ensureProject = async ({ orgId, projectId }) => {
   const project = await prisma.project.findFirst({
@@ -92,6 +125,14 @@ const submittalAuditSummary = (record) => ({
   remarks: record.remarks || null,
   archivedAt: dateSummary(record.archivedAt),
   archivedBy: record.archivedBy || null,
+  packageId: record.packageId || null,
+  workflowTemplateId: record.workflowTemplateId || null,
+  responseCode: record.responseCode || null,
+  revisionNumber: Number(record.revisionNumber || 0),
+  submitBy: dateSummary(record.submitBy),
+  requiredOnSite: dateSummary(record.requiredOnSite),
+  leadTimeWeeks: record.leadTimeWeeks ?? null,
+  managerUserId: record.managerUserId || null,
 });
 
 const buildSubmittalWhere = ({ projectId, query = {} }) => {
@@ -112,6 +153,20 @@ const buildSubmittalWhere = ({ projectId, query = {} }) => {
     before: trimToNull(query.dueBefore),
   });
   if (dueDate) where.dueDate = dueDate;
+
+  // OCTA-PM-SUB-017 filters: package, manager, ball in court, response code, late.
+  if (trimToNull(query.packageId)) where.packageId = trimToNull(query.packageId);
+  if (trimToNull(query.managerUserId)) where.managerUserId = trimToNull(query.managerUserId);
+  if (trimToNull(query.ballInCourtUserId)) where.ballInCourtUserId = trimToNull(query.ballInCourtUserId);
+  if (trimToNull(query.workflowTemplateId)) where.workflowTemplateId = trimToNull(query.workflowTemplateId);
+  if (trimToNull(query.responseCode)) where.responseCode = trimToNull(query.responseCode);
+  if (query.overdue === true || query.overdue === "true") {
+    const now = new Date();
+    where.AND = [
+      ...(where.AND || []),
+      { OR: [{ status: "under_review", dueDate: { lt: now } }, { status: { in: ["pending", "resubmit", "rejected"] }, submitBy: { lt: now } }] },
+    ];
+  }
 
   const search = trimToNull(query.search);
   if (search) {
@@ -226,8 +281,10 @@ const createSubmittal = async ({
   const count = await prisma.submittal.count({ where: { projectId } });
   const activityId = primaryActivityIdFromPayload(payload);
   const assignmentPayload = withDefaultOwnerParty(payload, projectAccess);
+  const upgrade = upgradeFields(payload);
+  const submitBy = await submitByFor({ projectId, record: { ...upgrade, activityId } });
 
-  const row = await prisma.$transaction(async (tx) => {
+  const { row, patch } = await prisma.$transaction(async (tx) => {
     const assignments = await workflowPartyAssignmentData({
       tx,
       orgId,
@@ -246,8 +303,11 @@ const createSubmittal = async ({
         specRef: payload.specRef?.trim() || null,
         status: payload.status || "pending",
         ...assignments,
+        ...upgrade,
+        createdBy: userId || null,
+        submitBy,
         submittedOn: payload.submittedOn ? new Date(payload.submittedOn) : null,
-        dueDate: payload.dueDate ? new Date(payload.dueDate) : null,
+        dueDate: payload.dueDate ? new Date(payload.dueDate) : submitBy,
         reviewedOn: payload.reviewedOn ? new Date(payload.reviewedOn) : null,
         remarks: payload.remarks?.trim() || null,
       },
@@ -315,8 +375,10 @@ const createSubmittal = async ({
       },
       metadata: { source: "document_control.submittal" },
     });
-    return created;
+    const workflowPatch = await submittalWorkflow.onStatusChange({ tx, orgId, projectId, existing: {}, updated: created, actorId: userId });
+    return { row: { ...created, ...workflowPatch }, patch: workflowPatch };
   });
+  await submittalWorkflow.afterStatusChange({ orgId, projectId, submittal: row, patch, actorId: userId });
 
   const [enriched] = await attachWorkflowDetailsToRecords({
     projectId,
@@ -416,8 +478,11 @@ const updateSubmittal = async ({
     );
   }
   const activityId = primaryActivityIdFromPayload(payload, existing.activityId);
+  const upgrade = upgradeFields(payload);
+  const datesTouched = ["leadTimeWeeks", "reviewDays", "requiredOnSite", "workflowTemplateId"].some((key) => key in upgrade) || activityId !== existing.activityId;
+  const submitBy = datesTouched ? await submitByFor({ projectId, record: { ...existing, ...upgrade, activityId } }) : undefined;
 
-  const row = await prisma.$transaction(async (tx) => {
+  const { row, patch } = await prisma.$transaction(async (tx) => {
     const assignments = await workflowPartyAssignmentData({
       tx,
       orgId,
@@ -430,6 +495,8 @@ const updateSubmittal = async ({
       where: { id: submittalId },
       data: {
         activityId,
+        ...upgrade,
+        ...(submitBy !== undefined ? { submitBy, ...(!existing.submittedOn && !payload.dueDate ? { dueDate: submitBy } : {}) } : {}),
         title: payload.title ?? existing.title,
         discipline:
           payload.discipline !== undefined
@@ -539,8 +606,10 @@ const updateSubmittal = async ({
       },
       metadata: { source: "document_control.submittal" },
     });
-    return updated;
+    const workflowPatch = await submittalWorkflow.onStatusChange({ tx, orgId, projectId, existing, updated, actorId: userId });
+    return { row: { ...updated, ...workflowPatch }, patch: workflowPatch };
   });
+  await submittalWorkflow.afterStatusChange({ orgId, projectId, submittal: row, patch, actorId: userId });
 
   const [enriched] = await attachWorkflowDetailsToRecords({
     projectId,
@@ -904,6 +973,7 @@ const deleteSubmittal = async ({
 };
 
 module.exports = {
+  SUBMITTAL_STATUSES,
   listSubmittals,
   createSubmittal,
   updateSubmittal,

@@ -45,6 +45,8 @@ const ENTITY_TYPES = Object.freeze({
   PUNCH_ITEM: "punch_item",
   FORM_TEMPLATE: "form_template",
   FORM_INSTANCE: "form_instance",
+  SUBMITTAL_PACKAGE: "submittal_package",
+  SUBMITTAL_WORKFLOW_TEMPLATE: "submittal_workflow_template",
 });
 
 const ACTIONS = Object.freeze({

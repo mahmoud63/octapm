@@ -109,7 +109,7 @@ const WORKFLOW_RECORDS = Object.freeze({
     model: "submittal",
     label: "Submittal",
     moduleCategory: NOTIFICATION_CATEGORIES.APPROVAL,
-    assignmentFields: ["owner", "reviewer", "approver"],
+    assignmentFields: ["owner", "reviewer", "approver", "managerUserId", "ballInCourtUserId", "createdBy"],
     dueFields: ["dueDate"],
     closedStatuses: ["approved", "rejected", "archived"],
   },

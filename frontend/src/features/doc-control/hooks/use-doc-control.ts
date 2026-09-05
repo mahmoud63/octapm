@@ -122,6 +122,165 @@ export interface RfiUpgradeFields {
   status?: 'draft' | 'open'
 }
 
+export type SubmittalResponseCode =
+  | 'approved'
+  | 'approved_as_noted'
+  | 'revise_resubmit'
+  | 'rejected'
+  | 'custom'
+
+export interface SubmittalStepAssignee {
+  type: 'user' | 'party_role' | 'role'
+  userId?: string | null
+  role?: string | null
+}
+
+export interface SubmittalWorkflowStep {
+  name: string
+  mode: 'sequential' | 'parallel'
+  days: number
+  assignees: SubmittalStepAssignee[]
+}
+
+export interface SubmittalWorkflowTemplate {
+  id: string
+  projectId: string | null
+  scope: 'company' | 'project'
+  name: string
+  description?: string | null
+  isDefault: boolean
+  status: 'active' | 'archived'
+  steps: SubmittalWorkflowStep[]
+  reviewDays: number
+  editable: boolean
+  createdAt?: string | null
+  updatedAt?: string | null
+}
+
+export interface SubmittalWorkflowTemplateInput {
+  name?: string
+  description?: string | null
+  isDefault?: boolean
+  status?: 'active' | 'archived'
+  steps?: SubmittalWorkflowStep[]
+}
+
+export interface SubmittalStepAssignment {
+  id: string
+  userId: string
+  user?: RfiPerson | null
+  role: string
+  status: 'pending' | 'approved' | 'rejected' | 'skipped'
+  responseCode?: string | null
+  responseCodeLabel?: string | null
+  comment?: string | null
+  decidedAt?: string | null
+}
+
+export interface SubmittalStep {
+  id: string
+  revisionNumber: number
+  sortOrder: number
+  name: string
+  mode: 'sequential' | 'parallel'
+  days: number
+  status: 'pending' | 'active' | 'approved' | 'rejected' | 'skipped'
+  startedAt?: string | null
+  dueAt?: string | null
+  completedAt?: string | null
+  isLate: boolean
+  assignments: SubmittalStepAssignment[]
+}
+
+export interface SubmittalPackageItem {
+  id: string
+  ref: string
+  title: string
+  status: SubmittalRecord['status']
+  revision?: string | null
+  revisionNumber: number
+  responseCode?: string | null
+  responseCodeLabel?: string | null
+  currentStepId?: string | null
+  ballInCourtUserId?: string | null
+  dueDate?: string | null
+}
+
+export interface SubmittalPackage {
+  id: string
+  projectId: string
+  number: number
+  ref: string
+  name: string
+  description?: string | null
+  status: 'open' | 'submitted' | 'closed'
+  activityId?: string | null
+  activity?: { id: string; name: string; startDate?: string | null } | null
+  requiredOnSite?: string | null
+  managerUserId?: string | null
+  manager?: RfiPerson | null
+  items: SubmittalPackageItem[]
+  summary: {
+    total: number
+    underReview: number
+    approved: number
+    returned: number
+  }
+  createdAt?: string | null
+  updatedAt?: string | null
+}
+
+export interface SubmittalPackageInput {
+  name?: string
+  description?: string | null
+  activityId?: string | null
+  requiredOnSite?: string | null
+  managerUserId?: string | null
+  submittalIds?: string[]
+}
+
+export interface SubmittalDecision {
+  decision: 'approve' | 'reject'
+  responseCode?: SubmittalResponseCode
+  responseCodeLabel?: string | null
+  comment?: string | null
+}
+
+export interface SubmittalPackageActionResult {
+  package: SubmittalPackage
+  results: Array<{
+    submittalId: string
+    ref: string
+    submitted?: boolean
+    decided?: boolean
+    skipped?: boolean
+    reason?: string | null
+    error?: string | null
+  }>
+}
+
+/** Fields added by OCTA-PM-SUB-017; accepted on create and PATCH. */
+export interface SubmittalUpgradeFields {
+  title?: string
+  discipline?: string | null
+  specRef?: string | null
+  revision?: string | null
+  activityId?: string | null
+  dueDate?: string | null
+  remarks?: string | null
+  packageId?: string | null
+  workflowTemplateId?: string | null
+  leadTimeWeeks?: number | null
+  reviewDays?: number | null
+  requiredOnSite?: string | null
+  managerUserId?: string | null
+  distributionUserIds?: string[]
+  ownerPartyId?: string | null
+  reviewerPartyId?: string | null
+  approverPartyId?: string | null
+  comment?: string
+}
+
 export interface SubmittalRecord extends WorkflowRecordMeta {
   id: string
   ref: string
@@ -130,6 +289,26 @@ export interface SubmittalRecord extends WorkflowRecordMeta {
   status: 'pending' | 'under_review' | 'approved' | 'resubmit' | 'rejected'
   dueDate?: string | null
   remarks?: string | null
+  discipline?: string | null
+  specRef?: string | null
+  activityId?: string | null
+  packageId?: string | null
+  workflowTemplateId?: string | null
+  currentStepId?: string | null
+  responseCode?: SubmittalResponseCode | null
+  responseCodeLabel?: string | null
+  revisionNumber?: number
+  leadTimeWeeks?: number | null
+  reviewDays?: number | null
+  requiredOnSite?: string | null
+  submitBy?: string | null
+  scheduleImpactDays?: number
+  managerUserId?: string | null
+  createdBy?: string | null
+  distributedAt?: string | null
+  ballInCourtUserId?: string | null
+  ownerUserId?: string | null
+  updatedAt?: string | null
   ownerPartyId?: string | null
   reviewerPartyId?: string | null
   approverPartyId?: string | null
@@ -266,11 +445,37 @@ export interface RfiListQuery {
   sortDir?: 'asc' | 'desc'
 }
 
+export interface SubmittalDetail extends SubmittalRecord {
+  package?: {
+    id: string
+    ref: string
+    name: string
+    status: SubmittalPackage['status']
+  } | null
+  workflowTemplate?: { id: string; name: string; reviewDays: number } | null
+  manager?: RfiPerson | null
+  activity?: { id: string; name: string; startDate?: string | null } | null
+  distribution: RfiPerson[]
+  distributionUserIds: string[]
+  reviewSteps: SubmittalStep[]
+  currentRevisionSteps: SubmittalStep[]
+  activeStep: SubmittalStep | null
+  lateSteps: number
+  isLate: boolean
+  path: string
+}
+
 export interface SubmittalListQuery {
   cursor?: string | null
   limit?: number
   status?: SubmittalRecord['status'] | 'all'
   search?: string
+  packageId?: string | null
+  managerUserId?: string | null
+  ballInCourtUserId?: string | null
+  workflowTemplateId?: string | null
+  responseCode?: SubmittalResponseCode | 'all'
+  overdue?: boolean
   sortBy?:
     | 'created'
     | 'updated'
@@ -298,6 +503,19 @@ const submittalKey = (projectId: string) => ['submittals', projectId]
 const submittalListKey = (projectId: string, query: SubmittalListQuery) => [
   ...submittalKey(projectId),
   query,
+]
+const submittalDetailKey = (projectId: string, submittalId: string) => [
+  'submittal-detail',
+  projectId,
+  submittalId,
+]
+const submittalPackagesKey = (projectId: string) => [
+  'submittal-packages',
+  projectId,
+]
+const submittalTemplatesKey = (projectId: string | null) => [
+  'submittal-workflow-templates',
+  projectId ?? 'company',
 ]
 const drawingKey = (projectId: string) => ['drawings', projectId]
 const transmittalKey = (projectId: string) => ['transmittals', projectId]
@@ -706,25 +924,311 @@ export const useSubmittals = (
     enabled: Boolean(projectId),
   })
 
+const invalidateSubmittals = (
+  qc: ReturnType<typeof useQueryClient>,
+  projectId: string
+) => {
+  qc.invalidateQueries({ queryKey: submittalKey(projectId) })
+  qc.invalidateQueries({ queryKey: ['submittal-detail', projectId] })
+  qc.invalidateQueries({ queryKey: submittalPackagesKey(projectId) })
+  qc.invalidateQueries({ queryKey: ['audit-events', projectId] })
+  invalidateDocControl(qc, projectId)
+}
+
 export const useCreateSubmittal = (projectId: string) => {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: (payload: {
-      title: string
-      owner?: string
-      ownerPartyId?: string
-      reviewerPartyId?: string
-      approverPartyId?: string
-      dueDate?: string
-    }) =>
+    mutationFn: (
+      payload: SubmittalUpgradeFields & {
+        title: string
+        owner?: string
+        status?: 'pending' | 'under_review'
+      }
+    ) =>
       apiClient
         .post(`/projects/${projectId}/submittals`, payload)
         .then((response) => response.data.data as SubmittalRecord),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: submittalKey(projectId) })
-      qc.invalidateQueries({ queryKey: ['audit-events', projectId] })
-      invalidateDocControl(qc, projectId)
-    },
+    onSuccess: () => invalidateSubmittals(qc, projectId),
+  })
+}
+
+export const useSubmittal = (projectId: string, submittalId: string | null) =>
+  useQuery<SubmittalDetail>({
+    queryKey: submittalDetailKey(projectId, submittalId ?? ''),
+    queryFn: () =>
+      apiClient
+        .get(`/projects/${projectId}/submittals/${submittalId}`)
+        .then((response) => response.data.data),
+    enabled: Boolean(projectId && submittalId),
+  })
+
+export const useUpdateSubmittal = (projectId: string) => {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({
+      submittalId,
+      payload,
+    }: {
+      submittalId: string
+      payload: SubmittalUpgradeFields
+    }) =>
+      apiClient
+        .patch(`/projects/${projectId}/submittals/${submittalId}`, payload)
+        .then((response) => response.data.data as SubmittalRecord),
+    onSuccess: () => invalidateSubmittals(qc, projectId),
+  })
+}
+
+export const useUpdateSubmittalPeople = (projectId: string) => {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({
+      submittalId,
+      managerUserId,
+      distributionUserIds,
+    }: {
+      submittalId: string
+      managerUserId?: string | null
+      distributionUserIds?: string[]
+    }) =>
+      apiClient
+        .put(`/projects/${projectId}/submittals/${submittalId}/people`, {
+          managerUserId,
+          distributionUserIds,
+        })
+        .then((response) => response.data.data as SubmittalDetail),
+    onSuccess: () => invalidateSubmittals(qc, projectId),
+  })
+}
+
+export const useDecideSubmittalStep = (projectId: string) => {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({
+      submittalId,
+      payload,
+    }: {
+      submittalId: string
+      payload: SubmittalDecision
+    }) =>
+      apiClient
+        .post(
+          `/projects/${projectId}/submittals/${submittalId}/decide`,
+          payload
+        )
+        .then((response) => response.data.data as SubmittalDetail),
+    onSuccess: () => invalidateSubmittals(qc, projectId),
+  })
+}
+
+export const useSubmittalPackages = (
+  projectId: string,
+  query: { status?: SubmittalPackage['status'] | 'all' } = {}
+) =>
+  useQuery<{ items: SubmittalPackage[] }>({
+    queryKey: [...submittalPackagesKey(projectId), query],
+    queryFn: () =>
+      apiClient
+        .get(`/projects/${projectId}/submittals/packages`, {
+          params: cleanParams(query),
+        })
+        .then((response) => response.data.data),
+    enabled: Boolean(projectId),
+  })
+
+export const useCreateSubmittalPackage = (projectId: string) => {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (payload: SubmittalPackageInput & { name: string }) =>
+      apiClient
+        .post(`/projects/${projectId}/submittals/packages`, payload)
+        .then((response) => response.data.data as SubmittalPackage),
+    onSuccess: () => invalidateSubmittals(qc, projectId),
+  })
+}
+
+export const useUpdateSubmittalPackage = (projectId: string) => {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({
+      packageId,
+      payload,
+    }: {
+      packageId: string
+      payload: SubmittalPackageInput
+    }) =>
+      apiClient
+        .patch(
+          `/projects/${projectId}/submittals/packages/${packageId}`,
+          payload
+        )
+        .then((response) => response.data.data as SubmittalPackage),
+    onSuccess: () => invalidateSubmittals(qc, projectId),
+  })
+}
+
+export const useAddSubmittalPackageItems = (projectId: string) => {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({
+      packageId,
+      submittalIds,
+    }: {
+      packageId: string
+      submittalIds: string[]
+    }) =>
+      apiClient
+        .post(`/projects/${projectId}/submittals/packages/${packageId}/items`, {
+          submittalIds,
+        })
+        .then((response) => response.data.data as SubmittalPackage),
+    onSuccess: () => invalidateSubmittals(qc, projectId),
+  })
+}
+
+export const useRemoveSubmittalPackageItem = (projectId: string) => {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({
+      packageId,
+      submittalId,
+    }: {
+      packageId: string
+      submittalId: string
+    }) =>
+      apiClient
+        .delete(
+          `/projects/${projectId}/submittals/packages/${packageId}/items/${submittalId}`
+        )
+        .then((response) => response.data.data as SubmittalPackage),
+    onSuccess: () => invalidateSubmittals(qc, projectId),
+  })
+}
+
+export const useSubmitSubmittalPackage = (projectId: string) => {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({
+      packageId,
+      comment,
+    }: {
+      packageId: string
+      comment?: string
+    }) =>
+      apiClient
+        .post(
+          `/projects/${projectId}/submittals/packages/${packageId}/submit`,
+          {
+            comment,
+          }
+        )
+        .then((response) => response.data.data as SubmittalPackageActionResult),
+    onSuccess: () => invalidateSubmittals(qc, projectId),
+  })
+}
+
+export const useDecideSubmittalPackage = (projectId: string) => {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({
+      packageId,
+      payload,
+    }: {
+      packageId: string
+      payload: SubmittalDecision
+    }) =>
+      apiClient
+        .post(
+          `/projects/${projectId}/submittals/packages/${packageId}/decide`,
+          payload
+        )
+        .then((response) => response.data.data as SubmittalPackageActionResult),
+    onSuccess: () => invalidateSubmittals(qc, projectId),
+  })
+}
+
+const submittalTemplatesBase = (projectId: string | null) =>
+  projectId
+    ? `/projects/${projectId}/submittals/workflow-templates`
+    : '/company/submittal-workflow-templates'
+
+/** Project scope lists project + company workflows; `null` lists the company library. */
+export const useSubmittalWorkflowTemplates = (
+  projectId: string | null,
+  query: {
+    includeArchived?: boolean
+    scope?: 'all' | 'project' | 'company'
+  } = {}
+) =>
+  useQuery<{ items: SubmittalWorkflowTemplate[] }>({
+    queryKey: [...submittalTemplatesKey(projectId), query],
+    queryFn: () =>
+      apiClient
+        .get(submittalTemplatesBase(projectId), { params: cleanParams(query) })
+        .then((response) => response.data.data),
+  })
+
+export const useCreateSubmittalWorkflowTemplate = (
+  projectId: string | null
+) => {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (payload: SubmittalWorkflowTemplateInput & { name: string }) =>
+      apiClient
+        .post(submittalTemplatesBase(projectId), payload)
+        .then((response) => response.data.data as SubmittalWorkflowTemplate),
+    onSuccess: () =>
+      qc.invalidateQueries({ queryKey: ['submittal-workflow-templates'] }),
+  })
+}
+
+export const useUpdateSubmittalWorkflowTemplate = (
+  projectId: string | null
+) => {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({
+      templateId,
+      payload,
+    }: {
+      templateId: string
+      payload: SubmittalWorkflowTemplateInput
+    }) =>
+      apiClient
+        .patch(`${submittalTemplatesBase(projectId)}/${templateId}`, payload)
+        .then((response) => response.data.data as SubmittalWorkflowTemplate),
+    onSuccess: () =>
+      qc.invalidateQueries({ queryKey: ['submittal-workflow-templates'] }),
+  })
+}
+
+export const useArchiveSubmittalWorkflowTemplate = (
+  projectId: string | null
+) => {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (templateId: string) =>
+      apiClient
+        .delete(`${submittalTemplatesBase(projectId)}/${templateId}`)
+        .then((response) => response.data.data as SubmittalWorkflowTemplate),
+    onSuccess: () =>
+      qc.invalidateQueries({ queryKey: ['submittal-workflow-templates'] }),
+  })
+}
+
+export const useSeedSubmittalWorkflowTemplates = () => {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: () =>
+      apiClient.post('/company/submittal-workflow-templates/starters').then(
+        (response) =>
+          response.data.data as {
+            created: number
+            items: SubmittalWorkflowTemplate[]
+          }
+      ),
+    onSuccess: () =>
+      qc.invalidateQueries({ queryKey: ['submittal-workflow-templates'] }),
   })
 }
 

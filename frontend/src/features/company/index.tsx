@@ -3,6 +3,7 @@ import {
   Building2,
   ClipboardCheck,
   FolderKanban,
+  GitBranch,
   Hash,
   ShieldCheck,
   Store,
@@ -39,6 +40,11 @@ const navItems = [
     title: 'Inspection templates',
     href: '/company/form-templates',
     icon: <ClipboardCheck size={18} />,
+  },
+  {
+    title: 'Submittal workflows',
+    href: '/company/submittal-workflows',
+    icon: <GitBranch size={18} />,
   },
   {
     title: 'Permissions',
