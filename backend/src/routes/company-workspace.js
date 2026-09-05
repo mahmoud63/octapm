@@ -426,6 +426,62 @@ router.delete(
   asyncHandler(async (req, res) => sendSuccess(res, await submittalWorkflow.archiveTemplate({ orgId: req.user.orgId, projectId: null, templateId: req.params.id, actor: formActor(req) }))),
 );
 
+// ── Workflow templates (OCTA-PLAT-WF-024) ────────────────────────────────
+
+const workflowEngine = require("../services/workflow-engine.service");
+const workflowTools = require("../services/workflow-tools");
+
+const workflowTemplateValidators = ({ requireName = false } = {}) => [
+  requireName ? body("name").isString().trim().notEmpty().isLength({ max: 160 }) : body("name").optional().isString().trim().isLength({ min: 1, max: 160 }),
+  body("tool").optional().isIn(workflowTools.TOOL_KEYS),
+  body("description").optional({ nullable: true }).isString().trim().isLength({ max: 2000 }),
+  body("isDefault").optional().isBoolean().toBoolean(),
+  body("priority").optional().isInt({ min: -100, max: 100 }).toInt(),
+  body("status").optional().isIn(["active", "archived"]),
+  body("rules").optional().isArray({ max: 20 }),
+  body("steps").optional().isArray({ max: 20 }),
+  body("startStep").optional({ nullable: true }).isString(),
+  validate,
+];
+
+router.get(
+  "/workflow-tools",
+  asyncHandler(async (req, res) => sendSuccess(res, { tools: workflowEngine.listTools() })),
+);
+
+router.get(
+  "/workflow-templates",
+  [query("tool").optional().isIn(workflowTools.TOOL_KEYS), query("includeArchived").optional().isBoolean().toBoolean(), validate],
+  asyncHandler(async (req, res) => sendSuccess(res, { items: await workflowEngine.listTemplates({ orgId: req.user.orgId, projectId: null, tool: req.query.tool || null, includeArchived: Boolean(req.query.includeArchived), scope: "company" }) })),
+);
+
+router.post(
+  "/workflow-templates",
+  requireCompanyAdmin,
+  [body("tool").isIn(workflowTools.TOOL_KEYS), ...workflowTemplateValidators({ requireName: true })],
+  asyncHandler(async (req, res) => sendSuccess(res, await workflowEngine.createTemplate({ orgId: req.user.orgId, projectId: null, payload: req.body, actor: formActor(req) }), 201)),
+);
+
+router.post(
+  "/workflow-templates/defaults",
+  requireCompanyAdmin,
+  asyncHandler(async (req, res) => sendSuccess(res, await workflowEngine.seedDefaultTemplates({ orgId: req.user.orgId, actor: formActor(req) }), 201)),
+);
+
+router.patch(
+  "/workflow-templates/:id",
+  requireCompanyAdmin,
+  [param("id").isUUID(), ...workflowTemplateValidators()],
+  asyncHandler(async (req, res) => sendSuccess(res, await workflowEngine.updateTemplate({ orgId: req.user.orgId, projectId: null, templateId: req.params.id, payload: req.body, actor: formActor(req) }))),
+);
+
+router.delete(
+  "/workflow-templates/:id",
+  requireCompanyAdmin,
+  [param("id").isUUID(), validate],
+  asyncHandler(async (req, res) => sendSuccess(res, await workflowEngine.archiveTemplate({ orgId: req.user.orgId, projectId: null, templateId: req.params.id, actor: formActor(req) }))),
+);
+
 router.post(
   "/project-templates/:id/create-project",
   requireCompanyAdmin,

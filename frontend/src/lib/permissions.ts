@@ -40,6 +40,7 @@ export type PermissionModule =
   | 'sub_pay_app'
   | 'report'
   | 'portfolio'
+  | 'workflow'
 
 export type RoleId =
   | 'pm'

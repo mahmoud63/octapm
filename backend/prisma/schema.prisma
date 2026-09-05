@@ -61,6 +61,9 @@ model Organisation {
   reportSchedules     ReportSchedule[]
   reportRuns          ReportRun[]
   projectHealthSnapshots ProjectHealthSnapshot[]
+  workflowTemplates   WorkflowTemplate[]
+  workflowInstances   WorkflowInstance[]
+  workflowStepAssignments WorkflowStepAssignment[]
   subPayAppLines      SubPayAppLine[]
   subPayAppPayments   SubPayAppPayment[]
   companyEquipment    CompanyEquipment[]
@@ -407,6 +410,9 @@ model Project {
   dailyLogs                     DailyLog[]
   reportDefinitions             ReportDefinition[]
   healthSnapshot                ProjectHealthSnapshot?
+  workflowTemplates             WorkflowTemplate[]
+  workflowInstances             WorkflowInstance[]
+  workflowStepAssignments       WorkflowStepAssignment[]
   subPayAppLines                SubPayAppLine[]
   subPayAppPayments             SubPayAppPayment[]
   activityCostLoadings          ActivityCostLoading[]
@@ -5646,4 +5652,97 @@ model ProjectHealthSnapshot {
   project Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
 
   @@index([orgId, overallScore])
+}
+
+// ─── Configurable workflow engine (OCTA-PLAT-WF-024) ───
+/** A route a record follows: response, condition and action steps; company library or one project. */
+model WorkflowTemplate {
+  id            String    @id @default(uuid())
+  orgId         String
+  projectId     String? // null = company library
+  tool          String // change_order, commitment, sub_pay_app, ipc_certificate, budget_revision, submittal, correspondence, document_revision
+  name          String
+  description   String?
+  isDefault     Boolean   @default(false)
+  priority      Int       @default(0)
+  status        String    @default("active") // active, archived
+  rulesJson     Json      @default("[]") // applicability conditions on the record context
+  stepsJson     Json      @default("[]")
+  startStep     String?
+  isSystem      Boolean   @default(false)
+  createdBy     String?
+  updatedBy     String?
+  archivedAt    DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  org       Organisation       @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  project   Project?           @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  instances WorkflowInstance[]
+
+  @@index([orgId, tool, status])
+  @@index([projectId, tool])
+}
+
+/** One run of a template on one record. */
+model WorkflowInstance {
+  id              String    @id @default(uuid())
+  orgId           String
+  projectId       String
+  templateId      String
+  tool            String
+  recordId        String
+  recordRef       String?
+  recordTitle     String?
+  status          String    @default("running") // running, succeeded, failed, cancelled
+  outcome         String? // success, fail
+  currentStepKey  String?
+  contextJson     Json      @default("{}")
+  stepsJson       Json      @default("[]")
+  applyStatus     String? // applied, failed, skipped
+  applyError      String?
+  escalationLevel Int       @default(0)
+  startedAt       DateTime  @default(now())
+  startedBy       String?
+  completedAt     DateTime?
+  cancelledAt     DateTime?
+  cancelReason    String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  org         Organisation             @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  project     Project                  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  template    WorkflowTemplate         @relation(fields: [templateId], references: [id], onDelete: Restrict)
+  assignments WorkflowStepAssignment[]
+
+  @@index([projectId, tool, recordId])
+  @@index([orgId, status])
+  @@index([templateId])
+}
+
+/** A person asked to respond on a step of an instance. */
+model WorkflowStepAssignment {
+  id          String    @id @default(uuid())
+  orgId       String
+  projectId   String
+  instanceId  String
+  stepKey     String
+  stepName    String
+  userId      String
+  status      String    @default("pending") // pending, responded, skipped
+  response    String?
+  comment     String?
+  isOverride  Boolean   @default(false)
+  dueAt       DateTime?
+  respondedAt DateTime?
+  escalatedAt DateTime?
+  createdAt   DateTime  @default(now())
+
+  org      Organisation     @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  project  Project          @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  instance WorkflowInstance @relation(fields: [instanceId], references: [id], onDelete: Cascade)
+
+  @@index([instanceId, stepKey])
+  @@index([userId, status])
+  @@index([projectId, status, dueAt])
 }

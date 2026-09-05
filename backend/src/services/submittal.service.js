@@ -801,6 +801,7 @@ const approveSubmittal = async ({
   userId = null,
   userRole = null,
   projectAccess = null,
+  viaWorkflow = false,
 }) => {
   const existing = await getSubmittalForWorkflow({
     orgId,
@@ -813,6 +814,9 @@ const approveSubmittal = async ({
       "SUBMITTAL_NOT_READY_FOR_APPROVAL",
       "Only under-review submittals can be approved",
     );
+  }
+  if (!viaWorkflow) {
+    await require("./workflow-engine.service").assertNotLocked({ tool: "submittal", projectId, recordId: submittalId });
   }
   assertPartyWorkflowAccess({ projectAccess, record: existing });
 
@@ -840,6 +844,7 @@ const rejectSubmittal = async ({
   userId = null,
   userRole = null,
   projectAccess = null,
+  viaWorkflow = false,
 }) => {
   const rejectionReason = decisionText({ reason });
   if (!rejectionReason) {
@@ -861,6 +866,9 @@ const rejectSubmittal = async ({
       "SUBMITTAL_NOT_READY_FOR_REJECTION",
       "Only under-review submittals can be rejected",
     );
+  }
+  if (!viaWorkflow) {
+    await require("./workflow-engine.service").assertNotLocked({ tool: "submittal", projectId, recordId: submittalId });
   }
   assertPartyWorkflowAccess({ projectAccess, record: existing });
 

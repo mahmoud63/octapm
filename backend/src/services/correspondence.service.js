@@ -123,6 +123,7 @@ const updateCorrespondence = async ({
   payload,
   userId,
   userRole,
+  viaWorkflow = false,
 }) => {
   await ensureProject({ orgId, projectId });
 
@@ -139,6 +140,9 @@ const updateCorrespondence = async ({
   }
 
   const nextStatus = payload.status ?? existing.status;
+  if (nextStatus !== existing.status && !viaWorkflow) {
+    await require('./workflow-engine.service').assertNotLocked({ tool: 'correspondence', projectId, recordId: correspondenceId });
+  }
   const activityId = primaryActivityIdFromPayload(payload, existing.activityId);
 
   const row = await prisma.$transaction(async (tx) => {

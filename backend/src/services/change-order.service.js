@@ -944,6 +944,7 @@ const updateChangeOrder = async ({
   userRole = null,
   payload,
   workflowAction = null,
+  viaWorkflow = false,
 }) => {
   const project = await ensureProject({ orgId, projectId });
   assertDirectStatusMutationBlocked({ payload, workflowAction });
@@ -965,6 +966,9 @@ const updateChangeOrder = async ({
       "Archived change orders cannot be updated through normal workflow actions",
   });
   assertApprovedRecordLocked({ existing, payload, workflowAction });
+  if (payload.status && payload.status !== existing.status && !viaWorkflow) {
+    await require("./workflow-engine.service").assertNotLocked({ tool: "change_order", projectId, recordId: coId });
+  }
 
   const nextStatus = payload.status || existing.status;
   const now = new Date();
@@ -1082,7 +1086,7 @@ const updateChangeOrder = async ({
     data.approvalComment = null;
   }
 
-  return prisma.$transaction(async (tx) => {
+  const result = await prisma.$transaction(async (tx) => {
     const updated = await tx.changeOrder.update({
       where: { id: coId },
       data,
@@ -1274,6 +1278,12 @@ const updateChangeOrder = async ({
     });
     return enriched;
   });
+  if (result?.status === CHANGE_ORDER_STATUSES.PENDING && existing.status !== CHANGE_ORDER_STATUSES.PENDING && !viaWorkflow) {
+    require("./workflow-engine.service")
+      .maybeStart({ orgId, projectId, tool: "change_order", recordId: coId, actor: { id: userId, role: userRole } })
+      .catch(() => null);
+  }
+  return result;
 };
 
 const approveChangeOrder = async ({
@@ -1283,6 +1293,7 @@ const approveChangeOrder = async ({
   comment = null,
   userId = null,
   userRole = null,
+  viaWorkflow = false,
 }) => {
   return updateChangeOrder({
     orgId,
@@ -1295,6 +1306,7 @@ const approveChangeOrder = async ({
       approvalComment: trimOrNull(comment),
     },
     workflowAction: CHANGE_ORDER_WORKFLOW_ACTIONS.APPROVE,
+    viaWorkflow,
   });
 };
 
@@ -1329,6 +1341,7 @@ const rejectChangeOrder = async ({
   reason,
   userId = null,
   userRole = null,
+  viaWorkflow = false,
 }) => {
   const rejectionReason = approvalDecisionNote({ reason });
   if (!rejectionReason) {
@@ -1351,6 +1364,7 @@ const rejectChangeOrder = async ({
       approvalComment: rejectionReason,
     },
     workflowAction: CHANGE_ORDER_WORKFLOW_ACTIONS.REJECT,
+    viaWorkflow,
   });
 };
 

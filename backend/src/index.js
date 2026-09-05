@@ -6,6 +6,7 @@ const { startBillingScheduler } = require('./jobs/billing-scheduler');
 const { startNotificationScheduler } = require('./jobs/notification-scheduler');
 const { startDailyLogScheduler } = require('./jobs/daily-log-scheduler');
 const { startReportScheduler } = require('./jobs/report-scheduler');
+const { startWorkflowScheduler } = require('./jobs/workflow-scheduler');
 const { attachRealtime } = require('./realtime/socket');
 const { registerAutoSubscriptions } = require('./services/comment.service');
 const { startJobWorker, stopJobWorker } = require('./jobs/worker');
@@ -34,6 +35,8 @@ startNotificationScheduler();
 startDailyLogScheduler();
 // Scheduled reports and portfolio snapshots (OCTA-RPT-BUILDER-023).
 startReportScheduler();
+// Workflow SLA escalation (OCTA-PLAT-WF-024).
+startWorkflowScheduler();
 // Durable job worker (BOQ AI, schedule generation). Set JOB_WORKER_ENABLED=false
 // on API instances when running dedicated workers via `npm run worker`.
 startJobWorker();

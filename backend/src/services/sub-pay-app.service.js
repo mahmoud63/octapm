@@ -451,9 +451,12 @@ const overClaimError = (row) => {
   return error;
 };
 
-const transition = async ({ orgId, projectId, payAppId, to, actor = null, viewer = null, reason = null, extra = {}, guard = null, action = auditService.ACTIONS.STATUS_CHANGED }) => {
+const transition = async ({ orgId, projectId, payAppId, to, actor = null, viewer = null, reason = null, extra = {}, guard = null, action = auditService.ACTIONS.STATUS_CHANGED, viaWorkflow = false }) => {
   await ensureProject({ orgId, projectId });
   const existing = await loadPayApp({ projectId, payAppId, viewer });
+  if (!viaWorkflow && [STATUS.APPROVED, STATUS.REJECTED, STATUS.UNDER_REVIEW].includes(to)) {
+    await require("./workflow-engine.service").assertNotLocked({ tool: "sub_pay_app", projectId, recordId: payAppId });
+  }
   const allowedFrom = {
     [STATUS.SUBMITTED]: [STATUS.DRAFT],
     [STATUS.UNDER_REVIEW]: [STATUS.SUBMITTED],
@@ -493,6 +496,9 @@ const transition = async ({ orgId, projectId, payAppId, to, actor = null, viewer
     return row;
   });
   const serialized = serialize(updated, { projectId });
+  if (to === STATUS.SUBMITTED && !viaWorkflow) {
+    require("./workflow-engine.service").maybeStart({ orgId, projectId, tool: "sub_pay_app", recordId: payAppId, actor }).catch(() => null);
+  }
   const vendorIds = await vendorMemberIds(updated.commitment?.projectPartyId);
   const currency = updated.commitment?.currency || "";
   if (to === STATUS.SUBMITTED) {
@@ -516,13 +522,14 @@ const reviewPayApp = ({ orgId, projectId, payAppId, actor, note }) =>
   transition({ orgId, projectId, payAppId, to: STATUS.UNDER_REVIEW, actor, extra: { reviewNote: trimOrNull(note)?.slice(0, 2000) || null } });
 
 /** Approval: compliance gate (insurance on the commitment, waiver when required) and the over-claim check. */
-const approvePayApp = ({ orgId, projectId, payAppId, actor, complianceOverrideReason = null, overClaimOverrideReason = null }) =>
+const approvePayApp = ({ orgId, projectId, payAppId, actor, complianceOverrideReason = null, overClaimOverrideReason = null, viaWorkflow = false }) =>
   transition({
     orgId,
     projectId,
     payAppId,
     to: STATUS.APPROVED,
     actor,
+    viaWorkflow,
     action: auditService.ACTIONS.APPROVED,
     reason: [complianceOverrideReason && `Compliance override: ${complianceOverrideReason}`, overClaimOverrideReason && `Over-claim override: ${overClaimOverrideReason}`].filter(Boolean).join(" · ") || null,
     extra: { complianceOverrideReason: trimOrNull(complianceOverrideReason)?.slice(0, 1000) || null, overClaimOverrideReason: trimOrNull(overClaimOverrideReason)?.slice(0, 1000) || null },
@@ -538,10 +545,10 @@ const approvePayApp = ({ orgId, projectId, payAppId, actor, complianceOverrideRe
     },
   });
 
-const rejectPayApp = async ({ orgId, projectId, payAppId, actor, code, reason }) => {
+const rejectPayApp = async ({ orgId, projectId, payAppId, actor, code, reason, viaWorkflow = false }) => {
   const rejectionCode = REJECTION_CODES.includes(code) ? code : "OTHER";
   if (!trimOrNull(reason)) throw new HttpError(400, "SUB_PAY_APP_REASON_REQUIRED", "Say why the application is rejected");
-  return transition({ orgId, projectId, payAppId, to: STATUS.REJECTED, actor, reason: trimOrNull(reason), action: auditService.ACTIONS.REJECTED, extra: { rejectionCode, rejectedReason: trimOrNull(reason).slice(0, 2000) } });
+  return transition({ orgId, projectId, payAppId, to: STATUS.REJECTED, actor, viaWorkflow, reason: trimOrNull(reason), action: auditService.ACTIONS.REJECTED, extra: { rejectionCode, rejectedReason: trimOrNull(reason).slice(0, 2000) } });
 };
 
 const reopenPayApp = ({ orgId, projectId, payAppId, actor, viewer }) => transition({ orgId, projectId, payAppId, to: STATUS.DRAFT, actor, viewer });

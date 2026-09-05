@@ -102,7 +102,7 @@ const createBudgetRevision = async ({ orgId, projectId, userId, payload }) => {
       ? computeDelta(payload.changeType || 'addition', payload.amount)
       : 0;
 
-  return prisma.budgetRevision.create({
+  const created = await prisma.budgetRevision.create({
     data: {
       projectId,
       ref,
@@ -120,6 +120,12 @@ const createBudgetRevision = async ({ orgId, projectId, userId, payload }) => {
       notes: payload.notes?.trim() || null,
     },
   });
+  if (created.status === 'submitted') {
+    require('./workflow-engine.service')
+      .maybeStart({ orgId, projectId, tool: 'budget_revision', recordId: created.id, actor: { id: userId } })
+      .catch(() => null);
+  }
+  return created;
 };
 
 const updateBudgetRevision = async ({
@@ -128,6 +134,7 @@ const updateBudgetRevision = async ({
   revisionId,
   userId,
   payload,
+  viaWorkflow = false,
 }) => {
   const project = await ensureProject({ orgId, projectId });
 
@@ -141,6 +148,9 @@ const updateBudgetRevision = async ({
       'BUDGET_REVISION_NOT_FOUND',
       'Budget revision not found',
     );
+  }
+  if (payload.status && payload.status !== existing.status && !viaWorkflow) {
+    await require('./workflow-engine.service').assertNotLocked({ tool: 'budget_revision', projectId, recordId: revisionId });
   }
 
   const updated = await prisma.budgetRevision.update({
@@ -186,6 +196,11 @@ const updateBudgetRevision = async ({
     projectId,
     baseBudget: project.contractValue,
   });
+  if (updated.status === 'submitted' && existing.status !== 'submitted' && !viaWorkflow) {
+    require('./workflow-engine.service')
+      .maybeStart({ orgId, projectId, tool: 'budget_revision', recordId: updated.id, actor: { id: userId } })
+      .catch(() => null);
+  }
 
   return updated;
 };

@@ -804,6 +804,7 @@ const approveDocumentRevision = async ({
   comment = null,
   userId = null,
   userRole = null,
+  viaWorkflow = false,
 }) => {
   await ensureProject({ orgId, projectId });
   const existing = await prisma.documentRevision.findFirst({
@@ -824,6 +825,9 @@ const approveDocumentRevision = async ({
       "DOCUMENT_REVISION_SUPERSEDED_READ_ONLY",
       "Superseded revisions are read-only",
     );
+  }
+  if (!viaWorkflow) {
+    await require("./workflow-engine.service").assertNotLocked({ tool: "document_revision", projectId, recordId: revisionId });
   }
 
   const record = await getRecord({

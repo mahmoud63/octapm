@@ -41,6 +41,7 @@ import { HistoryPanel } from '@/features/audit/components/audit-history-panel'
 import { CommentThread } from '@/features/comments/components/comment-thread'
 import { useVendors } from '@/features/company/hooks/use-company'
 import { useProjectCostCodes } from '@/features/cost/hooks/use-budget'
+import { WorkflowInstancePanel } from '@/features/workflows/components/workflow-instance-panel'
 import {
   COMMITMENT_STATUS_LABEL,
   INSURANCE_LABEL,
@@ -1417,6 +1418,11 @@ export function CommitmentDetailDialog({
                 </div>
               </div>
               <div className='space-y-4'>
+                <WorkflowInstancePanel
+                  projectId={projectId}
+                  tool='commitment'
+                  recordId={commitment.id}
+                />
                 <AttachmentPanel
                   projectId={projectId}
                   recordType='commitment'

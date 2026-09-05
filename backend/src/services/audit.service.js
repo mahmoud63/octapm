@@ -9,6 +9,8 @@ const ENTITY_TYPES = Object.freeze({
   SITE_DIARY: "site_diary",
   DAILY_LOG: "daily_log",
   REPORT: "report",
+  WORKFLOW_TEMPLATE: "workflow_template",
+  WORKFLOW_INSTANCE: "workflow_instance",
   IPC_CERTIFICATE: "ipc_certificate",
   IPC_ITEM: "ipc_item",
   CHANGE_ORDER: "change_order",

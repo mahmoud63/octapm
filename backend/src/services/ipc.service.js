@@ -983,7 +983,7 @@ const submitIpcPeriod = async ({
     );
   }
 
-  return prisma.$transaction(async (tx) => {
+  const updatedCertificate = await prisma.$transaction(async (tx) => {
     const now = new Date();
     await tx.ipcItem.updateMany({
       where: { projectId, ipcPeriod: period },
@@ -1049,6 +1049,10 @@ const submitIpcPeriod = async ({
 
     return updated;
   });
+  require("./workflow-engine.service")
+    .maybeStart({ orgId, projectId, tool: "ipc_certificate", recordId: certificate.id, actor: { id: userId, role: userRole } })
+    .catch(() => null);
+  return updatedCertificate;
 };
 
 const certifyIpcPeriod = async ({
@@ -1059,6 +1063,7 @@ const certifyIpcPeriod = async ({
   userRole = null,
   comment = null,
   overrideReason = null,
+  viaWorkflow = false,
 }) => {
   await ensureProject({ orgId, projectId });
 
@@ -1074,6 +1079,9 @@ const certifyIpcPeriod = async ({
       "IPC_INVALID_CERTIFICATION_STATE",
       "Only submitted IPC periods can be certified",
     );
+  }
+  if (!viaWorkflow) {
+    await require("./workflow-engine.service").assertNotLocked({ tool: "ipc_certificate", projectId, recordId: certificate.id });
   }
 
   return prisma.$transaction(async (tx) => {

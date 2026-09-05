@@ -7,6 +7,7 @@ import {
   Hash,
   ShieldCheck,
   Store,
+  Workflow,
   Wrench,
 } from 'lucide-react'
 import { useIsCompanyAdmin } from '@/lib/permissions'
@@ -45,6 +46,11 @@ const navItems = [
     title: 'Submittal workflows',
     href: '/company/submittal-workflows',
     icon: <GitBranch size={18} />,
+  },
+  {
+    title: 'Workflows',
+    href: '/company/workflows',
+    icon: <Workflow size={18} />,
   },
   {
     title: 'Permissions',

@@ -37,6 +37,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { AttachmentPanel } from '@/features/attachments/components/attachment-panel'
 import { HistoryPanel } from '@/features/audit/components/audit-history-panel'
 import { CommentThread } from '@/features/comments/components/comment-thread'
+import { WorkflowInstancePanel } from '@/features/workflows/components/workflow-instance-panel'
 import { useCommitments } from '../hooks/use-commitments'
 import {
   PAY_APP_STATUS_LABEL,
@@ -982,6 +983,11 @@ export function PayAppDetailDialog({
                 )}
               </div>
               <div className='space-y-4'>
+                <WorkflowInstancePanel
+                  projectId={projectId}
+                  tool='sub_pay_app'
+                  recordId={payApp.id}
+                />
                 <AttachmentPanel
                   projectId={projectId}
                   recordType='sub_pay_app'

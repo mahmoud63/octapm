@@ -27,6 +27,7 @@ import {
   CardTitle,
 } from '@/components/ui/card'
 import { Main } from '@/components/layout/main'
+import { MyWorkflowStepsSection } from '@/features/workflows/components/my-workflow-steps'
 
 type DashboardTarget = {
   projectId: string | null
@@ -935,6 +936,8 @@ export function Dashboard() {
                 ))}
               </div>
             </section>
+
+            <MyWorkflowStepsSection />
 
             {data.myOpenItems && <MyOpenItemsSection data={data.myOpenItems} />}
 

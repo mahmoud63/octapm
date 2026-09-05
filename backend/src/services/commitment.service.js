@@ -521,9 +521,12 @@ const notify = async ({ orgId, projectId, commitment, recipientUserIds = [], rec
 
 // ─── Transitions ──────────────────────────────────────────────────────────
 
-const transition = async ({ orgId, projectId, commitmentId, to, actor = null, reason = null, guard = null, extra = {} }) => {
+const transition = async ({ orgId, projectId, commitmentId, to, actor = null, reason = null, guard = null, extra = {}, viaWorkflow = false }) => {
   await ensureProject({ orgId, projectId });
   const existing = await loadCommitment({ projectId, commitmentId });
+  if (!viaWorkflow && [STATUS.APPROVED, STATUS.DRAFT].includes(to)) {
+    await require("./workflow-engine.service").assertNotLocked({ tool: "commitment", projectId, recordId: commitmentId });
+  }
   const allowedFrom = {
     [STATUS.PENDING]: [STATUS.DRAFT],
     [STATUS.APPROVED]: [STATUS.PENDING],
@@ -550,6 +553,9 @@ const transition = async ({ orgId, projectId, commitmentId, to, actor = null, re
     return row;
   });
   const serialized = serialize(updated, { projectId });
+  if (to === STATUS.PENDING && !viaWorkflow) {
+    require("./workflow-engine.service").maybeStart({ orgId, projectId, tool: "commitment", recordId: commitmentId, actor }).catch(() => null);
+  }
   const vendorIds = await vendorMemberIds({ projectId, projectPartyId: updated.projectPartyId });
   if (to === STATUS.PENDING) {
     await notify({ orgId, projectId, commitment: updated, actorId: actor?.id || null, recipientRoles: ["pm"], category: notificationService.NOTIFICATION_CATEGORIES.APPROVAL, event: "commitment.submitted", title: `${updated.ref} awaits approval: ${updated.title}`, message: `${serialized.vendor?.name || "Vendor"} · ${money(serialized.original, updated.currency)}` });
@@ -574,11 +580,11 @@ const submitCommitment = ({ orgId, projectId, commitmentId, actor }) =>
     },
   });
 
-const approveCommitment = ({ orgId, projectId, commitmentId, actor }) => transition({ orgId, projectId, commitmentId, to: STATUS.APPROVED, actor });
+const approveCommitment = ({ orgId, projectId, commitmentId, actor, viaWorkflow = false }) => transition({ orgId, projectId, commitmentId, to: STATUS.APPROVED, actor, viaWorkflow });
 
-const returnCommitment = ({ orgId, projectId, commitmentId, actor, reason }) => {
+const returnCommitment = ({ orgId, projectId, commitmentId, actor, reason, viaWorkflow = false }) => {
   if (!trimOrNull(reason)) throw new HttpError(400, "COMMITMENT_RETURN_REASON_REQUIRED", "Say what needs to change");
-  return transition({ orgId, projectId, commitmentId, to: STATUS.DRAFT, actor, reason: trimOrNull(reason) });
+  return transition({ orgId, projectId, commitmentId, to: STATUS.DRAFT, actor, reason: trimOrNull(reason), viaWorkflow });
 };
 
 const closeCommitment = ({ orgId, projectId, commitmentId, actor }) => transition({ orgId, projectId, commitmentId, to: STATUS.CLOSED, actor });

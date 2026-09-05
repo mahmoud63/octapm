@@ -18,6 +18,7 @@ const permissionRoutes = require("./routes/permissions");
 const companyWorkspaceRoutes = require("./routes/company-workspace");
 const reportBuilderRoutes = require("./routes/report-builder");
 const portfolioRoutes = require("./routes/portfolio");
+const workflowInboxRoutes = require("./routes/workflow-inbox");
 const {
   requireCloudFrontOriginSecret,
 } = require("./middleware/cloudfront-origin");
@@ -99,6 +100,7 @@ const createApp = () => {
   app.use("/api/v1/company", companyWorkspaceRoutes);
   app.use("/api/v1/reports", reportBuilderRoutes);
   app.use("/api/v1/portfolio", portfolioRoutes);
+  app.use("/api/v1/workflows", workflowInboxRoutes);
 
   app.use(notFoundHandler);
   app.use(errorHandler);

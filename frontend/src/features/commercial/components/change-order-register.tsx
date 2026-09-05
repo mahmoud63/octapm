@@ -13,6 +13,7 @@ import {
   WorkflowDecisionDialog,
   type WorkflowDecisionMode,
 } from '@/features/workflows/components/workflow-decision-dialog'
+import { WorkflowInstancePanel } from '@/features/workflows/components/workflow-instance-panel'
 import {
   type ChangeOrderRecord,
   useApproveChangeOrder,
@@ -667,13 +668,21 @@ export function ChangeOrderRegister({
       </div>
 
       {selectedHistoryOrder && (
-        <HistoryPanel
-          projectId={projectId}
-          entityType='change_order'
-          entityId={selectedHistoryOrder.id}
-          title={`${selectedHistoryOrder.ref} History`}
-          limit={30}
-        />
+        <>
+          <WorkflowInstancePanel
+            projectId={projectId}
+            tool='change_order'
+            recordId={selectedHistoryOrder.id}
+            className='rounded-md border p-3'
+          />
+          <HistoryPanel
+            projectId={projectId}
+            entityType='change_order'
+            entityId={selectedHistoryOrder.id}
+            title={`${selectedHistoryOrder.ref} History`}
+            limit={30}
+          />
+        </>
       )}
 
       <ChangeOrderForm

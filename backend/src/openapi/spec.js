@@ -12275,6 +12275,92 @@ const commitmentPermission = (action, transition = null) => modulePermission("co
   { method: "get", path: "/projects/{projectId}/commitments/{commitmentId}/export.pdf", summary: "Commitment statement PDF (values, schedule of values, change orders, insurance).", operationId: "exportCommitmentPdf", parameters: [...projectParams, commitmentIdParam], permissions: commitmentPermission("export"), responseSchema: { type: "string", format: "binary" } },
 ].forEach((route) => addGenericRoute({ tag: "Commercial", ...route }));
 
+// ─── Configurable workflow engine (OCTA-PLAT-WF-024) ───────────────────────
+const workflowTemplateIdParam = pathParam("templateId", "Workflow template UUID.");
+const workflowInstanceIdParam = pathParam("instanceId", "Workflow instance UUID.");
+const workflowTools = ["change_order", "commitment", "sub_pay_app", "ipc_certificate", "budget_revision", "submittal", "correspondence", "document_revision"];
+const workflowAssigneeSchema = objectSchema({ type: { type: "string", enum: ["user", "role", "party_role", "permission_template"] }, userId: nullableUuid, role: { type: "string", nullable: true }, templateId: nullableUuid });
+const workflowConditionSchema = objectSchema({ field: { type: "string" }, op: { type: "string", enum: ["eq", "neq", "gt", "gte", "lt", "lte", "in", "nin", "contains", "is_true", "is_false", "empty", "not_empty"] }, value: { description: "Compared with the record context (amount, type…)." } });
+const workflowStepSchema = objectSchema({
+  key: { type: "string" },
+  name: { type: "string" },
+  type: { type: "string", enum: ["response", "condition", "action"] },
+  description: { type: "string", nullable: true },
+  assignees: arrayOf(workflowAssigneeSchema),
+  requireAll: { type: "boolean", description: "Every assignee must give a positive response; one negative response ends the step." },
+  days: { type: "integer", nullable: true, description: "SLA; escalation after this many days." },
+  escalateRoles: arrayOf({ type: "string" }),
+  responses: arrayOf(objectSchema({ key: { type: "string" }, label: { type: "string" }, next: { type: "string", description: "A step key, end_success or end_fail." }, tone: { type: "string", enum: ["positive", "negative", "neutral"] }, requireComment: { type: "boolean" } })),
+  condition: { ...workflowConditionSchema, nullable: true },
+  whenTrue: { type: "string", nullable: true },
+  whenFalse: { type: "string", nullable: true },
+  action: objectSchema({ type: { type: "string", enum: ["notify"] }, roles: arrayOf({ type: "string" }), userIds: arrayOf(uuid), message: { type: "string", nullable: true } }),
+  next: { type: "string", nullable: true },
+});
+const workflowTemplateInput = objectSchema({
+  tool: { type: "string", enum: workflowTools },
+  name: { type: "string" },
+  description: { type: "string", nullable: true },
+  isDefault: { type: "boolean", description: "Used when no rule-bearing template matches." },
+  priority: { type: "integer" },
+  status: { type: "string", enum: ["active", "archived"] },
+  rules: arrayOf(workflowConditionSchema),
+  steps: arrayOf(workflowStepSchema),
+  startStep: { type: "string", nullable: true },
+});
+const workflowTemplateSchema = objectSchema({ id: uuid, projectId: nullableUuid, scope: { type: "string", enum: ["company", "project"] }, tool: { type: "string" }, toolLabel: { type: "string" }, name: { type: "string" }, description: { type: "string", nullable: true }, isDefault: { type: "boolean" }, priority: { type: "integer" }, status: { type: "string" }, rules: arrayOf(workflowConditionSchema), steps: arrayOf(workflowStepSchema), startStep: { type: "string", nullable: true }, isSystem: { type: "boolean" }, instanceCount: { type: "integer", nullable: true }, createdBy: nullableUuid, createdAt: nullableDateString, updatedAt: nullableDateString });
+const workflowInstanceSchema = objectSchema({
+  id: uuid,
+  projectId: uuid,
+  project: nullableRef("GenericObject"),
+  tool: { type: "string" },
+  toolLabel: { type: "string" },
+  recordId: uuid,
+  recordRef: { type: "string", nullable: true },
+  recordTitle: { type: "string", nullable: true },
+  path: { type: "string", nullable: true },
+  template: ref("GenericObject"),
+  status: { type: "string", enum: ["running", "succeeded", "failed", "cancelled"] },
+  outcome: { type: "string", nullable: true, enum: ["success", "fail", null] },
+  currentStepKey: { type: "string", nullable: true },
+  currentStep: nullableRef("GenericObject"),
+  steps: arrayOf(ref("GenericObject")),
+  context: ref("GenericObject"),
+  applyStatus: { type: "string", nullable: true, description: "applied, failed (outcome could not be written to the record) or skipped." },
+  applyError: { type: "string", nullable: true },
+  escalationLevel: { type: "integer" },
+  startedAt: nullableDateString,
+  startedBy: nullableUuid,
+  completedAt: nullableDateString,
+  cancelledAt: nullableDateString,
+  cancelReason: { type: "string", nullable: true },
+  myAssignment: nullableRef("GenericObject"),
+  updatedAt: nullableDateString,
+});
+const workflowToolsResponse = objectSchema({ tools: arrayOf(objectSchema({ key: { type: "string" }, label: { type: "string" }, module: { type: "string" }, triggerStatus: { type: "string", nullable: true }, outcomes: ref("GenericObject"), contextFields: arrayOf(ref("GenericObject")) })) });
+const workflowPermission = (action, transition = null) => modulePermission("workflow", action, transition);
+const workflowTemplateQuery = [queryParam("tool", "Only templates for this tool.", { type: "string", enum: workflowTools }), queryParam("includeArchived", "Include archived templates.", { type: "boolean" })];
+[
+  { method: "get", path: "/company/workflow-tools", summary: "Tools a workflow can run on, with the context fields templates may test and the status that starts a run automatically.", operationId: "listCompanyWorkflowTools", parameters: [], permissions: { auth: "bearer", roles: ROLE_IDS, note: "Any authenticated user." }, responseSchema: workflowToolsResponse },
+  { method: "get", path: "/company/workflow-templates", summary: "Company workflow templates.", operationId: "listCompanyWorkflowTemplates", parameters: workflowTemplateQuery, permissions: { auth: "bearer", roles: ROLE_IDS, note: "Any authenticated user." }, responseSchema: objectSchema({ items: arrayOf(workflowTemplateSchema) }) },
+  { method: "post", path: "/company/workflow-templates", summary: "Create a company workflow template (company admin). Steps: response (assignees, days, responses → next / end), condition (branch on the record context) or action (notify).", operationId: "createCompanyWorkflowTemplate", parameters: [], permissions: companyAdminPermission, requestBody: jsonBody(workflowTemplateInput, "Template.", true), responseSchema: workflowTemplateSchema, status: 201 },
+  { method: "post", path: "/company/workflow-templates/defaults", summary: "Seed one default template per tool that mirrors the built-in approval, plus a worked example with a rule and a condition (change orders ≥ 50,000).", operationId: "seedCompanyWorkflowDefaults", parameters: [], permissions: companyAdminPermission, responseSchema: objectSchema({ created: { type: "integer" }, templates: arrayOf(workflowTemplateSchema) }), status: 201 },
+  { method: "patch", path: "/company/workflow-templates/{id}", summary: "Update or archive a company workflow template (company admin).", operationId: "updateCompanyWorkflowTemplate", parameters: [idParam], permissions: companyAdminPermission, requestBody: jsonBody(workflowTemplateInput, "Fields to change.", false), responseSchema: workflowTemplateSchema },
+  { method: "delete", path: "/company/workflow-templates/{id}", summary: "Archive a company workflow template (company admin).", operationId: "archiveCompanyWorkflowTemplate", parameters: [idParam], permissions: companyAdminPermission, responseSchema: workflowTemplateSchema },
+  { method: "get", path: "/workflows/my-steps", summary: "Workflow steps waiting on the caller across every project.", operationId: "listMyWorkflowSteps", parameters: [], permissions: workflowPermission("read"), responseSchema: objectSchema({ items: arrayOf(ref("GenericObject")) }) },
+  { method: "get", path: "/projects/{projectId}/workflows/tools", summary: "Workflow tools catalogue.", operationId: "listWorkflowTools", parameters: projectParams, permissions: workflowPermission("read"), responseSchema: workflowToolsResponse },
+  { method: "get", path: "/projects/{projectId}/workflows/templates", summary: "Templates that apply on this project (project-level and company).", operationId: "listWorkflowTemplates", parameters: [...projectParams, ...workflowTemplateQuery], permissions: workflowPermission("read"), responseSchema: objectSchema({ items: arrayOf(workflowTemplateSchema) }) },
+  { method: "post", path: "/projects/{projectId}/workflows/templates", summary: "Create a project-level workflow template (PM).", operationId: "createWorkflowTemplate", parameters: projectParams, permissions: workflowPermission("update", "workflow.manage"), requestBody: jsonBody(workflowTemplateInput, "Template.", true), responseSchema: workflowTemplateSchema, status: 201 },
+  { method: "patch", path: "/projects/{projectId}/workflows/templates/{templateId}", summary: "Update a project-level workflow template (PM).", operationId: "updateWorkflowTemplate", parameters: [...projectParams, workflowTemplateIdParam], permissions: workflowPermission("update", "workflow.manage"), requestBody: jsonBody(workflowTemplateInput, "Fields to change.", false), responseSchema: workflowTemplateSchema },
+  { method: "delete", path: "/projects/{projectId}/workflows/templates/{templateId}", summary: "Archive a project-level workflow template (PM).", operationId: "archiveWorkflowTemplate", parameters: [...projectParams, workflowTemplateIdParam], permissions: workflowPermission("update", "workflow.manage"), responseSchema: workflowTemplateSchema },
+  { method: "get", path: "/projects/{projectId}/workflows/my-steps", summary: "Workflow steps waiting on the caller in this project.", operationId: "listProjectWorkflowSteps", parameters: projectParams, permissions: workflowPermission("read"), responseSchema: objectSchema({ items: arrayOf(ref("GenericObject")) }) },
+  { method: "get", path: "/projects/{projectId}/workflows/instances", summary: "Workflow runs on this project.", operationId: "listWorkflowInstances", parameters: [...projectParams, queryParam("tool", "Filter by tool.", { type: "string", enum: workflowTools }), queryParam("recordId", "Filter by record.", uuid), queryParam("status", "Filter by status.", { type: "string", enum: ["running", "succeeded", "failed", "cancelled"] }), queryParam("limit", "Max rows (default 50).", { type: "integer" })], permissions: workflowPermission("read"), responseSchema: objectSchema({ items: arrayOf(workflowInstanceSchema) }) },
+  { method: "post", path: "/projects/{projectId}/workflows/instances", summary: "Start a workflow on a record by hand (PM). Without `templateId` the first template whose rules match the record's context is used, else the tool's default. 409 WORKFLOW_ALREADY_RUNNING / 404 WORKFLOW_NO_TEMPLATE / 409 WORKFLOW_STEP_UNASSIGNED.", operationId: "startWorkflowInstance", parameters: projectParams, permissions: workflowPermission("update", "workflow.manage"), requestBody: jsonBody(objectSchema({ tool: { type: "string", enum: workflowTools }, recordId: uuid, templateId: nullableUuid }, ["tool", "recordId"]), "Record."), responseSchema: workflowInstanceSchema, status: 201 },
+  { method: "get", path: "/projects/{projectId}/workflows/instances/{instanceId}", summary: "One workflow run with its steps and assignments.", operationId: "getWorkflowInstance", parameters: [...projectParams, workflowInstanceIdParam], permissions: workflowPermission("read"), responseSchema: workflowInstanceSchema },
+  { method: "post", path: "/projects/{projectId}/workflows/instances/{instanceId}/respond", summary: "Give your response on the current step. A negative response ends the step at once; with `requireAll` the step waits for every assignee otherwise. Reaching an end applies the outcome to the record through its own service.", operationId: "respondWorkflowInstance", parameters: [...projectParams, workflowInstanceIdParam], permissions: workflowPermission("submit", "workflow.respond"), requestBody: jsonBody(objectSchema({ response: { type: "string", description: "A response key of the current step." }, comment: { type: "string", nullable: true } }, ["response"]), "Response."), responseSchema: workflowInstanceSchema },
+  { method: "post", path: "/projects/{projectId}/workflows/instances/{instanceId}/cancel", summary: "Cancel a running workflow (PM); the record's own approve / reject unlock.", operationId: "cancelWorkflowInstance", parameters: [...projectParams, workflowInstanceIdParam], permissions: workflowPermission("update", "workflow.manage"), requestBody: jsonBody(objectSchema({ reason: { type: "string", nullable: true } }), "Reason.", false), responseSchema: workflowInstanceSchema },
+].forEach((route) => addGenericRoute({ tag: "Workflows", ...route }));
+
 // ─── Report builder & portfolio (OCTA-RPT-BUILDER-023) ─────────────────────
 const reportIdParam = pathParam("reportId", "Saved report UUID.");
 const reportScheduleIdParam = pathParam("scheduleId", "Schedule UUID.");

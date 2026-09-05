@@ -324,6 +324,11 @@ router.use(
   require("./daily-logs"),
 );
 router.use(
+  "/:projectId/workflows",
+  nestedProjectAccess,
+  require("./workflows"),
+);
+router.use(
   "/:projectId/site-reporting",
   nestedProjectAccess,
   require("./site-reporting"),
