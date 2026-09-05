@@ -93,6 +93,7 @@ export interface ProjectTeamResponse {
   parties: Array<{
     id: string
     role: string
+    companyId: string | null
     companyName: string | null
     memberCount: number
     template: { id: string; name: string } | null

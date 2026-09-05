@@ -2,7 +2,7 @@ const { prisma } = require("../config/db");
 const { HttpError } = require("../utils/http-error");
 const {
   RECORD_TYPES,
-  assignmentData,
+  workflowAssignmentData,
   attachWorkflowDetailsToRecords,
   normalizeAttachmentRefs,
   primaryActivityIdFromPayload,
@@ -223,8 +223,15 @@ const createNcr = async ({
         description: payload.description?.trim() || null,
         disposition: payload.disposition?.trim() || null,
         status,
-        ...assignmentData(payload),
         responsible: payload.responsible?.trim() || null,
+        ...(await workflowAssignmentData({
+          tx,
+          orgId,
+          projectId,
+          payload,
+          status,
+          assigneeTextField: "responsible",
+        })),
         dueDate: payload.dueDate ? new Date(payload.dueDate) : null,
         closureComment: payload.closureComment?.trim() || null,
         closedDate: null,
@@ -311,11 +318,19 @@ const updateNcr = async ({
             ? payload.disposition?.trim() || null
             : existing.disposition,
         status: nextStatus,
-        ...assignmentData(payload, existing),
         responsible:
           payload.responsible !== undefined
             ? payload.responsible?.trim() || null
             : existing.responsible,
+        ...(await workflowAssignmentData({
+          tx,
+          orgId,
+          projectId,
+          payload,
+          existing,
+          status: nextStatus,
+          assigneeTextField: "responsible",
+        })),
         dueDate:
           payload.dueDate !== undefined
             ? payload.dueDate
@@ -411,6 +426,22 @@ const submitNcrCloseout = async ({
       data: {
         status: NCR_STATUS.SUBMITTED,
         responsible: closeout.responsible,
+        ...(await workflowAssignmentData({
+          tx,
+          orgId,
+          projectId,
+          payload: {
+            ...(payload.assigneeUserId !== undefined
+              ? { assigneeUserId: payload.assigneeUserId }
+              : {}),
+            ...(payload.assigneeCompanyId !== undefined
+              ? { assigneeCompanyId: payload.assigneeCompanyId }
+              : {}),
+          },
+          existing,
+          status: NCR_STATUS.SUBMITTED,
+          assigneeTextField: "responsible",
+        })),
         dueDate: closeout.dueDate,
         closureComment: closeout.closureComment,
         closureSubmittedBy: userId || null,

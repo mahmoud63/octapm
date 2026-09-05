@@ -153,10 +153,12 @@ describe("notification service", () => {
       ref: "RFI-001",
       subject: "Confirm embed plates",
       status: "open",
+      // Free-text refs are ignored (OCTA-DATA-REFS-004): only id columns
+      // resolve recipients, so no user lookup happens for this value.
       raisedBy: "site@example.com",
+      owner: "Project Manager",
     });
     mockPrisma.user.findMany
-      .mockResolvedValueOnce([activeUser])
       .mockResolvedValueOnce([pmUser])
       .mockResolvedValueOnce([]);
 

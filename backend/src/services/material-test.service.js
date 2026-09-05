@@ -2,7 +2,7 @@ const { prisma } = require('../config/db');
 const { HttpError } = require('../utils/http-error');
 const {
   RECORD_TYPES,
-  assignmentData,
+  workflowAssignmentData,
   attachWorkflowDetailsToRecords,
   primaryActivityIdFromPayload,
   recordWorkflowHistory,
@@ -66,7 +66,13 @@ const createMaterialTest = async ({ orgId, projectId, payload }) => {
         specValue: payload.specValue?.trim() || null,
         actualValue: payload.actualValue?.trim() || null,
         result: payload.result || 'pending',
-        ...assignmentData(payload),
+        ...(await workflowAssignmentData({
+          tx,
+          orgId,
+          projectId,
+          payload,
+          status: payload.result || 'pending',
+        })),
         dueDate: payload.dueDate ? new Date(payload.dueDate) : null,
         testDate: payload.testDate ? new Date(payload.testDate) : null,
         labName: payload.labName?.trim() || null,
@@ -134,7 +140,14 @@ const updateMaterialTest = async ({ orgId, projectId, testId, payload, userId, u
             ? payload.actualValue?.trim() || null
             : existing.actualValue,
         result: nextResult,
-        ...assignmentData(payload, existing),
+        ...(await workflowAssignmentData({
+          tx,
+          orgId,
+          projectId,
+          payload,
+          existing,
+          status: nextResult,
+        })),
         dueDate:
           payload.dueDate !== undefined
             ? payload.dueDate

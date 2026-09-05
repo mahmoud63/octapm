@@ -2188,6 +2188,127 @@ const components = {
     ProjectPartyPermissionRequest: objectSchema({
       templateId: nullableUuid,
     }),
+    UserReference: objectSchema(
+      {
+        id: uuid,
+        name: { type: "string", nullable: true },
+        email: { type: "string", nullable: true },
+      },
+      ["id"],
+    ),
+    CompanyReference: objectSchema(
+      { id: uuid, name: { type: "string", nullable: true } },
+      ["id"],
+    ),
+    AssignmentReferences: {
+      type: "object",
+      description:
+        "Accountability references present on every workflow record (OCTA-DATA-REFS-004). Legacy text fields (owner, reviewer, approver, assignee, responsible) remain readable for one release.",
+      properties: {
+        ownerUserId: nullableUuid,
+        reviewerUserId: nullableUuid,
+        approverUserId: nullableUuid,
+        assigneeUserId: nullableUuid,
+        assigneeCompanyId: nullableUuid,
+        ballInCourtUserId: nullableUuid,
+        ownerUser: { allOf: [ref("UserReference")], nullable: true },
+        reviewerUser: { allOf: [ref("UserReference")], nullable: true },
+        approverUser: { allOf: [ref("UserReference")], nullable: true },
+        assigneeUser: { allOf: [ref("UserReference")], nullable: true },
+        ballInCourtUser: { allOf: [ref("UserReference")], nullable: true },
+        assigneeCompany: { allOf: [ref("CompanyReference")], nullable: true },
+      },
+    },
+    AssignmentRecordType: {
+      type: "string",
+      enum: [
+        "risk",
+        "ncr",
+        "itp",
+        "defect",
+        "safety_incident",
+        "material_test",
+        "rfi",
+        "submittal",
+        "drawing",
+        "transmittal",
+        "correspondence",
+      ],
+    },
+    UnresolvedAssignmentReport: objectSchema({
+      projectId: uuid,
+      projectName: { type: "string" },
+      total: { type: "integer" },
+      byType: { type: "object", additionalProperties: { type: "integer" } },
+      items: arrayOf(
+        objectSchema({
+          recordType: ref("AssignmentRecordType"),
+          recordId: uuid,
+          ref: { type: "string" },
+          title: { type: "string", nullable: true },
+          status: { type: "string", nullable: true },
+          field: { type: "string" },
+          textField: { type: "string" },
+          value: { type: "string" },
+          label: { type: "string" },
+        }),
+      ),
+    }),
+    ResolveAssignmentRequest: objectSchema(
+      {
+        recordType: ref("AssignmentRecordType"),
+        recordId: uuid,
+        field: {
+          type: "string",
+          enum: [
+            "ownerUserId",
+            "reviewerUserId",
+            "approverUserId",
+            "assigneeUserId",
+            "ballInCourtUserId",
+            "assigneeCompanyId",
+          ],
+        },
+        userId: nullableUuid,
+        companyId: nullableUuid,
+      },
+      ["recordType", "recordId", "field"],
+    ),
+    ResolveAssignmentResponse: objectSchema({
+      recordType: ref("AssignmentRecordType"),
+      recordId: uuid,
+      field: { type: "string" },
+      value: { type: "string", nullable: true },
+      ballInCourtUserId: nullableUuid,
+    }),
+    MyOpenItem: objectSchema({
+      recordType: ref("AssignmentRecordType"),
+      label: { type: "string" },
+      recordId: uuid,
+      ref: { type: "string" },
+      title: { type: "string", nullable: true },
+      status: { type: "string", nullable: true },
+      projectId: uuid,
+      projectName: { type: "string", nullable: true },
+      roles: arrayOf({
+        type: "string",
+        enum: ["owner", "reviewer", "approver", "assignee", "ballInCourt"],
+      }),
+      ballInCourt: { type: "boolean" },
+      dueDate: nullableDateString,
+      overdue: { type: "boolean" },
+      updatedAt: nullableDateString,
+      target: freeObject("Workspace navigation target."),
+    }),
+    MyOpenItemsResponse: objectSchema({
+      items: arrayOf(ref("MyOpenItem")),
+      summary: objectSchema({
+        total: { type: "integer" },
+        overdue: { type: "integer" },
+        ballInCourt: { type: "integer" },
+        byType: { type: "object", additionalProperties: { type: "integer" } },
+      }),
+    }),
     JobStatusView: {
       type: "object",
       additionalProperties: true,
@@ -8885,6 +9006,53 @@ add(
   }),
 );
 
+// ─── Accountability references ──────────────────────────────────────────
+[
+  {
+    method: "get",
+    path: "/projects/{projectId}/assignments/mine",
+    summary:
+      "Open records where the caller is owner, reviewer, approver, assignee, or ball in court.",
+    operationId: "listMyProjectAssignments",
+    parameters: [
+      ...projectParams,
+      queryParam("limit", "Maximum items (1-500, default 200).", {
+        type: "integer",
+        minimum: 1,
+        maximum: 500,
+      }),
+    ],
+    permissions: authenticatedOnly,
+    responseSchema: ref("MyOpenItemsResponse"),
+  },
+  {
+    method: "get",
+    path: "/projects/{projectId}/assignments/unresolved",
+    summary:
+      "Backfill report: legacy text assignments that could not be matched to a user.",
+    operationId: "listUnresolvedAssignments",
+    parameters: projectParams,
+    permissions: companyAdminPermission,
+    responseSchema: ref("UnresolvedAssignmentReport"),
+  },
+  {
+    method: "post",
+    path: "/projects/{projectId}/assignments/resolve",
+    summary:
+      "Manually map one record field to a user or company and recompute ball in court.",
+    operationId: "resolveAssignment",
+    parameters: projectParams,
+    permissions: companyAdminPermission,
+    requestBody: jsonBody(ref("ResolveAssignmentRequest"), "Mapping."),
+    responseSchema: ref("ResolveAssignmentResponse"),
+  },
+].forEach((route) =>
+  addGenericRoute({
+    tag: "Assignments",
+    ...route,
+  }),
+);
+
 const openApiSpec = {
   openapi: "3.0.3",
   info: {
@@ -9074,6 +9242,11 @@ const openApiSpec = {
       name: "Permissions",
       description:
         "Permission templates (per-module level none/read_only/standard/admin plus granular grants) assignable per user per project or per project party, layered over the static role policy in shared/permissions.json. See docs/qa/permission-templates.md.",
+    },
+    {
+      name: "Assignments",
+      description:
+        "Accountability references on workflow records: every RFI, submittal, NCR, ITP, defect, safety incident, material test, drawing, transmittal, correspondence and risk carries ownerUserId / reviewerUserId / approverUserId / assigneeUserId / assigneeCompanyId / ballInCourtUserId. Notifications resolve recipients by id only. See docs/qa/record-assignments.md.",
     },
   ],
   paths,

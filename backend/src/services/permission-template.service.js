@@ -952,6 +952,7 @@ const listProjectTeam = async ({ orgId, projectId }) => {
     parties: parties.map((party) => ({
       id: party.id,
       role: normalizePartyRoleId(party.role),
+      companyId: party.companyId || null,
       companyName: party.company?.name || null,
       memberCount: party.members.length,
       template: party.permissionTemplate

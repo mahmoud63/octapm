@@ -6,6 +6,9 @@ const { authenticate } = require("../middleware/auth");
 const { getEffectiveRole, requirePermission } = require("../middleware/rbac");
 const { validate } = require("../middleware/validate");
 const {
+  assignmentReferenceValidators,
+} = require("../utils/assignment-validators");
+const {
   listNcrs,
   createNcr,
   updateNcr,
@@ -24,6 +27,8 @@ const ncrCloseoutValidators = [
   param("ncrId").isUUID(),
   body("responsible").optional().isString().trim(),
   body("owner").optional().isString().trim(),
+  body("assigneeUserId").optional({ nullable: true }).isUUID(),
+  body("assigneeCompanyId").optional({ nullable: true }).isUUID(),
   body("dueDate").optional({ nullable: true }).isISO8601(),
   body("closureComment").optional().isString().trim(),
   body("comment").optional().isString().trim(),
@@ -61,6 +66,7 @@ router.post(
     body("reviewer").optional().isString().trim(),
     body("approver").optional().isString().trim(),
     body("responsible").optional().isString().trim(),
+    ...assignmentReferenceValidators(),
     body("activityId").optional({ nullable: true }).isUUID(),
     body("activityIds").optional().isArray(),
     body("activityIds.*").optional().isUUID(),
@@ -189,6 +195,7 @@ router.patch(
     body("reviewer").optional().isString().trim(),
     body("approver").optional().isString().trim(),
     body("responsible").optional().isString().trim(),
+    ...assignmentReferenceValidators(),
     body("activityId").optional({ nullable: true }).isUUID(),
     body("activityIds").optional().isArray(),
     body("activityIds.*").optional().isUUID(),

@@ -172,6 +172,7 @@ router.get(
       orgId: req.user.orgId,
       userId: req.user.id,
       role: req.user.role,
+      isCompanyAdmin: req.user.isCompanyAdmin,
     });
 
     return sendSuccess(res, result);
@@ -280,6 +281,11 @@ router.use(
 );
 router.use("/:projectId/jobs", nestedProjectAccess, require("./jobs"));
 router.use("/:projectId/team", nestedProjectAccess, require("./project-team"));
+router.use(
+  "/:projectId/assignments",
+  nestedProjectAccess,
+  require("./assignments"),
+);
 router.use(
   "/:projectId/activities",
   nestedProjectAccess,

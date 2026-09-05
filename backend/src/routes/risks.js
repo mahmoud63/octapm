@@ -5,6 +5,9 @@ const { sendSuccess } = require("../utils/api-response");
 const { authenticate } = require("../middleware/auth");
 const { getEffectiveRole, requirePermission } = require("../middleware/rbac");
 const { validate } = require("../middleware/validate");
+const {
+  assignmentReferenceValidators,
+} = require("../utils/assignment-validators");
 const riskService = require("../services/risk.service");
 
 const router = express.Router({ mergeParams: true });
@@ -27,6 +30,7 @@ const riskPayloadValidators = ({ requireDescription = false } = {}) => [
   body("residualDescription").optional({ nullable: true }).isString().trim(),
   body("phase").optional({ nullable: true }).isString().trim(),
   body("owner").optional({ nullable: true }).isString().trim(),
+  ...assignmentReferenceValidators(),
   body("dueDate").optional({ nullable: true }).isISO8601(),
   body("escalationLevel").optional().isIn(["none", "watch", "escalated"]),
   body("escalationNotes").optional({ nullable: true }).isString().trim(),

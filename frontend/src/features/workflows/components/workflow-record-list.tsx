@@ -102,11 +102,29 @@ export interface WorkflowDueAlert {
   days: number
 }
 
+export interface WorkflowUserRef {
+  id: string
+  name: string | null
+  email?: string | null
+}
+
 export interface WorkflowRecordMeta {
   owner?: string | null
   reviewer?: string | null
   approver?: string | null
   responsible?: string | null
+  ownerUserId?: string | null
+  reviewerUserId?: string | null
+  approverUserId?: string | null
+  assigneeUserId?: string | null
+  assigneeCompanyId?: string | null
+  ballInCourtUserId?: string | null
+  ownerUser?: WorkflowUserRef | null
+  reviewerUser?: WorkflowUserRef | null
+  approverUser?: WorkflowUserRef | null
+  assigneeUser?: WorkflowUserRef | null
+  ballInCourtUser?: WorkflowUserRef | null
+  assigneeCompany?: { id: string; name: string | null } | null
   dueDate?: string | null
   dueAlert?: WorkflowDueAlert | null
   attachmentRefs?: WorkflowAttachment[]
@@ -153,24 +171,53 @@ const attachmentUrl = (attachment: WorkflowAttachment) =>
   attachment.fileUrl || attachment.url || null
 
 function AssignmentGrid({ row }: { row: WorkflowRecordMeta }) {
-  const assignments = [
-    ['Responsible', row.responsible],
-    ['Owner', row.owner],
-    ['Reviewer', row.reviewer],
-    ['Approver', row.approver],
+  // Referenced users win over legacy free text; the company shows under the
+  // assignee when one is routed.
+  const assignments: Array<
+    [string, string | null | undefined, string | null | undefined]
+  > = [
+    [
+      'Responsible',
+      row.assigneeUser?.name || row.responsible,
+      row.assigneeUserId,
+    ],
+    ['Owner', row.ownerUser?.name || row.owner, row.ownerUserId],
+    ['Reviewer', row.reviewerUser?.name || row.reviewer, row.reviewerUserId],
+    ['Approver', row.approverUser?.name || row.approver, row.approverUserId],
   ]
+  const ballInCourt = row.ballInCourtUserId
 
   return (
     <div className='grid gap-2 sm:grid-cols-4'>
-      {assignments.map(([label, value]) => (
-        <div key={label} className='min-w-0 rounded border px-3 py-2'>
-          <div className='flex items-center gap-2 text-xs text-muted-foreground'>
-            <UserRound className='h-3.5 w-3.5' />
-            <span>{label}</span>
+      {assignments.map(([label, value, userId]) => {
+        const holdsBall = Boolean(
+          ballInCourt && userId && ballInCourt === userId
+        )
+        return (
+          <div
+            key={label}
+            className={`min-w-0 rounded border px-3 py-2 ${holdsBall ? 'border-primary/50 bg-primary/5' : ''}`}
+          >
+            <div className='flex items-center gap-2 text-xs text-muted-foreground'>
+              <UserRound className='h-3.5 w-3.5' />
+              <span>{label}</span>
+              {holdsBall && (
+                <span className='ms-auto rounded bg-primary/10 px-1.5 py-0.5 text-[10px] font-semibold tracking-wide text-primary uppercase'>
+                  Ball in court
+                </span>
+              )}
+            </div>
+            <p className='mt-1 truncate text-sm font-medium'>
+              {value || 'Open'}
+            </p>
+            {label === 'Responsible' && row.assigneeCompany?.name && (
+              <p className='truncate text-xs text-muted-foreground'>
+                {row.assigneeCompany.name}
+              </p>
+            )}
           </div>
-          <p className='mt-1 truncate text-sm font-medium'>{value || 'Open'}</p>
-        </div>
-      ))}
+        )
+      })}
     </div>
   )
 }

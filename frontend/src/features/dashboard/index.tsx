@@ -118,6 +118,33 @@ type ProjectHealth = {
   target: DashboardTarget
 }
 
+type MyOpenItem = {
+  recordType: string
+  label: string
+  recordId: string
+  ref: string
+  title: string | null
+  status: string | null
+  projectId: string
+  projectName: string | null
+  roles: string[]
+  ballInCourt: boolean
+  dueDate: string | null
+  overdue: boolean
+  updatedAt: string | null
+  target: DashboardTarget
+}
+
+type MyOpenItems = {
+  items: MyOpenItem[]
+  summary: {
+    total: number
+    overdue: number
+    ballInCourt: number
+    byType: Record<string, number>
+  }
+}
+
 type WorkspaceDashboard = {
   generatedAt: string
   dataFreshness?: {
@@ -126,6 +153,7 @@ type WorkspaceDashboard = {
     sourceUpdatedAt: string | null
     note: string
   }
+  myOpenItems?: MyOpenItems
   summary: {
     totalProjects: number
     activeProjects: number
@@ -636,6 +664,109 @@ function ProjectHealthRow({ project }: { project: ProjectHealth }) {
   )
 }
 
+const roleLabels: Record<string, string> = {
+  owner: 'Owner',
+  reviewer: 'Reviewer',
+  approver: 'Approver',
+  assignee: 'Assignee',
+  ballInCourt: 'Ball in court',
+}
+
+function MyOpenItemsSection({ data }: { data: MyOpenItems }) {
+  const items = data.items.slice(0, 12)
+  return (
+    <section className='space-y-3' data-testid='uat-my-open-items'>
+      <div className='flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between'>
+        <div>
+          <h2 className='text-lg font-semibold'>My open items</h2>
+          <p className='text-sm text-muted-foreground'>
+            Records where you are owner, reviewer, approver, assignee, or hold
+            the ball — matched by user, not by name.
+          </p>
+        </div>
+        <div className='flex flex-wrap gap-2'>
+          <Badge variant='outline'>
+            {formatNumber(data.summary.total)} open
+          </Badge>
+          {data.summary.ballInCourt > 0 && (
+            <Badge>
+              {formatNumber(data.summary.ballInCourt)} in your court
+            </Badge>
+          )}
+          {data.summary.overdue > 0 && (
+            <Badge variant='destructive'>
+              {formatNumber(data.summary.overdue)} overdue
+            </Badge>
+          )}
+        </div>
+      </div>
+      {items.length === 0 ? (
+        <Card>
+          <CardContent className='py-8 text-center text-sm text-muted-foreground'>
+            Nothing is waiting on you right now.
+          </CardContent>
+        </Card>
+      ) : (
+        <div className='grid gap-3 md:grid-cols-2 xl:grid-cols-3'>
+          {items.map((item) => (
+            <Link
+              key={`${item.recordType}-${item.recordId}`}
+              to='/projects/$projectId'
+              params={{ projectId: item.projectId }}
+              search={targetSearch(item.target)}
+              data-testid={`uat-my-open-item-${item.recordType}`}
+              className={cn(
+                'rounded-md border bg-card p-3 transition-colors hover:bg-muted/40',
+                item.ballInCourt && 'border-primary/50'
+              )}
+            >
+              <div className='flex items-start justify-between gap-2'>
+                <div className='min-w-0'>
+                  <p className='text-xs text-muted-foreground'>
+                    {item.label} · {item.ref}
+                  </p>
+                  <p className='truncate text-sm font-medium'>{item.title}</p>
+                  <p className='truncate text-xs text-muted-foreground'>
+                    {item.projectName}
+                  </p>
+                </div>
+                {item.ballInCourt && (
+                  <Badge className='shrink-0'>Your move</Badge>
+                )}
+              </div>
+              <div className='mt-2 flex flex-wrap items-center gap-1.5'>
+                <Badge variant='outline'>
+                  {formatStatus(item.status || '')}
+                </Badge>
+                {item.roles
+                  .filter((role) => role !== 'ballInCourt')
+                  .map((role) => (
+                    <Badge key={role} variant='secondary'>
+                      {roleLabels[role] ?? role}
+                    </Badge>
+                  ))}
+                {item.dueDate && (
+                  <span
+                    className={cn(
+                      'ms-auto text-xs',
+                      item.overdue
+                        ? 'text-destructive'
+                        : 'text-muted-foreground'
+                    )}
+                  >
+                    {item.overdue ? 'Overdue · ' : 'Due '}
+                    {formatDate(item.dueDate)}
+                  </span>
+                )}
+              </div>
+            </Link>
+          ))}
+        </div>
+      )}
+    </section>
+  )
+}
+
 function EmptyWorkspace({ data }: { data: WorkspaceDashboard }) {
   return (
     <Card className='border-dashed'>
@@ -804,6 +935,8 @@ export function Dashboard() {
                 ))}
               </div>
             </section>
+
+            {data.myOpenItems && <MyOpenItemsSection data={data.myOpenItems} />}
 
             {pendingMetrics.length > 0 && (
               <section className='space-y-3'>

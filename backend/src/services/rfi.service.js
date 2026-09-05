@@ -227,8 +227,10 @@ const createRfi = async ({
   const row = await prisma.$transaction(async (tx) => {
     const assignments = await workflowPartyAssignmentData({
       tx,
+      orgId,
       projectId,
       payload: assignmentPayload,
+      status: payload.status || "open",
     });
     const created = await tx.rfi.create({
       data: {
@@ -391,9 +393,11 @@ const updateRfi = async ({
   const row = await prisma.$transaction(async (tx) => {
     const assignments = await workflowPartyAssignmentData({
       tx,
+      orgId,
       projectId,
       payload,
       existing,
+      status: nextStatus,
     });
     const updated = await tx.rfi.update({
       where: { id: rfiId },

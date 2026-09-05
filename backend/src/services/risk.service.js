@@ -2,6 +2,7 @@ const { prisma } = require("../config/db");
 const { HttpError } = require("../utils/http-error");
 const auditService = require("./audit.service");
 const approvalWorkflowService = require("./approval-workflow.service");
+const { deriveBallInCourt } = require("./workflow-support.service");
 const {
   ARCHIVED_STATUS,
   applyArchiveVisibility,
@@ -32,7 +33,15 @@ const RISK_SEVERITY_RANK = Object.freeze({
   CRITICAL: 4,
 });
 
+const userRefSelect = { select: { id: true, name: true, email: true } };
+
 const riskInclude = {
+  ownerUser: userRefSelect,
+  reviewerUser: userRefSelect,
+  approverUser: userRefSelect,
+  assigneeUser: userRefSelect,
+  ballInCourtUser: userRefSelect,
+  assigneeCompany: { select: { id: true, name: true } },
   activityLinks: {
     include: {
       activity: {
@@ -276,6 +285,18 @@ const serializeRisk = (risk, approvalHistory = []) => ({
   residualDescription: risk.residualDescription || null,
   phase: risk.phase || null,
   owner: risk.owner || null,
+  ownerUserId: risk.ownerUserId || null,
+  reviewerUserId: risk.reviewerUserId || null,
+  approverUserId: risk.approverUserId || null,
+  assigneeUserId: risk.assigneeUserId || null,
+  assigneeCompanyId: risk.assigneeCompanyId || null,
+  ballInCourtUserId: risk.ballInCourtUserId || null,
+  ownerUser: risk.ownerUser || null,
+  reviewerUser: risk.reviewerUser || null,
+  approverUser: risk.approverUser || null,
+  assigneeUser: risk.assigneeUser || null,
+  ballInCourtUser: risk.ballInCourtUser || null,
+  assigneeCompany: risk.assigneeCompany || null,
   dueDate: toIso(risk.dueDate),
   escalationLevel: risk.escalationLevel,
   escalationNotes: risk.escalationNotes || null,
@@ -517,6 +538,16 @@ const buildRiskData = (payload, existing = null) => {
   }
   if (payload.phase !== undefined) data.phase = trimOrNull(payload.phase);
   if (payload.owner !== undefined) data.owner = trimOrNull(payload.owner);
+  for (const field of [
+    "ownerUserId",
+    "reviewerUserId",
+    "approverUserId",
+    "assigneeUserId",
+    "assigneeCompanyId",
+    "ballInCourtUserId",
+  ]) {
+    if (payload[field] !== undefined) data[field] = trimOrNull(payload[field]);
+  }
   if (payload.dueDate !== undefined) data.dueDate = parseDate(payload.dueDate);
   if (payload.escalationLevel !== undefined || !existing) {
     data.escalationLevel = normalizeEscalation(
@@ -529,6 +560,13 @@ const buildRiskData = (payload, existing = null) => {
   }
   if (payload.status !== undefined || !existing) {
     data.status = normalizeStatus(payload.status, fallback.status || "open");
+  }
+
+  if (payload.ballInCourtUserId === undefined) {
+    data.ballInCourtUserId = deriveBallInCourt({
+      status: data.status ?? fallback.status,
+      refs: { ...fallback, ...data },
+    });
   }
 
   return data;

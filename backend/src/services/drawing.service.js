@@ -2,7 +2,7 @@ const { prisma } = require('../config/db');
 const { HttpError } = require('../utils/http-error');
 const {
   RECORD_TYPES,
-  assignmentData,
+  workflowAssignmentData,
   attachWorkflowDetailsToRecords,
   primaryActivityIdFromPayload,
   recordDocumentRevisions,
@@ -63,7 +63,13 @@ const createDrawing = async ({ orgId, projectId, payload }) => {
         revision: payload.revision || '0',
         purpose: payload.purpose?.trim() || null,
         status: payload.status || 'active',
-        ...assignmentData(payload),
+        ...(await workflowAssignmentData({
+          tx,
+          orgId,
+          projectId,
+          payload,
+          status: payload.status || 'active',
+        })),
         dueDate: payload.dueDate ? new Date(payload.dueDate) : null,
         reviewedOn: payload.reviewedOn ? new Date(payload.reviewedOn) : null,
         issueDate: payload.issueDate ? new Date(payload.issueDate) : null,
@@ -142,7 +148,14 @@ const updateDrawing = async ({
             ? payload.purpose?.trim() || null
             : existing.purpose,
         status: nextStatus,
-        ...assignmentData(payload, existing),
+        ...(await workflowAssignmentData({
+          tx,
+          orgId,
+          projectId,
+          payload,
+          existing,
+          status: nextStatus,
+        })),
         dueDate:
           payload.dueDate !== undefined
             ? payload.dueDate

@@ -2,7 +2,7 @@ const { prisma } = require('../config/db');
 const { HttpError } = require('../utils/http-error');
 const {
   RECORD_TYPES,
-  assignmentData,
+  workflowAssignmentData,
   attachWorkflowDetailsToRecords,
   primaryActivityIdFromPayload,
   recordWorkflowHistory,
@@ -60,7 +60,14 @@ const createItp = async ({ orgId, projectId, payload }) => {
         title: payload.title,
         pointType: payload.pointType || 'hold',
         status: payload.status || 'pending',
-        ...assignmentData(payload),
+        ...(await workflowAssignmentData({
+          tx,
+          orgId,
+          projectId,
+          payload,
+          status: payload.status || 'pending',
+          assigneeTextField: 'inspector',
+        })),
         dueDate: payload.dueDate ? new Date(payload.dueDate) : null,
         inspectionDate: payload.inspectionDate
           ? new Date(payload.inspectionDate)
@@ -118,7 +125,15 @@ const updateItp = async ({ orgId, projectId, itpId, payload, userId, userRole })
         title: payload.title ?? existing.title,
         pointType: payload.pointType ?? existing.pointType,
         status: nextStatus,
-        ...assignmentData(payload, existing),
+        ...(await workflowAssignmentData({
+          tx,
+          orgId,
+          projectId,
+          payload,
+          existing,
+          status: nextStatus,
+          assigneeTextField: 'inspector',
+        })),
         dueDate:
           payload.dueDate !== undefined
             ? payload.dueDate

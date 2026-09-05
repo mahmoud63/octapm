@@ -23,6 +23,53 @@ const DOCUMENT_RECORD_TYPES = new Set([
   RECORD_TYPES.CORRESPONDENCE,
 ]);
 
+/**
+ * Accountability references (OCTA-DATA-REFS-004). Every workflow record has
+ * user ids for owner / reviewer / approver / assignee / ball-in-court and a
+ * company id for the assignee. The legacy text columns (owner, reviewer,
+ * approver, assignee, responsible) are kept for one release and mirrored from
+ * the referenced user's name when a request sets an id without text.
+ */
+const USER_REF_FIELDS = Object.freeze([
+  "ownerUserId",
+  "reviewerUserId",
+  "approverUserId",
+  "assigneeUserId",
+  "ballInCourtUserId",
+]);
+const COMPANY_REF_FIELDS = Object.freeze(["assigneeCompanyId"]);
+const TEXT_MIRROR = Object.freeze({
+  ownerUserId: "owner",
+  reviewerUserId: "reviewer",
+  approverUserId: "approver",
+});
+
+// Statuses after which nobody has to act on the record.
+const CLOSED_STATUSES = new Set([
+  "closed",
+  "approved",
+  "passed",
+  "waived",
+  "cancelled",
+  "acknowledged",
+  "archived",
+  "superseded",
+  "pass",
+]);
+// Statuses where the originator (owner / assignee) holds the ball.
+const ORIGINATOR_STATUSES = new Set([
+  "answered",
+  "resubmit",
+  "rejected",
+  "in_progress",
+  "fail",
+  "failed",
+  "reopened",
+]);
+
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
 const toArray = (value) => (Array.isArray(value) ? value : []);
 
 const trimOrNull = (value) => {
@@ -47,6 +94,161 @@ const assignmentData = (payload = {}, existing = {}) => ({
   approver: normalizeTextField(payload, existing, "approver"),
 });
 
+/**
+ * Who must act next given the record's status and its references. Explicit
+ * `ballInCourtUserId` in the payload always wins.
+ */
+const deriveBallInCourt = ({ status, refs = {} }) => {
+  const normalized = String(status || "").toLowerCase();
+  if (CLOSED_STATUSES.has(normalized)) return null;
+  if (ORIGINATOR_STATUSES.has(normalized)) {
+    return refs.assigneeUserId || refs.ownerUserId || null;
+  }
+  return (
+    refs.reviewerUserId ||
+    refs.approverUserId ||
+    refs.assigneeUserId ||
+    refs.ownerUserId ||
+    null
+  );
+};
+
+/**
+ * Resolves the reference fields for a create/update: validates that every id
+ * belongs to the organisation, mirrors user names into the legacy text columns
+ * when the request only sent ids, and derives ball-in-court.
+ */
+const resolveAssignmentReferences = async ({
+  tx = prisma,
+  orgId = null,
+  projectId = null,
+  payload = {},
+  existing = {},
+  status = undefined,
+  assigneeTextField = null,
+  textData = {},
+}) => {
+  const data = {};
+  const refs = {};
+
+  for (const field of [...USER_REF_FIELDS, ...COMPANY_REF_FIELDS]) {
+    if (payload[field] !== undefined) {
+      data[field] = trimOrNull(payload[field]);
+    }
+    refs[field] =
+      payload[field] !== undefined
+        ? trimOrNull(payload[field])
+        : (existing?.[field] ?? null);
+  }
+
+  const requestedUserIds = [
+    ...new Set(USER_REF_FIELDS.map((field) => data[field]).filter(Boolean)),
+  ];
+  const requestedCompanyIds = [
+    ...new Set(COMPANY_REF_FIELDS.map((field) => data[field]).filter(Boolean)),
+  ];
+
+  let resolvedOrgId = orgId;
+  if (
+    !resolvedOrgId &&
+    projectId &&
+    (requestedUserIds.length || requestedCompanyIds.length) &&
+    tx.project?.findFirst
+  ) {
+    const project = await tx.project.findFirst({
+      where: { id: projectId },
+      select: { orgId: true },
+    });
+    resolvedOrgId = project?.orgId || null;
+  }
+
+  const usersById = new Map();
+  if (requestedUserIds.length && tx.user?.findMany) {
+    const users = await tx.user.findMany({
+      where: {
+        id: { in: requestedUserIds },
+        ...(resolvedOrgId ? { orgId: resolvedOrgId } : {}),
+      },
+      select: { id: true, name: true, email: true },
+    });
+    for (const user of users) usersById.set(user.id, user);
+    const missing = requestedUserIds.filter((id) => !usersById.has(id));
+    if (missing.length) {
+      throw new HttpError(
+        400,
+        "ASSIGNMENT_USER_NOT_FOUND",
+        "One or more assigned users were not found in this organisation",
+      );
+    }
+  }
+
+  if (requestedCompanyIds.length && tx.company?.findMany) {
+    const companies = await tx.company.findMany({
+      where: {
+        id: { in: requestedCompanyIds },
+        ...(resolvedOrgId ? { orgId: resolvedOrgId } : {}),
+      },
+      select: { id: true },
+    });
+    const found = new Set(companies.map((company) => company.id));
+    const missing = requestedCompanyIds.filter((id) => !found.has(id));
+    if (missing.length) {
+      throw new HttpError(
+        400,
+        "ASSIGNMENT_COMPANY_NOT_FOUND",
+        "The assigned company was not found in this organisation",
+      );
+    }
+  }
+
+  // Mirror names into the legacy text columns when only ids were supplied.
+  for (const [idField, textField] of Object.entries(TEXT_MIRROR)) {
+    if (data[idField] && payload[textField] === undefined) {
+      const user = usersById.get(data[idField]);
+      if (user?.name) textData[textField] = user.name;
+    }
+  }
+  if (
+    assigneeTextField &&
+    data.assigneeUserId &&
+    payload[assigneeTextField] === undefined
+  ) {
+    const user = usersById.get(data.assigneeUserId);
+    if (user?.name) textData[assigneeTextField] = user.name;
+  }
+
+  if (payload.ballInCourtUserId === undefined && status !== undefined) {
+    data.ballInCourtUserId = deriveBallInCourt({ status, refs });
+  }
+
+  return { ...textData, ...data };
+};
+
+/**
+ * Text assignments (legacy) plus validated user/company references.
+ * Drop-in replacement for `...assignmentData(payload, existing)` inside a
+ * transaction: `...(await workflowAssignmentData({ tx, orgId, projectId, payload, existing, status }))`.
+ */
+const workflowAssignmentData = async ({
+  tx = prisma,
+  orgId = null,
+  projectId = null,
+  payload = {},
+  existing = {},
+  status = undefined,
+  assigneeTextField = null,
+}) =>
+  resolveAssignmentReferences({
+    tx,
+    orgId,
+    projectId,
+    payload,
+    existing,
+    status,
+    assigneeTextField,
+    textData: assignmentData(payload, existing),
+  });
+
 const PARTY_ASSIGNMENT_FIELDS = [
   ["ownerPartyId", "owner"],
   ["reviewerPartyId", "reviewer"],
@@ -55,61 +257,88 @@ const PARTY_ASSIGNMENT_FIELDS = [
 
 const workflowPartyAssignmentData = async ({
   tx = prisma,
+  orgId = null,
   projectId,
   payload = {},
   existing = {},
+  status = undefined,
 }) => {
   const data = assignmentData(payload, existing);
   const requested = PARTY_ASSIGNMENT_FIELDS.filter(
     ([field]) => payload[field] !== undefined,
   );
 
-  if (!requested.length) return data;
+  if (requested.length) {
+    const requestedIds = requested
+      .map(([field]) => trimOrNull(payload[field]))
+      .filter(Boolean);
+    const uniqueIds = [...new Set(requestedIds)];
 
-  const requestedIds = requested
-    .map(([field]) => trimOrNull(payload[field]))
-    .filter(Boolean);
-  const uniqueIds = [...new Set(requestedIds)];
-
-  const partyRows = uniqueIds.length
-    ? await tx.projectParty.findMany({
-        where: {
-          id: { in: uniqueIds },
-          projectId,
-          status: "active",
-        },
-        include: {
-          company: {
-            select: {
-              id: true,
-              name: true,
+    const partyRows = uniqueIds.length
+      ? await tx.projectParty.findMany({
+          where: {
+            id: { in: uniqueIds },
+            projectId,
+            status: "active",
+          },
+          include: {
+            company: {
+              select: {
+                id: true,
+                name: true,
+              },
             },
           },
-        },
-      })
-    : [];
-  const partiesById = new Map(partyRows.map((row) => [row.id, row]));
-  const missing = uniqueIds.filter((id) => !partiesById.has(id));
+        })
+      : [];
+    const partiesById = new Map(partyRows.map((row) => [row.id, row]));
+    const missing = uniqueIds.filter((id) => !partiesById.has(id));
 
-  if (missing.length) {
-    throw new HttpError(
-      400,
-      "WORKFLOW_PROJECT_PARTY_NOT_FOUND",
-      "One or more routed project parties were not found in this project",
-    );
-  }
+    if (missing.length) {
+      throw new HttpError(
+        400,
+        "WORKFLOW_PROJECT_PARTY_NOT_FOUND",
+        "One or more routed project parties were not found in this project",
+      );
+    }
 
-  for (const [partyField, textField] of requested) {
-    const partyId = trimOrNull(payload[partyField]);
-    data[partyField] = partyId;
+    for (const [partyField, textField] of requested) {
+      const partyId = trimOrNull(payload[partyField]);
+      data[partyField] = partyId;
 
-    if (partyId && payload[textField] === undefined) {
-      data[textField] = partiesById.get(partyId)?.company?.name || null;
+      if (partyId && payload[textField] === undefined) {
+        data[textField] = partiesById.get(partyId)?.company?.name || null;
+      }
+    }
+
+    // A routed party implies the assignee company unless one was given.
+    if (payload.assigneeCompanyId === undefined) {
+      const routed =
+        partiesById.get(trimOrNull(payload.reviewerPartyId)) ||
+        partiesById.get(trimOrNull(payload.ownerPartyId));
+      if (routed?.companyId) data.assigneeCompanyId = routed.companyId;
     }
   }
 
-  return data;
+  return resolveAssignmentReferences({
+    tx,
+    orgId,
+    projectId,
+    payload,
+    existing,
+    status,
+    textData: data,
+  });
 };
+
+/** User ids a record is accountable to (for notifications and "my items"). */
+const assignmentUserIds = (record = {}) => [
+  ...new Set(
+    USER_REF_FIELDS.map((field) => record?.[field]).filter(
+      (value) => value && UUID_PATTERN.test(String(value)),
+    ),
+  ),
+];
 
 const normalizeActivityLinks = (payload = {}) => {
   const raw =
@@ -479,6 +708,68 @@ const dueAlertForRecord = (record) => {
   return null;
 };
 
+/** Loads {id,name,email} for every user referenced by the rows. */
+const loadReferencedUsers = async ({ tx, rows }) => {
+  const ids = [
+    ...new Set(
+      rows.flatMap((row) => USER_REF_FIELDS.map((field) => row?.[field])).filter(Boolean),
+    ),
+  ];
+  if (!ids.length || !tx.user?.findMany) return new Map();
+  const users = await tx.user.findMany({
+    where: { id: { in: ids } },
+    select: { id: true, name: true, email: true },
+  });
+  return new Map(users.map((user) => [user.id, user]));
+};
+
+const loadReferencedCompanies = async ({ tx, rows }) => {
+  const ids = [
+    ...new Set(
+      rows.flatMap((row) => COMPANY_REF_FIELDS.map((field) => row?.[field])).filter(Boolean),
+    ),
+  ];
+  if (!ids.length || !tx.company?.findMany) return new Map();
+  const companies = await tx.company.findMany({
+    where: { id: { in: ids } },
+    select: { id: true, name: true },
+  });
+  return new Map(companies.map((company) => [company.id, company]));
+};
+
+const serializeUserRef = (usersById, userId) => {
+  if (!userId) return null;
+  const user = usersById.get(userId);
+  return user
+    ? { id: user.id, name: user.name, email: user.email }
+    : { id: userId, name: null, email: null };
+};
+
+const serializeCompanyRef = (companiesById, companyId) => {
+  if (!companyId) return null;
+  const company = companiesById.get(companyId);
+  return company
+    ? { id: company.id, name: company.name }
+    : { id: companyId, name: null };
+};
+
+/** Adds ownerUser / reviewerUser / … / assigneeCompany objects to rows. */
+const attachAssignmentReferences = async ({ tx = prisma, rows }) => {
+  const [usersById, companiesById] = await Promise.all([
+    loadReferencedUsers({ tx, rows }),
+    loadReferencedCompanies({ tx, rows }),
+  ]);
+  return rows.map((row) => ({
+    ...row,
+    ownerUser: serializeUserRef(usersById, row.ownerUserId),
+    reviewerUser: serializeUserRef(usersById, row.reviewerUserId),
+    approverUser: serializeUserRef(usersById, row.approverUserId),
+    assigneeUser: serializeUserRef(usersById, row.assigneeUserId),
+    ballInCourtUser: serializeUserRef(usersById, row.ballInCourtUserId),
+    assigneeCompany: serializeCompanyRef(companiesById, row.assigneeCompanyId),
+  }));
+};
+
 const attachWorkflowDetailsToRecords = async ({
   tx = prisma,
   projectId,
@@ -508,47 +799,56 @@ const attachWorkflowDetailsToRecords = async ({
     }));
   }
 
-  const [attachments, history, activityLinks, revisions, approvalHistoryById] =
-    await Promise.all([
-      tx.workflowAttachment.findMany({
-        where: { projectId, recordType, recordId: { in: ids } },
-        orderBy: [{ createdAt: "asc" }],
-      }),
-      tx.workflowStatusHistory.findMany({
-        where: { projectId, recordType, recordId: { in: ids } },
-        orderBy: [{ createdAt: "asc" }, { id: "asc" }],
-      }),
-      tx.workflowActivityLink.findMany({
-        where: { projectId, recordType, recordId: { in: ids } },
-        include: {
-          activity: {
-            select: {
-              id: true,
-              name: true,
-              p6ActivityId: true,
-              wbsCode: true,
-              isCritical: true,
-              totalFloat: true,
-              startDate: true,
-              endDate: true,
-            },
+  const [
+    attachments,
+    history,
+    activityLinks,
+    revisions,
+    approvalHistoryById,
+    usersById,
+    companiesById,
+  ] = await Promise.all([
+    tx.workflowAttachment.findMany({
+      where: { projectId, recordType, recordId: { in: ids } },
+      orderBy: [{ createdAt: "asc" }],
+    }),
+    tx.workflowStatusHistory.findMany({
+      where: { projectId, recordType, recordId: { in: ids } },
+      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+    }),
+    tx.workflowActivityLink.findMany({
+      where: { projectId, recordType, recordId: { in: ids } },
+      include: {
+        activity: {
+          select: {
+            id: true,
+            name: true,
+            p6ActivityId: true,
+            wbsCode: true,
+            isCritical: true,
+            totalFloat: true,
+            startDate: true,
+            endDate: true,
           },
         },
-        orderBy: [{ createdAt: "asc" }],
-      }),
-      DOCUMENT_RECORD_TYPES.has(recordType)
-        ? tx.documentRevision.findMany({
-            where: { projectId, recordType, recordId: { in: ids } },
-            orderBy: [{ issuedAt: "desc" }, { createdAt: "desc" }],
-          })
-        : Promise.resolve([]),
-      approvalWorkflowService.listEventsForRecords({
-        tx,
-        projectId,
-        recordType,
-        recordIds: ids,
-      }),
-    ]);
+      },
+      orderBy: [{ createdAt: "asc" }],
+    }),
+    DOCUMENT_RECORD_TYPES.has(recordType)
+      ? tx.documentRevision.findMany({
+          where: { projectId, recordType, recordId: { in: ids } },
+          orderBy: [{ issuedAt: "desc" }, { createdAt: "desc" }],
+        })
+      : Promise.resolve([]),
+    approvalWorkflowService.listEventsForRecords({
+      tx,
+      projectId,
+      recordType,
+      recordIds: ids,
+    }),
+    loadReferencedUsers({ tx, rows }),
+    loadReferencedCompanies({ tx, rows }),
+  ]);
 
   const attachmentsById = groupByRecordId(attachments);
   const historyById = groupByRecordId(history);
@@ -608,6 +908,12 @@ const attachWorkflowDetailsToRecords = async ({
       ownerParty: serializeParty(row.ownerPartyId),
       reviewerParty: serializeParty(row.reviewerPartyId),
       approverParty: serializeParty(row.approverPartyId),
+      ownerUser: serializeUserRef(usersById, row.ownerUserId),
+      reviewerUser: serializeUserRef(usersById, row.reviewerUserId),
+      approverUser: serializeUserRef(usersById, row.approverUserId),
+      assigneeUser: serializeUserRef(usersById, row.assigneeUserId),
+      ballInCourtUser: serializeUserRef(usersById, row.ballInCourtUserId),
+      assigneeCompany: serializeCompanyRef(companiesById, row.assigneeCompanyId),
       attachmentRefs: rowAttachments,
       attachments: rowAttachments,
       activityLinks: activityLinksById.get(row.id) || [],
@@ -619,9 +925,14 @@ const attachWorkflowDetailsToRecords = async ({
 };
 
 module.exports = {
+  COMPANY_REF_FIELDS,
   RECORD_TYPES,
+  USER_REF_FIELDS,
   assignmentData,
+  assignmentUserIds,
+  attachAssignmentReferences,
   attachWorkflowDetailsToRecords,
+  deriveBallInCourt,
   dueAlertForRecord,
   dueDateForRecord,
   normalizeActivityLinks,
@@ -629,7 +940,9 @@ module.exports = {
   primaryActivityIdFromPayload,
   recordDocumentRevisions,
   recordWorkflowHistory,
+  resolveAssignmentReferences,
   syncWorkflowReferences,
   trimOrNull,
+  workflowAssignmentData,
   workflowPartyAssignmentData,
 };

@@ -2,7 +2,7 @@ const { prisma } = require('../config/db');
 const { HttpError } = require('../utils/http-error');
 const {
   RECORD_TYPES,
-  assignmentData,
+  workflowAssignmentData,
   attachWorkflowDetailsToRecords,
   primaryActivityIdFromPayload,
   recordDocumentRevisions,
@@ -65,7 +65,13 @@ const createCorrespondence = async ({ orgId, projectId, payload }) => {
         body: payload.body?.trim() || null,
         contractualNotice: Boolean(payload.contractualNotice),
         date: payload.date ? new Date(payload.date) : new Date(),
-        ...assignmentData(payload),
+        ...(await workflowAssignmentData({
+          tx,
+          orgId,
+          projectId,
+          payload,
+          status: payload.status || 'open',
+        })),
         dueDate: payload.dueDate ? new Date(payload.dueDate) : null,
         responseRequiredBy: payload.responseRequiredBy
           ? new Date(payload.responseRequiredBy)
@@ -157,7 +163,14 @@ const updateCorrespondence = async ({
               ? new Date(payload.date)
               : null
             : existing.date,
-        ...assignmentData(payload, existing),
+        ...(await workflowAssignmentData({
+          tx,
+          orgId,
+          projectId,
+          payload,
+          existing,
+          status: nextStatus,
+        })),
         dueDate:
           payload.dueDate !== undefined
             ? payload.dueDate

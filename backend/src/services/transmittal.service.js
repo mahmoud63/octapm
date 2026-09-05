@@ -2,7 +2,7 @@ const { prisma } = require('../config/db');
 const { HttpError } = require('../utils/http-error');
 const {
   RECORD_TYPES,
-  assignmentData,
+  workflowAssignmentData,
   attachWorkflowDetailsToRecords,
   recordDocumentRevisions,
   recordWorkflowHistory,
@@ -58,7 +58,13 @@ const createTransmittal = async ({ orgId, projectId, payload }) => {
         recipient: payload.recipient,
         method: payload.method || 'email',
         status: payload.status || 'pending_ack',
-        ...assignmentData(payload),
+        ...(await workflowAssignmentData({
+          tx,
+          orgId,
+          projectId,
+          payload,
+          status: payload.status || 'pending_ack',
+        })),
         dueDate: payload.dueDate ? new Date(payload.dueDate) : null,
         transmittedOn: payload.transmittedOn
           ? new Date(payload.transmittedOn)
@@ -133,7 +139,14 @@ const updateTransmittal = async ({
         recipient: payload.recipient ?? existing.recipient,
         method: payload.method ?? existing.method,
         status: nextStatus,
-        ...assignmentData(payload, existing),
+        ...(await workflowAssignmentData({
+          tx,
+          orgId,
+          projectId,
+          payload,
+          existing,
+          status: nextStatus,
+        })),
         dueDate:
           payload.dueDate !== undefined
             ? payload.dueDate

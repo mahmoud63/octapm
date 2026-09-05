@@ -194,6 +194,10 @@ function buildEmptyDashboard() {
       note: "No source records available yet.",
     },
     kpiSourceRules: KPI_SOURCE_RULES,
+    myOpenItems: {
+      items: [],
+      summary: { total: 0, overdue: 0, ballInCourt: 0, byType: {} },
+    },
     summary: {
       totalProjects: 0,
       activeProjects: 0,
@@ -414,12 +418,17 @@ async function getEvReports({ orgId, projects }) {
   }, new Map());
 }
 
-async function getWorkspaceDashboard({ orgId, userId, role }) {
+async function getWorkspaceDashboard({
+  orgId,
+  userId,
+  role,
+  isCompanyAdmin = false,
+}) {
   const projects = await prisma.project.findMany({
     where: {
       orgId,
       archivedAt: null,
-      ...getProjectAccessWhere({ userId, role }),
+      ...getProjectAccessWhere({ userId, role, isCompanyAdmin }),
     },
     orderBy: [{ status: "asc" }, { updatedAt: "desc" }],
     select: {
@@ -778,6 +787,14 @@ async function getWorkspaceDashboard({ orgId, userId, role }) {
   ]);
 
   const evReports = await getEvReports({ orgId, projects });
+  // "My open items": every record where this user is owner / reviewer /
+  // approver / assignee / ball in court, resolved by id only.
+  const myOpenItems = await require("./record-assignment.service")
+    .listMyOpenItems({ orgId, userId, projectIds, limit: 100 })
+    .catch((error) => {
+      console.error("[workspace-dashboard] my open items failed", error);
+      return { items: [], summary: { total: 0, overdue: 0, ballInCourt: 0, byType: {} } };
+    });
   const generatedAt = new Date().toISOString();
   const cutoffDate =
     latestIso([
@@ -1851,6 +1868,7 @@ async function getWorkspaceDashboard({ orgId, userId, role }) {
       note: "Official KPI cards use approved or active source records through cutoff; pending-review metrics are displayed separately.",
     },
     kpiSourceRules: KPI_SOURCE_RULES,
+    myOpenItems,
     summary: {
       totalProjects: projects.length,
       activeProjects: projects.filter((project) => project.status === "active")

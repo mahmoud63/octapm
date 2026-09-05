@@ -12,10 +12,12 @@ import {
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
+import { UserPicker } from '@/components/user-picker'
 import type { Activity } from '@/features/activities/data/schema'
 import type { RiskPayload, RiskRecord } from '../hooks/use-risks'
 
 type Props = {
+  projectId: string
   open: boolean
   onOpenChange: (open: boolean) => void
   initialRisk?: RiskRecord | null
@@ -47,6 +49,7 @@ const defaultState: RiskPayload = {
   residualDescription: '',
   phase: '',
   owner: '',
+  ownerUserId: null,
   dueDate: '',
   escalationLevel: 'none',
   escalationNotes: '',
@@ -77,6 +80,7 @@ const toFormState = (risk?: RiskRecord | null): RiskPayload => {
     residualDescription: risk.residualDescription || '',
     phase: risk.phase || '',
     owner: risk.owner || '',
+    ownerUserId: risk.ownerUserId ?? null,
     dueDate: toDateInputValue(risk.dueDate),
     escalationLevel: risk.escalationLevel || 'none',
     escalationNotes: risk.escalationNotes || '',
@@ -98,6 +102,7 @@ const activityLabel = (activity: Activity) =>
   `${activity.wbsCode ? `${activity.wbsCode} - ` : ''}${activity.name}`
 
 export function RiskFormDialog({
+  projectId,
   open,
   onOpenChange,
   initialRisk,
@@ -122,13 +127,18 @@ export function RiskFormDialog({
   }
 
   const addLink = () => {
-    const used = new Set((form.activityLinks || []).map((link) => link.activityId))
+    const used = new Set(
+      (form.activityLinks || []).map((link) => link.activityId)
+    )
     const nextActivity =
       activities.find((activity) => !used.has(activity.id)) || activities[0]
     if (!nextActivity) return
     setForm((prev) => ({
       ...prev,
-      activityLinks: [...(prev.activityLinks || []), emptyLink(nextActivity.id)],
+      activityLinks: [
+        ...(prev.activityLinks || []),
+        emptyLink(nextActivity.id),
+      ],
     }))
   }
 
@@ -149,6 +159,7 @@ export function RiskFormDialog({
     residualDescription: form.residualDescription?.trim() || undefined,
     phase: form.phase?.trim() || undefined,
     owner: form.owner?.trim() || undefined,
+    ownerUserId: form.ownerUserId || null,
     dueDate: form.dueDate || undefined,
     escalationNotes: form.escalationNotes?.trim() || undefined,
     status: canEditStatus ? form.status : undefined,
@@ -169,7 +180,8 @@ export function RiskFormDialog({
         <DialogHeader>
           <DialogTitle>{isEdit ? 'Edit Risk' : 'Add Risk'}</DialogTitle>
           <DialogDescription>
-            Capture impact, mitigation ownership, and linked schedule activities.
+            Capture impact, mitigation ownership, and linked schedule
+            activities.
           </DialogDescription>
         </DialogHeader>
 
@@ -280,13 +292,17 @@ export function RiskFormDialog({
 
             <div className='grid gap-1.5'>
               <Label htmlFor='risk-owner'>Owner</Label>
-              <Input
+              <UserPicker
                 id='risk-owner'
-                value={form.owner || ''}
-                onChange={(e) =>
-                  setForm((prev) => ({ ...prev, owner: e.target.value }))
+                testId='uat-risk-owner-picker'
+                projectId={projectId}
+                value={form.ownerUserId}
+                onChange={(userId) =>
+                  setForm((prev) => ({ ...prev, ownerUserId: userId }))
                 }
-                placeholder='Owner name'
+                placeholder={
+                  form.owner ? `${form.owner} (unmatched)` : 'Unassigned'
+                }
               />
             </div>
 

@@ -495,14 +495,12 @@ const resolveNotificationRecipients = async ({
     addUsersToMap(recipients, users, actorId);
   }
 
-  if (refs.length) {
-    const or = refs.flatMap((ref) => [
-      ...(isUuidLike(ref) ? [{ id: ref }] : []),
-      { email: { equals: ref, mode: "insensitive" } },
-      { name: { equals: ref, mode: "insensitive" } },
-    ]);
+  // Assignment refs are user ids only (OCTA-DATA-REFS-004): free-text names
+  // are never matched, so a typo can no longer notify the wrong person.
+  const refIds = refs.filter((ref) => isUuidLike(ref) && !directIds.includes(ref));
+  if (refIds.length) {
     const users = await tx.user.findMany({
-      where: { orgId, status: "active", OR: or },
+      where: { orgId, status: "active", id: { in: refIds } },
       select,
     });
     addUsersToMap(recipients, users, actorId);
@@ -683,8 +681,22 @@ const actionUrlFor = ({ projectId, recordType, recordId }) =>
     ? `/projects/${projectId}?module=notifications&recordType=${encodeURIComponent(recordType)}&recordId=${encodeURIComponent(recordId)}`
     : null;
 
+const USER_REFERENCE_FIELDS = [
+  "ownerUserId",
+  "reviewerUserId",
+  "approverUserId",
+  "assigneeUserId",
+  "ballInCourtUserId",
+];
+
+// Recipients come from id columns only: the record's accountability
+// references plus any configured actor-id fields (createdBy, submittedBy…).
 const assignmentRefsFor = (record, fields = []) =>
-  unique(fields.map((field) => record?.[field]).filter(Boolean));
+  unique(
+    [...USER_REFERENCE_FIELDS, ...fields]
+      .map((field) => record?.[field])
+      .filter((value) => value && isUuidLike(String(value))),
+  );
 
 const workflowCategory = ({
   action,

@@ -230,8 +230,10 @@ const createSubmittal = async ({
   const row = await prisma.$transaction(async (tx) => {
     const assignments = await workflowPartyAssignmentData({
       tx,
+      orgId,
       projectId,
       payload: assignmentPayload,
+      status: payload.status || "pending",
     });
     const created = await tx.submittal.create({
       data: {
@@ -418,9 +420,11 @@ const updateSubmittal = async ({
   const row = await prisma.$transaction(async (tx) => {
     const assignments = await workflowPartyAssignmentData({
       tx,
+      orgId,
       projectId,
       payload,
       existing,
+      status: nextStatus,
     });
     const updated = await tx.submittal.update({
       where: { id: submittalId },

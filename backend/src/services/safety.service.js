@@ -2,7 +2,7 @@ const { prisma } = require("../config/db");
 const { HttpError } = require("../utils/http-error");
 const {
   RECORD_TYPES,
-  assignmentData,
+  workflowAssignmentData,
   attachWorkflowDetailsToRecords,
   normalizeAttachmentRefs,
   primaryActivityIdFromPayload,
@@ -267,8 +267,15 @@ const createSafetyIncident = async ({
         date: payload.date ? new Date(payload.date) : new Date(),
         lostDays: Number(payload.lostDays) || 0,
         status,
-        ...assignmentData(payload),
         responsible: payload.responsible?.trim() || null,
+        ...(await workflowAssignmentData({
+          tx,
+          orgId,
+          projectId,
+          payload,
+          status,
+          assigneeTextField: "responsible",
+        })),
         dueDate: payload.dueDate ? new Date(payload.dueDate) : null,
         closedDate: null,
         closureComment: payload.closureComment?.trim() || null,
@@ -373,11 +380,19 @@ const updateSafetyIncident = async ({
             ? Number(payload.lostDays) || 0
             : existing.lostDays,
         status: nextStatus,
-        ...assignmentData(payload, existing),
         responsible:
           payload.responsible !== undefined
             ? payload.responsible?.trim() || null
             : existing.responsible,
+        ...(await workflowAssignmentData({
+          tx,
+          orgId,
+          projectId,
+          payload,
+          existing,
+          status: nextStatus,
+          assigneeTextField: "responsible",
+        })),
         dueDate:
           payload.dueDate !== undefined
             ? payload.dueDate
@@ -482,6 +497,22 @@ const submitSafetyCloseout = async ({
       data: {
         status: SAFETY_STATUS.SUBMITTED,
         responsible: closeout.responsible,
+        ...(await workflowAssignmentData({
+          tx,
+          orgId,
+          projectId,
+          payload: {
+            ...(payload.assigneeUserId !== undefined
+              ? { assigneeUserId: payload.assigneeUserId }
+              : {}),
+            ...(payload.assigneeCompanyId !== undefined
+              ? { assigneeCompanyId: payload.assigneeCompanyId }
+              : {}),
+          },
+          existing,
+          status: SAFETY_STATUS.SUBMITTED,
+          assigneeTextField: "responsible",
+        })),
         dueDate: closeout.dueDate,
         closureComment: closeout.closureComment,
         closureSubmittedBy: userId || null,

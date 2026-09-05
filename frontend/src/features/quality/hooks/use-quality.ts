@@ -77,6 +77,7 @@ const materialTestKey = (projectId: string) => ['material-tests', projectId]
 
 type CloseoutPayload = {
   responsible: string
+  assigneeUserId?: string | null
   dueDate: string
   closureComment: string
   attachmentRefs: Array<{

@@ -17,6 +17,16 @@ export interface RiskRecord {
   residualDescription: string | null
   phase: string | null
   owner: string | null
+  ownerUserId?: string | null
+  assigneeUserId?: string | null
+  assigneeCompanyId?: string | null
+  ballInCourtUserId?: string | null
+  ownerUser?: { id: string; name: string | null; email?: string | null } | null
+  ballInCourtUser?: {
+    id: string
+    name: string | null
+    email?: string | null
+  } | null
   dueDate: string | null
   escalationLevel: 'none' | 'watch' | 'escalated'
   escalationNotes: string | null
@@ -65,6 +75,7 @@ export interface RiskPayload {
   residualDescription?: string
   phase?: string
   owner?: string
+  ownerUserId?: string | null
   dueDate?: string
   escalationLevel?: 'none' | 'watch' | 'escalated'
   escalationNotes?: string

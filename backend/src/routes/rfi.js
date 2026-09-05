@@ -6,6 +6,9 @@ const { authenticate } = require("../middleware/auth");
 const { getEffectiveRole, requirePermission } = require("../middleware/rbac");
 const { validate } = require("../middleware/validate");
 const {
+  assignmentReferenceValidators,
+} = require("../utils/assignment-validators");
+const {
   listRfis,
   createRfi,
   updateRfi,
@@ -77,6 +80,7 @@ router.post(
     body("reviewer").optional().isString().trim(),
     body("reviewerPartyId").optional({ nullable: true }).isUUID(),
     body("approver").optional().isString().trim(),
+    ...assignmentReferenceValidators(),
     body("approverPartyId").optional({ nullable: true }).isUUID(),
     body("activityId").optional({ nullable: true }).isUUID(),
     body("activityIds").optional().isArray(),
@@ -279,6 +283,7 @@ router.patch(
     body("reviewer").optional().isString().trim(),
     body("reviewerPartyId").optional({ nullable: true }).isUUID(),
     body("approver").optional().isString().trim(),
+    ...assignmentReferenceValidators(),
     body("approverPartyId").optional({ nullable: true }).isUUID(),
     body("activityId").optional({ nullable: true }).isUUID(),
     body("activityIds").optional().isArray(),

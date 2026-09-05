@@ -4,6 +4,9 @@ const { sendSuccess } = require("../utils/api-response");
 const { body, param } = require("express-validator");
 const { validate } = require("../middleware/validate");
 const {
+  assignmentReferenceValidators,
+} = require("../utils/assignment-validators");
+const {
   listMaterialTests,
   createMaterialTest,
   updateMaterialTest,
@@ -32,6 +35,7 @@ router.post(
     body("owner").optional().isString().trim(),
     body("reviewer").optional().isString().trim(),
     body("approver").optional().isString().trim(),
+    ...assignmentReferenceValidators(),
     body("activityId").optional({ nullable: true }).isUUID(),
     body("activityIds").optional().isArray(),
     body("activityIds.*").optional().isUUID(),
@@ -66,6 +70,7 @@ router.patch(
     body("owner").optional().isString().trim(),
     body("reviewer").optional().isString().trim(),
     body("approver").optional().isString().trim(),
+    ...assignmentReferenceValidators(),
     body("activityId").optional({ nullable: true }).isUUID(),
     body("activityIds").optional().isArray(),
     body("activityIds.*").optional().isUUID(),

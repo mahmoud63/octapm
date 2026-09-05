@@ -564,6 +564,7 @@ export function RisksTable({
       )}
 
       <RiskFormDialog
+        projectId={projectId}
         key={`risk-create-${createOpen ? 'open' : 'closed'}`}
         open={createOpen}
         onOpenChange={setCreateOpen}
@@ -581,6 +582,7 @@ export function RisksTable({
       />
 
       <RiskFormDialog
+        projectId={projectId}
         key={editingRisk ? `risk-edit-${editingRisk.id}` : 'risk-edit-empty'}
         open={Boolean(editingRisk)}
         onOpenChange={(open) => {

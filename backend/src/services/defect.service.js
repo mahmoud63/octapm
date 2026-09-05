@@ -2,7 +2,7 @@ const { prisma } = require('../config/db');
 const { HttpError } = require('../utils/http-error');
 const {
   RECORD_TYPES,
-  assignmentData,
+  workflowAssignmentData,
   attachWorkflowDetailsToRecords,
   primaryActivityIdFromPayload,
   recordWorkflowHistory,
@@ -64,8 +64,15 @@ const createDefect = async ({ orgId, projectId, payload }) => {
         location: payload.location?.trim() || null,
         severity: payload.severity || 'minor',
         status: payload.status || 'open',
-        ...assignmentData(payload),
         assignee: payload.assignee?.trim() || null,
+        ...(await workflowAssignmentData({
+          tx,
+          orgId,
+          projectId,
+          payload,
+          status: payload.status || 'open',
+          assigneeTextField: 'assignee',
+        })),
         dueDate: payload.dueDate ? new Date(payload.dueDate) : null,
         targetCloseBy: payload.targetCloseBy
           ? new Date(payload.targetCloseBy)
@@ -136,11 +143,19 @@ const updateDefect = async ({ orgId, projectId, defectId, payload, userId, userR
             : existing.location,
         severity: payload.severity ?? existing.severity,
         status: nextStatus,
-        ...assignmentData(payload, existing),
         assignee:
           payload.assignee !== undefined
             ? payload.assignee?.trim() || null
             : existing.assignee,
+        ...(await workflowAssignmentData({
+          tx,
+          orgId,
+          projectId,
+          payload,
+          existing,
+          status: nextStatus,
+          assigneeTextField: 'assignee',
+        })),
         dueDate:
           payload.dueDate !== undefined
             ? payload.dueDate

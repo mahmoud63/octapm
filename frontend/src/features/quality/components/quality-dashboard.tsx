@@ -23,6 +23,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Textarea } from '@/components/ui/textarea'
+import { UserPicker } from '@/components/user-picker'
 import {
   WorkflowDecisionDialog,
   type WorkflowDecisionMode,
@@ -74,6 +75,7 @@ type CloseoutTarget =
       id: string
       label: string
       responsible?: string | null
+      assigneeUserId?: string | null
       dueDate?: string | null
     }
   | {
@@ -81,11 +83,13 @@ type CloseoutTarget =
       id: string
       label: string
       responsible?: string | null
+      assigneeUserId?: string | null
       dueDate?: string | null
     }
 
 type CloseoutPayload = {
   responsible: string
+  assigneeUserId?: string | null
   dueDate: string
   closureComment: string
   attachmentRefs: Array<{
@@ -113,12 +117,14 @@ function toDateInputValue(value?: string | null) {
 }
 
 function CloseoutDialog({
+  projectId,
   target,
   isPending,
   onUploadEvidence,
   onOpenChange,
   onConfirm,
 }: {
+  projectId: string
   target: CloseoutTarget | null
   isPending?: boolean
   onUploadEvidence: CloseoutEvidenceUploader
@@ -126,6 +132,7 @@ function CloseoutDialog({
   onConfirm: (payload: CloseoutPayload) => Promise<void>
 }) {
   const [responsible, setResponsible] = useState('')
+  const [assigneeUserId, setAssigneeUserId] = useState<string | null>(null)
   const [dueDate, setDueDate] = useState('')
   const [closureComment, setClosureComment] = useState('')
   const [evidenceFiles, setEvidenceFiles] = useState<File[]>([])
@@ -135,13 +142,14 @@ function CloseoutDialog({
   useEffect(() => {
     if (!target) return
     setResponsible(target.responsible || '')
+    setAssigneeUserId(target.assigneeUserId ?? null)
     setDueDate(toDateInputValue(target.dueDate))
     setClosureComment('')
     setEvidenceFiles([])
   }, [target])
 
   const canSubmit = Boolean(
-    responsible.trim() &&
+    (assigneeUserId || responsible.trim()) &&
     dueDate &&
     closureComment.trim() &&
     evidenceFiles.length
@@ -157,13 +165,26 @@ function CloseoutDialog({
         <div className='grid gap-3 sm:grid-cols-2'>
           <div className='space-y-1.5'>
             <Label htmlFor='quality-closeout-responsible'>
-              Responsible party
+              Responsible person
             </Label>
-            <Input
+            <UserPicker
               id='quality-closeout-responsible'
-              value={responsible}
-              onChange={(event) => setResponsible(event.target.value)}
+              testId='uat-closeout-responsible-picker'
+              projectId={projectId}
+              value={assigneeUserId}
+              onChange={setAssigneeUserId}
+              placeholder={
+                responsible ? `${responsible} (unmatched)` : 'Pick a person'
+              }
             />
+            {!assigneeUserId && (
+              <Input
+                aria-label='Responsible party (free text)'
+                placeholder='Or type a party name'
+                value={responsible}
+                onChange={(event) => setResponsible(event.target.value)}
+              />
+            )}
           </div>
           <div className='space-y-1.5'>
             <Label htmlFor='quality-closeout-due-date'>Due date</Label>
@@ -228,6 +249,7 @@ function CloseoutDialog({
                 const uploaded = await onUploadEvidence(evidenceFiles)
                 await onConfirm({
                   responsible: responsible.trim(),
+                  assigneeUserId,
                   dueDate,
                   closureComment: closureComment.trim(),
                   attachmentRefs: uploaded.map((file) => ({
@@ -518,6 +540,7 @@ export function QualityDashboard({
                           id: row.id,
                           label: row.ref,
                           responsible: row.responsible || row.owner,
+                          assigneeUserId: row.assigneeUserId ?? null,
                           dueDate: row.dueDate,
                         })
                       }
@@ -742,6 +765,7 @@ export function QualityDashboard({
                           id: row.id,
                           label: row.ref,
                           responsible: row.responsible || row.owner,
+                          assigneeUserId: row.assigneeUserId ?? null,
                           dueDate: row.dueDate,
                         })
                       }
@@ -851,6 +875,7 @@ export function QualityDashboard({
         </TabsContent>
       </Tabs>
       <CloseoutDialog
+        projectId={projectId}
         target={closeoutTarget}
         isPending={closeoutPending}
         onUploadEvidence={(files) => uploadCloseoutEvidence.mutateAsync(files)}

@@ -97,6 +97,64 @@ model User {
   taskAttachments         TaskAttachment[]    @relation("TaskAttachmentUploader")
   taskHistoryEvents       TaskHistory[]       @relation("TaskHistoryActor")
 
+  // Accountability references (OCTA-DATA-REFS-004): owner / reviewer / approver /
+  // assignee / ball-in-court per record type.
+  riskOwner               Risk[]              @relation("RiskOwnerUser")
+  riskReviewer            Risk[]              @relation("RiskReviewerUser")
+  riskApprover            Risk[]              @relation("RiskApproverUser")
+  riskAssignee            Risk[]              @relation("RiskAssigneeUser")
+  riskBallInCourt         Risk[]              @relation("RiskBallInCourtUser")
+  ncrOwner                NcrRecord[]         @relation("NcrOwnerUser")
+  ncrReviewer             NcrRecord[]         @relation("NcrReviewerUser")
+  ncrApprover             NcrRecord[]         @relation("NcrApproverUser")
+  ncrAssignee             NcrRecord[]         @relation("NcrAssigneeUser")
+  ncrBallInCourt          NcrRecord[]         @relation("NcrBallInCourtUser")
+  itpOwner                ItpRecord[]         @relation("ItpOwnerUser")
+  itpReviewer             ItpRecord[]         @relation("ItpReviewerUser")
+  itpApprover             ItpRecord[]         @relation("ItpApproverUser")
+  itpAssignee             ItpRecord[]         @relation("ItpAssigneeUser")
+  itpBallInCourt          ItpRecord[]         @relation("ItpBallInCourtUser")
+  defectOwner             DefectRecord[]      @relation("DefectOwnerUser")
+  defectReviewer          DefectRecord[]      @relation("DefectReviewerUser")
+  defectApprover          DefectRecord[]      @relation("DefectApproverUser")
+  defectAssignee          DefectRecord[]      @relation("DefectAssigneeUser")
+  defectBallInCourt       DefectRecord[]      @relation("DefectBallInCourtUser")
+  safetyOwner             SafetyIncident[]    @relation("SafetyOwnerUser")
+  safetyReviewer          SafetyIncident[]    @relation("SafetyReviewerUser")
+  safetyApprover          SafetyIncident[]    @relation("SafetyApproverUser")
+  safetyAssignee          SafetyIncident[]    @relation("SafetyAssigneeUser")
+  safetyBallInCourt       SafetyIncident[]    @relation("SafetyBallInCourtUser")
+  materialTestOwner       MaterialTest[]      @relation("MaterialTestOwnerUser")
+  materialTestReviewer    MaterialTest[]      @relation("MaterialTestReviewerUser")
+  materialTestApprover    MaterialTest[]      @relation("MaterialTestApproverUser")
+  materialTestAssignee    MaterialTest[]      @relation("MaterialTestAssigneeUser")
+  materialTestBallInCourt MaterialTest[]      @relation("MaterialTestBallInCourtUser")
+  rfiOwner                Rfi[]               @relation("RfiOwnerUser")
+  rfiReviewer             Rfi[]               @relation("RfiReviewerUser")
+  rfiApprover             Rfi[]               @relation("RfiApproverUser")
+  rfiAssignee             Rfi[]               @relation("RfiAssigneeUser")
+  rfiBallInCourt          Rfi[]               @relation("RfiBallInCourtUser")
+  submittalOwner          Submittal[]         @relation("SubmittalOwnerUser")
+  submittalReviewer       Submittal[]         @relation("SubmittalReviewerUser")
+  submittalApprover       Submittal[]         @relation("SubmittalApproverUser")
+  submittalAssignee       Submittal[]         @relation("SubmittalAssigneeUser")
+  submittalBallInCourt    Submittal[]         @relation("SubmittalBallInCourtUser")
+  drawingOwner            DrawingRecord[]     @relation("DrawingOwnerUser")
+  drawingReviewer         DrawingRecord[]     @relation("DrawingReviewerUser")
+  drawingApprover         DrawingRecord[]     @relation("DrawingApproverUser")
+  drawingAssignee         DrawingRecord[]     @relation("DrawingAssigneeUser")
+  drawingBallInCourt      DrawingRecord[]     @relation("DrawingBallInCourtUser")
+  transmittalOwner        Transmittal[]       @relation("TransmittalOwnerUser")
+  transmittalReviewer     Transmittal[]       @relation("TransmittalReviewerUser")
+  transmittalApprover     Transmittal[]       @relation("TransmittalApproverUser")
+  transmittalAssignee     Transmittal[]       @relation("TransmittalAssigneeUser")
+  transmittalBallInCourt  Transmittal[]       @relation("TransmittalBallInCourtUser")
+  correspondenceOwner     Correspondence[]    @relation("CorrespondenceOwnerUser")
+  correspondenceReviewer  Correspondence[]    @relation("CorrespondenceReviewerUser")
+  correspondenceApprover  Correspondence[]    @relation("CorrespondenceApproverUser")
+  correspondenceAssignee  Correspondence[]    @relation("CorrespondenceAssigneeUser")
+  correspondenceBallInCourt Correspondence[]  @relation("CorrespondenceBallInCourtUser")
+
   @@index([orgId])
   @@index([email])
 }
@@ -152,6 +210,17 @@ model Company {
   memberships      CompanyMembership[]
   projectParties   ProjectParty[]
   invitationTokens InvitationToken[]
+  riskAssignments           Risk[]           @relation("RiskAssigneeCompany")
+  ncrAssignments            NcrRecord[]      @relation("NcrAssigneeCompany")
+  itpAssignments            ItpRecord[]      @relation("ItpAssigneeCompany")
+  defectAssignments         DefectRecord[]   @relation("DefectAssigneeCompany")
+  safetyAssignments         SafetyIncident[] @relation("SafetyAssigneeCompany")
+  materialTestAssignments   MaterialTest[]   @relation("MaterialTestAssigneeCompany")
+  rfiAssignments            Rfi[]            @relation("RfiAssigneeCompany")
+  submittalAssignments      Submittal[]      @relation("SubmittalAssigneeCompany")
+  drawingAssignments        DrawingRecord[]  @relation("DrawingAssigneeCompany")
+  transmittalAssignments    Transmittal[]    @relation("TransmittalAssigneeCompany")
+  correspondenceAssignments Correspondence[] @relation("CorrespondenceAssigneeCompany")
 
   @@unique([orgId, name])
   @@index([orgId])
@@ -1843,6 +1912,12 @@ model Risk {
   residualDescription String?
   phase               String?
   owner               String?
+  ownerUserId         String?
+  reviewerUserId      String?
+  approverUserId      String?
+  assigneeUserId      String?
+  assigneeCompanyId   String?
+  ballInCourtUserId   String?
   dueDate             DateTime?
   escalationLevel     String    @default("none") // none, watch, escalated
   escalationNotes     String?
@@ -1864,11 +1939,23 @@ model Risk {
 
   project       Project            @relation(fields: [projectId], references: [id])
   activityLinks RiskActivityLink[]
+  ownerUser       User?    @relation("RiskOwnerUser", fields: [ownerUserId], references: [id], onDelete: SetNull)
+  reviewerUser    User?    @relation("RiskReviewerUser", fields: [reviewerUserId], references: [id], onDelete: SetNull)
+  approverUser    User?    @relation("RiskApproverUser", fields: [approverUserId], references: [id], onDelete: SetNull)
+  assigneeUser    User?    @relation("RiskAssigneeUser", fields: [assigneeUserId], references: [id], onDelete: SetNull)
+  ballInCourtUser User?    @relation("RiskBallInCourtUser", fields: [ballInCourtUserId], references: [id], onDelete: SetNull)
+  assigneeCompany Company? @relation("RiskAssigneeCompany", fields: [assigneeCompanyId], references: [id], onDelete: SetNull)
 
   @@index([projectId])
   @@index([projectId, status])
   @@index([projectId, status, archivedAt])
   @@index([projectId, dueDate])
+  @@index([ownerUserId])
+  @@index([reviewerUserId])
+  @@index([approverUserId])
+  @@index([assigneeUserId])
+  @@index([ballInCourtUserId])
+  @@index([assigneeCompanyId])
 }
 
 model RiskActivityLink {
@@ -2676,6 +2763,12 @@ model NcrRecord {
   reviewer           String?
   approver           String?
   responsible        String?
+  ownerUserId        String?
+  reviewerUserId     String?
+  approverUserId     String?
+  assigneeUserId     String?
+  assigneeCompanyId  String?
+  ballInCourtUserId  String?
   dueDate            DateTime?
   closureComment     String?
   closureSubmittedBy String?
@@ -2690,9 +2783,21 @@ model NcrRecord {
 
   project  Project   @relation(fields: [projectId], references: [id])
   activity Activity? @relation(fields: [activityId], references: [id])
+  ownerUser       User?    @relation("NcrOwnerUser", fields: [ownerUserId], references: [id], onDelete: SetNull)
+  reviewerUser    User?    @relation("NcrReviewerUser", fields: [reviewerUserId], references: [id], onDelete: SetNull)
+  approverUser    User?    @relation("NcrApproverUser", fields: [approverUserId], references: [id], onDelete: SetNull)
+  assigneeUser    User?    @relation("NcrAssigneeUser", fields: [assigneeUserId], references: [id], onDelete: SetNull)
+  ballInCourtUser User?    @relation("NcrBallInCourtUser", fields: [ballInCourtUserId], references: [id], onDelete: SetNull)
+  assigneeCompany Company? @relation("NcrAssigneeCompany", fields: [assigneeCompanyId], references: [id], onDelete: SetNull)
 
   @@index([projectId])
   @@index([projectId, status, dueDate])
+  @@index([ownerUserId])
+  @@index([reviewerUserId])
+  @@index([approverUserId])
+  @@index([assigneeUserId])
+  @@index([ballInCourtUserId])
+  @@index([assigneeCompanyId])
 }
 
 model ItpRecord {
@@ -2709,15 +2814,33 @@ model ItpRecord {
   dueDate        DateTime?
   inspectionDate DateTime?
   inspector      String?
+  ownerUserId       String?
+  reviewerUserId    String?
+  approverUserId    String?
+  assigneeUserId    String?
+  assigneeCompanyId String?
+  ballInCourtUserId String?
   notes          String?
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
 
   project  Project   @relation(fields: [projectId], references: [id])
   activity Activity? @relation(fields: [activityId], references: [id], onDelete: SetNull)
+  ownerUser       User?    @relation("ItpOwnerUser", fields: [ownerUserId], references: [id], onDelete: SetNull)
+  reviewerUser    User?    @relation("ItpReviewerUser", fields: [reviewerUserId], references: [id], onDelete: SetNull)
+  approverUser    User?    @relation("ItpApproverUser", fields: [approverUserId], references: [id], onDelete: SetNull)
+  assigneeUser    User?    @relation("ItpAssigneeUser", fields: [assigneeUserId], references: [id], onDelete: SetNull)
+  ballInCourtUser User?    @relation("ItpBallInCourtUser", fields: [ballInCourtUserId], references: [id], onDelete: SetNull)
+  assigneeCompany Company? @relation("ItpAssigneeCompany", fields: [assigneeCompanyId], references: [id], onDelete: SetNull)
 
   @@unique([projectId, ref])
   @@index([projectId])
+  @@index([ownerUserId])
+  @@index([reviewerUserId])
+  @@index([approverUserId])
+  @@index([assigneeUserId])
+  @@index([ballInCourtUserId])
+  @@index([assigneeCompanyId])
 }
 
 model DefectRecord {
@@ -2734,6 +2857,12 @@ model DefectRecord {
   reviewer      String?
   approver      String?
   assignee      String?
+  ownerUserId       String?
+  reviewerUserId    String?
+  approverUserId    String?
+  assigneeUserId    String?
+  assigneeCompanyId String?
+  ballInCourtUserId String?
   dueDate       DateTime?
   targetCloseBy DateTime?
   closedDate    DateTime?
@@ -2743,9 +2872,21 @@ model DefectRecord {
 
   project  Project   @relation(fields: [projectId], references: [id])
   activity Activity? @relation(fields: [activityId], references: [id], onDelete: SetNull)
+  ownerUser       User?    @relation("DefectOwnerUser", fields: [ownerUserId], references: [id], onDelete: SetNull)
+  reviewerUser    User?    @relation("DefectReviewerUser", fields: [reviewerUserId], references: [id], onDelete: SetNull)
+  approverUser    User?    @relation("DefectApproverUser", fields: [approverUserId], references: [id], onDelete: SetNull)
+  assigneeUser    User?    @relation("DefectAssigneeUser", fields: [assigneeUserId], references: [id], onDelete: SetNull)
+  ballInCourtUser User?    @relation("DefectBallInCourtUser", fields: [ballInCourtUserId], references: [id], onDelete: SetNull)
+  assigneeCompany Company? @relation("DefectAssigneeCompany", fields: [assigneeCompanyId], references: [id], onDelete: SetNull)
 
   @@unique([projectId, ref])
   @@index([projectId])
+  @@index([ownerUserId])
+  @@index([reviewerUserId])
+  @@index([approverUserId])
+  @@index([assigneeUserId])
+  @@index([ballInCourtUserId])
+  @@index([assigneeCompanyId])
 }
 
 model SafetyIncident {
@@ -2763,6 +2904,12 @@ model SafetyIncident {
   reviewer           String?
   approver           String?
   responsible        String?
+  ownerUserId        String?
+  reviewerUserId     String?
+  approverUserId     String?
+  assigneeUserId     String?
+  assigneeCompanyId  String?
+  ballInCourtUserId  String?
   dueDate            DateTime?
   closedDate         DateTime?
   closureComment     String?
@@ -2781,10 +2928,23 @@ model SafetyIncident {
   project  Project   @relation(fields: [projectId], references: [id])
   activity Activity? @relation(fields: [activityId], references: [id], onDelete: SetNull)
 
+  ownerUser       User?    @relation("SafetyOwnerUser", fields: [ownerUserId], references: [id], onDelete: SetNull)
+  reviewerUser    User?    @relation("SafetyReviewerUser", fields: [reviewerUserId], references: [id], onDelete: SetNull)
+  approverUser    User?    @relation("SafetyApproverUser", fields: [approverUserId], references: [id], onDelete: SetNull)
+  assigneeUser    User?    @relation("SafetyAssigneeUser", fields: [assigneeUserId], references: [id], onDelete: SetNull)
+  ballInCourtUser User?    @relation("SafetyBallInCourtUser", fields: [ballInCourtUserId], references: [id], onDelete: SetNull)
+  assigneeCompany Company? @relation("SafetyAssigneeCompany", fields: [assigneeCompanyId], references: [id], onDelete: SetNull)
+
   @@unique([projectId, ref])
   @@index([projectId])
   @@index([projectId, status, archivedAt])
   @@index([projectId, status, dueDate])
+  @@index([ownerUserId])
+  @@index([reviewerUserId])
+  @@index([approverUserId])
+  @@index([assigneeUserId])
+  @@index([ballInCourtUserId])
+  @@index([assigneeCompanyId])
 }
 
 model MaterialTest {
@@ -2799,6 +2959,12 @@ model MaterialTest {
   owner       String?
   reviewer    String?
   approver    String?
+  ownerUserId       String?
+  reviewerUserId    String?
+  approverUserId    String?
+  assigneeUserId    String?
+  assigneeCompanyId String?
+  ballInCourtUserId String?
   dueDate     DateTime?
   testDate    DateTime?
   labName     String?
@@ -2809,9 +2975,21 @@ model MaterialTest {
 
   project  Project   @relation(fields: [projectId], references: [id])
   activity Activity? @relation(fields: [activityId], references: [id], onDelete: SetNull)
+  ownerUser       User?    @relation("MaterialTestOwnerUser", fields: [ownerUserId], references: [id], onDelete: SetNull)
+  reviewerUser    User?    @relation("MaterialTestReviewerUser", fields: [reviewerUserId], references: [id], onDelete: SetNull)
+  approverUser    User?    @relation("MaterialTestApproverUser", fields: [approverUserId], references: [id], onDelete: SetNull)
+  assigneeUser    User?    @relation("MaterialTestAssigneeUser", fields: [assigneeUserId], references: [id], onDelete: SetNull)
+  ballInCourtUser User?    @relation("MaterialTestBallInCourtUser", fields: [ballInCourtUserId], references: [id], onDelete: SetNull)
+  assigneeCompany Company? @relation("MaterialTestAssigneeCompany", fields: [assigneeCompanyId], references: [id], onDelete: SetNull)
 
   @@unique([projectId, ref])
   @@index([projectId])
+  @@index([ownerUserId])
+  @@index([reviewerUserId])
+  @@index([approverUserId])
+  @@index([assigneeUserId])
+  @@index([ballInCourtUserId])
+  @@index([assigneeCompanyId])
 }
 
 // ─── Document Control ───
@@ -2833,6 +3011,12 @@ model Rfi {
   reviewerPartyId    String?
   approver           String?
   approverPartyId    String?
+  ownerUserId        String?
+  reviewerUserId     String?
+  approverUserId     String?
+  assigneeUserId     String?
+  assigneeCompanyId  String?
+  ballInCourtUserId  String?
   raisedBy           String?
   answeredBy         String?
   raisedDate         DateTime?
@@ -2849,6 +3033,12 @@ model Rfi {
   ownerParty    ProjectParty? @relation("RfiOwnerParty", fields: [ownerPartyId], references: [id], onDelete: SetNull)
   reviewerParty ProjectParty? @relation("RfiReviewerParty", fields: [reviewerPartyId], references: [id], onDelete: SetNull)
   approverParty ProjectParty? @relation("RfiApproverParty", fields: [approverPartyId], references: [id], onDelete: SetNull)
+  ownerUser       User?    @relation("RfiOwnerUser", fields: [ownerUserId], references: [id], onDelete: SetNull)
+  reviewerUser    User?    @relation("RfiReviewerUser", fields: [reviewerUserId], references: [id], onDelete: SetNull)
+  approverUser    User?    @relation("RfiApproverUser", fields: [approverUserId], references: [id], onDelete: SetNull)
+  assigneeUser    User?    @relation("RfiAssigneeUser", fields: [assigneeUserId], references: [id], onDelete: SetNull)
+  ballInCourtUser User?    @relation("RfiBallInCourtUser", fields: [ballInCourtUserId], references: [id], onDelete: SetNull)
+  assigneeCompany Company? @relation("RfiAssigneeCompany", fields: [assigneeCompanyId], references: [id], onDelete: SetNull)
 
   @@unique([projectId, ref])
   @@index([projectId])
@@ -2860,6 +3050,12 @@ model Rfi {
   @@index([ownerPartyId])
   @@index([reviewerPartyId])
   @@index([approverPartyId])
+  @@index([ownerUserId])
+  @@index([reviewerUserId])
+  @@index([approverUserId])
+  @@index([assigneeUserId])
+  @@index([ballInCourtUserId])
+  @@index([assigneeCompanyId])
 }
 
 model Submittal {
@@ -2878,6 +3074,12 @@ model Submittal {
   reviewerPartyId String?
   approver    String?
   approverPartyId String?
+  ownerUserId       String?
+  reviewerUserId    String?
+  approverUserId    String?
+  assigneeUserId    String?
+  assigneeCompanyId String?
+  ballInCourtUserId String?
   submittedOn DateTime?
   dueDate     DateTime?
   reviewedOn  DateTime?
@@ -2892,6 +3094,12 @@ model Submittal {
   ownerParty    ProjectParty? @relation("SubmittalOwnerParty", fields: [ownerPartyId], references: [id], onDelete: SetNull)
   reviewerParty ProjectParty? @relation("SubmittalReviewerParty", fields: [reviewerPartyId], references: [id], onDelete: SetNull)
   approverParty ProjectParty? @relation("SubmittalApproverParty", fields: [approverPartyId], references: [id], onDelete: SetNull)
+  ownerUser       User?    @relation("SubmittalOwnerUser", fields: [ownerUserId], references: [id], onDelete: SetNull)
+  reviewerUser    User?    @relation("SubmittalReviewerUser", fields: [reviewerUserId], references: [id], onDelete: SetNull)
+  approverUser    User?    @relation("SubmittalApproverUser", fields: [approverUserId], references: [id], onDelete: SetNull)
+  assigneeUser    User?    @relation("SubmittalAssigneeUser", fields: [assigneeUserId], references: [id], onDelete: SetNull)
+  ballInCourtUser User?    @relation("SubmittalBallInCourtUser", fields: [ballInCourtUserId], references: [id], onDelete: SetNull)
+  assigneeCompany Company? @relation("SubmittalAssigneeCompany", fields: [assigneeCompanyId], references: [id], onDelete: SetNull)
 
   @@unique([projectId, ref])
   @@index([projectId])
@@ -2902,6 +3110,12 @@ model Submittal {
   @@index([ownerPartyId])
   @@index([reviewerPartyId])
   @@index([approverPartyId])
+  @@index([ownerUserId])
+  @@index([reviewerUserId])
+  @@index([approverUserId])
+  @@index([assigneeUserId])
+  @@index([ballInCourtUserId])
+  @@index([assigneeCompanyId])
 }
 
 model DrawingRecord {
@@ -2918,6 +3132,12 @@ model DrawingRecord {
   owner         String?
   reviewer      String?
   approver      String?
+  ownerUserId       String?
+  reviewerUserId    String?
+  approverUserId    String?
+  assigneeUserId    String?
+  assigneeCompanyId String?
+  ballInCourtUserId String?
   dueDate       DateTime?
   reviewedOn    DateTime?
   issueDate     DateTime?
@@ -2927,9 +3147,21 @@ model DrawingRecord {
 
   project  Project   @relation(fields: [projectId], references: [id])
   activity Activity? @relation(fields: [activityId], references: [id], onDelete: SetNull)
+  ownerUser       User?    @relation("DrawingOwnerUser", fields: [ownerUserId], references: [id], onDelete: SetNull)
+  reviewerUser    User?    @relation("DrawingReviewerUser", fields: [reviewerUserId], references: [id], onDelete: SetNull)
+  approverUser    User?    @relation("DrawingApproverUser", fields: [approverUserId], references: [id], onDelete: SetNull)
+  assigneeUser    User?    @relation("DrawingAssigneeUser", fields: [assigneeUserId], references: [id], onDelete: SetNull)
+  ballInCourtUser User?    @relation("DrawingBallInCourtUser", fields: [ballInCourtUserId], references: [id], onDelete: SetNull)
+  assigneeCompany Company? @relation("DrawingAssigneeCompany", fields: [assigneeCompanyId], references: [id], onDelete: SetNull)
 
   @@unique([projectId, ref])
   @@index([projectId])
+  @@index([ownerUserId])
+  @@index([reviewerUserId])
+  @@index([approverUserId])
+  @@index([assigneeUserId])
+  @@index([ballInCourtUserId])
+  @@index([assigneeCompanyId])
 }
 
 model WorkflowAttachment {
@@ -3165,6 +3397,12 @@ model Transmittal {
   owner          String?
   reviewer       String?
   approver       String?
+  ownerUserId       String?
+  reviewerUserId    String?
+  approverUserId    String?
+  assigneeUserId    String?
+  assigneeCompanyId String?
+  ballInCourtUserId String?
   dueDate        DateTime?
   transmittedOn  DateTime?
   acknowledgedOn DateTime?
@@ -3174,9 +3412,21 @@ model Transmittal {
   updatedAt      DateTime  @updatedAt
 
   project Project @relation(fields: [projectId], references: [id])
+  ownerUser       User?    @relation("TransmittalOwnerUser", fields: [ownerUserId], references: [id], onDelete: SetNull)
+  reviewerUser    User?    @relation("TransmittalReviewerUser", fields: [reviewerUserId], references: [id], onDelete: SetNull)
+  approverUser    User?    @relation("TransmittalApproverUser", fields: [approverUserId], references: [id], onDelete: SetNull)
+  assigneeUser    User?    @relation("TransmittalAssigneeUser", fields: [assigneeUserId], references: [id], onDelete: SetNull)
+  ballInCourtUser User?    @relation("TransmittalBallInCourtUser", fields: [ballInCourtUserId], references: [id], onDelete: SetNull)
+  assigneeCompany Company? @relation("TransmittalAssigneeCompany", fields: [assigneeCompanyId], references: [id], onDelete: SetNull)
 
   @@unique([projectId, ref])
   @@index([projectId])
+  @@index([ownerUserId])
+  @@index([reviewerUserId])
+  @@index([approverUserId])
+  @@index([assigneeUserId])
+  @@index([ballInCourtUserId])
+  @@index([assigneeCompanyId])
 }
 
 model Correspondence {
@@ -3193,6 +3443,12 @@ model Correspondence {
   owner              String?
   reviewer           String?
   approver           String?
+  ownerUserId        String?
+  reviewerUserId     String?
+  approverUserId     String?
+  assigneeUserId     String?
+  assigneeCompanyId  String?
+  ballInCourtUserId  String?
   dueDate            DateTime?
   responseRequiredBy DateTime?
   responseDate       DateTime?
@@ -3203,9 +3459,21 @@ model Correspondence {
   project         Project                        @relation(fields: [projectId], references: [id])
   activity        Activity?                      @relation(fields: [activityId], references: [id], onDelete: SetNull)
   commercialLinks CommercialCorrespondenceLink[]
+  ownerUser       User?    @relation("CorrespondenceOwnerUser", fields: [ownerUserId], references: [id], onDelete: SetNull)
+  reviewerUser    User?    @relation("CorrespondenceReviewerUser", fields: [reviewerUserId], references: [id], onDelete: SetNull)
+  approverUser    User?    @relation("CorrespondenceApproverUser", fields: [approverUserId], references: [id], onDelete: SetNull)
+  assigneeUser    User?    @relation("CorrespondenceAssigneeUser", fields: [assigneeUserId], references: [id], onDelete: SetNull)
+  ballInCourtUser User?    @relation("CorrespondenceBallInCourtUser", fields: [ballInCourtUserId], references: [id], onDelete: SetNull)
+  assigneeCompany Company? @relation("CorrespondenceAssigneeCompany", fields: [assigneeCompanyId], references: [id], onDelete: SetNull)
 
   @@unique([projectId, ref])
   @@index([projectId])
+  @@index([ownerUserId])
+  @@index([reviewerUserId])
+  @@index([approverUserId])
+  @@index([assigneeUserId])
+  @@index([ballInCourtUserId])
+  @@index([assigneeCompanyId])
 }
 
 // ─── Mobile: Daily Reports ───
