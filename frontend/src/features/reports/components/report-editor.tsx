@@ -48,6 +48,7 @@ import {
   type ReportSource,
 } from '../hooks/use-report-builder'
 import { ReportChart } from './report-chart'
+import { ReportNarrative } from './report-narrative'
 import { ReportRuns } from './report-runs'
 import { ReportSchedulesDialog } from './report-schedules-dialog'
 
@@ -977,6 +978,7 @@ export function ReportEditor({
               {new Date(preview.generatedAt).toLocaleTimeString()}
             </span>
           </div>
+          <ReportNarrative definition={draft} />
           <ReportChart result={preview} chart={draft.chart} />
           {preview.groups && (
             <div className='overflow-x-auto rounded-md border'>

@@ -6,6 +6,7 @@ const { authenticate } = require("../middleware/auth");
 const { requirePermission } = require("../middleware/rbac");
 const { validate } = require("../middleware/validate");
 const service = require("../services/report-builder.service");
+const reportAssistant = require("../services/report-assistant.service");
 
 /** Report builder (OCTA-RPT-BUILDER-023): `/reports`. Org-level; every run is scoped per project as the caller. */
 const router = express.Router();
@@ -78,6 +79,23 @@ router.post(
   requirePermission("report", "read"),
   [...previewValidators, validate],
   asyncHandler(async (req, res) => sendSuccess(res, await service.preview({ orgId: orgId(req), user: user(req), payload: req.body, limit: req.body.limit || service.PREVIEW_LIMIT, offset: req.body.offset || 0 }))),
+);
+
+// OCTA-AI-NLREPORT-033: a question becomes a definition; a preview becomes a narrative.
+router.post(
+  "/ask",
+  requirePermission("assistant", "read"),
+  requirePermission("report", "read"),
+  [body("question").isString().trim().isLength({ min: 3, max: 1000 }), body("projectId").optional({ nullable: true }).isUUID(), validate],
+  asyncHandler(async (req, res) => sendSuccess(res, await reportAssistant.ask({ orgId: orgId(req), user: user(req), question: req.body.question, projectId: req.body.projectId || null }))),
+);
+
+router.post(
+  "/narrate",
+  requirePermission("assistant", "read"),
+  requirePermission("report", "read"),
+  [...previewValidators, validate],
+  asyncHandler(async (req, res) => sendSuccess(res, await reportAssistant.narrate({ orgId: orgId(req), user: user(req), payload: req.body }))),
 );
 
 router.post(

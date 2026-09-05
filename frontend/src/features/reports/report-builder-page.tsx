@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button'
 import { Separator } from '@/components/ui/separator'
 import { Main } from '@/components/layout/main'
 import { useProjects } from '@/features/projects/hooks/use-projects'
+import { ReportAsk } from './components/report-ask'
 import {
   ReportEditor,
   blankDefinition,
@@ -17,6 +18,7 @@ import {
   useReport,
   useReports,
   type ReportDefinition,
+  type ReportDefinitionInput,
 } from './hooks/use-report-builder'
 
 const VISIBILITY_LABEL = {
@@ -43,6 +45,10 @@ export function ReportBuilderPage({
   const canCreate = useCanPerform('report', 'create')
   const [draftKey, setDraftKey] = useState(0)
   const [newSource, setNewSource] = useState<string | null>(null)
+  const [seed, setSeed] = useState<{
+    definition: ReportDefinitionInput
+    key: number
+  } | null>(null)
   const sources = data?.sources ?? []
   const projects = useMemo(
     () =>
@@ -75,6 +81,7 @@ export function ReportBuilderPage({
           <Button
             onClick={() => {
               setDraftKey((value) => value + 1)
+              setSeed(null)
               open(null)
             }}
             data-testid='uat-report-new'
@@ -128,6 +135,13 @@ export function ReportBuilderPage({
           {isNew ? (
             sources.length ? (
               <div className='space-y-3'>
+                <ReportAsk
+                  projects={projects}
+                  onUse={(definition) => {
+                    setNewSource(definition.source)
+                    setSeed({ definition, key: Date.now() })
+                  }}
+                />
                 <div
                   className='flex flex-wrap gap-1'
                   data-testid='uat-report-source-picker'
@@ -145,10 +159,14 @@ export function ReportBuilderPage({
                   ))}
                 </div>
                 <ReportEditor
-                  key={`new-${draftKey}-${source?.key ?? ''}`}
+                  key={`new-${draftKey}-${seed?.key ?? ''}-${source?.key ?? ''}`}
                   sources={sources}
                   projects={projects}
-                  initial={blankDefinition(source)}
+                  initial={
+                    seed && seed.definition.source === source?.key
+                      ? seed.definition
+                      : blankDefinition(source)
+                  }
                   report={null}
                   onSaved={(saved) => open(saved.id)}
                   onDeleted={() => open(null)}
