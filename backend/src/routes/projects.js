@@ -406,6 +406,14 @@ router.use(
   nestedProjectAccess,
   require("./submittals"),
 );
+// Drawing sets and sheets must be mounted before the legacy drawings router,
+// whose `/:drawingId` route would otherwise swallow `/sets` and `/sheets`.
+router.use(
+  "/:projectId/drawings/sets",
+  nestedProjectAccess,
+  require("./drawing-sets"),
+);
+router.use("/:projectId/drawings/sheets", nestedProjectAccess, require("./sheets"));
 router.use("/:projectId/drawings", nestedProjectAccess, require("./drawings"));
 router.use(
   "/:projectId/transmittals",

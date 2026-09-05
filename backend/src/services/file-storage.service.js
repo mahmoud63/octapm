@@ -21,6 +21,7 @@ const DOCUMENT_TYPES = Object.freeze({
   SCHEDULE_IMPORT: 'schedule_import',
   SCHEDULE_GENERATION_SOURCE: 'schedule_generation_source',
   PROGRESS_IMPORT: 'progress_import',
+  DRAWING_SET: 'drawing_set',
 });
 
 const ALLOWED_IMAGE_MIME = new Set([
@@ -98,6 +99,16 @@ const DOCUMENT_POLICIES = {
     unsupportedCode: 'UNSUPPORTED_WORKFLOW_ATTACHMENT',
     unsupportedMessage:
       'Only images, PDF, Word, Excel, CSV, and text files are allowed',
+  },
+  [DOCUMENT_TYPES.DRAWING_SET]: {
+    allowedMime: new Set(['application/pdf', 'application/x-pdf', 'application/octet-stream']),
+    allowedExtensions: ['.pdf'],
+    maxBytes: 250 * 1024 * 1024,
+    prefix: 'drawings',
+    retentionEnv: 'DRAWING_UPLOAD_RETENTION_DAYS',
+    defaultRetentionDays: 3650,
+    unsupportedCode: 'UNSUPPORTED_DRAWING_FILE',
+    unsupportedMessage: 'Drawing sets must be PDF files',
   },
   [DOCUMENT_TYPES.BOQ_UPLOAD]: {
     allowedMime: ALLOWED_BOQ_MIME,

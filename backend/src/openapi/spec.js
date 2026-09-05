@@ -2680,6 +2680,199 @@ const components = {
       status: { type: "string" },
       jobId: nullableUuid,
     }),
+    SheetRevision: objectSchema({
+      id: uuid,
+      projectId: uuid,
+      sheetId: nullableUuid,
+      setId: nullableUuid,
+      documentId: uuid,
+      pageNumber: { type: "integer", description: "Page inside the stored PDF." },
+      number: { type: "string", nullable: true },
+      title: { type: "string", nullable: true },
+      revision: { type: "string", nullable: true },
+      discipline: { type: "string", nullable: true },
+      status: { type: "string", enum: ["pending_review", "published", "superseded", "rejected"] },
+      detected: objectSchema({
+        number: { type: "string", nullable: true },
+        title: { type: "string", nullable: true },
+        revision: { type: "string", nullable: true },
+        discipline: { type: "string", nullable: true },
+      }),
+      confidence: { type: "number", description: "0-1 average of number and title confidence." },
+      fields: { type: "object", nullable: true, description: "Per-field confidence and source." },
+      textStatus: { type: "string", enum: ["none", "ready", "no_text"] },
+      width: { type: "number", nullable: true, description: "Page width in PDF points." },
+      height: { type: "number", nullable: true },
+      rotation: { type: "integer" },
+      reviewedBy: nullableUuid,
+      reviewedAt: nullableDateString,
+      publishedBy: nullableUuid,
+      publishedAt: nullableDateString,
+      supersededById: nullableUuid,
+      supersededAt: nullableDateString,
+      createdBy: nullableUuid,
+      createdAt: dateString,
+      updatedAt: dateString,
+      fileUrl: { type: "string", nullable: true },
+      fileName: { type: "string", nullable: true },
+      sizeBytes: { type: "integer", nullable: true },
+      path: { type: "string", nullable: true, description: "Workspace path that opens the sheet." },
+    }),
+    Sheet: objectSchema({
+      id: uuid,
+      projectId: uuid,
+      number: { type: "string" },
+      title: { type: "string" },
+      discipline: { type: "string", nullable: true },
+      locationId: nullableUuid,
+      location: {
+        nullable: true,
+        ...objectSchema({ id: uuid, name: { type: "string" }, code: { type: "string", nullable: true }, path: { type: "string" } }),
+      },
+      status: { type: "string", enum: ["current", "obsolete"] },
+      obsoleteReason: { type: "string", nullable: true },
+      currentRevisionId: nullableUuid,
+      currentRevision: { ...ref("SheetRevision"), nullable: true },
+      revisionCount: { type: "integer", nullable: true },
+      revisions: arrayOf(ref("SheetRevision")),
+      drawingRecordId: nullableUuid,
+      hasFile: { type: "boolean" },
+      path: { type: "string", nullable: true },
+      createdAt: dateString,
+      updatedAt: dateString,
+    }),
+    DrawingSet: objectSchema({
+      id: uuid,
+      projectId: uuid,
+      setNumber: { type: "string" },
+      name: { type: "string" },
+      description: { type: "string", nullable: true },
+      discipline: { type: "string", nullable: true },
+      purpose: { type: "string", nullable: true, enum: ["IFC", "IFT", "IFA", "AS_BUILT", "TENDER", "SHOP", "RECORD", "OTHER", null] },
+      status: { type: "string", enum: ["draft", "processing", "review", "published", "archived", "failed"] },
+      sourceDocumentId: nullableUuid,
+      fileUrl: { type: "string", nullable: true },
+      fileName: { type: "string", nullable: true },
+      sizeBytes: { type: "integer", nullable: true },
+      pageCount: { type: "integer", nullable: true },
+      processedPages: { type: "integer" },
+      progress: { type: "integer", description: "0-100 while processing." },
+      detectionSummary: { type: "object", nullable: true },
+      counts: {
+        nullable: true,
+        ...objectSchema({
+          total: { type: "integer" },
+          pending: { type: "integer" },
+          published: { type: "integer" },
+          superseded: { type: "integer" },
+          rejected: { type: "integer" },
+        }),
+      },
+      receivedAt: nullableDateString,
+      issuedAt: nullableDateString,
+      uploadedBy: nullableUuid,
+      publishedAt: nullableDateString,
+      publishedBy: nullableUuid,
+      jobId: nullableUuid,
+      error: { type: "string", nullable: true },
+      path: { type: "string", nullable: true },
+      revisions: arrayOf(ref("SheetRevision")),
+      createdAt: dateString,
+      updatedAt: dateString,
+    }),
+    DrawingSetListResponse: objectSchema({ items: arrayOf(ref("DrawingSet")) }),
+    DrawingSetUpdateRequest: objectSchema({
+      name: { type: "string", maxLength: 160 },
+      description: { type: "string", nullable: true, maxLength: 2000 },
+      discipline: { type: "string", nullable: true, maxLength: 80 },
+      purpose: { type: "string", nullable: true },
+      receivedAt: nullableDateString,
+      issuedAt: nullableDateString,
+      status: { type: "string", enum: ["archived", "review", "published"] },
+    }),
+    SheetRevisionReviewRequest: objectSchema(
+      {
+        updates: arrayOf(
+          objectSchema(
+            {
+              id: uuid,
+              number: { type: "string", nullable: true, maxLength: 40 },
+              title: { type: "string", nullable: true, maxLength: 200 },
+              revision: { type: "string", nullable: true, maxLength: 20 },
+              discipline: { type: "string", nullable: true, maxLength: 80 },
+              status: { type: "string", enum: ["pending_review", "rejected"] },
+            },
+            ["id"],
+          ),
+        ),
+      },
+      ["updates"],
+    ),
+    SheetRevisionListResponse: objectSchema({
+      items: arrayOf(ref("SheetRevision")),
+      counts: { type: "object", nullable: true },
+      currentRevisionId: nullableUuid,
+    }),
+    DrawingSetPublishRequest: objectSchema({
+      revisionIds: { ...arrayOf(uuid), description: "Subset to publish; defaults to every reviewed page with a number." },
+    }),
+    SheetPublishResult: objectSchema({
+      sheetId: uuid,
+      number: { type: "string" },
+      title: { type: "string" },
+      revisionId: uuid,
+      revision: { type: "string" },
+      supersededRevisionId: nullableUuid,
+      isNewSheet: { type: "boolean" },
+    }),
+    DrawingSetPublishResponse: objectSchema({
+      published: { type: "integer" },
+      skipped: { type: "integer", description: "Pending pages without a sheet number." },
+      remaining: { type: "integer" },
+      results: arrayOf(ref("SheetPublishResult")),
+      set: ref("DrawingSet"),
+    }),
+    SheetListResponse: objectSchema({
+      items: arrayOf(ref("Sheet")),
+      summary: objectSchema({
+        total: { type: "integer" },
+        current: { type: "integer" },
+        obsolete: { type: "integer" },
+        disciplines: arrayOf(objectSchema({ discipline: { type: "string" }, count: { type: "integer" } })),
+      }),
+    }),
+    SheetUpdateRequest: objectSchema({
+      title: { type: "string", maxLength: 200 },
+      discipline: { type: "string", nullable: true, maxLength: 80 },
+      locationId: nullableUuid,
+      status: { type: "string", enum: ["current", "obsolete"] },
+      obsoleteReason: { type: "string", nullable: true, maxLength: 500 },
+    }),
+    SheetRevisionUploadResponse: objectSchema({
+      revision: ref("SheetRevision"),
+      published: { ...ref("SheetPublishResult"), nullable: true },
+    }),
+    SheetOfflineManifest: objectSchema({
+      generatedAt: dateString,
+      items: arrayOf(
+        objectSchema({
+          sheetId: uuid,
+          number: { type: "string" },
+          title: { type: "string" },
+          discipline: { type: "string", nullable: true },
+          revisionId: uuid,
+          revision: { type: "string", nullable: true },
+          documentId: uuid,
+          pageNumber: { type: "integer" },
+          fileUrl: { type: "string" },
+          fileName: { type: "string", nullable: true },
+          sizeBytes: { type: "integer", nullable: true },
+          sha256: { type: "string", nullable: true },
+          publishedAt: nullableDateString,
+        }),
+      ),
+      totals: objectSchema({ sheets: { type: "integer" }, documents: { type: "integer" }, bytes: { type: "integer" } }),
+    }),
     CompanyDirectoryEntry: objectSchema({
       id: uuid,
       orgId: uuid,
@@ -10044,6 +10237,240 @@ add(
   }),
 );
 
+// ─── Drawings: sets, sheets, revisions ─────────────────────────────────
+const drawingSetIdParam = pathParam("setId", "Drawing set UUID.");
+const sheetIdParam = pathParam("sheetId", "Sheet UUID.");
+const sheetRevisionIdParam = pathParam("revisionId", "Sheet revision UUID.");
+const drawingUploadPermission = {
+  auth: "bearer",
+  roles: ROLE_IDS,
+  note: "Transition `document.revision.upload` on document_control (PM, planning engineer, site engineer).",
+};
+const drawingPublishPermission = {
+  auth: "bearer",
+  roles: ROLE_IDS,
+  note: "Transition `drawing.publish` on document_control (PM, planning engineer, or a permission template granting it).",
+};
+const drawingSetFields = {
+  name: { type: "string", maxLength: 160, description: "Defaults to the file name." },
+  description: { type: "string", maxLength: 2000 },
+  discipline: { type: "string", maxLength: 80, description: "Fallback discipline for pages whose number has no recognisable prefix." },
+  purpose: { type: "string", enum: ["IFC", "IFT", "IFA", "AS_BUILT", "TENDER", "SHOP", "RECORD", "OTHER"] },
+  receivedAt: dateString,
+  issuedAt: dateString,
+};
+
+add(
+  "/projects/{projectId}/drawings/sets",
+  "get",
+  operation({
+    tag: "Drawings",
+    summary: "Drawing sets with per-status revision counts (archived sets hidden unless `status=all`).",
+    operationId: "listDrawingSets",
+    parameters: [...projectParams, queryParam("status", "Filter by set status, or `all`.", { type: "string" })],
+    permissions: modulePermission("document_control", "read"),
+    responseSchema: ref("DrawingSetListResponse"),
+  }),
+);
+
+add(
+  "/projects/{projectId}/drawings/sets",
+  "post",
+  operation({
+    tag: "Drawings",
+    summary:
+      "Upload a multi-page PDF as a drawing set. Returns 202: the drawing.set_process job reads every page's text layer and pre-fills sheet numbers, titles, revisions and disciplines with confidences.",
+    operationId: "createDrawingSet",
+    parameters: projectParams,
+    permissions: drawingUploadPermission,
+    requestBody: fileUploadBody({
+      fieldName: "file",
+      required: ["file"],
+      description: "Multipart form with the set PDF (max 250 MB, 1 500 pages).",
+      accepted: "PDF only.",
+      extraProperties: drawingSetFields,
+    }),
+    responseSchema: ref("DrawingSet"),
+    status: 202,
+  }),
+);
+
+[
+  {
+    method: "get",
+    path: "/projects/{projectId}/drawings/sets/{setId}",
+    summary: "One set with every page revision (detected values, confidence, review state).",
+    operationId: "getDrawingSet",
+    parameters: [projectIdParam, drawingSetIdParam],
+    permissions: modulePermission("document_control", "read"),
+    responseSchema: ref("DrawingSet"),
+  },
+  {
+    method: "patch",
+    path: "/projects/{projectId}/drawings/sets/{setId}",
+    summary: "Rename, re-describe or archive a set.",
+    operationId: "updateDrawingSet",
+    parameters: [projectIdParam, drawingSetIdParam],
+    permissions: modulePermission("document_control", "update"),
+    requestBody: jsonBody(ref("DrawingSetUpdateRequest"), "Fields to change."),
+    responseSchema: ref("DrawingSet"),
+  },
+  {
+    method: "delete",
+    path: "/projects/{projectId}/drawings/sets/{setId}",
+    summary: "Delete a set that has not published any sheet (otherwise archive it).",
+    operationId: "deleteDrawingSet",
+    parameters: [projectIdParam, drawingSetIdParam],
+    permissions: modulePermission("document_control", "update"),
+    responseSchema: objectSchema({ deleted: { type: "boolean" }, id: uuid }),
+  },
+  {
+    method: "post",
+    path: "/projects/{projectId}/drawings/sets/{setId}/reprocess",
+    summary: "Re-run title-block detection on pending pages (published pages are kept).",
+    operationId: "reprocessDrawingSet",
+    parameters: [projectIdParam, drawingSetIdParam],
+    permissions: modulePermission("document_control", "update"),
+    responseSchema: objectSchema({ queued: { type: "boolean" }, jobId: uuid, setId: uuid }),
+    status: 202,
+  },
+  {
+    method: "get",
+    path: "/projects/{projectId}/drawings/sets/{setId}/revisions",
+    summary: "Page revisions of a set, in page order.",
+    operationId: "listDrawingSetRevisions",
+    parameters: [projectIdParam, drawingSetIdParam],
+    permissions: modulePermission("document_control", "read"),
+    responseSchema: ref("SheetRevisionListResponse"),
+  },
+  {
+    method: "patch",
+    path: "/projects/{projectId}/drawings/sets/{setId}/revisions",
+    summary: "Review grid: correct numbers, titles, revisions, disciplines; reject pages that are not sheets.",
+    operationId: "reviewDrawingSetRevisions",
+    parameters: [projectIdParam, drawingSetIdParam],
+    permissions: drawingUploadPermission,
+    requestBody: jsonBody(ref("SheetRevisionReviewRequest"), "Up to 500 page updates."),
+    responseSchema: ref("SheetRevisionListResponse"),
+  },
+  {
+    method: "post",
+    path: "/projects/{projectId}/drawings/sets/{setId}/publish",
+    summary:
+      "Publish reviewed pages: each becomes the current revision of its sheet (matched by number), the previous current revision is superseded, followers and site roles are notified, every step is audited. All-or-nothing.",
+    operationId: "publishDrawingSet",
+    parameters: [projectIdParam, drawingSetIdParam],
+    permissions: drawingPublishPermission,
+    requestBody: jsonBody(ref("DrawingSetPublishRequest"), "Optional subset.", false),
+    responseSchema: ref("DrawingSetPublishResponse"),
+  },
+].forEach((route) => addGenericRoute({ tag: "Drawings", ...route }));
+
+add(
+  "/projects/{projectId}/drawings/sheets",
+  "get",
+  operation({
+    tag: "Drawings",
+    summary: "The current sheet set as the site sees it, with filters. Superseded revisions are never listed here.",
+    operationId: "listSheets",
+    parameters: [
+      ...projectParams,
+      queryParam("discipline", "Discipline filter.", { type: "string" }),
+      queryParam("locationId", "Location id; includes descendants.", uuid),
+      queryParam("search", "Number or title contains.", { type: "string" }),
+      queryParam("status", "current (default), obsolete or all.", { type: "string", enum: ["current", "obsolete", "all"] }),
+      queryParam("setId", "Only sheets with a revision from this set.", uuid),
+    ],
+    permissions: modulePermission("document_control", "read"),
+    responseSchema: ref("SheetListResponse"),
+  }),
+);
+
+add(
+  "/projects/{projectId}/drawings/sheets/offline-manifest",
+  "get",
+  operation({
+    tag: "Drawings",
+    summary: "Current sheets with file URLs, sizes and hashes for offline caching on site devices.",
+    operationId: "getSheetOfflineManifest",
+    parameters: projectParams,
+    permissions: modulePermission("document_control", "read"),
+    responseSchema: ref("SheetOfflineManifest"),
+  }),
+);
+
+add(
+  "/projects/{projectId}/drawings/sheets/revisions/{revisionId}/publish",
+  "post",
+  operation({
+    tag: "Drawings",
+    summary: "Publish one pending sheet revision (single-sheet upload flow).",
+    operationId: "publishSheetRevision",
+    parameters: [projectIdParam, sheetRevisionIdParam],
+    permissions: drawingPublishPermission,
+    responseSchema: {
+      allOf: [ref("SheetPublishResult"), objectSchema({ revision: ref("SheetRevision") })],
+    },
+  }),
+);
+
+[
+  {
+    method: "get",
+    path: "/projects/{projectId}/drawings/sheets/{sheetId}",
+    summary: "One sheet with its revision history. Superseded revisions are included only for users who can update document control.",
+    operationId: "getSheet",
+    parameters: [projectIdParam, sheetIdParam],
+    permissions: modulePermission("document_control", "read"),
+    responseSchema: ref("Sheet"),
+  },
+  {
+    method: "patch",
+    path: "/projects/{projectId}/drawings/sheets/{sheetId}",
+    summary: "Edit title, discipline, area, or mark the sheet obsolete / current again.",
+    operationId: "updateSheet",
+    parameters: [projectIdParam, sheetIdParam],
+    permissions: modulePermission("document_control", "update"),
+    requestBody: jsonBody(ref("SheetUpdateRequest"), "Fields to change."),
+    responseSchema: ref("Sheet"),
+  },
+  {
+    method: "get",
+    path: "/projects/{projectId}/drawings/sheets/{sheetId}/revisions",
+    summary: "Revision history of a sheet (superseded only for document_control.update).",
+    operationId: "listSheetRevisions",
+    parameters: [projectIdParam, sheetIdParam],
+    permissions: modulePermission("document_control", "read"),
+    responseSchema: ref("SheetRevisionListResponse"),
+  },
+].forEach((route) => addGenericRoute({ tag: "Drawings", ...route }));
+
+add(
+  "/projects/{projectId}/drawings/sheets/{sheetId}/revisions",
+  "post",
+  operation({
+    tag: "Drawings",
+    summary: "Upload a new revision of one sheet as a PDF; `publish=true` publishes it immediately (needs drawing.publish).",
+    operationId: "uploadSheetRevision",
+    parameters: [projectIdParam, sheetIdParam],
+    permissions: drawingUploadPermission,
+    requestBody: fileUploadBody({
+      fieldName: "file",
+      required: ["file", "revision"],
+      description: "Multipart form.",
+      accepted: "PDF only (max 100 MB).",
+      extraProperties: {
+        revision: { type: "string", maxLength: 20 },
+        title: { type: "string", maxLength: 200 },
+        pageNumber: { type: "integer", minimum: 1, description: "Page inside the PDF that is the sheet (default 1)." },
+        publish: { type: "boolean" },
+      },
+    }),
+    responseSchema: ref("SheetRevisionUploadResponse"),
+    status: 201,
+  }),
+);
+
 // ─── Company workspace ──────────────────────────────────────────────────
 const companyIdParam = pathParam("id", "Record UUID scoped to the organisation.");
 const searchParam = queryParam("search", "Name contains.", { type: "string" });
@@ -10454,6 +10881,11 @@ const openApiSpec = {
       name: "Comments",
       description:
         "Comments with explicit @mentions on every record type, plus record subscriptions (follow / unfollow). Comments also appear in the record history feed (`GET /projects/{projectId}/audit?source=comment`). See docs/qa/comments-subscriptions.md.",
+    },
+    {
+      name: "Drawings",
+      description:
+        "Drawing sets → sheets → revisions: upload a multi-page PDF, title blocks are read from the text layer per page (number, title, revision, discipline with confidence), review the grid, publish so the site sees only current sheets; superseded revisions stay available to document controllers. See docs/qa/drawings.md.",
     },
     {
       name: "Document Search",

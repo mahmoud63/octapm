@@ -669,6 +669,7 @@ module.exports = {
   getDocumentText,
   getIndexStatus,
   isExtractableDocument,
+  readDocumentBytes,
   reindexProject,
   runDocumentExtractJob,
   searchDocumentContent,

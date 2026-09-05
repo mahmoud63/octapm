@@ -848,28 +848,86 @@ const extractContentText = (content, fontsByName, fonts) => {
   return pieces.join("");
 };
 
-const extractPdf = (buffer) => {
-  const { objects, latin } = parsePdfObjects(buffer);
-  if (/\/Encrypt\s+\d+\s+\d+\s+R/.test(latin) || /\/Encrypt\s*<</.test(latin)) {
-    return result({ status: "unsupported", extractor: EXTRACTORS.PDF, reason: "encrypted" });
+const inheritedMatch = (objects, pageDict, pattern) => {
+  const seen = new Set();
+  let current = pageDict;
+  while (current) {
+    const match = pattern.exec(current);
+    if (match) return match;
+    const parentRef = refOf(current, "Parent");
+    if (parentRef === null || seen.has(parentRef)) return null;
+    seen.add(parentRef);
+    current = objects.get(parentRef)?.dict || null;
   }
+  return null;
+};
+
+const pageGeometry = (objects, pageDict) => {
+  const box = inheritedMatch(
+    objects,
+    pageDict,
+    /\/MediaBox\s*\[\s*([-\d.]+)\s+([-\d.]+)\s+([-\d.]+)\s+([-\d.]+)\s*\]/,
+  );
+  const rotate = inheritedMatch(objects, pageDict, /\/Rotate\s+(-?\d+)/);
+  const width = box ? Math.abs(Number(box[3]) - Number(box[1])) : null;
+  const height = box ? Math.abs(Number(box[4]) - Number(box[2])) : null;
+  return {
+    width: Number.isFinite(width) && width > 0 ? width : null,
+    height: Number.isFinite(height) && height > 0 ? height : null,
+    rotation: rotate ? ((Number(rotate[1]) % 360) + 360) % 360 : 0,
+  };
+};
+
+/** Parses a PDF once and returns per-page text and geometry. */
+const collectPdfPages = (buffer) => {
+  const { objects, latin } = parsePdfObjects(buffer);
+  const encrypted = /\/Encrypt\s+\d+\s+\d+\s+R/.test(latin) || /\/Encrypt\s*<</.test(latin);
+  if (encrypted) return { encrypted: true, objects, fonts: new Map(), pages: [] };
   expandObjectStreams(objects);
   const fonts = buildFonts(objects);
-  const pages = orderedPages(objects);
-  const pageTexts = [];
-
-  for (const pageNumber of pages) {
-    const pageDict = objects.get(pageNumber).dict;
+  const pages = orderedPages(objects).map((objectNumber, index) => {
+    const pageDict = objects.get(objectNumber).dict;
     const fontsByName = fontMapFor(objects, pageDict);
     const content = contentRefsFor(objects, pageDict)
       .map((ref) => streamOf(objects.get(ref)))
       .filter(Boolean)
       .map((data) => data.toString("latin1"))
       .join("\n");
-    pageTexts.push(content ? extractContentText(content, fontsByName, fonts) : "");
+    return {
+      pageNumber: index + 1,
+      text: content ? normalizeWhitespace(extractContentText(content, fontsByName, fonts)) : "",
+      ...pageGeometry(objects, pageDict),
+    };
+  });
+  return { encrypted: false, objects, fonts, pages };
+};
+
+/**
+ * Per-page text layer with page size (PDF points) and rotation — used by the
+ * drawings tool to detect title blocks sheet by sheet.
+ */
+const pdfPages = (buffer) => {
+  const collected = collectPdfPages(buffer);
+  return {
+    encrypted: collected.encrypted,
+    pageCount: collected.pages.length,
+    pages: collected.pages.map(({ pageNumber, text, width, height, rotation }) => ({
+      pageNumber,
+      text,
+      width,
+      height,
+      rotation,
+    })),
+  };
+};
+
+const extractPdf = (buffer) => {
+  const { encrypted, objects, fonts, pages } = collectPdfPages(buffer);
+  if (encrypted) {
+    return result({ status: "unsupported", extractor: EXTRACTORS.PDF, reason: "encrypted" });
   }
 
-  let text = pageTexts.join("\n\n");
+  let text = pages.map((page) => page.text).join("\n\n");
   if (!pages.length) {
     // No page tree found: scan every stream that carries text operators.
     const chunks = [];
@@ -966,5 +1024,6 @@ module.exports = {
   kindFor,
   normalizeWhitespace,
   parseCMap,
+  pdfPages,
   tokenize,
 };

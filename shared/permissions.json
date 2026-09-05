@@ -335,7 +335,8 @@
           "site_engineer"
         ],
         "document.revision.approve": ["pm"],
-        "document.revision.supersede": ["pm"]
+        "document.revision.supersede": ["pm"],
+        "drawing.publish": ["pm", "planning_eng"]
       }
     },
     "rfi": {

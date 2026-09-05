@@ -24,6 +24,7 @@ const JOB_TYPES = Object.freeze({
   REPORT_RENDER: "report.render",
   NOTIFICATION_DELIVER: "notification.deliver",
   PHOTO_THUMBNAIL: "photo.thumbnail",
+  DRAWING_SET_PROCESS: "drawing.set_process",
 });
 
 const JOB_STATUSES = Object.freeze({

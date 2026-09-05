@@ -37,6 +37,9 @@ const ENTITY_TYPES = Object.freeze({
   BACKGROUND_JOB: "background_job",
   ATTACHMENT: "attachment",
   PHOTO: "photo",
+  DRAWING_SET: "drawing_set",
+  SHEET: "sheet",
+  SHEET_REVISION: "sheet_revision",
 });
 
 const ACTIONS = Object.freeze({

@@ -28,6 +28,7 @@ const JOB_MODULE_BY_TYPE = Object.freeze({
   [jobService.JOB_TYPES.REPORT_RENDER]: "schedule",
   [jobService.JOB_TYPES.NOTIFICATION_DELIVER]: "user_management",
   [jobService.JOB_TYPES.PHOTO_THUMBNAIL]: "document_control",
+  [jobService.JOB_TYPES.DRAWING_SET_PROCESS]: "document_control",
 });
 
 const assertCanManageJob = (req, job) => {

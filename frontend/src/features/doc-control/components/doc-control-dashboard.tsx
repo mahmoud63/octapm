@@ -27,6 +27,7 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Textarea } from '@/components/ui/textarea'
 import { AuditHistoryPanel } from '@/features/audit/components/audit-history-panel'
+import { DrawingsModule } from '@/features/drawings/components/drawings-module'
 import type { ProjectSetupTarget } from '@/features/projects/data/schema'
 import { useProjectParties } from '@/features/projects/hooks/use-projects'
 import {
@@ -1614,51 +1615,59 @@ export function DocControlDashboard({
         </TabsContent>
 
         <TabsContent value='drawings' className='space-y-2'>
-          <div className='grid grid-cols-1 gap-2 sm:grid-cols-3'>
-            <Input
-              placeholder='Drawing no'
-              value={drawingNumber}
-              onChange={(e) => setDrawingNumber(e.target.value)}
-            />
-            <Input
-              placeholder='Drawing title'
-              value={drawingTitle}
-              onChange={(e) => setDrawingTitle(e.target.value)}
-            />
-            <Button
-              disabled={
-                createDrawing.isPending || !drawingNumber || !drawingTitle
-              }
-              onClick={async () => {
-                try {
-                  await createDrawing.mutateAsync({
-                    drawingNumber,
-                    title: drawingTitle,
-                  })
-                  setDrawingNumber('')
-                  setDrawingTitle('')
-                  toast.success('Drawing created')
-                } catch {
-                  toast.error('Failed to create drawing')
-                }
-              }}
-            >
-              Add
-            </Button>
-          </div>
-          <WorkflowRecordList
+          <DrawingsModule
             projectId={projectId}
-            recordType='drawing'
-            rows={drawings?.rows}
-            emptyText='No drawing records'
-            getRef={(row) => row.ref}
-            getTitle={(row) => `${row.drawingNumber} / ${row.title}`}
-            getStatus={(row) => row.status}
-            renderMeta={(row) => (
-              <div className='flex flex-wrap gap-2'>
-                <Badge variant='outline'>Rev {row.revision}</Badge>
-              </div>
-            )}
+            initialTarget={initialTarget}
+            legacy={
+              <>
+                <div className='grid grid-cols-1 gap-2 sm:grid-cols-3'>
+                  <Input
+                    placeholder='Drawing no'
+                    value={drawingNumber}
+                    onChange={(e) => setDrawingNumber(e.target.value)}
+                  />
+                  <Input
+                    placeholder='Drawing title'
+                    value={drawingTitle}
+                    onChange={(e) => setDrawingTitle(e.target.value)}
+                  />
+                  <Button
+                    disabled={
+                      createDrawing.isPending || !drawingNumber || !drawingTitle
+                    }
+                    onClick={async () => {
+                      try {
+                        await createDrawing.mutateAsync({
+                          drawingNumber,
+                          title: drawingTitle,
+                        })
+                        setDrawingNumber('')
+                        setDrawingTitle('')
+                        toast.success('Drawing created')
+                      } catch {
+                        toast.error('Failed to create drawing')
+                      }
+                    }}
+                  >
+                    Add
+                  </Button>
+                </div>
+                <WorkflowRecordList
+                  projectId={projectId}
+                  recordType='drawing'
+                  rows={drawings?.rows}
+                  emptyText='No drawing records'
+                  getRef={(row) => row.ref}
+                  getTitle={(row) => `${row.drawingNumber} / ${row.title}`}
+                  getStatus={(row) => row.status}
+                  renderMeta={(row) => (
+                    <div className='flex flex-wrap gap-2'>
+                      <Badge variant='outline'>Rev {row.revision}</Badge>
+                    </div>
+                  )}
+                />
+              </>
+            }
           />
         </TabsContent>
 

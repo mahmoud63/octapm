@@ -19,6 +19,9 @@ const registerAllHandlers = () => {
   registerJobHandler(JOB_TYPES.DOCUMENT_EXTRACT, (context) =>
     require("../../services/document-text.service").runDocumentExtractJob(context),
   );
+  registerJobHandler(JOB_TYPES.DRAWING_SET_PROCESS, (context) =>
+    require("../../services/drawing-set.service").runDrawingSetJob(context),
+  );
 };
 
 module.exports = { registerAllHandlers };
