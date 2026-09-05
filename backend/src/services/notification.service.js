@@ -222,6 +222,15 @@ const DUE_RECORDS = Object.freeze({
     statusField: "status",
     closedStatuses: ["closed", "void"],
   },
+  form_instance: {
+    model: "formInstance",
+    label: "Inspection",
+    moduleCategory: NOTIFICATION_CATEGORIES.QUALITY,
+    assignmentFields: ["assigneeUserId", "inspectorUserId", "approverUserId", "createdBy"],
+    dueFields: ["dueDate", "scheduledFor"],
+    statusField: "status",
+    closedStatuses: ["complete", "closed", "void"],
+  },
   material_test: {
     model: "materialTest",
     label: "Material test",

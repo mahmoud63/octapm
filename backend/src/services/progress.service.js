@@ -619,6 +619,22 @@ const approveProgressSubmissionWithClient = async ({
     );
   }
 
+  // ITP hold points on the activity must pass before progress is approved
+  // (OCTA-QA-TEMPLATE-014). Required lazily to avoid a service cycle.
+  const holdPoints = await require('./form.service').openHoldPoints(
+    { projectId, activityId: submission.activityId },
+    tx,
+  );
+  if (holdPoints.length) {
+    const first = holdPoints[0];
+    throw new HttpError(
+      409,
+      'ITP_HOLD_POINT_OPEN',
+      `${holdPoints.length} ITP hold point${holdPoints.length === 1 ? '' : 's'} on this activity ${holdPoints.length === 1 ? 'has' : 'have'} not passed (${first.ref}: ${first.label} — ${first.state})`,
+      { holdPoints },
+    );
+  }
+
   const now = new Date();
   const approved = await tx.progressSubmission.update({
     where: { id: submissionId },

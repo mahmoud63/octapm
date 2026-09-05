@@ -86,7 +86,7 @@ assert.match(read('src/features/projects/components/project-detail.tsx'), /<Qual
 
 // ── Wiring ──────────────────────────────────────────────────────────────
 assert.match(read('src/lib/permissions.ts'), /\| 'punch'/, 'punch permission module typed')
-assert.match(read('src/features/projects/lib/project-modules.ts'), /quality: \['ncr', 'safety', 'punch'\]/, 'quality workspace backed by punch')
+assert.match(read('src/features/projects/lib/project-modules.ts'), /quality: \['ncr', 'safety', 'punch'/, 'quality workspace backed by punch')
 assert.match(read('src/features/attachments/components/attachment-panel.tsx'), /punch_item: 'punch'/, 'attachments guarded by punch')
 assert.match(read('src/features/drawings/hooks/use-markups.ts'), /'punch_item'/, 'pins can target punch items')
 const pinDialog = read('src/features/drawings/components/pin-dialog.tsx')

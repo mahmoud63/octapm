@@ -43,6 +43,8 @@ const ENTITY_TYPES = Object.freeze({
   MARKUP: "markup",
   PIN: "pin",
   PUNCH_ITEM: "punch_item",
+  FORM_TEMPLATE: "form_template",
+  FORM_INSTANCE: "form_instance",
 });
 
 const ACTIONS = Object.freeze({

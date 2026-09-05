@@ -1,6 +1,7 @@
 import { Navigate, Outlet } from '@tanstack/react-router'
 import {
   Building2,
+  ClipboardCheck,
   FolderKanban,
   Hash,
   ShieldCheck,
@@ -33,6 +34,11 @@ const navItems = [
     title: 'Project templates',
     href: '/company/templates',
     icon: <FolderKanban size={18} />,
+  },
+  {
+    title: 'Inspection templates',
+    href: '/company/form-templates',
+    icon: <ClipboardCheck size={18} />,
   },
   {
     title: 'Permissions',

@@ -617,6 +617,38 @@
         "location.restore": ["pm", "planning_eng"]
       }
     },
+    "inspection": {
+      "label": "Inspections & Forms",
+      "actions": {
+        "read": [
+          "pm",
+          "planning_eng",
+          "qs",
+          "cost_controller",
+          "procurement",
+          "warehouse",
+          "site_engineer",
+          "finance"
+        ],
+        "create": ["pm", "planning_eng", "site_engineer", "qs"],
+        "update": ["pm", "planning_eng", "site_engineer", "qs"],
+        "delete": ["pm", "planning_eng"],
+        "submit": ["pm", "planning_eng", "site_engineer", "qs"],
+        "approve": ["pm", "planning_eng"],
+        "certify": [],
+        "baseline": [],
+        "export": ["pm", "planning_eng", "qs", "site_engineer", "cost_controller"]
+      },
+      "transitions": {
+        "inspection.start": ["pm", "planning_eng", "site_engineer", "qs"],
+        "inspection.complete": ["pm", "planning_eng", "site_engineer", "qs"],
+        "inspection.sign": ["pm", "planning_eng", "site_engineer", "qs"],
+        "inspection.close": ["pm", "planning_eng"],
+        "inspection.reopen": ["pm", "planning_eng"],
+        "inspection.void": ["pm"],
+        "inspection.template_admin": ["pm", "planning_eng", "qs"]
+      }
+    },
     "punch": {
       "label": "Punch List",
       "actions": {
@@ -653,6 +685,7 @@
   "partyPermissions": {
     "owner": {
       "modules": {
+        "inspection": { "actions": ["read", "export"], "transitions": [] },
         "punch": { "actions": ["read", "export"], "transitions": [] },
         "schedule": { "actions": ["read", "export"], "transitions": [] },
         "progress": { "actions": ["read", "export"], "transitions": [] },
@@ -687,6 +720,16 @@
     },
     "consultant": {
       "modules": {
+        "inspection": {
+          "actions": ["read", "create", "submit", "approve", "export"],
+          "transitions": [
+            "inspection.start",
+            "inspection.complete",
+            "inspection.sign",
+            "inspection.close",
+            "inspection.reopen"
+          ]
+        },
         "punch": {
           "actions": ["read", "create", "submit", "approve", "export"],
           "transitions": ["punch.open", "punch.close", "punch.reopen"]
@@ -731,6 +774,15 @@
     },
     "contractor": {
       "modules": {
+        "inspection": {
+          "actions": ["read", "create", "update", "submit", "export"],
+          "transitions": [
+            "inspection.start",
+            "inspection.complete",
+            "inspection.sign",
+            "inspection.template_admin"
+          ]
+        },
         "punch": {
           "actions": ["read", "create", "update", "submit", "export"],
           "transitions": [
@@ -784,6 +836,14 @@
     },
     "subcontractor": {
       "modules": {
+        "inspection": {
+          "actions": ["read", "submit", "export"],
+          "transitions": [
+            "inspection.start",
+            "inspection.complete",
+            "inspection.sign"
+          ]
+        },
         "punch": {
           "actions": ["read", "update", "submit", "export"],
           "transitions": ["punch.ready_for_review", "punch.dispute"]

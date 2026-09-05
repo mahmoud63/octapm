@@ -95,7 +95,7 @@ export const MODULE_PERMISSIONS: Partial<
   siteReporting: ['progress'],
   cost: ['cost'],
   commercial: ['change_order', 'ipc', 'eot'],
-  quality: ['ncr', 'safety', 'punch'],
+  quality: ['ncr', 'safety', 'punch', 'inspection'],
   docControl: ['document_control', 'rfi', 'submittal'],
   meetings: ['meeting'],
   boq: ['boq'],

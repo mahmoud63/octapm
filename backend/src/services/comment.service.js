@@ -50,6 +50,12 @@ const RECORD_SOURCES = Object.freeze({
     title: ["ref", "title"],
     extraRefs: ["managerUserId", "finalApproverUserId", "createdBy"],
   },
+  form_instance: {
+    model: "formInstance",
+    label: "Inspection",
+    title: ["ref", "title"],
+    extraRefs: ["inspectorUserId", "approverUserId", "createdBy"],
+  },
   material_test: {
     model: "materialTest",
     label: "Material test",

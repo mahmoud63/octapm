@@ -35,6 +35,7 @@ export type PermissionModule =
   | 'task'
   | 'location'
   | 'punch'
+  | 'inspection'
 
 export type RoleId =
   | 'pm'

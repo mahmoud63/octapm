@@ -43,6 +43,7 @@ import { Route as AuthenticatedErrorsErrorRouteImport } from './routes/_authenti
 import { Route as AuthenticatedCompanyVendorsRouteImport } from './routes/_authenticated/company/vendors'
 import { Route as AuthenticatedCompanyTemplatesRouteImport } from './routes/_authenticated/company/templates'
 import { Route as AuthenticatedCompanyPermissionsRouteImport } from './routes/_authenticated/company/permissions'
+import { Route as AuthenticatedCompanyFormTemplatesRouteImport } from './routes/_authenticated/company/form-templates'
 import { Route as AuthenticatedCompanyEquipmentRouteImport } from './routes/_authenticated/company/equipment'
 import { Route as AuthenticatedCompanyDirectoryRouteImport } from './routes/_authenticated/company/directory'
 import { Route as AuthenticatedCompanyCostCodesRouteImport } from './routes/_authenticated/company/cost-codes'
@@ -238,6 +239,12 @@ const AuthenticatedCompanyPermissionsRoute =
     path: '/permissions',
     getParentRoute: () => AuthenticatedCompanyRouteRoute,
   } as any)
+const AuthenticatedCompanyFormTemplatesRoute =
+  AuthenticatedCompanyFormTemplatesRouteImport.update({
+    id: '/form-templates',
+    path: '/form-templates',
+    getParentRoute: () => AuthenticatedCompanyRouteRoute,
+  } as any)
 const AuthenticatedCompanyEquipmentRoute =
   AuthenticatedCompanyEquipmentRouteImport.update({
     id: '/equipment',
@@ -301,6 +308,7 @@ export interface FileRoutesByFullPath {
   '/company/cost-codes': typeof AuthenticatedCompanyCostCodesRoute
   '/company/directory': typeof AuthenticatedCompanyDirectoryRoute
   '/company/equipment': typeof AuthenticatedCompanyEquipmentRoute
+  '/company/form-templates': typeof AuthenticatedCompanyFormTemplatesRoute
   '/company/permissions': typeof AuthenticatedCompanyPermissionsRoute
   '/company/templates': typeof AuthenticatedCompanyTemplatesRoute
   '/company/vendors': typeof AuthenticatedCompanyVendorsRoute
@@ -341,6 +349,7 @@ export interface FileRoutesByTo {
   '/company/cost-codes': typeof AuthenticatedCompanyCostCodesRoute
   '/company/directory': typeof AuthenticatedCompanyDirectoryRoute
   '/company/equipment': typeof AuthenticatedCompanyEquipmentRoute
+  '/company/form-templates': typeof AuthenticatedCompanyFormTemplatesRoute
   '/company/permissions': typeof AuthenticatedCompanyPermissionsRoute
   '/company/templates': typeof AuthenticatedCompanyTemplatesRoute
   '/company/vendors': typeof AuthenticatedCompanyVendorsRoute
@@ -384,6 +393,7 @@ export interface FileRoutesById {
   '/_authenticated/company/cost-codes': typeof AuthenticatedCompanyCostCodesRoute
   '/_authenticated/company/directory': typeof AuthenticatedCompanyDirectoryRoute
   '/_authenticated/company/equipment': typeof AuthenticatedCompanyEquipmentRoute
+  '/_authenticated/company/form-templates': typeof AuthenticatedCompanyFormTemplatesRoute
   '/_authenticated/company/permissions': typeof AuthenticatedCompanyPermissionsRoute
   '/_authenticated/company/templates': typeof AuthenticatedCompanyTemplatesRoute
   '/_authenticated/company/vendors': typeof AuthenticatedCompanyVendorsRoute
@@ -428,6 +438,7 @@ export interface FileRouteTypes {
     | '/company/cost-codes'
     | '/company/directory'
     | '/company/equipment'
+    | '/company/form-templates'
     | '/company/permissions'
     | '/company/templates'
     | '/company/vendors'
@@ -468,6 +479,7 @@ export interface FileRouteTypes {
     | '/company/cost-codes'
     | '/company/directory'
     | '/company/equipment'
+    | '/company/form-templates'
     | '/company/permissions'
     | '/company/templates'
     | '/company/vendors'
@@ -510,6 +522,7 @@ export interface FileRouteTypes {
     | '/_authenticated/company/cost-codes'
     | '/_authenticated/company/directory'
     | '/_authenticated/company/equipment'
+    | '/_authenticated/company/form-templates'
     | '/_authenticated/company/permissions'
     | '/_authenticated/company/templates'
     | '/_authenticated/company/vendors'
@@ -789,6 +802,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedCompanyPermissionsRouteImport
       parentRoute: typeof AuthenticatedCompanyRouteRoute
     }
+    '/_authenticated/company/form-templates': {
+      id: '/_authenticated/company/form-templates'
+      path: '/form-templates'
+      fullPath: '/company/form-templates'
+      preLoaderRoute: typeof AuthenticatedCompanyFormTemplatesRouteImport
+      parentRoute: typeof AuthenticatedCompanyRouteRoute
+    }
     '/_authenticated/company/equipment': {
       id: '/_authenticated/company/equipment'
       path: '/equipment'
@@ -845,6 +865,7 @@ interface AuthenticatedCompanyRouteRouteChildren {
   AuthenticatedCompanyCostCodesRoute: typeof AuthenticatedCompanyCostCodesRoute
   AuthenticatedCompanyDirectoryRoute: typeof AuthenticatedCompanyDirectoryRoute
   AuthenticatedCompanyEquipmentRoute: typeof AuthenticatedCompanyEquipmentRoute
+  AuthenticatedCompanyFormTemplatesRoute: typeof AuthenticatedCompanyFormTemplatesRoute
   AuthenticatedCompanyPermissionsRoute: typeof AuthenticatedCompanyPermissionsRoute
   AuthenticatedCompanyTemplatesRoute: typeof AuthenticatedCompanyTemplatesRoute
   AuthenticatedCompanyVendorsRoute: typeof AuthenticatedCompanyVendorsRoute
@@ -856,6 +877,8 @@ const AuthenticatedCompanyRouteRouteChildren: AuthenticatedCompanyRouteRouteChil
     AuthenticatedCompanyCostCodesRoute: AuthenticatedCompanyCostCodesRoute,
     AuthenticatedCompanyDirectoryRoute: AuthenticatedCompanyDirectoryRoute,
     AuthenticatedCompanyEquipmentRoute: AuthenticatedCompanyEquipmentRoute,
+    AuthenticatedCompanyFormTemplatesRoute:
+      AuthenticatedCompanyFormTemplatesRoute,
     AuthenticatedCompanyPermissionsRoute: AuthenticatedCompanyPermissionsRoute,
     AuthenticatedCompanyTemplatesRoute: AuthenticatedCompanyTemplatesRoute,
     AuthenticatedCompanyVendorsRoute: AuthenticatedCompanyVendorsRoute,

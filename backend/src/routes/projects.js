@@ -390,6 +390,8 @@ router.use("/:projectId/ncr", nestedProjectAccess, require("./ncr"));
 router.use("/:projectId/itp", nestedProjectAccess, require("./itp"));
 router.use("/:projectId/defects", nestedProjectAccess, require("./defects"));
 router.use("/:projectId/punch", nestedProjectAccess, require("./punch"));
+router.use("/:projectId/forms/templates", nestedProjectAccess, require("./form-templates"));
+router.use("/:projectId/forms", nestedProjectAccess, require("./forms"));
 router.use("/:projectId/safety", nestedProjectAccess, require("./safety"));
 router.use(
   "/:projectId/material-tests",

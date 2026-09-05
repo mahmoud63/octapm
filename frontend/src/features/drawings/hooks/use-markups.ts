@@ -55,6 +55,7 @@ export const PIN_RECORD_TYPES = [
   'rfi',
   'defect',
   'punch_item',
+  'form_instance',
   'photo',
   'ncr',
   'submittal',

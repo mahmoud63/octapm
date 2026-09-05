@@ -9,6 +9,7 @@ const { validate } = require("../middleware/validate");
 const { moneyBody } = require("../utils/money");
 const companyWorkspaceService = require("../services/company-workspace.service");
 const projectTemplateService = require("../services/project-template.service");
+const formService = require("../services/form.service");
 
 /**
  * Company workspace (OCTA-ADM-COMPANY-007): directory, vendors, cost codes,
@@ -298,6 +299,80 @@ router.delete(
     sendSuccess(
       res,
       await projectTemplateService.archiveTemplate({ orgId: req.user.orgId, templateId: req.params.id, ...actor(req) }),
+    ),
+  ),
+);
+
+// ─── Checklist / form templates (company library) ───────────────────────────
+const formActor = (req) => ({ id: req.user.id, name: req.user.name, role: getEffectiveRole(req) });
+const formTemplateValidators = ({ requireName = false } = {}) => [
+  requireName ? body("name").isString().trim().notEmpty().isLength({ max: 200 }) : body("name").optional().isString().trim().notEmpty().isLength({ max: 200 }),
+  body("description").optional({ nullable: true }).isString().trim().isLength({ max: 2000 }),
+  body("trade").optional({ nullable: true }).isString().trim().isLength({ max: 80 }),
+  body("type").optional().isIn(formService.TYPES),
+  body("status").optional().isIn(["draft", "active", "archived"]),
+  body("settings").optional({ nullable: true }).isObject(),
+  body("sections").optional().isArray({ max: 100 }),
+  body("sections.*.items").optional().isArray({ max: 500 }),
+  validate,
+];
+
+router.get(
+  "/form-templates",
+  [
+    query("type").optional().isIn(formService.TYPES),
+    query("status").optional().isIn(["draft", "active", "archived"]),
+    query("includeArchived").optional().isBoolean().toBoolean(),
+    query("search").optional().isString().trim().isLength({ max: 120 }),
+    validate,
+  ],
+  asyncHandler(async (req, res) => sendSuccess(res, await formService.listTemplates({ orgId: req.user.orgId, projectId: null, query: { ...req.query, scope: "company" } }))),
+);
+
+router.post(
+  "/form-templates",
+  requireCompanyAdmin,
+  formTemplateValidators({ requireName: true }),
+  asyncHandler(async (req, res) => sendSuccess(res, await formService.createTemplate({ orgId: req.user.orgId, projectId: null, payload: req.body, actor: formActor(req) }), 201)),
+);
+
+router.post(
+  "/form-templates/starters",
+  requireCompanyAdmin,
+  asyncHandler(async (req, res) => sendSuccess(res, await formService.seedStarterTemplates({ orgId: req.user.orgId, actor: formActor(req) }), 201)),
+);
+
+router.get(
+  "/form-templates/:id",
+  [param("id").isUUID(), validate],
+  asyncHandler(async (req, res) => sendSuccess(res, await formService.getTemplate({ orgId: req.user.orgId, projectId: null, templateId: req.params.id }))),
+);
+
+router.patch(
+  "/form-templates/:id",
+  requireCompanyAdmin,
+  [param("id").isUUID(), ...formTemplateValidators()],
+  asyncHandler(async (req, res) =>
+    sendSuccess(res, await formService.updateTemplate({ orgId: req.user.orgId, projectId: null, templateId: req.params.id, payload: req.body, actor: formActor(req) })),
+  ),
+);
+
+router.delete(
+  "/form-templates/:id",
+  requireCompanyAdmin,
+  [param("id").isUUID(), validate],
+  asyncHandler(async (req, res) => sendSuccess(res, await formService.archiveTemplate({ orgId: req.user.orgId, projectId: null, templateId: req.params.id, actor: formActor(req) }))),
+);
+
+router.post(
+  "/form-templates/:id/duplicate",
+  requireCompanyAdmin,
+  [param("id").isUUID(), body("targetProjectId").optional({ nullable: true }).isUUID(), body("name").optional({ nullable: true }).isString().trim().isLength({ max: 200 }), validate],
+  asyncHandler(async (req, res) =>
+    sendSuccess(
+      res,
+      await formService.duplicateTemplate({ orgId: req.user.orgId, templateId: req.params.id, targetProjectId: req.body.targetProjectId || null, name: req.body.name, actor: formActor(req) }),
+      201,
     ),
   ),
 );

@@ -45,6 +45,7 @@ const PIN_TARGETS = Object.freeze({
   task: { label: "Task", module: "task", create: false },
   safety_incident: { label: "Safety incident", module: "safety", create: false },
   itp: { label: "ITP", module: "ncr", create: false },
+  form_instance: { label: "Inspection", module: "inspection", create: false },
   correspondence: { label: "Correspondence", module: "document_control", create: false },
 });
 

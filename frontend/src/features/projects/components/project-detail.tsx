@@ -251,7 +251,7 @@ export function ProjectDetail({
         label: 'Quality',
         children: [
           { key: 'ncr', label: 'NCR' },
-          { key: 'itp', label: 'ITP' },
+          { key: 'itp', label: 'Inspections' },
           { key: 'defects', label: 'Punch list' },
           { key: 'safety', label: 'Safety' },
           { key: 'tests', label: 'Material Tests' },

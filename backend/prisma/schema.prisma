@@ -60,6 +60,8 @@ model Organisation {
   markups             Markup[]
   pins                Pin[]
   punchItems          PunchItem[]
+  formTemplates       FormTemplate[]
+  formInstances       FormInstance[]
   punchItemEvents     PunchItemEvent[]
 }
 
@@ -143,6 +145,11 @@ model User {
   punchManager            PunchItem[]         @relation("PunchManagerUser")
   punchFinalApprover      PunchItem[]         @relation("PunchFinalApproverUser")
   punchBallInCourt        PunchItem[]         @relation("PunchBallInCourtUser")
+  formAssignee            FormInstance[]      @relation("FormAssigneeUser")
+  formInspector           FormInstance[]      @relation("FormInspectorUser")
+  formApprover            FormInstance[]      @relation("FormApproverUser")
+  formBallInCourt         FormInstance[]      @relation("FormBallInCourtUser")
+  signatures              Signature[]         @relation("SignatureUser")
   safetyOwner             SafetyIncident[]    @relation("SafetyOwnerUser")
   safetyReviewer          SafetyIncident[]    @relation("SafetyReviewerUser")
   safetyApprover          SafetyIncident[]    @relation("SafetyApproverUser")
@@ -246,6 +253,7 @@ model Company {
   itpAssignments            ItpRecord[]      @relation("ItpAssigneeCompany")
   defectAssignments         DefectRecord[]   @relation("DefectAssigneeCompany")
   punchAssignments          PunchItem[]      @relation("PunchAssigneeCompany")
+  formAssignments           FormInstance[]   @relation("FormAssigneeCompany")
   safetyAssignments         SafetyIncident[] @relation("SafetyAssigneeCompany")
   materialTestAssignments   MaterialTest[]   @relation("MaterialTestAssigneeCompany")
   rfiAssignments            Rfi[]            @relation("RfiAssigneeCompany")
@@ -418,6 +426,8 @@ model Project {
   markups                       Markup[]
   pins                          Pin[]
   punchItems                    PunchItem[]
+  formTemplates                 FormTemplate[]
+  formInstances                 FormInstance[]
   punchItemEvents               PunchItemEvent[]
 
   @@index([orgId])
@@ -1175,6 +1185,7 @@ model ProjectDocument {
   chunks                   DocumentChunk[]
   drawingSets              DrawingSet[]              @relation("DrawingSetSource")
   sheetRevisions           SheetRevision[]           @relation("SheetRevisionDocument")
+  signatures               Signature[]
 
   @@index([orgId])
   @@index([projectId])
@@ -1279,6 +1290,7 @@ model Activity {
   ncrRecords             NcrRecord[]
   defectRecords          DefectRecord[]
   punchItems             PunchItem[]
+  formInstances          FormInstance[]
   safetyIncidents        SafetyIncident[]
   materialTests          MaterialTest[]
   rfis                   Rfi[]
@@ -3772,6 +3784,7 @@ model Location {
   photos     Photo[]
   sheets     Sheet[]
   punchItems PunchItem[]
+  formInstances FormInstance[]
 
   @@unique([projectId, code])
   @@index([orgId])
@@ -3978,6 +3991,7 @@ model Sheet {
   markups    Markup[]
   pins       Pin[]
   punchItems PunchItem[]
+  formInstances FormInstance[]
 
   @@unique([projectId, number])
   @@index([orgId])
@@ -4424,4 +4438,192 @@ model OutboundEvent {
   @@index([projectId, createdAt])
   @@index([entityType, entityId])
   @@index([type, createdAt])
+}
+
+// ─── Checklist / template engine (OCTA-QA-TEMPLATE-014) ───
+// A template (company-wide when projectId is null, or per project) is a list
+// of sections and items; an instance is one filled-in copy tied to an
+// activity / location / drawing. ITP hold-point items block progress
+// approval on their activity until they pass.
+model FormTemplate {
+  id               String   @id @default(uuid())
+  orgId            String
+  projectId        String?
+  sourceTemplateId String?
+  type             String   @default("inspection") // inspection, itp, form, talk
+  name             String
+  description      String?
+  trade            String?
+  version          Int      @default(1)
+  status           String   @default("active") // draft, active, archived
+  isSystem         Boolean  @default(false)
+  settingsJson     Json     @default("{}") // { requireSignatures: ["inspector"], deficiencyTarget: "punch_item", instructions }
+  createdBy        String?
+  updatedBy        String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  org       Organisation   @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  project   Project?       @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  sections  FormSection[]
+  items     FormItem[]
+  instances FormInstance[]
+
+  @@index([orgId, projectId, type, status])
+  @@index([projectId, status])
+}
+
+model FormSection {
+  id          String  @id @default(uuid())
+  templateId  String
+  title       String
+  description String?
+  sortOrder   Int     @default(0)
+
+  template FormTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  items    FormItem[]
+
+  @@index([templateId, sortOrder])
+}
+
+model FormItem {
+  id                  String   @id @default(uuid())
+  templateId          String
+  sectionId           String
+  sortOrder           Int      @default(0)
+  label               String
+  description         String?
+  responseType        String   @default("pass_fail") // pass_fail, yes_no, checkbox, text, number, choice, date, photo, signature
+  required            Boolean  @default(true)
+  photoRequired       Boolean  @default(false)
+  isHoldPoint         Boolean  @default(false)
+  inspectionPointType String? // hold, witness, review
+  optionsJson         Json? // choice: ["A","B"]; number: { min, max, unit }
+  reference           String? // spec clause / drawing
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  template  FormTemplate       @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  section   FormSection        @relation(fields: [sectionId], references: [id], onDelete: Cascade)
+  responses FormItemResponse[]
+  signatures Signature[]
+
+  @@index([templateId])
+  @@index([sectionId, sortOrder])
+}
+
+model FormInstance {
+  id                String    @id @default(uuid())
+  orgId             String
+  projectId         String
+  templateId        String
+  templateVersion   Int       @default(1)
+  number            Int
+  ref               String // INS-001, ITP-001, FRM-001, TBT-001
+  type              String
+  title             String
+  status            String    @default("scheduled") // scheduled, in_progress, complete, closed, void
+  outcome           String? // pass, fail, incomplete
+  activityId        String?
+  locationId        String?
+  sheetId           String?
+  assigneeUserId    String?
+  assigneeCompanyId String?
+  inspectorUserId   String?
+  approverUserId    String?
+  ballInCourtUserId String?
+  scheduledFor      DateTime?
+  dueDate           DateTime?
+  recurrenceJson    Json? // { every: "day"|"week"|"month", interval, until }
+  startedAt         DateTime?
+  completedAt       DateTime?
+  completedBy       String?
+  closedAt          DateTime?
+  closedBy          String?
+  reopenReason      String?
+  summaryJson       Json? // { total, answered, passed, failed, na, deficient, holdPointsOpen }
+  clientRequestId   String?
+  clientCreatedAt   DateTime?
+  deviceId          String?
+  legacyItpId       String?   @unique
+  createdBy         String?
+  updatedBy         String?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  org             Organisation       @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  project         Project            @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  template        FormTemplate       @relation(fields: [templateId], references: [id], onDelete: Restrict)
+  activity        Activity?          @relation(fields: [activityId], references: [id], onDelete: SetNull)
+  location        Location?          @relation(fields: [locationId], references: [id], onDelete: SetNull)
+  sheet           Sheet?             @relation(fields: [sheetId], references: [id], onDelete: SetNull)
+  assigneeUser    User?              @relation("FormAssigneeUser", fields: [assigneeUserId], references: [id], onDelete: SetNull)
+  assigneeCompany Company?           @relation("FormAssigneeCompany", fields: [assigneeCompanyId], references: [id], onDelete: SetNull)
+  inspectorUser   User?              @relation("FormInspectorUser", fields: [inspectorUserId], references: [id], onDelete: SetNull)
+  approverUser    User?              @relation("FormApproverUser", fields: [approverUserId], references: [id], onDelete: SetNull)
+  ballInCourtUser User?              @relation("FormBallInCourtUser", fields: [ballInCourtUserId], references: [id], onDelete: SetNull)
+  responses       FormItemResponse[]
+  signatures      Signature[]
+
+  @@unique([projectId, ref])
+  @@unique([projectId, clientRequestId])
+  @@index([orgId])
+  @@index([projectId, status])
+  @@index([projectId, type, status])
+  @@index([projectId, activityId, type])
+  @@index([projectId, scheduledFor])
+  @@index([templateId])
+  @@index([assigneeUserId])
+  @@index([ballInCourtUserId])
+  @@index([assigneeCompanyId])
+}
+
+model FormItemResponse {
+  id                   String    @id @default(uuid())
+  instanceId           String
+  itemId               String
+  value                String? // pass|fail|na, yes|no|na, checked|unchecked, text, number, choice, ISO date
+  numberValue          Float?
+  note                 String?
+  isDeficient          Boolean   @default(false)
+  deficiencyRecordType String? // punch_item, observation
+  deficiencyRecordId   String?
+  answeredBy           String?
+  answeredAt           DateTime?
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+
+  instance FormInstance @relation(fields: [instanceId], references: [id], onDelete: Cascade)
+  item     FormItem     @relation(fields: [itemId], references: [id], onDelete: Cascade)
+
+  @@unique([instanceId, itemId])
+  @@index([itemId])
+  @@index([deficiencyRecordType, deficiencyRecordId])
+}
+
+model Signature {
+  id            String   @id @default(uuid())
+  orgId         String
+  projectId     String
+  recordType    String   @default("form_instance")
+  recordId      String
+  instanceId    String?
+  itemId        String?
+  role          String // inspector, approver, subcontractor, witness, attendee
+  userId        String?
+  signerName    String
+  signerCompany String?
+  documentId    String?
+  signedAt      DateTime @default(now())
+  ipAddress     String?
+  userAgent     String?
+
+  instance FormInstance?    @relation(fields: [instanceId], references: [id], onDelete: Cascade)
+  item     FormItem?        @relation(fields: [itemId], references: [id], onDelete: SetNull)
+  user     User?            @relation("SignatureUser", fields: [userId], references: [id], onDelete: SetNull)
+  document ProjectDocument? @relation(fields: [documentId], references: [id], onDelete: SetNull)
+
+  @@index([recordType, recordId])
+  @@index([projectId])
+  @@index([instanceId])
 }

@@ -24,6 +24,7 @@ import { Label } from '@/components/ui/label'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Textarea } from '@/components/ui/textarea'
 import { UserPicker } from '@/components/user-picker'
+import { InspectionsModule } from '@/features/inspections/components/inspections-module'
 import type { ProjectSetupTarget } from '@/features/projects/data/schema'
 import { PunchModule } from '@/features/punch/components/punch-module'
 import {
@@ -462,7 +463,7 @@ export function QualityDashboard({
               NCR
             </TabsTrigger>
             <TabsTrigger className='min-h-10' value='itp'>
-              ITP
+              Inspections
             </TabsTrigger>
             <TabsTrigger className='min-h-10' value='defects'>
               Punch list
@@ -619,38 +620,47 @@ export function QualityDashboard({
         </TabsContent>
 
         <TabsContent value='itp' className='space-y-2'>
-          <div className='flex flex-col gap-2 sm:flex-row'>
-            <Input
-              aria-label='ITP title'
-              placeholder='ITP title'
-              value={itpTitle}
-              onChange={(e) => setItpTitle(e.target.value)}
-            />
-            <Button
-              className='min-h-10 w-full sm:w-auto'
-              disabled={createItp.isPending || !itpTitle}
-              onClick={async () => {
-                try {
-                  await createItp.mutateAsync({ title: itpTitle })
-                  setItpTitle('')
-                  toast.success('ITP created')
-                } catch {
-                  toast.error('Failed to create ITP')
-                }
-              }}
-            >
-              Add
-            </Button>
-          </div>
-          <WorkflowRecordList
+          <InspectionsModule
+            key={`${initialTarget?.source ?? ''}:${initialTarget?.recordId ?? ''}`}
             projectId={projectId}
-            recordType='itp'
-            rows={itps?.rows}
-            emptyText='No ITP records'
-            getRef={(row) => row.ref}
-            getTitle={(row) => row.title}
-            getSubtitle={(row) => row.pointType}
-            getStatus={(row) => row.status}
+            initialTarget={initialTarget}
+            legacy={
+              <>
+                <div className='flex flex-col gap-2 sm:flex-row'>
+                  <Input
+                    aria-label='ITP title'
+                    placeholder='ITP title'
+                    value={itpTitle}
+                    onChange={(e) => setItpTitle(e.target.value)}
+                  />
+                  <Button
+                    className='min-h-10 w-full sm:w-auto'
+                    disabled={createItp.isPending || !itpTitle}
+                    onClick={async () => {
+                      try {
+                        await createItp.mutateAsync({ title: itpTitle })
+                        setItpTitle('')
+                        toast.success('ITP created')
+                      } catch {
+                        toast.error('Failed to create ITP')
+                      }
+                    }}
+                  >
+                    Add
+                  </Button>
+                </div>
+                <WorkflowRecordList
+                  projectId={projectId}
+                  recordType='itp'
+                  rows={itps?.rows}
+                  emptyText='No ITP records'
+                  getRef={(row) => row.ref}
+                  getTitle={(row) => row.title}
+                  getSubtitle={(row) => row.pointType}
+                  getStatus={(row) => row.status}
+                />
+              </>
+            }
           />
         </TabsContent>
 
