@@ -68,6 +68,7 @@ import {
   type RfiRecord,
   type RfiUpgradeFields,
 } from '../hooks/use-doc-control'
+import { RfiResponseAssistant } from './rfi-ai-response'
 import { RfiPeopleList } from './rfi-people-list'
 
 const NONE = '__none'
@@ -890,6 +891,12 @@ export function RfiDetailDialog({
                   ))}
                 </ul>
               )}
+              <RfiResponseAssistant
+                projectId={projectId}
+                rfi={rfi}
+                canDraft={canRespond && !closed}
+                onUseDraft={(text) => setReply(text)}
+              />
               {canRespond && !closed && (
                 <div className='space-y-2'>
                   <Textarea

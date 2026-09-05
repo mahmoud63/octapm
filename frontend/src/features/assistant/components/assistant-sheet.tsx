@@ -47,7 +47,7 @@ export const useCurrentProjectId = () => {
   return match?.[1] ?? null
 }
 
-function CitationChip({ citation }: { citation: AssistantCitation }) {
+export function CitationChip({ citation }: { citation: AssistantCitation }) {
   const link = workspaceLink(citation.url)
   const label = `${citation.n}`
   const title = `${citation.typeLabel}${citation.ref ? ` ${citation.ref}` : ''} — ${citation.title}`
@@ -75,13 +75,20 @@ function CitationChip({ citation }: { citation: AssistantCitation }) {
   )
 }
 
-function AnswerText({ message }: { message: AssistantMessage }) {
-  const byNumber = new Map(
-    message.citations.map((citation) => [citation.n, citation])
-  )
+/** Text with `[n]` markers rendered as citation chips; shared by every AI feature. */
+export function CitedText({
+  content,
+  citations,
+  className,
+}: {
+  content: string
+  citations: AssistantCitation[]
+  className?: string
+}) {
+  const byNumber = new Map(citations.map((citation) => [citation.n, citation]))
   return (
-    <div className='space-y-1 text-sm whitespace-pre-wrap'>
-      {message.content.split('\n').map((line, lineIndex) => (
+    <div className={cn('space-y-1 text-sm whitespace-pre-wrap', className)}>
+      {content.split('\n').map((line, lineIndex) => (
         <p key={lineIndex} className={cn(line.startsWith('-') && 'pl-3')}>
           {splitCitations(line).map((part, index) => {
             if (part.kind === 'text')
@@ -99,7 +106,11 @@ function AnswerText({ message }: { message: AssistantMessage }) {
   )
 }
 
-function SourcesList({ citations }: { citations: AssistantCitation[] }) {
+function AnswerText({ message }: { message: AssistantMessage }) {
+  return <CitedText content={message.content} citations={message.citations} />
+}
+
+export function SourcesList({ citations }: { citations: AssistantCitation[] }) {
   if (citations.length === 0) return null
   return (
     <ul className='space-y-0.5 text-xs' data-testid='uat-assistant-sources'>

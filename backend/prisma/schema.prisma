@@ -6224,6 +6224,10 @@ model AssistantConversation {
   projectId     String?
   userId        String
   title         String
+  // OCTA-AI-RFI-029: chat (Ask OctaPM) or a stored AI run on a record (rfi_draft, rfi_response, rfi_summary).
+  kind          String    @default("chat")
+  recordType    String?
+  recordId      String?
   lastMessageAt DateTime?
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
@@ -6234,6 +6238,7 @@ model AssistantConversation {
   messages     AssistantMessage[]
 
   @@index([orgId, userId, lastMessageAt])
+  @@index([orgId, recordType, recordId])
   @@index([projectId])
 }
 

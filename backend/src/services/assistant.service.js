@@ -64,10 +64,24 @@ const serializeConversation = (row, { withMessages = false } = {}) => ({
 
 const status = () => ({ ...aiProvider.describe(), embeddings: require("./embedding.service").describe() });
 
+/** Only chats are listed in Ask OctaPM; AI runs stored on records (OCTA-AI-RFI-029) have their own kind. */
 const listConversations = async ({ orgId, user, projectId = null, limit = 30 }) => {
   if (!tablesReady()) return [];
-  const rows = await prisma.assistantConversation.findMany({ where: { orgId, userId: user.id, ...(projectId ? { projectId } : {}) }, include: { project: { select: { id: true, name: true } }, _count: { select: { messages: true } } }, orderBy: [{ lastMessageAt: "desc" }, { createdAt: "desc" }], take: Math.min(100, Math.max(1, Number(limit) || 30)) });
+  const rows = await prisma.assistantConversation.findMany({ where: { orgId, userId: user.id, kind: "chat", ...(projectId ? { projectId } : {}) }, include: { project: { select: { id: true, name: true } }, _count: { select: { messages: true } } }, orderBy: [{ lastMessageAt: "desc" }, { createdAt: "desc" }], take: Math.min(100, Math.max(1, Number(limit) || 30)) });
   return rows.map((row) => serializeConversation(row));
+};
+
+/**
+ * Stores one AI run made on behalf of a record (an RFI draft, a suggested
+ * response, a summary) as a conversation of `kind` with the prompt and the
+ * answer, so it can be audited and rated like a chat answer.
+ */
+const storeRun = async ({ orgId, user, projectId = null, kind, recordType = null, recordId = null, title, prompt, answer, citations = [], sources = [], usage = null, provider = null, model = null }) => {
+  if (!tablesReady()) return null;
+  const conversation = await prisma.assistantConversation.create({ data: { orgId, projectId, userId: user.id, kind, recordType, recordId, title: String(title || kind).slice(0, 120), lastMessageAt: new Date() } });
+  await prisma.assistantMessage.create({ data: { orgId, conversationId: conversation.id, role: "user", content: String(prompt || "").slice(0, 20000) } });
+  const message = await prisma.assistantMessage.create({ data: { orgId, conversationId: conversation.id, role: "assistant", content: String(answer || ""), citationsJson: citations, sourcesJson: sources.map((source) => ({ n: source.n, id: source.id, type: source.type, title: source.title, ref: source.ref, projectId: source.projectId, url: source.url })), usageJson: usage, provider, model } });
+  return { conversationId: conversation.id, message: serializeMessage(message) };
 };
 
 const loadConversation = async ({ orgId, user, conversationId }) => {
@@ -131,7 +145,7 @@ const ask = async ({ orgId, user, projectId = null, conversationId = null, quest
   let conversation = conversationId ? await loadConversation({ orgId, user, conversationId }) : null;
   const scopeProjectId = conversation?.projectId ?? projectId ?? null;
   if (!conversation) {
-    conversation = await prisma.assistantConversation.create({ data: { orgId, projectId: scopeProjectId, userId: user.id, title: text.slice(0, 120), lastMessageAt: new Date() }, include: { project: { select: { id: true, name: true } }, messages: true } });
+    conversation = await prisma.assistantConversation.create({ data: { orgId, projectId: scopeProjectId, userId: user.id, kind: "chat", title: text.slice(0, 120), lastMessageAt: new Date() }, include: { project: { select: { id: true, name: true } }, messages: true } });
   }
   const history = (conversation.messages || []).slice(-MAX_HISTORY).map((message) => ({ role: message.role, content: message.content }));
   const userMessage = await prisma.assistantMessage.create({ data: { orgId, conversationId: conversation.id, role: "user", content: text } });
@@ -211,4 +225,4 @@ const executeAction = async ({ orgId, user, projectId, action = {}, projectAcces
   throw new HttpError(400, "ASSISTANT_ACTION_UNKNOWN", "Unknown action");
 };
 
-module.exports = { SYSTEM_PROMPT, ACTION_TYPES, status, listConversations, getConversation, deleteConversation, ask, feedback, executeAction, normalizeActions, citationsFrom };
+module.exports = { SYSTEM_PROMPT, ACTION_TYPES, status, listConversations, getConversation, deleteConversation, ask, feedback, executeAction, normalizeActions, citationsFrom, storeRun, serializeMessage };

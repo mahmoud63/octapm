@@ -35,6 +35,7 @@ import {
 } from '@/features/custom-fields/hooks/use-custom-fields'
 import { LocationPicker } from '@/features/locations/components/location-picker'
 import { useCreateRfi, type RfiRecord } from '../hooks/use-doc-control'
+import { RfiDraftAssistant, SimilarRfis } from './rfi-ai-draft'
 import { RfiPeopleList } from './rfi-people-list'
 
 const NONE = '__none'
@@ -163,6 +164,22 @@ export function RfiCreateDialog({
             manager until it is opened.
           </DialogDescription>
         </DialogHeader>
+        <RfiDraftAssistant
+          projectId={projectId}
+          references={{ specSection, discipline, activityId, locationId }}
+          onApply={(draft) => {
+            setSubject(draft.subject)
+            setQuestion(draft.questionPlain || draft.question)
+            if (draft.discipline) setDiscipline(draft.discipline)
+            if (draft.specSection) setSpecSection(draft.specSection)
+            setPriority(draft.priority)
+            setCostImpact(draft.costImpact)
+            setScheduleImpactFlag(draft.scheduleImpactFlag)
+            toast.success(
+              'Draft applied — check every field before opening the RFI'
+            )
+          }}
+        />
         <div className='grid gap-3 sm:grid-cols-2'>
           <div className='space-y-1 sm:col-span-2'>
             <Label htmlFor='rfi-subject'>Subject</Label>
@@ -174,6 +191,7 @@ export function RfiCreateDialog({
               maxLength={200}
               data-testid='uat-rfi-subject'
             />
+            <SimilarRfis projectId={projectId} query={subject} />
           </div>
           <div className='space-y-1 sm:col-span-2'>
             <Label htmlFor='rfi-question'>Question</Label>

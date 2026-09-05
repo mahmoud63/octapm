@@ -25,6 +25,8 @@ const rfiWorkflow = require("../services/rfi-workflow.service");
 
 const router = express.Router({ mergeParams: true });
 router.use(authenticate);
+// OCTA-AI-RFI-029: `/ai/*` and `/:rfiId/ai/*` — registered before the record routes.
+router.use(require("./rfi-assistant"));
 
 // OCTA-PM-RFI-016 fields shared by create and update.
 const upgradeValidators = () => [

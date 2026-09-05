@@ -31,8 +31,8 @@ const stripHtml = (text) => String(text || "").replace(/<[^>]+>/g, "");
 
 /** How to turn a record hit into quotable text. Keys are search result types. */
 const BODY_LOADERS = Object.freeze({
-  rfi: { model: "rfi", select: { subject: true, question: true, response: true, status: true, discipline: true }, text: (row) => [row.question ? `Question: ${row.question}` : null, row.response ? `Answer: ${row.response}` : null, row.discipline ? `Discipline: ${row.discipline}` : null].filter(Boolean).join("\n") },
-  submittal: { model: "submittal", select: { title: true, remarks: true, status: true, responseCodeLabel: true }, text: (row) => [row.remarks ? `Remarks: ${row.remarks}` : null, row.responseCodeLabel ? `Response: ${row.responseCodeLabel}` : null, `Status: ${row.status}`].filter(Boolean).join("\n") },
+  rfi: { model: "rfi", select: { subject: true, question: true, response: true, status: true, discipline: true, specSection: true }, text: (row) => [row.question ? `Question: ${row.question}` : null, row.response ? `Answer: ${row.response}` : null, row.specSection ? `Spec section: ${row.specSection}` : null, row.discipline ? `Discipline: ${row.discipline}` : null].filter(Boolean).join("\n") },
+  submittal: { model: "submittal", select: { title: true, remarks: true, status: true, responseCodeLabel: true, specRef: true }, text: (row) => [row.remarks ? `Remarks: ${row.remarks}` : null, row.responseCodeLabel ? `Response: ${row.responseCodeLabel}` : null, row.specRef ? `Spec: ${row.specRef}` : null, `Status: ${row.status}`].filter(Boolean).join("\n") },
   correspondence: { model: "correspondence", select: { subject: true, body: true, direction: true, type: true }, text: (row) => [row.body, `${row.direction} ${row.type}`].filter(Boolean).join("\n") },
   change_order: { model: "changeOrder", select: { description: true, value: true, status: true, category: true }, text: (row) => [row.description, row.value !== undefined && row.value !== null ? `Value: ${row.value}` : null, row.category ? `Category: ${row.category}` : null].filter(Boolean).join("\n") },
   ncr: { model: "ncrRecord", select: { description: true, status: true, dueDate: true }, text: (row) => [row.description, row.dueDate ? `Due: ${toIso(row.dueDate)?.slice(0, 10)}` : null].filter(Boolean).join("\n") },
@@ -96,13 +96,16 @@ const projectSummaries = async ({ orgId, projectIds }) => {
 /**
  * Sources for a question. `projectId` narrows to one project (and enables
  * semantic document hits); without it, every project the caller can open is
- * searched. Returns numbered sources ready for a prompt.
+ * searched. `types` limits the record types (search type keys); `exclude`
+ * drops sources by `record:<id>` / `document:<id>` (e.g. the record being
+ * worked on). Returns numbered sources ready for a prompt.
  */
-const retrieve = async ({ orgId, user, projectId = null, query, limit = DEFAULT_LIMIT, projectAccess = null }) => {
+const retrieve = async ({ orgId, user, projectId = null, query, limit = DEFAULT_LIMIT, projectAccess = null, types = null, exclude = [] }) => {
   const text = trimOrNull(query);
   if (!text) throw new HttpError(400, "ASSISTANT_QUESTION_REQUIRED", "Ask a question");
   const searchService = require("./search.service");
-  const search = await searchService.globalSearch({ orgId, userId: user.id, role: user.role, query: { q: text, projectId: projectId || undefined, limit: Math.max(20, limit * 2) } });
+  const search = await searchService.globalSearch({ orgId, userId: user.id, role: user.role, query: { q: text, projectId: projectId || undefined, limit: Math.max(20, limit * 2), ...(Array.isArray(types) && types.length ? { types } : {}) } });
+  const excluded = new Set((exclude || []).filter(Boolean));
   const candidates = [];
   for (const item of search.items || []) {
     const isContent = String(item.id).startsWith("content:");
@@ -125,7 +128,7 @@ const retrieve = async ({ orgId, user, projectId = null, query, limit = DEFAULT_
     });
   }
   // Semantic passes inside one project (embeddings when configured, full text otherwise).
-  if (projectId) {
+  if (projectId && (!Array.isArray(types) || !types.length || types.includes("document"))) {
     try {
       const documentText = require("./document-text.service");
       const embeddings = require("./embedding.service");
@@ -148,6 +151,7 @@ const retrieve = async ({ orgId, user, projectId = null, query, limit = DEFAULT_
   const unique = new Map();
   for (const candidate of candidates) {
     const key = `${candidate.kind}:${candidate.id}`;
+    if (excluded.has(key)) continue;
     if (!unique.has(key) || unique.get(key).score < candidate.score) unique.set(key, candidate);
   }
   const ranked = [...unique.values()].sort((a, b) => b.score - a.score || String(b.date || "").localeCompare(String(a.date || ""))).slice(0, limit);
