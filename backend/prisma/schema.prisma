@@ -52,6 +52,8 @@ model Organisation {
   comments            Comment[]
   commentMentions     CommentMention[]
   recordSubscriptions RecordSubscription[]
+  documentTexts       DocumentText[]
+  documentChunks      DocumentChunk[]
 }
 
 model User {
@@ -396,6 +398,8 @@ model Project {
   photos                        Photo[]
   comments                      Comment[]
   recordSubscriptions           RecordSubscription[]
+  documentTexts                 DocumentText[]
+  documentChunks                DocumentChunk[]
 
   @@index([orgId])
   @@index([orgId, status, archivedAt])
@@ -1148,6 +1152,8 @@ model ProjectDocument {
   taskAttachments          TaskAttachment[]
   attachments              Attachment[]
   photo                    Photo?
+  text                     DocumentText?
+  chunks                   DocumentChunk[]
 
   @@index([orgId])
   @@index([projectId])
@@ -3886,6 +3892,63 @@ model Photo {
   @@index([projectId, createdAt])
   @@index([projectId, locationId])
   @@index([projectId, thumbnailStatus])
+}
+
+// ─── Document text, chunks and embeddings (OCTA-DOC-TEXT-010) ───
+model DocumentText {
+  id              String    @id @default(uuid())
+  orgId           String
+  projectId       String
+  documentId      String    @unique
+  status          String    @default("pending") // pending, ready, unsupported, failed
+  extractor       String? // text, html, spreadsheet, docx, pptx, odf, pdf
+  text            String?
+  excerpt         String?
+  wordCount       Int       @default(0)
+  pageCount       Int?
+  chunkCount      Int       @default(0)
+  embeddingStatus String    @default("none") // none, pending, ready, failed, disabled
+  embeddingModel  String?
+  embeddingError  String?
+  error           String?
+  extractedAt     DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  // Generated in the migration: to_tsvector('english', left(text, 400000)); GIN indexed.
+  searchVector    Unsupported("tsvector")?
+
+  org      Organisation    @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  project  Project         @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  document ProjectDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  chunks   DocumentChunk[]
+
+  @@index([orgId])
+  @@index([projectId, status])
+  @@index([projectId, embeddingStatus])
+}
+
+model DocumentChunk {
+  id             String   @id @default(uuid())
+  orgId          String
+  projectId      String
+  documentId     String
+  documentTextId String
+  index          Int
+  text           String
+  charStart      Int      @default(0)
+  charEnd        Int      @default(0)
+  embedding      Float[]  @default([])
+  createdAt      DateTime @default(now())
+
+  org          Organisation    @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  project      Project         @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  document     ProjectDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  documentText DocumentText    @relation(fields: [documentTextId], references: [id], onDelete: Cascade)
+
+  @@unique([documentId, index])
+  @@index([orgId])
+  @@index([projectId, documentId])
+  @@index([documentTextId])
 }
 
 // ─── Comments, @mentions and record subscriptions (OCTA-COMM-COMMENT-009) ───

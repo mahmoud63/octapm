@@ -1147,6 +1147,54 @@ const globalSearch = async ({
   );
   results.push(...moduleResults.flat());
 
+  // Full-text hits inside document contents (OCTA-DOC-TEXT-010). Only
+  // projects where the caller can read document control are searched.
+  if (query && activeTypes.includes("document")) {
+    const contentProjectIds = projects
+      .filter(({ access }) => canReadModule(access, "document_control"))
+      .map(({ project }) => project.id);
+    if (contentProjectIds.length) {
+      try {
+        const contentHits = await require("./document-text.service").searchDocumentContent({
+          orgId,
+          projectIds: contentProjectIds,
+          q: query,
+          limit: perTypeLimit,
+        });
+        for (const hit of contentHits) {
+          const project = projectMap.get(hit.projectId);
+          results.push(
+            makeResult({
+              row: {
+                id: `content:${hit.documentId}`,
+                projectId: hit.projectId,
+                updatedAt: hit.uploadedAt,
+              },
+              project,
+              type: "document",
+              typeLabel: "Document",
+              module: "docControl",
+              title: hit.title,
+              subtitle: hit.snippetText || hit.fileName,
+              identifier: hit.documentNumber || hit.fileName,
+              status: null,
+              date: hit.uploadedAt,
+              url: hit.path || hit.fileUrl,
+              metadata: {
+                documentId: hit.documentId,
+                snippet: hit.snippet,
+                source: "content",
+                fileUrl: hit.fileUrl,
+              },
+            }),
+          );
+        }
+      } catch (error) {
+        console.error("[search] document content search failed", error?.message || error);
+      }
+    }
+  }
+
   const items = results
     .map((result) => ({
       ...result,

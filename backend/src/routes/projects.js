@@ -294,6 +294,11 @@ router.use(
 router.use("/:projectId/photos", nestedProjectAccess, require("./photos"));
 router.use("/:projectId/comments", nestedProjectAccess, require("./comments"));
 router.use(
+  "/:projectId/documents",
+  nestedProjectAccess,
+  require("./document-search"),
+);
+router.use(
   "/:projectId/subscriptions",
   nestedProjectAccess,
   require("./subscriptions"),

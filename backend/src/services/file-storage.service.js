@@ -782,7 +782,7 @@ const uploadProjectDocument = async ({
   const fileName = `${safeName(baseName)}${extension}`;
   const retentionDays = retentionDaysFor(documentType);
 
-  return prisma.projectDocument.create({
+  const document = await prisma.projectDocument.create({
     data: {
       orgId,
       projectId,
@@ -807,6 +807,26 @@ const uploadProjectDocument = async ({
       uploadedBy: userId || null,
     },
   });
+
+  // Text extraction for search runs in the background (OCTA-DOC-TEXT-010).
+  // Required lazily to avoid a service cycle; a queue failure never blocks
+  // the upload itself.
+  try {
+    const documentTextService = require('./document-text.service');
+    if (documentTextService.isExtractableDocument(document)) {
+      await documentTextService.enqueueExtraction({
+        orgId,
+        projectId,
+        documentId: document.id,
+        requestedBy: userId || null,
+        document,
+      });
+    }
+  } catch (error) {
+    console.error('[document-text] failed to queue extraction', error?.message || error);
+  }
+
+  return document;
 };
 
 const serializeUploadedDocument = ({ document, projectId, routeBase }) => ({

@@ -16,6 +16,9 @@ const registerAllHandlers = () => {
   registerJobHandler(JOB_TYPES.PHOTO_THUMBNAIL, (context) =>
     require("../../services/attachment.service").runPhotoThumbnailJob(context),
   );
+  registerJobHandler(JOB_TYPES.DOCUMENT_EXTRACT, (context) =>
+    require("../../services/document-text.service").runDocumentExtractJob(context),
+  );
 };
 
 module.exports = { registerAllHandlers };

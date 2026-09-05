@@ -67,6 +67,7 @@ import {
   useUploadDocumentRevisionFile,
   useTransmittals,
 } from '../hooks/use-doc-control'
+import { DocumentSearchPanel } from './document-search-panel'
 
 type DocDecisionTarget =
   | {
@@ -528,8 +529,13 @@ export function DocControlDashboard({
             <TabsTrigger value='drawings'>Drawings</TabsTrigger>
             <TabsTrigger value='transmittals'>Transmittals</TabsTrigger>
             <TabsTrigger value='correspondence'>Correspondence</TabsTrigger>
+            <TabsTrigger value='search'>Search</TabsTrigger>
           </TabsList>
         )}
+
+        <TabsContent value='search'>
+          <DocumentSearchPanel projectId={projectId} />
+        </TabsContent>
 
         <TabsContent value='register' className='space-y-3'>
           <div className='grid grid-cols-2 gap-2 md:grid-cols-4'>
@@ -1042,7 +1048,10 @@ export function DocControlDashboard({
                 value={rfiSubject}
                 onChange={(e) => setRfiSubject(e.target.value)}
               />
-              <Select value={rfiOwnerPartyId} onValueChange={setRfiOwnerPartyId}>
+              <Select
+                value={rfiOwnerPartyId}
+                onValueChange={setRfiOwnerPartyId}
+              >
                 <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>
@@ -1462,9 +1471,7 @@ export function DocControlDashboard({
                   </Badge>
                 ) : null}
                 {row.ownerParty?.companyName ? (
-                  <Badge variant='outline'>
-                    {row.ownerParty.companyName}
-                  </Badge>
+                  <Badge variant='outline'>{row.ownerParty.companyName}</Badge>
                 ) : null}
               </div>
             )}

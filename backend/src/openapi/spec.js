@@ -2553,6 +2553,133 @@ const components = {
         ],
       }),
     }),
+    DocumentTextSummary: objectSchema({
+      status: { type: "string", enum: ["pending", "ready", "unsupported", "failed"] },
+      extractor: { type: "string", nullable: true },
+      wordCount: { type: "integer" },
+      pageCount: { type: "integer", nullable: true },
+      embeddingStatus: {
+        type: "string",
+        enum: ["none", "pending", "ready", "failed", "disabled"],
+      },
+    }),
+    DocumentSearchHit: objectSchema({
+      documentId: uuid,
+      projectId: uuid,
+      title: { type: "string" },
+      fileName: { type: "string" },
+      originalName: { type: "string", nullable: true },
+      documentNumber: { type: "string", nullable: true },
+      mimeType: { type: "string" },
+      sizeBytes: { type: "integer" },
+      documentType: { type: "string" },
+      folderPath: { type: "string", nullable: true },
+      uploadedAt: nullableDateString,
+      rank: { type: "number", description: "Postgres ts_rank_cd score (relative)." },
+      semanticScore: {
+        type: "number",
+        nullable: true,
+        description: "Cosine similarity of the best chunk when embeddings are enabled.",
+      },
+      score: { type: "number", description: "Combined 0-1 score used for ordering." },
+      snippet: {
+        type: "string",
+        nullable: true,
+        description: "Headline with matches wrapped in [[ and ]].",
+      },
+      snippetText: { type: "string", nullable: true },
+      matchedChunk: { type: "string", nullable: true },
+      text: { ...ref("DocumentTextSummary"), nullable: true },
+      revision: {
+        nullable: true,
+        ...objectSchema({
+          id: uuid,
+          recordType: { type: "string" },
+          recordId: { type: "string" },
+          revision: { type: "string" },
+          status: { type: "string", nullable: true },
+          isLatest: { type: "boolean" },
+        }),
+      },
+      records: arrayOf(
+        objectSchema({
+          recordType: { type: "string" },
+          recordId: { type: "string" },
+          role: { type: "string" },
+          path: { type: "string", nullable: true },
+        }),
+      ),
+      path: {
+        type: "string",
+        nullable: true,
+        description: "Workspace path that opens the linked record.",
+      },
+      fileUrl: { type: "string" },
+    }),
+    DocumentSearchResponse: objectSchema({
+      query: { type: "string", nullable: true },
+      items: arrayOf(ref("DocumentSearchHit")),
+      meta: objectSchema({
+        limit: { type: "integer" },
+        total: { type: "integer" },
+        mode: { type: "string", enum: ["text", "hybrid"] },
+        embeddings: objectSchema({
+          enabled: { type: "boolean" },
+          provider: { type: "string", nullable: true },
+          model: { type: "string", nullable: true },
+        }),
+      }),
+    }),
+    DocumentTextResponse: objectSchema({
+      document: ref("DocumentSearchHit"),
+      text: {
+        nullable: true,
+        ...objectSchema({
+          documentId: uuid,
+          status: { type: "string" },
+          extractor: { type: "string", nullable: true },
+          excerpt: { type: "string", nullable: true },
+          wordCount: { type: "integer" },
+          pageCount: { type: "integer", nullable: true },
+          chunkCount: { type: "integer" },
+          embeddingStatus: { type: "string" },
+          embeddingModel: { type: "string", nullable: true },
+          error: { type: "string", nullable: true },
+          extractedAt: nullableDateString,
+          text: { type: "string" },
+          truncated: { type: "boolean" },
+          totalChars: { type: "integer" },
+        }),
+      },
+      extractable: { type: "boolean" },
+    }),
+    DocumentIndexStatus: objectSchema({
+      documents: { type: "integer" },
+      indexed: { type: "integer" },
+      notIndexed: { type: "integer" },
+      counts: objectSchema({
+        pending: { type: "integer" },
+        ready: { type: "integer" },
+        unsupported: { type: "integer" },
+        failed: { type: "integer" },
+      }),
+      embeddings: objectSchema({
+        enabled: { type: "boolean" },
+        provider: { type: "string", nullable: true },
+        model: { type: "string", nullable: true },
+      }),
+    }),
+    DocumentReindexResponse: objectSchema({
+      total: { type: "integer" },
+      queued: { type: "integer" },
+      skipped: { type: "integer" },
+      unsupported: { type: "integer" },
+    }),
+    DocumentExtractResponse: objectSchema({
+      queued: { type: "boolean" },
+      status: { type: "string" },
+      jobId: nullableUuid,
+    }),
     CompanyDirectoryEntry: objectSchema({
       id: uuid,
       orgId: uuid,
@@ -9824,6 +9951,99 @@ add(
   }),
 );
 
+// ─── Document text and search ──────────────────────────────────────────
+const documentSearchIdParam = pathParam("documentId", "ProjectDocument UUID.");
+
+add(
+  "/projects/{projectId}/documents/search",
+  "get",
+  operation({
+    tag: "Document Search",
+    summary:
+      "Search inside document contents (PDF text layers, Word, Excel, PowerPoint, text). Postgres full-text ranking with highlighted snippets; `semantic=true` adds embedding similarity when a provider is configured.",
+    operationId: "searchDocumentContent",
+    parameters: [
+      ...projectParams,
+      queryParam("q", "Search terms (websearch syntax: quotes, OR, -exclude).", {
+        type: "string",
+        minLength: 1,
+        maxLength: 200,
+      }),
+      queryParam("limit", "Maximum hits (1-50, default 20).", { type: "integer", minimum: 1, maximum: 50 }),
+      queryParam("semantic", "Also rank by embedding similarity.", { type: "boolean" }),
+    ],
+    permissions: {
+      auth: "bearer",
+      roles: ROLE_IDS,
+      note: "Needs document_control.read. Each hit is also filtered by the modules the document is linked from (e.g. an IPC attachment needs ipc.read).",
+    },
+    responseSchema: ref("DocumentSearchResponse"),
+  }),
+);
+
+add(
+  "/projects/{projectId}/documents/index-status",
+  "get",
+  operation({
+    tag: "Document Search",
+    summary: "How much of the project's document set is text-indexed, and whether embeddings are enabled.",
+    operationId: "getDocumentIndexStatus",
+    parameters: projectParams,
+    permissions: modulePermission("document_control", "read"),
+    responseSchema: ref("DocumentIndexStatus"),
+  }),
+);
+
+add(
+  "/projects/{projectId}/documents/reindex",
+  "post",
+  operation({
+    tag: "Document Search",
+    summary: "Queue text extraction for every document that is not indexed yet (or every document with `force`).",
+    operationId: "reindexDocuments",
+    parameters: projectParams,
+    permissions: modulePermission("document_control", "update"),
+    requestBody: jsonBody(objectSchema({ force: { type: "boolean" } }), "Options.", false),
+    responseSchema: ref("DocumentReindexResponse"),
+    status: 202,
+  }),
+);
+
+add(
+  "/projects/{projectId}/documents/{documentId}/text",
+  "get",
+  operation({
+    tag: "Document Search",
+    summary: "Extraction status and (truncated) extracted text of one document.",
+    operationId: "getDocumentText",
+    parameters: [
+      projectIdParam,
+      documentSearchIdParam,
+      queryParam("maxChars", "Characters of text to return (200-200000, default 20000).", {
+        type: "integer",
+        minimum: 200,
+        maximum: 200000,
+      }),
+    ],
+    permissions: modulePermission("document_control", "read"),
+    responseSchema: ref("DocumentTextResponse"),
+  }),
+);
+
+add(
+  "/projects/{projectId}/documents/{documentId}/extract",
+  "post",
+  operation({
+    tag: "Document Search",
+    summary: "Re-run text extraction for one document through the document.extract job.",
+    operationId: "extractDocumentText",
+    parameters: [projectIdParam, documentSearchIdParam],
+    permissions: modulePermission("document_control", "update"),
+    responseSchema: ref("DocumentExtractResponse"),
+    status: 202,
+  }),
+);
+
 // ─── Company workspace ──────────────────────────────────────────────────
 const companyIdParam = pathParam("id", "Record UUID scoped to the organisation.");
 const searchParam = queryParam("search", "Name contains.", { type: "string" });
@@ -10234,6 +10454,11 @@ const openApiSpec = {
       name: "Comments",
       description:
         "Comments with explicit @mentions on every record type, plus record subscriptions (follow / unfollow). Comments also appear in the record history feed (`GET /projects/{projectId}/audit?source=comment`). See docs/qa/comments-subscriptions.md.",
+    },
+    {
+      name: "Document Search",
+      description:
+        "Text extraction (PDF, Word, Excel, PowerPoint, OpenDocument, text) through the document.extract job, Postgres full-text search with snippets, and optional embeddings (OPENAI / VOYAGE / GEMINI keys) for semantic ranking. Content hits also surface in the global search. See docs/qa/document-search.md.",
     },
     {
       name: "Assignments",

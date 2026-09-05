@@ -266,6 +266,7 @@ export function ProjectDetail({
           { key: 'drawings', label: 'Drawings' },
           { key: 'transmittals', label: 'Transmittals' },
           { key: 'correspondence', label: 'Correspondence' },
+          { key: 'search', label: 'Search' },
         ],
       },
       { key: 'meetings', label: 'Meetings' },
