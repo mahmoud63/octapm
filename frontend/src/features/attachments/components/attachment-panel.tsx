@@ -57,6 +57,8 @@ const RECORD_MODULES: Record<string, PermissionModule> = {
   daily_report: 'progress',
   site_diary: 'progress',
   daily_log: 'progress',
+  bid_package: 'bid',
+  bid: 'bid',
   progress_submission: 'progress',
   activity: 'schedule',
   change_order: 'change_order',

@@ -42,6 +42,7 @@ export type PermissionModule =
   | 'portfolio'
   | 'workflow'
   | 'custom_field'
+  | 'bid'
 
 export type RoleId =
   | 'pm'

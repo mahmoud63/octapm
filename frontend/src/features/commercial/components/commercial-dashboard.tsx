@@ -1,4 +1,5 @@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { BidPackagesPanel } from '@/features/bids/components/bid-packages-panel'
 import type { ProjectSetupTarget } from '@/features/projects/data/schema'
 import type { ScheduleActivity } from '@/features/schedule/data/schema'
 import { BudgetRevisionsPanel } from './budget-revisions-panel'
@@ -39,6 +40,7 @@ export function CommercialDashboard({
             <TabsTrigger value='change-orders'>Change Orders</TabsTrigger>
             <TabsTrigger value='commitments'>Commitments</TabsTrigger>
             <TabsTrigger value='pay-apps'>Pay Applications</TabsTrigger>
+            <TabsTrigger value='bids'>Bids</TabsTrigger>
             <TabsTrigger value='ipc'>IPC</TabsTrigger>
             <TabsTrigger value='sub-valuations'>
               Sub Valuations (legacy)
@@ -83,6 +85,17 @@ export function CommercialDashboard({
             projectId={projectId}
             initialRecordId={
               initialTarget?.source === 'sub_pay_app'
+                ? initialTarget.recordId
+                : undefined
+            }
+          />
+        </TabsContent>
+
+        <TabsContent value='bids'>
+          <BidPackagesPanel
+            projectId={projectId}
+            initialRecordId={
+              initialTarget?.source === 'bid_package'
                 ? initialTarget.recordId
                 : undefined
             }

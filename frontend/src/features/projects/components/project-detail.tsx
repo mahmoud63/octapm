@@ -247,6 +247,7 @@ export function ProjectDetail({
           { key: 'change-orders', label: 'Change Orders' },
           { key: 'commitments', label: 'Commitments' },
           { key: 'pay-apps', label: 'Pay Applications' },
+          { key: 'bids', label: 'Bids' },
           { key: 'ipc', label: 'IPC' },
           { key: 'sub-valuations', label: 'Sub Valuations (legacy)' },
           { key: 'budget-revisions', label: 'Budget Revisions' },

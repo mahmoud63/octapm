@@ -74,6 +74,8 @@ const RECORD_TYPE_MODULES = Object.freeze({
   commitment: "commitment",
   commitment_change_order: "commitment",
   sub_pay_app: "sub_pay_app",
+  bid_package: "bid",
+  bid: "bid",
   cost_record: "cost",
   boq_item: "boq",
   location: "location",

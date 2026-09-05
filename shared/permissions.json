@@ -441,6 +441,25 @@
         "custom_field.manage": ["pm"]
       }
     },
+    "bid": {
+      "label": "Bid Management",
+      "actions": {
+        "read": ["pm", "planning_eng", "qs", "cost_controller", "procurement", "finance"],
+        "create": ["pm", "qs", "procurement"],
+        "update": ["pm", "qs", "procurement"],
+        "delete": ["pm", "procurement"],
+        "submit": ["pm", "qs", "procurement"],
+        "approve": ["pm"],
+        "certify": [],
+        "baseline": [],
+        "export": ["pm", "planning_eng", "qs", "cost_controller", "procurement", "finance"]
+      },
+      "transitions": {
+        "bid.publish": ["pm", "procurement"],
+        "bid.answer": ["pm", "qs", "procurement"],
+        "bid.award": ["pm"]
+      }
+    },
     "portfolio": {
       "label": "Portfolio",
       "actions": {

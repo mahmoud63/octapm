@@ -17,6 +17,8 @@ const ENTITY_TYPES = Object.freeze({
   API_CLIENT: "api_client",
   WEBHOOK: "webhook",
   ACCOUNTING_CONNECTION: "accounting_connection",
+  BID_PACKAGE: "bid_package",
+  BID: "bid",
   IPC_CERTIFICATE: "ipc_certificate",
   IPC_ITEM: "ipc_item",
   CHANGE_ORDER: "change_order",

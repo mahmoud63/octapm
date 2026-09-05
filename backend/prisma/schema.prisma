@@ -75,6 +75,7 @@ model Organisation {
   accountingConnections AccountingConnection[]
   accountingCodeMappings AccountingCodeMapping[]
   accountingSyncs     AccountingSync[]
+  bidPackages         BidPackage[]
   subPayAppLines      SubPayAppLine[]
   subPayAppPayments   SubPayAppPayment[]
   companyEquipment    CompanyEquipment[]
@@ -430,6 +431,7 @@ model Project {
   customFieldValues             CustomFieldValue[]
   webhookSubscriptions          WebhookSubscription[]
   accountingSyncs               AccountingSync[]
+  bidPackages                   BidPackage[]
   subPayAppLines                SubPayAppLine[]
   subPayAppPayments             SubPayAppPayment[]
   activityCostLoadings          ActivityCostLoading[]
@@ -6029,4 +6031,184 @@ model AccountingSync {
   @@unique([provider, recordType, recordId])
   @@index([orgId, status])
   @@index([projectId, recordType])
+}
+
+// ─── Bid management (OCTA-PRE-BID-027) ────────────────────────────────────
+
+model BidPackage {
+  id                  String    @id @default(uuid())
+  orgId               String
+  projectId           String
+  number              Int
+  ref                 String // BP-001
+  title               String
+  description         String?
+  instructions        String?
+  status              String    @default("draft") // draft, open, closed, awarded, cancelled
+  dueAt               DateTime?
+  questionsDueAt      DateTime?
+  currency            String    @default("USD")
+  boqSections         String[]  @default([])
+  commitmentType      String    @default("subcontract") // subcontract, purchase_order
+  settingsJson        Json      @default("{}")
+  createdBy           String?
+  updatedBy           String?
+  publishedAt         DateTime?
+  closedAt            DateTime?
+  awardedAt           DateTime?
+  awardedBidId        String?
+  awardedCommitmentId String?
+  softAwardBidId      String?
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  organisation Organisation     @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  project      Project          @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  lines        BidPackageLine[]
+  addenda      BidAddendum[]
+  invitations  BidInvitation[]
+  questions    BidQuestion[]
+  bids         Bid[]
+
+  @@unique([projectId, ref])
+  @@index([orgId, status])
+  @@index([projectId, status])
+}
+
+model BidPackageLine {
+  id           String   @id @default(uuid())
+  orgId        String
+  packageId    String
+  lineNumber   Int
+  boqItemId    String?
+  section      String?
+  code         String?
+  description  String
+  unit         String?
+  qty          Decimal  @default(1) @db.Decimal(18, 3)
+  estimateRate Decimal? @db.Decimal(18, 2) // internal only, never shown to bidders
+  budgetLineId String?
+  costCodeId   String?
+  activityId   String?
+  sortOrder    Int      @default(0)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  package  BidPackage @relation(fields: [packageId], references: [id], onDelete: Cascade)
+  bidLines BidLine[]
+
+  @@index([packageId])
+}
+
+model BidAddendum {
+  id        String   @id @default(uuid())
+  orgId     String
+  packageId String
+  number    Int
+  title     String
+  body      String?
+  issuedAt  DateTime @default(now())
+  issuedBy  String?
+  createdAt DateTime @default(now())
+
+  package BidPackage @relation(fields: [packageId], references: [id], onDelete: Cascade)
+
+  @@index([packageId])
+}
+
+model BidInvitation {
+  id              String    @id @default(uuid())
+  orgId           String
+  packageId       String
+  vendorCompanyId String?
+  companyName     String
+  contactName     String?
+  contactEmail    String
+  tokenHash       String    @unique
+  expiresAt       DateTime
+  status          String    @default("invited") // invited, viewed, declined, submitted, withdrawn
+  invitedAt       DateTime  @default(now())
+  viewedAt        DateTime?
+  lastAccessAt    DateTime?
+  declinedReason  String?
+  remindersSent   Int       @default(0)
+  createdBy       String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  package   BidPackage    @relation(fields: [packageId], references: [id], onDelete: Cascade)
+  questions BidQuestion[]
+  bids      Bid[]
+
+  @@unique([packageId, contactEmail])
+  @@index([packageId, status])
+}
+
+model BidQuestion {
+  id           String    @id @default(uuid())
+  orgId        String
+  packageId    String
+  invitationId String?
+  question     String
+  askedAt      DateTime  @default(now())
+  askedBy      String?
+  answer       String?
+  answeredAt   DateTime?
+  answeredBy   String?
+  shared       Boolean   @default(false) // answer visible to every bidder, asker never named
+  status       String    @default("open") // open, answered
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  package    BidPackage     @relation(fields: [packageId], references: [id], onDelete: Cascade)
+  invitation BidInvitation? @relation(fields: [invitationId], references: [id], onDelete: SetNull)
+
+  @@index([packageId, status])
+}
+
+model Bid {
+  id           String    @id @default(uuid())
+  orgId        String
+  packageId    String
+  invitationId String    @unique
+  version      Int       @default(1)
+  status       String    @default("draft") // draft, submitted, withdrawn, awarded, unsuccessful
+  total        Decimal   @default(0) @db.Decimal(18, 2)
+  currency     String?
+  notes        String?
+  inclusions   String?
+  exclusions   String?
+  validityDays Int?
+  leadTimeDays Int?
+  documentId   String? // priced form uploaded by the bidder
+  submittedAt  DateTime?
+  submittedBy  String?
+  withdrawnAt  DateTime?
+  awardedAt    DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  package    BidPackage    @relation(fields: [packageId], references: [id], onDelete: Cascade)
+  invitation BidInvitation @relation(fields: [invitationId], references: [id], onDelete: Cascade)
+  lines      BidLine[]
+
+  @@index([packageId, status])
+}
+
+model BidLine {
+  id            String   @id @default(uuid())
+  orgId         String
+  bidId         String
+  packageLineId String
+  rate          Decimal? @db.Decimal(18, 2)
+  amount        Decimal  @default(0) @db.Decimal(18, 2)
+  included      Boolean  @default(true)
+  note          String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  bid         Bid            @relation(fields: [bidId], references: [id], onDelete: Cascade)
+  packageLine BidPackageLine @relation(fields: [packageLineId], references: [id], onDelete: Cascade)
+
+  @@unique([bidId, packageLineId])
 }
