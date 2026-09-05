@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Camera, Images, MapPin, Tag, X } from 'lucide-react'
+import { Camera, Images, MapPin, Sparkles, Tag, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { getServerErrorMessage } from '@/lib/handle-server-error'
 import { useCanPerform } from '@/lib/permissions'
@@ -31,6 +31,11 @@ import {
   type PhotoFilters,
   type PhotoRecord,
 } from '../hooks/use-attachments'
+import {
+  useAnalyzePhotos,
+  usePhotoAiStatus,
+} from '../hooks/use-photo-assistant'
+import { PhotoAnalysisPanel } from './photo-analysis'
 
 const RECORD_TYPE_OPTIONS: Array<{ value: string; label: string }> = [
   { value: 'ncr', label: 'NCR' },
@@ -199,6 +204,12 @@ function PhotoDetailDialog({
                   )}
                 </div>
 
+                <PhotoAnalysisPanel
+                  projectId={projectId}
+                  photo={photo}
+                  canEdit={canEdit}
+                />
+
                 <div>
                   <p className='mb-1 text-xs font-semibold text-muted-foreground uppercase'>
                     Attached to
@@ -243,6 +254,22 @@ export function PhotoGallery({ projectId }: { projectId: string }) {
   const [filters, setFilters] = useState<PhotoFilters>({ limit: 60 })
   const [selected, setSelected] = useState<PhotoRecord | null>(null)
   const { data, isLoading, error } = usePhotos(projectId, filters)
+  const { data: aiStatus } = usePhotoAiStatus(projectId)
+  const analyzeBatch = useAnalyzePhotos(projectId)
+  const runBatch = async () => {
+    try {
+      const result = await analyzeBatch.mutateAsync({
+        from: filters.from || null,
+        to: filters.to || null,
+        uncaptionedOnly: true,
+      })
+      toast.success(
+        `${result.analyzed} photo${result.analyzed === 1 ? '' : 's'} analysed${result.cached ? ` (${result.cached} already done)` : ''}; ${result.safetyFindings} safety finding${result.safetyFindings === 1 ? '' : 's'} — open a photo to review`
+      )
+    } catch (err) {
+      toast.error(getServerErrorMessage(err))
+    }
+  }
 
   const activeFilters = useMemo(
     () =>
@@ -283,6 +310,21 @@ export function PhotoGallery({ projectId }: { projectId: string }) {
         <div className='flex items-center gap-2 text-xs text-muted-foreground'>
           <Camera className='size-3.5' />
           {data?.summary.total ?? 0} photos
+          {canEdit && aiStatus?.enabled && (
+            <Button
+              size='sm'
+              variant='outline'
+              disabled={analyzeBatch.isPending}
+              onClick={runBatch}
+              title={`Captions, tags and safety findings for up to ${aiStatus.batchLimit} uncaptioned photos in the current date range`}
+              data-testid='uat-photo-ai-batch'
+            >
+              <Sparkles className='mr-1 size-3.5' />
+              {analyzeBatch.isPending
+                ? 'Analysing…'
+                : 'Analyse uncaptioned photos'}
+            </Button>
+          )}
           {activeFilters > 0 && (
             <Button
               size='sm'

@@ -217,7 +217,7 @@ const enqueueThumbnail = async ({ orgId, projectId, photoId, userId }) => {
   try {
     const jobService = require("../jobs/job.service");
     if (!prisma.backgroundJob?.create) return null;
-    return await jobService.enqueueJob({
+    const job = await jobService.enqueueJob({
       orgId,
       projectId,
       type: jobService.JOB_TYPES.PHOTO_THUMBNAIL,
@@ -225,6 +225,13 @@ const enqueueThumbnail = async ({ orgId, projectId, photoId, userId }) => {
       requestedBy: userId || null,
       maxAttempts: 2,
     });
+    // OCTA-AI-PHOTO-034: AI_PHOTO_AUTO=on analyses every upload in the background.
+    if (String(process.env.AI_PHOTO_AUTO || "").toLowerCase() === "on" && jobService.JOB_TYPES.PHOTO_ANALYZE) {
+      await jobService
+        .enqueueJob({ orgId, projectId, type: jobService.JOB_TYPES.PHOTO_ANALYZE, payload: { photoId, userId: userId || null }, requestedBy: userId || null, maxAttempts: 2, priority: -1 })
+        .catch((error) => console.error("[attachments] could not enqueue photo analysis", error));
+    }
+    return job;
   } catch (error) {
     console.error("[attachments] could not enqueue thumbnail job", error);
     return null;

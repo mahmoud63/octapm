@@ -43,6 +43,9 @@ const registerAllHandlers = () => {
   registerJobHandler(JOB_TYPES.ACCOUNTING_POLL, (context) =>
     require("../../services/accounting.service").runPollJob(context),
   );
+  registerJobHandler(JOB_TYPES.PHOTO_ANALYZE, (context) =>
+    require("../../services/photo-assistant.service").runPhotoAnalyzeJob(context),
+  );
 };
 
 module.exports = { registerAllHandlers };

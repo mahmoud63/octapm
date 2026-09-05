@@ -10,6 +10,8 @@ const attachmentService = require("../services/attachment.service");
 /** Project photo gallery: every image attached anywhere on the project. */
 const router = express.Router({ mergeParams: true });
 router.use(authenticate);
+// OCTA-AI-PHOTO-034: `/ai/*` and `/:photoId/ai/*` — registered before the photo routes.
+router.use(require("./photo-assistant"));
 
 router.get(
   "/",
