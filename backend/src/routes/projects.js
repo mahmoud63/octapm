@@ -446,6 +446,11 @@ router.use(
   require("./timesheets"),
 );
 router.use(
+  "/:projectId/change-events",
+  nestedProjectAccess,
+  require("./change-events"),
+);
+router.use(
   "/:projectId/drawings/sets",
   nestedProjectAccess,
   require("./drawing-sets"),

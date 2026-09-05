@@ -62,6 +62,8 @@ const RECORD_TYPE_MODULES = Object.freeze({
   progress_submission: "progress",
   activity: "schedule",
   change_order: "change_order",
+  change_event: "change_event",
+  rfq: "change_event",
   ipc: "ipc",
   ipc_certificate: "ipc",
   sub_valuation: "ipc",

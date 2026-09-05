@@ -12,6 +12,7 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as LandingRouteImport } from './routes/landing'
 import { Route as AuthenticatedRouteRouteImport } from './routes/_authenticated/route'
 import { Route as AuthenticatedIndexRouteImport } from './routes/_authenticated/index'
+import { Route as RfqTokenRouteImport } from './routes/rfq.$token'
 import { Route as BidTokenRouteImport } from './routes/bid.$token'
 import { Route as errors503RouteImport } from './routes/(errors)/503'
 import { Route as errors500RouteImport } from './routes/(errors)/500'
@@ -72,6 +73,11 @@ const AuthenticatedIndexRoute = AuthenticatedIndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => AuthenticatedRouteRoute,
+} as any)
+const RfqTokenRoute = RfqTokenRouteImport.update({
+  id: '/rfq/$token',
+  path: '/rfq/$token',
+  getParentRoute: () => rootRouteImport,
 } as any)
 const BidTokenRoute = BidTokenRouteImport.update({
   id: '/bid/$token',
@@ -353,6 +359,7 @@ export interface FileRoutesByFullPath {
   '/500': typeof errors500Route
   '/503': typeof errors503Route
   '/bid/$token': typeof BidTokenRoute
+  '/rfq/$token': typeof RfqTokenRoute
   '/billing/checkout': typeof AuthenticatedBillingCheckoutRoute
   '/company/cost-codes': typeof AuthenticatedCompanyCostCodesRoute
   '/company/custom-fields': typeof AuthenticatedCompanyCustomFieldsRoute
@@ -400,6 +407,7 @@ export interface FileRoutesByTo {
   '/500': typeof errors500Route
   '/503': typeof errors503Route
   '/bid/$token': typeof BidTokenRoute
+  '/rfq/$token': typeof RfqTokenRoute
   '/': typeof AuthenticatedIndexRoute
   '/billing/checkout': typeof AuthenticatedBillingCheckoutRoute
   '/company/cost-codes': typeof AuthenticatedCompanyCostCodesRoute
@@ -451,6 +459,7 @@ export interface FileRoutesById {
   '/(errors)/500': typeof errors500Route
   '/(errors)/503': typeof errors503Route
   '/bid/$token': typeof BidTokenRoute
+  '/rfq/$token': typeof RfqTokenRoute
   '/_authenticated/': typeof AuthenticatedIndexRoute
   '/_authenticated/billing/checkout': typeof AuthenticatedBillingCheckoutRoute
   '/_authenticated/company/cost-codes': typeof AuthenticatedCompanyCostCodesRoute
@@ -504,6 +513,7 @@ export interface FileRouteTypes {
     | '/500'
     | '/503'
     | '/bid/$token'
+    | '/rfq/$token'
     | '/billing/checkout'
     | '/company/cost-codes'
     | '/company/custom-fields'
@@ -551,6 +561,7 @@ export interface FileRouteTypes {
     | '/500'
     | '/503'
     | '/bid/$token'
+    | '/rfq/$token'
     | '/'
     | '/billing/checkout'
     | '/company/cost-codes'
@@ -601,6 +612,7 @@ export interface FileRouteTypes {
     | '/(errors)/500'
     | '/(errors)/503'
     | '/bid/$token'
+    | '/rfq/$token'
     | '/_authenticated/'
     | '/_authenticated/billing/checkout'
     | '/_authenticated/company/cost-codes'
@@ -651,6 +663,7 @@ export interface RootRouteChildren {
   errors500Route: typeof errors500Route
   errors503Route: typeof errors503Route
   BidTokenRoute: typeof BidTokenRoute
+  RfqTokenRoute: typeof RfqTokenRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -675,6 +688,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/'
       preLoaderRoute: typeof AuthenticatedIndexRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/rfq/$token': {
+      id: '/rfq/$token'
+      path: '/rfq/$token'
+      fullPath: '/rfq/$token'
+      preLoaderRoute: typeof RfqTokenRouteImport
+      parentRoute: typeof rootRouteImport
     }
     '/bid/$token': {
       id: '/bid/$token'
@@ -1141,6 +1161,7 @@ const rootRouteChildren: RootRouteChildren = {
   errors500Route: errors500Route,
   errors503Route: errors503Route,
   BidTokenRoute: BidTokenRoute,
+  RfqTokenRoute: RfqTokenRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

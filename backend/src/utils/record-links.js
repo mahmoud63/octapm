@@ -36,6 +36,8 @@ const RECORD_WORKSPACE = Object.freeze({
   document_revision: { module: "doc-control", child: "drawings" },
   spec_section: { module: "doc-control", child: "specifications" },
   change_order: { module: "commercial", child: "change-orders" },
+  change_event: { module: "commercial", child: "change-events" },
+  rfq: { module: "commercial", child: "change-events" },
   ipc: { module: "commercial", child: "ipc" },
   ipc_certificate: { module: "commercial", child: "ipc" },
   ipc_item: { module: "commercial", child: "ipc" },

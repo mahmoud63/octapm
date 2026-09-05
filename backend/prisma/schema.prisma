@@ -84,6 +84,9 @@ model Organisation {
   crews               Crew[]
   timesheets          Timesheet[]
   timeEntries         TimeEntry[]
+  changeEvents        ChangeEvent[]
+  changeEventLines    ChangeEventLine[]
+  rfqs                Rfq[]
   subPayAppLines      SubPayAppLine[]
   subPayAppPayments   SubPayAppPayment[]
   companyEquipment    CompanyEquipment[]
@@ -302,6 +305,7 @@ model Company {
   commitments          Commitment[]        @relation("CommitmentVendor")
   workers              Worker[]
   crews                Crew[]
+  rfqs                 Rfq[]               @relation("RfqVendor")
   riskAssignments           Risk[]           @relation("RiskAssigneeCompany")
   ncrAssignments            NcrRecord[]      @relation("NcrAssigneeCompany")
   itpAssignments            ItpRecord[]      @relation("ItpAssigneeCompany")
@@ -451,6 +455,9 @@ model Project {
   crews                         Crew[]
   timesheets                    Timesheet[]
   timeEntries                   TimeEntry[]
+  changeEvents                  ChangeEvent[]
+  changeEventLines              ChangeEventLine[]
+  rfqs                          Rfq[]
   subPayAppLines                SubPayAppLine[]
   subPayAppPayments             SubPayAppPayment[]
   activityCostLoadings          ActivityCostLoading[]
@@ -1411,6 +1418,8 @@ model Activity {
   progressSubmissions    ProgressSubmission[]
   ipcProgressLinks       IpcItemProgressLink[]
   timeEntries            TimeEntry[]
+  changeEvents           ChangeEvent[]
+  changeEventLines       ChangeEventLine[]
   subValuationLinks      SubValuationActivityLink[]
   eotClaimLinks          EotClaimActivityLink[]
   weatherDelayLinks      WeatherDelayActivityLink[]
@@ -1828,6 +1837,7 @@ model ChangeOrder {
   allocationLinks ChangeOrderAllocationLink[]
   budgetLineChanges BudgetLineChange[]
   commitmentChangeOrders CommitmentChangeOrder[]
+  changeEvents    ChangeEvent[]
 
   @@index([projectId])
   @@index([projectId, status, archivedAt])
@@ -4000,6 +4010,7 @@ model Location {
   formInstances FormInstance[]
   rfis       Rfi[]
   timeEntries TimeEntry[]
+  changeEvents ChangeEvent[]
 
   @@unique([projectId, code])
   @@index([orgId])
@@ -4034,6 +4045,7 @@ model CostCode {
   budgetLines      BudgetLine[]
   commitmentSovLines CommitmentSovLine[]
   timeEntries        TimeEntry[]
+  changeEventLines   ChangeEventLine[]
 
   @@unique([orgId, code])
   @@index([orgId, status])
@@ -4093,6 +4105,7 @@ model BudgetLine {
   allocations BudgetLineActivityAllocation[]
   changeOrders ChangeOrder[]
   sovLines    CommitmentSovLine[]
+  changeEventLines ChangeEventLine[]
 
   @@unique([projectId, costCodeId, costType])
   @@index([orgId])
@@ -4213,6 +4226,8 @@ model Commitment {
   changeOrders      CommitmentChangeOrder[]
   procurementOrders ProcurementOrder[]
   payApps           SubPayApp[]
+  changeEventLines  ChangeEventLine[]
+  rfqs              Rfq[]
 
   @@unique([projectId, ref])
   @@unique([projectId, type, number])
@@ -4292,6 +4307,7 @@ model CommitmentChangeOrder {
   project          Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
   commitment       Commitment   @relation(fields: [commitmentId], references: [id], onDelete: Cascade)
   primeChangeOrder ChangeOrder? @relation(fields: [primeChangeOrderId], references: [id], onDelete: SetNull)
+  rfqs             Rfq[]
 
   @@unique([commitmentId, number])
   @@unique([projectId, ref])
@@ -4998,6 +5014,142 @@ model TimeEntry {
   @@index([workerId])
   @@index([projectId, activityId])
   @@index([projectId, costCodeId])
+}
+
+// ─── Change events and RFQs (OCTA-COM-CE-038) ───
+/** A potential change captured before it becomes a change order: scope, rough order of magnitude, quotes. */
+model ChangeEvent {
+  id                 String    @id @default(uuid())
+  orgId              String
+  projectId          String
+  number             Int
+  ref                String
+  title              String
+  description        String?
+  type               String    @default("other") // owner_change, design_change, site_condition, error_omission, allowance, value_engineering, other
+  origin             String    @default("manual") // manual, rfi, submittal, daily_log, observation, meeting, other
+  sourceRecordType   String?
+  sourceRecordId     String?
+  status             String    @default("open") // open, pricing, priced, converted, closed, void
+  activityId         String?
+  locationId         String?
+  romAmount          Decimal   @default(0) @db.Decimal(18, 2)
+  scheduleImpactDays Int       @default(0)
+  ownerChange        Boolean   @default(true)
+  changeOrderId      String?
+  convertedAt        DateTime?
+  closedAt           DateTime?
+  closedBy           String?
+  voidReason         String?
+  notes              String?
+  createdBy          String?
+  updatedBy          String?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  org         Organisation      @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  project     Project           @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  activity    Activity?         @relation(fields: [activityId], references: [id], onDelete: SetNull)
+  location    Location?         @relation(fields: [locationId], references: [id], onDelete: SetNull)
+  changeOrder ChangeOrder?      @relation(fields: [changeOrderId], references: [id], onDelete: SetNull)
+  lines       ChangeEventLine[]
+  rfqs        Rfq[]
+
+  @@unique([projectId, number])
+  @@unique([projectId, ref])
+  @@index([orgId])
+  @@index([projectId, status])
+  @@index([projectId, sourceRecordType, sourceRecordId])
+}
+
+model ChangeEventLine {
+  id            String   @id @default(uuid())
+  orgId         String
+  projectId     String
+  changeEventId String
+  description   String
+  costCodeId    String?
+  budgetLineId  String?
+  activityId    String?
+  commitmentId  String?
+  quantity      Float    @default(1)
+  unit          String?
+  unitCost      Decimal  @default(0) @db.Decimal(18, 2)
+  romAmount     Decimal  @default(0) @db.Decimal(18, 2)
+  quotedAmount  Decimal? @db.Decimal(18, 2)
+  quotedRfqId   String?
+  notes         String?
+  sortOrder     Int      @default(0)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  org         Organisation @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  project     Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  changeEvent ChangeEvent  @relation(fields: [changeEventId], references: [id], onDelete: Cascade)
+  costCode    CostCode?    @relation(fields: [costCodeId], references: [id], onDelete: SetNull)
+  budgetLine  BudgetLine?  @relation(fields: [budgetLineId], references: [id], onDelete: SetNull)
+  activity    Activity?    @relation(fields: [activityId], references: [id], onDelete: SetNull)
+  commitment  Commitment?  @relation(fields: [commitmentId], references: [id], onDelete: SetNull)
+
+  @@index([orgId])
+  @@index([changeEventId])
+  @@index([projectId, activityId])
+  @@index([projectId, costCodeId])
+}
+
+/** A request for quotation sent to a vendor for a change event; answered through a public token link. */
+model Rfq {
+  id                      String    @id @default(uuid())
+  orgId                   String
+  projectId               String
+  changeEventId           String
+  number                  Int
+  ref                     String
+  commitmentId            String?
+  vendorCompanyId         String?
+  companyName             String
+  contactName             String?
+  contactEmail            String
+  tokenHash               String    @unique
+  expiresAt               DateTime
+  dueDate                 DateTime?
+  instructions            String?
+  lineIdsJson             Json      @default("[]")
+  status                  String    @default("sent") // sent, viewed, quoted, declined, accepted, rejected, cancelled
+  sentAt                  DateTime  @default(now())
+  viewedAt                DateTime?
+  lastAccessAt            DateTime?
+  quotedAt                DateTime?
+  quoteTotal              Decimal?  @db.Decimal(18, 2)
+  quoteLinesJson          Json      @default("[]") // [{ lineId, amount, note }]
+  quoteNotes              String?
+  quoteValidUntil         DateTime?
+  quoteLeadTimeDays       Int?
+  quotedBy                String?
+  declinedReason          String?
+  acceptedAt              DateTime?
+  acceptedBy              String?
+  rejectedAt              DateTime?
+  rejectedReason          String?
+  commitmentChangeOrderId String?
+  remindersSent           Int       @default(0)
+  createdBy               String?
+  createdAt               DateTime  @default(now())
+  updatedAt               DateTime  @updatedAt
+
+  org                   Organisation           @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  project               Project                @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  changeEvent           ChangeEvent            @relation(fields: [changeEventId], references: [id], onDelete: Cascade)
+  commitment            Commitment?            @relation(fields: [commitmentId], references: [id], onDelete: SetNull)
+  vendorCompany         Company?               @relation("RfqVendor", fields: [vendorCompanyId], references: [id], onDelete: SetNull)
+  commitmentChangeOrder CommitmentChangeOrder? @relation(fields: [commitmentChangeOrderId], references: [id], onDelete: SetNull)
+
+  @@unique([changeEventId, number])
+  @@unique([projectId, ref])
+  @@index([orgId])
+  @@index([projectId, status])
+  @@index([changeEventId, status])
+  @@index([commitmentId])
 }
 
 // ─── Document text, chunks and embeddings (OCTA-DOC-TEXT-010) ───

@@ -1,5 +1,6 @@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { BidPackagesPanel } from '@/features/bids/components/bid-packages-panel'
+import { ChangeEventsPanel } from '@/features/change-events/components/change-events-panel'
 import { ContractPanel } from '@/features/contract/components/contract-panel'
 import type { ProjectSetupTarget } from '@/features/projects/data/schema'
 import type { ScheduleActivity } from '@/features/schedule/data/schema'
@@ -38,6 +39,7 @@ export function CommercialDashboard({
       <Tabs {...tabsProps} className='space-y-3'>
         {showTabList && (
           <TabsList className='flex-wrap'>
+            <TabsTrigger value='change-events'>Change Events</TabsTrigger>
             <TabsTrigger value='change-orders'>Change Orders</TabsTrigger>
             <TabsTrigger value='commitments'>Commitments</TabsTrigger>
             <TabsTrigger value='pay-apps'>Pay Applications</TabsTrigger>
@@ -53,6 +55,19 @@ export function CommercialDashboard({
             <TabsTrigger value='contract'>Contract</TabsTrigger>
           </TabsList>
         )}
+
+        <TabsContent value='change-events'>
+          <ChangeEventsPanel
+            projectId={projectId}
+            activities={activities}
+            initialRecordId={
+              initialTarget?.source === 'change_event' ||
+              initialTarget?.source === 'rfq'
+                ? initialTarget.recordId
+                : undefined
+            }
+          />
+        </TabsContent>
 
         <TabsContent value='change-orders'>
           <ChangeOrderRegister

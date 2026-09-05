@@ -979,6 +979,27 @@
         "timesheet.reopen": ["pm", "cost_controller"],
         "timesheet.worker_admin": ["pm", "site_engineer", "cost_controller"]
       }
+    },
+    "change_event": {
+      "label": "Change Events",
+      "actions": {
+        "read": ["pm", "planning_eng", "qs", "cost_controller", "procurement", "site_engineer", "finance"],
+        "create": ["pm", "planning_eng", "qs", "site_engineer"],
+        "update": ["pm", "qs", "planning_eng"],
+        "delete": ["pm", "qs"],
+        "submit": ["pm", "qs", "procurement"],
+        "approve": ["pm", "qs"],
+        "certify": [],
+        "baseline": [],
+        "export": ["pm", "qs", "cost_controller", "finance", "procurement"]
+      },
+      "transitions": {
+        "change_event.rfq_send": ["pm", "qs", "procurement"],
+        "change_event.quote_accept": ["pm", "qs"],
+        "change_event.convert": ["pm", "qs"],
+        "change_event.close": ["pm", "qs"],
+        "change_event.void": ["pm"]
+      }
     }
   },
   "partyPermissions": {
@@ -1012,6 +1033,7 @@
         "commitment": { "actions": ["read"], "transitions": [] },
         "sub_pay_app": { "actions": ["read"], "transitions": [] },
         "change_order": { "actions": ["read", "export"], "transitions": [] },
+        "change_event": { "actions": ["read", "export"], "transitions": [] },
         "eot": { "actions": ["read", "export"], "transitions": [] },
         "meeting": {
           "actions": ["read", "submit"],
@@ -1073,6 +1095,7 @@
         "commitment": { "actions": ["read"], "transitions": [] },
         "sub_pay_app": { "actions": ["read"], "transitions": [] },
         "change_order": { "actions": ["read"], "transitions": [] },
+        "change_event": { "actions": ["read"], "transitions": [] },
         "eot": { "actions": ["read"], "transitions": [] },
         "meeting": {
           "actions": ["read", "create", "update", "submit"],
@@ -1152,6 +1175,10 @@
           "transitions": ["sub_pay_app.submit"]
         },
         "change_order": { "actions": ["read"], "transitions": [] },
+        "change_event": {
+          "actions": ["read", "create", "update", "submit", "export"],
+          "transitions": ["change_event.rfq_send"]
+        },
         "eot": { "actions": ["read"], "transitions": [] },
         "meeting": {
           "actions": ["read", "create", "update", "submit"],
