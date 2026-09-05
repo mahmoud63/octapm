@@ -21,6 +21,8 @@ const {
 const auditService = require("./audit.service");
 const approvalWorkflowService = require("./approval-workflow.service");
 const { summarizeRiskActivityLinks } = require("./risk.service");
+const jobService = require("../jobs/job.service");
+const { JobError, isTransientError } = require("../jobs/errors");
 
 const PROCUREMENT_SEVERITY_RANK = {
   none: 0,
@@ -1773,37 +1775,60 @@ function validateForGeneration(project, boqRows) {
   return errors;
 }
 
-// -- In-memory async job store (TTL: 2 hours) --------------------------------
-const jobs = new Map(); // jobId -> { status, step, error, projectId }
+// -- Durable schedule generation job (BackgroundJob queue) -------------------
+//
+// The pipeline below runs inside the job worker. Progress writes go to the job
+// row (visible to every API instance and to the realtime channel); an error
+// status throws so the worker records the failure, decides retryability, and
+// notifies the requester.
 
-function setJob(jobId, data) {
-  jobs.set(jobId, { ...jobs.get(jobId), ...data, updatedAt: Date.now() });
-}
+/**
+ * Job handler for `schedule.generate`. Payload: { rawText, label, userId }.
+ * Returns the staged revision id and counts as the job result.
+ */
+async function runScheduleGenerationJob({ job, payload = {}, updateProgress }) {
+  const jobId = job.id;
+  const { orgId, projectId } = job;
+  const { rawText, label = null, userId = null } = payload;
 
-// Clean up jobs older than 2 hours every 30 minutes
-const jobCleanupTimer = setInterval(
-  () => {
-    const cutoff = Date.now() - 2 * 60 * 60 * 1000;
-    for (const [id, job] of jobs) {
-      if (job.updatedAt < cutoff) jobs.delete(id);
+  const progress = (data) =>
+    Promise.resolve(updateProgress?.(data)).catch((error) =>
+      console.warn("[schedule] job progress update failed", error?.message),
+    );
+
+  // Same call shape as the previous in-memory store so the pipeline body stays
+  // unchanged: "error" statuses become thrown JobErrors, everything else is a
+  // progress update.
+  const setJob = (_jobId, data = {}) => {
+    const { status, error, code, retryable, ...rest } = data;
+    if (status === "error") {
+      throw new JobError(
+        code || "SCHEDULE_GENERATION_FAILED",
+        error || "Schedule generation failed",
+        { retryable: retryable ?? false },
+      );
     }
-  },
-  30 * 60 * 1000,
-);
-if (typeof jobCleanupTimer.unref === "function") jobCleanupTimer.unref();
+    progress(status === "done" ? { ...rest, step: rest.step || "Complete" } : rest);
+  };
 
-const getJob = (jobId) => jobs.get(jobId) || null;
+  if (!rawText || !String(rawText).trim()) {
+    throw new JobError("EMPTY_FILE", "No content found in file", {
+      retryable: false,
+    });
+  }
 
-async function runGeneratePipeline({
-  jobId,
-  orgId,
-  projectId,
-  rawText,
-  project,
-  label,
-  userId = null,
-}) {
-  try {
+  const project = await prisma.project.findFirst({
+    where: { id: projectId, orgId },
+  });
+  if (!project) {
+    throw new JobError("PROJECT_NOT_FOUND", "Project not found", {
+      retryable: false,
+    });
+  }
+
+  let stagedRevisionId = null;
+  let resourceCount = 0;
+  {
     // Step 2: structure BOQ
     setJob(jobId, {
       status: "running",
@@ -1828,12 +1853,15 @@ async function runGeneratePipeline({
       console.error("[schedule] BOQ parsing failed:", e);
       return setJob(jobId, {
         status: "error",
+        code: "AI_BOQ_PARSE_FAILED",
+        retryable: isTransientError(e),
         error: `AI BOQ parsing failed: ${e.message}`,
       });
     }
     if (!Array.isArray(boqRows) || boqRows.length === 0) {
       return setJob(jobId, {
         status: "error",
+        code: "EMPTY_FILE",
         error: "No BOQ items found in file",
       });
     }
@@ -1842,6 +1870,7 @@ async function runGeneratePipeline({
     if (validationErrors.length > 0) {
       return setJob(jobId, {
         status: "error",
+        code: "SCHEDULE_VALIDATION_FAILED",
         error: `Validation failed:\n• ${validationErrors.join("\n• ")}`,
       });
     }
@@ -1882,6 +1911,8 @@ async function runGeneratePipeline({
       console.error("[schedule] CPM generation failed:", e);
       return setJob(jobId, {
         status: "error",
+        code: "AI_SCHEDULE_GENERATION_FAILED",
+        retryable: isTransientError(e),
         error: `AI schedule generation failed: ${e.message}`,
       });
     }
@@ -1932,6 +1963,7 @@ async function runGeneratePipeline({
       });
       stagedRevisionId = revision.id;
     });
+    await progress({ stagedRevisionId });
 
     // Step 5: pass 3 resource allocation (non-fatal)
     setJob(jobId, {
@@ -1970,7 +2002,7 @@ async function runGeneratePipeline({
           },
         },
       });
-      const resourceCount = allocations.reduce(
+      resourceCount = allocations.reduce(
         (count, block) =>
           count +
           (Array.isArray(block?.resources) ? block.resources.length : 0),
@@ -1990,26 +2022,24 @@ async function runGeneratePipeline({
       });
     }
 
-    setJob(jobId, {
-      status: "done",
+    await progress({
       step: "Complete",
       currentStep: JOB_STEPS.length,
       totalSteps: JOB_STEPS.length,
       steps: JOB_STEPS,
       progress: 100,
     });
-  } catch (e) {
-    console.error("[schedule] Pipeline error:", e);
-    setJob(jobId, {
-      status: "error",
-      error: e.message || "Unexpected error",
-      steps: JOB_STEPS,
-      totalSteps: JOB_STEPS.length,
-    });
   }
+
+  return {
+    revisionId: stagedRevisionId,
+    resourceCount,
+    label: label || "AI Generated",
+  };
 }
 
-// Returns immediately with jobId; processing runs in background
+// Validates the upload and enqueues the durable generation job. The worker
+// (in-process or dedicated) picks it up; clients poll GET /schedule/job/:jobId.
 const startGenerateJob = async ({
   orgId,
   projectId,
@@ -2037,29 +2067,28 @@ const startGenerateJob = async ({
   if (!rawText.trim())
     throw new HttpError(400, "EMPTY_FILE", "No content found in file");
 
-  const jobId = `${projectId}-${Date.now()}`;
-  setJob(jobId, {
-    status: "running",
-    step: JOB_STEPS[0].label,
-    currentStep: 0,
-    totalSteps: JOB_STEPS.length,
-    steps: JOB_STEPS,
-    progress: 5,
-    projectId,
-  });
-
-  // Fire-and-forget - do NOT await
-  runGeneratePipeline({
-    jobId,
+  const job = await jobService.enqueueJob({
     orgId,
     projectId,
-    rawText,
-    project,
-    label,
-    userId,
+    type: jobService.JOB_TYPES.SCHEDULE_GENERATE,
+    requestedBy: userId,
+    maxAttempts: 2,
+    payload: {
+      rawText,
+      label,
+      userId,
+      fileName: file?.originalname || null,
+    },
+    progress: {
+      step: JOB_STEPS[0].label,
+      currentStep: 0,
+      totalSteps: JOB_STEPS.length,
+      steps: JOB_STEPS,
+      progress: 5,
+    },
   });
 
-  return { jobId };
+  return { jobId: job.id };
 };
 
 const toIso = (value) =>
@@ -3368,7 +3397,8 @@ const getResourcePlan = async ({ orgId, projectId }) => {
 
 module.exports = {
   startGenerateJob,
-  getJob,
+  runScheduleGenerationJob,
+  JOB_STEPS,
   getProjectSchedule,
   listRevisions,
   getRevision,

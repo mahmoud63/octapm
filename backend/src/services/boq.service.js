@@ -26,7 +26,8 @@ const {
 const fileStorageService = require("./file-storage.service");
 const auditService = require("./audit.service");
 const approvalWorkflowService = require("./approval-workflow.service");
-const { getBoqJob, setBoqJob } = require("./boq/job-store");
+const jobService = require("../jobs/job.service");
+const { JobError, isTransientError } = require("../jobs/errors");
 const { parseExcelInput, validateBoqRows } = require("./boq/excel-parser");
 const { generateBoqTemplate } = require("./boq/template");
 
@@ -912,23 +913,39 @@ async function processBoqUpload(projectId, fileBuffer, label, options = {}) {
     handleBoqUniqueError(error);
   }
 
-  // Step 5: Kick off async AI job for imported active rows, or finish comparison-only uploads immediately.
-  const jobId = uuidv4();
+  // Step 5: Enqueue the durable AI job for imported active rows, or record a
+  // completed job for comparison-only uploads so clients keep one polling path.
+  const jobOrgId =
+    options.orgId ||
+    (
+      await prisma.project.findUnique({
+        where: { id: projectId },
+        select: { orgId: true },
+      })
+    )?.orgId ||
+    null;
+  const jobContext = {
+    mode,
+    revision: serializeBoqRevision(revision),
+    comparison: comparison?.summary ?? null,
+    baseline: baseline ?? null,
+  };
+
   if (baseline?.locked) {
-    setBoqJob(jobId, {
-      status: "done",
-      step: "BOQ revision comparison saved; baseline rows were not changed.",
-      progress: 100,
+    const completed = await jobService.recordCompletedJob({
+      orgId: jobOrgId,
       projectId,
-      mode,
-      revision: serializeBoqRevision(revision),
-      comparison: comparison?.summary ?? null,
-      baseline,
-      error: null,
+      type: jobService.JOB_TYPES.BOQ_PARSE,
+      requestedBy: options.userId || null,
+      result: jobContext,
+      progress: {
+        step: "BOQ revision comparison saved; baseline rows were not changed.",
+        progress: 100,
+      },
     });
 
     return {
-      jobId,
+      jobId: completed.id,
       revisionId: revision.id,
       mode,
       baselineLocked: true,
@@ -936,24 +953,25 @@ async function processBoqUpload(projectId, fileBuffer, label, options = {}) {
     };
   }
 
-  setBoqJob(jobId, {
-    status: "processing",
-    step: "Preparing BOQ data...",
-    progress: 10,
+  const job = await jobService.enqueueJob({
+    orgId: jobOrgId,
     projectId,
-    mode,
-    revision: serializeBoqRevision(revision),
-    comparison: comparison?.summary ?? null,
-    baseline: baseline ?? null,
-    error: null,
+    type: jobService.JOB_TYPES.BOQ_PARSE,
+    requestedBy: options.userId || null,
+    maxAttempts: 2,
+    payload: {
+      projectId,
+      items: itemsWithAmounts,
+      label,
+      revisionId: revision.id,
+      userId: options.userId || null,
+    },
+    progress: { step: "Preparing BOQ data...", progress: 10 },
+    result: jobContext,
   });
 
-  processBoqAiAsync(projectId, jobId, itemsWithAmounts, label, {
-    revisionId: revision.id,
-  }).catch(() => {});
-
   return {
-    jobId,
+    jobId: job.id,
     revisionId: revision.id,
     mode,
     baselineLocked: false,
@@ -961,7 +979,36 @@ async function processBoqUpload(projectId, fileBuffer, label, options = {}) {
   };
 }
 
-async function processBoqAiAsync(projectId, jobId, items, label, options = {}) {
+/**
+ * Job handler for `boq.parse`: asks the AI for activity breakdowns of the
+ * imported BOQ rows and stores them as draft allocations. Runs in the worker;
+ * payload: { projectId, items, label, revisionId, userId }.
+ */
+async function runBoqActivityJob({ job, payload = {}, updateProgress }) {
+  const jobId = job.id;
+  const projectId = payload.projectId || job.projectId;
+  const items = Array.isArray(payload.items) ? payload.items : [];
+  const options = {
+    revisionId: payload.revisionId || null,
+    userId: payload.userId || job.requestedBy || null,
+  };
+
+  const setBoqJob = (_jobId, data = {}) => {
+    const { status, error, ...rest } = data;
+    if (status === "error") {
+      throw new JobError("BOQ_AI_FAILED", error || "AI processing failed", {
+        retryable: false,
+      });
+    }
+    Promise.resolve(updateProgress?.(rest)).catch(() => {});
+  };
+
+  if (!items.length) {
+    throw new JobError("BOQ_JOB_EMPTY", "No BOQ rows to process", {
+      retryable: false,
+    });
+  }
+
   try {
     setBoqJob(jobId, {
       status: "running",
@@ -995,11 +1042,7 @@ async function processBoqAiAsync(projectId, jobId, items, label, options = {}) {
     if (!jsonMatch) throw new Error("AI returned non-JSON response");
     const parsed = JSON.parse(jsonMatch[0]);
 
-    const proj = await prisma.project.findUnique({
-      where: { id: projectId },
-      select: { orgId: true },
-    });
-    if (proj) await incrementAiUsage(proj.orgId);
+    if (job.orgId) await incrementAiUsage(job.orgId);
 
     setBoqJob(jobId, { step: "Saving activities...", progress: 70 });
 
@@ -1044,6 +1087,7 @@ async function processBoqAiAsync(projectId, jobId, items, label, options = {}) {
 
     // Track all generated activity codes for predecessor linking
     const allGeneratedCodes = {}; // boqCode -> string[]
+    let activitiesCreated = 0;
 
     for (const boqResult of parsed.boqActivities ?? []) {
       const boqItem = itemByCode[boqResult.boqCode];
@@ -1102,18 +1146,23 @@ async function processBoqAiAsync(projectId, jobId, items, label, options = {}) {
           }),
         );
         codes.push(activity.activityCode);
+        activitiesCreated += 1;
       }
       allGeneratedCodes[boqResult.boqCode] = codes;
     }
 
-    setBoqJob(jobId, { status: "done", step: "Complete", progress: 100 });
+    setBoqJob(jobId, { step: "Complete", progress: 100 });
+    return { activitiesCreated };
   } catch (err) {
-    console.error("[boq] AI async error:", err);
-    setBoqJob(jobId, {
-      status: "error",
-      step: "AI processing failed",
-      error: err.message || "AI processing failed. Please try uploading again.",
-    });
+    console.error("[boq] AI job error:", err);
+    if (err instanceof JobError) throw err;
+    throw new JobError(
+      err.code && typeof err.code === "string" && !/^E[A-Z]+$/.test(err.code)
+        ? err.code
+        : "BOQ_AI_FAILED",
+      err.message || "AI processing failed. Please try uploading again.",
+      { retryable: isTransientError(err) },
+    );
   }
 }
 
@@ -1851,7 +1900,7 @@ async function deleteActivity(projectId, activityId, options = {}) {
 }
 
 module.exports = {
-  getBoqJob,
+  runBoqActivityJob,
   generateBoqTemplate,
   processBoqUpload,
   getProjectBoq,

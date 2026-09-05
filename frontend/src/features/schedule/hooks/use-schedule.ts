@@ -16,21 +16,32 @@ export const useProjectSchedule = (
   })
 
 export interface GenerateJob {
+  id?: string
+  jobId?: string
   status: 'processing' | 'running' | 'done' | 'error'
+  jobStatus?: 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled'
   step: string
   currentStep?: number
   totalSteps?: number
   steps?: Array<{ label: string; description: string }>
   progress?: number
-  error?: string
+  message?: string | null
+  error?: string | null
+  errorCode?: string | null
+  attempts?: number
+  maxAttempts?: number
+  canRetry?: boolean
+  revisionId?: string | null
   projectId: string
 }
 
-// Poll job status every 3 seconds until done or error
+// Poll job status every 3 seconds until done or error. `pollNonce` restarts
+// polling for the same job id after a retry.
 function useJobPoller(
   projectId: string,
   jobId: string | null,
-  onDone: () => void
+  onDone: () => void,
+  pollNonce = 0
 ) {
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const [job, setJob] = useState<GenerateJob | null>(null)
@@ -67,7 +78,7 @@ function useJobPoller(
     return () => {
       if (intervalRef.current) clearInterval(intervalRef.current)
     }
-  }, [jobId, projectId, onDone])
+  }, [jobId, projectId, onDone, pollNonce])
 
   return job
 }
@@ -75,6 +86,7 @@ function useJobPoller(
 export function useGenerateSchedule(projectId: string) {
   const qc = useQueryClient()
   const [jobId, setJobId] = useState<string | null>(null)
+  const [pollNonce, setPollNonce] = useState(0)
 
   const onDone = useCallback(() => {
     qc.invalidateQueries({ queryKey: ['schedule', projectId] })
@@ -84,7 +96,7 @@ export function useGenerateSchedule(projectId: string) {
     setJobId(null)
   }, [qc, projectId])
 
-  const job = useJobPoller(projectId, jobId, onDone)
+  const job = useJobPoller(projectId, jobId, onDone, pollNonce)
 
   const mutation = useMutation({
     mutationFn: ({ file, label }: { file: File; label?: string }) => {
@@ -104,18 +116,45 @@ export function useGenerateSchedule(projectId: string) {
     },
   })
 
+  // Re-queues the same durable job (keeps the uploaded content and revision label).
+  const { mutateAsync: retryMutateAsync, isPending: isRetrying } = useMutation({
+    mutationFn: (id: string) =>
+      apiClient
+        .post(`/projects/${projectId}/schedule/job/${id}/retry`)
+        .then((r) => r.data.data as GenerateJob),
+    onSuccess: () => {
+      setPollNonce((nonce) => nonce + 1)
+      qc.invalidateQueries({ queryKey: ['jobs', projectId] })
+    },
+  })
+
+  const retry = useCallback(async () => {
+    if (!jobId) return null
+    return retryMutateAsync(jobId)
+  }, [jobId, retryMutateAsync])
+
   const isPending =
     mutation.isPending ||
+    isRetrying ||
     job?.status === 'processing' ||
     job?.status === 'running'
   const currentStep = mutation.isPending ? 'Uploading file…' : (job?.step ?? '')
-  const error = job?.status === 'error' ? job.error : undefined
+  const error =
+    job?.status === 'error' ? (job.error ?? 'Generation failed') : undefined
+  const canRetry =
+    job?.status === 'error' && Boolean(job?.canRetry) && Boolean(jobId)
 
   return {
     trigger: mutation.mutateAsync,
+    retry,
+    canRetry,
+    isRetrying,
     isPending,
     currentStep,
     error,
+    errorCode: job?.errorCode ?? null,
+    attempts: job?.attempts ?? 0,
     job,
+    jobId,
   }
 }

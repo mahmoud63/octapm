@@ -116,8 +116,29 @@ export function useBoqUpload(projectId: string) {
   })
 }
 
+export interface BoqJob {
+  id: string
+  jobId: string
+  status: 'processing' | 'running' | 'done' | 'error'
+  jobStatus?: 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled'
+  step?: string | null
+  progress?: number
+  message?: string | null
+  error?: string | null
+  errorCode?: string | null
+  attempts?: number
+  maxAttempts?: number
+  canRetry?: boolean
+  projectId: string
+  mode?: 'imported' | 'comparison_only'
+  revision?: Record<string, unknown> | null
+  comparison?: Record<string, unknown> | null
+  baseline?: Record<string, unknown> | null
+  activitiesCreated?: number
+}
+
 export const useBoqJobStatus = (projectId: string, jobId: string | null) =>
-  useQuery({
+  useQuery<BoqJob>({
     queryKey: ['boq-job', projectId, jobId],
     queryFn: () =>
       apiClient
@@ -130,6 +151,22 @@ export const useBoqJobStatus = (projectId: string, jobId: string | null) =>
       return 3000
     },
   })
+
+// Re-queues a failed BOQ AI job; the same job id keeps polling afterwards.
+export const useRetryBoqJob = (projectId: string) => {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (jobId: string) =>
+      apiClient
+        .post(`/projects/${projectId}/boq/job/${jobId}/retry`)
+        .then((r) => r.data.data as BoqJob),
+    onSuccess: (job) => {
+      qc.setQueryData(['boq-job', projectId, job.jobId], job)
+      qc.invalidateQueries({ queryKey: ['boq-job', projectId, job.jobId] })
+      qc.invalidateQueries({ queryKey: ['jobs', projectId] })
+    },
+  })
+}
 
 export function useUpdateBoqItem(projectId: string) {
   const qc = useQueryClient()

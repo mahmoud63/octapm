@@ -18,7 +18,8 @@
     "openapi:validate": "node scripts/validate-openapi.js",
     "smoke:deploy": "node scripts/deployment-smoke.js",
     "test": "jest --runInBand",
-    "test:watch": "jest --watch"
+    "test:watch": "jest --watch",
+    "worker": "node src/worker.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.88.0",
@@ -31,6 +32,7 @@
     "express": "^4.21.0",
     "express-validator": "^7.2.0",
     "helmet": "^8.0.0",
+    "ioredis": "^5.11.1",
     "jsonwebtoken": "^9.0.0",
     "morgan": "^1.10.0",
     "multer": "^1.4.5-lts.1",

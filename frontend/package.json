@@ -40,6 +40,7 @@
     "test:field-ux": "node scripts/field-ux-accessibility.test.mjs",
     "test:equipment-utilization": "node scripts/equipment-utilization-ui.test.mjs",
     "test:navigation-realtime-locations": "node scripts/navigation-realtime-locations.test.mjs",
+    "test:background-jobs": "node scripts/background-jobs-ui.test.mjs",
     "lint": "eslint .",
     "preview": "vite preview",
     "format:check": "prettier --check .",

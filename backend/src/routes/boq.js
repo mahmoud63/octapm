@@ -13,6 +13,7 @@ const {
 const { getEffectiveRole, requireRoles } = require('../middleware/rbac');
 const boqService = require('../services/boq.service');
 const fileStorageService = require('../services/file-storage.service');
+const jobService = require('../jobs/job.service');
 const { assertMoneyInput } = require('../utils/money');
 
 const router = express.Router({ mergeParams: true });
@@ -142,17 +143,39 @@ router.get(
   }),
 );
 
-// GET /projects/:projectId/boq/job/:jobId
+// GET /projects/:projectId/boq/job/:jobId — poll the durable job status
 router.get(
   '/job/:jobId',
   authenticate,
   asyncHandler(async (req, res) => {
-    const job = boqService.getBoqJob(req.params.jobId);
+    const job = await jobService.getLegacyJob({
+      orgId: req.user.orgId,
+      projectId: req.params.projectId,
+      jobId: req.params.jobId,
+    });
     if (!job) throw new HttpError(404, 'JOB_NOT_FOUND', 'Job not found or expired');
-    if (job.projectId !== req.params.projectId) {
-      throw new HttpError(403, 'JOB_ACCESS_DENIED', 'Job does not belong to this project');
-    }
     return sendSuccess(res, job);
+  }),
+);
+
+// POST /projects/:projectId/boq/job/:jobId/retry — re-queue a failed AI job
+router.post(
+  '/job/:jobId/retry',
+  authenticate,
+  CAN_MODIFY,
+  asyncHandler(async (req, res) => {
+    await jobService.retryJob({
+      orgId: req.user.orgId,
+      projectId: req.params.projectId,
+      jobId: req.params.jobId,
+      userId: req.user.id,
+    });
+    const job = await jobService.getLegacyJob({
+      orgId: req.user.orgId,
+      projectId: req.params.projectId,
+      jobId: req.params.jobId,
+    });
+    return sendSuccess(res, job, 202);
   }),
 );
 

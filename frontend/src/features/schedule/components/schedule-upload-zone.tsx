@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Upload, FileSpreadsheet, AlertCircle } from 'lucide-react'
+import { Upload, FileSpreadsheet, AlertCircle, RotateCcw } from 'lucide-react'
 import { toast } from 'sonner'
 import { useCanPerform } from '@/lib/permissions'
 import { Button } from '@/components/ui/button'
@@ -22,9 +22,34 @@ export function ScheduleUploadZone({ projectId, project }: Props) {
   const fileRef = useRef<HTMLInputElement>(null)
   const [revisionLabel, setRevisionLabel] = useState('')
   const [isImportScheduleOpen, setImportScheduleOpen] = useState(false)
-  const { trigger, isPending, currentStep, error } =
-    useGenerateSchedule(projectId)
+  const {
+    trigger,
+    retry,
+    canRetry,
+    isRetrying,
+    isPending,
+    currentStep,
+    error,
+    errorCode,
+    attempts,
+  } = useGenerateSchedule(projectId)
   const stepText = currentStep.toLowerCase()
+
+  const handleRetry = useCallback(
+    async (event: React.MouseEvent) => {
+      event.stopPropagation()
+      try {
+        await retry()
+        toast.info('Generation re-queued')
+      } catch (err: unknown) {
+        const msg =
+          (err as { response?: { data?: { error?: { message?: string } } } })
+            ?.response?.data?.error?.message ?? 'Unable to retry the job'
+        toast.error(msg)
+      }
+    },
+    [retry]
+  )
   const isRateLimited =
     stepText.includes('rate limit') ||
     stepText.includes('rate limited') ||
@@ -176,10 +201,36 @@ export function ScheduleUploadZone({ projectId, project }: Props) {
               <p className='font-semibold text-destructive'>
                 Generation failed
               </p>
-              <p className='mt-1 text-sm text-muted-foreground'>{error}</p>
-              <p className='mt-2 text-xs text-muted-foreground'>
-                Click to try again with a new file
+              <p className='mt-1 text-sm whitespace-pre-line text-muted-foreground'>
+                {error}
               </p>
+              {(errorCode || attempts > 0) && (
+                <p className='mt-1 font-mono text-[11px] text-muted-foreground'>
+                  {errorCode ?? 'JOB_FAILED'}
+                  {attempts > 0 ? ` · attempt ${attempts}` : ''}
+                </p>
+              )}
+              {canRetry ? (
+                <div className='mt-3 flex flex-wrap justify-center gap-2'>
+                  <Button
+                    type='button'
+                    size='sm'
+                    onClick={handleRetry}
+                    disabled={isRetrying}
+                    data-testid='uat-schedule-job-retry'
+                  >
+                    <RotateCcw className='mr-2 h-4 w-4' />
+                    {isRetrying ? 'Re-queuing…' : 'Retry generation'}
+                  </Button>
+                  <span className='self-center text-xs text-muted-foreground'>
+                    or click to upload a new file
+                  </span>
+                </div>
+              ) : (
+                <p className='mt-2 text-xs text-muted-foreground'>
+                  Click to try again with a new file
+                </p>
+              )}
             </div>
           </>
         ) : (

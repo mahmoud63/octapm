@@ -1,46 +1,55 @@
 # Runtime State And Scale Blockers
 
-Status: open. These items do not block an internal demo, but they remain blockers
-for paid customer use, multi-instance deployment, and production scale.
+Status: durable job state and shared rate limiting were implemented on
+2026-09-05 (`OCTA-PLAT-JOBS-001`, see `docs/qa/background-jobs.md`). The
+remaining items below still block a production SLA claim and need evidence
+before a paid pilot.
 
-For a controlled shadow pilot, these risks require explicit Product, Backend,
-DevOps, and Security acceptance. Acceptance expires on 2026-07-31 unless a
-durable job store and shared rate limiter are implemented sooner.
+## Durable Job State — resolved (pending load evidence)
 
-## Durable Job State
+- Current state: BOQ AI processing and AI schedule generation are rows in the
+  `BackgroundJob` table, claimed with `FOR UPDATE SKIP LOCKED` by the worker in
+  `backend/src/jobs/worker.js`. Jobs heartbeat, are re-queued after a worker
+  crash, retry transient failures with exponential backoff, and are pruned after
+  `JOB_TTL_MS`.
+- Multi-instance: any number of API or dedicated worker processes
+  (`npm run worker --workspace=backend`) share the queue; job state is visible
+  from every instance via `GET /projects/{id}/jobs`.
+- Remaining evidence: run the restart-safety and two-instance scenarios in
+  `docs/qa/background-jobs.md` against staging and attach the log excerpts.
+- Owner: Backend.
 
-- Current state: BOQ and schedule job state use in-memory `Map` stores.
-- Impact: queued or in-progress jobs are lost on process restart and are not
-  visible across multiple API instances.
-- Required before paid customer or production: move job state to PostgreSQL,
-  Redis, or a compatible durable adapter; add restart-safety tests and
-  operational cleanup/TTL behavior.
-- Shadow-pilot constraint if risk accepted: single backend instance only, no
-  critical long-running imports without manual retry, and every import result
-  reviewed against the source file before use.
-- Owner: Backend. Target fix decision: 2026-07-15.
+## Distributed Rate Limiting — resolved for API buckets, partial for login lockout
 
-## Distributed Rate Limiting
+- Current state: all `createRateLimiter` buckets (api, auth, login, refresh,
+  upload, AI generation, billing, Stripe webhook) use
+  `backend/src/config/rate-limit-store.js`. With `REDIS_URL` set the counters
+  are shared in Redis; without it they are per-instance memory. A Redis outage
+  degrades to per-instance counters with a throttled warning, never a block.
+- Remaining: the login backoff/lockout counters in
+  `backend/src/services/auth-abuse.service.js` are still process-local (their
+  callers and tests are synchronous). The shared `auth-login` bucket bounds
+  attempts per IP+email across instances in the meantime.
+- Required before multi-instance production: provision Redis, set `REDIS_URL`
+  on every API instance, and move the lockout state to the shared store.
+- Owner: Backend/Security/DevOps.
 
-- Current state: API/auth/upload/AI/billing/webhook rate limit buckets are
-  process-local in memory.
-- Impact: limits are not enforced consistently across horizontally scaled API
-  instances.
-- Required before multi-instance or production: use Redis, a managed edge/WAF
-  limiter, or another shared limiter backend; keep local memory mode only for
-  development and single-instance demos.
-- Shadow-pilot constraint if risk accepted: single backend instance only,
-  external-party access limited, and edge/WAF throttling configured if exposed
-  outside an internal network.
-- Owner: Backend/Security/DevOps. Target fix decision: 2026-07-15.
+## Realtime Fan-out — per instance
 
-## Performance And Load Evidence
+- Current state: socket.io rooms are per API instance. A record changed on
+  instance A is pushed only to sockets connected to A.
+- Required before multi-instance production: add the socket.io Redis adapter
+  using the same `REDIS_URL`.
+- Owner: Backend.
+
+## Performance And Load Evidence — open
 
 - Current state: unit/build gates pass locally, but no load test evidence is
   attached for realistic construction-project volumes.
-- Impact: dashboard, schedule, document, and import behavior under pilot-scale
-  data is not proven.
+- Impact: dashboard, schedule, document, import, and job-queue behavior under
+  pilot-scale data is not proven.
 - Required before controlled production use: run and archive load tests for
-  project list/search, project detail, schedule Gantt, BOQ upload/import,
-  document revision access, EV dashboard, and notification queues.
-- Owner: QA/Backend/Frontend. Target first load evidence: 2026-07-31.
+  project list/search, project detail, schedule Gantt, BOQ upload/import (with
+  the worker under load), document revision access, EV dashboard, realtime
+  fan-out, and notification queues.
+- Owner: QA/Backend/Frontend. Target first load evidence: 2026-10-15.

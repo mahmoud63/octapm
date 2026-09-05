@@ -1,10 +1,17 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Upload, FileSpreadsheet, AlertCircle, Download, Lock } from 'lucide-react'
+import {
+  Upload,
+  FileSpreadsheet,
+  AlertCircle,
+  Download,
+  Lock,
+  RotateCcw,
+} from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { apiClient } from '@/services/api/client'
-import { useBoqUpload, useBoqJobStatus } from '../hooks/use-boq'
+import { useBoqUpload, useBoqJobStatus, useRetryBoqJob } from '../hooks/use-boq'
 import { BoqValidationDialog } from './boq-validation-dialog'
 
 interface Props {
@@ -44,14 +51,22 @@ export function BoqUploadZone({
   const [validationErrors, setValidationErrors] = useState<ValidationError[]>([])
   const [showValidation, setShowValidation] = useState(false)
   const [localError, setLocalError] = useState<string | null>(null)
+  const [failedJob, setFailedJob] = useState<{
+    id: string
+    errorCode: string | null
+    attempts: number
+    canRetry: boolean
+  } | null>(null)
 
   const upload = useBoqUpload(projectId)
+  const retryJob = useRetryBoqJob(projectId)
   const jobQuery = useBoqJobStatus(projectId, jobId)
   const job = jobQuery.data
 
   const isDone = job?.status === 'done'
   const isError = job?.status === 'error'
-  const isPending = upload.isPending || (!!jobId && !isDone && !isError)
+  const isPending =
+    upload.isPending || retryJob.isPending || (!!jobId && !isDone && !isError)
 
   useEffect(() => {
     if (isDone) {
@@ -62,15 +77,43 @@ export function BoqUploadZone({
       }
       onUploadSuccess()
       setJobId(null)
+      setFailedJob(null)
     }
   }, [isDone, job?.mode, onUploadSuccess])
 
   useEffect(() => {
-    if (isError) {
-      setLocalError(job?.error ?? 'AI processing failed. Try uploading again.')
+    if (isError && job) {
+      setLocalError(job.error ?? 'AI processing failed. Try uploading again.')
+      // Keep the durable job id so the user can re-queue it without re-uploading.
+      setFailedJob({
+        id: job.jobId ?? job.id,
+        errorCode: job.errorCode ?? null,
+        attempts: job.attempts ?? 0,
+        canRetry: Boolean(job.canRetry),
+      })
       setJobId(null)
     }
-  }, [isError, job?.error])
+  }, [isError, job])
+
+  const handleRetry = useCallback(
+    async (event: React.MouseEvent) => {
+      event.stopPropagation()
+      if (!failedJob) return
+      try {
+        const requeued = await retryJob.mutateAsync(failedJob.id)
+        setLocalError(null)
+        setFailedJob(null)
+        setJobId(requeued.jobId ?? failedJob.id)
+        toast.info('BOQ processing re-queued')
+      } catch (err: unknown) {
+        const message =
+          (err as { response?: { data?: { error?: { message?: string } } } })
+            ?.response?.data?.error?.message ?? 'Unable to retry the job'
+        toast.error(message)
+      }
+    },
+    [failedJob, retryJob]
+  )
 
   const handleFile = useCallback(
     async (file: File) => {
@@ -84,6 +127,7 @@ export function BoqUploadZone({
         return
       }
       setLocalError(null)
+      setFailedJob(null)
       try {
         const result = await upload.mutateAsync({ file, label: revisionLabel })
         setJobId(result.jobId)
@@ -226,9 +270,33 @@ export function BoqUploadZone({
             <div>
               <p className='font-semibold text-destructive'>Processing failed</p>
               <p className='mt-1 text-sm text-muted-foreground'>{localError}</p>
-              <p className='mt-2 text-xs text-muted-foreground'>
-                Click to try again with a new file
-              </p>
+              {failedJob && (failedJob.errorCode || failedJob.attempts > 0) && (
+                <p className='mt-1 font-mono text-[11px] text-muted-foreground'>
+                  {failedJob.errorCode ?? 'JOB_FAILED'}
+                  {failedJob.attempts > 0 ? ` · attempt ${failedJob.attempts}` : ''}
+                </p>
+              )}
+              {failedJob?.canRetry ? (
+                <div className='mt-3 flex flex-wrap justify-center gap-2'>
+                  <Button
+                    type='button'
+                    size='sm'
+                    onClick={handleRetry}
+                    disabled={retryJob.isPending}
+                    data-testid='uat-boq-job-retry'
+                  >
+                    <RotateCcw className='mr-2 h-4 w-4' />
+                    {retryJob.isPending ? 'Re-queuing…' : 'Retry AI processing'}
+                  </Button>
+                  <span className='self-center text-xs text-muted-foreground'>
+                    or click to upload a new file
+                  </span>
+                </div>
+              ) : (
+                <p className='mt-2 text-xs text-muted-foreground'>
+                  Click to try again with a new file
+                </p>
+              )}
             </div>
           </>
         ) : (

@@ -5,9 +5,14 @@ All notable platform-wide changes should be recorded here. Agents must read this
 ## 2026-09-05
 
 Sprint 1 of the Procore parity program (P0 foundations). See
-`docs/qa/realtime-events.md` and `docs/qa/locations.md`.
+`docs/qa/realtime-events.md`, `docs/qa/locations.md`, and
+`docs/qa/background-jobs.md`.
 
 ### Added
+
+- Added a durable background job queue (`BackgroundJob` table, `backend/src/jobs/`): jobs are claimed with `FOR UPDATE SKIP LOCKED`, heartbeat while running, are re-queued after a worker crash, retry transient failures with exponential backoff, notify the requester and write an audit event on final failure, and are pruned after `JOB_TTL_MS`. BOQ AI processing and AI schedule generation now run through it; the in-memory job maps are gone. New endpoints: `GET /projects/{id}/jobs`, `GET/POST /projects/{id}/jobs/{jobId}[/retry|/cancel]`, `POST /projects/{id}/schedule/job/{jobId}/retry`, `POST /projects/{id}/boq/job/{jobId}/retry`. The API runs the worker in-process by default; `npm run worker --workspace=backend` runs dedicated workers.
+- Added a shared rate-limit counter store (`backend/src/config/rate-limit-store.js`): Redis-backed when `REDIS_URL` is set (new optional dependency `ioredis`), per-instance memory otherwise, with automatic fallback and throttled logging if Redis is unavailable.
+- Added Retry actions to the BOQ upload and schedule generation panels; job pollers keep their response shape and gain `errorCode`, `attempts`, `maxAttempts`, `canRetry`, `jobStatus`.
 
 - Added an in-process domain event bus (`backend/src/events/bus.js`) and an authenticated socket.io realtime layer (`backend/src/realtime/socket.js`). Audit events, approval decisions, and notification creation now publish `domain.event` messages to project rooms (joined only after the REST project-access check) and to recipient user rooms.
 - Added the durable `OutboundEvent` log written inside the audited transaction, as the basis for future webhooks.

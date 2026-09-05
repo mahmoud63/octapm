@@ -106,6 +106,19 @@ jest.mock("../boq-calculation.service", () => ({
   ),
 }));
 jest.mock("../audit.service", () => mockAuditService);
+jest.mock("../../jobs/job.service", () => ({
+  JOB_TYPES: { BOQ_PARSE: "boq.parse", SCHEDULE_GENERATE: "schedule.generate" },
+  enqueueJob: jest.fn(async ({ projectId }) => ({
+    id: "job-1",
+    projectId,
+    status: "queued",
+  })),
+  recordCompletedJob: jest.fn(async ({ projectId }) => ({
+    id: "job-1",
+    projectId,
+    status: "succeeded",
+  })),
+}));
 
 const XLSX = require("@e965/xlsx");
 const service = require("../boq.service");

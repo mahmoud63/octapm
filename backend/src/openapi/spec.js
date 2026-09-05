@@ -1928,6 +1928,97 @@ const components = {
       affectedCount: { type: "integer" },
       affectedIds: arrayOf(uuid),
     }),
+    BackgroundJob: objectSchema({
+      id: uuid,
+      orgId: uuid,
+      projectId: { type: "string", format: "uuid", nullable: true },
+      type: {
+        type: "string",
+        enum: [
+          "boq.parse",
+          "schedule.generate",
+          "schedule.import",
+          "document.extract",
+          "report.render",
+          "notification.deliver",
+        ],
+      },
+      status: {
+        type: "string",
+        enum: ["queued", "running", "succeeded", "failed", "cancelled"],
+      },
+      priority: { type: "integer" },
+      attempts: { type: "integer" },
+      maxAttempts: { type: "integer" },
+      payload: freeObject("Job input; never contains secrets."),
+      progress: freeObject(
+        "Progress fields: step, currentStep, totalSteps, steps, progress (0-100), message.",
+      ),
+      result: { ...freeObject("Handler result merged over enqueue context."), nullable: true },
+      error: {
+        ...objectSchema({
+          code: { type: "string" },
+          message: { type: "string" },
+          details: freeObject("Optional structured details."),
+        }),
+        nullable: true,
+      },
+      requestedBy: { type: "string", nullable: true },
+      lockedBy: { type: "string", nullable: true },
+      runAfter: nullableDateString,
+      startedAt: nullableDateString,
+      finishedAt: nullableDateString,
+      heartbeatAt: nullableDateString,
+      expiresAt: nullableDateString,
+      createdAt: nullableDateString,
+      updatedAt: nullableDateString,
+      canRetry: { type: "boolean" },
+      isTerminal: { type: "boolean" },
+    }),
+    BackgroundJobListResponse: objectSchema({
+      items: arrayOf(ref("BackgroundJob")),
+      summary: objectSchema({
+        queued: { type: "integer" },
+        running: { type: "integer" },
+        failed: { type: "integer" },
+        succeeded: { type: "integer" },
+      }),
+    }),
+    JobStatusView: {
+      type: "object",
+      additionalProperties: true,
+      description:
+        "Legacy poller shape for BOQ/schedule jobs. Result fields (mode, revision, comparison, baseline, revisionId) are spread at the top level.",
+      properties: {
+        id: uuid,
+        jobId: uuid,
+        type: { type: "string" },
+        status: {
+          type: "string",
+          enum: ["processing", "running", "done", "error"],
+        },
+        jobStatus: {
+          type: "string",
+          enum: ["queued", "running", "succeeded", "failed", "cancelled"],
+        },
+        step: { type: "string", nullable: true },
+        currentStep: { type: "integer", nullable: true },
+        totalSteps: { type: "integer", nullable: true },
+        steps: { ...arrayOf(ref("GenericObject")), nullable: true },
+        progress: { type: "number" },
+        message: { type: "string", nullable: true },
+        error: { type: "string", nullable: true },
+        errorCode: { type: "string", nullable: true },
+        projectId: { type: "string", format: "uuid", nullable: true },
+        attempts: { type: "integer" },
+        maxAttempts: { type: "integer" },
+        canRetry: { type: "boolean" },
+        queuedAt: nullableDateString,
+        startedAt: nullableDateString,
+        finishedAt: nullableDateString,
+        updatedAt: nullableDateString,
+      },
+    },
     ActivityMutation: objectSchema({
       name: { type: "string" },
       activityCode: { type: "string", nullable: true },
@@ -8301,6 +8392,106 @@ add(
   }),
 );
 
+const backgroundJobIdParam = pathParam("jobId", "Background job UUID.");
+const projectJobParams = [projectIdParam, backgroundJobIdParam];
+
+[
+  {
+    method: "get",
+    path: "/projects/{projectId}/jobs",
+    summary: "List durable background jobs for a project (newest first).",
+    operationId: "listProjectJobs",
+    parameters: [
+      ...projectParams,
+      queryParam("status", "Filter by job status.", {
+        type: "string",
+        enum: ["queued", "running", "succeeded", "failed", "cancelled"],
+      }),
+      queryParam("type", "Filter by job type.", {
+        type: "string",
+        enum: [
+          "boq.parse",
+          "schedule.generate",
+          "schedule.import",
+          "document.extract",
+          "report.render",
+          "notification.deliver",
+        ],
+      }),
+      queryParam("limit", "Maximum rows (1-100, default 25).", {
+        type: "integer",
+        minimum: 1,
+        maximum: 100,
+      }),
+    ],
+    permissions: authenticatedOnly,
+    responseSchema: ref("BackgroundJobListResponse"),
+  },
+  {
+    method: "get",
+    path: "/projects/{projectId}/jobs/{jobId}",
+    summary: "Read one background job.",
+    operationId: "getProjectJob",
+    parameters: projectJobParams,
+    permissions: authenticatedOnly,
+    responseSchema: ref("BackgroundJob"),
+  },
+  {
+    method: "post",
+    path: "/projects/{projectId}/jobs/{jobId}/retry",
+    summary:
+      "Re-queue a failed or cancelled job. Requires update permission on the job's module (boq or schedule).",
+    operationId: "retryProjectJob",
+    parameters: projectJobParams,
+    permissions: authenticatedOnly,
+    responseSchema: ref("BackgroundJob"),
+    status: 202,
+  },
+  {
+    method: "post",
+    path: "/projects/{projectId}/jobs/{jobId}/cancel",
+    summary:
+      "Cancel a queued job. Requires update permission on the job's module.",
+    operationId: "cancelProjectJob",
+    parameters: projectJobParams,
+    permissions: authenticatedOnly,
+    responseSchema: ref("BackgroundJob"),
+  },
+].forEach((route) =>
+  addGenericRoute({
+    tag: "Jobs",
+    ...route,
+  }),
+);
+
+add(
+  "/projects/{projectId}/schedule/job/{jobId}/retry",
+  "post",
+  operation({
+    tag: "Schedule",
+    summary: "Re-queue a failed AI schedule generation job.",
+    operationId: "retryScheduleGenerationJob",
+    parameters: projectJobParams,
+    permissions: modulePermission("schedule", "update"),
+    responseSchema: ref("JobStatusView"),
+    status: 202,
+  }),
+);
+
+add(
+  "/projects/{projectId}/boq/job/{jobId}/retry",
+  "post",
+  operation({
+    tag: "BOQ",
+    summary: "Re-queue a failed BOQ AI activity job.",
+    operationId: "retryBoqJob",
+    parameters: projectJobParams,
+    permissions: rolesPermission("pm", "planning_eng", "qs"),
+    responseSchema: ref("JobStatusView"),
+    status: 202,
+  }),
+);
+
 const openApiSpec = {
   openapi: "3.0.3",
   info: {
@@ -8475,6 +8666,11 @@ const openApiSpec = {
       name: "Locations",
       description:
         "Hierarchical project locations (site, building, level, zone, room) used as the spatial key for field records.",
+    },
+    {
+      name: "Jobs",
+      description:
+        "Durable background jobs (BOQ AI, schedule generation) stored in PostgreSQL and processed by workers with retry, heartbeat recovery, and TTL pruning. See docs/qa/background-jobs.md.",
     },
     {
       name: "Realtime",

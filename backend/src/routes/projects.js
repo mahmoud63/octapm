@@ -276,6 +276,7 @@ router.use(
   nestedProjectAccess,
   require("./locations"),
 );
+router.use("/:projectId/jobs", nestedProjectAccess, require("./jobs"));
 router.use(
   "/:projectId/activities",
   nestedProjectAccess,

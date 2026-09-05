@@ -15,6 +15,7 @@ const { getEffectiveRole, requirePermission } = require('../middleware/rbac');
 const { validate } = require('../middleware/validate');
 const scheduleService = require('../services/schedule.service');
 const fileStorageService = require('../services/file-storage.service');
+const jobService = require('../jobs/job.service');
 
 // Mounted with mergeParams: true from projects router
 const router = express.Router({ mergeParams: true });
@@ -391,23 +392,41 @@ router.get(
   }),
 );
 
-// GET /projects/:projectId/schedule/job/:jobId — poll for status
+// GET /projects/:projectId/schedule/job/:jobId — poll the durable job status
 router.get(
   '/job/:jobId',
   requirePermission('schedule', 'read'),
+  [param('jobId').isUUID(), validate],
   asyncHandler(async (req, res) => {
-    const job = scheduleService.getJob(req.params.jobId);
+    const job = await jobService.getLegacyJob({
+      orgId: req.user.orgId,
+      projectId: req.params.projectId,
+      jobId: req.params.jobId,
+    });
     if (!job)
       throw new HttpError(404, 'JOB_NOT_FOUND', 'Job not found or expired');
-    // Verify job belongs to this project
-    if (job.projectId !== req.params.projectId) {
-      throw new HttpError(
-        403,
-        'FORBIDDEN',
-        'Job does not belong to this project',
-      );
-    }
     return sendSuccess(res, job);
+  }),
+);
+
+// POST /projects/:projectId/schedule/job/:jobId/retry — re-queue a failed job
+router.post(
+  '/job/:jobId/retry',
+  requirePermission('schedule', 'update'),
+  [param('jobId').isUUID(), validate],
+  asyncHandler(async (req, res) => {
+    await jobService.retryJob({
+      orgId: req.user.orgId,
+      projectId: req.params.projectId,
+      jobId: req.params.jobId,
+      userId: req.user.id,
+    });
+    const job = await jobService.getLegacyJob({
+      orgId: req.user.orgId,
+      projectId: req.params.projectId,
+      jobId: req.params.jobId,
+    });
+    return sendSuccess(res, job, 202);
   }),
 );
 

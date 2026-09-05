@@ -1,6 +1,8 @@
 const { HttpError } = require('../utils/http-error');
-
-const stores = new Set();
+const {
+  getSharedRateLimitStore,
+  setSharedRateLimitStore,
+} = require('../config/rate-limit-store');
 
 function readPositiveInt(value, fallback) {
   const parsed = Number.parseInt(value, 10);
@@ -30,6 +32,11 @@ function setRateHeaders(res, { limit, remaining, resetAt }) {
   res.set('RateLimit-Reset', String(Math.ceil(resetAt / 1000)));
 }
 
+/**
+ * Fixed-window limiter. Counters live in the shared rate-limit store (Redis
+ * when REDIS_URL is set, otherwise process memory), so limits are enforced
+ * consistently across horizontally scaled API instances.
+ */
 function createRateLimiter({
   name,
   windowMs,
@@ -38,9 +45,9 @@ function createRateLimiter({
   code = 'RATE_LIMITED',
   message = 'Too many requests. Try again later.',
   skip = () => false,
+  store = null,
 }) {
-  const store = new Map();
-  stores.add(store);
+  const resolveStore = () => store || getSharedRateLimitStore();
 
   return (req, res, next) => {
     if (skip(req) || max === Infinity) {
@@ -49,39 +56,39 @@ function createRateLimiter({
 
     const now = Date.now();
     const key = `${name}:${keyGenerator(req) || 'anonymous'}`;
-    let entry = store.get(key);
 
-    if (!entry || entry.resetAt <= now) {
-      entry = { count: 0, resetAt: now + windowMs };
-      store.set(key, entry);
-    }
+    return resolveStore()
+      .hit(key, windowMs, now)
+      .then(({ count, resetAt }) => {
+        const remaining = max - count;
+        setRateHeaders(res, { limit: max, remaining, resetAt });
 
-    entry.count += 1;
-    const remaining = max - entry.count;
-    setRateHeaders(res, { limit: max, remaining, resetAt: entry.resetAt });
+        if (count > max) {
+          const retryAfterSeconds = Math.max(
+            1,
+            Math.ceil((resetAt - now) / 1000),
+          );
+          res.set('Retry-After', String(retryAfterSeconds));
+          return next(
+            new HttpError(429, code, message, {
+              bucket: name,
+              retryAfterSeconds,
+            }),
+          );
+        }
 
-    if (entry.count > max) {
-      const retryAfterSeconds = Math.max(
-        1,
-        Math.ceil((entry.resetAt - now) / 1000),
-      );
-      res.set('Retry-After', String(retryAfterSeconds));
-      return next(
-        new HttpError(429, code, message, {
-          bucket: name,
-          retryAfterSeconds,
-        }),
-      );
-    }
-
-    return next();
+        return next();
+      })
+      .catch((error) => {
+        // A broken counter store must never take the API down.
+        console.error('[rate-limit] store failure; allowing request', error);
+        return next();
+      });
   };
 }
 
 function resetRateLimitStores() {
-  for (const store of stores) {
-    store.clear();
-  }
+  return getSharedRateLimitStore().clear();
 }
 
 const apiRateLimiter = createRateLimiter({
@@ -168,6 +175,7 @@ module.exports = {
   loginLimiter,
   refreshLimiter,
   resetRateLimitStores,
+  setSharedRateLimitStore,
   stripeWebhookLimiter,
   uploadLimiter,
 };
