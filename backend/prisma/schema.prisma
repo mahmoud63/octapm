@@ -42,6 +42,8 @@ model Organisation {
   subscription        Subscription?
   enterpriseLeads     EnterpriseLead[]
   locations           Location[]
+  permissionTemplates PermissionTemplate[]
+  projectUserPermissions ProjectUserPermission[]
 }
 
 model User {
@@ -52,6 +54,7 @@ model User {
   phone        String?
   passwordHash String
   role         String    @default("site_engineer") // super_admin, pm, planning_eng, qs, cost_controller, procurement, warehouse, site_engineer, finance
+  isCompanyAdmin Boolean @default(false) // org-wide project visibility + permission/user administration
   status       String    @default("active")
   lastLogin    DateTime?
   createdAt    DateTime  @default(now())
@@ -59,6 +62,7 @@ model User {
 
   org                     Organisation         @relation(fields: [orgId], references: [id])
   projectAssignments      ProjectAssignment[]
+  projectPermissions      ProjectUserPermission[] @relation("ProjectUserPermissionUser")
   activityAssignments     ActivityAssignment[]
   refreshSessions         RefreshSession[]
   passwordResetTokens     PasswordResetToken[]
@@ -296,6 +300,7 @@ model Project {
   taskHistoryEvents             TaskHistory[]
   notifications                 Notification[]
   locations                     Location[]
+  userPermissions               ProjectUserPermission[]
 
   @@index([orgId])
   @@index([orgId, status, archivedAt])
@@ -312,12 +317,14 @@ model ProjectParty {
   accessLevel          String           @default("collaborator")
   permissionProfile    String?
   permissionsJson      Json             @default("{}")
+  permissionTemplateId String?
   status               String           @default("active")
   createdAt            DateTime         @default(now())
   updatedAt            DateTime         @updatedAt
 
   project                       Project              @relation(fields: [projectId], references: [id], onDelete: Cascade)
   company                       Company              @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  permissionTemplate            PermissionTemplate?  @relation(fields: [permissionTemplateId], references: [id], onDelete: SetNull)
   members                       ProjectPartyMember[]
   invitationTokens              InvitationToken[]
   rfiOwnerAssignments           Rfi[]                @relation("RfiOwnerParty")
@@ -333,6 +340,7 @@ model ProjectParty {
   @@index([projectId])
   @@index([projectId, role])
   @@index([companyId])
+  @@index([permissionTemplateId])
   @@index([status])
 }
 
@@ -3438,6 +3446,83 @@ model Location {
   @@index([projectId, parentId, sortOrder])
   @@index([parentId])
   @@index([projectId, path])
+}
+
+// ─── Permission templates (per-tool levels + granular grants) ───
+model PermissionTemplate {
+  id            String   @id @default(uuid())
+  orgId         String
+  name          String
+  description   String?
+  kind          String   @default("internal") // internal (own staff), external (collaborators)
+  clientType    String? // gc, owner, consultant, subcontractor — which customer type this default suits
+  baseRole      String? // internal role whose policy defines the "standard" level
+  basePartyRole String? // party role whose policy defines the "standard" level (external templates)
+  isDefault     Boolean  @default(false)
+  isSystem      Boolean  @default(false) // seeded; cannot be deleted
+  status        String   @default("active") // active, archived
+  createdBy     String?
+  updatedBy     String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  org             Organisation              @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  tools           PermissionTemplateTool[]
+  grants          PermissionTemplateGrant[]
+  userPermissions ProjectUserPermission[]
+  projectParties  ProjectParty[]
+
+  @@unique([orgId, name])
+  @@index([orgId, status])
+  @@index([orgId, kind, clientType])
+}
+
+model PermissionTemplateTool {
+  id         String @id @default(uuid())
+  templateId String
+  module     String // key from shared/permissions.json modules
+  level      String @default("standard") // none, read_only, standard, admin
+
+  template PermissionTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+
+  @@unique([templateId, module])
+  @@index([templateId])
+}
+
+model PermissionTemplateGrant {
+  id         String  @id @default(uuid())
+  templateId String
+  module     String
+  action     String? // one of the policy actions
+  transition String? // one of the module transitions
+  key        String // "<module>|action:<action>" or "<module>|transition:<transition>"
+
+  template PermissionTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+
+  @@unique([templateId, key])
+  @@index([templateId])
+}
+
+model ProjectUserPermission {
+  id            String   @id @default(uuid())
+  orgId         String
+  projectId     String
+  userId        String
+  templateId    String?
+  overridesJson Json     @default("{}") // { tools: { module: level }, grants: [key] }
+  assignedBy    String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  org      Organisation        @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  project  Project             @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  user     User                @relation("ProjectUserPermissionUser", fields: [userId], references: [id], onDelete: Cascade)
+  template PermissionTemplate? @relation(fields: [templateId], references: [id], onDelete: SetNull)
+
+  @@unique([projectId, userId])
+  @@index([orgId])
+  @@index([userId])
+  @@index([templateId])
 }
 
 // ─── Background jobs (durable queue; claimed with SKIP LOCKED) ───

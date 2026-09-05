@@ -1,7 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { AxiosError } from 'axios'
 import { Link } from '@tanstack/react-router'
-import { ProjectPermissionProvider } from '@/lib/permissions'
+import {
+  ProjectPermissionProvider,
+  type PermissionMatrix,
+  type PermissionModule,
+} from '@/lib/permissions'
+import { useProjectRealtime } from '@/hooks/use-realtime'
 import { Main } from '@/components/layout/main'
 import { ActivitiesList } from '@/features/activities/components/activities-list'
 import { BoqPage } from '@/features/boq/components/boq-page'
@@ -11,6 +16,8 @@ import { DocControlDashboard } from '@/features/doc-control/components/doc-contr
 import { EquipmentSection } from '@/features/equipment/components/equipment-section'
 import { LocationsPanel } from '@/features/locations/components/locations-panel'
 import { MeetingsDashboard } from '@/features/meetings/components/meetings-dashboard'
+import { ProjectTeamPanel } from '@/features/permissions/components/project-team-panel'
+import { useMyProjectPermissions } from '@/features/permissions/hooks/use-permissions'
 import {
   useProject,
   useProjectParties,
@@ -23,7 +30,6 @@ import { ScheduleDashboard } from '@/features/schedule/components/schedule-dashb
 import { ScheduleUploadZone } from '@/features/schedule/components/schedule-upload-zone'
 import { useProjectSchedule } from '@/features/schedule/hooks/use-schedule'
 import { SiteReportingDashboard } from '@/features/site-reporting/components/site-reporting-dashboard'
-import { useProjectRealtime } from '@/hooks/use-realtime'
 import type { ProjectSetupTarget } from '../data/schema'
 import { HealthDashboard } from './health-dashboard'
 import { ProjectSetupWizard } from './project-setup-wizard'
@@ -40,9 +46,42 @@ type ModuleKey =
   | 'activities'
   | 'equipment'
   | 'locations'
+  | 'team'
   | 'reports'
   | 'overview'
   | 'boq'
+
+/**
+ * Which permission modules back each workspace module. A workspace module is
+ * hidden when the resolved permission matrix marks every backing module as
+ * not visible (level `none`). Modules with no entry are always shown.
+ */
+const MODULE_PERMISSIONS: Partial<Record<ModuleKey, PermissionModule[]>> = {
+  schedule: ['schedule'],
+  siteReporting: ['progress'],
+  cost: ['cost'],
+  commercial: ['change_order', 'ipc', 'eot'],
+  quality: ['ncr', 'safety'],
+  docControl: ['document_control', 'rfi', 'submittal'],
+  meetings: ['meeting'],
+  boq: ['boq'],
+  activities: ['schedule'],
+  equipment: ['schedule', 'cost'],
+  locations: ['location'],
+  reports: ['schedule'],
+}
+
+const isModuleVisible = (
+  matrix: PermissionMatrix | null | undefined,
+  key: ModuleKey
+) => {
+  const backing = MODULE_PERMISSIONS[key]
+  if (!matrix || !backing?.length) return true
+  return backing.some((module) => {
+    const entry = matrix.modules[module]
+    return entry ? entry.visible : true
+  })
+}
 
 type ModuleChildState = {
   schedule: string
@@ -185,6 +224,9 @@ export function ProjectDetail({
     projectId,
     { enabled: canLoadProjectModules }
   )
+  const { data: permissionMatrix } = useMyProjectPermissions(projectId, {
+    enabled: canLoadProjectModules,
+  })
   const [activeModule, setActiveModule] = useState<ModuleKey>('schedule')
   const [childState, setChildState] =
     useState<ModuleChildState>(DEFAULT_CHILD_STATE)
@@ -275,15 +317,25 @@ export function ProjectDetail({
       { key: 'activities', label: 'Activities' },
       { key: 'equipment', label: 'Equipment' },
       { key: 'locations', label: 'Locations' },
+      { key: 'team', label: 'Team' },
       { key: 'reports', label: 'Reports' },
       { key: 'overview', label: 'Overview' },
-    ]
+    ].filter((item) =>
+      isModuleVisible(permissionMatrix, item.key as ModuleKey)
+    ) as MenuItem[]
   }, [
     hasWbs,
+    permissionMatrix,
     scheduleActivitiesCount,
     scheduleCriticalCount,
     scheduleMilestonesCount,
   ])
+
+  // If a template hides the module currently open, show the first visible one.
+  const visibleModule: ModuleKey =
+    menuItems.some((item) => item.key === activeModule) || !menuItems.length
+      ? activeModule
+      : menuItems[0].key
 
   const setModuleChild = useCallback(
     (module: ModuleWithChildren, child: string) => {
@@ -342,7 +394,7 @@ export function ProjectDetail({
   const renderContent = () => {
     if (!project) return null
 
-    switch (activeModule) {
+    switch (visibleModule) {
       case 'schedule':
         return scheduleLoading ? (
           <div className='py-8 text-center text-muted-foreground'>
@@ -443,7 +495,10 @@ export function ProjectDetail({
 
       case 'meetings':
         return (
-          <MeetingsDashboard projectId={projectId} initialTarget={initialTarget} />
+          <MeetingsDashboard
+            projectId={projectId}
+            initialTarget={initialTarget}
+          />
         )
 
       case 'equipment':
@@ -451,6 +506,9 @@ export function ProjectDetail({
 
       case 'locations':
         return <LocationsPanel projectId={projectId} />
+
+      case 'team':
+        return <ProjectTeamPanel projectId={projectId} />
 
       case 'reports':
         return (
@@ -517,8 +575,9 @@ export function ProjectDetail({
                   <PartyDetailItem
                     label='Client / Owner'
                     value={
-                      activeProjectParties.find((party) => party.role === 'owner')
-                        ?.company?.name ?? project.clientName
+                      activeProjectParties.find(
+                        (party) => party.role === 'owner'
+                      )?.company?.name ?? project.clientName
                     }
                   />
                   <PartyDetailItem
@@ -667,6 +726,7 @@ export function ProjectDetail({
             role={project.projectAccess?.role}
             effectiveRole={projectEffectiveRole}
             partyAccess={project.projectAccess?.partyAccess}
+            matrix={permissionMatrix}
           >
             <div className='flex flex-wrap items-end justify-between gap-2'>
               <div>
@@ -701,7 +761,7 @@ export function ProjectDetail({
 
                 <nav className='space-y-1'>
                   {menuItems.map((item) => {
-                    const isActiveModule = activeModule === item.key
+                    const isActiveModule = visibleModule === item.key
                     const hasChildren = Boolean(item.children?.length)
 
                     return (
@@ -757,7 +817,7 @@ export function ProjectDetail({
               </aside>
 
               <section
-                data-testid={`uat-project-content-${activeModule}`}
+                data-testid={`uat-project-content-${visibleModule}`}
                 className='min-w-0'
               >
                 {renderContent()}

@@ -130,6 +130,7 @@ const sanitizeUser = (user) => ({
   email: user.email,
   phone: user.phone,
   role: user.role,
+  isCompanyAdmin: Boolean(user.isCompanyAdmin),
   status: user.status,
   lastLogin: user.lastLogin,
   createdAt: user.createdAt,
@@ -269,10 +270,16 @@ const register = async (
         phone: phone || null,
         passwordHash,
         role: "pm",
+        isCompanyAdmin: true,
       },
     });
 
     await ensureSubscription(createdOrg.id, tx);
+    // System permission templates (8 internal roles + 4 external party types).
+    await require("./permission-template.service").seedDefaultTemplates({
+      tx,
+      orgId: createdOrg.id,
+    });
     const authPayload = await createAuthSessionPayload(
       tx,
       createdUser,

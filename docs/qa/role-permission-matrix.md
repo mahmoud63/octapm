@@ -5,11 +5,17 @@ Source of truth: `shared/permissions.json`.
 Backend checks are authoritative. Frontend visibility uses the same policy
 metadata only to hide or disable actions before a request is sent.
 
-Project object access is enforced before module/action permissions. PM users can
-see all projects in their organization. All other roles must have a
-`ProjectAssignment` row or active `ProjectPartyMember` row for the requested
-project; otherwise project detail and nested module routes return
-`403 PROJECT_ACCESS_DENIED`.
+Project object access is enforced before module/action permissions. PM users and
+company admins (`User.isCompanyAdmin`) can see all projects in their
+organization. All other roles must have a `ProjectAssignment` row or active
+`ProjectPartyMember` row for the requested project; otherwise project detail and
+nested module routes return `403 PROJECT_ACCESS_DENIED`.
+
+The matrix below is the **base policy**. A permission template assigned to a
+user on a project (or to the user's project party) overrides it per module:
+`none` hides the module, `read_only` keeps read/export, `standard` keeps the
+base role's row, `admin` grants every action and transition, and grants add
+single actions on top. See `docs/qa/permission-templates.md`.
 
 ## Roles
 

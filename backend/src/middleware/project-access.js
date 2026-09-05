@@ -2,6 +2,9 @@ const { HttpError } = require('../utils/http-error');
 const {
   assertProjectAccess,
 } = require('../services/project-authorization.service');
+const {
+  attachTemplateContext,
+} = require('../services/permission-template.service');
 
 const requireProjectAccess = (paramName = 'projectId') => {
   return async (req, _res, next) => {
@@ -18,9 +21,12 @@ const requireProjectAccess = (paramName = 'projectId') => {
         projectId,
         userId: req.user.id,
         role: req.user.role,
+        isCompanyAdmin: req.user.isCompanyAdmin,
       });
 
       req.projectAccess = access;
+      // Permission templates (if any) layer over the role/party policy.
+      await attachTemplateContext({ req });
       return next();
     } catch (error) {
       return next(error);

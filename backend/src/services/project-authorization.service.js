@@ -6,7 +6,10 @@ const PROJECT_ACCESS_DENIED_CODE = 'PROJECT_ACCESS_DENIED';
 const PROJECT_ACCESS_DENIED_MESSAGE = 'You are not assigned to this project';
 const ORG_WIDE_PROJECT_ACCESS_ROLES = new Set(['pm', 'super_admin']);
 
-const canAccessAllProjects = (role) =>
+// Org-wide project visibility: PM / super_admin roles, plus company admins
+// (User.isCompanyAdmin) regardless of their functional role.
+const canAccessAllProjects = (role, options = {}) =>
+  Boolean(options?.isCompanyAdmin) ||
   ORG_WIDE_PROJECT_ACCESS_ROLES.has(normalizeRoleId(role));
 
 const projectAccessDenied = () =>
@@ -16,8 +19,8 @@ const projectAccessDenied = () =>
     PROJECT_ACCESS_DENIED_MESSAGE,
   );
 
-const getProjectAccessWhere = ({ userId, role }) => {
-  if (canAccessAllProjects(role)) {
+const getProjectAccessWhere = ({ userId, role, isCompanyAdmin = false }) => {
+  if (canAccessAllProjects(role, { isCompanyAdmin })) {
     return {};
   }
 
@@ -118,13 +121,22 @@ const throwProjectNotFoundOrAccessDenied = async ({ orgId, projectId }) => {
   throw new HttpError(404, 'PROJECT_NOT_FOUND', 'Project not found');
 };
 
-const assertProjectAccess = async ({ orgId, projectId, userId, role }) => {
+const assertProjectAccess = async ({
+  orgId,
+  projectId,
+  userId,
+  role,
+  isCompanyAdmin = false,
+}) => {
   const select = {
     id: true,
     orgId: true,
   };
 
-  if (!canAccessAllProjects(role) && userId) {
+  const orgWide = canAccessAllProjects(role, { isCompanyAdmin });
+  if (userId && (!orgWide || isCompanyAdmin)) {
+    // Company admins still get their assignment/party context so templates
+    // and party-scoped rules can apply to them.
     select.assignments = {
       where: { userId },
       select: { role: true },
@@ -137,7 +149,7 @@ const assertProjectAccess = async ({ orgId, projectId, userId, role }) => {
     where: {
       id: projectId,
       orgId,
-      ...getProjectAccessWhere({ userId, role }),
+      ...getProjectAccessWhere({ userId, role, isCompanyAdmin }),
     },
     select,
   });
@@ -155,6 +167,7 @@ const assertProjectAccess = async ({ orgId, projectId, userId, role }) => {
     role: assignmentRole || (partyAccess.length ? 'external_party' : normalizeRoleId(role)),
     assignmentRole,
     partyAccess,
+    isCompanyAdmin: Boolean(isCompanyAdmin),
     scope: assignmentRole
       ? 'assignment'
       : partyAccess.length

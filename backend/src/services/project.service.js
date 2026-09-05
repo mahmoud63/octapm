@@ -47,12 +47,13 @@ const getProjectAssignmentRole = (project) =>
 
 const getProjectPartyAccess = (project) => serializePartyAccess(project.parties);
 
-const buildProjectAccess = ({ project, role }) => {
+const buildProjectAccess = ({ project, role, isCompanyAdmin = false }) => {
   const orgRole = normalizeRoleId(role) || null;
   const assignmentRole = getProjectAssignmentRole(project);
   const partyAccess = getProjectPartyAccess(project);
-  const effectiveRole = canAccessAllProjects(orgRole)
-    ? orgRole
+  const orgWide = canAccessAllProjects(orgRole, { isCompanyAdmin });
+  const effectiveRole = orgWide
+    ? assignmentRole || orgRole
     : assignmentRole || (partyAccess.length ? "external_party" : orgRole);
 
   return {
@@ -60,11 +61,12 @@ const buildProjectAccess = ({ project, role }) => {
     effectiveRole,
     assignmentRole,
     orgRole,
+    isCompanyAdmin: Boolean(isCompanyAdmin),
     scope: assignmentRole
       ? "assignment"
       : partyAccess.length
         ? "party"
-        : canAccessAllProjects(orgRole)
+        : orgWide
           ? "org"
           : "assignment",
     partyRole: partyAccess[0]?.role || null,
@@ -86,6 +88,7 @@ const sanitizeProject = (project, options = {}) => {
   const projectAccess = buildProjectAccess({
     project,
     role: options.role,
+    isCompanyAdmin: options.isCompanyAdmin,
   });
 
   return {
@@ -294,12 +297,18 @@ const createProject = async ({ orgId, userId, role, payload }) => {
   return sanitizeProject(project, { role });
 };
 
-const findAccessibleProject = async ({ orgId, projectId, userId, role }) => {
+const findAccessibleProject = async ({
+  orgId,
+  projectId,
+  userId,
+  role,
+  isCompanyAdmin = false,
+}) => {
   const project = await prisma.project.findFirst({
     where: {
       id: projectId,
       orgId,
-      ...getProjectAccessWhere({ userId, role }),
+      ...getProjectAccessWhere({ userId, role, isCompanyAdmin }),
     },
     ...includeUserProjectAccess(userId),
   });
@@ -311,12 +320,18 @@ const findAccessibleProject = async ({ orgId, projectId, userId, role }) => {
   return project;
 };
 
-const listProjects = async ({ orgId, userId, role, query }) => {
+const listProjects = async ({
+  orgId,
+  userId,
+  role,
+  isCompanyAdmin = false,
+  query,
+}) => {
   const take = Math.min(Math.max(query.limit || 20, 1), 100);
 
   const where = {
     orgId,
-    ...getProjectAccessWhere({ userId, role }),
+    ...getProjectAccessWhere({ userId, role, isCompanyAdmin }),
   };
 
   if (query.status) {
@@ -353,7 +368,9 @@ const listProjects = async ({ orgId, userId, role, query }) => {
   }
 
   return {
-    items: projects.map((project) => sanitizeProject(project, { role })),
+    items: projects.map((project) =>
+      sanitizeProject(project, { role, isCompanyAdmin }),
+    ),
     pagination: {
       limit: take,
       nextCursor,
@@ -361,15 +378,22 @@ const listProjects = async ({ orgId, userId, role, query }) => {
   };
 };
 
-const getProjectById = async ({ orgId, projectId, userId, role }) => {
+const getProjectById = async ({
+  orgId,
+  projectId,
+  userId,
+  role,
+  isCompanyAdmin = false,
+}) => {
   const project = await findAccessibleProject({
     orgId,
     projectId,
     userId,
     role,
+    isCompanyAdmin,
   });
 
-  return sanitizeProject(project, { role });
+  return sanitizeProject(project, { role, isCompanyAdmin });
 };
 
 const updateProject = async ({ orgId, projectId, userId, role, payload }) => {

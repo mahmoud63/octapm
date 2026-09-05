@@ -21,11 +21,15 @@ import {
   FormMessage,
 } from '@/components/ui/form'
 import { Input } from '@/components/ui/input'
+import { Switch } from '@/components/ui/switch'
 import { PasswordInput } from '@/components/password-input'
 import { SelectDropdown } from '@/components/select-dropdown'
 import { roles } from '../data/data'
 import { type User } from '../data/schema'
-import { useCreateUserMutation, useUpdateUserMutation } from '../hooks/use-users'
+import {
+  useCreateUserMutation,
+  useUpdateUserMutation,
+} from '../hooks/use-users'
 
 const formSchema = z
   .object({
@@ -40,6 +44,7 @@ const formSchema = z
       .transform((value) => value.toLowerCase()),
     phone: z.string().trim().optional(),
     role: z.string().min(1, 'Role is required.'),
+    isCompanyAdmin: z.boolean(),
     password: z.string(),
     confirmPassword: z.string(),
     isEdit: z.boolean(),
@@ -87,6 +92,7 @@ export function UsersActionDialog({
       email: currentRow?.email ?? '',
       phone: currentRow?.phone ?? '',
       role: currentRow?.role ?? 'site_engineer',
+      isCompanyAdmin: currentRow?.isCompanyAdmin ?? false,
       password: '',
       confirmPassword: '',
       isEdit,
@@ -103,6 +109,7 @@ export function UsersActionDialog({
             email: values.email,
             phone: values.phone,
             role: values.role,
+            isCompanyAdmin: values.isCompanyAdmin,
           },
         })
         toast.success('Engineer updated successfully.')
@@ -127,6 +134,7 @@ export function UsersActionDialog({
         email: '',
         phone: '',
         role: 'site_engineer',
+        isCompanyAdmin: false,
         password: '',
         confirmPassword: '',
         isEdit: false,
@@ -220,6 +228,31 @@ export function UsersActionDialog({
                 </FormItem>
               )}
             />
+
+            {isEdit && (
+              <FormField
+                control={form.control}
+                name='isCompanyAdmin'
+                render={({ field }) => (
+                  <FormItem className='flex items-center justify-between rounded-md border p-3'>
+                    <div className='space-y-0.5'>
+                      <FormLabel>Company admin</FormLabel>
+                      <p className='text-xs text-muted-foreground'>
+                        Sees every project and manages users and permission
+                        templates.
+                      </p>
+                    </div>
+                    <FormControl>
+                      <Switch
+                        data-testid='uat-user-company-admin'
+                        checked={field.value}
+                        onCheckedChange={field.onChange}
+                      />
+                    </FormControl>
+                  </FormItem>
+                )}
+              />
+            )}
 
             {!isEdit && (
               <>

@@ -98,7 +98,13 @@ export const useUpdateUserMutation = () => {
       payload,
     }: {
       userId: string
-      payload: { name?: string; email?: string; phone?: string; role?: string }
+      payload: {
+        name?: string
+        email?: string
+        phone?: string
+        role?: string
+        isCompanyAdmin?: boolean
+      }
     }) => apiClient.patch(`/users/${userId}`, payload).then((r) => r.data.data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['users'] })

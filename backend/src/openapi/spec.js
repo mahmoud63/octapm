@@ -406,6 +406,11 @@ const components = {
         email: { type: "string", format: "email" },
         phone: { type: "string", nullable: true },
         role: { type: "string" },
+        isCompanyAdmin: {
+          type: "boolean",
+          description:
+            "Company admins see every project in the organisation and administer users and permission templates.",
+        },
         status: { type: "string" },
         lastLogin: nullableDateString,
         createdAt: nullableDateString,
@@ -1422,6 +1427,11 @@ const components = {
         },
         permissionProfile: { type: "string", nullable: true },
         permissionPolicy: ref("GenericObject"),
+        permissionTemplateId: nullableUuid,
+        permissionTemplate: {
+          allOf: [ref("PermissionTemplateRef")],
+          nullable: true,
+        },
         status: { type: "string", enum: ["active", "inactive"] },
         company: { allOf: [ref("Company")], nullable: true },
         members: arrayOf(ref("ProjectPartyMember")),
@@ -1983,6 +1993,200 @@ const components = {
         failed: { type: "integer" },
         succeeded: { type: "integer" },
       }),
+    }),
+    PermissionLevel: {
+      type: "string",
+      enum: ["none", "read_only", "standard", "admin"],
+      description:
+        "none hides the module; read_only allows read/export; standard is what the template's base role can do; admin is every action and transition.",
+    },
+    PermissionTemplateRef: objectSchema(
+      { id: uuid, name: { type: "string" } },
+      ["id", "name"],
+    ),
+    PermissionTemplateTool: objectSchema(
+      { module: { type: "string" }, level: ref("PermissionLevel") },
+      ["module", "level"],
+    ),
+    PermissionTemplateGrant: objectSchema(
+      {
+        module: { type: "string" },
+        action: { type: "string", nullable: true },
+        transition: { type: "string", nullable: true },
+        key: {
+          type: "string",
+          description:
+            '"<module>|action:<action>" or "<module>|transition:<transition>".',
+        },
+      },
+      ["module"],
+    ),
+    PermissionTemplate: objectSchema(
+      {
+        id: uuid,
+        orgId: uuid,
+        name: { type: "string" },
+        description: { type: "string", nullable: true },
+        kind: { type: "string", enum: ["internal", "external"] },
+        clientType: {
+          type: "string",
+          enum: ["gc", "owner", "consultant", "subcontractor"],
+          nullable: true,
+        },
+        baseRole: { type: "string", nullable: true },
+        basePartyRole: { type: "string", nullable: true },
+        isDefault: { type: "boolean" },
+        isSystem: { type: "boolean" },
+        status: { type: "string", enum: ["active", "archived"] },
+        tools: arrayOf(ref("PermissionTemplateTool")),
+        grants: arrayOf(ref("PermissionTemplateGrant")),
+        usage: objectSchema({
+          projectUsers: { type: "integer" },
+          parties: { type: "integer" },
+        }),
+        createdBy: nullableUuid,
+        updatedBy: nullableUuid,
+        createdAt: nullableDateString,
+        updatedAt: nullableDateString,
+      },
+      ["id", "orgId", "name", "kind", "status", "tools", "grants"],
+    ),
+    PermissionTemplateListResponse: objectSchema({
+      items: arrayOf(ref("PermissionTemplate")),
+    }),
+    PermissionTemplateMutationRequest: objectSchema({
+      name: { type: "string", maxLength: 120 },
+      description: { type: "string", maxLength: 1000, nullable: true },
+      kind: { type: "string", enum: ["internal", "external"] },
+      clientType: {
+        type: "string",
+        enum: ["gc", "owner", "consultant", "subcontractor"],
+        nullable: true,
+      },
+      baseRole: { type: "string", nullable: true },
+      basePartyRole: { type: "string", nullable: true },
+      status: { type: "string", enum: ["active", "archived"] },
+      tools: arrayOf(ref("PermissionTemplateTool")),
+      grants: arrayOf(
+        objectSchema({
+          module: { type: "string" },
+          action: { type: "string", nullable: true },
+          transition: { type: "string", nullable: true },
+        }),
+      ),
+    }),
+    PermissionCatalog: objectSchema({
+      levels: arrayOf(
+        objectSchema({
+          id: ref("PermissionLevel"),
+          label: { type: "string" },
+          description: { type: "string" },
+        }),
+      ),
+      actions: arrayOf({ type: "string" }),
+      roles: arrayOf(ref("GenericObject")),
+      partyRoles: arrayOf(ref("GenericObject")),
+      kinds: arrayOf({ type: "string" }),
+      clientTypes: arrayOf({ type: "string" }),
+      modules: arrayOf(
+        objectSchema({
+          id: { type: "string" },
+          label: { type: "string" },
+          actions: arrayOf({ type: "string" }),
+          transitions: arrayOf({ type: "string" }),
+        }),
+      ),
+    }),
+    PermissionModuleAccess: objectSchema({
+      label: { type: "string" },
+      level: ref("PermissionLevel"),
+      visible: { type: "boolean" },
+      actions: arrayOf({ type: "string" }),
+      transitions: arrayOf({ type: "string" }),
+    }),
+    PermissionMatrix: objectSchema(
+      {
+        orgId: nullableUuid,
+        projectId: nullableUuid,
+        userId: nullableUuid,
+        isCompanyAdmin: { type: "boolean" },
+        source: {
+          type: "string",
+          enum: ["template", "party_template", "assignment", "party", "org"],
+        },
+        role: { type: "string", nullable: true },
+        partyRoles: arrayOf({ type: "string" }),
+        template: { allOf: [ref("PermissionTemplateRef")], nullable: true },
+        modules: {
+          type: "object",
+          additionalProperties: ref("PermissionModuleAccess"),
+        },
+      },
+      ["isCompanyAdmin", "source", "modules"],
+    ),
+    ProjectTeamMember: objectSchema({
+      userId: uuid,
+      name: { type: "string" },
+      email: { type: "string", format: "email" },
+      orgRole: { type: "string", nullable: true },
+      isCompanyAdmin: { type: "boolean" },
+      status: { type: "string" },
+      assignmentRole: { type: "string", nullable: true },
+      party: {
+        allOf: [
+          objectSchema({
+            id: uuid,
+            role: { type: "string" },
+            companyId: nullableUuid,
+            companyName: { type: "string", nullable: true },
+            template: {
+              allOf: [ref("PermissionTemplateRef")],
+              nullable: true,
+            },
+          }),
+        ],
+        nullable: true,
+      },
+      template: { allOf: [ref("PermissionTemplateRef")], nullable: true },
+      overrides: ref("GenericObject"),
+      source: {
+        type: "string",
+        enum: ["template", "party_template", "assignment", "party", "org"],
+      },
+    }),
+    ProjectTeamResponse: objectSchema({
+      items: arrayOf(ref("ProjectTeamMember")),
+      parties: arrayOf(
+        objectSchema({
+          id: uuid,
+          role: { type: "string" },
+          companyName: { type: "string", nullable: true },
+          memberCount: { type: "integer" },
+          template: { allOf: [ref("PermissionTemplateRef")], nullable: true },
+        }),
+      ),
+    }),
+    ProjectUserPermissionRequest: objectSchema({
+      templateId: nullableUuid,
+      overrides: objectSchema({
+        tools: {
+          type: "object",
+          additionalProperties: ref("PermissionLevel"),
+        },
+        grants: arrayOf({ type: "string" }),
+      }),
+    }),
+    ProjectUserPermission: objectSchema({
+      id: uuid,
+      projectId: uuid,
+      userId: uuid,
+      template: { allOf: [ref("PermissionTemplateRef")], nullable: true },
+      overrides: ref("GenericObject"),
+      assignedBy: nullableUuid,
+      updatedAt: nullableDateString,
+    }),
+    ProjectPartyPermissionRequest: objectSchema({
+      templateId: nullableUuid,
     }),
     JobStatusView: {
       type: "object",
@@ -3889,6 +4093,23 @@ add(
     summary: "Return persisted settings for the authenticated user.",
     operationId: "getCurrentUserSettings",
     responseSchema: ref("UserSettingsResponse"),
+  }),
+);
+
+add(
+  "/auth/me/permissions",
+  "get",
+  operation({
+    tag: "Auth",
+    summary:
+      "Return the caller's effective permission matrix (module → level, actions, transitions).",
+    description:
+      "Without projectId the matrix reflects the org role. With projectId it is resolved through the permission template chain: project user template → party template → assignment role → org role. Company admins are always admin on user_management and project_parties.",
+    operationId: "getCurrentUserPermissions",
+    parameters: [
+      queryParam("projectId", "Project UUID to resolve against.", uuid),
+    ],
+    responseSchema: ref("PermissionMatrix"),
   }),
 );
 
@@ -8492,6 +8713,178 @@ add(
   }),
 );
 
+// ─── Permission templates & project team ────────────────────────────────
+const companyAdminPermission = {
+  auth: "bearer",
+  roles: ["pm"],
+  note: "Company admins (User.isCompanyAdmin) and project managers.",
+};
+const permissionTemplateIdParam = pathParam("id", "Permission template UUID.");
+
+add(
+  "/permissions/catalog",
+  "get",
+  operation({
+    tag: "Permissions",
+    summary:
+      "List the modules, actions, transitions, levels, roles and party roles a template can reference.",
+    operationId: "getPermissionCatalog",
+    responseSchema: ref("PermissionCatalog"),
+  }),
+);
+
+[
+  {
+    method: "get",
+    path: "/permissions/templates",
+    summary: "List the organisation's permission templates.",
+    operationId: "listPermissionTemplates",
+    parameters: [
+      queryParam("status", "Filter by status (defaults to active).", {
+        type: "string",
+        enum: ["active", "archived"],
+      }),
+      queryParam("kind", "Filter by kind.", {
+        type: "string",
+        enum: ["internal", "external"],
+      }),
+      queryParam("includeArchived", "Include archived templates.", {
+        type: "boolean",
+      }),
+    ],
+    responseSchema: ref("PermissionTemplateListResponse"),
+  },
+  {
+    method: "post",
+    path: "/permissions/templates",
+    summary: "Create a permission template.",
+    operationId: "createPermissionTemplate",
+    parameters: [],
+    requestBody: jsonBody(
+      ref("PermissionTemplateMutationRequest"),
+      "Template definition.",
+    ),
+    responseSchema: ref("PermissionTemplate"),
+    status: 201,
+  },
+  {
+    method: "get",
+    path: "/permissions/templates/{id}",
+    summary: "Read one permission template.",
+    operationId: "getPermissionTemplate",
+    parameters: [permissionTemplateIdParam],
+    responseSchema: ref("PermissionTemplate"),
+  },
+  {
+    method: "patch",
+    path: "/permissions/templates/{id}",
+    summary:
+      "Update a permission template. Passing tools or grants replaces the full set.",
+    operationId: "updatePermissionTemplate",
+    parameters: [permissionTemplateIdParam],
+    requestBody: jsonBody(
+      ref("PermissionTemplateMutationRequest"),
+      "Fields to change.",
+    ),
+    responseSchema: ref("PermissionTemplate"),
+  },
+  {
+    method: "post",
+    path: "/permissions/templates/{id}/duplicate",
+    summary: "Copy a template (system defaults included) into an editable one.",
+    operationId: "duplicatePermissionTemplate",
+    parameters: [permissionTemplateIdParam],
+    requestBody: jsonBody(
+      objectSchema({
+        name: { type: "string", maxLength: 120 },
+        description: { type: "string", maxLength: 1000, nullable: true },
+      }),
+      "Optional name/description for the copy.",
+      false,
+    ),
+    responseSchema: ref("PermissionTemplate"),
+    status: 201,
+  },
+  {
+    method: "delete",
+    path: "/permissions/templates/{id}",
+    summary:
+      "Archive a template. Fails with 409 while it is assigned to project users or parties; system defaults cannot be archived.",
+    operationId: "archivePermissionTemplate",
+    parameters: [permissionTemplateIdParam],
+    responseSchema: ref("PermissionTemplate"),
+  },
+].forEach((route) =>
+  addGenericRoute({
+    tag: "Permissions",
+    permissions: companyAdminPermission,
+    ...route,
+  }),
+);
+
+[
+  {
+    method: "get",
+    path: "/projects/{projectId}/team",
+    summary:
+      "List project team members (assignments and party members) with the template governing each.",
+    operationId: "listProjectTeam",
+    parameters: projectParams,
+    permissions: authenticatedOnly,
+    responseSchema: ref("ProjectTeamResponse"),
+  },
+  {
+    method: "put",
+    path: "/projects/{projectId}/team/{userId}/permissions",
+    summary:
+      "Assign a permission template (with optional per-module overrides) to a project member.",
+    operationId: "setProjectUserPermission",
+    parameters: [projectIdParam, userIdParam],
+    permissions: companyAdminPermission,
+    requestBody: jsonBody(
+      ref("ProjectUserPermissionRequest"),
+      "Template assignment.",
+    ),
+    responseSchema: ref("ProjectUserPermission"),
+  },
+  {
+    method: "delete",
+    path: "/projects/{projectId}/team/{userId}/permissions",
+    summary:
+      "Remove the template assignment so the member falls back to role/party permissions.",
+    operationId: "removeProjectUserPermission",
+    parameters: [projectIdParam, userIdParam],
+    permissions: companyAdminPermission,
+    responseSchema: objectSchema({
+      removed: { type: "boolean" },
+      projectId: uuid,
+      userId: uuid,
+    }),
+  },
+  {
+    method: "put",
+    path: "/projects/{projectId}/team/parties/{partyId}/permissions",
+    summary: "Set the external template applied to every member of a project party.",
+    operationId: "setProjectPartyPermissionTemplate",
+    parameters: [projectIdParam, partyIdParam],
+    permissions: companyAdminPermission,
+    requestBody: jsonBody(
+      ref("ProjectPartyPermissionRequest"),
+      "Template assignment.",
+    ),
+    responseSchema: objectSchema({
+      id: uuid,
+      projectId: uuid,
+      template: { allOf: [ref("PermissionTemplateRef")], nullable: true },
+    }),
+  },
+].forEach((route) =>
+  addGenericRoute({
+    tag: "Permissions",
+    ...route,
+  }),
+);
+
 const openApiSpec = {
   openapi: "3.0.3",
   info: {
@@ -8676,6 +9069,11 @@ const openApiSpec = {
       name: "Realtime",
       description:
         "Not a REST surface. Authenticated socket.io transport at the API origin: clients send `project:join { projectId }` (acknowledged after the same project access check as REST) and receive `domain.event` messages of type record.changed, approval.decided, notification.created, or job.progress. See docs/qa/realtime-events.md.",
+    },
+    {
+      name: "Permissions",
+      description:
+        "Permission templates (per-module level none/read_only/standard/admin plus granular grants) assignable per user per project or per project party, layered over the static role policy in shared/permissions.json. See docs/qa/permission-templates.md.",
     },
   ],
   paths,

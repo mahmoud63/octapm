@@ -21,6 +21,7 @@ export const userSchema = z.object({
   phone: z.string().nullable().optional(),
   status: userStatusSchema,
   role: userRoleSchema,
+  isCompanyAdmin: z.boolean().optional(),
   projectCount: z.number().default(0),
   lastLogin: z.string().nullable().optional(),
   createdAt: z.coerce.date(),

@@ -5,6 +5,8 @@ export interface AuthUser {
   email: string
   phone?: string | null
   role: string
+  /** Org-wide project visibility plus user and permission-template administration. */
+  isCompanyAdmin?: boolean
   status: string
   lastLogin?: string | null
   createdAt?: string

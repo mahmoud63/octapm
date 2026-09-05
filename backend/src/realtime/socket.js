@@ -67,6 +67,7 @@ const authenticateSocket = (socket, next) => {
       role: payload.role,
       email: payload.email,
       name: payload.name,
+      isCompanyAdmin: Boolean(payload.isCompanyAdmin),
     };
     return next();
   } catch (error) {
@@ -98,6 +99,7 @@ const handleProjectJoin = async (socket, payload, ack) => {
       projectId,
       userId: user.id,
       role: user.role,
+      isCompanyAdmin: user.isCompanyAdmin,
     });
     await socket.join(ROOMS.project(projectId));
     return ackSafely(ack, { ok: true, projectId });

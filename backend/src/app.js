@@ -14,6 +14,7 @@ const billingRoutes = require("./routes/billing");
 const notificationRoutes = require("./routes/notifications");
 const taskRoutes = require("./routes/tasks");
 const searchRoutes = require("./routes/search");
+const permissionRoutes = require("./routes/permissions");
 const {
   requireCloudFrontOriginSecret,
 } = require("./middleware/cloudfront-origin");
@@ -91,6 +92,7 @@ const createApp = () => {
   app.use("/api/v1/notifications", notificationRoutes);
   app.use("/api/v1/tasks", taskRoutes);
   app.use("/api/v1/search", searchRoutes);
+  app.use("/api/v1/permissions", permissionRoutes);
 
   app.use(notFoundHandler);
   app.use(errorHandler);

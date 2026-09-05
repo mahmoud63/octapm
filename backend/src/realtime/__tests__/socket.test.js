@@ -96,6 +96,7 @@ describe("realtime socket auth", () => {
       role: "pm",
       email: "pm@example.com",
       name: "PM",
+      isCompanyAdmin: false,
     });
   });
 });

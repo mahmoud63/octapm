@@ -23,6 +23,7 @@ const sanitizeUser = (user) => ({
   email: user.email,
   phone: user.phone,
   role: user.role,
+  isCompanyAdmin: Boolean(user.isCompanyAdmin),
   status: user.status,
   lastLogin: user.lastLogin,
   createdAt: user.createdAt,
@@ -287,6 +288,10 @@ const updateUser = async ({ orgId, userId, payload }) => {
       throw new HttpError(400, "INVALID_ROLE", "Role is invalid");
     }
     data.role = payload.role;
+  }
+
+  if (payload.isCompanyAdmin !== undefined) {
+    data.isCompanyAdmin = Boolean(payload.isCompanyAdmin);
   }
 
   const updated = await prisma.user.update({

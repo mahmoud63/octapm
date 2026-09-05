@@ -1,5 +1,5 @@
 const express = require("express");
-const { body, param } = require("express-validator");
+const { body, param, query } = require("express-validator");
 const { asyncHandler } = require("../utils/async-handler");
 const { sendSuccess } = require("../utils/api-response");
 const { HttpError } = require("../utils/http-error");
@@ -239,6 +239,42 @@ router.get(
       orgId: req.user.orgId,
     });
 
+    return sendSuccess(res, result);
+  }),
+);
+
+/**
+ * Effective permission matrix for the caller: org-wide when no projectId is
+ * given, otherwise resolved through the project's permission template chain
+ * (user template → party template → assignment role → org role).
+ */
+router.get(
+  "/me/permissions",
+  authenticate,
+  [query("projectId").optional().isUUID(), validate],
+  asyncHandler(async (req, res) => {
+    const permissionTemplateService = require("../services/permission-template.service");
+    if (!req.query.projectId) {
+      return sendSuccess(
+        res,
+        permissionTemplateService.resolveOrgPermissions({ user: req.user }),
+      );
+    }
+
+    const { assertProjectAccess } = require("../services/project-authorization.service");
+    const projectAccess = await assertProjectAccess({
+      orgId: req.user.orgId,
+      projectId: req.query.projectId,
+      userId: req.user.id,
+      role: req.user.role,
+      isCompanyAdmin: req.user.isCompanyAdmin,
+    });
+    const result = await permissionTemplateService.resolveProjectPermissions({
+      orgId: req.user.orgId,
+      projectId: req.query.projectId,
+      user: req.user,
+      projectAccess,
+    });
     return sendSuccess(res, result);
   }),
 );

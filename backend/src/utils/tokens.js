@@ -54,6 +54,7 @@ const createAccessToken = (user) => {
       role: user.role,
       email: user.email,
       name: user.name,
+      isCompanyAdmin: Boolean(user.isCompanyAdmin),
       type: 'access',
     },
     getEnv('JWT_SECRET'),

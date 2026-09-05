@@ -100,6 +100,10 @@ const sanitizeProjectParty = (party) => ({
   accessLevel: party.accessLevel,
   permissionProfile: party.permissionProfile ?? getDefaultPermissionProfile(party.role),
   permissionPolicy: getPartyPermissionProfile(party.role),
+  permissionTemplateId: party.permissionTemplateId ?? null,
+  permissionTemplate: party.permissionTemplate
+    ? { id: party.permissionTemplate.id, name: party.permissionTemplate.name }
+    : null,
   status: party.status,
   company: party.company ? sanitizeCompany(party.company) : null,
   members: (party.members || []).map(sanitizeMember),
@@ -213,6 +217,7 @@ const createCompany = async ({ orgId, payload }) => {
 
 const projectPartyInclude = {
   company: true,
+  permissionTemplate: { select: { id: true, name: true } },
   members: {
     where: { status: "active" },
     include: {

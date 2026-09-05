@@ -157,6 +157,7 @@ router.get(
       orgId: req.user.orgId,
       userId: req.user.id,
       role: req.user.role,
+      isCompanyAdmin: req.user.isCompanyAdmin,
       query: req.query,
     });
 
@@ -203,6 +204,7 @@ router.get(
       projectId: req.params.id,
       userId: req.user.id,
       role: req.user.role,
+      isCompanyAdmin: req.user.isCompanyAdmin,
     });
 
     return sendSuccess(res, result);
@@ -277,6 +279,7 @@ router.use(
   require("./locations"),
 );
 router.use("/:projectId/jobs", nestedProjectAccess, require("./jobs"));
+router.use("/:projectId/team", nestedProjectAccess, require("./project-team"));
 router.use(
   "/:projectId/activities",
   nestedProjectAccess,

@@ -117,6 +117,7 @@ router.patch(
     body("email").optional().isEmail().normalizeEmail(),
     body("phone").optional().isString().trim(),
     body("role").optional().isString(),
+    body("isCompanyAdmin").optional().isBoolean().toBoolean(),
     validate,
   ],
   asyncHandler(async (req, res) => {

@@ -30,6 +30,7 @@ import { Route as AuthenticatedSettingsIndexRouteImport } from './routes/_authen
 import { Route as AuthenticatedProjectsIndexRouteImport } from './routes/_authenticated/projects/index'
 import { Route as AuthenticatedHelpCenterIndexRouteImport } from './routes/_authenticated/help-center/index'
 import { Route as AuthenticatedBillingIndexRouteImport } from './routes/_authenticated/billing/index'
+import { Route as AuthenticatedSettingsPermissionsRouteImport } from './routes/_authenticated/settings/permissions'
 import { Route as AuthenticatedSettingsNotificationsRouteImport } from './routes/_authenticated/settings/notifications'
 import { Route as AuthenticatedSettingsDisplayRouteImport } from './routes/_authenticated/settings/display'
 import { Route as AuthenticatedSettingsBillingRouteImport } from './routes/_authenticated/settings/billing'
@@ -149,6 +150,12 @@ const AuthenticatedBillingIndexRoute =
     path: '/billing/',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
+const AuthenticatedSettingsPermissionsRoute =
+  AuthenticatedSettingsPermissionsRouteImport.update({
+    id: '/permissions',
+    path: '/permissions',
+    getParentRoute: () => AuthenticatedSettingsRouteRoute,
+  } as any)
 const AuthenticatedSettingsNotificationsRoute =
   AuthenticatedSettingsNotificationsRouteImport.update({
     id: '/notifications',
@@ -227,6 +234,7 @@ export interface FileRoutesByFullPath {
   '/settings/billing': typeof AuthenticatedSettingsBillingRoute
   '/settings/display': typeof AuthenticatedSettingsDisplayRoute
   '/settings/notifications': typeof AuthenticatedSettingsNotificationsRoute
+  '/settings/permissions': typeof AuthenticatedSettingsPermissionsRoute
   '/billing/': typeof AuthenticatedBillingIndexRoute
   '/help-center/': typeof AuthenticatedHelpCenterIndexRoute
   '/projects/': typeof AuthenticatedProjectsIndexRoute
@@ -257,6 +265,7 @@ export interface FileRoutesByTo {
   '/settings/billing': typeof AuthenticatedSettingsBillingRoute
   '/settings/display': typeof AuthenticatedSettingsDisplayRoute
   '/settings/notifications': typeof AuthenticatedSettingsNotificationsRoute
+  '/settings/permissions': typeof AuthenticatedSettingsPermissionsRoute
   '/billing': typeof AuthenticatedBillingIndexRoute
   '/help-center': typeof AuthenticatedHelpCenterIndexRoute
   '/projects': typeof AuthenticatedProjectsIndexRoute
@@ -290,6 +299,7 @@ export interface FileRoutesById {
   '/_authenticated/settings/billing': typeof AuthenticatedSettingsBillingRoute
   '/_authenticated/settings/display': typeof AuthenticatedSettingsDisplayRoute
   '/_authenticated/settings/notifications': typeof AuthenticatedSettingsNotificationsRoute
+  '/_authenticated/settings/permissions': typeof AuthenticatedSettingsPermissionsRoute
   '/_authenticated/billing/': typeof AuthenticatedBillingIndexRoute
   '/_authenticated/help-center/': typeof AuthenticatedHelpCenterIndexRoute
   '/_authenticated/projects/': typeof AuthenticatedProjectsIndexRoute
@@ -323,6 +333,7 @@ export interface FileRouteTypes {
     | '/settings/billing'
     | '/settings/display'
     | '/settings/notifications'
+    | '/settings/permissions'
     | '/billing/'
     | '/help-center/'
     | '/projects/'
@@ -353,6 +364,7 @@ export interface FileRouteTypes {
     | '/settings/billing'
     | '/settings/display'
     | '/settings/notifications'
+    | '/settings/permissions'
     | '/billing'
     | '/help-center'
     | '/projects'
@@ -385,6 +397,7 @@ export interface FileRouteTypes {
     | '/_authenticated/settings/billing'
     | '/_authenticated/settings/display'
     | '/_authenticated/settings/notifications'
+    | '/_authenticated/settings/permissions'
     | '/_authenticated/billing/'
     | '/_authenticated/help-center/'
     | '/_authenticated/projects/'
@@ -559,6 +572,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedBillingIndexRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/_authenticated/settings/permissions': {
+      id: '/_authenticated/settings/permissions'
+      path: '/permissions'
+      fullPath: '/settings/permissions'
+      preLoaderRoute: typeof AuthenticatedSettingsPermissionsRouteImport
+      parentRoute: typeof AuthenticatedSettingsRouteRoute
+    }
     '/_authenticated/settings/notifications': {
       id: '/_authenticated/settings/notifications'
       path: '/notifications'
@@ -631,6 +651,7 @@ interface AuthenticatedSettingsRouteRouteChildren {
   AuthenticatedSettingsBillingRoute: typeof AuthenticatedSettingsBillingRoute
   AuthenticatedSettingsDisplayRoute: typeof AuthenticatedSettingsDisplayRoute
   AuthenticatedSettingsNotificationsRoute: typeof AuthenticatedSettingsNotificationsRoute
+  AuthenticatedSettingsPermissionsRoute: typeof AuthenticatedSettingsPermissionsRoute
   AuthenticatedSettingsIndexRoute: typeof AuthenticatedSettingsIndexRoute
 }
 
@@ -642,6 +663,8 @@ const AuthenticatedSettingsRouteRouteChildren: AuthenticatedSettingsRouteRouteCh
     AuthenticatedSettingsDisplayRoute: AuthenticatedSettingsDisplayRoute,
     AuthenticatedSettingsNotificationsRoute:
       AuthenticatedSettingsNotificationsRoute,
+    AuthenticatedSettingsPermissionsRoute:
+      AuthenticatedSettingsPermissionsRoute,
     AuthenticatedSettingsIndexRoute: AuthenticatedSettingsIndexRoute,
   }
 

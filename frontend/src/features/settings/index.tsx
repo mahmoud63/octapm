@@ -1,5 +1,14 @@
 import { Outlet } from '@tanstack/react-router'
-import { Monitor, Bell, Palette, Wrench, UserCog, CreditCard } from 'lucide-react'
+import {
+  Monitor,
+  Bell,
+  Palette,
+  Wrench,
+  UserCog,
+  CreditCard,
+  ShieldCheck,
+} from 'lucide-react'
+import { useIsCompanyAdmin } from '@/lib/permissions'
 import { Separator } from '@/components/ui/separator'
 import { Main } from '@/components/layout/main'
 import { SidebarNav } from './components/sidebar-nav'
@@ -37,7 +46,20 @@ const sidebarNavItems = [
   },
 ]
 
+const adminNavItems = [
+  {
+    title: 'Permissions',
+    href: '/settings/permissions',
+    icon: <ShieldCheck size={18} />,
+  },
+]
+
 export function Settings() {
+  const isCompanyAdmin = useIsCompanyAdmin()
+  const items = isCompanyAdmin
+    ? [...sidebarNavItems, ...adminNavItems]
+    : sidebarNavItems
+
   return (
     <>
       <Main fixed>
@@ -52,7 +74,7 @@ export function Settings() {
         <Separator className='my-4 lg:my-6' />
         <div className='flex flex-1 flex-col space-y-2 overflow-hidden md:space-y-2 lg:flex-row lg:space-y-0 lg:space-x-12'>
           <aside className='top-0 lg:sticky lg:w-1/5'>
-            <SidebarNav items={sidebarNavItems} />
+            <SidebarNav items={items} />
           </aside>
           <div className='flex w-full overflow-y-hidden p-1'>
             <Outlet />

@@ -5,10 +5,12 @@ All notable platform-wide changes should be recorded here. Agents must read this
 ## 2026-09-05
 
 Sprint 1 of the Procore parity program (P0 foundations). See
-`docs/qa/realtime-events.md`, `docs/qa/locations.md`, and
-`docs/qa/background-jobs.md`.
+`docs/qa/realtime-events.md`, `docs/qa/locations.md`,
+`docs/qa/background-jobs.md`, and `docs/qa/permission-templates.md`.
 
 ### Added
+
+- Added configurable permission templates (OCTA-ADM-PERM-003): `PermissionTemplate` / `PermissionTemplateTool` / `PermissionTemplateGrant` / `ProjectUserPermission` tables, `User.isCompanyAdmin`, `ProjectParty.permissionTemplateId`. A template sets a level per module (`none`, `read_only`, `standard` = base role policy, `admin`) plus granular action/transition grants; it is assigned per user per project or per project party. `requireProjectAccess` attaches the resolved template and `requirePermission` evaluates it before the static policy; company admins see every project and administer users, parties, and templates. Twelve system defaults (8 internal roles, 4 party types) are seeded per organisation by migration and on registration. New endpoints: `GET /auth/me/permissions`, `GET /permissions/catalog`, `GET/POST /permissions/templates`, `GET/PATCH/DELETE /permissions/templates/{id}`, `POST /permissions/templates/{id}/duplicate`, `GET /projects/{id}/team`, `PUT/DELETE /projects/{id}/team/{userId}/permissions`, `PUT /projects/{id}/team/parties/{partyId}/permissions`; `PATCH /users/{id}` accepts `isCompanyAdmin`. Frontend: Settings › Permissions template editor, a Team module in the project workspace, matrix-aware `useCanPerform`/`useModuleAccess`, modules hidden at level `none`, and a Company admin switch in the user dialog.
 
 - Added a durable background job queue (`BackgroundJob` table, `backend/src/jobs/`): jobs are claimed with `FOR UPDATE SKIP LOCKED`, heartbeat while running, are re-queued after a worker crash, retry transient failures with exponential backoff, notify the requester and write an audit event on final failure, and are pruned after `JOB_TTL_MS`. BOQ AI processing and AI schedule generation now run through it; the in-memory job maps are gone. New endpoints: `GET /projects/{id}/jobs`, `GET/POST /projects/{id}/jobs/{jobId}[/retry|/cancel]`, `POST /projects/{id}/schedule/job/{jobId}/retry`, `POST /projects/{id}/boq/job/{jobId}/retry`. The API runs the worker in-process by default; `npm run worker --workspace=backend` runs dedicated workers.
 - Added a shared rate-limit counter store (`backend/src/config/rate-limit-store.js`): Redis-backed when `REDIS_URL` is set (new optional dependency `ioredis`), per-instance memory otherwise, with automatic fallback and throttled logging if Redis is unavailable.

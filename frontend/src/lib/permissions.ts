@@ -51,6 +51,36 @@ export type ProjectPartyRole =
   | 'contractor'
   | 'subcontractor'
 
+export type PermissionLevel = 'none' | 'read_only' | 'standard' | 'admin'
+
+/**
+ * Effective permission matrix returned by `GET /auth/me/permissions`.
+ * When present it is the source of truth: it already folds in permission
+ * templates, party templates, assignment roles and company-admin status.
+ */
+export type PermissionMatrix = {
+  orgId?: string | null
+  projectId?: string | null
+  userId?: string | null
+  isCompanyAdmin: boolean
+  source: 'template' | 'party_template' | 'assignment' | 'party' | 'org'
+  role?: string | null
+  partyRoles?: string[]
+  template?: { id: string; name: string } | null
+  modules: Partial<
+    Record<
+      PermissionModule,
+      {
+        label?: string
+        level: PermissionLevel
+        visible: boolean
+        actions: PermissionAction[]
+        transitions: string[]
+      }
+    >
+  >
+}
+
 type PermissionPolicy = {
   version: string
   actions: PermissionAction[]
@@ -109,6 +139,7 @@ type ProjectPermissionContextValue = {
     projectPartyId?: string | null
     companyId?: string | null
   }>
+  matrix?: PermissionMatrix | null
 }
 
 const ProjectPermissionContext =
@@ -137,11 +168,13 @@ export function ProjectPermissionProvider({
   role,
   effectiveRole,
   partyAccess,
+  matrix,
   children,
 }: {
   role?: string | null
   effectiveRole?: string | null
   partyAccess?: ProjectPermissionContextValue['partyAccess']
+  matrix?: PermissionMatrix | null
   children: ReactNode
 }) {
   const resolvedEffectiveRole = resolveEffectiveRole({
@@ -156,6 +189,7 @@ export function ProjectPermissionProvider({
         role: normalizeRoleId(role),
         effectiveRole: resolvedEffectiveRole,
         partyAccess,
+        matrix: matrix ?? null,
       },
     },
     children
@@ -166,6 +200,9 @@ export const useProjectEffectiveRole = () => {
   const context = useContext(ProjectPermissionContext)
   return context?.effectiveRole ?? context?.role ?? null
 }
+
+export const useProjectPermissionMatrix = () =>
+  useContext(ProjectPermissionContext)?.matrix ?? null
 
 export const canPerform = (
   role: string | null | undefined,
@@ -187,7 +224,10 @@ export const canPerform = (
 
 export const normalizePartyRoleId = (role: string | null | undefined) => {
   if (!role) return null
-  const normalized = String(role).trim().toLowerCase().replace(/[-\s]+/g, '_')
+  const normalized = String(role)
+    .trim()
+    .toLowerCase()
+    .replace(/[-\s]+/g, '_')
   if (normalized === 'client') return 'owner'
   if (normalized === 'main_contractor') return 'contractor'
   return normalized as ProjectPartyRole
@@ -201,13 +241,30 @@ export const canPartyPerform = (
 ) => {
   const role = normalizePartyRoleId(partyRole)
   if (!role) return false
-  const modulePolicy = permissionPolicy.partyPermissions?.[role]?.modules[
-    moduleName
-  ]
+  const modulePolicy =
+    permissionPolicy.partyPermissions?.[role]?.modules[moduleName]
   if (!modulePolicy) return false
   if (transition) return modulePolicy.transitions?.includes(transition) ?? false
   return modulePolicy.actions.includes(action)
 }
+
+/** Decide from a server matrix; `null` when the matrix has no entry. */
+export const canPerformWithMatrix = (
+  matrix: PermissionMatrix | null | undefined,
+  moduleName: PermissionModule,
+  action: PermissionAction,
+  transition?: string
+): boolean | null => {
+  const entry = matrix?.modules?.[moduleName]
+  if (!entry) return null
+  if (transition) return entry.transitions.includes(transition)
+  return entry.actions.includes(action)
+}
+
+export const getModuleLevel = (
+  matrix: PermissionMatrix | null | undefined,
+  moduleName: PermissionModule
+): PermissionLevel | null => matrix?.modules?.[moduleName]?.level ?? null
 
 export const useCanPerform = (
   moduleName: PermissionModule,
@@ -217,6 +274,16 @@ export const useCanPerform = (
 ) => {
   const authRole = useAuthStore((state) => state.auth.user?.role)
   const projectContext = useContext(ProjectPermissionContext)
+
+  // A resolved matrix (templates, party templates, company admin) wins.
+  const decided = canPerformWithMatrix(
+    projectContext?.matrix,
+    moduleName,
+    action,
+    transition
+  )
+  if (decided !== null && !projectRole) return decided
+
   const projectEffectiveRole =
     projectContext?.effectiveRole ?? projectContext?.role ?? null
   const role = resolveEffectiveRole({
@@ -229,4 +296,33 @@ export const useCanPerform = (
   return (projectContext?.partyAccess ?? []).some((party) =>
     canPartyPerform(party.role, moduleName, action, transition)
   )
+}
+
+/**
+ * Module-level access for navigation: hidden when the resolved matrix says
+ * `none`; otherwise falls back to whether the role can read the module.
+ */
+export const useModuleAccess = (moduleName: PermissionModule) => {
+  const authRole = useAuthStore((state) => state.auth.user?.role)
+  const projectContext = useContext(ProjectPermissionContext)
+  const entry = projectContext?.matrix?.modules?.[moduleName]
+  if (entry) {
+    return { level: entry.level, visible: entry.visible }
+  }
+  const role = resolveEffectiveRole({
+    authRole,
+    projectRole: projectContext?.effectiveRole ?? projectContext?.role,
+  })
+  const visible =
+    canPerform(role, moduleName, 'read') ||
+    (projectContext?.partyAccess ?? []).some((party) =>
+      canPartyPerform(party.role, moduleName, 'read')
+    )
+  return { level: visible ? ('standard' as const) : ('none' as const), visible }
+}
+
+/** Company admins and project managers administer users, parties and templates. */
+export const useIsCompanyAdmin = () => {
+  const user = useAuthStore((state) => state.auth.user)
+  return Boolean(user?.isCompanyAdmin) || normalizeRoleId(user?.role) === 'pm'
 }
