@@ -127,6 +127,26 @@ describe("punch service", () => {
       );
     });
 
+    it("numbers observations separately, validates their type and points back at the source", async () => {
+      const created = await service.createPunchItem({
+        orgId: ORG,
+        projectId: PROJECT,
+        actor: SITE,
+        payload: { title: "Unguarded slab edge", kind: "observation", observationType: "safety", hazard: "Fall from height", sourceRecordType: "form_instance", sourceRecordId: "inst-9", status: "open" },
+      });
+      expect(mockPrisma.punchItem.aggregate).toHaveBeenCalledWith({ where: { projectId: PROJECT, kind: "observation" }, _max: { number: true } });
+      expect(mockPrisma.punchItem.create).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ kind: "observation", number: 7, ref: "OBS-007", observationType: "safety", hazard: "Fall from height", sourceRecordType: "form_instance", sourceRecordId: "inst-9" }) }),
+      );
+      expect(created.kind).toBe("observation");
+      expect(created.path).toContain("/quality/observations?recordId=");
+      expect(created.sourcePath).toContain("/quality/itp?recordId=inst-9");
+      await expect(service.createPunchItem({ orgId: ORG, projectId: PROJECT, actor: SITE, payload: { title: "x", kind: "observation", observationType: "weather" } })).rejects.toMatchObject({ code: "OBSERVATION_TYPE_INVALID" });
+      // Plain punch items default to kind punch with PL numbering.
+      await service.createPunchItem({ orgId: ORG, projectId: PROJECT, actor: SITE, payload: { title: "Scuffed paint" } });
+      expect(mockPrisma.punchItem.create).toHaveBeenLastCalledWith(expect.objectContaining({ data: expect.objectContaining({ kind: "punch", ref: "PL-007" }) }));
+    });
+
     it("rejects bad priorities, missing titles and unknown companies", async () => {
       await expect(service.createPunchItem({ orgId: ORG, projectId: PROJECT, payload: { title: "x", priority: "asap" }, actor: SITE })).rejects.toMatchObject({ code: "PUNCH_PRIORITY_INVALID" });
       await expect(service.createPunchItem({ orgId: ORG, projectId: PROJECT, payload: { title: "  " }, actor: SITE })).rejects.toMatchObject({ code: "PUNCH_TITLE_REQUIRED" });
@@ -208,6 +228,10 @@ describe("punch service", () => {
       const pmWhere = mockPrisma.punchItem.findMany.mock.calls[1][0].where;
       expect(pmWhere.AND).toBeUndefined();
       expect(pmWhere.status).toEqual({ not: "void" });
+      expect(pmWhere.kind).toBe("punch");
+
+      await service.listPunchItems({ orgId: ORG, projectId: PROJECT, filters: { kind: "observation", observationType: "safety" }, viewer: PM });
+      expect(mockPrisma.punchItem.findMany.mock.calls[2][0].where).toEqual(expect.objectContaining({ kind: "observation", observationType: "safety" }));
     });
 
     it("summarises by status, company and overdue", async () => {
@@ -250,8 +274,8 @@ describe("punch service", () => {
       expect(text).toContain("Assigned to Other Co");
 
       const csv = await service.exportPunchListCsv({ orgId: ORG, projectId: PROJECT, filters: {}, viewer: PM });
-      expect(csv.csv).toContain("Ref,Title,Description,Status");
-      expect(csv.csv).toContain("PL-007,Crack in render");
+      expect(csv.csv).toContain("Ref,Kind,Title,Description,Status");
+      expect(csv.csv).toContain("PL-007,punch,Crack in render");
       expect(csv.csv).toContain("Level 3");
     });
   });

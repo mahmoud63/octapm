@@ -253,6 +253,7 @@ export function ProjectDetail({
           { key: 'ncr', label: 'NCR' },
           { key: 'itp', label: 'Inspections' },
           { key: 'defects', label: 'Punch list' },
+          { key: 'observations', label: 'Observations' },
           { key: 'safety', label: 'Safety' },
           { key: 'tests', label: 'Material Tests' },
         ],

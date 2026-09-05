@@ -13,6 +13,9 @@ export interface QualityDashboardData {
     testsFailed: number
     safetyIncidents: number
     safetyOpen: number
+    observationsOpen?: number
+    safetyObservationsOpen?: number
+    observationsByType?: Record<string, number>
     dueAlerts: number
     overdue: number
   }

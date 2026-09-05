@@ -41,15 +41,20 @@ import {
 import { CompanyPicker } from '@/components/user-picker'
 import { LocationPicker } from '@/features/locations/components/location-picker'
 import {
+  KIND_LABEL,
+  OBSERVATION_TYPES,
+  OBSERVATION_TYPE_LABEL,
   PUNCH_PRIORITIES,
   PUNCH_STATUSES,
   STATUS_LABEL,
   downloadPunchExport,
   formatPunchDate,
   usePunchItems,
+  type ObservationType,
   type PunchFilters,
   type PunchGroupBy,
   type PunchItem,
+  type PunchKind,
   type PunchPriority,
 } from '../hooks/use-punch'
 import { PunchPriorityBadge, PunchStatusBadge } from './punch-badges'
@@ -113,9 +118,11 @@ export function PunchList({
   onOpenItem,
   onCreate,
   onDistribute,
+  kind = 'punch',
 }: {
   projectId: string
   initialFilters?: Partial<PunchFilters>
+  kind?: PunchKind
   onOpenItem: (itemId: string) => void
   onCreate: () => void
   onDistribute: (input: { itemIds: string[]; companyId: string | null }) => void
@@ -139,6 +146,9 @@ export function PunchList({
   const [mine, setMine] = useState(initialFilters?.ballInCourtUserId === 'me')
   const [overdue, setOverdue] = useState(Boolean(initialFilters?.overdue))
   const [groupBy, setGroupBy] = useState<PunchGroupBy>('company')
+  const [observationType, setObservationType] = useState<ObservationType | ''>(
+    initialFilters?.observationType || ''
+  )
   const [selected, setSelected] = useState<string[]>([])
   const [exporting, setExporting] = useState(false)
 
@@ -152,13 +162,17 @@ export function PunchList({
       ballInCourtUserId: mine ? 'me' : null,
       overdue,
       sheetId: initialFilters?.sheetId ?? null,
+      kind,
+      observationType: observationType || undefined,
     }),
     [
       companyId,
       deferredSearch,
       initialFilters?.sheetId,
+      kind,
       locationId,
       mine,
+      observationType,
       overdue,
       priority,
       status,
@@ -196,7 +210,7 @@ export function PunchList({
     <div className='space-y-3' data-testid='uat-punch-list'>
       <div className='grid grid-cols-2 gap-2 sm:grid-cols-5'>
         <SummaryCard
-          label='Items'
+          label={kind === 'observation' ? 'Observations' : 'Items'}
           value={summary?.total ?? 0}
           testId='uat-punch-summary-total'
         />
@@ -218,6 +232,34 @@ export function PunchList({
           tone='bad'
         />
       </div>
+      {kind === 'observation' && summary && summary.byType?.length > 0 && (
+        <div
+          className='flex flex-wrap gap-1.5 text-xs'
+          data-testid='uat-observation-by-type'
+        >
+          {summary.byType.map((entry) => (
+            <button
+              key={entry.type}
+              type='button'
+              className={cn(
+                'rounded-full border px-2 py-0.5 text-muted-foreground transition hover:border-primary/60',
+                observationType === entry.type &&
+                  'border-primary text-foreground'
+              )}
+              onClick={() =>
+                setObservationType(
+                  observationType === entry.type
+                    ? ''
+                    : (entry.type as ObservationType)
+                )
+              }
+            >
+              {entry.label}: {entry.open} open
+              {entry.total !== entry.open ? ` / ${entry.total}` : ''}
+            </button>
+          ))}
+        </div>
+      )}
       {summary && summary.byCompany.length > 0 && (
         <div className='flex flex-wrap gap-1.5 text-xs'>
           {summary.byCompany.slice(0, 8).map((entry) => (
@@ -297,6 +339,31 @@ export function PunchList({
             ))}
           </SelectContent>
         </Select>
+        {kind === 'observation' && (
+          <Select
+            value={observationType || ANY}
+            onValueChange={(value) =>
+              setObservationType(
+                value === ANY ? '' : (value as ObservationType)
+              )
+            }
+          >
+            <SelectTrigger
+              className='w-[170px]'
+              data-testid='uat-observation-type-filter'
+            >
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={ANY}>Any type</SelectItem>
+              {OBSERVATION_TYPES.map((value) => (
+                <SelectItem key={value} value={value}>
+                  {OBSERVATION_TYPE_LABEL[value]}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        )}
         <label className='flex h-9 items-center gap-2 text-sm'>
           <Switch
             checked={mine}
@@ -394,7 +461,10 @@ export function PunchList({
           )}
           {canCreate && (
             <Button size='sm' onClick={onCreate} data-testid='uat-punch-new'>
-              <Plus className='mr-2 h-4 w-4' /> New item
+              <Plus className='mr-2 h-4 w-4' /> New{' '}
+              {kind === 'observation'
+                ? KIND_LABEL.observation.toLowerCase()
+                : 'item'}
             </Button>
           )}
         </div>
@@ -418,7 +488,9 @@ export function PunchList({
         <div className='rounded-md border border-dashed p-6 text-center text-sm text-muted-foreground'>
           {status || search || companyId || locationId || mine || overdue
             ? 'Nothing matches these filters.'
-            : 'No punch items yet. Add them from a walk-through, or drop a pin on a drawing.'}
+            : kind === 'observation'
+              ? 'No observations yet. Raise them from a safety walk, an inspection, a photo or a drawing pin.'
+              : 'No punch items yet. Add them from a walk-through, or drop a pin on a drawing.'}
         </div>
       ) : (
         <div className='overflow-x-auto rounded-md border'>
@@ -523,7 +595,14 @@ function GroupRows({
               <PunchPriorityBadge priority={item.priority} />
             </div>
             <p className='text-xs text-muted-foreground'>
-              {[item.trade, item.locationText].filter(Boolean).join(' · ')}
+              {[
+                item.kind === 'observation' ? item.observationTypeLabel : null,
+                item.hazard,
+                item.trade,
+                item.locationText,
+              ]
+                .filter(Boolean)
+                .join(' · ')}
             </p>
           </TableCell>
           <TableCell className='hidden text-sm md:table-cell'>

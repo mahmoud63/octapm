@@ -14,6 +14,8 @@ jest.mock("../../middleware/auth", () => ({
 const mockService = {
   ACTIONS: ["open", "ready_for_review", "close", "reopen", "dispute", "resolve_dispute", "void"],
   PRIORITIES: ["low", "normal", "high", "urgent"],
+  KINDS: ["punch", "observation"],
+  OBSERVATION_TYPES: ["safety", "quality", "commissioning", "work_to_complete", "environmental"],
   MAX_BULK: 100,
   listPunchItems: jest.fn(),
   createPunchItem: jest.fn(),
@@ -60,10 +62,17 @@ describe("punch routes", () => {
     expect(response.status).toBe(200);
     expect(mockService.listPunchItems).toHaveBeenCalledWith(
       expect.objectContaining({
-        filters: expect.objectContaining({ status: "open", overdue: true, ballInCourtUserId: "user-1" }),
+        filters: expect.objectContaining({ kind: "punch", status: "open", overdue: true, ballInCourtUserId: "user-1" }),
         viewer: expect.objectContaining({ projectAccess: expect.objectContaining({ scope: "party" }) }),
       }),
     );
+    const observations = await request(app).get("/projects/project-1/punch?kind=observation&observationType=safety");
+    expect(observations.status).toBe(200);
+    expect(mockService.listPunchItems).toHaveBeenLastCalledWith(expect.objectContaining({ filters: expect.objectContaining({ kind: "observation", observationType: "safety" }) }));
+    expect((await request(app).get("/projects/project-1/punch?kind=incident")).status).toBe(400);
+    const raised = await request(app).post("/projects/project-1/punch").set("x-role", "site_engineer").send({ title: "Unguarded edge", kind: "observation", observationType: "safety", hazard: "Fall from height", status: "open" });
+    expect(raised.status).toBe(201);
+    expect(mockService.createPunchItem).toHaveBeenCalledWith(expect.objectContaining({ payload: expect.objectContaining({ kind: "observation", observationType: "safety", hazard: "Fall from height" }) }));
   });
 
   it("lets site engineers and QS create, but not warehouse", async () => {

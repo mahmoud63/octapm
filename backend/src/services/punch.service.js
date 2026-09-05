@@ -41,6 +41,23 @@ const MAX_BULK = 100;
 const MAX_LIST = 1000;
 const MAX_EXPORT_PHOTOS = 40;
 
+// Observations (OCTA-QA-OBS-015) are the same engine with a second kind:
+// their own numbering, a type / hazard, and a pointer to where they were raised.
+const KINDS = ["punch", "observation"];
+const KIND_LABEL = { punch: "Punch item", observation: "Observation" };
+const KIND_LIST_LABEL = { punch: "Punch list", observation: "Observations" };
+const REF_PREFIX = { punch: "PL", observation: "OBS" };
+const OBSERVATION_TYPES = ["safety", "quality", "commissioning", "work_to_complete", "environmental"];
+const OBSERVATION_TYPE_LABEL = {
+  safety: "Safety",
+  quality: "Quality",
+  commissioning: "Commissioning",
+  work_to_complete: "Work to complete",
+  environmental: "Environmental",
+};
+const kindOf = (item) => (item?.kind === "observation" ? "observation" : "punch");
+const recordTypeFor = (item) => (kindOf(item) === "observation" ? "observation" : "punch_item");
+
 const trimOrNull = (value) => {
   if (value === null || value === undefined) return null;
   const text = String(value).trim();
@@ -151,11 +168,22 @@ const serializeItem = (item) => ({
   disputeReason: item.disputeReason || null,
   distributedAt: toIso(item.distributedAt),
   legacyDefectId: item.legacyDefectId || null,
+  kind: kindOf(item),
+  observationType: item.observationType || null,
+  observationTypeLabel: item.observationType ? OBSERVATION_TYPE_LABEL[item.observationType] || item.observationType : null,
+  hazard: item.hazard || null,
+  contributingCondition: item.contributingCondition || null,
+  sourceRecordType: item.sourceRecordType || null,
+  sourceRecordId: item.sourceRecordId || null,
+  sourcePath:
+    item.sourceRecordType && item.sourceRecordId
+      ? recordWorkspacePath({ projectId: item.projectId, recordType: item.sourceRecordType, recordId: item.sourceRecordId })
+      : null,
   createdBy: item.createdBy || null,
   updatedBy: item.updatedBy || null,
   createdAt: toIso(item.createdAt),
   updatedAt: toIso(item.updatedAt),
-  path: recordWorkspacePath({ projectId: item.projectId, recordType: "punch_item", recordId: item.id }),
+  path: recordWorkspacePath({ projectId: item.projectId, recordType: recordTypeFor(item), recordId: item.id }),
   attachments: item.attachments,
   attachmentRefs: item.attachmentRefs,
   activityLinks: item.activityLinks,
@@ -247,11 +275,11 @@ const notify = async ({ orgId, projectId, item, recipientUserIds, category, even
     title,
     message,
     priority,
-    actionUrl: recordWorkspacePath({ projectId, recordType: "punch_item", recordId: item.id }),
+    actionUrl: recordWorkspacePath({ projectId, recordType: recordTypeFor(item), recordId: item.id }),
     entityType: "punch_item",
     entityId: item.id,
     dedupeKeyBase: `punch:${item.id}:${event}:${Date.now()}`,
-    metadata: { ref: item.ref, status: item.status },
+    metadata: { ref: item.ref, status: item.status, kind: kindOf(item) },
   });
 
 /** Active project members of a company (for distribution and notifications). */
@@ -272,11 +300,24 @@ const normalizePayload = (payload = {}, { partial = false } = {}) => {
   const set = (key, value) => {
     if (value !== undefined) data[key] = value;
   };
+  const kind = partial ? null : payload.kind === "observation" ? "observation" : "punch";
+  if (!partial) data.kind = kind;
   if (!partial || payload.title !== undefined) {
     const title = trimOrNull(payload.title);
-    if (!title) throw new HttpError(400, "PUNCH_TITLE_REQUIRED", "Give the punch item a title");
+    if (!title) throw new HttpError(400, "PUNCH_TITLE_REQUIRED", `Give the ${(KIND_LABEL[kind] || "item").toLowerCase()} a title`);
     data.title = title.slice(0, 200);
   }
+  if (kind === "observation" || payload.observationType !== undefined) {
+    const type = payload.observationType || (kind === "observation" ? "quality" : null);
+    if (type !== null && !OBSERVATION_TYPES.includes(type)) {
+      throw new HttpError(400, "OBSERVATION_TYPE_INVALID", `Observation type must be one of ${OBSERVATION_TYPES.join(", ")}`);
+    }
+    set("observationType", type);
+  }
+  if (payload.hazard !== undefined) set("hazard", trimOrNull(payload.hazard)?.slice(0, 120) || null);
+  if (payload.contributingCondition !== undefined) set("contributingCondition", trimOrNull(payload.contributingCondition)?.slice(0, 2000) || null);
+  if (!partial && payload.sourceRecordType !== undefined) set("sourceRecordType", trimOrNull(payload.sourceRecordType)?.slice(0, 60) || null);
+  if (!partial && payload.sourceRecordId !== undefined) set("sourceRecordId", trimOrNull(payload.sourceRecordId)?.slice(0, 80) || null);
   if (payload.description !== undefined) set("description", trimOrNull(payload.description));
   if (payload.priority !== undefined) {
     if (!PRIORITIES.includes(payload.priority)) throw new HttpError(400, "PUNCH_PRIORITY_INVALID", `Priority must be one of ${PRIORITIES.join(", ")}`);
@@ -312,24 +353,26 @@ const validateReferences = async ({ orgId, projectId, data }) => {
   }
 };
 
-const nextNumber = async (tx, projectId) => {
-  const result = await tx.punchItem.aggregate({ where: { projectId }, _max: { number: true } });
+const nextNumber = async (tx, projectId, kind = "punch") => {
+  const result = await tx.punchItem.aggregate({ where: { projectId, kind }, _max: { number: true } });
   return (result?._max?.number || 0) + 1;
 };
 
-const refFor = (number) => `PL-${String(number).padStart(3, "0")}`;
+const refFor = (kind, number) => `${REF_PREFIX[kind] || "PL"}-${String(number).padStart(3, "0")}`;
 
 const createInTx = async (tx, { orgId, projectId, data, actor, initialStatus }) => {
   const status = initialStatus === STATUS.OPEN ? STATUS.OPEN : STATUS.DRAFT;
+  const kind = data.kind === "observation" ? "observation" : "punch";
   for (let attempt = 0; attempt < 3; attempt += 1) {
-    const number = (await nextNumber(tx, projectId)) + attempt;
+    const number = (await nextNumber(tx, projectId, kind)) + attempt;
     try {
       const item = await tx.punchItem.create({
         data: {
           orgId,
           projectId,
+          kind,
           number,
-          ref: refFor(number),
+          ref: refFor(kind, number),
           status,
           openedAt: status === STATUS.OPEN ? new Date() : null,
           createdBy: actor?.id || null,
@@ -553,6 +596,9 @@ const transitionPunchItem = async ({ orgId, projectId, itemId, action, reason = 
 
 const buildWhere = async ({ orgId, projectId, filters = {}, viewer = null }) => {
   const where = { orgId, projectId };
+  const kind = filters.kind || "punch";
+  if (kind !== "all") where.kind = KINDS.includes(kind) ? kind : "punch";
+  if (filters.observationType && OBSERVATION_TYPES.includes(filters.observationType)) where.observationType = filters.observationType;
   const status = filters.status || null;
   if (status && status !== "all") {
     const list = String(status).split(",").map((value) => value.trim()).filter((value) => STATUSES.includes(value));
@@ -592,10 +638,18 @@ const summarize = (items) => {
   const byStatus = Object.fromEntries(STATUSES.map((status) => [status, 0]));
   const byCompany = new Map();
   const byTrade = new Map();
+  const byType = new Map();
   let overdue = 0;
   for (const item of items) {
     byStatus[item.status] = (byStatus[item.status] || 0) + 1;
     if (isOverdue(item)) overdue += 1;
+    if (kindOf(item) === "observation") {
+      const type = item.observationType || "untyped";
+      const typeEntry = byType.get(type) || { type, label: OBSERVATION_TYPE_LABEL[type] || type, total: 0, open: 0 };
+      typeEntry.total += 1;
+      if (OPEN_STATUSES.includes(item.status)) typeEntry.open += 1;
+      byType.set(type, typeEntry);
+    }
     const company = item.assigneeCompany?.name || "Unassigned";
     const entry = byCompany.get(company) || { company, total: 0, open: 0, overdue: 0 };
     entry.total += 1;
@@ -612,6 +666,7 @@ const summarize = (items) => {
     byStatus,
     byCompany: [...byCompany.values()].sort((a, b) => b.open - a.open),
     byTrade: [...byTrade.entries()].map(([trade, count]) => ({ trade, count })).sort((a, b) => b.count - a.count),
+    byType: [...byType.values()].sort((a, b) => b.open - a.open),
   };
 };
 
@@ -627,11 +682,13 @@ const listPunchItems = async ({ orgId, projectId, filters = {}, viewer = null })
   return { items: await enrich({ projectId, items }), summary: summarize(items) };
 };
 
-const distributePunchItems = async ({ orgId, projectId, itemIds = [], companyIds = [], userIds = [], message = null, actor = null }) => {
+const distributePunchItems = async ({ orgId, projectId, itemIds = [], companyIds = [], userIds = [], message = null, kind = "punch", actor = null }) => {
   const project = await ensureProject({ orgId, projectId });
+  const listKind = KINDS.includes(kind) ? kind : "punch";
   const where = { orgId, projectId };
   if (itemIds.length) where.id = { in: itemIds };
   else {
+    where.kind = listKind;
     where.status = { in: [STATUS.OPEN, STATUS.READY, STATUS.DISPUTE] };
     if (companyIds.length) where.assigneeCompanyId = { in: companyIds };
   }
@@ -651,14 +708,17 @@ const distributePunchItems = async ({ orgId, projectId, itemIds = [], companyIds
   const lines = items.map((item) =>
     `${item.ref}  ${item.title}${item.locationText || item.location?.name ? ` — ${item.locationText || item.location?.name}` : ""}${item.dueDate ? ` (due ${formatDate(item.dueDate)})` : ""} [${item.status.replace(/_/g, " ")}]`,
   );
-  const subject = `Punch list: ${items.length} item${items.length === 1 ? "" : "s"} on ${project.name}`;
+  const dominantKind = items.every((item) => kindOf(item) === "observation") ? "observation" : listKind;
+  const listLabel = KIND_LIST_LABEL[dominantKind];
+  const listPath = recordWorkspacePath({ projectId, recordType: dominantKind === "observation" ? "observation" : "punch_item" });
+  const subject = `${listLabel}: ${items.length} item${items.length === 1 ? "" : "s"} on ${project.name}`;
   const body = [
     message ? `${message}\n` : null,
-    `${items.length} punch item${items.length === 1 ? "" : "s"} for your attention on ${project.name}:`,
+    `${items.length} ${KIND_LABEL[dominantKind].toLowerCase()}${items.length === 1 ? "" : "s"} for your attention on ${project.name}:`,
     "",
     ...lines,
     "",
-    baseUrl ? `Open the punch list: ${baseUrl}${recordWorkspacePath({ projectId, recordType: "punch_item" })}` : null,
+    baseUrl ? `Open the ${listLabel.toLowerCase()}: ${baseUrl}${listPath}` : null,
   ]
     .filter((line) => line !== null)
     .join("\n");
@@ -691,10 +751,10 @@ const distributePunchItems = async ({ orgId, projectId, itemIds = [], companyIds
     event: "punch.distributed",
     title: subject,
     message: lines.slice(0, 5).join("\n") + (lines.length > 5 ? `\n+${lines.length - 5} more` : ""),
-    actionUrl: recordWorkspacePath({ projectId, recordType: "punch_item" }),
+    actionUrl: listPath,
     entityType: "punch_item",
     dedupeKeyBase: `punch:distribute:${projectId}:${now.getTime()}`,
-    metadata: { count: items.length },
+    metadata: { count: items.length, kind: dominantKind },
   });
 
   return { items: items.length, recipients: results, distributedAt: now.toISOString() };
@@ -760,8 +820,10 @@ const exportPunchListPdf = async ({ orgId, projectId, filters = {}, groupBy = "c
   const items = await prisma.punchItem.findMany({ where, include, orderBy: [{ number: "asc" }], take: MAX_LIST });
   const photos = includePhotos ? await photoBuffersFor({ orgId, projectId, itemIds: items.map((item) => item.id), limit: MAX_EXPORT_PHOTOS }) : new Map();
 
-  const doc = createPdf({ title: `Punch list — ${project.name}`, pageSize: "A4-landscape", footer: new Date().toISOString().slice(0, 10) });
-  doc.heading(`Punch list — ${project.name}`);
+  const kind = KINDS.includes(filters.kind) ? filters.kind : "punch";
+  const listLabel = KIND_LIST_LABEL[kind];
+  const doc = createPdf({ title: `${listLabel} — ${project.name}`, pageSize: "A4-landscape", footer: new Date().toISOString().slice(0, 10) });
+  doc.heading(`${listLabel} — ${project.name}`);
   const summary = summarize(items);
   doc.paragraph(
     `${summary.total} item${summary.total === 1 ? "" : "s"} · ${summary.open} open · ${summary.overdue} overdue · ${summary.byStatus.closed || 0} closed` +
@@ -772,6 +834,9 @@ const exportPunchListPdf = async ({ orgId, projectId, filters = {}, groupBy = "c
   const columns = [
     { key: "ref", label: "Ref", width: 52 },
     { key: "title", label: "Item", width: 0.34 },
+    ...(kind === "observation"
+      ? [{ key: (row) => OBSERVATION_TYPE_LABEL[row.observationType] || row.observationType || "", label: "Type", width: 70 }, { key: (row) => row.hazard || "", label: "Hazard", width: 0.12 }]
+      : []),
     { key: (row) => row.location?.name || row.locationText || "", label: "Location", width: 0.18 },
     { key: (row) => row.trade || "", label: "Trade", width: 0.12 },
     { key: (row) => row.priority, label: "Priority", width: 52 },
@@ -791,8 +856,8 @@ const exportPunchListPdf = async ({ orgId, projectId, filters = {}, groupBy = "c
       }
     }
   }
-  if (!items.length) doc.paragraph("No punch items match the selected filters.");
-  return { buffer: doc.render(), fileName: `punch-list-${project.name.replace(/[^a-z0-9]+/gi, "-").toLowerCase()}.pdf`, count: items.length };
+  if (!items.length) doc.paragraph(`No ${KIND_LABEL[kind].toLowerCase()}s match the selected filters.`);
+  return { buffer: doc.render(), fileName: `${listLabel.toLowerCase().replace(/\s+/g, "-")}-${project.name.replace(/[^a-z0-9]+/gi, "-").toLowerCase()}.pdf`, count: items.length };
 };
 
 const csvCell = (value) => {
@@ -804,13 +869,18 @@ const exportPunchListCsv = async ({ orgId, projectId, filters = {}, viewer = nul
   const project = await ensureProject({ orgId, projectId });
   const where = await buildWhere({ orgId, projectId, filters, viewer });
   const items = await prisma.punchItem.findMany({ where, include, orderBy: [{ number: "asc" }], take: MAX_LIST });
-  const header = ["Ref", "Title", "Description", "Status", "Priority", "Trade", "Location", "Sheet", "Assignee company", "Assignee", "Manager", "Final approver", "Due", "Opened", "Closed", "Reopened", "Created"];
+  const kind = KINDS.includes(filters.kind) ? filters.kind : "punch";
+  const header = ["Ref", "Kind", "Title", "Description", "Status", "Priority", "Type", "Hazard", "Contributing condition", "Trade", "Location", "Sheet", "Assignee company", "Assignee", "Manager", "Final approver", "Due", "Opened", "Closed", "Reopened", "Created"];
   const rows = items.map((item) => [
     item.ref,
+    kindOf(item),
     item.title,
     item.description || "",
     item.status,
     item.priority,
+    item.observationType ? OBSERVATION_TYPE_LABEL[item.observationType] || item.observationType : "",
+    item.hazard || "",
+    item.contributingCondition || "",
     item.trade || "",
     item.location?.name || item.locationText || "",
     item.sheet?.number || "",
@@ -825,11 +895,15 @@ const exportPunchListCsv = async ({ orgId, projectId, filters = {}, viewer = nul
     formatDate(item.createdAt),
   ]);
   const csv = [header, ...rows].map((row) => row.map(csvCell).join(",")).join("\r\n");
-  return { csv: `﻿${csv}`, fileName: `punch-list-${project.name.replace(/[^a-z0-9]+/gi, "-").toLowerCase()}.csv`, count: items.length };
+  return { csv: `﻿${csv}`, fileName: `${KIND_LIST_LABEL[kind].toLowerCase().replace(/\s+/g, "-")}-${project.name.replace(/[^a-z0-9]+/gi, "-").toLowerCase()}.csv`, count: items.length };
 };
 
 module.exports = {
   ACTIONS,
+  KINDS,
+  KIND_LABEL,
+  OBSERVATION_TYPES,
+  OBSERVATION_TYPE_LABEL,
   MAX_BULK,
   PRIORITIES,
   STATUS,

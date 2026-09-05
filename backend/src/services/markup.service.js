@@ -418,6 +418,7 @@ const createLinkedRecord = async ({ orgId, projectId, recordType, create, sheet,
     const punchService = require("./punch.service");
     const title = trimOrNull(create.title) || trimOrNull(create.subject);
     if (!title) throw new HttpError(400, "PIN_TITLE_REQUIRED", "Give the punch item a title");
+    const observation = create.kind === "observation";
     return punchService.createPunchItem({
       orgId,
       projectId,
@@ -435,6 +436,16 @@ const createLinkedRecord = async ({ orgId, projectId, recordType, create, sheet,
         managerUserId: create.managerUserId || null,
         finalApproverUserId: create.finalApproverUserId || null,
         status: create.status || "open",
+        ...(observation
+          ? {
+              kind: "observation",
+              observationType: create.observationType || "safety",
+              hazard: trimOrNull(create.hazard) || null,
+              contributingCondition: trimOrNull(create.contributingCondition) || null,
+              sourceRecordType: "sheet",
+              sourceRecordId: sheet.id,
+            }
+          : {}),
       },
       actor,
     });

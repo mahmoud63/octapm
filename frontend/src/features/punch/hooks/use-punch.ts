@@ -15,6 +15,33 @@ export type PunchStatus = (typeof PUNCH_STATUSES)[number]
 export const PUNCH_PRIORITIES = ['low', 'normal', 'high', 'urgent'] as const
 export type PunchPriority = (typeof PUNCH_PRIORITIES)[number]
 
+/** Observations (OCTA-QA-OBS-015) share the engine as a second kind. */
+export const PUNCH_KINDS = ['punch', 'observation'] as const
+export type PunchKind = (typeof PUNCH_KINDS)[number]
+export const KIND_LABEL: Record<PunchKind, string> = {
+  punch: 'Punch item',
+  observation: 'Observation',
+}
+export const KIND_LIST_LABEL: Record<PunchKind, string> = {
+  punch: 'Punch list',
+  observation: 'Observations',
+}
+export const OBSERVATION_TYPES = [
+  'safety',
+  'quality',
+  'commissioning',
+  'work_to_complete',
+  'environmental',
+] as const
+export type ObservationType = (typeof OBSERVATION_TYPES)[number]
+export const OBSERVATION_TYPE_LABEL: Record<ObservationType, string> = {
+  safety: 'Safety',
+  quality: 'Quality',
+  commissioning: 'Commissioning',
+  work_to_complete: 'Work to complete',
+  environmental: 'Environmental',
+}
+
 export type PunchAction =
   | 'open'
   | 'ready_for_review'
@@ -135,6 +162,14 @@ export interface PunchItem {
   disputeReason: string | null
   distributedAt: string | null
   legacyDefectId: string | null
+  kind: PunchKind
+  observationType: ObservationType | null
+  observationTypeLabel: string | null
+  hazard: string | null
+  contributingCondition: string | null
+  sourceRecordType: string | null
+  sourceRecordId: string | null
+  sourcePath: string | null
   createdBy: string | null
   createdAt: string
   updatedAt: string
@@ -156,6 +191,7 @@ export interface PunchSummary {
     overdue: number
   }>
   byTrade: Array<{ trade: string; count: number }>
+  byType: Array<{ type: string; label: string; total: number; open: number }>
 }
 
 export interface PunchListResponse {
@@ -164,6 +200,9 @@ export interface PunchListResponse {
 }
 
 export interface PunchFilters {
+  /** punch (default), observation or all. */
+  kind?: PunchKind | 'all'
+  observationType?: ObservationType | '' | null
   /** Status, comma list, or `all`; empty hides void items only. */
   status?: string
   assigneeCompanyId?: string | null
@@ -198,6 +237,12 @@ export interface PunchItemInput {
   finalApproverUserId?: string | null
   dueDate?: string | null
   status?: 'draft' | 'open'
+  kind?: PunchKind
+  observationType?: ObservationType | null
+  hazard?: string | null
+  contributingCondition?: string | null
+  sourceRecordType?: string | null
+  sourceRecordId?: string | null
 }
 
 export interface PunchDistributeResult {
@@ -220,6 +265,8 @@ export const punchKeys = {
 }
 
 const toParams = (filters: PunchFilters) => ({
+  kind: filters.kind || undefined,
+  observationType: filters.observationType || undefined,
   status: filters.status || undefined,
   assigneeCompanyId: filters.assigneeCompanyId || undefined,
   assigneeUserId: filters.assigneeUserId || undefined,
@@ -369,6 +416,7 @@ export const useDistributePunchItems = (projectId: string) => {
       companyIds?: string[]
       userIds?: string[]
       message?: string | null
+      kind?: PunchKind
     }) => {
       const { data } = await apiClient.post<{ data: PunchDistributeResult }>(
         `/projects/${projectId}/punch/distribute`,

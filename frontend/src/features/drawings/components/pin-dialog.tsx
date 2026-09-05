@@ -28,7 +28,12 @@ import { Textarea } from '@/components/ui/textarea'
 import { CompanyPicker } from '@/components/user-picker'
 import { useUploadAttachments } from '@/features/attachments/hooks/use-attachments'
 import { useRfis } from '@/features/doc-control/hooks/use-doc-control'
-import { usePunchItems } from '@/features/punch/hooks/use-punch'
+import {
+  OBSERVATION_TYPES,
+  OBSERVATION_TYPE_LABEL,
+  usePunchItems,
+  type ObservationType,
+} from '@/features/punch/hooks/use-punch'
 import { useDefects } from '@/features/quality/hooks/use-quality'
 import {
   useCreatePin,
@@ -39,6 +44,7 @@ import {
 
 type Mode =
   | 'new_punch'
+  | 'new_observation'
   | 'link_punch'
   | 'new_rfi'
   | 'link_rfi'
@@ -47,6 +53,7 @@ type Mode =
 
 const MODE_LABEL: Record<Mode, string> = {
   new_punch: 'Raise a punch item here',
+  new_observation: 'Raise an observation here',
   link_punch: 'Link a punch item',
   new_rfi: 'Raise an RFI here',
   link_rfi: 'Link an existing RFI',
@@ -88,6 +95,8 @@ export function PinCreateDialog({
   const [question, setQuestion] = useState('')
   const [priority, setPriority] = useState('normal')
   const [punchCompanyId, setPunchCompanyId] = useState<string | null>(null)
+  const [observationType, setObservationType] =
+    useState<ObservationType>('safety')
   const [punchId, setPunchId] = useState('')
   const [rfiId, setRfiId] = useState('')
   const [defectId, setDefectId] = useState('')
@@ -132,6 +141,24 @@ export function PinCreateDialog({
         })
         toast.success(
           `${result.created?.ref ?? 'Punch item'} raised on sheet ${sheetNumber}`
+        )
+      } else if (mode === 'new_observation') {
+        const result = await createPin.mutateAsync({
+          x: point.x,
+          y: point.y,
+          recordType: 'punch_item',
+          sheetRevisionId,
+          create: {
+            title: subject.trim(),
+            description: question.trim() || undefined,
+            priority,
+            assigneeCompanyId: punchCompanyId || undefined,
+            kind: 'observation',
+            observationType,
+          },
+        })
+        toast.success(
+          `${result.created?.ref ?? 'Observation'} raised on sheet ${sheetNumber}`
         )
       } else if (mode === 'link_punch') {
         await createPin.mutateAsync({
@@ -204,6 +231,7 @@ export function PinCreateDialog({
 
   const canSubmit =
     (mode === 'new_punch' && subject.trim().length > 0) ||
+    (mode === 'new_observation' && subject.trim().length > 0) ||
     (mode === 'link_punch' && Boolean(punchId)) ||
     (mode === 'new_rfi' && subject.trim().length > 0) ||
     (mode === 'link_rfi' && Boolean(rfiId)) ||
@@ -242,6 +270,11 @@ export function PinCreateDialog({
                     {MODE_LABEL.new_punch}
                   </SelectItem>
                 )}
+                {canCreatePunch && (
+                  <SelectItem value='new_observation'>
+                    {MODE_LABEL.new_observation}
+                  </SelectItem>
+                )}
                 {canReadPunch && (
                   <SelectItem value='link_punch'>
                     {MODE_LABEL.link_punch}
@@ -265,10 +298,36 @@ export function PinCreateDialog({
             </Select>
           </div>
 
-          {mode === 'new_punch' && (
+          {(mode === 'new_punch' || mode === 'new_observation') && (
             <>
+              {mode === 'new_observation' && (
+                <div className='space-y-1'>
+                  <Label>Observation type</Label>
+                  <Select
+                    value={observationType}
+                    onValueChange={(value) =>
+                      setObservationType(value as ObservationType)
+                    }
+                  >
+                    <SelectTrigger data-testid='uat-pin-observation-type'>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {OBSERVATION_TYPES.map((value) => (
+                        <SelectItem key={value} value={value}>
+                          {OBSERVATION_TYPE_LABEL[value]}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
               <div className='space-y-1'>
-                <Label htmlFor='pin-punch-title'>What needs fixing</Label>
+                <Label htmlFor='pin-punch-title'>
+                  {mode === 'new_observation'
+                    ? 'What was observed'
+                    : 'What needs fixing'}
+                </Label>
                 <Input
                   id='pin-punch-title'
                   value={subject}

@@ -333,6 +333,19 @@ describe("form service", () => {
       responses[0].deficiencyRecordId = "punch-1";
       await expect(service.raiseDeficiency({ orgId: ORG, projectId: PROJECT, instanceId: "inst-1", itemId: I_HOLD, actor: SITE, payload: {} })).rejects.toMatchObject({ code: "FORM_DEFICIENCY_EXISTS" });
     });
+
+    it("raises a safety observation from a toolbox-talk deficiency", async () => {
+      seed({ status: "in_progress", type: "talk" });
+      responses = [{ id: `resp-${I_HOLD}`, instanceId: "inst-1", itemId: I_HOLD, value: "fail", isDeficient: true }];
+      mockPrisma.formItem.findFirst.mockResolvedValue(ITEM_HOLD);
+      mockCreatePunch.mockResolvedValueOnce({ id: "obs-1", ref: "OBS-002" });
+      const result = await service.raiseDeficiency({ orgId: ORG, projectId: PROJECT, instanceId: "inst-1", itemId: I_HOLD, actor: SITE, payload: { target: "observation", hazard: "Working at height" } });
+      expect(mockCreatePunch).toHaveBeenCalledWith(
+        expect.objectContaining({ payload: expect.objectContaining({ kind: "observation", observationType: "safety", hazard: "Working at height", sourceRecordType: "form_instance", sourceRecordId: "inst-1" }) }),
+      );
+      expect(mockPrisma.formItemResponse.upsert).toHaveBeenCalledWith(expect.objectContaining({ update: expect.objectContaining({ deficiencyRecordType: "observation", deficiencyRecordId: "obs-1" }) }));
+      expect(result.record.ref).toBe("OBS-002");
+    });
   });
 
   describe("hold points", () => {

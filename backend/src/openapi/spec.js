@@ -3147,7 +3147,10 @@ const components = {
       ["role", "image"],
     ),
     FormDeficiencyRequest: objectSchema({
-      target: { type: "string", enum: ["punch_item", "observation"], description: "Only punch_item until OBS-015." },
+      target: { type: "string", enum: ["punch_item", "observation"], description: "Punch item (default) or observation (type defaults to safety for toolbox talks, quality otherwise)." },
+      observationType: { type: "string", nullable: true, enum: ["safety", "quality", "commissioning", "work_to_complete", "environmental", null] },
+      hazard: { type: "string", nullable: true },
+      contributingCondition: { type: "string", nullable: true },
       title: { type: "string", nullable: true },
       priority: { type: "string", enum: ["low", "normal", "high", "urgent"] },
       trade: { type: "string", nullable: true },
@@ -3202,6 +3205,14 @@ const components = {
       disputeReason: { type: "string", nullable: true },
       distributedAt: nullableDateString,
       legacyDefectId: nullableUuid,
+      kind: { type: "string", enum: ["punch", "observation"], description: "Observations share the engine (OCTA-QA-OBS-015) with their own OBS-001 numbering." },
+      observationType: { type: "string", nullable: true, enum: ["safety", "quality", "commissioning", "work_to_complete", "environmental", null] },
+      observationTypeLabel: { type: "string", nullable: true },
+      hazard: { type: "string", nullable: true },
+      contributingCondition: { type: "string", nullable: true },
+      sourceRecordType: { type: "string", nullable: true, description: "Where it was raised from: form_instance, sheet, photo…" },
+      sourceRecordId: { type: "string", nullable: true },
+      sourcePath: { type: "string", nullable: true },
       createdBy: nullableUuid,
       createdAt: dateString,
       updatedAt: dateString,
@@ -3239,6 +3250,12 @@ const components = {
       finalApproverUserId: nullableUuid,
       dueDate: nullableDateString,
       status: { type: "string", enum: ["draft", "open"], description: "Create as draft (default) or open straight away." },
+      kind: { type: "string", enum: ["punch", "observation"], description: "Create only; defaults to punch." },
+      observationType: { type: "string", nullable: true, enum: ["safety", "quality", "commissioning", "work_to_complete", "environmental", null], description: "Observations only; defaults to quality." },
+      hazard: { type: "string", nullable: true, maxLength: 120 },
+      contributingCondition: { type: "string", nullable: true, maxLength: 2000 },
+      sourceRecordType: { type: "string", nullable: true, description: "Create only." },
+      sourceRecordId: { type: "string", nullable: true, description: "Create only." },
       activityIds: arrayOf(uuid),
       attachmentRefs: arrayOf(ref("GenericObject")),
     }),
@@ -3251,6 +3268,7 @@ const components = {
         byStatus: { type: "object" },
         byCompany: arrayOf(objectSchema({ company: { type: "string" }, total: { type: "integer" }, open: { type: "integer" }, overdue: { type: "integer" } })),
         byTrade: arrayOf(objectSchema({ trade: { type: "string" }, count: { type: "integer" } })),
+        byType: { ...arrayOf(objectSchema({ type: { type: "string" }, label: { type: "string" }, total: { type: "integer" }, open: { type: "integer" } })), description: "Observations by type." },
       }),
     }),
     PunchBulkRequest: objectSchema(
@@ -3268,6 +3286,7 @@ const components = {
       ["action"],
     ),
     PunchDistributeRequest: objectSchema({
+      kind: { type: "string", enum: ["punch", "observation"], description: "Which list to send when itemIds is empty (default punch)." },
       itemIds: { ...arrayOf(uuid), description: "Specific items; defaults to every open item for the companies." },
       companyIds: arrayOf(uuid),
       userIds: arrayOf(uuid),
@@ -11237,6 +11256,8 @@ add(
 // ─── Punch list ─────────────────────────────────────────────────────────
 const punchItemIdParam = pathParam("itemId", "Punch item UUID.");
 const punchFilterParams = [
+  queryParam("kind", "punch (default), observation, or all.", { type: "string", enum: ["punch", "observation", "all"] }),
+  queryParam("observationType", "Observation type.", { type: "string", enum: ["safety", "quality", "commissioning", "work_to_complete", "environmental"] }),
   queryParam("status", "Status, comma list, or `all` (void items hidden by default).", { type: "string" }),
   queryParam("assigneeCompanyId", "Assigned company.", uuid),
   queryParam("assigneeUserId", "Assigned user.", uuid),
@@ -11928,7 +11949,7 @@ const openApiSpec = {
     {
       name: "Punch List",
       description:
-        "Punch items with a draft → open → ready_for_review → closed state machine (plus in_dispute and void), an event ledger, company-scoped visibility for subcontractors, bulk create, email distribution, and PDF / CSV export per subcontractor or location. Replaces the legacy defect register (rows migrated). See docs/qa/punch-list.md.",
+        "Punch items with a draft → open → ready_for_review → closed state machine (plus in_dispute and void), an event ledger, company-scoped visibility for subcontractors, bulk create, email distribution, and PDF / CSV export per subcontractor or location. Replaces the legacy defect register (rows migrated). Observations (OCTA-QA-OBS-015: safety, quality, commissioning, work to complete, environmental; hazard and contributing condition; raised from inspections, photos or drawing pins) are the same engine with `kind=observation` and OBS-001 numbering. See docs/qa/punch-list.md.",
     },
     {
       name: "Drawings",

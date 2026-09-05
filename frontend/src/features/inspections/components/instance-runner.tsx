@@ -255,7 +255,7 @@ function ItemRow({
   problem: CompletionProblem | undefined
   onSave: (itemId: string, value: string | null, note?: string | null) => void
   onSign: (itemId: string) => void
-  onRaise: (itemId: string) => void
+  onRaise: (itemId: string, target: 'punch_item' | 'observation') => void
   saving: boolean
 }) {
   const response = item.response
@@ -534,10 +534,22 @@ function ItemRow({
             variant='outline'
             className='h-7 px-2 text-xs text-destructive'
             disabled={saving}
-            onClick={() => onRaise(item.id)}
+            onClick={() => onRaise(item.id, 'punch_item')}
             data-testid='uat-inspection-raise-punch'
           >
             <AlertTriangle className='mr-1 h-3.5 w-3.5' /> Raise punch item
+          </Button>
+        )}
+        {deficient && !response?.deficiencyRecordId && canRaise && (
+          <Button
+            size='sm'
+            variant='outline'
+            className='h-7 px-2 text-xs'
+            disabled={saving}
+            onClick={() => onRaise(item.id, 'observation')}
+            data-testid='uat-inspection-raise-observation'
+          >
+            <AlertTriangle className='mr-1 h-3.5 w-3.5' /> Raise observation
           </Button>
         )}
         {response?.deficiencyRecordId && response.deficiencyPath && (
@@ -545,7 +557,10 @@ function ItemRow({
             to={response.deficiencyPath}
             className='text-xs underline-offset-2 hover:underline'
           >
-            Punch item raised →
+            {response.deficiencyRecordType === 'observation'
+              ? 'Observation'
+              : 'Punch item'}{' '}
+            raised →
           </Link>
         )}
       </div>
@@ -669,12 +684,16 @@ export function InstanceRunner({
     }
   }
 
-  const onRaise = async (itemId: string) => {
+  const onRaise = async (
+    itemId: string,
+    target: 'punch_item' | 'observation'
+  ) => {
     if (!instance) return
     try {
       const result = await raise.mutateAsync({
         instanceId: instance.id,
         itemId,
+        payload: { target },
       })
       toast.success(`${result.record.ref} raised`)
     } catch (error) {

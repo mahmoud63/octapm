@@ -429,7 +429,7 @@ export function QualityDashboard({
 
   return (
     <div className='space-y-3'>
-      <div className='grid grid-cols-2 gap-2 sm:grid-cols-6'>
+      <div className='grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-7'>
         <div className='rounded border p-3'>
           <p className='text-xs text-muted-foreground'>Quality Score</p>
           <p className='text-2xl font-bold'>{metrics?.qualityScore ?? 0}</p>
@@ -443,12 +443,19 @@ export function QualityDashboard({
           <p className='text-2xl font-bold'>{metrics?.failedItps ?? 0}</p>
         </div>
         <div className='rounded border p-3'>
-          <p className='text-xs text-muted-foreground'>Open Defects</p>
+          <p className='text-xs text-muted-foreground'>Open punch items</p>
           <p className='text-2xl font-bold'>{metrics?.openDefects ?? 0}</p>
         </div>
         <div className='rounded border p-3'>
           <p className='text-xs text-muted-foreground'>Safety Open</p>
           <p className='text-2xl font-bold'>{metrics?.safetyOpen ?? 0}</p>
+        </div>
+        <div className='rounded border p-3' data-testid='uat-observations-kpi'>
+          <p className='text-xs text-muted-foreground'>Observations</p>
+          <p className='text-2xl font-bold'>{metrics?.observationsOpen ?? 0}</p>
+          <p className='text-xs text-muted-foreground'>
+            {metrics?.safetyObservationsOpen ?? 0} safety
+          </p>
         </div>
         <div className='rounded border p-3'>
           <p className='text-xs text-muted-foreground'>Due Alerts</p>
@@ -467,6 +474,9 @@ export function QualityDashboard({
             </TabsTrigger>
             <TabsTrigger className='min-h-10' value='defects'>
               Punch list
+            </TabsTrigger>
+            <TabsTrigger className='min-h-10' value='observations'>
+              Observations
             </TabsTrigger>
             <TabsTrigger className='min-h-10' value='safety'>
               Safety
@@ -719,6 +729,15 @@ export function QualityDashboard({
                 />
               </>
             }
+          />
+        </TabsContent>
+
+        <TabsContent value='observations' className='space-y-2'>
+          <PunchModule
+            key={`obs:${initialTarget?.source ?? ''}:${initialTarget?.recordId ?? ''}`}
+            projectId={projectId}
+            kind='observation'
+            initialTarget={initialTarget}
           />
         </TabsContent>
 

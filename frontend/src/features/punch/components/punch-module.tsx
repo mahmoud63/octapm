@@ -2,7 +2,7 @@ import { useState, type ReactNode } from 'react'
 import { ChevronDown, ChevronRight } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import type { ProjectSetupTarget } from '@/features/projects/data/schema'
-import type { PunchFilters } from '../hooks/use-punch'
+import type { PunchFilters, PunchKind } from '../hooks/use-punch'
 import type { PunchFormValue } from '../lib/form'
 import { PunchCreateDialog } from './punch-create-dialog'
 import { PunchDistributeDialog } from './punch-distribute-dialog'
@@ -19,10 +19,13 @@ export function PunchModule({
   projectId,
   initialTarget,
   legacy,
+  kind = 'punch',
 }: {
   projectId: string
   initialTarget?: ProjectSetupTarget
   legacy?: ReactNode
+  /** Observations (OCTA-QA-OBS-015) reuse the module with a second kind. */
+  kind?: PunchKind
 }) {
   const fromSheetQr =
     initialTarget?.source === 'sheet_qr' && Boolean(initialTarget.recordId)
@@ -55,9 +58,10 @@ export function PunchModule({
   }
 
   return (
-    <div className='space-y-4' data-testid='uat-punch-module'>
+    <div className='space-y-4' data-testid='uat-punch-module' data-kind={kind}>
       <PunchList
         projectId={projectId}
+        kind={kind}
         initialFilters={initialFilters}
         onOpenItem={setDetailId}
         onCreate={() =>
@@ -82,6 +86,7 @@ export function PunchModule({
       <PunchCreateDialog
         key={`create-${create.seed}`}
         projectId={projectId}
+        kind={kind}
         open={create.open}
         onOpenChange={(open) => setCreate((current) => ({ ...current, open }))}
         initial={create.initial}
@@ -93,6 +98,7 @@ export function PunchModule({
       <PunchDistributeDialog
         key={`distribute-${distribute.seed}`}
         projectId={projectId}
+        kind={kind}
         open={distribute.open}
         onOpenChange={(open) =>
           setDistribute((current) => ({ ...current, open }))

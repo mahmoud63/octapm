@@ -106,6 +106,32 @@ Punch items also take part in comments / mentions / subscriptions
   opens quick-create for the sheet. Notifications and comment links use
   `/quality/defects?recordId=`.
 
+## Observations (OCTA-QA-OBS-015)
+
+Observations — safety, quality, commissioning, work to complete,
+environmental — are the same record engine with `kind = observation`: the
+same state machine, ledger, company visibility, distribution and exports,
+plus `observationType`, `hazard`, `contributingCondition` and a pointer to
+where they were raised (`sourceRecordType` / `sourceRecordId`: an
+inspection instance, a drawing sheet, a photo). They number separately
+(OBS-001) and live on their own tab, **Quality › Observations**
+(`/projects/{id}/quality/observations`); deep links for the kind use record
+type `observation`.
+
+* Every punch endpoint takes `kind` (`punch` default, `observation`, `all`)
+  and `observationType`; `POST /punch` with `kind: "observation"` creates
+  one; the list summary adds `byType`; PDF / CSV exports add type and hazard
+  columns and are titled "Observations".
+* Raised from: the **Observations** tab (single or many at once), a drawing
+  pin (*Raise an observation here*, with the type), a deficient inspection
+  answer (*Raise observation* — safety for toolbox talks, quality otherwise,
+  linked back to the answer), or a photo attached afterwards.
+* Subcontractors see only their company's observations; HSE / PM roles see
+  everything (same `punch` permissions).
+* The quality dashboard reports `observationsOpen`,
+  `safetyObservationsOpen` and `observationsByType`; the Observations KPI
+  card sits next to Safety.
+
 ## Set-up
 
 * Run the migration (`npx prisma migrate deploy`).

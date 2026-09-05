@@ -4059,6 +4059,12 @@ model PunchItem {
   description         String?
   status              String    @default("draft") // draft, open, ready_for_review, closed, in_dispute, void
   priority            String    @default("normal") // low, normal, high, urgent
+  kind                String    @default("punch") // punch, observation (OCTA-QA-OBS-015: one field-item engine)
+  observationType     String? // safety, quality, commissioning, work_to_complete, environmental
+  hazard              String?
+  contributingCondition String?
+  sourceRecordType    String? // form_instance, sheet, photo… where it was raised from
+  sourceRecordId      String?
   trade               String?
   activityId          String?
   locationId          String?
@@ -4096,9 +4102,11 @@ model PunchItem {
   events            PunchItemEvent[]
 
   @@unique([projectId, ref])
-  @@unique([projectId, number])
+  @@unique([projectId, kind, number])
   @@index([orgId])
   @@index([projectId, status])
+  @@index([projectId, kind, status])
+  @@index([projectId, kind, observationType])
   @@index([projectId, assigneeCompanyId, status])
   @@index([projectId, locationId])
   @@index([projectId, dueDate])

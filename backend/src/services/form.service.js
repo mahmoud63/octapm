@@ -1363,13 +1363,22 @@ const raiseDeficiency = async ({ orgId, projectId, instanceId, itemId, payload =
   const response = await prisma.formItemResponse.findUnique({ where: { instanceId_itemId: { instanceId, itemId } } });
   if (response?.deficiencyRecordId) throw new HttpError(409, "FORM_DEFICIENCY_EXISTS", "This item already has a linked record");
   const target = payload.target === "observation" ? "observation" : "punch_item";
-  if (target !== "punch_item") throw new HttpError(400, "FORM_DEFICIENCY_TARGET_UNSUPPORTED", "Only punch items can be raised for now");
   const punchService = require("./punch.service");
   const record = await punchService.createPunchItem({
     orgId,
     projectId,
     actor,
     payload: {
+      ...(target === "observation"
+        ? {
+            kind: "observation",
+            observationType: payload.observationType || (existing.type === "talk" ? "safety" : "quality"),
+            hazard: trimOrNull(payload.hazard),
+            contributingCondition: trimOrNull(payload.contributingCondition),
+          }
+        : {}),
+      sourceRecordType: "form_instance",
+      sourceRecordId: existing.id,
       title: trimOrNull(payload.title) || `${item.label} — ${existing.ref}`,
       description: [response?.note, `Raised from ${existing.ref} · ${existing.title}`].filter(Boolean).join("\n"),
       priority: ["low", "normal", "high", "urgent"].includes(payload.priority) ? payload.priority : "normal",
@@ -1389,11 +1398,11 @@ const raiseDeficiency = async ({ orgId, projectId, instanceId, itemId, payload =
   await prisma.$transaction(async (tx) => {
     await tx.formItemResponse.upsert({
       where: { instanceId_itemId: { instanceId, itemId } },
-      create: { instanceId, itemId, value: null, isDeficient: true, deficiencyRecordType: "punch_item", deficiencyRecordId: record.id, answeredBy: actor?.id || null, answeredAt: new Date() },
-      update: { isDeficient: true, deficiencyRecordType: "punch_item", deficiencyRecordId: record.id },
+      create: { instanceId, itemId, value: null, isDeficient: true, deficiencyRecordType: target, deficiencyRecordId: record.id, answeredBy: actor?.id || null, answeredAt: new Date() },
+      update: { isDeficient: true, deficiencyRecordType: target, deficiencyRecordId: record.id },
     });
     await persistSummary(tx, { instanceId, templateId: existing.templateId });
-    await audit({ tx, orgId, projectId, instance: existing, action: auditService.ACTIONS.UPDATED, actor, summary: { deficiency: item.label, punchItem: record.ref } });
+    await audit({ tx, orgId, projectId, instance: existing, action: auditService.ACTIONS.UPDATED, actor, summary: { deficiency: item.label, [target === "observation" ? "observation" : "punchItem"]: record.ref } });
   });
   return { record, instance: await getInstance({ orgId, projectId, instanceId }) };
 };

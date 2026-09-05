@@ -717,6 +717,10 @@ export const useRaiseFormDeficiency = (projectId: string) => {
       instanceId: string
       itemId: string
       payload?: {
+        target?: 'punch_item' | 'observation'
+        observationType?: string | null
+        hazard?: string | null
+        contributingCondition?: string | null
         title?: string | null
         priority?: 'low' | 'normal' | 'high' | 'urgent'
         assigneeCompanyId?: string | null

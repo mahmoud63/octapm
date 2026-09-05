@@ -1,4 +1,5 @@
 import type {
+  ObservationType,
   PunchItem,
   PunchItemInput,
   PunchPriority,
@@ -8,6 +9,9 @@ export interface PunchFormValue {
   title: string
   description: string
   priority: PunchPriority
+  observationType: ObservationType
+  hazard: string
+  contributingCondition: string
   trade: string
   locationId: string | null
   locationText: string
@@ -25,6 +29,9 @@ export const emptyPunchForm = (
   title: '',
   description: '',
   priority: 'normal',
+  observationType: 'safety',
+  hazard: '',
+  contributingCondition: '',
   trade: '',
   locationId: null,
   locationText: '',
@@ -41,6 +48,9 @@ export const itemToForm = (item: PunchItem): PunchFormValue => ({
   title: item.title,
   description: item.description ?? '',
   priority: item.priority,
+  observationType: item.observationType ?? 'safety',
+  hazard: item.hazard ?? '',
+  contributingCondition: item.contributingCondition ?? '',
   trade: item.trade ?? '',
   locationId: item.locationId,
   locationText: item.locationText ?? '',
@@ -61,12 +71,25 @@ export const formToPayload = (
   {
     mode,
     includeTitle = true,
-  }: { mode: 'create' | 'update'; includeTitle?: boolean }
+    kind = 'punch',
+  }: {
+    mode: 'create' | 'update'
+    includeTitle?: boolean
+    kind?: 'punch' | 'observation'
+  }
 ): PunchItemInput => {
   const full: PunchItemInput = {
     ...(includeTitle ? { title: form.title.trim() } : {}),
     description: form.description.trim() || null,
     priority: form.priority,
+    ...(kind === 'observation'
+      ? {
+          kind: 'observation' as const,
+          observationType: form.observationType,
+          hazard: form.hazard.trim() || null,
+          contributingCondition: form.contributingCondition.trim() || null,
+        }
+      : {}),
     trade: form.trade.trim() || null,
     locationId: form.locationId || null,
     locationText: form.locationText.trim() || null,

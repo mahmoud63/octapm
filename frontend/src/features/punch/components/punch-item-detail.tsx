@@ -261,6 +261,11 @@ export function PunchItemDetail({
                 </span>
                 <PunchStatusBadge status={item.status} />
                 <PunchPriorityBadge priority={item.priority} />
+                {item.kind === 'observation' && item.observationTypeLabel && (
+                  <Badge variant='outline' data-testid='uat-observation-badge'>
+                    {item.observationTypeLabel} observation
+                  </Badge>
+                )}
                 {item.isOverdue && (
                   <Badge variant='destructive' className='gap-1'>
                     <AlertTriangle className='h-3 w-3' />
@@ -393,6 +398,25 @@ export function PunchItemDetail({
                   </span>
                 </Field>
                 <Field label='Trade'>{item.trade ?? '—'}</Field>
+                {item.kind === 'observation' && (
+                  <>
+                    <Field label='Hazard'>{item.hazard ?? '—'}</Field>
+                    <Field label='Contributing condition'>
+                      {item.contributingCondition ?? '—'}
+                    </Field>
+                  </>
+                )}
+                {item.sourcePath && (
+                  <Field label='Raised from'>
+                    <Link
+                      to={item.sourcePath}
+                      className='underline-offset-2 hover:underline'
+                      data-testid='uat-punch-source-link'
+                    >
+                      {item.sourceRecordType?.replace(/_/g, ' ') ?? 'record'}
+                    </Link>
+                  </Field>
+                )}
                 <Field icon={<MapPin className='h-3 w-3' />} label='Location'>
                   {[item.location?.name, item.locationText]
                     .filter(Boolean)

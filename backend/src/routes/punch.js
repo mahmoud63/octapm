@@ -37,6 +37,12 @@ const itemValidators = (partial = false) => [
   partial ? body("title").optional().isString().trim().isLength({ min: 1, max: 200 }) : body("title").isString().trim().isLength({ min: 1, max: 200 }),
   body("description").optional({ nullable: true }).isString().trim().isLength({ max: 4000 }),
   body("priority").optional().isIn(punchService.PRIORITIES),
+  body("kind").optional().isIn(punchService.KINDS),
+  body("observationType").optional({ nullable: true }).isIn(punchService.OBSERVATION_TYPES),
+  body("hazard").optional({ nullable: true }).isString().trim().isLength({ max: 120 }),
+  body("contributingCondition").optional({ nullable: true }).isString().trim().isLength({ max: 2000 }),
+  body("sourceRecordType").optional({ nullable: true }).isString().trim().isLength({ max: 60 }),
+  body("sourceRecordId").optional({ nullable: true }).isString().trim().isLength({ max: 80 }),
   body("trade").optional({ nullable: true }).isString().trim().isLength({ max: 80 }),
   body("locationText").optional({ nullable: true }).isString().trim().isLength({ max: 200 }),
   body("locationId").optional({ nullable: true }).isUUID(),
@@ -55,6 +61,8 @@ const itemValidators = (partial = false) => [
 ];
 
 const filterValidators = () => [
+  query("kind").optional().isIn([...punchService.KINDS, "all"]),
+  query("observationType").optional().isIn(punchService.OBSERVATION_TYPES),
   query("status").optional().isString().trim().isLength({ max: 120 }),
   query("assigneeCompanyId").optional({ values: "falsy" }).isUUID(),
   query("assigneeUserId").optional({ values: "falsy" }).isUUID(),
@@ -74,6 +82,8 @@ const filterValidators = () => [
 ];
 
 const filtersFrom = (req) => ({
+  kind: req.query.kind || "punch",
+  observationType: req.query.observationType || null,
   status: req.query.status || null,
   assigneeCompanyId: req.query.assigneeCompanyId || null,
   assigneeUserId: req.query.assigneeUserId || null,
@@ -192,6 +202,7 @@ router.post(
     body("userIds").optional().isArray({ max: 200 }),
     body("userIds.*").isUUID(),
     body("message").optional({ nullable: true }).isString().trim().isLength({ max: 2000 }),
+    body("kind").optional().isIn(punchService.KINDS),
     validate,
   ],
   asyncHandler(async (req, res) => {
@@ -202,6 +213,7 @@ router.post(
       companyIds: req.body.companyIds || [],
       userIds: req.body.userIds || [],
       message: req.body.message || null,
+      kind: req.body.kind || "punch",
       actor: actorFor(req),
     });
     return sendSuccess(res, result);

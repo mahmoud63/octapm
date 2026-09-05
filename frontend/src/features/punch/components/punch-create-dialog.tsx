@@ -16,9 +16,11 @@ import { Switch } from '@/components/ui/switch'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Textarea } from '@/components/ui/textarea'
 import {
+  KIND_LABEL,
   useBulkCreatePunchItems,
   useCreatePunchItem,
   type PunchItem,
+  type PunchKind,
 } from '../hooks/use-punch'
 import {
   emptyPunchForm,
@@ -39,11 +41,13 @@ export function PunchCreateDialog({
   onOpenChange,
   initial,
   onCreated,
+  kind = 'punch',
 }: {
   projectId: string
   open: boolean
   onOpenChange: (open: boolean) => void
   initial?: Partial<PunchFormValue>
+  kind?: PunchKind
   onCreated?: (items: PunchItem[]) => void
 }) {
   const [tab, setTab] = useState<'single' | 'bulk'>('single')
@@ -61,7 +65,8 @@ export function PunchCreateDialog({
     try {
       if (tab === 'single') {
         const item = await createOne.mutateAsync({
-          ...formToPayload(form, { mode: 'create' }),
+          ...formToPayload(form, { mode: 'create', kind }),
+          kind,
           status: openNow ? 'open' : 'draft',
         })
         toast.success(`${item.ref} ${openNow ? 'opened' : 'saved as draft'}`)
@@ -70,7 +75,12 @@ export function PunchCreateDialog({
         const result = await createMany.mutateAsync({
           items: bulkItems,
           defaults: {
-            ...formToPayload(form, { mode: 'create', includeTitle: false }),
+            ...formToPayload(form, {
+              mode: 'create',
+              includeTitle: false,
+              kind,
+            }),
+            kind,
             status: openNow ? 'open' : 'draft',
           },
         })
@@ -97,10 +107,11 @@ export function PunchCreateDialog({
         data-testid='uat-punch-create'
       >
         <DialogHeader>
-          <DialogTitle>New punch item</DialogTitle>
+          <DialogTitle>New {KIND_LABEL[kind].toLowerCase()}</DialogTitle>
           <DialogDescription>
-            Open it now to notify the company and assignee, or keep it as a
-            draft until the walk-through is done.
+            {kind === 'observation'
+              ? 'Open it now to notify the responsible company, or keep it as a draft until the walk is done.'
+              : 'Open it now to notify the company and assignee, or keep it as a draft until the walk-through is done.'}
           </DialogDescription>
         </DialogHeader>
         <Tabs
@@ -119,6 +130,7 @@ export function PunchCreateDialog({
               projectId={projectId}
               value={form}
               onChange={setForm}
+              kind={kind}
               disabled={busy}
             />
           </TabsContent>
@@ -146,6 +158,7 @@ export function PunchCreateDialog({
               projectId={projectId}
               value={form}
               onChange={setForm}
+              kind={kind}
               hideTitle
               disabled={busy}
               idPrefix='punch-bulk'

@@ -11,20 +11,28 @@ import { Textarea } from '@/components/ui/textarea'
 import { CompanyPicker, UserPicker } from '@/components/user-picker'
 import { useSheets } from '@/features/drawings/hooks/use-drawings'
 import { LocationPicker } from '@/features/locations/components/location-picker'
-import { PUNCH_PRIORITIES, type PunchPriority } from '../hooks/use-punch'
+import {
+  OBSERVATION_TYPES,
+  OBSERVATION_TYPE_LABEL,
+  PUNCH_PRIORITIES,
+  type ObservationType,
+  type PunchKind,
+  type PunchPriority,
+} from '../hooks/use-punch'
 import type { PunchFormValue } from '../lib/form'
 
 const NO_SHEET = '__none'
 
 /**
- * The punch item fields, shared by create (single and bulk defaults) and
- * edit. Assignees come from the project team so ball-in-court and company
- * visibility work; the sheet ties the item to a drawing.
+ * The punch item / observation fields, shared by create (single and bulk
+ * defaults) and edit. Assignees come from the project team so ball-in-court
+ * and company visibility work; the sheet ties the item to a drawing.
  */
 export function PunchItemForm({
   projectId,
   value,
   onChange,
+  kind = 'punch',
   hideTitle = false,
   disabled = false,
   idPrefix = 'punch',
@@ -32,10 +40,12 @@ export function PunchItemForm({
   projectId: string
   value: PunchFormValue
   onChange: (next: PunchFormValue) => void
+  kind?: PunchKind
   hideTitle?: boolean
   disabled?: boolean
   idPrefix?: string
 }) {
+  const observation = kind === 'observation'
   const { data: sheets } = useSheets(projectId, { status: 'current' })
   const sheetOptions = sheets?.items ?? []
   const set = <K extends keyof PunchFormValue>(
@@ -47,12 +57,18 @@ export function PunchItemForm({
     <div className='space-y-3' data-testid='uat-punch-form'>
       {!hideTitle && (
         <div className='space-y-1'>
-          <Label htmlFor={`${idPrefix}-title`}>What needs fixing</Label>
+          <Label htmlFor={`${idPrefix}-title`}>
+            {observation ? 'What was observed' : 'What needs fixing'}
+          </Label>
           <Input
             id={`${idPrefix}-title`}
             value={value.title}
             onChange={(event) => set('title', event.target.value)}
-            placeholder='e.g. Paint scuffed on corridor wall, gridline C4'
+            placeholder={
+              observation
+                ? 'e.g. Unguarded slab edge on level 3'
+                : 'e.g. Paint scuffed on corridor wall, gridline C4'
+            }
             maxLength={200}
             disabled={disabled}
             data-testid='uat-punch-title'
@@ -66,10 +82,67 @@ export function PunchItemForm({
           value={value.description}
           onChange={(event) => set('description', event.target.value)}
           rows={3}
-          placeholder='What is wrong and what "done" looks like'
+          placeholder={
+            observation
+              ? 'What you saw, who was involved, what was done on the spot'
+              : 'What is wrong and what "done" looks like'
+          }
           disabled={disabled}
         />
       </div>
+      {observation && (
+        <div className='grid gap-3 sm:grid-cols-2'>
+          <div className='space-y-1'>
+            <Label>Type</Label>
+            <Select
+              value={value.observationType}
+              onValueChange={(next) =>
+                set('observationType', next as ObservationType)
+              }
+              disabled={disabled}
+            >
+              <SelectTrigger data-testid='uat-observation-type'>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {OBSERVATION_TYPES.map((type) => (
+                  <SelectItem key={type} value={type}>
+                    {OBSERVATION_TYPE_LABEL[type]}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className='space-y-1'>
+            <Label htmlFor={`${idPrefix}-hazard`}>Hazard</Label>
+            <Input
+              id={`${idPrefix}-hazard`}
+              value={value.hazard}
+              onChange={(event) => set('hazard', event.target.value)}
+              placeholder='Fall from height, struck by, electrical…'
+              maxLength={120}
+              disabled={disabled}
+              data-testid='uat-observation-hazard'
+            />
+          </div>
+          <div className='space-y-1 sm:col-span-2'>
+            <Label htmlFor={`${idPrefix}-condition`}>
+              Contributing condition
+            </Label>
+            <Textarea
+              id={`${idPrefix}-condition`}
+              value={value.contributingCondition}
+              onChange={(event) =>
+                set('contributingCondition', event.target.value)
+              }
+              rows={2}
+              placeholder='Missing guardrail, poor lighting, no permit…'
+              maxLength={2000}
+              disabled={disabled}
+            />
+          </div>
+        </div>
+      )}
       <div className='grid gap-3 sm:grid-cols-2'>
         <div className='space-y-1'>
           <Label>Priority</Label>

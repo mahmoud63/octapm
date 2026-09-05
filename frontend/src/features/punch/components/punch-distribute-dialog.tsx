@@ -15,7 +15,11 @@ import {
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { useProjectTeam } from '@/features/permissions/hooks/use-permissions'
-import { useDistributePunchItems } from '../hooks/use-punch'
+import {
+  KIND_LIST_LABEL,
+  useDistributePunchItems,
+  type PunchKind,
+} from '../hooks/use-punch'
 
 /**
  * Emails the list to subcontractors (every active member of the company on
@@ -27,6 +31,7 @@ export function PunchDistributeDialog({
   onOpenChange,
   itemIds,
   defaultCompanyIds = [],
+  kind = 'punch',
 }: {
   projectId: string
   open: boolean
@@ -34,6 +39,7 @@ export function PunchDistributeDialog({
   /** Specific items; when empty every open item for the chosen companies goes. */
   itemIds?: string[]
   defaultCompanyIds?: string[]
+  kind?: PunchKind
 }) {
   const { data: team, isLoading } = useProjectTeam(projectId, {
     enabled: open,
@@ -58,6 +64,7 @@ export function PunchDistributeDialog({
   const submit = async () => {
     try {
       const result = await distribute.mutateAsync({
+        kind,
         itemIds: itemIds?.length ? itemIds : undefined,
         companyIds,
         userIds,
@@ -85,7 +92,8 @@ export function PunchDistributeDialog({
       >
         <DialogHeader>
           <DialogTitle className='flex items-center gap-2'>
-            <Send className='h-4 w-4' /> Send the punch list
+            <Send className='h-4 w-4' /> Send the{' '}
+            {KIND_LIST_LABEL[kind].toLowerCase()}
           </DialogTitle>
           <DialogDescription>
             Emails {scope} with a link back here, and records who received what
