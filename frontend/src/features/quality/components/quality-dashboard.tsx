@@ -516,6 +516,7 @@ export function QualityDashboard({
           <WorkflowRecordList
             projectId={projectId}
             recordType='ncr'
+            exportName='ncr'
             rows={ncrs?.rows}
             emptyText='No NCR records'
             getRef={(row) => row.ref}
@@ -662,6 +663,7 @@ export function QualityDashboard({
                 <WorkflowRecordList
                   projectId={projectId}
                   recordType='itp'
+                  exportName='itp'
                   rows={itps?.rows}
                   emptyText='No ITP records'
                   getRef={(row) => row.ref}
@@ -707,6 +709,7 @@ export function QualityDashboard({
                 <WorkflowRecordList
                   projectId={projectId}
                   recordType='defect'
+                  exportName='defect'
                   rows={defects?.rows}
                   emptyText='No defect records'
                   getRef={(row) => row.ref}
@@ -773,6 +776,7 @@ export function QualityDashboard({
           <WorkflowRecordList
             projectId={projectId}
             recordType='safety_incident'
+            exportName='safety_incident'
             rows={safety?.rows}
             emptyText='No safety incidents'
             getRef={(row) => row.ref}
@@ -910,6 +914,7 @@ export function QualityDashboard({
           <WorkflowRecordList
             projectId={projectId}
             recordType='material_test'
+            exportName='material_test'
             rows={tests?.rows}
             emptyText='No material tests'
             getRef={(row) => row.ref}

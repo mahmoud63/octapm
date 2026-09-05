@@ -27,6 +27,7 @@ const JOB_TYPES = Object.freeze({
   DRAWING_SET_PROCESS: "drawing.set_process",
   DAILY_LOG_WEATHER: "daily_log.weather",
   DAILY_LOG_DISTRIBUTE: "daily_log.distribute",
+  PORTFOLIO_REFRESH: "portfolio.refresh",
 });
 
 const JOB_STATUSES = Object.freeze({

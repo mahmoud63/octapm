@@ -38,6 +38,8 @@ export type PermissionModule =
   | 'inspection'
   | 'commitment'
   | 'sub_pay_app'
+  | 'report'
+  | 'portfolio'
 
 export type RoleId =
   | 'pm'

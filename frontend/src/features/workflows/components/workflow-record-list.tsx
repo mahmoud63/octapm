@@ -12,6 +12,7 @@ import {
   ShieldCheck,
   UserRound,
 } from 'lucide-react'
+import { csvFileName, downloadCsv } from '@/lib/export-csv'
 import { cn } from '@/lib/utils'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -154,6 +155,8 @@ interface WorkflowRecordListProps<
   renderActions?: (row: T) => ReactNode
   projectId?: string
   recordType?: string | ((row: T) => string)
+  /** File name base for "Export view" (CSV of the rows shown); omit to hide. */
+  exportName?: string
 }
 
 const formatDate = (value?: string | null) => {
@@ -461,6 +464,7 @@ export function WorkflowRecordList<
   renderActions,
   projectId,
   recordType,
+  exportName,
 }: WorkflowRecordListProps<T>) {
   const [selectedId, setSelectedId] = useState<string | null>(
     rows?.[0]?.id || null
@@ -478,8 +482,53 @@ export function WorkflowRecordList<
     )
   }
 
+  const exportView = () =>
+    downloadCsv(
+      csvFileName(exportName || 'records'),
+      [
+        { key: 'ref', label: 'Ref', value: getRef },
+        { key: 'title', label: 'Title', value: getTitle },
+        { key: 'status', label: 'Status', value: getStatus },
+        {
+          key: 'subtitle',
+          label: 'Details',
+          value: (row) => getSubtitle?.(row) ?? '',
+        },
+        { key: 'dueDate', label: 'Due', value: (row) => row.dueDate ?? '' },
+        {
+          key: 'owner',
+          label: 'Owner',
+          value: (row) => row.ownerUser?.name ?? row.owner ?? '',
+        },
+        {
+          key: 'activities',
+          label: 'Linked activities',
+          value: (row) => row.activityLinks?.length ?? 0,
+        },
+        {
+          key: 'attachments',
+          label: 'Attachments',
+          value: (row) => (row.attachments || row.attachmentRefs || []).length,
+        },
+      ],
+      rows
+    )
+
   return (
     <div className='space-y-2'>
+      {exportName && (
+        <div className='flex justify-end'>
+          <Button
+            variant='outline'
+            size='sm'
+            className='h-7'
+            onClick={exportView}
+            data-testid='uat-export-view'
+          >
+            <Download className='mr-1 h-3 w-3' /> Export view (CSV)
+          </Button>
+        </div>
+      )}
       {rows.map((row) => {
         const attachments = row.attachments || row.attachmentRefs || []
         const isSelected = selected?.id === row.id

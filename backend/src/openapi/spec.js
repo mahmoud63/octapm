@@ -12275,6 +12275,99 @@ const commitmentPermission = (action, transition = null) => modulePermission("co
   { method: "get", path: "/projects/{projectId}/commitments/{commitmentId}/export.pdf", summary: "Commitment statement PDF (values, schedule of values, change orders, insurance).", operationId: "exportCommitmentPdf", parameters: [...projectParams, commitmentIdParam], permissions: commitmentPermission("export"), responseSchema: { type: "string", format: "binary" } },
 ].forEach((route) => addGenericRoute({ tag: "Commercial", ...route }));
 
+// ─── Report builder & portfolio (OCTA-RPT-BUILDER-023) ─────────────────────
+const reportIdParam = pathParam("reportId", "Saved report UUID.");
+const reportScheduleIdParam = pathParam("scheduleId", "Schedule UUID.");
+const reportRunIdParam = pathParam("runId", "Report run UUID.");
+const reportOperators = ["eq", "neq", "in", "nin", "contains", "gt", "gte", "lt", "lte", "between", "empty", "not_empty", "is_true", "is_false", "last_days", "next_days", "before_today", "after_today", "today"];
+const reportFilterSchema = objectSchema({ field: { type: "string" }, op: { type: "string", enum: reportOperators }, value: { description: "Scalar, array (in / nin / between) or day count (last_days / next_days)." } }, ["field", "op"]);
+const reportDefinitionInput = objectSchema({
+  name: { type: "string" },
+  description: { type: "string", nullable: true },
+  source: { type: "string", description: "A source key from GET /reports/sources." },
+  projectId: { ...nullableUuid, description: "null = every project the caller can open." },
+  columns: arrayOf({ type: "string" }),
+  filters: arrayOf(reportFilterSchema),
+  sort: objectSchema({ field: { type: "string" }, dir: { type: "string", enum: ["asc", "desc"] } }),
+  groupBy: { type: "string", nullable: true },
+  aggregates: arrayOf(objectSchema({ fn: { type: "string", enum: ["count", "sum", "avg", "min", "max"] }, field: { type: "string", nullable: true } })),
+  chart: objectSchema({ type: { type: "string", enum: ["bar", "line", "pie", "none"] }, metric: { type: "string", description: "count or an aggregate key such as sum_value." } }),
+  visibility: { type: "string", enum: ["private", "project", "org"] },
+});
+const reportDefinitionSchema = objectSchema({
+  id: uuid,
+  projectId: nullableUuid,
+  project: nullableRef("GenericObject"),
+  name: { type: "string" },
+  description: { type: "string", nullable: true },
+  source: { type: "string" },
+  sourceLabel: { type: "string" },
+  columns: arrayOf({ type: "string" }),
+  filters: arrayOf(reportFilterSchema),
+  sort: nullableRef("GenericObject"),
+  groupBy: { type: "string", nullable: true },
+  aggregates: arrayOf(ref("GenericObject")),
+  chart: nullableRef("GenericObject"),
+  visibility: { type: "string", enum: ["private", "project", "org"] },
+  createdBy: nullableUuid,
+  isOwner: { type: "boolean" },
+  scheduleCount: { type: "integer" },
+  lastRunAt: nullableDateString,
+  createdAt: nullableDateString,
+  updatedAt: nullableDateString,
+});
+const reportResultSchema = objectSchema({
+  source: objectSchema({ key: { type: "string" }, label: { type: "string" }, module: { type: "string" } }),
+  columns: arrayOf(objectSchema({ key: { type: "string" }, label: { type: "string" }, type: { type: "string" } })),
+  rows: arrayOf(ref("GenericObject")),
+  rowCount: { type: "integer" },
+  total: { type: "integer" },
+  truncated: { type: "boolean" },
+  groupBy: nullableRef("GenericObject"),
+  aggregates: arrayOf(ref("GenericObject")),
+  groups: { type: "array", nullable: true, items: ref("GenericObject") },
+  totals: ref("GenericObject"),
+  projects: objectSchema({ inScope: { type: "integer" }, queried: { type: "integer" }, denied: { type: "integer", description: "Projects skipped because the caller cannot read the source there." } }),
+  generatedAt: dateString,
+});
+const reportScheduleInput = objectSchema({
+  frequency: { type: "string", enum: ["daily", "weekly", "monthly"] },
+  dayOfWeek: { type: "integer", minimum: 0, maximum: 6 },
+  dayOfMonth: { type: "integer", minimum: 1, maximum: 31 },
+  hour: { type: "integer", minimum: 0, maximum: 23 },
+  minute: { type: "integer", minimum: 0, maximum: 59 },
+  timezone: { type: "string" },
+  format: { type: "string", enum: ["pdf", "xlsx", "both"] },
+  recipients: objectSchema({ userIds: arrayOf(uuid), roles: arrayOf({ type: "string" }), emails: arrayOf({ type: "string" }) }),
+  enabled: { type: "boolean" },
+});
+const reportScheduleSchema = objectSchema({ id: uuid, reportId: uuid, frequency: { type: "string" }, dayOfWeek: { type: "integer" }, dayOfMonth: { type: "integer" }, hour: { type: "integer" }, minute: { type: "integer" }, timezone: { type: "string" }, format: { type: "string" }, recipients: ref("GenericObject"), enabled: { type: "boolean" }, nextRunAt: nullableDateString, lastRunAt: nullableDateString, lastStatus: { type: "string", nullable: true }, lastError: { type: "string", nullable: true }, createdBy: nullableUuid, createdAt: nullableDateString, updatedAt: nullableDateString });
+const reportRunSchema = objectSchema({ id: uuid, reportId: uuid, scheduleId: nullableUuid, status: { type: "string", enum: ["queued", "running", "succeeded", "failed"] }, trigger: { type: "string", enum: ["manual", "schedule"] }, format: { type: "string" }, rowCount: { type: "integer" }, truncated: { type: "boolean" }, hasPdf: { type: "boolean" }, hasXlsx: { type: "boolean" }, fileBase: { type: "string", nullable: true }, recipients: nullableRef("GenericObject"), delivery: nullableRef("GenericObject"), error: { type: "string", nullable: true }, requestedBy: nullableUuid, startedAt: nullableDateString, finishedAt: nullableDateString, createdAt: nullableDateString });
+const reportPermission = (action, transition = null) => modulePermission("report", action, transition);
+[
+  { method: "get", path: "/reports/sources", summary: "Report sources: the record types a report can be built on, their columns (with types) and defaults.", operationId: "listReportSources", parameters: [], permissions: reportPermission("read"), responseSchema: objectSchema({ sources: arrayOf(ref("GenericObject")) }) },
+  { method: "post", path: "/reports/preview", summary: "Run an unsaved definition as the caller. Projects where the caller cannot read the source's module are skipped and counted in `projects.denied`; party users see the rows the register would show them.", operationId: "previewReport", parameters: [], permissions: reportPermission("read"), requestBody: jsonBody(objectSchema({ ...reportDefinitionInput.properties, limit: { type: "integer", maximum: 1000 }, offset: { type: "integer" } }, ["source"]), "Definition."), responseSchema: reportResultSchema },
+  { method: "post", path: "/reports/export", summary: "Render an unsaved definition to XLSX (default) or PDF — the 'export this view' behind every register.", operationId: "exportReportDefinition", parameters: [], permissions: reportPermission("export"), requestBody: jsonBody(objectSchema({ ...reportDefinitionInput.properties, format: { type: "string", enum: ["pdf", "xlsx"] } }, ["source"]), "Definition."), responseSchema: { type: "string", format: "binary" } },
+  { method: "get", path: "/reports/runs/{runId}/download", summary: "Download a run's stored PDF or XLSX.", operationId: "downloadReportRun", parameters: [reportRunIdParam, queryParam("format", "pdf (default) or xlsx.", { type: "string", enum: ["pdf", "xlsx"] })], permissions: reportPermission("read"), responseSchema: { type: "string", format: "binary" } },
+  { method: "get", path: "/reports", summary: "Saved reports visible to the caller (own, org-shared, project-shared on projects they can open) plus the source catalogue.", operationId: "listReports", parameters: [queryParam("projectId", "Only reports scoped to this project.", uuid), queryParam("source", "Only reports on this source.", { type: "string" })], permissions: reportPermission("read"), responseSchema: objectSchema({ items: arrayOf(reportDefinitionSchema), sources: arrayOf(ref("GenericObject")) }) },
+  { method: "post", path: "/reports", summary: "Save a report definition.", operationId: "createReport", parameters: [], permissions: reportPermission("create"), requestBody: jsonBody(reportDefinitionInput, "Definition.", true), responseSchema: reportDefinitionSchema, status: 201 },
+  { method: "get", path: "/reports/{reportId}", summary: "One saved report.", operationId: "getReport", parameters: [reportIdParam], permissions: reportPermission("read"), responseSchema: reportDefinitionSchema },
+  { method: "put", path: "/reports/{reportId}", summary: "Update a saved report (owner or PM).", operationId: "updateReport", parameters: [reportIdParam], permissions: reportPermission("update"), requestBody: jsonBody(reportDefinitionInput, "Fields to change.", false), responseSchema: reportDefinitionSchema },
+  { method: "delete", path: "/reports/{reportId}", summary: "Delete a saved report (owner or PM); its schedules and runs go with it.", operationId: "deleteReport", parameters: [reportIdParam], permissions: reportPermission("delete"), responseSchema: objectSchema({ deleted: { type: "boolean" } }) },
+  { method: "post", path: "/reports/{reportId}/run", summary: "Run a saved report and return rows (paged).", operationId: "runReport", parameters: [reportIdParam], permissions: reportPermission("read"), requestBody: jsonBody(objectSchema({ limit: { type: "integer", maximum: 1000 }, offset: { type: "integer" } }), "Paging.", false), responseSchema: objectSchema({ ...reportResultSchema.properties, report: reportDefinitionSchema }) },
+  { method: "get", path: "/reports/{reportId}/export.pdf", summary: "Saved report as PDF.", operationId: "exportReportPdf", parameters: [reportIdParam], permissions: reportPermission("export"), responseSchema: { type: "string", format: "binary" } },
+  { method: "get", path: "/reports/{reportId}/export.xlsx", summary: "Saved report as XLSX (Data, Summary and About sheets).", operationId: "exportReportXlsx", parameters: [reportIdParam], permissions: reportPermission("export"), responseSchema: { type: "string", format: "binary" } },
+  { method: "get", path: "/reports/{reportId}/runs", summary: "Run history (files are kept for the last 30 runs).", operationId: "listReportRuns", parameters: [reportIdParam, queryParam("limit", "Max runs (default 20).", { type: "integer" })], permissions: reportPermission("read"), responseSchema: objectSchema({ items: arrayOf(reportRunSchema) }) },
+  { method: "post", path: "/reports/{reportId}/runs", summary: "Render now: stores the files on a run and, with `deliver`, sends them to the recipients (defaults to the caller).", operationId: "createReportRun", parameters: [reportIdParam], permissions: reportPermission("export"), requestBody: jsonBody(objectSchema({ format: { type: "string", enum: ["pdf", "xlsx", "both"] }, deliver: { type: "boolean" }, recipients: objectSchema({ userIds: arrayOf(uuid), roles: arrayOf({ type: "string" }), emails: arrayOf({ type: "string" }) }) }), "Options.", false), responseSchema: reportRunSchema, status: 201 },
+  { method: "get", path: "/reports/{reportId}/schedules", summary: "Schedules on a report.", operationId: "listReportSchedules", parameters: [reportIdParam], permissions: reportPermission("read"), responseSchema: objectSchema({ items: arrayOf(reportScheduleSchema) }) },
+  { method: "post", path: "/reports/{reportId}/schedules", summary: "Schedule the report (daily / weekly / monthly at a local time); runs render as the schedule's owner and deliver in-app + email to users and roles, email to external addresses.", operationId: "createReportSchedule", parameters: [reportIdParam], permissions: reportPermission("update", "report.schedule"), requestBody: jsonBody(reportScheduleInput, "Schedule.", false), responseSchema: reportScheduleSchema, status: 201 },
+  { method: "patch", path: "/reports/{reportId}/schedules/{scheduleId}", summary: "Change or pause a schedule.", operationId: "updateReportSchedule", parameters: [reportIdParam, reportScheduleIdParam], permissions: reportPermission("update", "report.schedule"), requestBody: jsonBody(reportScheduleInput, "Fields to change.", false), responseSchema: reportScheduleSchema },
+  { method: "delete", path: "/reports/{reportId}/schedules/{scheduleId}", summary: "Remove a schedule.", operationId: "deleteReportSchedule", parameters: [reportIdParam, reportScheduleIdParam], permissions: reportPermission("update", "report.schedule"), responseSchema: objectSchema({ deleted: { type: "boolean" } }) },
+  { method: "get", path: "/portfolio", summary: "Portfolio: one row per project the caller can open, read from the latest health snapshot (health score + dimensions, SPI / CPI / EV / PV / AC / EAC, cash next 90 days, open and overdue items), with a summary and a `stale` flag when a snapshot is older than two hours.", operationId: "getPortfolio", parameters: [], permissions: modulePermission("portfolio", "read"), responseSchema: objectSchema({ generatedAt: dateString, computedAt: nullableDateString, refreshing: { type: "boolean" }, summary: ref("GenericObject"), rows: arrayOf(ref("GenericObject")) }) },
+  { method: "post", path: "/portfolio/refresh", summary: "Queue a snapshot refresh for the organisation (returns the running job when one is already queued).", operationId: "refreshPortfolio", parameters: [], permissions: modulePermission("portfolio", "read"), responseSchema: objectSchema({ jobId: uuid, status: { type: "string" }, queued: { type: "boolean" } }), status: 202 },
+  { method: "get", path: "/portfolio/export.xlsx", summary: "Portfolio table as XLSX.", operationId: "exportPortfolioXlsx", parameters: [], permissions: modulePermission("portfolio", "export"), responseSchema: { type: "string", format: "binary" } },
+].forEach((route) => addGenericRoute({ tag: "Reports", ...route }));
+
 // ─── Daily log (OCTA-FLD-DAILY-022) ────────────────────────────────────────
 const dailyLogDateParam = pathParam("date", "Calendar day, YYYY-MM-DD.");
 const dailyLogSectionParam = pathParam("section", "manpower, equipment, deliveries, visitors, delays or notes.");

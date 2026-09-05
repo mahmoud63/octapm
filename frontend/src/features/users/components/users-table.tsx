@@ -133,6 +133,7 @@ export function UsersTable({
     >
       <DataTableToolbar
         table={table}
+        exportName='users'
         searchPlaceholder='Search name, email, or phone...'
         filters={[
           {

@@ -28,6 +28,12 @@ const registerAllHandlers = () => {
   registerJobHandler(JOB_TYPES.DAILY_LOG_DISTRIBUTE, (context) =>
     require("../../services/daily-log.service").runDistributeJob(context),
   );
+  registerJobHandler(JOB_TYPES.REPORT_RENDER, (context) =>
+    require("../../services/report-builder.service").runReportRenderJob(context),
+  );
+  registerJobHandler(JOB_TYPES.PORTFOLIO_REFRESH, (context) =>
+    require("../../services/portfolio.service").runPortfolioRefreshJob(context),
+  );
 };
 
 module.exports = { registerAllHandlers };

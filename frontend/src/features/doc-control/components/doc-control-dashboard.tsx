@@ -1264,6 +1264,7 @@ export function DocControlDashboard({
           <WorkflowRecordList
             projectId={projectId}
             recordType='rfi'
+            exportName='rfi'
             rows={rfis?.rows}
             emptyText='No RFI records'
             getRef={(row) => row.ref}
@@ -1618,6 +1619,7 @@ export function DocControlDashboard({
             <WorkflowRecordList
               projectId={projectId}
               recordType='submittal'
+              exportName='submittal'
               rows={submittals?.rows}
               emptyText='No submittals'
               getRef={(row) => row.ref}
@@ -1862,6 +1864,7 @@ export function DocControlDashboard({
                 <WorkflowRecordList
                   projectId={projectId}
                   recordType='drawing'
+                  exportName='drawing'
                   rows={drawings?.rows}
                   emptyText='No drawing records'
                   getRef={(row) => row.ref}
@@ -1907,6 +1910,7 @@ export function DocControlDashboard({
           <WorkflowRecordList
             projectId={projectId}
             recordType='transmittal'
+            exportName='transmittal'
             rows={transmittals?.rows}
             emptyText='No transmittals'
             getRef={(row) => row.ref}
@@ -1946,6 +1950,7 @@ export function DocControlDashboard({
           <WorkflowRecordList
             projectId={projectId}
             recordType='correspondence'
+            exportName='correspondence'
             rows={correspondence?.rows}
             emptyText='No correspondence records'
             getRef={(row) => row.ref}

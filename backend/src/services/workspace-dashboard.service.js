@@ -423,6 +423,9 @@ async function getWorkspaceDashboard({
   userId,
   role,
   isCompanyAdmin = false,
+  // Portfolio snapshots (OCTA-RPT-BUILDER-023) need every project's health,
+  // not just the six most at risk.
+  allProjects = false,
 }) {
   const projects = await prisma.project.findMany({
     where: {
@@ -1073,6 +1076,16 @@ async function getWorkspaceDashboard({
             ?.label || weakestDimension[0],
         score: weakestDimension[1],
       },
+      spi: spi === null || spi === undefined ? null : Number(spi),
+      cpi: cpi === null || cpi === undefined ? null : Number(cpi),
+      ev: toNumber(evReport.ev),
+      pv: toNumber(evReport.pv),
+      ac: toNumber(evReport.ac),
+      eac: toNumber(evReport.eac),
+      bac: toNumber(evReport.totalBudget),
+      criticalActivities: projectActivities.filter(
+        (activity) => activity.isCritical && !activity.isMilestone,
+      ).length,
       delayedActivities: toNumber(delayedByProject.get(project.id)),
       workflowActions,
       riskMitigations: toNumber(riskActionsByProject.get(project.id)),
@@ -1903,7 +1916,7 @@ async function getWorkspaceDashboard({
     },
     healthDimensions,
     workflowQueues,
-    projectHealth: atRiskProjects,
+    projectHealth: allProjects ? projectHealth : atRiskProjects,
     emptyState: null,
   };
 }

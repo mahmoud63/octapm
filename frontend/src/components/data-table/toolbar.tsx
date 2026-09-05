@@ -1,5 +1,6 @@
-import { Cross2Icon } from '@radix-ui/react-icons'
+import { Cross2Icon, DownloadIcon } from '@radix-ui/react-icons'
 import { type Table } from '@tanstack/react-table'
+import { csvFileName, downloadCsv } from '@/lib/export-csv'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { DataTableFacetedFilter } from './faceted-filter'
@@ -18,6 +19,31 @@ type DataTableToolbarProps<TData> = {
       icon?: React.ComponentType<{ className?: string }>
     }[]
   }[]
+  /** File name base for "Export view"; omit to hide the button. */
+  exportName?: string
+}
+
+/** Downloads the rows the table currently shows (filters applied, visible columns) as CSV. */
+export function exportTableView<TData>(table: Table<TData>, name: string) {
+  const columns = table
+    .getVisibleLeafColumns()
+    .filter((column) => column.id !== 'select' && column.id !== 'actions')
+  const rows = table.getFilteredRowModel().rows
+  downloadCsv(
+    csvFileName(name),
+    columns.map((column) => ({
+      key: column.id,
+      label:
+        typeof column.columnDef.header === 'string'
+          ? column.columnDef.header
+          : column.id,
+    })),
+    rows.map((row) =>
+      Object.fromEntries(
+        columns.map((column) => [column.id, row.getValue(column.id)])
+      )
+    )
+  )
 }
 
 export function DataTableToolbar<TData>({
@@ -25,6 +51,7 @@ export function DataTableToolbar<TData>({
   searchPlaceholder = 'Filter...',
   searchKey,
   filters = [],
+  exportName,
 }: DataTableToolbarProps<TData>) {
   const isFiltered =
     table.getState().columnFilters.length > 0 || table.getState().globalFilter
@@ -79,7 +106,20 @@ export function DataTableToolbar<TData>({
           </Button>
         )}
       </div>
-      <DataTableViewOptions table={table} />
+      <div className='flex items-center gap-2'>
+        {exportName && (
+          <Button
+            variant='outline'
+            size='sm'
+            className='h-8'
+            onClick={() => exportTableView(table, exportName)}
+            data-testid='uat-export-view'
+          >
+            <DownloadIcon className='me-1 h-4 w-4' /> Export view
+          </Button>
+        )}
+        <DataTableViewOptions table={table} />
+      </div>
     </div>
   )
 }

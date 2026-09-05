@@ -25,10 +25,13 @@ const JOB_MODULE_BY_TYPE = Object.freeze({
   [jobService.JOB_TYPES.SCHEDULE_GENERATE]: "schedule",
   [jobService.JOB_TYPES.SCHEDULE_IMPORT]: "schedule",
   [jobService.JOB_TYPES.DOCUMENT_EXTRACT]: "document_control",
-  [jobService.JOB_TYPES.REPORT_RENDER]: "schedule",
+  [jobService.JOB_TYPES.REPORT_RENDER]: "report",
   [jobService.JOB_TYPES.NOTIFICATION_DELIVER]: "user_management",
   [jobService.JOB_TYPES.PHOTO_THUMBNAIL]: "document_control",
   [jobService.JOB_TYPES.DRAWING_SET_PROCESS]: "document_control",
+  [jobService.JOB_TYPES.DAILY_LOG_WEATHER]: "progress",
+  [jobService.JOB_TYPES.DAILY_LOG_DISTRIBUTE]: "progress",
+  [jobService.JOB_TYPES.PORTFOLIO_REFRESH]: "portfolio",
 });
 
 const assertCanManageJob = (req, job) => {

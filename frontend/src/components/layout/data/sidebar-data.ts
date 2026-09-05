@@ -1,7 +1,9 @@
 import {
   Bell,
   Building2,
+  FileSpreadsheet,
   FolderKanban,
+  Gauge,
   HelpCircle,
   LayoutDashboard,
   ListTodo,
@@ -40,6 +42,16 @@ export const sidebarData: SidebarData = {
           title: 'Projects',
           url: '/projects',
           icon: FolderKanban,
+        },
+        {
+          title: 'Portfolio',
+          url: '/portfolio',
+          icon: Gauge,
+        },
+        {
+          title: 'Reports',
+          url: '/reports',
+          icon: FileSpreadsheet,
         },
         {
           title: 'Tasks',

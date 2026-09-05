@@ -16,6 +16,8 @@ const taskRoutes = require("./routes/tasks");
 const searchRoutes = require("./routes/search");
 const permissionRoutes = require("./routes/permissions");
 const companyWorkspaceRoutes = require("./routes/company-workspace");
+const reportBuilderRoutes = require("./routes/report-builder");
+const portfolioRoutes = require("./routes/portfolio");
 const {
   requireCloudFrontOriginSecret,
 } = require("./middleware/cloudfront-origin");
@@ -95,6 +97,8 @@ const createApp = () => {
   app.use("/api/v1/search", searchRoutes);
   app.use("/api/v1/permissions", permissionRoutes);
   app.use("/api/v1/company", companyWorkspaceRoutes);
+  app.use("/api/v1/reports", reportBuilderRoutes);
+  app.use("/api/v1/portfolio", portfolioRoutes);
 
   app.use(notFoundHandler);
   app.use(errorHandler);

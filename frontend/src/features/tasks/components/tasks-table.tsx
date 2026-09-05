@@ -118,6 +118,7 @@ export function TasksTable({ data }: DataTableProps) {
     >
       <DataTableToolbar
         table={table}
+        exportName='tasks'
         searchPlaceholder='Filter by title or ID...'
         filters={[
           {
