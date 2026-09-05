@@ -47,7 +47,9 @@ import { Route as AuthenticatedCompanyEquipmentRouteImport } from './routes/_aut
 import { Route as AuthenticatedCompanyDirectoryRouteImport } from './routes/_authenticated/company/directory'
 import { Route as AuthenticatedCompanyCostCodesRouteImport } from './routes/_authenticated/company/cost-codes'
 import { Route as AuthenticatedBillingCheckoutRouteImport } from './routes/_authenticated/billing/checkout'
-import { Route as AuthenticatedProjectsProjectIdBoqRouteImport } from './routes/_authenticated/projects/$projectId/boq'
+import { Route as AuthenticatedProjectsProjectIdIndexRouteImport } from './routes/_authenticated/projects/$projectId/index'
+import { Route as AuthenticatedProjectsProjectIdModuleIndexRouteImport } from './routes/_authenticated/projects/$projectId/$module/index'
+import { Route as AuthenticatedProjectsProjectIdModuleChildRouteImport } from './routes/_authenticated/projects/$projectId/$module/$child'
 
 const LandingRoute = LandingRouteImport.update({
   id: '/landing',
@@ -260,10 +262,22 @@ const AuthenticatedBillingCheckoutRoute =
     path: '/billing/checkout',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
-const AuthenticatedProjectsProjectIdBoqRoute =
-  AuthenticatedProjectsProjectIdBoqRouteImport.update({
-    id: '/boq',
-    path: '/boq',
+const AuthenticatedProjectsProjectIdIndexRoute =
+  AuthenticatedProjectsProjectIdIndexRouteImport.update({
+    id: '/',
+    path: '/',
+    getParentRoute: () => AuthenticatedProjectsProjectIdRoute,
+  } as any)
+const AuthenticatedProjectsProjectIdModuleIndexRoute =
+  AuthenticatedProjectsProjectIdModuleIndexRouteImport.update({
+    id: '/$module/',
+    path: '/$module/',
+    getParentRoute: () => AuthenticatedProjectsProjectIdRoute,
+  } as any)
+const AuthenticatedProjectsProjectIdModuleChildRoute =
+  AuthenticatedProjectsProjectIdModuleChildRouteImport.update({
+    id: '/$module/$child',
+    path: '/$module/$child',
     getParentRoute: () => AuthenticatedProjectsProjectIdRoute,
   } as any)
 
@@ -305,7 +319,9 @@ export interface FileRoutesByFullPath {
   '/settings/': typeof AuthenticatedSettingsIndexRoute
   '/tasks/': typeof AuthenticatedTasksIndexRoute
   '/users/': typeof AuthenticatedUsersIndexRoute
-  '/projects/$projectId/boq': typeof AuthenticatedProjectsProjectIdBoqRoute
+  '/projects/$projectId/': typeof AuthenticatedProjectsProjectIdIndexRoute
+  '/projects/$projectId/$module/$child': typeof AuthenticatedProjectsProjectIdModuleChildRoute
+  '/projects/$projectId/$module/': typeof AuthenticatedProjectsProjectIdModuleIndexRoute
 }
 export interface FileRoutesByTo {
   '/landing': typeof LandingRoute
@@ -329,7 +345,6 @@ export interface FileRoutesByTo {
   '/company/templates': typeof AuthenticatedCompanyTemplatesRoute
   '/company/vendors': typeof AuthenticatedCompanyVendorsRoute
   '/errors/$error': typeof AuthenticatedErrorsErrorRoute
-  '/projects/$projectId': typeof AuthenticatedProjectsProjectIdRouteWithChildren
   '/settings/account': typeof AuthenticatedSettingsAccountRoute
   '/settings/appearance': typeof AuthenticatedSettingsAppearanceRoute
   '/settings/billing': typeof AuthenticatedSettingsBillingRoute
@@ -343,7 +358,9 @@ export interface FileRoutesByTo {
   '/settings': typeof AuthenticatedSettingsIndexRoute
   '/tasks': typeof AuthenticatedTasksIndexRoute
   '/users': typeof AuthenticatedUsersIndexRoute
-  '/projects/$projectId/boq': typeof AuthenticatedProjectsProjectIdBoqRoute
+  '/projects/$projectId': typeof AuthenticatedProjectsProjectIdIndexRoute
+  '/projects/$projectId/$module/$child': typeof AuthenticatedProjectsProjectIdModuleChildRoute
+  '/projects/$projectId/$module': typeof AuthenticatedProjectsProjectIdModuleIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -385,7 +402,9 @@ export interface FileRoutesById {
   '/_authenticated/settings/': typeof AuthenticatedSettingsIndexRoute
   '/_authenticated/tasks/': typeof AuthenticatedTasksIndexRoute
   '/_authenticated/users/': typeof AuthenticatedUsersIndexRoute
-  '/_authenticated/projects/$projectId/boq': typeof AuthenticatedProjectsProjectIdBoqRoute
+  '/_authenticated/projects/$projectId/': typeof AuthenticatedProjectsProjectIdIndexRoute
+  '/_authenticated/projects/$projectId/$module/$child': typeof AuthenticatedProjectsProjectIdModuleChildRoute
+  '/_authenticated/projects/$projectId/$module/': typeof AuthenticatedProjectsProjectIdModuleIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -427,7 +446,9 @@ export interface FileRouteTypes {
     | '/settings/'
     | '/tasks/'
     | '/users/'
-    | '/projects/$projectId/boq'
+    | '/projects/$projectId/'
+    | '/projects/$projectId/$module/$child'
+    | '/projects/$projectId/$module/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/landing'
@@ -451,7 +472,6 @@ export interface FileRouteTypes {
     | '/company/templates'
     | '/company/vendors'
     | '/errors/$error'
-    | '/projects/$projectId'
     | '/settings/account'
     | '/settings/appearance'
     | '/settings/billing'
@@ -465,7 +485,9 @@ export interface FileRouteTypes {
     | '/settings'
     | '/tasks'
     | '/users'
-    | '/projects/$projectId/boq'
+    | '/projects/$projectId'
+    | '/projects/$projectId/$module/$child'
+    | '/projects/$projectId/$module'
   id:
     | '__root__'
     | '/_authenticated'
@@ -506,7 +528,9 @@ export interface FileRouteTypes {
     | '/_authenticated/settings/'
     | '/_authenticated/tasks/'
     | '/_authenticated/users/'
-    | '/_authenticated/projects/$projectId/boq'
+    | '/_authenticated/projects/$projectId/'
+    | '/_authenticated/projects/$projectId/$module/$child'
+    | '/_authenticated/projects/$projectId/$module/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -793,11 +817,25 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedBillingCheckoutRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
-    '/_authenticated/projects/$projectId/boq': {
-      id: '/_authenticated/projects/$projectId/boq'
-      path: '/boq'
-      fullPath: '/projects/$projectId/boq'
-      preLoaderRoute: typeof AuthenticatedProjectsProjectIdBoqRouteImport
+    '/_authenticated/projects/$projectId/': {
+      id: '/_authenticated/projects/$projectId/'
+      path: '/'
+      fullPath: '/projects/$projectId/'
+      preLoaderRoute: typeof AuthenticatedProjectsProjectIdIndexRouteImport
+      parentRoute: typeof AuthenticatedProjectsProjectIdRoute
+    }
+    '/_authenticated/projects/$projectId/$module/': {
+      id: '/_authenticated/projects/$projectId/$module/'
+      path: '/$module'
+      fullPath: '/projects/$projectId/$module/'
+      preLoaderRoute: typeof AuthenticatedProjectsProjectIdModuleIndexRouteImport
+      parentRoute: typeof AuthenticatedProjectsProjectIdRoute
+    }
+    '/_authenticated/projects/$projectId/$module/$child': {
+      id: '/_authenticated/projects/$projectId/$module/$child'
+      path: '/$module/$child'
+      fullPath: '/projects/$projectId/$module/$child'
+      preLoaderRoute: typeof AuthenticatedProjectsProjectIdModuleChildRouteImport
       parentRoute: typeof AuthenticatedProjectsProjectIdRoute
     }
   }
@@ -858,13 +896,19 @@ const AuthenticatedSettingsRouteRouteWithChildren =
   )
 
 interface AuthenticatedProjectsProjectIdRouteChildren {
-  AuthenticatedProjectsProjectIdBoqRoute: typeof AuthenticatedProjectsProjectIdBoqRoute
+  AuthenticatedProjectsProjectIdIndexRoute: typeof AuthenticatedProjectsProjectIdIndexRoute
+  AuthenticatedProjectsProjectIdModuleChildRoute: typeof AuthenticatedProjectsProjectIdModuleChildRoute
+  AuthenticatedProjectsProjectIdModuleIndexRoute: typeof AuthenticatedProjectsProjectIdModuleIndexRoute
 }
 
 const AuthenticatedProjectsProjectIdRouteChildren: AuthenticatedProjectsProjectIdRouteChildren =
   {
-    AuthenticatedProjectsProjectIdBoqRoute:
-      AuthenticatedProjectsProjectIdBoqRoute,
+    AuthenticatedProjectsProjectIdIndexRoute:
+      AuthenticatedProjectsProjectIdIndexRoute,
+    AuthenticatedProjectsProjectIdModuleChildRoute:
+      AuthenticatedProjectsProjectIdModuleChildRoute,
+    AuthenticatedProjectsProjectIdModuleIndexRoute:
+      AuthenticatedProjectsProjectIdModuleIndexRoute,
   }
 
 const AuthenticatedProjectsProjectIdRouteWithChildren =

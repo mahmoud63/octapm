@@ -34,11 +34,11 @@ const assertions = [
   },
   {
     file: 'src/features/projects/components/project-detail.tsx',
-    checks: [
-      'MeetingsDashboard',
-      "| 'meetings'",
-      "{ key: 'meetings', label: 'Meetings' }",
-    ],
+    checks: ['MeetingsDashboard', "{ key: 'meetings', label: 'Meetings' }"],
+  },
+  {
+    file: 'src/features/projects/lib/project-modules.ts',
+    checks: ["| 'meetings'", "meetings: 'meetings'"],
   },
   {
     file: '../shared/permissions.json',

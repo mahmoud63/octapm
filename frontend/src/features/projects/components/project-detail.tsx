@@ -1,100 +1,119 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { lazy, Suspense, useCallback, useMemo } from 'react'
 import { AxiosError } from 'axios'
-import { Link } from '@tanstack/react-router'
-import {
-  ProjectPermissionProvider,
-  type PermissionMatrix,
-  type PermissionModule,
-} from '@/lib/permissions'
+import { Link, useNavigate } from '@tanstack/react-router'
+import { ProjectPermissionProvider } from '@/lib/permissions'
 import { useProjectRealtime } from '@/hooks/use-realtime'
 import { Main } from '@/components/layout/main'
-import { ActivitiesList } from '@/features/activities/components/activities-list'
-import { PhotoGallery } from '@/features/attachments/components/photo-gallery'
-import { BoqPage } from '@/features/boq/components/boq-page'
-import { CommercialDashboard } from '@/features/commercial/components/commercial-dashboard'
-import { CostDashboard } from '@/features/cost/components/cost-dashboard'
-import { DocControlDashboard } from '@/features/doc-control/components/doc-control-dashboard'
-import { EquipmentSection } from '@/features/equipment/components/equipment-section'
-import { LocationsPanel } from '@/features/locations/components/locations-panel'
-import { MeetingsDashboard } from '@/features/meetings/components/meetings-dashboard'
-import { ProjectTeamPanel } from '@/features/permissions/components/project-team-panel'
 import { useMyProjectPermissions } from '@/features/permissions/hooks/use-permissions'
 import {
   useProject,
   useProjectParties,
   useProjectSetupReadiness,
 } from '@/features/projects/hooks/use-projects'
-import { QualityDashboard } from '@/features/quality/components/quality-dashboard'
-import { EvReport } from '@/features/reports/components/ev-report'
-import { WeeklyProgressReport } from '@/features/reports/components/weekly-progress-report'
-import { ScheduleDashboard } from '@/features/schedule/components/schedule-dashboard'
-import { ScheduleUploadZone } from '@/features/schedule/components/schedule-upload-zone'
 import { useProjectSchedule } from '@/features/schedule/hooks/use-schedule'
-import { SiteReportingDashboard } from '@/features/site-reporting/components/site-reporting-dashboard'
 import type { ProjectSetupTarget } from '../data/schema'
-import { HealthDashboard } from './health-dashboard'
+import {
+  DEFAULT_CHILD,
+  DEFAULT_MODULE,
+  isModuleVisible,
+  isModuleWithChildren,
+  moduleFromSlug,
+  slugForModule,
+  type ModuleKey,
+  type ModuleWithChildren,
+} from '../lib/project-modules'
 import { ProjectSetupWizard } from './project-setup-wizard'
 import { ProjectStatusBadge } from './project-status-badge'
 
-type ModuleKey =
-  | 'schedule'
-  | 'siteReporting'
-  | 'cost'
-  | 'commercial'
-  | 'quality'
-  | 'docControl'
-  | 'meetings'
-  | 'activities'
-  | 'equipment'
-  | 'locations'
-  | 'photos'
-  | 'team'
-  | 'reports'
-  | 'overview'
-  | 'boq'
+// Every module is its own chunk (OCTA-FE-ROUTES-008): the workspace shell
+// stays small and a module's code downloads the first time it is opened.
 
-/**
- * Which permission modules back each workspace module. A workspace module is
- * hidden when the resolved permission matrix marks every backing module as
- * not visible (level `none`). Modules with no entry are always shown.
- */
-const MODULE_PERMISSIONS: Partial<Record<ModuleKey, PermissionModule[]>> = {
-  schedule: ['schedule'],
-  siteReporting: ['progress'],
-  cost: ['cost'],
-  commercial: ['change_order', 'ipc', 'eot'],
-  quality: ['ncr', 'safety'],
-  docControl: ['document_control', 'rfi', 'submittal'],
-  meetings: ['meeting'],
-  boq: ['boq'],
-  activities: ['schedule'],
-  equipment: ['schedule', 'cost'],
-  locations: ['location'],
-  photos: ['document_control'],
-  reports: ['schedule'],
-}
-
-const isModuleVisible = (
-  matrix: PermissionMatrix | null | undefined,
-  key: ModuleKey
-) => {
-  const backing = MODULE_PERMISSIONS[key]
-  if (!matrix || !backing?.length) return true
-  return backing.some((module) => {
-    const entry = matrix.modules[module]
-    return entry ? entry.visible : true
-  })
-}
-
-type ModuleChildState = {
-  schedule: string
-  cost: string
-  commercial: string
-  quality: string
-  docControl: string
-}
-
-type ModuleWithChildren = keyof ModuleChildState
+const ScheduleDashboard = lazy(() =>
+  import('@/features/schedule/components/schedule-dashboard').then((m) => ({
+    default: m.ScheduleDashboard,
+  }))
+)
+const ScheduleUploadZone = lazy(() =>
+  import('@/features/schedule/components/schedule-upload-zone').then((m) => ({
+    default: m.ScheduleUploadZone,
+  }))
+)
+const BoqPage = lazy(() =>
+  import('@/features/boq/components/boq-page').then((m) => ({
+    default: m.BoqPage,
+  }))
+)
+const SiteReportingDashboard = lazy(() =>
+  import('@/features/site-reporting/components/site-reporting-dashboard').then(
+    (m) => ({ default: m.SiteReportingDashboard })
+  )
+)
+const ActivitiesList = lazy(() =>
+  import('@/features/activities/components/activities-list').then((m) => ({
+    default: m.ActivitiesList,
+  }))
+)
+const CostDashboard = lazy(() =>
+  import('@/features/cost/components/cost-dashboard').then((m) => ({
+    default: m.CostDashboard,
+  }))
+)
+const CommercialDashboard = lazy(() =>
+  import('@/features/commercial/components/commercial-dashboard').then((m) => ({
+    default: m.CommercialDashboard,
+  }))
+)
+const QualityDashboard = lazy(() =>
+  import('@/features/quality/components/quality-dashboard').then((m) => ({
+    default: m.QualityDashboard,
+  }))
+)
+const DocControlDashboard = lazy(() =>
+  import('@/features/doc-control/components/doc-control-dashboard').then(
+    (m) => ({ default: m.DocControlDashboard })
+  )
+)
+const MeetingsDashboard = lazy(() =>
+  import('@/features/meetings/components/meetings-dashboard').then((m) => ({
+    default: m.MeetingsDashboard,
+  }))
+)
+const EquipmentSection = lazy(() =>
+  import('@/features/equipment/components/equipment-section').then((m) => ({
+    default: m.EquipmentSection,
+  }))
+)
+const LocationsPanel = lazy(() =>
+  import('@/features/locations/components/locations-panel').then((m) => ({
+    default: m.LocationsPanel,
+  }))
+)
+const ProjectTeamPanel = lazy(() =>
+  import('@/features/permissions/components/project-team-panel').then((m) => ({
+    default: m.ProjectTeamPanel,
+  }))
+)
+const PhotoGallery = lazy(() =>
+  import('@/features/attachments/components/photo-gallery').then((m) => ({
+    default: m.PhotoGallery,
+  }))
+)
+const WeeklyProgressReport = lazy(() =>
+  import('@/features/reports/components/weekly-progress-report').then((m) => ({
+    default: m.WeeklyProgressReport,
+  }))
+)
+const EvReport = lazy(() =>
+  import('@/features/reports/components/ev-report').then((m) => ({
+    default: m.EvReport,
+  }))
+)
+const HealthDashboard = lazy(() =>
+  import('./health-dashboard').then((m) => ({ default: m.HealthDashboard }))
+)
+const ProjectOverview = lazy(() =>
+  import('./project-overview').then((m) => ({ default: m.ProjectOverview }))
+)
 
 type MenuChild = {
   key: string
@@ -105,20 +124,6 @@ type MenuItem = {
   key: ModuleKey
   label: string
   children?: MenuChild[]
-}
-
-const DEFAULT_CHILD_STATE: ModuleChildState = {
-  schedule: 'gantt',
-  cost: 'overview',
-  commercial: 'change-orders',
-  quality: 'ncr',
-  docControl: 'rfi',
-}
-
-function isModuleWithChildren(module: ModuleKey): module is ModuleWithChildren {
-  return ['schedule', 'cost', 'commercial', 'quality', 'docControl'].includes(
-    module
-  )
 }
 
 function formatDate(value: string | null) {
@@ -139,78 +144,29 @@ function formatDuration(
   return `${duration} ${durationUnit || 'months'}`
 }
 
-function formatPercent(value: number | null | undefined) {
-  if (value == null) return '-'
-  return `${Number(value).toLocaleString()}%`
-}
-
-function formatNumber(value: number | null | undefined, suffix = '') {
-  if (value == null) return '-'
-  return `${Number(value).toLocaleString()}${suffix}`
-}
-
-const contractTypeLabels: Record<string, string> = {
-  lump_sum: 'Lump Sum',
-  unit_rate: 'Unit Rate',
-  remeasurement: 'Remeasurement',
-  cost_plus: 'Cost Plus',
-  design_build: 'Design-Build',
-  epc: 'EPC',
-  other: 'Other',
-}
-
-const projectCalendarLabels: Record<string, string> = {
-  five_day: '5-Day',
-  six_day: '6-Day',
-  seven_day: '7-Day',
-  custom: 'Custom',
-}
-
-function formatLabel(
-  labels: Record<string, string>,
-  value: string | null | undefined
-) {
-  if (!value) return '-'
-  return labels[value] ?? value
-}
-
-function DetailItem({
-  label,
-  value,
-}: {
-  label: string
-  value: string | number | null | undefined
-}) {
+function ModuleLoading() {
   return (
-    <div>
-      <p className='text-xs text-muted-foreground'>{label}</p>
-      <p className='mt-1 text-sm font-medium text-foreground'>{value ?? '-'}</p>
-    </div>
-  )
-}
-
-function PartyDetailItem({
-  label,
-  value,
-}: {
-  label: string
-  value: string | null | undefined
-}) {
-  return (
-    <div>
-      <p className='text-xs text-muted-foreground'>{label}</p>
-      <p className='mt-1 text-sm font-medium text-foreground'>{value || '-'}</p>
+    <div className='py-8 text-center text-sm text-muted-foreground'>
+      Loading module…
     </div>
   )
 }
 
 export function ProjectDetail({
   projectId,
+  module: moduleSlug,
+  child: childSlug,
   initialTarget,
 }: {
   projectId: string
+  /** URL slug or legacy key of the open module; defaults to the schedule. */
+  module?: string
+  /** Sub-tab slug for modules that have one (gantt, ncr, rfi, …). */
+  child?: string
+  /** Deep-link extras (record id, status filter) carried in the search string. */
   initialTarget?: ProjectSetupTarget
 }) {
+  const navigate = useNavigate()
   const {
     data: project,
     isLoading,
@@ -230,9 +186,6 @@ export function ProjectDetail({
   const { data: permissionMatrix } = useMyProjectPermissions(projectId, {
     enabled: canLoadProjectModules,
   })
-  const [activeModule, setActiveModule] = useState<ModuleKey>('schedule')
-  const [childState, setChildState] =
-    useState<ModuleChildState>(DEFAULT_CHILD_STATE)
   const projectEffectiveRole =
     project?.projectAccess?.effectiveRole ??
     project?.effectiveRole ??
@@ -335,64 +288,72 @@ export function ProjectDetail({
     scheduleMilestonesCount,
   ])
 
+  // The URL is the state: module and sub-tab come from the route params.
+  const requestedModule = moduleFromSlug(moduleSlug) ?? DEFAULT_MODULE
   // If a template hides the module currently open, show the first visible one.
   const visibleModule: ModuleKey =
-    menuItems.some((item) => item.key === activeModule) || !menuItems.length
-      ? activeModule
+    menuItems.some((item) => item.key === requestedModule) || !menuItems.length
+      ? requestedModule
       : menuItems[0].key
 
-  const setModuleChild = useCallback(
-    (module: ModuleWithChildren, child: string) => {
-      setChildState((prev) => ({ ...prev, [module]: child }))
+  const childFor = useCallback(
+    (module: ModuleWithChildren) => {
+      const item = menuItems.find((entry) => entry.key === module)
+      const allowed = new Set(item?.children?.map((entry) => entry.key) ?? [])
+      const requested =
+        module === visibleModule && childSlug && allowed.has(childSlug)
+          ? childSlug
+          : null
+      return requested ?? DEFAULT_CHILD[module]
     },
-    []
+    [childSlug, menuItems, visibleModule]
   )
 
-  useEffect(() => {
-    if (!hasWbs && childState.schedule === 'wbs') {
-      setChildState((prev) => ({ ...prev, schedule: 'gantt' }))
-    }
-  }, [hasWbs, childState.schedule])
+  const childState: Record<ModuleWithChildren, string> = {
+    schedule: childFor('schedule'),
+    cost: childFor('cost'),
+    commercial: childFor('commercial'),
+    quality: childFor('quality'),
+    docControl: childFor('docControl'),
+  }
 
-  useEffect(() => {
-    if (!initialTarget?.module) return
+  const goTo = useCallback(
+    (module: ModuleKey, child?: string | null) => {
+      if (child) {
+        navigate({
+          to: '/projects/$projectId/$module/$child',
+          params: { projectId, module: slugForModule(module), child },
+        })
+      } else {
+        navigate({
+          to: '/projects/$projectId/$module',
+          params: { projectId, module: slugForModule(module) },
+        })
+      }
+    },
+    [navigate, projectId]
+  )
 
-    const module = initialTarget.module as ModuleKey
-    const item = menuItems.find((menuItem) => menuItem.key === module)
-    if (!item) return
-
-    setActiveModule(module)
-
-    if (!initialTarget.child || !isModuleWithChildren(module)) return
-
-    const allowedChildren = new Set(item.children?.map((child) => child.key))
-    if (allowedChildren.has(initialTarget.child)) {
-      setModuleChild(module, initialTarget.child)
-    }
-  }, [initialTarget?.module, initialTarget?.child, menuItems, setModuleChild])
+  const setModuleChild = useCallback(
+    (module: ModuleWithChildren, child: string) => goTo(module, child),
+    [goTo]
+  )
 
   const handleModuleSelect = (item: MenuItem) => {
-    setActiveModule(item.key)
-
-    if (!item.children) return
-
-    const module = item.key as ModuleWithChildren
-    const existing = childState[module]
-    const allowed = new Set(item.children.map((child) => child.key))
-    const fallback = item.children[0]?.key || existing
-
-    setModuleChild(module, allowed.has(existing) ? existing : fallback)
+    if (!item.children || !isModuleWithChildren(item.key)) {
+      goTo(item.key)
+      return
+    }
+    goTo(item.key, childState[item.key])
   }
 
   const handleSetupNavigate = (target: ProjectSetupTarget) => {
-    const module = target.module as ModuleKey
-    const exists = menuItems.some((item) => item.key === module)
-    if (!exists) return
-
-    setActiveModule(module)
-    if (target.child && isModuleWithChildren(module)) {
-      setModuleChild(module, target.child)
-    }
+    const module = moduleFromSlug(target.module)
+    if (!module || !menuItems.some((item) => item.key === module)) return
+    goTo(
+      module,
+      target.child && isModuleWithChildren(module) ? target.child : null
+    )
   }
 
   const renderContent = () => {
@@ -409,7 +370,7 @@ export function ProjectDetail({
             projectId={projectId}
             schedule={schedule}
             activeTab={childState.schedule}
-            onTabChange={(value) => setModuleChild('schedule', value)}
+            onTabChange={(value: string) => setModuleChild('schedule', value)}
             showTabList={false}
             initialTarget={initialTarget}
           />
@@ -442,7 +403,7 @@ export function ProjectDetail({
           <CostDashboard
             projectId={projectId}
             activeTab={childState.cost}
-            onTabChange={(value) => setModuleChild('cost', value)}
+            onTabChange={(value: string) => setModuleChild('cost', value)}
             showTabList={false}
             initialTarget={initialTarget}
           />
@@ -458,7 +419,7 @@ export function ProjectDetail({
             projectId={projectId}
             activities={schedule.activities}
             activeTab={childState.commercial}
-            onTabChange={(value) => setModuleChild('commercial', value)}
+            onTabChange={(value: string) => setModuleChild('commercial', value)}
             showTabList={false}
             initialTarget={initialTarget}
           />
@@ -473,7 +434,7 @@ export function ProjectDetail({
           <QualityDashboard
             projectId={projectId}
             activeTab={childState.quality}
-            onTabChange={(value) => setModuleChild('quality', value)}
+            onTabChange={(value: string) => setModuleChild('quality', value)}
             showTabList={false}
           />
         ) : (
@@ -487,7 +448,7 @@ export function ProjectDetail({
           <DocControlDashboard
             projectId={projectId}
             activeTab={childState.docControl}
-            onTabChange={(value) => setModuleChild('docControl', value)}
+            onTabChange={(value: string) => setModuleChild('docControl', value)}
             showTabList={false}
             initialTarget={initialTarget}
           />
@@ -540,159 +501,7 @@ export function ProjectDetail({
         return (
           <div className='space-y-4'>
             <HealthDashboard projectId={projectId} />
-
-            <div className='space-y-4'>
-              <section className='rounded-md border p-4'>
-                <h3 className='mb-3 text-sm font-semibold'>Project Basics</h3>
-                <div className='grid gap-4 sm:grid-cols-2 lg:grid-cols-3'>
-                  <DetailItem label='Type' value={project.type ?? '-'} />
-                  <DetailItem
-                    label='Location'
-                    value={project.location ?? '-'}
-                  />
-                  <DetailItem
-                    label='Duration'
-                    value={formatDuration(
-                      project.duration,
-                      project.durationUnit
-                    )}
-                  />
-                  <DetailItem
-                    label='Start Date'
-                    value={formatDate(project.startDate)}
-                  />
-                  <DetailItem
-                    label='End Date'
-                    value={formatDate(project.endDate)}
-                  />
-                  <DetailItem
-                    label='Baseline Date'
-                    value={formatDate(project.baselineDate ?? null)}
-                  />
-                  <DetailItem
-                    label='Data Date'
-                    value={formatDate(project.dataDate ?? null)}
-                  />
-                </div>
-              </section>
-
-              <section className='rounded-md border p-4'>
-                <h3 className='mb-3 text-sm font-semibold'>Contract Parties</h3>
-                <div className='grid gap-4 sm:grid-cols-2 lg:grid-cols-4'>
-                  <PartyDetailItem
-                    label='Client / Owner'
-                    value={
-                      activeProjectParties.find(
-                        (party) => party.role === 'owner'
-                      )?.company?.name ?? project.clientName
-                    }
-                  />
-                  <PartyDetailItem
-                    label='Consultant'
-                    value={
-                      activeProjectParties.find(
-                        (party) => party.role === 'consultant'
-                      )?.company?.name ?? project.consultantName
-                    }
-                  />
-                  <PartyDetailItem
-                    label='Contractor'
-                    value={
-                      activeProjectParties.find(
-                        (party) => party.role === 'contractor'
-                      )?.company?.name ?? project.contractorName
-                    }
-                  />
-                  <PartyDetailItem
-                    label='Subcontractors'
-                    value={
-                      activeProjectParties
-                        .filter((party) => party.role === 'subcontractor')
-                        .map((party) => party.company?.name)
-                        .filter(Boolean)
-                        .join(', ') || null
-                    }
-                  />
-                </div>
-              </section>
-
-              <section className='rounded-md border p-4'>
-                <h3 className='mb-3 text-sm font-semibold'>Contract Terms</h3>
-                <div className='grid gap-4 sm:grid-cols-2 lg:grid-cols-3'>
-                  <DetailItem
-                    label='Contract Type'
-                    value={formatLabel(
-                      contractTypeLabels,
-                      project.contractType
-                    )}
-                  />
-                  <DetailItem
-                    label='Contract Number'
-                    value={project.contractNumber ?? '-'}
-                  />
-                  <DetailItem
-                    label='Contract Value'
-                    value={formatMoney(project.currency, project.contractValue)}
-                  />
-                  <DetailItem
-                    label='Contract Completion'
-                    value={formatDate(project.completionDate ?? null)}
-                  />
-                  <DetailItem
-                    label='Revised Completion'
-                    value={formatDate(project.revisedCompletionDate ?? null)}
-                  />
-                  <DetailItem
-                    label='LD Rate / Day'
-                    value={formatMoney(project.currency, project.ldRatePerDay)}
-                  />
-                </div>
-              </section>
-
-              <section className='rounded-md border p-4'>
-                <h3 className='mb-3 text-sm font-semibold'>
-                  Commercial Defaults
-                </h3>
-                <div className='grid gap-4 sm:grid-cols-2 lg:grid-cols-4'>
-                  <DetailItem label='Currency' value={project.currency} />
-                  <DetailItem
-                    label='Retention'
-                    value={formatPercent(project.defaultRetentionRate)}
-                  />
-                  <DetailItem
-                    label='Weather Allowance'
-                    value={formatNumber(project.weatherAllowanceDays, ' days')}
-                  />
-                  <DetailItem
-                    label='Reporting Cutoff'
-                    value={formatNumber(project.reportingCutoffDay)}
-                  />
-                </div>
-              </section>
-
-              <section className='rounded-md border p-4'>
-                <h3 className='mb-3 text-sm font-semibold'>
-                  Reporting Settings
-                </h3>
-                <div className='grid gap-4 sm:grid-cols-2'>
-                  <DetailItem
-                    label='Project Calendar'
-                    value={formatLabel(
-                      projectCalendarLabels,
-                      project.projectCalendar
-                    )}
-                  />
-                  <DetailItem
-                    label='Cutoff Day'
-                    value={formatNumber(project.reportingCutoffDay)}
-                  />
-                  <DetailItem
-                    label='Data Date'
-                    value={formatDate(project.dataDate ?? null)}
-                  />
-                </div>
-              </section>
-            </div>
+            <ProjectOverview project={project} parties={activeProjectParties} />
           </div>
         )
 
@@ -773,21 +582,35 @@ export function ProjectDetail({
 
                     return (
                       <div key={item.key}>
-                        <button
+                        <Link
                           data-testid={`uat-project-module-${item.key}`}
-                          type='button'
-                          onClick={() => handleModuleSelect(item)}
+                          to={
+                            hasChildren && isModuleWithChildren(item.key)
+                              ? '/projects/$projectId/$module/$child'
+                              : '/projects/$projectId/$module'
+                          }
+                          params={{
+                            projectId,
+                            module: slugForModule(item.key),
+                            ...(hasChildren && isModuleWithChildren(item.key)
+                              ? { child: childState[item.key] }
+                              : {}),
+                          }}
+                          onClick={(event) => {
+                            event.preventDefault()
+                            handleModuleSelect(item)
+                          }}
                           className={[
-                            'w-full rounded-md px-2 py-2 text-left text-sm font-medium transition-colors',
+                            'block w-full rounded-md px-2 py-2 text-left text-sm font-medium transition-colors',
                             isActiveModule
                               ? 'bg-primary/10 text-primary'
                               : 'hover:bg-muted/50',
                           ].join(' ')}
                         >
                           {item.label}
-                        </button>
+                        </Link>
 
-                        {hasChildren && (
+                        {hasChildren && isModuleWithChildren(item.key) && (
                           <div className='ms-2 mt-1 space-y-1 border-s ps-2'>
                             {item.children?.map((child) => {
                               const module = item.key as ModuleWithChildren
@@ -796,23 +619,24 @@ export function ProjectDetail({
                                 childState[module] === child.key
 
                               return (
-                                <button
+                                <Link
                                   data-testid={`uat-project-module-${item.key}-${child.key}`}
                                   key={child.key}
-                                  type='button'
-                                  onClick={() => {
-                                    setActiveModule(item.key)
-                                    setModuleChild(module, child.key)
+                                  to='/projects/$projectId/$module/$child'
+                                  params={{
+                                    projectId,
+                                    module: slugForModule(module),
+                                    child: child.key,
                                   }}
                                   className={[
-                                    'w-full rounded-md px-2 py-1.5 text-left text-xs transition-colors',
+                                    'block w-full rounded-md px-2 py-1.5 text-left text-xs transition-colors',
                                     isChildActive
                                       ? 'bg-muted text-foreground'
                                       : 'text-muted-foreground hover:bg-muted/50 hover:text-foreground',
                                   ].join(' ')}
                                 >
                                   {child.label}
-                                </button>
+                                </Link>
                               )
                             })}
                           </div>
@@ -827,7 +651,9 @@ export function ProjectDetail({
                 data-testid={`uat-project-content-${visibleModule}`}
                 className='min-w-0'
               >
-                {renderContent()}
+                <Suspense fallback={<ModuleLoading />}>
+                  {renderContent()}
+                </Suspense>
               </section>
             </div>
           </ProjectPermissionProvider>

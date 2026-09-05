@@ -40,7 +40,11 @@ assert.match(recordList, /<AttachmentPanel/, 'record lists render the unified pa
 assert.match(recordList, /!attachment\.attachmentId/, 'legacy rows are passed through')
 const projectDetail = read('src/features/projects/components/project-detail.tsx')
 assert.match(projectDetail, /\{ key: 'photos', label: 'Photos' \}/, 'Photos module in the menu')
-assert.match(projectDetail, /photos: \['document_control'\]/, 'Photos visibility follows document_control')
+assert.match(
+  read('src/features/projects/lib/project-modules.ts'),
+  /photos: \['document_control'\]/,
+  'Photos visibility follows document_control'
+)
 assert.match(projectDetail, /<PhotoGallery projectId=\{projectId\} \/>/, 'Photos renders the gallery')
 
 // ── Backend contract ────────────────────────────────────────────────────

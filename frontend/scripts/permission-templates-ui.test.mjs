@@ -75,7 +75,11 @@ assert.ok(!/Procore/i.test(templatesPage), 'no vendor wording')
 
 // ── Project Team module ──────────────────────────────────────────────────
 const projectDetail = read('src/features/projects/components/project-detail.tsx')
-assert.match(projectDetail, /\| 'team'/, 'ModuleKey includes team')
+assert.match(
+  read('src/features/projects/lib/project-modules.ts'),
+  /\| 'team'/,
+  'ModuleKey includes team'
+)
 assert.match(projectDetail, /\{ key: 'team', label: 'Team' \}/, 'Team appears in the module menu')
 assert.match(projectDetail, /<ProjectTeamPanel projectId=\{projectId\} \/>/, 'Team renders the panel')
 assert.match(projectDetail, /useMyProjectPermissions\(projectId/, 'workspace loads the permission matrix')

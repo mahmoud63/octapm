@@ -77,10 +77,17 @@ assert.match(
   /validateSearch/,
   'project detail route validates module search params'
 )
+// Modules are URL segments (OCTA-FE-ROUTES-008); the page reads the module and
+// sub-tab params and the record deep-link search from whichever route matched.
 assert.match(
   projectPage,
-  /useSearch\(\{ from: '\/_authenticated\/projects\/\$projectId' \}\)/,
-  'project detail page consumes module search params'
+  /useSearch\(\{ strict: false \}\)/,
+  'project detail page consumes record deep-link search params'
+)
+assert.match(
+  projectRoute,
+  /beforeLoad/,
+  'legacy ?module= links are redirected to module routes'
 )
 assert.ok(
   projectDetail.includes('initialTarget'),
