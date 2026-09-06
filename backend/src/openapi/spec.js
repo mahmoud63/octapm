@@ -7110,6 +7110,7 @@ add(
       }),
       includeArchivedParam,
     ],
+    permissions: modulePermission("change_order", "read"),
   }),
 );
 
@@ -7508,6 +7509,7 @@ add(
     summary: "List EOT claims.",
     operationId: "listEotClaims",
     parameters: projectParams,
+    permissions: modulePermission("eot", "read"),
   }),
 );
 

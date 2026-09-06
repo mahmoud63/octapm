@@ -780,7 +780,10 @@ model AuthAuditEvent {
 model AuditEvent {
   id              String   @id @default(uuid())
   orgId           String
-  projectId       String
+  // Null for company-scoped entities: shared form templates, submittal
+  // workflow templates and report definitions belong to the organisation and
+  // have no project, but still have to leave an audit trail.
+  projectId       String?
   entityType      String
   entityId        String
   action          String
@@ -807,7 +810,8 @@ model AuditEvent {
 model RecordHistorySnapshot {
   id                   String   @id @default(uuid())
   orgId                String
-  projectId            String
+  // Null for company-scoped entities, mirroring AuditEvent.
+  projectId            String?
   entityType           String
   entityId             String
   action               String

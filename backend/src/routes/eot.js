@@ -27,6 +27,10 @@ router.use(require("./eot-assistant"));
 
 router.get(
   "/",
+  // Extension of time claims carry delay entitlement and the commercial case
+  // behind it, so the register follows the eot policy rather than being open to
+  // every project member.
+  requirePermission("eot", "read"),
   asyncHandler(async (req, res) => {
     const data = await listEotClaims({
       orgId: req.user.orgId,

@@ -476,11 +476,14 @@ const recordEvent = async ({
   attachments = [],
   metadata = {},
 }) => {
-  if (!orgId || !projectId || !entityType || !entityId || !action) {
+  // projectId is optional: company-scoped entities — shared form templates,
+  // submittal workflow templates, report definitions — belong to the
+  // organisation and have no project, but still have to be auditable.
+  if (!orgId || !entityType || !entityId || !action) {
     throw new HttpError(
       400,
       "AUDIT_EVENT_INVALID",
-      "Audit events require org, project, entity, and action metadata",
+      "Audit events require org, entity, and action metadata",
     );
   }
 

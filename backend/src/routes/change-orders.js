@@ -17,6 +17,10 @@ router.use(authenticate);
 
 router.get(
   "/",
+  // The register carries contract values and pricing, so it is not open to
+  // every project member: the change_order policy limits reads to the
+  // commercial and financial roles.
+  requirePermission("change_order", "read"),
   [
     query("status")
       .optional()

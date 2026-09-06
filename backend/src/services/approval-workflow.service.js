@@ -1,5 +1,6 @@
 const { prisma } = require("../config/db");
 const { HttpError } = require("../utils/http-error");
+const { isPrismaDecimal, toMoneyNumber } = require("../utils/money");
 const notificationService = require("./notification.service");
 const domainEvents = require("../events/bus");
 
@@ -66,6 +67,11 @@ const compactJson = (value) => {
   if (value === null || value === undefined) return {};
   if (value instanceof Date) return value.toISOString();
   if (Array.isArray(value)) return value.map(compactJson);
+  // A Prisma Decimal is an object, so without this it would be walked field by
+  // field and stored as its internals ({ s, e, d, constructor }) — which Prisma
+  // then refuses to write to a Json column, taking the whole transaction down.
+  // Callers pass raw rows here, so amounts arrive as Decimals routinely.
+  if (isPrismaDecimal(value)) return toMoneyNumber(value);
   if (typeof value !== "object") return value;
   return Object.entries(value).reduce((acc, [key, raw]) => {
     acc[key] = compactJson(raw);
