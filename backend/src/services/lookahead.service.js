@@ -1,4 +1,5 @@
-const ExcelJS = require("exceljs");
+﻿const ExcelJS = require("exceljs");
+const { brandWorkbook } = require("../utils/export-branding");
 const { prisma } = require("../config/db");
 const { HttpError } = require("../utils/http-error");
 const { recordWorkspacePath } = require("../utils/record-links");
@@ -744,6 +745,7 @@ const exportLookahead = async ({ orgId, projectId, lookaheadId, viewer = null })
   about.getColumn(2).width = 60;
   [["Project", project.name], ["Lookahead", `${detail.ref} — ${detail.title}`], ["Window", `${detail.startDate} → ${detail.endDate} (${detail.weeks} weeks)`], ["Status", detail.status], ["Tasks", String(detail.summary.items)], ["Open constraints", String(detail.summary.openConstraints)], ["PPC", detail.summary.ppc.ppc === null ? "—" : `${detail.summary.ppc.ppc}%`], ["Exported", new Date().toISOString()]].forEach((pair) => about.addRow(pair));
 
+  brandWorkbook(workbook, { title: `Lookahead — ${detail.ref}`, project: project.name });
   return { workbook, filename: `${String(detail.ref).toLowerCase()}-lookahead.xlsx` };
 };
 

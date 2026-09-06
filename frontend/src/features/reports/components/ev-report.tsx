@@ -123,7 +123,7 @@ function statusBadgeClass(status: string) {
   }
 
   if (normalized === 'in progress' || normalized === 'in_progress') {
-    return 'border-transparent bg-amber-500/15 text-amber-700 dark:text-amber-300'
+    return 'border-transparent bg-warning-soft text-warning-foreground'
   }
 
   if (normalized === 'delayed') {
@@ -265,7 +265,7 @@ export function EvReport({ projectId, readiness, onNavigate }: Props) {
             'rounded-lg border p-3 text-sm',
             readinessGate.ready
               ? 'border-emerald-200 bg-emerald-50 text-emerald-900 dark:border-emerald-900/40 dark:bg-emerald-950/20 dark:text-emerald-200'
-              : 'border-amber-200 bg-amber-50 text-amber-900 dark:border-amber-900/40 dark:bg-amber-950/20 dark:text-amber-200',
+              : 'border-warning/40 bg-warning-soft text-warning-foreground',
           ].join(' ')}
         >
           <div className='flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between'>
@@ -314,7 +314,7 @@ export function EvReport({ projectId, readiness, onNavigate }: Props) {
       )}
 
       {(basisWarnings || []).length > 0 && (
-        <div className='rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-900/40 dark:bg-amber-950/20 dark:text-amber-300'>
+        <div className='relative overflow-hidden rounded-lg border border-warning/40 bg-warning-soft p-3 ps-4 text-sm text-warning-foreground'>
           {(basisWarnings || []).map((warning: string) => (
             <p key={warning}>{warning}</p>
           ))}
@@ -322,7 +322,7 @@ export function EvReport({ projectId, readiness, onNavigate }: Props) {
       )}
 
       {(alerts.spiAlert || alerts.cpiAlert) && (
-        <div className='rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700'>
+        <div className='relative overflow-hidden rounded-lg border border-error/30 bg-error-soft p-3 ps-4 text-sm text-error-foreground'>
           Alert:{' '}
           {alerts.spiAlert &&
             `SPI ${spi?.toFixed(2)} < 0.9 (schedule slippage). `}
@@ -377,13 +377,13 @@ export function EvReport({ projectId, readiness, onNavigate }: Props) {
           label='SPI'
           value={spi !== null ? spi.toFixed(2) : '—'}
           sub='EV / PV'
-          color={spi !== null && spi < 0.9 ? 'text-red-600' : 'text-green-600'}
+          color={spi !== null && spi < 0.9 ? 'text-error' : 'text-success'}
         />
         <MetricCard
           label='CPI'
           value={cpi !== null ? cpi.toFixed(2) : '—'}
           sub='EV / AC'
-          color={cpi !== null && cpi < 0.9 ? 'text-red-600' : 'text-green-600'}
+          color={cpi !== null && cpi < 0.9 ? 'text-error' : 'text-success'}
         />
         <MetricCard label='EAC' value={fmt(eac)} sub='Budget / CPI' />
         <MetricCard label='ETC' value={fmt(etc)} sub='EAC - AC' />
@@ -394,13 +394,13 @@ export function EvReport({ projectId, readiness, onNavigate }: Props) {
           label='Schedule Variance (SV)'
           value={fmt(sv)}
           sub='EV - PV'
-          color={sv >= 0 ? 'text-green-600' : 'text-red-600'}
+          color={sv >= 0 ? 'text-success' : 'text-error'}
         />
         <MetricCard
           label='Cost Variance (CV)'
           value={fmt(cv)}
           sub='EV - AC'
-          color={cv >= 0 ? 'text-green-600' : 'text-red-600'}
+          color={cv >= 0 ? 'text-success' : 'text-error'}
         />
       </div>
 

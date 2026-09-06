@@ -1,4 +1,5 @@
-const ExcelJS = require("exceljs");
+﻿const ExcelJS = require("exceljs");
+const { brandWorkbook } = require("../utils/export-branding");
 const { prisma } = require("../config/db");
 const { HttpError } = require("../utils/http-error");
 const { can, canParty, normalizeRoleId } = require("../config/permissions");
@@ -531,6 +532,10 @@ const renderXlsx = async ({ report, result, user, project = null }) => {
     { field: "Projects", value: `${result.projects.queried} queried, ${result.projects.denied} not permitted` },
     { field: "Generated", value: `${result.generatedAt} by ${user?.name || user?.email || user?.id || "system"}` },
   ]);
+  brandWorkbook(workbook, {
+    title: report.name || "Report",
+    project: project ? project.name : null,
+  });
   return workbook.xlsx.writeBuffer().then((buffer) => Buffer.from(buffer));
 };
 

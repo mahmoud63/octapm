@@ -1,5 +1,6 @@
-const crypto = require("crypto");
+﻿const crypto = require("crypto");
 const ExcelJS = require("exceljs");
+const { brandWorkbook } = require("../utils/export-branding");
 const { prisma } = require("../config/db");
 const { HttpError } = require("../utils/http-error");
 const auditService = require("./audit.service");
@@ -795,6 +796,7 @@ const levelingXlsx = async ({ orgId, projectId, packageId }) => {
   about.addRow(["Currency", data.package.currency]);
   about.addRow(["Generated", new Date().toISOString()]);
   about.addRow(["Normalisation", "Excluded or unpriced lines are plugged with the average of the other bidders' amounts (or the estimate when nobody priced the line)."]);
+  brandWorkbook(workbook, { title: `Bid leveling — ${data.package.ref}` });
   const buffer = Buffer.from(await workbook.xlsx.writeBuffer());
   return { buffer, fileName: `${data.package.ref.toLowerCase()}-leveling.xlsx`, mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" };
 };

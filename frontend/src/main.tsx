@@ -111,6 +111,13 @@ onOutboxSynced((projectIds) => {
   void queryClient.invalidateQueries()
 })
 
+// The printed footer carries the portal address, so take it from the running
+// origin rather than hardcoding a domain that would be wrong per deployment.
+document.documentElement.style.setProperty(
+  '--octa-print-url',
+  `'${window.location.host}'`
+)
+
 // Render the app
 const rootElement = document.getElementById('root')!
 if (!rootElement.innerHTML) {

@@ -456,6 +456,42 @@
   background-size: 56px 56px;
 }
 
+/*
+ * The motif on a card: a single large octagon bled off the top-right corner,
+ * at very low opacity. One shape rather than a tile, so it reads as a
+ * watermark and never as texture behind data. Cards that carry a chart or a
+ * table can opt out with `.octa-card-plain`.
+ */
+.octa-card::after {
+  content: '';
+  position: absolute;
+  top: -38px;
+  right: -38px;
+  width: 128px;
+  height: 128px;
+  pointer-events: none;
+  z-index: 0;
+  opacity: 0.05;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 72 72'><path d='M22 4h28l18 18v28L50 68H22L4 50V22z' fill='none' stroke='%230F1B64' stroke-width='4'/></svg>");
+  background-size: contain;
+  background-repeat: no-repeat;
+}
+
+.dark .octa-card::after {
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 72 72'><path d='M22 4h28l18 18v28L50 68H22L4 50V22z' fill='none' stroke='%233388FF' stroke-width='4'/></svg>");
+  opacity: 0.08;
+}
+
+.octa-card-plain::after {
+  display: none;
+}
+
+/* Card content sits above the watermark. */
+.octa-card > * {
+  position: relative;
+  z-index: 1;
+}
+
 /* Octagonal clip, for brand marks and premium surfaces only. */
 .octa-clip {
   clip-path: polygon(

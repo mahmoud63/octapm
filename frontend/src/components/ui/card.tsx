@@ -1,12 +1,17 @@
 import * as React from 'react'
 import { cn } from '@/lib/utils'
 
+/**
+ * Every card carries the octagonal motif as a corner watermark — enough to say
+ * OctaPM, faint enough that a dense table or a set of figures stays the thing
+ * you read. See `.octa-card` in styles/index.css.
+ */
 function Card({ className, ...props }: React.ComponentProps<'div'>) {
   return (
     <div
       data-slot='card'
       className={cn(
-        'flex flex-col gap-6 rounded-xl border bg-card py-6 text-card-foreground shadow-sm',
+        'octa-card relative flex flex-col gap-6 overflow-hidden rounded-xl border bg-card py-6 text-card-foreground shadow-[var(--shadow-card)]',
         className
       )}
       {...props}

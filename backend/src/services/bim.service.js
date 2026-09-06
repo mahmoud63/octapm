@@ -1,9 +1,10 @@
-const fs = require("fs");
+﻿const fs = require("fs");
 const fsp = require("fs/promises");
 const os = require("os");
 const path = require("path");
 const crypto = require("crypto");
 const ExcelJS = require("exceljs");
+const { brandWorkbook } = require("../utils/export-branding");
 const { prisma } = require("../config/db");
 const { HttpError } = require("../utils/http-error");
 const { recordWorkspacePath } = require("../utils/record-links");
@@ -761,6 +762,7 @@ const exportElements = async ({ orgId, projectId, modelId, query = {} }) => {
     ["Exported", new Date().toISOString()],
   ].forEach((pair) => about.addRow(pair));
 
+  brandWorkbook(workbook, { title: `BIM elements — ${model.name}` });
   return { workbook, filename: `${String(model.name).replace(/[^a-z0-9-_]+/gi, "-").toLowerCase()}-elements.xlsx` };
 };
 

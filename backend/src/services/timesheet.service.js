@@ -1,4 +1,5 @@
-const ExcelJS = require("exceljs");
+﻿const ExcelJS = require("exceljs");
+const { brandWorkbook } = require("../utils/export-branding");
 const { prisma } = require("../config/db");
 const { HttpError } = require("../utils/http-error");
 const { recordWorkspacePath } = require("../utils/record-links");
@@ -768,6 +769,7 @@ const exportTimesheets = async ({ orgId, projectId, query = {}, viewer = null })
   about.addRow(["To", query.to || ""]);
   about.addRow(["Timesheets", sheets.length]);
   about.addRow(["Generated", new Date().toISOString()]);
+  brandWorkbook(workbook, { title: "Timesheets" });
   const buffer = Buffer.from(await workbook.xlsx.writeBuffer());
   return { buffer, fileName: `timesheets-${query.from || "all"}-${query.to || "all"}.xlsx`, mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", rows: entries.rowCount - 1 };
 };

@@ -461,10 +461,10 @@ function MetricCard({
   sourceStatus?: string
 }) {
   const pending = sourceStatus === 'pending-review'
-  // Provenance still matters â€” it is what makes a figure auditable â€” but it
+  // Provenance still matters — it is what makes a figure auditable — but it
   // does not need to occupy half the card. It moves to a single muted line
   // with the full detail on hover.
-  const provenance = `Source: ${source || 'Dashboard source'} Â· Cutoff: ${formatCutoff(cutoffDate)}`
+  const provenance = `Source: ${source || 'Dashboard source'} · Cutoff: ${formatCutoff(cutoffDate)}`
 
   const card = (
     <Card
@@ -703,7 +703,7 @@ function MyOpenItemsSection({ data }: { data: MyOpenItems }) {
           <h2 className='text-lg font-semibold'>My open items</h2>
           <p className='text-sm text-muted-foreground'>
             Records where you are owner, reviewer, approver, assignee, or hold
-            the ball â€” matched by user, not by name.
+            the ball — matched by user, not by name.
           </p>
         </div>
         <div className='flex flex-wrap gap-2'>
@@ -745,7 +745,7 @@ function MyOpenItemsSection({ data }: { data: MyOpenItems }) {
               <div className='flex items-start justify-between gap-2'>
                 <div className='min-w-0'>
                   <p className='text-xs text-muted-foreground'>
-                    {item.label} Â· {item.ref}
+                    {item.label} · {item.ref}
                   </p>
                   <p className='truncate text-sm font-medium'>{item.title}</p>
                   <p className='truncate text-xs text-muted-foreground'>
@@ -776,7 +776,7 @@ function MyOpenItemsSection({ data }: { data: MyOpenItems }) {
                         : 'text-muted-foreground'
                     )}
                   >
-                    {item.overdue ? 'Overdue Â· ' : 'Due '}
+                    {item.overdue ? 'Overdue · ' : 'Due '}
                     {formatDate(item.dueDate)}
                   </span>
                 )}

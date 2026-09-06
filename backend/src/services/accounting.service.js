@@ -1,5 +1,6 @@
-const crypto = require("crypto");
+﻿const crypto = require("crypto");
 const ExcelJS = require("exceljs");
+const { brandWorkbook } = require("../utils/export-branding");
 const { prisma } = require("../config/db");
 const { HttpError } = require("../utils/http-error");
 const secretBox = require("../utils/secret-box");
@@ -476,7 +477,7 @@ const renderExport = async ({ orgId, projectId = null, from = null, to = null, p
   const stamp = new Date().toISOString().slice(0, 10);
   if (format === "csv") {
     const lines = [EXPORT_COLUMNS.map((column) => csvCell(column.label)).join(","), ...data.rows.map((row) => EXPORT_COLUMNS.map((column) => csvCell(row[column.key])).join(","))];
-    return { buffer: Buffer.from(`﻿${lines.join("\r\n")}`, "utf8"), fileName: `accounting-export-${stamp}.csv`, mimeType: "text/csv; charset=utf-8", rows: data.rows.length };
+    return { buffer: Buffer.from(`ï»¿${lines.join("\r\n")}`, "utf8"), fileName: `accounting-export-${stamp}.csv`, mimeType: "text/csv; charset=utf-8", rows: data.rows.length };
   }
   const workbook = new ExcelJS.Workbook();
   workbook.creator = "OctaPM";
@@ -496,6 +497,7 @@ const renderExport = async ({ orgId, projectId = null, from = null, to = null, p
   about.addRow(["Provider mapping", provider || "none"]);
   about.addRow(["From", from || ""]);
   about.addRow(["To", to || ""]);
+  brandWorkbook(workbook, { title: "Accounting export" });
   const buffer = Buffer.from(await workbook.xlsx.writeBuffer());
   return { buffer, fileName: `accounting-export-${stamp}.xlsx`, mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", rows: data.rows.length };
 };

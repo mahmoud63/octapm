@@ -174,14 +174,16 @@ test.describe('project module bar', () => {
     await signIn(page)
     const projectId = await openProject(page)
 
-    // On Overview it is present.
+    // On Overview it is present. Wait for the panel rather than sleeping: the
+    // readiness query can be slow when the whole suite is running.
     await page.goto(`/projects/${projectId}/overview`)
     await page.waitForLoadState('domcontentloaded')
-    await page.waitForTimeout(2500)
-    const onOverview =
-      (await page.getByTestId('uat-setup-readiness-collapse').count()) +
-      (await page.getByTestId('uat-setup-readiness-expand').count())
-    expect(onOverview, 'Setup Readiness should be on Overview').toBeGreaterThan(0)
+    await expect(
+      page
+        .getByTestId('uat-setup-readiness-collapse')
+        .or(page.getByTestId('uat-setup-readiness-expand')),
+      'Setup Readiness should be on Overview',
+    ).toBeVisible({ timeout: 30_000 })
 
     // On every working module it is not: the setup checklist must not take
     // space away from the screens people work in all day.

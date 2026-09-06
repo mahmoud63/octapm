@@ -67,10 +67,10 @@ interface Props {
 const fmtUSD = (n: number) =>
   n
     ? '$' + Number(n).toLocaleString('en-US', { maximumFractionDigits: 0 })
-    : 'â€”'
+    : '—'
 
 const fmtDate = (value: string | null | undefined) =>
-  value ? new Date(value).toLocaleDateString() : 'â€”'
+  value ? new Date(value).toLocaleDateString() : '—'
 
 const formatLag = (lagDays: number) => {
   if (!lagDays) return ''
@@ -579,7 +579,7 @@ export function ScheduleDashboard({
                 <Input
                   value={regenLabel}
                   onChange={(e) => setRegenLabel(e.target.value)}
-                  placeholder='e.g. Rev 3 â€” post-RFI'
+                  placeholder='e.g. Rev 3 — post-RFI'
                   disabled={regenPending || !canCreateSchedule}
                   className='mb-1 h-8 text-sm'
                   onClick={(e) => e.stopPropagation()}
@@ -598,7 +598,7 @@ export function ScheduleDashboard({
                       className={cn('h-4 w-4', regenPending && 'animate-spin')}
                     />
                     {regenPending
-                      ? regenStep || 'Regeneratingâ€¦'
+                      ? regenStep || 'Regenerating…'
                       : 'Regenerate from BOQ file'}
                   </label>
                 </DropdownMenuItem>
@@ -736,25 +736,25 @@ export function ScheduleDashboard({
             <span>
               Start:{' '}
               <strong className='text-foreground'>
-                {revision.projectSummary.startDate || 'â€”'}
+                {revision.projectSummary.startDate || '—'}
               </strong>
             </span>
             <span>
               End:{' '}
               <strong className='text-foreground'>
-                {revision.projectSummary.endDate || 'â€”'}
+                {revision.projectSummary.endDate || '—'}
               </strong>
             </span>
             <span>
               Duration:{' '}
               <strong className='text-foreground'>
-                {revision.projectSummary.totalDuration || 'â€”'}
+                {revision.projectSummary.totalDuration || '—'}
               </strong>
             </span>
             <span>
               Type:{' '}
               <strong className='text-foreground'>
-                {revision.projectSummary.type || 'â€”'}
+                {revision.projectSummary.type || '—'}
               </strong>
             </span>
           </div>
@@ -967,18 +967,18 @@ export function ScheduleDashboard({
                     ].join(' ')}
                   >
                     <td className='p-2 text-xs font-semibold text-muted-foreground'>
-                      {a.batchId || 'â€”'}
+                      {a.batchId || '—'}
                     </td>
                     <td className='p-2 font-mono text-xs'>
                       {formatActivityCode(a, index)}
                     </td>
                     <td className='p-2 font-mono text-xs text-muted-foreground'>
-                      {a.wbsCode || 'â€”'}
+                      {a.wbsCode || '—'}
                     </td>
                     <td className='max-w-50 p-2'>
                       <div className='flex items-center gap-1.5'>
                         {a.isMilestone && (
-                          <span className='text-purple-600'>â—†</span>
+                          <span className='text-purple-600'>◆</span>
                         )}
                         {a.isCritical && !a.isMilestone && (
                           <span className='h-1.5 w-1.5 rounded-full bg-red-500' />
@@ -1033,34 +1033,34 @@ export function ScheduleDashboard({
                       )}
                     </td>
                     <td className='p-2 text-xs text-muted-foreground'>
-                      {a.category || 'â€”'}
+                      {a.category || '—'}
                     </td>
                     <td className='p-2 text-right text-xs'>
-                      {a.isMilestone ? 'â€”' : `${a.duration}d`}
+                      {a.isMilestone ? '—' : `${a.duration}d`}
                     </td>
                     <td
                       className='p-2 text-right font-mono text-xs'
                       title={fmtDate(a.earlyStartDate)}
                     >
-                      {a.earlyStart ?? 'â€”'}
+                      {a.earlyStart ?? '—'}
                     </td>
                     <td
                       className='p-2 text-right font-mono text-xs'
                       title={fmtDate(a.earlyFinishDate)}
                     >
-                      {a.earlyFinish ?? 'â€”'}
+                      {a.earlyFinish ?? '—'}
                     </td>
                     <td
                       className='p-2 text-right font-mono text-xs'
                       title={fmtDate(a.lateStartDate)}
                     >
-                      {a.lateStart ?? 'â€”'}
+                      {a.lateStart ?? '—'}
                     </td>
                     <td
                       className='p-2 text-right font-mono text-xs'
                       title={fmtDate(a.lateFinishDate)}
                     >
-                      {a.lateFinish ?? 'â€”'}
+                      {a.lateFinish ?? '—'}
                     </td>
                     <td className='p-2 text-right text-xs'>
                       {a.isMilestone ? (
@@ -1069,12 +1069,12 @@ export function ScheduleDashboard({
                         <span className='font-semibold text-red-600'>0d</span>
                       ) : isNearCritical(a) ? (
                         <span className='font-semibold text-orange-600'>
-                          {a.totalFloat}d âš 
+                          {a.totalFloat}d ⚠
                         </span>
                       ) : a.totalFloat != null ? (
                         `${a.totalFloat}d`
                       ) : (
-                        'â€”'
+                        '—'
                       )}
                     </td>
                     <td
@@ -1084,7 +1084,7 @@ export function ScheduleDashboard({
                       {formatActivityDependencies(a)}
                     </td>
                     <td className='p-2 text-right text-xs'>
-                      {a.budget ? fmtUSD(a.budget) : 'â€”'}
+                      {a.budget ? fmtUSD(a.budget) : '—'}
                     </td>
                     <td className='p-2 text-center'>
                       <ActivityStatusBadge status={a.status} />
@@ -1136,7 +1136,7 @@ export function ScheduleDashboard({
               <p className='font-semibold'>
                 {nearCriticalActs.length} near-critical{' '}
                 {nearCriticalActs.length === 1 ? 'activity' : 'activities'} (TF
-                â‰¤ 5d)
+                ≤ 5d)
               </p>
               <p className='mt-1 text-xs'>
                 These activities may become critical if delayed further:
@@ -1144,7 +1144,7 @@ export function ScheduleDashboard({
               <ul className='mt-1 list-inside list-disc text-xs'>
                 {nearCriticalActs.map((a) => (
                   <li key={a.id}>
-                    {a.name} â€” TF: {a.totalFloat ?? 'â€”'}d
+                    {a.name} — TF: {a.totalFloat ?? '—'}d
                   </li>
                 ))}
               </ul>
@@ -1171,8 +1171,8 @@ export function ScheduleDashboard({
                     <div className='min-w-0 flex-1'>
                       <p className='truncate font-medium'>{a.name}</p>
                       <p className='text-xs text-muted-foreground'>
-                        {formatActivityCode(a)} Â· WBS {a.wbsCode || '-'} Â·{' '}
-                        {a.category} Â· {a.duration}d Â· d{a.earlyStart}â†’d
+                        {formatActivityCode(a)} · WBS {a.wbsCode || '-'} ·{' '}
+                        {a.category} · {a.duration}d · d{a.earlyStart}→d
                         {a.earlyFinish}
                       </p>
                       <div className='mt-1 flex items-center gap-2'>
@@ -1225,13 +1225,13 @@ export function ScheduleDashboard({
               {nextMilestone && (
                 <div className='mb-4 rounded-lg border border-purple-300 bg-purple-50 p-3 dark:border-purple-900/40 dark:bg-purple-950/20'>
                   <p className='text-sm font-semibold text-purple-800 dark:text-purple-300'>
-                    â—† Next milestone: {nextMilestone.name}
+                    ◆ Next milestone: {nextMilestone.name}
                   </p>
                   <p className='mt-0.5 text-xs text-purple-700 dark:text-purple-400'>
-                    Day {nextMilestone.day} Â·{' '}
+                    Day {nextMilestone.day} ·{' '}
                     {(nextMilestone.day ?? 0) - todayWorkingDay} working days
                     away
-                    {nextMilestone.phase ? ` Â· ${nextMilestone.phase}` : ''}
+                    {nextMilestone.phase ? ` · ${nextMilestone.phase}` : ''}
                   </p>
                 </div>
               )}
@@ -1272,7 +1272,7 @@ export function ScheduleDashboard({
                       >
                         {isComplete && (
                           <div className='absolute top-3 right-3 flex h-5 w-5 items-center justify-center rounded-full bg-green-500 text-xs text-white'>
-                            âœ“
+                            ✓
                           </div>
                         )}
                         {isOverdue && (
@@ -1285,12 +1285,12 @@ export function ScheduleDashboard({
                           <span
                             className={`font-semibold ${isOverdue ? 'text-red-600' : 'text-purple-600'}`}
                           >
-                            â—†
+                            ◆
                           </span>
                           <div className='min-w-0 flex-1'>
                             <p className='truncate font-medium'>{m.name}</p>
                             <p className='text-xs text-muted-foreground'>
-                              {m.phase || 'â€”'} Â· Day {m.day ?? 'â€”'}
+                              {m.phase || '—'} · Day {m.day ?? '—'}
                             </p>
                             {m.description && (
                               <p className='mt-1 text-xs text-muted-foreground'>
@@ -1365,7 +1365,7 @@ export function ScheduleDashboard({
       {/* Generation metadata */}
       <p className='text-xs text-muted-foreground'>
         <CheckCircle2 className='mr-1 inline h-3 w-3 text-green-500' />
-        Schedule revision Â· {revision.label} Â· {revision.status} Â·{' '}
+        Schedule revision · {revision.label} · {revision.status} ·{' '}
         {new Date(revision.createdAt).toLocaleString()}
       </p>
 

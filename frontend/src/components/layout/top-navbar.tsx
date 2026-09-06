@@ -50,7 +50,7 @@ import { sidebarData } from './data/sidebar-data'
 import { ProjectSwitcher } from './project-switcher'
 import { type NavCollapsible, type NavLink, type NavItem } from './types'
 
-// â”€â”€ Flat list of top-level nav items â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Flat list of top-level nav items ──────────────────────────────────────
 // "Work" group items show directly; collapsible items become dropdowns.
 const generalItems = sidebarData.navGroups[0].items // Dashboard, Projects, Tasks, Users
 const otherItems = sidebarData.navGroups[1].items // Settings (collapsible), Help Center
@@ -65,7 +65,7 @@ function isNavCollapsible(item: NavItem): item is NavCollapsible {
   return 'items' in item && !!item.items
 }
 
-// â”€â”€ Desktop nav link â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Desktop nav link ──────────────────────────────────────────────────────
 function displayIdForTitle(title: string): DisplayNavigationItemId | null {
   const normalized = title.toLowerCase().replace(/\s+/g, '-')
   return displayNavigationItems.some((item) => item.id === normalized)
@@ -123,7 +123,7 @@ function NavLinkItem({ item, href }: { item: NavLink; href: string }) {
   )
 }
 
-// â”€â”€ Desktop dropdown for collapsible items â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Desktop dropdown for collapsible items ────────────────────────────────
 function NavDropdownItem({
   item,
   href,
@@ -176,7 +176,7 @@ function NavDropdownItem({
   )
 }
 
-// â”€â”€ User avatar dropdown â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── User avatar dropdown ──────────────────────────────────────────────────
 function UserDropdown() {
   const authUser = useAuthStore((state) => state.auth.user)
   const user = authUser
@@ -268,7 +268,7 @@ function UserDropdown() {
   )
 }
 
-// â”€â”€ Mobile sheet nav â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Mobile sheet nav ──────────────────────────────────────────────────────
 function MobileNav({ href, items }: { href: string; items: NavItem[] }) {
   const [open, setOpen] = React.useState(false)
 
@@ -359,7 +359,7 @@ function MobileNav({ href, items }: { href: string; items: NavItem[] }) {
   )
 }
 
-// â”€â”€ Main TopNavbar â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Main TopNavbar ─────────────────────────────────────────────────────────
 export function TopNavbar() {
   const href = useLocation({ select: (l) => l.href })
   const [scrolled, setScrolled] = React.useState(false)
@@ -414,7 +414,7 @@ export function TopNavbar() {
 
         {/* Desktop nav */}
         {/* min-w-0 lets the nav shrink inside the flex row, and the nav scrolls
-            within itself rather than pushing the page sideways â€” at tablet
+            within itself rather than pushing the page sideways — at tablet
             width the full link set is ~1056px against a 758px viewport. */}
         <nav className='hidden min-w-0 flex-1 items-center gap-0.5 overflow-x-auto [scrollbar-width:none] md:flex [&::-webkit-scrollbar]:hidden'>
           {visibleGeneralItems.map((item) =>

@@ -1546,7 +1546,7 @@ async function createManualBoqItem(projectId, data, options = {}) {
   };
 }
 
-// â”€â”€ Delete BOQ Item â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Delete BOQ Item ───────────────────────────────────────────────────────────
 async function deleteBoqItem(projectId, itemId, options = {}) {
   await assertProjectAccess(projectId, options.orgId);
   await assertBoqEditable(projectId);
@@ -1649,7 +1649,7 @@ async function deleteBoqItem(projectId, itemId, options = {}) {
   return { financial };
 }
 
-// â”€â”€ Create Activity â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Create Activity ───────────────────────────────────────────────────────────
 async function createActivity(projectId, boqItemId, data, options = {}) {
   await assertProjectAccess(projectId, options.orgId);
   await assertBoqEditable(projectId);
@@ -1733,7 +1733,7 @@ function findAllocationForBoqActivity(
   });
 }
 
-// â”€â”€ Update Activity â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Update Activity ──────────────────────────────────────────────────────────
 async function updateActivity(projectId, activityId, data, options = {}) {
   await assertProjectAccess(projectId, options.orgId);
   await assertBoqEditable(projectId);
@@ -1839,7 +1839,7 @@ async function updateActivity(projectId, activityId, data, options = {}) {
   return { activity: mapActivityAllocation(updated, updated.boqItem) };
 }
 
-// â”€â”€ Delete Activity â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Delete Activity ──────────────────────────────────────────────────────────
 async function deleteActivity(projectId, activityId, options = {}) {
   await assertProjectAccess(projectId, options.orgId);
   await assertBoqEditable(projectId);
