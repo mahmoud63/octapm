@@ -1,7 +1,9 @@
-import { lazy, Suspense, useCallback, useMemo } from 'react'
+import { lazy, Suspense, useCallback, useMemo, useState } from 'react'
 import { AxiosError } from 'axios'
 import { Link, useNavigate } from '@tanstack/react-router'
+import { formatShortDate } from '@/lib/dates'
 import { ProjectPermissionProvider } from '@/lib/permissions'
+import { cn } from '@/lib/utils'
 import { useProjectRealtime } from '@/hooks/use-realtime'
 import { Main } from '@/components/layout/main'
 import { useMyProjectPermissions } from '@/features/permissions/hooks/use-permissions'
@@ -22,8 +24,39 @@ import {
   type ModuleKey,
   type ModuleWithChildren,
 } from '../lib/project-modules'
+import { ProjectModuleNav } from './project-module-nav'
 import { ProjectSetupWizard } from './project-setup-wizard'
 import { ProjectStatusBadge } from './project-status-badge'
+
+/**
+ * Focus Mode and the readiness panel remember their state per browser, so a
+ * planner who works collapsed on the Gantt is not re-expanded on every visit.
+ * Wrapped because storage throws in private windows.
+ */
+function usePersistedFlag(key: string, fallback = false) {
+  const [value, setValue] = useState(() => {
+    try {
+      const stored = localStorage.getItem(key)
+      return stored === null ? fallback : stored === 'true'
+    } catch {
+      return fallback
+    }
+  })
+
+  const set = useCallback(
+    (next: boolean) => {
+      setValue(next)
+      try {
+        localStorage.setItem(key, String(next))
+      } catch {
+        // A per-viewer convenience; losing it is not worth surfacing.
+      }
+    },
+    [key]
+  )
+
+  return [value, set] as const
+}
 
 // Every module is its own chunk (OCTA-FE-ROUTES-008): the workspace shell
 // stays small and a module's code downloads the first time it is opened.
@@ -136,10 +169,9 @@ type MenuItem = {
   children?: MenuChild[]
 }
 
-function formatDate(value: string | null) {
-  if (!value) return '-'
-  return new Date(value).toLocaleDateString()
-}
+// Contract dates are stored as UTC midnight; rendering them in local time
+// showed every one a day early. See lib/dates.ts.
+const formatDate = (value: string | null) => formatShortDate(value)
 
 function formatMoney(currency: string, value: number | null | undefined) {
   if (value == null) return '—'
@@ -177,6 +209,10 @@ export function ProjectDetail({
   initialTarget?: ProjectSetupTarget
 }) {
   const navigate = useNavigate()
+  const [navCollapsed, setNavCollapsed] = usePersistedFlag('octa.project.nav.collapsed')
+  const [readinessCollapsed, setReadinessCollapsed] = usePersistedFlag(
+    'octa.project.readiness.collapsed'
+  )
   const {
     data: project,
     isLoading,
@@ -612,85 +648,41 @@ export function ProjectDetail({
               readiness={setupReadiness}
               isLoading={setupReadinessLoading}
               onNavigate={handleSetupNavigate}
+              collapsed={readinessCollapsed}
+              onCollapsedChange={setReadinessCollapsed}
             />
 
-            <div className='mt-2 grid gap-4 lg:grid-cols-[280px_minmax(0,1fr)]'>
-              <aside className='self-start rounded-md border bg-card p-3 lg:sticky lg:top-[calc(3.5rem+1rem)] lg:max-h-[calc(100vh-3.5rem-2rem)] lg:overflow-y-auto'>
-                <p className='mb-3 text-xs font-semibold tracking-wide text-muted-foreground uppercase'>
-                  Project Modules
-                </p>
-
-                <nav className='space-y-1'>
-                  {menuItems.map((item) => {
-                    const isActiveModule = visibleModule === item.key
-                    const hasChildren = Boolean(item.children?.length)
-
-                    return (
-                      <div key={item.key}>
-                        <Link
-                          data-testid={`uat-project-module-${item.key}`}
-                          to={
-                            hasChildren && isModuleWithChildren(item.key)
-                              ? '/projects/$projectId/$module/$child'
-                              : '/projects/$projectId/$module'
-                          }
-                          params={{
-                            projectId,
-                            module: slugForModule(item.key),
-                            ...(hasChildren && isModuleWithChildren(item.key)
-                              ? { child: childState[item.key] }
-                              : {}),
-                          }}
-                          onClick={(event) => {
-                            event.preventDefault()
-                            handleModuleSelect(item)
-                          }}
-                          className={[
-                            'block w-full rounded-md px-2 py-2 text-left text-sm font-medium transition-colors',
-                            isActiveModule
-                              ? 'bg-primary/10 text-primary'
-                              : 'hover:bg-muted/50',
-                          ].join(' ')}
-                        >
-                          {item.label}
-                        </Link>
-
-                        {hasChildren && isModuleWithChildren(item.key) && (
-                          <div className='ms-2 mt-1 space-y-1 border-s ps-2'>
-                            {item.children?.map((child) => {
-                              const module = item.key as ModuleWithChildren
-                              const isChildActive =
-                                isActiveModule &&
-                                childState[module] === child.key
-
-                              return (
-                                <Link
-                                  data-testid={`uat-project-module-${item.key}-${child.key}`}
-                                  key={child.key}
-                                  to='/projects/$projectId/$module/$child'
-                                  params={{
-                                    projectId,
-                                    module: slugForModule(module),
-                                    child: child.key,
-                                  }}
-                                  className={[
-                                    'block w-full rounded-md px-2 py-1.5 text-left text-xs transition-colors',
-                                    isChildActive
-                                      ? 'bg-muted text-foreground'
-                                      : 'text-muted-foreground hover:bg-muted/50 hover:text-foreground',
-                                  ].join(' ')}
-                                >
-                                  {child.label}
-                                </Link>
-                              )
-                            })}
-                          </div>
-                        )}
-                      </div>
-                    )
-                  })}
-                </nav>
-              </aside>
+            <div
+              className={cn(
+                'mt-2 grid gap-4',
+                navCollapsed
+                  ? 'lg:grid-cols-[3.5rem_minmax(0,1fr)]'
+                  : 'lg:grid-cols-[280px_minmax(0,1fr)]'
+              )}
+            >
+              <ProjectModuleNav
+                items={menuItems}
+                activeModule={visibleModule}
+                activeChild={
+                  isModuleWithChildren(visibleModule)
+                    ? childState[visibleModule]
+                    : undefined
+                }
+                collapsed={navCollapsed}
+                onCollapsedChange={setNavCollapsed}
+                onSelectModule={handleModuleSelect}
+                onSelectChild={(module, child) =>
+                  navigate({
+                    to: '/projects/$projectId/$module/$child',
+                    params: {
+                      projectId,
+                      module: slugForModule(module),
+                      child,
+                    },
+                  })
+                }
+                hasChildren={(key) => isModuleWithChildren(key)}
+              />
 
               <section
                 data-testid={`uat-project-content-${visibleModule}`}

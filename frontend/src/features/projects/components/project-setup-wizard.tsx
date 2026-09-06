@@ -2,12 +2,15 @@ import {
   AlertTriangle,
   ArrowRight,
   CheckCircle2,
+  ChevronDown,
+  ChevronUp,
   CircleDashed,
   Clock3,
   ListChecks,
   Lock,
   ShieldCheck,
 } from 'lucide-react'
+import { statusBadge, statusIcon, statusStripe } from '@/lib/status'
 import { cn } from '@/lib/utils'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -21,37 +24,20 @@ type Props = {
   readiness?: ProjectSetupReadiness
   isLoading?: boolean
   onNavigate: (target: ProjectSetupTarget) => void
+  /** Collapsed to the compact status bar, for focus on the working area. */
+  collapsed?: boolean
+  onCollapsedChange?: (collapsed: boolean) => void
 }
 
+/**
+ * Step status uses the product-wide semantic tones (lib/status.ts) rather than
+ * Tailwind palette colours, so Done is the same green here as everywhere else.
+ */
 const statusMeta = {
-  complete: {
-    label: 'Done',
-    icon: CheckCircle2,
-    className:
-      'border-emerald-300 bg-emerald-50 text-emerald-800 dark:bg-emerald-950/30 dark:text-emerald-200',
-    iconClassName: 'text-emerald-600',
-  },
-  attention: {
-    label: 'Review',
-    icon: Clock3,
-    className:
-      'border-amber-300 bg-amber-50 text-amber-800 dark:bg-amber-950/30 dark:text-amber-200',
-    iconClassName: 'text-amber-600',
-  },
-  blocked: {
-    label: 'Blocked',
-    icon: AlertTriangle,
-    className:
-      'border-rose-300 bg-rose-50 text-rose-800 dark:bg-rose-950/30 dark:text-rose-200',
-    iconClassName: 'text-rose-600',
-  },
-  pending: {
-    label: 'Pending',
-    icon: CircleDashed,
-    className:
-      'border-slate-300 bg-slate-50 text-slate-700 dark:bg-slate-900/60 dark:text-slate-200',
-    iconClassName: 'text-slate-500',
-  },
+  complete: { label: 'Done', icon: CheckCircle2, tone: 'done' as const },
+  attention: { label: 'Review', icon: Clock3, tone: 'review' as const },
+  blocked: { label: 'Blocked', icon: AlertTriangle, tone: 'blocked' as const },
+  pending: { label: 'Pending', icon: CircleDashed, tone: 'neutral' as const },
 }
 
 const countLabels: Record<string, string> = {
@@ -115,19 +101,27 @@ function StepCard({
   const chips = countChips(step)
 
   return (
-    <div className='flex min-h-35 flex-col justify-between rounded-md border bg-background p-3'>
+    // Status reads from a leading stripe and a badge, not from flooding the
+    // card — the card stays a neutral surface so the content is legible.
+    <div className='relative flex min-h-35 flex-col justify-between overflow-hidden rounded-md border bg-card p-3 pl-3.5 shadow-[var(--shadow-card)]'>
+      <span
+        aria-hidden
+        className={cn('absolute inset-y-0 left-0 w-[3px]', statusStripe(meta.tone))}
+      />
       <div className='space-y-3'>
         <div className='flex items-start justify-between gap-3'>
           <div className='min-w-0'>
             <div className='flex items-center gap-2'>
-              <Icon className={cn('h-4 w-4 shrink-0', meta.iconClassName)} />
-              <h4 className='truncate text-sm font-semibold'>{step.label}</h4>
+              <Icon className={cn('h-4 w-4 shrink-0', statusIcon(meta.tone))} />
+              <h4 className='truncate text-sm font-semibold text-foreground'>
+                {step.label}
+              </h4>
             </div>
             <p className='mt-1 line-clamp-2 text-xs text-muted-foreground'>
               {step.message}
             </p>
           </div>
-          <Badge variant='outline' className={cn('shrink-0', meta.className)}>
+          <Badge variant='outline' className={cn('shrink-0', statusBadge(meta.tone))}>
             {meta.label}
           </Badge>
         </div>
@@ -178,6 +172,8 @@ export function ProjectSetupWizard({
   readiness,
   isLoading,
   onNavigate,
+  collapsed = false,
+  onCollapsedChange,
 }: Props) {
   if (isLoading && !readiness) {
     return (
@@ -208,48 +204,116 @@ export function ProjectSetupWizard({
   const baselineGate = readiness.gates.baseline
   const reportingGate = readiness.gates.reporting
 
+  // Gate badges, in the product's semantic tones. A gate that is genuinely
+  // blocking reads red; one merely in progress reads amber; a satisfied one
+  // reads green. Baseline readiness is informational until it is locked.
+  const gateBadges = [
+    {
+      key: 'progress',
+      label: progressGate.ready ? 'Ready for progress' : 'Setup in progress',
+      tone: progressGate.ready ? ('done' as const) : ('review' as const),
+      icon: progressGate.ready ? CheckCircle2 : Clock3,
+    },
+    ...(reportingGate
+      ? [
+          {
+            key: 'reporting',
+            label: reportingGate.ready ? 'Official reporting ready' : 'Reporting gated',
+            tone: reportingGate.ready ? ('done' as const) : ('blocked' as const),
+            icon: reportingGate.ready ? CheckCircle2 : AlertTriangle,
+          },
+        ]
+      : []),
+    ...(baselineGate.alreadyLocked
+      ? [{ key: 'baseline', label: 'Baseline locked', tone: 'done' as const, icon: Lock }]
+      : baselineGate.ready
+        ? [{ key: 'baseline', label: 'Baseline ready', tone: 'info' as const, icon: ShieldCheck }]
+        : []),
+  ]
+
+  // Collapsed: a compact enterprise status bar that keeps the whole state
+  // legible in one line, so a working screen gets its vertical space back.
+  if (collapsed) {
+    return (
+      <section className='rounded-md border bg-card shadow-[var(--shadow-card)]'>
+        <button
+          type='button'
+          onClick={() => onCollapsedChange?.(false)}
+          data-testid='uat-setup-readiness-expand'
+          className='flex w-full flex-wrap items-center gap-x-3 gap-y-2 rounded-md px-3 py-2.5 text-start transition-colors hover:bg-accent/60 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none'
+        >
+          <ListChecks className='h-4 w-4 shrink-0 text-primary' />
+          <span className='text-sm font-semibold text-foreground'>Setup Readiness</span>
+
+          <span className='flex flex-wrap items-center gap-1.5'>
+            {gateBadges.map((gate) => (
+              <Badge
+                key={gate.key}
+                variant='outline'
+                className={cn('gap-1 px-1.5 py-0 text-[11px]', statusBadge(gate.tone))}
+              >
+                <gate.icon className='h-3 w-3' />
+                {gate.label}
+              </Badge>
+            ))}
+          </span>
+
+          <span className='ms-auto flex items-center gap-3 text-xs'>
+            <span className='font-medium text-foreground'>
+              <span className='octa-numeric'>
+                {readiness.summary.completeSteps}/{readiness.summary.totalSteps}
+              </span>{' '}
+              complete
+            </span>
+            {readiness.summary.blockingCount > 0 && (
+              <span className={cn('font-medium', statusIcon('blocked'))}>
+                {readiness.summary.blockingCount} blockers
+              </span>
+            )}
+            {readiness.summary.warningCount > 0 && (
+              <span className={cn('font-medium', statusIcon('review'))}>
+                {readiness.summary.warningCount} warnings
+              </span>
+            )}
+            <ChevronDown className='h-4 w-4 text-muted-foreground' />
+          </span>
+        </button>
+      </section>
+    )
+  }
+
   return (
-    <section className='rounded-md border bg-card p-4'>
+    <section className='rounded-md border bg-card p-4 shadow-[var(--shadow-card)]'>
       <div className='flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between'>
         <div className='min-w-0 space-y-2'>
           <div className='flex flex-wrap items-center gap-2'>
             <ListChecks className='h-4 w-4 text-primary' />
-            <h3 className='text-base font-semibold'>Setup Readiness</h3>
-            <Badge
-              variant='outline'
-              className={
-                progressGate.ready
-                  ? 'border-emerald-300 bg-emerald-50 text-emerald-800'
-                  : 'border-amber-300 bg-amber-50 text-amber-800'
-              }
-            >
-              {progressGate.ready ? 'Ready for progress' : 'Setup in progress'}
-            </Badge>
-            {reportingGate && (
+            <h3 className='text-base font-semibold text-foreground'>
+              Setup Readiness
+            </h3>
+            {gateBadges.map((gate) => (
               <Badge
+                key={gate.key}
                 variant='outline'
-                className={
-                  reportingGate.ready
-                    ? 'border-emerald-300 bg-emerald-50 text-emerald-800'
-                    : 'border-rose-300 bg-rose-50 text-rose-800'
-                }
+                className={cn('gap-1', statusBadge(gate.tone))}
               >
-                {reportingGate.ready
-                  ? 'Official reporting ready'
-                  : 'Reporting gated'}
+                <gate.icon className='h-3.5 w-3.5' />
+                {gate.label}
               </Badge>
+            ))}
+            {onCollapsedChange && (
+              <Button
+                type='button'
+                variant='ghost'
+                size='sm'
+                className='ms-auto h-7 gap-1 px-2 text-xs text-muted-foreground'
+                onClick={() => onCollapsedChange(true)}
+                data-testid='uat-setup-readiness-collapse'
+              >
+                Collapse
+                <ChevronUp className='h-3.5 w-3.5' />
+              </Button>
             )}
-            {baselineGate.alreadyLocked ? (
-              <Badge variant='secondary'>
-                <Lock className='h-3.5 w-3.5' />
-                Baseline locked
-              </Badge>
-            ) : baselineGate.ready ? (
-              <Badge variant='secondary'>
-                <ShieldCheck className='h-3.5 w-3.5' />
-                Baseline ready
-              </Badge>
-            ) : null}
           </div>
 
           <div className='max-w-3xl text-sm text-muted-foreground'>
@@ -268,11 +332,11 @@ export function ProjectSetupWizard({
             </span>
           </div>
 
-          <div className='h-2 max-w-xl rounded-full bg-muted'>
+          <div className='h-2 max-w-xl overflow-hidden rounded-full bg-muted'>
             <div
               className={cn(
                 'h-2 rounded-full transition-all',
-                progressGate.ready ? 'bg-emerald-500' : 'bg-primary'
+                progressGate.ready ? 'bg-success' : 'bg-interactive'
               )}
               style={{ width: `${progress}%` }}
             />

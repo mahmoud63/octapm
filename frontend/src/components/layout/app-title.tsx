@@ -1,6 +1,7 @@
 import { Link } from '@tanstack/react-router'
 import { Menu, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { OctaLogo } from '@/components/brand/octa-logo'
 import {
   SidebarMenu,
   SidebarMenuButton,
@@ -23,10 +24,17 @@ export function AppTitle() {
             <Link
               to='/'
               onClick={() => setOpenMobile(false)}
-              className='grid flex-1 text-start text-sm leading-tight'
+              className='flex flex-1 items-center gap-2.5 text-start leading-tight'
             >
-              <span className='truncate font-bold'>Octa PM</span>
-              <span className='truncate text-xs'>Construction Management</span>
+              <OctaLogo markOnly size='md' />
+              <span className='grid min-w-0'>
+                <span className='font-display truncate text-sm font-bold tracking-[-0.02em] text-primary'>
+                  octapm
+                </span>
+                <span className='truncate text-[11px] text-muted-foreground'>
+                  One platform, total project control
+                </span>
+              </span>
             </Link>
             <ToggleSidebar />
           </div>

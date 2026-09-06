@@ -1,96 +1,312 @@
-:root {
-  --radius: 0.625rem;
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.129 0.042 264.695);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.129 0.042 264.695);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.129 0.042 264.695);
-  --primary: oklch(0.208 0.042 265.755);
-  --primary-foreground: oklch(0.984 0.003 247.858);
-  --secondary: oklch(0.968 0.007 247.896);
-  --secondary-foreground: oklch(0.208 0.042 265.755);
-  --muted: oklch(0.968 0.007 247.896);
-  --muted-foreground: oklch(0.554 0.046 257.417);
-  --accent: oklch(0.968 0.007 247.896);
-  --accent-foreground: oklch(0.208 0.042 265.755);
-  --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.929 0.013 255.508);
-  --input: oklch(0.929 0.013 255.508);
-  --ring: oklch(0.704 0.04 256.788);
-  --chart-1: oklch(0.646 0.222 41.116);
-  --chart-2: oklch(0.6 0.118 184.704);
-  --chart-3: oklch(0.398 0.07 227.392);
-  --chart-4: oklch(0.828 0.189 84.429);
-  --chart-5: oklch(0.769 0.188 70.08);
+/* ==========================================================================
+   OctaPM design tokens
+   --------------------------------------------------------------------------
+   One source of truth for the product's visual identity. Components must use
+   the semantic tokens below (--primary, --success, --surface…) and never a raw
+   brand value or a Tailwind palette colour, so the brand can move in one place.
 
-  --sidebar: var(--background);
-  --sidebar-foreground: var(--foreground);
-  --sidebar-primary: var(--primary);
-  --sidebar-primary-foreground: var(--primary-foreground);
-  --sidebar-accent: var(--accent);
-  --sidebar-accent-foreground: var(--accent-foreground);
-  --sidebar-border: var(--border);
-  --sidebar-ring: var(--ring);
+   Layer 1  --octa-*        the official brand palette, raw
+   Layer 2  semantic tokens what a component actually asks for
+   Layer 3  @theme inline   registers them as Tailwind utilities
+   ========================================================================== */
+
+:root {
+  /* --- Layer 1: official OctaPM brand palette ---------------------------- */
+
+  /* Primary identity. Midnight Indigo carries the shell and the hierarchy. */
+  --octa-midnight-indigo: #0f1b64;
+  --octa-midnight-indigo-hover: #16257f;
+  --octa-midnight-indigo-deep: #0a1247;
+
+  /* Royal Blue: supporting primary actions, selected navigation. */
+  --octa-royal-blue: #325fec;
+  --octa-royal-blue-hover: #2a52d4;
+
+  /* Azure: buttons, links, interactive and informational states. */
+  --octa-azure: #3388ff;
+  --octa-azure-hover: #1f78f5;
+  --octa-azure-soft: #eaf2ff;
+
+  /* Charcoal: body copy and icons. Not pure black. */
+  --octa-charcoal: #121b21;
+  --octa-charcoal-muted: #5a6672;
+
+  /* PROVISIONAL — no exact value was supplied for Light Gray. Chosen to sit
+     under Midnight Indigo without a colour cast. Replace here when the brand
+     reference is available; nothing else needs to change. */
+  --octa-light-gray: #f4f6fa;
+  --octa-light-gray-deep: #e7ebf3;
+  --octa-border: #dfe4ee;
+
+  /* PROVISIONAL — no exact value was supplied for Turquoise. Used sparingly as
+     the accent, never competing with the indigo/blue identity. */
+  --octa-turquoise: #1ec9c3;
+  --octa-turquoise-soft: #e2faf8;
+
+  /* Extended product palette, for system feedback. */
+  --octa-success: #26ac7a;
+  --octa-success-soft: #e6f6f0;
+  --octa-success-strong: #16724f; /* text weight on a soft ground */
+  --octa-error: #f2445c;
+  --octa-error-soft: #fdebee;
+  --octa-error-strong: #b3172c;
+  --octa-warning: #fdc047;
+  --octa-warning-soft: #fff6e3;
+  --octa-warning-strong: #7a5200; /* amber cannot carry small text; this can */
+  --octa-info: #3388ff;
+  --octa-info-soft: #eaf2ff;
+  --octa-info-strong: #1a5fbf;
+  --octa-purple: #7d50f0;
+  --octa-purple-soft: #f0eaff;
+  --octa-purple-strong: #5326b8;
+
+  /* --- Layer 2: semantic tokens ----------------------------------------- */
+
+  /* Large content areas stay light for readability; the shell carries the
+     brand. That is the brand-balance principle, not a per-screen colour quota. */
+  --background: #ffffff;
+  --foreground: var(--octa-charcoal);
+  --surface: var(--octa-light-gray);
+  --surface-elevated: #ffffff;
+
+  --card: #ffffff;
+  --card-foreground: var(--octa-charcoal);
+  --popover: #ffffff;
+  --popover-foreground: var(--octa-charcoal);
+
+  --primary: var(--octa-midnight-indigo);
+  --primary-foreground: #ffffff;
+  --primary-hover: var(--octa-midnight-indigo-hover);
+
+  --secondary: var(--octa-light-gray);
+  --secondary-foreground: var(--octa-midnight-indigo);
+
+  --muted: var(--octa-light-gray);
+  --muted-foreground: var(--octa-charcoal-muted);
+
+  /* Interaction lives on Royal Blue; Azure is the lighter interactive tone. */
+  --interactive: var(--octa-royal-blue);
+  --interactive-hover: var(--octa-royal-blue-hover);
+  --interactive-foreground: #ffffff;
+  --accent: var(--octa-azure-soft);
+  --accent-foreground: var(--octa-midnight-indigo);
+
+  --selected: var(--octa-azure-soft);
+  --selected-foreground: var(--octa-midnight-indigo);
+  --selected-indicator: var(--octa-royal-blue);
+
+  --destructive: var(--octa-error);
+  --destructive-foreground: #ffffff;
+
+  --border: var(--octa-border);
+  --input: var(--octa-border);
+  --ring: var(--octa-azure);
+
+  --disabled: var(--octa-light-gray-deep);
+  --disabled-foreground: #9aa4b2;
+
+  /* Status. Semantics are fixed product-wide: green completed, amber review,
+     red blocked, blue informational, turquoise special accent. */
+  --success: var(--octa-success);
+  --success-soft: var(--octa-success-soft);
+  --success-foreground: var(--octa-success-strong);
+  --warning: var(--octa-warning);
+  --warning-soft: var(--octa-warning-soft);
+  --warning-foreground: var(--octa-warning-strong);
+  --error: var(--octa-error);
+  --error-soft: var(--octa-error-soft);
+  --error-foreground: var(--octa-error-strong);
+  --info: var(--octa-info);
+  --info-soft: var(--octa-info-soft);
+  --info-foreground: var(--octa-info-strong);
+  --brand-accent: var(--octa-turquoise);
+  --brand-accent-soft: var(--octa-turquoise-soft);
+
+  /* The application shell: navigation rails and headers carry the identity. */
+  --shell: var(--octa-midnight-indigo);
+  --shell-foreground: #ffffff;
+  --shell-muted-foreground: #b9c2e4;
+  --shell-border: #1d2a76;
+  --shell-hover: #16257f;
+
+  --sidebar: #ffffff;
+  --sidebar-foreground: var(--octa-charcoal);
+  --sidebar-primary: var(--octa-midnight-indigo);
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: var(--octa-azure-soft);
+  --sidebar-accent-foreground: var(--octa-midnight-indigo);
+  --sidebar-border: var(--octa-border);
+  --sidebar-ring: var(--octa-azure);
+
+  /* Data visualisation: a categorical ramp built from the brand, so charts
+     look like OctaPM rather than like the charting library's defaults. */
+  --chart-1: var(--octa-royal-blue);
+  --chart-2: var(--octa-turquoise);
+  --chart-3: var(--octa-midnight-indigo);
+  --chart-4: var(--octa-azure);
+  --chart-5: var(--octa-purple);
+  --chart-6: var(--octa-success);
+  --chart-7: var(--octa-warning);
+  --chart-8: var(--octa-error);
+
+  /* Enterprise geometry: restrained, not consumer-app rounded. */
+  --radius: 0.5rem;
+
+  /* Structural elevation. Cards are bordered, not floated. */
+  --shadow-card: 0 1px 2px 0 rgb(15 27 100 / 0.04);
+  --shadow-raised: 0 4px 12px -2px rgb(15 27 100 / 0.10);
+  --shadow-overlay: 0 16px 40px -8px rgb(15 27 100 / 0.22);
 }
 
 .dark {
-  --background: oklch(0.129 0.042 264.695);
-  --foreground: oklch(0.984 0.003 247.858);
-  --card: oklch(0.14 0.04 259.21);
-  --card-foreground: oklch(0.984 0.003 247.858);
-  --popover: oklch(0.208 0.042 265.755);
-  --popover-foreground: oklch(0.984 0.003 247.858);
-  --primary: oklch(0.929 0.013 255.508);
-  --primary-foreground: oklch(0.208 0.042 265.755);
-  --secondary: oklch(0.279 0.041 260.031);
-  --secondary-foreground: oklch(0.984 0.003 247.858);
-  --muted: oklch(0.279 0.041 260.031);
-  --muted-foreground: oklch(0.704 0.04 256.788);
-  --accent: oklch(0.279 0.041 260.031);
-  --accent-foreground: oklch(0.984 0.003 247.858);
-  --destructive: oklch(0.704 0.191 22.216);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.551 0.027 264.364);
-  --chart-1: oklch(0.488 0.243 264.376);
-  --chart-2: oklch(0.696 0.17 162.48);
-  --chart-3: oklch(0.769 0.188 70.08);
-  --chart-4: oklch(0.627 0.265 303.9);
-  --chart-5: oklch(0.645 0.246 16.439);
+  --background: #0b1020;
+  --foreground: #eef1f8;
+  --surface: #121a30;
+  --surface-elevated: #16203a;
+
+  --card: #121a30;
+  --card-foreground: #eef1f8;
+  --popover: #16203a;
+  --popover-foreground: #eef1f8;
+
+  /* On a dark ground Midnight Indigo has too little separation, so the
+     lighter brand blues carry the identity instead. */
+  --primary: var(--octa-royal-blue);
+  --primary-foreground: #ffffff;
+  --primary-hover: var(--octa-azure);
+
+  --secondary: #1b2542;
+  --secondary-foreground: #eef1f8;
+  --muted: #1b2542;
+  --muted-foreground: #9fabc6;
+
+  --interactive: var(--octa-azure);
+  --interactive-hover: #5ba0ff;
+  --interactive-foreground: #06122b;
+  --accent: #1d2a4d;
+  --accent-foreground: #dbe6ff;
+
+  --selected: #1d2a4d;
+  --selected-foreground: #dbe6ff;
+  --selected-indicator: var(--octa-azure);
+
+  --destructive: #ff6376;
+  --destructive-foreground: #26060c;
+
+  --border: #253156;
+  --input: #253156;
+  --ring: var(--octa-azure);
+
+  --disabled: #1b2542;
+  --disabled-foreground: #6b7796;
+
+  --success: #34c48d;
+  --success-soft: #102f26;
+  --success-foreground: #7ee7bd;
+  --warning: var(--octa-warning);
+  --warning-soft: #33260a;
+  --warning-foreground: #ffd98a;
+  --error: #ff6376;
+  --error-soft: #3a1119;
+  --error-foreground: #ffa8b4;
+  --info: #5ba0ff;
+  --info-soft: #10244a;
+  --info-foreground: #a9caff;
+  --brand-accent: #35ded7;
+  --brand-accent-soft: #0d2f2e;
+
+  --shell: #0a1024;
+  --shell-foreground: #eef1f8;
+  --shell-muted-foreground: #93a0c4;
+  --shell-border: #1c2748;
+  --shell-hover: #16203a;
+
+  --sidebar: #0e1529;
+  --sidebar-foreground: #eef1f8;
+  --sidebar-primary: var(--octa-azure);
+  --sidebar-primary-foreground: #06122b;
+  --sidebar-accent: #1d2a4d;
+  --sidebar-accent-foreground: #dbe6ff;
+  --sidebar-border: #253156;
+  --sidebar-ring: var(--octa-azure);
+
+  --shadow-card: 0 1px 2px 0 rgb(0 0 0 / 0.3);
+  --shadow-raised: 0 4px 12px -2px rgb(0 0 0 / 0.45);
+  --shadow-overlay: 0 16px 40px -8px rgb(0 0 0 / 0.6);
 }
 
-@theme inline {
-  --font-inter: 'Inter', 'sans-serif';
-  --font-manrope: 'Manrope', 'sans-serif';
+/* --- Layer 3: expose the tokens as Tailwind utilities -------------------- */
 
-  --radius-sm: calc(var(--radius) - 4px);
-  --radius-md: calc(var(--radius) - 2px);
+@theme inline {
+  /* Space Grotesk is the brand voice: wordmark, headings, navigation, KPIs.
+     Inter carries dense operational data, where it is more legible small.
+     Both are declared with real fallbacks so a blocked font never collapses
+     the layout. */
+  --font-display: 'Space Grotesk', 'Inter', ui-sans-serif, system-ui, sans-serif;
+  --font-sans: 'Inter', ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-inter: var(--font-sans);
+  --font-manrope: var(--font-display);
+
+  --radius-sm: calc(var(--radius) - 3px);
+  --radius-md: calc(var(--radius) - 1px);
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) + 4px);
+
   --color-background: var(--background);
   --color-foreground: var(--foreground);
+  --color-surface: var(--surface);
+  --color-surface-elevated: var(--surface-elevated);
   --color-card: var(--card);
   --color-card-foreground: var(--card-foreground);
   --color-popover: var(--popover);
   --color-popover-foreground: var(--popover-foreground);
+
   --color-primary: var(--primary);
   --color-primary-foreground: var(--primary-foreground);
+  --color-primary-hover: var(--primary-hover);
   --color-secondary: var(--secondary);
   --color-secondary-foreground: var(--secondary-foreground);
   --color-muted: var(--muted);
   --color-muted-foreground: var(--muted-foreground);
+
+  --color-interactive: var(--interactive);
+  --color-interactive-hover: var(--interactive-hover);
+  --color-interactive-foreground: var(--interactive-foreground);
   --color-accent: var(--accent);
   --color-accent-foreground: var(--accent-foreground);
+  --color-selected: var(--selected);
+  --color-selected-foreground: var(--selected-foreground);
+  --color-selected-indicator: var(--selected-indicator);
+
   --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
-  --color-chart-1: var(--chart-1);
-  --color-chart-2: var(--chart-2);
-  --color-chart-3: var(--chart-3);
-  --color-chart-4: var(--chart-4);
-  --color-chart-5: var(--chart-5);
+  --color-disabled: var(--disabled);
+  --color-disabled-foreground: var(--disabled-foreground);
+
+  --color-success: var(--success);
+  --color-success-soft: var(--success-soft);
+  --color-success-foreground: var(--success-foreground);
+  --color-warning: var(--warning);
+  --color-warning-soft: var(--warning-soft);
+  --color-warning-foreground: var(--warning-foreground);
+  --color-error: var(--error);
+  --color-error-soft: var(--error-soft);
+  --color-error-foreground: var(--error-foreground);
+  --color-info: var(--info);
+  --color-info-soft: var(--info-soft);
+  --color-info-foreground: var(--info-foreground);
+  --color-brand-accent: var(--brand-accent);
+  --color-brand-accent-soft: var(--brand-accent-soft);
+
+  --color-shell: var(--shell);
+  --color-shell-foreground: var(--shell-foreground);
+  --color-shell-muted-foreground: var(--shell-muted-foreground);
+  --color-shell-border: var(--shell-border);
+  --color-shell-hover: var(--shell-hover);
+
   --color-sidebar: var(--sidebar);
   --color-sidebar-foreground: var(--sidebar-foreground);
   --color-sidebar-primary: var(--sidebar-primary);
@@ -99,4 +315,58 @@
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-ring: var(--sidebar-ring);
+
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-chart-6: var(--chart-6);
+  --color-chart-7: var(--chart-7);
+  --color-chart-8: var(--chart-8);
+
+  /* The brand palette, for the rare case a surface genuinely needs it. */
+  --color-octa-midnight-indigo: var(--octa-midnight-indigo);
+  --color-octa-royal-blue: var(--octa-royal-blue);
+  --color-octa-azure: var(--octa-azure);
+  --color-octa-turquoise: var(--octa-turquoise);
+  --color-octa-charcoal: var(--octa-charcoal);
+  --color-octa-light-gray: var(--octa-light-gray);
+}
+
+/* --- Octagonal motif ----------------------------------------------------- */
+/* The brand signature, for login, onboarding, empty states and occasional
+   banners. Never behind dense tables, forms or Gantt charts. */
+
+.octa-hero {
+  background:
+    radial-gradient(120% 120% at 100% 0%, var(--octa-azure) 0%, transparent 55%),
+    linear-gradient(135deg, var(--octa-midnight-indigo-deep) 0%, var(--octa-midnight-indigo) 45%, var(--octa-royal-blue) 100%);
+  color: #fff;
+}
+
+/* A single octagon, tiled. Subtle enough to read as texture, not pattern. */
+.octa-pattern::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.14;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='72' height='72' viewBox='0 0 72 72'><path d='M22 4h28l18 18v28L50 68H22L4 50V22z' fill='none' stroke='white' stroke-width='1.25'/></svg>");
+  background-size: 72px 72px;
+}
+
+/* Octagonal clip, for brand marks and premium surfaces only. */
+.octa-clip {
+  clip-path: polygon(
+    30% 0%, 70% 0%, 100% 30%, 100% 70%,
+    70% 100%, 30% 100%, 0% 70%, 0% 30%
+  );
+}
+
+/* Financial and quantity columns: tabular figures so digits line up. */
+.octa-numeric {
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  font-feature-settings: 'tnum' 1;
 }

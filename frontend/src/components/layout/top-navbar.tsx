@@ -1,4 +1,4 @@
-import * as React from 'react'
+﻿import * as React from 'react'
 import { Link, useLocation } from '@tanstack/react-router'
 import {
   Menu,
@@ -8,10 +8,10 @@ import {
   Bell,
   CreditCard,
   Sparkles,
-  Command,
 } from 'lucide-react'
 import { useAuthStore } from '@/stores/auth-store'
 import { cn } from '@/lib/utils'
+import { OctaLogo } from '@/components/brand/octa-logo'
 import useDialogState from '@/hooks/use-dialog-state'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { Badge } from '@/components/ui/badge'
@@ -50,7 +50,7 @@ import { sidebarData } from './data/sidebar-data'
 import { ProjectSwitcher } from './project-switcher'
 import { type NavCollapsible, type NavLink, type NavItem } from './types'
 
-// ── Flat list of top-level nav items ──────────────────────────────────────
+// â”€â”€ Flat list of top-level nav items â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // "Work" group items show directly; collapsible items become dropdowns.
 const generalItems = sidebarData.navGroups[0].items // Dashboard, Projects, Tasks, Users
 const otherItems = sidebarData.navGroups[1].items // Settings (collapsible), Help Center
@@ -65,7 +65,7 @@ function isNavCollapsible(item: NavItem): item is NavCollapsible {
   return 'items' in item && !!item.items
 }
 
-// ── Desktop nav link ──────────────────────────────────────────────────────
+// â”€â”€ Desktop nav link â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function displayIdForTitle(title: string): DisplayNavigationItemId | null {
   const normalized = title.toLowerCase().replace(/\s+/g, '-')
   return displayNavigationItems.some((item) => item.id === normalized)
@@ -123,7 +123,7 @@ function NavLinkItem({ item, href }: { item: NavLink; href: string }) {
   )
 }
 
-// ── Desktop dropdown for collapsible items ────────────────────────────────
+// â”€â”€ Desktop dropdown for collapsible items â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function NavDropdownItem({
   item,
   href,
@@ -176,7 +176,7 @@ function NavDropdownItem({
   )
 }
 
-// ── User avatar dropdown ──────────────────────────────────────────────────
+// â”€â”€ User avatar dropdown â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function UserDropdown() {
   const authUser = useAuthStore((state) => state.auth.user)
   const user = authUser
@@ -268,7 +268,7 @@ function UserDropdown() {
   )
 }
 
-// ── Mobile sheet nav ──────────────────────────────────────────────────────
+// â”€â”€ Mobile sheet nav â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function MobileNav({ href, items }: { href: string; items: NavItem[] }) {
   const [open, setOpen] = React.useState(false)
 
@@ -288,10 +288,7 @@ function MobileNav({ href, items }: { href: string; items: NavItem[] }) {
               className='flex items-center gap-2'
               onClick={() => setOpen(false)}
             >
-              <div className='flex size-7 items-center justify-center rounded-md bg-primary text-sm font-bold text-primary-foreground'>
-                8
-              </div>
-              <span className='text-base font-bold'>OctaPM</span>
+              <OctaLogo size='lg' />
             </Link>
           </SheetTitle>
         </SheetHeader>
@@ -362,7 +359,7 @@ function MobileNav({ href, items }: { href: string; items: NavItem[] }) {
   )
 }
 
-// ── Main TopNavbar ─────────────────────────────────────────────────────────
+// â”€â”€ Main TopNavbar â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 export function TopNavbar() {
   const href = useLocation({ select: (l) => l.href })
   const [scrolled, setScrolled] = React.useState(false)
@@ -401,18 +398,20 @@ export function TopNavbar() {
     >
       <SubscriptionBanner />
       <div className='flex h-14 items-center gap-4 px-4 lg:px-6'>
-        {/* Logo */}
-        <Link to='/' className='flex shrink-0 items-center gap-2'>
-          <div className='flex size-7 items-center justify-center rounded-md bg-primary text-sm font-bold text-primary-foreground'>
-            <Command className='size-4' />
-          </div>
-          <span className='hidden font-bold sm:inline-block'>OctaPM</span>
+        {/* The brand mark. Wordmark hides on the narrowest widths; the mark
+            always stays, so the product remains identifiable. */}
+        <Link to='/' className='flex shrink-0 items-center' aria-label='OctaPM home'>
+          <OctaLogo className='sm:hidden' markOnly size='md' />
+          <OctaLogo className='hidden sm:inline-flex' size='md' />
         </Link>
 
         <ProjectSwitcher className='hidden md:inline-flex' />
 
         {/* Desktop nav */}
-        <nav className='hidden flex-1 items-center gap-0.5 md:flex'>
+        {/* min-w-0 lets the nav shrink inside the flex row, and the nav scrolls
+            within itself rather than pushing the page sideways â€” at tablet
+            width the full link set is ~1056px against a 758px viewport. */}
+        <nav className='hidden min-w-0 flex-1 items-center gap-0.5 overflow-x-auto [scrollbar-width:none] md:flex [&::-webkit-scrollbar]:hidden'>
           {visibleGeneralItems.map((item) =>
             isNavLink(item) ? (
               <NavLinkItem key={item.title} item={item} href={href} />

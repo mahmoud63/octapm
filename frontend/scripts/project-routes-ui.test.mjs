@@ -43,7 +43,18 @@ assert.ok(lazyCount >= 15, `every module is lazily loaded (found ${lazyCount})`)
 ;["import('@/features/schedule/components/schedule-dashboard')", "import('@/features/doc-control/components/doc-control-dashboard')", "import('@/features/commercial/components/commercial-dashboard')", "import('@/features/boq/components/boq-page')"].forEach(
   (fragment) => assert.ok(detail.includes(fragment), `lazy import ${fragment}`)
 )
-assert.match(detail, /data-testid=\{`uat-project-module-\$\{item\.key\}`\}/, 'module test ids preserved')
+// The module navigation moved into its own component when Focus Mode was
+// added; the shell renders it and the test ids live there now.
+assert.match(detail, /<ProjectModuleNav/, 'the shell renders the module navigation')
+const nav = read('src/features/projects/components/project-module-nav.tsx')
+assert.match(nav, /data-testid=\{`uat-project-module-\$\{item\.key\}`\}/, 'module test ids preserved')
+assert.match(nav, /data-testid=\{`uat-project-rail-\$\{item\.key\}`\}/, 'collapsed rail exposes per-module test ids')
+// Focus Mode: the collapsed rail is the Midnight Indigo shell surface.
+assert.match(nav, /bg-shell/, 'the collapsed rail uses the branded shell token')
+assert.ok(
+  !/bg-(emerald|rose|amber|slate|sky|indigo)-\d{2,3}/.test(nav),
+  'the module navigation uses design tokens, not Tailwind palette colours'
+)
 
 const page = read('src/features/projects/components/project-detail-page.tsx')
 assert.match(page, /useParams\(\{ strict: false \}\)/, 'page reads module/child params')

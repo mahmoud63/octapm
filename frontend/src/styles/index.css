@@ -15,6 +15,25 @@
   }
   body {
     @apply min-h-svh w-full bg-background text-foreground has-[div[data-variant='inset']]:bg-sidebar;
+    font-family: var(--font-sans);
+  }
+
+  /* Headings and the wordmark carry the brand typeface; body and table data
+     stay on Inter for legibility at small sizes. */
+  h1,
+  h2,
+  h3,
+  h4,
+  .font-display {
+    font-family: var(--font-display);
+    letter-spacing: -0.011em;
+  }
+
+  /* Financial and quantity columns line up digit for digit. */
+  th[data-numeric],
+  td[data-numeric] {
+    font-variant-numeric: tabular-nums;
+    text-align: right;
   }
 
   /* Override Radix scroll locking for sticky headers */
