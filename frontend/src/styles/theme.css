@@ -122,8 +122,19 @@
   --brand-accent: var(--octa-turquoise);
   --brand-accent-soft: var(--octa-turquoise-soft);
 
-  /* The application shell: navigation rails and headers carry the identity. */
+  /* The application shell.
+     The brand material runs deep indigo into a vivid blue, so the header does
+     the same: Midnight Indigo at the leading edge easing toward Royal Blue.
+     Restrained — a working header, not a hero panel. `--shell` stays a flat
+     colour for anything that needs one; `--shell-gradient` is the surface. */
   --shell: var(--octa-midnight-indigo);
+  --shell-gradient: linear-gradient(
+    100deg,
+    var(--octa-midnight-indigo-deep) 0%,
+    var(--octa-midnight-indigo) 42%,
+    #1c39a8 78%,
+    var(--octa-royal-blue) 100%
+  );
   --shell-foreground: #ffffff;
   --shell-muted-foreground: #b9c2e4;
   --shell-border: #1d2a76;
@@ -334,6 +345,87 @@
   --color-octa-light-gray: var(--octa-light-gray);
 }
 
+/* --- The Midnight Indigo application header ------------------------------ */
+/*
+ * Re-points the semantic tokens for everything inside the primary header, so
+ * buttons, dropdown triggers, inputs and the project switcher read correctly on
+ * the dark ground without each growing its own variant. Nothing here is pure
+ * black; muted content is white at reduced opacity.
+ */
+.octa-dark-header {
+  /* The brand gradient, plus a whisper of the octagonal pattern so the header
+     carries the same structural language as the brand material. */
+  background-image: var(--shell-gradient);
+  background-color: var(--octa-midnight-indigo);
+
+  --background: var(--shell);
+  --foreground: #ffffff;
+  --card: var(--shell);
+  --card-foreground: #ffffff;
+
+  --muted: rgb(255 255 255 / 0.08);
+  --muted-foreground: rgb(255 255 255 / 0.72);
+
+  /* Hover is a white wash; the active item is Royal Blue. */
+  --accent: rgb(255 255 255 / 0.12);
+  --accent-foreground: #ffffff;
+  --selected: var(--octa-royal-blue);
+  --selected-foreground: #ffffff;
+
+  --primary: #ffffff;
+  --primary-foreground: var(--octa-midnight-indigo);
+  --secondary: rgb(255 255 255 / 0.10);
+  --secondary-foreground: #ffffff;
+
+  --border: rgb(255 255 255 / 0.14);
+  --input: rgb(255 255 255 / 0.14);
+  --ring: var(--octa-azure);
+
+  color: #ffffff;
+}
+
+/* Dropdowns and popovers opened from the header are normal light surfaces:
+   only the bar itself is dark, so menus stay legible and enterprise. */
+.octa-dark-header [data-slot='dropdown-menu-content'],
+.octa-dark-header [data-slot='popover-content'] {
+  color: var(--octa-charcoal);
+}
+
+/*
+ * Header controls — the project selector and the search field.
+ *
+ * These are inputs, not decoration: on the indigo ground an outline button
+ * reads as almost nothing, so they get their own translucent white surface.
+ * White at low opacity rather than another blue, so the header keeps a single
+ * brand colour and the controls still read as interactive.
+ */
+.octa-dark-header [data-testid='project-switcher'],
+.octa-dark-header [data-slot='search-trigger'] {
+  background-color: rgb(255 255 255 / 0.12);
+  border-color: rgb(255 255 255 / 0.22);
+  color: #ffffff;
+}
+
+.octa-dark-header [data-testid='project-switcher']:hover,
+.octa-dark-header [data-slot='search-trigger']:hover {
+  background-color: rgb(255 255 255 / 0.2);
+  border-color: rgb(255 255 255 / 0.34);
+  color: #ffffff;
+}
+
+/* Icons and placeholder text sit back a step so the label leads. */
+.octa-dark-header [data-testid='project-switcher'] svg,
+.octa-dark-header [data-slot='search-trigger'] svg,
+.octa-dark-header [data-slot='search-trigger'] kbd {
+  color: rgb(255 255 255 / 0.72);
+}
+
+/* The keyboard hint reads as a key, not as a filled chip. */
+.octa-dark-header [data-slot='search-trigger'] kbd {
+  background-color: rgb(255 255 255 / 0.14);
+  border-color: rgb(255 255 255 / 0.22);
+}
+
 /* --- Octagonal motif ----------------------------------------------------- */
 /* The brand signature, for login, onboarding, empty states and occasional
    banners. Never behind dense tables, forms or Gantt charts. */
@@ -350,10 +442,18 @@
   content: '';
   position: absolute;
   inset: 0;
+  z-index: -1;
   pointer-events: none;
   opacity: 0.14;
   background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='72' height='72' viewBox='0 0 72 72'><path d='M22 4h28l18 18v28L50 68H22L4 50V22z' fill='none' stroke='white' stroke-width='1.25'/></svg>");
   background-size: 72px 72px;
+}
+
+/* On the application header the motif is a texture, not a pattern: it should
+   register as structure without competing with the navigation on top of it. */
+.octa-dark-header.octa-pattern::before {
+  opacity: 0.07;
+  background-size: 56px 56px;
 }
 
 /* Octagonal clip, for brand marks and premium surfaces only. */

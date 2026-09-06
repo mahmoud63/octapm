@@ -1,5 +1,9 @@
 import { useQuery } from '@tanstack/react-query'
 import { apiClient } from '@/services/api/client'
+import { formatLongDate } from '@/lib/dates'
+import { statusBadge } from '@/lib/status'
+import { cn } from '@/lib/utils'
+import { Badge } from '@/components/ui/badge'
 import {
   PolarAngleAxis,
   PolarGrid,
@@ -80,13 +84,103 @@ function scoreLabel(score: number) {
   return 'Poor'
 }
 
+// A reporting cutoff is a calendar date: render it in UTC so it does not shift
+// a day for anyone west of it. See lib/dates.ts.
 function formatDate(value?: string | null) {
   if (!value) return 'No cutoff'
-  return new Date(value).toLocaleDateString(undefined, {
-    month: 'short',
-    day: 'numeric',
-    year: 'numeric',
-  })
+  return formatLongDate(value)
+}
+
+/**
+ * Metric labels written for the person reading them, not for the developer who
+ * named the field. These cards previously printed raw keys — "spi: null",
+ * "cpi: 0.74 · ac: 4161900" — straight at a project manager.
+ */
+const METRIC_LABELS: Record<string, string> = {
+  spi: 'Schedule performance',
+  cpi: 'Cost performance',
+  ev: 'Earned value',
+  pv: 'Planned value',
+  ac: 'Actual cost',
+  eac: 'Forecast at completion',
+  delayedActivities: 'Delayed activities',
+  criticalActivities: 'Critical activities',
+  approvedChangeOrders: 'Approved change orders',
+  pendingChangeOrders: 'Pending change orders',
+  approvedScheduleImpactDays: 'Approved delay',
+  overduePOs: 'Overdue purchase orders',
+  atRiskItems: 'At-risk items',
+  majorNCRs: 'Major NCRs',
+  minorNCRs: 'Minor NCRs',
+  openNCRs: 'Open NCRs',
+  failedITPs: 'Failed inspections',
+  ltiCount: 'Lost-time injuries',
+  fatalityCount: 'Fatalities',
+  incidentCount: 'Incidents',
+  overdueRfis: 'Overdue RFIs',
+  pendingSubmittals: 'Pending submittals',
+  overdueSubmittals: 'Overdue submittals',
+}
+
+const MONEY_KEYS = new Set(['ev', 'pv', 'ac', 'eac', 'budget', 'actualCost', 'forecast'])
+const RATIO_KEYS = new Set(['spi', 'cpi'])
+
+function labelForMetric(key: string) {
+  if (METRIC_LABELS[key]) return METRIC_LABELS[key]
+  // Fall back to a humanised version rather than the raw identifier.
+  return key
+    .replace(/[_-]+/g, ' ')
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .replace(/\b([A-Z]{2,})\b/g, (match) => match)
+    .replace(/^./, (char) => char.toUpperCase())
+}
+
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}(T|$)/
+
+function formatMetricValue(key: string, value: unknown): string | null {
+  if (value === null || value === undefined || value === '') return null
+  if (typeof value === 'boolean') return value ? 'Yes' : 'No'
+
+  // A raw ISO timestamp is never something to show a project manager.
+  if (typeof value === 'string' && ISO_DATE.test(value)) return formatDate(value)
+
+  const numeric = typeof value === 'number' ? value : Number(value)
+  if (Number.isFinite(numeric)) {
+    if (MONEY_KEYS.has(key)) {
+      return numeric.toLocaleString(undefined, {
+        style: 'currency',
+        currency: 'USD',
+        maximumFractionDigits: 0,
+      })
+    }
+    if (RATIO_KEYS.has(key)) return numeric.toFixed(2)
+    if (/days$/i.test(key)) return `${numeric.toLocaleString()} ${numeric === 1 ? 'day' : 'days'}`
+    return numeric.toLocaleString()
+  }
+  return String(value)
+}
+
+/**
+ * The readable metrics for a dimension card, nulls dropped. The cutoff and
+ * source are shown once in the provenance line, so they are not repeated here.
+ */
+const NON_METRIC_KEYS = new Set([
+  'topRisks',
+  'sourceRule',
+  'cutoffDate',
+  'generatedAt',
+  'source',
+  'sourceStatus',
+])
+
+function readableMetrics(detail: HealthDimensionDetail) {
+  return Object.entries(detail)
+    .filter(([key]) => !NON_METRIC_KEYS.has(key))
+    .map(([key, value]) => ({ key, label: labelForMetric(key), value: formatMetricValue(key, value) }))
+    .filter((metric): metric is { key: string; label: string; value: string } =>
+      Boolean(metric.value)
+    )
+    .slice(0, 4)
 }
 
 function DimensionCard({
@@ -106,41 +200,59 @@ function DimensionCard({
   const topRisks = Array.isArray(detail.topRisks)
     ? detail.topRisks.slice(0, 2)
     : []
+  const metrics = readableMetrics(detail)
+  const provenance = `${sourceRule?.source || 'Official source'} through ${formatDate(cutoffDate)}`
+
   return (
-    <div className='space-y-2 rounded-lg border p-3'>
-      <div className='flex items-center justify-between'>
-        <p className='text-sm font-medium'>{label}</p>
+    <div
+      className='flex flex-col rounded-lg border bg-card p-3.5 shadow-[var(--shadow-card)]'
+      title={provenance}
+    >
+      {/* Dimension, score and band on one line: the figure leads. */}
+      <div className='flex items-baseline justify-between gap-2'>
+        <p className='truncate text-sm font-semibold text-foreground'>{label}</p>
+        <span className='font-display text-xl leading-none font-bold tabular-nums' style={{ color }}>
+          {score}
+        </span>
+      </div>
+
+      <div className='mt-2 flex items-center gap-2'>
+        <div className='h-1.5 flex-1 overflow-hidden rounded-full bg-muted'>
+          <div
+            className='h-1.5 rounded-full transition-all'
+            style={{ width: `${score}%`, background: color }}
+          />
+        </div>
         <span
-          className='rounded-full px-2 py-0.5 text-xs font-semibold'
-          style={{ background: `${color}22`, color }}
+          className='shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-semibold'
+          style={{ background: `${color}1f`, color }}
         >
           {scoreLabel(score)}
         </span>
       </div>
-      <div className='h-1.5 overflow-hidden rounded-full bg-muted'>
-        <div
-          className='h-1.5 rounded-full transition-all'
-          style={{ width: `${score}%`, background: color }}
-        />
-      </div>
-      <div className='flex items-center justify-between gap-2'>
-        <p className='text-xs text-muted-foreground'>
-          {Object.entries(detail)
-            .filter(([key]) => key !== 'topRisks')
-            .slice(0, 2)
-            .map(([k, v]) => `${k}: ${v}`)
-            .join(' · ')}
-        </p>
-        <p className='text-lg font-bold' style={{ color }}>
-          {score}
-        </p>
-      </div>
-      <div className='rounded-md bg-muted/40 px-2 py-1 text-[11px] text-muted-foreground'>
-        <span className='font-medium text-foreground'>
-          {sourceRule?.source || 'Official source'}
-        </span>{' '}
-        through {formatDate(cutoffDate)}
-      </div>
+
+      {/* Named metrics, aligned as label/value pairs. */}
+      {metrics.length > 0 && (
+        <dl className='mt-3 space-y-1'>
+          {metrics.map((metric) => (
+            // Both sides must be able to shrink: a long value with shrink-0
+            // pushed the whole page sideways on a phone.
+            <div
+              key={metric.key}
+              className='flex min-w-0 items-baseline justify-between gap-2 text-xs'
+            >
+              <dt className='min-w-0 truncate text-muted-foreground'>{metric.label}</dt>
+              <dd className='min-w-0 truncate text-end font-medium tabular-nums text-foreground'>
+                {metric.value}
+              </dd>
+            </div>
+          ))}
+        </dl>
+      )}
+
+      <p className='mt-3 truncate border-t pt-2 text-[11px] text-muted-foreground'>
+        {provenance}
+      </p>
       {topRisks.length > 0 && (
         <div className='space-y-1 border-t pt-2'>
           {topRisks.map((risk) => (
@@ -241,15 +353,26 @@ export function HealthDashboard({ projectId }: Props) {
           {pendingReview.map((metric) => (
             <div
               key={metric.key}
-              className='rounded-md border border-amber-500/30 bg-amber-500/5 p-3'
+              title={`${labelForMetric(metric.source)} through ${formatDate(metric.cutoffDate)}`}
+              className='relative overflow-hidden rounded-md border bg-card p-3 shadow-[var(--shadow-card)]'
             >
-              <p className='text-xs font-medium text-amber-700 dark:text-amber-300'>
+              <span aria-hidden className='absolute inset-y-0 left-0 w-[3px] bg-warning' />
+              <div className='flex items-baseline justify-between gap-2'>
+                <p className='truncate text-sm font-semibold text-foreground'>
+                  {metric.label}
+                </p>
+                <span className='font-display text-xl leading-none font-bold tabular-nums text-foreground'>
+                  {metric.count}
+                </span>
+              </div>
+              <Badge
+                variant='outline'
+                className={cn('mt-2 px-1.5 py-0 text-[10px]', statusBadge('review'))}
+              >
                 Pending review
-              </p>
-              <p className='mt-1 text-sm font-semibold'>{metric.label}</p>
-              <p className='text-2xl font-bold tabular-nums'>{metric.count}</p>
-              <p className='text-xs text-muted-foreground'>
-                {metric.source} through {formatDate(metric.cutoffDate)}
+              </Badge>
+              <p className='mt-2 truncate text-[11px] text-muted-foreground'>
+                {labelForMetric(metric.source)} · {formatDate(metric.cutoffDate)}
               </p>
             </div>
           ))}

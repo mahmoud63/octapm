@@ -3,7 +3,6 @@ import { AxiosError } from 'axios'
 import { Link, useNavigate } from '@tanstack/react-router'
 import { formatShortDate } from '@/lib/dates'
 import { ProjectPermissionProvider } from '@/lib/permissions'
-import { cn } from '@/lib/utils'
 import { useProjectRealtime } from '@/hooks/use-realtime'
 import { Main } from '@/components/layout/main'
 import { useMyProjectPermissions } from '@/features/permissions/hooks/use-permissions'
@@ -24,7 +23,7 @@ import {
   type ModuleKey,
   type ModuleWithChildren,
 } from '../lib/project-modules'
-import { ProjectModuleNav } from './project-module-nav'
+import { ProjectModuleBar } from './project-module-bar'
 import { ProjectSetupWizard } from './project-setup-wizard'
 import { ProjectStatusBadge } from './project-status-badge'
 
@@ -209,7 +208,6 @@ export function ProjectDetail({
   initialTarget?: ProjectSetupTarget
 }) {
   const navigate = useNavigate()
-  const [navCollapsed, setNavCollapsed] = usePersistedFlag('octa.project.nav.collapsed')
   const [readinessCollapsed, setReadinessCollapsed] = usePersistedFlag(
     'octa.project.readiness.collapsed'
   )
@@ -593,9 +591,30 @@ export function ProjectDetail({
 
   return (
     <>
+      {/* The module bar spans the viewport directly under the application
+          header, so the two read as one connected navigation system. */}
+      {project && !isProjectAccessDenied && (
+        <ProjectModuleBar
+          items={menuItems}
+          activeModule={visibleModule}
+          activeChild={
+            isModuleWithChildren(visibleModule)
+              ? childState[visibleModule]
+              : undefined
+          }
+          onSelectModule={handleModuleSelect}
+          onSelectChild={(module: ModuleKey, child: string) =>
+            navigate({
+              to: '/projects/$projectId/$module/$child',
+              params: { projectId, module: slugForModule(module), child },
+            })
+          }
+        />
+      )}
+
       <Main
         data-testid='uat-project-detail'
-        className='flex flex-1 flex-col gap-4 sm:gap-6'
+        className='flex flex-1 flex-col gap-3 sm:gap-4'
       >
         {isLoading ? (
           <div className='py-8 text-center text-muted-foreground'>
@@ -625,22 +644,19 @@ export function ProjectDetail({
             partyAccess={project.projectAccess?.partyAccess}
             matrix={permissionMatrix}
           >
-            <div className='flex flex-wrap items-end justify-between gap-2'>
-              <div>
-                <h2 className='text-2xl font-bold tracking-tight'>
-                  {project.name}
-                </h2>
-                <p className='text-sm text-muted-foreground'>
-                  {formatDate(project.startDate)} {'->'}{' '}
-                  {formatDate(project.endDate)}
-                </p>
-                <p className='text-xs text-muted-foreground'>
-                  Contract Value:{' '}
-                  {formatMoney(project.currency, project.contractValue)}
-                  {' - '}Duration:{' '}
-                  {formatDuration(project.duration, project.durationUnit)}
-                </p>
-              </div>
+            {/* Project identity, one line under the module bar. Deliberately
+                compact: it informs, it does not compete with navigation. */}
+            <div className='flex flex-wrap items-baseline gap-x-3 gap-y-1'>
+              <h2 className='font-display text-xl font-bold tracking-tight'>
+                {project.name}
+              </h2>
+              <span className='text-sm text-muted-foreground'>
+                {formatDate(project.startDate)} → {formatDate(project.endDate)}
+              </span>
+              <span className='text-xs text-muted-foreground'>
+                {formatMoney(project.currency, project.contractValue)} ·{' '}
+                {formatDuration(project.duration, project.durationUnit)}
+              </span>
               <ProjectStatusBadge status={project.status} />
             </div>
 
@@ -652,47 +668,15 @@ export function ProjectDetail({
               onCollapsedChange={setReadinessCollapsed}
             />
 
-            <div
-              className={cn(
-                'mt-2 grid gap-4',
-                navCollapsed
-                  ? 'lg:grid-cols-[3.5rem_minmax(0,1fr)]'
-                  : 'lg:grid-cols-[280px_minmax(0,1fr)]'
-              )}
+            {/* Navigation moved to the module bar above the project header, so
+                the workspace gets the full width — which matters most for
+                Gantt, Budget, BOQ, Earned Value, Reports, BIM and Drawings. */}
+            <section
+              data-testid={`uat-project-content-${visibleModule}`}
+              className='mt-2 min-w-0'
             >
-              <ProjectModuleNav
-                items={menuItems}
-                activeModule={visibleModule}
-                activeChild={
-                  isModuleWithChildren(visibleModule)
-                    ? childState[visibleModule]
-                    : undefined
-                }
-                collapsed={navCollapsed}
-                onCollapsedChange={setNavCollapsed}
-                onSelectModule={handleModuleSelect}
-                onSelectChild={(module, child) =>
-                  navigate({
-                    to: '/projects/$projectId/$module/$child',
-                    params: {
-                      projectId,
-                      module: slugForModule(module),
-                      child,
-                    },
-                  })
-                }
-                hasChildren={(key) => isModuleWithChildren(key)}
-              />
-
-              <section
-                data-testid={`uat-project-content-${visibleModule}`}
-                className='min-w-0'
-              >
-                <Suspense fallback={<ModuleLoading />}>
-                  {renderContent()}
-                </Suspense>
-              </section>
-            </div>
+              <Suspense fallback={<ModuleLoading />}>{renderContent()}</Suspense>
+            </section>
           </ProjectPermissionProvider>
         )}
       </Main>

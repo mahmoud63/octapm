@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+﻿import { useEffect, useMemo, useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { apiClient } from '@/services/api/client'
 import {
@@ -14,6 +14,7 @@ import {
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { useCanPerform } from '@/lib/permissions'
+import { statusIcon, statusStripe, type StatusTone } from '@/lib/status'
 import { cn } from '@/lib/utils'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -66,10 +67,10 @@ interface Props {
 const fmtUSD = (n: number) =>
   n
     ? '$' + Number(n).toLocaleString('en-US', { maximumFractionDigits: 0 })
-    : '—'
+    : 'â€”'
 
 const fmtDate = (value: string | null | undefined) =>
-  value ? new Date(value).toLocaleDateString() : '—'
+  value ? new Date(value).toLocaleDateString() : 'â€”'
 
 const formatLag = (lagDays: number) => {
   if (!lagDays) return ''
@@ -177,24 +178,36 @@ function ActivityStatusBadge({
   )
 }
 
+/**
+ * A schedule figure. Takes a semantic tone rather than a colour class, so these
+ * read the same green/amber/red as status does everywhere else in the product.
+ */
 function StatCard({
   label,
   value,
   sub,
-  color,
+  tone = 'neutral',
 }: {
   label: string
   value: string | number
   sub?: string
-  color?: string
+  tone?: StatusTone
 }) {
   return (
-    <div className='rounded-lg border bg-card p-4'>
-      <p className='text-xs tracking-wide text-muted-foreground uppercase'>
+    <div className='relative overflow-hidden rounded-lg border bg-card p-3.5 shadow-[var(--shadow-card)]'>
+      <span aria-hidden className={cn('absolute inset-y-0 left-0 w-[3px]', statusStripe(tone))} />
+      <p className='truncate text-[11px] font-medium tracking-wide text-muted-foreground uppercase'>
         {label}
       </p>
-      <p className={`mt-1 text-2xl font-bold ${color ?? ''}`}>{value}</p>
-      {sub && <p className='mt-0.5 text-xs text-muted-foreground'>{sub}</p>}
+      <p
+        className={cn(
+          'font-display mt-1.5 text-2xl leading-none font-bold tabular-nums',
+          tone === 'neutral' ? 'text-foreground' : statusIcon(tone)
+        )}
+      >
+        {value}
+      </p>
+      {sub && <p className='mt-1 truncate text-xs text-muted-foreground'>{sub}</p>}
     </div>
   )
 }
@@ -529,48 +542,15 @@ export function ScheduleDashboard({
   const showUpdateScheduleActions = canCreateSchedule || canSubmitProgress
 
   return (
-    <div className='space-y-6'>
-      {/* Header: stats + action toolbar */}
-      <div className='flex flex-col gap-4 sm:flex-row sm:flex-wrap sm:items-start sm:justify-between'>
-        {/* Stat cards */}
-        <div className='grid grid-cols-2 gap-3 sm:grid-cols-6'>
-          <StatCard label='Total Activities' value={revision.activityCount} />
-          <StatCard
-            label='Critical Path'
-            value={revision.criticalCount}
-            color='text-red-600'
-            sub='activities'
-          />
-          <StatCard
-            label='Milestones'
-            value={milestones.length}
-            color='text-purple-600'
-          />
-          <StatCard
-            label='Total Budget'
-            value={fmtUSD(totalBudget)}
-            color='text-amber-600'
-          />
-          <StatCard
-            label='Proc Risk'
-            value={procurementAlerts.length}
-            color={
-              procurementAlerts.length > 0
-                ? 'text-orange-600'
-                : 'text-green-600'
-            }
-            sub='alerts'
-          />
-          <StatCard
-            label='Project Risk'
-            value={projectRiskActivities.length}
-            color={overdueProjectRisks > 0 ? 'text-red-600' : 'text-amber-600'}
-            sub={`${overdueProjectRisks} overdue`}
-          />
-        </div>
-
-        {/* Action toolbar */}
-        <div className='flex flex-wrap items-center gap-2'>
+    <div className='space-y-4'>
+      {/* Actions sit on their own row at the top right, above the figures, so
+          they are always in the same place and never wrap between the cards. */}
+      <div className='flex flex-col gap-3'>
+        {/* Action toolbar, top right */}
+        <div
+          className='flex flex-wrap items-center justify-end gap-2'
+          data-testid='uat-schedule-actions'
+        >
           {/* Export actions */}
           <ExportButton projectId={projectId} />
           <PrintReportButton
@@ -599,7 +579,7 @@ export function ScheduleDashboard({
                 <Input
                   value={regenLabel}
                   onChange={(e) => setRegenLabel(e.target.value)}
-                  placeholder='e.g. Rev 3 — post-RFI'
+                  placeholder='e.g. Rev 3 â€” post-RFI'
                   disabled={regenPending || !canCreateSchedule}
                   className='mb-1 h-8 text-sm'
                   onClick={(e) => e.stopPropagation()}
@@ -618,7 +598,7 @@ export function ScheduleDashboard({
                       className={cn('h-4 w-4', regenPending && 'animate-spin')}
                     />
                     {regenPending
-                      ? regenStep || 'Regenerating…'
+                      ? regenStep || 'Regeneratingâ€¦'
                       : 'Regenerate from BOQ file'}
                   </label>
                 </DropdownMenuItem>
@@ -687,6 +667,35 @@ export function ScheduleDashboard({
           )}
         </div>
 
+        {/* Figures, full width beneath the actions. */}
+        <div className='grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-6'>
+          <StatCard label='Total Activities' value={revision.activityCount} />
+          <StatCard
+            label='Critical Path'
+            value={revision.criticalCount}
+            tone='blocked'
+            sub='activities'
+          />
+          <StatCard label='Milestones' value={milestones.length} tone='brand' />
+          <StatCard
+            label='Total Budget'
+            value={fmtUSD(totalBudget)}
+            tone='info'
+          />
+          <StatCard
+            label='Proc Risk'
+            value={procurementAlerts.length}
+            tone={procurementAlerts.length > 0 ? 'review' : 'done'}
+            sub='alerts'
+          />
+          <StatCard
+            label='Project Risk'
+            value={projectRiskActivities.length}
+            tone={overdueProjectRisks > 0 ? 'blocked' : 'review'}
+            sub={`${overdueProjectRisks} overdue`}
+          />
+        </div>
+
         {canCreateSchedule && (
           <input
             id='regen-file'
@@ -727,25 +736,25 @@ export function ScheduleDashboard({
             <span>
               Start:{' '}
               <strong className='text-foreground'>
-                {revision.projectSummary.startDate || '—'}
+                {revision.projectSummary.startDate || 'â€”'}
               </strong>
             </span>
             <span>
               End:{' '}
               <strong className='text-foreground'>
-                {revision.projectSummary.endDate || '—'}
+                {revision.projectSummary.endDate || 'â€”'}
               </strong>
             </span>
             <span>
               Duration:{' '}
               <strong className='text-foreground'>
-                {revision.projectSummary.totalDuration || '—'}
+                {revision.projectSummary.totalDuration || 'â€”'}
               </strong>
             </span>
             <span>
               Type:{' '}
               <strong className='text-foreground'>
-                {revision.projectSummary.type || '—'}
+                {revision.projectSummary.type || 'â€”'}
               </strong>
             </span>
           </div>
@@ -958,18 +967,18 @@ export function ScheduleDashboard({
                     ].join(' ')}
                   >
                     <td className='p-2 text-xs font-semibold text-muted-foreground'>
-                      {a.batchId || '—'}
+                      {a.batchId || 'â€”'}
                     </td>
                     <td className='p-2 font-mono text-xs'>
                       {formatActivityCode(a, index)}
                     </td>
                     <td className='p-2 font-mono text-xs text-muted-foreground'>
-                      {a.wbsCode || '—'}
+                      {a.wbsCode || 'â€”'}
                     </td>
                     <td className='max-w-50 p-2'>
                       <div className='flex items-center gap-1.5'>
                         {a.isMilestone && (
-                          <span className='text-purple-600'>◆</span>
+                          <span className='text-purple-600'>â—†</span>
                         )}
                         {a.isCritical && !a.isMilestone && (
                           <span className='h-1.5 w-1.5 rounded-full bg-red-500' />
@@ -1024,34 +1033,34 @@ export function ScheduleDashboard({
                       )}
                     </td>
                     <td className='p-2 text-xs text-muted-foreground'>
-                      {a.category || '—'}
+                      {a.category || 'â€”'}
                     </td>
                     <td className='p-2 text-right text-xs'>
-                      {a.isMilestone ? '—' : `${a.duration}d`}
+                      {a.isMilestone ? 'â€”' : `${a.duration}d`}
                     </td>
                     <td
                       className='p-2 text-right font-mono text-xs'
                       title={fmtDate(a.earlyStartDate)}
                     >
-                      {a.earlyStart ?? '—'}
+                      {a.earlyStart ?? 'â€”'}
                     </td>
                     <td
                       className='p-2 text-right font-mono text-xs'
                       title={fmtDate(a.earlyFinishDate)}
                     >
-                      {a.earlyFinish ?? '—'}
+                      {a.earlyFinish ?? 'â€”'}
                     </td>
                     <td
                       className='p-2 text-right font-mono text-xs'
                       title={fmtDate(a.lateStartDate)}
                     >
-                      {a.lateStart ?? '—'}
+                      {a.lateStart ?? 'â€”'}
                     </td>
                     <td
                       className='p-2 text-right font-mono text-xs'
                       title={fmtDate(a.lateFinishDate)}
                     >
-                      {a.lateFinish ?? '—'}
+                      {a.lateFinish ?? 'â€”'}
                     </td>
                     <td className='p-2 text-right text-xs'>
                       {a.isMilestone ? (
@@ -1060,12 +1069,12 @@ export function ScheduleDashboard({
                         <span className='font-semibold text-red-600'>0d</span>
                       ) : isNearCritical(a) ? (
                         <span className='font-semibold text-orange-600'>
-                          {a.totalFloat}d ⚠
+                          {a.totalFloat}d âš 
                         </span>
                       ) : a.totalFloat != null ? (
                         `${a.totalFloat}d`
                       ) : (
-                        '—'
+                        'â€”'
                       )}
                     </td>
                     <td
@@ -1075,7 +1084,7 @@ export function ScheduleDashboard({
                       {formatActivityDependencies(a)}
                     </td>
                     <td className='p-2 text-right text-xs'>
-                      {a.budget ? fmtUSD(a.budget) : '—'}
+                      {a.budget ? fmtUSD(a.budget) : 'â€”'}
                     </td>
                     <td className='p-2 text-center'>
                       <ActivityStatusBadge status={a.status} />
@@ -1127,7 +1136,7 @@ export function ScheduleDashboard({
               <p className='font-semibold'>
                 {nearCriticalActs.length} near-critical{' '}
                 {nearCriticalActs.length === 1 ? 'activity' : 'activities'} (TF
-                ≤ 5d)
+                â‰¤ 5d)
               </p>
               <p className='mt-1 text-xs'>
                 These activities may become critical if delayed further:
@@ -1135,7 +1144,7 @@ export function ScheduleDashboard({
               <ul className='mt-1 list-inside list-disc text-xs'>
                 {nearCriticalActs.map((a) => (
                   <li key={a.id}>
-                    {a.name} — TF: {a.totalFloat ?? '—'}d
+                    {a.name} â€” TF: {a.totalFloat ?? 'â€”'}d
                   </li>
                 ))}
               </ul>
@@ -1162,8 +1171,8 @@ export function ScheduleDashboard({
                     <div className='min-w-0 flex-1'>
                       <p className='truncate font-medium'>{a.name}</p>
                       <p className='text-xs text-muted-foreground'>
-                        {formatActivityCode(a)} · WBS {a.wbsCode || '-'} ·{' '}
-                        {a.category} · {a.duration}d · d{a.earlyStart}→d
+                        {formatActivityCode(a)} Â· WBS {a.wbsCode || '-'} Â·{' '}
+                        {a.category} Â· {a.duration}d Â· d{a.earlyStart}â†’d
                         {a.earlyFinish}
                       </p>
                       <div className='mt-1 flex items-center gap-2'>
@@ -1216,13 +1225,13 @@ export function ScheduleDashboard({
               {nextMilestone && (
                 <div className='mb-4 rounded-lg border border-purple-300 bg-purple-50 p-3 dark:border-purple-900/40 dark:bg-purple-950/20'>
                   <p className='text-sm font-semibold text-purple-800 dark:text-purple-300'>
-                    ◆ Next milestone: {nextMilestone.name}
+                    â—† Next milestone: {nextMilestone.name}
                   </p>
                   <p className='mt-0.5 text-xs text-purple-700 dark:text-purple-400'>
-                    Day {nextMilestone.day} ·{' '}
+                    Day {nextMilestone.day} Â·{' '}
                     {(nextMilestone.day ?? 0) - todayWorkingDay} working days
                     away
-                    {nextMilestone.phase ? ` · ${nextMilestone.phase}` : ''}
+                    {nextMilestone.phase ? ` Â· ${nextMilestone.phase}` : ''}
                   </p>
                 </div>
               )}
@@ -1263,7 +1272,7 @@ export function ScheduleDashboard({
                       >
                         {isComplete && (
                           <div className='absolute top-3 right-3 flex h-5 w-5 items-center justify-center rounded-full bg-green-500 text-xs text-white'>
-                            ✓
+                            âœ“
                           </div>
                         )}
                         {isOverdue && (
@@ -1276,12 +1285,12 @@ export function ScheduleDashboard({
                           <span
                             className={`font-semibold ${isOverdue ? 'text-red-600' : 'text-purple-600'}`}
                           >
-                            ◆
+                            â—†
                           </span>
                           <div className='min-w-0 flex-1'>
                             <p className='truncate font-medium'>{m.name}</p>
                             <p className='text-xs text-muted-foreground'>
-                              {m.phase || '—'} · Day {m.day ?? '—'}
+                              {m.phase || 'â€”'} Â· Day {m.day ?? 'â€”'}
                             </p>
                             {m.description && (
                               <p className='mt-1 text-xs text-muted-foreground'>
@@ -1356,7 +1365,7 @@ export function ScheduleDashboard({
       {/* Generation metadata */}
       <p className='text-xs text-muted-foreground'>
         <CheckCircle2 className='mr-1 inline h-3 w-3 text-green-500' />
-        Schedule revision · {revision.label} · {revision.status} ·{' '}
+        Schedule revision Â· {revision.label} Â· {revision.status} Â·{' '}
         {new Date(revision.createdAt).toLocaleString()}
       </p>
 

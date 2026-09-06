@@ -10,6 +10,7 @@ import {
   Lock,
   ShieldCheck,
 } from 'lucide-react'
+import { formatDateTime } from '@/lib/dates'
 import { statusBadge, statusIcon, statusStripe } from '@/lib/status'
 import { cn } from '@/lib/utils'
 import { Badge } from '@/components/ui/badge'
@@ -66,6 +67,8 @@ function labelFor(key: string) {
   )
 }
 
+const ISO_TIMESTAMP = /^\d{4}-\d{2}-\d{2}(T|$)/
+
 function formatCount(value: unknown) {
   if (typeof value === 'boolean') return value ? 'Yes' : 'No'
   if (typeof value === 'number') {
@@ -74,6 +77,9 @@ function formatCount(value: unknown) {
     })
   }
   if (typeof value === 'string') {
+    // An approval timestamp is a moment, not an identifier: show it as one
+    // rather than leaking the raw ISO string at the user.
+    if (ISO_TIMESTAMP.test(value)) return formatDateTime(value)
     return value.replace(/_/g, ' ')
   }
   return null

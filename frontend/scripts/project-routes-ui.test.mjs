@@ -43,17 +43,29 @@ assert.ok(lazyCount >= 15, `every module is lazily loaded (found ${lazyCount})`)
 ;["import('@/features/schedule/components/schedule-dashboard')", "import('@/features/doc-control/components/doc-control-dashboard')", "import('@/features/commercial/components/commercial-dashboard')", "import('@/features/boq/components/boq-page')"].forEach(
   (fragment) => assert.ok(detail.includes(fragment), `lazy import ${fragment}`)
 )
-// The module navigation moved into its own component when Focus Mode was
-// added; the shell renders it and the test ids live there now.
-assert.match(detail, /<ProjectModuleNav/, 'the shell renders the module navigation')
-const nav = read('src/features/projects/components/project-module-nav.tsx')
-assert.match(nav, /data-testid=\{`uat-project-module-\$\{item\.key\}`\}/, 'module test ids preserved')
-assert.match(nav, /data-testid=\{`uat-project-rail-\$\{item\.key\}`\}/, 'collapsed rail exposes per-module test ids')
-// Focus Mode: the collapsed rail is the Midnight Indigo shell surface.
-assert.match(nav, /bg-shell/, 'the collapsed rail uses the branded shell token')
+// Project navigation is the top module bar, not a left sidebar: the shell
+// renders it above the project header and there is exactly one of them.
+assert.match(detail, /<ProjectModuleBar/, 'the shell renders the top module bar')
 assert.ok(
-  !/bg-(emerald|rose|amber|slate|sky|indigo)-\d{2,3}/.test(nav),
-  'the module navigation uses design tokens, not Tailwind palette colours'
+  !/<ProjectModuleNav|uat-project-module-rail/.test(detail),
+  'the superseded sidebar navigation is gone, so there is one primary module navigation'
+)
+
+const bar = read('src/features/projects/components/project-module-bar.tsx')
+assert.match(bar, /data-testid='uat-project-module-bar'/, 'the module bar is addressable')
+// Tabs receive their id through the `testId` prop and render it as data-testid.
+assert.match(bar, /uat-module-tab-\$\{item\.key\}/, 'module tabs expose test ids')
+assert.match(bar, /data-testid=\{testId\}/, 'the tab renders the id it is given')
+assert.match(bar, /uat-module-child-\$\{item\.key\}-\$\{child\.key\}/, 'dropdown children expose test ids')
+// Sub-pages live in dropdowns; the row itself stays readable.
+assert.match(bar, /DropdownMenu/, 'sub-pages open in dropdowns rather than filling the row')
+assert.match(bar, /uat-module-tab-more/, 'lower-frequency modules fold into a More menu')
+// Accessibility: the active state must not depend only on colour.
+assert.match(bar, /aria-current=\{isActive \? 'page' : undefined\}/, 'active module sets aria-current')
+assert.match(bar, /aria-haspopup/, 'dropdown triggers announce themselves')
+assert.ok(
+  !/bg-(emerald|rose|amber|slate|sky|indigo)-\d{2,3}/.test(bar),
+  'the module bar uses design tokens, not Tailwind palette colours'
 )
 
 const page = read('src/features/projects/components/project-detail-page.tsx')

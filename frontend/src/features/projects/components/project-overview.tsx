@@ -1,9 +1,9 @@
+import { formatShortDate } from '@/lib/dates'
 import type { Project, ProjectParty } from '../data/schema'
 
-function formatDate(value: string | null) {
-  if (!value) return '-'
-  return new Date(value).toLocaleDateString()
-}
+// Contract dates are stored as UTC midnight; local formatting showed them a
+// day early. See lib/dates.ts.
+const formatDate = (value: string | null) => formatShortDate(value)
 
 function formatMoney(currency: string, value: number | null | undefined) {
   if (value == null) return '—'

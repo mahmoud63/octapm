@@ -17,6 +17,9 @@ export function Search({
   return (
     <Button
       variant='outline'
+      // The slot lets the Midnight Indigo header give this its own translucent
+      // surface, so it reads as a search field rather than disappearing.
+      data-slot='search-trigger'
       className={cn(
         'group relative h-8 w-full flex-1 justify-start rounded-md bg-muted/25 text-sm font-normal text-muted-foreground shadow-none hover:bg-accent sm:w-40 sm:pe-12 md:flex-none lg:w-52 xl:w-64',
         className

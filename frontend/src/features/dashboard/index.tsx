@@ -1,4 +1,4 @@
-import type { ComponentProps, ComponentType, ReactNode } from 'react'
+﻿import type { ComponentProps, ComponentType, ReactNode } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Link } from '@tanstack/react-router'
 import { apiClient } from '@/services/api/client'
@@ -16,6 +16,7 @@ import {
   TrendingDown,
   WalletCards,
 } from 'lucide-react'
+import { statusBadge } from '@/lib/status'
 import { cn } from '@/lib/utils'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -382,17 +383,26 @@ function severityTone(severity: string) {
   return 'border-border bg-muted text-muted-foreground'
 }
 
-function toneClasses(tone: string) {
-  const classes: Record<string, string> = {
-    emerald: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400',
-    sky: 'bg-sky-500/10 text-sky-600 dark:text-sky-400',
-    violet: 'bg-violet-500/10 text-violet-600 dark:text-violet-400',
-    amber: 'bg-amber-500/10 text-amber-600 dark:text-amber-400',
-    rose: 'bg-rose-500/10 text-rose-600 dark:text-rose-400',
-    red: 'bg-red-500/10 text-red-600 dark:text-red-400',
-  }
+/**
+ * KPI tones, mapped onto the OctaPM palette rather than Tailwind's.
+ * The legacy tone names are kept so callers do not all have to change at once.
+ */
+const TONE_TOKENS: Record<string, { icon: string; stripe: string }> = {
+  emerald: { icon: 'bg-success-soft text-success', stripe: 'bg-success' },
+  sky: { icon: 'bg-info-soft text-info', stripe: 'bg-info' },
+  violet: { icon: 'bg-accent text-interactive', stripe: 'bg-interactive' },
+  amber: { icon: 'bg-warning-soft text-warning-foreground', stripe: 'bg-warning' },
+  rose: { icon: 'bg-error-soft text-error', stripe: 'bg-error' },
+  red: { icon: 'bg-error-soft text-error', stripe: 'bg-error' },
+  brand: { icon: 'bg-accent text-primary', stripe: 'bg-primary' },
+}
 
-  return classes[tone] || classes.sky
+function toneClasses(tone: string) {
+  return (TONE_TOKENS[tone] || TONE_TOKENS.sky).icon
+}
+
+function toneStripe(tone: string) {
+  return (TONE_TOKENS[tone] || TONE_TOKENS.sky).stripe
 }
 
 function ModuleLink({
@@ -450,39 +460,50 @@ function MetricCard({
   cutoffDate?: string | null
   sourceStatus?: string
 }) {
+  const pending = sourceStatus === 'pending-review'
+  // Provenance still matters â€” it is what makes a figure auditable â€” but it
+  // does not need to occupy half the card. It moves to a single muted line
+  // with the full detail on hover.
+  const provenance = `Source: ${source || 'Dashboard source'} Â· Cutoff: ${formatCutoff(cutoffDate)}`
+
   const card = (
-    <Card className='h-full min-h-44 transition-colors hover:bg-muted/30'>
-      <CardHeader className='flex flex-row items-start justify-between space-y-0 pb-2'>
-        <div className='min-w-0 space-y-1'>
-          <CardTitle className='text-sm font-medium'>{label}</CardTitle>
-          <Badge
-            variant='outline'
-            className={cn(
-              'text-[10px]',
-              sourceStatus === 'pending-review'
-                ? 'border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300'
-                : 'border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300'
-            )}
-          >
-            {sourceStatus === 'pending-review' ? 'Pending' : 'Official'}
-          </Badge>
-        </div>
-        <span className={cn('rounded-md p-2', toneClasses(tone))}>
-          <Icon className='h-4 w-4' />
+    <Card
+      title={provenance}
+      className='relative h-full gap-0 overflow-hidden py-4 transition-colors hover:bg-accent/40'
+    >
+      {/* A tone stripe on the leading edge makes a row of KPIs scannable
+          without giving each card a coloured background. */}
+      <span
+        aria-hidden
+        className={cn('absolute inset-y-0 left-0 w-[3px]', toneStripe(tone))}
+      />
+      <CardHeader className='flex flex-row items-start justify-between gap-2 space-y-0 px-4 pb-2'>
+        <CardTitle className='min-w-0 text-xs font-medium tracking-wide text-muted-foreground uppercase'>
+          {label}
+        </CardTitle>
+        <span className={cn('shrink-0 rounded-md p-1.5', toneClasses(tone))}>
+          <Icon className='h-3.5 w-3.5' />
         </span>
       </CardHeader>
-      <CardContent>
-        <div className='text-2xl font-bold tabular-nums'>{value}</div>
-        <p className='mt-1 text-xs text-muted-foreground'>{detail}</p>
-        <div className='mt-3 space-y-1 border-t pt-2 text-[11px] text-muted-foreground'>
-          <p className='line-clamp-1'>
-            <span className='font-medium text-foreground'>Source:</span>{' '}
-            {source || 'Dashboard source'}
-          </p>
-          <p>
-            <span className='font-medium text-foreground'>Cutoff:</span>{' '}
+
+      <CardContent className='px-4'>
+        {/* The figure leads. Space Grotesk and tabular figures so a row of
+            numbers lines up and reads as one set. */}
+        <div className='font-display text-[1.75rem] leading-none font-bold tabular-nums text-foreground'>
+          {value}
+        </div>
+        <p className='mt-1.5 line-clamp-2 text-xs text-muted-foreground'>{detail}</p>
+
+        <div className='mt-3 flex items-center gap-1.5'>
+          <Badge
+            variant='outline'
+            className={cn('px-1.5 py-0 text-[10px]', statusBadge(pending ? 'review' : 'done'))}
+          >
+            {pending ? 'Pending' : 'Official'}
+          </Badge>
+          <span className='truncate text-[10px] text-muted-foreground'>
             {formatCutoff(cutoffDate)}
-          </p>
+          </span>
         </div>
       </CardContent>
     </Card>
@@ -682,7 +703,7 @@ function MyOpenItemsSection({ data }: { data: MyOpenItems }) {
           <h2 className='text-lg font-semibold'>My open items</h2>
           <p className='text-sm text-muted-foreground'>
             Records where you are owner, reviewer, approver, assignee, or hold
-            the ball — matched by user, not by name.
+            the ball â€” matched by user, not by name.
           </p>
         </div>
         <div className='flex flex-wrap gap-2'>
@@ -724,7 +745,7 @@ function MyOpenItemsSection({ data }: { data: MyOpenItems }) {
               <div className='flex items-start justify-between gap-2'>
                 <div className='min-w-0'>
                   <p className='text-xs text-muted-foreground'>
-                    {item.label} · {item.ref}
+                    {item.label} Â· {item.ref}
                   </p>
                   <p className='truncate text-sm font-medium'>{item.title}</p>
                   <p className='truncate text-xs text-muted-foreground'>
@@ -755,7 +776,7 @@ function MyOpenItemsSection({ data }: { data: MyOpenItems }) {
                         : 'text-muted-foreground'
                     )}
                   >
-                    {item.overdue ? 'Overdue · ' : 'Due '}
+                    {item.overdue ? 'Overdue Â· ' : 'Due '}
                     {formatDate(item.dueDate)}
                   </span>
                 )}

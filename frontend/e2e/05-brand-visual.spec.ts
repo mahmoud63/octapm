@@ -33,17 +33,18 @@ test.describe('brand visual validation', () => {
     await page.waitForLoadState('domcontentloaded')
     await page.waitForTimeout(3500)
 
-    const nav = page.getByTestId('uat-project-module-nav')
-    await expect(nav, 'the expanded module nav did not render').toBeVisible()
+    // Project navigation is the top module bar. It is deliberately lighter
+    // than the application header above it.
+    const bar = page.getByTestId('uat-project-module-bar')
+    await expect(bar, 'the project module bar did not render').toBeVisible()
 
-    // Expanded, the nav is a light surface — not a dark block.
-    const navBg = await nav.evaluate((el) => getComputedStyle(el).backgroundColor)
-    expect(navBg, 'the expanded nav should be a light surface').not.toBe(MIDNIGHT_INDIGO)
+    const barBg = await bar.evaluate((el) => getComputedStyle(el).backgroundColor)
+    expect(barBg, 'the module bar should be a light surface').not.toBe(MIDNIGHT_INDIGO)
 
     await page.screenshot({ path: `${SHOTS}/01-desktop-expanded.png`, fullPage: false })
   })
 
-  test('desktop, focus mode: indigo rail and compact readiness bar', async ({ page }) => {
+  test('the workspace runs full width with the module bar on top', async ({ page }) => {
     await signIn(page)
     const projectId = await openProject(page)
     await presetPanels(page, true)
@@ -51,21 +52,24 @@ test.describe('brand visual validation', () => {
     await page.waitForLoadState('domcontentloaded')
     await page.waitForTimeout(3500)
 
-    const rail = page.getByTestId('uat-project-module-rail')
-    await expect(rail, 'the collapsed rail did not render').toBeVisible()
+    // Navigation moved to the top bar; the left rail was removed so there is
+    // one obvious primary module navigation rather than two.
+    await expect(page.getByTestId('uat-project-module-rail')).toHaveCount(0)
+    await expect(page.getByTestId('uat-project-module-bar')).toBeVisible()
 
-    // The rail is the one place the shell asserts the brand hardest.
-    const railBg = await rail.evaluate((el) => getComputedStyle(el).backgroundColor)
-    expect(railBg, 'the collapsed rail must be Midnight Indigo').toBe(MIDNIGHT_INDIGO)
-
-    // The compact readiness bar replaces the full panel.
+    // The compact readiness bar keeps its collapsed state.
     await expect(page.getByTestId('uat-setup-readiness-expand')).toBeVisible()
 
-    // Focus mode must actually buy working width.
-    const railBox = await rail.boundingBox()
-    expect(railBox!.width, 'the rail should be a narrow icon rail').toBeLessThan(80)
+    // The workspace should now use nearly the whole viewport width.
+    const content = page.getByTestId(/^uat-project-content-/)
+    const box = await content.first().boundingBox()
+    const viewport = page.viewportSize()!
+    expect(
+      box!.width / viewport.width,
+      'the workspace should span most of the viewport now the sidebar is gone',
+    ).toBeGreaterThan(0.9)
 
-    await page.screenshot({ path: `${SHOTS}/02-desktop-focus-mode.png`, fullPage: false })
+    await page.screenshot({ path: `${SHOTS}/02-desktop-full-width.png`, fullPage: false })
   })
 
   test('readiness panel collapses and expands, and remembers it', async ({ page }) => {

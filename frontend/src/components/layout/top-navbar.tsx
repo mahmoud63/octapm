@@ -390,19 +390,24 @@ export function TopNavbar() {
   }, [])
 
   return (
+    // Midnight Indigo: the strongest brand surface in the product. Everything
+    // inside is white or white at reduced opacity — never black on the dark
+    // header. `octa-dark-header` re-points the shadcn tokens for this subtree
+    // so nested components (dropdowns, buttons, the project switcher) come
+    // along without each needing its own dark variant.
     <header
       className={cn(
-        'sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80',
-        scrolled && 'shadow-sm'
+        'octa-dark-header octa-pattern relative isolate sticky top-0 z-50 w-full text-shell-foreground',
+        scrolled && 'shadow-[var(--shadow-raised)]'
       )}
     >
       <SubscriptionBanner />
-      <div className='flex h-14 items-center gap-4 px-4 lg:px-6'>
-        {/* The brand mark. Wordmark hides on the narrowest widths; the mark
-            always stays, so the product remains identifiable. */}
+      <div className='flex h-14 items-center gap-3 px-4 lg:gap-4 lg:px-6'>
+        {/* The brand mark, in its white treatment for the indigo ground. The
+            wordmark hides on the narrowest widths; the mark always stays. */}
         <Link to='/' className='flex shrink-0 items-center' aria-label='OctaPM home'>
-          <OctaLogo className='sm:hidden' markOnly size='md' />
-          <OctaLogo className='hidden sm:inline-flex' size='md' />
+          <OctaLogo className='sm:hidden' markOnly size='md' surface='dark' />
+          <OctaLogo className='hidden sm:inline-flex' size='md' surface='dark' />
         </Link>
 
         <ProjectSwitcher className='hidden md:inline-flex' />

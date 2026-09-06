@@ -256,9 +256,10 @@ test.describe('dashboard reconciliation', () => {
         (p: { status: string }) => p.status === 'active',
       ).length
 
-      // The dashboard prints "Active Projects" with its count underneath.
-      const match = screen.match(/Active Projects\s*\n?\s*Official\s*\n?\s*(\d+)/)
-      const shown = match ? Number(match[1]) : null
+      // The KPI card prints its label, then the figure. The label is uppercased
+      // in CSS, so match case-insensitively rather than pinning the casing.
+      const match = screen.match(/Active Projects\s*\n\s*([\d,]+)/i)
+      const shown = match ? Number(match[1].replace(/,/g, '')) : null
       // eslint-disable-next-line no-console
       console.log(`KPI_ACTIVE_PROJECTS shown=${shown} actual=${activeProjects}`)
 
