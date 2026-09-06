@@ -45,6 +45,7 @@ const notificationsFormSchema = z.object({
   safety: categorySchema,
   task: categorySchema,
   workflow: categorySchema,
+  message: categorySchema,
 })
 
 type NotificationsFormValues = z.infer<typeof notificationsFormSchema>
@@ -111,6 +112,12 @@ const categoryCopy: Array<{
     label: 'Workflow updates',
     description: 'Lower-priority status changes across project records.',
   },
+  {
+    category: 'message',
+    label: 'Messages',
+    description:
+      'New messages in your conversations and people adding you to one (mentions are under Mentions).',
+  },
 ]
 
 const defaultCategory = {
@@ -132,6 +139,7 @@ const buildDefaultValues = (): NotificationsFormValues => ({
   safety: { ...defaultCategory },
   task: { ...defaultCategory },
   workflow: { inAppEnabled: true, emailEnabled: false, pushEnabled: false },
+  message: { inAppEnabled: true, emailEnabled: false, pushEnabled: true },
 })
 
 const defaultValues = buildDefaultValues()

@@ -13,6 +13,7 @@ export type NotificationCategory =
   | 'safety'
   | 'task'
   | 'workflow'
+  | 'message'
 
 export interface NotificationDeliveryAttempt {
   id: string
@@ -73,6 +74,7 @@ export const notificationCategories: NotificationCategory[] = [
   'safety',
   'task',
   'workflow',
+  'message',
 ]
 
 export const notificationsKey = ['notifications'] as const

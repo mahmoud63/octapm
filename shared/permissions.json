@@ -1032,6 +1032,65 @@
         "lookahead.archive": ["pm", "planning_eng"],
         "lookahead.item_status": ["pm", "planning_eng", "site_engineer"]
       }
+    },
+    "conversation": {
+      "label": "Messages",
+      "actions": {
+        "read": [
+          "pm",
+          "planning_eng",
+          "qs",
+          "cost_controller",
+          "procurement",
+          "warehouse",
+          "site_engineer",
+          "finance"
+        ],
+        "create": [
+          "pm",
+          "planning_eng",
+          "qs",
+          "cost_controller",
+          "procurement",
+          "warehouse",
+          "site_engineer",
+          "finance"
+        ],
+        "update": [
+          "pm",
+          "planning_eng",
+          "qs",
+          "cost_controller",
+          "procurement",
+          "warehouse",
+          "site_engineer",
+          "finance"
+        ],
+        "delete": ["pm"],
+        "submit": [],
+        "approve": [],
+        "certify": [],
+        "baseline": [],
+        "export": []
+      },
+      "transitions": {}
+    },
+    "email": {
+      "label": "Project Emails",
+      "actions": {
+        "read": ["pm", "planning_eng", "qs", "cost_controller", "procurement", "site_engineer", "finance"],
+        "create": ["pm", "planning_eng", "qs", "site_engineer"],
+        "update": ["pm", "planning_eng", "qs", "cost_controller", "site_engineer"],
+        "delete": ["pm"],
+        "submit": [],
+        "approve": [],
+        "certify": [],
+        "baseline": [],
+        "export": ["pm", "planning_eng", "qs"]
+      },
+      "transitions": {
+        "email.settings": ["pm"]
+      }
     }
   },
   "partyPermissions": {
@@ -1041,6 +1100,7 @@
         "punch": { "actions": ["read", "export"], "transitions": [] },
         "timesheet": { "actions": ["read", "export"], "transitions": [] },
         "lookahead": { "actions": ["read", "export"], "transitions": [] },
+        "conversation": { "actions": ["read", "create", "update"], "transitions": [] },
         "schedule": { "actions": ["read", "export"], "transitions": [] },
         "progress": { "actions": ["read", "export"], "transitions": [] },
         "boq": { "actions": ["read", "export"], "transitions": [] },
@@ -1097,6 +1157,7 @@
         },
         "timesheet": { "actions": ["read", "export"], "transitions": [] },
         "lookahead": { "actions": ["read", "export"], "transitions": [] },
+        "conversation": { "actions": ["read", "create", "update"], "transitions": [] },
         "schedule": { "actions": ["read", "export"], "transitions": [] },
         "progress": { "actions": ["read"], "transitions": [] },
         "boq": { "actions": ["read"], "transitions": [] },
@@ -1170,6 +1231,8 @@
           "actions": ["read", "create", "update", "delete", "submit", "export"],
           "transitions": ["lookahead.publish", "lookahead.archive", "lookahead.item_status"]
         },
+        "conversation": { "actions": ["read", "create", "update"], "transitions": [] },
+        "email": { "actions": ["read", "update"], "transitions": [] },
         "schedule": { "actions": ["read", "export"], "transitions": [] },
         "progress": {
           "actions": ["read", "create", "submit"],
@@ -1251,6 +1314,7 @@
           "actions": ["read", "update", "export"],
           "transitions": ["lookahead.item_status"]
         },
+        "conversation": { "actions": ["read", "create", "update"], "transitions": [] },
         "schedule": { "actions": ["read"], "transitions": [] },
         "progress": {
           "actions": ["read", "create", "submit"],

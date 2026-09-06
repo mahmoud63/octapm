@@ -14,6 +14,15 @@ const {
 const MAX_EMAIL_ATTEMPTS = 3;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
+const inboundAddresses = require("../utils/inbound-addresses");
+
+/** Reply-To for a notification email: the record's or conversation's inbound address, when inbound mail is configured. */
+const replyAddressFor = (notification) => {
+  if (!notification?.entityType || !notification?.entityId || !inboundAddresses.isInboundConfigured()) return null;
+  if (notification.entityType === "conversation") return inboundAddresses.conversationReplyAddress(notification.entityId);
+  return inboundAddresses.recordReplyAddress({ recordType: notification.entityType, recordId: notification.entityId });
+};
+
 const NOTIFICATION_CATEGORIES = Object.freeze({
   ASSIGNMENT: "assignment",
   MENTION: "mention",
@@ -26,12 +35,14 @@ const NOTIFICATION_CATEGORIES = Object.freeze({
   QUALITY: "quality",
   SAFETY: "safety",
   TASK: "task",
+  MESSAGE: "message",
 });
 
 const CATEGORY_ORDER = Object.freeze([
   NOTIFICATION_CATEGORIES.ASSIGNMENT,
   NOTIFICATION_CATEGORIES.MENTION,
   NOTIFICATION_CATEGORIES.COMMENT,
+  NOTIFICATION_CATEGORIES.MESSAGE,
   NOTIFICATION_CATEGORIES.DUE,
   NOTIFICATION_CATEGORIES.OVERDUE,
   NOTIFICATION_CATEGORIES.APPROVAL,
@@ -1187,10 +1198,15 @@ const processPendingEmailDeliveries = async ({
     }
 
     try {
+      // Replies to record / conversation emails come back into OctaPM (OCTA-COMM-CONV-042).
+      const replyTo = replyAddressFor(notification);
       const providerResult = await sendEmail({
         to,
         subject: notification.title,
-        body: deliveryBody(notification),
+        body: replyTo
+          ? `${deliveryBody(notification)}\n\nReply to this email to answer in OctaPM.`
+          : deliveryBody(notification),
+        replyTo,
         metadata: {
           notificationId: notification.id,
           category: notification.category,

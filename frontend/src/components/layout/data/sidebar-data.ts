@@ -7,6 +7,7 @@ import {
   HelpCircle,
   LayoutDashboard,
   ListTodo,
+  MessagesSquare,
   Monitor,
   Palette,
   Settings,
@@ -57,6 +58,11 @@ export const sidebarData: SidebarData = {
           title: 'Tasks',
           url: '/tasks',
           icon: ListTodo,
+        },
+        {
+          title: 'Messages',
+          url: '/messages',
+          icon: MessagesSquare,
         },
         {
           title: 'Users',

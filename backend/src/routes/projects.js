@@ -461,6 +461,11 @@ router.use(
   require("./lookaheads"),
 );
 router.use(
+  "/:projectId/emails",
+  nestedProjectAccess,
+  require("./project-emails"),
+);
+router.use(
   "/:projectId/drawings/sets",
   nestedProjectAccess,
   require("./drawing-sets"),

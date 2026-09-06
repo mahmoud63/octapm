@@ -82,6 +82,8 @@ const RECORD_TYPE_MODULES = Object.freeze({
   cost_record: "cost",
   direct_cost: "cost",
   lookahead: "lookahead",
+  conversation: "conversation",
+  inbound_email: "email",
   boq_item: "boq",
   location: "location",
   project: "project_parties",

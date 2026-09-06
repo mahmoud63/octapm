@@ -33,6 +33,7 @@ import { Route as AuthenticatedSettingsIndexRouteImport } from './routes/_authen
 import { Route as AuthenticatedReportsIndexRouteImport } from './routes/_authenticated/reports/index'
 import { Route as AuthenticatedProjectsIndexRouteImport } from './routes/_authenticated/projects/index'
 import { Route as AuthenticatedPortfolioIndexRouteImport } from './routes/_authenticated/portfolio/index'
+import { Route as AuthenticatedMessagesIndexRouteImport } from './routes/_authenticated/messages/index'
 import { Route as AuthenticatedHelpCenterIndexRouteImport } from './routes/_authenticated/help-center/index'
 import { Route as AuthenticatedCompanyIndexRouteImport } from './routes/_authenticated/company/index'
 import { Route as AuthenticatedBillingIndexRouteImport } from './routes/_authenticated/billing/index'
@@ -186,6 +187,12 @@ const AuthenticatedPortfolioIndexRoute =
   AuthenticatedPortfolioIndexRouteImport.update({
     id: '/portfolio/',
     path: '/portfolio/',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
+const AuthenticatedMessagesIndexRoute =
+  AuthenticatedMessagesIndexRouteImport.update({
+    id: '/messages/',
+    path: '/messages/',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
 const AuthenticatedHelpCenterIndexRoute =
@@ -406,6 +413,7 @@ export interface FileRoutesByFullPath {
   '/billing/': typeof AuthenticatedBillingIndexRoute
   '/company/': typeof AuthenticatedCompanyIndexRoute
   '/help-center/': typeof AuthenticatedHelpCenterIndexRoute
+  '/messages/': typeof AuthenticatedMessagesIndexRoute
   '/portfolio/': typeof AuthenticatedPortfolioIndexRoute
   '/projects/': typeof AuthenticatedProjectsIndexRoute
   '/reports/': typeof AuthenticatedReportsIndexRoute
@@ -457,6 +465,7 @@ export interface FileRoutesByTo {
   '/billing': typeof AuthenticatedBillingIndexRoute
   '/company': typeof AuthenticatedCompanyIndexRoute
   '/help-center': typeof AuthenticatedHelpCenterIndexRoute
+  '/messages': typeof AuthenticatedMessagesIndexRoute
   '/portfolio': typeof AuthenticatedPortfolioIndexRoute
   '/projects': typeof AuthenticatedProjectsIndexRoute
   '/reports': typeof AuthenticatedReportsIndexRoute
@@ -513,6 +522,7 @@ export interface FileRoutesById {
   '/_authenticated/billing/': typeof AuthenticatedBillingIndexRoute
   '/_authenticated/company/': typeof AuthenticatedCompanyIndexRoute
   '/_authenticated/help-center/': typeof AuthenticatedHelpCenterIndexRoute
+  '/_authenticated/messages/': typeof AuthenticatedMessagesIndexRoute
   '/_authenticated/portfolio/': typeof AuthenticatedPortfolioIndexRoute
   '/_authenticated/projects/': typeof AuthenticatedProjectsIndexRoute
   '/_authenticated/reports/': typeof AuthenticatedReportsIndexRoute
@@ -569,6 +579,7 @@ export interface FileRouteTypes {
     | '/billing/'
     | '/company/'
     | '/help-center/'
+    | '/messages/'
     | '/portfolio/'
     | '/projects/'
     | '/reports/'
@@ -620,6 +631,7 @@ export interface FileRouteTypes {
     | '/billing'
     | '/company'
     | '/help-center'
+    | '/messages'
     | '/portfolio'
     | '/projects'
     | '/reports'
@@ -675,6 +687,7 @@ export interface FileRouteTypes {
     | '/_authenticated/billing/'
     | '/_authenticated/company/'
     | '/_authenticated/help-center/'
+    | '/_authenticated/messages/'
     | '/_authenticated/portfolio/'
     | '/_authenticated/projects/'
     | '/_authenticated/reports/'
@@ -873,6 +886,13 @@ declare module '@tanstack/react-router' {
       path: '/portfolio'
       fullPath: '/portfolio/'
       preLoaderRoute: typeof AuthenticatedPortfolioIndexRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/messages/': {
+      id: '/_authenticated/messages/'
+      path: '/messages'
+      fullPath: '/messages/'
+      preLoaderRoute: typeof AuthenticatedMessagesIndexRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
     '/_authenticated/help-center/': {
@@ -1183,6 +1203,7 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedProjectsProjectIdRoute: typeof AuthenticatedProjectsProjectIdRouteWithChildren
   AuthenticatedBillingIndexRoute: typeof AuthenticatedBillingIndexRoute
   AuthenticatedHelpCenterIndexRoute: typeof AuthenticatedHelpCenterIndexRoute
+  AuthenticatedMessagesIndexRoute: typeof AuthenticatedMessagesIndexRoute
   AuthenticatedPortfolioIndexRoute: typeof AuthenticatedPortfolioIndexRoute
   AuthenticatedProjectsIndexRoute: typeof AuthenticatedProjectsIndexRoute
   AuthenticatedReportsIndexRoute: typeof AuthenticatedReportsIndexRoute
@@ -1200,6 +1221,7 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
     AuthenticatedProjectsProjectIdRouteWithChildren,
   AuthenticatedBillingIndexRoute: AuthenticatedBillingIndexRoute,
   AuthenticatedHelpCenterIndexRoute: AuthenticatedHelpCenterIndexRoute,
+  AuthenticatedMessagesIndexRoute: AuthenticatedMessagesIndexRoute,
   AuthenticatedPortfolioIndexRoute: AuthenticatedPortfolioIndexRoute,
   AuthenticatedProjectsIndexRoute: AuthenticatedProjectsIndexRoute,
   AuthenticatedReportsIndexRoute: AuthenticatedReportsIndexRoute,

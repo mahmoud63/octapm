@@ -78,6 +78,13 @@ const createApp = () => {
     express.raw({ type: "application/json" }),
     require("./routes/stripe-webhook"),
   );
+  // Inbound email carries base64 attachments: its own, larger JSON limit (OCTA-COMM-CONV-042).
+  app.use(
+    "/api/v1/public/inbound-email",
+    express.json({ limit: "40mb" }),
+    express.urlencoded({ extended: true, limit: "40mb" }),
+    require("./routes/inbound-email-webhook"),
+  );
   app.use(express.json({ limit: "10mb" }));
 
   app.get("/api/health", (_req, res) => {
@@ -106,6 +113,7 @@ const createApp = () => {
   app.use("/api/v1/public/bids", require("./routes/bid-portal"));
   app.use("/api/v1/public/rfqs", require("./routes/rfq-portal"));
   app.use("/api/v1/assistant", require("./routes/assistant").orgRouter);
+  app.use("/api/v1/conversations", require("./routes/conversations"));
 
   app.use(notFoundHandler);
   app.use(errorHandler);

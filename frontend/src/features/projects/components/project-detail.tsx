@@ -283,6 +283,7 @@ export function ProjectDetail({
           { key: 'specifications', label: 'Specifications' },
           { key: 'transmittals', label: 'Transmittals' },
           { key: 'correspondence', label: 'Correspondence' },
+          { key: 'emails', label: 'Emails' },
           { key: 'search', label: 'Search' },
         ],
       },

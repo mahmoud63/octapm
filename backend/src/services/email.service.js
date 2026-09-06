@@ -16,7 +16,7 @@ const buildProviderHeaders = () => {
   return headers;
 };
 
-async function sendViaWebhook({ to, subject, body, html, metadata }) {
+async function sendViaWebhook({ to, subject, body, html, metadata, replyTo }) {
   const response = await fetch(getEmailProviderUrl(), {
     method: "POST",
     headers: buildProviderHeaders(),
@@ -25,6 +25,7 @@ async function sendViaWebhook({ to, subject, body, html, metadata }) {
       subject,
       text: body,
       html: html || null,
+      ...(replyTo ? { replyTo } : {}),
       metadata: metadata || {},
     }),
   });
@@ -41,7 +42,8 @@ async function sendViaWebhook({ to, subject, body, html, metadata }) {
   return { delivered: true, provider: "webhook", to, subject };
 }
 
-async function sendEmail({ to, subject, body, html, metadata = {} }) {
+/** `replyTo` (optional) lets a reply land back in OctaPM — see inbound-email.service. */
+async function sendEmail({ to, subject, body, html, metadata = {}, replyTo = null }) {
   if (!to || !subject || !body) {
     throw new HttpError(
       400,
@@ -51,7 +53,7 @@ async function sendEmail({ to, subject, body, html, metadata = {} }) {
   }
 
   if (getEmailProviderUrl()) {
-    return sendViaWebhook({ to, subject, body, html, metadata });
+    return sendViaWebhook({ to, subject, body, html, metadata, replyTo });
   }
 
   if (process.env.NODE_ENV === "production") {

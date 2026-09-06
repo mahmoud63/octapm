@@ -105,6 +105,10 @@ model Organisation {
   directCostPayments  DirectCostPayment[]
   lookaheads          Lookahead[]
   lookaheadItems      LookaheadItem[]
+  conversations       Conversation[]
+  conversationMembers ConversationMember[]
+  conversationMessages ConversationMessage[]
+  inboundEmails       InboundEmail[]
   subPayAppLines      SubPayAppLine[]
   subPayAppPayments   SubPayAppPayment[]
   companyEquipment    CompanyEquipment[]
@@ -190,6 +194,8 @@ model User {
   taskAttachments         TaskAttachment[]    @relation("TaskAttachmentUploader")
   taskHistoryEvents       TaskHistory[]       @relation("TaskHistoryActor")
   authoredComments        Comment[]           @relation("CommentAuthor")
+  conversationMemberships ConversationMember[]
+  conversationMessages    ConversationMessage[] @relation("ConversationMessageAuthor")
   commentMentions         CommentMention[]    @relation("CommentMentionUser")
   recordSubscriptions     RecordSubscription[] @relation("RecordSubscriptionUser")
 
@@ -407,6 +413,9 @@ model Project {
   dailyLogSettingsJson  Json      @default("{}")
   projectCalendar       String?
   reportingCutoffDay    Int?
+  // Inbound email (OCTA-COMM-CONV-042): p-<token>@<INBOUND_EMAIL_DOMAIN> reaches this project's inbox.
+  inboundEmailToken     String?   @unique
+  inboundEmailAutoLog   Boolean   @default(false)
   currency              String    @default("USD")
   status                String    @default("active")
   templateId            String? // ProjectTemplate the project was created from
@@ -492,6 +501,8 @@ model Project {
   directCostPayments            DirectCostPayment[]
   lookaheads                    Lookahead[]
   lookaheadItems                LookaheadItem[]
+  conversations                 Conversation[]
+  inboundEmails                 InboundEmail[]
   subPayAppLines                SubPayAppLine[]
   subPayAppPayments             SubPayAppPayment[]
   activityCostLoadings          ActivityCostLoading[]
@@ -4976,6 +4987,132 @@ model CrewMember {
 
   @@unique([crewId, workerId])
   @@index([workerId])
+}
+
+/**
+ * Conversations (OCTA-COMM-CONV-042): direct, group and per-record message threads
+ * inside the organisation, optionally scoped to a project.
+ */
+model Conversation {
+  id                 String    @id @default(uuid())
+  orgId              String
+  projectId          String?
+  kind               String    @default("group") // direct, group, record
+  title              String?
+  directKey          String? // "<projectId|org>:<userA>:<userB>" — one direct thread per pair per scope
+  recordType         String?
+  recordId           String?
+  recordTitle        String?
+  lastMessageAt      DateTime?
+  lastMessagePreview String?
+  messageCount       Int       @default(0)
+  archivedAt         DateTime?
+  archivedBy         String?
+  createdBy          String?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  org           Organisation          @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  project       Project?              @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  members       ConversationMember[]
+  messages      ConversationMessage[]
+  inboundEmails InboundEmail[]
+
+  @@unique([orgId, directKey])
+  @@index([orgId, lastMessageAt])
+  @@index([projectId, kind])
+  @@index([orgId, recordType, recordId])
+}
+
+model ConversationMember {
+  id             String    @id @default(uuid())
+  orgId          String
+  conversationId String
+  userId         String
+  role           String    @default("member") // member, admin
+  lastReadAt     DateTime?
+  starred        Boolean   @default(false)
+  muted          Boolean   @default(false)
+  joinedAt       DateTime  @default(now())
+  leftAt         DateTime?
+
+  org          Organisation @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([conversationId, userId])
+  @@index([orgId])
+  @@index([userId, leftAt])
+}
+
+model ConversationMessage {
+  id                String    @id @default(uuid())
+  orgId             String
+  conversationId    String
+  authorId          String?
+  kind              String    @default("text") // text, system, email
+  body              String
+  mentionsJson      Json      @default("[]") // [{ userId, name }]
+  linkedRecordType  String?
+  linkedRecordId    String?
+  linkedRecordTitle String?
+  linkedProjectId   String?
+  inboundEmailId    String?
+  editedAt          DateTime?
+  deletedAt         DateTime?
+  deletedBy         String?
+  createdAt         DateTime  @default(now())
+
+  org          Organisation @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  author       User?        @relation("ConversationMessageAuthor", fields: [authorId], references: [id], onDelete: SetNull)
+
+  @@index([orgId])
+  @@index([conversationId, createdAt])
+  @@index([authorId])
+}
+
+/** An email received on a project inbox, a reply-to-record or a reply-to-conversation address (OCTA-COMM-CONV-042). */
+model InboundEmail {
+  id               String    @id @default(uuid())
+  orgId            String
+  projectId        String?
+  provider         String
+  messageId        String?
+  inReplyTo        String?
+  referencesJson   Json      @default("[]")
+  fromEmail        String
+  fromName         String?
+  toJson           Json      @default("[]")
+  ccJson           Json      @default("[]")
+  subject          String
+  textBody         String
+  htmlBody         String?
+  replyText        String? // the new text without the quoted thread
+  attachmentsJson  Json      @default("[]")
+  receivedAt       DateTime  @default(now())
+  status           String    @default("received") // received, posted, logged, linked, ignored, unmatched, rejected
+  target           String? // project, record, conversation
+  recordType       String?
+  recordId         String?
+  conversationId   String?
+  commentId        String?
+  messageRowId     String?
+  correspondenceId String?
+  senderUserId     String?
+  error            String?
+  processedAt      DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  org          Organisation  @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  project      Project?      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  conversation Conversation? @relation(fields: [conversationId], references: [id], onDelete: SetNull)
+
+  @@unique([orgId, provider, messageId])
+  @@index([projectId, status, receivedAt])
+  @@index([orgId, receivedAt])
+  @@index([recordType, recordId])
 }
 
 /**

@@ -30,6 +30,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { AuditHistoryPanel } from '@/features/audit/components/audit-history-panel'
 import { useRecordTypes } from '@/features/custom-fields/hooks/use-custom-fields'
 import { DrawingsModule } from '@/features/drawings/components/drawings-module'
+import { EmailsInbox } from '@/features/emails/components/emails-inbox'
 import type { ProjectSetupTarget } from '@/features/projects/data/schema'
 import { useProjectParties } from '@/features/projects/hooks/use-projects'
 import { SpecificationsPanel } from '@/features/specifications/components/specifications-panel'
@@ -579,6 +580,7 @@ export function DocControlDashboard({
             <TabsTrigger value='specifications'>Specifications</TabsTrigger>
             <TabsTrigger value='transmittals'>Transmittals</TabsTrigger>
             <TabsTrigger value='correspondence'>Correspondence</TabsTrigger>
+            <TabsTrigger value='emails'>Emails</TabsTrigger>
             <TabsTrigger value='search'>Search</TabsTrigger>
           </TabsList>
         )}
@@ -592,6 +594,10 @@ export function DocControlDashboard({
             projectId={projectId}
             initialTarget={initialTarget}
           />
+        </TabsContent>
+
+        <TabsContent value='emails'>
+          <EmailsInbox projectId={projectId} initialTarget={initialTarget} />
         </TabsContent>
 
         <TabsContent value='register' className='space-y-3'>

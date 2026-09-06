@@ -57,6 +57,8 @@ const RECORD_WORKSPACE = Object.freeze({
   cost_record: { module: "cost", child: "activity" },
   direct_cost: { module: "cost", child: "direct-costs" },
   lookahead: { module: "schedule", child: "lookahead" },
+  inbound_email: { module: "doc-control", child: "emails" },
+  conversation: { path: "/messages", param: "conversationId" },
   burn_rate_entry: { module: "cost", child: "burn" },
   boq_item: { module: "boq" },
   boq_revision: { module: "boq" },
@@ -75,11 +77,13 @@ const encode = (value) => encodeURIComponent(String(value));
  * so a link is never broken, only less precise.
  */
 const recordWorkspacePath = ({ projectId, recordType, recordId = null }) => {
-  if (!projectId) return null;
   const target = RECORD_WORKSPACE[recordType];
   if (target?.path) {
-    return recordId ? `${target.path}?recordId=${encode(recordId)}` : target.path;
+    // Org-level pages (tasks, messages) do not need a project.
+    const param = target.param || "recordId";
+    return recordId ? `${target.path}?${param}=${encode(recordId)}` : target.path;
   }
+  if (!projectId) return null;
   const base = target
     ? `/projects/${encode(projectId)}/${target.module}${target.child ? `/${target.child}` : ""}`
     : `/projects/${encode(projectId)}`;
