@@ -4,6 +4,7 @@ const jwt = require("jsonwebtoken");
 const { prisma } = require("../config/db");
 const { HttpError } = require("../utils/http-error");
 const secretBox = require("../utils/secret-box");
+const { apiUrl } = require("../utils/api-url");
 const { seal, open } = require("./mfa.service");
 
 /**
@@ -48,7 +49,7 @@ const decryptSecret = (value) => {
   }
 };
 const webAppUrl = () => (process.env.WEB_APP_URL || "http://localhost:5173").replace(/\/$/, "");
-const redirectUri = () => process.env.SSO_REDIRECT_URI || `${(process.env.API_BASE_URL || "http://localhost:3000/api/v1").replace(/\/$/, "")}/auth/sso/callback`;
+const redirectUri = () => process.env.SSO_REDIRECT_URI || apiUrl("/auth/sso/callback");
 const hashToken = (token) => crypto.createHash("sha256").update(String(token)).digest("hex");
 const fetcher = (fetchImpl) => fetchImpl || globalThis.fetch;
 

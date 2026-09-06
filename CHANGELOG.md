@@ -65,6 +65,20 @@ Sprint 1 of the Procore parity program (P0 foundations). See
 
 - Removed the admin-template placeholders from the authenticated app: Apps, Chats, Sign In (2 Col), the demo Auth/Errors navigation group, the fake team switcher, and the unused sidebar components. Display settings and the `UserSetting.displayItems` default no longer reference `apps`/`chats`.
 - The user menu's dead "Upgrade to Pro" entry now links to Plans & billing.
+- `backend/.env.example` now documents every environment variable the server
+  reads — roughly 70 keys across storage, jobs, schedulers, rate limits, the AI
+  provider, inbound and outbound email, SSO/MFA, web push, integrations and the
+  vendor portals — grouped, with defaults and with the five keys production
+  refuses to boot without called out at the top. It had drifted to 20 keys.
+
+### Fixed
+
+- `API_BASE_URL` was read with two opposite conventions: `sso.service` appended
+  `/auth/sso/callback` (expecting the value to end in `/api/v1`) while
+  `accounting.service` appended `/api/v1/integrations/...` (expecting a bare
+  origin). No single value satisfied both, so configuring SSO broke the
+  QuickBooks and Xero redirect URIs and vice versa. Both now build their
+  redirect URI through `utils/api-url.js`, which accepts either spelling.
 
 ## 2026-06-13
 

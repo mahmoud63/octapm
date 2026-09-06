@@ -3,6 +3,7 @@ const ExcelJS = require("exceljs");
 const { prisma } = require("../config/db");
 const { HttpError } = require("../utils/http-error");
 const secretBox = require("../utils/secret-box");
+const { apiUrl } = require("../utils/api-url");
 const auditService = require("./audit.service");
 const notificationService = require("./notification.service");
 const { PROVIDERS, PROVIDER_KEYS, getProvider, money } = require("./integrations/accounting-providers");
@@ -33,7 +34,7 @@ const num = (value) => (value && typeof value === "object" && typeof value.toNum
 const day = (value) => (value ? new Date(value).toISOString().slice(0, 10) : new Date().toISOString().slice(0, 10));
 const tablesReady = () => Boolean(prisma.accountingConnection?.findFirst);
 
-const redirectUri = (provider) => process.env.ACCOUNTING_REDIRECT_URI || `${(process.env.API_BASE_URL || process.env.WEB_APP_URL || "http://localhost:4000").replace(/\/$/, "")}/api/v1/integrations/accounting/${provider}/callback`;
+const redirectUri = (provider) => process.env.ACCOUNTING_REDIRECT_URI || apiUrl(`/integrations/accounting/${provider}/callback`);
 const webAppUrl = () => (process.env.WEB_APP_URL || "http://localhost:5173").replace(/\/$/, "");
 
 // ─── connections ───────────────────────────────────────────────────────────
