@@ -6,6 +6,7 @@ import {
   Wrench,
   UserCog,
   CreditCard,
+  KeyRound,
   ShieldCheck,
 } from 'lucide-react'
 import { useIsCompanyAdmin } from '@/lib/permissions'
@@ -23,6 +24,11 @@ const sidebarNavItems = [
     title: 'Account',
     href: '/settings/account',
     icon: <Wrench size={18} />,
+  },
+  {
+    title: 'Security',
+    href: '/settings/security',
+    icon: <KeyRound size={18} />,
   },
   {
     title: 'Appearance',

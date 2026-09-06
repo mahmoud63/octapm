@@ -36,6 +36,7 @@ import { Route as AuthenticatedPortfolioIndexRouteImport } from './routes/_authe
 import { Route as AuthenticatedHelpCenterIndexRouteImport } from './routes/_authenticated/help-center/index'
 import { Route as AuthenticatedCompanyIndexRouteImport } from './routes/_authenticated/company/index'
 import { Route as AuthenticatedBillingIndexRouteImport } from './routes/_authenticated/billing/index'
+import { Route as AuthenticatedSettingsSecurityRouteImport } from './routes/_authenticated/settings/security'
 import { Route as AuthenticatedSettingsPermissionsRouteImport } from './routes/_authenticated/settings/permissions'
 import { Route as AuthenticatedSettingsNotificationsRouteImport } from './routes/_authenticated/settings/notifications'
 import { Route as AuthenticatedSettingsDisplayRouteImport } from './routes/_authenticated/settings/display'
@@ -48,6 +49,7 @@ import { Route as AuthenticatedCompanyWorkflowsRouteImport } from './routes/_aut
 import { Route as AuthenticatedCompanyVendorsRouteImport } from './routes/_authenticated/company/vendors'
 import { Route as AuthenticatedCompanyTemplatesRouteImport } from './routes/_authenticated/company/templates'
 import { Route as AuthenticatedCompanySubmittalWorkflowsRouteImport } from './routes/_authenticated/company/submittal-workflows'
+import { Route as AuthenticatedCompanySecurityRouteImport } from './routes/_authenticated/company/security'
 import { Route as AuthenticatedCompanyPermissionsRouteImport } from './routes/_authenticated/company/permissions'
 import { Route as AuthenticatedCompanyIntegrationsRouteImport } from './routes/_authenticated/company/integrations'
 import { Route as AuthenticatedCompanyFormTemplatesRouteImport } from './routes/_authenticated/company/form-templates'
@@ -56,6 +58,7 @@ import { Route as AuthenticatedCompanyDirectoryRouteImport } from './routes/_aut
 import { Route as AuthenticatedCompanyCustomFieldsRouteImport } from './routes/_authenticated/company/custom-fields'
 import { Route as AuthenticatedCompanyCostCodesRouteImport } from './routes/_authenticated/company/cost-codes'
 import { Route as AuthenticatedBillingCheckoutRouteImport } from './routes/_authenticated/billing/checkout'
+import { Route as authSsoCompleteRouteImport } from './routes/(auth)/sso.complete'
 import { Route as AuthenticatedProjectsProjectIdIndexRouteImport } from './routes/_authenticated/projects/$projectId/index'
 import { Route as AuthenticatedProjectsProjectIdModuleIndexRouteImport } from './routes/_authenticated/projects/$projectId/$module/index'
 import { Route as AuthenticatedProjectsProjectIdModuleChildRouteImport } from './routes/_authenticated/projects/$projectId/$module/$child'
@@ -203,6 +206,12 @@ const AuthenticatedBillingIndexRoute =
     path: '/billing/',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
+const AuthenticatedSettingsSecurityRoute =
+  AuthenticatedSettingsSecurityRouteImport.update({
+    id: '/security',
+    path: '/security',
+    getParentRoute: () => AuthenticatedSettingsRouteRoute,
+  } as any)
 const AuthenticatedSettingsPermissionsRoute =
   AuthenticatedSettingsPermissionsRouteImport.update({
     id: '/permissions',
@@ -275,6 +284,12 @@ const AuthenticatedCompanySubmittalWorkflowsRoute =
     path: '/submittal-workflows',
     getParentRoute: () => AuthenticatedCompanyRouteRoute,
   } as any)
+const AuthenticatedCompanySecurityRoute =
+  AuthenticatedCompanySecurityRouteImport.update({
+    id: '/security',
+    path: '/security',
+    getParentRoute: () => AuthenticatedCompanyRouteRoute,
+  } as any)
 const AuthenticatedCompanyPermissionsRoute =
   AuthenticatedCompanyPermissionsRouteImport.update({
     id: '/permissions',
@@ -323,6 +338,11 @@ const AuthenticatedBillingCheckoutRoute =
     path: '/billing/checkout',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
+const authSsoCompleteRoute = authSsoCompleteRouteImport.update({
+  id: '/(auth)/sso/complete',
+  path: '/sso/complete',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AuthenticatedProjectsProjectIdIndexRoute =
   AuthenticatedProjectsProjectIdIndexRouteImport.update({
     id: '/',
@@ -360,6 +380,7 @@ export interface FileRoutesByFullPath {
   '/503': typeof errors503Route
   '/bid/$token': typeof BidTokenRoute
   '/rfq/$token': typeof RfqTokenRoute
+  '/sso/complete': typeof authSsoCompleteRoute
   '/billing/checkout': typeof AuthenticatedBillingCheckoutRoute
   '/company/cost-codes': typeof AuthenticatedCompanyCostCodesRoute
   '/company/custom-fields': typeof AuthenticatedCompanyCustomFieldsRoute
@@ -368,6 +389,7 @@ export interface FileRoutesByFullPath {
   '/company/form-templates': typeof AuthenticatedCompanyFormTemplatesRoute
   '/company/integrations': typeof AuthenticatedCompanyIntegrationsRoute
   '/company/permissions': typeof AuthenticatedCompanyPermissionsRoute
+  '/company/security': typeof AuthenticatedCompanySecurityRoute
   '/company/submittal-workflows': typeof AuthenticatedCompanySubmittalWorkflowsRoute
   '/company/templates': typeof AuthenticatedCompanyTemplatesRoute
   '/company/vendors': typeof AuthenticatedCompanyVendorsRoute
@@ -380,6 +402,7 @@ export interface FileRoutesByFullPath {
   '/settings/display': typeof AuthenticatedSettingsDisplayRoute
   '/settings/notifications': typeof AuthenticatedSettingsNotificationsRoute
   '/settings/permissions': typeof AuthenticatedSettingsPermissionsRoute
+  '/settings/security': typeof AuthenticatedSettingsSecurityRoute
   '/billing/': typeof AuthenticatedBillingIndexRoute
   '/company/': typeof AuthenticatedCompanyIndexRoute
   '/help-center/': typeof AuthenticatedHelpCenterIndexRoute
@@ -409,6 +432,7 @@ export interface FileRoutesByTo {
   '/bid/$token': typeof BidTokenRoute
   '/rfq/$token': typeof RfqTokenRoute
   '/': typeof AuthenticatedIndexRoute
+  '/sso/complete': typeof authSsoCompleteRoute
   '/billing/checkout': typeof AuthenticatedBillingCheckoutRoute
   '/company/cost-codes': typeof AuthenticatedCompanyCostCodesRoute
   '/company/custom-fields': typeof AuthenticatedCompanyCustomFieldsRoute
@@ -417,6 +441,7 @@ export interface FileRoutesByTo {
   '/company/form-templates': typeof AuthenticatedCompanyFormTemplatesRoute
   '/company/integrations': typeof AuthenticatedCompanyIntegrationsRoute
   '/company/permissions': typeof AuthenticatedCompanyPermissionsRoute
+  '/company/security': typeof AuthenticatedCompanySecurityRoute
   '/company/submittal-workflows': typeof AuthenticatedCompanySubmittalWorkflowsRoute
   '/company/templates': typeof AuthenticatedCompanyTemplatesRoute
   '/company/vendors': typeof AuthenticatedCompanyVendorsRoute
@@ -428,6 +453,7 @@ export interface FileRoutesByTo {
   '/settings/display': typeof AuthenticatedSettingsDisplayRoute
   '/settings/notifications': typeof AuthenticatedSettingsNotificationsRoute
   '/settings/permissions': typeof AuthenticatedSettingsPermissionsRoute
+  '/settings/security': typeof AuthenticatedSettingsSecurityRoute
   '/billing': typeof AuthenticatedBillingIndexRoute
   '/company': typeof AuthenticatedCompanyIndexRoute
   '/help-center': typeof AuthenticatedHelpCenterIndexRoute
@@ -461,6 +487,7 @@ export interface FileRoutesById {
   '/bid/$token': typeof BidTokenRoute
   '/rfq/$token': typeof RfqTokenRoute
   '/_authenticated/': typeof AuthenticatedIndexRoute
+  '/(auth)/sso/complete': typeof authSsoCompleteRoute
   '/_authenticated/billing/checkout': typeof AuthenticatedBillingCheckoutRoute
   '/_authenticated/company/cost-codes': typeof AuthenticatedCompanyCostCodesRoute
   '/_authenticated/company/custom-fields': typeof AuthenticatedCompanyCustomFieldsRoute
@@ -469,6 +496,7 @@ export interface FileRoutesById {
   '/_authenticated/company/form-templates': typeof AuthenticatedCompanyFormTemplatesRoute
   '/_authenticated/company/integrations': typeof AuthenticatedCompanyIntegrationsRoute
   '/_authenticated/company/permissions': typeof AuthenticatedCompanyPermissionsRoute
+  '/_authenticated/company/security': typeof AuthenticatedCompanySecurityRoute
   '/_authenticated/company/submittal-workflows': typeof AuthenticatedCompanySubmittalWorkflowsRoute
   '/_authenticated/company/templates': typeof AuthenticatedCompanyTemplatesRoute
   '/_authenticated/company/vendors': typeof AuthenticatedCompanyVendorsRoute
@@ -481,6 +509,7 @@ export interface FileRoutesById {
   '/_authenticated/settings/display': typeof AuthenticatedSettingsDisplayRoute
   '/_authenticated/settings/notifications': typeof AuthenticatedSettingsNotificationsRoute
   '/_authenticated/settings/permissions': typeof AuthenticatedSettingsPermissionsRoute
+  '/_authenticated/settings/security': typeof AuthenticatedSettingsSecurityRoute
   '/_authenticated/billing/': typeof AuthenticatedBillingIndexRoute
   '/_authenticated/company/': typeof AuthenticatedCompanyIndexRoute
   '/_authenticated/help-center/': typeof AuthenticatedHelpCenterIndexRoute
@@ -514,6 +543,7 @@ export interface FileRouteTypes {
     | '/503'
     | '/bid/$token'
     | '/rfq/$token'
+    | '/sso/complete'
     | '/billing/checkout'
     | '/company/cost-codes'
     | '/company/custom-fields'
@@ -522,6 +552,7 @@ export interface FileRouteTypes {
     | '/company/form-templates'
     | '/company/integrations'
     | '/company/permissions'
+    | '/company/security'
     | '/company/submittal-workflows'
     | '/company/templates'
     | '/company/vendors'
@@ -534,6 +565,7 @@ export interface FileRouteTypes {
     | '/settings/display'
     | '/settings/notifications'
     | '/settings/permissions'
+    | '/settings/security'
     | '/billing/'
     | '/company/'
     | '/help-center/'
@@ -563,6 +595,7 @@ export interface FileRouteTypes {
     | '/bid/$token'
     | '/rfq/$token'
     | '/'
+    | '/sso/complete'
     | '/billing/checkout'
     | '/company/cost-codes'
     | '/company/custom-fields'
@@ -571,6 +604,7 @@ export interface FileRouteTypes {
     | '/company/form-templates'
     | '/company/integrations'
     | '/company/permissions'
+    | '/company/security'
     | '/company/submittal-workflows'
     | '/company/templates'
     | '/company/vendors'
@@ -582,6 +616,7 @@ export interface FileRouteTypes {
     | '/settings/display'
     | '/settings/notifications'
     | '/settings/permissions'
+    | '/settings/security'
     | '/billing'
     | '/company'
     | '/help-center'
@@ -614,6 +649,7 @@ export interface FileRouteTypes {
     | '/bid/$token'
     | '/rfq/$token'
     | '/_authenticated/'
+    | '/(auth)/sso/complete'
     | '/_authenticated/billing/checkout'
     | '/_authenticated/company/cost-codes'
     | '/_authenticated/company/custom-fields'
@@ -622,6 +658,7 @@ export interface FileRouteTypes {
     | '/_authenticated/company/form-templates'
     | '/_authenticated/company/integrations'
     | '/_authenticated/company/permissions'
+    | '/_authenticated/company/security'
     | '/_authenticated/company/submittal-workflows'
     | '/_authenticated/company/templates'
     | '/_authenticated/company/vendors'
@@ -634,6 +671,7 @@ export interface FileRouteTypes {
     | '/_authenticated/settings/display'
     | '/_authenticated/settings/notifications'
     | '/_authenticated/settings/permissions'
+    | '/_authenticated/settings/security'
     | '/_authenticated/billing/'
     | '/_authenticated/company/'
     | '/_authenticated/help-center/'
@@ -664,6 +702,7 @@ export interface RootRouteChildren {
   errors503Route: typeof errors503Route
   BidTokenRoute: typeof BidTokenRoute
   RfqTokenRoute: typeof RfqTokenRoute
+  authSsoCompleteRoute: typeof authSsoCompleteRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -857,6 +896,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedBillingIndexRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/_authenticated/settings/security': {
+      id: '/_authenticated/settings/security'
+      path: '/security'
+      fullPath: '/settings/security'
+      preLoaderRoute: typeof AuthenticatedSettingsSecurityRouteImport
+      parentRoute: typeof AuthenticatedSettingsRouteRoute
+    }
     '/_authenticated/settings/permissions': {
       id: '/_authenticated/settings/permissions'
       path: '/permissions'
@@ -941,6 +987,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedCompanySubmittalWorkflowsRouteImport
       parentRoute: typeof AuthenticatedCompanyRouteRoute
     }
+    '/_authenticated/company/security': {
+      id: '/_authenticated/company/security'
+      path: '/security'
+      fullPath: '/company/security'
+      preLoaderRoute: typeof AuthenticatedCompanySecurityRouteImport
+      parentRoute: typeof AuthenticatedCompanyRouteRoute
+    }
     '/_authenticated/company/permissions': {
       id: '/_authenticated/company/permissions'
       path: '/permissions'
@@ -997,6 +1050,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedBillingCheckoutRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/(auth)/sso/complete': {
+      id: '/(auth)/sso/complete'
+      path: '/sso/complete'
+      fullPath: '/sso/complete'
+      preLoaderRoute: typeof authSsoCompleteRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/_authenticated/projects/$projectId/': {
       id: '/_authenticated/projects/$projectId/'
       path: '/'
@@ -1029,6 +1089,7 @@ interface AuthenticatedCompanyRouteRouteChildren {
   AuthenticatedCompanyFormTemplatesRoute: typeof AuthenticatedCompanyFormTemplatesRoute
   AuthenticatedCompanyIntegrationsRoute: typeof AuthenticatedCompanyIntegrationsRoute
   AuthenticatedCompanyPermissionsRoute: typeof AuthenticatedCompanyPermissionsRoute
+  AuthenticatedCompanySecurityRoute: typeof AuthenticatedCompanySecurityRoute
   AuthenticatedCompanySubmittalWorkflowsRoute: typeof AuthenticatedCompanySubmittalWorkflowsRoute
   AuthenticatedCompanyTemplatesRoute: typeof AuthenticatedCompanyTemplatesRoute
   AuthenticatedCompanyVendorsRoute: typeof AuthenticatedCompanyVendorsRoute
@@ -1048,6 +1109,7 @@ const AuthenticatedCompanyRouteRouteChildren: AuthenticatedCompanyRouteRouteChil
     AuthenticatedCompanyIntegrationsRoute:
       AuthenticatedCompanyIntegrationsRoute,
     AuthenticatedCompanyPermissionsRoute: AuthenticatedCompanyPermissionsRoute,
+    AuthenticatedCompanySecurityRoute: AuthenticatedCompanySecurityRoute,
     AuthenticatedCompanySubmittalWorkflowsRoute:
       AuthenticatedCompanySubmittalWorkflowsRoute,
     AuthenticatedCompanyTemplatesRoute: AuthenticatedCompanyTemplatesRoute,
@@ -1068,6 +1130,7 @@ interface AuthenticatedSettingsRouteRouteChildren {
   AuthenticatedSettingsDisplayRoute: typeof AuthenticatedSettingsDisplayRoute
   AuthenticatedSettingsNotificationsRoute: typeof AuthenticatedSettingsNotificationsRoute
   AuthenticatedSettingsPermissionsRoute: typeof AuthenticatedSettingsPermissionsRoute
+  AuthenticatedSettingsSecurityRoute: typeof AuthenticatedSettingsSecurityRoute
   AuthenticatedSettingsIndexRoute: typeof AuthenticatedSettingsIndexRoute
 }
 
@@ -1081,6 +1144,7 @@ const AuthenticatedSettingsRouteRouteChildren: AuthenticatedSettingsRouteRouteCh
       AuthenticatedSettingsNotificationsRoute,
     AuthenticatedSettingsPermissionsRoute:
       AuthenticatedSettingsPermissionsRoute,
+    AuthenticatedSettingsSecurityRoute: AuthenticatedSettingsSecurityRoute,
     AuthenticatedSettingsIndexRoute: AuthenticatedSettingsIndexRoute,
   }
 
@@ -1162,6 +1226,7 @@ const rootRouteChildren: RootRouteChildren = {
   errors503Route: errors503Route,
   BidTokenRoute: BidTokenRoute,
   RfqTokenRoute: RfqTokenRoute,
+  authSsoCompleteRoute: authSsoCompleteRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

@@ -102,6 +102,7 @@ const createApp = () => {
   app.use("/api/v1/portfolio", portfolioRoutes);
   app.use("/api/v1/workflows", workflowInboxRoutes);
   app.use("/api/v1/integrations", require("./routes/integrations"));
+  app.use("/api/v1/company", require("./routes/company-security"));
   app.use("/api/v1/public/bids", require("./routes/bid-portal"));
   app.use("/api/v1/public/rfqs", require("./routes/rfq-portal"));
   app.use("/api/v1/assistant", require("./routes/assistant").orgRouter);

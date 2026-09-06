@@ -13,10 +13,23 @@ model Organisation {
   name      String
   plan      String   @default("standard")
   status    String   @default("active")
+  // Single sign-on (OCTA-SEC-AUTH-040): one OpenID Connect provider per organisation.
+  ssoEnabled         Boolean   @default(false)
+  ssoProvider        String?   // oidc
+  ssoIssuer          String?
+  ssoClientId        String?
+  ssoClientSecretEnc String?
+  ssoDomainsJson     Json      @default("[]")
+  ssoAutoProvision   Boolean   @default(true)
+  ssoDefaultRole     String    @default("site_engineer")
+  ssoRequired        Boolean   @default(false)
+  ssoUpdatedAt       DateTime?
+  mfaRequired        Boolean   @default(false)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   users               User[]
+  ssoTickets          SsoTicket[]
   refreshSessions     RefreshSession[]
   passwordResetTokens PasswordResetToken[]
   invitationTokens    InvitationToken[]
@@ -123,10 +136,20 @@ model User {
   isCompanyAdmin Boolean @default(false) // org-wide project visibility + permission/user administration
   status       String    @default("active")
   lastLogin    DateTime?
+  // Two-factor and SSO (OCTA-SEC-AUTH-040)
+  mfaEnabled          Boolean   @default(false)
+  mfaSecretEnc        String?
+  mfaPendingSecretEnc String?
+  mfaEnrolledAt       DateTime?
+  mfaBackupCodesJson  Json      @default("[]")
+  ssoSubject          String?
+  ssoProvider         String?
+  ssoLinkedAt         DateTime?
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
 
   org                     Organisation         @relation(fields: [orgId], references: [id])
+  ssoTickets              SsoTicket[]
   projectAssignments      ProjectAssignment[]
   projectPermissions      ProjectUserPermission[] @relation("ProjectUserPermissionUser")
   activityAssignments     ActivityAssignment[]
@@ -5160,6 +5183,25 @@ model Rfq {
   @@index([projectId, status])
   @@index([changeEventId, status])
   @@index([commitmentId])
+}
+
+// ─── SSO login tickets (OCTA-SEC-AUTH-040) ───
+/** One-time, short-lived ticket handed to the browser after an IdP callback; exchanged for a session. */
+model SsoTicket {
+  id        String    @id @default(uuid())
+  orgId     String
+  userId    String
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  ipAddress String?
+  createdAt DateTime  @default(now())
+
+  org  Organisation @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  user User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
 }
 
 // ─── Direct costs (OCTA-FIN-DIRECT-039) ───

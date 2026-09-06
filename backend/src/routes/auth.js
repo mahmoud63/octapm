@@ -117,10 +117,18 @@ router.post(
   ],
   asyncHandler(async (req, res) => {
     const result = await authService.login(req.body, getRequestContext(req));
+    // A second factor is pending: no session yet, only the challenge token.
+    if (result.mfaRequired) return sendSuccess(res, result);
     setRefreshCookie(res, result);
     return sendSuccess(res, toPublicAuthResponse(result));
   }),
 );
+
+require("./auth-security").register(router, {
+  setRefreshCookie,
+  toPublicAuthResponse,
+  getRequestContext,
+});
 
 router.post(
   "/forgot-password",

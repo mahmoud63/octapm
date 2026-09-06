@@ -8,20 +8,102 @@ import type {
   ForgotPasswordResponse,
   InvitationPreview,
   LoginPayload,
+  LoginResult,
+  MfaSetup,
+  MfaStatus,
+  MfaVerifyPayload,
   RegisterPayload,
   RegisterResponse,
   ResetPasswordPayload,
   ResetPasswordResponse,
+  SsoLookup,
 } from '@/services/auth/types'
 
 const unwrapData = <T>(response: { data: ApiSuccess<T> }): T => {
   return response.data.data
 }
 
-export const login = async (payload: LoginPayload): Promise<AuthSession> => {
-  const response = await apiClient.post<ApiSuccess<AuthSession>>(
+/** Password login: a session, or an MFA challenge when the account has a second factor. */
+export const login = async (payload: LoginPayload): Promise<LoginResult> => {
+  const response = await apiClient.post<ApiSuccess<LoginResult>>(
     '/auth/login',
     payload
+  )
+  return unwrapData(response)
+}
+
+export const verifyMfa = async (
+  payload: MfaVerifyPayload
+): Promise<AuthSession> => {
+  const response = await apiClient.post<ApiSuccess<AuthSession>>(
+    '/auth/mfa/verify',
+    payload
+  )
+  return unwrapData(response)
+}
+
+export const getMfaStatus = async (): Promise<MfaStatus> => {
+  const response = await apiClient.get<ApiSuccess<MfaStatus>>('/auth/mfa')
+  return unwrapData(response)
+}
+
+export const startMfaSetup = async (): Promise<MfaSetup> => {
+  const response = await apiClient.post<ApiSuccess<MfaSetup>>('/auth/mfa/setup')
+  return unwrapData(response)
+}
+
+export const enableMfa = async (
+  code: string
+): Promise<{ enabled: boolean; backupCodes: string[] }> => {
+  const response = await apiClient.post<
+    ApiSuccess<{ enabled: boolean; backupCodes: string[] }>
+  >('/auth/mfa/enable', { code })
+  return unwrapData(response)
+}
+
+export const disableMfa = async (payload: {
+  password: string
+  code: string
+}): Promise<{ enabled: boolean }> => {
+  const response = await apiClient.post<ApiSuccess<{ enabled: boolean }>>(
+    '/auth/mfa/disable',
+    payload
+  )
+  return unwrapData(response)
+}
+
+export const regenerateMfaBackupCodes = async (
+  code: string
+): Promise<{ backupCodes: string[] }> => {
+  const response = await apiClient.post<ApiSuccess<{ backupCodes: string[] }>>(
+    '/auth/mfa/backup-codes',
+    { code }
+  )
+  return unwrapData(response)
+}
+
+export const ssoLookup = async (email: string): Promise<SsoLookup> => {
+  const response = await apiClient.get<ApiSuccess<SsoLookup>>(
+    '/auth/sso/lookup',
+    { params: { email } }
+  )
+  return unwrapData(response)
+}
+
+export const ssoStart = async (payload: {
+  email?: string | null
+  redirectTo?: string | null
+}): Promise<{ authorizationUrl: string; orgName: string }> => {
+  const response = await apiClient.post<
+    ApiSuccess<{ authorizationUrl: string; orgName: string }>
+  >('/auth/sso/start', payload)
+  return unwrapData(response)
+}
+
+export const ssoComplete = async (ticket: string): Promise<AuthSession> => {
+  const response = await apiClient.post<ApiSuccess<AuthSession>>(
+    '/auth/sso/complete',
+    { ticket }
   )
   return unwrapData(response)
 }

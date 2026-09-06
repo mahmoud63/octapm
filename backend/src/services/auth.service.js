@@ -133,6 +133,8 @@ const sanitizeUser = (user) => ({
   isCompanyAdmin: Boolean(user.isCompanyAdmin),
   status: user.status,
   lastLogin: user.lastLogin,
+  mfaEnabled: Boolean(user.mfaEnabled),
+  ssoLinked: Boolean(user.ssoSubject),
   createdAt: user.createdAt,
   updatedAt: user.updatedAt,
 });
@@ -339,12 +341,83 @@ const login = async ({ email, password }, context = {}) => {
     throw new HttpError(403, "USER_INACTIVE", "Your account is not active");
   }
 
+  // Organisation policies (OCTA-SEC-AUTH-040): SSO-only domains and a second factor.
+  const org = prisma.organisation?.findUnique
+    ? await prisma.organisation.findUnique({
+        where: { id: user.orgId },
+        select: {
+          ssoEnabled: true,
+          ssoRequired: true,
+          ssoDomainsJson: true,
+          mfaRequired: true,
+        },
+      })
+    : null;
+  if (
+    org?.ssoEnabled &&
+    org.ssoRequired &&
+    !user.isCompanyAdmin &&
+    require("./sso.service").domainMatches(normalizedEmail, org.ssoDomainsJson)
+  ) {
+    throw new HttpError(
+      403,
+      "SSO_REQUIRED",
+      "Your organisation signs in with single sign-on — use the SSO button",
+    );
+  }
+  if (user.mfaEnabled) {
+    const mfaService = require("./mfa.service");
+    await recordAuthAuditEvent({
+      orgId: user.orgId,
+      userId: user.id,
+      entityType: "user",
+      entityId: user.id,
+      action: "mfa.challenged",
+      email: normalizedEmail,
+      ipAddress: context.ipAddress,
+      userAgent: context.userAgent,
+    }).catch(() => null);
+    return {
+      mfaRequired: true,
+      mfaToken: mfaService.createChallenge(user),
+      methods: ["totp", "backup_code"],
+    };
+  }
+
   return prisma.$transaction(async (tx) => {
     const updatedUser = await tx.user.update({
       where: { id: user.id },
       data: { lastLogin: new Date() },
     });
 
+    const payload = await createAuthSessionPayload(tx, updatedUser, context);
+    payload.user.mfaEnrollmentRequired = Boolean(
+      org?.mfaRequired && !updatedUser.mfaEnabled,
+    );
+    return payload;
+  });
+};
+
+/** Second step of a login with two-factor: the challenge token plus a code from the app or a backup code. */
+const completeMfaLogin = async ({ mfaToken, code }, context = {}) => {
+  const mfaService = require("./mfa.service");
+  const user = await mfaService.resolveChallenge({ mfaToken, code, context });
+  return prisma.$transaction(async (tx) => {
+    const updatedUser = await tx.user.update({
+      where: { id: user.id },
+      data: { lastLogin: new Date() },
+    });
+    await recordAuthAuditEvent({
+      tx,
+      orgId: user.orgId,
+      userId: user.id,
+      entityType: "user",
+      entityId: user.id,
+      action: "mfa.verified",
+      email: user.email,
+      ipAddress: context.ipAddress,
+      userAgent: context.userAgent,
+    });
     return createAuthSessionPayload(tx, updatedUser, context);
   });
 };
@@ -862,6 +935,7 @@ const acceptInvitation = async (
 module.exports = {
   register,
   login,
+  completeMfaLogin,
   refresh,
   logout,
   getProfile,
@@ -869,4 +943,6 @@ module.exports = {
   resetPassword,
   getInvitationPreview,
   acceptInvitation,
+  createAuthSessionPayload,
+  sanitizeUser,
 };

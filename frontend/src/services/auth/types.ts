@@ -9,8 +9,54 @@ export interface AuthUser {
   isCompanyAdmin?: boolean
   status: string
   lastLogin?: string | null
+  /** Two-factor authentication is enrolled (OCTA-SEC-AUTH-040). */
+  mfaEnabled?: boolean
+  /** Signed in through single sign-on at least once. */
+  ssoLinked?: boolean
+  /** The organisation requires a second factor and this user has none yet. */
+  mfaEnrollmentRequired?: boolean
   createdAt?: string
   updatedAt?: string
+}
+
+export interface MfaChallenge {
+  mfaRequired: true
+  mfaToken: string
+  methods: Array<'totp' | 'backup_code'>
+}
+
+export type LoginResult = AuthSession | MfaChallenge
+
+export const isMfaChallenge = (result: LoginResult): result is MfaChallenge =>
+  (result as MfaChallenge).mfaRequired === true
+
+export interface MfaVerifyPayload {
+  mfaToken: string
+  code: string
+}
+
+export interface MfaStatus {
+  enabled: boolean
+  enrolledAt: string | null
+  backupCodesRemaining: number
+  pending: boolean
+  required: boolean
+  enrollmentRequired: boolean
+  ssoLinked: boolean
+}
+
+export interface MfaSetup {
+  secret: string
+  otpauthUrl: string
+  qrSvg: string
+  issuer: string
+  account: string
+}
+
+export interface SsoLookup {
+  sso: boolean
+  required: boolean
+  orgName: string | null
 }
 
 export interface AuthTokens {

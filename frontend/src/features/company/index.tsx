@@ -5,6 +5,7 @@ import {
   FolderKanban,
   GitBranch,
   Hash,
+  Lock,
   Plug,
   ShieldCheck,
   SlidersHorizontal,
@@ -63,6 +64,11 @@ const navItems = [
     title: 'Integrations',
     href: '/company/integrations',
     icon: <Plug size={18} />,
+  },
+  {
+    title: 'Security',
+    href: '/company/security',
+    icon: <Lock size={18} />,
   },
   {
     title: 'Permissions',
