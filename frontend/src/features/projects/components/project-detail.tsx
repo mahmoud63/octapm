@@ -211,6 +211,7 @@ export function ProjectDetail({
       { key: 'gantt', label: 'Gantt' },
       { key: 'activities', label: `Activities (${scheduleActivitiesCount})` },
       { key: 'progress', label: 'Progress' },
+      { key: 'lookahead', label: 'Lookahead' },
       { key: 'critical', label: `Critical Path (${scheduleCriticalCount})` },
       { key: 'ev', label: 'Earned Value' },
       { key: 'forecast', label: 'Forecast' },
@@ -222,7 +223,7 @@ export function ProjectDetail({
     ]
 
     if (hasWbs) {
-      scheduleChildren.splice(9, 0, { key: 'wbs', label: 'WBS' })
+      scheduleChildren.splice(10, 0, { key: 'wbs', label: 'WBS' })
     }
 
     return [

@@ -40,7 +40,9 @@ export const useProjects = () =>
       apiClient.get('/projects').then((response) => response.data.data),
   })
 
-export const useCompanies = (params: { search?: string; status?: string } = {}) =>
+export const useCompanies = (
+  params: { search?: string; status?: string } = {}
+) =>
   useQuery<CompaniesResponse>({
     queryKey: ['companies', params],
     queryFn: () =>

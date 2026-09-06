@@ -1,8 +1,14 @@
 const express = require('express');
+const { param } = require('express-validator');
 const { asyncHandler } = require('../utils/async-handler');
 const { authenticate } = require('../middleware/auth');
 const { requirePermission } = require('../middleware/rbac');
+const { validate } = require('../middleware/validate');
 const { generateProjectExport } = require('../services/export.service');
+const {
+  FORMATS: SCHEDULE_FORMATS,
+  exportSchedule,
+} = require('../services/schedule-export.service');
 
 const router = express.Router({ mergeParams: true });
 
@@ -34,6 +40,26 @@ router.get(
 
     await workbook.xlsx.write(res);
     res.end();
+  }),
+);
+
+// GET /projects/:projectId/export/schedule/:format — xer | p6xml | mspxml
+router.get(
+  '/schedule/:format',
+  requirePermission('schedule', 'export'),
+  [param('format').isIn(Object.keys(SCHEDULE_FORMATS)), validate],
+  asyncHandler(async (req, res) => {
+    const result = await exportSchedule({
+      projectId: req.params.projectId,
+      orgId: req.user.orgId,
+      format: req.params.format,
+    });
+    res.setHeader('Content-Type', result.contentType);
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="${result.filename}"`,
+    );
+    res.send(result.content);
   }),
 );
 

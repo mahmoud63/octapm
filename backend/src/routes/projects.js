@@ -456,6 +456,11 @@ router.use(
   require("./direct-costs"),
 );
 router.use(
+  "/:projectId/lookaheads",
+  nestedProjectAccess,
+  require("./lookaheads"),
+);
+router.use(
   "/:projectId/drawings/sets",
   nestedProjectAccess,
   require("./drawing-sets"),

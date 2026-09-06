@@ -46,6 +46,7 @@ export type PermissionModule =
   | 'assistant'
   | 'timesheet'
   | 'change_event'
+  | 'lookahead'
 
 export type RoleId =
   | 'pm'

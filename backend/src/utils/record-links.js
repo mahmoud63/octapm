@@ -56,6 +56,7 @@ const RECORD_WORKSPACE = Object.freeze({
   delivery_receipt: { module: "schedule", child: "longLead" },
   cost_record: { module: "cost", child: "activity" },
   direct_cost: { module: "cost", child: "direct-costs" },
+  lookahead: { module: "schedule", child: "lookahead" },
   burn_rate_entry: { module: "cost", child: "burn" },
   boq_item: { module: "boq" },
   boq_revision: { module: "boq" },

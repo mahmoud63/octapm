@@ -31,6 +31,7 @@ import { AuditHistoryPanel } from '@/features/audit/components/audit-history-pan
 import { ForecastPanel } from '@/features/forecast/components/forecast-panel'
 import { LongLeadTable } from '@/features/long-lead/components/long-lead-table'
 import { useLongLeadItems } from '@/features/long-lead/hooks/use-long-lead'
+import { LookaheadPanel } from '@/features/lookahead/components/lookahead-panel'
 import type { ProjectSetupTarget } from '@/features/projects/data/schema'
 import {
   projectSetupReadinessKey,
@@ -878,6 +879,7 @@ export function ScheduleDashboard({
               Activities ({activities.length})
             </TabsTrigger>
             <TabsTrigger value='progress'>Progress</TabsTrigger>
+            <TabsTrigger value='lookahead'>Lookahead</TabsTrigger>
             <TabsTrigger value='critical'>
               Critical Path ({critActs.length})
             </TabsTrigger>
@@ -1096,6 +1098,18 @@ export function ScheduleDashboard({
 
         <TabsContent value='progress' className='mt-4'>
           <ProgressTab activities={activities} projectId={projectId} />
+        </TabsContent>
+
+        <TabsContent value='lookahead' className='mt-4'>
+          <LookaheadPanel
+            projectId={projectId}
+            activities={activities}
+            initialLookaheadId={
+              initialTarget?.source === 'lookahead'
+                ? (initialTarget.recordId ?? null)
+                : null
+            }
+          />
         </TabsContent>
 
         <TabsContent value='ev' className='mt-4'>

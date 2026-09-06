@@ -103,6 +103,8 @@ model Organisation {
   directCosts         DirectCost[]
   directCostLines     DirectCostLine[]
   directCostPayments  DirectCostPayment[]
+  lookaheads          Lookahead[]
+  lookaheadItems      LookaheadItem[]
   subPayAppLines      SubPayAppLine[]
   subPayAppPayments   SubPayAppPayment[]
   companyEquipment    CompanyEquipment[]
@@ -488,6 +490,8 @@ model Project {
   directCosts                   DirectCost[]
   directCostLines               DirectCostLine[]
   directCostPayments            DirectCostPayment[]
+  lookaheads                    Lookahead[]
+  lookaheadItems                LookaheadItem[]
   subPayAppLines                SubPayAppLine[]
   subPayAppPayments             SubPayAppPayment[]
   activityCostLoadings          ActivityCostLoading[]
@@ -1464,6 +1468,7 @@ model Activity {
   tasks                  Task[]
   predecessorLinks       ActivityDependency[]       @relation("ActivityDependencySuccessor")
   successorLinks         ActivityDependency[]       @relation("ActivityDependencyPredecessor")
+  lookaheadItems         LookaheadItem[]
 
   @@index([projectId])
   @@index([projectId, isActive])
@@ -4042,6 +4047,7 @@ model Location {
   rfis       Rfi[]
   timeEntries TimeEntry[]
   changeEvents ChangeEvent[]
+  lookaheadItems LookaheadItem[]
 
   @@unique([projectId, code])
   @@index([orgId])
@@ -4948,8 +4954,9 @@ model Crew {
   org        Organisation @relation(fields: [orgId], references: [id], onDelete: Cascade)
   project    Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
   company    Company?     @relation(fields: [companyId], references: [id], onDelete: SetNull)
-  members    CrewMember[]
-  timesheets Timesheet[]
+  members        CrewMember[]
+  timesheets     Timesheet[]
+  lookaheadItems LookaheadItem[]
 
   @@unique([projectId, name])
   @@index([orgId])
@@ -4969,6 +4976,96 @@ model CrewMember {
 
   @@unique([crewId, workerId])
   @@index([workerId])
+}
+
+/**
+ * Short-interval plan (OCTA-SCH-LOOKAHEAD-041): a 2–6 week window seeded from the master
+ * schedule, with added tasks, constraints to clear and weekly percent-plan-complete.
+ */
+model Lookahead {
+  id           String    @id @default(uuid())
+  orgId        String
+  projectId    String
+  number       Int
+  ref          String // LA-001
+  title        String
+  startDate    DateTime  @db.Date
+  weeks        Int       @default(3)
+  weekStartDay Int       @default(1) // 0 Sunday … 6 Saturday
+  status       String    @default("draft") // draft, published, archived
+  filterJson   Json      @default("{}") // { wbsPrefixes, categories, crewIds, onlyCritical, activityIds }
+  notes        String?
+  publishedBy  String?
+  publishedAt  DateTime?
+  archivedBy   String?
+  archivedAt   DateTime?
+  refreshedAt  DateTime?
+  rolledFromId String?
+  createdBy    String?
+  updatedBy    String?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  org     Organisation    @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  project Project         @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  items   LookaheadItem[]
+
+  @@unique([projectId, number])
+  @@unique([projectId, ref])
+  @@index([orgId])
+  @@index([projectId, status])
+  @@index([projectId, startDate])
+}
+
+/** One row of a lookahead: a master-schedule activity in the window, or a task added by hand. */
+model LookaheadItem {
+  id                    String    @id @default(uuid())
+  orgId                 String
+  projectId             String
+  lookaheadId           String
+  activityId            String?
+  source                String    @default("schedule") // schedule, added, carried
+  name                  String
+  wbsCode               String?
+  plannedStart          DateTime  @db.Date
+  plannedFinish         DateTime  @db.Date
+  scheduleStart         DateTime? @db.Date // the master schedule's dates when seeded / refreshed
+  scheduleFinish        DateTime? @db.Date
+  datesEdited           Boolean   @default(false)
+  crewId                String?
+  companyId             String?
+  assigneeUserId        String?
+  locationId            String?
+  quantity              Float?
+  unit                  String?
+  status                String    @default("planned") // planned, in_progress, done, not_done, removed
+  pctComplete           Float     @default(0)
+  varianceReason        String? // design, material, labour, equipment, weather, prerequisite, permit, space, other
+  constraint            String?
+  constraintStatus      String    @default("none") // none, open, cleared
+  constraintOwnerUserId String?
+  constraintDueDate     DateTime? @db.Date
+  constraintClearedAt   DateTime?
+  notes                 String?
+  sortOrder             Int       @default(0)
+  carriedFromItemId     String?
+  createdBy             String?
+  updatedBy             String?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  org       Organisation @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  project   Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  lookahead Lookahead    @relation(fields: [lookaheadId], references: [id], onDelete: Cascade)
+  activity  Activity?    @relation(fields: [activityId], references: [id], onDelete: SetNull)
+  crew      Crew?        @relation(fields: [crewId], references: [id], onDelete: SetNull)
+  location  Location?    @relation(fields: [locationId], references: [id], onDelete: SetNull)
+
+  @@index([orgId])
+  @@index([lookaheadId, sortOrder])
+  @@index([projectId, activityId])
+  @@index([projectId, plannedStart])
+  @@index([projectId, constraintStatus])
 }
 
 /** One day's time for a crew (or a set of workers): draft → submitted → approved (labour cost posted) / rejected. */

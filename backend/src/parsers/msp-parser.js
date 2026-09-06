@@ -41,14 +41,22 @@ function parseDurationDays(input) {
   return Math.max(0, Math.round(total));
 }
 
+// MSPDI expresses LinkLag, TotalSlack, FreeSlack, StartSlack and FinishSlack
+// as integers in tenths of a minute (one 8-hour day = 4800).
+const TENTHS_OF_MINUTES_PER_DAY = 4800;
+
+function tenthsOfMinutesToDays(value) {
+  const n = Number.parseFloat(value);
+  if (!Number.isFinite(n)) return 0;
+  return Math.round(n / TENTHS_OF_MINUTES_PER_DAY);
+}
+
 function parseLagDays(input) {
   const raw = String(input || '').trim();
   if (!raw) return 0;
 
   if (/^[-+]?\d+(?:\.\d+)?$/.test(raw)) {
-    const minutes = Number.parseFloat(raw);
-    if (!Number.isFinite(minutes)) return 0;
-    return Math.round(minutes / 480);
+    return tenthsOfMinutesToDays(raw);
   }
 
   const sign = raw.startsWith('-') ? -1 : 1;
@@ -114,5 +122,7 @@ module.exports = {
   parseMspXml,
   parseDurationDays,
   parseLagDays,
+  tenthsOfMinutesToDays,
   mapMspRelType,
+  TENTHS_OF_MINUTES_PER_DAY,
 };

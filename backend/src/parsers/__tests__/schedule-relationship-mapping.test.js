@@ -78,7 +78,7 @@ describe('schedule importer relationship mapping', () => {
             <PredecessorLink>
               <PredecessorUID>1</PredecessorUID>
               <Type>3</Type>
-              <LinkLag>-960</LinkLag>
+              <LinkLag>-9600</LinkLag>
             </PredecessorLink>
           </Task>
         </Tasks>
@@ -89,11 +89,13 @@ describe('schedule importer relationship mapping', () => {
       {
         predUid: '1',
         type: 'SS',
-        lagDurationIso: '-960',
+        lagDurationIso: '-9600',
       },
     ]);
+    // MSPDI LinkLag is in tenths of a minute: -9600 = -2 working days.
     expect(parseLagDays(parsed.tasks[1].predecessors[0].lagDurationIso)).toBe(
       -2,
     );
+    expect(parseLagDays('-PT16H0M0S')).toBe(-2);
   });
 });

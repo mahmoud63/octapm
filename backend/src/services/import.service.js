@@ -13,6 +13,7 @@ const {
   parseMspXml,
   parseDurationDays,
   parseLagDays,
+  tenthsOfMinutesToDays,
 } = require('../parsers/msp-parser');
 const { applyCpmToProject, dateToWorkingDay } = require('./cpm.service');
 const { runPostImportSeeding } = require('./post-import.service');
@@ -419,7 +420,8 @@ async function importMsp({
 
   const activities = workTasks.map((task) => {
     const duration = parseDurationDays(task.durationIso);
-    const totalFloat = Math.round((Number(task.totalSlackMinutes) || 0) / 480);
+    // MSPDI TotalSlack is in tenths of a minute (4800 per 8-hour day).
+    const totalFloat = tenthsOfMinutesToDays(task.totalSlackMinutes);
 
     return {
       uid: task.uid,
