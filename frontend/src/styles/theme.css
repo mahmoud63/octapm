@@ -430,11 +430,30 @@
 /* The brand signature, for login, onboarding, empty states and occasional
    banners. Never behind dense tables, forms or Gantt charts. */
 
+/*
+ * The hero ground, as the brand material uses it: a muted indigo at the top
+ * left easing into a vivid blue at the right. Sign-in, onboarding and branded
+ * empty states — never behind dense data.
+ */
 .octa-hero {
   background:
-    radial-gradient(120% 120% at 100% 0%, var(--octa-azure) 0%, transparent 55%),
-    linear-gradient(135deg, var(--octa-midnight-indigo-deep) 0%, var(--octa-midnight-indigo) 45%, var(--octa-royal-blue) 100%);
+    radial-gradient(90% 120% at 8% 8%, rgb(255 255 255 / 0.16) 0%, transparent 45%),
+    linear-gradient(
+      115deg,
+      #223057 0%,
+      var(--octa-midnight-indigo-deep) 26%,
+      var(--octa-midnight-indigo) 52%,
+      #1636c4 80%,
+      #0b45ff 100%
+    );
   color: #fff;
+}
+
+/* On a hero the octagons are the structure, not a texture: large and drawn. */
+.octa-hero.octa-pattern::before {
+  opacity: 0.5;
+  background-size: 104px 104px;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='104' height='104' viewBox='0 0 72 72'><path d='M22 4h28l18 18v28L50 68H22L4 50V22z' fill='none' stroke='rgba(255,255,255,0.30)' stroke-width='1'/></svg>");
 }
 
 /* A single octagon, tiled. Subtle enough to read as texture, not pattern. */

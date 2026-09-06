@@ -1,4 +1,4 @@
-import { useSearch } from '@tanstack/react-router'
+import { Link, useSearch } from '@tanstack/react-router'
 import {
   Card,
   CardContent,
@@ -15,33 +15,49 @@ export function SignIn() {
 
   return (
     <AuthLayout>
-      <Card className='gap-4'>
+      {/* No octagon watermark here: the ground behind already carries it. */}
+      <Card className='octa-card-plain gap-4 shadow-[var(--shadow-overlay)]'>
         <CardHeader>
-          <CardTitle className='text-lg tracking-tight'>Sign in</CardTitle>
+          <CardTitle className='font-display text-xl tracking-tight'>
+            Sign in
+          </CardTitle>
           <CardDescription>
-            Enter your email and password below to <br />
-            log into your account
+            Enter your email and password to open your workspace.
           </CardDescription>
         </CardHeader>
         <CardContent>
           <UserAuthForm redirectTo={redirect} />
         </CardContent>
-        <CardFooter>
-          <p className='px-8 text-center text-sm text-muted-foreground'>
-            By clicking sign in, you agree to our{' '}
-            <a
-              href='/terms'
+        <CardFooter className='flex-col gap-4'>
+          {/* Creating an account is a real path, not a footnote. */}
+          <div className='w-full border-t pt-4 text-center text-sm'>
+            <span className='text-muted-foreground'>
+              New to OctaPM?{' '}
+            </span>
+            <Link
+              to='/sign-up'
+              data-testid='uat-sign-in-to-sign-up'
+              className='font-medium text-interactive underline-offset-4 hover:underline'
+            >
+              Create an account
+            </Link>
+          </div>
+
+          <p className='text-center text-xs text-muted-foreground'>
+            By signing in you agree to our{' '}
+            <Link
+              to='/terms'
               className='underline underline-offset-4 hover:text-primary'
             >
               Terms of Service
-            </a>{' '}
+            </Link>{' '}
             and{' '}
-            <a
-              href='/privacy'
+            <Link
+              to='/privacy'
               className='underline underline-offset-4 hover:text-primary'
             >
               Privacy Policy
-            </a>
+            </Link>
             .
           </p>
         </CardFooter>

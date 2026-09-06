@@ -13,41 +13,48 @@ import { SignUpForm } from './components/sign-up-form'
 export function SignUp() {
   return (
     <AuthLayout>
-      <Card className='gap-4'>
+      {/* No octagon watermark: the ground behind already carries it. */}
+      <Card className='octa-card-plain gap-4 shadow-[var(--shadow-overlay)]'>
         <CardHeader>
-          <CardTitle className='text-lg tracking-tight'>
-            Create an account
+          <CardTitle className='font-display text-xl tracking-tight'>
+            Create your workspace
           </CardTitle>
           <CardDescription>
-            Enter your email and password to create an account. <br />
-            Already have an account?{' '}
-            <Link
-              to='/sign-in'
-              className='underline underline-offset-4 hover:text-primary'
-            >
-              Sign In
-            </Link>
+            Set up an OctaPM organisation and invite your project team.
           </CardDescription>
         </CardHeader>
         <CardContent>
           <SignUpForm />
         </CardContent>
-        <CardFooter>
-          <p className='px-8 text-center text-sm text-muted-foreground'>
-            By creating an account, you agree to our{' '}
-            <a
-              href='/terms'
+        <CardFooter className='flex-col gap-4'>
+          <div className='w-full border-t pt-4 text-center text-sm'>
+            <span className='text-muted-foreground'>
+              Already have an account?{' '}
+            </span>
+            <Link
+              to='/sign-in'
+              data-testid='uat-sign-up-to-sign-in'
+              className='font-medium text-interactive underline-offset-4 hover:underline'
+            >
+              Sign in
+            </Link>
+          </div>
+
+          <p className='text-center text-xs text-muted-foreground'>
+            By creating an account you agree to our{' '}
+            <Link
+              to='/terms'
               className='underline underline-offset-4 hover:text-primary'
             >
               Terms of Service
-            </a>{' '}
+            </Link>{' '}
             and{' '}
-            <a
-              href='/privacy'
+            <Link
+              to='/privacy'
               className='underline underline-offset-4 hover:text-primary'
             >
               Privacy Policy
-            </a>
+            </Link>
             .
           </p>
         </CardFooter>
