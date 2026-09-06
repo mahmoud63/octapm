@@ -27,6 +27,7 @@ import {
 } from '@/components/ui/select'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { AuditHistoryPanel } from '@/features/audit/components/audit-history-panel'
+import { DirectCostsPanel } from '@/features/direct-costs/components/direct-costs-panel'
 import { useEquipmentUtilization } from '@/features/equipment/hooks/use-equipment'
 import type { ProjectSetupTarget } from '@/features/projects/data/schema'
 import {
@@ -174,8 +175,20 @@ export function CostDashboard({
             <TabsTrigger value='equipment'>Equipment</TabsTrigger>
             <TabsTrigger value='burn'>Burn Rate</TabsTrigger>
             <TabsTrigger value='budget'>Budget</TabsTrigger>
+            <TabsTrigger value='direct-costs'>Direct Costs</TabsTrigger>
           </TabsList>
         )}
+
+        <TabsContent value='direct-costs'>
+          <DirectCostsPanel
+            projectId={projectId}
+            initialRecordId={
+              initialTarget?.source === 'direct_cost'
+                ? initialTarget.recordId
+                : undefined
+            }
+          />
+        </TabsContent>
 
         <TabsContent value='overview' className='space-y-3'>
           <div className='grid grid-cols-1 gap-3 sm:grid-cols-3'>

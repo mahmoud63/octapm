@@ -162,6 +162,17 @@ const rebuildCashFlow = async ({ orgId, projectId }) => {
     }
   }
 
+  // Direct-cost payments (invoices, expenses, payroll) are outflows in the month paid (OCTA-FIN-DIRECT-039).
+  if (prisma.directCostPayment?.findMany) {
+    const directCostPayments = await prisma.directCostPayment.findMany({
+      where: { projectId },
+      select: { paidAt: true, amount: true },
+    });
+    for (const payment of directCostPayments) {
+      merge(toMonth(payment.paidAt), 0, toMoneyNumber(payment.amount));
+    }
+  }
+
   await prisma.$transaction(async (tx) => {
     await tx.cashFlowEntry.deleteMany({
       where: { projectId, source: "system" },

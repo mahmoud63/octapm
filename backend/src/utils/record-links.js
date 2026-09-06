@@ -55,6 +55,7 @@ const RECORD_WORKSPACE = Object.freeze({
   procurement_package: { module: "schedule", child: "longLead" },
   delivery_receipt: { module: "schedule", child: "longLead" },
   cost_record: { module: "cost", child: "activity" },
+  direct_cost: { module: "cost", child: "direct-costs" },
   burn_rate_entry: { module: "cost", child: "burn" },
   boq_item: { module: "boq" },
   boq_revision: { module: "boq" },

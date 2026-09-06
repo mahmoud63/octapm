@@ -173,7 +173,11 @@
         "reporting_period.override": ["pm"],
         "burn_rate.create": ["pm", "qs", "cost_controller"],
         "activity_cost.upsert": ["pm", "qs", "cost_controller"],
-        "activity_cost.update": ["pm", "qs", "cost_controller"]
+        "activity_cost.update": ["pm", "qs", "cost_controller"],
+        "direct_cost.submit": ["pm", "qs", "cost_controller"],
+        "direct_cost.approve": ["pm", "finance"],
+        "direct_cost.pay": ["pm", "finance"],
+        "direct_cost.void": ["pm", "finance"]
       }
     },
     "procurement": {

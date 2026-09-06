@@ -451,6 +451,11 @@ router.use(
   require("./change-events"),
 );
 router.use(
+  "/:projectId/direct-costs",
+  nestedProjectAccess,
+  require("./direct-costs"),
+);
+router.use(
   "/:projectId/drawings/sets",
   nestedProjectAccess,
   require("./drawing-sets"),

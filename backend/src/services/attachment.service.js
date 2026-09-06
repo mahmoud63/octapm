@@ -80,6 +80,7 @@ const RECORD_TYPE_MODULES = Object.freeze({
   bid_package: "bid",
   bid: "bid",
   cost_record: "cost",
+  direct_cost: "cost",
   boq_item: "boq",
   location: "location",
   project: "project_parties",

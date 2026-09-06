@@ -87,6 +87,9 @@ model Organisation {
   changeEvents        ChangeEvent[]
   changeEventLines    ChangeEventLine[]
   rfqs                Rfq[]
+  directCosts         DirectCost[]
+  directCostLines     DirectCostLine[]
+  directCostPayments  DirectCostPayment[]
   subPayAppLines      SubPayAppLine[]
   subPayAppPayments   SubPayAppPayment[]
   companyEquipment    CompanyEquipment[]
@@ -306,6 +309,7 @@ model Company {
   workers              Worker[]
   crews                Crew[]
   rfqs                 Rfq[]               @relation("RfqVendor")
+  directCosts          DirectCost[]        @relation("DirectCostVendor")
   riskAssignments           Risk[]           @relation("RiskAssigneeCompany")
   ncrAssignments            NcrRecord[]      @relation("NcrAssigneeCompany")
   itpAssignments            ItpRecord[]      @relation("ItpAssigneeCompany")
@@ -458,6 +462,9 @@ model Project {
   changeEvents                  ChangeEvent[]
   changeEventLines              ChangeEventLine[]
   rfqs                          Rfq[]
+  directCosts                   DirectCost[]
+  directCostLines               DirectCostLine[]
+  directCostPayments            DirectCostPayment[]
   subPayAppLines                SubPayAppLine[]
   subPayAppPayments             SubPayAppPayment[]
   activityCostLoadings          ActivityCostLoading[]
@@ -1420,6 +1427,7 @@ model Activity {
   timeEntries            TimeEntry[]
   changeEvents           ChangeEvent[]
   changeEventLines       ChangeEventLine[]
+  directCostLines        DirectCostLine[]
   subValuationLinks      SubValuationActivityLink[]
   eotClaimLinks          EotClaimActivityLink[]
   weatherDelayLinks      WeatherDelayActivityLink[]
@@ -4046,6 +4054,7 @@ model CostCode {
   commitmentSovLines CommitmentSovLine[]
   timeEntries        TimeEntry[]
   changeEventLines   ChangeEventLine[]
+  directCostLines    DirectCostLine[]
 
   @@unique([orgId, code])
   @@index([orgId, status])
@@ -4106,6 +4115,7 @@ model BudgetLine {
   changeOrders ChangeOrder[]
   sovLines    CommitmentSovLine[]
   changeEventLines ChangeEventLine[]
+  directCostLines  DirectCostLine[]
 
   @@unique([projectId, costCodeId, costType])
   @@index([orgId])
@@ -5150,6 +5160,111 @@ model Rfq {
   @@index([projectId, status])
   @@index([changeEventId, status])
   @@index([commitmentId])
+}
+
+// ─── Direct costs (OCTA-FIN-DIRECT-039) ───
+/** A cost not on a commitment — vendor invoice, expense, payroll — posted to the budget on approval. */
+model DirectCost {
+  id              String    @id @default(uuid())
+  orgId           String
+  projectId       String
+  number          Int
+  ref             String
+  type            String    @default("invoice") // invoice, expense, payroll, other
+  vendorCompanyId String?
+  vendorName      String?
+  invoiceNumber   String?
+  description     String
+  costDate        DateTime  @db.Date
+  dueDate         DateTime? @db.Date
+  receivedDate    DateTime? @db.Date
+  status          String    @default("draft") // draft, pending, approved, paid, void
+  subtotal        Decimal   @default(0) @db.Decimal(18, 2)
+  tax             Decimal   @default(0) @db.Decimal(18, 2)
+  total           Decimal   @default(0) @db.Decimal(18, 2)
+  paidTotal       Decimal   @default(0) @db.Decimal(18, 2)
+  paymentTerms    String?
+  notes           String?
+  submittedBy     String?
+  submittedAt     DateTime?
+  approvedBy      String?
+  approvedAt      DateTime?
+  rejectedReason  String?
+  postedAt        DateTime?
+  voidReason      String?
+  voidedAt        DateTime?
+  createdBy       String?
+  updatedBy       String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  org           Organisation        @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  project       Project             @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  vendorCompany Company?            @relation("DirectCostVendor", fields: [vendorCompanyId], references: [id], onDelete: SetNull)
+  lines         DirectCostLine[]
+  payments      DirectCostPayment[]
+
+  @@unique([projectId, number])
+  @@unique([projectId, ref])
+  @@index([orgId])
+  @@index([projectId, status])
+  @@index([projectId, costDate])
+  @@index([vendorCompanyId])
+}
+
+model DirectCostLine {
+  id           String   @id @default(uuid())
+  orgId        String
+  projectId    String
+  directCostId String
+  description  String
+  costCodeId   String?
+  budgetLineId String?
+  activityId   String?
+  costType     String? // labour, material, equipment, subcontract, indirect, overhead, contingency, other
+  quantity     Float    @default(1)
+  unit         String?
+  unitCost     Decimal  @default(0) @db.Decimal(18, 2)
+  amount       Decimal  @default(0) @db.Decimal(18, 2)
+  postedAmount Decimal  @default(0) @db.Decimal(18, 2)
+  notes        String?
+  sortOrder    Int      @default(0)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  org        Organisation @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  project    Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  directCost DirectCost   @relation(fields: [directCostId], references: [id], onDelete: Cascade)
+  costCode   CostCode?    @relation(fields: [costCodeId], references: [id], onDelete: SetNull)
+  budgetLine BudgetLine?  @relation(fields: [budgetLineId], references: [id], onDelete: SetNull)
+  activity   Activity?    @relation(fields: [activityId], references: [id], onDelete: SetNull)
+
+  @@index([orgId])
+  @@index([directCostId])
+  @@index([projectId, activityId])
+  @@index([projectId, costCodeId])
+}
+
+model DirectCostPayment {
+  id           String   @id @default(uuid())
+  orgId        String
+  projectId    String
+  directCostId String
+  amount       Decimal  @default(0) @db.Decimal(18, 2)
+  paidAt       DateTime
+  method       String?
+  reference    String?
+  note         String?
+  createdBy    String?
+  createdAt    DateTime @default(now())
+
+  org        Organisation @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  project    Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  directCost DirectCost   @relation(fields: [directCostId], references: [id], onDelete: Cascade)
+
+  @@index([orgId])
+  @@index([projectId, paidAt])
+  @@index([directCostId])
 }
 
 // ─── Document text, chunks and embeddings (OCTA-DOC-TEXT-010) ───

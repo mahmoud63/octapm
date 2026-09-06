@@ -239,6 +239,7 @@ export function ProjectDetail({
           { key: 'equipment', label: 'Equipment' },
           { key: 'burn', label: 'Burn Rate' },
           { key: 'budget', label: 'Budget' },
+          { key: 'direct-costs', label: 'Direct Costs' },
         ],
       },
       {
