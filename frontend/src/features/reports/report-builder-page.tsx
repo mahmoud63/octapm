@@ -49,7 +49,9 @@ export function ReportBuilderPage({
     definition: ReportDefinitionInput
     key: number
   } | null>(null)
-  const sources = data?.sources ?? []
+  // Guard the type, not just the absence: a malformed payload used to reach
+  // .find() here and take the whole page down with a TypeError.
+  const sources = Array.isArray(data?.sources) ? data.sources : []
   const projects = useMemo(
     () =>
       (projectsData?.items ?? []).map((project) => ({

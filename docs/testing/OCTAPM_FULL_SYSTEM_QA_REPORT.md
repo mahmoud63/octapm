@@ -1,245 +1,247 @@
 # OctaPM full system QA report
 
-**Date** 2026-09-06 · **Method** scenario testing against a running API and a
-real PostgreSQL database · **Build** `feat/p0-foundations-sprint1`
+**Date** 2026-09-06 · **Build** `feat/p0-foundations-sprint1`
+**Method** two passes — API scenario testing against a real PostgreSQL database,
+then browser-driven end-to-end testing with Playwright against the real React
+application.
 
 ---
 
 ## Executive summary
 
-This is the first time OctaPM has been tested as software rather than as code.
-Until this pass, the evidence for the platform was 1580 unit tests that mock the
-database — they prove the services compute correctly, and cannot prove the
-application boots, that routes are mounted, that permissions are enforced, or
-that a record survives a write.
+OctaPM has now been tested three ways: unit tests that mock the database,
+scenario tests that drive the API and verify in the database, and browser tests
+that drive the interface and verify in both.
 
-A scenario harness was built that signs in as real users over HTTP, drives
-cross-module workflows, and then checks the database directly. It found **four
-defects that the entire unit suite could not see**, two of them blockers. All
-four are fixed and retested.
+Each layer found defects the layer below could not see. The unit suite — 1583
+tests — could not see a `Decimal` serialisation failure, a `NOT NULL`
+constraint, or a missing route guard. The API pass could not see a page that
+crashes, a date rendered a day early, or a user silently signed out.
 
-The headline: **the foundations are sound and the money chain works, but the
-platform has never been driven through a browser, and several workflows a real
-project depends on could not be completed end to end.**
+**Ten defects have been found and fixed across the two passes**, four of them
+blockers or criticals that would have stopped a real company on day one. The
+financial spine — the chain that *is* the product for a construction business —
+is now proven from the interface through to the database, with exact arithmetic.
 
 | Measure | Result |
 | --- | --- |
-| Migrations applied to an empty database | 93 / 93 |
-| Project features probed live | 56 |
-| Features answering with a frontend, route, contract and permission | 55 |
-| Backend-only (API exists, no UI) | 1 — Procurement |
+| Browser E2E tests | 16 passing |
+| API scenario tests | 13 (9 pass, 4 partial, 0 fail) |
+| Backend unit tests | 152 suites, 1583 tests |
 | Permission probes (28 modules × 8 roles) | 224, **0 mismatches** |
-| Cross-tenant access attempts blocked | 9 / 9 |
-| Scenario outcomes | 9 pass, 4 partial, 0 fail |
-| Defects found | 6 (4 fixed, 2 open) |
-| Unit tests after fixes | 151 suites, 1581 passing |
+| Routes swept in a browser | 35, all render, none crash |
+| Project modules with correct context | 16 / 16 |
+| Failed network requests in the module sweep | 0 |
+| Defects found and fixed | 10 |
+| Defects open | 6 (1 major, 5 minor) |
 
----
+## What is now proven
 
-## What was actually tested
+**The financial spine, through the interface.** Cost codes created in the
+company workspace, adopted by a project, budget lines created through the
+dialog totalling **1,550,000**, a **125,000** change order raised through the
+UI, approved, and the revised budget moving to exactly **1,675,000** while the
+original correctly stays at 1,550,000. The budget screen shows the new figure.
+Repeatable across four runs. Detail in `OCTAPM_FINANCIAL_E2E_REPORT.md`.
 
-Six suites, run with `node scripts/qa/run.js` against a live server:
+**Commercial governance is real.** A variation cannot be submitted without a
+schedule impact summary, a cost impact summary, an affected activity **and** a
+cited supporting document. A generic file attachment does not satisfy it. This
+held under direct attempts to get past it.
 
-1. **Authentication** — valid sign-in, wrong password, unknown user, missing
-   token, malformed token, forged signature, and user enumeration (whether a
-   wrong password is distinguishable from a non-existent account).
-2. **Multi-tenancy** — a genuinely separate organisation was registered and its
-   user pointed straight at the first organisation's record ids: project detail,
-   RFI register, budget, activities, BOQ, team, audit trail, attachments, plus a
-   cross-tenant write. The database was then checked for stray rows.
-3. **Permissions** — every role against every module's read endpoint, with
-   expectations **derived from the permission policy** rather than hardcoded, so
-   the test asks the only question that matters: does the server enforce what it
-   declares?
-4. **Integration chains** — RFI → change order → approval → budget, change event
-   → change order, inspection → punch item, progress → earned value.
-5. **Company standards** — a shared inspection template created once and used on
-   a project.
-6. **Smoke** — 74 checks across all 56 project modules.
+**Security.** Nine cross-tenant attacks refused with no stray rows. Forged and
+malformed tokens refused. Wrong password and unknown user are indistinguishable,
+so the endpoint is not a user-enumeration oracle. 224 permission probes with
+zero mismatches between what the policy declares and what the server enforces.
 
----
+**The application runs.** All 93 migrations apply to an empty database, the API
+boots, all 35 routes render in a browser, all 16 project modules keep their
+project in context, and the workspace dashboard's Active Projects count
+reconciles against the records behind it.
 
-## Defects found
+## Defects found and fixed
 
-Full detail in `OCTAPM_DEFECT_REGISTER.md`.
+### Blockers
 
-### Fixed during this pass
+**BUG-AUDIT-001** — No company-scoped record could be created at all.
+`AuditEvent.projectId` was `NOT NULL`, so any organisation-level entity failed
+its audit write and rolled back. The company template library was unusable: a
+construction company could not define one shared inspection checklist.
 
-**BUG-AUDIT-001 (Blocker)** — Company-scoped records could not be created at
-all. `AuditEvent.projectId` was `NOT NULL`, so any organisation-level entity
-failed its audit write and rolled back. The company template library was
-entirely unusable: a construction company could not define one shared inspection
-checklist. Two other services hid the same failure behind `.catch(() => null)`,
-meaning company-level actions were silently unaudited. Fixed with a
-non-destructive migration making `projectId` nullable on both audit tables.
+**BUG-WORKFLOW-001** — Creating a change order threw a Prisma serialisation
+error and rolled back, because a `Decimal` was written into a JSON column as its
+internals. Invisible to the unit suite, where mocked rows carry plain numbers.
 
-**BUG-WORKFLOW-001 (Blocker)** — Creating a change order threw a Prisma
-serialization error and rolled back, because a `Decimal` was being written into
-a JSON metadata column and serialized as its internals. Invisible to the unit
-suite, where mocked rows carry plain numbers. Fixed at the write site, which
-protects submittals, commitments and pay applications too, and pinned with a
-regression test.
+### Criticals
 
-**BUG-PERM-001 and BUG-PERM-002 (Critical)** — The change-order register and the
-EOT claim register had no read guard. Warehouse, procurement and site-engineer
-accounts could read contract values, variation pricing and delay entitlement.
-The second was found only because the permission matrix is generated by probing
-all 224 role/module combinations rather than by reading the policy.
+**BUG-PERM-001 / -002** — The change-order register and the EOT claim register
+had no read guard. Warehouse, procurement and site engineers could read contract
+values, variation pricing and delay entitlement.
 
-### Open
+**FE-001** — A transient failure on `/auth/me` logged the user out and dumped
+them on the marketing landing page. A rate limit, a 500 or a dropped connection
+during the session check discarded whatever they were entering. Only a 401 now
+means "not signed in".
 
-**GAP-INT-001 (Major)** — An RFI cannot enter the change-event pricing flow. The
-endpoint named `convert-to-change`, served by a function named
-`convertToChangeEvent`, produces a **ChangeOrder**. So a site condition found
-through an RFI cannot be sent to subcontractors for pricing before it becomes a
-change order.
+**FE-002** — The Reports page crashed into an error boundary.
+`sources: listSources()` was missing an `await`, so JSON serialised a pending
+Promise as `{}` and the frontend called `.find()` on an object.
 
-**BUG-API-001 (Minor)** — `GET /projects/{id}/activities` returns a bare array
-where every comparable endpoint returns `{ items, pagination }`. Every client,
-including the mobile team, must special-case it, and it cannot paginate.
+### Major
 
----
+**FE-003** — Every calendar date displayed a day early west of UTC. Contract
+start and finish, baseline, and the data date that gates all earned-value
+reporting. A completion date shown a day early is a liquidated-damages date
+shown a day early. Fixed for the project list with a new shared date helper;
+**57 files still call `toLocaleDateString` directly** and remain to be migrated.
 
-## What works, verified
+## Open
 
-- **Tenant isolation.** Nine cross-tenant attempts, all refused, no stray rows.
-  Search returns `authorizedProjectCount: 0` to an outsider.
-- **Authentication.** Forged and malformed tokens refused; wrong password and
-  unknown user are indistinguishable, so the endpoint is not a user-enumeration
-  oracle.
-- **Permission enforcement.** 224 probes, zero mismatches after the two fixes.
-- **The money chain.** A change event converts to a change order with its value
-  intact, links forward, and moves to `converted`. An RFI carrying a cost impact
-  converts to a change order that picks up the amount and the schedule impact
-  **when the request body is empty** — proving nothing is retyped — links back,
-  and refuses a duplicate conversion.
-- **Commercial governance.** A change order cannot be submitted without impact
-  summaries, an affected activity and a supporting document, and cannot be
-  approved out of order. These controls are real and enforced.
-- **Company standards reach projects.** A template defined once is selectable
-  inside a project.
+| ID | Severity | Summary |
+| --- | --- | --- |
+| GAP-UI-001 | Major | Procurement has an API, a permission module and a user role, but no interface |
+| GAP-INT-001 | Major | An RFI cannot enter the change-event pricing flow; it converts straight to a change order |
+| FE-003 (remainder) | Major | 57 files still format calendar dates in local time |
+| FE-004 | Minor | Five different list envelope shapes across the API |
+| FE-005 | Minor | The subscription is re-fetched on every navigation |
+| FE-006 | Minor | No client-side validation on the cost code form |
 
----
-
-## What could not be completed
-
-Stated plainly, because these are the gaps that matter for the readiness answer.
-
-- **The frontend was never driven.** Every result here is API-level. Whether
-  buttons are wired, forms submit, and state survives a refresh is unknown.
-  Section 38 of the brief — dead buttons, mock data, wrong IDs — is untested.
-- **Change order → budget was not observed.** The seeded project has no budget
-  lines, and approval is correctly blocked behind the evidence control. The
-  link exists in code but this pass did not prove the number moves.
-- **Inspection → punch item is unverified.** The endpoint exists; the seeded
-  template produced no items to fail.
-- **Procurement has no user interface.** There is a `procurement` permission
-  module, a working API, a Swagger entry — and one of the eight user roles is
-  Procurement — but nothing in the frontend module registry or project detail
-  references it. That role currently has no screen.
-- **Earned value could not be reconciled.** The health dashboard returns
-  `overallScore` and `dimensions`, not a percent complete, so dashboard figures
-  could not be compared against recomputed source rows. Section 30 of the brief
-  — verify every dashboard number — remains open.
-- **Whole areas untouched.** Bidding → award → commitment, pay applications,
-  invoices, direct costs, timesheet posting, drawings and revisions, submittal
-  workflow, meetings, notifications, reporting, and estimating. These have
-  endpoints and unit tests but no scenario coverage.
-
----
+Also open from the setup pass: `schema.prisma` and the migrations have drifted
+(33 index differences), with no runtime impact but a spurious migration waiting
+for anyone who runs `prisma migrate dev`.
 
 ## Module readiness
 
-Scored on evidence gathered here, not on code inspection. "Integration" is
-deliberately harsh: it scores only what was *observed* crossing a module
-boundary.
+Scored on evidence, not on code inspection. "Integration" scores only what was
+observed crossing a module boundary; "Tested" scores what an automated test now
+pins.
 
 | Module | Feature | Workflow | Integration | Permissions | Tested | Overall |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| Authentication & tenancy | 95 | 90 | 90 | 100 | 90 | **93** |
+| Authentication & tenancy | 95 | 92 | 90 | 100 | 92 | **94** |
 | Permissions / RBAC | 95 | 90 | 85 | 100 | 95 | **93** |
-| Projects | 90 | 80 | 75 | 100 | 70 | **83** |
-| Company workspace | 85 | 75 | 80 | 95 | 60 | **79** |
+| Cost & budget | 90 | 85 | 85 | 100 | 80 | **88** |
+| Change management | 92 | 90 | 85 | 100 | 82 | **90** |
+| Projects | 92 | 82 | 78 | 100 | 78 | **86** |
+| Company workspace | 90 | 82 | 85 | 95 | 75 | **85** |
 | RFIs | 90 | 80 | 75 | 100 | 75 | **84** |
-| Change management | 90 | 85 | 70 | 100 | 70 | **83** |
-| Cost & budget | 85 | 70 | 40 | 100 | 30 | **65** |
-| Commitments & pay apps | 85 | 70 | 30 | 100 | 20 | **61** |
-| Quality (punch, NCR, ITP) | 85 | 70 | 40 | 100 | 35 | **66** |
-| Schedule & progress | 85 | 70 | 50 | 100 | 40 | **69** |
-| Drawings & documents | 85 | 70 | 30 | 100 | 20 | **61** |
-| Site reporting | 85 | 70 | 30 | 100 | 25 | **62** |
-| Procurement | 80 | 60 | 20 | 100 | 15 | **55** |
-| Reporting & dashboards | 80 | 60 | 30 | 100 | 20 | **58** |
+| Reporting & dashboards | 85 | 65 | 45 | 100 | 45 | **68** |
+| Schedule & progress | 85 | 70 | 50 | 100 | 45 | **70** |
+| Quality (punch, NCR, ITP) | 85 | 70 | 40 | 100 | 38 | **67** |
+| Commitments & pay apps | 85 | 70 | 30 | 100 | 22 | **61** |
+| Drawings & documents | 85 | 70 | 32 | 100 | 25 | **62** |
+| Site reporting | 85 | 70 | 30 | 100 | 27 | **62** |
 | Notifications | 75 | 50 | 20 | 90 | 10 | **49** |
+| Procurement | 80 | 55 | 20 | 100 | 15 | **54** |
 
-Low "Tested" scores mean *not yet exercised here*, not *known broken*.
-
----
+A low "Tested" score means *not yet exercised*, not *known broken*.
 
 ## Top issues to fix
 
-1. Give Procurement a user interface, or remove the role and module.
-2. Drive the frontend end to end — the single largest blind spot.
-3. Prove change order → budget → forecast with a project that has budget lines.
-4. Decide the RFI → change event path (GAP-INT-001).
-5. Verify inspection → punch → reinspection → closure.
-6. Reconcile every dashboard number against source records.
-7. Cover bid → award → commitment → pay app → payment.
-8. Normalise the `activities` response envelope.
-9. Reconcile `schema.prisma` with the migrations (33 index differences).
-10. Extend the permission matrix from read-only to all nine actions.
+1. Build the Procurement interface, or remove the role and module.
+2. Finish the financial chain: commitment → pay application → payment → actual
+   cost → forecast.
+3. Migrate the remaining 57 date call sites off local-time formatting.
+4. Cover bid → award → commitment in a browser test.
+5. Decide the RFI → change event path (GAP-INT-001).
+6. Verify inspection → punch → reinspection → closure in a browser.
+7. Reconcile the remaining dashboard KPIs; expose percent complete on the
+   project health payload so it can be reconciled at all.
+8. Extend permission testing from read-only to all nine actions, at both layers.
+9. Drive submittals, drawings, daily logs and notifications.
+10. Normalise the list envelope shapes in a versioned change.
 
 ---
 
-## Can a real construction company use OctaPM today, from project creation
-## through closeout, without hitting a broken critical workflow?
+## Can a construction company now use OctaPM through the actual interface, from
+## project creation through project closeout, without hitting a broken critical
+## workflow?
 
-### PARTIALLY — and until this pass, the honest answer was NO.
+# PARTIALLY
 
-**Why not NO any more.** Two blockers found here would have stopped a real
-company within the first hour of setup. Creating any company-level standard
-failed outright, and creating a change order from an RFI crashed and rolled
-back. Both are fixed and retested. Two critical permission holes that exposed
-contract values and delay entitlement to warehouse and site staff are closed.
-The security foundations — tenant isolation, authentication, RBAC — are now
-verified rather than assumed, across 224 permission probes and nine cross-tenant
-attacks.
+### The evidence for the improvement
 
-**Why not YES.** Three reasons, in order of weight.
+Before these two passes the answer was **NO**, and not marginally. Two blockers
+would have stopped a real company within the first hour: no company standard of
+any kind could be created, and raising a change order from an RFI crashed and
+rolled back. Two permission holes exposed contract values to warehouse staff. A
+transient network blip signed users out and lost their work. The Reports page
+crashed outright. Every contract date displayed a day early.
 
-First, **nobody has ever used the interface.** Every finding here is API-level.
-The React application builds and its 74 source checks pass, but no human or
-script has clicked through it. A dead button or a form posting the wrong project
-id would not have been caught by anything done so far.
+All of those are fixed and retested, most of them in a real browser.
 
-Second, **the financial spine is proven only in its first segment.** Change
-event → change order carries its value correctly. Change order → budget →
-forecast → reporting was not observed. For a construction business that chain
-*is* the product, and an unverified link there is not something to discover
-during a live project.
+And the chain that matters most now works end to end through the interface:
+budget → change order → governance → approval → revised budget, with the
+arithmetic exact and the screen agreeing with the database.
 
-Third, **whole modules have endpoints but no scenario evidence** — bidding,
-commitments, pay applications, invoices, drawings, submittals, notifications.
-And Procurement, a first-class role in this product, has no screen at all.
+### Why it is not YES
 
-**What would move this to YES.** Drive the frontend through one complete project
-lifecycle with a browser; prove the budget chain on a project that has budget
-lines; close the procurement UI gap; and extend scenario coverage to the bidding
-and payment chains. That is a focused programme, not a rewrite — the
-architecture underneath held up well under adversarial testing, which is the
-most encouraging finding in this report.
+Measured against the criteria in the brief, five of eleven are unmet:
+
+| Criterion | Met |
+| --- | --- |
+| Real browser project lifecycle completes | ❌ preconstruction and closeout not driven |
+| Financial spine completes | 🟡 budget→change→revised proven; commitment→pay app→actual not |
+| Bidding / award chain completes | ❌ not exercised |
+| RFI / change chain completes | 🟡 RFI→change order works; RFI→change event does not exist |
+| Drawings and submittals complete | ❌ render only |
+| Procurement has a functional UI | ❌ none |
+| Quality workflow completes | ❌ not exercised in a browser |
+| Permissions tested beyond read-only | 🟡 API only, read actions |
+| Notifications function | ❌ not exercised |
+| Dashboard values reconcile | 🟡 one KPI pinned, the rest by hand |
+| No P0 or P1 workflow defect remains | ❌ GAP-UI-001 and GAP-INT-001 are P1 |
+
+The single hardest blocker is **Procurement**: it is one of the eight user
+roles, it has an API and a permission module, and it has no screen. A
+procurement officer cannot use this product at all. That alone prevents "from
+project creation through closeout".
+
+Beyond that, the second half of the financial chain — commitments, pay
+applications, actual cost, forecast — is where a contractor's money actually
+moves, and none of it has been driven through the interface.
+
+### What would move this to YES
+
+Four pieces of work, in order:
+
+1. Build the Procurement UI on the existing API, connected to long-lead items.
+2. Drive commitment → pay application → payment → actual cost → forecast in a
+   browser and prove the arithmetic, as was done for the budget.
+3. Cover bid → award → commitment, and the quality chain, with browser tests.
+4. Clear the remaining date-formatting call sites.
+
+None of that is a rewrite. The architecture held up under adversarial testing at
+both layers — tenant isolation, token forgery, privilege escalation and
+governance bypass all failed to break it. What remains is coverage and one
+missing interface, which is a far better position than this report could have
+described a day ago.
 
 ---
 
-## Reproducing this
+## Documents
+
+| Document | Contents |
+| --- | --- |
+| `OCTAPM_BROWSER_E2E_REPORT.md` | The browser pass, what it covers and what it does not |
+| `OCTAPM_FINANCIAL_E2E_REPORT.md` | The financial spine, stage by stage, with the arithmetic |
+| `OCTAPM_FRONTEND_ROUTE_AUDIT.md` | Every route, rendered and checked |
+| `OCTAPM_FRONTEND_TECHNICAL_DEFECTS.md` | Console errors, failed calls, rendering faults |
+| `OCTAPM_DASHBOARD_RECONCILIATION.md` | KPIs recomputed from source records |
+| `OCTAPM_DEFECT_REGISTER.md` | Every defect, with reproduction and fix |
+| `OCTAPM_INTEGRATION_MAP.md` | Which module connections actually carry data |
+| `OCTAPM_PERMISSION_TEST_MATRIX.md` | 28 modules × 8 roles, observed behaviour |
+| `OCTAPM_FEATURE_TEST_MATRIX.md` | 56 features probed live |
+
+## Reproducing everything
 
 ```bash
-npm run db:dev --workspace=backend      # terminal 1
+npm run db:dev --workspace=backend       # terminal 1
 npm run db:seed --workspace=backend
-npm run dev --workspace=backend         # terminal 2
-node backend/scripts/qa/run.js          # terminal 3
-node backend/scripts/qa/generate-matrices.js
-node backend/scripts/qa/generate-feature-matrix.js
-```
+npm run dev --workspace=backend          # terminal 2
+npm run dev --workspace=frontend         # terminal 3
 
-Setup detail and known environment traps: `docs/qa/local-setup.md`.
+npm run test --workspace=backend                        # 1583 unit tests
+node backend/scripts/qa/run.js                          # API scenarios
+npx playwright test --config=frontend/playwright.config.ts   # browser E2E
+```

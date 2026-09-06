@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useNavigate } from '@tanstack/react-router'
 import { FolderOpen } from 'lucide-react'
 import { toast } from 'sonner'
+import { formatShortDate } from '@/lib/dates'
 import { getServerErrorMessage } from '@/lib/handle-server-error'
 import { Button } from '@/components/ui/button'
 import { useSubscription } from '@/features/billing/hooks/use-billing'
@@ -12,13 +13,9 @@ import { ProjectDeleteDialog } from './project-delete-dialog'
 import { ProjectEditDialog } from './project-edit-dialog'
 import { ProjectStatusBadge } from './project-status-badge'
 
-const formatDate = (value: string | null) => {
-  if (!value) {
-    return '-'
-  }
-
-  return new Date(value).toLocaleDateString()
-}
+// Contract dates are stored as UTC midnight, so they must be rendered in UTC —
+// see lib/dates.ts. Formatting them locally showed every date a day early.
+const formatDate = (value: string | null) => formatShortDate(value)
 
 const formatMoney = (value: number | null, currency: string) => {
   if (value === null) {

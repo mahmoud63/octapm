@@ -33,3 +33,8 @@ uploads/
 # Generated UAT evidence is uploaded as CI artifact; keep only the archive README.
 docs/release-readiness-audit/evidence/*.json
 docs/release-readiness-audit/evidence/screenshots/
+# Playwright
+frontend/test-results/
+frontend/playwright-report/
+frontend/blob-report/
+frontend/.playwright/

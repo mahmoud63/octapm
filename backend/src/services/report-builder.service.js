@@ -616,7 +616,9 @@ const listDefinitions = async ({ orgId, user, projectId = null, source = null })
   const where = await visibleDefinitionsWhere({ orgId, user, projectId });
   if (source) where.source = source;
   const rows = await prisma.reportDefinition.findMany({ where, include: { project: { select: { id: true, name: true } }, _count: { select: { schedules: true } } }, orderBy: [{ updatedAt: "desc" }] });
-  return { items: rows.map((row) => serializeDefinition(row, user)), sources: listSources() };
+  // listSources is async: without the await this serialised an unresolved
+  // Promise as `{}`, and the report builder crashed calling .find() on it.
+  return { items: rows.map((row) => serializeDefinition(row, user)), sources: await listSources({ orgId }) };
 };
 
 const getDefinitionRow = async ({ orgId, user, reportId }) => {

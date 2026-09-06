@@ -16,7 +16,9 @@ Status: ✅ works · 🟡 partial · 🔴 broken · ⚪ not implemented · ❓ u
 | Change Event | Change Order | Priced event becomes a CO | `POST /change-events/{id}/convert` creates the CO with the value intact, sets `changeEvent.changeOrderId`, moves the event to `converted` | ✅ |
 | Change Order | Approval workflow | Status transitions are governed and audited | Draft → submitted → approved enforced; an out-of-order approve is refused with 409; every transition writes an `ApprovalWorkflowEvent` | ✅ |
 | Change Order | Governance control | A variation cannot be approved without analysis | Submit refused with `CHANGE_ORDER_IMPACT_SUMMARY_REQUIRED`, then `CHANGE_ORDER_IMPACT_PROOF_REQUIRED` until an affected activity **and** a supporting document exist | ✅ |
-| Change Order | Budget | Approved CO moves the revised budget | Not observed: the seeded project has no budget lines, and approval is blocked behind the evidence control above | ❓ |
+| Change Order | Budget | Approved CO moves the revised budget | **Closed in the browser pass.** Budget lines created through the UI total 1,550,000; an approved 125,000 change order moves revised to 1,675,000 while original stays 1,550,000; the budget screen shows the new figure | ✅ |
+| Budget | Budget screen | Screen totals equal the source records | Recomputed from `budget/lines` and compared with the rendered total | ✅ |
+| Company cost codes | Project budget | A company code is adoptable and usable on a project | Adopted through Cost › Budget › Cost codes, then used to create budget lines | ✅ |
 | Company | Project (templates) | A shared template is usable on any project | Company template appears in `/projects/{id}/forms/templates` | ✅ |
 | Company | Audit | Org-level actions leave a trail | Now writes `AuditEvent` with `projectId = null` — was completely broken (BUG-AUDIT-001) | ✅ |
 | Inspection | Punch item | A failed item raises a tracked defect | Endpoint exists (`/forms/{id}/items/{itemId}/deficiency`); the seeded template produced no items to fail, so the link itself is unverified | 🟡 |

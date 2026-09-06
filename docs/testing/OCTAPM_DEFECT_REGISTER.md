@@ -13,9 +13,19 @@ fixed) · **By design** (investigated, not a defect).
 | BUG-WORKFLOW-001 | Blocker | P0 | Change orders / Workflow | A Decimal in workflow metadata killed the transaction | Fixed |
 | BUG-PERM-001 | Critical | P0 | Commercial | Change-order register readable by every role | Fixed |
 | BUG-PERM-002 | Critical | P0 | Commercial | EOT claim register readable by every role | Fixed |
-| BUG-API-001 | Minor | P2 | Schedule | `activities` returns a bare array, unlike every other list | Open |
+| **FE-001** | **Critical** | **P0** | **Auth / frontend** | **A transient failure on the session check logged the user out** | **Fixed** |
+| **FE-002** | **Critical** | **P0** | **Reports** | **The Reports page crashed: `sources` returned as an unresolved Promise** | **Fixed** |
+| **FE-003** | **Major** | **P1** | **Frontend / dates** | **Every calendar date displayed a day early west of UTC** | **Partially fixed** |
+| BUG-API-001 / FE-004 | Minor | P2 | API-wide | Five different list envelope shapes across endpoints | Open |
+| FE-005 | Minor | P3 | Billing | Subscription re-fetched on every navigation, trips its limiter | Open |
+| FE-006 | Minor | P3 | Company | No client-side validation on the cost code form | Open |
 | GAP-INT-001 | Major | P1 | RFI / Change events | An RFI cannot enter the change-event pricing flow | Open |
+| GAP-UI-001 | Major | P1 | Procurement | Backend, permissions and a user role exist; no interface | Open |
 | GAP-AUDIT-002 | Major | P1 | Audit | Company-level audit was silently swallowed in 3 services | Fixed (root cause) |
+
+Frontend defects FE-001 to FE-006 are documented in full in
+`OCTAPM_FRONTEND_TECHNICAL_DEFECTS.md`; each was found by driving a real browser
+and each fix was retested the same way.
 
 ---
 

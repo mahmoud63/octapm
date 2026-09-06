@@ -1,5 +1,5 @@
 {
-  "ranAt": "2026-09-06T06:22:41.851Z",
+  "ranAt": "2026-09-06T07:59:30.704Z",
   "base": "http://localhost:5000",
   "summary": {
     "total": 13,
@@ -15,7 +15,7 @@
       "role": "PM",
       "preconditions": "Seeded demo organisation",
       "status": "pass",
-      "ms": 883,
+      "ms": 1355,
       "steps": [
         {
           "description": "sign in with the correct password",
@@ -64,7 +64,7 @@
       "role": "anonymous",
       "preconditions": "S-AUTH-001",
       "status": "pass",
-      "ms": 8,
+      "ms": 51,
       "steps": [
         {
           "description": "call a protected endpoint with no token",
@@ -108,7 +108,7 @@
       "role": "PM",
       "preconditions": "Seeded demo organisation",
       "status": "pass",
-      "ms": 420,
+      "ms": 450,
       "steps": [
         {
           "description": "list projects",
@@ -149,7 +149,7 @@
       "role": "PM of a second organisation",
       "preconditions": "S-PROJ-001",
       "status": "pass",
-      "ms": 574,
+      "ms": 697,
       "steps": [
         {
           "description": "register a separate organisation",
@@ -226,7 +226,7 @@
       "role": "PM of a second organisation",
       "preconditions": "S-TENANT-001",
       "status": "pass",
-      "ms": 18,
+      "ms": 10,
       "steps": [
         {
           "description": "search for the other tenant's project name",
@@ -258,7 +258,7 @@
       "role": "all eight roles",
       "preconditions": "S-PROJ-001",
       "status": "pass",
-      "ms": 5991,
+      "ms": 6957,
       "steps": [],
       "findings": {
         "api": [
@@ -286,7 +286,7 @@
       "role": "all eight roles",
       "preconditions": "S-PROJ-001",
       "status": "pass",
-      "ms": 4265,
+      "ms": 4277,
       "steps": [
         {
           "description": "probe restricted endpoints with an excluded role",
@@ -319,7 +319,7 @@
       "role": "PM",
       "preconditions": "A project with an RFI",
       "status": "partial",
-      "ms": 203,
+      "ms": 628,
       "steps": [
         {
           "description": "PM raises an RFI with schedule impact",
@@ -338,7 +338,7 @@
         "api": [
           {
             "ok": true,
-            "message": "RFI RFI-044 created"
+            "message": "RFI RFI-048 created"
           },
           {
             "ok": true,
@@ -356,7 +356,7 @@
           },
           {
             "ok": true,
-            "message": "change order VO-20 exists"
+            "message": "change order VO-33 exists"
           }
         ],
         "permission": [],
@@ -393,7 +393,7 @@
       "role": "PM",
       "preconditions": "S-INT-001",
       "status": "pass",
-      "ms": 163,
+      "ms": 156,
       "steps": [
         {
           "description": "raise a change event with a ROM value",
@@ -409,11 +409,11 @@
         "database": [
           {
             "ok": true,
-            "message": "change event CE-002 holds its ROM value"
+            "message": "change event CE-003 holds its ROM value"
           },
           {
             "ok": true,
-            "message": "change order VO-21 exists"
+            "message": "change order VO-34 exists"
           }
         ],
         "permission": [],
@@ -438,11 +438,11 @@
       "role": "PM",
       "preconditions": "S-INT-002",
       "status": "partial",
-      "ms": 182,
+      "ms": 252,
       "steps": [
         {
           "description": "read the budget before approval",
-          "outcome": "0 line(s), revised total 0"
+          "outcome": "4 line(s), revised total 2050000"
         },
         {
           "description": "try to submit with no impact analysis",
@@ -470,10 +470,6 @@
         "connected": [
           {
             "ok": null,
-            "message": "the project has no budget lines, so budget movement cannot be observed"
-          },
-          {
-            "ok": null,
             "message": "submit still refused (CHANGE_ORDER_IMPACT_PROOF_REQUIRED): Approving a change order requires at least one affected activity and one supporting document — the remaining control is supporting evidence, which needs a document upload"
           }
         ]
@@ -487,7 +483,7 @@
       "role": "PM",
       "preconditions": "A form template exists",
       "status": "partial",
-      "ms": 180,
+      "ms": 97,
       "steps": [
         {
           "description": "list form templates",
@@ -502,7 +498,7 @@
         "api": [
           {
             "ok": true,
-            "message": "5 template(s) available"
+            "message": "6 template(s) available"
           },
           {
             "ok": null,
@@ -523,7 +519,7 @@
       "role": "PM",
       "preconditions": "Seeded activities with approved progress",
       "status": "partial",
-      "ms": 115,
+      "ms": 1171,
       "steps": [
         {
           "description": "read activities",
@@ -569,7 +565,7 @@
       "role": "Company admin (PM)",
       "preconditions": "Signed-in company administrator",
       "status": "pass",
-      "ms": 150,
+      "ms": 162,
       "steps": [
         {
           "description": "create a company-level template",
@@ -598,7 +594,7 @@
         "connected": [
           {
             "ok": true,
-            "message": "6 company template(s) available to every project"
+            "message": "7 company template(s) available to every project"
           },
           {
             "ok": true,
