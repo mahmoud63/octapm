@@ -99,11 +99,32 @@ The brand geometry, used as a signature and never as noise.
 | Utility | Use |
 | --- | --- |
 | `.octa-hero` | Indigo → Royal Blue → Azure gradient. Login, onboarding, welcome, occasional banners |
-| `.octa-pattern` | Tiled octagon texture at 14% opacity. Only over `.octa-hero` or an empty state |
+| `.octa-pattern` | Tiled octagon texture. Only over `.octa-hero` or an empty state |
 | `.octa-clip` | Octagonal clip for brand marks and premium surfaces |
+
+The tile is drawn as a `::before` layer, so its scale and strength change with
+the surface: **104px at 0.5** on `.octa-hero` (the motif is the point there),
+and a small corner watermark at **5%** on `.octa-card` (a signature, not a
+texture). `.octa-card-plain` opts a card out entirely — use it for anything
+sitting on ground that already carries the pattern.
 
 **Never** behind Gantt, Budget, BOQ, Change Orders, Procurement, RFIs or
 Drawings. On operational screens, data clarity outranks decoration.
+
+### Signed-out surfaces
+
+Sign-in, sign-up, Terms and Privacy are the one place the brand speaks at full
+volume, because they are all a prospect sees before there is any data to show.
+The rule for them:
+
+- The hero ground covers the whole viewport, edge to edge — not a band, not a
+  panel.
+- The form sits on a light `.octa-card-plain` surface. Inputs must read
+  normally; do not put fields directly on the gradient.
+- Left column carries the promise (logo, headline, one paragraph); it drops
+  below `lg`, where the form is the only job and the logo moves above it.
+- Legal documents reuse the same ground as a header band, then switch to the
+  ordinary reading surface — long prose on a gradient is unreadable.
 
 ## 6. Logo
 
