@@ -125,10 +125,14 @@ const pathParam = (name, description, format = "uuid") => ({
   schema: { type: "string", ...(format ? { format } : {}) },
 });
 
-const queryParam = (name, description, schema) => ({
+// `required` matters: a query parameter the route's validator insists on has to
+// say so, or a client written against this document gets a 400 it cannot
+// explain. Pass `{ required: true }` wherever the express-validator chain has no
+// `.optional()`.
+const queryParam = (name, description, schema, { required = false } = {}) => ({
   name,
   in: "query",
-  required: false,
+  required,
   description,
   schema,
 });
@@ -10641,8 +10645,8 @@ add(
     operationId: "listAttachments",
     parameters: [
       ...projectParams,
-      queryParam("recordType", "Record type.", ref("AttachmentRecordType")),
-      queryParam("recordId", "Record id.", { type: "string" }),
+      queryParam("recordType", "Record type.", ref("AttachmentRecordType"), { required: true }),
+      queryParam("recordId", "Record id. Omit to list every record of the type.", { type: "string" }),
     ],
     permissions: attachmentRecordPermission,
     responseSchema: ref("AttachmentListResponse"),
@@ -10804,10 +10808,12 @@ const commentRecordPermission = {
   note: "Permission follows the record's module: anyone who can `read` it can read comments, comment, and follow the record. Editing is author-only; removal is author, project manager or company admin.",
 };
 const commentIdParam = pathParam("commentId", "Comment UUID.");
+// Comments and subscriptions are always read against one record: both routes
+// validate recordType and recordId, so both are required here.
 const commentRecordParams = [
   ...projectParams,
-  queryParam("recordType", "Record type.", ref("AttachmentRecordType")),
-  queryParam("recordId", "Record id.", { type: "string" }),
+  queryParam("recordType", "Record type.", ref("AttachmentRecordType"), { required: true }),
+  queryParam("recordId", "Record id.", { type: "string" }, { required: true }),
 ];
 
 add(

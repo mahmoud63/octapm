@@ -16,6 +16,8 @@
     "db:studio": "npx prisma studio",
     "prisma:validate": "prisma validate --schema prisma/schema.prisma",
     "openapi:validate": "node scripts/validate-openapi.js",
+    "db:migrate:deploy": "npx prisma migrate deploy",
+    "smoke": "node scripts/smoke.js",
     "smoke:deploy": "node scripts/deployment-smoke.js",
     "test": "jest --runInBand",
     "test:watch": "jest --watch",

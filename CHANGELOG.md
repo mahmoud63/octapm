@@ -71,8 +71,35 @@ Sprint 1 of the Procore parity program (P0 foundations). See
   vendor portals — grouped, with defaults and with the five keys production
   refuses to boot without called out at the top. It had drifted to 20 keys.
 
+- Local setup and an end-to-end smoke test (OCTA-SETUP-044). See
+  `docs/qa/local-setup.md`. `backend/prisma/seed.js` — the file `db:seed` had
+  always named but which never existed — seeds one organisation, one user per
+  role and a project with a three-activity dependency chain, its BOQ and
+  allocations, approved progress, a seven-category cost breakdown and an active
+  baseline. `backend/scripts/smoke.js` (`npm run smoke`) runs 74 checks against
+  a running API: health, the OpenAPI document, refusal when unauthenticated,
+  sign-in, `/auth/me`, permission resolution, eight organisation endpoints, the
+  list endpoint of **all 56 project modules**, creating an RFI and reading it
+  back, and a 403 for a role without permission. `scripts/dev-db.mjs` takes
+  `DEV_DB_PORT` / `DEV_DB_DIR` / `DEV_DB_NAME` / `DEV_DB_USER` /
+  `DEV_DB_PASSWORD`, reports a busy port instead of failing obscurely, and
+  forces `--encoding=UTF8`.
+
+  **This is the first time the platform has been run.** All 92 migrations apply
+  to an empty database, the API boots, and 74/74 smoke checks pass.
+
 ### Fixed
 
+- `dev-db.mjs` created the cluster in the host locale's encoding, which on an
+  English Windows machine is WIN1252. Three migrations carry a `→` or `—` in a
+  SQL comment, so `migrate deploy` died at `20260906020000_add_drawing_sets_sheets`
+  with `22P05 character ... has no equivalent in encoding "WIN1252"`. The
+  cluster is now created as UTF-8.
+- The OpenAPI document declared `recordType` and `recordId` optional on
+  `GET /projects/{id}/comments`, `/attachments` and `/subscriptions`, but all
+  three routes validate them as required — so a client written against the
+  document got a 400 with no way to see why. `queryParam` now takes
+  `{ required: true }` and the three operations use it.
 - `API_BASE_URL` was read with two opposite conventions: `sso.service` appended
   `/auth/sso/callback` (expecting the value to end in `/api/v1`) while
   `accounting.service` appended `/api/v1/integrations/...` (expecting a bare
