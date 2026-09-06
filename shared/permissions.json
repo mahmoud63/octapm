@@ -1075,6 +1075,32 @@
       },
       "transitions": {}
     },
+    "bim": {
+      "label": "BIM",
+      "actions": {
+        "read": [
+          "pm",
+          "planning_eng",
+          "qs",
+          "cost_controller",
+          "procurement",
+          "warehouse",
+          "site_engineer",
+          "finance"
+        ],
+        "create": ["pm", "planning_eng"],
+        "update": ["pm", "planning_eng", "qs", "site_engineer"],
+        "delete": ["pm"],
+        "submit": [],
+        "approve": [],
+        "certify": [],
+        "baseline": [],
+        "export": ["pm", "planning_eng", "qs", "cost_controller"]
+      },
+      "transitions": {
+        "bim.link": ["pm", "planning_eng", "qs", "site_engineer"]
+      }
+    },
     "email": {
       "label": "Project Emails",
       "actions": {
@@ -1101,6 +1127,7 @@
         "timesheet": { "actions": ["read", "export"], "transitions": [] },
         "lookahead": { "actions": ["read", "export"], "transitions": [] },
         "conversation": { "actions": ["read", "create", "update"], "transitions": [] },
+        "bim": { "actions": ["read", "export"], "transitions": [] },
         "schedule": { "actions": ["read", "export"], "transitions": [] },
         "progress": { "actions": ["read", "export"], "transitions": [] },
         "boq": { "actions": ["read", "export"], "transitions": [] },
@@ -1158,6 +1185,7 @@
         "timesheet": { "actions": ["read", "export"], "transitions": [] },
         "lookahead": { "actions": ["read", "export"], "transitions": [] },
         "conversation": { "actions": ["read", "create", "update"], "transitions": [] },
+        "bim": { "actions": ["read", "export"], "transitions": [] },
         "schedule": { "actions": ["read", "export"], "transitions": [] },
         "progress": { "actions": ["read"], "transitions": [] },
         "boq": { "actions": ["read"], "transitions": [] },
@@ -1233,6 +1261,7 @@
         },
         "conversation": { "actions": ["read", "create", "update"], "transitions": [] },
         "email": { "actions": ["read", "update"], "transitions": [] },
+        "bim": { "actions": ["read", "update", "export"], "transitions": ["bim.link"] },
         "schedule": { "actions": ["read", "export"], "transitions": [] },
         "progress": {
           "actions": ["read", "create", "submit"],
@@ -1315,6 +1344,7 @@
           "transitions": ["lookahead.item_status"]
         },
         "conversation": { "actions": ["read", "create", "update"], "transitions": [] },
+        "bim": { "actions": ["read"], "transitions": [] },
         "schedule": { "actions": ["read"], "transitions": [] },
         "progress": {
           "actions": ["read", "create", "submit"],

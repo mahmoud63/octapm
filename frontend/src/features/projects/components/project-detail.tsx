@@ -43,6 +43,11 @@ const BoqPage = lazy(() =>
     default: m.BoqPage,
   }))
 )
+const BimPanel = lazy(() =>
+  import('@/features/bim/components/bim-panel').then((m) => ({
+    default: m.BimPanel,
+  }))
+)
 const SiteReportingDashboard = lazy(() =>
   import('@/features/site-reporting/components/site-reporting-dashboard').then(
     (m) => ({ default: m.SiteReportingDashboard })
@@ -289,6 +294,7 @@ export function ProjectDetail({
       },
       { key: 'meetings', label: 'Meetings' },
       { key: 'boq', label: 'BOQ' },
+      { key: 'bim', label: 'BIM' },
       { key: 'activities', label: 'Activities' },
       { key: 'equipment', label: 'Equipment' },
       { key: 'locations', label: 'Locations' },
@@ -409,6 +415,9 @@ export function ProjectDetail({
 
       case 'boq':
         return <BoqPage projectId={projectId} embedded />
+
+      case 'bim':
+        return <BimPanel projectId={projectId} initialTarget={initialTarget} />
 
       case 'siteReporting':
         return (

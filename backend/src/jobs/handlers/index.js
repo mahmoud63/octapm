@@ -22,6 +22,9 @@ const registerAllHandlers = () => {
   registerJobHandler(JOB_TYPES.DRAWING_SET_PROCESS, (context) =>
     require("../../services/drawing-set.service").runDrawingSetJob(context),
   );
+  registerJobHandler(JOB_TYPES.BIM_PARSE, (context) =>
+    require("../../services/bim.service").runBimParseJob(context),
+  );
   registerJobHandler(JOB_TYPES.DAILY_LOG_WEATHER, (context) =>
     require("../../services/daily-log.service").runWeatherJob(context),
   );

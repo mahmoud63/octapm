@@ -26,6 +26,7 @@ const JOB_TYPES = Object.freeze({
   PHOTO_THUMBNAIL: "photo.thumbnail",
   PHOTO_ANALYZE: "photo.analyze",
   DRAWING_SET_PROCESS: "drawing.set_process",
+  BIM_PARSE: "bim.parse",
   DAILY_LOG_WEATHER: "daily_log.weather",
   DAILY_LOG_DISTRIBUTE: "daily_log.distribute",
   PORTFOLIO_REFRESH: "portfolio.refresh",

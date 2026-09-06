@@ -465,6 +465,7 @@ router.use(
   nestedProjectAccess,
   require("./project-emails"),
 );
+router.use("/:projectId/bim", nestedProjectAccess, require("./bim"));
 router.use(
   "/:projectId/drawings/sets",
   nestedProjectAccess,

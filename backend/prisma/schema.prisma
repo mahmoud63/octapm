@@ -109,6 +109,9 @@ model Organisation {
   conversationMembers ConversationMember[]
   conversationMessages ConversationMessage[]
   inboundEmails       InboundEmail[]
+  bimModels           BimModel[]
+  bimElements         BimElement[]
+  bimElementLinks     BimElementLink[]
   subPayAppLines      SubPayAppLine[]
   subPayAppPayments   SubPayAppPayment[]
   companyEquipment    CompanyEquipment[]
@@ -503,6 +506,9 @@ model Project {
   lookaheadItems                LookaheadItem[]
   conversations                 Conversation[]
   inboundEmails                 InboundEmail[]
+  bimModels                     BimModel[]
+  bimElements                   BimElement[]
+  bimElementLinks               BimElementLink[]
   subPayAppLines                SubPayAppLine[]
   subPayAppPayments             SubPayAppPayment[]
   activityCostLoadings          ActivityCostLoading[]
@@ -1333,6 +1339,7 @@ model ProjectDocument {
   text                     DocumentText?
   chunks                   DocumentChunk[]
   drawingSets              DrawingSet[]              @relation("DrawingSetSource")
+  bimModels                BimModel[]                @relation("BimModelSource")
   sheetRevisions           SheetRevision[]           @relation("SheetRevisionDocument")
   signatures               Signature[]
 
@@ -4987,6 +4994,126 @@ model CrewMember {
 
   @@unique([crewId, workerId])
   @@index([workerId])
+}
+
+/**
+ * An uploaded IFC model (OCTA-BIM-IFC-043). Geometry is not stored — the
+ * spatial breakdown, the elements and their properties and quantities are.
+ */
+model BimModel {
+  id             String    @id @default(uuid())
+  orgId          String
+  projectId      String
+  name           String
+  discipline     String? // architectural, structural, mechanical, electrical, plumbing, civil, coordination, other
+  documentId     String?
+  ifcSchema      String? // IFC4, IFC2X3
+  status         String    @default("processing") // processing, ready, failed
+  version        Int       @default(1)
+  isCurrent      Boolean   @default(true)
+  supersededById String?
+  ifcProjectName String?
+  siteName       String?
+  buildingName   String?
+  unitsJson      Json      @default("{}")
+  headerJson     Json      @default("{}")
+  spatialJson    Json      @default("[]")
+  warningsJson   Json      @default("[]")
+  typeSummaryJson Json     @default("[]")
+  elementCount   Int       @default(0)
+  entityCount    Int       @default(0)
+  storeyCount    Int       @default(0)
+  linkedCount    Int       @default(0)
+  parsedAt       DateTime?
+  jobId          String?
+  error          String?
+  notes          String?
+  uploadedBy     String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  org            Organisation     @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  project        Project          @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  sourceDocument ProjectDocument? @relation("BimModelSource", fields: [documentId], references: [id], onDelete: SetNull)
+  elements       BimElement[]
+  links          BimElementLink[]
+
+  @@unique([projectId, name, version])
+  @@index([orgId])
+  @@index([projectId, status])
+  @@index([projectId, isCurrent])
+}
+
+/** One physical element (or space) of a model, with its base quantities. */
+model BimElement {
+  id             String   @id @default(uuid())
+  orgId          String
+  projectId      String
+  modelId        String
+  globalId       String
+  ifcType        String
+  name           String?
+  description    String?
+  objectType     String?
+  predefinedType String?
+  tag            String?
+  typeName       String?
+  storeyName     String?
+  storeyGlobalId String?
+  elevation      Float?
+  spatialPath    String?
+  materialsJson  Json     @default("[]")
+  propertiesJson Json     @default("{}")
+  netVolume      Float?
+  grossVolume    Float?
+  netArea        Float?
+  grossArea      Float?
+  length         Float?
+  width          Float?
+  height         Float?
+  perimeter      Float?
+  weight         Float?
+  quantityCount  Float?
+  searchText     String?
+  linkCount      Int      @default(0)
+  createdAt      DateTime @default(now())
+
+  org     Organisation     @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  project Project          @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  model   BimModel         @relation(fields: [modelId], references: [id], onDelete: Cascade)
+  links   BimElementLink[]
+
+  @@unique([modelId, globalId])
+  @@index([orgId])
+  @@index([modelId, ifcType])
+  @@index([modelId, storeyGlobalId])
+  @@index([projectId, ifcType])
+  @@index([projectId, globalId])
+}
+
+/** A model element tied to the rest of the project: an activity (4D), a location, a BOQ item, an issue. */
+model BimElementLink {
+  id           String   @id @default(uuid())
+  orgId        String
+  projectId    String
+  modelId      String
+  elementId    String
+  recordType   String // activity, location, boq_item, punch_item, observation, rfi, ncr, task
+  recordId     String
+  relationType String   @default("represents") // represents, affects, reference
+  notes        String?
+  createdBy    String?
+  createdAt    DateTime @default(now())
+
+  org     Organisation @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  project Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  model   BimModel     @relation(fields: [modelId], references: [id], onDelete: Cascade)
+  element BimElement   @relation(fields: [elementId], references: [id], onDelete: Cascade)
+
+  @@unique([elementId, recordType, recordId])
+  @@index([orgId])
+  @@index([projectId, recordType, recordId])
+  @@index([modelId, recordType])
 }
 
 /**

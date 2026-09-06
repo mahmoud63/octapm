@@ -23,6 +23,7 @@ export type ModuleKey =
   | 'reports'
   | 'overview'
   | 'boq'
+  | 'bim'
 
 export type ModuleWithChildren =
   | 'schedule'
@@ -50,6 +51,7 @@ export const MODULE_SLUGS: Record<ModuleKey, string> = {
   reports: 'reports',
   overview: 'overview',
   boq: 'boq',
+  bim: 'bim',
 }
 
 const MODULE_BY_SLUG: Record<string, ModuleKey> = Object.fromEntries(
@@ -102,6 +104,7 @@ export const MODULE_PERMISSIONS: Partial<
   docControl: ['document_control', 'rfi', 'submittal'],
   meetings: ['meeting'],
   boq: ['boq'],
+  bim: ['bim'],
   activities: ['schedule'],
   equipment: ['schedule', 'cost'],
   locations: ['location'],

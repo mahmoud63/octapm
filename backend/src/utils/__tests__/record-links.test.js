@@ -40,6 +40,7 @@ describe("record-links", () => {
       "reports",
       "overview",
       "boq",
+      "bim",
     ]);
     for (const target of Object.values(RECORD_WORKSPACE)) {
       if (target.path) continue;

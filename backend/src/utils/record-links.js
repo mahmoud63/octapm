@@ -58,6 +58,8 @@ const RECORD_WORKSPACE = Object.freeze({
   direct_cost: { module: "cost", child: "direct-costs" },
   lookahead: { module: "schedule", child: "lookahead" },
   inbound_email: { module: "doc-control", child: "emails" },
+  bim_model: { module: "bim" },
+  bim_element: { module: "bim" },
   conversation: { path: "/messages", param: "conversationId" },
   burn_rate_entry: { module: "cost", child: "burn" },
   boq_item: { module: "boq" },

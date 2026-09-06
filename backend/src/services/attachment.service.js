@@ -84,6 +84,7 @@ const RECORD_TYPE_MODULES = Object.freeze({
   lookahead: "lookahead",
   conversation: "conversation",
   inbound_email: "email",
+  bim_model: "bim",
   boq_item: "boq",
   location: "location",
   project: "project_parties",

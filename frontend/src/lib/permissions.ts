@@ -49,6 +49,7 @@ export type PermissionModule =
   | 'lookahead'
   | 'conversation'
   | 'email'
+  | 'bim'
 
 export type RoleId =
   | 'pm'

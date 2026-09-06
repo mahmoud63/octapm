@@ -22,6 +22,7 @@ const DOCUMENT_TYPES = Object.freeze({
   SCHEDULE_GENERATION_SOURCE: 'schedule_generation_source',
   PROGRESS_IMPORT: 'progress_import',
   DRAWING_SET: 'drawing_set',
+  BIM_MODEL: 'bim_model',
 });
 
 const ALLOWED_IMAGE_MIME = new Set([
@@ -149,6 +150,16 @@ const DOCUMENT_POLICIES = {
     defaultRetentionDays: 3650,
     unsupportedCode: 'UNSUPPORTED_FORMAT',
     unsupportedMessage: 'Supported formats: .xlsx, .xls, .csv',
+  },
+  [DOCUMENT_TYPES.BIM_MODEL]: {
+    allowedMime: new Set(['application/octet-stream', 'text/plain', 'application/x-step', 'model/ifc']),
+    allowedExtensions: ['.ifc'],
+    maxBytes: 300 * 1024 * 1024,
+    prefix: 'bim',
+    retentionEnv: 'BIM_MODEL_RETENTION_DAYS',
+    defaultRetentionDays: 3650,
+    unsupportedCode: 'UNSUPPORTED_FORMAT',
+    unsupportedMessage: 'Upload the model as an IFC file (.ifc)',
   },
   [DOCUMENT_TYPES.PROGRESS_IMPORT]: {
     allowedMime: new Set([
@@ -363,7 +374,8 @@ const assertMagicMatches = ({ file, mimeType, extension, head }) => {
     (mimeType === 'application/octet-stream' &&
       ((['.xlsx', '.docx'].includes(extension) && hasZipHeader(head)) ||
         (['.xls', '.doc'].includes(extension) && hasOleHeader(head)) ||
-        (['.csv', '.xml', '.xer'].includes(extension) && looksLikeText(head)))) ||
+        (['.csv', '.xml', '.xer', '.ifc'].includes(extension) && looksLikeText(head)))) ||
+    ((mimeType === 'application/x-step' || mimeType === 'model/ifc') && looksLikeText(head)) ||
     (mimeType === 'image/jpeg' && hasJpegHeader(head)) ||
     (mimeType === 'image/png' && hasPngHeader(head)) ||
     (mimeType === 'image/webp' && hasWebpHeader(head)) ||
@@ -1119,6 +1131,14 @@ const getScheduleGenerationFile = ({ orgId, projectId, key }) =>
     documentType: DOCUMENT_TYPES.SCHEDULE_GENERATION_SOURCE,
   });
 
+const getBimModelFile = ({ orgId, projectId, key }) =>
+  getProjectDocumentFile({
+    orgId,
+    projectId,
+    key,
+    documentType: DOCUMENT_TYPES.BIM_MODEL,
+  });
+
 const markDocumentLinked = async ({ documentId, entityType, entityId }) => {
   if (!documentId) return null;
   return prisma.projectDocument.update({
@@ -1173,6 +1193,7 @@ module.exports = {
   buildPrivateObjectKey,
   cleanupTempFiles,
   ensureTempUploadDirSync,
+  getBimModelFile,
   getBoqUploadFile,
   getImportUploadFile,
   getScheduleGenerationFile,
