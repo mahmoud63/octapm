@@ -87,8 +87,12 @@ are the components that bypassed the token layer and still need migrating.
 
 ### P3 — optional polish
 
-12. Replace the leftover `shadcn-admin.png` social preview and the template
-    favicons with OctaPM assets.
+12. ~~Replace the leftover template favicons with OctaPM assets.~~ **Done.**
+    The favicon, the two PWA icons and the maskable icon are now the brand
+    book's app icon — the eight-octagon ring in white on the Midnight Indigo to
+    Turquoise gradient. Because that tile carries its own ground, the separate
+    inverted `favicon_light.*` pair was removed rather than redrawn.
+    The `shadcn-admin.png` social preview is still the template's.
 13. Consider Space Grotesk Light for long-form body copy, per the brand
     material, where density allows.
 14. Motion: a short, consistent transition on collapse and selection.

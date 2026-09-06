@@ -29,13 +29,28 @@ export async function signIn(page: Page, who: keyof typeof PEOPLE = 'pm') {
   const password = page.locator('input[type="password"]').first()
   await password.click()
   await password.fill(PASSWORD)
-  await Promise.all([
+  const [response] = await Promise.all([
     page.waitForResponse(
       (r) => r.url().includes('/auth/login') && r.request().method() === 'POST',
       { timeout: 30_000 },
     ),
     page.getByRole('button', { name: 'Sign in', exact: true }).click(),
   ])
+
+  // Say why sign-in failed rather than leaving a "Workspace Control not found".
+  // The API allows RATE_LIMIT_LOGIN_MAX logins per IP and email in a 15-minute
+  // window (12 by default), and a full suite run — plus any run before it in
+  // the same window — burns through that. Raise it for the local API before
+  // running the suite back to back; see docs/qa/local-setup.md.
+  if (response.status() === 429) {
+    throw new Error(
+      `sign-in for ${who} was rate limited (429). The login budget is shared ` +
+        'across runs in a 15-minute window — start the API with a higher ' +
+        'RATE_LIMIT_LOGIN_MAX, or wait for the window to roll over.',
+    )
+  }
+  expect(response.status(), `sign-in for ${who} failed`).toBe(200)
+
   // The workspace dashboard is the landing page for a signed-in user.
   await expect(page.getByText('Workspace Control')).toBeVisible({ timeout: 30_000 })
 }

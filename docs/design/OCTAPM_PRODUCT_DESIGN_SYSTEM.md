@@ -35,13 +35,16 @@ semantic status colour, the octagonal structural language, and Space Grotesk.
 | `--octa-midnight-indigo` | `#0F1B64` | Shell, rails, primary actions, headings, hierarchy |
 | `--octa-royal-blue` | `#325FEC` | Supporting primary actions, selected navigation, active data |
 | `--octa-azure` | `#3388FF` | Links, interactive states, focus rings, informational |
-| `--octa-turquoise` | `#1EC9C3` **provisional** | Sparing accent: active indicators, special moments |
+| `--octa-turquoise` | `#13C1CE` | Accent: calls to action, active states, highlights, key data points |
 | `--octa-charcoal` | `#121B21` | Body text and icons. Never pure black |
-| `--octa-light-gray` | `#F4F6FA` **provisional** | Backgrounds, cards, dividers, neutral containers |
+| `--octa-light-gray` | `#DCDEDD` | Dividers, section grounds, framing, negative space |
 
-**Two values are provisional.** No exact Light Gray or Turquoise was supplied.
-Both are defined once at the top of `theme.css`; replacing them there updates
-the entire product with no other change.
+Every value above is the official one from the brand book.
+
+**One derived token.** Light Gray at full strength behind every panel reads as
+heavy in a product people look at for hours, so large working surfaces take
+`--octa-light-gray-soft` (`#F4F6FA`) and full-strength Light Gray does the
+dividing and framing. Both are declared together in `theme.css`.
 
 ### Semantic feedback
 
@@ -60,10 +63,16 @@ the accessibility rule.
 
 ### Balance
 
-Roughly 60 Midnight Indigo / 20 Royal Blue / 10 Azure / 5 neutral / 5 Turquoise,
-interpreted as a **hierarchy principle, not a per-screen quota**. Content areas
-stay light for readability; the shell, navigation, selected states and emphasis
-carry the brand. A Gantt chart or a budget table is not made 60% indigo.
+The brand book's ratio: **60 Midnight Indigo / 20 Royal Blue / 10 Azure / 5
+neutral (Light Gray and Charcoal) / 5 Turquoise**, with the accent explicitly
+budgeted at 5–10% so it never overwhelms the identity.
+
+Read it as a **hierarchy principle, not a per-screen quota**. Content areas stay
+light for readability; the shell, navigation, selected states and emphasis carry
+the brand. A Gantt chart or a budget table is not made 60% indigo. The marketing
+page is where the ratio is most literally visible, and
+`e2e/09-landing-brand.spec.ts` asserts that Turquoise there stays under 5% of the
+painted page.
 
 ## 3. Typography
 
@@ -100,7 +109,16 @@ The brand geometry, used as a signature and never as noise.
 | --- | --- |
 | `.octa-hero` | Indigo → Royal Blue → Azure gradient. Login, onboarding, welcome, occasional banners |
 | `.octa-pattern` | Tiled octagon texture. Only over `.octa-hero` or an empty state |
+| `.octa-tess` | The brand book's tessellation: octagons packed edge to edge, the gaps forming diamonds. Whole marketing grounds |
+| `.octa-tess-ink` | The same tessellation in indigo, for a light ground |
+| `.octa-notch` | Two corners chamfered at 45° — the brand's card geometry |
+| `.octa-notch-all` | All eight sides: chips, tiles, buttons |
 | `.octa-clip` | Octagonal clip for brand marks and premium surfaces |
+
+`clip-path` removes a border along with the corner, so a **framed** notched
+panel is two nested elements — the outer filled with the border colour, the
+inner one pixel inside it. `Panel` in `features/landing/components/primitives`
+does this. A notched button therefore takes a flat tint rather than an outline.
 
 The tile is drawn as a `::before` layer, so its scale and strength change with
 the surface: **104px at 0.5** on `.octa-hero` (the motif is the point there),
@@ -128,14 +146,26 @@ The rule for them:
 
 ## 6. Logo
 
-The mark is two octagonal blocks offset on the diagonal, reading as modular
-construction units locking together. Asset:
-`frontend/public/images/octapm-mark.svg`, redrawn from the supplied reference.
-**If an official vector exists, replace that file** — no code changes.
+The mark is **eight octagons arranged in a ring**: the same eight-sided module
+repeated, leaving a negative space at the centre that reads as the letter O.
+"Octa" comes from the Latin for eight, and the eight modules are the point.
 
-- Use `<OctaLogo />` for mark plus wordmark, `markOnly` for the collapsed rail.
-- `surface="dark"` on indigo grounds; the mark paints with `currentColor`, so it
-  is never recoloured arbitrarily.
+The wordmark is the brand's **custom octagonal lettering**, not a font. Its
+letterforms are chamfered from the same octagon.
+
+Both are the real vectors from the supplied Illustrator artwork, carried across
+exactly and held as path data in
+`frontend/src/components/brand/octa-logo.tsx`. Standalone copies live in
+`frontend/public/images/` — `octapm-mark.svg`, `octapm-wordmark.svg`,
+`octapm-lockup.svg` — for the favicon and anything outside React.
+
+- Use `<OctaLogo />` for the lockup, `markOnly` for the collapsed rail,
+  `<OctaMark />` where only the ring is wanted.
+- `surface="dark"` on indigo grounds; everything paints with `currentColor`, so
+  it is never recoloured arbitrarily.
+- **Never redraw either by hand, and never set "octapm" in Space Grotesk as a
+  substitute.** A text fallback loses the chamfered letterforms, which is most
+  of the identity. `e2e/09-landing-brand.spec.ts` guards this.
 - Never stretched, distorted, shadowed, or rebuilt from a normal font. Only the
   height varies.
 

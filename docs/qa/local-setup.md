@@ -1,156 +1,96 @@
-# Running OctaPM locally (OCTA-SETUP-044)
+# Running the test suites locally
 
-From an empty machine to a signed-in browser session with data in it, and a
-smoke test that proves the API actually works rather than merely compiles.
+The browser tests drive the real application against a real API and a real
+database. Nothing is mocked, so the services have to be up first.
 
-## Why this exists
-
-The unit suite (150 files, 1580 tests) mocks Prisma. It proves the services
-behave; it cannot prove the application boots, that the routes are mounted, that
-the middleware is in the right order, or that the migrations produce a schema
-Prisma can talk to. This card added the missing half:
-
-- `backend/prisma/seed.js` — the file `npm run db:seed` had always pointed at
-  but which did not exist.
-- `backend/scripts/smoke.js` — 74 checks over a running API.
-- `backend/scripts/dev-db.mjs` — now configurable, and forces UTF-8.
-
-## Steps
-
-Node 24.14+ and npm 11.9+. Everything below runs from the repository root.
-
-**1. Install.**
+## 1. Database
 
 ```bash
-npm install
+cd backend && node scripts/dev-db.mjs
 ```
 
-**2. Start a database.** `embedded-postgres` ships its own Postgres, so nothing
-needs to be installed system-wide. This process must stay running.
+Starts an embedded PostgreSQL. Two things matter:
+
+- **Keep the data directory out of OneDrive.** A synced folder corrupts the
+  cluster mid-write; `DEV_DB_DIR` exists so you can point it at, say,
+  `C:\Temp\octapm-pg`.
+- The cluster is created with `--encoding=UTF8`. Some migrations contain `→` and
+  `—`, and a WIN1252 cluster rejects them with `22P05`.
+
+Then apply migrations and seed the demo data:
 
 ```bash
-npm run db:dev --workspace=backend
+cd backend && npx prisma migrate deploy && npm run db:seed
 ```
 
-It prints the `DATABASE_URL` to use. If port 5432 is taken it says so and stops,
-rather than failing obscurely — point it elsewhere:
+The seed creates the organisation, the project **Riverside Tower**, and one user
+per role — `pm@octapm.demo` through `finance@octapm.demo`, all with the password
+`DemoPassw0rd!`. The browser tests expect exactly these.
+
+## 2. API and web app
 
 ```bash
-DEV_DB_PORT=55432 DEV_DB_DIR=/tmp/octapm-pg npm run db:dev --workspace=backend
+cd backend && npm run dev
 ```
-
-| Variable | Default | Notes |
-| --- | --- | --- |
-| `DEV_DB_PORT` | 5432 | |
-| `DEV_DB_DIR` | `backend/.pgdata` | Keep it off OneDrive — see *Traps* |
-| `DEV_DB_NAME` | `pmcopilots` | |
-| `DEV_DB_USER` | `postgres` | |
-| `DEV_DB_PASSWORD` | `yourpassword` | Local only |
-
-**3. Configure.** Copy `backend/.env.example` to `backend/.env` and set
-`DATABASE_URL` to whatever step 2 printed. Only five keys are needed to boot;
-the file marks them and documents the other ~65. For a quiet local run also set
-`JOB_WORKER_ENABLED=false` and the four `*_SCHEDULER_ENABLED=false` flags.
-
-**4. Migrate and seed.**
 
 ```bash
-npm run db:migrate:deploy --workspace=backend
-npm run db:seed --workspace=backend
+cd frontend && npm run dev
 ```
 
-The seed builds one organisation, one user per role, and the *Riverside Tower*
-project: three activities in a dependency chain, a three-line BOQ allocated to
-them, approved progress, a seven-category cost breakdown and an active baseline
-— enough that the dashboard, S-curve and earned-value views have something real
-to draw. Re-running updates the same rows.
+The API listens on `:5000` and the web app on `:5173`. The Playwright config
+assumes both, and deliberately does not start them itself: a cold Vite start on
+Windows takes longer than a `webServer` block will wait.
 
-It prints the accounts. All eight share the password `DemoPassw0rd!`:
+### Raise the login limit before a full run
 
-| Email | Role |
-| --- | --- |
-| `pm@octapm.demo` | PM, and company administrator |
-| `planner@octapm.demo` | Planning engineer |
-| `qs@octapm.demo` | Quantity surveyor |
-| `cost@octapm.demo` | Cost controller |
-| `procurement@octapm.demo` | Procurement |
-| `warehouse@octapm.demo` | Warehouse |
-| `site@octapm.demo` | Site engineer |
-| `finance@octapm.demo` | Finance |
+The API allows `RATE_LIMIT_LOGIN_MAX` login attempts per IP and email in a
+15-minute window — **12 by default**. A full suite run signs in far more often
+than that, and the window is shared with any run that came before it, so the
+second consecutive run fails partway through with a 429 that used to surface as
+a confusing "Workspace Control not found".
 
-**5. Run.**
+Start the API with a higher ceiling when you are running the suite:
 
 ```bash
-npm run dev
+cd backend && RATE_LIMIT_LOGIN_MAX=500 npm run dev
 ```
 
-API on `:5000`, web app on `:5173`, Swagger at
-`http://localhost:5000/api/v1/docs`.
+Leave the default alone anywhere else — it is a real brute-force control.
 
-**6. Prove it works.** With the API running, in another terminal:
+## 3. The suites
 
 ```bash
-npm run smoke --workspace=backend
+cd backend && node scripts/smoke.js
 ```
 
-## What the smoke test covers
-
-74 checks, about 4 seconds:
-
-- `/api/health` answers, and the OpenAPI document serves 661 paths.
-- An unauthenticated request is refused with the error envelope.
-- Sign-in returns a bearer token; `/auth/me` identifies the user; permission
-  resolution returns the module map.
-- Eight organisation-level endpoints: projects, notifications, conversations,
-  reports, portfolio, company cost codes and vendors, workflow steps.
-- **All 56 project modules' list endpoints** — every module the workspace can
-  open, from activities and BOQ through commitments, pay applications, punch,
-  drawings, specifications, timesheets, lookaheads and BIM.
-- A write: create an RFI, then read it back by id.
-- A negative: the warehouse role is refused (403) when creating an RFI.
-
-Point it anywhere with `SMOKE_BASE_URL`; override the account with
-`SMOKE_EMAIL` / `SMOKE_PASSWORD` / `SMOKE_DENY_EMAIL`.
-
-## Traps this card walked into
-
-Recorded because each one costs an hour to work out from the error alone.
-
-- **Never put the data directory on OneDrive.** The repository lives under a
-  synced OneDrive folder, and the default `backend/.pgdata` therefore does too.
-  A sync client rewriting files under a running Postgres will corrupt it, and
-  syncing one is slow enough that startup looks like a hang — the cluster sat in
-  "the database system is starting up" for eight minutes. Use `DEV_DB_DIR`.
-- **The cluster must be UTF-8.** Left alone, `initdb` takes its encoding from
-  the host locale, which on an English Windows machine is WIN1252. Three
-  migrations contain a `→` or an `—` in a SQL comment, and the migration then
-  dies with `22P05 character ... has no equivalent in encoding "WIN1252"`.
-  `dev-db.mjs` now passes `--encoding=UTF8 --lc-collate=C --lc-ctype=C`.
-  Encoding is fixed when the cluster is created: to change it, delete the data
-  directory and let it initialise again.
-- **Windows path length.** A data directory nested deeply enough that
-  `pg_wal/archive_status` crosses 260 characters fails initdb with a bare "No
-  such file or directory". Keep the path short.
-
-## Known gaps
-
-- **`schema.prisma` and the migrations have drifted.** Applying every migration
-  to an empty database and diffing it against the schema shows 33 indexes the
-  migrations create that the schema does not declare, 1 index and 2 foreign keys
-  the schema declares that no migration creates, and 76 constraints whose names
-  differ from Prisma's defaults. Nothing is broken at runtime — the API passes
-  all 74 smoke checks against exactly this database — but `prisma migrate dev`
-  will want to generate a spurious migration. Reconciling it is its own card and
-  must not be done casually, because rewriting an applied migration breaks its
-  checksum for anyone who has already run it.
-- The frontend is built and served but has not been driven end-to-end here; the
-  smoke test is API-only.
-
-## Test
+74 checks against a running API — the quickest way to tell whether the stack is
+actually up.
 
 ```bash
-npm run db:seed --workspace=backend
-npm run smoke --workspace=backend
+cd backend && node scripts/qa/run.js
 ```
 
-Expected: `74/74 passed`.
+The API-level scenarios: security, the authorization sweep, cross-module
+integration and company scoping.
+
+```bash
+cd frontend && npx playwright test
+```
+
+The browser tests. They sign in through the real form, drive the real UI and
+verify the resulting backend state through a separate API client — never through
+the browser's own session, because a second sign-in in the same cookie jar
+displaces the session under test.
+
+```bash
+cd frontend && for f in scripts/*.test.mjs; do node "$f"; done
+```
+
+The frontend contract tests. They are plain Node scripts with no runner, so they
+work anywhere Node does.
+
+## Screenshots
+
+The brand and navigation specs write to `docs/design/screenshots/`. They are
+committed on purpose: a visual change should show up in review as a changed
+image, not as a diff of Tailwind classes.

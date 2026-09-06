@@ -31,17 +31,21 @@
   --octa-charcoal: #121b21;
   --octa-charcoal-muted: #5a6672;
 
-  /* PROVISIONAL — no exact value was supplied for Light Gray. Chosen to sit
-     under Midnight Indigo without a colour cast. Replace here when the brand
-     reference is available; nothing else needs to change. */
-  --octa-light-gray: #f4f6fa;
+  /* Light Gray, the official value: backgrounds, dividers, cards and negative
+     space. It is a real grey — at full strength it is a divider or a section
+     ground, not a page background, so the two tints below carry the product's
+     large surfaces and this stays the reference. */
+  --octa-light-gray: #dcdedd;
+  --octa-light-gray-soft: #f4f6fa;
   --octa-light-gray-deep: #e7ebf3;
   --octa-border: #dfe4ee;
 
-  /* PROVISIONAL — no exact value was supplied for Turquoise. Used sparingly as
-     the accent, never competing with the indigo/blue identity. */
-  --octa-turquoise: #1ec9c3;
-  --octa-turquoise-soft: #e2faf8;
+  /* Turquoise, the official accent. The brand book budgets it at roughly 5% of
+     the identity: calls to action, active states, highlights and key data
+     points — never as a surface. */
+  --octa-turquoise: #13c1ce;
+  --octa-turquoise-hover: #0fa8b4;
+  --octa-turquoise-soft: #e2f8fa;
 
   /* Extended product palette, for system feedback. */
   --octa-success: #26ac7a;
@@ -66,7 +70,10 @@
      brand. That is the brand-balance principle, not a per-screen colour quota. */
   --background: #ffffff;
   --foreground: var(--octa-charcoal);
-  --surface: var(--octa-light-gray);
+  /* Large working surfaces take the soft tint, not Light Gray at full
+     strength: the product is read for hours and #dcdedd behind every panel
+     reads as heavy. Full-strength Light Gray does the dividing and framing. */
+  --surface: var(--octa-light-gray-soft);
   --surface-elevated: #ffffff;
 
   --card: #ffffff;
@@ -78,10 +85,10 @@
   --primary-foreground: #ffffff;
   --primary-hover: var(--octa-midnight-indigo-hover);
 
-  --secondary: var(--octa-light-gray);
+  --secondary: var(--octa-light-gray-soft);
   --secondary-foreground: var(--octa-midnight-indigo);
 
-  --muted: var(--octa-light-gray);
+  --muted: var(--octa-light-gray-soft);
   --muted-foreground: var(--octa-charcoal-muted);
 
   /* Interaction lives on Royal Blue; Azure is the lighter interactive tone. */
@@ -341,8 +348,11 @@
   --color-octa-royal-blue: var(--octa-royal-blue);
   --color-octa-azure: var(--octa-azure);
   --color-octa-turquoise: var(--octa-turquoise);
+  --color-octa-turquoise-hover: var(--octa-turquoise-hover);
+  --color-octa-turquoise-soft: var(--octa-turquoise-soft);
   --color-octa-charcoal: var(--octa-charcoal);
   --color-octa-light-gray: var(--octa-light-gray);
+  --color-octa-light-gray-soft: var(--octa-light-gray-soft);
 }
 
 /* --- The Midnight Indigo application header ------------------------------ */
@@ -509,6 +519,71 @@
 .octa-card > * {
   position: relative;
   z-index: 1;
+}
+
+/* --- The brand tessellation ---------------------------------------------- */
+/*
+ * The pattern as the brand book draws it: octagons packed edge to edge, so the
+ * space left between four neighbours forms the diamond. One octagon per tile is
+ * enough — the diamonds are drawn by the chamfers of the cells around it.
+ *
+ * This is the marketing pattern. It covers whole grounds (the hero, the closing
+ * panel, the footer) and never sits behind dense product data.
+ */
+.octa-tess {
+  position: relative;
+  isolation: isolate;
+}
+
+.octa-tess::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  opacity: var(--tess-opacity, 0.4);
+  background-size: var(--tess-size, 92px) var(--tess-size, 92px);
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><path d='M29.29 0H70.71L100 29.29V70.71L70.71 100H29.29L0 70.71V29.29Z' fill='none' stroke='rgba(255,255,255,0.34)' stroke-width='1.4'/></svg>");
+}
+
+/* On a light ground the same tessellation is drawn in indigo instead. */
+.octa-tess-ink::before {
+  opacity: var(--tess-opacity, 0.16);
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><path d='M29.29 0H70.71L100 29.29V70.71L70.71 100H29.29L0 70.71V29.29Z' fill='none' stroke='%230F1B64' stroke-width='1.4'/></svg>");
+}
+
+/* --- Chamfered geometry -------------------------------------------------- */
+/*
+ * The brand cuts corners at 45°, taken from the octagon. Two opposite corners
+ * rather than four: it reads as a deliberate diagonal instead of a stop sign.
+ *
+ * `clip-path` removes any border, so a framed panel is two nested elements —
+ * the outer one clipped and filled with the border colour, the inner one
+ * clipped and filled with the surface. See `Panel` in the landing feature.
+ */
+.octa-notch {
+  clip-path: polygon(
+    var(--notch, 18px) 0,
+    100% 0,
+    100% calc(100% - var(--notch, 18px)),
+    calc(100% - var(--notch, 18px)) 100%,
+    0 100%,
+    0 var(--notch, 18px)
+  );
+}
+
+/* All four corners, for octagonal chips and tiles. */
+.octa-notch-all {
+  clip-path: polygon(
+    var(--notch, 12px) 0,
+    calc(100% - var(--notch, 12px)) 0,
+    100% var(--notch, 12px),
+    100% calc(100% - var(--notch, 12px)),
+    calc(100% - var(--notch, 12px)) 100%,
+    var(--notch, 12px) 100%,
+    0 calc(100% - var(--notch, 12px)),
+    0 var(--notch, 12px)
+  );
 }
 
 /* Octagonal clip, for brand marks and premium surfaces only. */

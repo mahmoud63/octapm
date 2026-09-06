@@ -1,4 +1,19 @@
-<svg xmlns="http://www.w3.org/2000/svg" version="1.1" xmlns:xlink="http://www.w3.org/1999/xlink" xmlns:svgjs="http://svgjs.com/svgjs" width="24" height="24"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokewidth="2" strokelinecap="round" strokelinejoin="round">
-  <path d="M15 6v12a3 3 0 1 0 3-3H6a3 3 0 1 0 3 3V6a3 3 0 1 0-3 3h12a3 3 0 1 0-3-3"></path>
-</svg><style>@media (prefers-color-scheme: light) { :root { filter: contrast(1) brightness(0.8); } }
-</style></svg>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" role="img" aria-label="OctaPM">
+  <!--
+    The OctaPM app icon, as the brand book draws it: the eight-octagon ring in
+    white on the Midnight Indigo to Turquoise gradient. The tile carries its own
+    ground, so one icon works on a light or a dark browser chrome.
+    The ring path is the supplied Illustrator artwork — do not redraw it.
+  -->
+  <defs>
+    <linearGradient id="octa-icon" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#0F1B64"/>
+      <stop offset="0.55" stop-color="#1A3BB8"/>
+      <stop offset="1" stop-color="#13C1CE"/>
+    </linearGradient>
+  </defs>
+  <rect width="100" height="100" rx="22" fill="url(#octa-icon)"/>
+  <g transform="translate(19 19.15) scale(0.10559)" fill="#ffffff">
+    <path fill-rule="nonzero" d="M473.31 386.72L434.41 386.72L389.66 431.47L389.66 472.17L348.93 431.45L238.3 431.45L197.71 472.04L197.71 431.47L152.95 386.72L113.93 386.72L152.99 347.81L152.99 237.17L113.22 197.57L152.99 197.57L197.42 152.81L197.42 111.93L238.3 152.81L348.93 152.81L389.66 112.09L389.66 152.81L434.41 197.57L474.01 197.57L434.4 237.17L434.4 347.81ZM587.21 347.81L587.21 237.17L542.32 192.42L502.86 192.42L542.47 152.81L542.47 89.51L497.71 44.88L434.41 44.88L393.69 85.49L393.69 44.5L348.93 0L238.3 0L193.54 44.5L193.54 85.61L152.99 44.88L89.36 44.88L44.9 89.51L44.9 152.81L84.25 192.42L44.9 192.42L0 237.17L0 347.81L44.9 392.57L83.8 392.57L44.89 431.47L44.89 494.77L89.65 539.4L152.95 539.4L193.54 498.93L193.54 539.76L238.3 584.26L348.93 584.26L393.69 539.76L393.69 498.79L434.41 539.4L497.71 539.4L542.47 494.77L542.47 431.47L503.56 392.57L542.32 392.57Z"/>
+  </g>
+</svg>
