@@ -57,8 +57,10 @@ test.describe('brand visual validation', () => {
     await expect(page.getByTestId('uat-project-module-rail')).toHaveCount(0)
     await expect(page.getByTestId('uat-project-module-bar')).toBeVisible()
 
-    // The compact readiness bar keeps its collapsed state.
-    await expect(page.getByTestId('uat-setup-readiness-expand')).toBeVisible()
+    // Setup Readiness belongs to Overview. A working module must not carry the
+    // setup checklist, in either its expanded or collapsed form.
+    await expect(page.getByTestId('uat-setup-readiness-expand')).toHaveCount(0)
+    await expect(page.getByTestId('uat-setup-readiness-collapse')).toHaveCount(0)
 
     // The workspace should now use nearly the whole viewport width.
     const content = page.getByTestId(/^uat-project-content-/)

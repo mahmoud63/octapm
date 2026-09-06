@@ -170,6 +170,32 @@ test.describe('project module bar', () => {
     await expect(page.getByTestId('uat-module-menu-schedule')).toHaveCount(0)
   })
 
+  test('Setup Readiness appears on Overview only', async ({ page }) => {
+    await signIn(page)
+    const projectId = await openProject(page)
+
+    // On Overview it is present.
+    await page.goto(`/projects/${projectId}/overview`)
+    await page.waitForLoadState('domcontentloaded')
+    await page.waitForTimeout(2500)
+    const onOverview =
+      (await page.getByTestId('uat-setup-readiness-collapse').count()) +
+      (await page.getByTestId('uat-setup-readiness-expand').count())
+    expect(onOverview, 'Setup Readiness should be on Overview').toBeGreaterThan(0)
+
+    // On every working module it is not: the setup checklist must not take
+    // space away from the screens people work in all day.
+    for (const route of ['schedule/gantt', 'cost/budget', 'commercial/change-orders', 'boq']) {
+      await page.goto(`/projects/${projectId}/${route}`)
+      await page.waitForLoadState('domcontentloaded')
+      await page.waitForTimeout(1800)
+      const present =
+        (await page.getByTestId('uat-setup-readiness-collapse').count()) +
+        (await page.getByTestId('uat-setup-readiness-expand').count())
+      expect(present, `Setup Readiness leaked onto /${route}`).toBe(0)
+    }
+  })
+
   test('project context survives a refresh', async ({ page }) => {
     await signIn(page)
     const projectId = await openProject(page)

@@ -660,13 +660,18 @@ export function ProjectDetail({
               <ProjectStatusBadge status={project.status} />
             </div>
 
-            <ProjectSetupWizard
-              readiness={setupReadiness}
-              isLoading={setupReadinessLoading}
-              onNavigate={handleSetupNavigate}
-              collapsed={readinessCollapsed}
-              onCollapsedChange={setReadinessCollapsed}
-            />
+            {/* Setup Readiness is a project setup checklist, so it belongs on
+                Overview. Carrying it into Budget, Gantt or Drawings would take
+                working space on every screen to say the same thing. */}
+            {visibleModule === 'overview' && (
+              <ProjectSetupWizard
+                readiness={setupReadiness}
+                isLoading={setupReadinessLoading}
+                onNavigate={handleSetupNavigate}
+                collapsed={readinessCollapsed}
+                onCollapsedChange={setReadinessCollapsed}
+              />
+            )}
 
             {/* Navigation moved to the module bar above the project header, so
                 the workspace gets the full width — which matters most for
