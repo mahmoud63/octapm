@@ -142,6 +142,8 @@ model Organisation {
   submittalPackages   SubmittalPackage[]
   submittalWorkflowTemplates SubmittalWorkflowTemplate[]
   punchItemEvents     PunchItemEvent[]
+  primeContracts      PrimeContract[]
+  primeContractAdvances PrimeContractAdvance[]
 }
 
 model User {
@@ -351,6 +353,7 @@ model Company {
   invitationTokens InvitationToken[]
   procurementSuppliers ProcurementSupplier[]
   commitments          Commitment[]        @relation("CommitmentVendor")
+  primeContracts       PrimeContract[]     @relation("PrimeContractClient")
   workers              Worker[]
   crews                Crew[]
   rfqs                 Rfq[]               @relation("RfqVendor")
@@ -474,6 +477,8 @@ model Project {
   ipcInvoices                   IpcInvoice[]
   ipcPayments                   IpcPayment[]
   ipcRetentionReleases          IpcRetentionRelease[]
+  primeContract                 PrimeContract?
+  primeContractAdvances         PrimeContractAdvance[]
   subValuations                 SubValuation[]
   subValuationActivityLinks     SubValuationActivityLink[]
   subValuationAllocationLinks   SubValuationAllocationLink[]
@@ -1993,6 +1998,9 @@ model IpcItem {
   netPayable       Decimal   @default(0) @db.Decimal(18, 2)
   status           String    @default("draft") // draft, submitted, certified, paid
   certDate         DateTime?
+  // Items are read back in BOQ order and then in the order they were raised;
+  // without this the secondary sort has nothing to sort on.
+  createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt
 
   project        Project                @relation(fields: [projectId], references: [id])
@@ -2044,6 +2052,16 @@ model IpcCertificate {
   totalCert                    Decimal   @default(0) @db.Decimal(18, 2)
   totalRet                     Decimal   @default(0) @db.Decimal(18, 2)
   netPayable                   Decimal   @default(0) @db.Decimal(18, 2)
+  // Client-billing adjustments carried by the prime contract
+  // (OCTA-COM-PRIME-051). All default to zero, so a certificate raised before
+  // a contract existed reads exactly as it always did.
+  materialsOnSite              Decimal   @default(0) @db.Decimal(18, 2)
+  grossThisPeriod              Decimal   @default(0) @db.Decimal(18, 2)
+  advanceRecovery              Decimal   @default(0) @db.Decimal(18, 2)
+  deductions                   Decimal   @default(0) @db.Decimal(18, 2)
+  deductionsNote               String?
+  taxRate                      Float     @default(0)
+  taxAmount                    Decimal   @default(0) @db.Decimal(18, 2)
   status                       String    @default("draft") // draft, submitted, certified, paid
   invoiceStatus                String    @default("not_issued") // not_issued, issued, void
   paymentStatus                String    @default("unpaid") // unpaid, partially_paid, paid
@@ -2155,6 +2173,96 @@ model IpcRetentionRelease {
   @@index([projectId])
   @@index([ipcCertificateId])
   @@index([projectId, releaseDate])
+}
+
+// ─── The client contract (OCTA-COM-PRIME-051) ──────────────────────────────
+
+/**
+ * The commercial envelope of the contract with the client.
+ *
+ * One per project. The BOQ is the schedule of values — this holds what the BOQ
+ * cannot: what was originally agreed, what approved client change orders have
+ * done to it, and the terms that turn certified work into a sum of money
+ * (retention, advance and its recovery, tax, payment days).
+ *
+ * revisedValue is stored rather than computed on read because every downstream
+ * figure — over-certification limits, forecast, cash flow — compares against
+ * it, and they must all see the same number at the same moment.
+ */
+model PrimeContract {
+  id                     String    @id @default(uuid())
+  orgId                  String
+  projectId              String    @unique
+  ref                    String
+  title                  String
+  clientCompanyId        String?
+  contractType           String    @default("lump_sum") // lump_sum, remeasured, cost_plus, gmp
+  currency               String    @default("USD")
+  originalValue          Decimal   @default(0) @db.Decimal(18, 2)
+  approvedChangesValue   Decimal   @default(0) @db.Decimal(18, 2)
+  pendingChangesValue    Decimal   @default(0) @db.Decimal(18, 2)
+  revisedValue           Decimal   @default(0) @db.Decimal(18, 2)
+  retentionRate          Float     @default(5)
+  // Retention stops accruing once it reaches this share of the contract value.
+  retentionCapRate       Float?
+  advanceRate            Float     @default(0)
+  advanceAmount          Decimal   @default(0) @db.Decimal(18, 2)
+  advancePaidAmount      Decimal   @default(0) @db.Decimal(18, 2)
+  // Share of each gross certificate withheld to pay the advance back.
+  advanceRecoveryRate    Float     @default(0)
+  advanceRecoveredAmount Decimal   @default(0) @db.Decimal(18, 2)
+  // Share of stored-material value that may be certified before installation.
+  materialsOnSiteRate    Float     @default(100)
+  taxRate                Float     @default(0)
+  paymentTermsDays       Int       @default(30)
+  startDate              DateTime?
+  completionDate         DateTime?
+  status                 String    @default("active") // draft, active, closed
+  notes                  String?
+  createdBy              String?
+  updatedBy              String?
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @updatedAt
+
+  org           Organisation           @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  project       Project                @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  clientCompany Company?               @relation("PrimeContractClient", fields: [clientCompanyId], references: [id], onDelete: SetNull)
+  advances      PrimeContractAdvance[]
+
+  @@unique([orgId, ref])
+  @@index([orgId])
+  @@index([clientCompanyId])
+}
+
+/**
+ * The advance-payment ledger: what the client paid up front, and every
+ * recovery taken out of a certificate since.
+ *
+ * Append-only, like the stock ledger, so the outstanding advance is always the
+ * sum of its rows rather than a counter somebody can quietly edit.
+ */
+model PrimeContractAdvance {
+  id            String   @id @default(uuid())
+  orgId         String
+  projectId     String
+  contractId    String
+  reference     String
+  kind          String   @default("payment") // payment, recovery
+  amount        Decimal  @default(0) @db.Decimal(18, 2)
+  certificateId String?
+  occurredAt    DateTime @default(now())
+  note          String?
+  createdBy     String?
+  createdAt     DateTime @default(now())
+
+  org      Organisation  @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  project  Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  contract PrimeContract @relation(fields: [contractId], references: [id], onDelete: Cascade)
+
+  @@unique([projectId, reference])
+  @@index([orgId])
+  @@index([contractId, kind])
+  @@index([certificateId])
 }
 
 model Risk {
@@ -4756,6 +4864,12 @@ model SubPayApp {
   retentionCumulative      Decimal   @default(0) @db.Decimal(18, 2)
   backCharges              Decimal   @default(0) @db.Decimal(18, 2)
   backChargesNote          String?
+  // Withheld for a stated reason that is not a back-charge, and tax on what
+  // is left after everything is withheld (OCTA-COM-SUBPAY-052).
+  otherDeductions          Decimal   @default(0) @db.Decimal(18, 2)
+  otherDeductionsNote      String?
+  taxRate                  Float     @default(0)
+  taxAmount                Decimal   @default(0) @db.Decimal(18, 2)
   netThisPeriod            Decimal   @default(0) @db.Decimal(18, 2)
   paidAmount               Decimal   @default(0) @db.Decimal(18, 2)
   overClaimAmount          Decimal   @default(0) @db.Decimal(18, 2)
@@ -4805,6 +4919,11 @@ model SubPayAppLine {
   sovLineId        String
   description      String
   scheduledAmount  Decimal  @default(0) @db.Decimal(18, 2)
+  // The line as revised by approved change orders at the moment this claim was
+  // made, and what the changes contributed. Snapshotted alongside capAmount
+  // and approvedPct, which are also what-was-true-then figures.
+  approvedChangeAmount   Decimal @default(0) @db.Decimal(18, 2)
+  revisedScheduledAmount Decimal @default(0) @db.Decimal(18, 2)
   previousAmount   Decimal  @default(0) @db.Decimal(18, 2)
   thisPeriodAmount Decimal  @default(0) @db.Decimal(18, 2)
   cumulativeAmount Decimal  @default(0) @db.Decimal(18, 2)

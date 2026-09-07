@@ -73,6 +73,79 @@ describe("subcontractor payment applications", () => {
     expect(totals).toMatchObject({ workThisPeriod: 40000, workCumulative: 60000, materialsOnSite: 5000, grossThisPeriod: 45000, retentionThisPeriod: 4500, retentionCumulative: 6500, netThisPeriod: 39000 });
   });
 
+  it("taxes what is left after retention and withholdings, never the gross", () => {
+    // 45,000 gross − 4,500 retention − 1,500 back-charges − 3,000 deduction
+    // = 36,000, and 5% of that is 1,800. Tax on the gross would be 2,250 and
+    // the subcontractor would be overpaid every period.
+    const lines = [line({ thisPeriodAmount: 30000, cumulativeAmount: 50000, materialsOnSite: 5000 }), line({ id: "pl-2", thisPeriodAmount: 10000, cumulativeAmount: 10000 })];
+    const totals = service.financials({ lines, retentionRate: 10, backCharges: 1500, retentionBefore: 0, otherDeductions: 3000, taxRate: 5 });
+    expect(totals.taxAmount).toBe(1800);
+    expect(totals.netThisPeriod).toBe(37800);
+  });
+
+  describe("the revised schedule of values", () => {
+    const pctMap = new Map();
+
+    it("refuses a claim past the line's scheduled amount", () => {
+      expect(() =>
+        service.applyClaims({ lines: [line()], claims: new Map([["sov-1", { thisPeriodAmount: 85000 }]]), pctMap }),
+      ).toThrow(expect.objectContaining({ code: "SUB_PAY_APP_EXCEEDS_SCHEDULED" }));
+    });
+
+    it("allows it once an approved change order has raised the line", () => {
+      // The rule is "not past the scheduled amount unless an authorised
+      // contract modification says otherwise". This is the "unless".
+      const changeMap = new Map([["sov-1", 20000]]);
+      const [claimed] = service.applyClaims({
+        lines: [line()],
+        claims: new Map([["sov-1", { thisPeriodAmount: 85000 }]]),
+        pctMap,
+        changeMap,
+      });
+      expect(claimed.revisedScheduledAmount).toBe(120000);
+      expect(claimed.approvedChangeAmount).toBe(20000);
+      expect(claimed.cumulativeAmount).toBe(105000);
+    });
+
+    it("still refuses a claim past the revised amount", () => {
+      const changeMap = new Map([["sov-1", 20000]]);
+      expect(() =>
+        service.applyClaims({ lines: [line()], claims: new Map([["sov-1", { thisPeriodAmount: 105000 }]]), pctMap, changeMap }),
+      ).toThrow(expect.objectContaining({ code: "SUB_PAY_APP_EXCEEDS_SCHEDULED" }));
+    });
+
+    it("says what the ceiling is made of when it refuses", () => {
+      const changeMap = new Map([["sov-1", 20000]]);
+      let thrown = null;
+      try {
+        service.applyClaims({ lines: [line()], claims: new Map([["sov-1", { thisPeriodAmount: 200000 }]]), pctMap, changeMap });
+      } catch (error) {
+        thrown = error;
+      }
+      expect(thrown.message).toContain("120000");
+      expect(thrown.message).toContain("20000");
+    });
+
+    it("counts only approved change-order lines that name a schedule line", async () => {
+      const tx = {
+        commitmentChangeOrder: {
+          findMany: jest.fn(async () => [
+            { linesJson: [{ sovLineId: "sov-1", amount: 20000 }, { sovLineId: null, amount: 9999 }] },
+            { linesJson: [{ sovLineId: "sov-1", amount: 5000 }] },
+            { linesJson: "not-a-list" },
+          ]),
+        },
+      };
+      const map = await service.approvedChangesBySovLine({ tx, commitmentId: "cm-1" });
+      expect(map.get("sov-1")).toBe(25000);
+      expect(map.size).toBe(1);
+      // Only approved orders are asked for; a pending one must not raise a cap.
+      expect(tx.commitmentChangeOrder.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { commitmentId: "cm-1", status: "approved" } }),
+      );
+    });
+  });
+
   it("seeds a numbered application from the executed commitment with previous claims", async () => {
     mockPrisma.subPayApp.aggregate.mockResolvedValue({ _max: { number: 1 } });
     mockPrisma.subPayAppLine.findMany.mockResolvedValue([{ sovLineId: "sov-1", thisPeriodAmount: 20000, payApp: { id: "pa-0" } }]);

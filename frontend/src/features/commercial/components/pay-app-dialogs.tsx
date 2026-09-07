@@ -231,6 +231,13 @@ function LinesEditor({
   const [backChargesNote, setBackChargesNote] = useState(
     payApp.backChargesNote ?? ''
   )
+  const [otherDeductions, setOtherDeductions] = useState(
+    String(payApp.otherDeductions)
+  )
+  const [otherDeductionsNote, setOtherDeductionsNote] = useState(
+    payApp.otherDeductionsNote ?? ''
+  )
+  const [taxRate, setTaxRate] = useState(String(payApp.taxRate))
   const dirty =
     payApp.lines.some(
       (line) =>
@@ -238,7 +245,10 @@ function LinesEditor({
         drafts[line.sovLineId]?.mos !== String(line.materialsOnSite)
     ) ||
     backCharges !== String(payApp.backCharges) ||
-    backChargesNote !== (payApp.backChargesNote ?? '')
+    backChargesNote !== (payApp.backChargesNote ?? '') ||
+    otherDeductions !== String(payApp.otherDeductions) ||
+    otherDeductionsNote !== (payApp.otherDeductionsNote ?? '') ||
+    taxRate !== String(payApp.taxRate)
   const editable =
     canEdit && ['draft', 'submitted', 'under_review'].includes(payApp.status)
   return (
@@ -266,6 +276,9 @@ function LinesEditor({
               }
               const cumulative =
                 line.previousAmount + (Number(draft.thisPeriod) || 0)
+              // The ceiling is the line as revised by approved change orders.
+              const revised =
+                line.revisedScheduledAmount || line.scheduledAmount
               const over =
                 line.capAmount !== null && cumulative > line.capAmount + 0.01
               return (
@@ -285,7 +298,15 @@ function LinesEditor({
                     </div>
                   </td>
                   <td className='p-1 text-right tabular-nums'>
-                    {formatMoney(line.scheduledAmount)}
+                    {formatMoney(revised)}
+                    {/* An approved change order raised this line's ceiling;
+                        show where the extra came from. */}
+                    {line.approvedChangeAmount > 0 && (
+                      <div className='text-[10px] text-muted-foreground'>
+                        {formatMoney(line.scheduledAmount)} +{' '}
+                        {formatMoney(line.approvedChangeAmount)} approved
+                      </div>
+                    )}
                   </td>
                   <td className='p-1 text-right tabular-nums'>
                     {formatMoney(line.previousAmount)}
@@ -317,8 +338,8 @@ function LinesEditor({
                   >
                     {formatMoney(cumulative)}
                     <span className='ml-1 text-[10px] text-muted-foreground'>
-                      {line.scheduledAmount > 0
-                        ? `${Math.round((cumulative / line.scheduledAmount) * 100)}%`
+                      {revised > 0
+                        ? `${Math.round((cumulative / revised) * 100)}%`
                         : ''}
                     </span>
                   </td>
@@ -352,7 +373,7 @@ function LinesEditor({
                     />
                   </td>
                   <td className='p-1 text-right tabular-nums'>
-                    {formatMoney(line.scheduledAmount - cumulative)}
+                    {formatMoney(revised - cumulative)}
                   </td>
                 </tr>
               )
@@ -386,6 +407,49 @@ function LinesEditor({
               onChange={(e) => setBackChargesNote(e.target.value)}
             />
           </div>
+          <div className='space-y-1'>
+            <Label htmlFor='payapp-deductions' className='text-xs'>
+              Other deductions
+            </Label>
+            <Input
+              id='payapp-deductions'
+              type='number'
+              step='0.01'
+              min={0}
+              className='w-32'
+              value={otherDeductions}
+              onChange={(e) => setOtherDeductions(e.target.value)}
+              data-testid='uat-payapp-deductions'
+            />
+          </div>
+          <div className='min-w-40 flex-1 space-y-1'>
+            <Label htmlFor='payapp-deductions-note' className='text-xs'>
+              Deduction reason
+            </Label>
+            <Input
+              id='payapp-deductions-note'
+              value={otherDeductionsNote}
+              onChange={(e) => setOtherDeductionsNote(e.target.value)}
+              placeholder='Required when deducting'
+              data-testid='uat-payapp-deductions-note'
+            />
+          </div>
+          <div className='space-y-1'>
+            <Label htmlFor='payapp-tax' className='text-xs'>
+              Tax %
+            </Label>
+            <Input
+              id='payapp-tax'
+              type='number'
+              step='0.01'
+              min={0}
+              max={100}
+              className='w-24'
+              value={taxRate}
+              onChange={(e) => setTaxRate(e.target.value)}
+              data-testid='uat-payapp-tax'
+            />
+          </div>
           <Button
             size='sm'
             disabled={!dirty || update.isPending}
@@ -397,6 +461,9 @@ function LinesEditor({
                   payload: {
                     backCharges: Number(backCharges) || 0,
                     backChargesNote: backChargesNote.trim() || null,
+                    otherDeductions: Number(otherDeductions) || 0,
+                    otherDeductionsNote: otherDeductionsNote.trim() || null,
+                    taxRate: Number(taxRate) || 0,
                     lines: payApp.lines.map((line) => ({
                       sovLineId: line.sovLineId,
                       thisPeriodAmount:
@@ -538,7 +605,7 @@ export function PayAppDetailDialog({
             </DialogHeader>
 
             <div
-              className='grid grid-cols-2 gap-2 sm:grid-cols-6'
+              className='grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-8'
               data-testid='uat-payapp-values'
             >
               {[
@@ -547,6 +614,11 @@ export function PayAppDetailDialog({
                 ['Gross', payApp.grossThisPeriod],
                 ['Retention', payApp.retentionThisPeriod],
                 ['Back-charges', payApp.backCharges],
+                ['Deductions', payApp.otherDeductions],
+                [
+                  payApp.taxRate ? `Tax (${payApp.taxRate}%)` : 'Tax',
+                  payApp.taxAmount,
+                ],
                 ['Net payable', payApp.netThisPeriod],
               ].map(([label, value]) => (
                 <div key={label as string} className='rounded-md border p-2'>

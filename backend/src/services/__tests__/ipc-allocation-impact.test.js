@@ -4,9 +4,22 @@ const mockPrisma = {
   ipcCertificate: {
     findMany: jest.fn(),
     findFirst: jest.fn(),
+    // Read back by recomputeCertificateTotals to apply the client contract's
+    // terms (OCTA-COM-PRIME-051).
+    findUnique: jest.fn(async () => ({
+      id: "cert-1",
+      projectId: "project-1",
+      materialsOnSite: 0,
+      deductions: 0,
+      totalRet: 0,
+    })),
+    aggregate: jest.fn(async () => ({ _sum: { totalRet: 0 } })),
     create: jest.fn(),
     update: jest.fn(),
   },
+  // No contract on this project, so the certificate bills as it always did:
+  // certified work less retention.
+  primeContract: { findFirst: jest.fn(async () => null) },
   activityBoqAllocation: { findMany: jest.fn() },
   activityProgress: { findFirst: jest.fn() },
   changeOrderAllocationLink: { findMany: jest.fn() },

@@ -82,6 +82,42 @@ router.patch(
   }),
 );
 
+/**
+ * Stored materials and deductions on a certificate.
+ *
+ * Neither is measured work, so neither belongs on a BOQ line — but both move
+ * what the client owes, so they live on the certificate and a deduction has to
+ * say what it is for.
+ */
+router.patch(
+  "/:period/adjustments",
+  requirePermission("ipc", "update", {
+    transition: "item.update",
+  }),
+  [
+    param("period").isString(),
+    moneyBody("materialsOnSite"),
+    moneyBody("materialsAtCost"),
+    moneyBody("deductions"),
+    body("deductionsNote")
+      .optional({ nullable: true })
+      .isString()
+      .trim()
+      .isLength({ max: 500 }),
+    validate,
+  ],
+  asyncHandler(async (req, res) => {
+    const result = await ipcService.updateCertificateAdjustments({
+      orgId: req.user.orgId,
+      projectId: req.params.projectId,
+      period: req.params.period,
+      payload: req.body,
+      userId: req.user.id,
+    });
+    return sendSuccess(res, result);
+  }),
+);
+
 router.post(
   "/:period/submit",
   requirePermission("ipc", "submit", {

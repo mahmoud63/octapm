@@ -926,6 +926,13 @@ const createChangeOrder = async ({
       },
     });
 
+    // The client contract carries the revised value, so it re-reads the change
+    // orders itself rather than anybody keeping a second copy of the total.
+    await require("./prime-contract.service").recomputeChangeValues(tx, {
+      orgId,
+      projectId,
+    });
+
     const [enriched] = await attachEvidenceToRecords({
       tx,
       projectId,
@@ -1177,6 +1184,13 @@ const updateChangeOrder = async ({
         actorId: userId,
       });
     }
+
+    // And the client contract's revised value (OCTA-COM-PRIME-051): approved
+    // changes move it, everything still in play is reported beside it.
+    await require("./prime-contract.service").recomputeChangeValues(tx, {
+      orgId,
+      projectId,
+    });
 
     await auditService.recordEvent({
       tx,
@@ -1447,6 +1461,11 @@ const deleteChangeOrder = async ({
       userId,
       userRole,
       force: true,
+    });
+    // An archived change order is no longer pending against the contract.
+    await require("./prime-contract.service").recomputeChangeValues(tx, {
+      orgId,
+      projectId,
     });
     await approvalWorkflowService.recordTransition({
       tx,

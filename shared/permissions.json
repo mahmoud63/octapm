@@ -152,7 +152,9 @@
         "item.update": ["pm", "qs"],
         "invoice.issue": ["pm", "finance"],
         "payment.record": ["finance"],
-        "retention.release": ["finance"]
+        "retention.release": ["finance"],
+        "contract.manage": ["pm", "qs"],
+        "advance.record": ["pm", "finance"]
       }
     },
     "cost": {

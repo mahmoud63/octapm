@@ -7,7 +7,12 @@ const mockPrisma = {
     findFirst: jest.fn(),
     update: jest.fn(),
     delete: jest.fn(),
+    // The client contract re-reads the change orders after every write
+    // (OCTA-COM-PRIME-051).
+    aggregate: jest.fn(async () => ({ _sum: { value: 0 } })),
   },
+  // This project has no client contract, so the recompute is a no-op.
+  primeContract: { findFirst: jest.fn(async () => null), update: jest.fn() },
   activity: { findMany: jest.fn() },
   activityBoqAllocation: { findMany: jest.fn() },
   boqItem: { findMany: jest.fn() },

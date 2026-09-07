@@ -1,0 +1,784 @@
+const { prisma } = require("../config/db");
+const { HttpError } = require("../utils/http-error");
+const {
+  addMoney,
+  subtractMoney,
+  multiplyMoney,
+  toMoneyNumber,
+} = require("../utils/money");
+const auditService = require("./audit.service");
+
+/**
+ * The client contract, and the money it brings in (OCTA-COM-PRIME-051).
+ *
+ * OctaPM keeps money coming in and money going out on separate spines. Going
+ * out is the commitment: subcontract or purchase order, with its own schedule
+ * of values and pay applications. Coming in is this: one contract with the
+ * client, whose schedule of values is the BOQ, whose progress is certified
+ * period by period as an IPC, and whose certificates become invoices, payments
+ * and a receivable.
+ *
+ * What lives here is everything the BOQ cannot say: what was originally
+ * agreed, what approved client change orders have done to it, and the terms
+ * that turn certified work into a sum of money — retention and its cap, the
+ * advance and how it is recovered, tax, and how many days the client has.
+ *
+ * The single-source rule: a contract value is entered once, here. Approved
+ * change orders move it by themselves. Nothing downstream — certificate,
+ * forecast, cash flow — keeps its own copy.
+ */
+
+const MONEY_EPSILON = 0.01;
+
+/** Client change orders that have actually moved the contract value. */
+const APPROVED_CHANGE_STATUSES = ["approved"];
+/** Raised, not yet decided: shown separately so a forecast can see it coming. */
+const PENDING_CHANGE_STATUSES = ["draft", "pending"];
+
+const CONTRACT_TYPES = ["lump_sum", "remeasured", "cost_plus", "gmp"];
+const CONTRACT_STATUSES = ["draft", "active", "closed"];
+const ADVANCE_KINDS = ["payment", "recovery"];
+
+const round2 = (value) => Math.round((Number(value) || 0) * 100) / 100;
+const num = (value) => toMoneyNumber(value, 0);
+
+const trimOrNull = (value) => {
+  const text = String(value ?? "").trim();
+  return text ? text : null;
+};
+
+const pct = (amount, rate) => round2((Number(amount) || 0) * ((Number(rate) || 0) / 100));
+
+// ─── the contract itself ───────────────────────────────────────────────────
+
+const serializeContract = (contract, extra = {}) => ({
+  id: contract.id,
+  projectId: contract.projectId,
+  ref: contract.ref,
+  title: contract.title,
+  clientCompanyId: contract.clientCompanyId,
+  client: contract.clientCompany?.name ?? null,
+  contractType: contract.contractType,
+  currency: contract.currency,
+  originalValue: num(contract.originalValue),
+  approvedChangesValue: num(contract.approvedChangesValue),
+  pendingChangesValue: num(contract.pendingChangesValue),
+  revisedValue: num(contract.revisedValue),
+  retentionRate: contract.retentionRate,
+  retentionCapRate: contract.retentionCapRate,
+  advanceRate: contract.advanceRate,
+  advanceAmount: num(contract.advanceAmount),
+  advancePaidAmount: num(contract.advancePaidAmount),
+  advanceRecoveryRate: contract.advanceRecoveryRate,
+  advanceRecoveredAmount: num(contract.advanceRecoveredAmount),
+  advanceOutstanding: round2(
+    num(contract.advancePaidAmount) - num(contract.advanceRecoveredAmount)
+  ),
+  materialsOnSiteRate: contract.materialsOnSiteRate,
+  taxRate: contract.taxRate,
+  paymentTermsDays: contract.paymentTermsDays,
+  startDate: contract.startDate?.toISOString() ?? null,
+  completionDate: contract.completionDate?.toISOString() ?? null,
+  status: contract.status,
+  notes: contract.notes,
+  ...extra,
+});
+
+const contractInclude = { clientCompany: { select: { id: true, name: true } } };
+
+const loadProject = async ({ orgId, projectId }) => {
+  const project = await prisma.project.findFirst({
+    where: { id: projectId, orgId },
+    select: {
+      id: true,
+      name: true,
+      contractNumber: true,
+      contractType: true,
+      contractValue: true,
+      currency: true,
+      defaultRetentionRate: true,
+      startDate: true,
+      endDate: true,
+    },
+  });
+  if (!project) throw new HttpError(404, "PROJECT_NOT_FOUND", "Project not found");
+  return project;
+};
+
+/**
+ * The contract for a project, created on first read.
+ *
+ * A project that predates this module still has a contract value on it, and a
+ * BOQ. Rather than making somebody re-key what the system already knows, the
+ * first read builds the contract from the project's own metadata and the BOQ
+ * total. Nothing is invented: if the project has no value recorded, the
+ * original value is the BOQ, and if there is no BOQ either it is zero and
+ * waiting to be filled in.
+ */
+const ensureContract = async ({ orgId, projectId, userId = null }) => {
+  const existing = await prisma.primeContract.findFirst({
+    where: { projectId, project: { orgId } },
+    include: contractInclude,
+  });
+  if (existing) return existing;
+
+  const project = await loadProject({ orgId, projectId });
+  const boq = await prisma.boqItem.aggregate({
+    where: { projectId, isActive: true },
+    _sum: { amount: true },
+  });
+  const boqTotal = num(boq._sum?.amount);
+  const originalValue = num(project.contractValue) || boqTotal;
+
+  // The reference is unique per organisation, so fall back off the contract
+  // number to a count when two projects share one (or have none).
+  const base = trimOrNull(project.contractNumber) || `PC-${project.name}`;
+  let ref = base;
+  for (let attempt = 2; attempt <= 50; attempt += 1) {
+    const clash = await prisma.primeContract.findFirst({ where: { orgId, ref } });
+    if (!clash) break;
+    ref = `${base}-${attempt}`;
+  }
+
+  // Change orders that were approved before anybody opened this screen are
+  // still part of the contract. Reading them at creation is the difference
+  // between a contract that is built from what the system knows and one that
+  // starts wrong and only corrects itself on the next change order.
+  const [approved, pending] = await Promise.all([
+    prisma.changeOrder.aggregate({
+      where: { projectId, status: { in: APPROVED_CHANGE_STATUSES }, archivedAt: null },
+      _sum: { value: true },
+    }),
+    prisma.changeOrder.aggregate({
+      where: { projectId, status: { in: PENDING_CHANGE_STATUSES }, archivedAt: null },
+      _sum: { value: true },
+    }),
+  ]);
+  const approvedChangesValue = num(approved._sum?.value);
+  const pendingChangesValue = num(pending._sum?.value);
+
+  return prisma.primeContract.create({
+    data: {
+      orgId,
+      projectId,
+      ref,
+      title: `${project.name} — client contract`,
+      contractType: CONTRACT_TYPES.includes(project.contractType)
+        ? project.contractType
+        : "lump_sum",
+      currency: project.currency || "USD",
+      originalValue,
+      approvedChangesValue,
+      pendingChangesValue,
+      revisedValue: addMoney(originalValue, approvedChangesValue),
+      retentionRate: Number.isFinite(project.defaultRetentionRate)
+        ? project.defaultRetentionRate
+        : 5,
+      startDate: project.startDate,
+      completionDate: project.endDate,
+      createdBy: userId,
+      updatedBy: userId,
+    },
+    include: contractInclude,
+  });
+};
+
+/**
+ * Re-reads the client change orders and moves the contract value.
+ *
+ * Called whenever a change order's status changes. Approved changes land on
+ * the revised value; everything still in play is reported beside it rather
+ * than folded in, because a forecast wants to see both and a certificate must
+ * only ever be measured against what is actually approved.
+ */
+const recomputeChangeValues = async (tx, { orgId, projectId }) => {
+  const contract = await tx.primeContract.findFirst({ where: { projectId } });
+  if (!contract) return null;
+
+  const [approved, pending] = await Promise.all([
+    tx.changeOrder.aggregate({
+      where: { projectId, status: { in: APPROVED_CHANGE_STATUSES }, archivedAt: null },
+      _sum: { value: true },
+    }),
+    tx.changeOrder.aggregate({
+      where: { projectId, status: { in: PENDING_CHANGE_STATUSES }, archivedAt: null },
+      _sum: { value: true },
+    }),
+  ]);
+
+  const approvedChangesValue = num(approved._sum?.value);
+  const pendingChangesValue = num(pending._sum?.value);
+
+  return tx.primeContract.update({
+    where: { id: contract.id },
+    data: {
+      approvedChangesValue,
+      pendingChangesValue,
+      revisedValue: addMoney(num(contract.originalValue), approvedChangesValue),
+    },
+  });
+};
+
+const EDITABLE = [
+  "title",
+  "contractType",
+  "currency",
+  "status",
+  "notes",
+  "clientCompanyId",
+];
+
+const updateContract = async ({ orgId, projectId, userId, payload = {} }) => {
+  const contract = await ensureContract({ orgId, projectId, userId });
+  const data = { updatedBy: userId };
+
+  for (const field of EDITABLE) {
+    if (payload[field] === undefined) continue;
+    if (field === "contractType" && !CONTRACT_TYPES.includes(payload[field])) {
+      throw new HttpError(400, "CONTRACT_TYPE_INVALID", "Unknown contract type");
+    }
+    if (field === "status" && !CONTRACT_STATUSES.includes(payload[field])) {
+      throw new HttpError(400, "CONTRACT_STATUS_INVALID", "Unknown contract status");
+    }
+    data[field] = typeof payload[field] === "string" ? trimOrNull(payload[field]) : payload[field];
+  }
+
+  if (payload.originalValue !== undefined) {
+    const value = num(payload.originalValue);
+    if (value < 0) {
+      throw new HttpError(400, "CONTRACT_VALUE_INVALID", "The contract value cannot be negative");
+    }
+    data.originalValue = value;
+    data.revisedValue = addMoney(value, num(contract.approvedChangesValue));
+  }
+
+  for (const [field, code] of [
+    ["retentionRate", "RETENTION_RATE_INVALID"],
+    ["retentionCapRate", "RETENTION_CAP_INVALID"],
+    ["advanceRate", "ADVANCE_RATE_INVALID"],
+    ["advanceRecoveryRate", "ADVANCE_RECOVERY_INVALID"],
+    ["materialsOnSiteRate", "MATERIALS_RATE_INVALID"],
+    ["taxRate", "TAX_RATE_INVALID"],
+  ]) {
+    if (payload[field] === undefined) continue;
+    if (payload[field] === null && field === "retentionCapRate") {
+      data.retentionCapRate = null;
+      continue;
+    }
+    const rate = Number(payload[field]);
+    if (!Number.isFinite(rate) || rate < 0 || rate > 100) {
+      throw new HttpError(400, code, `${field} must be a percentage between 0 and 100`);
+    }
+    data[field] = rate;
+  }
+
+  if (payload.paymentTermsDays !== undefined) {
+    const days = Number(payload.paymentTermsDays);
+    if (!Number.isInteger(days) || days < 0 || days > 365) {
+      throw new HttpError(400, "PAYMENT_TERMS_INVALID", "Payment terms must be 0–365 days");
+    }
+    data.paymentTermsDays = days;
+  }
+
+  for (const field of ["startDate", "completionDate"]) {
+    if (payload[field] === undefined) continue;
+    data[field] = payload[field] ? new Date(payload[field]) : null;
+  }
+
+  // The advance is a percentage of the contract, so it follows the value
+  // rather than being typed twice.
+  const advanceRate = data.advanceRate ?? contract.advanceRate;
+  const baseValue = data.originalValue ?? num(contract.originalValue);
+  if (payload.advanceAmount !== undefined) {
+    data.advanceAmount = num(payload.advanceAmount);
+  } else if (data.advanceRate !== undefined || data.originalValue !== undefined) {
+    data.advanceAmount = pct(baseValue, advanceRate);
+  }
+
+  const updated = await prisma.$transaction(async (tx) => {
+    await tx.primeContract.update({ where: { id: contract.id }, data });
+    // Re-read the change orders while we are here. They are maintained by
+    // hooks on every change-order write, but a contract that was created
+    // before this module existed has never seen them, and saving the terms is
+    // exactly the moment somebody would notice the total was wrong.
+    await recomputeChangeValues(tx, { orgId, projectId });
+    return tx.primeContract.findUnique({
+      where: { id: contract.id },
+      include: contractInclude,
+    });
+  });
+
+  await auditService.recordEvent({
+    orgId,
+    projectId,
+    entityType: auditService.ENTITY_TYPES.PROJECT,
+    entityId: projectId,
+    action: auditService.ACTIONS.UPDATED,
+    actorId: userId,
+    summary: { transition: "contract.manage", ref: updated.ref },
+    oldSummary: {
+      originalValue: num(contract.originalValue),
+      retentionRate: contract.retentionRate,
+      advanceRate: contract.advanceRate,
+      taxRate: contract.taxRate,
+    },
+    newSummary: {
+      originalValue: num(updated.originalValue),
+      retentionRate: updated.retentionRate,
+      advanceRate: updated.advanceRate,
+      taxRate: updated.taxRate,
+    },
+  }).catch(() => null);
+
+  return serializeContract(updated);
+};
+
+// ─── the advance ───────────────────────────────────────────────────────────
+
+const advanceOutstanding = (contract) =>
+  round2(num(contract.advancePaidAmount) - num(contract.advanceRecoveredAmount));
+
+const nextAdvanceReference = async (tx, { projectId, prefix }) => {
+  const count = await tx.primeContractAdvance.count({ where: { projectId } });
+  for (let attempt = count + 1; attempt <= count + 200; attempt += 1) {
+    const reference = `${prefix}-${String(attempt).padStart(3, "0")}`;
+    const clash = await tx.primeContractAdvance.findFirst({
+      where: { projectId, reference },
+    });
+    if (!clash) return reference;
+  }
+  throw new HttpError(500, "ADVANCE_REF_EXHAUSTED", "Could not allocate an advance reference");
+};
+
+/** The client pays the advance. */
+const recordAdvancePayment = async ({ orgId, projectId, userId, payload = {} }) => {
+  const contract = await ensureContract({ orgId, projectId, userId });
+  const amount = num(payload.amount);
+  if (amount <= 0) {
+    throw new HttpError(400, "ADVANCE_AMOUNT_INVALID", "The advance must be greater than zero");
+  }
+
+  const paid = addMoney(num(contract.advancePaidAmount), amount);
+  if (num(contract.advanceAmount) > 0 && paid > num(contract.advanceAmount) + MONEY_EPSILON) {
+    throw new HttpError(
+      409,
+      "ADVANCE_OVER_AGREED",
+      `The advance agreed is ${num(contract.advanceAmount)}; ${num(contract.advancePaidAmount)} has already been received`
+    );
+  }
+
+  return prisma.$transaction(async (tx) => {
+    const reference =
+      trimOrNull(payload.reference) || (await nextAdvanceReference(tx, { projectId, prefix: "ADV" }));
+
+    await tx.primeContractAdvance.create({
+      data: {
+        orgId,
+        projectId,
+        contractId: contract.id,
+        reference,
+        kind: "payment",
+        amount,
+        occurredAt: payload.occurredAt ? new Date(payload.occurredAt) : new Date(),
+        note: trimOrNull(payload.note),
+        createdBy: userId,
+      },
+    });
+
+    const updated = await tx.primeContract.update({
+      where: { id: contract.id },
+      data: { advancePaidAmount: paid },
+      include: contractInclude,
+    });
+    return serializeContract(updated);
+  });
+};
+
+const listAdvances = async ({ orgId, projectId }) => {
+  const contract = await ensureContract({ orgId, projectId });
+  const rows = await prisma.primeContractAdvance.findMany({
+    where: { contractId: contract.id },
+    orderBy: [{ occurredAt: "asc" }],
+  });
+  return {
+    items: rows.map((row) => ({
+      id: row.id,
+      reference: row.reference,
+      kind: row.kind,
+      amount: num(row.amount),
+      certificateId: row.certificateId,
+      occurredAt: row.occurredAt?.toISOString() ?? null,
+      note: row.note,
+    })),
+    outstanding: advanceOutstanding(contract),
+  };
+};
+
+// ─── what a certificate is actually worth ──────────────────────────────────
+
+/**
+ * Turns a certificate's certified work into a sum of money.
+ *
+ * Pure, so the same arithmetic runs whether a certificate is being previewed
+ * in a draft or locked at certification. The order matters and is the order
+ * every standard form uses: gross, less retention, less what is being taken
+ * back off the advance, less deductions, then tax on what is left.
+ */
+const certificateFinancials = ({
+  contract,
+  totalCert = 0,
+  materialsOnSite = 0,
+  totalRet = 0,
+  deductions = 0,
+  cumulativeRetention = 0,
+}) => {
+  const gross = addMoney(num(totalCert), num(materialsOnSite));
+
+  // Retention stops once the cap is reached: the client holds a share of the
+  // contract, not a share of every certificate for ever.
+  let retention = num(totalRet);
+  const capRate = contract?.retentionCapRate;
+  if (capRate != null && capRate > 0) {
+    const cap = pct(num(contract.revisedValue), capRate);
+    const room = round2(cap - num(cumulativeRetention));
+    retention = Math.max(0, Math.min(retention, room));
+  }
+
+  // Never recover more of the advance than is still outstanding.
+  const outstanding = contract ? advanceOutstanding(contract) : 0;
+  const advanceRecovery = Math.min(
+    outstanding,
+    pct(gross, contract?.advanceRecoveryRate ?? 0)
+  );
+
+  const beforeTax = round2(
+    subtractMoney(subtractMoney(subtractMoney(gross, retention), advanceRecovery), num(deductions))
+  );
+  const taxRate = contract?.taxRate ?? 0;
+  const taxAmount = pct(beforeTax, taxRate);
+
+  return {
+    gross,
+    retention,
+    advanceRecovery,
+    deductions: num(deductions),
+    beforeTax,
+    taxRate,
+    taxAmount,
+    netPayable: addMoney(beforeTax, taxAmount),
+  };
+};
+
+/**
+ * Locks the advance recovery a certificate took, once it is certified.
+ *
+ * Writes a ledger row rather than only a counter, so "how much of the advance
+ * is left" can always be re-derived from the certificates that recovered it.
+ */
+const applyAdvanceRecovery = async (tx, { orgId, projectId, certificate, amount }) => {
+  if (!amount || amount <= MONEY_EPSILON) return null;
+  const contract = await tx.primeContract.findFirst({ where: { projectId } });
+  if (!contract) return null;
+
+  const already = await tx.primeContractAdvance.findFirst({
+    where: { contractId: contract.id, kind: "recovery", certificateId: certificate.id },
+  });
+  if (already) return already;
+
+  const reference = await nextAdvanceReference(tx, { projectId, prefix: "REC" });
+  const row = await tx.primeContractAdvance.create({
+    data: {
+      orgId,
+      projectId,
+      contractId: contract.id,
+      reference,
+      kind: "recovery",
+      amount,
+      certificateId: certificate.id,
+      occurredAt: new Date(),
+      note: `Recovered on ${certificate.period}`,
+    },
+  });
+
+  await tx.primeContract.update({
+    where: { id: contract.id },
+    data: {
+      advanceRecoveredAmount: addMoney(num(contract.advanceRecoveredAmount), amount),
+    },
+  });
+  return row;
+};
+
+// ─── the statement ─────────────────────────────────────────────────────────
+
+const CERTIFIED_STATUSES = ["certified", "paid"];
+
+/**
+ * The client billing statement.
+ *
+ * The summary block is the front page of a payment application: what was
+ * agreed, what the changes did to it, what has been certified before, what is
+ * being claimed now, and what the client actually owes. The lines below are
+ * the same story per BOQ item — contract, previous, this period, total,
+ * remaining — which is the table a QS reads first and the one every dispute
+ * starts from.
+ */
+const buildStatement = async ({ orgId, projectId, period = null }) => {
+  const contract = await ensureContract({ orgId, projectId });
+
+  const [certificates, boqItems] = await Promise.all([
+    prisma.ipcCertificate.findMany({
+      where: { projectId },
+      orderBy: [{ createdAt: "asc" }],
+    }),
+    // Only live BOQ items are in the contract: a superseded revision's items
+    // are history, not scope the client owes for.
+    prisma.boqItem.findMany({
+      where: { projectId, isActive: true },
+      orderBy: [{ sortOrder: "asc" }, { code: "asc" }],
+      select: {
+        id: true,
+        code: true,
+        section: true,
+        description: true,
+        unit: true,
+        qty: true,
+        rate: true,
+        amount: true,
+      },
+    }),
+  ]);
+
+  // The period being reported: the named one, else the newest not yet paid,
+  // else the newest of all.
+  const current =
+    (period ? certificates.find((row) => row.period === period) : null) ??
+    [...certificates].reverse().find((row) => row.status !== "paid") ??
+    certificates[certificates.length - 1] ??
+    null;
+
+  const certifiedBefore = certificates.filter(
+    (row) =>
+      CERTIFIED_STATUSES.includes(row.status) && (!current || row.createdAt < current.createdAt)
+  );
+
+  const previousCertified = certifiedBefore.reduce(
+    (sum, row) => addMoney(sum, num(row.totalCert)),
+    0
+  );
+  const cumulativeRetention = certificates
+    .filter((row) => CERTIFIED_STATUSES.includes(row.status))
+    .reduce((sum, row) => addMoney(sum, num(row.totalRet)), 0);
+
+  const items = current
+    ? await prisma.ipcItem.findMany({
+        where: { projectId, ipcCertificateId: current.id },
+        select: {
+          id: true,
+          boqItemId: true,
+          qty: true,
+          rate: true,
+          previousCert: true,
+          currentCert: true,
+          cumulativeCert: true,
+        },
+      })
+    : [];
+  const itemByBoq = new Map(items.map((row) => [row.boqItemId, row]));
+
+  const lines = boqItems.map((boqItem) => {
+    const item = itemByBoq.get(boqItem.id);
+    const contractAmount = num(boqItem.amount);
+    const previous = num(item?.previousCert);
+    const thisPeriod = num(item?.currentCert);
+    const total = item ? num(item.cumulativeCert) : previous;
+    return {
+      boqItemId: boqItem.id,
+      code: boqItem.code,
+      section: boqItem.section,
+      description: boqItem.description,
+      unit: boqItem.unit,
+      quantity: boqItem.qty,
+      rate: num(boqItem.rate),
+      contractAmount,
+      previous,
+      thisPeriod,
+      total,
+      remaining: round2(contractAmount - total),
+      pctComplete: contractAmount > 0 ? round2((total / contractAmount) * 100) : 0,
+    };
+  });
+
+  const financials = current
+    ? certificateFinancials({
+        contract,
+        totalCert: num(current.totalCert),
+        materialsOnSite: num(current.materialsOnSite),
+        totalRet: num(current.totalRet),
+        deductions: num(current.deductions),
+        cumulativeRetention: subtractMoney(cumulativeRetention, num(current.totalRet)),
+      })
+    : null;
+
+  const received = certificates.reduce((sum, row) => addMoney(sum, num(row.amountPaid)), 0);
+  const invoiced = certificates
+    .filter((row) => row.invoiceStatus === "issued")
+    .reduce((sum, row) => addMoney(sum, num(row.netPayable)), 0);
+
+  return {
+    contract: serializeContract(contract),
+    summary: {
+      originalValue: num(contract.originalValue),
+      approvedChangesValue: num(contract.approvedChangesValue),
+      pendingChangesValue: num(contract.pendingChangesValue),
+      revisedValue: num(contract.revisedValue),
+      previousCertified,
+      currentCertified: current ? num(current.totalCert) : 0,
+      materialsOnSite: current ? num(current.materialsOnSite) : 0,
+      grossThisPeriod: financials?.gross ?? 0,
+      retentionThisPeriod: financials?.retention ?? 0,
+      retentionCumulative: cumulativeRetention,
+      advanceAmount: num(contract.advanceAmount),
+      advancePaid: num(contract.advancePaidAmount),
+      advanceRecoveredToDate: num(contract.advanceRecoveredAmount),
+      advanceRecoveryThisPeriod: financials?.advanceRecovery ?? 0,
+      advanceOutstanding: advanceOutstanding(contract),
+      deductions: financials?.deductions ?? 0,
+      taxRate: financials?.taxRate ?? contract.taxRate,
+      taxAmount: financials?.taxAmount ?? 0,
+      totalDue: financials?.netPayable ?? 0,
+      cumulativeCertified: addMoney(previousCertified, current ? num(current.totalCert) : 0),
+      remainingToCertify: round2(
+        num(contract.revisedValue) -
+          addMoney(previousCertified, current ? num(current.totalCert) : 0)
+      ),
+      invoiced,
+      received,
+      outstanding: round2(invoiced - received),
+    },
+    current: current
+      ? {
+          id: current.id,
+          period: current.period,
+          status: current.status,
+          invoiceStatus: current.invoiceStatus,
+          paymentStatus: current.paymentStatus,
+          issueDate: current.issueDate?.toISOString() ?? null,
+          dueDate: current.dueDate?.toISOString() ?? null,
+          totalCert: num(current.totalCert),
+          totalRet: num(current.totalRet),
+          netPayable: num(current.netPayable),
+          amountPaid: num(current.amountPaid),
+          balanceDue: num(current.balanceDue),
+          deductionsNote: current.deductionsNote,
+        }
+      : null,
+    periods: certificates.map((row) => ({
+      id: row.id,
+      period: row.period,
+      status: row.status,
+      totalCert: num(row.totalCert),
+      totalRet: num(row.totalRet),
+      netPayable: num(row.netPayable),
+      amountPaid: num(row.amountPaid),
+      balanceDue: num(row.balanceDue),
+    })),
+    lines,
+  };
+};
+
+// ─── accounts receivable ───────────────────────────────────────────────────
+
+const AGEING_BUCKETS = [
+  { key: "current", label: "Not yet due", from: -Infinity, to: 0 },
+  { key: "d1_30", label: "1–30 days", from: 1, to: 30 },
+  { key: "d31_60", label: "31–60 days", from: 31, to: 60 },
+  { key: "d61_90", label: "61–90 days", from: 61, to: 90 },
+  { key: "d90_plus", label: "Over 90 days", from: 91, to: Infinity },
+];
+
+const bucketFor = (daysOverdue) =>
+  AGEING_BUCKETS.find((bucket) => daysOverdue >= bucket.from && daysOverdue <= bucket.to) ??
+  AGEING_BUCKETS[0];
+
+/**
+ * What the client owes, and how late it is.
+ *
+ * Ageing runs off the invoice's own due date where it has one and off the
+ * contract's payment terms where it does not — an invoice with no due date is
+ * still owed, and hiding it until somebody types a date is how debt goes
+ * unnoticed.
+ */
+const receivables = async ({ orgId, projectId, asOf = new Date() }) => {
+  const contract = await ensureContract({ orgId, projectId });
+  const invoices = await prisma.ipcInvoice.findMany({
+    where: { projectId, status: { not: "void" } },
+    orderBy: [{ invoiceDate: "asc" }],
+    include: { ipcCertificate: { select: { period: true } } },
+  });
+
+  const day = 24 * 60 * 60 * 1000;
+  const buckets = Object.fromEntries(
+    AGEING_BUCKETS.map((bucket) => [bucket.key, { ...bucket, amount: 0, count: 0 }])
+  );
+
+  const rows = invoices.map((invoice) => {
+    const dueDate =
+      invoice.dueDate ??
+      new Date(invoice.invoiceDate.getTime() + contract.paymentTermsDays * day);
+    const balance = round2(num(invoice.netAmount) - num(invoice.amountPaid));
+    const daysOverdue = Math.floor((asOf.getTime() - dueDate.getTime()) / day);
+    const bucket = bucketFor(daysOverdue);
+
+    if (balance > MONEY_EPSILON) {
+      buckets[bucket.key].amount = addMoney(buckets[bucket.key].amount, balance);
+      buckets[bucket.key].count += 1;
+    }
+
+    return {
+      id: invoice.id,
+      invoiceNumber: invoice.invoiceNumber,
+      period: invoice.ipcCertificate?.period ?? null,
+      invoiceDate: invoice.invoiceDate.toISOString(),
+      dueDate: dueDate.toISOString(),
+      netAmount: num(invoice.netAmount),
+      amountPaid: num(invoice.amountPaid),
+      balance,
+      status: invoice.status,
+      daysOverdue: balance > MONEY_EPSILON ? Math.max(0, daysOverdue) : 0,
+      bucket: bucket.key,
+    };
+  });
+
+  const outstanding = rows.reduce((sum, row) => addMoney(sum, row.balance), 0);
+  const overdue = rows
+    .filter((row) => row.daysOverdue > 0)
+    .reduce((sum, row) => addMoney(sum, row.balance), 0);
+
+  return {
+    currency: contract.currency,
+    invoiced: rows.reduce((sum, row) => addMoney(sum, row.netAmount), 0),
+    received: rows.reduce((sum, row) => addMoney(sum, row.amountPaid), 0),
+    outstanding,
+    overdue,
+    ageing: AGEING_BUCKETS.map((bucket) => buckets[bucket.key]),
+    invoices: rows,
+  };
+};
+
+module.exports = {
+  ADVANCE_KINDS,
+  CONTRACT_STATUSES,
+  CONTRACT_TYPES,
+  advanceOutstanding,
+  applyAdvanceRecovery,
+  buildStatement,
+  certificateFinancials,
+  ensureContract,
+  listAdvances,
+  receivables,
+  recomputeChangeValues,
+  recordAdvancePayment,
+  serializeContract,
+  updateContract,
+};

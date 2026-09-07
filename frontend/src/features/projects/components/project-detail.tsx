@@ -286,6 +286,7 @@ export function ProjectDetail({
         key: 'commercial',
         label: 'Commercial',
         children: [
+          { key: 'client-billing', label: 'Client Billing' },
           { key: 'change-events', label: 'Change Events' },
           { key: 'change-orders', label: 'Change Orders' },
           { key: 'commitments', label: 'Commitments' },

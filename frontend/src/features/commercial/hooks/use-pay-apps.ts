@@ -49,6 +49,10 @@ export interface PayAppLine {
   activityId: string | null
   activity: { id: string; name: string; code: string | null } | null
   scheduledAmount: number
+  /** What approved change orders added to this line. */
+  approvedChangeAmount: number
+  /** scheduled + approved changes: the ceiling this claim may not exceed. */
+  revisedScheduledAmount: number
   previousAmount: number
   thisPeriodAmount: number
   cumulativeAmount: number
@@ -90,6 +94,10 @@ export interface PayApp {
   retentionCumulative: number
   backCharges: number
   backChargesNote: string | null
+  otherDeductions: number
+  otherDeductionsNote: string | null
+  taxRate: number
+  taxAmount: number
   netThisPeriod: number
   paidAmount: number
   outstanding: number
@@ -151,6 +159,9 @@ export interface PayAppUpdateInput {
   retentionRate?: number | null
   backCharges?: number | null
   backChargesNote?: string | null
+  otherDeductions?: number | null
+  otherDeductionsNote?: string | null
+  taxRate?: number | null
   waiverRequired?: boolean
   waiverDocumentId?: string | null
   notes?: string | null

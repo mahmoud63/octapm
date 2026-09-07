@@ -78,6 +78,10 @@ const include = {
 const insuranceReadyFor = (commitment) =>
   (Array.isArray(commitment?.insuranceJson) ? commitment.insuranceJson : []).every((entry) => !entry.required || (entry.documentId && !(entry.expiresAt && new Date(entry.expiresAt) < new Date())));
 
+/** The line's ceiling: as revised by approved changes, or its original. */
+const revisedOf = (line) =>
+  toMoneyNumber(line.revisedScheduledAmount) || toMoneyNumber(line.scheduledAmount);
+
 const serializeLine = (line) => ({
   id: line.id,
   sovLineId: line.sovLineId,
@@ -87,15 +91,20 @@ const serializeLine = (line) => ({
   activityId: line.sovLine?.activityId || null,
   activity: line.sovLine?.activity ? { id: line.sovLine.activity.id, name: line.sovLine.activity.name, code: line.sovLine.activity.activityCode || line.sovLine.activity.wbsCode || null } : null,
   scheduledAmount: toMoneyNumber(line.scheduledAmount),
+  approvedChangeAmount: toMoneyNumber(line.approvedChangeAmount),
+  // What may actually be billed: the line as revised by approved change
+  // orders. Older rows carry no revised figure, so fall back to the original.
+  revisedScheduledAmount:
+    toMoneyNumber(line.revisedScheduledAmount) || toMoneyNumber(line.scheduledAmount),
   previousAmount: toMoneyNumber(line.previousAmount),
   thisPeriodAmount: toMoneyNumber(line.thisPeriodAmount),
   cumulativeAmount: toMoneyNumber(line.cumulativeAmount),
-  cumulativePct: toMoneyNumber(line.scheduledAmount) > 0 ? round2((toMoneyNumber(line.cumulativeAmount) / toMoneyNumber(line.scheduledAmount)) * 100) : 0,
+  cumulativePct: revisedOf(line) > 0 ? round2((toMoneyNumber(line.cumulativeAmount) / revisedOf(line)) * 100) : 0,
   materialsOnSite: toMoneyNumber(line.materialsOnSite),
   approvedPct: line.approvedPct === null || line.approvedPct === undefined ? null : Number(line.approvedPct),
   capAmount: line.capAmount === null || line.capAmount === undefined ? null : toMoneyNumber(line.capAmount),
   overClaimAmount: toMoneyNumber(line.overClaimAmount),
-  balanceToFinish: subtractMoney(line.scheduledAmount, line.cumulativeAmount),
+  balanceToFinish: subtractMoney(revisedOf(line), line.cumulativeAmount),
   notes: line.notes || null,
 });
 
@@ -119,6 +128,10 @@ const serialize = (row, { projectId = row.projectId } = {}) => ({
   retentionCumulative: toMoneyNumber(row.retentionCumulative),
   backCharges: toMoneyNumber(row.backCharges),
   backChargesNote: row.backChargesNote || null,
+  otherDeductions: toMoneyNumber(row.otherDeductions),
+  otherDeductionsNote: row.otherDeductionsNote || null,
+  taxRate: Number(row.taxRate) || 0,
+  taxAmount: toMoneyNumber(row.taxAmount),
   netThisPeriod: toMoneyNumber(row.netThisPeriod),
   paidAmount: toMoneyNumber(row.paidAmount),
   outstanding: COUNTED.includes(row.status) ? Math.max(0, subtractMoney(row.netThisPeriod, row.paidAmount)) : 0,
@@ -174,15 +187,53 @@ const approvedPctByActivity = async ({ tx = prisma, activityIds }) => {
   return map;
 };
 
+const CO_STATUS_APPROVED = "approved";
+
+/**
+ * What approved change orders have added to each schedule-of-values line.
+ *
+ * The rule is that previous + current may not exceed the line's scheduled
+ * amount — unless an authorised contract modification says otherwise. This is
+ * that "unless": an approved change order whose lines name a SOV line raises
+ * that line's ceiling by exactly the amount approved.
+ *
+ * Derived on every read rather than copied onto the line, so there is one
+ * place a revised SOV can come from and no second number to fall out of step.
+ */
+const approvedChangesBySovLine = async ({ tx = prisma, commitmentId }) => {
+  const map = new Map();
+  if (!tx.commitmentChangeOrder?.findMany) return map;
+  const orders = await tx.commitmentChangeOrder.findMany({
+    where: { commitmentId, status: CO_STATUS_APPROVED },
+    select: { linesJson: true },
+  });
+  for (const order of orders) {
+    const lines = Array.isArray(order.linesJson) ? order.linesJson : [];
+    for (const line of lines) {
+      if (!line?.sovLineId) continue;
+      const amount = toMoneyNumber(line.amount);
+      if (!amount) continue;
+      map.set(line.sovLineId, addMoney(map.get(line.sovLineId) || 0, amount));
+    }
+  }
+  return map;
+};
+
 /**
  * Applies claims to lines: cumulative = previous + this period; cap =
  * approved pct × scheduled when the line has an activity with approved
  * progress; over-claim = max(0, cumulative − cap).
+ *
+ * "Scheduled" is the line as revised by approved change orders, so extra work
+ * that has been properly authorised can be billed and extra work that has not
+ * still cannot.
  */
-const applyClaims = ({ lines, claims, pctMap }) =>
+const applyClaims = ({ lines, claims, pctMap, changeMap = new Map() }) =>
   lines.map((line) => {
     const claim = claims.get(line.sovLineId) || {};
-    const scheduled = toMoneyNumber(line.scheduledAmount);
+    const original = toMoneyNumber(line.scheduledAmount);
+    const approvedChange = changeMap.get(line.sovLineId) || 0;
+    const scheduled = addMoney(original, approvedChange);
     const previous = toMoneyNumber(line.previousAmount);
     let thisPeriod = claim.thisPeriodAmount;
     if ((thisPeriod === undefined || thisPeriod === null) && claim.thisPeriodPct !== undefined && claim.thisPeriodPct !== null) {
@@ -194,7 +245,13 @@ const applyClaims = ({ lines, claims, pctMap }) =>
     if (thisPeriod < -EPSILON) throw new HttpError(400, "SUB_PAY_APP_LINE_NEGATIVE", `Line ${line.sovLine?.lineNumber ?? ""}: this period cannot be negative`);
     const cumulative = addMoney(previous, thisPeriod);
     if (cumulative > scheduled + EPSILON) {
-      const error = new HttpError(400, "SUB_PAY_APP_EXCEEDS_SCHEDULED", `Line ${line.sovLine?.lineNumber ?? ""}: ${cumulative} exceeds the scheduled ${scheduled}`);
+      const error = new HttpError(
+        400,
+        "SUB_PAY_APP_EXCEEDS_SCHEDULED",
+        approvedChange
+          ? `Line ${line.sovLine?.lineNumber ?? ""}: ${cumulative} exceeds the revised ${scheduled} (${original} scheduled plus ${approvedChange} of approved changes)`
+          : `Line ${line.sovLine?.lineNumber ?? ""}: ${cumulative} exceeds the scheduled ${scheduled}`,
+      );
       error.details = { reasonCode: "INCORRECT_QUANTITIES", sovLineId: line.sovLineId };
       throw error;
     }
@@ -204,6 +261,8 @@ const applyClaims = ({ lines, claims, pctMap }) =>
     const overClaim = capAmount === null ? 0 : Math.max(0, subtractMoney(cumulative, capAmount));
     return {
       ...line,
+      revisedScheduledAmount: scheduled,
+      approvedChangeAmount: approvedChange,
       thisPeriodAmount: thisPeriod,
       cumulativeAmount: cumulative,
       materialsOnSite: claim.materialsOnSite === undefined || claim.materialsOnSite === null ? toMoneyNumber(line.materialsOnSite) : round2(Number(claim.materialsOnSite) || 0),
@@ -214,15 +273,44 @@ const applyClaims = ({ lines, claims, pctMap }) =>
     };
   });
 
-const financials = ({ lines, retentionRate, backCharges, retentionBefore }) => {
+/**
+ * What the subcontractor is actually paid.
+ *
+ * The same order as the client side, for the same reason: gross, less
+ * retention, less what is being withheld, then tax on what is left. Tax on the
+ * gross would overpay it every time.
+ */
+const financials = ({
+  lines,
+  retentionRate,
+  backCharges,
+  retentionBefore,
+  otherDeductions = 0,
+  taxRate = 0,
+}) => {
   const workThisPeriod = lines.reduce((acc, line) => addMoney(acc, line.thisPeriodAmount), 0);
   const workCumulative = lines.reduce((acc, line) => addMoney(acc, line.cumulativeAmount), 0);
   const materialsOnSite = lines.reduce((acc, line) => addMoney(acc, line.materialsOnSite), 0);
   const grossThisPeriod = addMoney(workThisPeriod, materialsOnSite);
   const retentionThisPeriod = round2(multiplyMoney(grossThisPeriod, (Number(retentionRate) || 0) / 100));
-  const netThisPeriod = subtractMoney(subtractMoney(grossThisPeriod, retentionThisPeriod), backCharges);
+  const beforeTax = subtractMoney(
+    subtractMoney(subtractMoney(grossThisPeriod, retentionThisPeriod), toMoneyNumber(backCharges)),
+    toMoneyNumber(otherDeductions),
+  );
+  const taxAmount = round2(multiplyMoney(beforeTax, (Number(taxRate) || 0) / 100));
+  const netThisPeriod = addMoney(beforeTax, taxAmount);
   const overClaimAmount = lines.reduce((acc, line) => addMoney(acc, line.overClaimAmount), 0);
-  return { workThisPeriod, workCumulative, materialsOnSite, grossThisPeriod, retentionThisPeriod, retentionCumulative: addMoney(retentionBefore, retentionThisPeriod), netThisPeriod, overClaimAmount };
+  return {
+    workThisPeriod,
+    workCumulative,
+    materialsOnSite,
+    grossThisPeriod,
+    retentionThisPeriod,
+    retentionCumulative: addMoney(retentionBefore, retentionThisPeriod),
+    taxAmount,
+    netThisPeriod,
+    overClaimAmount,
+  };
 };
 
 // ─── Loading ──────────────────────────────────────────────────────────────
@@ -296,7 +384,8 @@ const createPayApp = async ({ orgId, projectId, payload = {}, actor = null, view
     const retentionBefore = await retentionHeldBefore({ tx, commitmentId, beforeNumber: number });
     const seeded = commitment.lines.map((line, index) => ({ sovLineId: line.id, sovLine: line, description: line.description, scheduledAmount: toMoneyNumber(line.amount), previousAmount: previous.get(line.id) || 0, thisPeriodAmount: 0, cumulativeAmount: previous.get(line.id) || 0, materialsOnSite: 0, approvedPct: null, capAmount: null, overClaimAmount: 0, notes: null, sortOrder: index }));
     const pctMap = await approvedPctByActivity({ tx, activityIds: commitment.lines.map((line) => line.activityId) });
-    const lines = applyClaims({ lines: seeded, claims: new Map(), pctMap });
+    const changeMap = await approvedChangesBySovLine({ tx, commitmentId });
+    const lines = applyClaims({ lines: seeded, claims: new Map(), pctMap, changeMap });
     const retentionRate = payload.retentionRate === undefined || payload.retentionRate === null || payload.retentionRate === "" ? Number(commitment.retentionRate) || 0 : Number(payload.retentionRate);
     const totals = financials({ lines, retentionRate, backCharges: 0, retentionBefore });
     const row = await tx.subPayApp.create({
@@ -357,15 +446,18 @@ const normalizeClaims = (entries) => {
 /** Recomputes lines and totals from the stored lines plus any claims and app-level fields. */
 const recompute = async ({ tx, existing, claims = null, patch = {} }) => {
   const pctMap = await approvedPctByActivity({ tx, activityIds: existing.lines.map((line) => line.sovLine?.activityId) });
-  const lines = applyClaims({ lines: existing.lines, claims: claims || new Map(), pctMap });
+  const changeMap = await approvedChangesBySovLine({ tx, commitmentId: existing.commitmentId });
+  const lines = applyClaims({ lines: existing.lines, claims: claims || new Map(), pctMap, changeMap });
   const retentionRate = patch.retentionRate !== undefined ? patch.retentionRate : Number(existing.retentionRate) || 0;
   const backCharges = patch.backCharges !== undefined ? patch.backCharges : toMoneyNumber(existing.backCharges);
+  const otherDeductions = patch.otherDeductions !== undefined ? patch.otherDeductions : toMoneyNumber(existing.otherDeductions);
+  const taxRate = patch.taxRate !== undefined ? patch.taxRate : Number(existing.taxRate) || 0;
   const retentionBefore = await retentionHeldBefore({ tx, commitmentId: existing.commitmentId, beforeNumber: existing.number });
-  const totals = financials({ lines, retentionRate, backCharges, retentionBefore });
+  const totals = financials({ lines, retentionRate, backCharges, retentionBefore, otherDeductions, taxRate });
   for (const line of lines) {
-    await tx.subPayAppLine.update({ where: { id: line.id }, data: { thisPeriodAmount: line.thisPeriodAmount, cumulativeAmount: line.cumulativeAmount, materialsOnSite: line.materialsOnSite, approvedPct: line.approvedPct, capAmount: line.capAmount, overClaimAmount: line.overClaimAmount, notes: line.notes } });
+    await tx.subPayAppLine.update({ where: { id: line.id }, data: { thisPeriodAmount: line.thisPeriodAmount, cumulativeAmount: line.cumulativeAmount, materialsOnSite: line.materialsOnSite, approvedPct: line.approvedPct, capAmount: line.capAmount, overClaimAmount: line.overClaimAmount, approvedChangeAmount: line.approvedChangeAmount ?? 0, revisedScheduledAmount: line.revisedScheduledAmount ?? toMoneyNumber(line.scheduledAmount), notes: line.notes } });
   }
-  return { lines, totals: { ...totals, retentionRate, backCharges } };
+  return { lines, totals: { ...totals, retentionRate, backCharges, otherDeductions, taxRate } };
 };
 
 const updatePayApp = async ({ orgId, projectId, payAppId, payload = {}, actor = null, viewer = null }) => {
@@ -384,7 +476,21 @@ const updatePayApp = async ({ orgId, projectId, payAppId, payload = {}, actor = 
     if (!Number.isFinite(value) || value < 0) throw new HttpError(400, "SUB_PAY_APP_BACK_CHARGES_INVALID", "Back-charges must be zero or positive");
     patch.backCharges = round2(value);
   }
+  if (payload.otherDeductions !== undefined) {
+    const value = Number(payload.otherDeductions === null || payload.otherDeductions === "" ? 0 : payload.otherDeductions);
+    if (!Number.isFinite(value) || value < 0) throw new HttpError(400, "SUB_PAY_APP_DEDUCTION_INVALID", "A deduction must be zero or positive");
+    // Withholding money without saying why is how a payment dispute starts.
+    const note = trimOrNull(payload.otherDeductionsNote ?? existing.otherDeductionsNote);
+    if (value > EPSILON && !note) throw new HttpError(400, "SUB_PAY_APP_DEDUCTION_REASON_REQUIRED", "Say what is being deducted and why");
+    patch.otherDeductions = round2(value);
+  }
+  if (payload.taxRate !== undefined) {
+    const rate = Number(payload.taxRate === null || payload.taxRate === "" ? 0 : payload.taxRate);
+    if (!Number.isFinite(rate) || rate < 0 || rate > 100) throw new HttpError(400, "SUB_PAY_APP_TAX_INVALID", "Tax must be between 0 and 100 percent");
+    patch.taxRate = Math.round(rate * 100) / 100;
+  }
   const data = {};
+  if (payload.otherDeductionsNote !== undefined) data.otherDeductionsNote = trimOrNull(payload.otherDeductionsNote)?.slice(0, 1000) || null;
   if (payload.periodLabel !== undefined) {
     const periodLabel = trimOrNull(payload.periodLabel);
     if (!periodLabel) throw new HttpError(400, "SUB_PAY_APP_PERIOD_REQUIRED", "Give the application a period");
@@ -656,6 +762,7 @@ module.exports = {
   REJECTION_CODES,
   COUNTED,
   applyClaims,
+  approvedChangesBySovLine,
   financials,
   insuranceReadyFor,
   visibilityWhere,

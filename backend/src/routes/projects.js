@@ -384,6 +384,11 @@ router.use(
 );
 router.use("/:projectId/ipc", nestedProjectAccess, require("./ipc"));
 router.use(
+  "/:projectId/prime-contract",
+  nestedProjectAccess,
+  require("./prime-contract"),
+);
+router.use(
   "/:projectId/sub-valuations",
   nestedProjectAccess,
   require("./sub-valuations"),

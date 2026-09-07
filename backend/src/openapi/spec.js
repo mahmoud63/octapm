@@ -7345,6 +7345,127 @@ add(
   }),
 );
 
+// ─── the client contract (OCTA-COM-PRIME-051) ──────────────────────────────
+
+add(
+  "/projects/{projectId}/prime-contract",
+  "get",
+  operation({
+    tag: "Commercial",
+    summary:
+      "The client contract: original value, approved and pending change orders, revised value, and the terms that turn certified work into money.",
+    description:
+      "Created on first read from the project's own contract metadata and BOQ total, so nothing has to be re-keyed.",
+    operationId: "getPrimeContract",
+    parameters: projectParams,
+    permissions: modulePermission("ipc", "read"),
+  }),
+);
+
+add(
+  "/projects/{projectId}/prime-contract",
+  "patch",
+  operation({
+    tag: "Commercial",
+    summary: "Update the client contract's value and terms.",
+    operationId: "updatePrimeContract",
+    parameters: projectParams,
+    permissions: modulePermission("ipc", "update", "contract.manage"),
+    requestBody: jsonBody(
+      objectSchema({
+        title: { type: "string" },
+        contractType: {
+          type: "string",
+          enum: ["lump_sum", "remeasured", "cost_plus", "gmp"],
+        },
+        status: { type: "string", enum: ["draft", "active", "closed"] },
+        currency: { type: "string" },
+        clientCompanyId: { type: "string", format: "uuid", nullable: true },
+        originalValue: { type: "number", minimum: 0 },
+        retentionRate: { type: "number", minimum: 0, maximum: 100 },
+        retentionCapRate: { type: "number", minimum: 0, maximum: 100, nullable: true },
+        advanceRate: { type: "number", minimum: 0, maximum: 100 },
+        advanceAmount: { type: "number", minimum: 0 },
+        advanceRecoveryRate: { type: "number", minimum: 0, maximum: 100 },
+        materialsOnSiteRate: { type: "number", minimum: 0, maximum: 100 },
+        taxRate: { type: "number", minimum: 0, maximum: 100 },
+        paymentTermsDays: { type: "integer", minimum: 0, maximum: 365 },
+        startDate: { type: "string", format: "date-time", nullable: true },
+        completionDate: { type: "string", format: "date-time", nullable: true },
+        notes: { type: "string", nullable: true },
+      }),
+      "Contract fields to change. The advance amount follows the advance rate unless it is given explicitly.",
+      false,
+    ),
+  }),
+);
+
+add(
+  "/projects/{projectId}/prime-contract/statement",
+  "get",
+  operation({
+    tag: "Commercial",
+    summary:
+      "The client billing statement: contract, approved changes, previously certified, this period, retention, advance recovery, deductions, tax, total due — and the same story per BOQ line.",
+    operationId: "getClientBillingStatement",
+    parameters: [
+      ...projectParams,
+      queryParam("period", "Report this period rather than the latest open one.", {
+        type: "string",
+      }),
+    ],
+    permissions: modulePermission("ipc", "read"),
+  }),
+);
+
+add(
+  "/projects/{projectId}/prime-contract/receivables",
+  "get",
+  operation({
+    tag: "Commercial",
+    summary: "What the client owes, aged by invoice due date.",
+    description:
+      "An invoice with no due date is aged from the contract's payment terms rather than left out.",
+    operationId: "getClientReceivables",
+    parameters: projectParams,
+    permissions: modulePermission("ipc", "read"),
+  }),
+);
+
+add(
+  "/projects/{projectId}/prime-contract/advances",
+  "get",
+  operation({
+    tag: "Commercial",
+    summary: "The advance-payment ledger and what is still outstanding.",
+    operationId: "listContractAdvances",
+    parameters: projectParams,
+    permissions: modulePermission("ipc", "read"),
+  }),
+);
+
+add(
+  "/projects/{projectId}/prime-contract/advances",
+  "post",
+  operation({
+    tag: "Commercial",
+    summary: "Record an advance payment received from the client.",
+    operationId: "recordContractAdvance",
+    parameters: projectParams,
+    permissions: modulePermission("ipc", "create", "advance.record"),
+    requestBody: jsonBody(
+      objectSchema({
+        amount: { type: "number", minimum: 0 },
+        reference: { type: "string", nullable: true },
+        occurredAt: { type: "string", format: "date-time", nullable: true },
+        note: { type: "string", nullable: true },
+      }),
+      "The advance received. Refused if it takes the total past the agreed advance.",
+    ),
+    status: 201,
+  }),
+);
+
 add(
   "/projects/{projectId}/ipc",
   "get",
@@ -7406,6 +7527,38 @@ add(
     requestBody: jsonBody(
       ref("IpcItemPatchRequest"),
       "Partial IPC item payload.",
+      false,
+    ),
+  }),
+);
+
+add(
+  "/projects/{projectId}/ipc/{period}/adjustments",
+  "patch",
+  operation({
+    tag: "Commercial",
+    summary: "Set stored materials and deductions on a certificate.",
+    description:
+      "Neither is measured work, so neither sits on a BOQ line — but both move what the client owes, and a deduction must say what it is for.",
+    operationId: "updateIpcAdjustments",
+    parameters: [
+      ...projectParams,
+      pathParam("period", "IPC period label.", null),
+    ],
+    permissions: modulePermission("ipc", "update", "item.update"),
+    requestBody: jsonBody(
+      objectSchema({
+        materialsOnSite: { type: "number", minimum: 0 },
+        materialsAtCost: {
+          type: "number",
+          minimum: 0,
+          description:
+            "Delivered value, used to check the contract's stored-material percentage.",
+        },
+        deductions: { type: "number", minimum: 0 },
+        deductionsNote: { type: "string", nullable: true },
+      }),
+      "The adjustments to apply. Certified periods are refused.",
       false,
     ),
   }),
@@ -13307,7 +13460,16 @@ const payAppLineSchema = objectSchema({
   costCode: { type: "string", nullable: true },
   activityId: nullableUuid,
   activity: nullableRef("GenericObject"),
-  scheduledAmount: { type: "number" },
+  scheduledAmount: { type: "number", description: "The line as originally contracted." },
+  approvedChangeAmount: {
+    type: "number",
+    description: "What approved change orders naming this line have added to it.",
+  },
+  revisedScheduledAmount: {
+    type: "number",
+    description:
+      "scheduled + approved changes: the ceiling this claim may not exceed. Snapshotted when the claim was made.",
+  },
   previousAmount: { type: "number" },
   thisPeriodAmount: { type: "number" },
   cumulativeAmount: { type: "number" },
@@ -13339,6 +13501,14 @@ const payAppSchema = objectSchema({
   retentionCumulative: { type: "number" },
   backCharges: { type: "number" },
   backChargesNote: { type: "string", nullable: true },
+  otherDeductions: { type: "number" },
+  otherDeductionsNote: { type: "string", nullable: true },
+  taxRate: { type: "number" },
+  taxAmount: {
+    type: "number",
+    description:
+      "Tax on what is left after retention, back-charges and deductions — never on the gross.",
+  },
   netThisPeriod: { type: "number" },
   paidAmount: { type: "number" },
   outstanding: { type: "number" },
@@ -13375,6 +13545,13 @@ const payAppUpdateRequest = objectSchema({
   retentionRate: { type: "number", nullable: true },
   backCharges: { type: "number", nullable: true },
   backChargesNote: { type: "string", nullable: true },
+  otherDeductions: { type: "number", nullable: true },
+  otherDeductionsNote: {
+    type: "string",
+    nullable: true,
+    description: "Required when a deduction is set: withholding money must say why.",
+  },
+  taxRate: { type: "number", nullable: true },
   waiverRequired: { type: "boolean" },
   waiverDocumentId: nullableUuid,
   notes: { type: "string", nullable: true },

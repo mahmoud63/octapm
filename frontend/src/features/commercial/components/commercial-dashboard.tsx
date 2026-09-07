@@ -6,6 +6,7 @@ import type { ProjectSetupTarget } from '@/features/projects/data/schema'
 import type { ScheduleActivity } from '@/features/schedule/data/schema'
 import { BudgetRevisionsPanel } from './budget-revisions-panel'
 import { CashFlowPanel } from './cash-flow-panel'
+import { ClientBillingPanel } from './client-billing-panel'
 import { ChangeOrderRegister } from './change-order-register'
 import { CommitmentsPanel } from './commitments-panel'
 import { EotPanel } from './eot-panel'
@@ -39,6 +40,7 @@ export function CommercialDashboard({
       <Tabs {...tabsProps} className='space-y-3'>
         {showTabList && (
           <TabsList className='flex-wrap'>
+            <TabsTrigger value='client-billing'>Client Billing</TabsTrigger>
             <TabsTrigger value='change-events'>Change Events</TabsTrigger>
             <TabsTrigger value='change-orders'>Change Orders</TabsTrigger>
             <TabsTrigger value='commitments'>Commitments</TabsTrigger>
@@ -55,6 +57,10 @@ export function CommercialDashboard({
             <TabsTrigger value='contract'>Contract</TabsTrigger>
           </TabsList>
         )}
+
+        <TabsContent value='client-billing'>
+          <ClientBillingPanel projectId={projectId} />
+        </TabsContent>
 
         <TabsContent value='change-events'>
           <ChangeEventsPanel

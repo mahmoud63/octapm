@@ -10,6 +10,7 @@ const {
 } = require("../utils/money");
 const auditService = require("./audit.service");
 const approvalWorkflowService = require("./approval-workflow.service");
+const primeContractService = require("./prime-contract.service");
 
 const MONEY_EPSILON = 0.01;
 const QTY_EPSILON = 0.000001;
@@ -94,6 +95,15 @@ const listIpcCertificates = async ({ orgId, projectId }) => {
   });
 };
 
+/**
+ * Re-adds a certificate from its items, then applies the client contract.
+ *
+ * The items give the certified work and the retention on it. The contract
+ * turns that into a sum of money: stored materials on top, the retention cap,
+ * the slice taken back off the advance, any deductions, and tax on what is
+ * left. A project with no terms set has all of those at zero, so the answer is
+ * what it always was — certified less retention.
+ */
 const recomputeCertificateTotals = async (tx, certificateId) => {
   const items = await tx.ipcItem.findMany({
     where: { ipcCertificateId: certificateId },
@@ -110,12 +120,57 @@ const recomputeCertificateTotals = async (tx, certificateId) => {
     { totalCert: 0, totalRet: 0, netPayable: 0 },
   );
 
-  await tx.ipcCertificate.update({
+  const certificate = await tx.ipcCertificate.findUnique({
     where: { id: certificateId },
-    data: totals,
+    select: {
+      id: true,
+      projectId: true,
+      materialsOnSite: true,
+      deductions: true,
+      totalRet: true,
+    },
+  });
+  const contract = certificate
+    ? await tx.primeContract.findFirst({ where: { projectId: certificate.projectId } })
+    : null;
+
+  // Retention already held on earlier certificates, so the cap is measured
+  // across the contract rather than one period at a time.
+  const cumulativeRetention = certificate
+    ? await tx.ipcCertificate
+        .aggregate({
+          where: {
+            projectId: certificate.projectId,
+            status: { in: CERTIFIED_ITEM_STATUSES },
+            id: { not: certificateId },
+          },
+          _sum: { totalRet: true },
+        })
+        .then((row) => toMoneyNumber(row._sum?.totalRet, 0))
+    : 0;
+
+  const financials = primeContractService.certificateFinancials({
+    contract,
+    totalCert: totals.totalCert,
+    materialsOnSite: toMoneyNumber(certificate?.materialsOnSite, 0),
+    totalRet: totals.totalRet,
+    deductions: toMoneyNumber(certificate?.deductions, 0),
+    cumulativeRetention,
   });
 
-  return totals;
+  const data = {
+    totalCert: totals.totalCert,
+    totalRet: financials.retention,
+    grossThisPeriod: financials.gross,
+    advanceRecovery: financials.advanceRecovery,
+    taxRate: financials.taxRate,
+    taxAmount: financials.taxAmount,
+    netPayable: financials.netPayable,
+  };
+
+  await tx.ipcCertificate.update({ where: { id: certificateId }, data });
+
+  return { ...totals, ...data };
 };
 
 const sumMoneyRows = (rows, field) =>
@@ -960,6 +1015,103 @@ const updateIpcItem = async ({ orgId, projectId, period, itemId, payload }) => {
   return updatedItem;
 };
 
+/**
+ * Stored materials and deductions on a certificate.
+ *
+ * These are not measured work, so they do not belong on a BOQ line: material
+ * delivered but not yet installed is money the client owes against an invoice
+ * and a delivery note, and a deduction is a sum being withheld for a stated
+ * reason. Both sit on the certificate itself and both move the money, so a
+ * deduction must say why.
+ */
+const updateCertificateAdjustments = async ({
+  orgId,
+  projectId,
+  period,
+  payload = {},
+  userId = null,
+}) => {
+  await ensureProject({ orgId, projectId });
+
+  const certificate = await prisma.ipcCertificate.findFirst({
+    where: { projectId, period },
+  });
+  if (!certificate) {
+    throw new HttpError(404, "IPC_PERIOD_NOT_FOUND", "IPC period not found");
+  }
+  if (!["draft", "submitted"].includes(certificate.status)) {
+    throw new HttpError(
+      409,
+      "IPC_ADJUSTMENT_LOCKED",
+      "A certified period cannot be adjusted",
+    );
+  }
+
+  const contract = await prisma.primeContract.findFirst({ where: { projectId } });
+  const data = {};
+
+  if (payload.materialsOnSite !== undefined) {
+    const value = toMoneyNumber(payload.materialsOnSite, 0);
+    if (value < 0) {
+      throw new HttpError(400, "IPC_MATERIALS_INVALID", "Stored materials cannot be negative");
+    }
+    // The contract may allow only a share of stored material to be certified.
+    const rate = contract?.materialsOnSiteRate ?? 100;
+    if (rate < 100 && payload.materialsAtCost !== undefined) {
+      const allowed = toMoneyNumber(payload.materialsAtCost, 0) * (rate / 100);
+      if (value > allowed + MONEY_EPSILON) {
+        throw new HttpError(
+          409,
+          "IPC_MATERIALS_OVER_RATE",
+          `The contract allows ${rate}% of stored material, which is ${allowed.toFixed(2)}`,
+        );
+      }
+    }
+    data.materialsOnSite = value;
+  }
+
+  if (payload.deductions !== undefined) {
+    const value = toMoneyNumber(payload.deductions, 0);
+    if (value < 0) {
+      throw new HttpError(400, "IPC_DEDUCTION_INVALID", "A deduction cannot be negative");
+    }
+    const note = trimOrNull(payload.deductionsNote ?? certificate.deductionsNote);
+    if (value > MONEY_EPSILON && !note) {
+      throw new HttpError(
+        400,
+        "IPC_DEDUCTION_REASON_REQUIRED",
+        "Say what is being deducted and why",
+      );
+    }
+    data.deductions = value;
+    data.deductionsNote = value > MONEY_EPSILON ? note : null;
+  } else if (payload.deductionsNote !== undefined) {
+    data.deductionsNote = trimOrNull(payload.deductionsNote);
+  }
+
+  if (!Object.keys(data).length) {
+    throw new HttpError(400, "IPC_ADJUSTMENT_EMPTY", "Nothing to change");
+  }
+
+  return prisma.$transaction(async (tx) => {
+    await tx.ipcCertificate.update({ where: { id: certificate.id }, data });
+    await recomputeCertificateTotals(tx, certificate.id);
+
+    await auditService.recordEvent({
+      tx,
+      orgId,
+      projectId,
+      entityType: auditService.ENTITY_TYPES.IPC_CERTIFICATE,
+      entityId: certificate.id,
+      action: auditService.ACTIONS.UPDATED,
+      actorId: userId,
+      summary: { transition: "certificate.adjust", period, ...data },
+    });
+
+    return tx.ipcCertificate.findUnique({ where: { id: certificate.id } });
+  });
+};
+
 const submitIpcPeriod = async ({
   orgId,
   projectId,
@@ -1200,6 +1352,17 @@ const certifyIpcPeriod = async ({
       data: { status: "certified", certDate: now },
     });
 
+    // Settle the money before the certificate is stamped: the totals are
+    // re-read from the items and the contract's terms applied, so what is
+    // certified and what the client owes cannot drift apart.
+    const settled = await recomputeCertificateTotals(tx, certificate.id);
+    await primeContractService.applyAdvanceRecovery(tx, {
+      orgId,
+      projectId,
+      certificate,
+      amount: settled.advanceRecovery,
+    });
+
     const updated = await tx.ipcCertificate.update({
       where: { id: certificate.id },
       data: {
@@ -1218,12 +1381,9 @@ const certifyIpcPeriod = async ({
           : null,
         certificationOverrideBy: requiresOverride ? userId || null : null,
         certificationOverrideAt: requiresOverride ? now : null,
-        balanceDue: certificate.netPayable,
+        balanceDue: settled.netPayable,
         paymentStatus: "unpaid",
-        retentionStatus:
-          toMoneyNumber(certificate.totalRet) <= MONEY_EPSILON
-            ? "released"
-            : "held",
+        retentionStatus: settled.totalRet <= MONEY_EPSILON ? "released" : "held",
       },
     });
 
@@ -1704,6 +1864,7 @@ module.exports = {
   createIpcPeriod,
   getIpcPeriod,
   updateIpcItem,
+  updateCertificateAdjustments,
   submitIpcPeriod,
   certifyIpcPeriod,
   issueIpcInvoice,
