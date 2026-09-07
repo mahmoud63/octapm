@@ -20,6 +20,7 @@ export type PermissionModule =
   | 'ipc'
   | 'cost'
   | 'procurement'
+  | 'inventory'
   | 'risk'
   | 'user_management'
   | 'project_parties'

@@ -282,6 +282,9 @@ test.describe('gantt working area', () => {
     )
 
     // Switching back to a layout without resources puts them away again.
+    // Wait for the menu to finish closing first: a click that lands during the
+    // close animation is swallowed and the menu never reopens.
+    await expect(page.getByRole('menu')).toHaveCount(0)
     await page.getByTestId('primavera-gantt-layouts').click()
     await page.getByTestId('primavera-gantt-layout-builtin:classic').click()
     await expect(page.getByTestId('primavera-gantt-histogram')).toHaveCount(0)

@@ -9,6 +9,7 @@ import {
   ListTodo,
   MessagesSquare,
   Monitor,
+  PackageSearch,
   Palette,
   Settings,
   UserCog,
@@ -48,6 +49,11 @@ export const sidebarData: SidebarData = {
           title: 'Portfolio',
           url: '/portfolio',
           icon: Gauge,
+        },
+        {
+          title: 'Inventory',
+          url: '/inventory',
+          icon: PackageSearch,
         },
         {
           title: 'Reports',
