@@ -273,3 +273,123 @@ export const receiveTransfer = (
 
 export const getSummary = () =>
   apiClient.get(`${BASE}/summary`).then(unwrap<InventorySummary>)
+
+// --- goods receipt against a purchase order -------------------------------
+
+export type PurchaseOrderLine = {
+  id: string
+  lineNumber: number
+  itemCode: string | null
+  description: string
+  spec: string | null
+  unit: string
+  orderedQty: number
+  receivedQty: number
+  rejectedQty: number
+  outstandingQty: number
+  unitCost: number
+  activityId: string | null
+  activity: string | null
+  inventoryItemId: string | null
+  inventoryItem: { id: string; sku: string; name: string; unit: string } | null
+  status: string
+}
+
+export type PurchaseOrder = {
+  id: string
+  ref: string
+  status: string
+  warehouseStatus: string
+  projectId: string
+  project: string | null
+  supplierId: string | null
+  supplier: string | null
+  value: number
+  currency: string
+  orderDate: string | null
+  promisedDate: string | null
+  lines: PurchaseOrderLine[]
+}
+
+export const findPurchaseOrder = (ref: string) =>
+  apiClient
+    .get(`${BASE}/purchase-orders/${encodeURIComponent(ref)}`)
+    .then(unwrap<PurchaseOrder>)
+
+/**
+ * `receivable` is what goods receipt wants — orders still expecting a delivery.
+ * `all` is what the match wants, because an order that has been fully received
+ * and wrongly invoiced is exactly the case the match exists to catch.
+ */
+export const listOrders = (scope: 'receivable' | 'all' = 'all') =>
+  apiClient
+    .get(`${BASE}/purchase-orders`, { params: { scope } })
+    .then((response) => unwrap<{ items: PurchaseOrder[] }>(response).items)
+
+export type GoodsReceiptPayload = {
+  orderId: string
+  warehouseId: string
+  receiptNumber?: string | null
+  deliveryNote?: string | null
+  notes?: string | null
+  lines: Array<{
+    poLineId: string
+    acceptedQty?: number
+    rejectedQty?: number
+    unitCost?: number | null
+    locationId?: string | null
+    batchNo?: string | null
+    serialNo?: string | null
+  }>
+}
+
+export const postGoodsReceipt = (payload: GoodsReceiptPayload) =>
+  apiClient
+    .post(`${BASE}/goods-receipt`, payload)
+    .then(unwrap<{ receiptId: string; receiptNumber: string; movements: number }>)
+
+// --- three-way match ------------------------------------------------------
+
+export type MatchFlag = {
+  code: string
+  severity: 'blocking' | 'warning' | 'info'
+  message: string
+}
+
+export type MatchLine = {
+  poLineId: string
+  lineNumber: number
+  description: string
+  unit: string
+  orderedQty: number
+  receivedQty: number
+  rejectedQty: number
+  invoicedQty: number
+  orderedValue: number
+  receivedValue: number
+  invoicedValue: number
+  orderedUnitCost: number
+  invoicedUnitCost: number
+  flags: MatchFlag[]
+}
+
+export type OrderMatch = {
+  orderId: string
+  ref: string
+  supplier: string | null
+  projectId: string
+  verdict: 'matched' | 'check' | 'review' | 'unmatched'
+  totals: { ordered: number; received: number; invoiced: number }
+  invoices: Array<{
+    id: string
+    ref: string
+    invoiceNumber: string | null
+    status: string
+    total: number
+    costDate: string | null
+  }>
+  lines: MatchLine[]
+}
+
+export const matchOrder = (orderId: string) =>
+  apiClient.get(`${BASE}/match/order/${orderId}`).then(unwrap<OrderMatch>)

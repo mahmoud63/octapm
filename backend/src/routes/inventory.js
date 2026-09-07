@@ -6,6 +6,7 @@ const { authenticate } = require("../middleware/auth");
 const { requirePermission } = require("../middleware/rbac");
 const { validate } = require("../middleware/validate");
 const service = require("../services/inventory.service");
+const goodsReceipt = require("../services/goods-receipt.service");
 
 /**
  * Inventory and warehouse (OCTA-INV-STOCK-050).
@@ -428,6 +429,106 @@ router.post(
         user: req.user,
         transferId: req.params.transferId,
         payload: req.body,
+      })
+    )
+  )
+);
+
+// ─── goods receipt against a purchase order ────────────────────────────────
+
+router.get(
+  "/purchase-orders",
+  requirePermission("inventory", "read"),
+  [optionalProject, query("scope").optional().isIn(goodsReceipt.ORDER_SCOPES), validate],
+  asyncHandler(async (req, res) =>
+    sendSuccess(
+      res,
+      await goodsReceipt.listOrders({
+        orgId: req.user.orgId,
+        projectId: req.query.projectId ?? null,
+        scope: req.query.scope ?? "all",
+      })
+    )
+  )
+);
+
+/** What a storeman scans off the delivery note. */
+router.get(
+  "/purchase-orders/:ref",
+  requirePermission("inventory", "read"),
+  [param("ref").isString().trim().isLength({ min: 1, max: 120 }), validate],
+  asyncHandler(async (req, res) =>
+    sendSuccess(
+      res,
+      await goodsReceipt.findPurchaseOrder({
+        orgId: req.user.orgId,
+        ref: req.params.ref,
+      })
+    )
+  )
+);
+
+router.post(
+  "/goods-receipt",
+  requirePermission("inventory", "create", "stock.receive"),
+  [
+    body("orderId").isUUID(),
+    body("warehouseId").isUUID(),
+    body("receiptNumber").optional({ nullable: true }).isString().trim().isLength({ max: 40 }),
+    body("deliveryNote").optional({ nullable: true }).isString().trim().isLength({ max: 200 }),
+    body("notes").optional({ nullable: true }).isString().trim().isLength({ max: 2000 }),
+    body("lines").isArray({ min: 1 }),
+    body("lines.*.poLineId").isUUID(),
+    body("lines.*.acceptedQty").optional().isFloat({ min: 0 }),
+    body("lines.*.rejectedQty").optional().isFloat({ min: 0 }),
+    body("lines.*.unitCost").optional({ nullable: true }).isFloat({ min: 0 }),
+    body("lines.*.locationId").optional({ nullable: true }).isUUID(),
+    body("lines.*.inventoryItemId").optional({ nullable: true }).isUUID(),
+    body("lines.*.batchNo").optional({ nullable: true }).isString().trim().isLength({ max: 80 }),
+    body("lines.*.serialNo").optional({ nullable: true }).isString().trim().isLength({ max: 80 }),
+    body("lines.*.expiryDate").optional({ nullable: true }).isISO8601(),
+    validate,
+  ],
+  asyncHandler(async (req, res) =>
+    sendSuccess(
+      res,
+      await goodsReceipt.receiveAgainstOrder({
+        orgId: req.user.orgId,
+        user: req.user,
+        payload: req.body,
+      }),
+      201
+    )
+  )
+);
+
+// ─── three-way match ───────────────────────────────────────────────────────
+
+router.get(
+  "/match/order/:orderId",
+  requirePermission("inventory", "read"),
+  [param("orderId").isUUID(), validate],
+  asyncHandler(async (req, res) =>
+    sendSuccess(
+      res,
+      await goodsReceipt.matchOrder({
+        orgId: req.user.orgId,
+        orderId: req.params.orderId,
+      })
+    )
+  )
+);
+
+router.get(
+  "/match/invoice/:directCostId",
+  requirePermission("inventory", "read"),
+  [param("directCostId").isUUID(), validate],
+  asyncHandler(async (req, res) =>
+    sendSuccess(
+      res,
+      await goodsReceipt.matchInvoice({
+        orgId: req.user.orgId,
+        directCostId: req.params.directCostId,
       })
     )
   )

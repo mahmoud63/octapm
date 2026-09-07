@@ -522,6 +522,145 @@ async function upsertInventory({ orgId, projectId, activities, userId }) {
   return { warehouses, items };
 }
 
+/**
+ * Two purchase orders, so both halves of the flow have something real.
+ *
+ * PO-0001 is still outstanding: scan it in the warehouse and walk a delivery
+ * through goods receipt. PO-0002 is the brief's own example — 1,000 ordered,
+ * 950 accepted, 50 rejected, and a supplier invoice for the full 1,000 — so
+ * the three-way match opens with a discrepancy worth arguing about.
+ */
+async function upsertPurchaseOrders({ orgId, projectId, activities, items, userId }) {
+  const supplier = await prisma.procurementSupplier.upsert({
+    where: { projectId_name: { projectId, name: "Riverstone Cement" } },
+    create: { projectId, name: "Riverstone Cement", status: "approved" },
+    update: {},
+  });
+
+  const orders = {};
+  for (const spec of [
+    {
+      key: "open",
+      ref: "PO-0001",
+      item: "Formwork and reinforcement",
+      status: "issued",
+      lines: [
+        { activity: "frame", item: items.rebar, qty: 400, cost: 21.5 },
+        { activity: "frame", item: items.formwork, qty: 150, cost: 34 },
+      ],
+    },
+    {
+      key: "billed",
+      ref: "PO-0002",
+      item: "Cement supply",
+      status: "received",
+      received: true,
+      lines: [{ activity: "sub", item: items.cement, qty: 1000, cost: 6.4, accepted: 950, rejected: 50 }],
+    },
+  ]) {
+    const value = spec.lines.reduce((sum, line) => sum + line.qty * line.cost, 0);
+    const existing = await prisma.procurementOrder.findFirst({ where: { projectId, ref: spec.ref } });
+    const data = {
+      item: spec.item,
+      supplierId: supplier.id,
+      supplier: supplier.name,
+      status: spec.status,
+      value,
+      warehouseStatus: spec.received ? "received" : "not_received",
+      orderDate: date("2026-01-05"),
+      promisedDate: date("2026-02-02"),
+      updatedBy: userId,
+    };
+    const order = existing
+      ? await prisma.procurementOrder.update({ where: { id: existing.id }, data })
+      : await prisma.procurementOrder.create({
+          data: { projectId, ref: spec.ref, createdBy: userId, ...data },
+        });
+    orders[spec.key] = order;
+
+    let lineNumber = 1;
+    for (const line of spec.lines) {
+      const lineData = {
+        projectId,
+        supplierId: supplier.id,
+        activityId: activities[line.activity].id,
+        inventoryItemId: line.item.id,
+        itemCode: line.item.sku,
+        description: line.item.name,
+        unit: line.item.unit,
+        orderedQty: line.qty,
+        receivedQty: line.accepted ?? 0,
+        rejectedQty: line.rejected ?? 0,
+        unitCost: line.cost,
+        status: line.accepted ? "received" : "ordered",
+      };
+      const existingLine = await prisma.procurementPoLine.findFirst({
+        where: { orderId: order.id, lineNumber },
+      });
+      if (existingLine) {
+        await prisma.procurementPoLine.update({ where: { id: existingLine.id }, data: lineData });
+      } else {
+        await prisma.procurementPoLine.create({
+          data: { orderId: order.id, lineNumber, ...lineData },
+        });
+      }
+      lineNumber += 1;
+    }
+  }
+
+  // The supplier invoice for the full 1,000, against a delivery of 950.
+  const billedLines = await prisma.procurementPoLine.findMany({
+    where: { orderId: orders.billed.id },
+    orderBy: [{ lineNumber: "asc" }],
+  });
+  const existingInvoice = await prisma.directCost.findFirst({
+    where: { projectId, ref: "SI-0001" },
+  });
+  const invoiceData = {
+    type: "invoice",
+    vendorName: supplier.name,
+    invoiceNumber: "RC-88213",
+    purchaseOrderId: orders.billed.id,
+    description: "Cement supply against PO-0002",
+    costDate: date("2026-03-10"),
+    status: "pending",
+    subtotal: 6400,
+    total: 6400,
+    updatedBy: userId,
+  };
+  const invoice = existingInvoice
+    ? await prisma.directCost.update({ where: { id: existingInvoice.id }, data: invoiceData })
+    : await prisma.directCost.create({
+        data: { orgId, projectId, number: 1, ref: "SI-0001", createdBy: userId, ...invoiceData },
+      });
+
+  const existingInvoiceLine = await prisma.directCostLine.findFirst({
+    where: { directCostId: invoice.id },
+  });
+  const invoiceLineData = {
+    description: "Cement OPC 42.5N",
+    poLineId: billedLines[0].id,
+    activityId: activities.sub.id,
+    costType: "material",
+    quantity: 1000,
+    unit: "bag",
+    unitCost: 6.4,
+    amount: 6400,
+  };
+  if (existingInvoiceLine) {
+    await prisma.directCostLine.update({
+      where: { id: existingInvoiceLine.id },
+      data: invoiceLineData,
+    });
+  } else {
+    await prisma.directCostLine.create({
+      data: { orgId, projectId, directCostId: invoice.id, ...invoiceLineData },
+    });
+  }
+
+  return orders;
+}
+
 async function upsertResources(projectId, activities) {
   for (const spec of RESOURCES) {
     const activity = activities[spec.activity];
@@ -657,11 +796,18 @@ async function main() {
     userId: people.pm.id,
   });
   await upsertResources(project.id, activities);
-  await upsertInventory({
+  const { items: inventoryItems } = await upsertInventory({
     orgId: org.id,
     projectId: project.id,
     activities,
     userId: people.warehouse.id,
+  });
+  await upsertPurchaseOrders({
+    orgId: org.id,
+    projectId: project.id,
+    activities,
+    items: inventoryItems,
+    userId: people.procurement.id,
   });
   await upsertProgressAndCost({ projectId: project.id, activities, userId: people.pm.id });
   await upsertBaseline({ projectId: project.id, userId: people.pm.id });

@@ -5,8 +5,10 @@ import { Main } from '@/components/layout/main'
 import { Separator } from '@/components/ui/separator'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { getSummary } from './data/api'
+import { GoodsReceiptPanel } from './components/goods-receipt-panel'
 import { ItemsPanel } from './components/items-panel'
 import { LedgerPanel } from './components/ledger-panel'
+import { MatchPanel } from './components/match-panel'
 import { ScanWorkspace } from './components/scan-workspace'
 import { WarehousesPanel } from './components/warehouses-panel'
 
@@ -61,8 +63,11 @@ export function InventoryWorkspace() {
       <Separator className='my-5' />
 
       <Tabs defaultValue='scan' className='space-y-4'>
-        <TabsList data-testid='uat-inventory-tabs'>
+        {/* Six tabs do not fit across a phone, and scanning happens on a phone. */}
+        <TabsList className='h-auto flex-wrap' data-testid='uat-inventory-tabs'>
           <TabsTrigger value='scan'>Scan</TabsTrigger>
+          <TabsTrigger value='receive'>Goods in</TabsTrigger>
+          <TabsTrigger value='match'>Match</TabsTrigger>
           <TabsTrigger value='items'>Items</TabsTrigger>
           <TabsTrigger value='warehouses'>Warehouses</TabsTrigger>
           <TabsTrigger value='ledger'>Ledger</TabsTrigger>
@@ -70,6 +75,12 @@ export function InventoryWorkspace() {
 
         <TabsContent value='scan'>
           <ScanWorkspace />
+        </TabsContent>
+        <TabsContent value='receive'>
+          <GoodsReceiptPanel />
+        </TabsContent>
+        <TabsContent value='match'>
+          <MatchPanel />
         </TabsContent>
         <TabsContent value='items'>
           <ItemsPanel />

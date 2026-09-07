@@ -2654,6 +2654,7 @@ model ProcurementOrder {
   deliveryReceipts     DeliveryReceipt[]
   leadTimeAlerts       ProcurementLeadTimeAlert[]
   deliveryReceiptLines DeliveryReceiptLine[]
+  supplierInvoices     DirectCost[]
 
   @@index([projectId])
   @@index([activityId])
@@ -2673,6 +2674,9 @@ model ProcurementPoLine {
   activityId         String
   activityMaterialId String?
   materialMasterId   String?
+  // Which stocked item this line becomes on goods receipt. Set the first time
+  // the line is received, so the mapping is remembered for later deliveries.
+  inventoryItemId    String?
   lineNumber         Int
   itemCode           String?
   description        String
@@ -2705,8 +2709,11 @@ model ProcurementPoLine {
   receiptLines     DeliveryReceiptLine[]
   usages           ActivityMaterialUsage[]
   leadTimeAlerts   ProcurementLeadTimeAlert[]
+  inventoryItem    InventoryItem?             @relation(fields: [inventoryItemId], references: [id], onDelete: SetNull)
+  invoiceLines     DirectCostLine[]
 
   @@unique([orderId, lineNumber])
+  @@index([inventoryItemId])
   @@index([projectId])
   @@index([orderId])
   @@index([packageId])
@@ -2860,6 +2867,7 @@ model InventoryItem {
   transactions      StockTransaction[]
   transferLines     StockTransferLine[]
   countLines        InventoryCountLine[]
+  poLines           ProcurementPoLine[]
 
   @@unique([orgId, sku])
   @@unique([orgId, barcode])
@@ -5929,6 +5937,9 @@ model DirectCost {
   vendorCompanyId String?
   vendorName      String?
   invoiceNumber   String?
+  // The purchase order this invoice is against, which is what makes a
+  // three-way match possible: order, goods receipt, invoice.
+  purchaseOrderId String?
   description     String
   costDate        DateTime  @db.Date
   dueDate         DateTime? @db.Date
@@ -5956,9 +5967,11 @@ model DirectCost {
   org           Organisation        @relation(fields: [orgId], references: [id], onDelete: Cascade)
   project       Project             @relation(fields: [projectId], references: [id], onDelete: Cascade)
   vendorCompany Company?            @relation("DirectCostVendor", fields: [vendorCompanyId], references: [id], onDelete: SetNull)
+  purchaseOrder ProcurementOrder?   @relation(fields: [purchaseOrderId], references: [id], onDelete: SetNull)
   lines         DirectCostLine[]
   payments      DirectCostPayment[]
 
+  @@index([purchaseOrderId])
   @@unique([projectId, number])
   @@unique([projectId, ref])
   @@index([orgId])
@@ -5976,6 +5989,9 @@ model DirectCostLine {
   costCodeId   String?
   budgetLineId String?
   activityId   String?
+  // The purchase order line being billed, so quantity and price can be
+  // compared against what was ordered and what actually turned up.
+  poLineId     String?
   costType     String? // labour, material, equipment, subcontract, indirect, overhead, contingency, other
   quantity     Float    @default(1)
   unit         String?
@@ -5993,7 +6009,9 @@ model DirectCostLine {
   costCode   CostCode?    @relation(fields: [costCodeId], references: [id], onDelete: SetNull)
   budgetLine BudgetLine?  @relation(fields: [budgetLineId], references: [id], onDelete: SetNull)
   activity   Activity?    @relation(fields: [activityId], references: [id], onDelete: SetNull)
+  poLine     ProcurementPoLine? @relation(fields: [poLineId], references: [id], onDelete: SetNull)
 
+  @@index([poLineId])
   @@index([orgId])
   @@index([directCostId])
   @@index([projectId, activityId])

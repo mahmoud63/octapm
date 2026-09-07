@@ -14271,6 +14271,98 @@ add(
 );
 
 add(
+  "/inventory/purchase-orders",
+  "get",
+  operation({
+    tag: "Inventory",
+    summary: "List purchase orders for receiving or matching.",
+    operationId: "listReceivableOrders",
+    parameters: [
+      queryParam("projectId", "Limit to one project.", { type: "string", format: "uuid" }),
+      queryParam(
+        "scope",
+        '"receivable" limits to orders still expecting a delivery; "all" (the default) also includes received orders, which is what the three-way match needs. Cancelled and closed orders are never listed.',
+        { type: "string", enum: ["receivable", "all"] },
+      ),
+    ],
+    permissions: inventoryPermission("read"),
+  }),
+);
+
+add(
+  "/inventory/purchase-orders/{ref}",
+  "get",
+  operation({
+    tag: "Inventory",
+    summary: "Find a purchase order by reference, with what is still outstanding on each line.",
+    operationId: "findPurchaseOrderForReceipt",
+    parameters: [pathParam("ref", "The PO reference, as scanned or typed off the delivery note.", null)],
+    permissions: inventoryPermission("read"),
+  }),
+);
+
+add(
+  "/inventory/goods-receipt",
+  "post",
+  operation({
+    tag: "Inventory",
+    summary: "Receive a delivery against a purchase order, into stock.",
+    operationId: "receiveAgainstPurchaseOrder",
+    permissions: inventoryPermission("create", "stock.receive"),
+    requestBody: jsonBody(
+      objectSchema({
+        orderId: { type: "string", format: "uuid" },
+        warehouseId: { type: "string", format: "uuid" },
+        receiptNumber: { type: "string", nullable: true },
+        deliveryNote: { type: "string", nullable: true },
+        notes: { type: "string", nullable: true },
+        lines: {
+          type: "array",
+          items: objectSchema({
+            poLineId: { type: "string", format: "uuid" },
+            acceptedQty: { type: "number", minimum: 0 },
+            rejectedQty: { type: "number", minimum: 0 },
+            unitCost: { type: "number", nullable: true, minimum: 0 },
+            locationId: nullableUuid,
+            inventoryItemId: nullableUuid,
+            batchNo: { type: "string", nullable: true },
+            serialNo: { type: "string", nullable: true },
+            expiryDate: { type: "string", format: "date-time", nullable: true },
+          }),
+        },
+      }),
+      "The order, where it is being put, and what turned up on each line.",
+    ),
+    status: 201,
+  }),
+);
+
+add(
+  "/inventory/match/order/{orderId}",
+  "get",
+  operation({
+    tag: "Inventory",
+    summary:
+      "Three-way match for a purchase order: ordered against received against invoiced.",
+    operationId: "matchPurchaseOrder",
+    parameters: [pathParam("orderId", "Purchase order id.")],
+    permissions: inventoryPermission("read"),
+  }),
+);
+
+add(
+  "/inventory/match/invoice/{directCostId}",
+  "get",
+  operation({
+    tag: "Inventory",
+    summary: "Three-way match from a supplier invoice's side.",
+    operationId: "matchSupplierInvoice",
+    parameters: [pathParam("directCostId", "Supplier invoice (direct cost) id.")],
+    permissions: inventoryPermission("read"),
+  }),
+);
+
+add(
   "/inventory/summary",
   "get",
   operation({
