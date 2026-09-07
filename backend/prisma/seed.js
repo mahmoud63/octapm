@@ -592,9 +592,15 @@ async function purgeTestResidue(orgId) {
     await prisma.inventoryItem.deleteMany({ where: { id: { in: itemIds } } });
   }
 
-  if (orderIds.length || itemIds.length) {
+  // Scope-matrix tests raise a throwaway subcontract so the "first read seeds
+  // the starter rows" case is not fighting a matrix an earlier test rewrote.
+  const fixtures = await prisma.commitment.deleteMany({
+    where: { orgId, ref: { startsWith: "SC-SM-" } },
+  });
+
+  if (orderIds.length || itemIds.length || fixtures.count) {
     console.log(
-      `  cleared ${orderIds.length} test purchase orders and ${itemIds.length} test items`
+      `  cleared ${orderIds.length} test purchase orders, ${itemIds.length} test items and ${fixtures.count} test commitments`
     );
   }
 }
@@ -913,6 +919,152 @@ async function upsertPurchaseOrders({ orgId, projectId, activities, items, userI
   return orders;
 }
 
+/**
+ * An executed subcontract, so the money-going-out spine has something real.
+ *
+ * A schedule of values tied to activities, and an approved change order that
+ * raises one of its lines — which is the "unless an authorised contract
+ * modification exists" case the over-billing rule turns on. Without this the
+ * commitments register, pay applications and the scope matrix all open empty.
+ */
+async function upsertSubcontract({ orgId, projectId, activities, boqItems, userId }) {
+  const vendor = await prisma.company.upsert({
+    where: { orgId_name: { orgId, name: "Meridian Concrete Services" } },
+    create: {
+      orgId,
+      name: "Meridian Concrete Services",
+      type: "external",
+      isVendor: true,
+      trades: ["Concrete", "Formwork", "Reinforcement"],
+      email: "contracts@meridian.example",
+      status: "active",
+    },
+    update: {},
+  });
+
+  const existing = await prisma.commitment.findFirst({
+    where: { projectId, ref: "SC-0001" },
+  });
+  const data = {
+    type: "subcontract",
+    title: "Reinforced concrete frame — labour and plant",
+    description: "Frame to level 12, including formwork, reinforcement fixing and pours.",
+    vendorCompanyId: vendor.id,
+    status: "executed",
+    currency: "USD",
+    retentionRate: 10,
+    paymentTerms: "30 days from certification",
+    startDate: date("2026-03-09"),
+    endDate: date("2026-07-31"),
+    executedAt: date("2026-03-02"),
+    executedBy: userId,
+    approvedAt: date("2026-02-24"),
+    approvedBy: userId,
+    updatedBy: userId,
+  };
+
+  const commitment = existing
+    ? await prisma.commitment.update({ where: { id: existing.id }, data })
+    : await prisma.commitment.create({
+        data: { orgId, projectId, number: 1, ref: "SC-0001", createdBy: userId, ...data },
+      });
+
+  const lines = [
+    {
+      lineNumber: 1,
+      description: "Formwork to columns and slabs",
+      activity: "frame",
+      boq: "B-200",
+      unit: "m2",
+      qty: 9400,
+      rate: 62,
+    },
+    {
+      lineNumber: 2,
+      description: "Reinforcement fixing",
+      activity: "frame",
+      boq: "B-200",
+      unit: "tonne",
+      qty: 640,
+      rate: 410,
+    },
+    {
+      lineNumber: 3,
+      description: "Concrete placing and finishing",
+      activity: "frame",
+      boq: "B-200",
+      unit: "m3",
+      qty: 7100,
+      rate: 48,
+    },
+  ];
+
+  const sovLines = {};
+  for (const line of lines) {
+    const lineData = {
+      orgId,
+      projectId,
+      description: line.description,
+      activityId: activities[line.activity].id,
+      boqItemId: boqItems[line.boq]?.id ?? null,
+      unit: line.unit,
+      qty: line.qty,
+      rate: line.rate,
+      amount: line.qty * line.rate,
+      sortOrder: line.lineNumber - 1,
+    };
+    const found = await prisma.commitmentSovLine.findFirst({
+      where: { commitmentId: commitment.id, lineNumber: line.lineNumber },
+    });
+    sovLines[line.lineNumber] = found
+      ? await prisma.commitmentSovLine.update({ where: { id: found.id }, data: lineData })
+      : await prisma.commitmentSovLine.create({
+          data: { commitmentId: commitment.id, lineNumber: line.lineNumber, ...lineData },
+        });
+  }
+
+  // An approved change order that raises line 1: the subcontractor may bill
+  // past the original scheduled amount because this authorises it.
+  const existingCo = await prisma.commitmentChangeOrder.findFirst({
+    where: { commitmentId: commitment.id, number: 1 },
+  });
+  const coData = {
+    title: "Additional formwork to transfer slab",
+    description: "Client-instructed thickening at level 3.",
+    status: "approved",
+    value: 74_400,
+    linesJson: [
+      {
+        sovLineId: sovLines[1].id,
+        description: "Additional formwork to transfer slab",
+        activityId: activities.frame.id,
+        amount: 74_400,
+      },
+    ],
+    submittedAt: date("2026-04-08"),
+    approvedAt: date("2026-04-15"),
+    approvedBy: userId,
+    updatedBy: userId,
+  };
+  if (existingCo) {
+    await prisma.commitmentChangeOrder.update({ where: { id: existingCo.id }, data: coData });
+  } else {
+    await prisma.commitmentChangeOrder.create({
+      data: {
+        orgId,
+        projectId,
+        commitmentId: commitment.id,
+        number: 1,
+        ref: `${commitment.ref}-CO01`,
+        createdBy: userId,
+        ...coData,
+      },
+    });
+  }
+
+  return commitment;
+}
+
 async function upsertResources(projectId, activities) {
   for (const spec of RESOURCES) {
     const activity = activities[spec.activity];
@@ -1048,6 +1200,13 @@ async function main() {
     userId: people.pm.id,
   });
   await upsertResources(project.id, activities);
+  await upsertSubcontract({
+    orgId: org.id,
+    projectId: project.id,
+    activities,
+    boqItems,
+    userId: people.pm.id,
+  });
   const { items: inventoryItems } = await upsertInventory({
     orgId: org.id,
     projectId: project.id,

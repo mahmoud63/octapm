@@ -226,6 +226,94 @@ router.post(
   asyncHandler(async (req, res) => sendSuccess(res, await commitmentService.createChangeOrder({ ...scope(req), commitmentId: req.params.commitmentId, payload: req.body, actor: actor(req) }), 201)),
 );
 
+// ─── scope and responsibility (OCTA-SUB-SCOPE-054) ─────────────────────────
+
+const scopeService = require("../services/scope-matrix.service");
+
+/** Created on first read, seeded with the rows that cause arguments. */
+router.get(
+  "/:commitmentId/scope",
+  requirePermission("commitment", "read"),
+  [param("commitmentId").isUUID(), validate],
+  asyncHandler(async (req, res) =>
+    sendSuccess(
+      res,
+      await scopeService.getForCommitment({
+        ...scope(req),
+        commitmentId: req.params.commitmentId,
+        userId: req.user.id,
+      }),
+    ),
+  ),
+);
+
+/** The whole list is sent, so a row removed on screen is removed here. */
+router.put(
+  "/:commitmentId/scope",
+  requirePermission("commitment", "update", { transition: "scope.manage" }),
+  [
+    param("commitmentId").isUUID(),
+    body("title").optional().isString().trim().isLength({ min: 1, max: 200 }),
+    body("notes").optional({ nullable: true }).isString().trim().isLength({ max: 4000 }),
+    body("items").isArray({ max: 500 }),
+    body("items.*.kind").optional().isIn(scopeService.KINDS),
+    body("items.*.section").optional({ nullable: true }).isString().trim().isLength({ max: 80 }),
+    body("items.*.description").isString().trim().notEmpty().isLength({ max: 500 }),
+    body("items.*.responsibility").optional({ nullable: true }).isIn(scopeService.PARTIES),
+    body("items.*.notes").optional({ nullable: true }).isString().trim().isLength({ max: 1000 }),
+    validate,
+  ],
+  asyncHandler(async (req, res) =>
+    sendSuccess(
+      res,
+      await scopeService.replaceItems({
+        ...scope(req),
+        commitmentId: req.params.commitmentId,
+        userId: req.user.id,
+        payload: req.body,
+      }),
+    ),
+  ),
+);
+
+/** Refused while any row of work has nobody against it. */
+router.post(
+  "/:commitmentId/scope/agree",
+  requirePermission("commitment", "approve", { transition: "scope.agree" }),
+  [param("commitmentId").isUUID(), validate],
+  asyncHandler(async (req, res) =>
+    sendSuccess(
+      res,
+      await scopeService.agree({
+        ...scope(req),
+        commitmentId: req.params.commitmentId,
+        userId: req.user.id,
+      }),
+    ),
+  ),
+);
+
+router.post(
+  "/:commitmentId/scope/reopen",
+  requirePermission("commitment", "approve", { transition: "scope.agree" }),
+  [
+    param("commitmentId").isUUID(),
+    body("reason").optional({ nullable: true }).isString().trim().isLength({ max: 1000 }),
+    validate,
+  ],
+  asyncHandler(async (req, res) =>
+    sendSuccess(
+      res,
+      await scopeService.reopen({
+        ...scope(req),
+        commitmentId: req.params.commitmentId,
+        userId: req.user.id,
+        reason: req.body?.reason ?? null,
+      }),
+    ),
+  ),
+);
+
 router.get(
   "/:commitmentId/export.pdf",
   requirePermission("commitment", "export"),

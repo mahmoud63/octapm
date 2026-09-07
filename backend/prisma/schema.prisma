@@ -144,6 +144,8 @@ model Organisation {
   punchItemEvents     PunchItemEvent[]
   primeContracts      PrimeContract[]
   primeContractAdvances PrimeContractAdvance[]
+  scopeMatrices       ScopeMatrix[]
+  scopeMatrixItems    ScopeMatrixItem[]
 }
 
 model User {
@@ -479,6 +481,8 @@ model Project {
   ipcRetentionReleases          IpcRetentionRelease[]
   primeContract                 PrimeContract?
   primeContractAdvances         PrimeContractAdvance[]
+  scopeMatrices                 ScopeMatrix[]
+  scopeMatrixItems              ScopeMatrixItem[]
   subValuations                 SubValuation[]
   subValuationActivityLinks     SubValuationActivityLink[]
   subValuationAllocationLinks   SubValuationAllocationLink[]
@@ -4788,6 +4792,7 @@ model Commitment {
   payApps           SubPayApp[]
   changeEventLines  ChangeEventLine[]
   rfqs              Rfq[]
+  scopeMatrix       ScopeMatrix?
 
   @@unique([projectId, ref])
   @@unique([projectId, type, number])
@@ -4874,6 +4879,77 @@ model CommitmentChangeOrder {
   @@index([orgId])
   @@index([projectId, status])
   @@index([primeChangeOrderId])
+}
+
+// ─── Scope and responsibility (OCTA-SUB-SCOPE-054) ─────────────────────────
+
+/**
+ * What a subcontract actually covers, agreed before it is written.
+ *
+ * Construction disputes come overwhelmingly from unclear scope boundaries —
+ * who supplies the crane, who takes the waste away, who calls the inspection.
+ * The matrix makes each of those an explicit row with a named party rather
+ * than a paragraph of prose nobody re-reads.
+ *
+ * One per commitment or bid package, so a scope agreed at tender carries into
+ * the contract without being retyped.
+ */
+model ScopeMatrix {
+  id           String   @id @default(uuid())
+  orgId        String
+  projectId    String
+  commitmentId String?  @unique
+  bidPackageId String?  @unique
+  title        String
+  status       String   @default("draft") // draft, agreed
+  notes        String?
+  agreedAt     DateTime?
+  agreedBy     String?
+  createdBy    String?
+  updatedBy    String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  org        Organisation @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  project    Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  commitment Commitment?  @relation(fields: [commitmentId], references: [id], onDelete: Cascade)
+  bidPackage BidPackage?  @relation(fields: [bidPackageId], references: [id], onDelete: Cascade)
+  items      ScopeMatrixItem[]
+
+  @@index([orgId])
+  @@index([projectId, status])
+}
+
+/**
+ * One statement about scope.
+ *
+ * `kind` keeps the five lists the brief asks for in one table, because they
+ * are all statements about the same boundary and the contract generator walks
+ * them in a single pass. Only scope and responsibility rows carry a party.
+ */
+model ScopeMatrixItem {
+  id             String   @id @default(uuid())
+  orgId          String
+  projectId      String
+  matrixId       String
+  // scope, responsibility, inclusion, exclusion, clarification, interface
+  kind           String   @default("scope")
+  section        String?
+  description    String
+  // gc, subcontractor, by_others, shared, not_applicable — null on the list
+  // kinds, which are statements rather than allocations.
+  responsibility String?
+  notes          String?
+  sortOrder      Int      @default(0)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  org     Organisation @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  project Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  matrix  ScopeMatrix  @relation(fields: [matrixId], references: [id], onDelete: Cascade)
+
+  @@index([orgId])
+  @@index([matrixId, kind, sortOrder])
 }
 
 // ─── Subcontractor payment applications (OCTA-FIN-SUBPAY-021) ──────────────
@@ -7526,6 +7602,7 @@ model BidPackage {
   invitations  BidInvitation[]
   questions    BidQuestion[]
   bids         Bid[]
+  scopeMatrix  ScopeMatrix?
 
   @@unique([projectId, ref])
   @@index([orgId, status])

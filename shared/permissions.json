@@ -694,7 +694,9 @@
         "commitment.close": ["pm", "finance"],
         "commitment.void": ["pm"],
         "commitment_co.submit": ["pm", "qs", "procurement"],
-        "commitment_co.approve": ["pm"]
+        "commitment_co.approve": ["pm"],
+        "scope.manage": ["pm", "qs", "procurement"],
+        "scope.agree": ["pm", "qs"]
       }
     },
     "sub_pay_app": {

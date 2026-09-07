@@ -43,6 +43,7 @@ import { useVendors } from '@/features/company/hooks/use-company'
 import { useProjectCostCodes } from '@/features/cost/hooks/use-budget'
 import { CustomFieldsPanel } from '@/features/custom-fields/components/custom-fields-panel'
 import { WorkflowInstancePanel } from '@/features/workflows/components/workflow-instance-panel'
+import { ScopeMatrixPanel } from './scope-matrix-panel'
 import {
   COMMITMENT_STATUS_LABEL,
   INSURANCE_LABEL,
@@ -1332,6 +1333,15 @@ export function CommitmentDetailDialog({
                   canApprove={canCoApprove}
                   formatMoney={formatMoney}
                 />
+                {/* Scope boundaries, agreed before the subcontract is written
+                    (OCTA-SUB-SCOPE-054). Purchase-order commitments buy a
+                    thing rather than a package of work, so they have none. */}
+                {commitment.type === 'subcontract' && (
+                  <ScopeMatrixPanel
+                    projectId={projectId}
+                    commitmentId={commitment.id}
+                  />
+                )}
                 {commitment.procurementOrders.length > 0 && (
                   <div className='space-y-1'>
                     <p className='text-sm font-medium'>
