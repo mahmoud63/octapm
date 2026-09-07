@@ -82,6 +82,7 @@ const out = (row, { detail = false } = {}) => ({
   vendorCompanyId: row.vendorCompanyId || null,
   vendorName: row.vendorName || row.vendorCompany?.name || null,
   invoiceNumber: row.invoiceNumber || null,
+  purchaseOrderId: row.purchaseOrderId || null,
   description: row.description,
   costDate: dateKey(row.costDate),
   dueDate: dateKey(row.dueDate),
@@ -131,7 +132,7 @@ const load = async ({ orgId, projectId, directCostId, tx = prisma }) => {
   return row;
 };
 
-const normalizeHeader = async ({ orgId, payload, existing = null }) => {
+const normalizeHeader = async ({ orgId, projectId = null, payload, existing = null }) => {
   const pick = (key, fallback = null) => (payload[key] !== undefined ? payload[key] : existing ? existing[key] : fallback);
   const type = pick("type", "invoice");
   if (!TYPES.includes(type)) throw new HttpError(400, "DIRECT_COST_TYPE_INVALID", `Type must be one of ${TYPES.join(", ")}`);
@@ -146,8 +147,22 @@ const normalizeHeader = async ({ orgId, payload, existing = null }) => {
   }
   const tax = round2(pick("tax", 0));
   if (tax < 0) throw new HttpError(400, "DIRECT_COST_TAX_INVALID", "Tax cannot be negative");
+  // A supplier invoice against a purchase order (OCTA-COM-PO-053): the link is
+  // what lets the order say how much of it has been billed, and what the
+  // three-way match compares.
+  const purchaseOrderId = trimOrNull(pick("purchaseOrderId"));
+  if (purchaseOrderId && projectId) {
+    const order = await prisma.procurementOrder.findFirst({
+      where: { id: purchaseOrderId, projectId },
+      select: { id: true },
+    });
+    if (!order) {
+      throw new HttpError(400, "DIRECT_COST_PO_INVALID", "That purchase order is not on this project");
+    }
+  }
   return {
     type,
+    purchaseOrderId,
     description: description.slice(0, 2000),
     vendorCompanyId,
     vendorName: vendorName?.slice(0, 200) || null,
@@ -191,6 +206,21 @@ const normalizeLines = async ({ projectId, rows }) => {
     if (amount < 0) throw new HttpError(400, "DIRECT_COST_LINE_AMOUNT", `Line ${index + 1}: the amount cannot be negative`);
     return { id: trimOrNull(row.id), description: description.slice(0, 500), costCodeId, budgetLineId, activityId, costType, quantity, unit: trimOrNull(row.unit)?.slice(0, 20) || null, unitCost, amount, notes: trimOrNull(row.notes)?.slice(0, 1000) || null, sortOrder: index };
   });
+};
+
+/**
+ * Tells a purchase order how much of it has been billed.
+ *
+ * Called after anything that changes what a supplier invoice claims against an
+ * order — created, edited, voided, deleted, or moved to a different order.
+ * The order stores the figure so that listing a hundred of them does not mean
+ * a hundred aggregate queries.
+ */
+const syncPurchaseOrders = async (tx, orderIds) => {
+  const ids = uniqueIds(orderIds);
+  if (!ids.length) return;
+  const { recomputeInvoiced } = require("./purchase-order.service");
+  for (const orderId of ids) await recomputeInvoiced(tx, orderId);
 };
 
 const totalsOf = (lines, tax) => {
@@ -247,7 +277,7 @@ const nextNumber = async (tx, projectId) => ((await tx.directCost.aggregate({ wh
 
 const createDirectCost = async ({ orgId, projectId, payload = {}, actor = null }) => {
   await ensureProject({ orgId, projectId });
-  const header = await normalizeHeader({ orgId, payload });
+  const header = await normalizeHeader({ orgId, projectId, payload });
   const lines = await normalizeLines({ projectId, rows: payload.lines });
   await assertNoDuplicateInvoice({ projectId, vendorCompanyId: header.vendorCompanyId, vendorName: header.vendorName, invoiceNumber: header.invoiceNumber });
   const totals = totalsOf(lines, header.tax);
@@ -255,6 +285,7 @@ const createDirectCost = async ({ orgId, projectId, payload = {}, actor = null }
     const number = await nextNumber(tx, projectId);
     const row = await tx.directCost.create({ data: { ...header, ...totals, orgId, projectId, number, ref: `DC-${String(number).padStart(3, "0")}`, status: STATUS.DRAFT, createdBy: actor?.id || null, updatedBy: actor?.id || null } });
     if (lines.length) await tx.directCostLine.createMany({ data: lines.map(({ id, ...line }) => ({ ...line, orgId, projectId, directCostId: row.id })) });
+    await syncPurchaseOrders(tx, [header.purchaseOrderId]);
     return load({ orgId, projectId, directCostId: row.id, tx });
   });
   await auditService.recordEvent({ orgId, projectId, entityType: "direct_cost", entityId: created.id, action: auditService.ACTIONS.CREATED, actorId: actor?.id || null, summary: { ref: created.ref, type: created.type, vendor: created.vendorName, total: money(created.total), lines: created.lines.length } }).catch(() => null);
@@ -264,7 +295,7 @@ const createDirectCost = async ({ orgId, projectId, payload = {}, actor = null }
 const updateDirectCost = async ({ orgId, projectId, directCostId, payload = {}, actor = null }) => {
   const existing = await load({ orgId, projectId, directCostId });
   if (!EDITABLE.includes(existing.status)) throw new HttpError(409, "DIRECT_COST_LOCKED", `A ${existing.status} direct cost cannot be edited`);
-  const header = await normalizeHeader({ orgId, payload, existing });
+  const header = await normalizeHeader({ orgId, projectId, payload, existing });
   const lines = payload.lines !== undefined ? await normalizeLines({ projectId, rows: payload.lines }) : existing.lines.map((line) => ({ ...line, amount: toNumber(line.amount) }));
   await assertNoDuplicateInvoice({ projectId, vendorCompanyId: header.vendorCompanyId, vendorName: header.vendorName, invoiceNumber: header.invoiceNumber, excludeId: directCostId });
   const totals = totalsOf(lines, header.tax);
@@ -274,6 +305,8 @@ const updateDirectCost = async ({ orgId, projectId, directCostId, payload = {}, 
       await tx.directCostLine.deleteMany({ where: { directCostId } });
       if (lines.length) await tx.directCostLine.createMany({ data: lines.map(({ id, costCode, budgetLine, activity, postedAmount, createdAt, updatedAt, directCostId: _d, orgId: _o, projectId: _p, ...line }) => ({ ...line, orgId, projectId, directCostId })) });
     }
+    // Both orders, in case the invoice was moved from one to another.
+    await syncPurchaseOrders(tx, [existing.purchaseOrderId, header.purchaseOrderId]);
     return load({ orgId, projectId, directCostId, tx });
   });
   await auditService.recordEvent({ orgId, projectId, entityType: "direct_cost", entityId: directCostId, action: auditService.ACTIONS.UPDATED, actorId: actor?.id || null, summary: { ref: updated.ref, total: money(updated.total), lines: updated.lines.length } }).catch(() => null);
@@ -284,6 +317,7 @@ const deleteDirectCost = async ({ orgId, projectId, directCostId, actor = null }
   const existing = await load({ orgId, projectId, directCostId });
   if (existing.status !== STATUS.DRAFT) throw new HttpError(409, "DIRECT_COST_LOCKED", "Only draft direct costs can be deleted — void it instead");
   await prisma.directCost.delete({ where: { id: directCostId } });
+  await syncPurchaseOrders(prisma, [existing.purchaseOrderId]);
   await auditService.recordEvent({ orgId, projectId, entityType: "direct_cost", entityId: directCostId, action: auditService.ACTIONS.DELETED, actorId: actor?.id || null, summary: { ref: existing.ref } }).catch(() => null);
   return { deleted: true };
 };
@@ -373,6 +407,8 @@ const voidDirectCost = async ({ orgId, projectId, directCostId, payload = {}, ac
       reversed = round2(reversed + posted);
     }
     await tx.directCost.update({ where: { id: directCostId }, data: { status: STATUS.VOID, voidReason: reason.slice(0, 1000), voidedAt: new Date(), updatedBy: actor?.id || null } });
+    // A voided invoice is no longer a claim on the order.
+    await syncPurchaseOrders(tx, [existing.purchaseOrderId]);
     return { reversed, row: await load({ orgId, projectId, directCostId, tx }) };
   });
   await auditService.recordEvent({ orgId, projectId, entityType: "direct_cost", entityId: directCostId, action: auditService.ACTIONS.STATUS_CHANGED, actorId: actor?.id || null, summary: { ref: row.row.ref, from: existing.status, to: STATUS.VOID, reversed: row.reversed, reason: reason.slice(0, 200) } }).catch(() => null);

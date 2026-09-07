@@ -22,6 +22,9 @@ const validators = (partial = false) => [
   body("vendorCompanyId").optional({ nullable: true }).isString(),
   body("vendorName").optional({ nullable: true }).isString().isLength({ max: 200 }),
   body("invoiceNumber").optional({ nullable: true }).isString().isLength({ max: 80 }),
+  // The purchase order this invoice is against, so the order can say how much
+  // of it has been billed and the three-way match has something to compare.
+  body("purchaseOrderId").optional({ nullable: true }).isUUID(),
   date("dueDate"),
   date("receivedDate"),
   body("tax").optional({ nullable: true }).isFloat({ min: 0 }),

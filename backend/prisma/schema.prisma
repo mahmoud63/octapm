@@ -2732,7 +2732,38 @@ model ProcurementOrder {
   ref             String
   item            String
   supplier        String?
-  status          String    @default("planned") // planned, draft, issued, partial, received, closed, cancelled
+  // The commercial lifecycle. Fulfilment lives on warehouseStatus and billing
+  // on invoiceStatus, because an order that is fully delivered and half
+  // invoiced cannot pick one of those as "the" status. The API derives a
+  // single lifecycleStatus from all three for anyone who wants one word
+  // (OCTA-COM-PO-053).
+  status          String    @default("planned") // planned, draft, pending_approval, approved, issued, acknowledged, closed, cancelled
+  // not_invoiced, partially_invoiced, fully_invoiced
+  invoiceStatus   String    @default("not_invoiced")
+  invoicedAmount  Decimal   @default(0) @db.Decimal(18, 2)
+  subtotal        Decimal   @default(0) @db.Decimal(18, 2)
+  taxRate         Float     @default(0)
+  taxAmount       Decimal   @default(0) @db.Decimal(18, 2)
+  deliveryLocationId String?
+  deliveryAddress String?
+  deliveryTerms   String?
+  paymentTerms    String?
+  submittedAt     DateTime?
+  submittedBy     String?
+  approvedAt      DateTime?
+  approvedBy      String?
+  rejectedAt      DateTime?
+  rejectedBy      String?
+  rejectedReason  String?
+  // The supplier confirming the order, and under their own reference.
+  acknowledgedAt  DateTime?
+  acknowledgedBy  String?
+  acknowledgedRef String?
+  cancelledAt     DateTime?
+  cancelledBy     String?
+  cancelReason    String?
+  closedAt        DateTime?
+  closedBy        String?
   leadWeeks       Int       @default(0)
   requiredTiming  String    @default("activity_start") // activity_start, activity_finish
   needOffsetDays  Int       @default(0)
@@ -2758,6 +2789,7 @@ model ProcurementOrder {
   package              ProcurementPackage?        @relation(fields: [packageId], references: [id], onDelete: SetNull)
   supplierRef          ProcurementSupplier?       @relation(fields: [supplierId], references: [id], onDelete: SetNull)
   commitment           Commitment?                @relation(fields: [commitmentId], references: [id], onDelete: SetNull)
+  deliveryLocation     Location?                  @relation("PurchaseOrderDeliveryLocation", fields: [deliveryLocationId], references: [id], onDelete: SetNull)
   lines                ProcurementPoLine[]
   deliveryReceipts     DeliveryReceipt[]
   leadTimeAlerts       ProcurementLeadTimeAlert[]
@@ -2769,8 +2801,10 @@ model ProcurementOrder {
   @@index([packageId])
   @@index([supplierId])
   @@index([commitmentId])
+  @@index([deliveryLocationId])
   @@index([projectId, status])
   @@index([projectId, warehouseStatus])
+  @@index([projectId, invoiceStatus])
 }
 
 model ProcurementPoLine {
@@ -4533,6 +4567,7 @@ model Location {
   timeEntries TimeEntry[]
   changeEvents ChangeEvent[]
   lookaheadItems LookaheadItem[]
+  procurementOrders ProcurementOrder[] @relation("PurchaseOrderDeliveryLocation")
 
   @@unique([projectId, code])
   @@index([orgId])

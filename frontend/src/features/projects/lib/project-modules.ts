@@ -12,6 +12,7 @@ export type ModuleKey =
   | 'siteReporting'
   | 'cost'
   | 'commercial'
+  | 'procurement'
   | 'quality'
   | 'docControl'
   | 'meetings'
@@ -29,6 +30,7 @@ export type ModuleWithChildren =
   | 'schedule'
   | 'cost'
   | 'commercial'
+  | 'procurement'
   | 'quality'
   | 'docControl'
 
@@ -40,6 +42,7 @@ export const MODULE_SLUGS: Record<ModuleKey, string> = {
   siteReporting: 'site-reporting',
   cost: 'cost',
   commercial: 'commercial',
+  procurement: 'procurement',
   quality: 'quality',
   docControl: 'doc-control',
   meetings: 'meetings',
@@ -64,6 +67,7 @@ export const DEFAULT_CHILD: Record<ModuleWithChildren, string> = {
   schedule: 'gantt',
   cost: 'overview',
   commercial: 'change-orders',
+  procurement: 'purchase-orders',
   quality: 'ncr',
   docControl: 'rfi',
 }
@@ -100,6 +104,7 @@ export const MODULE_PERMISSIONS: Partial<
   siteReporting: ['progress'],
   cost: ['cost'],
   commercial: ['change_order', 'ipc', 'eot', 'commitment', 'sub_pay_app'],
+  procurement: ['procurement'],
   quality: ['ncr', 'safety', 'punch', 'inspection'],
   docControl: ['document_control', 'rfi', 'submittal'],
   meetings: ['meeting'],

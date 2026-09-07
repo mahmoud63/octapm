@@ -29,6 +29,7 @@ describe("record-links", () => {
       "site-reporting",
       "cost",
       "commercial",
+      "procurement",
       "quality",
       "doc-control",
       "meetings",

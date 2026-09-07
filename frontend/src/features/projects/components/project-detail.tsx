@@ -100,6 +100,11 @@ const CommercialDashboard = lazy(() =>
     default: m.CommercialDashboard,
   }))
 )
+const ProcurementDashboard = lazy(() =>
+  import('@/features/procurement/components/procurement-dashboard').then((m) => ({
+    default: m.ProcurementDashboard,
+  }))
+)
 const QualityDashboard = lazy(() =>
   import('@/features/quality/components/quality-dashboard').then((m) => ({
     default: m.QualityDashboard,
@@ -302,6 +307,14 @@ export function ProjectDetail({
         ],
       },
       {
+        key: 'procurement',
+        label: 'Procurement',
+        children: [
+          { key: 'purchase-orders', label: 'Purchase Orders' },
+          { key: 'suppliers', label: 'Suppliers' },
+        ],
+      },
+      {
         key: 'quality',
         label: 'Quality',
         children: [
@@ -373,6 +386,7 @@ export function ProjectDetail({
     schedule: childFor('schedule'),
     cost: childFor('cost'),
     commercial: childFor('commercial'),
+    procurement: childFor('procurement'),
     quality: childFor('quality'),
     docControl: childFor('docControl'),
   }
@@ -506,6 +520,20 @@ export function ProjectDetail({
           <div className='rounded-md border p-6 text-sm text-muted-foreground'>
             Generate a schedule first to access commercial modules.
           </div>
+        )
+
+      case 'procurement':
+        return (
+          <ProcurementDashboard
+            projectId={projectId}
+            activeTab={childState.procurement}
+            onTabChange={(value: string) => setModuleChild('procurement', value)}
+            initialOrderId={
+              initialTarget?.source === 'procurement_order'
+                ? initialTarget.recordId
+                : undefined
+            }
+          />
         )
 
       case 'quality':

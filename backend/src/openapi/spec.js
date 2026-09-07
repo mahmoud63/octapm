@@ -8022,6 +8022,148 @@ add(
   }),
 );
 
+// ─── the purchase order lifecycle (OCTA-COM-PO-053) ────────────────────────
+
+const poStatuses = [
+  "planned",
+  "draft",
+  "pending_approval",
+  "approved",
+  "issued",
+  "acknowledged",
+  "closed",
+  "cancelled",
+];
+const poOrderIdParam = pathParam("orderId", "Purchase order UUID.");
+
+add(
+  "/projects/{projectId}/purchase-orders",
+  "get",
+  operation({
+    tag: "Procurement",
+    summary:
+      "Purchase orders with their three states — commercial status, delivery, and billing — plus a derived lifecycleStatus of draft / pending_approval / approved / issued / acknowledged / partially_delivered / delivered / partially_invoiced / fully_invoiced / closed / cancelled.",
+    description:
+      "An order that is fully delivered and half invoiced cannot pick one word, so the three facts are stored separately and the single name is computed from them.",
+    operationId: "listPurchaseOrders",
+    parameters: [
+      ...projectParams,
+      queryParam("status", "Filter by commercial status.", {
+        type: "string",
+        enum: poStatuses,
+      }),
+      queryParam("supplierId", "Filter by supplier.", uuid),
+    ],
+    permissions: modulePermission("procurement", "read"),
+  }),
+);
+
+add(
+  "/projects/{projectId}/purchase-orders/{orderId}",
+  "get",
+  operation({
+    tag: "Procurement",
+    summary: "One purchase order with its lines, delivery receipts and supplier invoices.",
+    operationId: "getPurchaseOrder",
+    parameters: [...projectParams, poOrderIdParam],
+    permissions: modulePermission("procurement", "read"),
+  }),
+);
+
+add(
+  "/projects/{projectId}/purchase-orders/{orderId}",
+  "patch",
+  operation({
+    tag: "Procurement",
+    summary:
+      "Edit the order header while it is planned, draft or pending approval. The value is never sent: it is recomputed from the lines and the tax rate.",
+    operationId: "updatePurchaseOrder",
+    parameters: [...projectParams, poOrderIdParam],
+    permissions: modulePermission("procurement", "update", "po.issue"),
+    requestBody: jsonBody(
+      objectSchema({
+        item: { type: "string" },
+        supplierId: nullableUuid,
+        supplier: { type: "string", nullable: true },
+        buyer: { type: "string", nullable: true },
+        deliveryLocationId: nullableUuid,
+        deliveryAddress: { type: "string", nullable: true },
+        deliveryTerms: { type: "string", nullable: true },
+        paymentTerms: { type: "string", nullable: true },
+        taxRate: { type: "number", minimum: 0, maximum: 100 },
+        requiredBy: nullableDateString,
+        promisedDate: nullableDateString,
+        notes: { type: "string", nullable: true },
+      }),
+      "Header fields to change.",
+      false,
+    ),
+  }),
+);
+
+[
+  [
+    "submit",
+    "submitPurchaseOrder",
+    "Send the order for approval. Refused without lines, a supplier, and a required-on-site date.",
+    "submit",
+    "po.submit",
+  ],
+  ["approve", "approvePurchaseOrder", "Approve the order.", "approve", "po.approve"],
+  [
+    "reject",
+    "rejectPurchaseOrder",
+    "Send the order back to draft with a reason saying what needs to change.",
+    "approve",
+    "po.approve",
+  ],
+  ["issue", "issuePurchaseOrder", "Issue the approved order to the supplier.", "update", "po.issue"],
+  [
+    "acknowledge",
+    "acknowledgePurchaseOrder",
+    "Record the supplier confirming the order, optionally under their own reference.",
+    "update",
+    "po.acknowledge",
+  ],
+  [
+    "cancel",
+    "cancelPurchaseOrder",
+    "Cancel the order with a reason. Refused once any of it has been delivered — close it instead.",
+    "delete",
+    "po.cancel",
+  ],
+  [
+    "close",
+    "closePurchaseOrder",
+    "Close the order. Refused while deliveries are outstanding unless force is set and a reason is given.",
+    "update",
+    "po.close",
+  ],
+].forEach(([suffix, operationId, summary, action, transition]) => {
+  add(
+    `/projects/{projectId}/purchase-orders/{orderId}/${suffix}`,
+    "post",
+    operation({
+      tag: "Procurement",
+      summary,
+      operationId,
+      parameters: [...projectParams, poOrderIdParam],
+      permissions: modulePermission("procurement", action, transition),
+      requestBody: jsonBody(
+        objectSchema({
+          reason: { type: "string", nullable: true },
+          ...(suffix === "acknowledge"
+            ? { acknowledgedRef: { type: "string", nullable: true } }
+            : {}),
+          ...(suffix === "close" ? { force: { type: "boolean" } } : {}),
+        }),
+        "Transition payload.",
+        false,
+      ),
+    }),
+  );
+});
+
 add(
   "/projects/{projectId}/procurement/purchase-orders",
   "post",

@@ -51,7 +51,9 @@ const RECORD_WORKSPACE = Object.freeze({
   weather_delay: { module: "commercial", child: "weather" },
   meeting: { module: "meetings" },
   meeting_action: { module: "meetings" },
-  procurement_order: { module: "schedule", child: "longLead" },
+  // Purchase orders now have a home of their own (OCTA-COM-PO-053); packages
+  // are still planned against the schedule's long-lead view.
+  procurement_order: { module: "procurement", child: "purchase-orders" },
   procurement_package: { module: "schedule", child: "longLead" },
   delivery_receipt: { module: "schedule", child: "longLead" },
   cost_record: { module: "cost", child: "activity" },

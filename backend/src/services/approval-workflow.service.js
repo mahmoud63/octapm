@@ -17,6 +17,7 @@ const RECORD_TYPES = Object.freeze({
   NCR: "ncr",
   SAFETY_INCIDENT: "safety_incident",
   RISK: "risk",
+  PROCUREMENT_ORDER: "procurement_order",
 });
 
 const ACTIONS = Object.freeze({
@@ -535,6 +536,60 @@ const TRANSITIONS = Object.freeze({
       to: "archived",
       action: ACTIONS.ARCHIVED,
       decision: DECISIONS.ARCHIVED,
+    }),
+  ],
+  // The purchase order's commercial lifecycle (OCTA-COM-PO-053). Delivery and
+  // billing are separate states on the order and do not pass through here.
+  [RECORD_TYPES.PROCUREMENT_ORDER]: [
+    rule({
+      from: null,
+      to: ["planned", "draft"],
+      action: ACTIONS.CREATED,
+      decision: DECISIONS.CREATED,
+    }),
+    rule({
+      from: ["planned", "draft"],
+      to: "pending_approval",
+      action: ACTIONS.SUBMITTED,
+      decision: DECISIONS.SUBMITTED,
+    }),
+    rule({
+      from: "pending_approval",
+      to: "approved",
+      action: ACTIONS.APPROVED,
+      decision: DECISIONS.APPROVED,
+    }),
+    rule({
+      from: ["pending_approval", "approved"],
+      to: "draft",
+      action: ACTIONS.REJECTED,
+      decision: DECISIONS.REJECTED,
+      requireReason: true,
+    }),
+    rule({
+      from: "approved",
+      to: "issued",
+      action: ACTIONS.STATUS_CHANGED,
+      decision: DECISIONS.STATUS_CHANGED,
+    }),
+    rule({
+      from: "issued",
+      to: "acknowledged",
+      action: ACTIONS.STATUS_CHANGED,
+      decision: DECISIONS.STATUS_CHANGED,
+    }),
+    rule({
+      from: ["issued", "acknowledged"],
+      to: "closed",
+      action: ACTIONS.CLOSED,
+      decision: DECISIONS.CLOSED,
+    }),
+    rule({
+      from: ["planned", "draft", "pending_approval", "approved", "issued", "acknowledged"],
+      to: "cancelled",
+      action: ACTIONS.ARCHIVED,
+      decision: DECISIONS.ARCHIVED,
+      requireReason: true,
     }),
   ],
 });

@@ -373,6 +373,11 @@ router.use(
   nestedProjectAccess,
   require("./procurement"),
 );
+router.use(
+  "/:projectId/purchase-orders",
+  nestedProjectAccess,
+  require("./purchase-orders"),
+);
 router.use("/:projectId/cost", nestedProjectAccess, require("./cost"));
 router.use("/:projectId/budget", nestedProjectAccess, require("./budget"));
 router.use("/:projectId/commitments", nestedProjectAccess, require("./commitments"));

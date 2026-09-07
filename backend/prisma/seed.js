@@ -562,7 +562,14 @@ const MATERIAL_PLAN = [
  */
 async function purgeTestResidue(orgId) {
   const orders = await prisma.procurementOrder.findMany({
-    where: { ref: { startsWith: "PO-E2E-" } },
+    where: {
+      OR: [
+        // Goods-receipt tests raise their own order per run.
+        { ref: { startsWith: "PO-E2E-" } },
+        // Purchase-order lifecycle tests do the same.
+        { ref: { startsWith: "PO-LC-" } },
+      ],
+    },
     select: { id: true },
   });
   const orderIds = orders.map((order) => order.id);
@@ -575,7 +582,7 @@ async function purgeTestResidue(orgId) {
   }
 
   const items = await prisma.inventoryItem.findMany({
-    where: { orgId, sku: { startsWith: "E2E-" } },
+    where: { orgId, OR: [{ sku: { startsWith: "E2E-" } }, { sku: { startsWith: "LC-" } }] },
     select: { id: true },
   });
   const itemIds = items.map((item) => item.id);

@@ -939,10 +939,10 @@ const createPurchaseOrder = async ({ orgId, projectId, actor, payload }) => {
       0,
     );
 
-    await tx.procurementOrder.update({
-      where: { id: order.id },
-      data: { value: toMoneyDecimal(value) },
-    });
+    // The order's subtotal, tax and value all follow the lines
+    // (OCTA-COM-PO-053). One place computes them so a new order and an edited
+    // one cannot disagree.
+    await require('./purchase-order.service').recomputeTotals(tx, order.id);
 
     await recordAudit({
       tx,
