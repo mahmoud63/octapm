@@ -26,6 +26,7 @@ import {
 } from '@/components/ui/table'
 import { Textarea } from '@/components/ui/textarea'
 import { CompanySection } from './components/company-section'
+import { PrequalificationPanel } from './components/prequalification-panel'
 import {
   useCreateVendor,
   useUpdateVendor,
@@ -34,6 +35,7 @@ import {
   type CompanyDirectoryEntry,
   type VendorPayload,
 } from './hooks/use-company'
+import { prequalLabel, type PrequalStatus } from './hooks/use-prequalification'
 
 type Draft = {
   name: string
@@ -97,6 +99,36 @@ const toPayload = (draft: Draft): VendorPayload => ({
   notes: draft.notes.trim() || null,
   status: draft.status,
 })
+
+/**
+ * The prequalification state, on the row where somebody picks a
+ * subcontractor. "Not assessed" is a finding, so it is shown rather than left
+ * blank.
+ */
+function PrequalBadge({
+  state,
+  score,
+}: {
+  state: PrequalStatus
+  score: number | null
+}) {
+  const tone =
+    state === 'approved' || state === 'conditionally_approved'
+      ? 'default'
+      : state === 'rejected' || state === 'expired'
+        ? 'destructive'
+        : 'outline'
+  return (
+    <span className='flex items-center gap-1.5'>
+      <Badge variant={tone} data-testid={`uat-vendor-prequal-${state}`}>
+        {prequalLabel[state]}
+      </Badge>
+      {score !== null && (
+        <span className='text-xs tabular-nums text-muted-foreground'>{score}</span>
+      )}
+    </span>
+  )
+}
 
 function VendorDialog({
   vendor,
@@ -253,6 +285,12 @@ function VendorDialog({
             />
           </div>
         </div>
+        {/* Prequalification is only meaningful for a company that exists. */}
+        {vendor && (
+          <div className='mt-2'>
+            <PrequalificationPanel companyId={vendor.id} canManage />
+          </div>
+        )}
         <DialogFooter>
           <Button
             variant='outline'
@@ -398,6 +436,14 @@ export function CompanyVendors() {
             onChange={(event) => setSearch(event.target.value)}
             className='max-w-xs'
           />
+          {data && (
+            <span
+              className='text-xs text-muted-foreground'
+              data-testid='uat-vendor-qualified-count'
+            >
+              {data.summary.qualified} of {data.summary.total} prequalified
+            </span>
+          )}
           {data?.summary.trades.map(({ trade: value, count }) => (
             <button
               key={value}
@@ -420,6 +466,7 @@ export function CompanyVendors() {
                 <TableRow>
                   <TableHead>Vendor</TableHead>
                   <TableHead>Trades</TableHead>
+                  <TableHead>Prequalification</TableHead>
                   <TableHead>Contact</TableHead>
                   <TableHead className='text-right'>Reliability</TableHead>
                   <TableHead className='text-right'>Used on</TableHead>
@@ -431,7 +478,7 @@ export function CompanyVendors() {
                 {items.length === 0 ? (
                   <TableRow>
                     <TableCell
-                      colSpan={7}
+                      colSpan={8}
                       className='text-center text-muted-foreground'
                     >
                       No vendors yet. Add one, or they appear automatically when
@@ -455,6 +502,12 @@ export function CompanyVendors() {
                             </Badge>
                           ))}
                         </div>
+                      </TableCell>
+                      <TableCell>
+                        <PrequalBadge
+                          state={vendor.prequalification?.status ?? 'not_assessed'}
+                          score={vendor.prequalification?.score ?? null}
+                        />
                       </TableCell>
                       <TableCell className='text-xs'>
                         <div>{vendor.contactName || '—'}</div>

@@ -148,6 +148,7 @@ model Organisation {
   scopeMatrixItems    ScopeMatrixItem[]
   subcontractCloseouts SubcontractCloseout[]
   closeoutItems       CloseoutItem[]
+  vendorPrequalifications VendorPrequalification[]
 }
 
 model User {
@@ -353,6 +354,7 @@ model Company {
 
   org              Organisation        @relation(fields: [orgId], references: [id], onDelete: Cascade)
   memberships      CompanyMembership[]
+  prequalification VendorPrequalification?
   projectParties   ProjectParty[]
   invitationTokens InvitationToken[]
   procurementSuppliers ProcurementSupplier[]
@@ -7906,4 +7908,74 @@ model ContractProfile {
   project Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
 
   @@index([orgId])
+}
+
+// ─── Subcontractor prequalification (OCTA-SUB-PREQUAL-057) ───
+/**
+ * One assessment per vendor company, held at the organisation rather than the
+ * project: a subcontractor is qualified once and that answer is reused on
+ * every project they are invited to.
+ *
+ * The status a person records is draft, under_review, approved,
+ * conditionally_approved or rejected. "Expired" is never stored — it is read
+ * from validUntil and from the criteria that carry their own expiry, so a
+ * qualification granted on a licence that lapses stops counting on the day it
+ * lapses rather than on the day somebody notices.
+ */
+model VendorPrequalification {
+  id               String    @id @default(uuid())
+  orgId            String
+  companyId        String    @unique
+  status           String    @default("draft")
+  score            Decimal?  @db.Decimal(5, 2)
+  recommendation   String? // what the score suggested, kept so a decision against it is visible
+  validUntil       DateTime?
+  singleAwardLimit Decimal?  @db.Decimal(18, 2)
+  conditions       String?
+  decisionNote     String?
+  submittedAt      DateTime?
+  decidedAt        DateTime?
+  decidedBy        String?
+  createdBy        String?
+  updatedBy        String?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  org      Organisation       @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  company  Company            @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  criteria PrequalCriterion[]
+
+  @@index([orgId, status])
+  @@index([orgId, validUntil])
+}
+
+/**
+ * One scored line of the assessment. The weights sum to 100, each line is
+ * scored out of maxScore, and the qualification score is the weighted total.
+ * A line that carries an expiry (insurance, trade licences) also caps the
+ * qualification: cover that lapses in March cannot qualify anybody in April.
+ */
+model PrequalCriterion {
+  id         String    @id @default(uuid())
+  orgId      String
+  prequalId  String
+  key        String
+  label      String
+  category   String    @default("capability")
+  weight     Int       @default(10)
+  maxScore   Int       @default(5)
+  score      Int?
+  required   Boolean   @default(true)
+  tracksExpiry Boolean @default(false)
+  reference  String?
+  expiresAt  DateTime?
+  note       String?
+  sortOrder  Int       @default(0)
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  prequalification VendorPrequalification @relation(fields: [prequalId], references: [id], onDelete: Cascade)
+
+  @@unique([prequalId, key])
+  @@index([prequalId])
 }

@@ -600,9 +600,19 @@ async function purgeTestResidue(orgId) {
     where: { orgId, title: { in: ["Scope matrix fixture", "Closeout fixture"] } },
   });
 
-  if (orderIds.length || itemIds.length || fixtures.count) {
+  // Prequalification tests raise a vendor per case, because the gate has to be
+  // read on a company nobody has assessed. Packages go first: the invitations
+  // that point at these vendors hang off them.
+  const packages = await prisma.bidPackage.deleteMany({
+    where: { orgId, title: { startsWith: "E2E Prequal" } },
+  });
+  const vendors = await prisma.company.deleteMany({
+    where: { orgId, name: { startsWith: "E2E Prequal" } },
+  });
+
+  if (orderIds.length || itemIds.length || fixtures.count || vendors.count || packages.count) {
     console.log(
-      `  cleared ${orderIds.length} test purchase orders, ${itemIds.length} test items and ${fixtures.count} test commitments`
+      `  cleared ${orderIds.length} test purchase orders, ${itemIds.length} test items, ${fixtures.count} test commitments, ${packages.count} test bid packages and ${vendors.count} test vendors`
     );
   }
 }
@@ -929,6 +939,87 @@ async function upsertPurchaseOrders({ orgId, projectId, activities, items, userI
  * modification exists" case the over-billing rule turns on. Without this the
  * commitments register, pay applications and the scope matrix all open empty.
  */
+/**
+ * The subcontractor's prequalification (OCTA-SUB-PREQUAL-057).
+ *
+ * Conditionally approved rather than approved, on a score of 82, with the
+ * insurance certificate expiring inside the renewal horizon — so the
+ * prequalification screen opens showing the two things worth showing: a
+ * decision taken against the score's recommendation, and a qualification
+ * whose real expiry is earlier than the date on it.
+ */
+async function upsertPrequalification({ orgId, vendorId, userId }) {
+  const prequalService = require("../src/services/vendor-prequalification.service");
+  const days = (n) => new Date(Date.now() + n * 86_400_000);
+
+  const scores = {
+    financial_capacity: 4,
+    safety_history: 5,
+    experience: 5,
+    references: 4,
+    insurance: 4,
+    licenses: 4,
+    manpower: 4,
+    equipment: 3,
+    quality_history: 4,
+  };
+  const expiries = { insurance: days(38), licenses: days(210) };
+  const references = { insurance: "GL-4471209 · Gulf Mutual", licenses: "LA-CB-77412" };
+
+  const existing = await prisma.vendorPrequalification.findFirst({ where: { companyId: vendorId } });
+  const prequal =
+    existing ??
+    (await prisma.vendorPrequalification.create({
+      data: {
+        orgId,
+        companyId: vendorId,
+        createdBy: userId,
+        updatedBy: userId,
+        criteria: {
+          create: prequalService.CRITERIA.map((entry, index) => ({
+            orgId,
+            key: entry.key,
+            label: entry.label,
+            category: entry.category,
+            weight: entry.weight,
+            maxScore: prequalService.MAX_SCORE,
+            tracksExpiry: Boolean(entry.tracksExpiry),
+            sortOrder: index,
+          })),
+        },
+      },
+    }));
+
+  const criteria = await prisma.prequalCriterion.findMany({ where: { prequalId: prequal.id } });
+  for (const row of criteria) {
+    await prisma.prequalCriterion.update({
+      where: { id: row.id },
+      data: {
+        score: scores[row.key] ?? 4,
+        expiresAt: expiries[row.key] ?? null,
+        reference: references[row.key] ?? null,
+      },
+    });
+  }
+
+  await prisma.vendorPrequalification.update({
+    where: { id: prequal.id },
+    data: {
+      status: "conditionally_approved",
+      // 16 + 15 + 15 + 8 + 8 + 8 + 6.4 + 4.2 + 4
+      score: 84.6,
+      recommendation: "approved",
+      validUntil: days(300),
+      singleAwardLimit: 2500000,
+      conditions: "Second-tier concrete supervisor to be named before mobilisation.",
+      submittedAt: days(-40),
+      decidedAt: days(-35),
+      decidedBy: userId,
+      updatedBy: userId,
+    },
+  });
+}
+
 async function upsertSubcontract({ orgId, projectId, activities, boqItems, userId }) {
   // A full vendor profile, because the agreement is assembled from it: name,
   // registered name, registration and tax numbers, address and contact all
@@ -951,6 +1042,8 @@ async function upsertSubcontract({ orgId, projectId, activities, boqItems, userI
     create: { orgId, name: "Meridian Concrete Services", ...vendorProfile },
     update: vendorProfile,
   });
+
+  await upsertPrequalification({ orgId, vendorId: vendor.id, userId });
 
   const existing = await prisma.commitment.findFirst({
     where: { projectId, ref: "SC-0001" },

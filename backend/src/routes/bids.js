@@ -84,8 +84,8 @@ router.delete("/:packageId/lines/:lineId", write, [packageParam, param("lineId")
 router.post(
   "/:packageId/invitations",
   write,
-  [packageParam, body("invitations").isArray({ min: 1, max: 50 }), body("invitations.*.vendorCompanyId").optional({ nullable: true }).isUUID(), body("invitations.*.companyName").optional({ nullable: true }).isString().trim().isLength({ max: 200 }), body("invitations.*.contactName").optional({ nullable: true }).isString().trim().isLength({ max: 120 }), body("invitations.*.contactEmail").optional({ nullable: true }).isEmail(), validate],
-  asyncHandler(async (req, res) => sendSuccess(res, { items: await service.inviteBidders({ ...scope(req), packageId: req.params.packageId, invitations: req.body.invitations, actor: actor(req) }) }, 201)),
+  [packageParam, body("invitations").isArray({ min: 1, max: 50 }), body("invitations.*.vendorCompanyId").optional({ nullable: true }).isUUID(), body("invitations.*.companyName").optional({ nullable: true }).isString().trim().isLength({ max: 200 }), body("invitations.*.contactName").optional({ nullable: true }).isString().trim().isLength({ max: 120 }), body("invitations.*.contactEmail").optional({ nullable: true }).isEmail(), body("prequalOverrideReason").optional({ nullable: true }).isString().trim().isLength({ max: 500 }), validate],
+  asyncHandler(async (req, res) => sendSuccess(res, { items: await service.inviteBidders({ ...scope(req), packageId: req.params.packageId, invitations: req.body.invitations, prequalOverrideReason: req.body.prequalOverrideReason, actor: actor(req) }) }, 201)),
 );
 
 router.post("/:packageId/invitations/:invitationId/resend", write, [packageParam, param("invitationId").isUUID(), validate], asyncHandler(async (req, res) => sendSuccess(res, await service.resendInvitation({ ...scope(req), packageId: req.params.packageId, invitationId: req.params.invitationId, actor: actor(req) }))));
@@ -135,7 +135,7 @@ router.post("/:packageId/award/revoke", award, [packageParam, validate], asyncHa
 router.post(
   "/:packageId/award/confirm",
   award,
-  [packageParam, body("bidId").optional({ nullable: true }).isUUID(), body("title").optional({ nullable: true }).isString().trim().isLength({ max: 200 }), body("retentionRate").optional({ nullable: true }).isFloat({ min: 0, max: 100 }), body("startDate").optional({ nullable: true }).isISO8601(), body("endDate").optional({ nullable: true }).isISO8601(), validate],
+  [packageParam, body("bidId").optional({ nullable: true }).isUUID(), body("title").optional({ nullable: true }).isString().trim().isLength({ max: 200 }), body("retentionRate").optional({ nullable: true }).isFloat({ min: 0, max: 100 }), body("startDate").optional({ nullable: true }).isISO8601(), body("endDate").optional({ nullable: true }).isISO8601(), body("prequalOverrideReason").optional({ nullable: true }).isString().trim().isLength({ max: 500 }), validate],
   asyncHandler(async (req, res) => sendSuccess(res, await service.confirmAward({ ...scope(req), packageId: req.params.packageId, payload: req.body, actor: actor(req) }), 201)),
 );
 

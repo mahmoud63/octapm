@@ -4,6 +4,7 @@ import type {
   CreateProjectInput,
   Project,
 } from '@/features/projects/data/schema'
+import type { PrequalState } from './use-prequalification'
 
 export interface CompanyDirectoryEntry {
   id: string
@@ -31,6 +32,8 @@ export interface CompanyDirectoryEntry {
   memberCount: number
   projectCount: number
   supplierCount: number
+  /** Present on the vendor list, where choosing a subcontractor happens. */
+  prequalification?: PrequalState | null
   createdAt: string | null
   updatedAt: string | null
 }
@@ -246,7 +249,7 @@ export const useVendors = (
         items: CompanyDirectoryEntry[]
         summary: {
           total: number
-          tags?: never
+          qualified: number
           trades: Array<{ trade: string; count: number }>
         }
       }>('/company/vendors', filters),

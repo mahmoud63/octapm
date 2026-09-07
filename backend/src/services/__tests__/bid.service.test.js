@@ -1,4 +1,4 @@
-const store = { packages: [], lines: [], invitations: [], addenda: [], questions: [], bids: [], bidLines: [], attachments: [], companies: [] };
+const store = { packages: [], lines: [], invitations: [], addenda: [], questions: [], bids: [], bidLines: [], attachments: [], companies: [], prequals: [] };
 let seq = 0;
 const nextId = (prefix) => `${prefix}-${(seq += 1)}`;
 const matches = (row, where = {}) =>
@@ -97,6 +97,7 @@ const mockPrisma = {
   bidLine: table(store.bidLines, "bl"),
   attachment: { ...table(store.attachments, "att"), findMany: jest.fn(async () => store.attachments.map((row) => ({ ...row, document: { id: row.documentId, originalName: "Drawings.pdf", fileName: "d.pdf", mimeType: "application/pdf", sizeBytes: 10, uploadedAt: new Date() } }))) },
   company: table(store.companies, "co"),
+  vendorPrequalification: table(store.prequals, "pq"),
 };
 const mockAudit = { ENTITY_TYPES: { BID_PACKAGE: "bid_package" }, ACTIONS: { CREATED: "created", UPDATED: "updated", STATUS_CHANGED: "status_changed" }, recordEvent: jest.fn(async () => ({})) };
 const mockNotifications = { NOTIFICATION_CATEGORIES: { COMMERCIAL: "commercial" }, createNotifications: jest.fn(async () => ({ created: 1 })) };
@@ -237,7 +238,20 @@ describe("bid management", () => {
     await expect(service.portalSaveBid(tokenA, { notes: "late" })).rejects.toMatchObject({ code: "BID_PACKAGE_NOT_OPEN" });
 
     mockEmail.sendEmail.mockClear();
-    const result = await service.confirmAward({ orgId: ORG, projectId: PROJECT, packageId: pkg.id, payload: { retentionRate: 10 }, actor });
+    // Delta Piling was invited by email, so the company is created at award and
+    // has never been prequalified. That is the last moment before a subcontract
+    // exists, so the gate holds it — and names the reason.
+    await expect(
+      service.confirmAward({ orgId: ORG, projectId: PROJECT, packageId: pkg.id, payload: { retentionRate: 10 }, actor }),
+    ).rejects.toMatchObject({ code: "PREQUAL_AWARD_BLOCKED", message: expect.stringContaining("has not been prequalified") });
+
+    const result = await service.confirmAward({
+      orgId: ORG,
+      projectId: PROJECT,
+      packageId: pkg.id,
+      payload: { retentionRate: 10, prequalOverrideReason: "Assessment under way; award needed to hold the programme." },
+      actor,
+    });
     expect(result.package).toMatchObject({ status: "awarded", awardedBidId: second.bidId, awardedCommitmentId: "commit-1" });
     expect(result.commitment).toEqual({ id: "commit-1", ref: "SC-007", status: "draft" });
     expect(mockCommitments.createCommitment).toHaveBeenCalledWith(expect.objectContaining({ orgId: ORG, projectId: PROJECT, payload: expect.objectContaining({ type: "subcontract", title: "Piling subcontract — Delta Piling", currency: "USD", retentionRate: 10, vendorCompanyId: expect.any(String) }) }));

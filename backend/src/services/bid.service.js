@@ -6,6 +6,7 @@ const { HttpError } = require("../utils/http-error");
 const auditService = require("./audit.service");
 const notificationService = require("./notification.service");
 const emailService = require("./email.service");
+const prequalService = require("./vendor-prequalification.service");
 
 /**
  * Bid management (OCTA-PRE-BID-027).
@@ -178,8 +179,8 @@ const loadPackage = async ({ orgId, projectId, packageId, include = detailInclud
   return row;
 };
 
-const audit = ({ tx = prisma, orgId, projectId, packageId, action, actor, summary, oldStatus = null, newStatus = null }) =>
-  auditService.recordEvent({ tx, orgId, projectId, entityType: auditService.ENTITY_TYPES.BID_PACKAGE || "bid_package", entityId: packageId, action, actorId: actor?.id || null, actorRole: actor?.role || null, oldStatus, newStatus, summary }).catch(() => null);
+const audit = ({ tx = prisma, orgId, projectId, packageId, action, actor, summary, oldStatus = null, newStatus = null, reason = null }) =>
+  auditService.recordEvent({ tx, orgId, projectId, entityType: auditService.ENTITY_TYPES.BID_PACKAGE || "bid_package", entityId: packageId, action, actorId: actor?.id || null, actorRole: actor?.role || null, oldStatus, newStatus, reason, summary }).catch(() => null);
 
 const notifyTeam = ({ orgId, projectId, pkg, actorId = null, event, title, message, priority = "normal", recipientUserIds = [] }) =>
   notificationService.createNotifications({ orgId, projectId, actorId, recipientUserIds: [...new Set([pkg.createdBy, ...recipientUserIds].filter(Boolean))], recipientRoles: ["pm", "procurement"], category: notificationService.NOTIFICATION_CATEGORIES?.COMMERCIAL || "commercial", event, title, message, priority, entityType: "bid_package", entityId: pkg.id, dedupeKeyBase: `${event}:${pkg.id}:${Date.now()}`, actionUrl: `/projects/${projectId}/commercial/bids?recordId=${pkg.id}` }).catch(() => null);
@@ -390,13 +391,27 @@ const emailBidders = async ({ pkg, subject, text, kind = "addendum", extra = nul
   return invitations.length;
 };
 
-const inviteBidders = async ({ orgId, projectId, packageId, invitations = [], actor = null }) => {
+/**
+ * Invites bidders, refusing any vendor from the directory that is not
+ * prequalified (OCTA-SUB-PREQUAL-057) unless a reason is given.
+ *
+ * The gate only bites on vendors the directory knows, because an assessment
+ * is the only thing it can read. A one-off invitation to an email address is
+ * a company nobody has assessed yet — that shows on the package as
+ * "not assessed" rather than being quietly waved through.
+ */
+const inviteBidders = async ({ orgId, projectId, packageId, invitations = [], actor = null, prequalOverrideReason = null }) => {
   const project = await ensureProject({ orgId, projectId });
   const pkg = await loadPackage({ orgId, projectId, packageId, include: { invitations: true } });
   assertEditable(pkg);
   const list = Array.isArray(invitations) ? invitations : [];
   if (!list.length) throw new HttpError(400, "BID_INVITATIONS_REQUIRED", "Add at least one bidder");
   if (pkg.invitations.length + list.length > MAX_INVITATIONS) throw new HttpError(400, "BID_INVITATIONS_TOO_MANY", `At most ${MAX_INVITATIONS} bidders per package`);
+  const unqualified = await prequalService.assertInvitable({
+    orgId,
+    companies: list.map((entry) => ({ companyId: trimOrNull(entry.vendorCompanyId), name: trimOrNull(entry.companyName) || "This vendor" })),
+    override: prequalOverrideReason,
+  });
   const created = [];
   for (const entry of list) {
     let companyName = trimOrNull(entry.companyName);
@@ -419,7 +434,19 @@ const inviteBidders = async ({ orgId, projectId, packageId, invitations = [], ac
     if (pkg.status === STATUS.OPEN) rawToken = await sendInvitationEmail({ pkg, invitation: row, project });
     created.push({ ...row, rawToken });
   }
-  await audit({ orgId, projectId, packageId, action: auditService.ACTIONS.UPDATED, actor, summary: { ref: pkg.ref, invited: created.map((row) => row.companyName) } });
+  await audit({
+    orgId,
+    projectId,
+    packageId,
+    action: auditService.ACTIONS.UPDATED,
+    actor,
+    reason: unqualified.length ? trimOrNull(prequalOverrideReason) : null,
+    summary: {
+      ref: pkg.ref,
+      invited: created.map((row) => row.companyName),
+      ...(unqualified.length ? { prequalificationOverridden: unqualified.map((entry) => entry.name) } : {}),
+    },
+  });
   return created.map((row) => serializeInvitation(row, { token: pkg.status === STATUS.OPEN ? row.rawToken : null }));
 };
 
@@ -828,7 +855,15 @@ const ensureVendorCompany = async ({ tx, orgId, invitation }) => {
   return created.id;
 };
 
-/** Confirms the award: creates the commitment with the SOV from the bid lines and closes the package. */
+/**
+ * Confirms the award: creates the commitment with the SOV from the bid lines
+ * and closes the package.
+ *
+ * The prequalification gate runs again here, on the vendor company that will
+ * actually hold the subcontract, and this time it also checks the award
+ * against any single-award limit a conditional approval set. This is the
+ * second and last chance: after this the commitment exists.
+ */
 const confirmAward = async ({ orgId, projectId, packageId, payload = {}, actor = null }) => {
   const pkg = await loadPackage({ orgId, projectId, packageId });
   if (pkg.status === STATUS.AWARDED) throw new HttpError(409, "BID_PACKAGE_LOCKED", "The package is already awarded");
@@ -846,6 +881,13 @@ const confirmAward = async ({ orgId, projectId, packageId, payload = {}, actor =
   if (!sovLines.length) throw new HttpError(400, "BID_NO_LINES", "The winning bid has no priced lines to build the schedule of values from");
   const commitmentService = require("./commitment.service");
   const vendorCompanyId = await prisma.$transaction((tx) => ensureVendorCompany({ tx, orgId, invitation }));
+  const prequalState = await prequalService.assertAwardable({
+    orgId,
+    companyId: vendorCompanyId,
+    companyName: invitation.companyName,
+    amount: num(bid.total),
+    override: trimOrNull(payload.prequalOverrideReason),
+  });
   const commitment = await commitmentService.createCommitment({
     orgId,
     projectId,
@@ -869,7 +911,24 @@ const confirmAward = async ({ orgId, projectId, packageId, payload = {}, actor =
     await tx.bid.updateMany({ where: { packageId: pkg.id, id: { not: bid.id }, status: BID_STATUS.SUBMITTED }, data: { status: BID_STATUS.UNSUCCESSFUL } });
     return tx.bidPackage.update({ where: { id: pkg.id }, data: { status: STATUS.AWARDED, awardedAt: now, awardedBidId: bid.id, awardedCommitmentId: commitmentId, softAwardBidId: bid.id, closedAt: pkg.closedAt || now, updatedBy: actor?.id || null }, include: detailInclude });
   });
-  await audit({ orgId, projectId, packageId, action: auditService.ACTIONS.STATUS_CHANGED || "status_changed", actor, oldStatus: pkg.status, newStatus: STATUS.AWARDED, summary: { ref: pkg.ref, awardedTo: invitation.companyName, total: num(bid.total), commitmentId, commitmentRef: commitment?.ref || null } });
+  await audit({
+    orgId,
+    projectId,
+    packageId,
+    action: auditService.ACTIONS.STATUS_CHANGED || "status_changed",
+    actor,
+    oldStatus: pkg.status,
+    newStatus: STATUS.AWARDED,
+    reason: trimOrNull(payload.prequalOverrideReason),
+    summary: {
+      ref: pkg.ref,
+      awardedTo: invitation.companyName,
+      total: num(bid.total),
+      commitmentId,
+      commitmentRef: commitment?.ref || null,
+      prequalification: prequalState?.status ?? "not_assessed",
+    },
+  });
   await notifyTeam({ orgId, projectId, pkg, actorId: actor?.id || null, event: "bid.awarded", title: `${pkg.ref} awarded to ${invitation.companyName}`, message: `Commitment ${commitment?.ref || ""} created with ${sovLines.length} schedule-of-values line${sovLines.length === 1 ? "" : "s"}.`, priority: "normal", recipientUserIds: [] });
   const project = await prisma.project.findFirst({ where: { id: projectId }, select: { id: true, name: true } });
   for (const other of row.invitations) {

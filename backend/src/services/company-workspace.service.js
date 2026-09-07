@@ -1,5 +1,6 @@
 const { prisma } = require("../config/db");
 const { HttpError } = require("../utils/http-error");
+const prequalService = require("./vendor-prequalification.service");
 
 /**
  * Company workspace masters (OCTA-ADM-COMPANY-007): directory, vendors, cost
@@ -129,6 +130,11 @@ const listDirectory = async ({ orgId, query = {} }) => {
 
 // ─── Vendors ────────────────────────────────────────────────────────────────
 
+/**
+ * The vendor list, each row carrying its prequalification state
+ * (OCTA-SUB-PREQUAL-057) — the picker is where somebody chooses a
+ * subcontractor, so it is where "not prequalified" has to be visible.
+ */
 const listVendors = async ({ orgId, query = {} }) => {
   const where = { orgId, isVendor: true };
   if (!query.includeInactive) where.status = "active";
@@ -140,12 +146,15 @@ const listVendors = async ({ orgId, query = {} }) => {
     orderBy: [{ name: "asc" }],
     take: 500,
   });
+  const states = await prequalService.statesFor({ orgId, companyIds: rows.map((row) => row.id) });
   const trades = {};
   for (const row of rows) for (const trade of row.trades || []) trades[trade] = (trades[trade] || 0) + 1;
+  const items = rows.map((row) => ({ ...serializeCompany(row), prequalification: states.get(row.id) ?? null }));
   return {
-    items: rows.map(serializeCompany),
+    items,
     summary: {
       total: rows.length,
+      qualified: items.filter((item) => item.prequalification?.qualified).length,
       trades: Object.entries(trades)
         .sort((a, b) => b[1] - a[1])
         .map(([trade, count]) => ({ trade, count })),

@@ -8,6 +8,7 @@ const { subscriptionGate } = require("../middleware/subscription-gate");
 const { validate } = require("../middleware/validate");
 const { moneyBody } = require("../utils/money");
 const companyWorkspaceService = require("../services/company-workspace.service");
+const prequalService = require("../services/vendor-prequalification.service");
 const projectTemplateService = require("../services/project-template.service");
 const formService = require("../services/form.service");
 const submittalWorkflow = require("../services/submittal-workflow.service");
@@ -107,6 +108,108 @@ router.patch(
         vendorId: req.params.id,
         payload: req.body,
         ...actor(req),
+      }),
+    ),
+  ),
+);
+
+// ─── Prequalification (OCTA-SUB-PREQUAL-057) ────────────────────────────────
+// Reads are open — everybody choosing a subcontractor should be able to see
+// whether that subcontractor is qualified. Scoring and deciding need an admin.
+
+router.get(
+  "/prequalification",
+  [query("withinDays").optional().isInt({ min: 1, max: 365 }).toInt(), validate],
+  asyncHandler(async (req, res) =>
+    sendSuccess(
+      res,
+      await prequalService.listStates({ orgId: req.user.orgId, withinDays: req.query.withinDays ?? 60 }),
+    ),
+  ),
+);
+
+router.get(
+  "/vendors/:id/prequalification",
+  [param("id").isUUID(), validate],
+  asyncHandler(async (req, res) =>
+    sendSuccess(
+      res,
+      await prequalService.getPrequalification({
+        orgId: req.user.orgId,
+        companyId: req.params.id,
+        userId: req.user.id,
+      }),
+    ),
+  ),
+);
+
+router.patch(
+  "/vendors/:id/prequalification/criteria/:key",
+  requireCompanyAdmin,
+  [
+    param("id").isUUID(),
+    param("key").isString().trim().isLength({ min: 1, max: 60 }),
+    body("score").optional({ nullable: true }).isInt({ min: 0, max: 5 }).toInt(),
+    body("note").optional({ nullable: true }).isString().trim().isLength({ max: 2000 }),
+    body("reference").optional({ nullable: true }).isString().trim().isLength({ max: 200 }),
+    body("expiresAt").optional({ nullable: true }).isISO8601(),
+    validate,
+  ],
+  asyncHandler(async (req, res) =>
+    sendSuccess(
+      res,
+      await prequalService.scoreCriterion({
+        orgId: req.user.orgId,
+        companyId: req.params.id,
+        key: req.params.key,
+        payload: req.body,
+        userId: req.user.id,
+      }),
+    ),
+  ),
+);
+
+router.post(
+  "/vendors/:id/prequalification/decision",
+  requireCompanyAdmin,
+  [
+    param("id").isUUID(),
+    body("status").isIn(prequalService.DECIDED),
+    body("validUntil").optional({ nullable: true }).isISO8601(),
+    body("conditions").optional({ nullable: true }).isString().trim().isLength({ max: 4000 }),
+    body("decisionNote").optional({ nullable: true }).isString().trim().isLength({ max: 4000 }),
+    moneyBody("singleAwardLimit", { nullable: true }),
+    validate,
+  ],
+  asyncHandler(async (req, res) =>
+    sendSuccess(
+      res,
+      await prequalService.decide({
+        orgId: req.user.orgId,
+        companyId: req.params.id,
+        payload: req.body,
+        userId: req.user.id,
+      }),
+    ),
+  ),
+);
+
+router.post(
+  "/vendors/:id/prequalification/reopen",
+  requireCompanyAdmin,
+  [
+    param("id").isUUID(),
+    body("reason").isString().trim().notEmpty().isLength({ max: 500 }),
+    validate,
+  ],
+  asyncHandler(async (req, res) =>
+    sendSuccess(
+      res,
+      await prequalService.reopen({
+        orgId: req.user.orgId,
+        companyId: req.params.id,
+        reason: req.body.reason,
+        userId: req.user.id,
       }),
     ),
   ),
