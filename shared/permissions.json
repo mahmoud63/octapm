@@ -698,7 +698,9 @@
         "scope.manage": ["pm", "qs", "procurement"],
         "scope.agree": ["pm", "qs"],
         "closeout.manage": ["pm", "qs", "site_engineer"],
-        "closeout.approve": ["pm", "qs"]
+        "closeout.approve": ["pm", "qs"],
+        "evaluation.manage": ["pm", "qs", "site_engineer"],
+        "evaluation.approve": ["pm", "qs"]
       }
     },
     "sub_pay_app": {

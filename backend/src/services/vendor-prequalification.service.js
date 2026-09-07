@@ -337,12 +337,31 @@ const ensurePrequalification = async ({ orgId, companyId, userId = null }) => {
   });
 };
 
+/**
+ * The assessment, with what their finished subcontracts actually said about
+ * them (OCTA-SUB-PERF-058) beside it.
+ *
+ * This is the loop the two stages exist to close: performance is scored at
+ * closeout so that it turns up here, where somebody is deciding whether to
+ * qualify them again. Shown, not auto-filled — the evidence belongs on the
+ * screen, but the judgement is still a person's.
+ */
 const getPrequalification = async ({ orgId, companyId, userId = null }) => {
   const [company, record] = await Promise.all([
     loadCompany({ orgId, companyId }),
     ensurePrequalification({ orgId, companyId, userId }),
   ]);
-  return serialize(record, { company });
+  const evaluationService = require("./subcontractor-evaluation.service");
+  const history = await evaluationService.historyFor({ orgId, companyIds: [companyId] });
+  return {
+    ...serialize(record, { company }),
+    performance: history.get(companyId) ?? {
+      evaluations: 0,
+      score: null,
+      wouldReuse: null,
+      lastEvaluatedAt: null,
+    },
+  };
 };
 
 // ─── scoring a criterion ───────────────────────────────────────────────────

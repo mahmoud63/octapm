@@ -1,4 +1,4 @@
-const store = { prequals: [], criteria: [], companies: [], audits: [] };
+const store = { prequals: [], criteria: [], companies: [], audits: [], evaluations: [] };
 let seq = 0;
 const nextId = (prefix) => `${prefix}-${(seq += 1)}`;
 
@@ -57,6 +57,11 @@ const mockPrisma = {
       return row;
     }),
   },
+  // The assessment now carries what their finished subcontracts said about
+  // them, so reading one reads the evaluations too.
+  subcontractorEvaluation: {
+    findMany: jest.fn(async ({ where } = {}) => store.evaluations.filter((row) => matches(row, where))),
+  },
   authAuditEvent: { create: jest.fn(async ({ data }) => (store.audits.push(data), data)) },
 };
 
@@ -78,10 +83,7 @@ const future = (days) => new Date(Date.now() + days * 86_400_000).toISOString();
 const past = (days) => new Date(Date.now() - days * 86_400_000).toISOString();
 
 beforeEach(() => {
-  store.prequals.length = 0;
-  store.criteria.length = 0;
-  store.companies.length = 0;
-  store.audits.length = 0;
+  for (const key of Object.keys(store)) store[key].length = 0;
   seq = 0;
   store.companies.push(
     { id: COMPANY, orgId: ORG, name: "Meridian Concrete", trades: ["concrete"], isVendor: true, status: "active" },
@@ -115,6 +117,23 @@ describe("the assessment", () => {
     await expect(service.getPrequalification({ orgId: ORG, companyId: "nope" })).rejects.toMatchObject({
       code: "VENDOR_NOT_FOUND",
     });
+  });
+
+  it("carries what their finished subcontracts said about them", async () => {
+    // The loop the two stages exist to close: performance is scored at
+    // closeout so it turns up here, where somebody decides whether to qualify
+    // them again.
+    store.evaluations.push(
+      { id: "e1", orgId: ORG, companyId: COMPANY, status: "final", score: 82, wouldReuse: true, evaluatedAt: new Date() },
+      { id: "e2", orgId: ORG, companyId: COMPANY, status: "final", score: 74, wouldReuse: false, evaluatedAt: new Date() },
+    );
+    const view = await service.getPrequalification({ orgId: ORG, companyId: COMPANY });
+    expect(view.performance).toMatchObject({ evaluations: 2, score: 78, wouldReuse: { yes: 1, of: 2 } });
+  });
+
+  it("reports no history rather than omitting it for a vendor nobody has used", async () => {
+    const view = await service.getPrequalification({ orgId: ORG, companyId: COMPANY });
+    expect(view.performance).toMatchObject({ evaluations: 0, score: null, wouldReuse: null });
   });
 });
 

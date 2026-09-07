@@ -149,6 +149,7 @@ model Organisation {
   subcontractCloseouts SubcontractCloseout[]
   closeoutItems       CloseoutItem[]
   vendorPrequalifications VendorPrequalification[]
+  subcontractorEvaluations SubcontractorEvaluation[]
 }
 
 model User {
@@ -608,6 +609,7 @@ model Project {
   submittalPackages             SubmittalPackage[]
   submittalWorkflowTemplates    SubmittalWorkflowTemplate[]
   punchItemEvents               PunchItemEvent[]
+  subcontractorEvaluations      SubcontractorEvaluation[]
 
   @@index([orgId])
   @@index([orgId, status, archivedAt])
@@ -4801,6 +4803,7 @@ model Commitment {
   rfqs              Rfq[]
   scopeMatrix       ScopeMatrix?
   closeout          SubcontractCloseout?
+  evaluation        SubcontractorEvaluation?
 
   @@unique([projectId, ref])
   @@unique([projectId, type, number])
@@ -7978,4 +7981,73 @@ model PrequalCriterion {
 
   @@unique([prequalId, key])
   @@index([prequalId])
+}
+
+// ─── Subcontractor performance evaluation (OCTA-SUB-PERF-058) ───
+/**
+ * How a subcontractor actually performed on one subcontract, and — averaged
+ * across their subcontracts — the history that informs the next time they bid.
+ *
+ * The counterpart to prequalification. Prequalification asks whether a company
+ * can do the work; this asks whether they did. Most of the answer is already
+ * in the records — the NCRs, the punch list, the safety incidents, the change
+ * orders and the closeout handover all name the company they were raised
+ * against — so most of the score is read rather than rated, and only the two
+ * things the system genuinely cannot know are left to a person.
+ */
+model SubcontractorEvaluation {
+  id           String    @id @default(uuid())
+  orgId        String
+  projectId    String
+  commitmentId String    @unique
+  companyId    String?
+  status       String    @default("draft") // draft, final
+  score        Decimal?  @db.Decimal(5, 2)
+  wouldReuse   Boolean?
+  summary      String?
+  evaluatedBy  String?
+  evaluatedAt  DateTime?
+  createdBy    String?
+  updatedBy    String?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  org        Organisation          @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  project    Project               @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  commitment Commitment            @relation(fields: [commitmentId], references: [id], onDelete: Cascade)
+  criteria   EvaluationCriterion[]
+
+  @@index([orgId, companyId, status])
+  @@index([projectId])
+}
+
+/**
+ * One line of the evaluation.
+ *
+ * A derived line carries no stored score — it is recomputed from the records
+ * on every read. A row exists for it only to override that reading, which
+ * needs a reason: three non-conformances on a forty-storey frame are not
+ * three non-conformances on a fit-out, and the count alone cannot tell them
+ * apart.
+ */
+model EvaluationCriterion {
+  id             String   @id @default(uuid())
+  orgId          String
+  evaluationId   String
+  key            String
+  label          String
+  category       String   @default("delivery")
+  weight         Int      @default(10)
+  maxScore       Int      @default(5)
+  score          Int?
+  overrideReason String?
+  note           String?
+  sortOrder      Int      @default(0)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  evaluation SubcontractorEvaluation @relation(fields: [evaluationId], references: [id], onDelete: Cascade)
+
+  @@unique([evaluationId, key])
+  @@index([evaluationId])
 }

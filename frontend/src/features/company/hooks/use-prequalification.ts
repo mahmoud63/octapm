@@ -79,9 +79,23 @@ export interface VendorPrequalification {
   decidedAt: string | null
   decidedBy: string | null
   gaps: string[]
+  /**
+   * What their finished subcontracts said about them (OCTA-SUB-PERF-058).
+   * The loop the two stages exist to close: performance is scored at closeout
+   * so it turns up here, where somebody is deciding whether to qualify them
+   * again.
+   */
+  performance: VendorPerformanceHistory
   criteria: PrequalCriterion[]
   createdAt: string | null
   updatedAt: string | null
+}
+
+export interface VendorPerformanceHistory {
+  evaluations: number
+  score: number | null
+  wouldReuse: { yes: number; of: number } | null
+  lastEvaluatedAt: string | null
 }
 
 export interface PrequalOverviewRow {

@@ -232,6 +232,25 @@ export function PrequalificationPanel({
         </div>
       </div>
 
+      {/* What their finished subcontracts actually said. Evidence for the
+          judgement, not a substitute for it. */}
+      {data.performance.evaluations > 0 && (
+        <p
+          className='mt-2 rounded-md bg-muted/50 p-2 text-xs'
+          data-testid='uat-prequal-performance'
+        >
+          On {data.performance.evaluations} finished subcontract
+          {data.performance.evaluations === 1 ? '' : 's'} they averaged{' '}
+          <span className='font-medium tabular-nums'>
+            {data.performance.score}
+          </span>
+          /100
+          {data.performance.wouldReuse
+            ? `, and the team would use them again on ${data.performance.wouldReuse.yes} of ${data.performance.wouldReuse.of}.`
+            : '.'}
+        </p>
+      )}
+
       {/* What the score suggests — never what it decides. */}
       {data.band && !decided && (
         <p className='mt-2 text-xs text-muted-foreground'>

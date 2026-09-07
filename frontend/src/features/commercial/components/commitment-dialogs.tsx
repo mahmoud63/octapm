@@ -44,6 +44,7 @@ import { useProjectCostCodes } from '@/features/cost/hooks/use-budget'
 import { CustomFieldsPanel } from '@/features/custom-fields/components/custom-fields-panel'
 import { WorkflowInstancePanel } from '@/features/workflows/components/workflow-instance-panel'
 import { CloseoutPanel } from './closeout-panel'
+import { EvaluationPanel } from './evaluation-panel'
 import { ScopeMatrixPanel } from './scope-matrix-panel'
 import { SubcontractAgreementCard } from './subcontract-agreement-card'
 import {
@@ -1352,10 +1353,18 @@ export function CommitmentDetailDialog({
                     {/* The gate on final payment and closing. Only worth
                         showing once the subcontract is live. */}
                     {['executed', 'closed'].includes(commitment.status) && (
-                      <CloseoutPanel
-                        projectId={projectId}
-                        commitmentId={commitment.id}
-                      />
+                      <>
+                        <CloseoutPanel
+                          projectId={projectId}
+                          commitmentId={commitment.id}
+                        />
+                        {/* How they actually performed — mostly read from the
+                            records this subcontract already generated. */}
+                        <EvaluationPanel
+                          projectId={projectId}
+                          commitmentId={commitment.id}
+                        />
+                      </>
                     )}
                   </>
                 )}

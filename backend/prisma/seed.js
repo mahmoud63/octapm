@@ -1173,7 +1173,41 @@ async function upsertSubcontract({ orgId, projectId, activities, boqItems, userI
     });
   }
 
+  await upsertEvaluation({ orgId, projectId, commitmentId: commitment.id, userId });
+
   return commitment;
+}
+
+/**
+ * A finished performance evaluation (OCTA-SUB-PERF-058), so the demo shows the
+ * loop rather than two disconnected screens: this subcontractor was
+ * prequalified, did the work, was scored on it, and that score is waiting on
+ * their prequalification the next time somebody looks at them.
+ *
+ * The two rated lines are set here; the six derived ones are read from the
+ * records the rest of the seed already created, so the score is real rather
+ * than typed in.
+ */
+async function upsertEvaluation({ orgId, projectId, commitmentId, userId }) {
+  const evaluationService = require("../src/services/subcontractor-evaluation.service");
+  const existing = await prisma.subcontractorEvaluation.findFirst({ where: { commitmentId } });
+  if (existing?.status === "final") return existing;
+
+  for (const [key, score] of [["schedule", 3], ["management", 4]]) {
+    await evaluationService.scoreCriterion({ orgId, projectId, commitmentId, key, payload: { score }, userId });
+  }
+  await evaluationService.setVerdict({
+    orgId,
+    projectId,
+    commitmentId,
+    payload: {
+      wouldReuse: true,
+      summary:
+        "Strong on safety and workmanship. The programme slipped twice waiting on rebar, and the second slip cost a week on the frame.",
+    },
+    userId,
+  });
+  return evaluationService.finalise({ orgId, projectId, commitmentId, userId });
 }
 
 async function upsertResources(projectId, activities) {

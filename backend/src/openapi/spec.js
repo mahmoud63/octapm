@@ -3445,6 +3445,7 @@ const components = {
       decidedAt: nullableDateString,
       decidedBy: { type: "string", nullable: true },
       gaps: arrayOf({ type: "string", description: "What is stopping a decision being recorded, named rather than counted." }),
+      performance: ref("VendorPerformanceHistory"),
       criteria: arrayOf(ref("PrequalCriterion")),
       createdAt: nullableDateString,
       updatedAt: nullableDateString,
@@ -3475,6 +3476,27 @@ const components = {
         rejected: { type: "integer" },
         expiringSoon: { type: "integer" },
       }),
+    }),
+    VendorPerformanceHistory: objectSchema({
+      evaluations: { type: "integer", description: "Finalised evaluations only." },
+      score: { type: "number", nullable: true, description: "Average across them, out of 100." },
+      wouldReuse: objectSchema({ yes: { type: "integer" }, of: { type: "integer" } }),
+      lastEvaluatedAt: nullableDateString,
+    }),
+    VendorPerformance: objectSchema({
+      items: arrayOf(
+        objectSchema({
+          id: uuid,
+          status: { type: "string", enum: ["draft", "final"] },
+          score: { type: "number", nullable: true },
+          wouldReuse: { type: "boolean", nullable: true },
+          summary: { type: "string", nullable: true },
+          evaluatedAt: nullableDateString,
+          commitment: objectSchema({ id: uuid, ref: { type: "string" }, title: { type: "string" } }),
+          project: objectSchema({ id: uuid, name: { type: "string" } }),
+        }),
+      ),
+      history: ref("VendorPerformanceHistory"),
     }),
     PrequalCriterionRequest: objectSchema({
       score: { type: "integer", minimum: 0, maximum: 5, nullable: true },
@@ -12774,6 +12796,11 @@ const commitmentPermission = (action, transition = null) => modulePermission("co
   { method: "patch", path: "/projects/{projectId}/commitments/{commitmentId}/closeout/items/{key}", summary: "Mark one requirement complete against evidence, or waive it with a reason. A derived check cannot be ticked (409 CLOSEOUT_DERIVED_ITEM) — close the punch items, file the certificate, pay the application — it can only be waived.", operationId: "updateCommitmentCloseoutItem", parameters: [...projectParams, commitmentIdParam, pathParam("key", "Requirement key, e.g. as_builts.", null)], permissions: commitmentPermission("update", "closeout.manage"), requestBody: jsonBody(objectSchema({ status: { type: "string", enum: ["outstanding", "complete", "waived", "not_applicable"] }, documentId: nullableUuid, note: { type: "string", nullable: true }, waivedReason: { type: "string", nullable: true, description: "Required when waiving." } }), "The requirement's new state.", false) },
   { method: "post", path: "/projects/{projectId}/commitments/{commitmentId}/closeout/complete", summary: "Stamp the closeout complete. Refused while anything required is outstanding (409 CLOSEOUT_OUTSTANDING, which names them); overrideReason goes ahead anyway and is audited.", operationId: "completeCommitmentCloseout", parameters: [...projectParams, commitmentIdParam], permissions: commitmentPermission("approve", "closeout.approve"), requestBody: jsonBody(objectSchema({ overrideReason: { type: "string", nullable: true } }), "Optional override.", false) },
   { method: "post", path: "/projects/{projectId}/commitments/{commitmentId}/closeout/reopen", summary: "Reopen a completed closeout with a reason.", operationId: "reopenCommitmentCloseout", parameters: [...projectParams, commitmentIdParam], permissions: commitmentPermission("approve", "closeout.approve"), requestBody: jsonBody(objectSchema({ reason: { type: "string" } }, ["reason"]), "Why it is being reopened.") },
+  { method: "get", path: "/projects/{projectId}/commitments/{commitmentId}/evaluation", summary: "How the subcontractor performed. Six of the eight criteria are read from the records on every read — non-conformances, safety incidents and punch items raised against their company, change orders they raised themselves, how much they closed by the date it was due, and the closeout handover — and two are rated by a person. A criterion with nothing to measure (no closeout started, no due dates set) scores nothing rather than zero and drops out of the weighting, so the score measures the subcontractor rather than the project's record-keeping. Purchase orders are refused (409 EVALUATION_NOT_A_SUBCONTRACT).", operationId: "getCommitmentEvaluation", parameters: [...projectParams, commitmentIdParam], permissions: commitmentPermission("read") },
+  { method: "patch", path: "/projects/{projectId}/commitments/{commitmentId}/evaluation/criteria/{key}", summary: "Rate one criterion, or override a derived one — which needs a reason (400 EVALUATION_OVERRIDE_REASON_REQUIRED), because a count cannot tell three non-conformances on a frame from three on a fit-out. The reading is kept beside the override as derivedScore, and clearing the score (null) puts it back.", operationId: "scoreCommitmentEvaluationCriterion", parameters: [...projectParams, commitmentIdParam, pathParam("key", "Criterion key, e.g. quality or schedule.", null)], permissions: commitmentPermission("update", "evaluation.manage"), requestBody: jsonBody(objectSchema({ score: { type: "integer", minimum: 0, maximum: 5, nullable: true }, overrideReason: { type: "string", nullable: true, description: "Required when scoring a derived criterion." }, note: { type: "string", nullable: true } }), "The score.", false) },
+  { method: "patch", path: "/projects/{projectId}/commitments/{commitmentId}/evaluation", summary: "Whether you would use them again, and the written summary — the part of an evaluation that is not a score.", operationId: "setCommitmentEvaluationVerdict", parameters: [...projectParams, commitmentIdParam], permissions: commitmentPermission("update", "evaluation.manage"), requestBody: jsonBody(objectSchema({ wouldReuse: { type: "boolean", nullable: true }, summary: { type: "string", nullable: true } }), "The verdict.", false) },
+  { method: "post", path: "/projects/{projectId}/commitments/{commitmentId}/evaluation/final", summary: "Finalise the evaluation, which is what makes it count towards the company's history and show on their next prequalification. Refused while a rated criterion is unrated or nobody has said whether they would use them again (409 EVALUATION_INCOMPLETE, which names the gaps).", operationId: "finaliseCommitmentEvaluation", parameters: [...projectParams, commitmentIdParam], permissions: commitmentPermission("approve", "evaluation.approve") },
+  { method: "post", path: "/projects/{projectId}/commitments/{commitmentId}/evaluation/reopen", summary: "Reopen a final evaluation with a reason. The scores stay; only the decision is dropped.", operationId: "reopenCommitmentEvaluation", parameters: [...projectParams, commitmentIdParam], permissions: commitmentPermission("approve", "evaluation.approve"), requestBody: jsonBody(objectSchema({ reason: { type: "string" } }, ["reason"]), "Why it is being reopened.") },
 ].forEach((route) => addGenericRoute({ tag: "Commercial", ...route }));
 
 // ─── Configurable workflow engine (OCTA-PLAT-WF-024) ───────────────────────
@@ -14178,6 +14205,16 @@ const includeArchivedQuery = queryParam("includeArchived", "Include archived row
     parameters: [queryParam("withinDays", "Horizon for \"expiring soon\" (default 60).", { type: "integer" })],
     permissions: authenticatedOnly,
     responseSchema: ref("PrequalOverview"),
+  },
+  {
+    method: "get",
+    path: "/company/vendors/{id}/performance",
+    summary:
+      "What this subcontractor's finished subcontracts said about them: every evaluation, and the average across the finalised ones with how often the team said they would use them again. This is the history that shows on their next prequalification.",
+    operationId: "getVendorPerformance",
+    parameters: [companyIdParam],
+    permissions: authenticatedOnly,
+    responseSchema: ref("VendorPerformance"),
   },
   {
     method: "get",

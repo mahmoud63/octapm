@@ -416,6 +416,117 @@ router.post(
   ),
 );
 
+// ─── performance evaluation (OCTA-SUB-PERF-058) ────────────────────────────
+
+const evaluationService = require("../services/subcontractor-evaluation.service");
+
+/**
+ * The evaluation: six lines read from the records, two rated by a person.
+ * Created on first read with all eight listed.
+ */
+router.get(
+  "/:commitmentId/evaluation",
+  requirePermission("commitment", "read"),
+  [param("commitmentId").isUUID(), validate],
+  asyncHandler(async (req, res) =>
+    sendSuccess(
+      res,
+      await evaluationService.buildEvaluation({
+        ...scope(req),
+        commitmentId: req.params.commitmentId,
+        userId: req.user.id,
+      }),
+    ),
+  ),
+);
+
+/** Rates a line, or overrides a derived one — which needs a reason. */
+router.patch(
+  "/:commitmentId/evaluation/criteria/:key",
+  requirePermission("commitment", "update", { transition: "evaluation.manage" }),
+  [
+    param("commitmentId").isUUID(),
+    param("key").isString().trim().isLength({ min: 1, max: 60 }),
+    body("score").optional({ nullable: true }).isInt({ min: 0, max: 5 }).toInt(),
+    body("overrideReason").optional({ nullable: true }).isString().trim().isLength({ max: 1000 }),
+    body("note").optional({ nullable: true }).isString().trim().isLength({ max: 2000 }),
+    validate,
+  ],
+  asyncHandler(async (req, res) =>
+    sendSuccess(
+      res,
+      await evaluationService.scoreCriterion({
+        ...scope(req),
+        commitmentId: req.params.commitmentId,
+        key: req.params.key,
+        payload: req.body,
+        userId: req.user.id,
+      }),
+    ),
+  ),
+);
+
+/** Whether you would use them again, and why — the part that is not a score. */
+router.patch(
+  "/:commitmentId/evaluation",
+  requirePermission("commitment", "update", { transition: "evaluation.manage" }),
+  [
+    param("commitmentId").isUUID(),
+    body("wouldReuse").optional({ nullable: true }).isBoolean().toBoolean(),
+    body("summary").optional({ nullable: true }).isString().trim().isLength({ max: 4000 }),
+    validate,
+  ],
+  asyncHandler(async (req, res) =>
+    sendSuccess(
+      res,
+      await evaluationService.setVerdict({
+        ...scope(req),
+        commitmentId: req.params.commitmentId,
+        payload: req.body,
+        userId: req.user.id,
+      }),
+    ),
+  ),
+);
+
+/** Finalising is what makes it count towards the company's history. */
+router.post(
+  "/:commitmentId/evaluation/final",
+  requirePermission("commitment", "approve", { transition: "evaluation.approve" }),
+  [param("commitmentId").isUUID(), validate],
+  asyncHandler(async (req, res) =>
+    sendSuccess(
+      res,
+      await evaluationService.finalise({
+        ...scope(req),
+        commitmentId: req.params.commitmentId,
+        userId: req.user.id,
+      }),
+    ),
+  ),
+);
+
+router.post(
+  "/:commitmentId/evaluation/reopen",
+  requirePermission("commitment", "approve", { transition: "evaluation.approve" }),
+  [
+    param("commitmentId").isUUID(),
+    body("reason").isString().trim().notEmpty().isLength({ max: 1000 }),
+    validate,
+  ],
+  asyncHandler(async (req, res) =>
+    sendSuccess(
+      res,
+      await evaluationService.reopen({
+        ...scope(req),
+        commitmentId: req.params.commitmentId,
+        userId: req.user.id,
+        reason: req.body.reason,
+      }),
+    ),
+  ),
+);
+
 // ─── the subcontract agreement (OCTA-SUB-DOC-055) ──────────────────────────
 
 const agreementService = require("../services/subcontract-agreement.service");

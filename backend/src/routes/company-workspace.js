@@ -9,6 +9,7 @@ const { validate } = require("../middleware/validate");
 const { moneyBody } = require("../utils/money");
 const companyWorkspaceService = require("../services/company-workspace.service");
 const prequalService = require("../services/vendor-prequalification.service");
+const evaluationService = require("../services/subcontractor-evaluation.service");
 const projectTemplateService = require("../services/project-template.service");
 const formService = require("../services/form.service");
 const submittalWorkflow = require("../services/submittal-workflow.service");
@@ -124,6 +125,21 @@ router.get(
     sendSuccess(
       res,
       await prequalService.listStates({ orgId: req.user.orgId, withinDays: req.query.withinDays ?? 60 }),
+    ),
+  ),
+);
+
+/**
+ * What this subcontractor's finished subcontracts say about them
+ * (OCTA-SUB-PERF-058) — the history that informs the next time they bid.
+ */
+router.get(
+  "/vendors/:id/performance",
+  [param("id").isUUID(), validate],
+  asyncHandler(async (req, res) =>
+    sendSuccess(
+      res,
+      await evaluationService.listForCompany({ orgId: req.user.orgId, companyId: req.params.id }),
     ),
   ),
 );
