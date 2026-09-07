@@ -214,6 +214,11 @@ function MatrixEditor({
                   {rows.map((row) => (
                     <tr
                       key={row.key}
+                      // The description lives in an input while the matrix is a
+                      // draft and in a cell once it is agreed, so the row
+                      // carries it as an attribute for anything that needs to
+                      // find it either way.
+                      data-scope-row={row.description}
                       className={cn(
                         allocates && !row.responsibility && 'bg-warning/5'
                       )}

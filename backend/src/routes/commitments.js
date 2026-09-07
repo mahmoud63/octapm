@@ -314,6 +314,47 @@ router.post(
   ),
 );
 
+// ─── the subcontract agreement (OCTA-SUB-DOC-055) ──────────────────────────
+
+const agreementService = require("../services/subcontract-agreement.service");
+
+/**
+ * Everything the agreement will say, as data — plus what is still missing.
+ *
+ * The gaps are named rather than counted, so the screen can list them instead
+ * of just refusing.
+ */
+router.get(
+  "/:commitmentId/agreement",
+  requirePermission("commitment", "read"),
+  [param("commitmentId").isUUID(), validate],
+  asyncHandler(async (req, res) =>
+    sendSuccess(
+      res,
+      await agreementService.buildAgreement({
+        ...scope(req),
+        commitmentId: req.params.commitmentId,
+      }),
+    ),
+  ),
+);
+
+/** The agreement itself, assembled from records rather than typed. */
+router.get(
+  "/:commitmentId/agreement.pdf",
+  requirePermission("commitment", "export"),
+  [param("commitmentId").isUUID(), validate],
+  asyncHandler(async (req, res) => {
+    const { fileName, buffer } = await agreementService.exportAgreementPdf({
+      ...scope(req),
+      commitmentId: req.params.commitmentId,
+    });
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
+    return res.send(buffer);
+  }),
+);
+
 router.get(
   "/:commitmentId/export.pdf",
   requirePermission("commitment", "export"),

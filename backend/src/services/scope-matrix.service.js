@@ -222,11 +222,19 @@ const normalizeItem = (raw, index) => {
  * signed contract quotes it.
  */
 const replaceItems = async ({ orgId, projectId, commitmentId, userId, payload = {} }) => {
-  const current = await prisma.scopeMatrix.findFirst({
+  let current = await prisma.scopeMatrix.findFirst({
     where: { commitmentId, projectId },
     select: { id: true, status: true },
   });
-  if (!current) throw new HttpError(404, "SCOPE_MATRIX_NOT_FOUND", "Scope matrix not found");
+  // Writing before anybody has opened the screen is a perfectly ordinary thing
+  // for a client to do, so create the matrix rather than refusing.
+  if (!current) {
+    await getForCommitment({ orgId, projectId, commitmentId, userId });
+    current = await prisma.scopeMatrix.findFirst({
+      where: { commitmentId, projectId },
+      select: { id: true, status: true },
+    });
+  }
   if (current.status === "agreed") {
     throw new HttpError(
       409,

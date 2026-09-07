@@ -44,6 +44,7 @@ import { useProjectCostCodes } from '@/features/cost/hooks/use-budget'
 import { CustomFieldsPanel } from '@/features/custom-fields/components/custom-fields-panel'
 import { WorkflowInstancePanel } from '@/features/workflows/components/workflow-instance-panel'
 import { ScopeMatrixPanel } from './scope-matrix-panel'
+import { SubcontractAgreementCard } from './subcontract-agreement-card'
 import {
   COMMITMENT_STATUS_LABEL,
   INSURANCE_LABEL,
@@ -1337,10 +1338,17 @@ export function CommitmentDetailDialog({
                     (OCTA-SUB-SCOPE-054). Purchase-order commitments buy a
                     thing rather than a package of work, so they have none. */}
                 {commitment.type === 'subcontract' && (
-                  <ScopeMatrixPanel
-                    projectId={projectId}
-                    commitmentId={commitment.id}
-                  />
+                  <>
+                    <ScopeMatrixPanel
+                      projectId={projectId}
+                      commitmentId={commitment.id}
+                    />
+                    <SubcontractAgreementCard
+                      projectId={projectId}
+                      commitmentId={commitment.id}
+                      commitmentRef={commitment.ref}
+                    />
+                  </>
                 )}
                 {commitment.procurementOrders.length > 0 && (
                   <div className='space-y-1'>

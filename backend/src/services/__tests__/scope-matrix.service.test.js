@@ -159,6 +159,36 @@ describe("agreeing", () => {
 describe("changing an agreed matrix", () => {
   beforeEach(() => jest.clearAllMocks());
 
+  it("creates the matrix when a write arrives before anybody has opened it", async () => {
+    // A client should not have to GET first to be allowed to PUT.
+    // Not there for the write, not there for the create, there afterwards.
+    mockPrisma.scopeMatrix.findFirst
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(null)
+      .mockResolvedValue({ id: "matrix-1", status: "draft" });
+    mockPrisma.commitment.findFirst.mockResolvedValue({
+      id: "cm-1",
+      ref: "SC-0001",
+      title: "Frame",
+      type: "subcontract",
+      status: "executed",
+    });
+    mockPrisma.scopeMatrix.create.mockResolvedValue(matrix([]));
+    mockPrisma.scopeMatrix.findUnique.mockResolvedValue(matrix([item()]));
+    mockPrisma.scopeMatrix.update.mockResolvedValue(matrix([]));
+
+    await service.replaceItems({
+      orgId: "org-1",
+      projectId: "project-1",
+      commitmentId: "cm-1",
+      userId: "u1",
+      payload: { items: [{ kind: "scope", description: "Installation", responsibility: "gc" }] },
+    });
+
+    expect(mockPrisma.scopeMatrix.create).toHaveBeenCalled();
+    expect(mockPrisma.scopeMatrixItem.createMany).toHaveBeenCalled();
+  });
+
   it("is refused until it is reopened", async () => {
     mockPrisma.scopeMatrix.findFirst.mockResolvedValue({ id: "matrix-1", status: "agreed" });
     await expect(

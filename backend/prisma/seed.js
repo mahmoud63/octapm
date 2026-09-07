@@ -594,8 +594,10 @@ async function purgeTestResidue(orgId) {
 
   // Scope-matrix tests raise a throwaway subcontract so the "first read seeds
   // the starter rows" case is not fighting a matrix an earlier test rewrote.
+  // Matched on the title, because commitment refs are auto-numbered by the
+  // service rather than taken from the request.
   const fixtures = await prisma.commitment.deleteMany({
-    where: { orgId, ref: { startsWith: "SC-SM-" } },
+    where: { orgId, title: "Scope matrix fixture" },
   });
 
   if (orderIds.length || itemIds.length || fixtures.count) {
@@ -928,18 +930,26 @@ async function upsertPurchaseOrders({ orgId, projectId, activities, items, userI
  * commitments register, pay applications and the scope matrix all open empty.
  */
 async function upsertSubcontract({ orgId, projectId, activities, boqItems, userId }) {
+  // A full vendor profile, because the agreement is assembled from it: name,
+  // registered name, registration and tax numbers, address and contact all
+  // print on the contract without anybody retyping them.
+  const vendorProfile = {
+    type: "external",
+    isVendor: true,
+    trades: ["Concrete", "Formwork", "Reinforcement"],
+    legalName: "Meridian Concrete Services LLC",
+    registrationNumber: "LA-7741208",
+    taxNumber: "72-4419006",
+    address: "1840 Industrial Parkway, Baton Rouge, LA 70805",
+    contactName: "Ana Silva",
+    email: "contracts@meridian.example",
+    phone: "+1 225 555 0142",
+    status: "active",
+  };
   const vendor = await prisma.company.upsert({
     where: { orgId_name: { orgId, name: "Meridian Concrete Services" } },
-    create: {
-      orgId,
-      name: "Meridian Concrete Services",
-      type: "external",
-      isVendor: true,
-      trades: ["Concrete", "Formwork", "Reinforcement"],
-      email: "contracts@meridian.example",
-      status: "active",
-    },
-    update: {},
+    create: { orgId, name: "Meridian Concrete Services", ...vendorProfile },
+    update: vendorProfile,
   });
 
   const existing = await prisma.commitment.findFirst({
@@ -954,6 +964,14 @@ async function upsertSubcontract({ orgId, projectId, activities, boqItems, userI
     currency: "USD",
     retentionRate: 10,
     paymentTerms: "30 days from certification",
+    // Required cover with no certificate on file yet: the state a fresh
+    // subcontract is actually in, and what the agreement's readiness list and
+    // the pay-app compliance gate are both there to catch.
+    insuranceJson: [
+      { type: "general_liability", required: true, documentId: null, note: "USD 5m each occurrence" },
+      { type: "workers_compensation", required: true, documentId: null, note: "Statutory" },
+      { type: "auto", required: false, documentId: null, note: null },
+    ],
     startDate: date("2026-03-09"),
     endDate: date("2026-07-31"),
     executedAt: date("2026-03-02"),

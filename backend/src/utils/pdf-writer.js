@@ -21,19 +21,90 @@ const HELVETICA = [
   556, 556, 333, 500, 278, 556, 500, 722, 500, 500, 500, 334, 260, 334, 584,
 ];
 
+/**
+ * Helvetica widths for the typographic characters the app actually writes.
+ *
+ * An em-dash is nearly twice the fallback, so without these a line that wraps
+ * on a dash measures short and runs into the margin.
+ */
+const WIDE = new Map([
+  ["—", 1000],
+  ["…", 1000],
+  ["–", 556],
+  ["•", 350],
+  ["·", 278],
+  ["‘", 222],
+  ["’", 222],
+  ["“", 333],
+  ["”", 333],
+]);
+
 const textWidth = (text, size, bold = false) => {
   let width = 0;
   for (const ch of String(text)) {
     const code = ch.charCodeAt(0);
-    const base = code >= 32 && code <= 126 ? HELVETICA[code - 32] : 556;
+    const base =
+      WIDE.get(ch) ?? (code >= 32 && code <= 126 ? HELVETICA[code - 32] : 556);
     width += base * (bold ? 1.06 : 1);
   }
   return (width * size) / 1000;
 };
 
+/**
+ * Typographic characters WinAnsi has, at code points Unicode does not share.
+ *
+ * The app writes proper dashes and quotes everywhere, and without this map
+ * each one printed as "?" — an em-dash in a contract title is not a character
+ * anybody should have to avoid. The page content is written as latin1, so
+ * mapping to the WinAnsi byte is all that is needed.
+ */
+const WIN_ANSI = new Map([
+  ["€", "\x80"], // €
+  ["‚", "\x82"], // ‚
+  ["ƒ", "\x83"], // ƒ
+  ["„", "\x84"], // „
+  ["…", "\x85"], // …
+  ["†", "\x86"], // †
+  ["‡", "\x87"], // ‡
+  ["‰", "\x89"], // ‰
+  ["‹", "\x8b"], // ‹
+  ["‘", "\x91"], // '
+  ["’", "\x92"], // '
+  ["“", "\x93"], // "
+  ["”", "\x94"], // "
+  ["•", "\x95"], // •
+  ["–", "\x96"], // –
+  ["—", "\x97"], // —
+  ["™", "\x99"], // ™
+  ["›", "\x9b"], // ›
+]);
+
+/**
+ * Characters WinAnsi has no place for at all, spelled instead of dropped.
+ *
+ * The app uses arrows for date ranges; printing "08 March ? 30 July" made the
+ * range look like a question rather than a span.
+ */
+const TRANSLITERATE = new Map([
+  ["→", "-"],
+  ["←", "-"],
+  ["↔", "-"],
+  ["⇒", "=>"],
+  ["≤", "<="],
+  ["≥", ">="],
+  ["≠", "!="],
+  [" ", " "],
+  ["‑", "-"],
+  ["−", "-"],
+]);
+
 const escapePdfText = (text) =>
   String(text)
-    .replace(/[^\x20-\x7e\xa0-\xff]/g, "?")
+    .replace(/[→←↔⇒≤≥≠ ‑−]/g,
+      (character) => TRANSLITERATE.get(character) ?? "-")
+    .replace(/[ƒ–—‘’‚“”„†‡•…‰‹›€™]/g,
+      (character) => WIN_ANSI.get(character) ?? "?")
+    .replace(/[^\x20-\x7e\x80-\xff]/g, "?")
     .replace(/\\/g, "\\\\")
     .replace(/\(/g, "\\(")
     .replace(/\)/g, "\\)");
