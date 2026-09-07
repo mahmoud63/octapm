@@ -19,6 +19,8 @@ const store = {
   transactions: [],
   transfers: new Map(),
   transferLines: [],
+  ledger: [],
+  costRecords: [],
 };
 
 let nextId = 1;
@@ -110,6 +112,48 @@ const mockPrisma = {
       return clone(row);
     }),
   },
+
+  // An issue posts consumption to the cost ledger (OCTA-FIN-LEDGER-059).
+  costLedgerEntry: {
+    findFirst: jest.fn(async ({ where }) =>
+      clone(store.ledger.find((row) => row.orgId === where.orgId && row.sourceKey === where.sourceKey) || null)
+    ),
+    findMany: jest.fn(async ({ where = {} } = {}) =>
+      store.ledger
+        .filter((row) => Object.entries(where).every(([k, v]) => (v && typeof v === "object" ? true : row[k] === v)))
+        .map(clone)
+    ),
+    create: jest.fn(async ({ data }) => {
+      if (store.ledger.some((row) => row.orgId === data.orgId && row.sourceKey === data.sourceKey)) {
+        const error = new Error("Unique constraint failed");
+        error.code = "P2002";
+        throw error;
+      }
+      const row = { id: id("cle"), ...data };
+      store.ledger.push(row);
+      return clone(row);
+    }),
+  },
+  budgetLine: {
+    findFirst: jest.fn(async () => null),
+    update: jest.fn(async () => ({})),
+  },
+  costRecord: {
+    findFirst: jest.fn(async ({ where }) =>
+      clone(store.costRecords.find((row) => row.projectId === where.projectId && row.activityId === where.activityId) || null)
+    ),
+    update: jest.fn(async ({ where, data }) => {
+      const row = store.costRecords.find((r) => r.id === where.id);
+      if (data.actual?.increment !== undefined) row.actual = (row.actual || 0) + data.actual.increment;
+      if (data.actualThroughDate) row.actualThroughDate = data.actualThroughDate;
+      return clone(row);
+    }),
+    create: jest.fn(async ({ data }) => {
+      const row = { id: id("cr"), ...data };
+      store.costRecords.push(row);
+      return clone(row);
+    }),
+  },
 };
 
 jest.mock("../../config/db", () => ({ prisma: mockPrisma }));
@@ -156,6 +200,8 @@ describe("inventory stock ledger", () => {
     store.locations.clear();
     store.balances.length = 0;
     store.transactions.length = 0;
+    store.ledger.length = 0;
+    store.costRecords.length = 0;
     nextId = 1;
   });
 

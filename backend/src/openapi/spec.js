@@ -10135,6 +10135,36 @@ const costRecordListParams = [
   },
   {
     method: "get",
+    path: "/projects/{projectId}/cost/reconciliation",
+    summary:
+      "Compare the stored actual cost against the cost ledger (OCTA-FIN-LEDGER-059). `BudgetLine.actual` and `CostRecord.actual` are materialised projections of the ledger; this recomputes them from source entries and reports every line and activity where the two disagree by more than half a cent, in either direction. A stale `actualThroughDate` is reported even when the amount agrees, because it silently drops cost out of official AC. Read-only.",
+    operationId: "getCostReconciliation",
+    permissions: modulePermission("cost", "read"),
+  },
+  {
+    method: "get",
+    path: "/projects/{projectId}/cost/reconciliation/explain",
+    summary:
+      "Where one actual-cost figure came from: the ledger entries behind a budget line or an activity, newest first, each naming its source record.",
+    operationId: "explainActualCost",
+    parameters: [
+      queryParam("budgetLineId", "Budget line to explain.", { type: "string", format: "uuid" }),
+      queryParam("activityId", "Activity to explain.", { type: "string", format: "uuid" }),
+      queryParam("limit", "Maximum entries (default 200, max 500).", { type: "integer" }),
+    ],
+    permissions: modulePermission("cost", "read"),
+  },
+  {
+    method: "post",
+    path: "/projects/{projectId}/cost/reconciliation/recompute",
+    summary:
+      "Rebuild `BudgetLine.actual` and `CostRecord.actual` from the cost ledger, writing only the rows that disagree. Deliberate rather than scheduled: a silent nightly rewrite of financial figures hides drift instead of surfacing it. Pass `dryRun` to see what would change.",
+    operationId: "recomputeActualCost",
+    requestBody: jsonBody(objectSchema({ dryRun: { type: "boolean" } }), "Options.", false),
+    permissions: modulePermission("cost", "approve"),
+  },
+  {
+    method: "get",
     path: "/projects/{projectId}/cost/burn-rate",
     summary: "Get cost burn-rate entries.",
     operationId: "getBurnRate",
@@ -14649,7 +14679,8 @@ add(
   "post",
   operation({
     tag: "Inventory",
-    summary: "Issue stock to site against an activity or cost code.",
+    summary:
+      "Issue stock to site against an activity or cost code. The issue posts consumption to the cost ledger at the item's **weighted average** (OCTA-FIN-LEDGER-059), so the cost ledger and the stock ledger reconcile line for line. Refused with 409 `INV_INSUFFICIENT_AVAILABLE` when the quantity exceeds available stock — on hand less what is reserved.",
     operationId: "issueStock",
     permissions: inventoryPermission("submit", "stock.issue"),
     requestBody: stockMovementBody({
@@ -14661,6 +14692,38 @@ add(
       commitmentId: nullableUuid,
     }),
     status: 201,
+  }),
+);
+
+add(
+  "/inventory/stock/reserve",
+  "post",
+  operation({
+    tag: "Inventory",
+    summary:
+      "Reserve stock, or give it back. A positive quantity reserves, a negative one releases. Reserved stock stays on hand but stops being available, and an issue may only draw on what is available. Without a `locationId` the claim spreads across bins fullest-first, the same way an issue draws from them. Refused with 409 `INV_RESERVATION_OVER_STOCK` when more is reserved than is spare, and `INV_RESERVATION_NEGATIVE` when more is released than was held.",
+    operationId: "adjustStockReservation",
+    permissions: inventoryPermission("submit", "stock.issue"),
+    requestBody: jsonBody(
+      objectSchema({
+        itemId: uuid,
+        warehouseId: uuid,
+        locationId: nullableUuid,
+        quantity: { type: "number", description: "Positive reserves, negative releases." },
+        reference: { type: "string", nullable: true },
+        notes: { type: "string", nullable: true },
+      }, ["itemId", "warehouseId", "quantity"]),
+      "The reservation change.",
+    ),
+    responseSchema: objectSchema({
+      itemId: uuid,
+      warehouseId: uuid,
+      locationId: nullableUuid,
+      onHand: { type: "number" },
+      reserved: { type: "number" },
+      available: { type: "number" },
+      reservedBy: { type: "string", nullable: true },
+    }),
   }),
 );
 

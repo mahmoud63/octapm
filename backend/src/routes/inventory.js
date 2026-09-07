@@ -300,6 +300,31 @@ router.post(
   )
 );
 
+/**
+ * Reserve stock, or give it back. A positive quantity reserves, a negative one
+ * releases. Reserved stock stays on hand but stops being available, and an
+ * issue may only draw on what is available.
+ */
+router.post(
+  "/stock/reserve",
+  requirePermission("inventory", "submit", "stock.issue"),
+  [
+    body("itemId").isUUID(),
+    body("warehouseId").isUUID(),
+    body("locationId").optional({ nullable: true }).isUUID(),
+    body("quantity").isFloat().toFloat(),
+    body("reference").optional({ nullable: true }).isString().trim().isLength({ max: 200 }),
+    body("notes").optional({ nullable: true }).isString().trim().isLength({ max: 1000 }),
+    validate,
+  ],
+  asyncHandler(async (req, res) =>
+    sendSuccess(
+      res,
+      await service.adjustReservation({ orgId: req.user.orgId, user: req.user, payload: req.body })
+    )
+  )
+);
+
 for (const [path, type, transition] of [
   ["return", "return", "stock.return"],
   ["adjust", "adjust", "stock.adjust"],

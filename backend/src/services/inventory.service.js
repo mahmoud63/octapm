@@ -1,5 +1,6 @@
 const { prisma } = require("../config/db");
 const { HttpError } = require("../utils/http-error");
+const costLedger = require("./cost-ledger.service");
 
 /**
  * Inventory, warehouses and the stock ledger (OCTA-INV-STOCK-050).
@@ -47,6 +48,22 @@ const MOVEMENTS = {
 };
 
 const SIGNED_TYPES = new Set(["adjust", "count", "reverse"]);
+
+/**
+ * Movements that may only draw on **available** stock — on hand less what is
+ * reserved for somebody else.
+ *
+ * Damage, quarantine and counts are physical facts rather than allocations: a
+ * pallet that was dropped was dropped, whether or not it was spoken for, so
+ * those are deliberately allowed to take reserved stock down with them.
+ */
+const RESPECTS_RESERVATION = new Set(["issue", "transfer_out"]);
+
+/** What can actually be taken from a balance for this kind of movement. */
+const availableOn = (balance, type) =>
+  RESPECTS_RESERVATION.has(type)
+    ? Math.max(0, round(balance.onHand - (balance.reserved ?? 0)))
+    : Math.max(0, round(balance.onHand));
 
 const round = (value, dp = 4) => {
   const factor = 10 ** dp;
@@ -495,6 +512,20 @@ const postMovement = async (tx, { orgId, item, warehouseId, locationId = null, t
       `Only ${round(balance.onHand)} ${item.unit} of ${item.name} on hand here; ${round(Math.abs(delta))} requested`
     );
   }
+
+  // Reserved stock is spoken for. An issue may only draw on what is available,
+  // which is what the item and balance reads have always *reported* — the guard
+  // simply never enforced it.
+  if (delta < 0 && RESPECTS_RESERVATION.has(type)) {
+    const availableHere = availableOn(balance, type);
+    if (round(Math.abs(delta)) > availableHere) {
+      throw new HttpError(
+        409,
+        "INV_INSUFFICIENT_AVAILABLE",
+        `${round(balance.onHand)} ${item.unit} of ${item.name} on hand here but ${round(balance.reserved ?? 0)} reserved; only ${availableHere} available and ${round(Math.abs(delta))} requested`
+      );
+    }
+  }
   if (rule.quarantined === -1 && balance.quarantined < signed) {
     throw new HttpError(409, "INV_INSUFFICIENT_STOCK", "More is being released than is quarantined");
   }
@@ -531,7 +562,7 @@ const postMovement = async (tx, { orgId, item, warehouseId, locationId = null, t
     },
   });
 
-  return tx.stockTransaction.create({
+  const movement = await tx.stockTransaction.create({
     data: {
       orgId,
       itemId: item.id,
@@ -560,6 +591,53 @@ const postMovement = async (tx, { orgId, item, warehouseId, locationId = null, t
       performedBy: user.id,
       occurredAt: context.occurredAt ? new Date(context.occurredAt) : new Date(),
     },
+  });
+
+  await postConsumptionCost({ tx, orgId, item, movement });
+  return movement;
+};
+
+/**
+ * Consumption is the moment stock becomes project cost (OCTA-FIN-LEDGER-059).
+ *
+ * Receiving stock is an asset acquisition, not a project cost — so only `issue`
+ * spends, and only `return` gives it back. Everything else (transfers, counts,
+ * damage, quarantine, release) moves stock around inside the warehouse without
+ * touching a project.
+ *
+ * The amount is the movement's own `value`, which `postMovement` computed from
+ * the **weighted average** — never the latest purchase price. The cost ledger
+ * and the stock ledger therefore reconcile line for line, because they are
+ * reading the same number.
+ *
+ * The `StockTransaction` id is the idempotency key, so a movement can only ever
+ * carry one cost posting.
+ */
+const CONSUMPTION_SIGN = Object.freeze({ issue: 1, return: -1 });
+
+const postConsumptionCost = async ({ tx, orgId, item, movement }) => {
+  const sign = CONSUMPTION_SIGN[movement.type];
+  // Stock consumed off-project has nowhere to post; the movement still stands.
+  if (!sign || !movement.projectId) return null;
+  const value = Number(movement.value) || 0;
+  if (!value) return null;
+
+  return costLedger.post({
+    tx,
+    orgId,
+    projectId: movement.projectId,
+    sourceType: "material_issue",
+    sourceId: movement.id,
+    amount: sign * value,
+    costType: "material",
+    activityId: movement.activityId,
+    costCodeId: movement.costCodeId,
+    commitmentId: movement.commitmentId,
+    quantity: movement.quantity,
+    unitCost: movement.unitCost,
+    incurredOn: movement.occurredAt,
+    postedBy: movement.performedBy,
+    note: `${item.sku} · ${item.name}`,
   });
 };
 
@@ -593,13 +671,20 @@ const drawFromWarehouse = async (
     where: { itemId: item.id, warehouseId },
     orderBy: [{ onHand: "desc" }],
   });
-  const available = round(balances.reduce((sum, balance) => sum + balance.onHand, 0));
+  // Available, not on hand: reserved stock belongs to somebody else.
+  const available = round(
+    balances.reduce((sum, balance) => sum + availableOn(balance, type), 0)
+  );
 
   if (available < quantity) {
+    const onHand = round(balances.reduce((sum, balance) => sum + balance.onHand, 0));
+    const reserved = round(balances.reduce((sum, balance) => sum + (balance.reserved ?? 0), 0));
     throw new HttpError(
       409,
-      "INV_INSUFFICIENT_STOCK",
-      `Only ${available} ${item.unit} of ${item.name} in this warehouse; ${round(quantity)} requested`
+      reserved > 0 ? "INV_INSUFFICIENT_AVAILABLE" : "INV_INSUFFICIENT_STOCK",
+      reserved > 0
+        ? `${onHand} ${item.unit} of ${item.name} on hand but ${reserved} reserved; only ${available} available and ${round(quantity)} requested`
+        : `Only ${available} ${item.unit} of ${item.name} in this warehouse; ${round(quantity)} requested`
     );
   }
 
@@ -607,8 +692,9 @@ const drawFromWarehouse = async (
   let outstanding = quantity;
   for (const balance of balances) {
     if (outstanding <= 0) break;
-    if (balance.onHand <= 0) continue;
-    const take = round(Math.min(balance.onHand, outstanding));
+    const takeable = availableOn(balance, type);
+    if (takeable <= 0) continue;
+    const take = round(Math.min(takeable, outstanding));
     posted.push(
       await postMovement(tx, {
         orgId,
@@ -753,6 +839,113 @@ const issueStock = async ({ orgId, user, payload }) => {
       context: payload,
     });
     return { movements: posted.map(serializeTransaction) };
+  });
+};
+
+/**
+ * Reserves stock, or gives it back.
+ *
+ * `reserved` existed on the balance and was reported as `available = onHand −
+ * reserved`, but nothing could ever write it and the issue guard checked on
+ * hand alone — so the figure on screen was always just on hand, and a
+ * reservation could not have held anything back even if one had existed.
+ *
+ * A reservation is a claim on stock, not a movement of it: on hand does not
+ * change, so this writes no `StockTransaction` and no cost. It cannot exceed
+ * what is on hand, and it cannot go below zero.
+ */
+const adjustReservation = async ({ orgId, user, payload }) => {
+  const quantity = Number(payload.quantity);
+  if (!Number.isFinite(quantity) || quantity === 0) {
+    throw new HttpError(400, "INV_QUANTITY", "Quantity must not be zero");
+  }
+
+  return prisma.$transaction(async (tx) => {
+    const { item } = await loadItemAndWarehouse(tx, {
+      orgId,
+      itemId: payload.itemId,
+      warehouseId: payload.warehouseId,
+      locationId: payload.locationId ?? null,
+    });
+
+    // Stock is held per bin, but nobody reserves "30 bags from bin B-A03" —
+    // they reserve 30 bags from the store. Without a named location this
+    // spreads the claim across bins the same way an issue draws from them,
+    // fullest first, so a warehouse-level reservation actually holds warehouse
+    // stock rather than a phantom balance with nothing in it.
+    const balances = payload.locationId
+      ? await tx.stockBalance.findMany({
+          where: { itemId: item.id, warehouseId: payload.warehouseId, locationId: payload.locationId },
+        })
+      : await tx.stockBalance.findMany({
+          where: { itemId: item.id, warehouseId: payload.warehouseId },
+          orderBy: [{ onHand: "desc" }],
+        });
+
+    if (!balances.length) {
+      throw new HttpError(
+        409,
+        "INV_NO_STOCK_HERE",
+        `No ${item.name} is held ${payload.locationId ? "in that location" : "in this warehouse"}`
+      );
+    }
+
+    const onHand = round(balances.reduce((sum, b) => sum + b.onHand, 0));
+    const reserved = round(balances.reduce((sum, b) => sum + (b.reserved ?? 0), 0));
+
+    if (quantity > 0) {
+      const spare = round(onHand - reserved);
+      if (quantity > spare) {
+        throw new HttpError(
+          409,
+          "INV_RESERVATION_OVER_STOCK",
+          `${onHand} ${item.unit} of ${item.name} on hand${reserved ? ` with ${reserved} already reserved` : ""}; only ${spare} can be reserved and ${round(quantity)} was asked for`
+        );
+      }
+    } else if (Math.abs(quantity) > reserved) {
+      throw new HttpError(
+        409,
+        "INV_RESERVATION_NEGATIVE",
+        `Only ${reserved} ${item.unit} reserved here; ${round(Math.abs(quantity))} cannot be released`
+      );
+    }
+
+    // Reserve against the fullest bins first; release from the most heavily
+    // reserved first, so releasing never strands a claim on an empty bin.
+    const order = quantity > 0 ? balances : [...balances].sort((a, b) => (b.reserved ?? 0) - (a.reserved ?? 0));
+    let outstanding = Math.abs(quantity);
+    for (const balance of order) {
+      if (outstanding <= 0) break;
+      const room =
+        quantity > 0
+          ? Math.max(0, round(balance.onHand - (balance.reserved ?? 0)))
+          : round(balance.reserved ?? 0);
+      if (room <= 0) continue;
+      const step = round(Math.min(room, outstanding));
+      await tx.stockBalance.update({
+        where: { id: balance.id },
+        data: { reserved: round((balance.reserved ?? 0) + (quantity > 0 ? step : -step)) },
+      });
+      outstanding = round(outstanding - step);
+    }
+
+    const after = await tx.stockBalance.findMany({
+      where: payload.locationId
+        ? { itemId: item.id, warehouseId: payload.warehouseId, locationId: payload.locationId }
+        : { itemId: item.id, warehouseId: payload.warehouseId },
+    });
+    const nextOnHand = round(after.reduce((sum, b) => sum + b.onHand, 0));
+    const nextReserved = round(after.reduce((sum, b) => sum + (b.reserved ?? 0), 0));
+
+    return {
+      itemId: item.id,
+      warehouseId: payload.warehouseId,
+      locationId: payload.locationId ?? null,
+      onHand: nextOnHand,
+      reserved: nextReserved,
+      available: round(nextOnHand - nextReserved),
+      reservedBy: user?.id ?? null,
+    };
   });
 };
 
@@ -1133,6 +1326,7 @@ module.exports = {
   findByCode,
   getItem,
   getSummary,
+  adjustReservation,
   issueStock,
   listItems,
   listLocations,

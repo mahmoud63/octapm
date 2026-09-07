@@ -7,7 +7,7 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// ─── Organisation & Users ───
+// â”€â”€â”€ Organisation & Users â”€â”€â”€
 model Organisation {
   id        String   @id @default(uuid())
   name      String
@@ -150,6 +150,8 @@ model Organisation {
   closeoutItems       CloseoutItem[]
   vendorPrequalifications VendorPrequalification[]
   subcontractorEvaluations SubcontractorEvaluation[]
+
+  costLedgerEntries       CostLedgerEntry[]
 }
 
 model User {
@@ -300,7 +302,7 @@ model User {
   @@index([email])
 }
 
-// ─── Projects ───
+// â”€â”€â”€ Projects â”€â”€â”€
 model UserSetting {
   id                String    @id @default(uuid())
   orgId             String
@@ -610,6 +612,7 @@ model Project {
   submittalWorkflowTemplates    SubmittalWorkflowTemplate[]
   punchItemEvents               PunchItemEvent[]
   subcontractorEvaluations      SubcontractorEvaluation[]
+  costLedgerEntries             CostLedgerEntry[]
 
   @@index([orgId])
   @@index([orgId, status, archivedAt])
@@ -881,7 +884,7 @@ model ActivityAssignment {
   @@index([userId])
 }
 
-// ─── BOQ ───
+// â”€â”€â”€ BOQ â”€â”€â”€
 // Tasks
 model Task {
   id          String    @id @default(uuid())
@@ -1244,7 +1247,7 @@ model BoqItem {
   projectId              String
   revisionId             String?
   activeCodeKey          String?
-  code                   String? // e.g. "1.1", "2.3" — BOQ item code
+  code                   String? // e.g. "1.1", "2.3" â€” BOQ item code
   ref                    String? // legacy field kept for IPC compatibility
   description            String
   unit                   String?
@@ -1430,7 +1433,7 @@ model ExtraServicesConfig {
   sortOrder  Int    @default(0)
 }
 
-// ─── Activities (THE CORE — everything links here) ───
+// â”€â”€â”€ Activities (THE CORE â€” everything links here) â”€â”€â”€
 model Activity {
   id                String    @id @default(uuid())
   projectId         String
@@ -1526,6 +1529,7 @@ model Activity {
   successorLinks         ActivityDependency[]       @relation("ActivityDependencyPredecessor")
   lookaheadItems         LookaheadItem[]
   stockTransactions      StockTransaction[]
+  costLedgerEntries      CostLedgerEntry[]
 
   @@index([projectId])
   @@index([projectId, isActive])
@@ -1699,7 +1703,7 @@ model ProgressSubmission {
   @@index([dailyReportId])
 }
 
-// ─── Schedule Revisions ───
+// â”€â”€â”€ Schedule Revisions â”€â”€â”€
 model ScheduleRevision {
   id                       String    @id @default(uuid())
   projectId                String
@@ -1773,7 +1777,7 @@ model WeeklyReport {
   @@index([weekStartDate])
 }
 
-// ─── Cost Control ───
+// â”€â”€â”€ Cost Control â”€â”€â”€
 model CostRecord {
   id                String    @id @default(uuid())
   activityId        String
@@ -1893,7 +1897,7 @@ model EvPeriodSnapshot {
   @@index([cutoffDate])
 }
 
-// ─── Commercial ───
+// â”€â”€â”€ Commercial â”€â”€â”€
 model ChangeOrder {
   id                    String    @id @default(uuid())
   projectId             String
@@ -2188,18 +2192,18 @@ model IpcRetentionRelease {
   @@index([projectId, releaseDate])
 }
 
-// ─── The client contract (OCTA-COM-PRIME-051) ──────────────────────────────
+// â”€â”€â”€ The client contract (OCTA-COM-PRIME-051) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 /**
  * The commercial envelope of the contract with the client.
  *
- * One per project. The BOQ is the schedule of values — this holds what the BOQ
+ * One per project. The BOQ is the schedule of values â€” this holds what the BOQ
  * cannot: what was originally agreed, what approved client change orders have
  * done to it, and the terms that turn certified work into a sum of money
  * (retention, advance and its recovery, tax, payment days).
  *
  * revisedValue is stored rather than computed on read because every downstream
- * figure — over-certification limits, forecast, cash flow — compares against
+ * figure â€” over-certification limits, forecast, cash flow â€” compares against
  * it, and they must all see the same number at the same moment.
  */
 model PrimeContract {
@@ -2633,7 +2637,7 @@ model WeatherDelay {
   @@index([projectId])
 }
 
-// ─── Procurement ───
+// â”€â”€â”€ Procurement â”€â”€â”€
 model WeatherDelayActivityLink {
   id             String    @id @default(uuid())
   projectId      String
@@ -2973,10 +2977,10 @@ model MaterialMaster {
   @@index([projectId, code])
 }
 
-// ─── Inventory and warehouse (OCTA-INV-STOCK-050) ──────────────────────────
+// â”€â”€â”€ Inventory and warehouse (OCTA-INV-STOCK-050) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 //
 // MaterialMaster above is a *project's* procurement list: what this job needs
-// and from whom. Inventory is the other half — what the company physically
+// and from whom. Inventory is the other half â€” what the company physically
 // holds, where it is, and what it is worth. The two meet at goods receipt.
 //
 // The ledger is the source of truth. StockBalance is a running total kept in
@@ -3065,8 +3069,8 @@ model Warehouse {
 }
 
 /**
- * Where inside a warehouse. Zone → aisle → rack → shelf → bin, held as a
- * materialized path so a whole branch can be read in one query — the same
+ * Where inside a warehouse. Zone â†’ aisle â†’ rack â†’ shelf â†’ bin, held as a
+ * materialized path so a whole branch can be read in one query â€” the same
  * shape the project Location tree uses.
  */
 model WarehouseLocation {
@@ -3077,7 +3081,7 @@ model WarehouseLocation {
   code        String
   name        String
   kind        String    @default("zone") // zone, aisle, rack, shelf, bin
-  path        String // materialized path of ids: zoneId/aisleId/rackId…
+  path        String // materialized path of ids: zoneId/aisleId/rackIdâ€¦
   depth       Int       @default(0)
   sortOrder   Int       @default(0)
   status      String    @default("active") // active, archived
@@ -3303,7 +3307,7 @@ model InventoryCountLine {
   @@index([itemId])
 }
 
-// ─── Equipment ───
+// â”€â”€â”€ Equipment â”€â”€â”€
 model Equipment {
   id                 String   @id @default(uuid())
   projectId          String
@@ -3513,7 +3517,7 @@ model ResourceAllocation {
   @@index([activityId])
 }
 
-// ─── Quality ───
+// â”€â”€â”€ Quality â”€â”€â”€
 model NcrRecord {
   id                 String    @id @default(uuid())
   projectId          String
@@ -3756,7 +3760,7 @@ model MaterialTest {
   @@index([assigneeCompanyId])
 }
 
-// ─── Document Control ───
+// â”€â”€â”€ Document Control â”€â”€â”€
 model Rfi {
   id                 String    @id @default(uuid())
   projectId          String
@@ -3917,7 +3921,7 @@ model Submittal {
   leadTimeWeeks      Int?
   reviewDays         Int?
   requiredOnSite     DateTime?
-  submitBy           DateTime? // requiredOnSite − leadTimeWeeks − reviewDays
+  submitBy           DateTime? // requiredOnSite âˆ’ leadTimeWeeks âˆ’ reviewDays
   revisionNumber     Int       @default(0)
   scheduleImpactDays Int       @default(0)
   managerUserId      String?
@@ -4342,7 +4346,7 @@ model Correspondence {
   @@index([assigneeCompanyId])
 }
 
-// ─── Mobile: Daily Reports ───
+// â”€â”€â”€ Mobile: Daily Reports â”€â”€â”€
 model CommercialCorrespondenceLink {
   id               String   @id @default(uuid())
   projectId        String
@@ -4432,7 +4436,7 @@ model DailyReport {
   @@index([projectId, status])
 }
 
-// ─── Site Operations ───
+// â”€â”€â”€ Site Operations â”€â”€â”€
 model SiteDiary {
   id              String    @id @default(uuid())
   projectId       String
@@ -4473,7 +4477,7 @@ model SiteDiary {
   @@index([projectId, status])
 }
 
-// ─── Subscription & Billing ───
+// â”€â”€â”€ Subscription & Billing â”€â”€â”€
 model Subscription {
   id                   String    @id @default(uuid())
   orgId                String    @unique
@@ -4547,7 +4551,7 @@ model EnterpriseLead {
   @@index([orgId])
 }
 
-// ─── Locations (spatial key for field records) ───
+// â”€â”€â”€ Locations (spatial key for field records) â”€â”€â”€
 model Location {
   id          String    @id @default(uuid())
   orgId       String
@@ -4591,7 +4595,7 @@ model Location {
   @@index([projectId, path])
 }
 
-// ─── Company workspace masters (OCTA-ADM-COMPANY-007) ───
+// â”€â”€â”€ Company workspace masters (OCTA-ADM-COMPANY-007) â”€â”€â”€
 // Defined once per organisation and reused on every project.
 model CostCode {
   id          String   @id @default(uuid())
@@ -4624,7 +4628,7 @@ model CostCode {
   @@index([parentId])
 }
 
-// ─── Budget by cost code (OCTA-FIN-COSTCODE-019) ───────────────────────────
+// â”€â”€â”€ Budget by cost code (OCTA-FIN-COSTCODE-019) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 /** The subset of the organisation's cost codes a project budgets against. */
 model ProjectCostCode {
@@ -4679,6 +4683,7 @@ model BudgetLine {
   sovLines    CommitmentSovLine[]
   changeEventLines ChangeEventLine[]
   directCostLines  DirectCostLine[]
+  costLedgerEntries CostLedgerEntry[]
 
   @@unique([projectId, costCodeId, costType])
   @@index([orgId])
@@ -4710,7 +4715,7 @@ model BudgetLineChange {
   @@index([projectId, changeOrderId])
 }
 
-/** Share of a budget line carried by an activity (weights sum to ≤ 100 per line). */
+/** Share of a budget line carried by an activity (weights sum to â‰¤ 100 per line). */
 model BudgetLineActivityAllocation {
   id           String   @id @default(uuid())
   projectId    String
@@ -4730,7 +4735,7 @@ model BudgetLineActivityAllocation {
   @@index([projectId, activityId])
 }
 
-/** Frozen copy of the budget (lines, allocations, reconciliation) — one per locked reporting period. */
+/** Frozen copy of the budget (lines, allocations, reconciliation) â€” one per locked reporting period. */
 model BudgetSnapshot {
   id                 String   @id @default(uuid())
   orgId              String
@@ -4752,7 +4757,7 @@ model BudgetSnapshot {
   @@index([projectId, takenAt])
 }
 
-// ─── Commitments: subcontracts and purchase orders with a schedule of values (OCTA-FIN-COMMIT-020) ───
+// â”€â”€â”€ Commitments: subcontracts and purchase orders with a schedule of values (OCTA-FIN-COMMIT-020) â”€â”€â”€
 
 model Commitment {
   id                 String    @id @default(uuid())
@@ -4892,12 +4897,12 @@ model CommitmentChangeOrder {
   @@index([primeChangeOrderId])
 }
 
-// ─── Scope and responsibility (OCTA-SUB-SCOPE-054) ─────────────────────────
+// â”€â”€â”€ Scope and responsibility (OCTA-SUB-SCOPE-054) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 /**
  * What a subcontract actually covers, agreed before it is written.
  *
- * Construction disputes come overwhelmingly from unclear scope boundaries —
+ * Construction disputes come overwhelmingly from unclear scope boundaries â€”
  * who supplies the crane, who takes the waste away, who calls the inspection.
  * The matrix makes each of those an explicit row with a named party rather
  * than a paragraph of prose nobody re-reads.
@@ -4947,7 +4952,7 @@ model ScopeMatrixItem {
   kind           String   @default("scope")
   section        String?
   description    String
-  // gc, subcontractor, by_others, shared, not_applicable — null on the list
+  // gc, subcontractor, by_others, shared, not_applicable â€” null on the list
   // kinds, which are statements rather than allocations.
   responsibility String?
   notes          String?
@@ -4963,13 +4968,13 @@ model ScopeMatrixItem {
   @@index([matrixId, kind, sortOrder])
 }
 
-// ─── Subcontract closeout (OCTA-SUB-CLOSE-056) ─────────────────────────────
+// â”€â”€â”€ Subcontract closeout (OCTA-SUB-CLOSE-056) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 /**
  * What must be true before a subcontract is paid out and closed.
  *
- * Half the checklist is already knowable from records the system holds — the
- * punch list, the insurance certificates, the payment applications — so those
+ * Half the checklist is already knowable from records the system holds â€” the
+ * punch list, the insurance certificates, the payment applications â€” so those
  * checks are derived on read rather than ticked by hand. The rest are things
  * somebody hands over: as-builts, O&M manuals, warranties, training, the final
  * lien waiver. Those are rows here, completed against evidence.
@@ -5005,7 +5010,7 @@ model SubcontractCloseout {
  * One closeout requirement.
  *
  * A row exists for every handover item, and also for a derived check that has
- * been waived — the stored row is what overrides the live answer, so a waiver
+ * been waived â€” the stored row is what overrides the live answer, so a waiver
  * survives the thing it waived changing underneath it.
  */
 model CloseoutItem {
@@ -5038,7 +5043,7 @@ model CloseoutItem {
   @@index([documentId])
 }
 
-// ─── Subcontractor payment applications (OCTA-FIN-SUBPAY-021) ──────────────
+// â”€â”€â”€ Subcontractor payment applications (OCTA-FIN-SUBPAY-021) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 /** A period claim against a commitment's schedule of values. */
 model SubPayApp {
@@ -5192,9 +5197,9 @@ model ProjectTemplate {
   orgId           String
   name            String
   description     String?
-  settingsJson    Json     @default("{}") // project field defaults (type, contractType, currency, calendar, retention, …)
+  settingsJson    Json     @default("{}") // project field defaults (type, contractType, currency, calendar, retention, â€¦)
   partiesJson     Json     @default("[]") // [{ role, companyId?, companyName?, accessLevel?, permissionTemplateId? }]
-  foldersJson     Json     @default("[]") // ["Contract", "Drawings/IFC", …]
+  foldersJson     Json     @default("[]") // ["Contract", "Drawings/IFC", â€¦]
   locationsJson   Json     @default("[]") // [{ name, kind, code?, children: [...] }]
   assignmentsJson Json     @default("[]") // [{ userId, role, permissionTemplateId? }]
   isDefault       Boolean  @default(false)
@@ -5211,7 +5216,7 @@ model ProjectTemplate {
   @@index([orgId, status])
 }
 
-// ─── Unified attachments and photos (OCTA-DOC-ATTACH-006) ───
+// â”€â”€â”€ Unified attachments and photos (OCTA-DOC-ATTACH-006) â”€â”€â”€
 // One polymorphic link table for every record type; the file itself is a
 // ProjectDocument, so a photo can be attached to many records.
 model Attachment {
@@ -5278,7 +5283,7 @@ model Photo {
   @@index([projectId, thumbnailStatus])
 }
 
-// ─── Drawings tool: sets → sheets → revisions (OCTA-DWG-CORE-011) ───
+// â”€â”€â”€ Drawings tool: sets â†’ sheets â†’ revisions (OCTA-DWG-CORE-011) â”€â”€â”€
 model DrawingSet {
   id                   String    @id @default(uuid())
   orgId                String
@@ -5397,7 +5402,7 @@ model SheetRevision {
   @@index([supersededById])
 }
 
-// ─── Punch list (OCTA-FLD-PUNCH-013) ───
+// â”€â”€â”€ Punch list (OCTA-FLD-PUNCH-013) â”€â”€â”€
 model PunchItem {
   id                  String    @id @default(uuid())
   orgId               String
@@ -5412,7 +5417,7 @@ model PunchItem {
   observationType     String? // safety, quality, commissioning, work_to_complete, environmental
   hazard              String?
   contributingCondition String?
-  sourceRecordType    String? // form_instance, sheet, photo… where it was raised from
+  sourceRecordType    String? // form_instance, sheet, photoâ€¦ where it was raised from
   sourceRecordId      String?
   trade               String?
   activityId          String?
@@ -5492,7 +5497,7 @@ model PunchItemEvent {
   @@index([projectId, createdAt])
 }
 
-// ─── Sheet markups and pins (OCTA-DWG-MARKUP-012) ───
+// â”€â”€â”€ Sheet markups and pins (OCTA-DWG-MARKUP-012) â”€â”€â”€
 model Markup {
   id              String    @id @default(uuid())
   orgId           String
@@ -5525,7 +5530,7 @@ model Pin {
   sheetRevisionId String? // revision the pin was dropped on
   x               Float // 0..1 of page width
   y               Float // 0..1 of page height
-  recordType      String // rfi, defect, photo, punch_item, observation, …
+  recordType      String // rfi, defect, photo, punch_item, observation, â€¦
   recordId        String
   label           String?
   color           String?
@@ -5542,7 +5547,7 @@ model Pin {
   @@index([projectId, recordType, recordId])
 }
 
-// ─── Drawing intelligence (OCTA-AI-DWG-035) ───
+// â”€â”€â”€ Drawing intelligence (OCTA-AI-DWG-035) â”€â”€â”€
 /** A cross-reference found on a sheet ("SEE S-201", "DETAIL 3/A-501"), resolved to the target sheet when it exists. */
 model SheetReference {
   id            String   @id @default(uuid())
@@ -5568,7 +5573,7 @@ model SheetReference {
   @@index([projectId, targetSheetId])
 }
 
-// ─── Specifications (OCTA-AI-SPEC-036) ───
+// â”€â”€â”€ Specifications (OCTA-AI-SPEC-036) â”€â”€â”€
 /** A section of a specification document found in its extracted text (CSI MasterFormat or generic numbering). */
 model SpecSection {
   id         String   @id @default(uuid())
@@ -5598,8 +5603,8 @@ model SpecSection {
   @@index([projectId, division])
 }
 
-// ─── Timesheets and crews (OCTA-FLD-TIME-037) ───
-/** A person whose time is recorded — company-level, optionally a platform user. */
+// â”€â”€â”€ Timesheets and crews (OCTA-FLD-TIME-037) â”€â”€â”€
+/** A person whose time is recorded â€” company-level, optionally a platform user. */
 model Worker {
   id                 String   @id @default(uuid())
   orgId              String
@@ -5673,7 +5678,7 @@ model CrewMember {
 }
 
 /**
- * An uploaded IFC model (OCTA-BIM-IFC-043). Geometry is not stored — the
+ * An uploaded IFC model (OCTA-BIM-IFC-043). Geometry is not stored â€” the
  * spatial breakdown, the elements and their properties and quantities are.
  */
 model BimModel {
@@ -5802,7 +5807,7 @@ model Conversation {
   projectId          String?
   kind               String    @default("group") // direct, group, record
   title              String?
-  directKey          String? // "<projectId|org>:<userA>:<userB>" — one direct thread per pair per scope
+  directKey          String? // "<projectId|org>:<userA>:<userB>" â€” one direct thread per pair per scope
   recordType         String?
   recordId           String?
   recordTitle        String?
@@ -5919,7 +5924,7 @@ model InboundEmail {
 }
 
 /**
- * Short-interval plan (OCTA-SCH-LOOKAHEAD-041): a 2–6 week window seeded from the master
+ * Short-interval plan (OCTA-SCH-LOOKAHEAD-041): a 2â€“6 week window seeded from the master
  * schedule, with added tasks, constraints to clear and weekly percent-plan-complete.
  */
 model Lookahead {
@@ -5931,7 +5936,7 @@ model Lookahead {
   title        String
   startDate    DateTime  @db.Date
   weeks        Int       @default(3)
-  weekStartDay Int       @default(1) // 0 Sunday … 6 Saturday
+  weekStartDay Int       @default(1) // 0 Sunday â€¦ 6 Saturday
   status       String    @default("draft") // draft, published, archived
   filterJson   Json      @default("{}") // { wbsPrefixes, categories, crewIds, onlyCritical, activityIds }
   notes        String?
@@ -6008,7 +6013,7 @@ model LookaheadItem {
   @@index([projectId, constraintStatus])
 }
 
-/** One day's time for a crew (or a set of workers): draft → submitted → approved (labour cost posted) / rejected. */
+/** One day's time for a crew (or a set of workers): draft â†’ submitted â†’ approved (labour cost posted) / rejected. */
 model Timesheet {
   id              String    @id @default(uuid())
   orgId           String
@@ -6086,7 +6091,7 @@ model TimeEntry {
   @@index([projectId, costCodeId])
 }
 
-// ─── Change events and RFQs (OCTA-COM-CE-038) ───
+// â”€â”€â”€ Change events and RFQs (OCTA-COM-CE-038) â”€â”€â”€
 /** A potential change captured before it becomes a change order: scope, rough order of magnitude, quotes. */
 model ChangeEvent {
   id                 String    @id @default(uuid())
@@ -6222,7 +6227,7 @@ model Rfq {
   @@index([commitmentId])
 }
 
-// ─── SSO login tickets (OCTA-SEC-AUTH-040) ───
+// â”€â”€â”€ SSO login tickets (OCTA-SEC-AUTH-040) â”€â”€â”€
 /** One-time, short-lived ticket handed to the browser after an IdP callback; exchanged for a session. */
 model SsoTicket {
   id        String    @id @default(uuid())
@@ -6241,8 +6246,8 @@ model SsoTicket {
   @@index([expiresAt])
 }
 
-// ─── Direct costs (OCTA-FIN-DIRECT-039) ───
-/** A cost not on a commitment — vendor invoice, expense, payroll — posted to the budget on approval. */
+// â”€â”€â”€ Direct costs (OCTA-FIN-DIRECT-039) â”€â”€â”€
+/** A cost not on a commitment â€” vendor invoice, expense, payroll â€” posted to the budget on approval. */
 model DirectCost {
   id              String    @id @default(uuid())
   orgId           String
@@ -6356,7 +6361,7 @@ model DirectCostPayment {
   @@index([directCostId])
 }
 
-// ─── Document text, chunks and embeddings (OCTA-DOC-TEXT-010) ───
+// â”€â”€â”€ Document text, chunks and embeddings (OCTA-DOC-TEXT-010) â”€â”€â”€
 model DocumentText {
   id              String    @id @default(uuid())
   orgId           String
@@ -6413,7 +6418,7 @@ model DocumentChunk {
   @@index([documentTextId])
 }
 
-// ─── Comments, @mentions and record subscriptions (OCTA-COMM-COMMENT-009) ───
+// â”€â”€â”€ Comments, @mentions and record subscriptions (OCTA-COMM-COMMENT-009) â”€â”€â”€
 model Comment {
   id         String    @id @default(uuid())
   orgId      String
@@ -6480,14 +6485,14 @@ model RecordSubscription {
   @@index([userId, muted])
 }
 
-// ─── Permission templates (per-tool levels + granular grants) ───
+// â”€â”€â”€ Permission templates (per-tool levels + granular grants) â”€â”€â”€
 model PermissionTemplate {
   id            String   @id @default(uuid())
   orgId         String
   name          String
   description   String?
   kind          String   @default("internal") // internal (own staff), external (collaborators)
-  clientType    String? // gc, owner, consultant, subcontractor — which customer type this default suits
+  clientType    String? // gc, owner, consultant, subcontractor â€” which customer type this default suits
   baseRole      String? // internal role whose policy defines the "standard" level
   basePartyRole String? // party role whose policy defines the "standard" level (external templates)
   isDefault     Boolean  @default(false)
@@ -6557,7 +6562,7 @@ model ProjectUserPermission {
   @@index([templateId])
 }
 
-// ─── Background jobs (durable queue; claimed with SKIP LOCKED) ───
+// â”€â”€â”€ Background jobs (durable queue; claimed with SKIP LOCKED) â”€â”€â”€
 model BackgroundJob {
   id           String    @id @default(uuid())
   orgId        String
@@ -6591,7 +6596,7 @@ model BackgroundJob {
   @@index([expiresAt])
 }
 
-// ─── Outbound domain events (realtime fan-out and future webhooks) ───
+// â”€â”€â”€ Outbound domain events (realtime fan-out and future webhooks) â”€â”€â”€
 model OutboundEvent {
   id               String    @id @default(uuid())
   orgId            String
@@ -6613,7 +6618,7 @@ model OutboundEvent {
   @@index([type, createdAt])
 }
 
-// ─── Checklist / template engine (OCTA-QA-TEMPLATE-014) ───
+// â”€â”€â”€ Checklist / template engine (OCTA-QA-TEMPLATE-014) â”€â”€â”€
 // A template (company-wide when projectId is null, or per project) is a list
 // of sections and items; an instance is one filled-in copy tied to an
 // activity / location / drawing. ITP hold-point items block progress
@@ -6801,7 +6806,7 @@ model Signature {
   @@index([instanceId])
 }
 
-// ─── Submittal packages, workflow templates and steps (OCTA-PM-SUB-017) ───
+// â”€â”€â”€ Submittal packages, workflow templates and steps (OCTA-PM-SUB-017) â”€â”€â”€
 model SubmittalPackage {
   id             String    @id @default(uuid())
   orgId          String
@@ -6879,7 +6884,7 @@ model SubmittalStepAssignment {
   id           String    @id @default(uuid())
   stepId       String
   userId       String
-  role         String? // how the person was resolved: user, consultant, pm…
+  role         String? // how the person was resolved: user, consultant, pmâ€¦
   status       String    @default("pending") // pending, approved, rejected, skipped
   responseCode String?
   comment      String?
@@ -6893,7 +6898,7 @@ model SubmittalStepAssignment {
   @@index([userId, status])
 }
 
-// ─── Daily log (OCTA-FLD-DAILY-022) ───
+// â”€â”€â”€ Daily log (OCTA-FLD-DAILY-022) â”€â”€â”€
 /**
  * One log per project per calendar day. Sections are typed tables so manpower
  * and equipment are reportable across days; weather comes from the feed by
@@ -6937,7 +6942,7 @@ model DailyLog {
   @@index([projectId, status])
 }
 
-/** Crew on site: company × trade × head count × hours per head. */
+/** Crew on site: company Ã— trade Ã— head count Ã— hours per head. */
 model DailyLogManpower {
   id              String    @id @default(uuid())
   orgId           String
@@ -7131,7 +7136,7 @@ model DailyLogNote {
   @@index([projectId, kind])
 }
 
-// ─── Report builder & portfolio (OCTA-RPT-BUILDER-023) ───
+// â”€â”€â”€ Report builder & portfolio (OCTA-RPT-BUILDER-023) â”€â”€â”€
 /** A saved report: a source, the columns to show, filters, sort, grouping and chart. */
 model ReportDefinition {
   id             String    @id @default(uuid())
@@ -7293,7 +7298,7 @@ model ProjectHealthSnapshot {
   @@index([orgId, overallScore])
 }
 
-// ─── Configurable workflow engine (OCTA-PLAT-WF-024) ───
+// â”€â”€â”€ Configurable workflow engine (OCTA-PLAT-WF-024) â”€â”€â”€
 /** A route a record follows: response, condition and action steps; company library or one project. */
 model WorkflowTemplate {
   id            String    @id @default(uuid())
@@ -7386,13 +7391,13 @@ model WorkflowStepAssignment {
   @@index([projectId, status, dueAt])
 }
 
-// ─── Custom fields, fieldsets and record types (OCTA-PLAT-FIELDS-025) ──────
+// â”€â”€â”€ Custom fields, fieldsets and record types (OCTA-PLAT-FIELDS-025) â”€â”€â”€â”€â”€â”€
 
 model CustomFieldDefinition {
   id             String    @id @default(uuid())
   orgId          String
   projectId      String? // null = company field shown on every project
-  recordType     String // rfi, submittal, punch_item, change_order …
+  recordType     String // rfi, submittal, punch_item, change_order â€¦
   key            String
   label          String
   description    String?
@@ -7402,7 +7407,7 @@ model CustomFieldDefinition {
   hidden         Boolean   @default(false)
   defaultJson    Json?
   validationJson Json? // { min, max, minLength, maxLength, pattern }
-  conditionJson  Json? // { field, op, value } — shown when the condition holds
+  conditionJson  Json? // { field, op, value } â€” shown when the condition holds
   position       Int       @default(0)
   status         String    @default("active") // active, archived
   createdBy      String?
@@ -7462,7 +7467,7 @@ model ProjectFieldset {
 model RecordTypeDefinition {
   id           String    @id @default(uuid())
   orgId        String
-  tool         String // correspondence …
+  tool         String // correspondence â€¦
   key          String
   label        String
   description  String?
@@ -7505,7 +7510,7 @@ model CustomFieldValue {
   @@index([valueJson(ops: JsonbPathOps)], type: Gin)
 }
 
-// ─── Public API keys, webhooks and accounting connectors (OCTA-INT-API-026) ─
+// â”€â”€â”€ Public API keys, webhooks and accounting connectors (OCTA-INT-API-026) â”€
 
 model ApiClient {
   id          String    @id @default(uuid())
@@ -7652,7 +7657,7 @@ model AccountingSync {
   @@index([projectId, recordType])
 }
 
-// ─── Bid management (OCTA-PRE-BID-027) ────────────────────────────────────
+// â”€â”€â”€ Bid management (OCTA-PRE-BID-027) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 model BidPackage {
   id                  String    @id @default(uuid())
@@ -7833,7 +7838,7 @@ model BidLine {
   @@unique([bidId, packageLineId])
 }
 
-// ─── Project knowledge assistant (OCTA-AI-ASSIST-028) ─────────────────────
+// â”€â”€â”€ Project knowledge assistant (OCTA-AI-ASSIST-028) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 model AssistantConversation {
   id            String    @id @default(uuid())
@@ -7880,10 +7885,10 @@ model AssistantMessage {
   @@index([conversationId, createdAt])
 }
 
-// ─── Contract intelligence (OCTA-AI-CONTRACT-032) ───
+// â”€â”€â”€ Contract intelligence (OCTA-AI-CONTRACT-032) â”€â”€â”€
 /**
  * The contract's key periods and clauses for one project: the form (FIDIC,
- * NEC, JCT…), notice / particulars / response periods, the contract
+ * NEC, JCTâ€¦), notice / particulars / response periods, the contract
  * documents and the clauses extracted from them (confirmed by a person).
  */
 model ContractProfile {
@@ -7913,14 +7918,14 @@ model ContractProfile {
   @@index([orgId])
 }
 
-// ─── Subcontractor prequalification (OCTA-SUB-PREQUAL-057) ───
+// â”€â”€â”€ Subcontractor prequalification (OCTA-SUB-PREQUAL-057) â”€â”€â”€
 /**
  * One assessment per vendor company, held at the organisation rather than the
  * project: a subcontractor is qualified once and that answer is reused on
  * every project they are invited to.
  *
  * The status a person records is draft, under_review, approved,
- * conditionally_approved or rejected. "Expired" is never stored — it is read
+ * conditionally_approved or rejected. "Expired" is never stored â€” it is read
  * from validUntil and from the criteria that carry their own expiry, so a
  * qualification granted on a licence that lapses stops counting on the day it
  * lapses rather than on the day somebody notices.
@@ -7983,16 +7988,16 @@ model PrequalCriterion {
   @@index([prequalId])
 }
 
-// ─── Subcontractor performance evaluation (OCTA-SUB-PERF-058) ───
+// â”€â”€â”€ Subcontractor performance evaluation (OCTA-SUB-PERF-058) â”€â”€â”€
 /**
- * How a subcontractor actually performed on one subcontract, and — averaged
- * across their subcontracts — the history that informs the next time they bid.
+ * How a subcontractor actually performed on one subcontract, and â€” averaged
+ * across their subcontracts â€” the history that informs the next time they bid.
  *
  * The counterpart to prequalification. Prequalification asks whether a company
  * can do the work; this asks whether they did. Most of the answer is already
- * in the records — the NCRs, the punch list, the safety incidents, the change
+ * in the records â€” the NCRs, the punch list, the safety incidents, the change
  * orders and the closeout handover all name the company they were raised
- * against — so most of the score is read rather than rated, and only the two
+ * against â€” so most of the score is read rather than rated, and only the two
  * things the system genuinely cannot know are left to a person.
  */
 model SubcontractorEvaluation {
@@ -8024,7 +8029,7 @@ model SubcontractorEvaluation {
 /**
  * One line of the evaluation.
  *
- * A derived line carries no stored score — it is recomputed from the records
+ * A derived line carries no stored score â€” it is recomputed from the records
  * on every read. A row exists for it only to override that reading, which
  * needs a reason: three non-conformances on a forty-storey frame are not
  * three non-conformances on a fit-out, and the count alone cannot tell them
@@ -8050,4 +8055,69 @@ model EvaluationCriterion {
 
   @@unique([evaluationId, key])
   @@index([evaluationId])
+}
+
+// â”€â”€â”€ Cost ledger (OCTA-FIN-LEDGER-059) â”€â”€â”€
+/**
+ * Every actual cost, once, with its origin attached.
+ *
+ * Before this table `CostRecord.actual` and `BudgetLine.actual` were
+ * incremented at four call sites and could not be reconstructed from anything â€”
+ * so a missing contributor was invisible, which is exactly how subcontractor
+ * pay applications and material issues came to be absent from actual cost.
+ *
+ * The ledger is the truth. `CostRecord.actual` and `BudgetLine.actual` remain
+ * as materialised projections for query speed, and can be rebuilt from here at
+ * any time.
+ *
+ * `sourceKey` is what makes a posting idempotent: one economic event produces
+ * one entry, so a retry, a double click, a repeated webhook or a concurrent
+ * approval cannot post twice. Undoing a posting writes a negative entry with
+ * `reversalOfId` â€” history is never deleted.
+ */
+model CostLedgerEntry {
+  id           String   @id @default(uuid())
+  orgId        String
+  projectId    String
+  // `${sourceType}:${sourceId}:${sourceLineId ?? "header"}` â€” unique per org.
+  // A plain unique over nullable columns would not hold, because Postgres
+  // treats NULLs as distinct.
+  sourceKey    String
+  sourceType   String // direct_cost, timesheet, equipment, sub_pay_app, material_issue, manual
+  sourceId     String
+  sourceLineId String?
+  // Where the cost lands. activityId drives earned value; budgetLineId drives
+  // the budget register; both are resolved at posting time and stored, so the
+  // entry stays reconcilable even if the source record is later re-pointed.
+  activityId   String?
+  costCodeId   String?
+  budgetLineId String?
+  commitmentId String?
+  costType     String   @default("other") // labour, material, equipment, subcontract, indirect, overhead, contingency, other
+  // Signed. Positive is cost; negative is a reversal.
+  amount       Decimal  @db.Decimal(18, 2)
+  quantity     Float?
+  unitCost     Decimal? @db.Decimal(18, 4)
+  // The economic date â€” when the cost was incurred, not when it was keyed in.
+  // Drives `CostRecord.actualThroughDate` and therefore official AC.
+  incurredOn   DateTime
+  postedAt     DateTime @default(now())
+  postedBy     String?
+  reversalOfId String?
+  note         String?
+  createdAt    DateTime @default(now())
+
+  org        Organisation     @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  project    Project          @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  activity   Activity?        @relation(fields: [activityId], references: [id], onDelete: SetNull)
+  budgetLine BudgetLine?      @relation(fields: [budgetLineId], references: [id], onDelete: SetNull)
+  reversalOf CostLedgerEntry? @relation("CostLedgerReversal", fields: [reversalOfId], references: [id], onDelete: SetNull)
+  reversedBy CostLedgerEntry[] @relation("CostLedgerReversal")
+
+  @@unique([orgId, sourceKey])
+  @@index([projectId, incurredOn])
+  @@index([projectId, sourceType])
+  @@index([projectId, activityId])
+  @@index([projectId, budgetLineId])
+  @@index([commitmentId])
 }

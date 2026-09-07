@@ -5,6 +5,7 @@ const { createPdf } = require("../utils/pdf-writer");
 const { recordWorkspacePath } = require("../utils/record-links");
 const auditService = require("./audit.service");
 const notificationService = require("./notification.service");
+const costLedger = require("./cost-ledger.service");
 const { isPartyScopedAccess } = require("./company-party.service");
 
 /**
@@ -71,7 +72,7 @@ const include = {
     select: { id: true, ref: true, title: true, type: true, status: true, currency: true, retentionRate: true, vendorCompanyId: true, projectPartyId: true, createdBy: true, insuranceJson: true, vendorCompany: { select: { id: true, name: true } } },
   },
   waiverDocument: { select: { id: true, originalName: true, fileName: true } },
-  lines: { orderBy: { sortOrder: "asc" }, include: { sovLine: { select: { id: true, lineNumber: true, activityId: true, costCodeId: true, activity: { select: { id: true, name: true, activityCode: true, wbsCode: true } }, costCode: { select: { id: true, code: true } } } } } },
+  lines: { orderBy: { sortOrder: "asc" }, include: { sovLine: { select: { id: true, lineNumber: true, activityId: true, costCodeId: true, budgetLineId: true, activity: { select: { id: true, name: true, activityCode: true, wbsCode: true } }, costCode: { select: { id: true, code: true } } } } } },
   payments: { orderBy: { paidAt: "asc" } },
 };
 
@@ -557,6 +558,54 @@ const overClaimError = (row) => {
   return error;
 };
 
+/**
+ * Certification is the moment a subcontractor's work becomes actual cost
+ * (OCTA-FIN-LEDGER-059).
+ *
+ * Per line, because `SubPayAppLine.sovLineId → CommitmentSovLine` already
+ * carries the cost code, budget line and activity — the lineage was always
+ * there, it was simply never followed.
+ *
+ * Gross, not net. Retention is money withheld against a cost the subcontractor
+ * has already earned; posting net would understate actual until release and
+ * then spike it. Back-charges, other deductions and tax are header-level
+ * settlements and do not change what the work cost.
+ *
+ * `cost-ledger.post` is idempotent on `sourceKey`, so a retried approval, a
+ * double click or two concurrent approvals post once.
+ */
+const postCertifiedCost = async ({ tx, orgId, projectId, payApp, actor }) => {
+  const incurredOn = payApp.periodEnd || payApp.approvedAt || new Date();
+  let posted = 0;
+  let amount = 0;
+  for (const line of payApp.lines || []) {
+    const value = addMoney(line.thisPeriodAmount, line.materialsOnSite);
+    if (!value) continue;
+    const result = await costLedger.post({
+      tx,
+      orgId,
+      projectId,
+      sourceType: "sub_pay_app",
+      sourceId: payApp.id,
+      sourceLineId: line.id,
+      amount: value,
+      costType: "subcontract",
+      activityId: line.sovLine?.activityId || null,
+      costCodeId: line.sovLine?.costCodeId || null,
+      budgetLineId: line.sovLine?.budgetLineId || null,
+      commitmentId: payApp.commitmentId,
+      incurredOn,
+      postedBy: actor?.id || null,
+      note: `${payApp.ref} ${payApp.periodLabel}`,
+    });
+    if (result.posted) {
+      posted += 1;
+      amount = addMoney(amount, value);
+    }
+  }
+  return { posted, amount };
+};
+
 const transition = async ({ orgId, projectId, payAppId, to, actor = null, viewer = null, reason = null, extra = {}, guard = null, action = auditService.ACTIONS.STATUS_CHANGED, viaWorkflow = false }) => {
   await ensureProject({ orgId, projectId });
   const existing = await loadPayApp({ projectId, payAppId, viewer });
@@ -598,7 +647,16 @@ const transition = async ({ orgId, projectId, payAppId, to, actor = null, viewer
       extra = { ...extra, ...totals };
     }
     const row = await tx.subPayApp.update({ where: { id: payAppId }, data: { status: to, ...stamps, ...extra, updatedBy: actor?.id || null }, include });
-    await audit({ tx, orgId, projectId, entityId: payAppId, action, actor, reason, oldStatus: existing.status, newStatus: to, summary: { ref: row.ref, net: toMoneyNumber(row.netThisPeriod), gross: toMoneyNumber(row.grossThisPeriod), retention: toMoneyNumber(row.retentionThisPeriod), rejectionCode: row.rejectionCode || null } });
+    // Certification is the cost-recognition point (OCTA-FIN-LEDGER-059). It
+    // happens inside this transaction so the ledger entry and the status commit
+    // together, or neither does.
+    let costPosting = null;
+    if (to === STATUS.APPROVED) {
+      costPosting = await postCertifiedCost({ tx, orgId, projectId, payApp: row, actor });
+    } else if (to === STATUS.VOID) {
+      costPosting = await costLedger.reverse({ tx, orgId, projectId, sourceType: "sub_pay_app", sourceId: payAppId, postedBy: actor?.id || null, note: reason });
+    }
+    await audit({ tx, orgId, projectId, entityId: payAppId, action, actor, reason, oldStatus: existing.status, newStatus: to, summary: { ref: row.ref, net: toMoneyNumber(row.netThisPeriod), gross: toMoneyNumber(row.grossThisPeriod), retention: toMoneyNumber(row.retentionThisPeriod), rejectionCode: row.rejectionCode || null, ...(costPosting ? { costPosted: costPosting.amount ?? null, costLines: costPosting.posted ?? null, costReversed: costPosting.reversed ?? null } : {}) } });
     return row;
   });
   const serialized = serialize(updated, { projectId });

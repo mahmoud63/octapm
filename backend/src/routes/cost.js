@@ -7,6 +7,7 @@ const { requirePermission } = require('../middleware/rbac');
 const { validate } = require('../middleware/validate');
 const { moneyBody } = require('../utils/money');
 const costService = require('../services/cost.service');
+const costReconciliation = require('../services/cost-reconciliation.service');
 
 const router = express.Router({ mergeParams: true });
 router.use(authenticate);
@@ -161,6 +162,78 @@ router.patch(
     });
     return sendSuccess(res, result);
   }),
+);
+
+// ─── actual-cost reconciliation (OCTA-FIN-LEDGER-059) ──────────────────────
+
+/**
+ * Compares the stored actual cost against the cost ledger and reports the
+ * difference. Read-only — it never corrects anything.
+ */
+router.get(
+  '/reconciliation',
+  requirePermission('cost', 'read'),
+  [param('projectId').isUUID(), validate],
+  asyncHandler(async (req, res) =>
+    sendSuccess(
+      res,
+      await costReconciliation.reconcile({
+        orgId: req.user.orgId,
+        projectId: req.params.projectId,
+      }),
+    ),
+  ),
+);
+
+/** Where one actual-cost figure came from — the entries behind it. */
+router.get(
+  '/reconciliation/explain',
+  requirePermission('cost', 'read'),
+  [
+    param('projectId').isUUID(),
+    query('budgetLineId').optional().isUUID(),
+    query('activityId').optional().isUUID(),
+    query('limit').optional().isInt({ min: 1, max: 500 }).toInt(),
+    validate,
+  ],
+  asyncHandler(async (req, res) =>
+    sendSuccess(
+      res,
+      await costReconciliation.explain({
+        orgId: req.user.orgId,
+        projectId: req.params.projectId,
+        budgetLineId: req.query.budgetLineId ?? null,
+        activityId: req.query.activityId ?? null,
+        limit: req.query.limit ?? 200,
+      }),
+    ),
+  ),
+);
+
+/**
+ * Rebuilds the projections from the ledger. A deliberate act, not a schedule:
+ * a silent nightly rewrite of financial figures hides drift instead of
+ * surfacing it.
+ */
+router.post(
+  '/reconciliation/recompute',
+  requirePermission('cost', 'approve'),
+  [
+    param('projectId').isUUID(),
+    body('dryRun').optional().isBoolean().toBoolean(),
+    validate,
+  ],
+  asyncHandler(async (req, res) =>
+    sendSuccess(
+      res,
+      await costReconciliation.recomputeActualCost({
+        orgId: req.user.orgId,
+        projectId: req.params.projectId,
+        actor: req.user,
+        dryRun: req.body?.dryRun ?? false,
+      }),
+    ),
+  ),
 );
 
 module.exports = router;
