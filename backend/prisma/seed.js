@@ -15,6 +15,9 @@ const { PrismaClient } = require("@prisma/client");
 const bcrypt = require("bcryptjs");
 
 const prisma = new PrismaClient();
+// Opening stock goes in through the service, not straight into the tables, so
+// the seeded balances are produced by the same ledger the product uses.
+const inventoryService = require("../src/services/inventory.service");
 
 const PASSWORD = process.env.SEED_PASSWORD || "DemoPassw0rd!";
 const ORG_NAME = process.env.SEED_ORG_NAME || "OctaPM Demo Contracting";
@@ -331,6 +334,194 @@ async function upsertAllocations({ projectId, boqItems, activities, userId }) {
   }
 }
 
+// A central store and a site store, with a bin structure deep enough to show
+// what the location hierarchy is for.
+const WAREHOUSES = [
+  { key: "central", code: "WH-CENTRAL", name: "Central Warehouse", kind: "central", project: false },
+  { key: "site", code: "WH-RIVERSIDE", name: "Riverside Site Store", kind: "site", project: true },
+];
+
+const WAREHOUSE_LOCATIONS = [
+  { warehouse: "central", key: "zb", code: "B", name: "Zone B", kind: "zone" },
+  { warehouse: "central", key: "a03", parent: "zb", code: "B-A03", name: "Aisle 03", kind: "aisle" },
+  { warehouse: "central", key: "r06", parent: "a03", code: "B-A03-R06", name: "Rack 06", kind: "rack" },
+  { warehouse: "central", key: "s2", parent: "r06", code: "B-A03-R06-S2", name: "Shelf 2", kind: "shelf" },
+  { warehouse: "central", key: "b04", parent: "s2", code: "B-A03-R06-S2-B04", name: "Bin 04", kind: "bin" },
+  { warehouse: "site", key: "yard", code: "YARD", name: "Open yard", kind: "zone" },
+];
+
+const INVENTORY = [
+  {
+    key: "cement",
+    sku: "CEM-42.5N",
+    barcode: "5012345678900",
+    name: "Cement OPC 42.5N",
+    description: "Ordinary Portland cement, 50kg bag",
+    category: "Concrete",
+    unit: "bag",
+    manufacturer: "Riverstone Cement",
+    model: "OPC-42.5N",
+    specification: "BS EN 197-1 CEM I 42.5N",
+    unitCost: 6.4,
+    reorderLevel: 400,
+    minStock: 200,
+    maxStock: 4000,
+    leadTimeDays: 7,
+    receive: { warehouse: "central", location: "b04", quantity: 1800, unitCost: 6.4 },
+  },
+  {
+    key: "rebar",
+    sku: "RBR-T16",
+    barcode: "5012345678917",
+    name: "Reinforcement bar T16",
+    description: "High-yield deformed bar, 12m length",
+    category: "Reinforcement",
+    unit: "bar",
+    manufacturer: "Delta Steel",
+    model: "T16-12M",
+    specification: "BS 4449 Grade B500B",
+    unitCost: 21.5,
+    reorderLevel: 300,
+    minStock: 150,
+    maxStock: 2500,
+    leadTimeDays: 21,
+    receive: { warehouse: "central", location: "s2", quantity: 640, unitCost: 21.5 },
+  },
+  {
+    key: "formwork",
+    sku: "FWK-PLY18",
+    barcode: "5012345678924",
+    name: "Formwork plywood 18mm",
+    description: "Film-faced birch plywood, 2440 x 1220",
+    category: "Formwork",
+    unit: "sheet",
+    manufacturer: "Northline Timber",
+    specification: "18mm film-faced, 12 uses",
+    unitCost: 34,
+    reorderLevel: 120,
+    minStock: 60,
+    maxStock: 900,
+    leadTimeDays: 14,
+    receive: { warehouse: "site", location: "yard", quantity: 210, unitCost: 34 },
+  },
+  {
+    key: "membrane",
+    sku: "WPF-MEM01",
+    barcode: "5012345678931",
+    name: "Waterproofing membrane",
+    description: "Self-adhesive bituminous membrane, 1m x 20m roll",
+    category: "Waterproofing",
+    unit: "roll",
+    manufacturer: "Aquastop",
+    specification: "1.5mm SBS modified",
+    unitCost: 96,
+    reorderLevel: 40,
+    minStock: 20,
+    maxStock: 300,
+    leadTimeDays: 28,
+    // Deliberately left at nothing on hand, so the low-stock and out-of-stock
+    // figures on the dashboard have something real to report.
+  },
+];
+
+async function upsertInventory({ orgId, projectId, activities, userId }) {
+  const warehouses = {};
+  for (const spec of WAREHOUSES) {
+    const data = {
+      name: spec.name,
+      kind: spec.kind,
+      projectId: spec.project ? projectId : null,
+      status: "active",
+      updatedBy: userId,
+    };
+    const existing = await prisma.warehouse.findFirst({ where: { orgId, code: spec.code } });
+    warehouses[spec.key] = existing
+      ? await prisma.warehouse.update({ where: { id: existing.id }, data })
+      : await prisma.warehouse.create({
+          data: { orgId, code: spec.code, createdBy: userId, ...data },
+        });
+  }
+
+  const locations = {};
+  for (const spec of WAREHOUSE_LOCATIONS) {
+    const warehouse = warehouses[spec.warehouse];
+    const parent = spec.parent ? locations[spec.parent] : null;
+    const existing = await prisma.warehouseLocation.findFirst({
+      where: { warehouseId: warehouse.id, code: spec.code },
+    });
+    const data = {
+      name: spec.name,
+      kind: spec.kind,
+      parentId: parent?.id ?? null,
+      depth: parent ? parent.depth + 1 : 0,
+      status: "active",
+      updatedBy: userId,
+    };
+    let row = existing
+      ? await prisma.warehouseLocation.update({ where: { id: existing.id }, data })
+      : await prisma.warehouseLocation.create({
+          data: { orgId, warehouseId: warehouse.id, code: spec.code, path: "", createdBy: userId, ...data },
+        });
+    row = await prisma.warehouseLocation.update({
+      where: { id: row.id },
+      data: { path: parent ? `${parent.path}/${row.id}` : row.id },
+    });
+    locations[spec.key] = row;
+  }
+
+  const items = {};
+  for (const spec of INVENTORY) {
+    const { key, receive, ...fields } = spec;
+    const existing = await prisma.inventoryItem.findFirst({ where: { orgId, sku: spec.sku } });
+    const data = { ...fields, qrCode: spec.sku, status: "active", updatedBy: userId };
+    items[key] = existing
+      ? await prisma.inventoryItem.update({ where: { id: existing.id }, data })
+      : await prisma.inventoryItem.create({ data: { orgId, createdBy: userId, ...data } });
+
+    if (!receive) continue;
+    // Only stock an item the first time it is seeded: re-running the seed must
+    // not keep piling stock onto the same shelf.
+    const already = await prisma.stockTransaction.findFirst({
+      where: { orgId, itemId: items[key].id, type: "receipt" },
+    });
+    if (already) continue;
+
+    await inventoryService.receiveStock({
+      orgId,
+      user: { id: userId, role: "warehouse" },
+      payload: {
+        itemId: items[key].id,
+        warehouseId: warehouses[receive.warehouse].id,
+        locationId: locations[receive.location].id,
+        quantity: receive.quantity,
+        unitCost: receive.unitCost,
+        reference: "Opening stock",
+      },
+    });
+  }
+
+  // One issue to site, so the ledger, the activity and the cost have a worked
+  // example rather than an empty table.
+  const issued = await prisma.stockTransaction.findFirst({ where: { orgId, type: "issue" } });
+  if (!issued) {
+    await inventoryService.issueStock({
+      orgId,
+      user: { id: userId, role: "warehouse" },
+      payload: {
+        itemId: items.cement.id,
+        warehouseId: warehouses.central.id,
+        locationId: locations.b04.id,
+        quantity: 240,
+        projectId,
+        activityId: activities.sub.id,
+        reference: "Foundation pour 1",
+      },
+    });
+  }
+
+  return { warehouses, items };
+}
+
 async function upsertResources(projectId, activities) {
   for (const spec of RESOURCES) {
     const activity = activities[spec.activity];
@@ -466,6 +657,12 @@ async function main() {
     userId: people.pm.id,
   });
   await upsertResources(project.id, activities);
+  await upsertInventory({
+    orgId: org.id,
+    projectId: project.id,
+    activities,
+    userId: people.warehouse.id,
+  });
   await upsertProgressAndCost({ projectId: project.id, activities, userId: people.pm.id });
   await upsertBaseline({ projectId: project.id, userId: people.pm.id });
 

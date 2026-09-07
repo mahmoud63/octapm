@@ -72,6 +72,15 @@ model Organisation {
   dailyLogs           DailyLog[]
   reportDefinitions   ReportDefinition[]
   ganttLayouts        GanttLayout[]
+  inventoryItems      InventoryItem[]
+  warehouses          Warehouse[]
+  warehouseLocations  WarehouseLocation[]
+  stockBalances       StockBalance[]
+  stockTransactions   StockTransaction[]
+  stockTransfers      StockTransfer[]
+  stockTransferLines  StockTransferLine[]
+  inventoryCounts     InventoryCount[]
+  inventoryCountLines InventoryCountLine[]
   reportSchedules     ReportSchedule[]
   reportRuns          ReportRun[]
   projectHealthSnapshots ProjectHealthSnapshot[]
@@ -278,6 +287,7 @@ model User {
 
   apiClients   ApiClient[]
   assistantConversations AssistantConversation[]
+  managedWarehouses Warehouse[] @relation("WarehouseManager")
   @@index([orgId])
   @@index([email])
 }
@@ -481,6 +491,9 @@ model Project {
   dailyLogs                     DailyLog[]
   reportDefinitions             ReportDefinition[]
   ganttLayouts                  GanttLayout[]
+  inventoryItems                InventoryItem[]
+  warehouses                    Warehouse[]
+  stockTransactions             StockTransaction[]
   healthSnapshot                ProjectHealthSnapshot?
   workflowTemplates             WorkflowTemplate[]
   workflowInstances             WorkflowInstance[]
@@ -1240,6 +1253,7 @@ model BoqItem {
   commitmentSovLines      CommitmentSovLine[]
   changeOrderAllocations  ChangeOrderAllocationLink[]
   subValuationAllocations SubValuationAllocationLink[]
+  stockTransactions       StockTransaction[]
 
   @@unique([projectId, activeCodeKey])
   @@index([projectId])
@@ -1493,6 +1507,7 @@ model Activity {
   predecessorLinks       ActivityDependency[]       @relation("ActivityDependencySuccessor")
   successorLinks         ActivityDependency[]       @relation("ActivityDependencyPredecessor")
   lookaheadItems         LookaheadItem[]
+  stockTransactions      StockTransaction[]
 
   @@index([projectId])
   @@index([projectId, isActive])
@@ -2550,6 +2565,7 @@ model ProcurementSupplier {
   deliveryReceipts  DeliveryReceipt[]
   materialMaster    MaterialMaster[]
   activityMaterials ActivityMaterial[]
+  inventoryItems    InventoryItem[]
 
   @@unique([projectId, name])
   @@index([projectId])
@@ -2793,6 +2809,335 @@ model MaterialMaster {
   @@index([projectId])
   @@index([supplierId])
   @@index([projectId, code])
+}
+
+// ─── Inventory and warehouse (OCTA-INV-STOCK-050) ──────────────────────────
+//
+// MaterialMaster above is a *project's* procurement list: what this job needs
+// and from whom. Inventory is the other half — what the company physically
+// holds, where it is, and what it is worth. The two meet at goods receipt.
+//
+// The ledger is the source of truth. StockBalance is a running total kept in
+// step with it inside the same transaction, so a balance can always be proved
+// from the movements that produced it.
+
+/** What the company stocks. Org-level, optionally owned by one project. */
+model InventoryItem {
+  id                 String   @id @default(uuid())
+  orgId              String
+  projectId          String? // null = company-owned, available to every project
+  sku                String
+  barcode            String? // EAN/UPC/Code128 as printed on the label
+  qrCode             String? // the token a scanner resolves; defaults to the sku
+  name               String
+  description        String?
+  category           String?
+  unit               String
+  manufacturer       String?
+  model              String?
+  specification      String?
+  preferredSupplierId String?
+  unitCost           Decimal  @default(0) @db.Decimal(18, 4)
+  averageCost        Decimal  @default(0) @db.Decimal(18, 4) // weighted average, moved on each receipt
+  lastPurchasePrice  Decimal? @db.Decimal(18, 4)
+  reorderLevel       Float    @default(0)
+  minStock           Float    @default(0)
+  maxStock           Float?
+  leadTimeDays       Int      @default(0)
+  isSerialised       Boolean  @default(false)
+  isBatched          Boolean  @default(false)
+  status             String   @default("active") // active, archived
+  notes              String?
+  createdBy          String?
+  updatedBy          String?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  org               Organisation         @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  project           Project?             @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  preferredSupplier ProcurementSupplier? @relation(fields: [preferredSupplierId], references: [id], onDelete: SetNull)
+  balances          StockBalance[]
+  transactions      StockTransaction[]
+  transferLines     StockTransferLine[]
+  countLines        InventoryCountLine[]
+
+  @@unique([orgId, sku])
+  @@unique([orgId, barcode])
+  @@index([orgId, status])
+  @@index([orgId, projectId])
+  @@index([orgId, category])
+}
+
+/** Somewhere stock is held. A central store, a project store, a site container. */
+model Warehouse {
+  id          String    @id @default(uuid())
+  orgId       String
+  projectId   String? // null = central, serving every project
+  code        String
+  name        String
+  kind        String    @default("project") // central, project, site, temporary, equipment_yard
+  address     String?
+  managerId   String?
+  status      String    @default("active") // active, archived
+  notes       String?
+  createdBy   String?
+  updatedBy   String?
+  archivedAt  DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  org           Organisation        @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  project       Project?            @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  manager       User?               @relation("WarehouseManager", fields: [managerId], references: [id], onDelete: SetNull)
+  locations     WarehouseLocation[]
+  balances      StockBalance[]
+  transactions  StockTransaction[]
+  transfersOut  StockTransfer[]     @relation("TransferFrom")
+  transfersIn   StockTransfer[]     @relation("TransferTo")
+  counts        InventoryCount[]
+
+  @@unique([orgId, code])
+  @@index([orgId, status])
+  @@index([orgId, projectId])
+}
+
+/**
+ * Where inside a warehouse. Zone → aisle → rack → shelf → bin, held as a
+ * materialized path so a whole branch can be read in one query — the same
+ * shape the project Location tree uses.
+ */
+model WarehouseLocation {
+  id          String    @id @default(uuid())
+  orgId       String
+  warehouseId String
+  parentId    String?
+  code        String
+  name        String
+  kind        String    @default("zone") // zone, aisle, rack, shelf, bin
+  path        String // materialized path of ids: zoneId/aisleId/rackId…
+  depth       Int       @default(0)
+  sortOrder   Int       @default(0)
+  status      String    @default("active") // active, archived
+  createdBy   String?
+  updatedBy   String?
+  archivedAt  DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  org          Organisation        @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  warehouse    Warehouse           @relation(fields: [warehouseId], references: [id], onDelete: Cascade)
+  parent       WarehouseLocation?  @relation("WarehouseLocationChildren", fields: [parentId], references: [id], onDelete: Restrict)
+  children     WarehouseLocation[] @relation("WarehouseLocationChildren")
+  balances     StockBalance[]
+  transactions StockTransaction[]
+  countLines   InventoryCountLine[]
+
+  @@unique([warehouseId, code])
+  @@index([orgId])
+  @@index([warehouseId, status])
+  @@index([warehouseId, path])
+}
+
+/**
+ * How much of an item sits in one place, by state.
+ *
+ * `available` is not stored: it is onHand less what is reserved, and a stored
+ * copy would be one more thing to get out of step with the ledger.
+ */
+model StockBalance {
+  id          String   @id @default(uuid())
+  orgId       String
+  itemId      String
+  warehouseId String
+  locationId  String?
+  onHand      Float    @default(0)
+  reserved    Float    @default(0)
+  inTransit   Float    @default(0)
+  damaged     Float    @default(0)
+  quarantined Float    @default(0)
+  lastMovedAt DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  org       Organisation       @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  item      InventoryItem      @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  warehouse Warehouse          @relation(fields: [warehouseId], references: [id], onDelete: Cascade)
+  location  WarehouseLocation? @relation(fields: [locationId], references: [id], onDelete: SetNull)
+
+  @@unique([itemId, warehouseId, locationId])
+  @@index([orgId, itemId])
+  @@index([warehouseId])
+}
+
+/**
+ * Every movement of stock, ever. Append-only: a mistake is corrected with a
+ * reversing entry, never by editing history, because this ledger is what a
+ * material variance claim is argued from.
+ */
+model StockTransaction {
+  id          String   @id @default(uuid())
+  orgId       String
+  itemId      String
+  warehouseId String
+  locationId  String?
+  // receipt, issue, return, transfer_out, transfer_in, adjust, count,
+  // damage, quarantine, release, reverse
+  type        String
+  quantity    Float // signed: what this movement did to onHand
+  unitCost    Decimal  @default(0) @db.Decimal(18, 4)
+  value       Decimal  @default(0) @db.Decimal(18, 2)
+  balanceAfter Float   @default(0) // onHand at this location once this posted
+
+  // Where it went, so a cost lands on the right thing.
+  projectId          String?
+  activityId         String?
+  costCodeId         String?
+  boqItemId          String?
+  locationRefId      String? // the project Location it was installed at
+  commitmentId       String?
+
+  // Where it came from.
+  poLineId        String?
+  receiptLineId   String?
+  transferId      String?
+  countId         String?
+  reversesId      String?
+
+  batchNo    String?
+  serialNo   String?
+  expiryDate DateTime?
+  reference  String?
+  notes      String?
+  performedBy String?
+  occurredAt DateTime @default(now())
+  createdAt  DateTime @default(now())
+
+  org         Organisation       @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  item        InventoryItem      @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  warehouse   Warehouse          @relation(fields: [warehouseId], references: [id], onDelete: Cascade)
+  location    WarehouseLocation? @relation(fields: [locationId], references: [id], onDelete: SetNull)
+  project     Project?           @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  activity    Activity?          @relation(fields: [activityId], references: [id], onDelete: SetNull)
+  costCode    CostCode?          @relation(fields: [costCodeId], references: [id], onDelete: SetNull)
+  boqItem     BoqItem?           @relation(fields: [boqItemId], references: [id], onDelete: SetNull)
+  transfer    StockTransfer?     @relation(fields: [transferId], references: [id], onDelete: SetNull)
+  count       InventoryCount?    @relation(fields: [countId], references: [id], onDelete: SetNull)
+  reverses    StockTransaction?  @relation("StockReversal", fields: [reversesId], references: [id], onDelete: SetNull)
+  reversedBy  StockTransaction[] @relation("StockReversal")
+
+  @@index([orgId, occurredAt])
+  @@index([itemId, occurredAt])
+  @@index([warehouseId, occurredAt])
+  @@index([projectId, occurredAt])
+  @@index([activityId])
+  @@index([poLineId])
+  @@index([transferId])
+}
+
+/** Stock moving between two warehouses, and in transit until it lands. */
+model StockTransfer {
+  id              String    @id @default(uuid())
+  orgId           String
+  ref             String
+  fromWarehouseId String
+  toWarehouseId   String
+  status          String    @default("draft") // draft, in_transit, received, cancelled
+  reason          String?
+  notes           String?
+  dispatchedAt    DateTime?
+  dispatchedBy    String?
+  receivedAt      DateTime?
+  receivedBy      String?
+  cancelledAt     DateTime?
+  cancelledBy     String?
+  createdBy       String?
+  updatedBy       String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  org           Organisation        @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  fromWarehouse Warehouse           @relation("TransferFrom", fields: [fromWarehouseId], references: [id], onDelete: Cascade)
+  toWarehouse   Warehouse           @relation("TransferTo", fields: [toWarehouseId], references: [id], onDelete: Cascade)
+  lines         StockTransferLine[]
+  transactions  StockTransaction[]
+
+  @@unique([orgId, ref])
+  @@index([orgId, status])
+  @@index([fromWarehouseId])
+  @@index([toWarehouseId])
+}
+
+model StockTransferLine {
+  id          String   @id @default(uuid())
+  orgId       String
+  transferId  String
+  itemId      String
+  quantity    Float    @default(0)
+  receivedQty Float    @default(0)
+  damagedQty  Float    @default(0)
+  batchNo     String?
+  serialNo    String?
+  notes       String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  org      Organisation  @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  transfer StockTransfer @relation(fields: [transferId], references: [id], onDelete: Cascade)
+  item     InventoryItem @relation(fields: [itemId], references: [id], onDelete: Cascade)
+
+  @@index([transferId])
+  @@index([itemId])
+}
+
+/** A stock take: what the system thinks is there against what someone counted. */
+model InventoryCount {
+  id          String    @id @default(uuid())
+  orgId       String
+  warehouseId String
+  ref         String
+  status      String    @default("open") // open, counting, posted, cancelled
+  scope       String    @default("full") // full, cycle, spot
+  notes       String?
+  startedBy   String?
+  startedAt   DateTime  @default(now())
+  postedBy    String?
+  postedAt    DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  org          Organisation         @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  warehouse    Warehouse            @relation(fields: [warehouseId], references: [id], onDelete: Cascade)
+  lines        InventoryCountLine[]
+  transactions StockTransaction[]
+
+  @@unique([orgId, ref])
+  @@index([orgId, status])
+  @@index([warehouseId])
+}
+
+model InventoryCountLine {
+  id         String   @id @default(uuid())
+  orgId      String
+  countId    String
+  itemId     String
+  locationId String?
+  systemQty  Float    @default(0) // what the ledger said when the line was drawn
+  countedQty Float?
+  variance   Float    @default(0)
+  countedBy  String?
+  countedAt  DateTime?
+  notes      String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  org      Organisation       @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  count    InventoryCount     @relation(fields: [countId], references: [id], onDelete: Cascade)
+  item     InventoryItem      @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  location WarehouseLocation? @relation(fields: [locationId], references: [id], onDelete: SetNull)
+
+  @@unique([countId, itemId, locationId])
+  @@index([countId])
+  @@index([itemId])
 }
 
 // ─── Equipment ───
@@ -4108,6 +4453,7 @@ model CostCode {
   timeEntries        TimeEntry[]
   changeEventLines   ChangeEventLine[]
   directCostLines    DirectCostLine[]
+  stockTransactions  StockTransaction[]
 
   @@unique([orgId, code])
   @@index([orgId, status])

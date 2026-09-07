@@ -105,6 +105,7 @@ const createApp = () => {
   app.use("/api/v1/search", searchRoutes);
   app.use("/api/v1/permissions", permissionRoutes);
   app.use("/api/v1/company", companyWorkspaceRoutes);
+  app.use("/api/v1/inventory", require("./routes/inventory"));
   app.use("/api/v1/reports", reportBuilderRoutes);
   app.use("/api/v1/portfolio", portfolioRoutes);
   app.use("/api/v1/workflows", workflowInboxRoutes);

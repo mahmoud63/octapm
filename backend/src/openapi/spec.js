@@ -13879,6 +13879,414 @@ const includeArchivedQuery = queryParam("includeArchived", "Include archived row
   }),
 );
 
+// ─── Inventory and warehouse (OCTA-INV-STOCK-050) ──────────────────────────
+//
+// Company-level: a central store serves every project. Movements carry the
+// project and the activity or cost code they are for; the item master and the
+// warehouses do not have to.
+
+const inventoryPermission = (action, transition = null) =>
+  modulePermission("inventory", action, transition);
+
+const stockMovementBody = (extra = {}) =>
+  jsonBody(
+    objectSchema({
+      itemId: { type: "string", format: "uuid" },
+      warehouseId: { type: "string", format: "uuid" },
+      locationId: nullableUuid,
+      quantity: { type: "number" },
+      batchNo: { type: "string", nullable: true },
+      serialNo: { type: "string", nullable: true },
+      reference: { type: "string", nullable: true },
+      notes: { type: "string", nullable: true },
+      ...extra,
+    }),
+    "The movement.",
+  );
+
+const inventoryItemBody = objectSchema({
+  sku: { type: "string", maxLength: 60 },
+  name: { type: "string", maxLength: 200 },
+  unit: { type: "string", maxLength: 20 },
+  barcode: { type: "string", nullable: true },
+  qrCode: { type: "string", nullable: true },
+  description: { type: "string", nullable: true },
+  category: { type: "string", nullable: true },
+  manufacturer: { type: "string", nullable: true },
+  model: { type: "string", nullable: true },
+  specification: { type: "string", nullable: true },
+  preferredSupplierId: nullableUuid,
+  projectId: nullableUuid,
+  unitCost: { type: "number", minimum: 0 },
+  reorderLevel: { type: "number", minimum: 0 },
+  minStock: { type: "number", minimum: 0 },
+  maxStock: { type: "number", nullable: true, minimum: 0 },
+  leadTimeDays: { type: "integer", minimum: 0 },
+  isSerialised: { type: "boolean" },
+  isBatched: { type: "boolean" },
+  status: { type: "string", enum: ["active", "archived"] },
+  notes: { type: "string", nullable: true },
+});
+
+add(
+  "/inventory/items",
+  "get",
+  operation({
+    tag: "Inventory",
+    summary: "List inventory items with their stock position.",
+    operationId: "listInventoryItems",
+    parameters: [
+      queryParam("projectId", "Limit to company items plus this project's own.", {
+        type: "string",
+        format: "uuid",
+      }),
+      queryParam("search", "Matches SKU, name, barcode or manufacturer.", { type: "string" }),
+      queryParam("category", "Exact category.", { type: "string" }),
+      queryParam("status", "active (default) or archived.", { type: "string" }),
+      queryParam("lowStock", "Only items at or below their reorder level.", { type: "boolean" }),
+    ],
+    permissions: inventoryPermission("read"),
+  }),
+);
+
+add(
+  "/inventory/items",
+  "post",
+  operation({
+    tag: "Inventory",
+    summary: "Add an item to the inventory master.",
+    operationId: "createInventoryItem",
+    permissions: inventoryPermission("create", "item.manage"),
+    requestBody: jsonBody(inventoryItemBody, "Item fields. SKU, name and unit are required."),
+    status: 201,
+  }),
+);
+
+add(
+  "/inventory/items/scan/{code}",
+  "get",
+  operation({
+    tag: "Inventory",
+    summary: "Resolve a scanned barcode, QR token or SKU to an item and its locations.",
+    operationId: "scanInventoryItem",
+    parameters: [pathParam("code", "Whatever the scanner produced.", null)],
+    permissions: inventoryPermission("read"),
+  }),
+);
+
+add(
+  "/inventory/items/{itemId}",
+  "get",
+  operation({
+    tag: "Inventory",
+    summary: "Get one inventory item with its stock by location.",
+    operationId: "getInventoryItem",
+    parameters: [pathParam("itemId", "Inventory item id.")],
+    permissions: inventoryPermission("read"),
+  }),
+);
+
+add(
+  "/inventory/items/{itemId}",
+  "patch",
+  operation({
+    tag: "Inventory",
+    summary: "Update an inventory item.",
+    operationId: "updateInventoryItem",
+    parameters: [pathParam("itemId", "Inventory item id.")],
+    permissions: inventoryPermission("update", "item.manage"),
+    requestBody: jsonBody(inventoryItemBody, "Any subset of the item's fields.", false),
+  }),
+);
+
+add(
+  "/inventory/warehouses",
+  "get",
+  operation({
+    tag: "Inventory",
+    summary: "List warehouses.",
+    operationId: "listWarehouses",
+    parameters: [
+      queryParam("projectId", "Central warehouses plus this project's own.", {
+        type: "string",
+        format: "uuid",
+      }),
+    ],
+    permissions: inventoryPermission("read"),
+  }),
+);
+
+add(
+  "/inventory/warehouses",
+  "post",
+  operation({
+    tag: "Inventory",
+    summary: "Create a warehouse.",
+    operationId: "createWarehouse",
+    permissions: inventoryPermission("create", "warehouse.manage"),
+    requestBody: jsonBody(
+      objectSchema({
+        code: { type: "string", maxLength: 30 },
+        name: { type: "string", maxLength: 200 },
+        kind: {
+          type: "string",
+          enum: ["central", "project", "site", "temporary", "equipment_yard"],
+        },
+        projectId: nullableUuid,
+        managerId: nullableUuid,
+        address: { type: "string", nullable: true },
+        notes: { type: "string", nullable: true },
+      }),
+      "Warehouse fields.",
+    ),
+    status: 201,
+  }),
+);
+
+add(
+  "/inventory/warehouses/{warehouseId}",
+  "patch",
+  operation({
+    tag: "Inventory",
+    summary: "Update or archive a warehouse.",
+    operationId: "updateWarehouse",
+    parameters: [pathParam("warehouseId", "Warehouse id.")],
+    permissions: inventoryPermission("update", "warehouse.manage"),
+    requestBody: jsonBody(
+      objectSchema({
+        name: { type: "string" },
+        kind: { type: "string" },
+        managerId: nullableUuid,
+        address: { type: "string", nullable: true },
+        notes: { type: "string", nullable: true },
+        status: { type: "string", enum: ["active", "archived"] },
+      }),
+      "Any subset of the warehouse's fields.",
+      false,
+    ),
+  }),
+);
+
+add(
+  "/inventory/warehouses/{warehouseId}/locations",
+  "get",
+  operation({
+    tag: "Inventory",
+    summary: "List the zone / aisle / rack / shelf / bin tree of a warehouse.",
+    operationId: "listWarehouseLocations",
+    parameters: [pathParam("warehouseId", "Warehouse id.")],
+    permissions: inventoryPermission("read"),
+  }),
+);
+
+add(
+  "/inventory/warehouses/{warehouseId}/locations",
+  "post",
+  operation({
+    tag: "Inventory",
+    summary: "Add a place inside a warehouse.",
+    operationId: "createWarehouseLocation",
+    parameters: [pathParam("warehouseId", "Warehouse id.")],
+    permissions: inventoryPermission("create", "warehouse.manage"),
+    requestBody: jsonBody(
+      objectSchema({
+        code: { type: "string", maxLength: 40 },
+        name: { type: "string", maxLength: 200 },
+        kind: { type: "string", enum: ["zone", "aisle", "rack", "shelf", "bin"] },
+        parentId: nullableUuid,
+        sortOrder: { type: "integer" },
+      }),
+      "Location fields. Omit parentId for a top-level zone.",
+    ),
+    status: 201,
+  }),
+);
+
+add(
+  "/inventory/stock/receive",
+  "post",
+  operation({
+    tag: "Inventory",
+    summary: "Receive stock into a warehouse, moving the weighted average cost.",
+    operationId: "receiveStock",
+    permissions: inventoryPermission("create", "stock.receive"),
+    requestBody: stockMovementBody({
+      unitCost: { type: "number", nullable: true, minimum: 0 },
+      damagedQty: { type: "number", nullable: true, minimum: 0 },
+      poLineId: nullableUuid,
+      receiptLineId: nullableUuid,
+      expiryDate: { type: "string", format: "date-time", nullable: true },
+    }),
+    status: 201,
+  }),
+);
+
+add(
+  "/inventory/stock/issue",
+  "post",
+  operation({
+    tag: "Inventory",
+    summary: "Issue stock to site against an activity or cost code.",
+    operationId: "issueStock",
+    permissions: inventoryPermission("submit", "stock.issue"),
+    requestBody: stockMovementBody({
+      projectId: nullableUuid,
+      activityId: nullableUuid,
+      costCodeId: nullableUuid,
+      boqItemId: nullableUuid,
+      locationRefId: nullableUuid,
+      commitmentId: nullableUuid,
+    }),
+    status: 201,
+  }),
+);
+
+[
+  ["return", "Return unused stock from site.", "returnStock", "stock.return"],
+  ["adjust", "Adjust stock up or down, with a reason.", "adjustStock", "stock.adjust"],
+  ["damage", "Write stock off as damaged.", "damageStock", "stock.adjust"],
+  ["quarantine", "Hold stock pending inspection.", "quarantineStock", "stock.adjust"],
+  ["release", "Release quarantined stock back to available.", "releaseStock", "stock.adjust"],
+].forEach(([path, summary, operationId, transition]) =>
+  add(
+    `/inventory/stock/${path}`,
+    "post",
+    operation({
+      tag: "Inventory",
+      summary,
+      operationId,
+      permissions: inventoryPermission("update", transition),
+      requestBody: stockMovementBody({
+        projectId: nullableUuid,
+        activityId: nullableUuid,
+      }),
+      status: 201,
+    }),
+  ),
+);
+
+add(
+  "/inventory/stock/transactions",
+  "get",
+  operation({
+    tag: "Inventory",
+    summary: "Read the stock ledger.",
+    operationId: "listStockTransactions",
+    parameters: [
+      queryParam("itemId", "One item's movements.", { type: "string", format: "uuid" }),
+      queryParam("warehouseId", "One warehouse's movements.", { type: "string", format: "uuid" }),
+      queryParam("projectId", "Movements charged to one project.", { type: "string", format: "uuid" }),
+      queryParam("activityId", "Movements charged to one activity.", { type: "string", format: "uuid" }),
+      queryParam("type", "receipt, issue, return, transfer_out, transfer_in, adjust, damage, quarantine, release.", { type: "string" }),
+      queryParam("limit", "Up to 500, default 100.", { type: "integer" }),
+    ],
+    permissions: inventoryPermission("read"),
+  }),
+);
+
+add(
+  "/inventory/transfers",
+  "get",
+  operation({
+    tag: "Inventory",
+    summary: "List warehouse-to-warehouse transfers.",
+    operationId: "listStockTransfers",
+    parameters: [
+      queryParam("status", "draft, in_transit, received or cancelled.", { type: "string" }),
+    ],
+    permissions: inventoryPermission("read"),
+  }),
+);
+
+add(
+  "/inventory/transfers",
+  "post",
+  operation({
+    tag: "Inventory",
+    summary: "Raise a transfer between two warehouses.",
+    operationId: "createStockTransfer",
+    permissions: inventoryPermission("create", "stock.transfer"),
+    requestBody: jsonBody(
+      objectSchema({
+        fromWarehouseId: { type: "string", format: "uuid" },
+        toWarehouseId: { type: "string", format: "uuid" },
+        ref: { type: "string", nullable: true },
+        reason: { type: "string", nullable: true },
+        notes: { type: "string", nullable: true },
+        lines: {
+          type: "array",
+          items: objectSchema({
+            itemId: { type: "string", format: "uuid" },
+            // Validated as strictly positive by the route; expressed as a
+            // minimum here because this document is OpenAPI 3.0, where
+            // exclusiveMinimum is a boolean modifier rather than a value.
+            quantity: { type: "number", minimum: 0 },
+            batchNo: { type: "string", nullable: true },
+            serialNo: { type: "string", nullable: true },
+          }),
+        },
+      }),
+      "Where from, where to, and what.",
+    ),
+    status: 201,
+  }),
+);
+
+add(
+  "/inventory/transfers/{transferId}/dispatch",
+  "post",
+  operation({
+    tag: "Inventory",
+    summary: "Send a transfer: stock leaves the source and is in transit.",
+    operationId: "dispatchStockTransfer",
+    parameters: [pathParam("transferId", "Transfer id.")],
+    permissions: inventoryPermission("update", "stock.transfer"),
+  }),
+);
+
+add(
+  "/inventory/transfers/{transferId}/receive",
+  "post",
+  operation({
+    tag: "Inventory",
+    summary: "Receive a transfer, reporting anything damaged in transit.",
+    operationId: "receiveStockTransfer",
+    parameters: [pathParam("transferId", "Transfer id.")],
+    permissions: inventoryPermission("update", "stock.transfer"),
+    requestBody: jsonBody(
+      objectSchema({
+        lines: {
+          type: "array",
+          items: objectSchema({
+            id: { type: "string", format: "uuid" },
+            receivedQty: { type: "number", minimum: 0 },
+            damagedQty: { type: "number", minimum: 0 },
+          }),
+        },
+      }),
+      "Per-line quantities. Omit a line to accept it in full.",
+      false,
+    ),
+  }),
+);
+
+add(
+  "/inventory/summary",
+  "get",
+  operation({
+    tag: "Inventory",
+    summary: "Inventory value, stock health and movement totals.",
+    operationId: "getInventorySummary",
+    parameters: [
+      queryParam("projectId", "Scope the figures to one project.", {
+        type: "string",
+        format: "uuid",
+      }),
+    ],
+    permissions: inventoryPermission("read"),
+  }),
+);
+
 const openApiSpec = {
   openapi: "3.0.3",
   info: {
@@ -14123,6 +14531,11 @@ const openApiSpec = {
       name: "Project Emails",
       description:
         "Inbound email (OCTA-COMM-CONV-042): each project has an address (p-<token>@INBOUND_EMAIL_DOMAIN); notification emails carry signed reply-to-record / reply-to-conversation addresses. The provider webhook routes replies to comments and messages and keeps the rest in the project inbox for triage (log as correspondence, post to a record, start a conversation). See docs/qa/conversations-inbound-email.md.",
+    },
+    {
+      name: "Inventory",
+      description:
+        "Inventory, warehouses and the stock ledger (OCTA-INV-STOCK-050): an item master with barcode and QR resolution, warehouses with a zone/aisle/rack/shelf/bin tree, and every movement — receipt, issue to an activity or cost code, return, transfer, adjustment, damage and quarantine — written to an append-only ledger that the balances are kept in step with. Costing is weighted average; stock cannot go negative.",
     },
     {
       name: "Lookaheads",

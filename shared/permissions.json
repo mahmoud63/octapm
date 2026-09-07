@@ -220,6 +220,46 @@
         "alert.resolve": ["pm", "planning_eng", "procurement", "warehouse"]
       }
     },
+    "inventory": {
+      "label": "Inventory & Warehouse",
+      "actions": {
+        "read": [
+          "pm",
+          "planning_eng",
+          "qs",
+          "cost_controller",
+          "procurement",
+          "warehouse",
+          "site_engineer",
+          "finance"
+        ],
+        "create": ["pm", "procurement", "warehouse"],
+        "update": ["pm", "procurement", "warehouse"],
+        "delete": ["pm", "warehouse"],
+        "submit": ["pm", "warehouse", "site_engineer"],
+        "approve": ["pm", "warehouse"],
+        "certify": [],
+        "baseline": [],
+        "export": [
+          "pm",
+          "qs",
+          "cost_controller",
+          "procurement",
+          "warehouse",
+          "finance"
+        ]
+      },
+      "transitions": {
+        "item.manage": ["pm", "procurement", "warehouse"],
+        "warehouse.manage": ["pm", "warehouse"],
+        "stock.receive": ["pm", "procurement", "warehouse"],
+        "stock.issue": ["pm", "warehouse", "site_engineer"],
+        "stock.return": ["pm", "warehouse", "site_engineer"],
+        "stock.transfer": ["pm", "warehouse"],
+        "stock.adjust": ["pm", "warehouse"],
+        "stock.count": ["pm", "warehouse"]
+      }
+    },
     "risk": {
       "label": "Risk Register",
       "actions": {
