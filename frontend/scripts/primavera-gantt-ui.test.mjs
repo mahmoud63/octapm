@@ -79,19 +79,55 @@ assert.match(
   'saved layouts are offered in the toolbar'
 )
 
-// Saved layouts.
+// Saved layouts. They live on the server so a team can share them; only the
+// "which one was I last in" preference stays in the browser.
 const layouts = read('src/features/schedule/lib/gantt-layouts.ts')
 assert.match(layouts, /BUILT_IN_LAYOUTS/, 'built-in layouts are provided')
 assert.match(layouts, /Resource review/, 'a resource layout is provided')
 assert.match(
   layouts,
-  /catch \{\s*return null/,
-  'blocked browser storage must not break the chart'
+  /schedule\/layouts/,
+  'layouts are read from and written to the API'
 )
 assert.match(
   layouts,
   /export function isSameLayout/,
   'the toolbar can tell when the view has drifted from its layout'
+)
+assert.doesNotMatch(
+  layouts,
+  /localStorage\.setItem\(listKey/,
+  'the layout list is no longer kept in the browser'
+)
+assert.match(
+  layouts,
+  /octa\.gantt\.layout\./,
+  'the last-used layout stays a per-device preference'
+)
+assert.match(
+  gantt,
+  /primavera-gantt-layout-share/,
+  'a layout can be shared with the project from the menu'
+)
+
+// The API contract, on the backend side.
+const layoutService = read(
+  '../backend/src/services/gantt-layout.service.js'
+)
+assert.match(
+  layoutService,
+  /OR: \[\{ createdBy: user\.id \}, \{ visibility: "project" \}\]/,
+  'a caller sees their own layouts plus what the project shares'
+)
+assert.match(
+  layoutService,
+  /LAYOUT_FORBIDDEN/,
+  'someone else’s layout cannot be edited or deleted'
+)
+assert.match(
+  layoutService,
+  /const normalizeLayout/,
+  'layout payloads are whitelisted before they are stored'
 )
 
 // The histogram. Mixed units must not be stacked into one column, and the

@@ -71,6 +71,7 @@ model Organisation {
   subPayApps          SubPayApp[]
   dailyLogs           DailyLog[]
   reportDefinitions   ReportDefinition[]
+  ganttLayouts        GanttLayout[]
   reportSchedules     ReportSchedule[]
   reportRuns          ReportRun[]
   projectHealthSnapshots ProjectHealthSnapshot[]
@@ -479,6 +480,7 @@ model Project {
   subPayApps                    SubPayApp[]
   dailyLogs                     DailyLog[]
   reportDefinitions             ReportDefinition[]
+  ganttLayouts                  GanttLayout[]
   healthSnapshot                ProjectHealthSnapshot?
   workflowTemplates             WorkflowTemplate[]
   workflowInstances             WorkflowInstance[]
@@ -6479,6 +6481,37 @@ model ReportDefinition {
   @@index([orgId, projectId])
   @@index([orgId, createdBy])
   @@index([orgId, visibility])
+}
+
+/**
+ * A saved Gantt arrangement: timescale, zoom, where the splitter rests, whether
+ * the baseline and the resource histogram are shown, and which WBS rows are
+ * collapsed. The equivalent of a P6 layout.
+ *
+ * `private` is the author's own; `project` shares it with everyone who can open
+ * the project. Layouts name collapsed rows of one schedule, so they stay
+ * project-scoped rather than offering an org-wide variant that would not
+ * travel meaningfully.
+ */
+model GanttLayout {
+  id         String   @id @default(uuid())
+  orgId      String
+  projectId  String
+  name       String
+  visibility String   @default("private") // private, project
+  layoutJson Json
+  createdBy  String?
+  updatedBy  String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  org     Organisation @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  project Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  // One name per author per project, so "save" updates rather than duplicates.
+  @@unique([projectId, createdBy, name])
+  @@index([orgId, projectId])
+  @@index([orgId, createdBy])
 }
 
 /** When a report renders itself and who gets it. */

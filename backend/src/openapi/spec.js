@@ -6464,6 +6464,89 @@ add(
   }),
 );
 
+// Saved Gantt layouts. A layout is a view of the schedule, not schedule data,
+// so reading the schedule is permission enough to keep one and to share it.
+const ganttLayoutSchema = objectSchema({
+  timeScale: { type: "string", enum: ["day", "week", "month", "quarter"] },
+  pxPerDay: { type: "number", minimum: 1, maximum: 24 },
+  gridWidth: { type: "number", nullable: true },
+  showBaseline: { type: "boolean" },
+  showHistogram: { type: "boolean" },
+  histogramGroup: { type: "string", enum: ["type", "resource"] },
+  collapsed: { type: "array", items: { type: "string" } },
+});
+
+add(
+  "/projects/{projectId}/schedule/layouts",
+  "get",
+  operation({
+    tag: "Schedule",
+    summary: "List saved Gantt layouts visible to the caller.",
+    operationId: "listGanttLayouts",
+    parameters: projectParams,
+    permissions: modulePermission("schedule", "read"),
+  }),
+);
+
+add(
+  "/projects/{projectId}/schedule/layouts",
+  "post",
+  operation({
+    tag: "Schedule",
+    summary: "Save a Gantt layout under a name.",
+    operationId: "saveGanttLayout",
+    parameters: projectParams,
+    permissions: modulePermission("schedule", "read"),
+    requestBody: jsonBody(
+      objectSchema({
+        name: { type: "string", minLength: 1, maxLength: 60 },
+        visibility: { type: "string", enum: ["private", "project"] },
+        layout: ganttLayoutSchema,
+      }),
+      "Layout name, who can see it, and the arrangement itself.",
+    ),
+  }),
+);
+
+add(
+  "/projects/{projectId}/schedule/layouts/{layoutId}",
+  "patch",
+  operation({
+    tag: "Schedule",
+    summary: "Rename a Gantt layout, reshare it, or replace its arrangement.",
+    operationId: "updateGanttLayout",
+    parameters: [
+      ...projectParams,
+      pathParam("layoutId", "Saved layout id.", null),
+    ],
+    permissions: modulePermission("schedule", "read"),
+    requestBody: jsonBody(
+      objectSchema({
+        name: { type: "string", minLength: 1, maxLength: 60 },
+        visibility: { type: "string", enum: ["private", "project"] },
+        layout: ganttLayoutSchema,
+      }),
+      "Any subset of the layout's fields.",
+      false,
+    ),
+  }),
+);
+
+add(
+  "/projects/{projectId}/schedule/layouts/{layoutId}",
+  "delete",
+  operation({
+    tag: "Schedule",
+    summary: "Delete a saved Gantt layout.",
+    operationId: "deleteGanttLayout",
+    parameters: [
+      ...projectParams,
+      pathParam("layoutId", "Saved layout id.", null),
+    ],
+    permissions: modulePermission("schedule", "read"),
+  }),
+);
+
 add(
   "/projects/{projectId}/schedule/baseline",
   "post",

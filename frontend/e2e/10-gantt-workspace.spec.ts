@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
-import { openProject, signIn } from './support'
+import { API, apiClient, apiGet, apiToken, openProject, signIn } from './support'
 
 /**
  * The Gantt as a working surface.
@@ -14,13 +14,41 @@ import { openProject, signIn } from './support'
 
 const SHOTS = '../docs/design/screenshots'
 
-async function openGantt(page: Page) {
-  await signIn(page)
+async function openGantt(page: Page, who: 'pm' | 'planner' = 'pm') {
+  await signIn(page, who)
   const projectId = await openProject(page)
   await page.goto(`/projects/${projectId}/schedule`)
   await expect(page.getByTestId('primavera-gantt')).toBeVisible({ timeout: 30_000 })
   await page.getByTestId('primavera-gantt-viewport').scrollIntoViewIfNeeded()
   await page.waitForTimeout(600)
+  return projectId
+}
+
+/**
+ * Removes a layout this suite left behind, so a re-run starts clean.
+ *
+ * Through a separate API client, never the browser's own session: signing in
+ * again in the same cookie jar displaces the session under test.
+ */
+async function removeLayout(projectId: string, name: string) {
+  const client = await apiClient()
+  try {
+    const token = await apiToken(client)
+    const { body } = await apiGet(
+      client,
+      `/projects/${projectId}/schedule/layouts`,
+      token
+    )
+    for (const entry of body?.data?.items ?? []) {
+      if (entry.name !== name) continue
+      await client.delete(
+        `${API}/projects/${projectId}/schedule/layouts/${entry.id}`,
+        { headers: { authorization: `Bearer ${token}` } }
+      )
+    }
+  } finally {
+    await client.dispose()
+  }
 }
 
 /** Share of the chart's width that belongs to the bars rather than the table. */
@@ -167,7 +195,8 @@ test.describe('gantt working area', () => {
   })
 
   test('a layout can be saved and comes back on the next visit', async ({ page }) => {
-    await openGantt(page)
+    const projectId = await openGantt(page)
+    await removeLayout(projectId, 'My site review')
 
     // A built-in layout is the starting point.
     await expect(page.getByTestId('primavera-gantt-layouts')).toContainText(
@@ -179,20 +208,66 @@ test.describe('gantt working area', () => {
     await page.getByRole('button', { name: 'Month', exact: true }).click()
     await expect(page.getByTestId('primavera-gantt-histogram')).toBeVisible()
 
-    page.once('dialog', (dialog) => dialog.accept('Site review'))
+    page.once('dialog', (dialog) => dialog.accept('My site review'))
     await page.getByTestId('primavera-gantt-layouts').click()
     await page.getByTestId('primavera-gantt-layout-save').click()
     await expect(page.getByTestId('primavera-gantt-layouts')).toContainText(
-      'Site review',
+      'My site review',
     )
 
     // The whole point: come back and find it as you left it.
     await page.reload()
     await expect(page.getByTestId('primavera-gantt')).toBeVisible({ timeout: 30_000 })
     await expect(page.getByTestId('primavera-gantt-layouts')).toContainText(
-      'Site review',
+      'My site review',
     )
     await expect(page.getByTestId('primavera-gantt-histogram')).toBeVisible()
+
+    await removeLayout(projectId, 'My site review')
+  })
+
+  test('a shared layout reaches the rest of the project', async ({ page }) => {
+    const projectId = await openGantt(page)
+    await removeLayout(projectId, 'Weekly progress review')
+
+    // The PM sets a view up and shares it.
+    await page.getByTestId('primavera-gantt-resources').click()
+    page.once('dialog', (dialog) => dialog.accept('Weekly progress review'))
+    await page.getByTestId('primavera-gantt-layouts').click()
+    await page.getByTestId('primavera-gantt-layout-share').click()
+    await expect(page.getByTestId('primavera-gantt-layouts')).toContainText(
+      'Weekly progress review',
+    )
+
+    // The planner, in their own session, finds it waiting — attributed, and
+    // not theirs to delete.
+    await page.context().clearCookies()
+    await page.evaluate(() => {
+      localStorage.clear()
+      sessionStorage.clear()
+    })
+    await openGantt(page, 'planner')
+
+    await page.getByTestId('primavera-gantt-layouts').click()
+    const shared = page
+      .getByRole('menuitem')
+      .filter({ hasText: 'Weekly progress review' })
+    await expect(shared).toBeVisible()
+    await expect(shared, 'a shared layout should name who shared it').toContainText(
+      'Shared by',
+    )
+    await expect(
+      shared.getByRole('button', { name: /Delete layout/ }),
+      'a colleague must not be offered the delete',
+    ).toHaveCount(0)
+
+    await page.screenshot({ path: `${SHOTS}/22-gantt-shared-layout.png` })
+
+    // Applying it brings the histogram across with it.
+    await shared.click()
+    await expect(page.getByTestId('primavera-gantt-histogram')).toBeVisible()
+
+    await removeLayout(projectId, 'Weekly progress review')
   })
 
   test('the built-in resource layout turns the histogram on', async ({ page }) => {

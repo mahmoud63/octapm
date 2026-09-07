@@ -1,18 +1,23 @@
+import { apiClient } from '@/services/api/client'
+
 /**
  * Saved Gantt layouts.
  *
  * A planner sets the chart up once — which columns, how wide the table, what
  * timescale, baseline on or off, resources shown — and expects to find it that
- * way tomorrow, and to be able to keep more than one arrangement for different
- * jobs. That is what P6 calls a layout, and this is the same idea.
+ * way tomorrow, to keep more than one arrangement, and to hand a good one to
+ * the rest of the team. That is what P6 calls a layout.
  *
- * Layouts live in this browser, per project. They are not shared between
- * people or devices; moving them to the server is a separate piece of work,
- * and the interface says where they are stored so nobody is surprised.
+ * Layouts live on the server, scoped to the project. A `private` layout is the
+ * author's own; a `project` one is visible to everyone who can open the
+ * project. Which layout *you* last had open is a per-device preference and
+ * stays in this browser — it is not worth a round trip, and it should not
+ * follow you onto a shared site terminal.
  */
 
 export type TimeScale = 'day' | 'week' | 'month' | 'quarter'
 export type HistogramGroup = 'type' | 'resource'
+export type LayoutVisibility = 'private' | 'project'
 
 export type GanttLayout = {
   timeScale: TimeScale
@@ -29,8 +34,13 @@ export type GanttLayout = {
 export type NamedLayout = {
   id: string
   name: string
-  builtIn?: boolean
   layout: GanttLayout
+  /** Built-in layouts ship with the product and cannot be edited. */
+  builtIn?: boolean
+  visibility?: LayoutVisibility
+  ownerName?: string | null
+  isOwner?: boolean
+  canManage?: boolean
 }
 
 const BASE: GanttLayout = {
@@ -84,89 +94,66 @@ export const BUILT_IN_LAYOUTS: NamedLayout[] = [
 
 export const DEFAULT_LAYOUT_ID = BUILT_IN_LAYOUTS[0].id
 
-const listKey = (projectId: string) => `octa.gantt.layouts.${projectId}`
-const activeKey = (projectId: string) => `octa.gantt.layout.${projectId}`
-
-/** Storage is best-effort: a blocked or full store must never break the chart. */
-const read = (key: string) => {
-  try {
-    return window.localStorage.getItem(key)
-  } catch {
-    return null
-  }
-}
-
-const write = (key: string, value: string) => {
-  try {
-    window.localStorage.setItem(key, value)
-    return true
-  } catch {
-    return false
-  }
-}
-
 /** Fills in anything a layout saved by an older build is missing. */
 const normalise = (layout: Partial<GanttLayout> | undefined): GanttLayout => ({
   ...BASE,
   ...layout,
-  collapsed: Array.isArray(layout?.collapsed) ? layout!.collapsed : [],
+  collapsed: Array.isArray(layout?.collapsed) ? layout.collapsed : [],
 })
 
-export function loadSavedLayouts(projectId: string): NamedLayout[] {
-  const raw = read(listKey(projectId))
-  if (!raw) return []
-  try {
-    const parsed = JSON.parse(raw)
-    if (!Array.isArray(parsed)) return []
-    return parsed
-      .filter((entry) => entry && typeof entry.id === 'string' && typeof entry.name === 'string')
-      .map((entry) => ({
-        id: entry.id,
-        name: entry.name,
-        layout: normalise(entry.layout),
-      }))
-  } catch {
-    return []
-  }
+type LayoutResponse = {
+  id: string
+  name: string
+  visibility: LayoutVisibility
+  layout: Partial<GanttLayout>
+  ownerName?: string | null
+  isOwner?: boolean
+  canManage?: boolean
 }
 
-export function allLayouts(projectId: string): NamedLayout[] {
-  return [...BUILT_IN_LAYOUTS, ...loadSavedLayouts(projectId)]
+const fromApi = (row: LayoutResponse): NamedLayout => ({
+  id: row.id,
+  name: row.name,
+  visibility: row.visibility,
+  ownerName: row.ownerName ?? null,
+  isOwner: Boolean(row.isOwner),
+  canManage: Boolean(row.canManage),
+  layout: normalise(row.layout),
+})
+
+export async function fetchLayouts(projectId: string): Promise<NamedLayout[]> {
+  const response = await apiClient.get(`/projects/${projectId}/schedule/layouts`)
+  const items: LayoutResponse[] = response.data?.data?.items ?? []
+  return [...BUILT_IN_LAYOUTS, ...items.map(fromApi)]
 }
 
-export function findLayout(projectId: string, id: string): NamedLayout | null {
-  return allLayouts(projectId).find((entry) => entry.id === id) ?? null
-}
-
-/** Saves under a name, replacing a saved layout of the same name. */
-export function saveLayout(
+export async function saveLayout(
   projectId: string,
   name: string,
-  layout: GanttLayout
-): NamedLayout | null {
-  const trimmed = name.trim()
-  if (!trimmed) return null
-
-  const saved = loadSavedLayouts(projectId)
-  const existing = saved.find(
-    (entry) => entry.name.toLowerCase() === trimmed.toLowerCase()
+  layout: GanttLayout,
+  visibility: LayoutVisibility
+): Promise<NamedLayout> {
+  const response = await apiClient.post(
+    `/projects/${projectId}/schedule/layouts`,
+    { name, layout, visibility }
   )
-  const entry: NamedLayout = {
-    id: existing?.id ?? `layout:${Date.now().toString(36)}`,
-    name: trimmed,
-    layout: normalise(layout),
-  }
-
-  const next = existing
-    ? saved.map((item) => (item.id === entry.id ? entry : item))
-    : [...saved, entry]
-
-  return write(listKey(projectId), JSON.stringify(next)) ? entry : null
+  return fromApi(response.data.data)
 }
 
-export function deleteLayout(projectId: string, id: string) {
-  const next = loadSavedLayouts(projectId).filter((entry) => entry.id !== id)
-  write(listKey(projectId), JSON.stringify(next))
+export async function updateLayoutVisibility(
+  projectId: string,
+  layoutId: string,
+  visibility: LayoutVisibility
+): Promise<NamedLayout> {
+  const response = await apiClient.patch(
+    `/projects/${projectId}/schedule/layouts/${layoutId}`,
+    { visibility }
+  )
+  return fromApi(response.data.data)
+}
+
+export async function deleteLayout(projectId: string, layoutId: string) {
+  await apiClient.delete(`/projects/${projectId}/schedule/layouts/${layoutId}`)
 }
 
 /**
@@ -189,10 +176,24 @@ export function isSameLayout(saved: GanttLayout, current: GanttLayout): boolean 
   )
 }
 
+// --- Which layout this browser last had open ------------------------------
+// A per-device preference, not shared state. Storage is best-effort: a blocked
+// or full store must never break the chart.
+
+const activeKey = (projectId: string) => `octa.gantt.layout.${projectId}`
+
 export function loadActiveLayoutId(projectId: string): string {
-  return read(activeKey(projectId)) || DEFAULT_LAYOUT_ID
+  try {
+    return window.localStorage.getItem(activeKey(projectId)) || DEFAULT_LAYOUT_ID
+  } catch {
+    return DEFAULT_LAYOUT_ID
+  }
 }
 
 export function setActiveLayoutId(projectId: string, id: string) {
-  write(activeKey(projectId), id)
+  try {
+    window.localStorage.setItem(activeKey(projectId), id)
+  } catch {
+    // A browser that will not store the preference still shows the chart.
+  }
 }

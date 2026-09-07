@@ -14,6 +14,7 @@ const {
 const { getEffectiveRole, requirePermission } = require('../middleware/rbac');
 const { validate } = require('../middleware/validate');
 const scheduleService = require('../services/schedule.service');
+const ganttLayoutService = require('../services/gantt-layout.service');
 const fileStorageService = require('../services/file-storage.service');
 const jobService = require('../jobs/job.service');
 
@@ -441,6 +442,97 @@ router.get(
     });
     return sendSuccess(res, result);
   }),
+);
+
+/*
+ * Saved Gantt layouts.
+ *
+ * A layout is a view of the schedule, not schedule data — nothing here changes
+ * an activity — so reading the schedule is permission enough to keep one and to
+ * share it with the project. Who may change or remove a shared layout is
+ * decided per row in the service.
+ */
+const layoutBody = [
+  body('name').optional().isString().trim().isLength({ min: 1, max: 60 }),
+  body('visibility').optional().isIn(ganttLayoutService.VISIBILITIES),
+  body('layout').optional().isObject(),
+];
+
+// GET /projects/:projectId/schedule/layouts
+router.get(
+  '/layouts',
+  requirePermission('schedule', 'read'),
+  asyncHandler(async (req, res) =>
+    sendSuccess(
+      res,
+      await ganttLayoutService.listLayouts({
+        orgId: req.user.orgId,
+        projectId: req.params.projectId,
+        user: req.user,
+      }),
+    ),
+  ),
+);
+
+// POST /projects/:projectId/schedule/layouts — save under a name
+router.post(
+  '/layouts',
+  requirePermission('schedule', 'read'),
+  [
+    body('name').isString().trim().isLength({ min: 1, max: 60 }),
+    body('layout').isObject(),
+    body('visibility').optional().isIn(ganttLayoutService.VISIBILITIES),
+    validate,
+  ],
+  asyncHandler(async (req, res) =>
+    sendSuccess(
+      res,
+      await ganttLayoutService.saveLayoutFor({
+        orgId: req.user.orgId,
+        projectId: req.params.projectId,
+        user: req.user,
+        payload: req.body,
+      }),
+      201,
+    ),
+  ),
+);
+
+// PATCH /projects/:projectId/schedule/layouts/:layoutId — rename, reshare, restate
+router.patch(
+  '/layouts/:layoutId',
+  requirePermission('schedule', 'read'),
+  [param('layoutId').isUUID(), ...layoutBody, validate],
+  asyncHandler(async (req, res) =>
+    sendSuccess(
+      res,
+      await ganttLayoutService.updateLayout({
+        orgId: req.user.orgId,
+        projectId: req.params.projectId,
+        user: req.user,
+        layoutId: req.params.layoutId,
+        payload: req.body,
+      }),
+    ),
+  ),
+);
+
+// DELETE /projects/:projectId/schedule/layouts/:layoutId
+router.delete(
+  '/layouts/:layoutId',
+  requirePermission('schedule', 'read'),
+  [param('layoutId').isUUID(), validate],
+  asyncHandler(async (req, res) =>
+    sendSuccess(
+      res,
+      await ganttLayoutService.deleteLayout({
+        orgId: req.user.orgId,
+        projectId: req.params.projectId,
+        user: req.user,
+        layoutId: req.params.layoutId,
+      }),
+    ),
+  ),
 );
 
 module.exports = router;

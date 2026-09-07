@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   AlertTriangle,
   BarChart3,
@@ -12,11 +13,14 @@ import {
   Minimize2,
   RotateCcw,
   Scaling,
+  Share2,
   Trash2,
+  Users,
   ZoomIn,
   ZoomOut,
 } from 'lucide-react'
 import { toast } from 'sonner'
+import { getServerErrorMessage } from '@/lib/handle-server-error'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import {
@@ -35,15 +39,16 @@ import type {
 import {
   BUILT_IN_LAYOUTS,
   DEFAULT_LAYOUT_ID,
-  allLayouts,
   deleteLayout,
-  findLayout,
+  fetchLayouts,
   isSameLayout,
   loadActiveLayoutId,
   saveLayout,
   setActiveLayoutId,
+  updateLayoutVisibility,
   type GanttLayout,
   type HistogramGroup,
+  type LayoutVisibility,
   type NamedLayout,
   type TimeScale,
 } from '../lib/gantt-layouts'
@@ -910,8 +915,9 @@ export function GanttChart({
   const splitInitialised = useRef(false)
   const [showHistogram, setShowHistogram] = useState(false)
   const [histogramGroup, setHistogramGroup] = useState<HistogramGroup>('type')
-  const [layouts, setLayouts] = useState<NamedLayout[]>(BUILT_IN_LAYOUTS)
   const [activeLayoutId, setActiveLayout] = useState(DEFAULT_LAYOUT_ID)
+  const layoutRestored = useRef(false)
+  const queryClient = useQueryClient()
   const canEditActivities = Boolean(onActivityUpdate || onActivityDelete)
   const sourceActivities = activities as GanttActivity[]
   const dataDateMissing = !parseDate(dataDate)
@@ -1093,6 +1099,19 @@ export function GanttChart({
     collapsed: [...collapsedRows],
   })
 
+  // Layouts come from the server so the team shares them. The built-ins are
+  // prepended by the fetch, and stay available if the request fails.
+  const layoutsQuery = useQuery({
+    queryKey: ['gantt-layouts', projectId],
+    queryFn: () => fetchLayouts(projectId),
+    enabled: Boolean(projectId),
+    staleTime: 30_000,
+    placeholderData: BUILT_IN_LAYOUTS,
+  })
+  const layouts = layoutsQuery.data ?? BUILT_IN_LAYOUTS
+  const refreshLayouts = () =>
+    queryClient.invalidateQueries({ queryKey: ['gantt-layouts', projectId] })
+
   const applyLayout = (entry: NamedLayout) => {
     const { layout } = entry
     setTimeScale(layout.timeScale)
@@ -1111,51 +1130,83 @@ export function GanttChart({
     setActiveLayoutId(projectId, entry.id)
   }
 
-  // Restore the layout this project was last left in.
+  // Reopen in the layout this browser was last left in, once the real list has
+  // arrived. Waiting for that matters: the placeholder is the built-ins alone,
+  // and restoring against it would never find a saved layout.
+  const layoutsReady = Boolean(layoutsQuery.data) && !layoutsQuery.isPlaceholderData
   useEffect(() => {
-    if (!projectId) return
-    const available = allLayouts(projectId)
-    setLayouts(available)
+    if (layoutRestored.current || !projectId || !layoutsReady) return
+    layoutRestored.current = true
+
     const wanted = loadActiveLayoutId(projectId)
-    const entry = available.find((item) => item.id === wanted)
+    const entry = layoutsQuery.data?.find((item) => item.id === wanted)
     if (!entry || entry.id === DEFAULT_LAYOUT_ID) {
       setActiveLayout(entry?.id ?? DEFAULT_LAYOUT_ID)
       return
     }
     applyLayout(entry)
-    // Applying once on mount is the point; re-running would fight the planner.
+    // Applying once is the point; re-running would fight the planner.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [projectId])
+  }, [layoutsReady, projectId])
 
-  const handleSaveLayout = () => {
-    const suggestion =
-      layouts.find((entry) => entry.id === activeLayoutId && !entry.builtIn)?.name ?? ''
-    const name = window.prompt('Save this layout as', suggestion)
+  const handleSaveLayout = async (visibility: LayoutVisibility) => {
+    const current = layouts.find(
+      (entry) => entry.id === activeLayoutId && !entry.builtIn
+    )
+    const name = window.prompt(
+      visibility === 'project'
+        ? 'Share this layout with the project as'
+        : 'Save this layout as',
+      current?.name ?? ''
+    )
     if (name == null) return
-
-    const saved = saveLayout(projectId, name, currentLayout())
-    if (!saved) {
-      toast.error(
-        name.trim()
-          ? 'This browser would not store the layout.'
-          : 'Give the layout a name.'
-      )
+    if (!name.trim()) {
+      toast.error('Give the layout a name.')
       return
     }
-    setLayouts(allLayouts(projectId))
-    setActiveLayout(saved.id)
-    setActiveLayoutId(projectId, saved.id)
-    toast.success(`Layout "${saved.name}" saved`)
+
+    try {
+      const saved = await saveLayout(projectId, name, currentLayout(), visibility)
+      await refreshLayouts()
+      setActiveLayout(saved.id)
+      setActiveLayoutId(projectId, saved.id)
+      toast.success(
+        visibility === 'project'
+          ? `"${saved.name}" shared with the project`
+          : `Layout "${saved.name}" saved`
+      )
+    } catch (error) {
+      toast.error(getServerErrorMessage(error))
+    }
   }
 
-  const handleDeleteLayout = (entry: NamedLayout) => {
-    deleteLayout(projectId, entry.id)
-    setLayouts(allLayouts(projectId))
-    if (activeLayoutId === entry.id) {
-      const fallback = findLayout(projectId, DEFAULT_LAYOUT_ID)
-      if (fallback) applyLayout(fallback)
+  const handleShareLayout = async (entry: NamedLayout) => {
+    const next: LayoutVisibility =
+      entry.visibility === 'project' ? 'private' : 'project'
+    try {
+      await updateLayoutVisibility(projectId, entry.id, next)
+      await refreshLayouts()
+      toast.success(
+        next === 'project'
+          ? `"${entry.name}" shared with the project`
+          : `"${entry.name}" is now yours alone`
+      )
+    } catch (error) {
+      toast.error(getServerErrorMessage(error))
     }
-    toast.success(`Layout "${entry.name}" deleted`)
+  }
+
+  const handleDeleteLayout = async (entry: NamedLayout) => {
+    try {
+      await deleteLayout(projectId, entry.id)
+      await refreshLayouts()
+      if (activeLayoutId === entry.id) {
+        applyLayout(BUILT_IN_LAYOUTS[0])
+      }
+      toast.success(`Layout "${entry.name}" deleted`)
+    } catch (error) {
+      toast.error(getServerErrorMessage(error))
+    }
   }
 
   const activeLayout = layouts.find((entry) => entry.id === activeLayoutId)
@@ -1382,37 +1433,71 @@ export function GanttChart({
                 >
                   <Check
                     className={cn(
-                      'h-3.5 w-3.5',
+                      'h-3.5 w-3.5 shrink-0',
                       entry.id === activeLayoutId ? 'opacity-100' : 'opacity-0'
                     )}
                   />
-                  <span className='flex-1 truncate'>{entry.name}</span>
-                  {!entry.builtIn && (
-                    <button
-                      type='button'
-                      aria-label={`Delete layout ${entry.name}`}
-                      className='opacity-0 transition-opacity group-hover:opacity-100 hover:text-error'
-                      onClick={(event) => {
-                        event.preventDefault()
-                        event.stopPropagation()
-                        handleDeleteLayout(entry)
-                      }}
-                    >
-                      <Trash2 className='h-3.5 w-3.5' />
-                    </button>
+                  <span className='min-w-0 flex-1'>
+                    <span className='block truncate'>{entry.name}</span>
+                    {/* Say whose it is, so a shared layout is never mistaken
+                        for one of your own. */}
+                    {entry.visibility === 'project' && (
+                      <span className='block truncate text-[10px] text-muted-foreground'>
+                        Shared{entry.isOwner ? '' : ` by ${entry.ownerName ?? 'a colleague'}`}
+                      </span>
+                    )}
+                  </span>
+                  {entry.visibility === 'project' && (
+                    <Users className='h-3.5 w-3.5 shrink-0 text-interactive' />
+                  )}
+                  {entry.canManage && (
+                    <span className='flex shrink-0 gap-1.5 opacity-0 transition-opacity group-hover:opacity-100'>
+                      <button
+                        type='button'
+                        aria-label={
+                          entry.visibility === 'project'
+                            ? `Stop sharing ${entry.name}`
+                            : `Share ${entry.name} with the project`
+                        }
+                        className='hover:text-interactive'
+                        onClick={(event) => {
+                          event.preventDefault()
+                          event.stopPropagation()
+                          void handleShareLayout(entry)
+                        }}
+                      >
+                        <Share2 className='h-3.5 w-3.5' />
+                      </button>
+                      <button
+                        type='button'
+                        aria-label={`Delete layout ${entry.name}`}
+                        className='hover:text-error'
+                        onClick={(event) => {
+                          event.preventDefault()
+                          event.stopPropagation()
+                          void handleDeleteLayout(entry)
+                        }}
+                      >
+                        <Trash2 className='h-3.5 w-3.5' />
+                      </button>
+                    </span>
                   )}
                 </DropdownMenuItem>
               ))}
               <DropdownMenuSeparator />
               <DropdownMenuItem
-                onClick={handleSaveLayout}
+                onClick={() => void handleSaveLayout('private')}
                 data-testid='primavera-gantt-layout-save'
               >
                 Save this layout as…
               </DropdownMenuItem>
-              <p className='px-2 py-1.5 text-[11px] leading-snug text-muted-foreground'>
-                Saved layouts are kept in this browser, for this project.
-              </p>
+              <DropdownMenuItem
+                onClick={() => void handleSaveLayout('project')}
+                data-testid='primavera-gantt-layout-share'
+              >
+                <Share2 className='h-3.5 w-3.5' />
+                Share with the project…
+              </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
           <div className='flex items-center gap-1 rounded-md border bg-muted/30 p-1'>
