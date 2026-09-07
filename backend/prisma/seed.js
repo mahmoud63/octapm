@@ -385,7 +385,15 @@ const INVENTORY = [
     minStock: 150,
     maxStock: 2500,
     leadTimeDays: 21,
-    receive: { warehouse: "central", location: "s2", quantity: 640, unitCost: 21.5 },
+    // The first of three deliveries; the later two are in PRICE_HISTORY, which
+    // is what gives the purchase price trend a line to draw.
+    receive: {
+      warehouse: "central",
+      location: "s2",
+      quantity: 640,
+      unitCost: 21.5,
+      agedDays: 240,
+    },
   },
   {
     key: "formwork",
@@ -422,9 +430,186 @@ const INVENTORY = [
     // Deliberately left at nothing on hand, so the low-stock and out-of-stock
     // figures on the dashboard have something real to report.
   },
+  {
+    key: "sealant",
+    sku: "SLC-PU25",
+    barcode: "5012345678948",
+    name: "Polyurethane joint sealant",
+    description: "600ml sausage, grey",
+    category: "Sealants",
+    unit: "cartridge",
+    manufacturer: "Bondline",
+    specification: "ISO 11600 F 25 LM",
+    unitCost: 8.75,
+    reorderLevel: 60,
+    minStock: 30,
+    maxStock: 400,
+    leadTimeDays: 10,
+    // Below its reorder level but not empty: the case the low-stock list is for.
+    receive: { warehouse: "central", location: "s2", quantity: 24, unitCost: 8.75 },
+  },
+  {
+    key: "scaffold",
+    sku: "SCF-TUBE48",
+    barcode: "5012345678955",
+    name: "Scaffold tube 48.3mm",
+    description: "Galvanised tube, 6m length",
+    category: "Temporary works",
+    unit: "length",
+    manufacturer: "Northline Steel",
+    specification: "EN 39, 4.0mm wall",
+    unitCost: 18.4,
+    reorderLevel: 100,
+    minStock: 50,
+    maxStock: 400,
+    leadTimeDays: 35,
+    // Over-ordered and untouched since: this one item is both the overstock
+    // example and the slow-moving example, which is usually how it happens.
+    receive: {
+      warehouse: "site",
+      location: "yard",
+      quantity: 900,
+      unitCost: 18.4,
+      agedDays: 210,
+    },
+  },
 ];
 
+/**
+ * Two more deliveries of rebar, at what the supplier charged later.
+ *
+ * The price trend needs more than one delivery of the same item to say
+ * anything, and a flat line says nothing worth reading.
+ */
+const PRICE_HISTORY = [
+  {
+    ref: "Supplier delivery 2",
+    item: "rebar",
+    warehouse: "central",
+    location: "s2",
+    quantity: 180,
+    unitCost: 22.4,
+    agedDays: 90,
+  },
+  {
+    // Recent enough that rebar does not also read as slow-moving stock.
+    ref: "Supplier delivery 3",
+    item: "rebar",
+    warehouse: "central",
+    location: "s2",
+    quantity: 220,
+    unitCost: 24.1,
+    agedDays: 12,
+  },
+];
+
+/**
+ * What the programme needs next.
+ *
+ * Drives the upcoming-needs and long-lead sections of the inventory dashboard:
+ * the facade glazing is sixteen weeks away from a supplier and nothing has
+ * arrived, which is the kind of thing that has to be seen months early.
+ */
+const MATERIAL_PLAN = [
+  {
+    activity: "frame",
+    name: "Cement OPC 42.5N",
+    code: "CEM-42.5N",
+    unit: "bag",
+    qty: 2400,
+    receivedQty: 1800,
+    required: "2026-09-25",
+    orderBy: "2026-09-11",
+    leadWeeks: 2,
+    status: "partial",
+  },
+  {
+    activity: "facade",
+    name: "Unitised glazing panel type A",
+    code: "GLZ-UP-A",
+    unit: "panel",
+    qty: 320,
+    receivedQty: 0,
+    required: "2026-10-20",
+    orderBy: "2026-06-28",
+    leadWeeks: 16,
+    status: "planned",
+  },
+  {
+    activity: "facade",
+    name: "Structural silicone",
+    code: "SIL-STR",
+    unit: "cartridge",
+    qty: 900,
+    receivedQty: 0,
+    required: "2026-11-10",
+    orderBy: "2026-09-15",
+    leadWeeks: 8,
+    status: "planned",
+  },
+];
+
+/**
+ * Clears what the end-to-end suite left behind.
+ *
+ * The goods-receipt tests raise their own purchase order every run — a receipt
+ * cannot be un-posted, so a test that ate into shared data would behave
+ * differently the second time. That is the right trade for the tests and the
+ * wrong one for the demo database, where the orders pile up and crowd the real
+ * ones off the inventory dashboard. Re-seeding is what sweeps them up.
+ *
+ * Matched on the prefixes the tests use and nothing else.
+ */
+async function purgeTestResidue(orgId) {
+  const orders = await prisma.procurementOrder.findMany({
+    where: { ref: { startsWith: "PO-E2E-" } },
+    select: { id: true },
+  });
+  const orderIds = orders.map((order) => order.id);
+
+  if (orderIds.length) {
+    await prisma.deliveryReceiptLine.deleteMany({ where: { orderId: { in: orderIds } } });
+    await prisma.deliveryReceipt.deleteMany({ where: { orderId: { in: orderIds } } });
+    await prisma.procurementPoLine.deleteMany({ where: { orderId: { in: orderIds } } });
+    await prisma.procurementOrder.deleteMany({ where: { id: { in: orderIds } } });
+  }
+
+  const items = await prisma.inventoryItem.findMany({
+    where: { orgId, sku: { startsWith: "E2E-" } },
+    select: { id: true },
+  });
+  const itemIds = items.map((item) => item.id);
+  if (itemIds.length) {
+    await prisma.stockTransaction.deleteMany({ where: { itemId: { in: itemIds } } });
+    await prisma.stockBalance.deleteMany({ where: { itemId: { in: itemIds } } });
+    await prisma.inventoryItem.deleteMany({ where: { id: { in: itemIds } } });
+  }
+
+  if (orderIds.length || itemIds.length) {
+    console.log(
+      `  cleared ${orderIds.length} test purchase orders and ${itemIds.length} test items`
+    );
+  }
+}
+
+/**
+ * Moves a movement back in time.
+ *
+ * Demo data posted all at once looks like a store that opened this morning.
+ * The dashboard reads dates — how long stock has sat, what the price was doing
+ * — and needs a history to read.
+ */
+async function backdate(transactionId, days) {
+  const occurredAt = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+  await prisma.stockTransaction.update({
+    where: { id: transactionId },
+    data: { occurredAt },
+  });
+}
+
 async function upsertInventory({ orgId, projectId, activities, userId }) {
+  await purgeTestResidue(orgId);
+
   const warehouses = {};
   for (const spec of WAREHOUSES) {
     const data = {
@@ -486,7 +671,7 @@ async function upsertInventory({ orgId, projectId, activities, userId }) {
     });
     if (already) continue;
 
-    await inventoryService.receiveStock({
+    const movement = await inventoryService.receiveStock({
       orgId,
       user: { id: userId, role: "warehouse" },
       payload: {
@@ -498,6 +683,30 @@ async function upsertInventory({ orgId, projectId, activities, userId }) {
         reference: "Opening stock",
       },
     });
+    if (receive.agedDays) await backdate(movement.id, receive.agedDays);
+  }
+
+  // Later deliveries of the same item, so the purchase price trend has a line
+  // to draw rather than a single point.
+  for (const spec of PRICE_HISTORY) {
+    const already = await prisma.stockTransaction.findFirst({
+      where: { orgId, itemId: items[spec.item].id, reference: spec.ref },
+    });
+    if (already) continue;
+
+    const movement = await inventoryService.receiveStock({
+      orgId,
+      user: { id: userId, role: "warehouse" },
+      payload: {
+        itemId: items[spec.item].id,
+        warehouseId: warehouses[spec.warehouse].id,
+        locationId: locations[spec.location].id,
+        quantity: spec.quantity,
+        unitCost: spec.unitCost,
+        reference: spec.ref,
+      },
+    });
+    await backdate(movement.id, spec.agedDays);
   }
 
   // One issue to site, so the ledger, the activity and the cost have a worked
@@ -519,7 +728,43 @@ async function upsertInventory({ orgId, projectId, activities, userId }) {
     });
   }
 
+  await upsertMaterialPlan({ projectId, activities, userId });
+
   return { warehouses, items };
+}
+
+/** What each activity needs and when it has to be ordered to arrive in time. */
+async function upsertMaterialPlan({ projectId, activities, userId }) {
+  for (const spec of MATERIAL_PLAN) {
+    const data = {
+      code: spec.code,
+      unit: spec.unit,
+      qty: spec.qty,
+      plannedQty: spec.qty,
+      receivedQty: spec.receivedQty,
+      requiredDate: date(spec.required),
+      orderByDate: date(spec.orderBy),
+      leadWeeks: spec.leadWeeks,
+      status: spec.status,
+      updatedBy: userId,
+    };
+    const existing = await prisma.activityMaterial.findFirst({
+      where: { projectId, activityId: activities[spec.activity].id, name: spec.name },
+    });
+    if (existing) {
+      await prisma.activityMaterial.update({ where: { id: existing.id }, data });
+    } else {
+      await prisma.activityMaterial.create({
+        data: {
+          projectId,
+          activityId: activities[spec.activity].id,
+          name: spec.name,
+          createdBy: userId,
+          ...data,
+        },
+      });
+    }
+  }
 }
 
 /**

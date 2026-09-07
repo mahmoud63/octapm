@@ -5,6 +5,7 @@ import { Main } from '@/components/layout/main'
 import { Separator } from '@/components/ui/separator'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { getSummary } from './data/api'
+import { AnalyticsPanel } from './components/analytics-panel'
 import { GoodsReceiptPanel } from './components/goods-receipt-panel'
 import { ItemsPanel } from './components/items-panel'
 import { LedgerPanel } from './components/ledger-panel'
@@ -70,6 +71,7 @@ export function InventoryWorkspace() {
           <TabsTrigger value='match'>Match</TabsTrigger>
           <TabsTrigger value='items'>Items</TabsTrigger>
           <TabsTrigger value='warehouses'>Warehouses</TabsTrigger>
+          <TabsTrigger value='dashboard'>Dashboard</TabsTrigger>
           <TabsTrigger value='ledger'>Ledger</TabsTrigger>
         </TabsList>
 
@@ -87,6 +89,9 @@ export function InventoryWorkspace() {
         </TabsContent>
         <TabsContent value='warehouses'>
           <WarehousesPanel />
+        </TabsContent>
+        <TabsContent value='dashboard'>
+          <AnalyticsPanel />
         </TabsContent>
         <TabsContent value='ledger'>
           <LedgerPanel />

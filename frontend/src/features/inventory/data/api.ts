@@ -393,3 +393,128 @@ export type OrderMatch = {
 
 export const matchOrder = (orderId: string) =>
   apiClient.get(`${BASE}/match/order/${orderId}`).then(unwrap<OrderMatch>)
+
+// --- analytics ------------------------------------------------------------
+
+/** The shape every stock list on the dashboard shares. */
+export type StockRow = {
+  id: string
+  sku: string
+  name: string
+  unit: string
+  category: string | null
+  onHand: number
+  reserved: number
+  damaged: number
+  quarantined: number
+  averageCost: number
+  value: number
+  reorderLevel: number
+  minStock: number
+  maxStock: number | null
+  leadTimeDays: number
+}
+
+export type ShortageRow = StockRow & { shortfall: number }
+export type OverstockRow = StockRow & { excess: number; excessValue: number }
+export type SlowMovingRow = StockRow & { lastMovedAt: string | null; daysIdle: number | null }
+export type DamagedRow = StockRow & { damagedValue: number; quarantinedValue: number }
+
+export type ActivityUsage = {
+  projectId: string | null
+  project: string | null
+  activityId: string | null
+  activityRef: string | null
+  activity: string | null
+  quantity: number
+  value: number
+}
+
+export type VarianceRow = {
+  itemId: string
+  sku: string
+  name: string
+  unit: string
+  ordered: number
+  received: number
+  rejected: number
+  issued: number
+  onHand: number
+  outstanding: number
+  issuedOverReceived: number
+}
+
+export type PriceTrendRow = {
+  itemId: string
+  sku: string
+  name: string
+  unit: string
+  deliveries: number
+  first: number
+  last: number
+  change: number
+  changePct: number
+  rising: boolean
+  points: Array<{ at: string | null; unitCost: number; quantity: number }>
+}
+
+export type MaterialNeed = {
+  id: string
+  projectId: string
+  project: string | null
+  activityId: string
+  activityRef: string | null
+  activity: string | null
+  name: string
+  code: string | null
+  unit: string
+  required: number
+  received: number
+  stillNeeded: number
+  onHand: number | null
+  itemId: string | null
+  shortfall: number
+  requiredDate: string | null
+  orderByDate: string | null
+  leadWeeks: number
+  status: string
+  daysUntilRequired: number | null
+}
+
+export type InventoryAnalytics = {
+  generatedAt: string
+  headline: {
+    totalValue: number
+    itemCount: number
+    lowStock: number
+    outOfStock: number
+    overstock: number
+    damagedValue: number
+    quarantinedValue: number
+    issuedValue: number
+    warehouseCount: number
+  }
+  byWarehouse: Array<{
+    id: string
+    name: string
+    kind: string
+    value: number
+    lines: number
+    share: number
+  }>
+  lowStock: ShortageRow[]
+  outOfStock: ShortageRow[]
+  overstock: OverstockRow[]
+  slowMoving: SlowMovingRow[]
+  damaged: DamagedRow[]
+  usageByActivity: ActivityUsage[]
+  variance: VarianceRow[]
+  priceTrend: PriceTrendRow[]
+  upcomingNeeds: MaterialNeed[]
+  longLead: MaterialNeed[]
+}
+
+export const getAnalytics = (projectId?: string) =>
+  apiClient
+    .get(`${BASE}/analytics`, { params: projectId ? { projectId } : {} })
+    .then(unwrap<InventoryAnalytics>)

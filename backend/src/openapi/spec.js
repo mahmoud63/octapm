@@ -14379,6 +14379,26 @@ add(
   }),
 );
 
+add(
+  "/inventory/analytics",
+  "get",
+  operation({
+    tag: "Inventory",
+    summary:
+      "The inventory dashboard: value by warehouse, shortages, overstock, slow movers, damage, usage and cost by activity, ordered-against-received-against-used, purchase price trends, upcoming material needs from the programme, and long-lead items.",
+    description:
+      "Every section names the rows behind its number, capped at 25 each. Heavier than /inventory/summary, which is the tile strip.",
+    operationId: "getInventoryAnalytics",
+    parameters: [
+      queryParam("projectId", "Scope the figures to one project.", {
+        type: "string",
+        format: "uuid",
+      }),
+    ],
+    permissions: inventoryPermission("read"),
+  }),
+);
+
 const openApiSpec = {
   openapi: "3.0.3",
   info: {

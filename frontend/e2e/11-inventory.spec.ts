@@ -330,6 +330,57 @@ test.describe('inventory and warehouse', () => {
     await expect(page.getByTestId('uat-match-flags')).toHaveCount(0)
   })
 
+  test('the dashboard names the rows behind every number', async ({ page }) => {
+    await openInventory(page)
+    await page.getByRole('tab', { name: 'Dashboard' }).click()
+
+    const dashboard = page.getByTestId('uat-inventory-analytics')
+    await expect(dashboard).toBeVisible()
+
+    // Value by warehouse, against what the API says the whole store is worth.
+    const warehouses = page.getByTestId('uat-analytics-warehouses')
+    await expect(warehouses).toContainText('Central Warehouse')
+    await expect(warehouses).toContainText('%')
+
+    // Each attention list has to name items, not just count them.
+    const attention = page.getByTestId('uat-analytics-attention')
+    await expect(attention).toContainText('Polyurethane joint sealant')
+    await expect(attention).toContainText('days to replace')
+
+    await page.getByTestId('uat-analytics-tab-outOfStock').click()
+    await expect(attention).toContainText('Waterproofing membrane')
+
+    await page.getByTestId('uat-analytics-tab-slowMoving').click()
+    await expect(attention).toContainText('Scaffold tube')
+
+    // Ordered against received against used, with the rejected 50 visible.
+    const variance = page.getByTestId('uat-analytics-variance')
+    const cement = variance.locator('tbody tr', { hasText: 'Cement OPC 42.5N' }).first()
+    await expect(cement).toContainText('1,000')
+    await expect(cement).toContainText('950')
+    await expect(cement).toContainText('50')
+
+    // Usage lands on a named activity, not an id.
+    await expect(page.getByTestId('uat-analytics-usage')).toContainText(
+      'Substructure and raft foundation',
+    )
+
+    // A price that has moved across deliveries.
+    await expect(page.getByTestId('uat-analytics-prices')).toContainText('Reinforcement bar T16')
+
+    // And what the programme needs that the store cannot cover.
+    await expect(page.getByTestId('uat-analytics-needs')).toContainText('Unitised glazing panel')
+    const longLead = page.getByTestId('uat-analytics-long-lead')
+    await expect(longLead).toContainText('Unitised glazing panel type A')
+    // Its order-by date has passed and it has not arrived: that is the point.
+    await expect(longLead).toContainText('overdue')
+
+    await page.screenshot({
+      path: `${SHOTS}/29-inventory-dashboard.png`,
+      fullPage: true,
+    })
+  })
+
   test('it works on a phone, which is where scanning happens', async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 })
     await openInventory(page)

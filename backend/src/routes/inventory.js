@@ -7,6 +7,7 @@ const { requirePermission } = require("../middleware/rbac");
 const { validate } = require("../middleware/validate");
 const service = require("../services/inventory.service");
 const goodsReceipt = require("../services/goods-receipt.service");
+const analytics = require("../services/inventory-analytics.service");
 
 /**
  * Inventory and warehouse (OCTA-INV-STOCK-050).
@@ -544,6 +545,27 @@ router.get(
     sendSuccess(
       res,
       await service.getSummary({
+        orgId: req.user.orgId,
+        projectId: req.query.projectId ?? null,
+      })
+    )
+  )
+);
+
+/**
+ * The full picture, with the rows behind every number.
+ *
+ * Separate from /summary because it is a much heavier read: /summary is the
+ * strip of tiles at the top of every inventory screen, this is the dashboard.
+ */
+router.get(
+  "/analytics",
+  requirePermission("inventory", "read"),
+  [optionalProject, validate],
+  asyncHandler(async (req, res) =>
+    sendSuccess(
+      res,
+      await analytics.getAnalytics({
         orgId: req.user.orgId,
         projectId: req.query.projectId ?? null,
       })
