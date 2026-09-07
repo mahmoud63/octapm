@@ -76,7 +76,15 @@
     display: none !important;
   }
 
-  /* The brand band, repeated at the top of every printed page. */
+  /*
+   * The brand band on a printed page.
+   *
+   * A fixed element is the only thing Chrome will paint outside the flow here,
+   * and it is reliable for the single sheet an ordinary screen prints to. It is
+   * NOT a per-page running header — Chrome positions it against the document,
+   * not each page — so anything that runs to several sheets uses the repeating
+   * table header in `print-report.tsx` instead and switches this off.
+   */
   body::before {
     content: 'octapm';
     position: fixed;
@@ -131,6 +139,16 @@
   [data-testid^='uat-project-content-'] {
     margin-top: 14mm !important;
     margin-bottom: 12mm !important;
+  }
+
+  /*
+   * A multi-page report brings its own band and signature, repeated by the
+   * browser as a table header and footer. The fixed pair above would then be
+   * a second, mispositioned copy, so they are switched off for it.
+   */
+  body[data-print-mode='report']::before,
+  body[data-print-mode='report']::after {
+    display: none !important;
   }
 
   /* Cards and tables print as structure, not as floating panels. */

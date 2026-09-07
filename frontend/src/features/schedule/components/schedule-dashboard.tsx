@@ -48,7 +48,6 @@ import { GenerationProgress } from './generation-progress'
 import { ImportProgressDialog } from './import-progress-dialog'
 import { ImportScheduleDialog } from './import-schedule-dialog'
 import { PrintReport } from './print-report'
-import { PrintReportButton } from './print-report-button'
 import { ProgressTab } from './progress-tab'
 import { ResourcePlan } from './resource-plan'
 import { RevisionHistoryPanel } from './revision-history-panel'
@@ -551,10 +550,10 @@ export function ScheduleDashboard({
           className='flex flex-wrap items-center justify-end gap-2'
           data-testid='uat-schedule-actions'
         >
-          {/* Export actions */}
-          <ExportButton projectId={projectId} />
-          <PrintReportButton
-            onClick={() => {
+          {/* Every export, including the PDF report, lives in this one menu. */}
+          <ExportButton
+            projectId={projectId}
+            onExportPdf={() => {
               setShowPrintReport(true)
               window.setTimeout(() => window.print(), 250)
             }}

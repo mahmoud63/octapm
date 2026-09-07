@@ -74,4 +74,63 @@ test.describe('print output', () => {
     expect(body, 'the budget figures vanished when printing').toMatch(/1,550,000/)
     await page.emulateMedia({ media: 'screen' })
   })
+
+  test('the brand band clears the content on the printed page', async ({ page }) => {
+    // The page asks the browser to print as soon as the report mounts, and a
+    // real print job stalls the renderer here. Stub it out: this test renders
+    // the PDF itself, through page.pdf(), which is the thing being checked.
+    await page.addInitScript(() => {
+      window.print = () => {}
+    })
+
+    await signIn(page)
+    const projectId = await openProject(page)
+    await page.goto(`/projects/${projectId}/schedule`)
+    await page.waitForLoadState('domcontentloaded')
+    await page.waitForTimeout(2500)
+
+    // Export → Export PDF mounts the report. window.print() is a no-op in
+    // headless Chromium, so the report stays up for page.pdf() to render.
+    await page.getByTestId('uat-schedule-export').click()
+    await page.getByTestId('uat-schedule-export-pdf').click()
+    await expect(page.locator('#print-report')).toBeAttached()
+
+    const pdf = await page.pdf({ printBackground: true, format: 'A4' })
+    if (process.env.E2E_DUMP_PDF) {
+      const { writeFileSync } = await import('node:fs')
+      writeFileSync(process.env.E2E_DUMP_PDF, pdf)
+    }
+
+    // Print emulation cannot show this: only a real paginated render places
+    // the fixed band against the page box, which is where it used to land on
+    // top of the report's title.
+    const items = await firstPageText(pdf)
+    const band = items.find((item) => item.text.trim() === 'octapm')
+    const title = items.find((item) => item.text.includes('Riverside Tower'))
+
+    expect(band, 'the brand band is missing from the printed page').toBeTruthy()
+    expect(title, 'the report title is missing from the printed page').toBeTruthy()
+
+    // PDF y grows upward, so the band must sit above the title, with a real
+    // gap rather than touching it.
+    const gap = band!.y - title!.y
+    expect(
+      gap,
+      `the band overlaps the title (band y=${band!.y.toFixed(1)}, title y=${title!.y.toFixed(1)}, gap ${gap.toFixed(1)}pt)`,
+    ).toBeGreaterThan(20)
+  })
 })
+
+/** Text items on page one of a PDF, with their positions. */
+async function firstPageText(buffer: Buffer) {
+  const pdfjs = await import(
+    /* @vite-ignore */ '../../node_modules/pdfjs-dist/legacy/build/pdf.mjs'
+  )
+  const doc = await pdfjs.getDocument({ data: new Uint8Array(buffer) }).promise
+  const content = await (await doc.getPage(1)).getTextContent()
+  return content.items
+    .filter((item: unknown): item is { str: string; transform: number[] } =>
+      typeof (item as { str?: unknown }).str === 'string',
+    )
+    .map((item) => ({ text: item.str, y: item.transform[5], x: item.transform[4] }))
+}

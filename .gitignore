@@ -38,3 +38,5 @@ frontend/test-results/
 frontend/playwright-report/
 frontend/blob-report/
 frontend/.playwright/
+# Rewritten on every run; the committed screenshots are the artefact worth reviewing.
+docs/testing/e2e-results.json

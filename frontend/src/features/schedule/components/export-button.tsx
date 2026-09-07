@@ -1,5 +1,11 @@
 import { useState } from 'react'
-import { ChevronDown, Download, FileSpreadsheet, FileCode2 } from 'lucide-react'
+import {
+  ChevronDown,
+  Download,
+  FileSpreadsheet,
+  FileCode2,
+  FileText,
+} from 'lucide-react'
 import { toast } from 'sonner'
 import { getServerErrorMessage } from '@/lib/handle-server-error'
 import { useCanPerform } from '@/lib/permissions'
@@ -17,6 +23,8 @@ import { downloadFile } from '@/features/lookahead/hooks/use-lookaheads'
 interface Props {
   projectId: string
   className?: string
+  /** Opens the printable schedule report. Omitted where there is nothing to print. */
+  onExportPdf?: () => void
 }
 
 type ScheduleFormat = 'xer' | 'p6xml' | 'mspxml'
@@ -44,15 +52,21 @@ const SCHEDULE_FORMATS: Array<{
 ]
 
 /**
- * Export menu on the schedule: the multi-sheet workbook plus the schedule in
- * the planners' own formats (OCTA-SCH-LOOKAHEAD-041).
+ * Every way off the schedule, in one menu: the printable PDF report, the
+ * multi-sheet workbook, and the schedule in the planners' own formats
+ * (OCTA-SCH-LOOKAHEAD-041).
+ *
+ * The PDF used to be a second button beside this one, which read as two
+ * unrelated actions when it is simply another export.
  */
-export function ExportButton({ projectId, className }: Props) {
+export function ExportButton({ projectId, className, onExportPdf }: Props) {
   const canExportWorkbook = useCanPerform('cost', 'export')
   const canExportSchedule = useCanPerform('schedule', 'export')
   const [busy, setBusy] = useState<string | null>(null)
 
-  if (!canExportWorkbook && !canExportSchedule) return null
+  // The PDF report is rendered from what is already on screen, so it stays
+  // available even to a role that cannot download the data files.
+  if (!canExportWorkbook && !canExportSchedule && !onExportPdf) return null
 
   const run = async (key: string, url: string, fallback: string) => {
     setBusy(key)
@@ -82,6 +96,28 @@ export function ExportButton({ projectId, className }: Props) {
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align='end' className='w-64'>
+        {onExportPdf && (
+          <>
+            <DropdownMenuLabel className='text-xs text-muted-foreground'>
+              Report
+            </DropdownMenuLabel>
+            <DropdownMenuItem
+              onClick={onExportPdf}
+              data-testid='uat-schedule-export-pdf'
+            >
+              <FileText className='h-4 w-4' />
+              <div>
+                <p>Export PDF</p>
+                <p className='text-xs text-muted-foreground'>
+                  Printable schedule report, OctaPM branded
+                </p>
+              </div>
+            </DropdownMenuItem>
+          </>
+        )}
+        {onExportPdf && (canExportWorkbook || canExportSchedule) && (
+          <DropdownMenuSeparator />
+        )}
         {canExportWorkbook && (
           <>
             <DropdownMenuLabel className='text-xs text-muted-foreground'>

@@ -5,7 +5,10 @@ import {
   ChevronRight,
   GripHorizontal,
   Layers,
+  Maximize2,
+  Minimize2,
   RotateCcw,
+  Scaling,
   ZoomIn,
   ZoomOut,
 } from 'lucide-react'
@@ -143,7 +146,9 @@ const ROW_H = 32
 const BAR_H = 14
 const HEADER_H = 76
 const OVERSCAN = 16
-const MIN_PX = 3
+// Low enough that "fit to window" can genuinely fit a multi-year programme
+// rather than stopping short and leaving the tail off-screen.
+const MIN_PX = 1
 const MAX_PX = 24
 const DEFAULT_SCALE: TimeScale = 'week'
 const SCALE_SETTINGS = {
@@ -165,12 +170,29 @@ const GRID_COLUMNS = [
   { key: 'duration', label: 'Original Duration', width: 96 },
   { key: 'start', label: 'Start', width: 94 },
   { key: 'finish', label: 'Finish', width: 94 },
+  // Total float is how a planner reads criticality at a glance; P6 carries it
+  // next to the dates and so should this.
+  { key: 'totalFloat', label: 'Total Float', width: 84 },
   { key: 'baselineStart', label: 'BL Project Start', width: 103 },
   { key: 'baselineFinish', label: 'BL Project Finish', width: 103 },
 ] as const
 
 const GRID_W = GRID_COLUMNS.reduce((sum, column) => sum + column.width, 0)
 const GRID_TEMPLATE = GRID_COLUMNS.map((col) => `${col.width}px`).join(' ')
+/** How far left the grid/timeline splitter can be dragged. */
+const GRID_MIN_W = 220
+
+/** Where the splitter can rest: on a column edge, never through one. */
+const GRID_STOPS = GRID_COLUMNS.reduce<number[]>((stops, column) => {
+  stops.push((stops[stops.length - 1] ?? 0) + column.width)
+  return stops
+}, []).filter((stop) => stop >= GRID_MIN_W)
+
+/** Nearest column edge to a dragged position. */
+const snapGridWidth = (width: number) =>
+  GRID_STOPS.reduce((best, stop) =>
+    Math.abs(stop - width) < Math.abs(best - width) ? stop : best
+  )
 
 const MONTHS_SHORT = [
   'Jan',
@@ -693,7 +715,9 @@ const buildTimeline = (
   }
 
   const totalDays = Math.max(1, diffDays(start, end) + 1)
-  const width = Math.max(720, totalDays * pxPerDay)
+  // A modest floor only, so it never collapses to nothing — a large floor
+  // would stop "fit to window" from ever actually fitting.
+  const width = Math.max(320, totalDays * pxPerDay)
   return {
     start,
     end,
@@ -835,6 +859,12 @@ export function GanttChart({
   const [scrollTop, setScrollTop] = useState(0)
   const [scrollLeft, setScrollLeft] = useState(0)
   const [viewportHeight, setViewportHeight] = useState(640)
+  const [fullscreen, setFullscreen] = useState(false)
+  // The grid/timeline splitter, as in P6: dragging it left hides the trailing
+  // columns and hands the space to the bars.
+  const [gridWidth, setGridWidth] = useState(GRID_W)
+  const splitDrag = useRef<{ startX: number; startWidth: number } | null>(null)
+  const splitInitialised = useRef(false)
   const canEditActivities = Boolean(onActivityUpdate || onActivityDelete)
   const sourceActivities = activities as GanttActivity[]
   const dataDateMissing = !parseDate(dataDate)
@@ -898,7 +928,7 @@ export function GanttChart({
   )
 
   const totalHeight = rows.length * ROW_H
-  const contentWidth = GRID_W + timeline.width
+  const contentWidth = gridWidth + timeline.width
 
   const visibleRows = useMemo(() => {
     const bodyTop = Math.max(0, scrollTop - HEADER_H)
@@ -929,13 +959,78 @@ export function GanttChart({
     const element = viewportRef.current
     if (!element) return
 
-    const update = () => setViewportHeight(element.clientHeight || 640)
+    const update = () => {
+      setViewportHeight(element.clientHeight || 640)
+
+      // The bars are the point of a Gantt chart. If the full column set would
+      // leave them a sliver, start with the splitter closed far enough that
+      // most of the width belongs to the timeline — the same balance P6 opens
+      // with. Only once, so a width the planner chose is never overridden.
+      if (!splitInitialised.current && element.clientWidth > 0) {
+        splitInitialised.current = true
+        const budget = element.clientWidth * 0.6
+        if (GRID_W > budget) {
+          // Land on a column edge, and never past the budget — a snap that
+          // rounded up would put the bars back in a sliver.
+          const fits = GRID_STOPS.filter((stop) => stop <= budget)
+          setGridWidth(fits.length ? fits[fits.length - 1] : GRID_STOPS[0])
+        }
+      }
+    }
     update()
 
     const resizeObserver = new ResizeObserver(update)
     resizeObserver.observe(element)
     return () => resizeObserver.disconnect()
   }, [])
+
+  // Escape leaves full screen, which is what anyone who has used a maximised
+  // view expects — and the only way out if the toolbar scrolls away.
+  useEffect(() => {
+    if (!fullscreen) return
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setFullscreen(false)
+    }
+    window.addEventListener('keydown', onKey)
+    // The page behind must not scroll while the chart owns the window.
+    const previousOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    return () => {
+      window.removeEventListener('keydown', onKey)
+      document.body.style.overflow = previousOverflow
+    }
+  }, [fullscreen])
+
+  /** Drags the splitter between the activity table and the bars. */
+  useEffect(() => {
+    const onMove = (event: MouseEvent) => {
+      const drag = splitDrag.current
+      if (!drag) return
+      const next = drag.startWidth + (event.clientX - drag.startX)
+      // Snap to a column edge so a column is never cut down the middle.
+      setGridWidth(snapGridWidth(Math.min(GRID_W, Math.max(GRID_MIN_W, next))))
+    }
+    const onUp = () => {
+      splitDrag.current = null
+      document.body.style.userSelect = ''
+    }
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onUp)
+    return () => {
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup', onUp)
+    }
+  }, [])
+
+  /** Scales the timeline so the whole project fits the visible width. */
+  const fitToWindow = () => {
+    const element = viewportRef.current
+    if (!element) return
+    const available = element.clientWidth - gridWidth - 24
+    if (available <= 0) return
+    const next = available / Math.max(1, timeline.totalDays)
+    setPxPerDay(Math.min(MAX_PX, Math.max(MIN_PX, Math.round(next * 10) / 10)))
+  }
 
   const commitDrag = async (state: DragState) => {
     if (!onActivityUpdate || state.currentStart === state.origStart) return
@@ -1063,7 +1158,16 @@ export function GanttChart({
   }
 
   return (
-    <div className='space-y-3'>
+    <div
+      data-testid='primavera-gantt'
+      data-fullscreen={fullscreen ? 'true' : 'false'}
+      className={cn(
+        'space-y-3',
+        // Full screen is the working mode: the whole window, nothing else.
+        fullscreen &&
+          'fixed inset-0 z-50 flex flex-col overflow-hidden bg-background p-3'
+      )}
+    >
       <div className='flex flex-wrap items-center justify-between gap-3 rounded-md border bg-card px-3 py-2'>
         <div className='flex flex-wrap items-center gap-2'>
           {canEditActivities && (
@@ -1178,14 +1282,42 @@ export function GanttChart({
             size='icon'
             variant='ghost'
             className='h-7 w-7'
+            onClick={fitToWindow}
+            aria-label='Fit the schedule to the window'
+            title='Fit to window'
+            data-testid='primavera-gantt-fit'
+          >
+            <Scaling className='h-3.5 w-3.5' />
+          </Button>
+          <Button
+            size='icon'
+            variant='ghost'
+            className='h-7 w-7'
             onClick={() => {
               setTimeScale(DEFAULT_SCALE)
               setPxPerDay(DEFAULT_PX)
+              setGridWidth(GRID_W)
             }}
             aria-label='Reset zoom'
             title='Reset zoom'
           >
             <RotateCcw className='h-3.5 w-3.5' />
+          </Button>
+          <Button
+            size='icon'
+            variant='ghost'
+            className='h-7 w-7'
+            onClick={() => setFullscreen((value) => !value)}
+            aria-label={fullscreen ? 'Leave full screen' : 'Full screen'}
+            aria-pressed={fullscreen}
+            title={fullscreen ? 'Leave full screen (Esc)' : 'Full screen'}
+            data-testid='primavera-gantt-fullscreen'
+          >
+            {fullscreen ? (
+              <Minimize2 className='h-3.5 w-3.5' />
+            ) : (
+              <Maximize2 className='h-3.5 w-3.5' />
+            )}
           </Button>
         </div>
       </div>
@@ -1193,8 +1325,18 @@ export function GanttChart({
       <div
         ref={viewportRef}
         data-testid='primavera-gantt-viewport'
-        className='relative overflow-auto rounded-md border bg-card shadow-sm'
-        style={{ maxHeight: 680 }}
+        className={cn(
+          'relative overflow-auto rounded-md border bg-card shadow-sm',
+          fullscreen && 'min-h-0 flex-1'
+        )}
+        style={
+          fullscreen
+            ? undefined
+            : // Grow with the window rather than stopping at a fixed height:
+              // a planner reading a schedule wants the rows, not the whitespace
+              // under them.
+              { maxHeight: 'clamp(420px, calc(100vh - 260px), 1200px)' }
+        }
         onScroll={(event) => {
           setScrollTop(event.currentTarget.scrollTop)
           setScrollLeft(event.currentTarget.scrollLeft)
@@ -1218,6 +1360,14 @@ export function GanttChart({
           <ScheduleGrid
             rows={visibleRows}
             totalHeight={totalHeight}
+            width={gridWidth}
+            onSplitStart={(event) => {
+              splitDrag.current = {
+                startX: event.clientX,
+                startWidth: gridWidth,
+              }
+              document.body.style.userSelect = 'none'
+            }}
             hoveredRowId={hoveredRowId}
             selectedRowId={selectedRowId}
             savingId={savingId}
@@ -1342,6 +1492,8 @@ export function GanttChart({
 function ScheduleGrid({
   rows,
   totalHeight,
+  width,
+  onSplitStart,
   hoveredRowId,
   selectedRowId,
   savingId,
@@ -1354,6 +1506,8 @@ function ScheduleGrid({
 }: {
   rows: IndexedRow[]
   totalHeight: number
+  width: number
+  onSplitStart: (event: React.MouseEvent) => void
   hoveredRowId: string | null
   selectedRowId: string | null
   savingId: string | null
@@ -1367,12 +1521,18 @@ function ScheduleGrid({
   return (
     <div
       data-testid='primavera-gantt-grid'
-      className='sticky left-0 z-30 shrink-0 border-r bg-card shadow-[8px_0_18px_rgba(15,23,42,0.08)]'
-      style={{ width: GRID_W, height: HEADER_H + totalHeight }}
+      // Clipped, not shrunk: dragging the splitter left hides the trailing
+      // columns whole rather than squeezing every column illegibly narrow.
+      className='sticky left-0 z-30 shrink-0 overflow-hidden border-r bg-card shadow-[8px_0_18px_rgba(15,23,42,0.08)]'
+      style={{ width, height: HEADER_H + totalHeight }}
     >
       <div
         className='sticky top-0 z-40 grid border-b bg-muted/70 text-[10px] font-semibold tracking-wide text-muted-foreground uppercase backdrop-blur'
-        style={{ gridTemplateColumns: GRID_TEMPLATE, height: HEADER_H }}
+        style={{
+          gridTemplateColumns: GRID_TEMPLATE,
+          height: HEADER_H,
+          width: GRID_W,
+        }}
       >
         {GRID_COLUMNS.map((column) => (
           <div
@@ -1400,6 +1560,19 @@ function ScheduleGrid({
             onContextMenu={onContextMenu}
           />
         ))}
+      </div>
+
+      {/* The splitter. Sticky so it stays reachable however far down you are. */}
+      <div
+        role='separator'
+        aria-orientation='vertical'
+        aria-label='Resize the activity table'
+        data-testid='primavera-gantt-splitter'
+        onMouseDown={onSplitStart}
+        className='group sticky top-0 z-50 float-right h-full w-2 cursor-col-resize'
+        style={{ marginTop: -(HEADER_H + totalHeight), marginRight: -2 }}
+      >
+        <div className='mx-auto h-full w-px bg-transparent transition-colors group-hover:bg-interactive' />
       </div>
     </div>
   )
@@ -1548,6 +1721,24 @@ function ScheduleGridRow({
       <GridCell className='font-mono text-[11px]'>
         {formatGridDate(row.finishDate)}
       </GridCell>
+      <GridCell
+        className={cn(
+          'justify-end font-mono text-[11px]',
+          // Zero float is the critical path; negative float is a schedule that
+          // no longer works. Both are read at a glance, so colour them.
+          row.type === 'activity' &&
+            row.totalFloat != null &&
+            row.totalFloat < 0 &&
+            'font-semibold text-error',
+          row.type === 'activity' &&
+            row.totalFloat === 0 &&
+            'font-semibold text-error'
+        )}
+      >
+        {row.type === 'activity' && row.totalFloat != null
+          ? `${row.totalFloat}d`
+          : '-'}
+      </GridCell>
       <GridCell className='font-mono text-[11px] text-muted-foreground'>
         {formatGridDate(row.baselineStartDate)}
       </GridCell>
@@ -1615,17 +1806,23 @@ function TimelineHeader({
               style={{ stroke: CSS.border }}
               strokeWidth={1}
             />
-            <text
-              x={tick.x + Math.max(8, (tick.width ?? 0) / 2)}
-              y={17}
-              textAnchor={(tick.width ?? 0) > 72 ? 'middle' : 'start'}
-              fontSize={11}
-              fontWeight={700}
-              style={{ fill: CSS.fg }}
-              fontFamily='system-ui, sans-serif'
-            >
-              {formatMonthLabel(tick.date)}
-            </text>
+            {/* Zoomed out far enough and there is no room for a label; a
+                shortened one beats an overlapping one, and none beats both. */}
+            {(tick.width ?? 0) >= 30 && (
+              <text
+                x={tick.x + Math.max(6, (tick.width ?? 0) / 2)}
+                y={17}
+                textAnchor={(tick.width ?? 0) > 72 ? 'middle' : 'start'}
+                fontSize={11}
+                fontWeight={700}
+                style={{ fill: CSS.fg }}
+                fontFamily='system-ui, sans-serif'
+              >
+                {(tick.width ?? 0) > 72
+                  ? formatMonthLabel(tick.date)
+                  : MONTHS_SHORT[tick.date.getMonth()]}
+              </text>
+            )}
           </g>
         ))}
 
@@ -1639,15 +1836,17 @@ function TimelineHeader({
               style={{ stroke: CSS.border }}
               strokeWidth={0.8}
             />
-            <text
-              x={tick.x + 4}
-              y={43}
-              fontSize={9}
-              style={{ fill: CSS.mutedFg }}
-              fontFamily='ui-monospace, SFMono-Regular, Menlo, monospace'
-            >
-              {formatWeekLabel(tick.date)}
-            </text>
+            {pxPerDay * 7 >= 38 && (
+              <text
+                x={tick.x + 4}
+                y={43}
+                fontSize={9}
+                style={{ fill: CSS.mutedFg }}
+                fontFamily='ui-monospace, SFMono-Regular, Menlo, monospace'
+              >
+                {formatWeekLabel(tick.date)}
+              </text>
+            )}
           </g>
         ))}
 
@@ -1662,16 +1861,18 @@ function TimelineHeader({
               strokeWidth={0.5}
               opacity={0.75}
             />
-            <text
-              x={tick.x + Math.max(2, pxPerDay / 2)}
-              y={69}
-              textAnchor='middle'
-              fontSize={8}
-              style={{ fill: CSS.mutedFg }}
-              fontFamily='ui-monospace, SFMono-Regular, Menlo, monospace'
-            >
-              {formatDayLabel(tick.date)}
-            </text>
+            {pxPerDay >= 5 && (
+              <text
+                x={tick.x + Math.max(2, pxPerDay / 2)}
+                y={69}
+                textAnchor='middle'
+                fontSize={8}
+                style={{ fill: CSS.mutedFg }}
+                fontFamily='ui-monospace, SFMono-Regular, Menlo, monospace'
+              >
+                {formatDayLabel(tick.date)}
+              </text>
+            )}
           </g>
         ))}
 
