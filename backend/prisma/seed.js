@@ -102,6 +102,24 @@ const ALLOCATIONS = [
   { boq: "B-300", activity: "facade", quantity: 12400, weight: 100 },
 ];
 
+// Crews and plant per activity. Quantities are the total for the activity; the
+// resource histogram spreads them across its duration, so overlapping activities
+// show as a stacked peak — which is the whole point of drawing one.
+const RESOURCES = [
+  { activity: "sub", type: "labor", name: "Concrete gang", quantity: 640, unit: "man-days", dailyRate: 320 },
+  { activity: "sub", type: "labor", name: "Steel fixers", quantity: 480, unit: "man-days", dailyRate: 345 },
+  { activity: "sub", type: "equipment", name: "Crawler crane", quantity: 40, unit: "days", dailyRate: 1250 },
+
+  { activity: "frame", type: "labor", name: "Formwork carpenters", quantity: 1680, unit: "man-days", dailyRate: 355 },
+  { activity: "frame", type: "labor", name: "Steel fixers", quantity: 1260, unit: "man-days", dailyRate: 345 },
+  { activity: "frame", type: "equipment", name: "Tower crane", quantity: 105, unit: "days", dailyRate: 1480 },
+  { activity: "frame", type: "material", name: "Ready-mix concrete", quantity: 7100, unit: "m3", dailyRate: 0 },
+
+  { activity: "facade", type: "labor", name: "Facade installers", quantity: 1440, unit: "man-days", dailyRate: 410 },
+  { activity: "facade", type: "equipment", name: "Mast climbers", quantity: 120, unit: "days", dailyRate: 260 },
+  { activity: "facade", type: "material", name: "Curtain wall units", quantity: 12400, unit: "m2", dailyRate: 0 },
+];
+
 async function upsertOrganisation() {
   const existing = await prisma.organisation.findFirst({ where: { name: ORG_NAME } });
   if (existing) {
@@ -313,6 +331,30 @@ async function upsertAllocations({ projectId, boqItems, activities, userId }) {
   }
 }
 
+async function upsertResources(projectId, activities) {
+  for (const spec of RESOURCES) {
+    const activity = activities[spec.activity];
+    const data = {
+      resourceType: spec.type,
+      quantity: spec.quantity,
+      unit: spec.unit,
+      dailyRate: spec.dailyRate || null,
+      totalCost: spec.dailyRate ? spec.quantity * spec.dailyRate : null,
+    };
+
+    const existing = await prisma.resourceAllocation.findFirst({
+      where: { projectId, activityId: activity.id, resourceName: spec.name },
+    });
+    if (existing) {
+      await prisma.resourceAllocation.update({ where: { id: existing.id }, data });
+    } else {
+      await prisma.resourceAllocation.create({
+        data: { projectId, activityId: activity.id, resourceName: spec.name, ...data },
+      });
+    }
+  }
+}
+
 async function upsertProgressAndCost({ projectId, activities, userId }) {
   const now = new Date();
 
@@ -423,6 +465,7 @@ async function main() {
     activities,
     userId: people.pm.id,
   });
+  await upsertResources(project.id, activities);
   await upsertProgressAndCost({ projectId: project.id, activities, userId: people.pm.id });
   await upsertBaseline({ projectId: project.id, userId: people.pm.id });
 

@@ -68,6 +68,50 @@ assert.match(
   /event\.key === 'Escape'/,
   'Escape leaves full screen'
 )
+assert.match(
+  gantt,
+  /primavera-gantt-resources/,
+  'the resource histogram can be shown'
+)
+assert.match(
+  gantt,
+  /primavera-gantt-layouts/,
+  'saved layouts are offered in the toolbar'
+)
+
+// Saved layouts.
+const layouts = read('src/features/schedule/lib/gantt-layouts.ts')
+assert.match(layouts, /BUILT_IN_LAYOUTS/, 'built-in layouts are provided')
+assert.match(layouts, /Resource review/, 'a resource layout is provided')
+assert.match(
+  layouts,
+  /catch \{\s*return null/,
+  'blocked browser storage must not break the chart'
+)
+assert.match(
+  layouts,
+  /export function isSameLayout/,
+  'the toolbar can tell when the view has drifted from its layout'
+)
+
+// The histogram. Mixed units must not be stacked into one column, and the
+// spread has to come from the activity dates rather than a flat average.
+const histogram = read('src/features/schedule/components/resource-histogram.tsx')
+assert.match(
+  histogram,
+  /allocationUnit !== activeUnit/,
+  'the histogram charts one unit at a time'
+)
+assert.match(
+  histogram,
+  /quantity \/ spanDays/,
+  'resources are spread across the activity duration'
+)
+assert.match(
+  histogram,
+  /schedule\/resources/,
+  'the histogram reads the project resource plan'
+)
 
 // The export menu carries every export, the PDF report included.
 const exportButton = read('src/features/schedule/components/export-button.tsx')

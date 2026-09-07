@@ -910,6 +910,7 @@ export function ScheduleDashboard({
         <TabsContent value='gantt' className='mt-4'>
           <GanttChart
             activities={activities}
+            projectId={projectId}
             projectStartDate={
               project?.startDate || revision.projectSummary?.startDate || null
             }

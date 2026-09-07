@@ -1,26 +1,54 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   AlertTriangle,
+  BarChart3,
+  Check,
   ChevronDown,
   ChevronRight,
   GripHorizontal,
   Layers,
+  LayoutGrid,
   Maximize2,
   Minimize2,
   RotateCcw,
   Scaling,
+  Trash2,
   ZoomIn,
   ZoomOut,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import type {
   ActivityDependency,
   DependencyRelationship,
   ScheduleActivity,
 } from '../data/schema'
+import {
+  BUILT_IN_LAYOUTS,
+  DEFAULT_LAYOUT_ID,
+  allLayouts,
+  deleteLayout,
+  findLayout,
+  isSameLayout,
+  loadActiveLayoutId,
+  saveLayout,
+  setActiveLayoutId,
+  type GanttLayout,
+  type HistogramGroup,
+  type NamedLayout,
+  type TimeScale,
+} from '../lib/gantt-layouts'
 import { ActivityInlineEditDialog } from './activity-inline-edit-dialog'
+import { ResourcePane } from './resource-histogram'
 
 type GanttActivity = ScheduleActivity & {
   activityCode?: string | null
@@ -28,6 +56,8 @@ type GanttActivity = ScheduleActivity & {
 
 interface Props {
   activities: ScheduleActivity[]
+  /** Scopes saved layouts, and loads the resource plan for the histogram. */
+  projectId: string
   projectStartDate?: string | null
   projectEndDate?: string | null
   dataDate?: string | null
@@ -105,8 +135,6 @@ type DateTick = {
   width?: number
 }
 
-type TimeScale = 'day' | 'week' | 'month' | 'quarter'
-
 type TimelineModel = {
   start: Date
   end: Date
@@ -152,13 +180,27 @@ const MIN_PX = 1
 const MAX_PX = 24
 const DEFAULT_SCALE: TimeScale = 'week'
 const SCALE_SETTINGS = {
-  day: { label: 'Day', pxPerDay: 18, dayStep: 1, weekStep: 1 },
-  week: { label: 'Week', pxPerDay: 10, dayStep: 2, weekStep: 1 },
-  month: { label: 'Month', pxPerDay: 5, dayStep: 7, weekStep: 1 },
-  quarter: { label: 'Quarter', pxPerDay: 3, dayStep: 14, weekStep: 4 },
+  // bucketDays sizes one histogram column, so it lines up with the minor tick
+  // of the timescale above it rather than floating free of the header.
+  day: { label: 'Day', pxPerDay: 18, dayStep: 1, weekStep: 1, bucketDays: 1 },
+  week: { label: 'Week', pxPerDay: 10, dayStep: 2, weekStep: 1, bucketDays: 7 },
+  month: { label: 'Month', pxPerDay: 5, dayStep: 7, weekStep: 1, bucketDays: 7 },
+  quarter: {
+    label: 'Quarter',
+    pxPerDay: 3,
+    dayStep: 14,
+    weekStep: 4,
+    bucketDays: 30,
+  },
 } satisfies Record<
   TimeScale,
-  { label: string; pxPerDay: number; dayStep: number; weekStep: number }
+  {
+    label: string
+    pxPerDay: number
+    dayStep: number
+    weekStep: number
+    bucketDays: number
+  }
 >
 const DEFAULT_PX = SCALE_SETTINGS[DEFAULT_SCALE].pxPerDay
 const DAY_MS = 24 * 60 * 60 * 1000
@@ -832,6 +874,7 @@ const buildConnectors = (geometries: ActivityGeometry[]) => {
 
 export function GanttChart({
   activities,
+  projectId,
   projectStartDate,
   projectEndDate,
   dataDate,
@@ -865,6 +908,10 @@ export function GanttChart({
   const [gridWidth, setGridWidth] = useState(GRID_W)
   const splitDrag = useRef<{ startX: number; startWidth: number } | null>(null)
   const splitInitialised = useRef(false)
+  const [showHistogram, setShowHistogram] = useState(false)
+  const [histogramGroup, setHistogramGroup] = useState<HistogramGroup>('type')
+  const [layouts, setLayouts] = useState<NamedLayout[]>(BUILT_IN_LAYOUTS)
+  const [activeLayoutId, setActiveLayout] = useState(DEFAULT_LAYOUT_ID)
   const canEditActivities = Boolean(onActivityUpdate || onActivityDelete)
   const sourceActivities = activities as GanttActivity[]
   const dataDateMissing = !parseDate(dataDate)
@@ -949,6 +996,19 @@ export function GanttChart({
     [displayed, editingId]
   )
 
+  // Every activity with its dates, not just the rows currently on screen: the
+  // histogram is a picture of the whole project, and it must not change shape
+  // as you scroll.
+  const histogramActivities = useMemo(
+    () =>
+      displayed.map((activity) => ({
+        id: activity.id,
+        start: getActivityStart(activity, projectStart),
+        finish: getActivityFinish(activity, projectStart),
+      })),
+    [displayed, projectStart]
+  )
+
   const nCritical = displayed.filter(
     (activity) => activity.isCritical && !activity.isMilestone
   ).length
@@ -1021,6 +1081,90 @@ export function GanttChart({
       window.removeEventListener('mouseup', onUp)
     }
   }, [])
+
+  /** The current arrangement, in the shape a saved layout stores. */
+  const currentLayout = (): GanttLayout => ({
+    timeScale,
+    pxPerDay,
+    gridWidth,
+    showBaseline,
+    showHistogram,
+    histogramGroup,
+    collapsed: [...collapsedRows],
+  })
+
+  const applyLayout = (entry: NamedLayout) => {
+    const { layout } = entry
+    setTimeScale(layout.timeScale)
+    setPxPerDay(layout.pxPerDay)
+    setShowBaseline(layout.showBaseline)
+    setShowHistogram(layout.showHistogram)
+    setHistogramGroup(layout.histogramGroup)
+    setCollapsedRows(new Set(layout.collapsed))
+    if (layout.gridWidth != null) {
+      setGridWidth(Math.min(GRID_W, Math.max(GRID_MIN_W, layout.gridWidth)))
+      // A layout that names a width owns it; do not let the first measure of
+      // the viewport overwrite what the planner saved.
+      splitInitialised.current = true
+    }
+    setActiveLayout(entry.id)
+    setActiveLayoutId(projectId, entry.id)
+  }
+
+  // Restore the layout this project was last left in.
+  useEffect(() => {
+    if (!projectId) return
+    const available = allLayouts(projectId)
+    setLayouts(available)
+    const wanted = loadActiveLayoutId(projectId)
+    const entry = available.find((item) => item.id === wanted)
+    if (!entry || entry.id === DEFAULT_LAYOUT_ID) {
+      setActiveLayout(entry?.id ?? DEFAULT_LAYOUT_ID)
+      return
+    }
+    applyLayout(entry)
+    // Applying once on mount is the point; re-running would fight the planner.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectId])
+
+  const handleSaveLayout = () => {
+    const suggestion =
+      layouts.find((entry) => entry.id === activeLayoutId && !entry.builtIn)?.name ?? ''
+    const name = window.prompt('Save this layout as', suggestion)
+    if (name == null) return
+
+    const saved = saveLayout(projectId, name, currentLayout())
+    if (!saved) {
+      toast.error(
+        name.trim()
+          ? 'This browser would not store the layout.'
+          : 'Give the layout a name.'
+      )
+      return
+    }
+    setLayouts(allLayouts(projectId))
+    setActiveLayout(saved.id)
+    setActiveLayoutId(projectId, saved.id)
+    toast.success(`Layout "${saved.name}" saved`)
+  }
+
+  const handleDeleteLayout = (entry: NamedLayout) => {
+    deleteLayout(projectId, entry.id)
+    setLayouts(allLayouts(projectId))
+    if (activeLayoutId === entry.id) {
+      const fallback = findLayout(projectId, DEFAULT_LAYOUT_ID)
+      if (fallback) applyLayout(fallback)
+    }
+    toast.success(`Layout "${entry.name}" deleted`)
+  }
+
+  const activeLayout = layouts.find((entry) => entry.id === activeLayoutId)
+  const activeLayoutName = activeLayout?.name ?? 'Layout'
+  // Say when the view has drifted from the layout it was opened from, so the
+  // name in the toolbar never claims something that is no longer true.
+  const layoutModified = activeLayout
+    ? !isSameLayout(activeLayout.layout, currentLayout())
+    : false
 
   /** Scales the timeline so the whole project fits the visible width. */
   const fitToWindow = () => {
@@ -1193,6 +1337,84 @@ export function GanttChart({
             <Layers className='mr-1.5 h-3.5 w-3.5' />
             Baseline
           </Button>
+          <Button
+            size='sm'
+            variant={showHistogram ? 'secondary' : 'outline'}
+            onClick={() => setShowHistogram((prev) => !prev)}
+            aria-pressed={showHistogram}
+            data-testid='primavera-gantt-resources'
+          >
+            <BarChart3 className='mr-1.5 h-3.5 w-3.5' />
+            Resources
+          </Button>
+
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                size='sm'
+                variant='outline'
+                data-testid='primavera-gantt-layouts'
+              >
+                <LayoutGrid className='mr-1.5 h-3.5 w-3.5' />
+                <span className='max-w-32 truncate'>{activeLayoutName}</span>
+                {layoutModified && (
+                  <span
+                    className='ms-1 text-interactive'
+                    title='Changed since this layout was applied'
+                    data-testid='primavera-gantt-layout-modified'
+                  >
+                    •
+                  </span>
+                )}
+                <ChevronDown className='ml-1 h-3.5 w-3.5 opacity-60' />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align='start' className='w-64'>
+              <DropdownMenuLabel className='text-xs text-muted-foreground'>
+                Layouts
+              </DropdownMenuLabel>
+              {layouts.map((entry) => (
+                <DropdownMenuItem
+                  key={entry.id}
+                  onClick={() => applyLayout(entry)}
+                  data-testid={`primavera-gantt-layout-${entry.id}`}
+                  className='group'
+                >
+                  <Check
+                    className={cn(
+                      'h-3.5 w-3.5',
+                      entry.id === activeLayoutId ? 'opacity-100' : 'opacity-0'
+                    )}
+                  />
+                  <span className='flex-1 truncate'>{entry.name}</span>
+                  {!entry.builtIn && (
+                    <button
+                      type='button'
+                      aria-label={`Delete layout ${entry.name}`}
+                      className='opacity-0 transition-opacity group-hover:opacity-100 hover:text-error'
+                      onClick={(event) => {
+                        event.preventDefault()
+                        event.stopPropagation()
+                        handleDeleteLayout(entry)
+                      }}
+                    >
+                      <Trash2 className='h-3.5 w-3.5' />
+                    </button>
+                  )}
+                </DropdownMenuItem>
+              ))}
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                onClick={handleSaveLayout}
+                data-testid='primavera-gantt-layout-save'
+              >
+                Save this layout as…
+              </DropdownMenuItem>
+              <p className='px-2 py-1.5 text-[11px] leading-snug text-muted-foreground'>
+                Saved layouts are kept in this browser, for this project.
+              </p>
+            </DropdownMenuContent>
+          </DropdownMenu>
           <div className='flex items-center gap-1 rounded-md border bg-muted/30 p-1'>
             {(Object.keys(SCALE_SETTINGS) as TimeScale[]).map((scale) => (
               <Button
@@ -1469,6 +1691,28 @@ export function GanttChart({
           </div>
         )}
       </div>
+
+      {/*
+       * The resource pane, under the bars and pinned there — the way P6 keeps
+       * its histogram in a bottom pane. It scrolls sideways with the timeline
+       * but not up and down with the rows, so the demand profile stays in view
+       * while you read the schedule above it.
+       */}
+      {showHistogram && (
+        <ResourcePane
+          projectId={projectId}
+          activities={histogramActivities}
+          timelineStart={timeline.start}
+          totalDays={timeline.totalDays}
+          width={timeline.width}
+          pxPerDay={pxPerDay}
+          bucketDays={SCALE_SETTINGS[timeScale].bucketDays}
+          legendWidth={gridWidth}
+          group={histogramGroup}
+          onGroupChange={setHistogramGroup}
+          scrollLeft={scrollLeft}
+        />
+      )}
 
       <GanttLegend showBaseline={showBaseline} dataDate={timeline.dataDate} />
 
