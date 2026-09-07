@@ -1,5 +1,5 @@
 {
-  "ranAt": "2026-09-06T07:59:30.704Z",
+  "ranAt": "2026-09-07T23:07:34.248Z",
   "base": "http://localhost:5000",
   "summary": {
     "total": 13,
@@ -15,7 +15,7 @@
       "role": "PM",
       "preconditions": "Seeded demo organisation",
       "status": "pass",
-      "ms": 1355,
+      "ms": 895,
       "steps": [
         {
           "description": "sign in with the correct password",
@@ -64,7 +64,7 @@
       "role": "anonymous",
       "preconditions": "S-AUTH-001",
       "status": "pass",
-      "ms": 51,
+      "ms": 39,
       "steps": [
         {
           "description": "call a protected endpoint with no token",
@@ -108,7 +108,7 @@
       "role": "PM",
       "preconditions": "Seeded demo organisation",
       "status": "pass",
-      "ms": 450,
+      "ms": 615,
       "steps": [
         {
           "description": "list projects",
@@ -149,7 +149,7 @@
       "role": "PM of a second organisation",
       "preconditions": "S-PROJ-001",
       "status": "pass",
-      "ms": 697,
+      "ms": 571,
       "steps": [
         {
           "description": "register a separate organisation",
@@ -226,7 +226,7 @@
       "role": "PM of a second organisation",
       "preconditions": "S-TENANT-001",
       "status": "pass",
-      "ms": 10,
+      "ms": 28,
       "steps": [
         {
           "description": "search for the other tenant's project name",
@@ -258,7 +258,7 @@
       "role": "all eight roles",
       "preconditions": "S-PROJ-001",
       "status": "pass",
-      "ms": 6957,
+      "ms": 5804,
       "steps": [],
       "findings": {
         "api": [
@@ -286,25 +286,25 @@
       "role": "all eight roles",
       "preconditions": "S-PROJ-001",
       "status": "pass",
-      "ms": 4277,
+      "ms": 3232,
       "steps": [
         {
           "description": "probe restricted endpoints with an excluded role",
-          "outcome": "54 requests"
+          "outcome": "59 requests"
         }
       ],
       "findings": {
         "api": [
           {
             "ok": true,
-            "message": "15 project list endpoints are documented as role-restricted"
+            "message": "16 project list endpoints are documented as role-restricted"
           }
         ],
         "database": [],
         "permission": [
           {
             "ok": true,
-            "message": "all 15 restricted endpoints enforce their documented roles"
+            "message": "all 16 restricted endpoints enforce their documented roles"
           }
         ],
         "notification": [],
@@ -319,7 +319,7 @@
       "role": "PM",
       "preconditions": "A project with an RFI",
       "status": "partial",
-      "ms": 628,
+      "ms": 130,
       "steps": [
         {
           "description": "PM raises an RFI with schedule impact",
@@ -338,7 +338,7 @@
         "api": [
           {
             "ok": true,
-            "message": "RFI RFI-048 created"
+            "message": "RFI RFI-067 created"
           },
           {
             "ok": true,
@@ -356,7 +356,7 @@
           },
           {
             "ok": true,
-            "message": "change order VO-33 exists"
+            "message": "change order VO-66 exists"
           }
         ],
         "permission": [],
@@ -393,7 +393,7 @@
       "role": "PM",
       "preconditions": "S-INT-001",
       "status": "pass",
-      "ms": 156,
+      "ms": 135,
       "steps": [
         {
           "description": "raise a change event with a ROM value",
@@ -409,11 +409,11 @@
         "database": [
           {
             "ok": true,
-            "message": "change event CE-003 holds its ROM value"
+            "message": "change event CE-004 holds its ROM value"
           },
           {
             "ok": true,
-            "message": "change order VO-34 exists"
+            "message": "change order VO-67 exists"
           }
         ],
         "permission": [],
@@ -438,11 +438,11 @@
       "role": "PM",
       "preconditions": "S-INT-002",
       "status": "partial",
-      "ms": 252,
+      "ms": 216,
       "steps": [
         {
           "description": "read the budget before approval",
-          "outcome": "4 line(s), revised total 2050000"
+          "outcome": "4 line(s), revised total 5675000"
         },
         {
           "description": "try to submit with no impact analysis",
@@ -483,7 +483,7 @@
       "role": "PM",
       "preconditions": "A form template exists",
       "status": "partial",
-      "ms": 97,
+      "ms": 127,
       "steps": [
         {
           "description": "list form templates",
@@ -498,7 +498,7 @@
         "api": [
           {
             "ok": true,
-            "message": "6 template(s) available"
+            "message": "7 template(s) available"
           },
           {
             "ok": null,
@@ -519,7 +519,7 @@
       "role": "PM",
       "preconditions": "Seeded activities with approved progress",
       "status": "partial",
-      "ms": 1171,
+      "ms": 1240,
       "steps": [
         {
           "description": "read activities",
@@ -565,7 +565,7 @@
       "role": "Company admin (PM)",
       "preconditions": "Signed-in company administrator",
       "status": "pass",
-      "ms": 162,
+      "ms": 121,
       "steps": [
         {
           "description": "create a company-level template",
@@ -594,7 +594,7 @@
         "connected": [
           {
             "ok": true,
-            "message": "7 company template(s) available to every project"
+            "message": "8 company template(s) available to every project"
           },
           {
             "ok": true,

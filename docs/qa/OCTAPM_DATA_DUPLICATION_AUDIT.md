@@ -1,192 +1,213 @@
 # OctaPM — data duplication audit
 
-**Date:** 2026-09-07 · **Branch:** `feat/p0-foundations-sprint1` · **Head:** `ee09f5b`
+**Audited:** `feat/p0-foundations-sprint1` @ `db176510ba76259c5adf71f889f21ec6b6f66c56` · 2026-09-07
 **Companion to:** [`OCTAPM_SYSTEM_NERVOUS_SYSTEM.md`](./OCTAPM_SYSTEM_NERVOUS_SYSTEM.md)
 
-The founding principle of this platform is *enter information once, then reuse
-it everywhere*. This document lists every place the current implementation
-breaks that promise — where a person retypes something OctaPM already holds, or
-where the same fact is stored in more than one table with no authority between
-them.
+The founding principle is *enter information once, then reuse it everywhere*.
+This document lists every place the implementation breaks that promise.
 
-Each finding is verified against the schema and the services, not inferred.
+Every finding is verified against the schema and the services. Nothing is
+inferred from what would make sense.
 
-**Severity:** 🔴 creates wrong data · 🟡 wastes time and drifts · ⚪ acceptable denormalisation
+**Severity**
+
+| | |
+| --- | --- |
+| **P0** | can produce inconsistent **financial or legal** data |
+| **P1** | major operational duplication |
+| **P2** | user-efficiency cost |
+| **P3** | minor convenience |
 
 ---
 
-## D1 · Vendor identity is stored in eight places 🔴
+## D-P0-1 · Two vendor-matching rules create duplicate companies
 
-`Company` (with `isVendor`) is the intended single source of truth, established
-by `OCTA-ADM-COMPANY-007`. It is not honoured consistently.
+Two code paths create a `Company` from a name, and they disagree.
 
-| Table | Duplicated fields | Link to `Company` | Verdict |
-| --- | --- | --- | --- |
-| `Company` | name, legalName, registration, tax, address, contact, trades | — | **the master** |
-| `ProcurementSupplier` | name, contactName, email, phone, address, status | `companyId` **nullable** | 🔴 a full second copy, **per project** |
-| `BidInvitation` | companyName, contactName, contactEmail | `vendorCompanyId` nullable | 🟡 needed for ad-hoc invitees |
-| `Rfq` | companyName, contactName, contactEmail | `vendorCompanyId` nullable | 🟡 same |
-| `DirectCost` | `vendorName` | `vendorCompanyId` nullable | 🟡 |
-| `DailyLogDelivery` | `supplierName` free text | none | 🟡 no link at all |
-| `DailyLogManpower` | `companyName` free text | none | 🟡 no link at all |
-| `MeetingAttendee` / `MeetingDistribution` | `companyName` free text | none | ⚪ minutes are a snapshot |
-
-**The worst of these is `ProcurementSupplier`.** It carries a complete supplier
-profile — name, contact, email, phone, address, approval status — scoped to a
-single project, with `companyId` merely optional. The same supplier working on
-four projects is entered four times, and each copy can drift. A
-`vendorMigrationReport` exists to reconcile them after the fact, which is an
-admission that the duplication is real.
-
-**The mechanism that keeps creating duplicates.** Two code paths create a
-vendor from a name, and they disagree:
-
-| Path | Match rule | Consequence |
+| Path | Match rule | Result |
 | --- | --- | --- |
-| `company-workspace.createVendor` | `name: { equals, mode: "insensitive" }` | promotes the existing company |
-| `bid.ensureVendorCompany` *(bid.service.js:852)* | `name: invitation.companyName` — **exact, case-sensitive** | creates a **new** company |
+| `company-workspace.createVendor:195` | `name: { equals, mode: "insensitive" }` | promotes the existing company |
+| `bid.ensureVendorCompany:852` | `name: invitation.companyName` — **exact, case-sensitive** | creates a **new** company |
 
-So awarding a bid to "abc piling" when "ABC Piling" already exists produces a
-second company. The award then writes the commitment against the new one — and
-that new company has no prequalification, no performance history, and no
-insurance record. The duplicate silently defeats three of the controls built on
-top of `Company`.
+Awarding a bid to "abc piling" when "ABC Piling" already exists produces a
+second company. The award writes the commitment against the new one — and that
+new company has:
 
-**Fix (small, contained):** make `ensureVendorCompany` use the same
-case-insensitive match as `createVendor`, and consider trimming a trailing
-legal suffix before comparing.
+- no prequalification (so the award gate's `singleAwardLimit` cannot bite)
+- no performance history (so the evaluation loop restarts at zero)
+- no insurance record
+
+**A single duplicate silently defeats three of the controls built on top of
+`Company`.** This is financial and legal data: the subcontract is executed
+against a company record that is not the one the business qualified.
+
+**Fix:** one line — make `ensureVendorCompany` use the same case-insensitive
+match. Optionally trim a trailing legal suffix before comparing.
 
 ---
 
-## D2 · A purchase-order line cannot be cost-coded 🔴
+## D-P0-2 · A purchase-order line cannot be cost-coded
 
 `ProcurementPoLine` carries `activityId` (**required**), `packageId`,
-`supplierId`, `materialMasterId`, `inventoryItemId` — and **no `costCodeId`
-and no `budgetLineId`**.
+`supplierId`, `materialMasterId`, `inventoryItemId` — and **no `costCodeId`,
+no `budgetLineId`**.
 
 Consequences, all verified:
 
-- A buyer cannot code an order to the budget at the moment they raise it, which
-  is the moment they know what it is for.
-- The cost coding is instead typed for the first time on the **supplier
-  invoice** (`DirectCostLine` carries `costCodeId`, `budgetLineId`,
-  `activityId`), by a different person — usually finance — who was not the
-  buyer and is guessing.
-- Committed cost by cost code can only be seen through the separate
-  `Commitment` record, if the PO happens to have been linked to one
-  (`ProcurementOrder.commitmentId` is nullable).
+- The buyer cannot code the order to the budget at the moment they know what it
+  is for.
+- The coding is typed for the first time on the **supplier invoice**
+  (`DirectCostLine` carries all three keys), by finance, who were not the buyer.
+- Committed cost by cost code is visible only through a separate `Commitment`,
+  and `ProcurementOrder.commitmentId` is **nullable**.
 
-This is not duplicate entry so much as **displaced entry**: the fact is known
-early and captured late, by the wrong person. It is the root cause behind
-D3 as well.
+This is displaced entry rather than double entry, and it is P0 because the
+figure that reaches the budget is produced by someone guessing at what the
+buyer intended.
 
 ---
 
-## D3 · "Purchase order" means two different records 🟡
+## D-P0-3 · Two live subcontractor payment systems
 
-| Record | Where | What it is |
+| | Modern | Legacy |
 | --- | --- | --- |
-| `Commitment` with `type = 'purchase_order'` | Commercial module | a committed value against the budget, with an SOV and change orders |
-| `ProcurementOrder` | Procurement module | an operational order with lines, deliveries, invoicing status |
+| Record | `SubPayApp` + `SubPayAppLine` | `SubValuation` |
+| Subcontractor | `Commitment.vendorCompanyId` → `Company` | **`subcontractor String`, required, unlinked** |
+| Ceiling | approved progress × SOV, revised by approved COs | none |
+| Gates | over-claim, compliance, final-application closeout | none |
+| Cash flow | `SubPayAppPayment` → outflow | `SubValuation.netPayable` → outflow |
 
-They are related — `ProcurementOrder.commitmentId` lets an order draw down a
-commitment, and `commitment.totalsFor` computes `drawnDown` from them — but
-that link is **optional**, and the two live in different workspace modules with
-different registers, different permissions (`commitment` vs `procurement`) and
-different lifecycles.
+**Both are read by `rebuildCashFlow`.** A project billing through the legacy
+register produces cash-flow outflows attached to a free-text name — invisible to
+prequalification, performance evaluation and closeout, and impossible to
+reconcile against a commitment.
 
-A team can therefore raise a purchase order that never appears in the
-commitment register, and commit a purchase-order value that no operational
-order ever draws. Nothing reconciles the two.
-
-**This is a naming and reconciliation problem, not a bug.** The two records are
-each individually justified. What is missing is a rule about which one is
-authoritative and a report that shows commitments with no orders and orders
-with no commitment.
+Two payment systems posting to the same cash flow is a financial-integrity
+problem, not a tidiness one.
 
 ---
 
-## D4 · Subcontractor data across the lifecycle 🟢 mostly solved
+## D-P1-1 · Vendor identity is stored in eight places
 
-This chain is the one the platform gets **right**, and it is worth recording as
-the pattern the others should copy.
+`Company` (with `isVendor`) is the intended single source of truth.
 
-| Stage | Where the data comes from |
-| --- | --- |
-| Registration | `Company` — entered once |
-| Prequalification | reads `Company`; assessment held at org level, reused on every project |
-| Bid invitation | pre-fills company, contact and email from `Company` |
-| Award | creates the `Commitment` with the SOV built from the bid lines |
-| **Subcontract agreement** | **assembled from records** — org, vendor profile, project, SOV, approved COs, scope matrix, programme activities, insurances, prime-contract terms. Nothing is retyped |
-| Pay applications | ceilings derived from the SOV and approved progress |
-| Closeout | reads the punch register, insurance, payment applications, retention |
-| Evaluation | reads NCRs, punch, safety, change orders, closeout |
-| Next prequalification | reads the evaluation history |
+| Table | Duplicated fields | Link | Verdict |
+| --- | --- | --- | --- |
+| `Company` | name, legalName, registration, tax, address, contact, trades | — | **the master** |
+| `ProcurementSupplier` | name, contactName, email, phone, address, status | `companyId` **nullable** | 🔴 a full second profile, **per project** |
+| `BidInvitation` | companyName, contactName, contactEmail | `vendorCompanyId` nullable | acceptable for ad-hoc invitees |
+| `Rfq` | companyName, contactName, contactEmail | `vendorCompanyId` nullable | acceptable |
+| `DirectCost` | `vendorName` | `vendorCompanyId` nullable | 🟡 |
+| `DailyLogDelivery` | `supplierName` free text | **none** | 🟡 |
+| `DailyLogManpower` | `companyName` free text | **none** | 🟡 |
+| `MeetingAttendee`, `MeetingDistribution` | `companyName` free text | none | acceptable — minutes are a snapshot |
 
-The one leak is D1: an award to a name that does not match an existing company
-exactly starts a **second** company, and the whole chain above then runs on the
-duplicate.
-
----
-
-## D5 · Project data in generated documents ⚪ solved
-
-Checked and clean. `subcontract-agreement.service.buildAgreement` reads the
-organisation, the vendor's `Company` profile, the project, the commitment SOV,
-approved change orders, the scope matrix, the activities for the programme, the
-`insuranceJson` and the `PrimeContract` for governing terms — and prints them.
-No project or party fact is retyped into a contract.
-
-The same is true of the certificate (`prime-contract.certificateFinancials`)
-and the punch and commitment PDFs.
+`ProcurementSupplier` is the worst: a complete supplier profile scoped to a
+single project. The same supplier on four projects is entered four times, and
+each copy drifts. A `vendorMigrationReport` exists to reconcile them after the
+fact — an admission that the duplication is real.
 
 ---
 
-## D6 · Cost codes 🟢 solved
+## D-P1-2 · Fourteen models carry free-text party names beside proper keys
 
-Verified: there is **one** org-level `CostCode` master and a `ProjectCostCode`
-adoption row that points at it. Every consumer —
-`BudgetLine`, `CommitmentSovLine`, `CommitmentChangeOrder`, `TimeEntry`,
-`ChangeEventLine`, `DirectCostLine`, `StockTransaction`,
-`AccountingCodeMapping`, `BidPackageLine` — references the same `CostCode`.
+Verified by schema scan. Each of these has a free-text `owner` / `responsible` /
+`subcontractor` **String** alongside its `assigneeCompanyId` / `assigneeUserId`
+foreign keys:
 
-The user's hypothesis that procurement and cost keep separate cost codes is
-**not** supported by the schema. The real problem is D2: procurement has no
-cost code field at all.
+`Risk` · `SubValuation` · `NcrRecord` (owner **and** responsible) · `ItpRecord` ·
+`DefectRecord` · `SafetyIncident` (owner **and** responsible) · `MaterialTest` ·
+`Rfi` · `Submittal` · `DrawingRecord` · `Transmittal` · `Correspondence`
+
+These are legacy columns from before the party model existed. They are still
+written and displayed, so two answers to "who owns this?" can disagree — and
+only the FK reaches the closeout gate and the performance evaluation.
 
 ---
 
-## D7 · Progress is captured in four registers 🟡
+## D-P1-3 · Site progress is captured in four registers
 
 | Register | Field | Feeds |
 | --- | --- | --- |
 | `ActivityProgress` | `pctComplete`, approved | **official EV** |
 | `DailyLog*` | manpower, equipment, deliveries, delays, notes | daily report, weather delays |
-| `LookaheadItem` | `status` planned/in progress/done/not done | PPC |
-| `Timesheet` / `TimeEntry` | hours per activity | labour actual cost |
+| `LookaheadItem` | status planned / in progress / done / not done | PPC |
+| `TimeEntry` | hours per activity | labour actual cost |
 
-All four are activity-linked, which is the saving grace — they can be
-reconciled. But a site engineer records the same day's work up to four times,
-and only `ActivityProgress` moves earned value. `LookaheadItem.status` "done"
-does not set progress; a timesheet against an activity does not either.
+All four are activity-linked, so they *can* be reconciled — but a site engineer
+records the same day's work up to four times, and **only `ActivityProgress`
+moves earned value**. Marking a lookahead item "done" does not set progress; a
+timesheet against the activity does not either.
 
-**This is the largest daily-time cost to a site team in the product**, and the
-fix is not another screen — it is deriving a suggested `ActivityProgress` from
-the lookahead status and the daily log, for a person to confirm.
+This is the largest daily time cost in the product. The fix is not another
+screen — it is deriving a suggested `ActivityProgress` from the lookahead status
+and the daily log for a person to confirm.
 
 ---
 
-## D8 · Insurance is recorded per commitment, not per company 🟡
+## D-P1-4 · Insurance held per commitment, not per company
 
-`Commitment.insuranceJson` holds the required cover for **that subcontract**.
-A subcontractor working on three projects has their certificates entered three
-times, with three expiry dates that can disagree.
+`Commitment.insuranceJson` holds required cover for **that subcontract**. A
+subcontractor on three projects has their certificates entered three times, with
+three expiry dates that can disagree.
 
-Prequalification now holds `insurance` and `licenses` criteria with their own
-`expiresAt` at **company** level (`PrequalCriterion.tracksExpiry`), which is
-the right home. Nothing reconciles the two: a certificate that lapses on the
-prequalification does not warn the three commitments relying on it, and the
-commitment-level insurance gate does not read the company-level record.
+Prequalification now holds `insurance` and `licenses` with their own `expiresAt`
+at **company** level (`PrequalCriterion.tracksExpiry`) — the right home. Nothing
+reconciles the two: a certificate that lapses on the prequalification does not
+warn the three commitments relying on it, and the commitment-level gate does not
+read the company-level record.
+
+---
+
+## D-P2-1 · "Purchase order" means two different records
+
+| Record | Module | What it is |
+| --- | --- | --- |
+| `Commitment` with `type = 'purchase_order'` | Commercial | a committed value with an SOV and change orders |
+| `ProcurementOrder` | Procurement | an operational order with lines, deliveries, invoicing |
+
+Related through a **nullable** `ProcurementOrder.commitmentId`, with
+`commitment.totalsFor` computing `drawnDown` from them. Different registers,
+different permissions (`commitment` vs `procurement`), different lifecycles.
+
+A team can raise an order that never appears in the commitment register, and
+commit a value no order ever draws. **Nothing reconciles the two.** Each record
+is individually justified; what is missing is a rule about which is
+authoritative and a report showing both orphan sets.
+
+---
+
+## D-P2-2 · Material identity in three tables
+
+`MaterialMaster`, `InventoryItem` and `ActivityMaterial` all describe a
+material. `ProcurementPoLine` carries `materialMasterId` **and**
+`inventoryItemId` as separate nullable columns, and `goods-receipt` creates an
+`InventoryItem` on first delivery when a PO line has none — so the same physical
+material can exist as a master, an inventory item, and an activity material,
+created at different moments by different people.
+
+---
+
+## D-P3-1 · Reservations are a dead column
+
+`StockBalance.reserved` exists and is **read** — `available = onHand − reserved`
+is computed for display at `inventory.service:129` and `:208`. **No code ever
+writes it.** Worse, the guard that actually blocks an issue
+(`inventory.service:596`) checks `onHand` alone, so even if reservations existed
+they would not be enforced.
+
+Filed P3 only because nothing depends on it today; it becomes P1 the moment
+anyone builds against `available`.
+
+---
+
+## Solved — recorded so they are not re-litigated
+
+| | Finding |
+| --- | --- |
+| ✅ **Cost codes** | One org-level `CostCode` master with a `ProjectCostCode` adoption row. Every consumer — `BudgetLine`, `CommitmentSovLine`, `TimeEntry`, `ChangeEventLine`, `DirectCostLine`, `StockTransaction`, `BidPackageLine`, `AccountingCodeMapping` — points at the same master. The hypothesis that procurement and cost keep separate cost codes is **not supported**; the real problem is D-P0-2, that procurement has no cost-code field at all. |
+| ✅ **Project data in documents** | `subcontract-agreement.buildAgreement` assembles the contract from the organisation, vendor profile, project, SOV, approved COs, scope matrix, programme activities, insurances and prime-contract terms. Nothing is retyped. The same holds for the certificate and the punch and commitment PDFs. |
+| ✅ **Subcontractor lifecycle** | Directory → prequalification → bid → award → commitment → scope → agreement → pay app → closeout → evaluation → next prequalification is keyed on `companyId` throughout. Its one leak is D-P0-1. |
 
 ---
 
@@ -194,15 +215,17 @@ commitment-level insurance gate does not read the company-level record.
 
 | ID | Finding | Severity | Fix size |
 | --- | --- | --- | --- |
-| D1 | Vendor identity in 8 places; two disagreeing match rules create duplicate companies | 🔴 | small (one line) + medium (supplier consolidation) |
-| D2 | PO lines cannot be cost-coded; coding displaced to the invoice | 🔴 | medium |
-| D3 | "Purchase order" is two unreconciled records | 🟡 | small (a reconciliation report) |
-| D7 | Site progress captured in four registers, only one moves EV | 🟡 | medium (derive and confirm) |
-| D8 | Insurance held per commitment, not per company | 🟡 | medium |
-| D4 | Subcontractor lifecycle | 🟢 solved | — |
-| D5 | Project data in documents | 🟢 solved | — |
-| D6 | Cost codes | 🟢 solved | — |
+| D-P0-1 | Two vendor-matching rules create duplicate companies | **P0** | one line |
+| D-P0-2 | PO lines cannot be cost-coded | **P0** | medium |
+| D-P0-3 | Two live subcontractor payment systems | **P0** | medium — retire or link the legacy register |
+| D-P1-1 | Vendor identity in eight places; `ProcurementSupplier` duplicates per project | P1 | medium |
+| D-P1-2 | 14 models carry free-text party names beside proper keys | P1 | medium |
+| D-P1-3 | Progress captured in four registers, one moves EV | P1 | medium |
+| D-P1-4 | Insurance per commitment, not per company | P1 | medium |
+| D-P2-1 | "Purchase order" is two unreconciled records | P2 | small — a reconciliation report |
+| D-P2-2 | Material identity in three tables | P2 | medium |
+| D-P3-1 | Reservations are a dead column | P3 | small |
 
-The pattern is clear: **everything built recently honours the principle, and
-the older procurement/supplier layer does not.** D1 and D2 are both in that
-older layer, and both are cheap to fix relative to their impact.
+The pattern is unambiguous: **everything built recently honours the principle,
+and the older procurement / supplier / legacy-billing layer does not.** All
+three P0s live in that older layer, and D-P0-1 is a one-line fix.
