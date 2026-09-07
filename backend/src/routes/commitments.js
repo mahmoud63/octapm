@@ -198,8 +198,15 @@ router.post(
 router.post(
   "/:commitmentId/close",
   requirePermission("commitment", "approve", { transition: "commitment.close" }),
-  [param("commitmentId").isUUID(), validate],
-  asyncHandler(async (req, res) => sendSuccess(res, await commitmentService.closeCommitment({ ...scope(req), commitmentId: req.params.commitmentId, actor: actor(req) }))),
+  [
+    param("commitmentId").isUUID(),
+    // Closing over an outstanding checklist is allowed with a reason: the
+    // alternative is somebody ticking the checklist to get past it, which
+    // loses the record of what was actually outstanding.
+    body("closeoutOverrideReason").optional({ nullable: true }).isString().trim().isLength({ max: 1000 }),
+    validate,
+  ],
+  asyncHandler(async (req, res) => sendSuccess(res, await commitmentService.closeCommitment({ ...scope(req), commitmentId: req.params.commitmentId, actor: actor(req), closeoutOverrideReason: req.body?.closeoutOverrideReason ?? null }))),
 );
 
 router.delete(
@@ -305,6 +312,101 @@ router.post(
     sendSuccess(
       res,
       await scopeService.reopen({
+        ...scope(req),
+        commitmentId: req.params.commitmentId,
+        userId: req.user.id,
+        reason: req.body?.reason ?? null,
+      }),
+    ),
+  ),
+);
+
+// ─── closeout (OCTA-SUB-CLOSE-056) ─────────────────────────────────────────
+
+const closeoutService = require("../services/closeout.service");
+
+/** The checklist: four derived checks, then the handover documents. */
+router.get(
+  "/:commitmentId/closeout",
+  requirePermission("commitment", "read"),
+  [param("commitmentId").isUUID(), validate],
+  asyncHandler(async (req, res) =>
+    sendSuccess(
+      res,
+      await closeoutService.buildCloseout({
+        ...scope(req),
+        commitmentId: req.params.commitmentId,
+        userId: req.user.id,
+      }),
+    ),
+  ),
+);
+
+/**
+ * Marks one requirement. A derived check cannot be ticked — close the punch
+ * items, file the certificate, pay the application — only waived, with a
+ * reason.
+ */
+router.patch(
+  "/:commitmentId/closeout/items/:key",
+  requirePermission("commitment", "update", { transition: "closeout.manage" }),
+  [
+    param("commitmentId").isUUID(),
+    param("key").isString().trim().isLength({ min: 1, max: 60 }),
+    body("status").optional().isIn(closeoutService.STATUSES),
+    body("documentId").optional({ nullable: true }).isUUID(),
+    body("note").optional({ nullable: true }).isString().trim().isLength({ max: 1000 }),
+    body("waivedReason").optional({ nullable: true }).isString().trim().isLength({ max: 1000 }),
+    validate,
+  ],
+  asyncHandler(async (req, res) =>
+    sendSuccess(
+      res,
+      await closeoutService.updateItem({
+        ...scope(req),
+        commitmentId: req.params.commitmentId,
+        key: req.params.key,
+        payload: req.body,
+        userId: req.user.id,
+      }),
+    ),
+  ),
+);
+
+/** Stamps the closeout complete; refused while anything required is open. */
+router.post(
+  "/:commitmentId/closeout/complete",
+  requirePermission("commitment", "approve", { transition: "closeout.approve" }),
+  [
+    param("commitmentId").isUUID(),
+    body("overrideReason").optional({ nullable: true }).isString().trim().isLength({ max: 1000 }),
+    validate,
+  ],
+  asyncHandler(async (req, res) =>
+    sendSuccess(
+      res,
+      await closeoutService.complete({
+        ...scope(req),
+        commitmentId: req.params.commitmentId,
+        userId: req.user.id,
+        override: req.body?.overrideReason ?? null,
+      }),
+    ),
+  ),
+);
+
+router.post(
+  "/:commitmentId/closeout/reopen",
+  requirePermission("commitment", "approve", { transition: "closeout.approve" }),
+  [
+    param("commitmentId").isUUID(),
+    body("reason").optional({ nullable: true }).isString().trim().isLength({ max: 1000 }),
+    validate,
+  ],
+  asyncHandler(async (req, res) =>
+    sendSuccess(
+      res,
+      await closeoutService.reopen({
         ...scope(req),
         commitmentId: req.params.commitmentId,
         userId: req.user.id,

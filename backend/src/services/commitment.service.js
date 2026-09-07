@@ -587,7 +587,30 @@ const returnCommitment = ({ orgId, projectId, commitmentId, actor, reason, viaWo
   return transition({ orgId, projectId, commitmentId, to: STATUS.DRAFT, actor, reason: trimOrNull(reason), viaWorkflow });
 };
 
-const closeCommitment = ({ orgId, projectId, commitmentId, actor }) => transition({ orgId, projectId, commitmentId, to: STATUS.CLOSED, actor });
+/**
+ * Closing a subcontract runs the closeout gate (OCTA-SUB-CLOSE-056): punch
+ * list, insurance, the account and retention, plus the handover documents.
+ * A purchase-order commitment buys a thing rather than a package of work, so
+ * it has no handover to check.
+ */
+const closeCommitment = ({ orgId, projectId, commitmentId, actor, closeoutOverrideReason = null }) =>
+  transition({
+    orgId,
+    projectId,
+    commitmentId,
+    to: STATUS.CLOSED,
+    actor,
+    reason: trimOrNull(closeoutOverrideReason),
+    guard: async (existing) => {
+      if (existing.type !== "subcontract") return;
+      await require("./closeout.service").assertReady({
+        orgId,
+        projectId,
+        commitmentId,
+        override: closeoutOverrideReason,
+      });
+    },
+  });
 
 const voidCommitment = ({ orgId, projectId, commitmentId, actor, reason }) => {
   if (!trimOrNull(reason)) throw new HttpError(400, "COMMITMENT_VOID_REASON_REQUIRED", "Give a reason");

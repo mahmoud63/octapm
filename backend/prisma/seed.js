@@ -597,7 +597,7 @@ async function purgeTestResidue(orgId) {
   // Matched on the title, because commitment refs are auto-numbered by the
   // service rather than taken from the request.
   const fixtures = await prisma.commitment.deleteMany({
-    where: { orgId, title: "Scope matrix fixture" },
+    where: { orgId, title: { in: ["Scope matrix fixture", "Closeout fixture"] } },
   });
 
   if (orderIds.length || itemIds.length || fixtures.count) {

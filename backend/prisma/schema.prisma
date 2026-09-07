@@ -146,6 +146,8 @@ model Organisation {
   primeContractAdvances PrimeContractAdvance[]
   scopeMatrices       ScopeMatrix[]
   scopeMatrixItems    ScopeMatrixItem[]
+  subcontractCloseouts SubcontractCloseout[]
+  closeoutItems       CloseoutItem[]
 }
 
 model User {
@@ -483,6 +485,8 @@ model Project {
   primeContractAdvances         PrimeContractAdvance[]
   scopeMatrices                 ScopeMatrix[]
   scopeMatrixItems              ScopeMatrixItem[]
+  subcontractCloseouts          SubcontractCloseout[]
+  closeoutItems                 CloseoutItem[]
   subValuations                 SubValuation[]
   subValuationActivityLinks     SubValuationActivityLink[]
   subValuationAllocationLinks   SubValuationAllocationLink[]
@@ -1362,6 +1366,7 @@ model ProjectDocument {
   commitmentsExecuted      Commitment[]              @relation("CommitmentExecutedDocument")
   specSections             SpecSection[]
   subPayAppWaivers         SubPayApp[]               @relation("SubPayAppWaiverDocument")
+  closeoutEvidence         CloseoutItem[]            @relation("CloseoutItemEvidence")
   dailyLogPdfs             DailyLog[]                @relation("DailyLogPdf")
   attachments              Attachment[]
   photo                    Photo?
@@ -4793,6 +4798,7 @@ model Commitment {
   changeEventLines  ChangeEventLine[]
   rfqs              Rfq[]
   scopeMatrix       ScopeMatrix?
+  closeout          SubcontractCloseout?
 
   @@unique([projectId, ref])
   @@unique([projectId, type, number])
@@ -4950,6 +4956,81 @@ model ScopeMatrixItem {
 
   @@index([orgId])
   @@index([matrixId, kind, sortOrder])
+}
+
+// ─── Subcontract closeout (OCTA-SUB-CLOSE-056) ─────────────────────────────
+
+/**
+ * What must be true before a subcontract is paid out and closed.
+ *
+ * Half the checklist is already knowable from records the system holds — the
+ * punch list, the insurance certificates, the payment applications — so those
+ * checks are derived on read rather than ticked by hand. The rest are things
+ * somebody hands over: as-builts, O&M manuals, warranties, training, the final
+ * lien waiver. Those are rows here, completed against evidence.
+ *
+ * A required item can be waived, with a reason, because real projects release
+ * a retention against a written undertaking often enough that pretending
+ * otherwise just teaches people to lie to the checklist.
+ */
+model SubcontractCloseout {
+  id           String    @id @default(uuid())
+  orgId        String
+  projectId    String
+  commitmentId String    @unique
+  status       String    @default("open") // open, complete
+  notes        String?
+  completedAt  DateTime?
+  completedBy  String?
+  createdBy    String?
+  updatedBy    String?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  org        Organisation   @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  project    Project        @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  commitment Commitment     @relation(fields: [commitmentId], references: [id], onDelete: Cascade)
+  items      CloseoutItem[]
+
+  @@index([orgId])
+  @@index([projectId, status])
+}
+
+/**
+ * One closeout requirement.
+ *
+ * A row exists for every handover item, and also for a derived check that has
+ * been waived — the stored row is what overrides the live answer, so a waiver
+ * survives the thing it waived changing underneath it.
+ */
+model CloseoutItem {
+  id           String    @id @default(uuid())
+  orgId        String
+  projectId    String
+  closeoutId   String
+  key          String
+  label        String
+  required     Boolean   @default(true)
+  // outstanding, complete, waived, not_applicable
+  status       String    @default("outstanding")
+  documentId   String?
+  note         String?
+  waivedReason String?
+  completedAt  DateTime?
+  completedBy  String?
+  sortOrder    Int       @default(0)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  org      Organisation        @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  project  Project             @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  closeout SubcontractCloseout @relation(fields: [closeoutId], references: [id], onDelete: Cascade)
+  document ProjectDocument?    @relation("CloseoutItemEvidence", fields: [documentId], references: [id], onDelete: SetNull)
+
+  @@unique([closeoutId, key])
+  @@index([orgId])
+  @@index([closeoutId, sortOrder])
+  @@index([documentId])
 }
 
 // ─── Subcontractor payment applications (OCTA-FIN-SUBPAY-021) ──────────────

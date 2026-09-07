@@ -8,6 +8,11 @@ const mockPrisma = {
   subPayApp: { aggregate: jest.fn(async () => ({ _max: { number: 0 } })), findFirst: jest.fn(), findMany: jest.fn(async () => []), create: jest.fn(), update: jest.fn() },
   subPayAppLine: { findMany: jest.fn(async () => []), update: jest.fn(async () => ({})) },
   subPayAppPayment: { create: jest.fn(async ({ data }) => ({ id: "pay-1", ...data })) },
+  // Read when approving, to see whether this is the application that finishes
+  // the subcontract and so triggers the closeout gate (OCTA-SUB-CLOSE-056).
+  // Empty here: these applications are part-way claims, not the final one.
+  commitmentSovLine: { findMany: jest.fn(async () => []) },
+  commitmentChangeOrder: { findMany: jest.fn(async () => []) },
 };
 const mockAudit = { ENTITY_TYPES: { SUB_PAY_APP: "sub_pay_app" }, ACTIONS: { CREATED: "created", UPDATED: "updated", STATUS_CHANGED: "status_changed", APPROVED: "approved", REJECTED: "rejected" }, recordEvent: jest.fn(async () => ({})) };
 const mockNotifications = { NOTIFICATION_CATEGORIES: { APPROVAL: "approval", COMMERCIAL: "commercial", WORKFLOW: "workflow" }, createNotifications: jest.fn(async () => ({ created: 1 })) };
@@ -81,6 +86,46 @@ describe("subcontractor payment applications", () => {
     const totals = service.financials({ lines, retentionRate: 10, backCharges: 1500, retentionBefore: 0, otherDeductions: 3000, taxRate: 5 });
     expect(totals.taxAmount).toBe(1800);
     expect(totals.netThisPeriod).toBe(37800);
+  });
+
+  describe("recognising the final application", () => {
+    // Nobody marks an application "final". The arithmetic says so: it is the
+    // one that takes the cumulative claim to the revised value, and it is what
+    // triggers the closeout gate.
+    const tx = (lines, orders = []) => ({
+      commitmentSovLine: { findMany: jest.fn(async () => lines) },
+      commitmentChangeOrder: { findMany: jest.fn(async () => orders) },
+    });
+
+    it("is final when the claim reaches the revised value", async () => {
+      const existing = { commitmentId: "cm-1", lines: [{ cumulativeAmount: 150000 }] };
+      await expect(
+        service.isFinalApplication({ existing, tx: tx([{ amount: 100000 }, { amount: 50000 }]) }),
+      ).resolves.toBe(true);
+    });
+
+    it("counts approved change orders into the value it has to reach", async () => {
+      const existing = { commitmentId: "cm-1", lines: [{ cumulativeAmount: 150000 }] };
+      // 150,000 was the whole job until a change order added 20,000.
+      await expect(
+        service.isFinalApplication({
+          existing,
+          tx: tx([{ amount: 100000 }, { amount: 50000 }], [{ value: 20000 }]),
+        }),
+      ).resolves.toBe(false);
+    });
+
+    it("is not final part way through", async () => {
+      const existing = { commitmentId: "cm-1", lines: [{ cumulativeAmount: 90000 }] };
+      await expect(
+        service.isFinalApplication({ existing, tx: tx([{ amount: 150000 }]) }),
+      ).resolves.toBe(false);
+    });
+
+    it("is not final on a commitment with no schedule of values", async () => {
+      const existing = { commitmentId: "cm-1", lines: [{ cumulativeAmount: 90000 }] };
+      await expect(service.isFinalApplication({ existing, tx: tx([]) })).resolves.toBe(false);
+    });
   });
 
   describe("the revised schedule of values", () => {

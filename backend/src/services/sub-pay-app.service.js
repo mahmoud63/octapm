@@ -628,6 +628,37 @@ const reviewPayApp = ({ orgId, projectId, payAppId, actor, note }) =>
   transition({ orgId, projectId, payAppId, to: STATUS.UNDER_REVIEW, actor, extra: { reviewNote: trimOrNull(note)?.slice(0, 2000) || null } });
 
 /** Approval: compliance gate (insurance on the commitment, waiver when required) and the over-claim check. */
+/**
+ * Is this the application that finishes the subcontract?
+ *
+ * It is, when approving it would take the cumulative claim to the revised
+ * value — the original schedule of values plus every approved change order.
+ * Nobody marks an application "final"; the arithmetic says so.
+ */
+const isFinalApplication = async ({ existing, tx = prisma }) => {
+  const lines = await tx.commitmentSovLine.findMany({
+    where: { commitmentId: existing.commitmentId },
+    select: { amount: true },
+  });
+  if (!lines.length) return false;
+
+  const orders = await tx.commitmentChangeOrder.findMany({
+    where: { commitmentId: existing.commitmentId, status: "approved" },
+    select: { value: true },
+  });
+  const revised = addMoney(
+    lines.reduce((total, line) => addMoney(total, line.amount), 0),
+    orders.reduce((total, order) => addMoney(total, order.value), 0),
+  );
+  if (revised <= EPSILON) return false;
+
+  const claimed = (existing.lines || []).reduce(
+    (total, line) => addMoney(total, line.cumulativeAmount),
+    0,
+  );
+  return claimed >= subtractMoney(revised, EPSILON);
+};
+
 const approvePayAppCore = ({ orgId, projectId, payAppId, actor, complianceOverrideReason = null, overClaimOverrideReason = null, viaWorkflow = false }) =>
   transition({
     orgId,
@@ -647,6 +678,19 @@ const approvePayAppCore = ({ orgId, projectId, payAppId, actor, complianceOverri
         const error = new HttpError(409, "SUB_PAY_APP_COMPLIANCE", `Cannot approve: ${problems.join("; ")}`);
         error.details = { reasonCode: "MISSING_COMPLIANCE", problems };
         throw error;
+      }
+      // The final application — the one that takes the subcontract to its full
+      // revised value — runs the closeout gate (OCTA-SUB-CLOSE-056). "Before
+      // final payment" is the moment the leverage exists to get the as-builts
+      // and the warranties in; after it there is none.
+      if (await isFinalApplication({ existing })) {
+        await require("./closeout.service").assertReady({
+          orgId,
+          projectId,
+          commitmentId: existing.commitmentId,
+          override: complianceOverrideReason,
+          what: "paid in full",
+        });
       }
     },
   });
@@ -764,6 +808,7 @@ module.exports = {
   applyClaims,
   approvedChangesBySovLine,
   financials,
+  isFinalApplication,
   insuranceReadyFor,
   visibilityWhere,
   serialize,
