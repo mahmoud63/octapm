@@ -427,3 +427,24 @@ up as one.
 worth the scepticism applied to the instrument that produced it. This phase
 made the same demand of a red one** — twice, the instrument was at fault, and
 twice the tempting explanation was wrong on the numbers.
+
+---
+
+## 14. Smoke retest — OCTA-UX-ACTCODE-103
+
+**14 modules · 14 ✅ · 0 🟡 · 0 🔴.**
+
+One module came back 🟡 on the first clean pass: Activities opened, survived a
+refresh and raised no console error, but reported no content. It was not
+broken — the register listed all three activities with their names, dates,
+progress, values and statuses. What it did not show was the **activity code**.
+
+That is the identifier everyone on a site and in a programme actually uses. The
+Gantt has always shown it; the standalone register showed only the name, so the
+one thing a person arrives holding — *"what is happening on A-1000?"* — could
+not be answered on the page named after it. The code was already in the
+schema and simply never rendered.
+
+The column was added. **The rating moved because the missing information
+appeared, not because the check was relaxed** — which is the whole point of the
+instruction not to game the score.

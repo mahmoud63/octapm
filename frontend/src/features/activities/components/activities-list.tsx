@@ -114,6 +114,7 @@ export function ActivitiesList({
           <table className='w-full text-sm'>
             <thead className='border-b bg-muted/50'>
               <tr>
+                <th className='p-3 text-left font-medium'>Activity ID</th>
                 <th className='p-3 text-left font-medium'>Activity</th>
                 <th className='p-3 text-left font-medium'>Category</th>
                 <th className='p-3 text-left font-medium'>Start</th>
@@ -134,6 +135,15 @@ export function ActivitiesList({
                   className='cursor-pointer border-b hover:bg-muted/25'
                   onClick={() => setSelectedActivity(activity)}
                 >
+                  {/* The identifier everyone on site and in the programme
+                      actually refers to an activity by. The Gantt has always
+                      shown it; this register showed only the name, so the one
+                      thing a person arrives holding — "what is happening on
+                      A-1000?" — could not be found here
+                      (OCTA-UX-ACTCODE-103). */}
+                  <td className='p-3 font-mono text-xs'>
+                    {activity.activityCode ?? activity.p6ActivityId ?? '—'}
+                  </td>
                   <td className='p-3 font-medium'>
                     {activity.isMilestone && (
                       <span className='mr-1 text-yellow-500'>*</span>
