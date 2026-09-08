@@ -45,6 +45,19 @@ naming the plan and saying whose fault it is, because a limit you cannot
 determine is not a limit of nought. Seventeen organisations and two
 subscriptions were moved off the non-existent plan in this database.
 
+> **Existing databases need the same repair.** The code fix stops the silent
+> zero, but any organisation already sitting on `"standard"` will now get a
+> `500` instead of a misleading `402` — clearer, but still stuck. Rows already
+> written have to be moved onto a plan the catalogue contains:
+>
+> ```sql
+> UPDATE "Subscription" SET plan = 'business' WHERE plan NOT IN ('trial','individual','business','enterprise');
+> UPDATE "Organisation"  SET plan = 'business' WHERE plan NOT IN ('trial','individual','business','enterprise');
+> ```
+>
+> Choose the plan each customer is actually entitled to rather than `business`
+> across the board — this is a billing decision, not a migration.
+
 ### ✅ Not a defect: a new tenant is locked until it adds a card
 
 A newly registered organisation gets `status: 'incomplete'`, which is not in
