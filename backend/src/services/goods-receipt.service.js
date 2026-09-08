@@ -405,6 +405,8 @@ const receiveAgainstOrder = async ({ orgId, user, payload }) => {
     });
 
     const posted = [];
+    // One entry per line received, for the result the screen shows back.
+    const outcomes = [];
     for (const reported of lines) {
       const line = order.lines.find((candidate) => candidate.id === reported.poLineId);
       if (!line) {
@@ -515,6 +517,23 @@ const receiveAgainstOrder = async ({ orgId, user, payload }) => {
         });
       }
 
+      // What this line now looks like, so the storeman can be told what
+      // happened rather than just that something did (OCTA-UX-RECEIPT-100).
+      outcomes.push({
+        poLineId: line.id,
+        description: line.description ?? item?.name ?? null,
+        unit: line.unit ?? null,
+        itemId: item.id,
+        itemSku: item.sku ?? null,
+        orderedQty: ordered,
+        acceptedQty,
+        rejectedQty,
+        receivedQty: num(updatedLine.receivedQty),
+        remainingQty: round(Math.max(0, ordered - num(updatedLine.receivedQty))),
+        locationId: trimOrNull(reported.locationId),
+        status: nextStatus,
+      });
+
       // And the lead-time alert, which is about whether this material arrives
       // in time for the activity — a question a delivery obviously changes.
       await procurement.syncLeadTimeAlert({
@@ -540,10 +559,39 @@ const receiveAgainstOrder = async ({ orgId, user, payload }) => {
       },
     });
 
+    const orderStatus = allIn ? "received" : anyIn ? "partial" : order.status;
+
+    // On-hand after the delivery, for the items this receipt touched. A
+    // storeman's next question is always "so how much have I got now".
+    const stock = await tx.stockBalance.findMany({
+      where: {
+        warehouseId: warehouse.id,
+        itemId: { in: [...new Set(outcomes.map((row) => row.itemId))] },
+      },
+      select: { itemId: true, onHand: true },
+    });
+    // Summed across locations: the storeman asked how much is in this shed,
+    // not how much is on each rack in it.
+    const onHandByItem = new Map();
+    for (const row of stock) {
+      onHandByItem.set(row.itemId, num(onHandByItem.get(row.itemId)) + num(row.onHand));
+    }
+
     return {
       receiptId: receipt.id,
       receiptNumber: receipt.receiptNumber,
       movements: posted.length,
+      warehouse: { id: warehouse.id, name: warehouse.name ?? null },
+      order: {
+        id: order.id,
+        ref: order.ref,
+        status: orderStatus,
+        fullyReceived: allIn,
+      },
+      lines: outcomes.map((row) => ({
+        ...row,
+        onHand: round(num(onHandByItem.get(row.itemId))),
+      })),
     };
   });
 };

@@ -20,6 +20,8 @@ const mockPrisma = {
   // The requirement the material was ordered against, moved by the same
   // transaction that puts the stock away.
   activityMaterial: { update: jest.fn() },
+  // Read at the end so the receipt can report how much is now in the shed.
+  stockBalance: { findMany: jest.fn(async () => []) },
   // The receipt locks the lines it is about to change, so two lorries at the
   // gate cannot both read the same starting figure. The lock returns nothing;
   // what matters is that it is taken.

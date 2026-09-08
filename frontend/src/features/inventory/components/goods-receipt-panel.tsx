@@ -65,6 +65,28 @@ const blankEntries = (order: PurchaseOrder): Record<string, LineEntry> =>
  *   There is one receipt screen and one writer behind it; which module you came
  *   from should not change what you have to type.
  */
+/** What a posted delivery did, as the goods-receipt service reports it. */
+type ReceiptResult = {
+  receiptId: string
+  receiptNumber: string
+  movements: number
+  warehouse: { id: string; name: string | null } | null
+  order: { id: string; ref: string; status: string; fullyReceived: boolean } | null
+  lines: Array<{
+    poLineId: string
+    description: string | null
+    unit: string | null
+    itemSku: string | null
+    orderedQty: number
+    acceptedQty: number
+    rejectedQty: number
+    receivedQty: number
+    remainingQty: number
+    onHand: number
+    status: string
+  }>
+}
+
 export function GoodsReceiptPanel({ initialOrderRef }: { initialOrderRef?: string | null } = {}) {
   const queryClient = useQueryClient()
   const [order, setOrder] = useState<PurchaseOrder | null>(null)
@@ -72,6 +94,8 @@ export function GoodsReceiptPanel({ initialOrderRef }: { initialOrderRef?: strin
   const [warehouseId, setWarehouseId] = useState('')
   const [deliveryNote, setDeliveryNote] = useState('')
   const [entries, setEntries] = useState<Record<string, LineEntry>>({})
+  // The last delivery posted, kept so it can be read rather than announced.
+  const [receipt, setReceipt] = useState<ReceiptResult | null>(null)
 
   const warehouses = useQuery({ queryKey: ['inventory', 'warehouses'], queryFn: listWarehouses })
   const effectiveWarehouseId = warehouseId || warehouses.data?.[0]?.id || ''
@@ -127,6 +151,7 @@ export function GoodsReceiptPanel({ initialOrderRef }: { initialOrderRef?: strin
       })
     },
     onSuccess: (result) => {
+      setReceipt(result)
       toast.success(`${result.receiptNumber} posted`)
       void queryClient.invalidateQueries({ queryKey: ['inventory'] })
       // Re-read the order so the outstanding column reflects the delivery.
@@ -148,6 +173,93 @@ export function GoodsReceiptPanel({ initialOrderRef }: { initialOrderRef?: strin
 
   return (
     <div className='space-y-4' data-testid='uat-goods-receipt'>
+      {/* What the delivery actually did. A toast says a receipt was posted
+          and then takes the answer away with it; a storeman's next questions
+          are what was accepted, what is still outstanding, and how much is
+          now in the shed (OCTA-UX-RECEIPT-100). */}
+      {receipt && (
+        <Card className='octa-card-plain' data-testid='uat-receipt-result'>
+          <CardHeader className='pb-3'>
+            <div className='flex flex-wrap items-baseline justify-between gap-2'>
+              <CardTitle className='font-display text-base'>
+                {receipt.receiptNumber} posted
+              </CardTitle>
+              <span className='text-muted-foreground text-xs'>
+                {receipt.warehouse?.name} · {receipt.order?.ref} is now{' '}
+                <span data-testid='uat-receipt-order-status'>
+                  {receipt.order?.fullyReceived ? 'fully received' : 'part-delivered'}
+                </span>
+              </span>
+            </div>
+          </CardHeader>
+          <CardContent className='pt-0'>
+            <div className='overflow-x-auto'>
+              <table className='w-full text-sm'>
+                <thead className='text-muted-foreground text-xs'>
+                  <tr className='border-b'>
+                    <th className='p-2 text-left font-medium'>Item</th>
+                    <th className='p-2 text-right font-medium'>Accepted</th>
+                    <th className='p-2 text-right font-medium'>Rejected</th>
+                    <th className='p-2 text-right font-medium'>Still to come</th>
+                    <th className='p-2 text-right font-medium'>On hand</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {receipt.lines.map((line) => (
+                    <tr
+                      key={line.poLineId}
+                      className='border-b last:border-0'
+                      data-testid={`uat-receipt-line-${line.poLineId}`}
+                    >
+                      <td className='p-2'>
+                        <span>{line.description}</span>
+                        {line.itemSku && (
+                          <span className='text-muted-foreground ml-2 font-mono text-xs'>
+                            {line.itemSku}
+                          </span>
+                        )}
+                      </td>
+                      <td className='p-2 text-right font-mono tabular-nums'>
+                        {line.acceptedQty} {line.unit ?? ''}
+                      </td>
+                      <td className='p-2 text-right font-mono tabular-nums'>
+                        {line.rejectedQty > 0 ? (
+                          <span className='text-error-foreground'>{line.rejectedQty}</span>
+                        ) : (
+                          '—'
+                        )}
+                      </td>
+                      <td className='p-2 text-right font-mono tabular-nums'>
+                        {line.remainingQty > 0 ? line.remainingQty : '—'}
+                      </td>
+                      <td className='p-2 text-right font-mono tabular-nums'>
+                        {line.onHand}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div className='mt-3 flex flex-wrap gap-4 text-xs'>
+              <a
+                href='/inventory?tab=items'
+                className='text-primary font-medium hover:underline'
+                data-testid='uat-receipt-to-stock'
+              >
+                See it in stock
+              </a>
+              <a
+                href={`/inventory?tab=receive&orderRef=${encodeURIComponent(receipt.order?.ref ?? '')}`}
+                className='text-primary font-medium hover:underline'
+                data-testid='uat-receipt-again'
+              >
+                Receive more against this order
+              </a>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       <Card className='octa-card-plain'>
         <CardHeader className='pb-3'>
           <CardTitle className='font-display text-base'>
