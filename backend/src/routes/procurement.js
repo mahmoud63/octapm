@@ -169,6 +169,10 @@ router.post(
     body('lines').isArray({ min: 1 }),
     body('lines.*.lineNumber').optional().isInt({ min: 1 }).toInt(),
     body('lines.*.activityId').isUUID(),
+    // Cost coding at the moment the order is raised (OCTA-FIN-POLINE-060).
+    body('lines.*.costCodeId').optional({ nullable: true }).isUUID(),
+    body('lines.*.budgetLineId').optional({ nullable: true }).isUUID(),
+    body('lines.*.boqItemId').optional({ nullable: true }).isUUID(),
     optionalUuid('lines.*.activityMaterialId'),
     optionalUuid('lines.*.materialMasterId'),
     optionalUuid('lines.*.packageId'),

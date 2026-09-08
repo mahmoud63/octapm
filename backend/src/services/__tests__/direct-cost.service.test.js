@@ -1,4 +1,7 @@
-const store = { costs: [], lines: [], payments: [], budgetLines: [], costRecords: [], notifications: [] };
+const { createCostLedgerMock } = require("./helpers/cost-ledger-mock");
+
+const store = { costs: [], lines: [], payments: [], budgetLines: [], costRecords: [], notifications: [], poLines: [] };
+const mockLedger = createCostLedgerMock();
 let seq = 0;
 const nextId = (prefix) => `${prefix}-${(seq += 1)}`;
 const DATE_KEYS = new Set(["createdAt", "updatedAt", "costDate", "dueDate", "receivedDate", "submittedAt", "approvedAt", "postedAt", "voidedAt", "paidAt", "actualThroughDate"]);
@@ -74,6 +77,12 @@ const mockPrisma = {
   directCostPayment: table("payments"),
   budgetLine: table("budgetLines"),
   costRecord: table("costRecords"),
+  // Approving now posts through the cost ledger (OCTA-FIN-LEDGER-059).
+  costLedgerEntry: mockLedger.tables.costLedgerEntry,
+  // Read to decide whether a line bought stock rather than project cost: a
+  // line traceable to a PO line that stocks an item is capitalised, because
+  // the cost lands when the material is issued.
+  procurementPoLine: { findFirst: jest.fn(async ({ where }) => store.poLines.find((row) => row.id === where.id) || null) },
   $transaction: jest.fn(async (fn) => fn(mockPrisma)),
 };
 const mockAudit = { ACTIONS: { CREATED: "created", UPDATED: "updated", STATUS_CHANGED: "status_changed", APPROVED: "approved", REJECTED: "rejected", DELETED: "deleted" }, recordEvent: jest.fn(async () => null) };
@@ -97,6 +106,13 @@ const reset = () => {
     { id: "bl-site", projectId: "p1", costCodeId: "cc-site", costType: "overhead", status: "active", actual: 0 },
   ];
   store.costRecords = [{ id: "cr-1", projectId: "p1", activityId: "act-1", actual: 5000, actualThroughDate: new Date("2026-09-01T00:00:00Z") }];
+  store.poLines = [
+    // A stocked PO line: an invoice against this is capitalised, not expensed.
+    { id: "pol-stock", inventoryItemId: "item-1", receivedQty: 60 },
+    // Direct to site, never stocked: expensed as it always was.
+    { id: "pol-direct", inventoryItemId: null, receivedQty: 0 },
+  ];
+  mockLedger.reset();
   jest.clearAllMocks();
 };
 const invoice = (overrides = {}) =>
@@ -117,6 +133,29 @@ describe("direct costs", () => {
     await expect(invoice({ invoiceNumber: "INV-780", costDate: "" })).rejects.toMatchObject({ code: "DIRECT_COST_DATE_REQUIRED" });
     const list = await service.listDirectCosts({ ...scope, query: {} });
     expect(list.summary).toMatchObject({ count: 1, total: 5250, paid: 0, unpaid: 0, byType: expect.objectContaining({ invoice: { count: 1, total: 5250 } }) });
+  });
+
+  it("capitalises a line that bought stock, so buying and consuming are not both charged", async () => {
+    // Inventory is an asset. The economic cost of stocked material lands when
+    // it is issued to an activity, at weighted average — so expensing the
+    // invoice as well would charge the same money twice.
+    const draft = await invoice({
+      lines: [
+        { description: "Cement into store", costCodeId: "cc-conc", activityId: "act-1", poLineId: "pol-stock", amount: 4000 },
+        { description: "Pump hire to site", costCodeId: "cc-site", costType: "overhead", poLineId: "pol-direct", amount: 500 },
+      ],
+      tax: 0,
+    });
+    await service.submitDirectCost({ ...scope, actor, directCostId: draft.id });
+    const approved = await service.approveDirectCost({ ...scope, actor, directCostId: draft.id });
+
+    const posted = Object.fromEntries(approved.lines.map((line) => [line.description, line.postedAmount]));
+    expect(posted["Cement into store"]).toBe(0);
+    expect(posted["Pump hire to site"]).toBe(500);
+
+    // Only the direct-to-site line reaches the ledger.
+    expect(mockLedger.total({ sourceType: "direct_cost" })).toBe(500);
+    expect(approved.notes).toContain("capitalised to inventory");
   });
 
   it("submits only coded lines, approves and posts to the right budget lines and the activity, then voids with an exact reversal", async () => {

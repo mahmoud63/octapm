@@ -111,6 +111,18 @@ const mockPrisma = {
       store.transactions.push(row);
       return clone(row);
     }),
+    // An issue inherits the coding from the item's last receipt, so the cost
+    // code the buyer chose survives to the movement that spends it.
+    findFirst: jest.fn(async ({ where = {} } = {}) => {
+      const rows = store.transactions.filter(
+        (row) =>
+          (where.itemId === undefined || row.itemId === where.itemId) &&
+          (where.type === undefined || row.type === where.type) &&
+          (!where.OR || where.OR.some((clause) => Object.keys(clause).some((k) => row[k] != null)))
+      );
+      rows.sort((a, b) => new Date(b.occurredAt) - new Date(a.occurredAt));
+      return clone(rows[0] || null);
+    }),
   },
 
   // An issue posts consumption to the cost ledger (OCTA-FIN-LEDGER-059).

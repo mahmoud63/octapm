@@ -299,6 +299,11 @@ const receiveAgainstOrder = async ({ orgId, user, payload }) => {
             context: {
               projectId: order.projectId,
               activityId: line.activityId,
+              // The buyer's coding, carried onto the stock ledger
+              // (OCTA-FIN-POLINE-060) so an issue can inherit what the
+              // material was bought against instead of asking again.
+              costCodeId: line.costCodeId ?? null,
+              boqItemId: line.boqItemId ?? null,
               poLineId: line.id,
               receiptLineId: receiptLine.id,
               batchNo: reported.batchNo,

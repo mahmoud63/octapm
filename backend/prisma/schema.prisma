@@ -2831,6 +2831,14 @@ model ProcurementPoLine {
   packageId          String?
   supplierId         String?
   activityId         String
+  // Cost coding at the moment the order is raised (OCTA-FIN-POLINE-060).
+  // Optional, because a line for a service or a re-charge need not hit the
+  // budget — but a line that will become project cost should say where while
+  // the buyer still knows. Without these the coding was typed for the first
+  // time on the supplier invoice, by finance, who were not the buyer.
+  costCodeId         String?
+  budgetLineId       String?
+  boqItemId          String?
   activityMaterialId String?
   materialMasterId   String?
   // Which stocked item this line becomes on goods receipt. Set the first time
@@ -2878,6 +2886,8 @@ model ProcurementPoLine {
   @@index([packageId])
   @@index([supplierId])
   @@index([activityId])
+  @@index([costCodeId])
+  @@index([budgetLineId])
   @@index([activityMaterialId])
   @@index([projectId, status])
   @@index([projectId, requiredDate])

@@ -1,4 +1,7 @@
+const { createCostLedgerMock } = require("./helpers/cost-ledger-mock");
+
 const store = { workers: [], crews: [], crewMembers: [], timesheets: [], entries: [], costRecords: [], budgetLines: [], notifications: [] };
+const mockLedger = createCostLedgerMock();
 let seq = 0;
 const nextId = (prefix) => `${prefix}-${(seq += 1)}`;
 const clone = (row) => (row ? JSON.parse(JSON.stringify(row), (key, value) => (["date", "createdAt", "updatedAt", "submittedAt", "approvedAt", "rejectedAt", "postedAt", "actualThroughDate"].includes(key) && value ? new Date(value) : value)) : row);
@@ -118,6 +121,8 @@ const mockPrisma = {
   timeEntry: table("entries", { hydrate: hydrateEntry }),
   costRecord: table("costRecords"),
   budgetLine: table("budgetLines"),
+  // Approving now posts labour through the cost ledger (OCTA-FIN-LEDGER-059).
+  costLedgerEntry: mockLedger.tables.costLedgerEntry,
   $transaction: jest.fn(async (fn) => fn(mockPrisma)),
 };
 const mockAudit = { ACTIONS: { CREATED: "created", UPDATED: "updated", STATUS_CHANGED: "status_changed", APPROVED: "approved", REJECTED: "rejected", DELETED: "deleted" }, recordEvent: jest.fn(async () => null) };
@@ -156,6 +161,7 @@ const seed = () => {
 describe("timesheets and crews", () => {
   beforeEach(() => {
     seed();
+    mockLedger.reset();
     jest.clearAllMocks();
   });
 

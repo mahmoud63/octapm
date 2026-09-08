@@ -4,6 +4,7 @@ const { prisma } = require("../config/db");
 const { HttpError } = require("../utils/http-error");
 const { recordWorkspacePath } = require("../utils/record-links");
 const auditService = require("./audit.service");
+const costLedger = require("./cost-ledger.service");
 const notificationService = require("./notification.service");
 const { isPartyScopedAccess } = require("./company-party.service");
 
@@ -555,20 +556,29 @@ const approveTimesheet = async ({ orgId, projectId, timesheetId, actor = null, v
     for (const entry of existing.entries) {
       const rate = entry.rate !== null && entry.rate !== undefined ? toNumber(entry.rate) : toNumber(entry.worker?.hourlyRate, 0);
       const amount = round2(toNumber(entry.hours) * rate * multiplierFor(entry.timeType, entry.worker));
-      let budgetLineId = null;
-      if (entry.costCodeId) {
-        const line = await tx.budgetLine.findFirst({ where: { projectId, costCodeId: entry.costCodeId, costType: "labour", status: "active" }, select: { id: true } });
-        if (line) {
-          budgetLineId = line.id;
-          if (amount) await tx.budgetLine.update({ where: { id: line.id }, data: { actual: { increment: amount } } });
-        }
-      }
-      if (entry.activityId && amount) {
-        const record = await tx.costRecord.findFirst({ where: { projectId, activityId: entry.activityId }, select: { id: true, actualThroughDate: true } });
-        if (record) await tx.costRecord.update({ where: { id: record.id }, data: { actual: { increment: amount }, actualThroughDate: !record.actualThroughDate || record.actualThroughDate < existing.date ? existing.date : record.actualThroughDate } });
-        else await tx.costRecord.create({ data: { projectId, activityId: entry.activityId, actual: amount, actualThroughDate: existing.date } });
-      }
-      await tx.timeEntry.update({ where: { id: entry.id }, data: { rate, amount, postedAmount: amount, budgetLineId } });
+      // Through the cost ledger (OCTA-FIN-LEDGER-059), so labour is traceable
+      // back to the timesheet entry that produced it and reconciles like every
+      // other source.
+      const result = await costLedger.post({
+        tx,
+        orgId,
+        projectId,
+        sourceType: "timesheet",
+        sourceId: timesheetId,
+        sourceLineId: entry.id,
+        amount,
+        costType: "labour",
+        activityId: entry.activityId || null,
+        costCodeId: entry.costCodeId || null,
+        budgetLineId: entry.budgetLineId || null,
+        quantity: toNumber(entry.hours),
+        unitCost: rate,
+        incurredOn: existing.date,
+        postedBy: actor?.id || null,
+        note: entry.worker?.name || null,
+      });
+      const budgetLineId = result.entry?.budgetLineId ?? entry.budgetLineId ?? null;
+      await tx.timeEntry.update({ where: { id: entry.id }, data: { rate, amount, postedAmount: result.posted ? amount : toNumber(entry.postedAmount), budgetLineId } });
       posted.push({ ...entry, rate, amount });
     }
     const totals = totalsOf(posted);
@@ -600,15 +610,9 @@ const reopenTimesheet = async ({ orgId, projectId, timesheetId, payload = {}, ac
   const existing = await loadTimesheet({ orgId, projectId, timesheetId, viewer });
   if (![STATUS.APPROVED, STATUS.SUBMITTED].includes(existing.status)) throw new HttpError(409, "TIMESHEET_NOT_REOPENABLE", "Only submitted or approved timesheets can be reopened");
   const row = await prisma.$transaction(async (tx) => {
+    // Negative mirrors rather than decrements, so the reversal is on the record.
+    await costLedger.reverse({ tx, orgId, projectId, sourceType: "timesheet", sourceId: timesheetId, postedBy: actor?.id || null, note: payload.reason ? String(payload.reason).slice(0, 500) : null });
     for (const entry of existing.entries) {
-      const posted = toNumber(entry.postedAmount);
-      if (posted) {
-        if (entry.budgetLineId) await tx.budgetLine.update({ where: { id: entry.budgetLineId }, data: { actual: { decrement: posted } } }).catch(() => null);
-        if (entry.activityId) {
-          const record = await tx.costRecord.findFirst({ where: { projectId, activityId: entry.activityId }, select: { id: true } });
-          if (record) await tx.costRecord.update({ where: { id: record.id }, data: { actual: { decrement: posted } } });
-        }
-      }
       await tx.timeEntry.update({ where: { id: entry.id }, data: { postedAmount: 0, amount: 0, budgetLineId: null } });
     }
     await tx.timesheet.update({ where: { id: timesheetId }, data: { status: STATUS.DRAFT, approvedBy: null, approvedAt: null, postedAt: null, submittedBy: null, submittedAt: null, totalCost: 0, notes: payload.reason ? `${existing.notes ? `${existing.notes}\n` : ""}Reopened: ${String(payload.reason).slice(0, 500)}` : existing.notes } });

@@ -182,6 +182,11 @@ const serializeLine = (line) => ({
   activity: line.activity
     ? { id: line.activity.id, name: line.activity.name, code: line.activity.activityCode }
     : null,
+  // The buyer's cost coding (OCTA-FIN-POLINE-060), carried onto the stock
+  // ledger at receipt and inherited by the issue that finally spends it.
+  costCodeId: line.costCodeId ?? null,
+  budgetLineId: line.budgetLineId ?? null,
+  boqItemId: line.boqItemId ?? null,
   inventoryItemId: line.inventoryItemId,
   inventoryItem: line.inventoryItem,
   requiredDate: line.requiredDate?.toISOString() ?? null,

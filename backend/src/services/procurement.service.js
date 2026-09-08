@@ -765,6 +765,12 @@ const normalizeLineInput = async ({
     packageId: line.packageId || orderDefaults.packageId || null,
     supplierId: line.supplierId || orderDefaults.supplierId || null,
     activityId,
+    // Cost coding at the moment the order is raised (OCTA-FIN-POLINE-060), so
+    // the buyer codes it while they still know what it is for, instead of
+    // finance guessing on the invoice weeks later.
+    costCodeId: trimOrNull(line.costCodeId) || material?.costCodeId || null,
+    budgetLineId: trimOrNull(line.budgetLineId) || null,
+    boqItemId: trimOrNull(line.boqItemId) || material?.boqItemId || null,
     activityMaterialId: line.activityMaterialId || null,
     materialMasterId: line.materialMasterId || material?.materialMasterId || null,
     lineNumber: Number(line.lineNumber || index + 1),

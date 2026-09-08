@@ -828,6 +828,7 @@ const issueStock = async ({ orgId, user, payload }) => {
       warehouseId: payload.warehouseId,
       locationId: payload.locationId ?? null,
     });
+    const context = { ...payload, ...(await inheritedCoding(tx, { item, payload })) };
     const posted = await drawFromWarehouse(tx, {
       orgId,
       item,
@@ -836,10 +837,38 @@ const issueStock = async ({ orgId, user, payload }) => {
       quantity,
       type: "issue",
       user,
-      context: payload,
+      context,
     });
     return { movements: posted.map(serializeTransaction) };
   });
+};
+
+/**
+ * What this material was bought against, when whoever issued it did not say
+ * (OCTA-FIN-POLINE-060).
+ *
+ * A storeman issuing cement knows the activity; the cost code was decided on
+ * the purchase order weeks earlier, and asking for it again is how the two end
+ * up disagreeing. So an issue inherits the coding from the most recent receipt
+ * of the same item, which carries the buyer's coding. Anything stated
+ * explicitly always wins — inheritance fills silence, it never overrides.
+ */
+const inheritedCoding = async (tx, { item, payload }) => {
+  if (payload.costCodeId && payload.boqItemId) return {};
+  const lastReceipt = await tx.stockTransaction.findFirst({
+    where: {
+      itemId: item.id,
+      type: "receipt",
+      OR: [{ costCodeId: { not: null } }, { boqItemId: { not: null } }],
+    },
+    orderBy: { occurredAt: "desc" },
+    select: { costCodeId: true, boqItemId: true },
+  });
+  if (!lastReceipt) return {};
+  return {
+    ...(payload.costCodeId ? {} : { costCodeId: lastReceipt.costCodeId ?? null }),
+    ...(payload.boqItemId ? {} : { boqItemId: lastReceipt.boqItemId ?? null }),
+  };
 };
 
 /**

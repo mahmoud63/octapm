@@ -2,6 +2,7 @@ const { prisma } = require("../config/db");
 const { HttpError } = require("../utils/http-error");
 const { recordWorkspacePath } = require("../utils/record-links");
 const auditService = require("./audit.service");
+const costLedger = require("./cost-ledger.service");
 const notificationService = require("./notification.service");
 
 /**
@@ -204,7 +205,12 @@ const normalizeLines = async ({ projectId, rows }) => {
     const unitCost = round2(row.unitCost);
     const amount = row.amount !== undefined && row.amount !== null && row.amount !== "" ? round2(row.amount) : round2(quantity * unitCost);
     if (amount < 0) throw new HttpError(400, "DIRECT_COST_LINE_AMOUNT", `Line ${index + 1}: the amount cannot be negative`);
-    return { id: trimOrNull(row.id), description: description.slice(0, 500), costCodeId, budgetLineId, activityId, costType, quantity, unit: trimOrNull(row.unit)?.slice(0, 20) || null, unitCost, amount, notes: trimOrNull(row.notes)?.slice(0, 1000) || null, sortOrder: index };
+    // Which PO line this bills. `DirectCostLine.poLineId` has always existed
+    // but nothing ever wrote it, so the invoice could not be traced back to
+    // the order — and the capitalisation rule (OCTA-FIN-LEDGER-059) has no
+    // other way to tell stocked material from direct-to-site.
+    const poLineId = trimOrNull(row.poLineId);
+    return { id: trimOrNull(row.id), description: description.slice(0, 500), costCodeId, budgetLineId, activityId, poLineId, costType, quantity, unit: trimOrNull(row.unit)?.slice(0, 20) || null, unitCost, amount, notes: trimOrNull(row.notes)?.slice(0, 1000) || null, sortOrder: index };
   });
 };
 
@@ -348,26 +354,77 @@ const budgetLineFor = async ({ tx, projectId, line, costType }) => {
   return (await tx.budgetLine.findFirst({ where: { projectId, costCodeId: line.costCodeId, costType, status: "active" }, select: { id: true } })) || tx.budgetLine.findFirst({ where: { projectId, costCodeId: line.costCodeId, status: "active" }, select: { id: true } });
 };
 
+/**
+ * Whether this invoice line bought stock rather than project cost
+ * (OCTA-FIN-LEDGER-059).
+ *
+ * Inventory is an asset. Receiving material into a store does not consume it —
+ * issuing it to an activity does, and that is when the cost ledger records it,
+ * at weighted average, against the activity that actually used it.
+ *
+ * So an invoice line traceable to a PO line that stocks an item is
+ * **capitalised**: it settles the payable and moves inventory value, and it
+ * does not post project cost. Expensing it here as well would count the same
+ * economic event twice — once when it was bought and again when it was used.
+ *
+ * Everything else — services, plant hire, direct-to-site material that never
+ * touches a store — posts exactly as it always has.
+ */
+const capitalisedToInventory = async ({ tx, line }) => {
+  if (!line.poLineId) return false;
+  const poLine = await tx.procurementPoLine.findFirst({
+    where: { id: line.poLineId },
+    select: { inventoryItemId: true, receivedQty: true },
+  });
+  if (!poLine) return false;
+  return Boolean(poLine.inventoryItemId);
+};
+
 const approveDirectCost = async ({ orgId, projectId, directCostId, actor = null }) => {
   const existing = await load({ orgId, projectId, directCostId });
   if (existing.status !== STATUS.PENDING) throw new HttpError(409, "DIRECT_COST_NOT_PENDING", `Only pending direct costs can be approved (this one is ${existing.status})`);
   const now = new Date();
   const row = await prisma.$transaction(async (tx) => {
     let unposted = 0;
+    let capitalised = 0;
     for (const line of existing.lines) {
       const amount = round2(line.amount);
       const costType = line.costType || DEFAULT_COST_TYPE[existing.type] || "other";
       const budgetLine = await budgetLineFor({ tx, projectId, line, costType });
-      if (budgetLine && amount) await tx.budgetLine.update({ where: { id: budgetLine.id }, data: { actual: { increment: amount } } });
-      else if (!budgetLine) unposted += 1;
-      if (line.activityId && amount) {
-        const record = await tx.costRecord.findFirst({ where: { projectId, activityId: line.activityId }, select: { id: true, actualThroughDate: true } });
-        if (record) await tx.costRecord.update({ where: { id: record.id }, data: { actual: { increment: amount }, actualThroughDate: !record.actualThroughDate || record.actualThroughDate < existing.costDate ? existing.costDate : record.actualThroughDate } });
-        else await tx.costRecord.create({ data: { projectId, activityId: line.activityId, actual: amount, actualThroughDate: existing.costDate } });
+
+      if (await capitalisedToInventory({ tx, line })) {
+        capitalised += 1;
+        await tx.directCostLine.update({ where: { id: line.id }, data: { budgetLineId: budgetLine?.id || null, costType, postedAmount: 0 } });
+        continue;
       }
-      await tx.directCostLine.update({ where: { id: line.id }, data: { budgetLineId: budgetLine?.id || null, costType, postedAmount: budgetLine || line.activityId ? amount : 0 } });
+
+      // Through the ledger, so the figure can be traced back to this invoice
+      // and reconciled against the projections it maintains.
+      const result = await costLedger.post({
+        tx,
+        orgId,
+        projectId,
+        sourceType: "direct_cost",
+        sourceId: directCostId,
+        sourceLineId: line.id,
+        amount,
+        costType,
+        activityId: line.activityId || null,
+        costCodeId: line.costCodeId || null,
+        budgetLineId: budgetLine?.id || null,
+        incurredOn: existing.costDate,
+        postedBy: actor?.id || null,
+        note: `${existing.ref}${existing.vendorName ? ` · ${existing.vendorName}` : ""}`,
+      });
+      if (!budgetLine && !line.activityId) unposted += 1;
+      await tx.directCostLine.update({ where: { id: line.id }, data: { budgetLineId: budgetLine?.id || null, costType, postedAmount: result.posted ? amount : round2(line.postedAmount) } });
     }
-    await tx.directCost.update({ where: { id: directCostId }, data: { status: STATUS.APPROVED, approvedBy: actor?.id || null, approvedAt: now, postedAt: now, updatedBy: actor?.id || null, notes: unposted ? `${existing.notes ? `${existing.notes}\n` : ""}${unposted} line${unposted === 1 ? "" : "s"} had no budget line to post to.` : existing.notes } });
+    const notes = [
+      existing.notes,
+      unposted ? `${unposted} line${unposted === 1 ? "" : "s"} had no budget line to post to.` : null,
+      capitalised ? `${capitalised} line${capitalised === 1 ? "" : "s"} bought stock and were capitalised to inventory — the cost lands when the material is issued.` : null,
+    ].filter(Boolean).join("\n") || null;
+    await tx.directCost.update({ where: { id: directCostId }, data: { status: STATUS.APPROVED, approvedBy: actor?.id || null, approvedAt: now, postedAt: now, updatedBy: actor?.id || null, notes } });
     return load({ orgId, projectId, directCostId, tx });
   });
   await auditService.recordEvent({ orgId, projectId, entityType: "direct_cost", entityId: directCostId, action: auditService.ACTIONS.APPROVED, actorId: actor?.id || null, summary: { ref: row.ref, total: money(row.total), posted: money(row.lines.reduce((sum, line) => sum + toNumber(line.postedAmount), 0)) } }).catch(() => null);
@@ -394,18 +451,18 @@ const voidDirectCost = async ({ orgId, projectId, directCostId, payload = {}, ac
   const reason = trimOrNull(payload.reason);
   if (!reason) throw new HttpError(400, "DIRECT_COST_REASON_REQUIRED", "Say why the cost is voided");
   const row = await prisma.$transaction(async (tx) => {
+    // Through the ledger, which writes negative mirrors rather than deleting —
+    // so what was posted and then undone stays on the record, and reversing
+    // twice is a no-op for the same reason posting twice is.
+    const { reversed: mirrors } = await costLedger.reverse({ tx, orgId, projectId, sourceType: "direct_cost", sourceId: directCostId, postedBy: actor?.id || null, note: reason.slice(0, 500) });
     let reversed = 0;
     for (const line of existing.lines) {
       const posted = toNumber(line.postedAmount);
       if (!posted) continue;
-      if (line.budgetLineId) await tx.budgetLine.update({ where: { id: line.budgetLineId }, data: { actual: { decrement: posted } } }).catch(() => null);
-      if (line.activityId) {
-        const record = await tx.costRecord.findFirst({ where: { projectId, activityId: line.activityId }, select: { id: true } });
-        if (record) await tx.costRecord.update({ where: { id: record.id }, data: { actual: { decrement: posted } } });
-      }
       await tx.directCostLine.update({ where: { id: line.id }, data: { postedAmount: 0 } });
       reversed = round2(reversed + posted);
     }
+    void mirrors;
     await tx.directCost.update({ where: { id: directCostId }, data: { status: STATUS.VOID, voidReason: reason.slice(0, 1000), voidedAt: new Date(), updatedBy: actor?.id || null } });
     // A voided invoice is no longer a claim on the order.
     await syncPurchaseOrders(tx, [existing.purchaseOrderId]);
