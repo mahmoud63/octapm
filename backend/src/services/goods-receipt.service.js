@@ -262,13 +262,21 @@ const RECEIPT_PREFIX = "GRN-";
  * unique index on (projectId, receiptNumber) remains the real guarantee — this
  * only stops it firing in ordinary use.
  */
+const GENERATED_RECEIPT_PATTERN = "^GRN-[0-9]+$";
+
 const nextReceiptNumber = async (tx, projectId) => {
-  const latest = await tx.deliveryReceipt.findFirst({
-    where: { projectId, receiptNumber: { startsWith: RECEIPT_PREFIX } },
-    orderBy: { receiptNumber: "desc" },
-    select: { receiptNumber: true },
-  });
-  const highest = Number(String(latest?.receiptNumber || "").slice(RECEIPT_PREFIX.length)) || 0;
+  // Only the numbers this function generates can be counted. Delivery notes
+  // arrive with the supplier's own numbering, and plenty of them begin "GRN-"
+  // without being GRN-00001 — sorted as text, "GRN-x5xm3-A" came top, parsed to
+  // nothing, and the next number came out as GRN-00001, which was already
+  // taken. Every auto-numbered receipt on such a project then failed.
+  const [row] = await tx.$queryRaw`
+    SELECT MAX(SUBSTRING("receiptNumber" FROM ${RECEIPT_PREFIX.length + 1}::int)::int) AS highest
+    FROM "DeliveryReceipt"
+    WHERE "projectId" = ${projectId}
+      AND "receiptNumber" ~ ${GENERATED_RECEIPT_PATTERN}
+  `;
+  const highest = Number(row?.highest) || 0;
   return `${RECEIPT_PREFIX}${String(highest + 1).padStart(5, "0")}`;
 };
 
