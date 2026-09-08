@@ -566,7 +566,22 @@ const postMovement = async (tx, { orgId, item, warehouseId, locationId = null, t
   // the caller said so (OCTA-INV-PROJECT-068). Without this, `postConsumptionCost`
   // saw no project and posted nothing: stock left the warehouse, was consumed on
   // an activity, and no cost was recognised anywhere — silently.
-  const projectId = context.projectId ?? (await projectOfActivity({ tx, activityId: context.activityId }));
+  //
+  // And when the caller names both, they must agree (OCTA-INV-PROJECT-073). The
+  // activity is the stronger claim — it says what the material was actually used
+  // on — so a `projectId` that contradicts it is a mistake, and honouring it
+  // silently posts one project's cost against another's budget.
+  const activityProject = await projectOfActivity({ tx, activityId: context.activityId });
+  if (activityProject && context.projectId && context.projectId !== activityProject) {
+    const error = new HttpError(
+      400,
+      "INV_PROJECT_MISMATCH",
+      "The activity this is issued to belongs to a different project from the one named. Cost would land on the wrong project.",
+    );
+    error.details = { namedProjectId: context.projectId, activityProjectId: activityProject, activityId: context.activityId };
+    throw error;
+  }
+  const projectId = activityProject ?? context.projectId ?? null;
 
   const movement = await tx.stockTransaction.create({
     data: {

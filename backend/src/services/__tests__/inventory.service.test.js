@@ -332,6 +332,57 @@ describe("inventory stock ledger", () => {
   });
 
   /**
+   * The stronger claim wins, and a contradiction is refused
+   * (OCTA-INV-PROJECT-073). Deriving the project from the activity was right;
+   * letting a caller-supplied `projectId` override it was not — an issue could
+   * name project B while consuming against project A's activity, and the cost
+   * landed on B. Cross-project cost contamination, accepted with a 201.
+   */
+  it("refuses an issue whose named project contradicts its activity", async () => {
+    const item = seedItem();
+    const warehouse = seedWarehouse();
+    await service.receiveStock({
+      orgId: ORG,
+      user: USER,
+      payload: { itemId: item.id, warehouseId: warehouse.id, quantity: 10, unitCost: 20 },
+    });
+
+    const before = store.ledger.length;
+    await expect(
+      service.issueStock({
+        orgId: ORG,
+        user: USER,
+        payload: {
+          itemId: item.id,
+          warehouseId: warehouse.id,
+          quantity: 2,
+          activityId: "activity-1", // belongs to project-1
+          projectId: "project-2",
+        },
+      }),
+    ).rejects.toMatchObject({
+      code: "INV_PROJECT_MISMATCH",
+      details: expect.objectContaining({ namedProjectId: "project-2", activityProjectId: "project-1" }),
+    });
+    expect(store.ledger.length).toBe(before);
+
+    // Naming the same project the activity belongs to is fine.
+    const { movements } = await service.issueStock({
+      orgId: ORG,
+      user: USER,
+      payload: {
+        itemId: item.id,
+        warehouseId: warehouse.id,
+        quantity: 2,
+        activityId: "activity-1",
+        projectId: "project-1",
+      },
+    });
+    expect(movements[0].projectId).toBe("project-1");
+    expect(store.ledger.length).toBe(before + 1);
+  });
+
+  /**
    * A cost code is held at company level and cannot say which project is
    * spending, so an issue coded only to one posts no project cost. That is
    * legitimate — yard consumables are real — but it used to happen in silence.

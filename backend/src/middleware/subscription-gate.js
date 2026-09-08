@@ -30,13 +30,30 @@ const subscriptionGate = async (req, res, next) => {
 const enforceProjectLimit = async (req, res, next) => {
   try {
     const sub = await ensureSubscription(req.user.orgId);
-    const limit = PLANS[sub.plan]?.projectLimit ?? 0;
+    const plan = PLANS[sub.plan];
+    // A plan we do not recognise is our data being wrong, not a customer who
+    // has used their allowance (OCTA-BILL-PLAN-072). Falling back to `?? 0`
+    // silently turned an unknown plan id into a limit of nought — and since
+    // `count >= 0` is always true, that organisation could never create a
+    // project again, while being told to upgrade. The demo and UAT
+    // organisations were in exactly that state, on a plan called "standard"
+    // that the catalogue has never contained.
+    if (!plan) {
+      return next(
+        new HttpError(
+          500,
+          'SUBSCRIPTION_PLAN_UNKNOWN',
+          `This organisation is on a plan called "${sub.plan}", which does not exist. That is a configuration fault on our side, not a limit you have reached.`,
+        ),
+      );
+    }
+    const limit = plan.projectLimit;
     if (limit !== Infinity) {
       const count = await prisma.project.count({ where: { orgId: req.user.orgId } });
       if (count >= limit) {
         return next(new HttpError(
           402, 'PROJECT_LIMIT_REACHED',
-          `Your ${PLANS[sub.plan]?.name ?? 'current'} plan allows ${limit} project(s). Upgrade to add more.`,
+          `Your ${plan.name} plan allows ${limit} project(s). Upgrade to add more.`,
         ));
       }
     }

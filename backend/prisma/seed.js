@@ -123,25 +123,37 @@ const RESOURCES = [
   { activity: "facade", type: "material", name: "Curtain wall units", quantity: 12400, unit: "m2", dailyRate: 0 },
 ];
 
+/** A plan the catalogue in src/config/plans.js actually defines. */
+const SEED_PLAN = "business";
+
 async function upsertOrganisation() {
   const existing = await prisma.organisation.findFirst({ where: { name: ORG_NAME } });
   if (existing) {
     return prisma.organisation.update({
       where: { id: existing.id },
-      data: { status: "active", plan: existing.plan || "standard" },
+      data: { status: "active", plan: SEED_PLAN },
     });
   }
   return prisma.organisation.create({
-    data: { name: ORG_NAME, status: "active", plan: "standard" },
+    data: { name: ORG_NAME, status: "active", plan: SEED_PLAN },
   });
 }
 
+/**
+ * The demo organisation's subscription.
+ *
+ * usiness because it is a plan the catalogue actually contains
+ * (OCTA-BILL-PLAN-072). The seed used to write "standard", which it never has,
+ * so PLANS[sub.plan]?.projectLimit ?? 0 resolved to nought and the demo
+ * organisation could never create a project — told, on the front door of the
+ * product, that its plan allowed zero and it should upgrade.
+ */
 async function ensureSubscription(orgId) {
   if (!prisma.subscription?.upsert) return null;
   return prisma.subscription.upsert({
     where: { orgId },
-    create: { orgId, status: "active", plan: "standard" },
-    update: { status: "active", plan: "standard" },
+    create: { orgId, status: "active", plan: SEED_PLAN },
+    update: { status: "active", plan: SEED_PLAN },
   });
 }
 
