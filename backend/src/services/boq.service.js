@@ -544,6 +544,57 @@ async function getProjectCalendar(projectId, tx = prisma) {
   return project?.projectCalendar ?? null;
 }
 
+/**
+ * The activity a bill row says it belongs to.
+ *
+ * Scoped to the project, so one project's bill can never be allocated onto
+ * another's programme, and refusing a retired activity by name: an activity
+ * superseded by a schedule revision stops earning value, so hanging new money
+ * on it would put that money somewhere it can never be reported.
+ */
+async function resolveExistingActivity(tx, { projectId, activityId }) {
+  const activity = await tx.activity.findFirst({
+    where: { id: activityId, projectId },
+  });
+
+  if (!activity) {
+    throw new HttpError(
+      404,
+      "BOQ_ACTIVITY_NOT_IN_PROJECT",
+      "That activity is not on this project's programme",
+      { activityId, projectId },
+    );
+  }
+
+  if (activity.isActive === false) {
+    throw new HttpError(
+      409,
+      "BOQ_ACTIVITY_RETIRED",
+      `"${activity.name}" was retired by a schedule revision and no longer earns value. Allocate to the activity that replaced it.`,
+      { activityId, retiredAt: activity.retiredAt, retiredReason: activity.retiredReason },
+    );
+  }
+
+  return activity;
+}
+
+/** One live allocation per bill row per activity — add to it rather than beside it. */
+async function assertNotAlreadyAllocated(tx, { projectId, boqItemId, activityId }) {
+  const existing = await tx.activityBoqAllocation.findFirst({
+    where: { projectId, boqItemId, activityId, isActive: true },
+    select: { id: true, quantity: true },
+  });
+
+  if (existing) {
+    throw new HttpError(
+      409,
+      "DUPLICATE_ACTIVE_ALLOCATION",
+      "This bill row is already allocated to that activity. Change the existing allocation rather than adding a second one.",
+      { allocationId: existing.id, quantity: existing.quantity },
+    );
+  }
+}
+
 async function createOfficialBoqActivityAllocation(
   tx,
   {
@@ -562,9 +613,19 @@ async function createOfficialBoqActivityAllocation(
       ? toMoneyNumber(payload.amount)
       : multiplyMoney(quantity, rate);
   const activityName = String(payload.activityName || "").trim();
+  const existingActivityId = trimOrNull(payload.activityId);
 
-  if (!activityName) {
-    throw new HttpError(400, "MISSING_FIELDS", "activityName is required");
+  // A bill row either names an activity that already exists, or describes one
+  // to be created for it. Naming one is how a project that already has a
+  // programme — imported from P6, or built by its planner — keeps the money and
+  // the logic on the same activity instead of growing a second, shadow schedule
+  // of zero-duration stubs beside the real one.
+  if (!existingActivityId && !activityName) {
+    throw new HttpError(
+      400,
+      "MISSING_FIELDS",
+      "Name the activity this belongs to (activityId), or give a name to create one (activityName)",
+    );
   }
   assertPositiveAllocationValues({ quantity, amount });
 
@@ -579,42 +640,56 @@ async function createOfficialBoqActivityAllocation(
     nextAmount: amount,
   });
 
-  const activityCode =
-    normalizeCode(payload.activityCode) ||
-    (await nextActivityCode(projectId, boqItem.description, tx));
-  const activitySortOrder =
-    payload.sortOrder !== undefined
-      ? Number(payload.sortOrder)
-      : await tx.activity.count({ where: { projectId, isActive: true } });
-  const dependencyType = payload.dependencyType || null;
-  const predecessorCode = trimOrNull(payload.predecessorCode);
-  const predecessorText = predecessorCode
-    ? `${predecessorCode} ${dependencyType || "FS"}`
-    : null;
+  let activity;
 
-  const activity = await tx.activity.create({
-    data: {
+  if (existingActivityId) {
+    activity = await resolveExistingActivity(tx, {
       projectId,
-      name: activityName,
-      activityCode,
-      wbsCode: trimOrNull(payload.wbsCode),
-      calendarId,
-      category: payload.category || null,
-      duration: Number(payload.duration) || 0,
-      budget: amount,
-      predecessors: predecessorText,
-      batchId: payload.batchId || null,
-      sortOrder: activitySortOrder,
-    },
-  });
-
-  if (predecessorText) {
-    await replaceActivityDependencies(tx, {
-      projectId,
-      successorId: activity.id,
-      predecessors: predecessorText,
-      source,
+      activityId: existingActivityId,
     });
+    await assertNotAlreadyAllocated(tx, {
+      projectId,
+      boqItemId: boqItem.id,
+      activityId: activity.id,
+    });
+  } else {
+    const activityCode =
+      normalizeCode(payload.activityCode) ||
+      (await nextActivityCode(projectId, boqItem.description, tx));
+    const activitySortOrder =
+      payload.sortOrder !== undefined
+        ? Number(payload.sortOrder)
+        : await tx.activity.count({ where: { projectId, isActive: true } });
+    const dependencyType = payload.dependencyType || null;
+    const predecessorCode = trimOrNull(payload.predecessorCode);
+    const predecessorText = predecessorCode
+      ? `${predecessorCode} ${dependencyType || "FS"}`
+      : null;
+
+    activity = await tx.activity.create({
+      data: {
+        projectId,
+        name: activityName,
+        activityCode,
+        wbsCode: trimOrNull(payload.wbsCode),
+        calendarId,
+        category: payload.category || null,
+        duration: Number(payload.duration) || 0,
+        budget: amount,
+        predecessors: predecessorText,
+        batchId: payload.batchId || null,
+        sortOrder: activitySortOrder,
+      },
+    });
+
+    if (predecessorText) {
+      await replaceActivityDependencies(tx, {
+        projectId,
+        successorId: activity.id,
+        predecessors: predecessorText,
+        source,
+      });
+    }
   }
 
   const allocation = await tx.activityBoqAllocation.create({
@@ -1484,18 +1559,25 @@ async function createManualBoqItem(projectId, data, options = {}) {
         },
       });
 
-      await createOfficialBoqActivityAllocation(tx, {
-        projectId,
-        boqItem: item,
-        payload: {
-          activityName: data.activityName,
-          quantity: Number(data.quantity),
-          rate: toMoneyNumber(data.rate),
-        },
-        source: "manual",
-        userId: options.userId || null,
-        calendarId,
-      });
+      // A row may name an activity that exists, describe one to create, or name
+      // neither — the last leaves the row unallocated so its quantity can be
+      // split across several activities afterwards, which is what a bill item
+      // spanning more than one piece of work actually needs.
+      if (data.activityId || data.activityName) {
+        await createOfficialBoqActivityAllocation(tx, {
+          projectId,
+          boqItem: item,
+          payload: {
+            activityId: data.activityId,
+            activityName: data.activityName,
+            quantity: Number(data.quantity),
+            rate: toMoneyNumber(data.rate),
+          },
+          source: "manual",
+          userId: options.userId || null,
+          calendarId,
+        });
+      }
 
       const row = await tx.boqItem.findUnique({
         where: { id: item.id },
@@ -1676,6 +1758,7 @@ async function createActivity(projectId, boqItemId, data, options = {}) {
         projectId,
         boqItem: item,
         payload: {
+          activityId: data.activityId,
           activityName: data.activityName,
           quantity: Number(data.quantity) || 0,
           rate: toMoneyNumber(data.rate),
@@ -1899,7 +1982,89 @@ async function deleteActivity(projectId, activityId, options = {}) {
   return null;
 }
 
+/**
+ * Activities that look like a shadow of the real programme.
+ *
+ * The shape is specific: an activity carrying live bill allocations, with no
+ * duration and no logic joining it to anything, on a project where other
+ * activities do have duration or logic. That is what a bill row minting its own
+ * activity leaves behind once a real programme exists — money on a stub that is
+ * on nobody's critical path and has no dates.
+ *
+ * It reports and stops there. Whether two activities are the same piece of work
+ * is a judgement about the job, not a fact in the data, and acting on it would
+ * move financial history.
+ */
+async function findShadowActivities(projectId, options = {}) {
+  await assertProjectAccess(projectId, options.orgId);
+
+  const activities = await prisma.activity.findMany({
+    where: { projectId, isActive: true },
+    select: {
+      id: true,
+      name: true,
+      activityCode: true,
+      p6ActivityId: true,
+      duration: true,
+      startDate: true,
+      _count: { select: { predecessorLinks: true, successorLinks: true } },
+    },
+  });
+
+  const hasLogic = (a) => a._count.predecessorLinks > 0 || a._count.successorLinks > 0;
+  const hasDuration = (a) => Number(a.duration) > 0;
+  const realProgrammeExists = activities.some((a) => hasDuration(a) || hasLogic(a));
+
+  const allocations = await prisma.activityBoqAllocation.groupBy({
+    by: ["activityId"],
+    where: { projectId, isActive: true },
+    _sum: { amount: true, quantity: true },
+    _count: { _all: true },
+  });
+  const allocated = new Map(allocations.map((row) => [row.activityId, row]));
+
+  const items = realProgrammeExists
+    ? activities
+        .filter((a) => allocated.has(a.id) && !hasDuration(a) && !hasLogic(a))
+        .map((a) => {
+          const row = allocated.get(a.id);
+          return {
+            code: "POTENTIAL_SHADOW_ACTIVITY",
+            activityId: a.id,
+            activityCode: a.activityCode,
+            p6ActivityId: a.p6ActivityId,
+            name: a.name,
+            allocationCount: row._count._all,
+            allocatedAmount: toMoneyNumber(row._sum.amount || 0),
+            allocatedQuantity: Number(row._sum.quantity || 0),
+            why: "Carries bill value but has no duration and no logic, on a project that already has a programme",
+            sameNameAs: activities
+              .filter(
+                (other) =>
+                  other.id !== a.id &&
+                  String(other.name).trim().toLowerCase() === String(a.name).trim().toLowerCase(),
+              )
+              .map((other) => ({
+                activityId: other.id,
+                activityCode: other.activityCode,
+                p6ActivityId: other.p6ActivityId,
+                duration: other.duration,
+              })),
+          };
+        })
+    : [];
+
+  return {
+    projectId,
+    scannedActivities: activities.length,
+    realProgrammeExists,
+    items,
+    note: "Reported for review only. Nothing is merged or moved automatically.",
+  };
+}
+
 module.exports = {
+  findShadowActivities,
   runBoqActivityJob,
   generateBoqTemplate,
   processBoqUpload,

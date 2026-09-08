@@ -1560,16 +1560,30 @@ const components = {
         quantity: nonNegativeNumber,
         unit: { type: "string" },
         rate: money,
-        activityName: { type: "string" },
-      },
-      ["code", "description", "quantity", "unit", "rate", "activityName"],
-    ),
-    BoqActivityMutation: objectSchema(
-      {
+        activityId: {
+          ...uuid,
+          description:
+            "An activity already on the programme, to allocate this row to. Use this on a project that has a schedule — it is what keeps the bill and the programme on one activity instead of growing a second, shadow one. Mutually exclusive with activityName.",
+        },
         activityName: {
           type: "string",
           description:
-            "Draft helper label for an official schedule Activity. Legacy BoqActivity records are suggestion/history only.",
+            "Creates a new schedule activity for this row, with a generated activityCode. For a project that has no programme yet. Mutually exclusive with activityId; giving neither leaves the row unallocated, to be split across several activities afterwards.",
+        },
+      },
+      ["code", "description", "quantity", "unit", "rate"],
+    ),
+    BoqActivityMutation: objectSchema(
+      {
+        activityId: {
+          ...uuid,
+          description:
+            "An activity already on the programme, to allocate this share to. Mutually exclusive with activityName.",
+        },
+        activityName: {
+          type: "string",
+          description:
+            "Creates a new official schedule Activity for this share. Mutually exclusive with activityId. Legacy BoqActivity records are suggestion/history only.",
         },
         unit: { type: "string" },
         quantity: nonNegativeNumber,
@@ -1577,7 +1591,7 @@ const components = {
         dependencyType: { type: "string", enum: ["FS", "SS"], nullable: true },
         predecessorCode: { type: "string", nullable: true },
       },
-      ["activityName", "unit", "quantity", "rate"],
+      ["unit", "quantity", "rate"],
     ),
     ActivityBoqAllocationMutation: objectSchema(
       {
@@ -6360,6 +6374,19 @@ add(
     tag: "BOQ",
     summary: "Get BOQ items and value-state rollups for a project.",
     operationId: "getProjectBoq",
+    parameters: projectParams,
+  }),
+);
+
+add(
+  "/projects/{projectId}/boq/shadow-activities",
+  "get",
+  operation({
+    tag: "BOQ",
+    summary: "Report activities that look like a shadow of the real programme.",
+    description:
+      "Lists activities carrying BOQ allocations that have no duration and no logic, on a project whose other activities have both — the trace a BOQ row leaves when it mints its own activity beside an existing programme. Each is reported as POTENTIAL_SHADOW_ACTIVITY, with any same-named activities alongside it. Read-only: nothing is merged or moved, because deciding two activities are the same piece of work is a judgement about the job and acting on it would move financial history.",
+    operationId: "getBoqShadowActivities",
     parameters: projectParams,
   }),
 );

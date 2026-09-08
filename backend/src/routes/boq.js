@@ -61,6 +61,28 @@ function assertPositiveMoney(value, field) {
   assertMoneyInput(field, value, { min: 0.01 });
 }
 
+const UUID =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * A bill row says which activity it belongs to in one of two ways, never both:
+ * activityId names one already on the programme, activityName describes one to
+ * create. Accepting both would leave it ambiguous which the caller meant, and
+ * guessing is how a shadow schedule gets built.
+ */
+function assertActivityChoice(body) {
+  if (body.activityId && body.activityName) {
+    throw new HttpError(
+      400,
+      'VALIDATION_ERROR',
+      'Give either activityId, to use an activity already on the programme, or activityName, to create one — not both',
+    );
+  }
+  if (body.activityId !== undefined && body.activityId !== null && !UUID.test(String(body.activityId))) {
+    throw new HttpError(400, 'VALIDATION_ERROR', 'activityId must be a UUID');
+  }
+}
+
 function assertValidDependencyType(value) {
   if (value === undefined || value === null || value === '') return;
   if (!['FS', 'SS'].includes(value)) {
@@ -179,6 +201,24 @@ router.post(
   }),
 );
 
+// GET /projects/:projectId/boq/shadow-activities
+//
+// Reports activities that look like a bill row minted its own copy beside a
+// real programme: money on them, no duration, no logic, while other activities
+// on the same project have both. It only ever reports — deciding that two
+// activities are the same piece of work is a person's judgement, and merging
+// them would move financial history.
+router.get(
+  '/shadow-activities',
+  authenticate,
+  asyncHandler(async (req, res) => {
+    const data = await boqService.findShadowActivities(req.params.projectId, {
+      orgId: req.user.orgId,
+    });
+    return sendSuccess(res, data);
+  }),
+);
+
 // GET /projects/:projectId/boq
 router.get(
   '/',
@@ -217,10 +257,15 @@ router.post(
   authenticate,
   CAN_MODIFY,
   asyncHandler(async (req, res) => {
-    const { code, description, quantity, unit, rate, activityName } = req.body;
-    if (!code || !description || !quantity || !unit || !rate || !activityName) {
-      throw new HttpError(400, 'MISSING_FIELDS', 'code, description, quantity, unit, rate and activityName are required');
+    const { code, description, quantity, unit, rate } = req.body;
+    if (!code || !description || !quantity || !unit || !rate) {
+      throw new HttpError(400, 'MISSING_FIELDS', 'code, description, quantity, unit and rate are required');
     }
+    // The activity is optional now, and may be given either way: activityId to
+    // allocate the row to an activity already on the programme, activityName to
+    // create one for it, or neither to leave the row unallocated and split it
+    // across several activities afterwards.
+    assertActivityChoice(req.body);
     assertPositiveNumber(quantity, 'quantity');
     assertPositiveMoney(rate, 'rate');
     const result = await boqService.createManualBoqItem(
@@ -261,10 +306,15 @@ router.post(
   authenticate,
   CAN_MODIFY,
   asyncHandler(async (req, res) => {
-    const { activityName, unit, quantity, rate } = req.body;
-    if (!activityName || !unit || quantity === undefined || rate === undefined) {
-      throw new HttpError(400, 'MISSING_FIELDS', 'activityName, unit, quantity, and rate are required');
+    const { activityId, activityName, unit, quantity, rate } = req.body;
+    if ((!activityId && !activityName) || !unit || quantity === undefined || rate === undefined) {
+      throw new HttpError(
+        400,
+        'MISSING_FIELDS',
+        'unit, quantity and rate are required, with either activityId (an activity already on the programme) or activityName (one to create)',
+      );
     }
+    assertActivityChoice(req.body);
     assertPositiveNumber(quantity, 'quantity');
     assertPositiveMoney(rate, 'rate');
     assertValidDependencyType(req.body.dependencyType);

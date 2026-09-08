@@ -265,11 +265,16 @@ const mapAllocation = (allocation) => ({
   activity: allocation.activity
     ? {
         id: allocation.activity.id,
+        // A single label to show, and the two identifiers behind it kept
+        // apart: an imported activity has only a P6 id, one we created has
+        // only an activityCode, and a reader reconciling a bill against a
+        // programme needs to know which of the two they are holding.
         activityId:
           allocation.activity.activityCode ||
           allocation.activity.p6ActivityId ||
           allocation.activity.id,
         activityCode: allocation.activity.activityCode,
+        p6ActivityId: allocation.activity.p6ActivityId ?? null,
         name: allocation.activity.name,
         wbsCode: allocation.activity.wbsCode,
         category: allocation.activity.category,
