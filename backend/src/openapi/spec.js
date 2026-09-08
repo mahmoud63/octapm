@@ -3389,6 +3389,35 @@ const components = {
         trades: arrayOf(objectSchema({ trade: { type: "string" }, count: { type: "integer" } })),
       }),
     }),
+    VendorDuplicateReport: objectSchema({
+      duplicates: arrayOf(
+        objectSchema({
+          nameKey: { type: "string", description: "The folded name the group shares." },
+          keepSuggestion: uuid,
+          companies: arrayOf(
+            objectSchema({
+              id: uuid,
+              name: { type: "string" },
+              isVendor: { type: "boolean" },
+              status: { type: "string" },
+              prequalification: { type: "string", nullable: true },
+              commitments: { type: "integer" },
+              evaluations: { type: "integer" },
+              projects: { type: "integer" },
+              suppliers: { type: "integer" },
+              members: { type: "integer" },
+              createdAt: nullableDateString,
+            }),
+          ),
+        }),
+      ),
+      summary: objectSchema({
+        companies: { type: "integer" },
+        groups: { type: "integer" },
+        affected: { type: "integer" },
+      }),
+      note: { type: "string" },
+    }),
     PrequalState: objectSchema({
       status: {
         type: "string",
@@ -14195,6 +14224,16 @@ const includeArchivedQuery = queryParam("includeArchived", "Include archived row
     ],
     permissions: authenticatedOnly,
     responseSchema: ref("VendorListResponse"),
+  },
+  {
+    method: "get",
+    path: "/company/vendors/duplicates",
+    summary:
+      "Companies in the directory that are probably the same company (OCTA-ADM-DEDUPE-061), grouped by normalised name — case, punctuation and spacing folded, legal form deliberately not. **Reports, never merges**: moving commitments, prequalifications, evaluations and insurance between legal entities is a decision for a person. `keepSuggestion` is the record carrying the most history, because that is the one whose loss would cost the most.",
+    operationId: "getVendorDuplicates",
+    parameters: [],
+    permissions: companyAdminPermission,
+    responseSchema: ref("VendorDuplicateReport"),
   },
   {
     method: "get",

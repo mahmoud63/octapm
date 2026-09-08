@@ -604,10 +604,10 @@ async function purgeTestResidue(orgId) {
   // read on a company nobody has assessed. Packages go first: the invitations
   // that point at these vendors hang off them.
   const packages = await prisma.bidPackage.deleteMany({
-    where: { orgId, title: { startsWith: "E2E Prequal" } },
+    where: { orgId, OR: [{ title: { startsWith: "E2E Prequal" } }, { title: { startsWith: "E2E Dedupe" } }] },
   });
   const vendors = await prisma.company.deleteMany({
-    where: { orgId, name: { startsWith: "E2E Prequal" } },
+    where: { orgId, OR: [{ name: { startsWith: "E2E Prequal" } }, { name: { startsWith: "E2E Dedupe" } }] },
   });
 
   if (orderIds.length || itemIds.length || fixtures.count || vendors.count || packages.count) {

@@ -76,6 +76,19 @@ router.get(
   ),
 );
 
+/**
+ * Companies that are probably the same company (OCTA-ADM-DEDUPE-061).
+ * Reports, never merges — moving commitments, prequalifications and insurance
+ * between legal entities is a decision for a person.
+ */
+router.get(
+  "/vendors/duplicates",
+  requireCompanyAdmin,
+  asyncHandler(async (req, res) =>
+    sendSuccess(res, await companyWorkspaceService.duplicateCompanyReport({ orgId: req.user.orgId })),
+  ),
+);
+
 router.get(
   "/vendors/migration-report",
   requireCompanyAdmin,

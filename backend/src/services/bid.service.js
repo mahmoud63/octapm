@@ -7,6 +7,7 @@ const auditService = require("./audit.service");
 const notificationService = require("./notification.service");
 const emailService = require("./email.service");
 const prequalService = require("./vendor-prequalification.service");
+const { normalizeCompanyName } = require("../utils/company-name");
 
 /**
  * Bid management (OCTA-PRE-BID-027).
@@ -847,11 +848,24 @@ const revokeSoftAward = async ({ orgId, projectId, packageId, actor = null }) =>
   return serializePackage(row, { detail: true });
 };
 
+/**
+ * The company this award belongs to.
+ *
+ * Matched on the normalised name (OCTA-ADM-DEDUPE-061), not the exact string.
+ * This used to be a case-sensitive comparison while `createVendor` matched
+ * case-insensitively, so awarding to "abc piling" beside an existing
+ * "ABC Piling" quietly created a second company — one with no
+ * prequalification, no performance history and no insurance, which defeated
+ * three of the controls built on the directory in a single keystroke.
+ */
 const ensureVendorCompany = async ({ tx, orgId, invitation }) => {
   if (invitation.vendorCompanyId) return invitation.vendorCompanyId;
-  const existing = await tx.company.findFirst({ where: { orgId, name: invitation.companyName }, select: { id: true } });
+  const nameKey = normalizeCompanyName(invitation.companyName);
+  const existing = nameKey
+    ? await tx.company.findFirst({ where: { orgId, nameKey }, select: { id: true } })
+    : null;
   if (existing) return existing.id;
-  const created = await tx.company.create({ data: { orgId, name: invitation.companyName, email: invitation.contactEmail, contactName: invitation.contactName || null, type: "external", isVendor: true } });
+  const created = await tx.company.create({ data: { orgId, name: invitation.companyName, nameKey, email: invitation.contactEmail, contactName: invitation.contactName || null, type: "external", isVendor: true } });
   return created.id;
 };
 

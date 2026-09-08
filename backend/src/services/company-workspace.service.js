@@ -1,6 +1,7 @@
 const { prisma } = require("../config/db");
 const { HttpError } = require("../utils/http-error");
 const prequalService = require("./vendor-prequalification.service");
+const { normalizeCompanyName } = require("../utils/company-name");
 
 /**
  * Company workspace masters (OCTA-ADM-COMPANY-007): directory, vendors, cost
@@ -170,6 +171,9 @@ const vendorData = (payload = {}, existing = null) => {
     const name = trimOrNull(payload.name);
     if (!name) throw new HttpError(400, "VENDOR_NAME_REQUIRED", "Vendor name is required");
     data.name = name;
+    // Kept beside the name so matching is an indexed lookup rather than a
+    // scan, and so every writer agrees on what "the same company" means.
+    data.nameKey = normalizeCompanyName(name);
   }
   const trades = normalizeTrades(payload.trades ?? payload.tradeCategories);
   if (trades !== undefined) data.trades = trades;
@@ -192,10 +196,11 @@ const vendorData = (payload = {}, existing = null) => {
 const createVendor = async ({ orgId, payload = {}, actorId = null, actorRole = null }) => {
   const data = vendorData({ ...payload, name: payload.name });
   const company = await prisma.$transaction(async (tx) => {
-    const existing = await tx.company.findFirst({
-      where: { orgId, name: { equals: data.name, mode: "insensitive" } },
-      include: companyCounts,
-    });
+    // Matched on the normalised name, so "ABC Steel L.L.C." finds the existing
+    // "ABC Steel LLC" rather than raising a second one (OCTA-ADM-DEDUPE-061).
+    const existing = data.nameKey
+      ? await tx.company.findFirst({ where: { orgId, nameKey: data.nameKey }, include: companyCounts })
+      : null;
     const row = existing
       ? await tx.company.update({
           where: { id: existing.id },
@@ -227,12 +232,12 @@ const updateVendor = async ({ orgId, vendorId, payload = {}, actorId = null, act
   const data = vendorData(payload, existing);
   if (payload.isVendor !== undefined) data.isVendor = Boolean(payload.isVendor);
   const company = await prisma.$transaction(async (tx) => {
-    if (data.name && data.name.toLowerCase() !== existing.name.toLowerCase()) {
+    if (data.nameKey && data.nameKey !== normalizeCompanyName(existing.name)) {
       const clash = await tx.company.findFirst({
-        where: { orgId, id: { not: vendorId }, name: { equals: data.name, mode: "insensitive" } },
-        select: { id: true },
+        where: { orgId, id: { not: vendorId }, nameKey: data.nameKey },
+        select: { id: true, name: true },
       });
-      if (clash) throw new HttpError(409, "VENDOR_DUPLICATE_NAME", "A company with this name already exists");
+      if (clash) throw new HttpError(409, "VENDOR_DUPLICATE_NAME", `"${clash.name}" is already in the directory under that name`);
     }
     const row = await tx.company.update({ where: { id: vendorId }, data, include: companyCounts });
     await recordOrgAudit({
@@ -248,6 +253,100 @@ const updateVendor = async ({ orgId, vendorId, payload = {}, actorId = null, act
     return row;
   });
   return serializeCompany(company);
+};
+
+/**
+ * Companies in the directory that are probably the same company
+ * (OCTA-ADM-DEDUPE-061).
+ *
+ * Reports, never merges. Two records with the same normalised name are almost
+ * certainly one company typed twice — but merging them moves commitments,
+ * prequalifications, evaluations and insurance from one legal entity to
+ * another, and that is a decision with contractual weight. So this names them,
+ * shows what each one carries, and suggests which to keep.
+ *
+ * The suggestion is the record with the most history behind it, because that
+ * is the one whose loss would cost the most — not the oldest, and not the one
+ * with the tidiest spelling.
+ */
+const duplicateCompanyReport = async ({ orgId }) => {
+  const companies = await prisma.company.findMany({
+    where: { orgId },
+    include: {
+      prequalification: { select: { id: true, status: true } },
+      _count: {
+        select: {
+          memberships: true,
+          projectParties: true,
+          procurementSuppliers: true,
+          commitments: true,
+        },
+      },
+    },
+    orderBy: [{ name: "asc" }],
+  });
+
+  // `SubcontractorEvaluation.companyId` is a plain column rather than a
+  // relation — it is a denormalised copy for the history rollup — so it cannot
+  // be counted through `_count` and is grouped here instead.
+  const evaluationCounts = new Map();
+  if (prisma.subcontractorEvaluation?.groupBy) {
+    const grouped = await prisma.subcontractorEvaluation.groupBy({
+      by: ["companyId"],
+      where: { orgId, companyId: { in: companies.map((row) => row.id) } },
+      _count: { _all: true },
+    });
+    for (const row of grouped) evaluationCounts.set(row.companyId, row._count?._all ?? 0);
+  }
+
+  const groups = new Map();
+  for (const company of companies) {
+    const key = company.nameKey || normalizeCompanyName(company.name);
+    if (!key) continue;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(company);
+  }
+
+  const weight = (company) =>
+    (company._count?.commitments || 0) * 10 +
+    (evaluationCounts.get(company.id) || 0) * 5 +
+    (company.prequalification ? 5 : 0) +
+    (company._count?.projectParties || 0) * 2 +
+    (company._count?.procurementSuppliers || 0) +
+    (company._count?.memberships || 0);
+
+  const duplicates = [...groups.entries()]
+    .filter(([, rows]) => rows.length > 1)
+    .map(([nameKey, rows]) => {
+      const ranked = [...rows].sort((a, b) => weight(b) - weight(a));
+      return {
+        nameKey,
+        keepSuggestion: ranked[0].id,
+        companies: ranked.map((company) => ({
+          id: company.id,
+          name: company.name,
+          isVendor: Boolean(company.isVendor),
+          status: company.status,
+          prequalification: company.prequalification?.status ?? null,
+          commitments: company._count?.commitments ?? 0,
+          evaluations: evaluationCounts.get(company.id) ?? 0,
+          projects: company._count?.projectParties ?? 0,
+          suppliers: company._count?.procurementSuppliers ?? 0,
+          members: company._count?.memberships ?? 0,
+          createdAt: toIso(company.createdAt),
+        })),
+      };
+    });
+
+  return {
+    duplicates,
+    summary: {
+      companies: companies.length,
+      groups: duplicates.length,
+      affected: duplicates.reduce((sum, group) => sum + group.companies.length, 0),
+    },
+    note: "Reported, not merged: moving commitments, prequalifications and insurance between legal entities is a decision for a person.",
+  };
 };
 
 /**
@@ -552,5 +651,6 @@ module.exports = {
   updateCompanyEquipment,
   updateCostCode,
   updateVendor,
+  duplicateCompanyReport,
   vendorMigrationReport,
 };

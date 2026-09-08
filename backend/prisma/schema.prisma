@@ -336,6 +336,17 @@ model Company {
   id                 String   @id @default(uuid())
   orgId              String
   name               String
+  // `name` folded to how it would be typed by somebody who was not being
+  // careful (OCTA-ADM-DEDUPE-061): lowercase, punctuation resolved, spaces
+  // collapsed. Matching happens on this, so "ABC Steel LLC" and
+  // "abc steel llc" resolve to the same company instead of becoming two —
+  // and a duplicate carries no prequalification, no history and no insurance.
+  //
+  // Indexed, not unique: an existing directory may already hold duplicates,
+  // and a unique index would make the migration fail on exactly the databases
+  // that need this most. Merging existing ones is a person's decision, served
+  // by the duplicate report.
+  nameKey            String?
   legalName          String?
   tradeName          String?
   registrationNumber String?
@@ -385,6 +396,7 @@ model Company {
   @@index([orgId])
   @@index([orgId, status])
   @@index([orgId, isVendor])
+  @@index([orgId, nameKey])
 }
 
 model CompanyMembership {
