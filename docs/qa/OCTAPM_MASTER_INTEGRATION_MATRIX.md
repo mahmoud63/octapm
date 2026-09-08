@@ -372,3 +372,27 @@ The ❓ column has not been cleared. Cross-project and cross-tenant isolation
 remain the largest untested area — both adversarial attacks aimed at them were
 skipped because this database holds one project. That is the single most
 valuable next test.
+
+## Rows that have moved in Phases 17–18
+
+| Was | Now | What changed |
+| --- | --- | --- |
+| ❓ · BOQ row → schedule activity | ✅ | a row references an activity by `activityId` instead of always minting one — the shadow schedule is closed (OCTA-BOQ-ACTIVITY-078) |
+| ❓ · BOQ allocation → earned value | ✅ | approved allocation × approved progress, driven: 400,000 × 60% = 240,000, and +120,000 at 90% |
+| 🔴 · single-activity progress → any activity | ✅ | the route dropped `userRole`, so the PM override the refusal named could never apply (OCTA-PROG-ROLE-074) |
+| 🔴 · activity status across modules | ✅ | one rule, four call sites; the schedule screen and the client's report had disagreed about the same activity (OCTA-STATUS-ONE-075) |
+| 🔴 · imported programme → critical path | ✅ | activation never recalculated: every activity sat at day one with no dates (OCTA-IMPORT-CPM-076) |
+| ❓ · imported activity identity | ✅ | `p6ActivityId` is serialised beside `activityCode`, and the two stay distinguishable wherever a bill meets a programme (OCTA-ACT-P6ID-077) |
+| ❓ · schedule revision → allocations, progress, cost | ✅ documented | mapped activities update in place; unmapped are retired, never deleted, and stop earning |
+| 🔴 · project archive → plan allowance | ✅ | archived projects no longer spend the allowance, and the refusal says how many are live (OCTA-BILL-ARCHIVE-080) |
+| — | 🆕 🟡 | shadow-activity diagnostic: reports `POTENTIAL_SHADOW_ACTIVITY` for review, never merges |
+
+## Still not driven
+
+- **Procurement, three known seams** — carried forward from the nervous-system
+  document and reviewed but not built in Phase 18: two goods-receipt endpoints,
+  purchase-order dates that do not reach Long Lead, and supplier quote
+  comparison living under Commercial. Proposals are in the Phase 18 report.
+- **An independent adversarial pass.** Codex is not reachable from this machine
+  — no `codex` executable on `PATH`, none installed as an npm global. Every
+  review recorded so far is Claude's own. That has not changed.

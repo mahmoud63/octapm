@@ -247,6 +247,13 @@ has a schedule.
 
 Recommendation: (1), and leave the name alone.
 
+> **Closed in Phase 18** by option (1), as recommended: a bill row now
+> references an activity by `activityId`, creates one from `activityName`, or is
+> left unallocated to be split across several. Nothing matches on a name. See
+> `OCTAPM_BOQ_SCHEDULE_SPINE_CERTIFICATION.md` — 19 of 19 driven, plus a
+> `POTENTIAL_SHADOW_ACTIVITY` diagnostic that reports the stubs already created
+> and refuses to merge them.
+
 ---
 
 ## 7. Evidence

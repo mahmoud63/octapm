@@ -656,3 +656,52 @@ flowchart TD
   Commercial and reads as subcontract bidding.
 
 Both are documented rather than built, per the brief.
+
+---
+
+# Addendum — Phase 18: the BOQ ↔ schedule ↔ cost spine
+
+*2026-09-08. Full write-up: `OCTAPM_BOQ_SCHEDULE_SPINE_CERTIFICATION.md`.*
+
+## The nerve this phase repaired
+
+The bill and the programme were joined by **creation, not reference**. Every BOQ
+row typed into the grid minted its own activity, so a project that already had a
+schedule ended up with two: the real one holding the logic and the dates, and a
+shadow one — zero-duration stubs — holding all the money. Earned value reads
+approved allocations, so it would have sat entirely on activities that were on
+nobody's critical path.
+
+The join is now an id.
+
+```
+BOQ row ──activityId──▶ Activity ◀──activityId── commitment SOV line
+   │                       │  ▲                        │
+   │                       │  └── ActivityProgress     │
+   └── ActivityBoqAllocation (quantity, amount)        │
+                           │                           │
+                           ├── ActivityCostLoading ────┤  (PV)
+                           └── CostLedgerEntry ◀───────┘  (AC)
+```
+
+One activity carries planned quantity, planned value, approved progress, earned
+value and actual cost. Driven and measured: PV 400,000 · EV 360,000 · AC
+200,000 · SPI 0.9 · CPI 1.8, all on `S-100`, with the bill split across three
+imported activities and nothing created.
+
+## Corrections to the body of this document
+
+| Section | Was recorded as | Actually |
+| --- | --- | --- |
+| BOQ → schedule | one row, one activity (documented, deliberate) | still true by default, but a row can now **name** an activity instead of minting one; the shadow schedule was the untested consequence |
+| Activity identity | `activityCode` | **two identifiers**, kept apart: `activityCode` is ours, `p6ActivityId` is what an imported activity arrived with. An imported activity has only the second. |
+| Schedule revision → money | not assessed | mapped activities are updated **in place** so nothing detaches; unmapped ones are retired, never deleted, and stop earning. Written down in §4 of the certification. |
+
+## A nerve that is deliberately not automatic
+
+`GET /projects/{projectId}/boq/shadow-activities` reports activities that carry
+bill value with no duration and no logic, beside a real programme, as
+`POTENTIAL_SHADOW_ACTIVITY`. It names same-named activities alongside each one
+and **does not merge them**. Deciding two activities are the same piece of work
+is a judgement about the job; acting on it automatically would move financial
+history on a guess.
