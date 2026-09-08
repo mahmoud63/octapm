@@ -58,4 +58,24 @@ describe('project limit', () => {
     const error = await run({ plan: 'legacy-gold' }, 7);
     expect(error.code).toBe('SUBSCRIPTION_PLAN_UNKNOWN');
   });
+
+  /**
+   * Deleting a project archives it, and the project list hides archived ones.
+   * Counting them against the allowance anyway meant archiving gave nothing
+   * back: an organisation could see three projects and be told it had used all
+   * twenty-five, with no way to find the rest because nothing shows them.
+   */
+  it('counts only live projects, so archiving frees a place', async () => {
+    await run({ plan: 'business' }, 24);
+    expect(mockPrisma.project.count).toHaveBeenCalledWith({
+      where: { orgId: 'org-1', archivedAt: null },
+    });
+  });
+
+  it('says how many are live, so the refusal can be acted on', async () => {
+    const error = await run({ plan: 'business' }, 25);
+    expect(error.code).toBe('PROJECT_LIMIT_REACHED');
+    expect(error.message).toContain('25 are live');
+    expect(error.message).toMatch(/archiv/i);
+  });
 });

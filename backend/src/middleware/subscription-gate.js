@@ -49,11 +49,20 @@ const enforceProjectLimit = async (req, res, next) => {
     }
     const limit = plan.projectLimit;
     if (limit !== Infinity) {
-      const count = await prisma.project.count({ where: { orgId: req.user.orgId } });
+      // Archived projects do not spend the allowance. Deleting a project
+      // archives it — the right thing for a construction record, which has to
+      // survive the job it belonged to — and the project list hides archived
+      // ones. Counting them here meant archiving never gave anything back: an
+      // organisation could see three projects on screen, be told it had used
+      // all twenty-five, and have no way to find the other twenty-two, because
+      // nothing in the product shows them.
+      const count = await prisma.project.count({
+        where: { orgId: req.user.orgId, archivedAt: null },
+      });
       if (count >= limit) {
         return next(new HttpError(
           402, 'PROJECT_LIMIT_REACHED',
-          `Your ${plan.name} plan allows ${limit} project(s). Upgrade to add more.`,
+          `Your ${plan.name} plan allows ${limit} project(s), and ${count} are live. Archiving a project frees its place; upgrade to raise the limit.`,
         ));
       }
     }
