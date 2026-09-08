@@ -705,3 +705,47 @@ bill value with no duration and no logic, beside a real programme, as
 and **does not merge them**. Deciding two activities are the same piece of work
 is a judgement about the job; acting on it automatically would move financial
 history on a guess.
+
+---
+
+# Addendum — Phase 19: the procurement integration spine
+
+*2026-09-08. Full write-up: `OCTAPM_PROCUREMENT_SPINE_CERTIFICATION.md`.*
+
+## The nerve this phase repaired
+
+A delivery is one economic event and had **two writers**. Both wrote the same
+`DeliveryReceipt` rows; only one put anything on a shelf, only the other moved
+the material requirement, and a guard added to either had to be remembered on
+the other — which it was not.
+
+```
+                    ┌──────────────── one writer ────────────────┐
+Procurement route ──┤                                            │
+                    │  goods-receipt.service                     │
+Inventory route   ──┤    • warehouse + location                  │
+                    │    • stock movement, weighted average      │
+                    │    • buyer's coding onto the stock ledger  │
+                    │    • ActivityMaterial.receivedQty          │──▶ stock
+                    │    • lead-time alert                       │──▶ cost on issue
+                    │    • refuses: not issued, duplicate note,  │
+                    │      over-receipt, wrong project           │
+                    └────────────────────────────────────────────┘
+```
+
+## Corrections to the body of this document
+
+| Section | Was recorded as | Actually |
+| --- | --- | --- |
+| Two goods-receipt endpoints | "documented rather than built" | **built**: one writer, two doors. The procurement route delegates and keeps its URL. |
+| Long Lead ↔ Procurement | no relationship | `LongLeadItem.procurementPackageId`, nullable; six fields derived where linked, hand-maintained where not |
+| Materials RFQ | "no materials RFQ; bidding lives under Commercial" | still true of the engine, and now **reachable from Procurement**: a package requests quotes, `BidPackage.procurementPackageId` links them back. `Rfq.changeEventId` untouched. |
+| Receipt concurrency | not assessed | 🔴 **was** a lost update — two receipts of 60 against an order of 100 left records totalling 120 and a line saying 60. Lines are now locked for the read. |
+
+## What is still one nerve short
+
+Nothing in this phase reached the **screen**. The three seams are joined in the
+API and driven there; the Procurement module's own pages do not yet offer
+"Request quotes", show the linked long-lead status, or let a storeman pick a
+warehouse on a procurement receipt. The lifecycle is connected underneath and
+still has to be surfaced.

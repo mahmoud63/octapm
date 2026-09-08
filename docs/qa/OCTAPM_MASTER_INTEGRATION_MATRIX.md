@@ -396,3 +396,28 @@ valuable next test.
 - **An independent adversarial pass.** Codex is not reachable from this machine
   — no `codex` executable on `PATH`, none installed as an npm global. Every
   review recorded so far is Claude's own. That has not changed.
+
+## Rows that have moved in Phase 19
+
+| Was | Now | What changed |
+| --- | --- | --- |
+| 🔴 DELIVERY-01 · two goods-receipt endpoints | ✅ | one writer behind both doors; the procurement route delegates and keeps its URL (OCTA-PROC-RECEIPT-081) |
+| 🔴 · inventory receipt → activity material | ✅ | the live path never moved `ActivityMaterial.receivedQty`; it does now |
+| 🔴 · procurement receipt → stock | ✅ | it created none at all; every receipt now reaches the warehouse or is refused |
+| 🔴 · procurement receipt → PO-issued guard | ✅ | the Phase 15 guard existed on one writer only |
+| 🔴 · concurrent receipts | ✅ | a lost update: two receipts of 60 on an order of 100 left records totalling 120 and a line saying 60 (OCTA-PROC-RECEIPT-085) |
+| 🔴 · receipt → project scope | ✅ | a delivery could be booked from one project's route against another project's order (OCTA-PROC-RECEIPT-086) |
+| 🔴 · second PO for the same material | ✅ | raw `500 P2002`: the lead-time alert was looked up by line and unique by material (OCTA-PROC-LEADALERT-082) |
+| 🔴 LONGLEAD-01 · package ↔ long lead | ✅ | nullable `procurementPackageId`; six fields derived where linked (OCTA-PROC-LONGLEAD-083) |
+| 🔴 RFQ-01 · material quote comparison | ✅ | reachable from Procurement, using the existing bid engine; `Rfq.changeEventId` untouched (OCTA-PROC-QUOTES-084) |
+
+## Still not driven
+
+- **The Procurement screens.** Phase 19 joined the three seams in the API and
+  drove them there. Nothing was surfaced in the module's own pages: no "Request
+  quotes" button, no linked long-lead status, no warehouse picker on a
+  procurement receipt, and no ball-in-court. The lifecycle is connected
+  underneath and still has to be shown.
+- **An independent adversarial pass.** Codex remains unreachable from this
+  machine — no executable on `PATH`, not an npm global. Every review recorded so
+  far is Claude's own, and the certification says so.

@@ -229,3 +229,55 @@ is an asset, and only the issue is a cost.
 
 As in the subcontractor chain, the handoffs are correct but silent: nothing on a
 submitted order says it is now waiting on the PM.
+
+---
+
+# Addendum — Phase 19: what changed underneath, and what has not changed on screen
+
+*2026-09-08. Full write-up: `OCTAPM_PROCUREMENT_SPINE_CERTIFICATION.md`.*
+
+## Duplicate entry removed
+
+Classified as the brief asked — auto-generate, inherit, keep manual, or keep
+with override.
+
+| Was typed twice | Now | How |
+| --- | --- | --- |
+| Goods-receipt number | **AUTO-GENERATE, with override** | It was already generated when omitted, but by counting rows and adding one — two storemen scanning at the same moment got the same number. It now reads the highest already issued; the unique index remains the real guarantee. A delivery note the supplier printed is still accepted as given. |
+| Where the delivery went | **INHERIT, with override** | A free-text `warehouseLocation` that created no stock is replaced by a real `warehouseId`. Omit it and the project's own warehouse is used when it has exactly one, otherwise the single central one; when neither is unambiguous the receipt is refused rather than posted into nowhere. |
+| Long-lead status, warehouse status, expected delivery, delivered-at, order-by, supplier | **INHERIT** | Derived from the linked procurement package, its orders and its deliveries. Typing one is refused by name, not ignored. |
+| Quote enquiry title, description, currency, due date | **INHERIT** | Taken from the procurement package. The due date is its latest order date, because that is when the quotes are needed. |
+| Commitment type on a materials enquiry | **AUTO** | Chosen for the buyer. Asking a buyer to pick "purchase order" over "subcontract" is asking them to know which engine they are in. |
+| Item, quantity, unit, rate through quote → award → order | **INHERIT** | Stated once on the enquiry and carried to the purchase order unchanged: "Anodised panel, 3mm", 2,000 at 168, verified end to end. |
+
+### Kept manual, deliberately
+
+- **Purchase-order reference.** Buyers match these against supplier paperwork
+  and their own numbering. Auto-numbering was considered and not applied: the
+  `ref` is how a person finds the order in an email thread.
+- **Accepted and rejected quantities.** What actually came off the lorry is an
+  observation, not a derivation.
+
+## What has *not* changed, and is the honest gap
+
+**Everything above is API-level.** The Procurement module's own screens were not
+touched in this phase:
+
+- 🔴 No "Request quotes" entry point on a procurement package page — the route
+  exists and is driven, the button does not.
+- 🔴 No warehouse picker on a procurement receipt screen, because there is no
+  procurement receipt screen; the only goods-receipt UI is under Inventory.
+- 🔴 No linked long-lead indicator, so a planner cannot see on screen that a
+  status is derived rather than theirs to edit — they will find out from the
+  refusal.
+- 🔴 **Ball-in-court is not implemented.** It was asked for in this phase and is
+  not built: no record shows *Awaiting Procurement*, *Awaiting PM Approval*,
+  *Awaiting Supplier*, *Awaiting Warehouse Receipt* or *Awaiting Finance*.
+
+The four-persona browser drive that would measure steps, dialogs, inherited
+values and dead ends across PM, Procurement Manager, Warehouse Manager and
+Finance was **not performed**, because the screens those personas would use for
+the new capabilities do not exist yet. Measuring the old screens again would
+re-report the Phase 12 findings, not this phase's.
+
+**This is the next phase's work, and it is stated here rather than implied.**
