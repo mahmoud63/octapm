@@ -1379,7 +1379,88 @@ const enrichActivityMaterial = (material, project) => ({
 const enrichActivityMaterials = (materials, project) =>
   materials.map((material) => enrichActivityMaterial(material, project));
 
+
+/**
+ * Ask suppliers to price a procurement package.
+ *
+ * The comparison itself — inviting suppliers, taking their prices, levelling
+ * them side by side, awarding — is what the bid engine already does, and it
+ * already understands a purchase order as the thing being awarded. So this does
+ * not build a second one: it opens a bid package of the right type, linked back
+ * to the procurement package, with the title, currency and due date taken from
+ * what the buyer has already said. A buyer asking for quotes should not have to
+ * know that the machinery is shared with subcontract tendering, or choose a
+ * commitment type to make it behave (OCTA-PROC-QUOTES-084).
+ */
+const requestQuotes = async ({ orgId, projectId, packageId, actor, payload = {} }) => {
+  const pkg = await prisma.procurementPackage.findFirst({
+    where: { id: packageId, projectId, project: { orgId } },
+    select: {
+      id: true,
+      packageNumber: true,
+      title: true,
+      description: true,
+      requiredOnSiteDate: true,
+      latestOrderDate: true,
+      project: { select: { currency: true } },
+    },
+  });
+  if (!pkg) {
+    throw new HttpError(404, 'PROCUREMENT_PACKAGE_NOT_FOUND', 'Procurement package not found');
+  }
+
+  const bidService = require('./bid.service');
+  return bidService.createPackage({
+    orgId,
+    projectId,
+    actor,
+    payload: {
+      // Inherited, not retyped.
+      title: payload.title || `${pkg.packageNumber} ${pkg.title}`,
+      description: payload.description ?? pkg.description ?? null,
+      instructions: payload.instructions ?? null,
+      // Quotes are wanted by the date the buyer has to place the order.
+      dueAt: payload.dueAt ?? pkg.latestOrderDate ?? null,
+      currency: payload.currency || pkg.project?.currency || 'USD',
+      // Materials, not a subcontract — chosen here so the buyer never has to.
+      commitmentType: 'purchase_order',
+      procurementPackageId: pkg.id,
+      ...(payload.boqSections ? { boqSections: payload.boqSections } : {}),
+    },
+  });
+};
+
+/** The quote enquiries raised for a procurement package. */
+const listQuotes = async ({ orgId, projectId, packageId }) => {
+  const packages = await prisma.bidPackage.findMany({
+    where: { orgId, projectId, procurementPackageId: packageId },
+    select: {
+      id: true,
+      ref: true,
+      title: true,
+      status: true,
+      dueAt: true,
+      currency: true,
+      commitmentType: true,
+      createdAt: true,
+      _count: { select: { invitations: true, bids: true } },
+    },
+    orderBy: { createdAt: 'desc' },
+  });
+  return {
+    packageId,
+    items: packages.map((row) => ({
+      ...row,
+      invitedSuppliers: row._count.invitations,
+      quotesReceived: row._count.bids,
+      _count: undefined,
+    })),
+  };
+};
+
 module.exports = {
+  requestQuotes,
+  listQuotes,
   ACTIVITY_SELECT,
   acknowledgeLeadTimeAlert,
   buildMaterialRiskRow,

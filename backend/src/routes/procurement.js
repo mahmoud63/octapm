@@ -291,10 +291,63 @@ router.post(
     const result = await goodsReceiptService.receiveAgainstOrder({
       orgId: req.user.orgId,
       user: req.user,
-      payload: { ...req.body, orderId: req.params.orderId, warehouseId },
+      payload: {
+        ...req.body,
+        orderId: req.params.orderId,
+        // This route is scoped to a project; the order has to be on it.
+        projectId: req.params.projectId,
+        warehouseId,
+      },
     });
     return sendSuccess(res, result, 201);
   }),
+);
+
+// Quotes for a procurement package. In Procurement's own words: ask suppliers
+// to price this. Underneath it is the bid engine, which already levels and
+// awards — the buyer does not need to know that.
+router.post(
+  '/packages/:packageId/quotes',
+  requirePermission('bid', 'create'),
+  [
+    param('packageId').isUUID(),
+    body('title').optional().isString().trim().isLength({ max: 200 }),
+    body('description').optional({ nullable: true }).isString().trim().isLength({ max: 4000 }),
+    body('instructions').optional({ nullable: true }).isString().trim().isLength({ max: 8000 }),
+    body('dueAt').optional({ nullable: true }).isISO8601(),
+    body('currency').optional().isString().trim().isLength({ min: 3, max: 3 }),
+    body('boqSections').optional().isArray({ max: 100 }),
+    validate,
+  ],
+  asyncHandler(async (req, res) =>
+    sendSuccess(
+      res,
+      await procurementService.requestQuotes({
+        orgId: req.user.orgId,
+        projectId: req.params.projectId,
+        packageId: req.params.packageId,
+        actor: req.user,
+        payload: req.body,
+      }),
+      201,
+    ),
+  ),
+);
+
+router.get(
+  '/packages/:packageId/quotes',
+  requirePermission('bid', 'read'),
+  [param('packageId').isUUID(), validate],
+  asyncHandler(async (req, res) =>
+    sendSuccess(
+      res,
+      await procurementService.listQuotes({
+        orgId: req.user.orgId,
+        projectId: req.params.projectId,
+        packageId: req.params.packageId,
+      }),
+    ),
+  ),
 );
 
 router.get(

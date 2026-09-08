@@ -174,6 +174,7 @@ const resolveInventoryItem = async (tx, { orgId, user, line, requestedItemId }) 
   }
 
   const sku = trimOrNull(line.itemCode) || `PO-${line.id.slice(0, 8)}`;
+
   const existing = await tx.inventoryItem.findFirst({ where: { orgId, sku } });
   if (existing) return existing;
 
@@ -191,6 +192,46 @@ const resolveInventoryItem = async (tx, { orgId, user, line, requestedItemId }) 
       updatedBy: user.id,
     },
   });
+};
+
+/**
+ * The stocked items a delivery needs, settled before the transaction opens.
+ *
+ * Two lorries at the gate at once, both carrying something the warehouse has
+ * never held: each delivery looks the item up, finds nothing, and inserts. The
+ * second insert breaks the unique index — and a failed statement inside a
+ * Postgres transaction poisons the whole transaction, so catching it there is
+ * no help: the storeman gets a raw 500 and loses the delivery they just booked.
+ *
+ * Creating the items first, each in its own small transaction, keeps that race
+ * out of the receipt. A collision here costs one re-read and nothing else
+ * (OCTA-PROC-RECEIPT-085).
+ */
+const resolveItemsForReceipt = async ({ orgId, user, order, lines }) => {
+  const byLine = new Map();
+  for (const reported of lines) {
+    const line = order.lines.find((candidate) => candidate.id === reported.poLineId);
+    if (!line) continue;
+    try {
+      byLine.set(
+        line.id,
+        await resolveInventoryItem(prisma, {
+          orgId,
+          user,
+          line,
+          requestedItemId: reported.inventoryItemId,
+        }),
+      );
+    } catch (error) {
+      // Somebody else created it a moment ago. Take theirs.
+      if (error?.code !== "P2002") throw error;
+      const sku = trimOrNull(line.itemCode) || `PO-${line.id.slice(0, 8)}`;
+      const raced = await prisma.inventoryItem.findFirst({ where: { orgId, sku } });
+      if (!raced) throw error;
+      byLine.set(line.id, raced);
+    }
+  }
+  return byLine;
 };
 
 /**
@@ -239,9 +280,29 @@ const receiveAgainstOrder = async ({ orgId, user, payload }) => {
     throw new HttpError(400, "RECEIPT_EMPTY", "Say what was delivered");
   }
 
+  // Read the order once up front so the items can be settled before the
+  // transaction that puts the stock away.
+  // A caller that came in through a project's own route says which project it
+  // is, and the order has to be on it. Without this the inventory door's
+  // organisation-wide lookup let a delivery be booked from one project's route
+  // against another project's order, putting the stock and the cost on the
+  // wrong job (OCTA-PROC-RECEIPT-086).
+  const orderScope = {
+    id: payload.orderId,
+    project: { orgId },
+    ...(payload.projectId ? { projectId: payload.projectId } : {}),
+  };
+  const advance = await prisma.procurementOrder.findFirst({
+    where: orderScope,
+    include: { lines: true },
+  });
+  const itemsByLine = advance
+    ? await resolveItemsForReceipt({ orgId, user, order: advance, lines })
+    : new Map();
+
   return prisma.$transaction(async (tx) => {
     const order = await tx.procurementOrder.findFirst({
-      where: { id: payload.orderId, project: { orgId } },
+      where: orderScope,
       include: { lines: true, project: true },
     });
     if (!order) throw new HttpError(404, "PO_NOT_FOUND", "Purchase order not found");
@@ -262,6 +323,30 @@ const receiveAgainstOrder = async ({ orgId, user, payload }) => {
         remedy: "POST /projects/{projectId}/purchase-orders/{orderId}/submit, then /approve, then /issue",
       };
       throw error;
+    }
+
+    // Two lorries at the gate, same order.
+    //
+    // Everything below reads a line's received quantity, adds what has just
+    // arrived, and writes the total back. Two deliveries running at once both
+    // read the same starting figure and both write their own total, so one of
+    // them is silently lost: two receipts of 60 against an order of 100 left
+    // two receipt records totalling 120 and a line saying 60 — the books
+    // disagreeing with themselves, with both storemen told it worked. The
+    // over-receipt guard reads the same stale figure, so it cannot catch it
+    // either.
+    //
+    // Taking a row lock on the lines being received makes the second delivery
+    // wait for the first, so it reads a true starting figure
+    // (OCTA-PROC-RECEIPT-085).
+    const receivingLineIds = [...new Set(lines.map((row) => row.poLineId).filter(Boolean))];
+    if (receivingLineIds.length) {
+      await tx.$queryRaw`SELECT id FROM "ProcurementPoLine" WHERE id = ANY(${receivingLineIds}::text[]) FOR UPDATE`;
+      // Re-read behind the lock: the figures fetched with the order above were
+      // taken before it, and may already be out of date.
+      const fresh = await tx.procurementPoLine.findMany({ where: { id: { in: receivingLineIds } } });
+      const byId = new Map(fresh.map((row) => [row.id, row]));
+      order.lines = order.lines.map((row) => ({ ...row, ...(byId.get(row.id) || {}) }));
     }
 
     const warehouse = await tx.warehouse.findFirst({
@@ -333,12 +418,14 @@ const receiveAgainstOrder = async ({ orgId, user, payload }) => {
         );
       }
 
-      const item = await resolveInventoryItem(tx, {
-        orgId,
-        user,
-        line,
-        requestedItemId: reported.inventoryItemId,
-      });
+      const item =
+        itemsByLine.get(line.id) ||
+        (await resolveInventoryItem(tx, {
+          orgId,
+          user,
+          line,
+          requestedItemId: reported.inventoryItemId,
+        }));
 
       const receiptLine = await tx.deliveryReceiptLine.create({
         data: {

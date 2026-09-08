@@ -1553,6 +1553,17 @@ const components = {
       },
       parties: arrayOf(ref("ProjectPartyMutation")),
     }),
+    ProcurementQuoteRequest: objectSchema(
+      {
+        title: { type: 'string' },
+        description: { type: 'string', nullable: true },
+        instructions: { type: 'string', nullable: true },
+        dueAt: nullableDateString,
+        currency: { type: 'string', minLength: 3, maxLength: 3 },
+        boqSections: arrayOf({ type: 'string' }),
+      },
+      [],
+    ),
     BoqItemMutation: objectSchema(
       {
         code: { type: "string" },
@@ -6379,6 +6390,34 @@ add(
     summary: "Get BOQ items and value-state rollups for a project.",
     operationId: "getProjectBoq",
     parameters: projectParams,
+  }),
+);
+
+add(
+  "/projects/{projectId}/procurement/packages/{packageId}/quotes",
+  "post",
+  operation({
+    tag: "Procurement",
+    summary: "Ask suppliers to price a procurement package.",
+    description:
+      "Opens a quote enquiry for the package. Underneath it is the bid engine — the same machinery that levels and awards subcontract bids, which already understands a purchase order as the thing being awarded — so this creates a BidPackage with commitmentType purchase_order, linked back to the procurement package, taking its title, currency and due date from what the buyer has already stated. The buyer does not choose a commitment type or go to Commercial to start it.",
+    operationId: "requestProcurementQuotes",
+    parameters: [...projectParams, pathParam("packageId", "Procurement package id")],
+    permissions: rolesPermission("pm", "procurement", "qs"),
+    requestBody: jsonBody(ref("ProcurementQuoteRequest"), "Optional overrides; everything else is inherited.", false),
+    status: 201,
+  }),
+);
+
+add(
+  "/projects/{projectId}/procurement/packages/{packageId}/quotes",
+  "get",
+  operation({
+    tag: "Procurement",
+    summary: "The quote enquiries raised for a procurement package.",
+    operationId: "listProcurementQuotes",
+    parameters: [...projectParams, pathParam("packageId", "Procurement package id")],
+    permissions: rolesPermission("pm", "procurement", "qs"),
   }),
 );
 

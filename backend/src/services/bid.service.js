@@ -144,6 +144,10 @@ const serializePackage = (row, { detail = false } = {}) => ({
   currency: row.currency,
   boqSections: row.boqSections || [],
   commitmentType: row.commitmentType,
+  // The procurement package these quotes price, when the enquiry came from
+  // there. Without it on the way out, Procurement cannot show the buyer that
+  // these are its quotes.
+  procurementPackageId: row.procurementPackageId ?? null,
   publishedAt: toIso(row.publishedAt),
   closedAt: toIso(row.closedAt),
   awardedAt: toIso(row.awardedAt),
@@ -216,6 +220,11 @@ const packageData = (payload, { project, existing = null }) => {
   const questionsDueAt = optionalDate(payload.questionsDueAt, "questionsDueAt");
   if (questionsDueAt !== undefined) data.questionsDueAt = questionsDueAt;
   if (payload.currency !== undefined || !existing) data.currency = (trimOrNull(payload.currency) || existing?.currency || project?.currency || "USD").toUpperCase().slice(0, 3);
+  // Which procurement package these quotes are being sought for, when the
+  // enquiry started from Procurement. Set once, at creation, by that route.
+  if (payload.procurementPackageId !== undefined) {
+    data.procurementPackageId = payload.procurementPackageId || null;
+  }
   if (payload.commitmentType !== undefined || !existing) {
     const type = String(payload.commitmentType || existing?.commitmentType || "subcontract").toLowerCase();
     if (!COMMITMENT_TYPES.includes(type)) throw new HttpError(400, "BID_COMMITMENT_TYPE", `commitmentType must be one of ${COMMITMENT_TYPES.join(", ")}`);
