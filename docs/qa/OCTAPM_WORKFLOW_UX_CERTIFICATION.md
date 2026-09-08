@@ -448,3 +448,38 @@ schema and simply never rendered.
 The column was added. **The rating moved because the missing information
 appeared, not because the check was relaxed** — which is the whole point of the
 instruction not to game the score.
+
+---
+
+## 15. Final gate, on the committed state
+
+| gate | result |
+| --- | --- |
+| Playwright | **138 / 138** (19.5m) — two consecutive green full runs |
+| Jest | **1,881 / 1,881** (172 suites) |
+| OpenAPI contract | green — every live route documented |
+| Smoke retest | 14 modules · **14 ✅ · 0 🟡 · 0 🔴** |
+| UX quality gate | 10 of 11 flows 🟢 · 1 🔴 named (OCTA-UX-TEAM-093) |
+
+`retries: 0` throughout. No test was weakened, skipped or re-scoped to reach
+this. The activity-code column is the only case where a rating changed, and it
+changed because the missing information was added.
+
+### Eleven defects, none found by a failing test
+
+| card | what it looked like |
+| --- | --- |
+| GATE-092 | Procurement's own link hit "Generate a schedule first" |
+| BIC-094 | every commitment showed **no badge**; the test asserted the same invented status |
+| PROC-STATUS-095 | filtering for part-delivered orders returned **400** |
+| BIC-096 | "Awaiting E2E Concrete — payment" when it waited on finance |
+| BIC-097 | a PM saw "Your action" on **6 of 6 rows** of every register |
+| ACTION-098 | every buyer's orders absent — wrong model name behind a silent skip |
+| ACTION-099 | rows loaded the register and opened nothing |
+| RECEIPT-100 | a toast, then the answer gone; two columns permanently null |
+| SCHEDRISK-101 | "critical" with no magnitude; "Order By Missed" as a tooltip |
+| PODUP-102 | **no way to create a purchase order in the interface at all** |
+| ACTCODE-103 | the Activities register never showed the activity code |
+
+Eight of the eleven were invisible rather than loud. That is the phase in one
+line: **the product was green, and it was not working.**
