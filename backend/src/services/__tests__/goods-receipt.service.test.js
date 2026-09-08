@@ -156,6 +156,9 @@ describe("three-way match", () => {
     mockPrisma.procurementOrder.findFirst.mockResolvedValue({
       id: "order-1",
       ref: "PO-0001",
+      // A delivery only arrives against an order the supplier has
+      // (OCTA-PROC-RECEIPT-070).
+      status: "issued",
       projectId: "project-1",
       supplier: "Riverstone",
       supplierRef: { name: "Riverstone Cement" },
@@ -206,6 +209,10 @@ describe("goods receipt", () => {
   it("posts the stock, the receipt line and the order's progress together", async () => {
     mockPrisma.procurementOrder.findFirst.mockResolvedValue({
       id: "order-1",
+      ref: "PO-0001",
+      // A delivery only arrives against an order the supplier has
+      // (OCTA-PROC-RECEIPT-070).
+      status: "issued",
       projectId: "project-1",
       packageId: null,
       supplierId: null,
@@ -245,9 +252,43 @@ describe("goods receipt", () => {
     );
   });
 
+  /**
+   * A `planned` order used to accept a delivery, which walked around the whole
+   * approval workflow from the warehouse end: stock appeared against an order
+   * nobody had authorised, and an invoice then matched against it
+   * (OCTA-PROC-RECEIPT-070).
+   */
+  it.each(["planned", "draft", "pending_approval", "approved"])(
+    "refuses a delivery against a %s order",
+    async (status) => {
+      mockPrisma.procurementOrder.findFirst.mockResolvedValue({
+        id: "order-1",
+        ref: "PO-0001",
+        status,
+        projectId: "project-1",
+        lines: [poLine({})],
+      });
+      await expect(
+        service.receiveAgainstOrder({
+          orgId: ORG,
+          user: USER,
+          payload: {
+            orderId: "order-1",
+            warehouseId: "wh-1",
+            lines: [{ poLineId: "pol-1", acceptedQty: 1 }],
+          },
+        }),
+      ).rejects.toMatchObject({ status: 409, code: "PO_NOT_ISSUED" });
+    },
+  );
+
   it("refuses to take more than was ordered", async () => {
     mockPrisma.procurementOrder.findFirst.mockResolvedValue({
       id: "order-1",
+      ref: "PO-0001",
+      // A delivery only arrives against an order the supplier has
+      // (OCTA-PROC-RECEIPT-070).
+      status: "issued",
       projectId: "project-1",
       lines: [poLine({ receivedQty: 900 })],
     });
@@ -279,6 +320,10 @@ describe("goods receipt", () => {
     });
     mockPrisma.procurementOrder.findFirst.mockResolvedValue({
       id: "order-1",
+      ref: "PO-0001",
+      // A delivery only arrives against an order the supplier has
+      // (OCTA-PROC-RECEIPT-070).
+      status: "issued",
       projectId: "project-1",
       lines: [poLine({ inventoryItemId: null })],
     });
@@ -309,6 +354,10 @@ describe("goods receipt", () => {
   it("receives at the ordered price when the delivery does not state one", async () => {
     mockPrisma.procurementOrder.findFirst.mockResolvedValue({
       id: "order-1",
+      ref: "PO-0001",
+      // A delivery only arrives against an order the supplier has
+      // (OCTA-PROC-RECEIPT-070).
+      status: "issued",
       projectId: "project-1",
       lines: [poLine()],
     });

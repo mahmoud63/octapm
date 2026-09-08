@@ -323,3 +323,52 @@ The 🔴 rows are not eight independent bugs. They are **two** missing cost
 postings (C8/C9 inventory, E13/E14 pay app), the two metrics that inherit them
 (H7/H8), one forecast that inherits those (G10), and one API envelope
 inconsistency (K13).
+
+---
+
+# Addendum — Phases 11–15 (2026-09-08)
+
+The earlier score was taken at `db17651`, before the financial spine, the
+integrity checkpoint and the connected-workflow phases. This addendum records
+what has since been **driven**, and does not restate what has not.
+
+## Nerves re-traced from the database
+
+Read from the columns rather than from a serializer, because a serializer can
+present a link no column holds. Script: `scratchpad/nerve-trace.js`.
+
+| Nerve | State | Evidence |
+| --- | :---: | --- |
+| **N1** Schedule → procurement → inventory → activity cost → forecast | ✅ INTACT | PO line → activity 38/38 (required) · PO line → receipt line 14/14 · issue → activity 33/33 · issue → actual cost on an activity 11/11 · actual → forecast basis 3/3 |
+| **N2** Bid → subcontract → pay application → actual cost → cash flow | ✅ INTACT | awarded bid → commitment 9/9 · commitment → pay app 44/44 (required) · certified → actual cost 28/28 · payment → cash flow 14/14 |
+| **N3** RFI → change event → change order → budget → forecast | ✅ INTACT | event origin 4/4 · event → change order 4/4 · approved CO → budget revision 36/36 |
+| **N4** Drawing → RFI → consultant response → revision | ⚪ NO DATA / 🔴 partial | the drawing link is a polymorphic `Pin(sheetId, recordType, recordId)` and **has no rows here**, so it is untested rather than broken. `SheetRevision` has **no** link back to the RFI that caused it — that half is genuinely absent |
+| **N5** Specification → submittal → approval → procurement | 🟡 / 🔴 | `Submittal.specRef` is **free text**, not a foreign key to a spec section. `ProcurementOrder` has **no `submittalId`** — an approved submittal does not reach procurement at all. No submittals on file to drive |
+| **N6** Inspection → NCR/punch → subcontractor → corrective action → closure | ⚪ NO DATA | the mechanism exists (`assigneeCompanyId` on both `NcrRecord` and `PunchItem`), but this project has **0 NCRs and 0 punch items** |
+| **N7** Progress → schedule → earned value → reporting | ✅ INTACT | approved progress → activity 3/3 · percent complete 3/3 · activity budget → EV basis 3/3 |
+
+**4 intact · 2 with real structural gaps · 1 untestable for want of data.**
+
+> A first pass of this trace scored **five** nerves BROKEN. All but two were the
+> trace's own wrong field names — `ChangeOrder.changeEventId` (the key is on the
+> event), `Activity.pctComplete` (progress is its own table), `CostRecord.budgeted`
+> (the column is `budget`), `cashFlowPeriod` (the model is `CashFlowEntry`),
+> `goodsReceiptLine` (it is `DeliveryReceiptLine`). The schema was read before any
+> of it was written down.
+
+## Rows that have moved since `db17651`
+
+| Was | Now | What changed |
+| --- | --- | --- |
+| 🔴 C8/C9 · material issue → actual cost | ✅ | posts on issue at weighted average; and now derives the project from the activity (OCTA-INV-PROJECT-068) |
+| 🔴 E13/E14 · certified pay app → actual cost | ✅ | posts gross per SOV line, idempotent, reversible (OCTA-FIN-LEDGER-059, -063) |
+| ❓ · bid award → commitment cost coding | ✅ | inherits activity and budget line from the BOQ item where unambiguous (OCTA-BID-CODING-065) |
+| ❓ · notification/comment deep links | ✅ | `recordWorkspacePath` now emits `&source=`, so the link opens the record |
+| — | 🆕 ✅ | record → URL: a register now puts the open record in the address bar (pay applications only) |
+
+## Still not driven
+
+The ❓ column has not been cleared. Cross-project and cross-tenant isolation
+remain the largest untested area — both adversarial attacks aimed at them were
+skipped because this database holds one project. That is the single most
+valuable next test.

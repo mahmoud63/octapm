@@ -199,6 +199,17 @@ const resolveInventoryItem = async (tx, { orgId, user, line, requestedItemId }) 
  * should not quietly take more — that is either the wrong PO or the wrong
  * line, and both are worth stopping for.
  */
+/**
+ * The order states a delivery can arrive against.
+ *
+ * `issued` and `acknowledged` are an order the supplier has. `partial` and
+ * `received` are one they are still delivering. `planned`, `draft`,
+ * `pending_approval` and `approved` are not: nobody has told the supplier to
+ * send anything, so a lorry turning up against one means the order is wrong,
+ * not the delivery.
+ */
+const RECEIVABLE_STATUSES = new Set(["issued", "acknowledged", "partial", "received"]);
+
 const receiveAgainstOrder = async ({ orgId, user, payload }) => {
   const lines = Array.isArray(payload.lines) ? payload.lines : [];
   if (!lines.length) {
@@ -212,11 +223,51 @@ const receiveAgainstOrder = async ({ orgId, user, payload }) => {
     });
     if (!order) throw new HttpError(404, "PO_NOT_FOUND", "Purchase order not found");
 
+    // Nothing can be delivered against an order the supplier was never sent
+    // (OCTA-PROC-RECEIPT-070). Accepting one turns the whole approval workflow
+    // into a formality: a planned order nobody approved becomes stock, and then
+    // an invoice matches against it.
+    if (!RECEIVABLE_STATUSES.has(order.status)) {
+      const error = new HttpError(
+        409,
+        "PO_NOT_ISSUED",
+        `${order.ref} is ${order.status} — nothing can be delivered against an order that has not been issued to the supplier.`,
+      );
+      error.details = {
+        ref: order.ref,
+        status: order.status,
+        remedy: "POST /projects/{projectId}/purchase-orders/{orderId}/submit, then /approve, then /issue",
+      };
+      throw error;
+    }
+
     const warehouse = await tx.warehouse.findFirst({
       where: { id: payload.warehouseId, orgId },
     });
     if (!warehouse) {
       throw new HttpError(404, "WAREHOUSE_NOT_FOUND", "Warehouse not found");
+    }
+
+    // A delivery note posted twice — the second scan, the retried tap on a
+    // phone — is caught by the unique index. Left to Prisma it surfaced as a
+    // 500 with a raw `P2002`, which tells a storeman nothing and looks like the
+    // system broke rather than like they already did this (OCTA-PROC-RECEIPT-070).
+    const receiptNumber =
+      trimOrNull(payload.receiptNumber) || null;
+    if (receiptNumber) {
+      const already = await tx.deliveryReceipt.findFirst({
+        where: { projectId: order.projectId, receiptNumber },
+        select: { id: true, orderId: true, receivedAt: true },
+      });
+      if (already) {
+        const error = new HttpError(
+          409,
+          "RECEIPT_ALREADY_POSTED",
+          `Delivery note ${receiptNumber} has already been posted on this project.`,
+        );
+        error.details = { receiptNumber, receiptId: already.id, orderId: already.orderId };
+        throw error;
+      }
     }
 
     const receiptCount = await tx.deliveryReceipt.count({ where: { projectId: order.projectId } });
@@ -226,8 +277,7 @@ const receiveAgainstOrder = async ({ orgId, user, payload }) => {
         orderId: order.id,
         packageId: order.packageId,
         supplierId: order.supplierId,
-        receiptNumber:
-          trimOrNull(payload.receiptNumber) || `GRN-${String(receiptCount + 1).padStart(5, "0")}`,
+        receiptNumber: receiptNumber || `GRN-${String(receiptCount + 1).padStart(5, "0")}`,
         receivedBy: user.id,
         warehouseLocation: warehouse.name,
         deliveryNote: trimOrNull(payload.deliveryNote),

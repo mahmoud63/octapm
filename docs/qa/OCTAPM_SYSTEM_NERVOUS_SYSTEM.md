@@ -579,3 +579,80 @@ more work lands on top of the divergence. This audit did not touch it.
 - [`OCTAPM_DATA_DUPLICATION_AUDIT.md`](./OCTAPM_DATA_DUPLICATION_AUDIT.md)
 - [`../testing/OCTAPM_INTEGRATION_MAP.md`](../testing/OCTAPM_INTEGRATION_MAP.md) — earlier pass, superseded
 - [`../testing/qa-results.json`](../testing/qa-results.json) — **rewritten by this pass**
+
+---
+
+# Addendum — the nerves after Phases 11–15 (2026-09-08)
+
+The body of this document was written at `db17651`, from code inspection plus a
+first live pass. What follows is what has since been **driven through the
+screens**, and what that changed.
+
+## The seven nerves, as traced
+
+```mermaid
+flowchart LR
+  subgraph intact["Intact — carried, with data behind it"]
+    N1["N1 · Schedule → Procurement → Inventory<br/>→ Activity cost → Forecast"]
+    N2["N2 · Bid → Subcontract → Pay app<br/>→ Actual cost → Cash flow"]
+    N3["N3 · RFI → Change event → Change order<br/>→ Budget → Forecast"]
+    N7["N7 · Progress → Schedule<br/>→ Earned value → Reporting"]
+  end
+
+  subgraph gaps["Structural gaps"]
+    N4["N4 · Drawing → RFI → Response → Revision<br/>SheetRevision has no link to the RFI"]
+    N5["N5 · Specification → Submittal → Approval → Procurement<br/>specRef is free text; no submittalId on an order"]
+  end
+
+  subgraph nodata["No data to drive"]
+    N6["N6 · Inspection → NCR / punch → Subcontractor<br/>→ Corrective action → Closure"]
+  end
+
+  classDef ok fill:#0f5132,stroke:#198754,color:#fff
+  classDef gap fill:#664d03,stroke:#ffc107,color:#fff
+  classDef none fill:#41464b,stroke:#6c757d,color:#fff
+  class N1,N2,N3,N7 ok
+  class N4,N5 gap
+  class N6 none
+```
+
+## What was repaired in these phases
+
+```mermaid
+flowchart TD
+  BOQ["BOQ item<br/>+ approved activity allocation"] -->|"OCTA-BID-CODING-065<br/>was: dropped"| BL["Bid package line"]
+  BL --> BID["Bid"] --> AWARD["Award"] --> SOV["Schedule-of-values line<br/>activity · budget line"]
+  SOV --> CERT["Certification"] -->|"gross, per line"| LEDGER[("Cost ledger")]
+  LEDGER --> ACT["Activity actual cost"] --> EV["Earned value"]
+
+  PO["Purchase order"] -->|"OCTA-PROC-APPROVAL-067<br/>was: born 'issued'"| APPR["submit → approve → issue"]
+  APPR -->|"OCTA-PROC-RECEIPT-070<br/>was: any status accepted"| GRN["Goods receipt"]
+  GRN --> STOCK["Stock"] -->|"OCTA-INV-PROJECT-068<br/>was: no project, no posting"| LEDGER
+
+  NOTIF["Notification · comment"] -->|"&source=<br/>was: opened the module only"| REC["The record itself"]
+  REG["Register"] -->|"?recordId=&source=<br/>was: no address at all"| REC
+
+  classDef fixed fill:#0f5132,stroke:#198754,color:#fff
+  class SOV,APPR,GRN,STOCK,REC fixed
+```
+
+## Corrections to the body of this document
+
+| Section | Was recorded as | Actually |
+| --- | --- | --- |
+| §7 Inventory capability | material issue → actual cost 🔴 | ✅ — posts at weighted average, and now derives the project from the activity |
+| §9 Three billing systems | sub-valuations "legacy, still writable" | now **retained read-only**: no new rows, the name immutable, certified and paid rows undeletable (OCTA-FIN-SUBVAL-064) |
+| §11 Priority tables | bid → commitment cost coding not assessed | 🔴 **was** losing the activity entirely; now inherits it where unambiguous |
+
+## Two disconnections found in these phases and *not* fixed
+
+- **Two goods-receipt endpoints.** `…/procurement/purchase-orders/{id}/receipts`
+  records a delivery and creates **no stock** — it has no `warehouseId` to put
+  it anywhere. `/inventory/goods-receipt` creates the stock. Which a user
+  reaches depends on which module they opened.
+- **No materials RFQ.** `Rfq` is bound to a `changeEventId` — it is a change
+  pricing request. Comparing supplier quotes for materials is done by the bid
+  module with `commitmentType: purchase_order`, which works but lives under
+  Commercial and reads as subcontract bidding.
+
+Both are documented rather than built, per the brief.
