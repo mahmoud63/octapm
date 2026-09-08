@@ -255,8 +255,21 @@ is not labelled independent.
 | Long-lead spine | **10 / 10** |
 | Quote spine | **11 / 11** |
 | Adversarial | **12 held · 0 broke · 0 skipped** |
-| Backend | see the run recorded at the foot of this document |
+| Backend | **1,854 / 1,854 across 169 suites** |
+| Browser | **126 / 126** (16.3m, one worker) |
 | Migrations | 2, both additive and nullable, applied locally only |
+
+### The gate that was red first
+
+The run before this one failed six specs — the last four files in the suite —
+and the failures said so in words: *"sign-in for finance was rate limited
+(429). The login budget is shared across runs in a 15-minute window."* Seven
+429s in the API log. A day of full suites and API harnesses back to back had
+spent the login budget, not broken the product. Re-run after the window rolled
+over: **126 passed, no 429s at all.**
+
+Worth stating because the temptation is to read six red specs as a regression
+and start changing code. The suite tells you what happened if you read it.
 
 ## 10. A note on method
 
