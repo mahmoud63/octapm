@@ -180,7 +180,28 @@ brand-new project.
 | Isolation | **31 pass · 0 fail · 0 skip** |
 | Greenfield certification | **17 / 17** |
 | Backend | **1,830 Jest across 166 suites** (plus the known `report-builder-sources` timeout under parallel load) |
+| Browser | **124 Playwright passed · 0 failed** |
 | New unit tests | 5 on the project limit, 1 on the project/activity mismatch |
+
+### The one failure, and why it was not the product
+
+A full browser run reported the subcontractor lifecycle failing on *certified
+gross reaches actual cost* — gross 125,000, ledger moved 155,000.
+
+The 30,000 was mine. `playwright.config.ts` sets `workers: 1` deliberately,
+because these files build on one another against **one shared project**; I had
+run the suite with `--workers=2` to save wall-clock time. The log shows it
+plainly — spec 19's tests interleaved with spec 20's observations, and spec 19
+spends its way through +100,000, −100,000 and +95,000 on the same project. A
+neighbour's money landed inside the measurement window.
+
+The instrument was tightened regardless. A project-wide total taken across
+fifteen UI steps answers *"what did this project spend"*, when the assertion
+means *"what did this certification post"* — weak even single-threaded. The
+snapshot now sits immediately before the approval, and whatever moves during the
+claim is reported as an observation rather than absorbed into the figure. Re-run
+as the config intends: **124 passed**, with `ledgerMoved 248,000` against
+`gross 248,000` and `movedByAnythingElse 0`.
 
 ## 6. A note on method, again
 
