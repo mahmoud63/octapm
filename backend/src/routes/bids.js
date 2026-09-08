@@ -11,7 +11,13 @@ const service = require("../services/bid.service");
 const router = express.Router({ mergeParams: true });
 router.use(authenticate);
 
-const scope = (req) => ({ orgId: req.user.orgId, projectId: req.params.projectId });
+const scope = (req) => ({
+  orgId: req.user.orgId,
+  projectId: req.params.projectId,
+  // Carried so ball-in-court can say "your action" instead of naming a role
+  // the reader already holds.
+  viewer: { id: req.user.id, role: getEffectiveRole(req) },
+});
 const actor = (req) => ({ id: req.user.id, name: req.user.name, role: getEffectiveRole(req) });
 const read = requirePermission("bid", "read");
 const write = requirePermission("bid", "update");

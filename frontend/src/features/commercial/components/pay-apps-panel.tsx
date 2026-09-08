@@ -1,3 +1,4 @@
+import { BallInCourtBadge } from '@/components/ball-in-court'
 import { useMemo, useState } from 'react'
 import { Download, Eye, Plus } from 'lucide-react'
 import { toast } from 'sonner'
@@ -187,6 +188,14 @@ export function PayAppsPanel({
                     >
                       {PAY_APP_STATUS_LABEL[item.status]}
                     </Badge>
+                    {/* The status says where the claim is; this says who it
+                        is sitting with. A QS reading the register wants the
+                        second one (OCTA-UX-BALLINCOURT-087). */}
+                    <BallInCourtBadge
+                      ballInCourt={item.ballInCourt}
+                      className='mt-1 flex w-fit'
+                      testId={`uat-payapp-bic-${item.ref}`}
+                    />
                     {item.overClaimAmount > 0 && (
                       <span className='ml-1 text-xs text-destructive'>
                         over-claim

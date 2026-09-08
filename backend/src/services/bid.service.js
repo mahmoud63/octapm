@@ -2,6 +2,7 @@
 const ExcelJS = require("exceljs");
 const { brandWorkbook } = require("../utils/export-branding");
 const { prisma } = require("../config/db");
+const { ballInCourt } = require("./ball-in-court.service");
 const { HttpError } = require("../utils/http-error");
 const auditService = require("./audit.service");
 const notificationService = require("./notification.service");
@@ -130,9 +131,12 @@ const serializeBid = (row, { internal = true } = {}) => ({
   updatedAt: toIso(row.updatedAt),
 });
 
-const serializePackage = (row, { detail = false } = {}) => ({
+const serializePackage = (row, { detail = false, viewer = null } = {}) => ({
   id: row.id,
   projectId: row.projectId,
+  // Whose move it is: the buyer sending it out, the bidders pricing it, or
+  // the PM deciding the winner (OCTA-UX-BALLINCOURT-087).
+  ballInCourt: ballInCourt("bid_package", row, viewer),
   number: row.number,
   ref: row.ref,
   title: row.title,
@@ -192,13 +196,14 @@ const notifyTeam = ({ orgId, projectId, pkg, actorId = null, event, title, messa
 
 // ─── packages ──────────────────────────────────────────────────────────────
 
-const listPackages = async ({ orgId, projectId, status = null }) => {
+const listPackages = async ({ orgId, projectId, status = null, viewer = null }) => {
   await ensureProject({ orgId, projectId });
   const rows = await prisma.bidPackage.findMany({ where: { projectId, orgId, ...(status ? { status } : {}) }, include: { _count: { select: { lines: true, invitations: true, questions: true } }, bids: { select: { status: true } }, questions: { select: { status: true } } }, orderBy: { number: "desc" } });
-  return rows.map((row) => serializePackage(row));
+  return rows.map((row) => serializePackage(row, { viewer }));
 };
 
-const getPackage = async ({ orgId, projectId, packageId }) => serializePackage(await loadPackage({ orgId, projectId, packageId }), { detail: true });
+const getPackage = async ({ orgId, projectId, packageId, viewer = null }) =>
+  serializePackage(await loadPackage({ orgId, projectId, packageId }), { detail: true, viewer });
 
 const listBoqSections = async ({ orgId, projectId }) => {
   await ensureProject({ orgId, projectId });

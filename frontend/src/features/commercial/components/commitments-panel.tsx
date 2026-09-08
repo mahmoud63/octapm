@@ -1,3 +1,4 @@
+import { BallInCourtBadge } from '@/components/ball-in-court'
 import { useMemo, useState } from 'react'
 import { Eye, Plus } from 'lucide-react'
 import { useCanPerform } from '@/lib/permissions'
@@ -199,6 +200,11 @@ export function CommitmentsPanel({
                     >
                       {COMMITMENT_STATUS_LABEL[item.status]}
                     </Badge>
+                    <BallInCourtBadge
+                      ballInCourt={item.ballInCourt}
+                      className='mt-1 flex w-fit'
+                      testId={`uat-commitment-bic-${item.ref}`}
+                    />
                     {item.status === 'approved' && !item.insuranceReady && (
                       <span className='ml-1 text-xs text-amber-600'>
                         insurance

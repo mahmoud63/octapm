@@ -1,3 +1,4 @@
+import type { BallInCourt } from '@/components/ball-in-court'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { apiClient } from '@/services/api/client'
 
@@ -135,6 +136,8 @@ export interface BidRecord {
 }
 
 export interface BidPackage {
+  /** Whose move it is — derived by the API, never stored. */
+  ballInCourt?: BallInCourt | null
   id: string
   projectId: string
   number: number

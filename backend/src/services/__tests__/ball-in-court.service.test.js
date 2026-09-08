@@ -56,6 +56,54 @@ describe('whose move it is', () => {
     expect(result.label).toContain('Alpha Cladding');
   });
 
+  it('does not tell a PM that everything is their action', () => {
+    // The permission policy lets a PM make nearly every transition, so
+    // deriving "yours" from it put "Your action" on every row of every
+    // register a PM opened. Whose turn it is comes from the workflow; what
+    // they may do comes from the policy (OCTA-UX-BIC-097).
+    const pm = { role: 'pm' };
+    const qs = { role: 'qs' };
+
+    const draft = ballInCourt('commitment', { status: 'draft' }, pm);
+    expect(draft.state).toBe('awaiting');
+    expect(draft.label).toBe('Awaiting the QS — to be sent for approval');
+    // ...but a PM may still submit it, and the button hangs on this.
+    expect(draft.canAct).toBe(true);
+    expect(draft.action.roles).toContain('pm');
+
+    // It is the QS's turn, and the QS is told so.
+    expect(ballInCourt('commitment', { status: 'draft' }, qs).label).toBe('Your action');
+
+    // And where the PM genuinely is the party, they are still told.
+    const pending = ballInCourt('commitment', { status: 'pending' }, pm);
+    expect(pending.label).toBe('Your action');
+    expect(pending.isYou).toBe(true);
+
+    // A QS cannot approve it, and is not told it is theirs.
+    const forQs = ballInCourt('commitment', { status: 'pending' }, qs);
+    expect(forQs.label).toBe('Awaiting the project manager — approval');
+    expect(forQs.canAct).toBe(false);
+  });
+
+  it('does not name the vendor on a record waiting on one of our own roles', () => {
+    // Every caller has a vendor to hand and no way to know when it is the
+    // wrong answer, so the service refuses it rather than trusting them.
+    // Before this, an approved claim read "Awaiting E2E Concrete — payment"
+    // when it was waiting on finance (OCTA-UX-BIC-096).
+    const named = { name: 'Meridian Piling' };
+    const approved = ballInCourt('sub_pay_app', { status: 'approved' }, null, named);
+    expect(approved.label).toBe('Awaiting finance — payment');
+    expect(approved.party.label).not.toMatch(/Meridian/);
+
+    const draftCommitment = ballInCourt('commitment', { status: 'draft' }, null, named);
+    expect(draftCommitment.label).toMatch(/QS/i);
+    expect(draftCommitment.label).not.toMatch(/Meridian/);
+
+    // And still uses it where the external party really is the one waiting.
+    const draftClaim = ballInCourt('sub_pay_app', { status: 'draft' }, null, named);
+    expect(draftClaim.label).toBe('Awaiting Meridian Piling — the claim to be submitted');
+  });
+
   it('falls back to the trade when no company is named', () => {
     const result = ballInCourt('purchase_order', { status: 'issued' }, buyer);
     expect(result.label).toBe('Awaiting the supplier to acknowledge');

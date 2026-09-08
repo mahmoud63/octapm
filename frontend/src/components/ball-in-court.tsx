@@ -17,7 +17,14 @@ export type BallInCourt = {
   state: 'yours' | 'awaiting' | 'none'
   label: string | null
   party: { kind: string; label: string; role: string | null } | null
+  /** Whether the viewer is the party being waited on — whose turn it is. */
   isYou: boolean
+  /**
+   * Whether the viewer is *permitted* to make the move, whoever's turn it is.
+   * Hang action buttons on this, never on isYou: a PM may submit a draft
+   * commitment that is the QS's to send (OCTA-UX-BIC-097).
+   */
+  canAct?: boolean
   action: { transition: string; roles: string[] } | null
 }
 

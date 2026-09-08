@@ -1,4 +1,5 @@
 const { prisma } = require("../config/db");
+const { ballInCourt } = require("./ball-in-court.service");
 const { HttpError } = require("../utils/http-error");
 const { addMoney, subtractMoney, multiplyMoney, toMoneyNumber } = require("../utils/money");
 const { createPdf } = require("../utils/pdf-writer");
@@ -118,9 +119,18 @@ const serializeLine = (line, changeMap = null) => ({
   notes: line.notes || null,
 });
 
-const serialize = (row, { projectId = row.projectId, changeMap = null } = {}) => ({
+const serialize = (row, { projectId = row.projectId, changeMap = null, viewer = null } = {}) => ({
   id: row.id,
   projectId: row.projectId,
+  // Whose move it is. A claim moves between the subcontractor, the QS who
+  // certifies it and finance who pays it, and the register never said which
+  // of the three was holding it up (OCTA-UX-BALLINCOURT-087).
+  ballInCourt: ballInCourt(
+    "sub_pay_app",
+    row,
+    viewer,
+    row.commitment?.vendorCompany ? { name: row.commitment.vendorCompany.name } : null,
+  ),
   commitmentId: row.commitmentId,
   commitment: row.commitment ? { id: row.commitment.id, ref: row.commitment.ref, title: row.commitment.title, type: row.commitment.type, status: row.commitment.status, currency: row.commitment.currency, vendor: row.commitment.vendorCompany ? { id: row.commitment.vendorCompany.id, name: row.commitment.vendorCompany.name } : null, insuranceReady: insuranceReadyFor(row.commitment) } : null,
   number: row.number,
@@ -347,12 +357,12 @@ const loadPayApp = async ({ projectId, payAppId, viewer = null }, tx = prisma) =
  * application to a caller goes through here, so the ceiling on screen is the
  * ceiling the claim will actually be checked against.
  */
-const serializeFresh = async (row, { projectId = row.projectId } = {}) =>
-  serialize(row, { projectId, changeMap: await approvedChangesBySovLine({ commitmentId: row.commitmentId }) });
+const serializeFresh = async (row, { projectId = row.projectId, viewer = null } = {}) =>
+  serialize(row, { projectId, viewer, changeMap: await approvedChangesBySovLine({ commitmentId: row.commitmentId }) });
 
 const getPayApp = async ({ orgId, projectId, payAppId, viewer = null }) => {
   await ensureProject({ orgId, projectId });
-  return serializeFresh(await loadPayApp({ projectId, payAppId, viewer }), { projectId });
+  return serializeFresh(await loadPayApp({ projectId, payAppId, viewer }), { projectId, viewer });
 };
 
 const listPayApps = async ({ orgId, projectId, query = {}, viewer = null }) => {
@@ -365,7 +375,7 @@ const listPayApps = async ({ orgId, projectId, query = {}, viewer = null }) => {
   if (scope) where.AND = [scope];
   const rows = await prisma.subPayApp.findMany({ where, include, orderBy: [{ createdAt: "desc" }], take: 500 });
   const changeMap = await approvedChangesBySovLine({ commitmentIds: rows.map((row) => row.commitmentId) });
-  const items = rows.map((row) => serialize(row, { projectId, changeMap }));
+  const items = rows.map((row) => serialize(row, { projectId, changeMap, viewer }));
   const sum = (predicate, key) => items.filter(predicate).reduce((acc, item) => addMoney(acc, item[key]), 0);
   return {
     items,

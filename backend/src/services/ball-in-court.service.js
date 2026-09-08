@@ -128,8 +128,15 @@ const titleCase = (text) =>
  */
 const describe = ({ party, verb, namedParty }) => {
   if (party.kind === "none") return null;
-  if (namedParty) return `Awaiting ${namedParty}${verb ? ` — ${verb}` : ""}`;
+  // A named company stands in for the *external* party and nothing else.
+  // Using it whenever a caller happened to know one told a QS that an
+  // approved claim was "Awaiting E2E Concrete — payment" when it was waiting
+  // on finance, and told a buyer that a draft commitment was waiting on the
+  // vendor when it was waiting on the QS to send it (OCTA-UX-BIC-096). The
+  // guard lives here rather than at each call site because every caller has
+  // a company to hand and no reason to know when it is the wrong answer.
   if (party.kind === "external") {
+    if (namedParty) return `Awaiting ${namedParty}${verb ? ` — ${verb}` : ""}`;
     return verb ? `Awaiting ${verb}` : `With ${party.label}`;
   }
   return `Awaiting ${party.label}${verb ? ` — ${verb}` : ""}`;
@@ -155,6 +162,7 @@ const ballInCourt = (recordType, record, viewer = null, named = null) => {
       label: null,
       party: null,
       isYou: false,
+      canAct: false,
       action: null,
     };
   }
@@ -168,9 +176,20 @@ const ballInCourt = (recordType, record, viewer = null, named = null) => {
         : [];
 
   const viewerRole = normalizeRoleId(viewer?.role);
-  // "Yours" only when the viewer could actually make the move. A person who
-  // cannot act is not helped by being told it is their turn.
-  const isYou = Boolean(viewerRole && roles.includes(viewerRole));
+  // Two different questions, and conflating them made the answer useless.
+  //
+  // "Can I act?" is the permission policy: a PM is allowed to make nearly
+  // every transition in the system, so deriving "yours" from that put "Your
+  // action" on every row of every register a PM opened — six of six
+  // commitments, six of six orders, six of six bid packages. A prompt that
+  // fires on everything is not a prompt (OCTA-UX-BIC-097).
+  //
+  // "Is it my move?" is the workflow: the party the record is *waiting on*.
+  // A draft commitment waits on the QS. A PM can submit it, and may well
+  // want to, but it is not their turn — so they get "Awaiting the QS" and
+  // `canAct`, which is what an action button should be hung on.
+  const isYou = Boolean(viewerRole && party.kind === "role" && viewerRole === party.role);
+  const canAct = Boolean(viewerRole && roles.includes(viewerRole));
 
   const namedParty = named?.name || null;
 
@@ -180,10 +199,13 @@ const ballInCourt = (recordType, record, viewer = null, named = null) => {
     // Who is being waited on, for a person who wants to go and ask them.
     party: {
       kind: party.kind,
-      label: namedParty || titleCase(party.label),
+      label: (party.kind === "external" && namedParty) || titleCase(party.label),
       role: party.kind === "role" ? party.role : null,
     },
     isYou,
+    // Whether this viewer is *permitted* to make the move, whoever's turn it
+    // is. The UI hangs the action button on this, not on isYou.
+    canAct,
     // The move the record is waiting for. The UI uses it to decide which
     // button to offer; it is never shown as text.
     action: transition ? { transition, roles } : null,

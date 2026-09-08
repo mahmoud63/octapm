@@ -1,3 +1,4 @@
+import { BallInCourtBadge } from '@/components/ball-in-court'
 import { useState } from 'react'
 import { Gavel, Loader2, Plus } from 'lucide-react'
 import { toast } from 'sonner'
@@ -316,6 +317,11 @@ export function BidPackagesPanel({
               </button>
               <Badge variant='outline' className={statusTone(pkg.status)}>
                 {PACKAGE_STATUS_LABEL[pkg.status]}
+                <BallInCourtBadge
+                  ballInCourt={pkg.ballInCourt}
+                  className='ml-2'
+                  testId={`uat-bid-bic-${pkg.ref}`}
+                />
               </Badge>
               {pkg.softAwardBidId && pkg.status !== 'awarded' && (
                 <Badge variant='secondary'>Soft award</Badge>

@@ -19,7 +19,7 @@ router.use(authenticate);
 
 const scope = (req) => ({ orgId: req.user.orgId, projectId: req.params.projectId });
 const actor = (req) => ({ id: req.user.id, name: req.user.name, role: getEffectiveRole(req) });
-const viewer = (req) => ({ id: req.user.id, projectAccess: req.projectAccess });
+const viewer = (req) => ({ id: req.user.id, role: getEffectiveRole(req), projectAccess: req.projectAccess });
 
 const upload = multer({
   storage: multer.diskStorage({

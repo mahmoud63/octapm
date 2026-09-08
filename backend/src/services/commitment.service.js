@@ -1,4 +1,5 @@
 const { prisma } = require("../config/db");
+const { ballInCourt } = require("./ball-in-court.service");
 const { HttpError } = require("../utils/http-error");
 const { addMoney, subtractMoney, multiplyMoney, toMoneyNumber } = require("../utils/money");
 const { createPdf } = require("../utils/pdf-writer");
@@ -148,12 +149,20 @@ const totalsFor = (row) => {
   return { original, approvedChanges, pendingChanges, revised, retentionRate: Number(row.retentionRate) || 0, retentionOnRevised: round2(multiplyMoney(revised, (Number(row.retentionRate) || 0) / 100)), drawnDown };
 };
 
-const serialize = (row, { projectId = row.projectId } = {}) => {
+const serialize = (row, { projectId = row.projectId, viewer = null } = {}) => {
   const totals = totalsFor(row);
   const insurance = serializeInsurance(row.insuranceJson);
   return {
     id: row.id,
     projectId: row.projectId,
+    // Whose move it is: the QS raising it, the PM approving it, or the QS
+    // again chasing the signature (OCTA-UX-BALLINCOURT-087).
+    ballInCourt: ballInCourt(
+      "commitment",
+      row,
+      viewer,
+      row.vendorCompany ? { name: row.vendorCompany.name } : null,
+    ),
     number: row.number,
     ref: row.ref,
     type: row.type,
@@ -201,7 +210,7 @@ const loadCommitment = async ({ projectId, commitmentId, viewer = null }, tx = p
 
 const getCommitment = async ({ orgId, projectId, commitmentId, viewer = null }) => {
   await ensureProject({ orgId, projectId });
-  return serialize(await loadCommitment({ projectId, commitmentId, viewer }), { projectId });
+  return serialize(await loadCommitment({ projectId, commitmentId, viewer }), { projectId, viewer });
 };
 
 const listCommitments = async ({ orgId, projectId, query = {}, viewer = null }) => {
@@ -218,7 +227,7 @@ const listCommitments = async ({ orgId, projectId, query = {}, viewer = null }) 
     where.OR = [{ ref: { contains: search, mode: "insensitive" } }, { title: { contains: search, mode: "insensitive" } }, { vendorCompany: { name: { contains: search, mode: "insensitive" } } }];
   }
   const rows = await prisma.commitment.findMany({ where, include, orderBy: [{ type: "asc" }, { number: "desc" }], take: 500 });
-  const items = rows.map((row) => serialize(row, { projectId }));
+  const items = rows.map((row) => serialize(row, { projectId, viewer }));
   const summary = {
     total: items.length,
     byStatus: STATUSES.reduce((acc, status) => ({ ...acc, [status]: items.filter((item) => item.status === status).length }), {}),
