@@ -229,3 +229,38 @@ anyone builds against `available`.
 The pattern is unambiguous: **everything built recently honours the principle,
 and the older procurement / supplier / legacy-billing layer does not.** All
 three P0s live in that older layer, and D-P0-1 is a one-line fix.
+
+---
+
+# Phase 20 addendum — the duplicate a buyer types
+
+The register above is about data duplicated between tables. This is the other
+kind: **data the system already holds and asks a person to type again.** It is
+the same defect — two copies that can disagree — except the second copy is
+made by hand, so it disagrees sooner.
+
+## The purchase order raised after an award
+
+Before Phase 20 there was no way to raise a purchase order in the interface at
+all, and the API demanded a reference the buyer invented. The classification,
+settled and enforced by `POST /procurement/packages/:id/order`:
+
+| field | verdict | where the system already had it |
+| --- | --- | --- |
+| PO reference | **AUTO-GENERATE** | its own sequence; a typed one still honoured |
+| supplier | **INHERIT** | the winning bid's invitation |
+| line description | **INHERIT** | the priced package line |
+| unit, quantity | **INHERIT** | the priced package line |
+| unit cost | **INHERIT** | the rate that supplier quoted |
+| activity | **INHERIT** | the package line |
+| required date | **KEEP WITH OVERRIDE** | the package's needed-on-site date |
+| lead weeks | **KEEP WITH OVERRIDE** | the package |
+
+An empty request body now yields a complete, correct order. **Measured across
+the four-persona drive and the raise-order drive: zero fields typed by any
+persona that the system already knew.**
+
+Why this belongs in a duplication audit rather than a UX one: the rate a buyer
+retypes is the rate the three-way match will later compare an invoice against.
+A hand-copied order that drifts from the award does not merely annoy the
+buyer — it removes the only true thing the match had to compare with.

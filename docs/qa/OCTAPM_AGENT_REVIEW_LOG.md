@@ -142,3 +142,51 @@ only worth the scepticism applied to the instrument that produced it.** Across
 Phases 11–15, four separate "findings" evaporated on inspection and three
 "passes" were false. Every one was caught by an internal contradiction in the
 measurement, not by re-reading the product.
+
+---
+
+# Phase 20 — reviewing the reviewers
+
+Codex remains unreachable from this machine. Rather than record another
+Claude-reviewing-Claude pass and call it independent, this phase attacked the
+**instruments** instead: where a test and the code it checks were written from
+the same guess, that pair was replaced by a test that reads its expectation
+from the thing being checked.
+
+## Three tests that agreed with the code and not the product
+
+| what agreed | how it was broken | what replaced it |
+| --- | --- | --- |
+| The ball-in-court table said a commitment is `pending_approval`; the unit test asserted `pending_approval` | The service says `pending`. Every commitment showed **no badge**, and both halves were happy | `ball-in-court.vocabulary.test.js` reads each vocabulary from the service that publishes it |
+| The action centre named the model `purchaseOrder` behind a skip-if-missing guard | The model is `procurementOrder`. Every buyer's orders were absent; nothing failed | `record-assignment.models.test.js` runs against the **real** Prisma client — a mock would hold a second copy of the same guess |
+| "Your action" derived from the permission policy | A PM is permitted on nearly everything, so it fired on six of six rows of every register | A test that asserts a PM is *not* told a draft commitment is theirs, verified by reverting the fix |
+
+The first of those found a product defect within a minute of being written:
+`partial` and `received` were missing from the purchase-order status
+vocabulary, so filtering the register for them returned **400** — on the two
+states an order spends most of its life in after issue.
+
+## Fixes verified by removing them
+
+Two fixes were confirmed the hard way — the fix was reverted in place and the
+test watched to fail, then restored:
+
+- `isYou` reverted to the permission rule → *"does not tell a PM that
+  everything is their action"* fails.
+- The model name reverted to `purchaseOrder` → both model tests fail, naming
+  the exact typo.
+
+## What this still is not
+
+It is not an independent adversarial review, and it is not offered as one.
+Everything above was written by the same agent that wrote the code, and a
+shared blind spot survives all of it. **Codex, or any second reviewer, remains
+the most valuable gap in this programme** — it has been the most valuable gap
+since Phase 15 and nothing in this phase changes that.
+
+What did change is the standard applied to a green result. Ten defects were
+found this phase and **not one of them was found by a failing test.** Seven
+were literally invisible: a missing badge, a skipped record type, a deep link
+that opens a list instead of a record, two permanently-null columns, and a
+filter returning 400. The only instrument that found them was driving the
+product as a person and reading what came back.

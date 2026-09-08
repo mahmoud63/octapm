@@ -749,3 +749,52 @@ API and driven there; the Procurement module's own pages do not yet offer
 "Request quotes", show the linked long-lead status, or let a storeman pick a
 warehouse on a procurement receipt. The lifecycle is connected underneath and
 still has to be surfaced.
+
+---
+
+# Phase 20 addendum — the nerve reaches the screen
+
+The paragraph above this one said nothing in Phase 19 reached a screen. It does
+now, and putting it there found ten defects that the API-level work could not
+have found, because every one of them is invisible rather than loud.
+
+## What is now on a screen
+
+| seam | where a person meets it |
+| --- | --- |
+| Package → quotes | **Request quotes** on the procurement package |
+| Quotes → comparison | **Compare quotes** → opens that enquiry, survives a refresh |
+| Award → order | **Raise the order** → nothing typed, everything inherited |
+| Order → delivery | **Receive delivery** → Inventory, order and warehouse prefilled |
+| Delivery → stock | accepted / rejected / still to come / **on hand** |
+| Long lead → package | a **Procurement** column, or "Tracked by hand" |
+| Delivery → programme | **"136d late"** on the activity, in English |
+| Any handoff → a person | **ball-in-court** on four registers |
+| Everything → today | **Needs you**, per person, deep-linked to the record |
+
+## Where the nervous system was mis-wired
+
+Three of the ten were wires that ran to the wrong place and reported nothing:
+
+- The action centre asked Prisma for `purchaseOrder`; the model is
+  `procurementOrder`. A skip-if-missing guard swallowed it — **every buyer's
+  orders were absent from the one screen meant to list them, with nothing
+  failing anywhere.**
+- Its rows deep-linked with our own name for the record type. The workspace
+  calls a purchase order `procurement_order` when it opens one from a URL, so
+  those rows loaded the register and opened nothing — indistinguishable from
+  working, because the list is there either way.
+- The receipt result read on-hand from an `inventoryStock` model that does not
+  exist, and identified items by `item.code`, which is not a field. Both would
+  have been permanently null.
+
+## What is still one nerve short
+
+**A project cannot be given a team.** There is no API or UI path to add an
+existing colleague to a project — only an email invitation they must accept.
+`setProjectUserPermission` refuses with *"Assign the user to the project before
+setting a permission template"*, an instruction nothing implements. Every
+persona test in this programme therefore runs on the seeded project, because a
+newly created one has a team of one and refuses everybody else with
+`PROJECT_ACCESS_DENIED`. Recorded as **OCTA-UX-TEAM-093**, unbuilt: a
+project-team endpoint is a feature decision, not a UX repair.

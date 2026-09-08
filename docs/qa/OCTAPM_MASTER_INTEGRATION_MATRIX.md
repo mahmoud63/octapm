@@ -421,3 +421,41 @@ valuable next test.
 - **An independent adversarial pass.** Codex remains unreachable from this
   machine — no executable on `PATH`, not an npm global. Every review recorded so
   far is Claude's own, and the certification says so.
+
+---
+
+# Phase 20 addendum
+
+## The Procurement screens — now built
+
+The gap named above is closed. Request quotes, compare quotes, raise the order,
+receive the delivery, the delivery's own result, the long-lead package link,
+the schedule's delay in days, and ball-in-court on four registers are all on
+screen and driven by six new specs (`24`–`29`). The four-persona drive that was
+owed has been performed and is recorded in `OCTAPM_PROCUREMENT_UX_TEST.md`.
+
+**Ten defects, all found by driving the live product; none by a green suite.**
+Seven were invisible rather than loud: a missing badge, a silently skipped
+record type, a deep link that opens the list instead of the record, two columns
+permanently null from wrong model and field names, and a filter that returned
+400 for the two statuses an order spends most of its life in.
+
+## An independent adversarial pass — still not possible
+
+Codex remains unreachable from this machine: no executable on `PATH`, not an
+npm global. Every review recorded in this programme is Claude's own, and each
+certification says so plainly. Phase 20's substitute is not another review — it
+is that **every fix here was reproduced against the live system before it was
+made, and the important ones were verified by reverting the fix and watching
+the test fail.** That is weaker than an independent reviewer and is not offered
+as a replacement for one.
+
+## New gap opened by this phase
+
+**OCTA-UX-TEAM-093 — a project cannot be given a team.** No API or UI path adds
+an existing colleague to a project; only an email invitation they must accept.
+`setProjectUserPermission` refuses with an instruction the product does not
+implement. Consequence: a newly created project has a team of one and refuses
+every other persona with `PROJECT_ACCESS_DENIED`, which is why persona testing
+runs on the seeded project. Not built — a project-team endpoint is a feature
+decision, not a UX repair.

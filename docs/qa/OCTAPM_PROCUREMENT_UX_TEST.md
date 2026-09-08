@@ -281,3 +281,61 @@ the new capabilities do not exist yet. Measuring the old screens again would
 re-report the Phase 12 findings, not this phase's.
 
 **This is the next phase's work, and it is stated here rather than implied.**
+
+---
+
+# Phase 20 — the drive that was owed
+
+The paragraph above deferred the four-persona browser drive to the next phase,
+because the screens those personas needed did not exist. They do now, and the
+drive was performed: `e2e/24-procurement-personas.spec.ts` walks one cladding
+requirement from package to enquiry to award to order to two deliveries to the
+three-way match, as the four people who do it.
+
+It records what each person actually did rather than an impression afterwards.
+
+| persona | steps | dialogs | **typed** | inherited | navigations | dead ends |
+| --- | --- | --- | --- | --- | --- | --- |
+| Procurement Manager | 2 | 0 | **0** | 2 | 1 | 0 |
+| Project Manager | 1 | 0 | **0** | 1 | 0 | 0 |
+| Warehouse Manager | 1 | 0 | **0** | 1 | 1 | 0 |
+| Finance | 1 | 0 | **0** | 1 | 0 | 0 |
+
+Plus the buyer raising the order for an award, measured separately in
+`29-raise-order-from-award.spec.ts`: **1 step, 0 dialogs, 0 typed, 5
+inherited.**
+
+## What each inherited instead of typing
+
+- **Procurement** — the needed-on-site date and latest order date from the
+  requirement; the enquiry's title, description, currency and quote due date
+  from the package. They never chose a commitment type and never opened
+  Commercial.
+- **PM** — supplier, value and dates from the award.
+- **Warehouse** — the order, its lines and the warehouse, from the link
+  Procurement offers. `typedToGetHere: 0`.
+- **Finance** — ordered, received and invoiced quantities, from the order and
+  its deliveries. Verdict `matched`, 2,000 = 2,000.
+
+## The one dead end the drive found
+
+The buyer's own *Compare quotes* link landed on **"Generate a schedule first to
+access commercial modules."** The bidding engine lives under Commercial, and
+Commercial was gated on a baselined programme — which is precisely wrong for
+quoting, since pricing long-lead packages before the programme is baselined is
+why long-lead items exist. Fixed as OCTA-UX-GATE-092; the drive now passes
+through it.
+
+## Whose move it is, read back at every step
+
+```
+planned          → Your action                     (the buyer)
+pending_approval → Awaiting the project manager — approval
+approved         → Your action                     (the buyer, to issue)
+issued           → Awaiting Beta Facades — the supplier to acknowledge
+partial          → Your action                     (the warehouse)
+received         → Awaiting finance — the supplier's invoice
+```
+
+No label anywhere contains a permission code; both the unit test and the
+browser spec fail if one does.
