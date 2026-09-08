@@ -25,6 +25,24 @@ export interface LongLeadItemRecord {
     name: string
     wbsCode: string | null
   } | null
+  /**
+   * The package this is being bought under, when there is one. While it is
+   * null the planner maintains the dates and statuses by hand; once it is set
+   * they are read from the package, its orders and its deliveries, and typing
+   * one is refused.
+   */
+  procurementLinked?: boolean
+  derivedFields?: string[]
+  procurementPackage?: {
+    id: string
+    packageNumber: string
+    title: string
+    status: string
+    requiredOnSiteDate: string | null
+    latestOrderDate: string | null
+    orderCount: number
+    receiptCount: number
+  } | null
   procurementRisk?: {
     severity: 'none' | 'low' | 'medium' | 'high' | 'critical'
     reason: string

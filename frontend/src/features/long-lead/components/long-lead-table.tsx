@@ -263,6 +263,7 @@ export function LongLeadTable({ projectId, activities }: Props) {
               <th className='p-2 text-left font-medium'>Activity</th>
               <th className='p-2 text-left font-medium'>Risk</th>
               <th className='p-2 text-left font-medium'>Supplier</th>
+              <th className='p-2 text-left font-medium'>Procurement</th>
               <th className='p-2 text-right font-medium'>Actions</th>
             </tr>
           </thead>
@@ -270,7 +271,7 @@ export function LongLeadTable({ projectId, activities }: Props) {
             {items.length === 0 ? (
               <tr>
                 <td
-                  colSpan={10}
+                  colSpan={11}
                   className='p-6 text-center text-muted-foreground'
                 >
                   No long lead items available.
@@ -436,6 +437,38 @@ export function LongLeadTable({ projectId, activities }: Props) {
                     </td>
                     <td className='p-2 text-muted-foreground'>
                       {item.supplier || '-'}
+                    </td>
+                    <td className='p-2'>
+                      {/* Whether this is being bought under a package, and so
+                          whether the dates beside it are the planner's own or
+                          read from procurement. An unlinked item is still
+                          theirs to maintain; a linked one is not, and the
+                          system will refuse an edit rather than let the two
+                          drift apart (OCTA-PROC-LONGLEAD-UI-091). */}
+                      {item.procurementPackage ? (
+                        <div
+                          className='min-w-0'
+                          data-testid={`uat-long-lead-package-${item.id}`}
+                        >
+                          <p className='truncate font-mono text-xs font-medium'>
+                            {item.procurementPackage.packageNumber}
+                          </p>
+                          <p className='text-muted-foreground text-xs'>
+                            {item.procurementPackage.orderCount === 0
+                              ? 'not ordered yet'
+                              : `${item.procurementPackage.orderCount} order${item.procurementPackage.orderCount === 1 ? '' : 's'}`}
+                            {item.procurementPackage.receiptCount > 0 &&
+                              ` · ${item.procurementPackage.receiptCount} delivered`}
+                          </p>
+                        </div>
+                      ) : (
+                        <p
+                          className='text-muted-foreground text-xs'
+                          data-testid={`uat-long-lead-unlinked-${item.id}`}
+                        >
+                          Tracked by hand
+                        </p>
+                      )}
                     </td>
                     <td className='p-2 text-right'>
                       <div className='flex justify-end gap-1'>
