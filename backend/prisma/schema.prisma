@@ -2385,6 +2385,13 @@ model LongLeadItem {
   id                   String    @id @default(uuid())
   projectId            String
   activityId           String?
+  // The procurement package this item is being bought under, when one exists.
+  // Nullable on purpose: a long-lead item is registered before anything is
+  // ordered — that is what the register is for. While it is null the planner
+  // maintains the dates and statuses by hand; once it is set they are derived
+  // from the package, its orders and its deliveries, so the planner and the
+  // buyer are not keeping the same facts in two places (OCTA-PROC-LONGLEAD-083).
+  procurementPackageId String?
   item                 String
   leadWeeks            Int       @default(0)
   requiredTiming       String    @default("activity_start") // activity_start, activity_finish
@@ -2401,11 +2408,13 @@ model LongLeadItem {
   createdAt            DateTime  @default(now())
   updatedAt            DateTime  @updatedAt
 
-  project  Project   @relation(fields: [projectId], references: [id])
-  activity Activity? @relation(fields: [activityId], references: [id], onDelete: SetNull)
+  project             Project              @relation(fields: [projectId], references: [id])
+  activity            Activity?            @relation(fields: [activityId], references: [id], onDelete: SetNull)
+  procurementPackage  ProcurementPackage?  @relation(fields: [procurementPackageId], references: [id], onDelete: SetNull)
 
   @@index([projectId])
   @@index([activityId])
+  @@index([procurementPackageId])
   @@index([projectId, status])
   @@index([projectId, warehouseStatus])
 }
@@ -2752,6 +2761,8 @@ model ProcurementPackage {
   deliveryReceipts  DeliveryReceipt[]
   activityMaterials ActivityMaterial[]
   leadTimeAlerts    ProcurementLeadTimeAlert[]
+  longLeadItems     LongLeadItem[]
+  bidPackages       BidPackage[]
 
   @@unique([projectId, packageNumber])
   @@index([projectId])
@@ -7715,6 +7726,13 @@ model BidPackage {
   currency            String    @default("USD")
   boqSections         String[]  @default([])
   commitmentType      String    @default("subcontract") // subcontract, purchase_order
+  // The procurement package these quotes are being sought for, when the
+  // enquiry was started from Procurement rather than Commercial. Nullable:
+  // subcontract bidding has no procurement package behind it. Comparing
+  // supplier quotes for materials is the same job as levelling subcontract
+  // bids, so it uses the same engine rather than a second one
+  // (OCTA-PROC-QUOTES-084).
+  procurementPackageId String?
   settingsJson        Json      @default("{}")
   createdBy           String?
   updatedBy           String?
@@ -7735,10 +7753,12 @@ model BidPackage {
   questions    BidQuestion[]
   bids         Bid[]
   scopeMatrix  ScopeMatrix?
+  procurementPackage ProcurementPackage? @relation(fields: [procurementPackageId], references: [id], onDelete: SetNull)
 
   @@unique([projectId, ref])
   @@index([orgId, status])
   @@index([projectId, status])
+  @@index([procurementPackageId])
 }
 
 model BidPackageLine {

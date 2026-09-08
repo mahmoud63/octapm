@@ -183,6 +183,138 @@ function enrichRows(rows, project) {
   return rows.map((row) => enrichProcurementRow(row, { project }));
 }
 
+
+/**
+ * What the procurement package already knows.
+ *
+ * A long-lead item and a procurement package carried the same six facts with
+ * nothing joining them, so the planner and the buyer maintained the dates and
+ * statuses separately and the register could not see what had actually been
+ * ordered. Where the link exists these are read from the package, its orders
+ * and its deliveries rather than typed a second time
+ * (OCTA-PROC-LONGLEAD-083).
+ *
+ * Where it does not, nothing changes: an item registered before anything is
+ * ordered is the planner's own, and stays hand-maintained.
+ */
+const DERIVED_FIELDS = Object.freeze([
+  'status',
+  'warehouseStatus',
+  'expectedDeliveryDate',
+  'deliveredAt',
+  'orderBy',
+  'supplier',
+]);
+
+/** Ordered state, from the orders raised under the package. */
+const orderedStateOf = (orders) => {
+  if (!orders.length) return 'not_ordered';
+  const live = orders.filter((order) => order.status !== 'cancelled');
+  if (!live.length) return 'not_ordered';
+  if (live.every((order) => ['received', 'closed'].includes(order.status))) return 'delivered';
+  if (live.some((order) => ['issued', 'acknowledged', 'partial', 'received', 'closed'].includes(order.status))) {
+    return 'ordered';
+  }
+  return 'not_ordered';
+};
+
+/** Delivered state, from what the warehouse actually has. */
+const warehouseStateOf = (orders) => {
+  if (!orders.length) return 'not_received';
+  const states = orders.map((order) => order.warehouseStatus || 'not_received');
+  if (states.every((state) => state === 'issued')) return 'issued';
+  if (states.every((state) => ['received', 'issued'].includes(state))) return 'received';
+  if (states.some((state) => state !== 'not_received')) return 'partial';
+  return 'not_received';
+};
+
+const deriveFromPackage = (row) => {
+  const pkg = row.procurementPackage;
+  if (!pkg) return { ...row, procurementLinked: false, derivedFields: [] };
+
+  const orders = pkg.orders || [];
+  const receipts = pkg.deliveryReceipts || [];
+  const status = orderedStateOf(orders);
+  const warehouseStatus = warehouseStateOf(orders);
+  const latestReceipt = receipts
+    .map((receipt) => receipt.receivedAt)
+    .filter(Boolean)
+    .sort((a, b) => new Date(b) - new Date(a))[0] || null;
+
+  return {
+    ...row,
+    procurementLinked: true,
+    // The package is the source; the register shows what it says.
+    status,
+    warehouseStatus,
+    expectedDeliveryDate: pkg.requiredOnSiteDate ?? row.expectedDeliveryDate,
+    orderBy: pkg.latestOrderDate ? new Date(pkg.latestOrderDate).toISOString().slice(0, 10) : row.orderBy,
+    deliveredAt: warehouseStatus === 'not_received' ? null : latestReceipt,
+    supplier: pkg.supplier?.name ?? row.supplier,
+    derivedFields: DERIVED_FIELDS,
+    procurementPackage: {
+      id: pkg.id,
+      packageNumber: pkg.packageNumber,
+      title: pkg.title,
+      status: pkg.status,
+      requiredOnSiteDate: pkg.requiredOnSiteDate,
+      latestOrderDate: pkg.latestOrderDate,
+      orderCount: orders.length,
+      receiptCount: receipts.length,
+    },
+  };
+};
+
+const PACKAGE_INCLUDE = {
+  select: {
+    id: true,
+    packageNumber: true,
+    title: true,
+    status: true,
+    requiredOnSiteDate: true,
+    latestOrderDate: true,
+    supplier: { select: { name: true } },
+    orders: { select: { id: true, status: true, warehouseStatus: true } },
+    deliveryReceipts: { select: { id: true, receivedAt: true } },
+  },
+};
+
+/**
+ * A field the package owns cannot also be typed here.
+ *
+ * Refused rather than quietly ignored: a planner who edits a status and sees it
+ * snap back has learned nothing about why.
+ */
+const assertNotDerived = (payload, linked) => {
+  if (!linked) return;
+  const attempted = DERIVED_FIELDS.filter((field) => payload[field] !== undefined);
+  if (!attempted.length) return;
+  const error = new HttpError(
+    409,
+    'LONG_LEAD_FIELD_DERIVED',
+    `This item is linked to a procurement package, so ${attempted.join(', ')} ${attempted.length === 1 ? 'comes' : 'come'} from the package, its orders and its deliveries. Change it there, or unlink the item to maintain it by hand.`,
+  );
+  error.details = { derivedFields: DERIVED_FIELDS, attempted };
+  throw error;
+};
+
+/** The package a long-lead item may be attached to, on this project only. */
+const ensurePackageLink = async ({ projectId, procurementPackageId }) => {
+  if (!procurementPackageId) return null;
+  const pkg = await prisma.procurementPackage.findFirst({
+    where: { id: procurementPackageId, projectId },
+    select: { id: true },
+  });
+  if (!pkg) {
+    throw new HttpError(
+      404,
+      'PROCUREMENT_PACKAGE_NOT_FOUND',
+      "That procurement package is not on this project",
+    );
+  }
+  return pkg.id;
+};
+
 const listLongLeadItems = async ({ orgId, projectId }) => {
   const project = await ensureProject({ orgId, projectId });
 
@@ -190,11 +322,12 @@ const listLongLeadItems = async ({ orgId, projectId }) => {
     where: { projectId },
     include: {
       activity: { select: ACTIVITY_SELECT },
+      procurementPackage: PACKAGE_INCLUDE,
     },
     orderBy: [{ leadWeeks: 'desc' }, { createdAt: 'asc' }],
   });
 
-  return enrichRows(rows, project);
+  return enrichRows(rows.map(deriveFromPackage), project);
 };
 
 const createLongLeadItem = async ({ orgId, projectId, payload }) => {
@@ -207,6 +340,11 @@ const createLongLeadItem = async ({ orgId, projectId, payload }) => {
     leadWeeks: payload.leadWeeks,
   });
   await ensureActivityLink({ projectId, activityId });
+  const procurementPackageId = await ensurePackageLink({
+    projectId,
+    procurementPackageId: payload.procurementPackageId,
+  });
+  assertNotDerived(payload, Boolean(procurementPackageId));
 
   const data = normalizeRowForWrite(payload, {
     requiredTiming: 'activity_start',
@@ -228,13 +366,15 @@ const createLongLeadItem = async ({ orgId, projectId, payload }) => {
       status: 'not_ordered',
       ...data,
       activityId,
+      procurementPackageId,
     },
     include: {
       activity: { select: ACTIVITY_SELECT },
+      procurementPackage: PACKAGE_INCLUDE,
     },
   });
 
-  return enrichProcurementRow(row, { project });
+  return enrichProcurementRow(deriveFromPackage(row), { project });
 };
 
 const updateLongLeadItem = async ({ orgId, projectId, itemId, payload }) => {
@@ -265,17 +405,31 @@ const updateLongLeadItem = async ({ orgId, projectId, itemId, payload }) => {
   });
   await ensureActivityLink({ projectId, activityId: nextActivityId });
 
+  // Linking, unlinking, or leaving it as it was.
+  const nextPackageId =
+    payload.procurementPackageId === undefined
+      ? existing.procurementPackageId
+      : await ensurePackageLink({
+          projectId,
+          procurementPackageId: payload.procurementPackageId,
+        });
+  assertNotDerived(payload, Boolean(nextPackageId));
+
   const data = normalizeRowForWrite(payload, existing);
+  if (payload.procurementPackageId !== undefined) {
+    data.procurementPackageId = nextPackageId;
+  }
 
   const row = await prisma.longLeadItem.update({
     where: { id: itemId },
     data,
     include: {
       activity: { select: ACTIVITY_SELECT },
+      procurementPackage: PACKAGE_INCLUDE,
     },
   });
 
-  return enrichProcurementRow(row, { project });
+  return enrichProcurementRow(deriveFromPackage(row), { project });
 };
 
 const deleteLongLeadItem = async ({ orgId, projectId, itemId }) => {
