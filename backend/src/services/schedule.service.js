@@ -8,9 +8,11 @@ const {
   getApprovedActivityAllocationTotals,
 } = require("./activity-boq-allocation.service");
 const {
+  applyCpmToProject,
   buildCriticalPathExplanation,
   workingDayToDate,
 } = require("./cpm.service");
+const { deriveActivityStatus } = require("../utils/activity-status");
 const {
   createProjectDependencies,
   findDependencyCycle,
@@ -2289,11 +2291,7 @@ const getProjectSchedule = async ({ orgId, projectId }) => {
         weight: 0,
         count: 0,
       };
-      let status = "todo";
-      if (pct >= 100) status = "complete";
-      else if (pct > 0) status = "in_progress";
-      else if (activity.endDate && new Date() > new Date(activity.endDate))
-        status = "delayed";
+      const status = deriveActivityStatus(pct, activity.endDate);
 
       const {
         progress,
@@ -2755,6 +2753,14 @@ async function activateRevisionSnapshot({
         ],
       },
     });
+
+    // The activities and the logic between them are now live, but nothing has
+    // worked out what that logic means. Without this the planner's first sight
+    // of an imported programme is every activity starting on day one with no
+    // dates at all, and a critical path copied from the file rather than
+    // calculated — a twenty-five day job that reads as ten. It runs inside the
+    // transaction so the programme is never briefly wrong.
+    await applyCpmToProject(project.id, tx);
 
     return { revision: updatedRevision, activationAuditJson };
   });

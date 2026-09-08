@@ -51,6 +51,17 @@ const mockAuditService = {
 };
 
 jest.mock('../../config/db', () => ({ prisma: mockPrisma }));
+
+/**
+ * Activating a revision recalculates the critical path. The engine itself is
+ * covered by its own tests and by the live import harness; what matters here is
+ * that activation asks for it, so the mock stands in for the calculation.
+ */
+const mockApplyCpm = jest.fn();
+jest.mock('../cpm.service', () => ({
+  ...jest.requireActual('../cpm.service'),
+  applyCpmToProject: mockApplyCpm,
+}));
 jest.mock('../activity-boq-allocation.service', () => ({
   buildAllocationSummary: mockBuildAllocationSummary,
   getApprovedActivityAllocationTotals: mockGetApprovedActivityAllocationTotals,
@@ -402,6 +413,10 @@ describe('schedule revision lifecycle service', () => {
     });
 
     expect(result.revision.isActive).toBe(true);
+    // Without this the planner's first sight of an imported programme is every
+    // activity starting on day one with no dates, and a critical path copied
+    // from the file rather than calculated.
+    expect(mockApplyCpm).toHaveBeenCalledWith('project-1', expect.anything());
     expect(mockPrisma.activity.update).toHaveBeenCalledWith(
       expect.objectContaining({
         where: { id: 'activity-1' },
