@@ -562,6 +562,12 @@ const postMovement = async (tx, { orgId, item, warehouseId, locationId = null, t
     },
   });
 
+  // An issue to an activity belongs to that activity's project, whether or not
+  // the caller said so (OCTA-INV-PROJECT-068). Without this, `postConsumptionCost`
+  // saw no project and posted nothing: stock left the warehouse, was consumed on
+  // an activity, and no cost was recognised anywhere — silently.
+  const projectId = context.projectId ?? (await projectOfActivity({ tx, activityId: context.activityId }));
+
   const movement = await tx.stockTransaction.create({
     data: {
       orgId,
@@ -573,7 +579,7 @@ const postMovement = async (tx, { orgId, item, warehouseId, locationId = null, t
       unitCost: round(costForMovement),
       value: round(Math.abs(delta) * costForMovement, 2),
       balanceAfter: nextOnHand,
-      projectId: context.projectId ?? null,
+      projectId,
       activityId: context.activityId ?? null,
       costCodeId: context.costCodeId ?? null,
       boqItemId: context.boqItemId ?? null,
@@ -615,9 +621,27 @@ const postMovement = async (tx, { orgId, item, warehouseId, locationId = null, t
  */
 const CONSUMPTION_SIGN = Object.freeze({ issue: 1, return: -1 });
 
+/**
+ * The project an activity belongs to.
+ *
+ * A caller issuing to an activity has already said which project it is; making
+ * them say it twice invites them to leave it out, and a movement with no
+ * project posts no cost at all.
+ */
+const projectOfActivity = async ({ tx, activityId }) => {
+  if (!activityId || !tx.activity?.findUnique) return null;
+  const activity = await tx.activity.findUnique({
+    where: { id: activityId },
+    select: { projectId: true },
+  });
+  return activity?.projectId ?? null;
+};
+
 const postConsumptionCost = async ({ tx, orgId, item, movement }) => {
   const sign = CONSUMPTION_SIGN[movement.type];
-  // Stock consumed off-project has nowhere to post; the movement still stands.
+  // Stock consumed off-project genuinely has nowhere to post — a movement
+  // naming no activity and no project is warehouse housekeeping, not spend.
+  // A movement that names an activity always has a project by now.
   if (!sign || !movement.projectId) return null;
   const value = Number(movement.value) || 0;
   if (!value) return null;
@@ -820,6 +844,12 @@ const issueStock = async ({ orgId, user, payload }) => {
       "Issue to an activity or a cost code, so the cost lands somewhere"
     );
   }
+  // Note on the cost-code-only case: a cost code is held at company level and
+  // does not say which project is spending, so such an issue posts no project
+  // cost. That is deliberate — yard consumables against a company cost code are
+  // real, and the cost ledger is project-scoped — but it means the caller has to
+  // be told, which `issueStock` reports as `costPosted` rather than leaving the
+  // cost silently absent (OCTA-INV-PROJECT-068).
 
   return prisma.$transaction(async (tx) => {
     const { item } = await loadItemAndWarehouse(tx, {
@@ -839,7 +869,20 @@ const issueStock = async ({ orgId, user, payload }) => {
       user,
       context,
     });
-    return { movements: posted.map(serializeTransaction) };
+    // Whether this issue became project cost. An issue coded only to a company
+    // cost code legitimately does not — and the caller should be told, rather
+    // than left to notice the absence later.
+    const costPosted = posted.some((movement) => movement.projectId);
+    return {
+      movements: posted.map(serializeTransaction),
+      costPosted,
+      ...(costPosted
+        ? {}
+        : {
+            costNote:
+              "Issued against a company cost code with no project, so no project cost was posted",
+          }),
+    };
   });
 };
 

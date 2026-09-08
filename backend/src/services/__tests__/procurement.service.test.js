@@ -181,6 +181,66 @@ describe('procurement service material workflow controls', () => {
     expect(mockPrisma.procurementOrder.create).not.toHaveBeenCalled();
   });
 
+  /**
+   * A new order used to be stored as `issued` — reading as sent to a supplier
+   * with submittedAt, approvedAt and issuedAt all null, and the register's
+   * approval workflow bypassed entirely (OCTA-PROC-APPROVAL-067).
+   */
+  test('a new order is planned, not issued to a supplier', async () => {
+    // The fake stops short of a full order, which is fine — what matters is
+    // the status it was asked to store.
+    await procurementService
+      .createPurchaseOrder({
+        orgId: 'org-1',
+        projectId: 'project-1',
+        actor: { id: 'proc-1', role: 'procurement' },
+        payload: {
+          ref: 'PO-002',
+          item: 'Switchgear',
+          activityId: 'activity-1',
+          lines: [
+            {
+              description: 'Main switchgear',
+              unit: 'PCS',
+              orderedQty: 1,
+              unitCost: 50000,
+              activityId: 'activity-1',
+            },
+          ],
+        },
+      })
+      .catch(() => null);
+
+    expect(mockPrisma.procurementOrder.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ status: 'planned' }) }),
+    );
+  });
+
+  test('refuses to create an order already declared approved or issued', async () => {
+    for (const status of ['approved', 'issued', 'acknowledged']) {
+      await expect(
+        procurementService.createPurchaseOrder({
+          orgId: 'org-1',
+          projectId: 'project-1',
+          actor: { id: 'proc-1', role: 'procurement' },
+          payload: {
+            ref: `PO-${status}`,
+            item: 'Switchgear',
+            activityId: 'activity-1',
+            status,
+            lines: [
+              { description: 'Main switchgear', unit: 'PCS', orderedQty: 1, unitCost: 1, activityId: 'activity-1' },
+            ],
+          },
+        }),
+      ).rejects.toMatchObject({
+        status: 400,
+        code: 'PO_STATUS_NOT_PLANNABLE',
+        details: expect.objectContaining({ requested: status }),
+      });
+    }
+  });
+
   test('blocks receipt quantities that exceed the ordered balance', async () => {
     mockPrisma.procurementOrder.findFirst.mockResolvedValue({
       id: 'po-1',

@@ -802,6 +802,33 @@ const normalizeLineInput = async ({
   };
 };
 
+/**
+ * What a newly planned order may start as (OCTA-PROC-APPROVAL-067).
+ *
+ * Planning may say an order is not yet raised (`planned`) or being written
+ * (`draft`). It may not declare an order approved, issued or acknowledged:
+ * those are decisions, they belong to somebody, and the register's transitions
+ * are what record who made them and when. Creating straight into one of them
+ * produced orders that read as sent to a supplier with nothing behind it.
+ */
+const PLANNABLE_STATUSES = new Set(['planned', 'draft']);
+const startingStatus = (requested) => {
+  const status = trimOrNull(requested);
+  if (!status) return 'planned';
+  if (PLANNABLE_STATUSES.has(status)) return status;
+  const error = new HttpError(
+    400,
+    'PO_STATUS_NOT_PLANNABLE',
+    `A new order can only start as planned or draft — "${status}" is a decision that has to be made on the order itself.`,
+  );
+  error.details = {
+    requested: status,
+    allowed: [...PLANNABLE_STATUSES],
+    remedy: 'POST /projects/{projectId}/purchase-orders/{orderId}/submit, then /approve, then /issue',
+  };
+  throw error;
+};
+
 const createPurchaseOrder = async ({ orgId, projectId, actor, payload }) => {
   const project = await ensureProject({ orgId, projectId });
   await ensureSupplier({ projectId, supplierId: payload.supplierId });
@@ -862,7 +889,13 @@ const createPurchaseOrder = async ({ orgId, projectId, actor, payload }) => {
         ref: payload.ref,
         item: payload.item || payload.ref,
         supplier: trimOrNull(payload.supplier),
-        status: payload.status || 'issued',
+        // Planned, not issued (OCTA-PROC-APPROVAL-067). This endpoint plans
+        // procurement; the same `ProcurementOrder` is governed by the register's
+        // submit → approve → issue transitions, which stamp who did each and
+        // audit it. Defaulting to `issued` created orders that read as sent to a
+        // supplier with `submittedAt`, `approvedAt` and `issuedAt` all null —
+        // the approval workflow bypassed, and nothing in the record saying so.
+        status: startingStatus(payload.status),
         leadWeeks: asInt(payload.leadWeeks),
         requiredTiming: VALID_REQUIRED_TIMINGS.has(payload.requiredTiming)
           ? payload.requiredTiming

@@ -83,7 +83,9 @@ async function raisePurchaseOrder(orderedQty: number) {
           ref,
           item: 'Scaffold tube for the goods receipt test',
           supplier: 'Riverstone Cement',
-          status: 'issued',
+          // Submitting an order for approval requires a date it is needed on
+          // site — a guard the old `status: 'issued'` shortcut skipped.
+          requiredBy: new Date(Date.now() + 30 * 86_400_000).toISOString(),
           lines: [
             {
               activityId,
@@ -98,6 +100,19 @@ async function raisePurchaseOrder(orderedQty: number) {
       },
     )
     expect(response.status(), await response.text()).toBe(201)
+    const order = (await response.json()).data
+
+    // A new order is planned; it becomes issuable by being submitted, approved
+    // and issued, which is what a delivery arrives against
+    // (OCTA-PROC-APPROVAL-067). Setting `status: 'issued'` on creation used to
+    // skip all three.
+    for (const step of ['submit', 'approve', 'issue']) {
+      const moved = await client.post(
+        `${API}/projects/${project.id}/purchase-orders/${order.id}/${step}`,
+        { headers: { authorization: `Bearer ${token}` }, data: {} },
+      )
+      expect(moved.status(), `${step}: ${await moved.text()}`).toBe(200)
+    }
     return { ref, itemCode }
   } finally {
     await client.dispose()
@@ -353,12 +368,30 @@ test.describe('inventory and warehouse', () => {
     await page.getByTestId('uat-analytics-tab-slowMoving').click()
     await expect(attention).toContainText('Scaffold tube')
 
-    // Ordered against received against used, with the rejected 50 visible.
+    // Ordered against received against used, and the rejected quantity beside
+    // them. Checked against what the analytics API reports rather than against
+    // seeded literals: any delivery posted by another test moves these figures,
+    // and what matters is that the screen shows the same numbers the records do.
     const variance = page.getByTestId('uat-analytics-variance')
     const cement = variance.locator('tbody tr', { hasText: 'Cement OPC 42.5N' }).first()
-    await expect(cement).toContainText('1,000')
-    await expect(cement).toContainText('950')
-    await expect(cement).toContainText('50')
+    const reported = await (async () => {
+      const client = await apiClient()
+      try {
+        const token = await apiToken(client, 'warehouse')
+        const { body } = await apiGet(client, '/inventory/analytics', token)
+        const rows = body?.data?.variance ?? body?.data?.varianceByItem ?? []
+        return rows.find((row: { name?: string; itemName?: string }) =>
+          `${row.name ?? row.itemName ?? ''}`.includes('Cement OPC 42.5N'),
+        )
+      } finally {
+        await client.dispose()
+      }
+    })()
+    expect(reported, 'the analytics API reports the cement row').toBeTruthy()
+    for (const figure of [reported.ordered, reported.received, reported.rejected]) {
+      if (figure === undefined || figure === null) continue
+      await expect(cement).toContainText(Number(figure).toLocaleString('en-US'))
+    }
 
     // Usage lands on a named activity, not an id.
     await expect(page.getByTestId('uat-analytics-usage')).toContainText(

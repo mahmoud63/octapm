@@ -150,9 +150,10 @@ router.post(
     optionalUuid('supplierId'),
     optionalUuid('commitmentId'),
     body('supplier').optional({ nullable: true }).isString().trim(),
-    body('status')
-      .optional()
-      .isIn(['planned', 'draft', 'issued', 'partial', 'received', 'closed', 'cancelled']),
+    // A new order may only be planned or drafted here. Approved, issued and
+    // acknowledged are decisions made on the register, which records who made
+    // them (OCTA-PROC-APPROVAL-067).
+    body('status').optional().isIn(['planned', 'draft']),
     body('leadWeeks').optional().isInt({ min: 0 }).toInt(),
     body('requiredTiming')
       .optional()

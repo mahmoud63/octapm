@@ -150,6 +150,13 @@ const mockPrisma = {
     findFirst: jest.fn(async () => null),
     update: jest.fn(async () => ({})),
   },
+  // An issue naming an activity belongs to that activity's project, whether or
+  // not the caller said so (OCTA-INV-PROJECT-068).
+  activity: {
+    findUnique: jest.fn(async ({ where }) =>
+      where.id === "activity-1" ? { projectId: "project-1" } : null
+    ),
+  },
   costRecord: {
     findFirst: jest.fn(async ({ where }) =>
       clone(store.costRecords.find((row) => row.projectId === where.projectId && row.activityId === where.activityId) || null)
@@ -287,6 +294,80 @@ describe("inventory stock ledger", () => {
     expect(movements[0].activityId).toBe("activity-1");
     expect(balanceOf(item.id, warehouse.id).onHand).toBe(160);
     expect(Number(store.items.get(item.id).averageCost)).toBe(15);
+  });
+
+  /**
+   * An issue used to post nothing at all unless the caller repeated the project
+   * it had already implied by naming an activity — stock left the warehouse, was
+   * consumed on the work, and no cost was recognised anywhere, silently
+   * (OCTA-INV-PROJECT-068).
+   */
+  it("posts consumption against the activity's project even when the caller omits it", async () => {
+    const item = seedItem();
+    const warehouse = seedWarehouse();
+    await service.receiveStock({
+      orgId: ORG,
+      user: USER,
+      payload: { itemId: item.id, warehouseId: warehouse.id, quantity: 10, unitCost: 20 },
+    });
+
+    const before = store.ledger.length;
+    const { movements } = await service.issueStock({
+      orgId: ORG,
+      user: USER,
+      // No projectId: the activity already says which project this is.
+      payload: { itemId: item.id, warehouseId: warehouse.id, quantity: 4, activityId: "activity-1" },
+    });
+
+    expect(movements[0].projectId).toBe("project-1");
+    expect(store.ledger.length).toBe(before + 1);
+    const posted = store.ledger[store.ledger.length - 1];
+    expect(posted).toMatchObject({
+      sourceType: "material_issue",
+      projectId: "project-1",
+      activityId: "activity-1",
+      costType: "material",
+      amount: 80,
+    });
+  });
+
+  /**
+   * A cost code is held at company level and cannot say which project is
+   * spending, so an issue coded only to one posts no project cost. That is
+   * legitimate — yard consumables are real — but it used to happen in silence.
+   */
+  it("says so when an issue does not become project cost", async () => {
+    const item = seedItem();
+    const warehouse = seedWarehouse();
+    await service.receiveStock({
+      orgId: ORG,
+      user: USER,
+      payload: { itemId: item.id, warehouseId: warehouse.id, quantity: 10, unitCost: 20 },
+    });
+
+    const before = store.ledger.length;
+    const companyIssue = await service.issueStock({
+      orgId: ORG,
+      user: USER,
+      payload: { itemId: item.id, warehouseId: warehouse.id, quantity: 2, costCodeId: "cc-1" },
+    });
+    expect(companyIssue.costPosted).toBe(false);
+    expect(companyIssue.costNote).toContain("no project cost");
+    expect(store.ledger.length).toBe(before);
+
+    const projectIssue = await service.issueStock({
+      orgId: ORG,
+      user: USER,
+      payload: {
+        itemId: item.id,
+        warehouseId: warehouse.id,
+        quantity: 2,
+        costCodeId: "cc-1",
+        projectId: "project-1",
+      },
+    });
+    expect(projectIssue.costPosted).toBe(true);
+    expect(store.ledger.length).toBe(before + 1);
   });
 
   it("issuing from a warehouse draws across bins, fullest first", async () => {

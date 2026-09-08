@@ -12,6 +12,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import { useRecordInUrl } from '@/hooks/use-record-in-url'
 import { AuditHistoryPanel } from '@/features/audit/components/audit-history-panel'
 import { downloadAccountingExport } from '@/features/integrations/hooks/use-integrations'
 import { useProject } from '@/features/projects/hooks/use-projects'
@@ -58,9 +59,9 @@ export function PayAppsPanel({
   const { data, isLoading } = usePayApps(projectId, { status })
   const [createOpen, setCreateOpen] = useState(false)
   const [nonce, setNonce] = useState(0)
-  const [detailId, setDetailId] = useState<string | null>(
-    initialRecordId ?? null
-  )
+  // The open record lives in the address bar, so it can be copied to somebody
+  // and survives a refresh.
+  const [detailId, setDetailId] = useRecordInUrl('sub_pay_app', initialRecordId)
   const items = data?.items ?? []
   const summary = data?.summary
 
