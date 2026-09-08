@@ -21,8 +21,7 @@ export function AuthLayout({ children }: AuthLayoutProps) {
       <div className='relative z-10 mx-auto grid min-h-svh max-w-6xl items-center gap-10 px-6 py-10 lg:grid-cols-2 lg:gap-16'>
         {/* The promise. Hidden on small screens, where the form is the job. */}
         <section className='hidden flex-col text-white lg:flex'>
-          <OctaLogo surface='dark' size='lg' />
-          <h1 className='font-display mt-10 text-4xl leading-[1.1] font-bold tracking-tight text-balance xl:text-5xl'>
+          <h1 className='font-display text-4xl leading-[1.1] font-bold tracking-tight text-balance xl:text-5xl'>
             One Platform,
             <br />
             Total Project Control
@@ -38,9 +37,11 @@ export function AuthLayout({ children }: AuthLayoutProps) {
         </section>
 
         {/* The form. A light surface so inputs read normally on the dark ground. */}
+        {/* The form, with the mark standing over it. On a phone the left column
+            is gone entirely, so this is also the only place the brand appears. */}
         <section className='mx-auto w-full max-w-md'>
-          <div className='mb-6 flex justify-center lg:hidden'>
-            <OctaLogo surface='dark' size='lg' />
+          <div className='mb-8 flex justify-center'>
+            <OctaLogo surface='dark' size='xl' />
           </div>
           {children}
         </section>

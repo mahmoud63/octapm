@@ -45,11 +45,13 @@ type Props = {
   surface?: 'light' | 'dark'
   /** Mark only, for the collapsed rail and small spaces. */
   markOnly?: boolean
-  size?: 'sm' | 'md' | 'lg'
+  size?: 'sm' | 'md' | 'lg' | 'xl'
   className?: string
 }
 
-const SIZE = { sm: 'h-5', md: 'h-6', lg: 'h-8' } as const
+// xl is for the signed-out door, where the brand is the whole point and has a
+// full column to itself; everywhere inside the product stays at md or below.
+const SIZE = { sm: 'h-5', md: 'h-6', lg: 'h-8', xl: 'h-14' } as const
 
 export function OctaLogo({
   surface = 'light',
