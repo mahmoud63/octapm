@@ -4,6 +4,7 @@ const {
   getApprovedActivityAllocationTotals,
 } = require('./activity-boq-allocation.service');
 const { applyCpmToProject, workingDayToDate } = require('./cpm.service');
+const { deriveActivityStatus } = require('../utils/activity-status');
 const {
   replaceActivityDependencies,
   serializeDependencyDto,
@@ -25,13 +26,8 @@ const VALID_CATEGORIES = [
   'other',
 ];
 
-const computeStatus = (latestProgress, endDate) => {
-  const pct = latestProgress?.pctComplete ?? 0;
-  if (pct >= 100) return 'complete';
-  if (pct > 0) return 'in_progress';
-  if (endDate && new Date() > new Date(endDate)) return 'delayed';
-  return 'todo';
-};
+const computeStatus = (latestProgress, endDate) =>
+  deriveActivityStatus(latestProgress?.pctComplete ?? 0, endDate);
 
 const normalizeActivityCode = (value) => {
   if (value === null) return null;
@@ -182,6 +178,12 @@ const sanitizeActivity = (activity, allocationTotals = null, project = null) => 
     projectId: activity.projectId,
     name: activity.name,
     activityCode: activity.activityCode ?? null,
+    // The identifier the programme came in with. Imported activities carry no
+    // activityCode of ours, so without this an imported P6 schedule lists every
+    // row with a blank code and the planner cannot find the activity they are
+    // being asked about by its real name. Kept separate from activityCode
+    // rather than folded into it: they are two different identifiers.
+    p6ActivityId: activity.p6ActivityId ?? null,
     wbsCode: activity.wbsCode,
     category: activity.category,
     earlyStart: activity.earlyStart,

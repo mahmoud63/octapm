@@ -12,6 +12,11 @@
  *   walks JSON (json: true → filtered and sorted in memory).
  */
 
+const {
+  STATUSES: ACTIVITY_STATUSES,
+  deriveActivityStatus,
+} = require("../utils/activity-status");
+
 const DAY_MS = 86_400_000;
 const today = () => new Date();
 
@@ -60,12 +65,9 @@ const SOURCES = Object.freeze({
       col("budget", "Budget", "money"),
       col("sortOrder", "Order", "number"),
       computed("pctComplete", "% complete (approved)", "number", (row) => Number(row.progress?.[0]?.pctComplete ?? 0)),
-      computed("status", "Status", "enum", (row) => {
-        const pct = Number(row.progress?.[0]?.pctComplete ?? 0);
-        if (pct >= 100) return "complete";
-        if (row.endDate && new Date(row.endDate) < today()) return "delayed";
-        return pct > 0 ? "in_progress" : "to_do";
-      }, { enum: ["to_do", "in_progress", "complete", "delayed"] }),
+      computed("status", "Status", "enum", (row) =>
+        deriveActivityStatus(row.progress?.[0]?.pctComplete ?? 0, row.endDate, today()),
+      { enum: ACTIVITY_STATUSES }),
     ],
   },
   rfi: {

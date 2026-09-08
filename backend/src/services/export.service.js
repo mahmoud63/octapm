@@ -6,6 +6,7 @@ const {
   serializeDate,
 } = require('./procurement-risk.service');
 const { workingDayToDate } = require('./cpm.service');
+const { deriveActivityStatus } = require('../utils/activity-status');
 
 const HEADER_FILL = {
   type: 'pattern',
@@ -62,10 +63,7 @@ function parseAssumptions(snapshotJson) {
 }
 
 function getStatus(pctComplete, endDate) {
-  if (pctComplete >= 100) return 'complete';
-  if (pctComplete > 0) return 'in_progress';
-  if (endDate && new Date(endDate) < new Date()) return 'delayed';
-  return 'todo';
+  return deriveActivityStatus(pctComplete, endDate);
 }
 
 async function generateProjectExport({ projectId, orgId }) {
