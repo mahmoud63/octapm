@@ -332,3 +332,46 @@ because both were written from the same guess is not evidence. Three of this
 phase's guards now read their expectations from the thing they are checking —
 the service's own status list, the real Prisma client, the permission policy —
 so the next divergence is a red test rather than a blank cell.
+
+---
+
+## 12. UX quality gate
+
+Scored against what the specs actually measured, not against an impression.
+🔴 is a flow a competent person cannot complete without help; 🟡 is one they
+complete but with avoidable friction; 🟢 is one that works.
+
+| flow | before Phase 20 | after | evidence |
+| --- | --- | --- | --- |
+| Get a package priced | 🔴 no path from Procurement | 🟢 | `24` — 2 steps, 0 typed |
+| Compare the quotes | 🔴 dead end on the schedule gate | 🟢 | `24` — opens the record, survives refresh |
+| Raise the order | 🔴 **no path at all**, API only | 🟢 | `29` — 1 step, 0 typed, 5 inherited |
+| Receive a delivery | 🟡 retype the PO reference | 🟢 | `24` — order and warehouse prefilled |
+| Know what a delivery did | 🔴 a toast, then nothing | 🟢 | `27` — accepted/rejected/remaining/on hand |
+| Know whose move it is | 🔴 nothing | 🟢 | `25` — four registers, no permission codes |
+| Know what needs *you* | 🔴 endpoint with no caller | 🟢 | `26` — five people, five lists, deep-linked |
+| See a late delivery | 🟡 "critical", no magnitude | 🟢 | `28` — "136d late" + why |
+| See long-lead's package | 🟡 refusals looked arbitrary | 🟢 | Procurement column |
+| Filter orders being delivered | 🔴 **400** | 🟢 | 200 + 200, correct badges |
+| Put a team on a project | 🔴 | 🔴 **open** | OCTA-UX-TEAM-093, §10 |
+
+**Ten of eleven flows are green. One remains red and is named rather than
+quietly downgraded**: a project cannot be given a team, so every persona test
+in this programme runs on the seeded project. It is a feature decision, not a
+UX repair, and is the honest answer to "did this phase reach zero red" — it
+did not, and the reason is written down.
+
+### Two things deliberately not done
+
+- **Activities table virtualisation.** The Gantt already virtualises
+  (`visibleRows` from `scrollTop`); the activities table renders every row. On
+  a real P6 import that matters. It is not fixed here because it could not be
+  measured honestly this phase — the seeded project has three activities, and
+  shipping a virtualisation change verified against three rows would be worse
+  than leaving it.
+- **Agreement readiness (§14).** Already built, front and back: the commitment
+  detail shows what insurance is missing before execution
+  (`uat-commitment-insurance-gate`), execution is refused with
+  `COMMITMENT_INSURANCE_MISSING`, and the override requires both the
+  permission and a written reason, which is recorded on the transition. This
+  phase verified it rather than rebuilding it.
