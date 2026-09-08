@@ -142,11 +142,42 @@ router.get(
   }),
 );
 
+/**
+ * Raise the order for an awarded package. Everything on it is already known,
+ * so nothing is asked for that the system can read (OCTA-UX-PODUP-102). The
+ * three overridable fields are accepted here and are the only ones a buyer
+ * would sensibly change at this point.
+ */
+router.post(
+  '/packages/:packageId/order',
+  requirePermission('procurement', 'create', { transition: 'po.issue' }),
+  [
+    param('packageId').isUUID(),
+    body('ref').optional({ values: 'falsy' }).isString().trim(),
+    body('leadWeeks').optional().isInt({ min: 0 }).toInt(),
+    optionalDate('requiredBy'),
+    body('notes').optional({ nullable: true }).isString().trim(),
+    validate,
+  ],
+  asyncHandler(async (req, res) => {
+    const result = await procurementService.raiseOrderFromAward({
+      orgId: req.user.orgId,
+      projectId: req.params.projectId,
+      packageId: req.params.packageId,
+      actor: req.user,
+      payload: req.body,
+    });
+    return sendSuccess(res, result, 201);
+  }),
+);
+
 router.post(
   '/purchase-orders',
   requirePermission('procurement', 'create', { transition: 'po.issue' }),
   [
-    body('ref').isString().trim().notEmpty(),
+    // Optional: the project numbers its own orders unless the buyer has a
+    // reference of their own to use (OCTA-UX-PODUP-102).
+    body('ref').optional({ values: 'falsy' }).isString().trim(),
     body('item').optional({ nullable: true }).isString().trim(),
     optionalUuid('activityId'),
     optionalUuid('packageId'),

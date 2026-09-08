@@ -839,6 +839,151 @@ const startingStatus = (requested) => {
   throw error;
 };
 
+/**
+ * The next order number on this project.
+ *
+ * Making a buyer invent one is duplicate entry of the worst kind: the system
+ * knows every reference it has ever issued and the person does not, so they
+ * keep a list somewhere else and two of them working the same afternoon
+ * collide (OCTA-UX-PODUP-102). A reference typed by hand is still honoured —
+ * some organisations number orders from a finance system — but nobody has to.
+ *
+ * Only generated references are counted, so a hand-typed "PO-STEEL-REV2"
+ * cannot push the sequence somewhere strange.
+ */
+const ORDER_PREFIX = 'PO-';
+const GENERATED_ORDER_PATTERN = ['^PO-[0-9]+', '$'].join('');
+
+const nextOrderRef = async (tx, projectId) => {
+  const [row] = await tx.$queryRaw`
+    SELECT MAX(SUBSTRING("ref" FROM ${ORDER_PREFIX.length + 1}::int)::int) AS highest
+    FROM "ProcurementOrder"
+    WHERE "projectId" = ${projectId}
+      AND "ref" ~ ${GENERATED_ORDER_PATTERN}
+  `;
+  const highest = Number(row?.highest) || 0;
+  return `${ORDER_PREFIX}${String(highest + 1).padStart(5, '0')}`;
+};
+
+/**
+ * Raise the order for what was awarded.
+ *
+ * Everything on a purchase order raised after an award is already written
+ * down somewhere: the supplier on the winning bid, the lines and units on the
+ * package that was priced, the rates the supplier quoted, the date the
+ * package is needed on site. Making a buyer copy that across is not just
+ * tedious — it is where the order stops matching the award, and the
+ * three-way match then has nothing true to compare against
+ * (OCTA-UX-PODUP-102).
+ *
+ * What is inherited and what stays the buyer's:
+ *   ref            auto-generated, unless they have their own numbering
+ *   supplier       inherited from the winning bid — never retyped
+ *   lines          inherited from the priced package lines, at the quoted rate
+ *   unit, qty      inherited from the package line
+ *   activity       inherited from the package line, or the package
+ *   required date  inherited from the package, overridable on the call
+ *   lead weeks     inherited from the package, overridable on the call
+ */
+const raiseOrderFromAward = async ({ orgId, projectId, packageId, actor, payload = {} }) => {
+  await ensureProject({ orgId, projectId });
+
+  const pkg = await prisma.procurementPackage.findFirst({
+    where: { id: packageId, projectId },
+  });
+  if (!pkg) {
+    throw new HttpError(404, 'PROCUREMENT_PACKAGE_NOT_FOUND', 'Procurement package not found');
+  }
+
+  const enquiry = await prisma.bidPackage.findFirst({
+    where: { projectId, procurementPackageId: packageId, status: 'awarded' },
+    orderBy: { awardedAt: 'desc' },
+    include: {
+      lines: true,
+      bids: {
+        include: {
+          lines: true,
+          // The company sits on the invitation the bid answers, not on the
+          // bid itself, and the invitation carries its name directly.
+          invitation: { select: { vendorCompanyId: true, companyName: true } },
+        },
+      },
+    },
+  });
+  if (!enquiry) {
+    throw new HttpError(
+      409,
+      'PROCUREMENT_NO_AWARD',
+      'Award a quote for this package before raising the order',
+    );
+  }
+
+  const winner = (enquiry.bids || []).find((bid) => bid.id === enquiry.awardedBidId);
+  if (!winner) {
+    throw new HttpError(
+      409,
+      'PROCUREMENT_AWARD_INCOMPLETE',
+      'The awarded quote could not be read back',
+    );
+  }
+
+  const ratesByLine = new Map((winner.lines || []).map((line) => [line.packageLineId, line]));
+  const lines = (enquiry.lines || [])
+    .map((line) => {
+      const priced = ratesByLine.get(line.id);
+      // A bidder may exclude a line. An excluded line was not bought.
+      if (priced && priced.included === false) return null;
+      return {
+        activityId: line.activityId || pkg.activityId,
+        description: line.description,
+        unit: line.unit || null,
+        orderedQty: Number(line.qty) || 0,
+        unitCost: priced?.rate === null || priced?.rate === undefined ? 0 : Number(priced.rate),
+        packageId,
+      };
+    })
+    .filter((line) => line && line.activityId);
+
+  if (!lines.length) {
+    throw new HttpError(
+      409,
+      'PROCUREMENT_AWARD_NOT_SCHEDULE_LINKED',
+      'The awarded lines are not linked to an activity, so the order cannot be traced',
+    );
+  }
+
+  return createPurchaseOrder({
+    orgId,
+    projectId,
+    actor,
+    payload: {
+      // The buyer's own reference wins if they gave one; otherwise the
+      // project numbers it.
+      ref: payload.ref || null,
+      item: pkg.title,
+      activityId: pkg.activityId || null,
+      packageId,
+      // The name only. `supplierId` on an order points at a
+      // ProcurementSupplier — this project's own supplier record — while the
+      // bid names a Company from the directory. They are different things,
+      // and passing one for the other is refused as SUPPLIER_NOT_FOUND.
+      supplier: winner.invitation?.companyName || null,
+      currency: enquiry.currency || pkg.currency || undefined,
+      requiredBy:
+        payload.requiredBy ||
+        (pkg.requiredOnSiteDate
+          ? new Date(pkg.requiredOnSiteDate).toISOString().slice(0, 10)
+          : undefined),
+      leadWeeks:
+        payload.leadWeeks === undefined || payload.leadWeeks === null
+          ? pkg.leadWeeks ?? undefined
+          : payload.leadWeeks,
+      notes: payload.notes || null,
+      lines,
+    },
+  });
+};
+
 const createPurchaseOrder = async ({ orgId, projectId, actor, payload }) => {
   const project = await ensureProject({ orgId, projectId });
   await ensureSupplier({ projectId, supplierId: payload.supplierId });
@@ -889,6 +1034,7 @@ const createPurchaseOrder = async ({ orgId, projectId, actor, payload }) => {
   }
 
   return prisma.$transaction(async (tx) => {
+    const ref = trimOrNull(payload.ref) || (await nextOrderRef(tx, projectId));
     const order = await tx.procurementOrder.create({
       data: {
         projectId,
@@ -896,8 +1042,8 @@ const createPurchaseOrder = async ({ orgId, projectId, actor, payload }) => {
         packageId: payload.packageId || null,
         supplierId: payload.supplierId || null,
         commitmentId: payload.commitmentId || null,
-        ref: payload.ref,
-        item: payload.item || payload.ref,
+        ref,
+        item: payload.item || ref,
         supplier: trimOrNull(payload.supplier),
         // Planned, not issued (OCTA-PROC-APPROVAL-067). This endpoint plans
         // procurement; the same `ProcurementOrder` is governed by the register's
@@ -1468,6 +1614,7 @@ module.exports = {
   buildLineRiskRow,
   createPackage,
   createPurchaseOrder,
+  raiseOrderFromAward,
   createSupplier,
   enrichActivityMaterial,
   enrichActivityMaterials,

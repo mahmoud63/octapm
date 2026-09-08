@@ -1553,6 +1553,19 @@ const components = {
       },
       parties: arrayOf(ref("ProjectPartyMutation")),
     }),
+    /**
+     * The only four things a buyer could sensibly change when raising the
+     * order for an award. Everything else is read from the award itself.
+     */
+    ProcurementOrderFromAward: objectSchema(
+      {
+        ref: { type: 'string', nullable: true },
+        requiredBy: nullableDateString,
+        leadWeeks: { type: 'integer', minimum: 0 },
+        notes: { type: 'string', nullable: true },
+      },
+      [],
+    ),
     ProcurementQuoteRequest: objectSchema(
       {
         title: { type: 'string' },
@@ -6418,6 +6431,26 @@ add(
     operationId: "listProcurementQuotes",
     parameters: [...projectParams, pathParam("packageId", "Procurement package id")],
     permissions: rolesPermission("pm", "procurement", "qs"),
+  }),
+);
+
+add(
+  "/projects/{projectId}/procurement/packages/{packageId}/order",
+  "post",
+  operation({
+    tag: "Procurement",
+    summary: "Raise the purchase order for an awarded package.",
+    description:
+      "Creates the order for whatever quote was awarded against this package, taking every field from what is already recorded: the supplier from the winning bid, the description, unit and quantity from the priced package lines, the unit cost from the rate that supplier quoted, the activity from the package line, and the needed-on-site date and lead time from the package. The reference is issued by the project unless one is supplied. Only the reference, required date, lead weeks and notes may be overridden here — everything else would be a difference between the order and the award, which is what the three-way match later has to compare against. Refused with PROCUREMENT_NO_AWARD until a quote has been awarded, and with PROCUREMENT_AWARD_NOT_SCHEDULE_LINKED if none of the awarded lines carry an activity.",
+    operationId: "raiseProcurementOrderFromAward",
+    parameters: [...projectParams, pathParam("packageId", "Procurement package id")],
+    permissions: rolesPermission("pm", "procurement"),
+    requestBody: jsonBody(
+      ref("ProcurementOrderFromAward"),
+      "Optional overrides; everything else is inherited from the award.",
+      false,
+    ),
+    status: 201,
   }),
 );
 

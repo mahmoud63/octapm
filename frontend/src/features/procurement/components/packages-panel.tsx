@@ -6,6 +6,7 @@ import {
   useProcurementPackages,
   usePackageQuotes,
   useRequestQuotes,
+  useRaiseOrderFromAward,
   type ProcurementPackage,
 } from '../hooks/use-packages'
 
@@ -61,6 +62,7 @@ function OrderWindow({ pkg }: { pkg: ProcurementPackage }) {
 function Quotes({ projectId, pkg }: { projectId: string; pkg: ProcurementPackage }) {
   const { data: quotes, isLoading } = usePackageQuotes(projectId, pkg.id)
   const request = useRequestQuotes(projectId)
+  const raise = useRaiseOrderFromAward(projectId)
 
   if (isLoading) {
     return <p className='text-muted-foreground px-3 py-2 text-xs'>Loading quotes…</p>
@@ -111,6 +113,22 @@ function Quotes({ projectId, pkg }: { projectId: string; pkg: ProcurementPackage
             >
               Compare quotes
             </a>
+            {/* Once a winner is chosen the order writes itself: everything on
+                it is already recorded against the award, so asking the buyer
+                to retype any of it only introduces a difference between the
+                order and what was actually agreed (OCTA-UX-PODUP-102). */}
+            {quote.status === 'awarded' && (
+              <Button
+                size='sm'
+                variant='outline'
+                className='h-6 px-2 text-xs'
+                disabled={raise.isPending}
+                onClick={() => raise.mutate(pkg.id)}
+                data-testid={`uat-raise-order-${quote.ref}`}
+              >
+                Raise the order
+              </Button>
+            )}
           </div>
         </div>
       ))}

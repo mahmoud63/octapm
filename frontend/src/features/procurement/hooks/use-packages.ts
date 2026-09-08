@@ -103,3 +103,29 @@ export function useRequestQuotes(projectId: string) {
     },
   })
 }
+
+/**
+ * Raise the order for what was awarded.
+ *
+ * Nothing is sent. The supplier, the lines, the units, the quoted rates, the
+ * date it is needed on site and the lead time are all already recorded
+ * against the award, and the reference is the project's to issue — so asking
+ * a buyer to type any of it again is asking them to introduce a difference
+ * between the order and the award (OCTA-UX-PODUP-102).
+ */
+export function useRaiseOrderFromAward(projectId: string) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (packageId: string) =>
+      apiClient
+        .post(`/projects/${projectId}/procurement/packages/${packageId}/order`, {})
+        .then((r) => r.data.data),
+    onSuccess: (order: { ref?: string }) => {
+      toast.success(`${order?.ref ?? 'Order'} raised from the award`)
+      void queryClient.invalidateQueries({ queryKey: ['procurement'] })
+      void queryClient.invalidateQueries({ queryKey: ['purchase-orders'] })
+    },
+    onError: (err: AxiosError<ApiErrorResponse>) =>
+      toast.error(apiErrorMessage(err, 'Could not raise the order')),
+  })
+}
