@@ -508,10 +508,17 @@ export function ProjectDetail({
         )
 
       case 'commercial':
-        return schedule ? (
+        // Commercial waits for a programme because most of it prices work
+        // against activities. Quoting does not: a buyer gets long-lead
+        // packages priced *before* the programme is baselined, which is the
+        // whole reason long-lead items exist. Gating the whole module made
+        // Procurement's own "Compare quotes" link land on "generate a
+        // schedule first" (OCTA-UX-GATE-092), so the bidding engine — which
+        // takes no activities — is let through and the rest still waits.
+        return schedule || childState.commercial === 'bids' ? (
           <CommercialDashboard
             projectId={projectId}
-            activities={schedule.activities}
+            activities={schedule?.activities ?? []}
             activeTab={childState.commercial}
             onTabChange={(value: string) => setModuleChild('commercial', value)}
             showTabList={false}
