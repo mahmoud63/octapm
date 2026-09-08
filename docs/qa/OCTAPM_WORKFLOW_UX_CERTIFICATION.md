@@ -375,3 +375,55 @@ did not, and the reason is written down.
   `COMMITMENT_INSURANCE_MISSING`, and the override requires both the
   permission and a written reason, which is recorded on the transition. This
   phase verified it rather than rebuilding it.
+
+---
+
+## 13. The regression gate, and what it cost to trust it
+
+**Final: Playwright 138/138 · Jest 1,881/1,881 · OpenAPI contract green.**
+
+The gate took three full runs to produce a number worth quoting, and the two
+that failed are recorded here rather than discarded, because the reason each
+failed is the phase's own lesson pointed at me.
+
+| run | result | failing spec | cause |
+| --- | --- | --- | --- |
+| 1 | 137/138 (16.2m) | `19-payapp-actual-cost` — sign-in | **my tooling.** nodemon restarted mid-suite and could not rebind: `EADDRINUSE` → `app crashed`. Logins in that window failed. |
+| 2 | 137/138 (20.4m) | `22-user-smoke` — cost overview | the app shell never hydrated within 30s. Not reproducible. |
+| 3 | **138/138 (20.0m)** | — | — |
+
+`retries` stayed at 0 and no test was touched. Adding a retry would have made
+the board green on run 1 and taught nobody anything.
+
+### Two explanations I would have been happy to assert, and why both were wrong
+
+**The login rate limiter.** My first instinct, and it is the usual suspect in
+this suite. The arithmetic killed it: the suite makes roughly 178 `pm` logins
+(83 bare `signIn`, 10 explicit, 79 via `openProject`, 6 direct `apiToken`)
+against a documented limit of 12 per 15 minutes — which would fail at test 12,
+not test 116. Checking `.env` finished the job: dev raises it to **2000 per 60
+seconds**. The limiter was never involved.
+
+**Accumulated test data.** The obvious second suspect, and I had genuinely
+polluted the seeded project all session — 158 purchase orders, 222
+commitments, 162 lead-time alerts. Every endpoint the failing page needs
+returns in **25–152 ms**, and the page itself loaded in 1.4–2.4s on three
+consecutive probes. Not it either.
+
+### What is actually true
+
+Run 1 is diagnosed and proven: the API restarted underneath the suite because
+I was committing while it ran, and this worktree also sits under OneDrive,
+which rewrites files. The API now runs as a plain `node src/index.js` with no
+file watcher, so nothing can restart it mid-suite.
+
+Run 2 is not diagnosed. It is a single non-reproducible hydration stall in a
+20-minute single-worker pass against a **dev Vite server**, on a machine also
+running Postgres and the API. That is a harness fragility, not a product
+defect, and it is written down as an unexplained failure rather than dressed
+up as one.
+
+**The standing instruction for this programme is that a green result is only
+worth the scepticism applied to the instrument that produced it. This phase
+made the same demand of a red one** — twice, the instrument was at fault, and
+twice the tempting explanation was wrong on the numbers.
