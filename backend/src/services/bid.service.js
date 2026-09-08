@@ -225,13 +225,87 @@ const packageData = (payload, { project, existing = null }) => {
   return data;
 };
 
+/**
+ * The cost coding a BOQ item already implies (OCTA-BID-CODING-065).
+ *
+ * A bid line seeded from the BOQ used to carry only `boqItemId`, so the award
+ * built a schedule of values with no activity, no cost code and no budget line
+ * — and the certified cost then landed on the ledger attached to nothing.
+ * Activity actual cost, budget actual and therefore earned value were all blind
+ * to it, while reconciliation still read "balanced" because both sides agreed
+ * on nothing.
+ *
+ * The information was there the whole time: the BOQ item is allocated to
+ * activities, and activities are allocated to budget lines.
+ *
+ * **Only where it is unambiguous.** A BOQ item split across three activities
+ * cannot honestly be one schedule-of-values line naming one of them, and
+ * picking the largest share would put real money on the wrong activity. Split
+ * items are left uncoded so a person codes them, which is a visible gap rather
+ * than a silent mis-posting.
+ */
+const codingForBoqItems = async ({ tx, projectId, boqItemIds }) => {
+  const coding = new Map();
+  if (!boqItemIds.length || !tx.activityBoqAllocation?.findMany) return coding;
+
+  const allocations = await tx.activityBoqAllocation.findMany({
+    where: { projectId, boqItemId: { in: boqItemIds }, status: "approved", isActive: true },
+    select: { boqItemId: true, activityId: true },
+  });
+
+  const byItem = new Map();
+  for (const row of allocations) {
+    byItem.set(row.boqItemId, [...(byItem.get(row.boqItemId) || []), row.activityId]);
+  }
+
+  // Activity → budget line, again only when one line owns the activity.
+  const activityIds = [...new Set([...byItem.values()].filter((ids) => ids.length === 1).map((ids) => ids[0]))];
+  const budgetByActivity = new Map();
+  if (activityIds.length && tx.budgetLineActivityAllocation?.findMany) {
+    const links = await tx.budgetLineActivityAllocation.findMany({
+      where: { projectId, activityId: { in: activityIds } },
+      select: { activityId: true, budgetLineId: true, budgetLine: { select: { id: true, costCodeId: true } } },
+    });
+    const grouped = new Map();
+    for (const link of links) grouped.set(link.activityId, [...(grouped.get(link.activityId) || []), link]);
+    for (const [activityId, rows] of grouped) {
+      if (rows.length === 1) budgetByActivity.set(activityId, rows[0].budgetLine);
+    }
+  }
+
+  for (const [boqItemId, ids] of byItem) {
+    if (ids.length !== 1) continue;
+    const activityId = ids[0];
+    const budgetLine = budgetByActivity.get(activityId) || null;
+    coding.set(boqItemId, {
+      activityId,
+      budgetLineId: budgetLine?.id || null,
+      costCodeId: budgetLine?.costCodeId || null,
+    });
+  }
+  return coding;
+};
+
 const linesFromBoq = async ({ tx, projectId, sections = null, boqItemIds = null, existingBoqIds = new Set(), startNumber = 1 }) => {
   const where = { projectId, isActive: true, supersededAt: null, ...(boqItemIds?.length ? { id: { in: boqItemIds } } : {}), ...(sections?.length ? { section: { in: sections.map((section) => section || null) } } : {}) };
   const items = await tx.boqItem.findMany({ where, orderBy: [{ sortOrder: "asc" }, { code: "asc" }] });
+  const wanted = items.filter((item) => !existingBoqIds.has(item.id));
+  const coding = await codingForBoqItems({ tx, projectId, boqItemIds: wanted.map((item) => item.id) });
   let lineNumber = startNumber;
-  return items
-    .filter((item) => !existingBoqIds.has(item.id))
-    .map((item, index) => ({ lineNumber: lineNumber++, boqItemId: item.id, section: item.section || null, code: item.code || item.ref || null, description: item.description, unit: item.unit || null, qty: round3(num(item.qty)), estimateRate: round2(num(item.rate)), sortOrder: startNumber - 1 + index }));
+  return wanted.map((item, index) => ({
+    lineNumber: lineNumber++,
+    boqItemId: item.id,
+    section: item.section || null,
+    code: item.code || item.ref || null,
+    description: item.description,
+    unit: item.unit || null,
+    qty: round3(num(item.qty)),
+    estimateRate: round2(num(item.rate)),
+    // Carried so the award can build a schedule of values that actual cost can
+    // find its way home from.
+    ...(coding.get(item.id) || {}),
+    sortOrder: startNumber - 1 + index,
+  }));
 };
 
 const createPackage = async ({ orgId, projectId, payload = {}, actor = null }) => {
@@ -958,6 +1032,7 @@ module.exports = {
   INVITE_STATUS,
   BID_STATUS,
   COMMITMENT_TYPES,
+  codingForBoqItems,
   hashToken,
   portalUrl,
   listPackages,

@@ -266,4 +266,86 @@ describe("bid management", () => {
     expect(mockEmail.sendEmail.mock.calls.map((call) => call[0].subject).sort()).toEqual(["BP-001 Piling subcontract: award decision", "BP-001 Piling subcontract: you have been awarded the work"]);
     await expect(service.confirmAward({ orgId: ORG, projectId: PROJECT, packageId: pkg.id, payload: {}, actor })).rejects.toMatchObject({ code: "BID_PACKAGE_LOCKED" });
   });
+
+  /**
+   * A bid line seeded from the BOQ used to carry only `boqItemId`, so the award
+   * built a schedule of values with no activity — and certified cost then
+   * landed on the ledger attached to nothing, invisible to activity actual cost
+   * and to earned value, while reconciliation still read "balanced"
+   * (OCTA-BID-CODING-065).
+   */
+  describe("cost coding inherited from the BOQ", () => {
+    const tx = ({ allocations = [], budgetLinks = [] }) => ({
+      activityBoqAllocation: { findMany: jest.fn(async () => allocations) },
+      budgetLineActivityAllocation: { findMany: jest.fn(async () => budgetLinks) },
+    });
+
+    it("takes the activity when the BOQ item is allocated to exactly one", async () => {
+      const coding = await service.codingForBoqItems({
+        tx: tx({ allocations: [{ boqItemId: "boq-1", activityId: "act-1" }] }),
+        projectId: PROJECT,
+        boqItemIds: ["boq-1"],
+      });
+      expect(coding.get("boq-1")).toEqual({ activityId: "act-1", budgetLineId: null, costCodeId: null });
+    });
+
+    it("takes the budget line and cost code when one line owns that activity", async () => {
+      const coding = await service.codingForBoqItems({
+        tx: tx({
+          allocations: [{ boqItemId: "boq-1", activityId: "act-1" }],
+          budgetLinks: [{ activityId: "act-1", budgetLineId: "bl-1", budgetLine: { id: "bl-1", costCodeId: "cc-1" } }],
+        }),
+        projectId: PROJECT,
+        boqItemIds: ["boq-1"],
+      });
+      expect(coding.get("boq-1")).toEqual({ activityId: "act-1", budgetLineId: "bl-1", costCodeId: "cc-1" });
+    });
+
+    /**
+     * The refusal that matters. One schedule-of-values line cannot honestly
+     * name one of three activities, and taking the largest share would put real
+     * money on the wrong one. Uncoded and visible beats coded and wrong.
+     */
+    it("leaves a BOQ item split across activities uncoded rather than guessing", async () => {
+      const coding = await service.codingForBoqItems({
+        tx: tx({
+          allocations: [
+            { boqItemId: "boq-1", activityId: "act-1" },
+            { boqItemId: "boq-1", activityId: "act-2" },
+            { boqItemId: "boq-2", activityId: "act-3" },
+          ],
+        }),
+        projectId: PROJECT,
+        boqItemIds: ["boq-1", "boq-2"],
+      });
+      expect(coding.has("boq-1")).toBe(false);
+      expect(coding.get("boq-2")).toMatchObject({ activityId: "act-3" });
+    });
+
+    it("leaves the budget line alone when the activity sits on more than one", async () => {
+      const coding = await service.codingForBoqItems({
+        tx: tx({
+          allocations: [{ boqItemId: "boq-1", activityId: "act-1" }],
+          budgetLinks: [
+            { activityId: "act-1", budgetLineId: "bl-1", budgetLine: { id: "bl-1", costCodeId: "cc-1" } },
+            { activityId: "act-1", budgetLineId: "bl-2", budgetLine: { id: "bl-2", costCodeId: "cc-2" } },
+          ],
+        }),
+        projectId: PROJECT,
+        boqItemIds: ["boq-1"],
+      });
+      // The activity is unambiguous, so it is taken; the budget line is not.
+      expect(coding.get("boq-1")).toEqual({ activityId: "act-1", budgetLineId: null, costCodeId: null });
+    });
+
+    it("only counts approved, active allocations", async () => {
+      const allocationTx = tx({ allocations: [] });
+      await service.codingForBoqItems({ tx: allocationTx, projectId: PROJECT, boqItemIds: ["boq-1"] });
+      expect(allocationTx.activityBoqAllocation.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ status: "approved", isActive: true }),
+        }),
+      );
+    });
+  });
 });
