@@ -321,6 +321,11 @@ router.post(
       projectId: req.params.projectId,
       activityId: req.params.id,
       userId: req.user.id,
+      // Without this the caller arrives at the assignment check with no role,
+      // so the PM/planning override the refusal names can never apply — and
+      // the same person doing the same thing through bulk-progress, which does
+      // pass it, is allowed.
+      userRole: getEffectiveRole(req),
       payload: req.body,
     });
     return sendSuccess(res, result);
