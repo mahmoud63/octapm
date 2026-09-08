@@ -204,8 +204,23 @@ Schedule Activity
 | --- | --- |
 | BOQ spine (API, driven) | **19 / 19** |
 | Report reconciliation | **7 / 7** |
-| Browser (`23-boq-schedule-spine`) | **2 / 2** |
+| Browser | **126 Playwright passed · 0 failed** (15.0m, one worker) |
+| Backend | **1,853 of 1,854 Jest across 169 suites** (the known `report-builder-sources` timeout under parallel load; passes alone in 2.5s) |
 | New tests | 9 on the activity choice, 2 on the project count |
+
+### The Phase 17 regression gate
+
+Phase 17 was accepted subject to the browser suite being green, and it was not:
+one failure in `22-user-smoke`, reproduced twice.
+
+**It was the test, not the product.** The smoke test counted pay-application
+rows the instant the panel became visible — but the panel is the outer container
+and paints with its summary defaulted to zero before the rows arrive. The count
+was a race, and one the register loses more often the more applications exist:
+87 rows in an earlier run, 94 running the spec alone, nought in two consecutive
+full runs as this session's harnesses added more. Waiting for the first row
+fixes the measurement and makes an empty register fail *as* an empty register.
+The gate then ran **126 / 126**, with 108 rows observed.
 
 ## 10. A note on method
 
