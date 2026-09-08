@@ -1234,7 +1234,7 @@ async function upsertResources(projectId, activities) {
   }
 }
 
-async function upsertProgressAndCost({ projectId, activities, userId }) {
+async function upsertProgressAndCost({ orgId, projectId, activities, userId }) {
   const now = new Date();
 
   for (const spec of ACTIVITIES) {
@@ -1263,8 +1263,15 @@ async function upsertProgressAndCost({ projectId, activities, userId }) {
       await prisma.activityProgress.create({ data: { activityId: activity.id, ...progress } });
     }
 
-    // A plausible seven-category split of the activity's budget, with actuals
-    // tracking the progress percentage.
+    // A plausible seven-category split of the activity's budget.
+    //
+    // `actual` is deliberately NOT written here (OCTA-FIN-MIGRATE-062). It is a
+    // projection of the cost ledger now, so writing it directly would create
+    // exactly the condition this whole phase exists to remove: millions of
+    // actual cost with nothing behind it. The figure is posted as a
+    // `legacy_opening_balance` entry below instead, which is what a real
+    // project's pre-OctaPM spend honestly is — and re-seeding then cannot
+    // clobber cost the ledger has since recorded.
     const budget = spec.budget;
     const cost = {
       labour: Math.round(budget * 0.32),
@@ -1276,8 +1283,6 @@ async function upsertProgressAndCost({ projectId, activities, userId }) {
       contingency: Math.round(budget * 0.01),
       budget,
       committed: Math.round(budget * 0.86),
-      actual: spec.actualCost,
-      actualThroughDate: date("2026-06-30"),
       forecast: Math.round(budget * 1.02),
     };
 
@@ -1289,7 +1294,77 @@ async function upsertProgressAndCost({ projectId, activities, userId }) {
     } else {
       await prisma.costRecord.create({ data: { projectId, activityId: activity.id, ...cost } });
     }
+
+    await seedOpeningBalance({
+      orgId,
+      projectId,
+      activityId: activity.id,
+      amount: spec.actualCost,
+      label: activity.activityCode || activity.name,
+    });
   }
+}
+
+/**
+ * The activity's pre-OctaPM spend, recorded as what it is.
+ *
+ * A demo project that has been running for months has actual cost from before
+ * it was on the platform. Posting that as an opening balance — rather than
+ * writing `CostRecord.actual` directly — means a fresh database is
+ * reconciled from the first seed, and the demo shows the same honest split a
+ * real migrated project would: an opening position, plus whatever has been
+ * transacted since.
+ *
+ * Idempotent on the same key the migration uses, so re-seeding never doubles
+ * it.
+ */
+async function seedOpeningBalance({ orgId, projectId, activityId, amount, label }) {
+  if (!amount) return;
+  const record = await prisma.costRecord.findFirst({
+    where: { projectId, activityId },
+    select: { id: true },
+  });
+  if (!record) return;
+
+  const sourceKey = `legacy_opening_balance:cost_record:${record.id}`;
+  const existing = await prisma.costLedgerEntry.findFirst({ where: { orgId, sourceKey }, select: { id: true } });
+  if (existing) return;
+
+  const entry = await prisma.costLedgerEntry.create({
+    data: {
+      orgId,
+      projectId,
+      sourceKey,
+      sourceType: "legacy_opening_balance",
+      sourceId: record.id,
+      batchId: "seed-opening",
+      activityId,
+      costType: "other",
+      amount,
+      incurredOn: date("2026-06-30"),
+      note: `Opening balance · ${label} · Cost incurred before this project was on OctaPM.`,
+    },
+  });
+
+  // Move the projection the same way a posting would, so stored and derived
+  // agree from the very first seed.
+  //
+  // The date only ever moves forward. An opening balance is dated earlier than
+  // the transactions that follow it, and forcing it would drag the record's
+  // `actualThroughDate` backwards — which silently drops later cost out of
+  // official AC, since that reads the latest actual on or before a cutoff.
+  const current = await prisma.costRecord.findFirst({
+    where: { id: record.id },
+    select: { actualThroughDate: true },
+  });
+  const advance = !current?.actualThroughDate || current.actualThroughDate < entry.incurredOn;
+  await prisma.costRecord.update({
+    where: { id: record.id },
+    data: {
+      actual: { increment: amount },
+      ...(advance ? { actualThroughDate: entry.incurredOn } : {}),
+    },
+  });
 }
 
 async function upsertBaseline({ projectId, userId }) {
@@ -1365,7 +1440,7 @@ async function main() {
     items: inventoryItems,
     userId: people.procurement.id,
   });
-  await upsertProgressAndCost({ projectId: project.id, activities, userId: people.pm.id });
+  await upsertProgressAndCost({ orgId: org.id, projectId: project.id, activities, userId: people.pm.id });
   await upsertBaseline({ projectId: project.id, userId: people.pm.id });
 
   console.log(`Seeded "${ORG_NAME}" / "${PROJECT_NAME}"`);

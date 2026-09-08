@@ -59,10 +59,17 @@ const derivedTotals = async ({ tx = prisma, projectId }) => {
   const byCostType = new Map();
   const latestByActivity = new Map();
   let total = 0;
+  // An opening balance is a starting position, not something that happened on
+  // this project. Every report that asks what a project has spent has to be
+  // able to tell the two apart (OCTA-FIN-MIGRATE-062).
+  let transactional = 0;
+  let legacyOpening = 0;
 
   for (const entry of entries) {
     const amount = num(entry.amount);
     total = addMoney(total, amount);
+    if (entry.sourceType === "legacy_opening_balance") legacyOpening = addMoney(legacyOpening, amount);
+    else transactional = addMoney(transactional, amount);
     if (entry.budgetLineId) {
       byBudgetLine.set(entry.budgetLineId, addMoney(byBudgetLine.get(entry.budgetLineId) || 0, amount));
     }
@@ -77,7 +84,17 @@ const derivedTotals = async ({ tx = prisma, projectId }) => {
     byCostType.set(entry.costType, addMoney(byCostType.get(entry.costType) || 0, amount));
   }
 
-  return { entries: entries.length, total: round2(total), byBudgetLine, byActivity, bySource, byCostType, latestByActivity };
+  return {
+    entries: entries.length,
+    total: round2(total),
+    transactional: round2(transactional),
+    legacyOpening: round2(legacyOpening),
+    byBudgetLine,
+    byActivity,
+    bySource,
+    byCostType,
+    latestByActivity,
+  };
 };
 
 /**
@@ -183,13 +200,27 @@ const reconcile = async ({ orgId, projectId }) => {
   const recordedBudgetTotal = round2(budgetLines.reduce((sum, line) => addMoney(sum, line.actual), 0));
   const recordedActivityTotal = round2(costRecords.reduce((sum, row) => addMoney(sum, row.actual), 0));
 
+  // Whether unexplained stored actual still exists. Reported on every read, so
+  // an operator sees it before they act rather than after.
+  const migration = await require("./cost-migration.service").analyse({ orgId, projectId });
+
   return {
     projectId,
     ledger: {
       entries: derived.entries,
       total: derived.total,
+      // The two halves, kept apart: money transacted on this project, and the
+      // opening position it started the ledger from.
+      transactionalActual: derived.transactional,
+      legacyOpeningActual: derived.legacyOpening,
       bySource: Object.fromEntries([...derived.bySource].map(([k, v]) => [k, round2(v)])),
       byCostType: Object.fromEntries([...derived.byCostType].map(([k, v]) => [k, round2(v)])),
+    },
+    migration: {
+      required: migration.migrationRequired,
+      rowsNeedingOpening: migration.summary.rowsNeedingOpening,
+      unexplainedTotal: migration.summary.openingTotal,
+      byClassification: migration.summary.byClassification,
     },
     budget: {
       recordedTotal: recordedBudgetTotal,
@@ -217,6 +248,25 @@ const reconcile = async ({ orgId, projectId }) => {
  */
 const recomputeActualCost = async ({ orgId, projectId, actor = null, dryRun = false }) => {
   const before = await reconcile({ orgId, projectId });
+
+  // The one thing this must never do. While unexplained actual cost exists,
+  // "repairing" the projection to match the ledger would silently delete real
+  // financial history — it would look like a fix and behave like a deletion.
+  // Open the balances first, deliberately, and only then let the projections
+  // be rebuilt.
+  if (before.migration.required) {
+    const error = new HttpError(
+      409,
+      "ACTUAL_COST_LEDGER_MIGRATION_REQUIRED",
+      `${before.migration.rowsNeedingOpening} row${before.migration.rowsNeedingOpening === 1 ? " carries" : "s carry"} ${before.migration.unexplainedTotal} of actual cost with nothing on the ledger behind it. Recomputing now would erase it. Run the legacy opening-balance migration first.`
+    );
+    error.details = {
+      migration: before.migration,
+      remedy: "POST /projects/{projectId}/cost/reconciliation/migrate",
+    };
+    throw error;
+  }
+
   if (dryRun || before.balanced) return { ...before, applied: 0, dryRun };
 
   const applied = await prisma.$transaction(async (tx) => {

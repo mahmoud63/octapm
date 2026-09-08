@@ -8105,9 +8105,16 @@ model CostLedgerEntry {
   // A plain unique over nullable columns would not hold, because Postgres
   // treats NULLs as distinct.
   sourceKey    String
-  sourceType   String // direct_cost, timesheet, equipment, sub_pay_app, material_issue, manual
+  // direct_cost, timesheet, equipment, sub_pay_app, material_issue, manual,
+  // legacy_opening_balance
+  sourceType   String
   sourceId     String
   sourceLineId String?
+  // Which migration run created this entry, for `legacy_opening_balance` rows
+  // (OCTA-FIN-MIGRATE-062). An opening balance is not a transaction and must
+  // never pretend to be one — this says which run put it there, so a batch can
+  // be found, audited or reversed as a unit.
+  batchId      String?
   // Where the cost lands. activityId drives earned value; budgetLineId drives
   // the budget register; both are resolved at posting time and stored, so the
   // entry stays reconcilable even if the source record is later re-pointed.
@@ -8139,6 +8146,7 @@ model CostLedgerEntry {
   @@unique([orgId, sourceKey])
   @@index([projectId, incurredOn])
   @@index([projectId, sourceType])
+  @@index([batchId])
   @@index([projectId, activityId])
   @@index([projectId, budgetLineId])
   @@index([commitmentId])

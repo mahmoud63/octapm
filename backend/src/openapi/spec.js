@@ -10184,6 +10184,27 @@ const costRecordListParams = [
     permissions: modulePermission("cost", "read"),
   },
   {
+    method: "get",
+    path: "/projects/{projectId}/cost/reconciliation/migration",
+    summary:
+      "What actual cost predates the ledger, classified per row (OCTA-FIN-MIGRATE-062): **A** the ledger already explains it · **B** partially explained, only the remainder opens · **C** nothing explains it · **drift** the ledger explains *more* than the projection holds, which belongs to recompute rather than to an opening balance. Read-only.",
+    operationId: "getActualCostMigration",
+    permissions: modulePermission("cost", "read"),
+  },
+  {
+    method: "post",
+    path: "/projects/{projectId}/cost/reconciliation/migrate",
+    summary:
+      "Open the actual cost that no source transaction explains, as `legacy_opening_balance` ledger entries carrying a batch id and a stated reason. It does not pretend the amount came from an invoice, a pay application or a stock issue. Idempotent by arithmetic rather than by memory: the opening amount is always stored minus everything the ledger already explains — prior openings included — so a second run finds nothing and writes nothing.",
+    operationId: "migrateActualCostToLedger",
+    requestBody: jsonBody(
+      objectSchema({ reason: { type: "string", nullable: true }, dryRun: { type: "boolean" } }),
+      "Why the balances are being opened.",
+      false,
+    ),
+    permissions: modulePermission("cost", "approve"),
+  },
+  {
     method: "post",
     path: "/projects/{projectId}/cost/reconciliation/recompute",
     summary:

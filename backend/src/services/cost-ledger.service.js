@@ -35,7 +35,21 @@ const SOURCE_TYPES = Object.freeze([
   "sub_pay_app",
   "material_issue",
   "manual",
+  // Actual cost that predates the ledger and cannot be reconstructed from any
+  // source transaction (OCTA-FIN-MIGRATE-062). Recorded honestly as an opening
+  // balance rather than pretended into an invoice that never existed.
+  "legacy_opening_balance",
 ]);
+
+/**
+ * Sources that represent something that actually happened on this project.
+ * An opening balance is a starting position, not a transaction, so every
+ * report that asks "what has this project spent" must be able to tell the two
+ * apart.
+ */
+const TRANSACTIONAL_SOURCES = Object.freeze(
+  SOURCE_TYPES.filter((type) => type !== "legacy_opening_balance")
+);
 
 const COST_TYPES = Object.freeze([
   "labour",
@@ -166,6 +180,7 @@ const post = async ({
   incurredOn,
   postedBy = null,
   note = null,
+  batchId = null,
 }) => {
   if (!SOURCE_TYPES.includes(sourceType)) {
     throw new HttpError(400, "COST_LEDGER_SOURCE_INVALID", `Unknown cost source "${sourceType}"`);
@@ -214,6 +229,7 @@ const post = async ({
         incurredOn: new Date(incurredOn),
         postedBy,
         note,
+        batchId,
       },
     });
   } catch (error) {
@@ -313,6 +329,7 @@ module.exports = {
   COST_TYPES,
   DEFAULT_COST_TYPE,
   SOURCE_TYPES,
+  TRANSACTIONAL_SOURCES,
   applyToProjections,
   certifiedAgainstCommitment,
   post,

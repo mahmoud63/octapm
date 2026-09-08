@@ -8,6 +8,7 @@ const { validate } = require('../middleware/validate');
 const { moneyBody } = require('../utils/money');
 const costService = require('../services/cost.service');
 const costReconciliation = require('../services/cost-reconciliation.service');
+const costMigration = require('../services/cost-migration.service');
 
 const router = express.Router({ mergeParams: true });
 router.use(authenticate);
@@ -211,9 +212,56 @@ router.get(
 );
 
 /**
+ * What actual cost predates the ledger, classified — read-only.
+ */
+router.get(
+  '/reconciliation/migration',
+  requirePermission('cost', 'read'),
+  [param('projectId').isUUID(), validate],
+  asyncHandler(async (req, res) =>
+    sendSuccess(
+      res,
+      await costMigration.analyse({
+        orgId: req.user.orgId,
+        projectId: req.params.projectId,
+      }),
+    ),
+  ),
+);
+
+/**
+ * Opens the balances that no source transaction explains, as
+ * `legacy_opening_balance` entries. Idempotent: the key names the row it
+ * opens, not the run, so a second pass writes nothing.
+ */
+router.post(
+  '/reconciliation/migrate',
+  requirePermission('cost', 'approve'),
+  [
+    param('projectId').isUUID(),
+    body('reason').optional({ nullable: true }).isString().trim().isLength({ max: 1000 }),
+    body('dryRun').optional().isBoolean().toBoolean(),
+    validate,
+  ],
+  asyncHandler(async (req, res) =>
+    sendSuccess(
+      res,
+      await costMigration.migrate({
+        orgId: req.user.orgId,
+        projectId: req.params.projectId,
+        actor: req.user,
+        reason: req.body?.reason ?? null,
+        dryRun: req.body?.dryRun ?? false,
+      }),
+    ),
+  ),
+);
+
+/**
  * Rebuilds the projections from the ledger. A deliberate act, not a schedule:
  * a silent nightly rewrite of financial figures hides drift instead of
- * surfacing it.
+ * surfacing it. Refused with 409 ACTUAL_COST_LEDGER_MIGRATION_REQUIRED while
+ * unexplained actual cost exists, because "repairing" it would erase it.
  */
 router.post(
   '/reconciliation/recompute',
