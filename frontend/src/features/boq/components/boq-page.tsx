@@ -34,16 +34,32 @@ function BoqContent({ projectId }: { projectId: string }) {
       </div>
 
       {!boq?.hasUploadedBoq ? (
-        <BoqUploadZone
-          projectId={projectId}
-          project={{
-            name: project?.name,
-            startDate: project?.startDate,
-            duration: project?.duration,
-          }}
-          baseline={boq?.baseline}
-          onUploadSuccess={() => refetch()}
-        />
+        <>
+          <BoqUploadZone
+            projectId={projectId}
+            project={{
+              name: project?.name,
+              startDate: project?.startDate,
+              duration: project?.duration,
+            }}
+            baseline={boq?.baseline}
+            onUploadSuccess={() => refetch()}
+          />
+          {/*
+            An empty bill still needs a way in. Uploading a spreadsheet is the
+            usual route, but a small job priced by hand had no way to enter its
+            first row at all — the grid, and the button that adds to it, only
+            appeared once a row already existed.
+          */}
+          <BoqEditableGrid
+            projectId={projectId}
+            items={[]}
+            financial={null}
+            currency={project?.currency ?? 'USD'}
+            baselineLocked={Boolean(boq?.baseline?.locked)}
+            onDataChange={() => refetch()}
+          />
+        </>
       ) : (
         <>
           <BoqUploadZone

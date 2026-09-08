@@ -11,6 +11,11 @@ export const activitySchema = z.object({
   id: z.string().uuid(),
   projectId: z.string().uuid(),
   name: z.string(),
+  // Two different identifiers: the code OctaPM gives an activity, and the one
+  // it arrived with from P6. An imported activity has only the second, so a
+  // picker that shows neither leaves the planner nothing to recognise.
+  activityCode: z.string().nullable().optional(),
+  p6ActivityId: z.string().nullable().optional(),
   wbsCode: z.string().nullable(),
   category: z.string().nullable(),
   startDate: z.string().nullable(),

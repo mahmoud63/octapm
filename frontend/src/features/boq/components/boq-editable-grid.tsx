@@ -616,6 +616,7 @@ export function BoqEditableGrid({
           className='text-muted-foreground'
           disabled={baselineLocked}
           onClick={() => setShowAddRow(true)}
+          data-testid='uat-boq-add-row'
         >
           <Plus className='mr-1.5 h-4 w-4' />
           Add BOQ Row

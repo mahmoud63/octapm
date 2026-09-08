@@ -210,11 +210,16 @@ export const CreateBoqItemInputSchema = z.object({
   quantity: z.number().positive(),
   unit: z.string().min(1),
   rate: positiveMoneyInputSchema,
-  activityName: z.string().min(1).max(255),
+  // activityId attaches the row to an activity already on the programme;
+  // activityName creates one for it; neither leaves the row unallocated, to be
+  // split across activities afterwards. Never both.
+  activityId: z.string().uuid().optional(),
+  activityName: z.string().min(1).max(255).optional(),
 })
 
 export const CreateBoqActivityInputSchema = z.object({
-  activityName: z.string().min(1).max(255),
+  activityId: z.string().uuid().optional(),
+  activityName: z.string().min(1).max(255).optional(),
   unit: z.string().min(1),
   quantity: z.number().positive(),
   rate: positiveMoneyInputSchema,
