@@ -1,3 +1,4 @@
+import type { BallInCourt } from '@/components/ball-in-court'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { apiClient } from '@/services/api/client'
 
@@ -108,6 +109,8 @@ export type PurchaseOrder = {
   invoiceStatus: 'not_invoiced' | 'partially_invoiced' | 'fully_invoiced'
   lifecycleStatus: LifecycleStatus
   lifecycleLabel: string
+  /** Whose move it is, derived on the server from state and permissions. */
+  ballInCourt?: BallInCourt | null
   supplierId: string | null
   supplier: string | null
   supplierEmail: string | null

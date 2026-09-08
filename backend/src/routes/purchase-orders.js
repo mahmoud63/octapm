@@ -18,7 +18,13 @@ const service = require("../services/purchase-order.service");
 const router = express.Router({ mergeParams: true });
 router.use(authenticate);
 
-const scope = (req) => ({ orgId: req.user.orgId, projectId: req.params.projectId });
+const scope = (req) => ({
+  orgId: req.user.orgId,
+  projectId: req.params.projectId,
+  // Carried on every read so ball-in-court can say "your action" rather than
+  // naming a role the reader already holds.
+  viewer: { id: req.user.id, role: getEffectiveRole(req) },
+});
 const actor = (req) => ({ id: req.user.id, role: getEffectiveRole(req) });
 const orderId = param("orderId").isUUID();
 const reason = (max = 2000) =>

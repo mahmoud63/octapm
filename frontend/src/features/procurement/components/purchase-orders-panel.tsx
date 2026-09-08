@@ -1,3 +1,4 @@
+import { BallInCourtBadge } from '@/components/ball-in-court'
 import { useState } from 'react'
 import { Loader2 } from 'lucide-react'
 import { formatDate } from '@/lib/dates'
@@ -28,6 +29,9 @@ const money = (value: number, currency = 'USD') =>
     currency,
     maximumFractionDigits: 0,
   }).format(value || 0)
+
+/** Orders a delivery can still arrive against. */
+const RECEIVABLE = new Set(['issued', 'acknowledged', 'partial', 'received'])
 
 export function StatusBadge({ order }: { order: PurchaseOrder }) {
   return (
@@ -153,6 +157,7 @@ export function PurchaseOrdersPanel({
               <th className='px-3 py-2 text-end'>Value</th>
               <th className='px-3 py-2 text-end'>Invoiced</th>
               <th className='px-3 py-2 text-end'>Lines</th>
+              <th className='px-3 py-2 text-end'></th>
             </tr>
           </thead>
           <tbody className='divide-y'>
@@ -169,7 +174,13 @@ export function PurchaseOrdersPanel({
                 </td>
                 <td className='px-3 py-2'>{order.supplier ?? '—'}</td>
                 <td className='px-3 py-2'>
-                  <StatusBadge order={order} />
+                  <div className='flex flex-col items-start gap-1'>
+                    <StatusBadge order={order} />
+                    <BallInCourtBadge
+                      ballInCourt={order.ballInCourt}
+                      testId={`uat-po-ball-${order.ref}`}
+                    />
+                  </div>
                 </td>
                 <td
                   className={cn(
@@ -193,11 +204,28 @@ export function PurchaseOrdersPanel({
                 <td className='px-3 py-2 text-end font-mono tabular-nums'>
                   {order.lines.length}
                 </td>
+                <td className='px-3 py-2 text-end'>
+                  {/* An order out with the supplier is waiting for a lorry. The
+                      receipt screen lives in Inventory and there is one of it,
+                      so this points at it with the order already named rather
+                      than making a storeman type the reference again
+                      (OCTA-UX-RECEIPT-089). */}
+                  {RECEIVABLE.has(order.status) && (
+                    <a
+                      href={`/inventory?tab=receive&orderRef=${encodeURIComponent(order.ref)}`}
+                      className='text-primary text-xs font-medium hover:underline'
+                      onClick={(event) => event.stopPropagation()}
+                      data-testid={`uat-po-receive-${order.ref}`}
+                    >
+                      Receive delivery
+                    </a>
+                  )}
+                </td>
               </tr>
             ))}
             {items.length === 0 && (
               <tr>
-                <td colSpan={7} className='px-3 py-10 text-center text-muted-foreground'>
+                <td colSpan={8} className='px-3 py-10 text-center text-muted-foreground'>
                   {data?.items.length
                     ? 'No order matches that filter.'
                     : 'No purchase orders have been raised on this project.'}

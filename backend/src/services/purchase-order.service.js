@@ -1,5 +1,6 @@
 const { prisma } = require("../config/db");
 const { HttpError } = require("../utils/http-error");
+const { ballInCourt } = require("./ball-in-court.service");
 const { addMoney, toMoneyNumber } = require("../utils/money");
 const auditService = require("./audit.service");
 const approvalWorkflowService = require("./approval-workflow.service");
@@ -195,7 +196,25 @@ const serializeLine = (line) => ({
   notes: line.notes,
 });
 
-const serializeOrder = (order) => ({
+/**
+ * The state ball-in-court should read from.
+ *
+ * An order's `status` is its commercial life — issued, closed — while
+ * `warehouseStatus` is what has physically turned up. Once an order is out
+ * with the supplier the useful question becomes a delivery question, so the
+ * fulfilment state takes over.
+ */
+const waitingState = (order) => {
+  if (order.status === STATUS.ISSUED || order.status === STATUS.ACKNOWLEDGED) {
+    if (order.warehouseStatus === "partial") return "partial";
+    if (order.warehouseStatus === "received" || order.warehouseStatus === "issued") {
+      return "received";
+    }
+  }
+  return order.status;
+};
+
+const serializeOrder = (order, viewer = null) => ({
   id: order.id,
   projectId: order.projectId,
   project: order.project?.name ?? null,
@@ -206,6 +225,17 @@ const serializeOrder = (order) => ({
   invoiceStatus: order.invoiceStatus,
   lifecycleStatus: lifecycleStatus(order),
   lifecycleLabel: LIFECYCLE_LABEL[lifecycleStatus(order)],
+  // Whose move it is, derived from the state and the permission policy rather
+  // than stored — a stored answer goes stale the moment somebody acts by
+  // another route (OCTA-UX-BALLINCOURT-087).
+  ballInCourt: ballInCourt(
+    "purchase_order",
+    { status: waitingState(order) },
+    viewer,
+    order.status === STATUS.ISSUED && order.warehouseStatus === "not_received"
+      ? { name: order.supplierRef?.name ?? order.supplier ?? null }
+      : null,
+  ),
   supplierId: order.supplierId,
   supplier: order.supplierRef?.name ?? order.supplier ?? null,
   supplierEmail: order.supplierRef?.email ?? null,
@@ -269,10 +299,10 @@ const loadOrder = async ({ orgId, projectId, orderId, tx = prisma }) => {
   return order;
 };
 
-const getOrder = async ({ orgId, projectId, orderId }) =>
-  serializeOrder(await loadOrder({ orgId, projectId, orderId }));
+const getOrder = async ({ orgId, projectId, orderId, viewer = null }) =>
+  serializeOrder(await loadOrder({ orgId, projectId, orderId }), viewer);
 
-const listOrders = async ({ orgId, projectId, status = null, supplierId = null }) => {
+const listOrders = async ({ orgId, projectId, status = null, supplierId = null, viewer = null }) => {
   const orders = await prisma.procurementOrder.findMany({
     where: {
       projectId,
@@ -285,7 +315,7 @@ const listOrders = async ({ orgId, projectId, status = null, supplierId = null }
     take: 500,
   });
 
-  const items = orders.map(serializeOrder);
+  const items = orders.map((order) => serializeOrder(order, viewer));
   const sum = (predicate, key) =>
     round2(items.filter(predicate).reduce((total, item) => addMoney(total, item[key]), 0));
 
