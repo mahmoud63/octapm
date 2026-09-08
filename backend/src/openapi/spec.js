@@ -5089,7 +5089,16 @@ const components = {
     ),
     SubValuationRequest: objectSchema(
       {
-        subcontractor: { type: "string" },
+        subcontractor: {
+          type: "string",
+          description:
+            "Free-text subcontractor name. Historical only: creation is retired, and on update this field is immutable (409 SUB_VALUATION_NAME_IMMUTABLE). Use `companyId` to attribute the valuation to a real company.",
+        },
+        companyId: {
+          ...nullableUuid,
+          description:
+            "The company this legacy valuation is attributed to. Set one row at a time, from the attribution report — names are never matched automatically.",
+        },
         period: { type: "string" },
         workDone: money,
         materialsOnSite: money,
@@ -7817,8 +7826,21 @@ add(
   "get",
   operation({
     tag: "Commercial",
-    summary: "List subcontractor valuations.",
+    summary:
+      "List legacy subcontractor valuations. Superseded by payment applications against a subcontract commitment (OCTA-FIN-SUBVAL-064): these name their subcontractor in free text, hold no schedule of values and post nothing to the cost ledger — they reach the project through cash flow only, and only once certified or paid. Existing rows are retained and readable; no new ones are accepted.",
     operationId: "listSubValuations",
+    parameters: projectParams,
+  }),
+);
+
+add(
+  "/projects/{projectId}/sub-valuations/attribution",
+  "get",
+  operation({
+    tag: "Commercial",
+    summary:
+      "Which company each legacy free-text name most likely meant. Proposes only: an unambiguous single match is offered as `suggested`, anything else as `candidates` for a person to choose. Names are never matched automatically — the key folds punctuation but not the legal form, so \"ABC Steel LLC\" and \"ABC Steel Ltd\" stay apart. Apply one row at a time with PATCH `companyId`.",
+    operationId: "reportSubValuationAttribution",
     parameters: projectParams,
   }),
 );
@@ -7828,10 +7850,10 @@ add(
   "post",
   operation({
     tag: "Commercial",
-    summary: "Create a subcontractor valuation.",
+    summary:
+      "Retired — always 409 SUB_VALUATION_RETIRED. Raise a subcontract commitment and claim against it with a payment application, which names the subcontractor company and posts certified cost to the ledger. The error carries the destination.",
     operationId: "createSubValuation",
     parameters: projectParams,
-    requestBody: jsonBody(ref("SubValuationRequest"), "Sub valuation payload."),
     status: 201,
   }),
 );
@@ -7841,7 +7863,8 @@ add(
   "patch",
   operation({
     tag: "Commercial",
-    summary: "Update a subcontractor valuation.",
+    summary:
+      "Update a legacy valuation so an in-flight one can be finished, and attribute it to a company with `companyId`. `subcontractor` is immutable (409 SUB_VALUATION_NAME_IMMUTABLE): it records who was billed at the time, and attribution goes beside it rather than over it.",
     operationId: "updateSubValuation",
     parameters: projectRecordParams,
     requestBody: jsonBody(
@@ -10263,7 +10286,8 @@ addGenericRoute({
   path: "/projects/{projectId}/sub-valuations/{id}",
   method: "delete",
   tag: "Commercial",
-  summary: "Delete a subcontractor valuation.",
+  summary:
+    "Delete a draft or submitted legacy valuation. A certified or paid one is refused (409 SUB_VALUATION_HISTORICAL): it is the record that money was committed to or paid out, and deleting it removes the only trace that it happened.",
   operationId: "deleteSubValuation",
   parameters: projectRecordParams,
 });

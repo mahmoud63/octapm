@@ -378,6 +378,8 @@ model Company {
   crews                Crew[]
   rfqs                 Rfq[]               @relation("RfqVendor")
   directCosts          DirectCost[]        @relation("DirectCostVendor")
+  // Attribution of legacy free-text valuations, where the name resolved.
+  subValuations        SubValuation[]      @relation("SubValuationCompany")
   riskAssignments           Risk[]           @relation("RiskAssigneeCompany")
   ncrAssignments            NcrRecord[]      @relation("NcrAssigneeCompany")
   itpAssignments            ItpRecord[]      @relation("ItpAssigneeCompany")
@@ -2422,11 +2424,18 @@ model BurnRateEntry {
   @@index([date])
 }
 
+/// Superseded by subcontract commitments and their payment applications
+/// (OCTA-FIN-SUBVAL-064). Existing rows are kept and readable; no new ones are
+/// accepted, because `subcontractor` is free text that nothing downstream can
+/// follow. `companyId` attributes a historical row where the name resolves to a
+/// company — proposed by a report, never matched automatically — and the free
+/// text stays as what was written at the time.
 model SubValuation {
   id              String    @id @default(uuid())
   projectId       String
   ref             String
   subcontractor   String
+  companyId       String?
   period          String
   workDone        Decimal   @default(0) @db.Decimal(18, 2)
   materialsOnSite Decimal   @default(0) @db.Decimal(18, 2)
@@ -2443,11 +2452,13 @@ model SubValuation {
   updatedAt       DateTime  @updatedAt
 
   project         Project                      @relation(fields: [projectId], references: [id])
+  company         Company?                     @relation("SubValuationCompany", fields: [companyId], references: [id], onDelete: SetNull)
   activityLinks   SubValuationActivityLink[]
   allocationLinks SubValuationAllocationLink[]
 
   @@unique([projectId, ref])
   @@index([projectId])
+  @@index([companyId])
 }
 
 model SubValuationActivityLink {

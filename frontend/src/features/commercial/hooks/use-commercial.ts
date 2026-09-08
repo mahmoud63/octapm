@@ -687,11 +687,19 @@ export const useReleaseIpcRetention = (projectId: string) => {
   })
 }
 
+/**
+ * A legacy subcontractor valuation (OCTA-FIN-SUBVAL-064). Retained read-only:
+ * payment applications against a subcontract commitment replaced them, and no
+ * new valuations are accepted.
+ */
 export interface SubValuationRecord {
   id: string
   projectId: string
   ref: string
+  /** The subcontractor as typed at the time. Immutable. */
   subcontractor: string
+  /** The company it has since been attributed to, where the name resolved. */
+  company: { id: string; name: string } | null
   period: string
   workDone: number
   materialsOnSite: number
@@ -830,17 +838,27 @@ export const useSubValuations = (projectId: string) =>
     enabled: Boolean(projectId),
   })
 
-export const useCreateSubValuation = (projectId: string) => {
+/**
+ * Attributes a legacy valuation to a company. The free-text `subcontractor` is
+ * immutable — the API answers `SUB_VALUATION_NAME_IMMUTABLE` — so this is how a
+ * historical row is connected to a real party.
+ */
+export const useAttributeSubValuation = (projectId: string) => {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: (payload: Partial<SubValuationRecord>) =>
+    mutationFn: ({
+      valuationId,
+      companyId,
+    }: {
+      valuationId: string
+      companyId: string | null
+    }) =>
       apiClient
-        .post(`/projects/${projectId}/sub-valuations`, payload)
+        .patch(`/projects/${projectId}/sub-valuations/${valuationId}`, {
+          companyId,
+        })
         .then((response) => response.data.data as SubValuationRecord),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: subValKey(projectId) })
-      qc.invalidateQueries({ queryKey: cashFlowKey(projectId) })
-    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: subValKey(projectId) }),
   })
 }
 

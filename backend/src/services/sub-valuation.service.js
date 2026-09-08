@@ -7,13 +7,42 @@ const {
   toMoneyNumber,
 } = require('../utils/money');
 const auditService = require('./audit.service');
+const { normalizeCompanyName } = require('../utils/company-name');
 const {
   RECORD_TYPES,
   attachEvidenceToRecords,
   syncEvidenceReferences,
 } = require('./commercial-traceability.service');
 
+/**
+ * Legacy subcontractor valuations (OCTA-FIN-SUBVAL-064).
+ *
+ * These predate subcontract commitments. They name their subcontractor in free
+ * text, hold no schedule of values, and post nothing to the cost ledger — they
+ * only reach the project through cash flow. Subcontract commitments and their
+ * payment applications replaced all of that.
+ *
+ * So the module is **retained read-only**, not migrated and not retired:
+ *
+ * - **No new rows.** A free-text party is the record nothing downstream can
+ *   follow, which is the whole reason the replacement exists.
+ * - **Existing rows stay, and stay editable enough to be finished** — a
+ *   valuation left mid-flight has to be certifiable and payable, or the
+ *   migration strands real money.
+ * - **`subcontractor` is immutable.** It is the record of who was billed at the
+ *   time; attribution goes on `companyId` beside it, never over it.
+ * - **Certified and paid rows cannot be deleted.** They are history.
+ *
+ * Attribution is proposed by `attributionReport` and applied one row at a time.
+ * Names are never matched automatically, for the reason set out in
+ * `company-name.js`: two companies with near-identical names are usually two
+ * companies.
+ */
+
 const DEFAULT_RETENTION_RATE = 5;
+
+/** Statuses that record money the project has committed to or paid out. */
+const HISTORICAL_STATUSES = Object.freeze(['certified', 'paid']);
 
 const activityTraceSelect = {
   id: true,
@@ -36,6 +65,9 @@ const boqTraceSelect = {
 };
 
 const subValuationInclude = {
+  // Where a historical valuation has been attributed to a real company. The
+  // free-text `subcontractor` stays beside it as what was written at the time.
+  company: { select: { id: true, name: true } },
   activityLinks: {
     include: { activity: { select: activityTraceSelect } },
     orderBy: [{ createdAt: 'asc' }],
@@ -315,93 +347,23 @@ const listSubValuations = async ({ orgId, projectId }) => {
   return { rows: enrichedRows, summary };
 };
 
-const createSubValuation = async ({ orgId, projectId, payload, userId = null }) => {
-  const project = await ensureProject({ orgId, projectId });
-
-  const count = await prisma.subValuation.count({ where: { projectId } });
-  const ref = `SV-${String(count + 1).padStart(2, '0')}`;
-
-  const values = computeFinancials({
-    ...payload,
-    retentionRate: payload.retentionRate ?? resolveRetentionRate(project),
-  });
-
-  return prisma.$transaction(async (tx) => {
-    const created = await tx.subValuation.create({
-      data: {
-        projectId,
-        ref,
-        subcontractor: payload.subcontractor,
-        period: payload.period,
-        workDone: toMoneyNumber(payload.workDone),
-        materialsOnSite: toMoneyNumber(payload.materialsOnSite),
-        grossPayable: values.grossPayable,
-        retentionRate: values.retentionRate,
-        retention: values.retention,
-        backCharges: toMoneyNumber(payload.backCharges),
-        netPayable: values.netPayable,
-        status: payload.status || 'draft',
-        submittedDate: payload.submittedDate
-          ? new Date(payload.submittedDate)
-          : null,
-        certDate: payload.certDate ? new Date(payload.certDate) : null,
-        payDate: payload.payDate ? new Date(payload.payDate) : null,
-      },
-      include: subValuationInclude,
-    });
-
-    const activityTrace = await syncActivityLinks({
-      tx,
-      projectId,
-      subValuationId: created.id,
-      payload,
-    });
-    const allocationTrace = await syncAllocationLinks({
-      tx,
-      projectId,
-      subValuationId: created.id,
-      payload,
-      values,
-    });
-    const evidence = await syncEvidenceReferences({
-      tx,
-      projectId,
-      recordType: RECORD_TYPES.SUB_VALUATION,
-      recordId: created.id,
-      payload,
-      userId,
-    });
-
-    await auditService.recordEvent({
-      tx,
-      orgId,
-      projectId,
-      entityType: auditService.ENTITY_TYPES.SUB_VALUATION,
-      entityId: created.id,
-      action: auditService.ACTIONS.CREATED,
-      actorId: userId,
-      newStatus: created.status,
-      newSummary: summarizeSubValuation(created),
-      summary: {
-        transition: 'sub_valuation.create',
-        ref: created.ref,
-        netPayable: created.netPayable,
-        activityLinks: activityTrace?.count ?? 0,
-        allocationLinks: allocationTrace?.count ?? 0,
-        correspondenceLinks: evidence.correspondenceCount,
-        attachmentRefs: evidence.attachmentCount,
-      },
-      attachments: evidence.attachments,
-    });
-
-    const [enriched] = await attachEvidenceToRecords({
-      tx,
-      projectId,
-      recordType: RECORD_TYPES.SUB_VALUATION,
-      records: [created],
-    });
-    return enriched;
-  });
+/**
+ * Refused. Kept as a function rather than removed so the route answers with an
+ * explanation and a destination instead of a 404 that reads like a fault.
+ */
+const createSubValuation = async ({ orgId, projectId }) => {
+  await ensureProject({ orgId, projectId });
+  const error = new HttpError(
+    409,
+    'SUB_VALUATION_RETIRED',
+    'Subcontractor valuations have been replaced by payment applications against a subcontract commitment, which name the subcontractor company, carry a schedule of values, and post certified cost to the ledger. Existing valuations stay readable.',
+  );
+  error.details = {
+    replacedBy: 'sub_pay_app',
+    how: 'Raise the subcontract under Commercial → Commitments, then claim against it under Commercial → Pay applications.',
+    createPath: `/projects/${projectId}/pay-apps`,
+  };
+  throw error;
 };
 
 const updateSubValuation = async ({
@@ -425,18 +387,76 @@ const updateSubValuation = async ({
     );
   }
 
-  const nextValues = computeFinancials({
-    workDone: payload.workDone ?? existing.workDone,
-    materialsOnSite: payload.materialsOnSite ?? existing.materialsOnSite,
-    retentionRate: payload.retentionRate ?? existing.retentionRate,
-    backCharges: payload.backCharges ?? existing.backCharges,
-  });
+  // The free-text name records who was billed at the time. Attribution belongs
+  // on companyId beside it; rewriting the name would edit the historical record
+  // to look like something it was not.
+  if (
+    payload.subcontractor !== undefined &&
+    String(payload.subcontractor).trim() !== existing.subcontractor
+  ) {
+    const error = new HttpError(
+      409,
+      'SUB_VALUATION_NAME_IMMUTABLE',
+      `${existing.ref} was raised against "${existing.subcontractor}". That name is the record of who was billed and cannot be rewritten — attribute the valuation to a company instead.`,
+    );
+    error.details = { subcontractor: existing.subcontractor, attributeWith: 'companyId' };
+    throw error;
+  }
+
+  let companyId;
+  if (payload.companyId !== undefined) {
+    const id = payload.companyId ? String(payload.companyId).trim() : null;
+    if (id) {
+      const company = await prisma.company.findFirst({
+        where: { id, orgId },
+        select: { id: true },
+      });
+      if (!company) throw new HttpError(404, 'COMPANY_NOT_FOUND', 'Company not found');
+    }
+    companyId = id;
+  }
+
+  // A certified or paid valuation holds figures that were agreed. Nothing may
+  // restate them — not an edit, and not the recompute that a save would
+  // otherwise run over them as a side effect of attributing a company.
+  const frozen = HISTORICAL_STATUSES.includes(existing.status);
+  if (frozen) {
+    const MONEY_FIELDS = ['workDone', 'materialsOnSite', 'retentionRate', 'backCharges'];
+    const attempted = MONEY_FIELDS.filter(
+      (field) =>
+        payload[field] !== undefined &&
+        Number(payload[field]) !== Number(existing[field]),
+    );
+    if (attempted.length) {
+      const error = new HttpError(
+        409,
+        'SUB_VALUATION_HISTORICAL',
+        `${existing.ref} is ${existing.status}. Its figures were agreed and cannot be restated.`,
+      );
+      error.details = { ref: existing.ref, status: existing.status, fields: attempted };
+      throw error;
+    }
+  }
+
+  const nextValues = frozen
+    ? {
+        grossPayable: existing.grossPayable,
+        retentionRate: existing.retentionRate,
+        retention: existing.retention,
+        netPayable: existing.netPayable,
+      }
+    : computeFinancials({
+        workDone: payload.workDone ?? existing.workDone,
+        materialsOnSite: payload.materialsOnSite ?? existing.materialsOnSite,
+        retentionRate: payload.retentionRate ?? existing.retentionRate,
+        backCharges: payload.backCharges ?? existing.backCharges,
+      });
 
   return prisma.$transaction(async (tx) => {
     const updated = await tx.subValuation.update({
       where: { id: valuationId },
       data: {
-        subcontractor: payload.subcontractor ?? existing.subcontractor,
+        ...(companyId === undefined ? {} : { companyId }),
         period: payload.period ?? existing.period,
         workDone:
           payload.workDone !== undefined
@@ -560,6 +580,18 @@ const deleteSubValuation = async ({
     );
   }
 
+  // A certified or paid valuation is money the project committed to or paid
+  // out. Deleting it removes the only record that it happened.
+  if (HISTORICAL_STATUSES.includes(existing.status)) {
+    const error = new HttpError(
+      409,
+      'SUB_VALUATION_HISTORICAL',
+      `${existing.ref} is ${existing.status} and cannot be deleted — it is the record of ${toMoneyNumber(existing.netPayable)} ${existing.status === 'paid' ? 'paid to' : 'certified for'} ${existing.subcontractor}.`,
+    );
+    error.details = { ref: existing.ref, status: existing.status, netPayable: toMoneyNumber(existing.netPayable) };
+    throw error;
+  }
+
   await prisma.$transaction(async (tx) => {
     await auditService.recordEvent({
       tx,
@@ -583,7 +615,82 @@ const deleteSubValuation = async ({
   return { deleted: true };
 };
 
+/**
+ * Which company each legacy free-text name most likely meant.
+ *
+ * Proposes, and stops there. `normalizeCompanyName` folds punctuation and separators
+ * but deliberately not the legal form, so "ABC Steel LLC" and "ABC Steel Ltd"
+ * stay apart — they are usually two companies, and a financial record attached
+ * to the wrong one is worse than one attached to none.
+ *
+ * An unambiguous single match is offered as `suggested`; anything else is
+ * listed as `candidates` for a person to choose from.
+ */
+const attributionReport = async ({ orgId, projectId }) => {
+  await ensureProject({ orgId, projectId });
+
+  const rows = await prisma.subValuation.findMany({
+    where: { projectId },
+    select: {
+      id: true,
+      ref: true,
+      subcontractor: true,
+      companyId: true,
+      status: true,
+      netPayable: true,
+      company: { select: { id: true, name: true } },
+    },
+    orderBy: [{ ref: 'asc' }],
+  });
+
+  const companies = await prisma.company.findMany({
+    where: { orgId },
+    select: { id: true, name: true, nameKey: true },
+  });
+  const byKey = new Map();
+  for (const company of companies) {
+    const key = company.nameKey || normalizeCompanyName(company.name);
+    if (!key) continue;
+    byKey.set(key, [...(byKey.get(key) || []), { id: company.id, name: company.name }]);
+  }
+
+  const items = rows.map((row) => {
+    const key = normalizeCompanyName(row.subcontractor);
+    const candidates = byKey.get(key) || [];
+    return {
+      id: row.id,
+      ref: row.ref,
+      subcontractor: row.subcontractor,
+      status: row.status,
+      netPayable: toMoneyNumber(row.netPayable),
+      attributed: row.company ? { id: row.company.id, name: row.company.name } : null,
+      nameKey: key,
+      candidates,
+      // Only an unambiguous match is worth putting in front of someone as an
+      // answer; the rest is a question.
+      suggested: !row.companyId && candidates.length === 1 ? candidates[0] : null,
+    };
+  });
+
+  return {
+    projectId,
+    // Reported, never applied: attribution is a PATCH of one row at a time,
+    // made by a person who knows which company it was.
+    applyWith: `PATCH /projects/${projectId}/sub-valuations/{valuationId} { "companyId": "…" }`,
+    summary: {
+      total: items.length,
+      attributed: items.filter((item) => item.attributed).length,
+      suggested: items.filter((item) => item.suggested).length,
+      ambiguous: items.filter((item) => !item.attributed && item.candidates.length > 1).length,
+      unmatched: items.filter((item) => !item.attributed && item.candidates.length === 0).length,
+    },
+    items,
+  };
+};
+
 module.exports = {
+  HISTORICAL_STATUSES,
+  attributionReport,
   listSubValuations,
   createSubValuation,
   updateSubValuation,

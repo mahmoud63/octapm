@@ -115,8 +115,14 @@ const rebuildCashFlow = async ({ orgId, projectId }) => {
     },
   });
 
+  // Legacy subcontractor valuations (OCTA-FIN-SUBVAL-064): retained read-only,
+  // and still an outflow because they hold money that really did leave.
+  //
+  // Only certified and paid ones. A draft is a working figure somebody is still
+  // editing, and a submitted claim has not been agreed — counting either as cash
+  // out puts money in the forecast that nobody has undertaken to pay.
   const subRows = await prisma.subValuation.findMany({
-    where: { projectId },
+    where: { projectId, status: { in: ["certified", "paid"] } },
     select: {
       payDate: true,
       certDate: true,
