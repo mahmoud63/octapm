@@ -65,6 +65,7 @@ const WAITING = Object.freeze({
   sub_pay_app: {
     draft: { party: PARTY.SUBCONTRACTOR, transition: null, verb: "the claim to be submitted" },
     submitted: { party: PARTY.QS, transition: "sub_pay_app.approve", verb: "certification" },
+    under_review: { party: PARTY.QS, transition: "sub_pay_app.approve", verb: "certification" },
     approved: { party: PARTY.FINANCE, transition: "sub_pay_app.pay", verb: "payment" },
     paid: { party: NOBODY, transition: null, verb: null },
     rejected: { party: PARTY.SUBCONTRACTOR, transition: null, verb: "a corrected claim" },
@@ -81,11 +82,11 @@ const WAITING = Object.freeze({
 
   commitment: {
     draft: { party: PARTY.QS, transition: "commitment.submit", verb: "to be sent for approval" },
-    pending_approval: { party: PARTY.PM, transition: "commitment.approve", verb: "approval" },
+    pending: { party: PARTY.PM, transition: "commitment.approve", verb: "approval" },
     approved: { party: PARTY.QS, transition: "commitment.execute", verb: "the signed agreement" },
     executed: { party: NOBODY, transition: null, verb: null },
     closed: { party: NOBODY, transition: null, verb: null },
-    cancelled: { party: NOBODY, transition: null, verb: null },
+    void: { party: NOBODY, transition: null, verb: null },
   },
 
   direct_cost: {

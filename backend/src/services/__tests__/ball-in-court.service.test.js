@@ -90,7 +90,7 @@ describe('whose move it is', () => {
     expect(ballInCourt('sub_pay_app', { status: 'submitted' }, buyer).label).toMatch(/QS/);
     expect(ballInCourt('sub_pay_app', { status: 'approved' }, buyer).label).toMatch(/finance/i);
     expect(ballInCourt('bid_package', { status: 'closed' }, buyer).label).toMatch(/project manager/i);
-    expect(ballInCourt('commitment', { status: 'pending_approval' }, buyer).label).toMatch(/project manager/i);
+    expect(ballInCourt('commitment', { status: 'pending' }, buyer).label).toMatch(/project manager/i);
     expect(ballInCourt('direct_cost', { status: 'pending' }, buyer).label).toMatch(/project manager/i);
     expect(ballInCourt('long_lead_item', { status: 'ordered' }, buyer).label).toMatch(/delivery/i);
   });

@@ -33,6 +33,13 @@ const STATUS = Object.freeze({
   APPROVED: "approved",
   ISSUED: "issued",
   ACKNOWLEDGED: "acknowledged",
+  // Goods receipt moves an order through these two, and always has. They were
+  // missing from the vocabulary, so the register's own status filter refused
+  // them — a buyer could not ask which orders were part-delivered or
+  // delivered, which is most of an order's life after it is issued
+  // (OCTA-PROC-STATUS-095).
+  PARTIAL: "partial",
+  RECEIVED: "received",
   CLOSED: "closed",
   CANCELLED: "cancelled",
 });
