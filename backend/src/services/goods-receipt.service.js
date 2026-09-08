@@ -341,11 +341,11 @@ const receiveAgainstOrder = async ({ orgId, user, payload }) => {
     // (OCTA-PROC-RECEIPT-085).
     const receivingLineIds = [...new Set(lines.map((row) => row.poLineId).filter(Boolean))];
     if (receivingLineIds.length) {
-      await tx.$queryRaw`SELECT id FROM "ProcurementPoLine" WHERE id = ANY(${receivingLineIds}::text[]) FOR UPDATE`;
-      // Re-read behind the lock: the figures fetched with the order above were
-      // taken before it, and may already be out of date.
-      const fresh = await tx.procurementPoLine.findMany({ where: { id: { in: receivingLineIds } } });
-      const byId = new Map(fresh.map((row) => [row.id, row]));
+      // The lock and the true figures in one query: rows come back as they are
+      // at the moment they are locked, so there is no second read to go stale
+      // between the two.
+      const locked = await tx.$queryRaw`SELECT * FROM "ProcurementPoLine" WHERE id = ANY(${receivingLineIds}::text[]) FOR UPDATE`;
+      const byId = new Map((locked || []).map((row) => [row.id, row]));
       order.lines = order.lines.map((row) => ({ ...row, ...(byId.get(row.id) || {}) }));
     }
 

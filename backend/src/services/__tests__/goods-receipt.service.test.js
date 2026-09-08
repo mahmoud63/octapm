@@ -20,6 +20,10 @@ const mockPrisma = {
   // The requirement the material was ordered against, moved by the same
   // transaction that puts the stock away.
   activityMaterial: { update: jest.fn() },
+  // The receipt locks the lines it is about to change, so two lorries at the
+  // gate cannot both read the same starting figure. The lock returns nothing;
+  // what matters is that it is taken.
+  $queryRaw: jest.fn(async () => []),
   $transaction: (fn) => fn(mockPrisma),
 };
 
