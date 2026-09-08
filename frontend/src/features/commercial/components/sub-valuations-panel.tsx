@@ -38,8 +38,9 @@ export function SubValuationsPanel({ projectId }: { projectId: string }) {
             These valuations name their subcontractor as typed text and never
             reached actual cost. Claims are now made against a subcontract
             commitment, which names the company and posts certified cost to the
-            ledger. The {rows.length} valuation{rows.length === 1 ? '' : 's'} here
-            {rows.length === 1 ? ' stays' : ' stay'} readable.
+            ledger.
+            {rows.length > 0 &&
+              ` The ${rows.length} here ${rows.length === 1 ? 'stays' : 'stay'} readable.`}
           </p>
         </div>
         <Button asChild size='sm' variant='outline'>
