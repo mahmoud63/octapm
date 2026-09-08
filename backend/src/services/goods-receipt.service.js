@@ -1,6 +1,7 @@
 const { prisma } = require("../config/db");
 const { HttpError } = require("../utils/http-error");
 const inventory = require("./inventory.service");
+const procurement = require("./procurement.service");
 
 /**
  * Goods receipt against a purchase order, and the three-way match that follows
@@ -208,6 +209,28 @@ const resolveInventoryItem = async (tx, { orgId, user, line, requestedItemId }) 
  * send anything, so a lorry turning up against one means the order is wrong,
  * not the delivery.
  */
+
+const RECEIPT_PREFIX = "GRN-";
+
+/**
+ * The next delivery-note number for a project.
+ *
+ * Reads the highest number already issued rather than counting rows: counting
+ * gives two people receiving at the same moment the same answer, and rows that
+ * are later removed make the count go backwards onto numbers already used. The
+ * unique index on (projectId, receiptNumber) remains the real guarantee — this
+ * only stops it firing in ordinary use.
+ */
+const nextReceiptNumber = async (tx, projectId) => {
+  const latest = await tx.deliveryReceipt.findFirst({
+    where: { projectId, receiptNumber: { startsWith: RECEIPT_PREFIX } },
+    orderBy: { receiptNumber: "desc" },
+    select: { receiptNumber: true },
+  });
+  const highest = Number(String(latest?.receiptNumber || "").slice(RECEIPT_PREFIX.length)) || 0;
+  return `${RECEIPT_PREFIX}${String(highest + 1).padStart(5, "0")}`;
+};
+
 const RECEIVABLE_STATUSES = new Set(["issued", "acknowledged", "partial", "received"]);
 
 const receiveAgainstOrder = async ({ orgId, user, payload }) => {
@@ -219,7 +242,7 @@ const receiveAgainstOrder = async ({ orgId, user, payload }) => {
   return prisma.$transaction(async (tx) => {
     const order = await tx.procurementOrder.findFirst({
       where: { id: payload.orderId, project: { orgId } },
-      include: { lines: true },
+      include: { lines: true, project: true },
     });
     if (!order) throw new HttpError(404, "PO_NOT_FOUND", "Purchase order not found");
 
@@ -270,15 +293,16 @@ const receiveAgainstOrder = async ({ orgId, user, payload }) => {
       }
     }
 
-    const receiptCount = await tx.deliveryReceipt.count({ where: { projectId: order.projectId } });
     const receipt = await tx.deliveryReceipt.create({
       data: {
         projectId: order.projectId,
         orderId: order.id,
         packageId: order.packageId,
         supplierId: order.supplierId,
-        receiptNumber: receiptNumber || `GRN-${String(receiptCount + 1).padStart(5, "0")}`,
-        receivedBy: user.id,
+        dailyReportId: payload.dailyReportId || null,
+        receiptNumber: receiptNumber || (await nextReceiptNumber(tx, order.projectId)),
+        receivedAt: payload.receivedAt ? new Date(payload.receivedAt) : new Date(),
+        receivedBy: trimOrNull(payload.receivedBy) || user.id,
         warehouseLocation: warehouse.name,
         deliveryNote: trimOrNull(payload.deliveryNote),
         notes: trimOrNull(payload.notes),
@@ -369,17 +393,40 @@ const receiveAgainstOrder = async ({ orgId, user, payload }) => {
       // What was rejected never becomes stock: it goes back on the lorry. It is
       // recorded on the receipt line so the match can see it.
 
-      await tx.procurementPoLine.update({
+      const nextStatus =
+        num(line.receivedQty) + acceptedQty >= ordered - QTY_EPSILON ? "received" : "partial";
+      const updatedLine = await tx.procurementPoLine.update({
         where: { id: line.id },
         data: {
           receivedQty: round(num(line.receivedQty) + acceptedQty),
           rejectedQty: round(num(line.rejectedQty) + rejectedQty),
           inventoryItemId: item.id,
-          status:
-            num(line.receivedQty) + acceptedQty >= ordered - QTY_EPSILON
-              ? "received"
-              : "partial",
+          status: nextStatus,
         },
+      });
+
+      // The requirement this was ordered against. Without it the planner's
+      // material list still reads nought received after the lorry has been and
+      // gone — which is what happened while this was the only writer that did
+      // not do it (OCTA-PROC-RECEIPT-081).
+      if (line.activityMaterialId) {
+        await tx.activityMaterial.update({
+          where: { id: line.activityMaterialId },
+          data: {
+            receivedQty: { increment: acceptedQty },
+            status: nextStatus === "received" ? "received" : "partial",
+            updatedBy: user.id,
+          },
+        });
+      }
+
+      // And the lead-time alert, which is about whether this material arrives
+      // in time for the activity — a question a delivery obviously changes.
+      await procurement.syncLeadTimeAlert({
+        tx,
+        projectId: order.projectId,
+        project: order.project,
+        line: { ...line, ...updatedLine },
       });
     }
 

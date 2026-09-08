@@ -454,10 +454,20 @@ const syncLeadTimeAlert = async ({
       ? buildMaterialRiskRow(material)
       : buildPackageRiskRow(packageRow);
   const risk = computeProcurementRisk(riskRow, { project });
+  // The row is unique on (projectId, poLineId) AND on
+  // (projectId, activityMaterialId), so a line that names a material has to be
+  // looked up by the material or the second order for it collides: the lookup
+  // by line finds nothing, the create then breaks the material constraint, and
+  // the buyer gets a raw 500 for the ordinary act of ordering the same material
+  // twice — a top-up, a split delivery, a second supplier
+  // (OCTA-PROC-LEADALERT-082). One alert per material, pointing at the line
+  // that most recently changed its outlook.
   const where = {
     projectId,
     ...(line
-      ? { poLineId: line.id }
+      ? line.activityMaterialId
+        ? { activityMaterialId: line.activityMaterialId }
+        : { poLineId: line.id }
       : material
         ? { activityMaterialId: material.id }
         : { packageId: packageRow.id }),
@@ -1045,203 +1055,17 @@ const deriveLineStatus = ({ orderedQty, receivedQty, issuedQty, consumedQty }) =
   return 'ordered';
 };
 
-const recordDeliveryReceipt = async ({
-  orgId,
-  projectId,
-  orderId,
-  actor,
-  payload,
-}) => {
-  const project = await ensureProject({ orgId, projectId });
-  const order = await ensureOrder({ projectId, orderId });
-  await ensureDailyReport({
-    projectId,
-    dailyReportId: payload.dailyReportId,
-  });
-  if (!Array.isArray(payload.lines) || payload.lines.length === 0) {
-    throw new HttpError(
-      400,
-      'RECEIPT_LINES_REQUIRED',
-      'A delivery receipt requires at least one PO line',
-    );
-  }
-
-  const receiptLines = [];
-  for (const rawLine of payload.lines) {
-    const line = await ensurePoLine({
-      projectId,
-      orderId,
-      poLineId: rawLine.poLineId,
-    });
-    const dailyReportId = rawLine.dailyReportId || payload.dailyReportId || null;
-    await ensureDailyReport({
-      projectId,
-      dailyReportId,
-      activityId: line.activityId,
-    });
-    const acceptedQty = asPositive('acceptedQty', rawLine.acceptedQty);
-    const rejectedQty = asNonNegative(rawLine.rejectedQty);
-    const issuedQty = rawLine.issuedQty === undefined
-      ? payload.issueToActivity
-        ? acceptedQty
-        : 0
-      : asNonNegative(rawLine.issuedQty);
-
-    if (issuedQty > acceptedQty) {
-      throw new HttpError(
-        400,
-        'ISSUED_QTY_EXCEEDS_RECEIVED',
-        'Issued quantity cannot exceed accepted receipt quantity',
-      );
-    }
-
-    if (Number(line.receivedQty || 0) + acceptedQty > Number(line.orderedQty || 0)) {
-      throw new HttpError(
-        409,
-        'RECEIPT_QTY_EXCEEDS_ORDERED',
-        'Receipt quantity exceeds the ordered balance for this PO line',
-      );
-    }
-
-    receiptLines.push({
-      line,
-      acceptedQty,
-      rejectedQty,
-      issuedQty,
-      dailyReportId,
-      rawLine,
-    });
-  }
-
-  return prisma.$transaction(async (tx) => {
-    const receipt = await tx.deliveryReceipt.create({
-      data: {
-        projectId,
-        orderId,
-        packageId: order.packageId || null,
-        supplierId: order.supplierId || null,
-        dailyReportId: payload.dailyReportId || null,
-        receiptNumber: payload.receiptNumber,
-        receivedAt: parseNullableDate(payload.receivedAt, 'receivedAt') || new Date(),
-        receivedBy: trimOrNull(payload.receivedBy) || actor?.id || null,
-        warehouseLocation: trimOrNull(payload.warehouseLocation),
-        deliveryNote: trimOrNull(payload.deliveryNote),
-        status: payload.status || 'posted',
-        notes: trimOrNull(payload.notes),
-        createdBy: actor?.id || null,
-      },
-    });
-
-    const createdReceiptLines = [];
-    for (const {
-      line,
-      acceptedQty,
-      rejectedQty,
-      issuedQty,
-      dailyReportId,
-      rawLine,
-    } of receiptLines) {
-      const receiptLine = await tx.deliveryReceiptLine.create({
-        data: {
-          projectId,
-          receiptId: receipt.id,
-          orderId,
-          poLineId: line.id,
-          activityId: line.activityId,
-          activityMaterialId: line.activityMaterialId || null,
-          dailyReportId,
-          acceptedQty,
-          rejectedQty,
-          issuedQty,
-          notes: trimOrNull(rawLine.notes),
-        },
-      });
-      createdReceiptLines.push(receiptLine);
-
-      const nextReceivedQty = Number(line.receivedQty || 0) + acceptedQty;
-      const nextRejectedQty = Number(line.rejectedQty || 0) + rejectedQty;
-      const nextIssuedQty = Number(line.issuedQty || 0) + issuedQty;
-      const nextStatus = deriveLineStatus({
-        orderedQty: Number(line.orderedQty || 0),
-        receivedQty: nextReceivedQty,
-        issuedQty: nextIssuedQty,
-        consumedQty: Number(line.consumedQty || 0),
-      });
-      const updatedLine = await tx.procurementPoLine.update({
-        where: { id: line.id },
-        data: {
-          receivedQty: nextReceivedQty,
-          rejectedQty: nextRejectedQty,
-          issuedQty: nextIssuedQty,
-          status: nextStatus,
-        },
-      });
-
-      if (line.activityMaterialId) {
-        await tx.activityMaterial.update({
-          where: { id: line.activityMaterialId },
-          data: {
-            receivedQty: { increment: acceptedQty },
-            issuedQty: { increment: issuedQty },
-            status: nextStatus === 'issued' ? 'issued' : 'partial',
-            updatedBy: actor?.id || null,
-          },
-        });
-      }
-
-      await syncLeadTimeAlert({
-        tx,
-        projectId,
-        project,
-        line: { ...line, ...updatedLine },
-      });
-    }
-
-    const updatedLines = await tx.procurementPoLine.findMany({
-      where: { orderId },
-    });
-    const nextOrderStatus = deriveOrderStatus(updatedLines);
-    await tx.procurementOrder.update({
-      where: { id: orderId },
-      data: {
-        status: nextOrderStatus,
-        warehouseStatus:
-          nextOrderStatus === 'closed'
-            ? 'issued'
-            : nextOrderStatus === 'received'
-              ? 'received'
-              : 'partial',
-        receivedAt:
-          ['received', 'closed'].includes(nextOrderStatus) && !order.receivedAt
-            ? new Date()
-            : order.receivedAt,
-        issuedAt:
-          nextOrderStatus === 'closed' && !order.issuedAt
-            ? new Date()
-            : order.issuedAt,
-        updatedBy: actor?.id || null,
-      },
-    });
-
-    await recordAudit({
-      tx,
-      orgId,
-      projectId,
-      entityType: ENTITY_TYPES.DELIVERY_RECEIPT,
-      entityId: receipt.id,
-      action: ACTIONS.CREATED,
-      actor,
-      newStatus: receipt.status,
-      summary: {
-        receiptNumber: receipt.receiptNumber,
-        orderId,
-        lineCount: createdReceiptLines.length,
-      },
-    });
-
-    return { receipt, lines: createdReceiptLines };
-  });
-};
+/**
+ * Delivery receipts are written by `goods-receipt.service`, not here.
+ *
+ * There used to be a second writer at this point, reached from the procurement
+ * route. It recorded the delivery and updated the order, but it put nothing on
+ * a shelf and had no view of the warehouse — so a delivery booked from
+ * Procurement left the stock empty, and every guard added to the other writer
+ * (an order that was never issued, a delivery note posted twice) had to be
+ * remembered here and was not. One economic event, one writer
+ * (OCTA-PROC-RECEIPT-081).
+ */
 
 const recordActivityMaterialUsage = async ({
   orgId,
@@ -1572,7 +1396,6 @@ module.exports = {
   listPurchaseOrders,
   listSuppliers,
   recordActivityMaterialUsage,
-  recordDeliveryReceipt,
   resolveLeadTimeAlert,
   syncLeadTimeAlert,
   updateLeadTimeAlert,

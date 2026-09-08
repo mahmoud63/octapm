@@ -21,9 +21,12 @@ const mockActivityService = {
 const mockCostService = {
   updateCostRecord: jest.fn(),
 };
+const mockGoodsReceiptService = { receiveAgainstOrder: jest.fn() };
 const mockProcurementService = {
   createPurchaseOrder: jest.fn(),
-  recordDeliveryReceipt: jest.fn(),
+  // Delivery receipts are written by goods-receipt.service now; the
+  // procurement route delegates to it, so that is what this asserts against.
+  syncLeadTimeAlert: jest.fn(),
   acknowledgeLeadTimeAlert: jest.fn(),
   resolveLeadTimeAlert: jest.fn(),
   updateLeadTimeAlert: jest.fn(),
@@ -187,6 +190,7 @@ jest.mock("../../services/schedule.service", () => mockScheduleService);
 jest.mock("../../services/activity.service", () => mockActivityService);
 jest.mock("../../services/cost.service", () => mockCostService);
 jest.mock("../../services/procurement.service", () => mockProcurementService);
+jest.mock("../../services/goods-receipt.service", () => mockGoodsReceiptService);
 jest.mock("../../services/material.service", () => mockMaterialService);
 jest.mock("../../services/ipc.service", () => mockIpcService);
 jest.mock("../../services/user.service", () => mockUserService);
@@ -244,6 +248,7 @@ const roles = [
 
 const ids = {
   activity: "11111111-1111-4111-8111-111111111111",
+  warehouse: "11111111-1111-4111-8111-111111111112",
   cost: "22222222-2222-4222-8222-222222222222",
   revision: "33333333-3333-4333-8333-333333333333",
   report: "44444444-4444-4444-8444-444444444444",
@@ -463,11 +468,12 @@ const routeSpecs = [
     path: `/projects/project-1/procurement/purchase-orders/${ids.order}/receipts`,
     body: {
       receiptNumber: "GRN-001",
+      warehouseId: ids.warehouse,
       lines: [{ poLineId: ids.line, acceptedQty: 1, issuedQty: 1 }],
     },
     allowed: ["pm", "procurement", "warehouse"],
     expectedStatus: 201,
-    mock: mockProcurementService.recordDeliveryReceipt,
+    mock: mockGoodsReceiptService.receiveAgainstOrder,
     response: { receipt: { receiptNumber: "GRN-001" } },
   },
   {

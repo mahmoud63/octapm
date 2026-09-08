@@ -9,11 +9,17 @@
 const mockPrisma = {
   procurementOrder: { findFirst: jest.fn(), findMany: jest.fn(), update: jest.fn() },
   procurementPoLine: { findMany: jest.fn(), update: jest.fn() },
-  deliveryReceipt: { create: jest.fn(), count: jest.fn() },
+  // findFirst backs both the duplicate-delivery-note check and the next
+  // receipt number, which reads the highest already issued rather than
+  // counting rows.
+  deliveryReceipt: { create: jest.fn(), count: jest.fn(), findFirst: jest.fn() },
   deliveryReceiptLine: { create: jest.fn() },
   directCost: { findFirst: jest.fn() },
   inventoryItem: { findFirst: jest.fn(), create: jest.fn() },
   warehouse: { findFirst: jest.fn() },
+  // The requirement the material was ordered against, moved by the same
+  // transaction that puts the stock away.
+  activityMaterial: { update: jest.fn() },
   $transaction: (fn) => fn(mockPrisma),
 };
 
@@ -21,8 +27,12 @@ const mockInventory = { postMovement: jest.fn(async () => ({ id: "txn-1" })) };
 
 jest.mock("../../config/db", () => ({ prisma: mockPrisma }));
 jest.mock("../inventory.service", () => mockInventory);
+// The lead-time alert is procurement's own calculation; that it is asked for is
+// what matters here, and it has its own tests.
+jest.mock("../procurement.service", () => ({ syncLeadTimeAlert: jest.fn() }));
 
 const service = require("../goods-receipt.service");
+const procurement = require("../procurement.service");
 
 const ORG = "org-1";
 const USER = { id: "user-store", role: "warehouse" };
@@ -204,6 +214,71 @@ describe("goods receipt", () => {
     mockPrisma.procurementPoLine.findMany.mockResolvedValue([
       poLine({ receivedQty: 950 }),
     ]);
+  });
+
+  /**
+   * What the other writer did and this one did not.
+   *
+   * While Procurement had a receipt writer of its own, it was the only path
+   * that moved the material requirement and refreshed the lead-time alert — so
+   * a delivery booked through the warehouse, which is the path the product's
+   * own screen uses, left the planner's material list reading nought received
+   * after the lorry had been and gone (OCTA-PROC-RECEIPT-081).
+   */
+  it("moves the requirement the material was ordered against", async () => {
+    mockPrisma.procurementOrder.findFirst.mockResolvedValue({
+      id: "order-1",
+      ref: "PO-0001",
+      status: "issued",
+      projectId: "project-1",
+      packageId: null,
+      supplierId: null,
+      project: { id: "project-1" },
+      lines: [poLine({ activityMaterialId: "material-7" })],
+    });
+
+    await service.receiveAgainstOrder({
+      orgId: ORG,
+      user: USER,
+      payload: {
+        orderId: "order-1",
+        warehouseId: "wh-1",
+        lines: [{ poLineId: "line-1", acceptedQty: 400 }],
+      },
+    });
+
+    expect(mockPrisma.activityMaterial.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: "material-7" },
+        data: expect.objectContaining({ receivedQty: { increment: 400 }, status: "partial" }),
+      })
+    );
+    expect(procurement.syncLeadTimeAlert).toHaveBeenCalled();
+  });
+
+  it("leaves the material alone when the line was not ordered against one", async () => {
+    mockPrisma.procurementOrder.findFirst.mockResolvedValue({
+      id: "order-1",
+      ref: "PO-0001",
+      status: "issued",
+      projectId: "project-1",
+      packageId: null,
+      supplierId: null,
+      project: { id: "project-1" },
+      lines: [poLine({ activityMaterialId: null })],
+    });
+
+    await service.receiveAgainstOrder({
+      orgId: ORG,
+      user: USER,
+      payload: {
+        orderId: "order-1",
+        warehouseId: "wh-1",
+        lines: [{ poLineId: "line-1", acceptedQty: 400 }],
+      },
+    });
+
+    expect(mockPrisma.activityMaterial.update).not.toHaveBeenCalled();
   });
 
   it("posts the stock, the receipt line and the order's progress together", async () => {

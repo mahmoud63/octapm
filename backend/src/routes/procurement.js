@@ -7,6 +7,9 @@ const { requirePermission } = require('../middleware/rbac');
 const { validate } = require('../middleware/validate');
 const { moneyBody } = require('../utils/money');
 const procurementService = require('../services/procurement.service');
+const goodsReceiptService = require('../services/goods-receipt.service');
+const { prisma } = require('../config/db');
+const { HttpError } = require('../utils/http-error');
 
 const router = express.Router({ mergeParams: true });
 router.use(authenticate);
@@ -206,6 +209,49 @@ router.post(
   }),
 );
 
+
+/**
+ * Where the goods went.
+ *
+ * Receiving stock needs a real warehouse, not a line of free text — free text
+ * is why deliveries booked here used to create nothing. Take the one the caller
+ * named; failing that, the project's own warehouse when it has exactly one;
+ * failing that, the central warehouse when there is exactly one. Never choose
+ * between several, and never fall through silently: a delivery that cannot say
+ * where it went is refused, because the alternative is a receipt that looks
+ * posted and leaves the shelf empty.
+ */
+const resolveReceiptWarehouse = async ({ orgId, projectId, requested }) => {
+  if (requested) return requested;
+
+  const candidates = await prisma.warehouse.findMany({
+    where: { orgId, status: 'active', OR: [{ projectId }, { projectId: null }] },
+    select: { id: true, name: true, code: true, projectId: true },
+    orderBy: { name: 'asc' },
+  });
+  const ownedByProject = candidates.filter((row) => row.projectId === projectId);
+  const central = candidates.filter((row) => row.projectId === null);
+  const chosen =
+    ownedByProject.length === 1
+      ? ownedByProject[0]
+      : central.length === 1
+        ? central[0]
+        : null;
+  if (chosen) return chosen.id;
+
+  const error = new HttpError(
+    400,
+    'WAREHOUSE_REQUIRED_FOR_RECEIPT',
+    candidates.length
+      ? 'Say which warehouse the delivery went to — this project has more than one to choose from.'
+      : 'This delivery has nowhere to go: the project has no active warehouse. Create one, then receive against it.',
+  );
+  error.details = {
+    warehouses: candidates.map(({ id, name, code }) => ({ id, name, code })),
+  };
+  throw error;
+};
+
 router.post(
   '/purchase-orders/:orderId/receipts',
   requirePermission('procurement', 'submit', { transition: 'receipt.post' }),
@@ -214,7 +260,7 @@ router.post(
     body('receiptNumber').isString().trim().notEmpty(),
     optionalDate('receivedAt'),
     body('receivedBy').optional({ nullable: true }).isString().trim(),
-    body('warehouseLocation').optional({ nullable: true }).isString().trim(),
+    optionalUuid('warehouseId'),
     body('deliveryNote').optional({ nullable: true }).isString().trim(),
     optionalUuid('dailyReportId'),
     body('issueToActivity').optional().isBoolean().toBoolean(),
@@ -229,12 +275,23 @@ router.post(
     validate,
   ],
   asyncHandler(async (req, res) => {
-    const result = await procurementService.recordDeliveryReceipt({
+    // One receipt, two doors. Procurement and the warehouse may both start the
+    // job, but a delivery is a single economic event and there is one writer
+    // for it — the goods-receipt service, which puts the stock away, values it,
+    // carries the buyer's coding onto the stock ledger and refuses a delivery
+    // against an order nobody ever sent. While this route had a writer of its
+    // own it had none of that: it recorded deliveries that created no stock at
+    // all, and accepted them against orders still sitting in "planned"
+    // (OCTA-PROC-RECEIPT-081).
+    const warehouseId = await resolveReceiptWarehouse({
       orgId: req.user.orgId,
       projectId: req.params.projectId,
-      orderId: req.params.orderId,
-      actor: req.user,
-      payload: req.body,
+      requested: req.body.warehouseId,
+    });
+    const result = await goodsReceiptService.receiveAgainstOrder({
+      orgId: req.user.orgId,
+      user: req.user,
+      payload: { ...req.body, orderId: req.params.orderId, warehouseId },
     });
     return sendSuccess(res, result, 201);
   }),

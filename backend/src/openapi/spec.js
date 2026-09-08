@@ -5276,7 +5276,11 @@ const components = {
         receiptNumber: { type: "string" },
         receivedAt: nullableDateString,
         receivedBy: { type: "string", nullable: true },
-        warehouseLocation: { type: "string", nullable: true },
+        warehouseId: {
+          ...nullableUuid,
+          description:
+            "The warehouse the delivery went into. Omit it and the project's own warehouse is used when it has exactly one, otherwise the single central warehouse; when neither is unambiguous the receipt is refused with WAREHOUSE_REQUIRED_FOR_RECEIPT rather than recording a delivery that creates no stock. Replaces the free-text warehouseLocation, which is still readable on historical receipts but no longer written.",
+        },
         deliveryNote: { type: "string", nullable: true },
         dailyReportId: nullableUuid,
         issueToActivity: { type: "boolean" },
