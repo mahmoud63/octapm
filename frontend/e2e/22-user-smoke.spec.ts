@@ -2,6 +2,10 @@ import { expect, test, type Page } from '@playwright/test'
 import { openProject, signIn, watchForProblems } from './support'
 import { observe } from './support-ux'
 
+// This file signs in twice through the form and makes no API calls of its own,
+// so it needs no token cache — but it runs alongside specs that do, which is
+// why those cache.
+
 /**
  * A user-oriented smoke test.
  *

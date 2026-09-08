@@ -112,3 +112,29 @@ export const observe = (tag: string, value: unknown) => {
   // eslint-disable-next-line no-console
   console.log(`UX_OBSERVE ${tag} ${JSON.stringify(value)}`)
 }
+
+/**
+ * One bearer token per persona, for the whole worker.
+ *
+ * A spec that reads back what the screens did makes dozens of API calls, and
+ * signing in for each of them exhausts the login rate limit — which then fails
+ * the *next* spec, so the whole suite reports failures that have nothing to do
+ * with the product. The token does not depend on the request context, so it can
+ * be borrowed.
+ */
+const tokens = new Map<string, Promise<string>>()
+
+export function cachedToken(
+  who: string,
+  fetchToken: () => Promise<string>,
+): Promise<string> {
+  const existing = tokens.get(who)
+  if (existing) return existing
+  const fresh = fetchToken().catch((error) => {
+    // A failed sign-in must not be remembered as the answer.
+    tokens.delete(who)
+    throw error
+  })
+  tokens.set(who, fresh)
+  return fresh
+}

@@ -1,6 +1,6 @@
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test'
 import { API, apiClient, apiGet, apiToken, openProject, signIn } from './support'
-import { Journey, observe } from './support-ux'
+import { Journey, cachedToken, observe } from './support-ux'
 
 /**
  * The whole subcontractor lifecycle, through the screens, as four people.
@@ -25,7 +25,10 @@ async function withApi<T>(
 ) {
   const client = await apiClient()
   try {
-    return await fn(client, await apiToken(client, who))
+    // One sign-in per persona for the whole file: a spec that reads back what
+    // the screens did makes dozens of calls, and signing in for each burns the
+    // login budget the rest of the suite needs.
+    return await fn(client, await cachedToken(who, () => apiToken(client, who)))
   } finally {
     await client.dispose()
   }
