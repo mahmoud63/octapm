@@ -6,7 +6,8 @@ const {
   deriveBallInCourt,
   resolveAssignmentReferences,
 } = require("./workflow-support.service");
-const { ballInCourt } = require("./ball-in-court.service");
+const { ballInCourt, WAITING } = require("./ball-in-court.service");
+const { normalizeRoleId } = require("../config/permissions");
 const { waitingState: poWaitingState } = require("./purchase-order.service");
 
 /**
@@ -374,6 +375,11 @@ const DERIVED_MODELS = Object.freeze({
     // delivery question, and the register already knows how to ask it.
     extraFields: ["warehouseStatus"],
     waitingState: poWaitingState,
+    // The waiting state of an order out with a supplier is a delivery
+    // question, so `issued` and `acknowledged` can each become `partial` or
+    // `received` once stock arrives. Those stored statuses have to be in the
+    // query even though nobody waits on them by name.
+    derivedFrom: ["issued", "acknowledged"],
     // The workspace calls this one "procurement_order" when it opens a
     // record from a URL. Our own name for the type is not that, and a link
     // built from the wrong one loads the register and opens nothing — which
@@ -404,9 +410,29 @@ const DERIVED_MODELS = Object.freeze({
   },
 });
 
+/**
+ * The statuses of this record type that are actually this person's move.
+ *
+ * Narrowing the query rather than the results matters for correctness, not
+ * just speed: `take` applies before any filtering, so on a project with more
+ * purchase orders than the page size a buyer's own drafts could fall outside
+ * the window and simply not appear. It also means a QS never queries the
+ * purchase-order table at all.
+ */
+const myStatuses = (recordType, role, config) => {
+  const table = WAITING[recordType] || {};
+  const mine = Object.entries(table)
+    .filter(([, waiting]) => waiting?.party?.kind === "role" && waiting.party.role === role)
+    .map(([status]) => status);
+  if (!mine.length) return [];
+  return [...new Set([...mine, ...(config.derivedFrom || [])])];
+};
+
 const listDerivedItems = async ({ projectIds, role, limit }) => {
   if (!role || !projectIds.length) return [];
   const items = [];
+
+  const viewerRole = normalizeRoleId(role);
 
   for (const [recordType, config] of Object.entries(DERIVED_MODELS)) {
     const model = prisma[config.model];
@@ -414,8 +440,10 @@ const listDerivedItems = async ({ projectIds, role, limit }) => {
     // fails on it against the real client. Here it must not take down the
     // whole action centre for the record types that do work.
     if (!model?.findMany) continue;
+    const statuses = myStatuses(recordType, viewerRole, config);
+    if (!statuses.length) continue;
     const rows = await model.findMany({
-      where: { projectId: { in: projectIds } },
+      where: { projectId: { in: projectIds }, status: { in: statuses } },
       select: {
         id: true,
         projectId: true,
