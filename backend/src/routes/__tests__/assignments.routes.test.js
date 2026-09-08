@@ -57,6 +57,9 @@ describe("assignment routes", () => {
     expect(mockService.listMyOpenItems).toHaveBeenCalledWith({
       orgId: "org-1",
       userId: "user-1",
+      // The role decides the derived half of the list: a purchase order
+      // waiting on approval names a role, not a stored user id.
+      role: "warehouse",
       projectIds: ["project-1"],
       limit: 25,
     });

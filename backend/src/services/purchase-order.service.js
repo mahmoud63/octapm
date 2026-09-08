@@ -655,6 +655,7 @@ const updateOrder = async ({ orgId, projectId, orderId, actor, payload = {} }) =
 };
 
 module.exports = {
+  waitingState,
   EDITABLE_STATUSES,
   INVOICE_STATUS,
   LIFECYCLE_LABEL,

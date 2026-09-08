@@ -1,3 +1,4 @@
+import { NeedsYouPanel } from './needs-you-panel'
 import { lazy, Suspense, useCallback, useMemo, useState } from 'react'
 import { AxiosError } from 'axios'
 import { Link, useNavigate } from '@tanstack/react-router'
@@ -616,6 +617,7 @@ export function ProjectDetail({
       case 'overview':
         return (
           <div className='space-y-4'>
+            <NeedsYouPanel projectId={projectId} />
             <HealthDashboard projectId={projectId} />
             <ProjectOverview project={project} parties={activeProjectParties} />
           </div>

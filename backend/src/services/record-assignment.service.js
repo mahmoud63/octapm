@@ -6,6 +6,8 @@ const {
   deriveBallInCourt,
   resolveAssignmentReferences,
 } = require("./workflow-support.service");
+const { ballInCourt } = require("./ball-in-court.service");
+const { waitingState: poWaitingState } = require("./purchase-order.service");
 
 /**
  * Cross-record accountability (OCTA-DATA-REFS-004): which records still carry
@@ -347,7 +349,126 @@ const dueDateOf = (row) =>
  * Everything the user is accountable for (owner, reviewer, approver,
  * assignee, or ball in court) that is still open, across the given projects.
  */
-const listMyOpenItems = async ({ orgId, userId, projectIds = [], limit = 200 }) => {
+/**
+ * Commercial and procurement records, whose ball-in-court is derived rather
+ * than assigned.
+ *
+ * The action centre was built for records that name a person: an NCR has an
+ * assignee, an RFI has a ball-in-court user. Nothing in commercial or
+ * procurement does — a purchase order waiting on approval is waiting on
+ * whoever holds the PM role, not on a stored user id. So none of it appeared
+ * on the one screen that answers "what needs my attention today?", and a
+ * buyer with eleven orders to issue saw an empty list (OCTA-UX-ACTION-098).
+ *
+ * These are folded into the same list rather than given a competing one: same
+ * shape, same sort, same deep link.
+ */
+const DERIVED_MODELS = Object.freeze({
+  purchase_order: {
+    model: "procurementOrder",
+    label: "Purchase order",
+    titleField: "item",
+    workspaceModule: "procurement",
+    workspaceChild: "purchase-orders",
+    // Once an order is out with the supplier the useful question is a
+    // delivery question, and the register already knows how to ask it.
+    extraFields: ["warehouseStatus"],
+    waitingState: poWaitingState,
+    // The workspace calls this one "procurement_order" when it opens a
+    // record from a URL. Our own name for the type is not that, and a link
+    // built from the wrong one loads the register and opens nothing — which
+    // is what happened, silently, because a deep link that misses just shows
+    // the list (OCTA-UX-ACTION-099).
+    source: "procurement_order",
+  },
+  commitment: {
+    model: "commitment",
+    label: "Commitment",
+    titleField: "title",
+    workspaceModule: "commercial",
+    workspaceChild: "commitments",
+  },
+  sub_pay_app: {
+    model: "subPayApp",
+    label: "Payment application",
+    titleField: "periodLabel",
+    workspaceModule: "commercial",
+    workspaceChild: "pay-apps",
+  },
+  bid_package: {
+    model: "bidPackage",
+    label: "Bid package",
+    titleField: "title",
+    workspaceModule: "commercial",
+    workspaceChild: "bids",
+  },
+});
+
+const listDerivedItems = async ({ projectIds, role, limit }) => {
+  if (!role || !projectIds.length) return [];
+  const items = [];
+
+  for (const [recordType, config] of Object.entries(DERIVED_MODELS)) {
+    const model = prisma[config.model];
+    // A name that does not exist is a bug, and record-assignment.models.test
+    // fails on it against the real client. Here it must not take down the
+    // whole action centre for the record types that do work.
+    if (!model?.findMany) continue;
+    const rows = await model.findMany({
+      where: { projectId: { in: projectIds } },
+      select: {
+        id: true,
+        projectId: true,
+        ref: true,
+        status: true,
+        updatedAt: true,
+        [config.titleField]: true,
+        ...Object.fromEntries((config.extraFields || []).map((field) => [field, true])),
+        project: { select: { id: true, name: true } },
+      },
+      take: limit,
+      orderBy: [{ updatedAt: "desc" }],
+    });
+
+    for (const row of rows) {
+      // Only what is actually this person's move. "You are permitted to do
+      // this" would put nearly every record in the project on a PM's list.
+      const status = config.waitingState ? config.waitingState(row) : row.status;
+      const waiting = ballInCourt(recordType, { ...row, status }, { role });
+      if (waiting.state !== "yours") continue;
+      items.push({
+        recordType,
+        label: config.label,
+        recordId: row.id,
+        ref: row.ref,
+        title: row[config.titleField] || row.ref,
+        status,
+        projectId: row.projectId,
+        projectName: row.project?.name || null,
+        roles: [],
+        ballInCourt: true,
+        derived: true,
+        dueDate: null,
+        overdue: false,
+        updatedAt: toIso(row.updatedAt),
+        target: {
+          projectId: row.projectId,
+          module: config.workspaceModule,
+          child: config.workspaceChild,
+          recordType,
+          // What the workspace expects in ?source=, which is not always our
+          // name for the record type.
+          source: config.source || recordType,
+          recordId: row.id,
+        },
+      });
+    }
+  }
+
+  return items;
+};
+
+const listMyOpenItems = async ({ orgId, userId, role = null, projectIds = [], limit = 200 }) => {
   if (!userId || !projectIds.length) {
     return { items: [], summary: { total: 0, overdue: 0, ballInCourt: 0, byType: {} } };
   }
@@ -411,6 +532,8 @@ const listMyOpenItems = async ({ orgId, userId, projectIds = [], limit = 200 }) 
     }
   }
 
+  items.push(...(await listDerivedItems({ projectIds, role, limit })));
+
   items.sort((a, b) => {
     if (a.ballInCourt !== b.ballInCourt) return a.ballInCourt ? -1 : 1;
     if (a.overdue !== b.overdue) return a.overdue ? -1 : 1;
@@ -434,6 +557,7 @@ const listMyOpenItems = async ({ orgId, userId, projectIds = [], limit = 200 }) 
 };
 
 module.exports = {
+  DERIVED_MODELS,
   ASSIGNABLE_FIELDS,
   RECORD_MODELS,
   RECORD_TYPE_IDS,

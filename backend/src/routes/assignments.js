@@ -21,6 +21,7 @@ router.get(
     const result = await recordAssignmentService.listMyOpenItems({
       orgId: req.user.orgId,
       userId: req.user.id,
+      role: getEffectiveRole(req),
       projectIds: [req.params.projectId],
       limit: req.query.limit || 200,
     });
