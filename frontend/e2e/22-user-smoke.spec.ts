@@ -297,6 +297,14 @@ test.describe('user smoke test across the portal', () => {
     // Deep-link into a record and back out, the way a notification does.
     await page.goto(`/projects/${projectId}/commercial/pay-apps`)
     await expect(page.getByTestId('uat-payapps-panel')).toBeVisible({ timeout: 30_000 })
+    // The panel is the outer container and paints before its rows arrive, so
+    // counting the moment it appears is a race — and one the register loses
+    // more often the more applications the project has. Wait for the first row,
+    // which fails as an empty register rather than as a puzzling count of nought.
+    await expect(
+      page.getByTestId('uat-payapp-row').first(),
+      'the register lists what has been raised',
+    ).toBeVisible({ timeout: 30_000 })
     const rows = await page.getByTestId('uat-payapp-row').count()
     observe('PAYAPP_ROWS_VISIBLE', rows)
     expect(rows, 'the register lists what has been raised').toBeGreaterThan(0)
