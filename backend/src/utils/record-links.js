@@ -79,6 +79,11 @@ const encode = (value) => encodeURIComponent(String(value));
 /**
  * Absolute app path for a record. Unknown record types open the project root
  * so a link is never broken, only less precise.
+ *
+ * `source` carries the record type alongside the id because that is what the
+ * module dashboards key on when deciding which record to open — a link with
+ * only `?recordId=` lands on the right tab and opens nothing, which is what
+ * every notification and comment link did.
  */
 const recordWorkspacePath = ({ projectId, recordType, recordId = null }) => {
   const target = RECORD_WORKSPACE[recordType];
@@ -91,7 +96,9 @@ const recordWorkspacePath = ({ projectId, recordType, recordId = null }) => {
   const base = target
     ? `/projects/${encode(projectId)}/${target.module}${target.child ? `/${target.child}` : ""}`
     : `/projects/${encode(projectId)}`;
-  return recordId ? `${base}?recordId=${encode(recordId)}` : base;
+  return recordId
+    ? `${base}?recordId=${encode(recordId)}&source=${encode(recordType)}`
+    : base;
 };
 
 module.exports = {

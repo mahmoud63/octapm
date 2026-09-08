@@ -114,11 +114,16 @@ router.post(
   asyncHandler(async (req, res) => sendSuccess(res, await service.rejectPayApp({ ...scope(req), payAppId: req.params.payAppId, actor: actor(req), code: req.body.code, reason: req.body.reason }))),
 );
 
+/**
+ * Back to draft. From rejected that is an ordinary resubmission; from approved
+ * it revokes the certificate and reverses the cost it posted, so it needs the
+ * approval permission and a stated reason.
+ */
 router.post(
   "/:payAppId/reopen",
   requirePermission("sub_pay_app", "update"),
-  [param("payAppId").isUUID(), validate],
-  asyncHandler(async (req, res) => sendSuccess(res, await service.reopenPayApp({ ...scope(req), payAppId: req.params.payAppId, actor: actor(req), viewer: viewer(req) }))),
+  [param("payAppId").isUUID(), body("reason").optional({ nullable: true }).isString().trim().isLength({ max: 2000 }), validate],
+  asyncHandler(async (req, res) => sendSuccess(res, await service.reopenPayApp({ ...scope(req), payAppId: req.params.payAppId, actor: actor(req), viewer: viewer(req), reason: req.body?.reason ?? null }))),
 );
 
 router.post(

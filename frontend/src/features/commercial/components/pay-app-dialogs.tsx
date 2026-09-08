@@ -526,6 +526,8 @@ export function PayAppDetailDialog({
   const [approving, setApproving] = useState(false)
   const [complianceReason, setComplianceReason] = useState('')
   const [overClaimReason, setOverClaimReason] = useState('')
+  const [revoking, setRevoking] = useState(false)
+  const [revokeReason, setRevokeReason] = useState('')
   const [paying, setPaying] = useState(false)
   const [payAmount, setPayAmount] = useState('')
   const [payReference, setPayReference] = useState('')
@@ -596,11 +598,21 @@ export function PayAppDetailDialog({
                       Compliance: {complianceProblems.join(', ')}
                     </Badge>
                   )}
+                {/* This has been certified before. Anyone reading it needs to
+                    know that, and why the earlier certificate was taken back. */}
+                {payApp.certificationRevision > 0 && (
+                  <Badge variant='outline' data-testid='uat-payapp-revision'>
+                    Revision {payApp.certificationRevision}
+                  </Badge>
+                )}
               </div>
               <DialogDescription>
                 {payApp.commitment?.ref} {payApp.commitment?.title} ·{' '}
                 {payApp.commitment?.vendor?.name ?? 'no vendor'} · retention{' '}
                 {payApp.retentionRate}%
+                {payApp.revokedReason
+                  ? ` · earlier certification revoked: ${payApp.revokedReason}`
+                  : ''}
               </DialogDescription>
             </DialogHeader>
 
@@ -700,6 +712,19 @@ export function PayAppDetailDialog({
                     <Banknote className='mr-1 h-4 w-4' /> Record payment
                   </Button>
                 )}
+              {/* Certification posted actual cost. Taking it back reverses
+                  that posting and returns the claim to draft — possible only
+                  while none of it has been paid. */}
+              {payApp.revocable && canApprove && (
+                <Button
+                  size='sm'
+                  variant='outline'
+                  onClick={() => setRevoking((v) => !v)}
+                  data-testid='uat-payapp-revoke'
+                >
+                  <RotateCcw className='mr-1 h-4 w-4' /> Revoke certification
+                </Button>
+              )}
               {['draft', 'rejected'].includes(payApp.status) && canVoid && (
                 <Button
                   size='sm'
@@ -806,6 +831,60 @@ export function PayAppDetailDialog({
                     }}
                   >
                     Approve
+                  </Button>
+                </div>
+              </div>
+            )}
+
+            {revoking && (
+              <div
+                className='space-y-2 rounded-md border p-3'
+                data-testid='uat-payapp-revoke-form'
+              >
+                <p className='text-sm font-medium'>
+                  Revoke the certification of {payApp.ref}
+                </p>
+                <p className='text-xs text-muted-foreground'>
+                  {formatMoney(payApp.grossThisPeriod)} of certified cost will
+                  be reversed out of actual cost and {payApp.ref} returns to
+                  draft to be corrected. The original posting and its reversal
+                  both stay on the cost ledger — nothing is deleted.
+                </p>
+                <Input
+                  placeholder='Why is this certification being revoked?'
+                  value={revokeReason}
+                  onChange={(e) => setRevokeReason(e.target.value)}
+                  data-testid='uat-payapp-revoke-reason'
+                />
+                <div className='flex justify-end gap-2'>
+                  <Button
+                    size='sm'
+                    variant='outline'
+                    onClick={() => setRevoking(false)}
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    size='sm'
+                    variant='destructive'
+                    disabled={act.isPending || !revokeReason.trim()}
+                    data-testid='uat-payapp-revoke-confirm'
+                    onClick={async () => {
+                      try {
+                        await act.mutateAsync({
+                          payAppId: payApp.id,
+                          action: 'reopen',
+                          body: { reason: revokeReason.trim() },
+                        })
+                        toast.success('Certification revoked')
+                        setRevoking(false)
+                        setRevokeReason('')
+                      } catch (error) {
+                        toast.error(getServerErrorMessage(error))
+                      }
+                    }}
+                  >
+                    Revoke
                   </Button>
                 </div>
               </div>

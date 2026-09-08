@@ -74,6 +74,13 @@ const coValidators = ({ requireTitle = false } = {}) => [
   body("primeChangeOrderId").optional({ nullable: true }).isUUID(),
   body("lines").optional().isArray({ max: 500 }),
   body("lines.*.amount").isFloat(),
+  // The schedule-of-values line this change moves. Without it the change
+  // raises the commitment's revised value but not the line's billing ceiling.
+  body("lines.*.sovLineId").optional({ nullable: true }).isUUID(),
+  body("lines.*.description").optional({ nullable: true }).isString().trim().isLength({ max: 500 }),
+  body("lines.*.costCodeId").optional({ nullable: true }).isUUID(),
+  body("lines.*.budgetLineId").optional({ nullable: true }).isUUID(),
+  body("lines.*.activityId").optional({ nullable: true }).isUUID(),
 ];
 
 router.get(

@@ -12837,7 +12837,7 @@ const commitmentCoRequest = objectSchema({
   description: { type: "string", nullable: true },
   value: { type: "number", nullable: true, description: "Used when no lines are given." },
   primeChangeOrderId: nullableUuid,
-  lines: arrayOf(objectSchema({ description: { type: "string" }, costCodeId: nullableUuid, budgetLineId: nullableUuid, activityId: nullableUuid, amount: { type: "number" } })),
+  lines: arrayOf(objectSchema({ description: { type: "string" }, sovLineId: { ...nullableUuid, description: "The schedule-of-values line this change modifies. Naming it raises that line's billing ceiling on the next payment application once the change is approved; without it the change adds to the contract value but no line can be billed any further. Must be a line of this commitment (400 COMMITMENT_CO_LINE_SOV_INVALID)." }, costCodeId: nullableUuid, budgetLineId: nullableUuid, activityId: nullableUuid, amount: { type: "number" } })),
 });
 const reasonBody = jsonBody(objectSchema({ reason: { type: "string" } }), "Reason.", false);
 const commitmentPermission = (action, transition = null) => modulePermission("commitment", action, transition);
@@ -13885,6 +13885,18 @@ const payAppSchema = objectSchema({
   reviewNote: { type: "string", nullable: true },
   rejectionCode: { type: "string", nullable: true, enum: [...payAppRejectionCodes, null] },
   rejectedReason: { type: "string", nullable: true },
+  certificationRevision: {
+    type: "integer",
+    description:
+      "How many times this application's certification has been revoked and re-issued. Part of the ledger's idempotency key, so a corrected certificate posts as its own economic event rather than being taken for a duplicate of the one that was reversed.",
+  },
+  revokedReason: { type: "string", nullable: true },
+  revokedAt: nullableDateString,
+  revocable: {
+    type: "boolean",
+    description:
+      "Whether the certification can still be taken back — approved, with nothing paid against it.",
+  },
   notes: { type: "string", nullable: true },
   submittedAt: nullableDateString,
   reviewedAt: nullableDateString,
@@ -13932,7 +13944,7 @@ const payAppPermission = (action, transition = null) => modulePermission("sub_pa
   { method: "post", path: "/projects/{projectId}/pay-apps/{payAppId}/review", summary: "QS review: marks the application under review with a note.", operationId: "reviewSubPayApp", parameters: [...projectParams, payAppIdParam], permissions: payAppPermission("submit", "sub_pay_app.review"), requestBody: jsonBody(objectSchema({ note: { type: "string", nullable: true } }), "Review note.", false), responseSchema: payAppSchema },
   { method: "post", path: "/projects/{projectId}/pay-apps/{payAppId}/approve", summary: "PM approval with the compliance gate (commitment insurance valid, lien waiver on file when required → 409 SUB_PAY_APP_COMPLIANCE) and the over-claim check; both can be overridden with a reason.", operationId: "approveSubPayApp", parameters: [...projectParams, payAppIdParam], permissions: payAppPermission("approve", "sub_pay_app.approve"), requestBody: jsonBody(objectSchema({ complianceOverrideReason: { type: "string", nullable: true }, overClaimOverrideReason: { type: "string", nullable: true } }), "Overrides.", false), responseSchema: payAppSchema },
   { method: "post", path: "/projects/{projectId}/pay-apps/{payAppId}/reject", summary: "Reject with a reason code and reason.", operationId: "rejectSubPayApp", parameters: [...projectParams, payAppIdParam], permissions: payAppPermission("submit", "sub_pay_app.reject"), requestBody: jsonBody(objectSchema({ code: { type: "string", enum: payAppRejectionCodes }, reason: { type: "string" } }, ["reason"]), "Rejection."), responseSchema: payAppSchema },
-  { method: "post", path: "/projects/{projectId}/pay-apps/{payAppId}/reopen", summary: "Return a rejected application to draft.", operationId: "reopenSubPayApp", parameters: [...projectParams, payAppIdParam], permissions: payAppPermission("update"), responseSchema: payAppSchema },
+  { method: "post", path: "/projects/{projectId}/pay-apps/{payAppId}/reopen", summary: "Return an application to draft. From rejected this is an ordinary resubmission. From approved it revokes the certificate: the certified cost is reversed on the ledger with negative mirrors (nothing is deleted), `certificationRevision` is bumped so the corrected re-certification posts as its own event, and a reason is required (400 SUB_PAY_APP_REASON_REQUIRED). Refused once any of it has been paid (409 SUB_PAY_APP_ALREADY_PAID) — correct a paid certificate on the next application or with a credit.", operationId: "reopenSubPayApp", parameters: [...projectParams, payAppIdParam], permissions: payAppPermission("update"), requestBody: jsonBody(objectSchema({ reason: { type: "string", nullable: true, maxLength: 2000, description: "Required when revoking a certification." } }), "Revocation reason."), responseSchema: payAppSchema },
   { method: "post", path: "/projects/{projectId}/pay-apps/{payAppId}/payments", summary: "Record a payment (finance). Σ payments cannot exceed the net approved (400 SUB_PAY_APP_PAYMENT_EXCEEDS); paid in full moves the application to paid and the project cash flow is rebuilt.", operationId: "recordSubPayAppPayment", parameters: [...projectParams, payAppIdParam], permissions: payAppPermission("certify", "sub_pay_app.pay"), requestBody: jsonBody(objectSchema({ amount: { type: "number" }, paidAt: nullableDateString, method: { type: "string", nullable: true }, reference: { type: "string", nullable: true }, note: { type: "string", nullable: true } }, ["amount"]), "Payment."), responseSchema: payAppSchema, status: 201 },
   { method: "get", path: "/projects/{projectId}/pay-apps/{payAppId}/export.pdf", summary: "Application statement PDF.", operationId: "exportSubPayAppPdf", parameters: [...projectParams, payAppIdParam], permissions: payAppPermission("export"), responseSchema: { type: "string", format: "binary" } },
 ].forEach((route) => addGenericRoute({ tag: "Commercial", ...route }));

@@ -115,7 +115,7 @@ describe("drawing intelligence", () => {
         ["A-501", "sh-a501", 2],
         ["S-201", "sh-s201", 1],
       ]);
-      expect(result.outgoing[0].targetSheet.path).toBe("/projects/p1/doc-control/drawings?recordId=sh-a501");
+      expect(result.outgoing[0].targetSheet.path).toBe("/projects/p1/doc-control/drawings?recordId=sh-a501&source=sheet");
       expect(mockDocumentText.readDocumentBytes).toHaveBeenCalledTimes(1);
 
       const listed = await service.listReferences({ ...scope, sheetId: "sh-s201" });

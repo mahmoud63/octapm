@@ -647,17 +647,31 @@ const executeCommitment = async ({ orgId, projectId, commitmentId, actor = null,
 
 // ─── Change orders ────────────────────────────────────────────────────────
 
-const normalizeCoLines = (entries) => {
+/**
+ * `sovLineIds` is the set of schedule-of-values lines the change order's own
+ * commitment has. A line may name one, and only one of those: naming the line
+ * it modifies is what lets the pay application raise that line's billing
+ * ceiling (`approvedChangesBySovLine`). Carrying the id through was missing,
+ * so an approved change order raised the commitment's revised value while the
+ * schedule of values stayed at its original — authorised work that could never
+ * be billed.
+ */
+const normalizeCoLines = (entries, { sovLineIds = null } = {}) => {
   if (entries === undefined || entries === null) return [];
   if (!Array.isArray(entries)) throw new HttpError(400, "COMMITMENT_CO_LINES_INVALID", "lines must be a list");
   return entries.slice(0, MAX_LINES).map((entry, index) => {
     const amount = Number(entry?.amount);
     if (!Number.isFinite(amount)) throw new HttpError(400, "COMMITMENT_CO_LINE_AMOUNT_INVALID", `Line ${index + 1}: amount must be a number`);
-    return { description: trimOrNull(entry?.description)?.slice(0, 500) || `Line ${index + 1}`, costCodeId: trimOrNull(entry?.costCodeId) || null, budgetLineId: trimOrNull(entry?.budgetLineId) || null, activityId: trimOrNull(entry?.activityId) || null, amount: round2(amount) };
+    const sovLineId = trimOrNull(entry?.sovLineId) || null;
+    // A change order may only move a line of the contract it is a change to.
+    if (sovLineId && sovLineIds && !sovLineIds.has(sovLineId)) {
+      throw new HttpError(400, "COMMITMENT_CO_LINE_SOV_INVALID", `Line ${index + 1}: that schedule-of-values line is not on this commitment`);
+    }
+    return { description: trimOrNull(entry?.description)?.slice(0, 500) || `Line ${index + 1}`, sovLineId, costCodeId: trimOrNull(entry?.costCodeId) || null, budgetLineId: trimOrNull(entry?.budgetLineId) || null, activityId: trimOrNull(entry?.activityId) || null, amount: round2(amount) };
   });
 };
 
-const coData = (payload = {}, { existing = null } = {}) => {
+const coData = (payload = {}, { existing = null, sovLineIds = null } = {}) => {
   const data = {};
   if (payload.title !== undefined || !existing) {
     const title = trimOrNull(payload.title);
@@ -666,7 +680,7 @@ const coData = (payload = {}, { existing = null } = {}) => {
   }
   if (payload.description !== undefined) data.description = trimOrNull(payload.description)?.slice(0, 4000) || null;
   if (payload.lines !== undefined) {
-    const lines = normalizeCoLines(payload.lines);
+    const lines = normalizeCoLines(payload.lines, { sovLineIds });
     data.linesJson = lines;
     if (lines.length) data.value = lines.reduce((acc, line) => addMoney(acc, line.amount), 0);
   }
@@ -689,7 +703,7 @@ const createChangeOrder = async ({ orgId, projectId, commitmentId, payload = {},
   await ensureProject({ orgId, projectId });
   const commitment = await loadCommitment({ projectId, commitmentId });
   if ([STATUS.VOID, STATUS.CLOSED].includes(commitment.status)) throw new HttpError(409, "COMMITMENT_LOCKED", `A ${commitment.status} commitment cannot take change orders`);
-  const data = coData(payload);
+  const data = coData(payload, { sovLineIds: new Set((commitment.lines || []).map((line) => line.id)) });
   const run = async (tx) => {
     if (data.primeChangeOrderId) {
       const prime = await tx.changeOrder.findFirst({ where: { id: data.primeChangeOrderId, projectId }, select: { id: true } });
@@ -712,7 +726,8 @@ const updateChangeOrder = async ({ orgId, projectId, changeOrderId, payload = {}
   await ensureProject({ orgId, projectId });
   const existing = await loadChangeOrder({ projectId, changeOrderId });
   if (![CO_STATUS.DRAFT, CO_STATUS.PENDING].includes(existing.status)) throw new HttpError(409, "COMMITMENT_CO_LOCKED", `A ${existing.status} change order cannot be edited`);
-  const data = coData(payload, { existing });
+  const sovLines = await prisma.commitmentSovLine.findMany({ where: { commitmentId: existing.commitmentId }, select: { id: true } });
+  const data = coData(payload, { existing, sovLineIds: new Set(sovLines.map((line) => line.id)) });
   const updated = await prisma.$transaction(async (tx) => {
     const row = await tx.commitmentChangeOrder.update({ where: { id: changeOrderId }, data: { ...data, updatedBy: actor?.id || null }, include: { primeChangeOrder: { select: { id: true, ref: true, status: true } } } });
     await audit({ tx, orgId, projectId, entityType: auditService.ENTITY_TYPES.COMMITMENT_CHANGE_ORDER, entityId: changeOrderId, action: auditService.ACTIONS.UPDATED, actor, summary: { ref: row.ref, changed: Object.keys(data) } });

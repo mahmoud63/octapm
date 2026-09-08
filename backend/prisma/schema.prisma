@@ -5115,6 +5115,14 @@ model SubPayApp {
   rejectedBy               String?
   paidAt                   DateTime?
   voidReason               String?
+  // Revoking a certification reverses the ledger with negative mirrors rather
+  // than deleting, so the original idempotency keys survive. The revision is
+  // what a corrected re-certification keys on, so it counts as its own economic
+  // event instead of being swallowed as a duplicate (OCTA-FIN-SUBPAY-063).
+  certificationRevision    Int       @default(0)
+  revokedReason            String?
+  revokedAt                DateTime?
+  revokedBy                String?
   createdBy                String?
   updatedBy                String?
   createdAt                DateTime  @default(now())

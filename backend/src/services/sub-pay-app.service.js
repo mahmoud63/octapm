@@ -79,11 +79,22 @@ const include = {
 const insuranceReadyFor = (commitment) =>
   (Array.isArray(commitment?.insuranceJson) ? commitment.insuranceJson : []).every((entry) => !entry.required || (entry.documentId && !(entry.expiresAt && new Date(entry.expiresAt) < new Date())));
 
-/** The line's ceiling: as revised by approved changes, or its original. */
-const revisedOf = (line) =>
-  toMoneyNumber(line.revisedScheduledAmount) || toMoneyNumber(line.scheduledAmount);
+/**
+ * The line's ceiling: as revised by approved changes, or its original.
+ *
+ * Derived from the change orders when they are to hand, and only otherwise
+ * from the stored copy. The stored figure is written by `recompute`, which runs
+ * on a save or a transition — so between a change order being approved and the
+ * next save, the copy is behind. Reading it would show a QS a ceiling they
+ * cannot bill to and then accept the claim anyway.
+ */
+const revisedOf = (line, changeMap = null) => {
+  const original = toMoneyNumber(line.scheduledAmount);
+  if (changeMap) return addMoney(original, changeMap.get(line.sovLineId) || 0);
+  return toMoneyNumber(line.revisedScheduledAmount) || original;
+};
 
-const serializeLine = (line) => ({
+const serializeLine = (line, changeMap = null) => ({
   id: line.id,
   sovLineId: line.sovLineId,
   lineNumber: line.sovLine?.lineNumber ?? null,
@@ -92,24 +103,22 @@ const serializeLine = (line) => ({
   activityId: line.sovLine?.activityId || null,
   activity: line.sovLine?.activity ? { id: line.sovLine.activity.id, name: line.sovLine.activity.name, code: line.sovLine.activity.activityCode || line.sovLine.activity.wbsCode || null } : null,
   scheduledAmount: toMoneyNumber(line.scheduledAmount),
-  approvedChangeAmount: toMoneyNumber(line.approvedChangeAmount),
-  // What may actually be billed: the line as revised by approved change
-  // orders. Older rows carry no revised figure, so fall back to the original.
-  revisedScheduledAmount:
-    toMoneyNumber(line.revisedScheduledAmount) || toMoneyNumber(line.scheduledAmount),
+  approvedChangeAmount: changeMap ? round2(changeMap.get(line.sovLineId) || 0) : toMoneyNumber(line.approvedChangeAmount),
+  // What may actually be billed: the line as revised by approved change orders.
+  revisedScheduledAmount: revisedOf(line, changeMap),
   previousAmount: toMoneyNumber(line.previousAmount),
   thisPeriodAmount: toMoneyNumber(line.thisPeriodAmount),
   cumulativeAmount: toMoneyNumber(line.cumulativeAmount),
-  cumulativePct: revisedOf(line) > 0 ? round2((toMoneyNumber(line.cumulativeAmount) / revisedOf(line)) * 100) : 0,
+  cumulativePct: revisedOf(line, changeMap) > 0 ? round2((toMoneyNumber(line.cumulativeAmount) / revisedOf(line, changeMap)) * 100) : 0,
   materialsOnSite: toMoneyNumber(line.materialsOnSite),
   approvedPct: line.approvedPct === null || line.approvedPct === undefined ? null : Number(line.approvedPct),
   capAmount: line.capAmount === null || line.capAmount === undefined ? null : toMoneyNumber(line.capAmount),
   overClaimAmount: toMoneyNumber(line.overClaimAmount),
-  balanceToFinish: subtractMoney(revisedOf(line), line.cumulativeAmount),
+  balanceToFinish: subtractMoney(revisedOf(line, changeMap), line.cumulativeAmount),
   notes: line.notes || null,
 });
 
-const serialize = (row, { projectId = row.projectId } = {}) => ({
+const serialize = (row, { projectId = row.projectId, changeMap = null } = {}) => ({
   id: row.id,
   projectId: row.projectId,
   commitmentId: row.commitmentId,
@@ -145,6 +154,13 @@ const serialize = (row, { projectId = row.projectId } = {}) => ({
   reviewNote: row.reviewNote || null,
   rejectionCode: row.rejectionCode || null,
   rejectedReason: row.rejectedReason || null,
+  // How many times this application has been certified. Zero until a
+  // certification is revoked and the corrected one takes its place.
+  certificationRevision: Number(row.certificationRevision) || 0,
+  revokedReason: row.revokedReason || null,
+  revokedAt: toIso(row.revokedAt),
+  // A certificate can be taken back only while none of it has been paid.
+  revocable: row.status === STATUS.APPROVED && toMoneyNumber(row.paidAmount) <= EPSILON,
   notes: row.notes || null,
   submittedAt: toIso(row.submittedAt),
   reviewedAt: toIso(row.reviewedAt),
@@ -152,7 +168,7 @@ const serialize = (row, { projectId = row.projectId } = {}) => ({
   rejectedAt: toIso(row.rejectedAt),
   paidAt: toIso(row.paidAt),
   voidReason: row.voidReason || null,
-  lines: (row.lines || []).map(serializeLine),
+  lines: (row.lines || []).map((line) => serializeLine(line, changeMap)),
   payments: (row.payments || []).map((payment) => ({ id: payment.id, amount: toMoneyNumber(payment.amount), paidAt: toIso(payment.paidAt), method: payment.method || null, reference: payment.reference || null, note: payment.note || null })),
   createdBy: row.createdBy || null,
   createdAt: toIso(row.createdAt),
@@ -201,11 +217,13 @@ const CO_STATUS_APPROVED = "approved";
  * Derived on every read rather than copied onto the line, so there is one
  * place a revised SOV can come from and no second number to fall out of step.
  */
-const approvedChangesBySovLine = async ({ tx = prisma, commitmentId }) => {
+const approvedChangesBySovLine = async ({ tx = prisma, commitmentId = null, commitmentIds = null }) => {
   const map = new Map();
   if (!tx.commitmentChangeOrder?.findMany) return map;
+  const scope = commitmentIds ? { in: uniqueIds(commitmentIds) } : commitmentId;
+  if (commitmentIds && !scope.in.length) return map;
   const orders = await tx.commitmentChangeOrder.findMany({
-    where: { commitmentId, status: CO_STATUS_APPROVED },
+    where: { commitmentId: scope, status: CO_STATUS_APPROVED },
     select: { linesJson: true },
   });
   for (const order of orders) {
@@ -323,9 +341,18 @@ const loadPayApp = async ({ projectId, payAppId, viewer = null }, tx = prisma) =
   return row;
 };
 
+/**
+ * Serialises with the billing ceiling derived from the approved change orders
+ * rather than from the copy on the row. Every path that hands a pay
+ * application to a caller goes through here, so the ceiling on screen is the
+ * ceiling the claim will actually be checked against.
+ */
+const serializeFresh = async (row, { projectId = row.projectId } = {}) =>
+  serialize(row, { projectId, changeMap: await approvedChangesBySovLine({ commitmentId: row.commitmentId }) });
+
 const getPayApp = async ({ orgId, projectId, payAppId, viewer = null }) => {
   await ensureProject({ orgId, projectId });
-  return serialize(await loadPayApp({ projectId, payAppId, viewer }), { projectId });
+  return serializeFresh(await loadPayApp({ projectId, payAppId, viewer }), { projectId });
 };
 
 const listPayApps = async ({ orgId, projectId, query = {}, viewer = null }) => {
@@ -337,7 +364,8 @@ const listPayApps = async ({ orgId, projectId, query = {}, viewer = null }) => {
   const scope = visibilityWhere(viewer);
   if (scope) where.AND = [scope];
   const rows = await prisma.subPayApp.findMany({ where, include, orderBy: [{ createdAt: "desc" }], take: 500 });
-  const items = rows.map((row) => serialize(row, { projectId }));
+  const changeMap = await approvedChangesBySovLine({ commitmentIds: rows.map((row) => row.commitmentId) });
+  const items = rows.map((row) => serialize(row, { projectId, changeMap }));
   const sum = (predicate, key) => items.filter(predicate).reduce((acc, item) => addMoney(acc, item[key]), 0);
   return {
     items,
@@ -413,7 +441,7 @@ const createPayApp = async ({ orgId, projectId, payload = {}, actor = null, view
     await audit({ tx, orgId, projectId, entityId: row.id, action: auditService.ACTIONS.CREATED, actor, newStatus: STATUS.DRAFT, summary: { ref: row.ref, commitment: commitment.ref, period: row.periodLabel, lines: lines.length } });
     return row;
   });
-  return serialize(created, { projectId });
+  return serializeFresh(created, { projectId });
 };
 
 const normalizeClaims = (entries) => {
@@ -518,7 +546,7 @@ const updatePayApp = async ({ orgId, projectId, payAppId, payload = {}, actor = 
     await audit({ tx, orgId, projectId, entityId: payAppId, action: auditService.ACTIONS.UPDATED, actor, summary: { ref: row.ref, net: toMoneyNumber(row.netThisPeriod), overClaim: toMoneyNumber(row.overClaimAmount), changed: [...Object.keys(data), ...(claims ? ["lines"] : []), ...Object.keys(patch)] } });
     return row;
   });
-  return serialize(updated, { projectId });
+  return serializeFresh(updated, { projectId });
 };
 
 // ─── Notifications ────────────────────────────────────────────────────────
@@ -573,9 +601,16 @@ const overClaimError = (row) => {
  *
  * `cost-ledger.post` is idempotent on `sourceKey`, so a retried approval, a
  * double click or two concurrent approvals post once.
+ *
+ * The revision is part of the key. A revoked certification is reversed with
+ * negative mirrors rather than deleted, so the original keys are still there —
+ * without the revision, correcting an application and certifying it again would
+ * match those keys and post nothing at all, leaving the ledger holding the
+ * reversal and none of the corrected cost.
  */
 const postCertifiedCost = async ({ tx, orgId, projectId, payApp, actor }) => {
   const incurredOn = payApp.periodEnd || payApp.approvedAt || new Date();
+  const revision = Number(payApp.certificationRevision) || 0;
   let posted = 0;
   let amount = 0;
   for (const line of payApp.lines || []) {
@@ -588,6 +623,7 @@ const postCertifiedCost = async ({ tx, orgId, projectId, payApp, actor }) => {
       sourceType: "sub_pay_app",
       sourceId: payApp.id,
       sourceLineId: line.id,
+      keySuffix: revision ? `r${revision}` : null,
       amount: value,
       costType: "subcontract",
       activityId: line.sovLine?.activityId || null,
@@ -596,7 +632,7 @@ const postCertifiedCost = async ({ tx, orgId, projectId, payApp, actor }) => {
       commitmentId: payApp.commitmentId,
       incurredOn,
       postedBy: actor?.id || null,
-      note: `${payApp.ref} ${payApp.periodLabel}`,
+      note: `${payApp.ref} ${payApp.periodLabel}${revision ? ` (revision ${revision})` : ""}`,
     });
     if (result.posted) {
       posted += 1;
@@ -604,6 +640,36 @@ const postCertifiedCost = async ({ tx, orgId, projectId, payApp, actor }) => {
     }
   }
   return { posted, amount };
+};
+
+/**
+ * Certification is not final, but it is not silently editable either.
+ *
+ * A certified application that was wrong has to be correctable, or the only
+ * remaining options are leaving false cost on the ledger or deleting financial
+ * history. So an approval may be revoked — back to draft to be corrected, or to
+ * void to end it — and the ledger is reversed with negative mirrors, leaving
+ * both the posting and its undoing on the record.
+ *
+ * Not once money has moved. A payment against a certificate cannot be un-made
+ * by changing the certificate; that correction belongs on the next application
+ * or on a credit, where it stays visible. Refusing here names the payment
+ * rather than saying no.
+ */
+const assertRevocable = ({ existing, to, reason }) => {
+  const paid = toMoneyNumber(existing.paidAmount);
+  if (paid > EPSILON) {
+    const error = new HttpError(
+      409,
+      "SUB_PAY_APP_ALREADY_PAID",
+      `${existing.ref} has been paid ${paid}. A paid certificate cannot be revoked — correct it on the next application or raise a credit.`,
+    );
+    error.details = { paidAmount: paid, net: toMoneyNumber(existing.netThisPeriod), payments: (existing.payments || []).map((p) => ({ id: p.id, amount: toMoneyNumber(p.amount), paidAt: toIso(p.paidAt), reference: p.reference || null })) };
+    throw error;
+  }
+  if (!trimOrNull(reason)) {
+    throw new HttpError(400, "SUB_PAY_APP_REASON_REQUIRED", `Say why ${existing.ref}'s certification is being ${to === STATUS.VOID ? "voided" : "revoked"}`);
+  }
 };
 
 const transition = async ({ orgId, projectId, payAppId, to, actor = null, viewer = null, reason = null, extra = {}, guard = null, action = auditService.ACTIONS.STATUS_CHANGED, viaWorkflow = false }) => {
@@ -617,12 +683,18 @@ const transition = async ({ orgId, projectId, payAppId, to, actor = null, viewer
     [STATUS.UNDER_REVIEW]: [STATUS.SUBMITTED],
     [STATUS.APPROVED]: [STATUS.SUBMITTED, STATUS.UNDER_REVIEW],
     [STATUS.REJECTED]: [STATUS.SUBMITTED, STATUS.UNDER_REVIEW],
-    [STATUS.DRAFT]: [STATUS.REJECTED],
-    [STATUS.VOID]: [STATUS.DRAFT, STATUS.REJECTED],
+    // Certification can be taken back while no money has moved: to draft to be
+    // corrected, or to void to end it (OCTA-FIN-SUBPAY-063).
+    [STATUS.DRAFT]: [STATUS.REJECTED, STATUS.APPROVED],
+    [STATUS.VOID]: [STATUS.DRAFT, STATUS.REJECTED, STATUS.APPROVED],
   }[to];
   if (!allowedFrom?.includes(existing.status)) throw new HttpError(409, "SUB_PAY_APP_TRANSITION_INVALID", `A ${existing.status} application cannot become ${to}`);
+  // Leaving a certified state is a financial act, not an edit.
+  const revoking = existing.status === STATUS.APPROVED && [STATUS.DRAFT, STATUS.VOID].includes(to);
+  if (revoking) assertRevocable({ existing, to, reason });
   if (guard) await guard(existing);
   const now = new Date();
+  const revision = revoking ? (Number(existing.certificationRevision) || 0) + 1 : undefined;
   const stamps = {
     [STATUS.SUBMITTED]: { submittedAt: now, submittedBy: actor?.id || null, rejectionCode: null, rejectedReason: null },
     [STATUS.UNDER_REVIEW]: { reviewedAt: now, reviewedBy: actor?.id || null },
@@ -631,6 +703,17 @@ const transition = async ({ orgId, projectId, payAppId, to, actor = null, viewer
     [STATUS.DRAFT]: { submittedAt: null, rejectedAt: null },
     [STATUS.VOID]: { voidReason: reason },
   }[to];
+  if (revoking) {
+    Object.assign(stamps, {
+      certificationRevision: revision,
+      revokedAt: now,
+      revokedBy: actor?.id || null,
+      revokedReason: trimOrNull(reason)?.slice(0, 2000) || null,
+      // The approval is undone, so the stamp that says it was approved goes
+      // with it. What happened stays in the audit trail and on the ledger.
+      ...(to === STATUS.DRAFT ? { approvedAt: null, approvedBy: null } : {}),
+    });
+  }
   const updated = await prisma.$transaction(async (tx) => {
     // Recompute caps against the latest approved progress before anything final.
     if ([STATUS.SUBMITTED, STATUS.APPROVED].includes(to)) {
@@ -653,13 +736,15 @@ const transition = async ({ orgId, projectId, payAppId, to, actor = null, viewer
     let costPosting = null;
     if (to === STATUS.APPROVED) {
       costPosting = await postCertifiedCost({ tx, orgId, projectId, payApp: row, actor });
-    } else if (to === STATUS.VOID) {
-      costPosting = await costLedger.reverse({ tx, orgId, projectId, sourceType: "sub_pay_app", sourceId: payAppId, postedBy: actor?.id || null, note: reason });
+    } else if (revoking || to === STATUS.VOID) {
+      // Negative mirrors, never deletions: the posting and its undoing both
+      // stay on the record.
+      costPosting = await costLedger.reverse({ tx, orgId, projectId, sourceType: "sub_pay_app", sourceId: payAppId, postedBy: actor?.id || null, note: reason ? `${row.ref} revoked: ${reason}` : null });
     }
     await audit({ tx, orgId, projectId, entityId: payAppId, action, actor, reason, oldStatus: existing.status, newStatus: to, summary: { ref: row.ref, net: toMoneyNumber(row.netThisPeriod), gross: toMoneyNumber(row.grossThisPeriod), retention: toMoneyNumber(row.retentionThisPeriod), rejectionCode: row.rejectionCode || null, ...(costPosting ? { costPosted: costPosting.amount ?? null, costLines: costPosting.posted ?? null, costReversed: costPosting.reversed ?? null } : {}) } });
     return row;
   });
-  const serialized = serialize(updated, { projectId });
+  const serialized = await serializeFresh(updated, { projectId });
   if (to === STATUS.SUBMITTED && !viaWorkflow) {
     require("./workflow-engine.service").maybeStart({ orgId, projectId, tool: "sub_pay_app", recordId: payAppId, actor }).catch(() => null);
   }
@@ -671,6 +756,10 @@ const transition = async ({ orgId, projectId, payAppId, to, actor = null, viewer
     await notify({ orgId, projectId, payApp: updated, actorId: actor?.id || null, recipientUserIds: [updated.createdBy, ...vendorIds], recipientRoles: ["finance"], category: notificationService.NOTIFICATION_CATEGORIES.COMMERCIAL, event: "sub_pay_app.approved", title: `${updated.ref} approved: ${money(serialized.netThisPeriod, currency)} to pay`, message: `Retention held ${money(serialized.retentionThisPeriod, currency)}${serialized.backCharges ? ` · back-charges ${money(serialized.backCharges, currency)}` : ""}` });
   } else if (to === STATUS.REJECTED) {
     await notify({ orgId, projectId, payApp: updated, actorId: actor?.id || null, recipientUserIds: [updated.createdBy, ...vendorIds], category: notificationService.NOTIFICATION_CATEGORIES.COMMERCIAL, event: "sub_pay_app.rejected", title: `${updated.ref} rejected (${updated.rejectionCode || "OTHER"})`, message: reason || "Rejected", priority: "high" });
+  } else if (revoking) {
+    // Somebody was told this was approved and how much they would be paid.
+    // Taking that back without telling them is how a payment dispute starts.
+    await notify({ orgId, projectId, payApp: updated, actorId: actor?.id || null, recipientUserIds: [updated.createdBy, ...vendorIds], recipientRoles: ["finance", "qs"], category: notificationService.NOTIFICATION_CATEGORIES.COMMERCIAL, event: "sub_pay_app.revoked", title: `${updated.ref} certification revoked`, message: `${reason || "Revoked"} · ${money(serialized.grossThisPeriod, currency)} reversed from actual cost`, priority: "high" });
   } else if (to === STATUS.UNDER_REVIEW) {
     await notify({ orgId, projectId, payApp: updated, actorId: actor?.id || null, recipientUserIds: [updated.createdBy], category: notificationService.NOTIFICATION_CATEGORIES.WORKFLOW, event: "sub_pay_app.under_review", title: `${updated.ref} is being reviewed`, message: extra.reviewNote || "Under review by the QS" });
   }
@@ -768,7 +857,13 @@ const rejectPayApp = async ({ orgId, projectId, payAppId, actor, code, reason, v
   return transition({ orgId, projectId, payAppId, to: STATUS.REJECTED, actor, viaWorkflow, reason: trimOrNull(reason), action: auditService.ACTIONS.REJECTED, extra: { rejectionCode, rejectedReason: trimOrNull(reason).slice(0, 2000) } });
 };
 
-const reopenPayApp = ({ orgId, projectId, payAppId, actor, viewer }) => transition({ orgId, projectId, payAppId, to: STATUS.DRAFT, actor, viewer });
+/**
+ * Back to draft. From rejected that is a resubmission; from approved it is a
+ * revocation of the certificate, which reverses the cost it posted and needs a
+ * stated reason (`assertRevocable`).
+ */
+const reopenPayApp = ({ orgId, projectId, payAppId, actor, viewer, reason = null }) =>
+  transition({ orgId, projectId, payAppId, to: STATUS.DRAFT, actor, viewer, reason: trimOrNull(reason) });
 
 const voidPayApp = ({ orgId, projectId, payAppId, actor, reason }) => {
   if (!trimOrNull(reason)) throw new HttpError(400, "SUB_PAY_APP_REASON_REQUIRED", "Give a reason");
@@ -806,7 +901,7 @@ const recordPayment = async ({ orgId, projectId, payAppId, payload = {}, actor =
   }
   const vendorIds = await vendorMemberIds(updated.commitment?.projectPartyId);
   await notify({ orgId, projectId, payApp: updated, actorId: actor?.id || null, recipientUserIds: [updated.createdBy, ...vendorIds], category: notificationService.NOTIFICATION_CATEGORIES.COMMERCIAL, event: "sub_pay_app.paid", title: `${updated.ref}: ${money(amount, updated.commitment?.currency || "")} paid`, message: updated.status === STATUS.PAID ? "Paid in full" : `${money(subtractMoney(net, toMoneyNumber(updated.paidAmount)), updated.commitment?.currency || "")} still outstanding` });
-  return serialize(updated, { projectId });
+  return serializeFresh(updated, { projectId });
 };
 
 // ─── Statement PDF ────────────────────────────────────────────────────────
@@ -814,7 +909,7 @@ const recordPayment = async ({ orgId, projectId, payAppId, payload = {}, actor =
 const exportStatementPdf = async ({ orgId, projectId, payAppId, viewer = null }) => {
   const project = await ensureProject({ orgId, projectId });
   const row = await loadPayApp({ projectId, payAppId, viewer });
-  const data = serialize(row, { projectId });
+  const data = await serializeFresh(row, { projectId });
   const currency = data.commitment?.currency || "";
   const doc = createPdf({ title: `${data.ref} payment application`, author: project.name, pageSize: "A4", footer: `${project.name} · ${data.ref} · generated ${formatDate(new Date())}` });
   doc.heading(`${data.ref} · ${data.commitment?.title || ""}`);

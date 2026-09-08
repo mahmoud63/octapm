@@ -842,6 +842,10 @@ function ChangeOrdersSection({
   const [adding, setAdding] = useState(false)
   const [title, setTitle] = useState('')
   const [value, setValue] = useState('')
+  // Which schedule-of-values line this change moves. Without it the change
+  // raises the contract value but the line's billing ceiling stays where it
+  // was, and the extra work can never be claimed.
+  const [sovLineId, setSovLineId] = useState<string>('none')
   const run = async (
     changeOrderId: string,
     action: 'submit' | 'approve' | 'reject' | 'void'
@@ -879,39 +883,84 @@ function ChangeOrdersSection({
         )}
       </div>
       {adding && (
-        <div className='grid gap-2 rounded-md border p-3 md:grid-cols-[minmax(0,1fr)_140px_auto]'>
-          <Input
-            placeholder='Title'
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-          />
-          <Input
-            type='number'
-            step='0.01'
-            placeholder='Value'
-            value={value}
-            onChange={(e) => setValue(e.target.value)}
-          />
-          <Button
-            size='sm'
-            disabled={create.isPending || !title.trim() || !Number(value)}
-            onClick={async () => {
-              try {
-                await create.mutateAsync({
-                  commitmentId: commitment.id,
-                  payload: { title: title.trim(), value: Number(value) },
-                })
-                toast.success('Change order drafted')
-                setTitle('')
-                setValue('')
-                setAdding(false)
-              } catch (error) {
-                toast.error(getServerErrorMessage(error))
-              }
-            }}
-          >
-            Add
-          </Button>
+        <div className='space-y-2 rounded-md border p-3'>
+          <div className='grid gap-2 md:grid-cols-[minmax(0,1fr)_140px_auto]'>
+            <Input
+              placeholder='Title'
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              data-testid='uat-commitment-co-title'
+            />
+            <Input
+              type='number'
+              step='0.01'
+              placeholder='Value'
+              value={value}
+              onChange={(e) => setValue(e.target.value)}
+              data-testid='uat-commitment-co-value'
+            />
+            <Button
+              size='sm'
+              disabled={create.isPending || !title.trim() || !Number(value)}
+              data-testid='uat-commitment-co-add'
+              onClick={async () => {
+                try {
+                  await create.mutateAsync({
+                    commitmentId: commitment.id,
+                    payload:
+                      sovLineId === 'none'
+                        ? { title: title.trim(), value: Number(value) }
+                        : {
+                            title: title.trim(),
+                            lines: [
+                              {
+                                description: title.trim(),
+                                sovLineId,
+                                amount: Number(value),
+                              },
+                            ],
+                          },
+                  })
+                  toast.success('Change order drafted')
+                  setTitle('')
+                  setValue('')
+                  setSovLineId('none')
+                  setAdding(false)
+                } catch (error) {
+                  toast.error(getServerErrorMessage(error))
+                }
+              }}
+            >
+              Add
+            </Button>
+          </div>
+          <div className='space-y-1'>
+            <Label className='text-xs'>Against which line?</Label>
+            <Select value={sovLineId} onValueChange={setSovLineId}>
+              <SelectTrigger
+                className='w-full'
+                data-testid='uat-commitment-co-sovline'
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value='none'>
+                  No specific line — adds to the contract value only
+                </SelectItem>
+                {commitment.lines.map((line) => (
+                  <SelectItem key={line.id} value={line.id ?? ''}>
+                    {line.lineNumber}. {line.description} (
+                    {formatMoney(line.amount)})
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <p className='text-[11px] text-muted-foreground'>
+              {sovLineId === 'none'
+                ? 'The subcontract is worth more, but no line can be billed any further than before.'
+                : "Raises that line's billing ceiling on the next payment application."}
+            </p>
+          </div>
         </div>
       )}
       {commitment.changeOrders.length === 0 ? (

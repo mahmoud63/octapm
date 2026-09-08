@@ -116,7 +116,7 @@ describe("change events and RFQs", () => {
 
   it("creates a change event with numbered ref, lines and ROM totals", async () => {
     const event = await createEvent();
-    expect(event).toMatchObject({ ref: "CE-001", status: "open", type: "owner_change", origin: "rfi", sourcePath: "/projects/p1/doc-control/rfi?recordId=rfi-1", totals: { rom: 13400, quoted: null, estimate: 13400 }, lineCount: 2 });
+    expect(event).toMatchObject({ ref: "CE-001", status: "open", type: "owner_change", origin: "rfi", sourcePath: "/projects/p1/doc-control/rfi?recordId=rfi-1&source=rfi", totals: { rom: 13400, quoted: null, estimate: 13400 }, lineCount: 2 });
     expect(event.lines.map((line) => [line.description, line.romAmount, line.activity?.name])).toEqual([
       ["Supply and install DB-L1-02", 12000, "MEP rough-in"],
       ["Core through slab", 1400, "Pour slab L1"],

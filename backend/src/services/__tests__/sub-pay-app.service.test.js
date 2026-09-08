@@ -1,4 +1,7 @@
+const ledger = require("./helpers/cost-ledger-mock").createCostLedgerMock({ idPrefix: "pa-cle" });
+
 const mockPrisma = {
+  ...ledger.tables,
   $transaction: jest.fn((fn) => fn(mockPrisma)),
   project: { findFirst: jest.fn(async () => ({ id: "project-1", name: "Tower", currency: "USD" })) },
   projectDocument: { findFirst: jest.fn(async () => ({ id: "waiver-1" })) },
@@ -55,6 +58,7 @@ const payApp = (overrides = {}) => ({
 describe("subcontractor payment applications", () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    ledger.reset();
     mockPrisma.commitment.findFirst.mockResolvedValue(commitment());
     mockPrisma.subPayApp.findFirst.mockResolvedValue(payApp());
     mockPrisma.subPayApp.create.mockImplementation(async ({ data }) => payApp({ ...data, id: "pa-new", lines: (data.lines?.create || []).map((row, index) => ({ id: `nl${index}`, ...row, sovLine: sov({ id: row.sovLineId }) })) }));
@@ -251,5 +255,141 @@ describe("subcontractor payment applications", () => {
     const pdf = await service.exportStatementPdf({ orgId: "org-1", projectId: "project-1", payAppId: "pa-1" });
     expect(pdf.fileName).toBe("SC-001-PA02.pdf");
     expect(pdf.buffer.subarray(0, 4).toString()).toBe("%PDF");
+  });
+
+  /**
+   * Certification is the point subcontractor work becomes actual cost
+   * (OCTA-FIN-LEDGER-059) and revocation is how a wrong one is corrected
+   * (OCTA-FIN-SUBPAY-063). The ledger mock enforces the real unique
+   * `sourceKey`, which is what makes these assertions mean anything.
+   */
+  describe("certification and its correction", () => {
+    const claimed = (overrides = {}) =>
+      payApp({
+        status: "under_review",
+        periodEnd: new Date("2026-09-30"),
+        lines: [line({ thisPeriodAmount: 30000, cumulativeAmount: 50000 })],
+        ...overrides,
+      });
+
+    const approve = () =>
+      service.approvePayApp({ orgId: "org-1", projectId: "project-1", payAppId: "pa-1", actor: { id: "pm" } });
+
+    beforeEach(() => {
+      // The projections the posting maintains.
+      ledger.seedBudgetLine({ id: "bl-1", projectId: "project-1", costCodeId: "code-1", costType: "subcontract" });
+      ledger.seedCostRecord({ id: "cr-1", projectId: "project-1", activityId: "act-1" });
+      // The row the update returns is what gets posted, so it has to carry the
+      // claim. The suite's default returns zero-claim lines, which is why none
+      // of this path was reachable before.
+      mockPrisma.subPayApp.update.mockImplementation(async ({ data }) => claimed({ ...data }));
+    });
+
+    it("posts the gross claim to the ledger, coded off the schedule-of-values line", async () => {
+      mockPrisma.subPayApp.findFirst.mockResolvedValue(claimed());
+      await approve();
+      expect(ledger.total()).toBe(30000);
+      const [entry] = ledger.store.entries;
+      expect(entry).toMatchObject({
+        sourceType: "sub_pay_app",
+        sourceId: "pa-1",
+        sourceLineId: "pl-1",
+        costType: "subcontract",
+        activityId: "act-1",
+        commitmentId: "cm-1",
+      });
+      expect(ledger.store.budgetLines[0].actual).toBe(30000);
+      expect(ledger.store.costRecords[0].actual).toBe(30000);
+    });
+
+    it("posts once however many approvals arrive", async () => {
+      mockPrisma.subPayApp.findFirst.mockResolvedValue(claimed());
+      await approve();
+      // The state machine would refuse the second call in real life; the ledger
+      // has to survive it even if that guard is ever bypassed.
+      mockPrisma.subPayApp.findFirst.mockResolvedValue(claimed());
+      await approve();
+      expect(ledger.store.entries.length).toBe(1);
+      expect(ledger.total()).toBe(30000);
+    });
+
+    it("revoking reverses the posting instead of deleting it", async () => {
+      mockPrisma.subPayApp.findFirst.mockResolvedValue(claimed());
+      await approve();
+
+      mockPrisma.subPayApp.findFirst.mockResolvedValue(claimed({ status: "approved", certificationRevision: 0 }));
+      const revoked = await service.reopenPayApp({
+        orgId: "org-1", projectId: "project-1", payAppId: "pa-1", actor: { id: "pm" },
+        reason: "Measured against the superseded drawing",
+      });
+
+      expect(revoked.status).toBe("draft");
+      expect(mockPrisma.subPayApp.update).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ certificationRevision: 1, revokedReason: "Measured against the superseded drawing", approvedAt: null }),
+        }),
+      );
+      // Two entries, netting to nothing: both halves are on the record.
+      expect(ledger.store.entries.length).toBe(2);
+      expect(ledger.total()).toBe(0);
+      expect(ledger.store.entries[1].amount).toBe(-30000);
+      expect(ledger.store.entries[1].reversalOfId).toBe(ledger.store.entries[0].id);
+      expect(mockNotifications.createNotifications).toHaveBeenCalledWith(
+        expect.objectContaining({ event: "sub_pay_app.revoked", priority: "high" }),
+      );
+    });
+
+    /**
+     * The trap this exists to avoid: the reversal leaves the original keys in
+     * place, so a corrected re-certification under the same key would be taken
+     * for a duplicate and post nothing — leaving the ledger holding the
+     * reversal and none of the corrected cost.
+     */
+    it("re-certifying a corrected claim posts under its own revision", async () => {
+      mockPrisma.subPayApp.findFirst.mockResolvedValue(claimed());
+      await approve();
+      mockPrisma.subPayApp.findFirst.mockResolvedValue(claimed({ status: "approved" }));
+      await service.reopenPayApp({ orgId: "org-1", projectId: "project-1", payAppId: "pa-1", actor: { id: "pm" }, reason: "wrong quantity" });
+
+      mockPrisma.subPayApp.findFirst.mockResolvedValue(
+        claimed({ certificationRevision: 1, lines: [line({ thisPeriodAmount: 28000, cumulativeAmount: 48000 })] }),
+      );
+      mockPrisma.subPayApp.update.mockImplementation(async ({ data }) =>
+        payApp({ certificationRevision: 1, periodEnd: new Date("2026-09-30"), lines: [line({ thisPeriodAmount: 28000, cumulativeAmount: 48000 })], ...data }),
+      );
+      await approve();
+
+      expect(ledger.store.entries.length).toBe(3);
+      expect(ledger.total()).toBe(28000);
+      expect(ledger.store.entries[2].sourceKey).toBe("sub_pay_app:pa-1:pl-1:r1");
+      expect(ledger.store.entries[2].note).toContain("revision 1");
+    });
+
+    it("refuses to revoke a certificate that has been paid, and names the payment", async () => {
+      mockPrisma.subPayApp.findFirst.mockResolvedValue(
+        claimed({ status: "approved", paidAmount: 5000, netThisPeriod: 27000, payments: [{ id: "p-1", amount: 5000, paidAt: new Date(), reference: "EFT-12" }] }),
+      );
+      await expect(
+        service.reopenPayApp({ orgId: "org-1", projectId: "project-1", payAppId: "pa-1", actor: { id: "pm" }, reason: "changed my mind" }),
+      ).rejects.toMatchObject({
+        code: "SUB_PAY_APP_ALREADY_PAID",
+        details: expect.objectContaining({ paidAmount: 5000, payments: [expect.objectContaining({ reference: "EFT-12" })] }),
+      });
+    });
+
+    it("will not revoke without a reason", async () => {
+      mockPrisma.subPayApp.findFirst.mockResolvedValue(claimed({ status: "approved" }));
+      await expect(
+        service.reopenPayApp({ orgId: "org-1", projectId: "project-1", payAppId: "pa-1", actor: { id: "pm" } }),
+      ).rejects.toMatchObject({ code: "SUB_PAY_APP_REASON_REQUIRED" });
+      expect(ledger.store.entries.length).toBe(0);
+    });
+
+    it("still lets a rejected application go back to draft with no reason and no reversal", async () => {
+      mockPrisma.subPayApp.findFirst.mockResolvedValue(claimed({ status: "rejected" }));
+      const reopened = await service.reopenPayApp({ orgId: "org-1", projectId: "project-1", payAppId: "pa-1", actor: { id: "qs" } });
+      expect(reopened.status).toBe("draft");
+      expect(ledger.store.entries.length).toBe(0);
+    });
   });
 });

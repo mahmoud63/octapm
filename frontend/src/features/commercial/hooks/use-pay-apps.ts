@@ -110,6 +110,12 @@ export interface PayApp {
   reviewNote: string | null
   rejectionCode: RejectionCode | null
   rejectedReason: string | null
+  /** How many times this application has been certified and taken back. */
+  certificationRevision: number
+  revokedReason: string | null
+  revokedAt: string | null
+  /** A certificate can be taken back only while none of it has been paid. */
+  revocable: boolean
   notes: string | null
   submittedAt: string | null
   reviewedAt: string | null
@@ -179,6 +185,10 @@ const invalidate = (
   qc.invalidateQueries({ queryKey: ['commitments', projectId] })
   qc.invalidateQueries({ queryKey: ['cash-flow', projectId] })
   qc.invalidateQueries({ queryKey: ['audit-events', projectId] })
+  // Certifying — and revoking a certification — moves actual cost, so anything
+  // reading it is stale from this point.
+  qc.invalidateQueries({ queryKey: ['cost', projectId] })
+  qc.invalidateQueries({ queryKey: ['budget', projectId] })
 }
 
 export const usePayApps = (

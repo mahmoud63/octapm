@@ -236,7 +236,7 @@ describe("drawing set service", () => {
           recipientUserIds: ["follower-1"],
           recipientRoles: ["pm", "planning_eng", "site_engineer"],
           title: "Drawing set SET-001 published",
-          actionUrl: `/projects/${PROJECT}/doc-control/drawings?recordId=${SET_ID}`,
+          actionUrl: `/projects/${PROJECT}/doc-control/drawings?recordId=${SET_ID}&source=drawing_set`,
         }),
       );
     });

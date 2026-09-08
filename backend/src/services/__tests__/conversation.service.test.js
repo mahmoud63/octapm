@@ -239,7 +239,7 @@ describe("conversations", () => {
 
   it("keeps one thread per record and lets a message share a record with its title and link", async () => {
     const thread = await service.createConversation({ orgId: "org-1", viewer: eng, payload: { kind: "record", projectId: "p1", recordType: "rfi", recordId: "rfi-12", memberUserIds: ["u-qs"] } });
-    expect(thread).toMatchObject({ kind: "record", title: "RFI RFI-012 – Rebar spacing", recordType: "rfi", recordId: "rfi-12", recordPath: "/projects/p1/doc-control/rfi?recordId=rfi-12" });
+    expect(thread).toMatchObject({ kind: "record", title: "RFI RFI-012 – Rebar spacing", recordType: "rfi", recordId: "rfi-12", recordPath: "/projects/p1/doc-control/rfi?recordId=rfi-12&source=rfi" });
     const same = await service.createConversation({ orgId: "org-1", viewer: pm, payload: { kind: "record", projectId: "p1", recordType: "rfi", recordId: "rfi-12" } });
     expect(same.id).toBe(thread.id);
     expect(same.members.map((member) => member.userId)).toEqual(["u-eng", "u-qs", "u-pm"]);
@@ -247,7 +247,7 @@ describe("conversations", () => {
     await expect(service.createConversation({ orgId: "org-1", viewer: pm, payload: { kind: "record", recordType: "rfi", recordId: "x" } })).rejects.toMatchObject({ code: "CONVERSATION_PROJECT_REQUIRED" });
 
     const shared = await service.sendMessage({ orgId: "org-1", viewer: pm, conversationId: thread.id, payload: { linkedRecord: { recordType: "submittal", recordId: "sub-3" } } });
-    expect(shared.linkedRecord).toEqual({ recordType: "submittal", recordId: "sub-3", title: "Submittal SUB-3 – Rebar spacing", projectId: "p1", path: "/projects/p1/doc-control/submittals?recordId=sub-3" });
+    expect(shared.linkedRecord).toEqual({ recordType: "submittal", recordId: "sub-3", title: "Submittal SUB-3 – Rebar spacing", projectId: "p1", path: "/projects/p1/doc-control/submittals?recordId=sub-3&source=submittal" });
     expect((await service.getConversation({ orgId: "org-1", viewer: pm, conversationId: thread.id })).lastMessagePreview).toBe("Priya: Shared Submittal SUB-3 – Rebar spacing");
     await expect(service.sendMessage({ orgId: "org-1", viewer: viewer("u-out"), conversationId: thread.id, payload: { linkedRecord: { recordType: "rfi", recordId: "r" } } })).rejects.toMatchObject({ code: "CONVERSATION_NOT_FOUND" });
     const member = await service.memberForEmail({ orgId: "org-1", conversationId: thread.id, userId: "u-qs" });

@@ -220,12 +220,44 @@ Pay application approved
 Pay application paid
    └─ SubPayAppPayment → rebuildCashFlow                          [cash only]
 
-Pay application voided / reopened
+Certification revoked  (approved → draft, or approved → void)
    └─ reversing CostLedgerEntry (negative amount, reversalOfId set)
+   └─ SubPayApp.certificationRevision += 1
 ```
 
 `committed` is untouched throughout. Remaining commitment falls because
 `certifiedAgainstCommitments` rises.
+
+### Correcting a certificate
+
+A certificate that was wrong has to be correctable, or the only options left are
+leaving false cost on the ledger or deleting financial history. So an approval
+can be taken back — to draft to be corrected, or to void to end it — and the
+ledger is reversed with negative mirrors.
+
+Two rules make that safe.
+
+**Not once money has moved.** A payment against a certificate cannot be un-made
+by changing the certificate. Revocation is refused with
+`409 SUB_PAY_APP_ALREADY_PAID`, which names the payments; the correction belongs
+on the next application or on a credit, where it stays visible.
+
+**The revision is part of the idempotency key.** Reversal writes mirrors rather
+than deleting, so the original `sourceKey`s survive — and a corrected
+re-certification under the same keys would be taken for a duplicate and post
+*nothing*, leaving the ledger holding the reversal and none of the corrected
+cost. `certificationRevision` is appended as `keySuffix`, so each certification
+of the same application is its own economic event while staying idempotent
+within itself:
+
+```
+sub_pay_app:<payAppId>:<lineId>        first certification
+reversal:<entryId>                     its reversal
+sub_pay_app:<payAppId>:<lineId>:r1     the corrected certification
+```
+
+Proven end to end: +100,000, −100,000, +95,000 leaves three entries summing to
+95,000, with nothing deleted.
 
 ---
 

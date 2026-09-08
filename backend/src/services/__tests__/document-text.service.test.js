@@ -232,7 +232,7 @@ describe("document text service", () => {
           documentNumber: "RFI-012",
           snippet: "Rebar [[spacing]] shall be 200mm",
           snippetText: "Rebar spacing shall be 200mm",
-          path: `/projects/${PROJECT}/doc-control/rfi?recordId=rfi-1`,
+          path: `/projects/${PROJECT}/doc-control/rfi?recordId=rfi-1&source=rfi`,
           fileUrl: `/api/v1/projects/${PROJECT}/attachments/documents/${DOC_ID}`,
           score: 1,
         }),

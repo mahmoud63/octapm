@@ -300,7 +300,7 @@ describe("BIM models", () => {
 
     const links = await service.listLinks({ ...scope, modelId: model.id, query: {} });
     expect(links.items).toHaveLength(3);
-    expect(links.items[0]).toMatchObject({ recordType: "activity", recordTitle: "A100 Pour slab L1", recordPath: "/projects/p1/activities?recordId=act-1", relationType: "represents" });
+    expect(links.items[0]).toMatchObject({ recordType: "activity", recordTitle: "A100 Pour slab L1", recordPath: "/projects/p1/activities?recordId=act-1&source=activity", relationType: "represents" });
     expect(links.records).toEqual([expect.objectContaining({ recordType: "activity", recordId: "act-1", elements: 3 })]);
 
     const forActivity = await service.elementsForRecord({ ...scope, recordType: "activity", recordId: "act-1" });

@@ -175,13 +175,13 @@ describe("inbound email", () => {
     expect((await service.getEmail({ orgId: "org-1", projectId: "p1", emailId: email.id })).textBody).toContain("Booked for 06:00.");
 
     const logged = await service.logAsCorrespondence({ orgId: "org-1", projectId: "p1", emailId: email.id, payload: { contractualNotice: true }, actor });
-    expect(logged).toMatchObject({ status: "logged", correspondenceId: "cor-1", correspondencePath: "/projects/p1/doc-control/correspondence?recordId=cor-1" });
+    expect(logged).toMatchObject({ status: "logged", correspondenceId: "cor-1", correspondencePath: "/projects/p1/doc-control/correspondence?recordId=cor-1&source=correspondence" });
     expect(mockCorrespondence.createCorrespondence).toHaveBeenCalledWith(expect.objectContaining({ payload: expect.objectContaining({ contractualNotice: true, ownerUserId: "u-pm", subject: "Pump booking" }) }));
     expect(mockAttachments.createAttachments).toHaveBeenLastCalledWith(expect.objectContaining({ recordType: "correspondence", recordId: "cor-1", documentIds: ["doc-0"] }));
     await expect(service.logAsCorrespondence({ orgId: "org-1", projectId: "p1", emailId: email.id, actor })).rejects.toMatchObject({ code: "INBOUND_EMAIL_ALREADY_LOGGED" });
 
     const posted = await service.postToRecord({ orgId: "org-1", projectId: "p1", emailId: email.id, payload: { recordType: "rfi", recordId: RFI_ID }, actor });
-    expect(posted).toMatchObject({ status: "posted", recordType: "rfi", recordId: RFI_ID, commentId: "cmt-1", recordPath: `/projects/p1/doc-control/rfi?recordId=${RFI_ID}` });
+    expect(posted).toMatchObject({ status: "posted", recordType: "rfi", recordId: RFI_ID, commentId: "cmt-1", recordPath: `/projects/p1/doc-control/rfi?recordId=${RFI_ID}&source=rfi` });
     expect(mockComments.createComment.mock.calls[0][0].body).toMatch(/^📧 Email from Amal Haddad <amal@tower\.test> — Pump booking\n\nBooked for 06:00\./);
     await expect(service.postToRecord({ orgId: "org-1", projectId: "p1", emailId: email.id, payload: { recordType: "photo", recordId: "x" }, actor })).rejects.toMatchObject({ code: "INBOUND_EMAIL_RECORD_INVALID" });
 

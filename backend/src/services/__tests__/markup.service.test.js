@@ -173,8 +173,8 @@ describe("markup service", () => {
           recordType: "rfi",
           recordLabel: "RFI",
           record: expect.objectContaining({ display: "RFI RFI-009 – Rebar spacing", status: "open" }),
-          recordPath: `/projects/${PROJECT}/doc-control/rfi?recordId=rfi-9`,
-          sheetPath: `/projects/${PROJECT}/doc-control/drawings?recordId=${SHEET_ID}&pin=pin-1`,
+          recordPath: `/projects/${PROJECT}/doc-control/rfi?recordId=rfi-9&source=rfi`,
+          sheetPath: `/projects/${PROJECT}/doc-control/drawings?recordId=${SHEET_ID}&source=sheet&pin=pin-1`,
         }),
       );
     });

@@ -106,6 +106,8 @@ export interface CommitmentChangeOrder {
   primeChangeOrder: { id: string; ref: string; status: string } | null
   lines: Array<{
     description: string
+    /** The schedule-of-values line this change raises the ceiling of. */
+    sovLineId: string | null
     costCodeId: string | null
     budgetLineId: string | null
     activityId: string | null
@@ -408,6 +410,12 @@ export interface CommitmentCoInput {
   primeChangeOrderId?: string | null
   lines?: Array<{
     description: string
+    /**
+     * The schedule-of-values line this change modifies. Naming it is what
+     * raises that line's billing ceiling on the next pay application; without
+     * it the change adds to the contract value but cannot be claimed.
+     */
+    sovLineId?: string | null
     costCodeId?: string | null
     budgetLineId?: string | null
     activityId?: string | null

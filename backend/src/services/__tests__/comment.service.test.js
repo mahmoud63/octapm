@@ -148,7 +148,7 @@ describe("comment service", () => {
           event: "comment.mentioned",
           recipientUserIds: [MENTIONED],
           title: "Amal mentioned you on RFI RFI-012 – Rebar spacing",
-          actionUrl: `/projects/${PROJECT}/doc-control/rfi?recordId=${RFI_ID}`,
+          actionUrl: `/projects/${PROJECT}/doc-control/rfi?recordId=${RFI_ID}&source=rfi`,
           dedupeKeyBase: `comment:${COMMENT_ID}:mention`,
         }),
       );
@@ -383,7 +383,7 @@ describe("comment service", () => {
       expect(state.subscribers[0]).toEqual(
         expect.objectContaining({
           userId: FOLLOWER,
-          path: `/projects/${PROJECT}/doc-control/rfi?recordId=${RFI_ID}`,
+          path: `/projects/${PROJECT}/doc-control/rfi?recordId=${RFI_ID}&source=rfi`,
         }),
       );
 

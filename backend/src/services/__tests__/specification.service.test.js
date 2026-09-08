@@ -281,7 +281,7 @@ describe("specifications and scope intelligence", () => {
       expect(section.text).toContain("grade C40/50");
       expect(section.related.boqItems.map((row) => row.code)).toEqual(["3.1"]);
       expect(section.related.rfis.map((row) => row.ref)).toEqual(["RFI-001"]);
-      expect(section.path).toBe("/projects/p1/doc-control/specifications?recordId=" + concreteId);
+      expect(section.path).toBe("/projects/p1/doc-control/specifications?recordId=" + concreteId + "&source=spec_section");
     });
 
     it("checks the section against the related sheets' text layers and normalises the findings", async () => {
@@ -310,7 +310,7 @@ describe("specifications and scope intelligence", () => {
     it("raises a draft RFI tagged with the section", async () => {
       const result = await service.raiseRfi({ ...scope, sectionId: concreteId, user, payload: { subject: "Concrete grade: C40/50 or C35/45?", question: "S-201 shows C35/45; 03 30 00 requires C40/50.", priority: "high" } });
       expect(mockRfi.createRfi).toHaveBeenCalledWith(expect.objectContaining({ payload: expect.objectContaining({ specSection: "03 30 00", discipline: "Structural", status: "draft", priority: "high" }), userId: "u-1" }));
-      expect(result).toEqual({ record: { id: "rfi-9", ref: "RFI-009", status: "draft" }, url: "/projects/p1/doc-control/rfi?recordId=rfi-9" });
+      expect(result).toEqual({ record: { id: "rfi-9", ref: "RFI-009", status: "draft" }, url: "/projects/p1/doc-control/rfi?recordId=rfi-9&source=rfi" });
       await expect(service.raiseRfi({ ...scope, sectionId: concreteId, user, payload: {} })).rejects.toMatchObject({ code: "SPEC_RFI_SUBJECT" });
     });
   });
