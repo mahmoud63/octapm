@@ -637,7 +637,7 @@ test.describe('the subcontractor lifecycle, end to end', () => {
       '/projects/:id/commercial/pay-apps',
     )
     await switchTo(page, 'qs')
-    const beforeCert = await ledger(projectId)
+    const beforeClaim = await ledger(projectId)
 
     await page.goto(`/projects/${projectId}/commercial/pay-apps`)
     qs2.step('Open payment applications').navigate('Commercial → Pay applications')
@@ -737,6 +737,12 @@ test.describe('the subcontractor lifecycle, end to end', () => {
       'Commercial → Pay applications',
     )
 
+    // Taken here, immediately before the approval, rather than back at the
+    // start of the claim. The assertion below is about what *this
+    // certification* posts, and a project-wide total measured across fifteen UI
+    // steps answers a different question — anything else that spends on this
+    // project in the meantime lands inside the window and the figure lies.
+    const beforeCert = await ledger(projectId)
     await page.getByTestId('uat-payapp-approve').click()
     pmCertify.dialog('Approve')
     await Promise.all([
@@ -757,6 +763,11 @@ test.describe('the subcontractor lifecycle, end to end', () => {
       net: certified.netThisPeriod,
       ledgerMoved:
         Math.round((afterCert.ledger.total - beforeCert.ledger.total) * 100) / 100,
+      // Everything the project spent while the claim was being raised. Zero
+      // when this test has the project to itself; anything else is a neighbour
+      // writing to the same project, and worth seeing rather than absorbing.
+      movedByAnythingElse:
+        Math.round((beforeCert.ledger.total - beforeClaim.ledger.total) * 100) / 100,
       balanced: afterCert.balanced,
     })
     expect(
