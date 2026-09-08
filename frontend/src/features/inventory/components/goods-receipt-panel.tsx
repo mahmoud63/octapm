@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Loader2 } from 'lucide-react'
 import { toast } from 'sonner'
@@ -59,7 +59,13 @@ const blankEntries = (order: PurchaseOrder): Record<string, LineEntry> =>
     ])
   )
 
-export function GoodsReceiptPanel() {
+/**
+ * @param initialOrderRef  a purchase order to look up on arrival, so a link
+ *   from Procurement lands on the delivery rather than on an empty search box.
+ *   There is one receipt screen and one writer behind it; which module you came
+ *   from should not change what you have to type.
+ */
+export function GoodsReceiptPanel({ initialOrderRef }: { initialOrderRef?: string | null } = {}) {
   const queryClient = useQueryClient()
   const [order, setOrder] = useState<PurchaseOrder | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -88,6 +94,16 @@ export function GoodsReceiptPanel() {
       setError(getServerErrorMessage(caught))
     },
   })
+
+  // Arriving with an order named: look it up once, exactly as if the storeman
+  // had typed it.
+  const requestedRef = initialOrderRef ?? null
+  const [lookedUpRef, setLookedUpRef] = useState<string | null>(null)
+  useEffect(() => {
+    if (!requestedRef || lookedUpRef === requestedRef) return
+    setLookedUpRef(requestedRef)
+    lookup.mutate(requestedRef)
+  }, [requestedRef, lookedUpRef, lookup])
 
   const post = useMutation({
     mutationFn: () => {

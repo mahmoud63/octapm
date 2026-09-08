@@ -1,4 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
+import { Route } from '@/routes/_authenticated/inventory'
+import { useAuthStore } from '@/stores/auth-store'
 import { Navigate } from '@tanstack/react-router'
 import { useCanPerform } from '@/lib/permissions'
 import { Main } from '@/components/layout/main'
@@ -24,8 +26,23 @@ import { WarehousesPanel } from './components/warehouses-panel'
  * pallet with a phone actually wants, and everything else here is the desk view
  * of the same data.
  */
+/**
+ * Where Inventory opens.
+ *
+ * It opened on the scanner for everybody, which is right for a storeman with a
+ * phone in a yard and wrong for a PM who came to see what the project is
+ * holding — the smoke test marked the module amber for exactly that. The
+ * scanner-first workflow is kept for the people who need it; everyone else
+ * lands on the stock position (OCTA-UX-INVENTORY-090).
+ */
+const landingTabFor = (role: string | undefined) =>
+  role === 'warehouse' || role === 'site_engineer' ? 'scan' : 'items'
+
 export function InventoryWorkspace() {
   const canRead = useCanPerform('inventory', 'read')
+  const { tab, orderRef } = Route.useSearch()
+  const role = useAuthStore((state) => state.auth.user?.role)
+  const landing = tab || landingTabFor(role ?? undefined)
   const summary = useQuery({ queryKey: ['inventory', 'summary'], queryFn: getSummary })
 
   if (!canRead) return <Navigate to='/' replace />
@@ -63,7 +80,7 @@ export function InventoryWorkspace() {
 
       <Separator className='my-5' />
 
-      <Tabs defaultValue='scan' className='space-y-4'>
+      <Tabs defaultValue={landing} className='space-y-4'>
         {/* Six tabs do not fit across a phone, and scanning happens on a phone. */}
         <TabsList className='h-auto flex-wrap' data-testid='uat-inventory-tabs'>
           <TabsTrigger value='scan'>Scan</TabsTrigger>
@@ -79,7 +96,7 @@ export function InventoryWorkspace() {
           <ScanWorkspace />
         </TabsContent>
         <TabsContent value='receive'>
-          <GoodsReceiptPanel />
+          <GoodsReceiptPanel initialOrderRef={orderRef} />
         </TabsContent>
         <TabsContent value='match'>
           <MatchPanel />

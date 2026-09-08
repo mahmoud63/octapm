@@ -310,6 +310,7 @@ export function ProjectDetail({
         key: 'procurement',
         label: 'Procurement',
         children: [
+          { key: 'packages', label: 'Packages' },
           { key: 'purchase-orders', label: 'Purchase Orders' },
           { key: 'suppliers', label: 'Suppliers' },
         ],

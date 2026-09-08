@@ -1,3 +1,4 @@
+import { PackagesPanel } from './packages-panel'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { PurchaseOrdersPanel } from './purchase-orders-panel'
 import { SuppliersPanel } from './suppliers-panel'
@@ -30,10 +31,15 @@ export function ProcurementDashboard({
     <Tabs {...tabsProps} className='space-y-3'>
       {showTabList && (
         <TabsList className='h-auto flex-wrap'>
+          <TabsTrigger value='packages'>Packages</TabsTrigger>
           <TabsTrigger value='purchase-orders'>Purchase Orders</TabsTrigger>
           <TabsTrigger value='suppliers'>Suppliers</TabsTrigger>
         </TabsList>
       )}
+
+      <TabsContent value='packages'>
+        <PackagesPanel projectId={projectId} />
+      </TabsContent>
 
       <TabsContent value='purchase-orders'>
         <PurchaseOrdersPanel projectId={projectId} initialOrderId={initialOrderId} />
