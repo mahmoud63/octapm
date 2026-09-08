@@ -372,8 +372,36 @@ const titleCase = (value: string) =>
     .trim()
     .replace(/\w\S*/g, (word) => word.charAt(0).toUpperCase() + word.slice(1))
 
+/**
+ * The delay reasons, in the words a planner would use.
+ *
+ * These are our internal names for the rule that fired. Title-casing them
+ * produced "Order By Missed" and "Missing Delivery Commitment", which is a
+ * database column with the underscores taken out, not a sentence
+ * (OCTA-UX-SCHEDRISK-101).
+ */
+const PROCUREMENT_REASON_WORDS: Record<string, string> = {
+  order_by_missed: 'too late to order and still arrive in time',
+  missing_delivery_commitment: 'no delivery date agreed with the supplier',
+  missing_activity_link: 'not linked to an activity, so nothing checks the dates',
+  not_schedule_linked: 'not linked to the programme',
+  delivery_after_need: 'the supplier’s date is after it is needed on site',
+  received: 'delivered',
+  issued: 'issued from store',
+}
+
 const formatProcurementReason = (value?: string | null) =>
-  value ? titleCase(value) : 'On Track'
+  value ? (PROCUREMENT_REASON_WORDS[value] ?? titleCase(value)) : 'On Track'
+
+/**
+ * "136 days late" beats "critical". The severity says how much to care; the
+ * days say what the problem actually is, and the figure was already on the
+ * activity and simply not shown.
+ */
+const formatProcurementDelay = (days?: number | null) => {
+  const late = Math.round(Number(days) || 0)
+  return late > 0 ? `${late}d late` : null
+}
 
 const getProcurementRisk = (activity: GanttActivity) => {
   const risk = activity.procurementRiskSummary
@@ -2025,13 +2053,18 @@ function ScheduleGridRow({
                 getProcurementRisk(row.activity)?.highestSeverity ?? 'none'
               ]
             )}
-            title={formatProcurementReason(
-              getProcurementRisk(row.activity)?.reason
-            )}
+            title={[
+              getProcurementRisk(row.activity)?.highestSeverity,
+              formatProcurementDelay(getProcurementRisk(row.activity)?.daysAtRisk),
+              formatProcurementReason(getProcurementRisk(row.activity)?.reason),
+            ]
+              .filter(Boolean)
+              .join(' — ')}
           >
             <AlertTriangle className='h-3 w-3 shrink-0' />
-            <span className='truncate'>
-              {getProcurementRisk(row.activity)?.highestSeverity}
+            <span className='truncate' data-testid={`uat-proc-risk-${row.activity.id}`}>
+              {formatProcurementDelay(getProcurementRisk(row.activity)?.daysAtRisk) ??
+                getProcurementRisk(row.activity)?.highestSeverity}
               {getProcurementRisk(row.activity)?.atRiskCount
                 ? ` (${getProcurementRisk(row.activity)?.atRiskCount})`
                 : ''}

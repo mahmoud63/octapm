@@ -130,8 +130,29 @@ const projectRiskClassMap = {
   CRITICAL: 'bg-red-100 text-red-800',
 }
 
+/**
+ * The delay reasons in the words a planner would use. Stripping the
+ * underscores off our internal name produced "order by missed", which is a
+ * database column read aloud rather than a sentence (OCTA-UX-SCHEDRISK-101).
+ */
+const PROCUREMENT_REASON_WORDS: Record<string, string> = {
+  order_by_missed: 'too late to order and still arrive in time',
+  missing_delivery_commitment: 'no delivery date agreed with the supplier',
+  missing_activity_link: 'not linked to an activity, so nothing checks the dates',
+  not_schedule_linked: 'not linked to the programme',
+  delivery_after_need: 'the supplier’s date is after it is needed on site',
+  received: 'delivered',
+  issued: 'issued from store',
+}
+
 const formatProcurementReason = (reason: string | undefined) =>
-  reason ? reason.replace(/_/g, ' ') : 'on track'
+  reason ? (PROCUREMENT_REASON_WORDS[reason] ?? reason.replace(/_/g, ' ')) : 'on track'
+
+/** How late, which is the thing a planner acts on. "critical" is not. */
+const formatProcurementDelay = (days: number | undefined) => {
+  const late = Math.round(Number(days) || 0)
+  return late > 0 ? `${late}d late` : null
+}
 
 type ProcurementAlertDisplay = {
   id: string
@@ -988,9 +1009,17 @@ export function ScheduleDashboard({
                     </td>
                     <td
                       className='p-2'
-                      title={formatProcurementReason(
-                        procurementRiskByActivity.get(a.id)?.reason
-                      )}
+                      title={[
+                        procurementRiskByActivity.get(a.id)?.severity,
+                        formatProcurementDelay(
+                          procurementRiskByActivity.get(a.id)?.daysAtRisk
+                        ),
+                        formatProcurementReason(
+                          procurementRiskByActivity.get(a.id)?.reason
+                        ),
+                      ]
+                        .filter(Boolean)
+                        .join(' — ')}
                     >
                       {procurementRiskByActivity.get(a.id) ? (
                         <Badge
@@ -1001,7 +1030,11 @@ export function ScheduleDashboard({
                             ]
                           }
                         >
-                          {procurementRiskByActivity.get(a.id)?.severity}
+                          <span data-testid={`uat-proc-risk-${a.id}`}>
+                            {formatProcurementDelay(
+                              procurementRiskByActivity.get(a.id)?.daysAtRisk
+                            ) ?? procurementRiskByActivity.get(a.id)?.severity}
+                          </span>
                         </Badge>
                       ) : (
                         <span className='text-xs text-muted-foreground'>-</span>
