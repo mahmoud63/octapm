@@ -280,3 +280,86 @@ project with more than a hundred purchase orders the older ones are
 unreachable from that screen. The test data made it visible; the limit is real
 either way. Recorded as **P2, not fixed here** — it is a feature change, not
 an environment repair.
+
+---
+
+## 10. What the clean-up found in the product
+
+Making the environment deterministic was supposed to be housekeeping. It
+surfaced three product defects, because a deterministic environment is exactly
+what stops data-shaped bugs hiding.
+
+### OCTA-API-PAGING-110 — cursor pagination lost a row per page — **P1, fixed**
+
+`nextCursor` was the look-ahead row that `take: take + 1` fetches, and the next
+page asked for `cursor: { id: thatRow }, skip: 1`, stepping over it. Prisma's
+cursor is inclusive, so those are two incompatible conventions. Present in
+projects, users and company parties.
+
+One project of twenty-three was returned by no page. At a page size of five,
+four were. The mobile team consumes these endpoints.
+
+Found because a dashboard reconciliation spec read 21 vs 20 and the
+investigation did not stop at the first plausible answer. **The dashboard was
+right the whole time.**
+
+### OCTA-API-REFNUM-111 — generated references collide after a deletion — **P1, one fixed, eleven recorded**
+
+Bid packages numbered themselves `count + 1`. Riverside held 53 packages
+numbered up to 73, so the next asked for 54 — which existed — and creation
+died on the unique `(projectId, ref)` with a 500. One deletion is enough, and
+it stays broken until enough records climb past the gap.
+
+Fixed for bids, which was actively returning 500. **Not fixed, and listed
+here deliberately:**
+
+```
+budget-revision  BR-   change-order   VO-   correspondence  COR-
+defect           DEF-  drawing-set    SET-  drawing         DWG-
+eot              EOT-  inventory      (prefix)  ipc         (prefix)
+itp              ITP-  material-test  MTEST-
+```
+
+Every one collides the same way. The purchase-order and goods-receipt
+sequences already take the highest already used — the same defect, in the same
+codebase, arrived at twice by different routes. **P1 for Phase 21**; eleven
+services is a refactor, not an end-of-session repair.
+
+### The Match picker's 100-row cap — **P2, not fixed**
+
+`take: 100`, no paging, no search. On a project with more than a hundred
+purchase orders the older ones cannot be reached from that screen. Test data
+made it visible; the limit is real regardless.
+
+---
+
+## 11. Final gate
+
+| gate | result |
+| --- | --- |
+| Playwright | **141 / 141** (15.5m) |
+| Jest | **1,887 / 1,887** across 174 suites |
+| OpenAPI | 731 documented paths |
+| Console | 0 OctaPM errors · 0 OctaPM warnings |
+| Smoke | 14 modules · 14 ✅ · 0 🟡 · 0 🔴 |
+| `429` during the run | **0** |
+| API restarts during the run | **0** |
+| `EADDRINUSE` | **0** |
+
+`retries: 0` throughout. No test was weakened, skipped or re-scoped, and the
+production login limiter was not touched.
+
+### Instruments corrected on the way
+
+Four, and every one of them had been reporting success:
+
+| instrument | how it was lying |
+| --- | --- |
+| the dashboard KPI spec | compared one page of `/projects` against a count of all of them; passed while the workspace held under twenty |
+| the first pagination test | took `organisation.findFirst()`, a fixture org with two projects, so every case fell through a `total <= pageSize` early return **and passed with the bug deliberately reintroduced** |
+| the second pagination test | took its baseline from a single 100-row page, so an org of 106 made the walk look like it had invented rows |
+| the bid service mock | could not answer `aggregate`, so it failed a correct fix |
+
+The habit that caught all four is the same one this programme applies to the
+product: **reintroduce the bug and watch the test fail.** A green test that has
+never been shown to go red is an assertion about nothing.
