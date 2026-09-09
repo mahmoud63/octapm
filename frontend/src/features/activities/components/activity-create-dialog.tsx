@@ -10,6 +10,7 @@ import { Checkbox } from '@/components/ui/checkbox'
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
@@ -156,6 +157,13 @@ export function ActivityCreateDialog({
       <DialogContent className='sm:max-w-2xl'>
         <DialogHeader>
           <DialogTitle>Add Activity</DialogTitle>
+          {/* Radix wires this to aria-describedby, so it is what a screen
+              reader hears after the title (OCTA-A11Y-DIALOG-105). */}
+          <DialogDescription>
+            Give the activity a code, a name and its dates. Everything booked
+            against it later — cost, materials, progress — hangs off this
+            record.
+          </DialogDescription>
         </DialogHeader>
 
         <Form {...form}>

@@ -138,3 +138,76 @@ export const parseMoney = (text: string | null): number => {
   const value = Number.parseFloat(cleaned)
   return Number.isFinite(value) ? value : 0
 }
+
+/**
+ * A strict console gate for the workflows this programme certifies.
+ *
+ * `watchForProblems` above collects console *errors* for the defect log. This
+ * is the harder line: it fails a test on any error **or warning** the
+ * application itself produces, because the ones that matter most here are
+ * warnings — Radix's missing-`DialogTitle` and React's controlled/uncontrolled
+ * complaint are both `console.warn`, and a watcher listening only for errors
+ * walked straight past them (OCTA-QA-CONSOLE-106).
+ *
+ * The allowlist is deliberately tiny and each entry has to earn its place. It
+ * holds only messages the browser emits *about* the page rather than messages
+ * the page emits about itself.
+ */
+const CONSOLE_ALLOWED: Array<{ pattern: RegExp; why: string }> = [
+  {
+    pattern: /Download the React DevTools/,
+    why: 'React DevTools nag: emitted by React itself, not by OctaPM.',
+  },
+  {
+    pattern: /Failed to load resource.*\b401\b/,
+    why:
+      'The browser reporting the HTTP status of the bootstrap /auth/me probe. ' +
+      'On a cold load the access token lives only in memory, so the first call ' +
+      'is unauthenticated; the response interceptor refreshes and retries, and ' +
+      'the user sees nothing. Only 401 is tolerated — any other status fails.',
+  },
+]
+
+/**
+ * Never allowlisted, and named here so a future reader cannot quietly add them:
+ * controlled/uncontrolled transitions, missing `key` props, missing
+ * `DialogTitle`, and missing `Description`/`aria-describedby`. Those are
+ * defects to fix, not noise to tolerate.
+ */
+export const CONSOLE_NEVER_ALLOWED = [
+  /changing an? (un)?controlled/i,
+  /unique "key" prop/i,
+  /requires a `?DialogTitle/i,
+  /Missing `?Description`? or `?aria-describedby/i,
+]
+
+export function gateConsole(page: Page) {
+  const offences: string[] = []
+
+  const consider = (type: string, text: string) => {
+    if (CONSOLE_NEVER_ALLOWED.some((p) => p.test(text))) {
+      offences.push(`[${type}] ${text.replace(/\s+/g, ' ').slice(0, 300)}`)
+      return
+    }
+    if (CONSOLE_ALLOWED.some((entry) => entry.pattern.test(text))) return
+    offences.push(`[${type}] ${text.replace(/\s+/g, ' ').slice(0, 300)}`)
+  }
+
+  page.on('console', (message) => {
+    const type = message.type()
+    if (type !== 'error' && type !== 'warning') return
+    consider(type, message.text())
+  })
+  page.on('pageerror', (error) => consider('pageerror', String(error)))
+
+  return {
+    offences,
+    /** Fails with the offending messages rather than just a count. */
+    assertClean(context: string) {
+      expect(
+        offences,
+        `${context}: the browser console must be clean.\n${offences.join('\n')}`,
+      ).toEqual([])
+    },
+  }
+}

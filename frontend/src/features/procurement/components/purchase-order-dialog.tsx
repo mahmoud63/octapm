@@ -96,10 +96,21 @@ export function PurchaseOrderDialog({
   return (
     <Dialog open={Boolean(orderId)} onOpenChange={(next) => !next && onClose()}>
       <DialogContent className='max-h-[92vh] overflow-y-auto sm:max-w-4xl'>
+        {/* The visible heading lives in OrderBody, which only mounts once the
+            order has loaded — so for the whole fetch the dialog had no name
+            and no description, and a screen reader announced nothing at all
+            (OCTA-A11Y-DIALOG-105). This labels it from the moment it opens
+            and steps aside once the real header arrives. */}
         {order.isPending && (
-          <div className='flex justify-center py-16'>
-            <Loader2 className='size-6 animate-spin text-muted-foreground' />
-          </div>
+          <>
+            <DialogHeader className='sr-only'>
+              <DialogTitle>Purchase order</DialogTitle>
+              <DialogDescription>Loading the order…</DialogDescription>
+            </DialogHeader>
+            <div className='flex justify-center py-16'>
+              <Loader2 className='size-6 animate-spin text-muted-foreground' />
+            </div>
+          </>
         )}
         {order.data && (
           <OrderBody projectId={projectId} order={order.data} onClose={onClose} />

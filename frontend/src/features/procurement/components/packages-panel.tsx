@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { Fragment, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { BallInCourtBadge } from '@/components/ball-in-court'
 import { cn } from '@/lib/utils'
@@ -184,9 +184,8 @@ export function PackagesPanel({ projectId }: { projectId: string }) {
         </thead>
         <tbody className='divide-y'>
           {packages.map((pkg) => (
-            <>
+            <Fragment key={pkg.id}>
               <tr
-                key={pkg.id}
                 className='hover:bg-surface/60 cursor-pointer'
                 onClick={() => setOpenId(openId === pkg.id ? null : pkg.id)}
                 data-testid={`uat-package-row-${pkg.packageNumber}`}
@@ -218,7 +217,7 @@ export function PackagesPanel({ projectId }: { projectId: string }) {
                   </td>
                 </tr>
               )}
-            </>
+            </Fragment>
           ))}
         </tbody>
       </table>
