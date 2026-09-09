@@ -553,3 +553,26 @@ treats it as never allowlistable, so it fails loudly if it ever appears.
 | OpenAPI | 731 documented paths |
 | Smoke | 14 modules · 14 ✅ · 0 🟡 · 0 🔴 |
 | Console | 0 OctaPM errors · 0 OctaPM warnings |
+
+---
+
+## 17. Phase 20.5 addendum — the numbering blocker, and a correction
+
+Full detail in `OCTAPM_GREENFIELD_BLOCKER_CERTIFICATION.md`. Two things belong
+here because they correct what this document previously said.
+
+**Section 16 reported "zero 429s across 1,612 logins" and concluded the rate
+limiter was never involved. That was wrong.** The count came from
+`grep -c ' 429 '` against a log where morgan colourises the status, so the ANSI
+codes meant the pattern never matched. There were 25. The culprit is
+`authLimiter` — everything under `/api/v1/auth`, including the `/auth/me` probe
+on every cold page load — at 2,025 requests against a 2,000 budget in one
+13.7-minute run. Fixed in local `.env` only; production defaults unchanged.
+
+**The bid-package fix recorded in section 15 was a half-measure.** It moved
+numbering off `count + 1` and onto `MAX + 1`, which closes the gap and not the
+race. Phase 20.5 moved it, and 33 other sites, onto an atomic counter.
+
+Both are the same lesson this phase kept relearning: a measurement is only
+worth the scepticism applied to the instrument, and that applies to a grep as
+much as to a test suite.

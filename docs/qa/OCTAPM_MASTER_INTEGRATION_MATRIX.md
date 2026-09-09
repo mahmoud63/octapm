@@ -459,3 +459,32 @@ implement. Consequence: a newly created project has a team of one and refuses
 every other persona with `PROJECT_ACCESS_DENIED`, which is why persona testing
 runs on the seeded project. Not built — a project-team endpoint is a feature
 decision, not a UX repair.
+
+---
+
+# Phase 20.5 addendum
+
+## Closed
+
+**OCTA-API-REFNUM-111 — unsafe reference numbering.** 34 sites across 29 files,
+in two families (`count + 1`, and `MAX + 1` which the brief warned against
+specifically). All on one atomic counter. Proven by concurrency, gap and
+mutation tests against the real database; mutation-checked at 9 of 14 cases
+failing when the old behaviour is restored.
+
+**OCTA-QA-POOL-112 — leaked test connections.** Four real-database suites now
+release their pools. Measured: 34 idle at baseline, ~56 of 100 at peak,
+returning to baseline. `max_connections` was not touched.
+
+**OCTA-QA-AUTHLIMIT-113 — the 429 that was mis-measured.** Not the login
+limiter but `authLimiter`, at 2,025 requests against a 2,000 budget in one run.
+Fixed in local `.env` only; production stays at 80 per 15 minutes.
+
+## Open
+
+**OCTA-UX-TEAM-093 — a project cannot be given a team. P1, unstarted.** The
+other half of the Phase 20.5 brief. Until it is built, a greenfield project has
+a team of one and no persona but the creator can reach it, so a full-system
+simulation cannot be driven on a project the simulation itself creates.
+
+**Match picker `take: 100`. P2.** No paging, no search.

@@ -798,3 +798,28 @@ persona test in this programme therefore runs on the seeded project, because a
 newly created one has a team of one and refuses everybody else with
 `PROJECT_ACCESS_DENIED`. Recorded as **OCTA-UX-TEAM-093**, unbuilt: a
 project-team endpoint is a feature decision, not a UX repair.
+
+---
+
+# Phase 20.5 addendum — every register numbers itself the same way
+
+34 call sites across 29 files generated their own references, in two families
+that failed differently: `count + 1` collided after any deletion, and
+`MAX + 1` collided under concurrency. Both produced an HTTP 500 on a create.
+
+They now share one strategy — a `ReferenceCounter` row advanced by a single
+atomic statement, seeded lazily from whatever the register had already issued
+so existing references keep their numbers. Gaps are not filled and the counter
+never rolls back, so a reference already quoted to a supplier is never handed
+out twice.
+
+This is the same shape as the rest of the nervous system: one rule, in one
+place, that every module reads rather than each keeping its own copy. The
+numbering was the last obvious case of the same decision being made
+independently in twenty-nine files.
+
+**Still one nerve short, unchanged from Phase 20:** a project cannot be given a
+team. There is no path to add an existing colleague to a project, only an email
+invitation they must accept, so a newly created project has a team of one and
+refuses every other persona with `PROJECT_ACCESS_DENIED`. That is the blocker
+standing between here and a full greenfield simulation.
