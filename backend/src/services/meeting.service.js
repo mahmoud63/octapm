@@ -11,6 +11,7 @@ const auditService = require("./audit.service");
 const notificationService = require("./notification.service");
 const taskService = require("./task.service");
 const { assertProjectAccess } = require("./project-authorization.service");
+const { nextRef } = require("../utils/reference-number");
 
 const MEETING_ENTITY_TYPE = "meeting";
 const MEETING_STATUSES = Object.freeze([
@@ -758,10 +759,15 @@ const collectValidationIds = ({
   taskIds: (actionItems || []).map((row) => row.taskId),
 });
 
-const nextMeetingNumber = async ({ tx, projectId }) => {
-  const count = await tx.meeting.count({ where: { projectId } });
-  return `MTG-${String(count + 1).padStart(4, "0")}`;
-};
+const nextMeetingNumber = async ({ tx, projectId }) =>
+  nextRef(tx, {
+    table: "Meeting",
+    column: "meetingNumber",
+    scopeColumn: "projectId",
+    scopeId: projectId,
+    prefix: "MTG",
+    pad: 4,
+  });
 
 const recordMeetingAudit = ({
   tx,

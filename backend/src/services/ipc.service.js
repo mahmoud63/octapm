@@ -11,6 +11,7 @@ const {
 const auditService = require("./audit.service");
 const approvalWorkflowService = require("./approval-workflow.service");
 const primeContractService = require("./prime-contract.service");
+const { nextRef: nextReferenceNumber } = require("../utils/reference-number");
 
 const MONEY_EPSILON = 0.01;
 const QTY_EPSILON = 0.000001;
@@ -1470,11 +1471,27 @@ const findIssuedInvoice = async ({ tx, projectId, certificateId }) =>
     },
   });
 
+/** Prisma delegate -> table, for the shared counter. */
+const REF_TABLES = {
+  ipcInvoice: "IpcInvoice",
+  ipcPayment: "IpcPayment",
+  ipcRetentionRelease: "IpcRetentionRelease",
+};
+
 const nextReference = async ({ tx, modelName, projectId, prefix, field }) => {
-  const count = tx[modelName]?.count
-    ? await tx[modelName].count({ where: { projectId } })
-    : 0;
-  return `${prefix}-${String(count + 1).padStart(3, "0")}`;
+  const table = REF_TABLES[modelName];
+  if (!table) throw new Error(`ipc: no table mapping for "${modelName}"`);
+  // The prefix carries the period, so each period counts separately — which is
+  // the intent, and is preserved because the counter is scoped by prefix as
+  // well as by project. Counting rows breaks after a void or a deletion, and
+  // races even without one (OCTA-API-REFNUM-111).
+  return nextReferenceNumber(tx, {
+    table,
+    column: field,
+    scopeColumn: "projectId",
+    scopeId: projectId,
+    prefix,
+  });
 };
 
 const issueIpcInvoice = async ({

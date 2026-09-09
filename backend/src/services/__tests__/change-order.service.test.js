@@ -1,4 +1,6 @@
+const { referenceCounterMock } = require("./helpers/reference-counter-mock");
 const mockPrisma = {
+  ...referenceCounterMock(),
   $transaction: jest.fn((fn) => fn(mockPrisma)),
   project: { findFirst: jest.fn() },
   changeOrder: {

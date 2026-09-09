@@ -1,5 +1,6 @@
 const { prisma } = require('../config/db');
 const { HttpError } = require('../utils/http-error');
+const { nextRef } = require("../utils/reference-number");
 const {
   RECORD_TYPES,
   workflowAssignmentData,
@@ -50,7 +51,7 @@ const listDefects = async ({ orgId, projectId }) => {
 const createDefect = async ({ orgId, projectId, payload }) => {
   await ensureProject({ orgId, projectId });
 
-  const count = await prisma.defectRecord.count({ where: { projectId } });
+  const generatedRef = await nextRef(prisma, { table: 'DefectRecord', scopeColumn: 'projectId', scopeId: projectId, prefix: 'DEF' });
   const activityId = primaryActivityIdFromPayload(payload);
 
   const row = await prisma.$transaction(async (tx) => {
@@ -58,7 +59,7 @@ const createDefect = async ({ orgId, projectId, payload }) => {
       data: {
         projectId,
         activityId,
-        ref: payload.ref || `DEF-${String(count + 1).padStart(3, '0')}`,
+        ref: payload.ref || generatedRef,
         title: payload.title,
         trade: payload.trade?.trim() || null,
         location: payload.location?.trim() || null,

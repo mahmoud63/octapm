@@ -11,6 +11,7 @@ const {
 } = require("./workflow-support.service");
 const approvalWorkflowService = require("./approval-workflow.service");
 const auditService = require("./audit.service");
+const { nextRef } = require("../utils/reference-number");
 const {
   ARCHIVED_STATUS,
   applyArchiveVisibility,
@@ -244,7 +245,7 @@ const createSafetyIncident = async ({
 }) => {
   await ensureProject({ orgId, projectId });
 
-  const count = await prisma.safetyIncident.count({ where: { projectId } });
+  const generatedRef = await nextRef(prisma, { table: 'SafetyIncident', scopeColumn: 'projectId', scopeId: projectId, prefix: 'SAF' });
   const activityId = primaryActivityIdFromPayload(payload);
   const status = payload.status || SAFETY_STATUS.OPEN;
   if (![SAFETY_STATUS.OPEN, SAFETY_STATUS.INVESTIGATING].includes(status)) {
@@ -260,7 +261,7 @@ const createSafetyIncident = async ({
       data: {
         projectId,
         activityId,
-        ref: payload.ref || `SAF-${String(count + 1).padStart(3, "0")}`,
+        ref: payload.ref || generatedRef,
         incidentType: payload.incidentType,
         severity: payload.severity?.trim() || null,
         title: payload.title,

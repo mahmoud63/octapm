@@ -3,6 +3,7 @@ const { HttpError } = require("../utils/http-error");
 const auditService = require("./audit.service");
 const approvalWorkflowService = require("./approval-workflow.service");
 const { deriveBallInCourt } = require("./workflow-support.service");
+const { nextRef } = require("../utils/reference-number");
 const {
   ARCHIVED_STATUS,
   applyArchiveVisibility,
@@ -623,8 +624,8 @@ const createRisk = async ({
   }
 
   const activityLinks = normalizeActivityLinks(payload);
-  const count = await prisma.risk.count({ where: { projectId } });
-  const ref = `RSK-${String(count + 1).padStart(2, "0")}`;
+  const generatedRef = await nextRef(prisma, { table: 'Risk', scopeColumn: 'projectId', scopeId: projectId, prefix: 'RSK', pad: 2 });
+  const ref = generatedRef;
 
   const risk = await prisma.$transaction(async (tx) => {
     if (activityLinks !== null) {

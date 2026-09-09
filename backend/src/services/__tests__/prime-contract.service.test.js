@@ -1,3 +1,4 @@
+const { referenceCounterMock } = require("./helpers/reference-counter-mock");
 /**
  * The client contract.
  *
@@ -9,6 +10,7 @@
  */
 
 const mockPrisma = {
+  ...referenceCounterMock(),
   primeContract: { findFirst: jest.fn(), update: jest.fn(), create: jest.fn(), count: jest.fn() },
   primeContractAdvance: { findFirst: jest.fn(), create: jest.fn(), count: jest.fn() },
   changeOrder: { aggregate: jest.fn() },

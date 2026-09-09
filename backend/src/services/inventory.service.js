@@ -1,6 +1,7 @@
 const { prisma } = require("../config/db");
 const { HttpError } = require("../utils/http-error");
 const costLedger = require("./cost-ledger.service");
+const { nextRef: nextReferenceNumber } = require("../utils/reference-number");
 
 /**
  * Inventory, warehouses and the stock ledger (OCTA-INV-STOCK-050).
@@ -1144,9 +1145,21 @@ const transferInclude = {
   lines: { include: { item: { select: { sku: true, name: true, unit: true } } } },
 };
 
+/** Prisma delegate -> table, for the shared counter. */
+const REF_TABLES = { stockTransfer: "StockTransfer" };
+
 const nextRef = async (model, orgId, prefix) => {
-  const count = await prisma[model].count({ where: { orgId } });
-  return `${prefix}-${String(count + 1).padStart(5, "0")}`;
+  const table = REF_TABLES[model];
+  if (!table) throw new Error(`inventory: no table mapping for "${model}"`);
+  // Counting breaks the moment a transfer is deleted, and racing two creates
+  // breaks it even without one (OCTA-API-REFNUM-111).
+  return nextReferenceNumber(prisma, {
+    table,
+    scopeColumn: "orgId",
+    scopeId: orgId,
+    prefix,
+    pad: 5,
+  });
 };
 
 const createTransfer = async ({ orgId, user, payload }) => {

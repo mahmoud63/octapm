@@ -1,5 +1,6 @@
 const { prisma } = require('../config/db');
 const { HttpError } = require('../utils/http-error');
+const { nextRef } = require("../utils/reference-number");
 const {
   RECORD_TYPES,
   workflowAssignmentData,
@@ -48,7 +49,7 @@ const listDrawings = async ({ orgId, projectId }) => {
 const createDrawing = async ({ orgId, projectId, payload }) => {
   await ensureProject({ orgId, projectId });
 
-  const count = await prisma.drawingRecord.count({ where: { projectId } });
+  const generatedRef = await nextRef(prisma, { table: 'DrawingRecord', scopeColumn: 'projectId', scopeId: projectId, prefix: 'DWG' });
   const activityId = primaryActivityIdFromPayload(payload);
 
   const row = await prisma.$transaction(async (tx) => {
@@ -56,7 +57,7 @@ const createDrawing = async ({ orgId, projectId, payload }) => {
       data: {
         projectId,
         activityId,
-        ref: payload.ref || `DWG-${String(count + 1).padStart(3, '0')}`,
+        ref: payload.ref || generatedRef,
         drawingNumber: payload.drawingNumber,
         title: payload.title,
         discipline: payload.discipline?.trim() || null,

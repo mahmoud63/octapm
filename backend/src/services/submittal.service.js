@@ -25,6 +25,7 @@ const {
 const auditService = require("./audit.service");
 const approvalWorkflowService = require("./approval-workflow.service");
 const submittalWorkflow = require("./submittal-workflow.service");
+const { nextRef } = require("../utils/reference-number");
 const {
   ARCHIVED_STATUS,
   applyArchiveVisibility,
@@ -278,7 +279,7 @@ const createSubmittal = async ({
 }) => {
   await ensureProject({ orgId, projectId });
 
-  const count = await prisma.submittal.count({ where: { projectId } });
+  const generatedRef = await nextRef(prisma, { table: 'Submittal', scopeColumn: 'projectId', scopeId: projectId, prefix: 'SUB' });
   const activityId = primaryActivityIdFromPayload(payload);
   const assignmentPayload = withDefaultOwnerParty(payload, projectAccess);
   const upgrade = upgradeFields(payload);
@@ -296,7 +297,7 @@ const createSubmittal = async ({
       data: {
         projectId,
         activityId,
-        ref: payload.ref || `SUB-${String(count + 1).padStart(3, "0")}`,
+        ref: payload.ref || generatedRef,
         title: payload.title,
         discipline: payload.discipline?.trim() || null,
         revision: payload.revision || "A",

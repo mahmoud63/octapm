@@ -1,4 +1,7 @@
+const { referenceCounterMock } = require("./helpers/reference-counter-mock");
 const mockPrisma = {
+  // The fixture pretends two sets already exist, so the next is SET-003.
+  ...referenceCounterMock({ highest: 2 }),
   $transaction: jest.fn((fn) => fn(mockPrisma)),
   project: { findFirst: jest.fn() },
   location: { findFirst: jest.fn() },

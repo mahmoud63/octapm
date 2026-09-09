@@ -14,6 +14,7 @@ const {
   sortKeyFor,
 } = require("../utils/sheet-title-detect");
 const { recordWorkspacePath } = require("../utils/record-links");
+const { nextReference: nextReferenceNumber } = require("../utils/reference-number");
 
 /**
  * Drawings tool (OCTA-DWG-CORE-011): DrawingSet → Sheet → SheetRevision.
@@ -224,8 +225,17 @@ const revisionCountsForSets = async ({ projectId, setIds }) => {
 // ─── Sets ─────────────────────────────────────────────────────────────────
 
 const nextSetNumber = async ({ projectId, offset = 0 }) => {
-  const count = await prisma.drawingSet.count({ where: { projectId } });
-  return `SET-${String(count + 1 + offset).padStart(3, "0")}`;
+  // `offset` used to nudge past a clash the count had already caused; the
+  // counter cannot hand out the same number twice, so it is only honoured when
+  // a caller deliberately wants to skip ahead (OCTA-API-REFNUM-111).
+  const { number } = await nextReferenceNumber(prisma, {
+    table: "DrawingSet",
+    column: "setNumber",
+    scopeColumn: "projectId",
+    scopeId: projectId,
+    prefix: "SET",
+  });
+  return `SET-${String(number + offset).padStart(3, "0")}`;
 };
 
 const normalizeSetPayload = (payload = {}) => {

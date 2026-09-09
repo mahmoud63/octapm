@@ -9,6 +9,7 @@ const {
 } = require("./commercial-traceability.service");
 const { recordWorkflowHistory } = require("./workflow-support.service");
 const approvalWorkflowService = require("./approval-workflow.service");
+const { nextRef } = require("../utils/reference-number");
 const {
   ARCHIVED_STATUS,
   applyArchiveVisibility,
@@ -813,8 +814,7 @@ const createChangeOrder = async ({
   await ensureProject({ orgId, projectId });
   assertCreateStatus(payload);
 
-  const count = await prisma.changeOrder.count({ where: { projectId } });
-  const ref = `VO-${String(count + 1).padStart(2, "0")}`;
+  const ref = await nextRef(prisma, { table: 'ChangeOrder', scopeColumn: 'projectId', scopeId: projectId, prefix: 'VO', pad: 2 });
   const now = new Date();
   const status = CHANGE_ORDER_STATUSES.DRAFT;
   const primaryActivityId = firstActivityIdFromPayload(payload);

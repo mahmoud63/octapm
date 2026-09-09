@@ -8,6 +8,7 @@ const { requireRoles } = require('../middleware/rbac');
 const { validate } = require('../middleware/validate');
 const { prisma } = require('../config/db');
 const { workingDayToDate } = require('../services/cpm.service');
+const { nextRef } = require("../utils/reference-number");
 
 const router = express.Router({ mergeParams: true });
 
@@ -113,14 +114,18 @@ router.get(
         }
       }
 
-      const count = await prisma.weeklyReport.count({
-        where: { projectId: req.params.projectId },
+      const generatedRef = await nextRef(prisma, {
+        table: "WeeklyReport",
+        scopeColumn: "projectId",
+        scopeId: req.params.projectId,
+        prefix: "WR",
+        pad: 2,
       });
 
       report = await prisma.weeklyReport.create({
         data: {
           projectId: req.params.projectId,
-          ref: `WR-${String(count + 1).padStart(2, '0')}`,
+          ref: generatedRef,
           weekStartDate,
           weekEndDate,
           plannedProgress:
@@ -163,14 +168,18 @@ router.post(
       throw new HttpError(404, 'PROJECT_NOT_FOUND', 'Project not found');
     }
 
-    const count = await prisma.weeklyReport.count({
-      where: { projectId: req.params.projectId },
+    const generatedRef = await nextRef(prisma, {
+      table: "WeeklyReport",
+      scopeColumn: "projectId",
+      scopeId: req.params.projectId,
+      prefix: "WR",
+      pad: 2,
     });
 
     const report = await prisma.weeklyReport.create({
       data: {
         projectId: req.params.projectId,
-        ref: `WR-${String(count + 1).padStart(2, '0')}`,
+        ref: generatedRef,
         weekStartDate: new Date(req.body.weekStartDate),
         weekEndDate: new Date(req.body.weekEndDate),
         preparedBy: req.body.preparedBy || null,

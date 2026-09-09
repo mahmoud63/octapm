@@ -8190,3 +8190,27 @@ model CostLedgerEntry {
   @@index([projectId, budgetLineId])
   @@index([commitmentId])
 }
+
+/**
+ * The next number for one family of human-readable references.
+ *
+ * Every register in OctaPM numbered itself `count + 1`, which is only ever
+ * right while nothing has been deleted: delete one row and the next create
+ * asks for a number that already exists, and dies on the unique index with a
+ * 500. Twenty-two call sites did this (OCTA-API-REFNUM-111).
+ *
+ * `MAX(existing) + 1` fixes the gap but not the race — two creates reading the
+ * same maximum still produce the same reference. This counter is incremented
+ * by a single atomic statement instead, so two concurrent callers cannot be
+ * handed the same number whether or not either sits in a transaction. It is
+ * seeded from the highest reference already issued the first time a scope is
+ * used, so references that exist today keep their numbers.
+ *
+ * `scope` names the family and what it is counted within, e.g.
+ * "project:<uuid>:VO" or "org:<uuid>:TRF".
+ */
+model ReferenceCounter {
+  scope     String   @id
+  next      Int
+  updatedAt DateTime @updatedAt
+}

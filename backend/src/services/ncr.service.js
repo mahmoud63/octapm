@@ -10,6 +10,7 @@ const {
   syncWorkflowReferences,
 } = require("./workflow-support.service");
 const approvalWorkflowService = require("./approval-workflow.service");
+const { nextRef } = require("../utils/reference-number");
 
 const ensureProject = async ({ orgId, projectId }) => {
   const project = await prisma.project.findFirst({
@@ -202,7 +203,7 @@ const createNcr = async ({
 }) => {
   await ensureProject({ orgId, projectId });
 
-  const count = await prisma.ncrRecord.count({ where: { projectId } });
+  const generatedRef = await nextRef(prisma, { table: 'NcrRecord', scopeColumn: 'projectId', scopeId: projectId, prefix: 'NCR' });
   const activityId = primaryActivityIdFromPayload(payload);
   const status = payload.status || NCR_STATUS.OPEN;
   if (status !== NCR_STATUS.OPEN) {
@@ -218,7 +219,7 @@ const createNcr = async ({
       data: {
         projectId,
         activityId,
-        ref: payload.ref || `NCR-${String(count + 1).padStart(3, "0")}`,
+        ref: payload.ref || generatedRef,
         severity: payload.severity || "minor",
         description: payload.description?.trim() || null,
         disposition: payload.disposition?.trim() || null,

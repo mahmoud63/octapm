@@ -1,6 +1,7 @@
 const { prisma } = require('../config/db');
 const { HttpError } = require('../utils/http-error');
 const { addMoney, subtractMoney, toMoneyNumber } = require('../utils/money');
+const { nextRef } = require("../utils/reference-number");
 
 const ensureProject = async ({ orgId, projectId }) => {
   const project = await prisma.project.findFirst({
@@ -87,8 +88,7 @@ const listBudgetRevisions = async ({ orgId, projectId }) => {
 const createBudgetRevision = async ({ orgId, projectId, userId, payload }) => {
   const project = await ensureProject({ orgId, projectId });
 
-  const count = await prisma.budgetRevision.count({ where: { projectId } });
-  const ref = `BR-${String(count + 1).padStart(2, '0')}`;
+  const ref = await nextRef(prisma, { table: 'BudgetRevision', scopeColumn: 'projectId', scopeId: projectId, prefix: 'BR', pad: 2 });
 
   const last = await prisma.budgetRevision.findFirst({
     where: { projectId, status: 'approved' },

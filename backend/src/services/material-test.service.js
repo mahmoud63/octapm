@@ -1,5 +1,6 @@
 const { prisma } = require('../config/db');
 const { HttpError } = require('../utils/http-error');
+const { nextRef } = require("../utils/reference-number");
 const {
   RECORD_TYPES,
   workflowAssignmentData,
@@ -53,7 +54,7 @@ const listMaterialTests = async ({ orgId, projectId }) => {
 const createMaterialTest = async ({ orgId, projectId, payload }) => {
   await ensureProject({ orgId, projectId });
 
-  const count = await prisma.materialTest.count({ where: { projectId } });
+  const generatedRef = await nextRef(prisma, { table: 'MaterialTest', scopeColumn: 'projectId', scopeId: projectId, prefix: 'MTEST' });
   const activityId = primaryActivityIdFromPayload(payload);
 
   const row = await prisma.$transaction(async (tx) => {
@@ -61,7 +62,7 @@ const createMaterialTest = async ({ orgId, projectId, payload }) => {
       data: {
         projectId,
         activityId,
-        ref: payload.ref || `MTEST-${String(count + 1).padStart(3, '0')}`,
+        ref: payload.ref || generatedRef,
         testType: payload.testType,
         specValue: payload.specValue?.trim() || null,
         actualValue: payload.actualValue?.trim() || null,

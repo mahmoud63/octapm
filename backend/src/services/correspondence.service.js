@@ -1,5 +1,6 @@
 const { prisma } = require('../config/db');
 const { HttpError } = require('../utils/http-error');
+const { nextRef } = require("../utils/reference-number");
 const {
   RECORD_TYPES,
   workflowAssignmentData,
@@ -54,7 +55,7 @@ const resolveRecordTypeKey = async ({ orgId, key }) =>
 const createCorrespondence = async ({ orgId, projectId, payload }) => {
   await ensureProject({ orgId, projectId });
 
-  const count = await prisma.correspondence.count({ where: { projectId } });
+  const generatedRef = await nextRef(prisma, { table: 'Correspondence', scopeColumn: 'projectId', scopeId: projectId, prefix: 'COR' });
   const activityId = primaryActivityIdFromPayload(payload);
 
   const row = await prisma.$transaction(async (tx) => {
@@ -62,7 +63,7 @@ const createCorrespondence = async ({ orgId, projectId, payload }) => {
       data: {
         projectId,
         activityId,
-        ref: payload.ref || `COR-${String(count + 1).padStart(3, '0')}`,
+        ref: payload.ref || generatedRef,
         direction: payload.direction,
         type: payload.type,
         recordTypeKey: await resolveRecordTypeKey({ orgId, key: payload.recordTypeKey }),

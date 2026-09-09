@@ -1,4 +1,6 @@
+const { referenceCounterMock } = require("./helpers/reference-counter-mock");
 const mockPrisma = {
+  ...referenceCounterMock(),
   $transaction: jest.fn((callback) => callback(mockPrisma)),
   meeting: {
     count: jest.fn(),

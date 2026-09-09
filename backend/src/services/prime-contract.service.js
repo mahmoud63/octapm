@@ -7,6 +7,7 @@ const {
   toMoneyNumber,
 } = require("../utils/money");
 const auditService = require("./audit.service");
+const { nextRef } = require("../utils/reference-number");
 
 /**
  * The client contract, and the money it brings in (OCTA-COM-PRIME-051).
@@ -338,17 +339,18 @@ const updateContract = async ({ orgId, projectId, userId, payload = {} }) => {
 const advanceOutstanding = (contract) =>
   round2(num(contract.advancePaidAmount) - num(contract.advanceRecoveredAmount));
 
-const nextAdvanceReference = async (tx, { projectId, prefix }) => {
-  const count = await tx.primeContractAdvance.count({ where: { projectId } });
-  for (let attempt = count + 1; attempt <= count + 200; attempt += 1) {
-    const reference = `${prefix}-${String(attempt).padStart(3, "0")}`;
-    const clash = await tx.primeContractAdvance.findFirst({
-      where: { projectId, reference },
-    });
-    if (!clash) return reference;
-  }
-  throw new HttpError(500, "ADVANCE_REF_EXHAUSTED", "Could not allocate an advance reference");
-};
+const nextAdvanceReference = async (tx, { projectId, prefix }) =>
+  // This one already knew counting was unsafe: it scanned forward up to two
+  // hundred times looking for a free reference, which is a race dressed as a
+  // retry — two callers scan the same gap and both take it. The counter
+  // settles it in one atomic statement (OCTA-API-REFNUM-111).
+  nextRef(tx, {
+    table: "PrimeContractAdvance",
+    column: "reference",
+    scopeColumn: "projectId",
+    scopeId: projectId,
+    prefix,
+  });
 
 /** The client pays the advance. */
 const recordAdvancePayment = async ({ orgId, projectId, userId, payload = {} }) => {

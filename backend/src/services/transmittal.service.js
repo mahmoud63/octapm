@@ -1,5 +1,6 @@
 const { prisma } = require('../config/db');
 const { HttpError } = require('../utils/http-error');
+const { nextRef } = require("../utils/reference-number");
 const {
   RECORD_TYPES,
   workflowAssignmentData,
@@ -46,13 +47,13 @@ const listTransmittals = async ({ orgId, projectId }) => {
 const createTransmittal = async ({ orgId, projectId, payload }) => {
   await ensureProject({ orgId, projectId });
 
-  const count = await prisma.transmittal.count({ where: { projectId } });
+  const generatedRef = await nextRef(prisma, { table: 'Transmittal', scopeColumn: 'projectId', scopeId: projectId, prefix: 'TRM' });
 
   const row = await prisma.$transaction(async (tx) => {
     const created = await tx.transmittal.create({
       data: {
         projectId,
-        ref: payload.ref || `TRM-${String(count + 1).padStart(3, '0')}`,
+        ref: payload.ref || generatedRef,
         subject: payload.subject,
         sender: payload.sender,
         recipient: payload.recipient,

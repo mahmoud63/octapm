@@ -1,5 +1,6 @@
 const { prisma } = require('../config/db');
 const { HttpError } = require('../utils/http-error');
+const { nextRef } = require("../utils/reference-number");
 const {
   RECORD_TYPES,
   workflowAssignmentData,
@@ -48,7 +49,7 @@ const listItps = async ({ orgId, projectId }) => {
 const createItp = async ({ orgId, projectId, payload }) => {
   await ensureProject({ orgId, projectId });
 
-  const count = await prisma.itpRecord.count({ where: { projectId } });
+  const generatedRef = await nextRef(prisma, { table: 'ItpRecord', scopeColumn: 'projectId', scopeId: projectId, prefix: 'ITP' });
   const activityId = primaryActivityIdFromPayload(payload);
 
   const row = await prisma.$transaction(async (tx) => {
@@ -56,7 +57,7 @@ const createItp = async ({ orgId, projectId, payload }) => {
       data: {
         projectId,
         activityId,
-        ref: payload.ref || `ITP-${String(count + 1).padStart(3, '0')}`,
+        ref: payload.ref || generatedRef,
         title: payload.title,
         pointType: payload.pointType || 'hold',
         status: payload.status || 'pending',

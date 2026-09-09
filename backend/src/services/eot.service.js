@@ -9,6 +9,7 @@ const {
 } = require('./commercial-traceability.service');
 const { recordWorkflowHistory } = require('./workflow-support.service');
 const approvalWorkflowService = require('./approval-workflow.service');
+const { nextRef } = require("../utils/reference-number");
 
 const EOT_WORKFLOW_ACTIONS = Object.freeze({
   SUBMIT: 'submit',
@@ -645,8 +646,8 @@ const createEotClaim = async ({
 }) => {
   await ensureProject({ orgId, projectId });
 
-  const count = await prisma.eotClaim.count({ where: { projectId } });
-  const ref = `EOT-${String(count + 1).padStart(2, '0')}`;
+  const generatedRef = await nextRef(prisma, { table: 'EotClaim', scopeColumn: 'projectId', scopeId: projectId, prefix: 'EOT', pad: 2 });
+  const ref = generatedRef;
 
   const calc = await calculateEot({
     orgId,

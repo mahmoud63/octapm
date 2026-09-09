@@ -25,6 +25,7 @@ const {
 const auditService = require("./audit.service");
 const approvalWorkflowService = require("./approval-workflow.service");
 const rfiWorkflow = require("./rfi-workflow.service");
+const { nextRef } = require("../utils/reference-number");
 const {
   ARCHIVED_STATUS,
   applyArchiveVisibility,
@@ -276,7 +277,7 @@ const createRfi = async ({
 }) => {
   await ensureProject({ orgId, projectId });
 
-  const count = await prisma.rfi.count({ where: { projectId } });
+  const generatedRef = await nextRef(prisma, { table: 'Rfi', scopeColumn: 'projectId', scopeId: projectId, prefix: 'RFI' });
   const activityId = primaryActivityIdFromPayload(payload);
   const assignmentPayload = withDefaultOwnerParty(payload, projectAccess);
   await rfiWorkflow.validateUsers({ orgId, userIds: [payload.managerUserId] });
@@ -294,7 +295,7 @@ const createRfi = async ({
       data: {
         projectId,
         activityId,
-        ref: payload.ref || `RFI-${String(count + 1).padStart(3, "0")}`,
+        ref: payload.ref || generatedRef,
         subject: payload.subject,
         question: payload.question?.trim() || null,
         response: payload.response?.trim() || null,

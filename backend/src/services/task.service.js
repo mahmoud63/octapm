@@ -10,6 +10,7 @@ const {
 } = require("../utils/list-query");
 const auditService = require("./audit.service");
 const notificationService = require("./notification.service");
+const { nextRef } = require("../utils/reference-number");
 const {
   assertProjectAccess,
   canAccessAllProjects,
@@ -391,10 +392,15 @@ const ensureAttachmentDocuments = async ({
   }
 };
 
-const nextTaskNumber = async ({ tx, projectId }) => {
-  const count = await tx.task.count({ where: { projectId } });
-  return `TSK-${String(count + 1).padStart(4, "0")}`;
-};
+const nextTaskNumber = async ({ tx, projectId }) =>
+  nextRef(tx, {
+    table: "Task",
+    column: "taskNumber",
+    scopeColumn: "projectId",
+    scopeId: projectId,
+    prefix: "TSK",
+    pad: 4,
+  });
 
 const createTaskHistory = ({
   tx,
