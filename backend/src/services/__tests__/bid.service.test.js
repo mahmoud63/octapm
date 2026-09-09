@@ -46,6 +46,20 @@ const table = (rows, prefix, model = null) => ({
   findFirst: jest.fn(async ({ where } = {}) => includeFor(model)(rows.find((row) => matches(row, where)) || null)),
   findUnique: jest.fn(async ({ where }) => includeFor(model)(rows.find((row) => Object.entries(where).every(([key, value]) => row[key] === value)) || null)),
   count: jest.fn(async ({ where } = {}) => rows.filter((row) => matches(row, where)).length),
+  // Sequences take their next value from the highest already used, not from
+  // how many rows exist, so the fake table has to be able to answer that
+  // (OCTA-API-REFNUM-111).
+  aggregate: jest.fn(async ({ where, _max } = {}) => {
+    const found = rows.filter((row) => matches(row, where));
+    const max = {};
+    for (const field of Object.keys(_max || {})) {
+      const values = found
+        .map((row) => row[field])
+        .filter((value) => value !== null && value !== undefined);
+      max[field] = values.length ? values.reduce((a, b) => (a > b ? a : b)) : null;
+    }
+    return { _max: max };
+  }),
   create: jest.fn(async ({ data }) => {
     const nested = data.lines?.create;
     const { lines, ...rest } = data;

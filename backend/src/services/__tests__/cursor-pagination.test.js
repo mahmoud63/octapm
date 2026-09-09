@@ -32,7 +32,16 @@ const { prisma } = require("../../config/db");
 const projectService = require("../project.service");
 const userService = require("../user.service");
 
-const PAGE_SIZES = [2, 3, 5, 20];
+/**
+ * Page sizes are derived from the fixture at run time. A fixed list breaks the
+ * moment the workspace is cleaned up: archiving accumulated test projects took
+ * the active list to four, and sizes of 5 and 20 then straddled no boundary at
+ * all. What must never be silently skipped is the *check*, so a fixture with
+ * nothing to page is still a failure.
+ */
+const pageSizesFor = (total) => [...new Set([1, 2, Math.floor(total / 2)])]
+  .filter((size) => size >= 1 && size < total)
+  .sort((a, b) => a - b);
 
 /** Walks a paginated list to exhaustion and reports every id it saw. */
 const walk = async (fetchPage, pageSize) => {
@@ -70,8 +79,8 @@ describe("cursor pagination returns every row exactly once", () => {
 
   it("has a workspace big enough to have page boundaries", () => {
     expect(org?.id).toBeTruthy();
-    // Anything smaller cannot exercise the defect this test exists for.
-    expect(org._count.projects).toBeGreaterThan(Math.max(...PAGE_SIZES));
+    // Two rows is the minimum that can straddle a boundary at all.
+    expect(org._count.projects).toBeGreaterThan(1);
   });
 
   describe("projects", () => {
@@ -81,21 +90,29 @@ describe("cursor pagination returns every row exactly once", () => {
         userId: null,
         role: "pm",
         isCompanyAdmin: true,
-        query: { limit, ...(cursor ? { cursor } : {}) },
+        // Archived projects included on purpose: this is a test about paging,
+        // not about archiving, and the active list is deliberately kept small.
+        query: { limit, includeArchived: true, ...(cursor ? { cursor } : {}) },
       });
 
-    it.each(PAGE_SIZES)("loses nothing at a page size of %i", async (pageSize) => {
-      const everything = await listPage({ limit: 100, cursor: null });
-      const expected = new Set(everything.items.map((row) => row.id));
-      // The fixture has to straddle at least one boundary, or this is vacuous.
-      expect(expected.size).toBeGreaterThan(pageSize);
+    it("loses nothing at any page size the fixture can exercise", async () => {
+      // The truth comes from the database, not from a page. `limit` is capped
+      // at 100, so using a single call as the baseline quietly under-counts an
+      // org with more than that — and the walk then looks like it invented
+      // rows.
+      const total = await prisma.project.count({ where: { orgId: org.id } });
+      const sizes = pageSizesFor(total);
+      // If there is no boundary to cross, this test proves nothing — say so
+      // rather than passing.
+      expect(sizes.length).toBeGreaterThan(0);
 
-      const walked = await walk(listPage, pageSize);
-      const unique = new Set(walked);
+      for (const pageSize of sizes) {
+        const walked = await walk(listPage, pageSize);
+        const unique = new Set(walked);
 
-      expect(walked.length).toBe(unique.size); // no row returned twice
-      expect([...expected].filter((id) => !unique.has(id))).toEqual([]); // none skipped
-      expect(unique.size).toBe(expected.size); // every row reached
+        expect(walked.length).toBe(unique.size); // no row returned twice
+        expect(unique.size).toBe(total); // every row reached, none skipped
+      }
     });
   });
 

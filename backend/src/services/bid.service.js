@@ -326,8 +326,16 @@ const createPackage = async ({ orgId, projectId, payload = {}, actor = null }) =
   const project = await ensureProject({ orgId, projectId });
   const data = packageData(payload, { project });
   const created = await prisma.$transaction(async (tx) => {
-    const count = await tx.bidPackage.count({ where: { projectId } });
-    const number = count + 1;
+    // The next number is one past the highest already used, not one past
+    // how many exist. Counting breaks the moment anything is deleted: this
+    // project holds 53 packages numbered up to 73, so `count + 1` was 54 —
+    // which already existed — and every attempt to raise a package died on
+    // the unique (projectId, ref) with a 500 (OCTA-API-REFNUM-111).
+    const highest = await tx.bidPackage.aggregate({
+      where: { projectId },
+      _max: { number: true },
+    });
+    const number = (highest._max.number ?? 0) + 1;
     const lines = data.boqSections?.length ? await linesFromBoq({ tx, projectId, sections: data.boqSections }) : [];
     if (lines.length > MAX_LINES) throw new HttpError(400, "BID_LINES_TOO_MANY", `At most ${MAX_LINES} lines per package`);
     const row = await tx.bidPackage.create({ data: { orgId, projectId, number, ref: `BP-${String(number).padStart(3, "0")}`, ...data, createdBy: actor?.id || null, updatedBy: actor?.id || null, lines: { create: lines.map((line) => ({ ...line, orgId })) } }, include: detailInclude });
