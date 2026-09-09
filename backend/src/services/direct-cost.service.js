@@ -4,6 +4,7 @@ const { recordWorkspacePath } = require("../utils/record-links");
 const auditService = require("./audit.service");
 const costLedger = require("./cost-ledger.service");
 const notificationService = require("./notification.service");
+const { nextNumber: nextCounterNumber } = require("../utils/reference-number");
 
 /**
  * Direct costs (OCTA-FIN-DIRECT-039).
@@ -279,7 +280,8 @@ const listDirectCosts = async ({ orgId, projectId, query = {} }) => {
 
 const getDirectCost = async ({ orgId, projectId, directCostId }) => out(await load({ orgId, projectId, directCostId }), { detail: true });
 
-const nextNumber = async (tx, projectId) => ((await tx.directCost.aggregate({ where: { projectId }, _max: { number: true } }))._max?.number || 0) + 1;
+const nextNumber = async (tx, projectId) =>
+  nextCounterNumber(tx, { table: "DirectCost", scope: { projectId } });
 
 const createDirectCost = async ({ orgId, projectId, payload = {}, actor = null }) => {
   await ensureProject({ orgId, projectId });

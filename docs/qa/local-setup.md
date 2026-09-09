@@ -67,6 +67,37 @@ stack is wrong.
 Do not use `/api/v1/projects` as a liveness probe. It is protected, so it
 answers `401` when unauthenticated — correct behaviour, not a failure.
 
+### The auth window, which is the one that actually bites
+
+The limiter that stops a full suite is **`authLimiter`**, not the login one.
+It covers everything under `/api/v1/auth` — including the `/auth/me` probe
+the app makes on every cold page load — and its production default is 80
+requests per 15 minutes per IP.
+
+A full browser run makes about **2,025 requests under `/api/v1/auth` in 13.7
+minutes**. `backend/.env` raises the ceiling to 2,000, but with the default
+15-minute window that is one budget for the whole run: it ran out at request
+2,001 and every `/auth/*` call after that — login, `/auth/me`,
+`sso/lookup`, `refresh` — returned 429, failing eight specs.
+
+`backend/.env` therefore also shortens the window so the budget refreshes
+during a run:
+
+```
+RATE_LIMIT_AUTH_MAX=2000
+RATE_LIMIT_AUTH_WINDOW_MS=60000
+```
+
+`.env` is untracked and local-only. **The production defaults in
+`rate-limit.js` are unchanged** — 80 per 15 minutes is a real control.
+
+If a suite fails with 429, count them with the colour codes stripped, or you
+will read zero where there are twenty-five:
+
+```bash
+sed 's/[[0-9;]*m//g' api.log | grep -cE " 429 "
+```
+
 ### The login ceiling is already raised, and is not your problem
 
 `backend/.env` sets `RATE_LIMIT_LOGIN_MAX=2000` over a 60-second window, so a

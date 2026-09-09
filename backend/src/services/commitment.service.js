@@ -8,6 +8,7 @@ const auditService = require("./audit.service");
 const notificationService = require("./notification.service");
 const { isPartyScopedAccess } = require("./company-party.service");
 const fileStorageService = require("./file-storage.service");
+const { nextNumber: nextCounterNumber } = require("../utils/reference-number");
 
 /**
  * Commitments (OCTA-FIN-COMMIT-020): subcontracts and purchase-order
@@ -364,8 +365,7 @@ const commitmentData = (payload = {}, { project, existing = null } = {}) => {
 };
 
 const nextNumber = async (tx, projectId, type) => {
-  const last = await tx.commitment.aggregate({ where: { projectId, type }, _max: { number: true } });
-  return (last?._max?.number || 0) + 1;
+  return nextCounterNumber(tx, { table: "Commitment", scope: { projectId, type } });
 };
 
 const refFor = (type, number) => `${REF_PREFIX[type] || "CM"}-${String(number).padStart(3, "0")}`;
@@ -718,8 +718,7 @@ const createChangeOrder = async ({ orgId, projectId, commitmentId, payload = {},
       const prime = await tx.changeOrder.findFirst({ where: { id: data.primeChangeOrderId, projectId }, select: { id: true } });
       if (!prime) throw new HttpError(404, "CHANGE_ORDER_NOT_FOUND", "Prime change order not found");
     }
-    const last = await tx.commitmentChangeOrder.aggregate({ where: { commitmentId }, _max: { number: true } });
-    const number = (last?._max?.number || 0) + 1;
+    const number = await nextCounterNumber(tx, { table: "CommitmentChangeOrder", scope: { commitmentId } });
     const row = await tx.commitmentChangeOrder.create({
       data: { orgId, projectId, commitmentId, number, ref: `${commitment.ref}-CO${String(number).padStart(2, "0")}`, status: CO_STATUS.DRAFT, value: 0, linesJson: [], ...data, createdBy: actor?.id || null, updatedBy: actor?.id || null },
       include: { primeChangeOrder: { select: { id: true, ref: true, status: true } } },

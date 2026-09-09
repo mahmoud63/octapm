@@ -8,6 +8,7 @@ const auditService = require("./audit.service");
 const notificationService = require("./notification.service");
 const costLedger = require("./cost-ledger.service");
 const { isPartyScopedAccess } = require("./company-party.service");
+const { nextNumber } = require("../utils/reference-number");
 
 /**
  * Subcontractor payment applications (OCTA-FIN-SUBPAY-021). A pay app is a
@@ -417,8 +418,7 @@ const createPayApp = async ({ orgId, projectId, payload = {}, actor = null, view
       error.details = { reasonCode: "DUPLICATE_PERIOD" };
       throw error;
     }
-    const last = await tx.subPayApp.aggregate({ where: { commitmentId }, _max: { number: true } });
-    const number = (last?._max?.number || 0) + 1;
+    const number = await nextNumber(tx, { table: "SubPayApp", scope: { commitmentId } });
     const previous = await previousByLine({ tx, commitmentId, beforeNumber: number });
     const retentionBefore = await retentionHeldBefore({ tx, commitmentId, beforeNumber: number });
     const seeded = commitment.lines.map((line, index) => ({ sovLineId: line.id, sovLine: line, description: line.description, scheduledAmount: toMoneyNumber(line.amount), previousAmount: previous.get(line.id) || 0, thisPeriodAmount: 0, cumulativeAmount: previous.get(line.id) || 0, materialsOnSite: 0, approvedPct: null, capAmount: null, overClaimAmount: 0, notes: null, sortOrder: index }));

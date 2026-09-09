@@ -52,6 +52,11 @@ describe("reference numbering", () => {
     for (const prefix of scopesUsed) {
       await prisma.referenceCounter.deleteMany({ where: { scope: { contains: `|${prefix}` } } });
     }
+    // Twenty simultaneous callers open twenty connections. Jest runs these
+    // files in one process, so holding that pool afterwards starves whatever
+    // suite comes next — which is how a report test that takes 1.8s alone
+    // started timing out at five seconds.
+    await prisma.$disconnect();
   });
 
   it("has the seeded project", () => {
@@ -134,16 +139,20 @@ describe("reference numbering", () => {
       expect([a.number, b.number].sort()).toEqual([1, 2]);
     });
 
-    it("gives fifty simultaneous callers fifty different references", async () => {
+    // Twenty, not fifty. The property under test is that racing callers get
+    // distinct numbers, which twenty proves as well as fifty; fifty simply
+    // exhausted the local cluster — max_connections is 100 and the rest of the
+    // suite already holds forty-odd — and a test that fails on the harness
+    // rather than the product teaches nobody anything.
+    it("gives twenty simultaneous callers twenty different references", async () => {
       const spec = specFor(freshPrefix(), projectId);
       const results = await Promise.all(
-        Array.from({ length: 50 }, () => nextReference(prisma, spec)),
+        Array.from({ length: 20 }, () => nextReference(prisma, spec)),
       );
-      const refs = results.map((r) => r.ref);
-      expect(new Set(refs).size).toBe(50);
+      expect(new Set(results.map((r) => r.ref)).size).toBe(20);
       // And they are a contiguous run, so nothing was skipped either.
       expect(results.map((r) => r.number).sort((x, y) => x - y)).toEqual(
-        Array.from({ length: 50 }, (_, i) => i + 1),
+        Array.from({ length: 20 }, (_, i) => i + 1),
       );
     });
 

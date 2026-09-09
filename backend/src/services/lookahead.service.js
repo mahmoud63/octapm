@@ -7,6 +7,7 @@ const auditService = require("./audit.service");
 const notificationService = require("./notification.service");
 const { isPartyScopedAccess } = require("./company-party.service");
 const { isWorkingDate, workingDayToDate } = require("./cpm.service");
+const { nextNumber } = require("../utils/reference-number");
 
 /**
  * Lookaheads (OCTA-SCH-LOOKAHEAD-041): short-interval plans.
@@ -349,8 +350,7 @@ const createLookahead = async ({ orgId, projectId, payload = {}, actor = null })
   const project = await ensureProject({ orgId, projectId });
   const header = normalizeHeader({ payload });
   const created = await prisma.$transaction(async (tx) => {
-    const max = await tx.lookahead.aggregate({ where: { projectId }, _max: { number: true } });
-    const number = (max._max.number || 0) + 1;
+    const number = await nextNumber(tx, { table: "Lookahead", scope: { projectId } });
     const row = await tx.lookahead.create({ data: { orgId, projectId, number, ref: `LA-${String(number).padStart(3, "0")}`, ...header, status: STATUS.DRAFT, createdBy: actor?.id || null, updatedBy: actor?.id || null } });
     let seeded = 0;
     if (payload.seed !== false) {
@@ -472,8 +472,7 @@ const rollForward = async ({ orgId, projectId, lookaheadId, payload = {}, actor 
   const window = { start: header.startDate, end: addDays(header.startDate, header.weeks * 7 - 1) };
   const carried = source.items.filter((item) => [ITEM_STATUS.PLANNED, ITEM_STATUS.IN_PROGRESS, ITEM_STATUS.NOT_DONE].includes(item.status)).filter((item) => item.status === ITEM_STATUS.NOT_DONE || startOfUtcDay(item.plannedFinish).getTime() >= window.start.getTime());
   const created = await prisma.$transaction(async (tx) => {
-    const max = await tx.lookahead.aggregate({ where: { projectId }, _max: { number: true } });
-    const number = (max._max.number || 0) + 1;
+    const number = await nextNumber(tx, { table: "Lookahead", scope: { projectId } });
     const row = await tx.lookahead.create({ data: { orgId, projectId, number, ref: `LA-${String(number).padStart(3, "0")}`, ...header, status: STATUS.DRAFT, rolledFromId: source.id, createdBy: actor?.id || null, updatedBy: actor?.id || null } });
     const carriedRows = carried.map((item, index) => {
       const notDone = item.status === ITEM_STATUS.NOT_DONE;

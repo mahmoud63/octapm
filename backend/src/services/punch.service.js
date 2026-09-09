@@ -13,6 +13,7 @@ const {
 } = require("./workflow-support.service");
 const { recordWorkspacePath } = require("../utils/record-links");
 const { createPdf, formatDate } = require("../utils/pdf-writer");
+const { nextNumber: nextCounterNumber } = require("../utils/reference-number");
 
 /**
  * Punch list (OCTA-FLD-PUNCH-013).
@@ -356,8 +357,7 @@ const validateReferences = async ({ orgId, projectId, data }) => {
 };
 
 const nextNumber = async (tx, projectId, kind = "punch") => {
-  const result = await tx.punchItem.aggregate({ where: { projectId, kind }, _max: { number: true } });
-  return (result?._max?.number || 0) + 1;
+  return nextCounterNumber(tx, { table: "PunchItem", scope: { projectId, kind } });
 };
 
 const refFor = (kind, number) => `${REF_PREFIX[kind] || "PL"}-${String(number).padStart(3, "0")}`;

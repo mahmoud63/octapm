@@ -9,6 +9,7 @@ const notificationService = require("./notification.service");
 const emailService = require("./email.service");
 const prequalService = require("./vendor-prequalification.service");
 const { normalizeCompanyName } = require("../utils/company-name");
+const { nextReference: nextReferenceNumber } = require("../utils/reference-number");
 
 /**
  * Bid management (OCTA-PRE-BID-027).
@@ -326,16 +327,18 @@ const createPackage = async ({ orgId, projectId, payload = {}, actor = null }) =
   const project = await ensureProject({ orgId, projectId });
   const data = packageData(payload, { project });
   const created = await prisma.$transaction(async (tx) => {
-    // The next number is one past the highest already used, not one past
-    // how many exist. Counting breaks the moment anything is deleted: this
-    // project holds 53 packages numbered up to 73, so `count + 1` was 54 —
-    // which already existed — and every attempt to raise a package died on
-    // the unique (projectId, ref) with a 500 (OCTA-API-REFNUM-111).
-    const highest = await tx.bidPackage.aggregate({
-      where: { projectId },
-      _max: { number: true },
+    // Phase 20 moved this off `count + 1`, which collided after any deletion,
+    // onto MAX + 1 — which closes the gap but not the race: two requests
+    // reading the same maximum still compute the same number and one loses on
+    // the unique (projectId, ref). The counter settles it in a single atomic
+    // statement, the same way every other register now does
+    // (OCTA-API-REFNUM-111).
+    const { number } = await nextReferenceNumber(tx, {
+      table: "BidPackage",
+      scopeColumn: "projectId",
+      scopeId: projectId,
+      prefix: "BP",
     });
-    const number = (highest._max.number ?? 0) + 1;
     const lines = data.boqSections?.length ? await linesFromBoq({ tx, projectId, sections: data.boqSections }) : [];
     if (lines.length > MAX_LINES) throw new HttpError(400, "BID_LINES_TOO_MANY", `At most ${MAX_LINES} lines per package`);
     const row = await tx.bidPackage.create({ data: { orgId, projectId, number, ref: `BP-${String(number).padStart(3, "0")}`, ...data, createdBy: actor?.id || null, updatedBy: actor?.id || null, lines: { create: lines.map((line) => ({ ...line, orgId })) } }, include: detailInclude });

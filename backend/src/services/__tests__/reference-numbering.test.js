@@ -24,6 +24,7 @@ const { prisma } = require("../../config/db");
 const bidService = require("../bid.service");
 
 describe("generated references do not collide after a deletion", () => {
+
   let project;
   const created = [];
 
@@ -39,6 +40,12 @@ describe("generated references do not collide after a deletion", () => {
     if (created.length) {
       await prisma.bidPackage.deleteMany({ where: { id: { in: created } } });
     }
+    // Last, and after the rows are gone: Jest runs these files in one process,
+    // and a real-database suite that walks away from its connections leaves
+    // them idle for every suite that follows — measured at 53 idle connections
+    // part-way through a full run, which is how a report test that takes 1.8s
+    // alone began exceeding a five second timeout (OCTA-QA-POOL-112).
+    await prisma.$disconnect();
   });
 
   it("has the seeded project to work against", () => {
@@ -65,8 +72,21 @@ describe("generated references do not collide after a deletion", () => {
     });
     created.push(pkg.id);
 
-    expect(pkg.number).toBe(highest + 1);
-    expect(pkg.ref).toBe(`BP-${String(highest + 1).padStart(3, "0")}`);
+    // Strictly past everything the register holds — not necessarily
+    // `highest + 1`. Phase 20.5 moved this onto a counter that never rolls
+    // back, so once records are deleted the next number continues from where
+    // the counter had got to rather than from the surviving maximum. That is
+    // the point: a reference already quoted in an email is never handed out a
+    // second time (OCTA-API-REFNUM-111).
+    expect(pkg.number).toBeGreaterThan(highest);
+    expect(pkg.ref).toBe(`BP-${String(pkg.number).padStart(3, "0")}`);
+
+    // And it collides with nothing already issued.
+    const clash = await prisma.bidPackage.findFirst({
+      where: { projectId: project.id, ref: pkg.ref, id: { not: pkg.id } },
+      select: { id: true },
+    });
+    expect(clash).toBeNull();
   });
 
   it("keeps climbing when called again", async () => {

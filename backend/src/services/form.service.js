@@ -7,6 +7,7 @@ const fileStorageService = require("./file-storage.service");
 const { isPartyScopedAccess } = require("./company-party.service");
 const { recordWorkspacePath } = require("../utils/record-links");
 const { createPdf, formatDate } = require("../utils/pdf-writer");
+const { nextNumber: nextCounterNumber } = require("../utils/reference-number");
 
 /**
  * Checklist / template engine (OCTA-QA-TEMPLATE-014).
@@ -737,8 +738,7 @@ const audit = ({ tx, orgId, projectId, instance, action, actor, oldStatus, newSt
   });
 
 const nextNumber = async (tx, { projectId, type }) => {
-  const last = await tx.formInstance.aggregate({ where: { projectId, type }, _max: { number: true } });
-  return (last._max.number || 0) + 1;
+  return nextCounterNumber(tx, { table: "FormInstance", scope: { projectId, type } });
 };
 
 const refFor = (type, number) => `${TYPE_PREFIX[type] || "FRM"}-${String(number).padStart(3, "0")}`;

@@ -1,3 +1,4 @@
+const { referenceCounterMock } = require("./helpers/reference-counter-mock");
 const store = { lookaheads: [], items: [], notifications: [], audits: [] };
 let seq = 0;
 const nextId = (prefix) => `${prefix}-${(seq += 1)}`;
@@ -88,6 +89,7 @@ const hydrateItem = (row) => ({ ...row, activity: ACTIVITIES.find((item) => item
 const hydrateLookahead = (row) => ({ ...row, items: sortRows(store.items.filter((item) => item.lookaheadId === row.id).map((item) => hydrateItem(clone(item))), [{ sortOrder: "asc" }, { plannedStart: "asc" }]) });
 
 const mockPrisma = {
+  ...referenceCounterMock(),
   project: { findFirst: jest.fn(async ({ where }) => (where.id === "p1" ? PROJECT : null)) },
   activity: {
     findMany: jest.fn(async () => ACTIVITIES.map((item) => ({ ...item, progress: item.progress.map((progress) => ({ ...progress })) }))),

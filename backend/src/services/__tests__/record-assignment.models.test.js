@@ -16,6 +16,15 @@ const { DERIVED_MODELS } = require("../record-assignment.service");
 const { prisma } = require("../../config/db");
 
 describe("the action centre's derived record models", () => {
+
+  // Release the pool. Jest runs these files in one process, and a real-database
+  // suite that walks away from its connections leaves them idle for every suite
+  // that follows — measured at 53 idle connections part-way through a full run,
+  // which is how a report test that takes 1.8s alone began exceeding a five
+  // second timeout (OCTA-QA-POOL-112).
+  afterAll(async () => {
+    await prisma.$disconnect();
+  });
   it("names a Prisma model that exists, for every record type", () => {
     const missing = Object.entries(DERIVED_MODELS)
       .filter(([, config]) => typeof prisma[config.model]?.findMany !== "function")

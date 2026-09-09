@@ -1,3 +1,4 @@
+const { referenceCounterMock } = require("./helpers/reference-counter-mock");
 const store = { events: [], lines: [], rfqs: [], notifications: [], emails: [], changeOrders: [], commitmentChangeOrders: [] };
 let seq = 0;
 const nextId = (prefix) => `${prefix}-${(seq += 1)}`;
@@ -73,6 +74,7 @@ const hydrateEvent = (row) => ({ ...row, project: PROJECT, activity: ACTIVITIES.
 const hydratePortalRfq = (row) => ({ ...hydrateRfq(row), changeEvent: hydrateEvent(clone(store.events.find((event) => event.id === row.changeEventId))) });
 
 const mockPrisma = {
+  ...referenceCounterMock(),
   project: { findFirst: jest.fn(async ({ where }) => (where.id === "p1" ? PROJECT : null)) },
   activity: { findMany: jest.fn(async ({ where }) => ACTIVITIES.filter((activity) => where.id.in.includes(activity.id)).map((activity) => ({ id: activity.id }))) },
   location: { findFirst: jest.fn(async () => null) },

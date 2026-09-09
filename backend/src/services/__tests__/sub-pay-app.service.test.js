@@ -1,6 +1,8 @@
+const { referenceCounterMock } = require("./helpers/reference-counter-mock");
 const ledger = require("./helpers/cost-ledger-mock").createCostLedgerMock({ idPrefix: "pa-cle" });
 
 const mockPrisma = {
+  ...referenceCounterMock(),
   ...ledger.tables,
   $transaction: jest.fn((fn) => fn(mockPrisma)),
   project: { findFirst: jest.fn(async () => ({ id: "project-1", name: "Tower", currency: "USD" })) },

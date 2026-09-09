@@ -71,6 +71,15 @@ const busiestOrg = async () => {
 };
 
 describe("cursor pagination returns every row exactly once", () => {
+
+  // Release the pool. Jest runs these files in one process, and a real-database
+  // suite that walks away from its connections leaves them idle for every suite
+  // that follows — measured at 53 idle connections part-way through a full run,
+  // which is how a report test that takes 1.8s alone began exceeding a five
+  // second timeout (OCTA-QA-POOL-112).
+  afterAll(async () => {
+    await prisma.$disconnect();
+  });
   let org;
 
   beforeAll(async () => {

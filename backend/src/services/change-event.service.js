@@ -5,6 +5,7 @@ const { recordWorkspacePath } = require("../utils/record-links");
 const auditService = require("./audit.service");
 const notificationService = require("./notification.service");
 const emailService = require("./email.service");
+const { nextNumber: nextCounterNumber } = require("../utils/reference-number");
 
 /**
  * Change events and RFQs (OCTA-COM-CE-038).
@@ -273,8 +274,7 @@ const listChangeEvents = async ({ orgId, projectId, query = {} }) => {
 const getChangeEvent = async ({ orgId, projectId, changeEventId }) => eventOut(await loadEvent({ orgId, projectId, changeEventId }), { detail: true });
 
 const nextNumber = async (tx, projectId) => {
-  const last = await tx.changeEvent.aggregate({ where: { projectId }, _max: { number: true } });
-  return (last?._max?.number || 0) + 1;
+  return nextCounterNumber(tx, { table: "ChangeEvent", scope: { projectId } });
 };
 
 const createChangeEvent = async ({ orgId, projectId, payload = {}, actor = null }) => {
@@ -357,7 +357,7 @@ const sendRfqs = async ({ orgId, projectId, changeEventId, payload = {}, actor =
   const commitmentById = new Map(commitments.map((row) => [row.id, row]));
   const created = [];
   await prisma.$transaction(async (tx) => {
-    let last = (await tx.rfq.aggregate({ where: { changeEventId }, _max: { number: true } }))._max?.number || 0;
+    let last = 0;
     for (const [index, recipient] of recipients.entries()) {
       const commitment = recipient.commitmentId ? commitmentById.get(recipient.commitmentId) : null;
       if (recipient.commitmentId && !commitment) throw new HttpError(400, "CHANGE_EVENT_COMMITMENT_INVALID", `Recipient ${index + 1}: the commitment is not on this project`);
@@ -367,7 +367,7 @@ const sendRfqs = async ({ orgId, projectId, changeEventId, payload = {}, actor =
       if (!companyName) throw new HttpError(400, "RFQ_COMPANY_REQUIRED", `Recipient ${index + 1}: a company name is needed`);
       const duplicate = await tx.rfq.findFirst({ where: { changeEventId, contactEmail, status: { in: RFQ_OPEN } }, select: { id: true, ref: true } });
       if (duplicate) throw new HttpError(409, "RFQ_ALREADY_SENT", `${duplicate.ref} is already open for ${contactEmail}`);
-      last += 1;
+      last = await nextCounterNumber(tx, { table: "Rfq", scope: { changeEventId } });
       const token = newToken();
       const row = await tx.rfq.create({ data: { orgId, projectId, changeEventId, number: last, ref: `${event.ref}-RFQ${String(last).padStart(2, "0")}`, commitmentId: commitment?.id || null, vendorCompanyId: commitment?.vendorCompanyId || trimOrNull(recipient.vendorCompanyId) || null, companyName: companyName.slice(0, 200), contactName: (trimOrNull(recipient.contactName) || commitment?.projectParty?.contactName || commitment?.vendorCompany?.contactName || null)?.slice(0, 120) || null, contactEmail, tokenHash: hashToken(token), expiresAt: linkExpiry(dueDate), dueDate, instructions, lineIdsJson: lineIds, status: RFQ_STATUS.SENT, createdBy: actor?.id || null }, include: rfqInclude });
       created.push({ row, token });

@@ -5,6 +5,7 @@ const auditService = require("./audit.service");
 const notificationService = require("./notification.service");
 const { RECORD_TYPES, attachWorkflowDetailsToRecords } = require("./workflow-support.service");
 const { recordWorkspacePath } = require("../utils/record-links");
+const { nextNumber: nextCounterNumber } = require("../utils/reference-number");
 
 /**
  * Submittal upgrade (OCTA-PM-SUB-017): packages, multi-step review routes
@@ -697,8 +698,7 @@ const createPackage = async ({ orgId, projectId, payload = {}, actor = null }) =
   const name = trimOrNull(payload.name);
   if (!name) throw new HttpError(400, "SUBMITTAL_PACKAGE_NAME_REQUIRED", "Give the package a name");
   const created = await prisma.$transaction(async (tx) => {
-    const last = await tx.submittalPackage.aggregate({ where: { projectId }, _max: { number: true } });
-    const number = (last?._max?.number || 0) + 1;
+    const number = await nextCounterNumber(tx, { table: "SubmittalPackage", scope: { projectId } });
     const row = await tx.submittalPackage.create({
       data: {
         orgId,

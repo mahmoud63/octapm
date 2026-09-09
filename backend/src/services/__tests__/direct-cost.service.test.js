@@ -1,3 +1,4 @@
+const { referenceCounterMock } = require("./helpers/reference-counter-mock");
 const { createCostLedgerMock } = require("./helpers/cost-ledger-mock");
 
 const store = { costs: [], lines: [], payments: [], budgetLines: [], costRecords: [], notifications: [], poLines: [] };
@@ -68,6 +69,7 @@ const hydrateLine = (row) => ({ ...row, costCode: COST_CODES.find((code) => code
 const hydrateCost = (row) => ({ ...row, vendorCompany: COMPANIES.find((company) => company.id === row.vendorCompanyId) || null, lines: store.lines.filter((line) => line.directCostId === row.id).sort((a, b) => a.sortOrder - b.sortOrder).map((line) => hydrateLine(clone(line))), payments: store.payments.filter((payment) => payment.directCostId === row.id).map(clone), _count: { lines: store.lines.filter((line) => line.directCostId === row.id).length, payments: store.payments.filter((payment) => payment.directCostId === row.id).length } });
 
 const mockPrisma = {
+  ...referenceCounterMock(),
   project: { findFirst: jest.fn(async ({ where }) => (where.id === "p1" ? PROJECT : null)) },
   company: { findFirst: jest.fn(async ({ where }) => COMPANIES.find((company) => company.id === where.id) || null) },
   activity: { findMany: jest.fn(async ({ where }) => ACTIVITIES.filter((activity) => where.id.in.includes(activity.id)).map((activity) => ({ id: activity.id }))) },

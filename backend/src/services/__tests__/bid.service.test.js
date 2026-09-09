@@ -1,3 +1,4 @@
+const { referenceCounterMock } = require("./helpers/reference-counter-mock");
 const store = { packages: [], lines: [], invitations: [], addenda: [], questions: [], bids: [], bidLines: [], attachments: [], companies: [], prequals: [] };
 let seq = 0;
 const nextId = (prefix) => `${prefix}-${(seq += 1)}`;
@@ -99,6 +100,7 @@ const BOQ = [
 ];
 
 const mockPrisma = {
+  ...referenceCounterMock(),
   $transaction: jest.fn((fn) => fn(mockPrisma)),
   project: { findFirst: jest.fn(async ({ where }) => (where.id === "p1" ? { id: "p1", name: "Tower", currency: "USD", orgId: "org-1" } : null)) },
   boqItem: { ...table(BOQ, "boq"), findMany: jest.fn(async ({ where }) => BOQ.filter((item) => item.isActive && (!where.section || where.section.in.includes(item.section)) && (!where.id || where.id.in.includes(item.id)))) },

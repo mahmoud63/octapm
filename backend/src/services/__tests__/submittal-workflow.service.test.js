@@ -1,4 +1,6 @@
+const { referenceCounterMock } = require("./helpers/reference-counter-mock");
 const mockPrisma = {
+  ...referenceCounterMock(),
   $transaction: jest.fn((fn) => fn(mockPrisma)),
   project: { findFirst: jest.fn(async () => ({ id: "project-1", name: "Tower" })) },
   user: { findMany: jest.fn(async ({ where }) => (where.id?.in || []).map((id) => ({ id, name: id, email: null }))) },

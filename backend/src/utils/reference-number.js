@@ -120,4 +120,67 @@ const nextReference = async (client, spec) => {
 /** The formatted reference only, for the many callers that want just that. */
 const nextRef = async (client, spec) => (await nextReference(client, spec)).ref;
 
-module.exports = { nextReference, nextRef, prisma };
+/**
+ * The next value for a register that keeps its number in its own integer
+ * column and formats the reference separately.
+ *
+ * Change events, commitments, direct costs, punch items, lookaheads, form
+ * instances and sub pay apps all work this way, and all of them read
+ * `MAX(number) + 1`. That is gap-safe and race-unsafe: two transactions read
+ * the same maximum, both write it, and the second loses on the unique index —
+ * the same 500 as `count + 1`, arriving under load instead of after a
+ * deletion. READ COMMITTED, which is what these transactions run at, does not
+ * prevent it.
+ *
+ * `scope` may name more than one column, because several of these number
+ * separately per type or kind — a subcontract and a purchase order each have
+ * their own run of numbers within a project.
+ *
+ * @param {object} client  prisma, or a transaction client
+ * @param {object} spec
+ * @param {string} spec.table         e.g. "Commitment"
+ * @param {object} spec.scope         equality filters, e.g. { projectId, type }
+ * @param {string} [spec.numberColumn] default "number"
+ */
+const nextNumber = async (client, spec) => {
+  const { table, scope = {}, numberColumn = "number" } = spec;
+  assertIdentifier(table, "table");
+  assertIdentifier(numberColumn, "number column");
+
+  const columns = Object.keys(scope);
+  for (const column of columns) assertIdentifier(column, "scope column");
+
+  // Seed from the register's own highest number, so existing runs continue.
+  const where = columns.length
+    ? " WHERE " + columns.map((c, i) => `"${c}" = $${i + 1}`).join(" AND ")
+    : "";
+  const seedRows = await client.$queryRawUnsafe(
+    `SELECT MAX("${numberColumn}")::int AS highest FROM "${table}"${where}`,
+    ...columns.map((c) => scope[c]),
+  );
+  const seed = (Number(seedRows?.[0]?.highest) || 0) + 1;
+
+  // One counter per distinct scope. Sorted so the key does not depend on the
+  // order the caller happened to write the filters in.
+  const key = [
+    table,
+    numberColumn,
+    ...columns.sort().map((c) => `${c}:${scope[c]}`),
+  ].join("|");
+
+  const rows = await client.$queryRaw`
+    INSERT INTO "ReferenceCounter" ("scope", "next", "updatedAt")
+    VALUES (${key}, ${seed}, NOW())
+    ON CONFLICT ("scope") DO UPDATE
+      SET "next" = "ReferenceCounter"."next" + 1, "updatedAt" = NOW()
+    RETURNING "next"
+  `;
+
+  const number = Number(rows?.[0]?.next);
+  if (!Number.isFinite(number) || number < 1) {
+    throw new Error(`reference-number: counter for ${key} returned ${rows?.[0]?.next}`);
+  }
+  return number;
+};
+
+module.exports = { nextReference, nextRef, nextNumber, prisma };
