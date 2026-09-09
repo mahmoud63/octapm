@@ -176,4 +176,9 @@ if (failures) {
   console.log(`${failures} problem${failures === 1 ? '' : 's'}. Fix the above before running the suite.\n`)
   process.exit(1)
 }
-console.log('Stack looks right. Remember: no code edits while a full suite runs.\n')
+console.log('Stack looks right.')
+console.log('')
+console.log('Before a full regression:')
+console.log('  cd backend && npm run db:seed   # clears PO-E2E-/PO-LC- rows from earlier runs')
+console.log('During one: no code edits, no API restart, no reseed.')
+console.log('')

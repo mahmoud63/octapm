@@ -483,3 +483,73 @@ changed because the missing information was added.
 
 Eight of the eleven were invisible rather than loud. That is the phase in one
 line: **the product was green, and it was not working.**
+
+---
+
+## 16. Clean-up addendum — the environment, and the console
+
+Phase 20 closed with a green board and two loose ends: a regression gate that
+had needed four attempts, and a browser console nobody had actually read. Both
+were cleaned up before Phase 21, and both produced findings.
+
+### The environment was the cause of the flaky gate
+
+Three **zombie `nodemon` watchers** were resident in this worktree, each having
+crashed on `EADDRINUSE` without exiting — nodemon prints *"waiting for file
+changes"* and stays armed. Any backend file change woke all of them to fight
+for `:5000`, which is what restarted the live API mid-suite and produced the
+run-1 sign-in failure.
+
+The API now runs under `npm start` with no file watcher, and
+`npm run dev:check` reports the whole stack and refuses the suite if it is
+wrong. Full detail in `OCTAPM_DEV_TEST_ENVIRONMENT_CERTIFICATION.md`.
+
+### The 429 that never happened
+
+The suspicion carried into this clean-up was that late-suite failures were the
+login limiter. The API log says otherwise: **1,537 × 200, 3 × 401, 0 × 429
+across 1,612 login requests.** `backend/.env` sets the ceiling to 2,000 per
+minute; the three 401s are the auth specs using a wrong password on purpose.
+
+What made it look like rate limiting is that grepping for "rate limit" returns
+1,935 hits which are all the stack frame `rate-limit.js:80` — the limiter's own
+`next()`, in the stack of every logged error because the middleware is in the
+chain. **The production limiter was not touched and no test-only bypass was
+added**, because there was nothing to bypass.
+
+### Three more defects, found by reading the console
+
+Consistent with the rest of this phase: none had ever failed a test, because
+the suite's watcher listened for `console.error` and two of the three arrive as
+`console.warn`.
+
+| card | defect |
+| --- | --- |
+| OCTA-UX-KEY-104 | `PackagesPanel`'s map returned a bare `<>` with the key on the inner `<tr>` — a bare fragment cannot carry a key, so 21 rows had none |
+| OCTA-A11Y-DIALOG-105 | the purchase-order dialog rendered its heading inside the body that mounts only after the fetch, so it had no accessible name or description for the whole load; the activity dialog had a title but no description |
+| OCTA-QA-CONSOLE-106 | nothing was watching for warnings at all |
+
+That brings the phase to **fourteen defects, none of them found by a failing
+test.**
+
+### One item that could not be reproduced
+
+The controlled/uncontrolled input warnings reported at the start of the
+clean-up **do not reproduce** on this codebase. Twelve routes and eleven
+async-loaded *edit* dialogs were driven with clicking and typing — the pattern
+that actually triggers the warning — and produced none. Statically there are no
+`useState<T>()` values feeding a `value` prop and no `value={x?.y}` without a
+fallback.
+
+No fix was invented for a pattern that could not be found. The console gate
+treats it as never allowlistable, so it fails loudly if it ever appears.
+
+### Final gate
+
+| gate | result |
+| --- | --- |
+| Playwright | 141 tests (138 + 3 console-quality) |
+| Jest | 1,881 / 1,881 |
+| OpenAPI | 731 documented paths |
+| Smoke | 14 modules · 14 ✅ · 0 🟡 · 0 🔴 |
+| Console | 0 OctaPM errors · 0 OctaPM warnings |

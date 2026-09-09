@@ -123,3 +123,44 @@ That is the second time in this phase that a red finding evaporated on
 inspection — and both times the tell was an internal contradiction in the
 measurement itself ("did not open" alongside "has content"). A smoke report is
 only worth the scepticism applied to its own instrument.
+
+---
+
+# Phase 20 clean-up addendum — the console counts too
+
+The smoke test rates a module on whether it opens, holds content, survives a
+refresh, and raises no console error. That last check listened for
+`console.error` only, which is why three real defects sat under a green board:
+two of them arrive as `console.warn`.
+
+## What the module ratings now include
+
+`e2e/30-console-quality.spec.ts` runs alongside the smoke test and fails on any
+error **or warning** the application produces about itself, across the twelve
+screens the Phase 20 workflows use, the procurement package rows, and the
+purchase-order dialog through its loading state.
+
+Latest run: **14 modules · 14 ✅ · 0 🟡 · 0 🔴 · 0 console errors · 0 failed
+requests.**
+
+## The three defects a console-error-only watcher walked past
+
+| defect | why it was invisible |
+| --- | --- |
+| `PackagesPanel` keyed the inner `<tr>` while the map returned a bare `<>` — so 21 rows had no key at all | React reports it, and the suite was not listening at that level |
+| The purchase-order dialog had no accessible name or description for the whole of its loading state | Radix reports it as a **warning** |
+| The activity dialog had a title but no description | Radix reports it as a **warning** |
+
+## Two entries the gate tolerates, and why
+
+Only messages the browser emits *about* the page, never messages the page
+emits about itself:
+
+- React's own DevTools nag.
+- The browser reporting a `401` on the bootstrap `/auth/me` probe. On a cold
+  load the access token lives only in memory, so the first call is
+  unauthenticated; the response interceptor refreshes and retries and the user
+  sees nothing. Only `401` is tolerated — any other status fails the gate.
+
+Controlled/uncontrolled transitions, missing `key`, missing `DialogTitle` and
+missing `Description` are named in the code as never allowlistable.

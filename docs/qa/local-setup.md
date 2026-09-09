@@ -30,8 +30,17 @@ per role — `pm@octapm.demo` through `finance@octapm.demo`, all with the passwo
 ## 2. API and web app
 
 ```bash
-cd backend && npm run dev
+cd backend && npm start
 ```
+
+**`npm start`, not `npm run dev`, for anything you will run a suite against.**
+`npm run dev` starts nodemon, and a nodemon that loses the race for :5000 does
+not exit — it crashes with `EADDRINUSE`, prints "waiting for file changes" and
+stays resident, still watching. Three of them accumulated in one session, and
+the next file change woke them all to fight over the port. That restarted the
+live API in the middle of a 16-minute regression and produced a sign-in failure
+that looked exactly like a product defect. See
+`OCTAPM_DEV_TEST_ENVIRONMENT_CERTIFICATION.md`.
 
 ```bash
 cd frontend && npm run dev
@@ -41,21 +50,38 @@ The API listens on `:5000` and the web app on `:5173`. The Playwright config
 assumes both, and deliberately does not start them itself: a cold Vite start on
 Windows takes longer than a `webServer` block will wait.
 
-### Raise the login limit before a full run
-
-The API allows `RATE_LIMIT_LOGIN_MAX` login attempts per IP and email in a
-15-minute window — **12 by default**. A full suite run signs in far more often
-than that, and the window is shared with any run that came before it, so the
-second consecutive run fails partway through with a 429 that used to surface as
-a confusing "Workspace Control not found".
-
-Start the API with a higher ceiling when you are running the suite:
+### Check the stack before you run anything
 
 ```bash
-cd backend && RATE_LIMIT_LOGIN_MAX=500 npm run dev
+npm run dev:check
 ```
 
-Leave the default alone anywhere else — it is a real brute-force control.
+Reports the database, the API (through `/api/health`, which is public and
+returns only a status and a timestamp), the web server, how many API-ish node
+processes are alive, and the login ceiling. It reports rather than repairs:
+where something is wrong it prints the exact `Stop-Process` command.
+
+`npm run e2e` runs the same check first and refuses to start the suite if the
+stack is wrong.
+
+Do not use `/api/v1/projects` as a liveness probe. It is protected, so it
+answers `401` when unauthenticated — correct behaviour, not a failure.
+
+### The login ceiling is already raised, and is not your problem
+
+`backend/.env` sets `RATE_LIMIT_LOGIN_MAX=2000` over a 60-second window, so a
+local suite run does not come close. Measured across a full run: **1,537 × 200,
+3 × 401, 0 × 429 over 1,612 login requests** — the 401s being the auth specs
+deliberately using a wrong password.
+
+The production default of 12 per 15 minutes is a real brute-force control and
+is unchanged. Do not weaken it, and do not add a test-only bypass; there is
+nothing to bypass.
+
+If you ever do suspect rate limiting, count actual `429` responses. Grepping
+the API log for "rate limit" returns thousands of hits that are all the
+stack-trace frame `rate-limit.js:80` — the limiter's own `next()`, present in
+every logged error because the middleware sits in the chain.
 
 ## 3. The suites
 
