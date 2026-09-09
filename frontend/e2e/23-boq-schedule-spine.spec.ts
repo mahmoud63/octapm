@@ -49,6 +49,36 @@ const post = async (
  * and the QS see in the BOQ afterwards.
  */
 
+/**
+ * Projects this file created, retired when it finishes.
+ *
+ * These specs create a project per test and used to leave every one of them
+ * behind. Twenty-odd runs later the organisation had spent its 25-project plan
+ * allowance, project creation started being refused, and six specs failed at
+ * once on what looked like unrelated `undefined` errors
+ * (OCTA-QA-FIXTURE-114).
+ *
+ * DELETE soft-archives — sets `archivedAt`, which is what the allowance
+ * counts — and a failure is printed rather than swallowed, because a cleanup
+ * that cannot fail out loud is not cleanup.
+ */
+const createdProjects: string[] = []
+
+test.afterAll(async () => {
+  if (!createdProjects.length) return
+  await withApi(async (client, token) => {
+    for (const projectId of createdProjects) {
+      const response = await client.delete(`${API}/projects/${projectId}`, {
+        headers: { authorization: `Bearer ${token}` },
+      })
+      if (!response.ok()) {
+        // eslint-disable-next-line no-console
+        console.log(`CLEANUP FAILED for ${projectId}: ${response.status()}`)
+      }
+    }
+  })
+})
+
 const readBack = async <T>(path: string): Promise<T> =>
   withApi(async (client, token) => (await apiGet(client, path, token)).body?.data)
 
@@ -64,6 +94,7 @@ async function seedProjectWithProgramme(stamp: string) {
         contractValue: 2_000_000,
       })
     ).body.data
+    createdProjects.push(project.id)
 
     const xer = [
       'ERMHDR\t19.12\t2027-01-04\tProject\tadmin\tadmin\tdb\tPM\tUSD',
@@ -226,6 +257,7 @@ test.describe('the bill and the programme meet on one activity', () => {
       `creating the project: ${created.error?.code ?? ''} ${created.error?.message ?? ''}`,
     ).toBeLessThan(300)
     const project = created.body.data as { id: string }
+    createdProjects.push(project.id)
 
     await signIn(page, 'pm')
     await page.goto(`/projects/${project.id}/boq`)

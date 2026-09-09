@@ -488,3 +488,35 @@ a team of one and no persona but the creator can reach it, so a full-system
 simulation cannot be driven on a project the simulation itself creates.
 
 **Match picker `take: 100`. P2.** No paging, no search.
+
+---
+
+# Phase 20.5 addendum — team assignment closed
+
+**OCTA-UX-TEAM-093 — a project cannot be given a team. CLOSED.**
+
+Both halves of the Phase 20.5 brief are now done. An existing company user is
+added to a project by picking their name — no email, no company, no role
+retyped — through `POST /projects/:id/team`, backed by the same
+`ProjectAssignment` the invitation flow already wrote. The email invitation
+remains the separate path for somebody with no account.
+
+Proven on a project the spec creates rather than the seeded one, which is the
+case that was broken: seven personas refused `403` before, `200` after, roles
+inherited from their company role, unauthorised transitions still `403`, and
+removal scoped to one project with the account, other projects and authored
+records intact.
+
+This unblocks the full greenfield simulation. A simulation can now create its
+own project and staff it, instead of borrowing the seeded one.
+
+## Still open
+
+**Match picker `take: 100`. P2.** No paging, no search.
+
+**Controlled/uncontrolled React warnings. P2.** Still unreproducible; the
+console gate treats them as never-allowlistable.
+
+**An independent adversarial review.** Codex remains unreachable from this
+machine. Every review in this programme is Claude's own, and each certification
+says so.

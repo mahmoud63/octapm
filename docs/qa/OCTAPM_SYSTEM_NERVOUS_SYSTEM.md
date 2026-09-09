@@ -823,3 +823,29 @@ team. There is no path to add an existing colleague to a project, only an email
 invitation they must accept, so a newly created project has a team of one and
 refuses every other persona with `PROJECT_ACCESS_DENIED`. That is the blocker
 standing between here and a full greenfield simulation.
+
+---
+
+# Phase 20.5 addendum — a project can be given a team
+
+The paragraph above this one said OctaPM was "one nerve short": a project could
+not be given a team, so a greenfield project had a team of one and refused
+everybody else with `PROJECT_ACCESS_DENIED`. That nerve is connected.
+
+An existing colleague is added by picking their name. It writes the same
+`ProjectAssignment` that accepting an invitation writes — the row
+`assertProjectAccess` already reads and `listProjectTeam` already shows — so
+project access and permission templates behave exactly as they did. The
+invitation path stays for people who have no account yet, and the two are
+labelled as the different things they are.
+
+The connection worth noting is what it does *not* do. Being on a team is not
+being allowed everything: a warehouse manager added to a project can reach it
+and is still refused on approving a purchase order. Access and permission stay
+two separate questions, answered by two separate systems, which is the same
+separation ball-in-court relies on — whose turn it is, and who may act.
+
+And removal is one project's worth of access and no more. The account, the
+other projects, and everything the person authored here are untouched, because
+a project record that quietly loses its author is worse than one belonging to
+somebody who has moved on.

@@ -34,6 +34,25 @@ const call = async (
   return { status: response.status(), data: body?.data, error: body?.error }
 }
 
+/**
+ * Retire a project the spec created.
+ *
+ * There is no /archive endpoint — DELETE soft-archives, setting archivedAt,
+ * which is what the plan allowance counts. The first version of this posted to
+ * a route that does not exist and swallowed the 404 with `.catch(() => {})`,
+ * so every run leaked three projects until the organisation hit its 25-project
+ * ceiling and every spec that creates a project started failing. A cleanup
+ * that cannot fail out loud is not cleanup (OCTA-QA-FIXTURE-114).
+ */
+const archive = async (client: Client, projectId: string, token: string) => {
+  const r = await call(client, 'delete', `/projects/${projectId}`, token)
+  if (r.status >= 300) {
+    // eslint-disable-next-line no-console
+    console.log(`CLEANUP FAILED for ${projectId}: ${r.status} ${JSON.stringify(r.error)}`)
+  }
+  return r.status
+}
+
 /** A token per persona, minted once. */
 const tokensFor = async (client: Client, who: Array<keyof typeof PEOPLE>) => {
   const out: Record<string, string> = {}
@@ -198,7 +217,7 @@ test.describe('a project gets a team', () => {
         expect(transitions[who], `${who} cannot approve a purchase order`).toBe(403)
       }
 
-      await call(client, 'post', `/projects/${project.id}/archive`, tokens.pm).catch(() => {})
+      await archive(client, project.id, tokens.pm)
     } finally {
       await client.dispose()
     }
@@ -287,7 +306,7 @@ test.describe('a project gets a team', () => {
       expect(stillSignsIn.ok(), 'they can still sign in to OctaPM').toBeTruthy()
 
       for (const project of [alpha, beta]) {
-        await call(client, 'post', `/projects/${project.id}/archive`, tokens.pm).catch(() => {})
+        await archive(client, project.id, tokens.pm)
       }
     } finally {
       await client.dispose()
@@ -328,7 +347,7 @@ test.describe('a project gets a team', () => {
         'the button is not shown to somebody who cannot use it',
       ).toHaveCount(0)
 
-      await call(client, 'post', `/projects/${project.id}/archive`, tokens.pm).catch(() => {})
+      await archive(client, project.id, tokens.pm)
     } finally {
       await client.dispose()
     }
