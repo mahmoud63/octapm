@@ -251,10 +251,28 @@ test.describe('dashboard reconciliation', () => {
     const client = await apiClient()
     try {
       const token = await apiToken(client)
-      const { body } = await apiGet(client, '/projects', token)
-      const activeProjects = (body?.data?.items || []).filter(
-        (p: { status: string }) => p.status === 'active',
-      ).length
+
+      // /projects is cursor-paginated at 20 a page, so a single call counts
+      // one page and not the total. This compared that page against a KPI
+      // that counts every project, and passed for years only because the
+      // workspace happened to hold fewer than twenty — the moment accumulated
+      // test projects pushed it past the boundary it failed, and the dashboard
+      // was right all along (OCTA-QA-PAGING-109).
+      const projects: Array<{ status: string }> = []
+      let cursor: string | null = null
+      for (let page = 0; page < 20; page += 1) {
+        const path: string = cursor
+          ? `/projects?cursor=${encodeURIComponent(cursor)}`
+          : '/projects'
+        const { body } = await apiGet(client, path, token)
+        const items = body?.data?.items ?? []
+        projects.push(...items)
+        const next = body?.data?.pagination?.nextCursor ?? null
+        // The last page repeats its own cursor, so stop when it stops moving.
+        if (!next || !items.length || next === cursor) break
+        cursor = next
+      }
+      const activeProjects = projects.filter((p) => p.status === 'active').length
 
       // The KPI card prints its label, then the figure. The label is uppercased
       // in CSS, so match case-insensitively rather than pinning the casing.

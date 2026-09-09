@@ -367,8 +367,13 @@ const listProjects = async ({
 
   let nextCursor = null;
   if (projects.length > take) {
-    const nextProject = projects.pop();
-    nextCursor = nextProject.id;
+    projects.pop();
+  // The cursor is the last row we actually returned, not the look-ahead row.
+  // Prisma's `cursor` is inclusive and `skip: 1` steps over it, so handing
+  // back the look-ahead id meant the next page began *after* it and that row
+  // was returned by no page at all — one record lost per page boundary,
+  // silently (OCTA-API-PAGING-110).
+    nextCursor = projects[projects.length - 1].id;
   }
 
   return {
