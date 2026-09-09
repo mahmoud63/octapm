@@ -1,6 +1,6 @@
 import * as React from 'react'
 import { Link } from '@tanstack/react-router'
-import { ShieldCheck, Users } from 'lucide-react'
+import { ShieldCheck, UserMinus, Users } from 'lucide-react'
 import { toast } from 'sonner'
 import { getServerErrorMessage } from '@/lib/handle-server-error'
 import { useIsCompanyAdmin, useProjectEffectiveRole } from '@/lib/permissions'
@@ -21,10 +21,13 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
+import { Button } from '@/components/ui/button'
 import { CustomFieldsAdmin } from '@/features/custom-fields/components/custom-fields-admin'
+import { AddProjectMemberDialog } from './add-project-member-dialog'
 import {
   usePermissionTemplates,
   useProjectTeam,
+  useRemoveProjectMember,
   useSetPartyTemplate,
   useSetTeamMemberTemplate,
   type PermissionTemplate,
@@ -91,6 +94,7 @@ export function ProjectTeamPanel({ projectId }: { projectId: string }) {
   )
   const setMemberTemplate = useSetTeamMemberTemplate(projectId)
   const setPartyTemplate = useSetPartyTemplate(projectId)
+  const removeMember = useRemoveProjectMember(projectId)
 
   const templates = React.useMemo(
     () => templateData?.items ?? [],
@@ -112,6 +116,18 @@ export function ProjectTeamPanel({ projectId }: { projectId: string }) {
         templateId
           ? `${member.name} now uses the selected template.`
           : `${member.name} falls back to their role permissions.`
+      )
+    } catch (err) {
+      toast.error(getServerErrorMessage(err))
+    }
+  }
+
+  const removeFromProject = async (member: ProjectTeamMember) => {
+    try {
+      await removeMember.mutateAsync(member.userId)
+      toast.success(
+        `${member.name} no longer has access to this project. Their account and ` +
+          'other projects are unchanged.'
       )
     } catch (err) {
       toast.error(getServerErrorMessage(err))
@@ -155,6 +171,7 @@ export function ProjectTeamPanel({ projectId }: { projectId: string }) {
             )}
           </p>
         </div>
+        {canManage && <AddProjectMemberDialog projectId={projectId} />}
       </div>
 
       {error ? (
@@ -177,13 +194,14 @@ export function ProjectTeamPanel({ projectId }: { projectId: string }) {
                 <TableHead>Company</TableHead>
                 <TableHead>Permissions</TableHead>
                 <TableHead>Source</TableHead>
+                <TableHead></TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {items.length === 0 ? (
                 <TableRow>
                   <TableCell
-                    colSpan={5}
+                    colSpan={6}
                     className='text-center text-muted-foreground'
                   >
                     No one is assigned to this project yet.
@@ -250,6 +268,23 @@ export function ProjectTeamPanel({ projectId }: { projectId: string }) {
                       <Badge variant='secondary'>
                         {sourceLabels[member.source]}
                       </Badge>
+                    </TableCell>
+                    <TableCell className='text-end'>
+                      {/* Only somebody assigned directly can be un-assigned
+                          here. A party member belongs to their company's
+                          party, and removing them is that party's business
+                          (OCTA-UX-TEAM-093). */}
+                      {canManage && !member.party && (
+                        <Button
+                          variant='ghost'
+                          size='sm'
+                          disabled={removeMember.isPending}
+                          onClick={() => removeFromProject(member)}
+                          data-testid={`uat-team-remove-${member.userId}`}
+                        >
+                          <UserMinus className='mr-1 size-4' /> Remove
+                        </Button>
+                      )}
                     </TableCell>
                   </TableRow>
                 ))

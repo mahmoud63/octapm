@@ -962,6 +962,207 @@ const listProjectTeam = async ({ orgId, projectId }) => {
   };
 };
 
+/**
+ * Put an existing colleague on a project.
+ *
+ * OctaPM could already tell somebody "assign the user to the project before
+ * setting a permission template" and then offer no way to do it: the only
+ * route onto a project was an email invitation the person had to accept, which
+ * is the wrong shape entirely for a colleague who already has an account. So a
+ * newly created project had a team of one, and every other persona was refused
+ * with PROJECT_ACCESS_DENIED (OCTA-UX-TEAM-093).
+ *
+ * This is deliberately not a new access model. It writes the same
+ * ProjectAssignment row that accepting an invitation writes, which is what
+ * `assertProjectAccess` already reads and what `listProjectTeam` already
+ * shows. Permission templates layer over it exactly as before.
+ *
+ * The project role is what this person does *here*. It defaults to the role
+ * they carry in the company, because that is right nearly all of the time, but
+ * a planner brought onto a job to run cost control can be assigned as one
+ * without changing who they are elsewhere.
+ */
+const addProjectMember = async ({
+  orgId,
+  projectId,
+  userId,
+  role = null,
+  actorId = null,
+  actorRole = null,
+}) => {
+  const [project, user] = await Promise.all([
+    prisma.project.findFirst({ where: { id: projectId, orgId }, select: { id: true } }),
+    prisma.user.findFirst({
+      where: { id: userId, orgId },
+      select: { id: true, name: true, email: true, role: true, status: true, isCompanyAdmin: true },
+    }),
+  ]);
+
+  if (!project) {
+    throw new HttpError(404, "PROJECT_NOT_FOUND", "Project not found");
+  }
+  // Scoped to the organisation on purpose: this adds a colleague, never
+  // somebody from another company. An external party joins through
+  // ProjectParty, which has its own invitation and its own visibility rules.
+  if (!user) {
+    throw new HttpError(404, "USER_NOT_IN_ORGANISATION", "That user is not in this organisation");
+  }
+  if (user.status !== "active") {
+    throw new HttpError(
+      409,
+      "USER_NOT_ACTIVE",
+      `${user.name || user.email} is ${user.status}, so they cannot be added to a project`,
+    );
+  }
+
+  const projectRole = normalizeRoleId(trimOrNull(role)) || normalizeRoleId(user.role);
+
+  const existing = await prisma.projectAssignment.findUnique({
+    where: { projectId_userId: { projectId, userId } },
+    select: { id: true, role: true },
+  });
+
+  const assignment = await prisma.$transaction(async (tx) => {
+    const row = await tx.projectAssignment.upsert({
+      where: { projectId_userId: { projectId, userId } },
+      create: { projectId, userId, role: projectRole },
+      update: { role: projectRole },
+    });
+
+    await recordOrgAudit({
+      tx,
+      orgId,
+      actorId,
+      actorRole,
+      entityType: "project_assignment",
+      entityId: row.id,
+      // Re-adding somebody who is already on the project is a role change, and
+      // reads as one in the log rather than as a second joining.
+      action: existing ? "role_changed" : "assigned",
+      metadata: {
+        projectId,
+        userId,
+        email: user.email,
+        role: projectRole,
+        previousRole: existing ? normalizeRoleId(existing.role) : null,
+      },
+    });
+
+    return row;
+  });
+
+  return {
+    userId,
+    name: user.name,
+    email: user.email,
+    orgRole: normalizeRoleId(user.role),
+    isCompanyAdmin: Boolean(user.isCompanyAdmin),
+    status: user.status,
+    assignmentRole: normalizeRoleId(assignment.role),
+    alreadyOnProject: Boolean(existing),
+  };
+};
+
+/**
+ * Take somebody off one project.
+ *
+ * Only the join row goes. Their account, their other projects and everything
+ * they ever authored here are untouched — a removed person's change orders,
+ * receipts and approvals still name them, because a project record that
+ * quietly loses its author is worse than one belonging to somebody who has
+ * moved on.
+ */
+const removeProjectMember = async ({
+  orgId,
+  projectId,
+  userId,
+  actorId = null,
+  actorRole = null,
+}) => {
+  const project = await prisma.project.findFirst({
+    where: { id: projectId, orgId },
+    select: { id: true },
+  });
+  if (!project) {
+    throw new HttpError(404, "PROJECT_NOT_FOUND", "Project not found");
+  }
+
+  const assignment = await prisma.projectAssignment.findUnique({
+    where: { projectId_userId: { projectId, userId } },
+    select: { id: true, role: true, user: { select: { email: true } } },
+  });
+  if (!assignment) {
+    throw new HttpError(404, "PROJECT_MEMBER_NOT_FOUND", "That user is not on this project");
+  }
+
+  await prisma.$transaction(async (tx) => {
+    await tx.projectAssignment.delete({ where: { id: assignment.id } });
+    // The permission template was granted for this project, so it goes with
+    // the assignment; leaving it behind would silently re-grant on re-add.
+    await tx.projectUserPermission.deleteMany({ where: { orgId, projectId, userId } });
+
+    await recordOrgAudit({
+      tx,
+      orgId,
+      actorId,
+      actorRole,
+      entityType: "project_assignment",
+      entityId: assignment.id,
+      action: "removed",
+      metadata: {
+        projectId,
+        userId,
+        email: assignment.user?.email || null,
+        role: normalizeRoleId(assignment.role),
+      },
+    });
+  });
+
+  return { userId, projectId, removed: true };
+};
+
+/**
+ * Colleagues who could be added, with the ones already here marked.
+ *
+ * Returning everybody and flagging membership beats filtering the list: the
+ * common question at this screen is "is Priya already on this job?", and a
+ * name that is simply absent does not answer it.
+ */
+const listAssignableUsers = async ({ orgId, projectId, search = null }) => {
+  const [users, assignments] = await Promise.all([
+    prisma.user.findMany({
+      where: {
+        orgId,
+        status: "active",
+        ...(search
+          ? {
+              OR: [
+                { name: { contains: search, mode: "insensitive" } },
+                { email: { contains: search, mode: "insensitive" } },
+              ],
+            }
+          : {}),
+      },
+      select: { id: true, name: true, email: true, role: true, isCompanyAdmin: true },
+      orderBy: [{ name: "asc" }],
+      take: 200,
+    }),
+    prisma.projectAssignment.findMany({ where: { projectId }, select: { userId: true } }),
+  ]);
+
+  const onProject = new Set(assignments.map((row) => row.userId));
+  return {
+    items: users.map((user) => ({
+      userId: user.id,
+      name: user.name,
+      email: user.email,
+      orgRole: normalizeRoleId(user.role),
+      isCompanyAdmin: Boolean(user.isCompanyAdmin),
+      onProject: onProject.has(user.id),
+    })),
+  };
+};
+
 const assertUserOnProject = async ({ tx, projectId, userId }) => {
   const [assignment, membership] = await Promise.all([
     tx.projectAssignment.findFirst({ where: { projectId, userId }, select: { id: true } }),
@@ -1136,7 +1337,10 @@ module.exports = {
   getTemplate,
   grantKey,
   invalidateTemplateCache,
+  addProjectMember,
+  listAssignableUsers,
   listProjectTeam,
+  removeProjectMember,
   listTemplates,
   parseGrantKey,
   removeProjectUserPermission,

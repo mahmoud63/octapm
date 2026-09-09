@@ -107,6 +107,8 @@ export const permissionKeys = {
   myProject: (projectId: string) => ['permissions', projectId, 'me'] as const,
   myOrg: ['permissions', 'org', 'me'] as const,
   team: (projectId: string) => ['project-team', projectId] as const,
+  assignable: (projectId: string, search: string) =>
+    ['project-team', projectId, 'assignable', search] as const,
 }
 
 export const usePermissionCatalog = () =>
@@ -300,6 +302,74 @@ export const useSetPartyTemplate = (projectId: string) => {
         queryKey: ['project-parties', projectId],
       })
       queryClient.invalidateQueries({ queryKey: ['permission-templates'] })
+    },
+  })
+}
+
+/**
+ * Colleagues who could be put on this project.
+ *
+ * Everyone in the company comes back, with the ones already here marked,
+ * because the question at this screen is usually "is Priya already on this
+ * job?" and a name that is simply absent does not answer it
+ * (OCTA-UX-TEAM-093).
+ */
+export type AssignableUser = {
+  userId: string
+  name: string
+  email: string
+  orgRole: string
+  isCompanyAdmin: boolean
+  onProject: boolean
+}
+
+export const useAssignableUsers = (
+  projectId: string,
+  search: string,
+  options: { enabled?: boolean } = {}
+) =>
+  useQuery({
+    queryKey: permissionKeys.assignable(projectId, search),
+    queryFn: async () => {
+      const { data } = await apiClient.get<{ data: { items: AssignableUser[] } }>(
+        `/projects/${projectId}/team/assignable`,
+        { params: search ? { search } : {} }
+      )
+      return data.data.items
+    },
+    enabled: options.enabled ?? true,
+  })
+
+/** Put an existing colleague on the project. */
+export const useAddProjectMember = (projectId: string) => {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: async ({ userId, role }: { userId: string; role?: string | null }) => {
+      const { data } = await apiClient.post<{
+        data: { userId: string; name: string; assignmentRole: string; alreadyOnProject: boolean }
+      }>(`/projects/${projectId}/team`, { userId, ...(role ? { role } : {}) })
+      return data.data
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: permissionKeys.team(projectId) })
+      void queryClient.invalidateQueries({ queryKey: ['project-team', projectId, 'assignable'] })
+    },
+  })
+}
+
+/** Take somebody off this project. Their account and other projects stay. */
+export const useRemoveProjectMember = (projectId: string) => {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: async (userId: string) => {
+      const { data } = await apiClient.delete<{ data: { removed: boolean } }>(
+        `/projects/${projectId}/team/${userId}`
+      )
+      return data.data
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: permissionKeys.team(projectId) })
+      void queryClient.invalidateQueries({ queryKey: ['project-team', projectId, 'assignable'] })
     },
   })
 }

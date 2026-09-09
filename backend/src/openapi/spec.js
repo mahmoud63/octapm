@@ -2232,6 +2232,29 @@ const components = {
         }),
       ),
     }),
+    /** Who to put on the project, and optionally what they do here. */
+    ProjectMemberRequest: objectSchema(
+      {
+        userId: { type: "string", format: "uuid" },
+        role: {
+          type: "string",
+          nullable: true,
+          enum: [
+            "pm",
+            "planning_eng",
+            "qs",
+            "cost_controller",
+            "procurement",
+            "warehouse",
+            "site_engineer",
+            "finance",
+          ],
+          description:
+            "What they do on this project. Defaults to the role they carry in the organisation.",
+        },
+      },
+      ["userId"],
+    ),
     ProjectUserPermissionRequest: objectSchema({
       templateId: nullableUuid,
       overrides: objectSchema({
@@ -11237,6 +11260,47 @@ add(
     parameters: projectParams,
     permissions: authenticatedOnly,
     responseSchema: ref("ProjectTeamResponse"),
+  },
+  {
+    method: "get",
+    path: "/projects/{projectId}/team/assignable",
+    summary: "Colleagues who could be added to this project, with existing members marked.",
+    description:
+      "Everyone active in the organisation, each flagged with whether they are already on the project. The already-assigned are returned rather than filtered out, because the question at this screen is usually whether somebody is already on the job and a missing name does not answer it. This is the existing-colleague half of building a team; somebody with no account is invited by email through POST /users/invitations instead.",
+    operationId: "listAssignableProjectUsers",
+    parameters: [
+      ...projectParams,
+      {
+        name: "search",
+        in: "query",
+        required: false,
+        schema: { type: "string" },
+        description: "Filters on name or email.",
+      },
+    ],
+    permissions: companyAdminPermission,
+  },
+  {
+    method: "post",
+    path: "/projects/{projectId}/team",
+    summary: "Add an existing company user to this project.",
+    description:
+      "Writes the same ProjectAssignment that accepting an invitation writes, so project access and permission templates behave exactly as they already did — this is a way in, not a second access model. The project role defaults to the role the person carries in the organisation, which is right nearly always, but may be overridden: a planner brought onto a job to run cost control can be assigned as one without changing who they are elsewhere. Adding somebody already on the project changes their role and answers 200 rather than 201. Refused with USER_NOT_IN_ORGANISATION for anyone outside the company — an external party joins through ProjectParty, which has its own invitation and visibility rules — and with USER_NOT_ACTIVE for a suspended account.",
+    operationId: "addProjectMember",
+    parameters: projectParams,
+    permissions: companyAdminPermission,
+    requestBody: jsonBody(ref("ProjectMemberRequest"), "The colleague, and optionally their role here."),
+    status: 201,
+  },
+  {
+    method: "delete",
+    path: "/projects/{projectId}/team/{userId}",
+    summary: "Take somebody off this project.",
+    description:
+      "Removes the project assignment and the permission template granted for this project. Their company account, their access to every other project, and everything they authored here are untouched: a project record that quietly loses its author is worse than one belonging to somebody who has moved on. Refused with PROJECT_MEMBER_NOT_FOUND if they were not on the project.",
+    operationId: "removeProjectMember",
+    parameters: [projectIdParam, userIdParam],
+    permissions: companyAdminPermission,
   },
   {
     method: "put",
