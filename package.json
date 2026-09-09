@@ -13,6 +13,8 @@
   ],
   "scripts": {
     "dev": "concurrently \"npm run dev --workspace=backend\" \"npm run dev --workspace=frontend\" --names \"API,WEB\" --prefix-colors \"blue,green\"",
+    "dev:check": "node scripts/dev-preflight.mjs",
+    "e2e": "node scripts/dev-preflight.mjs && npm run test:e2e --workspace=frontend",
     "dev:backend": "npm run dev --workspace=backend",
     "dev:frontend": "npm run dev --workspace=frontend",
     "build": "npm run build --workspaces --if-present",

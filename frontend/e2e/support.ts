@@ -67,17 +67,49 @@ export async function apiClient(): Promise<APIRequestContext> {
   return playwrightRequest.newContext({ baseURL: API })
 }
 
+/**
+ * One bearer token per person, for the lifetime of the worker.
+ *
+ * The token does not depend on the request context, so it can be borrowed.
+ * Minting a fresh one per call meant `openProject` alone signed in 79 times a
+ * run for a value that never changes — pure round trips, and needless coupling
+ * to a limiter whose whole purpose is to notice repeated logins
+ * (OCTA-QA-LOGIN-107).
+ *
+ * The specs that are *about* signing in still go through the real form via
+ * `signIn`; this only covers the out-of-band client used to check backend
+ * state.
+ */
+const tokenCache = new Map<string, Promise<string>>()
+
 /** A bearer token obtained out-of-band, for asserting on backend state. */
 export async function apiToken(
   client: APIRequestContext,
   who: keyof typeof PEOPLE = 'pm',
 ): Promise<string> {
-  const response = await client.post(`${API}/auth/login`, {
-    data: { email: PEOPLE[who].email, password: PASSWORD },
+  const cached = tokenCache.get(who)
+  if (cached) return cached
+
+  const fresh = (async () => {
+    const response = await client.post(`${API}/auth/login`, {
+      data: { email: PEOPLE[who].email, password: PASSWORD },
+    })
+    // Report what actually happened. A bare "sign-in failed" sent a previous
+    // investigation chasing a rate limit that was never involved.
+    const detail = response.ok()
+      ? ''
+      : ` (HTTP ${response.status()} ${await response.text().catch(() => '')})`.slice(0, 200)
+    expect(response.ok(), `sign-in for ${who} failed${detail}`).toBeTruthy()
+    const body = await response.json()
+    return body.data.tokens.accessToken as string
+  })().catch((error) => {
+    // A failed sign-in must not be remembered as the answer.
+    tokenCache.delete(who)
+    throw error
   })
-  expect(response.ok(), `sign-in for ${who} failed`).toBeTruthy()
-  const body = await response.json()
-  return body.data.tokens.accessToken
+
+  tokenCache.set(who, fresh)
+  return fresh
 }
 
 /** GETs an API path, for verifying what the UI claims. */
