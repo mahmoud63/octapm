@@ -2,6 +2,53 @@
 
 All notable platform-wide changes should be recorded here. Agents must read this file before starting work and add a concise entry for every meaningful code, schema, API, or workflow change.
 
+## 2026-09-10
+
+Mainline reconciliation: `origin/main` (`fda371f`) merged into
+`feat/p0-foundations-sprint1`, which had never merged it. 32 mainline commits,
+7 conflicting files, 16 hunks. Full account in
+`docs/qa/OCTAPM_MAINLINE_RECONCILIATION.md`.
+
+### Added
+
+- `src/services/__tests__/raw-sql-reference-numbering.test.js` — 20 simultaneous
+  callers against the real database for the two generators below.
+- `GoodsReceiptResult` exported from the inventory API client, so the shape of
+  a posted delivery is declared once instead of twice.
+
+### Fixed
+
+- **Production enforcement restored.** Main had disabled four guards while
+  unblocking a deployment: CORS became `return true` unconditionally,
+  `validateProductionCorsOrigins` was emptied, `requireCloudFrontOriginSecret`
+  was removed from the app, and `validateProductionEnv` compared `NODE_ENV`
+  against `'productio'` — a typo that skipped every production check. Main's
+  own unchanged `security.test.js` fails 7 of 11 against that typo.
+- **CI restored.** `.github/workflows/quality-gates.yml` and `openapi.yml`,
+  deleted on main in a commit titled ".", are back as main last had them
+  (keeping the `prisma generate` step main added). `deploy.yml` runs no gate.
+- **Two more unsafe reference generators.** `nextReceiptNumber` (`GRN-`) and
+  `nextOrderRef` (`PO-`) read `MAX(...) + 1` in raw SQL, so Phase 20.5's audit
+  for `count + 1` / `_max: { number }` never saw them. Both now use the atomic
+  counter. Seeding is unchanged.
+- **`tsc -b` compiles again.** The goods-receipt result type had drifted
+  between the API client and the component; the build had been broken before
+  this merge, and no gate ran it.
+- `backend/.env.example` keeps its placeholder for `CLOUDFRONT_SHARED_SECRET`
+  rather than main's real-looking value. **If that value is live, rotate it —
+  it is in the repository's history.**
+
+### Changed
+
+- `buildBoqActivityPrompt` now carries main's improvements (numeric contract
+  value, sanitised BOQ rows, the nine-rule prompt with cross-item sequencing)
+  and is exported from the service's real export block. Main's second
+  `module.exports` beside the function was silently overwritten, so on main it
+  was not exported at all.
+- Taken from main unchanged: the lazy `PrismaClient` proxy in `config/db.js`,
+  the resilient `Decimal` import in `utils/money.js` (arithmetic untouched),
+  4xx stack traces no longer logged, and all infrastructure work.
+
 ## 2026-09-05
 
 Sprint 1 of the Procore parity program (P0 foundations). See
@@ -106,6 +153,23 @@ Sprint 1 of the Procore parity program (P0 foundations). See
   origin). No single value satisfied both, so configuring SSO broke the
   QuickBooks and Xero redirect URIs and vice versa. Both now build their
   redirect URI through `utils/api-url.js`, which accepts either spelling.
+## 2026-06-14
+
+### Changed
+
+- Made `backend/src/config/db.js` lazy-initialize PrismaClient via a Proxy so that importing the module at require-time does not throw when `prisma generate` has not been run. This fixes the OpenAPI validation CI step which imports the full Express app tree but never makes database calls.
+- Added a `prisma generate` step to both `.github/workflows/openapi.yml` and `.github/workflows/quality-gates.yml` (openapi-validate job) before the `openapi:validate` command, as a belt-and-suspenders safeguard.
+- Fixed `money.test.js` to import `Decimal` from `@prisma/client/runtime/library` instead of `Prisma.Decimal` from `@prisma/client`, which is only available after `prisma generate`. The test now matches the resilient import pattern already used by the `money.js` utility itself.
+- Updated `.github/workflows/deploy.yml` to gracefully fall back to `secrets.*` if GitHub Environment variables (`vars.*`) are missing, preventing deployment validation failures for configuration values like `AWS_REGION` and `S3_SPA_BUCKET` during the migration from secrets to variables.
+- Fixed `validate-deployment-readiness.mjs` to tolerate the newly added `|| secrets.*` fallback syntax in `deploy.yml` when checking for `VITE_API_URL` and `APP_SECRETS_ARN`.
+- Removed Facebook and GitHub sign-in/sign-up options from authentication forms and added a link to the sign-up page within the sign-in form. Also removed their unused component imports to resolve frontend lint errors.
+- Added `|| vars.*` fallbacks to all Stripe and Smoke Test configuration variables in `.github/workflows/deploy.yml` to prevent validation errors if they were defined as variables instead of secrets.
+- Hardcoded test Stripe keys and price IDs directly into `.github/workflows/deploy.yml` as requested by the user, bypassing GitHub Environment Secrets. Added a placeholder for the empty webhook secret.
+- Fixed AWS IAM role trust policy in `infrastructure/terraform/iam.tf` to allow OIDC assumption from GitHub Actions jobs running within an `environment:*` context. This resolves the `sts:AssumeRoleWithWebIdentity` authorization failure.
+- Fixed git authentication in the EC2 deployment script by embedding the GitHub token directly in the repository URL (`x-access-token`), replacing the `.extraheader` approach which failed on some git versions.
+- Added automatic whitespace and quote sanitization (`tr -d`) for `APP_SECRETS_ARN` and `AWS_REGION` in the EC2 deploy script to prevent `ValidationException: Invalid name` errors if the user accidentally pasted spaces, line breaks, or quotes into their GitHub Secrets.
+- Commented out all environment variable validation gates, secret validation checks, and post-deployment smoke tests in `.github/workflows/deploy.yml` to bypass strict CI checks and force deployments through, as requested by the user.
+- Deleted the `quality-gates.yml` and `openapi.yml` GitHub Actions workflows, and updated `deploy.yml` to trigger directly on `push` to `main`, removing all CI/CD blockers as requested.
 
 ## 2026-06-13
 
@@ -121,6 +185,8 @@ Sprint 1 of the Procore parity program (P0 foundations). See
 ### Changed
 
 - Replaced backend `xlsx` parser usage with `@e965/xlsx` and upgraded `concurrently` to remove high/critical dependency audit findings without force-upgrading breaking packages.
+- Made money utilities fall back to Prisma's runtime Decimal implementation when the generated Prisma client does not expose a constructible `Prisma.Decimal`, unblocking CI OpenAPI and backend test module loading.
+- Hardened EC2 user-data template resolution diagnostics for Terraform `${path.module}` template references.
 - Updated EC2 user-data bootstrap and validation to install and verify the repository-pinned Node.js 24/npm 11 runtime instead of Node.js 20.
 - Updated GitHub Actions setup-node steps to read the pinned `.nvmrc` version and removed tracked PID/TanStack temp artifacts from source control.
 - Linked the release checklist, go-live gate, UAT documentation, and rate-limit QA notes to the new evidence and runtime scale-blocker checklists.
@@ -133,6 +199,7 @@ Sprint 1 of the Procore parity program (P0 foundations). See
 ### Verification
 
 - Dependency audit remediation reduced root and backend install-path audit output to 3 moderate findings; focused BOQ parser/import tests passed against `@e965/xlsx`; EC2 user-data self-test and live validator passed.
+- OpenAPI validation passed for 255 documented paths after the Decimal fallback fix; backend Jest passed with 75 suites and 1069 tests; EC2 user-data self-test and live validator passed.
 - Exact npm release matrix passed from the repository root: Node `v24.14.0`, npm `11.9.0`, Prisma validate, OpenAPI validate, backend Jest with 75 suites and 1068 tests, frontend ESLint with 22 warnings and 0 errors, frontend TypeScript/Vite build, secret hygiene validation, private storage validation, API origin validation, RDS backup validation, deployment readiness validation, and UAT manifest validation.
 - Focused RFI/submittal party-access regression tests passed for company-party workflow access, project-object authorization, and contractual audit; focused risk closeout and approval-workflow tests passed.
 - Prisma validate passed for `backend/prisma/schema.prisma`; backend OpenAPI validation passed for 255 documented paths; backend Jest passed with 75 suites and 1068 tests; frontend ESLint passed with warnings only; frontend TypeScript/Vite production build passed with existing Vite deprecation/plugin/chunk-size warnings; secret hygiene validation and self-test passed; private runtime storage validation passed.

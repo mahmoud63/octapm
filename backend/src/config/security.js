@@ -3,6 +3,10 @@ const { collectStripeConfigProblems } = require('./stripe');
 const DEFAULT_DEVELOPMENT_ORIGINS = [
   'http://localhost:5173',
   'http://127.0.0.1:5173',
+  'http://localhost:5174',
+  'http://127.0.0.1:5174',
+  'http://localhost:5175',
+  'http://127.0.0.1:5175',
 ];
 
 const REQUIRED_PRODUCTION_ENV = [
@@ -34,7 +38,9 @@ const splitList = (value) =>
 const unique = (values) => [...new Set(values)];
 
 const normalizeOrigin = (value) => {
-  const trimmed = String(value || '').trim().replace(/\/+$/, '');
+  const trimmed = String(value || '')
+    .trim()
+    .replace(/\/+$/, '');
   if (!trimmed) return null;
 
   const parsed = new URL(trimmed);
@@ -47,10 +53,7 @@ const normalizeOrigin = (value) => {
 
 const getConfiguredCorsOrigins = (env = process.env) =>
   unique(
-    [
-      ...splitList(env.CORS_ALLOWED_ORIGINS),
-      ...splitList(env.FRONTEND_URL),
-    ]
+    [...splitList(env.CORS_ALLOWED_ORIGINS), ...splitList(env.FRONTEND_URL)]
       .map(normalizeOrigin)
       .filter(Boolean),
   );
@@ -61,14 +64,24 @@ const getAllowedCorsOrigins = (env = process.env) => {
   return env.NODE_ENV === 'production' ? [] : DEFAULT_DEVELOPMENT_ORIGINS;
 };
 
+// A request with no Origin header is not a browser cross-origin request
+// (curl, a health check, a server-to-server call), so it is allowed; anything
+// else must appear in the configured allowlist.
+//
+// Main replaced this with an unconditional `return true` while unblocking a
+// deployment (commit ab50f03, "allow origin list"). Phase 20.6 restored it:
+// widening CORS belongs in CORS_ALLOWED_ORIGINS / FRONTEND_URL, which this
+// function already reads, not in the code.
 const isCorsOriginAllowed = (origin, env = process.env) => {
   if (!origin) return true;
   return getAllowedCorsOrigins(env).includes(origin);
 };
 
-const createCorsOriginDelegate = (env = process.env) => (origin, callback) => {
-  callback(null, isCorsOriginAllowed(origin, env));
-};
+const createCorsOriginDelegate =
+  (env = process.env) =>
+  (origin, callback) => {
+    callback(null, isCorsOriginAllowed(origin, env));
+  };
 
 const createCorsOptions = (env = process.env) => ({
   origin: createCorsOriginDelegate(env),
@@ -112,7 +125,9 @@ const validateProductionCorsOrigins = (env, problems) => {
   ];
 
   if (originValues.length === 0) {
-    problems.push('CORS_ALLOWED_ORIGINS or FRONTEND_URL must list approved frontend origins');
+    problems.push(
+      'CORS_ALLOWED_ORIGINS or FRONTEND_URL must list approved frontend origins',
+    );
     return;
   }
 
@@ -135,7 +150,9 @@ const validateProductionCorsOrigins = (env, problems) => {
       problems.push(`${origin} must use https in production CORS`);
     }
     if (['localhost', '127.0.0.1', '::1'].includes(parsed.hostname)) {
-      problems.push(`${origin} must not be a local development origin in production`);
+      problems.push(
+        `${origin} must not be a local development origin in production`,
+      );
     }
   }
 };
@@ -156,6 +173,10 @@ const validateProductionFileStorage = (env, problems) => {
 };
 
 const validateProductionEnv = (env = process.env) => {
+  // 'productio' on main (a typo introduced in e2b95be) made this return early
+  // for NODE_ENV=production, so every check below — secret length, secret
+  // reuse, Stripe configuration, S3 bucket, CORS — was skipped in the one
+  // environment they exist for. Restored in Phase 20.6.
   if (env.NODE_ENV !== 'production') {
     return [];
   }
@@ -170,22 +191,31 @@ const validateProductionEnv = (env = process.env) => {
   assertMinimumLength(env, 'JWT_REFRESH_SECRET', 32, problems);
   assertMinimumLength(env, 'CLOUDFRONT_SHARED_SECRET', 32, problems);
 
-  problems.push(...collectStripeConfigProblems(env, {
-    requireSecretKey: true,
-    requireWebhookSecret: true,
-    requireLiveSecretKey: true,
-    requirePriceIds: true,
-    requireRotationEvidence: true,
-  }));
+  problems.push(
+    ...collectStripeConfigProblems(env, {
+      requireSecretKey: true,
+      requireWebhookSecret: true,
+      requireLiveSecretKey: true,
+      requirePriceIds: true,
+      requireRotationEvidence: true,
+    }),
+  );
 
   assertDistinct(env, 'JWT_SECRET', 'JWT_REFRESH_SECRET', problems);
   assertDistinct(env, 'JWT_SECRET', 'CLOUDFRONT_SHARED_SECRET', problems);
-  assertDistinct(env, 'JWT_REFRESH_SECRET', 'CLOUDFRONT_SHARED_SECRET', problems);
+  assertDistinct(
+    env,
+    'JWT_REFRESH_SECRET',
+    'CLOUDFRONT_SHARED_SECRET',
+    problems,
+  );
   validateProductionCorsOrigins(env, problems);
   validateProductionFileStorage(env, problems);
 
   if (problems.length > 0) {
-    throw new Error(`Production environment validation failed:\n- ${problems.join('\n- ')}`);
+    throw new Error(
+      `Production environment validation failed:\n- ${problems.join('\n- ')}`,
+    );
   }
 
   return problems;

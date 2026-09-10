@@ -1,25 +1,25 @@
-const Anthropic = require("@anthropic-ai/sdk");
-const { v4: uuidv4 } = require("uuid");
-const { prisma } = require("../config/db");
-const { HttpError } = require("../utils/http-error");
-const { nextActivityCode } = require("../utils/activity-code");
-const { activeBoqCodeKey, normalizeBoqCode } = require("../utils/boq-code");
+const Anthropic = require('@anthropic-ai/sdk');
+const { v4: uuidv4 } = require('uuid');
+const { prisma } = require('../config/db');
+const { HttpError } = require('../utils/http-error');
+const { nextActivityCode } = require('../utils/activity-code');
+const { activeBoqCodeKey, normalizeBoqCode } = require('../utils/boq-code');
 const {
   addMoney,
   divideMoney,
   multiplyMoney,
   toMoneyNumber,
-} = require("../utils/money");
-const { calculateFinancials } = require("./boq-calculation.service");
+} = require('../utils/money');
+const { calculateFinancials } = require('./boq-calculation.service');
 const {
   assertAiQuota,
   incrementAiUsage,
-} = require("../middleware/subscription-gate");
+} = require('../middleware/subscription-gate');
 const {
   assertAllocationCapacity,
   buildAllocationSummary,
   computeDefaultWeight,
-} = require("./activity-boq-allocation.service");
+} = require('./activity-boq-allocation.service');
 const {
   replaceActivityDependencies,
 } = require("./activity-dependency.service");
@@ -32,12 +32,12 @@ const { parseExcelInput, validateBoqRows } = require("./boq/excel-parser");
 const { generateBoqTemplate } = require("./boq/template");
 
 const BOQ_REVISION_STATUS = Object.freeze({
-  IMPORTED: "imported",
-  COMPARISON_ONLY: "comparison_only",
+  IMPORTED: 'imported',
+  COMPARISON_ONLY: 'comparison_only',
 });
 
 const BOQ_BASELINE_LOCK_REASON =
-  "Pending BOQ revision comparison; baseline is locked";
+  'Pending BOQ revision comparison; baseline is locked';
 
 const client = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY,
@@ -45,9 +45,9 @@ const client = new Anthropic({
 });
 
 const normalizeCode = normalizeBoqCode;
-const activeStatuses = ["draft", "submitted", "approved"];
+const activeStatuses = ['draft', 'submitted', 'approved'];
 const trimOrNull = (value) => {
-  const text = String(value ?? "").trim();
+  const text = String(value ?? '').trim();
   return text || null;
 };
 
@@ -76,7 +76,7 @@ const boqRevisionAuditSummary = (revision) => ({
   revisionNumber: revision.revisionNumber,
   label: revision.label || null,
   status: revision.status,
-  source: revision.source || "upload",
+  source: revision.source || 'upload',
   baselineLocked: Boolean(revision.baselineLocked),
   itemCount: Number(revision.itemCount || 0),
   addedCount: Number(revision.addedCount || 0),
@@ -105,7 +105,7 @@ const rowCodeKey = (code) => normalizeCode(code).toLowerCase();
 function duplicateBoqItemCodeError(code) {
   return new HttpError(
     400,
-    "DUPLICATE_BOQ_ITEM_CODE",
+    'DUPLICATE_BOQ_ITEM_CODE',
     `BOQ item code "${code}" already exists for this project`,
   );
 }
@@ -113,29 +113,29 @@ function duplicateBoqItemCodeError(code) {
 function duplicateBoqActivityCodeError(code) {
   return new HttpError(
     400,
-    "DUPLICATE_BOQ_ACTIVITY_CODE",
+    'DUPLICATE_BOQ_ACTIVITY_CODE',
     `BOQ activity code "${code}" already exists for this project`,
   );
 }
 
 function handleBoqUniqueError(error) {
-  if (error?.code !== "P2002") throw error;
+  if (error?.code !== 'P2002') throw error;
 
   const target = Array.isArray(error.meta?.target)
     ? error.meta.target
-    : [String(error.meta?.target || "")];
-  const targetText = target.join(" ").toLowerCase();
+    : [String(error.meta?.target || '')];
+  const targetText = target.join(' ').toLowerCase();
 
-  if (targetText.includes("activitycode")) {
-    throw duplicateBoqActivityCodeError("generated");
+  if (targetText.includes('activitycode')) {
+    throw duplicateBoqActivityCodeError('generated');
   }
 
   if (
-    targetText.includes("activecodekey") ||
-    targetText.includes("boqitem_projectid_active") ||
-    targetText.includes("code")
+    targetText.includes('activecodekey') ||
+    targetText.includes('boqitem_projectid_active') ||
+    targetText.includes('code')
   ) {
-    throw duplicateBoqItemCodeError("submitted");
+    throw duplicateBoqItemCodeError('submitted');
   }
 
   throw error;
@@ -151,8 +151,8 @@ async function assertUniqueBoqItemCode(
   if (!normalizedCode) {
     throw new HttpError(
       400,
-      "BOQ_ITEM_CODE_REQUIRED",
-      "BOQ item code is required",
+      'BOQ_ITEM_CODE_REQUIRED',
+      'BOQ item code is required',
     );
   }
 
@@ -223,7 +223,7 @@ async function getBoqBaselineLock(projectId, tx = prisma) {
     tx.boqRevision?.findFirst
       ? tx.boqRevision.findFirst({
           where: { projectId, baselineLocked: true },
-          orderBy: [{ lockedAt: "desc" }, { createdAt: "desc" }],
+          orderBy: [{ lockedAt: 'desc' }, { createdAt: 'desc' }],
           select: {
             id: true,
             revisionNumber: true,
@@ -234,8 +234,8 @@ async function getBoqBaselineLock(projectId, tx = prisma) {
       : null,
     tx.scheduleRevision?.findFirst
       ? tx.scheduleRevision.findFirst({
-          where: { projectId, status: "baselined" },
-          orderBy: [{ baselinedAt: "desc" }, { createdAt: "desc" }],
+          where: { projectId, status: 'baselined' },
+          orderBy: [{ baselinedAt: 'desc' }, { createdAt: 'desc' }],
           select: { id: true, baselinedAt: true },
         })
       : null,
@@ -245,9 +245,9 @@ async function getBoqBaselineLock(projectId, tx = prisma) {
   return {
     locked,
     source: baselinedSchedule
-      ? "schedule_baseline"
+      ? 'schedule_baseline'
       : lockedBoqRevision
-        ? "boq_revision"
+        ? 'boq_revision'
         : null,
     scheduleRevisionId: baselinedSchedule?.id ?? null,
     boqRevisionId: lockedBoqRevision?.id ?? null,
@@ -263,8 +263,8 @@ async function assertBoqEditable(projectId, tx = prisma) {
   if (baseline.locked) {
     throw new HttpError(
       409,
-      "BOQ_BASELINE_LOCKED",
-      "BOQ baseline is locked. Upload a revision for comparison instead of editing current baseline rows.",
+      'BOQ_BASELINE_LOCKED',
+      'BOQ baseline is locked. Upload a revision for comparison instead of editing current baseline rows.',
       { baseline },
     );
   }
@@ -278,7 +278,7 @@ async function assertProjectAccess(projectId, orgId, tx = prisma) {
     select: { id: true, orgId: true },
   });
   if (!project) {
-    throw new HttpError(404, "PROJECT_NOT_FOUND", "Project not found");
+    throw new HttpError(404, 'PROJECT_NOT_FOUND', 'Project not found');
   }
   return project;
 }
@@ -286,8 +286,8 @@ async function assertProjectAccess(projectId, orgId, tx = prisma) {
 function rowChanged(existing, incoming) {
   return (
     normalizeCode(existing.code) !== normalizeCode(incoming.code) ||
-    String(existing.description ?? "") !== String(incoming.description ?? "") ||
-    String(existing.unit ?? "") !== String(incoming.unit ?? "") ||
+    String(existing.description ?? '') !== String(incoming.description ?? '') ||
+    String(existing.unit ?? '') !== String(incoming.unit ?? '') ||
     !quantityEquals(existing.qty, incoming.qty) ||
     !moneyEquals(existing.rate, incoming.rate) ||
     !moneyEquals(existing.amount, incoming.amount)
@@ -379,7 +379,7 @@ async function createBoqRevision(
 ) {
   const latest = await tx.boqRevision.findFirst({
     where: { projectId },
-    orderBy: { revisionNumber: "desc" },
+    orderBy: { revisionNumber: 'desc' },
     select: { revisionNumber: true },
   });
   const revisionNumber = (latest?.revisionNumber ?? 0) + 1;
@@ -465,12 +465,12 @@ const boqItemActivityAllocationInclude = {
               },
             },
           },
-          orderBy: { createdAt: "asc" },
+          orderBy: { createdAt: 'asc' },
         },
       },
     },
   },
-  orderBy: { createdAt: "asc" },
+  orderBy: { createdAt: 'asc' },
 };
 
 const boqItemInclude = {
@@ -478,7 +478,7 @@ const boqItemInclude = {
 };
 
 function activityDisplayCode(activity) {
-  return activity?.activityCode || activity?.p6ActivityId || activity?.id || "";
+  return activity?.activityCode || activity?.p6ActivityId || activity?.id || '';
 }
 
 function dependencyDisplay(activity) {
@@ -530,8 +530,8 @@ function assertPositiveAllocationValues({ quantity, amount }) {
   if (quantity <= 0 || amount <= 0) {
     throw new HttpError(
       400,
-      "INVALID_ALLOCATION_VALUES",
-      "Activity allocation quantity and amount must be greater than zero",
+      'INVALID_ALLOCATION_VALUES',
+      'Activity allocation quantity and amount must be greater than zero',
     );
   }
 }
@@ -601,7 +601,7 @@ async function createOfficialBoqActivityAllocation(
     projectId,
     boqItem,
     payload,
-    source = "manual",
+    source = 'manual',
     userId = null,
     calendarId = null,
   },
@@ -701,7 +701,7 @@ async function createOfficialBoqActivityAllocation(
       amount,
       weight: computeDefaultWeight({ amount, boqItem }),
       source,
-      status: payload.status || "draft",
+      status: payload.status || 'draft',
       notes: trimOrNull(payload.notes),
       createdBy: userId || null,
       updatedBy: userId || null,
@@ -722,7 +722,7 @@ async function processBoqUpload(projectId, fileBuffer, label, options = {}) {
         select: { orgId: true },
       });
   if (!project)
-    throw new HttpError(404, "PROJECT_NOT_FOUND", "Project not found");
+    throw new HttpError(404, 'PROJECT_NOT_FOUND', 'Project not found');
   await assertAiQuota(project.orgId);
 
   let itemsWithAmounts;
@@ -732,8 +732,8 @@ async function processBoqUpload(projectId, fileBuffer, label, options = {}) {
     if (rawRows.length === 0) {
       throw new HttpError(
         400,
-        "BOQ_VALIDATION_FAILED",
-        "No data rows found in file",
+        'BOQ_VALIDATION_FAILED',
+        'No data rows found in file',
       );
     }
 
@@ -742,8 +742,8 @@ async function processBoqUpload(projectId, fileBuffer, label, options = {}) {
     if (!validation.valid) {
       throw new HttpError(
         400,
-        "BOQ_VALIDATION_FAILED",
-        "BOQ file contains validation errors",
+        'BOQ_VALIDATION_FAILED',
+        'BOQ file contains validation errors',
         {
           errors: validation.errors,
         },
@@ -766,7 +766,7 @@ async function processBoqUpload(projectId, fileBuffer, label, options = {}) {
       await fileStorageService
         .markDocumentRejected({
           documentId: options.documentId,
-          code: error.code || "BOQ_UPLOAD_FAILED",
+          code: error.code || 'BOQ_UPLOAD_FAILED',
           message: error.message,
         })
         .catch(() => {});
@@ -822,8 +822,8 @@ async function processBoqUpload(projectId, fileBuffer, label, options = {}) {
         await trx.projectDocument.update({
           where: { id: options.documentId },
           data: {
-            status: "linked",
-            linkedEntityType: "boq_revision",
+            status: 'linked',
+            linkedEntityType: 'boq_revision',
             linkedEntityId: revision.id,
           },
         });
@@ -869,7 +869,7 @@ async function processBoqUpload(projectId, fileBuffer, label, options = {}) {
             blockedCount: revision.blockedCount,
           },
           metadata: {
-            source: "boq.upload",
+            source: 'boq.upload',
             sourceDocumentId: options.documentId || null,
             baseline,
           },
@@ -947,7 +947,7 @@ async function processBoqUpload(projectId, fileBuffer, label, options = {}) {
           removedCount: revision.removedCount,
         },
         metadata: {
-          source: "boq.upload",
+          source: 'boq.upload',
           sourceDocumentId: options.documentId || null,
           baseline,
         },
@@ -980,7 +980,7 @@ async function processBoqUpload(projectId, fileBuffer, label, options = {}) {
       await fileStorageService
         .markDocumentRejected({
           documentId: options.documentId,
-          code: error.code || "BOQ_UPLOAD_FAILED",
+          code: error.code || 'BOQ_UPLOAD_FAILED',
           message: error.message,
         })
         .catch(() => {});
@@ -1086,8 +1086,8 @@ async function runBoqActivityJob({ job, payload = {}, updateProgress }) {
 
   try {
     setBoqJob(jobId, {
-      status: "running",
-      step: "Calling AI to generate activities...",
+      status: 'running',
+      step: 'Calling AI to generate activities...',
       progress: 30,
     });
 
@@ -1107,19 +1107,19 @@ async function runBoqActivityJob({ job, payload = {}, updateProgress }) {
     const prompt = buildBoqActivityPrompt(project, items);
 
     const message = await client.messages.create({
-      model: "claude-sonnet-4-6",
+      model: 'claude-sonnet-4-6',
       max_tokens: 8192,
-      messages: [{ role: "user", content: prompt }],
+      messages: [{ role: 'user', content: prompt }],
     });
 
-    const rawText = message.content[0]?.text ?? "";
+    const rawText = message.content[0]?.text ?? '';
     const jsonMatch = rawText.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) throw new Error("AI returned non-JSON response");
+    if (!jsonMatch) throw new Error('AI returned non-JSON response');
     const parsed = JSON.parse(jsonMatch[0]);
 
     if (job.orgId) await incrementAiUsage(job.orgId);
 
-    setBoqJob(jobId, { step: "Saving activities...", progress: 70 });
+    setBoqJob(jobId, { step: 'Saving activities...', progress: 70 });
 
     // Fetch saved BOQ items to get their IDs. Existing rows keep their
     // generated activity breakdowns; only rows without activities are expanded.
@@ -1170,7 +1170,7 @@ async function runBoqActivityJob({ job, payload = {}, updateProgress }) {
 
       const codes = [];
       const activities = (boqResult.activities ?? []).filter((act) =>
-        String(act?.activityName || "").trim(),
+        String(act?.activityName || '').trim(),
       );
       const boqQuantity = toNumber(boqItem.qty);
       const totalSuggestedQuantity = activities.reduce(
@@ -1215,7 +1215,7 @@ async function runBoqActivityJob({ job, payload = {}, updateProgress }) {
               predecessorCode,
               sortOrder: i,
             },
-            source: "ai",
+            source: 'ai',
             userId: options.userId || null,
             calendarId: project?.projectCalendar ?? null,
           }),
@@ -1244,44 +1244,83 @@ async function runBoqActivityJob({ job, payload = {}, updateProgress }) {
 // ── AI Prompt ─────────────────────────────────────────────────────────────────
 function buildBoqActivityPrompt(project, boqItems) {
   const startDate = project?.startDate
-    ? new Date(project.startDate).toISOString().split("T")[0]
-    : "TBD";
-  const currency = project?.currency ?? "USD";
-  const totalBudget = project?.contractValue ?? 0;
+    ? new Date(project.startDate).toISOString().split('T')[0]
+    : 'TBD';
+  const currency = project?.currency ?? 'USD';
+  const totalBudget = Number(project?.contractValue ?? 0);
 
-  return `You are a construction project planning expert. Break down each BOQ item into specific construction activities and define logical dependencies between them.
+  // Sanitize BOQ items before injecting into the prompt so malformed
+  // source data (common from Excel exports) doesn't silently produce
+  // undefined/NaN/null fields with no visibility.
+  const sanitizedBoqItems = boqItems.map((i, idx) => ({
+    code: i.code ?? `UNKNOWN_${idx}`,
+    description: i.description ? i.description.substring(0, 300) : '',
+    quantity: Number.isFinite(Number(i.qty)) ? Number(i.qty) : 0,
+    unit: i.unit ?? 'unit',
+    rate: Number.isFinite(Number(i.rate)) ? Number(i.rate) : 0,
+    amount: Number.isFinite(Number(i.amount)) ? Number(i.amount) : 0,
+  }));
+
+  return `You are a construction project planning expert. Break down each BOQ item into specific construction activities and define logical dependencies between them — both within each BOQ item and across BOQ items, reflecting real-world construction sequencing.
 
 RULES:
-1. For each BOQ item, generate 1-5 specific construction activities
-2. Activities must be practical, sequential construction tasks
-3. Use ONLY these dependency types:
-   - "FS" (Finish-to-Start): Activity B cannot start until Activity A finishes
-   - "SS" (Start-to-Start): Activity B can start when Activity A starts
-   - null: No dependency
-4. The first activity in each BOQ item typically has null dependency within that item, but may depend on a previous BOQ item
-5. Activity names must be specific, max 255 characters
-6. Keep unit and quantity realistic relative to the BOQ item
-7. Quantities across activities under one BOQ item should logically relate to the BOQ item's total quantity
+
+1. ACTIVITY COUNT
+   - Generate 1-5 specific construction activities per BOQ item.
+   - For non-construction items (e.g. Preliminaries, Legal Clauses, Administrative, Health & Safety), generate EXACTLY 1 summary activity or "Level of Effort" task. Do not invent construction tasks for legal clauses.
+   - Simple or low-complexity BOQ items (e.g. supply-and-fix of small components, minor fittings) may have as few as 1 activity. Do NOT pad trivial items with artificial steps just to reach a higher count.
+
+2. ACTIVITY QUALITY
+   - Activities must be practical, sequential, real-world construction tasks.
+   - Activity names must be specific and descriptive, max 255 characters.
+   - Use standard construction sequencing logic appropriate to the trade, for example:
+     - Earthworks: excavation → backfill → compaction
+     - Concrete works: formwork → reinforcement → pour → curing → strip formwork
+     - Masonry: layout/marking → block/brick laying → curing → plastering
+     - MEP: rough-in → testing → fixing/installation → commissioning
+     - Finishes: surface preparation → application → curing/drying → final inspection/cleaning
+   - Adapt this logic sensibly to whatever trade each BOQ item actually represents.
+
+3. UNITS AND QUANTITIES
+   - If an activity uses the SAME unit as its parent BOQ item, the quantities of all such activities MUST sum exactly to the BOQ item's total quantity (i.e., they represent sequential sub-portions of the same measured scope).
+   - If an activity uses a DIFFERENT unit than the BOQ item (e.g., the BOQ item is in m² but an activity is naturally measured in days, crew-hours, trips, or lots), assign a realistic standalone quantity for that unit — do not force it into the summation.
+   - Never produce zero or negative quantities. If a BOQ item's quantity, unit, or rate is missing or zero in the input, infer a reasonable construction-realistic value for the activities, but preserve the original boqCode and description exactly as given.
+
+4. RATE FIELD SEMANTICS
+   - The "rate" field on each activity is a PLANNING/SCHEDULING rate only (e.g., for sequencing or resource-loading purposes). It is intentionally decoupled from the original BOQ item's rate and amount — do NOT try to reconcile activity rate × quantity with the BOQ item's amount. Use realistic, trade-appropriate planning rates.
+
+5. DEPENDENCY TYPES
+   - Use ONLY: "FS" (Finish-to-Start), "SS" (Start-to-Start), or null (no dependency).
+
+6. WITHIN-ITEM DEPENDENCIES
+   - Sequence activities within a BOQ item logically using FS/SS as appropriate.
+   - The first activity in a BOQ item has predecessorIndex = null UNLESS it has a cross-item dependency (see Rule 7).
+
+7. CROSS-BOQ-ITEM DEPENDENCIES (IMPORTANT)
+   - Apply your construction domain knowledge of standard trade sequencing to link BOQ items together, even if the input array is not already in logical construction order. Examples:
+     - Excavation/earthworks → PCC/blinding → foundation concrete → backfill → structural columns/slabs → masonry → MEP rough-in → plastering/finishes → MEP fixing → painting → final handover items.
+     - Curing/waiting activities in one BOQ item often gate the start of formwork-removal or next-stage activities in a subsequent BOQ item.
+   - When such a relationship exists, set dependencyType, predecessorBoqCode, and predecessorActivityIndex on the dependent activity (typically the first activity of the dependent BOQ item, but not always).
+   - Do not force cross-item dependencies where none plausibly exist — independent/parallel BOQ items (e.g. unrelated external works happening concurrently) should remain null.
+
+8. MUTUAL EXCLUSIVITY OF PREDECESSOR FIELDS
+   - For any single activity, populate EXACTLY ONE of the following, never both:
+     (a) predecessorIndex (same-item dependency) — in this case predecessorBoqCode and predecessorActivityIndex must be null.
+     (b) predecessorBoqCode + predecessorActivityIndex (cross-item dependency) — in this case predecessorIndex must be null.
+   - If dependencyType is null, all three predecessor fields must be null.
+
+9. COMPLETENESS
+   - Every BOQ item from the input array must appear exactly once in the output "boqActivities" array, in the same order as the input, with boqCode matching exactly (including case and formatting).
+   - Do not skip, merge, or invent BOQ items beyond what is provided in the input.
 
 PROJECT CONTEXT:
-- Name: ${project?.name ?? "Construction Project"}
+- Name: ${project?.name ?? 'Construction Project'}
 - Start Date: ${startDate}
-- Duration: ${project?.duration ?? 12} ${project?.durationUnit ?? "months"}
+- Duration: ${project?.duration ?? 12} ${project?.durationUnit ?? 'months'}
 - Total Budget: ${currency} ${totalBudget.toLocaleString()}
 
 BOQ ITEMS:
-${JSON.stringify(
-  boqItems.map((i) => ({
-    code: i.code,
-    description: i.description,
-    quantity: i.qty,
-    unit: i.unit,
-    rate: i.rate,
-    amount: i.amount,
-  })),
-  null,
-  2,
-)}
+${JSON.stringify(sanitizedBoqItems, null, 2)}
 
 Respond ONLY with valid JSON matching this exact structure:
 {
@@ -1313,13 +1352,13 @@ async function getProjectBoq(projectId, options = {}) {
   const [items, allocationSummary, revisions, baseline] = await Promise.all([
     prisma.boqItem.findMany({
       where: { projectId, isActive: true },
-      orderBy: { sortOrder: "asc" },
+      orderBy: { sortOrder: 'asc' },
       include: boqItemInclude,
     }),
     buildAllocationSummary({ projectId }),
     prisma.boqRevision.findMany({
       where: { projectId },
-      orderBy: [{ revisionNumber: "desc" }, { createdAt: "desc" }],
+      orderBy: [{ revisionNumber: 'desc' }, { createdAt: 'desc' }],
       take: 10,
     }),
     getBoqBaselineLock(projectId),
@@ -1377,7 +1416,7 @@ async function getProjectBoq(projectId, options = {}) {
 function mapBoqItem(item, allocationTotals = null) {
   return {
     id: item.id,
-    code: item.code || item.ref || "",
+    code: item.code || item.ref || '',
     description: item.description,
     quantity: item.qty,
     unit: item.unit,
@@ -1423,7 +1462,7 @@ function mapActivityAllocation(allocation, boqItem) {
     allocationId: allocation.id,
     boqItemId: allocation.boqItemId,
     activityCode: activityDisplayCode(allocation.activity),
-    activityName: allocation.activity?.name ?? "",
+    activityName: allocation.activity?.name ?? '',
     unit: boqItem.unit ?? null,
     quantity,
     rate:
@@ -1433,7 +1472,7 @@ function mapActivityAllocation(allocation, boqItem) {
     budget: amount,
     dependencyType: dependency.dependencyType,
     predecessorCode: dependency.predecessorCode,
-    isManual: allocation.source === "manual",
+    isManual: allocation.source === 'manual',
     source: allocation.source,
     allocationStatus: allocation.status,
     sortOrder: allocation.activity?.sortOrder ?? boqItem.sortOrder ?? 0,
@@ -1446,12 +1485,12 @@ async function updateBoqItem(projectId, itemId, data, options = {}) {
   await assertBoqEditable(projectId);
   const existing = await findBoqItemInProject(projectId, itemId);
   if (!existing)
-    throw new HttpError(404, "BOQ_ITEM_NOT_FOUND", "BOQ item not found");
+    throw new HttpError(404, 'BOQ_ITEM_NOT_FOUND', 'BOQ item not found');
   if (existing.isActive === false) {
     throw new HttpError(
       409,
-      "BOQ_ITEM_INACTIVE",
-      "Historical BOQ rows cannot be edited from the current BOQ grid",
+      'BOQ_ITEM_INACTIVE',
+      'Historical BOQ rows cannot be edited from the current BOQ grid',
     );
   }
 
@@ -1505,7 +1544,7 @@ async function updateBoqItem(projectId, itemId, data, options = {}) {
           description: row.description,
           amount: toMoneyNumber(row.amount),
         },
-        metadata: { source: "boq.manual_grid" },
+        metadata: { source: 'boq.manual_grid' },
       });
       return row;
     });
@@ -1593,14 +1632,14 @@ async function createManualBoqItem(projectId, data, options = {}) {
         actorId: options.userId || null,
         actorRole: options.userRole || null,
         oldStatus: null,
-        newStatus: "draft",
+        newStatus: 'draft',
         newSummary: boqItemAuditSummary(row),
         summary: {
           code: row.code || null,
           description: row.description,
           amount: toMoneyNumber(row.amount),
         },
-        metadata: { source: "boq.manual_grid" },
+        metadata: { source: 'boq.manual_grid' },
       });
       return row;
     });
@@ -1634,19 +1673,19 @@ async function deleteBoqItem(projectId, itemId, options = {}) {
   await assertBoqEditable(projectId);
   const item = await findBoqItemInProject(projectId, itemId);
   if (!item)
-    throw new HttpError(404, "BOQ_ITEM_NOT_FOUND", "BOQ item not found");
+    throw new HttpError(404, 'BOQ_ITEM_NOT_FOUND', 'BOQ item not found');
   if (item.isActive === false) {
     throw new HttpError(
       409,
-      "BOQ_ITEM_INACTIVE",
-      "Historical BOQ rows cannot be deleted",
+      'BOQ_ITEM_INACTIVE',
+      'Historical BOQ rows cannot be deleted',
     );
   }
   if (!item.isManual) {
     throw new HttpError(
       403,
-      "BOQ_ITEM_NOT_DELETABLE",
-      "Uploaded BOQ rows cannot be deleted",
+      'BOQ_ITEM_NOT_DELETABLE',
+      'Uploaded BOQ rows cannot be deleted',
     );
   }
 
@@ -1657,13 +1696,13 @@ async function deleteBoqItem(projectId, itemId, options = {}) {
   const protectedAllocation = allocations.find(
     (allocation) =>
       activeStatuses.includes(allocation.status) &&
-      allocation.status !== "draft",
+      allocation.status !== 'draft',
   );
   if (protectedAllocation) {
     throw new HttpError(
       409,
-      "BOQ_ITEM_HAS_LINKED_ALLOCATIONS",
-      "BOQ rows with submitted or approved activity allocations must be revised through the allocation workflow.",
+      'BOQ_ITEM_HAS_LINKED_ALLOCATIONS',
+      'BOQ rows with submitted or approved activity allocations must be revised through the allocation workflow.',
     );
   }
 
@@ -1672,11 +1711,11 @@ async function deleteBoqItem(projectId, itemId, options = {}) {
       await tx.activityBoqAllocation.updateMany({
         where: { id: { in: allocations.map((allocation) => allocation.id) } },
         data: {
-          status: "rejected",
+          status: 'rejected',
           isActive: false,
           rejectedBy: options.userId || null,
           rejectedAt: new Date(),
-          rejectedReason: "Manual BOQ row deleted before allocation approval",
+          rejectedReason: 'Manual BOQ row deleted before allocation approval',
           updatedBy: options.userId || null,
         },
       });
@@ -1688,7 +1727,7 @@ async function deleteBoqItem(projectId, itemId, options = {}) {
           isActive: false,
           retiredAt: new Date(),
           retiredBy: options.userId || null,
-          retiredReason: "Manual BOQ row deleted before allocation approval",
+          retiredReason: 'Manual BOQ row deleted before allocation approval',
         },
       });
     }
@@ -1703,7 +1742,7 @@ async function deleteBoqItem(projectId, itemId, options = {}) {
       action: auditService.ACTIONS.DELETED,
       actorId: options.userId || null,
       actorRole: options.userRole || null,
-      oldStatus: item.isActive === false ? "inactive" : "active",
+      oldStatus: item.isActive === false ? 'inactive' : 'active',
       newStatus: null,
       oldSummary: boqItemAuditSummary(item),
       summary: {
@@ -1712,7 +1751,7 @@ async function deleteBoqItem(projectId, itemId, options = {}) {
         amount: toMoneyNumber(item.amount),
       },
       metadata: {
-        source: "boq.manual_grid",
+        source: 'boq.manual_grid',
         retiredAllocationIds: allocations.map((allocation) => allocation.id),
       },
     });
@@ -1737,12 +1776,12 @@ async function createActivity(projectId, boqItemId, data, options = {}) {
   await assertBoqEditable(projectId);
   const item = await findBoqItemInProject(projectId, boqItemId);
   if (!item)
-    throw new HttpError(404, "BOQ_ITEM_NOT_FOUND", "BOQ item not found");
+    throw new HttpError(404, 'BOQ_ITEM_NOT_FOUND', 'BOQ item not found');
   if (item.isActive === false) {
     throw new HttpError(
       409,
-      "BOQ_ITEM_INACTIVE",
-      "Historical BOQ rows cannot receive new activities",
+      'BOQ_ITEM_INACTIVE',
+      'Historical BOQ rows cannot receive new activities',
     );
   }
 
@@ -1766,7 +1805,7 @@ async function createActivity(projectId, boqItemId, data, options = {}) {
           predecessorCode: data.predecessorCode || null,
           sortOrder: count,
         },
-        source: "manual",
+        source: 'manual',
         userId: options.userId || null,
         calendarId,
       });
@@ -1808,7 +1847,7 @@ function findAllocationForBoqActivity(
                 },
               },
             },
-            orderBy: { createdAt: "asc" },
+            orderBy: { createdAt: 'asc' },
           },
         },
       },
@@ -1826,12 +1865,12 @@ async function updateActivity(projectId, activityId, data, options = {}) {
     data?.allocationId || null,
   );
   if (!existing)
-    throw new HttpError(404, "ACTIVITY_NOT_FOUND", "Activity not found");
-  if (existing.status !== "draft") {
+    throw new HttpError(404, 'ACTIVITY_NOT_FOUND', 'Activity not found');
+  if (existing.status !== 'draft') {
     throw new HttpError(
       409,
-      "ALLOCATION_NOT_EDITABLE",
-      "Only draft activity BOQ allocations can be edited from the BOQ grid",
+      'ALLOCATION_NOT_EDITABLE',
+      'Only draft activity BOQ allocations can be edited from the BOQ grid',
     );
   }
 
@@ -1865,14 +1904,14 @@ async function updateActivity(projectId, activityId, data, options = {}) {
   const updated = await prisma.$transaction(async (tx) => {
     const activityData = {};
     if (data.activityName !== undefined) {
-      activityData.name = String(data.activityName || "").trim();
+      activityData.name = String(data.activityName || '').trim();
     }
     if (
       data.dependencyType !== undefined ||
       data.predecessorCode !== undefined
     ) {
       const predecessorCode = trimOrNull(data.predecessorCode);
-      const dependencyType = data.dependencyType || "FS";
+      const dependencyType = data.dependencyType || 'FS';
       activityData.predecessors = predecessorCode
         ? `${predecessorCode} ${dependencyType}`
         : null;
@@ -1888,7 +1927,7 @@ async function updateActivity(projectId, activityId, data, options = {}) {
             projectId,
             successorId: existing.activityId,
             predecessors: activityData.predecessors,
-            source: existing.source || "manual",
+            source: existing.source || 'manual',
           });
         } else {
           await tx.activityDependency.deleteMany({
@@ -1934,8 +1973,8 @@ async function deleteActivity(projectId, activityId, options = {}) {
     if (activeAllocations.length > 1) {
       throw new HttpError(
         409,
-        "ALLOCATION_NOT_EDITABLE",
-        "This schedule activity has multiple BOQ allocations. Remove the specific allocation from the allocation workflow.",
+        'ALLOCATION_NOT_EDITABLE',
+        'This schedule activity has multiple BOQ allocations. Remove the specific allocation from the allocation workflow.',
       );
     }
   }
@@ -1946,12 +1985,12 @@ async function deleteActivity(projectId, activityId, options = {}) {
     options.allocationId || null,
   );
   if (!allocation)
-    throw new HttpError(404, "ACTIVITY_NOT_FOUND", "Activity not found");
-  if (allocation.status !== "draft") {
+    throw new HttpError(404, 'ACTIVITY_NOT_FOUND', 'Activity not found');
+  if (allocation.status !== 'draft') {
     throw new HttpError(
       409,
-      "ALLOCATION_NOT_EDITABLE",
-      "Submitted or approved activity allocations must be rejected or revised before removing the schedule activity",
+      'ALLOCATION_NOT_EDITABLE',
+      'Submitted or approved activity allocations must be rejected or revised before removing the schedule activity',
     );
   }
 
@@ -1959,12 +1998,12 @@ async function deleteActivity(projectId, activityId, options = {}) {
     await tx.activityBoqAllocation.update({
       where: { id: allocation.id },
       data: {
-        status: "rejected",
+        status: 'rejected',
         isActive: false,
         rejectedBy: options.userId || null,
         rejectedAt: new Date(),
         rejectedReason:
-          "BOQ helper activity deleted before allocation approval",
+          'BOQ helper activity deleted before allocation approval',
         updatedBy: options.userId || null,
       },
     });
@@ -1974,7 +2013,7 @@ async function deleteActivity(projectId, activityId, options = {}) {
         isActive: false,
         retiredAt: new Date(),
         retiredBy: options.userId || null,
-        retiredReason: "BOQ helper activity deleted before allocation approval",
+        retiredReason: 'BOQ helper activity deleted before allocation approval',
       },
     });
   });
@@ -2066,6 +2105,11 @@ async function findShadowActivities(projectId, options = {}) {
 module.exports = {
   findShadowActivities,
   runBoqActivityJob,
+  // Exported so the prompt can be inspected and regression-tested without
+  // calling the model. Main added this as a second `module.exports` beside the
+  // function itself, which this assignment silently overwrote, so it is
+  // listed here instead (Phase 20.6).
+  buildBoqActivityPrompt,
   generateBoqTemplate,
   processBoqUpload,
   getProjectBoq,

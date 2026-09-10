@@ -32,8 +32,15 @@ function extractBlock(source, headerPattern) {
 }
 
 function resolveTemplatePath(templatePath, moduleDir) {
-  const withModulePath = templatePath.replace(/\$\{path\.module\}/g, moduleDir)
-  return resolve(moduleDir, withModulePath)
+  const moduleToken = '${path.module}'
+  if (templatePath.startsWith(moduleToken)) {
+    const relativeTemplatePath = templatePath
+      .slice(moduleToken.length)
+      .replace(/^[/\\]/, '')
+    return resolve(moduleDir, relativeTemplatePath)
+  }
+
+  return resolve(moduleDir, templatePath)
 }
 
 export function validateEc2UserData(computeSource, options = {}) {
@@ -79,7 +86,9 @@ export function validateEc2UserData(computeSource, options = {}) {
   for (const templateRef of templateRefs) {
     const resolvedTemplatePath = resolveTemplatePath(templateRef, moduleDir)
     if (!templateExists(resolvedTemplatePath)) {
-      failures.push(`EC2 user data template does not exist: ${templateRef}`)
+      failures.push(
+        `EC2 user data template does not exist: ${templateRef} (resolved to ${resolvedTemplatePath})`,
+      )
       continue
     }
 
