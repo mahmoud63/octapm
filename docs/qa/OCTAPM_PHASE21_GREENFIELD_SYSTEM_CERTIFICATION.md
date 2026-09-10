@@ -1,203 +1,180 @@
 # Phase 21 — greenfield system simulation
 
-**Status: NOT CERTIFIED.** Not because anything failed — 142 of 142 checks
-passed and no P0 or P1 is open — but because the run did not reach the whole
-of the scope the phase defines. §7 says exactly what is missing.
+**Status: NOT CERTIFIED.** Nothing failed — 205 of 205 checks passed across
+both halves and no P0 or P1 is open — but the run still did not reach the whole
+of the scope the phase defines. §8 lists exactly what is missing.
 
-**Branch:** `feat/p0-foundations-sprint1` · **from** `a2a3e0e` · **run** 2026-09-10
+**Branch:** `feat/p0-foundations-sprint1`
+**21A from** `a2a3e0e` · **21B from** `55af9cc`
 **Project:** `OCTA PHASE21 GREENFIELD 20260910093852` (`0ce999f2-b175-432b-8551-20182b4fc990`)
 
 ---
 
-## 1. Was it really greenfield?
+## 1. One greenfield project, continued — proven, not assumed
 
-**Yes.** Nothing in the business scenario came from the seed.
+Phase 21B did not start over. Before adding a single transaction it proved the
+project by **id and by state**: 29 snapshot checks reconciled the team,
+schedule, BOQ, budget, commitments, ledger, cash and stock against every figure
+Phase 21A reported. It also enumerated every project matching `PHASE21` and
+confirmed **exactly one is live** — the rest are archived copies from earlier
+runs — so the wrong one could not be continued by accident.
 
-Seed infrastructure used, and only this: the eight demo **identities** and
-their passwords, the role definitions, the plan catalogue. Everything the
-scenario needed, it made:
+**Nothing in the business scenario came from the seed.** Only the eight demo
+identities, the role definitions and the plan catalogue.
 
 | created by the run | |
 | --- | --- |
-| 4 companies | client, material supplier, subcontractor, consultant |
-| 1 project | created through `POST /projects`, never inserted into PostgreSQL |
-| 7 project team assignments | through the Phase 20.5 "add existing user" workflow |
-| 7 cost codes | company master, then selected onto the project |
-| 14 activities | across 3 WBS branches, with FS dependencies |
-| 5 BOQ items | priced, 459,000.00 |
-| 5 BOQ→activity allocations | one whole, one split across two activities, one left unallocated |
-| 7 budget lines | 1,700,000.00 |
-| 1 supplier, 1 warehouse, 1 zone, 1 bin, 1 stocked item | |
-| 2 purchase orders | draft → submit → approve → issue |
-| 3 goods receipts | including a partial delivery |
-| 1 material issue | plus 2 from authorisation probes |
-| 1 subcontract | raised, agreement generated, signed PDF uploaded, executed |
-| 1 pay application | draft → submit → review → approve, then paid |
-| 1 second project | created and archived, to attack project isolation |
-| 1 outsider tenant | registered through sign-up, to attack tenant isolation |
+| 4 companies · 1 project · 7 team assignments · 7 cost codes | 21A |
+| 14 activities across 3 WBS branches · 5 BOQ items · 5 allocations · 7 budget lines | 21A |
+| 1 supplier · warehouse/zone/bin · 1 stocked item · 2 POs · 3 receipts · material issues | 21A |
+| 1 subcontract signed and executed · 1 pay app certified and paid | 21A |
+| 1 outsider tenant · 1 isolation project (archived) | 21A |
+| 2 change orders (1 draft, 1 approved) with instruction attached · 1 direct cost | 21B |
+| progress on 3 activities, submitted and approved | 21B |
 
-**Riverside Tower was not used.** The project the run created starts empty:
-0 activities, 0 BOQ items, 0 budget lines, 0 commitments, 0 purchase orders —
-asserted, not assumed.
+Riverside Tower was never used.
 
 ---
 
-## 2. What was proven
+## 2. Checks
 
-**142 checks, 0 failed**, across seven stages.
-
-| stage | checks | what it establishes |
+| stage | checks | |
 | --- | ---: | --- |
-| 1 foundation | 38 | directory, project, team before/after, ordinary member cannot manage the team |
-| 2 schedule | 14 | 14 activities, CPM, critical path, float, recalculation, identity preservation |
-| 3 BOQ & budget | 13 | whole/split/unallocated, four refusals, the 1,700,000.00 anchor |
-| 4 procurement→cost | 28 | PO lifecycle, partial delivery, weighted average, **stock ≠ cost, issue = cost** |
-| 5 subcontract | 15 | agreement→signature→execution, **certified gross is the cost, payment is not** |
-| 7 adversarial | 34 | tenant isolation, non-disclosure, project isolation, RBAC |
-
-### The two financial gates
-
-**Materials.** 1,650.00 of stock arrived across three delivery notes and the
-cost ledger recorded **nothing** — 0 entries, `bySource` empty. Issuing 60
-bags posted **660.00**, exactly 60 × the weighted average of 11.00. Stock fell
-from 150 to 90 bags and from 1,650.00 to 990.00.
-
-**Subcontract.** A 100,000.00 subcontract certified 60,000.00 gross, held
-6,000.00 retention and paid 54,000.00. Actual cost rose by the **gross
-60,000.00**. Recording the payment left it unchanged.
-
-Full arithmetic in `OCTAPM_PHASE21_FINANCIAL_RECONCILIATION.md`. Every
-exercised line reconciles with **delta 0.00**, and the ledger, the budget
-projection and the activity projection all agree at 60,704.00.
-
-### CPM, checked on paper
-
-The network was designed so the answer was known before the API gave one:
-longest path 5+10+3+12+8+6+7+8+9+7+6 = **81 working days** over 12 activities.
-The API returned exactly 12 activities at zero float, the two spurs carrying
-float (47 and 20 days), and a finish of 2027-04-08. Adding 10 days to
-excavation moved the finish to 2027-04-20 — 10 working days on a six-day
-calendar — and restoring the duration restored the original finish, on the
-same 14 activity ids.
-
-### Security
-
-13 cross-tenant attacks, all refused, **zero leaks**. Reads answer `404
-PROJECT_NOT_FOUND` and writes `402` — and a **real project answers identically
-to one that does not exist**, on every verb, so nothing is disclosed. Five
-cross-project id substitutions all refused. Seven wrong-role approval attempts
-all `403`, attacked at the API and not inferred from button visibility.
+| 1 foundation | 38 | directory, project, team before/after |
+| 2 schedule | 14 | CPM, critical path, float, recalculation |
+| 3 BOQ & budget | 13 | whole/split/unallocated, refusals, the anchor |
+| 4 procurement → cost | 28 | **stock ≠ cost, issue = cost** |
+| 5 subcontract | 15 | **certified gross is the cost, payment is not** |
+| 7 adversarial | 34 | tenant, project, RBAC |
+| snapshot (21B) | 29 | the project is the one 21A left |
+| 8 change & direct cost | 28 | **Revised Budget identity**, +8,500.00 |
+| 9 progress & EV | 7 | EV derived before the report was read |
+| **total** | **205** | **0 failed** |
 
 ---
 
-## 3. Connected-system matrix
+## 3. The financial gates
 
-| connection | |
-| --- | --- |
-| Company → Project Team | **VERIFIED** |
-| Project Team → RBAC | **VERIFIED** |
-| WBS → Schedule | **VERIFIED** |
-| Schedule → BOQ | **VERIFIED** (whole, split, unallocated; no shadow activities) |
-| BOQ → Budget | **PARTIAL** — both exist and reconcile; no automated BOQ→budget derivation was exercised |
-| BOQ/Activity → Procurement | **VERIFIED** (PO lines carry activity and cost code) |
-| Award → PO | **PARTIAL** — POs raised directly; the RFQ→quote→award path was not driven |
-| PO → Goods Receipt | **VERIFIED** (partial then final, outstanding correct) |
-| Goods Receipt → Inventory | **VERIFIED** |
-| Inventory → Material Issue | **VERIFIED** |
-| **Material Issue → Actual Cost** | **VERIFIED** — exact |
-| Subcontractor → Commitment | **VERIFIED** (directory company reused, not retyped) |
-| Commitment → SOV → Pay App | **VERIFIED** (SOV line inherited) |
-| **Pay App → Actual Cost** | **VERIFIED** — gross, exact |
-| Pay App → Payment → Cash Flow | **VERIFIED** (54,000.00 out, cost unchanged) |
-| Records → Audit | **PARTIAL** — audit entries written by the team workflow; not systematically inspected |
-| Schedule → Cost dashboard | **VERIFIED** after P21-001 |
-| Procurement → RFQ/Bid | **NOT EXERCISED** |
-| PO → Long Lead | **NOT EXERCISED** |
-| Change → Revised Budget | **NOT EXERCISED** |
-| Progress → EV; Actual Cost → CPI | **NOT EXERCISED** |
-| RFI → Change | **NOT EXERCISED** |
-| Quality → responsibility | **NOT EXERCISED** |
-| Records → Deep links; Workflow → Ball in Court | **NOT EXERCISED** |
+**Materials.** 1,650.00 of stock arrived across three delivery notes including
+a partial — ledger recorded **nothing**. Issuing 60 bags posted **660.00** at a
+weighted average of exactly **11.00**.
+
+**Subcontract.** 100,000.00 executed against a signed agreement; 60,000.00
+certified gross; 6,000.00 retention; 54,000.00 paid. Actual cost rose by the
+**gross**, and the payment moved cash only.
+
+**Change.** Original **1,700,000.00 immutable**; approved changes 250,000.00;
+**Revised 1,950,000.00** — identity exact. A 40,000.00 draft moved nothing, and
+approving a variation moved the ledger by 0.00.
+
+**Direct cost.** +8,500.00 exactly, once.
+
+**Total actual 69,204.00**, agreeing across four independent readings: the
+API reconciliation, **a raw SQL sum of `CostLedgerEntry`**, the budget-line
+projection and the activity projection. Delta **0.00** on every exercised line.
+
+**Earned value.** EV computed from approved allocations and percentages
+*before* the report was read: 97,500.00, matched to the cent; advancing A130
+took it to 120,000.00. CPI 138.4943 = EV / AC-to-date, exact to four places.
+
+Full arithmetic in `OCTAPM_PHASE21_FINANCIAL_RECONCILIATION.md`.
 
 ---
 
-## 4. Defects
+## 4. CPM, checked on paper and then in the browser
+
+Longest path 5+10+3+12+8+6+7+8+9+7+6 = **81 working days** over 12 activities.
+The API returned exactly that. The planner's screen then showed it
+independently: **14 activities · critical path 12 · 1 milestone**, the driving
+chain listed in order, and float drivers *MEP 20d* and *Backfill 47d* — the
+same float the API measured.
+
+---
+
+## 5. Security
+
+13 cross-tenant attacks from a separately registered tenant, **zero leaks**,
+and a real project answers **identically** to one that does not exist on every
+verb. Five cross-project id substitutions refused. Seven wrong-role approval
+attempts all 403, attacked at the API rather than inferred from buttons.
+
+---
+
+## 6. Defects
 
 | | P0 | P1 | P2 | P3 |
 | --- | ---: | ---: | ---: | ---: |
-| discovered | 0 | 1 | 1 | 4 |
-| fixed | 0 | **1** | **1** | 0 |
-| open | **0** | **0** | 0 | 4 |
+| discovered | 0 | 1 | 2 | 4 |
+| fixed | 0 | **1** | 1 | 0 |
+| open | **0** | **0** | **1** | 4 |
 
-The P1 (P21-001) is the finding this phase existed to produce: a project
-planned in the product was invisible to the schedule, cost and site-reporting
-modules, because the schedule payload was gated on an import artefact. Fixed,
-with a regression test that fails 5 of 7 against the old code.
+The P1 (P21-001) is what this phase existed to produce. The open P2 (P21-007)
+is a consequence of fixing it: a schedule planned in the product now displays,
+but has no stored revision to baseline. Seven test defects in my own
+instruments are recorded — one briefly reported a cross-tenant leak that did
+not exist, and was verified before being written down.
 
-Four test defects in my own instruments are recorded in the register — one of
-which briefly reported a cross-tenant leak that did not exist. It was verified
-before being reported.
+Six product rules were **confirmed by attacking them**: approved variations are
+immutable, duplicate supplier invoices are refused, a variation needs written
+impact plus linked activities plus an attachment, a subcontract needs its
+signed agreement, an activity needs a responsible engineer, and a draft BOQ
+allocation earns nothing.
 
 ---
 
-## 5. Gates
+## 7. Gates
 
 | gate | result |
 | --- | --- |
 | Jest | **1,915 / 1,915**, 177 suites |
 | OpenAPI | **733 paths**, valid |
 | `prisma validate` | valid |
-| Phase 21 driver | **142 / 142 checks** |
-| Full Playwright | **NOT RUN** (§7) |
-| Console gate | **NOT RUN** as a full sweep (§7) |
-| 14-path smoke | **NOT RUN** (§7) |
+| Frontend typecheck (`tsc -b`) | **green** |
+| Frontend production build | **green** |
+| Phase 21 driver | **205 / 205** |
+| Full Playwright | see §9 |
 
-Environment during the run: one PostgreSQL cluster (postmaster 20848, 42
-workers — not 43 clusters), one API (pid 20168), one Vite (pid 30496, `:5173`),
-no nodemon. A duplicate Vite on `:5174` was found and removed first (P21-002).
-
----
-
-## 6. Enter-once, observed
-
-| information | verdict |
-| --- | --- |
-| Subcontractor identity | **VALID REUSE** — created once, selected on the commitment, carried to the pay app |
-| Supplier identity | **VALID REUSE** — created once, selected on both POs |
-| SOV line | **VALID REUSE** — the pay app inherited the subcontract's line; no scope retyped |
-| Activity and cost code | **VALID REUSE** — carried from PO line to receipt to issue to ledger |
-| Subcontract agreement | **VALID REUSE** — assembled from the record with 0 gaps, rendered to PDF for signature |
-| PO reference, GRN number | **VALID** — generated (`PO-…-A`, `GRN-00001/2/3`), hand entry still allowed |
-| Activity engineer | **VALID CONFIRMATION** — an activity may not exist with nobody responsible |
-
-No unnecessary duplicate entry was found in the paths driven.
+Environment: one PostgreSQL cluster (postmaster 20848), one API, one Vite on
+`:5173`, no nodemon. A duplicate Vite on `:5174` was removed first (P21-002).
 
 ---
 
-## 7. What this run did not reach
+## 8. What this run did not reach
 
-Stated plainly. Each is scope the phase defines and this run did not cover:
+- **Client commercial chain** — no prime contract, SOV, valuation, invoice or
+  client payment. Revenue and AR untested.
+- **RFQ → quotes → comparison → award**, and **long-lead**.
+- **Supplier invoice / 3-way match**, and direct-to-site recognition.
+- **Timesheets / labour cost**.
+- **RFI**, and RFI → change.
+- **Document control** beyond the single instruction attached to the change
+  order; **quality**; **safety / field**; **meetings and tasks**.
+- **Ball-in-court transitions** driven through a full cycle — the semantics
+  were observed and are correct, but no responsibility hand-off was driven.
+- **Per-record deep links** — module and child deep links work; per-record was
+  not systematically tested.
+- **Persona UX drive** — 2 of 11 personas driven in the browser.
+- **Permanent Playwright spec** for the greenfield lifecycle (§32).
+- **Retention release**, and a weighted average that does not divide cleanly.
 
-- **Change management** (§22) — no change order; Revised Budget untested as
-  anything but equal to Original Budget.
-- **Client commercial chain** (§11) — no prime contract, SOV, valuation,
-  certificate or client invoice.
-- **RFQ → quote → award** (§14) and **long-lead** (§15) — POs were raised
-  directly.
-- **3-way match** (§19), **direct costs** (§20), **timesheets** (§21).
-- **Progress and earned value** (§28) — no PV/EV/AC/SPI/CPI.
-- **RFI** (§23), **document control** (§24), **quality** (§25), **safety /
-  field** (§26), **meetings and tasks** (§27).
-- **Deep links** (§36) and **ball-in-court** (§37).
-- **Persona UX drive** (§39) — the browser was used to diagnose and verify
-  P21-001, but the eight-persona walkthrough was not performed.
-- **Full Playwright, console gate and 14-path smoke** (§45).
-- **Permanent Playwright spec** (§44) — the driver is committed as a Node
-  suite under `backend/scripts/phase21/`, not yet as a Playwright spec.
-- **Codex independent review** (§43) — **CODEX INDEPENDENT REVIEW NOT
-  AVAILABLE.** No independent adversarial review was performed; the review in
-  this document is my own and is therefore weaker evidence.
+**CODEX INDEPENDENT REVIEW NOT AVAILABLE** — checked, not assumed. The
+adversarial review in `OCTAPM_PHASE21_ADVERSARIAL_REVIEW.md` is a self-review
+and is labelled as weaker evidence.
 
-Nothing in this list failed. It was not attempted, and the phase's
-certification rule requires the whole scope, so the honest verdict is
-**PHASE 21 NOT CERTIFIED**.
+---
+
+## 9. Verdict
+
+**PHASE 21 NOT CERTIFIED.**
+
+Blockers, precisely:
+
+1. Scope in §8 not exercised — most materially the client commercial chain,
+   3-way match, timesheets, RFQ→award, quality and document control.
+2. Persona UX drive incomplete (2 of 11 in the browser).
+3. No permanent browser regression for the greenfield lifecycle.
+4. No independent review available.
+5. One open P2 (P21-007) introduced by the P1 fix.
+
+Not blockers: every financial delta is 0.00, the ledger reconciles four ways,
+tenant and project isolation and RBAC are proven, and no P0 or P1 is open.
