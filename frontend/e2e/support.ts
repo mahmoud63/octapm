@@ -80,7 +80,23 @@ export async function apiClient(): Promise<APIRequestContext> {
  * `signIn`; this only covers the out-of-band client used to check backend
  * state.
  */
-const tokenCache = new Map<string, Promise<string>>()
+const tokenCache = new Map<string, { minted: number; token: Promise<string> }>()
+
+/**
+ * How long a cached token may be reused.
+ *
+ * Access tokens live 15 minutes (`JWT_EXPIRY`, default `15 * 60`). A full
+ * browser suite takes 16 to 25, so a token minted at the start is expired
+ * before the end — which is exactly what happened: every isolated run passed
+ * and every full run failed once, in a different spec each time, with the 401
+ * swallowed by `apiGet` and surfacing as "project not visible" or "cannot
+ * read properties of undefined" (OCTA-QA-FIXTURE-114).
+ *
+ * Ten minutes keeps almost all of the saving — a 25-minute run mints three
+ * tokens per persona instead of the seventy-nine it started with — while never
+ * handing out one that is about to expire.
+ */
+const TOKEN_TTL_MS = 10 * 60_000
 
 /** A bearer token obtained out-of-band, for asserting on backend state. */
 export async function apiToken(
@@ -88,7 +104,7 @@ export async function apiToken(
   who: keyof typeof PEOPLE = 'pm',
 ): Promise<string> {
   const cached = tokenCache.get(who)
-  if (cached) return cached
+  if (cached && Date.now() - cached.minted < TOKEN_TTL_MS) return cached.token
 
   const fresh = (async () => {
     const response = await client.post(`${API}/auth/login`, {
@@ -108,7 +124,7 @@ export async function apiToken(
     throw error
   })
 
-  tokenCache.set(who, fresh)
+  tokenCache.set(who, { minted: Date.now(), token: fresh })
   return fresh
 }
 
