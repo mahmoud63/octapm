@@ -6,12 +6,18 @@
  * first test here.
  */
 
+const { referenceCounterMock } = require("./helpers/reference-counter-mock");
+
 const mockPrisma = {
+  // The receipt number is drawn from the atomic counter, which is two raw
+  // queries this fake has no tables for (Phase 20.6). The helper also answers
+  // the `FOR UPDATE` lock this service takes over the lines it is about to
+  // change: anything that is not the counter statement comes back empty,
+  // which is what a lock returns.
+  ...referenceCounterMock(),
   procurementOrder: { findFirst: jest.fn(), findMany: jest.fn(), update: jest.fn() },
   procurementPoLine: { findMany: jest.fn(), update: jest.fn() },
-  // findFirst backs both the duplicate-delivery-note check and the next
-  // receipt number, which reads the highest already issued rather than
-  // counting rows.
+  // findFirst backs the duplicate-delivery-note check.
   deliveryReceipt: { create: jest.fn(), count: jest.fn(), findFirst: jest.fn() },
   deliveryReceiptLine: { create: jest.fn() },
   directCost: { findFirst: jest.fn() },
@@ -22,10 +28,6 @@ const mockPrisma = {
   activityMaterial: { update: jest.fn() },
   // Read at the end so the receipt can report how much is now in the shed.
   stockBalance: { findMany: jest.fn(async () => []) },
-  // The receipt locks the lines it is about to change, so two lorries at the
-  // gate cannot both read the same starting figure. The lock returns nothing;
-  // what matters is that it is taken.
-  $queryRaw: jest.fn(async () => []),
   $transaction: (fn) => fn(mockPrisma),
 };
 

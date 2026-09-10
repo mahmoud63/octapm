@@ -19,6 +19,7 @@ import {
   listLocations,
   listWarehouses,
   postGoodsReceipt,
+  type GoodsReceiptResult,
   type PurchaseOrder,
 } from '../data/api'
 import { CodeScanner } from './code-scanner'
@@ -65,27 +66,11 @@ const blankEntries = (order: PurchaseOrder): Record<string, LineEntry> =>
  *   There is one receipt screen and one writer behind it; which module you came
  *   from should not change what you have to type.
  */
-/** What a posted delivery did, as the goods-receipt service reports it. */
-type ReceiptResult = {
-  receiptId: string
-  receiptNumber: string
-  movements: number
-  warehouse: { id: string; name: string | null } | null
-  order: { id: string; ref: string; status: string; fullyReceived: boolean } | null
-  lines: Array<{
-    poLineId: string
-    description: string | null
-    unit: string | null
-    itemSku: string | null
-    orderedQty: number
-    acceptedQty: number
-    rejectedQty: number
-    receivedQty: number
-    remainingQty: number
-    onHand: number
-    status: string
-  }>
-}
+/**
+ * What a posted delivery did, as the goods-receipt service reports it. The
+ * shape lives beside the API client so the two cannot drift apart again.
+ */
+type ReceiptResult = GoodsReceiptResult
 
 export function GoodsReceiptPanel({ initialOrderRef }: { initialOrderRef?: string | null } = {}) {
   const queryClient = useQueryClient()

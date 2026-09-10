@@ -1,5 +1,6 @@
 const { prisma } = require("../config/db");
 const { HttpError } = require("../utils/http-error");
+const { nextRef } = require("../utils/reference-number");
 const inventory = require("./inventory.service");
 const procurement = require("./procurement.service");
 
@@ -251,34 +252,36 @@ const resolveItemsForReceipt = async ({ orgId, user, order, lines }) => {
  * not the delivery.
  */
 
-const RECEIPT_PREFIX = "GRN-";
 
 /**
  * The next delivery-note number for a project.
  *
- * Reads the highest number already issued rather than counting rows: counting
- * gives two people receiving at the same moment the same answer, and rows that
- * are later removed make the count go backwards onto numbers already used. The
- * unique index on (projectId, receiptNumber) remains the real guarantee — this
- * only stops it firing in ordinary use.
+ * This used to read `MAX(receiptNumber) + 1` and say so: "the unique index on
+ * (projectId, receiptNumber) remains the real guarantee — this only stops it
+ * firing in ordinary use." Two people receiving at the same moment read the
+ * same maximum, both compute the same number, and the second loses on that
+ * index with an HTTP 500. Phase 20.5 removed that pattern from 34 registers
+ * but missed this one and the purchase-order ref, because both are written in
+ * raw SQL rather than the `count + 1` / `_max: { number }` shapes the audit
+ * grepped for (Phase 20.6).
+ *
+ * The counter behind `nextRef` is advanced by a single atomic statement, so
+ * the number is unique before the index is ever consulted. Seeding, and which
+ * references count towards it, are unchanged: only `GRN-` followed by digits
+ * seeds the sequence, because delivery notes arrive with the supplier's own
+ * numbering and plenty of them begin "GRN-" without being GRN-00001 — sorted
+ * as text, "GRN-x5xm3-A" came top, parsed to nothing, and the next number came
+ * out as GRN-00001, which was already taken.
  */
-const GENERATED_RECEIPT_PATTERN = "^GRN-[0-9]+$";
-
-const nextReceiptNumber = async (tx, projectId) => {
-  // Only the numbers this function generates can be counted. Delivery notes
-  // arrive with the supplier's own numbering, and plenty of them begin "GRN-"
-  // without being GRN-00001 — sorted as text, "GRN-x5xm3-A" came top, parsed to
-  // nothing, and the next number came out as GRN-00001, which was already
-  // taken. Every auto-numbered receipt on such a project then failed.
-  const [row] = await tx.$queryRaw`
-    SELECT MAX(SUBSTRING("receiptNumber" FROM ${RECEIPT_PREFIX.length + 1}::int)::int) AS highest
-    FROM "DeliveryReceipt"
-    WHERE "projectId" = ${projectId}
-      AND "receiptNumber" ~ ${GENERATED_RECEIPT_PATTERN}
-  `;
-  const highest = Number(row?.highest) || 0;
-  return `${RECEIPT_PREFIX}${String(highest + 1).padStart(5, "0")}`;
-};
+const nextReceiptNumber = async (tx, projectId) =>
+  nextRef(tx, {
+    table: "DeliveryReceipt",
+    column: "receiptNumber",
+    scopeColumn: "projectId",
+    scopeId: projectId,
+    prefix: "GRN",
+    pad: 5,
+  });
 
 const RECEIVABLE_STATUSES = new Set(["issued", "acknowledged", "partial", "received"]);
 
@@ -821,6 +824,9 @@ module.exports = {
   PRICE_TOLERANCE,
   QTY_EPSILON,
   findPurchaseOrder,
+  // Exported so the concurrency property can be tested directly rather than
+  // inferred from a delivery posting (Phase 20.6).
+  nextReceiptNumber,
   listOrders,
   matchInvoice,
   matchLine,

@@ -72,8 +72,18 @@ const referenceCounterMock = ({ highest = 0 } = {}) => {
     /**
      * The counter upsert, called as a tagged template with (scope, seed).
      * First use takes the seed; later ones advance.
+     *
+     * Answers **only** the counter statement. `$queryRaw` is not this helper's
+     * alone — the goods-receipt suite also uses it for the `FOR UPDATE` lock a
+     * delivery takes over the lines it is about to change — so anything that
+     * is not the counter falls through to an empty result, which is what a
+     * lock returns. Without this the double would answer a statement it knows
+     * nothing about and hand back a counter row (Phase 20.6).
      */
-    async $queryRaw(_strings, ...values) {
+    async $queryRaw(strings, ...values) {
+      const sql = Array.isArray(strings) ? strings.join("?") : String(strings ?? "");
+      if (!sql.includes("ReferenceCounter")) return [];
+
       const [scope, seed] = values;
       const next = counters.has(scope) ? counters.get(scope) + 1 : Number(seed) || 1;
       counters.set(scope, next);

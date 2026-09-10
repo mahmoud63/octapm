@@ -343,10 +343,46 @@ export type GoodsReceiptPayload = {
   }>
 }
 
+/**
+ * What posting a delivery gives back: the receipt itself, plus enough of the
+ * warehouse, the order and each line for the screen to show what arrived
+ * without a second round trip.
+ *
+ * Declared here rather than beside the component, because it was declared in
+ * both places and the two drifted — the client's copy still stopped at
+ * `movements` after the server had grown the rest, which made `tsc -b` fail
+ * while the running app was fine (Phase 20.6).
+ */
+export type GoodsReceiptResult = {
+  receiptId: string
+  receiptNumber: string
+  movements: number
+  warehouse: { id: string; name: string | null } | null
+  order: {
+    id: string
+    ref: string
+    status: string
+    fullyReceived: boolean
+  } | null
+  lines: Array<{
+    poLineId: string
+    description: string | null
+    unit: string | null
+    itemSku: string | null
+    orderedQty: number
+    acceptedQty: number
+    rejectedQty: number
+    receivedQty: number
+    remainingQty: number
+    onHand: number
+    status: string
+  }>
+}
+
 export const postGoodsReceipt = (payload: GoodsReceiptPayload) =>
   apiClient
     .post(`${BASE}/goods-receipt`, payload)
-    .then(unwrap<{ receiptId: string; receiptNumber: string; movements: number }>)
+    .then(unwrap<GoodsReceiptResult>)
 
 // --- three-way match ------------------------------------------------------
 

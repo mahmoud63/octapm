@@ -1,5 +1,6 @@
 const { prisma } = require('../config/db');
 const { HttpError } = require('../utils/http-error');
+const { nextRef } = require('../utils/reference-number');
 const {
   ACTIONS,
   ENTITY_TYPES,
@@ -850,20 +851,29 @@ const startingStatus = (requested) => {
  *
  * Only generated references are counted, so a hand-typed "PO-STEEL-REV2"
  * cannot push the sequence somewhere strange.
+ *
+ * This read `MAX(ref) + 1` until Phase 20.6. Two buyers raising an order in
+ * the same moment read the same maximum and computed the same reference, and
+ * the second lost on the unique index on (projectId, ref) with an HTTP 500 —
+ * which is the collision the docstring above says the generator exists to
+ * prevent. Phase 20.5 moved 34 registers off that pattern but missed this one,
+ * because it is written in raw SQL rather than the `count + 1` /
+ * `_max: { number }` shapes the audit grepped for.
+ *
+ * `nextRef` advances a counter row in one atomic statement, so the reference
+ * is unique before the index is consulted. Seeding is unchanged: only "PO-"
+ * followed by digits counts, so a hand-typed "PO-STEEL-REV2" still cannot push
+ * the sequence somewhere strange.
  */
-const ORDER_PREFIX = 'PO-';
-const GENERATED_ORDER_PATTERN = ['^PO-[0-9]+', '$'].join('');
-
-const nextOrderRef = async (tx, projectId) => {
-  const [row] = await tx.$queryRaw`
-    SELECT MAX(SUBSTRING("ref" FROM ${ORDER_PREFIX.length + 1}::int)::int) AS highest
-    FROM "ProcurementOrder"
-    WHERE "projectId" = ${projectId}
-      AND "ref" ~ ${GENERATED_ORDER_PATTERN}
-  `;
-  const highest = Number(row?.highest) || 0;
-  return `${ORDER_PREFIX}${String(highest + 1).padStart(5, '0')}`;
-};
+const nextOrderRef = async (tx, projectId) =>
+  nextRef(tx, {
+    table: 'ProcurementOrder',
+    column: 'ref',
+    scopeColumn: 'projectId',
+    scopeId: projectId,
+    prefix: 'PO',
+    pad: 5,
+  });
 
 /**
  * Raise the order for what was awarded.
@@ -1608,6 +1618,9 @@ module.exports = {
   requestQuotes,
   listQuotes,
   ACTIVITY_SELECT,
+  // Exported so the concurrency property can be tested directly rather than
+  // inferred from raising an order (Phase 20.6).
+  nextOrderRef,
   acknowledgeLeadTimeAlert,
   buildMaterialRiskRow,
   buildPackageRiskRow,
