@@ -128,10 +128,30 @@ export async function openProject(page: Page, name = 'Riverside Tower') {
   const client = await apiClient()
   try {
     const token = await apiToken(client)
-    const { body } = await apiGet(client, '/projects', token)
-    const project = (body?.data?.items || []).find((p: { name: string }) => p.name === name)
-    expect(project, `project "${name}" not visible`).toBeTruthy()
-    return project.id as string
+    // Report what the request actually did. `apiGet` returns `body: null` for
+    // any non-2xx, so a transient 500 used to arrive here as an empty list and
+    // fail with 'project "Riverside Tower" not visible' — which reads as a
+    // missing fixture and sent an investigation looking at pagination and the
+    // rate limiter, when the project was there all along
+    // (OCTA-QA-FIXTURE-114).
+    const response = await client.get(`${API}/projects`, {
+      headers: { authorization: `Bearer ${token}` },
+    })
+    const body = await response.json().catch(() => null)
+    expect(
+      response.ok(),
+      `listing projects to find "${name}" -> ${response.status()} ` +
+        `${body?.error?.code ?? ''} ${body?.error?.message ?? ''}`,
+    ).toBeTruthy()
+
+    const items = (body?.data?.items || []) as Array<{ id: string; name: string }>
+    const project = items.find((p) => p.name === name)
+    expect(
+      project,
+      `project "${name}" not among the ${items.length} the API returned: ` +
+        items.map((p) => p.name).join(', '),
+    ).toBeTruthy()
+    return project!.id
   } finally {
     await client.dispose()
   }
