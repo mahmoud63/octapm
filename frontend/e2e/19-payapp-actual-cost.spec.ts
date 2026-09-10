@@ -49,8 +49,27 @@ async function send(
   })
 }
 
+/**
+ * A read that says what went wrong.
+ *
+ * `apiGet` returns `body: null` for any non-2xx, so this used to hand back
+ * `undefined` and the failure surfaced three lines later as "cannot read
+ * properties of undefined", naming a field instead of a status. That turned a
+ * diagnosable failure into a mystery twice in one session
+ * (OCTA-QA-FIXTURE-114).
+ */
 const read = async (path: string) =>
-  withApi(async (client, token) => (await apiGet(client, path, token)).body?.data)
+  withApi(async (client, token) => {
+    const response = await client.get(`${API}${path}`, {
+      headers: { authorization: `Bearer ${token}` },
+    })
+    const body = await response.json().catch(() => null)
+    expect(
+      response.ok(),
+      `GET ${path} -> ${response.status()} ${body?.error?.code ?? ''} ${body?.error?.message ?? ''}`,
+    ).toBeTruthy()
+    return body?.data
+  })
 
 /** Actual cost, from the ledger — not from any figure a page rendered. */
 const ledger = async (projectId: string) =>
