@@ -2,7 +2,7 @@
 
 **Phase 20.5** · **Written:** 2026-09-09
 **Cards:** OCTA-API-REFNUM-111 · OCTA-QA-POOL-112 · OCTA-QA-AUTHLIMIT-113
-**Status:** both approved P1s closed. See §7.
+**Status:** both approved P1s closed. See §8.
 
 Phase 20.5 was scoped to close the two P1s that could invalidate a full-system
 simulation: unsafe reference numbering, and the inability to put a team on a
@@ -134,7 +134,7 @@ was not raised; nothing about PostgreSQL's configuration was touched.
 | state | idle connections |
 | --- | --- |
 | baseline, only the API and web running | **34** |
-| peak during a full Jest run | **~56 of 100** |
+| peak during a full Jest run | **50–56 of 100**, across runs |
 | after the run | back to baseline |
 
 Four real-database suites were walking away from their pools. They now
@@ -184,17 +184,65 @@ sets `RATE_LIMIT_AUTH_WINDOW_MS=60000`, so the budget refreshes during a run.
 
 ---
 
-## 6. Gates
+## 6. The failure that was never the same twice
+
+Full regressions kept failing one test — a different test each time, with a
+different-looking message. *"project Riverside Tower not visible."* *"Cannot
+read properties of undefined (reading 'ledger')."* A pay application with no
+lines. Every one of those specs passed on its own, immediately afterwards.
+
+Four causes were investigated and eliminated in turn: cursor pagination, the
+subscription plan's project allowance, the rate limiter, and OneDrive holding
+a screenshot open. Each was a real defect, each was fixed, and none of them
+was this.
+
+The cause was the token cache added during the Phase 20 clean-up, which held
+one access token per persona for the lifetime of the worker.
+
+```
+access token lifetime (JWT_EXPIRY)   15 minutes
+a full regression                    16–25 minutes
+```
+
+Past the fifteen-minute mark every cached request came back `401
+TOKEN_EXPIRED` — and `apiGet` returns `body: null` for any non-2xx, so the
+401 reached the assertion as an empty list or an undefined object. The symptom
+landed on whichever spec happened to be running at the time. That is why it
+moved, and why an isolated re-run always passed: a fresh worker mints a fresh
+token.
+
+It was found by making one helper say what it actually saw:
+
+```
+listing projects to find "Riverside Tower" -> 401 TOKEN_EXPIRED
+```
+
+The fix is a ten-minute TTL on the cache, so a cached token is thrown away
+while it is still valid. Not a retry, and not a longer-lived token: a harness
+carrying an expired credential should notice, and production token lifetimes
+are not a test's business.
+
+**Recorded because it cost four investigations:** silent error handling in test
+infrastructure is where both false-green and false-red come from. Four
+instances turned up in this phase alone — `.catch(() => {})` over a 404, a
+skip-if-missing over a mistyped model name, `body?.data` swallowing a status,
+and `openProject` reporting "not visible" for a request that never succeeded.
+Every one of them converted a diagnosable failure into a mystery.
+
+---
+
+## 7. Gates
 
 | gate | result |
 | --- | --- |
-| Jest | **1,898 / 1,898** across 175 suites (three consecutive clean runs) |
+| Jest | **1,898 / 1,898** across 175 suites, in 94 s |
 | OpenAPI | **733 documented paths** |
-| Playwright | **144 / 144** |
+| Playwright | **144 / 144**, in 16.6 min, `retries: 0` |
 | Console gate | 0 OctaPM errors · 0 OctaPM warnings |
 | User smoke | 14 modules · 14 ✅ · 0 🟡 · 0 🔴 |
 | 429s during the run | **0** |
 | API restarts during the run | **0** |
+| 5xx during the run | **0** |
 
 `retries: 0` throughout. No test was weakened, skipped or re-scoped. The one
 assertion that changed — the bid numbering test — was **corrected, not
@@ -213,7 +261,7 @@ everything issued, colliding with nothing).
 
 ---
 
-## 7. Project team assignment — closed
+## 8. Project team assignment — closed
 
 OctaPM could tell somebody *"assign the user to the project before setting a
 permission template"* and then offer no way to do it. The only route onto a
@@ -289,7 +337,7 @@ button is not rendered for them at all. Every add, role change and removal is
 written to the auth audit log with the actor, the project, the email and the
 role.
 
-## 8. Still P2
+## 9. Still P2
 
 - **Match picker** lists `take: 100` purchase orders with no paging or search,
   so on a project with more than a hundred the older ones are unreachable from
@@ -300,7 +348,7 @@ role.
 
 ---
 
-## 9. An environment hazard worth naming: OneDrive
+## 10. An environment hazard worth naming: OneDrive
 
 This worktree lives under `OneDrive - Louisiana State University`. One full
 regression lost a test to it:
