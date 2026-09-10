@@ -202,6 +202,64 @@ const serializeRevision = (revision, extra = {}) => ({
   ...extra,
 });
 
+/**
+ * The schedule of a project that was planned here, one activity at a time.
+ *
+ * A ScheduleRevision is written by a P6/MSP import or an AI generation and by
+ * nothing else — `POST /projects/:id/activities` does not create one. So a
+ * project planned inside OctaPM had activities with their CPM computed and
+ * stored, and no revision, and `getProjectSchedule` answered `null`: the Gantt
+ * and the critical path fell back to the upload prompt, the module bar read
+ * "Activities (0)", the cost dashboard did not render, and site reporting was
+ * handed an empty list (OCTA-SCHED-GREENFIELD-121).
+ *
+ * A revision records where a schedule came from. What is on the programme is
+ * the activities, so when there is no revision to read, the summary is derived
+ * from them. Counts are computed rather than remembered, which is what those
+ * numbers mean; an imported revision keeps the totals its import recorded.
+ */
+const buildInProductRevision = ({ project, activities }) => {
+  const critical = activities.filter(
+    (activity) => activity.isCritical || Number(activity.totalFloat) === 0,
+  );
+  const milestones = activities.filter((activity) => activity.isMilestone);
+
+  return {
+    // No stored row, so nothing for an audit trail to point at.
+    id: null,
+    projectId: project.id,
+    label: "Planned in OctaPM",
+    activityCount: activities.length,
+    criticalCount: critical.length,
+    totalBudget: null,
+    source: "in_product",
+    isActive: true,
+    status: REVISION_STATUS.APPROVED,
+    statusTransitionLog: [],
+    createdAt: project.createdAt ?? null,
+    snapshotJson: {
+      projectSummary: {
+        startDate: project.startDate ?? null,
+        endDate: project.endDate ?? null,
+        dataDate: project.dataDate ?? null,
+      },
+      criticalPath: critical.map((activity) => activity.activityCode || activity.id),
+      milestones: milestones.map((activity) => ({
+        activityId: activity.id,
+        activityCode: activity.activityCode || null,
+        name: activity.name,
+        date: activity.earlyFinishDate ?? activity.endDate ?? null,
+      })),
+      // Import artefacts. A schedule planned here has none of them yet.
+      risks: [],
+      wbs: [],
+      resourceSummary: [],
+      longLeadItems: [],
+      assumptions: [],
+    },
+  };
+};
+
 const buildPlannedDateFields = (activity, project) => {
   if (!project?.startDate) {
     return {
@@ -2167,11 +2225,9 @@ const getProjectSchedule = async ({ orgId, projectId }) => {
   if (!project)
     throw new HttpError(404, "PROJECT_NOT_FOUND", "Project not found");
 
-  const revision =
+  const storedRevision =
     (await getActiveRevision(projectId)) ||
     (await getLatestRevision(projectId));
-
-  if (!revision) return null;
 
   const [activities, allocationTotals, allocationSummary] = await Promise.all([
     prisma.activity.findMany({
@@ -2238,6 +2294,12 @@ const getProjectSchedule = async ({ orgId, projectId }) => {
     getApprovedActivityAllocationTotals({ projectId }),
     buildAllocationSummary({ projectId }),
   ]);
+
+  // Nothing imported, nothing generated and nothing planned: there is no
+  // schedule to report. With activities present, the summary comes from them.
+  if (!storedRevision && activities.length === 0) return null;
+
+  const revision = storedRevision || buildInProductRevision({ project, activities });
 
   const snap = revision.snapshotJson || {};
 
