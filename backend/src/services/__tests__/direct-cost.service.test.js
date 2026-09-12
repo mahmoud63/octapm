@@ -345,3 +345,66 @@ describe("Phase 21D — integrity (Codex round 2)", () => {
     lock.mockRestore();
   });
 });
+
+describe("Phase 21D — integrity (Codex round 3)", () => {
+  beforeEach(() => {
+    reset();
+    store.poLines = [
+      { id: "pol-stock", orderId: "po-1", projectId: "p1", inventoryItemId: "item-1", receivedQty: 100 },
+      { id: "pol-b", orderId: "po-2", projectId: "p1", inventoryItemId: "item-9", receivedQty: 100 },
+    ];
+    mockPrisma.procurementOrder = { findFirst: jest.fn(async ({ where }) => ({ id: where.id })) };
+  });
+
+  const draft = (over = {}) =>
+    service.createDirectCost({ ...scope, actor, payload: { type: "invoice", vendorCompanyId: "co-1", invoiceNumber: "INV-203", description: "Cement", costDate: "2026-09-01", lines: [
+      { description: "Cement, stocked, order A", costCodeId: "cc-conc", activityId: "act-1", poLineId: "pol-stock", amount: 4000 },
+    ], ...over } });
+
+  it("CX21-203: a header-only edit reads the lines under the lock, so a replacement that landed first is what it checks", async () => {
+    const cost = await draft();
+    // While this header-only change waited for the lock, another edit replaced
+    // the lines with order B's stocked line.
+    const lock = jest.spyOn(mockPrisma, "$queryRaw").mockImplementation(async (strings) => {
+      if (strings.join("?").includes('FROM "DirectCost"')) {
+        store.lines = store.lines.filter((row) => row.directCostId !== cost.id);
+        store.lines.push({ id: "line-b", directCostId: cost.id, orgId: "org-1", projectId: "p1", description: "order B's line", costCodeId: "cc-conc", activityId: "act-1", poLineId: "pol-b", costType: "material", amount: 500, sortOrder: 0 });
+      }
+      return [];
+    });
+    await expect(service.updateDirectCost({ ...scope, actor, directCostId: cost.id, payload: { purchaseOrderId: "po-1" } })).rejects.toMatchObject({ code: "DIRECT_COST_LINE_PO_LINE" });
+    lock.mockRestore();
+    expect(store.costs.find((row) => row.id === cost.id).purchaseOrderId ?? null).toBeNull();
+  });
+
+  it("CX21-204: a return that started while the invoice was pending refuses once it has been approved under the lock", async () => {
+    const cost = await draft({ invoiceNumber: "INV-204a" });
+    await service.submitDirectCost({ ...scope, actor, directCostId: cost.id });
+    const lock = jest.spyOn(mockPrisma, "$queryRaw").mockImplementation(async (strings) => {
+      if (strings.join("?").includes('FROM "DirectCost"')) store.costs.find((row) => row.id === cost.id).status = "approved";
+      return [];
+    });
+    await expect(service.rejectDirectCost({ ...scope, actor, directCostId: cost.id, payload: { reason: "wrong vendor" } })).rejects.toMatchObject({ code: "DIRECT_COST_NOT_PENDING" });
+    lock.mockRestore();
+    expect(store.costs.find((row) => row.id === cost.id).status).toBe("approved");
+  });
+
+  it("CX21-204: a submit and an approve each refuse when the status moved under the lock", async () => {
+    const cost = await draft({ invoiceNumber: "INV-204b" });
+    let lock = jest.spyOn(mockPrisma, "$queryRaw").mockImplementation(async (strings) => {
+      if (strings.join("?").includes('FROM "DirectCost"')) store.costs.find((row) => row.id === cost.id).status = "void";
+      return [];
+    });
+    await expect(service.submitDirectCost({ ...scope, actor, directCostId: cost.id })).rejects.toMatchObject({ code: "DIRECT_COST_NOT_DRAFT" });
+    lock.mockRestore();
+    store.costs.find((row) => row.id === cost.id).status = "draft";
+    await service.submitDirectCost({ ...scope, actor, directCostId: cost.id });
+    lock = jest.spyOn(mockPrisma, "$queryRaw").mockImplementation(async (strings) => {
+      if (strings.join("?").includes('FROM "DirectCost"')) store.costs.find((row) => row.id === cost.id).status = "draft";
+      return [];
+    });
+    await expect(service.approveDirectCost({ ...scope, actor, directCostId: cost.id })).rejects.toMatchObject({ code: "DIRECT_COST_NOT_PENDING" });
+    lock.mockRestore();
+    expect(mockLedger.total()).toBe(0);
+  });
+});

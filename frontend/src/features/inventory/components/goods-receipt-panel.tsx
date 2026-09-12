@@ -108,11 +108,12 @@ export function GoodsReceiptPanel({ initialOrderRef }: { initialOrderRef?: strin
   // had typed it.
   const requestedRef = initialOrderRef ?? null
   const [lookedUpRef, setLookedUpRef] = useState<string | null>(null)
+  const { mutate: lookUp } = lookup
   useEffect(() => {
     if (!requestedRef || lookedUpRef === requestedRef) return
     setLookedUpRef(requestedRef)
-    lookup.mutate(requestedRef)
-  }, [requestedRef, lookedUpRef, lookup])
+    lookUp(requestedRef)
+  }, [requestedRef, lookedUpRef, lookUp])
 
   const post = useMutation({
     mutationFn: () => {

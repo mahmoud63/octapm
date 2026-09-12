@@ -429,3 +429,14 @@ describe("Phase 21D — integrity (Codex round 2)", () => {
     expect(mockPrisma.subPayApp.update).not.toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ status: "draft" }) }));
   });
 });
+
+describe("Phase 21D — integrity (Codex round 3)", () => {
+  it("CX21-204: a rejection that started on a submitted application refuses once it is approved under the lock", async () => {
+    mockPrisma.subPayApp.findFirst
+      .mockResolvedValueOnce(payApp({ status: "submitted", netThisPeriod: 27000 }))
+      .mockResolvedValueOnce(payApp({ status: "approved", netThisPeriod: 27000 }));
+    mockPrisma.subPayApp.update.mockClear();
+    await expect(service.rejectPayApp({ orgId: "org-1", projectId: "project-1", payAppId: "pa-1", actor: { id: "qs" }, code: "measurement", reason: "measured wrong" })).rejects.toMatchObject({ code: "SUB_PAY_APP_TRANSITION_INVALID" });
+    expect(mockPrisma.subPayApp.update).not.toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ status: "rejected" }) }));
+  });
+});

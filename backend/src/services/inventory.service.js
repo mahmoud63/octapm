@@ -483,6 +483,19 @@ const createLocation = async ({ orgId, user, warehouseId, payload }) => {
 // ─── the ledger ────────────────────────────────────────────────────────────
 
 /**
+ * Every stock movement holds its item for the whole transaction (postMovement
+ * takes the lock itself, first). An operation that moves several items takes
+ * them all up front, in id order, so two multi-item operations cannot wait on
+ * each other in opposite orders (Phase 21D). NO KEY UPDATE does not conflict
+ * with the KEY SHARE a balance insert takes on the item.
+ */
+const lockItems = async (tx, itemIds) => {
+  for (const id of [...new Set((itemIds || []).filter(Boolean))].sort()) {
+    await tx.$queryRaw`SELECT id FROM "InventoryItem" WHERE id = ${id} FOR NO KEY UPDATE`;
+  }
+};
+
+/**
  * Posts one movement: writes the transaction and moves the balance with it.
  *
  * Always called inside a database transaction, so a balance is never updated
@@ -497,17 +510,17 @@ const postMovement = async (tx, { orgId, item, warehouseId, locationId = null, t
     throw new HttpError(400, "INV_QUANTITY", "Quantity must not be zero");
   }
 
-  // The price a movement is costed at is read from the item row now, not from
-  // the object the caller loaded before the transaction began: a receipt that
-  // waited for another receipt's lock must blend against the average that
-  // receipt left behind (Phase 21D, CX21-101). A costed receipt takes the lock
-  // BEFORE the balance row exists — the balance insert takes a KEY SHARE on
-  // the item, and two first receipts that each held one and then asked for
-  // the item lock deadlocked. NO KEY UPDATE does not conflict with KEY SHARE.
+  // The price a movement is costed at is read from the item row under the
+  // item's lock, not from the object the caller loaded before the transaction
+  // began: a receipt that waited for another receipt's lock blends against
+  // the average that receipt left behind (CX21-101), and an issue that waited
+  // for a receipt leaves at the average the receipt made, so stock plus
+  // consumption always adds up to what was bought (CX21-201). Every movement
+  // takes this lock, before the balance row exists — the balance insert takes
+  // a KEY SHARE on the item, which NO KEY UPDATE does not conflict with, so
+  // two first receipts into different stores cannot deadlock (Phase 21D).
   const costed = Boolean(rule.costs && unitCost != null);
-  const [freshItem] = costed
-    ? await tx.$queryRaw`SELECT "averageCost" FROM "InventoryItem" WHERE id = ${item.id} FOR NO KEY UPDATE`
-    : await tx.$queryRaw`SELECT "averageCost" FROM "InventoryItem" WHERE id = ${item.id}`;
+  const [freshItem] = await tx.$queryRaw`SELECT "averageCost" FROM "InventoryItem" WHERE id = ${item.id} FOR NO KEY UPDATE`;
   const itemAverage = freshItem && freshItem.averageCost != null ? Number(freshItem.averageCost) : Number(item.averageCost ?? 0);
 
   const balance =
@@ -739,10 +752,12 @@ const drawFromWarehouse = async (
     return [row];
   }
 
-  // The bins are locked before they are read, so the split decided here is
+  // The item is held before its bins are read, so the split decided here is
   // the split that is posted: a concurrent draw waits, then sees what is left
-  // rather than failing on a bin that was emptied under it (Phase 21D).
-  await tx.$queryRaw`SELECT id FROM "StockBalance" WHERE "itemId" = ${item.id} AND "warehouseId" = ${warehouseId} FOR NO KEY UPDATE`;
+  // rather than failing on a bin that was emptied under it — and a bin that
+  // did not exist when this read ran cannot appear meanwhile, because bins
+  // are only created under the same item lock (Phase 21D, CX21-202).
+  await lockItems(tx, [item.id]);
   const balances = await tx.stockBalance.findMany({
     where: { itemId: item.id, warehouseId },
     orderBy: [{ onHand: "desc" }],
@@ -997,10 +1012,12 @@ const adjustReservation = async ({ orgId, user, payload }) => {
     // spreads the claim across bins the same way an issue draws from them,
     // fullest first, so a warehouse-level reservation actually holds warehouse
     // stock rather than a phantom balance with nothing in it.
-    // A reservation is a claim on what is on hand; the balances it claims
-    // against are locked before they are read so an issue committed meanwhile
-    // is seen, not overwritten (Phase 21D, CX21-105).
-    await tx.$queryRaw`SELECT id FROM "StockBalance" WHERE "itemId" = ${item.id} AND "warehouseId" = ${payload.warehouseId} FOR NO KEY UPDATE`;
+    // A reservation is a claim on what is on hand: the item is held before
+    // its balances are read, so an issue committed meanwhile is seen, not
+    // overwritten, and no bin can appear between the lock and the read
+    // (Phase 21D, CX21-105 / CX21-202). Holding the item — one row — rather
+    // than the bins also cannot wait on a receipt in the opposite order.
+    await lockItems(tx, [item.id]);
     const balances = payload.locationId
       ? await tx.stockBalance.findMany({
           where: { itemId: item.id, warehouseId: payload.warehouseId, locationId: payload.locationId },
@@ -1245,6 +1262,10 @@ const createTransfer = async ({ orgId, user, payload }) => {
 /** Stock leaves the source and is in transit until someone receives it. */
 const dispatchTransfer = async ({ orgId, user, transferId }) => {
   return prisma.$transaction(async (tx) => {
+    // Locked before it is read: the second of two concurrent dispatches or
+    // receipts waits, then sees the status the first one wrote (Phase 21D,
+    // CX21-206).
+    await tx.$queryRaw`SELECT id FROM "StockTransfer" WHERE id = ${transferId} FOR UPDATE`;
     const transfer = await tx.stockTransfer.findFirst({
       where: { id: transferId, orgId },
       include: { lines: true },
@@ -1253,6 +1274,7 @@ const dispatchTransfer = async ({ orgId, user, transferId }) => {
     if (transfer.status !== "draft") {
       throw new HttpError(409, "TRANSFER_STATE", `A ${transfer.status} transfer cannot be dispatched`);
     }
+    await lockItems(tx, transfer.lines.map((line) => line.itemId));
 
     for (const line of transfer.lines) {
       const item = await tx.inventoryItem.findFirst({ where: { id: line.itemId, orgId } });
@@ -1286,6 +1308,10 @@ const receiveTransfer = async ({ orgId, user, transferId, payload = {} }) => {
   );
 
   return prisma.$transaction(async (tx) => {
+    // Locked before it is read: the second of two concurrent dispatches or
+    // receipts waits, then sees the status the first one wrote (Phase 21D,
+    // CX21-206).
+    await tx.$queryRaw`SELECT id FROM "StockTransfer" WHERE id = ${transferId} FOR UPDATE`;
     const transfer = await tx.stockTransfer.findFirst({
       where: { id: transferId, orgId },
       include: { lines: true },
@@ -1294,6 +1320,7 @@ const receiveTransfer = async ({ orgId, user, transferId, payload = {} }) => {
     if (transfer.status !== "in_transit") {
       throw new HttpError(409, "TRANSFER_STATE", `A ${transfer.status} transfer cannot be received`);
     }
+    await lockItems(tx, transfer.lines.map((line) => line.itemId));
 
     for (const line of transfer.lines) {
       const reported = received.get(line.id) ?? {};
@@ -1341,7 +1368,7 @@ const receiveTransfer = async ({ orgId, user, transferId, payload = {} }) => {
 
       // The source stops counting it as in transit once it has landed. It may
       // have left from several bins, so clear it wherever it was raised.
-      await tx.$queryRaw`SELECT id FROM "StockBalance" WHERE "itemId" = ${line.itemId} AND "warehouseId" = ${transfer.fromWarehouseId} FOR NO KEY UPDATE`;
+      await lockItems(tx, [line.itemId]);
       const sourceBalances = await tx.stockBalance.findMany({
         where: { itemId: line.itemId, warehouseId: transfer.fromWarehouseId },
       });
@@ -1452,6 +1479,7 @@ const getSummary = async ({ orgId, projectId = null }) => {
 };
 
 module.exports = {
+  lockItems,
   ITEM_STATUSES,
   LOCATION_KINDS,
   MOVEMENTS,

@@ -725,11 +725,17 @@ const transition = async ({ orgId, projectId, payAppId, to, actor = null, viewer
     });
   }
   const updated = await prisma.$transaction(async (tx) => {
+    // The application is held for the transaction, and the status the
+    // transition was decided on is checked again under the lock: a rejection
+    // that started while the application was submitted must not land on it
+    // once approved and paid (Phase 21D, CX21-204).
+    await tx.$queryRaw`SELECT id FROM "SubPayApp" WHERE id = ${payAppId} FOR UPDATE`;
+    const fresh = await tx.subPayApp.findFirst({ where: { id: payAppId }, select: { status: true } });
+    if (fresh && fresh.status !== existing.status) throw new HttpError(409, "SUB_PAY_APP_TRANSITION_INVALID", `A ${fresh.status} application cannot become ${to}`);
     if (revoking) {
       // The "nothing paid" check ran before the transaction; a payment that
       // landed since is found under the lock and stops the revocation
       // (Phase 21D, CX21-103).
-      await tx.$queryRaw`SELECT id FROM "SubPayApp" WHERE id = ${payAppId} FOR UPDATE`;
       const paidRows = await tx.subPayAppPayment.findMany({ where: { payAppId }, select: { amount: true } });
       const paidNow = round2(paidRows.reduce((sum, p) => sum + toMoneyNumber(p.amount), 0));
       if (paidNow > EPSILON) assertRevocable({ existing: { ...existing, paidAmount: paidNow, payments: [] }, to, reason });

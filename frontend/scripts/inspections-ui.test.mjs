@@ -86,18 +86,6 @@ assert.match(inspectionsModule, /initialTarget\?\.source === 'itp'/, 'source=itp
 assert.match(inspectionsModule, /legacyRecordId \? null : \(initialTarget\?\.recordId \?\? null\)/, 'an itp id never opens the instance runner')
 assert.match(inspectionsModule, /useState\(Boolean\(legacyRecordId\)\)/, 'the legacy register opens for an itp deep link')
 assert.match(read('src/features/quality/components/quality-dashboard.tsx'), /recordType='itp'[\s\S]*?initialSelectedId=\{[\s\S]*?source === 'itp'/, 'the ITP register selects the deep-linked record')
-// P21-011: an ITP deep link names a legacy ITP, not a form instance.
-const inspectionsModule = read('src/features/inspections/components/inspections-module.tsx')
-assert.match(inspectionsModule, /initialTarget\?\.source === 'itp'/, 'source=itp is recognised')
-assert.match(inspectionsModule, /legacyRecordId \? null : \(initialTarget\?\.recordId \?\? null\)/, 'an itp id never opens the instance runner')
-assert.match(inspectionsModule, /useState\(Boolean\(legacyRecordId\)\)/, 'the legacy register opens for an itp deep link')
-assert.match(read('src/features/quality/components/quality-dashboard.tsx'), /recordType='itp'[\s\S]*?initialSelectedId=\{[\s\S]*?source === 'itp'/, 'the ITP register selects the deep-linked record')
-// P21-011: an ITP deep link names a legacy ITP, not a form instance.
-const inspectionsModule = read('src/features/inspections/components/inspections-module.tsx')
-assert.match(inspectionsModule, /initialTarget\?\.source === 'itp'/, 'source=itp is recognised')
-assert.match(inspectionsModule, /legacyRecordId \? null : \(initialTarget\?\.recordId \?\? null\)/, 'an itp id never opens the instance runner')
-assert.match(inspectionsModule, /useState\(Boolean\(legacyRecordId\)\)/, 'the legacy register opens for an itp deep link')
-assert.match(read('src/features/quality/components/quality-dashboard.tsx'), /recordType='itp'[\s\S]*?initialSelectedId=\{[\s\S]*?source === 'itp'/, 'the ITP register selects the deep-linked record')
 ;['uat-inspections-module', 'uat-inspections-tab-templates', 'uat-inspections-legacy-toggle'].forEach((id) =>
   assert.ok(module_.includes(id), `module exposes ${id}`)
 )

@@ -316,28 +316,33 @@ const createDirectCost = async ({ orgId, projectId, payload = {}, actor = null }
 };
 
 const updateDirectCost = async ({ orgId, projectId, directCostId, payload = {}, actor = null }) => {
-  const existing = await load({ orgId, projectId, directCostId });
-  if (!EDITABLE.includes(existing.status)) throw new HttpError(409, "DIRECT_COST_LOCKED", `A ${existing.status} direct cost cannot be edited`);
-  const header = await normalizeHeader({ orgId, projectId, payload, existing });
-  const lines = payload.lines !== undefined ? await normalizeLines({ projectId, rows: payload.lines, purchaseOrderId: header.purchaseOrderId }) : existing.lines.map((line) => ({ ...line, amount: toNumber(line.amount) }));
-  // Moving the invoice to another order without touching its lines would keep
-  // lines that bill the old order's purchase-order lines — and a stocked line
-  // among them would still suppress this project's cost (Phase 21D, CX21-104).
-  if (payload.lines === undefined && (header.purchaseOrderId || null) !== (existing.purchaseOrderId || null)) {
-    const keptIds = uniqueIds(existing.lines.map((line) => line.poLineId));
-    if (keptIds.length) {
-      const onOrder = await prisma.procurementPoLine.findMany({
-        where: { id: { in: keptIds }, order: { projectId }, ...(header.purchaseOrderId ? { orderId: header.purchaseOrderId } : {}) },
-        select: { id: true },
-      });
-      if (onOrder.length !== keptIds.length) {
-        throw new HttpError(400, "DIRECT_COST_LINE_PO_LINE", "The invoice's lines bill purchase-order lines that are not on the order it now names; replace the lines together with the order");
+  const updated = await prisma.$transaction(async (tx) => {
+    // Everything an edit decides on is read under the invoice's lock: two
+    // edits at once — a header-only order change and a line replacement, say
+    // — are serialised, and each one's checks and totals describe the row it
+    // actually writes (Phase 21D, CX21-203).
+    await tx.$queryRaw`SELECT id FROM "DirectCost" WHERE id = ${directCostId} FOR UPDATE`;
+    const existing = await load({ orgId, projectId, directCostId, tx });
+    if (!EDITABLE.includes(existing.status)) throw new HttpError(409, "DIRECT_COST_LOCKED", `A ${existing.status} direct cost cannot be edited`);
+    const header = await normalizeHeader({ orgId, projectId, payload, existing });
+    const lines = payload.lines !== undefined ? await normalizeLines({ projectId, rows: payload.lines, purchaseOrderId: header.purchaseOrderId }) : existing.lines.map((line) => ({ ...line, amount: toNumber(line.amount) }));
+    // Moving the invoice to another order without touching its lines would keep
+    // lines that bill the old order's purchase-order lines — and a stocked line
+    // among them would still suppress this project's cost (Phase 21D, CX21-104).
+    if (payload.lines === undefined && (header.purchaseOrderId || null) !== (existing.purchaseOrderId || null)) {
+      const keptIds = uniqueIds(existing.lines.map((line) => line.poLineId));
+      if (keptIds.length) {
+        const onOrder = await prisma.procurementPoLine.findMany({
+          where: { id: { in: keptIds }, order: { projectId }, ...(header.purchaseOrderId ? { orderId: header.purchaseOrderId } : {}) },
+          select: { id: true },
+        });
+        if (onOrder.length !== keptIds.length) {
+          throw new HttpError(400, "DIRECT_COST_LINE_PO_LINE", "The invoice's lines bill purchase-order lines that are not on the order it now names; replace the lines together with the order");
+        }
       }
     }
-  }
-  await assertNoDuplicateInvoice({ projectId, vendorCompanyId: header.vendorCompanyId, vendorName: header.vendorName, invoiceNumber: header.invoiceNumber, excludeId: directCostId });
-  const totals = totalsOf(lines, header.tax);
-  const updated = await prisma.$transaction(async (tx) => {
+    await assertNoDuplicateInvoice({ projectId, vendorCompanyId: header.vendorCompanyId, vendorName: header.vendorName, invoiceNumber: header.invoiceNumber, excludeId: directCostId });
+    const totals = totalsOf(lines, header.tax);
     await tx.directCost.update({ where: { id: directCostId }, data: { ...header, ...totals, updatedBy: actor?.id || null } });
     if (payload.lines !== undefined) {
       await tx.directCostLine.deleteMany({ where: { directCostId } });
@@ -367,13 +372,28 @@ const notify = ({ orgId, projectId, row, actor, event, title, message, recipient
     .createNotifications({ orgId, projectId, actorId: actor?.id || null, recipientUserIds: uniqueIds(recipientUserIds), recipientRoles, type: "direct_cost", category: notificationService.NOTIFICATION_CATEGORIES.COMMERCIAL, event, title, message, actionUrl: recordWorkspacePath({ projectId, recordType: "direct_cost", recordId: row.id }), entityType: "direct_cost", entityId: row.id, dedupeKeyBase: `direct_cost:${row.id}:${event}:${Date.now()}`, metadata: { ref: row.ref, status: row.status, total: money(row.total) } })
     .catch(() => null);
 
+/**
+ * Holds the invoice for the transaction and refuses if its status is no longer
+ * one the caller decided on: a return that started while the invoice was
+ * pending must not land on it once approved and paid (Phase 21D, CX21-204).
+ */
+const lockExpecting = async (tx, directCostId, statuses, code, message) => {
+  await tx.$queryRaw`SELECT id FROM "DirectCost" WHERE id = ${directCostId} FOR UPDATE`;
+  const fresh = await tx.directCost.findFirst({ where: { id: directCostId }, select: { status: true } });
+  if (fresh && !statuses.includes(fresh.status)) throw new HttpError(409, code, message(fresh.status));
+  return fresh;
+};
+
 const submitDirectCost = async ({ orgId, projectId, directCostId, actor = null }) => {
   const existing = await load({ orgId, projectId, directCostId });
   if (existing.status !== STATUS.DRAFT) throw new HttpError(409, "DIRECT_COST_NOT_DRAFT", `A ${existing.status} direct cost cannot be submitted`);
   if (!existing.lines.length) throw new HttpError(400, "DIRECT_COST_EMPTY", "Add at least one line before submitting");
   const unCoded = existing.lines.filter((line) => !line.costCodeId && !line.budgetLineId);
   if (unCoded.length) throw new HttpError(400, "DIRECT_COST_LINE_COST_CODE_REQUIRED", `${unCoded.length} line${unCoded.length === 1 ? " has" : "s have"} no cost code — every line must be coded before approval`);
-  const row = await prisma.directCost.update({ where: { id: directCostId }, data: { status: STATUS.PENDING, submittedBy: actor?.id || null, submittedAt: new Date(), rejectedReason: null, updatedBy: actor?.id || null }, include: detailInclude });
+  const row = await prisma.$transaction(async (tx) => {
+    await lockExpecting(tx, directCostId, [STATUS.DRAFT], "DIRECT_COST_NOT_DRAFT", (status) => `A ${status} direct cost cannot be submitted`);
+    return tx.directCost.update({ where: { id: directCostId }, data: { status: STATUS.PENDING, submittedBy: actor?.id || null, submittedAt: new Date(), rejectedReason: null, updatedBy: actor?.id || null }, include: detailInclude });
+  });
   await auditService.recordEvent({ orgId, projectId, entityType: "direct_cost", entityId: directCostId, action: auditService.ACTIONS.STATUS_CHANGED, actorId: actor?.id || null, summary: { ref: row.ref, from: STATUS.DRAFT, to: STATUS.PENDING, total: money(row.total) } }).catch(() => null);
   await notify({ orgId, projectId, row, actor, event: "direct_cost.submitted", title: `${row.ref} waiting for approval`, message: `${row.type} ${row.vendorName ? `from ${row.vendorName} ` : ""}for ${money(row.total)} — ${row.description.slice(0, 120)}`, recipientRoles: ["pm", "finance"] });
   return out(row, { detail: true });
@@ -417,6 +437,7 @@ const approveDirectCost = async ({ orgId, projectId, directCostId, actor = null 
   if (existing.status !== STATUS.PENDING) throw new HttpError(409, "DIRECT_COST_NOT_PENDING", `Only pending direct costs can be approved (this one is ${existing.status})`);
   const now = new Date();
   const row = await prisma.$transaction(async (tx) => {
+    await lockExpecting(tx, directCostId, [STATUS.PENDING], "DIRECT_COST_NOT_PENDING", (status) => `Only pending direct costs can be approved (this one is ${status})`);
     let unposted = 0;
     let capitalised = 0;
     for (const line of existing.lines) {
@@ -469,7 +490,10 @@ const rejectDirectCost = async ({ orgId, projectId, directCostId, payload = {}, 
   if (existing.status !== STATUS.PENDING) throw new HttpError(409, "DIRECT_COST_NOT_PENDING", "Only pending direct costs can be returned");
   const reason = trimOrNull(payload.reason);
   if (!reason) throw new HttpError(400, "DIRECT_COST_REASON_REQUIRED", "Say why the cost is returned");
-  const row = await prisma.directCost.update({ where: { id: directCostId }, data: { status: STATUS.DRAFT, rejectedReason: reason.slice(0, 1000), submittedBy: null, submittedAt: null, updatedBy: actor?.id || null }, include: detailInclude });
+  const row = await prisma.$transaction(async (tx) => {
+    await lockExpecting(tx, directCostId, [STATUS.PENDING], "DIRECT_COST_NOT_PENDING", () => "Only pending direct costs can be returned");
+    return tx.directCost.update({ where: { id: directCostId }, data: { status: STATUS.DRAFT, rejectedReason: reason.slice(0, 1000), submittedBy: null, submittedAt: null, updatedBy: actor?.id || null }, include: detailInclude });
+  });
   await auditService.recordEvent({ orgId, projectId, entityType: "direct_cost", entityId: directCostId, action: auditService.ACTIONS.REJECTED, actorId: actor?.id || null, summary: { ref: row.ref, reason: reason.slice(0, 200) } }).catch(() => null);
   await notify({ orgId, projectId, row, actor, event: "direct_cost.rejected", title: `${row.ref} returned`, message: reason.slice(0, 500), recipientUserIds: [existing.submittedBy, row.createdBy] });
   return out(row, { detail: true });
@@ -485,7 +509,7 @@ const voidDirectCost = async ({ orgId, projectId, directCostId, payload = {}, ac
   const row = await prisma.$transaction(async (tx) => {
     // A payment recorded while this void was being decided must stop it: the
     // invoice is locked and its payments counted again (Phase 21D, CX21-103).
-    await tx.$queryRaw`SELECT id FROM "DirectCost" WHERE id = ${directCostId} FOR UPDATE`;
+    await lockExpecting(tx, directCostId, Object.values(STATUS).filter((status) => status !== STATUS.VOID), "DIRECT_COST_LOCKED", () => `${existing.ref} is already void`);
     const paymentsNow = await tx.directCostPayment.findMany({ where: { directCostId }, select: { id: true } });
     if (paymentsNow.length) throw new HttpError(409, "DIRECT_COST_HAS_PAYMENTS", "A direct cost with payments cannot be voided — reverse the payments first");
     // Through the ledger, which writes negative mirrors rather than deleting —

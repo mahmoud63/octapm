@@ -370,6 +370,10 @@ const receiveAgainstOrder = async ({ orgId, user, payload }) => {
       const byId = new Map((locked || []).map((row) => [row.id, row]));
       order.lines = order.lines.map((row) => ({ ...row, ...(byId.get(row.id) || {}) }));
     }
+    // Every stocked item on the order is held for the transaction, in id
+    // order, before any line moves stock — so a multi-line delivery and a
+    // multi-line transfer cannot wait on each other's items (Phase 21D).
+    await inventory.lockItems(tx, order.lines.map((row) => row.inventoryItemId));
 
     const warehouse = await tx.warehouse.findFirst({
       where: { id: payload.warehouseId, orgId },

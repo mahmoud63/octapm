@@ -31,7 +31,7 @@ const mockPrisma = {
   $transaction: (fn) => fn(mockPrisma),
 };
 
-const mockInventory = { postMovement: jest.fn(async () => ({ id: "txn-1" })) };
+const mockInventory = { postMovement: jest.fn(async () => ({ id: "txn-1" })), lockItems: jest.fn(async () => undefined) };
 
 jest.mock("../../config/db", () => ({ prisma: mockPrisma }));
 jest.mock("../inventory.service", () => mockInventory);
@@ -477,5 +477,29 @@ describe("Phase 21D — integrity (Codex round 1)", () => {
     ).rejects.toMatchObject({ code: "RECEIPT_DUPLICATE_LINE" });
     expect(mockInventory.postMovement).not.toHaveBeenCalled();
     expect(mockPrisma.procurementPoLine.update).not.toHaveBeenCalled();
+  });
+});
+
+describe("Phase 21D — integrity (Codex round 3)", () => {
+  beforeEach(() => jest.clearAllMocks());
+
+  it("holds every stocked item on the order before any line moves stock", async () => {
+    mockPrisma.procurementOrder.findFirst.mockResolvedValue({
+      id: "order-1", ref: "PO-0001", status: "issued", projectId: "project-1", packageId: null, supplierId: null,
+      project: { id: "project-1" }, lines: [poLine({ orderedQty: 100 }), poLine({ id: "line-2", inventoryItemId: "item-0", orderedQty: 5 })],
+    });
+    mockPrisma.warehouse.findFirst.mockResolvedValue({ id: "wh-1", orgId: ORG, name: "Main" });
+    mockPrisma.deliveryReceipt.count.mockResolvedValue(0);
+    mockPrisma.deliveryReceipt.create.mockResolvedValue({ id: "grn-1", receiptNumber: "GRN-00001" });
+    mockPrisma.deliveryReceiptLine.create.mockResolvedValue({ id: "grn-line-1" });
+    mockPrisma.inventoryItem.findFirst.mockResolvedValue({ id: "item-1", orgId: ORG, sku: "CEM-42.5N", unit: "bag", averageCost: 6 });
+    mockPrisma.procurementPoLine.update.mockResolvedValue({});
+    mockPrisma.procurementOrder.update.mockResolvedValue({});
+    mockPrisma.procurementPoLine.findMany.mockResolvedValue([]);
+    await service.receiveAgainstOrder({ orgId: ORG, user: USER, payload: { orderId: "order-1", warehouseId: "wh-1", lines: [{ poLineId: "line-1", acceptedQty: 10 }] } });
+    expect(mockInventory.lockItems).toHaveBeenCalledTimes(1);
+    const [, ids] = mockInventory.lockItems.mock.calls[0];
+    expect(ids.filter(Boolean).sort()).toEqual(["item-0", "item-1"].filter((id) => ids.includes(id)).sort());
+    expect(mockInventory.lockItems.mock.invocationCallOrder[0]).toBeLessThan(mockInventory.postMovement.mock.invocationCallOrder[0]);
   });
 });
