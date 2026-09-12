@@ -1888,6 +1888,11 @@ export function DocControlDashboard({
                 <WorkflowRecordList
                   projectId={projectId}
                   recordType='drawing'
+                  initialSelectedId={
+                    initialTarget?.source === 'drawing'
+                      ? initialTarget.recordId
+                      : undefined
+                  }
                   exportName='drawing'
                   rows={drawings?.rows}
                   emptyText='No drawing records'
@@ -1934,6 +1939,11 @@ export function DocControlDashboard({
           <WorkflowRecordList
             projectId={projectId}
             recordType='transmittal'
+            initialSelectedId={
+              initialTarget?.source === 'transmittal'
+                ? initialTarget.recordId
+                : undefined
+            }
             exportName='transmittal'
             rows={transmittals?.rows}
             emptyText='No transmittals'
@@ -2007,6 +2017,11 @@ export function DocControlDashboard({
           <WorkflowRecordList
             projectId={projectId}
             recordType='correspondence'
+            initialSelectedId={
+              initialTarget?.source === 'correspondence'
+                ? initialTarget.recordId
+                : undefined
+            }
             exportName='correspondence'
             rows={correspondence?.rows}
             emptyText='No correspondence records'

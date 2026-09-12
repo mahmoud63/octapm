@@ -1376,7 +1376,11 @@ export function ScheduleDashboard({
 
         {/* Long Lead tab */}
         <TabsContent value='longLead' className='mt-4'>
-          <LongLeadTable projectId={projectId} activities={activities} />
+          <LongLeadTable
+            projectId={projectId}
+            activities={activities}
+            initialTarget={initialTarget}
+          />
         </TabsContent>
 
         {/* WBS tab */}

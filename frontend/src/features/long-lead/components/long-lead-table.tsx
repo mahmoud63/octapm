@@ -1,7 +1,8 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { AlertTriangle, Pencil, Plus, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
+import type { ProjectSetupTarget } from '@/features/projects/data/schema'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
@@ -27,6 +28,8 @@ import {
 type Props = {
   projectId: string
   activities: ScheduleActivity[]
+  /** A package or delivery deep link: the items bought under it are selected. */
+  initialTarget?: ProjectSetupTarget
 }
 
 type FormState = {
@@ -123,13 +126,27 @@ const mutationErrorMessage = (error: unknown, fallback: string) =>
   (error as { response?: { data?: { error?: { message?: string } } } })
     ?.response?.data?.error?.message ?? fallback
 
-export function LongLeadTable({ projectId, activities }: Props) {
+export function LongLeadTable({ projectId, activities, initialTarget }: Props) {
+  const targetPackageId =
+    initialTarget?.source === 'procurement_package' ||
+    initialTarget?.source === 'delivery_receipt'
+      ? (initialTarget.recordId ?? null)
+      : null
+  const targetItemId =
+    initialTarget?.source === 'long_lead' ? (initialTarget.recordId ?? null) : null
+  const isTargeted = (item: { id: string; procurementPackage?: { id: string } | null }) =>
+    item.id === targetItemId || (Boolean(targetPackageId) && item.procurementPackage?.id === targetPackageId)
   const { data: items = [], isLoading } = useLongLeadItems(projectId)
   const createItem = useCreateLongLeadItem(projectId)
   const updateItem = useUpdateLongLeadItem(projectId)
   const deleteItem = useDeleteLongLeadItem(projectId)
 
   const [formOpen, setFormOpen] = useState(false)
+  useEffect(() => {
+    if (!targetPackageId && !targetItemId) return
+    const first = document.querySelector('[data-testid^="uat-record-row-"][data-selected="true"]')
+    first?.scrollIntoView({ block: 'center' })
+  }, [targetPackageId, targetItemId, formOpen])
   const [editingItem, setEditingItem] = useState<LongLeadItemRecord | null>(
     null
   )
@@ -285,9 +302,13 @@ export function LongLeadTable({ projectId, activities }: Props) {
                 return (
                   <tr
                     key={item.id}
+                    id={`uat-record-row-${item.id}`}
+                    data-testid={`uat-record-row-${item.id}`}
+                    data-selected={isTargeted(item) ? 'true' : 'false'}
                     className={cn(
                       'border-b hover:bg-muted/25',
-                      rowRiskClassMap[severity]
+                      rowRiskClassMap[severity],
+                      isTargeted(item) && 'bg-primary/5 ring-1 ring-primary/40'
                     )}
                   >
                     <td className='max-w-64 p-2'>

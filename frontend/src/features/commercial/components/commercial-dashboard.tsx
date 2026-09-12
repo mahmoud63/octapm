@@ -129,12 +129,14 @@ export function CommercialDashboard({
           <IpcWorkbook
             projectId={projectId}
             initialStatus={
-              initialTarget?.source === 'ipc_certificate'
+              initialTarget?.source === 'ipc_certificate' ||
+              initialTarget?.source === 'ipc'
                 ? initialTarget.status
                 : undefined
             }
             initialRecordId={
-              initialTarget?.source === 'ipc_certificate'
+              initialTarget?.source === 'ipc_certificate' ||
+              initialTarget?.source === 'ipc'
                 ? initialTarget.recordId
                 : undefined
             }
@@ -158,7 +160,15 @@ export function CommercialDashboard({
         </TabsContent>
 
         <TabsContent value='weather'>
-          <WeatherDelaysPanel projectId={projectId} activities={activities} />
+          <WeatherDelaysPanel
+            projectId={projectId}
+            activities={activities}
+            initialRecordId={
+              initialTarget?.source === 'weather_delay'
+                ? initialTarget.recordId
+                : undefined
+            }
+          />
         </TabsContent>
 
         <TabsContent value='contract'>

@@ -475,7 +475,13 @@ export function ProjectDetail({
           <SiteReportingDashboard
             projectId={projectId}
             activities={schedule?.activities ?? []}
-            initialDate={initialTarget?.date}
+            initialDate={
+              initialTarget?.date ??
+              (initialTarget?.source === 'daily_log' &&
+              /^\d{4}-\d{2}-\d{2}$/.test(initialTarget.recordId ?? '')
+                ? initialTarget.recordId
+                : undefined)
+            }
             initialTimesheetId={
               initialTarget?.source === 'timesheet'
                 ? (initialTarget.recordId ?? null)
@@ -587,7 +593,9 @@ export function ProjectDetail({
         return <EquipmentSection projectId={projectId} />
 
       case 'locations':
-        return <LocationsPanel projectId={projectId} />
+        return (
+          <LocationsPanel projectId={projectId} initialTarget={initialTarget} />
+        )
 
       case 'team':
         return <ProjectTeamPanel projectId={projectId} />

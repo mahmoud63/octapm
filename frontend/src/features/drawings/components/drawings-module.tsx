@@ -40,7 +40,10 @@ export function DrawingsModule({
   legacy?: ReactNode
 }) {
   const [view, setView] = useState<View>(() => initialView(initialTarget))
-  const [legacyOpen, setLegacyOpen] = useState(false)
+  // A link that names a legacy drawing record opens the register it lives in.
+  const [legacyOpen, setLegacyOpen] = useState(
+    initialTarget?.source === 'drawing' && Boolean(initialTarget.recordId)
+  )
 
   if (view.kind === 'sheet') {
     return (

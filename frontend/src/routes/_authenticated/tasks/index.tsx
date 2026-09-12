@@ -15,6 +15,8 @@ const taskSearchSchema = z.object({
     .optional()
     .catch([]),
   filter: z.string().optional().catch(''),
+  /** A task deep link (`/tasks?recordId=`) opens that task. */
+  recordId: z.string().optional().catch(undefined),
 })
 
 export const Route = createFileRoute('/_authenticated/tasks/')({

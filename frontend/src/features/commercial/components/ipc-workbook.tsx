@@ -177,6 +177,10 @@ export function IpcWorkbook({
             className='h-9 rounded-md border bg-background px-2 text-sm'
             value={activePeriod}
             onChange={(e) => setSelectedPeriod(e.target.value)}
+            data-testid='uat-ipc-period-select'
+            data-period-id={
+              periods.find((period) => period.period === activePeriod)?.id ?? ''
+            }
           >
             {periods.map((period) => (
               <option key={period.id} value={period.period}>

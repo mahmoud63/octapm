@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { CheckCircle2, History, RotateCcw, Send, XCircle } from 'lucide-react'
 import { toast } from 'sonner'
 import { handleServerError } from '@/lib/handle-server-error'
@@ -136,7 +136,16 @@ export function ChangeOrderRegister({
   const [editing, setEditing] = useState<ChangeOrderRecord | null>(null)
   const [decisionTarget, setDecisionTarget] =
     useState<ChangeOrderDecisionTarget | null>(null)
-  const [historyOrderId, setHistoryOrderId] = useState<string | null>(null)
+  // A deep link's order is the one whose history and detail open first.
+  const [historyOrderId, setHistoryOrderId] = useState<string | null>(
+    initialRecordId ?? null
+  )
+  useEffect(() => {
+    if (!initialRecordId) return
+    document
+      .getElementById(`uat-record-row-${initialRecordId}`)
+      ?.scrollIntoView({ block: 'center' })
+  }, [initialRecordId])
   const [statusFilter, setStatusFilter] = useState<
     ChangeOrderRecord['status'] | 'all'
   >(
@@ -417,7 +426,15 @@ export function ChangeOrderRegister({
               </tr>
             ) : (
               filteredOrders.map((order) => (
-                <tr key={order.id} className='border-b hover:bg-muted/30'>
+                <tr
+                  key={order.id}
+                  id={`uat-record-row-${order.id}`}
+                  data-testid={`uat-record-row-${order.id}`}
+                  data-selected={
+                    selectedHistoryOrder?.id === order.id ? 'true' : 'false'
+                  }
+                  className='border-b hover:bg-muted/30'
+                >
                   <td className='p-2 font-mono text-xs font-semibold text-blue-600'>
                     {order.ref}
                   </td>

@@ -671,6 +671,11 @@ export function MeetingsDashboard({
                 <button
                   key={meeting.id}
                   type='button'
+                  id={`uat-record-row-${meeting.id}`}
+                  data-testid={`uat-record-row-${meeting.id}`}
+                  data-selected={
+                    selectedMeeting?.id === meeting.id ? 'true' : 'false'
+                  }
                   onClick={() => {
                     setSelectedId(meeting.id)
                     setMode('view')

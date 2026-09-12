@@ -1,5 +1,6 @@
 import * as React from 'react'
 import { z } from 'zod'
+import type { ProjectSetupTarget } from '@/features/projects/data/schema'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import {
@@ -304,6 +305,7 @@ function LocationRow({
   canEdit,
   canArchive,
   expanded,
+  selected = false,
   onToggle,
   onAddChild,
   onEdit,
@@ -316,6 +318,8 @@ function LocationRow({
   canEdit: boolean
   canArchive: boolean
   expanded: boolean
+  /** Named by a deep link. */
+  selected?: boolean
   onToggle: () => void
   onAddChild: () => void
   onEdit: () => void
@@ -329,9 +333,13 @@ function LocationRow({
 
   return (
     <div
+      id={`uat-record-row-${node.id}`}
       data-testid='location-row'
+      data-record-id={node.id}
+      data-selected={selected ? 'true' : 'false'}
       className={cn(
         'group flex min-h-10 items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-muted/50',
+        selected && 'bg-primary/5 ring-1 ring-primary/40',
         isArchived && 'opacity-60'
       )}
       style={{ paddingInlineStart: `${node.depth * 20 + 8}px` }}
@@ -431,7 +439,15 @@ function LocationRow({
   )
 }
 
-export function LocationsPanel({ projectId }: { projectId: string }) {
+export function LocationsPanel({
+  projectId,
+  initialTarget,
+}: {
+  projectId: string
+  initialTarget?: ProjectSetupTarget
+}) {
+  const targetId =
+    initialTarget?.source === 'location' ? (initialTarget.recordId ?? null) : null
   const [showArchived, setShowArchived] = React.useState(false)
   const [editor, setEditor] = React.useState<EditorState>(null)
   const [archiveTarget, setArchiveTarget] =
@@ -512,6 +528,7 @@ export function LocationsPanel({ projectId }: { projectId: string }) {
             expanded={expanded}
             onToggle={() => toggle(node.id)}
             onAddChild={() => setEditor({ mode: 'create', parent: node })}
+            selected={node.id === targetId}
             onEdit={() => setEditor({ mode: 'edit', location: node })}
             onMove={(dir) => move(node, nodes, dir)}
             onArchive={() => setArchiveTarget(node)}
@@ -524,6 +541,12 @@ export function LocationsPanel({ projectId }: { projectId: string }) {
 
   const summary = data?.summary
   const tree = data?.tree ?? []
+  React.useEffect(() => {
+    if (!targetId || !tree.length) return
+    document
+      .getElementById(`uat-record-row-${targetId}`)
+      ?.scrollIntoView({ block: 'center' })
+  }, [targetId, tree.length])
 
   return (
     <div className='space-y-4' data-testid='uat-locations-panel'>

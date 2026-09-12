@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -11,11 +11,23 @@ import {
 export function WeatherDelaysPanel({
   projectId,
   activities = [],
+  initialRecordId,
 }: {
   projectId: string
   activities?: ScheduleActivity[]
+  /** The delay a deep link named: selected and brought on screen. */
+  initialRecordId?: string
 }) {
   const { data } = useWeatherDelays(projectId)
+  const targeted = Boolean(
+    initialRecordId && data?.rows.some((row) => row.id === initialRecordId)
+  )
+  useEffect(() => {
+    if (!targeted) return
+    document
+      .getElementById(`uat-record-row-${initialRecordId}`)
+      ?.scrollIntoView({ block: 'center' })
+  }, [targeted, initialRecordId])
   const createMutation = useCreateWeatherDelay(projectId)
 
   const [date, setDate] = useState('')
@@ -141,7 +153,17 @@ export function WeatherDelaysPanel({
           </thead>
           <tbody>
             {data?.rows.map((row) => (
-              <tr key={row.id} className='border-b'>
+              <tr
+                key={row.id}
+                id={`uat-record-row-${row.id}`}
+                data-testid={`uat-record-row-${row.id}`}
+                data-selected={row.id === initialRecordId ? 'true' : 'false'}
+                className={
+                  row.id === initialRecordId
+                    ? 'border-b bg-primary/5 ring-1 ring-primary/40'
+                    : 'border-b'
+                }
+              >
                 <td className='p-2 text-xs'>
                   {new Date(row.date).toLocaleDateString()}
                 </td>
