@@ -1638,7 +1638,7 @@ const recordIpcPayment = async ({
     );
   }
 
-  return prisma.$transaction(async (tx) => {
+  const recorded = await prisma.$transaction(async (tx) => {
     const invoice = await findIssuedInvoice({
       tx,
       projectId,
@@ -1749,6 +1749,20 @@ const recordIpcPayment = async ({
       certificate: synced.certificate,
     };
   });
+
+  // Cash flow is a materialised projection. A subcontractor payment and a
+  // direct-cost payment both rebuild it once their transaction has committed;
+  // this path did not, so a client payment showed in the invoice and in the
+  // receivables and not in cash flow until somebody pressed rebuild
+  // (P21-009, found by the Phase 21 greenfield run). Same pattern as the other
+  // two: after the commit, and never allowed to undo a recorded payment.
+  try {
+    await require("./cash-flow.service").rebuildCashFlow({ orgId, projectId });
+  } catch (error) {
+    console.warn("[ipc] cash flow rebuild failed", error?.message || error);
+  }
+
+  return recorded;
 };
 
 const releaseIpcRetention = async ({

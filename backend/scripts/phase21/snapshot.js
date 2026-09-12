@@ -18,22 +18,27 @@ const { pm, qs, cost, finance, planner, warehouse } = ctx.people;
 /** What Phase 21A certified. */
 const EXPECTED = {
   originalBudget: 1_700_000,
-  revisedBudget: 1_700_000,
+  approvedChanges: 250_000,
+  revisedBudget: 1_950_000,
   committed: 100_000,
-  actual: 60_704,
+  actual: 69_204,
+  directCost: 8_500,
   certifiedSubcontract: 60_000,
   materialIssue: 704,
+  stockOnHand: 86,
   cashOut: 54_000,
   retention: 6_000,
   activities: 14,
   boqItems: 5,
-  budgetLines: 7,
+  // 7 from stage 3, plus the "Unassigned approved changes" holding line the
+  // product created when approved variations arrived with no budget line.
+  budgetLines: 8,
   teamMembers: 8,
   costCodes: 7,
 };
 
 async function main() {
-  section("PHASE 21B · STEP 2 — snapshot and prove the project we are continuing");
+  section("PHASE 21C · STEP 0 — snapshot and prove the project we are continuing");
 
   // ── identity ─────────────────────────────────────────────────────────────
   const project = await GET(pm, `/projects/${P}`);
@@ -79,9 +84,16 @@ async function main() {
 
   const budget = await GET(cost, `/projects/${P}/budget/lines`);
   const lines = budget.items || budget.lines || [];
-  check("budget lines", EXPECTED.budgetLines, lines.length);
+  check("budget lines (7 planned + 1 system holding line for unassigned changes)", EXPECTED.budgetLines, lines.length);
+  const holding = lines.find((l) => (l.costCode?.code ?? l.costCode) === "CO");
+  check("the holding line carries the approved changes and no original budget", true, Boolean(holding) && cents(holding.originalBudget) === 0 && cents(holding.approvedChanges) === cents(EXPECTED.approvedChanges));
   const originalTotal = lines.reduce((s, l) => s + cents(l.originalBudget), 0);
   check("ORIGINAL BUDGET", cents(EXPECTED.originalBudget), originalTotal);
+  const approvedTotal = lines.reduce((s, l) => s + cents(l.approvedChanges ?? 0), 0);
+  const revisedTotal = lines.reduce((s, l) => s + cents(l.revisedBudget ?? 0), 0);
+  check("APPROVED CHANGES", cents(EXPECTED.approvedChanges), approvedTotal);
+  check("REVISED BUDGET", cents(EXPECTED.revisedBudget), revisedTotal);
+  check("Revised = Original + approved changes", originalTotal + approvedTotal, revisedTotal);
 
   // ── the money 21A left behind ────────────────────────────────────────────
   section("2.2  Financial baseline");
@@ -101,6 +113,7 @@ async function main() {
   check("CostLedgerEntry total", cents(EXPECTED.actual), L.ledgerCents);
   check("  of which certified subcontract", cents(EXPECTED.certifiedSubcontract), L.bySource.sub_pay_app ?? 0);
   check("  of which material issue", cents(EXPECTED.materialIssue), L.bySource.material_issue ?? 0);
+  check("  of which direct cost", cents(EXPECTED.directCost), L.bySource.direct_cost ?? 0);
   check("budget-line actual projection", cents(EXPECTED.actual), L.budgetProjectionCents);
   check("activity actual projection", cents(EXPECTED.actual), L.activityProjectionCents);
   check("no legacy opening balance", 0, L.legacyOpeningCents);
@@ -123,7 +136,7 @@ async function main() {
   const wa = Number(item.averageCost ?? item.weightedAverageCost ?? item.unitCost ?? 0);
   note("stock on hand", `${onHand} bags @ ${wa}`);
   check("weighted average is still 11.00", 11, wa);
-  check("stock left is 150 less the 64 issued", 86, onHand);
+  check("stock left is 150 less the 64 issued", EXPECTED.stockOnHand, onHand);
 
   // ── the anchors Phase 21B will build on ──────────────────────────────────
   ctx.baseline21B = {
