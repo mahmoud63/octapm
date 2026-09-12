@@ -15,13 +15,27 @@ const ctx = JSON.parse(fs.readFileSync(CONTEXT, "utf8"));
 const P = ctx.projectId;
 const { pm, qs, cost, finance, planner, warehouse } = ctx.people;
 
-/** What Phase 21A certified. */
+/**
+ * What Phase 21A/21B certified, moved on by the Phase 21C transactions — each
+ * one named, so a number here is never "whatever the API says now":
+ *
+ *   21C stage 13  labour   5 x 8 h @ 50.00 = 2,000.00 on the ledger (timesheet)
+ *   21C stage 14  RFI-001 → VO-22 4,500.00 approved, on budget line 01-100
+ *   21C stage 10  client payment 80,000.00 received → cash in
+ */
 const EXPECTED = {
   originalBudget: 1_700_000,
-  approvedChanges: 250_000,
-  revisedBudget: 1_950_000,
+  approvedChanges: 250_000 + 4_500,
+  // Every approved change sits on the product's holding line: budgetLineId is
+  // accepted by the change-order create AND update validators and discarded by
+  // both (P21-012, P3). VO-22 named 01-100 twice and still landed here.
+  approvedChangesOnHoldingLine: 250_000 + 4_500,
+  approvedChangesOn01100: 0,
+  revisedBudget: 1_950_000 + 4_500,
   committed: 100_000,
-  actual: 69_204,
+  actual: 69_204 + 2_000,
+  labour: 2_000,
+  cashIn: 80_000,
   directCost: 8_500,
   certifiedSubcontract: 60_000,
   materialIssue: 704,
@@ -86,7 +100,9 @@ async function main() {
   const lines = budget.items || budget.lines || [];
   check("budget lines (7 planned + 1 system holding line for unassigned changes)", EXPECTED.budgetLines, lines.length);
   const holding = lines.find((l) => (l.costCode?.code ?? l.costCode) === "CO");
-  check("the holding line carries the approved changes and no original budget", true, Boolean(holding) && cents(holding.originalBudget) === 0 && cents(holding.approvedChanges) === cents(EXPECTED.approvedChanges));
+  check("the holding line carries the 21A/21B approved changes and no original budget", true, Boolean(holding) && cents(holding.originalBudget) === 0 && cents(holding.approvedChanges) === cents(EXPECTED.approvedChangesOnHoldingLine));
+  const line01100 = lines.find((l) => l.costCode?.code === "01-100" || l.costCodeCode === "01-100" || l.description === "Site works and earthmoving");
+  check("budget line 01-100 carries none of it — budgetLineId is discarded on create and update (P21-012)", cents(EXPECTED.approvedChangesOn01100), cents(line01100?.approvedChanges ?? 0));
   const originalTotal = lines.reduce((s, l) => s + cents(l.originalBudget), 0);
   check("ORIGINAL BUDGET", cents(EXPECTED.originalBudget), originalTotal);
   const approvedTotal = lines.reduce((s, l) => s + cents(l.approvedChanges ?? 0), 0);
@@ -114,6 +130,7 @@ async function main() {
   check("  of which certified subcontract", cents(EXPECTED.certifiedSubcontract), L.bySource.sub_pay_app ?? 0);
   check("  of which material issue", cents(EXPECTED.materialIssue), L.bySource.material_issue ?? 0);
   check("  of which direct cost", cents(EXPECTED.directCost), L.bySource.direct_cost ?? 0);
+  check("  of which labour (timesheet)", cents(EXPECTED.labour), L.bySource.timesheet ?? L.bySource.labour ?? 0);
   check("budget-line actual projection", cents(EXPECTED.actual), L.budgetProjectionCents);
   check("activity actual projection", cents(EXPECTED.actual), L.activityProjectionCents);
   check("no legacy opening balance", 0, L.legacyOpeningCents);
@@ -129,7 +146,7 @@ async function main() {
 
   const cash = await GET(finance, `/projects/${P}/cash-flow`);
   check("cash out", cents(EXPECTED.cashOut), cents(cash.summary?.outflow ?? 0));
-  check("cash in", 0, cents(cash.summary?.inflow ?? 0));
+  check("cash in (the client's 80,000.00, stage 10)", cents(EXPECTED.cashIn), cents(cash.summary?.inflow ?? 0));
 
   const item = await GET(warehouse, `/inventory/items/${ctx.itemId}`);
   const onHand = Number(item.onHand ?? item.stockOnHand ?? item.quantity ?? 0);

@@ -1,0 +1,758 @@
+[
+  {
+    "role": "warehouse",
+    "prefix": "boq",
+    "post": "404 NOT_FOUND",
+    "del": "404 NOT_FOUND",
+    "doorOpen": false
+  },
+  {
+    "role": "warehouse",
+    "prefix": "budget-revisions",
+    "post": "403 FORBIDDEN",
+    "del": "403 FORBIDDEN",
+    "doorOpen": false
+  },
+  {
+    "role": "warehouse",
+    "prefix": "cash-flow",
+    "post": "403 FORBIDDEN",
+    "del": "403 FORBIDDEN",
+    "doorOpen": false
+  },
+  {
+    "role": "warehouse",
+    "prefix": "correspondence",
+    "post": "403 FORBIDDEN",
+    "del": "403 FORBIDDEN",
+    "doorOpen": false
+  },
+  {
+    "role": "warehouse",
+    "prefix": "defects",
+    "post": "403 FORBIDDEN",
+    "del": "403 FORBIDDEN",
+    "doorOpen": false
+  },
+  {
+    "role": "warehouse",
+    "prefix": "drawings",
+    "post": "403 FORBIDDEN",
+    "del": "403 FORBIDDEN",
+    "doorOpen": false
+  },
+  {
+    "role": "warehouse",
+    "prefix": "itp",
+    "post": "403 FORBIDDEN",
+    "del": "403 FORBIDDEN",
+    "doorOpen": false
+  },
+  {
+    "role": "warehouse",
+    "prefix": "long-lead",
+    "post": "403 FORBIDDEN",
+    "del": "403 FORBIDDEN",
+    "doorOpen": false
+  },
+  {
+    "role": "warehouse",
+    "prefix": "material-tests",
+    "post": "403 FORBIDDEN",
+    "del": "403 FORBIDDEN",
+    "doorOpen": false
+  },
+  {
+    "role": "warehouse",
+    "prefix": "sub-valuations",
+    "post": "403 FORBIDDEN",
+    "del": "403 FORBIDDEN",
+    "doorOpen": false
+  },
+  {
+    "role": "warehouse",
+    "prefix": "transmittals",
+    "post": "403 FORBIDDEN",
+    "del": "403 FORBIDDEN",
+    "doorOpen": false
+  },
+  {
+    "role": "warehouse",
+    "prefix": "weather-delays",
+    "post": "403 FORBIDDEN",
+    "del": "403 FORBIDDEN",
+    "doorOpen": false
+  },
+  {
+    "role": "warehouse",
+    "prefix": "weekly-reports",
+    "post": "403 FORBIDDEN",
+    "del": "403 FORBIDDEN",
+    "doorOpen": false
+  },
+  {
+    "role": "warehouse",
+    "prefix": "jobs",
+    "post": "404 NOT_FOUND",
+    "del": "404 NOT_FOUND",
+    "doorOpen": false
+  },
+  {
+    "role": "warehouse",
+    "prefix": "assignments",
+    "post": "404 NOT_FOUND",
+    "del": "404 NOT_FOUND",
+    "doorOpen": false
+  },
+  {
+    "role": "warehouse",
+    "prefix": "team",
+    "post": "403 FORBIDDEN",
+    "del": "403 FORBIDDEN",
+    "doorOpen": false
+  },
+  {
+    "role": "warehouse",
+    "prefix": "quality",
+    "post": "404 NOT_FOUND",
+    "del": "404 NOT_FOUND",
+    "doorOpen": false
+  },
+  {
+    "role": "warehouse",
+    "prefix": "submittals",
+    "post": "403 FORBIDDEN",
+    "del": "403 FORBIDDEN",
+    "doorOpen": false
+  },
+  {
+    "role": "warehouse",
+    "prefix": "ncr",
+    "post": "403 FORBIDDEN",
+    "del": "403 FORBIDDEN",
+    "doorOpen": false
+  },
+  {
+    "role": "warehouse",
+    "prefix": "safety",
+    "post": "403 FORBIDDEN",
+    "del": "403 FORBIDDEN",
+    "doorOpen": false
+  },
+  {
+    "role": "warehouse",
+    "prefix": "punch",
+    "post": "403 FORBIDDEN",
+    "del": "403 FORBIDDEN",
+    "doorOpen": false
+  },
+  {
+    "role": "warehouse",
+    "prefix": "rfi",
+    "post": "403 FORBIDDEN",
+    "del": "403 FORBIDDEN",
+    "doorOpen": false
+  },
+  {
+    "role": "warehouse",
+    "prefix": "meetings",
+    "post": "403 FORBIDDEN",
+    "del": "403 FORBIDDEN",
+    "doorOpen": false
+  },
+  {
+    "role": "warehouse",
+    "prefix": "tasks",
+    "post": "403 FORBIDDEN",
+    "del": "403 FORBIDDEN",
+    "doorOpen": false
+  },
+  {
+    "role": "warehouse",
+    "prefix": "photos",
+    "post": "404 NOT_FOUND",
+    "del": "404 NOT_FOUND",
+    "doorOpen": false
+  },
+  {
+    "role": "warehouse",
+    "prefix": "daily-logs",
+    "post": "404 NOT_FOUND",
+    "del": "404 NOT_FOUND",
+    "doorOpen": false
+  },
+  {
+    "role": "warehouse",
+    "prefix": "timesheets",
+    "post": "403 FORBIDDEN",
+    "del": "403 FORBIDDEN",
+    "doorOpen": false
+  },
+  {
+    "role": "warehouse",
+    "prefix": "locations",
+    "post": "403 FORBIDDEN",
+    "del": "403 FORBIDDEN",
+    "doorOpen": false
+  },
+  {
+    "role": "warehouse",
+    "prefix": "risks",
+    "post": "403 FORBIDDEN",
+    "del": "403 FORBIDDEN",
+    "doorOpen": false
+  },
+  {
+    "role": "warehouse",
+    "prefix": "commitments",
+    "post": "403 FORBIDDEN",
+    "del": "403 FORBIDDEN",
+    "doorOpen": false
+  },
+  {
+    "role": "warehouse",
+    "prefix": "pay-apps",
+    "post": "403 FORBIDDEN",
+    "del": "403 FORBIDDEN",
+    "doorOpen": false
+  },
+  {
+    "role": "warehouse",
+    "prefix": "ipc",
+    "post": "403 FORBIDDEN",
+    "del": "404 NOT_FOUND",
+    "doorOpen": false
+  },
+  {
+    "role": "warehouse",
+    "prefix": "eot",
+    "post": "403 FORBIDDEN",
+    "del": "404 NOT_FOUND",
+    "doorOpen": false
+  },
+  {
+    "role": "warehouse",
+    "prefix": "change-orders",
+    "post": "403 FORBIDDEN",
+    "del": "403 FORBIDDEN",
+    "doorOpen": false
+  },
+  {
+    "role": "warehouse",
+    "prefix": "direct-costs",
+    "post": "403 FORBIDDEN",
+    "del": "403 FORBIDDEN",
+    "doorOpen": false
+  },
+  {
+    "role": "warehouse",
+    "prefix": "purchase-orders",
+    "post": "404 NOT_FOUND",
+    "del": "404 NOT_FOUND",
+    "doorOpen": false
+  },
+  {
+    "role": "warehouse",
+    "prefix": "procurement/packages",
+    "post": "403 FORBIDDEN",
+    "del": "404 NOT_FOUND",
+    "doorOpen": false
+  },
+  {
+    "role": "warehouse",
+    "prefix": "cost/codes",
+    "post": "404 NOT_FOUND",
+    "del": "404 NOT_FOUND",
+    "doorOpen": false
+  },
+  {
+    "role": "warehouse",
+    "prefix": "budget/lines",
+    "post": "403 FORBIDDEN",
+    "del": "403 FORBIDDEN",
+    "doorOpen": false
+  },
+  {
+    "role": "warehouse",
+    "prefix": "forecast",
+    "post": "404 NOT_FOUND",
+    "del": "404 NOT_FOUND",
+    "doorOpen": false
+  },
+  {
+    "role": "warehouse",
+    "prefix": "lookaheads",
+    "post": "403 FORBIDDEN",
+    "del": "403 FORBIDDEN",
+    "doorOpen": false
+  },
+  {
+    "role": "warehouse",
+    "prefix": "site-diaries",
+    "post": "403 FORBIDDEN",
+    "del": "404 NOT_FOUND",
+    "doorOpen": false
+  },
+  {
+    "role": "warehouse",
+    "prefix": "daily-reports",
+    "post": "403 FORBIDDEN",
+    "del": "404 NOT_FOUND",
+    "doorOpen": false
+  },
+  {
+    "role": "warehouse",
+    "prefix": "specifications",
+    "post": "404 NOT_FOUND",
+    "del": "404 NOT_FOUND",
+    "doorOpen": false
+  },
+  {
+    "role": "warehouse",
+    "prefix": "form-templates",
+    "post": "404 NOT_FOUND",
+    "del": "404 NOT_FOUND",
+    "doorOpen": false
+  },
+  {
+    "role": "warehouse",
+    "prefix": "forms",
+    "post": "403 FORBIDDEN",
+    "del": "403 FORBIDDEN",
+    "doorOpen": false
+  },
+  {
+    "role": "warehouse",
+    "prefix": "bim",
+    "post": "404 NOT_FOUND",
+    "del": "404 NOT_FOUND",
+    "doorOpen": false
+  },
+  {
+    "role": "warehouse",
+    "prefix": "change-events",
+    "post": "403 FORBIDDEN",
+    "del": "403 FORBIDDEN",
+    "doorOpen": false
+  },
+  {
+    "role": "warehouse",
+    "prefix": "equipment",
+    "post": "403 FORBIDDEN",
+    "del": "403 FORBIDDEN",
+    "doorOpen": false
+  },
+  {
+    "role": "warehouse",
+    "prefix": "contract",
+    "post": "404 NOT_FOUND",
+    "del": "404 NOT_FOUND",
+    "doorOpen": false
+  },
+  {
+    "role": "warehouse",
+    "prefix": "activities",
+    "post": "403 FORBIDDEN",
+    "del": "403 FORBIDDEN",
+    "doorOpen": false
+  },
+  {
+    "role": "warehouse",
+    "prefix": "comments",
+    "post": "400 VALIDATION_ERROR",
+    "del": "404 COMMENT_NOT_FOUND",
+    "doorOpen": true
+  },
+  {
+    "role": "warehouse",
+    "prefix": "custom-fields",
+    "post": "404 NOT_FOUND",
+    "del": "404 NOT_FOUND",
+    "doorOpen": false
+  },
+  {
+    "role": "warehouse",
+    "prefix": "inventory/items",
+    "post": "404 NOT_FOUND",
+    "del": "404 NOT_FOUND",
+    "doorOpen": false
+  },
+  {
+    "role": "finance",
+    "prefix": "boq",
+    "post": "404 NOT_FOUND",
+    "del": "404 NOT_FOUND",
+    "doorOpen": false
+  },
+  {
+    "role": "finance",
+    "prefix": "budget-revisions",
+    "post": "403 FORBIDDEN",
+    "del": "403 FORBIDDEN",
+    "doorOpen": false
+  },
+  {
+    "role": "finance",
+    "prefix": "cash-flow",
+    "post": "403 FORBIDDEN",
+    "del": "403 FORBIDDEN",
+    "doorOpen": false
+  },
+  {
+    "role": "finance",
+    "prefix": "correspondence",
+    "post": "403 FORBIDDEN",
+    "del": "403 FORBIDDEN",
+    "doorOpen": false
+  },
+  {
+    "role": "finance",
+    "prefix": "defects",
+    "post": "403 FORBIDDEN",
+    "del": "403 FORBIDDEN",
+    "doorOpen": false
+  },
+  {
+    "role": "finance",
+    "prefix": "drawings",
+    "post": "403 FORBIDDEN",
+    "del": "403 FORBIDDEN",
+    "doorOpen": false
+  },
+  {
+    "role": "finance",
+    "prefix": "itp",
+    "post": "403 FORBIDDEN",
+    "del": "403 FORBIDDEN",
+    "doorOpen": false
+  },
+  {
+    "role": "finance",
+    "prefix": "long-lead",
+    "post": "403 FORBIDDEN",
+    "del": "403 FORBIDDEN",
+    "doorOpen": false
+  },
+  {
+    "role": "finance",
+    "prefix": "material-tests",
+    "post": "403 FORBIDDEN",
+    "del": "403 FORBIDDEN",
+    "doorOpen": false
+  },
+  {
+    "role": "finance",
+    "prefix": "sub-valuations",
+    "post": "403 FORBIDDEN",
+    "del": "403 FORBIDDEN",
+    "doorOpen": false
+  },
+  {
+    "role": "finance",
+    "prefix": "transmittals",
+    "post": "403 FORBIDDEN",
+    "del": "403 FORBIDDEN",
+    "doorOpen": false
+  },
+  {
+    "role": "finance",
+    "prefix": "weather-delays",
+    "post": "403 FORBIDDEN",
+    "del": "403 FORBIDDEN",
+    "doorOpen": false
+  },
+  {
+    "role": "finance",
+    "prefix": "weekly-reports",
+    "post": "403 FORBIDDEN",
+    "del": "403 FORBIDDEN",
+    "doorOpen": false
+  },
+  {
+    "role": "finance",
+    "prefix": "jobs",
+    "post": "404 NOT_FOUND",
+    "del": "404 NOT_FOUND",
+    "doorOpen": false
+  },
+  {
+    "role": "finance",
+    "prefix": "assignments",
+    "post": "404 NOT_FOUND",
+    "del": "404 NOT_FOUND",
+    "doorOpen": false
+  },
+  {
+    "role": "finance",
+    "prefix": "team",
+    "post": "403 FORBIDDEN",
+    "del": "403 FORBIDDEN",
+    "doorOpen": false
+  },
+  {
+    "role": "finance",
+    "prefix": "quality",
+    "post": "404 NOT_FOUND",
+    "del": "404 NOT_FOUND",
+    "doorOpen": false
+  },
+  {
+    "role": "finance",
+    "prefix": "submittals",
+    "post": "403 FORBIDDEN",
+    "del": "403 FORBIDDEN",
+    "doorOpen": false
+  },
+  {
+    "role": "finance",
+    "prefix": "ncr",
+    "post": "403 FORBIDDEN",
+    "del": "403 FORBIDDEN",
+    "doorOpen": false
+  },
+  {
+    "role": "finance",
+    "prefix": "safety",
+    "post": "403 FORBIDDEN",
+    "del": "403 FORBIDDEN",
+    "doorOpen": false
+  },
+  {
+    "role": "finance",
+    "prefix": "punch",
+    "post": "403 FORBIDDEN",
+    "del": "403 FORBIDDEN",
+    "doorOpen": false
+  },
+  {
+    "role": "finance",
+    "prefix": "rfi",
+    "post": "403 FORBIDDEN",
+    "del": "403 FORBIDDEN",
+    "doorOpen": false
+  },
+  {
+    "role": "finance",
+    "prefix": "meetings",
+    "post": "403 FORBIDDEN",
+    "del": "403 FORBIDDEN",
+    "doorOpen": false
+  },
+  {
+    "role": "finance",
+    "prefix": "tasks",
+    "post": "403 FORBIDDEN",
+    "del": "403 FORBIDDEN",
+    "doorOpen": false
+  },
+  {
+    "role": "finance",
+    "prefix": "photos",
+    "post": "404 NOT_FOUND",
+    "del": "404 NOT_FOUND",
+    "doorOpen": false
+  },
+  {
+    "role": "finance",
+    "prefix": "daily-logs",
+    "post": "404 NOT_FOUND",
+    "del": "404 NOT_FOUND",
+    "doorOpen": false
+  },
+  {
+    "role": "finance",
+    "prefix": "timesheets",
+    "post": "403 FORBIDDEN",
+    "del": "403 FORBIDDEN",
+    "doorOpen": false
+  },
+  {
+    "role": "finance",
+    "prefix": "locations",
+    "post": "403 FORBIDDEN",
+    "del": "403 FORBIDDEN",
+    "doorOpen": false
+  },
+  {
+    "role": "finance",
+    "prefix": "risks",
+    "post": "403 FORBIDDEN",
+    "del": "403 FORBIDDEN",
+    "doorOpen": false
+  },
+  {
+    "role": "finance",
+    "prefix": "commitments",
+    "post": "403 FORBIDDEN",
+    "del": "403 FORBIDDEN",
+    "doorOpen": false
+  },
+  {
+    "role": "finance",
+    "prefix": "pay-apps",
+    "post": "403 FORBIDDEN",
+    "del": "403 FORBIDDEN",
+    "doorOpen": false
+  },
+  {
+    "role": "finance",
+    "prefix": "ipc",
+    "post": "403 FORBIDDEN",
+    "del": "404 NOT_FOUND",
+    "doorOpen": false
+  },
+  {
+    "role": "finance",
+    "prefix": "eot",
+    "post": "403 FORBIDDEN",
+    "del": "404 NOT_FOUND",
+    "doorOpen": false
+  },
+  {
+    "role": "finance",
+    "prefix": "change-orders",
+    "post": "403 FORBIDDEN",
+    "del": "403 FORBIDDEN",
+    "doorOpen": false
+  },
+  {
+    "role": "finance",
+    "prefix": "direct-costs",
+    "post": "403 FORBIDDEN",
+    "del": "403 FORBIDDEN",
+    "doorOpen": false
+  },
+  {
+    "role": "finance",
+    "prefix": "purchase-orders",
+    "post": "404 NOT_FOUND",
+    "del": "404 NOT_FOUND",
+    "doorOpen": false
+  },
+  {
+    "role": "finance",
+    "prefix": "procurement/packages",
+    "post": "403 FORBIDDEN",
+    "del": "404 NOT_FOUND",
+    "doorOpen": false
+  },
+  {
+    "role": "finance",
+    "prefix": "cost/codes",
+    "post": "404 NOT_FOUND",
+    "del": "404 NOT_FOUND",
+    "doorOpen": false
+  },
+  {
+    "role": "finance",
+    "prefix": "budget/lines",
+    "post": "403 FORBIDDEN",
+    "del": "403 FORBIDDEN",
+    "doorOpen": false
+  },
+  {
+    "role": "finance",
+    "prefix": "forecast",
+    "post": "404 NOT_FOUND",
+    "del": "404 NOT_FOUND",
+    "doorOpen": false
+  },
+  {
+    "role": "finance",
+    "prefix": "lookaheads",
+    "post": "403 FORBIDDEN",
+    "del": "403 FORBIDDEN",
+    "doorOpen": false
+  },
+  {
+    "role": "finance",
+    "prefix": "site-diaries",
+    "post": "403 FORBIDDEN",
+    "del": "404 NOT_FOUND",
+    "doorOpen": false
+  },
+  {
+    "role": "finance",
+    "prefix": "daily-reports",
+    "post": "403 FORBIDDEN",
+    "del": "404 NOT_FOUND",
+    "doorOpen": false
+  },
+  {
+    "role": "finance",
+    "prefix": "specifications",
+    "post": "404 NOT_FOUND",
+    "del": "404 NOT_FOUND",
+    "doorOpen": false
+  },
+  {
+    "role": "finance",
+    "prefix": "form-templates",
+    "post": "404 NOT_FOUND",
+    "del": "404 NOT_FOUND",
+    "doorOpen": false
+  },
+  {
+    "role": "finance",
+    "prefix": "forms",
+    "post": "403 FORBIDDEN",
+    "del": "403 FORBIDDEN",
+    "doorOpen": false
+  },
+  {
+    "role": "finance",
+    "prefix": "bim",
+    "post": "404 NOT_FOUND",
+    "del": "404 NOT_FOUND",
+    "doorOpen": false
+  },
+  {
+    "role": "finance",
+    "prefix": "change-events",
+    "post": "403 FORBIDDEN",
+    "del": "403 FORBIDDEN",
+    "doorOpen": false
+  },
+  {
+    "role": "finance",
+    "prefix": "equipment",
+    "post": "403 FORBIDDEN",
+    "del": "403 FORBIDDEN",
+    "doorOpen": false
+  },
+  {
+    "role": "finance",
+    "prefix": "contract",
+    "post": "404 NOT_FOUND",
+    "del": "404 NOT_FOUND",
+    "doorOpen": false
+  },
+  {
+    "role": "finance",
+    "prefix": "activities",
+    "post": "403 FORBIDDEN",
+    "del": "403 FORBIDDEN",
+    "doorOpen": false
+  },
+  {
+    "role": "finance",
+    "prefix": "comments",
+    "post": "400 VALIDATION_ERROR",
+    "del": "404 COMMENT_NOT_FOUND",
+    "doorOpen": true
+  },
+  {
+    "role": "finance",
+    "prefix": "custom-fields",
+    "post": "404 NOT_FOUND",
+    "del": "404 NOT_FOUND",
+    "doorOpen": false
+  },
+  {
+    "role": "finance",
+    "prefix": "inventory/items",
+    "post": "404 NOT_FOUND",
+    "del": "404 NOT_FOUND",
+    "doorOpen": false
+  }
+]

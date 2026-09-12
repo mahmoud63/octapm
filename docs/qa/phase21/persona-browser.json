@@ -1,0 +1,811 @@
+{
+  "ranAt": "2026-09-12T18:54:39.654Z",
+  "project": {
+    "id": "0ce999f2-b175-432b-8551-20182b4fc990",
+    "name": "OCTA PHASE21 GREENFIELD 20260910093852"
+  },
+  "personas": {
+    "pm": {
+      "label": "Project Manager",
+      "email": "pm@octapm.demo",
+      "landingUrl": "/",
+      "landingText": "Skip to Main Select project Dashboard Projects Portfolio Inventory Reports Tasks Messages Users Company Settings Help Center Live Search ⌘ K 9+ Notifications Toggle theme DO Workspace Control Construction health, approva",
+      "sidebar": [
+        "Dashboard",
+        "Projects",
+        "Portfolio",
+        "Inventory",
+        "Reports",
+        "Tasks",
+        "Messages",
+        "Users",
+        "Company",
+        "Help Center"
+      ],
+      "responsibilitySignal": "waiting on you right now",
+      "projectTabs": [
+        "Export",
+        "Update Schedule",
+        "More actions",
+        "Lock Baseline",
+        "All sources",
+        "All actions",
+        "Ack",
+        "Resolve",
+        "Edit",
+        "Baseline",
+        "Resources",
+        "Classic schedule",
+        "Day",
+        "Week",
+        "Month",
+        "Quarter"
+      ],
+      "projectText": "Skip to Main OCTA PHASE21 GREENFIELD 20260910093852 Dashboard Projects Portfolio Inventory Reports Tasks Messages Users Company Settings Help Center Live Search ⌘ K 9+ Notifications Toggle theme DO Ov",
+      "ownPage": {
+        "url": "/projects/0ce999f2-b175-432b-8551-20182b4fc990/commercial",
+        "text": "Skip to Main OCTA PHASE21 GREENFIELD 20260910093852 Dashboard Projects Portfolio Inventory Reports Tasks Messages Users Company Settings Help Center Live Search ⌘ K 9+ Notifications Toggle theme DO Overview Schedule Site Reporting Cost Control Commercial Quali",
+        "forbiddenText": false,
+        "consoleErrors": [
+          "Failed to load resource: the server responded with a status of 401 (Unauthorized)"
+        ],
+        "failedRequests": [
+          "401 GET /auth/me"
+        ],
+        "visibleActions": [
+          "Add Change Order",
+          "All sources",
+          "All actions",
+          "Edit",
+          "Archive",
+          "History"
+        ]
+      },
+      "usersPage": {
+        "text": "Skip to Main Select project Dashboard Projects Portfolio Inventory Reports Tasks Messages Users Company Settings Help Center Live Search ⌘ K",
+        "failedRequests": [
+          "401 GET /auth/me"
+        ]
+      }
+    },
+    "planner": {
+      "label": "Planning Engineer",
+      "email": "planner@octapm.demo",
+      "landingUrl": "/",
+      "landingText": "Skip to Main Select project Dashboard Projects Portfolio Inventory Reports Tasks Messages Users Company Settings Help Center Live Search ⌘ K 8 Notifications Toggle theme RM Workspace Control Construction health, approval",
+      "sidebar": [
+        "Dashboard",
+        "Projects",
+        "Portfolio",
+        "Inventory",
+        "Reports",
+        "Tasks",
+        "Messages",
+        "Users",
+        "Company",
+        "Help Center"
+      ],
+      "responsibilitySignal": "waiting on you right now",
+      "projectTabs": [
+        "Export",
+        "Update Schedule",
+        "More actions",
+        "All sources",
+        "All actions",
+        "Ack",
+        "Resolve",
+        "Edit",
+        "Baseline",
+        "Resources",
+        "Classic schedule",
+        "Day",
+        "Week",
+        "Month",
+        "Quarter"
+      ],
+      "projectText": "Skip to Main OCTA PHASE21 GREENFIELD 20260910093852 Dashboard Projects Portfolio Inventory Reports Tasks Messages Users Company Settings Help Center Live Search ⌘ K 8 Notifications Toggle theme RM Ove",
+      "ownPage": {
+        "url": "/projects/0ce999f2-b175-432b-8551-20182b4fc990/schedule",
+        "text": "Skip to Main OCTA PHASE21 GREENFIELD 20260910093852 Dashboard Projects Portfolio Inventory Reports Tasks Messages Users Company Settings Help Center Live Search ⌘ K 8 Notifications Toggle theme RM Overview Schedule Site Reporting Cost Control Commercial Qualit",
+        "forbiddenText": false,
+        "consoleErrors": [
+          "Failed to load resource: the server responded with a status of 401 (Unauthorized)"
+        ],
+        "failedRequests": [
+          "401 GET /auth/me"
+        ],
+        "visibleActions": [
+          "Export",
+          "Update Schedule",
+          "More actions",
+          "All sources",
+          "All actions",
+          "Ack",
+          "Resolve",
+          "Edit",
+          "Baseline",
+          "Resources",
+          "Classic schedule",
+          "Day",
+          "Week",
+          "Month",
+          "Quarter"
+        ]
+      },
+      "usersPage": {
+        "text": "Skip to Main Select project Dashboard Projects Portfolio Inventory Reports Tasks Messages Users Company Settings Help Center Live Search ⌘ K",
+        "failedRequests": [
+          "401 GET /auth/me"
+        ]
+      }
+    },
+    "qs": {
+      "label": "Quantity Surveyor",
+      "email": "qs@octapm.demo",
+      "landingUrl": "/",
+      "landingText": "Skip to Main Select project Dashboard Projects Portfolio Inventory Reports Tasks Messages Users Company Settings Help Center Live Search ⌘ K 9+ Notifications Toggle theme SL Workspace Control Construction health, approva",
+      "sidebar": [
+        "Dashboard",
+        "Projects",
+        "Portfolio",
+        "Inventory",
+        "Reports",
+        "Tasks",
+        "Messages",
+        "Users",
+        "Company",
+        "Help Center"
+      ],
+      "responsibilitySignal": "waiting on you right now",
+      "projectTabs": [
+        "Export",
+        "All sources",
+        "All actions",
+        "Baseline",
+        "Resources",
+        "Classic schedule",
+        "Day",
+        "Week",
+        "Month",
+        "Quarter"
+      ],
+      "projectText": "Skip to Main OCTA PHASE21 GREENFIELD 20260910093852 Dashboard Projects Portfolio Inventory Reports Tasks Messages Users Company Settings Help Center Live Search ⌘ K 9+ Notifications Toggle theme SL Ov",
+      "ownPage": {
+        "url": "/projects/0ce999f2-b175-432b-8551-20182b4fc990/commercial/change-orders",
+        "text": "Skip to Main OCTA PHASE21 GREENFIELD 20260910093852 Dashboard Projects Portfolio Inventory Reports Tasks Messages Users Company Settings Help Center Live Search ⌘ K 9+ Notifications Toggle theme SL Overview Schedule Site Reporting Cost Control Commercial Quali",
+        "forbiddenText": false,
+        "consoleErrors": [
+          "Failed to load resource: the server responded with a status of 401 (Unauthorized)"
+        ],
+        "failedRequests": [
+          "401 GET /auth/me"
+        ],
+        "visibleActions": [
+          "Add Change Order",
+          "All sources",
+          "All actions",
+          "Edit",
+          "Archive",
+          "History"
+        ]
+      },
+      "usersPage": {
+        "text": "Skip to Main Select project Dashboard Projects Portfolio Inventory Reports Tasks Messages Users Company Settings Help Center Live Search ⌘ K",
+        "failedRequests": [
+          "401 GET /auth/me"
+        ]
+      }
+    },
+    "cost": {
+      "label": "Cost Controller",
+      "email": "cost@octapm.demo",
+      "landingUrl": "/",
+      "landingText": "Skip to Main Select project Dashboard Projects Portfolio Inventory Reports Tasks Messages Users Company Settings Help Center Live Search ⌘ K 9+ Notifications Toggle theme TH Workspace Control Construction health, approva",
+      "sidebar": [
+        "Dashboard",
+        "Projects",
+        "Portfolio",
+        "Inventory",
+        "Reports",
+        "Tasks",
+        "Messages",
+        "Users",
+        "Company",
+        "Help Center"
+      ],
+      "responsibilitySignal": "waiting on you right now",
+      "projectTabs": [
+        "Export",
+        "All sources",
+        "All actions",
+        "Baseline",
+        "Resources",
+        "Classic schedule",
+        "Day",
+        "Week",
+        "Month",
+        "Quarter"
+      ],
+      "projectText": "Skip to Main OCTA PHASE21 GREENFIELD 20260910093852 Dashboard Projects Portfolio Inventory Reports Tasks Messages Users Company Settings Help Center Live Search ⌘ K 9+ Notifications Toggle theme TH Ov",
+      "ownPage": {
+        "url": "/projects/0ce999f2-b175-432b-8551-20182b4fc990/cost",
+        "text": "Skip to Main OCTA PHASE21 GREENFIELD 20260910093852 Dashboard Projects Portfolio Inventory Reports Tasks Messages Users Company Settings Help Center Live Search ⌘ K 9+ Notifications Toggle theme TH Overview Schedule Site Reporting Cost Control Commercial Quali",
+        "forbiddenText": false,
+        "consoleErrors": [
+          "Failed to load resource: the server responded with a status of 401 (Unauthorized)",
+          "Failed to load resource: the server responded with a status of 403 (Forbidden)"
+        ],
+        "failedRequests": [
+          "401 GET /auth/me",
+          "403 GET /projects/0ce999f2-b175-432b-8551-20182b4fc990/parties"
+        ],
+        "visibleActions": []
+      },
+      "usersPage": {
+        "text": "Skip to Main Select project Dashboard Projects Portfolio Inventory Reports Tasks Messages Users Company Settings Help Center Live Search ⌘ K",
+        "failedRequests": [
+          "401 GET /auth/me",
+          "403 GET /users"
+        ]
+      }
+    },
+    "procurement": {
+      "label": "Procurement Manager",
+      "email": "procurement@octapm.demo",
+      "landingUrl": "/",
+      "landingText": "Skip to Main Select project Dashboard Projects Portfolio Inventory Reports Tasks Messages Users Company Settings Help Center Live Search ⌘ K 9+ Notifications Toggle theme AB Workspace Control Construction health, approva",
+      "sidebar": [
+        "Dashboard",
+        "Projects",
+        "Portfolio",
+        "Inventory",
+        "Reports",
+        "Tasks",
+        "Messages",
+        "Users",
+        "Company",
+        "Help Center"
+      ],
+      "responsibilitySignal": "waiting on you right now",
+      "projectTabs": [
+        "Export",
+        "All sources",
+        "All actions",
+        "Ack",
+        "Resolve",
+        "Baseline",
+        "Resources",
+        "Classic schedule",
+        "Day",
+        "Week",
+        "Month",
+        "Quarter"
+      ],
+      "projectText": "Skip to Main OCTA PHASE21 GREENFIELD 20260910093852 Dashboard Projects Portfolio Inventory Reports Tasks Messages Users Company Settings Help Center Live Search ⌘ K 9+ Notifications Toggle theme AB Ov",
+      "ownPage": {
+        "url": "/projects/0ce999f2-b175-432b-8551-20182b4fc990/procurement/purchase-orders",
+        "text": "Skip to Main OCTA PHASE21 GREENFIELD 20260910093852 Dashboard Projects Portfolio Inventory Reports Tasks Messages Users Company Settings Help Center Live Search ⌘ K 9+ Notifications Toggle theme AB Overview Schedule Commercial Quality Doc Control Meetings BOQ ",
+        "forbiddenText": false,
+        "consoleErrors": [
+          "Failed to load resource: the server responded with a status of 401 (Unauthorized)",
+          "Failed to load resource: the server responded with a status of 403 (Forbidden)"
+        ],
+        "failedRequests": [
+          "401 GET /auth/me",
+          "403 GET /projects/0ce999f2-b175-432b-8551-20182b4fc990/parties"
+        ],
+        "visibleActions": [
+          "Packages",
+          "Purchase Orders",
+          "Suppliers",
+          "All",
+          "Draft1",
+          "Fully invoiced2"
+        ]
+      },
+      "usersPage": {
+        "text": "Skip to Main Select project Dashboard Projects Portfolio Inventory Reports Tasks Messages Users Company Settings Help Center Live Search ⌘ K",
+        "failedRequests": [
+          "401 GET /auth/me",
+          "403 GET /users"
+        ]
+      }
+    },
+    "warehouse": {
+      "label": "Storeman",
+      "email": "warehouse@octapm.demo",
+      "landingUrl": "/",
+      "landingText": "Skip to Main Select project Dashboard Projects Portfolio Inventory Reports Tasks Messages Users Company Settings Help Center Live Search ⌘ K Notifications Toggle theme JW Workspace Control Construction health, approval q",
+      "sidebar": [
+        "Dashboard",
+        "Projects",
+        "Portfolio",
+        "Inventory",
+        "Reports",
+        "Tasks",
+        "Messages",
+        "Users",
+        "Company",
+        "Help Center"
+      ],
+      "responsibilitySignal": "waiting on you right now",
+      "projectTabs": [
+        "Export",
+        "All sources",
+        "All actions",
+        "Ack",
+        "Resolve",
+        "Baseline",
+        "Resources",
+        "Classic schedule",
+        "Day",
+        "Week",
+        "Month",
+        "Quarter"
+      ],
+      "projectText": "Skip to Main OCTA PHASE21 GREENFIELD 20260910093852 Dashboard Projects Portfolio Inventory Reports Tasks Messages Users Company Settings Help Center Live Search ⌘ K Notifications Toggle theme JW Overv",
+      "ownPage": {
+        "url": "/inventory",
+        "text": "Skip to Main Select project Dashboard Projects Portfolio Inventory Reports Tasks Messages Users Company Settings Help Center Live Search ⌘ K Notifications Toggle theme JW Inventory & warehouse What the company holds, where it is, and what it cost — from goods ",
+        "forbiddenText": false,
+        "consoleErrors": [
+          "Failed to load resource: the server responded with a status of 401 (Unauthorized)"
+        ],
+        "failedRequests": [
+          "401 GET /auth/me"
+        ],
+        "visibleActions": [
+          "Scan",
+          "Goods in",
+          "Match",
+          "Items",
+          "Warehouses",
+          "Dashboard",
+          "Ledger",
+          "Look up"
+        ]
+      },
+      "usersPage": {
+        "text": "Skip to Main Select project Dashboard Projects Portfolio Inventory Reports Tasks Messages Users Company Settings Help Center Live Search ⌘ K",
+        "failedRequests": [
+          "401 GET /auth/me",
+          "403 GET /users"
+        ]
+      }
+    },
+    "site": {
+      "label": "Site Engineer",
+      "email": "site@octapm.demo",
+      "landingUrl": "/",
+      "landingText": "Skip to Main Select project Dashboard Projects Portfolio Inventory Reports Tasks Messages Users Company Settings Help Center Live Search ⌘ K 9+ Notifications Toggle theme PR Workspace Control Construction health, approva",
+      "sidebar": [
+        "Dashboard",
+        "Projects",
+        "Portfolio",
+        "Inventory",
+        "Reports",
+        "Tasks",
+        "Messages",
+        "Users",
+        "Company",
+        "Help Center"
+      ],
+      "responsibilitySignal": "waiting on you right now",
+      "projectTabs": [
+        "Export",
+        "Update Schedule",
+        "All sources",
+        "All actions",
+        "Baseline",
+        "Resources",
+        "Classic schedule",
+        "Day",
+        "Week",
+        "Month",
+        "Quarter"
+      ],
+      "projectText": "Skip to Main OCTA PHASE21 GREENFIELD 20260910093852 Dashboard Projects Portfolio Inventory Reports Tasks Messages Users Company Settings Help Center Live Search ⌘ K 9+ Notifications Toggle theme PR Ov",
+      "ownPage": {
+        "url": "/projects/0ce999f2-b175-432b-8551-20182b4fc990/site-reporting",
+        "text": "Skip to Main OCTA PHASE21 GREENFIELD 20260910093852 Dashboard Projects Portfolio Inventory Reports Tasks Messages Users Company Settings Help Center Live Search ⌘ K 9+ Notifications Toggle theme PR Overview Schedule Site Reporting Commercial Quality Doc Contro",
+        "forbiddenText": false,
+        "consoleErrors": [
+          "Failed to load resource: the server responded with a status of 401 (Unauthorized)",
+          "Failed to load resource: the server responded with a status of 403 (Forbidden)",
+          "Failed to load resource: the server responded with a status of 403 (Forbidden)"
+        ],
+        "failedRequests": [
+          "401 GET /auth/me",
+          "403 GET /projects/0ce999f2-b175-432b-8551-20182b4fc990/parties"
+        ],
+        "visibleActions": [
+          "Daily Log",
+          "Timesheets",
+          "Activity",
+          "Diary",
+          "Review",
+          "Today",
+          "Manpower report",
+          "30·",
+          "31·",
+          "01·",
+          "02·",
+          "03·",
+          "04·",
+          "05·",
+          "06·",
+          "07·"
+        ]
+      },
+      "usersPage": {
+        "text": "Skip to Main Select project Dashboard Projects Portfolio Inventory Reports Tasks Messages Users Company Settings Help Center Live Search ⌘ K",
+        "failedRequests": [
+          "401 GET /auth/me",
+          "403 GET /users"
+        ]
+      }
+    },
+    "finance": {
+      "label": "Finance",
+      "email": "finance@octapm.demo",
+      "landingUrl": "/",
+      "landingText": "Skip to Main Select project Dashboard Projects Portfolio Inventory Reports Tasks Messages Users Company Settings Help Center Live Search ⌘ K 9+ Notifications Toggle theme GM Workspace Control Construction health, approva",
+      "sidebar": [
+        "Dashboard",
+        "Projects",
+        "Portfolio",
+        "Inventory",
+        "Reports",
+        "Tasks",
+        "Messages",
+        "Users",
+        "Company",
+        "Help Center"
+      ],
+      "responsibilitySignal": "waiting on you right now",
+      "projectTabs": [
+        "Export",
+        "All sources",
+        "All actions",
+        "Baseline",
+        "Resources",
+        "Classic schedule",
+        "Day",
+        "Week",
+        "Month",
+        "Quarter"
+      ],
+      "projectText": "Skip to Main OCTA PHASE21 GREENFIELD 20260910093852 Dashboard Projects Portfolio Inventory Reports Tasks Messages Users Company Settings Help Center Live Search ⌘ K 9+ Notifications Toggle theme GM Ov",
+      "ownPage": {
+        "url": "/projects/0ce999f2-b175-432b-8551-20182b4fc990/commercial/ipc",
+        "text": "Skip to Main OCTA PHASE21 GREENFIELD 20260910093852 Dashboard Projects Portfolio Inventory Reports Tasks Messages Users Company Settings Help Center Live Search ⌘ K 9+ Notifications Toggle theme GM Overview Schedule Site Reporting Cost Control Commercial Quali",
+        "forbiddenText": false,
+        "consoleErrors": [
+          "Failed to load resource: the server responded with a status of 401 (Unauthorized)",
+          "Failed to load resource: the server responded with a status of 403 (Forbidden)"
+        ],
+        "failedRequests": [
+          "401 GET /auth/me",
+          "403 GET /projects/0ce999f2-b175-432b-8551-20182b4fc990/parties"
+        ],
+        "visibleActions": [
+          "All sources",
+          "All actions",
+          "Record",
+          "Release"
+        ]
+      },
+      "usersPage": {
+        "text": "Skip to Main Select project Dashboard Projects Portfolio Inventory Reports Tasks Messages Users Company Settings Help Center Live Search ⌘ K",
+        "failedRequests": [
+          "401 GET /auth/me",
+          "403 GET /users"
+        ]
+      }
+    }
+  },
+  "deepLinks": [
+    {
+      "key": "drawing",
+      "recordType": "drawing",
+      "recordId": "174d8121-393e-4c50-abcf-af5bbf4c2be5",
+      "ref": "P21-20260910093852-S-101",
+      "url": "/projects/0ce999f2-b175-432b-8551-20182b4fc990/doc-control/drawings?recordId=174d8121-393e-4c50-abcf-af5bbf4c2be5&source=drawing",
+      "verdict": "MODULE HOME ONLY",
+      "evidence": "no dialog; ref NOT visible; Skip to Main OCTA PHASE21 GREENFIELD 20260910093852 Dashboard Projects Portfolio Inventory",
+      "failedRequests": [
+        "401 /auth/me"
+      ]
+    },
+    {
+      "key": "submittal",
+      "recordType": "submittal",
+      "recordId": "d759eed8-2638-4987-980d-5e6423739dad",
+      "ref": "SUB-001",
+      "url": "/projects/0ce999f2-b175-432b-8551-20182b4fc990/doc-control/submittals?recordId=d759eed8-2638-4987-980d-5e6423739dad&source=submittal",
+      "verdict": "RECORD OPENED",
+      "evidence": "dialog; ref visible; Skip to Main OCTA PHASE21 GREENFIELD 20260910093852 Dashboard Projects Portfolio Inventory",
+      "failedRequests": [
+        "401 /auth/me"
+      ]
+    },
+    {
+      "key": "transmittal",
+      "recordType": "transmittal",
+      "recordId": "db359ad8-916f-45ea-b512-a8d89a4cbc71",
+      "ref": "TRM-001",
+      "url": "/projects/0ce999f2-b175-432b-8551-20182b4fc990/doc-control/transmittals?recordId=db359ad8-916f-45ea-b512-a8d89a4cbc71&source=transmittal",
+      "verdict": "RECORD ON SCREEN (list row, no detail opened)",
+      "evidence": "no dialog; ref visible; Skip to Main OCTA PHASE21 GREENFIELD 20260910093852 Dashboard Projects Portfolio Inventory",
+      "failedRequests": [
+        "401 /auth/me"
+      ]
+    },
+    {
+      "key": "correspondence",
+      "recordType": "correspondence",
+      "recordId": "9bf7b703-f317-4c9f-8f51-7a69604ccab1",
+      "ref": "COR-001",
+      "url": "/projects/0ce999f2-b175-432b-8551-20182b4fc990/doc-control/correspondence?recordId=9bf7b703-f317-4c9f-8f51-7a69604ccab1&source=correspondence",
+      "verdict": "RECORD ON SCREEN (list row, no detail opened)",
+      "evidence": "no dialog; ref visible; Skip to Main OCTA PHASE21 GREENFIELD 20260910093852 Dashboard Projects Portfolio Inventory",
+      "failedRequests": [
+        "401 /auth/me"
+      ]
+    },
+    {
+      "key": "rfi",
+      "recordType": "rfi",
+      "recordId": "06f4ea91-9fc6-49dd-a7c8-24ee67c1f6ca",
+      "ref": "RFI-001",
+      "url": "/projects/0ce999f2-b175-432b-8551-20182b4fc990/doc-control/rfi?recordId=06f4ea91-9fc6-49dd-a7c8-24ee67c1f6ca&source=rfi",
+      "verdict": "RECORD OPENED",
+      "evidence": "dialog; ref visible; Skip to Main OCTA PHASE21 GREENFIELD 20260910093852 Dashboard Projects Portfolio Inventory",
+      "failedRequests": [
+        "401 /auth/me"
+      ]
+    },
+    {
+      "key": "ncr",
+      "recordType": "ncr",
+      "recordId": "73dce703-7588-4aef-a4aa-aa2c39deda07",
+      "ref": "NCR-001",
+      "url": "/projects/0ce999f2-b175-432b-8551-20182b4fc990/quality/ncr?recordId=73dce703-7588-4aef-a4aa-aa2c39deda07&source=ncr",
+      "verdict": "RECORD ON SCREEN (list row, no detail opened)",
+      "evidence": "no dialog; ref visible; Skip to Main OCTA PHASE21 GREENFIELD 20260910093852 Dashboard Projects Portfolio Inventory",
+      "failedRequests": [
+        "401 /auth/me"
+      ]
+    },
+    {
+      "key": "itp",
+      "recordType": "itp",
+      "recordId": "4fcbdbe1-fdb7-4d0a-abb3-4e7adb0f13a9",
+      "ref": "ITP-001",
+      "url": "/projects/0ce999f2-b175-432b-8551-20182b4fc990/quality/itp?recordId=4fcbdbe1-fdb7-4d0a-abb3-4e7adb0f13a9&source=itp",
+      "verdict": "MODULE HOME ONLY",
+      "evidence": "dialog; ref NOT visible; Skip to Main OCTA PHASE21 GREENFIELD 20260910093852 Dashboard Projects Portfolio Inventory",
+      "failedRequests": [
+        "401 /auth/me",
+        "404 /projects/0ce999f2-b175-432b-8551-20182b4fc990/forms/4fcbdbe1-fdb7-4d0a-abb3-4e7adb0f13a9"
+      ]
+    },
+    {
+      "key": "defect",
+      "recordType": "defect",
+      "recordId": "186446e0-46bd-400a-97a7-30736387ded7",
+      "ref": "DEF-001",
+      "url": "/projects/0ce999f2-b175-432b-8551-20182b4fc990/quality/defects?recordId=186446e0-46bd-400a-97a7-30736387ded7&source=defect",
+      "verdict": "MODULE HOME ONLY",
+      "evidence": "dialog; ref NOT visible; Skip to Main OCTA PHASE21 GREENFIELD 20260910093852 Dashboard Projects Portfolio Inventory",
+      "failedRequests": [
+        "401 /auth/me",
+        "404 /projects/0ce999f2-b175-432b-8551-20182b4fc990/punch/186446e0-46bd-400a-97a7-30736387ded7"
+      ]
+    },
+    {
+      "key": "punch_item",
+      "recordType": "punch_item",
+      "recordId": "d82fd999-8e07-4c70-8302-0b4bc8dd9a14",
+      "ref": "PL-001",
+      "url": "/projects/0ce999f2-b175-432b-8551-20182b4fc990/quality/defects?recordId=d82fd999-8e07-4c70-8302-0b4bc8dd9a14&source=punch_item",
+      "verdict": "RECORD OPENED",
+      "evidence": "dialog; ref visible; Skip to Main OCTA PHASE21 GREENFIELD 20260910093852 Dashboard Projects Portfolio Inventory",
+      "failedRequests": [
+        "401 /auth/me"
+      ]
+    },
+    {
+      "key": "observation",
+      "recordType": "observation",
+      "recordId": "e52c90e8-fdcc-402d-948c-e9e7dbadda33",
+      "ref": "OBS-001",
+      "url": "/projects/0ce999f2-b175-432b-8551-20182b4fc990/quality/observations?recordId=e52c90e8-fdcc-402d-948c-e9e7dbadda33&source=observation",
+      "verdict": "RECORD OPENED",
+      "evidence": "dialog; ref visible; Skip to Main OCTA PHASE21 GREENFIELD 20260910093852 Dashboard Projects Portfolio Inventory",
+      "failedRequests": [
+        "401 /auth/me"
+      ]
+    },
+    {
+      "key": "daily_log",
+      "recordType": "daily_log",
+      "recordId": "2027-02-01",
+      "ref": "2027-02-01",
+      "url": "/projects/0ce999f2-b175-432b-8551-20182b4fc990/site-reporting?recordId=2027-02-01&source=daily_log",
+      "verdict": "MODULE HOME ONLY",
+      "evidence": "no dialog; ref NOT visible; Skip to Main OCTA PHASE21 GREENFIELD 20260910093852 Dashboard Projects Portfolio Inventory",
+      "failedRequests": [
+        "401 /auth/me"
+      ]
+    },
+    {
+      "key": "safety_incident",
+      "recordType": "safety_incident",
+      "recordId": "1519aa97-8755-42c4-b532-5965e858060d",
+      "ref": "SAF-001",
+      "url": "/projects/0ce999f2-b175-432b-8551-20182b4fc990/quality/safety?recordId=1519aa97-8755-42c4-b532-5965e858060d&source=safety_incident",
+      "verdict": "RECORD ON SCREEN (list row, no detail opened)",
+      "evidence": "no dialog; ref visible; Skip to Main OCTA PHASE21 GREENFIELD 20260910093852 Dashboard Projects Portfolio Inventory",
+      "failedRequests": [
+        "401 /auth/me"
+      ]
+    },
+    {
+      "key": "weather_delay",
+      "recordType": "weather_delay",
+      "recordId": "7f967459-5daf-43b6-a6c6-b157149c2680",
+      "ref": "7f967459-5daf-43b6-a6c6-b157149c2680",
+      "url": "/projects/0ce999f2-b175-432b-8551-20182b4fc990/commercial/weather?recordId=7f967459-5daf-43b6-a6c6-b157149c2680&source=weather_delay",
+      "verdict": "MODULE HOME ONLY",
+      "evidence": "no dialog; ref NOT visible; Skip to Main OCTA PHASE21 GREENFIELD 20260910093852 Dashboard Projects Portfolio Inventory",
+      "failedRequests": [
+        "401 /auth/me"
+      ]
+    },
+    {
+      "key": "meeting",
+      "recordType": "meeting",
+      "recordId": "e263d5f6-94b8-4e66-982f-6f8deccb23db",
+      "ref": "P21-20260910093852 MTG-01 Weekly progress meeting, week 5",
+      "url": "/projects/0ce999f2-b175-432b-8551-20182b4fc990/meetings?recordId=e263d5f6-94b8-4e66-982f-6f8deccb23db&source=meeting",
+      "verdict": "RECORD ON SCREEN (list row, no detail opened)",
+      "evidence": "no dialog; ref visible; Skip to Main OCTA PHASE21 GREENFIELD 20260910093852 Dashboard Projects Portfolio Inventory",
+      "failedRequests": [
+        "401 /auth/me"
+      ]
+    },
+    {
+      "key": "task",
+      "recordType": "task",
+      "recordId": "e56f75ad-0cbb-41d6-a6d6-fef36175bc8b",
+      "ref": "P21-20260910093852 TSK-01 Re-brief lifting plan and tag lines to the steelfixing crew",
+      "url": "/tasks?recordId=e56f75ad-0cbb-41d6-a6d6-fef36175bc8b",
+      "verdict": "RECORD ON SCREEN (list row, no detail opened)",
+      "evidence": "no dialog; ref visible; Skip to Main Select project Dashboard Projects Portfolio Inventory Reports Tasks Messages ",
+      "failedRequests": [
+        "401 /auth/me"
+      ]
+    },
+    {
+      "key": "change_order",
+      "recordType": "change_order",
+      "recordId": "84ec8b03-7fd3-4711-9145-0c691eb2308a",
+      "ref": "VO-20",
+      "url": "/projects/0ce999f2-b175-432b-8551-20182b4fc990/commercial/change-orders?recordId=84ec8b03-7fd3-4711-9145-0c691eb2308a&source=change_order",
+      "verdict": "RECORD ON SCREEN (list row, no detail opened)",
+      "evidence": "no dialog; ref visible; Skip to Main OCTA PHASE21 GREENFIELD 20260910093852 Dashboard Projects Portfolio Inventory",
+      "failedRequests": [
+        "401 /auth/me"
+      ]
+    },
+    {
+      "key": "procurement_order",
+      "recordType": "procurement_order",
+      "recordId": "43a9dae8-c56f-407a-913f-d0925b7728ee",
+      "ref": "PO-20260910093852-A",
+      "url": "/projects/0ce999f2-b175-432b-8551-20182b4fc990/procurement/purchase-orders?recordId=43a9dae8-c56f-407a-913f-d0925b7728ee&source=procurement_order",
+      "verdict": "RECORD OPENED",
+      "evidence": "dialog; ref visible; Skip to Main OCTA PHASE21 GREENFIELD 20260910093852 Dashboard Projects Portfolio Inventory",
+      "failedRequests": [
+        "401 /auth/me"
+      ]
+    },
+    {
+      "key": "commitment",
+      "recordType": "commitment",
+      "recordId": "ca6ea0ff-15e9-43ed-ae46-90d2fcb84e6b",
+      "ref": "SC-001",
+      "url": "/projects/0ce999f2-b175-432b-8551-20182b4fc990/commercial/commitments?recordId=ca6ea0ff-15e9-43ed-ae46-90d2fcb84e6b&source=commitment",
+      "verdict": "RECORD OPENED",
+      "evidence": "dialog; ref visible; Skip to Main OCTA PHASE21 GREENFIELD 20260910093852 Dashboard Projects Portfolio Inventory",
+      "failedRequests": [
+        "401 /auth/me"
+      ]
+    },
+    {
+      "key": "sub_pay_app",
+      "recordType": "sub_pay_app",
+      "recordId": "b1057973-84f9-4910-8127-0754fdced215",
+      "ref": "SC-001-PA01",
+      "url": "/projects/0ce999f2-b175-432b-8551-20182b4fc990/commercial/pay-apps?recordId=b1057973-84f9-4910-8127-0754fdced215&source=sub_pay_app",
+      "verdict": "RECORD OPENED",
+      "evidence": "dialog; ref visible; Skip to Main OCTA PHASE21 GREENFIELD 20260910093852 Dashboard Projects Portfolio Inventory",
+      "failedRequests": [
+        "401 /auth/me"
+      ]
+    },
+    {
+      "key": "bid_package",
+      "recordType": "bid_package",
+      "recordId": "cc95fbf6-35dc-418e-96ed-3df863ee1bce",
+      "ref": "BP-001",
+      "url": "/projects/0ce999f2-b175-432b-8551-20182b4fc990/commercial/bids?recordId=cc95fbf6-35dc-418e-96ed-3df863ee1bce&source=bid_package",
+      "verdict": "RECORD OPENED",
+      "evidence": "dialog; ref visible; Skip to Main OCTA PHASE21 GREENFIELD 20260910093852 Dashboard Projects Portfolio Inventory",
+      "failedRequests": [
+        "401 /auth/me"
+      ]
+    },
+    {
+      "key": "procurement_package",
+      "recordType": "procurement_package",
+      "recordId": "48aaf02b-b47e-452c-baa0-a12d5d6c4186",
+      "ref": null,
+      "url": "/projects/0ce999f2-b175-432b-8551-20182b4fc990/schedule/longLead?recordId=48aaf02b-b47e-452c-baa0-a12d5d6c4186&source=procurement_package",
+      "verdict": "MODULE HOME ONLY",
+      "evidence": "no dialog; ref unknown; Skip to Main OCTA PHASE21 GREENFIELD 20260910093852 Dashboard Projects Portfolio Inventory",
+      "failedRequests": [
+        "401 /auth/me"
+      ]
+    },
+    {
+      "key": "direct_cost",
+      "recordType": "direct_cost",
+      "recordId": "3152efea-9e65-49e9-8b50-d100d9c62a42",
+      "ref": "DC-001",
+      "url": "/projects/0ce999f2-b175-432b-8551-20182b4fc990/cost/direct-costs?recordId=3152efea-9e65-49e9-8b50-d100d9c62a42&source=direct_cost",
+      "verdict": "RECORD OPENED",
+      "evidence": "dialog; ref visible; Skip to Main OCTA PHASE21 GREENFIELD 20260910093852 Dashboard Projects Portfolio Inventory",
+      "failedRequests": [
+        "401 /auth/me"
+      ]
+    },
+    {
+      "key": "timesheet",
+      "recordType": "timesheet",
+      "recordId": "3f8526f8-724b-4eec-a721-d37bae56da4d",
+      "ref": "2027-02-01",
+      "url": "/projects/0ce999f2-b175-432b-8551-20182b4fc990/site-reporting?recordId=3f8526f8-724b-4eec-a721-d37bae56da4d&source=timesheet",
+      "verdict": "RECORD OPENED",
+      "evidence": "dialog; ref visible; Skip to Main OCTA PHASE21 GREENFIELD 20260910093852 Dashboard Projects Portfolio Inventory",
+      "failedRequests": [
+        "401 /auth/me"
+      ]
+    },
+    {
+      "key": "location",
+      "recordType": "location",
+      "recordId": "f94dc252-7671-4161-9055-3edd9c9a96af",
+      "ref": "Foundation zone, grid A-D",
+      "url": "/projects/0ce999f2-b175-432b-8551-20182b4fc990/locations?recordId=f94dc252-7671-4161-9055-3edd9c9a96af&source=location",
+      "verdict": "RECORD ON SCREEN (list row, no detail opened)",
+      "evidence": "no dialog; ref visible; Skip to Main OCTA PHASE21 GREENFIELD 20260910093852 Dashboard Projects Portfolio Inventory",
+      "failedRequests": [
+        "401 /auth/me"
+      ]
+    },
+    {
+      "key": "ipc",
+      "recordType": "ipc",
+      "recordId": "7b3dfa12-6acc-40d0-9ab1-69ea5a411445",
+      "ref": null,
+      "url": "/projects/0ce999f2-b175-432b-8551-20182b4fc990/commercial/ipc?recordId=7b3dfa12-6acc-40d0-9ab1-69ea5a411445&source=ipc",
+      "verdict": "MODULE HOME ONLY",
+      "evidence": "no dialog; ref unknown; Skip to Main OCTA PHASE21 GREENFIELD 20260910093852 Dashboard Projects Portfolio Inventory",
+      "failedRequests": [
+        "401 /auth/me"
+      ]
+    }
+  ]
+}
