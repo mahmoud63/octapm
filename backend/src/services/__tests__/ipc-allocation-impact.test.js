@@ -1021,6 +1021,6 @@ describe("IPC allocation impact", () => {
     expect(mockPrisma.ipcRetentionRelease.create).not.toHaveBeenCalled();
     // The release holds the certificate like a payment does, so two releases at
     // once are checked one after the other (Phase 21D, CX21-205).
-    expect(mockPrisma.$queryRaw.mock.calls.some((call) => Array.isArray(call[0]) && /FROM "IpcCertificate" WHERE id = ? FOR UPDATE/.test(call[0].join("?")))).toBe(true);
+    expect(mockPrisma.$queryRaw.mock.calls.some((call) => Array.isArray(call[0]) && /FROM "IpcCertificate" WHERE id = \? FOR UPDATE/.test(call[0].join("?")))).toBe(true);
   });
 });
