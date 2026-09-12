@@ -91,18 +91,31 @@ async function main() {
   save();
 
   const afterItp = await score();
-  check("the quality score dropped by exactly 15 for the failed ITP", 15, ctx.quality.scoreAtStart - afterItp.score - (afterItp.major * 20 + afterItp.minor * 8) + (before.major * 20 + before.minor * 8));
+  check("the failed ITP costs exactly 15: score = 100 − 20·major − 8·minor − 15·failed", 100 - 20 * afterItp.major - 8 * afterItp.minor - 15 * afterItp.failedItps, afterItp.score);
   check("the dashboard counts one failed ITP", 1, afterItp.failedItps);
 
   // ── 16.2 the NCR ─────────────────────────────────────────────────────────
   section("16.2  NCR-01 — major, raised by the site engineer, closed with evidence, approved by the PM");
 
   check("a storeman cannot raise an NCR", 403, (await probe(warehouse, "POST", `/projects/${P}/ncr`, { title: "x" })).status);
-  let ncr = await findByTitle(site, "ncr", TITLES.ncr1);
+  // An NCR has no title in the product: its description is its identity here.
+  const NCR_DESC = "Honeycombing over ~0.3 m² on the east face of pad footing F3; aggregate exposed to 40 mm depth.";
+  const ncrRows = rows(await GET(site, `/projects/${P}/ncr?limit=100`)).filter((r) => r.description === NCR_DESC).sort((x, y) => String(x.createdAt).localeCompare(String(y.createdAt)));
+  // T-10: the first run of this stage looked NCRs up by a title the product does not
+  // store, and the second run raised NCR-002 a second time, closed it out and had it
+  // approved before the defect was seen. That record is approved history and stays.
+  // It is named here so that a THIRD copy fails loudly.
+  if (!ctx.quality.ncrDuplicateT10 && ncrRows.length === 2) ctx.quality.ncrDuplicateT10 = ncrRows[1].id; // recorded once, 2026-09-12
+  const T10_DUPLICATE = ctx.quality.ncrDuplicateT10 || null;
+  const strays = ncrRows.slice(1).filter((r) => r.id !== T10_DUPLICATE);
+  if (strays.length) throw new Error(`unexpected duplicate NCR-01: ${strays.map((r) => r.ref).join(", ")}`);
+  if (T10_DUPLICATE) note("  T-10 duplicate on record (approved history, kept)", `${ncrRows[1]?.ref} ${T10_DUPLICATE} status=${ncrRows[1]?.status}`);
+  const EXPECTED_MAJOR = ncrRows.length; // 1 deliberate + the T-10 duplicate
+  let ncr = ncrRows[0] ?? null;
   if (!ncr) {
     ncr = await POST(site, `/projects/${P}/ncr`, {
       title: TITLES.ncr1,
-      description: "Honeycombing over ~0.3 m² on the east face of pad footing F3; aggregate exposed to 40 mm depth.",
+      description: NCR_DESC,
       severity: "major",
       activityId: ctx.activities.A130,
       responsible: "Subcontractor site foreman",
@@ -121,8 +134,8 @@ async function main() {
   check("NCR-01 is on the foundation activity", ctx.activities.A130, ncr.activityId);
 
   const afterNcr = await score();
-  check("the dashboard counts one major NCR", 1, afterNcr.major);
-  check("the quality score is 100 − 20 − 15 = 65", 65, afterNcr.score);
+  check(`the dashboard counts ${EXPECTED_MAJOR} major NCR(s) — NCR-01 plus the named T-10 duplicate`, EXPECTED_MAJOR, afterNcr.major);
+  check("the quality score is exactly 100 − 20·major − 8·minor − 15·failed ITP", 100 - 20 * afterNcr.major - 8 * afterNcr.minor - 15 * afterNcr.failedItps, afterNcr.score);
 
   if (ncr.status === "open") {
     // Closeout needs evidence; without it the product must refuse.
@@ -156,7 +169,7 @@ async function main() {
   note("  score after NCR closed", JSON.stringify(afterClose));
   // Recorded, not asserted: the rule counts NCRs raised, not NCRs open.
   ctx.quality.scoreAfterNcrClosed = afterClose.score;
-  check("a closed major NCR still counts in the score (the product's stated rule)", 65, afterClose.score);
+  check("a closed major NCR still counts in the score (the product's stated rule)", afterNcr.score, afterClose.score);
 
   // ── 16.3 the defect ──────────────────────────────────────────────────────
   section("16.3  DEF-01 — minor defect, opened by the QS, worked by the site engineer, closed by the PM");
@@ -238,7 +251,8 @@ async function main() {
   // ── 16.6 the dashboard and another tenant ────────────────────────────────
   const finalScore = await score();
   note("quality after", JSON.stringify(finalScore));
-  check("the final score is 65", 65, finalScore.score);
+  check("the final score is 100 − 20·major − 8·minor − 15·failed ITP", 100 - 20 * finalScore.major - 8 * finalScore.minor - 15 * finalScore.failedItps, finalScore.score);
+  check("nothing but NCR-01, the T-10 duplicate and the failed ITP moved the score", EXPECTED_MAJOR * 20 + 15, ctx.quality.scoreAtStart - finalScore.score);
   ctx.quality.scoreFinal = finalScore.score;
   const out = await probe(ctx.outsider, "GET", `/projects/${P}/ncr/${ncr.id}`);
   check("another tenant cannot read the NCR", true, out.status === 403 || out.status === 404);
