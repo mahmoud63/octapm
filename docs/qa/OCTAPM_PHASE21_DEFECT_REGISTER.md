@@ -155,3 +155,158 @@ Recorded because they were confirmed by trying to break them, not by reading cod
 | T-05 | Stages were not idempotent across change orders. A repeated run approved a **second** 125,000.00 variation, and approved variations cannot be reversed — so Revised Budget is 1,950,000.00 rather than the 1,825,000.00 the brief suggested. | The absolute assertion failed. The stage is now find-or-create, and the arithmetic is asserted as an identity rather than a fixed total, because the fixed total stopped being true. |
 | T-06 | The EV movement check assumed A130 started at 0%. A prior run had already progressed it, so the check double-counted. | Expected 120,000.00, got 97,500.00. Now reads the current percentage and asserts the delta from it. |
 | T-07 | **TEST DATA DEFECT.** Transactions were dated 2027 (the project's construction year) while the clock says 2026-09-10, so the EV report legitimately excluded 68,500.00 of cost from AC-to-date. | The EV report's AC (704.00) disagreed with the ledger (69,204.00). Investigated before classifying: the report documents `actualThroughDate <= cutoffDate`, and the difference is now asserted exactly rather than treated as a discrepancy. **Not a product defect.** |
+
+---
+
+# Phase 21C additions
+
+Two P1s were found and fixed in this stage; both are covered by regression
+tests that were shown to fail without the fix. Everything else found is P2 or
+P3 and is documented, not fixed, per the brief.
+
+## P21-009 · P1 · Cash flow · **FIXED**
+
+| | |
+| --- | --- |
+| **Area** | Client billing → cash flow |
+| **Persona** | Finance |
+| **Workflow** | Certify IPC-01 → issue the client invoice → record the client's 80,000.00 payment → read cash flow |
+| **Observed** | Cash flow showed **inflow 0.00** after the payment was recorded. Cash out from the subcontractor payment (54,000.00) was present; the receivable side was not. |
+| **Expected** | A recorded client payment is an inflow. |
+| **Root cause** | **PRODUCT DEFECT.** Cash flow is a materialised projection rebuilt on demand; `recordIpcPayment` wrote the payment and returned without rebuilding it, so the inflow appeared only after somebody called `POST /cash-flow/rebuild`. The subcontractor path rebuilds; the client path did not. |
+| **Financial impact** | Cash-flow reporting understated inflows by every client payment until the next unrelated rebuild. No ledger or budget figure was wrong. |
+| **Security impact** | None. |
+| **Fix** | `backend/src/services/ipc.service.js`: after the payment transaction commits, `rebuildCashFlow({ orgId, projectId })` runs; a rebuild failure is logged and does not roll back the payment (the payment is the fact; the projection is derived). Commit `c8f0be5`. |
+| **Regression test** | `backend/src/services/__tests__/ipc-payment-cash-flow.test.js` — 3 cases; 2 of 3 fail with the fix removed. |
+| **Verified** | Stage 10: inflow 0.00 before, **80,000.00** after; snapshot: cash in 80,000.00 (36 / 36). |
+| **Status** | FIXED |
+
+## P21-010 · P1 · RBAC · **FIXED**
+
+| | |
+| --- | --- |
+| **Area** | Authorisation on ten project routers |
+| **Personas** | Storeman, finance, procurement — and anyone else on the project |
+| **Workflow** | Stage 15: a storeman issued a transmittal (200); a site engineer closed a client letter (200). |
+| **Observed** | `drawings`, `transmittals`, `correspondence`, `itp`, `defects`, `material-tests`, `budget-revisions`, `cash-flow`, `sub-valuations` and `weather-delays` were mounted behind project membership only. Any member of any role could create, change or delete those records. `shared/permissions.json` says which roles may; the neighbouring routers (drawing sets, sheets, NCR, budget, sub pay apps) enforce it. |
+| **How it was found** | `rbac-audit.js`: every project-nested prefix, as two roles the policy denies, with a body that cannot pass validation. A present guard answers **403** before validation; a missing one answers **400** or a **404 …_NOT_FOUND** — the request got through the door. 22 of 108 probes got through; all on those ten routers. |
+| **Root cause** | **PRODUCT DEFECT** — the routers were written without `requirePermission`. |
+| **Data integrity impact** | Intra-tenant: a role the policy excludes could alter or delete quality and document-control records. Tenant isolation was not affected (the outsider was refused everywhere). |
+| **Security impact** | Authorisation gap inside a tenant. |
+| **Fix** | Each route now carries `requirePermission` with the module the policy already names for it — `document_control` (drawings, transmittals, correspondence), `inspection` (ITP, material tests), `punch` (defects), `cost` (budget revisions, cash flow), `sub_pay_app` (sub valuations), `eot` (weather delays). Delete follows the neighbouring convention: `document_control` and `eot` have no delete row, so their delete routes take `update` (as drawing sets do). 41 routes. Commit `935d500`. |
+| **Regression test** | `backend/src/routes/__tests__/project-route-guards.test.js` — 87 cases through the real RBAC middleware: every route as a denied role (403 FORBIDDEN) and an allowed role (through the door), plus a coverage check that fails if a route is added to one of these routers without a case. With `itp.js` reverted to its unguarded form: **5 of 87 fail**. |
+| **Verified** | `rbac-audit.js` after the fix: **2 of 108** through the door, both on `comments` — which every role may use by design (`meeting.comment`, `task.comment` list all eight roles). Stage 15 re-run: 24 / 24. Full Jest: 2,005 / 2,005. |
+| **Status** | FIXED |
+
+## P21-011 · P2 · Deep links · OPEN
+
+| | |
+| --- | --- |
+| **Area** | Record-level deep links from the quality module |
+| **Observed** | `…/quality/itp?recordId=<itp id>&source=itp` opens a dialog and fetches `GET /projects/{id}/forms/<itp id>` → **404**; `…/quality/defects?recordId=<defect id>&source=defect` opens a dialog and fetches `GET /projects/{id}/punch/<defect id>` → **404**. The link resolves to the right module and then treats the id as a different record type (form instance; punch item). |
+| **Expected** | The ITP or defect the id names opens. |
+| **Root cause** | **PRODUCT DEFECT.** `record-links.js` maps `itp` and `form_instance` to the same workspace (`quality/itp`) and `defect` and `punch_item` to the same (`quality/defects`); the pages open by id assuming one of the two types. |
+| **Impact** | A notification or comment link to an ITP or a defect lands on an error dialog. |
+| **Fix** | Not applied — behind a product decision on how the two record kinds share a page. |
+| **Evidence** | `docs/qa/phase21/persona-browser.json`, deep links `itp` and `defect`: `failedRequests` show the 404s. |
+| **Status** | OPEN |
+
+## P21-012 · P3 · Change orders · OPEN
+
+| | |
+| --- | --- |
+| **Observed** | `POST` and `PATCH /change-orders` accept `budgetLineId` (validated as a UUID) and discard it. Every approved variation on the project — including VO-22, which named budget line 01-100 on create **and** on update — sits on the product-created holding line "CO / Unassigned approved changes" (254,500.00). |
+| **Expected** | Either the field is honoured, or it is not offered. |
+| **Root cause** | **PRODUCT DEFECT** (contract), with a working fallback: the holding line keeps the Revised Budget identity exact. |
+| **Impact** | Approved changes cannot be placed on a budget line through the API; the Revised Budget total is right, its distribution is not. |
+| **Status** | OPEN |
+
+## P21-013 · P3 · Persona UX · OPEN
+
+| | |
+| --- | --- |
+| **Observed** | The sidebar offers **Users** and **Company** to every role. For cost controller, procurement, storeman, site engineer and finance, `GET /users` answers **403** and the page renders *"Engineers — No engineers yet."* — a refusal shown as an empty list. |
+| **Expected** | Either the link is not offered, or the page says it is not theirs. |
+| **Root cause** | **PRODUCT DEFECT** (UX). |
+| **Status** | OPEN |
+
+## P21-014 · P3 · Console hygiene · OPEN
+
+| | |
+| --- | --- |
+| **Observed** | Every page load, every persona: one `401 GET /auth/me` in the console before the session is established. On their own module pages, cost controller, procurement, site engineer and finance also produce `403 GET /projects/{id}/parties` — the page asks for a list the role may not read. |
+| **Impact** | Console noise on every page; a console gate that forbids 4xx would fail on a healthy session. |
+| **Root cause** | **PRODUCT DEFECT** (request ordering / role-unaware fetch). |
+| **Evidence** | `persona-browser.json` → `ownPage.failedRequests` for all eight personas. |
+| **Status** | OPEN |
+
+## P21-015 · P3 · Deep links · OPEN
+
+| | |
+| --- | --- |
+| **Observed** | Of 25 record deep links built from `record-links.js`: **10 open the record** (submittal, RFI, punch item, observation, purchase order, commitment, pay app, bid package, direct cost, timesheet — the last as the site-reporting day), **8 land on the register with the record's row visible but no detail opened** (transmittal, correspondence, NCR, safety incident, meeting, task, change order, location), **5 land on the module home with no sign of the record** (drawing, daily log, weather delay, procurement package, IPC), and **2 open the wrong record type** (P21-011). |
+| **Expected** | A record-level deep link opens the record. A module-home URL is not a record deep link. |
+| **Root cause** | **PRODUCT DEFECT** (incomplete): the `?recordId=&source=` contract exists and several modules honour it; the rest do not yet. |
+| **Status** | OPEN |
+
+## P21-016 · P3 · Procurement read model · OPEN
+
+| | |
+| --- | --- |
+| **Observed** | `GET /purchase-orders/{id}` does not carry `packageId`; the register row does. A package stays `tendering` after its bid is awarded and its PO raised. |
+| **Root cause** | **PRODUCT DEFECT** (read model / status). |
+| **Status** | OPEN |
+
+## P21-017 · P3 · OpenAPI · OPEN
+
+| | |
+| --- | --- |
+| **Observed** | `POST /direct-costs` accepts `purchaseOrderId` and line `poLineId` and the 3-way match depends on them; OpenAPI documents neither, nor `poLineId` on the invoice read. `POST /change-orders` documents `budgetLineId`, which is discarded (P21-012). |
+| **Root cause** | **DOCUMENTATION DEFECT.** |
+| **Status** | OPEN |
+
+## P21-018 · P3 · Procurement UX · OPEN
+
+| | |
+| --- | --- |
+| **Observed** | Purchase-order register, procurement persona: the "Waiting on you" card says **0 to approve · 0 unconfirmed** while PO-00001's row says **Your action** (a draft awaiting the procurement manager's own submit). |
+| **Root cause** | **PRODUCT DEFECT** (UX): the card counts approvals, the row counts any action. |
+| **Status** | OPEN |
+
+## P21-019 · P3 · Quality score · OPEN (business question)
+
+| | |
+| --- | --- |
+| **Observed** | `qualityScore = 100 − 20·majorNCRs − 8·minorNCRs − 15·failedITPs` counts NCRs **raised**, not NCRs **open**: closing and approving NCR-001 left the score where it was. |
+| **Expected** | The stated rule (CLAUDE.md) does not say; a quality score that never recovers is a product decision to confirm. |
+| **Root cause** | **EXPECTED BUSINESS RULE**, pending confirmation. |
+| **Status** | OPEN |
+
+## Verified-by-attack behaviours added in 21C
+
+- Prequalification gates the RFQ: an unqualified vendor cannot be invited (`PREQUAL_NOT_QUALIFIED`) and an ad-hoc bidder cannot be confirmed without a written override (`PREQUAL_AWARD_BLOCKED`, then `prequalOverrideReason`).
+- A converted RFI cannot be converted twice (`409 RFI_ALREADY_CONVERTED`).
+- NCR and safety closeouts refuse without evidence (`NCR_CLOSEOUT_EVIDENCE_REQUIRED`, `SAFETY_CLOSEOUT_EVIDENCE_REQUIRED`); the raiser cannot approve their own closeout.
+- A punch item is closed by the PM alone; reopening needs a reason (`PUNCH_REASON_REQUIRED`).
+- A rejected submittal cannot be approved until resubmitted and re-reviewed; a storeman cannot decide it.
+- A storeman sees only the current approved drawing revision — never the one in review, never the superseded one.
+- An approved daily log cannot be edited; the site engineer cannot approve their own day; the planner cannot approve it either.
+- A worker cannot be timesheeted for more than 24 h in a day.
+- A supplier invoice for stocked goods posts **no** second cost (delta 0.00); the price variance on PO-B is detected, not accepted (`price_variance`, blocking).
+
+## Further test defects in my own instruments (21C)
+
+| id | what was wrong | consequence, and what was done |
+| --- | --- | --- |
+| T-08 | The 21A change-order stage never verified that the instruction it uploaded was attached, and passed `budgetLineId` without checking it stuck. | The holding line's existence surprised the snapshot. Now asserted (P21-012). |
+| T-09 | Stage 14's "a converted change starts as a draft" was asserted on every run, including the one where the change was already approved. | Failed on the idempotent re-run. The status at creation is recorded once and asserted from the record. |
+| T-10 | Stage 16 looked NCRs up by `title` — a field the product does not store (an NCR's identity is its `description`). The second run raised **NCR-002**, closed it out and had it approved before the mistake was seen. | An approved record is not deleted to tidy a test. NCR-002 is **named** in the stage as the T-10 duplicate, a third copy fails loudly, and the quality score is asserted by the product's formula against the dashboard's own counts (45 = 100 − 2·20 − 15) rather than a typed 65. Recorded in `test-data-corrections.log`. |
+
+## P21-020 · P3 · Inventory analytics / e2e fixtures · OPEN
+
+| | |
+| --- | --- |
+| **Observed** | `GET /inventory/analytics` returns `variance` as a fixed first-25 with no ordering or paging. After several full Playwright runs the list is filled by purchase orders the lifecycle specs leave behind (`PO-xxxxxxxx` refs), the seeded cement row is no longer in it, and `11-inventory.spec.ts › the dashboard names the rows behind every number` fails — alone as well as in the suite. The seed's cleanup covers `PO-E2E-` and `PO-LC-` refs only. |
+| **Root cause** | **TEST DATA / ENVIRONMENT** (fixture residue the seed does not clear), and a **P3 product observation** (an unordered capped list). Not caused by any Phase 21 change: no 21C commit touches the analytics path, and the residue predates 21C. |
+| **Also in the same full run** | `11-inventory.spec.ts › a delivery against a purchase order becomes stock` failed once on a screenshot write into the OneDrive-synced `docs/design/screenshots` folder (`UNKNOWN: unknown error, open …`) and passed when the spec was re-run alone — **ENVIRONMENT**. |
+| **Status** | OPEN — clear the residue (extend the seed's prefix list, or retire the specs' orders) and give the variance list an order. |

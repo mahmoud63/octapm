@@ -210,3 +210,93 @@ value.
   whether release posts cost a second time is unknown.
 
 None of these failed. They were not reached.
+
+---
+
+# Phase 21C — the reconciliation, rebuilt
+
+Every figure below was read from the API on 2026-09-12 after the last 21C
+stage, by `snapshot.js` (**36 / 36**) and by the stages that produced it. The
+21A/21B figures above are unchanged; 21C added exactly three cost-bearing or
+cash-bearing transactions and one budget-bearing one, each named.
+
+## 10. What 21C added to the money
+
+| stage | transaction | ledger | budget | cash |
+| --- | --- | ---: | ---: | ---: |
+| 13 | 5 steelfixers × 8 h @ 50.00, approved by the cost controller | **+2,000.00** (`timesheet`, labour) | — | — |
+| 12 | supplier invoices A (1,000.00) and B (700.00) for stocked cement, approved | **+0.00** — cost was recognised at issue | — | — |
+| 14 | RFI-001 → VO-22, 4,500.00, approved by the PM | +0.00 | **+4,500.00** approved changes | — |
+| 10 | IPC-01 certified 120,000.00; invoice 108,000.00 net; client paid 80,000.00 | +0.00 | — | **+80,000.00 in** |
+
+## 11. The ledger, four ways
+
+| | |
+| --- | ---: |
+| `CostLedgerEntry` total (API, `/cost/reconciliation`) | **71,204.00** |
+| SQL `SUM(amount)` over the project's entries (21B method, re-run) | 71,204.00 |
+| budget-line actual projection | 71,204.00 |
+| activity actual projection | 71,204.00 |
+
+By source: material issue **704.00** + subcontract pay app **60,000.00** +
+direct cost **8,500.00** + timesheet **2,000.00** = 71,204.00. By cost type:
+material 704.00, subcontract 60,000.00, indirect 8,500.00, labour 2,000.00.
+The service reports itself balanced; no legacy opening balance.
+
+## 12. The budget identity
+
+| | |
+| --- | ---: |
+| Original budget (immutable) | 1,700,000.00 |
+| Approved changes — 21B (VO-18, VO-20) | 250,000.00 |
+| Approved changes — 21C (VO-22 from RFI-001) | 4,500.00 |
+| **Revised Budget** | **1,954,500.00** |
+
+Identity exact: 1,700,000.00 + 254,500.00 = 1,954,500.00. All 254,500.00 sits
+on the product's holding line "CO / Unassigned approved changes" because the
+change-order API discards `budgetLineId` (P21-012) — the total is right, the
+distribution is not, and the snapshot asserts both facts rather than one.
+
+## 13. The client side
+
+| | |
+| --- | ---: |
+| IPC-01 certified gross (three items, one per approved allocation) | 120,000.00 |
+| Retention 5 % | 12,000.00 |
+| Net certified / invoiced | 108,000.00 |
+| Received | 80,000.00 |
+| Outstanding (receivable) | 28,000.00 |
+| Cash flow in | **80,000.00** (0.00 before the P21-009 fix) |
+| Cash flow out (subcontractor, 21B) | 54,000.00 |
+
+Certified revenue equals earned value (120,000.00 = 120,000.00) because the
+same approved progress governs both — a genuine cross-check, not a
+tautology: EV was derived independently from allocation amounts × percent
+complete in 21B, and the IPC items were capped by the product from the same
+allocations in 21C.
+
+## 14. Three-way match, to the cent
+
+| PO | ordered | received | invoiced | variance | verdict |
+| --- | ---: | ---: | ---: | ---: | --- |
+| A | 100 @ 10.00 = 1,000.00 | 1,000.00 | 1,000.00 | 0.00 | clean |
+| B | 50 @ 13.00 = 650.00 | 650.00 | 50 @ 14.00 = **700.00** | **+50.00** | `price_variance`, blocking |
+
+Both invoices approved; ledger delta **0.00**; material issue still the only
+material cost source (704.00).
+
+## 15. Earned value, as of the cutoff
+
+Unchanged from 21B and stated rather than hidden: the EV report's AC counts
+cost dated on or before its cutoff (`actualThroughDate <= cutoffDate`); the
+2027-dated subcontract, crane, cement and labour costs are beyond the 2026
+cutoff and are counted in the lifetime ledger, not in AC-to-date (T-07,
+**not** a product defect). EV 120,000.00 at the 2026 cutoff; lifetime ledger
+71,204.00.
+
+## 16. What moved that should not have — nothing
+
+Receiving stock, invoicing stocked goods, approving two variations, booking
+progress, recording payments in and out, closing an NCR, approving a daily
+log: each left the ledger where it was, and each is asserted as a **0.00**
+delta by the stage that drove it.

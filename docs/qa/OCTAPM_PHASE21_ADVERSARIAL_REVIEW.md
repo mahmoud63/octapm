@@ -151,3 +151,98 @@ specific ways of being falsely green were looked for, that three of them were
 found and fixed, and that three named gaps remain open. An independent
 reviewer would be looking for the seventh, which by definition is not in this
 document.
+
+---
+
+# Phase 21C — adversarial self-review
+
+## ADVERSARIAL SELF-REVIEW — NOT INDEPENDENT
+
+Codex was checked for again on 2026-09-12 and is not available in this
+environment. What follows is the author attacking the author's own 21C
+work, and is labelled as such. It is weaker evidence than an independent
+review would be; it is not no evidence.
+
+## 4. The question put to the 21C work
+
+### 4.1 "The RBAC fix could have broken a legitimate flow"
+
+Forty-one routes gained a guard in one commit. If any role that legitimately
+used one of them was not in the policy row chosen, that flow now 403s.
+
+What was done about it: every route is exercised in the regression test as
+an **allowed** role too, not only a denied one; the full Jest suite (2,005)
+and the full Playwright suite ran after the change; stages 15–18, which use
+these routes as site engineer, QS, planner and PM, all passed after the
+restart. The module chosen for each router is the one the policy already
+names for its neighbours (drawing sets → `document_control`, budget →
+`cost`, pay apps → `sub_pay_app`), not one invented for the fix. The residual
+risk is a flow no test drives — e.g. a cost controller reading cash flow was
+allowed by the policy and is exercised; a **site engineer reading cash flow**
+was never allowed by the policy and now cannot; if the UI shows that page to
+site engineers it will 403 (that is P21-014's shape, and the product's
+choice).
+
+### 4.2 "The quality-score assertion was bent to fit the duplicate"
+
+The first version typed `65`; after the T-10 duplicate the stage asserts the
+product's formula against the dashboard's own counts and gets `45`. Is that
+"lowering the assertion to achieve green"?
+
+No, and here is the difference: the formula assertion is stronger than the
+constant (it fails if the product mis-weights any term), the duplicate is
+**named by id** in the stage so that a third copy fails loudly, and a second
+independent check asserts that nothing but NCR-01, the named duplicate and
+the failed ITP moved the score (55 points, exactly). What was lowered is my
+own tidiness, which is recorded as T-10.
+
+### 4.3 "The deep-link grades are a heuristic"
+
+RECORD OPENED means the record's reference was on screen **and** a dialog
+was open, or the reference was inside the dialog. A page that opens a
+detail panel that is not a `role=dialog` would be under-graded as "list row
+only". So the 8 "on screen, no detail" rows may include some that did open.
+The 5 "module home" rows and the 2 "wrong record type" rows are not
+heuristic: the reference was absent, or the network showed a 404 for the
+wrong record type. The grade is therefore a floor for the good cases and
+exact for the bad ones.
+
+### 4.4 "The permanent spec only asserts what it built"
+
+It does — that is what a greenfield regression is. It does not assert against
+the manually driven Phase 21 project, by design (the brief forbids that
+dependence). What it proves is the connected spine on an empty project, with
+the personas the policy names, twice in a row, with the project retired and
+the allowance checked. What it does not prove is anything about the ledger of
+an existing project — the Phase 21 stages do that.
+
+### 4.5 "A 20-second regression is too small to mean much"
+
+It is seventeen API-side assertions and five browser ones on one spine. It
+is small so that it can run on every change. Breadth is the job of the
+twenty Phase 21 stages, which are committed beside it and are re-runnable.
+
+### 4.6 "The audit that found P21-010 could have false negatives"
+
+The probe sends an invalid body; a guard that runs **after** validation would
+answer 400 and be graded as unguarded when it was not. The opposite error —
+a missing guard graded as present — cannot happen: nothing but a guard
+answers 403 to an invalid body. So the audit can over-report, never
+under-report; and every over-report would have shown up as a failing
+"allowed role" case in the regression test, which none did.
+
+## 5. Where I would look first if I distrusted this work (21C)
+
+1. The `delete → update` mapping for `document_control` and `eot` routes:
+   a planning engineer can now delete a drawing record. That follows the
+   drawing-sets convention, but it is a choice.
+2. NCR-002: an approved major NCR that exists because of a test defect. It is
+   named everywhere it matters; it is still there.
+3. The manpower report agreeing with the timesheet proves the report adds
+   up, not that the two are linked — they are not.
+4. `persona-browser.json` grades were produced by one script and one run;
+   the procurement persona was also driven by hand and agreed.
+
+## 6. What this review does not establish (21C)
+
+That anyone other than the author has read the fix, the spec or the grades.

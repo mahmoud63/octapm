@@ -151,3 +151,70 @@ Nobody was given admin rights to make a step pass.
 | Activity engineer | **VALID CONFIRMATION** — an activity may not exist with nobody responsible |
 
 No unnecessary duplicate entry was found in the paths driven.
+
+---
+
+# Phase 21C — every persona, in the browser
+
+Driven on 2026-09-12 with `stage19-browser.js` (headless Chromium, the real
+sign-in form, 1440 × 900) against the Phase 21 project, and the procurement
+manager additionally by hand in the in-app browser pane. What each person
+saw is in `docs/qa/phase21/persona-browser.json`. "Can act" (a control is on
+the screen) is written down separately from "is responsible" (the product's
+own waiting-on-you signal) throughout.
+
+## 6. The eight staff personas
+
+| persona | landed on | project module strip | own page driven | refused when tried (API) |
+| --- | --- | --- | --- | --- |
+| Project manager | Workspace Control, "waiting on you right now" | Overview · Schedule · Site Reporting · Cost Control · Commercial · Quality · Doc Control · Meetings · BOQ · BIM · More; Lock Baseline, Update Schedule | Commercial: Add Change Order, Edit, Archive, History | — |
+| Planning engineer | same | same strip; Update Schedule, Baseline, Resources; no Lock Baseline | Schedule: Export, Update Schedule, Baseline, Resources, Classic schedule | approve daily log (403), raise safety incident (403) |
+| Quantity surveyor | same | Export, Baseline, Resources | Change orders: Add Change Order, Edit, Archive, History | approve own change (403), approve NCR closeout (403), approve submittal (403) |
+| Cost controller | same | Export, Baseline, Resources | Cost Control overview (KPI cards; no actions) | read `/users` (403), read parties (403) |
+| Procurement manager | same (by hand: Projects list) | Export, Ack, Resolve | Purchase orders: Packages · Purchase Orders · Suppliers; filters All / Draft 1 / Fully invoiced 2; Receive delivery links | edit / archive / create project (403), read `/users` (403) |
+| Storeman | same | Export, Ack, Resolve | Inventory: Scan · Goods in · Match · Items · Warehouses · Dashboard · Ledger · Look up | everything it tried on quality, doc control, safety, timesheets, meetings, tasks, EOT (403) |
+| Site engineer | same | Update Schedule | Site reporting: Daily Log · Timesheets · Activity · Diary · Review · Manpower report · day strip | approve own day (403), approve own closeouts (403), close punch item (403), attach to a schedule activity (403) |
+| Finance | same | Export, Baseline, Resources | IPC: Record, Release | book a supplier invoice (403), read parties (403) |
+
+Observations that hold for all eight:
+
+- **Landing is the same page for everyone** (Workspace Control) and it says
+  what is waiting on the signed-in person. That is the right shape; whether
+  each role's queue is the right queue was checked only for the flows driven.
+- **The sidebar is identical for every role** — Dashboard, Projects,
+  Portfolio, Inventory, Reports, Tasks, Messages, Users, Company, Help
+  Center. Users and Company are offered to five roles that the API refuses
+  (P21-013): the page renders "No engineers yet".
+- **The project module strip is role-aware where it matters**: Lock Baseline
+  is the PM's alone; Update Schedule is offered to PM, planner and site
+  engineer (progress.submit); Ack / Resolve on the procurement risk to PM,
+  planner, procurement and storeman.
+- **Console noise on every page**: `401 GET /auth/me` on load for every
+  persona, and `403 GET /projects/{id}/parties` on the module pages of four
+  roles (P21-014).
+- **Procurement's "Waiting on you"** card says 0 while a row says "Your
+  action" (P21-018).
+
+## 7. The external personas
+
+- **Subcontractor / supplier portal** — driven through the tokenised RFQ
+  portal in stage 11 (three bidders priced, submitted and were levelled;
+  the portal exposes the package reference and the bidder's own invitation
+  only). Not driven: a subcontractor user signing in to the application
+  itself; there is no such seeded identity and Phase 21 does not create
+  users beyond the tenant it registers for isolation attacks.
+- **Client / owner** — the client's money was driven from the contractor's
+  side (IPC certified, invoice issued, payment recorded, receivable read).
+  A client-side portal login was not driven for the same reason.
+
+## 8. Enter-once, observed in 21C
+
+- The RFI carried its activity, location, manager, assignee and distribution
+  into the change it became; nothing was retyped.
+- The bid package's lines came from the BOQ; the PO came from the award; the
+  supplier invoice pointed at the PO line; the match read all three.
+- The timesheet's crew day and the daily log's manpower entry were entered
+  separately (two products' worth of typing for one fact) — the manpower
+  report agreed with the timesheet, but nothing links them.
+- The meeting's action became a task by linking, not by the product creating
+  it (`createTask` exists on the validator; not exercised).
