@@ -689,7 +689,64 @@ describe("Phase 21D — integrity (Codex round 1)", () => {
     const warehouse = seedWarehouse();
     await service.receiveStock({ orgId: ORG, user: USER, payload: { itemId: item.id, warehouseId: warehouse.id, quantity: 100, unitCost: 10 } });
     const statements = mockPrisma.$queryRaw.mock.calls.map((call) => (Array.isArray(call[0]) ? call[0].join("?") : String(call[0])));
-    expect(statements.some((sql) => /FROM "StockBalance" WHERE id = \? FOR UPDATE/.test(sql))).toBe(true);
-    expect(statements.some((sql) => /FROM "InventoryItem" WHERE id = \? FOR UPDATE/.test(sql))).toBe(true);
+    expect(statements.some((sql) => /FROM "StockBalance" WHERE id = \? FOR NO KEY UPDATE/.test(sql))).toBe(true);
+    expect(statements.some((sql) => /FROM "InventoryItem" WHERE id = \? FOR NO KEY UPDATE/.test(sql))).toBe(true);
+  });
+});
+
+describe("Phase 21D — integrity (Codex round 2)", () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockPrisma.$queryRaw.mockImplementation(async () => []);
+    store.items.clear(); store.warehouses.clear(); store.locations.clear();
+    store.balances.length = 0; store.transactions.length = 0; store.ledger.length = 0; store.costRecords.length = 0;
+    nextId = 1;
+  });
+  afterAll(() => mockPrisma.$queryRaw.mockImplementation(async () => []));
+
+  it("CX21-101: a receipt blends against the price read under the item lock, not the one loaded before", async () => {
+    // The caller's copy of the item says 10.00; the row, once locked, says
+    // 15.00 — another receipt finished in between. 200 on hand at 15.00 plus
+    // 100 at 30.00 is 20.00. Blending at the stale 10.00 would give 16.67.
+    const item = seedItem({ averageCost: 10 });
+    const warehouse = seedWarehouse();
+    store.balances.push({ id: "bal-existing", orgId: ORG, itemId: item.id, warehouseId: warehouse.id, locationId: null, onHand: 200, reserved: 0, inTransit: 0, damaged: 0, quarantined: 0 });
+    mockPrisma.$queryRaw.mockImplementation(async (strings) => (strings.join("?").includes('"InventoryItem"') ? [{ averageCost: "15" }] : []));
+    await service.receiveStock({ orgId: ORG, user: USER, payload: { itemId: item.id, warehouseId: warehouse.id, quantity: 100, unitCost: 30 } });
+    expect(Number(store.items.get(item.id).averageCost)).toBe(20);
+    const statements = mockPrisma.$queryRaw.mock.calls.map((call) => call[0].join("?"));
+    const itemLock = statements.findIndex((sql) => /FROM "InventoryItem" WHERE id = \? FOR NO KEY UPDATE/.test(sql));
+    const balanceLock = statements.findIndex((sql) => /FROM "StockBalance" WHERE id = \? FOR NO KEY UPDATE/.test(sql));
+    // The item is locked before the balance row is touched, so two first
+    // receipts into different stores cannot deadlock on the item.
+    expect(itemLock).toBeGreaterThanOrEqual(0);
+    expect(balanceLock).toBeGreaterThan(itemLock);
+  });
+
+  it("CX21-105: a reservation locks the warehouse's balances before it reads them", async () => {
+    const item = seedItem();
+    const warehouse = seedWarehouse();
+    await service.receiveStock({ orgId: ORG, user: USER, payload: { itemId: item.id, warehouseId: warehouse.id, quantity: 100, unitCost: 10 } });
+    mockPrisma.$queryRaw.mockClear();
+    mockPrisma.stockBalance.findMany.mockClear();
+    await service.adjustReservation({ orgId: ORG, user: USER, payload: { itemId: item.id, warehouseId: warehouse.id, quantity: 80 } });
+    const lockAt = mockPrisma.$queryRaw.mock.invocationCallOrder[mockPrisma.$queryRaw.mock.calls.findIndex((call) => /FROM "StockBalance" WHERE "itemId" = \? AND "warehouseId" = \? FOR NO KEY UPDATE/.test(call[0].join("?")))];
+    const readAt = mockPrisma.stockBalance.findMany.mock.invocationCallOrder[0];
+    expect(lockAt).toBeDefined();
+    expect(lockAt).toBeLessThan(readAt);
+    expect(balanceOf(item.id, warehouse.id).reserved).toBe(80);
+  });
+
+  it("a warehouse-wide issue locks the bins before it splits the draw across them", async () => {
+    const item = seedItem();
+    const warehouse = seedWarehouse();
+    await service.receiveStock({ orgId: ORG, user: USER, payload: { itemId: item.id, warehouseId: warehouse.id, quantity: 100, unitCost: 10 } });
+    mockPrisma.$queryRaw.mockClear();
+    mockPrisma.stockBalance.findMany.mockClear();
+    await service.issueStock({ orgId: ORG, user: USER, payload: { itemId: item.id, warehouseId: warehouse.id, quantity: 40, activityId: "activity-1", projectId: "project-1" } });
+    const lockIdx = mockPrisma.$queryRaw.mock.calls.findIndex((call) => /FROM "StockBalance" WHERE "itemId" = \? AND "warehouseId" = \? FOR NO KEY UPDATE/.test(call[0].join("?")));
+    expect(lockIdx).toBeGreaterThanOrEqual(0);
+    expect(mockPrisma.$queryRaw.mock.invocationCallOrder[lockIdx]).toBeLessThan(mockPrisma.stockBalance.findMany.mock.invocationCallOrder[0]);
+    expect(balanceOf(item.id, warehouse.id).onHand).toBe(60);
   });
 });

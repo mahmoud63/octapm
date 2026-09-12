@@ -497,6 +497,19 @@ const postMovement = async (tx, { orgId, item, warehouseId, locationId = null, t
     throw new HttpError(400, "INV_QUANTITY", "Quantity must not be zero");
   }
 
+  // The price a movement is costed at is read from the item row now, not from
+  // the object the caller loaded before the transaction began: a receipt that
+  // waited for another receipt's lock must blend against the average that
+  // receipt left behind (Phase 21D, CX21-101). A costed receipt takes the lock
+  // BEFORE the balance row exists — the balance insert takes a KEY SHARE on
+  // the item, and two first receipts that each held one and then asked for
+  // the item lock deadlocked. NO KEY UPDATE does not conflict with KEY SHARE.
+  const costed = Boolean(rule.costs && unitCost != null);
+  const [freshItem] = costed
+    ? await tx.$queryRaw`SELECT "averageCost" FROM "InventoryItem" WHERE id = ${item.id} FOR NO KEY UPDATE`
+    : await tx.$queryRaw`SELECT "averageCost" FROM "InventoryItem" WHERE id = ${item.id}`;
+  const itemAverage = freshItem && freshItem.averageCost != null ? Number(freshItem.averageCost) : Number(item.averageCost ?? 0);
+
   const balance =
     (await tx.stockBalance.findFirst({ where: { itemId: item.id, warehouseId, locationId } })) ??
     (await tx.stockBalance.create({
@@ -507,7 +520,7 @@ const postMovement = async (tx, { orgId, item, warehouseId, locationId = null, t
   // locked for the rest of this transaction and the figures re-read from the
   // locked row, so a concurrent issue waits and then sees the truth
   // (Phase 21D, CX21-004). An empty result is what a fake database returns.
-  const [lockedBalance] = await tx.$queryRaw`SELECT "onHand", "reserved", "inTransit", "damaged", "quarantined" FROM "StockBalance" WHERE id = ${balance.id} FOR UPDATE`;
+  const [lockedBalance] = await tx.$queryRaw`SELECT "onHand", "reserved", "inTransit", "damaged", "quarantined" FROM "StockBalance" WHERE id = ${balance.id} FOR NO KEY UPDATE`;
   if (lockedBalance) {
     for (const key of ["onHand", "reserved", "inTransit", "damaged", "quarantined"]) {
       if (lockedBalance[key] !== undefined && lockedBalance[key] !== null) balance[key] = Number(lockedBalance[key]);
@@ -544,21 +557,21 @@ const postMovement = async (tx, { orgId, item, warehouseId, locationId = null, t
 
   // Weighted average: a receipt blends its price in, everything else leaves at
   // the average it finds.
-  let costForMovement = Number(item.averageCost ?? 0);
-  if (rule.costs && unitCost != null) {
+  let costForMovement = itemAverage;
+  if (costed) {
     const receiptCost = Number(unitCost);
     // The average belongs to the item, so it blends against everything the
     // item has on hand — every warehouse and bin — not only the balance this
     // delivery lands in. A first delivery into an empty second store used to
     // reset the shared average to its own price (Phase 21D, CX21-003). The
-    // item row is locked so two deliveries into different stores blend in turn.
-    await tx.$queryRaw`SELECT id FROM "InventoryItem" WHERE id = ${item.id} FOR UPDATE`;
+    // item row was locked above, so two deliveries into different stores
+    // blend in turn, each against the price the other left.
     const balances = await tx.stockBalance.findMany({ where: { itemId: item.id }, select: { onHand: true } });
     const itemOnHand = balances.reduce((sum, row) => sum + Number(row.onHand ?? 0), 0);
     const totalQty = itemOnHand + signed;
     const blended =
       totalQty > 0
-        ? (itemOnHand * Number(item.averageCost ?? 0) + signed * receiptCost) / totalQty
+        ? (itemOnHand * itemAverage + signed * receiptCost) / totalQty
         : receiptCost;
     await tx.inventoryItem.update({
       where: { id: item.id },
@@ -726,6 +739,10 @@ const drawFromWarehouse = async (
     return [row];
   }
 
+  // The bins are locked before they are read, so the split decided here is
+  // the split that is posted: a concurrent draw waits, then sees what is left
+  // rather than failing on a bin that was emptied under it (Phase 21D).
+  await tx.$queryRaw`SELECT id FROM "StockBalance" WHERE "itemId" = ${item.id} AND "warehouseId" = ${warehouseId} FOR NO KEY UPDATE`;
   const balances = await tx.stockBalance.findMany({
     where: { itemId: item.id, warehouseId },
     orderBy: [{ onHand: "desc" }],
@@ -980,6 +997,10 @@ const adjustReservation = async ({ orgId, user, payload }) => {
     // spreads the claim across bins the same way an issue draws from them,
     // fullest first, so a warehouse-level reservation actually holds warehouse
     // stock rather than a phantom balance with nothing in it.
+    // A reservation is a claim on what is on hand; the balances it claims
+    // against are locked before they are read so an issue committed meanwhile
+    // is seen, not overwritten (Phase 21D, CX21-105).
+    await tx.$queryRaw`SELECT id FROM "StockBalance" WHERE "itemId" = ${item.id} AND "warehouseId" = ${payload.warehouseId} FOR NO KEY UPDATE`;
     const balances = payload.locationId
       ? await tx.stockBalance.findMany({
           where: { itemId: item.id, warehouseId: payload.warehouseId, locationId: payload.locationId },
@@ -1320,6 +1341,7 @@ const receiveTransfer = async ({ orgId, user, transferId, payload = {} }) => {
 
       // The source stops counting it as in transit once it has landed. It may
       // have left from several bins, so clear it wherever it was raised.
+      await tx.$queryRaw`SELECT id FROM "StockBalance" WHERE "itemId" = ${line.itemId} AND "warehouseId" = ${transfer.fromWarehouseId} FOR NO KEY UPDATE`;
       const sourceBalances = await tx.stockBalance.findMany({
         where: { itemId: line.itemId, warehouseId: transfer.fromWarehouseId },
       });

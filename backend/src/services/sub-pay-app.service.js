@@ -725,6 +725,15 @@ const transition = async ({ orgId, projectId, payAppId, to, actor = null, viewer
     });
   }
   const updated = await prisma.$transaction(async (tx) => {
+    if (revoking) {
+      // The "nothing paid" check ran before the transaction; a payment that
+      // landed since is found under the lock and stops the revocation
+      // (Phase 21D, CX21-103).
+      await tx.$queryRaw`SELECT id FROM "SubPayApp" WHERE id = ${payAppId} FOR UPDATE`;
+      const paidRows = await tx.subPayAppPayment.findMany({ where: { payAppId }, select: { amount: true } });
+      const paidNow = round2(paidRows.reduce((sum, p) => sum + toMoneyNumber(p.amount), 0));
+      if (paidNow > EPSILON) assertRevocable({ existing: { ...existing, paidAmount: paidNow, payments: [] }, to, reason });
+    }
     // Recompute caps against the latest approved progress before anything final.
     if ([STATUS.SUBMITTED, STATUS.APPROVED].includes(to)) {
       const { totals } = await recompute({ tx, existing });
@@ -900,16 +909,21 @@ const recordPayment = async ({ orgId, projectId, payAppId, payload = {}, actor =
     // Recomputed under a row lock: the check above read a figure another
     // payment may have moved since (Phase 21D, CX21-005).
     await tx.$queryRaw`SELECT id FROM "SubPayApp" WHERE id = ${payAppId} FOR UPDATE`;
+    // Status and net are re-read under the lock: a revocation that landed
+    // between the check above and here must not be paid (Phase 21D, CX21-103).
+    const current = (await tx.subPayApp.findFirst({ where: { id: payAppId }, select: { status: true, netThisPeriod: true, paidAmount: true } })) || existing;
+    if (!COUNTED.includes(current.status)) throw new HttpError(409, "SUB_PAY_APP_NOT_APPROVED", "Only approved applications can be paid");
+    const netNow = toMoneyNumber(current.netThisPeriod);
     const paidRows = await tx.subPayAppPayment.findMany({ where: { payAppId }, select: { amount: true } });
-    const alreadyPaidNow = paidRows.length ? round2(paidRows.reduce((sum, p) => sum + toMoneyNumber(p.amount), 0)) : alreadyPaid;
-    if (addMoney(alreadyPaidNow, amount) > net + EPSILON) {
-      const error = new HttpError(400, "SUB_PAY_APP_PAYMENT_EXCEEDS", `Payment would exceed the net approved ${net}; ${subtractMoney(net, alreadyPaidNow)} remains`);
-      error.details = { netApproved: net, paid: alreadyPaidNow, remaining: subtractMoney(net, alreadyPaidNow) };
+    const alreadyPaidNow = paidRows.length ? round2(paidRows.reduce((sum, p) => sum + toMoneyNumber(p.amount), 0)) : toMoneyNumber(current.paidAmount);
+    if (addMoney(alreadyPaidNow, amount) > netNow + EPSILON) {
+      const error = new HttpError(400, "SUB_PAY_APP_PAYMENT_EXCEEDS", `Payment would exceed the net approved ${netNow}; ${subtractMoney(netNow, alreadyPaidNow)} remains`);
+      error.details = { netApproved: netNow, paid: alreadyPaidNow, remaining: subtractMoney(netNow, alreadyPaidNow) };
       throw error;
     }
     await tx.subPayAppPayment.create({ data: { orgId, projectId, payAppId, amount, paidAt, method: trimOrNull(payload.method)?.slice(0, 60) || null, reference: trimOrNull(payload.reference)?.slice(0, 120) || null, note: trimOrNull(payload.note)?.slice(0, 1000) || null, createdBy: actor?.id || null } });
     const paidAmount = addMoney(alreadyPaidNow, amount);
-    const fullyPaid = paidAmount >= net - EPSILON;
+    const fullyPaid = paidAmount >= netNow - EPSILON;
     const row = await tx.subPayApp.update({ where: { id: payAppId }, data: { paidAmount, paidAt: fullyPaid ? paidAt : existing.paidAt, status: fullyPaid ? STATUS.PAID : existing.status, updatedBy: actor?.id || null }, include });
     await audit({ tx, orgId, projectId, entityId: payAppId, action: fullyPaid ? auditService.ACTIONS.STATUS_CHANGED : auditService.ACTIONS.UPDATED, actor, oldStatus: existing.status, newStatus: row.status, summary: { ref: row.ref, payment: amount, paidAmount, net, reference: trimOrNull(payload.reference) || null } });
     return row;

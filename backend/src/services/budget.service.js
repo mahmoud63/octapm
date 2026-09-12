@@ -278,15 +278,17 @@ const createBudgetLine = async ({ orgId, projectId, payload = {}, actor = null }
       originalBudget,
       description: trimOrNull(payload.description)?.slice(0, 500) || null,
       committed: money(payload, "committed") ?? 0,
-      actual: money(payload, "actual") ?? 0,
       forecast: payload.forecast === undefined || payload.forecast === null || payload.forecast === "" ? null : money(payload, "forecast"),
       sortOrder: Number.isInteger(Number(payload.sortOrder)) ? Number(payload.sortOrder) : 0,
       status: "active",
       updatedBy: actor?.id || null,
     };
+    // An archived line that comes back keeps the actual the ledger posted on
+    // it — the entries are still there, and a projection reset to zero would
+    // make the reconciliation lie (Phase 21D, CX21-102). A new line starts at 0.
     const row = clash
       ? await tx.budgetLine.update({ where: { id: clash.id }, data, include: lineInclude })
-      : await tx.budgetLine.create({ data: { orgId, projectId, costCodeId, costType, createdBy: actor?.id || null, ...data }, include: lineInclude });
+      : await tx.budgetLine.create({ data: { orgId, projectId, costCodeId, costType, createdBy: actor?.id || null, actual: 0, ...data }, include: lineInclude });
     await audit({ tx, orgId, projectId, entityId: row.id, action: auditService.ACTIONS.CREATED, actor, summary: { code: row.costCode?.code, costType, originalBudget } });
     return row;
   });

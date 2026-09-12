@@ -1655,6 +1655,10 @@ const recordIpcPayment = async ({
     // The certificate is locked so two payments recorded at once are checked
     // one after the other against the rows the first one wrote (Phase 21D).
     await tx.$queryRaw`SELECT id FROM "IpcCertificate" WHERE id = ${certificate.id} FOR UPDATE`;
+    const currentCertificate = await tx.ipcCertificate.findFirst({ where: { id: certificate.id }, select: { status: true } });
+    if (currentCertificate && !PAYABLE_CERTIFICATE_STATUSES.includes(currentCertificate.status)) {
+      throw new HttpError(409, "IPC_CERTIFICATE_NOT_CERTIFIED", "Only certified IPC periods can receive payments");
+    }
     const { payments, releases } = await loadPaymentRows({
       tx,
       projectId,

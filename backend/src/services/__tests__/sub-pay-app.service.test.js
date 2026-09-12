@@ -411,3 +411,21 @@ describe("Phase 21D — integrity (Codex round 1)", () => {
     mockPrisma.subPayAppPayment.findMany.mockResolvedValue([]);
   });
 });
+
+describe("Phase 21D — integrity (Codex round 2)", () => {
+  it("CX21-103: a payment re-reads the application under the lock and refuses one revoked in between", async () => {
+    mockPrisma.subPayApp.findFirst
+      .mockResolvedValueOnce(payApp({ status: "approved", netThisPeriod: 27000, paidAmount: 0 }))
+      .mockResolvedValueOnce(payApp({ status: "draft", netThisPeriod: 27000, paidAmount: 0 }));
+    mockPrisma.subPayAppPayment.create.mockClear();
+    await expect(service.recordPayment({ orgId: "org-1", projectId: "project-1", payAppId: "pa-1", payload: { amount: 1000 } })).rejects.toMatchObject({ code: "SUB_PAY_APP_NOT_APPROVED" });
+    expect(mockPrisma.subPayAppPayment.create).not.toHaveBeenCalled();
+  });
+
+  it("CX21-103: a revocation counts the payments again under the lock and refuses once one has landed", async () => {
+    mockPrisma.subPayApp.findFirst.mockResolvedValue(payApp({ status: "approved", netThisPeriod: 27000, paidAmount: 0 }));
+    mockPrisma.subPayAppPayment.findMany.mockResolvedValueOnce([{ amount: 5000 }]);
+    await expect(service.reopenPayApp({ orgId: "org-1", projectId: "project-1", payAppId: "pa-1", actor: { id: "qs" }, reason: "measured wrong" })).rejects.toMatchObject({ code: "SUB_PAY_APP_ALREADY_PAID" });
+    expect(mockPrisma.subPayApp.update).not.toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ status: "draft" }) }));
+  });
+});

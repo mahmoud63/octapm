@@ -293,3 +293,55 @@ describe("Phase 21D — integrity (Codex round 1)", () => {
     lock.mockRestore();
   });
 });
+
+jest.mock("../purchase-order.service", () => ({ recomputeInvoiced: jest.fn(async () => null) }));
+
+describe("Phase 21D — integrity (Codex round 2)", () => {
+  beforeEach(() => {
+    reset();
+    store.poLines = [
+      { id: "pol-stock", orderId: "po-1", projectId: "p1", inventoryItemId: "item-1", receivedQty: 100 },
+      { id: "pol-b", orderId: "po-2", projectId: "p1", inventoryItemId: null, receivedQty: 0 },
+    ];
+    mockPrisma.procurementOrder = { findFirst: jest.fn(async ({ where }) => ({ id: where.id })) };
+  });
+
+  const stockedInvoice = (over = {}) =>
+    service.createDirectCost({ ...scope, actor, payload: { type: "invoice", vendorCompanyId: "co-1", invoiceNumber: "INV-104", description: "Cement", costDate: "2026-09-01", lines: [
+      { description: "Cement, stocked", costCodeId: "cc-conc", activityId: "act-1", poLineId: "pol-stock", amount: 4000 },
+    ], ...over } });
+
+  it("CX21-104: moving an invoice to another order without replacing its lines is refused when the lines bill the old order", async () => {
+    const cost = await stockedInvoice();
+    await expect(service.updateDirectCost({ ...scope, actor, directCostId: cost.id, payload: { purchaseOrderId: "po-2" } })).rejects.toMatchObject({ code: "DIRECT_COST_LINE_PO_LINE" });
+    // Naming the order the lines already belong to is fine.
+    const moved = await service.updateDirectCost({ ...scope, actor, directCostId: cost.id, payload: { purchaseOrderId: "po-1" } });
+    expect(moved.purchaseOrderId).toBe("po-1");
+  });
+
+  it("CX21-103: a payment finds the void that landed after its status check, under the lock", async () => {
+    const cost = await stockedInvoice({ invoiceNumber: "INV-103a" });
+    await service.submitDirectCost({ ...scope, actor, directCostId: cost.id });
+    await service.approveDirectCost({ ...scope, actor, directCostId: cost.id });
+    const lock = jest.spyOn(mockPrisma, "$queryRaw").mockImplementation(async (strings) => {
+      if (strings.join("?").includes('FROM "DirectCost"')) store.costs.find((row) => row.id === cost.id).status = "void";
+      return [];
+    });
+    await expect(service.recordPayment({ ...scope, actor, directCostId: cost.id, payload: { amount: 100 } })).rejects.toMatchObject({ code: "DIRECT_COST_NOT_APPROVED" });
+    expect(store.payments.filter((row) => row.directCostId === cost.id)).toHaveLength(0);
+    lock.mockRestore();
+  });
+
+  it("CX21-103: a void finds the payment that landed after its check, under the lock", async () => {
+    const cost = await stockedInvoice({ invoiceNumber: "INV-103b" });
+    await service.submitDirectCost({ ...scope, actor, directCostId: cost.id });
+    await service.approveDirectCost({ ...scope, actor, directCostId: cost.id });
+    const lock = jest.spyOn(mockPrisma, "$queryRaw").mockImplementation(async (strings) => {
+      if (strings.join("?").includes('FROM "DirectCost"')) store.payments.push({ id: "pay-late", orgId: "org-1", projectId: "p1", directCostId: cost.id, amount: 100, paidAt: new Date() });
+      return [];
+    });
+    await expect(service.voidDirectCost({ ...scope, actor, directCostId: cost.id, payload: { reason: "duplicate" } })).rejects.toMatchObject({ code: "DIRECT_COST_HAS_PAYMENTS" });
+    expect(store.costs.find((row) => row.id === cost.id).status).toBe("approved");
+    lock.mockRestore();
+  });
+});

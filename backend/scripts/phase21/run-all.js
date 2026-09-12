@@ -54,6 +54,11 @@ if (!keep) {
   console.log(`continuing stamp ${ctx.stamp}\n`);
 }
 
+if (only && !STAGES.some((stage) => stage.includes(only))) {
+  console.error(`--only=${only} matches no stage; nothing was run`);
+  process.exit(1);
+}
+
 let failed = 0;
 for (const stage of STAGES) {
   if (only && !stage.includes(only)) continue;

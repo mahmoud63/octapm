@@ -203,3 +203,15 @@ describe("Phase 21D — integrity (Codex round 1)", () => {
     ).resolves.toBeTruthy();
   });
 });
+
+describe("Phase 21D — integrity (Codex round 2)", () => {
+  it("CX21-102: bringing an archived line back keeps the actual the ledger posted on it", async () => {
+    mockPrisma.budgetLine.findFirst.mockResolvedValue({ id: "line-9", status: "archived" });
+    mockPrisma.budgetLine.update.mockResolvedValue(line({ id: "line-9", actual: 15000 }));
+    await service.createBudgetLine({ orgId: "org-1", projectId: "project-1", payload: { costCodeId: CODE.id, costType: "material", originalBudget: 1000 }, actor: { id: "user-1", role: "cost_controller" } });
+    expect(mockPrisma.budgetLine.update).toHaveBeenCalledWith(expect.objectContaining({ where: { id: "line-9" } }));
+    const written = mockPrisma.budgetLine.update.mock.calls.at(-1)[0].data;
+    expect(Object.prototype.hasOwnProperty.call(written, "actual")).toBe(false);
+    expect(written).toMatchObject({ status: "active", originalBudget: 1000 });
+  });
+});

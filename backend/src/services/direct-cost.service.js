@@ -320,6 +320,21 @@ const updateDirectCost = async ({ orgId, projectId, directCostId, payload = {}, 
   if (!EDITABLE.includes(existing.status)) throw new HttpError(409, "DIRECT_COST_LOCKED", `A ${existing.status} direct cost cannot be edited`);
   const header = await normalizeHeader({ orgId, projectId, payload, existing });
   const lines = payload.lines !== undefined ? await normalizeLines({ projectId, rows: payload.lines, purchaseOrderId: header.purchaseOrderId }) : existing.lines.map((line) => ({ ...line, amount: toNumber(line.amount) }));
+  // Moving the invoice to another order without touching its lines would keep
+  // lines that bill the old order's purchase-order lines — and a stocked line
+  // among them would still suppress this project's cost (Phase 21D, CX21-104).
+  if (payload.lines === undefined && (header.purchaseOrderId || null) !== (existing.purchaseOrderId || null)) {
+    const keptIds = uniqueIds(existing.lines.map((line) => line.poLineId));
+    if (keptIds.length) {
+      const onOrder = await prisma.procurementPoLine.findMany({
+        where: { id: { in: keptIds }, order: { projectId }, ...(header.purchaseOrderId ? { orderId: header.purchaseOrderId } : {}) },
+        select: { id: true },
+      });
+      if (onOrder.length !== keptIds.length) {
+        throw new HttpError(400, "DIRECT_COST_LINE_PO_LINE", "The invoice's lines bill purchase-order lines that are not on the order it now names; replace the lines together with the order");
+      }
+    }
+  }
   await assertNoDuplicateInvoice({ projectId, vendorCompanyId: header.vendorCompanyId, vendorName: header.vendorName, invoiceNumber: header.invoiceNumber, excludeId: directCostId });
   const totals = totalsOf(lines, header.tax);
   const updated = await prisma.$transaction(async (tx) => {
@@ -468,6 +483,11 @@ const voidDirectCost = async ({ orgId, projectId, directCostId, payload = {}, ac
   const reason = trimOrNull(payload.reason);
   if (!reason) throw new HttpError(400, "DIRECT_COST_REASON_REQUIRED", "Say why the cost is voided");
   const row = await prisma.$transaction(async (tx) => {
+    // A payment recorded while this void was being decided must stop it: the
+    // invoice is locked and its payments counted again (Phase 21D, CX21-103).
+    await tx.$queryRaw`SELECT id FROM "DirectCost" WHERE id = ${directCostId} FOR UPDATE`;
+    const paymentsNow = await tx.directCostPayment.findMany({ where: { directCostId }, select: { id: true } });
+    if (paymentsNow.length) throw new HttpError(409, "DIRECT_COST_HAS_PAYMENTS", "A direct cost with payments cannot be voided — reverse the payments first");
     // Through the ledger, which writes negative mirrors rather than deleting —
     // so what was posted and then undone stays on the record, and reversing
     // twice is a no-op for the same reason posting twice is.
@@ -503,9 +523,13 @@ const recordPayment = async ({ orgId, projectId, directCostId, payload = {}, act
     // since. Lock the invoice, recompute what has really been paid from the
     // payment rows, and check again before writing (Phase 21D, CX21-005).
     await tx.$queryRaw`SELECT id FROM "DirectCost" WHERE id = ${directCostId} FOR UPDATE`;
+    // The status was checked before the lock; a void that landed in between
+    // must not be paid back to life (Phase 21D, CX21-103).
+    const current = (await tx.directCost.findFirst({ where: { id: directCostId }, select: { status: true, total: true, paidTotal: true } })) || existing;
+    if (![STATUS.APPROVED, STATUS.PAID].includes(current.status)) throw new HttpError(409, "DIRECT_COST_NOT_APPROVED", "Payments can only be recorded on approved direct costs");
     const paidRows = await tx.directCostPayment.findMany({ where: { directCostId }, select: { amount: true } });
-    const alreadyPaid = paidRows.length ? round2(paidRows.reduce((sum, p) => sum + toNumber(p.amount), 0)) : toNumber(existing.paidTotal);
-    const remaining = round2(toNumber(existing.total) - alreadyPaid);
+    const alreadyPaid = paidRows.length ? round2(paidRows.reduce((sum, p) => sum + toNumber(p.amount), 0)) : toNumber(current.paidTotal);
+    const remaining = round2(toNumber(current.total) - alreadyPaid);
     if (amount > remaining + 0.005) throw new HttpError(400, "DIRECT_COST_PAYMENT_EXCEEDS", `The payment exceeds the balance of ${remaining}`);
     await tx.directCostPayment.create({ data: { orgId, projectId, directCostId, amount, paidAt, method: trimOrNull(payload.method)?.slice(0, 60) || null, reference: trimOrNull(payload.reference)?.slice(0, 120) || null, note: trimOrNull(payload.note)?.slice(0, 1000) || null, createdBy: actor?.id || null } });
     const paidTotal = round2(alreadyPaid + amount);
