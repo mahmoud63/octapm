@@ -3,6 +3,7 @@ const { asyncHandler } = require("../utils/async-handler");
 const { sendSuccess } = require("../utils/api-response");
 const { body, param } = require("express-validator");
 const { validate } = require("../middleware/validate");
+const { requirePermission } = require("../middleware/rbac");
 const {
   assignmentReferenceValidators,
 } = require("../utils/assignment-validators");
@@ -17,6 +18,7 @@ const router = express.Router({ mergeParams: true });
 
 router.get(
   "/",
+  requirePermission("inspection", "read"),
   asyncHandler(async (req, res) => {
     const data = await listMaterialTests({
       orgId: req.user.orgId,
@@ -29,6 +31,7 @@ router.get(
 
 router.post(
   "/",
+  requirePermission("inspection", "create"),
   [
     body("testType").trim().notEmpty(),
     body("result").optional().isIn(["pass", "fail", "pending"]),
@@ -64,6 +67,7 @@ router.post(
 
 router.patch(
   "/:testId",
+  requirePermission("inspection", "update"),
   [
     param("testId").isUUID(),
     body("result").optional().isIn(["pass", "fail", "pending"]),
@@ -100,6 +104,7 @@ router.patch(
 
 router.delete(
   "/:testId",
+  requirePermission("inspection", "delete"),
   [param("testId").isUUID(), validate],
   asyncHandler(async (req, res) => {
     const data = await deleteMaterialTest({

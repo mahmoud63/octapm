@@ -3,6 +3,7 @@ const { asyncHandler } = require("../utils/async-handler");
 const { sendSuccess } = require("../utils/api-response");
 const { body, param } = require("express-validator");
 const { validate } = require("../middleware/validate");
+const { requirePermission } = require("../middleware/rbac");
 const {
   assignmentReferenceValidators,
 } = require("../utils/assignment-validators");
@@ -17,6 +18,7 @@ const router = express.Router({ mergeParams: true });
 
 router.get(
   "/",
+  requirePermission("punch", "read"),
   asyncHandler(async (req, res) => {
     const data = await listDefects({
       orgId: req.user.orgId,
@@ -29,6 +31,7 @@ router.get(
 
 router.post(
   "/",
+  requirePermission("punch", "create"),
   [
     body("title").trim().notEmpty(),
     body("severity").optional().isIn(["minor", "major", "critical"]),
@@ -65,6 +68,7 @@ router.post(
 
 router.patch(
   "/:defectId",
+  requirePermission("punch", "update"),
   [
     param("defectId").isUUID(),
     body("severity").optional().isIn(["minor", "major", "critical"]),
@@ -103,6 +107,7 @@ router.patch(
 
 router.delete(
   "/:defectId",
+  requirePermission("punch", "delete"),
   [param("defectId").isUUID(), validate],
   asyncHandler(async (req, res) => {
     const data = await deleteDefect({

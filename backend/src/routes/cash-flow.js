@@ -2,6 +2,7 @@ const express = require("express");
 const { asyncHandler } = require("../utils/async-handler");
 const { body, param } = require("express-validator");
 const { validate } = require("../middleware/validate");
+const { requirePermission } = require("../middleware/rbac");
 const { sendSuccess } = require("../utils/api-response");
 const { moneyBody } = require("../utils/money");
 const {
@@ -15,6 +16,7 @@ const router = express.Router({ mergeParams: true });
 
 router.get(
   "/",
+  requirePermission("cost", "read"),
   asyncHandler(async (req, res) => {
     const data = await listCashFlow({
       orgId: req.user.orgId,
@@ -27,6 +29,7 @@ router.get(
 
 router.post(
   "/",
+  requirePermission("cost", "create"),
   [
     body("period").matches(/^\d{4}-\d{2}$/),
     moneyBody("inflow"),
@@ -46,6 +49,7 @@ router.post(
 
 router.post(
   "/rebuild",
+  requirePermission("cost", "update"),
   asyncHandler(async (req, res) => {
     const data = await rebuildCashFlow({
       orgId: req.user.orgId,
@@ -58,6 +62,7 @@ router.post(
 
 router.delete(
   "/:entryId",
+  requirePermission("cost", "delete"),
   [param("entryId").isUUID(), validate],
   asyncHandler(async (req, res) => {
     const data = await deleteCashFlowEntry({

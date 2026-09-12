@@ -2,6 +2,7 @@ const express = require("express");
 const { asyncHandler } = require("../utils/async-handler");
 const { body, param } = require("express-validator");
 const { validate } = require("../middleware/validate");
+const { requirePermission } = require("../middleware/rbac");
 const { sendSuccess } = require("../utils/api-response");
 const { moneyBody } = require("../utils/money");
 const {
@@ -15,6 +16,7 @@ const router = express.Router({ mergeParams: true });
 
 router.get(
   "/",
+  requirePermission("cost", "read"),
   asyncHandler(async (req, res) => {
     const data = await listBudgetRevisions({
       orgId: req.user.orgId,
@@ -27,6 +29,7 @@ router.get(
 
 router.post(
   "/",
+  requirePermission("cost", "create"),
   [
     body("title").trim().notEmpty(),
     body("changeType").isIn(["addition", "deduction"]),
@@ -51,6 +54,7 @@ router.post(
 
 router.patch(
   "/:revisionId",
+  requirePermission("cost", "update"),
   [
     param("revisionId").isUUID(),
     body("changeType").optional().isIn(["addition", "deduction"]),
@@ -76,6 +80,7 @@ router.patch(
 
 router.delete(
   "/:revisionId",
+  requirePermission("cost", "delete"),
   [param("revisionId").isUUID(), validate],
   asyncHandler(async (req, res) => {
     const data = await deleteBudgetRevision({

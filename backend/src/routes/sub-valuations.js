@@ -2,6 +2,7 @@ const express = require("express");
 const { asyncHandler } = require("../utils/async-handler");
 const { body, param } = require("express-validator");
 const { validate } = require("../middleware/validate");
+const { requirePermission } = require("../middleware/rbac");
 const { sendSuccess } = require("../utils/api-response");
 const { moneyBody } = require("../utils/money");
 const {
@@ -21,6 +22,7 @@ const router = express.Router({ mergeParams: true });
 
 router.get(
   "/",
+  requirePermission("sub_pay_app", "read"),
   asyncHandler(async (req, res) => {
     const data = await listSubValuations({
       orgId: req.user.orgId,
@@ -34,6 +36,7 @@ router.get(
 /** Which company each free-text name most likely meant. Proposes only. */
 router.get(
   "/attribution",
+  requirePermission("sub_pay_app", "read"),
   asyncHandler(async (req, res) =>
     sendSuccess(
       res,
@@ -48,6 +51,7 @@ router.get(
 // Retired. Answers with the replacement rather than a bare refusal.
 router.post(
   "/",
+  requirePermission("sub_pay_app", "create"),
   asyncHandler(async (req, res) => {
     const row = await createSubValuation({
       orgId: req.user.orgId,
@@ -62,6 +66,7 @@ router.post(
 
 router.patch(
   "/:valuationId",
+  requirePermission("sub_pay_app", "update"),
   [
     param("valuationId").isUUID(),
     // Attribution to a real company. The free-text name is immutable — see
@@ -107,6 +112,7 @@ router.patch(
 
 router.delete(
   "/:valuationId",
+  requirePermission("sub_pay_app", "delete"),
   [param("valuationId").isUUID(), validate],
   asyncHandler(async (req, res) => {
     const data = await deleteSubValuation({

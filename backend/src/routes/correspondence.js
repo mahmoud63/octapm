@@ -3,6 +3,7 @@ const { asyncHandler } = require("../utils/async-handler");
 const { sendSuccess } = require("../utils/api-response");
 const { body, param } = require("express-validator");
 const { validate } = require("../middleware/validate");
+const { requirePermission } = require("../middleware/rbac");
 const {
   assignmentReferenceValidators,
 } = require("../utils/assignment-validators");
@@ -17,6 +18,7 @@ const router = express.Router({ mergeParams: true });
 
 router.get(
   "/",
+  requirePermission("document_control", "read"),
   asyncHandler(async (req, res) => {
     const data = await listCorrespondence({
       orgId: req.user.orgId,
@@ -29,6 +31,7 @@ router.get(
 
 router.post(
   "/",
+  requirePermission("document_control", "create"),
   [
     body("direction").isIn(["incoming", "outgoing"]),
     body("type").isIn(["letter", "email", "memo", "notice"]),
@@ -70,6 +73,7 @@ router.post(
 
 router.patch(
   "/:correspondenceId",
+  requirePermission("document_control", "update"),
   [
     param("correspondenceId").isUUID(),
     body("direction").optional().isIn(["incoming", "outgoing"]),
@@ -112,6 +116,7 @@ router.patch(
 
 router.delete(
   "/:correspondenceId",
+  requirePermission("document_control", "update"),
   [param("correspondenceId").isUUID(), validate],
   asyncHandler(async (req, res) => {
     const data = await deleteCorrespondence({

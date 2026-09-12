@@ -3,6 +3,7 @@ const { asyncHandler } = require("../utils/async-handler");
 const { sendSuccess } = require("../utils/api-response");
 const { body, param } = require("express-validator");
 const { validate } = require("../middleware/validate");
+const { requirePermission } = require("../middleware/rbac");
 const {
   listWeatherDelays,
   createWeatherDelay,
@@ -14,6 +15,7 @@ const router = express.Router({ mergeParams: true });
 
 router.get(
   "/",
+  requirePermission("eot", "read"),
   asyncHandler(async (req, res) => {
     const data = await listWeatherDelays({
       orgId: req.user.orgId,
@@ -26,6 +28,7 @@ router.get(
 
 router.post(
   "/",
+  requirePermission("eot", "create"),
   [
     body("description").trim().notEmpty(),
     body("date").optional().isISO8601(),
@@ -59,6 +62,7 @@ router.post(
 
 router.patch(
   "/:weatherId",
+  requirePermission("eot", "update"),
   [
     param("weatherId").isUUID(),
     body("date").optional().isISO8601(),
@@ -93,6 +97,7 @@ router.patch(
 
 router.delete(
   "/:weatherId",
+  requirePermission("eot", "update"),
   [param("weatherId").isUUID(), validate],
   asyncHandler(async (req, res) => {
     const data = await deleteWeatherDelay({

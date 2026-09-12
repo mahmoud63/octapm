@@ -3,6 +3,7 @@ const { asyncHandler } = require("../utils/async-handler");
 const { sendSuccess } = require("../utils/api-response");
 const { body, param } = require("express-validator");
 const { validate } = require("../middleware/validate");
+const { requirePermission } = require("../middleware/rbac");
 const {
   assignmentReferenceValidators,
 } = require("../utils/assignment-validators");
@@ -17,6 +18,7 @@ const router = express.Router({ mergeParams: true });
 
 router.get(
   "/",
+  requirePermission("inspection", "read"),
   asyncHandler(async (req, res) => {
     const data = await listItps({
       orgId: req.user.orgId,
@@ -29,6 +31,7 @@ router.get(
 
 router.post(
   "/",
+  requirePermission("inspection", "create"),
   [
     body("title").trim().notEmpty(),
     body("pointType").optional().isIn(["hold", "witness", "review"]),
@@ -65,6 +68,7 @@ router.post(
 
 router.patch(
   "/:itpId",
+  requirePermission("inspection", "update"),
   [
     param("itpId").isUUID(),
     body("pointType").optional().isIn(["hold", "witness", "review"]),
@@ -102,6 +106,7 @@ router.patch(
 
 router.delete(
   "/:itpId",
+  requirePermission("inspection", "delete"),
   [param("itpId").isUUID(), validate],
   asyncHandler(async (req, res) => {
     const data = await deleteItp({
