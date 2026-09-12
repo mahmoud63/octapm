@@ -1,5 +1,6 @@
 const mockPrisma = {
   $transaction: jest.fn((fn) => fn(mockPrisma)),
+  $queryRaw: jest.fn(async () => []), // row locks (Phase 21D): nothing to lock in a fake
   project: { findFirst: jest.fn() },
   ipcCertificate: {
     findMany: jest.fn(),

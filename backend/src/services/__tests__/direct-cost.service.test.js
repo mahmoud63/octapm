@@ -84,7 +84,19 @@ const mockPrisma = {
   // Read to decide whether a line bought stock rather than project cost: a
   // line traceable to a PO line that stocks an item is capitalised, because
   // the cost lands when the material is issued.
-  procurementPoLine: { findFirst: jest.fn(async ({ where }) => store.poLines.find((row) => row.id === where.id) || null) },
+  procurementPoLine: {
+    findFirst: jest.fn(async ({ where }) => store.poLines.find((row) => row.id === where.id) || null),
+    // The project-membership check (Phase 21D, CX21-001): a fixture line is on
+    // the project unless it says otherwise, and on the invoice's order when the
+    // invoice names one.
+    findMany: jest.fn(async ({ where }) =>
+      store.poLines
+        .filter((row) => where.id.in.includes(row.id))
+        .filter((row) => (row.projectId ?? "p1") === where.order.projectId)
+        .filter((row) => where.orderId === undefined || row.orderId === where.orderId)
+        .map((row) => ({ id: row.id })),
+    ),
+  },
   $transaction: jest.fn(async (fn) => fn(mockPrisma)),
 };
 const mockAudit = { ACTIONS: { CREATED: "created", UPDATED: "updated", STATUS_CHANGED: "status_changed", APPROVED: "approved", REJECTED: "rejected", DELETED: "deleted" }, recordEvent: jest.fn(async () => null) };
@@ -235,5 +247,49 @@ describe("direct costs", () => {
     await expect(service.deleteDirectCost({ ...scope, actor, directCostId: old.id })).rejects.toMatchObject({ code: "DIRECT_COST_LOCKED" });
     expect((await service.deleteDirectCost({ ...scope, actor, directCostId: fresh.id })).deleted).toBe(true);
     await expect(service.getDirectCost({ ...scope, directCostId: fresh.id })).rejects.toMatchObject({ status: 404 });
+  });
+});
+
+describe("Phase 21D — integrity (Codex round 1)", () => {
+  beforeEach(() => {
+    reset();
+    store.poLines = [
+      { id: "pol-stock", orderId: "po-1", projectId: "p1", inventoryItemId: "item-1", receivedQty: 100 },
+      { id: "pol-elsewhere", orderId: "po-9", projectId: "p9", inventoryItemId: "item-9", receivedQty: 100 },
+    ];
+  });
+
+  it("CX21-001: refuses a line that bills a purchase-order line from another project", async () => {
+    await expect(
+      service.createDirectCost({ ...scope, actor, payload: { type: "invoice", vendorCompanyId: "co-1", invoiceNumber: "INV-X-1", description: "Cement", costDate: "2026-09-01", lines: [
+        { description: "Cement billed against another project's order line", costCodeId: "cc-conc", activityId: "act-1", poLineId: "pol-elsewhere", amount: 4000 },
+      ] } }),
+    ).rejects.toMatchObject({ code: "DIRECT_COST_LINE_PO_LINE" });
+    expect(store.costs).toHaveLength(0);
+  });
+
+  it("CX21-001: refuses a line whose PO line is on a different order than the invoice names", async () => {
+    mockPrisma.procurementOrder = { findFirst: jest.fn(async () => ({ id: "po-2" })) };
+    await expect(
+      service.createDirectCost({ ...scope, actor, payload: { type: "invoice", vendorCompanyId: "co-1", invoiceNumber: "INV-X-2", description: "Cement", costDate: "2026-09-01", purchaseOrderId: "po-2", lines: [
+        { description: "Cement", costCodeId: "cc-conc", activityId: "act-1", poLineId: "pol-stock", amount: 4000 },
+      ] } }),
+    ).rejects.toMatchObject({ code: "DIRECT_COST_LINE_PO_LINE" });
+  });
+
+  it("CX21-005: a payment is checked against the payment rows, not a figure read before the transaction", async () => {
+    const cost = await invoice();
+    await service.submitDirectCost({ ...scope, actor, directCostId: cost.id });
+    await service.approveDirectCost({ ...scope, actor, directCostId: cost.id });
+    // Another payment landed between the balance check and the transaction: its
+    // row exists, the invoice's paidTotal has not caught up yet.
+    const total = Number(store.costs[0].total);
+    store.payments.push({ id: "pay-race", orgId: "org-1", projectId: "p1", directCostId: cost.id, amount: total - 10, paidAt: new Date() });
+    const lock = jest.spyOn(mockPrisma, "$queryRaw");
+    await expect(service.recordPayment({ ...scope, actor, directCostId: cost.id, payload: { amount: 60 } })).rejects.toMatchObject({ code: "DIRECT_COST_PAYMENT_EXCEEDS" });
+    const paid = await service.recordPayment({ ...scope, actor, directCostId: cost.id, payload: { amount: 10 } });
+    expect(Number(paid.paidTotal)).toBe(total);
+    expect(lock.mock.calls.map((call) => call[0].join("?")).some((sql) => sql.includes('FROM "DirectCost" WHERE id = ? FOR UPDATE'))).toBe(true);
+    lock.mockRestore();
   });
 });

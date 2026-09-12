@@ -12,7 +12,7 @@ const mockPrisma = {
   commitment: { findFirst: jest.fn() },
   subPayApp: { aggregate: jest.fn(async () => ({ _max: { number: 0 } })), findFirst: jest.fn(), findMany: jest.fn(async () => []), create: jest.fn(), update: jest.fn() },
   subPayAppLine: { findMany: jest.fn(async () => []), update: jest.fn(async () => ({})) },
-  subPayAppPayment: { create: jest.fn(async ({ data }) => ({ id: "pay-1", ...data })) },
+  subPayAppPayment: { create: jest.fn(async ({ data }) => ({ id: "pay-1", ...data })), findMany: jest.fn(async () => []) },
   // Read when approving, to see whether this is the application that finishes
   // the subcontract and so triggers the closeout gate (OCTA-SUB-CLOSE-056).
   // Empty here: these applications are part-way claims, not the final one.
@@ -393,5 +393,21 @@ describe("subcontractor payment applications", () => {
       expect(reopened.status).toBe("draft");
       expect(ledger.store.entries.length).toBe(0);
     });
+  });
+});
+
+describe("Phase 21D — integrity (Codex round 1)", () => {
+  it("CX21-005: a payment is checked against the payment rows under a lock, not the figure read before the transaction", async () => {
+    // The application says 20,000 paid; the rows say a further 6,000 landed since.
+    mockPrisma.subPayApp.findFirst.mockResolvedValue(payApp({ status: "approved", netThisPeriod: 27000, paidAmount: 20000 }));
+    mockPrisma.subPayAppPayment.findMany.mockResolvedValue([{ amount: 20000 }, { amount: 6000 }]);
+    const lock = jest.spyOn(mockPrisma, "$queryRaw");
+    await expect(service.recordPayment({ orgId: "org-1", projectId: "project-1", payAppId: "pa-1", payload: { amount: 7000 } })).rejects.toMatchObject({ code: "SUB_PAY_APP_PAYMENT_EXCEEDS" });
+    const paid = await service.recordPayment({ orgId: "org-1", projectId: "project-1", payAppId: "pa-1", payload: { amount: 1000 } });
+    expect(mockPrisma.subPayApp.update).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ paidAmount: 27000, status: "paid" }) }));
+    expect(paid.status).toBe("paid");
+    expect(lock.mock.calls.map((call) => call[0].join("?")).some((sql) => sql.includes('FROM "SubPayApp" WHERE id = ? FOR UPDATE'))).toBe(true);
+    lock.mockRestore();
+    mockPrisma.subPayAppPayment.findMany.mockResolvedValue([]);
   });
 });

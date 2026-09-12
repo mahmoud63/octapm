@@ -79,7 +79,9 @@ export function BudgetLineDialog({
     line ? String(line.originalBudget) : ''
   )
   const [committed, setCommitted] = useState(line ? String(line.committed) : '')
-  const [actual, setActual] = useState(line ? String(line.actual) : '')
+  // Actual cost is posted by the cost ledger and is shown here, never typed:
+  // the API refuses a figure that differs from what was posted (Phase 21D).
+  const actual = line ? String(line.actual) : '0'
   const [forecast, setForecast] = useState(
     line?.forecastIsManual ? String(line.forecast) : ''
   )
@@ -93,7 +95,6 @@ export function BudgetLineDialog({
         description: description.trim() || null,
         originalBudget: parseMoney(original) ?? 0,
         committed: parseMoney(committed) ?? 0,
-        actual: parseMoney(actual) ?? 0,
         forecast: parseMoney(forecast),
       }
       if (line) {
@@ -187,13 +188,14 @@ export function BudgetLineDialog({
             />
           </div>
           <div className='space-y-1'>
-            <Label htmlFor='budget-actual'>Actual</Label>
+            <Label htmlFor='budget-actual'>Actual (posted from the cost ledger)</Label>
             <Input
               id='budget-actual'
               type='number'
               step='0.01'
               value={actual}
-              onChange={(e) => setActual(e.target.value)}
+              readOnly
+              disabled
             />
           </div>
           <div className='space-y-1'>

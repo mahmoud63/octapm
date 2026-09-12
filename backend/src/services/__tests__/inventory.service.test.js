@@ -38,6 +38,9 @@ const matches = (row, where = {}) =>
 
 const mockPrisma = {
   $transaction: (fn) => fn(mockPrisma),
+  // Row locks (Phase 21D): a fake database has nothing to lock; an empty result
+  // leaves the figures as they were read.
+  $queryRaw: jest.fn(async () => []),
 
   inventoryItem: {
     findFirst: jest.fn(async ({ where }) => {
@@ -68,7 +71,7 @@ const mockPrisma = {
   stockBalance: {
     findMany: jest.fn(async ({ where, orderBy }) => {
       let rows = store.balances.filter(
-        (b) => b.itemId === where.itemId && b.warehouseId === where.warehouseId
+        (b) => b.itemId === where.itemId && (where.warehouseId === undefined || b.warehouseId === where.warehouseId)
       );
       if (orderBy?.[0]?.onHand === "desc") {
         rows = [...rows].sort((a, b) => b.onHand - a.onHand);
@@ -657,5 +660,36 @@ describe("inventory stock ledger", () => {
         payload: { itemId: item.id, warehouseId: warehouse.id, quantity: 1, unitCost: 1 },
       })
     ).rejects.toThrow(expect.objectContaining({ status: 404, code: "ITEM_NOT_FOUND" }));
+  });
+});
+
+describe("Phase 21D — integrity (Codex round 1)", () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    store.items.clear(); store.warehouses.clear(); store.locations.clear();
+    store.balances.length = 0; store.transactions.length = 0; store.ledger.length = 0; store.costRecords.length = 0;
+    nextId = 1;
+  });
+
+  it("CX21-003: the weighted average blends against every balance of the item, not only the receiving store", async () => {
+    const item = seedItem();
+    const central = seedWarehouse({ code: "CENTRAL" });
+    const site = seedWarehouse({ code: "SITE" });
+    await service.receiveStock({ orgId: ORG, user: USER, payload: { itemId: item.id, warehouseId: central.id, quantity: 100, unitCost: 10 } });
+    await service.receiveStock({ orgId: ORG, user: USER, payload: { itemId: item.id, warehouseId: site.id, quantity: 100, unitCost: 20 } });
+    // 100 at 10 in one store and 100 at 20 in another is 200 at 15 — the item's
+    // average, not the empty store's.
+    expect(Number(store.items.get(item.id).averageCost)).toBe(15);
+    expect(balanceOf(item.id, central.id).onHand).toBe(100);
+    expect(balanceOf(item.id, site.id).onHand).toBe(100);
+  });
+
+  it("CX21-004: a movement locks its balance row for the transaction before it reads the figures", async () => {
+    const item = seedItem();
+    const warehouse = seedWarehouse();
+    await service.receiveStock({ orgId: ORG, user: USER, payload: { itemId: item.id, warehouseId: warehouse.id, quantity: 100, unitCost: 10 } });
+    const statements = mockPrisma.$queryRaw.mock.calls.map((call) => (Array.isArray(call[0]) ? call[0].join("?") : String(call[0])));
+    expect(statements.some((sql) => /FROM "StockBalance" WHERE id = \? FOR UPDATE/.test(sql))).toBe(true);
+    expect(statements.some((sql) => /FROM "InventoryItem" WHERE id = \? FOR UPDATE/.test(sql))).toBe(true);
   });
 });

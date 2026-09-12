@@ -350,7 +350,18 @@ const receiveAgainstOrder = async ({ orgId, user, payload }) => {
     // Taking a row lock on the lines being received makes the second delivery
     // wait for the first, so it reads a true starting figure
     // (OCTA-PROC-RECEIPT-085).
-    const receivingLineIds = [...new Set(lines.map((row) => row.poLineId).filter(Boolean))];
+    // The same order line reported twice on one receipt was checked twice
+    // against the same starting figure: two rows of 60 on a line of 100 both
+    // passed, stock took 120 and the line recorded 60 (Phase 21D, CX21-002).
+    const seenLineIds = new Set();
+    for (const row of lines) {
+      if (!row.poLineId) continue;
+      if (seenLineIds.has(row.poLineId)) {
+        throw new HttpError(400, "RECEIPT_DUPLICATE_LINE", "An order line is reported twice on this receipt; report one quantity per order line");
+      }
+      seenLineIds.add(row.poLineId);
+    }
+    const receivingLineIds = [...seenLineIds];
     if (receivingLineIds.length) {
       // The lock and the true figures in one query: rows come back as they are
       // at the moment they are locked, so there is no second read to go stale

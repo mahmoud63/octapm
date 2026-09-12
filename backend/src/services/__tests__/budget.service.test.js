@@ -183,3 +183,23 @@ describe("budget by cost code", () => {
     expect(service.costTypeForOrder({ category: "Design" })).toBe("other");
   });
 });
+
+describe("Phase 21D — integrity (Codex round 1)", () => {
+  it("CX21-007: refuses an actual typed onto a new budget line", async () => {
+    mockPrisma.budgetLine.findFirst.mockResolvedValue(null);
+    await expect(
+      service.createBudgetLine({ orgId: "org-1", projectId: "project-1", payload: { costCodeId: CODE.id, costType: "material", originalBudget: 1000, actual: 250 } }),
+    ).rejects.toMatchObject({ code: "BUDGET_ACTUAL_IS_DERIVED" });
+  });
+
+  it("CX21-007: refuses a changed actual on an existing line, and lets an unchanged one through", async () => {
+    mockPrisma.budgetLine.findFirst.mockResolvedValue(line({ actual: 15000 }));
+    await expect(
+      service.updateBudgetLine({ orgId: "org-1", projectId: "project-1", lineId: "line-1", payload: { actual: 0 } }),
+    ).rejects.toMatchObject({ code: "BUDGET_ACTUAL_IS_DERIVED" });
+    mockPrisma.budgetLine.update.mockResolvedValue(line({ actual: 15000, description: "Concrete" }));
+    await expect(
+      service.updateBudgetLine({ orgId: "org-1", projectId: "project-1", lineId: "line-1", payload: { actual: 15000, description: "Concrete" } }),
+    ).resolves.toBeTruthy();
+  });
+});

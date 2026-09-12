@@ -197,16 +197,31 @@ const post = async ({
     costType: resolvedType,
   });
 
-  const sourceKey = sourceKeyFor({ sourceType, sourceId, sourceLineId, suffix: keySuffix });
+  let sourceKey = sourceKeyFor({ sourceType, sourceId, sourceLineId, suffix: keySuffix });
 
   // The unique index is the real guard — checking first only saves a rollback,
   // and two concurrent approvals both passing the check is exactly the race
   // this table exists to lose safely.
-  const existing = await tx.costLedgerEntry.findFirst({
+  //
+  // A posting that was since REVERSED does not hold its key: the economic
+  // event has happened again (a reopened timesheet re-approved, a returned
+  // invoice re-approved) and must post again, under its own key, so that the
+  // history keeps the first posting, its reversal and the new posting. Before
+  // this, re-approval answered "already posted" and the cost stayed reversed
+  // (Phase 21D, CX21-006).
+  let existing = await tx.costLedgerEntry.findFirst({
     where: { orgId, sourceKey },
     select: { id: true },
   });
-  if (existing) return { entry: existing, posted: false, reason: "already_posted" };
+  for (let repost = 2; existing; repost += 1) {
+    const reversed = await tx.costLedgerEntry.findFirst({
+      where: { orgId, reversalOfId: existing.id },
+      select: { id: true },
+    });
+    if (!reversed) return { entry: existing, posted: false, reason: "already_posted" };
+    sourceKey = sourceKeyFor({ sourceType, sourceId, sourceLineId, suffix: [keySuffix, `r${repost}`].filter(Boolean).join(":") });
+    existing = await tx.costLedgerEntry.findFirst({ where: { orgId, sourceKey }, select: { id: true } });
+  }
 
   let entry;
   try {

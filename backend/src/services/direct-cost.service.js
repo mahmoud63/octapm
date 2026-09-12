@@ -178,9 +178,21 @@ const normalizeHeader = async ({ orgId, projectId = null, payload, existing = nu
   };
 };
 
-const normalizeLines = async ({ projectId, rows }) => {
+const normalizeLines = async ({ projectId, rows, purchaseOrderId = null }) => {
   const list = Array.isArray(rows) ? rows : [];
   if (list.length > 500) throw new HttpError(400, "DIRECT_COST_TOO_MANY_LINES", "A direct cost takes up to 500 lines");
+  // A line that bills a purchase-order line must bill one on THIS project — and,
+  // when the invoice names its order, one on THAT order. The line id used to be
+  // copied unchecked, and the capitalisation rule then read the foreign line's
+  // stock link to decide this project incurs no cost (Phase 21D, CX21-001).
+  const poLineIds = uniqueIds(list.map((row) => row.poLineId));
+  const poLines = poLineIds.length
+    ? await prisma.procurementPoLine.findMany({
+        where: { id: { in: poLineIds }, order: { projectId }, ...(purchaseOrderId ? { orderId: purchaseOrderId } : {}) },
+        select: { id: true },
+      })
+    : [];
+  const poLineSet = new Set(poLines.map((row) => row.id));
   const budgetLineIds = uniqueIds(list.map((row) => row.budgetLineId));
   const budgetLines = budgetLineIds.length ? await prisma.budgetLine.findMany({ where: { id: { in: budgetLineIds }, projectId }, select: { id: true, costCodeId: true, costType: true } }) : [];
   const budgetLineById = new Map(budgetLines.map((row) => [row.id, row]));
@@ -211,6 +223,9 @@ const normalizeLines = async ({ projectId, rows }) => {
     // the order — and the capitalisation rule (OCTA-FIN-LEDGER-059) has no
     // other way to tell stocked material from direct-to-site.
     const poLineId = trimOrNull(row.poLineId);
+    if (poLineId && !poLineSet.has(poLineId)) {
+      throw new HttpError(400, "DIRECT_COST_LINE_PO_LINE", `Line ${index + 1}: that purchase-order line is not on this ${purchaseOrderId ? "invoice's order" : "project"}`);
+    }
     return { id: trimOrNull(row.id), description: description.slice(0, 500), costCodeId, budgetLineId, activityId, poLineId, costType, quantity, unit: trimOrNull(row.unit)?.slice(0, 20) || null, unitCost, amount, notes: trimOrNull(row.notes)?.slice(0, 1000) || null, sortOrder: index };
   });
 };
@@ -286,7 +301,7 @@ const nextNumber = async (tx, projectId) =>
 const createDirectCost = async ({ orgId, projectId, payload = {}, actor = null }) => {
   await ensureProject({ orgId, projectId });
   const header = await normalizeHeader({ orgId, projectId, payload });
-  const lines = await normalizeLines({ projectId, rows: payload.lines });
+  const lines = await normalizeLines({ projectId, rows: payload.lines, purchaseOrderId: header.purchaseOrderId });
   await assertNoDuplicateInvoice({ projectId, vendorCompanyId: header.vendorCompanyId, vendorName: header.vendorName, invoiceNumber: header.invoiceNumber });
   const totals = totalsOf(lines, header.tax);
   const created = await prisma.$transaction(async (tx) => {
@@ -304,7 +319,7 @@ const updateDirectCost = async ({ orgId, projectId, directCostId, payload = {}, 
   const existing = await load({ orgId, projectId, directCostId });
   if (!EDITABLE.includes(existing.status)) throw new HttpError(409, "DIRECT_COST_LOCKED", `A ${existing.status} direct cost cannot be edited`);
   const header = await normalizeHeader({ orgId, projectId, payload, existing });
-  const lines = payload.lines !== undefined ? await normalizeLines({ projectId, rows: payload.lines }) : existing.lines.map((line) => ({ ...line, amount: toNumber(line.amount) }));
+  const lines = payload.lines !== undefined ? await normalizeLines({ projectId, rows: payload.lines, purchaseOrderId: header.purchaseOrderId }) : existing.lines.map((line) => ({ ...line, amount: toNumber(line.amount) }));
   await assertNoDuplicateInvoice({ projectId, vendorCompanyId: header.vendorCompanyId, vendorName: header.vendorName, invoiceNumber: header.invoiceNumber, excludeId: directCostId });
   const totals = totalsOf(lines, header.tax);
   const updated = await prisma.$transaction(async (tx) => {
@@ -484,8 +499,16 @@ const recordPayment = async ({ orgId, projectId, directCostId, payload = {}, act
   const paidAt = payload.paidAt ? new Date(payload.paidAt) : new Date();
   if (Number.isNaN(paidAt.getTime())) throw new HttpError(400, "DIRECT_COST_DATE_INVALID", "paidAt is not a valid date");
   const row = await prisma.$transaction(async (tx) => {
+    // The balance check above read a figure that another payment may have moved
+    // since. Lock the invoice, recompute what has really been paid from the
+    // payment rows, and check again before writing (Phase 21D, CX21-005).
+    await tx.$queryRaw`SELECT id FROM "DirectCost" WHERE id = ${directCostId} FOR UPDATE`;
+    const paidRows = await tx.directCostPayment.findMany({ where: { directCostId }, select: { amount: true } });
+    const alreadyPaid = paidRows.length ? round2(paidRows.reduce((sum, p) => sum + toNumber(p.amount), 0)) : toNumber(existing.paidTotal);
+    const remaining = round2(toNumber(existing.total) - alreadyPaid);
+    if (amount > remaining + 0.005) throw new HttpError(400, "DIRECT_COST_PAYMENT_EXCEEDS", `The payment exceeds the balance of ${remaining}`);
     await tx.directCostPayment.create({ data: { orgId, projectId, directCostId, amount, paidAt, method: trimOrNull(payload.method)?.slice(0, 60) || null, reference: trimOrNull(payload.reference)?.slice(0, 120) || null, note: trimOrNull(payload.note)?.slice(0, 1000) || null, createdBy: actor?.id || null } });
-    const paidTotal = round2(toNumber(existing.paidTotal) + amount);
+    const paidTotal = round2(alreadyPaid + amount);
     await tx.directCost.update({ where: { id: directCostId }, data: { paidTotal, status: paidTotal + 0.005 >= toNumber(existing.total) ? STATUS.PAID : STATUS.APPROVED, updatedBy: actor?.id || null } });
     return load({ orgId, projectId, directCostId, tx });
   });

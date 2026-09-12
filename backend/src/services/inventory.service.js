@@ -503,6 +503,17 @@ const postMovement = async (tx, { orgId, item, warehouseId, locationId = null, t
       data: { orgId, itemId: item.id, warehouseId, locationId },
     }));
 
+  // Two movements that both read 100 must not both write 40. The balance row is
+  // locked for the rest of this transaction and the figures re-read from the
+  // locked row, so a concurrent issue waits and then sees the truth
+  // (Phase 21D, CX21-004). An empty result is what a fake database returns.
+  const [lockedBalance] = await tx.$queryRaw`SELECT "onHand", "reserved", "inTransit", "damaged", "quarantined" FROM "StockBalance" WHERE id = ${balance.id} FOR UPDATE`;
+  if (lockedBalance) {
+    for (const key of ["onHand", "reserved", "inTransit", "damaged", "quarantined"]) {
+      if (lockedBalance[key] !== undefined && lockedBalance[key] !== null) balance[key] = Number(lockedBalance[key]);
+    }
+  }
+
   const delta = SIGNED_TYPES.has(type) ? signed : rule.onHand * signed;
   const nextOnHand = round(balance.onHand + delta);
 
@@ -536,10 +547,18 @@ const postMovement = async (tx, { orgId, item, warehouseId, locationId = null, t
   let costForMovement = Number(item.averageCost ?? 0);
   if (rule.costs && unitCost != null) {
     const receiptCost = Number(unitCost);
-    const totalQty = balance.onHand + signed;
+    // The average belongs to the item, so it blends against everything the
+    // item has on hand — every warehouse and bin — not only the balance this
+    // delivery lands in. A first delivery into an empty second store used to
+    // reset the shared average to its own price (Phase 21D, CX21-003). The
+    // item row is locked so two deliveries into different stores blend in turn.
+    await tx.$queryRaw`SELECT id FROM "InventoryItem" WHERE id = ${item.id} FOR UPDATE`;
+    const balances = await tx.stockBalance.findMany({ where: { itemId: item.id }, select: { onHand: true } });
+    const itemOnHand = balances.reduce((sum, row) => sum + Number(row.onHand ?? 0), 0);
+    const totalQty = itemOnHand + signed;
     const blended =
       totalQty > 0
-        ? (balance.onHand * Number(item.averageCost ?? 0) + signed * receiptCost) / totalQty
+        ? (itemOnHand * Number(item.averageCost ?? 0) + signed * receiptCost) / totalQty
         : receiptCost;
     await tx.inventoryItem.update({
       where: { id: item.id },

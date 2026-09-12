@@ -897,8 +897,18 @@ const recordPayment = async ({ orgId, projectId, payAppId, payload = {}, actor =
   }
   const paidAt = optionalDate(payload.paidAt, "paidAt") || new Date();
   const updated = await prisma.$transaction(async (tx) => {
+    // Recomputed under a row lock: the check above read a figure another
+    // payment may have moved since (Phase 21D, CX21-005).
+    await tx.$queryRaw`SELECT id FROM "SubPayApp" WHERE id = ${payAppId} FOR UPDATE`;
+    const paidRows = await tx.subPayAppPayment.findMany({ where: { payAppId }, select: { amount: true } });
+    const alreadyPaidNow = paidRows.length ? round2(paidRows.reduce((sum, p) => sum + toMoneyNumber(p.amount), 0)) : alreadyPaid;
+    if (addMoney(alreadyPaidNow, amount) > net + EPSILON) {
+      const error = new HttpError(400, "SUB_PAY_APP_PAYMENT_EXCEEDS", `Payment would exceed the net approved ${net}; ${subtractMoney(net, alreadyPaidNow)} remains`);
+      error.details = { netApproved: net, paid: alreadyPaidNow, remaining: subtractMoney(net, alreadyPaidNow) };
+      throw error;
+    }
     await tx.subPayAppPayment.create({ data: { orgId, projectId, payAppId, amount, paidAt, method: trimOrNull(payload.method)?.slice(0, 60) || null, reference: trimOrNull(payload.reference)?.slice(0, 120) || null, note: trimOrNull(payload.note)?.slice(0, 1000) || null, createdBy: actor?.id || null } });
-    const paidAmount = addMoney(alreadyPaid, amount);
+    const paidAmount = addMoney(alreadyPaidNow, amount);
     const fullyPaid = paidAmount >= net - EPSILON;
     const row = await tx.subPayApp.update({ where: { id: payAppId }, data: { paidAmount, paidAt: fullyPaid ? paidAt : existing.paidAt, status: fullyPaid ? STATUS.PAID : existing.status, updatedBy: actor?.id || null }, include });
     await audit({ tx, orgId, projectId, entityId: payAppId, action: fullyPaid ? auditService.ACTIONS.STATUS_CHANGED : auditService.ACTIONS.UPDATED, actor, oldStatus: existing.status, newStatus: row.status, summary: { ref: row.ref, payment: amount, paidAmount, net, reference: trimOrNull(payload.reference) || null } });

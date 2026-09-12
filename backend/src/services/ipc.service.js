@@ -1652,6 +1652,9 @@ const recordIpcPayment = async ({
       );
     }
 
+    // The certificate is locked so two payments recorded at once are checked
+    // one after the other against the rows the first one wrote (Phase 21D).
+    await tx.$queryRaw`SELECT id FROM "IpcCertificate" WHERE id = ${certificate.id} FOR UPDATE`;
     const { payments, releases } = await loadPaymentRows({
       tx,
       projectId,

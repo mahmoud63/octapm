@@ -458,3 +458,24 @@ describe("goods receipt", () => {
     expect(mockInventory.postMovement.mock.calls[0][1].unitCost).toBe(6.4);
   });
 });
+
+describe("Phase 21D — integrity (Codex round 1)", () => {
+  beforeEach(() => jest.clearAllMocks());
+
+  it("CX21-002: refuses a receipt that reports the same order line twice", async () => {
+    mockPrisma.procurementOrder.findFirst.mockResolvedValue({
+      id: "order-1", ref: "PO-0001", status: "issued", projectId: "project-1", packageId: null, supplierId: null,
+      project: { id: "project-1" }, lines: [poLine({ orderedQty: 100 })],
+    });
+    mockPrisma.warehouse.findFirst.mockResolvedValue({ id: "wh-1", orgId: ORG, name: "Main" });
+    mockPrisma.deliveryReceipt.count.mockResolvedValue(0);
+    await expect(
+      service.receiveAgainstOrder({ orgId: ORG, user: USER, payload: { orderId: "order-1", warehouseId: "wh-1", lines: [
+        { poLineId: "line-1", acceptedQty: 60 },
+        { poLineId: "line-1", acceptedQty: 60 },
+      ] } }),
+    ).rejects.toMatchObject({ code: "RECEIPT_DUPLICATE_LINE" });
+    expect(mockInventory.postMovement).not.toHaveBeenCalled();
+    expect(mockPrisma.procurementPoLine.update).not.toHaveBeenCalled();
+  });
+});

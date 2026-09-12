@@ -264,6 +264,12 @@ const createBudgetLine = async ({ orgId, projectId, payload = {}, actor = null }
   const costCodeId = trimOrNull(payload.costCodeId);
   if (!costCodeId) throw new HttpError(400, "BUDGET_COST_CODE_REQUIRED", "Pick a cost code");
   const originalBudget = money(payload, "originalBudget") ?? 0;
+  // Actual cost is a projection of the cost ledger (OCTA-FIN-LEDGER-059). A
+  // figure typed onto a line would be one the ledger never posted, and the
+  // reconciliation would then be arguing with an invention (Phase 21D, CX21-007).
+  if (round2(money(payload, "actual") ?? 0) !== 0) {
+    throw new HttpError(400, "BUDGET_ACTUAL_IS_DERIVED", "Actual cost is posted through the cost ledger; it cannot be typed onto a budget line");
+  }
   const created = await prisma.$transaction(async (tx) => {
     await ensureProjectCostCodes({ tx, orgId, projectId, costCodeIds: [costCodeId], actorId: actor?.id || null });
     const clash = await tx.budgetLine.findFirst({ where: { projectId, costCodeId, costType }, select: { id: true, status: true } });
@@ -294,7 +300,9 @@ const updateBudgetLine = async ({ orgId, projectId, lineId, payload = {}, actor 
   if (payload.description !== undefined) data.description = trimOrNull(payload.description)?.slice(0, 500) || null;
   if (payload.originalBudget !== undefined) data.originalBudget = money(payload, "originalBudget");
   if (payload.committed !== undefined) data.committed = money(payload, "committed");
-  if (payload.actual !== undefined) data.actual = money(payload, "actual");
+  if (payload.actual !== undefined && round2(money(payload, "actual") ?? 0) !== round2(Number(existing.actual ?? 0))) {
+    throw new HttpError(400, "BUDGET_ACTUAL_IS_DERIVED", "Actual cost is posted through the cost ledger; it cannot be typed onto a budget line");
+  }
   if (payload.forecast !== undefined) data.forecast = payload.forecast === null || payload.forecast === "" ? null : money(payload, "forecast");
   if (payload.costType !== undefined) data.costType = normalizeCostType(payload.costType);
   if (payload.sortOrder !== undefined) data.sortOrder = Number.isInteger(Number(payload.sortOrder)) ? Number(payload.sortOrder) : existing.sortOrder;
