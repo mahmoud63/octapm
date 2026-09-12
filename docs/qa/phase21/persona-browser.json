@@ -1,5 +1,5 @@
 {
-  "ranAt": "2026-09-12T20:10:29.168Z",
+  "ranAt": "2026-09-12T20:55:49.184Z",
   "project": {
     "id": "0ce999f2-b175-432b-8551-20182b4fc990",
     "name": "OCTA PHASE21 GREENFIELD 20260910093852"
@@ -511,8 +511,8 @@
       "recordId": "174d8121-393e-4c50-abcf-af5bbf4c2be5",
       "ref": "P21-20260910093852-S-101",
       "url": "/projects/0ce999f2-b175-432b-8551-20182b4fc990/doc-control/drawings?recordId=174d8121-393e-4c50-abcf-af5bbf4c2be5&source=drawing",
-      "verdict": "MODULE HOME ONLY",
-      "evidence": "no dialog; ref NOT visible; Skip to Main OCTA PHASE21 GREENFIELD 20260910093852 Dashboard Projects Portfolio Inventory",
+      "verdict": "RECORD ON SCREEN (sole row, selected by default)",
+      "evidence": "no dialog; ref visible; Skip to Main OCTA PHASE21 GREENFIELD 20260910093852 Dashboard Projects Portfolio Inventory",
       "failedRequests": [
         "401 /auth/me"
       ]
@@ -535,8 +535,8 @@
       "recordId": "db359ad8-916f-45ea-b512-a8d89a4cbc71",
       "ref": "TRM-001",
       "url": "/projects/0ce999f2-b175-432b-8551-20182b4fc990/doc-control/transmittals?recordId=db359ad8-916f-45ea-b512-a8d89a4cbc71&source=transmittal",
-      "verdict": "RECORD ON SCREEN (list row, no detail opened)",
-      "evidence": "no dialog; ref visible; Skip to Main OCTA PHASE21 GREENFIELD 20260910093852 Dashboard Projects Portfolio Inventory",
+      "verdict": "RECORD OPENED (inline, selected row)",
+      "evidence": "no dialog; selected row; ref visible; Skip to Main OCTA PHASE21 GREENFIELD 20260910093852 Dashboard Projects Portfolio Inventory",
       "failedRequests": [
         "401 /auth/me"
       ]
@@ -571,8 +571,8 @@
       "recordId": "73dce703-7588-4aef-a4aa-aa2c39deda07",
       "ref": "NCR-001",
       "url": "/projects/0ce999f2-b175-432b-8551-20182b4fc990/quality/ncr?recordId=73dce703-7588-4aef-a4aa-aa2c39deda07&source=ncr",
-      "verdict": "RECORD ON SCREEN (list row, no detail opened)",
-      "evidence": "no dialog; ref visible; Skip to Main OCTA PHASE21 GREENFIELD 20260910093852 Dashboard Projects Portfolio Inventory",
+      "verdict": "RECORD OPENED (inline, selected row)",
+      "evidence": "no dialog; selected row; ref visible; Skip to Main OCTA PHASE21 GREENFIELD 20260910093852 Dashboard Projects Portfolio Inventory",
       "failedRequests": [
         "401 /auth/me"
       ]
@@ -633,7 +633,7 @@
       "recordId": "2027-02-01",
       "ref": "2027-02-01",
       "url": "/projects/0ce999f2-b175-432b-8551-20182b4fc990/site-reporting?recordId=2027-02-01&source=daily_log",
-      "verdict": "MODULE HOME ONLY",
+      "verdict": "RECORD OPENED (the day is open)",
       "evidence": "no dialog; ref NOT visible; Skip to Main OCTA PHASE21 GREENFIELD 20260910093852 Dashboard Projects Portfolio Inventory",
       "failedRequests": [
         "401 /auth/me"
@@ -655,10 +655,10 @@
       "key": "weather_delay",
       "recordType": "weather_delay",
       "recordId": "7f967459-5daf-43b6-a6c6-b157149c2680",
-      "ref": "7f967459-5daf-43b6-a6c6-b157149c2680",
+      "ref": "Heavy rain, pour postponed 2 h",
       "url": "/projects/0ce999f2-b175-432b-8551-20182b4fc990/commercial/weather?recordId=7f967459-5daf-43b6-a6c6-b157149c2680&source=weather_delay",
-      "verdict": "MODULE HOME ONLY",
-      "evidence": "no dialog; ref NOT visible; Skip to Main OCTA PHASE21 GREENFIELD 20260910093852 Dashboard Projects Portfolio Inventory",
+      "verdict": "RECORD ON SCREEN (sole row, selected by default)",
+      "evidence": "no dialog; ref visible; Skip to Main OCTA PHASE21 GREENFIELD 20260910093852 Dashboard Projects Portfolio Inventory",
       "failedRequests": [
         "401 /auth/me"
       ]
@@ -669,7 +669,7 @@
       "recordId": "e263d5f6-94b8-4e66-982f-6f8deccb23db",
       "ref": "P21-20260910093852 MTG-01 Weekly progress meeting, week 5",
       "url": "/projects/0ce999f2-b175-432b-8551-20182b4fc990/meetings?recordId=e263d5f6-94b8-4e66-982f-6f8deccb23db&source=meeting",
-      "verdict": "RECORD ON SCREEN (list row, no detail opened)",
+      "verdict": "RECORD ON SCREEN (sole row, selected by default)",
       "evidence": "no dialog; ref visible; Skip to Main OCTA PHASE21 GREENFIELD 20260910093852 Dashboard Projects Portfolio Inventory",
       "failedRequests": [
         "401 /auth/me"
@@ -681,8 +681,8 @@
       "recordId": "e56f75ad-0cbb-41d6-a6d6-fef36175bc8b",
       "ref": "P21-20260910093852 TSK-01 Re-brief lifting plan and tag lines to the steelfixing crew",
       "url": "/tasks?recordId=e56f75ad-0cbb-41d6-a6d6-fef36175bc8b",
-      "verdict": "RECORD ON SCREEN (list row, no detail opened)",
-      "evidence": "no dialog; ref visible; Skip to Main Select project Dashboard Projects Portfolio Inventory Reports Tasks Messages ",
+      "verdict": "RECORD OPENED",
+      "evidence": "dialog; ref visible; Skip to Main Select project Dashboard Projects Portfolio Inventory Reports Tasks Messages ",
       "failedRequests": [
         "401 /auth/me"
       ]
@@ -693,7 +693,7 @@
       "recordId": "84ec8b03-7fd3-4711-9145-0c691eb2308a",
       "ref": "VO-20",
       "url": "/projects/0ce999f2-b175-432b-8551-20182b4fc990/commercial/change-orders?recordId=84ec8b03-7fd3-4711-9145-0c691eb2308a&source=change_order",
-      "verdict": "RECORD ON SCREEN (list row, no detail opened)",
+      "verdict": "RECORD OPENED (register narrowed to it, selected)",
       "evidence": "no dialog; ref visible; Skip to Main OCTA PHASE21 GREENFIELD 20260910093852 Dashboard Projects Portfolio Inventory",
       "failedRequests": [
         "401 /auth/me"
@@ -789,7 +789,7 @@
       "recordId": "f94dc252-7671-4161-9055-3edd9c9a96af",
       "ref": "Foundation zone, grid A-D",
       "url": "/projects/0ce999f2-b175-432b-8551-20182b4fc990/locations?recordId=f94dc252-7671-4161-9055-3edd9c9a96af&source=location",
-      "verdict": "RECORD ON SCREEN (list row, no detail opened)",
+      "verdict": "RECORD ON SCREEN (sole row, selected by default)",
       "evidence": "no dialog; ref visible; Skip to Main OCTA PHASE21 GREENFIELD 20260910093852 Dashboard Projects Portfolio Inventory",
       "failedRequests": [
         "401 /auth/me"
@@ -814,7 +814,7 @@
       "recordId": "7b3dfa12-6acc-40d0-9ab1-69ea5a411445",
       "ref": null,
       "url": "/projects/0ce999f2-b175-432b-8551-20182b4fc990/commercial/ipc?recordId=7b3dfa12-6acc-40d0-9ab1-69ea5a411445&source=ipc",
-      "verdict": "MODULE HOME ONLY",
+      "verdict": "RECORD OPENED (the period is shown)",
       "evidence": "no dialog; ref unknown; Skip to Main OCTA PHASE21 GREENFIELD 20260910093852 Dashboard Projects Portfolio Inventory",
       "failedRequests": [
         "401 /auth/me"

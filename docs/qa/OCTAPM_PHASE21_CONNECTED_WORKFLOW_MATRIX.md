@@ -64,7 +64,7 @@ the start of every stage.
 | Meetings → Actions → Tasks | **VERIFIED** (C) | MTG-01 with 5 attendees, 3 agenda items, 1 decision on A130, 2 actions; finalised and distributed by the planner (stamped who / when); the site engineer's action is a task on A130 linked back to the minutes, commented and closed by its assignee; a storeman cannot close it |
 | Workflow → Ball in Court | **VERIFIED** (C) | driven through a full cycle on RFI-001 (above) and observed on every register the personas opened ("waiting on you right now" on every landing) |
 | Ball in Court → Needs You | **PARTIAL** (B, C) | the landing page's responsibility panel is present for all eight personas; the PO register's "Waiting on you" card and its "Your action" row disagree (P21-018) |
-| Register → Record deep link | **PARTIAL** (C) | 26 links graded after the P21-011 fix: **12 open the record** (both ITPs selected inline), 9 land on the register with the row visible, 5 land on the module home, 0 open the wrong record type (P21-015) |
+| Register → Record deep link | **VERIFIED after fix** (C) | every register opens on the record its link names (P21-011, P21-015 fixed; `34-register-deep-links.spec.ts` 13 / 13, 13 of 13 fail without the fix); on the Phase 21 project 18 of 26 links open the record, 7 single-record registers select their record, 1 package with no long-lead item lands on the long-lead view (P21-021) |
 | Records → Audit | **VERIFIED** (B) | change-order status history shows Draft→Pending→Approved with actor id, reason and the named attachment |
 | Tenant isolation | **VERIFIED** (A, C) | 13 attacks from a separately registered tenant, zero leaks; every 21C record kind (RFI, drawing, NCR, meeting) refused to the outsider |
 | Project isolation | **VERIFIED** (A) | 5 cross-project id substitutions all refused 404 |
@@ -74,13 +74,13 @@ the start of every stage.
 
 | state | count |
 | --- | ---: |
-| **VERIFIED** (incl. "correctly not connected" and "after fix") | **48** |
-| PARTIAL | 6 |
+| **VERIFIED** (incl. "correctly not connected" and "after fix") | **49** |
+| PARTIAL | 5 |
 | MISSING from this run | 0 |
 | NOT EXERCISED | 0 |
 | BROKEN | **0** |
 
-Nothing is BROKEN. The six PARTIAL rows are named and each has a defect or an
-observation behind it (P21-011, P21-012, P21-015, P21-018, the BOQ→budget
-derivation, and long-lead alerts). Every row that was MISSING or NOT EXERCISED
+Nothing is BROKEN. The five PARTIAL rows are named and each has a defect or an
+observation behind it (P21-012, P21-018, the BOQ→budget derivation, long-lead
+alerts, and the change → budget-line placement). Every row that was MISSING or NOT EXERCISED
 at the end of 21B was driven in 21C.

@@ -241,13 +241,25 @@ P3 and is documented, not fixed, per the brief.
 | **Evidence** | `persona-browser.json` → `ownPage.failedRequests` for all eight personas. |
 | **Status** | OPEN |
 
-## P21-015 · P3 · Deep links · OPEN
+## P21-015 · P3 · Deep links · **FIXED** (one landing left open, below)
 
 | | |
 | --- | --- |
 | **Observed** | 26 record deep links graded after the P21-011 fix (the 25 from before, plus the second ITP, so that one of the two cannot be the register's default first row): **12 open the record** (submittal, RFI, punch item, observation, purchase order, commitment, pay app, bid package, direct cost, timesheet, and now ITP-001 and ITP-002, each selected inline), **9 land on the register with the record's row visible but no detail opened** (transmittal, NCR, meeting, task, change order, location — and correspondence, defect and safety, whose registers on this project hold a single record, so a selected row there proves nothing about the link; the defect fix is proven by `33-quality-deep-links.spec.ts`, which selects each of two defects by id), **5 land on the module home with no sign of the record** (drawing, daily log, weather delay, procurement package, IPC), and **0 open the wrong record type**. `WorkflowRecordList` now takes the named record; the NCR, safety, transmittal and correspondence registers could pass it the same way. |
 | **Expected** | A record-level deep link opens the record. A module-home URL is not a record deep link. |
-| **Root cause** | **PRODUCT DEFECT** (incomplete): the `?recordId=&source=` contract exists and several modules honour it; the rest do not yet. |
+| **Root cause** | **PRODUCT DEFECT** (incomplete): the `?recordId=&source=` contract exists and several modules honoured it; the rest did not. |
+| **Fix** | Every register now opens on the record its link names, the way P21-011 did it. The shared record list takes `initialSelectedId` from the NCR, safety, material-test, drawing, transmittal and correspondence registers (the drawings module opens its legacy register for a `drawing` link); the change-order register opens the named order's history and detail as well as narrowing to it; the weather-delay table selects and scrolls to the named delay; the meeting list marks the meeting it already selected; `/tasks?recordId=` opens the task in its drawer; the locations tree selects and scrolls to the named location; a `daily_log` link whose id is a day opens that day; the IPC workbook accepts `ipc` as well as `ipc_certificate` and says which period it shows; the long-lead table selects the item bought under a `procurement_package` or `delivery_receipt` link. Fifteen files, 187 lines. |
+| **Regression test** | `frontend/e2e/34-register-deep-links.spec.ts` — creates two of each kind on the seeded project (NCR, safety incident, material test, transmittal, letter, drawing, weather delay, location, meeting, change order, task, a daily-log day) and opens the link to each of the pair: the named row is selected and its sibling is not (the change-order register, which narrows to the named record by design, shows no sibling); a task opens in its drawer; the day opens; the IPC period is the one shown; nothing 404s; everything is retired at the end and the run fails if not. **Without the fix 13 of 13 fail**; with it 13 / 13. Targeted regression (navigation, client billing, user smoke, ball-in-court UI, needs-you, schedule risk, specs 33 and 34): 48 / 48. Typecheck green; lint 0 errors on the changed files. |
+| **Regrade on the Phase 21 project** | 26 links: **18 open the record**, 7 are registers holding a single record (the row is selected, which a default first-row selection would also show — the spec proves those with two), **1 lands on the module home**: `procurement_package`, because that project bought its package without a long-lead item, and the link is routed to the long-lead view (`record-links.js`), which has no row for it. Also unreached: `delivery_receipt` (no read endpoint to obtain an id) and `ipc_item` (an item id, not a period). |
+| **Status** | FIXED — except the `procurement_package` landing for a package with no long-lead item, which is a routing decision (send it to the procurement packages tab) rather than a register fix; left OPEN as P21-021. |
+
+## P21-021 · P3 · Deep links · OPEN
+
+| | |
+| --- | --- |
+| **Observed** | `record-links.js` routes `procurement_package` and `delivery_receipt` to the schedule's long-lead view. A package bought without a long-lead item (as the Phase 21 project's RFQ package was) has no row there, so its link lands on an empty module home. |
+| **Expected** | A package link opens the package — on the procurement Packages tab when no long-lead item carries it. |
+| **Root cause** | **PRODUCT DEFECT** (routing), carried out of P21-015. |
 | **Status** | OPEN |
 
 ## P21-016 · P3 · Procurement read model · OPEN

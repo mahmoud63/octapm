@@ -144,6 +144,13 @@ async function main() {
   links.location = { recordType: "location", recordId: ctx.locationId, ref: "Foundation zone, grid A-D" };
   // The second ITP: whichever of the two the register lists first, one of them is not the default row.
   if (ctx.quality?.itpIds?.itp2) links.itp2 = { recordType: "itp", recordId: ctx.quality.itpIds.itp2, ref: "ITP-002" };
+  // The long-lead item bought under the RFQ package carries the package number; that is the reference to look for.
+  try {
+    const ll = await GET(ctx.people.pm, `/projects/${P}/long-lead`);
+    const items = ll.items || ll.rows || (Array.isArray(ll) ? ll : []);
+    const bought = items.find((i) => i.procurementPackage && i.procurementPackage.id === ctx.rfqPackageId);
+    if (bought) links.procurement_package.ref = bought.procurementPackage.packageNumber || bought.item || null;
+  } catch (e) { links.procurement_package.refError = `${e.status} ${e.code}`; }
   // Fill in the references the product gave these records.
   const fill = async (key, path_, pick) => { try { const d = await GET(ctx.people.pm, path_); links[key].ref = pick(d) || links[key].ref; } catch (e) { links[key].refError = `${e.status} ${e.code}`; } };
   await fill("change_order", `/projects/${P}/change-orders?limit=100`, (d) => (d.orders || []).find((o) => o.id === ctx.changeOrderId)?.ref);
@@ -155,6 +162,8 @@ async function main() {
   const ipc = await GET(ctx.people.pm, `/projects/${P}/ipc`).catch((e) => ({ error: `${e.status} ${e.code}` }));
   const period = (ipc.periods || ipc.items || ipc.rows || (Array.isArray(ipc) ? ipc : []))[0];
   if (period) links.ipc = { recordType: "ipc", recordId: period.id, ref: period.ref || period.number || period.periodNumber || null };
+  // A weather delay has no reference number; its description is what the register shows.
+  if (links.weather_delay?.recordId) { try { const wds = await GET(ctx.people.pm, `/projects/${P}/weather-delays`); const wd = (wds.rows || wds.items || wds).find((d) => d.id === links.weather_delay.recordId); if (wd) links.weather_delay.ref = wd.description; } catch (e) { links.weather_delay.refError = `${e.status} ${e.code}`; } }
 
   const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
   const page = await context.newPage();
@@ -180,7 +189,15 @@ async function main() {
       const refInSelectedRow = link.ref && rowCount > 1 && (await selectedRow.count()) ? (await selectedRow.innerText().catch(() => "")).includes(String(link.ref)) : false;
       const soleRowSelected = link.ref && rowCount === 1 && (await selectedRow.count()) ? (await selectedRow.innerText().catch(() => "")).includes(String(link.ref)) : false;
       const moduleRendered = !/not found|404|something went wrong/i.test(text.slice(0, 400)) && text.length > 200;
+      // Shapes that are not a list row: the daily log opens a day, the IPC workbook a period,
+      // the change-order register narrows to the named order and selects it.
+      const dayOpen = link.recordType === "daily_log" && (await page.locator('input[type="date"]').first().inputValue().catch(() => "")) === String(link.recordId);
+      const periodOpen = link.recordType === "ipc" && (await page.getByTestId("uat-ipc-period-select").getAttribute("data-period-id").catch(() => null)) === String(link.recordId);
+      const narrowed = link.recordType === "change_order" && /Showing the selected dashboard record/.test(text) && soleRowSelected;
       if (refInDialog || (refOnScreen && dialog) || refInSelectedRow) verdict = refInSelectedRow && !dialog ? "RECORD OPENED (inline, selected row)" : "RECORD OPENED";
+      else if (dayOpen) verdict = "RECORD OPENED (the day is open)";
+      else if (periodOpen) verdict = "RECORD OPENED (the period is shown)";
+      else if (narrowed) verdict = "RECORD OPENED (register narrowed to it, selected)";
       else if (soleRowSelected) verdict = "RECORD ON SCREEN (sole row, selected by default)";
       else if (refOnScreen) verdict = "RECORD ON SCREEN (list row, no detail opened)";
       else if (moduleRendered) verdict = "MODULE HOME ONLY";
