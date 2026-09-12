@@ -198,7 +198,7 @@ P3 and is documented, not fixed, per the brief.
 | **Verified** | `rbac-audit.js` after the fix: **2 of 108** through the door, both on `comments` — which every role may use by design (`meeting.comment`, `task.comment` list all eight roles). Stage 15 re-run: 24 / 24. Full Jest: 2,005 / 2,005. |
 | **Status** | FIXED |
 
-## P21-011 · P2 · Deep links · OPEN
+## P21-011 · P2 · Deep links · **FIXED**
 
 | | |
 | --- | --- |
@@ -207,9 +207,10 @@ P3 and is documented, not fixed, per the brief.
 | **Expected** | The ITP or defect the id names opens. |
 | **Root cause** | **PRODUCT DEFECT.** `record-links.js` maps `itp` and `form_instance` to the same workspace (`quality/itp`) and `defect` and `punch_item` to the same (`quality/defects`); the pages open by id assuming one of the two types. |
 | **Impact** | A notification or comment link to an ITP or a defect lands on an error dialog. |
-| **Fix** | Not applied — behind a product decision on how the two record kinds share a page. |
-| **Evidence** | `docs/qa/phase21/persona-browser.json`, deep links `itp` and `defect`: `failedRequests` show the 404s. |
-| **Status** | OPEN |
+| **Fix** | The branch is by `source`, which the link already carries. `?source=itp` opens the legacy ITP register on that record and fetches no instance; `?source=defect` opens the legacy defect register on that record and fetches no punch item; `punch_item`, `observation`, `sheet_qr` and instance links are untouched. `WorkflowRecordList` gained `initialSelectedId` (selects the named row on first render, scrolls it into view once the rows are in, and marks every row `data-selected`); the two modules open their legacy register when the link names a legacy record; the quality dashboard hands the id through. Four files, 50 lines. |
+| **Regression test** | `frontend/e2e/33-quality-deep-links.spec.ts` — creates an ITP, a defect and a punch item on the seeded project, opens each deep link as the PM, asserts no request for the wrong record type and no 404, the named row selected, and the punch-item link still opening its dialog; retires all three and fails if it cannot. **Without the fix 2 of 3 fail** (the wrong-type fetches are observed); with it 3 / 3. The source-reading UI tests (`scripts/inspections-ui.test.mjs`, `scripts/punch-ui.test.mjs`) assert the branches. |
+| **Verified** | Stage 19 regrade: `itp` and `defect` now RECORD OPENED (inline, selected row), no 404s anywhere; targeted regression (user smoke, ball-in-court UI, needs-you, spec 33) 13 / 13; typecheck green; lint 0 errors on the changed files. |
+| **Status** | FIXED |
 
 ## P21-012 · P3 · Change orders · OPEN
 
@@ -244,7 +245,7 @@ P3 and is documented, not fixed, per the brief.
 
 | | |
 | --- | --- |
-| **Observed** | Of 25 record deep links built from `record-links.js`: **10 open the record** (submittal, RFI, punch item, observation, purchase order, commitment, pay app, bid package, direct cost, timesheet — the last as the site-reporting day), **8 land on the register with the record's row visible but no detail opened** (transmittal, correspondence, NCR, safety incident, meeting, task, change order, location), **5 land on the module home with no sign of the record** (drawing, daily log, weather delay, procurement package, IPC), and **2 open the wrong record type** (P21-011). |
+| **Observed** | 26 record deep links graded after the P21-011 fix (the 25 from before, plus the second ITP, so that one of the two cannot be the register's default first row): **12 open the record** (submittal, RFI, punch item, observation, purchase order, commitment, pay app, bid package, direct cost, timesheet, and now ITP-001 and ITP-002, each selected inline), **9 land on the register with the record's row visible but no detail opened** (transmittal, NCR, meeting, task, change order, location — and correspondence, defect and safety, whose registers on this project hold a single record, so a selected row there proves nothing about the link; the defect fix is proven by `33-quality-deep-links.spec.ts`, which selects each of two defects by id), **5 land on the module home with no sign of the record** (drawing, daily log, weather delay, procurement package, IPC), and **0 open the wrong record type**. `WorkflowRecordList` now takes the named record; the NCR, safety, transmittal and correspondence registers could pass it the same way. |
 | **Expected** | A record-level deep link opens the record. A module-home URL is not a record deep link. |
 | **Root cause** | **PRODUCT DEFECT** (incomplete): the `?recordId=&source=` contract exists and several modules honour it; the rest do not yet. |
 | **Status** | OPEN |

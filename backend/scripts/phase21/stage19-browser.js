@@ -142,6 +142,8 @@ async function main() {
   links.direct_cost = { recordType: "direct_cost", recordId: ctx.directCostId, ref: null };
   links.timesheet = { recordType: "timesheet", recordId: ctx.timesheetId, ref: null };
   links.location = { recordType: "location", recordId: ctx.locationId, ref: "Foundation zone, grid A-D" };
+  // The second ITP: whichever of the two the register lists first, one of them is not the default row.
+  if (ctx.quality?.itpIds?.itp2) links.itp2 = { recordType: "itp", recordId: ctx.quality.itpIds.itp2, ref: "ITP-002" };
   // Fill in the references the product gave these records.
   const fill = async (key, path_, pick) => { try { const d = await GET(ctx.people.pm, path_); links[key].ref = pick(d) || links[key].ref; } catch (e) { links[key].refError = `${e.status} ${e.code}`; } };
   await fill("change_order", `/projects/${P}/change-orders?limit=100`, (d) => (d.orders || []).find((o) => o.id === ctx.changeOrderId)?.ref);
@@ -171,12 +173,19 @@ async function main() {
       const dialog = await page.locator("[role=dialog], [data-state=open][role=dialog], aside[data-state=open]").count();
       const refOnScreen = link.ref ? text.includes(String(link.ref)) : false;
       const refInDialog = link.ref && dialog ? (await page.locator("[role=dialog]").first().innerText().catch(() => "")).includes(String(link.ref)) : false;
+      // A register may open the record inline: the deep-linked row is selected and expanded (P21-011 fix).
+      const selectedRow = page.locator('[data-selected="true"]').first();
+      const rowCount = await page.locator("[data-selected]").count();
+      // A register selects its first row by default; a selected sole row proves nothing about the link.
+      const refInSelectedRow = link.ref && rowCount > 1 && (await selectedRow.count()) ? (await selectedRow.innerText().catch(() => "")).includes(String(link.ref)) : false;
+      const soleRowSelected = link.ref && rowCount === 1 && (await selectedRow.count()) ? (await selectedRow.innerText().catch(() => "")).includes(String(link.ref)) : false;
       const moduleRendered = !/not found|404|something went wrong/i.test(text.slice(0, 400)) && text.length > 200;
-      if (refInDialog || (refOnScreen && dialog)) verdict = "RECORD OPENED";
+      if (refInDialog || (refOnScreen && dialog) || refInSelectedRow) verdict = refInSelectedRow && !dialog ? "RECORD OPENED (inline, selected row)" : "RECORD OPENED";
+      else if (soleRowSelected) verdict = "RECORD ON SCREEN (sole row, selected by default)";
       else if (refOnScreen) verdict = "RECORD ON SCREEN (list row, no detail opened)";
       else if (moduleRendered) verdict = "MODULE HOME ONLY";
       else verdict = "FAILED";
-      evidence = `${dialog ? "dialog" : "no dialog"}; ref ${link.ref ? (refOnScreen ? "visible" : "NOT visible") : "unknown"}; ${text.slice(0, 90)}`;
+      evidence = `${dialog ? "dialog" : "no dialog"}${refInSelectedRow ? "; selected row" : ""}; ref ${link.ref ? (refOnScreen ? "visible" : "NOT visible") : "unknown"}; ${text.slice(0, 90)}`;
     } catch (error) {
       verdict = "FAILED";
       evidence = String(error.message).slice(0, 160);

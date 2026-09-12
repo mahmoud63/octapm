@@ -64,7 +64,7 @@ the start of every stage.
 | Meetings → Actions → Tasks | **VERIFIED** (C) | MTG-01 with 5 attendees, 3 agenda items, 1 decision on A130, 2 actions; finalised and distributed by the planner (stamped who / when); the site engineer's action is a task on A130 linked back to the minutes, commented and closed by its assignee; a storeman cannot close it |
 | Workflow → Ball in Court | **VERIFIED** (C) | driven through a full cycle on RFI-001 (above) and observed on every register the personas opened ("waiting on you right now" on every landing) |
 | Ball in Court → Needs You | **PARTIAL** (B, C) | the landing page's responsibility panel is present for all eight personas; the PO register's "Waiting on you" card and its "Your action" row disagree (P21-018) |
-| Register → Record deep link | **PARTIAL** (C) | 25 links graded: **10 open the record**, 8 land on the register with the row visible, 5 land on the module home, 2 open the wrong record type (P21-011, P21-015) |
+| Register → Record deep link | **PARTIAL** (C) | 26 links graded after the P21-011 fix: **12 open the record** (both ITPs selected inline), 9 land on the register with the row visible, 5 land on the module home, 0 open the wrong record type (P21-015) |
 | Records → Audit | **VERIFIED** (B) | change-order status history shows Draft→Pending→Approved with actor id, reason and the named attachment |
 | Tenant isolation | **VERIFIED** (A, C) | 13 attacks from a separately registered tenant, zero leaks; every 21C record kind (RFI, drawing, NCR, meeting) refused to the outsider |
 | Project isolation | **VERIFIED** (A) | 5 cross-project id substitutions all refused 404 |

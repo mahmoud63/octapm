@@ -1,5 +1,5 @@
 {
-  "ranAt": "2026-09-12T18:54:39.654Z",
+  "ranAt": "2026-09-12T20:10:29.168Z",
   "project": {
     "id": "0ce999f2-b175-432b-8551-20182b4fc990",
     "name": "OCTA PHASE21 GREENFIELD 20260910093852"
@@ -72,7 +72,7 @@
       "label": "Planning Engineer",
       "email": "planner@octapm.demo",
       "landingUrl": "/",
-      "landingText": "Skip to Main Select project Dashboard Projects Portfolio Inventory Reports Tasks Messages Users Company Settings Help Center Live Search ⌘ K 8 Notifications Toggle theme RM Workspace Control Construction health, approval",
+      "landingText": "Skip to Main Select project Dashboard Projects Portfolio Inventory Reports Tasks Messages Users Company Settings Help Center Live Search ⌘ K 9+ Notifications Toggle theme RM Workspace Control Construction health, approva",
       "sidebar": [
         "Dashboard",
         "Projects",
@@ -103,10 +103,10 @@
         "Month",
         "Quarter"
       ],
-      "projectText": "Skip to Main OCTA PHASE21 GREENFIELD 20260910093852 Dashboard Projects Portfolio Inventory Reports Tasks Messages Users Company Settings Help Center Live Search ⌘ K 8 Notifications Toggle theme RM Ove",
+      "projectText": "Skip to Main OCTA PHASE21 GREENFIELD 20260910093852 Dashboard Projects Portfolio Inventory Reports Tasks Messages Users Company Settings Help Center Live Search ⌘ K 9+ Notifications Toggle theme RM Ov",
       "ownPage": {
         "url": "/projects/0ce999f2-b175-432b-8551-20182b4fc990/schedule",
-        "text": "Skip to Main OCTA PHASE21 GREENFIELD 20260910093852 Dashboard Projects Portfolio Inventory Reports Tasks Messages Users Company Settings Help Center Live Search ⌘ K 8 Notifications Toggle theme RM Overview Schedule Site Reporting Cost Control Commercial Qualit",
+        "text": "Skip to Main OCTA PHASE21 GREENFIELD 20260910093852 Dashboard Projects Portfolio Inventory Reports Tasks Messages Users Company Settings Help Center Live Search ⌘ K 9+ Notifications Toggle theme RM Overview Schedule Site Reporting Cost Control Commercial Quali",
         "forbiddenText": false,
         "consoleErrors": [
           "Failed to load resource: the server responded with a status of 401 (Unauthorized)"
@@ -547,7 +547,7 @@
       "recordId": "9bf7b703-f317-4c9f-8f51-7a69604ccab1",
       "ref": "COR-001",
       "url": "/projects/0ce999f2-b175-432b-8551-20182b4fc990/doc-control/correspondence?recordId=9bf7b703-f317-4c9f-8f51-7a69604ccab1&source=correspondence",
-      "verdict": "RECORD ON SCREEN (list row, no detail opened)",
+      "verdict": "RECORD ON SCREEN (sole row, selected by default)",
       "evidence": "no dialog; ref visible; Skip to Main OCTA PHASE21 GREENFIELD 20260910093852 Dashboard Projects Portfolio Inventory",
       "failedRequests": [
         "401 /auth/me"
@@ -583,11 +583,11 @@
       "recordId": "4fcbdbe1-fdb7-4d0a-abb3-4e7adb0f13a9",
       "ref": "ITP-001",
       "url": "/projects/0ce999f2-b175-432b-8551-20182b4fc990/quality/itp?recordId=4fcbdbe1-fdb7-4d0a-abb3-4e7adb0f13a9&source=itp",
-      "verdict": "MODULE HOME ONLY",
-      "evidence": "dialog; ref NOT visible; Skip to Main OCTA PHASE21 GREENFIELD 20260910093852 Dashboard Projects Portfolio Inventory",
+      "verdict": "RECORD OPENED (inline, selected row)",
+      "evidence": "no dialog; selected row; ref visible; Skip to Main OCTA PHASE21 GREENFIELD 20260910093852 Dashboard Projects Portfolio Inventory",
       "failedRequests": [
         "401 /auth/me",
-        "404 /projects/0ce999f2-b175-432b-8551-20182b4fc990/forms/4fcbdbe1-fdb7-4d0a-abb3-4e7adb0f13a9"
+        "400 /projects/0ce999f2-b175-432b-8551-20182b4fc990/custom-fields/values/itp/4fcbdbe1-fdb7-4d0a-abb3-4e7adb0f13a9"
       ]
     },
     {
@@ -596,11 +596,11 @@
       "recordId": "186446e0-46bd-400a-97a7-30736387ded7",
       "ref": "DEF-001",
       "url": "/projects/0ce999f2-b175-432b-8551-20182b4fc990/quality/defects?recordId=186446e0-46bd-400a-97a7-30736387ded7&source=defect",
-      "verdict": "MODULE HOME ONLY",
-      "evidence": "dialog; ref NOT visible; Skip to Main OCTA PHASE21 GREENFIELD 20260910093852 Dashboard Projects Portfolio Inventory",
+      "verdict": "RECORD ON SCREEN (sole row, selected by default)",
+      "evidence": "no dialog; ref visible; Skip to Main OCTA PHASE21 GREENFIELD 20260910093852 Dashboard Projects Portfolio Inventory",
       "failedRequests": [
         "401 /auth/me",
-        "404 /projects/0ce999f2-b175-432b-8551-20182b4fc990/punch/186446e0-46bd-400a-97a7-30736387ded7"
+        "400 /projects/0ce999f2-b175-432b-8551-20182b4fc990/custom-fields/values/defect/186446e0-46bd-400a-97a7-30736387ded7"
       ]
     },
     {
@@ -645,7 +645,7 @@
       "recordId": "1519aa97-8755-42c4-b532-5965e858060d",
       "ref": "SAF-001",
       "url": "/projects/0ce999f2-b175-432b-8551-20182b4fc990/quality/safety?recordId=1519aa97-8755-42c4-b532-5965e858060d&source=safety_incident",
-      "verdict": "RECORD ON SCREEN (list row, no detail opened)",
+      "verdict": "RECORD ON SCREEN (sole row, selected by default)",
       "evidence": "no dialog; ref visible; Skip to Main OCTA PHASE21 GREENFIELD 20260910093852 Dashboard Projects Portfolio Inventory",
       "failedRequests": [
         "401 /auth/me"
@@ -793,6 +793,19 @@
       "evidence": "no dialog; ref visible; Skip to Main OCTA PHASE21 GREENFIELD 20260910093852 Dashboard Projects Portfolio Inventory",
       "failedRequests": [
         "401 /auth/me"
+      ]
+    },
+    {
+      "key": "itp2",
+      "recordType": "itp",
+      "recordId": "809135e0-5085-4d09-9caa-a97e3eb9046a",
+      "ref": "ITP-002",
+      "url": "/projects/0ce999f2-b175-432b-8551-20182b4fc990/quality/itp?recordId=809135e0-5085-4d09-9caa-a97e3eb9046a&source=itp",
+      "verdict": "RECORD OPENED (inline, selected row)",
+      "evidence": "no dialog; selected row; ref visible; Skip to Main OCTA PHASE21 GREENFIELD 20260910093852 Dashboard Projects Portfolio Inventory",
+      "failedRequests": [
+        "401 /auth/me",
+        "400 /projects/0ce999f2-b175-432b-8551-20182b4fc990/custom-fields/values/itp/809135e0-5085-4d09-9caa-a97e3eb9046a"
       ]
     },
     {

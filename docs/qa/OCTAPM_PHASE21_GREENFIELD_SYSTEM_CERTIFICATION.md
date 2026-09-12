@@ -85,10 +85,13 @@ client or subcontractor **user** exists to sign in as, and Phase 21 did not
 create one. Findings: P21-013, P21-014, P21-018. See
 `OCTAPM_PHASE21_PERSONA_UX_REPORT.md`.
 
-Record deep links: of 25, **10 open the record, 8 land on the register with
-the row visible, 5 land on the module home, 2 open the wrong record type**
-(P21-011 P2; P21-015 P3). A module-home URL was not counted as a record deep
-link.
+Record deep links: of 26 graded after the P21-011 fix, **12 open the record,
+9 land on the register with the row visible, 5 land on the module home, 0
+open the wrong record type** (P21-015 P3). The two that opened the wrong
+record type — ITP and defect, P21-011 — were fixed after the first report;
+both ITPs now open selected inline, and the defect fix is proven by its
+regression spec on a register with two defects (this project's holds one).
+A module-home URL was not counted as a record deep link.
 
 ---
 
@@ -117,16 +120,18 @@ guards and the CI jobs; the `deploy.yml` items are inherited by both.
 | | P0 | P1 | P2 | P3 |
 | --- | ---: | ---: | ---: | ---: |
 | discovered (A + B + C) | 0 | 3 | 3 | 13 |
-| fixed | 0 | **3** | 1 | 0 |
-| open | **0** | **0** | **2** | 13 |
+| fixed | 0 | **3** | **2** | 0 |
+| open | **0** | **0** | **1** | 13 |
 
 The three P1s — a schedule planned in the product did not display (P21-001,
 21A), a client payment did not reach cash flow (P21-009, 21C), ten routers
 enforced no role (P21-010, 21C) — are fixed, each with a regression test
-shown to fail without the fix. The two open P2s: P21-007 (a product-planned
-schedule has no stored revision to baseline; a consequence of the P21-001
-fix) and P21-011 (ITP and defect deep links open the wrong record type). Ten
-test defects in my own instruments are recorded (T-01 … T-10). Full detail:
+shown to fail without the fix. Of the three P2s, P21-002 (environment) and
+P21-011 (ITP and defect deep links opened the wrong record type — fixed after
+the first 21C report, with a browser regression that fails 2 of 3 without the
+fix) are closed; the one open P2 is P21-007 (a product-planned schedule has no
+stored revision to baseline; a consequence of the P21-001 fix). Ten test
+defects in my own instruments are recorded (T-01 … T-10). Full detail:
 `OCTAPM_PHASE21_DEFECT_REGISTER.md`.
 
 Fifteen product rules were **confirmed by attacking them** — listed in the
@@ -146,6 +151,7 @@ register.
 | Frontend lint | **red on pre-existing debt**: 25 errors in 11 files untouched by Phase 21 (10 earlier e2e specs, `goods-receipt-panel.tsx`); the new spec is clean |
 | Phase 21 driver, all stages | **468 / 468** |
 | Permanent greenfield spec (§8), twice back to back | **3 / 3 and 3 / 3** (17 s, 14 s) |
+| P21-011 regression (`33-quality-deep-links.spec.ts`) | **3 / 3**; 2 of 3 fail without the fix; targeted regression with user smoke, ball-in-court UI and needs-you: **13 / 13** |
 | Full Playwright | **145 / 147** in 15.1 min. The two failures are both in `11-inventory.spec.ts` and both environmental: (69) the spec's own screenshot write into the OneDrive-synced `docs/design/screenshots` folder was refused by the file system (`UNKNOWN: unknown error, open …`) — the test passes when the spec is run alone; (72) the analytics variance list is a first-25 crowded out by purchase orders left behind by earlier lifecycle specs (`PO-xxxxxxxx` refs, which the seed's `PO-E2E-` / `PO-LC-` cleanup does not cover), so the seeded cement row is absent — reproducible alone (1 of 11 fails), and no 21C change touches that path. Recorded as P21-020 (P3). Every other spec, including the three new ones, passed. |
 | API during 21C | 2,720 requests, **0 × 429, 0 × 5xx**; **1 restart** (to load the P21-010 fix, logged); no token expiry (harness re-mints inside 15 min) |
 | Cleanup | every stage's records are keyed and re-found; the permanent spec retires its project and fails if it cannot; one test-data correction logged (T-10) |
@@ -184,7 +190,7 @@ page to prove nothing leaked. It does not depend on the Phase 21 project.
 
 ## 10. Verdict
 
-**PHASE 21 CERTIFIED** — as a greenfield system simulation on one project across 21A, 21B and 21C. The certification conditions hold: no P0; no P1 open (three found, three fixed, each with a regression test shown to fail without the fix); every financial identity exact to the cent and reconciled four ways; the permanent greenfield regression green twice from nothing with its project retired; all eight staff personas driven in the browser; the adversarial self-review complete and labelled. Carried, not hidden: two open P2s (P21-007, P21-011), thirteen P3s, the frontend lint debt in files Phase 21 did not touch, the two environmental Playwright failures above, and the **PRE-DEPLOYMENT SECURITY DEBT — OPEN**. Codex independent review was genuinely unavailable and, per the brief, is not a condition. Phase 22 has not been started.
+**PHASE 21 CERTIFIED** — as a greenfield system simulation on one project across 21A, 21B and 21C. The certification conditions hold: no P0; no P1 open (three found, three fixed, each with a regression test shown to fail without the fix); every financial identity exact to the cent and reconciled four ways; the permanent greenfield regression green twice from nothing with its project retired; all eight staff personas driven in the browser; the adversarial self-review complete and labelled. Carried, not hidden: one open P2 (P21-007), thirteen P3s, the frontend lint debt in files Phase 21 did not touch, the two environmental Playwright failures above, and the **PRE-DEPLOYMENT SECURITY DEBT — OPEN**. Codex independent review was genuinely unavailable and, per the brief, is not a condition. Phase 22 has not been started.
 
 Not blockers, and stated so the reader does not have to infer them: every
 financial identity is exact to the cent and reconciles four ways; tenant and
