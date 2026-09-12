@@ -13,7 +13,9 @@ import { PunchList } from './punch-list'
  * Quality › Punch list. Deep links: `?recordId=<item>` opens the item;
  * `?source=sheet_qr&recordId=<sheet>` (from a printed sheet QR code) opens
  * quick-create with that drawing pre-selected and the list filtered to it.
- * The legacy defect register stays reachable underneath.
+ * The legacy defect register stays reachable underneath, and
+ * `?source=defect&recordId=` opens it on that defect rather than fetching a
+ * punch item by the same id (P21-011 — that used to be a 404 dialog).
  */
 export function PunchModule({
   projectId,
@@ -29,8 +31,14 @@ export function PunchModule({
 }) {
   const fromSheetQr =
     initialTarget?.source === 'sheet_qr' && Boolean(initialTarget.recordId)
+  const legacyRecordId =
+    kind === 'punch' && initialTarget?.source === 'defect'
+      ? (initialTarget.recordId ?? null)
+      : null
   const [detailId, setDetailId] = useState<string | null>(
-    !fromSheetQr && initialTarget?.recordId ? initialTarget.recordId : null
+    !fromSheetQr && !legacyRecordId && initialTarget?.recordId
+      ? initialTarget.recordId
+      : null
   )
   const [create, setCreate] = useState<{
     open: boolean
@@ -47,7 +55,7 @@ export function PunchModule({
     itemIds: string[]
     companyIds: string[]
   }>({ open: false, seed: 0, itemIds: [], companyIds: [] })
-  const [showLegacy, setShowLegacy] = useState(false)
+  const [showLegacy, setShowLegacy] = useState(Boolean(legacyRecordId))
 
   const initialFilters: Partial<PunchFilters> = {
     status:

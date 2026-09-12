@@ -664,6 +664,11 @@ export function QualityDashboard({
                   projectId={projectId}
                   recordType='itp'
                   exportName='itp'
+                  initialSelectedId={
+                    initialTarget?.source === 'itp'
+                      ? initialTarget.recordId
+                      : undefined
+                  }
                   rows={itps?.rows}
                   emptyText='No ITP records'
                   getRef={(row) => row.ref}
@@ -710,6 +715,11 @@ export function QualityDashboard({
                   projectId={projectId}
                   recordType='defect'
                   exportName='defect'
+                  initialSelectedId={
+                    initialTarget?.source === 'defect'
+                      ? initialTarget.recordId
+                      : undefined
+                  }
                   rows={defects?.rows}
                   emptyText='No defect records'
                   getRef={(row) => row.ref}

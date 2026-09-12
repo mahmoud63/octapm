@@ -1,4 +1,4 @@
-import { useMemo, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import {
   AlertTriangle,
   CalendarClock,
@@ -158,6 +158,11 @@ interface WorkflowRecordListProps<
   recordType?: string | ((row: T) => string)
   /** File name base for "Export view" (CSV of the rows shown); omit to hide. */
   exportName?: string
+  /**
+   * The record a deep link named (`?recordId=`): selected on first render and
+   * scrolled into view once the rows are in, instead of the first row.
+   */
+  initialSelectedId?: string | null
 }
 
 const formatDate = (value?: string | null) => {
@@ -466,14 +471,25 @@ export function WorkflowRecordList<
   projectId,
   recordType,
   exportName,
+  initialSelectedId,
 }: WorkflowRecordListProps<T>) {
   const [selectedId, setSelectedId] = useState<string | null>(
-    rows?.[0]?.id || null
+    initialSelectedId || rows?.[0]?.id || null
   )
   const selected = useMemo(
     () => rows?.find((row) => row.id === selectedId) || rows?.[0],
     [rows, selectedId]
   )
+  // A deep-linked row is brought on screen once it exists; a click never is.
+  const targeted =
+    Boolean(initialSelectedId) &&
+    Boolean(rows?.some((row) => row.id === initialSelectedId))
+  useEffect(() => {
+    if (!targeted) return
+    document
+      .getElementById(`uat-record-row-${initialSelectedId}`)
+      ?.scrollIntoView({ block: 'center' })
+  }, [targeted, initialSelectedId])
 
   if (!rows?.length) {
     return (
@@ -536,6 +552,9 @@ export function WorkflowRecordList<
         return (
           <div
             key={row.id}
+            id={`uat-record-row-${row.id}`}
+            data-testid={`uat-record-row-${row.id}`}
+            data-selected={isSelected ? 'true' : 'false'}
             className={cn(
               'rounded border bg-background',
               isSelected && 'border-primary/60'

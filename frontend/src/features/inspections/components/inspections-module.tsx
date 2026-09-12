@@ -14,6 +14,10 @@ import { TemplateList } from './template-list'
  * Quality › Inspections: scheduled instances (inspections, ITPs, forms,
  * toolbox talks) and the templates behind them. `?recordId=` opens an
  * instance; the legacy ITP register stays reachable underneath.
+ *
+ * `?source=itp&recordId=` names a legacy ITP record, not an instance: the
+ * register opens with that record selected, and no instance is fetched
+ * (P21-011 — an ITP id used to be sent to `/forms/{id}` and land on a 404).
  */
 export function InspectionsModule({
   projectId,
@@ -30,15 +34,17 @@ export function InspectionsModule({
     'inspection.template_admin'
   )
   const [tab, setTab] = useState<'instances' | 'templates'>('instances')
+  const legacyRecordId =
+    initialTarget?.source === 'itp' ? (initialTarget.recordId ?? null) : null
   const [detailId, setDetailId] = useState<string | null>(
-    initialTarget?.recordId ?? null
+    legacyRecordId ? null : (initialTarget?.recordId ?? null)
   )
   const [create, setCreate] = useState<{
     open: boolean
     seed: number
     templateId: string | null
   }>({ open: false, seed: 0, templateId: null })
-  const [showLegacy, setShowLegacy] = useState(false)
+  const [showLegacy, setShowLegacy] = useState(Boolean(legacyRecordId))
 
   const initialFilters: Partial<FormFilters> = {
     status:
