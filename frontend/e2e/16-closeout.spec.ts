@@ -1,5 +1,5 @@
 import { expect, test, type APIRequestContext } from '@playwright/test'
-import { API, apiClient, apiGet, apiToken, openProject, signIn } from './support'
+import { API, apiClient, apiGet, apiToken, openProject, SHOTS, signIn } from './support'
 
 /**
  * Subcontract closeout.
@@ -209,6 +209,6 @@ test.describe('subcontract closeout', () => {
     ).toHaveCount(0)
 
     await page.getByTestId('uat-closeout').scrollIntoViewIfNeeded()
-    await page.screenshot({ path: '../docs/design/screenshots/34-subcontract-closeout.png' })
+    await page.screenshot({ path: `${SHOTS}/34-subcontract-closeout.png` })
   })
 })

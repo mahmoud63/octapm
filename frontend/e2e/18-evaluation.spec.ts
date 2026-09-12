@@ -1,5 +1,5 @@
 import { expect, test, type APIRequestContext } from '@playwright/test'
-import { API, apiClient, apiGet, apiToken, openProject, signIn } from './support'
+import { API, apiClient, apiGet, apiToken, openProject, SHOTS, signIn } from './support'
 
 /**
  * Subcontractor performance evaluation.
@@ -253,6 +253,6 @@ test.describe('subcontractor performance evaluation', () => {
     )
 
     await panel.scrollIntoViewIfNeeded()
-    await page.screenshot({ path: '../docs/design/screenshots/36-subcontractor-evaluation.png' })
+    await page.screenshot({ path: `${SHOTS}/36-subcontractor-evaluation.png` })
   })
 })

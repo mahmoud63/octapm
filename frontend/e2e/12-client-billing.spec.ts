@@ -1,5 +1,5 @@
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test'
-import { API, apiClient, apiGet, apiToken, openProject, signIn } from './support'
+import { API, apiClient, apiGet, apiToken, openProject, SHOTS, signIn } from './support'
 
 /**
  * Client billing — money coming in.
@@ -10,10 +10,9 @@ import { API, apiClient, apiGet, apiToken, openProject, signIn } from './support
  * done here, because a payment application that only adds up on screen is
  * worse than one that visibly does not.
  *
- * Screenshots land in docs/design/screenshots/.
+ * Screenshots land under test-results (see SHOTS in support.ts).
  */
 
-const SHOTS = '../docs/design/screenshots'
 
 const contractPath = (projectId: string) => `/projects/${projectId}/prime-contract`
 

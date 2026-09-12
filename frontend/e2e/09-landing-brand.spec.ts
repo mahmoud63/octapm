@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
-import { watchForProblems } from './support'
+import { SHOTS, watchForProblems } from './support'
 
 /**
  * The public marketing page, checked against the brand book.
@@ -9,10 +9,9 @@ import { watchForProblems } from './support'
  * octagon geometry, Space Grotesk on the headings, and the accent staying an
  * accent rather than spreading across the page.
  *
- * Screenshots land in docs/design/screenshots/.
+ * Screenshots land under test-results (see SHOTS in support.ts).
  */
 
-const SHOTS = '../docs/design/screenshots'
 
 /** Official values from the supplied brand book. */
 const BRAND = {

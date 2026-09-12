@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
-import { API, apiClient, apiGet, apiToken, openProject, signIn } from './support'
+import { API, apiClient, apiGet, apiToken, openProject, SHOTS, signIn } from './support'
 
 /**
  * The Gantt as a working surface.
@@ -9,10 +9,9 @@ import { API, apiClient, apiGet, apiToken, openProject, signIn } from './support
  * chart opens with a usable split, that it can take the whole window, and that
  * fitting the timeline really fits it.
  *
- * Screenshots land in docs/design/screenshots/.
+ * Screenshots land under test-results (see SHOTS in support.ts).
  */
 
-const SHOTS = '../docs/design/screenshots'
 
 async function openGantt(page: Page, who: 'pm' | 'planner' = 'pm') {
   await signIn(page, who)

@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { openProject, signIn } from './support'
+import { openProject, SHOTS, signIn } from './support'
 
 /**
  * Brand and visual validation.
@@ -9,11 +9,10 @@ import { openProject, signIn } from './support'
  * actually Midnight Indigo, that status colours carry their assigned meaning,
  * and that the layout survives tablet and mobile widths without overflowing.
  *
- * Screenshots land in docs/design/screenshots/.
+ * Screenshots land under test-results (see SHOTS in support.ts).
  */
 
 // Relative to the Playwright config, which lives in frontend/.
-const SHOTS = '../docs/design/screenshots'
 const MIDNIGHT_INDIGO = 'rgb(15, 27, 100)'
 
 /** Sets both collapsible panels before the page is loaded. */

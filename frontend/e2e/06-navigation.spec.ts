@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
-import { openProject, signIn, watchForProblems } from './support'
+import { openProject, SHOTS, signIn, watchForProblems } from './support'
 
 /**
  * The two-level navigation: a Midnight Indigo application header, and a
@@ -11,7 +11,6 @@ import { openProject, signIn, watchForProblems } from './support'
  */
 
 const MIDNIGHT_INDIGO = 'rgb(15, 27, 100)'
-const SHOTS = '../docs/design/screenshots'
 
 /** Opens a module dropdown and waits for its menu. */
 async function openModuleMenu(page: Page, module: string) {

@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
-import { API, apiClient, apiGet, apiToken, signIn } from './support'
+import { API, apiClient, apiGet, apiToken, SHOTS, signIn } from './support'
 
 /**
  * Inventory and warehouse.
@@ -8,10 +8,9 @@ import { API, apiClient, apiGet, apiToken, signIn } from './support'
  * front of a pallet with a phone actually does, and it has to answer "what is
  * this, how much is there and where" before it offers to move anything.
  *
- * Screenshots land in docs/design/screenshots/.
+ * Screenshots land under test-results (see SHOTS in support.ts).
  */
 
-const SHOTS = '../docs/design/screenshots'
 const CEMENT = 'CEM-42.5N'
 
 async function openInventory(page: Page, who: 'pm' | 'warehouse' = 'warehouse') {
@@ -86,6 +85,14 @@ async function raisePurchaseOrder(orderedQty: number) {
           // Submitting an order for approval requires a date it is needed on
           // site — a guard the old `status: 'issued'` shortcut skipped.
           requiredBy: new Date(Date.now() + 30 * 86_400_000).toISOString(),
+          // The Match tab lists at most 100 open orders, earliest promised date
+          // first and unpromised last (goods-receipt.service.js listOrders,
+          // take: 100, sorted on the ORDER's promisedDate). Orders this suite
+          // leaves behind pushed a fresh, unpromised order out of that window
+          // and the match test timed out looking for its row (Phase 21D). A
+          // promised date the product sorts first keeps the order where the
+          // tab can show it; the cap itself is P21-022.
+          promisedDate: '2020-01-01T00:00:00.000Z',
           lines: [
             {
               activityId,
@@ -340,6 +347,18 @@ test.describe('inventory and warehouse', () => {
     await expect(page.getByTestId('uat-receipt-accepted-1')).toHaveValue('', { timeout: 15_000 })
 
     await page.getByRole('tab', { name: 'Match' }).click()
+    // Say why, if the tab cannot show the order, rather than time out on a click.
+    const listed = await (async () => {
+      const client = await apiClient()
+      try {
+        const token = await apiToken(client, 'warehouse')
+        const { body } = await apiGet(client, '/inventory/purchase-orders?scope=all', token)
+        return (body?.data?.items ?? []).some((order: { ref: string }) => order.ref === ref)
+      } finally {
+        await client.dispose()
+      }
+    })()
+    expect(listed, `${ref} is within the Match tab's 100-order window (P21-022)`).toBe(true)
     await page.getByTestId(`uat-match-order-${ref}`).click()
     await expect(page.getByTestId('uat-match-verdict')).toContainText('Matched')
     await expect(page.getByTestId('uat-match-flags')).toHaveCount(0)
@@ -372,25 +391,34 @@ test.describe('inventory and warehouse', () => {
     // them. Checked against what the analytics API reports rather than against
     // seeded literals: any delivery posted by another test moves these figures,
     // and what matters is that the screen shows the same numbers the records do.
+    // The variance list is a ranked top-25 (largest |issued − received| first,
+    // LIST_LIMIT in inventory-analytics.service.js), not a register: which
+    // items are in it depends on every delivery and issue on the store, so no
+    // seeded row can be assumed to be there. What the screen owes the reader
+    // is that every row the API ranks is shown with the API's own figures —
+    // so the rows are taken from the API and each is found by its own name.
     const variance = page.getByTestId('uat-analytics-variance')
-    const cement = variance.locator('tbody tr', { hasText: 'Cement OPC 42.5N' }).first()
-    const reported = await (async () => {
+    type VarianceRow = { name?: string; itemName?: string; ordered?: number; received?: number; rejected?: number }
+    const reported: VarianceRow[] = await (async () => {
       const client = await apiClient()
       try {
         const token = await apiToken(client, 'warehouse')
         const { body } = await apiGet(client, '/inventory/analytics', token)
-        const rows = body?.data?.variance ?? body?.data?.varianceByItem ?? []
-        return rows.find((row: { name?: string; itemName?: string }) =>
-          `${row.name ?? row.itemName ?? ''}`.includes('Cement OPC 42.5N'),
-        )
+        return body?.data?.variance ?? body?.data?.varianceByItem ?? []
       } finally {
         await client.dispose()
       }
     })()
-    expect(reported, 'the analytics API reports the cement row').toBeTruthy()
-    for (const figure of [reported.ordered, reported.received, reported.rejected]) {
-      if (figure === undefined || figure === null) continue
-      await expect(cement).toContainText(Number(figure).toLocaleString('en-US'))
+    expect(reported.length, 'the analytics API ranks at least one variance row').toBeGreaterThan(0)
+    for (const row of reported.slice(0, 3)) {
+      const name = `${row.name ?? row.itemName ?? ''}`
+      expect(name, 'a ranked row is named').toBeTruthy()
+      const shown = variance.locator('tbody tr', { hasText: name }).first()
+      await expect(shown, `the screen shows the ranked row "${name}"`).toBeVisible()
+      for (const figure of [row.ordered, row.received, row.rejected]) {
+        if (figure === undefined || figure === null) continue
+        await expect(shown).toContainText(Number(figure).toLocaleString('en-US'))
+      }
     }
 
     // Usage lands on a named activity, not an id.

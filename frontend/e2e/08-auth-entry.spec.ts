@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { watchForProblems } from './support'
+import { SHOTS, watchForProblems } from './support'
 
 /**
  * The signed-out entry surfaces: sign in, sign up, and the two legal documents
@@ -10,10 +10,9 @@ import { watchForProblems } from './support'
  * routes must resolve without a session, the links between them must actually
  * go somewhere, and the brand ground must render behind all of it.
  *
- * Screenshots land in docs/design/screenshots/.
+ * Screenshots land under test-results (see SHOTS in support.ts).
  */
 
-const SHOTS = '../docs/design/screenshots'
 
 /** The dark brand ground the auth and legal pages sit on. */
 const HERO = '.octa-hero.octa-pattern'

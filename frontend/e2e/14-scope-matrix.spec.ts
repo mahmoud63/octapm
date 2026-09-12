@@ -1,5 +1,5 @@
 import { expect, test, type APIRequestContext } from '@playwright/test'
-import { API, apiClient, apiGet, apiToken, openProject, signIn } from './support'
+import { API, apiClient, apiGet, apiToken, openProject, SHOTS, signIn } from './support'
 
 /**
  * The scope and responsibility matrix.
@@ -216,6 +216,6 @@ test.describe('scope and responsibility', () => {
     // The unallocated count is the thing that must be impossible to miss.
     await expect(page.getByTestId('uat-scope-unallocated')).toContainText('1 unallocated')
 
-    await page.screenshot({ path: `../docs/design/screenshots/32-scope-matrix.png`, fullPage: true })
+    await page.screenshot({ path: `${SHOTS}/32-scope-matrix.png`, fullPage: true })
   })
 })

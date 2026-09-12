@@ -1,5 +1,5 @@
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test'
-import { API, apiClient, apiGet, apiToken, openProject, signIn } from './support'
+import { API, apiClient, apiGet, apiToken, openProject, SHOTS, signIn } from './support'
 
 /**
  * Purchase orders.
@@ -9,10 +9,9 @@ import { API, apiClient, apiGet, apiToken, openProject, signIn } from './support
  * an order has three states and shows one word, and the actions offered are
  * only the ones legal from where it actually is.
  *
- * Screenshots land in docs/design/screenshots/.
+ * Screenshots land under test-results (see SHOTS in support.ts).
  */
 
-const SHOTS = '../docs/design/screenshots'
 
 async function withApi<T>(
   fn: (client: APIRequestContext, token: string) => Promise<T>,

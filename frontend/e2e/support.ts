@@ -1,3 +1,4 @@
+import { mkdirSync } from 'node:fs'
 import { expect, request as playwrightRequest, type APIRequestContext, type Page } from '@playwright/test'
 
 /** Seeded demo accounts — see backend/prisma/seed.js. */
@@ -14,6 +15,26 @@ export const PEOPLE = {
 
 export const PASSWORD = process.env.E2E_PASSWORD || 'DemoPassw0rd!'
 export const API = process.env.E2E_API_URL || 'http://localhost:5000/api/v1'
+
+/**
+ * Where the specs write their screenshots.
+ *
+ * They used to overwrite the committed design gallery under
+ * docs/design/screenshots on every run. That folder is tracked and lives in a
+ * OneDrive-synchronised tree, and a full suite run lost a test to
+ * `UNKNOWN: unknown error, open …27-inventory-goods-receipt.png` while the
+ * sync client held the previous file (Phase 21D). Transient evidence now goes
+ * to a per-run folder under test-results (git-ignored, never rewritten). To
+ * refresh the committed gallery deliberately, run with
+ * E2E_SHOTS_DIR=../docs/design/screenshots.
+ */
+export const SHOTS = (() => {
+  const dir =
+    process.env.E2E_SHOTS_DIR ||
+    `test-results/screenshots/${new Date().toISOString().replace(/[:.]/g, '-')}`
+  mkdirSync(dir, { recursive: true })
+  return dir
+})()
 
 /**
  * Signs in through the actual form. Typing rather than filling matters: these

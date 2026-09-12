@@ -13,14 +13,30 @@ const fs = require("fs");
 const path = require("path");
 
 const NODE = process.execPath;
+// Every stage of the certification, in the order it was driven. There is no
+// stage 6: change and progress became stages 8 and 9 in 21B. A stage named
+// here that is not on disk fails the run — a runner that skips what it cannot
+// find can exit green having proved nothing (Phase 21D, CX21-008).
 const STAGES = [
   "stage1-foundation.js",
   "stage2-schedule.js",
   "stage3-boq-budget.js",
   "stage4-procurement-inventory.js",
   "stage5-subcontract.js",
-  "stage6-change-progress.js",
   "stage7-security.js",
+  "stage8-change-directcost.js",
+  "stage9-progress-ev.js",
+  "stage10-client.js",
+  "stage11-rfq.js",
+  "stage12-three-way-match.js",
+  "stage13-labour.js",
+  "stage14-rfi.js",
+  "stage15-document-control.js",
+  "stage16-quality.js",
+  "stage17-field-safety.js",
+  "stage18-meetings-tasks.js",
+  "stage19-browser.js",
+  "snapshot.js",
 ];
 
 const keep = process.argv.includes("--keep");
@@ -42,8 +58,9 @@ let failed = 0;
 for (const stage of STAGES) {
   if (only && !stage.includes(only)) continue;
   if (!fs.existsSync(path.join(__dirname, stage))) {
-    console.log(`--- ${stage}: not written yet, skipping ---`);
-    continue;
+    console.error(`--- ${stage}: MISSING — the certification cannot be reproduced without it ---`);
+    failed += 1;
+    break;
   }
   console.log(`\n########## ${stage} ##########`);
   try {

@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { openProject, signIn } from './support'
+import { openProject, SHOTS, signIn } from './support'
 
 /**
  * Printing from the portal.
@@ -10,7 +10,6 @@ import { openProject, signIn } from './support'
  * the screen.
  */
 
-const SHOTS = '../docs/design/screenshots'
 
 test.describe('print output', () => {
   test('carries the brand band and signature, and drops the chrome', async ({ page }) => {

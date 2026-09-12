@@ -1,5 +1,5 @@
 import { expect, test, type APIRequestContext } from '@playwright/test'
-import { API, apiClient, apiGet, apiToken, openProject, signIn } from './support'
+import { API, apiClient, apiGet, apiToken, openProject, SHOTS, signIn } from './support'
 
 /**
  * Subcontractor prequalification.
@@ -288,6 +288,6 @@ test.describe('subcontractor prequalification', () => {
     await expect(panel).toContainText('Recorded against the score')
 
     await panel.scrollIntoViewIfNeeded()
-    await page.screenshot({ path: '../docs/design/screenshots/35-subcontractor-prequalification.png' })
+    await page.screenshot({ path: `${SHOTS}/35-subcontractor-prequalification.png` })
   })
 })

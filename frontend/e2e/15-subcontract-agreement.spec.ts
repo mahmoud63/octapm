@@ -1,5 +1,5 @@
 import { expect, test, type APIRequestContext } from '@playwright/test'
-import { API, apiClient, apiGet, apiToken, openProject, signIn } from './support'
+import { API, apiClient, apiGet, apiToken, openProject, SHOTS, signIn } from './support'
 
 /**
  * The subcontract agreement.
@@ -131,6 +131,6 @@ test.describe('subcontract agreement', () => {
     // The card sits below the fold of a scrolling dialog, so bring it into
     // view before capturing.
     await card.scrollIntoViewIfNeeded()
-    await page.screenshot({ path: '../docs/design/screenshots/33-subcontract-agreement.png' })
+    await page.screenshot({ path: `${SHOTS}/33-subcontract-agreement.png` })
   })
 })
