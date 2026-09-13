@@ -459,6 +459,8 @@ const updateCommitment = async ({ orgId, projectId, commitmentId, payload = {}, 
   if (existing.status === STATUS.VOID) throw new HttpError(409, "COMMITMENT_VOID", "A void commitment cannot be changed");
   const data = commitmentData(payload, { project, existing });
   const updated = await prisma.$transaction(async (tx) => {
+    const [fresh] = await tx.$queryRaw`SELECT status FROM "Commitment" WHERE id = ${commitmentId} FOR UPDATE`;
+    if (fresh && fresh.status !== existing.status) throw new HttpError(409, "COMMITMENT_STATE_CHANGED", `The commitment is ${fresh.status} now; look again before editing it`);
     const vendor = EDITABLE_STATUSES.includes(existing.status) ? await resolveVendor({ tx, orgId, projectId, payload }) : {};
     if (!EDITABLE_STATUSES.includes(existing.status)) {
       // After approval only paperwork changes: dates, terms, notes, insurance.
@@ -477,6 +479,11 @@ const replaceLines = async ({ orgId, projectId, commitmentId, payload = {}, acto
   if (!EDITABLE_STATUSES.includes(existing.status)) throw new HttpError(409, "COMMITMENT_LOCKED", "The schedule of values is fixed once the commitment is approved; raise a change order instead");
   const lines = normalizeLines(payload.lines);
   const updated = await prisma.$transaction(async (tx) => {
+    // The schedule of values is fixed once the commitment is approved; the
+    // check ran before the lock, so it is asked again under it (Phase 21D,
+    // CX21-427).
+    const [fresh] = await tx.$queryRaw`SELECT status FROM "Commitment" WHERE id = ${commitmentId} FOR UPDATE`;
+    if (fresh && !EDITABLE_STATUSES.includes(fresh.status)) throw new HttpError(409, "COMMITMENT_LOCKED", "The schedule of values is fixed once the commitment is approved; raise a change order instead");
     await validateLineReferences({ tx, orgId, projectId, lines });
     await tx.commitmentSovLine.deleteMany({ where: { commitmentId } });
     for (const line of lines) await tx.commitmentSovLine.create({ data: { ...line, orgId, projectId, commitmentId } });

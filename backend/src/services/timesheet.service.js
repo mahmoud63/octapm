@@ -498,12 +498,25 @@ const assertEditable = (row) => {
 };
 
 /** Replaces the entries (and notes) of a draft or rejected timesheet. */
+/**
+ * Holds the timesheet for the transaction and refuses if its status is no
+ * longer one the caller decided on: a return that started while the sheet
+ * was submitted must not land on it once approved and posted — the cost
+ * would stay posted and the sheet become editable (Phase 21D, CX21-414);
+ * an edit or a delete that started on a draft, likewise (CX21-423).
+ */
+const lockTimesheetExpecting = async (tx, timesheetId, statuses, code, message) => {
+  const [fresh] = await tx.$queryRaw`SELECT status FROM "Timesheet" WHERE id = ${timesheetId} FOR UPDATE`;
+  if (fresh && !statuses.includes(fresh.status)) throw new HttpError(409, code, message(fresh.status));
+};
+
 const updateTimesheet = async ({ orgId, projectId, timesheetId, payload = {}, actor = null, viewer = null }) => {
   const existing = await loadTimesheet({ orgId, projectId, timesheetId, viewer });
   assertEditable(existing);
   const rows = Array.isArray(payload.entries) ? payload.entries : null;
   const { entries } = rows ? await normalizeEntries({ orgId, projectId, rows, viewer }) : { entries: existing.entries.map((entry) => ({ ...entry })) };
   const updated = await prisma.$transaction(async (tx) => {
+    await lockTimesheetExpecting(tx, timesheetId, [STATUS.DRAFT, STATUS.REJECTED], "TIMESHEET_LOCKED", (status) => `A ${status} timesheet cannot be edited`);
     if (rows) {
       await tx.timeEntry.deleteMany({ where: { timesheetId } });
       if (entries.length) await tx.timeEntry.createMany({ data: entries.map(({ id, worker, activity, costCode, location, rate, amount, postedAmount, budgetLineId, createdAt, updatedAt, timesheetId: _ts, orgId: _o, projectId: _p, ...entry }) => ({ ...entry, orgId, projectId, timesheetId })) });
@@ -518,7 +531,10 @@ const updateTimesheet = async ({ orgId, projectId, timesheetId, payload = {}, ac
 const deleteTimesheet = async ({ orgId, projectId, timesheetId, actor = null, viewer = null }) => {
   const existing = await loadTimesheet({ orgId, projectId, timesheetId, viewer });
   if (existing.status !== STATUS.DRAFT) throw new HttpError(409, "TIMESHEET_LOCKED", "Only draft timesheets can be deleted");
-  await prisma.timesheet.delete({ where: { id: timesheetId } });
+  await prisma.$transaction(async (tx) => {
+    await lockTimesheetExpecting(tx, timesheetId, [STATUS.DRAFT], "TIMESHEET_LOCKED", () => "Only draft timesheets can be deleted");
+    await tx.timesheet.delete({ where: { id: timesheetId } });
+  });
   await auditService.recordEvent({ orgId, projectId, entityType: "timesheet", entityId: timesheetId, action: auditService.ACTIONS.DELETED, actorId: actor?.id || null, summary: { date: dateKey(existing.date) } }).catch(() => null);
   return { deleted: true };
 };
@@ -529,17 +545,6 @@ const notify = async ({ orgId, projectId, row, actor, event, title, message, rec
     .catch(() => null);
 
 const labelOf = (row) => `${row.crew?.name ? `${row.crew.name} · ` : ""}${dateKey(row.date)}`;
-
-/**
- * Holds the timesheet for the transaction and refuses if its status is no
- * longer one the caller decided on: a return that started while the sheet
- * was submitted must not land on it once approved and posted — the cost
- * would stay posted and the sheet become editable (Phase 21D, CX21-414).
- */
-const lockTimesheetExpecting = async (tx, timesheetId, statuses, code, message) => {
-  const [fresh] = await tx.$queryRaw`SELECT status FROM "Timesheet" WHERE id = ${timesheetId} FOR UPDATE`;
-  if (fresh && !statuses.includes(fresh.status)) throw new HttpError(409, code, message(fresh.status));
-};
 
 const submitTimesheet = async ({ orgId, projectId, timesheetId, actor = null, viewer = null }) => {
   const existing = await loadTimesheet({ orgId, projectId, timesheetId, viewer });

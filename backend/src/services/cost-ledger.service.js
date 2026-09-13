@@ -185,6 +185,13 @@ const post = async ({
   if (!SOURCE_TYPES.includes(sourceType)) {
     throw new HttpError(400, "COST_LEDGER_SOURCE_INVALID", `Unknown cost source "${sourceType}"`);
   }
+  // The project must be the organisation's. Every caller scopes its own
+  // records; this is the last line, so that no caller can post one tenant's
+  // cost onto another's project whatever it was handed (Phase 21D, CX21-420).
+  if (tx.project?.findFirst) {
+    const owner = await tx.project.findFirst({ where: { id: projectId, orgId }, select: { id: true } });
+    if (owner === null) throw new HttpError(403, "COST_LEDGER_PROJECT_FOREIGN", "That project is not this organisation's");
+  }
   const value = round2(num(amount));
   if (!value) return { entry: null, posted: false, reason: "zero" };
 

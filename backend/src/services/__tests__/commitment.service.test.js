@@ -143,3 +143,16 @@ describe("commitments", () => {
     expect(pdf.buffer.subarray(0, 4).toString()).toBe("%PDF");
   });
 });
+
+describe("Phase 21D — integrity (release challenge, second pass)", () => {
+  afterEach(() => jest.restoreAllMocks());
+
+  it("CX21-427: replacing the schedule of values refuses once the commitment was approved under the lock", async () => {
+    mockPrisma.commitment.findFirst.mockResolvedValue(commitment({ status: "draft", lines: [line()] }));
+    mockPrisma.commitmentSovLine.deleteMany.mockClear();
+    const lock = jest.spyOn(mockPrisma, "$queryRaw").mockImplementation(async (strings) => (Array.isArray(strings) && strings.join("?").includes('FROM "Commitment"') ? [{ status: "approved" }] : []));
+    await expect(service.replaceLines({ orgId: "org-1", projectId: "project-1", commitmentId: "cm-1", payload: { lines: [{ lineNumber: 1, description: "Formwork", amount: 200000 }] }, actor: { id: "qs" } })).rejects.toMatchObject({ code: "COMMITMENT_LOCKED" });
+    expect(lock).toHaveBeenCalled();
+    expect(mockPrisma.commitmentSovLine.deleteMany).not.toHaveBeenCalled();
+  });
+});

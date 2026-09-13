@@ -3,6 +3,7 @@ const { asyncHandler } = require("../utils/async-handler");
 const { sendSuccess } = require("../utils/api-response");
 const { validate } = require("../middleware/validate");
 const { authenticate } = require("../middleware/auth");
+const { noApiKey } = require("../middleware/rbac");
 const { loginLimiter } = require("../middleware/rate-limit");
 const authService = require("../services/auth.service");
 const mfaService = require("../services/mfa.service");
@@ -27,10 +28,10 @@ const register = (router, { setRefreshCookie, toPublicAuthResponse, getRequestCo
 
   // ── MFA: enrolment and management (signed in) ──
   router.get("/mfa", authenticate, asyncHandler(async (req, res) => sendSuccess(res, await mfaService.status({ userId: req.user.id }))));
-  router.post("/mfa/setup", authenticate, asyncHandler(async (req, res) => sendSuccess(res, await mfaService.beginEnrollment({ userId: req.user.id }))));
-  router.post("/mfa/enable", authenticate, [body("code").isString().trim().isLength({ min: 6, max: 8 }), validate], asyncHandler(async (req, res) => sendSuccess(res, await mfaService.enable({ userId: req.user.id, code: req.body.code, context: getRequestContext(req) }))));
-  router.post("/mfa/disable", authenticate, [body("password").isString().notEmpty(), body("code").isString().trim().isLength({ min: 6, max: 12 }), validate], asyncHandler(async (req, res) => sendSuccess(res, await mfaService.disable({ userId: req.user.id, password: req.body.password, code: req.body.code, context: getRequestContext(req) }))));
-  router.post("/mfa/backup-codes", authenticate, [body("code").isString().trim().isLength({ min: 6, max: 8 }), validate], asyncHandler(async (req, res) => sendSuccess(res, await mfaService.regenerateBackupCodes({ userId: req.user.id, code: req.body.code, context: getRequestContext(req) }))));
+  router.post("/mfa/setup", authenticate, noApiKey, asyncHandler(async (req, res) => sendSuccess(res, await mfaService.beginEnrollment({ userId: req.user.id }))));
+  router.post("/mfa/enable", authenticate, noApiKey, [body("code").isString().trim().isLength({ min: 6, max: 8 }), validate], asyncHandler(async (req, res) => sendSuccess(res, await mfaService.enable({ userId: req.user.id, code: req.body.code, context: getRequestContext(req) }))));
+  router.post("/mfa/disable", authenticate, noApiKey, [body("password").isString().notEmpty(), body("code").isString().trim().isLength({ min: 6, max: 12 }), validate], asyncHandler(async (req, res) => sendSuccess(res, await mfaService.disable({ userId: req.user.id, password: req.body.password, code: req.body.code, context: getRequestContext(req) }))));
+  router.post("/mfa/backup-codes", authenticate, noApiKey, [body("code").isString().trim().isLength({ min: 6, max: 8 }), validate], asyncHandler(async (req, res) => sendSuccess(res, await mfaService.regenerateBackupCodes({ userId: req.user.id, code: req.body.code, context: getRequestContext(req) }))));
 
   // ── SSO ──
   router.get("/sso/lookup", [query("email").isEmail(), validate], asyncHandler(async (req, res) => sendSuccess(res, await ssoService.lookup({ email: req.query.email }))));

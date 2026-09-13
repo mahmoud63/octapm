@@ -155,6 +155,8 @@ const mockPrisma = {
   },
   // An issue naming an activity belongs to that activity's project, whether or
   // not the caller said so (OCTA-INV-PROJECT-068).
+  // project-1 and project-2 are this organisation's; anything else is not (Phase 21D, CX21-420).
+  project: { findFirst: jest.fn(async ({ where }) => (["project-1", "project-2"].includes(where.id) && (!where.orgId || where.orgId === "org-1") ? { id: where.id } : null)) },
   activity: {
     // Scoped by organisation since Phase 21D (CX21-410): activity-1 belongs
     // to org-1; anything else is not this organisation's.
@@ -863,5 +865,39 @@ describe("Phase 21D — integrity (release challenge)", () => {
     // the fake has no rollback; in PostgreSQL the movement and the refusal share one transaction — what the fake can show is that no cost was posted
     expect(store.ledger).toHaveLength(0);
     expect(mockPrisma.activity.findFirst).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({ project: { orgId: ORG } }) }));
+  });
+});
+
+describe("Phase 21D — integrity (release challenge, second pass)", () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockPrisma.$queryRaw.mockImplementation(async () => []);
+    store.items.clear(); store.warehouses.clear(); store.locations.clear();
+    store.balances.length = 0; store.transactions.length = 0; store.ledger.length = 0; store.costRecords.length = 0;
+    nextId = 1;
+  });
+
+  it("CX21-420: an issue that names a project of another organisation, with no activity, is refused and posts nothing", async () => {
+    const item = seedItem();
+    const warehouse = seedWarehouse();
+    await service.receiveStock({ orgId: ORG, user: USER, payload: { itemId: item.id, warehouseId: warehouse.id, quantity: 100, unitCost: 10 } });
+    await expect(
+      service.issueStock({ orgId: ORG, user: USER, payload: { itemId: item.id, warehouseId: warehouse.id, quantity: 10, projectId: "project-of-another-tenant", costCodeId: "code-1" } }),
+    ).rejects.toMatchObject({ code: "PROJECT_NOT_FOUND", status: 404 });
+    expect(store.ledger).toHaveLength(0);
+    expect(mockPrisma.project.findFirst).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({ id: "project-of-another-tenant", orgId: ORG }) }));
+  });
+
+  it("CX21-421: a key limited to other projects may not issue to this one, even through the activity", async () => {
+    const item = seedItem();
+    const warehouse = seedWarehouse();
+    await service.receiveStock({ orgId: ORG, user: USER, payload: { itemId: item.id, warehouseId: warehouse.id, quantity: 100, unitCost: 10 } });
+    await expect(
+      service.issueStock({ orgId: ORG, user: USER, payload: { itemId: item.id, warehouseId: warehouse.id, quantity: 10, activityId: "activity-1", allowedProjectIds: ["project-2"] } }),
+    ).rejects.toMatchObject({ code: "FORBIDDEN_PROJECT", status: 403 });
+    expect(store.ledger).toHaveLength(0);
+    // and a key allowed on the activity's project goes through
+    const { movements } = await service.issueStock({ orgId: ORG, user: USER, payload: { itemId: item.id, warehouseId: warehouse.id, quantity: 10, activityId: "activity-1", allowedProjectIds: ["project-1"] } });
+    expect(movements).toHaveLength(1);
   });
 });

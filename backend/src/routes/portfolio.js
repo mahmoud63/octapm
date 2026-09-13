@@ -4,6 +4,8 @@ const { asyncHandler } = require("../utils/async-handler");
 const { sendSuccess } = require("../utils/api-response");
 const { authenticate } = require("../middleware/auth");
 const { requirePermission } = require("../middleware/rbac");
+/** A key limited to some projects sees a portfolio of those projects only (Phase 21D, CX21-425). */
+const keyProjects = (req) => (req.apiClient?.projectIds?.length ? req.apiClient.projectIds : null);
 const service = require("../services/portfolio.service");
 
 /** Portfolio (OCTA-RPT-BUILDER-023): `/portfolio` — one health row per project from snapshots. */
@@ -15,7 +17,7 @@ const user = (req) => ({ id: req.user.id, role: req.user.role, isCompanyAdmin: B
 router.get(
   "/",
   requirePermission("portfolio", "read"),
-  asyncHandler(async (req, res) => sendSuccess(res, await service.getPortfolio({ orgId: req.user.orgId, user: user(req) }))),
+  asyncHandler(async (req, res) => sendSuccess(res, await service.getPortfolio({ orgId: req.user.orgId, user: user(req), projectIds: keyProjects(req) }))),
 );
 
 router.post(
@@ -28,7 +30,7 @@ router.get(
   "/export.xlsx",
   requirePermission("portfolio", "export"),
   asyncHandler(async (req, res) => {
-    const portfolio = await service.getPortfolio({ orgId: req.user.orgId, user: user(req) });
+    const portfolio = await service.getPortfolio({ orgId: req.user.orgId, user: user(req), projectIds: keyProjects(req) });
     const workbook = new ExcelJS.Workbook();
     workbook.creator = "OctaPM";
     const sheet = workbook.addWorksheet("Portfolio");

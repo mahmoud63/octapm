@@ -637,6 +637,19 @@ const postMovement = async (tx, { orgId, item, warehouseId, locationId = null, t
     throw error;
   }
   const projectId = activityProject ?? context.projectId ?? null;
+  // A project named without an activity is checked against the organisation
+  // the way an activity is (CX21-410): a project id from another tenant used
+  // to be trusted, and this tenant's stock then charged that tenant's budget
+  // line (Phase 21D, CX21-420).
+  if (projectId && !activityProject && tx.project?.findFirst) {
+    const owner = await tx.project.findFirst({ where: { id: projectId, orgId }, select: { id: true } });
+    if (!owner) throw new HttpError(404, "PROJECT_NOT_FOUND", "That project is not this organisation's");
+  }
+  // A key limited to some projects may not move stock on another, whether
+  // the project is named or derived from the activity (CX21-421).
+  if (projectId && Array.isArray(context.allowedProjectIds) && context.allowedProjectIds.length && !context.allowedProjectIds.includes(projectId)) {
+    throw new HttpError(403, "FORBIDDEN_PROJECT", "This API key is not allowed on that project");
+  }
 
   const movement = await tx.stockTransaction.create({
     data: {
@@ -1162,13 +1175,13 @@ const adjustStock = async ({ orgId, user, payload, type }) => {
   });
 };
 
-const listTransactions = async ({ orgId, itemId = null, warehouseId = null, projectId = null, activityId = null, type = null, limit = 100 }) => {
+const listTransactions = async ({ orgId, itemId = null, warehouseId = null, projectId = null, projectIds = null, activityId = null, type = null, limit = 100 }) => {
   const rows = await prisma.stockTransaction.findMany({
     where: {
       orgId,
       ...(itemId ? { itemId } : {}),
       ...(warehouseId ? { warehouseId } : {}),
-      ...(projectId ? { projectId } : {}),
+      ...(projectId ? { projectId } : projectIds ? { projectId: { in: projectIds } } : {}),
       ...(activityId ? { activityId } : {}),
       ...(type ? { type } : {}),
     },

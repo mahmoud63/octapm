@@ -68,7 +68,7 @@ const editableFields: Array<
   'contingency',
   'budget',
   'committed',
-  // actual is posted from the cost ledger and shown, never typed (Phase 21D)
+  'actual',
   'forecast',
 ]
 
@@ -358,7 +358,7 @@ export function CostDashboard({
                       {editableFields.map((field) => (
                         <Fragment key={field}>
                           <td className='p-2 text-right'>
-                            {isEditing ? (
+                            {isEditing && field !== 'actual' ? (
                               <Input
                                 type='number'
                                 step={MONEY_INPUT_STEP}

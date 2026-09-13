@@ -28,3 +28,13 @@ describe('activity actual cost is derived', () => {
     expect(mockPrisma.costRecord.update).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ actualThroughDate: new Date('2027-02-02T00:00:00.000Z') }) }));
   });
 });
+
+describe('a cost-record edit never writes actual', () => {
+  it('CX21-422: a budget-only update leaves actual to the ledger', async () => {
+    mockPrisma.costRecord.update.mockClear();
+    await service.updateCostRecord({ orgId: 'org-1', projectId: 'p1', costRecordId: 'cr-1', payload: { budget: 1500 } });
+    const written = mockPrisma.costRecord.update.mock.calls.at(-1)[0].data;
+    expect(Object.prototype.hasOwnProperty.call(written, 'actual')).toBe(false);
+    expect(written).toMatchObject({ budget: 1500 });
+  });
+});

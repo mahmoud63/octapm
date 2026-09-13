@@ -70,3 +70,11 @@ describe("portfolio snapshots", () => {
     expect(mockJobs.enqueueJob).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("Phase 21D — integrity (release challenge, second pass)", () => {
+  it("CX21-425: a key limited to some projects sees a portfolio of those projects only", async () => {
+    mockPrisma.project.findMany.mockResolvedValue([]);
+    await service.getPortfolio({ orgId: "org-1", user: { id: "u", role: "pm", isCompanyAdmin: false }, projectIds: ["p1"] });
+    expect(mockPrisma.project.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({ orgId: "org-1", id: { in: ["p1"] } }) }));
+  });
+});

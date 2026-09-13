@@ -125,3 +125,11 @@ describe("two-factor authentication", () => {
     expect(session.tokens.accessToken).toBeTruthy();
   });
 });
+
+describe("Phase 21D — integrity (release challenge, second pass)", () => {
+  it("CX21-429: enrolling a new device while two-factor is on is refused; it must be turned off first", async () => {
+    store.users[0].mfaEnabled = true;
+    await expect(mfaService.beginEnrollment({ userId: "u-1" })).rejects.toMatchObject({ code: "MFA_ALREADY_ENABLED", status: 409 });
+    store.users[0].mfaEnabled = false;
+  });
+});

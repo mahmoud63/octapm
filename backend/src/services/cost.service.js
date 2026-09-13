@@ -338,7 +338,8 @@ const upsertCostRecord = async ({
     contingency: toMoneyNumber(payload.contingency ?? existing?.contingency ?? 0),
     budget,
     committed: toMoneyNumber(payload.committed ?? existing?.committed ?? 0),
-    actual,
+    // actual is not written here: it is the ledger's projection, and a stale
+    // copy would erase a posting that landed since the read (Phase 21D, CX21-422)
     actualThroughDate,
     forecast: resolveForecast({
       budget,
@@ -416,7 +417,8 @@ const updateCostRecord = async ({
     contingency: toMoneyNumber(payload.contingency ?? existing.contingency),
     budget,
     committed: toMoneyNumber(payload.committed ?? existing.committed),
-    actual,
+    // actual is not written here: it is the ledger's projection, and a stale
+    // copy would erase a posting that landed since the read (Phase 21D, CX21-422)
     actualThroughDate,
     forecast: resolveForecast({
       budget,

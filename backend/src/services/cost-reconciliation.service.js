@@ -271,20 +271,20 @@ const recomputeActualCost = async ({ orgId, projectId, actor = null, dryRun = fa
 
   const applied = await prisma.$transaction(async (tx) => {
     let count = 0;
+    // Derived by the database at the moment of the write, not from the report
+    // read earlier: a posting that landed in between is kept, not undone
+    // (Phase 21D, CX21-428).
     for (const row of before.budget.variances) {
       if (row.note) continue; // orphaned ledger rows have no line to correct
-      await tx.budgetLine.update({ where: { id: row.budgetLineId }, data: { actual: row.derived } });
+      await tx.$executeRaw`UPDATE "BudgetLine" SET actual = COALESCE((SELECT SUM(e.amount) FROM "CostLedgerEntry" e WHERE e."budgetLineId" = "BudgetLine".id), 0) WHERE id = ${row.budgetLineId}`;
       count += 1;
     }
     for (const row of before.activity.variances) {
       if (row.note) continue;
-      await tx.costRecord.updateMany({
-        where: { projectId, activityId: row.activityId },
-        data: {
-          actual: row.derived,
-          ...(row.expectedThroughDate ? { actualThroughDate: new Date(row.expectedThroughDate) } : {}),
-        },
-      });
+      await tx.$executeRaw`UPDATE "CostRecord" SET actual = COALESCE((SELECT SUM(e.amount) FROM "CostLedgerEntry" e WHERE e."projectId" = "CostRecord"."projectId" AND e."activityId" = "CostRecord"."activityId"), 0) WHERE "projectId" = ${projectId} AND "activityId" = ${row.activityId}`;
+      if (row.expectedThroughDate) {
+        await tx.costRecord.updateMany({ where: { projectId, activityId: row.activityId }, data: { actualThroughDate: new Date(row.expectedThroughDate) } });
+      }
       count += 1;
     }
     return count;

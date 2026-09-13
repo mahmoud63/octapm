@@ -264,3 +264,15 @@ describe("Phase 21D — integrity (release challenge)", () => {
     expect(mockPrisma.procurementOrder.update).not.toHaveBeenCalled();
   });
 });
+
+describe("Phase 21D — integrity (release challenge, second pass)", () => {
+  afterEach(() => mockPrisma.$queryRaw.mockImplementation(async () => []));
+
+  it("CX21-426: a rejection that started on a pending order refuses once the order was approved and issued under the lock", async () => {
+    mockPrisma.procurementOrder.findFirst.mockResolvedValue(order({ status: "pending_approval" }));
+    mockPrisma.procurementOrder.update.mockClear();
+    mockPrisma.$queryRaw.mockImplementation(async (strings) => (Array.isArray(strings) && strings.join("?").includes('FROM "ProcurementOrder"') ? [{ status: "issued" }] : []));
+    await expect(service.rejectOrder({ orgId: "org-1", projectId: "project-1", orderId: "order-1", actor: { id: "pm" }, reason: "wrong supplier" })).rejects.toMatchObject({ code: "PO_STATE_CHANGED" });
+    expect(mockPrisma.procurementOrder.update).not.toHaveBeenCalled();
+  });
+});

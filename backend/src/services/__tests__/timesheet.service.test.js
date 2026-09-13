@@ -310,3 +310,19 @@ describe("Phase 21D — integrity (release challenge)", () => {
     expect(mockPrisma.timesheet.update).not.toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ status: "rejected" }) }));
   });
 });
+
+describe("Phase 21D — integrity (release challenge, second pass)", () => {
+  afterEach(() => mockPrisma.$queryRaw.mockImplementation(async () => []));
+
+  it("CX21-423: an edit that started on a draft refuses once the sheet was approved under the lock", async () => {
+    const sheet = { id: "ts-8", orgId: "org-1", projectId: "p1", status: "draft", date: new Date("2027-02-02"), entries: [], crew: null };
+    mockPrisma.timesheet.findFirst.mockResolvedValue(sheet);
+    mockPrisma.timeEntry.deleteMany.mockClear();
+    mockPrisma.$queryRaw.mockImplementation(async (strings) => (Array.isArray(strings) && strings.join("?").includes('FROM "Timesheet"') ? [{ status: "approved" }] : []));
+    await expect(service.updateTimesheet({ orgId: "org-1", projectId: "p1", timesheetId: "ts-8", payload: { notes: "late" }, actor: { id: "site" } })).rejects.toMatchObject({ code: "TIMESHEET_LOCKED" });
+    expect(mockPrisma.timeEntry.deleteMany).not.toHaveBeenCalled();
+    mockPrisma.timesheet.delete.mockClear();
+    await expect(service.deleteTimesheet({ orgId: "org-1", projectId: "p1", timesheetId: "ts-8", actor: { id: "site" } })).rejects.toMatchObject({ code: "TIMESHEET_LOCKED" });
+    expect(mockPrisma.timesheet.delete).not.toHaveBeenCalled();
+  });
+});

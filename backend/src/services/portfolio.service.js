@@ -144,9 +144,9 @@ const serializeSnapshot = (snapshot, now) => {
 };
 
 /** One row per project the caller can open; snapshots only, no recomputation. */
-const getPortfolio = async ({ orgId, user, now = new Date() }) => {
+const getPortfolio = async ({ orgId, user, projectIds = null, now = new Date() }) => {
   const projects = await prisma.project.findMany({
-    where: { orgId, archivedAt: null, ...getProjectAccessWhere({ userId: user.id, role: user.role, isCompanyAdmin: user.isCompanyAdmin }) },
+    where: { orgId, archivedAt: null, ...(projectIds ? { id: { in: projectIds } } : {}), ...getProjectAccessWhere({ userId: user.id, role: user.role, isCompanyAdmin: user.isCompanyAdmin }) },
     select: { id: true, name: true, status: true, currency: true, contractValue: true, startDate: true, endDate: true, clientName: true, healthSnapshot: true },
     orderBy: { name: "asc" },
   });

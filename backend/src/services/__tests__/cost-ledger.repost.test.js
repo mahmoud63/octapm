@@ -9,7 +9,11 @@
 const { createCostLedgerMock } = require("./helpers/cost-ledger-mock");
 
 const ledger = createCostLedgerMock();
-const mockPrisma = { ...ledger.tables };
+const mockPrisma = {
+  ...ledger.tables,
+  // Only p1 is org-1's (Phase 21D, CX21-420).
+  project: { findFirst: jest.fn(async ({ where }) => (where.id === "p1" && where.orgId === "org-1" ? { id: "p1" } : null)) },
+};
 jest.mock("../../config/db", () => ({ prisma: mockPrisma }));
 
 const service = require("../cost-ledger.service");
@@ -61,5 +65,16 @@ describe("cost ledger — posting again after a reversal", () => {
     expect(third.entry.sourceKey).toBe("timesheet:ts-1:entry-1:r3");
     const entries = await mockPrisma.costLedgerEntry.findMany({ where: { orgId: "org-1" } });
     expect(entries.reduce((sum, row) => sum + Number(row.amount), 0)).toBe(400);
+  });
+});
+
+describe("cost ledger — the project must be the organisation's", () => {
+  beforeEach(() => ledger.reset());
+
+  it("CX21-420: refuses to post onto a project that is not the caller's organisation's, whatever it was handed", async () => {
+    await expect(service.post(posting({ projectId: "p-of-another-tenant" }))).rejects.toMatchObject({ code: "COST_LEDGER_PROJECT_FOREIGN", status: 403 });
+    expect(await mockPrisma.costLedgerEntry.findMany({ where: {} })).toHaveLength(0);
+    const own = await service.post(posting());
+    expect(own.posted).toBe(true);
   });
 });

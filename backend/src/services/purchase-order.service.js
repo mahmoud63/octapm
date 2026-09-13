@@ -448,6 +448,11 @@ const transition = async ({ orgId, projectId, orderId, to, actor, reason = null,
   assertTransition(existing.status, to);
 
   return prisma.$transaction(async (tx) => {
+    // The transition was decided on a status read before the lock; a
+    // rejection that started on a pending order must not land on it once
+    // approved and issued (Phase 21D, CX21-426).
+    const [fresh] = await tx.$queryRaw`SELECT status FROM "ProcurementOrder" WHERE id = ${orderId} FOR UPDATE`;
+    if (fresh && fresh.status !== existing.status) throw new HttpError(409, "PO_STATE_CHANGED", `The order is ${fresh.status} now; it cannot become ${to} from there without a fresh look`);
     const now = new Date();
     const patch = { status: to, updatedBy: actor?.id ?? null, ...data };
 

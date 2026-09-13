@@ -285,7 +285,7 @@ const nextReceiptNumber = async (tx, projectId) =>
 
 const RECEIVABLE_STATUSES = new Set(["issued", "acknowledged", "partial", "received"]);
 
-const receiveAgainstOrder = async ({ orgId, user, payload }) => {
+const receiveAgainstOrder = async ({ orgId, user, payload, allowedProjectIds = null }) => {
   const lines = Array.isArray(payload.lines) ? payload.lines : [];
   if (!lines.length) {
     throw new HttpError(400, "RECEIPT_EMPTY", "Say what was delivered");
@@ -317,6 +317,11 @@ const receiveAgainstOrder = async ({ orgId, user, payload }) => {
       include: { lines: true, project: true },
     });
     if (!order) throw new HttpError(404, "PO_NOT_FOUND", "Purchase order not found");
+    // A key limited to some projects may not receive against another's order,
+    // whether or not the payload names the project (Phase 21D, CX21-421).
+    if (allowedProjectIds?.length && !allowedProjectIds.includes(order.projectId)) {
+      throw new HttpError(403, "FORBIDDEN_PROJECT", "This API key is not allowed on that project");
+    }
 
     // Nothing can be delivered against an order the supplier was never sent
     // (OCTA-PROC-RECEIPT-070). Accepting one turns the whole approval workflow

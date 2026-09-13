@@ -68,6 +68,10 @@ const status = async ({ userId }) => {
 /** Creates a fresh secret and returns what the authenticator app needs (the secret is not stored in the clear). */
 const beginEnrollment = async ({ userId }) => {
   const user = await loadUser(userId);
+  // An enabled factor is not replaced by enrolling another: turning it off
+  // takes the password and a current code, and only then can a new device
+  // be enrolled (Phase 21D, CX21-429).
+  if (user.mfaEnabled) throw new HttpError(409, "MFA_ALREADY_ENABLED", "Two-factor is already on; turn it off with your password and a current code before enrolling a new device");
   const secret = generateSecret();
   await prisma.user.update({ where: { id: userId }, data: { mfaPendingSecretEnc: seal(secret) } });
   const url = otpauthUrl({ issuer: ISSUER(), account: user.email, secret });

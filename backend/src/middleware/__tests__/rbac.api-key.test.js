@@ -22,3 +22,14 @@ describe('requireRoles with an API key', () => {
     expect(await run({ user: pm, method: 'PATCH', baseUrl: '/api/v1/projects' })).toBeNull();
   });
 });
+
+const { noApiKey } = require('../rbac');
+
+describe('noApiKey on account-security routes', () => {
+  it('CX21-429: refuses an API key and lets a person through', async () => {
+    const withKey = await new Promise((resolve) => noApiKey({ user: { id: 'u1' }, apiClient: { scopes: ['*:write'] } }, {}, (err) => resolve(err ?? null)));
+    expect(withKey).toMatchObject({ status: 403, code: 'API_KEY_FORBIDDEN' });
+    const person = await new Promise((resolve) => noApiKey({ user: { id: 'u1' } }, {}, (err) => resolve(err ?? null)));
+    expect(person).toBeNull();
+  });
+});

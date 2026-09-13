@@ -316,7 +316,7 @@ router.post(
   asyncHandler(async (req, res) =>
     sendSuccess(
       res,
-      await scopedCall(req, req.body.projectId, () => service.issueStock({ orgId: req.user.orgId, user: req.user, payload: req.body })),
+      await scopedCall(req, req.body.projectId, () => service.issueStock({ orgId: req.user.orgId, user: req.user, payload: { ...req.body, allowedProjectIds: keyProjects(req) } })),
       201
     )
   )
@@ -391,17 +391,14 @@ router.get(
     validate,
   ],
   asyncHandler(async (req, res) =>
-    sendSuccess(
-      res,
-      await service.listTransactions({
-        orgId: req.user.orgId,
+    sendSuccess(res, await scopedCall(req, req.query.projectId, () => service.listTransactions({ projectIds: keyProjects(req), orgId: req.user.orgId,
         itemId: req.query.itemId ?? null,
         warehouseId: req.query.warehouseId ?? null,
         projectId: req.query.projectId ?? null,
         activityId: req.query.activityId ?? null,
         type: req.query.type ?? null,
         limit: req.query.limit ?? 100,
-      })
+      }))
     )
   )
 );
@@ -534,7 +531,7 @@ router.post(
     validate,
   ],
   asyncHandler(async (req, res) =>
-    sendSuccess(res, await scopedCall(req, req.body.projectId, () => goodsReceipt.receiveAgainstOrder({ orgId: req.user.orgId, user: req.user, payload: req.body })),
+    sendSuccess(res, await scopedCall(req, req.body.projectId, () => goodsReceipt.receiveAgainstOrder({ orgId: req.user.orgId, user: req.user, payload: req.body, allowedProjectIds: keyProjects(req) })),
       201
     )
   )
