@@ -1813,6 +1813,7 @@ model CostRecord {
   activity Activity @relation(fields: [activityId], references: [id])
   project  Project  @relation(fields: [projectId], references: [id])
 
+  @@unique([projectId, activityId]) // one projection row per activity (Phase 21D, CX21-474)
   @@index([activityId])
   @@index([projectId])
   @@index([projectId, updatedAt])

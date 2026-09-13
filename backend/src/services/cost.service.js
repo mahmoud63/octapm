@@ -322,7 +322,9 @@ const upsertCostRecord = async ({
     overhead: toMoneyNumber(payload.overhead ?? existing?.overhead ?? 0),
     contingency: toMoneyNumber(payload.contingency ?? existing?.contingency ?? 0),
     budget,
-    committed: toMoneyNumber(payload.committed ?? existing?.committed ?? 0),
+    // committed is the commitments' projection: written only when supplied
+    // (an echo), never the copy read before the lock (Phase 21D, CX21-475)
+    ...(payload.committed !== undefined ? { committed: toMoneyNumber(payload.committed) } : existing ? {} : { committed: 0 }),
     // actual is not written here: it is the ledger's projection, and a stale
     // copy would erase a posting that landed since the read (Phase 21D, CX21-422)
     ...(actualThroughDate !== undefined ? { actualThroughDate } : {}),
@@ -406,7 +408,7 @@ const updateCostRecord = async ({
     overhead: toMoneyNumber(payload.overhead ?? existing.overhead),
     contingency: toMoneyNumber(payload.contingency ?? existing.contingency),
     budget,
-    committed: toMoneyNumber(payload.committed ?? existing.committed),
+    ...(payload.committed !== undefined ? { committed: toMoneyNumber(payload.committed) } : {}), // the commitments' (CX21-475)
     // actual is not written here: it is the ledger's projection, and a stale
     // copy would erase a posting that landed since the read (Phase 21D, CX21-422)
     ...(actualThroughDate !== undefined ? { actualThroughDate } : {}),

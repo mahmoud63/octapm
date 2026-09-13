@@ -4,6 +4,8 @@
  */
 let existing = null;
 const mockPrisma = {
+  $transaction: jest.fn(async (fn) => fn(mockPrisma)),
+  $queryRaw: jest.fn(async () => []), // row locks (Phase 21D): the held row, when a test says so
   project: { findFirst: jest.fn(async () => ({ id: "p1", orgId: "org-1", contractValue: 1000000 })) },
   budgetRevision: {
     findFirst: jest.fn(async ({ where }) => (where.id ? existing : null)),
@@ -62,5 +64,21 @@ describe("Phase 21D — integrity (release challenge, sixth pass)", () => {
     const back = await service.updateBudgetRevision({ ...base, userId: "pm-1", canApprove: true, revisionId: "br-1", payload: { status: "draft" } });
     expect(back.status).toBe("draft");
     await expect(service.deleteBudgetRevision({ ...base, canApprove: true, revisionId: "br-1" })).resolves.toEqual({ deleted: true });
+  });
+});
+
+describe("Phase 21D — integrity (release challenge, seventh pass)", () => {
+  beforeEach(() => { jest.clearAllMocks(); mockPrisma.$queryRaw.mockImplementation(async () => []); existing = { id: "br-1", projectId: "p1", status: "draft", title: "Steel", changeType: "addition", amount: 100000, effectiveDate: new Date("2027-01-01"), approvedBy: null, approvedAt: null, notes: null, linkedChangeOrder: null }; });
+
+  it("CX21-470: an edit that started on a draft decides on the status as held — approved meanwhile, its money and status are the approver's; a delete likewise", async () => {
+    mockPrisma.$queryRaw.mockImplementation(async (strings) => (Array.isArray(strings) && strings.join("?").includes('FROM "BudgetRevision"') ? [{ status: "approved" }] : []));
+    await expect(service.updateBudgetRevision({ ...base, revisionId: "br-1", payload: { amount: 250000 } })).rejects.toMatchObject({ code: "BUDGET_REVISION_APPROVED", status: 409 });
+    expect(mockPrisma.budgetRevision.update).not.toHaveBeenCalled();
+    // a harmless edit goes through, and writes no status of its own
+    const retitled = await service.updateBudgetRevision({ ...base, revisionId: "br-1", payload: { title: "Steel (rev B)" } });
+    expect(retitled.title).toBe("Steel (rev B)");
+    expect(Object.prototype.hasOwnProperty.call(mockPrisma.budgetRevision.update.mock.calls.at(-1)[0].data, "status")).toBe(false);
+    await expect(service.deleteBudgetRevision({ ...base, revisionId: "br-1" })).rejects.toMatchObject({ code: "BUDGET_REVISION_APPROVAL_REQUIRED", status: 403 });
+    expect(mockPrisma.budgetRevision.delete).not.toHaveBeenCalled();
   });
 });

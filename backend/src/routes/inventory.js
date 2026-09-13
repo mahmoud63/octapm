@@ -426,7 +426,7 @@ router.get(
   asyncHandler(async (req, res) =>
     sendSuccess(
       res,
-      await service.listTransfers({ orgId: req.user.orgId, status: req.query.status ?? null })
+      await service.listTransfers({ orgId: req.user.orgId, status: req.query.status ?? null, projectIds: keyProjects(req) })
     )
   )
 );

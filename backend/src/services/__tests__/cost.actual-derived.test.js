@@ -68,3 +68,14 @@ describe('one projection row per activity, whoever creates it', () => {
     expect(mockPrisma.costRecord.update).toHaveBeenCalled();
   });
 });
+
+describe('committed is the commitments\' projection', () => {
+  it('CX21-475: a budget-only edit writes no committed; the upsert of a new record leaves it to the commitments too', async () => {
+    mockPrisma.costRecord.update.mockClear();
+    await service.updateCostRecord({ orgId: 'org-1', projectId: 'p1', costRecordId: 'cr-1', payload: { budget: 1400 } });
+    expect(Object.prototype.hasOwnProperty.call(mockPrisma.costRecord.update.mock.calls.at(-1)[0].data, 'committed')).toBe(false);
+    mockPrisma.costRecord.update.mockClear();
+    await service.upsertCostRecord({ orgId: 'org-1', projectId: 'p1', activityId: 'act-1', payload: { budget: 700 } });
+    expect(Object.prototype.hasOwnProperty.call(mockPrisma.costRecord.update.mock.calls.at(-1)[0].data, 'committed')).toBe(false);
+  });
+});

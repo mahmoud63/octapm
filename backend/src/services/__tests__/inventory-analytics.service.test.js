@@ -235,5 +235,8 @@ describe("Phase 21D — integrity (release challenge, third pass)", () => {
     expect(prisma.activityMaterial.findMany.mock.calls[0][0].where).toMatchObject({ projectId: { in: ["p1"] } });
     // and the warehouse values count only items of those projects, or of none (CX21-441)
     expect(prisma.warehouse.findMany.mock.calls[0][0].include.balances.where).toEqual({ item: { OR: [{ projectId: null }, { projectId: { in: ["p1"] } }] } });
+    // and only warehouses of those projects, or the company's (CX21-462); the items' balances likewise (CX21-471)
+    expect(prisma.warehouse.findMany.mock.calls[0][0].where).toMatchObject({ OR: [{ projectId: null }, { projectId: { in: ["p1"] } }] });
+    expect(prisma.inventoryItem.findMany.mock.calls[0][0].include.balances.where).toEqual({ warehouse: { OR: [{ projectId: null }, { projectId: { in: ["p1"] } }] } });
   });
 });

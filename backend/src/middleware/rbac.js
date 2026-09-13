@@ -97,8 +97,11 @@ const requireRoles = (...allowedRoles) => {
     // An API key never exceeds its scopes, whatever its owner may do — the
     // permission guard has always said so; this role guard did not, and a
     // read-only key could edit or archive a project (Phase 21D, CX21-415).
-    const writeAction = ACTION_BY_METHOD[req.method];
-    if (req.apiClient && writeAction && !require('../services/api-client.service').scopeAllows(req.apiClient, moduleForRequest(req), writeAction)) {
+    // — and a read through it needs a read scope on the route's module just
+    // the same: the billing history answered a key with only an inventory scope
+    // (Phase 21D, CX21-476).
+    const action = ACTION_BY_METHOD[req.method] || 'read';
+    if (req.apiClient && !require('../services/api-client.service').scopeAllows(req.apiClient, moduleForRequest(req), action)) {
       return next(new HttpError(403, 'API_KEY_SCOPE', 'This API key does not allow that action'));
     }
 

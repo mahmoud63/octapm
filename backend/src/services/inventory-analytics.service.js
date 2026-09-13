@@ -247,7 +247,9 @@ const getAnalytics = async ({ orgId, projectId = null, projectIds = null }) => {
         status: "active",
         ...(projectId ? { OR: [{ projectId: null }, { projectId }] } : projectIds?.length ? { OR: [{ projectId: null }, { projectId: { in: projectIds } }] } : {}),
       },
-      include: { balances: true },
+      // the balances too: a company item's stock in another project's
+      // warehouse is not this key's to count (CX21-471)
+      include: { balances: projectIds?.length ? { where: { warehouse: { OR: [{ projectId: null }, { projectId: { in: projectIds } }] } } } : true },
     }),
     prisma.warehouse.findMany({
       where: { orgId, status: "active", ...(projectIds?.length ? { OR: [{ projectId: null }, { projectId: { in: projectIds } }] } : {}) },

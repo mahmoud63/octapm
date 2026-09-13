@@ -33,3 +33,15 @@ describe('noApiKey on account-security routes', () => {
     expect(person).toBeNull();
   });
 });
+
+describe('requireRoles reads through an API key', () => {
+  const owner = { id: 'u1', role: 'pm', orgId: 'org-1' };
+  const read = (req) => new Promise((resolve) => requireRoles('pm', 'finance')(req, {}, (err) => resolve(err ?? null)));
+
+  it('CX21-476: a read through a role guard needs a read scope on the module the route is mounted on', async () => {
+    expect(await read({ user: owner, method: 'GET', baseUrl: '/api/v1/billing', apiClient: { scopes: ['inventory:read'] } })).toMatchObject({ status: 403, code: 'API_KEY_SCOPE' });
+    expect(await read({ user: owner, method: 'GET', baseUrl: '/api/v1/billing', apiClient: { scopes: ['billing:read'] } })).toBeNull();
+    expect(await read({ user: owner, method: 'GET', baseUrl: '/api/v1/billing', apiClient: { scopes: ['*:read'] } })).toBeNull();
+    expect(await read({ user: owner, method: 'GET', baseUrl: '/api/v1/billing' })).toBeNull();
+  });
+});

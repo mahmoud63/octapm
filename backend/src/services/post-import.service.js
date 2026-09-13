@@ -32,7 +32,14 @@ async function seedCostRecords(projectId) {
 
   if (!activities.length) return 0;
 
-  const existing = await prisma.costRecord.findMany({
+  return prisma.$transaction(async (tx) => {
+  // Every creator of a projection row holds the (project, activity) pair
+  // first and looks again under it (Phase 21D, CX21-474); the unique index
+  // on the pair is the last line.
+  for (const activity of activities) {
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`cost-record:${projectId}:${activity.id}`}))`;
+  }
+  const existing = await tx.costRecord.findMany({
     where: { projectId },
     select: { activityId: true },
   });
@@ -42,7 +49,7 @@ async function seedCostRecords(projectId) {
 
   if (!toCreate.length) return 0;
 
-  await prisma.costRecord.createMany({
+  await tx.costRecord.createMany({
     data: toCreate.map((activity) => ({
       projectId,
       activityId: activity.id,
@@ -62,6 +69,7 @@ async function seedCostRecords(projectId) {
   });
 
   return toCreate.length;
+  });
 }
 
 function formatOrderBy(earlyStart) {

@@ -39,6 +39,9 @@ router.get(
 
 router.get(
   '/transactions',
+  // Invoices are the company's money: the same door as subscribing, which
+  // also checks an API key's scopes (Phase 21D, CX21-476).
+  requireRoles('pm', 'finance'),
   asyncHandler(async (req, res) => {
     const data = await subscriptionService.listInvoices(req.user.orgId);
     return sendSuccess(res, data);

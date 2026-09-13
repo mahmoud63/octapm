@@ -1318,7 +1318,12 @@ const createTransfer = async ({ orgId, user, payload }) => {
     prisma.warehouse.findFirst({ where: { id: payload.toWarehouseId, orgId } }),
   ]);
   if (!from || !to) throw new HttpError(404, "WAREHOUSE_NOT_FOUND", "Warehouse not found");
-  await assertStockAllowed(prisma, { orgId, allowedProjectIds: payload.allowedProjectIds ?? null, warehouses: [from, to], itemIds: lines.map((line) => line.itemId) });
+  // Every item on the transfer must be this organisation's: an id of another
+  // tenant's item used to be linked and its details echoed back (CX21-473).
+  const itemIds = [...new Set(lines.map((line) => requireText(line.itemId, "Item")))];
+  const known = await prisma.inventoryItem.findMany({ where: { id: { in: itemIds }, orgId }, select: { id: true } });
+  if (known.length !== itemIds.length) throw new HttpError(404, "ITEM_NOT_FOUND", "Item not found");
+  await assertStockAllowed(prisma, { orgId, allowedProjectIds: payload.allowedProjectIds ?? null, warehouses: [from, to], itemIds });
 
   const ref = trimOrNull(payload.ref) || (await nextRef("stockTransfer", orgId, "TRF"));
   const row = await prisma.stockTransfer.create({
@@ -1495,9 +1500,11 @@ const receiveTransfer = async ({ orgId, user, transferId, payload = {}, allowedP
   });
 };
 
-const listTransfers = async ({ orgId, status = null }) => {
+const listTransfers = async ({ orgId, status = null, projectIds = null }) => {
+  // A key sees transfers between warehouses of its projects or the company's (CX21-472).
+  const scope = projectIds?.length ? { OR: [{ projectId: null }, { projectId: { in: projectIds } }] } : null;
   const rows = await prisma.stockTransfer.findMany({
-    where: { orgId, ...(status ? { status } : {}) },
+    where: { orgId, ...(status ? { status } : {}), ...(scope ? { fromWarehouse: scope, toWarehouse: scope } : {}) },
     include: transferInclude,
     orderBy: [{ createdAt: "desc" }],
     take: 200,

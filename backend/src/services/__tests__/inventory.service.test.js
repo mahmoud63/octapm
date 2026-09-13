@@ -1028,3 +1028,31 @@ describe("Phase 21D — integrity (release challenge, sixth pass)", () => {
     expect(store.ledger).toHaveLength(charged + 1);
   });
 });
+
+describe("Phase 21D — integrity (release challenge, seventh pass)", () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    store.items.clear(); store.warehouses.clear(); store.locations.clear();
+    store.balances.length = 0; store.transactions.length = 0; store.ledger.length = 0; store.costRecords.length = 0;
+    nextId = 1;
+  });
+
+  it("CX21-472: a key's transfer list holds only transfers between warehouses of its projects or the company's", async () => {
+    mockPrisma.stockTransfer = { ...(mockPrisma.stockTransfer || {}), findMany: jest.fn(async () => []) };
+    await service.listTransfers({ orgId: ORG, projectIds: ["project-1"] });
+    const where = mockPrisma.stockTransfer.findMany.mock.calls.at(-1)[0].where;
+    const scope = { OR: [{ projectId: null }, { projectId: { in: ["project-1"] } }] };
+    expect(where).toMatchObject({ orgId: ORG, fromWarehouse: scope, toWarehouse: scope });
+  });
+
+  it("CX21-473: a transfer names only items of this organisation — another tenant's id is not found, whoever asks", async () => {
+    const from = seedWarehouse();
+    const to = seedWarehouse({ code: "SITE-2", name: "Second store" });
+    mockPrisma.stockTransfer = { ...(mockPrisma.stockTransfer || {}), create: jest.fn(async ({ data }) => ({ id: "trf-1", ...data, lines: [] })) };
+    mockPrisma.inventoryItem.findMany = jest.fn(async ({ where }) => [...store.items.values()].filter((row) => where.id.in.includes(row.id) && row.orgId === where.orgId));
+    await expect(
+      service.createTransfer({ orgId: ORG, user: USER, payload: { ref: "TRF-X", fromWarehouseId: from.id, toWarehouseId: to.id, lines: [{ itemId: "item-of-another-tenant", quantity: 1 }] } }),
+    ).rejects.toMatchObject({ code: "ITEM_NOT_FOUND", status: 404 });
+    expect(mockPrisma.stockTransfer.create).not.toHaveBeenCalled();
+  });
+});

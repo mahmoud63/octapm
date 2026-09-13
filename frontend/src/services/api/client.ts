@@ -96,11 +96,25 @@ apiClient.interceptors.response.use(
     isRefreshing = true
 
     try {
+      const askedFor = useAuthStore.getState().auth.user?.id ?? null
       const refreshResponse = await authlessClient.post<
         ApiSuccess<AuthSession>
       >('/auth/refresh')
 
       const session = refreshResponse.data.data
+      // The identity may have changed while the refresh was in flight — a
+      // sign-out, or another person signing in on this tab. A late answer
+      // for the previous person must not be installed over the current one
+      // (Phase 21D, CX21-477).
+      const current = useAuthStore.getState().auth.user?.id ?? null
+      // A tab with nobody signed in yet (the refresh cookie signing someone
+      // in on load) is not a change of identity.
+      const freshTab = askedFor === null && current === null
+      if (!freshTab && (current !== askedFor || session.user.id !== askedFor)) {
+        const stale = new Error('The session changed while it was being refreshed')
+        flushPendingRequests(stale)
+        return Promise.reject(stale)
+      }
       auth.setSession(session.user, session.tokens.accessToken)
 
       flushPendingRequests(null, session.tokens.accessToken)

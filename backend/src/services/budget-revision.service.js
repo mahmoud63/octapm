@@ -20,8 +20,8 @@ const computeDelta = (changeType, amount) => {
   return changeType === 'deduction' ? subtractMoney(0, value) : value;
 };
 
-const recomputeCumulative = async ({ projectId, baseBudget }) => {
-  const rows = await prisma.budgetRevision.findMany({
+const recomputeCumulative = async ({ projectId, baseBudget, tx = prisma }) => {
+  const rows = await tx.budgetRevision.findMany({
     where: { projectId, status: 'approved' },
     orderBy: [{ effectiveDate: 'asc' }, { createdAt: 'asc' }],
   });
@@ -30,7 +30,7 @@ const recomputeCumulative = async ({ projectId, baseBudget }) => {
 
   for (const row of rows) {
     running = addMoney(running, computeDelta(row.changeType, row.amount));
-    await prisma.budgetRevision.update({
+    await tx.budgetRevision.update({
       where: { id: row.id },
       data: { cumulativeBudget: running },
     });
@@ -145,17 +145,24 @@ const updateBudgetRevision = async ({
 }) => {
   const project = await ensureProject({ orgId, projectId });
 
-  const existing = await prisma.budgetRevision.findFirst({
+  const found = await prisma.budgetRevision.findFirst({
     where: { id: revisionId, projectId },
   });
 
-  if (!existing) {
+  if (!found) {
     throw new HttpError(
       404,
       'BUDGET_REVISION_NOT_FOUND',
       'Budget revision not found',
     );
   }
+  // The decisions below are taken on the status as held for this
+  // transaction, not on the read above: an edit that started on a draft
+  // used to land after its approval, rewriting the money and the status
+  // (Phase 21D, CX21-470).
+  return prisma.$transaction(async (tx) => {
+  const [held] = await tx.$queryRaw`SELECT status FROM "BudgetRevision" WHERE id = ${revisionId} FOR UPDATE`;
+  const existing = held ? { ...found, status: held.status } : found;
   if (payload.status && payload.status !== existing.status && !viaWorkflow) {
     await require('./workflow-engine.service').assertNotLocked({ tool: 'budget_revision', projectId, recordId: revisionId });
   }
@@ -172,7 +179,7 @@ const updateBudgetRevision = async ({
     throw new HttpError(409, 'BUDGET_REVISION_APPROVED', 'An approved revision is changed only by someone who can approve cost');
   }
 
-  const updated = await prisma.budgetRevision.update({
+  const updated = await tx.budgetRevision.update({
     where: { id: revisionId },
     data: {
       title: payload.title ?? existing.title,
@@ -191,7 +198,9 @@ const updateBudgetRevision = async ({
             ? new Date(payload.effectiveDate)
             : null
           : existing.effectiveDate,
-      status: payload.status ?? existing.status,
+      // the status is written only when the caller sets it; the copy read
+      // before the lock is never written back (CX21-470)
+      ...(payload.status ? { status: payload.status } : {}),
       approvedBy:
         payload.status === 'approved' && existing.status !== 'approved'
           ? userId || null
@@ -214,6 +223,7 @@ const updateBudgetRevision = async ({
   await recomputeCumulative({
     projectId,
     baseBudget: project.contractValue,
+    tx,
   });
   if (updated.status === 'submitted' && existing.status !== 'submitted' && !viaWorkflow) {
     require('./workflow-engine.service')
@@ -222,6 +232,7 @@ const updateBudgetRevision = async ({
   }
 
   return updated;
+  });
 };
 
 const deleteBudgetRevision = async ({ orgId, projectId, revisionId, canApprove = false }) => {
@@ -239,17 +250,23 @@ const deleteBudgetRevision = async ({ orgId, projectId, revisionId, canApprove =
     );
   }
 
-  // Deleting an approved revision undoes an approval (Phase 21D, CX21-460).
-  if (existing.status === 'approved' && !canApprove) {
-    throw new HttpError(403, 'BUDGET_REVISION_APPROVAL_REQUIRED', 'Only someone who can approve cost may delete an approved revision');
-  }
-  await prisma.budgetRevision.delete({ where: { id: revisionId } });
-  await recomputeCumulative({
-    projectId,
-    baseBudget: project.contractValue,
+  return prisma.$transaction(async (tx) => {
+    // Decided on the status as held (CX21-470): a delete that started on a
+    // draft must not remove the revision approved meanwhile.
+    const [held] = await tx.$queryRaw`SELECT status FROM "BudgetRevision" WHERE id = ${revisionId} FOR UPDATE`;
+    const status = held ? held.status : existing.status;
+    // Deleting an approved revision undoes an approval (Phase 21D, CX21-460).
+    if (status === 'approved' && !canApprove) {
+      throw new HttpError(403, 'BUDGET_REVISION_APPROVAL_REQUIRED', 'Only someone who can approve cost may delete an approved revision');
+    }
+    await tx.budgetRevision.delete({ where: { id: revisionId } });
+    await recomputeCumulative({
+      projectId,
+      baseBudget: project.contractValue,
+      tx,
+    });
+    return { deleted: true };
   });
-
-  return { deleted: true };
 };
 
 module.exports = {
