@@ -8,6 +8,8 @@ jest.mock("../../middleware/auth", () => ({
       orgId: "org-1",
       role: req.get("x-role") || "site_engineer",
     };
+    // An API key acting as that user (Phase 21D, CX21-444).
+    if (req.get("x-api-scopes")) req.apiClient = { id: "key-1", scopes: req.get("x-api-scopes").split(","), projectIds: [] };
     next();
   },
 }));
@@ -136,5 +138,19 @@ describe("project jobs routes", () => {
       .set("x-role", "pm")
       .expect(200);
     expect(mockJobService.cancelJob).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("Phase 21D — integrity (release challenge, fourth pass)", () => {
+  it("CX21-444: a read-only API key cannot retry or cancel a job its owner could", async () => {
+    const app = buildApp();
+    mockJobService.getJob.mockResolvedValue({ id: JOB_ID, type: "schedule.generate" });
+    mockJobService.retryJob.mockResolvedValue({ id: JOB_ID, status: "queued" });
+    mockJobService.cancelJob.mockResolvedValue({ id: JOB_ID, status: "cancelled" });
+    const retry = await request(app).post(`/projects/project-1/jobs/${JOB_ID}/retry`).set("x-role", "pm").set("x-api-scopes", "*:read");
+    expect(retry.status).toBe(403);
+    const cancel = await request(app).post(`/projects/project-1/jobs/${JOB_ID}/cancel`).set("x-role", "pm").set("x-api-scopes", "*:read");
+    expect(cancel.status).toBe(403);
+    await request(app).post(`/projects/project-1/jobs/${JOB_ID}/retry`).set("x-role", "pm").set("x-api-scopes", "*:write").expect(202);
   });
 });

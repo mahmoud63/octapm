@@ -248,8 +248,14 @@ async function subscribe(orgId, planId, billingCycle, paymentMethodId = null) {
     const stripe = getStripe();
     // A Stripe subscription that is still running — active, past due, or
     // cancelled at period end and not yet ended — is changed in place.
+    // A lookup that fails is a failure, not "no subscription": swallowing it
+    // let a transient Stripe error create a second billable subscription
+    // (Phase 21D, CX21-440). Only "no such subscription" means none.
     const running = held.stripeSubscriptionId
-      ? await stripe.subscriptions.retrieve(held.stripeSubscriptionId).catch(() => null)
+      ? await stripe.subscriptions.retrieve(held.stripeSubscriptionId).catch((error) => {
+          if (error?.code === 'resource_missing' || error?.statusCode === 404) return null;
+          throw error;
+        })
       : null;
     const reusable = Boolean(running && !['canceled', 'incomplete_expired'].includes(running.status));
     let stripeSub;

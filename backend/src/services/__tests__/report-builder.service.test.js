@@ -198,3 +198,20 @@ describe("Phase 21D — integrity (release challenge, third pass)", () => {
     expect(own.projects).toEqual({ inScope: 1, queried: 1, denied: 0 });
   });
 });
+
+describe("Phase 21D — integrity (release challenge, fourth pass)", () => {
+  beforeEach(() => {
+    mockPrisma.project.findMany.mockResolvedValue(projects);
+    mockAccess.assertProjectAccess.mockImplementation(async ({ projectId, role }) => staffAccess(projectId, role));
+    mockPrisma.reportDefinition.findFirst.mockResolvedValue({ id: "r1", orgId: "org-1", name: "Cost by line", source: "cost_record", visibility: "org", createdBy: "pm-1", projectId: null, columnsJson: [], filtersJson: [], project: null, _count: { schedules: 0 } });
+    mockPrisma.reportRun.findFirst.mockResolvedValue({ id: "run-1", orgId: "org-1", reportId: "r1", requestedBy: "pm-1", fileBase: "cost-by-line", pdfBytes: Buffer.from("%PDF-stub"), xlsxBytes: null, report: { id: "r1", createdBy: "pm-1" } });
+  });
+
+  it("CX21-442: only the run's requester (or a company admin) downloads its file — a narrower reader gets a fresh query, not the wider file", async () => {
+    await expect(service.getRunFile({ orgId: "org-1", user: warehouse, runId: "run-1", format: "pdf" })).rejects.toMatchObject({ code: "REPORT_RUN_NOT_YOURS", status: 403 });
+    const own = await service.getRunFile({ orgId: "org-1", user: pm, runId: "run-1", format: "pdf" });
+    expect(own.buffer.toString()).toBe("%PDF-stub");
+    const admin = await service.getRunFile({ orgId: "org-1", user: { ...warehouse, isCompanyAdmin: true }, runId: "run-1", format: "pdf" });
+    expect(admin.fileName).toBe("cost-by-line.pdf");
+  });
+});

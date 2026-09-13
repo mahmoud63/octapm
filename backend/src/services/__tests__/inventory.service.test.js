@@ -901,3 +901,25 @@ describe("Phase 21D — integrity (release challenge, second pass)", () => {
     expect(movements).toHaveLength(1);
   });
 });
+
+describe("Phase 21D — integrity (release challenge, fourth pass)", () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    store.items.clear(); store.warehouses.clear(); store.locations.clear();
+    store.balances.length = 0; store.transactions.length = 0; store.ledger.length = 0; store.costRecords.length = 0;
+    nextId = 1;
+    // The store fakes have no list readers for these tables; the reads under test are asserted by their arguments.
+    mockPrisma.inventoryItem.findMany = jest.fn(async () => []);
+    mockPrisma.warehouse.findMany = jest.fn(async () => []);
+    mockPrisma.stockTransaction.findMany = jest.fn(async () => []);
+  });
+
+  it("CX21-441: a key's project list narrows the item list and the summary, warehouse values included", async () => {
+    await service.listItems({ orgId: ORG, projectIds: ["project-1"] });
+    expect(mockPrisma.inventoryItem.findMany.mock.calls.at(-1)[0].where).toMatchObject({ OR: [{ projectId: null }, { projectId: { in: ["project-1"] } }] });
+    await service.getSummary({ orgId: ORG, projectIds: ["project-1"] });
+    expect(mockPrisma.inventoryItem.findMany.mock.calls.at(-1)[0].where).toMatchObject({ OR: [{ projectId: null }, { projectId: { in: ["project-1"] } }] });
+    expect(mockPrisma.warehouse.findMany.mock.calls.at(-1)[0].include.balances.where).toEqual({ item: { OR: [{ projectId: null }, { projectId: { in: ["project-1"] } }] } });
+    expect(mockPrisma.stockTransaction.findMany.mock.calls.at(-1)[0].where).toMatchObject({ projectId: { in: ["project-1"] } });
+  });
+});

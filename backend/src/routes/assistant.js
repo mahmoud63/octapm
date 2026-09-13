@@ -4,7 +4,7 @@ const { asyncHandler } = require("../utils/async-handler");
 const { sendSuccess } = require("../utils/api-response");
 const { HttpError } = require("../utils/http-error");
 const { authenticate } = require("../middleware/auth");
-const { requirePermission, hasPermission } = require("../middleware/rbac");
+const { requirePermission, hasPermission, noApiKey } = require("../middleware/rbac");
 const { validate } = require("../middleware/validate");
 const service = require("../services/assistant.service");
 
@@ -16,6 +16,10 @@ const service = require("../services/assistant.service");
 const build = ({ withActions }) => {
   const router = express.Router({ mergeParams: true });
   router.use(authenticate);
+  // The assistant retrieves, answers and keeps conversations as the person
+  // it talks to; an API key has the report assistant, scoped to its own
+  // projects and modules, and nothing here (Phase 21D, CX21-443).
+  router.use(noApiKey);
 
   const user = (req) => req.user;
   const projectIdOf = (req) =>

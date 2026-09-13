@@ -123,6 +123,7 @@ router.get(
 router.post(
   "/",
   requirePermission("report", "create"),
+  noApiKey,
   [...definitionValidators(false), validate],
   asyncHandler(async (req, res) => sendSuccess(res, await service.createDefinition({ orgId: orgId(req), user: user(req), payload: req.body }), 201)),
 );
@@ -139,6 +140,7 @@ router.get(
 router.put(
   "/:reportId",
   requirePermission("report", "update"),
+  noApiKey,
   [param("reportId").isUUID(), ...definitionValidators(true), validate],
   asyncHandler(async (req, res) => sendSuccess(res, await service.updateDefinition({ orgId: orgId(req), user: user(req), reportId: req.params.reportId, payload: req.body }))),
 );
@@ -146,6 +148,7 @@ router.put(
 router.delete(
   "/:reportId",
   requirePermission("report", "delete"),
+  noApiKey,
   [param("reportId").isUUID(), validate],
   asyncHandler(async (req, res) => sendSuccess(res, await service.deleteDefinition({ orgId: orgId(req), user: user(req), reportId: req.params.reportId }))),
 );
@@ -204,6 +207,7 @@ router.post(
 router.patch(
   "/:reportId/schedules/:scheduleId",
   requirePermission("report", "update", { transition: "report.schedule" }),
+  noApiKey,
   [param("reportId").isUUID(), param("scheduleId").isUUID(), ...scheduleValidators, validate],
   asyncHandler(async (req, res) => sendSuccess(res, await service.updateSchedule({ orgId: orgId(req), user: user(req), reportId: req.params.reportId, scheduleId: req.params.scheduleId, payload: req.body }))),
 );
@@ -211,6 +215,7 @@ router.patch(
 router.delete(
   "/:reportId/schedules/:scheduleId",
   requirePermission("report", "update", { transition: "report.schedule" }),
+  noApiKey,
   [param("reportId").isUUID(), param("scheduleId").isUUID(), validate],
   asyncHandler(async (req, res) => sendSuccess(res, await service.deleteSchedule({ orgId: orgId(req), user: user(req), reportId: req.params.reportId, scheduleId: req.params.scheduleId }))),
 );

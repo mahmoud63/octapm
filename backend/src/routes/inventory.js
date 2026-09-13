@@ -58,14 +58,15 @@ router.get(
   asyncHandler(async (req, res) =>
     sendSuccess(
       res,
-      await service.listItems({
+      await scopedCall(req, req.query.projectId ?? null, () => service.listItems({
         orgId: req.user.orgId,
         projectId: req.query.projectId ?? null,
+        projectIds: keyProjects(req),
         search: req.query.search ?? null,
         category: req.query.category ?? null,
         status: req.query.status ?? "active",
         lowStock: Boolean(req.query.lowStock),
-      })
+      }))
     )
   )
 );
@@ -294,7 +295,9 @@ router.post(
   asyncHandler(async (req, res) =>
     sendSuccess(
       res,
-      await service.receiveStock({ orgId: req.user.orgId, user: req.user, payload: req.body }),
+      // A direct receipt names its project (or none); the key's list travels
+      // with it as it does for an issue (Phase 21D, CX21-441).
+      await scopedCall(req, req.body.projectId, () => service.receiveStock({ orgId: req.user.orgId, user: req.user, payload: { ...req.body, allowedProjectIds: keyProjects(req) } })),
       201
     )
   )
@@ -579,10 +582,11 @@ router.get(
   asyncHandler(async (req, res) =>
     sendSuccess(
       res,
-      await service.getSummary({
+      await scopedCall(req, req.query.projectId ?? null, () => service.getSummary({
         orgId: req.user.orgId,
         projectId: req.query.projectId ?? null,
-      })
+        projectIds: keyProjects(req),
+      }))
     )
   )
 );

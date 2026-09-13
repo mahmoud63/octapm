@@ -227,6 +227,9 @@ const getAnalytics = async ({ orgId, projectId = null, projectIds = null }) => {
   // One project when asked for one; the caller's allowed projects (an API
   // key's list) when not (Phase 21D, CX21-430).
   const projectScope = projectId ? { projectId } : projectIds?.length ? { projectId: { in: projectIds } } : {};
+  // Project items outside the caller's projects stay out of the warehouse
+  // values too (CX21-441).
+  const itemScope = projectId ? { OR: [{ projectId: null }, { projectId }] } : projectIds?.length ? { OR: [{ projectId: null }, { projectId: { in: projectIds } }] } : null;
 
   const [
     itemRows,
@@ -248,7 +251,7 @@ const getAnalytics = async ({ orgId, projectId = null, projectIds = null }) => {
     }),
     prisma.warehouse.findMany({
       where: { orgId, status: "active" },
-      include: { balances: { include: { item: { select: { averageCost: true } } } } },
+      include: { balances: { ...(itemScope ? { where: { item: itemScope } } : {}), include: { item: { select: { averageCost: true } } } } },
     }),
     prisma.stockTransaction.groupBy({
       by: ["itemId"],

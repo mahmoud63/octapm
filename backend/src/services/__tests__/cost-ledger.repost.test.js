@@ -11,6 +11,7 @@ const { createCostLedgerMock } = require("./helpers/cost-ledger-mock");
 const ledger = createCostLedgerMock();
 const mockPrisma = {
   ...ledger.tables,
+  $queryRaw: jest.fn(async () => []), // row locks (Phase 21D): the held row, when a test says so
   // Only p1 is org-1's (Phase 21D, CX21-420).
   project: { findFirst: jest.fn(async ({ where }) => (where.id === "p1" && where.orgId === "org-1" ? { id: "p1" } : null)) },
 };
@@ -76,5 +77,24 @@ describe("cost ledger — the project must be the organisation's", () => {
     expect(await mockPrisma.costLedgerEntry.findMany({ where: {} })).toHaveLength(0);
     const own = await service.post(posting());
     expect(own.posted).toBe(true);
+  });
+});
+
+describe("cost ledger — the through-date is decided under the lock", () => {
+  beforeEach(() => { ledger.reset(); mockPrisma.$queryRaw.mockImplementation(async () => []); });
+
+  it("CX21-445: a posting that read an old date does not drag a later, committed date back", async () => {
+    ledger.seedCostRecord({ id: "cr-1", projectId: "p1", activityId: "act-1", actual: 0, actualThroughDate: new Date("2027-01-01T00:00:00.000Z") });
+    // Under the lock the row already carries a later date (another posting committed in between).
+    mockPrisma.$queryRaw.mockImplementation(async (strings) => (strings.join("?").includes('FROM "CostRecord"') ? [{ actualThroughDate: new Date("2027-03-20T00:00:00.000Z") }] : []));
+    await service.post(posting({ activityId: "act-1", incurredOn: "2027-03-10" }));
+    const [record] = await mockPrisma.costRecord.findMany({ where: { activityId: "act-1" } });
+    expect(new Date(record.actualThroughDate).toISOString()).toBe("2027-01-01T00:00:00.000Z"); // untouched: the held date is later
+    expect(record.actual).toBe(400);
+    // and when the held date is earlier, the posting advances it
+    mockPrisma.$queryRaw.mockImplementation(async (strings) => (strings.join("?").includes('FROM "CostRecord"') ? [{ actualThroughDate: new Date("2027-02-01T00:00:00.000Z") }] : []));
+    await service.post(posting({ sourceId: "ts-2", sourceLineId: "entry-2", activityId: "act-1", incurredOn: "2027-03-10" }));
+    const [advanced] = await mockPrisma.costRecord.findMany({ where: { activityId: "act-1" } });
+    expect(new Date(advanced.actualThroughDate).toISOString()).toBe("2027-03-10T00:00:00.000Z");
   });
 });

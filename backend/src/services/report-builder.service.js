@@ -1027,6 +1027,13 @@ const getRunFile = async ({ orgId, user, runId, format }) => {
   const run = await prisma.reportRun.findFirst({ where: { id: runId, orgId }, include: { report: true } });
   if (!run) throw new HttpError(404, "REPORT_RUN_NOT_FOUND", "Run not found");
   await getDefinitionRow({ orgId, user, reportId: run.reportId }); // visibility check
+  // The file holds what its requester could see, not what this reader can:
+  // it is the requester's (a scheduled run: the report's owner's) to
+  // download, and a company admin's (Phase 21D, CX21-442).
+  const owner = run.requestedBy || run.report?.createdBy || null;
+  if (!user.isCompanyAdmin && owner !== user.id) {
+    throw new HttpError(403, "REPORT_RUN_NOT_YOURS", "A stored report file can be downloaded only by whoever requested it");
+  }
   const bytes = format === "xlsx" ? run.xlsxBytes : run.pdfBytes;
   if (!bytes || !bytes.length) throw new HttpError(404, "REPORT_RUN_FILE_MISSING", `This run has no ${format.toUpperCase()} file`);
   return { buffer: Buffer.from(bytes), fileName: `${run.fileBase || "report"}.${format}`, mimeType: format === "xlsx" ? "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" : "application/pdf" };

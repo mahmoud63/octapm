@@ -63,3 +63,22 @@ describe("Phase 21D — integrity (release challenge, third pass)", () => {
     expect(mockStripe.subscriptions.create).toHaveBeenCalledWith(expect.objectContaining({ customer: "cus_1" }), expect.objectContaining({ idempotencyKey: expect.stringContaining("subscribe:sub-1:individual:monthly") }));
   });
 });
+
+describe("Phase 21D — integrity (release challenge, fourth pass)", () => {
+  beforeEach(() => { jest.clearAllMocks(); calls.length = 0; row = { ...baseRow }; });
+
+  it("CX21-440: a lookup that fails is a failure — nothing is created and nothing is written", async () => {
+    mockStripe.subscriptions.retrieve.mockRejectedValueOnce(Object.assign(new Error("connection reset"), { code: "api_connection_error" }));
+    await expect(service.subscribe("org-1", "business", "monthly")).rejects.toThrow("connection reset");
+    expect(mockStripe.subscriptions.create).not.toHaveBeenCalled();
+    expect(mockStripe.subscriptions.update).not.toHaveBeenCalled();
+    expect(mockPrisma.subscription.update).not.toHaveBeenCalled();
+  });
+
+  it("only \"no such subscription\" means there is none to change", async () => {
+    mockStripe.subscriptions.retrieve.mockRejectedValueOnce(Object.assign(new Error("No such subscription"), { code: "resource_missing", statusCode: 404 }));
+    await service.subscribe("org-1", "business", "monthly");
+    expect(mockStripe.subscriptions.create).toHaveBeenCalledTimes(1);
+    expect(mockStripe.subscriptions.update).not.toHaveBeenCalled();
+  });
+});

@@ -130,7 +130,13 @@ const applyToProjections = async ({ tx, entry }) => {
     });
     const incurredOn = new Date(entry.incurredOn);
     if (record) {
-      const advance = !record.actualThroughDate || record.actualThroughDate < incurredOn;
+      // Decided from the row as held for this transaction, not from the read
+      // above: two postings reading the same date at once could each
+      // "advance" it and the later-committing one drag it back (Phase 21D,
+      // CX21-445).
+      const [held] = tx.$queryRaw ? await tx.$queryRaw`SELECT "actualThroughDate" FROM "CostRecord" WHERE id = ${record.id} FOR NO KEY UPDATE` : [];
+      const current = held ? held.actualThroughDate : record.actualThroughDate;
+      const advance = !current || new Date(current) < incurredOn;
       await tx.costRecord.update({
         where: { id: record.id },
         data: {

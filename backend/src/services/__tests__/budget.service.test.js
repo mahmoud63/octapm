@@ -1,5 +1,6 @@
 const mockPrisma = {
   $transaction: jest.fn((fn) => fn(mockPrisma)),
+  $queryRaw: jest.fn(async () => []), // row locks (Phase 21D): nothing to lock in a fake
   project: { findFirst: jest.fn(async () => ({ id: "project-1", name: "Tower", contractValue: 1000000 })) },
   costCode: { findMany: jest.fn(async () => []), findFirst: jest.fn(async () => null), create: jest.fn(async ({ data }) => ({ id: "code-co", ...data })) },
   projectCostCode: { findMany: jest.fn(async () => []), create: jest.fn(async ({ data }) => ({ id: "pcc-1", ...data })), update: jest.fn(async () => ({})), updateMany: jest.fn(async () => ({ count: 0 })) },
@@ -213,5 +214,20 @@ describe("Phase 21D — integrity (Codex round 2)", () => {
     const written = mockPrisma.budgetLine.update.mock.calls.at(-1)[0].data;
     expect(Object.prototype.hasOwnProperty.call(written, "actual")).toBe(false);
     expect(written).toMatchObject({ status: "active", originalBudget: 1000 });
+  });
+});
+
+describe("Phase 21D — integrity (release challenge, fourth pass)", () => {
+  it("CX21-446: a transfer holds both lines, in id order, before it reads what is available", async () => {
+    const order = [];
+    mockPrisma.$queryRaw.mockImplementation(async (strings, ...values) => { order.push(`lock:${strings.join("?")}|${JSON.stringify(values)}`); return []; });
+    mockPrisma.budgetLine.findFirst.mockImplementation(async ({ where }) => { order.push(`read:${where.id}`); return where.id === "line-1" ? line() : line({ id: "line-2", costType: "labour", originalBudget: 10000 }); });
+    await service.transferBudget({ orgId: "org-1", projectId: "project-1", payload: { fromLineId: "line-2", toLineId: "line-1", amount: 1000, note: "back" }, actor: { id: "user-1" } });
+    const lockAt = order.findIndex((entry) => entry.startsWith("lock:"));
+    expect(lockAt).toBeGreaterThanOrEqual(0);
+    expect(order[lockAt]).toContain("FOR NO KEY UPDATE");
+    expect(order[lockAt]).toContain('["line-1","line-2"]');
+    expect(order.findIndex((entry) => entry.startsWith("read:"))).toBeGreaterThan(lockAt);
+    mockPrisma.$queryRaw.mockImplementation(async () => []);
   });
 });

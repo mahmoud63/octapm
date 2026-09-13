@@ -153,13 +153,14 @@ const withStock = (item) => {
   };
 };
 
-const listItems = async ({ orgId, projectId = null, search = null, category = null, status = "active", lowStock = false }) => {
+const listItems = async ({ orgId, projectId = null, projectIds = null, search = null, category = null, status = "active", lowStock = false }) => {
   const where = {
     orgId,
     ...(status ? { status } : {}),
     ...(category ? { category } : {}),
-    // A company item is usable on every project; a project item only on its own.
-    ...(projectId ? { OR: [{ projectId: null }, { projectId }] } : {}),
+    // A company item is usable on every project; a project item only on its
+    // own — and, for a key limited to some projects, only those (CX21-441).
+    ...(projectId ? { OR: [{ projectId: null }, { projectId }] } : projectIds?.length ? { OR: [{ projectId: null }, { projectId: { in: projectIds } }] } : {}),
     ...(search
       ? {
           OR: [
@@ -1444,22 +1445,25 @@ const listTransfers = async ({ orgId, status = null }) => {
  * Value is on-hand at weighted average — the same basis the ledger posts at,
  * so the dashboard and a stock report cannot disagree.
  */
-const getSummary = async ({ orgId, projectId = null }) => {
+const getSummary = async ({ orgId, projectId = null, projectIds = null }) => {
+  // Project items outside the caller's projects stay out of every figure,
+  // the warehouse values included (Phase 21D, CX21-441).
+  const itemScope = projectId ? { OR: [{ projectId: null }, { projectId }] } : projectIds?.length ? { OR: [{ projectId: null }, { projectId: { in: projectIds } }] } : null;
   const [items, warehouses, recent] = await Promise.all([
     prisma.inventoryItem.findMany({
       where: {
         orgId,
         status: "active",
-        ...(projectId ? { OR: [{ projectId: null }, { projectId }] } : {}),
+        ...(itemScope || {}),
       },
       include: { balances: true },
     }),
     prisma.warehouse.findMany({
       where: { orgId, status: "active" },
-      include: { balances: { include: { item: { select: { averageCost: true } } } } },
+      include: { balances: { ...(itemScope ? { where: { item: itemScope } } : {}), include: { item: { select: { averageCost: true } } } } },
     }),
     prisma.stockTransaction.findMany({
-      where: { orgId, ...(projectId ? { projectId } : {}) },
+      where: { orgId, ...(projectId ? { projectId } : projectIds?.length ? { projectId: { in: projectIds } } : {}) },
       orderBy: [{ occurredAt: "desc" }],
       take: 250,
       select: { type: true, value: true, quantity: true, itemId: true, occurredAt: true },

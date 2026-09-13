@@ -4,9 +4,8 @@ const { asyncHandler } = require("../utils/async-handler");
 const { sendSuccess } = require("../utils/api-response");
 const { HttpError } = require("../utils/http-error");
 const { authenticate } = require("../middleware/auth");
-const { getEffectiveRole } = require("../middleware/rbac");
+const { hasPermission } = require("../middleware/rbac");
 const { validate } = require("../middleware/validate");
-const { can } = require("../config/permissions");
 const jobService = require("../jobs/job.service");
 
 /**
@@ -39,11 +38,10 @@ const JOB_MODULE_BY_TYPE = Object.freeze({
 
 const assertCanManageJob = (req, job) => {
   const moduleName = JOB_MODULE_BY_TYPE[job.type] || "schedule";
-  const allowed = can({
-    role: getEffectiveRole(req),
-    module: moduleName,
-    action: "update",
-  });
+  // The same decision every write goes through — role, project template,
+  // and an API key's scopes; a static role check let a read-only key cancel
+  // a job (Phase 21D, CX21-444).
+  const allowed = hasPermission(req, moduleName, "update");
   if (!allowed) {
     const error = new HttpError(
       403,
