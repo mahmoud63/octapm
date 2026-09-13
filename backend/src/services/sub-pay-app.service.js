@@ -200,6 +200,22 @@ const previousByLine = async ({ tx = prisma, commitmentId, beforeNumber }) => {
   return map;
 };
 
+/**
+ * What the OTHER counted applications on the commitment have certified on each
+ * line — whatever their numbers. A rejected application reopened after a newer
+ * one was approved and paid used to trust the "previous" stored when it was
+ * created (zero), and could bill the same work again (Phase 21D, CX21-502).
+ */
+const previousByLineExcluding = async ({ tx = prisma, commitmentId, excludeId }) => {
+  const lines = await tx.subPayAppLine.findMany({
+    where: { payApp: { commitmentId, status: { in: COUNTED }, id: { not: excludeId } } },
+    select: { sovLineId: true, thisPeriodAmount: true },
+  });
+  const map = new Map();
+  for (const line of lines) map.set(line.sovLineId, addMoney(map.get(line.sovLineId) || 0, line.thisPeriodAmount));
+  return map;
+};
+
 const retentionHeldBefore = async ({ tx = prisma, commitmentId, beforeNumber }) => {
   const apps = await tx.subPayApp.findMany({ where: { commitmentId, status: { in: COUNTED }, number: { lt: beforeNumber } }, select: { retentionThisPeriod: true } });
   return apps.reduce((acc, app) => addMoney(acc, app.retentionThisPeriod), 0);
@@ -486,7 +502,11 @@ const normalizeClaims = (entries) => {
 const recompute = async ({ tx, existing, claims = null, patch = {} }) => {
   const pctMap = await approvedPctByActivity({ tx, activityIds: existing.lines.map((line) => line.sovLine?.activityId) });
   const changeMap = await approvedChangesBySovLine({ tx, commitmentId: existing.commitmentId });
-  const lines = applyClaims({ lines: existing.lines, claims: claims || new Map(), pctMap, changeMap });
+  // "Previous" is derived here, every time, from the other counted
+  // applications — never trusted from the line (CX21-502).
+  const previous = await previousByLineExcluding({ tx, commitmentId: existing.commitmentId, excludeId: existing.id });
+  const based = existing.lines.map((line) => ({ ...line, previousAmount: previous.get(line.sovLineId) || 0 }));
+  const lines = applyClaims({ lines: based, claims: claims || new Map(), pctMap, changeMap });
   const retentionRate = patch.retentionRate !== undefined ? patch.retentionRate : Number(existing.retentionRate) || 0;
   const backCharges = patch.backCharges !== undefined ? patch.backCharges : toMoneyNumber(existing.backCharges);
   const otherDeductions = patch.otherDeductions !== undefined ? patch.otherDeductions : toMoneyNumber(existing.otherDeductions);
@@ -494,7 +514,7 @@ const recompute = async ({ tx, existing, claims = null, patch = {} }) => {
   const retentionBefore = await retentionHeldBefore({ tx, commitmentId: existing.commitmentId, beforeNumber: existing.number });
   const totals = financials({ lines, retentionRate, backCharges, retentionBefore, otherDeductions, taxRate });
   for (const line of lines) {
-    await tx.subPayAppLine.update({ where: { id: line.id }, data: { thisPeriodAmount: line.thisPeriodAmount, cumulativeAmount: line.cumulativeAmount, materialsOnSite: line.materialsOnSite, approvedPct: line.approvedPct, capAmount: line.capAmount, overClaimAmount: line.overClaimAmount, approvedChangeAmount: line.approvedChangeAmount ?? 0, revisedScheduledAmount: line.revisedScheduledAmount ?? toMoneyNumber(line.scheduledAmount), notes: line.notes } });
+    await tx.subPayAppLine.update({ where: { id: line.id }, data: { previousAmount: line.previousAmount, thisPeriodAmount: line.thisPeriodAmount, cumulativeAmount: line.cumulativeAmount, materialsOnSite: line.materialsOnSite, approvedPct: line.approvedPct, capAmount: line.capAmount, overClaimAmount: line.overClaimAmount, approvedChangeAmount: line.approvedChangeAmount ?? 0, revisedScheduledAmount: line.revisedScheduledAmount ?? toMoneyNumber(line.scheduledAmount), notes: line.notes } });
   }
   return { lines, totals: { ...totals, retentionRate, backCharges, otherDeductions, taxRate } };
 };

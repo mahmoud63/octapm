@@ -584,8 +584,12 @@ const postMovement = async (tx, { orgId, item, warehouseId, locationId = null, t
     // on the road reset the average to its own price, and the transfer then
     // landed at that price — 200 valued at 30.00 against 4,000.00 bought
     // (Phase 21D, CX21-403).
-    const balances = await tx.stockBalance.findMany({ where: { itemId: item.id }, select: { onHand: true, inTransit: true } });
-    const itemOnHand = balances.reduce((sum, row) => sum + Number(row.onHand ?? 0) + Number(row.inTransit ?? 0), 0);
+    // Quarantined stock, likewise: it comes back to the shelf at the item's
+    // average when it is released, so it is the item's stock while it waits
+    // (Phase 21D, CX21-501). Damaged stock is written off and does not come
+    // back, so it is not counted.
+    const balances = await tx.stockBalance.findMany({ where: { itemId: item.id }, select: { onHand: true, inTransit: true, quarantined: true } });
+    const itemOnHand = balances.reduce((sum, row) => sum + Number(row.onHand ?? 0) + Number(row.inTransit ?? 0) + Number(row.quarantined ?? 0), 0);
     const totalQty = itemOnHand + signed;
     const blended =
       totalQty > 0

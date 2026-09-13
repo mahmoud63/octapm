@@ -815,3 +815,29 @@ describe("Phase 21D — integrity (Codex round 5)", () => {
     expect(Number(store.items.get(item.id).averageCost)).toBe(20);
   });
 });
+
+describe("Phase 21D — integrity (Codex round 6)", () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockPrisma.$queryRaw.mockImplementation(async () => []);
+    store.items.clear(); store.warehouses.clear(); store.locations.clear();
+    store.balances.length = 0; store.transactions.length = 0; store.ledger.length = 0; store.costRecords.length = 0;
+    nextId = 1;
+  });
+
+  it("CX21-501: quarantined stock still counts in the item's average, since it comes back to the shelf at that average", async () => {
+    const item = seedItem({ averageCost: 10 });
+    const warehouse = seedWarehouse();
+    store.balances.push({ id: "bal-held", orgId: ORG, itemId: item.id, warehouseId: warehouse.id, locationId: null, onHand: 0, reserved: 0, inTransit: 0, damaged: 0, quarantined: 100 });
+    await service.receiveStock({ orgId: ORG, user: USER, payload: { itemId: item.id, warehouseId: warehouse.id, quantity: 100, unitCost: 30 } });
+    expect(Number(store.items.get(item.id).averageCost)).toBe(20);
+  });
+
+  it("damaged stock is written off and does not count", async () => {
+    const item = seedItem({ averageCost: 10 });
+    const warehouse = seedWarehouse();
+    store.balances.push({ id: "bal-damaged", orgId: ORG, itemId: item.id, warehouseId: warehouse.id, locationId: null, onHand: 0, reserved: 0, inTransit: 0, damaged: 100, quarantined: 0 });
+    await service.receiveStock({ orgId: ORG, user: USER, payload: { itemId: item.id, warehouseId: warehouse.id, quantity: 100, unitCost: 30 } });
+    expect(Number(store.items.get(item.id).averageCost)).toBe(30);
+  });
+});

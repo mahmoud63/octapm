@@ -489,3 +489,26 @@ describe("Phase 21D — integrity (Codex round 5)", () => {
     expect(mockPrisma.subPayApp.update).not.toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ status: "submitted" }) }));
   });
 });
+
+describe("Phase 21D — integrity (Codex round 6)", () => {
+  afterEach(() => mockPrisma.subPayAppLine.findMany.mockImplementation(async () => []));
+
+  it("CX21-502: a reopened application's previous amount is what the other counted applications certified, so the same work cannot be billed twice", async () => {
+    // Application A was rejected, B (newer) was approved and paid for 60,000
+    // on the 100,000 line. A comes back claiming 60,000: previous is B's
+    // 60,000, cumulative would be 120,000 — refused.
+    mockPrisma.subPayApp.findFirst.mockResolvedValue(payApp({ id: "pa-A", status: "draft", lines: [line({ scheduledAmount: 100000, previousAmount: 0, thisPeriodAmount: 0, cumulativeAmount: 0 })] }));
+    mockPrisma.subPayAppLine.findMany.mockImplementation(async ({ where } = {}) => (where?.payApp?.id?.not === "pa-A" ? [{ sovLineId: "sov-1", thisPeriodAmount: 60000 }] : []));
+    await expect(
+      service.updatePayApp({ orgId: "org-1", projectId: "project-1", payAppId: "pa-A", payload: { lines: [{ sovLineId: "sov-1", thisPeriodAmount: 60000 }] }, actor: { id: "sub-user" } }),
+    ).rejects.toMatchObject({ code: "SUB_PAY_APP_EXCEEDS_SCHEDULED" });
+  });
+
+  it("CX21-502: with nothing certified elsewhere, previous is zero even if the line says otherwise", async () => {
+    mockPrisma.subPayApp.findFirst.mockResolvedValue(payApp({ id: "pa-A", status: "draft", lines: [line({ scheduledAmount: 100000, previousAmount: 40000, thisPeriodAmount: 0, cumulativeAmount: 40000 })] }));
+    mockPrisma.subPayAppLine.update.mockClear();
+    mockPrisma.subPayApp.update.mockImplementation(async ({ data }) => payApp({ id: "pa-A", status: "draft", ...data }));
+    await service.updatePayApp({ orgId: "org-1", projectId: "project-1", payAppId: "pa-A", payload: { lines: [{ sovLineId: "sov-1", thisPeriodAmount: 70000 }] }, actor: { id: "sub-user" } });
+    expect(mockPrisma.subPayAppLine.update).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ previousAmount: 0, thisPeriodAmount: 70000, cumulativeAmount: 70000 }) }));
+  });
+});
