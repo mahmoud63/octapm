@@ -51,10 +51,11 @@ const resolveActualThroughDate = ({ payload, existing = null, actual }) => {
   );
   if (suppliedDate !== undefined) return suppliedDate;
 
-  if (payload.actual !== undefined) {
-    return new Date();
-  }
-
+  // An actual in the payload is only ever an echo of what the ledger posted
+  // (COST_ACTUAL_IS_DERIVED); it is not a posting, so it does not move the
+  // date the actual is good through. Treating it as one reset the date under
+  // the latest ledger entry and the reconciliation flagged the activity as
+  // stale (Phase 21D, T-15).
   if (existing?.actualThroughDate) {
     return existing.actualThroughDate;
   }

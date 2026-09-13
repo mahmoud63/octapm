@@ -21,5 +21,10 @@ describe('activity actual cost is derived', () => {
     await expect(service.updateCostRecord({ orgId: 'org-1', projectId: 'p1', costRecordId: 'cr-1', payload: { actual: 0 } })).rejects.toMatchObject({ code: 'COST_ACTUAL_IS_DERIVED' });
     expect(mockPrisma.costRecord.update).not.toHaveBeenCalled();
     await expect(service.updateCostRecord({ orgId: 'org-1', projectId: 'p1', costRecordId: 'cr-1', payload: { actual: 400, budget: 1200 } })).resolves.toBeTruthy();
+    // and the echo does not move the date the actual is good through (T-15)
+    mockPrisma.costRecord.findFirst.mockResolvedValueOnce({ id: 'cr-1', projectId: 'p1', activityId: 'act-1', budget: 1000, actual: 400, committed: 0, forecast: 1000, labour: 0, material: 0, equipment: 0, subcontract: 0, indirect: 0, overhead: 0, contingency: 0, actualThroughDate: new Date('2027-02-02T00:00:00.000Z') });
+    mockPrisma.costRecord.update.mockClear();
+    await service.updateCostRecord({ orgId: 'org-1', projectId: 'p1', costRecordId: 'cr-1', payload: { actual: 400 } });
+    expect(mockPrisma.costRecord.update).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ actualThroughDate: new Date('2027-02-02T00:00:00.000Z') }) }));
   });
 });
