@@ -1056,3 +1056,13 @@ describe("Phase 21D — integrity (release challenge, seventh pass)", () => {
     expect(mockPrisma.stockTransfer.create).not.toHaveBeenCalled();
   });
 });
+
+describe("Phase 21D — integrity (release challenge, eighth pass)", () => {
+  it("CX21-481: a key's transfer list also requires every line's item to be its projects' or the company's", async () => {
+    mockPrisma.stockTransfer = { ...(mockPrisma.stockTransfer || {}), findMany: jest.fn(async () => []) };
+    await service.listTransfers({ orgId: ORG, projectIds: ["project-1"] });
+    const where = mockPrisma.stockTransfer.findMany.mock.calls.at(-1)[0].where;
+    const scope = { OR: [{ projectId: null }, { projectId: { in: ["project-1"] } }] };
+    expect(where).toMatchObject({ fromWarehouse: scope, toWarehouse: scope, lines: { every: { item: scope } } });
+  });
+});

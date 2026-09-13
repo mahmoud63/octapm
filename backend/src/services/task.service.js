@@ -608,6 +608,7 @@ const listTasks = async ({
   role,
   projectAccess = null,
   query = {},
+  projectIds = null,
 }) => {
   if (projectId) {
     await getAccessForProject({ orgId, projectId, userId, role, projectAccess });
@@ -629,6 +630,9 @@ const listTasks = async ({
     projectAccess,
     includeArchived,
   });
+  // A key limited to some projects lists tasks of those projects only, even
+  // through the mount outside a project (Phase 21D, CX21-486).
+  if (!projectId && projectIds?.length) where.projectId = { in: projectIds };
 
   if (query.status && query.status !== "all") {
     where.status = String(query.status).split(",");
@@ -696,11 +700,14 @@ const createTask = async ({
   userId,
   userRole,
   projectAccess = null,
+  allowedProjectIds = null,
 }) => {
   const projectId = routeProjectId || trimToNull(payload.projectId);
   if (!projectId) {
     throw new HttpError(400, "TASK_PROJECT_REQUIRED", "Task project is required");
   }
+  // A key limited to some projects creates tasks on those only (CX21-486).
+  if (allowedProjectIds?.length && !allowedProjectIds.includes(projectId)) throw new HttpError(403, "FORBIDDEN_PROJECT", "This API key is not allowed on that project");
 
   await getAccessForProject({
     orgId,

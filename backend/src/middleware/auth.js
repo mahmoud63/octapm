@@ -1,5 +1,6 @@
 const { verifyAccessToken } = require('../utils/tokens');
 const { HttpError } = require('../utils/http-error');
+const { prisma } = require('../config/db');
 const { API_KEY_PREFIX, authenticateApiKey } = require('../services/api-client.service');
 
 const parseBearerToken = (authorizationHeader) => {
@@ -40,16 +41,27 @@ const authenticate = (req, res, next) => {
     }
 
     const payload = verifyAccessToken(token);
-    req.user = {
-      id: payload.sub,
-      orgId: payload.orgId,
-      role: payload.role,
-      email: payload.email,
-      name: payload.name,
-      isCompanyAdmin: Boolean(payload.isCompanyAdmin),
-    };
-
-    return next();
+    // The token is honoured only while the account it names is active, and
+    // with the role and standing the account holds now — not those it held
+    // when the token was minted: a deactivated or demoted person kept their
+    // old authority until the token expired (Phase 21D, CX21-485).
+    return prisma.user
+      .findUnique({ where: { id: payload.sub }, select: { id: true, orgId: true, role: true, status: true, isCompanyAdmin: true } })
+      .then((account) => {
+        if (!account || account.orgId !== payload.orgId || account.status !== 'active') {
+          return next(new HttpError(401, 'USER_INACTIVE', 'This account is no longer active'));
+        }
+        req.user = {
+          id: payload.sub,
+          orgId: payload.orgId,
+          role: account.role || payload.role,
+          email: payload.email,
+          name: payload.name,
+          isCompanyAdmin: Boolean(account.isCompanyAdmin),
+        };
+        return next();
+      })
+      .catch(next);
   } catch (error) {
     if (error.name === 'TokenExpiredError') {
       return next(

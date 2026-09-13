@@ -12,6 +12,7 @@ const API_BASE_URL =
 
 interface RetriableRequestConfig extends AxiosRequestConfig {
   _retry?: boolean
+  _sentBy?: string | null
   headers?: AxiosRequestHeaders | Record<string, string>
 }
 
@@ -49,11 +50,13 @@ const flushPendingRequests = (error: unknown, token?: string) => {
 }
 
 apiClient.interceptors.request.use((config: InternalAxiosRequestConfig) => {
-  const accessToken = useAuthStore.getState().auth.accessToken
+  const { accessToken, user } = useAuthStore.getState().auth
 
   if (accessToken) {
     config.headers.Authorization = `Bearer ${accessToken}`
   }
+  // Who sent it: a request is only ever retried for that person (CX21-484).
+  ;(config as RetriableRequestConfig)._sentBy = user?.id ?? null
 
   return config
 })
@@ -77,6 +80,13 @@ apiClient.interceptors.response.use(
     if (originalRequest._retry || isAuthRequest) {
       return Promise.reject(error)
     }
+    // A late 401 for a request the previous person sent is not retried under
+    // whoever is signed in now (Phase 21D, CX21-484).
+    const sentBy = originalRequest._sentBy ?? null
+    const signedInNow = useAuthStore.getState().auth.user?.id ?? null
+    if (sentBy !== null && sentBy !== signedInNow) {
+      return Promise.reject(error)
+    }
 
     const { auth } = useAuthStore.getState()
     if (isRefreshing) {
@@ -95,8 +105,8 @@ apiClient.interceptors.response.use(
     originalRequest._retry = true
     isRefreshing = true
 
+    const askedFor = useAuthStore.getState().auth.user?.id ?? null
     try {
-      const askedFor = useAuthStore.getState().auth.user?.id ?? null
       const refreshResponse = await authlessClient.post<
         ApiSuccess<AuthSession>
       >('/auth/refresh')
@@ -125,7 +135,9 @@ apiClient.interceptors.response.use(
       return apiClient(originalRequest)
     } catch (refreshError) {
       flushPendingRequests(refreshError)
-      auth.reset()
+      // A refresh that failed for the previous person must not sign out the
+      // person who signed in meanwhile.
+      if ((useAuthStore.getState().auth.user?.id ?? null) === askedFor) auth.reset()
       return Promise.reject(refreshError)
     } finally {
       isRefreshing = false

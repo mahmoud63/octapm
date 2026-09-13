@@ -324,7 +324,7 @@ const upsertCostRecord = async ({
     budget,
     // committed is the commitments' projection: written only when supplied
     // (an echo), never the copy read before the lock (Phase 21D, CX21-475)
-    ...(payload.committed !== undefined ? { committed: toMoneyNumber(payload.committed) } : existing ? {} : { committed: 0 }),
+    ...(payload.committed !== undefined ? { committed: toMoneyNumber(payload.committed) } : {}),
     // actual is not written here: it is the ledger's projection, and a stale
     // copy would erase a posting that landed since the read (Phase 21D, CX21-422)
     ...(actualThroughDate !== undefined ? { actualThroughDate } : {}),
@@ -341,9 +341,11 @@ const upsertCostRecord = async ({
     // meanwhile is updated, not duplicated (Phase 21D, CX21-464).
     if (tx.$executeRaw) await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`cost-record:${projectId}:${activityId}`}))`;
     const current = existing ?? (await tx.costRecord.findFirst({ where: { projectId, activityId } }));
+    // A row found under the lock keeps the committed a commitment gave it;
+    // only a row created here starts at 0 (Phase 21D, CX21-482).
     const record = current
       ? await tx.costRecord.update({ where: { id: current.id }, data })
-      : await tx.costRecord.create({ data });
+      : await tx.costRecord.create({ data: { ...(payload.committed === undefined ? { committed: 0 } : {}), ...data } });
 
     await auditService.recordEvent({
       tx,

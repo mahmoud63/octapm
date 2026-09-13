@@ -1504,7 +1504,7 @@ const listTransfers = async ({ orgId, status = null, projectIds = null }) => {
   // A key sees transfers between warehouses of its projects or the company's (CX21-472).
   const scope = projectIds?.length ? { OR: [{ projectId: null }, { projectId: { in: projectIds } }] } : null;
   const rows = await prisma.stockTransfer.findMany({
-    where: { orgId, ...(status ? { status } : {}), ...(scope ? { fromWarehouse: scope, toWarehouse: scope } : {}) },
+    where: { orgId, ...(status ? { status } : {}), ...(scope ? { fromWarehouse: scope, toWarehouse: scope, lines: { every: { item: scope } } } : {}) },
     include: transferInclude,
     orderBy: [{ createdAt: "desc" }],
     take: 200,

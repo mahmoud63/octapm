@@ -161,8 +161,15 @@ const updateBudgetRevision = async ({
   // used to land after its approval, rewriting the money and the status
   // (Phase 21D, CX21-470).
   return prisma.$transaction(async (tx) => {
-  const [held] = await tx.$queryRaw`SELECT status FROM "BudgetRevision" WHERE id = ${revisionId} FOR UPDATE`;
-  const existing = held ? { ...found, status: held.status } : found;
+  // One revision edit per project at a time (an advisory lock taken before
+  // the row): two edits holding different revisions and then recomputing
+  // the cumulative over all of them could wait on each other.
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`budget-revisions:${projectId}`}))`;
+  await tx.$queryRaw`SELECT status FROM "BudgetRevision" WHERE id = ${revisionId} FOR UPDATE`;
+  // The whole row as held, not only its status: an edit that wrote back the
+  // money and the approval stamps it had read undid a concurrent approval
+  // (Phase 21D, CX21-480).
+  const existing = (await tx.budgetRevision.findFirst({ where: { id: revisionId, projectId } })) || found;
   if (payload.status && payload.status !== existing.status && !viaWorkflow) {
     await require('./workflow-engine.service').assertNotLocked({ tool: 'budget_revision', projectId, recordId: revisionId });
   }
@@ -179,46 +186,20 @@ const updateBudgetRevision = async ({
     throw new HttpError(409, 'BUDGET_REVISION_APPROVED', 'An approved revision is changed only by someone who can approve cost');
   }
 
-  const updated = await tx.budgetRevision.update({
-    where: { id: revisionId },
-    data: {
-      title: payload.title ?? existing.title,
-      changeType: payload.changeType ?? existing.changeType,
-      amount:
-        payload.amount !== undefined
-          ? toMoneyNumber(payload.amount)
-          : existing.amount,
-      linkedChangeOrder:
-        payload.linkedChangeOrder !== undefined
-          ? payload.linkedChangeOrder?.trim() || null
-          : existing.linkedChangeOrder,
-      effectiveDate:
-        payload.effectiveDate !== undefined
-          ? payload.effectiveDate
-            ? new Date(payload.effectiveDate)
-            : null
-          : existing.effectiveDate,
-      // the status is written only when the caller sets it; the copy read
-      // before the lock is never written back (CX21-470)
-      ...(payload.status ? { status: payload.status } : {}),
-      approvedBy:
-        payload.status === 'approved' && existing.status !== 'approved'
-          ? userId || null
-          : payload.status && payload.status !== 'approved'
-            ? null
-          : existing.approvedBy,
-      approvedAt:
-        payload.status === 'approved' && existing.status !== 'approved'
-          ? new Date()
-          : payload.status && payload.status !== 'approved'
-            ? null
-          : existing.approvedAt,
-      notes:
-        payload.notes !== undefined
-          ? payload.notes?.trim() || null
-          : existing.notes,
-    },
-  });
+  // Only what the caller sent is written; nothing read before the lock is
+  // copied back (Phase 21D, CX21-470 / CX21-480).
+  const data = {
+    ...(payload.title !== undefined ? { title: payload.title } : {}),
+    ...(payload.changeType !== undefined ? { changeType: payload.changeType } : {}),
+    ...(payload.amount !== undefined ? { amount: toMoneyNumber(payload.amount) } : {}),
+    ...(payload.linkedChangeOrder !== undefined ? { linkedChangeOrder: payload.linkedChangeOrder?.trim() || null } : {}),
+    ...(payload.effectiveDate !== undefined ? { effectiveDate: payload.effectiveDate ? new Date(payload.effectiveDate) : null } : {}),
+    ...(payload.notes !== undefined ? { notes: payload.notes?.trim() || null } : {}),
+    ...(payload.status ? { status: payload.status } : {}),
+    ...(payload.status === 'approved' && existing.status !== 'approved' ? { approvedBy: userId || null, approvedAt: new Date() } : {}),
+    ...(payload.status && payload.status !== 'approved' ? { approvedBy: null, approvedAt: null } : {}),
+  };
+  const updated = await tx.budgetRevision.update({ where: { id: revisionId }, data });
 
   await recomputeCumulative({
     projectId,
@@ -251,6 +232,7 @@ const deleteBudgetRevision = async ({ orgId, projectId, revisionId, canApprove =
   }
 
   return prisma.$transaction(async (tx) => {
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`budget-revisions:${projectId}`}))`;
     // Decided on the status as held (CX21-470): a delete that started on a
     // draft must not remove the revision approved meanwhile.
     const [held] = await tx.$queryRaw`SELECT status FROM "BudgetRevision" WHERE id = ${revisionId} FOR UPDATE`;

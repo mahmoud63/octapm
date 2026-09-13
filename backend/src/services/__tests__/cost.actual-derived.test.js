@@ -79,3 +79,18 @@ describe('committed is the commitments\' projection', () => {
     expect(Object.prototype.hasOwnProperty.call(mockPrisma.costRecord.update.mock.calls.at(-1)[0].data, 'committed')).toBe(false);
   });
 });
+
+describe('the row a commitment created keeps its committed', () => {
+  it('CX21-482: a budget-only upsert that found no row before the lock, and one under it, updates that row without touching committed', async () => {
+    mockPrisma.$executeRaw = jest.fn(async () => 0);
+    mockPrisma.costRecord.findFirst.mockResolvedValueOnce(null); // before the lock
+    mockPrisma.costRecord.findFirst.mockResolvedValueOnce({ id: 'cr-9', projectId: 'p1', activityId: 'act-1', budget: 0, actual: 0, committed: 250000, forecast: 0, labour: 0, material: 0, equipment: 0, subcontract: 0, indirect: 0, overhead: 0, contingency: 0 }); // under it
+    mockPrisma.costRecord.update.mockClear();
+    mockPrisma.costRecord.create.mockClear();
+    await service.upsertCostRecord({ orgId: 'org-1', projectId: 'p1', activityId: 'act-1', payload: { budget: 900 } });
+    expect(mockPrisma.costRecord.create).not.toHaveBeenCalled();
+    const written = mockPrisma.costRecord.update.mock.calls.at(-1)[0].data;
+    expect(Object.prototype.hasOwnProperty.call(written, 'committed')).toBe(false);
+    expect(Number(written.budget)).toBe(900);
+  });
+});

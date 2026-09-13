@@ -31,3 +31,14 @@ describe("Phase 21D — integrity (release challenge, seventh pass)", () => {
     expect(model).toMatch(/@@unique\(\[projectId, activityId\]\)/);
   });
 });
+
+describe("Phase 21D — integrity (release challenge, eighth pass)", () => {
+  it("CX21-483: the unique-pair migration merges and removes duplicate rows before creating the index", () => {
+    const sql = fs.readFileSync(path.join(__dirname, "../../../prisma/migrations/20261001090100_cost_record_unique_pair/migration.sql"), "utf8");
+    const dedupe = sql.indexOf('DELETE FROM "CostRecord"');
+    const index = sql.indexOf("CREATE UNIQUE INDEX");
+    expect(dedupe).toBeGreaterThanOrEqual(0);
+    expect(index).toBeGreaterThan(dedupe);
+    expect(sql).toMatch(/PARTITION BY "projectId", *"activityId"/);
+  });
+});

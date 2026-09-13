@@ -13,6 +13,22 @@ const router = express.Router({ mergeParams: true });
 router.use(authenticate);
 router.use(subscriptionGate);
 
+// An API key limited to some projects is held to them on this mount as on a
+// project's own: the list and the creation carry its list, and every task
+// addressed by id must be on one of its projects (Phase 21D, CX21-486).
+const keyProjects = (req) => (req.apiClient?.projectIds?.length ? req.apiClient.projectIds : null);
+router.param("id", asyncHandler(async (req, res, next) => {
+  const allowed = keyProjects(req);
+  if (!allowed) return next();
+  const { prisma } = require("../config/db");
+  const task = await prisma.task.findFirst({ where: { id: req.params.id, orgId: req.user.orgId }, select: { projectId: true } });
+  if (task && !allowed.includes(task.projectId)) {
+    const { HttpError } = require("../utils/http-error");
+    return next(new HttpError(403, "FORBIDDEN_PROJECT", "This API key is not allowed on that project"));
+  }
+  return next();
+}));
+
 const optionalNullableUuid = (field) =>
   body(field).optional({ values: "falsy" }).isUUID();
 
@@ -95,6 +111,7 @@ router.get(
       role: req.user.role,
       projectAccess: req.projectAccess || null,
       query: req.query,
+      projectIds: keyProjects(req),
     });
     return sendSuccess(res, result);
   }),
@@ -112,6 +129,7 @@ router.post(
       userId: req.user.id,
       userRole: getEffectiveRole(req),
       projectAccess: req.projectAccess || null,
+      allowedProjectIds: keyProjects(req),
     });
     return sendSuccess(res, result, 201);
   }),
