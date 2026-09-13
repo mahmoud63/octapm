@@ -562,3 +562,28 @@ describe("Phase 21D — integrity (release challenge, third pass)", () => {
     expect(mockPrisma.inventoryItem.create).not.toHaveBeenCalled();
   });
 });
+
+describe("Phase 21D — integrity (release challenge, sixth pass)", () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockPrisma.deliveryReceipt.count.mockResolvedValue(0);
+    mockPrisma.deliveryReceipt.findFirst.mockResolvedValue(null);
+  });
+  const issuedOrder = (over = {}) => ({ id: "order-1", ref: "PO-0001", status: "issued", projectId: "project-1", packageId: null, supplierId: null, currency: "USD", project: { id: "project-1" }, lines: [poLine()], ...over });
+
+  it("CX21-461: a key allowed on the order's project may not receive it into another project's warehouse, nor onto another project's item", async () => {
+    mockPrisma.procurementOrder.findFirst.mockResolvedValue(issuedOrder());
+    mockPrisma.warehouse.findFirst.mockResolvedValue({ id: "wh-2", orgId: ORG, name: "Project 2 store", projectId: "project-2" });
+    mockPrisma.inventoryItem.findFirst.mockResolvedValue({ id: "item-1", orgId: ORG, sku: "CEM-42.5N", projectId: null });
+    mockInventory.postMovement.mockClear();
+    await expect(
+      service.receiveAgainstOrder({ orgId: ORG, user: USER, payload: { orderId: "order-1", warehouseId: "wh-2", lines: [{ poLineId: "line-1", acceptedQty: 10 }] }, allowedProjectIds: ["project-1"] }),
+    ).rejects.toMatchObject({ code: "FORBIDDEN_PROJECT", status: 403 });
+    mockPrisma.warehouse.findFirst.mockResolvedValue({ id: "wh-1", orgId: ORG, name: "Main", projectId: null });
+    mockPrisma.inventoryItem.findFirst.mockResolvedValue({ id: "item-2", orgId: ORG, sku: "P2-ONLY", projectId: "project-2" });
+    await expect(
+      service.receiveAgainstOrder({ orgId: ORG, user: USER, payload: { orderId: "order-1", warehouseId: "wh-1", lines: [{ poLineId: "line-1", acceptedQty: 10, inventoryItemId: "item-2" }] }, allowedProjectIds: ["project-1"] }),
+    ).rejects.toMatchObject({ code: "FORBIDDEN_PROJECT", status: 403 });
+    expect(mockInventory.postMovement).not.toHaveBeenCalled();
+  });
+});

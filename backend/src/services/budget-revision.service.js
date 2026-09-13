@@ -164,6 +164,9 @@ const updateBudgetRevision = async ({
   if (payload.status === 'approved' && existing.status !== 'approved' && !canApprove) {
     throw new HttpError(403, 'BUDGET_REVISION_APPROVAL_REQUIRED', 'Only someone who can approve cost may approve a revision');
   }
+  if (existing.status === 'approved' && payload.status && payload.status !== 'approved' && !canApprove) {
+    throw new HttpError(403, 'BUDGET_REVISION_APPROVAL_REQUIRED', 'Only someone who can approve cost may take a revision out of approval');
+  }
   const moneyTouched = payload.amount !== undefined || payload.changeType !== undefined || payload.effectiveDate !== undefined;
   if (existing.status === 'approved' && moneyTouched && !canApprove) {
     throw new HttpError(409, 'BUDGET_REVISION_APPROVED', 'An approved revision is changed only by someone who can approve cost');
@@ -221,7 +224,7 @@ const updateBudgetRevision = async ({
   return updated;
 };
 
-const deleteBudgetRevision = async ({ orgId, projectId, revisionId }) => {
+const deleteBudgetRevision = async ({ orgId, projectId, revisionId, canApprove = false }) => {
   const project = await ensureProject({ orgId, projectId });
 
   const existing = await prisma.budgetRevision.findFirst({
@@ -236,6 +239,10 @@ const deleteBudgetRevision = async ({ orgId, projectId, revisionId }) => {
     );
   }
 
+  // Deleting an approved revision undoes an approval (Phase 21D, CX21-460).
+  if (existing.status === 'approved' && !canApprove) {
+    throw new HttpError(403, 'BUDGET_REVISION_APPROVAL_REQUIRED', 'Only someone who can approve cost may delete an approved revision');
+  }
   await prisma.budgetRevision.delete({ where: { id: revisionId } });
   await recomputeCumulative({
     projectId,

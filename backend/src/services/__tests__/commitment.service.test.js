@@ -184,3 +184,30 @@ describe("Phase 21D — integrity (release challenge, fifth pass)", () => {
     expect(mockPrisma.commitmentChangeOrder.update).not.toHaveBeenCalled();
   });
 });
+
+describe("Phase 21D — integrity (release challenge, sixth pass)", () => {
+  afterEach(() => jest.restoreAllMocks());
+  const pendingCo = () => ({ id: "cco-1", ref: "SC-001-CO01", status: "pending", value: 2500, linesJson: [], createdBy: "user-qs", commitmentId: "cm-1", primeChangeOrderId: null, commitment: { id: "cm-1", ref: "SC-001", status: "executed", projectId: "project-1", projectPartyId: "party-1", createdBy: "user-qs" } });
+
+  it("CX21-465: recomputing committed cost holds the project before it reads the commitments, so two approvals cannot each write a total that omits the other", async () => {
+    mockPrisma.$executeRaw = jest.fn(async () => 0);
+    mockPrisma.commitmentChangeOrder.findFirst.mockResolvedValue(pendingCo());
+    mockPrisma.commitmentChangeOrder.update.mockImplementation(async ({ data }) => ({ ...pendingCo(), ...data }));
+    mockPrisma.commitment.findMany.mockResolvedValue([]);
+    mockPrisma.budgetLine.findMany.mockResolvedValue([]);
+    mockPrisma.commitment.findMany.mockClear();
+    await service.transitionChangeOrder({ orgId: "org-1", projectId: "project-1", changeOrderId: "cco-1", to: "approved", actor: { id: "pm" } });
+    const held = mockPrisma.$executeRaw.mock.calls.find(([strings, ...values]) => Array.isArray(strings) && strings.join("?").includes("pg_advisory_xact_lock") && values.includes("committed:project-1"));
+    expect(held).toBeDefined();
+    expect(mockPrisma.$executeRaw.mock.invocationCallOrder[0]).toBeLessThan(mockPrisma.commitment.findMany.mock.invocationCallOrder[0]);
+  });
+
+  it("CX21-466: an edit cannot link a change order to a prime change order of another project", async () => {
+    mockPrisma.commitmentChangeOrder.findFirst.mockResolvedValue(pendingCo());
+    mockPrisma.commitmentChangeOrder.update.mockClear();
+    mockPrisma.changeOrder.findFirst.mockResolvedValueOnce(null); // not on this project
+    await expect(service.updateChangeOrder({ orgId: "org-1", projectId: "project-1", changeOrderId: "cco-1", payload: { primeChangeOrderId: "co-of-project-2" }, actor: { id: "qs" } })).rejects.toMatchObject({ status: 404 });
+    expect(mockPrisma.commitmentChangeOrder.update).not.toHaveBeenCalled();
+    expect(mockPrisma.changeOrder.findFirst).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({ id: "co-of-project-2", projectId: "project-1" }) }));
+  });
+});

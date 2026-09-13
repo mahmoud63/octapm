@@ -250,7 +250,7 @@ const getAnalytics = async ({ orgId, projectId = null, projectIds = null }) => {
       include: { balances: true },
     }),
     prisma.warehouse.findMany({
-      where: { orgId, status: "active" },
+      where: { orgId, status: "active", ...(projectIds?.length ? { OR: [{ projectId: null }, { projectId: { in: projectIds } }] } : {}) },
       include: { balances: { ...(itemScope ? { where: { item: itemScope } } : {}), include: { item: { select: { averageCost: true } } } } },
     }),
     prisma.stockTransaction.groupBy({

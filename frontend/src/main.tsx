@@ -74,6 +74,13 @@ const queryClient = new QueryClient({
   }),
 })
 
+// Everything fetched belongs to the person who is signed in. Whenever the
+// identity changes — sign-in, sign-out, or a refresh that installs another
+// person's session — the cache is emptied (Phase 21D, CX21-456 / CX21-467).
+useAuthStore.subscribe((state, previous) => {
+  if (state.auth.user?.id !== previous.auth.user?.id) queryClient.clear()
+})
+
 // Create a new router instance
 const router = createRouter({
   routeTree,

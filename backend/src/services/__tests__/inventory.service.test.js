@@ -624,6 +624,7 @@ describe("inventory stock ledger", () => {
         itemId: item.id,
         warehouseId: warehouse.id,
         quantity: 30,
+        activityId: "activity-1",
         costCodeId: "cc-1",
       },
     });
@@ -631,7 +632,7 @@ describe("inventory stock ledger", () => {
       orgId: ORG,
       user: USER,
       type: "return",
-      payload: { itemId: item.id, warehouseId: warehouse.id, quantity: 5, costCodeId: "cc-1" },
+      payload: { itemId: item.id, warehouseId: warehouse.id, quantity: 5, activityId: "activity-1" },
     });
     await service.adjustStock({
       orgId: ORG,
@@ -970,5 +971,60 @@ describe("Phase 21D — integrity (release challenge, fifth pass)", () => {
     await service.adjustStock({ orgId: ORG, user: USER, type: "return", payload: { itemId: item.id, warehouseId: warehouse.id, quantity: 10, activityId: "activity-1" } });
     expect(store.ledger).toHaveLength(charged + 1);
     expect(Number(store.ledger.at(-1).amount)).toBeLessThan(0);
+  });
+});
+
+describe("Phase 21D — integrity (release challenge, sixth pass)", () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    store.items.clear(); store.warehouses.clear(); store.locations.clear();
+    store.balances.length = 0; store.transactions.length = 0; store.ledger.length = 0; store.costRecords.length = 0;
+    nextId = 1;
+  });
+
+  it("CX21-461: a transfer of another project's item, or into another project's warehouse, is refused to a limited key", async () => {
+    const item = seedItem({ projectId: "project-2" });
+    const from = seedWarehouse();
+    const to = seedWarehouse({ code: "SITE-2", name: "Project 2 store", projectId: "project-2" });
+    mockPrisma.stockTransfer = mockPrisma.stockTransfer || { create: jest.fn(async ({ data }) => ({ id: "trf-1", ...data, lines: [] })) };
+    mockPrisma.stockTransfer.create.mockClear();
+    mockPrisma.inventoryItem.findMany = jest.fn(async ({ where }) => [...store.items.values()].filter((row) => where.id.in.includes(row.id)));
+    await expect(
+      service.createTransfer({ orgId: ORG, user: USER, payload: { ref: "TRF-P", fromWarehouseId: from.id, toWarehouseId: to.id, lines: [{ itemId: item.id, quantity: 1 }], allowedProjectIds: ["project-1"] } }),
+    ).rejects.toMatchObject({ code: "FORBIDDEN_PROJECT", status: 403 });
+    const company = seedItem({ projectId: null, sku: "CO-1" });
+    await expect(
+      service.createTransfer({ orgId: ORG, user: USER, payload: { ref: "TRF-C", fromWarehouseId: from.id, toWarehouseId: to.id, lines: [{ itemId: company.id, quantity: 1 }], allowedProjectIds: ["project-1"] } }),
+    ).rejects.toMatchObject({ code: "FORBIDDEN_PROJECT", status: 403 });
+    expect(mockPrisma.stockTransfer.create).not.toHaveBeenCalled();
+  });
+
+  it("CX21-462: a company item's balances in another project's warehouse are not shown to a limited key, and that warehouse is neither listed nor edited", async () => {
+    const wh2 = seedWarehouse({ code: "SITE-2", name: "Project 2 store", projectId: "project-2" });
+    const wh1 = seedWarehouse();
+    const item = seedItem({ projectId: null });
+    store.balances.push({ id: "bal-1", itemId: item.id, warehouseId: wh2.id, locationId: null, onHand: 5, reserved: 0, damaged: 0, quarantined: 0, inTransit: 0, warehouse: { id: wh2.id, code: "SITE-2", name: "Project 2 store", projectId: "project-2" } });
+    store.balances.push({ id: "bal-2", itemId: item.id, warehouseId: wh1.id, locationId: null, onHand: 3, reserved: 0, damaged: 0, quarantined: 0, inTransit: 0, warehouse: { id: wh1.id, code: wh1.code, name: wh1.name, projectId: null } });
+    mockPrisma.inventoryItem.findFirst = jest.fn(async ({ where }) => { const row = store.items.get(where.id); return row ? { ...row, balances: store.balances.filter((b) => b.itemId === row.id) } : null; });
+    await service.getItem({ orgId: ORG, itemId: item.id, allowedProjectIds: ["project-1"] });
+    expect(mockPrisma.inventoryItem.findFirst.mock.calls.at(-1)[0].include.balances.where).toEqual({ warehouse: { OR: [{ projectId: null }, { projectId: { in: ["project-1"] } }] } });
+    mockPrisma.warehouse.findMany = jest.fn(async () => []);
+    await service.listWarehouses({ orgId: ORG, projectIds: ["project-1"] });
+    expect(mockPrisma.warehouse.findMany.mock.calls.at(-1)[0].where).toMatchObject({ OR: [{ projectId: null }, { projectId: { in: ["project-1"] } }] });
+    await expect(service.updateWarehouse({ orgId: ORG, user: USER, warehouseId: wh2.id, payload: { notes: "x" }, allowedProjectIds: ["project-1"] })).rejects.toMatchObject({ code: "FORBIDDEN_PROJECT", status: 403 });
+  });
+
+  it("CX21-463: a return names the activity (or the project) its cost comes back to — a cost code alone is not enough", async () => {
+    const item = seedItem();
+    const wh = seedWarehouse();
+    await service.receiveStock({ orgId: ORG, user: USER, payload: { itemId: item.id, warehouseId: wh.id, quantity: 20, unitCost: 10 } });
+    await service.issueStock({ orgId: ORG, user: USER, payload: { itemId: item.id, warehouseId: wh.id, quantity: 10, activityId: "activity-1" } });
+    const charged = store.ledger.length;
+    await expect(
+      service.adjustStock({ orgId: ORG, user: USER, type: "return", payload: { itemId: item.id, warehouseId: wh.id, quantity: 10, costCodeId: "cc-1" } }),
+    ).rejects.toMatchObject({ code: "INV_NO_COST_SOURCE", status: 400 });
+    expect(store.ledger).toHaveLength(charged);
+    await service.adjustStock({ orgId: ORG, user: USER, type: "return", payload: { itemId: item.id, warehouseId: wh.id, quantity: 10, activityId: "activity-1" } });
+    expect(store.ledger).toHaveLength(charged + 1);
   });
 });

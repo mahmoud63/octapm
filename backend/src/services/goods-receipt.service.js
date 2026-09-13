@@ -159,7 +159,7 @@ const listOrders = async ({ orgId, projectId = null, projectIds = null, scope = 
  * storeman stop and set one up, this matches on the code and creates one if it
  * has to, then remembers the mapping on the line for next time.
  */
-const resolveInventoryItem = async (tx, { orgId, user, line, requestedItemId }) => {
+const resolveInventoryItemUnchecked = async (tx, { orgId, user, line, requestedItemId }) => {
   if (requestedItemId) {
     const item = await tx.inventoryItem.findFirst({
       where: { id: requestedItemId, orgId },
@@ -208,7 +208,16 @@ const resolveInventoryItem = async (tx, { orgId, user, line, requestedItemId }) 
  * out of the receipt. A collision here costs one re-read and nothing else
  * (OCTA-PROC-RECEIPT-085).
  */
-const resolveItemsForReceipt = async ({ orgId, user, order, lines }) => {
+/** The resolved item must be one the key may touch: a project item is that project's (Phase 21D, CX21-461). */
+const resolveInventoryItem = async (tx, { orgId, user, line, requestedItemId, allowedProjectIds = null }) => {
+  const item = await resolveInventoryItemUnchecked(tx, { orgId, user, line, requestedItemId });
+  if (item?.projectId && allowedProjectIds?.length && !allowedProjectIds.includes(item.projectId)) {
+    throw new HttpError(403, "FORBIDDEN_PROJECT", "This API key is not allowed on that project");
+  }
+  return item;
+};
+
+const resolveItemsForReceipt = async ({ orgId, user, order, lines, allowedProjectIds = null }) => {
   const byLine = new Map();
   for (const reported of lines) {
     const line = order.lines.find((candidate) => candidate.id === reported.poLineId);
@@ -221,6 +230,7 @@ const resolveItemsForReceipt = async ({ orgId, user, order, lines }) => {
           user,
           line,
           requestedItemId: reported.inventoryItemId,
+          allowedProjectIds,
         }),
       );
     } catch (error) {
@@ -314,7 +324,7 @@ const receiveAgainstOrder = async ({ orgId, user, payload, allowedProjectIds = n
     throw new HttpError(403, "FORBIDDEN_PROJECT", "This API key is not allowed on that project");
   }
   const itemsByLine = advance
-    ? await resolveItemsForReceipt({ orgId, user, order: advance, lines })
+    ? await resolveItemsForReceipt({ orgId, user, order: advance, lines, allowedProjectIds })
     : new Map();
 
   return prisma.$transaction(async (tx) => {
@@ -400,6 +410,11 @@ const receiveAgainstOrder = async ({ orgId, user, payload, allowedProjectIds = n
     });
     if (!warehouse) {
       throw new HttpError(404, "WAREHOUSE_NOT_FOUND", "Warehouse not found");
+    }
+    // A project's warehouse takes deliveries only from a key allowed on that
+    // project, whichever project the order is on (Phase 21D, CX21-461).
+    if (warehouse.projectId && allowedProjectIds?.length && !allowedProjectIds.includes(warehouse.projectId)) {
+      throw new HttpError(403, "FORBIDDEN_PROJECT", "This API key is not allowed on that project");
     }
 
     // A delivery note posted twice — the second scan, the retried tap on a

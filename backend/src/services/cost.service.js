@@ -334,8 +334,13 @@ const upsertCostRecord = async ({
   };
 
   return runInTransaction(async (tx) => {
-    const record = existing
-      ? await tx.costRecord.update({ where: { id: existing.id }, data })
+    // One projection row per activity, whoever creates it: the pair is held
+    // before the row is looked for again, so a posting that created it
+    // meanwhile is updated, not duplicated (Phase 21D, CX21-464).
+    if (tx.$executeRaw) await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`cost-record:${projectId}:${activityId}`}))`;
+    const current = existing ?? (await tx.costRecord.findFirst({ where: { projectId, activityId } }));
+    const record = current
+      ? await tx.costRecord.update({ where: { id: current.id }, data })
       : await tx.costRecord.create({ data });
 
     await auditService.recordEvent({

@@ -385,6 +385,11 @@ const costTypeForCommitment = (type) => (type === "purchase_order" ? "material" 
  */
 const recomputeCommitted = async ({ tx = prisma, orgId, projectId }) => {
   if (!tx.commitment?.findMany || !tx.budgetLine?.findMany) return null;
+  // Held for the transaction before the commitments are read: two approvals
+  // recomputing at once each wrote a total that left the other out, and the
+  // later write won (Phase 21D, CX21-465). The second now waits for the
+  // first to commit, and reads its approval.
+  if (tx.$executeRaw) await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`committed:${projectId}`}))`;
   const commitments = await tx.commitment.findMany({
     where: { projectId, status: { in: POSTING_STATUSES } },
     select: { id: true, type: true, lines: { select: { amount: true, budgetLineId: true, costCodeId: true, activityId: true } }, changeOrders: { where: { status: CO_STATUS.APPROVED }, select: { value: true, linesJson: true } } },
@@ -421,7 +426,14 @@ const recomputeCommitted = async ({ tx = prisma, orgId, projectId }) => {
     for (const [activityId, amount] of byActivity.entries()) {
       const recordId = recordByActivity.get(activityId);
       if (recordId) await tx.costRecord.update({ where: { id: recordId }, data: { committed: round2(amount) } });
-      else if (tx.costRecord?.create) await tx.costRecord.create({ data: { projectId, activityId, committed: round2(amount) } });
+      else if (tx.costRecord?.create) {
+        // The pair is held before the row is created, and looked for again
+        // under the lock (Phase 21D, CX21-464).
+        if (tx.$executeRaw) await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`cost-record:${projectId}:${activityId}`}))`;
+        const again = tx.costRecord.findFirst ? await tx.costRecord.findFirst({ where: { projectId, activityId }, select: { id: true } }) : null;
+        if (again) await tx.costRecord.update({ where: { id: again.id }, data: { committed: round2(amount) } });
+        else await tx.costRecord.create({ data: { projectId, activityId, committed: round2(amount) } });
+      }
     }
     for (const row of records) {
       if (!byActivity.has(row.activityId)) {
@@ -749,6 +761,11 @@ const updateChangeOrder = async ({ orgId, projectId, changeOrderId, payload = {}
   if (![CO_STATUS.DRAFT, CO_STATUS.PENDING].includes(existing.status)) throw new HttpError(409, "COMMITMENT_CO_LOCKED", `A ${existing.status} change order cannot be edited`);
   const sovLines = await prisma.commitmentSovLine.findMany({ where: { commitmentId: existing.commitmentId }, select: { id: true } });
   const data = coData(payload, { existing, sovLineIds: new Set(sovLines.map((line) => line.id)) });
+  if (data.primeChangeOrderId && data.primeChangeOrderId !== existing.primeChangeOrderId) {
+    // The link is the project's, on an edit as on a creation (Phase 21D, CX21-466).
+    const prime = await prisma.changeOrder.findFirst({ where: { id: data.primeChangeOrderId, projectId }, select: { id: true } });
+    if (!prime) throw new HttpError(404, "CHANGE_ORDER_NOT_FOUND", "Prime change order not found");
+  }
   const updated = await prisma.$transaction(async (tx) => {
     // Editability was checked before the lock; an edit that started on a
     // pending change order must not land after its approval posted the old

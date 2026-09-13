@@ -48,3 +48,19 @@ describe("Phase 21D — integrity (release challenge, fifth pass)", () => {
     expect(Number(changed.amount)).toBe(250000);
   });
 });
+
+describe("Phase 21D — integrity (release challenge, sixth pass)", () => {
+  beforeEach(() => { jest.clearAllMocks(); existing = { id: "br-1", projectId: "p1", status: "approved", title: "Steel", changeType: "addition", amount: 100000, effectiveDate: new Date("2027-01-01"), approvedBy: "pm-1", approvedAt: new Date(), notes: null, linkedChangeOrder: null }; });
+
+  it("CX21-460: whoever cannot approve cost can neither un-approve an approved revision nor delete it", async () => {
+    await expect(service.updateBudgetRevision({ ...base, revisionId: "br-1", payload: { status: "draft" } })).rejects.toMatchObject({ code: "BUDGET_REVISION_APPROVAL_REQUIRED", status: 403 });
+    await expect(service.updateBudgetRevision({ ...base, revisionId: "br-1", payload: { status: "rejected" } })).rejects.toMatchObject({ code: "BUDGET_REVISION_APPROVAL_REQUIRED", status: 403 });
+    expect(mockPrisma.budgetRevision.update).not.toHaveBeenCalled();
+    await expect(service.deleteBudgetRevision({ ...base, revisionId: "br-1" })).rejects.toMatchObject({ code: "BUDGET_REVISION_APPROVAL_REQUIRED", status: 403 });
+    expect(mockPrisma.budgetRevision.delete).not.toHaveBeenCalled();
+    // the approver may do both
+    const back = await service.updateBudgetRevision({ ...base, userId: "pm-1", canApprove: true, revisionId: "br-1", payload: { status: "draft" } });
+    expect(back.status).toBe("draft");
+    await expect(service.deleteBudgetRevision({ ...base, canApprove: true, revisionId: "br-1" })).resolves.toEqual({ deleted: true });
+  });
+});

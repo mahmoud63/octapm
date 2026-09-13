@@ -87,6 +87,7 @@ router.delete(
   asyncHandler(async (req, res) => {
     const data = await deleteBudgetRevision({
       orgId: req.user.orgId,
+      canApprove: hasPermission(req, "cost", "approve"),
       projectId: req.params.projectId,
       revisionId: req.params.revisionId,
     });

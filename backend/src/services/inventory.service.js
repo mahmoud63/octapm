@@ -179,7 +179,7 @@ const listItems = async ({ orgId, projectId = null, projectIds = null, search = 
 
   const rows = await prisma.inventoryItem.findMany({
     where,
-    include: { balances: true, preferredSupplier: { select: { name: true } } },
+    include: { balances: projectIds?.length ? balancesFor(projectIds) : true, preferredSupplier: { select: { name: true } } },
     orderBy: [{ name: "asc" }],
     take: 500,
   });
@@ -195,7 +195,7 @@ const listItems = async ({ orgId, projectId = null, projectIds = null, search = 
  * printed SKU, so this tries all three rather than making the field the
  * scanner's problem.
  */
-const findByCode = async ({ orgId, code }) => {
+const findByCode = async ({ orgId, code, allowedProjectIds = null }) => {
   const value = requireText(code, "code");
   const row = await prisma.inventoryItem.findFirst({
     where: {
@@ -204,6 +204,7 @@ const findByCode = async ({ orgId, code }) => {
     },
     include: {
       balances: {
+        ...balancesFor(allowedProjectIds),
         include: {
           warehouse: { select: { id: true, code: true, name: true, kind: true } },
           location: { select: { id: true, code: true, name: true, kind: true, path: true } },
@@ -235,11 +236,15 @@ const findByCode = async ({ orgId, code }) => {
   };
 };
 
-const getItem = async ({ orgId, itemId }) => {
+const balancesFor = (allowedProjectIds) => (allowedProjectIds?.length ? { where: { warehouse: { OR: [{ projectId: null }, { projectId: { in: allowedProjectIds } }] } } } : {});
+
+const getItem = async ({ orgId, itemId, allowedProjectIds = null }) => {
   const row = await prisma.inventoryItem.findFirst({
     where: { id: itemId, orgId },
     include: {
       balances: {
+        // A key sees stock only in warehouses of its projects or the company's (CX21-462).
+        ...balancesFor(allowedProjectIds),
         include: {
           warehouse: { select: { id: true, code: true, name: true } },
           location: { select: { id: true, code: true, name: true } },
@@ -348,12 +353,12 @@ const serializeWarehouse = (row) => ({
   createdAt: row.createdAt?.toISOString() ?? null,
 });
 
-const listWarehouses = async ({ orgId, projectId = null, status = "active" }) => {
+const listWarehouses = async ({ orgId, projectId = null, projectIds = null, status = "active" }) => {
   const rows = await prisma.warehouse.findMany({
     where: {
       orgId,
       ...(status ? { status } : {}),
-      ...(projectId ? { OR: [{ projectId: null }, { projectId }] } : {}),
+      ...(projectId ? { OR: [{ projectId: null }, { projectId }] } : projectIds?.length ? { OR: [{ projectId: null }, { projectId: { in: projectIds } }] } : {}), // a key sees its projects' warehouses and the company's (CX21-462)
     },
     include: {
       manager: { select: { name: true } },
@@ -390,9 +395,11 @@ const createWarehouse = async ({ orgId, user, payload }) => {
   return serializeWarehouse(row);
 };
 
-const updateWarehouse = async ({ orgId, user, warehouseId, payload }) => {
+const updateWarehouse = async ({ orgId, user, warehouseId, payload, allowedProjectIds = null }) => {
   const existing = await prisma.warehouse.findFirst({ where: { id: warehouseId, orgId } });
   if (!existing) throw new HttpError(404, "WAREHOUSE_NOT_FOUND", "Warehouse not found");
+  // A project's warehouse is that project's to change (Phase 21D, CX21-462).
+  if (existing.projectId && allowedProjectIds?.length && !allowedProjectIds.includes(existing.projectId)) throw new HttpError(403, "FORBIDDEN_PROJECT", "This API key is not allowed on that project");
 
   const data = { updatedBy: user.id };
   if (payload.name !== undefined) data.name = requireText(payload.name, "Name");
@@ -425,7 +432,14 @@ const serializeLocation = (row) => ({
   status: row.status,
 });
 
-const listLocations = async ({ orgId, warehouseId }) => {
+const assertWarehouseAllowed = async ({ orgId, warehouseId, allowedProjectIds }) => {
+  if (!allowedProjectIds?.length) return;
+  const warehouse = await prisma.warehouse.findFirst({ where: { id: warehouseId, orgId }, select: { projectId: true } });
+  if (warehouse?.projectId && !allowedProjectIds.includes(warehouse.projectId)) throw new HttpError(403, "FORBIDDEN_PROJECT", "This API key is not allowed on that project");
+};
+
+const listLocations = async ({ orgId, warehouseId, allowedProjectIds = null }) => {
+  await assertWarehouseAllowed({ orgId, warehouseId, allowedProjectIds });
   const rows = await prisma.warehouseLocation.findMany({
     where: { orgId, warehouseId, status: "active" },
     orderBy: [{ path: "asc" }, { sortOrder: "asc" }],
@@ -439,7 +453,8 @@ const listLocations = async ({ orgId, warehouseId }) => {
  * The path is materialized on write so a whole branch reads in one query, and
  * the depth is taken from the parent rather than trusted from the caller.
  */
-const createLocation = async ({ orgId, user, warehouseId, payload }) => {
+const createLocation = async ({ orgId, user, warehouseId, payload, allowedProjectIds = null }) => {
+  await assertWarehouseAllowed({ orgId, warehouseId, allowedProjectIds });
   const warehouse = await prisma.warehouse.findFirst({ where: { id: warehouseId, orgId } });
   if (!warehouse) throw new HttpError(404, "WAREHOUSE_NOT_FOUND", "Warehouse not found");
 
@@ -1148,13 +1163,14 @@ const adjustStock = async ({ orgId, user, payload, type }) => {
     // An unexplained adjustment is the thing an auditor asks about first.
     throw new HttpError(400, "INV_ADJUST_REASON", "Say why the stock is being adjusted");
   }
-  if (type === "return" && !payload.activityId && !payload.costCodeId) {
+  if (type === "return" && !payload.activityId && !payload.projectId) {
     // Stock coming back from site brings its cost back from where it was
     // charged, exactly as an issue charges it: a return naming neither an
     // activity nor a cost code left the cost on the activity that no longer
     // had the material, and a second issue charged it again (Phase 21D,
     // CX21-455).
-    throw new HttpError(400, "INV_NO_COST_SOURCE", "Return from an activity or a cost code, so the cost comes back from where it was charged");
+    // A cost code alone names no project, so nothing would come back (CX21-463).
+    throw new HttpError(400, "INV_NO_COST_SOURCE", "Return from the activity or project the stock was issued to, so its cost comes back from where it was charged");
   }
 
   const quantity = type === "adjust" ? Number(payload.quantity) : positive(payload.quantity, "Quantity");
@@ -1272,6 +1288,24 @@ const nextRef = async (model, orgId, prefix) => {
   });
 };
 
+/**
+ * A key limited to some projects may move or claim stock only between the
+ * warehouses of those projects (or company ones) and only items of those
+ * projects (or company items) (Phase 21D, CX21-461).
+ */
+const assertStockAllowed = async (client, { orgId, allowedProjectIds, warehouses = [], itemIds = [] }) => {
+  if (!allowedProjectIds?.length) return;
+  for (const warehouse of warehouses) {
+    if (warehouse?.projectId && !allowedProjectIds.includes(warehouse.projectId)) throw new HttpError(403, "FORBIDDEN_PROJECT", "This API key is not allowed on that project");
+  }
+  const ids = [...new Set(itemIds.filter(Boolean))];
+  if (!ids.length) return;
+  const items = await client.inventoryItem.findMany({ where: { id: { in: ids }, orgId }, select: { id: true, projectId: true } });
+  for (const item of items) {
+    if (item.projectId && !allowedProjectIds.includes(item.projectId)) throw new HttpError(403, "FORBIDDEN_PROJECT", "This API key is not allowed on that project");
+  }
+};
+
 const createTransfer = async ({ orgId, user, payload }) => {
   const lines = Array.isArray(payload.lines) ? payload.lines : [];
   if (!lines.length) throw new HttpError(400, "TRANSFER_EMPTY", "Add at least one item to transfer");
@@ -1284,6 +1318,7 @@ const createTransfer = async ({ orgId, user, payload }) => {
     prisma.warehouse.findFirst({ where: { id: payload.toWarehouseId, orgId } }),
   ]);
   if (!from || !to) throw new HttpError(404, "WAREHOUSE_NOT_FOUND", "Warehouse not found");
+  await assertStockAllowed(prisma, { orgId, allowedProjectIds: payload.allowedProjectIds ?? null, warehouses: [from, to], itemIds: lines.map((line) => line.itemId) });
 
   const ref = trimOrNull(payload.ref) || (await nextRef("stockTransfer", orgId, "TRF"));
   const row = await prisma.stockTransfer.create({
@@ -1313,7 +1348,7 @@ const createTransfer = async ({ orgId, user, payload }) => {
 };
 
 /** Stock leaves the source and is in transit until someone receives it. */
-const dispatchTransfer = async ({ orgId, user, transferId }) => {
+const dispatchTransfer = async ({ orgId, user, transferId, allowedProjectIds = null }) => {
   return prisma.$transaction(async (tx) => {
     // Locked before it is read: the second of two concurrent dispatches or
     // receipts waits, then sees the status the first one wrote (Phase 21D,
@@ -1324,6 +1359,10 @@ const dispatchTransfer = async ({ orgId, user, transferId }) => {
       include: { lines: true },
     });
     if (!transfer) throw new HttpError(404, "TRANSFER_NOT_FOUND", "Transfer not found");
+    if (allowedProjectIds?.length) {
+      const ends = await tx.warehouse.findMany({ where: { id: { in: [transfer.fromWarehouseId, transfer.toWarehouseId] }, orgId }, select: { id: true, projectId: true } });
+      await assertStockAllowed(tx, { orgId, allowedProjectIds, warehouses: ends, itemIds: transfer.lines.map((line) => line.itemId) });
+    }
     if (transfer.status !== "draft") {
       throw new HttpError(409, "TRANSFER_STATE", `A ${transfer.status} transfer cannot be dispatched`);
     }
@@ -1355,7 +1394,7 @@ const dispatchTransfer = async ({ orgId, user, transferId }) => {
 };
 
 /** Stock lands. What arrived damaged is written off at the destination. */
-const receiveTransfer = async ({ orgId, user, transferId, payload = {} }) => {
+const receiveTransfer = async ({ orgId, user, transferId, payload = {}, allowedProjectIds = null }) => {
   const received = new Map(
     (Array.isArray(payload.lines) ? payload.lines : []).map((line) => [line.id, line])
   );
@@ -1370,6 +1409,10 @@ const receiveTransfer = async ({ orgId, user, transferId, payload = {} }) => {
       include: { lines: true },
     });
     if (!transfer) throw new HttpError(404, "TRANSFER_NOT_FOUND", "Transfer not found");
+    if (allowedProjectIds?.length) {
+      const ends = await tx.warehouse.findMany({ where: { id: { in: [transfer.fromWarehouseId, transfer.toWarehouseId] }, orgId }, select: { id: true, projectId: true } });
+      await assertStockAllowed(tx, { orgId, allowedProjectIds, warehouses: ends, itemIds: transfer.lines.map((line) => line.itemId) });
+    }
     if (transfer.status !== "in_transit") {
       throw new HttpError(409, "TRANSFER_STATE", `A ${transfer.status} transfer cannot be received`);
     }
@@ -1481,10 +1524,10 @@ const getSummary = async ({ orgId, projectId = null, projectIds = null }) => {
         status: "active",
         ...(itemScope || {}),
       },
-      include: { balances: true },
+      include: { balances: projectIds?.length ? balancesFor(projectIds) : true },
     }),
     prisma.warehouse.findMany({
-      where: { orgId, status: "active" },
+      where: { orgId, status: "active", ...(projectIds?.length ? { OR: [{ projectId: null }, { projectId: { in: projectIds } }] } : {}) },
       include: { balances: { ...(itemScope ? { where: { item: itemScope } } : {}), include: { item: { select: { averageCost: true } } } } },
     }),
     prisma.stockTransaction.findMany({

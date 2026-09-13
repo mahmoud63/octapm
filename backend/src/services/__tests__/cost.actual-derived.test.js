@@ -5,6 +5,9 @@ const mockPrisma = {
   $transaction: jest.fn(async (fn) => fn(mockPrisma)),
   project: { findFirst: jest.fn(async () => ({ id: 'p1', orgId: 'org-1' })) },
   activity: { findFirst: jest.fn(async () => ({ id: 'act-1', projectId: 'p1' })) },
+  activityBoqAllocation: { findMany: jest.fn(async () => []) },
+  budgetLineActivityAllocation: { findMany: jest.fn(async () => []) },
+  boqItem: { findMany: jest.fn(async () => []) },
   costRecord: {
     findFirst: jest.fn(async () => ({ id: 'cr-1', projectId: 'p1', activityId: 'act-1', budget: 1000, actual: 400, committed: 0, forecast: 1000, labour: 0, material: 0, equipment: 0, subcontract: 0, indirect: 0, overhead: 0, contingency: 0, actualThroughDate: null })),
     update: jest.fn(async ({ data }) => ({ id: 'cr-1', ...data })),
@@ -47,5 +50,21 @@ describe("the through-date is the ledger's", () => {
     expect(Object.prototype.hasOwnProperty.call(mockPrisma.costRecord.update.mock.calls.at(-1)[0].data, 'actualThroughDate')).toBe(false);
     await service.updateCostRecord({ orgId: 'org-1', projectId: 'p1', costRecordId: 'cr-1', payload: { actualThroughDate: '2027-03-03' } });
     expect(new Date(mockPrisma.costRecord.update.mock.calls.at(-1)[0].data.actualThroughDate).toISOString()).toBe('2027-03-03T00:00:00.000Z');
+  });
+});
+
+describe('one projection row per activity, whoever creates it', () => {
+  it('CX21-464: a cost-record upsert holds the (project, activity) pair before it looks for the row', async () => {
+    mockPrisma.$executeRaw = jest.fn(async () => 0);
+    mockPrisma.costRecord.findFirst.mockResolvedValueOnce(null);
+    mockPrisma.costRecord.create.mockClear();
+    await service.upsertCostRecord({ orgId: 'org-1', projectId: 'p1', activityId: 'act-1', payload: { budget: 500 } });
+    const held = mockPrisma.$executeRaw.mock.calls.find(([strings, ...values]) => Array.isArray(strings) && strings.join('?').includes('pg_advisory_xact_lock') && values.includes('cost-record:p1:act-1'));
+    expect(held).toBeDefined();
+    const lockOrder = mockPrisma.$executeRaw.mock.invocationCallOrder[0];
+    // looked for again under the lock: the row a posting created meanwhile is updated, not duplicated
+    expect(mockPrisma.costRecord.findFirst.mock.invocationCallOrder.at(-1)).toBeGreaterThan(lockOrder);
+    expect(mockPrisma.costRecord.create).not.toHaveBeenCalled();
+    expect(mockPrisma.costRecord.update).toHaveBeenCalled();
   });
 });

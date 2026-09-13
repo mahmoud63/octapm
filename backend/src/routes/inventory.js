@@ -82,7 +82,7 @@ router.get(
   requirePermission("inventory", "read"),
   [param("code").isString().trim().isLength({ min: 1, max: 120 }), validate],
   asyncHandler(async (req, res) =>
-    sendScoped(req, res, await service.findByCode({ orgId: req.user.orgId, code: req.params.code }))
+    sendScoped(req, res, await service.findByCode({ orgId: req.user.orgId, code: req.params.code, allowedProjectIds: keyProjects(req) }))
   )
 );
 
@@ -92,7 +92,7 @@ router.get(
   [param("itemId").isUUID(), validate],
   asyncHandler(async (req, res) =>
     // A project item is that project's (Phase 21D, CX21-451).
-    sendScoped(req, res, await service.getItem({ orgId: req.user.orgId, itemId: req.params.itemId }))
+    sendScoped(req, res, await service.getItem({ orgId: req.user.orgId, itemId: req.params.itemId, allowedProjectIds: keyProjects(req) }))
   )
 );
 
@@ -133,7 +133,7 @@ router.post(
   asyncHandler(async (req, res) =>
     sendSuccess(
       res,
-      await service.createItem({ orgId: req.user.orgId, user: req.user, payload: req.body }),
+      await scopedCall(req, req.body.projectId ?? null, () => service.createItem({ orgId: req.user.orgId, user: req.user, payload: req.body })),
       201
     )
   )
@@ -170,10 +170,11 @@ router.get(
   asyncHandler(async (req, res) =>
     sendSuccess(
       res,
-      await service.listWarehouses({
+      await scopedCall(req, req.query.projectId ?? null, () => service.listWarehouses({
         orgId: req.user.orgId,
         projectId: req.query.projectId ?? null,
-      })
+        projectIds: keyProjects(req),
+      }))
     )
   )
 );
@@ -194,7 +195,7 @@ router.post(
   asyncHandler(async (req, res) =>
     sendSuccess(
       res,
-      await service.createWarehouse({ orgId: req.user.orgId, user: req.user, payload: req.body }),
+      await scopedCall(req, req.body.projectId ?? null, () => service.createWarehouse({ orgId: req.user.orgId, user: req.user, payload: req.body })),
       201
     )
   )
@@ -221,6 +222,7 @@ router.patch(
         user: req.user,
         warehouseId: req.params.warehouseId,
         payload: req.body,
+        allowedProjectIds: keyProjects(req),
       })
     )
   )
@@ -236,6 +238,7 @@ router.get(
       await service.listLocations({
         orgId: req.user.orgId,
         warehouseId: req.params.warehouseId,
+        allowedProjectIds: keyProjects(req),
       })
     )
   )
@@ -258,6 +261,7 @@ router.post(
       res,
       await service.createLocation({
         orgId: req.user.orgId,
+        allowedProjectIds: keyProjects(req),
         user: req.user,
         warehouseId: req.params.warehouseId,
         payload: req.body,
@@ -443,7 +447,7 @@ router.post(
   asyncHandler(async (req, res) =>
     sendSuccess(
       res,
-      await service.createTransfer({ orgId: req.user.orgId, user: req.user, payload: req.body }),
+      await service.createTransfer({ orgId: req.user.orgId, user: req.user, payload: { ...req.body, allowedProjectIds: keyProjects(req) } }),
       201
     )
   )
@@ -458,6 +462,7 @@ router.post(
       res,
       await service.dispatchTransfer({
         orgId: req.user.orgId,
+        allowedProjectIds: keyProjects(req),
         user: req.user,
         transferId: req.params.transferId,
       })
@@ -481,6 +486,7 @@ router.post(
       res,
       await service.receiveTransfer({
         orgId: req.user.orgId,
+        allowedProjectIds: keyProjects(req),
         user: req.user,
         transferId: req.params.transferId,
         payload: req.body,
