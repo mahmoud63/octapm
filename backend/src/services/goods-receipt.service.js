@@ -307,6 +307,12 @@ const receiveAgainstOrder = async ({ orgId, user, payload, allowedProjectIds = n
     where: orderScope,
     include: { lines: true },
   });
+  // The key's project list is checked before anything is created for the
+  // delivery: settling the items used to create the stocked item first and
+  // refuse afterwards, leaving the item behind (Phase 21D, CX21-421).
+  if (advance && allowedProjectIds?.length && !allowedProjectIds.includes(advance.projectId)) {
+    throw new HttpError(403, "FORBIDDEN_PROJECT", "This API key is not allowed on that project");
+  }
   const itemsByLine = advance
     ? await resolveItemsForReceipt({ orgId, user, order: advance, lines })
     : new Map();
@@ -317,6 +323,12 @@ const receiveAgainstOrder = async ({ orgId, user, payload, allowedProjectIds = n
       include: { lines: true, project: true },
     });
     if (!order) throw new HttpError(404, "PO_NOT_FOUND", "Purchase order not found");
+    // The order is held for the delivery. Its status was read a moment ago;
+    // a cancellation landing between that read and the receipt's final
+    // update used to be overwritten with "partial" or "received", with the
+    // stock booked against a cancelled order (Phase 21D, CX21-434).
+    const [held] = await tx.$queryRaw`SELECT status FROM "ProcurementOrder" WHERE id = ${order.id} FOR UPDATE`;
+    if (held) order.status = held.status;
     // A key limited to some projects may not receive against another's order,
     // whether or not the payload names the project (Phase 21D, CX21-421).
     if (allowedProjectIds?.length && !allowedProjectIds.includes(order.projectId)) {

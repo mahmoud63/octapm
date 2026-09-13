@@ -222,9 +222,11 @@ const priceTrend = (items, receipts) => {
 
 // ─── the whole dashboard ───────────────────────────────────────────────────
 
-const getAnalytics = async ({ orgId, projectId = null }) => {
+const getAnalytics = async ({ orgId, projectId = null, projectIds = null }) => {
   const now = new Date();
-  const projectScope = projectId ? { projectId } : {};
+  // One project when asked for one; the caller's allowed projects (an API
+  // key's list) when not (Phase 21D, CX21-430).
+  const projectScope = projectId ? { projectId } : projectIds?.length ? { projectId: { in: projectIds } } : {};
 
   const [
     itemRows,
@@ -240,7 +242,7 @@ const getAnalytics = async ({ orgId, projectId = null }) => {
       where: {
         orgId,
         status: "active",
-        ...(projectId ? { OR: [{ projectId: null }, { projectId }] } : {}),
+        ...(projectId ? { OR: [{ projectId: null }, { projectId }] } : projectIds?.length ? { OR: [{ projectId: null }, { projectId: { in: projectIds } }] } : {}),
       },
       include: { balances: true },
     }),

@@ -3,7 +3,7 @@ const { body, param, query } = require("express-validator");
 const { asyncHandler } = require("../utils/async-handler");
 const { sendSuccess } = require("../utils/api-response");
 const { authenticate } = require("../middleware/auth");
-const { requirePermission } = require("../middleware/rbac");
+const { requirePermission, noApiKey } = require("../middleware/rbac");
 const { validate } = require("../middleware/validate");
 const service = require("../services/report-builder.service");
 const reportAssistant = require("../services/report-assistant.service");
@@ -78,7 +78,7 @@ router.post(
   "/preview",
   requirePermission("report", "read"),
   [...previewValidators, validate],
-  asyncHandler(async (req, res) => sendSuccess(res, await service.preview({ orgId: orgId(req), user: user(req), payload: req.body, limit: req.body.limit || service.PREVIEW_LIMIT, offset: req.body.offset || 0 }))),
+  asyncHandler(async (req, res) => sendSuccess(res, await service.preview({ orgId: orgId(req), user: user(req), apiClient: req.apiClient || null, payload: req.body, limit: req.body.limit || service.PREVIEW_LIMIT, offset: req.body.offset || 0 }))),
 );
 
 // OCTA-AI-NLREPORT-033: a question becomes a definition; a preview becomes a narrative.
@@ -87,7 +87,7 @@ router.post(
   requirePermission("assistant", "read"),
   requirePermission("report", "read"),
   [body("question").isString().trim().isLength({ min: 3, max: 1000 }), body("projectId").optional({ nullable: true }).isUUID(), validate],
-  asyncHandler(async (req, res) => sendSuccess(res, await reportAssistant.ask({ orgId: orgId(req), user: user(req), question: req.body.question, projectId: req.body.projectId || null }))),
+  asyncHandler(async (req, res) => sendSuccess(res, await reportAssistant.ask({ orgId: orgId(req), user: user(req), apiClient: req.apiClient || null, question: req.body.question, projectId: req.body.projectId || null }))),
 );
 
 router.post(
@@ -95,19 +95,20 @@ router.post(
   requirePermission("assistant", "read"),
   requirePermission("report", "read"),
   [...previewValidators, validate],
-  asyncHandler(async (req, res) => sendSuccess(res, await reportAssistant.narrate({ orgId: orgId(req), user: user(req), payload: req.body }))),
+  asyncHandler(async (req, res) => sendSuccess(res, await reportAssistant.narrate({ orgId: orgId(req), user: user(req), apiClient: req.apiClient || null, payload: req.body }))),
 );
 
 router.post(
   "/export",
   requirePermission("report", "export"),
   [...previewValidators, body("format").optional().isIn(["pdf", "xlsx"]), body("name").optional().isString().trim().isLength({ max: 160 }), validate],
-  asyncHandler(async (req, res) => sendFile(res, await service.renderDefinition({ orgId: orgId(req), user: user(req), definition: req.body, format: req.body.format || "xlsx" }))),
+  asyncHandler(async (req, res) => sendFile(res, await service.renderDefinition({ orgId: orgId(req), user: user(req), apiClient: req.apiClient || null, definition: req.body, format: req.body.format || "xlsx" }))),
 );
 
 router.get(
   "/runs/:runId/download",
   requirePermission("report", "read"),
+  noApiKey,
   [param("runId").isUUID(), query("format").optional().isIn(["pdf", "xlsx"]), validate],
   asyncHandler(async (req, res) => sendFile(res, await service.getRunFile({ orgId: orgId(req), user: user(req), runId: req.params.runId, format: req.query.format || "pdf" }))),
 );
@@ -153,21 +154,21 @@ router.post(
   "/:reportId/run",
   requirePermission("report", "read"),
   [param("reportId").isUUID(), body("limit").optional().isInt({ min: 1, max: 1000 }).toInt(), body("offset").optional().isInt({ min: 0 }).toInt(), validate],
-  asyncHandler(async (req, res) => sendSuccess(res, await service.runDefinition({ orgId: orgId(req), user: user(req), reportId: req.params.reportId, limit: req.body.limit || service.PREVIEW_LIMIT, offset: req.body.offset || 0 }))),
+  asyncHandler(async (req, res) => sendSuccess(res, await service.runDefinition({ orgId: orgId(req), user: user(req), apiClient: req.apiClient || null, reportId: req.params.reportId, limit: req.body.limit || service.PREVIEW_LIMIT, offset: req.body.offset || 0 }))),
 );
 
 router.get(
   "/:reportId/export.pdf",
   requirePermission("report", "export"),
   [param("reportId").isUUID(), validate],
-  asyncHandler(async (req, res) => sendFile(res, await service.renderDefinition({ orgId: orgId(req), user: user(req), reportId: req.params.reportId, format: "pdf" }))),
+  asyncHandler(async (req, res) => sendFile(res, await service.renderDefinition({ orgId: orgId(req), user: user(req), apiClient: req.apiClient || null, reportId: req.params.reportId, format: "pdf" }))),
 );
 
 router.get(
   "/:reportId/export.xlsx",
   requirePermission("report", "export"),
   [param("reportId").isUUID(), validate],
-  asyncHandler(async (req, res) => sendFile(res, await service.renderDefinition({ orgId: orgId(req), user: user(req), reportId: req.params.reportId, format: "xlsx" }))),
+  asyncHandler(async (req, res) => sendFile(res, await service.renderDefinition({ orgId: orgId(req), user: user(req), apiClient: req.apiClient || null, reportId: req.params.reportId, format: "xlsx" }))),
 );
 
 router.get(
@@ -180,6 +181,7 @@ router.get(
 router.post(
   "/:reportId/runs",
   requirePermission("report", "export"),
+  noApiKey,
   [param("reportId").isUUID(), body("format").optional().isIn(service.FORMATS), body("deliver").optional().isBoolean().toBoolean(), body("recipients").optional().isObject(), validate],
   asyncHandler(async (req, res) => sendSuccess(res, await service.createRun({ orgId: orgId(req), user: user(req), reportId: req.params.reportId, format: req.body.format || "pdf", deliver: Boolean(req.body.deliver), recipients: req.body.recipients || null }), 201)),
 );
@@ -194,6 +196,7 @@ router.get(
 router.post(
   "/:reportId/schedules",
   requirePermission("report", "update", { transition: "report.schedule" }),
+  noApiKey,
   [param("reportId").isUUID(), ...scheduleValidators, validate],
   asyncHandler(async (req, res) => sendSuccess(res, await service.createSchedule({ orgId: orgId(req), user: user(req), reportId: req.params.reportId, payload: req.body }), 201)),
 );

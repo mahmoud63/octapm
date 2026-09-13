@@ -44,27 +44,12 @@ const parseOptionalDate = (value, field = 'date') => {
   return date;
 };
 
-const resolveActualThroughDate = ({ payload, existing = null, actual }) => {
-  const suppliedDate = parseOptionalDate(
-    payload.actualThroughDate,
-    'actualThroughDate',
-  );
-  if (suppliedDate !== undefined) return suppliedDate;
-
-  // An actual in the payload is only ever an echo of what the ledger posted
-  // (COST_ACTUAL_IS_DERIVED); it is not a posting, so it does not move the
-  // date the actual is good through. Treating it as one reset the date under
-  // the latest ledger entry and the reconciliation flagged the activity as
-  // stale (Phase 21D, T-15).
-  if (existing?.actualThroughDate) {
-    return existing.actualThroughDate;
-  }
-
-  if (existing && Number(existing.actual) > 0) {
-    return existing.updatedAt || new Date();
-  }
-
-  return Number(actual) > 0 ? new Date() : null;
+const resolveActualThroughDate = ({ payload }) => {
+  // The date the actual is good through is the ledger's (it advances it with
+  // every posting). An edit writes it only when the caller supplies one;
+  // writing back the date it had read erased a posting's advance that landed
+  // in between (Phase 21D, CX21-436). `undefined` means "not written".
+  return parseOptionalDate(payload.actualThroughDate, 'actualThroughDate');
 };
 
 const COST_RECORD_INCLUDE = {
@@ -340,7 +325,7 @@ const upsertCostRecord = async ({
     committed: toMoneyNumber(payload.committed ?? existing?.committed ?? 0),
     // actual is not written here: it is the ledger's projection, and a stale
     // copy would erase a posting that landed since the read (Phase 21D, CX21-422)
-    actualThroughDate,
+    ...(actualThroughDate !== undefined ? { actualThroughDate } : {}),
     forecast: resolveForecast({
       budget,
       actual,
@@ -419,7 +404,7 @@ const updateCostRecord = async ({
     committed: toMoneyNumber(payload.committed ?? existing.committed),
     // actual is not written here: it is the ledger's projection, and a stale
     // copy would erase a posting that landed since the read (Phase 21D, CX21-422)
-    actualThroughDate,
+    ...(actualThroughDate !== undefined ? { actualThroughDate } : {}),
     forecast: resolveForecast({
       budget,
       actual,

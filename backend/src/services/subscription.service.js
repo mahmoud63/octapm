@@ -221,56 +221,74 @@ async function subscribe(orgId, planId, billingCycle, paymentMethodId = null) {
     });
   }
 
-  const pm = await prisma.paymentMethod.findFirst({
-    where: { subscriptionId: sub.id, isDefault: true },
-  });
-  if (!sub.stripeCustomerId || !pm) {
-    throw new HttpError(400, 'PAYMENT_METHOD_REQUIRED', 'No payment method on file');
-  }
-
-  if (planRank(planId) < planRank(sub.plan) && sub.status === 'active') {
-    throw new HttpError(400, 'DOWNGRADE_NOT_ALLOWED', 'Downgrades are not supported');
-  }
-
-  const priceId = getStripePriceId(planId, billingCycle);
-  if (!priceId) {
-    throw new HttpError(500, 'CONFIG_ERROR', `Missing Stripe price for ${planId}/${billingCycle}`);
-  }
-
-  const stripe = getStripe();
-  let stripeSub;
-
-  if (sub.stripeSubscriptionId && sub.status === 'active') {
-    const current = await stripe.subscriptions.retrieve(sub.stripeSubscriptionId);
-    stripeSub = await stripe.subscriptions.update(sub.stripeSubscriptionId, {
-      items: [{ id: current.items.data[0].id, price: priceId }],
-      proration_behavior: 'always_invoice',
-      default_payment_method: pm.stripePaymentMethodId,
+  // One subscribe per organisation at a time, decided on a row read under the
+  // lock: two concurrent requests used to both read "no active subscription"
+  // and each create a Stripe subscription, the second hiding the first; and a
+  // subscribe after a cancel-at-period-end used to create a second billable
+  // subscription while the first ran to its period end (Phase 21D, CX21-435).
+  await prisma.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${`subscription:${orgId}`}))`;
+    const held = await ensureSubscription(orgId, tx);
+    const pm = await tx.paymentMethod.findFirst({
+      where: { subscriptionId: held.id, isDefault: true },
     });
-  } else {
-    stripeSub = await stripe.subscriptions.create({
-      customer: sub.stripeCustomerId,
-      items: [{ price: priceId }],
-      default_payment_method: pm.stripePaymentMethodId,
-      payment_behavior: 'error_if_incomplete',
-      expand: ['latest_invoice'],
-    });
-  }
+    if (!held.stripeCustomerId || !pm) {
+      throw new HttpError(400, 'PAYMENT_METHOD_REQUIRED', 'No payment method on file');
+    }
 
-  await prisma.subscription.update({
-    where: { id: sub.id },
-    data: {
-      plan: planId,
-      billingCycle,
-      status: 'active',
-      stripeSubscriptionId: stripeSub.id,
-      currentPeriodEnd: new Date(stripeSub.current_period_end * 1000),
-      cancelAtPeriodEnd: false,
-      canceledAt: null,
-      aiGenerationsUsed: 0,
-      periodResetAt: new Date(stripeSub.current_period_end * 1000),
-    },
-  });
+    if (planRank(planId) < planRank(held.plan) && held.status === 'active') {
+      throw new HttpError(400, 'DOWNGRADE_NOT_ALLOWED', 'Downgrades are not supported');
+    }
+
+    const priceId = getStripePriceId(planId, billingCycle);
+    if (!priceId) {
+      throw new HttpError(500, 'CONFIG_ERROR', `Missing Stripe price for ${planId}/${billingCycle}`);
+    }
+
+    const stripe = getStripe();
+    // A Stripe subscription that is still running — active, past due, or
+    // cancelled at period end and not yet ended — is changed in place.
+    const running = held.stripeSubscriptionId
+      ? await stripe.subscriptions.retrieve(held.stripeSubscriptionId).catch(() => null)
+      : null;
+    const reusable = Boolean(running && !['canceled', 'incomplete_expired'].includes(running.status));
+    let stripeSub;
+    if (reusable) {
+      stripeSub = await stripe.subscriptions.update(held.stripeSubscriptionId, {
+        items: [{ id: running.items.data[0].id, price: priceId }],
+        cancel_at_period_end: false,
+        proration_behavior: 'always_invoice',
+        default_payment_method: pm.stripePaymentMethodId,
+      });
+    } else {
+      stripeSub = await stripe.subscriptions.create({
+        customer: held.stripeCustomerId,
+        items: [{ price: priceId }],
+        default_payment_method: pm.stripePaymentMethodId,
+        payment_behavior: 'error_if_incomplete',
+        expand: ['latest_invoice'],
+      }, {
+        // The same attempt replayed (a retry after a failed write here) gets
+        // the same subscription back from Stripe, not a second one.
+        idempotencyKey: `subscribe:${held.id}:${planId}:${billingCycle}:${held.stripeSubscriptionId || 'first'}`,
+      });
+    }
+
+    await tx.subscription.update({
+      where: { id: held.id },
+      data: {
+        plan: planId,
+        billingCycle,
+        status: 'active',
+        stripeSubscriptionId: stripeSub.id,
+        currentPeriodEnd: new Date(stripeSub.current_period_end * 1000),
+        cancelAtPeriodEnd: false,
+        canceledAt: null,
+        aiGenerationsUsed: 0,
+        periodResetAt: new Date(stripeSub.current_period_end * 1000),
+      },
+    });
+  }, { maxWait: 5000, timeout: 30000 });
 
   return getCurrentSubscription(orgId);
 }

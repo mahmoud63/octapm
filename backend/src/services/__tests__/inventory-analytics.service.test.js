@@ -214,3 +214,24 @@ describe("damaged report", () => {
     expect(service.damagedReport([item()])).toEqual([]);
   });
 });
+
+describe("Phase 21D — integrity (release challenge, third pass)", () => {
+  it("CX21-430: a key's project list narrows every project-scoped figure", async () => {
+    const { prisma } = require("../../config/db");
+    const empty = () => jest.fn(async () => []);
+    Object.assign(prisma, {
+      inventoryItem: { findMany: empty() },
+      warehouse: { findMany: empty() },
+      stockTransaction: { groupBy: empty(), findMany: empty() },
+      procurementPoLine: { groupBy: empty() },
+      activityMaterial: { findMany: empty() },
+      activity: { findMany: empty() },
+      project: { findMany: empty() },
+    });
+    await service.getAnalytics({ orgId: "org-1", projectIds: ["p1"] });
+    expect(prisma.stockTransaction.groupBy).toHaveBeenCalled();
+    for (const call of prisma.stockTransaction.groupBy.mock.calls) expect(call[0].where).toMatchObject({ projectId: { in: ["p1"] } });
+    expect(prisma.inventoryItem.findMany.mock.calls[0][0].where).toMatchObject({ OR: [{ projectId: null }, { projectId: { in: ["p1"] } }] });
+    expect(prisma.activityMaterial.findMany.mock.calls[0][0].where).toMatchObject({ projectId: { in: ["p1"] } });
+  });
+});

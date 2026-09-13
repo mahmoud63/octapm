@@ -25,7 +25,8 @@ describe('activity actual cost is derived', () => {
     mockPrisma.costRecord.findFirst.mockResolvedValueOnce({ id: 'cr-1', projectId: 'p1', activityId: 'act-1', budget: 1000, actual: 400, committed: 0, forecast: 1000, labour: 0, material: 0, equipment: 0, subcontract: 0, indirect: 0, overhead: 0, contingency: 0, actualThroughDate: new Date('2027-02-02T00:00:00.000Z') });
     mockPrisma.costRecord.update.mockClear();
     await service.updateCostRecord({ orgId: 'org-1', projectId: 'p1', costRecordId: 'cr-1', payload: { actual: 400 } });
-    expect(mockPrisma.costRecord.update).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ actualThroughDate: new Date('2027-02-02T00:00:00.000Z') }) }));
+    // — since CX21-436 the date is not written at all unless the caller supplies one
+    expect(Object.prototype.hasOwnProperty.call(mockPrisma.costRecord.update.mock.calls.at(-1)[0].data, 'actualThroughDate')).toBe(false);
   });
 });
 
@@ -36,5 +37,15 @@ describe('a cost-record edit never writes actual', () => {
     const written = mockPrisma.costRecord.update.mock.calls.at(-1)[0].data;
     expect(Object.prototype.hasOwnProperty.call(written, 'actual')).toBe(false);
     expect(written).toMatchObject({ budget: 1500 });
+  });
+});
+
+describe("the through-date is the ledger's", () => {
+  it('CX21-436: an edit writes no through-date it did not supply, and writes the one it did', async () => {
+    mockPrisma.costRecord.update.mockClear();
+    await service.updateCostRecord({ orgId: 'org-1', projectId: 'p1', costRecordId: 'cr-1', payload: { budget: 1300 } });
+    expect(Object.prototype.hasOwnProperty.call(mockPrisma.costRecord.update.mock.calls.at(-1)[0].data, 'actualThroughDate')).toBe(false);
+    await service.updateCostRecord({ orgId: 'org-1', projectId: 'p1', costRecordId: 'cr-1', payload: { actualThroughDate: '2027-03-03' } });
+    expect(new Date(mockPrisma.costRecord.update.mock.calls.at(-1)[0].data.actualThroughDate).toISOString()).toBe('2027-03-03T00:00:00.000Z');
   });
 });

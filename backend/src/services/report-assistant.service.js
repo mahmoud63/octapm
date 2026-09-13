@@ -198,7 +198,7 @@ const definitionOut = ({ proposal, normalized, projectId }) => ({
 
 const runMessage = (stored) => (stored?.message ? { id: stored.message.id, provider: stored.message.provider, model: stored.message.model, feedback: stored.message.feedback } : null);
 
-const ask = async ({ orgId, user, question, projectId = null, transport = null }) => {
+const ask = async ({ orgId, user, question, projectId = null, transport = null, apiClient = null }) => {
   const text = trimOrNull(question);
   if (!text) throw new HttpError(400, "REPORT_NL_QUESTION_REQUIRED", "Ask for a report in a sentence");
   if (text.length > MAX_QUESTION) throw new HttpError(400, "REPORT_NL_QUESTION_TOO_LONG", `Keep the question under ${MAX_QUESTION} characters`);
@@ -239,7 +239,7 @@ const ask = async ({ orgId, user, question, projectId = null, transport = null }
   let preview = null;
   const warnings = [...repaired.warnings];
   try {
-    preview = await reportBuilder.runQuery({ orgId, user, definition: { ...repaired.normalized, projectId: projectId || null }, limit: PREVIEW_ROWS });
+    preview = await reportBuilder.runQuery({ orgId, user, definition: { ...repaired.normalized, projectId: projectId || null }, limit: PREVIEW_ROWS, apiClient });
   } catch (error) {
     warnings.push(`Preview failed: ${error?.message || "unknown error"}`);
   }
@@ -277,8 +277,8 @@ const deterministicNarrative = (result) => {
   return { headline, summary: `${headline}${top.length > 1 ? ` The next groups are ${top.slice(1).map((group) => `${group.label} (${group.count})`).join(" and ")}.` : ""}`, highlights, caveats };
 };
 
-const narrate = async ({ orgId, user, payload = {}, transport = null }) => {
-  const result = await reportBuilder.preview({ orgId, user, payload, limit: 200 });
+const narrate = async ({ orgId, user, payload = {}, transport = null, apiClient = null }) => {
+  const result = await reportBuilder.preview({ orgId, user, payload, limit: 200, apiClient });
   const fallback = deterministicNarrative(result);
   const digest = digestOf(result);
   const out = (narrative, degraded, reason, stored) => ({ degraded, reason, narrative, result: { total: result.total, groups: result.groups?.length || 0, projects: result.projects, truncated: result.truncated }, message: runMessage(stored) });

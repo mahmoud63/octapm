@@ -271,20 +271,23 @@ const recomputeActualCost = async ({ orgId, projectId, actor = null, dryRun = fa
 
   const applied = await prisma.$transaction(async (tx) => {
     let count = 0;
-    // Derived by the database at the moment of the write, not from the report
-    // read earlier: a posting that landed in between is kept, not undone
-    // (Phase 21D, CX21-428).
-    for (const row of before.budget.variances) {
-      if (row.note) continue; // orphaned ledger rows have no line to correct
-      await tx.$executeRaw`UPDATE "BudgetLine" SET actual = COALESCE((SELECT SUM(e.amount) FROM "CostLedgerEntry" e WHERE e."budgetLineId" = "BudgetLine".id), 0) WHERE id = ${row.budgetLineId}`;
+    const lineIds = before.budget.variances.filter((row) => !row.note).map((row) => row.budgetLineId);
+    const activityIds = before.activity.variances.filter((row) => !row.note).map((row) => row.activityId);
+    // The projection rows are held first, in a statement of their own. A
+    // posting that is adding to one of them holds the same lock until it
+    // commits, so the SUM below — taken by a later statement — sees it. A SUM
+    // inside the UPDATE that waited on that lock would keep the snapshot it
+    // started with and write the posting away (Phase 21D, CX21-428 / CX21-432).
+    if (lineIds.length) await tx.$queryRaw`SELECT id FROM "BudgetLine" WHERE id = ANY(${lineIds}::text[]) FOR NO KEY UPDATE`;
+    if (activityIds.length) await tx.$queryRaw`SELECT id FROM "CostRecord" WHERE "projectId" = ${projectId} AND "activityId" = ANY(${activityIds}::text[]) FOR NO KEY UPDATE`;
+    for (const budgetLineId of lineIds) {
+      await tx.$executeRaw`UPDATE "BudgetLine" SET actual = COALESCE((SELECT SUM(e.amount) FROM "CostLedgerEntry" e WHERE e."budgetLineId" = "BudgetLine".id), 0) WHERE id = ${budgetLineId}`;
       count += 1;
     }
-    for (const row of before.activity.variances) {
-      if (row.note) continue;
-      await tx.$executeRaw`UPDATE "CostRecord" SET actual = COALESCE((SELECT SUM(e.amount) FROM "CostLedgerEntry" e WHERE e."projectId" = "CostRecord"."projectId" AND e."activityId" = "CostRecord"."activityId"), 0) WHERE "projectId" = ${projectId} AND "activityId" = ${row.activityId}`;
-      if (row.expectedThroughDate) {
-        await tx.costRecord.updateMany({ where: { projectId, activityId: row.activityId }, data: { actualThroughDate: new Date(row.expectedThroughDate) } });
-      }
+    for (const activityId of activityIds) {
+      // The through-date is the ledger's latest incurred date, derived in the
+      // same statement as the amount — never a date read before the lock.
+      await tx.$executeRaw`UPDATE "CostRecord" SET actual = COALESCE((SELECT SUM(e.amount) FROM "CostLedgerEntry" e WHERE e."projectId" = "CostRecord"."projectId" AND e."activityId" = "CostRecord"."activityId"), 0), "actualThroughDate" = COALESCE((SELECT MAX(e."incurredOn") FROM "CostLedgerEntry" e WHERE e."projectId" = "CostRecord"."projectId" AND e."activityId" = "CostRecord"."activityId"), "actualThroughDate") WHERE "projectId" = ${projectId} AND "activityId" = ${activityId}`;
       count += 1;
     }
     return count;

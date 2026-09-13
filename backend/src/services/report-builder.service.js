@@ -358,8 +358,18 @@ const projectNameOf = (row, source) => (source.key === "daily_log_manpower" ? nu
  * columns used, grouping and totals, plus how many projects were queried or
  * denied by permission.
  */
-const runQuery = async ({ orgId, user, definition, limit = PREVIEW_LIMIT, offset = 0 }) => {
+const runQuery = async ({ orgId, user, definition, limit = PREVIEW_LIMIT, offset = 0, apiClient = null }) => {
   const source = await resolveSource({ orgId, key: definition.source });
+  // An API key reads a source only with a scope on the source's module, and
+  // only on its own projects; the report used to run as the key's owner
+  // (Phase 21D, CX21-431).
+  const keyProjects = apiClient?.projectIds?.length ? apiClient.projectIds : null;
+  if (apiClient && !require("./api-client.service").scopeAllows(apiClient, source.module, "read")) {
+    throw new HttpError(403, "API_KEY_SCOPE", `This API key cannot read ${source.module}`);
+  }
+  if (keyProjects && definition.projectId && !keyProjects.includes(definition.projectId)) {
+    throw new HttpError(403, "FORBIDDEN_PROJECT", "This API key is not allowed on that project");
+  }
   const columns = normalizeColumns(source, definition.columns).map((key) => sources.columnByKey(source, key));
   const filters = normalizeFilters(source, definition.filters);
   const sort = normalizeSort(source, definition.sort);
@@ -367,7 +377,7 @@ const runQuery = async ({ orgId, user, definition, limit = PREVIEW_LIMIT, offset
   const aggregates = normalizeAggregates(source, definition.aggregates);
   const cap = Math.min(Math.max(1, Number(limit) || PREVIEW_LIMIT), EXPORT_LIMIT);
 
-  const projects = await accessibleProjects({ orgId, user, projectId: definition.projectId || null });
+  const projects = (await accessibleProjects({ orgId, user, projectId: definition.projectId || null })).filter((project) => !keyProjects || keyProjects.includes(project.id));
   const contexts = [];
   let denied = 0;
   for (const project of projects) {
@@ -715,25 +725,25 @@ const deleteDefinition = async ({ orgId, user, reportId }) => {
 };
 
 /** Ad-hoc run of an unsaved definition (the builder's preview). */
-const preview = async ({ orgId, user, payload = {}, limit = PREVIEW_LIMIT, offset = 0 }) => {
+const preview = async ({ orgId, user, payload = {}, limit = PREVIEW_LIMIT, offset = 0, apiClient = null }) => {
   const normalized = await normalizeDefinition({ orgId, payload });
   const projectId = trimOrNull(payload.projectId);
-  return runQuery({ orgId, user, definition: { ...normalized, projectId }, limit: Math.min(MAX_LIMIT, limit), offset });
+  return runQuery({ orgId, user, definition: { ...normalized, projectId }, limit: Math.min(MAX_LIMIT, limit), offset, apiClient });
 };
 
-const runDefinition = async ({ orgId, user, reportId, limit = PREVIEW_LIMIT, offset = 0 }) => {
+const runDefinition = async ({ orgId, user, reportId, limit = PREVIEW_LIMIT, offset = 0, apiClient = null }) => {
   const row = await getDefinitionRow({ orgId, user, reportId });
-  const result = await runQuery({ orgId, user, definition: { source: row.source, columns: row.columnsJson, filters: row.filtersJson, sort: row.sortJson, groupBy: row.groupBy, aggregates: row.aggregatesJson, projectId: row.projectId }, limit: Math.min(MAX_LIMIT, limit), offset });
+  const result = await runQuery({ orgId, user, apiClient, definition: { source: row.source, columns: row.columnsJson, filters: row.filtersJson, sort: row.sortJson, groupBy: row.groupBy, aggregates: row.aggregatesJson, projectId: row.projectId }, limit: Math.min(MAX_LIMIT, limit), offset });
   await prisma.reportDefinition.update({ where: { id: row.id }, data: { lastRunAt: new Date() } }).catch(() => null);
   return { report: serializeDefinition(row, user), ...result };
 };
 
-const renderDefinition = async ({ orgId, user, reportId = null, definition = null, format = "pdf" }) => {
+const renderDefinition = async ({ orgId, user, reportId = null, definition = null, format = "pdf", apiClient = null }) => {
   const row = reportId ? await getDefinitionRow({ orgId, user, reportId }) : null;
   const report = row
     ? { id: row.id, name: row.name, description: row.description, source: row.source, columns: row.columnsJson, filters: row.filtersJson, sort: row.sortJson, groupBy: row.groupBy, aggregates: row.aggregatesJson, projectId: row.projectId }
     : { id: null, name: trimOrNull(definition?.name) || "Report", description: trimOrNull(definition?.description), ...(await normalizeDefinition({ orgId, payload: definition || {} })), projectId: trimOrNull(definition?.projectId) };
-  const result = await runQuery({ orgId, user, definition: report, limit: EXPORT_LIMIT });
+  const result = await runQuery({ orgId, user, definition: report, limit: EXPORT_LIMIT, apiClient });
   const project = report.projectId ? await prisma.project.findFirst({ where: { id: report.projectId, orgId }, select: { id: true, name: true, currency: true } }) : null;
   const base = fileBase(report);
   if (format === "xlsx") return { buffer: await renderXlsx({ report, result, user, project }), fileName: `${base}.xlsx`, mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", result };

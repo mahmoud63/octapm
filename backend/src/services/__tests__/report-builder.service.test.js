@@ -181,3 +181,20 @@ describe("report builder", () => {
     expect(mockPrisma.reportDefinition.update).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ name: "Taken", updatedBy: "pm-1" }) }));
   });
 });
+
+describe("Phase 21D — integrity (release challenge, third pass)", () => {
+  beforeEach(() => {
+    mockPrisma.project.findMany.mockResolvedValue(projects);
+    mockAccess.assertProjectAccess.mockImplementation(async ({ projectId, role }) => staffAccess(projectId, role));
+  });
+
+  it("CX21-431: a key reads a source only with a scope on its module, and only on its own projects", async () => {
+    const limited = { scopes: ["report:read"], projectIds: ["p1"] };
+    await expect(service.runQuery({ orgId: "org-1", user: pm, definition: { source: "cost_record", columns: ["budget"] }, apiClient: limited })).rejects.toMatchObject({ code: "API_KEY_SCOPE", status: 403 });
+    const reader = { scopes: ["*:read"], projectIds: ["p1"] };
+    await expect(service.runQuery({ orgId: "org-1", user: pm, definition: { source: "rfi", columns: ["ref"], projectId: "p2" }, apiClient: reader })).rejects.toMatchObject({ code: "FORBIDDEN_PROJECT", status: 403 });
+    mockPrisma.rfi.findMany.mockResolvedValueOnce([]);
+    const own = await service.runQuery({ orgId: "org-1", user: pm, definition: { source: "rfi", columns: ["ref"] }, apiClient: reader });
+    expect(own.projects).toEqual({ inScope: 1, queried: 1, denied: 0 });
+  });
+});

@@ -563,6 +563,12 @@ const transition = async ({ orgId, projectId, commitmentId, to, actor = null, re
     [STATUS.VOID]: { voidReason: reason },
   }[to];
   const updated = await prisma.$transaction(async (tx) => {
+    // The transition was decided on a status read before the lock; a return
+    // that started on an approved commitment must not land on it once
+    // executed — it would become a draft with its committed cost still posted
+    // and its schedule of values open again (Phase 21D, CX21-433).
+    const [fresh] = await tx.$queryRaw`SELECT status FROM "Commitment" WHERE id = ${commitmentId} FOR UPDATE`;
+    if (fresh && fresh.status !== existing.status) throw new HttpError(409, "COMMITMENT_STATE_CHANGED", `The commitment is ${fresh.status} now; it cannot become ${to} from there without looking again`);
     const row = await tx.commitment.update({ where: { id: commitmentId }, data: { status: to, ...stamps, ...extra, updatedBy: actor?.id || null }, include });
     await audit({ tx, orgId, projectId, entityId: commitmentId, action: to === STATUS.APPROVED ? auditService.ACTIONS.APPROVED : auditService.ACTIONS.STATUS_CHANGED, actor, reason, oldStatus: existing.status, newStatus: to, summary: { ref: row.ref, type: row.type, revised: totalsFor(row).revised } });
     if (POSTING_STATUSES.includes(to) || POSTING_STATUSES.includes(existing.status)) await recomputeCommitted({ tx, orgId, projectId });

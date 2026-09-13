@@ -528,3 +528,37 @@ describe("Phase 21D — integrity (Codex round 4)", () => {
     expect(mockInventory.lockItems.mock.invocationCallOrder[0]).toBeLessThan(mockInventory.postMovement.mock.invocationCallOrder[0]);
   });
 });
+
+describe("Phase 21D — integrity (release challenge, third pass)", () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockPrisma.warehouse.findFirst.mockResolvedValue({ id: "wh-1", orgId: ORG, name: "Main" });
+    mockPrisma.deliveryReceipt.count.mockResolvedValue(0);
+    mockPrisma.deliveryReceipt.findFirst.mockResolvedValue(null);
+  });
+  afterEach(() => jest.restoreAllMocks());
+  const issuedOrder = (over = {}) => ({ id: "order-1", ref: "PO-0001", status: "issued", projectId: "project-1", packageId: null, supplierId: null, currency: "USD", project: { id: "project-1" }, lines: [poLine()], ...over });
+
+  it("CX21-434: a delivery that started on an issued order refuses once the order was cancelled under the lock, and moves no stock", async () => {
+    mockPrisma.procurementOrder.findFirst.mockResolvedValue(issuedOrder());
+    mockPrisma.inventoryItem.findFirst.mockResolvedValue({ id: "item-1", orgId: ORG, sku: "CEM-42.5N" });
+    mockInventory.postMovement.mockClear();
+    mockPrisma.procurementOrder.update.mockClear();
+    jest.spyOn(mockPrisma, "$queryRaw").mockImplementation(async (strings) => (Array.isArray(strings) && strings.join("?").includes('FROM "ProcurementOrder"') ? [{ status: "cancelled" }] : []));
+    await expect(
+      service.receiveAgainstOrder({ orgId: ORG, user: USER, payload: { orderId: "order-1", warehouseId: "wh-1", lines: [{ poLineId: "line-1", acceptedQty: 10 }] } }),
+    ).rejects.toMatchObject({ code: "PO_NOT_ISSUED", status: 409 });
+    expect(mockInventory.postMovement).not.toHaveBeenCalled();
+    expect(mockPrisma.procurementOrder.update).not.toHaveBeenCalled();
+  });
+
+  it("CX21-421: a key refused on the order's project creates nothing before it is refused", async () => {
+    mockPrisma.procurementOrder.findFirst.mockResolvedValue(issuedOrder({ lines: [poLine({ inventoryItemId: null })] }));
+    mockPrisma.inventoryItem.findFirst.mockResolvedValue(null);
+    mockPrisma.inventoryItem.create.mockClear();
+    await expect(
+      service.receiveAgainstOrder({ orgId: ORG, user: USER, payload: { orderId: "order-1", warehouseId: "wh-1", lines: [{ poLineId: "line-1", acceptedQty: 10 }] }, allowedProjectIds: ["project-2"] }),
+    ).rejects.toMatchObject({ code: "FORBIDDEN_PROJECT", status: 403 });
+    expect(mockPrisma.inventoryItem.create).not.toHaveBeenCalled();
+  });
+});

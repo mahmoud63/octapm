@@ -156,3 +156,16 @@ describe("Phase 21D — integrity (release challenge, second pass)", () => {
     expect(mockPrisma.commitmentSovLine.deleteMany).not.toHaveBeenCalled();
   });
 });
+
+describe("Phase 21D — integrity (release challenge, third pass)", () => {
+  afterEach(() => jest.restoreAllMocks());
+
+  it("CX21-433: an approval that started on a pending commitment refuses once the commitment moved under the lock", async () => {
+    mockPrisma.commitment.findFirst.mockResolvedValue(commitment({ status: "pending" }));
+    mockPrisma.commitment.update.mockClear();
+    const lock = jest.spyOn(mockPrisma, "$queryRaw").mockImplementation(async (strings) => (Array.isArray(strings) && strings.join("?").includes('FROM "Commitment"') ? [{ status: "executed" }] : []));
+    await expect(service.approveCommitment({ orgId: "org-1", projectId: "project-1", commitmentId: "cm-1", actor: { id: "pm" } })).rejects.toMatchObject({ code: "COMMITMENT_STATE_CHANGED", status: 409 });
+    expect(lock).toHaveBeenCalled();
+    expect(mockPrisma.commitment.update).not.toHaveBeenCalled();
+  });
+});

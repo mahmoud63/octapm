@@ -366,12 +366,17 @@ for (const [path, type, transition] of [
     asyncHandler(async (req, res) =>
       sendSuccess(
         res,
-        await service.adjustStock({
-          orgId: req.user.orgId,
-          user: req.user,
-          payload: req.body,
-          type,
-        }),
+        // The key's project list travels with the movement, as it does for an
+        // issue: a return or adjustment named for another project's activity
+        // used to add stock and post cost there (Phase 21D, CX21-430).
+        await scopedCall(req, req.body.projectId, () =>
+          service.adjustStock({
+            orgId: req.user.orgId,
+            user: req.user,
+            payload: { ...req.body, allowedProjectIds: keyProjects(req) },
+            type,
+          })
+        ),
         201
       )
     )
@@ -595,10 +600,15 @@ router.get(
   asyncHandler(async (req, res) =>
     sendSuccess(
       res,
-      await analytics.getAnalytics({
-        orgId: req.user.orgId,
-        projectId: req.query.projectId ?? null,
-      })
+      // Analytics are project figures too (usage and cost by activity):
+      // a key limited to some projects sees those projects' (CX21-430).
+      await scopedCall(req, req.query.projectId ?? null, () =>
+        analytics.getAnalytics({
+          orgId: req.user.orgId,
+          projectId: req.query.projectId ?? null,
+          projectIds: keyProjects(req),
+        })
+      )
     )
   )
 );

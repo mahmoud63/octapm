@@ -76,6 +76,7 @@ describe("search routes", () => {
       orgId: "org-1",
       userId: "user-1",
       role: "pm",
+      apiClient: null,
       query: expect.objectContaining({
         q: "slab",
         type: "rfi,submittal",

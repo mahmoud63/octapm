@@ -1,3 +1,4 @@
+const { HttpError } = require("../utils/http-error");
 const { prisma } = require("../config/db");
 const { can, canParty, normalizeRoleId } = require("../config/permissions");
 const { containsInsensitive, trimToNull } = require("../utils/list-query");
@@ -1054,7 +1055,18 @@ const globalSearch = async ({
   userId,
   role,
   query: rawQuery = {},
+  apiClient = null,
 }) => {
+  // An API key never sees past its own scopes or projects, whatever its owner
+  // may: search used to answer with the owner's whole view (Phase 21D, CX21-431).
+  const keyProjects = apiClient?.projectIds?.length ? apiClient.projectIds : null;
+  const keyAllowsType = (type) => {
+    if (!apiClient) return true;
+    const { scopeAllows } = require("./api-client.service");
+    if (type === "project") return scopeAllows(apiClient, "project", "read");
+    const definition = SEARCH_DEFINITIONS.find((entry) => entry.type === type);
+    return definition ? scopeAllows(apiClient, definition.module, "read") : false;
+  };
   const limit = normalizeLimit(rawQuery.limit);
   const query = trimToNull(rawQuery.q || rawQuery.search);
   const normalizedQuery = query?.toLowerCase() || null;
@@ -1062,6 +1074,9 @@ const globalSearch = async ({
   const statuses = normalizeStatuses(rawQuery);
   const dateRange = parseDateRange(rawQuery);
   const projectId = trimToNull(rawQuery.projectId);
+  if (keyProjects && projectId && !keyProjects.includes(projectId)) {
+    throw new HttpError(403, "FORBIDDEN_PROJECT", "This API key is not allowed on that project");
+  }
   const includeArchived =
     rawQuery.includeArchived === true || rawQuery.includeArchived === "true";
   const hasAnyFilter = Boolean(
@@ -1093,19 +1108,21 @@ const globalSearch = async ({
     };
   }
 
-  const projects = await listAccessibleProjects({
+  const accessible = await listAccessibleProjects({
     orgId,
     userId,
     role,
     projectId,
     includeArchived,
   });
+  const projects = keyProjects ? accessible.filter(({ project }) => keyProjects.includes(project.id)) : accessible;
   const projectAccesses = projects.map(({ access }) => ({ access }));
   const projectMap = new Map(
     projects.map(({ project }) => [project.id, project]),
   );
-  const activeTypes =
-    selectedTypes || SEARCHABLE_TYPES.map((entry) => entry.type);
+  const activeTypes = (
+    selectedTypes || SEARCHABLE_TYPES.map((entry) => entry.type)
+  ).filter(keyAllowsType);
   const perTypeLimit = Math.min(
     Math.max(Math.ceil(limit / Math.max(activeTypes.length, 1)) + 3, 5),
     12,

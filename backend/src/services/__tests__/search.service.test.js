@@ -249,3 +249,26 @@ describe("global search service", () => {
     });
   });
 });
+
+describe("Phase 21D — integrity (release challenge, third pass)", () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockPrisma.project.findMany.mockResolvedValue([projectRow(), projectRow({ id: "project-2", name: "Riverside Tower" })]);
+    mockPrisma.rfi.findMany.mockResolvedValue([]);
+    mockPrisma.task.findMany.mockResolvedValue([]);
+    mockPrisma.changeOrder.findMany.mockResolvedValue([]);
+  });
+
+  it("CX21-431: a key limited to one project is refused another, sees only its own, and only the modules its scopes allow", async () => {
+    const apiClient = { scopes: ["*:read"], projectIds: ["project-1"] };
+    await expect(
+      searchService.globalSearch({ orgId: "org-1", userId: "user-1", role: "pm", query: { type: "project", projectId: "project-2" }, apiClient }),
+    ).rejects.toMatchObject({ code: "FORBIDDEN_PROJECT", status: 403 });
+    const own = await searchService.globalSearch({ orgId: "org-1", userId: "user-1", role: "pm", query: { q: "tower", type: "project" }, apiClient });
+    expect(own.items.map((item) => item.projectId)).toEqual(["project-1"]);
+    const scoped = { scopes: ["report:read"], projectIds: [] };
+    const none = await searchService.globalSearch({ orgId: "org-1", userId: "user-1", role: "pm", query: { q: "slab", type: "rfi" }, apiClient: scoped });
+    expect(mockPrisma.rfi.findMany).not.toHaveBeenCalled();
+    expect(none.items).toEqual([]);
+  });
+});

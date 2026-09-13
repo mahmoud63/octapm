@@ -36,6 +36,7 @@ router.get(
       userId: req.user.id,
       role: req.user.role,
       query: req.query,
+      apiClient: req.apiClient || null,
     });
 
     return sendSuccess(res, result);
