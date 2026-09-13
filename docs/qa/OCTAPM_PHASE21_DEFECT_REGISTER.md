@@ -844,6 +844,115 @@ The final gate run on `28a2d50` failed its last two steps by exactly **22.00**: 
 
 The second full gate run (on `79f5ea1`) went red in the pay-application spec, which reconciles the seeded demo project: one activity was flagged *date-stale*. Between the two runs, the CX21-412 live probe had echoed an activity's unchanged actual — and the through-date resolver still treated any `actual` in a payload as a posting made now, resetting the date under the latest ledger entry. **Two things**: an instrument effect (the probe echoed a field on the demo project), and a **product rule made wrong by the phase's own fix** — with actual now derived, an echo is never a posting. The date was restored (200), the resolver no longer moves the date on an echo (`772f2c5`, with a regression that fails on `79f5ea1`), and the gates were run a third time.
 
+## The second release pass — HEAD `772f2c5`: one Critical, nine Highs
+
+The reviewer account's usage limit lifted at 04:29 CDT and the second pass
+ran on `772f2c5` (checkout `221eb25`, documents only on top): DO NOT
+RELEASE — one Critical and nine Highs, and three of the first pass's fixes
+(CX21-410, 412, 416) marked INCOMPLETE because of them. Every finding was
+verified against the code before anything changed; all ten hold. All fixed
+in `29456c4`, each with a regression that fails on `772f2c5` (10 / 10,
+mutation-checked by reverting the fourteen product files), six staged live.
+
+## P21-070 · **P0** · Tenant isolation · **FIXED** (Codex CX21-420, Critical)
+
+| | |
+| --- | --- |
+| **Observed** | P21-061 closed the activity path only. A stock issue that named a **project id and a cost code, with no activity**, trusted the project id: another organisation's project id resolved, and this organisation's stock posted cost — this `orgId`, that `projectId` — onto the other tenant's budget line. |
+| **Root cause** | **CONFIRMED PRODUCT DEFECT** — the same gap as P21-061 one field over; the ledger itself had no last line against a foreign project either. |
+| **Fix** | The named project must be the caller's organisation's (`404 PROJECT_NOT_FOUND`), and the cost ledger refuses, as its last line, to post onto any project that is not the organisation's (`403 COST_LEDGER_PROJECT_FOREIGN`), whatever a caller hands it. |
+| **Regression** | `inventory.service.test.js` "CX21-420", `cost-ledger.repost.test.js` "CX21-420". Live: an issue naming the only other organisation's project ("UAT Regression Tower") → **404**, our stock 86 → 86, their ledger, cost records and movements read straight from the tables **unchanged**. (The outsider tenant registered by stage 7 has no subscription and cannot create a project; the foreign project was read from the database instead.) |
+
+## P21-071 · P1 · RBAC / project isolation · **FIXED** (Codex CX21-421)
+
+| | |
+| --- | --- |
+| **Observed** | P21-063 checked the project a request *named*. A key limited to some projects could **omit** `projectId` and issue through another project's activity, receive against another project's order, and read every project's stock movements. |
+| **Root cause** | **CONFIRMED PRODUCT DEFECT** (the restriction was enforced at the route on a field the caller could leave out). |
+| **Fix** | The key's project list travels into the service: an issue or receipt whose project — named or derived from the activity or the order — is outside it is refused (`403 FORBIDDEN_PROJECT`); the movement list is filtered to it. |
+| **Regression** | `inventory.service.test.js` "CX21-421" (refused outside, allowed inside). Live, a `*:write` key limited to Riverside: issue via the P21 project's activity **403**, receipt against its order **403**, its movements **403**, unfiltered movements 200 with 369 rows and **0** outside Riverside. |
+
+## P21-072 · P1 · Cost · **FIXED** (Codex CX21-422)
+
+| | |
+| --- | --- |
+| **Observed** | P21-064 refused a *changed* actual. A budget-only edit still wrote back the actual it had read, so a ledger posting that landed between the read and the write was overwritten. |
+| **Root cause** | **CONFIRMED PRODUCT DEFECT** (the echo was allowed through and then persisted). |
+| **Fix** | Cost-record create and update never write `actual`; only the ledger moves it. |
+| **Regression** | `cost.actual-derived.test.js` "CX21-422" (the update's data carries no `actual`). Live: a budget-only PATCH on a Riverside record → 200, actual and its through-date unchanged. |
+
+## P21-073 · P1 · Labour · **FIXED** (Codex CX21-423)
+
+| | |
+| --- | --- |
+| **Observed** | P21-066 locked submit/approve/return/reopen. Edit and delete still decided on a status read before the lock: an edit that started on a draft landed on a sheet approved (and posted) meanwhile; a delete likewise. |
+| **Root cause** | **CONFIRMED PRODUCT DEFECT** (two writers left outside the lock). |
+| **Fix** | Both hold the sheet and re-check its status (`409 TIMESHEET_LOCKED`). |
+| **Regression** | `timesheet.service.test.js` "CX21-423" (edit and delete refused once the lock reports *approved*; nothing deleted or rewritten). |
+
+## P21-074 · P1 · Cost dashboard · **FIXED** (Codex CX21-424, a regression of the P21-064 fix)
+
+| | |
+| --- | --- |
+| **Observed** | Removing `actual` from the dashboard's editable fields removed the **Actual column** from the table, so the money columns no longer matched their headings. |
+| **Root cause** | **CONFIRMED PRODUCT DEFECT** — my own regression, in the frontend, which no backend gate could see. |
+| **Fix** | The column is back; while a row is being edited the actual is shown read-only rather than as an input. |
+| **Regression** | `tsc -b` and the file's lint clean; the full Playwright run exercises the dashboard. |
+
+## P21-075 · P1 · Portfolio / project isolation · **FIXED** (Codex CX21-425)
+
+| | |
+| --- | --- |
+| **Observed** | The portfolio ignored an API key's project list and returned every project of the organisation. |
+| **Root cause** | **CONFIRMED PRODUCT DEFECT**. |
+| **Fix** | `getPortfolio` takes the key's projects and narrows the project query to them. |
+| **Regression** | `portfolio.service.test.js` "CX21-425". Live: the Riverside-only key → 1 project listed, 0 outside it. |
+
+## P21-076 · P1 · Procurement · **FIXED** (Codex CX21-426)
+
+| | |
+| --- | --- |
+| **Observed** | P21-067 locked the order *edit*. Lifecycle transitions (submit, approve, reject, issue, acknowledge, close, cancel) still decided on a status read before the transaction, so a rejection that started on a pending order landed on it after approval and issue. |
+| **Root cause** | **CONFIRMED PRODUCT DEFECT**. |
+| **Fix** | The transition holds the order and refuses if its status moved (`409 PO_STATE_CHANGED`). |
+| **Regression** | `purchase-order.service.test.js` "CX21-426" (rejection refused once the lock reports *issued*; no update written). |
+
+## P21-077 · P1 · Commitments · **FIXED** (Codex CX21-427)
+
+| | |
+| --- | --- |
+| **Observed** | Replacing a commitment's schedule of values, and editing its header, checked the editable statuses before the lock; a replacement that started on a draft landed after approval, under pay applications already valued against the old lines. |
+| **Root cause** | **CONFIRMED PRODUCT DEFECT**. |
+| **Fix** | Both hold the commitment and re-check (`409 COMMITMENT_LOCKED` / `COMMITMENT_STATE_CHANGED`). |
+| **Regression** | `commitment.service.test.js` "CX21-427" (replacement refused once the lock reports *approved*; the old lines are not deleted). |
+
+## P21-078 · P1 · Cost reconciliation · **FIXED** (Codex CX21-428)
+
+| | |
+| --- | --- |
+| **Observed** | The reconciliation *repair* computed each record's actual from the ledger, then wrote that number — a posting between the read and the write was erased by the very tool meant to restore the figures. |
+| **Root cause** | **CONFIRMED PRODUCT DEFECT**. |
+| **Fix** | The repair sets actual from a `SUM` over the ledger **in the same UPDATE statement**. |
+| **Regression** | `cost-reconciliation.service.test.js` (suite green). Live: a dry-run recompute on the certified project → 200, 21 ledger entries, 71,204.00, migration not required, nothing to repair; snapshot 36 / 36 and actual-cost delta 0.00 afterwards. |
+
+## P21-079 · P1 · Account security · **FIXED** (Codex CX21-429)
+
+| | |
+| --- | --- |
+| **Observed** | An API key acting as its owner could begin a new MFA enrolment and replace the owner's factor — a leaked key becoming a second factor. |
+| **Root cause** | **CONFIRMED PRODUCT DEFECT** (authorization). |
+| **Fix** | The four `/auth/mfa/*` routes refuse API keys (`403 API_KEY_FORBIDDEN`), and enrolment is refused while two-factor is on (`409 MFA_ALREADY_ENABLED`) — it must be turned off with the password and a current code first. |
+| **Regression** | `rbac.api-key.test.js` "CX21-429", `mfa.service.test.js` "CX21-429". Live: a `*:write` key → `POST /auth/mfa/setup` **403**. |
+
+## The third release pass — HEAD `29456c4`: not yet run
+
+Launched at 04:45 CDT on `29456c4` (read-only, the whole backend, the same
+brief plus the ten fixes to verify). It read the tree for twenty-three
+minutes and 196,872 tokens, then the account hit its usage limit again
+("try again at 9:32 AM"); no verdict was written and `git status` was
+unchanged. The prompt (`codex-release3-prompt.txt`) is to be re-run when the
+window opens; until it returns, the certification verdict stays conditional.
+
 ## Codex round 10 — on the ninth loop's fixes (HEAD `28a2d50`): PASS
 
 Every fix CORRECT, no regressions, nothing new of Critical or High

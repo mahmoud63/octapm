@@ -398,23 +398,48 @@ run moved the certified ledger by exactly 22.00. The bags were returned
 through the product's own return movement, the stage now gives back what it
 issues, and the gates were re-run (T-14).
 
-A second pass of the release challenge was launched on `79f5ea1` (and would
-have been re-run on `772f2c5`); it stopped after 54,830 tokens on the ChatGPT
-usage limit of the Codex account ("try again at 4:29 AM"). Until it runs,
-the final HEAD has been re-challenged by every regression test, every live
-probe and the full gate sequence, but not by the independent reviewer. That
-is stated as such in the verdict rather than papered over.
+The second pass ran once the usage limit lifted (04:31 CDT, on `772f2c5`):
+DO NOT RELEASE again — one Critical and nine Highs, and three of the first
+pass's fixes marked INCOMPLETE *because of* the new findings. All ten held
+(register P21-070 … P21-079), and they are instructive precisely because
+each is the first pass's finding **one field over**: the cross-tenant
+check on an activity id (P21-061) had left the project id, named without an
+activity, trusted — and the ledger had no last line of its own against a
+foreign project; the key's project restriction (P21-063) was enforced on
+the `projectId` the request *named*, so omitting it walked past the check
+through the activity, the order and the movement list; the refusal of a
+*changed* actual (P21-064) still wrote back the unchanged one, overwriting
+whatever the ledger had posted meanwhile — and my own frontend fix for it
+had hidden the Actual column; the timesheet lock (P21-066) covered the
+transitions but not edit and delete; the purchase-order lock (P21-067)
+covered the edit but not the lifecycle transitions; a commitment's schedule
+of values and header could be replaced after approval by a writer that
+decided before its lock; the reconciliation *repair* wrote an actual it had
+read before the lock; the portfolio ignored a key's project list; and an
+API key could begin a new MFA enrolment and replace its owner's factor. All
+fixed in `29456c4`, each with a regression that fails on `772f2c5` (10/10
+by reverting the fourteen product files), six staged live — the cross-tenant
+issue against the only other organisation's project → 404 with our stock
+and their ledger, records and movements read from the tables unchanged; a
+Riverside-only key → 403 on the other project's activity, order and
+movements, 0 foreign rows unfiltered, 1 project in its portfolio; a
+budget-only edit leaving actual and its through-date alone; a write-scoped
+key → 403 on MFA setup.
+
+The lesson the two passes teach is the one section 11 draws: a reviewer
+that reads the whole backend finds the *shape* of a fix's gap, and a fix
+that closes the reported path and not the shape will be found again.
+
+The third pass, on `29456c4`, was launched as soon as the fixes were committed (04:45 CDT); it read for twenty-three minutes and 196,872 tokens and then met the same usage limit ("try again at 9:32 AM"); no verdict was written and `git status` was unchanged. Until it returns, the final HEAD has been re-challenged by 66 regression cases, the live probes and the full gate sequence (run four), but not by the independent reviewer — stated as such in the verdict rather than papered over.
 
 ## 11. What the rounds cost, and what they were worth
 
-Nine loops and a release loop: 40 confirmed product defects in the ledger,
-stock, payment, transition, authorization and tenant-isolation paths
-(7 + 5 + 6 + 4 + 3 + 2 + 1 + 2 + 2 + 8, one of them a regression of a
-loop's own fix, plus one P3 hygiene item), 56 regression cases (52 of them fail on the code they guard; four guard flows that must keep working), and
+Nine loops and two release loops: 50 confirmed product defects in the
+ledger, stock, payment, transition, authorization and tenant-isolation paths
+(7 + 5 + 6 + 4 + 3 + 2 + 1 + 2 + 2 + 8 + 10, two of them regressions of a
+loop's own fix, plus one P3 hygiene item), 66 regression cases (62 of them fail on the code they guard; four guard flows that must keep working), and
 a demo-project reconciliation that still balances to the cent after all of
 it. The Phase 21 project's own figures did not move once (36/36 before and
 after every loop); the defects lived in what those figures never exercised —
 concurrency, cross-scope ids and stock in motion — which is exactly where a
 certification driven from one client, one request at a time, is blind.
-
-__ROUND6__

@@ -314,7 +314,7 @@ evidence set and it exits non-zero on any delta.
 
 | line item | EXPECTED | ACTUAL | DELTA | PASS | source |
 | --- | ---: | ---: | ---: | :---: | --- |
-| Actual cost — SQL `SUM(amount)` over `CostLedgerEntry` | 71,204.00 | 71,204.00 | 0.00 | PASS | SQL (12 entries) |
+| Actual cost — SQL `SUM(amount)` over `CostLedgerEntry` | 71,204.00 | 71,204.00 | 0.00 | PASS | SQL (24 entries at run four — see below) |
 | Actual cost — API `/cost/reconciliation` `ledger.total` | 71,204.00 | 71,204.00 | 0.00 | PASS | API |
 | Actual cost — SQL `SUM(BudgetLine.actual)` projection | 71,204.00 | 71,204.00 | 0.00 | PASS | SQL |
 | Actual cost — SQL `SUM(CostRecord.actual)` projection | 71,204.00 | 71,204.00 | 0.00 | PASS | SQL |
@@ -340,8 +340,18 @@ evidence set and it exits non-zero on any delta.
 | API reports balanced / legacy opening balance | balanced / 0.00 | balanced / 0.00 | — | PASS | API |
 
 **Actual-cost delta: 0.00** on all three readings (SQL, API, documents) and
-0.00 between SQL and API. Snapshot 36/36 after each of the three fix loops.
+0.00 between SQL and API. Snapshot 36/36 after each of the twelve fix loops
+and after each of the four gate runs.
 
-The twenty-two defects Phase 21D fixed did not move a single one of these
+The fifty-one defects Phase 21D fixed did not move a single one of these
 figures — which is the point: they lived in concurrency and cross-scope
 ids, not in the sequential arithmetic these figures exercise.
+
+**Run four, on `29456c4`** (2026-09-13 10:10–10:32 UTC, after the second
+release pass's ten fixes): the same 16 source lines and 36 snapshot checks
+pass, actual-cost delta **0.00** on all three readings. The ledger holds 24
+entries on the project — the 12 the certification posted, plus the stage-7
+bag issues and their returns from three gate runs (T-14), which net to
+0.00 — with 0 reversals, 0 re-postings and 0 duplicate keys database-wide.
+(An earlier draft of the table said "12 entries" at the frozen run; the
+run-3 log says 21. The count in the table is now the final run's.)
