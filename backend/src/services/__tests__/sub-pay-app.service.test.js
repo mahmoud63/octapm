@@ -463,3 +463,29 @@ describe("Phase 21D — integrity (Codex round 4)", () => {
     expect(reads.filter((args) => args.include).length).toBeGreaterThanOrEqual(2);
   });
 });
+
+describe("Phase 21D — integrity (Codex round 5)", () => {
+  it("CX21-401: a notes-only edit recomputes from the application as it is under the lock, keeping a deduction another edit just made", async () => {
+    // The caller's copy has no back-charge; by the time the lock is held,
+    // another edit has recorded 20,000. A notes edit must not put 0 back.
+    mockPrisma.subPayApp.findFirst
+      .mockResolvedValueOnce(payApp({ status: "draft", backCharges: 0, lines: [line({ thisPeriodAmount: 50000, cumulativeAmount: 70000 })] }))
+      .mockResolvedValueOnce(payApp({ status: "draft", backCharges: 20000, lines: [line({ thisPeriodAmount: 50000, cumulativeAmount: 70000 })] }));
+    mockPrisma.subPayApp.update.mockClear();
+    mockPrisma.subPayApp.update.mockImplementation(async ({ data }) => payApp({ status: "draft", ...data }));
+    await service.updatePayApp({ orgId: "org-1", projectId: "project-1", payAppId: "pa-1", payload: { notes: "invoice attached" }, actor: { id: "qs" } });
+    expect(mockPrisma.subPayApp.update).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ backCharges: 20000, notes: "invoice attached" }) }));
+  });
+
+  it("CX21-402: a transition asks its guard again about the application it reloaded under the lock", async () => {
+    // The guard passed on a claimed application; under the lock the claims
+    // are gone (an edit landed in between). Submitting nothing is refused.
+    mockPrisma.subPayApp.findFirst
+      .mockResolvedValueOnce(payApp({ status: "draft", lines: [line({ thisPeriodAmount: 50000, cumulativeAmount: 70000 })] }))
+      .mockResolvedValueOnce(payApp({ status: "draft" }))
+      .mockResolvedValueOnce(payApp({ status: "draft", lines: [line({ thisPeriodAmount: 0, cumulativeAmount: 20000 })] }));
+    mockPrisma.subPayApp.update.mockClear();
+    await expect(service.submitPayApp({ orgId: "org-1", projectId: "project-1", payAppId: "pa-1", actor: { id: "sub-user" } })).rejects.toMatchObject({ code: "SUB_PAY_APP_EMPTY" });
+    expect(mockPrisma.subPayApp.update).not.toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ status: "submitted" }) }));
+  });
+});

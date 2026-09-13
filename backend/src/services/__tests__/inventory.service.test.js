@@ -795,3 +795,23 @@ describe("Phase 21D — integrity (Codex round 3)", () => {
     expect(ids).toEqual(["item-a", "item-b", "item-c"]);
   });
 });
+
+describe("Phase 21D — integrity (Codex round 5)", () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockPrisma.$queryRaw.mockImplementation(async () => []);
+    store.items.clear(); store.warehouses.clear(); store.locations.clear();
+    store.balances.length = 0; store.transactions.length = 0; store.ledger.length = 0; store.costRecords.length = 0;
+    nextId = 1;
+  });
+
+  it("CX21-403: stock in transit still counts in the item's average, so a purchase made while a transfer is on the road blends with it", async () => {
+    // 100 bought at 10.00 are on the road; 100 more arrive at 30.00. The item
+    // has 200 units worth 4,000.00 — an average of 20.00, not 30.00.
+    const item = seedItem({ averageCost: 10 });
+    const warehouse = seedWarehouse();
+    store.balances.push({ id: "bal-road", orgId: ORG, itemId: item.id, warehouseId: warehouse.id, locationId: null, onHand: 0, reserved: 0, inTransit: 100, damaged: 0, quarantined: 0 });
+    await service.receiveStock({ orgId: ORG, user: USER, payload: { itemId: item.id, warehouseId: warehouse.id, quantity: 100, unitCost: 30 } });
+    expect(Number(store.items.get(item.id).averageCost)).toBe(20);
+  });
+});

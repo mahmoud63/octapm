@@ -557,6 +557,12 @@ const updatePayApp = async ({ orgId, projectId, payAppId, payload = {}, actor = 
     // overwrite a certified, paid application (Phase 21D, CX21-302).
     const [fresh] = await tx.$queryRaw`SELECT status FROM "SubPayApp" WHERE id = ${payAppId} FOR UPDATE`;
     if (fresh && !EDITABLE.includes(fresh.status)) throw new HttpError(409, "SUB_PAY_APP_LOCKED", `A ${fresh.status} application cannot be edited`);
+    // The recompute rewrites every line and every adjustment, the ones this
+    // request did not mention included — so it must start from the
+    // application as it is under the lock, not as it was when the caller
+    // looked, or a notes-only edit would put back a deduction another edit
+    // just made (Phase 21D, CX21-401).
+    Object.assign(existing, await loadPayApp({ projectId, payAppId, viewer }, tx));
     const { totals } = await recompute({ tx, existing, claims, patch });
     const row = await tx.subPayApp.update({ where: { id: payAppId }, data: { ...data, ...totals, updatedBy: actor?.id || null }, include });
     await audit({ tx, orgId, projectId, entityId: payAppId, action: auditService.ACTIONS.UPDATED, actor, summary: { ref: row.ref, net: toMoneyNumber(row.netThisPeriod), overClaim: toMoneyNumber(row.overClaimAmount), changed: [...Object.keys(data), ...(claims ? ["lines"] : []), ...Object.keys(patch)] } });
@@ -741,6 +747,10 @@ const transition = async ({ orgId, projectId, payAppId, to, actor = null, viewer
     // The lines the transition recomputes from are the lines as they are
     // under the lock, not as they were when the caller looked (CX21-302).
     Object.assign(existing, await loadPayApp({ projectId, payAppId, viewer }, tx));
+    // The guard decided on the application as it was before the lock; the
+    // claims it now holds may differ (an edit landed in between), so it is
+    // asked again about what will actually be approved (Phase 21D, CX21-402).
+    if (guard) await guard(existing);
     if (revoking) {
       // The "nothing paid" check ran before the transaction; a payment that
       // landed since is found under the lock and stops the revocation

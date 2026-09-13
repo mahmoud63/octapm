@@ -579,8 +579,13 @@ const postMovement = async (tx, { orgId, item, warehouseId, locationId = null, t
     // reset the shared average to its own price (Phase 21D, CX21-003). The
     // item row was locked above, so two deliveries into different stores
     // blend in turn, each against the price the other left.
-    const balances = await tx.stockBalance.findMany({ where: { itemId: item.id }, select: { onHand: true } });
-    const itemOnHand = balances.reduce((sum, row) => sum + Number(row.onHand ?? 0), 0);
+    // What is in transit between two stores is still the item's stock, at the
+    // item's average: leaving it out let a purchase made while a transfer was
+    // on the road reset the average to its own price, and the transfer then
+    // landed at that price — 200 valued at 30.00 against 4,000.00 bought
+    // (Phase 21D, CX21-403).
+    const balances = await tx.stockBalance.findMany({ where: { itemId: item.id }, select: { onHand: true, inTransit: true } });
+    const itemOnHand = balances.reduce((sum, row) => sum + Number(row.onHand ?? 0) + Number(row.inTransit ?? 0), 0);
     const totalQty = itemOnHand + signed;
     const blended =
       totalQty > 0
