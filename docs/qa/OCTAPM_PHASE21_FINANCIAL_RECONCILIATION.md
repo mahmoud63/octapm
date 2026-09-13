@@ -314,7 +314,7 @@ evidence set and it exits non-zero on any delta.
 
 | line item | EXPECTED | ACTUAL | DELTA | PASS | source |
 | --- | ---: | ---: | ---: | :---: | --- |
-| Actual cost — SQL `SUM(amount)` over `CostLedgerEntry` | 71,204.00 | 71,204.00 | 0.00 | PASS | SQL (24 entries at run four — see below) |
+| Actual cost — SQL `SUM(amount)` over `CostLedgerEntry` | 71,204.00 | 71,204.00 | 0.00 | PASS | SQL (35 entries at run eight — see below) |
 | Actual cost — API `/cost/reconciliation` `ledger.total` | 71,204.00 | 71,204.00 | 0.00 | PASS | API |
 | Actual cost — SQL `SUM(BudgetLine.actual)` projection | 71,204.00 | 71,204.00 | 0.00 | PASS | SQL |
 | Actual cost — SQL `SUM(CostRecord.actual)` projection | 71,204.00 | 71,204.00 | 0.00 | PASS | SQL |
@@ -340,18 +340,24 @@ evidence set and it exits non-zero on any delta.
 | API reports balanced / legacy opening balance | balanced / 0.00 | balanced / 0.00 | — | PASS | API |
 
 **Actual-cost delta: 0.00** on all three readings (SQL, API, documents) and
-0.00 between SQL and API. Snapshot 36/36 after each of the twelve fix loops
-and after each of the four gate runs.
+0.00 between SQL and API. Snapshot 36/36 after each of the sixteen fix loops
+and after each of the eight gate runs.
 
-The fifty-one defects Phase 21D fixed did not move a single one of these
+The seventy-four defects Phase 21D fixed did not move a single one of these
 figures — which is the point: they lived in concurrency and cross-scope
 ids, not in the sequential arithmetic these figures exercise.
 
-**Run four, on `29456c4`** (2026-09-13 10:10–10:32 UTC, after the second
-release pass's ten fixes): the same 16 source lines and 36 snapshot checks
-pass, actual-cost delta **0.00** on all three readings. The ledger holds 24
-entries on the project — the 12 the certification posted, plus the stage-7
-bag issues and their returns from three gate runs (T-14), which net to
-0.00 — with 0 reversals, 0 re-postings and 0 duplicate keys database-wide.
-(An earlier draft of the table said "12 entries" at the frozen run; the
-run-3 log says 21. The count in the table is now the final run's.)
+**Runs four to eight.** The gates were re-run after every loop that
+changed the source: run four on `29456c4`, five on `2b0df2b`, six on
+`59cf34b`, seven on `d23dc05` and eight on **`ded5fa0`** (2026-09-13
+16:11–16:31 UTC). Every run but the seventh passed all 16 source lines and 36
+snapshot checks with an actual-cost delta of **0.00** on all three readings;
+run seven failed on P21-106 (a regression of the fifteenth loop that made
+every cost posting answer 500 — the movements were refused whole, so
+nothing moved) and the sixth's last two steps hit a restart (T-16). The
+ledger holds 35 entries on the project — the 12 the certification
+posted, the stage-7 bag issues and their returns from the gate runs (T-14),
+and one issue-and-return pair from the sixteenth loop's live check — which
+net to 0.00, with 0 reversals, 0 re-postings and 0 duplicate keys
+database-wide. (The count in the table is the final run's; the frozen run's
+log is the authority.)

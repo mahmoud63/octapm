@@ -430,14 +430,100 @@ The lesson the two passes teach is the one section 11 draws: a reviewer
 that reads the whole backend finds the *shape* of a fix's gap, and a fix
 that closes the reported path and not the shape will be found again.
 
-The third pass, on `29456c4`, was launched as soon as the fixes were committed (04:45 CDT); it read for twenty-three minutes and 196,872 tokens and then met the same usage limit ("try again at 9:32 AM"); no verdict was written and `git status` was unchanged. Until it returns, the final HEAD has been re-challenged by 66 regression cases, the live probes and the full gate sequence (run four), but not by the independent reviewer — stated as such in the verdict rather than papered over.
+The third pass, on `29456c4`, was launched as soon as the fixes were
+committed (04:45 CDT); it read for twenty-three minutes and 196,872 tokens
+and met the same usage limit. Re-run when the window opened (09:33 CDT),
+with the prompt narrowed to the code diff, it answered in six minutes: DO
+NOT RELEASE — no Critical, seven Highs (register P21-080 … P21-086), three
+of the second pass's fixes INCOMPLETE because of them, two Mediums. Again
+each finding is a closed path's neighbour: the five stock routes the second
+loop had not touched (return, adjust, damage, quarantine, release) and the
+analytics; two readers — global search and the report builder — that had
+never heard of API keys and answered as the owner; the repair's SUM inside
+the very UPDATE that waited on a posting's lock (READ COMMITTED keeps the
+statement's snapshot, so the posting it waited for is invisible to it); the
+commitment lifecycle transitions beside the locked edit; the receipt that
+locked the lines but not the order; a subscribe with no serialisation or
+idempotency, able to create two billable Stripe subscriptions; and the
+through-date written back beside the actual that no longer was. All fixed
+in `2b0df2b`, each with a regression that fails on `29456c4` (11 / 11 by
+reverting the twelve product files); the two reachable by one request staged
+live (a Riverside-only key: return to the other project's activity → 403 with
+stock unchanged, its analytics → 403, unfiltered analytics with no row of it;
+search by its id → 403, by name → 0 rows; a report preview on it → 403, on
+Riverside → 200; a `report:read` key → 403 on the cost source). One Medium —
+backup-code consumption unlocked — is registered at P2 (P21-087) and not
+fixed, by the brief.
+
+The fourth pass, on `2b0df2b` (09:46 CDT, twenty minutes): DO NOT RELEASE
+— no Critical, eight Highs (register P21-088 … P21-095), four of the third
+pass's fixes INCOMPLETE because of them. One is mine: the lookup I added
+to reuse a running Stripe subscription swallowed a failed lookup as "no
+subscription", so a Stripe outage at that instant would have created a
+second billable one — the pass caught it before any client could. The
+others are, again, the closed path's neighbours: three more inventory doors
+(the direct receipt, the item list, the summary and both warehouse
+valuations); a stored report file downloadable by any reader of the
+definition with the requester's wider access — a session-user disclosure,
+not only a key's; the assistant retrieving and reading conversations as a
+key's owner; job retry/cancel on a static role check; the ledger's own
+through-date advance decided from an unlocked read; two concurrent budget
+transfers past the available-budget guard; and report definitions and
+schedules mutable by a key as the owner. All fixed in the commit after
+`2b0df2b`, each with a regression that fails on `2b0df2b` (6 of 7 by
+reverting the ten product files; the seventh guards a flow that must keep
+working), four staged live (a Riverside-only key: receipt to the other
+project → 403 with stock unchanged, its items and summary → 403, unfiltered
+summary and items with no row of it; a key → the assistant 403; a read-only
+key → cancel and retry of a queued job 403; a key → creating a report 403).
+
+The fifth pass, on `59cf34b` (10:19 CDT, thirteen minutes): DO NOT
+RELEASE — no Critical, eight Highs and two Mediums (register P21-096 …
+P21-105), three of the fourth pass's fixes INCOMPLETE because of them. The
+best of them is not a race at all but an object literal: the item list's
+search clause and its project clause were two `OR` keys on one object, so
+the search silently replaced the scope — a bug older than the key checks
+that it defeated. The rest: a project's own item and warehouse were never
+treated as that project's stock (reads, scans, edits, reservations and a
+receipt naming no project all walked past the checks that looked only at
+what the *movement* named); conversations answered a key as its owner; a
+budget revision was born "approved" by whoever could create cost; the
+commitment change orders beside the locked commitment; "Return from site"
+putting stock back without reversing the activity's cost; the browser's
+query cache surviving a sign-out into another organisation; two first
+postings each creating a projection row of which the reports read one;
+and, at Medium, an admin exception applied after the filter that excluded
+it, and a lock order my own comment claimed and the SQL did not deliver.
+All fixed in the commit after `59cf34b`, each with a regression that fails
+on `59cf34b` (8 / 8 by reverting the nine backend product files), five
+staged live (a Riverside-only key: a P21-only item invisible to its search,
+refused on read, scan, edit, receipt and reservation; a key → conversations
+403; a QS's revision born a draft, refused as approved, refused approval,
+the PM's born approved; a bare return 400).
+
+The sixth pass, on `ded5fa0`, was launched at 10:47 CDT and stopped on the
+reviewer account's usage limit after 39,535 tokens ("try again at 2:33 PM");
+no verdict was written and the tree was unchanged. In the same hour the
+gate, not the reviewer, found the sixteenth defect — mine: the fifteenth
+loop's advisory locks were taken with `$queryRaw`, which cannot read the
+`void` that `pg_advisory_xact_lock()` returns, and every cost posting to an
+activity answered 500 on `d23dc05`. The greenfield spec's first request
+failed, run seven was stopped, the locks moved to `$executeRaw` (P21-106,
+`ded5fa0`), and run eight passed every gate. A unit test with a faked
+client could never have seen it; the gate that drives the real product did,
+on its first request — which is the whole argument for the gate. Until the
+sixth pass returns, the final HEAD has been re-challenged by 92 regression
+cases, 45 live probes and the full gate sequence, but not by the
+independent reviewer — stated as such in the verdict rather than papered
+over.
 
 ## 11. What the rounds cost, and what they were worth
 
-Nine loops and two release loops: 50 confirmed product defects in the
-ledger, stock, payment, transition, authorization and tenant-isolation paths
-(7 + 5 + 6 + 4 + 3 + 2 + 1 + 2 + 2 + 8 + 10, two of them regressions of a
-loop's own fix, plus one P3 hygiene item), 66 regression cases (62 of them fail on the code they guard; four guard flows that must keep working), and
+Nine loops, five release loops and one loop of my own: 74 confirmed product
+defects in the ledger, stock, payment, transition, authorization, billing
+and tenant-isolation paths (7 + 5 + 6 + 4 + 3 + 2 + 1 + 2 + 2 + 8 + 10 + 7 +
+8 + 8 + 1, four of them regressions of a loop's own fix, plus two P2 fixed,
+one P3 hygiene item and one P2 carried), 92 regression cases (87 of them fail on the code they guard; five guard flows that must keep working), and
 a demo-project reconciliation that still balances to the cent after all of
 it. The Phase 21 project's own figures did not move once (36/36 before and
 after every loop); the defects lived in what those figures never exercised —

@@ -208,12 +208,12 @@ the pre-deployment security debt is out of scope and is carried OPEN.
 Section 10 certified Phase 21 on the evidence of Phases 21A–21C: one
 greenfield project, driven from one client, one request at a time, with a
 self-review in place of an independent one. Phase 21D added the independent
-review — ten Codex rounds on the changed files and two passes of a release
+review — ten Codex rounds on the changed files and five passes of a release
 challenge across the whole backend, all read-only, each finding verified
 before anything was acted on — and it found what a sequential drive cannot:
-**51 product defects** in concurrency, cross-scope ids, tenant isolation, authorization
+**74 product defects** in concurrency, cross-scope ids, tenant isolation, authorization
 and billing rules across the ledger, stock, payment and transition paths
-(register P21-025 … P21-079), every one reproduced live or by a regression
+(register P21-025 … P21-106), every one reproduced live or by a regression
 that fails on the unfixed code, every one fixed. The certified project's own
 figures never moved (36/36 before, between and after every loop; the one
 time they did, it was my own instrument — T-14 — and it was put back through
@@ -221,12 +221,13 @@ the product's own return movement).
 
 ## 12. The gates, re-run on the frozen source
 
-Source frozen at `29456c4e4d3c7e59e00fdb081ef52fb44050c5a6` (the second
-release pass's ten fixes on top of `772f2c5`); the only commits after it are
-documents. Run four of the gate sequence, 2026-09-13 10:10–10:32 UTC,
-nothing else touching the database (run three, on `772f2c5`, had passed the
-same gates at 06:11–06:34 UTC with 2,061 Jest tests and Playwright 163/163
-in 20.2 min):
+Source frozen at `ded5fa0414b8ef907255c210442587c3a7685bff` (the fifth
+release pass's fixes and the sixteenth loop's correction on top of
+`59cf34b`); the only commits after it are documents. Run eight of the gate
+sequence, 2026-09-13 16:11–16:31 UTC, nothing else touching the database.
+Runs three to six — on `772f2c5`, `29456c4`, `2b0df2b` and `59cf34b` — had
+passed the same gates after each loop; run seven, on `d23dc05`, failed on
+P21-106 and is why `ded5fa0` exists:
 
 | gate | result |
 | --- | --- |
@@ -234,28 +235,28 @@ in 20.2 min):
 | `prisma migrate status` | 113 migrations, database up to date |
 | `prisma migrate diff` (database vs datamodel) | exit 2: 76 renamed index/FK names, 33 "removed" indexes (the GIN trigram search indexes the schema cannot declare), 22 `updatedAt` defaults, 1 index the schema declares and the database lacks, 1 referential action that differs — no table, column or type differs (P21-035) |
 | OpenAPI | 733 documented paths valid |
-| Jest (backend, four workers) | **182 suites, 2,071 tests, 0 failures** |
+| Jest (backend, four workers) | **185 suites, 2,097 tests, 0 failures** |
 | `tsc -b` | clean |
 | `vite build` | built |
 | Greenfield spec 32, twice | 3/3 and 3/3 — active project count unchanged, cleanup 0 failures, duplicate irreversible transactions 0, token expiry 0, reference collisions 0 |
-| Full Playwright, retries 0 | **163 / 163 in 18.9 min**, 0 skipped |
+| Full Playwright, retries 0 | **163 / 163 in 16.8 min**, 0 skipped |
 | Console gate (spec 30) | 5/5, errors 0, warnings 0 |
 | 14-path smoke (spec 22) | 14 modules, console errors 0, failed requests 0 |
 | RBAC audit (`rbac-audit.js`) | exit 0 |
 | Tenant / project isolation (stage 7) | 36/36 — and the stage now leaves the ledger where it found it |
 | Snapshot (`snapshot.js`) | **36 / 36** |
 | Reconciliation (`final-recon.js`) | 16 source lines and 36 snapshot lines pass; **actual-cost delta 0.00** (SQL, API, documents) |
-| API log | since the restart that loaded `29456c4` (segment 13): **8,179 requests, 5xx 0, 429 0**; the whole log (13 segments): **70,189 requests, 5xx 0, 429 0**, unhandled/deadlock 0; every restart logged with its reason (13, all product changes) |
-| Frontend lint | 0 errors in the 41 files Phase 21 touched (the cost dashboard re-checked after the second-pass fix); 24 historic errors in 10 earlier e2e specs carried |
+| API log | since the restart that loaded `ded5fa0` (segment 17): **8,166 requests, 5xx 0, 429 0**; the whole log (17 segments): **102,219 requests, 5xx 15, 429 0**, unhandled/deadlock 0 — the fifteen are the P21-106 regression on `d23dc05` during the superseded run seven, none before or since; every restart logged with its reason (17, all product changes) |
+| Frontend lint | 0 errors in the 45 files Phase 21 touched (the movement dialog, the sign-out dialog, the sign-in form and the inventory spec re-checked after the fifth pass); 24 historic errors in 10 earlier e2e specs carried |
 
 ## 13. Conditions, checked one by one
 
 | condition | holds? | evidence |
 | --- | :---: | --- |
-| P0 = 0 | **yes** | the two P0 found (P21-061 and P21-070 — a cross-tenant stock issue through an activity id, then through a project id) are FIXED with regressions and live probes |
-| P1 open = 0 | **yes** | 48 P1 found across 21A–21D, all FIXED with regressions that fail on the unfixed code |
+| P0 = 0 | **yes** | the three P0 found — P21-061 and P21-070 (a cross-tenant stock issue through an activity id, then through a project id) and P21-106 (my own regression on `d23dc05`, every cost posting answering 500, caught by the greenfield gate within minutes) — are FIXED with regressions and live probes |
+| P1 open = 0 | **yes** | 70 P1 found across 21A–21D, all FIXED with regressions that fail on the unfixed code |
 | Codex Critical = 0, High = 0 on the changed files | **yes** | round 10 on `28a2d50`: PASS |
-| Codex Critical = 0, High = 0 on the final HEAD, whole backend | **not yet shown** | pass 1 (`28a2d50`): 1 Critical + 8 High, fixed; pass 2 (`772f2c5`): 1 Critical + 9 High, fixed in `29456c4` and verified by regression (10/10 fail on `772f2c5`) and six live probes; **pass 3 on `29456c4` stopped on the reviewer account's usage limit** after 196,872 tokens ("try again at 9:32 AM CDT"), no verdict written |
+| Codex Critical = 0, High = 0 on the final HEAD, whole backend | **not yet shown** | pass 1 (`28a2d50`): 1 Critical + 8 High; pass 2 (`772f2c5`): 1 Critical + 9 High; pass 3 (`29456c4`): 7 High; pass 4 (`2b0df2b`): 8 High; pass 5 (`59cf34b`): 8 High + 2 Medium — every finding verified, fixed, regression-tested against the code it was found on, and staged live where one request can; **pass 6 on `ded5fa0` stopped on the reviewer account's usage limit** after 39,535 tokens ("try again at 2:33 PM CDT"), no verdict written |
 | Full Playwright 100 %, retries 0, no unexpected skips | **yes** | §12 |
 | Console errors 0, warnings 0 | **yes** | §12 |
 | 14-path smoke | **yes** | §12 |
@@ -267,20 +268,24 @@ in 20.2 min):
 
 ## 14. Independent review, final position
 
-Rounds 1–10 (changed files): the last verdict, on `28a2d50`, is **PASS** —
-every fix CORRECT, no regressions, nothing new of Critical or High
-severity. Release challenge, first pass (whole backend, on `28a2d50`): **DO
-NOT RELEASE** — one Critical, eight High; eight confirmed and fixed, one a
-real bug with no reachable effect (P21-069). Second pass (on `772f2c5`):
-**DO NOT RELEASE** — one Critical, nine High, each the first pass's finding
-one field over; all ten confirmed and fixed in `29456c4` (P21-070 …
-P21-079), each with a regression that fails on `772f2c5`, six staged live.
-Third pass (on `29456c4`): **not yet run** — launched at 04:45 CDT, stopped
-on the reviewer account's usage limit after 196,872 tokens; the prompt is
-prepared and the pass is to be run as soon as the limit lifts (09:32 CDT).
-Until it runs, the final HEAD has been re-challenged by 66 regression cases,
-26 live probes and the full gate sequence (run four), but not by the
-independent reviewer.
+Rounds 1–10 (changed files): the last verdict, on `28a2d50`, is **PASS**.
+Release challenge, whole backend: **five passes, five DO NOT RELEASE** —
+one Critical and eight High on `28a2d50`; one Critical and nine High on
+`772f2c5`; seven High on `29456c4`; eight High on `2b0df2b`; eight High and
+two Medium on `59cf34b`. Every finding was verified against the code before
+anything changed (register P21-061 … P21-105); every one that held — all but
+one, a bug with no reachable effect (P21-069) — was fixed with a regression
+that fails on the commit it was found on (mutation-checked, 62 cases across
+the five passes) and, where one request can stage it, against the live API.
+Each pass found the previous fix's gap one field over, and the sixteenth
+loop was my own: the fifteenth loop's advisory locks broke every cost
+posting on `d23dc05`, and the greenfield gate found it before the reviewer
+could (P21-106, fixed in `ded5fa0`). Pass six, on `ded5fa0`: **not yet
+run** — launched at 10:47 CDT, stopped on the reviewer account's usage
+limit after 39,535 tokens; the prompt is prepared and the pass is to be run
+as soon as the limit lifts (14:33 CDT). Until it runs, the final HEAD has
+been re-challenged by 92 regression cases, 45 live probes and the full gate
+sequence (run eight), but not by the independent reviewer.
 
 ## 15. Verdict
 
@@ -289,13 +294,13 @@ not yet re-challenged the final HEAD, for a reason outside this repository.
 The certification rule admits no partial credit, so:
 
 **PHASE 21 VERDICT: PHASE 21 GREENFIELD SYSTEM CERTIFICATION WITHHELD** —
-one condition outstanding (the third release pass), everything else met.
+one condition outstanding (the sixth release pass), everything else met.
 Not "not certified" for any defect: none is open above P2.
 
 **CLIENT READINESS VERDICT: CONDITIONAL CLIENT READY — PILOT/UAT.** The
-condition is exactly one: the third release pass returns no Critical or
-High on `29456c4` (or, if it does, the loop resumes and closes them as the
-twelve before it were closed). Open P2/P3 items are dispositioned in the
+condition is exactly one: the sixth release pass returns no Critical or
+High on `ded5fa0` (or, if it does, the loop resumes and closes them as the
+fifteen before it were closed). Open P2/P3 items are dispositioned in the
 register; none carries a financial, security or data-integrity risk for a
 pilot.
 

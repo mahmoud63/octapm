@@ -944,14 +944,286 @@ mutation-checked by reverting the fourteen product files), six staged live.
 | **Fix** | The four `/auth/mfa/*` routes refuse API keys (`403 API_KEY_FORBIDDEN`), and enrolment is refused while two-factor is on (`409 MFA_ALREADY_ENABLED`) — it must be turned off with the password and a current code first. |
 | **Regression** | `rbac.api-key.test.js` "CX21-429", `mfa.service.test.js` "CX21-429". Live: a `*:write` key → `POST /auth/mfa/setup` **403**. |
 
-## The third release pass — HEAD `29456c4`: not yet run
+## The third release pass — HEAD `29456c4`: no Critical, seven Highs
 
-Launched at 04:45 CDT on `29456c4` (read-only, the whole backend, the same
-brief plus the ten fixes to verify). It read the tree for twenty-three
-minutes and 196,872 tokens, then the account hit its usage limit again
-("try again at 9:32 AM"); no verdict was written and `git status` was
-unchanged. The prompt (`codex-release3-prompt.txt`) is to be re-run when the
-window opens; until it returns, the certification verdict stays conditional.
+Launched at 04:45 CDT, it stopped on the account's usage limit after
+196,872 tokens; re-run at 09:33 CDT with the prompt narrowed to the code
+diff, it returned in six minutes (153,432 tokens): DO NOT RELEASE — no
+Critical, seven Highs, three of the second pass's fixes INCOMPLETE because
+of them, two Mediums. Every finding was verified against the code before
+anything changed; all seven Highs hold, one Medium is the missing half of
+P21-071 and is closed with it, the other is registered at P2. All fixed in
+`2b0df2b`, each with a regression that fails on `29456c4` (11 / 11,
+mutation-checked by reverting the twelve product files); the two reachable
+by a single request staged live.
+
+## P21-080 · P1 · RBAC / project isolation · **FIXED** (Codex CX21-430; closes the INCOMPLETE on CX21-416)
+
+| | |
+| --- | --- |
+| **Observed** | P21-063 and P21-071 covered issue, receipt and the movement list. The **return, adjustment, damage, quarantine and release** routes passed the request straight through, so a key limited to some projects could add stock and post negative cost to another project through its activity; the inventory **analytics** ignored the key's projects and answered with every project's usage and cost by activity. |
+| **Root cause** | **CONFIRMED PRODUCT DEFECT** (the same gap as P21-071, on the five routes the second loop did not touch). |
+| **Fix** | The key's project list travels with every movement (`403 FORBIDDEN_PROJECT`, named or derived from the activity) and narrows every project-scoped analytics query. |
+| **Regression** | `inventory-analytics.service.test.js` "CX21-430" (every project-scoped query carries `projectId: { in }`). Live, a `*:write` key limited to Riverside: return to the P21 project's activity **403**, stock 86 → 86; its analytics **403**; unfiltered analytics 200 with no row of it; Riverside's analytics 200. |
+
+## P21-081 · P1 · RBAC / project isolation · **FIXED** (Codex CX21-431)
+
+| | |
+| --- | --- |
+| **Observed** | Global search answered an API key with its owner's whole view — any project by id, any module — and the report builder ran a report as the owner: a key limited to project A with `report:read` could preview B's cost records with neither B nor `cost:read`. |
+| **Root cause** | **CONFIRMED PRODUCT DEFECT** (authorization; two readers outside the guards that had learned about keys). |
+| **Fix** | Search refuses a project outside the key's list (`403`), narrows results to it and searches only the modules the key's scopes allow; a report runs only with a scope on its source's module (`403 API_KEY_SCOPE`) and only on the key's projects; deferred runs, their files and schedules — rendered later as the owner — refuse API keys altogether (`noApiKey`). |
+| **Regression** | `search.service.test.js` and `report-builder.service.test.js` "CX21-431". Live: search by the other project's id **403**, by name 0 rows of it, 1 of Riverside; a preview on it **403**, on Riverside 200; a `report:read` key → cost source **403 API_KEY_SCOPE**, project search 200 with 0 rows. (No report definition exists on the database, so the deferred-run refusal rests on the guard's own test and the route wiring.) |
+
+## P21-082 · P1 · Cost reconciliation · **FIXED** (Codex CX21-432; closes the INCOMPLETE on CX21-428)
+
+| | |
+| --- | --- |
+| **Observed** | P21-078 moved the SUM into the UPDATE. But an UPDATE that waits on a posting's row lock keeps the snapshot it started with: once the posting commits, the statement re-checks the row it is writing, not the ledger rows it is summing — and writes the total from before the posting. |
+| **Root cause** | **CONFIRMED PRODUCT DEFECT** (READ COMMITTED semantics: the sub-select's snapshot is the statement's, not the lock's). |
+| **Fix** | The repair holds the projection rows in a statement of their own first; a posting adding to one of them holds the same lock until it commits, and the SUM — taken by the next statement — sees it. The through-date is derived in the same UPDATE (`MAX(incurredOn)`), never from a date read before the lock. |
+| **Regression** | `cost-reconciliation.repair.test.js` "CX21-432" (two locks before any write; amount and date in one statement; no pre-read date written). Gates run 5 re-ran the dry-run recompute and the reconciliation on the certified project (0.00). |
+
+## P21-083 · P1 · Commitments · **FIXED** (Codex CX21-433)
+
+| | |
+| --- | --- |
+| **Observed** | P21-077 locked the edit and the schedule of values. The lifecycle transitions (submit, approve, return, execute, close, void) still decided on a status read before the transaction and updated unconditionally: a return that started on an approved commitment landed after it was executed, turning an executed agreement back into an editable draft with its committed cost still posted. |
+| **Root cause** | **CONFIRMED PRODUCT DEFECT**. |
+| **Fix** | The transition holds the commitment and refuses if its status moved (`409 COMMITMENT_STATE_CHANGED`). |
+| **Regression** | `commitment.service.test.js` "CX21-433" (approval refused once the lock reports *executed*; no update written). |
+
+## P21-084 · P1 · Procurement / receipt · **FIXED** (Codex CX21-434, and the CX21-421 remainder)
+
+| | |
+| --- | --- |
+| **Observed** | A goods receipt locked the order's lines but never the order: a cancellation that landed between its status read and its final update was overwritten with "partial" or "received", with the stock booked against a cancelled order. And (the Medium Codex attached to CX21-421) the receipt resolved — and created — stocked items before checking the key's projects, so a refused receipt left an item behind. |
+| **Root cause** | **CONFIRMED PRODUCT DEFECT** (two). |
+| **Fix** | The receipt locks the order row and takes its status from under the lock before the receivable check; the key's projects are checked before anything is created. |
+| **Regression** | `goods-receipt.service.test.js` "CX21-434" (refused once the lock reports *cancelled*; no stock moved, no order update) and "CX21-421" (refused before any item is created). |
+
+## P21-085 · P1 · Billing · **FIXED** (Codex CX21-435)
+
+| | |
+| --- | --- |
+| **Observed** | Subscribing had no serialisation and no idempotency: two concurrent requests both read "no active subscription" and each created a Stripe subscription, the second hiding the first in the database; and a subscribe after a cancel-at-period-end took the create branch while the first subscription ran to its period end — two billable subscriptions. |
+| **Root cause** | **CONFIRMED PRODUCT DEFECT** (money). |
+| **Fix** | One subscribe per organisation at a time (an advisory transaction lock), decided on a row read under it; a Stripe subscription still running (any status but canceled or incomplete-expired) is changed in place with cancel-at-period-end cleared; a creation carries an idempotency key so a replayed attempt gets the same subscription back. |
+| **Regression** | `subscription.service.test.js` (new): a subscribe while the Stripe subscription still runs updates it and creates nothing; the lock precedes the read; a first creation carries the key. Stripe is not configured on this database, so the live path is not staged. |
+
+## P21-086 · P1 · Cost · **FIXED** (Codex CX21-436)
+
+| | |
+| --- | --- |
+| **Observed** | P21-072 stopped an edit writing `actual`; it still wrote back the **through-date** it had read, so a ledger posting that advanced the date between the read and the write was undone — and a cutoff report then included cost from after the cutoff. |
+| **Root cause** | **CONFIRMED PRODUCT DEFECT** (the same shape as P21-072, one field over). |
+| **Fix** | An edit writes the through-date only when the caller supplies one; otherwise the field is not written at all. |
+| **Regression** | `cost.actual-derived.test.js` "CX21-436" (a budget-only edit writes no date; a supplied date is written); the T-15 assertion tightened to "not written". |
+
+## P21-087 · P2 · Account security · **OPEN** (Codex third pass, Medium)
+
+Backup-code consumption rewrites an unlocked JSON array; two verifications
+racing on the same code could both succeed, or one could restore a code the
+other consumed. A code is single-use in practice (the window is the
+milliseconds between two verifications of the same account); no money, data
+or tenant boundary is at stake. **Not fixed** — outside P0/P1 by the brief;
+dispositioned below.
+
+## The fourth release pass — HEAD `2b0df2b`: no Critical, eight Highs
+
+Run at 09:46 CDT on `2b0df2b` (127,143 tokens, twenty minutes): DO NOT
+RELEASE — no Critical, eight Highs, one of them a regression of the
+thirteenth loop's own subscription fix, and four of the third pass's fixes
+INCOMPLETE because of them. Every finding was verified against the code
+before anything changed; all eight hold. All fixed in the commit after
+`2b0df2b`, each with a regression that fails on `2b0df2b` (6 of 7 by
+reverting the ten product files; the seventh guards a flow that must keep
+working and passes on both), the four reachable by a single request staged
+live.
+
+## P21-088 · P1 · Billing · **FIXED** (Codex CX21-440, a regression of the P21-085 fix; closes the INCOMPLETE on CX21-435)
+
+| | |
+| --- | --- |
+| **Observed** | The thirteenth loop looked the running Stripe subscription up before deciding whether to change or create — and swallowed a failed lookup as "no subscription". A transient Stripe error at that moment created a second billable subscription and the database kept only the new id. |
+| **Root cause** | **CONFIRMED PRODUCT DEFECT** — my own: a `.catch(() => null)` written for "not found" that also caught "not reachable". |
+| **Fix** | A failed lookup fails the subscribe (the caller retries); only Stripe's "no such subscription" means there is none to change. |
+| **Regression** | `subscription.service.test.js` "CX21-440" (a connection error propagates, nothing created or written; a `resource_missing` still creates once). |
+
+## P21-089 · P1 · RBAC / project isolation · **FIXED** (Codex CX21-441; closes the INCOMPLETE on CX21-416 and CX21-430)
+
+| | |
+| --- | --- |
+| **Observed** | Three more inventory doors ignored a key's project list: the **direct stock receipt** passed the request straight through (a key limited to A could book stock to B), the **item list** and the **summary** took any `projectId`, and the summary's and analytics' **warehouse values** counted every project's items. |
+| **Root cause** | **CONFIRMED PRODUCT DEFECT** (the same gap as P21-071 and P21-080, on the doors those loops did not reach). |
+| **Fix** | The key's projects travel with the receipt (`403 FORBIDDEN_PROJECT`) and narrow the item list, the summary and both warehouse valuations to items of those projects or of none. |
+| **Regression** | `inventory.service.test.js` "CX21-441" and the analytics case extended (warehouse balances filtered by item project). Live, a `*:write` key limited to Riverside: receipt to the P21 project **403**, stock 86 → 86; its items and summary **403**; unfiltered summary and items 200 with no row of it. |
+
+## P21-090 · P1 · Reports · **FIXED** (Codex CX21-442)
+
+| | |
+| --- | --- |
+| **Observed** | A stored report file is rendered with its requester's whole access. Any reader who could see the definition — a session user with narrower project or module access, not only a key — could download it and read the projects a fresh query would have hidden from them. |
+| **Root cause** | **CONFIRMED PRODUCT DEFECT** (authorization: the file's visibility was the definition's, not the reader's). |
+| **Fix** | A stored file is its requester's (a scheduled run: the report owner's) and a company admin's to download (`403 REPORT_RUN_NOT_YOURS`); everyone else runs the report afresh as themselves. |
+| **Regression** | `report-builder.service.test.js` "CX21-442" (a narrower reader refused; the requester and an admin served). No stored run exists on the database, so the live path rests on the regression. |
+
+## P21-091 · P1 · RBAC · **FIXED** (Codex CX21-443; closes part of the INCOMPLETE on CX21-431)
+
+| | |
+| --- | --- |
+| **Observed** | The assistant retrieved records through global search without the key's restrictions and read conversations as the key's owner — a key limited to A could ask about B and read B's stored conversations. |
+| **Root cause** | **CONFIRMED PRODUCT DEFECT**. |
+| **Fix** | The assistant refuses API keys altogether (`403 API_KEY_FORBIDDEN`): it retrieves, answers and keeps conversations as the person it talks to. A key keeps the report assistant, which is scoped to the key. |
+| **Regression** | The `noApiKey` guard's own test; live: a key → `/assistant/status` **403**, `/assistant/conversations` **403**. |
+
+## P21-092 · P1 · RBAC · **FIXED** (Codex CX21-444)
+
+| | |
+| --- | --- |
+| **Observed** | Retrying or cancelling a background job checked the role statically, outside the decision every other write goes through: a read-only key (or a PM held to a read-only template) could cancel a queued schedule generation. |
+| **Root cause** | **CONFIRMED PRODUCT DEFECT**. |
+| **Fix** | Retry and cancel go through `hasPermission` — role, project template and key scopes. |
+| **Regression** | `routes/__tests__/jobs.routes.test.js` "CX21-444" (a `*:read` key refused on retry and cancel; `*:write` allowed). Live: a read-only key on a queued job → cancel **403**, retry **403**. |
+
+## P21-093 · P1 · Cost ledger · **FIXED** (Codex CX21-445)
+
+| | |
+| --- | --- |
+| **Observed** | A ledger posting decided whether to advance the activity's through-date from a row read before its lock; two postings reading the same date could each "advance" it, and the later-committing one dragged it back — a January cutoff then included a later cost. |
+| **Root cause** | **CONFIRMED PRODUCT DEFECT** (the same shape as P21-082 and P21-086, on the normal posting path). |
+| **Fix** | The decision is taken from the row as held for the transaction. |
+| **Regression** | `cost-ledger.repost.test.js` "CX21-445" (a posting that read an old date leaves a later held date alone, and advances an earlier one). |
+
+## P21-094 · P1 · Budget · **FIXED** (Codex CX21-446)
+
+| | |
+| --- | --- |
+| **Observed** | Two concurrent transfers out of the same budget line both passed the available-budget check and left the line negative, past the very guard written to stop that. |
+| **Root cause** | **CONFIRMED PRODUCT DEFECT**. |
+| **Fix** | A transfer holds both lines, in id order, before it counts what is available. |
+| **Regression** | `budget.service.test.js` "CX21-446" (the lock, in sorted id order, precedes every read of the lines). |
+
+## P21-095 · P1 · RBAC / reports · **FIXED** (Codex CX21-447; closes the rest of the INCOMPLETE on CX21-431)
+
+| | |
+| --- | --- |
+| **Observed** | Report definitions and schedules were changed and deleted as the key's owner: a key limited to A could delete an org-visible B report or re-enable its schedule, which then ran under the owner's access. |
+| **Root cause** | **CONFIRMED PRODUCT DEFECT**. |
+| **Fix** | Definitions and schedules are a person's act: every report mutation refuses API keys, as runs, downloads and schedule creation already did. A key previews, runs and exports synchronously, within its scopes and projects. |
+| **Regression** | Route wiring on the `noApiKey` guard (its own test). Live: a key → `POST /reports` **403 API_KEY_FORBIDDEN**. |
+
+## The fifth release pass — HEAD `59cf34b`: no Critical, eight Highs, two Mediums
+
+Run at 10:19 CDT on `59cf34b` (114,024 tokens, thirteen minutes): DO NOT
+RELEASE — no Critical, eight Highs, two Mediums, and three of the fourth
+pass's fixes INCOMPLETE because of them. Every finding was verified against
+the code before anything changed; all ten hold. All fixed in the commit
+after `59cf34b`, each with a regression that fails on `59cf34b` (8 / 8 by
+reverting the nine backend product files), the five reachable by a single
+request staged live.
+
+## P21-096 · P1 · RBAC / project isolation · **FIXED** (Codex CX21-450)
+
+| | |
+| --- | --- |
+| **Observed** | The item list built its project scope and its search as two `OR` keys on one object, so the search **replaced** the scope: a key limited to A searching by name was given B's project items — prices and balances included. (The same collision hid a session user's project filter behind a search before the key existed.) |
+| **Root cause** | **CONFIRMED PRODUCT DEFECT** (an object literal, not a query). |
+| **Fix** | Scope and search are two clauses of one `AND`. |
+| **Regression** | `inventory.service.test.js` "CX21-450". Live: a Riverside-only key searching for a P21-only item by name → 200 with 0 rows; the storeman's own search finds it. |
+
+## P21-097 · P1 · RBAC / project isolation · **FIXED** (Codex CX21-451; closes the INCOMPLETE on CX21-441, CX21-430 and CX21-416)
+
+| | |
+| --- | --- |
+| **Observed** | A project's own item or warehouse (`projectId` on the item master and the warehouse) was not that project's to a key: single-item reads, scans and edits took any item of the organisation; a receipt naming no project moved a project item's stock; a reservation claimed it. |
+| **Root cause** | **CONFIRMED PRODUCT DEFECT** — the checks had only ever looked at the project a *movement* named, never at the project the *stock* belonged to. |
+| **Fix** | Every movement loader refuses an item or warehouse of a project outside the key's list, whatever the movement names; item reads and scans answer through the same check; an edit checks the item's project and the project it is moved to; reservations carry the key's projects. |
+| **Regression** | `inventory.service.test.js` "CX21-451" (a P21-only item: receipt and reservation refused to a key limited elsewhere, received by a key allowed there). Live, a Riverside-only key on a P21-only item: read **403**, scan **403**, edit **403**, receipt naming no project **403**, reservation **403**; the item untouched. |
+
+## P21-098 · P1 · RBAC · **FIXED** (Codex CX21-452)
+
+| | |
+| --- | --- |
+| **Observed** | Conversations answered an API key as its owner: a key limited to A listed and read B's conversations and messages wherever the owner was a member. |
+| **Root cause** | **CONFIRMED PRODUCT DEFECT**. |
+| **Fix** | Conversations are between people: the router refuses API keys. |
+| **Regression** | The `noApiKey` guard's own test; live: a key → `GET /conversations` **403**. |
+
+## P21-099 · P1 · Budget / authorization · **FIXED** (Codex CX21-453)
+
+| | |
+| --- | --- |
+| **Observed** | A budget revision was created **approved** by whoever could *create* cost — a QS or cost controller — and an approved revision's amount could be changed by whoever could *update* cost, while the policy reserves approval to the PM and finance. Every such revision moved the project's revised budget at once. |
+| **Root cause** | **CONFIRMED PRODUCT DEFECT** (a default of "approved" and no approval check). |
+| **Fix** | Only someone who may approve cost creates an approved revision, approves one, or changes the money of one (`403 BUDGET_REVISION_APPROVAL_REQUIRED`, `409 BUDGET_REVISION_APPROVED`); everyone else starts a draft to submit. Workflow-driven approvals keep their authority. |
+| **Regression** | `budget-revision.service.test.js` (new). Live, on Riverside (every revision deleted afterwards): a QS's revision → status **draft**; created as approved → **403**; approving their own draft → **403**; the PM's → **approved**. |
+
+## P21-100 · P1 · Commitments · **FIXED** (Codex CX21-454)
+
+| | |
+| --- | --- |
+| **Observed** | A commitment change order was edited and moved on a status read before the transaction: an edit that started on a pending order landed after its approval had posted the old value, leaving an approved order at a new amount with committed cost at the old one. |
+| **Root cause** | **CONFIRMED PRODUCT DEFECT** (the same shape as P21-077 and P21-083, on the change orders). |
+| **Fix** | Edit and transition hold the change order and re-check (`409 COMMITMENT_CO_LOCKED` / `COMMITMENT_CO_STATE_CHANGED`). |
+| **Regression** | `commitment.service.test.js` "CX21-454". |
+
+## P21-101 · P1 · Inventory costing · **FIXED** (Codex CX21-455)
+
+| | |
+| --- | --- |
+| **Observed** | "Return from site" put stock back without reversing the activity's cost: the dialog sent no activity, and the product posts no cost for a movement naming none — so the activity kept the cost of material it no longer had, and issuing it again charged it twice. |
+| **Root cause** | **CONFIRMED PRODUCT DEFECT** (a rule that held for issues and not for returns). |
+| **Fix** | A return names the activity or cost code its cost goes back to, exactly as an issue names where it goes (`400 INV_NO_COST_SOURCE`); the dialog asks for it and sends it. The inventory spec's put-back — which returned without naming the activity — now names it (a TEST DATA correction that the rule exposed). |
+| **Regression** | `inventory.service.test.js` "CX21-455" (a bare return refused; a return naming the activity posts the negative entry). Live: a bare return → **400**. |
+
+## P21-102 · P1 · Tenant isolation (frontend) · **FIXED** (Codex CX21-456)
+
+| | |
+| --- | --- |
+| **Observed** | Signing out cleared the session and the offline store but not the query cache; signing in as another organisation on the same tab could render the previous organisation's inventory and billing before its own requests answered. |
+| **Root cause** | **CONFIRMED PRODUCT DEFECT** (frontend). |
+| **Fix** | Signing out, and signing in, clear the query cache. |
+| **Regression** | `tsc -b` and lint clean; the full Playwright run signs in and out throughout. |
+
+## P21-103 · P1 · Cost ledger · **FIXED** (Codex CX21-457)
+
+| | |
+| --- | --- |
+| **Observed** | Two first postings for an activity could each find no projection row and each create one; official actual cost reads one row per activity, so half the cost vanished from the reports. |
+| **Root cause** | **CONFIRMED PRODUCT DEFECT** (no uniqueness on the pair; the P21-093 lock protected existing rows only). |
+| **Fix** | A posting holds the (project, activity) pair for its transaction before it looks for the row, so the second finds the first's. |
+| **Regression** | `cost-ledger.repost.test.js` "CX21-457". |
+
+## P21-104 · P2 · Reports · **FIXED** (Codex CX21-458, Medium; closes the INCOMPLETE on CX21-442)
+
+A company admin could not download a run of a report private to someone else: the visibility filter refused it before the admin exception. The admin now takes any run's file. `report-builder.service.test.js` "CX21-458".
+
+## P21-105 · P2 · Budget · **FIXED** (Codex CX21-459, Medium)
+
+The P21-094 lock held both budget lines in one `ANY(...)` statement, which does not order the row locks the comment claimed it did. The lines are held one statement at a time, in id order. `budget.service.test.js` "CX21-446" tightened.
+
+## The sixteenth loop — my own regression, caught by the gate
+
+Gates run 7, on `d23dc05`, failed the greenfield spec on its first request
+and eight more specs after it: every cost posting to an activity answered
+500. Not a finding of the reviewer's — the fifteenth loop's advisory locks
+were taken with a client call that cannot read the `void` they return. The
+fix is `ded5fa0`; gates run 8 is the run the certification cites for the
+fifteenth and sixteenth loops together.
+
+## P21-106 · **P0** · Cost ledger · **FIXED** (my own regression, found by the greenfield gate)
+
+| | |
+| --- | --- |
+| **Observed** | On `d23dc05` (the fifteenth loop) every cost posting to an activity — a stock issue, a timesheet approval, a direct cost — failed with **500**: the advisory lock added for P21-103 was taken with `$queryRaw`, and Prisma refuses to deserialize the `void` that `pg_advisory_xact_lock()` returns. The subscription lock (P21-085) had the same shape on a path no gate exercises. |
+| **Root cause** | **CONFIRMED PRODUCT DEFECT** — mine; the unit tests fake the client and could not see it. Gates run 7 caught it on its first request: the greenfield spec's issue of two bags. Two 5xx responses were produced on the certified project before the run was superseded; the movement was refused whole, so no stock or cost moved. |
+| **Fix** | Both locks are taken with `$executeRaw`, which runs the statement and reads nothing back; the regression asserts the lock never goes through `$queryRaw`. Nothing on `d23dc05` was pushed or deployed. |
+| **Regression** | `cost-ledger.repost.test.js` "CX21-457" and `subscription.service.test.js` tightened. Live: an issue of one bag to A-130 and its return, both 2xx, ledger back where it started; greenfield 3/3 twice in gates run 8. |
+
+## T-16 · a superseded gate run overlapped a restart
+
+Gates run 6 (on `59cf34b`) was already superseded by the fifth pass's findings when it reached its last two steps; its snapshot and reconciliation failed with "connection refused" because the API was restarting on the fifteenth loop's code at that second (15:47:40 UTC). **ENVIRONMENT** (my own scheduling); the run is recorded as such and run 7, on the new HEAD, is the one the certification cites.
 
 ## Codex round 10 — on the ninth loop's fixes (HEAD `28a2d50`): PASS
 
@@ -982,6 +1254,7 @@ Every finding that stays open after Phase 21D, with what a pilot/UAT client woul
 | --- | :---: | --- | --- | --- | :---: | :---: | :---: | --- | :---: |
 | P21-007 | P2 | Schedule baseline | A project planned in the app shows "no schedule revision" as a baseline blocker; the baseline cannot be locked from the screen. | Import the schedule (XER/XML) or accept an unlocked baseline during the pilot; EV and progress work without the lock. | none | none | none | Phase 22 (first sprint) | Yes — carried deliberately; no evidence it blocks a pilot flow |
 | P21-023 | P2 | Task deep links | A notification for a task beyond the first 25 rows opens the register without the drawer. | Filter or scroll to the task. | none | none | none | Phase 22 | Yes |
+| P21-087 | P2 | Account security | Two verifications racing on the same backup code could both pass; the code is single-use in practice. | None needed; regenerate codes if one is suspected shared. | none | low (needs a stolen code used twice within milliseconds) | none | Phase 22 | Yes |
 | P21-003 | P3 | OpenAPI | `POST /activities` does not document the required `engineerIds`. | The API's 400 says so. | none | none | none | Phase 22 docs pass | Yes |
 | P21-004 | P3 | OpenAPI | Purchase-order `status` documented wider than the validator accepts. | Use `submit/approve/issue`. | none | none | none | Phase 22 docs pass | Yes |
 | P21-005 | P3 | Security posture | An outsider tenant's write meets `402` before `403`. | None needed — the write is refused either way. | none | low (information: the gate order reveals the subscription state, not data) | none | Phase 22 | Yes |
