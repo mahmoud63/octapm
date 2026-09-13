@@ -323,3 +323,574 @@ P3 and is documented, not fixed, per the brief.
 | **Root cause** | **TEST DATA / ENVIRONMENT** (fixture residue the seed does not clear), and a **P3 product observation** (an unordered capped list). Not caused by any Phase 21 change: no 21C commit touches the analytics path, and the residue predates 21C. |
 | **Also in the same full run** | `11-inventory.spec.ts › a delivery against a purchase order becomes stock` failed once on a screenshot write into the OneDrive-synced `docs/design/screenshots` folder (`UNKNOWN: unknown error, open …`) and passed when the spec was re-run alone — **ENVIRONMENT**. |
 | **Status** | OPEN — clear the residue (extend the seed's prefix list, or retire the specs' orders) and give the variance list an order. |
+
+# Phase 21D additions — final certification closure
+
+Phase 21D closed the 145/147 gate, put the branch in front of an independent
+reviewer (OpenAI Codex CLI 0.154.0, `codex exec --sandbox read-only`, round 1
+on HEAD `11c2335`) and reproduced every finding it made before changing
+anything. Seven HIGH findings reproduced live against the demo project and
+were fixed; the rest are dispositioned below. Nothing new was built.
+
+## P21-022 · P3 · Procurement / inventory read model · OPEN
+
+| | |
+| --- | --- |
+| **Observed** | The goods-receipt **Match** tab lists at most 100 open orders (`goods-receipt.service.js` `listOrders`, `take: 100`, ordered by the order's `promisedDate` ascending, unpromised last) with no search or paging, and `GET /inventory/analytics` `variance` is a top-25. On a database carrying many open orders a freshly raised, unpromised order is not on the tab. |
+| **How found** | `11-inventory.spec.ts › a delivery against a purchase order becomes stock` timed out looking for its order's row after the lifecycle specs left more than 100 open orders behind. |
+| **Root cause** | **CONFIRMED PRODUCT LIMITATION** — a capped, unsearchable list. Not a Phase 21 regression. |
+| **Test change** | The spec now gives its order a promised date the product sorts first and asserts, through `GET /inventory/purchase-orders?scope=all`, that the order is inside the 100-order window before it clicks; the analytics check compares the UI table with the API's own ranked rows instead of hunting a seeded row in a top-25. Neither change weakens what is asserted about the product. |
+| **Client impact** | A storeman on a busy project may need the order's page rather than the Match tab. Workaround: receive from the purchase order itself. No financial, security or data-integrity risk. |
+| **Status** | OPEN — give the tab a search box or paging (Phase 22 candidate). |
+
+## P21-023 · P2 · Deep links · OPEN
+
+| | |
+| --- | --- |
+| **Observed** | A task deep link (`/projects/:id/tasks?recordId=…`) opens the drawer only when the task is on the first 25-row page (`list-query.js` `DEFAULT_LIMIT = 25`); a notification for an older task lands on the register with nothing open. |
+| **How found** | Codex round 1, CX21-009 (MEDIUM). Confirmed by reading `features/tasks/index.tsx` `OpenNamedTask`, which searches the loaded rows only. |
+| **Root cause** | **CONFIRMED PRODUCT DEFECT** — the opener should fetch the task by id when it is not in the loaded page. |
+| **Client impact** | Navigation only; the task is reachable by scrolling or filtering. Not fixed in 21D: the brief limits changes to P0/P1 and Critical/High. Compatible with pilot use. |
+| **Status** | OPEN (P2) — fetch by id when absent from the list. |
+
+## P21-024 · P3 · Contracts · OPEN (observation) — and a documentation correction
+
+| | |
+| --- | --- |
+| **Observed** | The Phase 21 prime contract carries `retentionRate: 10` while the project's `defaultRetentionRate` is 5; the certification held 12,000.00 on 120,000.00 — 10 %. The 21A/21C reports and the reconciliation wrote "retention 5 % = 12,000.00", which is arithmetically wrong. |
+| **How found** | Codex round 1, CX21-013 (LOW). Verified by reading the contract and the project. |
+| **Root cause** | **DOCUMENTATION DEFECT** (corrected in the three documents in 21D) plus a **product observation**: creating a prime contract does not inherit the project's default retention rate, so the two can silently disagree. |
+| **Client impact** | None on figures — the product used the contract's rate consistently. A QS should check the rate on the contract, not assume the project default. |
+| **Status** | Documentation corrected. Product observation OPEN (P3). |
+
+## P21-025 · P1 · Direct cost · **FIXED** (Codex CX21-001)
+
+| | |
+| --- | --- |
+| **Observed** | An invoice line's `poLineId` was copied unchecked. A line naming a purchase-order line from **another project** (or another order than the invoice names) was accepted, and the capitalisation rule then read that foreign line's stock link and posted **no cost** on approval. |
+| **Reproduced** | Live: invoice with a foreign PO line → 201, submitted, approved, ledger delta **0 c** on a 10.00 invoice. |
+| **Root cause** | **CONFIRMED PRODUCT DEFECT** — missing scope check. |
+| **Fix** | `direct-cost.service.js` `normalizeLines` now loads the named PO lines scoped to the project and, when the invoice names its order, to that order; a line outside that set is refused with `400 DIRECT_COST_LINE_PO_LINE`. |
+| **Regression** | `direct-cost.service.test.js` "CX21-001" (two cases); fails on the unfixed service. Live re-check: `400 DIRECT_COST_LINE_PO_LINE`. |
+
+## P21-026 · P1 · Goods receipt · **FIXED** (Codex CX21-002)
+
+| | |
+| --- | --- |
+| **Observed** | The same order line reported twice on one receipt was checked twice against the same starting quantity: two rows of 60 on a line of 100 both passed; stock took **120** and the line recorded **60**. |
+| **Reproduced** | Live: receipt 200, PO line `receivedQty` 60, stock on hand 120. |
+| **Root cause** | **CONFIRMED PRODUCT DEFECT** — the `FOR UPDATE` lock covered the lines, not the repeated row. |
+| **Fix** | `goods-receipt.service.js` refuses a repeated `poLineId` on one receipt with `400 RECEIPT_DUPLICATE_LINE` before any stock moves. |
+| **Regression** | `goods-receipt.service.test.js` "CX21-002"; fails on the unfixed service. Live re-check: `400 RECEIPT_DUPLICATE_LINE`, nothing moved. |
+
+## P21-027 · P1 · Inventory costing · **FIXED** (Codex CX21-003)
+
+| | |
+| --- | --- |
+| **Observed** | The item's weighted average blended the receipt against the on-hand of the **receiving balance only**. 100 at 10.00 in one store then 100 at 20.00 in another left the item's average at **20.00** instead of 15.00, and every later issue was costed wrong. |
+| **Reproduced** | Live: two receipts, `averageCost` 20 (expected 15). |
+| **Root cause** | **CONFIRMED PRODUCT DEFECT** — the average is the item's; the arithmetic used one bin. |
+| **Fix** | `inventory.service.js` `drawFromWarehouse` locks the item row and blends against the sum of every `StockBalance` of the item. |
+| **Regression** | `inventory.service.test.js` "CX21-003"; fails on the unfixed service. Live re-check: `averageCost` 15.00. The Phase 21 project's own average is unchanged at 11.00 (snapshot 36/36). |
+
+## P21-028 · P1 · Inventory · **FIXED** (Codex CX21-004)
+
+| | |
+| --- | --- |
+| **Observed** | Stock issues read a balance and wrote absolute figures with no row lock; two concurrent issues of 60 from 100 both read 100 and both succeeded, leaving **40**. |
+| **Reproduced** | Live: two parallel issues → 200/200, on hand 40. |
+| **Root cause** | **CONFIRMED PRODUCT DEFECT** — lost update. |
+| **Fix** | `drawFromWarehouse` takes `SELECT … FOR UPDATE` on the balance row and re-reads its figures under the lock before checking and writing. |
+| **Regression** | `inventory.service.test.js` "CX21-004" (the lock statements are asserted); live re-check over six attempts: 200/**409**, on hand 40. |
+
+## P21-029 · P1 · Payments · **FIXED** (Codex CX21-005)
+
+| | |
+| --- | --- |
+| **Observed** | Direct-cost and subcontract pay-application payments checked the balance from a figure read **before** the transaction and wrote an absolute paid total. Two concurrent payments of 60 on a balance of 60 both succeeded: `paidTotal` 60, payment rows summing to **120**. |
+| **Reproduced** | Live: 200/200, `paidTotal` 60, rows 120. |
+| **Root cause** | **CONFIRMED PRODUCT DEFECT** — stale read, no lock. |
+| **Fix** | Both services lock the parent row inside the transaction, recompute what has been paid from the payment rows, re-check, then write the recomputed total. The IPC payment path, which already computed from rows inside the transaction, now takes the same lock. |
+| **Regression** | `direct-cost.service.test.js` and `sub-pay-app.service.test.js` "CX21-005"; both fail on the unfixed services. Live re-check: 200/**400**, `paidTotal` 60 = rows 60. |
+
+## P21-030 · P1 · Cost ledger · **FIXED** (Codex CX21-006)
+
+| | |
+| --- | --- |
+| **Observed** | A reopened, re-approved timesheet posted **nothing**: the second approval hit the first posting's `sourceKey`, answered `already_posted`, and the cost stayed reversed. Net after re-approve **0.00** instead of 400.00. |
+| **Reproduced** | Live: first approve +40,000 c, reopen, re-approve → sheet approved, net **+0 c**. |
+| **Root cause** | **CONFIRMED PRODUCT DEFECT** — idempotency key not released by a reversal. |
+| **Fix** | `cost-ledger.service.js` `post`: when the existing entry under the key has a reversal, the posting takes the next free key (`…:r2`, `…:r3`, …); an un-reversed existing entry still answers `already_posted`. The history keeps the first posting, its reversal and the new posting. |
+| **Regression** | New suite `cost-ledger.repost.test.js` (post → refuse → reverse → post again; twice); fails on the unfixed service. Live re-check: net **+40,000 c** after re-approve. |
+
+## P21-031 · P1 · Budget · **FIXED** (Codex CX21-007)
+
+| | |
+| --- | --- |
+| **Observed** | `POST/PATCH /budget/lines` accepted `actual` and wrote it straight onto the line — a figure the cost ledger never posted, and the reconciliation would then be arguing with an invention. |
+| **Reproduced** | Live: PATCH `actual` → 200. |
+| **Root cause** | **CONFIRMED PRODUCT DEFECT** — a derived projection exposed as an input (OCTA-FIN-LEDGER-059). |
+| **Fix** | `budget.service.js` refuses a non-zero `actual` on create and a changed `actual` on update with `400 BUDGET_ACTUAL_IS_DERIVED`; an unchanged echo is accepted because the edit dialog sends the current figure. The dialog's Actual field is now read-only and no longer sent. |
+| **Regression** | `budget.service.test.js` "CX21-007" (two cases); fails on the unfixed service. Live re-check: changed value → **400**, create with `actual` → **400**, unchanged echo → 200, figure unchanged. |
+
+## P21-032 · Test infrastructure · **FIXED** (Codex CX21-008)
+
+| | |
+| --- | --- |
+| **Observed** | `backend/scripts/phase21/run-all.js` listed seven stages, one of which (`stage6-change-progress.js`) never existed, and **skipped** any stage file it could not find — so it could exit green having driven none of stages 8–19. |
+| **Root cause** | **CONFIRMED TEST-INFRASTRUCTURE DEFECT** (false-green risk). The stages themselves were always run individually and their evidence is in the reports; the manifest was stale. |
+| **Fix** | The manifest names every stage (1–5, 7–19, then the snapshot) and a missing stage fails the run. |
+
+## P21-033 · P3 · Cash flow (legacy) · OPEN
+
+Codex CX21-010: the legacy subcontract-valuation module counts a certified valuation as a cash outflow at certification, ahead of payment. The connected program uses subcontract pay applications, whose cash-out is recorded at payment (verified, snapshot "cash out 54,000"). **ACCEPTED — LEGACY MODULE**; a pilot on the connected workflow is not affected. Retire or align the legacy module in Phase 22.
+
+## P21-034 · P3 · Cash flow · OPEN (design)
+
+Codex CX21-011: after a payment is recorded, a failed cash-flow projection rebuild is logged and swallowed, so the payment stands while the projection can lag. **ACCEPTED DESIGN** — the payment is the record and the projection is derived (`ipc-payment-cash-flow.test.js` asserts exactly this). Recommendation: a retry or a "projection stale" flag. No financial-record risk.
+
+## P21-035 · P3 · Tooling · OPEN (observation)
+
+`prisma migrate status` reports the database up to date; `prisma migrate diff --from-schema-datasource --to-schema-datamodel` reports only two **index names** differing — PostgreSQL truncates identifiers at 63 characters (`WorkflowActivityLink_recordType_recordId_activityId_relationTyp…`, `WorkflowStatusHistory_projectId_recordType_recordId_createdAt_i…`) while Prisma abbreviates them its own way. No column, table, constraint or index *definition* differs. Cosmetic; no action.
+
+## Codex round 1 findings not carried as defects
+
+- **CX21-012** (MEDIUM, "recorded gates are not green") — closed by Phase 21D: the two Playwright failures are fixed at the root (P21-020 / P21-022) and the full gates are re-run below.
+- **CX21-009** is P21-023; **CX21-013** is folded into P21-024.
+
+## Codex round 2 — on the first loop's fixes (HEAD `aa1972c`)
+
+The reviewer read the first loop's diff and returned **BLOCK**: five of the
+seven fixes were INCOMPLETE and two regressions were predicted. Every item was
+verified against the code before anything changed; all held. Fixed in
+`ffe09fc`, with nine regressions that fail on the first loop's services.
+
+## P21-036 · P1 · Inventory costing · **FIXED** (Codex CX21-101)
+
+| | |
+| --- | --- |
+| **Observed** | The first fix locked the item row but still blended with the `averageCost` loaded **before** the transaction. A receipt that waited on another receipt's lock used the price that receipt had just replaced: 200 on hand at 15.00 plus 100 at 30.00 gave 16.67 instead of 20.00. The same stale copy served two lines of one item on a single delivery. |
+| **Root cause** | **CONFIRMED PRODUCT DEFECT** (introduced by the first loop's shape of fix). |
+| **Fix** | The price is read from the item row under the lock. The lock is taken before the balance row is looked up or created, with `FOR NO KEY UPDATE`, so it does not conflict with the `KEY SHARE` a balance insert takes on the item — the deadlock Codex predicted between two first receipts into different stores. |
+| **Regression** | `inventory.service.test.js` "CX21-101" (price under the lock; item lock before balance lock). Live: three concurrent-receipt attempts each ended at the order-independent **20.00**; two first receipts into two stores both posted (200 @ 25.00). |
+
+## P21-037 · P1 · Budget · **FIXED** (Codex CX21-102)
+
+| | |
+| --- | --- |
+| **Observed** | Creating a line whose archived twin exists reactivates the twin — and the first fix's create path wrote `actual: 0` over a projection the ledger still backed. |
+| **Root cause** | **CONFIRMED PRODUCT DEFECT** (pre-existing; exposed by reviewing the touched function). |
+| **Fix** | A reactivated line keeps its actual; only a genuinely new line starts at 0. |
+| **Regression** | `budget.service.test.js` "CX21-102". Live: 150.00 posted, line archived, created again → same line reactivated with **150.00** kept. |
+
+## P21-038 · P1 · Payments · **FIXED** (Codex CX21-103)
+
+| | |
+| --- | --- |
+| **Observed** | The first fix locked the invoice and recomputed the paid total, but the **status** check still ran before the lock: a void that landed in between was paid back to approved/paid. The void, likewise, counted payments before its lock. The pay-application revocation and the IPC payment had the same shape. |
+| **Root cause** | **CONFIRMED PRODUCT DEFECT** (race). |
+| **Fix** | The payment re-reads status and total under the lock (`409 DIRECT_COST_NOT_APPROVED` / `SUB_PAY_APP_NOT_APPROVED` / `IPC_CERTIFICATE_NOT_CERTIFIED`); the void and the revocation lock the row and count payments again (`409 DIRECT_COST_HAS_PAYMENTS` / `SUB_PAY_APP_ALREADY_PAID`). |
+| **Regression** | `direct-cost.service.test.js` "CX21-103" (two cases) and `sub-pay-app.service.test.js` "CX21-103" (two cases), each injecting the other write at the moment of the lock. |
+
+## P21-039 · P1 · Direct cost · **FIXED** (Codex CX21-104)
+
+| | |
+| --- | --- |
+| **Observed** | The first fix scoped lines on create and on line replacement, but a header-only edit that moved the invoice to another order kept the old order's lines — including a stocked one that suppresses the project's cost. |
+| **Root cause** | **CONFIRMED PRODUCT DEFECT** (bypass of the first fix). |
+| **Fix** | A header-only order change re-checks the kept lines against the new order and refuses with `400 DIRECT_COST_LINE_PO_LINE`; naming the order the lines already belong to is accepted. |
+| **Regression** | `direct-cost.service.test.js` "CX21-104". Live: move to B → **400**; re-name A → 200. |
+
+## P21-040 · P1 · Inventory · **FIXED** (Codex CX21-105)
+
+| | |
+| --- | --- |
+| **Observed** | Reservations computed `reserved` from an unlocked read and wrote it absolutely; a reservation of 80 raced with an issue of 60 on 100 could leave 80 reserved against 40 on hand. The warehouse-wide issue split and the transfer landing read bins the same way. |
+| **Root cause** | **CONFIRMED PRODUCT DEFECT** (same class as CX21-004, other code paths). |
+| **Fix** | The warehouse's balances for the item are locked (`FOR NO KEY UPDATE`) before they are read in the reservation, the warehouse-wide issue split and the transfer landing. A concurrent draw waits and then sees what is left — which also removes the spurious `INV_INSUFFICIENT_STOCK` Codex predicted for the split. |
+| **Regression** | `inventory.service.test.js` "CX21-105" and "a warehouse-wide issue locks the bins…" (lock precedes the read). Live: reserve 80 ∥ issue 60 on 100 → reserve **200**, issue **409 INV_INSUFFICIENT_AVAILABLE**. |
+
+## P21-032, continued
+
+Codex round 2 added that `run-all.js --only=<no match>` exited green having run nothing. It now exits 1 with "matches no stage; nothing was run" (verified by hand).
+
+## Codex round 3 — on the second loop's fixes (HEAD `ffe09fc`)
+
+The reviewer returned **BLOCK** again: three of the round-2 fixes were still
+INCOMPLETE (each a race variant of the same defect), six new Highs, and one
+deadlock the round-2 bin prelock had introduced. Every item was verified
+against the code; all held. Fixed in the commit after `ffe09fc`, with eight
+regressions that fail on the round-2 services.
+
+## P21-041 · P1 · Inventory costing · **FIXED** (Codex CX21-201)
+
+| | |
+| --- | --- |
+| **Observed** | An issue read the item's average before any lock. One that waited for a concurrent receipt left at the old price while the stock it left behind was valued at the new one: 100 at 10.00, receive 100 at 30.00 and issue 100 at once — consumption 1,000.00, stock 2,000.00, against 4,000.00 bought. |
+| **Root cause** | **CONFIRMED PRODUCT DEFECT** — the round-2 fix locked receipts only. |
+| **Fix** | Every movement takes the item row (`FOR NO KEY UPDATE`) first and prices from the row under the lock. |
+| **Regression** | `inventory.service.test.js` "CX21-201". Live, three attempts with a receipt and an issue fired together: stock value plus consumption equalled the 4,000.00 bought in both orderings the race produced (150 @ 20.00 + 1,000.00; 150 @ 23.33 + 500.00). |
+
+## P21-042 · P1 · Inventory · **FIXED** (Codex CX21-202 and the round-2 deadlock)
+
+| | |
+| --- | --- |
+| **Observed** | Round 2 locked the *existing* bins of a warehouse before reading them. A bin created in between (a first receipt into a new store) was not locked, so a reservation could still be written against stock an issue had since drawn; and locking bins in query order let a two-line receipt and a reservation release wait on each other in opposite orders — a deadlock. |
+| **Root cause** | **CONFIRMED PRODUCT DEFECT** (phantom rows) and a **regression of the round-2 fix** (lock order). |
+| **Fix** | The bin prelocks are removed. The item lock, taken first, is the one lock every stock operation takes — reservations, the warehouse-wide split and the transfer landing included — and bins are only ever created under it, so nothing can appear between the lock and the read. Multi-item operations (a delivery, a transfer) take all their items up front in id order through an exported `lockItems`. |
+| **Regression** | `inventory.service.test.js` "no path locks bins by warehouse any more…", "lockItems takes several items in id order"; `goods-receipt.service.test.js` "holds every stocked item on the order before any line moves stock". Live: a two-line receipt in one item order racing a release in the other — both **200**, stock exact. |
+
+## P21-043 · P1 · Inventory transfers · **FIXED** (Codex CX21-206)
+
+| | |
+| --- | --- |
+| **Observed** | Two concurrent dispatches, or two concurrent receipts, of one transfer both read its status before either wrote: a transfer of 10 landed 20. |
+| **Root cause** | **CONFIRMED PRODUCT DEFECT** (pre-existing; found by reviewing the touched file). |
+| **Fix** | The transfer row is locked before its status is read; the second caller sees `in_transit` / `received` and is refused with `409 TRANSFER_STATE`. |
+| **Regression** | Live: dispatch **200 / 409**, receive **200 / 409**; 90 in the source, 10 in the destination. |
+
+## P21-044 · P1 · Direct cost · **FIXED** (Codex CX21-203)
+
+| | |
+| --- | --- |
+| **Observed** | The header-only order check (P21-039) validated against lines read before the lock; a line replacement that committed in between left an invoice naming order A with order B's stocked lines. |
+| **Root cause** | **CONFIRMED PRODUCT DEFECT** (race variant of P21-039). |
+| **Fix** | `updateDirectCost` does all its reading — status, lines, order check, duplicate check, totals — under the invoice's lock. |
+| **Regression** | `direct-cost.service.test.js` "CX21-203" (the replacement is injected at the moment of the lock; the header change is refused). |
+
+## P21-045 · P1 · Direct cost and pay applications · **FIXED** (Codex CX21-204)
+
+| | |
+| --- | --- |
+| **Observed** | Submit, approve, return and void each decided on a status read before the write. A return that started on a pending invoice landed on it once approved **and paid**, putting a paid, posted invoice back into draft. The same shape on every pay-application transition. |
+| **Root cause** | **CONFIRMED PRODUCT DEFECT** (race). |
+| **Fix** | Every direct-cost transition holds the invoice and refuses if the status moved (`lockExpecting`); every pay-application transition holds the application and refuses if its status differs from the one the transition was decided on (`409 SUB_PAY_APP_TRANSITION_INVALID`). |
+| **Regression** | `direct-cost.service.test.js` "CX21-204" (two cases: return, submit/approve); `sub-pay-app.service.test.js` "CX21-204". |
+
+## P21-046 · P1 · Client billing · **FIXED** (Codex CX21-205)
+
+| | |
+| --- | --- |
+| **Observed** | A retention release checked the retained balance without the certificate lock a payment takes; two releases of 80 on 100 retained could both pass. |
+| **Root cause** | **CONFIRMED PRODUCT DEFECT** (same class as P21-029). |
+| **Fix** | The release takes the certificate lock and re-checks its status before it reads the rows. |
+| **Regression** | `ipc-allocation-impact.test.js` "limits retention releases…" now asserts the lock statement. No live race was staged: the only certificate outside the certified Phase 21 project is a draft, and the Phase 21 certificate's figures are part of what this phase certifies. |
+
+## Lint — two errors in Phase 21-touched frontend files, cleared
+
+`scripts/inspections-ui.test.mjs` had the P21-011 assertion block appended three times (a parse error under ESLint — the script itself still ran, because Node parsed only the first declaration before the duplicate threw at load time in ESLint's stricter pass); one copy is kept. `goods-receipt-panel.tsx` passed a `useMutation` result into an effect's dependency list (`@tanstack/query/no-unstable-deps`, written 2026-09-08, before Phase 21, in a file Phase 21A touched); the stable `mutate` is destructured instead.
+
+## Codex round 4 — on the third loop's fixes (HEAD `6165c04`)
+
+The reviewer confirmed the stock protocol (every round-3 item CORRECT except
+two it tied to new findings) and returned **BLOCK** for four remaining
+writers of the same class — a status read before the transaction, a write
+after it — and one gap in the delivery prelock. All confirmed against the
+code; fixed in the commit after `6165c04`, with five regressions that fail
+on the round-3 services.
+
+## P21-047 · P2 · Goods receipt · **FIXED** (Codex CX21-301)
+
+| | |
+| --- | --- |
+| **Observed** | The round-3 prelock named the items on the order's lines; a line the storeman resolves to a different item (or that resolves by SKU) was locked later, in payload order — which a transfer holding the same two items in sorted order could contradict. |
+| **Root cause** | **CONFIRMED** — an incomplete prelock (introduced in round 3). A deadlock costs one aborted request, not data; hence P2. |
+| **Fix** | The prelock covers the items the lines resolve to (`itemsByLine`) as well as the items the order names. |
+| **Regression** | `goods-receipt.service.test.js` "CX21-301". |
+
+## P21-048 · P1 · Subcontract pay applications · **FIXED** (Codex CX21-302)
+
+| | |
+| --- | --- |
+| **Observed** | An edit checked "editable" before its transaction, then wrote lines before the application — the opposite order to every transition (a deadlock), and an edit paused after its check could overwrite a certified, paid application's lines and totals. A transition, likewise, recomputed from lines read before its lock. |
+| **Root cause** | **CONFIRMED PRODUCT DEFECT** (race). |
+| **Fix** | The edit holds the application first and refuses if it is no longer editable (`409 SUB_PAY_APP_LOCKED`); a transition re-reads the application under its lock before it recomputes. |
+| **Regression** | `sub-pay-app.service.test.js` "CX21-302" (two cases). |
+
+## P21-049 · P1 · Direct cost · **FIXED** (Codex CX21-303)
+
+| | |
+| --- | --- |
+| **Observed** | A delete that started on a draft ran after the invoice was submitted, approved and paid, removing the invoice, its lines and its payments while the posted cost stayed on the ledger without a source. |
+| **Root cause** | **CONFIRMED PRODUCT DEFECT** (race). |
+| **Fix** | The delete holds the invoice and refuses if it is no longer a draft. |
+| **Regression** | `direct-cost.service.test.js` "CX21-303". |
+
+## P21-050 · P1 · Client billing · **FIXED** (Codex CX21-304)
+
+| | |
+| --- | --- |
+| **Observed** | IPC item edits, adjustments, submit, certify and invoice issue each decided on a status read before the transaction; a stale submit could rewrite a certified, invoiced, paid period to "submitted", and a stale adjustment could change the net payable on a paid certificate. |
+| **Root cause** | **CONFIRMED PRODUCT DEFECT** (race). |
+| **Fix** | Each holds the certificate and refuses if its status moved, reading the status through the lock statement itself. |
+| **Regression** | `ipc-allocation-impact.test.js` "CX21-304" (submit); the other four paths take the identical guard. |
+
+## Codex round 5 — on the fourth loop's fixes (HEAD `5345f36`)
+
+The reviewer confirmed every round-4 item but one and returned **BLOCK** for
+three more findings. All confirmed against the code; fixed in the commit
+after `5345f36`, with three regressions that fail on the round-4 services.
+
+## P21-051 · P1 · Subcontract pay applications · **FIXED** (Codex CX21-401)
+
+| | |
+| --- | --- |
+| **Observed** | An edit recomputed from the copy it loaded before its lock, and the recompute rewrites every adjustment — including the ones the request never mentioned. A notes-only edit paused before its lock, another edit recording a 20,000.00 back-charge, the notes edit resumed: the back-charge went back to zero and the net payable rose. |
+| **Root cause** | **CONFIRMED PRODUCT DEFECT** (lost update on an editable draft). |
+| **Fix** | The edit reloads the application under the lock before it recomputes. |
+| **Regression** | `sub-pay-app.service.test.js` "CX21-401". |
+
+## P21-052 · P1 · Subcontract pay applications · **FIXED** (Codex CX21-402)
+
+| | |
+| --- | --- |
+| **Observed** | A transition's guard — the final-application closeout gate on approval, the "claim something" check on submit — ran on the application before the lock; the round-4 reload under the lock could carry different claims that the guard never saw. |
+| **Root cause** | **CONFIRMED PRODUCT DEFECT** (race variant of P21-048). |
+| **Fix** | After the reload, the guard is asked again about the application that will actually be transitioned. |
+| **Regression** | `sub-pay-app.service.test.js` "CX21-402" (submit with claims that vanish under the lock is refused `SUB_PAY_APP_EMPTY`). |
+
+## P21-053 · P1 · Inventory costing · **FIXED** (Codex CX21-403)
+
+| | |
+| --- | --- |
+| **Observed** | The weighted average counted on-hand stock only. Sequentially, with no race: 100 bought at 10.00, all dispatched to another store, 100 more bought at 30.00 while the transfer is on the road — the average became 30.00 — then the transfer lands at 30.00: 200 units valued at 6,000.00 against 4,000.00 bought, and every later issue is over-costed. |
+| **Root cause** | **CONFIRMED PRODUCT DEFECT** (pre-existing valuation rule; found by reviewing the touched function). |
+| **Fix** | Units in transit are still the item's units at the item's average, and blend like any other. |
+| **Regression** | `inventory.service.test.js` "CX21-403". Live: 100 @ 10 → dispatched → 100 @ 30 received → transfer landed → **200 @ 20.00 = 4,000.00**. |
+
+## Codex round 6 — on the fifth loop's fixes (HEAD `adee79d`)
+
+Every round-5 item CORRECT, no regressions; **BLOCK** for two more findings
+in the touched files, both pre-existing valuation and billing rules rather
+than races. Confirmed against the code; fixed in the commit after
+`adee79d`, with four regressions that fail on the round-5 services.
+
+## P21-054 · P1 · Inventory costing · **FIXED** (Codex CX21-501)
+
+| | |
+| --- | --- |
+| **Observed** | Quarantined stock was left out of the weighted average the way in-transit stock was (P21-053): 100 at 10.00 quarantined, 100 bought at 30.00 → average 30.00 → the quarantine released at 30.00: 200 valued at 6,000.00 against 4,000.00 bought. |
+| **Root cause** | **CONFIRMED PRODUCT DEFECT** (valuation rule). |
+| **Fix** | Quarantined stock counts in the item's quantity for blending; damaged stock, which is written off and never comes back, does not. |
+| **Regression** | `inventory.service.test.js` "CX21-501" and "damaged stock is written off and does not count". |
+
+## P21-055 · P1 · Subcontract pay applications · **FIXED** (Codex CX21-502)
+
+| | |
+| --- | --- |
+| **Observed** | A line's "previous" amount was trusted from the value stored when the application was created. Application A rejected, application B (newer) approved and paid for 60,000.00 on a 100,000.00 line, A reopened and re-submitted for 60,000.00: A's previous was still 0, each application passed its own ceiling, and 120,000.00 could be certified and paid against 100,000.00. |
+| **Root cause** | **CONFIRMED PRODUCT DEFECT** (billing ceiling computed from a stale, number-ordered "previous"). |
+| **Fix** | Every recompute derives each line's previous amount from the other counted (approved or paid) applications on the commitment — whatever their numbers — and writes it back to the line; the ceiling check then sees the true cumulative. |
+| **Regression** | `sub-pay-app.service.test.js` "CX21-502" (two cases: the re-bill is refused `SUB_PAY_APP_EXCEEDS_SCHEDULED`; with nothing certified elsewhere, previous is 0 even when the line says otherwise). |
+
+## Codex round 7 — on the sixth loop's fixes (HEAD `66da083`)
+
+CX21-501 CORRECT; CX21-502 INCOMPLETE for a concurrent variant; **BLOCK** for
+one finding. Confirmed against the code; fixed in the commit after
+`66da083`.
+
+## P21-056 · P1 · Subcontract pay applications · **FIXED** (Codex CX21-601)
+
+| | |
+| --- | --- |
+| **Observed** | Two open applications on one commitment (a rejected one reopened while a newer one was open — reopening did not apply the "one open application" rule that raising one does) could be approved at once; each read the other's claims as not yet certified, and 120,000.00 could be certified against a 100,000.00 line. |
+| **Root cause** | **CONFIRMED PRODUCT DEFECT** (the ceiling read other applications without a commitment-level lock; the one-open rule had a gap). |
+| **Fix** | Every transition, and raising an application, holds the commitment row before the application's, so decisions on one commitment are serialised and the second sees the first's claims as "previous". Coming back to draft is refused while another application is open (`409 SUB_PAY_APP_OPEN_EXISTS`). |
+| **Regression** | `sub-pay-app.service.test.js` "CX21-601" (three cases: lock order on a transition; reopen refused while another is open; the commitment held on creation). Live: reopening A while B is open → **409 SUB_PAY_APP_OPEN_EXISTS**; A reopened after B was paid and claiming the same 60 % → **400 SUB_PAY_APP_EXCEEDS_SCHEDULED**; claiming the remaining 40 % → 200 with previous = B's certified amount. |
+
+## Codex round 8 — on the seventh loop's fix (HEAD `f3c8591`)
+
+CX21-601 and CX21-502 CORRECT, no regressions; **BLOCK** for two more
+pre-existing rules in the touched service. Confirmed against the code;
+fixed in the commit after `f3c8591`, with four regressions (three fail on
+the round-7 code; the fourth guards the flow that must keep working).
+
+## P21-057 · P1 · Subcontract pay applications · **FIXED** (Codex CX21-701)
+
+| | |
+| --- | --- |
+| **Observed** | Materials stored on site were added to the gross and posted to cost after the line ceiling had been checked on work alone. A line worth 100,000.00 accepted 200,000.00 of materials with no work, and 190,000.00 (after 5 % retention) was payable, with no over-claim reported. Other applications' materials were not counted as "previous" either. |
+| **Root cause** | **CONFIRMED PRODUCT DEFECT** (billing ceiling incomplete). |
+| **Fix** | Work plus materials on site must fit the line's value; what other counted applications certified — work and materials — is "previous". |
+| **Regression** | `sub-pay-app.service.test.js` "CX21-701" (two cases). Live, fresh commitment: 200,000.00 of materials on a 100,000.00 line → **400 SUB_PAY_APP_EXCEEDS_SCHEDULED**; 60,000.00 of work plus 40,000.00 of materials → 200. |
+
+## P21-058 · P1 · RBAC · **FIXED** (Codex CX21-702)
+
+| | |
+| --- | --- |
+| **Observed** | `POST /pay-apps/:id/reopen` required only the update permission, but from *approved* it revokes the PM's certification and reverses the cost it posted. The route's own comment said it "needs the approval permission"; the code did not check it. A QS or a subcontractor-party editor could undo a certification. |
+| **Root cause** | **CONFIRMED PRODUCT DEFECT** (authorization). |
+| **Fix** | The route tells the service whether the caller holds the approval permission; revoking a certified application without it is refused with `403 SUB_PAY_APP_REVOKE_FORBIDDEN`. Coming back from *rejected* is an ordinary edit and still needs only update. Voiding keeps its own delete-on-void permission. |
+| **Regression** | `sub-pay-app.service.test.js` "CX21-702" (two cases). Live: the QS reopening a PM-approved application → **403**, status stays approved; the PM → 200, status draft. |
+
+## Codex round 9 — on the eighth loop's fixes (HEAD `65bddc2`)
+
+CX21-702 CORRECT; CX21-701 INCOMPLETE because its fix had over-reached; one
+more pre-existing rule. **BLOCK**. Both confirmed; fixed in the commit
+after `65bddc2`, with two regressions that fail on the round-8 code.
+
+## P21-059 · P1 · Subcontract pay applications · **FIXED** (Codex CX21-801, a regression of P21-057)
+
+| | |
+| --- | --- |
+| **Observed** | The round-8 fix folded other applications' materials into the line's "previous" amount, which the approved-progress cap also reads: 40,000.00 of work and 30,000.00 of materials certified before, progress now 50 %, a valid claim of 10,000.00 more work computed cumulative work 80,000.00 against a 50,000.00 cap and was refused as an over-claim. Codex caught it before it reached any run. |
+| **Root cause** | **REGRESSION** of the eighth loop (one figure for two rules). |
+| **Fix** | "Previous" keeps work and materials apart: work meets the progress cap; work plus materials — earlier and this period's — meets the line's value. |
+| **Regression** | `sub-pay-app.service.test.js` "CX21-801" (the valid claim goes through with previous 40,000.00 and no over-claim; the value ceiling still holds). |
+
+## P21-060 · P1 · Subcontract closeout · **FIXED** (Codex CX21-802)
+
+| | |
+| --- | --- |
+| **Observed** | The final-application test summed work only. An application that exhausted the subcontract's value with work plus materials was not "final", skipped the closeout gate (as-builts, warranties) and its override reason, and could be paid in full. |
+| **Root cause** | **CONFIRMED PRODUCT DEFECT** (pre-existing). |
+| **Fix** | Materials on site — this application's and the other counted applications' — count towards the value that makes an application final. |
+| **Regression** | `sub-pay-app.service.test.js` "CX21-802" (60,000.00 of work plus 40,000.00 of materials on 100,000.00 is final; 60,000.00 of work alone is not; materials paid on an earlier application count). |
+
+## The final release challenge — HEAD `28a2d50`: one Critical, eight Highs
+
+Unlike rounds 1–10, the release challenge read the **whole backend** and the
+money, stock and RBAC features of the frontend, and returned DO NOT RELEASE.
+Every finding was verified against the code; eight of the nine hold as
+described and one holds as a bug with no reachable effect. All fixed in the
+commit after `28a2d50`, each with a regression that fails on that commit
+(mutation-checked), and five staged live.
+
+## P21-061 · **P0** · Tenant isolation · **FIXED** (Codex CX21-410, Critical)
+
+| | |
+| --- | --- |
+| **Observed** | A stock issue resolved its activity by id alone. An activity id from **another organisation** resolved to that organisation's project, and this organisation's stock then posted cost — with this organisation's `orgId` and the other's `projectId` — onto the other tenant's activity. No composite tenant constraint stopped it. |
+| **Root cause** | **CONFIRMED PRODUCT DEFECT** — the only cross-tenant write found in Phase 21; the Phase 21 isolation stage attacked with an outsider *reading and writing the project's own routes*, never with a foreign id inside an otherwise legitimate request. |
+| **Fix** | The activity must be on a project of the caller's organisation; any other id is refused (`404 ACTIVITY_NOT_FOUND`) and nothing moves. |
+| **Regression** | `inventory.service.test.js` "CX21-410". Live: an issue naming an activity of the only other organisation in the database → **404**, stock 86 → 86. |
+
+## P21-062 · P1 · RBAC · **FIXED** (Codex CX21-415)
+
+| | |
+| --- | --- |
+| **Observed** | A role-only route guard (`requireRoles`, used on project create/update/archive, billing, BOQ, change orders and EOT) never looked at an API key's scopes; the permission guard always had. A key restricted to `*:read` owned by a PM could edit a project's contract value and archive the project. |
+| **Root cause** | **CONFIRMED PRODUCT DEFECT** (authorization). |
+| **Fix** | A write through a role guard now needs a write scope for the route's module (`403 API_KEY_SCOPE`); reads are unchanged. |
+| **Regression** | `src/middleware/__tests__/rbac.api-key.test.js`. Live: a `*:read` key → PATCH project **403**, GET 200. |
+
+## P21-063 · P1 · RBAC / project isolation · **FIXED** (Codex CX21-416)
+
+| | |
+| --- | --- |
+| **Observed** | The warehouse routes for purchase orders, the three-way match and stock issue/receipt sit under `/inventory`, not under a project router, so a key limited to some projects could list another project's orders (with prices and lines), read its match, and issue or receive against it. |
+| **Root cause** | **CONFIRMED PRODUCT DEFECT** (the project restriction was enforced only by the project-router middleware). |
+| **Fix** | Those routes honour the key's project list: a named project outside it is refused (`403 FORBIDDEN_PROJECT`), an unfiltered list is filtered to it, and single-order reads are checked after loading. |
+| **Regression** | Live: a key limited to Riverside → the other project's orders **403**; own project 200; unfiltered list 200 with 0 foreign rows. |
+
+## P21-064 · P1 · Cost · **FIXED** (Codex CX21-412)
+
+| | |
+| --- | --- |
+| **Observed** | An activity's actual cost was writable through the cost-record routes (and offered as an editable field on the cost dashboard), exactly as a budget line's had been (P21-031): a PM could zero it under posted ledger entries and corrupt AC/CPI/EAC. |
+| **Root cause** | **CONFIRMED PRODUCT DEFECT**. |
+| **Fix** | A changed actual is refused on create and update (`400 COST_ACTUAL_IS_DERIVED`); an unchanged echo passes; the dashboard no longer offers the field. |
+| **Regression** | `cost.actual-derived.test.js`. Live: changed actual → **400**; unchanged echo → 200. |
+
+## P21-065 · P1 · Client billing · **FIXED** (Codex CX21-413)
+
+| | |
+| --- | --- |
+| **Observed** | Two IPC periods certified at once each locked only their own certificate and read the other's items as not yet certified; 120,000.00 could be certified against a 100,000.00 allocation without an override. |
+| **Root cause** | **CONFIRMED PRODUCT DEFECT** (same class as P21-056). |
+| **Fix** | Certification holds the project row before the certificate, so certifications on one project are decided one at a time. |
+| **Regression** | `ipc-allocation-impact.test.js` "CX21-413" (lock order). |
+
+## P21-066 · P1 · Labour · **FIXED** (Codex CX21-414)
+
+| | |
+| --- | --- |
+| **Observed** | A return that started on a submitted timesheet could land after it was approved and posted: the sheet became rejected — editable — with its cost still on the ledger; replaced entries carry new ids, so re-approval posted the same labour again. |
+| **Root cause** | **CONFIRMED PRODUCT DEFECT** (race; same class as P21-045). |
+| **Fix** | Every timesheet transition (submit, approve, return, reopen) holds the sheet and refuses if its status moved. |
+| **Regression** | `timesheet.service.test.js` "CX21-414". |
+
+## P21-067 · P1 · Procurement · **FIXED** (Codex CX21-417)
+
+| | |
+| --- | --- |
+| **Observed** | A purchase-order edit that started on a pending order could write after the order was approved, changing its terms (a tax rate, a line) with the status left at approved. |
+| **Root cause** | **CONFIRMED PRODUCT DEFECT** (race). |
+| **Fix** | The edit holds the order and refuses if it is no longer editable (`409 PO_LOCKED`). |
+| **Regression** | `purchase-order.service.test.js` "CX21-417". |
+
+## P21-068 · P1 · Cost ledger · **FIXED** (Codex CX21-418)
+
+| | |
+| --- | --- |
+| **Observed** | Approving equipment usage on a daily report wrote the activity's actual **absolutely** and created no ledger entry: it could overwrite a concurrent posting, approving twice charged twice, and the equipment cost never reconciled against the ledger. |
+| **Root cause** | **CONFIRMED PRODUCT DEFECT** — the one cost source that bypassed OCTA-FIN-LEDGER-059 (the Phase 21 project has no equipment usage, which is why every reconciliation balanced). |
+| **Fix** | Equipment usage posts through the cost ledger, once per report (`sourceType: equipment`); the record keeps only the equipment category and the derived forecast. |
+| **Regression** | `daily-report.service.test.js` "posts approved equipment usage…" now asserts the ledger post and that no absolute actual is written. |
+
+## P21-069 · P3 · RBAC hygiene · **FIXED** (Codex CX21-411, reported as High)
+
+| | |
+| --- | --- |
+| **Observed** | Thirteen inventory routes passed their transition name (`stock.adjust`, `stock.issue`, …) as a bare string where the guard expects an options object, so the name was dropped. |
+| **Verification** | **The claimed impact is a FALSE POSITIVE**: no policy — `shared/permissions.json`, the party permissions, the permission templates — names any inventory transition, so nothing was let through; the procurement role is refused `stock.adjust` by the generic rule (live: **403**), before and after. |
+| **Fix** | The routes pass `{ transition }` and the guard accepts either form, so a future transition rule will bind. Recorded at P3. |
+
+## T-14 · the isolation stage moved the certified project
+
+The final gate run on `28a2d50` failed its last two steps by exactly **22.00**: the stage-7 RBAC probes (a storeman's and a site engineer's issue of one bag each) ran again as part of the gates and issued two more bags at 11.00 from the certified project. The 21A–21C baseline had absorbed the first run's bags; a second run moved the figures. **ENVIRONMENT / TEST-INFRASTRUCTURE**, not the product: the two bags were returned through the product's own return movement (ledger −22.00, stock 86, snapshot 36/36), and the stage now returns the bags its probes issue and checks it left the ledger where it found it.
+
+## T-15 · my own probe moved a through-date, and found a rule that no longer held
+
+The second full gate run (on `79f5ea1`) went red in the pay-application spec, which reconciles the seeded demo project: one activity was flagged *date-stale*. Between the two runs, the CX21-412 live probe had echoed an activity's unchanged actual — and the through-date resolver still treated any `actual` in a payload as a posting made now, resetting the date under the latest ledger entry. **Two things**: an instrument effect (the probe echoed a field on the demo project), and a **product rule made wrong by the phase's own fix** — with actual now derived, an echo is never a posting. The date was restored (200), the resolver no longer moves the date on an echo (`772f2c5`, with a regression that fails on `79f5ea1`), and the gates were run a third time.
+
+## Codex round 10 — on the ninth loop's fixes (HEAD `28a2d50`): PASS
+
+Every fix CORRECT, no regressions, nothing new of Critical or High
+severity. `28a2d50` is the frozen source for the final gates.
+
+## Further test and environment defects found in my own instruments (21D)
+
+| id | what was wrong | consequence, and what was done |
+| --- | --- | --- |
+| T-11 | The two database-backed Jest suites that open twenty connections each (`reference-number`, `raw-sql-reference-numbering`) failed with "Can't reach database server" in three of nine full runs — each time another process (an API restart, a live probe) was using the same embedded PostgreSQL, and once with the default worker count alone. They passed alone every time. | **ENVIRONMENT** (connection bursts against the embedded database), not the product. The final gate runs Jest with four workers and nothing else touching the database; recorded, not hidden. |
+| T-12 | The round-1 live probe for CX21-007 patched the budget line's own actual back onto it, which proved the field was writable but would have counted the fix's deliberate "unchanged echo" as a failure. | The probe now sends a changed value; a separate probe covers create and the echo. |
+| T-13 | My round-8 regression for CX21-701 encoded a merged "previous" (work plus materials) that round 9 showed to be wrong; the test was corrected with the fix. | Recorded so the register does not overstate what the eighth loop proved. |
+
+## Codex round 1 findings not carried as defects (restated)
+
+- **CX21-012** closed by this phase; **CX21-009** is P21-023; **CX21-013** is folded into P21-024.
+
+## Prisma drift — the P21-035 observation, examined
+
+`migrate diff --from-schema-datasource --to-schema-datamodel` on the frozen HEAD reports: index and foreign-key **renames** (hand-written migration names vs Prisma's); **thirty-three "removed" indexes** which are the GIN trigram search indexes the migrations create in SQL and the schema cannot declare; `updatedAt` **defaults** the database carries and the schema does not; one index the schema declares that the database lacks (`ActivityBoqAllocation(projectId, boqItemId, activityId)` — performance only); and one referential action that differs — `ActivityProgressMethod.projectId` is `ON DELETE RESTRICT` in the database and `Cascade` in the schema. Nothing in the code deletes a `Project` row, so the last has no reachable effect today; it is recorded so that a future project hard-delete is written against the database as it is. No table, column or type differs.
+
+## Disposition of open P2 / P3 findings
+
+Every finding that stays open after Phase 21D, with what a pilot/UAT client would meet and whether it is compatible with the readiness verdict. "Timing" says when it should be closed.
+
+| ID | Sev | Area | Client impact | Workaround | Financial risk | Security risk | Data-integrity risk | Timing | Compatible with CLIENT READY — PILOT/UAT |
+| --- | :---: | --- | --- | --- | :---: | :---: | :---: | --- | :---: |
+| P21-007 | P2 | Schedule baseline | A project planned in the app shows "no schedule revision" as a baseline blocker; the baseline cannot be locked from the screen. | Import the schedule (XER/XML) or accept an unlocked baseline during the pilot; EV and progress work without the lock. | none | none | none | Phase 22 (first sprint) | Yes — carried deliberately; no evidence it blocks a pilot flow |
+| P21-023 | P2 | Task deep links | A notification for a task beyond the first 25 rows opens the register without the drawer. | Filter or scroll to the task. | none | none | none | Phase 22 | Yes |
+| P21-003 | P3 | OpenAPI | `POST /activities` does not document the required `engineerIds`. | The API's 400 says so. | none | none | none | Phase 22 docs pass | Yes |
+| P21-004 | P3 | OpenAPI | Purchase-order `status` documented wider than the validator accepts. | Use `submit/approve/issue`. | none | none | none | Phase 22 docs pass | Yes |
+| P21-005 | P3 | Security posture | An outsider tenant's write meets `402` before `403`. | None needed — the write is refused either way. | none | low (information: the gate order reveals the subscription state, not data) | none | Phase 22 | Yes |
+| P21-006 | P3 | RBAC (business question) | A site engineer can issue stock, as a storeman can. | Policy decision; restrict if the client's process demands it. | low | low | none | Client decision at pilot kick-off | Yes |
+| P21-008 | P3 | RBAC (business question) | A planning engineer can see the commercial module and its figures. | Policy decision. | none | low (read visibility) | none | Client decision at pilot kick-off | Yes |
+| P21-012 | P3 | Change orders | `budgetLineId` on a variation is discarded; approved changes sit on the holding line. | Distribute from the holding line with a budget transfer (works, audited). | none — totals are exact; distribution is manual | none | none | Phase 22 | Yes |
+| P21-013 | P3 | Persona UX | "Users" and "Company" are offered to roles that get 403; the page shows an empty list, not a refusal. | Ignore the two entries. | none | none | none | Phase 22 | Yes |
+| P21-014 | P3 | Console hygiene | One 401 (`/auth/me`) per load before sign-in; 403 on `/parties` for four roles. | None needed; the console gate (spec 30) allows exactly these, no others. | none | none | none | Phase 22 | Yes |
+| P21-016 | P3 | Procurement read model | Package stays `tendering` after award + PO. | Read the register row, which carries the state. | none | none | none | Phase 22 | Yes |
+| P21-017 | P3 | OpenAPI | `purchaseOrderId` / `poLineId` undocumented on direct costs. | The UI sets them. | none | none | none | Phase 22 docs pass | Yes |
+| P21-018 | P3 | Procurement UX | "Waiting on you" counts 0 while a row says "Your action" for the user's own draft. | Use the row. | none | none | none | Phase 22 | Yes |
+| P21-019 | P3 | Quality score (business question) | Score counts NCRs raised, not open. | Read open NCRs on the dashboard. | none | none | none | Client decision | Yes |
+| P21-020 | P3 | Inventory analytics | Variance list is a fixed top-25 without paging. | Use the purchase-order register. | none | none | none | Phase 22 | Yes |
+| P21-021 | P3 | Deep links | Package/receipt links land on the long-lead view, empty for a package with no long-lead item. | Open the package from the RFQ register. | none | none | none | Phase 22 | Yes |
+| P21-022 | P3 | Match tab | Match tab shows at most 100 open orders, no search. | Receive from the purchase order itself. | none | none | none | Phase 22 | Yes |
+| P21-024 | P3 | Contracts (observation) | A prime contract does not inherit the project's default retention rate. | Set the rate on the contract (the QS sees it there). | low — only if a QS assumes the project default | none | none | Phase 22 | Yes |
+| P21-033 | P3 | Cash flow (legacy) | Legacy sub-valuation module counts cash-out at certification. | Use subcontract pay applications (the connected flow). | low — legacy module only | none | none | Phase 22 (retire or align) | Yes |
+| P21-034 | P3 | Cash flow (design) | A failed projection rebuild after a payment is logged, not retried. | Any later payment or a manual rebuild refreshes it. | none — the payment is the record | none | none | Phase 22 | Yes |
+| P21-035 | P3 | Tooling | `migrate diff` reports index/FK names, `updatedAt` defaults and 33 search indexes the schema cannot declare; one index the schema declares is missing from the database (`ActivityBoqAllocation(projectId, boqItemId, activityId)`). | none | none | none | none — no column, type or constraint definition differs | Phase 22: add the missing index in a migration; leave the names | Yes |
+
+**Test defects in my own instruments** (T-01 … T-10) are recorded in the register; none affects the product verdict.

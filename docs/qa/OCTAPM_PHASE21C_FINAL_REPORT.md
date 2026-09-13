@@ -20,7 +20,7 @@ at the end.
 
 9. Prime contract exists automatically with the project; IPC-01 created against it.
 10. IPC items are one per **approved BOQ allocation** (B-001/A110, B-002/A120, B-002/A130); the product caps quantity and progress (`IPC_ALLOCATION_QTY_EXCEEDED`, `IPC_APPROVED_PROGRESS_EXCEEDED`) — both refusals driven.
-11. Certified gross **120,000.00**; retention 5 % = **12,000.00**; net **108,000.00**.
+11. Certified gross **120,000.00**; retention 10 % = **12,000.00** (the prime contract's rate; the project default is 5 %, P21-024); net **108,000.00**.
 12. Certified revenue equals earned value (120,000.00 = 120,000.00) — the same approved progress governs both.
 13. One invoice issued; a second issue refused (`IPC_INVOICE_ALREADY_ISSUED`).
 14. Payment **80,000.00** recorded; receivable **28,000.00**; invoice `part_paid`.

@@ -38,7 +38,7 @@ the start of every stage.
 | Pay App → Payment | **VERIFIED** (B) | 54,000.00 recorded |
 | Payment → Cash Flow (out) | **VERIFIED** (B) | cash out 54,000.00; cost unchanged by the payment |
 | Prime Contract → Client SOV | **VERIFIED** (C) | prime contract auto-created with the project; IPC-01 items one per approved allocation (B-001/A110, B-002/A120, B-002/A130); caps refuse over-certification (`IPC_ALLOCATION_QTY_EXCEEDED`, `IPC_APPROVED_PROGRESS_EXCEEDED`) |
-| Client SOV → certification → invoice | **VERIFIED** (C) | certified gross **120,000.00** = the earned value of the same approved progress; retention 5 % = 12,000.00; net 108,000.00; one invoice, a second issue refused (`IPC_INVOICE_ALREADY_ISSUED`) |
+| Client SOV → certification → invoice | **VERIFIED** (C) | certified gross **120,000.00** = the earned value of the same approved progress; retention 10 % = 12,000.00 (the prime contract's rate, not the project's 5 % default — P21-024); net 108,000.00; one invoice, a second issue refused (`IPC_INVOICE_ALREADY_ISSUED`) |
 | Client invoice → payment → receivables | **VERIFIED** (C) | 80,000.00 received, 28,000.00 outstanding, invoice `part_paid` |
 | **Client payment → Cash Flow (in)** | **VERIFIED after fix** (C) | inflow **0.00** before (P21-009, P1), **80,000.00** after `recordIpcPayment` rebuilds the projection |
 | **Change → Revised Budget** | **VERIFIED** (B, C) | Original 1,700,000.00 immutable; approved changes 250,000.00 (B) + 4,500.00 (C, from RFI-001); **Revised 1,954,500.00**; identity exact |

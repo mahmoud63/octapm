@@ -262,7 +262,7 @@ distribution is not, and the snapshot asserts both facts rather than one.
 | | |
 | --- | ---: |
 | IPC-01 certified gross (three items, one per approved allocation) | 120,000.00 |
-| Retention 5 % | 12,000.00 |
+| Retention 10 % (the prime contract's rate; project default 5 %, P21-024) | 12,000.00 |
 | Net certified / invoiced | 108,000.00 |
 | Received | 80,000.00 |
 | Outstanding (receivable) | 28,000.00 |
@@ -300,3 +300,48 @@ Receiving stock, invoicing stocked goods, approving two variations, booking
 progress, recording payments in and out, closing an NCR, approving a daily
 log: each left the ledger where it was, and each is asserted as a **0.00**
 delta by the stage that drove it.
+
+# Phase 21D — the reconciliation, recomputed from source
+
+## 17. Three readings of the same money
+
+Phase 21D rebuilt the reconciliation from the tables (SQL, no service code in
+the path), from the API's own reconciliation and registers (the snapshot's
+36 checks), and from the figures the certification documents state — after
+every fix loop, and finally on the frozen HEAD. Every line is EXPECTED /
+ACTUAL / DELTA / PASS; the script is `final-recon.js` in the Phase 21D
+evidence set and it exits non-zero on any delta.
+
+| line item | EXPECTED | ACTUAL | DELTA | PASS | source |
+| --- | ---: | ---: | ---: | :---: | --- |
+| Actual cost — SQL `SUM(amount)` over `CostLedgerEntry` | 71,204.00 | 71,204.00 | 0.00 | PASS | SQL (12 entries) |
+| Actual cost — API `/cost/reconciliation` `ledger.total` | 71,204.00 | 71,204.00 | 0.00 | PASS | API |
+| Actual cost — SQL `SUM(BudgetLine.actual)` projection | 71,204.00 | 71,204.00 | 0.00 | PASS | SQL |
+| Actual cost — SQL `SUM(CostRecord.actual)` projection | 71,204.00 | 71,204.00 | 0.00 | PASS | SQL |
+| Actual cost — API `budget.recordedTotal` | 71,204.00 | 71,204.00 | 0.00 | PASS | API |
+| Actual cost — API `activity.recordedTotal` | 71,204.00 | 71,204.00 | 0.00 | PASS | API |
+|   of which material issue | 704.00 | 704.00 | 0.00 | PASS | SQL |
+|   of which subcontract pay app | 60,000.00 | 60,000.00 | 0.00 | PASS | SQL |
+|   of which direct cost | 8,500.00 | 8,500.00 | 0.00 | PASS | SQL |
+|   of which timesheet | 2,000.00 | 2,000.00 | 0.00 | PASS | SQL |
+| Original budget — SQL `SUM(BudgetLine.originalBudget)` | 1,700,000.00 | 1,700,000.00 | 0.00 | PASS | SQL |
+| Approved changes (VO-18, VO-20, VO-22) | 254,500.00 | 254,500.00 | 0.00 | PASS | API |
+| Revised budget = original + approved changes | 1,954,500.00 | 1,954,500.00 | 0.00 | PASS | API |
+| Executed commitments | 100,000.00 | 100,000.00 | 0.00 | PASS | API |
+| Certified subcontract gross | 60,000.00 | 60,000.00 | 0.00 | PASS | API |
+| Subcontract retention held | 6,000.00 | 6,000.00 | 0.00 | PASS | API |
+| Subcontract paid / cash out | 54,000.00 | 54,000.00 | 0.00 | PASS | API |
+| Client cash in | 80,000.00 | 80,000.00 | 0.00 | PASS | API |
+| Stock on hand (bags) | 86 | 86 | 0 | PASS | API |
+| Weighted average (per bag) | 11.00 | 11.00 | 0.00 | PASS | API |
+| Ledger reversal entries on the project | 0 | 0 | 0 | PASS | SQL |
+| Ledger re-postings (`:rN` keys) on the project | 0 | 0 | 0 | PASS | SQL |
+| Duplicate `(orgId, sourceKey)` pairs, whole database | 0 | 0 | 0 | PASS | SQL |
+| API reports balanced / legacy opening balance | balanced / 0.00 | balanced / 0.00 | — | PASS | API |
+
+**Actual-cost delta: 0.00** on all three readings (SQL, API, documents) and
+0.00 between SQL and API. Snapshot 36/36 after each of the three fix loops.
+
+The twenty-two defects Phase 21D fixed did not move a single one of these
+figures — which is the point: they lived in concurrency and cross-scope
+ids, not in the sequential arithmetic these figures exercise.

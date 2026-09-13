@@ -200,3 +200,95 @@ financial identity is exact to the cent and reconciles four ways; tenant and
 project isolation are proven; RBAC is proven after a fix that is tested;
 no P0 or P1 is open; the permanent regression passes twice from nothing;
 the pre-deployment security debt is out of scope and is carried OPEN.
+
+# Phase 21D — final certification closure
+
+## 11. What 21D changed about section 10
+
+Section 10 certified Phase 21 on the evidence of Phases 21A–21C: one
+greenfield project, driven from one client, one request at a time, with a
+self-review in place of an independent one. Phase 21D added the independent
+review — ten Codex rounds on the changed files and a release challenge across
+the whole backend, all read-only, each finding verified before anything was
+acted on — and it found what a sequential drive cannot: **41 product
+defects** in concurrency, cross-scope ids, tenant isolation, authorization
+and billing rules across the ledger, stock, payment and transition paths
+(register P21-025 … P21-069), every one reproduced live or by a regression
+that fails on the unfixed code, every one fixed. The certified project's own
+figures never moved (36/36 before, between and after every loop; the one
+time they did, it was my own instrument — T-14 — and it was put back through
+the product's own return movement).
+
+## 12. The gates, re-run on the frozen source
+
+Source frozen at `772f2c5d6d3fe1e5895ac741c69698f0cc70d6f9` (the through-date
+correction on top of the release-challenge fixes); the only commits after it
+are documents. Run three of the gate sequence, 2026-09-13 06:11–06:34 UTC,
+nothing else touching the database:
+
+| gate | result |
+| --- | --- |
+| `prisma validate` | valid |
+| `prisma migrate status` | 113 migrations, database up to date |
+| `prisma migrate diff` (database vs datamodel) | exit 2: 76 renamed index/FK names, 33 "removed" indexes (the GIN trigram search indexes the schema cannot declare), 22 `updatedAt` defaults, 1 index the schema declares and the database lacks, 1 referential action that differs — no table, column or type differs (P21-035) |
+| OpenAPI | 733 documented paths valid |
+| Jest (backend, four workers) | **182 suites, 2,061 tests, 0 failures** |
+| `tsc -b` | clean |
+| `vite build` | built |
+| Greenfield spec 32, twice | 3/3 and 3/3 — active project count unchanged, cleanup 0 failures, duplicate irreversible transactions 0, token expiry 0, reference collisions 0 |
+| Full Playwright, retries 0 | **163 / 163 in 20.2 min**, 0 skipped |
+| Console gate (spec 30) | 5/5, errors 0, warnings 0 |
+| 14-path smoke (spec 22) | 14 modules, console errors 0, failed requests 0 |
+| RBAC audit (`rbac-audit.js`) | exit 0 |
+| Tenant / project isolation (stage 7) | 36/36 — and the stage now leaves the ledger where it found it |
+| Snapshot (`snapshot.js`) | **36 / 36** |
+| Reconciliation (`final-recon.js`) | 16 source lines and 36 snapshot lines pass; **actual-cost delta 0.00** (SQL, API, documents) |
+| API log, whole phase (11 restart segments) | **37,048 requests, 5xx 0, 429 0**, unhandled/deadlock 0; every restart logged with its reason (12) |
+| Frontend lint | 0 errors in the 40 files Phase 21 touched; 24 historic errors in 10 earlier e2e specs carried |
+
+## 13. Conditions, checked one by one
+
+| condition | holds? | evidence |
+| --- | :---: | --- |
+| P0 = 0 | **yes** | the one P0 found (P21-061, cross-tenant issue) is FIXED with a regression and a live probe |
+| P1 open = 0 | **yes** | 39 P1 found across 21A–21D, all FIXED with regressions that fail on the unfixed code |
+| Codex Critical = 0, High = 0 on the changed files | **yes** | round 10 on `28a2d50`: PASS |
+| Codex Critical = 0, High = 0 on the final HEAD, whole backend | **not yet shown** | the release challenge found 1 Critical + 8 High on `28a2d50`; all fixed in `79f5ea1`/`772f2c5` and verified by regression and live probe; the **second pass could not run** — the Codex account hit its usage limit ("try again at 04:29 CDT") after 54,830 tokens |
+| Full Playwright 100 %, retries 0, no unexpected skips | **yes** | §12 |
+| Console errors 0, warnings 0 | **yes** | §12 |
+| 14-path smoke | **yes** | §12 |
+| Financial reconciliation, actual-cost delta 0.00 | **yes** | §12, reconciliation §17 |
+| Greenfield twice, allowance and cleanup exact | **yes** | §12 |
+| 429 = 0, unexpected 5xx = 0, unexpected API restarts = 0 | **yes** | §12 |
+| Security / RBAC / isolation | **yes** | §12 |
+| Lint: Phase 21-touched files clean | **yes** | §12 |
+
+## 14. Independent review, final position
+
+Rounds 1–10 (changed files): the last verdict, on `28a2d50`, is **PASS** —
+every fix CORRECT, no regressions, nothing new of Critical or High
+severity. Release challenge, first pass (whole backend, on `28a2d50`): **DO
+NOT RELEASE** — one Critical, eight High; eight confirmed and fixed, one a
+real bug with no reachable effect (P21-069). Release challenge, second pass
+(on the final HEAD): **not run** — blocked by the reviewer account's usage
+limit; the prompt is prepared and the pass is to be run as soon as the limit
+lifts. Until it runs, the final HEAD has been re-challenged by 56 regression
+cases, 20 live probes and the full gate sequence, but not by the independent
+reviewer.
+
+## 15. Verdict
+
+Every condition in section 13 holds except one: the independent reviewer has
+not yet re-challenged the final HEAD, for a reason outside this repository.
+The certification rule admits no partial credit, so:
+
+**PHASE 21 VERDICT: PHASE 21 GREENFIELD SYSTEM CERTIFICATION WITHHELD** —
+one condition outstanding (the second release pass), everything else met.
+Not "not certified" for any defect: none is open above P2.
+
+**CLIENT READINESS VERDICT: CONDITIONAL CLIENT READY — PILOT/UAT.** The
+condition is exactly one: the second release pass returns no Critical or
+High on `772f2c5` (or, if it does, the loop resumes and closes them as the
+eleven before it were closed). Open P2/P3 items are dispositioned in the
+register; none carries a financial, security or data-integrity risk for a
+pilot.

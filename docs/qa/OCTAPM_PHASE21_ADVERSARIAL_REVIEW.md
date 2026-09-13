@@ -246,3 +246,175 @@ under-report; and every over-report would have shown up as a failing
 ## 6. What this review does not establish (21C)
 
 That anyone other than the author has read the fix, the spec or the grades.
+
+# Phase 21D — independent review, at last
+
+## CODEX INDEPENDENT REVIEW — PERFORMED
+
+The heading above section 1 ("CODEX INDEPENDENT REVIEW NOT AVAILABLE") is
+superseded. Phase 21D put the branch in front of OpenAI Codex CLI 0.154.0,
+run from this session as `codex exec --sandbox read-only`, and proved the
+connection first: Codex returned `CODEX_FROM_CLAUDE_OK`, the branch name, the
+HEAD SHA and the remote URL, all matching `git`, and modified nothing (the
+working tree was checked after every round). No token was printed or stored
+in the repository.
+
+The rule of engagement, from the brief: nothing Codex said was acted on
+until it had been reproduced — live against the demo project where a request
+could stage it, by a regression test that fails on the unfixed code where the
+race could not be timed from outside — and nothing was dismissed because the
+existing tests were green. Every fix went back to Codex as a new HEAD.
+
+## 5. Round 1 — HEAD `11c2335`: seven Highs, all real
+
+Codex read the ledger, stock and payment services and reported seven HIGH
+findings (CX21-001 … 007), one MEDIUM test-infrastructure finding
+(CX21-008), four MEDIUM/LOW observations and a BLOCK verdict. All seven Highs
+reproduced live, first try, exactly as described (register P21-025 … 031):
+an invoice billing another project's purchase-order line posted no cost; a
+receipt naming one line twice took 120 on a line of 100; two stores blended
+to the wrong average; two concurrent issues both succeeded; two concurrent
+payments both cleared; a reopened, re-approved timesheet posted nothing; a
+budget line's actual was writable through the API.
+
+What this says about Phases 21A–21C: every one of those defects sat under
+flows those phases drove and certified, and none of the 36 snapshot checks or
+the 163 Playwright tests could have caught them, because none of them fired
+two requests at once or sent a second project's id where the first was
+expected. The self-review in sections 1–4 said as much in principle
+("where I would look first"); the independent review found the instances.
+
+## 6. Round 2 — HEAD `aa1972c`: the fixes were incomplete
+
+Codex read the first loop's diff and returned BLOCK: five of the seven fixes
+were INCOMPLETE — each one a race variant of the same defect, reachable
+through a code path the first fix did not cover — plus two regressions it
+predicted from PostgreSQL lock semantics: a deadlock between a balance
+insert's `KEY SHARE` and the item `FOR UPDATE`, and a warehouse-wide split
+failing on a bin emptied under it. All were confirmed against the code
+(register P21-036 … 040) and fixed; the reservation fix took a per-warehouse
+bin prelock.
+
+## 7. Round 3 — HEAD `ffe09fc`: the second loop's own gaps
+
+BLOCK again, and the most instructive round. The bin prelock did not stop a
+bin being *created* between the lock and the read (a phantom), and locked
+bins in query order, which a two-line receipt could contradict — a new
+deadlock. Issues still priced from an average read before any lock, so a
+receipt and an issue at once could lose value. Every status transition on
+invoices and pay applications decided on a status read before the write.
+Transfers could be dispatched or landed twice. Retention releases had no
+lock. (Register P21-041 … 046.)
+
+The third loop replaced the piecemeal locks with one protocol: every stock
+operation holds the item row first (`FOR NO KEY UPDATE`, which does not
+conflict with the `KEY SHARE` a balance insert takes), multi-item operations
+take all their items up front in id order, and every financial transition
+holds its row and refuses if the status moved since it was decided. The
+probes that had reproduced rounds 1 and 2 were re-run after every loop; none
+came back.
+
+## 8. Rounds 4 and 5 — the last writers, and one valuation rule
+
+Round 4 (HEAD `6165c04`) confirmed the stock protocol and named the four
+writers still deciding on a status read before their transaction: the
+pay-application edit (which also wrote lines before the application — the
+opposite order to every transition, a deadlock), the invoice delete, and
+the IPC item edit, adjustment, submit, certify and invoice paths; plus a
+delivery prelock that missed the items a line resolves to by choice or by
+SKU. Round 5 (HEAD `5345f36`) found that the edit still recomputed from its
+pre-lock copy (a notes-only edit could erase a deduction another edit had
+just made), that a transition's guard was not asked again about the claims
+it reloaded, and — sequentially, no race — that a purchase made while a
+transfer was on the road reset the item's average to its own price, so the
+transfer landed at that price and stock plus consumption no longer added
+up to what was bought. (Register P21-047 … P21-053.) All fixed, each with a
+regression that fails on the previous services; the valuation defect was
+also staged live: 200 units bought for 4,000.00 now land at 20.00.
+
+## 9. Rounds 6 and 7 — rules, not races
+
+Round 6 (HEAD `adee79d`) confirmed everything and found two rules rather
+than races: quarantined stock left out of the average the way in-transit
+stock had been, and a line's "previous" amount trusted from the value stored
+when the application was raised — so a rejected application reopened after
+a newer one was approved and paid could bill the same work again. Round 7
+(HEAD `66da083`) found the concurrent form of the second: two applications
+open on one commitment could be approved at once, each reading the other's
+claims as not yet certified. The fix serialises every decision on a
+commitment on the commitment row and closes the gap that let two be open —
+a rejected application cannot come back to draft while another is open.
+Both re-billing scenarios were staged live on a fresh commitment: the
+re-bill is refused with the line showing the other application's 60 % as
+previous, and reopening while another is open is refused.
+(Register P21-054 … P21-056.)
+
+Round 8 (HEAD `f3c8591`) confirmed the commitment lock and found two
+pre-existing rules in the same service: materials stored on site were added
+to the gross and posted to cost *after* the line ceiling had been checked
+on work alone (a 100,000 line accepted 200,000 of materials), and the
+reopen route required only the update permission although from *approved*
+it revokes the PM's certification and reverses posted cost — the route's
+own comment said it needed the approval permission. Both fixed and staged
+live on a fresh commitment (register P21-057, P21-058).
+
+Round 9 (HEAD `65bddc2`) did what an independent reviewer is for: it caught
+a regression in the eighth loop before any run could. Folding other
+applications' materials into the line's "previous" amount had made
+materials look like work to the approved-progress cap, and a valid claim of
+more work after materials had been certified would have been refused. The
+ninth loop keeps work and materials apart — work meets the progress cap,
+work plus materials meets the line's value — and, from the same round, an
+application that exhausts the subcontract with work plus materials is now
+the *final* one and runs the closeout gate it used to skip (register
+P21-059, P21-060). Round 10 (HEAD `28a2d50`) returned **PASS**: every fix
+CORRECT, no regressions, nothing new of Critical or High severity.
+
+## 10. The release challenge — the whole backend, not the changed files
+
+Rounds 1–10 were confined to the files each loop had changed. The release
+challenge, on `28a2d50`, was told to try to stop a pilot across the whole
+backend and the money, stock and RBAC features of the frontend — and it
+did: DO NOT RELEASE, one Critical and eight Highs. Eight of the nine held
+(register P21-061 … P21-068), and they are the most serious findings of the
+phase: a stock issue that resolved its activity by id alone and would post
+this tenant's cost onto **another tenant's** activity; a role-only route
+guard that never looked at an API key's scopes, so a read-only key could
+archive a project; warehouse routes outside the project routers that ignored
+a key's project list; an activity's actual cost writable through the
+cost-record routes; two IPC periods certifiable at once past the shared
+ceiling; a stale timesheet return that left posted labour editable; a
+purchase-order edit landing after approval; and equipment usage that wrote
+the activity's actual absolutely, with no ledger entry at all. The ninth
+(CX21-411) was a real argument-shape bug with **no reachable effect** — no
+policy names the inventory transitions it dropped — and is recorded at P3.
+All fixed in `79f5ea1`, each with a regression that fails on `28a2d50`, five
+of them staged live (the cross-tenant issue against the only other
+organisation in the database → 404, stock unchanged).
+
+The first full gate run, on `28a2d50`, also exposed my own instrument: the
+isolation stage's RBAC probes issue two bags each time they run, and the
+run moved the certified ledger by exactly 22.00. The bags were returned
+through the product's own return movement, the stage now gives back what it
+issues, and the gates were re-run (T-14).
+
+A second pass of the release challenge was launched on `79f5ea1` (and would
+have been re-run on `772f2c5`); it stopped after 54,830 tokens on the ChatGPT
+usage limit of the Codex account ("try again at 4:29 AM"). Until it runs,
+the final HEAD has been re-challenged by every regression test, every live
+probe and the full gate sequence, but not by the independent reviewer. That
+is stated as such in the verdict rather than papered over.
+
+## 11. What the rounds cost, and what they were worth
+
+Nine loops and a release loop: 40 confirmed product defects in the ledger,
+stock, payment, transition, authorization and tenant-isolation paths
+(7 + 5 + 6 + 4 + 3 + 2 + 1 + 2 + 2 + 8, one of them a regression of a
+loop's own fix, plus one P3 hygiene item), 56 regression cases (52 of them fail on the code they guard; four guard flows that must keep working), and
+a demo-project reconciliation that still balances to the cent after all of
+it. The Phase 21 project's own figures did not move once (36/36 before and
+after every loop); the defects lived in what those figures never exercised —
+concurrency, cross-scope ids and stock in motion — which is exactly where a
+certification driven from one client, one request at a time, is blind.
+
+__ROUND6__
