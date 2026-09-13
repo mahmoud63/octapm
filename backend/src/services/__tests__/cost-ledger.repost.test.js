@@ -12,6 +12,7 @@ const ledger = createCostLedgerMock();
 const mockPrisma = {
   ...ledger.tables,
   $queryRaw: jest.fn(async () => []), // row locks (Phase 21D): the held row, when a test says so
+  $executeRaw: jest.fn(async () => 0), // advisory locks (Phase 21D): run, nothing read back
   // Only p1 is org-1's (Phase 21D, CX21-420).
   project: { findFirst: jest.fn(async ({ where }) => (where.id === "p1" && where.orgId === "org-1" ? { id: "p1" } : null)) },
 };
@@ -100,11 +101,12 @@ describe("cost ledger — the through-date is decided under the lock", () => {
 });
 
 describe("cost ledger — one projection row per activity", () => {
-  beforeEach(() => { ledger.reset(); mockPrisma.$queryRaw.mockClear(); mockPrisma.$queryRaw.mockImplementation(async () => []); });
+  beforeEach(() => { ledger.reset(); mockPrisma.$queryRaw.mockClear(); mockPrisma.$executeRaw.mockClear(); mockPrisma.$queryRaw.mockImplementation(async () => []); });
 
   it("CX21-457: a posting holds the (project, activity) pair before it looks for the record it may have to create", async () => {
     await service.post(posting({ activityId: "act-9", incurredOn: "2027-03-10" }));
-    const held = mockPrisma.$queryRaw.mock.calls.find(([strings, ...values]) => Array.isArray(strings) && strings.join("?").includes("pg_advisory_xact_lock") && values.includes("cost-record:p1:act-9"));
+    const held = mockPrisma.$executeRaw.mock.calls.find(([strings, ...values]) => Array.isArray(strings) && strings.join("?").includes("pg_advisory_xact_lock") && values.includes("cost-record:p1:act-9"));
+    expect(mockPrisma.$queryRaw.mock.calls.some(([strings]) => Array.isArray(strings) && strings.join("?").includes("pg_advisory_xact_lock"))).toBe(false); // never through $queryRaw: void cannot be read back
     expect(held).toBeDefined();
     const records = await mockPrisma.costRecord.findMany({ where: { activityId: "act-9" } });
     expect(records).toHaveLength(1);

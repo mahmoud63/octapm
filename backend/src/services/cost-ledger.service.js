@@ -128,7 +128,9 @@ const applyToProjections = async ({ tx, entry }) => {
     // none and each create one, and official AC read only one of them
     // (Phase 21D, CX21-457). The pair is held for the transaction before the
     // row is looked for.
-    if (tx.$queryRaw) await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${`cost-record:${entry.projectId}:${entry.activityId}`}))`;
+    // Taken with $executeRaw: the function returns void, which $queryRaw
+    // cannot deserialize (a 500 on every posting — caught by the greenfield gate).
+    if (tx.$executeRaw) await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`cost-record:${entry.projectId}:${entry.activityId}`}))`;
     const record = await tx.costRecord.findFirst({
       where: { projectId: entry.projectId, activityId: entry.activityId },
       select: { id: true, actualThroughDate: true },

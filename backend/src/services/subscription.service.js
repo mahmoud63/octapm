@@ -227,7 +227,9 @@ async function subscribe(orgId, planId, billingCycle, paymentMethodId = null) {
   // subscribe after a cancel-at-period-end used to create a second billable
   // subscription while the first ran to its period end (Phase 21D, CX21-435).
   await prisma.$transaction(async (tx) => {
-    await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${`subscription:${orgId}`}))`;
+    // $executeRaw, not $queryRaw: the lock function returns void, which
+    // $queryRaw cannot deserialize.
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`subscription:${orgId}`}))`;
     const held = await ensureSubscription(orgId, tx);
     const pm = await tx.paymentMethod.findFirst({
       where: { subscriptionId: held.id, isDefault: true },

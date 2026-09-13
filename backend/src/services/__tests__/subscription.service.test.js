@@ -8,6 +8,7 @@ let row = { ...baseRow };
 const mockPrisma = {
   $transaction: jest.fn(async (fn) => fn(mockPrisma)),
   $queryRaw: jest.fn(async (strings) => { calls.push(`raw:${Array.isArray(strings) ? strings.join("?") : String(strings)}`); return []; }),
+  $executeRaw: jest.fn(async (strings) => { calls.push(`raw:${Array.isArray(strings) ? strings.join("?") : String(strings)}`); return 0; }),
   subscription: {
     findUnique: jest.fn(async () => { calls.push("read"); return { ...row }; }),
     create: jest.fn(async ({ data }) => ({ ...row, ...data })),
@@ -53,6 +54,7 @@ describe("Phase 21D — integrity (release challenge, third pass)", () => {
     await service.subscribe("org-1", "business", "monthly");
     const lockAt = calls.findIndex((c) => c.startsWith("raw:") && c.includes("pg_advisory_xact_lock"));
     expect(lockAt).toBeGreaterThanOrEqual(0);
+    expect(mockPrisma.$executeRaw).toHaveBeenCalled(); // the lock runs through $executeRaw (void cannot be read back)
     expect(calls.lastIndexOf("read")).toBeGreaterThan(lockAt);
   });
 
