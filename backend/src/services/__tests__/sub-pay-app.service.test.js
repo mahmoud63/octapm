@@ -440,3 +440,26 @@ describe("Phase 21D — integrity (Codex round 3)", () => {
     expect(mockPrisma.subPayApp.update).not.toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ status: "rejected" }) }));
   });
 });
+
+describe("Phase 21D — integrity (Codex round 4)", () => {
+  it("CX21-302: an edit holds the application first and refuses once it is no longer editable under the lock", async () => {
+    mockPrisma.subPayApp.findFirst.mockResolvedValue(payApp({ status: "draft", netThisPeriod: 27000 }));
+    mockPrisma.subPayApp.update.mockClear();
+    mockPrisma.subPayAppLine.update.mockClear();
+    const lock = jest.spyOn(mockPrisma, "$queryRaw").mockImplementation(async (strings) => (strings.join("?").includes('FROM "SubPayApp"') ? [{ status: "paid" }] : []));
+    await expect(service.updatePayApp({ orgId: "org-1", projectId: "project-1", payAppId: "pa-1", payload: { backCharges: 500 }, actor: { id: "qs" } })).rejects.toMatchObject({ code: "SUB_PAY_APP_LOCKED" });
+    lock.mockRestore();
+    expect(mockPrisma.subPayApp.update).not.toHaveBeenCalled();
+    expect(mockPrisma.subPayAppLine.update).not.toHaveBeenCalled();
+  });
+
+  it("CX21-302: a transition re-reads the application under its lock before it recomputes", async () => {
+    mockPrisma.subPayApp.findFirst.mockResolvedValue(payApp({ status: "submitted", netThisPeriod: 27000 }));
+    mockPrisma.subPayApp.update.mockImplementation(async ({ data }) => payApp({ status: "submitted", netThisPeriod: 27000, ...data }));
+    mockPrisma.subPayApp.findFirst.mockClear();
+    await service.rejectPayApp({ orgId: "org-1", projectId: "project-1", payAppId: "pa-1", actor: { id: "qs" }, code: "measurement", reason: "re-measure" });
+    // one read before the transaction, the status guard, then the reload with the include
+    const reads = mockPrisma.subPayApp.findFirst.mock.calls.map((call) => call[0]);
+    expect(reads.filter((args) => args.include).length).toBeGreaterThanOrEqual(2);
+  });
+});

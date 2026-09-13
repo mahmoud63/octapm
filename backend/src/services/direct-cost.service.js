@@ -359,8 +359,13 @@ const updateDirectCost = async ({ orgId, projectId, directCostId, payload = {}, 
 const deleteDirectCost = async ({ orgId, projectId, directCostId, actor = null }) => {
   const existing = await load({ orgId, projectId, directCostId });
   if (existing.status !== STATUS.DRAFT) throw new HttpError(409, "DIRECT_COST_LOCKED", "Only draft direct costs can be deleted — void it instead");
-  await prisma.directCost.delete({ where: { id: directCostId } });
-  await syncPurchaseOrders(prisma, [existing.purchaseOrderId]);
+  await prisma.$transaction(async (tx) => {
+    // A delete that started on a draft must not remove an invoice that was
+    // submitted, approved and paid meanwhile (Phase 21D, CX21-303).
+    await lockExpecting(tx, directCostId, [STATUS.DRAFT], "DIRECT_COST_LOCKED", () => "Only draft direct costs can be deleted — void it instead");
+    await tx.directCost.delete({ where: { id: directCostId } });
+    await syncPurchaseOrders(tx, [existing.purchaseOrderId]);
+  });
   await auditService.recordEvent({ orgId, projectId, entityType: "direct_cost", entityId: directCostId, action: auditService.ACTIONS.DELETED, actorId: actor?.id || null, summary: { ref: existing.ref } }).catch(() => null);
   return { deleted: true };
 };

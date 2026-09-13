@@ -1024,3 +1024,18 @@ describe("IPC allocation impact", () => {
     expect(mockPrisma.$queryRaw.mock.calls.some((call) => Array.isArray(call[0]) && /FROM "IpcCertificate" WHERE id = \? FOR UPDATE/.test(call[0].join("?")))).toBe(true);
   });
 });
+
+describe("Phase 21D — integrity (Codex round 4)", () => {
+  it("CX21-304: a submit that started on a draft refuses once the period was certified under the lock", async () => {
+    const certificate = { id: "ipc-1", projectId: "project-1", period: "IPC-1", status: "draft", totalCert: 0, totalRet: 0, netPayable: 0 };
+    mockPrisma.project.findFirst.mockResolvedValue({ id: "project-1" });
+    mockPrisma.ipcCertificate.findFirst.mockResolvedValue(certificate);
+    mockPrisma.ipcCertificate.update.mockClear();
+    mockPrisma.$queryRaw.mockImplementation(async (strings) => (Array.isArray(strings) && strings.join("?").includes('FROM "IpcCertificate"') ? [{ status: "certified" }] : []));
+    await expect(
+      ipcService.submitIpcPeriod({ orgId: "org-1", projectId: "project-1", period: "IPC-1", userId: "qs-1" }),
+    ).rejects.toMatchObject({ code: "IPC_INVALID_SUBMISSION_STATE" });
+    mockPrisma.$queryRaw.mockImplementation(async () => []);
+    expect(mockPrisma.ipcCertificate.update).not.toHaveBeenCalled();
+  });
+});

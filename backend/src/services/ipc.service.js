@@ -852,6 +852,18 @@ const createIpcPeriod = async ({
   return getIpcPeriod({ orgId, projectId, period: certificate.period });
 };
 
+/**
+ * Holds the certificate for the transaction and refuses if its status is no
+ * longer one the caller decided on — a submit that started on a draft must not
+ * land on a period that was certified, invoiced and paid meanwhile (Phase 21D,
+ * CX21-304). The status is read through the lock statement itself, so a fake
+ * database, which answers with nothing, is left alone.
+ */
+const lockCertificateExpecting = async ({ tx, certificateId, statuses, code, message }) => {
+  const [fresh] = await tx.$queryRaw`SELECT status FROM "IpcCertificate" WHERE id = ${certificateId} FOR UPDATE`;
+  if (fresh && !statuses.includes(fresh.status)) throw new HttpError(409, code, message);
+};
+
 const updateIpcItem = async ({ orgId, projectId, period, itemId, payload }) => {
   await ensureProject({ orgId, projectId });
 
@@ -920,6 +932,7 @@ const updateIpcItem = async ({ orgId, projectId, period, itemId, payload }) => {
   });
 
   const updatedItem = await prisma.$transaction(async (tx) => {
+    await lockCertificateExpecting({ tx, certificateId: certificate.id, statuses: ["draft"], code: "IPC_PERIOD_NOT_EDITABLE", message: "IPC items can only be updated while the period is in draft" });
     const item = await tx.ipcItem.update({
       where: { id: itemId },
       data: {
@@ -1095,6 +1108,7 @@ const updateCertificateAdjustments = async ({
   }
 
   return prisma.$transaction(async (tx) => {
+    await lockCertificateExpecting({ tx, certificateId: certificate.id, statuses: ["draft", "submitted"], code: "IPC_ADJUSTMENT_LOCKED", message: "A certified period cannot be adjusted" });
     await tx.ipcCertificate.update({ where: { id: certificate.id }, data });
     await recomputeCertificateTotals(tx, certificate.id);
 
@@ -1137,6 +1151,7 @@ const submitIpcPeriod = async ({
   }
 
   const updatedCertificate = await prisma.$transaction(async (tx) => {
+    await lockCertificateExpecting({ tx, certificateId: certificate.id, statuses: ["draft"], code: "IPC_INVALID_SUBMISSION_STATE", message: "Only draft IPC periods can be submitted" });
     const now = new Date();
     await tx.ipcItem.updateMany({
       where: { projectId, ipcPeriod: period },
@@ -1238,6 +1253,7 @@ const certifyIpcPeriod = async ({
   }
 
   return prisma.$transaction(async (tx) => {
+    await lockCertificateExpecting({ tx, certificateId: certificate.id, statuses: ["submitted"], code: "IPC_INVALID_CERTIFICATION_STATE", message: "Only submitted IPC periods can be certified" });
     const now = new Date();
     const normalizedOverrideReason = trimOrNull(overrideReason);
     const normalizedRole = normalizeRoleId(userRole);
@@ -1514,6 +1530,7 @@ const issueIpcInvoice = async ({
   }
 
   return prisma.$transaction(async (tx) => {
+    await lockCertificateExpecting({ tx, certificateId: certificate.id, statuses: PAYABLE_CERTIFICATE_STATUSES, code: "IPC_CERTIFICATE_NOT_CERTIFIED", message: "Only certified IPC periods can be invoiced" });
     const existingInvoice = await findIssuedInvoice({
       tx,
       projectId,

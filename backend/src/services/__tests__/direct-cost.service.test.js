@@ -408,3 +408,22 @@ describe("Phase 21D — integrity (Codex round 3)", () => {
     expect(mockLedger.total()).toBe(0);
   });
 });
+
+describe("Phase 21D — integrity (Codex round 4)", () => {
+  beforeEach(() => {
+    reset();
+    mockPrisma.procurementOrder = { findFirst: jest.fn(async ({ where }) => ({ id: where.id })) };
+  });
+
+  it("CX21-303: a delete that started on a draft refuses once the invoice was approved under the lock", async () => {
+    const cost = await invoice({ invoiceNumber: "INV-303" });
+    const lock = jest.spyOn(mockPrisma, "$queryRaw").mockImplementation(async (strings) => {
+      if (strings.join("?").includes('FROM "DirectCost"')) store.costs.find((row) => row.id === cost.id).status = "approved";
+      return [];
+    });
+    await expect(service.deleteDirectCost({ ...scope, actor, directCostId: cost.id })).rejects.toMatchObject({ code: "DIRECT_COST_LOCKED" });
+    lock.mockRestore();
+    expect(store.costs.find((row) => row.id === cost.id)).toBeTruthy();
+    expect(store.lines.filter((row) => row.directCostId === cost.id)).toHaveLength(2);
+  });
+});

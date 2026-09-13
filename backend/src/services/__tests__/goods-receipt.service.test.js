@@ -499,7 +499,32 @@ describe("Phase 21D — integrity (Codex round 3)", () => {
     await service.receiveAgainstOrder({ orgId: ORG, user: USER, payload: { orderId: "order-1", warehouseId: "wh-1", lines: [{ poLineId: "line-1", acceptedQty: 10 }] } });
     expect(mockInventory.lockItems).toHaveBeenCalledTimes(1);
     const [, ids] = mockInventory.lockItems.mock.calls[0];
-    expect(ids.filter(Boolean).sort()).toEqual(["item-0", "item-1"].filter((id) => ids.includes(id)).sort());
+    // lockItems de-duplicates; the list handed to it may name an item twice (mapped on the order and resolved for the line)
+    expect([...new Set(ids.filter(Boolean))].sort()).toEqual(["item-0", "item-1"]);
+    expect(mockInventory.lockItems.mock.invocationCallOrder[0]).toBeLessThan(mockInventory.postMovement.mock.invocationCallOrder[0]);
+  });
+});
+
+describe("Phase 21D — integrity (Codex round 4)", () => {
+  beforeEach(() => jest.clearAllMocks());
+
+  it("CX21-301: the prelock covers the item a line resolves to, not only the one the order names", async () => {
+    // The order line names no item; the storeman picks item-7 on the delivery.
+    mockPrisma.procurementOrder.findFirst.mockResolvedValue({
+      id: "order-1", ref: "PO-0001", status: "issued", projectId: "project-1", packageId: null, supplierId: null,
+      project: { id: "project-1" }, lines: [poLine({ inventoryItemId: null, orderedQty: 100 })],
+    });
+    mockPrisma.warehouse.findFirst.mockResolvedValue({ id: "wh-1", orgId: ORG, name: "Main" });
+    mockPrisma.deliveryReceipt.count.mockResolvedValue(0);
+    mockPrisma.deliveryReceipt.create.mockResolvedValue({ id: "grn-1", receiptNumber: "GRN-00001" });
+    mockPrisma.deliveryReceiptLine.create.mockResolvedValue({ id: "grn-line-1" });
+    mockPrisma.inventoryItem.findFirst.mockResolvedValue({ id: "item-7", orgId: ORG, sku: "PICKED", unit: "bag", averageCost: 6 });
+    mockPrisma.procurementPoLine.update.mockResolvedValue({});
+    mockPrisma.procurementOrder.update.mockResolvedValue({});
+    mockPrisma.procurementPoLine.findMany.mockResolvedValue([]);
+    await service.receiveAgainstOrder({ orgId: ORG, user: USER, payload: { orderId: "order-1", warehouseId: "wh-1", lines: [{ poLineId: "line-1", acceptedQty: 10, inventoryItemId: "item-7" }] } });
+    const [, ids] = mockInventory.lockItems.mock.calls[0];
+    expect(ids).toContain("item-7");
     expect(mockInventory.lockItems.mock.invocationCallOrder[0]).toBeLessThan(mockInventory.postMovement.mock.invocationCallOrder[0]);
   });
 });
