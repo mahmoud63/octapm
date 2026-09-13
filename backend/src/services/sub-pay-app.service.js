@@ -207,13 +207,20 @@ const previousByLine = async ({ tx = prisma, commitmentId, beforeNumber }) => {
  * created (zero), and could bill the same work again (Phase 21D, CX21-502).
  */
 const previousByLineExcluding = async ({ tx = prisma, commitmentId, excludeId }) => {
+  if (!tx.subPayAppLine?.findMany) return new Map();
   const lines = await tx.subPayAppLine.findMany({
     where: { payApp: { commitmentId, status: { in: COUNTED }, id: { not: excludeId } } },
     select: { sovLineId: true, thisPeriodAmount: true, materialsOnSite: true },
   });
   const map = new Map();
-  // Work and the materials paid with it: both were certified against the line.
-  for (const line of lines) map.set(line.sovLineId, addMoney(map.get(line.sovLineId) || 0, addMoney(line.thisPeriodAmount, line.materialsOnSite)));
+  // Work and materials are kept apart: work is what the approved-progress cap
+  // measures, and work plus materials is what the line's value bounds. Adding
+  // the two into one "previous" made materials look like work and blocked a
+  // valid claim (Phase 21D, CX21-801).
+  for (const line of lines) {
+    const prior = map.get(line.sovLineId) || { work: 0, materials: 0 };
+    map.set(line.sovLineId, { work: addMoney(prior.work, line.thisPeriodAmount), materials: addMoney(prior.materials, line.materialsOnSite) });
+  }
   return map;
 };
 
@@ -296,8 +303,9 @@ const applyClaims = ({ lines, claims, pctMap, changeMap = new Map() }) =>
     // cannot carry 200,000 of materials (Phase 21D, CX21-701).
     const materials = claim.materialsOnSite === undefined || claim.materialsOnSite === null ? toMoneyNumber(line.materialsOnSite) : round2(Number(claim.materialsOnSite) || 0);
     if (materials < -EPSILON) throw new HttpError(400, "SUB_PAY_APP_LINE_NEGATIVE", `Line ${line.sovLine?.lineNumber ?? ""}: materials on site cannot be negative`);
-    const claimed = addMoney(cumulative, materials);
-    const breakdown = materials > EPSILON ? ` (${cumulative} of work and ${materials} of materials on site)` : "";
+    const priorMaterials = toMoneyNumber(line.previousMaterials);
+    const claimed = addMoney(addMoney(cumulative, priorMaterials), materials);
+    const breakdown = materials > EPSILON || priorMaterials > EPSILON ? ` (${cumulative} of work, ${priorMaterials} of materials already certified and ${materials} of materials on site)` : "";
     if (claimed > scheduled + EPSILON) {
       const error = new HttpError(
         400,
@@ -517,7 +525,7 @@ const recompute = async ({ tx, existing, claims = null, patch = {} }) => {
   // "Previous" is derived here, every time, from the other counted
   // applications — never trusted from the line (CX21-502).
   const previous = await previousByLineExcluding({ tx, commitmentId: existing.commitmentId, excludeId: existing.id });
-  const based = existing.lines.map((line) => ({ ...line, previousAmount: previous.get(line.sovLineId) || 0 }));
+  const based = existing.lines.map((line) => ({ ...line, previousAmount: (previous.get(line.sovLineId) || {}).work || 0, previousMaterials: (previous.get(line.sovLineId) || {}).materials || 0 }));
   const lines = applyClaims({ lines: based, claims: claims || new Map(), pctMap, changeMap });
   const retentionRate = patch.retentionRate !== undefined ? patch.retentionRate : Number(existing.retentionRate) || 0;
   const backCharges = patch.backCharges !== undefined ? patch.backCharges : toMoneyNumber(existing.backCharges);
@@ -897,8 +905,12 @@ const isFinalApplication = async ({ existing, tx = prisma }) => {
   );
   if (revised <= EPSILON) return false;
 
+  // Materials stored on site are paid like work, here and on the other
+  // counted applications; an application that exhausts the value with them
+  // is the final one and runs the closeout gate (Phase 21D, CX21-802).
+  const prior = await previousByLineExcluding({ tx, commitmentId: existing.commitmentId, excludeId: existing.id });
   const claimed = (existing.lines || []).reduce(
-    (total, line) => addMoney(total, line.cumulativeAmount),
+    (total, line) => addMoney(total, addMoney(addMoney(line.cumulativeAmount, line.materialsOnSite), (prior.get(line.sovLineId) || {}).materials || 0)),
     0,
   );
   return claimed >= subtractMoney(revised, EPSILON);

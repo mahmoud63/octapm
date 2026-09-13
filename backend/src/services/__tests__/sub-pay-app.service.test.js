@@ -573,7 +573,8 @@ describe("Phase 21D — integrity (Codex round 8)", () => {
     mockPrisma.subPayAppLine.update.mockClear();
     mockPrisma.subPayApp.update.mockImplementation(async ({ data }) => payApp({ id: "pa-A", status: "draft", ...data }));
     await service.updatePayApp({ orgId: "org-1", projectId: "project-1", payAppId: "pa-A", payload: { lines: [{ sovLineId: "sov-1", thisPeriodAmount: 30000 }] }, actor: { id: "sub-user" } });
-    expect(mockPrisma.subPayAppLine.update).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ previousAmount: 70000, cumulativeAmount: 100000 }) }));
+    // previous is the other application's WORK (40,000); its 30,000 of materials bound the value, not the work (CX21-801)
+    expect(mockPrisma.subPayAppLine.update).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ previousAmount: 40000, cumulativeAmount: 70000 }) }));
   });
 
   it("CX21-702: an editor without the approval permission cannot revoke a certified application", async () => {
@@ -588,5 +589,41 @@ describe("Phase 21D — integrity (Codex round 8)", () => {
     mockPrisma.subPayApp.update.mockImplementation(async ({ data }) => payApp({ status: "rejected", ...data }));
     const reopened = await service.reopenPayApp({ orgId: "org-1", projectId: "project-1", payAppId: "pa-1", actor: { id: "qs" } });
     expect(reopened.status).toBe("draft");
+  });
+});
+
+describe("Phase 21D — integrity (Codex round 9)", () => {
+  afterEach(() => {
+    mockPrisma.subPayAppLine.findMany.mockImplementation(async () => []);
+    mockPrisma.activityProgress.findMany.mockResolvedValue([]);
+    mockPrisma.commitmentSovLine.findMany.mockImplementation(async () => []);
+  });
+
+  it("CX21-801: materials another application was paid for bound the line's value but are not work against the progress cap", async () => {
+    // 40,000 of work and 30,000 of materials were certified before; progress
+    // is now approved at 50 %. A claim of 10,000 more work is valid: work
+    // reaches 50,000 (the cap), value reaches 80,000 (under the line).
+    mockPrisma.subPayApp.findFirst.mockResolvedValue(payApp({ id: "pa-B", status: "draft", lines: [line({ scheduledAmount: 100000, previousAmount: 0, thisPeriodAmount: 0, cumulativeAmount: 0 })] }));
+    mockPrisma.subPayAppLine.findMany.mockImplementation(async ({ where } = {}) => (where?.payApp?.id?.not === "pa-B" ? [{ sovLineId: "sov-1", thisPeriodAmount: 40000, materialsOnSite: 30000 }] : []));
+    mockPrisma.activityProgress.findMany.mockResolvedValue([{ activityId: "act-1", pctComplete: 50 }]);
+    mockPrisma.subPayAppLine.update.mockClear();
+    mockPrisma.subPayApp.update.mockImplementation(async ({ data }) => payApp({ id: "pa-B", status: "draft", ...data }));
+    await service.updatePayApp({ orgId: "org-1", projectId: "project-1", payAppId: "pa-B", payload: { lines: [{ sovLineId: "sov-1", thisPeriodAmount: 10000 }] }, actor: { id: "sub-user" } });
+    expect(mockPrisma.subPayAppLine.update).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ previousAmount: 40000, cumulativeAmount: 50000, overClaimAmount: 0 }) }));
+    // but the value ceiling still counts those materials: 40,000 more work would be 80,000 + 30,000
+    await expect(
+      service.updatePayApp({ orgId: "org-1", projectId: "project-1", payAppId: "pa-B", payload: { lines: [{ sovLineId: "sov-1", thisPeriodAmount: 40000 }] }, actor: { id: "sub-user" } }),
+    ).rejects.toMatchObject({ code: "SUB_PAY_APP_EXCEEDS_SCHEDULED" });
+  });
+
+  it("CX21-802: an application that exhausts the subcontract with work and materials is the final one", async () => {
+    mockPrisma.commitmentSovLine.findMany.mockImplementation(async () => [{ amount: 100000 }]);
+    const withMaterials = payApp({ id: "pa-F", lines: [line({ cumulativeAmount: 60000, materialsOnSite: 40000 })] });
+    await expect(service.isFinalApplication({ existing: withMaterials })).resolves.toBe(true);
+    const workOnly = payApp({ id: "pa-F", lines: [line({ cumulativeAmount: 60000, materialsOnSite: 0 })] });
+    await expect(service.isFinalApplication({ existing: workOnly })).resolves.toBe(false);
+    // materials another counted application was paid for count too
+    mockPrisma.subPayAppLine.findMany.mockImplementation(async ({ where } = {}) => (where?.payApp?.id?.not === "pa-F" ? [{ sovLineId: "sov-1", thisPeriodAmount: 0, materialsOnSite: 40000 }] : []));
+    await expect(service.isFinalApplication({ existing: workOnly })).resolves.toBe(true);
   });
 });
