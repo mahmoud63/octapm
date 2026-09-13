@@ -3,7 +3,7 @@ const { body, param, query } = require("express-validator");
 const { asyncHandler } = require("../utils/async-handler");
 const { sendSuccess } = require("../utils/api-response");
 const { authenticate } = require("../middleware/auth");
-const { requirePermission, getEffectiveRole } = require("../middleware/rbac");
+const { requirePermission, getEffectiveRole, hasPermission } = require("../middleware/rbac");
 const { validate } = require("../middleware/validate");
 const service = require("../services/sub-pay-app.service");
 
@@ -123,7 +123,7 @@ router.post(
   "/:payAppId/reopen",
   requirePermission("sub_pay_app", "update"),
   [param("payAppId").isUUID(), body("reason").optional({ nullable: true }).isString().trim().isLength({ max: 2000 }), validate],
-  asyncHandler(async (req, res) => sendSuccess(res, await service.reopenPayApp({ ...scope(req), payAppId: req.params.payAppId, actor: actor(req), viewer: viewer(req), reason: req.body?.reason ?? null }))),
+  asyncHandler(async (req, res) => sendSuccess(res, await service.reopenPayApp({ ...scope(req), payAppId: req.params.payAppId, actor: actor(req), viewer: viewer(req), reason: req.body?.reason ?? null, canRevoke: hasPermission(req, "sub_pay_app", "approve", { transition: "sub_pay_app.approve" }) }))),
 );
 
 router.post(

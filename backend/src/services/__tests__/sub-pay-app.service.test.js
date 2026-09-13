@@ -227,7 +227,7 @@ describe("subcontractor payment applications", () => {
 
   it("gates approval on compliance and allows an override with a reason", async () => {
     mockPrisma.subPayApp.findFirst.mockResolvedValue(payApp({ status: "under_review", waiverRequired: true, waiverDocumentId: null, lines: [line({ thisPeriodAmount: 30000, cumulativeAmount: 50000 })] }));
-    await expect(service.approvePayApp({ orgId: "org-1", projectId: "project-1", payAppId: "pa-1", actor: { id: "pm" } })).rejects.toMatchObject({ code: "SUB_PAY_APP_COMPLIANCE", details: expect.objectContaining({ reasonCode: "MISSING_COMPLIANCE" }) });
+    await expect(service.approvePayApp({ orgId: "org-1", projectId: "project-1", payAppId: "pa-1", actor: { id: "pm" }, canRevoke: true })).rejects.toMatchObject({ code: "SUB_PAY_APP_COMPLIANCE", details: expect.objectContaining({ reasonCode: "MISSING_COMPLIANCE" }) });
     const approved = await service.approvePayApp({ orgId: "org-1", projectId: "project-1", payAppId: "pa-1", actor: { id: "pm" }, complianceOverrideReason: "Waiver couriered, arrives Monday" });
     expect(approved.status).toBe("approved");
     expect(mockPrisma.subPayApp.update).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ status: "approved", complianceOverrideReason: "Waiver couriered, arrives Monday" }) }));
@@ -275,7 +275,7 @@ describe("subcontractor payment applications", () => {
       });
 
     const approve = () =>
-      service.approvePayApp({ orgId: "org-1", projectId: "project-1", payAppId: "pa-1", actor: { id: "pm" } });
+      service.approvePayApp({ orgId: "org-1", projectId: "project-1", payAppId: "pa-1", actor: { id: "pm" }, canRevoke: true });
 
     beforeEach(() => {
       // The projections the posting maintains.
@@ -321,7 +321,8 @@ describe("subcontractor payment applications", () => {
 
       mockPrisma.subPayApp.findFirst.mockResolvedValue(claimed({ status: "approved", certificationRevision: 0 }));
       const revoked = await service.reopenPayApp({
-        orgId: "org-1", projectId: "project-1", payAppId: "pa-1", actor: { id: "pm" },
+        orgId: "org-1",
+        canRevoke: true, projectId: "project-1", payAppId: "pa-1", actor: { id: "pm" },
         reason: "Measured against the superseded drawing",
       });
 
@@ -351,7 +352,7 @@ describe("subcontractor payment applications", () => {
       mockPrisma.subPayApp.findFirst.mockResolvedValue(claimed());
       await approve();
       mockPrisma.subPayApp.findFirst.mockResolvedValue(claimed({ status: "approved" }));
-      await service.reopenPayApp({ orgId: "org-1", projectId: "project-1", payAppId: "pa-1", actor: { id: "pm" }, reason: "wrong quantity" });
+      await service.reopenPayApp({ orgId: "org-1", projectId: "project-1", payAppId: "pa-1", actor: { id: "pm" }, canRevoke: true, reason: "wrong quantity" });
 
       mockPrisma.subPayApp.findFirst.mockResolvedValue(
         claimed({ certificationRevision: 1, lines: [line({ thisPeriodAmount: 28000, cumulativeAmount: 48000 })] }),
@@ -372,7 +373,7 @@ describe("subcontractor payment applications", () => {
         claimed({ status: "approved", paidAmount: 5000, netThisPeriod: 27000, payments: [{ id: "p-1", amount: 5000, paidAt: new Date(), reference: "EFT-12" }] }),
       );
       await expect(
-        service.reopenPayApp({ orgId: "org-1", projectId: "project-1", payAppId: "pa-1", actor: { id: "pm" }, reason: "changed my mind" }),
+        service.reopenPayApp({ orgId: "org-1", projectId: "project-1", payAppId: "pa-1", actor: { id: "pm" }, canRevoke: true, reason: "changed my mind" }),
       ).rejects.toMatchObject({
         code: "SUB_PAY_APP_ALREADY_PAID",
         details: expect.objectContaining({ paidAmount: 5000, payments: [expect.objectContaining({ reference: "EFT-12" })] }),
@@ -382,7 +383,7 @@ describe("subcontractor payment applications", () => {
     it("will not revoke without a reason", async () => {
       mockPrisma.subPayApp.findFirst.mockResolvedValue(claimed({ status: "approved" }));
       await expect(
-        service.reopenPayApp({ orgId: "org-1", projectId: "project-1", payAppId: "pa-1", actor: { id: "pm" } }),
+        service.reopenPayApp({ orgId: "org-1", projectId: "project-1", payAppId: "pa-1", actor: { id: "pm" }, canRevoke: true }),
       ).rejects.toMatchObject({ code: "SUB_PAY_APP_REASON_REQUIRED" });
       expect(ledger.store.entries.length).toBe(0);
     });
@@ -425,7 +426,7 @@ describe("Phase 21D — integrity (Codex round 2)", () => {
   it("CX21-103: a revocation counts the payments again under the lock and refuses once one has landed", async () => {
     mockPrisma.subPayApp.findFirst.mockResolvedValue(payApp({ status: "approved", netThisPeriod: 27000, paidAmount: 0 }));
     mockPrisma.subPayAppPayment.findMany.mockResolvedValueOnce([{ amount: 5000 }]);
-    await expect(service.reopenPayApp({ orgId: "org-1", projectId: "project-1", payAppId: "pa-1", actor: { id: "qs" }, reason: "measured wrong" })).rejects.toMatchObject({ code: "SUB_PAY_APP_ALREADY_PAID" });
+    await expect(service.reopenPayApp({ orgId: "org-1", projectId: "project-1", payAppId: "pa-1", actor: { id: "qs" }, canRevoke: true, reason: "measured wrong" })).rejects.toMatchObject({ code: "SUB_PAY_APP_ALREADY_PAID" });
     expect(mockPrisma.subPayApp.update).not.toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ status: "draft" }) }));
   });
 });
@@ -545,5 +546,47 @@ describe("Phase 21D — integrity (Codex round 7)", () => {
     const statements = lock.mock.calls.map((call) => (Array.isArray(call[0]) ? call[0].join("?") : String(call[0])));
     lock.mockRestore();
     expect(statements.some((sql) => /FROM "Commitment" WHERE id = \? FOR NO KEY UPDATE/.test(sql))).toBe(true);
+  });
+});
+
+describe("Phase 21D — integrity (Codex round 8)", () => {
+  afterEach(() => mockPrisma.subPayAppLine.findMany.mockImplementation(async () => []));
+
+  it("CX21-701: materials on site count against the line with the work — 200,000 of materials on a 100,000 line is refused", async () => {
+    mockPrisma.subPayApp.findFirst.mockResolvedValue(payApp({ status: "draft", lines: [line({ scheduledAmount: 100000, previousAmount: 0, thisPeriodAmount: 0, cumulativeAmount: 0, materialsOnSite: 0 })] }));
+    await expect(
+      service.updatePayApp({ orgId: "org-1", projectId: "project-1", payAppId: "pa-1", payload: { lines: [{ sovLineId: "sov-1", thisPeriodAmount: 0, materialsOnSite: 200000 }] }, actor: { id: "sub-user" } }),
+    ).rejects.toMatchObject({ code: "SUB_PAY_APP_EXCEEDS_SCHEDULED" });
+    // work plus materials up to the line's value is fine
+    mockPrisma.subPayApp.update.mockImplementation(async ({ data }) => payApp({ status: "draft", ...data }));
+    await expect(
+      service.updatePayApp({ orgId: "org-1", projectId: "project-1", payAppId: "pa-1", payload: { lines: [{ sovLineId: "sov-1", thisPeriodAmount: 60000, materialsOnSite: 40000 }] }, actor: { id: "sub-user" } }),
+    ).resolves.toBeTruthy();
+  });
+
+  it("CX21-701: materials another application was paid for count in previous", async () => {
+    mockPrisma.subPayApp.findFirst.mockResolvedValue(payApp({ id: "pa-A", status: "draft", lines: [line({ scheduledAmount: 100000, previousAmount: 0, thisPeriodAmount: 0, cumulativeAmount: 0 })] }));
+    mockPrisma.subPayAppLine.findMany.mockImplementation(async ({ where } = {}) => (where?.payApp?.id?.not === "pa-A" ? [{ sovLineId: "sov-1", thisPeriodAmount: 40000, materialsOnSite: 30000 }] : []));
+    await expect(
+      service.updatePayApp({ orgId: "org-1", projectId: "project-1", payAppId: "pa-A", payload: { lines: [{ sovLineId: "sov-1", thisPeriodAmount: 40000 }] }, actor: { id: "sub-user" } }),
+    ).rejects.toMatchObject({ code: "SUB_PAY_APP_EXCEEDS_SCHEDULED" });
+    mockPrisma.subPayAppLine.update.mockClear();
+    mockPrisma.subPayApp.update.mockImplementation(async ({ data }) => payApp({ id: "pa-A", status: "draft", ...data }));
+    await service.updatePayApp({ orgId: "org-1", projectId: "project-1", payAppId: "pa-A", payload: { lines: [{ sovLineId: "sov-1", thisPeriodAmount: 30000 }] }, actor: { id: "sub-user" } });
+    expect(mockPrisma.subPayAppLine.update).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ previousAmount: 70000, cumulativeAmount: 100000 }) }));
+  });
+
+  it("CX21-702: an editor without the approval permission cannot revoke a certified application", async () => {
+    mockPrisma.subPayApp.findFirst.mockResolvedValue(payApp({ status: "approved", netThisPeriod: 27000, paidAmount: 0 }));
+    mockPrisma.subPayApp.update.mockClear();
+    await expect(service.reopenPayApp({ orgId: "org-1", projectId: "project-1", payAppId: "pa-1", actor: { id: "qs" }, reason: "correction" })).rejects.toMatchObject({ code: "SUB_PAY_APP_REVOKE_FORBIDDEN", status: 403 });
+    expect(mockPrisma.subPayApp.update).not.toHaveBeenCalled();
+  });
+
+  it("CX21-702: coming back from rejected needs no approval authority", async () => {
+    mockPrisma.subPayApp.findFirst.mockResolvedValue(payApp({ status: "rejected", netThisPeriod: 27000 }));
+    mockPrisma.subPayApp.update.mockImplementation(async ({ data }) => payApp({ status: "rejected", ...data }));
+    const reopened = await service.reopenPayApp({ orgId: "org-1", projectId: "project-1", payAppId: "pa-1", actor: { id: "qs" } });
+    expect(reopened.status).toBe("draft");
   });
 });

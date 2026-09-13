@@ -209,10 +209,11 @@ const previousByLine = async ({ tx = prisma, commitmentId, beforeNumber }) => {
 const previousByLineExcluding = async ({ tx = prisma, commitmentId, excludeId }) => {
   const lines = await tx.subPayAppLine.findMany({
     where: { payApp: { commitmentId, status: { in: COUNTED }, id: { not: excludeId } } },
-    select: { sovLineId: true, thisPeriodAmount: true },
+    select: { sovLineId: true, thisPeriodAmount: true, materialsOnSite: true },
   });
   const map = new Map();
-  for (const line of lines) map.set(line.sovLineId, addMoney(map.get(line.sovLineId) || 0, line.thisPeriodAmount));
+  // Work and the materials paid with it: both were certified against the line.
+  for (const line of lines) map.set(line.sovLineId, addMoney(map.get(line.sovLineId) || 0, addMoney(line.thisPeriodAmount, line.materialsOnSite)));
   return map;
 };
 
@@ -290,13 +291,20 @@ const applyClaims = ({ lines, claims, pctMap, changeMap = new Map() }) =>
     thisPeriod = round2(thisPeriod);
     if (thisPeriod < -EPSILON) throw new HttpError(400, "SUB_PAY_APP_LINE_NEGATIVE", `Line ${line.sovLine?.lineNumber ?? ""}: this period cannot be negative`);
     const cumulative = addMoney(previous, thisPeriod);
-    if (cumulative > scheduled + EPSILON) {
+    // Materials stored on site are paid and posted like work, so they count
+    // against the line's value together with the work: a line worth 100,000
+    // cannot carry 200,000 of materials (Phase 21D, CX21-701).
+    const materials = claim.materialsOnSite === undefined || claim.materialsOnSite === null ? toMoneyNumber(line.materialsOnSite) : round2(Number(claim.materialsOnSite) || 0);
+    if (materials < -EPSILON) throw new HttpError(400, "SUB_PAY_APP_LINE_NEGATIVE", `Line ${line.sovLine?.lineNumber ?? ""}: materials on site cannot be negative`);
+    const claimed = addMoney(cumulative, materials);
+    const breakdown = materials > EPSILON ? ` (${cumulative} of work and ${materials} of materials on site)` : "";
+    if (claimed > scheduled + EPSILON) {
       const error = new HttpError(
         400,
         "SUB_PAY_APP_EXCEEDS_SCHEDULED",
         approvedChange
-          ? `Line ${line.sovLine?.lineNumber ?? ""}: ${cumulative} exceeds the revised ${scheduled} (${original} scheduled plus ${approvedChange} of approved changes)`
-          : `Line ${line.sovLine?.lineNumber ?? ""}: ${cumulative} exceeds the scheduled ${scheduled}`,
+          ? `Line ${line.sovLine?.lineNumber ?? ""}: ${claimed}${breakdown} exceeds the revised ${scheduled} (${original} scheduled plus ${approvedChange} of approved changes)`
+          : `Line ${line.sovLine?.lineNumber ?? ""}: ${claimed}${breakdown} exceeds the scheduled ${scheduled}`,
       );
       error.details = { reasonCode: "INCORRECT_QUANTITIES", sovLineId: line.sovLineId };
       throw error;
@@ -311,7 +319,7 @@ const applyClaims = ({ lines, claims, pctMap, changeMap = new Map() }) =>
       approvedChangeAmount: approvedChange,
       thisPeriodAmount: thisPeriod,
       cumulativeAmount: cumulative,
-      materialsOnSite: claim.materialsOnSite === undefined || claim.materialsOnSite === null ? toMoneyNumber(line.materialsOnSite) : round2(Number(claim.materialsOnSite) || 0),
+      materialsOnSite: materials,
       approvedPct,
       capAmount,
       overClaimAmount: round2(overClaim),
@@ -718,7 +726,7 @@ const assertRevocable = ({ existing, to, reason }) => {
   }
 };
 
-const transition = async ({ orgId, projectId, payAppId, to, actor = null, viewer = null, reason = null, extra = {}, guard = null, action = auditService.ACTIONS.STATUS_CHANGED, viaWorkflow = false }) => {
+const transition = async ({ orgId, projectId, payAppId, to, actor = null, viewer = null, reason = null, extra = {}, guard = null, action = auditService.ACTIONS.STATUS_CHANGED, viaWorkflow = false, canRevoke = false }) => {
   await ensureProject({ orgId, projectId });
   const existing = await loadPayApp({ projectId, payAppId, viewer });
   if (!viaWorkflow && [STATUS.APPROVED, STATUS.REJECTED, STATUS.UNDER_REVIEW].includes(to)) {
@@ -737,6 +745,10 @@ const transition = async ({ orgId, projectId, payAppId, to, actor = null, viewer
   if (!allowedFrom?.includes(existing.status)) throw new HttpError(409, "SUB_PAY_APP_TRANSITION_INVALID", `A ${existing.status} application cannot become ${to}`);
   // Leaving a certified state is a financial act, not an edit.
   const revoking = existing.status === STATUS.APPROVED && [STATUS.DRAFT, STATUS.VOID].includes(to);
+  // Undoing a certification reverses the cost it posted; it is the
+  // approver's act, not the editor's. The route says whether the caller
+  // holds the approval permission (Phase 21D, CX21-702).
+  if (revoking && !canRevoke) throw new HttpError(403, "SUB_PAY_APP_REVOKE_FORBIDDEN", "Revoking a certified application needs the approval permission");
   if (revoking) assertRevocable({ existing, to, reason });
   if (guard) await guard(existing);
   const now = new Date();
@@ -948,12 +960,13 @@ const rejectPayApp = async ({ orgId, projectId, payAppId, actor, code, reason, v
  * revocation of the certificate, which reverses the cost it posted and needs a
  * stated reason (`assertRevocable`).
  */
-const reopenPayApp = ({ orgId, projectId, payAppId, actor, viewer, reason = null }) =>
-  transition({ orgId, projectId, payAppId, to: STATUS.DRAFT, actor, viewer, reason: trimOrNull(reason) });
+const reopenPayApp = ({ orgId, projectId, payAppId, actor, viewer, reason = null, canRevoke = false }) =>
+  transition({ orgId, projectId, payAppId, to: STATUS.DRAFT, actor, viewer, reason: trimOrNull(reason), canRevoke });
 
 const voidPayApp = ({ orgId, projectId, payAppId, actor, reason }) => {
   if (!trimOrNull(reason)) throw new HttpError(400, "SUB_PAY_APP_REASON_REQUIRED", "Give a reason");
-  return transition({ orgId, projectId, payAppId, to: STATUS.VOID, actor, reason: trimOrNull(reason) });
+  // The void route is guarded by the delete permission on the void transition, which is that authority.
+  return transition({ orgId, projectId, payAppId, to: STATUS.VOID, actor, reason: trimOrNull(reason), canRevoke: true });
 };
 
 // ─── Payments ─────────────────────────────────────────────────────────────
