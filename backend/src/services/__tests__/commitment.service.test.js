@@ -13,7 +13,7 @@ const mockPrisma = {
   activity: { findMany: jest.fn(async ({ where }) => (where.id?.in || []).map((id) => ({ id }))) },
   costRecord: { findMany: jest.fn(async () => []), update: jest.fn(async () => ({})), create: jest.fn(async () => ({})) },
   commitment: { aggregate: jest.fn(async () => ({ _max: { number: 2 } })), create: jest.fn(), findFirst: jest.fn(), findMany: jest.fn(async () => []), update: jest.fn() },
-  commitmentSovLine: { deleteMany: jest.fn(async () => ({ count: 0 })), create: jest.fn(async ({ data }) => ({ id: "line", ...data })) },
+  commitmentSovLine: { findMany: jest.fn(async () => []), deleteMany: jest.fn(async () => ({ count: 0 })), create: jest.fn(async ({ data }) => ({ id: "line", ...data })) },
   commitmentChangeOrder: { aggregate: jest.fn(async () => ({ _max: { number: 0 } })), create: jest.fn(), findFirst: jest.fn(), update: jest.fn() },
   changeOrder: { findFirst: jest.fn(async () => ({ id: "co-1", ref: "VO-01", value: 5000, description: "Extra excavation" })) },
   projectDocument: { findFirst: jest.fn(async () => ({ id: "doc-1" })) },
@@ -167,5 +167,20 @@ describe("Phase 21D — integrity (release challenge, third pass)", () => {
     await expect(service.approveCommitment({ orgId: "org-1", projectId: "project-1", commitmentId: "cm-1", actor: { id: "pm" } })).rejects.toMatchObject({ code: "COMMITMENT_STATE_CHANGED", status: 409 });
     expect(lock).toHaveBeenCalled();
     expect(mockPrisma.commitment.update).not.toHaveBeenCalled();
+  });
+});
+
+describe("Phase 21D — integrity (release challenge, fifth pass)", () => {
+  afterEach(() => jest.restoreAllMocks());
+  const pendingCo = () => ({ id: "cco-1", ref: "SC-001-CO01", status: "pending", value: 2500, linesJson: [], createdBy: "user-qs", commitmentId: "cm-1", commitment: { id: "cm-1", ref: "SC-001", status: "executed", projectId: "project-1", projectPartyId: "party-1", createdBy: "user-qs" } });
+
+  it("CX21-454: an edit that started on a pending change order refuses once it was approved under the lock, and a transition refuses once the order moved", async () => {
+    mockPrisma.commitmentChangeOrder.findFirst.mockResolvedValue(pendingCo());
+    mockPrisma.commitmentChangeOrder.update.mockClear();
+    const lock = jest.spyOn(mockPrisma, "$queryRaw").mockImplementation(async (strings) => (Array.isArray(strings) && strings.join("?").includes('FROM "CommitmentChangeOrder"') ? [{ status: "approved" }] : []));
+    await expect(service.updateChangeOrder({ orgId: "org-1", projectId: "project-1", changeOrderId: "cco-1", payload: { title: "Bigger" }, actor: { id: "qs" } })).rejects.toMatchObject({ code: "COMMITMENT_CO_LOCKED", status: 409 });
+    await expect(service.transitionChangeOrder({ orgId: "org-1", projectId: "project-1", changeOrderId: "cco-1", to: "approved", actor: { id: "pm" } })).rejects.toMatchObject({ code: "COMMITMENT_CO_STATE_CHANGED", status: 409 });
+    expect(lock).toHaveBeenCalled();
+    expect(mockPrisma.commitmentChangeOrder.update).not.toHaveBeenCalled();
   });
 });

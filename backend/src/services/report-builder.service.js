@@ -1026,7 +1026,9 @@ const createRun = async ({ orgId, user, reportId, format = "pdf", recipients = n
 const getRunFile = async ({ orgId, user, runId, format }) => {
   const run = await prisma.reportRun.findFirst({ where: { id: runId, orgId }, include: { report: true } });
   if (!run) throw new HttpError(404, "REPORT_RUN_NOT_FOUND", "Run not found");
-  await getDefinitionRow({ orgId, user, reportId: run.reportId }); // visibility check
+  // A company admin takes any run's file (CX21-458); everyone else must be
+  // able to see the report at all.
+  if (!user.isCompanyAdmin) await getDefinitionRow({ orgId, user, reportId: run.reportId });
   // The file holds what its requester could see, not what this reader can:
   // it is the requester's (a scheduled run: the report's owner's) to
   // download, and a company admin's (Phase 21D, CX21-442).

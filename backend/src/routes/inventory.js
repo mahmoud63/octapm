@@ -27,7 +27,7 @@ const scopedCall = (req, projectId, run) => {
   return run();
 };
 const sendScoped = (req, res, result) => {
-  assertKeyAllowsProject(req, result?.projectId ?? result?.order?.projectId ?? result?.invoice?.projectId ?? null);
+  assertKeyAllowsProject(req, result?.projectId ?? result?.item?.projectId ?? result?.order?.projectId ?? result?.invoice?.projectId ?? null);
   return sendSuccess(res, result);
 };
 
@@ -82,10 +82,7 @@ router.get(
   requirePermission("inventory", "read"),
   [param("code").isString().trim().isLength({ min: 1, max: 120 }), validate],
   asyncHandler(async (req, res) =>
-    sendSuccess(
-      res,
-      await service.findByCode({ orgId: req.user.orgId, code: req.params.code })
-    )
+    sendScoped(req, res, await service.findByCode({ orgId: req.user.orgId, code: req.params.code }))
   )
 );
 
@@ -94,10 +91,8 @@ router.get(
   requirePermission("inventory", "read"),
   [param("itemId").isUUID(), validate],
   asyncHandler(async (req, res) =>
-    sendSuccess(
-      res,
-      await service.getItem({ orgId: req.user.orgId, itemId: req.params.itemId })
-    )
+    // A project item is that project's (Phase 21D, CX21-451).
+    sendScoped(req, res, await service.getItem({ orgId: req.user.orgId, itemId: req.params.itemId }))
   )
 );
 
@@ -148,8 +143,13 @@ router.patch(
   "/items/:itemId",
   requirePermission("inventory", "update", { transition: "item.manage" }),
   [param("itemId").isUUID(), ...itemBody, validate],
-  asyncHandler(async (req, res) =>
-    sendSuccess(
+  asyncHandler(async (req, res) => {
+    // A project item is that project's, and an item may not be moved onto a
+    // project the key is not allowed on (Phase 21D, CX21-451).
+    const current = await service.getItem({ orgId: req.user.orgId, itemId: req.params.itemId });
+    assertKeyAllowsProject(req, current?.projectId ?? null);
+    assertKeyAllowsProject(req, req.body.projectId ?? null);
+    return sendSuccess(
       res,
       await service.updateItem({
         orgId: req.user.orgId,
@@ -157,8 +157,8 @@ router.patch(
         itemId: req.params.itemId,
         payload: req.body,
       })
-    )
-  )
+    );
+  })
 );
 
 // ─── warehouses and locations ──────────────────────────────────────────────
@@ -345,7 +345,8 @@ router.post(
   asyncHandler(async (req, res) =>
     sendSuccess(
       res,
-      await service.adjustReservation({ orgId: req.user.orgId, user: req.user, payload: req.body })
+      // A reservation is a claim on a project's stock as much as an issue is (CX21-451).
+      await service.adjustReservation({ orgId: req.user.orgId, user: req.user, payload: { ...req.body, allowedProjectIds: keyProjects(req) } })
     )
   )
 );
@@ -364,6 +365,7 @@ for (const [path, type, transition] of [
       ...movementBody,
       body("projectId").optional({ nullable: true }).isUUID(),
       body("activityId").optional({ nullable: true }).isUUID(),
+      body("costCodeId").optional({ nullable: true }).isUUID(),
       validate,
     ],
     asyncHandler(async (req, res) =>

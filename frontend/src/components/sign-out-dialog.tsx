@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useNavigate, useLocation } from '@tanstack/react-router'
+import { useQueryClient } from '@tanstack/react-query'
 import { logout } from '@/services/auth/api'
 import { toast } from 'sonner'
 import { useAuthStore } from '@/stores/auth-store'
@@ -15,6 +16,7 @@ export function SignOutDialog({ open, onOpenChange }: SignOutDialogProps) {
   const navigate = useNavigate()
   const location = useLocation()
   const { auth } = useAuthStore()
+  const queryClient = useQueryClient()
   const [isSigningOut, setIsSigningOut] = useState(false)
 
   const handleSignOut = async () => {
@@ -22,6 +24,9 @@ export function SignOutDialog({ open, onOpenChange }: SignOutDialogProps) {
     try {
       await logout()
       auth.reset()
+      // Everything fetched belongs to the person who was signed in; the next
+      // person on this tab must not see it (Phase 21D, CX21-456).
+      queryClient.clear()
       // Offline caches and the outbox belong to the signed-in user.
       void clearOfflineData()
       onOpenChange(false)

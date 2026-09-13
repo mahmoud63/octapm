@@ -85,7 +85,7 @@ const listBudgetRevisions = async ({ orgId, projectId }) => {
   };
 };
 
-const createBudgetRevision = async ({ orgId, projectId, userId, payload }) => {
+const createBudgetRevision = async ({ orgId, projectId, userId, payload, canApprove = false }) => {
   const project = await ensureProject({ orgId, projectId });
 
   const ref = await nextRef(prisma, { table: 'BudgetRevision', scopeColumn: 'projectId', scopeId: projectId, prefix: 'BR', pad: 2 });
@@ -96,7 +96,13 @@ const createBudgetRevision = async ({ orgId, projectId, userId, payload }) => {
   });
 
   const baseline = toMoneyNumber(last?.cumulativeBudget ?? project.contractValue);
-  const status = payload.status || 'approved';
+  // A revision is approved only by someone who may approve cost; anyone else
+  // starts it as a draft to submit. It used to be created "approved" by
+  // whoever could create cost (Phase 21D, CX21-453).
+  const status = payload.status || (canApprove ? 'approved' : 'draft');
+  if (status === 'approved' && !canApprove) {
+    throw new HttpError(403, 'BUDGET_REVISION_APPROVAL_REQUIRED', 'Only someone who can approve cost may create an approved revision; submit it instead');
+  }
   const delta =
     status === 'approved'
       ? computeDelta(payload.changeType || 'addition', payload.amount)
@@ -135,6 +141,7 @@ const updateBudgetRevision = async ({
   userId,
   payload,
   viaWorkflow = false,
+  canApprove = viaWorkflow,
 }) => {
   const project = await ensureProject({ orgId, projectId });
 
@@ -151,6 +158,15 @@ const updateBudgetRevision = async ({
   }
   if (payload.status && payload.status !== existing.status && !viaWorkflow) {
     await require('./workflow-engine.service').assertNotLocked({ tool: 'budget_revision', projectId, recordId: revisionId });
+  }
+  // Approval, and any change to the money of an approved revision, is the
+  // approver's (Phase 21D, CX21-453).
+  if (payload.status === 'approved' && existing.status !== 'approved' && !canApprove) {
+    throw new HttpError(403, 'BUDGET_REVISION_APPROVAL_REQUIRED', 'Only someone who can approve cost may approve a revision');
+  }
+  const moneyTouched = payload.amount !== undefined || payload.changeType !== undefined || payload.effectiveDate !== undefined;
+  if (existing.status === 'approved' && moneyTouched && !canApprove) {
+    throw new HttpError(409, 'BUDGET_REVISION_APPROVED', 'An approved revision is changed only by someone who can approve cost');
   }
 
   const updated = await prisma.budgetRevision.update({

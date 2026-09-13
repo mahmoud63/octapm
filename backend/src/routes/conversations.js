@@ -3,13 +3,16 @@ const { body, param, query } = require("express-validator");
 const { asyncHandler } = require("../utils/async-handler");
 const { sendSuccess } = require("../utils/api-response");
 const { authenticate } = require("../middleware/auth");
-const { getEffectiveRole, requirePermission } = require("../middleware/rbac");
+const { getEffectiveRole, requirePermission, noApiKey } = require("../middleware/rbac");
 const { validate } = require("../middleware/validate");
 const service = require("../services/conversation.service");
 
 /** Conversations (OCTA-COMM-CONV-042): `/conversations` — organisation-wide, optionally scoped to a project. */
 const router = express.Router();
 router.use(authenticate);
+// Conversations are between people; a key acting as a member would read and
+// write them far outside its own projects (Phase 21D, CX21-452).
+router.use(noApiKey);
 
 const viewerFor = (req) => {
   const role = getEffectiveRole(req);

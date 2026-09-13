@@ -215,3 +215,13 @@ describe("Phase 21D — integrity (release challenge, fourth pass)", () => {
     expect(admin.fileName).toBe("cost-by-line.pdf");
   });
 });
+
+describe("Phase 21D — integrity (release challenge, fifth pass)", () => {
+  it("CX21-458: a company admin downloads a run of a report that is private to someone else", async () => {
+    mockPrisma.reportDefinition.findFirst.mockResolvedValue(null); // invisible under the visibility filter
+    mockPrisma.reportRun.findFirst.mockResolvedValue({ id: "run-2", orgId: "org-1", reportId: "r2", requestedBy: "someone-else", fileBase: "private", pdfBytes: Buffer.from("%PDF-private"), xlsxBytes: null, report: { id: "r2", createdBy: "someone-else" } });
+    await expect(service.getRunFile({ orgId: "org-1", user: pm, runId: "run-2", format: "pdf" })).rejects.toMatchObject({ code: "REPORT_NOT_FOUND" });
+    const admin = await service.getRunFile({ orgId: "org-1", user: { ...pm, isCompanyAdmin: true }, runId: "run-2", format: "pdf" });
+    expect(admin.buffer.toString()).toBe("%PDF-private");
+  });
+});

@@ -225,9 +225,13 @@ describe("Phase 21D — integrity (release challenge, fourth pass)", () => {
     await service.transferBudget({ orgId: "org-1", projectId: "project-1", payload: { fromLineId: "line-2", toLineId: "line-1", amount: 1000, note: "back" }, actor: { id: "user-1" } });
     const lockAt = order.findIndex((entry) => entry.startsWith("lock:"));
     expect(lockAt).toBeGreaterThanOrEqual(0);
-    expect(order[lockAt]).toContain("FOR NO KEY UPDATE");
-    expect(order[lockAt]).toContain('["line-1","line-2"]');
-    expect(order.findIndex((entry) => entry.startsWith("read:"))).toBeGreaterThan(lockAt);
+    // one row per statement, in id order, so two transfers never wait on each other (CX21-459)
+    const locks = order.filter((entry) => entry.startsWith("lock:"));
+    expect(locks).toHaveLength(2);
+    expect(locks.every((entry) => entry.includes("FOR NO KEY UPDATE"))).toBe(true);
+    expect(locks[0]).toContain('["line-1"]');
+    expect(locks[1]).toContain('["line-2"]');
+    expect(order.findIndex((entry) => entry.startsWith("read:"))).toBeGreaterThan(order.lastIndexOf(locks[1]));
     mockPrisma.$queryRaw.mockImplementation(async () => []);
   });
 });

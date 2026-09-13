@@ -463,8 +463,9 @@ const transferBudget = async ({ orgId, projectId, payload = {}, actor = null }) 
     // Both lines are held first, in id order, so two transfers out of the
     // same line decide on figures the other has committed, not on the same
     // read (Phase 21D, CX21-446).
-    const heldIds = [fromLineId, toLineId].sort();
-    await tx.$queryRaw`SELECT id FROM "BudgetLine" WHERE id = ANY(${heldIds}::text[]) FOR NO KEY UPDATE`;
+    for (const lineId of [fromLineId, toLineId].sort()) {
+      await tx.$queryRaw`SELECT id FROM "BudgetLine" WHERE id = ${lineId} FOR NO KEY UPDATE`;
+    }
     const from = await loadLine({ projectId, lineId: fromLineId }, tx);
     const to = await loadLine({ projectId, lineId: toLineId }, tx);
     if (from.status !== "active" || to.status !== "active") throw new HttpError(409, "BUDGET_LINE_ARCHIVED", "Archived lines cannot take transfers");

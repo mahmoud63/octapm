@@ -154,23 +154,27 @@ const withStock = (item) => {
 };
 
 const listItems = async ({ orgId, projectId = null, projectIds = null, search = null, category = null, status = "active", lowStock = false }) => {
+  // A company item is usable on every project; a project item only on its
+  // own — and, for a key limited to some projects, only those (CX21-441).
+  // The project scope and the search are two clauses, not one: as two "OR"
+  // keys on one object, the search replaced the scope (Phase 21D, CX21-450).
+  const projectScope = projectId ? { OR: [{ projectId: null }, { projectId }] } : projectIds?.length ? { OR: [{ projectId: null }, { projectId: { in: projectIds } }] } : null;
+  const searchScope = search
+    ? {
+        OR: [
+          { sku: { contains: search, mode: "insensitive" } },
+          { name: { contains: search, mode: "insensitive" } },
+          { barcode: { contains: search, mode: "insensitive" } },
+          { manufacturer: { contains: search, mode: "insensitive" } },
+        ],
+      }
+    : null;
+  const clauses = [projectScope, searchScope].filter(Boolean);
   const where = {
     orgId,
     ...(status ? { status } : {}),
     ...(category ? { category } : {}),
-    // A company item is usable on every project; a project item only on its
-    // own — and, for a key limited to some projects, only those (CX21-441).
-    ...(projectId ? { OR: [{ projectId: null }, { projectId }] } : projectIds?.length ? { OR: [{ projectId: null }, { projectId: { in: projectIds } }] } : {}),
-    ...(search
-      ? {
-          OR: [
-            { sku: { contains: search, mode: "insensitive" } },
-            { name: { contains: search, mode: "insensitive" } },
-            { barcode: { contains: search, mode: "insensitive" } },
-            { manufacturer: { contains: search, mode: "insensitive" } },
-          ],
-        }
-      : {}),
+    ...(clauses.length ? { AND: clauses } : {}),
   };
 
   const rows = await prisma.inventoryItem.findMany({
@@ -832,12 +836,21 @@ const drawFromWarehouse = async (
   return posted;
 };
 
-const loadItemAndWarehouse = async (tx, { orgId, itemId, warehouseId, locationId }) => {
+const loadItemAndWarehouse = async (tx, { orgId, itemId, warehouseId, locationId, allowedProjectIds = null }) => {
   const item = await tx.inventoryItem.findFirst({ where: { id: itemId, orgId } });
   if (!item) throw new HttpError(404, "ITEM_NOT_FOUND", "Item not found");
 
   const warehouse = await tx.warehouse.findFirst({ where: { id: warehouseId, orgId } });
   if (!warehouse) throw new HttpError(404, "WAREHOUSE_NOT_FOUND", "Warehouse not found");
+
+  // A project's own item or warehouse is that project's stock: a key limited
+  // to other projects may not move or claim it, whatever the movement names
+  // (Phase 21D, CX21-451).
+  for (const owner of [item.projectId, warehouse.projectId]) {
+    if (owner && allowedProjectIds?.length && !allowedProjectIds.includes(owner)) {
+      throw new HttpError(403, "FORBIDDEN_PROJECT", "This API key is not allowed on that project");
+    }
+  }
 
   if (locationId) {
     const location = await tx.warehouseLocation.findFirst({
@@ -889,6 +902,7 @@ const receiveStock = async ({ orgId, user, payload }) => {
       itemId: payload.itemId,
       warehouseId: payload.warehouseId,
       locationId: payload.locationId ?? null,
+      allowedProjectIds: payload.allowedProjectIds ?? null,
     });
 
     const row = await postMovement(tx, {
@@ -952,6 +966,7 @@ const issueStock = async ({ orgId, user, payload }) => {
       itemId: payload.itemId,
       warehouseId: payload.warehouseId,
       locationId: payload.locationId ?? null,
+      allowedProjectIds: payload.allowedProjectIds ?? null,
     });
     const context = { ...payload, ...(await inheritedCoding(tx, { item, payload })) };
     const posted = await drawFromWarehouse(tx, {
@@ -1033,6 +1048,7 @@ const adjustReservation = async ({ orgId, user, payload }) => {
       itemId: payload.itemId,
       warehouseId: payload.warehouseId,
       locationId: payload.locationId ?? null,
+      allowedProjectIds: payload.allowedProjectIds ?? null,
     });
 
     // Stock is held per bin, but nobody reserves "30 bags from bin B-A03" —
@@ -1132,6 +1148,14 @@ const adjustStock = async ({ orgId, user, payload, type }) => {
     // An unexplained adjustment is the thing an auditor asks about first.
     throw new HttpError(400, "INV_ADJUST_REASON", "Say why the stock is being adjusted");
   }
+  if (type === "return" && !payload.activityId && !payload.costCodeId) {
+    // Stock coming back from site brings its cost back from where it was
+    // charged, exactly as an issue charges it: a return naming neither an
+    // activity nor a cost code left the cost on the activity that no longer
+    // had the material, and a second issue charged it again (Phase 21D,
+    // CX21-455).
+    throw new HttpError(400, "INV_NO_COST_SOURCE", "Return from an activity or a cost code, so the cost comes back from where it was charged");
+  }
 
   const quantity = type === "adjust" ? Number(payload.quantity) : positive(payload.quantity, "Quantity");
   if (!Number.isFinite(quantity) || quantity === 0) {
@@ -1144,6 +1168,7 @@ const adjustStock = async ({ orgId, user, payload, type }) => {
       itemId: payload.itemId,
       warehouseId: payload.warehouseId,
       locationId: payload.locationId ?? null,
+      allowedProjectIds: payload.allowedProjectIds ?? null,
     });
 
     // Movements that take stock out have to find it wherever it is; the ones

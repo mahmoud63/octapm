@@ -173,7 +173,13 @@ export function MovementDialog({ action, item, stock, warehouses, onClose, onDon
           activityId: activityId || null,
         })
       }
-      return moveStock(action, payload)
+      // A return brings its cost back from the activity it was issued to (CX21-455).
+      return moveStock(
+        action,
+        action === 'return'
+          ? { ...payload, projectId: projectId || null, activityId: activityId || null }
+          : payload
+      )
     },
     onSuccess: () => {
       toast.success(`${copy?.verb} recorded`)
@@ -187,7 +193,7 @@ export function MovementDialog({ action, item, stock, warehouses, onClose, onDon
 
   if (!open || !item || !copy || !action) return null
 
-  const needsCostTarget = action === 'issue'
+  const needsCostTarget = action === 'issue' || action === 'return'
   const canSubmit =
     Number.isFinite(Number(quantity)) &&
     Number(quantity) !== 0 &&
@@ -309,7 +315,7 @@ export function MovementDialog({ action, item, stock, warehouses, onClose, onDon
             </>
           )}
 
-          {action === 'issue' && (
+          {(action === 'issue' || action === 'return') && (
             <>
               <div className='grid gap-2'>
                 <Label htmlFor='movement-project'>Project</Label>

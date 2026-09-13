@@ -750,6 +750,11 @@ const updateChangeOrder = async ({ orgId, projectId, changeOrderId, payload = {}
   const sovLines = await prisma.commitmentSovLine.findMany({ where: { commitmentId: existing.commitmentId }, select: { id: true } });
   const data = coData(payload, { existing, sovLineIds: new Set(sovLines.map((line) => line.id)) });
   const updated = await prisma.$transaction(async (tx) => {
+    // Editability was checked before the lock; an edit that started on a
+    // pending change order must not land after its approval posted the old
+    // value (Phase 21D, CX21-454).
+    const [fresh] = await tx.$queryRaw`SELECT status FROM "CommitmentChangeOrder" WHERE id = ${changeOrderId} FOR UPDATE`;
+    if (fresh && ![CO_STATUS.DRAFT, CO_STATUS.PENDING].includes(fresh.status)) throw new HttpError(409, "COMMITMENT_CO_LOCKED", `A ${fresh.status} change order cannot be edited`);
     const row = await tx.commitmentChangeOrder.update({ where: { id: changeOrderId }, data: { ...data, updatedBy: actor?.id || null }, include: { primeChangeOrder: { select: { id: true, ref: true, status: true } } } });
     await audit({ tx, orgId, projectId, entityType: auditService.ENTITY_TYPES.COMMITMENT_CHANGE_ORDER, entityId: changeOrderId, action: auditService.ACTIONS.UPDATED, actor, summary: { ref: row.ref, changed: Object.keys(data) } });
     return row;
@@ -766,6 +771,8 @@ const transitionChangeOrder = async ({ orgId, projectId, changeOrderId, to, acto
   const now = new Date();
   const stamps = { [CO_STATUS.PENDING]: { submittedAt: now, submittedBy: actor?.id || null }, [CO_STATUS.APPROVED]: { approvedAt: now, approvedBy: actor?.id || null }, [CO_STATUS.REJECTED]: { rejectedAt: now, rejectedBy: actor?.id || null, rejectedReason: trimOrNull(reason) }, [CO_STATUS.VOID]: { rejectedReason: trimOrNull(reason) } }[to];
   const updated = await prisma.$transaction(async (tx) => {
+    const [fresh] = await tx.$queryRaw`SELECT status FROM "CommitmentChangeOrder" WHERE id = ${changeOrderId} FOR UPDATE`;
+    if (fresh && fresh.status !== existing.status) throw new HttpError(409, "COMMITMENT_CO_STATE_CHANGED", `The change order is ${fresh.status} now; it cannot become ${to} from there without looking again`);
     const row = await tx.commitmentChangeOrder.update({ where: { id: changeOrderId }, data: { status: to, ...stamps, updatedBy: actor?.id || null }, include: { primeChangeOrder: { select: { id: true, ref: true, status: true } } } });
     await audit({ tx, orgId, projectId, entityType: auditService.ENTITY_TYPES.COMMITMENT_CHANGE_ORDER, entityId: changeOrderId, action: to === CO_STATUS.APPROVED ? auditService.ACTIONS.APPROVED : to === CO_STATUS.REJECTED ? auditService.ACTIONS.REJECTED : auditService.ACTIONS.STATUS_CHANGED, actor, reason: trimOrNull(reason), oldStatus: existing.status, newStatus: to, summary: { ref: row.ref, commitment: existing.commitment.ref, value: toMoneyNumber(row.value) } });
     if (to === CO_STATUS.APPROVED && POSTING_STATUSES.includes(existing.commitment.status)) await recomputeCommitted({ tx, orgId, projectId });

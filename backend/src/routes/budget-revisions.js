@@ -2,7 +2,7 @@ const express = require("express");
 const { asyncHandler } = require("../utils/async-handler");
 const { body, param } = require("express-validator");
 const { validate } = require("../middleware/validate");
-const { requirePermission } = require("../middleware/rbac");
+const { requirePermission, hasPermission } = require("../middleware/rbac");
 const { sendSuccess } = require("../utils/api-response");
 const { moneyBody } = require("../utils/money");
 const {
@@ -43,6 +43,7 @@ router.post(
   asyncHandler(async (req, res) => {
     const row = await createBudgetRevision({
       orgId: req.user.orgId,
+      canApprove: hasPermission(req, "cost", "approve"),
       projectId: req.params.projectId,
       userId: req.user.id,
       payload: req.body,
@@ -68,6 +69,7 @@ router.patch(
   asyncHandler(async (req, res) => {
     const row = await updateBudgetRevision({
       orgId: req.user.orgId,
+      canApprove: hasPermission(req, "cost", "approve"),
       projectId: req.params.projectId,
       revisionId: req.params.revisionId,
       userId: req.user.id,

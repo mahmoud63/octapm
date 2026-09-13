@@ -4,6 +4,7 @@ import { AxiosError } from 'axios'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { Link, useNavigate } from '@tanstack/react-router'
+import { useQueryClient } from '@tanstack/react-query'
 import { login, ssoLookup, ssoStart, verifyMfa } from '@/services/auth/api'
 import {
   isMfaChallenge,
@@ -111,7 +112,10 @@ export function UserAuthForm({
     }
   }, [])
 
+  const queryClient = useQueryClient()
   const finish = (session: AuthSession) => {
+    // Nothing fetched before this sign-in may be shown to this person (CX21-456).
+    queryClient.clear()
     auth.setSession(session.user, session.tokens.accessToken)
     navigate({ to: redirectTo || '/', replace: true })
     return `Welcome back, ${session.user.name}!`

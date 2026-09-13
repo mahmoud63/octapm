@@ -98,3 +98,15 @@ describe("cost ledger — the through-date is decided under the lock", () => {
     expect(new Date(advanced.actualThroughDate).toISOString()).toBe("2027-03-10T00:00:00.000Z");
   });
 });
+
+describe("cost ledger — one projection row per activity", () => {
+  beforeEach(() => { ledger.reset(); mockPrisma.$queryRaw.mockClear(); mockPrisma.$queryRaw.mockImplementation(async () => []); });
+
+  it("CX21-457: a posting holds the (project, activity) pair before it looks for the record it may have to create", async () => {
+    await service.post(posting({ activityId: "act-9", incurredOn: "2027-03-10" }));
+    const held = mockPrisma.$queryRaw.mock.calls.find(([strings, ...values]) => Array.isArray(strings) && strings.join("?").includes("pg_advisory_xact_lock") && values.includes("cost-record:p1:act-9"));
+    expect(held).toBeDefined();
+    const records = await mockPrisma.costRecord.findMany({ where: { activityId: "act-9" } });
+    expect(records).toHaveLength(1);
+  });
+});

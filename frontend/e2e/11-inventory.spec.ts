@@ -220,6 +220,16 @@ test.describe('inventory and warehouse', () => {
       const { body } = await apiGet(client, `/inventory/items/scan/${CEMENT}`, token)
       const item = body.data.item
       const warehouseId = body.data.stock[0].warehouseId
+      // A return brings its cost back from the activity the bags were issued
+      // to (CX21-455): the latest issue movement says which one.
+      const { body: moved } = await apiGet(
+        client,
+        `/inventory/stock/transactions?itemId=${item.id}&type=issue&limit=1`,
+        token,
+      )
+      const movements = Array.isArray(moved?.data) ? moved.data : moved?.data?.items || []
+      const activityId = movements[0]?.activityId
+      expect(activityId, 'the issue to put back names no activity').toBeTruthy()
       await client.post(`${API}/inventory/stock/return`, {
         headers: { authorization: `Bearer ${token}` },
         data: {
@@ -227,6 +237,7 @@ test.describe('inventory and warehouse', () => {
           warehouseId,
           locationId: body.data.stock[0].locationId,
           quantity: 12,
+          activityId,
           notes: 'Returned by the inventory test',
         },
       })
