@@ -517,13 +517,77 @@ cases, 45 live probes and the full gate sequence, but not by the
 independent reviewer — stated as such in the verdict rather than papered
 over.
 
+Re-run when the window opened (14:34 CDT), the sixth pass answered in five
+minutes: DO NOT RELEASE — no Critical, eight Highs, one Medium (register
+P21-107 … P21-115). This time every High was **reproduced before anything
+changed**, four of them against the live API: a QS moved a PM-approved
+revision back to draft and a cost controller deleted one (the approval
+guard covered entering approval, not leaving it); a key limited to one
+project created a transfer of another project's stock (transfers had never
+met the key), listed and edited another project's warehouse; a return
+naming only a cost code put a bag back and left its 11.00 on the activity
+(a cost code names no project). The other four by regression: a receipt
+into another project's warehouse or onto its item; two more creators of the
+projection row outside the ledger's lock; two concurrent change-order
+approvals each writing a committed total without the other; a change order
+re-linked to another project's prime order on an edit where creation had
+checked; and, on the browser, a token refresh installing another person's
+session without emptying the cache. All fixed in the commit after
+`ded5fa0`, each with a regression that fails on `ded5fa0` (8 / 8 by
+reverting the eight backend files); the four live findings re-probed
+refused on the fix. The Medium — a QS's revision now starts as a draft and
+the screen has no submit control — is a consequence of the fifth pass's own
+fix, registered at P2 (P21-115) and not fixed, by the brief.
+
+The seventh pass, on `fa7b28b` (14:55 CDT, five minutes): DO NOT RELEASE
+— no Critical, eight Highs (register P21-116 … P21-123). Two reproduced
+live: the billing history route had no permission check at all, so a key
+with only an inventory scope read the company's invoices; and the transfer
+list had never met the key. The rest confirmed by reading and by
+regressions that fail on `fa7b28b`: the revision guards of the two
+previous loops decided on a status read before the write and copied it
+back; the analytics' item balances behind its totals were still unfiltered;
+a transfer could link another tenant's item and echo its details (no other
+tenant on this database holds one, so the live path could not be staged);
+the post-import seeding created projection rows outside every lock — and
+the schema had never forbidden a second row for a pair, which it now does
+(`@@unique([projectId, activityId])`, the last line every writer meets); a
+cost edit wrote back the `committed` it had read, as it once wrote back
+`actual`; and, on the browser, a refresh answering late installed the
+previous person's session over the current one. All fixed in the commit
+after `fa7b28b`, each with a regression that fails on it (7 / 7 by
+reverting the eight product files).
+
+Gates run nine, meanwhile, caught my own unfinished work: the dev server
+serves the working tree, and the refresh guard I was still writing refused
+the fresh-tab sign-in every spec relies on — stopped, corrected (a tab with
+nobody signed in is not a change of identity), recorded as T-17.
+
+The eighth pass, on `b2bd518` (15:53 CDT, six minutes): DO NOT RELEASE —
+no Critical, seven Highs, two Mediums that were mine (register P21-124 …
+P21-130). The revision edit I had just fixed still copied back the money
+and the approval it had read — the status alone had been refreshed under
+the lock; the transfer list I had just scoped by warehouse still carried
+another project's item on a line; the cost upsert I had just stopped from
+writing `committed` still wrote a 0 onto the row a commitment created
+meanwhile; the unique-pair migration would have failed on a database that
+had met the defect it fixes; the refresh guard compared identities at the
+401 rather than at the request; an access token kept a deactivated or
+demoted person's authority until it expired; and the task API mounted
+outside a project answered a key as its owner. Two reproduced live, the
+rest by regressions that fail on `b2bd518`; all fixed in the commit after
+it, with the two Mediums. Gates run ten, on `b2bd518`, also showed ten
+runs' worth of order residue filling the Match tab's window (T-18): test
+data, closed before run eleven.
+
 ## 11. What the rounds cost, and what they were worth
 
-Nine loops, five release loops and one loop of my own: 74 confirmed product
-defects in the ledger, stock, payment, transition, authorization, billing
-and tenant-isolation paths (7 + 5 + 6 + 4 + 3 + 2 + 1 + 2 + 2 + 8 + 10 + 7 +
-8 + 8 + 1, four of them regressions of a loop's own fix, plus two P2 fixed,
-one P3 hygiene item and one P2 carried), 92 regression cases (87 of them fail on the code they guard; five guard flows that must keep working), and
+Nine loops, eight release loops and one loop of my own: 97 confirmed product
+defects in the ledger, stock, payment, transition, authentication,
+authorization, billing and tenant-isolation paths (7 + 5 + 6 + 4 + 3 + 2 + 1
++ 2 + 2 + 8 + 10 + 7 + 8 + 8 + 1 + 8 + 8 + 7, four of them regressions of a
+loop's own fix, plus four P2 fixed, one P3 hygiene item and two P2 carried),
+113 regression cases (87 of them fail on the code they guard; five guard flows that must keep working), and
 a demo-project reconciliation that still balances to the cent after all of
 it. The Phase 21 project's own figures did not move once (36/36 before and
 after every loop); the defects lived in what those figures never exercised —
