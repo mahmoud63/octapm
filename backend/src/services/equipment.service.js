@@ -248,6 +248,8 @@ const normalizeDailyReportEquipmentLines = async ({ tx, projectId, report }) => 
   });
 };
 
+const costLedger = require('./cost-ledger.service');
+
 const postEquipmentCostImpact = async ({
   tx,
   orgId,
@@ -263,6 +265,26 @@ const postEquipmentCostImpact = async ({
   );
   if (equipmentCost <= 0) return null;
 
+  // Through the cost ledger (OCTA-FIN-LEDGER-059): one entry per report, so
+  // approving a report twice posts once, the activity's actual is incremented
+  // rather than overwritten under a concurrent posting, and the equipment
+  // charge reconciles like every other source (Phase 21D, CX21-418).
+  const posting = await costLedger.post({
+    tx,
+    orgId,
+    projectId,
+    sourceType: 'equipment',
+    sourceId: report.id,
+    amount: equipmentCost,
+    costType: 'equipment',
+    activityId: report.activityId,
+    incurredOn: normalizeUsageDate(report.date),
+    postedBy: actorId,
+    note: 'Equipment usage from the daily report',
+  });
+
+  // The ledger has already created or advanced the activity's record; what is
+  // left is the equipment category and the forecast the record derives.
   const existing = await tx.costRecord.findFirst({
     where: { projectId, activityId: report.activityId },
   });
@@ -270,14 +292,13 @@ const postEquipmentCostImpact = async ({
     existing?.actualThroughDate || null,
     normalizeUsageDate(report.date),
   );
-
-  const nextEquipment = addMoney(existing?.equipment || 0, equipmentCost);
-  const nextActual = addMoney(existing?.actual || 0, equipmentCost);
+  const nextEquipment = posting.posted
+    ? addMoney(existing?.equipment || 0, equipmentCost)
+    : toMoneyNumber(existing?.equipment || 0);
+  const nextActual = toMoneyNumber(existing?.actual || 0);
   const existingForecast = toMoneyNumber(existing?.forecast || 0);
   const existingBudget = toMoneyNumber(existing?.budget || 0);
-  const nextForecast = existing
-    ? Math.max(existingForecast, existingBudget, nextActual)
-    : nextActual;
+  const nextForecast = Math.max(existingForecast, existingBudget, nextActual);
 
   const data = {
     projectId,
@@ -291,14 +312,13 @@ const postEquipmentCostImpact = async ({
     contingency: toMoneyNumber(existing?.contingency || 0),
     budget: toMoneyNumber(existing?.budget || 0),
     committed: toMoneyNumber(existing?.committed || 0),
-    actual: nextActual,
     actualThroughDate,
     forecast: nextForecast,
   };
 
   const record = existing
     ? await tx.costRecord.update({ where: { id: existing.id }, data })
-    : await tx.costRecord.create({ data });
+    : await tx.costRecord.create({ data: { ...data, actual: 0 } });
 
   await auditService.recordEvent({
     tx,

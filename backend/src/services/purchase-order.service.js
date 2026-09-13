@@ -637,6 +637,11 @@ const updateOrder = async ({ orgId, projectId, orderId, actor, payload = {} }) =
   }
 
   return prisma.$transaction(async (tx) => {
+    // The editable check ran before the transaction; an approval that landed
+    // since must stop the edit, or the terms would change after approval
+    // (Phase 21D, CX21-417).
+    const [fresh] = await tx.$queryRaw`SELECT status FROM "ProcurementOrder" WHERE id = ${orderId} FOR UPDATE`;
+    if (fresh && !EDITABLE_STATUSES.includes(fresh.status)) throw new HttpError(409, "PO_LOCKED", `A ${fresh.status} order cannot be edited`);
     await tx.procurementOrder.update({ where: { id: orderId }, data });
     // The value follows the lines and the tax rate; it is never typed.
     await recomputeTotals(tx, orderId);

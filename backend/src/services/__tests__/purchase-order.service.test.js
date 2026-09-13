@@ -14,6 +14,7 @@ const mockPrisma = {
   directCost: { aggregate: jest.fn() },
   location: { findFirst: jest.fn() },
   $transaction: (fn) => fn(mockPrisma),
+  $queryRaw: jest.fn(async () => []), // row locks (Phase 21D): nothing to lock in a fake
 };
 
 jest.mock("../../config/db", () => ({ prisma: mockPrisma }));
@@ -248,5 +249,18 @@ describe("the money on an order", () => {
     const result = await service.recomputeInvoiced(mockPrisma, "order-1");
     expect(result.invoicedAmount).toBe(0);
     expect(result.invoiceStatus).toBe("not_invoiced");
+  });
+});
+
+describe("Phase 21D — integrity (release challenge)", () => {
+  afterEach(() => mockPrisma.$queryRaw.mockImplementation(async () => []));
+
+  it("CX21-417: an edit that started on a pending order refuses once the order was approved under the lock", async () => {
+    // editable when the caller looked (draft); approved by the time the lock is held
+    mockPrisma.procurementOrder.findFirst.mockResolvedValue({ id: "po-9", orgId: "org-1", projectId: "p1", status: "draft", currency: "USD", taxRate: 0, lines: [], supplierId: null });
+    mockPrisma.procurementOrder.update.mockClear();
+    mockPrisma.$queryRaw.mockImplementation(async (strings) => (Array.isArray(strings) && strings.join("?").includes('FROM "ProcurementOrder"') ? [{ status: "approved" }] : []));
+    await expect(service.updateOrder({ orgId: "org-1", projectId: "p1", orderId: "po-9", actor: { id: "proc" }, payload: { taxRate: 100 } })).rejects.toMatchObject({ code: "PO_LOCKED" });
+    expect(mockPrisma.procurementOrder.update).not.toHaveBeenCalled();
   });
 });

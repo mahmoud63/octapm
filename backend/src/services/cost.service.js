@@ -312,6 +312,12 @@ const upsertCostRecord = async ({
   const approvedBudget = allocationTotals.get(activityId)?.amount || 0;
 
   const budget = toMoneyNumber(payload.budget ?? approvedBudget);
+  // Actual cost is a projection of the cost ledger (OCTA-FIN-LEDGER-059);
+  // a figure typed onto the activity would be one the ledger never posted
+  // (Phase 21D, CX21-412).
+  if (payload.actual !== undefined && Math.abs(toMoneyNumber(payload.actual) - toMoneyNumber(existing?.actual ?? 0)) > 0.005) {
+    throw new HttpError(400, 'COST_ACTUAL_IS_DERIVED', 'Actual cost is posted through the cost ledger; it cannot be typed onto an activity');
+  }
   const actual = toMoneyNumber(payload.actual ?? existing?.actual ?? 0);
   const actualThroughDate = resolveActualThroughDate({
     payload,
@@ -389,6 +395,9 @@ const updateCostRecord = async ({
   }
 
   const budget = toMoneyNumber(payload.budget ?? existing.budget);
+  if (payload.actual !== undefined && Math.abs(toMoneyNumber(payload.actual) - toMoneyNumber(existing.actual)) > 0.005) {
+    throw new HttpError(400, 'COST_ACTUAL_IS_DERIVED', 'Actual cost is posted through the cost ledger; it cannot be typed onto an activity');
+  }
   const actual = toMoneyNumber(payload.actual ?? existing.actual);
   const actualThroughDate = resolveActualThroughDate({
     payload,

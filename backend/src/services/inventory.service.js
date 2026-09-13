@@ -626,7 +626,7 @@ const postMovement = async (tx, { orgId, item, warehouseId, locationId = null, t
   // activity is the stronger claim — it says what the material was actually used
   // on — so a `projectId` that contradicts it is a mistake, and honouring it
   // silently posts one project's cost against another's budget.
-  const activityProject = await projectOfActivity({ tx, activityId: context.activityId });
+  const activityProject = await projectOfActivity({ tx, orgId, activityId: context.activityId });
   if (activityProject && context.projectId && context.projectId !== activityProject) {
     const error = new HttpError(
       400,
@@ -698,13 +698,18 @@ const CONSUMPTION_SIGN = Object.freeze({ issue: 1, return: -1 });
  * them say it twice invites them to leave it out, and a movement with no
  * project posts no cost at all.
  */
-const projectOfActivity = async ({ tx, activityId }) => {
-  if (!activityId || !tx.activity?.findUnique) return null;
-  const activity = await tx.activity.findUnique({
-    where: { id: activityId },
+const projectOfActivity = async ({ tx, orgId, activityId }) => {
+  if (!activityId || !tx.activity?.findFirst) return null;
+  // Scoped to the organisation. An activity id from another tenant used to
+  // resolve to that tenant's project, and this tenant's stock then posted
+  // cost against it (Phase 21D, CX21-410). An id that is not on a project
+  // of this organisation is refused, not silently left without a project.
+  const activity = await tx.activity.findFirst({
+    where: { id: activityId, ...(orgId ? { project: { orgId } } : {}) },
     select: { projectId: true },
   });
-  return activity?.projectId ?? null;
+  if (!activity) throw new HttpError(404, "ACTIVITY_NOT_FOUND", "That activity is not on a project of this organisation");
+  return activity.projectId;
 };
 
 const postConsumptionCost = async ({ tx, orgId, item, movement }) => {

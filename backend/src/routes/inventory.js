@@ -8,6 +8,28 @@ const { validate } = require("../middleware/validate");
 const service = require("../services/inventory.service");
 const goodsReceipt = require("../services/goods-receipt.service");
 const analytics = require("../services/inventory-analytics.service");
+const { HttpError } = require("../utils/http-error");
+
+/**
+ * An API key limited to some projects may not read or move another project's
+ * records through the warehouse routes, which are not under a project router
+ * (Phase 21D, CX21-416).
+ */
+const assertKeyAllowsProject = (req, projectId) => {
+  const allowed = req.apiClient?.projectIds;
+  if (allowed?.length && projectId && !allowed.includes(projectId)) {
+    throw new HttpError(403, "FORBIDDEN_PROJECT", "This API key is not allowed on that project");
+  }
+};
+const keyProjects = (req) => (req.apiClient?.projectIds?.length ? req.apiClient.projectIds : null);
+const scopedCall = (req, projectId, run) => {
+  assertKeyAllowsProject(req, projectId);
+  return run();
+};
+const sendScoped = (req, res, result) => {
+  assertKeyAllowsProject(req, result?.projectId ?? result?.order?.projectId ?? result?.invoice?.projectId ?? null);
+  return sendSuccess(res, result);
+};
 
 /**
  * Inventory and warehouse (OCTA-INV-STOCK-050).
@@ -104,7 +126,7 @@ const itemBody = [
 
 router.post(
   "/items",
-  requirePermission("inventory", "create", "item.manage"),
+  requirePermission("inventory", "create", { transition: "item.manage" }),
   [
     body("sku").isString().trim().isLength({ min: 1, max: 60 }),
     body("name").isString().trim().isLength({ min: 1, max: 200 }),
@@ -123,7 +145,7 @@ router.post(
 
 router.patch(
   "/items/:itemId",
-  requirePermission("inventory", "update", "item.manage"),
+  requirePermission("inventory", "update", { transition: "item.manage" }),
   [param("itemId").isUUID(), ...itemBody, validate],
   asyncHandler(async (req, res) =>
     sendSuccess(
@@ -157,7 +179,7 @@ router.get(
 
 router.post(
   "/warehouses",
-  requirePermission("inventory", "create", "warehouse.manage"),
+  requirePermission("inventory", "create", { transition: "warehouse.manage" }),
   [
     body("code").isString().trim().isLength({ min: 1, max: 30 }),
     body("name").isString().trim().isLength({ min: 1, max: 200 }),
@@ -179,7 +201,7 @@ router.post(
 
 router.patch(
   "/warehouses/:warehouseId",
-  requirePermission("inventory", "update", "warehouse.manage"),
+  requirePermission("inventory", "update", { transition: "warehouse.manage" }),
   [
     param("warehouseId").isUUID(),
     body("name").optional().isString().trim().isLength({ min: 1, max: 200 }),
@@ -220,7 +242,7 @@ router.get(
 
 router.post(
   "/warehouses/:warehouseId/locations",
-  requirePermission("inventory", "create", "warehouse.manage"),
+  requirePermission("inventory", "create", { transition: "warehouse.manage" }),
   [
     param("warehouseId").isUUID(),
     body("code").isString().trim().isLength({ min: 1, max: 40 }),
@@ -259,7 +281,7 @@ const movementBody = [
 
 router.post(
   "/stock/receive",
-  requirePermission("inventory", "create", "stock.receive"),
+  requirePermission("inventory", "create", { transition: "stock.receive" }),
   [
     ...movementBody,
     body("unitCost").optional({ nullable: true }).isFloat({ min: 0 }),
@@ -280,7 +302,7 @@ router.post(
 
 router.post(
   "/stock/issue",
-  requirePermission("inventory", "submit", "stock.issue"),
+  requirePermission("inventory", "submit", { transition: "stock.issue" }),
   [
     ...movementBody,
     body("projectId").optional({ nullable: true }).isUUID(),
@@ -294,7 +316,7 @@ router.post(
   asyncHandler(async (req, res) =>
     sendSuccess(
       res,
-      await service.issueStock({ orgId: req.user.orgId, user: req.user, payload: req.body }),
+      await scopedCall(req, req.body.projectId, () => service.issueStock({ orgId: req.user.orgId, user: req.user, payload: req.body })),
       201
     )
   )
@@ -307,7 +329,7 @@ router.post(
  */
 router.post(
   "/stock/reserve",
-  requirePermission("inventory", "submit", "stock.issue"),
+  requirePermission("inventory", "submit", { transition: "stock.issue" }),
   [
     body("itemId").isUUID(),
     body("warehouseId").isUUID(),
@@ -334,7 +356,7 @@ for (const [path, type, transition] of [
 ]) {
   router.post(
     `/stock/${path}`,
-    requirePermission("inventory", "update", transition),
+    requirePermission("inventory", "update", { transition }),
     [
       ...movementBody,
       body("projectId").optional({ nullable: true }).isUUID(),
@@ -400,7 +422,7 @@ router.get(
 
 router.post(
   "/transfers",
-  requirePermission("inventory", "create", "stock.transfer"),
+  requirePermission("inventory", "create", { transition: "stock.transfer" }),
   [
     body("fromWarehouseId").isUUID(),
     body("toWarehouseId").isUUID(),
@@ -422,7 +444,7 @@ router.post(
 
 router.post(
   "/transfers/:transferId/dispatch",
-  requirePermission("inventory", "update", "stock.transfer"),
+  requirePermission("inventory", "update", { transition: "stock.transfer" }),
   [param("transferId").isUUID(), validate],
   asyncHandler(async (req, res) =>
     sendSuccess(
@@ -438,7 +460,7 @@ router.post(
 
 router.post(
   "/transfers/:transferId/receive",
-  requirePermission("inventory", "update", "stock.transfer"),
+  requirePermission("inventory", "update", { transition: "stock.transfer" }),
   [
     param("transferId").isUUID(),
     body("lines").optional().isArray(),
@@ -467,13 +489,11 @@ router.get(
   requirePermission("inventory", "read"),
   [optionalProject, query("scope").optional().isIn(goodsReceipt.ORDER_SCOPES), validate],
   asyncHandler(async (req, res) =>
-    sendSuccess(
-      res,
-      await goodsReceipt.listOrders({
+    sendSuccess(res, await scopedCall(req, req.query.projectId, () => goodsReceipt.listOrders({ projectIds: keyProjects(req),
         orgId: req.user.orgId,
         projectId: req.query.projectId ?? null,
         scope: req.query.scope ?? "all",
-      })
+      }))
     )
   )
 );
@@ -484,9 +504,7 @@ router.get(
   requirePermission("inventory", "read"),
   [param("ref").isString().trim().isLength({ min: 1, max: 120 }), validate],
   asyncHandler(async (req, res) =>
-    sendSuccess(
-      res,
-      await goodsReceipt.findPurchaseOrder({
+    sendScoped(req, res, await goodsReceipt.findPurchaseOrder({
         orgId: req.user.orgId,
         ref: req.params.ref,
       })
@@ -496,7 +514,7 @@ router.get(
 
 router.post(
   "/goods-receipt",
-  requirePermission("inventory", "create", "stock.receive"),
+  requirePermission("inventory", "create", { transition: "stock.receive" }),
   [
     body("orderId").isUUID(),
     body("warehouseId").isUUID(),
@@ -516,13 +534,7 @@ router.post(
     validate,
   ],
   asyncHandler(async (req, res) =>
-    sendSuccess(
-      res,
-      await goodsReceipt.receiveAgainstOrder({
-        orgId: req.user.orgId,
-        user: req.user,
-        payload: req.body,
-      }),
+    sendSuccess(res, await scopedCall(req, req.body.projectId, () => goodsReceipt.receiveAgainstOrder({ orgId: req.user.orgId, user: req.user, payload: req.body })),
       201
     )
   )
@@ -535,9 +547,7 @@ router.get(
   requirePermission("inventory", "read"),
   [param("orderId").isUUID(), validate],
   asyncHandler(async (req, res) =>
-    sendSuccess(
-      res,
-      await goodsReceipt.matchOrder({
+    sendScoped(req, res, await goodsReceipt.matchOrder({
         orgId: req.user.orgId,
         orderId: req.params.orderId,
       })
@@ -550,9 +560,7 @@ router.get(
   requirePermission("inventory", "read"),
   [param("directCostId").isUUID(), validate],
   asyncHandler(async (req, res) =>
-    sendSuccess(
-      res,
-      await goodsReceipt.matchInvoice({
+    sendScoped(req, res, await goodsReceipt.matchInvoice({
         orgId: req.user.orgId,
         directCostId: req.params.directCostId,
       })

@@ -130,7 +130,7 @@ const findPurchaseOrder = async ({ orgId, ref }) => {
  */
 const ORDER_SCOPES = ["receivable", "all"];
 
-const listOrders = async ({ orgId, projectId = null, scope = "all" }) => {
+const listOrders = async ({ orgId, projectId = null, projectIds = null, scope = "all" }) => {
   const status =
     scope === "receivable"
       ? { in: ["draft", "issued", "partial"] }
@@ -139,7 +139,7 @@ const listOrders = async ({ orgId, projectId = null, scope = "all" }) => {
   const orders = await prisma.procurementOrder.findMany({
     where: {
       project: { orgId },
-      ...(projectId ? { projectId } : {}),
+      ...(projectId ? { projectId } : projectIds ? { projectId: { in: projectIds } } : {}),
       status,
     },
     include: orderInclude,

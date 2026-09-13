@@ -48,7 +48,7 @@ const isCompanyAdmin = (req) => Boolean(req.user?.isCompanyAdmin);
  * to check a second action inside a handler.
  */
 const hasPermission = (req, moduleName, action, options = {}) => {
-  const { transition = null } = options;
+  const { transition = null } = typeof options === 'string' ? { transition: options } : options || {};
   if (!req?.user) return false;
   // An API key never exceeds its scopes, whatever its owner may do.
   if (req.apiClient && !require('../services/api-client.service').scopeAllows(req.apiClient, moduleName, action)) return false;
@@ -67,12 +67,29 @@ const hasPermission = (req, moduleName, action, options = {}) => {
   );
 };
 
+/** The policy module a role-guarded route belongs to, from where it is mounted. */
+const MODULE_BY_SEGMENT = { 'change-orders': 'change_order', eot: 'eot', boq: 'boq', billing: 'billing', projects: 'project' };
+const moduleForRequest = (req) => {
+  const segments = String(req.baseUrl || '').split('/').filter(Boolean);
+  const last = segments[segments.length - 1];
+  return MODULE_BY_SEGMENT[last] || (segments.includes('projects') ? 'project' : last || 'project');
+};
+const ACTION_BY_METHOD = { POST: 'create', PUT: 'update', PATCH: 'update', DELETE: 'delete' };
+
 const requireRoles = (...allowedRoles) => {
   return (req, res, next) => {
     if (!req.user) {
       return next(
         new HttpError(401, 'AUTH_REQUIRED', 'Authentication is required'),
       );
+    }
+
+    // An API key never exceeds its scopes, whatever its owner may do — the
+    // permission guard has always said so; this role guard did not, and a
+    // read-only key could edit or archive a project (Phase 21D, CX21-415).
+    const writeAction = ACTION_BY_METHOD[req.method];
+    if (req.apiClient && writeAction && !require('../services/api-client.service').scopeAllows(req.apiClient, moduleForRequest(req), writeAction)) {
+      return next(new HttpError(403, 'API_KEY_SCOPE', 'This API key does not allow that action'));
     }
 
     if (!allowedRoles.includes(getEffectiveRole(req))) {
@@ -90,7 +107,7 @@ const requireRoles = (...allowedRoles) => {
 };
 
 const requirePermission = (moduleName, action, options = {}) => {
-  const { transition = null } = options;
+  const { transition = null } = typeof options === 'string' ? { transition: options } : options || {};
 
   return (req, res, next) => {
     if (!req.user) {

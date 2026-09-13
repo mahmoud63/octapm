@@ -494,11 +494,15 @@ describe('daily report service', () => {
         where: { id: 'cost-1' },
         data: expect.objectContaining({
           equipment: 500,
-          actual: 650,
+          // actual is no longer written here: the ledger posts it (Phase 21D, CX21-418)
           actualThroughDate: reportDate,
         }),
       }),
     );
+    expect(require("../cost-ledger.service").post).toHaveBeenCalledWith(
+      expect.objectContaining({ sourceType: "equipment", amount: 400, activityId: "activity-1", projectId: "project-1" }),
+    );
+    expect(mockPrisma.costRecord.update).not.toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ actual: expect.anything() }) }));
     expect(mockPrisma.auditEvent.create).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
@@ -515,3 +519,7 @@ describe('daily report service', () => {
     );
   });
 });
+
+jest.mock('../cost-ledger.service', () => ({
+  post: jest.fn(async ({ amount }) => ({ posted: true, entry: { amount } })),
+}));

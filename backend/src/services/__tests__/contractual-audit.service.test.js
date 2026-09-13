@@ -245,7 +245,8 @@ describe('contractual record audit history', () => {
       projectId: 'project-1',
       costRecordId: 'cost-1',
       payload: {
-        actual: 325,
+        // actual is posted by the ledger and only echoed here (Phase 21D, CX21-412)
+        actual: 250,
         committed: 500,
         actualThroughDate: '2026-06-05T00:00:00.000Z',
       },

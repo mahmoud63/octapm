@@ -1039,3 +1039,21 @@ describe("Phase 21D — integrity (Codex round 4)", () => {
     expect(mockPrisma.ipcCertificate.update).not.toHaveBeenCalled();
   });
 });
+
+describe("Phase 21D — integrity (release challenge)", () => {
+  it("CX21-413: certifying holds the project row before the certificate, so two periods cannot both pass the shared ceiling", async () => {
+    const certificate = { id: "ipc-1", projectId: "project-1", period: "IPC-1", status: "submitted", totalCert: 1000, totalRet: 50, netPayable: 950 };
+    mockPrisma.project.findFirst.mockResolvedValue({ id: "project-1" });
+    mockPrisma.ipcCertificate.findFirst.mockResolvedValue(certificate);
+    mockPrisma.ipcItem.findMany.mockResolvedValue([]);
+    mockPrisma.ipcItem.updateMany.mockResolvedValue({ count: 0 });
+    mockPrisma.ipcCertificate.update.mockImplementation(({ data }) => Promise.resolve({ ...certificate, ...data }));
+    mockPrisma.$queryRaw.mockClear();
+    await ipcService.certifyIpcPeriod({ orgId: "org-1", projectId: "project-1", period: "IPC-1", userId: "finance-1" });
+    const statements = mockPrisma.$queryRaw.mock.calls.map((call) => (Array.isArray(call[0]) ? call[0].join("?") : String(call[0])));
+    const project = statements.findIndex((sql) => /FROM "Project" WHERE id = \? FOR NO KEY UPDATE/.test(sql));
+    const cert = statements.findIndex((sql) => /FROM "IpcCertificate" WHERE id = \? FOR UPDATE/.test(sql));
+    expect(project).toBeGreaterThanOrEqual(0);
+    expect(cert).toBeGreaterThan(project);
+  });
+});

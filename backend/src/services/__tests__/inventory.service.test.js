@@ -156,8 +156,10 @@ const mockPrisma = {
   // An issue naming an activity belongs to that activity's project, whether or
   // not the caller said so (OCTA-INV-PROJECT-068).
   activity: {
-    findUnique: jest.fn(async ({ where }) =>
-      where.id === "activity-1" ? { projectId: "project-1" } : null
+    // Scoped by organisation since Phase 21D (CX21-410): activity-1 belongs
+    // to org-1; anything else is not this organisation's.
+    findFirst: jest.fn(async ({ where }) =>
+      where.id === "activity-1" && (!where.project || where.project.orgId === "org-1") ? { projectId: "project-1" } : null
     ),
   },
   costRecord: {
@@ -839,5 +841,27 @@ describe("Phase 21D — integrity (Codex round 6)", () => {
     store.balances.push({ id: "bal-damaged", orgId: ORG, itemId: item.id, warehouseId: warehouse.id, locationId: null, onHand: 0, reserved: 0, inTransit: 0, damaged: 100, quarantined: 0 });
     await service.receiveStock({ orgId: ORG, user: USER, payload: { itemId: item.id, warehouseId: warehouse.id, quantity: 100, unitCost: 30 } });
     expect(Number(store.items.get(item.id).averageCost)).toBe(30);
+  });
+});
+
+describe("Phase 21D — integrity (release challenge)", () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockPrisma.$queryRaw.mockImplementation(async () => []);
+    store.items.clear(); store.warehouses.clear(); store.locations.clear();
+    store.balances.length = 0; store.transactions.length = 0; store.ledger.length = 0; store.costRecords.length = 0;
+    nextId = 1;
+  });
+
+  it("CX21-410: an issue to an activity that is not on a project of this organisation is refused, and nothing moves", async () => {
+    const item = seedItem();
+    const warehouse = seedWarehouse();
+    await service.receiveStock({ orgId: ORG, user: USER, payload: { itemId: item.id, warehouseId: warehouse.id, quantity: 100, unitCost: 10 } });
+    await expect(
+      service.issueStock({ orgId: ORG, user: USER, payload: { itemId: item.id, warehouseId: warehouse.id, quantity: 10, activityId: "activity-of-another-tenant" } }),
+    ).rejects.toMatchObject({ code: "ACTIVITY_NOT_FOUND", status: 404 });
+    // the fake has no rollback; in PostgreSQL the movement and the refusal share one transaction — what the fake can show is that no cost was posted
+    expect(store.ledger).toHaveLength(0);
+    expect(mockPrisma.activity.findFirst).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({ project: { orgId: ORG } }) }));
   });
 });

@@ -68,7 +68,7 @@ const editableFields: Array<
   'contingency',
   'budget',
   'committed',
-  'actual',
+  // actual is posted from the cost ledger and shown, never typed (Phase 21D)
   'forecast',
 ]
 

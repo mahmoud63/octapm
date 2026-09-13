@@ -1253,6 +1253,10 @@ const certifyIpcPeriod = async ({
   }
 
   return prisma.$transaction(async (tx) => {
+    // Certifications on one project are decided one at a time: the project
+    // row is held first, so two periods certified at once cannot both read
+    // the other's items as not yet certified (Phase 21D, CX21-413).
+    await tx.$queryRaw`SELECT id FROM "Project" WHERE id = ${projectId} FOR NO KEY UPDATE`;
     await lockCertificateExpecting({ tx, certificateId: certificate.id, statuses: ["submitted"], code: "IPC_INVALID_CERTIFICATION_STATE", message: "Only submitted IPC periods can be certified" });
     const now = new Date();
     const normalizedOverrideReason = trimOrNull(overrideReason);

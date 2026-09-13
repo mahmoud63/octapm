@@ -262,7 +262,21 @@ async function main() {
   note("bags issued by the RBAC probes", issuedBags);
   check("the probes moved the ledger by exactly what they issued", issuedBags * 1100, probeCost);
   ctx.financials.rbacProbeCents = probeCost;
-  ctx.financials.finalLedger = ledgerAfter;
+  // The probes' bags go back: the stage leaves the ledger where it found it,
+  // so a re-run never moves the certified figures. Phase 21D found the bags
+  // of a second run on the certified project (register T-14).
+  let ledgerRestored = ledgerAfter;
+  if (issuedBags > 0) {
+    const giveBack = await probe(warehouse, "POST", "/inventory/stock/return", {
+      itemId: ctx.itemId, warehouseId: ctx.warehouseId, locationId: ctx.binId, quantity: issuedBags, projectId: P,
+      activityId: ctx.activities.A130, costCodeId: ctx.costCodes["02-100"],
+      reference: `${ctx.tag}-RBAC-PROBE-RETURN`, notes: "the RBAC probes' bags, returned so the stage leaves the ledger where it found it",
+    });
+    check("the probes' bags are returned", 200, giveBack.status);
+    ledgerRestored = readLedger(await GET(cost, `/projects/${P}/cost/reconciliation`));
+    check("the probes leave the ledger where they found it", ledgerAtStart.ledgerCents, ledgerRestored.ledgerCents);
+  }
+  ctx.financials.finalLedger = ledgerRestored;
 
   // ── 7.5 give the isolation project back ──────────────────────────────────
   const archived = await probe(pm, "DELETE", `/projects/${ctx.isolationProjectId}`);

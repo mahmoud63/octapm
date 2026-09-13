@@ -530,6 +530,17 @@ const notify = async ({ orgId, projectId, row, actor, event, title, message, rec
 
 const labelOf = (row) => `${row.crew?.name ? `${row.crew.name} · ` : ""}${dateKey(row.date)}`;
 
+/**
+ * Holds the timesheet for the transaction and refuses if its status is no
+ * longer one the caller decided on: a return that started while the sheet
+ * was submitted must not land on it once approved and posted — the cost
+ * would stay posted and the sheet become editable (Phase 21D, CX21-414).
+ */
+const lockTimesheetExpecting = async (tx, timesheetId, statuses, code, message) => {
+  const [fresh] = await tx.$queryRaw`SELECT status FROM "Timesheet" WHERE id = ${timesheetId} FOR UPDATE`;
+  if (fresh && !statuses.includes(fresh.status)) throw new HttpError(409, code, message(fresh.status));
+};
+
 const submitTimesheet = async ({ orgId, projectId, timesheetId, actor = null, viewer = null }) => {
   const existing = await loadTimesheet({ orgId, projectId, timesheetId, viewer });
   assertEditable(existing);
@@ -538,6 +549,7 @@ const submitTimesheet = async ({ orgId, projectId, timesheetId, actor = null, vi
   if (missing.length) throw new HttpError(400, "TIMESHEET_ENTRY_ACTIVITY_REQUIRED", `${missing.length} entr${missing.length === 1 ? "y has" : "ies have"} no activity — every entry must be linked to a schedule activity`, { workerIds: uniqueIds(missing.map((entry) => entry.workerId)) });
   const now = new Date();
   const row = await prisma.$transaction(async (tx) => {
+    await lockTimesheetExpecting(tx, timesheetId, [STATUS.DRAFT, STATUS.REJECTED], "TIMESHEET_LOCKED", (status) => `A ${status} timesheet cannot be submitted`);
     await tx.timesheet.update({ where: { id: timesheetId }, data: { status: STATUS.SUBMITTED, submittedBy: actor?.id || null, submittedAt: now, rejectedBy: null, rejectedAt: null, rejectionReason: null } });
     return loadTimesheet({ orgId, projectId, timesheetId, viewer, tx });
   });
@@ -552,6 +564,7 @@ const approveTimesheet = async ({ orgId, projectId, timesheetId, actor = null, v
   if (existing.status !== STATUS.SUBMITTED) throw new HttpError(409, "TIMESHEET_NOT_SUBMITTED", "Only submitted timesheets can be approved");
   const now = new Date();
   const row = await prisma.$transaction(async (tx) => {
+    await lockTimesheetExpecting(tx, timesheetId, [STATUS.SUBMITTED], "TIMESHEET_NOT_SUBMITTED", () => "Only submitted timesheets can be approved");
     const posted = [];
     for (const entry of existing.entries) {
       const rate = entry.rate !== null && entry.rate !== undefined ? toNumber(entry.rate) : toNumber(entry.worker?.hourlyRate, 0);
@@ -597,6 +610,7 @@ const rejectTimesheet = async ({ orgId, projectId, timesheetId, payload = {}, ac
   if (!reason) throw new HttpError(400, "TIMESHEET_REASON_REQUIRED", "Say why the timesheet is returned");
   const now = new Date();
   const row = await prisma.$transaction(async (tx) => {
+    await lockTimesheetExpecting(tx, timesheetId, [STATUS.SUBMITTED], "TIMESHEET_NOT_SUBMITTED", () => "Only submitted timesheets can be returned");
     await tx.timesheet.update({ where: { id: timesheetId }, data: { status: STATUS.REJECTED, rejectedBy: actor?.id || null, rejectedAt: now, rejectionReason: reason.slice(0, 1000) } });
     return loadTimesheet({ orgId, projectId, timesheetId, viewer, tx });
   });
@@ -610,6 +624,7 @@ const reopenTimesheet = async ({ orgId, projectId, timesheetId, payload = {}, ac
   const existing = await loadTimesheet({ orgId, projectId, timesheetId, viewer });
   if (![STATUS.APPROVED, STATUS.SUBMITTED].includes(existing.status)) throw new HttpError(409, "TIMESHEET_NOT_REOPENABLE", "Only submitted or approved timesheets can be reopened");
   const row = await prisma.$transaction(async (tx) => {
+    await lockTimesheetExpecting(tx, timesheetId, [STATUS.APPROVED, STATUS.SUBMITTED], "TIMESHEET_NOT_REOPENABLE", () => "Only submitted or approved timesheets can be reopened");
     // Negative mirrors rather than decrements, so the reversal is on the record.
     await costLedger.reverse({ tx, orgId, projectId, sourceType: "timesheet", sourceId: timesheetId, postedBy: actor?.id || null, note: payload.reason ? String(payload.reason).slice(0, 500) : null });
     for (const entry of existing.entries) {

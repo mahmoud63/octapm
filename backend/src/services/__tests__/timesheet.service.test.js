@@ -124,6 +124,7 @@ const mockPrisma = {
   // Approving now posts labour through the cost ledger (OCTA-FIN-LEDGER-059).
   costLedgerEntry: mockLedger.tables.costLedgerEntry,
   $transaction: jest.fn(async (fn) => fn(mockPrisma)),
+  $queryRaw: jest.fn(async () => []), // row locks (Phase 21D): nothing to lock in a fake
 };
 const mockAudit = { ACTIONS: { CREATED: "created", UPDATED: "updated", STATUS_CHANGED: "status_changed", APPROVED: "approved", REJECTED: "rejected", DELETED: "deleted" }, recordEvent: jest.fn(async () => null) };
 const mockNotifications = { NOTIFICATION_CATEGORIES: { APPROVAL: "approval" }, createNotifications: jest.fn(async (payload) => store.notifications.push(payload)) };
@@ -294,5 +295,18 @@ describe("timesheets and crews", () => {
     await expect(service.createCrew({ ...scope, payload: { name: "formwork a" }, actor: pm, viewer: pm })).rejects.toMatchObject({ code: "CREW_NAME_EXISTS" });
     await service.createTimesheet({ ...scope, payload: { date: "2026-09-07", crewId: "crew-1" }, actor: pm, viewer: pm });
     await expect(service.deleteCrew({ ...scope, crewId: "crew-1", actor: pm, viewer: pm })).rejects.toMatchObject({ code: "CREW_IN_USE" });
+  });
+});
+
+describe("Phase 21D — integrity (release challenge)", () => {
+  afterEach(() => mockPrisma.$queryRaw.mockImplementation(async () => []));
+
+  it("CX21-414: a return that started on a submitted timesheet refuses once it was approved under the lock", async () => {
+    const sheet = { id: "ts-9", orgId: "org-1", projectId: "p1", status: "submitted", date: new Date("2027-02-02"), entries: [{ id: "e1", hours: 8, rate: 50, activityId: "act-1", worker: { name: "A" } }], crew: null };
+    mockPrisma.timesheet.findFirst.mockResolvedValue(sheet);
+    mockPrisma.timesheet.update.mockClear();
+    mockPrisma.$queryRaw.mockImplementation(async (strings) => (Array.isArray(strings) && strings.join("?").includes('FROM "Timesheet"') ? [{ status: "approved" }] : []));
+    await expect(service.rejectTimesheet({ orgId: "org-1", projectId: "p1", timesheetId: "ts-9", payload: { reason: "wrong hours" }, actor: { id: "pm" } })).rejects.toMatchObject({ code: "TIMESHEET_NOT_SUBMITTED" });
+    expect(mockPrisma.timesheet.update).not.toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ status: "rejected" }) }));
   });
 });
