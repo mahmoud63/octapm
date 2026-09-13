@@ -512,3 +512,38 @@ describe("Phase 21D — integrity (Codex round 6)", () => {
     expect(mockPrisma.subPayAppLine.update).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ previousAmount: 0, thisPeriodAmount: 70000, cumulativeAmount: 70000 }) }));
   });
 });
+
+describe("Phase 21D — integrity (Codex round 7)", () => {
+  it("CX21-601: a transition holds the commitment before the application, so two applications cannot both pass the shared ceiling", async () => {
+    mockPrisma.subPayApp.findFirst.mockResolvedValue(payApp({ status: "draft", lines: [line({ thisPeriodAmount: 50000, cumulativeAmount: 70000 })] }));
+    mockPrisma.subPayApp.update.mockImplementation(async ({ data }) => payApp({ status: "submitted", ...data }));
+    const lock = jest.spyOn(mockPrisma, "$queryRaw");
+    await service.submitPayApp({ orgId: "org-1", projectId: "project-1", payAppId: "pa-1", actor: { id: "sub-user" } });
+    const statements = lock.mock.calls.map((call) => (Array.isArray(call[0]) ? call[0].join("?") : String(call[0])));
+    lock.mockRestore();
+    const commitment = statements.findIndex((sql) => /FROM "Commitment" WHERE id = \? FOR NO KEY UPDATE/.test(sql));
+    const application = statements.findIndex((sql) => /FROM "SubPayApp" WHERE id = \? FOR UPDATE/.test(sql));
+    expect(commitment).toBeGreaterThanOrEqual(0);
+    expect(application).toBeGreaterThan(commitment);
+  });
+
+  it("CX21-601: a rejected application cannot come back to draft while another application is open on the commitment", async () => {
+    mockPrisma.subPayApp.findFirst.mockResolvedValue(payApp({ status: "rejected", netThisPeriod: 27000 }));
+    mockPrisma.subPayApp.update.mockClear();
+    const lock = jest.spyOn(mockPrisma, "$queryRaw").mockImplementation(async (strings) => (Array.isArray(strings) && strings.join("?").includes("status IN ('draft', 'submitted', 'under_review')") ? [{ ref: "SC-001-PA03" }] : []));
+    await expect(service.reopenPayApp({ orgId: "org-1", projectId: "project-1", payAppId: "pa-1", actor: { id: "pm" }, reason: "resubmit" })).rejects.toMatchObject({ code: "SUB_PAY_APP_OPEN_EXISTS", details: { reasonCode: "DUPLICATE_PERIOD" } });
+    lock.mockRestore();
+    expect(mockPrisma.subPayApp.update).not.toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ status: "draft" }) }));
+  });
+
+  it("CX21-601: raising an application holds the commitment before it checks for an open one", async () => {
+    mockPrisma.commitment.findFirst.mockResolvedValue(commitment());
+    mockPrisma.subPayApp.findFirst.mockResolvedValueOnce(null).mockResolvedValue(payApp({ status: "draft" }));
+    mockPrisma.subPayApp.create.mockResolvedValue(payApp({ status: "draft" }));
+    const lock = jest.spyOn(mockPrisma, "$queryRaw");
+    await service.createPayApp({ orgId: "org-1", projectId: "project-1", payload: { commitmentId: "cm-1", periodLabel: "2026-10" }, actor: { id: "sub-user" } });
+    const statements = lock.mock.calls.map((call) => (Array.isArray(call[0]) ? call[0].join("?") : String(call[0])));
+    lock.mockRestore();
+    expect(statements.some((sql) => /FROM "Commitment" WHERE id = \? FOR NO KEY UPDATE/.test(sql))).toBe(true);
+  });
+});

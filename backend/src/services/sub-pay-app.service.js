@@ -428,6 +428,10 @@ const createPayApp = async ({ orgId, projectId, payload = {}, actor = null, view
   const periodLabel = trimOrNull(payload.periodLabel);
   if (!periodLabel) throw new HttpError(400, "SUB_PAY_APP_PERIOD_REQUIRED", "Give the application a period (e.g. 2026-09)");
   const created = await prisma.$transaction(async (tx) => {
+    // The commitment is held first — the order every transition takes — so
+    // two applications raised at once cannot both pass the "one open
+    // application" check (Phase 21D, CX21-601).
+    await tx.$queryRaw`SELECT id FROM "Commitment" WHERE id = ${commitmentId} FOR NO KEY UPDATE`;
     const open = await tx.subPayApp.findFirst({ where: { commitmentId, status: { in: [STATUS.DRAFT, STATUS.SUBMITTED, STATUS.UNDER_REVIEW] } }, select: { ref: true } });
     if (open) {
       const error = new HttpError(409, "SUB_PAY_APP_OPEN_EXISTS", `${open.ref} is still open on this commitment`);
@@ -757,6 +761,12 @@ const transition = async ({ orgId, projectId, payAppId, to, actor = null, viewer
     });
   }
   const updated = await prisma.$transaction(async (tx) => {
+    // One application at a time is decided per commitment: the commitment
+    // row is held before the application's, so two applications on the same
+    // schedule of values cannot both pass the shared ceiling before either
+    // commits — the second waits, then sees the first's claims as "previous"
+    // (Phase 21D, CX21-601).
+    await tx.$queryRaw`SELECT id FROM "Commitment" WHERE id = ${existing.commitmentId} FOR NO KEY UPDATE`;
     // The application is held for the transaction, and the status the
     // transition was decided on is checked again under the lock: a rejection
     // that started while the application was submitted must not land on it
@@ -771,6 +781,18 @@ const transition = async ({ orgId, projectId, payAppId, to, actor = null, viewer
     // claims it now holds may differ (an edit landed in between), so it is
     // asked again about what will actually be approved (Phase 21D, CX21-402).
     if (guard) await guard(existing);
+    if (to === STATUS.DRAFT) {
+      // Coming back to draft — from rejected or from approved — is subject to
+      // the same rule as being raised: one open application per commitment.
+      // Two open at once could each be approved against the same schedule of
+      // values (CX21-601).
+      const [open] = await tx.$queryRaw`SELECT ref FROM "SubPayApp" WHERE "commitmentId" = ${existing.commitmentId} AND id <> ${payAppId} AND status IN ('draft', 'submitted', 'under_review') LIMIT 1`;
+      if (open) {
+        const error = new HttpError(409, "SUB_PAY_APP_OPEN_EXISTS", `${open.ref} is still open on this commitment`);
+        error.details = { reasonCode: "DUPLICATE_PERIOD" };
+        throw error;
+      }
+    }
     if (revoking) {
       // The "nothing paid" check ran before the transaction; a payment that
       // landed since is found under the lock and stops the revocation
