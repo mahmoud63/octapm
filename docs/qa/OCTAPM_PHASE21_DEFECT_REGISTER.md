@@ -1476,6 +1476,117 @@ are mine.
 | **Fix** | The list and the creation carry the key's projects; every task addressed by id on that mount must be on one of them (`403 FORBIDDEN_PROJECT`). |
 | **Regression** | `task.key-scope.test.js` (new). Live on the fix: the list without the P21 task, the creation refused. |
 
+## The ninth release pass — HEAD `e5f1c70`: no Critical, eight Highs, two Mediums
+
+Run at 19:35 CDT after the usage window reopened (142,281 tokens, six
+minutes): DO NOT RELEASE — no Critical, eight Highs, two Mediums, and three
+earlier fixes INCOMPLETE because of them. Every High was reproduced or
+confirmed before any code changed — six against the live API on `e5f1c70`
+(the migration's merge run inside a rolled-back transaction; a deactivated
+person's socket; a template that refuses tasks; a committed figure typed to
+0; a key reading its owner's notifications from every project; two advance
+receipts arriving together) and two by regression tests that fail on
+`e5f1c70` — and each fix carries a regression that fails on `e5f1c70`. All
+fixed in the commit after `e5f1c70`. The two Mediums and one observation
+are recorded below (P21-139 … P21-141) and not fixed, as the brief asks.
+
+## P21-131 · P1 · Cost ledger (migration) · **FIXED** (Codex CX21-490; closes the INCOMPLETE on CX21-483, CX21-474 and CX21-457)
+
+| | |
+| --- | --- |
+| **Observed** | The unique-pair migration merged duplicate cost-record rows by folding `actual` into the kept row and deleting the others — with their categories, budget, forecast and committed. **Reproduced live** on the local database, inside a transaction rolled back afterwards: two rows for one activity (A: budget 100,000; B: material 25,000, forecast 120,000, committed 5,000) became one row with budget 100,000, material 0, forecast 0, committed 0. |
+| **Root cause** | **CONFIRMED PRODUCT DEFECT** (data loss on any database that had met P21-103/P21-111/P21-120 before the index). |
+| **Fix** | The merge keeps every figure the duplicates held: `actual` summed, and each other figure — the seven categories, budget, forecast, committed, the through-date — the largest any row held (a figure typed twice is counted once, one typed on either row is kept). The others are then removed and the index created. Re-applied to the local database only (index dropped, migration row removed, `migrate deploy`). |
+| **Regression** | `post-import.service.test.js` (CX21-490: every money column is merged before the delete). Live on the fix, the same rolled-back staging: one row, budget 100,000, material 25,000, forecast 120,000, committed 5,000, actual 30. |
+
+## P21-132 · P1 · Authentication (realtime) · **FIXED** (Codex CX21-491; closes the INCOMPLETE on CX21-485)
+
+| | |
+| --- | --- |
+| **Observed** | The socket handshake verified the token and trusted it: a deactivated or demoted person's still-valid token opened a socket, joined a project room as the role the token carried, and received that project's events — after the REST layer (P21-129) had already refused them. **Reproduced live**: a throwaway PM, deactivated after signing in — `GET /auth/me` 401 USER_INACTIVE, the socket connected and `project:join` answered ok. |
+| **Root cause** | **CONFIRMED PRODUCT DEFECT** (the socket path of P21-129). |
+| **Fix** | The handshake loads the account and refuses (`USER_INACTIVE`) unless it is active and in the token's organisation; the socket carries the account's role and standing, not the token's. A project join loads the account again before the project is looked at. A deactivation, or a change of role or standing, drops the person's open sockets (`disconnectUser`), so the next connection carries the account as it is now. |
+| **Regression** | `socket.test.js` (CX21-491: refused at the handshake, the account's role on the socket, refused at the join, sockets dropped). Live on the fix: the socket refused with USER_INACTIVE. |
+
+## P21-133 · P1 · RBAC / permission templates · **FIXED** (Codex CX21-492)
+
+| | |
+| --- | --- |
+| **Observed** | A project's permission template decides on the project's own mount, where the project middleware attaches it; the mount outside a project (`/api/v1/tasks`) never attached one, and the role's policy answered instead. **Reproduced live**: a template with the tasks module at `none`, assigned to the QS on the P21 project — `/projects/P/tasks` 403, `/tasks?projectId=P` 200 with the tasks. |
+| **Root cause** | **CONFIRMED PRODUCT DEFECT** (an authorisation layer applied on one of two mounts). |
+| **Fix** | On the mount outside a project every route first resolves the project the request names — the query's or body's `projectId`, or the project of the task addressed by id — checks access to it and attaches its template, so `requirePermission` decides as it does on the project's own mount. A list across projects leaves out the projects whose template (a member's, or a party's when no member template is set) refuses the tasks module. |
+| **Regression** | `tasks.project-context.test.js` (new: the list, the read by id, the creation and the edit refused under a refusing template; ordinary access and the list across projects unchanged) and `task.key-scope.test.js` (CX21-492: the cross-project list leaves the refused projects out, for a session and for a key). Live on the fix: `/tasks?projectId=P` 403 FORBIDDEN. |
+
+## P21-134 · P1 · Cost · **FIXED** (Codex CX21-493; closes the INCOMPLETE on CX21-475)
+
+| | |
+| --- | --- |
+| **Observed** | `committed` on a cost record is written by `recomputeCommitted` from the executed commitments, yet the edit and the upsert accepted any typed figure, and the cost table offered the field: a QS typed 0 over an executed 100,000 subcontract. **Reproduced live** on the P21 project's A310 (committed 100,000 from the executed subcontract): `PATCH … { committed: 0 }` 200, stored 0; restored. |
+| **Root cause** | **CONFIRMED PRODUCT DEFECT** (a derived figure left typeable; the actual had the same defect, P21-064). |
+| **Fix** | Where an executed (or closed) commitment, or an approved change order of one, names the activity, a supplied committed that differs from the row's is refused (`400 COST_COMMITTED_IS_DERIVED`); an echo passes, and an activity no commitment names keeps a typed figure. The summary and the list mark those rows (`committedDerived`) and the cost table no longer offers to edit them. |
+| **Regression** | `cost.actual-derived.test.js` (CX21-493: refused where a commitment names the activity, the echo and the un-named activity accepted). Live on the fix: 400 COST_COMMITTED_IS_DERIVED, stored figure unchanged. |
+
+## P21-135 · P1 · RBAC / API keys · **FIXED** (Codex CX21-494)
+
+| | |
+| --- | --- |
+| **Observed** | The notification routes had no scope guard and no project filter: a key limited to the P21 project with only `inventory:read` read its owner's notifications — messages, metadata — from every project, and the summary's counts; the workflow inbox took a `workflow:read` key across every project. **Reproduced live**: the key's `GET /notifications` 200, fifty rows, fifty from other projects; `/notifications/summary` 200, 367 unread. |
+| **Root cause** | **CONFIRMED PRODUCT DEFECT** (the same shape as P21-079: a person's own surface reached with a key). |
+| **Fix** | The inbox, its summary, its devices and its preferences are the person's own: every notification route refuses a key (`403 API_KEY_FORBIDDEN`, the rule that already covers MFA, the assistant and conversations). The workflow inbox takes a limited key's project list. |
+| **Regression** | `notifications.routes.test.js` (CX21-494: the list, the summary, the preferences, the devices and mark-read refused to a key, the person still served) and `workflow-engine.service.test.js` (CX21-494: the inbox narrowed to the key's projects). Live on the fix: 403 API_KEY_FORBIDDEN. |
+
+## P21-136 · P1 · Client billing · **FIXED** (Codex CX21-495)
+
+| | |
+| --- | --- |
+| **Observed** | An advance receipt computed the new paid total and checked the agreed cap from a read made before its transaction, then wrote that total over the aggregate. **Reproduced live** on the P21 project's client contract (advance set to 100,000 for the probe, restored after): two concurrent receipts of 60,000 — both 200 in five of six runs, two receipt rows totalling 120,000 against 100,000 agreed, `advancePaidAmount` 60,000. |
+| **Root cause** | **CONFIRMED PRODUCT DEFECT** (the same shape as P21-029 and P21-038). |
+| **Fix** | The receipt holds the contract row (`FOR UPDATE`) and reads the agreed and received figures under the lock; the cap is checked and the aggregate written from those. |
+| **Regression** | `prime-contract.service.test.js` (CX21-495: a receipt that landed since the read counts against the cap and in the aggregate). Live on the fix, four runs: one receipt 200, the other 409 ADVANCE_OVER_AGREED, one row, aggregate 60,000. |
+
+## P21-137 · P1 · Change orders · **FIXED** (Codex CX21-496)
+
+| | |
+| --- | --- |
+| **Observed** | `updateChangeOrder` checked the approval lock and the transition on a copy read before its transaction, and the update inside it re-read nothing: a QS edit of a pending order's value that overlapped the PM's approval wrote the new value onto the approved order, and — the copy still saying pending — applied the approval's activity impacts and budget revision a second time. Not stageable in one request; **confirmed by a regression that fails on `e5f1c70`**. |
+| **Root cause** | **CONFIRMED PRODUCT DEFECT** (the same shape as P21-112 and P21-124: a decision made on a copy). |
+| **Fix** | Inside the transaction the order is held (`FOR UPDATE`) and read again before anything is written; an order whose status (or archive state) moved since the copy was read is not written (`409 CHANGE_ORDER_CHANGED` — reload and decide again). |
+| **Regression** | `change-order.service.test.js` (CX21-496: a pending copy, an approved row as held — refused, nothing written, the lock before the re-read). |
+
+## P21-138 · P1 · Cost · **FIXED** (Codex CX21-497; closes the INCOMPLETE on CX21-482 and CX21-475)
+
+| | |
+| --- | --- |
+| **Observed** | A cost-record edit built its update from a copy read before the lock and wrote every category back — two editors of different fields erased each other's work — and the edit path took no pair lock at all; an upsert that omitted the budget reset it to the approved allocation total. **Confirmed by regressions that fail on `e5f1c70`** (an edit naming `material` wrote `labour` too; an upsert naming one category wrote the budget). |
+| **Root cause** | **CONFIRMED PRODUCT DEFECT** (the same shape as P21-124, the cost-record side). |
+| **Fix** | Both paths hold the (project, activity) pair — the ledger, the commitments and each other hold it too — read the row under it, decide the actual and committed guards on that row, and write only the fields the caller supplied; the forecast follows a budget that is set. A row created under the lock starts from the approved allocation and committed 0. |
+| **Regression** | `cost.actual-derived.test.js` (CX21-497: only the given fields written, the lock before the read, the budget left alone on an upsert; the CX21-464 and CX21-482 cases brought to the single read under the lock). |
+
+## P21-139 · P2 · Budget revisions · **OPEN** (Codex ninth pass, Medium)
+
+A revision's creation appends its amount to a cumulative balance read
+before it, without the project serialisation the edit and the delete now
+hold (P21-116, P21-124); two creations at once, or a back-dated one, can
+store a wrong `cumulativeBudget`. **Not fixed** — a Medium, outside the
+brief's loop. The figure is a projection; the repair recomputes it, and the
+revision amounts themselves are not affected.
+
+## P21-140 · P2 · Permission templates · **OPEN** (Codex ninth pass, Medium)
+
+When a template lookup fails (a database error while the project middleware
+attaches it), the request falls back to the legacy role policy instead of
+being refused. **Not fixed** — a Medium, outside the brief's loop; the
+failure is logged, and it is a database failure, not a request anyone can
+cause. Dispositioned for Phase 22 with P21-139.
+
+## P21-141 · P3 · Performance · **OPEN** (observation, ninth pass)
+
+Since P21-129 every JWT request loads its account once; a route mounted
+under a project authenticates in the project router and again in its own
+(`/projects/:id/tasks`, `/projects/:id/cost`), so those requests cost two
+indexed lookups. **Not fixed** — an observation, no functional effect;
+noted for Phase 22.
+
 ## T-18 · ten gate runs' order residue filled the Match tab's window
 
 Gates run 10 (on `b2bd518`) failed two Match-tab tests of the inventory spec:

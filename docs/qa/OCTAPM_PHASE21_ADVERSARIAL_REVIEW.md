@@ -580,14 +580,35 @@ it, with the two Mediums. Gates run ten, on `b2bd518`, also showed ten
 runs' worth of order residue filling the Match tab's window (T-18): test
 data, closed before run eleven.
 
+The ninth pass, on `e5f1c70` (19:35 CDT, after the usage window
+reopened; six minutes, 142,281 tokens): DO NOT RELEASE — no Critical, eight
+Highs, two Mediums (register P21-131 … P21-141). The migration I had just
+taught to merge duplicates merged only their actual and discarded what
+else they held; the account check I had put on the REST layer was missing
+from the socket, so a deactivated person kept their rooms; the project
+template that decides on a project's own mount was never asked on the
+task mount outside a project; the committed figure I had stopped an upsert
+from zeroing could still be typed to zero by anyone; the notification routes
+took any key and every project; an advance receipt decided its cap on a
+copy; a change-order edit decided its approval lock on a copy; and the
+cost-record edit that I had just made keep a row's committed still wrote
+the row's other fields back from its copy. Six reproduced live (the
+migration inside a rolled-back transaction, the socket with a throwaway
+deactivated account, the template on the QS, the typed committed on A310,
+the key on the inbox, the two receipts — in five of six runs), two by
+regressions that fail on `e5f1c70`; all eight fixed in the commit after
+it, with twelve regressions in nine suites, eleven of which fail on
+`e5f1c70`. The two Mediums and one observation are recorded and, as the
+brief asks, not fixed.
+
 ## 11. What the rounds cost, and what they were worth
 
-Nine loops, eight release loops and one loop of my own: 97 confirmed product
+Nine loops, nine release loops and one loop of my own: 105 confirmed product
 defects in the ledger, stock, payment, transition, authentication,
 authorization, billing and tenant-isolation paths (7 + 5 + 6 + 4 + 3 + 2 + 1
-+ 2 + 2 + 8 + 10 + 7 + 8 + 8 + 1 + 8 + 8 + 7, four of them regressions of a
-loop's own fix, plus four P2 fixed, one P3 hygiene item and two P2 carried),
-113 regression cases (87 of them fail on the code they guard; five guard flows that must keep working), and
++ 2 + 2 + 8 + 10 + 7 + 8 + 8 + 1 + 8 + 8 + 7 + 8, four of them regressions of
+a loop's own fix, plus four P2 fixed, one P3 hygiene item and four P2 and one
+P3 carried), 125 regression cases (87 of them fail on the code they guard; five guard flows that must keep working), and
 a demo-project reconciliation that still balances to the cent after all of
 it. The Phase 21 project's own figures did not move once (36/36 before and
 after every loop); the defects lived in what those figures never exercised —
