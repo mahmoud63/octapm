@@ -1094,6 +1094,24 @@ const updateChangeOrder = async ({
   }
 
   const result = await prisma.$transaction(async (tx) => {
+    // The order is held and read again before anything is written: the
+    // checks above were made on a copy, and an approval that landed since
+    // was edited over — its value changed, its impacts applied twice
+    // (Phase 21D, CX21-496). An order that moved is not written; the caller
+    // reloads it and decides again.
+    if (tx.$queryRaw) await tx.$queryRaw`SELECT id FROM "ChangeOrder" WHERE id = ${coId} FOR UPDATE`;
+    const held = await tx.changeOrder.findFirst({ where: { id: coId, projectId }, select: { status: true, archivedAt: true } });
+    if (!held) {
+      throw new HttpError(404, "CHANGE_ORDER_NOT_FOUND", "Change order not found");
+    }
+    if (held.status !== existing.status || Boolean(held.archivedAt) !== Boolean(existing.archivedAt)) {
+      throw new HttpError(
+        409,
+        "CHANGE_ORDER_CHANGED",
+        `The change order is now ${held.status}; reload it and decide again`,
+      );
+    }
+
     const updated = await tx.changeOrder.update({
       where: { id: coId },
       data,

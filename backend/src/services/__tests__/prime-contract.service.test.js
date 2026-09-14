@@ -430,3 +430,26 @@ describe("advance payments", () => {
     expect(mockPrisma.primeContract.update).not.toHaveBeenCalled();
   });
 });
+
+describe("Phase 21D — integrity (release challenge, ninth pass)", () => {
+  it("CX21-495: a receipt is decided on the contract as held — a receipt that landed since the read counts against the agreed advance, and the aggregate carries both", async () => {
+    mockPrisma.project.findFirst.mockResolvedValue({ id: "project-1", orgId: "org-1", name: "P" });
+    mockPrisma.primeContract.findFirst.mockResolvedValue(contract({ advanceAmount: 100_000, advancePaidAmount: 0 }));
+    mockPrisma.primeContractAdvance.findFirst.mockResolvedValue(null);
+    mockPrisma.primeContractAdvance.create.mockClear();
+    mockPrisma.primeContract.update.mockClear();
+    mockPrisma.primeContract.update.mockImplementation(async ({ data }) => contract({ ...data }));
+    // as held, 60,000 has arrived since the read: a second 60,000 would exceed the 100,000 agreed
+    mockPrisma.$queryRaw = jest.fn(async () => [{ advanceAmount: 100_000, advancePaidAmount: 60_000 }]);
+    await expect(
+      service.recordAdvancePayment({ orgId: "org-1", projectId: "project-1", userId: "user-1", payload: { amount: 60_000, reference: "ADV-2" } })
+    ).rejects.toMatchObject({ status: 409, code: "ADVANCE_OVER_AGREED" });
+    expect(mockPrisma.primeContractAdvance.create).not.toHaveBeenCalled();
+    expect(mockPrisma.$queryRaw.mock.calls[0][0].join("?")).toMatch(/FOR UPDATE/);
+    // a receipt that fits is added to the figure as held, not to the one read before
+    mockPrisma.$queryRaw.mockResolvedValue([{ advanceAmount: 100_000, advancePaidAmount: 30_000 }]);
+    await service.recordAdvancePayment({ orgId: "org-1", projectId: "project-1", userId: "user-1", payload: { amount: 60_000, reference: "ADV-3" } });
+    expect(mockPrisma.primeContract.update.mock.calls.at(-1)[0].data).toMatchObject({ advancePaidAmount: 90_000 });
+    delete mockPrisma.$queryRaw;
+  });
+});

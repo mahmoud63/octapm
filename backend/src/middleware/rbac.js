@@ -81,10 +81,11 @@ const ACTION_BY_METHOD = { POST: 'create', PUT: 'update', PATCH: 'update', DELET
  * act. An API key acts as its owner for the work it is scoped to, never for
  * this (Phase 21D, CX21-429).
  */
-const noApiKey = (req, res, next) =>
+const personal = (what) => (req, res, next) =>
   req.apiClient
-    ? next(new HttpError(403, 'API_KEY_FORBIDDEN', 'Account security cannot be changed with an API key'))
+    ? next(new HttpError(403, 'API_KEY_FORBIDDEN', `${what} cannot be reached with an API key`))
     : next();
+const noApiKey = personal('Account security');
 
 const requireRoles = (...allowedRoles) => {
   return (req, res, next) => {
@@ -174,6 +175,8 @@ const requireCompanyAdmin = (req, res, next) => {
 
 module.exports = {
   noApiKey,
+  personal,
+  personal,
   COMPANY_ADMIN_MODULES,
   getEffectiveRole,
   hasPermission,

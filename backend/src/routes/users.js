@@ -7,6 +7,7 @@ const { requirePermission } = require("../middleware/rbac");
 const { subscriptionGate } = require("../middleware/subscription-gate");
 const { validate } = require("../middleware/validate");
 const userService = require("../services/user.service");
+const { disconnectUser } = require("../realtime/socket");
 
 const router = express.Router();
 router.use(authenticate);
@@ -126,6 +127,8 @@ router.patch(
       userId: req.params.id,
       payload: req.body,
     });
+    // A changed role or standing reaches their open sockets too (Phase 21D, CX21-491).
+    if (req.body.role !== undefined || req.body.isCompanyAdmin !== undefined) disconnectUser(req.app.get("io"), req.params.id);
     return sendSuccess(res, result);
   }),
 );
@@ -169,6 +172,7 @@ router.patch(
       orgId: req.user.orgId,
       userId: req.params.id,
     });
+    disconnectUser(req.app.get("io"), req.params.id); // their sockets go with the account (CX21-491)
     return sendSuccess(res, result);
   }),
 );

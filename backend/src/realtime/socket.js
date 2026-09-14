@@ -1,4 +1,5 @@
 const { verifyAccessToken } = require("../utils/tokens");
+const { prisma } = require("../config/db");
 const {
   assertProjectAccess,
 } = require("../services/project-authorization.service");
@@ -10,6 +11,13 @@ const { subscribe } = require("../events/bus");
  * Security model:
  * - Every socket must present a valid access token in the handshake
  *   (`auth.token` or an Authorization bearer header). No anonymous sockets.
+ *   The token names an account, and the socket is honoured only while that
+ *   account is active and in the token's organisation, with the role and
+ *   standing it holds now — the same rule the REST layer applies (CX21-485);
+ *   a deactivated or demoted person kept their old authority on the socket
+ *   until the token expired (Phase 21D, CX21-491). The rule is applied again
+ *   when a project room is joined, and the person's sockets are dropped when
+ *   they are deactivated or their role changes (`disconnectUser`).
  * - A socket joins its own `user:{id}` room and the `org:{id}` room on connect.
  *   Org rooms are only used for org-wide, non-record events (none today).
  * - Project rooms are joined on demand and only after the same project access
@@ -52,29 +60,49 @@ const socketError = (code, message) => {
   return error;
 };
 
-const authenticateSocket = (socket, next) => {
+/** The account a token names, as it stands now — or null when it is gone, inactive or in another organisation. */
+const accountStanding = async ({ userId, orgId }) => {
+  if (!userId || !prisma?.user?.findUnique) return null;
+  const account = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { id: true, orgId: true, role: true, status: true, isCompanyAdmin: true },
+  });
+  if (!account || account.orgId !== orgId || account.status !== "active") return null;
+  return account;
+};
+
+const authenticateSocket = async (socket, next) => {
+  let payload;
   try {
     const token = parseHandshakeToken(socket);
     if (!token) {
       return next(socketError("AUTH_REQUIRED", "Missing access token"));
     }
-
-    const payload = verifyAccessToken(token);
-    socket.data = socket.data || {};
-    socket.data.user = {
-      id: payload.sub,
-      orgId: payload.orgId,
-      role: payload.role,
-      email: payload.email,
-      name: payload.name,
-      isCompanyAdmin: Boolean(payload.isCompanyAdmin),
-    };
-    return next();
+    payload = verifyAccessToken(token);
   } catch (error) {
     if (error?.name === "TokenExpiredError") {
       return next(socketError("TOKEN_EXPIRED", "Access token has expired"));
     }
     return next(socketError("INVALID_TOKEN", "Access token is invalid"));
+  }
+
+  try {
+    const account = await accountStanding({ userId: payload.sub, orgId: payload.orgId });
+    if (!account) {
+      return next(socketError("USER_INACTIVE", "This account is no longer active"));
+    }
+    socket.data = socket.data || {};
+    socket.data.user = {
+      id: payload.sub,
+      orgId: payload.orgId,
+      role: account.role || payload.role,
+      email: payload.email,
+      name: payload.name,
+      isCompanyAdmin: Boolean(account.isCompanyAdmin),
+    };
+    return next();
+  } catch (error) {
+    return next(socketError("AUTH_UNAVAILABLE", "The account could not be verified"));
   }
 };
 
@@ -94,12 +122,17 @@ const handleProjectJoin = async (socket, payload, ack) => {
   }
 
   try {
+    // The account as it stands now decides, not the socket's copy of it (CX21-491).
+    const account = await accountStanding({ userId: user.id, orgId: user.orgId });
+    if (!account) {
+      return ackSafely(ack, { ok: false, projectId, code: "USER_INACTIVE" });
+    }
     await assertProjectAccess({
       orgId: user.orgId,
       projectId,
       userId: user.id,
-      role: user.role,
-      isCompanyAdmin: user.isCompanyAdmin,
+      role: account.role || user.role,
+      isCompanyAdmin: Boolean(account.isCompanyAdmin),
     });
     await socket.join(ROOMS.project(projectId));
     return ackSafely(ack, { ok: true, projectId });
@@ -151,6 +184,15 @@ const broadcastDomainEvent = (io, event) => {
   return rooms.length;
 };
 
+/** Drops every socket a person holds — on deactivation or a role change, so the next connection carries the account as it is now (CX21-491). */
+const disconnectUser = (io, userId) => {
+  if (!io?.in || !userId) return false;
+  const room = io.in(ROOMS.user(userId));
+  if (typeof room?.disconnectSockets !== "function") return false;
+  room.disconnectSockets(true);
+  return true;
+};
+
 const attachRealtime = (io) => {
   io.use(authenticateSocket);
 
@@ -197,6 +239,7 @@ module.exports = {
   attachRealtime,
   authenticateSocket,
   broadcastDomainEvent,
+  disconnectUser,
   handleProjectJoin,
   handleProjectLeave,
   targetRoomsFor,

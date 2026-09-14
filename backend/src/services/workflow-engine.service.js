@@ -742,9 +742,9 @@ const cancelInstance = async ({ orgId, projectId, instanceId, actor, reason = nu
 };
 
 /** Steps waiting on one person, across the projects they can see. */
-const myAssignments = async ({ orgId, userId, projectId = null, limit = 100 }) => {
+const myAssignments = async ({ orgId, userId, projectId = null, projectIds = null, limit = 100 }) => {
   const rows = await prisma.workflowStepAssignment.findMany({
-    where: { orgId, userId, status: ASSIGNMENT_STATUS.PENDING, ...(projectId ? { projectId } : {}), instance: { status: INSTANCE_STATUS.RUNNING } },
+    where: { orgId, userId, status: ASSIGNMENT_STATUS.PENDING, ...(projectId ? { projectId } : projectIds?.length ? { projectId: { in: projectIds } } : {}), instance: { status: INSTANCE_STATUS.RUNNING } },
     include: { instance: { include: { template: { select: { id: true, name: true } }, project: { select: { id: true, name: true } } } } },
     orderBy: [{ dueAt: "asc" }, { createdAt: "asc" }],
     take: Math.min(500, Math.max(1, Number(limit) || 100)),

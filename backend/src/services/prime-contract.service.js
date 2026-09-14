@@ -360,16 +360,25 @@ const recordAdvancePayment = async ({ orgId, projectId, userId, payload = {} }) 
     throw new HttpError(400, "ADVANCE_AMOUNT_INVALID", "The advance must be greater than zero");
   }
 
-  const paid = addMoney(num(contract.advancePaidAmount), amount);
-  if (num(contract.advanceAmount) > 0 && paid > num(contract.advanceAmount) + MONEY_EPSILON) {
-    throw new HttpError(
-      409,
-      "ADVANCE_OVER_AGREED",
-      `The advance agreed is ${num(contract.advanceAmount)}; ${num(contract.advancePaidAmount)} has already been received`
-    );
-  }
-
   return prisma.$transaction(async (tx) => {
+    // The contract row is held and its figures read under the lock: two
+    // receipts arriving together each read the same "received so far", both
+    // passed the agreed cap, and the aggregate kept one of them while both
+    // receipt rows stood (Phase 21D, CX21-495).
+    const held = tx.$queryRaw
+      ? (await tx.$queryRaw`SELECT "advanceAmount"::float8 AS "advanceAmount", "advancePaidAmount"::float8 AS "advancePaidAmount" FROM "PrimeContract" WHERE id = ${contract.id} FOR UPDATE`)[0]
+      : null;
+    const agreed = num(held?.advanceAmount ?? contract.advanceAmount);
+    const receivedSoFar = num(held?.advancePaidAmount ?? contract.advancePaidAmount);
+    const paid = addMoney(receivedSoFar, amount);
+    if (agreed > 0 && paid > agreed + MONEY_EPSILON) {
+      throw new HttpError(
+        409,
+        "ADVANCE_OVER_AGREED",
+        `The advance agreed is ${agreed}; ${receivedSoFar} has already been received`
+      );
+    }
+
     const reference =
       trimOrNull(payload.reference) || (await nextAdvanceReference(tx, { projectId, prefix: "ADV" }));
 

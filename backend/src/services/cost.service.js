@@ -121,11 +121,16 @@ const attachApprovedBudgets = async ({ projectId, records }) => {
     projectId,
     activityIds,
   });
+  // Rows whose committed is the executed commitments' figure are marked, so
+  // the screen does not offer to edit what the edit would refuse (CX21-493).
+  const { activitiesWithExecutedCommitments } = require('./commitment.service');
+  const derived = await activitiesWithExecutedCommitments({ projectId });
 
   return records.map((record) => ({
     ...record,
     generatedBudget: record.budget,
     budget: allocationTotals.get(record.activityId)?.amount || 0,
+    committedDerived: derived.has(record.activityId),
   }));
 };
 
@@ -272,6 +277,61 @@ const burnRateSummary = (entry) => ({
   note: entry.note || null,
 });
 
+const CATEGORY_FIELDS = ['labour', 'material', 'equipment', 'subcontract', 'indirect', 'overhead', 'contingency'];
+
+/**
+ * Actual cost is a projection of the cost ledger (OCTA-FIN-LEDGER-059); a
+ * figure typed onto the activity would be one the ledger never posted
+ * (Phase 21D, CX21-412). An echo of the row's own figure is let through.
+ */
+const assertActualIsTheLedgers = ({ payload, existing }) => {
+  if (payload.actual === undefined) return;
+  if (Math.abs(toMoneyNumber(payload.actual) - toMoneyNumber(existing?.actual ?? 0)) > 0.005) {
+    throw new HttpError(400, 'COST_ACTUAL_IS_DERIVED', 'Actual cost is posted through the cost ledger; it cannot be typed onto an activity');
+  }
+};
+
+/**
+ * Committed is the executed commitments' projection wherever one names the
+ * activity (`recomputeCommitted` writes it); a figure typed there would hide
+ * an obligation the project has entered. An activity no commitment names
+ * keeps a typed figure, and an echo of the row's own figure is let through
+ * (Phase 21D, CX21-493).
+ */
+const assertCommittedIsTheCommitments = async ({ tx, payload, existing, projectId, activityId }) => {
+  if (payload.committed === undefined) return;
+  if (Math.abs(toMoneyNumber(payload.committed) - toMoneyNumber(existing?.committed ?? 0)) <= 0.005) return;
+  const { hasExecutedCommitmentOn } = require('./commitment.service');
+  if (await hasExecutedCommitmentOn({ tx, projectId, activityId })) {
+    throw new HttpError(400, 'COST_COMMITTED_IS_DERIVED', "Committed cost on this activity is the executed commitments' figure; it cannot be typed");
+  }
+};
+
+/**
+ * Only what the caller supplied is written. A copy of the row read before
+ * the lock was written back over fields the caller never mentioned, and two
+ * editors of different fields erased each other's work (Phase 21D, CX21-497);
+ * budget, actual, its through-date and committed each have their own owner.
+ * The forecast follows the budget when the budget is set and no forecast is
+ * given.
+ */
+const suppliedCostFields = ({ payload, existing }) => {
+  const data = {};
+  for (const field of CATEGORY_FIELDS) {
+    if (payload[field] !== undefined) data[field] = toMoneyNumber(payload[field]);
+  }
+  if (payload.budget !== undefined) data.budget = toMoneyNumber(payload.budget);
+  if (payload.committed !== undefined) data.committed = toMoneyNumber(payload.committed);
+  const actualThroughDate = resolveActualThroughDate({ payload });
+  if (actualThroughDate !== undefined) data.actualThroughDate = actualThroughDate;
+  if (payload.forecast !== undefined && payload.forecast !== null) {
+    data.forecast = Number(payload.forecast) || 0;
+  } else if (data.budget !== undefined) {
+    data.forecast = resolveForecast({ budget: data.budget, actual: toMoneyNumber(existing?.actual ?? 0) });
+  }
+  return data;
+};
+
 const upsertCostRecord = async ({
   orgId,
   projectId,
@@ -289,63 +349,41 @@ const upsertCostRecord = async ({
     throw new HttpError(404, 'ACTIVITY_NOT_FOUND', 'Activity not found');
   }
 
-  const existing = await prisma.costRecord.findFirst({
-    where: { projectId, activityId },
-  });
   const allocationTotals = await getApprovedActivityAllocationTotals({
     projectId,
   });
   const approvedBudget = allocationTotals.get(activityId)?.amount || 0;
 
-  const budget = toMoneyNumber(payload.budget ?? approvedBudget);
-  // Actual cost is a projection of the cost ledger (OCTA-FIN-LEDGER-059);
-  // a figure typed onto the activity would be one the ledger never posted
-  // (Phase 21D, CX21-412).
-  if (payload.actual !== undefined && Math.abs(toMoneyNumber(payload.actual) - toMoneyNumber(existing?.actual ?? 0)) > 0.005) {
-    throw new HttpError(400, 'COST_ACTUAL_IS_DERIVED', 'Actual cost is posted through the cost ledger; it cannot be typed onto an activity');
-  }
-  const actual = toMoneyNumber(payload.actual ?? existing?.actual ?? 0);
-  const actualThroughDate = resolveActualThroughDate({
-    payload,
-    existing,
-    actual,
-  });
-
-  const data = {
-    projectId,
-    activityId,
-    labour: toMoneyNumber(payload.labour ?? existing?.labour ?? 0),
-    material: toMoneyNumber(payload.material ?? existing?.material ?? 0),
-    equipment: toMoneyNumber(payload.equipment ?? existing?.equipment ?? 0),
-    subcontract: toMoneyNumber(payload.subcontract ?? existing?.subcontract ?? 0),
-    indirect: toMoneyNumber(payload.indirect ?? existing?.indirect ?? 0),
-    overhead: toMoneyNumber(payload.overhead ?? existing?.overhead ?? 0),
-    contingency: toMoneyNumber(payload.contingency ?? existing?.contingency ?? 0),
-    budget,
-    // committed is the commitments' projection: written only when supplied
-    // (an echo), never the copy read before the lock (Phase 21D, CX21-475)
-    ...(payload.committed !== undefined ? { committed: toMoneyNumber(payload.committed) } : {}),
-    // actual is not written here: it is the ledger's projection, and a stale
-    // copy would erase a posting that landed since the read (Phase 21D, CX21-422)
-    ...(actualThroughDate !== undefined ? { actualThroughDate } : {}),
-    forecast: resolveForecast({
-      budget,
-      actual,
-      payloadForecast: payload.forecast,
-    }),
-  };
-
   return runInTransaction(async (tx) => {
     // One projection row per activity, whoever creates it: the pair is held
-    // before the row is looked for again, so a posting that created it
-    // meanwhile is updated, not duplicated (Phase 21D, CX21-464).
+    // first and the row is read under it, so every decision below is made on
+    // the row as it is now — not on a copy read before — and a posting that
+    // created the row meanwhile is updated, not duplicated (Phase 21D,
+    // CX21-464, CX21-497).
     if (tx.$executeRaw) await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`cost-record:${projectId}:${activityId}`}))`;
-    const current = existing ?? (await tx.costRecord.findFirst({ where: { projectId, activityId } }));
-    // A row found under the lock keeps the committed a commitment gave it;
-    // only a row created here starts at 0 (Phase 21D, CX21-482).
-    const record = current
-      ? await tx.costRecord.update({ where: { id: current.id }, data })
-      : await tx.costRecord.create({ data: { ...(payload.committed === undefined ? { committed: 0 } : {}), ...data } });
+    const existing = await tx.costRecord.findFirst({ where: { projectId, activityId } });
+    assertActualIsTheLedgers({ payload, existing });
+    await assertCommittedIsTheCommitments({ tx, payload, existing, projectId, activityId });
+
+    const data = suppliedCostFields({ payload, existing });
+    let record;
+    if (existing) {
+      // A row found under the lock keeps the committed a commitment gave it
+      // (Phase 21D, CX21-482) and every figure the caller did not mention.
+      record = await tx.costRecord.update({ where: { id: existing.id }, data });
+    } else {
+      const budget = data.budget ?? approvedBudget;
+      record = await tx.costRecord.create({
+        data: {
+          projectId,
+          activityId,
+          committed: 0,
+          ...data,
+          budget,
+          forecast: data.forecast ?? resolveForecast({ budget, actual: 0 }),
+        },
+      });
+    }
 
     await auditService.recordEvent({
       tx,
@@ -383,45 +421,26 @@ const updateCostRecord = async ({
 }) => {
   await ensureProject({ orgId, projectId });
 
-  const existing = await prisma.costRecord.findFirst({
+  const found = await prisma.costRecord.findFirst({
     where: { id: costRecordId, projectId },
   });
-  if (!existing) {
+  if (!found) {
     throw new HttpError(404, 'COST_RECORD_NOT_FOUND', 'Cost record not found');
   }
 
-  const budget = toMoneyNumber(payload.budget ?? existing.budget);
-  if (payload.actual !== undefined && Math.abs(toMoneyNumber(payload.actual) - toMoneyNumber(existing.actual)) > 0.005) {
-    throw new HttpError(400, 'COST_ACTUAL_IS_DERIVED', 'Actual cost is posted through the cost ledger; it cannot be typed onto an activity');
-  }
-  const actual = toMoneyNumber(payload.actual ?? existing.actual);
-  const actualThroughDate = resolveActualThroughDate({
-    payload,
-    existing,
-    actual,
-  });
-
-  const data = {
-    labour: toMoneyNumber(payload.labour ?? existing.labour),
-    material: toMoneyNumber(payload.material ?? existing.material),
-    equipment: toMoneyNumber(payload.equipment ?? existing.equipment),
-    subcontract: toMoneyNumber(payload.subcontract ?? existing.subcontract),
-    indirect: toMoneyNumber(payload.indirect ?? existing.indirect),
-    overhead: toMoneyNumber(payload.overhead ?? existing.overhead),
-    contingency: toMoneyNumber(payload.contingency ?? existing.contingency),
-    budget,
-    ...(payload.committed !== undefined ? { committed: toMoneyNumber(payload.committed) } : {}), // the commitments' (CX21-475)
-    // actual is not written here: it is the ledger's projection, and a stale
-    // copy would erase a posting that landed since the read (Phase 21D, CX21-422)
-    ...(actualThroughDate !== undefined ? { actualThroughDate } : {}),
-    forecast: resolveForecast({
-      budget,
-      actual,
-      payloadForecast: payload.forecast,
-    }),
-  };
-
   return runInTransaction(async (tx) => {
+    // The (project, activity) pair is held — the ledger, the commitments and
+    // the upsert hold it too — and the row is read again under it: the edit
+    // is decided on the row as it is now (Phase 21D, CX21-497).
+    if (tx.$executeRaw) await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`cost-record:${projectId}:${found.activityId}`}))`;
+    const existing = await tx.costRecord.findFirst({ where: { id: costRecordId, projectId } });
+    if (!existing) {
+      throw new HttpError(404, 'COST_RECORD_NOT_FOUND', 'Cost record not found');
+    }
+    assertActualIsTheLedgers({ payload, existing });
+    await assertCommittedIsTheCommitments({ tx, payload, existing, projectId, activityId: existing.activityId });
+
+    const data = suppliedCostFields({ payload, existing });
     const record = await tx.costRecord.update({ where: { id: costRecordId }, data });
 
     await auditService.recordEvent({

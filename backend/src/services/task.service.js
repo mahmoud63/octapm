@@ -633,6 +633,16 @@ const listTasks = async ({
   // A key limited to some projects lists tasks of those projects only, even
   // through the mount outside a project (Phase 21D, CX21-486).
   if (!projectId && projectIds?.length) where.projectId = { in: projectIds };
+  // A list across projects leaves out the projects whose permission template
+  // refuses this person the tasks module — the template each project's own
+  // mount would have applied (Phase 21D, CX21-492).
+  if (!projectId) {
+    const { projectsWhereTemplateDenies } = require("./permission-template.service");
+    const denied = await projectsWhereTemplateDenies({ orgId, userId, module: "task", action: "read" });
+    if (denied.length) {
+      where.projectId = where.projectId?.in ? { in: where.projectId.in.filter((id) => !denied.includes(id)) } : { notIn: denied };
+    }
+  }
 
   if (query.status && query.status !== "all") {
     where.status = String(query.status).split(",");

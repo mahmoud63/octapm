@@ -1,5 +1,8 @@
 const mockVerifyAccessToken = jest.fn();
 const mockAssertProjectAccess = jest.fn();
+// The account the token names, as it stands now (CX21-491): active in org-1 unless a test says otherwise.
+const mockPrisma = { user: { findUnique: jest.fn(async () => ({ id: "user-1", orgId: "org-1", status: "active", isCompanyAdmin: false })) } };
+jest.mock("../../config/db", () => ({ prisma: mockPrisma }));
 
 jest.mock("../../utils/tokens", () => ({
   verifyAccessToken: mockVerifyAccessToken,
@@ -14,6 +17,7 @@ const {
   attachRealtime,
   authenticateSocket,
   broadcastDomainEvent,
+  disconnectUser,
   handleProjectJoin,
   targetRoomsFor,
 } = require("../socket");
@@ -74,7 +78,7 @@ describe("realtime socket auth", () => {
     expect(next2.mock.calls[0][0].data).toEqual({ code: "INVALID_TOKEN" });
   });
 
-  it("accepts bearer headers and stores the user on the socket", () => {
+  it("accepts bearer headers and stores the user on the socket", async () => {
     mockVerifyAccessToken.mockReturnValue({
       sub: "user-1",
       orgId: "org-1",
@@ -87,7 +91,7 @@ describe("realtime socket auth", () => {
     });
     const next = jest.fn();
 
-    authenticateSocket(socket, next);
+    await authenticateSocket(socket, next);
 
     expect(next).toHaveBeenCalledWith();
     expect(socket.data.user).toEqual({
@@ -119,6 +123,7 @@ describe("realtime project rooms", () => {
       projectId: PROJECT_ID,
       userId: "user-1",
       role: "site_engineer",
+      isCompanyAdmin: false,
     });
     expect(socket.join).toHaveBeenCalledWith(ROOMS.project(PROJECT_ID));
     expect(ack).toHaveBeenCalledWith({ ok: true, projectId: PROJECT_ID });
@@ -241,5 +246,40 @@ describe("realtime broadcast", () => {
       expect.objectContaining({ userId: "user-1", orgId: "org-1" }),
     );
     handle.unsubscribe();
+  });
+});
+
+describe("Phase 21D — integrity (release challenge, ninth pass)", () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  it("CX21-491: a deactivated or demoted account's still-valid token is refused at the handshake and at a project join, and a deactivation drops the person's sockets", async () => {
+    mockVerifyAccessToken.mockReturnValue({ sub: "user-1", orgId: "org-1", role: "pm", email: "pm@example.com", name: "PM" });
+    // deactivated: the handshake is refused although the token verifies
+    mockPrisma.user.findUnique.mockResolvedValueOnce({ id: "user-1", orgId: "org-1", role: "pm", status: "inactive", isCompanyAdmin: false });
+    const refused = jest.fn();
+    await authenticateSocket(createFakeSocket({ auth: { token: "t" } }), refused);
+    expect(refused.mock.calls[0][0].data).toEqual({ code: "USER_INACTIVE" });
+    // demoted: the account's role reaches the socket, not the token's
+    mockPrisma.user.findUnique.mockResolvedValueOnce({ id: "user-1", orgId: "org-1", role: "site_engineer", status: "active", isCompanyAdmin: false });
+    const socket = createFakeSocket({ auth: { token: "t" } });
+    const accepted = jest.fn();
+    await authenticateSocket(socket, accepted);
+    expect(accepted).toHaveBeenCalledWith();
+    expect(socket.data.user.role).toBe("site_engineer");
+    // deactivated after connecting: the join is refused before the project is looked at
+    mockPrisma.user.findUnique.mockResolvedValueOnce(null);
+    const ack = jest.fn();
+    await handleProjectJoin(socket, { projectId: PROJECT_ID }, ack);
+    expect(ack).toHaveBeenCalledWith({ ok: false, projectId: PROJECT_ID, code: "USER_INACTIVE" });
+    expect(mockAssertProjectAccess).not.toHaveBeenCalled();
+    expect(socket.join).not.toHaveBeenCalled();
+    // and the deactivation itself drops every socket the person holds
+    const disconnectSockets = jest.fn();
+    const io = { in: jest.fn(() => ({ disconnectSockets })) };
+    expect(disconnectUser(io, "user-1")).toBe(true);
+    expect(io.in).toHaveBeenCalledWith(ROOMS.user("user-1"));
+    expect(disconnectSockets).toHaveBeenCalledWith(true);
   });
 });

@@ -17,6 +17,8 @@ export interface CostRecord {
   actual: number
   actualThroughDate: string | null
   forecast: number
+  /** committed is the executed commitments' figure on this activity — the API refuses a typed one (CX21-493). */
+  committedDerived?: boolean
   updatedAt: string
   activity?: {
     id: string

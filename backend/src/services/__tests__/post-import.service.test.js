@@ -42,3 +42,15 @@ describe("Phase 21D — integrity (release challenge, eighth pass)", () => {
     expect(sql).toMatch(/PARTITION BY "projectId", *"activityId"/);
   });
 });
+
+describe("Phase 21D — integrity (release challenge, ninth pass)", () => {
+  it("CX21-490: the unique-pair migration keeps every figure the duplicates held — actual summed, the rest the largest of them — before it removes them", () => {
+    const sql = fs.readFileSync(path.join(__dirname, "../../../prisma/migrations/20261001090100_cost_record_unique_pair/migration.sql"), "utf8");
+    const fold = sql.slice(0, sql.indexOf('DELETE FROM "CostRecord"'));
+    expect(fold).toMatch(/SUM\(c\.actual\)/);
+    for (const column of ["labour", "material", "equipment", "subcontract", "indirect", "overhead", "contingency", "budget", "forecast", "committed"]) {
+      expect(fold).toMatch(new RegExp(`MAX\\(c\\.${column}\\)`));
+    }
+    expect(fold).toMatch(/MAX\(c\."actualThroughDate"\)/);
+  });
+});

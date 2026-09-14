@@ -383,6 +383,44 @@ const costTypeForCommitment = (type) => (type === "purchase_order" ? "material" 
  * else the cost code's line for the commitment's cost type) and on their
  * activity's cost record.
  */
+/**
+ * The activities of a project that an executed (or closed) commitment names on
+ * a line, or an approved change order of one names in its lines — the
+ * activities whose cost-record committed is the commitments' projection
+ * (`recomputeCommitted` writes it) and not a figure to be typed
+ * (Phase 21D, CX21-493).
+ */
+const activitiesWithExecutedCommitments = async ({ tx = prisma, projectId }) => {
+  const named = new Set();
+  if (!tx.commitmentSovLine?.findMany) return named;
+  const lines = await tx.commitmentSovLine.findMany({
+    where: { activityId: { not: null }, commitment: { projectId, status: { in: POSTING_STATUSES } } },
+    select: { activityId: true },
+  });
+  for (const line of lines) if (line.activityId) named.add(line.activityId);
+  if (tx.commitmentChangeOrder?.findMany) {
+    const orders = await tx.commitmentChangeOrder.findMany({
+      where: { status: CO_STATUS.APPROVED, commitment: { projectId, status: { in: POSTING_STATUSES } } },
+      select: { linesJson: true },
+    });
+    for (const order of orders) {
+      const lines = Array.isArray(order.linesJson) ? order.linesJson : [];
+      for (const line of lines) if (line?.activityId && Number(line?.amount)) named.add(line.activityId);
+    }
+  }
+  return named;
+};
+
+const hasExecutedCommitmentOn = async ({ tx = prisma, projectId, activityId }) => {
+  if (!activityId || !tx.commitmentSovLine?.findFirst) return false;
+  const line = await tx.commitmentSovLine.findFirst({
+    where: { activityId, commitment: { projectId, status: { in: POSTING_STATUSES } } },
+    select: { id: true },
+  });
+  if (line) return true;
+  return (await activitiesWithExecutedCommitments({ tx, projectId })).has(activityId);
+};
+
 const recomputeCommitted = async ({ tx = prisma, orgId, projectId }) => {
   if (!tx.commitment?.findMany || !tx.budgetLine?.findMany) return null;
   // Held for the transaction before the commitments are read: two approvals
@@ -908,6 +946,8 @@ module.exports = {
   visibilityWhere,
   costTypeForCommitment,
   recomputeCommitted,
+  activitiesWithExecutedCommitments,
+  hasExecutedCommitmentOn,
   listCommitments,
   getCommitment,
   createCommitment,

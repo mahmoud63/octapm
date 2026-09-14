@@ -358,7 +358,9 @@ export function CostDashboard({
                       {editableFields.map((field) => (
                         <Fragment key={field}>
                           <td className='p-2 text-right'>
-                            {isEditing && field !== 'actual' ? (
+                            {isEditing &&
+                            field !== 'actual' &&
+                            !(field === 'committed' && row.committedDerived) ? (
                               <Input
                                 type='number'
                                 step={MONEY_INPUT_STEP}

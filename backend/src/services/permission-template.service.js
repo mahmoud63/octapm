@@ -413,6 +413,49 @@ const resolveTemplateContext = async ({
 };
 
 /**
+ * The projects on which a template assigned to this person — as a member, or
+ * through a party they belong to when no member template is set — refuses the
+ * module/action. A list mounted outside any project (/tasks) has no project in
+ * its path to attach a template for; it leaves these projects out instead,
+ * as each project's own mount would have refused (Phase 21D, CX21-492).
+ */
+const projectsWhereTemplateDenies = async ({
+  tx = prisma,
+  orgId,
+  userId,
+  module,
+  action,
+  transition = null,
+}) => {
+  if (!userId || !tx.projectUserPermission?.findMany) return [];
+  const denied = new Set();
+  const decided = new Set();
+  const assignments = await tx.projectUserPermission.findMany({
+    where: { orgId, userId, templateId: { not: null } },
+    select: { projectId: true, templateId: true, overridesJson: true },
+  });
+  for (const assignment of assignments) {
+    const compiled = await loadCompiledTemplate({ tx, templateId: assignment.templateId, overrides: assignment.overridesJson || {} });
+    if (!compiled) continue;
+    decided.add(assignment.projectId);
+    if (!templateAllows(compiled, { module, action, transition })) denied.add(assignment.projectId);
+  }
+  if (tx.projectPartyMember?.findMany) {
+    const memberships = await tx.projectPartyMember.findMany({
+      where: { userId, status: "active", projectParty: { permissionTemplateId: { not: null } } },
+      select: { projectParty: { select: { projectId: true, permissionTemplateId: true } } },
+    });
+    for (const membership of memberships) {
+      const party = membership.projectParty;
+      if (!party?.permissionTemplateId || decided.has(party.projectId)) continue;
+      const compiled = await loadCompiledTemplate({ tx, templateId: party.permissionTemplateId });
+      if (compiled && !templateAllows(compiled, { module, action, transition })) denied.add(party.projectId);
+    }
+  }
+  return [...denied];
+};
+
+/**
  * Attaches the compiled template (if any) to req.projectAccess so
  * requirePermission can evaluate it. Never throws: a lookup failure leaves the
  * legacy policy in place.
@@ -1343,6 +1386,7 @@ module.exports = {
   removeProjectMember,
   listTemplates,
   parseGrantKey,
+  projectsWhereTemplateDenies,
   removeProjectUserPermission,
   resolveOrgPermissions,
   resolveProjectPermissions,

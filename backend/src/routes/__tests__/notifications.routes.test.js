@@ -34,6 +34,8 @@ jest.mock("../../middleware/auth", () => ({
       role: req.get("x-role") || "site_engineer",
       email: "site@example.com",
     };
+    // an API key acting as this person (CX21-494)
+    if (req.get("x-api-key")) req.apiClient = { id: "key-1", scopes: ["*:read", "*:write"], projectIds: [] };
     next();
   },
 }));
@@ -168,5 +170,23 @@ describe("notification routes", () => {
         horizonDays: 7,
       },
     );
+  });
+});
+
+describe("Phase 21D — integrity (release challenge, ninth pass)", () => {
+  it("CX21-494: a person's notifications, their summary and their preferences are not reached with an API key, whatever its scopes", async () => {
+    const app = buildApp();
+    for (const path of ["/notifications", "/notifications/summary", "/notifications/preferences", "/notifications/push/subscriptions"]) {
+      const res = await request(app).get(path).set("x-api-key", "1");
+      expect([path, res.status, res.body?.error?.code]).toEqual([path, 403, "API_KEY_FORBIDDEN"]);
+    }
+    const marked = await request(app).post("/notifications/mark-read").set("x-api-key", "1");
+    expect(marked.status).toBe(403);
+    expect(mockNotificationService.listNotifications).not.toHaveBeenCalled();
+    expect(mockNotificationService.getNotificationSummary).not.toHaveBeenCalled();
+    expect(mockNotificationService.markAllRead).not.toHaveBeenCalled();
+    // the person still reaches their own
+    mockNotificationService.listNotifications.mockResolvedValue({ rows: [], pagination: { hasMore: false, nextCursor: null } });
+    expect((await request(app).get("/notifications")).status).toBe(200);
   });
 });

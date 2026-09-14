@@ -211,3 +211,14 @@ describe("workflow engine", () => {
     expect(created.find((row) => row.tool === "sub_pay_app").stepsJson.map((step) => step.key)).toEqual(["qs_review", "pm_approval"]);
   });
 });
+
+describe("Phase 21D — integrity (release challenge, ninth pass)", () => {
+  it("CX21-494: the inbox of a key limited to some projects holds those projects' steps only", async () => {
+    mockPrisma.workflowStepAssignment.findMany.mockResolvedValueOnce([]);
+    await engine.myAssignments({ orgId: "org-1", userId: "u1", projectIds: ["p1"] });
+    expect(mockPrisma.workflowStepAssignment.findMany.mock.calls.at(-1)[0].where).toMatchObject({ orgId: "org-1", userId: "u1", projectId: { in: ["p1"] } });
+    mockPrisma.workflowStepAssignment.findMany.mockResolvedValueOnce([]);
+    await engine.myAssignments({ orgId: "org-1", userId: "u1" });
+    expect(mockPrisma.workflowStepAssignment.findMany.mock.calls.at(-1)[0].where.projectId).toBeUndefined();
+  });
+});

@@ -3,7 +3,7 @@ const { body, param, query } = require("express-validator");
 const { asyncHandler } = require("../utils/async-handler");
 const { sendSuccess } = require("../utils/api-response");
 const { authenticate } = require("../middleware/auth");
-const { requireRoles } = require("../middleware/rbac");
+const { requireRoles, personal } = require("../middleware/rbac");
 const { validate } = require("../middleware/validate");
 const notificationService = require("../services/notification.service");
 const pushService = require("../services/push.service");
@@ -11,6 +11,11 @@ const pushService = require("../services/push.service");
 const router = express.Router();
 
 router.use(authenticate);
+// The inbox, its summary, its devices and its preferences are the person's
+// own. A key acts as its owner for the work it is scoped to, never for this:
+// a key limited to one project with an inventory scope read its owner's
+// notifications from every project (Phase 21D, CX21-494).
+router.use(personal("A person's notifications"));
 
 const categories = notificationService.CATEGORY_ORDER;
 
