@@ -208,12 +208,12 @@ the pre-deployment security debt is out of scope and is carried OPEN.
 Section 10 certified Phase 21 on the evidence of Phases 21A–21C: one
 greenfield project, driven from one client, one request at a time, with a
 self-review in place of an independent one. Phase 21D added the independent
-review — ten Codex rounds on the changed files and five passes of a release
+review — ten Codex rounds on the changed files and eleven passes of a release
 challenge across the whole backend, all read-only, each finding verified
 before anything was acted on — and it found what a sequential drive cannot:
-**74 product defects** in concurrency, cross-scope ids, tenant isolation, authorization
+**111 product defects** in concurrency, cross-scope ids, tenant isolation, authorization
 and billing rules across the ledger, stock, payment and transition paths
-(register P21-025 … P21-106), every one reproduced live or by a regression
+(register P21-025 … P21-147), every one reproduced live or by a regression
 that fails on the unfixed code, every one fixed. The certified project's own
 figures never moved (36/36 before, between and after every loop; the one
 time they did, it was my own instrument — T-14 — and it was put back through
@@ -221,13 +221,18 @@ the product's own return movement).
 
 ## 12. The gates, re-run on the frozen source
 
-Source frozen at `ded5fa0414b8ef907255c210442587c3a7685bff` (the fifth
-release pass's fixes and the sixteenth loop's correction on top of
-`59cf34b`); the only commits after it are documents. Run eight of the gate
-sequence, 2026-09-13 16:11–16:31 UTC, nothing else touching the database.
-Runs three to six — on `772f2c5`, `29456c4`, `2b0df2b` and `59cf34b` — had
-passed the same gates after each loop; run seven, on `d23dc05`, failed on
-P21-106 and is why `ded5fa0` exists:
+Source frozen at `e5353863840d97beb90d24997648926364e6ab49` — the tenth
+release pass's fixes on `8ad4a06`, with the one schema migration of the
+phase (the unique pair on `CostRecord`, merging any duplicates first with
+every figure they held) applied to the local database only, and one
+test-only commit for T-19 on top of them: no product change after
+`8ad4a06`, the HEAD the eleventh pass reviewed; the only commits after it
+are documents. Run fourteen of the gate sequence, 2026-09-14
+02:16–02:38 UTC, nothing else touching the database. The runs before
+it — on `772f2c5`, `29456c4`, `2b0df2b`, `59cf34b`, `ded5fa0`, `fa7b28b`,
+`b2bd518`, `e5f1c70`, `8a1d7dd` and `8ad4a06` — had passed the same gates
+after each loop, five of them with an instrument or residue failure
+recorded as such (T-16, T-17, T-18, T-19 on two runs); run seven, on `d23dc05`, failed on P21-106:
 
 | gate | result |
 | --- | --- |
@@ -235,28 +240,28 @@ P21-106 and is why `ded5fa0` exists:
 | `prisma migrate status` | 113 migrations, database up to date |
 | `prisma migrate diff` (database vs datamodel) | exit 2: 76 renamed index/FK names, 33 "removed" indexes (the GIN trigram search indexes the schema cannot declare), 22 `updatedAt` defaults, 1 index the schema declares and the database lacks, 1 referential action that differs — no table, column or type differs (P21-035) |
 | OpenAPI | 733 documented paths valid |
-| Jest (backend, four workers) | **185 suites, 2,097 tests, 0 failures** |
+| Jest (backend, four workers) | **190 suites, 2,139 tests, 0 failures** |
 | `tsc -b` | clean |
 | `vite build` | built |
 | Greenfield spec 32, twice | 3/3 and 3/3 — active project count unchanged, cleanup 0 failures, duplicate irreversible transactions 0, token expiry 0, reference collisions 0 |
-| Full Playwright, retries 0 | **163 / 163 in 16.8 min**, 0 skipped |
+| Full Playwright, retries 0 | **163 / 163 in 18.4 min**, 0 skipped |
 | Console gate (spec 30) | 5/5, errors 0, warnings 0 |
 | 14-path smoke (spec 22) | 14 modules, console errors 0, failed requests 0 |
 | RBAC audit (`rbac-audit.js`) | exit 0 |
 | Tenant / project isolation (stage 7) | 36/36 — and the stage now leaves the ledger where it found it |
 | Snapshot (`snapshot.js`) | **36 / 36** |
 | Reconciliation (`final-recon.js`) | 16 source lines and 36 snapshot lines pass; **actual-cost delta 0.00** (SQL, API, documents) |
-| API log | since the restart that loaded `ded5fa0` (segment 17): **8,166 requests, 5xx 0, 429 0**; the whole log (17 segments): **102,219 requests, 5xx 15, 429 0**, unhandled/deadlock 0 — the fifteen are the P21-106 regression on `d23dc05` during the superseded run seven, none before or since; every restart logged with its reason (17, all product changes) |
-| Frontend lint | 0 errors in the 45 files Phase 21 touched (the movement dialog, the sign-out dialog, the sign-in form and the inventory spec re-checked after the fifth pass); 24 historic errors in 10 earlier e2e specs carried |
+| API log | since the restart that loaded `e535386` (segment 23): **16,175 requests, 5xx 0, 429 0**; the whole log (23 segments): **144,901 requests, 5xx 15, 429 0**, unhandled/deadlock 0 — the 5xx are the P21-106 regression on `d23dc05` during the superseded run seven, none before or since; every restart logged with its reason (23, all product changes) |
+| Frontend lint | 0 errors in the 53 files Phase 21 touched (the cost dashboard and its hook, the realtime client, the movement dialog, the sign-out and sign-in forms, the app entry, the API client and the inventory, agreement, closeout and evaluation specs re-checked after the later passes); 24 historic errors in 10 earlier e2e specs carried |
 
 ## 13. Conditions, checked one by one
 
 | condition | holds? | evidence |
 | --- | :---: | --- |
 | P0 = 0 | **yes** | the three P0 found — P21-061 and P21-070 (a cross-tenant stock issue through an activity id, then through a project id) and P21-106 (my own regression on `d23dc05`, every cost posting answering 500, caught by the greenfield gate within minutes) — are FIXED with regressions and live probes |
-| P1 open = 0 | **yes** | 70 P1 found across 21A–21D, all FIXED with regressions that fail on the unfixed code |
+| P1 open = 0 | **yes** | 107 P1 found across 21D (and the 21A–21C P1s before them), all FIXED with regressions that fail on the unfixed code |
 | Codex Critical = 0, High = 0 on the changed files | **yes** | round 10 on `28a2d50`: PASS |
-| Codex Critical = 0, High = 0 on the final HEAD, whole backend | **not yet shown** | pass 1 (`28a2d50`): 1 Critical + 8 High; pass 2 (`772f2c5`): 1 Critical + 9 High; pass 3 (`29456c4`): 7 High; pass 4 (`2b0df2b`): 8 High; pass 5 (`59cf34b`): 8 High + 2 Medium — every finding verified, fixed, regression-tested against the code it was found on, and staged live where one request can; **pass 6 on `ded5fa0` stopped on the reviewer account's usage limit** after 39,535 tokens ("try again at 2:33 PM CDT"), no verdict written |
+| Codex Critical = 0, High = 0 on the final HEAD, whole backend | **not yet shown** | pass 1 (`28a2d50`): 1 Critical + 8 High; pass 2 (`772f2c5`): 1 Critical + 9 High; pass 3 (`29456c4`): 7 High; pass 4 (`2b0df2b`): 8 High; pass 5 (`59cf34b`): 8 High + 2 Medium; pass 6 (`ded5fa0`): 8 High + 1 Medium; pass 7 (`fa7b28b`): 8 High; pass 8 (`b2bd518`): 7 High + 2 Medium; pass 9 (`e5f1c70`): 8 High + 2 Medium; pass 10 (`8a1d7dd`): 6 High + 2 Medium — every finding verified (from the sixth pass on, reproduced before any code changed), fixed, regression-tested against the code it was found on, and staged live where one request can; **pass 11 on `8ad4a06` attempted twice — 20:50 CDT (112,866 tokens) and 00:35 CDT once the five-hour window reopened (110,245 tokens) — and stopped both times by the reviewer account's usage limit before a verdict was written; the limit lifts on 19 September 2026 at 12:23 CDT**; the tenth pass's six Highs are fixed with regressions that fail on `8a1d7dd` and re-probed live on `8ad4a06`, but the reviewer has not yet confirmed them closed |
 | Full Playwright 100 %, retries 0, no unexpected skips | **yes** | §12 |
 | Console errors 0, warnings 0 | **yes** | §12 |
 | 14-path smoke | **yes** | §12 |
@@ -269,38 +274,66 @@ P21-106 and is why `ded5fa0` exists:
 ## 14. Independent review, final position
 
 Rounds 1–10 (changed files): the last verdict, on `28a2d50`, is **PASS**.
-Release challenge, whole backend: **five passes, five DO NOT RELEASE** —
-one Critical and eight High on `28a2d50`; one Critical and nine High on
-`772f2c5`; seven High on `29456c4`; eight High on `2b0df2b`; eight High and
-two Medium on `59cf34b`. Every finding was verified against the code before
-anything changed (register P21-061 … P21-105); every one that held — all but
-one, a bug with no reachable effect (P21-069) — was fixed with a regression
-that fails on the commit it was found on (mutation-checked, 62 cases across
-the five passes) and, where one request can stage it, against the live API.
-Each pass found the previous fix's gap one field over, and the sixteenth
-loop was my own: the fifteenth loop's advisory locks broke every cost
-posting on `d23dc05`, and the greenfield gate found it before the reviewer
-could (P21-106, fixed in `ded5fa0`). Pass six, on `ded5fa0`: **not yet
-run** — launched at 10:47 CDT, stopped on the reviewer account's usage
-limit after 39,535 tokens; the prompt is prepared and the pass is to be run
-as soon as the limit lifts (14:33 CDT). Until it runs, the final HEAD has
-been re-challenged by 92 regression cases, 45 live probes and the full gate
-sequence (run eight), but not by the independent reviewer.
+Release challenge, whole backend: **eleven passes** — ten DO NOT
+RELEASE (one Critical and eight High on `28a2d50`; one Critical and nine
+High on `772f2c5`; seven High on `29456c4`; eight High on `2b0df2b`; eight
+High and two Medium on `59cf34b`; eight High and one Medium on `ded5fa0`;
+eight High on `fa7b28b`; seven High and two Medium on `b2bd518`; eight High
+and two Medium on `e5f1c70`; six High and two Medium on `8a1d7dd`) and
+then, on **`8ad4a06`** — the product code of `e535386` — **no verdict**: the
+eleventh pass was attempted twice — 20:50 CDT (112,866 tokens) and 00:35 CDT once the five-hour window reopened (110,245 tokens) — and stopped both times by the reviewer account's usage limit before a verdict was written; the limit lifts on 19 September 2026 at 12:23 CDT. The tenth pass's six Highs are fixed, guarded by nine regressions that fail
+on `8a1d7dd`, two of them re-probed live on `8ad4a06` and refused, but the
+reviewer has not yet confirmed them closed. Every finding of the ten earlier passes was verified
+against the code before anything changed — from the sixth pass on,
+reproduced live or by a failing regression first — (register P21-061 …
+P21-147); every one that held — all but one, a bug with no reachable
+effect (P21-069) — was fixed with a regression that fails on the commit it
+was found on (mutation-checked, 134 cases in all) and, where one request
+can stage it, against the live API. Each pass found the previous fix's gap
+one field over; two loops were my own — the fifteenth loop's advisory
+locks broke every cost posting on `d23dc05` (P21-106) and the eighteenth
+loop's refresh guard broke the fresh-tab sign-in on the working tree
+(T-17) — and the gates found both before the reviewer could. The Mediums
+the ninth pass raised (P21-139, P21-140) and its one observation (P21-141)
+are dispositioned in the register and, as the brief asks, not fixed; the
+tenth pass's notes on the ninth loop's own fixes (P21-148 … P21-150) were
+fixed with the tenth loop.
 
 ## 15. Verdict
 
-Every condition in section 13 holds except one: the independent reviewer has
-not yet re-challenged the final HEAD, for a reason outside this repository.
-The certification rule admits no partial credit, so:
+Every condition in section 13 holds but one: P0 = 0 and P1 open = 0 (every
+one of the 111 found, fixed with a regression that fails on the unfixed
+code); the independent reviewer's last word on the final product HEAD is
+**not yet given** — the eleventh pass stopped twice on the reviewer
+account's usage limit, which lifts on 19 September 2026; the full Playwright suite 163 / 163 with retries 0 and no
+unexpected skip; console errors 0 and warnings 0; the 14-path smoke clean;
+the financial reconciliation to the cent, actual-cost delta 0.00 on three
+readings; the greenfield run twice with allowance and cleanup exact;
+429 = 0, unexpected 5xx = 0 and unexpected restarts = 0 on the frozen HEAD;
+tenant, project and role isolation clean; lint clean on every file the
+phase touched. The rule admits no partial credit, and one condition is
+unshown:
 
-**PHASE 21 VERDICT: PHASE 21 GREENFIELD SYSTEM CERTIFICATION WITHHELD** —
-one condition outstanding (the sixth release pass), everything else met.
-Not "not certified" for any defect: none is open above P2.
+**PHASE 21 VERDICT: PHASE 21 GREENFIELD SYSTEM CERTIFICATION WITHHELD** — on `e5353863840d97beb90d24997648926364e6ab49`, the source
+frozen after the twenty-first loop, every condition holds on the evidence
+of gates run fourteen except the reviewer's confirmation of the final
+product HEAD. When the eleventh pass on `8ad4a06` returns Critical 0 and
+High 0, the certification is written from this evidence without another
+change; any Critical or High it returns reopens the loop. Nothing is taken
+on credit.
 
-**CLIENT READINESS VERDICT: CONDITIONAL CLIENT READY — PILOT/UAT.** The
-condition is exactly one: the sixth release pass returns no Critical or
-High on `ded5fa0` (or, if it does, the loop resumes and closes them as the
-fifteen before it were closed). Open P2/P3 items are dispositioned in the
-register; none carries a financial, security or data-integrity risk for a
-pilot.
+**CLIENT READINESS VERDICT: CONDITIONAL CLIENT READY — PILOT/UAT.**
+Conditional on one thing: the eleventh independent pass confirming the
+tenth pass's six findings closed on `8ad4a06` (the reviewer account's
+limit lifts on 19 September 2026 at 12:23 CDT; the prompt is prepared).
+Not production ready, and not claimed to be: a pilot with a client who knows the open
+P2/P3 list in the register (P21-007, P21-022, P21-023, P21-087, P21-115,
+P21-139 and P21-140 at P2, twenty-one at P3, each with a workaround and
+none with a financial, security or data-integrity risk), who applies the
+one schema migration of the phase — it merges duplicate cost-record pairs,
+keeping every figure they held, before forbidding them, and the
+reconciliation repair is run afterwards — and who understands that the
+tenth pass is the reviewer's last completed word, on the HEAD before this
+one, and that its findings are closed here on my evidence until the
+eleventh pass confirms them.
 

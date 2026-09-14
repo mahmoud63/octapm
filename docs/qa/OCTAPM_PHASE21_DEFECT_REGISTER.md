@@ -1682,9 +1682,13 @@ first 500 rows newest first, and after twelve runs' residue (445
 subcontracts and 67 purchase orders on Riverside, created by the specs
 themselves) `SC-0001` sat at position 512. Not a product change:
 **TEST INFRASTRUCTURE** — the three specs now ask for the seeded
-subcontract by reference (`?search=SC-0001`); the residue is left in place
+subcontract by reference (`?search=SC-0001`) and their screen tests type it into the screen's search box (run 13 failed those three the same way); the residue is left in place
 (executed subcontracts carry pay applications the reconciliation spec
-counts). Run 13 is the run the certification cites.
+counts). Run 14 is the run the certification cites.
+
+## The eleventh release pass — HEAD `8ad4a06`: not completed (the reviewer account's usage limit)
+
+Attempted twice — 20:50 CDT (112,866 tokens) and 00:35 CDT once the five-hour window reopened (110,245 tokens) — and stopped both times by the reviewer account's usage limit before a verdict was written; the limit lifts on 19 September 2026 at 12:23 CDT; the tree was unchanged both times. The prompt (`codex-release11-prompt.txt`, stamped 8ad4a06) is ready to run when it does. No Critical or High is open; the tenth pass's six findings are fixed, regression-tested and re-probed live but not yet independently re-confirmed. `8ad4a06` is the reviewed product HEAD and `e535386` — one test-only commit on it (T-19) — the frozen source the gates certify.
 
 ## T-18 · ten gate runs' order residue filled the Match tab's window
 
@@ -1701,6 +1705,17 @@ residue was closed (status only, 123 rows, the seeded `PO-nnnn` and
 `PO-LC-*` orders untouched), leaving 57 open orders and PO-0002 back in the
 window; run 11 is the run the certification cites. P21-022 stays a P2 for
 Phase 22.
+
+## T-17 · the dev server serves the working tree
+
+Gates run 9 (on `fa7b28b`) had its Playwright phase fail from the first
+sign-in: the Vite dev server serves the working tree, not the frozen HEAD,
+and the refresh guard I was still writing for CX21-477 refused the
+fresh-tab sign-in (nobody signed in before the refresh) that every spec
+relies on. **ENVIRONMENT / my own scheduling**: the run was stopped, the
+guard corrected before it was committed, and the next run on committed
+code is the one the certification cites. Rule kept: finish and typecheck a
+frontend edit before a gate run starts.
 
 ## T-16 · a superseded gate run overlapped a restart
 

@@ -622,6 +622,16 @@ every gate but skipped thirteen subcontract tests whose seeded record had
 fallen past the commitments list's first page (T-19): test infrastructure,
 corrected before run thirteen.
 
+Gates run thirteen, on `8ad4a06`, failed the three screen tests of the same
+specs on the same residue (T-19, the screen side); corrected in a test-only
+commit, `e535386`, before run fourteen, the certification run.
+
+The eleventh pass, on `8ad4a06`, was attempted twice — 20:50 CDT (112,866 tokens) and 00:35 CDT once the five-hour window reopened (110,245 tokens) — and stopped both times by the reviewer account's usage limit before a verdict was written; the limit lifts on 19 September 2026 at 12:23 CDT. The loop that
+began with seven Highs on `11c2335` stands at none known on the
+twenty-first HEAD after it — the tenth pass's six fixed, regression-tested
+and re-probed, but not yet re-confirmed by the reviewer — and the
+certification waits on that one word.
+
 ## 11. What the rounds cost, and what they were worth
 
 Nine loops, ten release loops and one loop of my own: 111 confirmed product

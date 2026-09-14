@@ -314,7 +314,7 @@ evidence set and it exits non-zero on any delta.
 
 | line item | EXPECTED | ACTUAL | DELTA | PASS | source |
 | --- | ---: | ---: | ---: | :---: | --- |
-| Actual cost — SQL `SUM(amount)` over `CostLedgerEntry` | 71,204.00 | 71,204.00 | 0.00 | PASS | SQL (35 entries at run eight — see below) |
+| Actual cost — SQL `SUM(amount)` over `CostLedgerEntry` | 71,204.00 | 71,204.00 | 0.00 | PASS | SQL (57 entries at run fourteen — see below) |
 | Actual cost — API `/cost/reconciliation` `ledger.total` | 71,204.00 | 71,204.00 | 0.00 | PASS | API |
 | Actual cost — SQL `SUM(BudgetLine.actual)` projection | 71,204.00 | 71,204.00 | 0.00 | PASS | SQL |
 | Actual cost — SQL `SUM(CostRecord.actual)` projection | 71,204.00 | 71,204.00 | 0.00 | PASS | SQL |
@@ -340,24 +340,32 @@ evidence set and it exits non-zero on any delta.
 | API reports balanced / legacy opening balance | balanced / 0.00 | balanced / 0.00 | — | PASS | API |
 
 **Actual-cost delta: 0.00** on all three readings (SQL, API, documents) and
-0.00 between SQL and API. Snapshot 36/36 after each of the sixteen fix loops
-and after each of the eight gate runs.
+0.00 between SQL and API. Snapshot 36/36 after each of the twenty-one fix loops
+and after each of the fourteen gate runs.
 
-The seventy-four defects Phase 21D fixed did not move a single one of these
+The 111 defects Phase 21D fixed did not move a single one of these
 figures — which is the point: they lived in concurrency and cross-scope
 ids, not in the sequential arithmetic these figures exercise.
 
-**Runs four to eight.** The gates were re-run after every loop that
+**Runs four to fourteen.** The gates were re-run after every loop that
 changed the source: run four on `29456c4`, five on `2b0df2b`, six on
-`59cf34b`, seven on `d23dc05` and eight on **`ded5fa0`** (2026-09-13
-16:11–16:31 UTC). Every run but the seventh passed all 16 source lines and 36
-snapshot checks with an actual-cost delta of **0.00** on all three readings;
-run seven failed on P21-106 (a regression of the fifteenth loop that made
-every cost posting answer 500 — the movements were refused whole, so
-nothing moved) and the sixth's last two steps hit a restart (T-16). The
-ledger holds 35 entries on the project — the 12 the certification
+`59cf34b`, seven on `d23dc05`, eight on `ded5fa0`, nine on `fa7b28b`, ten on
+`b2bd518`, eleven on `e5f1c70`, twelve on `8a1d7dd`, thirteen on `8ad4a06`
+and fourteen on **`e535386`** (2026-09-14 02:16–02:38 UTC). Every run that reached
+its end passed all 16 source lines and 36 snapshot checks with an
+actual-cost delta of **0.00** on all three readings; run seven failed on
+P21-106 (a regression that made every cost posting answer 500 — the
+movements were refused whole, so nothing moved), the sixth's last two
+steps hit a restart (T-16), the ninth's Playwright phase was stopped
+because the dev server served an unfinished frontend edit (T-17), the
+tenth's Match-tab tests met ten runs' worth of order residue (T-18), and
+the twelfth skipped thirteen subcontract tests whose seeded record the
+runs' residue had pushed past the list they looked in, and the thirteenth
+failed three screen tests of the same specs on the same residue (T-19) —
+in every one
+of those, stage 7, the snapshot and the reconciliation still passed. The
+ledger holds 57 entries on the project — the 12 the certification
 posted, the stage-7 bag issues and their returns from the gate runs (T-14),
-and one issue-and-return pair from the sixteenth loop's live check — which
-net to 0.00, with 0 reversals, 0 re-postings and 0 duplicate keys
-database-wide. (The count in the table is the final run's; the frozen run's
-log is the authority.)
+and the probes' own issue-and-return pairs — which net to 0.00, with 0
+reversals, 0 re-postings and 0 duplicate keys database-wide. (The count in
+the table is the final run's; the frozen run's log is the authority.)
