@@ -651,14 +651,30 @@ that fail on `8ad4a06`; all seven fixed in the commit after it, with the
 Medium and the export, and ten regressions in eight suites, all of which
 fail on `8ad4a06`.
 
+The twelfth pass, on `af76293` (02:05 CDT, six minutes, 175,342 tokens):
+DO NOT RELEASE — no Critical, eight Highs, two Mediums that were mine
+(register P21-159 … P21-169). The party rule I had left out of the
+document search's viewer; the legacy valuations register open to every
+party; that register's edit re-reading the status and not the figures; the
+job list and the BOQ job routes read under project access alone; the
+supplier-invoice duplicate check made before the transaction and not
+under it; a stock movement storing whatever cost code, BOQ item or
+commitment it was given; the task list across projects seeing a party-only
+project with the organisation role; and BOQ deletion under the shared
+modification list. Four reproduced live (the BOQ-scoped key's job list with
+payloads; the invoice recorded twice; the movement stored with a Riverside
+BOQ item; the QS's deletion), four by regressions that fail on `af76293`;
+all eight fixed in the commit after it, with the two Mediums, and eleven
+regressions in eight suites, all of which fail on `af76293`.
+
 ## 11. What the rounds cost, and what they were worth
 
-Nine loops, eleven release loops and one loop of my own: 118 confirmed product
+Nine loops, twelve release loops and one loop of my own: 127 confirmed product
 defects in the ledger, stock, payment, transition, authentication,
 authorization, billing and tenant-isolation paths (7 + 5 + 6 + 4 + 3 + 2 + 1
-+ 2 + 2 + 8 + 10 + 7 + 8 + 8 + 1 + 8 + 8 + 7 + 8 + 6 + 7, six of them
-regressions of a loop's own fix, plus seven P2 and two P3 fixed, and two P2
-and one P3 carried), 144 regression cases (87 of them fail on the code they guard; five guard flows that must keep working), and
++ 2 + 2 + 8 + 10 + 7 + 8 + 8 + 1 + 8 + 8 + 7 + 8 + 6 + 7 + 9, seven of them
+regressions of a loop's own fix, plus nine P2 and two P3 fixed, and two P2
+and one P3 carried), 156 regression cases (87 of them fail on the code they guard; five guard flows that must keep working), and
 a demo-project reconciliation that still balances to the cent after all of
 it. The Phase 21 project's own figures did not move once (36/36 before and
 after every loop); the defects lived in what those figures never exercised —

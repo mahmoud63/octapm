@@ -1673,6 +1673,113 @@ parties decide, as on the project's own routes.
 
 `personal` was exported twice from the RBAC middleware. Removed.
 
+## The twelfth release pass — HEAD `af76293`: no Critical, eight Highs
+
+Run at 02:05 CDT (175,342 tokens, six minutes): DO NOT RELEASE — no
+Critical, eight Highs, two Mediums that were regressions of the eleventh
+loop, and the ninth pass's two Mediums carried. Every High was reproduced
+or confirmed before any code changed — four against the live API on
+`af76293` (a key with only a BOQ scope listing every module's jobs with
+their payloads; the same supplier invoice received twice at once and
+recorded twice; a stock issue storing another project's BOQ item; a QS
+deleting a BOQ row) and four by regression tests that fail on `af76293` —
+and each fix carries a regression that fails on `af76293`. All fixed in
+the commit after `af76293`, with the two Mediums.
+
+## P21-159 · P1 · Document search / party isolation · **FIXED** (Codex CX21-530; closes the INCOMPLETE on CX21-522 and CX21-514)
+
+| | |
+| --- | --- |
+| **Observed** | A document was visible to anyone who could read a module it was linked from; a party-scoped person (a subcontractor's member) with RFI read therefore reached, through the document's text and the content search, the attachments of another subcontractor's RFI they could not open. **Confirmed by regressions that fail on `af76293`** (no party user with an indexed RFI attachment was to hand live). |
+| **Root cause** | **CONFIRMED PRODUCT DEFECT** (the module rule applied without the record's party routing). |
+| **Fix** | A party-scoped viewer carries its parties; an attachment to a party-routed record (an RFI, a submittal — owner, reviewer, approver party) counts only when that record is routed to one of them, on the text endpoint, the project search and the cross-project content search alike. A document linked only to records routed elsewhere is not surfaced. |
+| **Regression** | `document-text.service.test.js` (CX21-530: hidden when routed away, shown when routed to the party, unchanged for a member; the content search and the text endpoint agree) and `search.service.test.js` (CX21-530: the viewer carries a party's parties and nothing for a member). |
+
+## P21-160 · P1 · Subcontractor valuations / party isolation · **FIXED** (Codex CX21-531)
+
+| | |
+| --- | --- |
+| **Observed** | The legacy valuations list, edit and delete took every valuation on the project whoever asked: a subcontractor's member listed another subcontractor's financial records, could restate a submitted one and re-attribute a historical one. **Confirmed by regressions that fail on `af76293`** (the module is retired for new rows). |
+| **Root cause** | **CONFIRMED PRODUCT DEFECT** (no party scope on a party-facing register). |
+| **Fix** | A party-scoped person sees, edits and deletes the valuations attributed to their own company only (`404` otherwise), and cannot attribute one to another company (`403`); members of the project are unchanged. |
+| **Regression** | `sub-valuation-traceability.test.js` (CX21-531: the list narrowed to the party's company, the edit and delete of another's refused, re-attribution refused, a member unchanged). |
+
+## P21-161 · P1 · Subcontractor valuations · **FIXED** (Codex CX21-532; closes the INCOMPLETE on CX21-521)
+
+| | |
+| --- | --- |
+| **Observed** | The edit held the row and compared its status, but computed the figures it left unsaid and the totals from the copy read before the lock: a certification begun on a copy restated a figure changed since. **Confirmed by a regression that fails on `af76293`.** |
+| **Root cause** | **CONFIRMED PRODUCT DEFECT** (the same shape as P21-138, on the valuation). |
+| **Fix** | The row is read again whole under the lock and every decision — the historical checks, the unsaid figures, the totals, the audit's before-image — is made on it. |
+| **Regression** | `sub-valuation-traceability.test.js` (CX21-532: a figure changed since the copy is kept, not restated). |
+
+## P21-162 · P1 · Jobs / RBAC · **FIXED** (Codex CX21-533)
+
+| | |
+| --- | --- |
+| **Observed** | The project's job list and job reads had project access and nothing else: a key limited to the project with only a BOQ scope listed every module's jobs with their payloads and results; and the BOQ job routes polled and re-queued any job of the project — a failed schedule import could be retried under the BOQ guard. **Reproduced live**: a `boq:read` key listed fifteen document-extraction and thumbnail jobs on the P21 project, payloads and results included. |
+| **Root cause** | **CONFIRMED PRODUCT DEFECT** (reads unguarded by the module they belong to). |
+| **Fix** | A job is listed and read under the read permission of its module (the same map the retry and cancel use); the BOQ job routes take BOQ jobs only (`404` otherwise), and the BOQ retry needs BOQ update. |
+| **Regression** | `jobs.routes.test.js` (CX21-533: a BOQ-scoped key sees BOQ jobs only, a PM all) and `boq.read-guard.test.js` (CX21-533: a schedule job neither polled nor retried through the BOQ routes; the retry under a refusing template refused). Live on the fix: the key lists no job outside BOQ. |
+
+## P21-163 · P1 · Direct costs · **FIXED** (Codex CX21-534)
+
+| | |
+| --- | --- |
+| **Observed** | The duplicate-invoice check ran before the transaction and was not repeated inside it: two receptions of the same supplier invoice arriving together both passed and were both recorded, approvable and payable twice. **Reproduced live**: the same invoice number posted twice at once on the P21 project — both 200, two draft rows. |
+| **Root cause** | **CONFIRMED PRODUCT DEFECT** (a check-before-write race; the same shape as P21-029). |
+| **Fix** | The invoice identity (project, vendor, number) is held with an advisory lock inside the transaction and the check made again under it, on creation and on an edit that renames the invoice. |
+| **Regression** | `direct-cost.service.test.js` (CX21-534: the identity held before the check is made again). Live on the fix: one 200, one 409 DIRECT_COST_DUPLICATE_INVOICE, one row. |
+
+## P21-164 · P1 · Inventory / cross-scope references · **FIXED** (Codex CX21-535)
+
+| | |
+| --- | --- |
+| **Observed** | A stock movement stored the cost code, BOQ item and commitment it was given, checked against nothing — a cost code of another organisation reached the ledger, a BOQ item or commitment of another project the movement. **Reproduced live**: an issue to a P21 activity naming a Riverside BOQ item — 200, the movement stored with it. |
+| **Root cause** | **CONFIRMED PRODUCT DEFECT** (the same shape as P21-151, on the movement). |
+| **Fix** | The references a movement carries are checked as its activity and project are: the cost code this organisation's, the BOQ item and the commitment this project's (`404` otherwise; a BOQ item or commitment needs a project). |
+| **Regression** | `inventory.service.test.js` (CX21-535: a foreign cost code, BOQ item and commitment each refused; the project's own passes). Live on the fix: 404 BOQ_ITEM_NOT_FOUND. |
+
+## P21-165 · P1 · RBAC / project isolation · **FIXED** (Codex CX21-536; closes the INCOMPLETE on CX21-525)
+
+| | |
+| --- | --- |
+| **Observed** | The task list across projects saw a project reached only through a party membership with the person's organisation role: a planning engineer who was only a subcontractor's member on a project saw everyone's tasks there, where the project's own list gave them their own. **Confirmed by a regression that fails on `af76293`.** |
+| **Root cause** | **CONFIRMED PRODUCT DEFECT** (my P21-156 narrowed by assignments and not by party memberships). |
+| **Fix** | A project reached only through an active party membership is seen as a party sees it — own tasks only; and a role that sees every project is not narrowed by an assignment, as the project's own mount does not load one for it (the pass's note on P21-156). |
+| **Regression** | `task.key-scope.test.js` (CX21-536: the party-only project narrowed; a PM's assignment not narrowing). |
+
+## P21-166 · P1 · RBAC / BOQ · **FIXED** (Codex CX21-537)
+
+| | |
+| --- | --- |
+| **Observed** | Deleting a BOQ row or an activity's BOQ link took the shared modification role list — PM, planning engineer, QS — while the policy gives BOQ deletion to the PM alone. **Reproduced live**: the QS deleted a manual BOQ row on the P21 project — 200, the row gone. |
+| **Root cause** | **CONFIRMED PRODUCT DEFECT** (a role list wider than the policy it stood for). |
+| **Fix** | Both deletes take `requirePermission('boq', 'delete')`. |
+| **Regression** | `boq.read-guard.test.js` (CX21-537: a QS and a planning engineer refused, a PM served). Live on the fix: 403. |
+
+## P21-167 · P2 · Tasks · **FIXED** (twelfth pass, Medium — a regression of the P21-156 fix)
+
+A PM's assignment narrowed the list across projects while the project's
+own mount, which loads no assignment for a role that sees every project,
+did not. Fixed with the loop (P21-165's second half).
+
+## P21-168 · P2 · BOQ · **FIXED** (twelfth pass, Medium — a regression of the P21-157 fix)
+
+Someone a template lets upload a bill (BOQ create) but not read it could
+upload and then poll its job forever at 403. Fixed with the loop: the
+job-status poll takes BOQ read or create. Regression in
+`boq.read-guard.test.js`.
+
+## P21-169 · P1 · BOQ / schedule · **FIXED** (my own probe, the twenty-third loop)
+
+| | |
+| --- | --- |
+| **Observed** | Deleting a manual BOQ row retired every activity it was allocated to — the one it was merely allocated to included, with its schedule and its cost history. **Reproduced live by my own CX21-537 probe on `af76293`**: the row it created was allocated to the P21 project's A100 (stock issued against it); the QS's delete retired A100, and the snapshot fell to 13 activities. Restored by hand (A100 active again, its retirement fields cleared), snapshot 36/36. |
+| **Root cause** | **CONFIRMED PRODUCT DEFECT** (the delete assumed every allocated activity was minted by the row). |
+| **Fix** | Only an activity the row itself minted — created with the row or later, carrying no ledger entry, no stock movement, no cost record and no allocation on another row — retires with it; any other keeps its schedule and history, and only its allocation is rejected. |
+| **Regression** | `boq.service.test.js` (P21-169: the pre-existing activity kept, the minted one retired; a minted one allocated elsewhere kept too). Live on the fix: the PM's delete of a row allocated to A100 leaves A100 active. |
+
 ## T-19 · the seeded subcontract fell past the commitments list's first page
 
 Gates run 12 (on `8a1d7dd`) skipped thirteen tests of the subcontract
