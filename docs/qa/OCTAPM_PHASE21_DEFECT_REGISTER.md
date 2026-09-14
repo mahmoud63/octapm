@@ -1587,6 +1587,105 @@ under a project authenticates in the project router and again in its own
 indexed lookups. **Not fixed** — an observation, no functional effect;
 noted for Phase 22.
 
+## The tenth release pass — HEAD `8a1d7dd`: no Critical, six Highs
+
+Run at 20:19 CDT (169,276 tokens, seven minutes): DO NOT RELEASE — no
+Critical, six Highs, and three notes on the ninth pass's own fixes (two
+regressions of loop 20, one stray export), with the two Mediums of the
+ninth pass carried. Every High was reproduced or confirmed before any code
+changed — two against the live API on `8a1d7dd` (a template that refuses
+documents not stopping search; a template that refuses change orders not
+stopping their creation) and four by regression tests that fail on
+`8a1d7dd` (one of them, the retired valuations module, no longer reachable
+live) — and each fix carries a regression that fails on `8a1d7dd`. All
+fixed in the commit after `8a1d7dd`, with loop 20's two regressions.
+
+## P21-142 · P1 · RBAC / project isolation · **FIXED** (Codex CX21-510; a regression of the P21-133 fix)
+
+| | |
+| --- | --- |
+| **Observed** | The task mount outside a project resolved the project named in the query for its access and template (P21-133) but still listed across every project: a person with a wide role on project A and a narrow one on B, asking for A's tasks, was answered with B's tasks under A's visibility. **Confirmed by a route regression that fails on `8a1d7dd`** (the list asked for A reached the service with no project); the two-assignment case was not staged live. |
+| **Root cause** | **CONFIRMED PRODUCT DEFECT** (my own: the context was resolved for the project, the list was not narrowed to it). |
+| **Fix** | The project named in the query is the list's project. |
+| **Regression** | `tasks.project-context.test.js` (CX21-510: the list asked for a project reaches the service as that project's list, with its access; the list across projects reaches it with none). |
+
+## P21-143 · P1 · Cost · **FIXED** (Codex CX21-511; closes the INCOMPLETE on CX21-493, CX21-497 and CX21-475)
+
+| | |
+| --- | --- |
+| **Observed** | The commitments' recompute wrote an existing cost record's committed without the (project, activity) lock the edits now hold, and an edit that echoed the committed it had read wrote it back: an edit paused after its read, a commitment executed meanwhile (committed 150,000), the edit resumed and wrote 100,000. **Confirmed by regressions that fail on `8a1d7dd`.** |
+| **Root cause** | **CONFIRMED PRODUCT DEFECT** (the last writer of the pair that did not hold it). |
+| **Fix** | The recompute holds the pair before writing an existing row (as it did before creating one); an echo of the row's committed writes nothing. |
+| **Regression** | `commitment.service.test.js` (CX21-511: the pair held before the recompute's update) and `cost.actual-derived.test.js` (CX21-511: an echo is not written by the edit or the upsert). |
+
+## P21-144 · P1 · Change orders · **FIXED** (Codex CX21-512; the archive side of P21-137)
+
+| | |
+| --- | --- |
+| **Observed** | The archive checked the approved-state prohibition on a copy read before its transaction and archived unconditionally: an archive begun on a pending order that was approved meanwhile archived the approved order — its value out of the contract's aggregate, its budget revision and impacts standing. **Confirmed by a regression that fails on `8a1d7dd`.** |
+| **Root cause** | **CONFIRMED PRODUCT DEFECT** (the same shape as P21-137, on the other writer). |
+| **Fix** | The archive holds the order and reads it again; an order whose status or archive state moved is not written (`409 CHANGE_ORDER_CHANGED`). |
+| **Regression** | `change-order.service.test.js` (CX21-512: a pending copy, an approved row as held — refused, nothing written, the lock before the re-read). |
+
+## P21-145 · P1 · Subcontractor valuations · **FIXED** (Codex CX21-513)
+
+| | |
+| --- | --- |
+| **Observed** | The valuation edit froze a certified or paid valuation's figures by its current status but accepted a new status from any editor: set back to draft, the agreed figures were editable again and the record deletable, and an editor could mark a valuation paid without payment authority. The module is retired for new valuations (`SUB_VALUATION_RETIRED`) and this database holds none, so it was **not stageable live; confirmed by regressions that fail on `8a1d7dd`**. It matters for a database that carries legacy valuations. |
+| **Root cause** | **CONFIRMED PRODUCT DEFECT** (a historical record whose history could be rewritten by moving its status). |
+| **Fix** | A certified or paid valuation does not leave its status through an edit (`409 SUB_VALUATION_HISTORICAL`); marking one paid needs the paying authority (`sub_pay_app.pay`) and certified the certifying authority, checked on the route. |
+| **Regression** | `sub-valuation-traceability.test.js` (CX21-513: the status of a paid or certified valuation cannot be moved, an echo passes) and `sub-valuations.status-authority.test.js` (new: paid and certified refused to an editor, allowed to the authority). |
+
+## P21-146 · P1 · RBAC / permission templates · **FIXED** (Codex CX21-514)
+
+| | |
+| --- | --- |
+| **Observed** | Search decided the modules a person may search from the role's static policy; a project's permission template — which refuses those modules on the project's own routes — was never asked, so a template that refused documents let their titles and content snippets through search. **Reproduced live**: the QS under a template with document control at `none` on the P21 project — four document hits before the template, four after. |
+| **Root cause** | **CONFIRMED PRODUCT DEFECT** (an authorisation layer applied on the routes but not on the search that reads the same records). |
+| **Fix** | Search resolves the templates of every project it spans at once (a member template first, else an active party's) and asks each before searching a module there; the document-content search takes the same answer. |
+| **Regression** | `search.service.test.js` (CX21-514: a member template and a party template that refuse a module keep its records out; no template, the role answers). Live on the fix: zero document hits under the template. |
+
+## P21-147 · P1 · RBAC / permission templates · **FIXED** (Codex CX21-515)
+
+| | |
+| --- | --- |
+| **Observed** | The role guard (`requireRoles`) never asked the attached permission template, while the permission guard did: a template that set change orders to `none` or read-only still let a PM or QS create, edit and archive them (and the same on every role-guarded route under a project: billing, BOQ, EOT, project settings). **Reproduced live**: the QS under a template with change orders at `none` created a change order on the P21 project. |
+| **Root cause** | **CONFIRMED PRODUCT DEFECT** (two guards, one of which ignored the project's configuration). |
+| **Fix** | The role guard asks the template first for every module the policy knows (the mount names the module), as the permission guard does: the template decides, and the role list decides only where there is none. |
+| **Regression** | `rbac-template.test.js` (CX21-515: a template refusing change orders refuses their creation, edit and archive to a PM; one granting them admits a role the list does not name; none, and the list decides). Live on the fix: 403 FORBIDDEN (source: template). |
+
+## P21-148 · P2 · Realtime · **FIXED** (tenth pass, a regression of the P21-132 fix)
+
+A user edit that repeated the person's role unchanged dropped their sockets,
+and the client did not reconnect after a server-side disconnect, so an
+active person lost live updates until a reload. Fixed with the loop:
+sockets are dropped only when the role or standing actually changed, and
+the client reconnects after a server-side disconnect (and stops when the
+handshake refuses the account).
+
+## P21-149 · P2 · Permission templates · **FIXED** (tenth pass, a regression of the P21-133 fix)
+
+The cross-project task list read party templates through memberships of
+parties that were no longer active. Fixed with the loop: only active
+parties decide, as on the project's own routes.
+
+## P21-150 · P3 · Hygiene · **FIXED** (tenth pass)
+
+`personal` was exported twice from the RBAC middleware. Removed.
+
+## T-19 · the seeded subcontract fell past the commitments list's first page
+
+Gates run 12 (on `8a1d7dd`) skipped thirteen tests of the subcontract
+agreement, closeout and evaluation specs with "no seeded subcontract": each
+looked the seeded `SC-0001` up in the commitments list, which answers its
+first 500 rows newest first, and after twelve runs' residue (445
+subcontracts and 67 purchase orders on Riverside, created by the specs
+themselves) `SC-0001` sat at position 512. Not a product change:
+**TEST INFRASTRUCTURE** — the three specs now ask for the seeded
+subcontract by reference (`?search=SC-0001`); the residue is left in place
+(executed subcontracts carry pay applications the reconciliation spec
+counts). Run 13 is the run the certification cites.
+
 ## T-18 · ten gate runs' order residue filled the Match tab's window
 
 Gates run 10 (on `b2bd518`) failed two Match-tab tests of the inventory spec:
