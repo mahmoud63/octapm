@@ -117,6 +117,7 @@ test.describe('subcontract agreement', () => {
     test.skip(!commitment, 'no seeded subcontract')
 
     await page.goto(`/projects/${projectId}/commercial/commitments`)
+    await page.getByPlaceholder('Search ref, title or vendor').fill('SC-0001') // the screen lists the first 500 too (T-19)
     await expect(page.getByText('SC-0001')).toBeVisible({ timeout: 30_000 })
     await page
       .getByRole('row', { name: /SC-0001/ })
