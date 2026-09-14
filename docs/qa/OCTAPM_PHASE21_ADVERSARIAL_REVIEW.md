@@ -626,20 +626,39 @@ Gates run thirteen, on `8ad4a06`, failed the three screen tests of the same
 specs on the same residue (T-19, the screen side); corrected in a test-only
 commit, `e535386`, before run fourteen, the certification run.
 
-The eleventh pass, on `8ad4a06`, was attempted twice — 20:50 CDT (112,866 tokens) and 00:35 CDT once the five-hour window reopened (110,245 tokens) — and stopped both times by the reviewer account's usage limit before a verdict was written; the limit lifts on 19 September 2026 at 12:23 CDT. The loop that
-began with seven Highs on `11c2335` stands at none known on the
-twenty-first HEAD after it — the tenth pass's six fixed, regression-tested
-and re-probed, but not yet re-confirmed by the reviewer — and the
-certification waits on that one word.
+The eleventh pass, on `8ad4a06`, stopped twice on the reviewer account's
+usage limit (20:50 and 00:35 CDT, 112,866 and 110,245 tokens in) and
+answered on the third attempt (01:40 CDT, seven minutes, 169,186 tokens):
+DO NOT RELEASE — no Critical, seven Highs, one Medium that was mine
+(register P21-151 … P21-158). The one that mattered most was the oldest
+shape in this ledger: a commitment change order's lines were never checked
+against the project, so an approval would have projected another tenant's
+activity onto the cost register — a Critical by the register's own rule
+(P21-061, P21-070), graded High by the reviewer because the row is not
+served across tenants, fixed as a P0 here. The rest: the retired
+valuations module deciding its edit and its delete on a copy; the content
+search serving every document a project's document control allowed, its
+own module rule unasked; a record event carrying a cost record's figures to
+every socket in the room; a change-order approval deciding on the parent's
+copied status; the task list across projects seeing every project with the
+organisation role, my own narrowing of it two loops ago notwithstanding;
+and the BOQ register read with authentication and nothing else. Four
+reproduced live (the foreign line stored on a change order; the QS's socket
+receiving budget, committed and actual under a template refusing cost; the
+planner seeing as site engineer what the project's own list hid; the BOQ
+read under a refusing template and a task-only key), three by regressions
+that fail on `8ad4a06`; all seven fixed in the commit after it, with the
+Medium and the export, and ten regressions in eight suites, all of which
+fail on `8ad4a06`.
 
 ## 11. What the rounds cost, and what they were worth
 
-Nine loops, ten release loops and one loop of my own: 111 confirmed product
+Nine loops, eleven release loops and one loop of my own: 118 confirmed product
 defects in the ledger, stock, payment, transition, authentication,
 authorization, billing and tenant-isolation paths (7 + 5 + 6 + 4 + 3 + 2 + 1
-+ 2 + 2 + 8 + 10 + 7 + 8 + 8 + 1 + 8 + 8 + 7 + 8 + 6, five of them regressions
-of a loop's own fix, plus six P2 and two P3 fixed, and two P2 and one P3
-carried), 134 regression cases (87 of them fail on the code they guard; five guard flows that must keep working), and
++ 2 + 2 + 8 + 10 + 7 + 8 + 8 + 1 + 8 + 8 + 7 + 8 + 6 + 7, six of them
+regressions of a loop's own fix, plus seven P2 and two P3 fixed, and two P2
+and one P3 carried), 144 regression cases (87 of them fail on the code they guard; five guard flows that must keep working), and
 a demo-project reconciliation that still balances to the cent after all of
 it. The Phase 21 project's own figures did not move once (36/36 before and
 after every loop); the defects lived in what those figures never exercised —

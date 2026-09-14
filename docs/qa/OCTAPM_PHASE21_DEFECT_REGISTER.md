@@ -1686,9 +1686,96 @@ subcontract by reference (`?search=SC-0001`) and their screen tests type it into
 (executed subcontracts carry pay applications the reconciliation spec
 counts). Run 14 is the run the certification cites.
 
-## The eleventh release pass — HEAD `8ad4a06`: not completed (the reviewer account's usage limit)
+## The eleventh release pass — HEAD `8ad4a06`: no Critical, seven Highs
 
-Attempted twice — 20:50 CDT (112,866 tokens) and 00:35 CDT once the five-hour window reopened (110,245 tokens) — and stopped both times by the reviewer account's usage limit before a verdict was written; the limit lifts on 19 September 2026 at 12:23 CDT; the tree was unchanged both times. The prompt (`codex-release11-prompt.txt`, stamped 8ad4a06) is ready to run when it does. No Critical or High is open; the tenth pass's six findings are fixed, regression-tested and re-probed live but not yet independently re-confirmed. `8ad4a06` is the reviewed product HEAD and `e535386` — one test-only commit on it (T-19) — the frozen source the gates certify.
+Run at 01:40 CDT on the third attempt (169,186 tokens, seven minutes; the
+first two attempts, at 20:50 and 00:35 CDT, stopped on the reviewer
+account's usage limit): DO NOT RELEASE — no Critical, seven Highs, one
+Medium that was a regression of the tenth loop, and the duplicate export
+the tenth pass had noted still in place. Every High was reproduced or
+confirmed before any code changed — four against the live API on `8ad4a06`
+(a change order accepting another tenant's activity; a socket in the
+project room receiving a cost record's figures under a template refusing
+cost; the task list across projects showing a narrowly assigned person the
+tasks the project's own list hides; the BOQ register read by a template
+refusing BOQ and by a key without the scope) and three by regression tests
+that fail on `8ad4a06` — and each fix carries a regression that fails on
+`8ad4a06`. All fixed in the commit after `8ad4a06`, with the Medium and the
+export.
+
+## P21-151 · **P0** · Tenant isolation · **FIXED** (Codex CX21-520)
+
+| | |
+| --- | --- |
+| **Observed** | A commitment change order's lines named any activity, budget line or cost code at all — the contract's own lines are checked against the project, the change order's were not — so an approval projected another project's, or another tenant's, activity onto this project's cost register with its name and WBS. **Reproduced live**: a change order on the P21 project's executed subcontract accepted a line naming an activity of another tenant's project (stored on the row; not submitted or approved). |
+| **Root cause** | **CONFIRMED PRODUCT DEFECT** (the same shape as P21-061 and P21-070: a cross-scope id accepted on a line). |
+| **Fix** | A change order's lines are validated as the contract's lines are — this project's activities and budget lines, this organisation's cost codes — on creation and on edit (`404 ACTIVITY_NOT_FOUND` and its siblings). |
+| **Regression** | `commitment.service.test.js` (CX21-520: a line naming another project's activity refused on creation and on edit, the row untouched). Live on the fix: 404 ACTIVITY_NOT_FOUND. |
+
+## P21-152 · P1 · Subcontractor valuations · **FIXED** (Codex CX21-521; closes the INCOMPLETE on CX21-513)
+
+| | |
+| --- | --- |
+| **Observed** | The valuation edit and delete decided their historical checks on a copy read before the transaction and wrote unconditionally: an edit begun on a submitted valuation that was certified meanwhile restated its figures and set it back to submitted; a delete begun likewise removed the certified record. **Confirmed by regressions that fail on `8ad4a06`** (the module is retired for new valuations; the risk is a database carrying legacy ones). |
+| **Root cause** | **CONFIRMED PRODUCT DEFECT** (a decision made on a copy — the same shape as P21-137 and P21-144). |
+| **Fix** | Both hold the row (`FOR UPDATE`) and read it again; a valuation whose status moved since the copy is neither written nor deleted (`409 SUB_VALUATION_CHANGED`). |
+| **Regression** | `sub-valuation-traceability.test.js` (CX21-521: a submitted copy, a certified row as held — the edit and the delete refused, nothing written). |
+
+## P21-153 · P1 · Document search / permission templates · **FIXED** (Codex CX21-522; closes the INCOMPLETE on CX21-514)
+
+| | |
+| --- | --- |
+| **Observed** | The cross-project content search checked document control once per project and then served every matching document — its title, its headline — although the document's own endpoint judges each by the modules it is linked from: a document attached only to an RFI reached a person whose template refused RFIs, and a key with only a document-control scope. **Confirmed by a regression that fails on `8ad4a06`** (the search reads indexed text; no indexed RFI-only document was to hand live). |
+| **Root cause** | **CONFIRMED PRODUCT DEFECT** (the visibility rule applied on one path and not on the other). |
+| **Fix** | The content search takes a viewer per project — the person's template and role there, a key's scopes — and judges each hit as `getDocumentText` judges one document. |
+| **Regression** | `document-text.service.test.js` (CX21-522: a document attached only to a refused module is not surfaced, one under document control is) and `search.service.test.js` (CX21-522: the viewer handed over answers as the template and the key's scopes would). |
+
+## P21-154 · P1 · Realtime / permission templates · **FIXED** (Codex CX21-523)
+
+| | |
+| --- | --- |
+| **Observed** | A record event carried the record's audit summary — for a cost record its budget, committed, actual and every category — to every member of the project room, whatever their template or party standing said about cost. **Reproduced live**: the QS under a template with cost at `none` — `GET …/cost/summary` 403 — joined the P21 project room and received two cost-record events carrying `material`, `budget`, `committed` and `actual`. |
+| **Root cause** | **CONFIRMED PRODUCT DEFECT** (the audit summary reused as a broadcast payload). |
+| **Fix** | A record event tells a room which record changed and what happened, and nothing of its figures: the summary is not broadcast; subscribers refetch what they may read (the client only ever used the event to invalidate its queries). Events addressed to people — notifications — keep their payload. |
+| **Regression** | `socket.test.js` (CX21-523: a cost-record event reaches the room without its figures; a notification keeps its payload). Live on the fix: events received, no figures. |
+
+## P21-155 · P1 · Commitments · **FIXED** (Codex CX21-524)
+
+| | |
+| --- | --- |
+| **Observed** | An approval decided whether to post to committed on the parent commitment's status read before its transaction: a parent executed meanwhile left the approved change order out of every committed figure until the next recompute, while the contract's revised value carried it. **Confirmed by a regression that fails on `8ad4a06`.** |
+| **Root cause** | **CONFIRMED PRODUCT DEFECT** (a decision made on a copy). |
+| **Fix** | The approval holds the parent (`FOR UPDATE`) and reads its standing under the lock; an executed parent posts. |
+| **Regression** | `commitment.service.test.js` (CX21-524: a parent executed since the copy was read — the lock taken, the recompute run). |
+
+## P21-156 · P1 · RBAC / project isolation · **FIXED** (Codex CX21-525; closes the INCOMPLETE on CX21-492)
+
+| | |
+| --- | --- |
+| **Observed** | The task list across projects saw every project with the person's organisation role: a planning engineer assigned to one project as a site engineer saw, on the list outside a project, the tasks that project's own list hid from them. **Reproduced live**: the planner, assigned to P21 as site engineer, `/projects/P21/tasks` 2 tasks, `/tasks` 3 on P21 — the task the PM had raised for the QS among them. |
+| **Root cause** | **CONFIRMED PRODUCT DEFECT** (my own P21-133 and P21-142 narrowed the list to its templates and its project; the assignment role was still the organisation's). |
+| **Fix** | Across projects, each project is seen with the role held there: a wide organisation role narrowed by an assignment sees only its own tasks on that project; a narrow one widened by an assignment sees that project whole. |
+| **Regression** | `task.key-scope.test.js` (CX21-525: both directions, and a wide role with no narrowing assignment unchanged). Live on the fix: `/tasks` shows 2 on P21, none the project's own list hides. |
+
+## P21-157 · P1 · RBAC / BOQ · **FIXED** (Codex CX21-526)
+
+| | |
+| --- | --- |
+| **Observed** | The BOQ register's read (and its shadow-activity report and job status) had authentication and nothing else: a template with BOQ at `none` read the financial register, and so did a key limited to the project with only a task scope. **Reproduced live**: the QS under a template refusing BOQ — 200, five items; a `task:read` key — 200, five items. |
+| **Root cause** | **CONFIRMED PRODUCT DEFECT** (a read route with no permission guard). |
+| **Fix** | The three reads take `requirePermission('boq', 'read')` — the project's template and a key's scopes decide, as on the guarded mutations. |
+| **Regression** | `boq.read-guard.test.js` (new: refused to a refusing template and to a key without the scope, served to a PM). Live on the fix: 403 for both. |
+
+## P21-158 · P2 · Subcontractor valuations · **FIXED** (Codex CX21-527, Medium — a regression of the P21-145 fix)
+
+The route-level authority check refused an editor's edit that merely
+repeated the valuation's current certified or paid status (a company
+attribution alongside it, say). Fixed with the loop: the route hands the
+service the caller's authority and the service applies it on a change of
+status only. Regression in `sub-valuation-traceability.test.js` and
+`sub-valuations.status-authority.test.js`. The duplicate `personal` export
+the tenth pass noted (P21-150) was found still in place — my
+re-runnable patch had skipped it — and is now removed.
 
 ## T-18 · ten gate runs' order residue filled the Match tab's window
 
