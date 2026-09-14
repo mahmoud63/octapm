@@ -314,3 +314,31 @@ describe("Phase 21D — integrity (release challenge, eleventh pass)", () => {
     expect(everything).toHaveLength(2);
   });
 });
+
+describe("Phase 21D — integrity (release challenge, twelfth pass)", () => {
+  afterEach(() => { delete mockPrisma.rfi; });
+
+  it("CX21-530: a party-scoped viewer reaches a document through the records routed to its party only — the visibility rule, the content search and the text endpoint agree", async () => {
+    const doc = { id: "doc-rfi", projectId: "project-1", orgId: "org-1", originalName: "x.pdf", fileName: "x.pdf", mimeType: "application/pdf", uploadedAt: new Date(), text: null, documentRevisions: [], attachments: [{ recordType: "rfi", recordId: "rfi-b", role: "attachment" }] };
+    const partyViewer = { canRead: () => true, partyIds: ["party-a"] };
+    mockPrisma.rfi = { findMany: jest.fn(async () => []) }; // routed to another party
+    let partyVisible = await service.partyRoutedRecordIds({ documents: [doc], viewer: partyViewer });
+    expect(service.documentVisible(doc, partyViewer, partyVisible)).toBe(false);
+    expect(mockPrisma.rfi.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({ id: { in: ["rfi-b"] }, OR: expect.any(Array) }) }));
+    mockPrisma.rfi.findMany.mockResolvedValue([{ id: "rfi-b" }]); // routed to this party
+    partyVisible = await service.partyRoutedRecordIds({ documents: [doc], viewer: partyViewer });
+    expect(service.documentVisible(doc, partyViewer, partyVisible)).toBe(true);
+    // a viewer that is not party-scoped is judged by modules alone, as before
+    const staff = { canRead: () => true };
+    expect(await service.partyRoutedRecordIds({ documents: [doc], viewer: staff })).toBeNull();
+    expect(service.documentVisible(doc, staff, null)).toBe(true);
+    // the content search and the text endpoint take the same answer
+    mockPrisma.rfi.findMany.mockResolvedValue([]);
+    mockPrisma.$queryRaw.mockResolvedValue([{ documentId: "doc-rfi", projectId: "project-1", rank: 1, headline: "x" }]);
+    mockPrisma.projectDocument.findMany.mockResolvedValue([doc]);
+    expect(await service.searchDocumentContent({ orgId: "org-1", projectIds: ["project-1"], q: "x", viewerFor: () => partyViewer })).toHaveLength(0);
+    expect(await service.searchDocumentContent({ orgId: "org-1", projectIds: ["project-1"], q: "x", viewerFor: () => staff })).toHaveLength(1);
+    mockPrisma.projectDocument.findFirst.mockResolvedValue({ ...doc, text: null });
+    await expect(service.getDocumentText({ orgId: "org-1", projectId: "project-1", documentId: "doc-rfi", viewer: partyViewer })).rejects.toMatchObject({ status: 403 });
+  });
+});

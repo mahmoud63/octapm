@@ -383,3 +383,38 @@ describe('Phase 21D — integrity (release challenge, eleventh pass)', () => {
     expect(mockPrisma.subValuation.update).toHaveBeenCalledTimes(2);
   });
 });
+
+describe('Phase 21D — integrity (release challenge, twelfth pass)', () => {
+  const party = { id: 'project-1', role: 'external_party', scope: 'party', assignmentRole: null, partyAccess: [{ projectPartyId: 'party-1', companyId: 'co-a', role: 'subcontractor' }] };
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockPrisma.project.findFirst.mockResolvedValue({ id: 'project-1', orgId: 'org-1', defaultRetentionRate: 5 });
+    mockPrisma.subValuation.update.mockResolvedValue(stored());
+    mockPrisma.subValuation.findMany.mockResolvedValue([]);
+  });
+
+  it("CX21-531: a party-scoped person lists, edits and deletes the valuations of their own company only, and cannot re-attribute one", async () => {
+    await subValuationService.listSubValuations({ orgId: 'org-1', projectId: 'project-1', projectAccess: party });
+    expect(mockPrisma.subValuation.findMany.mock.calls.at(-1)[0].where).toMatchObject({ projectId: 'project-1', companyId: { in: ['co-a'] } });
+    mockPrisma.subValuation.findFirst.mockResolvedValue(stored({ status: 'submitted', companyId: 'co-b' }));
+    await expect(subValuationService.updateSubValuation({ orgId: 'org-1', projectId: 'project-1', valuationId: 'sv-1', userId: 'sub-1', payload: { workDone: 5 }, projectAccess: party })).rejects.toMatchObject({ status: 404 });
+    await expect(subValuationService.deleteSubValuation({ orgId: 'org-1', projectId: 'project-1', valuationId: 'sv-1', userId: 'sub-1', projectAccess: party })).rejects.toMatchObject({ status: 404 });
+    mockPrisma.subValuation.findFirst.mockResolvedValue(stored({ status: 'submitted', companyId: 'co-a' }));
+    await expect(subValuationService.updateSubValuation({ orgId: 'org-1', projectId: 'project-1', valuationId: 'sv-1', userId: 'sub-1', payload: { companyId: 'co-b' }, projectAccess: party })).rejects.toMatchObject({ status: 403 });
+    expect(mockPrisma.subValuation.update).not.toHaveBeenCalled();
+    expect(mockPrisma.subValuation.delete).not.toHaveBeenCalled();
+    // a member of the project is not narrowed
+    await subValuationService.listSubValuations({ orgId: 'org-1', projectId: 'project-1', projectAccess: { id: 'project-1', role: 'qs', scope: 'assignment', assignmentRole: 'qs', partyAccess: [] } });
+    expect(mockPrisma.subValuation.findMany.mock.calls.at(-1)[0].where).toEqual({ projectId: 'project-1' });
+  });
+
+  it('CX21-532: an edit is computed from the row as held — a figure changed since the copy was read is kept, not restated from the copy', async () => {
+    mockPrisma.subValuation.findFirst
+      .mockResolvedValueOnce(stored({ status: 'submitted', workDone: 100 })) // the copy
+      .mockResolvedValueOnce(stored({ status: 'submitted', workDone: 200 })); // the row as held
+    await subValuationService.updateSubValuation({ orgId: 'org-1', projectId: 'project-1', valuationId: 'sv-1', userId: 'pm-1', payload: { status: 'certified' }, authority: { pay: true, certify: true } });
+    const data = mockPrisma.subValuation.update.mock.calls[0][0].data;
+    expect(data.workDone).toBe(200);
+    expect(data.status).toBe('certified');
+  });
+});

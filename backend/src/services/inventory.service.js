@@ -670,6 +670,22 @@ const postMovement = async (tx, { orgId, item, warehouseId, locationId = null, t
   if (projectId && Array.isArray(context.allowedProjectIds) && context.allowedProjectIds.length && !context.allowedProjectIds.includes(projectId)) {
     throw new HttpError(403, "FORBIDDEN_PROJECT", "This API key is not allowed on that project");
   }
+  // The references a movement carries are checked as its activity and
+  // project are: a cost code of another organisation, a BOQ item or a
+  // commitment of another project were stored as given, and the cost code
+  // reached the ledger (Phase 21D, CX21-535).
+  if (context.costCodeId && tx.costCode?.findFirst) {
+    const code = await tx.costCode.findFirst({ where: { id: context.costCodeId, orgId }, select: { id: true } });
+    if (!code) throw new HttpError(404, "COST_CODE_NOT_FOUND", "That cost code is not this organisation's");
+  }
+  if (context.boqItemId && tx.boqItem?.findFirst) {
+    const item = projectId ? await tx.boqItem.findFirst({ where: { id: context.boqItemId, projectId }, select: { id: true } }) : null;
+    if (!item) throw new HttpError(404, "BOQ_ITEM_NOT_FOUND", "That BOQ item is not on this project");
+  }
+  if (context.commitmentId && tx.commitment?.findFirst) {
+    const commitment = projectId ? await tx.commitment.findFirst({ where: { id: context.commitmentId, projectId }, select: { id: true } }) : null;
+    if (!commitment) throw new HttpError(404, "COMMITMENT_NOT_FOUND", "That commitment is not on this project");
+  }
 
   const movement = await tx.stockTransaction.create({
     data: {

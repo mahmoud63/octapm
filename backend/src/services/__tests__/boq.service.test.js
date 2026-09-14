@@ -851,3 +851,35 @@ describe("BOQ service integrity", () => {
     });
   });
 });
+
+describe("Phase 21D — integrity (the twenty-third loop's own finding)", () => {
+  it("P21-169: deleting a manual BOQ row retires only the activity the row minted — an activity it was merely allocated to keeps its schedule and its cost history", async () => {
+    const item = { id: "boq-1", projectId: "project-1", code: "1.1", description: "Excavation", qty: 5, unit: "m3", rate: 100, amount: 500, isManual: true, isActive: true, sortOrder: 0, createdAt: new Date("2026-09-14T07:00:00.000Z") };
+    mockPrisma.project.findFirst.mockResolvedValue({ id: "project-1", orgId: "org-1" });
+    mockPrisma.boqRevision.findFirst.mockResolvedValue(null);
+    mockPrisma.scheduleRevision.findFirst.mockResolvedValue(null);
+    mockPrisma.boqItem.findFirst.mockResolvedValue(item);
+    mockPrisma.boqItem.findMany.mockResolvedValue([]);
+    mockPrisma.activityBoqAllocation.findMany.mockResolvedValue([
+      { id: "al-old", activityId: "act-old", status: "draft" }, // an activity that existed before the row
+      { id: "al-new", activityId: "act-new", status: "draft" }, // the activity the row minted
+    ]);
+    mockPrisma.activityBoqAllocation.updateMany = jest.fn(async () => ({ count: 2 }));
+    mockPrisma.activityBoqAllocation.count.mockResolvedValue(0);
+    mockPrisma.activity.findMany = jest.fn(async () => [{ id: "act-new" }]); // created with the row or later
+    mockPrisma.activity.updateMany = jest.fn(async () => ({ count: 1 }));
+    await service.deleteBoqItem("project-1", "boq-1", { orgId: "org-1", userId: "pm-1", userRole: "pm" });
+    expect(mockPrisma.activity.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({ id: { in: ["act-old", "act-new"] }, projectId: "project-1", createdAt: { gte: item.createdAt } }) }));
+    expect(mockPrisma.activity.updateMany).toHaveBeenCalledTimes(1);
+    expect(mockPrisma.activity.updateMany).toHaveBeenCalledWith(expect.objectContaining({ where: { id: { in: ["act-new"] } } }));
+    // and a minted activity that already carries an allocation on another row is kept too
+    mockPrisma.activity.updateMany.mockClear();
+    mockPrisma.activityBoqAllocation.count.mockResolvedValue(1);
+    await service.deleteBoqItem("project-1", "boq-1", { orgId: "org-1", userId: "pm-1", userRole: "pm" });
+    expect(mockPrisma.activity.updateMany).not.toHaveBeenCalled();
+    delete mockPrisma.activity.findMany;
+    delete mockPrisma.activity.updateMany;
+    delete mockPrisma.activityBoqAllocation.updateMany;
+  });
+});
+

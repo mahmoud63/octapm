@@ -302,11 +302,12 @@ const computeFinancials = ({
   };
 };
 
-const listSubValuations = async ({ orgId, projectId }) => {
+const listSubValuations = async ({ orgId, projectId, projectAccess = null }) => {
   await ensureProject({ orgId, projectId });
 
+  const companyIds = partyCompanyIds(projectAccess); // a party's own company only (CX21-531)
   const rows = await prisma.subValuation.findMany({
-    where: { projectId },
+    where: { projectId, ...(companyIds ? { companyId: { in: companyIds } } : {}) },
     include: subValuationInclude,
     orderBy: [{ submittedDate: 'desc' }, { createdAt: 'desc' }],
   });
@@ -366,6 +367,18 @@ const createSubValuation = async ({ orgId, projectId }) => {
   throw error;
 };
 
+/**
+ * A party-scoped person (a subcontractor's member) sees and edits the
+ * valuations attributed to their own company only; the list, the edit and
+ * the delete took every valuation on the project (Phase 21D, CX21-531).
+ */
+const partyCompanyIds = (projectAccess) => {
+  if (!projectAccess) return null;
+  const { isPartyScopedAccess } = require('./company-party.service');
+  if (!isPartyScopedAccess(projectAccess)) return null;
+  return [...new Set((projectAccess.partyAccess || []).map((party) => party.companyId).filter(Boolean))];
+};
+
 const updateSubValuation = async ({
   orgId,
   projectId,
@@ -373,40 +386,32 @@ const updateSubValuation = async ({
   payload,
   userId = null,
   authority = null,
+  projectAccess = null,
 }) => {
   await ensureProject({ orgId, projectId });
 
-  const existing = await prisma.subValuation.findFirst({
+  const found = await prisma.subValuation.findFirst({
     where: { id: valuationId, projectId },
   });
 
-  if (!existing) {
+  if (!found) {
     throw new HttpError(
       404,
       'SUB_VALUATION_NOT_FOUND',
       'Sub valuation not found',
     );
   }
-
-  // The free-text name records who was billed at the time. Attribution belongs
-  // on companyId beside it; rewriting the name would edit the historical record
-  // to look like something it was not.
-  if (
-    payload.subcontractor !== undefined &&
-    String(payload.subcontractor).trim() !== existing.subcontractor
-  ) {
-    const error = new HttpError(
-      409,
-      'SUB_VALUATION_NAME_IMMUTABLE',
-      `${existing.ref} was raised against "${existing.subcontractor}". That name is the record of who was billed and cannot be rewritten — attribute the valuation to a company instead.`,
-    );
-    error.details = { subcontractor: existing.subcontractor, attributeWith: 'companyId' };
-    throw error;
+  const companyIds = partyCompanyIds(projectAccess);
+  if (companyIds && !companyIds.includes(found.companyId)) {
+    throw new HttpError(404, 'SUB_VALUATION_NOT_FOUND', 'Sub valuation not found');
   }
 
   let companyId;
   if (payload.companyId !== undefined) {
     const id = payload.companyId ? String(payload.companyId).trim() : null;
+    if (companyIds && (!id || !companyIds.includes(id))) {
+      throw new HttpError(403, 'FORBIDDEN', "A valuation stays attributed to the party's own company");
+    }
     if (id) {
       const company = await prisma.company.findFirst({
         where: { id, orgId },
@@ -417,74 +422,92 @@ const updateSubValuation = async ({
     companyId = id;
   }
 
-  // A certified or paid valuation holds figures that were agreed. Nothing may
-  // restate them — not an edit, and not the recompute that a save would
-  // otherwise run over them as a side effect of attributing a company.
-  const frozen = HISTORICAL_STATUSES.includes(existing.status);
-  // Marking a valuation certified or paid is the certifying or paying
-  // authority's act; an edit that leaves the status where it is needs neither
-  // (Phase 21D, CX21-513, CX21-527).
-  if (authority && payload.status !== undefined && payload.status !== existing.status) {
-    if (payload.status === 'paid' && !authority.pay) throw new HttpError(403, 'FORBIDDEN', 'Marking a valuation paid needs payment authority');
-    if (payload.status === 'certified' && !authority.certify) throw new HttpError(403, 'FORBIDDEN', 'Certifying a valuation needs certification authority');
-  }
-  if (frozen && payload.status !== undefined && payload.status !== existing.status) {
-    // Set back to draft, a paid valuation's agreed figures were editable again
-    // and the record deletable; the status of a historical record is not an
-    // edit's to change (Phase 21D, CX21-513).
-    const error = new HttpError(
-      409,
-      'SUB_VALUATION_HISTORICAL',
-      `${existing.ref} is ${existing.status}. Its status is the record of what was agreed and cannot be changed by an edit.`,
-    );
-    error.details = { ref: existing.ref, status: existing.status, fields: ['status'] };
-    throw error;
-  }
-  if (frozen) {
-    const MONEY_FIELDS = ['workDone', 'materialsOnSite', 'retentionRate', 'backCharges'];
-    const attempted = MONEY_FIELDS.filter(
-      (field) =>
-        payload[field] !== undefined &&
-        Number(payload[field]) !== Number(existing[field]),
-    );
-    if (attempted.length) {
+  return prisma.$transaction(async (tx) => {
+    // The row is held and read again, whole, before anything is decided or
+    // written: the historical checks, the figures an edit leaves unsaid and
+    // the totals all come from the row as it is now — a certification that
+    // landed since a copy was read was written over and set back (CX21-521),
+    // and a figure changed since was restated from the copy (CX21-532).
+    if (tx.$queryRaw) await tx.$queryRaw`SELECT id FROM "SubValuation" WHERE id = ${valuationId} FOR UPDATE`;
+    const existing = await tx.subValuation.findFirst({ where: { id: valuationId, projectId } });
+    if (!existing) throw new HttpError(404, 'SUB_VALUATION_NOT_FOUND', 'Sub valuation not found');
+    if (existing.status !== found.status) {
+      const error = new HttpError(409, 'SUB_VALUATION_CHANGED', `${found.ref} is now ${existing.status}; reload it and decide again`);
+      error.details = { ref: found.ref, status: existing.status };
+      throw error;
+    }
+
+    // The free-text name records who was billed at the time. Attribution belongs
+    // on companyId beside it; rewriting the name would edit the historical record
+    // to look like something it was not.
+    if (
+      payload.subcontractor !== undefined &&
+      String(payload.subcontractor).trim() !== existing.subcontractor
+    ) {
+      const error = new HttpError(
+        409,
+        'SUB_VALUATION_NAME_IMMUTABLE',
+        `${existing.ref} was raised against "${existing.subcontractor}". That name is the record of who was billed and cannot be rewritten — attribute the valuation to a company instead.`,
+      );
+      error.details = { subcontractor: existing.subcontractor, attributeWith: 'companyId' };
+      throw error;
+    }
+
+    // A certified or paid valuation holds figures that were agreed. Nothing may
+    // restate them — not an edit, and not the recompute that a save would
+    // otherwise run over them as a side effect of attributing a company.
+    const frozen = HISTORICAL_STATUSES.includes(existing.status);
+    // Marking a valuation certified or paid is the certifying or paying
+    // authority's act; an edit that leaves the status where it is needs neither
+    // (Phase 21D, CX21-513, CX21-527).
+    if (authority && payload.status !== undefined && payload.status !== existing.status) {
+      if (payload.status === 'paid' && !authority.pay) throw new HttpError(403, 'FORBIDDEN', 'Marking a valuation paid needs payment authority');
+      if (payload.status === 'certified' && !authority.certify) throw new HttpError(403, 'FORBIDDEN', 'Certifying a valuation needs certification authority');
+    }
+    if (frozen && payload.status !== undefined && payload.status !== existing.status) {
+      // Set back to draft, a paid valuation's agreed figures were editable again
+      // and the record deletable; the status of a historical record is not an
+      // edit's to change (Phase 21D, CX21-513).
       const error = new HttpError(
         409,
         'SUB_VALUATION_HISTORICAL',
-        `${existing.ref} is ${existing.status}. Its figures were agreed and cannot be restated.`,
+        `${existing.ref} is ${existing.status}. Its status is the record of what was agreed and cannot be changed by an edit.`,
       );
-      error.details = { ref: existing.ref, status: existing.status, fields: attempted };
+      error.details = { ref: existing.ref, status: existing.status, fields: ['status'] };
       throw error;
     }
-  }
-
-  const nextValues = frozen
-    ? {
-        grossPayable: existing.grossPayable,
-        retentionRate: existing.retentionRate,
-        retention: existing.retention,
-        netPayable: existing.netPayable,
+    if (frozen) {
+      const MONEY_FIELDS = ['workDone', 'materialsOnSite', 'retentionRate', 'backCharges'];
+      const attempted = MONEY_FIELDS.filter(
+        (field) =>
+          payload[field] !== undefined &&
+          Number(payload[field]) !== Number(existing[field]),
+      );
+      if (attempted.length) {
+        const error = new HttpError(
+          409,
+          'SUB_VALUATION_HISTORICAL',
+          `${existing.ref} is ${existing.status}. Its figures were agreed and cannot be restated.`,
+        );
+        error.details = { ref: existing.ref, status: existing.status, fields: attempted };
+        throw error;
       }
-    : computeFinancials({
-        workDone: payload.workDone ?? existing.workDone,
-        materialsOnSite: payload.materialsOnSite ?? existing.materialsOnSite,
-        retentionRate: payload.retentionRate ?? existing.retentionRate,
-        backCharges: payload.backCharges ?? existing.backCharges,
-      });
-
-  return prisma.$transaction(async (tx) => {
-    // The row is held and read again before anything is written: the
-    // historical checks above were made on a copy, and a certification
-    // that landed since was written over — and set back (Phase 21D,
-    // CX21-521).
-    if (tx.$queryRaw) await tx.$queryRaw`SELECT id FROM "SubValuation" WHERE id = ${valuationId} FOR UPDATE`;
-    const held = await tx.subValuation.findFirst({ where: { id: valuationId, projectId }, select: { status: true } });
-    if (!held) throw new HttpError(404, 'SUB_VALUATION_NOT_FOUND', 'Sub valuation not found');
-    if (held.status !== existing.status) {
-      const error = new HttpError(409, 'SUB_VALUATION_CHANGED', `${existing.ref} is now ${held.status}; reload it and decide again`);
-      error.details = { ref: existing.ref, status: held.status };
-      throw error;
     }
+
+    const nextValues = frozen
+      ? {
+          grossPayable: existing.grossPayable,
+          retentionRate: existing.retentionRate,
+          retention: existing.retention,
+          netPayable: existing.netPayable,
+        }
+      : computeFinancials({
+          workDone: payload.workDone ?? existing.workDone,
+          materialsOnSite: payload.materialsOnSite ?? existing.materialsOnSite,
+          retentionRate: payload.retentionRate ?? existing.retentionRate,
+          backCharges: payload.backCharges ?? existing.backCharges,
+        });
+
     const updated = await tx.subValuation.update({
       where: { id: valuationId },
       data: {
@@ -597,6 +620,7 @@ const deleteSubValuation = async ({
   projectId,
   valuationId,
   userId = null,
+  projectAccess = null,
 }) => {
   await ensureProject({ orgId, projectId });
 
@@ -610,6 +634,11 @@ const deleteSubValuation = async ({
       'SUB_VALUATION_NOT_FOUND',
       'Sub valuation not found',
     );
+  }
+
+  const companyIds = partyCompanyIds(projectAccess);
+  if (companyIds && !companyIds.includes(existing.companyId)) {
+    throw new HttpError(404, 'SUB_VALUATION_NOT_FOUND', 'Sub valuation not found'); // a party's own only (CX21-531)
   }
 
   // A certified or paid valuation is money the project committed to or paid

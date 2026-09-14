@@ -340,3 +340,21 @@ describe("Phase 21D — integrity (release challenge, eleventh pass)", () => {
     expect(keyed.canRead("submittal")).toBe(false);
   });
 });
+
+describe("Phase 21D — integrity (release challenge, twelfth pass)", () => {
+  it("CX21-530: the viewer handed to the content search carries a party-scoped person's parties, and nothing for a member", async () => {
+    mockPrisma.project.findMany.mockResolvedValue([projectRow({ parties: [projectParty()] })]);
+    mockPrisma.drawingRecord = { findMany: jest.fn(async () => []) };
+    mockPrisma.documentRevision = { findMany: jest.fn(async () => []) };
+    mockSearchDocumentContent.mockClear();
+    await searchService.globalSearch({ orgId: "org-1", userId: "user-1", role: "site_engineer", query: { q: "slab", type: "document" } });
+    const viewer = mockSearchDocumentContent.mock.calls[0][0].viewerFor("project-1");
+    expect(viewer.partyIds).toEqual(["party-1"]);
+    mockPrisma.project.findMany.mockResolvedValue([projectRow({ assignments: [{ role: "pm" }] })]);
+    mockSearchDocumentContent.mockClear();
+    await searchService.globalSearch({ orgId: "org-1", userId: "user-1", role: "pm", query: { q: "slab", type: "document" } });
+    expect(mockSearchDocumentContent.mock.calls[0][0].viewerFor("project-1").partyIds).toBeNull();
+    delete mockPrisma.drawingRecord;
+    delete mockPrisma.documentRevision;
+  });
+});

@@ -1191,7 +1191,10 @@ const globalSearch = async ({
     const accessByProject = new Map(projects.map(({ project, access }) => [project.id, access]));
     const viewerFor = (id) => {
       const access = accessByProject.get(id);
-      return { canRead: (moduleName) => Boolean(access) && canReadModule(access, moduleName) && (!apiClient || require("./api-client.service").scopeAllows(apiClient, moduleName, "read")) };
+      return {
+        canRead: (moduleName) => Boolean(access) && canReadModule(access, moduleName) && (!apiClient || require("./api-client.service").scopeAllows(apiClient, moduleName, "read")),
+        partyIds: access && isPartyScopedAccess(access) ? partyIdsFor(access) : null, // routed records through the party only (CX21-530)
+      };
     };
     if (contentProjectIds.length) {
       try {

@@ -52,3 +52,20 @@ describe("Phase 21D — integrity (release challenge, eleventh pass)", () => {
     expect(where.AND || []).toEqual([]);
   });
 });
+
+describe("Phase 21D — integrity (release challenge, twelfth pass)", () => {
+  afterEach(() => { delete mockPrisma.projectAssignment; delete mockPrisma.projectPartyMember; });
+
+  it("CX21-536: a project reached only through a party membership narrows a wide role to its own tasks there, and a role that sees every project is not narrowed by an assignment", async () => {
+    mockPrisma.projectAssignment = { findMany: jest.fn(async () => []) };
+    mockPrisma.projectPartyMember = { findMany: jest.fn(async () => [{ projectParty: { projectId: "p5" } }]) };
+    await service.listTasks({ orgId: "org-1", userId: "u1", role: "planning_eng", query: {} });
+    let where = mockPrisma.task.findMany.mock.calls.at(-1)[0].where;
+    expect(where.AND).toEqual(expect.arrayContaining([{ OR: [{ projectId: { notIn: ["p5"] } }, { OR: [{ assigneeId: "u1" }, { createdById: "u1" }] }] }]));
+    expect(mockPrisma.projectPartyMember.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({ userId: "u1", status: "active", projectParty: { status: "active" } }) }));
+    mockPrisma.projectAssignment.findMany.mockResolvedValue([{ projectId: "p9", role: "site_engineer" }]);
+    await service.listTasks({ orgId: "org-1", userId: "u1", role: "pm", query: {} });
+    where = mockPrisma.task.findMany.mock.calls.at(-1)[0].where;
+    expect(where.AND || []).toEqual([]);
+  });
+});

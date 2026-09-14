@@ -154,3 +154,17 @@ describe("Phase 21D — integrity (release challenge, fourth pass)", () => {
     await request(app).post(`/projects/project-1/jobs/${JOB_ID}/retry`).set("x-role", "pm").set("x-api-scopes", "*:write").expect(202);
   });
 });
+
+describe("Phase 21D — integrity (release challenge, twelfth pass)", () => {
+  it("CX21-533: a job is listed and read under its module's read permission — a key with only a BOQ scope sees BOQ jobs only; a PM sees them all", async () => {
+    const app = buildApp();
+    mockJobService.listJobs.mockResolvedValue({ items: [{ id: "j1", type: "boq.parse" }, { id: "j2", type: "schedule.generate", payload: { rows: 3 } }], summary: {} });
+    const keyed = await request(app).get(`/projects/22222222-2222-4222-8222-222222222222/jobs`).set("x-role", "pm").set("x-api-scopes", "boq:read");
+    expect(keyed.status).toBe(200);
+    expect(keyed.body.data.items.map((job) => job.id)).toEqual(["j1"]);
+    mockJobService.getJob.mockResolvedValue({ id: JOB_ID, type: "schedule.generate" });
+    expect((await request(app).get(`/projects/22222222-2222-4222-8222-222222222222/jobs/${JOB_ID}`).set("x-role", "pm").set("x-api-scopes", "boq:read")).status).toBe(404);
+    const pm = await request(app).get(`/projects/22222222-2222-4222-8222-222222222222/jobs`).set("x-role", "pm");
+    expect(pm.body.data.items).toHaveLength(2);
+  });
+});

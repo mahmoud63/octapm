@@ -27,6 +27,7 @@ router.get(
     const data = await listSubValuations({
       orgId: req.user.orgId,
       projectId: req.params.projectId,
+      projectAccess: req.projectAccess || null,
     });
 
     return sendSuccess(res, data);
@@ -114,6 +115,7 @@ router.patch(
       userId: req.user.id,
       payload: req.body,
       authority: statusAuthority(req),
+      projectAccess: req.projectAccess || null,
     });
 
     return sendSuccess(res, row);
@@ -130,6 +132,7 @@ router.delete(
       projectId: req.params.projectId,
       valuationId: req.params.valuationId,
       userId: req.user.id,
+          projectAccess: req.projectAccess || null,
     });
 
     return sendSuccess(res, data);

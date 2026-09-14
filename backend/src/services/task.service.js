@@ -642,9 +642,24 @@ const listTasks = async ({
     const wide = (candidate) => PROJECT_WIDE_TASK_ROLES.has(normalizeRoleId(candidate)) || canAccessAllProjects(normalizeRoleId(candidate));
     const assignments = await prisma.projectAssignment.findMany({ where: { userId }, select: { projectId: true, role: true } });
     const own = [{ assigneeId: userId }, { createdById: userId }];
-    if (wide(role)) {
-      const narrowly = assignments.filter((assignment) => !wide(assignment.role)).map((assignment) => assignment.projectId);
-      if (narrowly.length) where.AND = [...(where.AND || []), { OR: [{ projectId: { notIn: narrowly } }, { OR: own }] }];
+    // A role that sees every project is not narrowed by an assignment — the
+    // project's own mount does not load one for it (the twelfth pass's note).
+    if (canAccessAllProjects(normalizeRoleId(role))) {
+      // nothing to narrow
+    } else if (wide(role)) {
+      const narrowly = new Set(assignments.filter((assignment) => !wide(assignment.role)).map((assignment) => assignment.projectId));
+      // A project reached only through a party membership is seen as a party
+      // sees it — own tasks only — as the project's own mount resolves it
+      // (Phase 21D, CX21-536).
+      if (prisma.projectPartyMember?.findMany) {
+        const assigned = new Set(assignments.map((assignment) => assignment.projectId));
+        const memberships = await prisma.projectPartyMember.findMany({ where: { userId, status: "active", projectParty: { status: "active" } }, select: { projectParty: { select: { projectId: true } } } });
+        for (const membership of memberships) {
+          const id = membership.projectParty?.projectId;
+          if (id && !assigned.has(id)) narrowly.add(id);
+        }
+      }
+      if (narrowly.size) where.AND = [...(where.AND || []), { OR: [{ projectId: { notIn: [...narrowly] } }, { OR: own }] }];
     } else {
       const widely = assignments.filter((assignment) => wide(assignment.role)).map((assignment) => assignment.projectId);
       if (widely.length) {

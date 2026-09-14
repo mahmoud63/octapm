@@ -250,9 +250,12 @@ const totalsOf = (lines, tax) => {
   return { subtotal, total: round2(subtotal + toNumber(tax)) };
 };
 
-const assertNoDuplicateInvoice = async ({ projectId, vendorCompanyId, vendorName, invoiceNumber, excludeId = null }) => {
+const invoiceLockKey = ({ projectId, vendorCompanyId, vendorName, invoiceNumber }) =>
+  `direct-cost-invoice:${projectId}:${String(vendorCompanyId || vendorName || "").toLowerCase()}:${String(invoiceNumber || "").toLowerCase()}`;
+
+const assertNoDuplicateInvoice = async ({ projectId, vendorCompanyId, vendorName, invoiceNumber, excludeId = null, tx = prisma }) => {
   if (!invoiceNumber) return;
-  const clash = await prisma.directCost.findFirst({ where: { projectId, invoiceNumber: { equals: invoiceNumber, mode: "insensitive" }, status: { not: STATUS.VOID }, ...(excludeId ? { id: { not: excludeId } } : {}), ...(vendorCompanyId ? { vendorCompanyId } : vendorName ? { vendorName: { equals: vendorName, mode: "insensitive" } } : {}) }, select: { id: true, ref: true } });
+  const clash = await tx.directCost.findFirst({ where: { projectId, invoiceNumber: { equals: invoiceNumber, mode: "insensitive" }, status: { not: STATUS.VOID }, ...(excludeId ? { id: { not: excludeId } } : {}), ...(vendorCompanyId ? { vendorCompanyId } : vendorName ? { vendorName: { equals: vendorName, mode: "insensitive" } } : {}) }, select: { id: true, ref: true } });
   if (clash) throw new HttpError(409, "DIRECT_COST_DUPLICATE_INVOICE", `Invoice ${invoiceNumber} from this vendor is already recorded as ${clash.ref}`, { directCostId: clash.id, ref: clash.ref });
 };
 
@@ -305,6 +308,14 @@ const createDirectCost = async ({ orgId, projectId, payload = {}, actor = null }
   await assertNoDuplicateInvoice({ projectId, vendorCompanyId: header.vendorCompanyId, vendorName: header.vendorName, invoiceNumber: header.invoiceNumber });
   const totals = totalsOf(lines, header.tax);
   const created = await prisma.$transaction(async (tx) => {
+    // The invoice identity (project, vendor, number) is held before the
+    // duplicate check is made again: two receptions of the same invoice
+    // arriving together each passed the check and both were recorded,
+    // approvable and payable twice (Phase 21D, CX21-534).
+    if (header.invoiceNumber && tx.$executeRaw) {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${invoiceLockKey({ projectId, vendorCompanyId: header.vendorCompanyId, vendorName: header.vendorName, invoiceNumber: header.invoiceNumber })}))`;
+      await assertNoDuplicateInvoice({ projectId, vendorCompanyId: header.vendorCompanyId, vendorName: header.vendorName, invoiceNumber: header.invoiceNumber, tx });
+    }
     const number = await nextNumber(tx, projectId);
     const row = await tx.directCost.create({ data: { ...header, ...totals, orgId, projectId, number, ref: `DC-${String(number).padStart(3, "0")}`, status: STATUS.DRAFT, createdBy: actor?.id || null, updatedBy: actor?.id || null } });
     if (lines.length) await tx.directCostLine.createMany({ data: lines.map(({ id, ...line }) => ({ ...line, orgId, projectId, directCostId: row.id })) });
@@ -341,7 +352,8 @@ const updateDirectCost = async ({ orgId, projectId, directCostId, payload = {}, 
         }
       }
     }
-    await assertNoDuplicateInvoice({ projectId, vendorCompanyId: header.vendorCompanyId, vendorName: header.vendorName, invoiceNumber: header.invoiceNumber, excludeId: directCostId });
+    if (header.invoiceNumber && tx.$executeRaw) await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${invoiceLockKey({ projectId, vendorCompanyId: header.vendorCompanyId, vendorName: header.vendorName, invoiceNumber: header.invoiceNumber })}))`; // the invoice identity, as on creation (CX21-534)
+    await assertNoDuplicateInvoice({ projectId, vendorCompanyId: header.vendorCompanyId, vendorName: header.vendorName, invoiceNumber: header.invoiceNumber, excludeId: directCostId, tx });
     const totals = totalsOf(lines, header.tax);
     await tx.directCost.update({ where: { id: directCostId }, data: { ...header, ...totals, updatedBy: actor?.id || null } });
     if (payload.lines !== undefined) {

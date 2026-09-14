@@ -1066,3 +1066,26 @@ describe("Phase 21D — integrity (release challenge, eighth pass)", () => {
     expect(where).toMatchObject({ fromWarehouse: scope, toWarehouse: scope, lines: { every: { item: scope } } });
   });
 });
+
+describe("Phase 21D — integrity (release challenge, twelfth pass)", () => {
+  afterEach(() => { delete mockPrisma.costCode; delete mockPrisma.boqItem; delete mockPrisma.commitment; });
+
+  it("CX21-535: the references a movement carries are this organisation's and this project's — a foreign cost code, BOQ item or commitment is refused and nothing moves", async () => {
+    const item = seedItem();
+    const warehouse = seedWarehouse();
+    await service.receiveStock({ orgId: ORG, user: USER, payload: { itemId: item.id, warehouseId: warehouse.id, quantity: 10, unitCost: 10 } });
+    mockPrisma.costCode = { findFirst: jest.fn(async () => null) };
+    await expect(service.issueStock({ orgId: ORG, user: USER, payload: { itemId: item.id, warehouseId: warehouse.id, quantity: 1, activityId: "activity-1", projectId: "project-1", costCodeId: "cc-of-another-tenant" } })).rejects.toMatchObject({ status: 404, code: "COST_CODE_NOT_FOUND" });
+    expect(mockPrisma.costCode.findFirst).toHaveBeenCalledWith(expect.objectContaining({ where: { id: "cc-of-another-tenant", orgId: ORG }, select: { id: true } }));
+    mockPrisma.boqItem = { findFirst: jest.fn(async () => null) };
+    await expect(service.issueStock({ orgId: ORG, user: USER, payload: { itemId: item.id, warehouseId: warehouse.id, quantity: 1, activityId: "activity-1", projectId: "project-1", boqItemId: "boq-of-another-project" } })).rejects.toMatchObject({ status: 404, code: "BOQ_ITEM_NOT_FOUND" });
+    mockPrisma.commitment = { findFirst: jest.fn(async () => null) };
+    await expect(service.issueStock({ orgId: ORG, user: USER, payload: { itemId: item.id, warehouseId: warehouse.id, quantity: 1, activityId: "activity-1", projectId: "project-1", commitmentId: "cm-of-another-project" } })).rejects.toMatchObject({ status: 404, code: "COMMITMENT_NOT_FOUND" });
+    // (the balance is adjusted before the references are checked; the database transaction rolls it back — this fake store does not)
+    // and the project's own references pass
+    mockPrisma.boqItem.findFirst.mockResolvedValue({ id: "boq-1" });
+    const { movements } = await service.issueStock({ orgId: ORG, user: USER, payload: { itemId: item.id, warehouseId: warehouse.id, quantity: 1, activityId: "activity-1", projectId: "project-1", boqItemId: "boq-1" } });
+    expect(movements).toHaveLength(1);
+    expect(mockPrisma.boqItem.findFirst).toHaveBeenLastCalledWith(expect.objectContaining({ where: { id: "boq-1", projectId: "project-1" } }));
+  });
+});

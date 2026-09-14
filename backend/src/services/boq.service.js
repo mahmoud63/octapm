@@ -1719,17 +1719,38 @@ async function deleteBoqItem(projectId, itemId, options = {}) {
           updatedBy: options.userId || null,
         },
       });
-      await tx.activity.updateMany({
-        where: {
-          id: { in: allocations.map((allocation) => allocation.activityId) },
-        },
-        data: {
-          isActive: false,
-          retiredAt: new Date(),
-          retiredBy: options.userId || null,
-          retiredReason: 'Manual BOQ row deleted before allocation approval',
-        },
-      });
+      // Only an activity the row itself minted — created with the row and
+      // carrying nothing else — retires with it. An activity the row was
+      // merely allocated to keeps its schedule and its cost history: this
+      // delete retired a live activity with stock issued against it
+      // (Phase 21D, P21-169, found by the twenty-third loop's own probe).
+      const candidates = tx.activity.findMany
+        ? await tx.activity.findMany({
+            where: { id: { in: allocations.map((allocation) => allocation.activityId) }, projectId, createdAt: { gte: item.createdAt } },
+            select: { id: true },
+          })
+        : [];
+      const minted = [];
+      for (const candidate of candidates) {
+        const footprint = await Promise.all([
+          tx.costLedgerEntry?.count ? tx.costLedgerEntry.count({ where: { activityId: candidate.id } }) : 0,
+          tx.stockTransaction?.count ? tx.stockTransaction.count({ where: { activityId: candidate.id } }) : 0,
+          tx.costRecord?.count ? tx.costRecord.count({ where: { activityId: candidate.id } }) : 0,
+          tx.activityBoqAllocation?.count ? tx.activityBoqAllocation.count({ where: { activityId: candidate.id, isActive: true, boqItemId: { not: itemId } } }) : 0,
+        ]);
+        if (footprint.every((count) => !count)) minted.push(candidate.id);
+      }
+      if (minted.length) {
+        await tx.activity.updateMany({
+          where: { id: { in: minted } },
+          data: {
+            isActive: false,
+            retiredAt: new Date(),
+            retiredBy: options.userId || null,
+            retiredReason: 'Manual BOQ row deleted before allocation approval',
+          },
+        });
+      }
     }
 
     await tx.boqItem.delete({ where: { id: itemId } });

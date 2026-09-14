@@ -456,14 +456,51 @@ const snippetText = (headline) => String(headline || "").replace(/\[\[|\]\]/g, "
  * linked from (document control register, or a record module through the
  * attachment table). Unlinked uploads fall under document control.
  */
-const documentVisible = (document, viewer) => {
+/**
+ * Records routed between parties (RFIs, submittals — owner, reviewer,
+ * approver party): for a party-scoped viewer, an attachment to one of them
+ * counts only when the record is routed to one of the viewer's parties. A
+ * subcontractor with RFI read could reach, through the document, the text
+ * of another subcontractor's RFI it could not open (Phase 21D, CX21-530).
+ */
+const PARTY_ROUTED_MODELS = Object.freeze({ rfi: "rfi", submittal: "submittal" });
+
+/** The party-routed records among these documents' attachments that the viewer's parties may see; null for a viewer that is not party-scoped. */
+const partyRoutedRecordIds = async ({ documents, viewer }) => {
+  if (!Array.isArray(viewer?.partyIds)) return null;
+  const wanted = {};
+  for (const document of documents) {
+    for (const attachment of document?.attachments || []) {
+      const model = PARTY_ROUTED_MODELS[attachment.recordType];
+      if (model) (wanted[model] ||= new Set()).add(attachment.recordId);
+    }
+  }
+  const visible = new Set();
+  for (const [model, ids] of Object.entries(wanted)) {
+    if (!ids.size || !viewer.partyIds.length || !prisma[model]?.findMany) continue;
+    const rows = await prisma[model].findMany({
+      where: { id: { in: [...ids] }, OR: [{ ownerPartyId: { in: viewer.partyIds } }, { reviewerPartyId: { in: viewer.partyIds } }, { approverPartyId: { in: viewer.partyIds } }] },
+      select: { id: true },
+    });
+    for (const row of rows) visible.add(`${model}:${row.id}`);
+  }
+  return visible;
+};
+
+const documentVisible = (document, viewer, partyVisible = null) => {
   if (!viewer?.canRead) return true;
   const modules = new Set();
   if (document.documentRevisions?.length) modules.add("document_control");
+  let routedAway = 0;
   for (const attachment of document.attachments || []) {
+    const model = PARTY_ROUTED_MODELS[attachment.recordType];
+    if (partyVisible && model && !partyVisible.has(`${model}:${attachment.recordId}`)) { routedAway += 1; continue; }
     modules.add(RECORD_TYPE_MODULES[attachment.recordType] || "document_control");
   }
-  if (!modules.size) modules.add("document_control");
+  if (!modules.size) {
+    if (routedAway) return false; // linked only to records routed to other parties
+    modules.add("document_control");
+  }
   return [...modules].some((moduleName) => viewer.canRead(moduleName));
 };
 
@@ -591,9 +628,10 @@ const searchDocuments = async ({
   const byId = new Map(documents.map((document) => [document.id, document]));
   const maxRank = Math.max(...rows.map((row) => Number(row.rank) || 0), 0.000001);
 
+  const partyVisible = await partyRoutedRecordIds({ documents, viewer }); // routed records, for a party-scoped viewer (CX21-530)
   const items = ids
     .map((id) => byId.get(id))
-    .filter((document) => document && documentVisible(document, viewer))
+    .filter((document) => document && documentVisible(document, viewer, partyVisible))
     .map((document) => {
       const ranked = rankById.get(document.id);
       const hit = semanticHits.get(document.id) || null;
@@ -644,11 +682,20 @@ const searchDocumentContent = async ({ orgId, projectIds, q, limit = 10, viewerF
     include: documentInclude,
   });
   const byId = new Map(documents.map((document) => [document.id, document]));
+  // a party-scoped viewer's routed records, resolved per project (CX21-530)
+  const partyVisibleByProject = new Map();
+  if (viewerFor) {
+    for (const document of documents) {
+      if (partyVisibleByProject.has(document.projectId)) continue;
+      const viewer = viewerFor(document.projectId);
+      partyVisibleByProject.set(document.projectId, await partyRoutedRecordIds({ documents: documents.filter((row) => row.projectId === document.projectId), viewer }));
+    }
+  }
   return rows
     .map((row) => {
       const document = byId.get(row.documentId);
       if (!document) return null;
-      if (viewerFor && !documentVisible(document, viewerFor(document.projectId))) return null;
+      if (viewerFor && !documentVisible(document, viewerFor(document.projectId), partyVisibleByProject.get(document.projectId))) return null;
       return serializeHit({ document, rank: row.rank, headline: row.headline });
     })
     .filter(Boolean);
@@ -660,7 +707,8 @@ const getDocumentText = async ({ orgId, projectId, documentId, viewer = null, ma
     include: { ...documentInclude, text: true },
   });
   if (!document) throw new HttpError(404, "DOCUMENT_NOT_FOUND", "Document not found");
-  if (!documentVisible(document, viewer)) {
+  const partyVisible = await partyRoutedRecordIds({ documents: [document], viewer });
+  if (!documentVisible(document, viewer, partyVisible)) {
     throw new HttpError(403, "FORBIDDEN", "You do not have permission to view this document");
   }
   return {
@@ -674,6 +722,7 @@ module.exports = {
   EMBEDDING_STATUS,
   TEXT_STATUS,
   documentVisible,
+  partyRoutedRecordIds,
   enqueueExtraction,
   getDocumentText,
   getIndexStatus,

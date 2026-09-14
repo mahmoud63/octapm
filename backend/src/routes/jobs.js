@@ -36,6 +36,11 @@ const JOB_MODULE_BY_TYPE = Object.freeze({
   [jobService.JOB_TYPES.PORTFOLIO_REFRESH]: "portfolio",
 });
 
+// A job is read under the read permission of the module it belongs to — a
+// key with only a BOQ scope listed every module's jobs with their payloads
+// and results (Phase 21D, CX21-533).
+const canReadJob = (req, job) => hasPermission(req, JOB_MODULE_BY_TYPE[job.type] || "schedule", "read");
+
 const assertCanManageJob = (req, job) => {
   const moduleName = JOB_MODULE_BY_TYPE[job.type] || "schedule";
   // The same decision every write goes through — role, project template,
@@ -67,7 +72,8 @@ router.get(
       projectId: req.params.projectId,
       query: req.query,
     });
-    return sendSuccess(res, result);
+    const items = (result.items || []).filter((job) => canReadJob(req, job));
+    return sendSuccess(res, { ...result, items });
   }),
 );
 
@@ -80,7 +86,7 @@ router.get(
       projectId: req.params.projectId,
       jobId: req.params.jobId,
     });
-    if (!job) {
+    if (!job || !canReadJob(req, job)) {
       throw new HttpError(404, "JOB_NOT_FOUND", "Job not found or expired");
     }
     return sendSuccess(res, job);

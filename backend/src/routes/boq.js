@@ -10,7 +10,23 @@ const {
   aiGenerationLimiter,
   uploadLimiter,
 } = require('../middleware/rate-limit');
-const { getEffectiveRole, requirePermission, requireRoles } = require('../middleware/rbac');
+const { getEffectiveRole, hasPermission, requirePermission, requireRoles } = require('../middleware/rbac');
+const { JOB_TYPES } = require('../jobs/job.service');
+
+// The BOQ job routes are for BOQ jobs: the polling and the retry took any
+// job of the project — a failed schedule import could be re-queued from
+// here under the BOQ guard (Phase 21D, CX21-533).
+const boqJobOnly = (job) => {
+  if (!job || job.type !== JOB_TYPES.BOQ_PARSE) throw new HttpError(404, 'JOB_NOT_FOUND', 'Job not found or expired');
+  return job;
+};
+// The upload polls its job's status: someone the template lets upload (BOQ
+// create) but not read must still see their upload finish (the twelfth
+// pass's note on CX21-526).
+const canPollBoqJob = (req, res, next) =>
+  hasPermission(req, 'boq', 'read') || hasPermission(req, 'boq', 'create')
+    ? next()
+    : next(Object.assign(new HttpError(403, 'FORBIDDEN', 'You do not have permission for this action'), { details: { module: 'boq', action: 'read', source: req.projectAccess?.template ? 'template' : 'role' } }));
 const boqService = require('../services/boq.service');
 const fileStorageService = require('../services/file-storage.service');
 const jobService = require('../jobs/job.service');
@@ -169,14 +185,13 @@ router.get(
 router.get(
   '/job/:jobId',
   authenticate,
-  requirePermission('boq', 'read'),
+  canPollBoqJob,
   asyncHandler(async (req, res) => {
-    const job = await jobService.getLegacyJob({
+    const job = boqJobOnly(await jobService.getLegacyJob({
       orgId: req.user.orgId,
       projectId: req.params.projectId,
       jobId: req.params.jobId,
-    });
-    if (!job) throw new HttpError(404, 'JOB_NOT_FOUND', 'Job not found or expired');
+    }));
     return sendSuccess(res, job);
   }),
 );
@@ -185,8 +200,9 @@ router.get(
 router.post(
   '/job/:jobId/retry',
   authenticate,
-  CAN_MODIFY,
+  requirePermission('boq', 'update'),
   asyncHandler(async (req, res) => {
+    boqJobOnly(await jobService.getLegacyJob({ orgId: req.user.orgId, projectId: req.params.projectId, jobId: req.params.jobId }));
     await jobService.retryJob({
       orgId: req.user.orgId,
       projectId: req.params.projectId,
@@ -287,11 +303,13 @@ router.post(
   }),
 );
 
-// DELETE /projects/:projectId/boq/items/:itemId
+// DELETE /projects/:projectId/boq/items/:itemId — deletion is the BOQ delete
+// permission's (PM only in the policy); the shared modification list let a
+// QS or planning engineer remove rows (Phase 21D, CX21-537).
 router.delete(
   '/items/:itemId',
   authenticate,
-  CAN_MODIFY,
+  requirePermission('boq', 'delete'),
   asyncHandler(async (req, res) => {
     const result = await boqService.deleteBoqItem(
       req.params.projectId,
@@ -369,7 +387,7 @@ router.patch(
 router.delete(
   '/activities/:activityId',
   authenticate,
-  CAN_MODIFY,
+  requirePermission('boq', 'delete'),
   asyncHandler(async (req, res) => {
     await boqService.deleteActivity(
       req.params.projectId,

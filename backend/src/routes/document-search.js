@@ -19,6 +19,10 @@ router.use(authenticate);
 const viewerFor = (req) => ({
   id: req.user.id,
   canRead: (moduleName) => hasPermission(req, moduleName, "read"),
+  // a party-scoped person sees party-routed records through their parties only (CX21-530)
+  partyIds: require("../services/company-party.service").isPartyScopedAccess(req.projectAccess || {})
+    ? (req.projectAccess?.partyAccess || []).map((party) => party.projectPartyId).filter(Boolean)
+    : null,
 });
 
 router.get(

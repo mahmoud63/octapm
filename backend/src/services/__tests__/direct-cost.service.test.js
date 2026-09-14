@@ -427,3 +427,18 @@ describe("Phase 21D — integrity (Codex round 4)", () => {
     expect(store.lines.filter((row) => row.directCostId === cost.id)).toHaveLength(2);
   });
 });
+
+describe("Phase 21D — integrity (release challenge, twelfth pass)", () => {
+  it("CX21-534: the invoice identity is held before the duplicate check is made again — two receptions of one invoice cannot both pass", async () => {
+    mockPrisma.$executeRaw = jest.fn(async () => 0);
+    const spy = jest.spyOn(mockPrisma.directCost, "findFirst");
+    await service.createDirectCost({ ...scope, actor, payload: { type: "invoice", vendorCompanyId: "co-1", invoiceNumber: "INV-DUP-1", description: "Cement", costDate: "2026-09-01", lines: [{ description: "x", costCodeId: "cc-conc", activityId: "act-1", amount: 10 }] } });
+    const lock = mockPrisma.$executeRaw.mock.calls.find(([strings, ...values]) => Array.isArray(strings) && strings.join("?").includes("pg_advisory_xact_lock") && values.includes("direct-cost-invoice:p1:co-1:inv-dup-1"));
+    expect(lock).toBeDefined();
+    const checks = spy.mock.calls.filter(([args]) => args?.where?.invoiceNumber);
+    expect(checks.length).toBeGreaterThanOrEqual(2); // before the lock, and again under it
+    expect(mockPrisma.$executeRaw.mock.invocationCallOrder[0]).toBeLessThan(spy.mock.invocationCallOrder.at(-1));
+    spy.mockRestore();
+    delete mockPrisma.$executeRaw;
+  });
+});
