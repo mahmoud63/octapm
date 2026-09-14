@@ -2,7 +2,8 @@ const express = require("express");
 const { asyncHandler } = require("../utils/async-handler");
 const { body, param } = require("express-validator");
 const { validate } = require("../middleware/validate");
-const { requirePermission } = require("../middleware/rbac");
+const { requirePermission, hasPermission } = require("../middleware/rbac");
+const { HttpError } = require("../utils/http-error");
 const { sendSuccess } = require("../utils/api-response");
 const { moneyBody } = require("../utils/money");
 const {
@@ -64,9 +65,24 @@ router.post(
   }),
 );
 
+// Marking a valuation certified or paid is the certifying or paying
+// authority's act, not any editor's: the edit accepted the status from
+// whoever could edit (Phase 21D, CX21-513).
+const statusAuthority = (req, res, next) => {
+  const status = req.body?.status;
+  if (status === "paid" && !hasPermission(req, "sub_pay_app", "approve", { transition: "sub_pay_app.pay" })) {
+    return next(new HttpError(403, "FORBIDDEN", "Marking a valuation paid needs payment authority"));
+  }
+  if (status === "certified" && !hasPermission(req, "sub_pay_app", "certify")) {
+    return next(new HttpError(403, "FORBIDDEN", "Certifying a valuation needs certification authority"));
+  }
+  return next();
+};
+
 router.patch(
   "/:valuationId",
   requirePermission("sub_pay_app", "update"),
+  statusAuthority,
   [
     param("valuationId").isUUID(),
     // Attribution to a real company. The free-text name is immutable — see

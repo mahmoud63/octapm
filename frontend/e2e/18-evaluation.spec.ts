@@ -26,7 +26,8 @@ async function withApi<T>(fn: (client: APIRequestContext, token: string) => Prom
 /** The seeded, executed subcontract — the one with real work behind it. */
 async function seededSubcontract(projectId: string) {
   return withApi(async (client, token) => {
-    const { body } = await apiGet(client, `/projects/${projectId}/commitments`, token)
+    // asked for by reference: the list answers its first 500 rows, and the runs' residue has pushed the seeded one past them (T-19)
+    const { body } = await apiGet(client, `/projects/${projectId}/commitments?search=SC-0001`, token)
     return (body?.data?.items ?? []).find((row: { ref: string }) => row.ref === 'SC-0001') ?? null
   })
 }

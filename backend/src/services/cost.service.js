@@ -321,7 +321,12 @@ const suppliedCostFields = ({ payload, existing }) => {
     if (payload[field] !== undefined) data[field] = toMoneyNumber(payload[field]);
   }
   if (payload.budget !== undefined) data.budget = toMoneyNumber(payload.budget);
-  if (payload.committed !== undefined) data.committed = toMoneyNumber(payload.committed);
+  // committed is written only when it differs from the row's: an echo of the
+  // figure read is not written back over a recompute that landed since the
+  // read (Phase 21D, CX21-511)
+  if (payload.committed !== undefined && Math.abs(toMoneyNumber(payload.committed) - toMoneyNumber(existing?.committed ?? 0)) > 0.005) {
+    data.committed = toMoneyNumber(payload.committed);
+  }
   const actualThroughDate = resolveActualThroughDate({ payload });
   if (actualThroughDate !== undefined) data.actualThroughDate = actualThroughDate;
   if (payload.forecast !== undefined && payload.forecast !== null) {

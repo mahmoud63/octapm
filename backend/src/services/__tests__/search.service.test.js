@@ -272,3 +272,38 @@ describe("Phase 21D — integrity (release challenge, third pass)", () => {
     expect(none.items).toEqual([]);
   });
 });
+
+describe("Phase 21D — integrity (release challenge, tenth pass)", () => {
+  const rfiRow = () => ({ id: "rfi-9", projectId: "project-1", ref: "RFI-009", subject: "Slab spec", status: "open", priority: "high", dueDate: null, createdAt: new Date("2026-06-10T00:00:00.000Z"), updatedAt: new Date("2026-06-11T00:00:00.000Z") });
+  const template = (id) => ({ id, name: "No RFIs", kind: "internal", baseRole: "pm", status: "active", tools: [{ module: "rfi", level: "none" }], grants: [] });
+
+  afterEach(() => {
+    delete mockPrisma.projectUserPermission;
+    delete mockPrisma.permissionTemplate;
+  });
+
+  it("CX21-514: a project whose permission template refuses a module is not searched for that module — for a member template and for a party template", async () => {
+    mockPrisma.project.findMany.mockResolvedValue([projectRow({ assignments: [{ role: "pm" }] })]);
+    mockPrisma.rfi.findMany.mockResolvedValue([rfiRow()]);
+    mockPrisma.projectUserPermission = { findMany: jest.fn(async () => [{ projectId: "project-1", templateId: "tpl-no-rfi-a", overridesJson: {} }]) };
+    mockPrisma.permissionTemplate = { findFirst: jest.fn(async ({ where }) => template(where.id)) };
+    const denied = await searchService.globalSearch({ orgId: "org-1", userId: "user-1", role: "pm", query: { q: "slab", type: "rfi" } });
+    expect(denied.items.filter((row) => row.type === "rfi")).toHaveLength(0);
+    expect(mockPrisma.rfi.findMany).not.toHaveBeenCalled();
+    expect(mockPrisma.projectUserPermission.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({ userId: "user-1", projectId: { in: ["project-1"] } }) }));
+
+    // through a party's template, when no member template is set
+    mockPrisma.projectUserPermission.findMany.mockResolvedValue([]);
+    mockPrisma.projectParty = { findMany: jest.fn(async () => [{ id: "party-1", projectId: "project-1", permissionTemplateId: "tpl-no-rfi-b" }]) };
+    mockPrisma.project.findMany.mockResolvedValue([projectRow({ parties: [projectParty()] })]);
+    const deniedByParty = await searchService.globalSearch({ orgId: "org-1", userId: "user-1", role: "site_engineer", query: { q: "slab", type: "rfi" } });
+    expect(deniedByParty.items.filter((row) => row.type === "rfi")).toHaveLength(0);
+    expect(mockPrisma.projectParty.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({ id: { in: ["party-1"] }, status: "active" }) }));
+    delete mockPrisma.projectParty;
+
+    // and without a template the role's policy answers as before
+    mockPrisma.project.findMany.mockResolvedValue([projectRow({ assignments: [{ role: "pm" }] })]);
+    const allowed = await searchService.globalSearch({ orgId: "org-1", userId: "user-1", role: "pm", query: { q: "slab", type: "rfi" } });
+    expect(allowed.items.filter((row) => row.type === "rfi")).toHaveLength(1);
+  });
+});

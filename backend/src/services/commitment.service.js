@@ -463,8 +463,13 @@ const recomputeCommitted = async ({ tx = prisma, orgId, projectId }) => {
     const recordByActivity = new Map(records.map((row) => [row.activityId, row.id]));
     for (const [activityId, amount] of byActivity.entries()) {
       const recordId = recordByActivity.get(activityId);
-      if (recordId) await tx.costRecord.update({ where: { id: recordId }, data: { committed: round2(amount) } });
-      else if (tx.costRecord?.create) {
+      if (recordId) {
+        // The pair is held before an existing row is written too: a cost-record
+        // edit decides on the row under that lock, and a recompute that wrote
+        // between its read and its write was written over (Phase 21D, CX21-511).
+        if (tx.$executeRaw) await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`cost-record:${projectId}:${activityId}`}))`;
+        await tx.costRecord.update({ where: { id: recordId }, data: { committed: round2(amount) } });
+      } else if (tx.costRecord?.create) {
         // The pair is held before the row is created, and looked for again
         // under the lock (Phase 21D, CX21-464).
         if (tx.$executeRaw) await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`cost-record:${projectId}:${activityId}`}))`;

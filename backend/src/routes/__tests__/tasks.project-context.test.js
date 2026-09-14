@@ -106,3 +106,19 @@ describe("Phase 21D — integrity (release challenge, ninth pass)", () => {
     expect(mockAssertProjectAccess).not.toHaveBeenCalled();
   });
 });
+
+describe("Phase 21D — integrity (release challenge, tenth pass)", () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    attachedTemplate = null;
+  });
+
+  it("CX21-510: a list asked for one project is that project's list — the access resolved for it is not applied across every project", async () => {
+    const app = buildApp();
+    expect((await request(app).get(`/tasks?projectId=${PROJECT_ID}`)).status).toBe(200);
+    expect(mockTaskService.listTasks).toHaveBeenCalledWith(expect.objectContaining({ projectId: PROJECT_ID, projectAccess: expect.objectContaining({ id: PROJECT_ID }) }));
+    mockTaskService.listTasks.mockClear();
+    expect((await request(app).get("/tasks")).status).toBe(200);
+    expect(mockTaskService.listTasks).toHaveBeenCalledWith(expect.objectContaining({ projectId: null, projectAccess: null }));
+  });
+});

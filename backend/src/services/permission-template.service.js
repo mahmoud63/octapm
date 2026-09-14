@@ -442,7 +442,7 @@ const projectsWhereTemplateDenies = async ({
   }
   if (tx.projectPartyMember?.findMany) {
     const memberships = await tx.projectPartyMember.findMany({
-      where: { userId, status: "active", projectParty: { permissionTemplateId: { not: null } } },
+      where: { userId, status: "active", projectParty: { status: "active", permissionTemplateId: { not: null } } },
       select: { projectParty: { select: { projectId: true, permissionTemplateId: true } } },
     });
     for (const membership of memberships) {
@@ -453,6 +453,39 @@ const projectsWhereTemplateDenies = async ({
     }
   }
   return [...denied];
+};
+
+/**
+ * The compiled template for each of several projects at once — a member
+ * template first, else the template of a party the person belongs to on
+ * that project — resolved as `resolveTemplateContext` resolves one. Search
+ * spans many projects and asks their templates together (Phase 21D,
+ * CX21-514).
+ */
+const templatesForProjects = async ({ tx = prisma, userId, projects = [] }) => {
+  const out = new Map();
+  if (!userId || !projects.length || !tx.projectUserPermission?.findMany) return out;
+  const assignments = await tx.projectUserPermission.findMany({
+    where: { userId, projectId: { in: projects.map((project) => project.id) }, templateId: { not: null } },
+    select: { projectId: true, templateId: true, overridesJson: true },
+  });
+  for (const assignment of assignments) {
+    const compiled = await loadCompiledTemplate({ tx, templateId: assignment.templateId, overrides: assignment.overridesJson || {} });
+    if (compiled) out.set(assignment.projectId, compiled);
+  }
+  const partyIds = projects.flatMap((project) => (out.has(project.id) ? [] : project.partyIds || []));
+  if (partyIds.length && tx.projectParty?.findMany) {
+    const parties = await tx.projectParty.findMany({
+      where: { id: { in: partyIds }, status: "active", permissionTemplateId: { not: null } },
+      select: { id: true, projectId: true, permissionTemplateId: true },
+    });
+    for (const party of parties) {
+      if (out.has(party.projectId)) continue;
+      const compiled = await loadCompiledTemplate({ tx, templateId: party.permissionTemplateId });
+      if (compiled) out.set(party.projectId, compiled);
+    }
+  }
+  return out;
 };
 
 /**
@@ -1396,5 +1429,6 @@ module.exports = {
   setPartyTemplate,
   setProjectUserPermission,
   templateAllows,
+  templatesForProjects,
   updateTemplate,
 };

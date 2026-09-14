@@ -315,3 +315,26 @@ describe('sub valuation traceability', () => {
     });
   });
 });
+
+describe('Phase 21D — integrity (release challenge, tenth pass)', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockPrisma.project.findFirst.mockResolvedValue({ id: 'project-1', orgId: 'org-1', defaultRetentionRate: 5 });
+    mockPrisma.subValuation.update.mockResolvedValue(stored({ status: 'paid' }));
+  });
+
+  it('CX21-513: a paid or certified valuation does not leave its status through an edit, so its agreed figures stay frozen', async () => {
+    mockPrisma.subValuation.findFirst.mockResolvedValue(stored({ status: 'paid' }));
+    await expect(
+      subValuationService.updateSubValuation({ orgId: 'org-1', projectId: 'project-1', valuationId: 'sv-1', userId: 'qs-1', payload: { status: 'draft' } }),
+    ).rejects.toMatchObject({ status: 409, code: 'SUB_VALUATION_HISTORICAL', details: { fields: ['status'] } });
+    mockPrisma.subValuation.findFirst.mockResolvedValue(stored({ status: 'certified' }));
+    await expect(
+      subValuationService.updateSubValuation({ orgId: 'org-1', projectId: 'project-1', valuationId: 'sv-1', userId: 'qs-1', payload: { status: 'submitted', workDone: 5000 } }),
+    ).rejects.toMatchObject({ code: 'SUB_VALUATION_HISTORICAL' });
+    expect(mockPrisma.subValuation.update).not.toHaveBeenCalled();
+    // an echo of the status, with a non-money field, still passes
+    await subValuationService.updateSubValuation({ orgId: 'org-1', projectId: 'project-1', valuationId: 'sv-1', userId: 'qs-1', payload: { status: 'certified', period: '2026-07' } });
+    expect(mockPrisma.subValuation.update).toHaveBeenCalledTimes(1);
+  });
+});

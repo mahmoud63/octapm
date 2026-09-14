@@ -542,3 +542,24 @@ describe("Phase 21D — integrity (release challenge, ninth pass)", () => {
     delete mockPrisma.$queryRaw;
   });
 });
+
+describe("Phase 21D — integrity (release challenge, tenth pass)", () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockPrisma.project.findFirst.mockResolvedValue({ id: "project-1", orgId: "org-1", name: "Project" });
+  });
+
+  it("CX21-512: an archive decided on a pending order is not written once the order was approved meanwhile — the order is held and read again first", async () => {
+    mockPrisma.$queryRaw = jest.fn(async () => []);
+    mockPrisma.changeOrder.findFirst
+      .mockResolvedValueOnce({ ...existing, status: "pending" }) // the copy the approved-state check was made on
+      .mockResolvedValueOnce({ ...existing, status: "approved", approvedAt: new Date("2026-06-11T10:00:00.000Z") }); // the order as held
+    await expect(
+      changeOrderService.deleteChangeOrder({ orgId: "org-1", projectId: "project-1", coId: "co-1", userId: "pm-1", userRole: "pm" }),
+    ).rejects.toMatchObject({ status: 409, code: "CHANGE_ORDER_CHANGED" });
+    expect(mockPrisma.changeOrder.update).not.toHaveBeenCalled();
+    expect(mockPrisma.$queryRaw.mock.calls[0][0].join("?")).toMatch(/"ChangeOrder".*FOR UPDATE/);
+    expect(mockPrisma.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(mockPrisma.changeOrder.findFirst.mock.invocationCallOrder[1]);
+    delete mockPrisma.$queryRaw;
+  });
+});

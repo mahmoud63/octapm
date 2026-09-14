@@ -93,8 +93,27 @@ class RealtimeClient {
         socket.emit('project:join', { projectId })
       }
     })
-    socket.on('disconnect', () => this.setStatus('disconnected'))
-    socket.on('connect_error', () => this.setStatus('connecting'))
+    socket.on('disconnect', (reason) => {
+      this.setStatus('disconnected')
+      // The server drops a person's sockets when their role or standing
+      // changes (CX21-491); the client does not reconnect on its own after a
+      // server-side disconnect, so it reconnects here — the handshake carries
+      // the account as it is now, and refuses it if it is no longer active.
+      if (reason === 'io server disconnect' && this.socket === socket) {
+        window.setTimeout(() => {
+          if (this.socket === socket && !socket.connected) socket.connect()
+        }, 1000)
+      }
+    })
+    socket.on('connect_error', (error: Error & { data?: { code?: string } }) => {
+      const code = error?.data?.code
+      if (code === 'USER_INACTIVE' || code === 'INVALID_TOKEN') {
+        // nothing to retry with this token: the account is gone or the token is not honoured
+        this.disconnect()
+        return
+      }
+      this.setStatus('connecting')
+    })
     socket.io.on('reconnect_attempt', () => this.setStatus('connecting'))
     socket.on('domain.event', (event: DomainEvent) => {
       for (const listener of this.listeners) {

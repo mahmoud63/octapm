@@ -420,6 +420,18 @@ const updateSubValuation = async ({
   // restate them — not an edit, and not the recompute that a save would
   // otherwise run over them as a side effect of attributing a company.
   const frozen = HISTORICAL_STATUSES.includes(existing.status);
+  if (frozen && payload.status !== undefined && payload.status !== existing.status) {
+    // Set back to draft, a paid valuation's agreed figures were editable again
+    // and the record deletable; the status of a historical record is not an
+    // edit's to change (Phase 21D, CX21-513).
+    const error = new HttpError(
+      409,
+      'SUB_VALUATION_HISTORICAL',
+      `${existing.ref} is ${existing.status}. Its status is the record of what was agreed and cannot be changed by an edit.`,
+    );
+    error.details = { ref: existing.ref, status: existing.status, fields: ['status'] };
+    throw error;
+  }
   if (frozen) {
     const MONEY_FIELDS = ['workDone', 'materialsOnSite', 'retentionRate', 'backCharges'];
     const attempted = MONEY_FIELDS.filter(

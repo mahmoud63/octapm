@@ -1,6 +1,6 @@
 const { HttpError } = require("../utils/http-error");
 const { prisma } = require("../config/db");
-const { can, canParty, normalizeRoleId } = require("../config/permissions");
+const { can, canParty, normalizeRoleId, permissionPolicy } = require("../config/permissions");
 const { containsInsensitive, trimToNull } = require("../utils/list-query");
 const {
   canAccessAllProjects,
@@ -809,14 +809,29 @@ const listAccessibleProjects = async ({
     orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
   });
 
-  return projects.map((project) => ({
+  const accesses = projects.map((project) => ({
     project,
     access: buildProjectAccess({ project, role: normalizedRole }),
   }));
+  // A project's permission template decides the modules a person may search
+  // there, as it decides on the project's own routes: search asked the role's
+  // policy only, and a template that refused a module elsewhere let its
+  // records and document contents through here (Phase 21D, CX21-514).
+  const { templatesForProjects } = require("./permission-template.service");
+  const templates = await templatesForProjects({
+    userId,
+    projects: accesses.map(({ project, access }) => ({ id: project.id, partyIds: partyIdsFor(access) })),
+  });
+  for (const entry of accesses) entry.access.template = templates.get(entry.project.id) || null;
+  return accesses;
 };
 
 const canReadModule = (projectAccess, moduleName) => {
   if (!moduleName) return true;
+  if (projectAccess.template && permissionPolicy.modules[moduleName]) {
+    const { templateAllows } = require("./permission-template.service");
+    return templateAllows(projectAccess.template, { module: moduleName, action: "read" });
+  }
   if (can({ role: projectAccess.role, module: moduleName, action: "read" })) {
     return true;
   }

@@ -102,8 +102,23 @@ const requireRoles = (...allowedRoles) => {
     // the same: the billing history answered a key with only an inventory scope
     // (Phase 21D, CX21-476).
     const action = ACTION_BY_METHOD[req.method] || 'read';
-    if (req.apiClient && !require('../services/api-client.service').scopeAllows(req.apiClient, moduleForRequest(req), action)) {
+    const moduleName = moduleForRequest(req);
+    if (req.apiClient && !require('../services/api-client.service').scopeAllows(req.apiClient, moduleName, action)) {
       return next(new HttpError(403, 'API_KEY_SCOPE', 'This API key does not allow that action'));
+    }
+
+    // A permission template attached by the project middleware decides here as
+    // it does for the permission guard: this role guard never asked it, and a
+    // template that refused change orders did not stop their creation, edit
+    // or archive (Phase 21D, CX21-515). Modules the policy does not know keep
+    // the role list.
+    const { permissionPolicy } = require('../config/permissions');
+    const decided = permissionPolicy.modules[moduleName] ? templateDecision(req, moduleName, action, null) : null;
+    if (decided !== null) {
+      if (decided) return next();
+      const error = new HttpError(403, 'FORBIDDEN', 'You do not have permission for this action');
+      error.details = { module: moduleName, action, transition: null, source: 'template' };
+      return next(error);
     }
 
     if (!allowedRoles.includes(getEffectiveRole(req))) {

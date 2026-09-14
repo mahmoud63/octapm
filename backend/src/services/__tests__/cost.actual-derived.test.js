@@ -136,10 +136,22 @@ describe('Phase 21D — integrity (release challenge, ninth pass)', () => {
     expect(mockPrisma.commitmentSovLine.findFirst.mock.calls[0][0].where).toMatchObject({ activityId: 'act-1', commitment: { projectId: 'p1' } });
     // an echo of the row's own figure passes, and an activity no commitment names keeps a typed figure
     await service.updateCostRecord({ orgId: 'org-1', projectId: 'p1', costRecordId: 'cr-1', payload: { committed: 0, material: 1 } });
-    expect(written()).toEqual({ material: 1, committed: 0 });
+    expect(written()).toEqual({ material: 1 }); // the echo is not written (CX21-511)
     mockPrisma.commitmentSovLine.findFirst.mockResolvedValue(null);
     await service.updateCostRecord({ orgId: 'org-1', projectId: 'p1', costRecordId: 'cr-1', payload: { committed: 999 } });
     expect(written()).toEqual({ committed: 999 });
     delete mockPrisma.commitmentSovLine;
+  });
+});
+
+describe('Phase 21D — integrity (release challenge, tenth pass)', () => {
+  it("CX21-511: an echo of the row's committed writes nothing — a recompute that landed since the read is not written over", async () => {
+    mockPrisma.$executeRaw = jest.fn(async () => 0);
+    mockPrisma.costRecord.update.mockClear();
+    await service.updateCostRecord({ orgId: 'org-1', projectId: 'p1', costRecordId: 'cr-1', payload: { committed: 0 } });
+    expect(mockPrisma.costRecord.update.mock.calls.at(-1)[0].data).toEqual({});
+    mockPrisma.costRecord.update.mockClear();
+    await service.upsertCostRecord({ orgId: 'org-1', projectId: 'p1', activityId: 'act-1', payload: { committed: 0, budget: 1000 } });
+    expect(Object.prototype.hasOwnProperty.call(mockPrisma.costRecord.update.mock.calls.at(-1)[0].data, 'committed')).toBe(false);
   });
 });

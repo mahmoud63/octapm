@@ -413,3 +413,12 @@ describe("permission template resolution against the database", () => {
     ).rejects.toMatchObject({ code: "PERMISSION_TEMPLATE_KIND_MISMATCH" });
   });
 });
+
+describe("Phase 21D — integrity (release challenge, tenth pass)", () => {
+  it("the projects a template refuses (CX21-492) are read from member templates first and from the templates of active parties only", async () => {
+    mockPrisma.projectUserPermission.findMany = jest.fn(async () => []);
+    mockPrisma.projectPartyMember.findMany = jest.fn(async () => []);
+    await service.projectsWhereTemplateDenies({ orgId: "org-1", userId: "u1", module: "task", action: "read" });
+    expect(mockPrisma.projectPartyMember.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({ userId: "u1", status: "active", projectParty: expect.objectContaining({ status: "active" }) }) }));
+  });
+});

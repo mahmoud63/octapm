@@ -211,3 +211,18 @@ describe("Phase 21D — integrity (release challenge, sixth pass)", () => {
     expect(mockPrisma.changeOrder.findFirst).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({ id: "co-of-project-2", projectId: "project-1" }) }));
   });
 });
+
+describe("Phase 21D — integrity (release challenge, tenth pass)", () => {
+  it("CX21-511: the recompute holds the (project, activity) pair before it writes an existing cost record's committed", async () => {
+    mockPrisma.$executeRaw = jest.fn(async () => 0);
+    mockPrisma.commitment.findMany.mockResolvedValue([{ id: "c-1", type: "subcontract", lines: [{ amount: 5000, budgetLineId: null, costCodeId: null, activityId: "act-1" }], changeOrders: [] }]);
+    mockPrisma.budgetLine.findMany.mockResolvedValue([]);
+    mockPrisma.costRecord.findMany.mockResolvedValue([{ id: "cr-1", activityId: "act-1" }]);
+    mockPrisma.costRecord.update.mockClear();
+    await service.recomputeCommitted({ orgId: "org-1", projectId: "project-1" });
+    const pair = mockPrisma.$executeRaw.mock.calls.findIndex(([strings, ...values]) => Array.isArray(strings) && strings.join("?").includes("pg_advisory_xact_lock") && values.includes("cost-record:project-1:act-1"));
+    expect(pair).toBeGreaterThanOrEqual(0);
+    expect(mockPrisma.$executeRaw.mock.invocationCallOrder[pair]).toBeLessThan(mockPrisma.costRecord.update.mock.invocationCallOrder[0]);
+    expect(mockPrisma.costRecord.update).toHaveBeenCalledWith({ where: { id: "cr-1" }, data: { committed: 5000 } });
+  });
+});

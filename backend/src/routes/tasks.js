@@ -124,6 +124,7 @@ router.get(
   requirePermission("task", "read"),
   [
     query("cursor").optional({ values: "falsy" }).isUUID(),
+    query("projectId").optional({ values: "falsy" }).isUUID(),
     query("limit").optional().isInt({ min: 1, max: 100 }).toInt(),
     query("status").optional().isString().trim(),
     query("priority").optional().isString().trim(),
@@ -139,9 +140,13 @@ router.get(
     validate,
   ],
   asyncHandler(async (req, res) => {
+    // The project named in the query is the list's project: its access and
+    // its template were resolved for it, and a list across every project
+    // would otherwise have been read with that one project's role (Phase
+    // 21D, CX21-510).
     const result = await taskService.listTasks({
       orgId: req.user.orgId,
-      projectId: req.params.projectId || null,
+      projectId: req.params.projectId || requestedProjectId(req) || null,
       userId: req.user.id,
       role: req.user.role,
       projectAccess: req.projectAccess || null,

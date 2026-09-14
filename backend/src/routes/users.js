@@ -122,13 +122,16 @@ router.patch(
     validate,
   ],
   asyncHandler(async (req, res) => {
+    const before = await userService.getUserById({ orgId: req.user.orgId, userId: req.params.id });
     const result = await userService.updateUser({
       orgId: req.user.orgId,
       userId: req.params.id,
       payload: req.body,
     });
-    // A changed role or standing reaches their open sockets too (Phase 21D, CX21-491).
-    if (req.body.role !== undefined || req.body.isCompanyAdmin !== undefined) disconnectUser(req.app.get("io"), req.params.id);
+    // A changed role or standing reaches their open sockets too (Phase 21D,
+    // CX21-491) — a change, not an edit that repeats the same values (the
+    // tenth pass's note).
+    if (before.role !== result.role || Boolean(before.isCompanyAdmin) !== Boolean(result.isCompanyAdmin)) disconnectUser(req.app.get("io"), req.params.id);
     return sendSuccess(res, result);
   }),
 );
