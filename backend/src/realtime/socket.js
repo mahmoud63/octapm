@@ -160,6 +160,19 @@ const targetRoomsFor = (event) => {
   return [];
 };
 
+// A record event tells a project room that a record changed — which one,
+// what happened — and nothing of its figures: every member of the room
+// received a cost record's budget, committed and actual whether or not they
+// may read cost, so the summary stays behind and each subscriber refetches
+// what it may read (Phase 21D, CX21-523). Events addressed to people
+// (notifications) keep their payload; they were built for those people.
+const clientPayload = (event) => {
+  const payload = event.payload || {};
+  if (event.recipientUserIds?.length) return payload;
+  const { summary, ...rest } = payload;
+  return rest;
+};
+
 const serializeForClient = (event) => ({
   id: event.id,
   type: event.type,
@@ -170,7 +183,7 @@ const serializeForClient = (event) => ({
   action: event.action,
   actorId: event.actorId,
   occurredAt: event.occurredAt,
-  payload: event.payload || {},
+  payload: clientPayload(event),
 });
 
 const broadcastDomainEvent = (io, event) => {

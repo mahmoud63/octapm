@@ -338,3 +338,48 @@ describe('Phase 21D — integrity (release challenge, tenth pass)', () => {
     expect(mockPrisma.subValuation.update).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('Phase 21D — integrity (release challenge, eleventh pass)', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockPrisma.project.findFirst.mockResolvedValue({ id: 'project-1', orgId: 'org-1', defaultRetentionRate: 5 });
+    mockPrisma.subValuation.update.mockResolvedValue(stored());
+  });
+
+  it('CX21-521: an edit or a delete decided on a submitted copy is refused once the valuation was certified meanwhile — the row is held and read again first', async () => {
+    mockPrisma.$queryRaw = jest.fn(async () => []);
+    mockPrisma.subValuation.findFirst
+      .mockResolvedValueOnce(stored({ status: 'submitted' })) // the copy the checks were made on
+      .mockResolvedValueOnce(stored({ status: 'certified' })); // the row as held
+    await expect(
+      subValuationService.updateSubValuation({ orgId: 'org-1', projectId: 'project-1', valuationId: 'sv-1', userId: 'qs-1', payload: { workDone: 500 } }),
+    ).rejects.toMatchObject({ status: 409, code: 'SUB_VALUATION_CHANGED' });
+    expect(mockPrisma.subValuation.update).not.toHaveBeenCalled();
+    expect(mockPrisma.$queryRaw.mock.calls[0][0].join('?')).toMatch(/"SubValuation".*FOR UPDATE/);
+    mockPrisma.subValuation.findFirst
+      .mockResolvedValueOnce(stored({ status: 'submitted' }))
+      .mockResolvedValueOnce(stored({ status: 'certified' }));
+    await expect(
+      subValuationService.deleteSubValuation({ orgId: 'org-1', projectId: 'project-1', valuationId: 'sv-1', userId: 'pm-1' }),
+    ).rejects.toMatchObject({ code: 'SUB_VALUATION_CHANGED' });
+    expect(mockPrisma.subValuation.delete).not.toHaveBeenCalled();
+    delete mockPrisma.$queryRaw;
+  });
+
+  it('CX21-527: paying and certifying need that authority on a change of status only — an editor repeating the status it has passes', async () => {
+    mockPrisma.subValuation.findFirst.mockResolvedValue(stored({ status: 'submitted' }));
+    await expect(
+      subValuationService.updateSubValuation({ orgId: 'org-1', projectId: 'project-1', valuationId: 'sv-1', userId: 'qs-1', payload: { status: 'paid' }, authority: { pay: false, certify: false } }),
+    ).rejects.toMatchObject({ status: 403 });
+    await expect(
+      subValuationService.updateSubValuation({ orgId: 'org-1', projectId: 'project-1', valuationId: 'sv-1', userId: 'qs-1', payload: { status: 'certified' }, authority: { pay: false, certify: false } }),
+    ).rejects.toMatchObject({ status: 403 });
+    expect(mockPrisma.subValuation.update).not.toHaveBeenCalled();
+    mockPrisma.subValuation.findFirst.mockResolvedValue(stored({ status: 'certified' }));
+    await subValuationService.updateSubValuation({ orgId: 'org-1', projectId: 'project-1', valuationId: 'sv-1', userId: 'qs-1', payload: { status: 'certified', period: '2026-08' }, authority: { pay: false, certify: false } });
+    expect(mockPrisma.subValuation.update).toHaveBeenCalledTimes(1);
+    mockPrisma.subValuation.findFirst.mockResolvedValue(stored({ status: 'submitted' }));
+    await subValuationService.updateSubValuation({ orgId: 'org-1', projectId: 'project-1', valuationId: 'sv-1', userId: 'pm-1', payload: { status: 'paid' }, authority: { pay: true, certify: true } });
+    expect(mockPrisma.subValuation.update).toHaveBeenCalledTimes(2);
+  });
+});

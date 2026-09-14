@@ -1,6 +1,8 @@
 /**
  * Marking a sub valuation certified or paid is the certifying or paying
- * authority's act (Phase 21D, CX21-513).
+ * authority's act: the route tells the service what authority the caller
+ * holds, and the service applies it on a change of status only
+ * (Phase 21D, CX21-513, CX21-527).
  */
 const express = require("express");
 const request = require("supertest");
@@ -35,21 +37,16 @@ const buildApp = () => {
   return app;
 };
 
-describe("Phase 21D — integrity (release challenge, tenth pass)", () => {
+describe("Phase 21D — integrity (release challenge, tenth and eleventh passes)", () => {
   beforeEach(() => jest.clearAllMocks());
 
-  it("CX21-513: an editor cannot mark a valuation paid or certified; the paying and certifying authority can", async () => {
+  it("CX21-513 / CX21-527: the route hands the service the caller's authority — none for an editor, paying and certifying for a PM — and refuses nothing itself, so an edit that repeats a status passes", async () => {
     const app = buildApp();
-    const paidByQs = await request(app).patch(`/projects/${PROJECT_ID}/sub-valuations/${VALUATION_ID}`).set("x-role", "qs").send({ status: "paid" });
-    expect([paidByQs.status, paidByQs.body.error?.code]).toEqual([403, "FORBIDDEN"]);
-    const certifiedByQs = await request(app).patch(`/projects/${PROJECT_ID}/sub-valuations/${VALUATION_ID}`).set("x-role", "qs").send({ status: "certified" });
-    expect(certifiedByQs.status).toBe(403);
-    expect(mockService.updateSubValuation).not.toHaveBeenCalled();
-
-    const draftByQs = await request(app).patch(`/projects/${PROJECT_ID}/sub-valuations/${VALUATION_ID}`).set("x-role", "qs").send({ status: "submitted", workDone: 1000 });
-    expect(draftByQs.status).toBe(200);
-    const paidByPm = await request(app).patch(`/projects/${PROJECT_ID}/sub-valuations/${VALUATION_ID}`).set("x-role", "pm").send({ status: "paid" });
-    expect(paidByPm.status).toBe(200);
-    expect(mockService.updateSubValuation).toHaveBeenCalledTimes(2);
+    const byQs = await request(app).patch(`/projects/${PROJECT_ID}/sub-valuations/${VALUATION_ID}`).set("x-role", "qs").send({ status: "certified", companyId: null });
+    expect(byQs.status).toBe(200);
+    expect(mockService.updateSubValuation).toHaveBeenLastCalledWith(expect.objectContaining({ authority: { pay: false, certify: false }, payload: expect.objectContaining({ status: "certified" }) }));
+    const byPm = await request(app).patch(`/projects/${PROJECT_ID}/sub-valuations/${VALUATION_ID}`).set("x-role", "pm").send({ status: "paid" });
+    expect(byPm.status).toBe(200);
+    expect(mockService.updateSubValuation).toHaveBeenLastCalledWith(expect.objectContaining({ authority: { pay: true, certify: true } }));
   });
 });

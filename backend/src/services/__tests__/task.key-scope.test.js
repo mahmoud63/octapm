@@ -31,3 +31,24 @@ describe("Phase 21D — integrity (release challenge, ninth pass)", () => {
     mockDenies.mockResolvedValue([]);
   });
 });
+
+describe("Phase 21D — integrity (release challenge, eleventh pass)", () => {
+  afterEach(() => { delete mockPrisma.projectAssignment; });
+
+  it("CX21-525: across projects, each project is seen with the role held there — a wide organisation role narrowed by an assignment sees only its own tasks on that project, and a narrow one widened by an assignment sees that project whole", async () => {
+    mockPrisma.projectAssignment = { findMany: jest.fn(async () => [{ projectId: "p9", role: "site_engineer" }, { projectId: "p3", role: "planning_eng" }]) };
+    await service.listTasks({ orgId: "org-1", userId: "u1", role: "planning_eng", query: {} });
+    let where = mockPrisma.task.findMany.mock.calls.at(-1)[0].where;
+    expect(where.AND).toEqual(expect.arrayContaining([{ OR: [{ projectId: { notIn: ["p9"] } }, { OR: [{ assigneeId: "u1" }, { createdById: "u1" }] }] }]));
+    expect(where.OR).toBeUndefined();
+    await service.listTasks({ orgId: "org-1", userId: "u1", role: "site_engineer", query: {} });
+    where = mockPrisma.task.findMany.mock.calls.at(-1)[0].where;
+    expect(where.AND).toEqual(expect.arrayContaining([{ OR: [{ projectId: { in: ["p3"] } }, { OR: [{ assigneeId: "u1" }, { createdById: "u1" }] }] }]));
+    expect(where.OR).toBeUndefined();
+    // and with no narrowing assignment, a wide role's list is left as it was
+    mockPrisma.projectAssignment.findMany.mockResolvedValue([]);
+    await service.listTasks({ orgId: "org-1", userId: "u1", role: "pm", query: {} });
+    where = mockPrisma.task.findMany.mock.calls.at(-1)[0].where;
+    expect(where.AND || []).toEqual([]);
+  });
+});

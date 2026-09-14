@@ -10,7 +10,7 @@ const {
   aiGenerationLimiter,
   uploadLimiter,
 } = require('../middleware/rate-limit');
-const { getEffectiveRole, requireRoles } = require('../middleware/rbac');
+const { getEffectiveRole, requirePermission, requireRoles } = require('../middleware/rbac');
 const boqService = require('../services/boq.service');
 const fileStorageService = require('../services/file-storage.service');
 const jobService = require('../jobs/job.service');
@@ -169,6 +169,7 @@ router.get(
 router.get(
   '/job/:jobId',
   authenticate,
+  requirePermission('boq', 'read'),
   asyncHandler(async (req, res) => {
     const job = await jobService.getLegacyJob({
       orgId: req.user.orgId,
@@ -211,6 +212,7 @@ router.post(
 router.get(
   '/shadow-activities',
   authenticate,
+  requirePermission('boq', 'read'),
   asyncHandler(async (req, res) => {
     const data = await boqService.findShadowActivities(req.params.projectId, {
       orgId: req.user.orgId,
@@ -219,10 +221,14 @@ router.get(
   }),
 );
 
-// GET /projects/:projectId/boq
+// GET /projects/:projectId/boq — the register is read under the BOQ
+// permission (the project's template, a key's scope): it had authentication
+// only, and a template that refused BOQ, or a key with no boq scope, read the
+// financial register (Phase 21D, CX21-526).
 router.get(
   '/',
   authenticate,
+  requirePermission('boq', 'read'),
   asyncHandler(async (req, res) => {
     const data = await boqService.getProjectBoq(req.params.projectId, {
       orgId: req.user.orgId,

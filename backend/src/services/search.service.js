@@ -1185,6 +1185,14 @@ const globalSearch = async ({
     const contentProjectIds = projects
       .filter(({ access }) => canReadModule(access, "document_control"))
       .map(({ project }) => project.id);
+    // Each hit is then judged as the document itself would be: by the modules
+    // it is linked from, for this person on that project, and for a key by
+    // its scopes (Phase 21D, CX21-522).
+    const accessByProject = new Map(projects.map(({ project, access }) => [project.id, access]));
+    const viewerFor = (id) => {
+      const access = accessByProject.get(id);
+      return { canRead: (moduleName) => Boolean(access) && canReadModule(access, moduleName) && (!apiClient || require("./api-client.service").scopeAllows(apiClient, moduleName, "read")) };
+    };
     if (contentProjectIds.length) {
       try {
         const contentHits = await require("./document-text.service").searchDocumentContent({
@@ -1192,6 +1200,7 @@ const globalSearch = async ({
           projectIds: contentProjectIds,
           q: query,
           limit: perTypeLimit,
+          viewerFor,
         });
         for (const hit of contentHits) {
           const project = projectMap.get(hit.projectId);

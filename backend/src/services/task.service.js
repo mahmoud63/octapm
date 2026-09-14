@@ -633,6 +633,26 @@ const listTasks = async ({
   // A key limited to some projects lists tasks of those projects only, even
   // through the mount outside a project (Phase 21D, CX21-486).
   if (!projectId && projectIds?.length) where.projectId = { in: projectIds };
+  // Across projects, each project is seen with the role held there: a person
+  // whose organisation role sees every task, but who is assigned narrowly on
+  // one project, sees only their own tasks on it — as that project's own list
+  // shows them — and the reverse holds for a narrow organisation role with a
+  // wide assignment (Phase 21D, CX21-525).
+  if (!projectId && prisma.projectAssignment?.findMany) {
+    const wide = (candidate) => PROJECT_WIDE_TASK_ROLES.has(normalizeRoleId(candidate)) || canAccessAllProjects(normalizeRoleId(candidate));
+    const assignments = await prisma.projectAssignment.findMany({ where: { userId }, select: { projectId: true, role: true } });
+    const own = [{ assigneeId: userId }, { createdById: userId }];
+    if (wide(role)) {
+      const narrowly = assignments.filter((assignment) => !wide(assignment.role)).map((assignment) => assignment.projectId);
+      if (narrowly.length) where.AND = [...(where.AND || []), { OR: [{ projectId: { notIn: narrowly } }, { OR: own }] }];
+    } else {
+      const widely = assignments.filter((assignment) => wide(assignment.role)).map((assignment) => assignment.projectId);
+      if (widely.length) {
+        delete where.OR;
+        where.AND = [...(where.AND || []), { OR: [{ projectId: { in: widely } }, { OR: own }] }];
+      }
+    }
+  }
   // A list across projects leaves out the projects whose permission template
   // refuses this person the tasks module — the template each project's own
   // mount would have applied (Phase 21D, CX21-492).

@@ -626,7 +626,14 @@ const searchDocuments = async ({
 };
 
 /** Cross-project content hits for the global search palette. */
-const searchDocumentContent = async ({ orgId, projectIds, q, limit = 10 }) => {
+/**
+ * `viewerFor(projectId)` gives the viewer whose `canRead(module)` decides each
+ * hit, as `getDocumentText` decides one document: a document attached only
+ * to a record whose module the viewer may not read is not surfaced, headline
+ * and all — the cross-project search checked document control once per
+ * project and then served every matching document (Phase 21D, CX21-522).
+ */
+const searchDocumentContent = async ({ orgId, projectIds, q, limit = 10, viewerFor = null }) => {
   const query = trimOrNull(q);
   const ids = [...new Set((projectIds || []).filter(Boolean))];
   if (!query || !ids.length || !prisma.$queryRaw) return [];
@@ -640,7 +647,9 @@ const searchDocumentContent = async ({ orgId, projectIds, q, limit = 10 }) => {
   return rows
     .map((row) => {
       const document = byId.get(row.documentId);
-      return document ? serializeHit({ document, rank: row.rank, headline: row.headline }) : null;
+      if (!document) return null;
+      if (viewerFor && !documentVisible(document, viewerFor(document.projectId))) return null;
+      return serializeHit({ document, rank: row.rank, headline: row.headline });
     })
     .filter(Boolean);
 };

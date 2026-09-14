@@ -786,6 +786,11 @@ const createChangeOrder = async ({ orgId, projectId, commitmentId, payload = {},
       const prime = await tx.changeOrder.findFirst({ where: { id: data.primeChangeOrderId, projectId }, select: { id: true } });
       if (!prime) throw new HttpError(404, "CHANGE_ORDER_NOT_FOUND", "Prime change order not found");
     }
+    // A change order's lines name this project's activities, budget lines and
+    // cost codes, as the contract's own lines must: unchecked, an approval
+    // projected another project's — another tenant's — activity onto this
+    // project's cost register (Phase 21D, CX21-520).
+    if (data.linesJson?.length) await validateLineReferences({ tx, orgId, projectId, lines: data.linesJson });
     const number = await nextCounterNumber(tx, { table: "CommitmentChangeOrder", scope: { commitmentId } });
     const row = await tx.commitmentChangeOrder.create({
       data: { orgId, projectId, commitmentId, number, ref: `${commitment.ref}-CO${String(number).padStart(2, "0")}`, status: CO_STATUS.DRAFT, value: 0, linesJson: [], ...data, createdBy: actor?.id || null, updatedBy: actor?.id || null },
@@ -815,6 +820,7 @@ const updateChangeOrder = async ({ orgId, projectId, changeOrderId, payload = {}
     // value (Phase 21D, CX21-454).
     const [fresh] = await tx.$queryRaw`SELECT status FROM "CommitmentChangeOrder" WHERE id = ${changeOrderId} FOR UPDATE`;
     if (fresh && ![CO_STATUS.DRAFT, CO_STATUS.PENDING].includes(fresh.status)) throw new HttpError(409, "COMMITMENT_CO_LOCKED", `A ${fresh.status} change order cannot be edited`);
+    if (data.linesJson?.length) await validateLineReferences({ tx, orgId, projectId, lines: data.linesJson }); // the project's references, on an edit as on a creation (CX21-520)
     const row = await tx.commitmentChangeOrder.update({ where: { id: changeOrderId }, data: { ...data, updatedBy: actor?.id || null }, include: { primeChangeOrder: { select: { id: true, ref: true, status: true } } } });
     await audit({ tx, orgId, projectId, entityType: auditService.ENTITY_TYPES.COMMITMENT_CHANGE_ORDER, entityId: changeOrderId, action: auditService.ACTIONS.UPDATED, actor, summary: { ref: row.ref, changed: Object.keys(data) } });
     return row;
@@ -835,7 +841,15 @@ const transitionChangeOrder = async ({ orgId, projectId, changeOrderId, to, acto
     if (fresh && fresh.status !== existing.status) throw new HttpError(409, "COMMITMENT_CO_STATE_CHANGED", `The change order is ${fresh.status} now; it cannot become ${to} from there without looking again`);
     const row = await tx.commitmentChangeOrder.update({ where: { id: changeOrderId }, data: { status: to, ...stamps, updatedBy: actor?.id || null }, include: { primeChangeOrder: { select: { id: true, ref: true, status: true } } } });
     await audit({ tx, orgId, projectId, entityType: auditService.ENTITY_TYPES.COMMITMENT_CHANGE_ORDER, entityId: changeOrderId, action: to === CO_STATUS.APPROVED ? auditService.ACTIONS.APPROVED : to === CO_STATUS.REJECTED ? auditService.ACTIONS.REJECTED : auditService.ACTIONS.STATUS_CHANGED, actor, reason: trimOrNull(reason), oldStatus: existing.status, newStatus: to, summary: { ref: row.ref, commitment: existing.commitment.ref, value: toMoneyNumber(row.value) } });
-    if (to === CO_STATUS.APPROVED && POSTING_STATUSES.includes(existing.commitment.status)) await recomputeCommitted({ tx, orgId, projectId });
+    // Whether the approval posts to committed depends on the parent's
+    // standing as held now — an execution that landed since the copy was
+    // read left an approved change order out of every committed figure
+    // until the next recompute (Phase 21D, CX21-524).
+    if (to === CO_STATUS.APPROVED) {
+      if (tx.$queryRaw) await tx.$queryRaw`SELECT id FROM "Commitment" WHERE id = ${existing.commitmentId} FOR UPDATE`;
+      const parent = tx.commitment?.findFirst ? await tx.commitment.findFirst({ where: { id: existing.commitmentId }, select: { status: true } }) : null;
+      if (POSTING_STATUSES.includes(parent?.status || existing.commitment.status)) await recomputeCommitted({ tx, orgId, projectId });
+    }
     return row;
   });
   if (to === CO_STATUS.PENDING) {

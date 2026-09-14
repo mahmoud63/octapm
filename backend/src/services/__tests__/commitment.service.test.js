@@ -131,6 +131,7 @@ describe("commitments", () => {
     mockPrisma.commitmentChangeOrder.update.mockImplementation(async ({ data }) => ({ id: "cco-1", ref: "SC-001-CO01", value: 2500, linesJson: [], ...data }));
     mockPrisma.commitment.findMany.mockResolvedValue([{ id: "cm-1", type: "subcontract", lines: [], changeOrders: [{ value: 2500, linesJson: [{ amount: 2500, costCodeId: "code-1", activityId: "act-1" }] }] }]);
     mockPrisma.budgetLine.findMany.mockResolvedValue([{ id: "bl-1", costCodeId: "code-1", costType: "subcontract", status: "active" }]);
+    mockPrisma.commitment.findFirst.mockResolvedValue(commitment({ status: "executed" })); // the parent as held (CX21-524)
     await service.transitionChangeOrder({ orgId: "org-1", projectId: "project-1", changeOrderId: "cco-1", to: "approved", actor: { id: "pm" } });
     expect(mockPrisma.budgetLine.update).toHaveBeenCalledWith({ where: { id: "bl-1" }, data: { committedFromCommitments: 2500 } });
     await expect(service.transitionChangeOrder({ orgId: "org-1", projectId: "project-1", changeOrderId: "cco-1", to: "rejected", actor: { id: "pm" } })).rejects.toMatchObject({ code: "COMMITMENT_CO_REASON_REQUIRED" });
@@ -195,6 +196,7 @@ describe("Phase 21D — integrity (release challenge, sixth pass)", () => {
     mockPrisma.commitmentChangeOrder.update.mockImplementation(async ({ data }) => ({ ...pendingCo(), ...data }));
     mockPrisma.commitment.findMany.mockResolvedValue([]);
     mockPrisma.budgetLine.findMany.mockResolvedValue([]);
+    mockPrisma.commitment.findFirst.mockResolvedValue({ status: "executed" }); // the parent as held (CX21-524)
     mockPrisma.commitment.findMany.mockClear();
     await service.transitionChangeOrder({ orgId: "org-1", projectId: "project-1", changeOrderId: "cco-1", to: "approved", actor: { id: "pm" } });
     const held = mockPrisma.$executeRaw.mock.calls.find(([strings, ...values]) => Array.isArray(strings) && strings.join("?").includes("pg_advisory_xact_lock") && values.includes("committed:project-1"));
@@ -224,5 +226,47 @@ describe("Phase 21D — integrity (release challenge, tenth pass)", () => {
     expect(pair).toBeGreaterThanOrEqual(0);
     expect(mockPrisma.$executeRaw.mock.invocationCallOrder[pair]).toBeLessThan(mockPrisma.costRecord.update.mock.invocationCallOrder[0]);
     expect(mockPrisma.costRecord.update).toHaveBeenCalledWith({ where: { id: "cr-1" }, data: { committed: 5000 } });
+  });
+});
+
+describe("Phase 21D — integrity (release challenge, eleventh pass)", () => {
+  const executedParent = () => ({ id: "cm-1", ref: "SC-001", status: "approved", type: "subcontract", title: "Concrete", projectPartyId: null, vendorCompanyId: null, createdBy: "user-qs", lines: [{ id: "sov-1" }] });
+
+  it("CX21-520: a change order's lines must name this project's activities, budget lines and cost codes — a line naming another project's activity is refused on creation and on edit", async () => {
+    mockPrisma.commitment.findFirst.mockResolvedValue({ ...executedParent(), status: "executed", changeOrders: [] });
+    mockPrisma.activity.findMany.mockResolvedValueOnce([]); // the foreign activity is not on this project
+    mockPrisma.commitmentChangeOrder.create.mockClear();
+    await expect(
+      service.createChangeOrder({ orgId: "org-1", projectId: "project-1", commitmentId: "cm-1", payload: { title: "Foreign", lines: [{ amount: 100, activityId: "act-of-project-2" }] }, actor: { id: "pm" } }),
+    ).rejects.toMatchObject({ status: 404, code: "ACTIVITY_NOT_FOUND" });
+    expect(mockPrisma.commitmentChangeOrder.create).not.toHaveBeenCalled();
+    expect(mockPrisma.activity.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({ id: { in: ["act-of-project-2"] }, projectId: "project-1" }) }));
+    // on an edit as on a creation
+    mockPrisma.commitmentChangeOrder.findFirst.mockResolvedValue({ id: "cco-1", ref: "SC-001-CO01", status: "draft", value: 0, linesJson: [], createdBy: "user-qs", commitmentId: "cm-1", primeChangeOrderId: null, commitment: executedParent() });
+    mockPrisma.$queryRaw = jest.fn(async () => [{ status: "draft" }]);
+    mockPrisma.activity.findMany.mockResolvedValueOnce([]);
+    mockPrisma.commitmentChangeOrder.update.mockClear();
+    await expect(
+      service.updateChangeOrder({ orgId: "org-1", projectId: "project-1", changeOrderId: "cco-1", payload: { lines: [{ amount: 100, activityId: "act-of-project-2" }] }, actor: { id: "qs" } }),
+    ).rejects.toMatchObject({ code: "ACTIVITY_NOT_FOUND" });
+    expect(mockPrisma.commitmentChangeOrder.update).not.toHaveBeenCalled();
+    delete mockPrisma.$queryRaw;
+  });
+
+  it("CX21-524: an approval decides whether to post to committed on the parent's standing as held — a parent executed since the copy was read counts", async () => {
+    mockPrisma.$executeRaw = jest.fn(async () => 0);
+    mockPrisma.$queryRaw = jest.fn(async () => [{ status: "pending" }]);
+    mockPrisma.commitmentChangeOrder.findFirst.mockResolvedValue({ id: "cco-1", ref: "SC-001-CO01", status: "pending", value: 2500, linesJson: [], createdBy: "user-qs", commitmentId: "cm-1", primeChangeOrderId: null, commitment: executedParent() }); // the copy says the parent is only approved
+    mockPrisma.commitmentChangeOrder.update.mockImplementation(async ({ data }) => ({ id: "cco-1", ref: "SC-001-CO01", value: 2500, linesJson: [], ...data }));
+    mockPrisma.commitment.findFirst.mockResolvedValue({ status: "executed" }); // as held, it was executed meanwhile
+    mockPrisma.commitment.findMany.mockResolvedValue([]);
+    mockPrisma.budgetLine.findMany.mockResolvedValue([]);
+    mockPrisma.commitment.findFirst.mockResolvedValue({ status: "executed" }); // the parent as held (CX21-524)
+    mockPrisma.commitment.findMany.mockClear();
+    await service.transitionChangeOrder({ orgId: "org-1", projectId: "project-1", changeOrderId: "cco-1", to: "approved", actor: { id: "pm" } });
+    const parentLock = mockPrisma.$queryRaw.mock.calls.find(([strings]) => Array.isArray(strings) && /FROM "Commitment" WHERE/.test(strings.join("?")) && strings.join("?").includes("FOR UPDATE"));
+    expect(parentLock).toBeDefined();
+    expect(mockPrisma.commitment.findMany).toHaveBeenCalled(); // the recompute ran
+    delete mockPrisma.$queryRaw;
   });
 });

@@ -372,6 +372,7 @@ const updateSubValuation = async ({
   valuationId,
   payload,
   userId = null,
+  authority = null,
 }) => {
   await ensureProject({ orgId, projectId });
 
@@ -420,6 +421,13 @@ const updateSubValuation = async ({
   // restate them — not an edit, and not the recompute that a save would
   // otherwise run over them as a side effect of attributing a company.
   const frozen = HISTORICAL_STATUSES.includes(existing.status);
+  // Marking a valuation certified or paid is the certifying or paying
+  // authority's act; an edit that leaves the status where it is needs neither
+  // (Phase 21D, CX21-513, CX21-527).
+  if (authority && payload.status !== undefined && payload.status !== existing.status) {
+    if (payload.status === 'paid' && !authority.pay) throw new HttpError(403, 'FORBIDDEN', 'Marking a valuation paid needs payment authority');
+    if (payload.status === 'certified' && !authority.certify) throw new HttpError(403, 'FORBIDDEN', 'Certifying a valuation needs certification authority');
+  }
   if (frozen && payload.status !== undefined && payload.status !== existing.status) {
     // Set back to draft, a paid valuation's agreed figures were editable again
     // and the record deletable; the status of a historical record is not an
@@ -465,6 +473,18 @@ const updateSubValuation = async ({
       });
 
   return prisma.$transaction(async (tx) => {
+    // The row is held and read again before anything is written: the
+    // historical checks above were made on a copy, and a certification
+    // that landed since was written over — and set back (Phase 21D,
+    // CX21-521).
+    if (tx.$queryRaw) await tx.$queryRaw`SELECT id FROM "SubValuation" WHERE id = ${valuationId} FOR UPDATE`;
+    const held = await tx.subValuation.findFirst({ where: { id: valuationId, projectId }, select: { status: true } });
+    if (!held) throw new HttpError(404, 'SUB_VALUATION_NOT_FOUND', 'Sub valuation not found');
+    if (held.status !== existing.status) {
+      const error = new HttpError(409, 'SUB_VALUATION_CHANGED', `${existing.ref} is now ${held.status}; reload it and decide again`);
+      error.details = { ref: existing.ref, status: held.status };
+      throw error;
+    }
     const updated = await tx.subValuation.update({
       where: { id: valuationId },
       data: {
@@ -605,6 +625,16 @@ const deleteSubValuation = async ({
   }
 
   await prisma.$transaction(async (tx) => {
+    // Held and read again: a delete that passed its check on a copy removed
+    // a valuation certified since (Phase 21D, CX21-521).
+    if (tx.$queryRaw) await tx.$queryRaw`SELECT id FROM "SubValuation" WHERE id = ${valuationId} FOR UPDATE`;
+    const held = await tx.subValuation.findFirst({ where: { id: valuationId, projectId }, select: { status: true } });
+    if (!held) throw new HttpError(404, 'SUB_VALUATION_NOT_FOUND', 'Sub valuation not found');
+    if (held.status !== existing.status) {
+      const error = new HttpError(409, 'SUB_VALUATION_CHANGED', `${existing.ref} is now ${held.status}; reload it and decide again`);
+      error.details = { ref: existing.ref, status: held.status };
+      throw error;
+    }
     await auditService.recordEvent({
       tx,
       orgId,

@@ -191,7 +191,6 @@ const requireCompanyAdmin = (req, res, next) => {
 module.exports = {
   noApiKey,
   personal,
-  personal,
   COMPANY_ADMIN_MODULES,
   getEffectiveRole,
   hasPermission,

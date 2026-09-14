@@ -283,3 +283,37 @@ describe("Phase 21D — integrity (release challenge, ninth pass)", () => {
     expect(disconnectSockets).toHaveBeenCalledWith(true);
   });
 });
+
+describe("Phase 21D — integrity (release challenge, eleventh pass)", () => {
+  it("CX21-523: a record event reaches the project room without the record's figures; an event addressed to people keeps its payload", () => {
+    const { io, emits } = createFakeIo();
+    broadcastDomainEvent(
+      io,
+      bus.normalizeEvent({
+        type: bus.EVENT_TYPES.RECORD_CHANGED,
+        orgId: "org-1",
+        projectId: PROJECT_ID,
+        entityType: "cost_record",
+        entityId: "cr-1",
+        action: "updated",
+        payload: { oldStatus: null, newStatus: null, summary: { budget: 1000, committed: 250, actual: 400, material: 7 } },
+      }),
+    );
+    broadcastDomainEvent(
+      io,
+      bus.normalizeEvent({
+        type: bus.EVENT_TYPES.NOTIFICATION_CREATED,
+        orgId: "org-1",
+        projectId: PROJECT_ID,
+        recipientUserIds: ["u1"],
+        payload: { summary: { title: "Approved" } },
+      }),
+    );
+    expect(emits[0].room).toBe(ROOMS.project(PROJECT_ID));
+    expect(emits[0].payload.entityType).toBe("cost_record");
+    expect(emits[0].payload.payload.summary).toBeUndefined();
+    expect(JSON.stringify(emits[0].payload)).not.toMatch(/budget|committed|actual/);
+    expect(emits[1].room).toBe(ROOMS.user("u1"));
+    expect(emits[1].payload.payload.summary).toEqual({ title: "Approved" });
+  });
+});

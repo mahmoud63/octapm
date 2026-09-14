@@ -14,6 +14,8 @@ const mockPrisma = {
 };
 
 jest.mock("../../config/db", () => ({ prisma: mockPrisma }));
+const mockSearchDocumentContent = jest.fn(async () => []);
+jest.mock("../document-text.service", () => ({ searchDocumentContent: mockSearchDocumentContent }));
 
 const searchService = require("../search.service");
 
@@ -305,5 +307,36 @@ describe("Phase 21D — integrity (release challenge, tenth pass)", () => {
     mockPrisma.project.findMany.mockResolvedValue([projectRow({ assignments: [{ role: "pm" }] })]);
     const allowed = await searchService.globalSearch({ orgId: "org-1", userId: "user-1", role: "pm", query: { q: "slab", type: "rfi" } });
     expect(allowed.items.filter((row) => row.type === "rfi")).toHaveLength(1);
+  });
+});
+
+describe("Phase 21D — integrity (release challenge, eleventh pass)", () => {
+  afterEach(() => {
+    delete mockPrisma.projectUserPermission;
+    delete mockPrisma.permissionTemplate;
+    delete mockPrisma.drawingRecord;
+    delete mockPrisma.documentRevision;
+  });
+
+  it("CX21-522: the content search is handed a viewer per project that answers as the person's template and a key's scopes would for each module", async () => {
+    mockPrisma.project.findMany.mockResolvedValue([projectRow({ assignments: [{ role: "pm" }] })]);
+    mockPrisma.drawingRecord = { findMany: jest.fn(async () => []) };
+    mockPrisma.documentRevision = { findMany: jest.fn(async () => []) };
+    mockPrisma.projectUserPermission = { findMany: jest.fn(async () => [{ projectId: "project-1", templateId: "tpl-no-rfi-c", overridesJson: {} }]) };
+    mockPrisma.permissionTemplate = { findFirst: jest.fn(async ({ where }) => ({ id: where.id, name: "No RFIs", kind: "internal", baseRole: "pm", status: "active", tools: [{ module: "rfi", level: "none" }], grants: [] })) };
+    mockSearchDocumentContent.mockClear();
+    await searchService.globalSearch({ orgId: "org-1", userId: "user-1", role: "pm", query: { q: "slab", type: "document" } });
+    expect(mockSearchDocumentContent).toHaveBeenCalledTimes(1);
+    const { viewerFor } = mockSearchDocumentContent.mock.calls[0][0];
+    expect(typeof viewerFor).toBe("function");
+    expect(viewerFor("project-1").canRead("document_control")).toBe(true);
+    expect(viewerFor("project-1").canRead("rfi")).toBe(false);
+    expect(viewerFor("project-9").canRead("document_control")).toBe(false);
+    // a key's scopes narrow it further
+    mockSearchDocumentContent.mockClear();
+    await searchService.globalSearch({ orgId: "org-1", userId: "user-1", role: "pm", query: { q: "slab", type: "document" }, apiClient: { id: "key-1", scopes: ["document_control:read"], projectIds: [] } });
+    const keyed = mockSearchDocumentContent.mock.calls[0][0].viewerFor("project-1");
+    expect(keyed.canRead("document_control")).toBe(true);
+    expect(keyed.canRead("submittal")).toBe(false);
   });
 });

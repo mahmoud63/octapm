@@ -296,3 +296,21 @@ describe("document text service", () => {
     });
   });
 });
+
+describe("Phase 21D — integrity (release challenge, eleventh pass)", () => {
+  it("CX21-522: a content hit is judged as the document itself would be — a document attached only to a record whose module the viewer may not read is not surfaced", async () => {
+    mockPrisma.$queryRaw.mockResolvedValue([
+      { documentId: "doc-rfi", projectId: "project-1", rank: 0.9, headline: "the [[slab]] opening" },
+      { documentId: "doc-dc", projectId: "project-1", rank: 0.5, headline: "[[slab]] drawing" },
+    ]);
+    mockPrisma.projectDocument.findMany.mockResolvedValue([
+      { id: "doc-rfi", projectId: "project-1", orgId: "org-1", originalName: "rfi-attachment.pdf", fileName: "rfi-attachment.pdf", mimeType: "application/pdf", uploadedAt: new Date(), text: null, documentRevisions: [], attachments: [{ recordType: "rfi", recordId: "rfi-1", role: "attachment" }] },
+      { id: "doc-dc", projectId: "project-1", orgId: "org-1", originalName: "drawing.pdf", fileName: "drawing.pdf", mimeType: "application/pdf", uploadedAt: new Date(), text: null, documentRevisions: [{ id: "rev-1", recordType: "document_control", recordId: "d1", revision: "A", status: "issued", title: "Drawing", documentNumber: "DWG-1", folderPath: "/", isLatest: true }], attachments: [] },
+    ]);
+    const viewerFor = () => ({ canRead: (moduleName) => moduleName === "document_control" }); // RFIs refused
+    const hits = await service.searchDocumentContent({ orgId: "org-1", projectIds: ["project-1"], q: "slab", viewerFor });
+    expect(hits.map((hit) => hit.documentId ?? hit.id)).toEqual(["doc-dc"]);
+    const everything = await service.searchDocumentContent({ orgId: "org-1", projectIds: ["project-1"], q: "slab", viewerFor: () => ({ canRead: () => true }) });
+    expect(everything).toHaveLength(2);
+  });
+});
