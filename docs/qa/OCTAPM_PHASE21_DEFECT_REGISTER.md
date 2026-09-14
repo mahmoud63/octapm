@@ -1780,6 +1780,18 @@ job-status poll takes BOQ read or create. Regression in
 | **Fix** | Only an activity the row itself minted — created with the row or later, carrying no ledger entry, no stock movement, no cost record and no allocation on another row — retires with it; any other keeps its schedule and history, and only its allocation is rejected. |
 | **Regression** | `boq.service.test.js` (P21-169: the pre-existing activity kept, the minted one retired; a minted one allocated elsewhere kept too). Live on the fix: the PM's delete of a row allocated to A100 leaves A100 active. |
 
+## P21-170 · P2 · Change orders · **OPEN** (Codex twelfth pass, Medium)
+
+A pending change order can still be approved after its parent commitment
+is voided: the approval re-reads the parent under its lock (P21-155) and,
+finding it neither executed nor closed, records the approval and sends its
+notifications without posting committed cost — a change approved against a
+contract that no longer stands. **Not fixed** — a Medium, outside the
+brief's loop. No money moves (nothing posts on a void parent, and a void
+parent cannot be executed again); the workaround is to void or reject the
+pending change orders together with the parent. Dispositioned for Phase 22
+with P21-139 and P21-140.
+
 ## T-19 · the seeded subcontract fell past the commitments list's first page
 
 Gates run 12 (on `8a1d7dd`) skipped thirteen tests of the subcontract
@@ -1946,6 +1958,9 @@ Every finding that stays open after Phase 21D, with what a pilot/UAT client woul
 | P21-023 | P2 | Task deep links | A notification for a task beyond the first 25 rows opens the register without the drawer. | Filter or scroll to the task. | none | none | none | Phase 22 | Yes |
 | P21-087 | P2 | Account security | Two verifications racing on the same backup code could both pass; the code is single-use in practice. | None needed; regenerate codes if one is suspected shared. | none | low (needs a stolen code used twice within milliseconds) | none | Phase 22 | Yes |
 | P21-115 | P2 | Budget revisions (browser) | A QS's or cost controller's revision starts as a draft and the screen offers no control to submit it. | The PM or finance creates or approves revisions; a draft is submitted through the API or the workflow. | none | none | none | Phase 22 (a submit control) | Yes |
+| P21-139 | P2 | Budget revisions | Two revision creations at once, or a back-dated one, can store a wrong cumulative balance (a projection). | The reconciliation repair recomputes it; the revision amounts themselves are unaffected. | none — the figure is a projection | none | low (a stored projection, recomputed on repair) | Phase 22 | Yes |
+| P21-140 | P2 | Permission templates | A database failure while a project's template is attached falls back to the legacy role policy instead of refusing the request. | None needed — a database fault, logged, not a request anyone can cause. | none | low (fail-open on a database fault only) | none | Phase 22 | Yes |
+| P21-170 | P2 | Change orders | A pending change order can be approved after its parent commitment is voided; the approval is recorded and notified, nothing is posted. | Void or reject pending change orders together with the parent. | none — nothing posts on a void parent | none | low (an approval recorded against a void contract) | Phase 22 | Yes |
 | P21-003 | P3 | OpenAPI | `POST /activities` does not document the required `engineerIds`. | The API's 400 says so. | none | none | none | Phase 22 docs pass | Yes |
 | P21-004 | P3 | OpenAPI | Purchase-order `status` documented wider than the validator accepts. | Use `submit/approve/issue`. | none | none | none | Phase 22 docs pass | Yes |
 | P21-005 | P3 | Security posture | An outsider tenant's write meets `402` before `403`. | None needed — the write is refused either way. | none | low (information: the gate order reveals the subscription state, not data) | none | Phase 22 | Yes |
