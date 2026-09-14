@@ -629,7 +629,7 @@ defects in the ledger, stock, payment, transition, authentication,
 authorization, billing and tenant-isolation paths (7 + 5 + 6 + 4 + 3 + 2 + 1
 + 2 + 2 + 8 + 10 + 7 + 8 + 8 + 1 + 8 + 8 + 7 + 8 + 6, five of them regressions
 of a loop's own fix, plus six P2 and two P3 fixed, and two P2 and one P3
-carried), 136 regression cases (87 of them fail on the code they guard; five guard flows that must keep working), and
+carried), 134 regression cases (87 of them fail on the code they guard; five guard flows that must keep working), and
 a demo-project reconciliation that still balances to the cent after all of
 it. The Phase 21 project's own figures did not move once (36/36 before and
 after every loop); the defects lived in what those figures never exercised —
