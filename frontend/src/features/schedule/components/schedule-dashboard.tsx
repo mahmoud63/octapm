@@ -698,9 +698,10 @@ export function ScheduleDashboard({
           />
           <StatCard label='Milestones' value={milestones.length} tone='brand' />
           <StatCard
-            label='Total Budget'
+            label='Activity budget'
             value={fmtUSD(totalBudget)}
             tone='info'
+            sub='on this schedule revision'
           />
           <StatCard
             label='Proc Risk'

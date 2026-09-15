@@ -79,6 +79,7 @@ export function CommercialDashboard({
           <ChangeOrderRegister
             projectId={projectId}
             activities={activities}
+            initialNew={initialTarget?.new === 'change_order'}
             initialStatus={
               initialTarget?.source === 'change_order'
                 ? initialTarget.status

@@ -142,6 +142,7 @@ export function CostDashboard({
 
   const totals = useMemo(() => summary?.totals, [summary?.totals])
   const eac = useMemo(() => summary?.eac, [summary?.eac])
+  const budget = useMemo(() => summary?.budget, [summary?.budget])
 
   if (isLoading) {
     return (
@@ -182,6 +183,7 @@ export function CostDashboard({
         <TabsContent value='direct-costs'>
           <DirectCostsPanel
             projectId={projectId}
+            initialNew={initialTarget?.new === 'direct_cost'}
             initialRecordId={
               initialTarget?.source === 'direct_cost'
                 ? initialTarget.recordId
@@ -191,48 +193,93 @@ export function CostDashboard({
         </TabsContent>
 
         <TabsContent value='overview' className='space-y-3'>
-          <div className='grid grid-cols-1 gap-3 sm:grid-cols-3'>
-            <div className='rounded-lg border border-green-300 bg-green-50 p-4 text-center'>
-              <p className='text-xs text-green-700'>Optimistic (-10%)</p>
-              <p className='text-2xl font-bold text-green-700'>
-                {fmtUSD(eac?.optimistic || 0)}
-              </p>
+          {/* One budget vocabulary (Phase 22A): the same term means the same
+              figure here, on the Budget tab and on the project header. */}
+          <section
+            className='rounded-lg border bg-card p-3'
+            data-testid='cost-budget-summary'
+          >
+            <p className='text-xs font-semibold tracking-wide text-muted-foreground uppercase'>
+              Budget
+            </p>
+            <p className='text-xs text-muted-foreground'>
+              As the budget register states it — original, approved changes,
+              revisions, revised.
+            </p>
+            <div className='mt-2 grid grid-cols-2 gap-3 sm:grid-cols-4'>
+              <CostFigure
+                label='Original budget'
+                value={fmtUSD(budget?.originalBudget ?? 0)}
+                hint='The approved starting budget'
+              />
+              <CostFigure
+                label='Approved changes'
+                value={fmtUSD(budget?.approvedChanges ?? 0)}
+                hint='Approved change orders'
+              />
+              <CostFigure
+                label='Revisions & transfers'
+                value={fmtUSD(budget?.revisions ?? 0)}
+                hint='Approved budget revisions and transfers'
+              />
+              <CostFigure
+                label='Revised budget'
+                value={fmtUSD(budget?.revisedBudget ?? 0)}
+                hint='Original + approved changes + revisions'
+                emphasis
+              />
             </div>
-            <div className='rounded-lg border p-4 text-center'>
-              <p className='text-xs text-muted-foreground'>Most Likely</p>
-              <p className='text-2xl font-bold'>
-                {fmtUSD(eac?.mostLikely || 0)}
-              </p>
-            </div>
-            <div className='rounded-lg border border-red-300 bg-red-50 p-4 text-center'>
-              <p className='text-xs text-red-700'>Pessimistic (+15%)</p>
-              <p className='text-2xl font-bold text-red-700'>
-                {fmtUSD(eac?.pessimistic || 0)}
-              </p>
-            </div>
-          </div>
+          </section>
 
           <div className='grid grid-cols-2 gap-3 sm:grid-cols-4'>
-            <div className='rounded-lg border bg-card p-3'>
-              <p className='text-xs text-muted-foreground'>Budget</p>
-              <p className='text-lg font-bold'>{fmtUSD(totals?.budget || 0)}</p>
-            </div>
-            <div className='rounded-lg border bg-card p-3'>
-              <p className='text-xs text-muted-foreground'>Committed</p>
-              <p className='text-lg font-bold'>
-                {fmtUSD(totals?.committed || 0)}
-              </p>
-            </div>
-            <div className='rounded-lg border bg-card p-3'>
-              <p className='text-xs text-muted-foreground'>Actual</p>
-              <p className='text-lg font-bold'>{fmtUSD(totals?.actual || 0)}</p>
-            </div>
-            <div className='rounded-lg border bg-card p-3'>
-              <p className='text-xs text-muted-foreground'>Forecast</p>
-              <p className='text-lg font-bold'>
-                {fmtUSD(totals?.forecast || 0)}
-              </p>
-            </div>
+            <CostFigure
+              label='Allocated to activities'
+              value={fmtUSD(totals?.budget || 0)}
+              hint='Budget carried on activity cost records'
+            />
+            <CostFigure
+              label='Committed'
+              value={fmtUSD(totals?.committed || 0)}
+              hint='Executed subcontracts and purchase orders'
+            />
+            <CostFigure
+              label='Actual cost'
+              value={fmtUSD(totals?.actual || 0)}
+              hint='Posted to the cost ledger to date'
+            />
+            <CostFigure
+              label='Forecast (EAC)'
+              value={fmtUSD(eac?.mostLikely ?? totals?.forecast ?? 0)}
+              hint='Estimate at completion on activity cost records — never below actual cost'
+            />
+          </div>
+
+          {/* Estimate at completion: actual to date + cost to complete. The
+              scenarios vary only the cost to complete, so they order
+              optimistic ≤ most likely ≤ pessimistic and none sits below
+              what has already been spent. */}
+          <div
+            className='grid grid-cols-1 gap-3 sm:grid-cols-3'
+            data-testid='cost-eac-scenarios'
+          >
+            <ScenarioCard
+              tone='good'
+              label='Optimistic EAC'
+              sub='cost to complete −10%'
+              value={fmtUSD(eac?.optimistic ?? 0)}
+            />
+            <ScenarioCard
+              tone='neutral'
+              label='Most likely EAC'
+              sub='actual to date + cost to complete'
+              value={fmtUSD(eac?.mostLikely ?? 0)}
+            />
+            <ScenarioCard
+              tone='risk'
+              label='Pessimistic EAC'
+              sub='cost to complete +15%'
+              value={fmtUSD(eac?.pessimistic ?? 0)}
+            />
           </div>
         </TabsContent>
 
@@ -749,3 +796,53 @@ export function CostDashboard({
     </div>
   )
 }
+
+function CostFigure({
+  label,
+  value,
+  hint,
+  emphasis = false,
+}: {
+  label: string
+  value: string
+  hint?: string
+  emphasis?: boolean
+}) {
+  return (
+    <div
+      className={emphasis ? 'rounded-lg border-2 border-primary/40 bg-card p-3' : 'rounded-lg border bg-card p-3'}
+      title={hint}
+    >
+      <p className='text-xs text-muted-foreground'>{label}</p>
+      <p className='text-lg font-bold'>{value}</p>
+      {hint && <p className='text-[11px] text-muted-foreground'>{hint}</p>}
+    </div>
+  )
+}
+
+function ScenarioCard({
+  tone,
+  label,
+  sub,
+  value,
+}: {
+  tone: 'good' | 'neutral' | 'risk'
+  label: string
+  sub: string
+  value: string
+}) {
+  const toneClass =
+    tone === 'good'
+      ? 'border-green-300 bg-green-50 text-green-700'
+      : tone === 'risk'
+        ? 'border-red-300 bg-red-50 text-red-700'
+        : 'border-border bg-card text-foreground'
+  return (
+    <div className={`rounded-lg border p-4 text-center ${toneClass}`}>
+      <p className='text-xs'>{label}</p>
+      <p className='text-2xl font-bold'>{value}</p>
+      <p className='text-[11px] opacity-80'>{sub}</p>
+    </div>
+  )
+}
+

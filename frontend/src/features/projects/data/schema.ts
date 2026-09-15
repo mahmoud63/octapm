@@ -197,6 +197,8 @@ export type ProjectSetupTarget = {
   pin?: string
   /** Day to open when the target is the daily log (`YYYY-MM-DD`). */
   date?: string
+  /** Open the module's create dialog on arrival (Phase 22A quick actions). */
+  new?: string
 }
 
 export type ProjectSetupStep = {

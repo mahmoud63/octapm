@@ -97,11 +97,14 @@ export function ChangeOrderRegister({
   activities,
   initialStatus,
   initialRecordId,
+  initialNew = false,
 }: {
   projectId: string
   activities: ScheduleActivity[]
   initialStatus?: string
   initialRecordId?: string
+  /** Arrive with the create form open (Phase 22A quick actions). */
+  initialNew?: boolean
 }) {
   const { data, isLoading } = useChangeOrders(projectId)
   const createChangeOrder = useCreateChangeOrder(projectId)
@@ -132,8 +135,19 @@ export function ChangeOrderRegister({
     'change_order.reopen'
   )
 
-  const [open, setOpen] = useState(false)
+  const [open, setOpen] = useState(initialNew)
   const [editing, setEditing] = useState<ChangeOrderRecord | null>(null)
+  // A quick action can land here while the register is already mounted, so
+  // a fresh "new" request opens the blank form again (adjusting state during
+  // render, as React documents for values derived from a prop change).
+  const [seenNew, setSeenNew] = useState(initialNew)
+  if (initialNew !== seenNew) {
+    setSeenNew(initialNew)
+    if (initialNew) {
+      setEditing(null)
+      setOpen(true)
+    }
+  }
   const [decisionTarget, setDecisionTarget] =
     useState<ChangeOrderDecisionTarget | null>(null)
   // A deep link's order is the one whose history and detail open first.
@@ -712,6 +726,7 @@ export function ChangeOrderRegister({
 
       <ChangeOrderForm
         key={`${editing?.id ?? 'change-order-create'}-${open ? 'open' : 'closed'}`}
+        projectId={projectId}
         open={open}
         onOpenChange={setOpen}
         activities={activities}

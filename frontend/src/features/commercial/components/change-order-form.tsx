@@ -16,6 +16,8 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
+import { DocumentPicker } from './document-picker'
+import { RaisedByPicker } from './raised-by-picker'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import type { ScheduleActivity } from '@/features/schedule/data/schema'
@@ -27,6 +29,7 @@ type Props = {
   activities: ScheduleActivity[]
   initial?: ChangeOrderRecord | null
   isSaving?: boolean
+  projectId: string
   onSubmit: (payload: {
     description: string
     category?: string
@@ -63,7 +66,7 @@ type FormState = {
   costImpactSummary: string
   activityIds: string[]
   activityImpacts: Record<string, ActivityImpactState>
-  supportingDocumentIds: string
+  documentIds: string[]
   submittedDate: string
   raisedBy: string
 }
@@ -77,7 +80,7 @@ const defaultState: FormState = {
   costImpactSummary: '',
   activityIds: [],
   activityImpacts: {},
-  supportingDocumentIds: '',
+  documentIds: [],
   submittedDate: '',
   raisedBy: '',
 }
@@ -111,11 +114,10 @@ const toFormState = (initial?: ChangeOrderRecord | null): FormState => {
         ? [initial.activityId]
         : [],
     activityImpacts,
-    supportingDocumentIds:
+    documentIds:
       initial.attachmentRefs
         ?.map((attachment) => attachment.documentId)
-        .filter(Boolean)
-        .join(', ') || '',
+        .filter((id): id is string => Boolean(id)) || [],
     submittedDate: initial.submittedDate
       ? new Date(initial.submittedDate).toISOString().slice(0, 10)
       : '',
@@ -124,6 +126,7 @@ const toFormState = (initial?: ChangeOrderRecord | null): FormState => {
 }
 
 export function ChangeOrderForm({
+  projectId,
   open,
   onOpenChange,
   activities,
@@ -164,14 +167,11 @@ export function ChangeOrderForm({
     }))
   }
 
-  const documentIds = form.supportingDocumentIds
-    .split(/[\s,;]+/)
-    .map((value) => value.trim())
-    .filter(Boolean)
+  const documentIds = form.documentIds
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className='sm:max-w-3xl'>
+      <DialogContent className='max-h-[92vh] overflow-y-auto sm:max-w-3xl'>
         <DialogHeader>
           <DialogTitle>
             {initial ? 'Edit Change Order' : 'Add Change Order'}
@@ -273,12 +273,13 @@ export function ChangeOrderForm({
 
           <div className='grid gap-1.5'>
             <Label htmlFor='co-raised-by'>Raised By</Label>
-            <Input
+            {/* A known person or party is picked, not typed; "Other" keeps a
+                free-text originator for someone outside the project (Phase 22A). */}
+            <RaisedByPicker
               id='co-raised-by'
+              projectId={projectId}
               value={form.raisedBy}
-              onChange={(e) =>
-                setForm((prev) => ({ ...prev, raisedBy: e.target.value }))
-              }
+              onChange={(raisedBy) => setForm((prev) => ({ ...prev, raisedBy }))}
             />
           </div>
 
@@ -400,19 +401,23 @@ export function ChangeOrderForm({
           )}
 
           <div className='col-span-2 grid gap-1.5'>
-            <Label htmlFor='co-supporting-documents'>
-              Supporting Document IDs
-            </Label>
-            <Input
-              id='co-supporting-documents'
-              value={form.supportingDocumentIds}
-              onChange={(e) =>
-                setForm((prev) => ({
-                  ...prev,
-                  supportingDocumentIds: e.target.value,
-                }))
+            <Label>Supporting documents</Label>
+            {/* Documents are picked from the project's register by reference,
+                title, revision and status — never typed as ids (Phase 22A). */}
+            <DocumentPicker
+              projectId={projectId}
+              value={form.documentIds}
+              onChange={(documentIds) =>
+                setForm((prev) => ({ ...prev, documentIds }))
               }
-              placeholder='Document IDs'
+              initialLabels={Object.fromEntries(
+                (initial?.attachmentRefs || [])
+                  .filter((attachment) => attachment.documentId)
+                  .map((attachment) => [
+                    attachment.documentId as string,
+                    attachment.fileName || attachment.description || 'Document',
+                  ])
+              )}
             />
           </div>
         </div>

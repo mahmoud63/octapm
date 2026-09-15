@@ -1,5 +1,6 @@
 const mockPrisma = {
   project: { findFirst: jest.fn() },
+  user: { findMany: jest.fn() },
   auditEvent: {
     create: jest.fn(),
     findMany: jest.fn(),
@@ -32,6 +33,38 @@ describe('audit service', () => {
     mockPrisma.workflowStatusHistory.findMany.mockResolvedValue([]);
     mockPrisma.workflowAttachment.findMany.mockResolvedValue([]);
     mockPrisma.commercialAttachmentRef.findMany.mockResolvedValue([]);
+    mockPrisma.user.findMany.mockResolvedValue([]);
+  });
+
+  it('names the actor on every event, in one batched lookup, and carries no name (the UI shows "Former user") for an account that no longer exists', async () => {
+    const at = new Date('2026-06-09T11:00:00.000Z');
+    mockPrisma.project.findFirst.mockResolvedValue({ id: 'project-1' });
+    mockPrisma.auditEvent.findMany.mockResolvedValue([
+      { id: 'audit-1', orgId: 'org-1', projectId: 'project-1', entityType: 'change_order', entityId: 'co-1', action: 'updated', actorId: 'qs-1', actorRole: null, occurredAt: at, createdAt: at, summaryJson: {}, attachmentsJson: [], metadataJson: {} },
+      { id: 'audit-2', orgId: 'org-1', projectId: 'project-1', entityType: 'change_order', entityId: 'co-1', action: 'updated', actorId: 'gone-1', actorRole: 'pm', occurredAt: at, createdAt: at, summaryJson: {}, attachmentsJson: [], metadataJson: {} },
+    ]);
+    mockPrisma.approvalWorkflowEvent.findMany.mockResolvedValue([
+      { id: 'approval-1', orgId: 'org-1', projectId: 'project-1', recordType: 'change_order', recordId: 'co-1', workflowType: 'change_order', action: 'approved', decision: 'approved', fromStatus: 'pending', toStatus: 'approved', actorId: 'pm-1', actorRole: 'pm', reason: null, comment: null, metadataJson: {}, createdAt: at },
+    ]);
+    mockPrisma.user.findMany.mockResolvedValue([
+      { id: 'qs-1', name: 'Quinn Surveyor', role: 'qs' },
+      { id: 'pm-1', name: 'Priya Manager', role: 'pm' },
+    ]);
+
+    const result = await auditService.listEvents({ orgId: 'org-1', projectId: 'project-1', entityType: 'change_order', entityId: 'co-1', limit: 10, order: 'asc' });
+
+    expect(mockPrisma.user.findMany).toHaveBeenCalledTimes(1);
+    expect(mockPrisma.user.findMany).toHaveBeenCalledWith({
+      where: { id: { in: expect.arrayContaining(['qs-1', 'gone-1', 'pm-1']) } },
+      select: { id: true, name: true, role: true },
+    });
+    // approval rows are exposed as "approval:<id>"; audit rows keep their own id
+    const byId = Object.fromEntries(result.events.map((event) => [event.rawId || event.id, event]));
+    expect(byId['audit-1']).toEqual(expect.objectContaining({ actorId: 'qs-1', actorName: 'Quinn Surveyor', actorRole: 'qs' }));
+    expect(byId['approval-1']).toEqual(expect.objectContaining({ actorId: 'pm-1', actorName: 'Priya Manager' }));
+    // a deleted account: no name to show, the stored role kept — the UI renders "Former user"
+    expect(byId['audit-2']).toEqual(expect.objectContaining({ actorId: 'gone-1', actorName: null, actorRole: 'pm' }));
+    expect(result.events.every((event) => 'actorName' in event)).toBe(true);
   });
 
   it('records compact structured events and redacts sensitive summary keys', async () => {

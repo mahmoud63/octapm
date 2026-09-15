@@ -16,7 +16,10 @@ import { Route as AuthenticatedRouteRouteImport } from './routes/_authenticated/
 import { Route as AuthenticatedIndexRouteImport } from './routes/_authenticated/index'
 import { Route as RfqTokenRouteImport } from './routes/rfq.$token'
 import { Route as BidTokenRouteImport } from './routes/bid.$token'
+import { Route as AuthenticatedVendorsRouteImport } from './routes/_authenticated/vendors'
 import { Route as AuthenticatedInventoryRouteImport } from './routes/_authenticated/inventory'
+import { Route as AuthenticatedDirectoryRouteImport } from './routes/_authenticated/directory'
+import { Route as AuthenticatedCostCodesRouteImport } from './routes/_authenticated/cost-codes'
 import { Route as errors503RouteImport } from './routes/(errors)/503'
 import { Route as errors500RouteImport } from './routes/(errors)/500'
 import { Route as errors404RouteImport } from './routes/(errors)/404'
@@ -101,9 +104,24 @@ const BidTokenRoute = BidTokenRouteImport.update({
   path: '/bid/$token',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AuthenticatedVendorsRoute = AuthenticatedVendorsRouteImport.update({
+  id: '/vendors',
+  path: '/vendors',
+  getParentRoute: () => AuthenticatedRouteRoute,
+} as any)
 const AuthenticatedInventoryRoute = AuthenticatedInventoryRouteImport.update({
   id: '/inventory',
   path: '/inventory',
+  getParentRoute: () => AuthenticatedRouteRoute,
+} as any)
+const AuthenticatedDirectoryRoute = AuthenticatedDirectoryRouteImport.update({
+  id: '/directory',
+  path: '/directory',
+  getParentRoute: () => AuthenticatedRouteRoute,
+} as any)
+const AuthenticatedCostCodesRoute = AuthenticatedCostCodesRouteImport.update({
+  id: '/cost-codes',
+  path: '/cost-codes',
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
 const errors503Route = errors503RouteImport.update({
@@ -405,7 +423,10 @@ export interface FileRoutesByFullPath {
   '/404': typeof errors404Route
   '/500': typeof errors500Route
   '/503': typeof errors503Route
+  '/cost-codes': typeof AuthenticatedCostCodesRoute
+  '/directory': typeof AuthenticatedDirectoryRoute
   '/inventory': typeof AuthenticatedInventoryRoute
+  '/vendors': typeof AuthenticatedVendorsRoute
   '/bid/$token': typeof BidTokenRoute
   '/rfq/$token': typeof RfqTokenRoute
   '/sso/complete': typeof authSsoCompleteRoute
@@ -460,7 +481,10 @@ export interface FileRoutesByTo {
   '/404': typeof errors404Route
   '/500': typeof errors500Route
   '/503': typeof errors503Route
+  '/cost-codes': typeof AuthenticatedCostCodesRoute
+  '/directory': typeof AuthenticatedDirectoryRoute
   '/inventory': typeof AuthenticatedInventoryRoute
+  '/vendors': typeof AuthenticatedVendorsRoute
   '/bid/$token': typeof BidTokenRoute
   '/rfq/$token': typeof RfqTokenRoute
   '/': typeof AuthenticatedIndexRoute
@@ -519,7 +543,10 @@ export interface FileRoutesById {
   '/(errors)/404': typeof errors404Route
   '/(errors)/500': typeof errors500Route
   '/(errors)/503': typeof errors503Route
+  '/_authenticated/cost-codes': typeof AuthenticatedCostCodesRoute
+  '/_authenticated/directory': typeof AuthenticatedDirectoryRoute
   '/_authenticated/inventory': typeof AuthenticatedInventoryRoute
+  '/_authenticated/vendors': typeof AuthenticatedVendorsRoute
   '/bid/$token': typeof BidTokenRoute
   '/rfq/$token': typeof RfqTokenRoute
   '/_authenticated/': typeof AuthenticatedIndexRoute
@@ -580,7 +607,10 @@ export interface FileRouteTypes {
     | '/404'
     | '/500'
     | '/503'
+    | '/cost-codes'
+    | '/directory'
     | '/inventory'
+    | '/vendors'
     | '/bid/$token'
     | '/rfq/$token'
     | '/sso/complete'
@@ -635,7 +665,10 @@ export interface FileRouteTypes {
     | '/404'
     | '/500'
     | '/503'
+    | '/cost-codes'
+    | '/directory'
     | '/inventory'
+    | '/vendors'
     | '/bid/$token'
     | '/rfq/$token'
     | '/'
@@ -693,7 +726,10 @@ export interface FileRouteTypes {
     | '/(errors)/404'
     | '/(errors)/500'
     | '/(errors)/503'
+    | '/_authenticated/cost-codes'
+    | '/_authenticated/directory'
     | '/_authenticated/inventory'
+    | '/_authenticated/vendors'
     | '/bid/$token'
     | '/rfq/$token'
     | '/_authenticated/'
@@ -807,11 +843,32 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof BidTokenRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/_authenticated/vendors': {
+      id: '/_authenticated/vendors'
+      path: '/vendors'
+      fullPath: '/vendors'
+      preLoaderRoute: typeof AuthenticatedVendorsRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
     '/_authenticated/inventory': {
       id: '/_authenticated/inventory'
       path: '/inventory'
       fullPath: '/inventory'
       preLoaderRoute: typeof AuthenticatedInventoryRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/directory': {
+      id: '/_authenticated/directory'
+      path: '/directory'
+      fullPath: '/directory'
+      preLoaderRoute: typeof AuthenticatedDirectoryRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/cost-codes': {
+      id: '/_authenticated/cost-codes'
+      path: '/cost-codes'
+      fullPath: '/cost-codes'
+      preLoaderRoute: typeof AuthenticatedCostCodesRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
     '/(errors)/503': {
@@ -1256,7 +1313,10 @@ const AuthenticatedProjectsProjectIdRouteWithChildren =
 interface AuthenticatedRouteRouteChildren {
   AuthenticatedCompanyRouteRoute: typeof AuthenticatedCompanyRouteRouteWithChildren
   AuthenticatedSettingsRouteRoute: typeof AuthenticatedSettingsRouteRouteWithChildren
+  AuthenticatedCostCodesRoute: typeof AuthenticatedCostCodesRoute
+  AuthenticatedDirectoryRoute: typeof AuthenticatedDirectoryRoute
   AuthenticatedInventoryRoute: typeof AuthenticatedInventoryRoute
+  AuthenticatedVendorsRoute: typeof AuthenticatedVendorsRoute
   AuthenticatedIndexRoute: typeof AuthenticatedIndexRoute
   AuthenticatedBillingCheckoutRoute: typeof AuthenticatedBillingCheckoutRoute
   AuthenticatedErrorsErrorRoute: typeof AuthenticatedErrorsErrorRoute
@@ -1274,7 +1334,10 @@ interface AuthenticatedRouteRouteChildren {
 const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedCompanyRouteRoute: AuthenticatedCompanyRouteRouteWithChildren,
   AuthenticatedSettingsRouteRoute: AuthenticatedSettingsRouteRouteWithChildren,
+  AuthenticatedCostCodesRoute: AuthenticatedCostCodesRoute,
+  AuthenticatedDirectoryRoute: AuthenticatedDirectoryRoute,
   AuthenticatedInventoryRoute: AuthenticatedInventoryRoute,
+  AuthenticatedVendorsRoute: AuthenticatedVendorsRoute,
   AuthenticatedIndexRoute: AuthenticatedIndexRoute,
   AuthenticatedBillingCheckoutRoute: AuthenticatedBillingCheckoutRoute,
   AuthenticatedErrorsErrorRoute: AuthenticatedErrorsErrorRoute,

@@ -197,9 +197,12 @@ function NewDirectCostDialog({
 export function DirectCostsPanel({
   projectId,
   initialRecordId,
+  initialNew = false,
 }: {
   projectId: string
   initialRecordId?: string
+  /** Arrive with the create dialog open (Phase 22A quick actions). */
+  initialNew?: boolean
 }) {
   const canCreate = useCanPerform('cost', 'create')
   const [status, setStatus] = useState(ALL)
@@ -211,7 +214,7 @@ export function DirectCostsPanel({
     q,
   })
   const [openId, setOpenId] = useState<string | null>(initialRecordId ?? null)
-  const [creating, setCreating] = useState(false)
+  const [creating, setCreating] = useState(initialNew)
   const summary = data?.summary
 
   return (

@@ -45,6 +45,8 @@ export interface AuditEvent {
   action: string
   decision?: string | null
   actorId: string | null
+  /** The person's name; null when they are no longer in the organisation (Phase 22A). */
+  actorName?: string | null
   actorRole: string | null
   occurredAt: string
   oldStatus: string | null

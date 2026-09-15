@@ -409,7 +409,7 @@ test.describe('inventory and warehouse', () => {
     // is that every row the API ranks is shown with the API's own figures —
     // so the rows are taken from the API and each is found by its own name.
     const variance = page.getByTestId('uat-analytics-variance')
-    type VarianceRow = { name?: string; itemName?: string; ordered?: number; received?: number; rejected?: number }
+    type VarianceRow = { name?: string; itemName?: string; sku?: string; itemCode?: string; ordered?: number; received?: number; rejected?: number }
     const reported: VarianceRow[] = await (async () => {
       const client = await apiClient()
       try {
@@ -424,7 +424,10 @@ test.describe('inventory and warehouse', () => {
     for (const row of reported.slice(0, 3)) {
       const name = `${row.name ?? row.itemName ?? ''}`
       expect(name, 'a ranked row is named').toBeTruthy()
-      const shown = variance.locator('tbody tr', { hasText: name }).first()
+      // several items can share a name (every receipt of a line without an item
+      // code numbers a new one), so the row is found by its SKU when the API gives one
+      const key = `${row.sku ?? row.itemCode ?? ''}` || name
+      const shown = variance.locator('tbody tr', { hasText: key }).first()
       await expect(shown, `the screen shows the ranked row "${name}"`).toBeVisible()
       for (const figure of [row.ordered, row.received, row.rejected]) {
         if (figure === undefined || figure === null) continue

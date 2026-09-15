@@ -149,7 +149,10 @@ export function BudgetPanel({ projectId }: { projectId: string }) {
         <Stat label='Revised' value={formatMoney(totals?.revisedBudget ?? 0)} />
         <Stat label='Committed' value={formatMoney(totals?.committed ?? 0)} />
         <Stat label='Actual' value={formatMoney(totals?.actual ?? 0)} />
-        <Stat label='Forecast' value={formatMoney(totals?.forecast ?? 0)} />
+        <Stat
+          label='Forecast (budget lines)'
+          value={formatMoney(totals?.forecast ?? 0)}
+        />
         <Stat
           label='Variance'
           value={formatMoney(totals?.variance ?? 0)}

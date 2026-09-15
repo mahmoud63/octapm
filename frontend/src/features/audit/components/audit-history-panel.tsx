@@ -302,10 +302,14 @@ function TimelineItem({ event }: { event: AuditEvent }) {
               <span>{humanize(event.actorRole)}</span>
             </span>
           )}
-          {event.actorId && (
+          {(event.actorName || event.actorId) && (
             <span>
-              <span className='text-muted-foreground'>Actor </span>
-              <span className='font-mono'>{event.actorId}</span>
+              <span className='text-muted-foreground'>By </span>
+              {/* A person's name, never the internal id; the id stays in the
+                  tooltip for technical detail (Phase 22A). */}
+              <span title={event.actorId || undefined}>
+                {event.actorName || 'Former user'}
+              </span>
             </span>
           )}
           {note && (

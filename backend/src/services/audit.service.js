@@ -581,6 +581,27 @@ const ensureProject = async ({ orgId, projectId }) => {
   return project;
 };
 
+/**
+ * Who acted, by name. A client-facing history must never show a raw user id
+ * (Phase 22A, from the Phase 22 audit UX22-05): one lookup for every actor
+ * on the page, the role filled from the account when the row carries none,
+ * and a person no longer in the organisation left as null for the screen to
+ * label. The id stays on the event for technical detail only.
+ */
+const attachActorNames = async (events) => {
+  const actorIds = [...new Set(events.map((event) => event.actorId).filter(Boolean))];
+  const users = actorIds.length && prisma.user?.findMany
+    ? await prisma.user.findMany({ where: { id: { in: actorIds } }, select: { id: true, name: true, role: true } })
+    : [];
+  const byId = new Map(users.map((user) => [user.id, user]));
+  for (const event of events) {
+    const user = event.actorId ? byId.get(event.actorId) : null;
+    event.actorName = user?.name || event.summary?.author || null;
+    if (!event.actorRole && user?.role) event.actorRole = user.role;
+  }
+  return events;
+};
+
 const listEvents = async ({
   orgId,
   projectId,
@@ -673,6 +694,7 @@ const listEvents = async ({
     ...toArray(statusRows).map((row) => serializeStatusHistory({ orgId, row })),
     ...toArray(commentRows).map(serializeCommentEvent),
   ].sort((a, b) => compareTimeline(a, b, direction));
+  await attachActorNames(combined);
 
   const hasMore = combined.length > safeLimit;
   const events = await loadRecordAttachments({

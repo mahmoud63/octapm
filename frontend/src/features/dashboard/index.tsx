@@ -29,6 +29,7 @@ import {
 } from '@/components/ui/card'
 import { Main } from '@/components/layout/main'
 import { MyWorkflowStepsSection } from '@/features/workflows/components/my-workflow-steps'
+import { QuickActions } from './quick-actions'
 
 type DashboardTarget = {
   projectId: string | null
@@ -928,6 +929,8 @@ export function Dashboard() {
             </Link>
           </Button>
         </div>
+
+        {!data.emptyState && <QuickActions />}
 
         {data.emptyState ? (
           <EmptyWorkspace data={data} />

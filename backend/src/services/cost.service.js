@@ -216,16 +216,23 @@ const getCostSummary = async ({ orgId, projectId }) => {
     current.budget = addMoney(current.budget, record.budget);
     current.committed = addMoney(current.committed, record.committed);
     current.actual = addMoney(current.actual, record.actual);
-    current.forecast = addMoney(current.forecast, record.forecast);
+    current.forecast = addMoney(current.forecast, estimateAtCompletion(record));
     byPhaseMap.set(phase, current);
   }
 
   const totals = summarizeTotals(records);
-  const eac = {
-    optimistic: multiplyMoney(totals.budget, 0.9),
-    mostLikely: totals.forecast || totals.budget,
-    pessimistic: multiplyMoney(totals.budget, 1.15),
-  };
+  // "Forecast" on the summary is the most-likely estimate at completion —
+  // the same figure the scenario card shows, so one word means one thing.
+  const mostLikely = records.reduce((sum, record) => addMoney(sum, estimateAtCompletion(record)), 0);
+  totals.forecast = mostLikely;
+  const eac = estimateScenarios({ actual: totals.actual, mostLikely });
+
+  // The project's budget as the budget register states it — original,
+  // approved changes, revisions, revised — so the cost cockpit and the
+  // budget register give the same answer to "what is my budget?" (Phase 22A).
+  // The per-activity figure is what has been allocated to activities, and
+  // is labelled as such rather than as "the budget".
+  const budget = await canonicalBudget({ orgId, projectId });
 
   return {
     records,
@@ -237,7 +244,58 @@ const getCostSummary = async ({ orgId, projectId }) => {
     })),
     totals,
     eac,
+    budget: { ...budget, allocatedToActivities: totals.budget },
   };
+};
+
+/**
+ * A record's estimate at completion: its forecast when that is a forecast at
+ * completion (set, and not below what is already spent); otherwise the larger
+ * of its budget and its actual — a record never expects to finish below what
+ * it has already cost. The most-likely figure used to be a raw sum of
+ * per-record forecasts, many of them unset, and sat below actual-to-date
+ * while the optimistic and pessimistic cards were plain budget multiples
+ * (Phase 22A, from the Phase 22 audit UX22-02).
+ */
+const estimateAtCompletion = (record) => {
+  const actual = toMoneyNumber(record.actual);
+  const forecast = toMoneyNumber(record.forecast);
+  const budget = toMoneyNumber(record.budget);
+  if (forecast > 0 && forecast >= actual) return forecast;
+  return Math.max(budget, actual);
+};
+
+/**
+ * Scenarios vary only the cost to complete (EAC − actual), so they order
+ * optimistic ≤ most likely ≤ pessimistic and none falls below actual.
+ */
+const estimateScenarios = ({ actual, mostLikely }) => {
+  const toComplete = Math.max(0, subtractMoney(mostLikely, actual));
+  return {
+    basis: 'estimate_at_completion',
+    actual,
+    toComplete,
+    optimistic: addMoney(actual, multiplyMoney(toComplete, 0.9)),
+    mostLikely,
+    pessimistic: addMoney(actual, multiplyMoney(toComplete, 1.15)),
+  };
+};
+
+const canonicalBudget = async ({ orgId, projectId }) => {
+  try {
+    const { listBudgetLines } = require('./budget.service');
+    const register = await listBudgetLines({ orgId, projectId });
+    const totals = register?.summary?.totals || {};
+    return {
+      originalBudget: toMoneyNumber(totals.originalBudget ?? 0),
+      approvedChanges: toMoneyNumber(totals.approvedChanges ?? 0),
+      revisions: toMoneyNumber(totals.revisions ?? 0),
+      revisedBudget: toMoneyNumber(totals.revisedBudget ?? 0),
+      source: 'budget_register',
+    };
+  } catch {
+    return { originalBudget: null, approvedChanges: null, revisions: null, revisedBudget: null, source: null };
+  }
 };
 
 const resolveForecast = ({ budget, actual, payloadForecast }) => {

@@ -71,6 +71,7 @@ export interface WorkflowApprovalEntry {
   oldStatus?: string | null
   newStatus?: string | null
   actorId?: string | null
+  actorName?: string | null
   actorRole?: string | null
   reason?: string | null
   comment?: string | null
@@ -445,9 +446,8 @@ function ApprovalList({ history = [] }: { history?: WorkflowApprovalEntry[] }) {
             </div>
             <div className='mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground'>
               {entry.actorRole && <span>{statusLabel(entry.actorRole)}</span>}
-              {entry.actorId && (
-                <span className='font-mono'>{entry.actorId}</span>
-              )}
+              {/* Never a raw id on screen (Phase 22A). */}
+              {entry.actorName && <span>{entry.actorName}</span>}
             </div>
             {note && <p className='mt-1 text-muted-foreground'>{note}</p>}
           </div>

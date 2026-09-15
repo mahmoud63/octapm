@@ -16,7 +16,10 @@ export const Route = createRootRouteWithContext<{
         <NavigationProgress />
         <Outlet />
         <Toaster duration={5000} />
-        {import.meta.env.MODE === 'development' && (
+        {/* Development tooling only behind an explicit opt-in — never in a
+            client build, and not on the dev server a demo might run from
+            (Phase 22A). Set VITE_DEVTOOLS=true locally to enable. */}
+        {import.meta.env.VITE_DEVTOOLS === 'true' && (
           <>
             <ReactQueryDevtools buttonPosition='bottom-left' />
             <TanStackRouterDevtools position='bottom-right' />

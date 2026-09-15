@@ -30,6 +30,7 @@ export function SignOutDialog({ open, onOpenChange }: SignOutDialogProps) {
       // Offline caches and the outbox belong to the signed-in user.
       void clearOfflineData()
       onOpenChange(false)
+      toast.success('Signed out')
 
       // Preserve current location for redirect after sign-in
       const currentPath = location.href

@@ -18,10 +18,11 @@ export function ProjectDetailPage() {
     recordId?: string
     pin?: string
     date?: string
+    new?: string
   }
 
   const hasDeepLink = Boolean(
-    search.status || search.source || search.recordId || search.date
+    search.status || search.source || search.recordId || search.date || search.new
   )
 
   return (
@@ -39,6 +40,7 @@ export function ProjectDetailPage() {
               recordId: search.recordId,
               pin: search.pin,
               date: search.date,
+              new: search.new,
             }
           : undefined
       }

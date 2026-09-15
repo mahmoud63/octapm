@@ -28,6 +28,18 @@ function OpenNamedTask({ tasks, recordId }: { tasks: Task[]; recordId?: string }
   return null
 }
 
+/** A workspace quick action lands here with the create drawer open — once (Phase 22A). */
+function OpenNewTask({ wanted }: { wanted: boolean }) {
+  const { setOpen } = useTasks()
+  const opened = useRef(false)
+  useEffect(() => {
+    if (!wanted || opened.current) return
+    opened.current = true
+    setOpen('create')
+  }, [wanted, setOpen])
+  return null
+}
+
 export function Tasks() {
   const search = useSearch({ from: '/_authenticated/tasks/' })
   const { data, isError, isLoading } = useTasksQuery({
@@ -38,6 +50,7 @@ export function Tasks() {
 
   return (
     <TasksProvider>
+      <OpenNewTask wanted={search.new === 'task'} />
       <Main className='flex flex-1 flex-col gap-4 sm:gap-6'>
         <div className='flex flex-wrap items-end justify-between gap-2'>
           <div>

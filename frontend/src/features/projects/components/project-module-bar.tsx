@@ -41,6 +41,7 @@ const PRIMARY_ORDER: ModuleKey[] = [
   'siteReporting',
   'cost',
   'commercial',
+  'procurement',
   'quality',
   'docControl',
   'meetings',

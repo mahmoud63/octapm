@@ -173,7 +173,9 @@ export function DocControlDashboard({
       ? initialTarget.recordId
       : null
   )
-  const [rfiCreateOpen, setRfiCreateOpen] = useState(false)
+  const [rfiCreateOpen, setRfiCreateOpen] = useState(
+    initialTarget?.new === 'rfi'
+  ) // a workspace quick action lands here with the form open (Phase 22A)
 
   const [submittalSearch, setSubmittalSearch] = useState('')
   const [submittalView, setSubmittalView] = useState<

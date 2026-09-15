@@ -50,6 +50,19 @@ export interface CostSummary {
     optimistic: number
     mostLikely: number
     pessimistic: number
+    /** Estimate at completion: actual to date + cost to complete (Phase 22A). */
+    basis?: 'estimate_at_completion'
+    actual?: number
+    toComplete?: number
+  }
+  /** The budget as the budget register states it — one vocabulary (Phase 22A). */
+  budget?: {
+    originalBudget: number | null
+    approvedChanges: number | null
+    revisions: number | null
+    revisedBudget: number | null
+    allocatedToActivities: number
+    source: 'budget_register' | null
   }
 }
 

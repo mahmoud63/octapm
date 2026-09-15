@@ -242,9 +242,16 @@ export function RfiDetailDialog({
         data-testid='uat-rfi-detail'
       >
         {isLoading || !rfi ? (
-          <div className='flex items-center gap-2 py-8 text-sm text-muted-foreground'>
-            <Loader2 className='h-4 w-4 animate-spin' /> Loading RFI…
-          </div>
+          // the dialog is titled from its first render, so assistive tech (and
+          // the console) never see an untitled dialog while the RFI loads
+          <DialogHeader>
+            <DialogTitle className='flex items-center gap-2 py-8 text-sm font-normal text-muted-foreground'>
+              <Loader2 className='h-4 w-4 animate-spin' /> Loading RFI…
+            </DialogTitle>
+            <DialogDescription className='sr-only'>
+              The request for information is loading.
+            </DialogDescription>
+          </DialogHeader>
         ) : (
           <>
             <DialogHeader>

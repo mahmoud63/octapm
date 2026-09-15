@@ -19,6 +19,8 @@ type ProjectSearch = {
   recordId?: string
   pin?: string
   date?: string
+  /** Open a module's create dialog on arrival (`?new=rfi`, `?new=change_order`, `?new=direct_cost`) — Phase 22A quick actions. */
+  new?: string
 }
 
 export const Route = createFileRoute('/_authenticated/projects/$projectId')({
@@ -30,6 +32,7 @@ export const Route = createFileRoute('/_authenticated/projects/$projectId')({
     recordId: typeof search.recordId === 'string' ? search.recordId : undefined,
     pin: typeof search.pin === 'string' ? search.pin : undefined,
     date: typeof search.date === 'string' ? search.date : undefined,
+    new: typeof search.new === 'string' ? search.new : undefined,
   }),
   beforeLoad: ({ params, search }) => {
     const module = moduleFromSlug(search.module)
@@ -43,6 +46,7 @@ export const Route = createFileRoute('/_authenticated/projects/$projectId')({
       recordId: search.recordId,
       pin: search.pin,
       date: search.date,
+      new: search.new,
     }
     if (child && isModuleWithChildren(module)) {
       throw redirect({

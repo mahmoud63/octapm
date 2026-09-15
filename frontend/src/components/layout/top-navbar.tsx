@@ -196,6 +196,7 @@ function UserDropdown() {
             variant='ghost'
             size='icon'
             className='size-9 rounded-full p-0'
+            aria-label='Account menu'
           >
             <Avatar className='size-8 rounded-full'>
               <AvatarImage src={user.avatar} alt={user.name} />

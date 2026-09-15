@@ -701,8 +701,11 @@ export function ProjectDetail({
                 {formatDate(project.startDate)} → {formatDate(project.endDate)}
               </span>
               <span className='text-xs text-muted-foreground'>
-                {formatMoney(project.currency, project.contractValue)} ·{' '}
-                {formatDuration(project.duration, project.durationUnit)}
+                Contract value{' '}
+                {formatMoney(project.currency, project.contractValue)}
+                {project.duration
+                  ? ` · ${formatDuration(project.duration, project.durationUnit)}`
+                  : null}
               </span>
               <ProjectStatusBadge status={project.status} />
             </div>

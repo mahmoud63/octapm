@@ -3,6 +3,7 @@ import axios from 'axios'
 import { getMyProfile } from '@/services/auth/api'
 import { useAuthStore } from '@/stores/auth-store'
 import { AuthenticatedLayout } from '@/components/layout/authenticated-layout'
+import { NotFoundError } from '@/features/errors/not-found-error'
 
 /**
  * Only a 401 means "not signed in".
@@ -53,4 +54,7 @@ export const Route = createFileRoute('/_authenticated')({
     }
   },
   component: AuthenticatedLayout,
+  // A wrong URL inside the signed-in shell gets the same page as one outside it,
+  // not the router's bare "Not Found".
+  notFoundComponent: NotFoundError,
 })

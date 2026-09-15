@@ -242,10 +242,18 @@ test.describe('purchase orders', () => {
       const { body } = await apiGet(client, `/projects/${projectId}/purchase-orders`, token)
       return body.data.items
     })
-    const received = orders.find(
-      (order: { warehouseStatus: string }) => order.warehouseStatus === 'received',
-    )
-    test.skip(!received, 'no fully received order on this project')
+    // The seeded PO-0002 first; otherwise any fully received order that is still
+    // open. A received order that was closed afterwards reads "closed", which is
+    // its own state and not what this case is about.
+    type Listed = { ref: string; warehouseStatus: string; lifecycleStatus: string }
+    const received =
+      orders.find((order: Listed) => order.ref === 'PO-0002' && order.warehouseStatus === 'received') ??
+      orders.find(
+        (order: Listed) =>
+          order.warehouseStatus === 'received' &&
+          !(['closed', 'cancelled'] as string[]).includes(order.lifecycleStatus),
+      )
+    test.skip(!received, 'no fully received, still-open order on this project')
 
     // Delivery beats the commercial state, and billing beats delivery.
     expect(['delivered', 'partially_invoiced', 'fully_invoiced']).toContain(

@@ -17,6 +17,8 @@ const taskSearchSchema = z.object({
   filter: z.string().optional().catch(''),
   /** A task deep link (`/tasks?recordId=`) opens that task. */
   recordId: z.string().optional().catch(undefined),
+  /** Arrive with the create drawer open (`/tasks?new=task`, Phase 22A quick actions). */
+  new: z.string().optional().catch(undefined),
 })
 
 export const Route = createFileRoute('/_authenticated/tasks/')({
