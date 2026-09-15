@@ -672,14 +672,33 @@ commit, the activity restored by hand. The pass's third "Existing" Medium —
 a pending change order approvable after its parent is voided, nothing
 posted — is registered as P21-170 and, by the brief, not fixed.
 
+The thirteenth pass, on `425e2a2` (20:31 CDT, six minutes, 145,575
+tokens, on the second attempt — the first stopped on the five-hour window
+at 60,125 tokens): DO NOT RELEASE — no Critical, eight Highs, and the three
+"Existing" Mediums carried (register P21-171 … P21-179). The record-routing
+rule that reached only RFIs and submittals, not the dozen other record
+types that carry a rule of their own; the valuation attribution report open
+to every party; that report's edit and delete re-checking company ownership
+before the lock, not under it; photo-analysis and BIM jobs falling through
+to schedule permission; my P21-169 taking creation time for origin and the
+activity-link delete guarding nothing; my P21-164 refusing legitimate
+inherited coding; my duplicate-invoice check splitting on how the vendor
+was named; and a short transfer receipt losing the shortfall's value. Five
+reproduced live (the schedule key's photo-analysis payload; the link
+delete retiring a live activity; the shared-stock issue refused; the
+invoice recorded twice; the short receipt), three by regressions that fail
+on `425e2a2`; all eight fixed in the commit after it, with the twelfth
+pass's ten-attachment note, and nine regressions in six suites, all of
+which fail on `425e2a2`.
+
 ## 11. What the rounds cost, and what they were worth
 
-Nine loops, twelve release loops and one loop of my own: 127 confirmed product
+Nine loops, thirteen release loops and one loop of my own: 135 confirmed product
 defects in the ledger, stock, payment, transition, authentication,
 authorization, billing and tenant-isolation paths (7 + 5 + 6 + 4 + 3 + 2 + 1
-+ 2 + 2 + 8 + 10 + 7 + 8 + 8 + 1 + 8 + 8 + 7 + 8 + 6 + 7 + 9, seven of them
-regressions of a loop's own fix, plus nine P2 and two P3 fixed, and three P2
-and one P3 carried), 156 regression cases (87 of them fail on the code they guard; five guard flows that must keep working), and
++ 2 + 2 + 8 + 10 + 7 + 8 + 8 + 1 + 8 + 8 + 7 + 8 + 6 + 7 + 9 + 8, nine of them
+regressions of a loop's own fix, plus ten P2 and two P3 fixed, and three P2
+and one P3 carried), 165 regression cases (87 of them fail on the code they guard; five guard flows that must keep working), and
 a demo-project reconciliation that still balances to the cent after all of
 it. The Phase 21 project's own figures did not move once (36/36 before and
 after every loop); the defects lived in what those figures never exercised —

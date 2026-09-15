@@ -1792,6 +1792,103 @@ parent cannot be executed again); the workaround is to void or reject the
 pending change orders together with the parent. Dispositioned for Phase 22
 with P21-139 and P21-140.
 
+## The thirteenth release pass — HEAD `425e2a2`: no Critical, eight Highs
+
+Run at 20:31 CDT (145,575 tokens, six minutes, on the second attempt — the
+first stopped on the five-hour window at 60,125 tokens): DO NOT RELEASE —
+no Critical, eight Highs, and the three "Existing" Mediums carried
+(P21-139, P21-140, P21-170). Every High was reproduced or confirmed before
+any code changed — five against the live API on `425e2a2` (a schedule key
+reading a photo-analysis job's payload; a BOQ link's delete retiring a live
+activity; a shared-stock issue refused by inherited coding; one supplier
+invoice recorded twice across two spellings of the vendor; a short transfer
+receipt losing the shortfall) and three by regression tests that fail on
+`425e2a2` — and each fix carries a regression that fails on `425e2a2`. All
+eight fixed in the commit after it, with the twelfth pass's ten-attachment
+note (my own regression). The pass also confirmed CX21-532, CX21-536,
+CX21-537 and the twelfth pass's two Mediums CORRECT.
+
+## P21-171 · P1 · Document search / record isolation · **FIXED** (Codex CX21-540; extends the CX21-530 fix)
+
+| | |
+| --- | --- |
+| **Observed** | The twelfth pass's fix routed RFIs and submittals through the party, but every other record a document is attached to was still reduced to its module permission: a party-scoped person with timesheet read reached, through a document, the text of another company's timesheet; a private conversation's attachment was reached by a non-member. **Confirmed by regressions that fail on `425e2a2`** (no party user with an indexed foreign-timesheet attachment was to hand live). |
+| **Root cause** | **CONFIRMED PRODUCT DEFECT** (the record-routing rule covered two record types of the dozen that carry one). |
+| **Fix** | Each record type that has a rule of its own beyond the module — routed to a party (RFI, submittal), attributed to a company (timesheet, payment application, commitment and its change order, punch item, inspection), a person's own (task, lookahead) or a conversation's members' — is resolved against that same rule, mirroring the record's own service; a document linked only to records the viewer's rules exclude is not surfaced, on the text endpoint, the project search and the cross-project content search alike. A member of the project is unchanged for the party-only rules, but a conversation's attachments are its members' for everyone. |
+| **Regression** | `document-text.service.test.js` (CX21-540: another company's timesheet and someone else's task withheld from a party; a conversation's attachment withheld from a non-member and shown to a member; the text endpoint agrees). |
+
+## P21-172 · P1 · Subcontractor valuations / party isolation · **FIXED** (Codex CX21-541)
+
+| | |
+| --- | --- |
+| **Observed** | The valuations list, edit and delete were scoped to the party's company, but the attribution report beside them was not: a subcontractor's member read every company's valuation refs, statuses and net-payable amounts through it. **Confirmed by a regression that fails on `425e2a2`.** |
+| **Root cause** | **CONFIRMED PRODUCT DEFECT** (a party-facing endpoint the CX21-531 scope did not reach). |
+| **Fix** | The attribution report is a party-scoped person's own company's rows and candidate companies only; a member of the project sees the whole project as before. |
+| **Regression** | `sub-valuation-traceability.test.js` (CX21-541: the report narrowed to the party's company for both the valuations and the candidate companies; the whole project for a member). |
+
+## P21-173 · P1 · Subcontractor valuations · **FIXED** (Codex CX21-542; extends the CX21-531 fix)
+
+| | |
+| --- | --- |
+| **Observed** | The party-ownership check on an edit and a delete ran before the lock and was not repeated under it: a party's edit that began before the row was re-attributed to another company by a same-status change went through on the other company's row. **Confirmed by a regression that fails on `425e2a2`.** |
+| **Root cause** | **CONFIRMED PRODUCT DEFECT** (a check-before-lock, the same shape as CX21-521/532 on the attribution). |
+| **Fix** | The company ownership is re-checked on the row as held under the lock, on the edit and the delete, and `404` when it moved; the attribution the edit itself writes is checked against the held row too. |
+| **Regression** | `sub-valuation-traceability.test.js` (CX21-542: a row re-attributed since the copy was read is refused and nothing is written). |
+
+## P21-174 · P1 · Jobs / RBAC · **FIXED** (Codex CX21-543; extends the CX21-533 fix)
+
+| | |
+| --- | --- |
+| **Observed** | The job module map fell back to `schedule` for a type it did not name: photo-analysis and BIM-parse jobs were left off it, so a schedule-scoped key read their payloads and could cancel or retry them, while a key scoped to photos or BIM was refused its own jobs. **Reproduced live**: a `schedule:read` key read a `photo.analyze` job's payload and result on the P21 project. |
+| **Root cause** | **CONFIRMED PRODUCT DEFECT** (a default that mapped every unnamed type to one module). |
+| **Fix** | Photo-analysis maps to document control and BIM-parse to the BIM module; a job of a type the map does not name is nobody's to read, retry or cancel (no fallback), so a new type is refused until it is placed. |
+| **Regression** | `jobs.routes.test.js` (CX21-543: a schedule key sees schedule jobs only, a BIM key BIM only, a document-control key photo-analysis only, a PM all; a job of an unknown type is 404 to read and 403 to manage). Live on the fix: the schedule key reads no photo-analysis job. |
+
+## P21-175 · P1 · BOQ / schedule · **FIXED** (Codex CX21-544; completes P21-169)
+
+| | |
+| --- | --- |
+| **Observed** | My P21-169 fix took a later `createdAt` for "the row minted this activity", so a schedule activity created after a manual row and then allocated to it was retired when the row was deleted; and the activity-link delete (`DELETE /boq/activities/:id`) retired its activity unconditionally, past every P21-169 guard. **Reproduced live**: a draft link from a manual row to the P21 project's live A100 (stock issued against it) was deleted through the link route — A100 was retired. |
+| **Root cause** | **CONFIRMED PRODUCT DEFECT** (creation time is not origin; and the second delete path was never guarded). |
+| **Fix** | The BOQ row that mints an activity is recorded on it (`mintedByBoqItemId`, one local-only migration); a delete — of the row or of the link — retires an activity only when the row minted it and it carries no ledger entry, no stock movement, no cost record and no live allocation on another row. Any other activity keeps its schedule and its history; only the allocation is rejected. |
+| **Regression** | `boq.service.test.js` (P21-169 / CX21-544: a pre-existing activity, one created later, and one carrying another allocation are all kept, only the marked footprint-free one retired; the link delete keeps a live activity and rejects only the allocation). Live on the fix: the link delete of A100 leaves it active. |
+
+## P21-176 · P1 · Inventory / cross-scope references · **FIXED** (Codex CX21-545; a regression of the P21-164 fix)
+
+| | |
+| --- | --- |
+| **Observed** | My P21-164 check refused any BOQ item or commitment not on the movement's project, but an issue inherits coding from the item's last receipt: a shared item received against one project's BOQ row could not then be issued to another project's activity (the inherited row failed the check and rolled the issue back), and an issue against a company cost code with no project failed the same way. **Reproduced live**: an issue of a shared item against a company cost code, no project, after a receipt that carried a BOQ row — `404 BOQ_ITEM_NOT_FOUND`. |
+| **Root cause** | **CONFIRMED PRODUCT DEFECT** (a guard that refused legitimate inherited coding instead of not carrying what does not fit). |
+| **Fix** | Inheritance fills silence only with coding that fits the issue: the buyer's BOQ row only when it is the project's the issue lands on, a cost code only when it is this organisation's; anything else is left off, not carried into a refusal. An explicit reference is still validated as before, and a receipt into a company store keeps the buyer's row (checked against the organisation). |
+| **Regression** | `inventory.service.test.js` (CX21-545: a shared item's foreign inherited BOQ row is left off and the issue to another project goes through; a company-cost-code issue with no project goes through; the project's own inherited row travels with the material). Live on the fix: the issue is served. |
+
+## P21-177 · P1 · Direct costs / duplicate invoice · **FIXED** (Codex CX21-546; a regression of the P21-163 fix)
+
+| | |
+| --- | --- |
+| **Observed** | My P21-163 duplicate check and its advisory lock split on how the vendor was named: the same invoice number entered once with the vendor as free text and once with the vendor's company id was recorded twice, approvable and payable twice, and the two took different locks. **Reproduced live**: one invoice on the P21 project, vendor as text then by company id — both `200`, two rows. |
+| **Root cause** | **CONFIRMED PRODUCT DEFECT** (the identity keyed on the vendor's representation, not the vendor). |
+| **Fix** | A vendor named by its company and the same vendor named as text are one vendor: the duplicate check looks for both spellings (resolving the company's name and the named company), and the advisory lock is keyed on the project and the invoice number alone, so the two receptions serialise. |
+| **Regression** | `direct-cost.service.test.js` (CX21-546: a second invoice is a duplicate whether the first named the vendor as text or by id, and the lock key carries no vendor). Live on the fix: the second is `409 DIRECT_COST_DUPLICATE_INVOICE`. |
+
+## P21-178 · P1 · Inventory / transfers · **FIXED** (Codex CX21-547)
+
+| | |
+| --- | --- |
+| **Observed** | A short transfer receipt cleared the whole dispatched quantity from transit and closed the transfer, without recording the shortfall: 100 dispatched and 80 received left 80 at the destination, 100 gone from the source's in-transit, and the missing 20's value off the books with no movement. **Reproduced live**: dispatch 2, receive 1 — one unit unaccounted for, no shortfall movement. |
+| **Root cause** | **CONFIRMED PRODUCT DEFECT** (the receipt posted only what arrived and what was damaged, but cleared transit by the full line quantity). |
+| **Fix** | What was sent and neither received nor reported damaged lands at the destination and is written off there as a movement of its own, the way damage is, so the value that left the source is accounted for and the loss is on the record; found later, an adjustment brings it back. |
+| **Regression** | `inventory.service.test.js` (CX21-547: 100 sent, 80 received leaves 80 on hand, transit cleared, and a −20 adjustment movement recording the shortfall). Live on the fix: the shortfall is a movement. |
+
+## P21-179 · P2 · Document search · **FIXED** (thirteenth pass, Medium — a regression of the P21-159 fix)
+
+The document-visibility include loaded only ten of a document's attachment
+links, so a party-scoped viewer whose one accessible RFI or submittal link
+fell after ten routed elsewhere was refused a document they should see.
+Fixed with the loop: every link is read for the visibility decision (only
+the serialised `records` list is still capped at ten). Regression in
+`document-text.service.test.js`.
+
 ## T-19 · the seeded subcontract fell past the commitments list's first page
 
 Gates run 12 (on `8a1d7dd`) skipped thirteen tests of the subcontract
