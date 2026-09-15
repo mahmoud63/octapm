@@ -129,3 +129,22 @@ committed external pilot. After Wave A+B, re-audit for a **READY FOR EXTERNAL PI
 
 Audit complete. No recommendations implemented. Evidence and the prioritised programme
 (RECOMMENDED_CHANGES, Waves A/B/C) are presented for your approval before any UX/product change wave.
+
+---
+
+## PHASE 22A OUTCOME (2026-09-15)
+
+Phase 22A implemented the Wave A/B items above and revalidated them in the browser as eight personas,
+with a two-session handoff test and the Phase 21 financial gate re-proven. Full detail:
+`OCTAPM_PHASE22A_IMPLEMENTATION_REPORT.md`; per-item status: `OCTAPM_PHASE22_UX_DEFECT_REGISTER.md`
+(Phase 22A status section); clicks and scores: the 22A sections of the click matrix and scorecard.
+
+- Fixed: UX22-01, -02, -03, -04, -05, -07, -08, -09, -12, -13 and four items found during the phase.
+- Downgraded with evidence: UX22-06 (menus are opaque), UX22-10 (wrong URL; registries hardened anyway).
+- Open: UX22-11, UX22-17, UX22-15, UX22-16, UX22-14 (partial) and five residuals recorded in 22A.
+- Two-session propagation: RFI both ways, change-order creation and direct-cost approval all **REALTIME**.
+- Financial gate: snapshot 36/36, Actual 71,204.00, delta 0.00.
+- Score: ≈ 3.8 → **≈ 4.1 / 5**; the 4.5 target is not met (Quality and Settings/Admin untouched by design).
+
+**Verdicts:** CONDITIONAL FOR CLIENT DEMO · CONDITIONAL FOR EXTERNAL PILOT (unchanged). Conditions are
+listed in the implementation report, §16.

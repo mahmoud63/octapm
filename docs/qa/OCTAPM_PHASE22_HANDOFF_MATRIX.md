@@ -80,3 +80,24 @@ numbers), not broken handoffs.
   be confirmed live.
 - **To finish:** run the six chains as separate logins (Site Eng → Planner → PM → QS → Cost → Finance,
   etc.) to convert DRIVE-NEXT hops to live-observed and to record per-hop click counts.
+
+---
+
+## Phase 22A — two-session handoff test (2026-09-15)
+
+Two independent browser contexts (separate cookies, separate sockets), product UI only, on the
+disposable Riverside Tower project. Session A = PM (Dana Okafor). Session B = site engineer (Priya
+Raman) for the RFI, QS (Sofia Lindqvist) for the change order, cost controller (Tomás Herrera) for the
+direct cost. Classification: REALTIME ≤ 3 s without refresh · NEAR REALTIME ≤ 20 s · REFRESH REQUIRED ·
+STALE. Four runs; figures from the last run, ranges across runs.
+
+| Handoff | From → to | Seen | Class |
+| --- | --- | --- | --- |
+| RFI raised | site engineer → PM register | 485–550 ms, no refresh | **REALTIME** |
+| RFI answered and closed | PM → site engineer register; "My open items" empties | 11–60 ms, no refresh | **REALTIME** |
+| Change order created (Raised By from the team) | QS → PM register | 0.5–1.1 s, no refresh | **REALTIME** |
+| Change order approved | PM → QS register, Cost Overview | not reached: the register's "Needs proof" gate (activities + evidence document + both impact summaries) blocks submission, and Riverside has no register document with a file to attach. Business rule, not a propagation fault. |
+| Direct cost approved ($750) | PM → cost controller's Cost Overview "Actual cost" | 3 ms, no refresh ($34,712,564 → $34,713,314) | **REALTIME** |
+
+Mechanism: the socket transport (`lib/realtime.ts`) invalidates the TanStack queries of the project room on
+`record.changed`, so lists refetch within a round-trip. Script kept at `scratchpad/p21/two-session.mjs`.

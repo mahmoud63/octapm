@@ -85,3 +85,20 @@ approvers) and decide whether an external Client/Owner read-only portal is in pi
 
 None of these should reopen the Phase-21 financial guarantees. R9 in particular must be built with the
 same reconcile-and-regression discipline (Actual stays ledger-derived; snapshot 36/36; delta 0.00).
+
+---
+
+## Phase 22A status (2026-09-15)
+
+| Rec | Status | What landed |
+| --- | --- | --- |
+| R1 Clean client build | DONE | devtools flag-gated (`VITE_DEVTOOLS`), production build verified; "Signed out" wording; "Not configured on this server" copy left (UX22-16, P3). |
+| R2 One budget vocabulary | DONE | Contract value · Activity budget (schedule revision) · Allocated to activities · Original / Approved changes / Revisions & transfers / Revised budget — one backend source; Budget tab and Cost Overview agree. |
+| R3 Forecast presentation | DONE | EAC = actual + cost to complete; scenarios ordered and ≥ Actual; regression test. |
+| R4 Reference, don't retype | DONE (change order) | Raised By picker, document picker; Category still free text (P3). |
+| R5 Quick-create + Procurement | DONE | Workspace quick actions (RFI / Change / Direct cost / Task, role-gated, `?new=` deep links); Procurement first-class. |
+| R6 Deep-linkable registries | DONE | Verified direct URL / refresh / new tab; short redirects; branded 404 in the shell. |
+| R7 Menu polish | NOT NEEDED | Menus measured opaque; finding downgraded. |
+| R8 Demo-data hygiene | DONE (script) · OPEN (durable) | `archive-e2e-residue.js` applied locally and documented; dedicated e2e organisation for the suites still recommended. |
+| R9 Change order → budget line | OPEN | Out of 22A scope (backend allocation design, UX22-17). |
+| R10 Per-persona landing / client portal | OPEN | Wave C, not started (as instructed). |

@@ -96,3 +96,23 @@ called out where it matters.
   plain-language status on POs and pay apps.
 - **The workspace landing is PM-shaped.** Whether each non-PM persona gets an equally purposeful
   landing (vs. the same cockpit) is the key open question for the per-persona login pass.
+
+---
+
+## Phase 22A persona pass (2026-09-15, one browser session per persona)
+
+| Persona | Account | Landing and project access | Role-aware modules | Quick actions offered | Needs You / open items | Leaked actions |
+| --- | --- | --- | --- | --- | --- | --- |
+| PM | Dana Okafor | Workspace Control → certified project, every module | all, Procurement first-class | New RFI · New change order · New direct cost · New task | "My open items" user-matched | none |
+| Planner | Ravi Menon | Workspace → project Schedule | Schedule, Cost, Commercial, Procurement, Quality, Doc Control… | New RFI · New task | 0 open | none |
+| QS | Sofia Lindqvist | Workspace → Commercial / Cost | Commercial, Cost… | New change order · New direct cost | 0 open | none |
+| Cost Controller | Tomás Herrera | Workspace → Cost Overview (budget block, EAC cards) | Cost… | New direct cost | 0 open | none |
+| Procurement | Amina Bello | Workspace → project Procurement (Packages / Purchase Orders / Suppliers) | Overview, Schedule, Commercial, Procurement, Quality, Doc Control, Meetings, BOQ, BIM | none — the row is hidden rather than showing an action the role cannot perform | 0 open | none |
+| Warehouse | Jonas Weber | Workspace → Inventory (Scan, Goods in, Match, Items, Warehouses, Dashboard, Ledger) | Overview, Schedule, Procurement, Quality, Doc Control… | none (hidden) | 0 open | none |
+| Site Engineer | Priya Raman | Workspace → project RFI register | Doc Control… | New RFI · New task | 0 open | none |
+| Finance | Grace Mbeki | Workspace → Commercial pay applications ($54,000 paid, $6,000 retention, actors named) | Commercial… | none (hidden) | 0 open | none |
+| Quality | — | **Unsupported**: the product has eight roles and no Quality account; not faked. | | | | |
+| Client / Owner / Subcontractor | — | **Unsupported**: no persona accounts; not faked. | | | | |
+
+Every persona signed out with "Signed out" (never "Session expired!") and signed back in on the same
+sign-in page; no persona saw a control its role cannot use.

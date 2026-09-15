@@ -70,3 +70,30 @@ complex commercial workflows may exceed this when each click is a real business 
   because of the missing workspace quick-create.
 - **Highest-click observed paths:** Add Change Order (data entry justified) and reaching Procurement
   (findability, not justified).
+
+---
+
+## Phase 22A rebaseline (measured live, PM, from Workspace Control)
+
+Quick actions on the workspace (New RFI / New change order / New direct cost / New task, project
+remembered) and Procurement as a first-class module change the landing-page cost of the high-frequency
+creates. Counts are meaningful clicks excluding typing; "After" was measured on the dev server on
+2026-09-15 with each dialog opening from the workspace in one click (`?new=` deep link).
+
+| Task | Before (Phase 22) | After (22A) | Δ | Note |
+| --- | :-: | :-: | :-: | --- |
+| Create RFI (full form) | 8 (M) | 2 (M) | −6 | Quick action (1) → "Open RFI" (1). +1 if the remembered project must change. |
+| Create Change Order | 6 (M) | 2 (M) | −4 | Quick action (1) → Create (1). Raised By = 2 clicks (was typing); documents = 2 clicks (was typing UUIDs). |
+| Create Direct Cost | 6 (M) | 2 (M) | −4 | Quick action (1) → Create (1); lines added on the detail as before. |
+| Create Task | 3 (M) | 2 (M) | −1 | Quick action (1) → Save (1). |
+| Issue Material | 4 (M/E) | 4 (M) | 0 | Inventory (1) → Items (1) → Issue (1) → confirm (1). Unchanged — out of 22A scope. |
+| Receive Goods | 4–6 (E) | 4–6 (E) | 0 | Unchanged. |
+| Approve Timesheet | 3–5 (E) | 3–5 (E) | 0 | Unchanged. |
+| Certify Pay App | 3–5 (E) | 3–5 (E) | 0 | Unchanged. |
+| Raise NCR | 6 (E) | 6 (E) | 0 | Unchanged — NCR was not on the quick-action candidate list. |
+| Find a Document | 4 (M) | 4 (M) | 0 | Project (2) → Doc Control (1) → search (1). Registries now also reachable by direct URL (0 clicks). |
+| Reach Procurement (from a project) | 3+ (M) | 1 (M) | −2 | First-class module button after Commercial. |
+
+**Measured average for the four quick-action creates: 5.75 → 2.0 clicks from the landing page.** The
+2-click project entry that taxed every create is gone for the four highest-frequency records; the
+remaining paths are unchanged and still within target from context.

@@ -53,3 +53,17 @@ permits duplicates. These are contained, fixable form-level issues rather than a
 
 **Gate result: PASS with conditions** — clear the document-picker and person-picker gaps (DR-1, DR-2)
 before external pilot, since typing raw IDs is not something a construction client will accept.
+
+---
+
+## Phase 22A update (2026-09-15)
+
+| Field | Before | After | Source reused |
+| --- | --- | --- | --- |
+| Change order — Raised By | free text | picker: Project team (name, role) · Parties (company, role) · Other / external free text; stores the display name in the existing column, so every earlier record reads as before | project team API, project parties API |
+| Change order — Supporting documents | raw `ProjectDocument` UUIDs typed by hand | searchable picker over the document register (reference, title, number, revision, status) with chips; same ids persisted, same backend validation | document register API |
+| Audit / approval / status feeds — actor | raw user id | person's name (one batched lookup in `audit.service.listEvents`), "Former user" when the account is gone | users |
+| Workspace quick actions — project | n/a | remembered per person (local), defaults to the first active project; each action opens the module's own dialog | projects API |
+
+Residual (recorded): workflow attachments such as RFI instruction letters are not register documents, so the
+document picker cannot offer them (22A-P2-01); Category stays free text (UX22-15).

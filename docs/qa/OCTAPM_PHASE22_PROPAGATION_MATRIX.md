@@ -110,3 +110,20 @@ Delay legend: **sync** (same request) · **refresh** (visible after a manual/aut
 - **Completion step:** freshly drive Award→PO→Receive, Certify client valuation, and Inspection-failure
   through the browser on the Riverside project to convert the DRIVE-NEXT rows from "design-verified" to
   "live-observed". No failure is expected based on Phase-21 evidence.
+
+---
+
+## Phase 22A recheck (2026-09-15)
+
+Re-checked after the budget/forecast changes and the residue archive. "Evidence" names the proof used;
+nothing in this table was taken on trust.
+
+| Chain | Evidence | Status |
+| --- | --- | --- |
+| Change order → revised budget → cost → forecast → dashboard → audit | Certified project: Approved VOs $254,500 = "Approved changes" on Cost Overview and on the Budget tab; Revised $1,954,500 on both; CO history names actors. Two-session: creation reaches the PM REALTIME. Allocation to a budget line remains a manual transfer (UX22-17). | CONNECTED (allocation manual) |
+| Procurement award → PO → receipt → inventory → three-way match | Certified project: 3 POs, committed $1,650, invoiced $1,700; snapshot checks on receipt and stock pass (36/36). | CONNECTED |
+| Inventory issue → stock → ledger → Actual | Snapshot "stock left is 150 less the 64 issued" = 86; Actual 71,204.00 reconciles SQL = API (delta 0.00). | CONNECTED |
+| Subcontract certification → Actual → retention → payment → cash flow | Pay app SC-001-PA01 approved net $54,000, paid $54,000, retention $6,000; ledger reconciliation delta 0.00. | CONNECTED |
+| Timesheet approval → labour → ledger → Actual | Labour actual $2,000 on 01-100 in the budget register and the ledger lines; reconciliation 16/16 source lines. | CONNECTED |
+| RFI answer → status → responsibility → Needs You → audit | Two-session REALTIME both ways; site engineer's "My open items" reads 0 after closure; audit feed names the actor. | CONNECTED |
+| Direct cost approval → Actual (added this phase) | Two-session: cost controller's "Actual cost" moves by the approved $750 within 3 ms, no refresh. | CONNECTED |

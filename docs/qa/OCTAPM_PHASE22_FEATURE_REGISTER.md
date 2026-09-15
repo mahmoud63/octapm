@@ -207,3 +207,15 @@ value, status, and Export / primary-action / "…" controls.
 | Finance / Accounts | Yes | payments, receipts, cash flow |
 | Subcontractor / External party | Yes (party-scoped) | party membership; company-scoped visibility (hardened in Phase 21) |
 | Client / Owner user | **NOT CONFIRMED AS A DISTINCT LOGIN PERSONA** | client commercial data exists (prime contract, client valuations, receipts) but a dedicated client/owner *login* was not verified in this pass — treat as NOT CONFIRMED pending a login test |
+
+---
+
+## Phase 22A additions (2026-09-15)
+
+| Feature | Where | Personas | Notes |
+| --- | --- | --- | --- |
+| Workspace quick actions | Workspace Control, under the header | any persona whose role can create the record | New RFI · New change order · New direct cost · New task; project remembered; each opens the module's own dialog (`?new=rfi`, `?new=change_order`, `?new=direct_cost`, `/tasks?new=task`); hidden entirely when the role can create none of them |
+| Budget block + EAC cards | Cost Control → Overview | PM, Cost Controller, QS | Original / Approved changes / Revisions & transfers / Revised (budget register) · Allocated to activities · Committed · Actual cost · Forecast (EAC) · Optimistic / Most likely / Pessimistic |
+| Raised By picker · Document picker | Commercial → Add / Edit Change Order | QS, PM | project team, parties, other/external; register documents with an uploaded revision |
+| Registry short links | `/cost-codes`, `/vendors`, `/directory` | any | redirect to `/company/…` |
+| Residue archive script | `backend/scripts/demo/archive-e2e-residue.js` | operator | dry-run by default; `--apply` |

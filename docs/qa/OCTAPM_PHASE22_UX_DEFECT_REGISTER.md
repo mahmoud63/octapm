@@ -51,3 +51,49 @@ All items below were **observed live this pass** unless marked otherwise. None i
 
 Tag rollup: CONNECTIVITY 2 · DUPLICATE ENTRY 4 · CLICK FRICTION 2 · PROFESSIONAL-PRESENTATION 8 ·
 RELIABILITY/DEEP-LINK 1 · TERMINOLOGY 1 · STALE DATA 0 observed · MISSING HANDOFF 0 observed.
+
+---
+
+## Phase 22A status (2026-09-15)
+
+Every item re-checked live in the browser after implementation (PM plus the other seven personas).
+Evidence and root causes are in `OCTAPM_PHASE22A_IMPLEMENTATION_REPORT.md`.
+
+| ID | Sev | Status after 22A | Evidence |
+| --- | :-: | --- | --- |
+| UX22-01 | P1 | **FIXED** | Header "Contract value USD 2,000,000"; Schedule "Activity budget — on this schedule revision $387,000"; Cost Overview Budget block Original $1,700,000 / Approved changes $254,500 / Revisions $0 / Revised $1,954,500 = Budget tab; "Allocated to activities $225,000". One backend source. |
+| UX22-02 | P1 | **FIXED** | Optimistic $155,170 ≤ Most likely $164,500 ≤ Pessimistic $178,494, all ≥ Actual $71,204; Jest regression anchored on 71,204. |
+| UX22-03 | P1 | **FIXED** | Searchable document picker over the register (reference/title/number/revision/status), chips, no IDs typed. Residual 22A-P2-01: only register documents with a file can be attached. |
+| UX22-04 | P2 | **FIXED** | Raised By picker: Project team / Parties / Other-external; history untouched. |
+| UX22-05 | P2 | **FIXED** | "By Sofia Lindqvist" on CO history, pay-app history, budget history; "Former user" fallback; mutation-checked test. |
+| UX22-06 | P2 | **DOWNGRADED — not a defect** | Measured: background `rgb(255,255,255)`, opacity 1, z-index 50, no transparency; the audit screenshot and two of today's caught the 150 ms fade-in mid-way. No code change. |
+| UX22-07 | P2 | **FIXED** | Devtools behind `VITE_DEVTOOLS=true`; absent on the dev server and in the production build. |
+| UX22-08 | P2 | **FIXED** | Workspace Quick actions, role-gated; every action opens its existing dialog in one click. |
+| UX22-09 | P2 | **FIXED** | Procurement first-class after Commercial for every persona that has it. |
+| UX22-10 | P2 | **DOWNGRADED + hardened** | The audited URL was wrong (`/company/cost-codes` is the route). All registries verified by direct URL, refresh, new tab; `/cost-codes`, `/vendors`, `/directory` now redirect; wrong URLs inside the shell show the branded 404. |
+| UX22-11 | P2 | **OPEN** | Cost card now reads "Committed — executed subcontracts and purchase orders"; Procurement's "Committed" (PO value) unchanged. |
+| UX22-12 | P2 | **FIXED** | `backend/scripts/demo/archive-e2e-residue.js` (dry-run, marker-scoped, fail-loud, reversible); Workspace 2 active projects, Inventory 7 items / 3 stores; Phase 21 gate re-proven. |
+| UX22-13 | P3 | **FIXED** | "Signed out" toast; "Session expired!" reserved for a real 401; spec 35. |
+| UX22-14 | P3 | **PARTIAL** | Budget block and EAC cards fill the landing; no chart/trend yet. |
+| UX22-15 | P3 | **OPEN** | Category still free text. |
+| UX22-16 | P3 | **OPEN** | "Not configured on this server" copy unchanged. |
+| UX22-17 | P2 | **OPEN** | Holding-line allocation of approved change value (backend design; out of 22A scope). |
+
+### Found and fixed during 22A
+
+| ID | Sev | Finding | Status |
+| --- | :-: | --- | --- |
+| 22A-01 | P2 | Add Change Order dialog could not scroll on short screens — Create / Choose documents unreachable. | FIXED (`max-h-[92vh] overflow-y-auto`) |
+| 22A-02 | P3 | RFI detail rendered an untitled dialog while loading (console error, screen readers). | FIXED (titled loading state) |
+| 22A-03 | P3 | Wrong URL inside the signed-in shell showed the router's bare "Not Found". | FIXED (branded 404) |
+| 22A-04 | P3 | Project header printed "· —" when duration is unset. | FIXED |
+
+### Found during 22A, recorded as residual
+
+| ID | Sev | Finding |
+| --- | :-: | --- |
+| 22A-P2-01 | P2 | Workflow attachments (RFI instructions, letters) are not register documents; a change order cannot cite them through the picker, and its "Needs proof" gate needs a register document with a file. |
+| 22A-P3-01 | P3 | Direct-cost dialog labels are not linked to their inputs. |
+| 22A-P3-02 | P3 | Every full reload logs a 401 for `/auth/me` before the refresh path recovers (console noise only). |
+| 22A-P3-03 | P3 | 437 directory companies carry no residue marker (UNKNOWN class, left alone); vendors page caps at 500 rows. |
+| 22A-P3-04 | P3 | No quick action exists for the Procurement or Warehouse personas; the row is hidden for them. |

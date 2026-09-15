@@ -60,3 +60,19 @@ Rating per attribute: **CLIENT-QUALITY** · **ACCEPTABLE** · **NEEDS WORK** · 
 information architecture and workflow semantics are professional; what undermines the demo is presentation
 hygiene (devtools in build, raw UUIDs, transparent menus, "Document IDs", inconsistent budget/committed
 figures, illogical cost scenarios) and demo-data cleanliness — all fixable without re-architecture.
+
+---
+
+## Phase 22A update (2026-09-15)
+
+| Finding | Status | Now |
+| --- | --- | --- |
+| Developer artifacts in the running app (UX22-07) | FIXED | Devtools only when `VITE_DEVTOOLS=true`; absent on the dev server a demo runs from and in the production build. |
+| Raw actor UUIDs (UX22-05) | FIXED | Names on every audit, approval and status feed through the shared panel; "Former user" fallback; id on hover. |
+| "Session expired!" on sign out (UX22-13) | FIXED | "Signed out"; the warning is kept for a genuine 401 while signed in (spec 35). |
+| Semi-transparent dropdown menus (UX22-06) | NOT A DEFECT | Measured opaque (`rgb(255,255,255)`, opacity 1, z-index 50); the screenshots caught the fade-in. |
+| Three "budget" numbers (UX22-01) | FIXED | One vocabulary — Contract value, Activity budget (schedule revision), Allocated to activities, Original / Approved changes / Revisions / Revised budget — from one backend source. |
+| Inverted forecast (UX22-02) | FIXED | Ordered scenarios, all ≥ Actual, each card says what it varies. |
+| Demo residue (UX22-12) | FIXED | Workspace shows 2 active projects, Inventory 7 items and 3 stores; residue archived by explicit marker, reversible. |
+| Sparse cost landing (UX22-14) | PARTIAL | Budget block and EAC cards; no chart yet. |
+| Found this phase | FIXED | Change-order dialog scrolls on short screens; RFI detail titled while loading (no console error); branded 404 inside the shell; no "· —" in the header. |

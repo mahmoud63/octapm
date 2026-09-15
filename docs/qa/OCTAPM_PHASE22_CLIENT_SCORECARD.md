@@ -55,3 +55,31 @@ Inventory (3.8), Quality (3.7, provisional), Commercial (3.6), Settings/Admin (3
 **≈ 3.8 / 5 — "solid, connected, professional core; not yet demo-polished."**
 (Unweighted mean of module scores = 3.81; weighting the daily-use modules — Workspace, RFI,
 Procurement, Cost, Commercial — leaves it essentially unchanged.)
+
+---
+
+## Phase 22A re-score (2026-09-15, after implementation and revalidation)
+
+Same dimensions and scale; only what was verified live moves. Quality and Settings/Admin were outside
+the 22A scope and are reported as they are — not inflated.
+
+| Module | EoU | Clk | Vis | Term | WfC | Rel | Con | Find | Resp | Rpt | **Score** | Δ | What moved |
+| --- | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | --- |
+| Workspace / Home | 4 | 5 | 5 | 4 | 5 | 4 | 5 | 5 | 5 | 4 | **4.6** | +0.3 | quick actions (Clk); residue gone, no dev badge (Vis) |
+| Doc Control / RFI | 5 | 5 | 5 | 4 | 5 | 5 | 5 | 5 | 5 | 4 | **4.8** | +0.3 | two-session REALTIME both ways (Rel, Con); titled dialog, no console error (Vis) |
+| Procurement | 4 | 4 | 4 | 3 | 5 | 4 | 4 | 5 | 5 | 4 | **4.2** | +0.2 | first-class module (Find, Clk); "Committed" wording unchanged (Term) |
+| Schedule *(provisional)* | 4 | 4 | 4 | 5 | 4 | 4 | 4 | 3 | 4 | 4 | **4.0** | +0.1 | "Activity budget — on this schedule revision" (Term) |
+| Inventory / Warehouse | 4 | 4 | 5 | 4 | 4 | 4 | 5 | 4 | 3 | 4 | **4.1** | +0.3 | 7 real items, 3 real stores, meaningful stock value (Vis, Rpt) |
+| Commercial | 4 | 4 | 5 | 4 | 4 | 4 | 5 | 4 | 4 | 3 | **4.1** | +0.5 | pickers (EoU), names not UUIDs (Vis), approved changes labelled (Term), REALTIME create + Raised By reuse (Con), quick action (Find) |
+| Quality *(provisional)* | 4 | 4 | 4 | 4 | 4 | 3 | 4 | 3 | 4 | 3 | **3.7** | 0 | not in 22A scope; no Quality persona exists |
+| Settings / Admin | 3 | 3 | 4 | 4 | 3 | 5 | 4 | 4 | 3 | 3 | **3.6** | +0.3 | direct URL / refresh / new tab verified, short redirects, branded 404 (Rel, Find) |
+| Cost Control | 4 | 4 | 4 | 5 | 4 | 4 | 5 | 4 | 3 | 4 | **4.1** | +0.9 | one budget vocabulary from one source (Term), budget block + credible EAC cards (Vis, Rpt, EoU), quick action (Find) |
+
+**OCTAPM CLIENT EXPERIENCE SCORE after 22A: ≈ 4.1 / 5** (unweighted mean 4.13; the five daily-use
+modules — Workspace, RFI, Procurement, Cost, Commercial — average 4.4).
+
+Target check: overall ≥ 4.5 **not met**; no core module < 4.0 **not met** for Quality (3.7,
+provisional, untouched) and Settings/Admin (3.6, admin surface). Why: the phase was scoped to the
+audit's Wave A/B items, so Quality's findability/reliability, Procurement's "Committed" wording, the
+cost landing's lack of a chart, and the admin screens' click cost were left where Phase 22 found them.
+Modules scoring 5/5: still none (RFI is at 4.8).
