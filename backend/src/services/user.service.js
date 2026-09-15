@@ -6,16 +6,8 @@ const auditService = require("./audit.service");
 const { sendEmail, templates } = require("./email.service");
 const companyPartyService = require("./company-party.service");
 
-const ALLOWED_ROLES = [
-  "pm",
-  "planning_eng",
-  "qs",
-  "cost_controller",
-  "procurement",
-  "warehouse",
-  "site_engineer",
-  "finance",
-];
+// every role the permission policy knows (shared/permissions.json) — one list, kept there
+const ALLOWED_ROLES = require("../config/permissions").ALL_ROLES;
 
 const sanitizeUser = (user) => ({
   id: user.id,
@@ -38,6 +30,7 @@ const ROLE_LABELS = new Map([
   ["procurement", "Procurement"],
   ["warehouse", "Warehouse"],
   ["site_engineer", "Site Engineer"],
+  ["quality_engineer", "Quality Engineer"],
   ["finance", "Finance"],
 ]);
 
@@ -530,6 +523,7 @@ module.exports = {
   listUsers,
   createUser,
   inviteUser,
+  ALLOWED_ROLES,
   getUserById,
   updateUser,
   resetPassword,

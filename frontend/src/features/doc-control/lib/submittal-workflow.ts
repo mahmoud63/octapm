@@ -61,6 +61,7 @@ export const PROJECT_ROLE_OPTIONS = [
   { id: 'procurement', label: 'Procurement' },
   { id: 'warehouse', label: 'Warehouse' },
   { id: 'site_engineer', label: 'Site Engineer' },
+  { id: 'quality_engineer', label: 'Quality Engineer' },
   { id: 'finance', label: 'Finance' },
 ]
 

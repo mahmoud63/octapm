@@ -19,7 +19,7 @@ const expectedPolicies = [
     module: "progress",
     action: "submit",
     transition: "submission.submit",
-    allowed: ["pm", "planning_eng", "site_engineer"],
+    allowed: ["pm", "planning_eng", "site_engineer", "quality_engineer"],
   },
   {
     module: "progress",
@@ -79,7 +79,7 @@ const expectedPolicies = [
     module: "procurement",
     action: "submit",
     transition: "material.use",
-    allowed: ["pm", "warehouse", "site_engineer"],
+    allowed: ["pm", "warehouse", "site_engineer", "quality_engineer"],
   },
   {
     module: "procurement",
@@ -124,13 +124,13 @@ const expectedPolicies = [
   {
     module: "rfi",
     action: "create",
-    allowed: ["pm", "planning_eng", "site_engineer"],
+    allowed: ["pm", "planning_eng", "site_engineer", "quality_engineer"],
   },
   {
     module: "rfi",
     action: "submit",
     transition: "rfi.answer",
-    allowed: ["pm", "planning_eng", "site_engineer"],
+    allowed: ["pm", "planning_eng", "site_engineer", "quality_engineer"],
   },
   {
     module: "rfi",
@@ -146,7 +146,7 @@ const expectedPolicies = [
   {
     module: "submittal",
     action: "update",
-    allowed: ["pm", "planning_eng", "site_engineer"],
+    allowed: ["pm", "planning_eng", "site_engineer", "quality_engineer"],
   },
   {
     module: "submittal",
@@ -166,13 +166,14 @@ const expectedPolicies = [
       "warehouse",
       "site_engineer",
       "finance",
+      "quality_engineer",
     ],
   },
   {
     module: "document_control",
     action: "submit",
     transition: "document.revision.submit_review",
-    allowed: ["pm", "planning_eng", "site_engineer"],
+    allowed: ["pm", "planning_eng", "site_engineer", "quality_engineer"],
   },
   {
     module: "document_control",
@@ -183,19 +184,19 @@ const expectedPolicies = [
   {
     module: "ncr",
     action: "create",
-    allowed: ["pm", "planning_eng", "site_engineer"],
+    allowed: ["pm", "planning_eng", "site_engineer", "quality_engineer"],
   },
   {
     module: "ncr",
     action: "submit",
     transition: "ncr.close",
-    allowed: ["pm", "planning_eng", "site_engineer"],
+    allowed: ["pm", "planning_eng", "site_engineer", "quality_engineer"],
   },
   {
     module: "ncr",
     action: "approve",
     transition: "ncr.reopen",
-    allowed: ["pm"],
+    allowed: ["pm", "quality_engineer"],
   },
   {
     module: "ncr",
@@ -205,24 +206,24 @@ const expectedPolicies = [
   {
     module: "safety",
     action: "create",
-    allowed: ["pm", "site_engineer"],
+    allowed: ["pm", "site_engineer", "quality_engineer"],
   },
   {
     module: "safety",
     action: "update",
-    allowed: ["pm", "site_engineer"],
+    allowed: ["pm", "site_engineer", "quality_engineer"],
   },
   {
     module: "safety",
     action: "submit",
     transition: "safety.close",
-    allowed: ["pm", "site_engineer"],
+    allowed: ["pm", "site_engineer", "quality_engineer"],
   },
   {
     module: "safety",
     action: "approve",
     transition: "safety.reopen",
-    allowed: ["pm"],
+    allowed: ["pm", "quality_engineer"],
   },
   {
     module: "safety",
@@ -232,7 +233,7 @@ const expectedPolicies = [
   {
     module: "meeting",
     action: "create",
-    allowed: ["pm", "planning_eng", "site_engineer"],
+    allowed: ["pm", "planning_eng", "site_engineer", "quality_engineer"],
   },
   {
     module: "meeting",
@@ -253,6 +254,7 @@ const expectedPolicies = [
       "warehouse",
       "site_engineer",
       "finance",
+      "quality_engineer",
     ],
   },
 ];

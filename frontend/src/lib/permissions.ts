@@ -60,6 +60,7 @@ export type RoleId =
   | 'procurement'
   | 'warehouse'
   | 'site_engineer'
+  | 'quality_engineer'
   | 'finance'
 
 export type ProjectPartyRole =
@@ -145,6 +146,9 @@ const roleAliases: Record<string, RoleId> = {
   warehouse: 'warehouse',
   site_engineer: 'site_engineer',
   'site engineer': 'site_engineer',
+  quality_engineer: 'quality_engineer',
+  'quality engineer': 'quality_engineer',
+  quality: 'quality_engineer',
   finance: 'finance',
 }
 
@@ -161,6 +165,15 @@ type ProjectPermissionContextValue = {
 
 const ProjectPermissionContext =
   createContext<ProjectPermissionContextValue | null>(null)
+
+/** The person-facing name of a role id ('quality_engineer' → 'Quality Engineer'), never the raw id (Phase 22B). */
+export const roleLabel = (role: string | null | undefined): string => {
+  if (!role) return '—'
+  const id = normalizeRoleId(role)
+  const known = permissionPolicy.roles.find((entry) => entry.id === id)
+  if (known) return known.label
+  return String(role).replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
+}
 
 export const normalizeRoleId = (role: string | null | undefined) => {
   if (!role) return null

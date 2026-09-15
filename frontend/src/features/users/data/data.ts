@@ -1,6 +1,7 @@
 import {
   BarChart3,
   Calculator,
+  ClipboardCheck,
   HardHat,
   Package,
   Shield,
@@ -50,6 +51,11 @@ export const roles = [
     label: 'Site Engineer',
     value: 'site_engineer',
     icon: UserCheck,
+  },
+  {
+    label: 'Quality Engineer',
+    value: 'quality_engineer',
+    icon: ClipboardCheck,
   },
   {
     label: 'Finance',

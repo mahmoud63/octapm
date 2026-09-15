@@ -3,7 +3,8 @@ const { asyncHandler } = require("../utils/async-handler");
 const { sendSuccess } = require("../utils/api-response");
 const { body, param } = require("express-validator");
 const { authenticate } = require("../middleware/auth");
-const { getEffectiveRole, requirePermission } = require("../middleware/rbac");
+const { getEffectiveRole, requirePermission, requirePermissionOr } = require("../middleware/rbac");
+const { prisma } = require("../config/db");
 const { validate } = require("../middleware/validate");
 const {
   assignmentReferenceValidators,
@@ -93,9 +94,20 @@ router.post(
   }),
 );
 
+// The person the NCR is assigned to may submit its closeout whatever their role
+// (Phase 22B): a procurement lead answering for a material defect, a site
+// engineer for a pour. Approval stays with the quality engineer.
+const isNcrAssignee = async (req) => {
+  const row = await prisma.ncrRecord.findFirst({
+    where: { id: req.params.ncrId, projectId: req.params.projectId },
+    select: { assigneeUserId: true },
+  });
+  return Boolean(row?.assigneeUserId) && row.assigneeUserId === req.user.id;
+};
+
 router.post(
   "/:ncrId/submit",
-  requirePermission("ncr", "submit", { transition: "ncr.submit" }),
+  requirePermissionOr("ncr", "submit", { transition: "ncr.submit" }, isNcrAssignee),
   ncrCloseoutValidators,
   asyncHandler(async (req, res) => {
     const row = await submitNcrCloseout({
@@ -113,7 +125,7 @@ router.post(
 
 router.post(
   "/:ncrId/close",
-  requirePermission("ncr", "submit", { transition: "ncr.close" }),
+  requirePermissionOr("ncr", "submit", { transition: "ncr.close" }, isNcrAssignee),
   ncrCloseoutValidators,
   asyncHandler(async (req, res) => {
     const row = await closeNcr({

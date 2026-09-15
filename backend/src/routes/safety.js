@@ -3,7 +3,8 @@ const { asyncHandler } = require("../utils/async-handler");
 const { sendSuccess } = require("../utils/api-response");
 const { body, param, query } = require("express-validator");
 const { authenticate } = require("../middleware/auth");
-const { getEffectiveRole, requirePermission } = require("../middleware/rbac");
+const { getEffectiveRole, requirePermission, requirePermissionOr } = require("../middleware/rbac");
+const { prisma } = require("../config/db");
 const { validate } = require("../middleware/validate");
 const {
   assignmentReferenceValidators,
@@ -105,9 +106,19 @@ router.post(
   }),
 );
 
+// The person the incident is assigned to may submit its closeout whatever their
+// role (Phase 22B); approval stays with the quality engineer.
+const isIncidentAssignee = async (req) => {
+  const row = await prisma.safetyIncident.findFirst({
+    where: { id: req.params.incidentId, projectId: req.params.projectId },
+    select: { assigneeUserId: true },
+  });
+  return Boolean(row?.assigneeUserId) && row.assigneeUserId === req.user.id;
+};
+
 router.post(
   "/:incidentId/submit",
-  requirePermission("safety", "submit", { transition: "safety.submit" }),
+  requirePermissionOr("safety", "submit", { transition: "safety.submit" }, isIncidentAssignee),
   safetyCloseoutValidators,
   asyncHandler(async (req, res) => {
     const row = await submitSafetyCloseout({
@@ -125,7 +136,7 @@ router.post(
 
 router.post(
   "/:incidentId/close",
-  requirePermission("safety", "submit", { transition: "safety.close" }),
+  requirePermissionOr("safety", "submit", { transition: "safety.close" }, isIncidentAssignee),
   safetyCloseoutValidators,
   asyncHandler(async (req, res) => {
     const row = await closeSafetyIncident({

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import {
   CheckCircle2,
   RotateCcw,
@@ -9,6 +9,7 @@ import {
 import { toast } from 'sonner'
 import { handleServerError } from '@/lib/handle-server-error'
 import { useCanPerform } from '@/lib/permissions'
+import { useAuthStore } from '@/stores/auth-store'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
@@ -27,6 +28,10 @@ import { UserPicker } from '@/components/user-picker'
 import { InspectionsModule } from '@/features/inspections/components/inspections-module'
 import type { ProjectSetupTarget } from '@/features/projects/data/schema'
 import { PunchModule } from '@/features/punch/components/punch-module'
+import {
+  QualityCreateDialog,
+  type QualityCreateKind,
+} from './quality-create-dialog'
 import {
   WorkflowDecisionDialog,
   type WorkflowDecisionMode,
@@ -142,14 +147,16 @@ function CloseoutDialog({
 
   const open = !!target
 
-  useEffect(() => {
-    if (!target) return
+  // a different record opening the dialog starts a fresh draft
+  const [seenTarget, setSeenTarget] = useState<CloseoutTarget | null>(null)
+  if (target && target !== seenTarget) {
+    setSeenTarget(target)
     setResponsible(target.responsible || '')
     setAssigneeUserId(target.assigneeUserId ?? null)
     setDueDate(toDateInputValue(target.dueDate))
     setClosureComment('')
     setEvidenceFiles([])
-  }, [target])
+  }
 
   const canSubmit = Boolean(
     (assigneeUserId || responsible.trim()) &&
@@ -317,6 +324,11 @@ export function QualityDashboard({
   const reopenSafety = useReopenSafetyIncident(projectId)
   const uploadCloseoutEvidence = useUploadWorkflowAttachments(projectId)
   const createTest = useCreateMaterialTest(projectId)
+  const [createKind, setCreateKind] = useState<QualityCreateKind | null>(null)
+  // the person a record is assigned to submits its closeout whatever their role
+  const me = useAuthStore((state) => state.auth.user?.id ?? null)
+  const isMine = (row: { assigneeUserId?: string | null }) =>
+    Boolean(me) && row.assigneeUserId === me
   const canCreateNcr = useCanPerform('ncr', 'create')
   const canSubmitNcr = useCanPerform('ncr', 'submit', 'ncr.close')
   const canCreateSafety = useCanPerform('safety', 'create')
@@ -511,6 +523,14 @@ export function QualityDashboard({
               >
                 Add
               </Button>
+              <Button
+                variant='outline'
+                className='min-h-10 w-full sm:w-auto'
+                onClick={() => setCreateKind('ncr')}
+                data-testid='uat-ncr-new'
+              >
+                New NCR…
+              </Button>
             </div>
           )}
           <WorkflowRecordList
@@ -548,7 +568,7 @@ export function QualityDashboard({
             renderActions={(row) =>
               row.status === 'open' ? (
                 <>
-                  {canSubmitNcr && (
+                  {(canSubmitNcr || isMine(row)) && (
                     <Button
                       size='sm'
                       variant='outline'
@@ -784,6 +804,14 @@ export function QualityDashboard({
               >
                 Add
               </Button>
+              <Button
+                variant='outline'
+                className='min-h-10 w-full sm:w-auto'
+                onClick={() => setCreateKind('safety')}
+                data-testid='uat-safety-new'
+              >
+                Record incident…
+              </Button>
             </div>
           )}
           <WorkflowRecordList
@@ -820,7 +848,7 @@ export function QualityDashboard({
             renderActions={(row) =>
               row.status === 'open' || row.status === 'investigating' ? (
                 <>
-                  {canSubmitSafety && (
+                  {(canSubmitSafety || isMine(row)) && (
                     <Button
                       size='sm'
                       variant='outline'
@@ -921,12 +949,20 @@ export function QualityDashboard({
                   await createTest.mutateAsync({ testType })
                   setTestType('')
                   toast.success('Material test logged')
-                } catch {
-                  toast.error('Failed to create test')
+                } catch (error) {
+                  handleServerError(error)
                 }
               }}
             >
               Add
+            </Button>
+            <Button
+              variant='outline'
+              className='min-h-10 w-full sm:w-auto'
+              onClick={() => setCreateKind('material_test')}
+              data-testid='uat-material-test-new'
+            >
+              Log test…
             </Button>
           </div>
           <WorkflowRecordList
@@ -946,6 +982,13 @@ export function QualityDashboard({
           />
         </TabsContent>
       </Tabs>
+      <QualityCreateDialog
+        projectId={projectId}
+        kind={createKind}
+        onOpenChange={(open) => {
+          if (!open) setCreateKind(null)
+        }}
+      />
       <CloseoutDialog
         projectId={projectId}
         target={closeoutTarget}

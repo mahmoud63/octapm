@@ -11,6 +11,7 @@ const userRoleSchema = z.union([
   z.literal('procurement'),
   z.literal('warehouse'),
   z.literal('site_engineer'),
+  z.literal('quality_engineer'),
   z.literal('finance'),
 ])
 

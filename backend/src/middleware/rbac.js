@@ -164,6 +164,26 @@ const requirePermission = (moduleName, action, options = {}) => {
   };
 };
 
+/**
+ * requirePermission with a record-level allowance (Phase 22B). When the role
+ * policy refuses, `allowRecord(req)` may still let the request through: the
+ * person an NCR is assigned to submits its closeout whatever their role, because
+ * the ball is in their court and the quality engineer decides on what they
+ * submit. The allowance never widens an API key, and a template or role that
+ * already allows the action never consults the record.
+ */
+const requirePermissionOr = (moduleName, action, options = {}, allowRecord = async () => false) => {
+  const guard = requirePermission(moduleName, action, options);
+  return (req, res, next) =>
+    guard(req, res, (error) => {
+      if (!error || error.status !== 403 || req.apiClient) return next(error);
+      Promise.resolve()
+        .then(() => allowRecord(req))
+        .then((allowed) => next(allowed ? undefined : error))
+        .catch(next);
+    });
+};
+
 /** Company administration: company admins and project managers. */
 const requireCompanyAdmin = (req, res, next) => {
   if (!req.user) {
@@ -196,5 +216,6 @@ module.exports = {
   hasPermission,
   requireCompanyAdmin,
   requirePermission,
+  requirePermissionOr,
   requireRoles,
 };

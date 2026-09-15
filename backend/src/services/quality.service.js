@@ -17,7 +17,7 @@ const ensureProject = async ({ orgId, projectId }) => {
 const getQualityDashboard = async ({ orgId, projectId }) => {
   await ensureProject({ orgId, projectId });
 
-  const [ncrs, itps, defects, tests, safety, fieldItems] = await Promise.all([
+  let [ncrs, itps, defects, tests, safety, fieldItems] = await Promise.all([
     prisma.ncrRecord.findMany({ where: { projectId } }),
     prisma.itpRecord.findMany({ where: { projectId } }),
     prisma.defectRecord.findMany({ where: { projectId } }),
@@ -32,6 +32,15 @@ const getQualityDashboard = async ({ orgId, projectId }) => {
       : Promise.resolve(null),
   ]);
 
+  // An archived record is withdrawn — it neither counts against the quality
+  // score nor shows as open (Phase 22B: 80 archived safety incidents read as
+  // "Safety Open 80").
+  const live = (rows) => rows.filter((row) => row.status !== 'archived' && row.status !== 'void');
+  ncrs = live(ncrs);
+  itps = live(itps);
+  defects = live(defects);
+  tests = live(tests);
+  safety = live(safety);
   const majorNcrs = ncrs.filter((row) => row.severity === 'major').length;
   const minorNcrs = ncrs.filter((row) => row.severity === 'minor').length;
   const failedItps = itps.filter((row) => row.status === 'failed').length;

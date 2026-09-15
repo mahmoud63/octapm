@@ -32,6 +32,7 @@ const ROLES = [
   ['procurement', 'Procurement'],
   ['warehouse', 'Warehouse'],
   ['site_engineer', 'Site engineer'],
+  ['quality_engineer', 'Quality engineer'],
   ['finance', 'Finance'],
 ] as const
 

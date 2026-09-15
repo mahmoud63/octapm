@@ -157,6 +157,10 @@ export const useCreateNcr = (projectId: string) => {
       severity?: 'major' | 'minor'
       owner?: string
       dueDate?: string
+      activityId?: string | null
+      assigneeUserId?: string | null
+      assigneeCompanyId?: string | null
+      responsible?: string
     }) =>
       apiClient
         .post(`/projects/${projectId}/ncr`, payload)
@@ -308,8 +312,13 @@ export const useCreateSafetyIncident = (projectId: string) => {
     mutationFn: (payload: {
       title: string
       incidentType: 'near_miss' | 'first_aid' | 'lti' | 'fatality'
+      severity?: string
       owner?: string
       dueDate?: string
+      activityId?: string | null
+      assigneeUserId?: string | null
+      assigneeCompanyId?: string | null
+      responsible?: string
     }) =>
       apiClient
         .post(`/projects/${projectId}/safety`, payload)
@@ -425,6 +434,10 @@ export const useCreateMaterialTest = (projectId: string) => {
       testType: string
       owner?: string
       dueDate?: string
+      testDate?: string
+      activityId?: string | null
+      assigneeUserId?: string | null
+      assigneeCompanyId?: string | null
     }) =>
       apiClient
         .post(`/projects/${projectId}/material-tests`, payload)

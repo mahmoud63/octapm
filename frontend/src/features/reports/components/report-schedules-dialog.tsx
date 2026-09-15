@@ -36,6 +36,7 @@ const ROLES = [
   ['qs', 'Quantity surveyors'],
   ['cost_controller', 'Cost controllers'],
   ['site_engineer', 'Site engineers'],
+  ['quality_engineer', 'Quality engineers'],
   ['finance', 'Finance'],
   ['procurement', 'Procurement'],
   ['warehouse', 'Warehouse'],
