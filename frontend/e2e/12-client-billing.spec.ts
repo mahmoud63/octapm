@@ -127,7 +127,19 @@ test.describe('client billing', () => {
       })
     }
 
-    const before = await statement(projectId)
+    let before = await statement(projectId)
+    if (!before.current) {
+      // A fresh fixture has no payment application yet: raise the first period,
+      // so the certificate's arithmetic is exercised on every run (Phase 22B).
+      await withApi(async (client, token) => {
+        const response = await client.post(`${API}/projects/${projectId}/ipc`, {
+          headers: { authorization: `Bearer ${token}` },
+          data: {},
+        })
+        expect(response.status(), await response.text()).toBe(201)
+      })
+      before = await statement(projectId)
+    }
     test.skip(!before.current, 'no payment application has been raised on this project')
 
     // Stored materials and a deduction, which are not measured work and so do

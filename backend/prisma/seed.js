@@ -18,22 +18,29 @@ const prisma = new PrismaClient();
 // Opening stock goes in through the service, not straight into the tables, so
 // the seeded balances are produced by the same ledger the product uses.
 const inventoryService = require("../src/services/inventory.service");
+const budgetService = require("../src/services/budget.service");
 
 const PASSWORD = process.env.SEED_PASSWORD || "DemoPassw0rd!";
 const ORG_NAME = process.env.SEED_ORG_NAME || "OctaPM Demo Contracting";
 const PROJECT_NAME = process.env.SEED_PROJECT_NAME || "Riverside Tower";
+// The people's e-mail domain. Every e-mail is unique across organisations, so a
+// second organisation seeded from this file — the dedicated E2E one — needs its
+// own domain (Phase 22B): SEED_EMAIL_DOMAIN=octapm-e2e.test.
+const EMAIL_DOMAIN = process.env.SEED_EMAIL_DOMAIN || "octapm.demo";
+const mail = (local) => `${local}@${EMAIL_DOMAIN}`;
 
 const date = (value) => new Date(`${value}T00:00:00.000Z`);
 
 const PEOPLE = [
-  ["pm", "Dana Okafor", "pm@octapm.demo", "pm"],
-  ["planner", "Ravi Menon", "planner@octapm.demo", "planning_eng"],
-  ["qs", "Sofia Lindqvist", "qs@octapm.demo", "qs"],
-  ["cost", "Tomás Herrera", "cost@octapm.demo", "cost_controller"],
-  ["procurement", "Amina Bello", "procurement@octapm.demo", "procurement"],
-  ["warehouse", "Jonas Weber", "warehouse@octapm.demo", "warehouse"],
-  ["site", "Priya Raman", "site@octapm.demo", "site_engineer"],
-  ["finance", "Grace Mbeki", "finance@octapm.demo", "finance"],
+  ["pm", "Dana Okafor", mail("pm"), "pm"],
+  ["planner", "Ravi Menon", mail("planner"), "planning_eng"],
+  ["qs", "Sofia Lindqvist", mail("qs"), "qs"],
+  ["cost", "Tomás Herrera", mail("cost"), "cost_controller"],
+  ["procurement", "Amina Bello", mail("procurement"), "procurement"],
+  ["warehouse", "Jonas Weber", mail("warehouse"), "warehouse"],
+  ["site", "Priya Raman", mail("site"), "site_engineer"],
+  ["quality", "Lena Fischer", mail("quality"), "quality_engineer"],
+  ["finance", "Grace Mbeki", mail("finance"), "finance"],
 ];
 
 // Three activities in a finish-to-start chain, so the schedule, the critical
@@ -1246,6 +1253,48 @@ async function upsertResources(projectId, activities) {
   }
 }
 
+// The organisation's cost codes, entered once (Phase 22B). An existing code is
+// left as the organisation named it; only a missing one is created.
+const COST_CODES = [
+  ["01-100", "Site works", "labour"],
+  ["02-100", "Concrete", "material"],
+  ["02-200", "Reinforcement", "material"],
+  ["03-100", "Blockwork", "subcontract"],
+  ["04-100", "MEP first fix", "subcontract"],
+  ["05-100", "Finishes", "subcontract"],
+];
+
+// The fixture project's original budget, by cost code and cost type. Seeded only
+// when the project has no budget lines at all, so a project that was budgeted by a
+// person keeps every figure that person entered.
+const BUDGET_LINES = [
+  ["02-100", "material", 500000, "Concrete works"],
+  ["02-200", "material", 350000, "Reinforcement supply and fix"],
+  ["04-100", "subcontract", 700000, "MEP first fix"],
+  ["01-100", "labour", 150000, "Site labour"],
+];
+
+async function upsertCostCodesAndBudget({ orgId, projectId, userId }) {
+  const codes = {};
+  for (const [index, [code, name, category]] of COST_CODES.entries()) {
+    const existing = await prisma.costCode.findFirst({ where: { orgId, code } });
+    codes[code] = existing || (await prisma.costCode.create({ data: { orgId, code, name, category, sortOrder: index, createdBy: userId } }));
+  }
+  const lines = await prisma.budgetLine.count({ where: { projectId } });
+  if (lines > 0) return { codes, linesCreated: 0 };
+  let linesCreated = 0;
+  for (const [code, costType, originalBudget, description] of BUDGET_LINES) {
+    await budgetService.createBudgetLine({
+      orgId,
+      projectId,
+      payload: { costCodeId: codes[code].id, costType, originalBudget, description },
+      actor: { id: userId },
+    });
+    linesCreated += 1;
+  }
+  return { codes, linesCreated };
+}
+
 async function upsertProgressAndCost({ orgId, projectId, activities, userId }) {
   const now = new Date();
 
@@ -1432,6 +1481,7 @@ async function main() {
     userId: people.pm.id,
   });
   await upsertResources(project.id, activities);
+  const budget = await upsertCostCodesAndBudget({ orgId: org.id, projectId: project.id, userId: people.pm.id });
   await upsertSubcontract({
     orgId: org.id,
     projectId: project.id,
@@ -1460,6 +1510,7 @@ async function main() {
   console.log(`  project       ${project.id}`);
   console.log(`  activities    ${Object.keys(activities).length}`);
   console.log(`  BOQ items     ${Object.keys(boqItems).length}`);
+  console.log(`  budget lines  ${budget.linesCreated} created`);
   console.log("");
   console.log(`Sign in with any of these — password "${PASSWORD}":`);
   for (const [, name, email, role] of PEOPLE) {

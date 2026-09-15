@@ -29,10 +29,17 @@ describe("generated references do not collide after a deletion", () => {
   const created = [];
 
   beforeAll(async () => {
-    project = await prisma.project.findFirst({
-      where: { name: "Riverside Tower" },
-      select: { id: true, orgId: true },
-    });
+    // the dedicated E2E organisation's fixture when it exists (Phase 22B), any
+    // Riverside Tower otherwise; whatever is created here is deleted again
+    project =
+      (await prisma.project.findFirst({
+        where: { name: "Riverside Tower", status: "active", org: { name: "OctaPM E2E" } },
+        select: { id: true, orgId: true },
+      })) ||
+      (await prisma.project.findFirst({
+        where: { name: "Riverside Tower", status: "active" },
+        select: { id: true, orgId: true },
+      }));
   });
 
   afterAll(async () => {
@@ -53,15 +60,24 @@ describe("generated references do not collide after a deletion", () => {
   });
 
   it("numbers past the highest, not past the count", async () => {
-    const before = await prisma.bidPackage.aggregate({
-      where: { projectId: project.id },
-      _max: { number: true },
+    // Make the gap ourselves (Phase 22B): a clean fixture has nothing deleted,
+    // and a test that needed somebody else's deletions proved nothing on it.
+    const kept = await bidService.createPackage({
+      orgId: project.orgId,
+      projectId: project.id,
+      payload: { title: `Numbering guard kept ${Date.now().toString(36)}`, commitmentType: "subcontract" },
+      actor: null,
     });
+    created.push(kept.id);
+    const gone = await bidService.createPackage({
+      orgId: project.orgId,
+      projectId: project.id,
+      payload: { title: `Numbering guard deleted ${Date.now().toString(36)}`, commitmentType: "subcontract" },
+      actor: null,
+    });
+    await prisma.bidPackage.delete({ where: { id: gone.id } });
+    const highest = gone.number; // issued, quoted, then deleted — the count no longer reaches it
     const count = await prisma.bidPackage.count({ where: { projectId: project.id } });
-    const highest = before._max.number ?? 0;
-
-    // The fixture only proves anything if the two disagree — which they do
-    // exactly when something has been deleted.
     expect(highest).toBeGreaterThan(count);
 
     const pkg = await bidService.createPackage({

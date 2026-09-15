@@ -101,7 +101,7 @@ test.describe('purchase orders', () => {
     await openProcurement(page, projectId)
 
     const register = page.getByTestId('uat-purchase-orders')
-    await expect(register).toContainText('Committed')
+    await expect(register).toContainText('PO value')
     await expect(register).toContainText('Waiting on you')
     // Seeded orders are there to look at.
     await expect(register.locator('tbody tr').first()).toBeVisible()

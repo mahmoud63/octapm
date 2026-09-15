@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { apiClient, apiGet, apiToken, openProject, parseMoney, signIn, watchForProblems } from './support'
+import { apiClient, apiGet, apiToken, openProject, signIn, watchForProblems } from './support'
 
 /**
  * The financial spine, driven entirely through the interface.
@@ -29,7 +29,7 @@ test.describe('financial spine', () => {
     // Ask the backend what already exists, so a re-run does not try to create a
     // duplicate code (which the app correctly refuses).
     const probe = await apiClient()
-    let present = new Set<string>()
+    let present: Set<string>
     try {
       const token = await apiToken(probe)
       const { body } = await apiGet(probe, '/company/cost-codes', token)
@@ -113,8 +113,12 @@ test.describe('financial spine', () => {
       adopted += 1
     }
     if (adopted > 0) {
-      // The footer's second button commits; the first is Close.
-      await picker.getByRole('button').filter({ hasNotText: 'Close' }).last().click()
+      // Apply commits and goes quiet; the picker stays open so more codes can be
+      // adopted, so it is closed explicitly once the commit has landed.
+      const apply = picker.getByRole('button', { name: 'Apply' })
+      await apply.click()
+      await expect(apply).toBeDisabled({ timeout: 20_000 })
+      await picker.getByRole('button', { name: 'Close' }).first().click()
       await expect(picker).toBeHidden({ timeout: 20_000 })
     } else {
       // Two things are named Close: the footer button and the dialog's X.
@@ -127,7 +131,7 @@ test.describe('financial spine', () => {
     // Which cost codes already have a line? Re-running must not try to create
     // a duplicate, which the app rightly refuses.
     const existingClient = await apiClient()
-    let existingLines = 0
+    let existingLines: number
     try {
       const token = await apiToken(existingClient)
       const { body } = await apiGet(existingClient, `/projects/${projectId}/budget/lines`, token)
@@ -203,6 +207,7 @@ test.describe('financial spine', () => {
     } finally {
       await client.dispose()
     }
+    expect(problems.consoleErrors, 'console errors while creating budget lines').toEqual([])
   })
 
   test('an approved change order moves the revised budget by exactly its value', async ({ page }) => {

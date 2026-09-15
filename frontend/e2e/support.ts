@@ -1,16 +1,23 @@
 import { mkdirSync } from 'node:fs'
-import { expect, request as playwrightRequest, type APIRequestContext, type Page } from '@playwright/test'
+import { expect, request as playwrightRequest, type APIRequestContext, type Page, type Response } from '@playwright/test'
 
-/** Seeded demo accounts — see backend/prisma/seed.js. */
+/**
+ * The seeded people of the dedicated E2E organisation ("OctaPM E2E", people
+ * <role>@octapm-e2e.test) — the same seed as the demo organisation, reset before
+ * every run by e2e/global-setup.ts (Phase 22B). The suites never sign in to
+ * the demo organisation, so nothing they create can reach a client-facing
+ * workspace or the certified Phase 21 project.
+ */
+const DOMAIN = process.env.E2E_EMAIL_DOMAIN || 'octapm-e2e.test'
 export const PEOPLE = {
-  pm: { email: 'pm@octapm.demo', role: 'pm' },
-  planner: { email: 'planner@octapm.demo', role: 'planning_eng' },
-  qs: { email: 'qs@octapm.demo', role: 'qs' },
-  cost: { email: 'cost@octapm.demo', role: 'cost_controller' },
-  procurement: { email: 'procurement@octapm.demo', role: 'procurement' },
-  warehouse: { email: 'warehouse@octapm.demo', role: 'warehouse' },
-  site: { email: 'site@octapm.demo', role: 'site_engineer' },
-  finance: { email: 'finance@octapm.demo', role: 'finance' },
+  pm: { email: `pm@${DOMAIN}`, role: 'pm' },
+  planner: { email: `planner@${DOMAIN}`, role: 'planning_eng' },
+  qs: { email: `qs@${DOMAIN}`, role: 'qs' },
+  cost: { email: `cost@${DOMAIN}`, role: 'cost_controller' },
+  procurement: { email: `procurement@${DOMAIN}`, role: 'procurement' },
+  warehouse: { email: `warehouse@${DOMAIN}`, role: 'warehouse' },
+  site: { email: `site@${DOMAIN}`, role: 'site_engineer' },
+  finance: { email: `finance@${DOMAIN}`, role: 'finance' },
 } as const
 
 export const PASSWORD = process.env.E2E_PASSWORD || 'DemoPassw0rd!'
@@ -45,18 +52,27 @@ export async function signIn(page: Page, who: keyof typeof PEOPLE = 'pm') {
   await page.goto('/sign-in')
   const email = page.getByPlaceholder('name@example.com')
   await email.waitFor({ state: 'visible' })
-  await email.click()
-  await email.fill(PEOPLE[who].email)
   const password = page.locator('input[type="password"]').first()
-  await password.click()
-  await password.fill(PASSWORD)
-  const [response] = await Promise.all([
-    page.waitForResponse(
-      (r) => r.url().includes('/auth/login') && r.request().method() === 'POST',
-      { timeout: 30_000 },
-    ),
-    page.getByRole('button', { name: 'Sign in', exact: true }).click(),
-  ])
+  const typeBoth = async () => {
+    await email.click()
+    await email.fill(PEOPLE[who].email)
+    await password.click()
+    await password.fill(PASSWORD)
+  }
+  await typeBoth()
+  // What was typed is checked before the form is sent: a form that settles its
+  // state a moment after it paints can drop what a fast hand typed into it, and
+  // an empty form is refused by validation without any request (Phase 22B).
+  await expect(email).toHaveValue(PEOPLE[who].email)
+  const isLogin = (r: Response) => r.url().includes('/auth/login') && r.request().method() === 'POST'
+  let response: Response | null = null
+  for (let attempt = 0; attempt < 2 && !response; attempt += 1) {
+    if ((await email.inputValue()) !== PEOPLE[who].email || !(await password.inputValue())) await typeBoth()
+    const pending = page.waitForResponse(isLogin, { timeout: attempt === 0 ? 15_000 : 30_000 }).catch(() => null)
+    await page.getByRole('button', { name: 'Sign in', exact: true }).click()
+    response = await pending
+  }
+  if (!response) throw new Error(`sign-in for ${who}: the form never sent its request`)
 
   // Say why sign-in failed rather than leaving a "Workspace Control not found".
   // The API allows RATE_LIMIT_LOGIN_MAX logins per IP and email in a 15-minute

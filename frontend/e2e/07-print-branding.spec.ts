@@ -66,11 +66,18 @@ test.describe('print output', () => {
     await page.waitForLoadState('domcontentloaded')
     await page.waitForTimeout(2500)
 
+    // The figure the screen shows is the figure print must keep — whatever the
+    // fixture's original budget is (the E2E fixture seeds 1,700,000; a re-run
+    // never depends on a number some earlier run left behind).
+    const onScreen = await page.locator('body').innerText()
+    const original = /Original[\s\S]{0,40}?\$([\d,]{5,})/.exec(onScreen)?.[1]
+    expect(original, 'the original budget is shown on screen').toBeTruthy()
+
     await page.emulateMedia({ media: 'print' })
     const body = await page.locator('body').innerText()
 
     // Branding must not cost the content: the figures still have to be there.
-    expect(body, 'the budget figures vanished when printing').toMatch(/1,550,000/)
+    expect(body, 'the budget figures vanished when printing').toContain(original as string)
     await page.emulateMedia({ media: 'screen' })
   })
 

@@ -14,6 +14,8 @@ const BASE_URL = process.env.E2E_BASE_URL || 'http://localhost:5173'
 
 export default defineConfig({
   testDir: './e2e',
+  // The dedicated E2E organisation is reset and seeded before every run (Phase 22B).
+  globalSetup: './e2e/global-setup.ts',
   // The scenarios build on one another inside a file (create a budget line,
   // then spend against it), so a file's tests run in order.
   fullyParallel: false,

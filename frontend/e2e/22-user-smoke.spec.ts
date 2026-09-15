@@ -285,11 +285,11 @@ test.describe('user smoke test across the portal', () => {
     const projectId = await openProject(page)
 
     await page.goto(`/projects/${projectId}/cost/overview`)
-    await expect(page.locator('body')).toContainText(/Committed/i, { timeout: 30_000 })
+    await expect(page.locator('body')).toContainText(/Executed commitments|Committed/i, { timeout: 30_000 })
     const body = await page.locator('body').innerText()
     observe('COST_OVERVIEW_SHOWS', {
       mentionsActual: /actual/i.test(body),
-      mentionsCommitted: /committed/i.test(body),
+      mentionsCommitted: /executed commitments|committed/i.test(body),
       mentionsVariance: /variance/i.test(body),
       mentionsForecast: /forecast|eac|final/i.test(body),
     })

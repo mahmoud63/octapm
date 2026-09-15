@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { openProject, signIn, watchForProblems } from './support'
+import { openProject, signIn, watchForProblems, PEOPLE } from './support'
 
 /**
  * Sign-in through the real form, and a sweep of every navigation destination.
@@ -19,7 +19,7 @@ test.describe('authentication', () => {
     await page.goto('/sign-in')
     const email = page.getByPlaceholder('name@example.com')
     await email.click()
-    await email.fill('pm@octapm.demo')
+    await email.fill(PEOPLE.pm.email)
     const password = page.locator('input[type="password"]').first()
     await password.click()
     await password.fill('definitely-not-the-password')
