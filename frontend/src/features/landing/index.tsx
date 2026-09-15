@@ -11,6 +11,7 @@ import {
   X,
 } from 'lucide-react'
 import { OctaLogo, OctaMark } from '@/components/brand/octa-logo'
+import { HeroVideo } from './components/hero-video'
 import { useTheme } from '@/context/theme-provider'
 import { cn } from '@/lib/utils'
 import {
@@ -181,8 +182,9 @@ export function OctaPMLanding() {
       <section
         id='top'
         data-testid='uat-landing-hero'
-        className='octa-hero octa-tess relative overflow-hidden'
+        className='octa-hero octa-tess relative isolate overflow-hidden'
       >
+        <HeroVideo />
         <div className='mx-auto grid max-w-6xl gap-14 px-6 pt-32 pb-20 lg:grid-cols-[1.05fr_1fr] lg:items-center lg:gap-16 lg:pt-40 lg:pb-28'>
           <div>
             <p className='mb-6 inline-flex items-center gap-2.5 text-[11px] font-semibold tracking-[0.16em] text-white/75 uppercase'>
