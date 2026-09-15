@@ -1889,6 +1889,100 @@ Fixed with the loop: every link is read for the visibility decision (only
 the serialised `records` list is still capped at ten). Regression in
 `document-text.service.test.js`.
 
+## The fourteenth release pass — HEAD `0733f6f`: no Critical, seven Highs
+
+Run at 21:58 CDT (151,212 tokens, six minutes): DO NOT RELEASE — no
+Critical, seven Highs, and the three "Existing" Mediums carried (P21-139,
+P21-140, P21-170). Two reproduced against the live API on `0733f6f` (a
+read-only key posting a comment; a direct receipt damaging more than it
+received) and five confirmed by regression tests that fail on `0733f6f`;
+each fix carries a regression that fails on `0733f6f`. All seven fixed in
+the commit after it, with two regressions of the thirteenth loop's own
+fixes. The pass also confirmed CX21-541, CX21-543, CX21-545, CX21-547 and
+the twelfth-pass Mediums CORRECT.
+
+## P21-180 · P1 · Document search / record isolation · **FIXED** (Codex CX21-550; a gap in the CX21-540 fix)
+
+| | |
+| --- | --- |
+| **Observed** | The change-order rule I added in the thirteenth loop admitted a change order by its own `createdBy`, not by its parent commitment: someone who created a change order while a member, then scoped to a company that does not own the parent, still reached its attachment through the document, though the register refused the record itself. **Confirmed by a regression that fails on `0733f6f`.** |
+| **Root cause** | **CONFIRMED PRODUCT DEFECT** (a child record judged on its own author, not its parent's rule). |
+| **Fix** | A change order is visible only when its parent commitment is — by the parent's vendor company or the parent's creator; the change order's own `createdBy` no longer admits it. |
+| **Regression** | `document-text.service.test.js` (CX21-550: the query asks the parent commitment's rule; hidden when the parent is another company's, shown when it is the party's). |
+
+## P21-181 · P1 · Attachments / record isolation · **FIXED** (Codex CX21-551)
+
+| | |
+| --- | --- |
+| **Observed** | The unified attachment routes checked the record's module but not the record itself: a party-scoped person listed another company's timesheet attachments by record type, and the document download checked neither the record nor the module — a project-scoped key without the document's module scope could fetch its bytes. **Reproduced by regression; confirmed against the same record-rule the text search now uses.** |
+| **Root cause** | **CONFIRMED PRODUCT DEFECT** (the attachment routes never carried the record's own rule — the class the twelfth and thirteenth passes closed on the text search, on the attachment routes). |
+| **Fix** | The list, the read and the download carry the viewer's record rule (`recordVisibleToViewer` / `documentReadableToViewer`, the same rules as the content search): a party sees only the records their rule admits, and a download is refused unless the document is visible through a place it is linked from. The list is narrowed to the viewer's records. |
+| **Regression** | `attachments.routes.test.js` (CX21-551: a record the rule excludes hides its list and its download; the list is called with a viewer). |
+
+## P21-182 · P1 · Attachments / record isolation · **FIXED** (Codex CX21-552)
+
+| | |
+| --- | --- |
+| **Observed** | Attaching and unlinking checked the module but neither the target record's ownership nor the source document's visibility: a party could delete another company's evidence link, or link another company's document to their own record. **Confirmed by a regression that fails on `0733f6f`.** |
+| **Root cause** | **CONFIRMED PRODUCT DEFECT** (a mutation guarded by the module alone). |
+| **Fix** | A link is refused unless the target record is visible to the viewer and every document being linked is one the viewer may already see; an unlink is refused unless the attachment's record is visible. |
+| **Regression** | `attachments.routes.test.js` (CX21-552: a link pulls in only visible documents; an unlink checks the record). |
+
+## P21-183 · P1 · BOQ / concurrency · **FIXED** (Codex CX21-553; completes P21-175)
+
+| | |
+| --- | --- |
+| **Observed** | BOQ row and link deletion read the allocations and checked their status before the transaction, then updated by id inside it without re-checking: a submission or approval that landed in between was overwritten (marked rejected/inactive), and a minted activity could be retired past a footprint that appeared since. **Confirmed by a regression that fails on `0733f6f`.** |
+| **Root cause** | **CONFIRMED PRODUCT DEFECT** (a check-before-lock on the delete, the same shape as the transitions). |
+| **Fix** | The delete holds the BOQ row (or the allocation) `FOR UPDATE` and re-reads the allocations under it; a protected allocation that appeared since raises `409`, and the retire/footprint decision is made on the held rows. |
+| **Regression** | `boq.service.test.js` (CX21-553: an allocation drafted at the pre-check but approved under the lock stops the delete). |
+
+## P21-184 · P1 · Commitments / party isolation · **FIXED** (Codex CX21-554)
+
+| | |
+| --- | --- |
+| **Observed** | Commitment reads asserted the viewer's party, but the financial mutations passed the actor and loaded the row unrestricted: a party with `commitment:update` could edit, replace the schedule of values of, and transition another company's commitment it could not even read. **Confirmed by a regression that fails on `0733f6f`.** |
+| **Root cause** | **CONFIRMED PRODUCT DEFECT** (the mutation paths never carried the viewer the read path did). |
+| **Fix** | The actor carries its project access, and every mutation — edit, replace-lines, insurance, submit, approve, return, execute, close, void, and the change-order edit and transition — loads the row under that viewer, so a party may act only on their own company's commitment (`404` otherwise). |
+| **Regression** | `commitment.service.test.js` (CX21-554: another company's party refused on edit, replace-lines and the change-order edit; the owning party served). |
+
+## P21-185 · P1 · Comments / record isolation · **FIXED** (Codex CX21-555)
+
+| | |
+| --- | --- |
+| **Observed** | Comments checked the record's module but not the record: a party read and posted on another subcontractor's RFI thread; and posting needed only read, so a read-only API key wrote a comment. **Reproduced live**: an `rfi:read` key posted a comment on the P21 RFI. |
+| **Root cause** | **CONFIRMED PRODUCT DEFECT** (a party-facing thread guarded by the module; a write behind a read gate). |
+| **Fix** | Reading and writing a comment carry the parent record's rule (`recordVisibleToViewer`), so a party sees only their own records' threads; and a comment posted, edited or removed through an API key needs a write scope on the record's module, not read. |
+| **Regression** | `comments.routes.test.js` (CX21-555: a read-only key refused, a write-scoped key served; a record the rule excludes hides its thread and refuses a new comment). Live on the fix: the `rfi:read` key is `403`. |
+
+## P21-186 · P1 · Inventory / receipts · **FIXED** (Codex CX21-556)
+
+| | |
+| --- | --- |
+| **Observed** | A direct receipt let the damaged quantity exceed the quantity delivered: receiving one and damaging a hundred wrote off ninety-nine that were already on the shelf. **Reproduced live**: receive 1, damage 5 on the shared item — accepted, four written off from stock on hand. |
+| **Root cause** | **CONFIRMED PRODUCT DEFECT** (the damage write-off was not bounded by the receipt). |
+| **Fix** | The damaged quantity is checked against the received quantity before anything moves; more damaged than received is refused (`400`), and nothing is posted. |
+| **Regression** | `inventory.service.test.js` (CX21-556: damaging more than received is refused and nothing moves; a damage within the receipt still works). Live on the fix: `400 INV_DAMAGE_EXCEEDS_RECEIPT`. |
+
+## P21-187 · P2 · Direct costs · **FIXED** (fourteenth pass, Medium — a regression of the P21-177 fix)
+
+My thirteenth-loop duplicate-invoice fix matched a vendor by name against
+every row: a row carrying a different company id but a stale name (left by a
+vendor edit) then blocked a legitimate invoice for the company that name
+belongs to. Fixed with the loop: a name is matched only against a text-only
+row (no company id), and a company id only against the same company id, so
+two distinct companies are never merged. Regression in
+`direct-cost.service.test.js`.
+
+## P21-188 · P2 · Document search · **FIXED** (fourteenth pass, Medium — a regression of the P21-179 fix)
+
+The visibility decision read every attachment link, but the serialised hit
+still returned the first ten unfiltered: an accessible document disclosed
+the ids and paths of inaccessible records, and an accessible link beyond the
+first ten was omitted. Fixed with the loop: the serialised records are the
+links the viewer may see, and the path is drawn from a visible one.
+Regression in `document-text.service.test.js` (the note on CX21-530).
+
 ## T-19 · the seeded subcontract fell past the commitments list's first page
 
 Gates run 12 (on `8a1d7dd`) skipped thirteen tests of the subcontract
