@@ -433,12 +433,30 @@ describe("Phase 21D — integrity (release challenge, twelfth pass)", () => {
     mockPrisma.$executeRaw = jest.fn(async () => 0);
     const spy = jest.spyOn(mockPrisma.directCost, "findFirst");
     await service.createDirectCost({ ...scope, actor, payload: { type: "invoice", vendorCompanyId: "co-1", invoiceNumber: "INV-DUP-1", description: "Cement", costDate: "2026-09-01", lines: [{ description: "x", costCodeId: "cc-conc", activityId: "act-1", amount: 10 }] } });
-    const lock = mockPrisma.$executeRaw.mock.calls.find(([strings, ...values]) => Array.isArray(strings) && strings.join("?").includes("pg_advisory_xact_lock") && values.includes("direct-cost-invoice:p1:co-1:inv-dup-1"));
+    const lock = mockPrisma.$executeRaw.mock.calls.find(([strings, ...values]) => Array.isArray(strings) && strings.join("?").includes("pg_advisory_xact_lock") && values.includes("direct-cost-invoice:p1:inv-dup-1"));
     expect(lock).toBeDefined();
     const checks = spy.mock.calls.filter(([args]) => args?.where?.invoiceNumber);
     expect(checks.length).toBeGreaterThanOrEqual(2); // before the lock, and again under it
     expect(mockPrisma.$executeRaw.mock.invocationCallOrder[0]).toBeLessThan(spy.mock.invocationCallOrder.at(-1));
-    spy.mockRestore();
+    spy.mockClear(); // not mockRestore: on a plain mock it drops the implementation for every test after (the thirteenth loop)
+    delete mockPrisma.$executeRaw;
+  });
+});
+
+describe("Phase 21D — integrity (release challenge, thirteenth pass)", () => {
+  it("CX21-546: a vendor named as text on one invoice and by its company on the next is one vendor — the second is a duplicate either way round, and the identity held is the project and the number", async () => {
+    mockPrisma.$executeRaw = jest.fn(async () => 0);
+    const byIdOnly = mockPrisma.company.findFirst.getMockImplementation();
+    mockPrisma.company.findFirst.mockImplementation(async ({ where }) => COMPANIES.find((company) => (where.id && company.id === where.id) || (where.name?.equals && company.name.toLowerCase() === String(where.name.equals).toLowerCase())) || null);
+    const lines = [{ description: "x", costCodeId: "cc-conc", activityId: "act-1", amount: 10 }];
+    await service.createDirectCost({ ...scope, actor, payload: { type: "invoice", vendorName: "gulf ready mix", invoiceNumber: "INV-546", description: "Cement", costDate: "2026-09-01", lines } });
+    await expect(service.createDirectCost({ ...scope, actor, payload: { type: "invoice", vendorCompanyId: "co-1", invoiceNumber: "INV-546", description: "Cement again", costDate: "2026-09-01", lines } })).rejects.toMatchObject({ code: "DIRECT_COST_DUPLICATE_INVOICE" });
+    await service.createDirectCost({ ...scope, actor, payload: { type: "invoice", vendorCompanyId: "co-1", invoiceNumber: "INV-547", description: "Rebar", costDate: "2026-09-01", lines } });
+    await expect(service.createDirectCost({ ...scope, actor, payload: { type: "invoice", vendorName: "Gulf Ready Mix", invoiceNumber: "INV-547", description: "Rebar again", costDate: "2026-09-01", lines } })).rejects.toMatchObject({ code: "DIRECT_COST_DUPLICATE_INVOICE" });
+    const locks = mockPrisma.$executeRaw.mock.calls.map(([, ...values]) => values.find((value) => String(value).startsWith("direct-cost-invoice:")));
+    expect(locks).toContain("direct-cost-invoice:p1:inv-546");
+    expect(locks.some((key) => String(key).includes(":co-1:"))).toBe(false);
+    mockPrisma.company.findFirst.mockImplementation(byIdOnly);
     delete mockPrisma.$executeRaw;
   });
 });

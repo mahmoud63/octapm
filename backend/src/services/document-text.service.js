@@ -444,7 +444,7 @@ const documentInclude = {
     },
   },
   attachments: {
-    take: 10,
+    // every link — the visibility rule reads them all; ten hid an accessible one (the thirteenth pass's note on CX21-530)
     select: { recordType: true, recordId: true, role: true },
   },
 };
@@ -457,48 +457,73 @@ const snippetText = (headline) => String(headline || "").replace(/\[\[|\]\]/g, "
  * attachment table). Unlinked uploads fall under document control.
  */
 /**
- * Records routed between parties (RFIs, submittals — owner, reviewer,
- * approver party): for a party-scoped viewer, an attachment to one of them
- * counts only when the record is routed to one of the viewer's parties. A
- * subcontractor with RFI read could reach, through the document, the text
- * of another subcontractor's RFI it could not open (Phase 21D, CX21-530).
+ * Records with a rule of their own beyond the module: routed between
+ * parties (RFIs, submittals — owner, reviewer, approver party), attributed
+ * to a company (timesheets, payment applications, commitments and their
+ * change orders, punch items, inspections), a person's own (tasks,
+ * lookaheads) or a conversation's members'. For a party-scoped viewer, an
+ * attachment to such a record counts only when the record's own rule admits
+ * the viewer — a subcontractor with RFI read reached, through the document,
+ * the text of another subcontractor's RFI (CX21-530), and with timesheet
+ * read the attachment of another company's timesheet (CX21-540). A
+ * conversation's attachments are its members' for everyone.
+ *
+ * Each rule mirrors the record's own service; a clause whose input the
+ * viewer lacks is left out, and a record with no clause left is not visible.
  */
-const PARTY_ROUTED_MODELS = Object.freeze({ rfi: "rfi", submittal: "submittal" });
+const some = (field, ids) => (Array.isArray(ids) && ids.length ? { [field]: { in: ids } } : null);
+const own = (field, userId) => (userId ? { [field]: userId } : null);
+const routed = ({ partyIds }) => [some("ownerPartyId", partyIds), some("reviewerPartyId", partyIds), some("approverPartyId", partyIds)];
+const RECORD_RULES = Object.freeze({
+  rfi: { model: "rfi", party: true, clauses: routed },
+  submittal: { model: "submittal", party: true, clauses: routed },
+  timesheet: { model: "timesheet", party: true, clauses: ({ companyIds, userId }) => [some("companyId", companyIds), own("createdBy", userId)] },
+  sub_pay_app: { model: "subPayApp", party: true, clauses: ({ companyIds, userId }) => [companyIds?.length ? { commitment: { vendorCompanyId: { in: companyIds } } } : null, own("createdBy", userId)] },
+  commitment: { model: "commitment", party: true, clauses: ({ companyIds, userId }) => [some("vendorCompanyId", companyIds), own("createdBy", userId)] },
+  commitment_change_order: { model: "commitmentChangeOrder", party: true, clauses: ({ companyIds, userId }) => [companyIds?.length ? { commitment: { vendorCompanyId: { in: companyIds } } } : null, own("createdBy", userId)] },
+  punch_item: { model: "punchItem", party: true, clauses: ({ companyIds, userId }) => [some("assigneeCompanyId", companyIds), own("createdBy", userId), own("assigneeUserId", userId)] },
+  form_instance: { model: "formInstance", party: true, clauses: ({ companyIds, userId }) => [some("assigneeCompanyId", companyIds), own("createdBy", userId), own("assigneeUserId", userId), own("inspectorUserId", userId), own("approverUserId", userId)] },
+  task: { model: "task", party: true, clauses: ({ userId }) => [own("assigneeId", userId), own("createdById", userId)] },
+  lookahead: { model: "lookahead", party: true, clauses: ({ userId }) => [{ status: { in: ["published", "archived"] } }, own("createdBy", userId)] },
+  conversation: { model: "conversation", party: false, clauses: ({ userId }) => [userId ? { members: { some: { userId, leftAt: null } } } : null] },
+});
 
-/** The party-routed records among these documents' attachments that the viewer's parties may see; null for a viewer that is not party-scoped. */
-const partyRoutedRecordIds = async ({ documents, viewer }) => {
-  if (!Array.isArray(viewer?.partyIds)) return null;
+/** Whether this viewer is judged by a record's own rule: a party-scoped viewer by all of them, anyone by the ones that bind everyone. */
+const ruleApplies = (rule, viewer) => Boolean(rule) && (Array.isArray(viewer?.partyIds) || !rule.party);
+
+/** The ruled records among these documents' attachments that the viewer may see; null when there is no viewer. */
+const recordRuleVisibleIds = async ({ documents, viewer }) => {
+  if (!viewer) return null;
   const wanted = {};
   for (const document of documents) {
     for (const attachment of document?.attachments || []) {
-      const model = PARTY_ROUTED_MODELS[attachment.recordType];
-      if (model) (wanted[model] ||= new Set()).add(attachment.recordId);
+      if (!ruleApplies(RECORD_RULES[attachment.recordType], viewer)) continue;
+      (wanted[attachment.recordType] ||= new Set()).add(attachment.recordId);
     }
   }
   const visible = new Set();
-  for (const [model, ids] of Object.entries(wanted)) {
-    if (!ids.size || !viewer.partyIds.length || !prisma[model]?.findMany) continue;
-    const rows = await prisma[model].findMany({
-      where: { id: { in: [...ids] }, OR: [{ ownerPartyId: { in: viewer.partyIds } }, { reviewerPartyId: { in: viewer.partyIds } }, { approverPartyId: { in: viewer.partyIds } }] },
-      select: { id: true },
-    });
-    for (const row of rows) visible.add(`${model}:${row.id}`);
+  for (const [recordType, ids] of Object.entries(wanted)) {
+    const rule = RECORD_RULES[recordType];
+    const clauses = rule.clauses(viewer).filter(Boolean);
+    if (!ids.size || !clauses.length || !prisma[rule.model]?.findMany) continue;
+    const rows = await prisma[rule.model].findMany({ where: { id: { in: [...ids] }, OR: clauses }, select: { id: true } });
+    for (const row of rows) visible.add(`${recordType}:${row.id}`);
   }
   return visible;
 };
 
-const documentVisible = (document, viewer, partyVisible = null) => {
+const documentVisible = (document, viewer, ruled = null) => {
   if (!viewer?.canRead) return true;
   const modules = new Set();
   if (document.documentRevisions?.length) modules.add("document_control");
-  let routedAway = 0;
+  let withheld = 0;
   for (const attachment of document.attachments || []) {
-    const model = PARTY_ROUTED_MODELS[attachment.recordType];
-    if (partyVisible && model && !partyVisible.has(`${model}:${attachment.recordId}`)) { routedAway += 1; continue; }
+    const rule = RECORD_RULES[attachment.recordType];
+    if (ruled && ruleApplies(rule, viewer) && !ruled.has(`${attachment.recordType}:${attachment.recordId}`)) { withheld += 1; continue; }
     modules.add(RECORD_TYPE_MODULES[attachment.recordType] || "document_control");
   }
   if (!modules.size) {
-    if (routedAway) return false; // linked only to records routed to other parties
+    if (withheld) return false; // linked only to records the viewer may not open
     modules.add("document_control");
   }
   return [...modules].some((moduleName) => viewer.canRead(moduleName));
@@ -507,7 +532,7 @@ const documentVisible = (document, viewer, partyVisible = null) => {
 const serializeHit = ({ document, rank = 0, headline = null, semanticScore = null, matchedChunk = null }) => {
   const projectId = document.projectId;
   const revision = document.documentRevisions?.[0] || null;
-  const records = (document.attachments || []).map((attachment) => ({
+  const records = (document.attachments || []).slice(0, 10).map((attachment) => ({
     recordType: attachment.recordType,
     recordId: attachment.recordId,
     role: attachment.role,
@@ -628,7 +653,7 @@ const searchDocuments = async ({
   const byId = new Map(documents.map((document) => [document.id, document]));
   const maxRank = Math.max(...rows.map((row) => Number(row.rank) || 0), 0.000001);
 
-  const partyVisible = await partyRoutedRecordIds({ documents, viewer }); // routed records, for a party-scoped viewer (CX21-530)
+  const partyVisible = await recordRuleVisibleIds({ documents, viewer }); // the records with a rule of their own, for this viewer (CX21-530, CX21-540)
   const items = ids
     .map((id) => byId.get(id))
     .filter((document) => document && documentVisible(document, viewer, partyVisible))
@@ -682,13 +707,13 @@ const searchDocumentContent = async ({ orgId, projectIds, q, limit = 10, viewerF
     include: documentInclude,
   });
   const byId = new Map(documents.map((document) => [document.id, document]));
-  // a party-scoped viewer's routed records, resolved per project (CX21-530)
+  // each project's ruled records for its viewer (CX21-530, CX21-540)
   const partyVisibleByProject = new Map();
   if (viewerFor) {
     for (const document of documents) {
       if (partyVisibleByProject.has(document.projectId)) continue;
       const viewer = viewerFor(document.projectId);
-      partyVisibleByProject.set(document.projectId, await partyRoutedRecordIds({ documents: documents.filter((row) => row.projectId === document.projectId), viewer }));
+      partyVisibleByProject.set(document.projectId, await recordRuleVisibleIds({ documents: documents.filter((row) => row.projectId === document.projectId), viewer }));
     }
   }
   return rows
@@ -707,7 +732,7 @@ const getDocumentText = async ({ orgId, projectId, documentId, viewer = null, ma
     include: { ...documentInclude, text: true },
   });
   if (!document) throw new HttpError(404, "DOCUMENT_NOT_FOUND", "Document not found");
-  const partyVisible = await partyRoutedRecordIds({ documents: [document], viewer });
+  const partyVisible = await recordRuleVisibleIds({ documents: [document], viewer });
   if (!documentVisible(document, viewer, partyVisible)) {
     throw new HttpError(403, "FORBIDDEN", "You do not have permission to view this document");
   }
@@ -722,7 +747,8 @@ module.exports = {
   EMBEDDING_STATUS,
   TEXT_STATUS,
   documentVisible,
-  partyRoutedRecordIds,
+  recordRuleVisibleIds,
+  RECORD_RULES,
   enqueueExtraction,
   getDocumentText,
   getIndexStatus,

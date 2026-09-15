@@ -1194,6 +1194,8 @@ const globalSearch = async ({
       return {
         canRead: (moduleName) => Boolean(access) && canReadModule(access, moduleName) && (!apiClient || require("./api-client.service").scopeAllows(apiClient, moduleName, "read")),
         partyIds: access && isPartyScopedAccess(access) ? partyIdsFor(access) : null, // routed records through the party only (CX21-530)
+        companyIds: access && isPartyScopedAccess(access) ? [...new Set((access.partyAccess || []).map((party) => party.companyId).filter(Boolean))] : null, // a company's own records (CX21-540)
+        userId, // a person's own records, a conversation's members (CX21-540)
       };
     };
     if (contentProjectIds.length) {

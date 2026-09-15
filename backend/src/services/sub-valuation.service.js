@@ -431,6 +431,12 @@ const updateSubValuation = async ({
     if (tx.$queryRaw) await tx.$queryRaw`SELECT id FROM "SubValuation" WHERE id = ${valuationId} FOR UPDATE`;
     const existing = await tx.subValuation.findFirst({ where: { id: valuationId, projectId } });
     if (!existing) throw new HttpError(404, 'SUB_VALUATION_NOT_FOUND', 'Sub valuation not found');
+    // The attribution is judged on the row as held too: a party's edit that
+    // began before a same-status re-attribution went through on the other
+    // company's row (CX21-542).
+    if (companyIds && !companyIds.includes(existing.companyId)) {
+      throw new HttpError(404, 'SUB_VALUATION_NOT_FOUND', 'Sub valuation not found');
+    }
     if (existing.status !== found.status) {
       const error = new HttpError(409, 'SUB_VALUATION_CHANGED', `${found.ref} is now ${existing.status}; reload it and decide again`);
       error.details = { ref: found.ref, status: existing.status };
@@ -657,8 +663,11 @@ const deleteSubValuation = async ({
     // Held and read again: a delete that passed its check on a copy removed
     // a valuation certified since (Phase 21D, CX21-521).
     if (tx.$queryRaw) await tx.$queryRaw`SELECT id FROM "SubValuation" WHERE id = ${valuationId} FOR UPDATE`;
-    const held = await tx.subValuation.findFirst({ where: { id: valuationId, projectId }, select: { status: true } });
+    const held = await tx.subValuation.findFirst({ where: { id: valuationId, projectId }, select: { status: true, companyId: true } });
     if (!held) throw new HttpError(404, 'SUB_VALUATION_NOT_FOUND', 'Sub valuation not found');
+    if (companyIds && !companyIds.includes(held.companyId)) {
+      throw new HttpError(404, 'SUB_VALUATION_NOT_FOUND', 'Sub valuation not found'); // re-attributed since the copy was read (CX21-542)
+    }
     if (held.status !== existing.status) {
       const error = new HttpError(409, 'SUB_VALUATION_CHANGED', `${existing.ref} is now ${held.status}; reload it and decide again`);
       error.details = { ref: existing.ref, status: held.status };
@@ -697,11 +706,15 @@ const deleteSubValuation = async ({
  * An unambiguous single match is offered as `suggested`; anything else is
  * listed as `candidates` for a person to choose from.
  */
-const attributionReport = async ({ orgId, projectId }) => {
+const attributionReport = async ({ orgId, projectId, projectAccess = null }) => {
   await ensureProject({ orgId, projectId });
+  // A party-scoped person's report is their own company's rows and
+  // candidates — the register is scoped that way, and this listed every
+  // company's valuations, statuses and amounts beside it (CX21-541).
+  const companyIds = partyCompanyIds(projectAccess);
 
   const rows = await prisma.subValuation.findMany({
-    where: { projectId },
+    where: { projectId, ...(companyIds ? { companyId: { in: companyIds } } : {}) },
     select: {
       id: true,
       ref: true,
@@ -715,7 +728,7 @@ const attributionReport = async ({ orgId, projectId }) => {
   });
 
   const companies = await prisma.company.findMany({
-    where: { orgId },
+    where: { orgId, ...(companyIds ? { id: { in: companyIds } } : {}) },
     select: { id: true, name: true, nameKey: true },
   });
   const byKey = new Map();

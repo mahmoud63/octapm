@@ -418,3 +418,37 @@ describe('Phase 21D — integrity (release challenge, twelfth pass)', () => {
     expect(data.status).toBe('certified');
   });
 });
+
+describe('Phase 21D — integrity (release challenge, thirteenth pass)', () => {
+  const party = { id: 'project-1', role: 'external_party', scope: 'party', assignmentRole: null, partyAccess: [{ projectPartyId: 'party-1', companyId: 'co-a', role: 'subcontractor' }] };
+  const member = { id: 'project-1', role: 'qs', scope: 'assignment', assignmentRole: 'qs', partyAccess: [] };
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockPrisma.project.findFirst.mockResolvedValue({ id: 'project-1', orgId: 'org-1', defaultRetentionRate: 5 });
+    mockPrisma.subValuation.update.mockResolvedValue(stored());
+    mockPrisma.subValuation.findMany.mockResolvedValue([]);
+    mockPrisma.company = { ...(mockPrisma.company || {}), findMany: jest.fn(async () => []) };
+  });
+
+  it("CX21-541: the attribution report is a party's own company's rows and candidates; a member's is the whole project", async () => {
+    await subValuationService.attributionReport({ orgId: 'org-1', projectId: 'project-1', projectAccess: party });
+    expect(mockPrisma.subValuation.findMany.mock.calls.at(-1)[0].where).toMatchObject({ projectId: 'project-1', companyId: { in: ['co-a'] } });
+    expect(mockPrisma.company.findMany.mock.calls.at(-1)[0].where).toMatchObject({ orgId: 'org-1', id: { in: ['co-a'] } });
+    await subValuationService.attributionReport({ orgId: 'org-1', projectId: 'project-1', projectAccess: member });
+    expect(mockPrisma.subValuation.findMany.mock.calls.at(-1)[0].where).toEqual({ projectId: 'project-1' });
+    expect(mockPrisma.company.findMany.mock.calls.at(-1)[0].where).toEqual({ orgId: 'org-1' });
+  });
+
+  it("CX21-542: the attribution is judged on the row as held — re-attributed to another company since the copy was read, a party's edit and delete are refused and nothing is written", async () => {
+    mockPrisma.subValuation.findFirst
+      .mockResolvedValueOnce(stored({ status: 'submitted', companyId: 'co-a' })) // the copy
+      .mockResolvedValueOnce(stored({ status: 'submitted', companyId: 'co-b' })); // the row as held
+    await expect(subValuationService.updateSubValuation({ orgId: 'org-1', projectId: 'project-1', valuationId: 'sv-1', userId: 'sub-1', payload: { workDone: 5 }, projectAccess: party })).rejects.toMatchObject({ status: 404 });
+    expect(mockPrisma.subValuation.update).not.toHaveBeenCalled();
+    mockPrisma.subValuation.findFirst
+      .mockResolvedValueOnce(stored({ status: 'submitted', companyId: 'co-a' }))
+      .mockResolvedValueOnce({ status: 'submitted', companyId: 'co-b' });
+    await expect(subValuationService.deleteSubValuation({ orgId: 'org-1', projectId: 'project-1', valuationId: 'sv-1', userId: 'sub-1', projectAccess: party })).rejects.toMatchObject({ status: 404 });
+    expect(mockPrisma.subValuation.delete).not.toHaveBeenCalled();
+  });
+});

@@ -250,12 +250,28 @@ const totalsOf = (lines, tax) => {
   return { subtotal, total: round2(subtotal + toNumber(tax)) };
 };
 
-const invoiceLockKey = ({ projectId, vendorCompanyId, vendorName, invoiceNumber }) =>
-  `direct-cost-invoice:${projectId}:${String(vendorCompanyId || vendorName || "").toLowerCase()}:${String(invoiceNumber || "").toLowerCase()}`;
+// The invoice identity held is the project and the number: a vendor is named
+// by its company or as text, and the two are one vendor (CX21-546), so the
+// lock does not split on how it was named.
+const invoiceLockKey = ({ projectId, invoiceNumber }) =>
+  `direct-cost-invoice:${projectId}:${String(invoiceNumber || "").toLowerCase()}`;
 
-const assertNoDuplicateInvoice = async ({ projectId, vendorCompanyId, vendorName, invoiceNumber, excludeId = null, tx = prisma }) => {
+const assertNoDuplicateInvoice = async ({ orgId = null, projectId, vendorCompanyId, vendorName, invoiceNumber, excludeId = null, tx = prisma }) => {
   if (!invoiceNumber) return;
-  const clash = await tx.directCost.findFirst({ where: { projectId, invoiceNumber: { equals: invoiceNumber, mode: "insensitive" }, status: { not: STATUS.VOID }, ...(excludeId ? { id: { not: excludeId } } : {}), ...(vendorCompanyId ? { vendorCompanyId } : vendorName ? { vendorName: { equals: vendorName, mode: "insensitive" } } : {}) }, select: { id: true, ref: true } });
+  // The same vendor named by its company on one invoice and as text on the
+  // other is one vendor: both spellings are looked for (CX21-546).
+  const vendor = [];
+  if (vendorCompanyId) {
+    vendor.push({ vendorCompanyId });
+    const company = tx.company?.findFirst ? await tx.company.findFirst({ where: { id: vendorCompanyId }, select: { name: true } }) : null;
+    if (company?.name) vendor.push({ vendorName: { equals: company.name, mode: "insensitive" } });
+  }
+  if (vendorName) {
+    vendor.push({ vendorName: { equals: vendorName, mode: "insensitive" } });
+    const named = tx.company?.findFirst ? await tx.company.findFirst({ where: { ...(orgId ? { orgId } : {}), name: { equals: vendorName, mode: "insensitive" } }, select: { id: true } }) : null;
+    if (named?.id && named.id !== vendorCompanyId) vendor.push({ vendorCompanyId: named.id });
+  }
+  const clash = await tx.directCost.findFirst({ where: { projectId, invoiceNumber: { equals: invoiceNumber, mode: "insensitive" }, status: { not: STATUS.VOID }, ...(excludeId ? { id: { not: excludeId } } : {}), ...(vendor.length ? { OR: vendor } : {}) }, select: { id: true, ref: true } });
   if (clash) throw new HttpError(409, "DIRECT_COST_DUPLICATE_INVOICE", `Invoice ${invoiceNumber} from this vendor is already recorded as ${clash.ref}`, { directCostId: clash.id, ref: clash.ref });
 };
 
@@ -305,7 +321,7 @@ const createDirectCost = async ({ orgId, projectId, payload = {}, actor = null }
   await ensureProject({ orgId, projectId });
   const header = await normalizeHeader({ orgId, projectId, payload });
   const lines = await normalizeLines({ projectId, rows: payload.lines, purchaseOrderId: header.purchaseOrderId });
-  await assertNoDuplicateInvoice({ projectId, vendorCompanyId: header.vendorCompanyId, vendorName: header.vendorName, invoiceNumber: header.invoiceNumber });
+  await assertNoDuplicateInvoice({ orgId, projectId, vendorCompanyId: header.vendorCompanyId, vendorName: header.vendorName, invoiceNumber: header.invoiceNumber });
   const totals = totalsOf(lines, header.tax);
   const created = await prisma.$transaction(async (tx) => {
     // The invoice identity (project, vendor, number) is held before the
@@ -314,7 +330,7 @@ const createDirectCost = async ({ orgId, projectId, payload = {}, actor = null }
     // approvable and payable twice (Phase 21D, CX21-534).
     if (header.invoiceNumber && tx.$executeRaw) {
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${invoiceLockKey({ projectId, vendorCompanyId: header.vendorCompanyId, vendorName: header.vendorName, invoiceNumber: header.invoiceNumber })}))`;
-      await assertNoDuplicateInvoice({ projectId, vendorCompanyId: header.vendorCompanyId, vendorName: header.vendorName, invoiceNumber: header.invoiceNumber, tx });
+      await assertNoDuplicateInvoice({ orgId, projectId, vendorCompanyId: header.vendorCompanyId, vendorName: header.vendorName, invoiceNumber: header.invoiceNumber, tx });
     }
     const number = await nextNumber(tx, projectId);
     const row = await tx.directCost.create({ data: { ...header, ...totals, orgId, projectId, number, ref: `DC-${String(number).padStart(3, "0")}`, status: STATUS.DRAFT, createdBy: actor?.id || null, updatedBy: actor?.id || null } });
@@ -353,7 +369,7 @@ const updateDirectCost = async ({ orgId, projectId, directCostId, payload = {}, 
       }
     }
     if (header.invoiceNumber && tx.$executeRaw) await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${invoiceLockKey({ projectId, vendorCompanyId: header.vendorCompanyId, vendorName: header.vendorName, invoiceNumber: header.invoiceNumber })}))`; // the invoice identity, as on creation (CX21-534)
-    await assertNoDuplicateInvoice({ projectId, vendorCompanyId: header.vendorCompanyId, vendorName: header.vendorName, invoiceNumber: header.invoiceNumber, excludeId: directCostId, tx });
+    await assertNoDuplicateInvoice({ orgId, projectId, vendorCompanyId: header.vendorCompanyId, vendorName: header.vendorName, invoiceNumber: header.invoiceNumber, excludeId: directCostId, tx });
     const totals = totalsOf(lines, header.tax);
     await tx.directCost.update({ where: { id: directCostId }, data: { ...header, ...totals, updatedBy: actor?.id || null } });
     if (payload.lines !== undefined) {

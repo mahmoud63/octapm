@@ -16,14 +16,20 @@ const documentTextService = require("../services/document-text.service");
 const router = express.Router({ mergeParams: true });
 router.use(authenticate);
 
-const viewerFor = (req) => ({
-  id: req.user.id,
-  canRead: (moduleName) => hasPermission(req, moduleName, "read"),
-  // a party-scoped person sees party-routed records through their parties only (CX21-530)
-  partyIds: require("../services/company-party.service").isPartyScopedAccess(req.projectAccess || {})
-    ? (req.projectAccess?.partyAccess || []).map((party) => party.projectPartyId).filter(Boolean)
-    : null,
-});
+const viewerFor = (req) => {
+  // a party-scoped person reaches a record with a rule of its own — routed
+  // to a party, attributed to a company, a person's own — through that rule
+  // (CX21-530, CX21-540); a member of the project through the modules alone
+  const partyScoped = require("../services/company-party.service").isPartyScopedAccess(req.projectAccess || {});
+  const parties = req.projectAccess?.partyAccess || [];
+  return {
+    id: req.user.id,
+    userId: req.user.id,
+    canRead: (moduleName) => hasPermission(req, moduleName, "read"),
+    partyIds: partyScoped ? parties.map((party) => party.projectPartyId).filter(Boolean) : null,
+    companyIds: partyScoped ? [...new Set(parties.map((party) => party.companyId).filter(Boolean))] : null,
+  };
+};
 
 router.get(
   "/search",

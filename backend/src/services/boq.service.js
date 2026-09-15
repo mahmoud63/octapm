@@ -678,6 +678,7 @@ async function createOfficialBoqActivityAllocation(
         budget: amount,
         predecessors: predecessorText,
         batchId: payload.batchId || null,
+        mintedByBoqItemId: boqItem.id, // the row that minted it — what a later delete may retire (CX21-544)
         sortOrder: activitySortOrder,
       },
     });
@@ -1668,6 +1669,31 @@ async function createManualBoqItem(projectId, data, options = {}) {
 }
 
 // ── Delete BOQ Item ───────────────────────────────────────────────────────────
+/**
+ * Whether removing a BOQ row's allocation retires the activity it points at:
+ * only an activity the row itself minted (marked with the row when the row
+ * created it) that carries no ledger entry, no stock movement, no cost record
+ * and no live allocation on another row. Anything else — an activity the row
+ * was merely allocated to, or one minted before the mark existed — keeps its
+ * schedule and its history; only the allocation goes (Phase 21D, P21-169,
+ * CX21-544).
+ */
+async function retiresWithRow(tx, { projectId, activityId, boqItemId }) {
+  if (!tx.activity?.findFirst) return false;
+  const activity = await tx.activity.findFirst({
+    where: { id: activityId, projectId, mintedByBoqItemId: boqItemId },
+    select: { id: true },
+  });
+  if (!activity) return false;
+  const footprint = await Promise.all([
+    tx.costLedgerEntry?.count ? tx.costLedgerEntry.count({ where: { activityId } }) : 0,
+    tx.stockTransaction?.count ? tx.stockTransaction.count({ where: { activityId } }) : 0,
+    tx.costRecord?.count ? tx.costRecord.count({ where: { activityId } }) : 0,
+    tx.activityBoqAllocation?.count ? tx.activityBoqAllocation.count({ where: { activityId, isActive: true, boqItemId: { not: boqItemId } } }) : 0,
+  ]);
+  return footprint.every((count) => !count);
+}
+
 async function deleteBoqItem(projectId, itemId, options = {}) {
   await assertProjectAccess(projectId, options.orgId);
   await assertBoqEditable(projectId);
@@ -1719,26 +1745,14 @@ async function deleteBoqItem(projectId, itemId, options = {}) {
           updatedBy: options.userId || null,
         },
       });
-      // Only an activity the row itself minted — created with the row and
-      // carrying nothing else — retires with it. An activity the row was
-      // merely allocated to keeps its schedule and its cost history: this
-      // delete retired a live activity with stock issued against it
-      // (Phase 21D, P21-169, found by the twenty-third loop's own probe).
-      const candidates = tx.activity.findMany
-        ? await tx.activity.findMany({
-            where: { id: { in: allocations.map((allocation) => allocation.activityId) }, projectId, createdAt: { gte: item.createdAt } },
-            select: { id: true },
-          })
-        : [];
+      // Only an activity the row itself minted, marked as such, and that
+      // carries nothing else retires with it; anything else keeps its
+      // schedule and its history — a delete retired a live activity with
+      // stock issued against it (P21-169), and creation time was then taken
+      // for origin (CX21-544).
       const minted = [];
-      for (const candidate of candidates) {
-        const footprint = await Promise.all([
-          tx.costLedgerEntry?.count ? tx.costLedgerEntry.count({ where: { activityId: candidate.id } }) : 0,
-          tx.stockTransaction?.count ? tx.stockTransaction.count({ where: { activityId: candidate.id } }) : 0,
-          tx.costRecord?.count ? tx.costRecord.count({ where: { activityId: candidate.id } }) : 0,
-          tx.activityBoqAllocation?.count ? tx.activityBoqAllocation.count({ where: { activityId: candidate.id, isActive: true, boqItemId: { not: itemId } } }) : 0,
-        ]);
-        if (footprint.every((count) => !count)) minted.push(candidate.id);
+      for (const allocation of allocations) {
+        if (await retiresWithRow(tx, { projectId, activityId: allocation.activityId, boqItemId: itemId })) minted.push(allocation.activityId);
       }
       if (minted.length) {
         await tx.activity.updateMany({
@@ -2015,6 +2029,7 @@ async function deleteActivity(projectId, activityId, options = {}) {
     );
   }
 
+  let activityRetired = false;
   await prisma.$transaction(async (tx) => {
     await tx.activityBoqAllocation.update({
       where: { id: allocation.id },
@@ -2028,18 +2043,25 @@ async function deleteActivity(projectId, activityId, options = {}) {
         updatedBy: options.userId || null,
       },
     });
-    await tx.activity.update({
-      where: { id: activityId },
-      data: {
-        isActive: false,
-        retiredAt: new Date(),
-        retiredBy: options.userId || null,
-        retiredReason: 'BOQ helper activity deleted before allocation approval',
-      },
-    });
+    // The activity itself goes only if the row minted it and nothing else
+    // touched it; a live activity the link merely pointed at keeps its
+    // schedule and its history — this path retired one with stock issued
+    // against it (CX21-544).
+    activityRetired = await retiresWithRow(tx, { projectId, activityId, boqItemId: allocation.boqItemId });
+    if (activityRetired) {
+      await tx.activity.update({
+        where: { id: activityId },
+        data: {
+          isActive: false,
+          retiredAt: new Date(),
+          retiredBy: options.userId || null,
+          retiredReason: 'BOQ helper activity deleted before allocation approval',
+        },
+      });
+    }
   });
 
-  return null;
+  return { allocationRejected: true, activityRetired };
 }
 
 /**

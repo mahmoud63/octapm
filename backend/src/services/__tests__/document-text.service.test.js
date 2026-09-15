@@ -322,16 +322,17 @@ describe("Phase 21D — integrity (release challenge, twelfth pass)", () => {
     const doc = { id: "doc-rfi", projectId: "project-1", orgId: "org-1", originalName: "x.pdf", fileName: "x.pdf", mimeType: "application/pdf", uploadedAt: new Date(), text: null, documentRevisions: [], attachments: [{ recordType: "rfi", recordId: "rfi-b", role: "attachment" }] };
     const partyViewer = { canRead: () => true, partyIds: ["party-a"] };
     mockPrisma.rfi = { findMany: jest.fn(async () => []) }; // routed to another party
-    let partyVisible = await service.partyRoutedRecordIds({ documents: [doc], viewer: partyViewer });
+    let partyVisible = await service.recordRuleVisibleIds({ documents: [doc], viewer: partyViewer });
     expect(service.documentVisible(doc, partyViewer, partyVisible)).toBe(false);
     expect(mockPrisma.rfi.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({ id: { in: ["rfi-b"] }, OR: expect.any(Array) }) }));
     mockPrisma.rfi.findMany.mockResolvedValue([{ id: "rfi-b" }]); // routed to this party
-    partyVisible = await service.partyRoutedRecordIds({ documents: [doc], viewer: partyViewer });
+    partyVisible = await service.recordRuleVisibleIds({ documents: [doc], viewer: partyViewer });
     expect(service.documentVisible(doc, partyViewer, partyVisible)).toBe(true);
-    // a viewer that is not party-scoped is judged by modules alone, as before
+    // a viewer that is not party-scoped is judged by modules alone for a routed record, as before
     const staff = { canRead: () => true };
-    expect(await service.partyRoutedRecordIds({ documents: [doc], viewer: staff })).toBeNull();
-    expect(service.documentVisible(doc, staff, null)).toBe(true);
+    const staffRuled = await service.recordRuleVisibleIds({ documents: [doc], viewer: staff });
+    expect(staffRuled.size).toBe(0);
+    expect(service.documentVisible(doc, staff, staffRuled)).toBe(true);
     // the content search and the text endpoint take the same answer
     mockPrisma.rfi.findMany.mockResolvedValue([]);
     mockPrisma.$queryRaw.mockResolvedValue([{ documentId: "doc-rfi", projectId: "project-1", rank: 1, headline: "x" }]);
@@ -340,5 +341,55 @@ describe("Phase 21D — integrity (release challenge, twelfth pass)", () => {
     expect(await service.searchDocumentContent({ orgId: "org-1", projectIds: ["project-1"], q: "x", viewerFor: () => staff })).toHaveLength(1);
     mockPrisma.projectDocument.findFirst.mockResolvedValue({ ...doc, text: null });
     await expect(service.getDocumentText({ orgId: "org-1", projectId: "project-1", documentId: "doc-rfi", viewer: partyViewer })).rejects.toMatchObject({ status: 403 });
+  });
+});
+
+describe("Phase 21D — integrity (release challenge, thirteenth pass)", () => {
+  afterEach(() => { delete mockPrisma.timesheet; delete mockPrisma.task; delete mockPrisma.conversation; delete mockPrisma.rfi; });
+  const link = (recordType, recordId) => ({ recordType, recordId, role: "attachment" });
+  const docWith = (attachments, id = "doc-x") => ({ id, projectId: "project-1", orgId: "org-1", originalName: "x.pdf", fileName: "x.pdf", mimeType: "application/pdf", uploadedAt: new Date(), text: null, documentRevisions: [], attachments });
+
+  it("CX21-540: a party-scoped viewer reaches a document through a company-attributed or personal record only under that record's own rule — another company's timesheet and someone else's task are withheld; a conversation's attachments are its members' for everyone", async () => {
+    const party = { canRead: () => true, partyIds: ["party-a"], companyIds: ["co-a"], userId: "sub-1" };
+    mockPrisma.timesheet = { findMany: jest.fn(async () => []) };
+    const ts = docWith([link("timesheet", "ts-b")]);
+    let ruled = await service.recordRuleVisibleIds({ documents: [ts], viewer: party });
+    expect(service.documentVisible(ts, party, ruled)).toBe(false);
+    expect(mockPrisma.timesheet.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({ id: { in: ["ts-b"] }, OR: expect.arrayContaining([{ companyId: { in: ["co-a"] } }, { createdBy: "sub-1" }]) }) }));
+    mockPrisma.timesheet.findMany.mockResolvedValue([{ id: "ts-b" }]);
+    ruled = await service.recordRuleVisibleIds({ documents: [ts], viewer: party });
+    expect(service.documentVisible(ts, party, ruled)).toBe(true);
+    // someone else's task
+    mockPrisma.task = { findMany: jest.fn(async () => []) };
+    const task = docWith([link("task", "task-9")]);
+    expect(service.documentVisible(task, party, await service.recordRuleVisibleIds({ documents: [task], viewer: party }))).toBe(false);
+    expect(mockPrisma.task.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({ OR: [{ assigneeId: "sub-1" }, { createdById: "sub-1" }] }) }));
+    // a member of the project is judged by modules for those
+    const staff = { canRead: () => true, userId: "pm-1" };
+    expect(service.documentVisible(ts, staff, await service.recordRuleVisibleIds({ documents: [ts], viewer: staff }))).toBe(true);
+    // a conversation's attachments are its members' — for the member too
+    mockPrisma.conversation = { findMany: jest.fn(async () => []) };
+    const chat = docWith([link("conversation", "conv-1")]);
+    expect(service.documentVisible(chat, staff, await service.recordRuleVisibleIds({ documents: [chat], viewer: staff }))).toBe(false);
+    expect(mockPrisma.conversation.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({ id: { in: ["conv-1"] }, OR: [{ members: { some: { userId: "pm-1", leftAt: null } } }] }) }));
+    mockPrisma.conversation.findMany.mockResolvedValue([{ id: "conv-1" }]);
+    expect(service.documentVisible(chat, staff, await service.recordRuleVisibleIds({ documents: [chat], viewer: staff }))).toBe(true);
+    // the text endpoint agrees
+    mockPrisma.timesheet.findMany.mockResolvedValue([]);
+    mockPrisma.projectDocument.findFirst.mockResolvedValue({ ...ts, text: null });
+    await expect(service.getDocumentText({ orgId: "org-1", projectId: "project-1", documentId: ts.id, viewer: party })).rejects.toMatchObject({ status: 403 });
+  });
+
+  it("the note on CX21-530: every link is read — an accessible RFI link after ten routed elsewhere is not lost, and the search loads them all", async () => {
+    const party = { canRead: () => true, partyIds: ["party-a"], companyIds: [], userId: "sub-1" };
+    const links = [...Array.from({ length: 10 }, (_, i) => link("rfi", `rfi-away-${i}`)), link("rfi", "rfi-mine")];
+    mockPrisma.rfi = { findMany: jest.fn(async ({ where }) => (where.id.in.includes("rfi-mine") ? [{ id: "rfi-mine" }] : [])) };
+    const doc = docWith(links, "doc-eleven");
+    expect(service.documentVisible(doc, party, await service.recordRuleVisibleIds({ documents: [doc], viewer: party }))).toBe(true);
+    mockPrisma.$queryRaw.mockResolvedValue([{ documentId: "doc-eleven", projectId: "project-1", rank: 1, headline: "x" }]);
+    mockPrisma.projectDocument.findMany.mockResolvedValue([doc]);
+    const hits = await service.searchDocumentContent({ orgId: "org-1", projectIds: ["project-1"], q: "x", viewerFor: () => party });
+    expect(hits).toHaveLength(1);
+    expect(mockPrisma.projectDocument.findMany.mock.calls.at(-1)[0].include.attachments.take).toBeUndefined();
   });
 });

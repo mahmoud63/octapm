@@ -678,13 +678,17 @@ const postMovement = async (tx, { orgId, item, warehouseId, locationId = null, t
     const code = await tx.costCode.findFirst({ where: { id: context.costCodeId, orgId }, select: { id: true } });
     if (!code) throw new HttpError(404, "COST_CODE_NOT_FOUND", "That cost code is not this organisation's");
   }
+  // On a movement with a project the BOQ row or commitment is that
+  // project's; on one without — a receipt into a company store carrying the
+  // buyer's coding — it is this organisation's (the stricter rule refused the
+  // receipt itself, CX21-545).
   if (context.boqItemId && tx.boqItem?.findFirst) {
-    const item = projectId ? await tx.boqItem.findFirst({ where: { id: context.boqItemId, projectId }, select: { id: true } }) : null;
-    if (!item) throw new HttpError(404, "BOQ_ITEM_NOT_FOUND", "That BOQ item is not on this project");
+    const boqRow = await tx.boqItem.findFirst({ where: { id: context.boqItemId, ...(projectId ? { projectId } : { project: { orgId } }) }, select: { id: true } });
+    if (!boqRow) throw new HttpError(404, "BOQ_ITEM_NOT_FOUND", projectId ? "That BOQ item is not on this project" : "That BOQ item is not this organisation's");
   }
   if (context.commitmentId && tx.commitment?.findFirst) {
-    const commitment = projectId ? await tx.commitment.findFirst({ where: { id: context.commitmentId, projectId }, select: { id: true } }) : null;
-    if (!commitment) throw new HttpError(404, "COMMITMENT_NOT_FOUND", "That commitment is not on this project");
+    const commitment = await tx.commitment.findFirst({ where: { id: context.commitmentId, ...(projectId ? { projectId } : { orgId }) }, select: { id: true } });
+    if (!commitment) throw new HttpError(404, "COMMITMENT_NOT_FOUND", projectId ? "That commitment is not on this project" : "That commitment is not this organisation's");
   }
 
   const movement = await tx.stockTransaction.create({
@@ -999,7 +1003,9 @@ const issueStock = async ({ orgId, user, payload }) => {
       locationId: payload.locationId ?? null,
       allowedProjectIds: payload.allowedProjectIds ?? null,
     });
-    const context = { ...payload, ...(await inheritedCoding(tx, { item, payload })) };
+    // The project the issue lands on decides which inherited coding fits it (CX21-545).
+    const projectId = (await projectOfActivity({ tx, orgId, activityId: payload.activityId ?? null })) ?? payload.projectId ?? null;
+    const context = { ...payload, ...(await inheritedCoding(tx, { orgId, item, payload, projectId })) };
     const posted = await drawFromWarehouse(tx, {
       orgId,
       item,
@@ -1037,7 +1043,7 @@ const issueStock = async ({ orgId, user, payload }) => {
  * of the same item, which carries the buyer's coding. Anything stated
  * explicitly always wins — inheritance fills silence, it never overrides.
  */
-const inheritedCoding = async (tx, { item, payload }) => {
+const inheritedCoding = async (tx, { orgId, item, payload, projectId = null }) => {
   if (payload.costCodeId && payload.boqItemId) return {};
   const lastReceipt = await tx.stockTransaction.findFirst({
     where: {
@@ -1049,10 +1055,22 @@ const inheritedCoding = async (tx, { item, payload }) => {
     select: { costCodeId: true, boqItemId: true },
   });
   if (!lastReceipt) return {};
-  return {
-    ...(payload.costCodeId ? {} : { costCodeId: lastReceipt.costCodeId ?? null }),
-    ...(payload.boqItemId ? {} : { boqItemId: lastReceipt.boqItemId ?? null }),
-  };
+  // Inheritance fills silence with coding that fits the issue: the buyer's
+  // BOQ row only when it is the project's this issue lands on, a cost code
+  // only when it is this organisation's — anything else is left off, not
+  // carried into a refusal. A shared item received against one project's
+  // row could not be issued to another's, nor against a company cost code
+  // at all (CX21-545).
+  const inherited = {};
+  if (!payload.costCodeId && lastReceipt.costCodeId) {
+    const fits = !tx.costCode?.findFirst || Boolean(await tx.costCode.findFirst({ where: { id: lastReceipt.costCodeId, orgId }, select: { id: true } }));
+    if (fits) inherited.costCodeId = lastReceipt.costCodeId;
+  }
+  if (!payload.boqItemId && lastReceipt.boqItemId && projectId) {
+    const fits = !tx.boqItem?.findFirst || Boolean(await tx.boqItem.findFirst({ where: { id: lastReceipt.boqItemId, projectId }, select: { id: true } }));
+    if (fits) inherited.boqItemId = lastReceipt.boqItemId;
+  }
+  return inherited;
 };
 
 /**
@@ -1480,6 +1498,33 @@ const receiveTransfer = async ({ orgId, user, transferId, payload = {}, allowedP
           quantity: damagedQty,
           user,
           context: { transferId: transfer.id, reference: transfer.ref, notes: "Damaged in transit" },
+        });
+      }
+      // What was sent and neither arrived nor was reported damaged is not
+      // quietly dropped: the shortfall lands and is written off at the
+      // destination as a movement of its own, the way damage is, so the value
+      // that left the source is accounted for and the loss is on the record
+      // — the whole dispatch was cleared from transit and the difference
+      // vanished (CX21-547). Found later, an adjustment brings it back.
+      const shortQty = round(line.quantity - receivedQty - damagedQty);
+      if (shortQty > 0) {
+        await postMovement(tx, {
+          orgId,
+          item,
+          warehouseId: transfer.toWarehouseId,
+          type: "transfer_in",
+          quantity: shortQty,
+          user,
+          context: { transferId: transfer.id, reference: transfer.ref },
+        });
+        await postMovement(tx, {
+          orgId,
+          item,
+          warehouseId: transfer.toWarehouseId,
+          type: "adjust",
+          quantity: -shortQty,
+          user,
+          context: { transferId: transfer.id, reference: transfer.ref, notes: `Short on receipt of ${transfer.ref}: ${line.quantity} sent, ${receivedQty} received, ${damagedQty} damaged` },
         });
       }
 

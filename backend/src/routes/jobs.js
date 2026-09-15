@@ -11,9 +11,9 @@ const jobService = require("../jobs/job.service");
 /**
  * Project background jobs (durable queue).
  *
- * Reading job state needs only project access (the mounting router already
- * enforces it). Retry/cancel require the update permission of the module the
- * job belongs to, so a QS can retry a BOQ job but not a schedule job.
+ * A job is read under the read permission of the module it belongs to and
+ * retried or cancelled under its update permission, so a QS can retry a BOQ
+ * job but not a schedule job (Phase 21D, CX21-533, CX21-543).
  */
 
 const router = express.Router({ mergeParams: true });
@@ -30,7 +30,9 @@ const JOB_MODULE_BY_TYPE = Object.freeze({
   [jobService.JOB_TYPES.ACCOUNTING_SYNC]: "sub_pay_app",
   [jobService.JOB_TYPES.ACCOUNTING_POLL]: "sub_pay_app",
   [jobService.JOB_TYPES.PHOTO_THUMBNAIL]: "document_control",
+  [jobService.JOB_TYPES.PHOTO_ANALYZE]: "document_control",
   [jobService.JOB_TYPES.DRAWING_SET_PROCESS]: "document_control",
+  [jobService.JOB_TYPES.BIM_PARSE]: "bim",
   [jobService.JOB_TYPES.DAILY_LOG_WEATHER]: "progress",
   [jobService.JOB_TYPES.DAILY_LOG_DISTRIBUTE]: "progress",
   [jobService.JOB_TYPES.PORTFOLIO_REFRESH]: "portfolio",
@@ -39,14 +41,21 @@ const JOB_MODULE_BY_TYPE = Object.freeze({
 // A job is read under the read permission of the module it belongs to — a
 // key with only a BOQ scope listed every module's jobs with their payloads
 // and results (Phase 21D, CX21-533).
-const canReadJob = (req, job) => hasPermission(req, JOB_MODULE_BY_TYPE[job.type] || "schedule", "read");
+// Every job type names its module; a job whose type names none is nobody's
+// to read or manage — the fallback to "schedule" let a schedule key read
+// photo-analysis and BIM jobs and denied them to their own readers (CX21-543).
+const moduleOfJob = (job) => JOB_MODULE_BY_TYPE[job?.type] || null;
+const canReadJob = (req, job) => {
+  const moduleName = moduleOfJob(job);
+  return Boolean(moduleName) && hasPermission(req, moduleName, "read");
+};
 
 const assertCanManageJob = (req, job) => {
-  const moduleName = JOB_MODULE_BY_TYPE[job.type] || "schedule";
+  const moduleName = moduleOfJob(job);
   // The same decision every write goes through — role, project template,
   // and an API key's scopes; a static role check let a read-only key cancel
   // a job (Phase 21D, CX21-444).
-  const allowed = hasPermission(req, moduleName, "update");
+  const allowed = Boolean(moduleName) && hasPermission(req, moduleName, "update");
   if (!allowed) {
     const error = new HttpError(
       403,

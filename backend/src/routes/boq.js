@@ -389,7 +389,7 @@ router.delete(
   authenticate,
   requirePermission('boq', 'delete'),
   asyncHandler(async (req, res) => {
-    await boqService.deleteActivity(
+    const result = await boqService.deleteActivity(
       req.params.projectId,
       req.params.activityId,
       {
@@ -399,7 +399,7 @@ router.delete(
         allocationId: req.body?.allocationId || req.query?.allocationId || null,
       },
     );
-    return sendSuccess(res, null);
+    return sendSuccess(res, result ?? null);
   }),
 );
 

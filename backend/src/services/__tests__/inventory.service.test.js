@@ -1089,3 +1089,60 @@ describe("Phase 21D — integrity (release challenge, twelfth pass)", () => {
     expect(mockPrisma.boqItem.findFirst).toHaveBeenLastCalledWith(expect.objectContaining({ where: { id: "boq-1", projectId: "project-1" } }));
   });
 });
+
+describe("Phase 21D — integrity (release challenge, thirteenth pass)", () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockPrisma.$queryRaw.mockImplementation(async () => []);
+    store.items.clear(); store.warehouses.clear(); store.locations.clear();
+    store.balances.length = 0; store.transactions.length = 0; store.ledger.length = 0; store.costRecords.length = 0;
+    nextId = 1;
+  });
+  afterEach(() => { delete mockPrisma.boqItem; delete mockPrisma.costCode; delete mockPrisma.stockTransfer; delete mockPrisma.stockTransferLine; });
+
+  it("CX21-545: coding inherited from the last receipt fits the issue or is not carried — another project's BOQ row is left off, not refused; a receipt into a company store keeps the buyer's row; the project's own issue carries it", async () => {
+    const item = seedItem();
+    const central = seedWarehouse({ projectId: null });
+    // boq-a is project-1's; the receipt into the company store names it with no project of its own
+    mockPrisma.boqItem = { findFirst: jest.fn(async ({ where }) => (where.id === "boq-a" && (where.projectId === "project-1" || where.project?.orgId === ORG) ? { id: "boq-a" } : null)) };
+    await service.receiveStock({ orgId: ORG, user: USER, payload: { itemId: item.id, warehouseId: central.id, quantity: 10, unitCost: 10, boqItemId: "boq-a" } });
+    expect(store.transactions.at(-1).boqItemId).toBe("boq-a");
+    // issued to project-2's activity: the row does not fit and is left off; the issue goes through
+    const activities = mockPrisma.activity.findFirst.getMockImplementation();
+    mockPrisma.activity.findFirst.mockImplementation(async (args) => (args.where.id === "activity-2" ? { projectId: "project-2" } : activities(args)));
+    try {
+      const { movements } = await service.issueStock({ orgId: ORG, user: USER, payload: { itemId: item.id, warehouseId: central.id, quantity: 1, activityId: "activity-2" } });
+      expect(movements[0].projectId).toBe("project-2");
+      expect(movements[0].boqItemId ?? null).toBeNull();
+      // and against a company cost code with no project at all
+      mockPrisma.costCode = { findFirst: jest.fn(async ({ where }) => (where.id === "cc-1" && where.orgId === ORG ? { id: "cc-1" } : null)) };
+      const bare = await service.issueStock({ orgId: ORG, user: USER, payload: { itemId: item.id, warehouseId: central.id, quantity: 1, costCodeId: "cc-1" } });
+      expect(bare.movements[0].boqItemId ?? null).toBeNull();
+      expect(bare.movements[0].costCodeId).toBe("cc-1");
+      // issued to project-1's own activity, the row travels with the material
+      const own = await service.issueStock({ orgId: ORG, user: USER, payload: { itemId: item.id, warehouseId: central.id, quantity: 1, activityId: "activity-1" } });
+      expect(own.movements[0].boqItemId).toBe("boq-a");
+    } finally {
+      mockPrisma.activity.findFirst.mockImplementation(activities);
+    }
+  });
+
+  it("CX21-547: a short transfer receipt accounts for the shortfall — it lands and is written off at the destination as a movement of its own, and the whole dispatch is off the books only through movements", async () => {
+    const item = seedItem({ averageCost: 10 });
+    const from = seedWarehouse({ code: "A" });
+    const to = seedWarehouse({ code: "B" });
+    store.balances.push({ id: "bal-from", orgId: ORG, itemId: item.id, warehouseId: from.id, locationId: null, onHand: 0, reserved: 0, inTransit: 100, damaged: 0, quarantined: 0 });
+    const transfer = { id: "trf-9", orgId: ORG, ref: "TRF-009", fromWarehouseId: from.id, toWarehouseId: to.id, status: "in_transit", lines: [{ id: "line-1", itemId: item.id, quantity: 100, receivedQty: null, damagedQty: null, item: { id: item.id, sku: item.sku, name: item.name, unit: item.unit } }] };
+    mockPrisma.stockTransfer = { findFirst: jest.fn(async () => transfer), update: jest.fn(async ({ data }) => ({ ...transfer, ...data, fromWarehouse: from, toWarehouse: to })) };
+    mockPrisma.stockTransferLine = { update: jest.fn(async ({ data }) => ({ ...transfer.lines[0], ...data })) };
+    await service.receiveTransfer({ orgId: ORG, user: USER, transferId: "trf-9", payload: { lines: [{ id: "line-1", receivedQty: 80, damagedQty: 0 }] } });
+    expect(balanceOf(item.id, to.id).onHand).toBe(80);
+    expect(balanceOf(item.id, from.id).inTransit).toBe(0);
+    const short = store.transactions.filter((row) => row.transferId === "trf-9" && row.type === "adjust");
+    expect(short).toHaveLength(1);
+    expect(short[0].quantity).toBe(-20);
+    expect(short[0].notes).toMatch(/Short on receipt of TRF-009: 100 sent, 80 received, 0 damaged/);
+    const landed = store.transactions.filter((row) => row.transferId === "trf-9" && row.type === "transfer_in").reduce((sum, row) => sum + row.quantity, 0);
+    expect(landed).toBe(100);
+  });
+});

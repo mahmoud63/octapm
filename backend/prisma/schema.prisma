@@ -1475,6 +1475,7 @@ model Activity {
   isCritical        Boolean   @default(false)
   predecessors      String? // comma-separated: "ACT-01 FS, ACT-02 SS+2"
   batchId           String? // for chunked generation: B1, B2, etc.
+  mintedByBoqItemId String? // the BOQ row that created this activity, if one did (Phase 21D, CX21-544)
   isActive          Boolean   @default(true)
   retiredAt         DateTime?
   retiredBy         String?
@@ -1549,6 +1550,7 @@ model Activity {
   @@index([projectId, isActive])
   @@index([projectId, isActive, sortOrder])
   @@index([projectId, isActive, category])
+  @@index([projectId, mintedByBoqItemId])
   @@index([projectId, isCritical])
   @@index([projectId, activityCode])
   @@index([projectId, p6ActivityId])

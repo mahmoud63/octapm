@@ -44,6 +44,7 @@ router.get(
       await attributionReport({
         orgId: req.user.orgId,
         projectId: req.params.projectId,
+        projectAccess: req.projectAccess || null,
       }),
     ),
   ),

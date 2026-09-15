@@ -22,6 +22,8 @@ const mockJobService = {
     DOCUMENT_EXTRACT: "document.extract",
     REPORT_RENDER: "report.render",
     NOTIFICATION_DELIVER: "notification.deliver",
+    PHOTO_ANALYZE: "photo.analyze",
+    BIM_PARSE: "bim.parse",
   },
   JOB_STATUSES: {
     QUEUED: "queued",
@@ -166,5 +168,27 @@ describe("Phase 21D — integrity (release challenge, twelfth pass)", () => {
     expect((await request(app).get(`/projects/22222222-2222-4222-8222-222222222222/jobs/${JOB_ID}`).set("x-role", "pm").set("x-api-scopes", "boq:read")).status).toBe(404);
     const pm = await request(app).get(`/projects/22222222-2222-4222-8222-222222222222/jobs`).set("x-role", "pm");
     expect(pm.body.data.items).toHaveLength(2);
+  });
+});
+
+describe("Phase 21D — integrity (release challenge, thirteenth pass)", () => {
+  it("CX21-543: every job type names its module — a schedule key does not see photo-analysis or BIM jobs, their own readers do, and a job of no known type is nobody's to read or manage", async () => {
+    const app = buildApp();
+    const P = "22222222-2222-4222-8222-222222222222";
+    mockJobService.listJobs.mockResolvedValue({ items: [{ id: "p1", type: "photo.analyze", payload: { photoId: "x" } }, { id: "b1", type: "bim.parse" }, { id: "s1", type: "schedule.import" }, { id: "u1", type: "something.new" }], summary: {} });
+    const schedule = await request(app).get(`/projects/${P}/jobs`).set("x-role", "pm").set("x-api-scopes", "schedule:read");
+    expect(schedule.body.data.items.map((job) => job.id)).toEqual(["s1"]);
+    const bim = await request(app).get(`/projects/${P}/jobs`).set("x-role", "pm").set("x-api-scopes", "bim:read");
+    expect(bim.body.data.items.map((job) => job.id)).toEqual(["b1"]);
+    const documents = await request(app).get(`/projects/${P}/jobs`).set("x-role", "pm").set("x-api-scopes", "document_control:read");
+    expect(documents.body.data.items.map((job) => job.id)).toEqual(["p1"]);
+    const pm = await request(app).get(`/projects/${P}/jobs`).set("x-role", "pm");
+    expect(pm.body.data.items.map((job) => job.id).sort()).toEqual(["b1", "p1", "s1"]);
+    mockJobService.getJob.mockResolvedValue({ id: JOB_ID, type: "photo.analyze" });
+    expect((await request(app).get(`/projects/${P}/jobs/${JOB_ID}`).set("x-role", "pm").set("x-api-scopes", "schedule:read")).status).toBe(404);
+    expect((await request(app).post(`/projects/${P}/jobs/${JOB_ID}/cancel`).set("x-role", "pm").set("x-api-scopes", "schedule:write")).status).toBe(403);
+    mockJobService.getJob.mockResolvedValue({ id: JOB_ID, type: "something.new" });
+    expect((await request(app).get(`/projects/${P}/jobs/${JOB_ID}`).set("x-role", "pm")).status).toBe(404);
+    expect((await request(app).post(`/projects/${P}/jobs/${JOB_ID}/cancel`).set("x-role", "pm")).status).toBe(403);
   });
 });
