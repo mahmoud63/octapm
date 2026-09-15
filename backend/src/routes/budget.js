@@ -15,9 +15,11 @@ const scope = (req) => ({ orgId: req.user.orgId, projectId: req.params.projectId
 const actor = (req) => ({ id: req.user.id, name: req.user.name, role: getEffectiveRole(req) });
 const moneyField = (name) => body(name).optional({ nullable: true }).isFloat({ min: -1e12, max: 1e12 });
 
+// The project's cost codes are reference data: change events, timesheets and direct costs
+// pick from them, so any member of the project reads them (Phase 22B). Changing the set
+// stays with cost control (PUT below).
 router.get(
   "/cost-codes",
-  requirePermission("cost", "read"),
   [query("includeArchived").optional().isBoolean().toBoolean(), validate],
   asyncHandler(async (req, res) => sendSuccess(res, await budgetService.listProjectCostCodes({ ...scope(req), query: req.query }))),
 );

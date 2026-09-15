@@ -4,6 +4,7 @@ import { Badge } from '@/components/ui/badge'
 import { Checkbox } from '@/components/ui/checkbox'
 import { DataTableColumnHeader } from '@/components/data-table'
 import { LongText } from '@/components/long-text'
+import { roleLabel } from '@/lib/permissions'
 import { callTypes, roles } from '../data/data'
 import { type User } from '../data/schema'
 import { DataTableRowActions } from './data-table-row-actions.tsx'
@@ -112,7 +113,7 @@ export const usersColumns: ColumnDef<User>[] = [
       const userType = roles.find(({ value }) => value === role)
 
       if (!userType) {
-        return null
+        return <span className='text-sm'>{roleLabel(role)}</span>
       }
 
       return (
@@ -120,7 +121,7 @@ export const usersColumns: ColumnDef<User>[] = [
           {userType.icon && (
             <userType.icon size={16} className='text-muted-foreground' />
           )}
-          <span className='text-sm capitalize'>{row.getValue('role')}</span>
+          <span className='text-sm'>{userType.label}</span>
         </div>
       )
     },

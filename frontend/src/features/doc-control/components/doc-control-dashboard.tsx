@@ -1,4 +1,5 @@
 import { useMemo, useRef, useState } from 'react'
+import { formatShortDate } from '@/lib/dates'
 import {
   CheckCircle2,
   Download,
@@ -1665,7 +1666,7 @@ export function DocControlDashboard({
                   ) : row.submitBy &&
                     ['pending', 'resubmit', 'rejected'].includes(row.status) ? (
                     <Badge variant='outline'>
-                      Submit by {new Date(row.submitBy).toLocaleDateString()}
+                      Submit by {formatShortDate(row.submitBy)}
                     </Badge>
                   ) : null}
                   {row.reviewerParty?.companyName ? (

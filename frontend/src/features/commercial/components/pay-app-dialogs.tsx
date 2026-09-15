@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { formatShortDate } from '@/lib/dates'
 import {
   AlertTriangle,
   Banknote,
@@ -58,7 +59,7 @@ import {
 
 const NONE = '__none'
 const formatDate = (value?: string | null) =>
-  value ? new Date(value).toLocaleDateString() : '—'
+  value ? formatShortDate(value) : '—'
 
 const statusTone = (status: PayApp['status']) =>
   ({

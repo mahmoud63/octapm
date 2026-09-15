@@ -248,7 +248,8 @@ const clean = (query: Record<string, unknown>) =>
 
 export const useCommitments = (
   projectId: string,
-  query: CommitmentListQuery = {}
+  query: CommitmentListQuery = {},
+  options: { enabled?: boolean } = {}
 ) =>
   useQuery<CommitmentListResponse>({
     queryKey: [...commitmentsKey(projectId), 'list', query],
@@ -258,7 +259,7 @@ export const useCommitments = (
           params: clean(query as unknown as Record<string, unknown>),
         })
         .then((response) => response.data.data),
-    enabled: Boolean(projectId),
+    enabled: Boolean(projectId) && (options.enabled ?? true),
   })
 
 export const useCommitment = (projectId: string, commitmentId: string | null) =>

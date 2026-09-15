@@ -128,3 +128,55 @@ export const isModuleVisible = (
     return entry ? entry.visible : true
   })
 }
+
+/**
+ * Which permission module backs a sub-tab, where it differs from the module's
+ * own set (Phase 22B). A sub-tab with no entry follows its module. A sub-tab
+ * is offered when any of its backing modules is visible.
+ */
+export const CHILD_PERMISSIONS: Partial<
+  Record<ModuleWithChildren, Record<string, PermissionModule[]>>
+> = {
+  commercial: {
+    'client-billing': ['ipc'],
+    'change-events': ['change_event'],
+    'change-orders': ['change_order'],
+    commitments: ['commitment'],
+    'pay-apps': ['sub_pay_app'],
+    bids: ['bid'],
+    ipc: ['ipc'],
+    'sub-valuations': ['sub_pay_app'],
+    'budget-revisions': ['cost', 'change_order'],
+    'cash-flow': ['cost', 'ipc'],
+    eot: ['eot'],
+    weather: ['eot'],
+    contract: ['ipc', 'commitment'],
+  },
+  quality: {
+    ncr: ['ncr'],
+    itp: ['inspection'],
+    defects: ['punch'],
+    observations: ['inspection'],
+    safety: ['safety'],
+    tests: ['ncr'],
+  },
+  docControl: {
+    rfi: ['rfi'],
+    submittals: ['submittal'],
+  },
+}
+
+export const isChildVisible = (
+  matrix: PermissionMatrix | null | undefined,
+  module: ModuleKey,
+  child: string
+) => {
+  const backing = isModuleWithChildren(module)
+    ? CHILD_PERMISSIONS[module]?.[child]
+    : undefined
+  if (!matrix || !backing?.length) return true
+  return backing.some((permission) => {
+    const entry = matrix.modules[permission]
+    return entry ? entry.visible : true
+  })
+}

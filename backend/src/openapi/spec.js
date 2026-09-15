@@ -6211,6 +6211,22 @@ add(
 );
 
 add(
+  "/companies/{companyId}",
+  "patch",
+  operation({
+    tag: "Companies",
+    summary: "Edit a managed company (Phase 22B).",
+    description:
+      "Every field is optional. The parties, bids, commitments and invoices that name the company keep their link; a name that another company already carries is refused with COMPANY_EXISTS.",
+    operationId: "updateCompany",
+    parameters: [pathParam("companyId", "Company id.")],
+    permissions: modulePermission("project_parties", "update"),
+    requestBody: jsonBody(ref("CompanyMutation"), "Fields to change."),
+    responseSchema: ref("Company"),
+  }),
+);
+
+add(
   "/projects",
   "get",
   operation({
@@ -11425,6 +11441,25 @@ add(
     ],
     permissions: attachmentRecordPermission,
     responseSchema: ref("AttachmentListResponse"),
+  }),
+);
+
+add(
+  "/projects/{projectId}/attachments/search",
+  "get",
+  operation({
+    tag: "Attachments",
+    summary: "Search the project's attachments across records, for reuse as evidence (Phase 22B).",
+    description:
+      "Matches file name, caption, record reference and title on the newest attachments the caller may see (record-type permission and record visibility both apply). One row per document; deep link on the record.",
+    operationId: "searchProjectAttachments",
+    parameters: [
+      ...projectParams,
+      queryParam("q", "Text to match (file name, caption, record reference or title).", { type: "string" }),
+      queryParam("limit", "Rows to return (1–100, default 25).", { type: "integer" }),
+    ],
+    permissions: authenticatedOnly,
+    responseSchema: ref("GenericObject"),
   }),
 );
 

@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react'
+import { formatShortDate } from '@/lib/dates'
 import {
   AlertTriangle,
   Banknote,
@@ -357,7 +358,7 @@ export function IpcWorkbook({
                 <p className='text-muted-foreground'>
                   {issuedInvoice.status} - Due{' '}
                   {issuedInvoice.dueDate
-                    ? new Date(issuedInvoice.dueDate).toLocaleDateString()
+                    ? formatShortDate(issuedInvoice.dueDate)
                     : 'not set'}
                 </p>
               </div>
@@ -554,7 +555,7 @@ export function IpcWorkbook({
                     <div>
                       <p className='font-medium'>{payment.paymentReference}</p>
                       <p className='text-muted-foreground'>
-                        {new Date(payment.paymentDate).toLocaleDateString()}
+                        {formatShortDate(payment.paymentDate)}
                         {payment.paymentMethod
                           ? ` - ${payment.paymentMethod}`
                           : ''}
@@ -587,7 +588,7 @@ export function IpcWorkbook({
                     <div>
                       <p className='font-medium'>{release.releaseReference}</p>
                       <p className='text-muted-foreground'>
-                        {new Date(release.releaseDate).toLocaleDateString()}
+                        {formatShortDate(release.releaseDate)}
                         {release.reason ? ` - ${release.reason}` : ''}
                       </p>
                     </div>

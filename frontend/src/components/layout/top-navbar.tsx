@@ -10,6 +10,7 @@ import {
   Sparkles,
 } from 'lucide-react'
 import { useAuthStore } from '@/stores/auth-store'
+import { useCanPerform, useIsCompanyAdmin } from '@/lib/permissions'
 import { cn } from '@/lib/utils'
 import { OctaLogo } from '@/components/brand/octa-logo'
 import useDialogState from '@/hooks/use-dialog-state'
@@ -371,9 +372,18 @@ export function TopNavbar() {
     () => new Set(displayItems),
     [displayItems]
   )
+  // People and Company are administration: offered only to those who may open them
+  const canSeePeople = useCanPerform('user_management', 'read')
+  const isCompanyAdmin = useIsCompanyAdmin()
   const visibleGeneralItems = React.useMemo(
-    () => filterDisplayItems(generalItems, visibleDisplayItems),
-    [visibleDisplayItems]
+    () =>
+      filterDisplayItems(generalItems, visibleDisplayItems).filter((item) => {
+        if (!('url' in item)) return true
+        if (item.url === '/users') return canSeePeople
+        if (item.url === '/company/directory') return isCompanyAdmin
+        return true
+      }),
+    [visibleDisplayItems, canSeePeople, isCompanyAdmin]
   )
   const visibleOtherItems = React.useMemo(
     () => filterDisplayItems(otherItems, visibleDisplayItems),

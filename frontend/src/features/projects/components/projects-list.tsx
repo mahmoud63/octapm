@@ -5,6 +5,7 @@ import { toast } from 'sonner'
 import { formatShortDate } from '@/lib/dates'
 import { getServerErrorMessage } from '@/lib/handle-server-error'
 import { Button } from '@/components/ui/button'
+import { useAuthStore } from '@/stores/auth-store'
 import { useSubscription } from '@/features/billing/hooks/use-billing'
 import type { Project } from '../data/schema'
 import { useArchiveProject, useProjects } from '../hooks/use-projects'
@@ -37,6 +38,10 @@ export function ProjectsList() {
   const archiveProject = useArchiveProject()
 
   const { data, isLoading } = useProjects()
+  // Editing and archiving a project is the project manager's and the planner's
+  // (the API refuses everyone else), so nobody else is shown the buttons (Phase 22B).
+  const role = useAuthStore((state) => state.auth.user?.role)
+  const canManageProjects = role === 'pm' || role === 'planning_eng'
   const { data: subscription } = useSubscription()
   const subscriptionAllowsWrites = subscription?.hasAccess !== false
   const projects = data?.items ?? []
@@ -145,23 +150,27 @@ export function ProjectsList() {
                         >
                           View
                         </Button>
-                        <Button
-                          variant='ghost'
-                          size='sm'
-                          disabled={!subscriptionAllowsWrites}
-                          onClick={() => setEditingProject(project)}
-                        >
-                          Edit
-                        </Button>
-                        <Button
-                          variant='ghost'
-                          size='sm'
-                          className='text-destructive hover:text-destructive'
-                          disabled={!subscriptionAllowsWrites}
-                          onClick={() => setArchivingProject(project)}
-                        >
-                          Archive
-                        </Button>
+                        {canManageProjects && (
+                          <Button
+                            variant='ghost'
+                            size='sm'
+                            disabled={!subscriptionAllowsWrites}
+                            onClick={() => setEditingProject(project)}
+                          >
+                            Edit
+                          </Button>
+                        )}
+                        {canManageProjects && (
+                          <Button
+                            variant='ghost'
+                            size='sm'
+                            className='text-destructive hover:text-destructive'
+                            disabled={!subscriptionAllowsWrites}
+                            onClick={() => setArchivingProject(project)}
+                          >
+                            Archive
+                          </Button>
+                        )}
                       </div>
                     </td>
                   </tr>

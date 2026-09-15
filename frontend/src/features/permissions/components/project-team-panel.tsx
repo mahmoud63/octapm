@@ -3,7 +3,11 @@ import { Link } from '@tanstack/react-router'
 import { ShieldCheck, UserMinus, Users } from 'lucide-react'
 import { toast } from 'sonner'
 import { getServerErrorMessage } from '@/lib/handle-server-error'
-import { useIsCompanyAdmin, useProjectEffectiveRole } from '@/lib/permissions'
+import {
+  roleLabel,
+  useIsCompanyAdmin,
+  useProjectEffectiveRole,
+} from '@/lib/permissions'
 import { Badge } from '@/components/ui/badge'
 import {
   Select,
@@ -222,7 +226,7 @@ export function ProjectTeamPanel({ projectId }: { projectId: string }) {
                     <TableCell>
                       <div className='flex flex-wrap items-center gap-1'>
                         <span>
-                          {humanize(
+                          {roleLabel(
                             member.assignmentRole ??
                               member.party?.role ??
                               member.orgRole

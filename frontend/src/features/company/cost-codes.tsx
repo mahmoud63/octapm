@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Archive, Plus, Upload } from 'lucide-react'
+import { Archive, Pencil, Plus, Upload } from 'lucide-react'
 import { toast } from 'sonner'
 import { getServerErrorMessage } from '@/lib/handle-server-error'
 import { Badge } from '@/components/ui/badge'
@@ -69,6 +69,8 @@ export function CompanyCostCodes() {
   const update = useUpdateCostCode()
   const importCodes = useImportCostCodes()
   const [dialogOpen, setDialogOpen] = useState(false)
+  // the id of the code being edited; null while creating (Phase 22B)
+  const [editingId, setEditingId] = useState<string | null>(null)
   const [importOpen, setImportOpen] = useState(false)
   const [csv, setCsv] = useState('')
   const [draft, setDraft] = useState({
@@ -80,15 +82,47 @@ export function CompanyCostCodes() {
   })
   const items = data?.items ?? []
 
+  const emptyDraft = () => ({
+    code: '',
+    name: '',
+    category: 'other' as CostCodeCategory,
+    parentId: NONE,
+    description: '',
+  })
+  const openCreate = () => {
+    setEditingId(null)
+    setDraft(emptyDraft())
+    setDialogOpen(true)
+  }
+  const openEdit = (code: (typeof items)[number]) => {
+    setEditingId(code.id)
+    setDraft({
+      code: code.code,
+      name: code.name,
+      category: code.category as CostCodeCategory,
+      parentId: code.parentId || NONE,
+      description: code.description || '',
+    })
+    setDialogOpen(true)
+  }
+
   const submit = async () => {
     try {
-      await create.mutateAsync({
+      const payload = {
         code: draft.code,
         name: draft.name,
         category: draft.category,
         parentId: draft.parentId === NONE ? null : draft.parentId,
         description: draft.description || null,
-      })
+      }
+      if (editingId) {
+        await update.mutateAsync({ costCodeId: editingId, payload })
+        toast.success(`${draft.code} updated.`)
+        setEditingId(null)
+        setDialogOpen(false)
+        return
+      }
+      await create.mutateAsync(payload)
       toast.success('Cost code added.')
       setDraft({
         code: '',
@@ -135,7 +169,7 @@ export function CompanyCostCodes() {
           <Button
             size='sm'
             data-testid='uat-cost-code-new'
-            onClick={() => setDialogOpen(true)}
+            onClick={openCreate}
           >
             <Plus className='size-4' /> New cost code
           </Button>
@@ -222,6 +256,15 @@ export function CompanyCostCodes() {
                         <Button
                           size='icon'
                           variant='ghost'
+                          aria-label='Edit cost code'
+                          data-testid='uat-cost-code-edit'
+                          onClick={() => openEdit(code)}
+                        >
+                          <Pencil className='size-4' />
+                        </Button>
+                        <Button
+                          size='icon'
+                          variant='ghost'
                           aria-label='Archive cost code'
                           onClick={async () => {
                             try {
@@ -250,9 +293,11 @@ export function CompanyCostCodes() {
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>New cost code</DialogTitle>
+            <DialogTitle>{editingId ? `Edit ${draft.code}` : 'New cost code'}</DialogTitle>
             <DialogDescription>
-              Codes are unique per organisation and upper-cased.
+              {editingId
+                ? 'Budgets, commitments and costs already on this code keep it; only the name, category, parent and description change.'
+                : 'Codes are unique per organisation and upper-cased.'}
             </DialogDescription>
           </DialogHeader>
           <div className='grid gap-3 sm:grid-cols-2'>
@@ -341,7 +386,7 @@ export function CompanyCostCodes() {
             </Button>
             <Button
               onClick={submit}
-              disabled={create.isPending}
+              disabled={create.isPending || update.isPending}
               data-testid='uat-cost-code-save'
             >
               {create.isPending ? 'Saving…' : 'Add cost code'}

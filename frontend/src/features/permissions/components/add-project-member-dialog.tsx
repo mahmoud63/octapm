@@ -2,6 +2,7 @@ import * as React from 'react'
 import { Loader2, Search, UserPlus } from 'lucide-react'
 import { toast } from 'sonner'
 import { getServerErrorMessage } from '@/lib/handle-server-error'
+import { roleLabel } from '@/lib/permissions'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
@@ -48,10 +49,6 @@ import {
  * defaults to the one they carry in the company.
  */
 
-/** "planning_eng" → "Planning eng". */
-const humanize = (value: string) =>
-  value ? value.replace(/_/g, ' ').replace(/^./, (c) => c.toUpperCase()) : '—'
-
 /** What somebody can do on a project. Their company role is the default. */
 const PROJECT_ROLES = [
   'pm',
@@ -61,6 +58,7 @@ const PROJECT_ROLES = [
   'procurement',
   'warehouse',
   'site_engineer',
+  'quality_engineer',
   'finance',
 ] as const
 
@@ -93,8 +91,8 @@ export function AddProjectMemberDialog({ projectId }: { projectId: string }) {
       const result = await add.mutateAsync({ userId: selected.userId, role: role || null })
       toast.success(
         result.alreadyOnProject
-          ? `${result.name} is now a ${humanize(result.assignmentRole).toLowerCase()} on this project.`
-          : `${result.name} added to the project as ${humanize(result.assignmentRole).toLowerCase()}.`
+          ? `${result.name} is now a ${roleLabel(result.assignmentRole).toLowerCase()} on this project.`
+          : `${result.name} added to the project as ${roleLabel(result.assignmentRole).toLowerCase()}.`
       )
       setOpen(false)
       reset()
@@ -181,7 +179,7 @@ export function AddProjectMemberDialog({ projectId }: { projectId: string }) {
                         </span>
                       </span>
                       <span className='flex shrink-0 items-center gap-2'>
-                        <Badge variant='outline'>{humanize(user.orgRole)}</Badge>
+                        <Badge variant='outline'>{roleLabel(user.orgRole)}</Badge>
                         {user.onProject && (
                           <Badge variant='secondary'>Already on project</Badge>
                         )}
@@ -203,7 +201,7 @@ export function AddProjectMemberDialog({ projectId }: { projectId: string }) {
                 <SelectContent>
                   {PROJECT_ROLES.map((value) => (
                     <SelectItem key={value} value={value}>
-                      {humanize(value)}
+                      {roleLabel(value)}
                       {value === selected.orgRole ? ' (their company role)' : ''}
                     </SelectItem>
                   ))}

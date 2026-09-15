@@ -120,7 +120,13 @@ function SendRfqDialog({
   open: boolean
   onOpenChange: (open: boolean) => void
 }) {
-  const { data: commitments } = useCommitments(projectId)
+  // a site engineer raises change events without reading the commitment register
+  const canReadCommitments = useCanPerform('commitment', 'read')
+  const { data: commitments } = useCommitments(
+    projectId,
+    {},
+    { enabled: canReadCommitments }
+  )
   const send = useSendRfqs(projectId)
   const [commitmentIds, setCommitmentIds] = useState<Set<string>>(new Set())
   const [adHoc, setAdHoc] = useState<

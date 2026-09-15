@@ -112,7 +112,7 @@ export function UsersActionDialog({
             isCompanyAdmin: values.isCompanyAdmin,
           },
         })
-        toast.success('Engineer updated successfully.')
+        toast.success('Person updated.')
         onOpenChange(false)
       } catch (error) {
         toast.error(getServerErrorMessage(error))
@@ -128,7 +128,7 @@ export function UsersActionDialog({
         role: values.role,
         password: values.password,
       })
-      toast.success('Engineer created successfully.')
+      toast.success('Person added.')
       form.reset({
         name: '',
         email: '',
@@ -157,7 +157,7 @@ export function UsersActionDialog({
     >
       <DialogContent className='sm:max-w-lg'>
         <DialogHeader className='text-start'>
-          <DialogTitle>{isEdit ? 'Edit User' : 'Add Engineer'}</DialogTitle>
+          <DialogTitle>{isEdit ? 'Edit person' : 'Add person'}</DialogTitle>
           <DialogDescription>
             {isEdit
               ? 'Update the user profile information.'

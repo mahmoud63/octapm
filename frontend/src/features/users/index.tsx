@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { getRouteApi } from '@tanstack/react-router'
+import { Navigate, getRouteApi } from '@tanstack/react-router'
 import { type SortingState } from '@tanstack/react-table'
 import { useCanPerform } from '@/lib/permissions'
 import { Button } from '@/components/ui/button'
@@ -18,6 +18,16 @@ const SORT_COLUMN_MAP: Record<string, 'name' | 'email' | 'projects'> = {
   name: 'name',
   email: 'email',
   projectCount: 'projects',
+}
+
+/**
+ * The directory of people is administration; anyone else lands back on the
+ * workspace before the page asks for a list it would be refused (Phase 22B).
+ */
+export function UsersGate() {
+  const canSeePeople = useCanPerform('user_management', 'read')
+  if (!canSeePeople) return <Navigate to='/' replace />
+  return <Users />
 }
 
 export function Users() {
@@ -42,9 +52,9 @@ export function Users() {
       <Main className='flex flex-1 flex-col gap-4 sm:gap-6'>
         <div className='flex flex-wrap items-end justify-between gap-2'>
           <div>
-            <h2 className='text-2xl font-bold tracking-tight'>Engineers</h2>
+            <h2 className='text-2xl font-bold tracking-tight'>People</h2>
             <p className='text-muted-foreground'>
-              Manage engineer accounts and role assignments.
+              Everyone in the organisation, their role and the projects they are on.
             </p>
           </div>
           <UsersPrimaryButtons />
@@ -83,5 +93,5 @@ function AddFirstEngineerButton() {
 
   if (!canCreateUser || !subscriptionAllowsWrites) return null
 
-  return <Button onClick={() => setOpen('add')}>+ Add Engineer</Button>
+  return <Button onClick={() => setOpen('add')}>+ Add person</Button>
 }

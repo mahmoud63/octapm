@@ -7,6 +7,14 @@ import { Main } from '@/components/layout/main'
 import { Separator } from '@/components/ui/separator'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { getSummary } from './data/api'
+
+// Stock is valued in the organisation's currency; money on screen carries its symbol (Phase 22B).
+const money = (value: number) =>
+  new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: 'USD',
+    maximumFractionDigits: 0,
+  }).format(value)
 import { AnalyticsPanel } from './components/analytics-panel'
 import { GoodsReceiptPanel } from './components/goods-receipt-panel'
 import { ItemsPanel } from './components/items-panel'
@@ -63,11 +71,11 @@ export function InventoryWorkspace() {
 
       <div className='mt-5 grid grid-cols-2 gap-3 lg:grid-cols-5'>
         {[
-          ['Stock value', figures ? figures.totalValue.toLocaleString() : '—'],
+          ['Stock value', figures ? money(figures.totalValue) : '—'],
           ['Items', figures ? String(figures.itemCount) : '—'],
           ['Below reorder', figures ? String(figures.lowStock) : '—'],
           ['Out of stock', figures ? String(figures.outOfStock) : '—'],
-          ['Issued recently', figures ? figures.issuedValue.toLocaleString() : '—'],
+          ['Issued recently', figures ? money(figures.issuedValue) : '—'],
         ].map(([label, value]) => (
           <div key={label} className='rounded-md border bg-card px-4 py-3'>
             <p className='text-[11px] tracking-wide text-muted-foreground uppercase'>

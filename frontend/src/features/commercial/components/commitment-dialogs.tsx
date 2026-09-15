@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { formatShortDate } from '@/lib/dates'
 import {
   CheckCircle2,
   Download,
@@ -82,7 +83,7 @@ const statusTone = (status: Commitment['status']) =>
   })[status]
 
 const formatDate = (value?: string | null) =>
-  value ? new Date(value).toLocaleDateString() : '—'
+  value ? formatShortDate(value) : '—'
 
 type LineDraft = {
   description: string

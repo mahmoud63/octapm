@@ -1,5 +1,5 @@
 import { NeedsYouPanel } from './needs-you-panel'
-import { lazy, Suspense, useCallback, useMemo, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from 'react'
 import { AxiosError } from 'axios'
 import { Link, useNavigate } from '@tanstack/react-router'
 import { formatShortDate } from '@/lib/dates'
@@ -17,6 +17,7 @@ import type { ProjectSetupTarget } from '../data/schema'
 import {
   DEFAULT_CHILD,
   DEFAULT_MODULE,
+  isChildVisible,
   isModuleVisible,
   isModuleWithChildren,
   moduleFromSlug,
@@ -233,9 +234,14 @@ export function ProjectDetail({
     projectId,
     { enabled: canLoadProjectModules }
   )
-  const { data: permissionMatrix } = useMyProjectPermissions(projectId, {
-    enabled: canLoadProjectModules,
-  })
+  const { data: permissionMatrix, isPending: permissionsPending } =
+    useMyProjectPermissions(projectId, {
+      enabled: canLoadProjectModules,
+    })
+  // until the person's permissions are known, no module content mounts: a module
+  // the policy hides would otherwise fire the requests it is refused (Phase 22B)
+  const permissionsSettling =
+    canLoadProjectModules && permissionsPending && !permissionMatrix
   const projectEffectiveRole =
     project?.projectAccess?.effectiveRole ??
     project?.effectiveRole ??
@@ -352,9 +358,22 @@ export function ProjectDetail({
       { key: 'team', label: 'Team' },
       { key: 'reports', label: 'Reports' },
       { key: 'overview', label: 'Overview' },
-    ].filter((item) =>
-      isModuleVisible(permissionMatrix, item.key as ModuleKey)
-    ) as MenuItem[]
+    ]
+      .map((item) =>
+        'children' in item && item.children
+          ? {
+              ...item,
+              children: item.children.filter((child) =>
+                isChildVisible(permissionMatrix, item.key as ModuleKey, child.key)
+              ),
+            }
+          : item
+      )
+      .filter(
+        (item) =>
+          isModuleVisible(permissionMatrix, item.key as ModuleKey) &&
+          (!('children' in item) || !item.children || item.children.length > 0)
+      ) as MenuItem[]
   }, [
     hasWbs,
     permissionMatrix,
@@ -379,7 +398,11 @@ export function ProjectDetail({
         module === visibleModule && childSlug && allowed.has(childSlug)
           ? childSlug
           : null
-      return requested ?? DEFAULT_CHILD[module]
+      // the module's usual first tab, unless the policy hides it — then the first offered
+      const fallback = allowed.has(DEFAULT_CHILD[module])
+        ? DEFAULT_CHILD[module]
+        : (item?.children?.[0]?.key ?? DEFAULT_CHILD[module])
+      return requested ?? fallback
     },
     [childSlug, menuItems, visibleModule]
   )
@@ -392,6 +415,46 @@ export function ProjectDetail({
     quality: childFor('quality'),
     docControl: childFor('docControl'),
   }
+
+  // A URL to a module or sub-tab the policy hides lands on what is offered, and the
+  // address bar says so (Phase 22B): a bookmark never shows one tab and another's content.
+  const offeredChild = isModuleWithChildren(visibleModule)
+    ? childState[visibleModule]
+    : null
+  useEffect(() => {
+    if (permissionsSettling || !menuItems.length) return
+    const moduleMismatch = visibleModule !== requestedModule
+    const childMismatch =
+      !moduleMismatch &&
+      Boolean(offeredChild && childSlug && childSlug !== offeredChild)
+    if (!moduleMismatch && !childMismatch) return
+    if (offeredChild) {
+      navigate({
+        to: '/projects/$projectId/$module/$child',
+        params: {
+          projectId,
+          module: slugForModule(visibleModule),
+          child: offeredChild,
+        },
+        replace: true,
+      })
+    } else {
+      navigate({
+        to: '/projects/$projectId/$module',
+        params: { projectId, module: slugForModule(visibleModule) },
+        replace: true,
+      })
+    }
+  }, [
+    permissionsSettling,
+    menuItems.length,
+    visibleModule,
+    requestedModule,
+    offeredChild,
+    childSlug,
+    navigate,
+    projectId,
+  ])
 
   const goTo = useCallback(
     (module: ModuleKey, child?: string | null) => {
@@ -730,7 +793,11 @@ export function ProjectDetail({
               data-testid={`uat-project-content-${visibleModule}`}
               className='mt-2 min-w-0'
             >
-              <Suspense fallback={<ModuleLoading />}>{renderContent()}</Suspense>
+              {permissionsSettling ? (
+                <ModuleLoading />
+              ) : (
+                <Suspense fallback={<ModuleLoading />}>{renderContent()}</Suspense>
+              )}
             </section>
           </ProjectPermissionProvider>
         )}

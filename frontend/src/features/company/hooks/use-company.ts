@@ -286,6 +286,52 @@ export const useCreateVendor = () => {
   })
 }
 
+export interface CompanyPayload {
+  name?: string
+  tradeName?: string | null
+  type?: string
+  email?: string | null
+  phone?: string | null
+  website?: string | null
+  address?: string | null
+  status?: 'active' | 'inactive'
+}
+
+/** Any company in the directory — owner, consultant, contractor — not only a vendor (Phase 22B). */
+export const useCreateCompany = () => {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: async (payload: CompanyPayload) => {
+      const { data } = await apiClient.post<{ data: CompanyDirectoryEntry }>(
+        '/companies',
+        payload
+      )
+      return data.data
+    },
+    onSuccess: () => invalidateCompany(queryClient),
+  })
+}
+
+export const useUpdateCompany = () => {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: async ({
+      companyId,
+      payload,
+    }: {
+      companyId: string
+      payload: CompanyPayload
+    }) => {
+      const { data } = await apiClient.patch<{ data: CompanyDirectoryEntry }>(
+        `/companies/${companyId}`,
+        payload
+      )
+      return data.data
+    },
+    onSuccess: () => invalidateCompany(queryClient),
+  })
+}
+
 export const useUpdateVendor = () => {
   const queryClient = useQueryClient()
   return useMutation({

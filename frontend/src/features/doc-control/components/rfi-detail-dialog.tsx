@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { formatShortDate } from '@/lib/dates'
 import { Link } from '@tanstack/react-router'
 import {
   AlertTriangle,
@@ -81,7 +82,7 @@ const STATUS_LABEL: Record<string, string> = {
 }
 
 const formatDate = (value?: string | null) =>
-  value ? new Date(value).toLocaleDateString() : '—'
+  value ? formatShortDate(value) : '—'
 
 type EditDraft = {
   subject: string

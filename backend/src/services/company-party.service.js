@@ -221,6 +221,28 @@ const createCompany = async ({ orgId, payload }) => {
   return sanitizeCompany(company);
 };
 
+/**
+ * Edit a company in the directory (Phase 22B). Only the fields sent change;
+ * the name stays unique within the organisation; parties, vendors, bids and
+ * commitments that reference the company keep their link.
+ */
+const updateCompany = async ({ orgId, companyId, payload = {} }) => {
+  const existing = await prisma.company.findFirst({ where: { id: companyId, orgId } });
+  if (!existing) throw new HttpError(404, "COMPANY_NOT_FOUND", "Company not found");
+  const built = buildCompanyData(orgId, payload);
+  const data = {};
+  for (const key of ["name", "legalName", "tradeName", "registrationNumber", "taxNumber", "type", "email", "phone", "website", "address", "status"]) {
+    if (payload[key] !== undefined) data[key] = built[key];
+  }
+  if (data.name === null) throw new HttpError(400, "COMPANY_NAME_REQUIRED", "Company name is required");
+  if (data.name && data.name !== existing.name) {
+    const clash = await prisma.company.findFirst({ where: { orgId, name: data.name, id: { not: companyId } } });
+    if (clash) throw new HttpError(409, "COMPANY_EXISTS", "Another company already has this name");
+  }
+  const company = await prisma.company.update({ where: { id: companyId }, data });
+  return sanitizeCompany(company);
+};
+
 const projectPartyInclude = {
   company: true,
   permissionTemplate: { select: { id: true, name: true } },
@@ -774,6 +796,7 @@ module.exports = {
   PARTY_ROLES,
   addProjectPartyMember,
   addProjectPartyMemberWithTx,
+  updateCompany,
   applyPartyWorkflowVisibility,
   assertPartyWorkflowAccess,
   acceptProjectPartyInvitation,

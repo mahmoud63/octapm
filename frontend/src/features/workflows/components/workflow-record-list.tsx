@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { formatShortDate } from '@/lib/dates'
 import {
   AlertTriangle,
   CalendarClock,
@@ -170,7 +171,7 @@ const formatDate = (value?: string | null) => {
   if (!value) return 'Unscheduled'
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return 'Unscheduled'
-  return date.toLocaleDateString()
+  return formatShortDate(date)
 }
 
 const statusLabel = (value?: string | null) =>

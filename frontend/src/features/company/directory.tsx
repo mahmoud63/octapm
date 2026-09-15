@@ -1,9 +1,13 @@
 import { useState } from 'react'
 import { Link } from '@tanstack/react-router'
-import { Building2, Store, Users } from 'lucide-react'
+import { Building2, Pencil, Plus, Store, Users } from 'lucide-react'
+import { useCanPerform } from '@/lib/permissions'
 import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 import { Skeleton } from '@/components/ui/skeleton'
+import { Switch } from '@/components/ui/switch'
 import {
   Table,
   TableBody,
@@ -12,20 +16,46 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
+import { CompanyDialog } from './components/company-dialog'
 import { CompanySection } from './components/company-section'
-import { useCompanyDirectory } from './hooks/use-company'
+import {
+  useCompanyDirectory,
+  type CompanyDirectoryEntry,
+} from './hooks/use-company'
 
 export function CompanyDirectory() {
   const [search, setSearch] = useState('')
-  const { data, isLoading } = useCompanyDirectory(search ? { search } : {})
+  // an inactive company is kept for history; it is not offered on new records and
+  // stays out of the list unless asked for
+  const [includeInactive, setIncludeInactive] = useState(false)
+  const { data, isLoading } = useCompanyDirectory({
+    ...(search ? { search } : {}),
+    ...(includeInactive ? {} : { status: 'active' }),
+  })
   const items = data?.items ?? []
+  // adding or editing a company is the same permission as naming a party on a project
+  const canManage = useCanPerform('project_parties', 'create')
+  const [dialogOpen, setDialogOpen] = useState(false)
+  const [editing, setEditing] = useState<CompanyDirectoryEntry | null>(null)
 
   return (
     <CompanySection
       title='Directory'
       description='Every company the organisation works with — owners, consultants, contractors and vendors — with where they appear.'
       actions={
-        <div className='flex flex-wrap gap-2 text-xs text-muted-foreground'>
+        <div className='flex flex-wrap items-center gap-2 text-xs text-muted-foreground'>
+          {canManage && (
+            <Button
+              size='sm'
+              onClick={() => {
+                setEditing(null)
+                setDialogOpen(true)
+              }}
+              data-testid='uat-company-new'
+            >
+              <Plus className='size-4' /> Add company
+            </Button>
+          )}
           <Badge variant='outline'>
             <Building2 className='size-3' /> {data?.summary.companies ?? 0}{' '}
             companies
@@ -41,12 +71,25 @@ export function CompanyDirectory() {
       }
     >
       <div className='space-y-3' data-testid='uat-company-directory'>
-        <Input
-          placeholder='Search by name, trade name or email'
-          value={search}
-          onChange={(event) => setSearch(event.target.value)}
-          className='max-w-sm'
-        />
+        <div className='flex flex-wrap items-center gap-4'>
+          <Input
+            placeholder='Search by name, trade name or email'
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            className='max-w-sm'
+          />
+          <div className='flex items-center gap-2'>
+            <Switch
+              id='directory-include-inactive'
+              checked={includeInactive}
+              onCheckedChange={setIncludeInactive}
+              data-testid='uat-company-include-inactive'
+            />
+            <Label htmlFor='directory-include-inactive' className='text-xs'>
+              Show inactive companies
+            </Label>
+          </div>
+        </div>
         {isLoading ? (
           <div className='space-y-2'>
             <Skeleton className='h-10 w-full' />
@@ -64,13 +107,14 @@ export function CompanyDirectory() {
                   <TableHead className='text-right'>Projects</TableHead>
                   <TableHead className='text-right'>Supplier on</TableHead>
                   <TableHead>Status</TableHead>
+                  <TableHead className='w-12' />
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {items.length === 0 ? (
                   <TableRow>
                     <TableCell
-                      colSpan={7}
+                      colSpan={8}
                       className='text-center text-muted-foreground'
                     >
                       No companies match.
@@ -123,6 +167,22 @@ export function CompanyDirectory() {
                           {company.status}
                         </Badge>
                       </TableCell>
+                      <TableCell className='text-right'>
+                        {canManage && (
+                          <Button
+                            size='icon'
+                            variant='ghost'
+                            aria-label={`Edit ${company.name}`}
+                            data-testid='uat-company-edit'
+                            onClick={() => {
+                              setEditing(company)
+                              setDialogOpen(true)
+                            }}
+                          >
+                            <Pencil className='size-4' />
+                          </Button>
+                        )}
+                      </TableCell>
                     </TableRow>
                   ))
                 )}
@@ -131,6 +191,14 @@ export function CompanyDirectory() {
           </div>
         )}
       </div>
+      <CompanyDialog
+        open={dialogOpen}
+        company={editing}
+        onOpenChange={(open) => {
+          setDialogOpen(open)
+          if (!open) setEditing(null)
+        }}
+      />
     </CompanySection>
   )
 }

@@ -1,5 +1,5 @@
 const express = require("express");
-const { body, query } = require("express-validator");
+const { body, param, query } = require("express-validator");
 const { asyncHandler } = require("../utils/async-handler");
 const { sendSuccess } = require("../utils/api-response");
 const { authenticate } = require("../middleware/auth");
@@ -58,6 +58,26 @@ router.post(
       payload: req.body,
     });
     return sendSuccess(res, result, 201);
+  }),
+);
+
+// Editing a company (Phase 22B): the same validators, every field optional.
+router.patch(
+  "/:companyId",
+  requirePermission("project_parties", "update"),
+  [
+    param("companyId").isUUID(),
+    body("name").optional().isString().trim().notEmpty().isLength({ max: 255 }),
+    ...companyValidators.slice(1),
+    validate,
+  ],
+  asyncHandler(async (req, res) => {
+    const result = await companyPartyService.updateCompany({
+      orgId: req.user.orgId,
+      companyId: req.params.companyId,
+      payload: req.body,
+    });
+    return sendSuccess(res, result);
   }),
 );
 
