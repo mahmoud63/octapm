@@ -51,7 +51,7 @@ export const SHOTS = (() => {
 export async function signIn(page: Page, who: keyof typeof PEOPLE = 'pm') {
   await page.goto('/sign-in')
   const email = page.getByPlaceholder('name@example.com')
-  await email.waitFor({ state: 'visible' })
+  await email.waitFor({ state: 'visible', timeout: 30_000 })
   const password = page.locator('input[type="password"]').first()
   const typeBoth = async () => {
     await email.click()

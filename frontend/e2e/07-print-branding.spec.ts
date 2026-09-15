@@ -69,8 +69,10 @@ test.describe('print output', () => {
     // The figure the screen shows is the figure print must keep — whatever the
     // fixture's original budget is (the E2E fixture seeds 1,700,000; a re-run
     // never depends on a number some earlier run left behind).
+    const figure = /Original[\s\S]{0,40}?\$([\d,]{5,})/
+    await expect(page.locator('body'), 'the original budget is shown on screen').toContainText(figure, { timeout: 30_000 })
     const onScreen = await page.locator('body').innerText()
-    const original = /Original[\s\S]{0,40}?\$([\d,]{5,})/.exec(onScreen)?.[1]
+    const original = figure.exec(onScreen)?.[1]
     expect(original, 'the original budget is shown on screen').toBeTruthy()
 
     await page.emulateMedia({ media: 'print' })

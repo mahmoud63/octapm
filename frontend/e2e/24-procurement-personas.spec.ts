@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test'
-import { API, apiClient, apiGet, apiToken, openProject, signIn } from './support'
+import { API, apiClient, apiToken, openProject, signIn } from './support'
 import { Journey, cachedToken, observe } from './support-ux'
 
 /**
@@ -39,7 +39,7 @@ const post = async (client: Client, path: string, token: string, data: unknown) 
     headers: { authorization: `Bearer ${token}` },
     data,
   })
-  let body: { data?: any; error?: { code?: string; message?: string } } | null = null
+  let body: { data?: Record<string, unknown>; error?: { code?: string; message?: string } } | null
   try {
     body = await response.json()
   } catch {
@@ -374,7 +374,7 @@ test.describe('four people, one delivery', () => {
     observe('THREE_WAY_MATCH', {
       lines: (matched?.lines ?? []).length,
       verdict: matched?.verdict ?? matched?.status ?? null,
-      orderedVsReceived: (matched?.lines ?? []).map((line: any) => ({
+      orderedVsReceived: (matched?.lines ?? []).map((line: { orderedQty?: number; receivedQty?: number }) => ({
         ordered: line.orderedQty,
         received: line.receivedQty,
       })),
