@@ -9,6 +9,7 @@ import {
   Sparkles,
 } from 'lucide-react'
 import { toast } from 'sonner'
+import { FINANCIAL_TERMS } from '@/lib/financial-terms'
 import { getServerErrorMessage } from '@/lib/handle-server-error'
 import { useCanPerform } from '@/lib/permissions'
 import { cn } from '@/lib/utils'
@@ -660,8 +661,11 @@ export function ForecastPanel({ projectId }: { projectId: string }) {
                     <th className='px-2 py-1.5 text-right font-medium'>
                       Revised
                     </th>
-                    <th className='px-2 py-1.5 text-right font-medium'>
-                      Committed
+                    <th
+                      className='px-2 py-1.5 text-right font-medium'
+                      title={FINANCIAL_TERMS.executedCommitments.hint}
+                    >
+                      {FINANCIAL_TERMS.executedCommitments.label}
                     </th>
                     <th className='px-2 py-1.5 text-right font-medium'>
                       Forecast

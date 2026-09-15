@@ -152,6 +152,35 @@ describe("budget by cost code", () => {
     expect(applied.lines).toEqual([{ lineId: "line-co", amount: 10000 }]);
   });
 
+  it("Phase 22B: applies an explicit split to its lines, sends an archived line's share to the change-orders line, and re-applies without doubling", async () => {
+    const order = { id: "co-2", ref: "VO-02", value: 10000, activityId: "act-1", category: "Subcontract", budgetLineId: null, budgetAllocationsJson: [{ budgetLineId: "line-1", amount: 6000 }, { budgetLineId: "line-2", amount: 4000 }] };
+    // both lines still exist: each takes its own amount, nothing goes to the activity's lines
+    mockPrisma.budgetLine.findMany.mockResolvedValueOnce([{ id: "line-1" }, { id: "line-2" }]);
+    let applied = await service.applyChangeOrderToBudgetLines({ orgId: "org-1", projectId: "project-1", order });
+    expect(applied.lines).toEqual([{ lineId: "line-1", amount: 6000 }, { lineId: "line-2", amount: 4000 }]);
+    expect(mockPrisma.budgetLineActivityAllocation.findMany).not.toHaveBeenCalled();
+    expect(mockPrisma.budgetLineChange.deleteMany).toHaveBeenCalledWith({ where: { projectId: "project-1", changeOrderId: "co-2" } });
+    expect(mockPrisma.budgetLineChange.create).toHaveBeenCalledTimes(2);
+    // approved again (or re-pointed): the old rows are removed first, so the value is never counted twice
+    jest.clearAllMocks();
+    mockPrisma.budgetLine.findMany.mockResolvedValueOnce([{ id: "line-1" }, { id: "line-2" }]);
+    applied = await service.applyChangeOrderToBudgetLines({ orgId: "org-1", projectId: "project-1", order });
+    expect(mockPrisma.budgetLineChange.deleteMany).toHaveBeenCalledTimes(1);
+    expect(applied.lines.reduce((acc, row) => acc + row.amount, 0)).toBe(10000);
+    // line-2 archived since the split was written: its 4,000 lands on the change-orders line, the total is intact
+    jest.clearAllMocks();
+    mockPrisma.budgetLine.findMany.mockResolvedValueOnce([{ id: "line-1" }]);
+    mockPrisma.costCode.findFirst.mockResolvedValueOnce({ id: "code-co" });
+    mockPrisma.budgetLine.findFirst.mockResolvedValueOnce({ id: "line-co" });
+    applied = await service.applyChangeOrderToBudgetLines({ orgId: "org-1", projectId: "project-1", order });
+    expect(applied.lines).toEqual([{ lineId: "line-1", amount: 6000 }, { lineId: "line-co", amount: 4000 }]);
+    // the value edited after the split (12,000 against a 10,000 split): the last line takes the difference, the lines still add up to the value
+    jest.clearAllMocks();
+    mockPrisma.budgetLine.findMany.mockResolvedValueOnce([{ id: "line-1" }, { id: "line-2" }]);
+    applied = await service.applyChangeOrderToBudgetLines({ orgId: "org-1", projectId: "project-1", order: { ...order, value: 12000 } });
+    expect(applied.lines).toEqual([{ lineId: "line-1", amount: 6000 }, { lineId: "line-2", amount: 6000 }]);
+  });
+
   it("reconciles activity budgets against budget lines", async () => {
     mockPrisma.activity.findMany.mockResolvedValue([{ id: "act-1", name: "Slab", activityCode: "A100", budget: 0 }, { id: "act-2", name: "Columns", activityCode: "A200", budget: 0 }]);
     mockAllocationTotals.mockResolvedValue(new Map([["act-1", { amount: 60000 }], ["act-2", { amount: 40000 }]]));

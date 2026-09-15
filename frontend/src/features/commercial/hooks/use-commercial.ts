@@ -165,6 +165,16 @@ export interface ChangeOrderRecord {
   supportingDocumentIds?: string[]
   documentIds?: string[]
   approvalHistory?: ApprovalHistoryEvent[]
+  // where the approved value lands (Phase 22B): one line, or an explicit split
+  budgetLineId?: string | null
+  budgetAllocationsJson?: Array<{ budgetLineId: string; amount: number }>
+  budgetAllocations?: Array<{ budgetLineId: string; amount: number }>
+  budgetLine?: {
+    id: string
+    description: string | null
+    costType: string
+    costCode: { id: string; code: string; name: string } | null
+  } | null
 }
 
 export interface ChangeOrderSummary {

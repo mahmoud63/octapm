@@ -15,6 +15,7 @@ import {
   MONEY_PRECISION_MESSAGE,
   toMoneyNumber,
 } from '@/lib/money'
+import { FINANCIAL_TERMS } from '@/lib/financial-terms'
 import { useCanPerform } from '@/lib/permissions'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -238,9 +239,9 @@ export function CostDashboard({
               hint='Budget carried on activity cost records'
             />
             <CostFigure
-              label='Committed'
+              label={FINANCIAL_TERMS.executedCommitments.label}
               value={fmtUSD(totals?.committed || 0)}
-              hint='Executed subcontracts and purchase orders'
+              hint={FINANCIAL_TERMS.executedCommitments.hint}
             />
             <CostFigure
               label='Actual cost'
@@ -326,7 +327,9 @@ export function CostDashboard({
                 <SelectItem value='activity'>Activity</SelectItem>
                 <SelectItem value='phase'>Phase</SelectItem>
                 <SelectItem value='updated'>Updated</SelectItem>
-                <SelectItem value='committed'>Committed</SelectItem>
+                <SelectItem value='committed'>
+                  {FINANCIAL_TERMS.executedCommitments.label}
+                </SelectItem>
                 <SelectItem value='actual'>Actual</SelectItem>
                 <SelectItem value='forecast'>Forecast</SelectItem>
               </SelectContent>
@@ -361,7 +364,12 @@ export function CostDashboard({
                   <th className='p-2 text-right font-medium'>Overhead</th>
                   <th className='p-2 text-right font-medium'>Contingency</th>
                   <th className='p-2 text-right font-medium'>Budget</th>
-                  <th className='p-2 text-right font-medium'>Committed</th>
+                  <th
+                    className='p-2 text-right font-medium'
+                    title={FINANCIAL_TERMS.executedCommitments.hint}
+                  >
+                    {FINANCIAL_TERMS.executedCommitments.label}
+                  </th>
                   <th className='p-2 text-right font-medium'>Actual</th>
                   <th className='p-2 text-right font-medium'>Actual Through</th>
                   <th className='p-2 text-right font-medium'>Forecast</th>
@@ -577,7 +585,12 @@ export function CostDashboard({
                 <tr>
                   <th className='p-2 text-left font-medium'>Phase</th>
                   <th className='p-2 text-right font-medium'>Budget</th>
-                  <th className='p-2 text-right font-medium'>Committed</th>
+                  <th
+                    className='p-2 text-right font-medium'
+                    title={FINANCIAL_TERMS.executedCommitments.hint}
+                  >
+                    {FINANCIAL_TERMS.executedCommitments.label}
+                  </th>
                   <th className='p-2 text-right font-medium'>Actual</th>
                   <th className='p-2 text-right font-medium'>Forecast</th>
                   <th className='p-2 text-right font-medium'>Variance $</th>

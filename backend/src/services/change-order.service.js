@@ -49,6 +49,14 @@ const allocationTraceSelect = {
 
 const changeOrderInclude = {
   activity: { select: { id: true, name: true, wbsCode: true } },
+  budgetLine: {
+    select: {
+      id: true,
+      description: true,
+      costType: true,
+      costCode: { select: { id: true, code: true, name: true } },
+    },
+  },
   activityLinks: {
     include: { activity: { select: activityTraceSelect } },
     orderBy: [{ createdAt: "asc" }],
@@ -78,6 +86,8 @@ const CHANGE_ORDER_WORKFLOW_ACTIONS = Object.freeze({
 });
 
 const APPROVAL_LOCKED_FIELDS = new Set([
+  "budgetLineId",
+  "budgetAllocations",
   "description",
   "category",
   "value",
@@ -157,6 +167,55 @@ const ensureProject = async ({ orgId, projectId }) => {
   }
 
   return project;
+};
+
+const round2 = (value) => Math.round((Number(value) || 0) * 100) / 100;
+
+// ─── Budget allocation (Phase 22B) ─────────────────────────────────────────
+// A change order names where its approved value lands: one budget line, or an
+// explicit split across lines whose amounts add up to the value. Naming
+// nothing leaves the decision to the approval rule (the activity's lines, else
+// the project's "Change orders" line), exactly as before.
+const normalizeBudgetAllocations = async ({ tx, projectId, payload, value, existing = null }) => {
+  const hasLine = payload.budgetLineId !== undefined;
+  const hasSplit = payload.budgetAllocations !== undefined;
+  if (!hasLine && !hasSplit) return null;
+
+  let split = hasSplit ? payload.budgetAllocations : existing?.budgetAllocationsJson;
+  split = (Array.isArray(split) ? split : [])
+    .map((row) => ({ budgetLineId: trimOrNull(row?.budgetLineId), amount: round2(toMoneyNumber(row?.amount)) }))
+    .filter((row) => row.budgetLineId);
+  let budgetLineId = hasLine ? trimOrNull(payload.budgetLineId) : existing?.budgetLineId ?? null;
+  if (split.length === 1) {
+    // one line with the whole value is simply the line
+    budgetLineId = split[0].budgetLineId;
+    split = [];
+  }
+
+  const ids = [...new Set([budgetLineId, ...split.map((row) => row.budgetLineId)].filter(Boolean))];
+  if (ids.length) {
+    const lines = await tx.budgetLine.findMany({ where: { id: { in: ids }, projectId, status: "active" }, select: { id: true } });
+    const known = new Set(lines.map((line) => line.id));
+    if (ids.some((id) => !known.has(id))) {
+      throw new HttpError(400, "CHANGE_ORDER_BUDGET_LINE_INVALID", "A budget line named on the change order is not an active line of this project");
+    }
+  }
+  if (split.length) {
+    if (split.some((row) => row.amount <= 0)) {
+      throw new HttpError(400, "CHANGE_ORDER_ALLOCATION_INVALID", "Every line of the split needs an amount above zero");
+    }
+    const seen = new Set();
+    for (const row of split) {
+      if (seen.has(row.budgetLineId)) throw new HttpError(400, "CHANGE_ORDER_ALLOCATION_INVALID", "A budget line appears twice in the split");
+      seen.add(row.budgetLineId);
+    }
+    const total = split.reduce((acc, row) => addMoney(acc, row.amount), 0);
+    if (Math.abs(subtractMoney(total, value)) > 0.005) {
+      throw new HttpError(400, "CHANGE_ORDER_ALLOCATION_MISMATCH", `The split adds up to ${total}, not to the change order value ${value}`);
+    }
+    budgetLineId = null; // the split is the allocation
+  }
+  return { budgetLineId, budgetAllocationsJson: split };
 };
 
 const firstActivityIdFromPayload = (payload = {}) => {
@@ -820,6 +879,7 @@ const createChangeOrder = async ({
   const primaryActivityId = firstActivityIdFromPayload(payload);
 
   return prisma.$transaction(async (tx) => {
+    const allocation = await normalizeBudgetAllocations({ tx, projectId, payload, value: toMoneyNumber(payload.value) });
     const created = await tx.changeOrder.create({
       data: {
         projectId,
@@ -827,6 +887,8 @@ const createChangeOrder = async ({
           primaryActivityId !== undefined
             ? primaryActivityId
             : payload.activityId || null,
+        budgetLineId: allocation?.budgetLineId ?? null,
+        budgetAllocationsJson: allocation?.budgetAllocationsJson ?? [],
         ref,
         description: payload.description,
         category: payload.category?.trim() || null,
@@ -1029,6 +1091,18 @@ const updateChangeOrder = async ({
   if (payload.category !== undefined)
     data.category = payload.category?.trim() || null;
   if (payload.value !== undefined) data.value = toMoneyNumber(payload.value);
+  const nextValue = payload.value !== undefined ? toMoneyNumber(payload.value) : toMoneyNumber(existing.value);
+  const allocation = await normalizeBudgetAllocations({ tx: prisma, projectId, payload, value: nextValue, existing });
+  if (allocation) {
+    data.budgetLineId = allocation.budgetLineId;
+    data.budgetAllocationsJson = allocation.budgetAllocationsJson;
+  } else if (payload.value !== undefined && Array.isArray(existing.budgetAllocationsJson) && existing.budgetAllocationsJson.length) {
+    // the value moved under a split that still adds up to the old value
+    const total = existing.budgetAllocationsJson.reduce((acc, row) => addMoney(acc, toMoneyNumber(row?.amount)), 0);
+    if (Math.abs(subtractMoney(total, nextValue)) > 0.005) {
+      throw new HttpError(400, "CHANGE_ORDER_ALLOCATION_MISMATCH", "The value changed; update the split so it adds up to the new value");
+    }
+  }
   if (payload.scheduleImpact !== undefined) {
     data.scheduleImpact = Number(payload.scheduleImpact) || 0;
   }

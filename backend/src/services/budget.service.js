@@ -525,7 +525,23 @@ const applyChangeOrderToBudgetLines = async ({ tx = prisma, orgId, projectId, or
   const value = toMoneyNumber(order.value);
   await tx.budgetLineChange.deleteMany({ where: { projectId, changeOrderId: order.id } });
   let targets = [];
-  if (order.budgetLineId) {
+  // Phase 22B: the order names its lines and amounts. A line archived since is
+  // not dropped in silence — its share goes to the "Change orders" line, so the
+  // lines still add up to the approved value.
+  const explicit = Array.isArray(order.budgetAllocationsJson)
+    ? order.budgetAllocationsJson.filter((row) => row && row.budgetLineId && toMoneyNumber(row.amount) > 0)
+    : [];
+  if (explicit.length) {
+    const lines = await tx.budgetLine.findMany({ where: { id: { in: explicit.map((row) => row.budgetLineId) }, projectId }, select: { id: true } });
+    const known = new Set(lines.map((line) => line.id));
+    let orphan = 0;
+    for (const row of explicit) {
+      if (known.has(row.budgetLineId)) targets.push({ lineId: row.budgetLineId, amount: round2(toMoneyNumber(row.amount)) });
+      else orphan = addMoney(orphan, row.amount);
+    }
+    if (orphan > 0) targets.push({ lineId: await ensureChangeOrderLine({ tx, orgId, projectId, costType: costTypeForOrder(order), actorId }), amount: round2(orphan) });
+  }
+  if (!targets.length && order.budgetLineId) {
     const line = await tx.budgetLine.findFirst({ where: { id: order.budgetLineId, projectId }, select: { id: true } });
     if (line) targets = [{ lineId: line.id, share: 1 }];
   }
@@ -538,7 +554,12 @@ const applyChangeOrderToBudgetLines = async ({ tx = prisma, orgId, projectId, or
   const applied = [];
   let remaining = value;
   for (const [index, target] of targets.entries()) {
-    const amount = index === targets.length - 1 ? round2(remaining) : round2(multiplyMoney(value, target.share));
+    const amount =
+      index === targets.length - 1
+        ? round2(remaining) // the last line takes the rounding, so the lines add up to the value exactly
+        : target.amount !== undefined
+          ? round2(Math.min(target.amount, remaining))
+          : round2(multiplyMoney(value, target.share));
     remaining = subtractMoney(remaining, amount);
     await tx.budgetLineChange.create({ data: { orgId, projectId, budgetLineId: target.lineId, kind: "change_order", amount, changeOrderId: order.id, note: `Approved ${order.ref || "change order"}`, createdBy: actorId } });
     await recomputeAllocations(tx, target.lineId);

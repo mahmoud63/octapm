@@ -566,6 +566,41 @@ export const useRfis = (projectId: string, query: RfiListQuery = {}) =>
     enabled: Boolean(projectId),
   })
 
+export interface ProjectEvidenceItem {
+  documentId: string
+  attachmentId: string
+  recordType: string
+  recordId: string
+  recordRef: string | null
+  recordTitle: string | null
+  recordStatus: string | null
+  role: string
+  caption: string | null
+  fileName: string | null
+  mimeType: string | null
+  sizeBytes: number | null
+  uploadedAt: string | null
+  fileUrl: string | null
+}
+
+/**
+ * Evidence already attached to the project's records — RFI letters, NCR
+ * photos, submittal transmittals — that a change order can cite without a
+ * second upload (Phase 22B). The API applies the viewer's own visibility.
+ */
+export const useProjectEvidence = (projectId: string, search?: string) =>
+  useQuery<{ items: ProjectEvidenceItem[] }>({
+    queryKey: ['project-evidence', projectId, search || ''],
+    queryFn: () =>
+      apiClient
+        .get(`/projects/${projectId}/attachments/search`, {
+          params: { q: search || undefined, limit: 40 },
+        })
+        .then((response) => response.data.data),
+    enabled: Boolean(projectId),
+    staleTime: 15_000,
+  })
+
 export const useDocumentRegister = (
   projectId: string,
   query: DocumentRegisterQuery = {}

@@ -38,6 +38,9 @@ jest.mock("../inventory.service", () => mockInventory);
 // The lead-time alert is procurement's own calculation; that it is asked for is
 // what matters here, and it has its own tests.
 jest.mock("../procurement.service", () => ({ syncLeadTimeAlert: jest.fn() }));
+// the delivery is published to the project as it is posted (Phase 22B)
+const mockAudit = { recordEvent: jest.fn(async () => ({})), ENTITY_TYPES: { DELIVERY_RECEIPT: "delivery_receipt" }, ACTIONS: { CREATED: "created" } };
+jest.mock("../audit.service", () => mockAudit);
 
 const service = require("../goods-receipt.service");
 const procurement = require("../procurement.service");
@@ -262,6 +265,10 @@ describe("goods receipt", () => {
       })
     );
     expect(procurement.syncLeadTimeAlert).toHaveBeenCalled();
+    // the delivery reaches everyone watching the project (Phase 22B)
+    expect(mockAudit.recordEvent).toHaveBeenCalledWith(
+      expect.objectContaining({ projectId: "project-1", entityType: "delivery_receipt", action: "created", newStatus: "partial" })
+    );
   });
 
   it("leaves the material alone when the line was not ordered against one", async () => {

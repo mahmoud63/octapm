@@ -12,13 +12,18 @@ import {
   CommandList,
 } from '@/components/ui/command'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
-import { useDocumentRegister } from '@/features/doc-control/hooks/use-doc-control'
+import {
+  useDocumentRegister,
+  useProjectEvidence,
+} from '@/features/doc-control/hooks/use-doc-control'
 
 /**
  * Pick supporting documents from the project's document register — searched
- * by reference, title, document number, revision and status — and keep the
- * file's canonical id underneath. A person never sees or types an id
- * (Phase 22A, from the Phase 22 audit UX22-03).
+ * by reference, title, document number, revision and status — or from the
+ * evidence already attached to the project's records (an RFI's instruction,
+ * an NCR's photo, a submittal's transmittal), and keep the file's canonical
+ * id underneath. A person never sees or types an id, and never uploads the
+ * same file twice (Phase 22A UX22-03; Phase 22B 22A-P2-01).
  */
 export function DocumentPicker({
   projectId,
@@ -38,6 +43,14 @@ export function DocumentPicker({
   const { data, isLoading } = useDocumentRegister(projectId, {
     search: search.trim() || undefined,
   })
+  const { data: evidence, isLoading: evidenceLoading } = useProjectEvidence(
+    projectId,
+    search.trim() || undefined
+  )
+  const recordOptions = useMemo(
+    () => evidence?.items || [],
+    [evidence]
+  )
 
   const options = useMemo(
     () =>
@@ -59,8 +72,14 @@ export function DocumentPicker({
       map[row.documentId as string] =
         `${row.ref}${row.revision ? ` rev ${row.revision}` : ''} — ${row.title}`
     }
+    for (const row of recordOptions) {
+      if (!map[row.documentId]) {
+        map[row.documentId] =
+          `${row.recordRef || row.recordType} — ${row.fileName || row.caption || 'file'}`
+      }
+    }
     return map
-  }, [options, initialLabels])
+  }, [options, recordOptions, initialLabels])
 
   const toggle = (documentId: string) =>
     onChange(
@@ -113,9 +132,9 @@ export function DocumentPicker({
             />
             <CommandList>
               <CommandEmpty>
-                {isLoading
+                {isLoading || evidenceLoading
                   ? 'Loading documents…'
-                  : 'No documents match. Only register documents with an uploaded revision can be attached.'}
+                  : 'Nothing matches in the register or on the project\'s records.'}
               </CommandEmpty>
               <CommandGroup heading='Project documents'>
                 {options.map((row) => {
@@ -149,6 +168,40 @@ export function DocumentPicker({
                   )
                 })}
               </CommandGroup>
+              {recordOptions.length > 0 && (
+                <CommandGroup heading='Attached to records'>
+                  {recordOptions.map((row) => {
+                    const selected = value.includes(row.documentId)
+                    return (
+                      <CommandItem
+                        key={row.attachmentId}
+                        value={row.documentId}
+                        onSelect={() => toggle(row.documentId)}
+                        className='flex items-start gap-2'
+                        data-testid='co-evidence-option'
+                      >
+                        <Check
+                          className={cn('mt-0.5 size-4', selected ? 'opacity-100' : 'opacity-0')}
+                        />
+                        <div className='min-w-0'>
+                          <p className='truncate text-sm font-medium'>
+                            {row.recordRef || row.recordType}
+                            {row.recordStatus ? (
+                              <span className='ml-2 text-xs font-normal text-muted-foreground'>
+                                {row.recordStatus}
+                              </span>
+                            ) : null}
+                          </p>
+                          <p className='truncate text-xs text-muted-foreground'>
+                            {row.fileName || row.caption || 'file'}
+                            {row.recordTitle ? ` · ${row.recordTitle}` : ''}
+                          </p>
+                        </div>
+                      </CommandItem>
+                    )
+                  })}
+                </CommandGroup>
+              )}
             </CommandList>
           </Command>
         </PopoverContent>

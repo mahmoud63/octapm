@@ -1920,6 +1920,7 @@ model ChangeOrder {
   projectId             String
   activityId            String?
   budgetLineId          String? // target budget line for the approved value (OCTA-FIN-COSTCODE-019)
+  budgetAllocationsJson Json      @default("[]") // explicit split of the approved value across budget lines: [{ budgetLineId, amount }] (Phase 22B)
   ref                   String
   description           String
   category              String?

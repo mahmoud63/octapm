@@ -1,6 +1,7 @@
 import { BallInCourtBadge } from '@/components/ball-in-court'
 import { useMemo, useState } from 'react'
 import { Eye, Plus } from 'lucide-react'
+import { FINANCIAL_TERMS } from '@/lib/financial-terms'
 import { useCanPerform } from '@/lib/permissions'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -77,7 +78,7 @@ export function CommitmentsPanel({
           ['Original', summary?.original ?? 0, true],
           ['Approved changes', summary?.approvedChanges ?? 0, true],
           ['Revised', summary?.revised ?? 0, true],
-          ['Committed (executed)', summary?.committed ?? 0, true],
+          [FINANCIAL_TERMS.executedCommitments.label, summary?.committed ?? 0, true],
         ].map(([label, value, isMoney]) => (
           <div key={label as string} className='rounded-lg border p-3'>
             <p className='text-xs text-muted-foreground'>{label as string}</p>

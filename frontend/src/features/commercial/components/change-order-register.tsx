@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { formatShortDate } from '@/lib/dates'
 import { CheckCircle2, History, RotateCcw, Send, XCircle } from 'lucide-react'
 import { toast } from 'sonner'
 import { handleServerError } from '@/lib/handle-server-error'
@@ -69,6 +70,17 @@ const approvalReady = (order: ChangeOrderRecord) => {
   )
 }
 
+const CO_STATUS_LABELS: Record<string, string> = {
+  draft: 'Draft',
+  pending: 'Pending approval',
+  approved: 'Approved',
+  rejected: 'Rejected',
+  archived: 'Archived',
+}
+
+const changeOrderStatusLabel = (status: string) =>
+  CO_STATUS_LABELS[status] ?? status.replace(/_/g, ' ')
+
 function CoBadge({ status }: { status: string }) {
   const map: Record<string, string> = {
     draft: 'bg-slate-100 text-slate-800',
@@ -80,8 +92,9 @@ function CoBadge({ status }: { status: string }) {
   return (
     <span
       className={`rounded-full px-2 py-0.5 text-xs font-semibold ${map[status] ?? map.pending}`}
+      data-status={status}
     >
-      {status}
+      {changeOrderStatusLabel(status)}
     </span>
   )
 }
@@ -331,6 +344,14 @@ export function ChangeOrderRegister({
                       >
                         Cost: {order.costImpactSummary || 'Missing'}
                       </p>
+                      <p className='truncate sm:col-span-2' data-testid='co-budget-target'>
+                        Budget line:{' '}
+                        {order.budgetLine
+                          ? `${order.budgetLine.costCode?.code ?? '—'} · ${order.budgetLine.description || order.budgetLine.costType}`
+                          : order.budgetAllocationsJson?.length
+                            ? `split across ${order.budgetAllocationsJson.length} lines`
+                            : 'Change orders line (unassigned)'}
+                      </p>
                     </div>
                     <p className='text-xs text-muted-foreground'>
                       {trace.activityCount} activities | {trace.allocationCount}{' '}
@@ -478,12 +499,12 @@ export function ChangeOrderRegister({
                   <td className='p-2 text-right'>{order.scheduleImpact}d</td>
                   <td className='p-2 text-xs text-muted-foreground'>
                     {order.submittedDate
-                      ? new Date(order.submittedDate).toLocaleDateString()
+                      ? formatShortDate(order.submittedDate)
                       : '-'}
                   </td>
                   <td className='p-2 text-xs text-muted-foreground'>
                     {order.approvedDate
-                      ? new Date(order.approvedDate).toLocaleDateString()
+                      ? formatShortDate(order.approvedDate)
                       : '-'}
                   </td>
                   <td className='p-2 text-muted-foreground'>

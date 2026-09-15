@@ -16,6 +16,14 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
+import { useBudgetLines } from '@/features/cost/hooks/use-budget'
 import { DocumentPicker } from './document-picker'
 import { RaisedByPicker } from './raised-by-picker'
 import { Label } from '@/components/ui/label'
@@ -32,6 +40,8 @@ type Props = {
   projectId: string
   onSubmit: (payload: {
     description: string
+    budgetLineId?: string | null
+    budgetAllocations?: Array<{ budgetLineId: string; amount: number }>
     category?: string
     value?: number
     scheduleImpact?: number
@@ -69,7 +79,11 @@ type FormState = {
   documentIds: string[]
   submittedDate: string
   raisedBy: string
+  budgetLineId: string
+  budgetSplit: Array<{ budgetLineId: string; amount: string }>
 }
+
+const NO_LINE = '__change_orders_line__'
 
 const defaultState: FormState = {
   description: '',
@@ -83,6 +97,8 @@ const defaultState: FormState = {
   documentIds: [],
   submittedDate: '',
   raisedBy: '',
+  budgetLineId: '',
+  budgetSplit: [],
 }
 
 const toFormState = (initial?: ChangeOrderRecord | null): FormState => {
@@ -122,6 +138,11 @@ const toFormState = (initial?: ChangeOrderRecord | null): FormState => {
       ? new Date(initial.submittedDate).toISOString().slice(0, 10)
       : '',
     raisedBy: initial.raisedBy || '',
+    budgetLineId: initial.budgetLineId || '',
+    budgetSplit: (initial.budgetAllocationsJson || []).map((row) => ({
+      budgetLineId: row.budgetLineId,
+      amount: String(row.amount),
+    })),
   }
 }
 
@@ -135,6 +156,20 @@ export function ChangeOrderForm({
   onSubmit,
 }: Props) {
   const [form, setForm] = useState<FormState>(() => toFormState(initial))
+  const { data: budgetLinesData } = useBudgetLines(projectId)
+  const budgetLines = budgetLinesData?.items ?? []
+  const lineLabel = (lineId: string) => {
+    const line = budgetLines.find((row) => row.id === lineId)
+    if (!line) return lineId
+    return `${line.costCode?.code ?? '—'} · ${line.description || line.costType}`
+  }
+  const splitTotal = form.budgetSplit.reduce(
+    (acc, row) => acc + (Number(row.amount) || 0),
+    0
+  )
+  const splitMismatch =
+    form.budgetSplit.length > 0 &&
+    Math.abs(splitTotal - (Number(form.value) || 0)) > 0.005
   const selectedActivityIds = new Set(form.activityIds)
   const selectedActivities = form.activityIds
     .map((id) => activities.find((activity) => activity.id === id))
@@ -400,6 +435,133 @@ export function ChangeOrderForm({
             </div>
           )}
 
+          <div className='col-span-2 grid gap-1.5' data-testid='co-budget-allocation'>
+            <Label>Budget allocation</Label>
+            <p className='text-xs text-muted-foreground'>
+              Where the approved value lands in the budget. Leave it on the
+              project&apos;s &quot;Change orders&quot; line to decide later, name one
+              line, or split it across lines.
+            </p>
+            {form.budgetSplit.length === 0 ? (
+              <Select
+                value={form.budgetLineId || NO_LINE}
+                onValueChange={(value) =>
+                  setForm((prev) => ({
+                    ...prev,
+                    budgetLineId: value === NO_LINE ? '' : value,
+                  }))
+                }
+              >
+                <SelectTrigger data-testid='co-budget-line'>
+                  <SelectValue placeholder='Change orders line (decide later)' />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={NO_LINE}>
+                    Change orders line (decide later)
+                  </SelectItem>
+                  {budgetLines.map((line) => (
+                    <SelectItem key={line.id} value={line.id}>
+                      {lineLabel(line.id)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            ) : (
+              <div className='grid gap-1.5' data-testid='co-budget-split'>
+                {form.budgetSplit.map((row, index) => (
+                  <div key={index} className='flex items-center gap-2'>
+                    <Select
+                      value={row.budgetLineId || undefined}
+                      onValueChange={(value) =>
+                        setForm((prev) => ({
+                          ...prev,
+                          budgetSplit: prev.budgetSplit.map((item, i) =>
+                            i === index ? { ...item, budgetLineId: value } : item
+                          ),
+                        }))
+                      }
+                    >
+                      <SelectTrigger className='flex-1'>
+                        <SelectValue placeholder='Budget line' />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {budgetLines.map((line) => (
+                          <SelectItem key={line.id} value={line.id}>
+                            {lineLabel(line.id)}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <Input
+                      type='number'
+                      step='0.01'
+                      min='0'
+                      className='w-36'
+                      aria-label='Amount on this line'
+                      value={row.amount}
+                      onChange={(e) =>
+                        setForm((prev) => ({
+                          ...prev,
+                          budgetSplit: prev.budgetSplit.map((item, i) =>
+                            i === index ? { ...item, amount: e.target.value } : item
+                          ),
+                        }))
+                      }
+                    />
+                    <Button
+                      type='button'
+                      variant='ghost'
+                      size='sm'
+                      onClick={() =>
+                        setForm((prev) => ({
+                          ...prev,
+                          budgetSplit: prev.budgetSplit.filter((_, i) => i !== index),
+                        }))
+                      }
+                    >
+                      Remove
+                    </Button>
+                  </div>
+                ))}
+                <p
+                  className={
+                    splitMismatch
+                      ? 'text-xs text-destructive'
+                      : 'text-xs text-muted-foreground'
+                  }
+                >
+                  Split total {splitTotal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} of{' '}
+                  {(Number(form.value) || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  {splitMismatch ? ' — the lines must add up to the value' : ''}
+                </p>
+              </div>
+            )}
+            <div>
+              <Button
+                type='button'
+                variant='ghost'
+                size='sm'
+                data-testid='co-budget-split-toggle'
+                onClick={() =>
+                  setForm((prev) =>
+                    prev.budgetSplit.length
+                      ? { ...prev, budgetSplit: [] }
+                      : {
+                          ...prev,
+                          budgetLineId: '',
+                          budgetSplit: [
+                            { budgetLineId: prev.budgetLineId, amount: prev.value },
+                            { budgetLineId: '', amount: '0' },
+                          ],
+                        }
+                  )
+                }
+              >
+                {form.budgetSplit.length ? 'One line instead' : 'Split across lines'}
+              </Button>
+            </div>
+          </div>
+
           <div className='col-span-2 grid gap-1.5'>
             <Label>Supporting documents</Label>
             {/* Documents are picked from the project's register by reference,
@@ -441,8 +603,23 @@ export function ChangeOrderForm({
                 toast.error(MONEY_PRECISION_MESSAGE)
                 return
               }
+              if (form.budgetSplit.some((row) => !row.budgetLineId)) {
+                toast.error('Pick a budget line for every row of the split')
+                return
+              }
+              if (splitMismatch) {
+                toast.error('The split must add up to the change order value')
+                return
+              }
 
               await onSubmit({
+                budgetLineId: form.budgetSplit.length
+                  ? null
+                  : form.budgetLineId || null,
+                budgetAllocations: form.budgetSplit.map((row) => ({
+                  budgetLineId: row.budgetLineId,
+                  amount: toMoneyNumber(row.amount),
+                })),
                 description: form.description.trim(),
                 category: form.category || undefined,
                 value: toMoneyNumber(form.value),

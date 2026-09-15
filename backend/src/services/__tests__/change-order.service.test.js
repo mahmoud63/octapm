@@ -364,6 +364,29 @@ describe("change order service audit history", () => {
     );
   });
 
+  it("Phase 22B: stores the budget line or the split it is given, and refuses a split that does not add up", async () => {
+    mockPrisma.project.findFirst.mockResolvedValue({ id: "project-1", orgId: "org-1" });
+    mockPrisma.budgetLine = { findMany: jest.fn(async ({ where }) => (where.id.in || []).filter((id) => id !== "line-archived").map((id) => ({ id }))) };
+    mockPrisma.changeOrder.create.mockImplementation(async ({ data }) => ({ id: "co-alloc", ...data, activityLinks: [], allocationLinks: [] }));
+    mockPrisma.changeOrder.findFirst.mockResolvedValue(null);
+
+    // one line: the line travels on the order, no split
+    await changeOrderService.createChangeOrder({ orgId: "org-1", projectId: "project-1", userId: "qs-1", payload: { description: "Rock in footing", value: 5000, budgetLineId: "line-1" } });
+    expect(mockPrisma.changeOrder.create).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ budgetLineId: "line-1", budgetAllocationsJson: [] }) }));
+
+    // a split that adds up: stored as the split, the single line cleared
+    mockPrisma.changeOrder.create.mockClear();
+    await changeOrderService.createChangeOrder({ orgId: "org-1", projectId: "project-1", userId: "qs-1", payload: { description: "Rock in footing", value: 5000, budgetAllocations: [{ budgetLineId: "line-1", amount: 3000 }, { budgetLineId: "line-2", amount: 2000 }] } });
+    expect(mockPrisma.changeOrder.create).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ budgetLineId: null, budgetAllocationsJson: [{ budgetLineId: "line-1", amount: 3000 }, { budgetLineId: "line-2", amount: 2000 }] }) }));
+
+    // a split that does not add up, a line that is not the project's, a line twice: all refused before anything is written
+    mockPrisma.changeOrder.create.mockClear();
+    await expect(changeOrderService.createChangeOrder({ orgId: "org-1", projectId: "project-1", userId: "qs-1", payload: { description: "x", value: 5000, budgetAllocations: [{ budgetLineId: "line-1", amount: 3000 }, { budgetLineId: "line-2", amount: 1000 }] } })).rejects.toMatchObject({ code: "CHANGE_ORDER_ALLOCATION_MISMATCH" });
+    await expect(changeOrderService.createChangeOrder({ orgId: "org-1", projectId: "project-1", userId: "qs-1", payload: { description: "x", value: 5000, budgetLineId: "line-archived" } })).rejects.toMatchObject({ code: "CHANGE_ORDER_BUDGET_LINE_INVALID" });
+    await expect(changeOrderService.createChangeOrder({ orgId: "org-1", projectId: "project-1", userId: "qs-1", payload: { description: "x", value: 5000, budgetAllocations: [{ budgetLineId: "line-1", amount: 2500 }, { budgetLineId: "line-1", amount: 2500 }] } })).rejects.toMatchObject({ code: "CHANGE_ORDER_ALLOCATION_INVALID" });
+    expect(mockPrisma.changeOrder.create).not.toHaveBeenCalled();
+  });
+
   it("blocks direct approval status on create and update", async () => {
     mockPrisma.changeOrder.count.mockResolvedValue(0);
     await expect(

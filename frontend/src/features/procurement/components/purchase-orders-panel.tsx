@@ -2,6 +2,7 @@ import { BallInCourtBadge } from '@/components/ball-in-court'
 import { useState } from 'react'
 import { Loader2 } from 'lucide-react'
 import { formatDate } from '@/lib/dates'
+import { FINANCIAL_TERMS } from '@/lib/financial-terms'
 import { cn } from '@/lib/utils'
 import { Input } from '@/components/ui/input'
 import {
@@ -87,7 +88,7 @@ export function PurchaseOrdersPanel({
       <div className='grid grid-cols-2 gap-3 lg:grid-cols-4'>
         {[
           ['Orders', String(data?.summary.total ?? 0)],
-          ['Committed', money(data?.summary.committed ?? 0, currency)],
+          [FINANCIAL_TERMS.poValue.label, money(data?.summary.committed ?? 0, currency)],
           ['Invoiced', money(data?.summary.invoiced ?? 0, currency)],
           [
             'Waiting on you',

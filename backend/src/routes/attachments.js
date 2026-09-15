@@ -113,6 +113,28 @@ router.get(
   }),
 );
 
+// Evidence already on the project's records, for citing on a change order
+// (Phase 22B). Declared before "/:attachmentId" so "search" is never read as an id.
+router.get(
+  "/search",
+  [
+    query("q").optional().isString().trim().isLength({ max: 120 }),
+    query("limit").optional().isInt({ min: 1, max: 100 }).toInt(),
+    validate,
+  ],
+  asyncHandler(async (req, res) => {
+    const viewer = viewerFor(req);
+    const result = await attachmentService.searchProjectEvidence({
+      orgId: req.user.orgId,
+      projectId: req.params.projectId,
+      viewer,
+      q: req.query.q || "",
+      limit: req.query.limit || 40,
+    });
+    return sendSuccess(res, result);
+  }),
+);
+
 router.post(
   "/",
   uploadLimiter,

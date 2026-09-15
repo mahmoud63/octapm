@@ -486,6 +486,80 @@ const listAttachments = async ({ orgId, projectId, recordType, recordId, viewer 
   return { items: visible.map((row) => serializeAttachment(row, projectId)) };
 };
 
+/**
+ * Evidence already in the project (Phase 22B): every document attached to any
+ * record the viewer may read — an RFI's instruction letter, an NCR's photos, a
+ * submittal's transmittal, a daily log's photos — searched by file name,
+ * caption, or the record's reference and title. A change order then cites the
+ * very same ProjectDocument the record carries: nothing is uploaded twice, and
+ * nothing appears that the record's own visibility rule would hide (the module
+ * read permission first, then the Phase 21 record rules for party-scoped
+ * viewers).
+ */
+const searchProjectEvidence = async ({ orgId, projectId, viewer = null, q = "", limit = 40 }) => {
+  await ensureProject({ orgId, projectId });
+  const rows = await prisma.attachment.findMany({
+    where: { projectId, document: { status: { in: ["available", "linked"] } } },
+    include: attachmentInclude,
+    orderBy: [{ createdAt: "desc" }],
+    take: 500,
+  });
+  let visible = rows.filter((row) => {
+    const moduleName = RECORD_TYPE_MODULES[row.recordType];
+    return !moduleName || !viewer?.canRead || viewer.canRead(moduleName);
+  });
+  if (viewer) {
+    const docText = require("./document-text.service");
+    const pairs = [...new Map(visible.map((row) => [`${row.recordType}:${row.recordId}`, { recordType: row.recordType, recordId: row.recordId }])).values()];
+    const ruled = await docText.recordRuleVisibleIds({ documents: [{ attachments: pairs }], viewer });
+    visible = visible.filter((row) => docText.attachmentVisible({ recordType: row.recordType, recordId: row.recordId, role: row.role }, viewer, ruled));
+  }
+
+  // one label per record, resolved through the same loader comments and pins use
+  const { loadRecord } = require("./comment.service");
+  const labels = new Map();
+  const keys = [...new Set(visible.map((row) => `${row.recordType}:${row.recordId}`))].slice(0, 150);
+  for (const key of keys) {
+    const [recordType, recordId] = key.split(":");
+    try {
+      const { record, display } = await loadRecord({ orgId, projectId, recordType, recordId });
+      labels.set(key, { ref: record?.ref || record?.number || null, title: display || null, status: record?.status || null });
+    } catch {
+      labels.set(key, { ref: null, title: null, status: null });
+    }
+  }
+
+  const needle = String(q || "").trim().toLowerCase();
+  const seen = new Set();
+  const items = [];
+  for (const row of visible) {
+    if (seen.has(row.documentId)) continue; // the same file can hang on several records; offer it once
+    const label = labels.get(`${row.recordType}:${row.recordId}`) || { ref: null, title: null, status: null };
+    const fileName = row.document?.fileName || row.document?.originalName || null;
+    const haystack = [fileName, row.caption, label.ref, label.title].filter(Boolean).join(" ").toLowerCase();
+    if (needle && !haystack.includes(needle)) continue;
+    seen.add(row.documentId);
+    items.push({
+      documentId: row.documentId,
+      attachmentId: row.id,
+      recordType: row.recordType,
+      recordId: row.recordId,
+      recordRef: label.ref,
+      recordTitle: label.title,
+      recordStatus: label.status,
+      role: row.role,
+      caption: row.caption || null,
+      fileName,
+      mimeType: row.document?.mimeType || null,
+      sizeBytes: row.document?.sizeBytes ?? null,
+      uploadedAt: toIso(row.document?.uploadedAt || row.createdAt),
+      fileUrl: row.document ? documentUrl(projectId, row.document.id) : null,
+    });
+    if (items.length >= limit) break;
+  }
+  return { items, total: items.length };
+};
+
 const getAttachment = async ({ orgId, projectId, attachmentId }) => {
   const row = await prisma.attachment.findFirst({
     where: { id: attachmentId, projectId, orgId },
@@ -803,6 +877,7 @@ const runPhotoThumbnailJob = async ({ job, payload = {}, updateProgress = async 
 };
 
 module.exports = {
+  searchProjectEvidence,
   ATTACHMENT_ROLES,
   RECORD_TYPES,
   RECORD_TYPE_MODULES,

@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Loader2, Sparkles, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
+import { FINANCIAL_TERMS } from '@/lib/financial-terms'
 import { getServerErrorMessage } from '@/lib/handle-server-error'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -178,7 +179,12 @@ export function BudgetLineDialog({
             />
           </div>
           <div className='space-y-1'>
-            <Label htmlFor='budget-committed'>Committed</Label>
+            <Label
+              htmlFor='budget-committed'
+              title={FINANCIAL_TERMS.manualCommitted.hint}
+            >
+              {FINANCIAL_TERMS.manualCommitted.label}
+            </Label>
             <Input
               id='budget-committed'
               type='number'

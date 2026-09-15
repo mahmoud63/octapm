@@ -13,6 +13,7 @@ import {
   XCircle,
 } from 'lucide-react'
 import { toast } from 'sonner'
+import { FINANCIAL_TERMS } from '@/lib/financial-terms'
 import { getServerErrorMessage } from '@/lib/handle-server-error'
 import { useCanPerform } from '@/lib/permissions'
 import { cn } from '@/lib/utils'
@@ -147,7 +148,10 @@ export function BudgetPanel({ projectId }: { projectId: string }) {
         />
         <Stat label='Revisions' value={formatMoney(totals?.revisions ?? 0)} />
         <Stat label='Revised' value={formatMoney(totals?.revisedBudget ?? 0)} />
-        <Stat label='Committed' value={formatMoney(totals?.committed ?? 0)} />
+        <Stat
+          label={FINANCIAL_TERMS.executedCommitments.label}
+          value={formatMoney(totals?.committed ?? 0)}
+        />
         <Stat label='Actual' value={formatMoney(totals?.actual ?? 0)} />
         <Stat
           label='Forecast (budget lines)'
@@ -318,7 +322,12 @@ export function BudgetPanel({ projectId }: { projectId: string }) {
                 <th className='p-2 text-right'>Original</th>
                 <th className='p-2 text-right'>Changes</th>
                 <th className='p-2 text-right'>Revised</th>
-                <th className='p-2 text-right'>Committed</th>
+                <th
+                  className='p-2 text-right'
+                  title={FINANCIAL_TERMS.executedCommitments.hint}
+                >
+                  {FINANCIAL_TERMS.executedCommitments.label}
+                </th>
                 <th className='p-2 text-right'>Actual</th>
                 <th className='p-2 text-right'>Forecast</th>
                 <th className='p-2 text-right'>Variance</th>

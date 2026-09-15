@@ -3,6 +3,7 @@ const { HttpError } = require("../utils/http-error");
 const { nextRef } = require("../utils/reference-number");
 const inventory = require("./inventory.service");
 const procurement = require("./procurement.service");
+const auditService = require("./audit.service");
 
 /**
  * Goods receipt against a purchase order, and the three-way match that follows
@@ -629,6 +630,26 @@ const receiveAgainstOrder = async ({ orgId, user, payload, allowedProjectIds = n
     for (const row of stock) {
       onHandByItem.set(row.itemId, num(onHandByItem.get(row.itemId)) + num(row.onHand));
     }
+
+    // Everyone watching the order — the buyer's purchase-order list, the
+    // project's stock — learns of the delivery as it is posted (Phase 22B).
+    await auditService.recordEvent({
+      tx,
+      orgId,
+      projectId: order.projectId,
+      entityType: auditService.ENTITY_TYPES.DELIVERY_RECEIPT,
+      entityId: receipt.id,
+      action: auditService.ACTIONS.CREATED,
+      actorId: user?.id || null,
+      actorRole: user?.role || null,
+      newStatus: orderStatus,
+      summary: {
+        receiptNumber: receipt.receiptNumber,
+        orderRef: order.ref,
+        warehouse: warehouse.name ?? null,
+        lines: outcomes.length,
+      },
+    });
 
     return {
       receiptId: receipt.id,
