@@ -83,3 +83,30 @@ provisional, untouched) and Settings/Admin (3.6, admin surface). Why: the phase 
 audit's Wave A/B items, so Quality's findability/reliability, Procurement's "Committed" wording, the
 cost landing's lack of a chart, and the admin screens' click cost were left where Phase 22 found them.
 Modules scoring 5/5: still none (RFI is at 4.8).
+
+## Phase 22B re-score (2026-09-15, after the external-pilot pass)
+
+Same dimensions and scale. Only what was driven live moves; Schedule was not deep-driven in 22B and
+keeps its provisional score. Meetings/Tasks and BOQ were exercised only through quick actions and the
+seeded bill and are not scored (no number is better than a guessed one).
+
+| Module | EoU | Clk | Vis | Term | WfC | Rel | Con | Find | Resp | Rpt | **Score** | Δ vs 22A | What moved |
+| --- | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | --- |
+| Workspace / Home | 4 | 5 | 5 | 4 | 5 | 5 | 5 | 5 | 5 | 5 | **4.8** | +0.2 | KPIs count only live projects (2 visible, 7 procurement risks, was 7 / 273); no console error for any persona (Rel, Rpt) |
+| Doc Control / RFI | 5 | 5 | 5 | 4 | 5 | 5 | 5 | 5 | 5 | 4 | **4.8** | 0 | unchanged; dates no longer shift |
+| Procurement | 4 | 4 | 4 | 5 | 5 | 5 | 5 | 5 | 5 | 4 | **4.6** | +0.4 | "PO value" (Term); receipt reaches the buyer live (Con); bid package → award → commitment driven end to end, 0 errors (Rel) |
+| Schedule *(provisional)* | 4 | 4 | 4 | 5 | 4 | 4 | 4 | 3 | 4 | 4 | **4.0** | 0 | not deep-driven this phase |
+| Inventory / Warehouse | 4 | 4 | 5 | 5 | 4 | 4 | 5 | 4 | 4 | 4 | **4.3** | +0.2 | USD on the KPIs (Term); the buyer's list follows the receipt (Resp) |
+| Commercial | 5 | 4 | 5 | 5 | 5 | 5 | 5 | 4 | 4 | 4 | **4.6** | +0.5 | budget line and evidence picked on the form (EoU); "Executed commitments", "Pending approval" (Term); approval queue and REALTIME approval (WfC, Rel); approved value on the named line (Rpt) |
+| Quality | 5 | 5 | 4 | 4 | 5 | 5 | 5 | 4 | 5 | 4 | **4.6** | +0.9 | Quality Engineer role; one dialog to raise (EoU, Clk); assignee submits the closeout, quality engineer approves, every handoff REALTIME (WfC, Con, Resp); live KPIs, 0 errors (Rel, Rpt) |
+| Settings / Admin | 4 | 4 | 5 | 5 | 4 | 5 | 4 | 4 | 4 | 3 | **4.2** | +0.6 | Add/Edit company, cost-code edit (EoU, Clk); 7 active companies instead of 644, role labels (Vis, Term); People page explains itself (Resp); registries still have no audit view or pagination (Rpt) |
+| Cost Control | 4 | 4 | 4 | 5 | 4 | 5 | 5 | 4 | 4 | 4 | **4.3** | +0.2 | cost codes readable by every role, 0 errors (Rel); the change lands on the line its owner named (Resp) |
+
+**OCTAPM CLIENT EXPERIENCE SCORE after 22B: 4.47 / 5 (≈ 4.5).** Unweighted mean of the nine scored
+modules (40.2 / 9); the five daily-use modules (Workspace, RFI, Procurement, Cost, Commercial) average
+4.6. Not inflated: 4.47 sits on the 4.5 boundary because Schedule is still provisional (4.0) and
+Settings/Admin lacks registry audit views and pagination (4.2).
+
+Target check: overall ≥ 4.5 — **met at the boundary (4.47 rounds to 4.5; strictly 0.03 short)**; no
+core module < 4.0 — **met** (lowest 4.0, provisional); Quality ≥ 4.0 — **met** (4.6); Settings/Admin
+≥ 4.0 — **met** (4.2). Modules scoring 5/5: still none (Workspace and RFI at 4.8).

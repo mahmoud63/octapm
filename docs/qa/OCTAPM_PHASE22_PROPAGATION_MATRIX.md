@@ -127,3 +127,23 @@ nothing in this table was taken on trust.
 | Timesheet approval → labour → ledger → Actual | Labour actual $2,000 on 01-100 in the budget register and the ledger lines; reconciliation 16/16 source lines. | CONNECTED |
 | RFI answer → status → responsibility → Needs You → audit | Two-session REALTIME both ways; site engineer's "My open items" reads 0 after closure; audit feed names the actor. | CONNECTED |
 | Direct cost approval → Actual (added this phase) | Two-session: cost controller's "Actual cost" moves by the approved $750 within 3 ms, no refresh. | CONNECTED |
+
+## Phase 22B final pass (2026-09-15, disposable E2E project unless noted)
+
+| Chain | Evidence | Status |
+| --- | --- | --- |
+| Change order → named budget line → revised budget → Cost Overview → forecast | E2E Riverside: VO approved $12,500 on line 01-100 (Site labour $150,000 → $162,500 revised); project Approved changes 12,500, Revised 1,712,500, Forecast 1,712,500; the QS sees the approval in 3 ms | CONNECTED |
+| Change order with a split across lines / with an archived line | `budget.service.test.js` "applies an explicit split", archived share to the holding line; repeated approval idempotent (`change-order.service.test.js`) | CONNECTED (unit) |
+| Historical change orders (certified project) | still on the holding line, Original 1,700,000 / Approved changes 254,500 / Revised 1,954,500; 36/36 snapshot checks, Actual delta 0.00 | PRESERVED |
+| Procurement: RFQ (bid package) → award → commitment | supplier portal drive: package published, bid submitted and revised, soft award, confirmed award raises subcontract commitment SC-002 from the priced lines | CONNECTED |
+| Procurement: PO → receipt → stock → PM list | goods receipt against PO-0001: PM list "Delivered" in 4 ms; stock 1,560 bags at 6.40 on navigation | CONNECTED |
+| Inventory issue → stock / value / ledger / Actual | certified project snapshot: 86 bags left at 11.00, material issue 704.00 in the ledger, Actual 71,204.00 (SQL = API) | CONNECTED (certified, read-only) |
+| Labour: timesheet approval → ledger / Actual | certified snapshot: labour 2,000.00 on 01-100 reconciles | CONNECTED (certified) |
+| Subcontract: certification → Actual / retention / payment; payment does not post Actual again | certified snapshot: certified 60,000.00, retention 6,000.00, paid 54,000.00 = cash out; Actual unchanged by payment (delta 0.00) | CONNECTED (certified) |
+| Client: valuation → invoice → receipt; Actual unchanged | certified snapshot: cash in 80,000.00 (stage 10), Actual unchanged | CONNECTED (certified) |
+| RFI → status → responsibility → Needs You → audit | two-session REALTIME both ways | CONNECTED |
+| Quality: NCR → responsible person → Needs You → corrective action with evidence → approval → close | two-session: every handoff REALTIME; the closed NCR leaves "My open items" | CONNECTED |
+| Quality dashboard KPIs | live rows only (void/archived excluded), `quality.metrics.test.js` | CONNECTED |
+
+Propagation verdict: **PASS** — no incorrect financial propagation found; the certified project's
+reconciliation is unchanged at 36/36 with Actual delta 0.00.

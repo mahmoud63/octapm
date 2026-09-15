@@ -219,3 +219,30 @@ value, status, and Export / primary-action / "…" controls.
 | Raised By picker · Document picker | Commercial → Add / Edit Change Order | QS, PM | project team, parties, other/external; register documents with an uploaded revision |
 | Registry short links | `/cost-codes`, `/vendors`, `/directory` | any | redirect to `/company/…` |
 | Residue archive script | `backend/scripts/demo/archive-e2e-residue.js` | operator | dry-run by default; `--apply` |
+
+## Phase 22B additions (2026-09-15)
+
+| Feature | Where | Status |
+| --- | --- | --- |
+| Quality Engineer role (policy, labels, pickers, invitations, templates) | `shared/permissions.json`, users, team, report schedules | live |
+| Quality create dialog (NCR, safety incident, material test with severity, activity, responsible person and company, due date) | Quality dashboard | live |
+| Assignee may submit an NCR or safety closeout regardless of role | `requirePermissionOr`, ncr and safety close routes, dashboard | live |
+| Change order names a budget line or a split; applied on approval | change-order form and register, budget service | live |
+| Change-order evidence from any record's attachments | document picker "Attached to records", `GET /projects/:id/attachments/search` | live |
+| One financial vocabulary (Executed commitments, PO value, Committed (manual)) | cost, commercial, procurement, forecast, reports | live |
+| Goods receipt publishes a project event (buyer's list updates live) | goods-receipt service | live |
+| Company add and edit from the Directory; active-only listing with an inactive switch | Company, Directory | live |
+| Cost-code edit | Company, Cost codes | live |
+| Navigation gated by permission (People, Company); sub-tabs follow their permission module; content waits for permissions | top navbar, project detail | live |
+| Every role reads project parties | policy | live |
+| Invitable roles from the policy | user service | live |
+| Dedicated E2E organisation, reset on every Playwright run, count report | `scripts/e2e/reset-e2e-org.js`, `e2e/global-setup.ts` | live |
+| Seeded cost codes and budget lines (only when a project has none) | `prisma/seed.js` | live |
+| Residue script: company clean-up (inactive, opt-in delete), greenfield cost codes archived, archivedAt stamped, pinned to the certified project's organisation, live demo project protected by name | `scripts/demo/archive-e2e-residue.js` | live |
+| Clean demo Riverside Tower (original fixture archived with its history) | demo organisation | live |
+
+Personas, support status after 22B: Company/Admin, PM, Planner, QS, Cost Controller, Procurement,
+Warehouse, Site Engineer, Quality, Finance are SUPPORTED (browser-certified). Supplier / Bidder is
+SUPPORTED by invitation link (portal, no login). Client / Owner and Subcontractor logins are NOT
+SUPPORTED as external users (an invited representative receives an internal role) and are excluded
+from Pilot V1.

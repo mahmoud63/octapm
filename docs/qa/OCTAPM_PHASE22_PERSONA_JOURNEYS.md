@@ -116,3 +116,42 @@ called out where it matters.
 
 Every persona signed out with "Signed out" (never "Session expired!") and signed back in on the same
 sign-in page; no persona saw a control its role cannot use.
+
+## Phase 22B persona certification (2026-09-15, E2E organisation, one browser session per persona)
+
+Driven by `scratchpad/p21/persona-cert-22b.mjs` after the final fixes: sign in, landing, "My open
+items", quick actions, the project's module bar and "More" overflow, the persona's own module, one URL
+the policy refuses, sign out; every 403 response and console error recorded. Primary workflows are
+evidenced by the two-session driver (RFI, change order, goods receipt, NCR), the supplier portal
+driver (bid package, award) and the Playwright suite (pay applications, timesheets, inventory issue,
+punch, inspections, direct costs).
+
+| Persona | Account | Landing | Quick actions | Module bar | Own module | Refused URL | 403 / console | Sign out |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Company / Admin | Dana Okafor (PM, company admin) | Workspace Control, "My open items" | RFI · Change order · Direct cost · Task | all, Procurement first-class | Company → Directory (Add company, 7 active) | – | 0 / 0 | yes |
+| PM | Dana Okafor | Workspace Control | RFI · Change order · Direct cost · Task | all | Commercial → Change Orders (approval queue) | – | 0 / 0 | yes |
+| Planner | Ravi Menon | Workspace Control | RFI · Task | all | Schedule | Pay Applications → first offered Commercial tab | 0 / 0 | yes |
+| QS | Sofia Lindqvist | Workspace Control | Change order · Direct cost | all | Commercial → Change Orders | People (allowed by policy) | 0 / 0 | yes |
+| Cost Controller | Tomás Herrera | Workspace Control | Direct cost | all | Cost Overview | People → workspace (refused cleanly) | 0 / 0 after the People gate | yes |
+| Procurement | Amina Bello | Workspace Control | none offered | Overview, Schedule, Commercial, Procurement, Quality, Doc Control, Meetings, BOQ, BIM, More | Procurement → Purchase Orders | Change Orders → first offered Commercial tab | 0 / 0 after cost codes became reference data | yes |
+| Warehouse | Jonas Weber | Workspace Control | none offered | Overview, Schedule, Procurement, Quality, Doc Control, Meetings, BOQ, BIM, More | Inventory | Commitments (module hidden) → Overview | 0 / 0 | yes |
+| Site Engineer | Priya Raman | Workspace Control | RFI · Task | Overview, Schedule, Site Reporting, Commercial, Procurement, Quality, Doc Control, Meetings, BOQ, BIM | Doc Control → RFI | Change Orders → first offered Commercial tab | 0 / 0 after the change-event dialog stopped asking for commitments | yes |
+| Quality | Lena Fischer (Quality Engineer, new) | Workspace Control | RFI · Task | Overview, Schedule, Site Reporting, Commercial, Procurement, Quality, Doc Control, Meetings, BOQ, BIM | Quality (NCR, Inspections, Punch, Observations, Safety, Material Tests) | Cost (module hidden) → Overview | 0 / 0 | yes |
+| Finance | Grace Mbeki | Workspace Control | none offered | all | Commercial → Pay Applications | Company directory → workspace (refused cleanly) | 0 / 0 | yes |
+
+The run before the last three fixes (People gate, cost codes as reference data, change-event dialog)
+logged one 403 for the cost controller, one for procurement and two for the site engineer; those are
+the three fixes, re-driven afterwards.
+
+## External personas (2026-09-15, driven live, not faked)
+
+| Persona | Driven as | Result | Decision |
+| --- | --- | --- | --- |
+| Supplier / Bidder | two supplier companies invited to a bid package (prequalification refused, then overridden with an audited reason), portal opened from the link with no account | 20/20: package, due date and lines shown; only the bidder's own invitation visible; lines priced, total worked out, bid submitted, question posted, withdrawn, repriced and resubmitted; the other bidder sees nothing of it; the buyer levels, soft-awards, confirms (commitment SC-002 raised from the priced lines); "This package was awarded to you"; the other bidder is told the package closed; 375 px width without sideways scroll; no console error | **SUPPORTED** (by invitation link; no login, no tenant of its own) |
+| Client / Owner | company added, named as the Owner party, a representative invited to the party by email, invitation accepted, signed in | the representative becomes an internal Site Engineer of the contractor's organisation: internal navigation, internal modules, "My open items"; administration pages refused; no owner-facing view | **NOT SUPPORTED** as an external user |
+| Subcontractor | as above with a Subcontractor party | as above | **NOT SUPPORTED** as an external user |
+
+**Decision: OPTION A — Pilot V1 is an internal contractor pilot.** The ten internal personas are
+supported and browser-certified; the supplier/bidder portal is supported by link and may be used with
+suppliers; owner and subcontractor logins are excluded from the pilot until the product has an
+external role model and tenant boundary (recorded as 22B-17, a scope decision, not a defect).

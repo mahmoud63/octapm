@@ -67,3 +67,18 @@ before external pilot, since typing raw IDs is not something a construction clie
 
 Residual (recorded): workflow attachments such as RFI instruction letters are not register documents, so the
 document picker cannot offer them (22A-P2-01); Category stays free text (UX22-15).
+
+## Phase 22B update (2026-09-15)
+
+| Enter once | Before 22B | After 22B |
+| --- | --- | --- |
+| Change-order budget line | not selectable; every approval went to the holding line | picked from the project's active lines (or split); the approved value lands on that line; history untouched |
+| Change-order evidence | re-uploaded even when already on the RFI | picked from "Attached to records" (the RFI's letter, an NCR photo, a submittal) or the register; one document, one canonical id |
+| Company | typed as free text in party dialogs; no Add or Edit in the Directory | added and edited once in the Directory (name, trade name, type, contact, active flag); parties, bids, commitments and invoices pick it |
+| Cost code | created by hand per organisation; the E2E fixture had none | seeded once per organisation (six codes) by the seed; budget lines seeded only when a project has none |
+| Roles for invites | a second list in the user service (Quality Engineer silently became Site Engineer) | one list, the policy's |
+| Project parties for pickers | readable only by PM, planner and QS, so the NCR "responsible company" and RFI party pickers failed for six roles | readable by every role |
+| Quality record creation | one text box; responsible person, company, activity and due date added afterwards | one dialog with severity, activity, responsible person (user picker), responsible company (project parties) and due date |
+
+Remaining duplicate entry: the bidder's contact name and email are typed on the invitation when the
+vendor record has none; acceptable, since the vendor record then carries them.

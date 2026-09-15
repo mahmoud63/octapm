@@ -76,3 +76,23 @@ figures, illogical cost scenarios) and demo-data cleanliness — all fixable wit
 | Demo residue (UX22-12) | FIXED | Workspace shows 2 active projects, Inventory 7 items and 3 stores; residue archived by explicit marker, reversible. |
 | Sparse cost landing (UX22-14) | PARTIAL | Budget block and EAC cards; no chart yet. |
 | Found this phase | FIXED | Change-order dialog scrolls on short screens; RFI detail titled while loading (no console error); branded 404 inside the shell; no "· —" in the header. |
+
+## Phase 22B update (2026-09-15)
+
+Driven as every internal persona on the E2E organisation and as the PM on the demo organisation.
+
+- **Raw IDs and enums:** the change-order status badge now reads "Pending approval" (was `pending`);
+  team and People roles read "Quality Engineer" (was `quality_engineer`); company type reads
+  "Owner / client". No raw UUID is shown to a normal client on any screen driven.
+- **Test data in client-facing views:** Directory 644 to 7 active companies; Workspace "7 visible
+  projects / 273 procurement risks" to 2 / 7; the demo Riverside Tower is a clean reseed (2 orders,
+  1 commitment, 0 pay applications, 4 budget lines). What remains: the archived original fixture
+  (hidden) and the certified Phase 21 project's run-stamped party names (frozen by design).
+- **Dead ends:** roles without user-management read no longer see "Users"; a URL to a hidden
+  sub-tab lands on the first offered one; the persona certification in the 22B report records the
+  403 and console-error count per persona.
+- **Dates and currency:** registers use the UTC short date (no day shift); inventory KPIs are USD.
+- **Empty states:** Procurement packages ("Nothing to buy yet: create one from a material
+  requirement"), punch list, pay applications and locations all explain the next step.
+- **Still cosmetic (P3):** the bidder portal's browser confirm box on withdrawal; the esbuild
+  deprecation notice in the production build log (tooling, not product).

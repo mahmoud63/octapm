@@ -97,3 +97,41 @@ creates. Counts are meaningful clicks excluding typing; "After" was measured on 
 **Measured average for the four quick-action creates: 5.75 → 2.0 clicks from the landing page.** The
 2-click project entry that taxed every create is gone for the four highest-frequency records; the
 remaining paths are unchanged and still within target from context.
+
+## Phase 22B rebaseline (measured live on 2026-09-15, PM unless noted)
+
+Counts are meaningful clicks after the module named in "Start" is open, excluding typing.
+`M` = measured live in the browser or in the two-session driver · `E` = counted from the
+control set of the screen (the create control was located; the full flow was not driven).
+Business-value clicks (a decision, a signature, an evidence pick) are separated from
+navigation friction (getting to the control) in the last column.
+
+| Task | Phase 22 | 22A | 22B | Δ vs 22A | Start | Business value / friction | Note |
+| --- | :-: | :-: | :-: | :-: | --- | --- | --- |
+| Create RFI | 8 (M) | 2 (M) | 2 (M) | 0 | Workspace | 1 / 1 | Quick action → Open RFI. |
+| Answer RFI | – | – | 4 (M) | – | RFI register | 3 / 1 | Details → Reply → Close → confirm the official answer. |
+| Create Change | 6 (M) | 2 (M) | 6 (M) | +4 | Workspace | 5 / 1 | Quick action (1) → budget line (2, new) → evidence from the RFI's letter (2, replaces a second upload) → Create (1). The two new clicks are the P2-2 allocation and the P2-3 evidence pick. |
+| Approve Change | – | – | 2 (M) | – | Change orders | 2 / 0 | Approve → confirm; the QS sees it in <1 s. |
+| Create Direct Cost | 6 (M) | 2 (M) | 2 (M) | 0 | Workspace | 1 / 1 | Unchanged. |
+| Create RFQ (bid package) | – | – | 4 (M/E) | – | Project | 2 / 2 | Commercial (1) → Bids (1) → New package (1) → Create (1); lines, bidders and Publish follow on the package. |
+| Award RFQ | – | – | 3 (E) | – | Bid package | 3 / 0 | Soft award → Confirm award → confirm (raises the commitment). |
+| Create PO | – | 5 (E) | 4–5 (E) | 0 | Project | – | Raised from a procurement package (material requirement on the schedule); not driven this pass. |
+| Receive Goods | 4–6 (E) | 4–6 (E) | 4 (M) | – | Inventory | 2 / 2 | Goods in (1) → scan the order (1) → Post (1) after the accepted quantities; the PM's list updates in <1 s (new 22B event). |
+| Issue Material | 4 (M/E) | 4 (M) | 4 (M) | 0 | Inventory | 2 / 2 | Unchanged. |
+| Approve Timesheet | 3–5 (E) | 3–5 (E) | 4 (E) | – | Project | 2 / 2 | Site Reporting (1) → Timesheets (1) → open (1) → Approve (1). |
+| Create Pay App | – | – | 6 (M/E) | – | Project | 4 / 2 | Commercial (1) → Pay Applications (1) → New application (1) → commitment (2) → Create (1). |
+| Certify Pay App | 3–5 (E) | 3–5 (E) | 3 (E) | – | Pay applications | 3 / 0 | Open → Approve → confirm. |
+| Raise NCR | 6 (E) | 6 (E) | 3 (M) | −3 | Project | 2 / 1 | Quality (1) → New NCR… (1) → Raise (1), with severity, activity, responsible person and company on one dialog (new 22B). |
+| Close NCR | – | – | 4 (M) | – | Quality | 4 / 0 | Responsible person: Submit closeout (1) → Upload & submit (1); quality engineer: Approve (1) → confirm (1). Two people, two sessions, <1 s handoff each way. |
+| Create Punch Item | – | – | 4 (M/E) | – | Project | 2 / 2 | Quality (1) → Punch list (1) → New item (1) → Save (1). |
+| Create Task | 3 (M) | 2 (M) | 2 (M) | 0 | Workspace | 1 / 1 | Unchanged. |
+| Find Document | 4 (M) | 4 (M) | 2 (M) | −2 | Project | 1 / 1 | Doc Control (1) → Search (1) → type; 0 clicks by direct URL. |
+| Create Company | – | – | 3 (M) | – | Company | 2 / 1 | Company (1) → Add company (1) → Add (1) — new in 22B (was "not available in the UI"). |
+| Add Project Member | – | – | 4 (M/E) | – | Project | 2 / 2 | Team (1) → Add existing user (1) → pick (1) → Add (1); role shown as a label, not an enum. |
+
+High-frequency average (Create RFI, Create Task, Create Direct Cost, Raise NCR, Find Document,
+Receive Goods, Issue Material): **2.7 clicks from the start screen** (22A: 3.9 for the same set,
+Raise NCR and Find Document being the movers). Worst workflows by click count: Create Change (6,
+of which 5 are decisions), Create Pay App (6, of which 4 are decisions) and Create PO (4–5,
+estimated). No genuine control was removed: every added click in 22B is a budget allocation, an
+evidence pick or a confirmation.

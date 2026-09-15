@@ -101,3 +101,29 @@ STALE. Four runs; figures from the last run, ranges across runs.
 
 Mechanism: the socket transport (`lib/realtime.ts`) invalidates the TanStack queries of the project room on
 `record.changed`, so lists refetch within a round-trip. Script kept at `scratchpad/p21/two-session.mjs`.
+
+## Phase 22B — four two-session handoffs (2026-09-15, E2E organisation)
+
+Two independent browser contexts per chain (separate cookies, separate sockets), product UI only, on the
+E2E organisation's Riverside Tower after a reset. Classification: REALTIME ≤ 3 s without refresh · NEAR
+REALTIME ≤ 20 s · REFRESH REQUIRED · STALE. Checks made by navigating to another screen are marked
+"on navigation" (they are not a live-update measurement). Figures from the final run
+(`scratchpad/p21/two-session-22b.mjs`, log `two-session-22b-final2.log`); four earlier runs agree.
+
+| Chain | Handoff | From → to | Seen | Class |
+| --- | --- | --- | --- | --- |
+| RFI | RFI raised | site engineer → PM register | 77–965 ms, no refresh | **REALTIME** |
+| RFI | answered and closed | PM → site engineer register | 7–14 ms, no refresh | **REALTIME** |
+| Change / Commercial | change order created with budget line 01-100 and the RFI's letter as evidence | QS → PM register | 0.8 s, no refresh | **REALTIME** |
+| Change / Commercial | submitted for approval | QS → PM approval queue ("1 pending") | 5 ms, no refresh | **REALTIME** |
+| Change / Commercial | approved | PM → QS register ("Approved") | 3 ms, no refresh | **REALTIME** |
+| Change / Commercial | approved value on Cost Overview and on budget line 01-100 ($150,000 → $162,500) | QS, Cost Overview and Budget tab | correct on navigation | on navigation |
+| Procurement / Inventory | goods received against PO-0001 | warehouse (Goods in) → PM purchase-order list ("Delivered") | 4 ms, no refresh | **REALTIME** (new: the receipt publishes a project event) |
+| Procurement / Inventory | stock on hand after the receipt | warehouse → PM Inventory items (1,560 bags, avg 6.40) | correct on navigation | on navigation |
+| Quality | NCR raised on the procurement lead | quality engineer → procurement lead's "My open items" | 0.5–0.8 s, no refresh | **REALTIME** |
+| Quality | closeout submitted with photo/file evidence by the assignee | procurement lead → quality engineer (NCR "submitted", Approve offered) | 5 ms, no refresh | **REALTIME** (new: the assignee may submit) |
+| Quality | closeout approved | quality engineer → procurement lead (NCR "closed") | 5 ms, no refresh | **REALTIME** |
+| Quality | the closed NCR leaves "My open items" | procurement lead's workspace | correct on navigation | on navigation |
+
+No handoff was STALE; no responsibility or financial figure was misleading in either session; 0
+responses were refused and 0 console errors were logged across the eight sessions.

@@ -204,3 +204,18 @@ Workspace 4.6 · Doc Control/RFI 4.8 · Procurement 4.2 · Schedule 4.0 · Inven
 **CONDITIONAL FOR CLIENT DEMO** — ready on the demo path (login → workspace → project → budget → forecast → change order → RFI → procurement → inventory) with the residue script run beforehand; the conditions are the recorded P2s (the "Committed" wording in Procurement, the change-order proof needing a register document, holding-line allocation) and the modules not touched in this phase (Quality, Settings/Admin).
 
 **CONDITIONAL FOR EXTERNAL PILOT** — unchanged from Phase 22: the P2 list above and the durable residue fix (dedicated e2e organisation) should land before outside users work in the demo organisation.
+
+## Phase 22B follow-up (2026-09-15)
+
+Items this report carried that Phase 22B changed:
+
+- §13 remaining P2s: P2-1 ("Committed"), P2-2 (change-order allocation) and P2-3 (evidence reuse)
+  are fixed; see the Phase 22B sections of the defect register and the 22B report.
+- §4 demo-data strategy: the durable fix landed — the suites run in a dedicated "OctaPM E2E"
+  organisation reset by Playwright's global setup; the demo organisation's Riverside Tower
+  (`95c188f3…`), which carried 521 commitments and 163 orders of suite history, was renamed and
+  archived and a clean Riverside Tower (`cb4f705c…`) reseeded. The residue script now also cleans
+  companies and cost codes, stamps `archivedAt`, and is pinned to the certified project's organisation.
+- §8 persona pass: a Quality Engineer account now exists (Lena Fischer) and is certified; the
+  Client/Owner and Subcontractor rows remain unsupported by decision (Option A).
+- §16 verdicts: superseded by the Phase 22B report.

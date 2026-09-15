@@ -102,3 +102,16 @@ same reconcile-and-regression discipline (Actual stays ledger-derived; snapshot 
 | R8 Demo-data hygiene | DONE (script) · OPEN (durable) | `archive-e2e-residue.js` applied locally and documented; dedicated e2e organisation for the suites still recommended. |
 | R9 Change order → budget line | OPEN | Out of 22A scope (backend allocation design, UX22-17). |
 | R10 Per-persona landing / client portal | OPEN | Wave C, not started (as instructed). |
+
+## Phase 22B status (2026-09-15)
+
+| Item | Status |
+| --- | --- |
+| Standardise "Committed" | done: `FINANCIAL_TERMS` applied across Cost, Commercial, Procurement, Forecast and report columns; regression script |
+| Change-order budget allocation | done: line or split on the change order, applied on approval, idempotent, archived-line fallback, history preserved |
+| Change-order evidence reuse | done: attachment search across records in the document picker |
+| Dedicated E2E organisation | done: `scripts/e2e/reset-e2e-org.js` plus the Playwright global setup; suites sign in to `@octapm-e2e.test`; deterministic seed with cost codes and budget lines |
+| Quality persona | done: Quality Engineer role; assignee closeout; richer create dialog; live KPIs |
+| Settings and Admin | done for company add and edit, cost-code edit, role labels, People page copy, directory inactive filter, invitable roles; Locations, Warehouses, Equipment and Templates audited read-only |
+| External personas | decided: Option A (internal contractor Pilot V1); supplier and bidder portal supported by link; owner and subcontractor logins excluded |
+| Presentation | done for status labels, role labels, dates, currency, directory and workspace residue; three P3s open |

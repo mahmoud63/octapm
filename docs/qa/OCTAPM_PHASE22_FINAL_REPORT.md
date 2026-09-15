@@ -148,3 +148,27 @@ with a two-session handoff test and the Phase 21 financial gate re-proven. Full 
 
 **Verdicts:** CONDITIONAL FOR CLIENT DEMO · CONDITIONAL FOR EXTERNAL PILOT (unchanged). Conditions are
 listed in the implementation report, §16.
+
+## PHASE 22B OUTCOME (2026-09-15)
+
+Phase 22B closed the three carried P2s (one "Committed" vocabulary, change-order budget allocation,
+change-order evidence reuse), gave the suites their own organisation, completed the Quality and
+Settings/Admin experience, decided the external-persona scope live, certified every internal persona
+in the browser and re-proved the financial gate. Full detail:
+`OCTAPM_PHASE22B_EXTERNAL_PILOT_READINESS_REPORT.md`; per-item status: the Phase 22B sections of the
+defect register, click matrix, scorecard, persona journeys, handoff and propagation matrices.
+
+- Fixed: P2-1, P2-2, P2-3 and fourteen 22B findings (two of them P1: the missing Quality role and the
+  assignee who could not act on their own NCR).
+- Open: three P3s (portal confirm box; the certified project's run-stamped party names; external
+  representatives receiving an internal role, a scope decision).
+- Two-session: four chains, twelve handoffs, every live handoff **REALTIME**, 0 refused calls, 0
+  console errors.
+- Financial gate: snapshot 36/36, Actual 71,204.00, delta 0.00; the approved change in the E2E
+  project lands on the line its owner named.
+- Score: ≈ 4.1 → **4.47 / 5 (≈ 4.5)**; Quality 3.7 → 4.6; Settings/Admin 3.6 → 4.2.
+- External personas: **Option A** — internal contractor Pilot V1; supplier/bidder portal supported by
+  link (20/20 live); owner and subcontractor logins excluded (not faked).
+
+**Verdicts:** see the 22B report, §"Verdicts" — a demo verdict and an external-pilot verdict, issued
+after the three consecutive Playwright runs.
