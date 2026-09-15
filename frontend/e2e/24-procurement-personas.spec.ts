@@ -319,6 +319,9 @@ test.describe('four people, one delivery', () => {
 
     await page.goto(receiveHref!)
     await expect(page.getByTestId('uat-goods-receipt')).toBeVisible({ timeout: 30_000 })
+    // The link carries the order; its lookup lands a moment after the panel paints,
+    // so the panel is given time to name it before its text is read (Phase 22B).
+    await expect(page.getByTestId('uat-goods-receipt'), 'the order is already looked up').toContainText(`PO-${stamp}`, { timeout: 30_000 })
     const receiptText = await page.getByTestId('uat-goods-receipt').innerText()
     const warehouseValue = await page
       .getByTestId('uat-receipt-warehouse')
