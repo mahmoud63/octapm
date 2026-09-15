@@ -10,6 +10,7 @@ jest.mock("../../middleware/auth", () => ({
       role: req.get("x-role") || "site_engineer",
       isCompanyAdmin: req.get("x-company-admin") === "1",
     };
+    if (req.get("x-api-scopes")) req.apiClient = { id: "key-1", scopes: req.get("x-api-scopes").split(","), projectIds: [] };
     next();
   },
 }));
@@ -36,6 +37,7 @@ const mockService = {
   listMySubscriptions: jest.fn(),
 };
 jest.mock("../../services/comment.service", () => mockService);
+jest.mock("../../services/document-text.service", () => ({ recordVisibleToViewer: jest.fn(async () => true), documentReadableToViewer: jest.fn(async () => true) }));
 
 const commentsRouter = require("../comments");
 const subscriptionsRouter = require("../subscriptions");
@@ -198,5 +200,34 @@ describe("comment and subscription routes", () => {
     expect(mockService.listMySubscriptions).toHaveBeenCalledWith(
       expect.objectContaining({ userId: "user-1", limit: 5 }),
     );
+  });
+});
+
+describe("Phase 21D — integrity (release challenge, fourteenth pass)", () => {
+  const docText = require("../../services/document-text.service");
+  beforeEach(() => {
+    jest.clearAllMocks();
+    docText.recordVisibleToViewer.mockResolvedValue(true);
+    mockService.listComments.mockResolvedValue({ items: [], pagination: { limit: 50, nextCursor: null } });
+    mockService.createComment.mockResolvedValue({ id: COMMENT_ID });
+    mockService.getComment.mockResolvedValue({ id: COMMENT_ID, recordType: "rfi", recordId: "rfi-1" });
+  });
+
+  it("CX21-555: a read-only API key cannot post a comment, but a key with a write scope can", async () => {
+    const app = buildApp();
+    const readKey = await request(app).post(`/projects/project-1/comments`).set("x-role", "pm").set("x-api-scopes", "rfi:read").send({ recordType: "rfi", recordId: "rfi-1", body: "hello" });
+    expect(readKey.status).toBe(403);
+    expect(mockService.createComment).not.toHaveBeenCalled();
+    const writeKey = await request(app).post(`/projects/project-1/comments`).set("x-role", "pm").set("x-api-scopes", "rfi:read,rfi:write").send({ recordType: "rfi", recordId: "rfi-1", body: "hello" });
+    expect(writeKey.status).toBe(201);
+  });
+
+  it("CX21-555: a record the viewer's rule excludes hides its comments and refuses a new one", async () => {
+    const app = buildApp();
+    docText.recordVisibleToViewer.mockResolvedValue(false);
+    expect((await request(app).get(`/projects/project-1/comments?recordType=rfi&recordId=rfi-b`).set("x-role", "pm")).status).toBe(404);
+    expect(mockService.listComments).not.toHaveBeenCalled();
+    expect((await request(app).post(`/projects/project-1/comments`).set("x-role", "pm").send({ recordType: "rfi", recordId: "rfi-b", body: "x" })).status).toBe(404);
+    expect(mockService.createComment).not.toHaveBeenCalled();
   });
 });

@@ -510,7 +510,7 @@ const createCommitment = async ({ orgId, projectId, payload = {}, actor = null }
 
 const updateCommitment = async ({ orgId, projectId, commitmentId, payload = {}, actor = null }) => {
   const project = await ensureProject({ orgId, projectId });
-  const existing = await loadCommitment({ projectId, commitmentId });
+  const existing = await loadCommitment({ projectId, commitmentId, viewer: actor });
   if (existing.status === STATUS.VOID) throw new HttpError(409, "COMMITMENT_VOID", "A void commitment cannot be changed");
   const data = commitmentData(payload, { project, existing });
   const updated = await prisma.$transaction(async (tx) => {
@@ -530,7 +530,7 @@ const updateCommitment = async ({ orgId, projectId, commitmentId, payload = {}, 
 
 const replaceLines = async ({ orgId, projectId, commitmentId, payload = {}, actor = null }) => {
   await ensureProject({ orgId, projectId });
-  const existing = await loadCommitment({ projectId, commitmentId });
+  const existing = await loadCommitment({ projectId, commitmentId, viewer: actor });
   if (!EDITABLE_STATUSES.includes(existing.status)) throw new HttpError(409, "COMMITMENT_LOCKED", "The schedule of values is fixed once the commitment is approved; raise a change order instead");
   const lines = normalizeLines(payload.lines);
   const updated = await prisma.$transaction(async (tx) => {
@@ -551,7 +551,7 @@ const replaceLines = async ({ orgId, projectId, commitmentId, payload = {}, acto
 
 const setInsurance = async ({ orgId, projectId, commitmentId, payload = {}, actor = null }) => {
   await ensureProject({ orgId, projectId });
-  const existing = await loadCommitment({ projectId, commitmentId });
+  const existing = await loadCommitment({ projectId, commitmentId, viewer: actor });
   const insurance = normalizeInsurance(payload.insurance) || [];
   const updated = await prisma.$transaction(async (tx) => {
     const row = await tx.commitment.update({ where: { id: commitmentId }, data: { insuranceJson: insurance, updatedBy: actor?.id || null }, include });
@@ -594,7 +594,7 @@ const notify = async ({ orgId, projectId, commitment, recipientUserIds = [], rec
 
 const transition = async ({ orgId, projectId, commitmentId, to, actor = null, reason = null, guard = null, extra = {}, viaWorkflow = false }) => {
   await ensureProject({ orgId, projectId });
-  const existing = await loadCommitment({ projectId, commitmentId });
+  const existing = await loadCommitment({ projectId, commitmentId, viewer: actor });
   if (!viaWorkflow && [STATUS.APPROVED, STATUS.DRAFT].includes(to)) {
     await require("./workflow-engine.service").assertNotLocked({ tool: "commitment", projectId, recordId: commitmentId });
   }
@@ -701,7 +701,7 @@ const voidCommitment = ({ orgId, projectId, commitmentId, actor, reason }) => {
  */
 const executeCommitment = async ({ orgId, projectId, commitmentId, actor = null, file = null, documentId = null, override = false, overrideReason = null, canOverride = false }) => {
   await ensureProject({ orgId, projectId });
-  const existing = await loadCommitment({ projectId, commitmentId });
+  const existing = await loadCommitment({ projectId, commitmentId, viewer: actor });
   if (existing.status !== STATUS.APPROVED) throw new HttpError(409, "COMMITMENT_TRANSITION_INVALID", "Only approved commitments can be executed");
   let executedDocumentId = trimOrNull(documentId);
   if (file) {
@@ -778,7 +778,7 @@ const loadChangeOrder = async ({ projectId, changeOrderId }, tx = prisma) => {
 
 const createChangeOrder = async ({ orgId, projectId, commitmentId, payload = {}, actor = null, tx: outerTx = null }) => {
   await ensureProject({ orgId, projectId });
-  const commitment = await loadCommitment({ projectId, commitmentId });
+  const commitment = await loadCommitment({ projectId, commitmentId, viewer: actor });
   if ([STATUS.VOID, STATUS.CLOSED].includes(commitment.status)) throw new HttpError(409, "COMMITMENT_LOCKED", `A ${commitment.status} commitment cannot take change orders`);
   const data = coData(payload, { sovLineIds: new Set((commitment.lines || []).map((line) => line.id)) });
   const run = async (tx) => {
@@ -806,6 +806,7 @@ const createChangeOrder = async ({ orgId, projectId, commitmentId, payload = {},
 const updateChangeOrder = async ({ orgId, projectId, changeOrderId, payload = {}, actor = null }) => {
   await ensureProject({ orgId, projectId });
   const existing = await loadChangeOrder({ projectId, changeOrderId });
+  assertVisible(existing.commitment, actor); // a change order is its parent commitment's party's (CX21-554)
   if (![CO_STATUS.DRAFT, CO_STATUS.PENDING].includes(existing.status)) throw new HttpError(409, "COMMITMENT_CO_LOCKED", `A ${existing.status} change order cannot be edited`);
   const sovLines = await prisma.commitmentSovLine.findMany({ where: { commitmentId: existing.commitmentId }, select: { id: true } });
   const data = coData(payload, { existing, sovLineIds: new Set(sovLines.map((line) => line.id)) });
@@ -831,6 +832,7 @@ const updateChangeOrder = async ({ orgId, projectId, changeOrderId, payload = {}
 const transitionChangeOrder = async ({ orgId, projectId, changeOrderId, to, actor = null, reason = null }) => {
   await ensureProject({ orgId, projectId });
   const existing = await loadChangeOrder({ projectId, changeOrderId });
+  assertVisible(existing.commitment, actor); // a change order is its parent commitment's party's (CX21-554)
   const allowedFrom = { [CO_STATUS.PENDING]: [CO_STATUS.DRAFT], [CO_STATUS.APPROVED]: [CO_STATUS.PENDING], [CO_STATUS.REJECTED]: [CO_STATUS.PENDING], [CO_STATUS.VOID]: [CO_STATUS.DRAFT, CO_STATUS.PENDING] }[to];
   if (!allowedFrom?.includes(existing.status)) throw new HttpError(409, "COMMITMENT_CO_TRANSITION_INVALID", `A ${existing.status} change order cannot become ${to}`);
   if ([CO_STATUS.REJECTED, CO_STATUS.VOID].includes(to) && !trimOrNull(reason)) throw new HttpError(400, "COMMITMENT_CO_REASON_REQUIRED", "Give a reason");

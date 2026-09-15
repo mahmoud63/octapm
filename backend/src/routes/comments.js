@@ -7,6 +7,9 @@ const { authenticate } = require("../middleware/auth");
 const { getEffectiveRole, hasPermission } = require("../middleware/rbac");
 const { validate } = require("../middleware/validate");
 const commentService = require("../services/comment.service");
+const documentTextService = require("../services/document-text.service");
+const { isPartyScopedAccess } = require("../services/company-party.service");
+const { scopeAllows } = require("../services/api-client.service");
 
 /**
  * Comments on any record (OCTA-COMM-COMMENT-009). Anyone who can read the
@@ -18,12 +21,40 @@ router.use(authenticate);
 
 const viewerFor = (req) => {
   const role = getEffectiveRole(req);
+  const partyScoped = isPartyScopedAccess(req.projectAccess || {});
+  const parties = req.projectAccess?.partyAccess || [];
   return {
     id: req.user.id,
+    userId: req.user.id,
     name: req.user.name || null,
     role,
     canModerate: Boolean(req.user.isCompanyAdmin) || role === "pm",
+    canRead: (moduleName) => hasPermission(req, moduleName, "read"),
+    partyIds: partyScoped ? parties.map((party) => party.projectPartyId).filter(Boolean) : null,
+    companyIds: partyScoped ? [...new Set(parties.map((party) => party.companyId).filter(Boolean))] : null,
   };
+};
+
+// A party-scoped person reads and writes comments only on a record their own
+// rule admits — the module alone let a subcontractor read another's RFI
+// discussion (Phase 21D, CX21-555).
+const assertRecordVisible = async (req, recordType, recordId) => {
+  if (!(await documentTextService.recordVisibleToViewer({ recordType, recordId, viewer: viewerFor(req) }))) {
+    throw new HttpError(404, "COMMENT_RECORD_NOT_FOUND", "Record not found");
+  }
+};
+
+// A read-only key could post a comment because the write route asked only for
+// read; a key posting, editing or removing a comment needs a write scope on
+// the record's module (Phase 21D, CX21-555).
+const assertKeyMayWrite = (req, recordType) => {
+  if (!req.apiClient) return;
+  const moduleName = commentService.moduleForRecordType(recordType);
+  if (!scopeAllows(req.apiClient, moduleName, "update") && !scopeAllows(req.apiClient, moduleName, "create")) {
+    const forbidden = new HttpError(403, "FORBIDDEN", "This API key cannot post comments on this record");
+    forbidden.details = { module: moduleName, action: "write" };
+    throw forbidden;
+  }
 };
 
 const assertRecordRead = (req, recordType) => {
@@ -57,6 +88,7 @@ router.get(
   ],
   asyncHandler(async (req, res) => {
     assertRecordRead(req, req.query.recordType);
+    await assertRecordVisible(req, req.query.recordType, req.query.recordId);
     const result = await commentService.listComments({
       orgId: req.user.orgId,
       projectId: req.params.projectId,
@@ -83,6 +115,8 @@ router.post(
   ],
   asyncHandler(async (req, res) => {
     assertRecordRead(req, req.body.recordType);
+    assertKeyMayWrite(req, req.body.recordType);
+    await assertRecordVisible(req, req.body.recordType, req.body.recordId);
     const comment = await commentService.createComment({
       orgId: req.user.orgId,
       projectId: req.params.projectId,
@@ -112,6 +146,8 @@ router.patch(
       commentId: req.params.commentId,
     });
     assertRecordRead(req, existing.recordType);
+    assertKeyMayWrite(req, existing.recordType);
+    await assertRecordVisible(req, existing.recordType, existing.recordId);
     const comment = await commentService.updateComment({
       orgId: req.user.orgId,
       projectId: req.params.projectId,
@@ -134,6 +170,8 @@ router.delete(
       commentId: req.params.commentId,
     });
     assertRecordRead(req, existing.recordType);
+    assertKeyMayWrite(req, existing.recordType);
+    await assertRecordVisible(req, existing.recordType, existing.recordId);
     const result = await commentService.deleteComment({
       orgId: req.user.orgId,
       projectId: req.params.projectId,

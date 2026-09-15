@@ -460,3 +460,21 @@ describe("Phase 21D — integrity (release challenge, thirteenth pass)", () => {
     delete mockPrisma.$executeRaw;
   });
 });
+
+describe("Phase 21D — integrity (release challenge, fourteenth pass)", () => {
+  it("CX21-546b: a name matches only a text-only row — a row carrying a different company id and a stale name does not block a new invoice for another company", async () => {
+    reset();
+    mockPrisma.$executeRaw = jest.fn(async () => 0);
+    const companies = jest.spyOn(mockPrisma.company, "findFirst").mockImplementation(async ({ where }) => ([{ id: "co-1", name: "Alpha Corp" }, { id: "co-2", name: "Beta Corp" }].find((company) => (where.id && company.id === where.id) || (where.name?.equals && company.name.toLowerCase() === String(where.name.equals).toLowerCase())) || null));
+    const lines = [{ description: "x", costCodeId: "cc-conc", activityId: "act-1", amount: 10 }];
+    // a row for company Beta that still carries Alpha's name (a stale vendor edit)
+    store.costs.push({ id: "dc-stale", orgId: "org-1", projectId: "p1", invoiceNumber: "INV-900", status: "draft", vendorCompanyId: "co-2", vendorName: "Alpha Corp", number: 900, ref: "DC-900" });
+    // a genuine new invoice for Alpha with the same number must be allowed, not treated as Beta's duplicate
+    await service.createDirectCost({ ...scope, actor, payload: { type: "invoice", vendorCompanyId: "co-1", invoiceNumber: "INV-900", description: "Alpha invoice", costDate: "2026-09-01", lines } });
+    expect(store.costs.some((row) => row.vendorCompanyId === "co-1" && row.invoiceNumber === "INV-900")).toBe(true);
+    // but a real duplicate for Beta (by id) is still caught
+    await expect(service.createDirectCost({ ...scope, actor, payload: { type: "invoice", vendorCompanyId: "co-2", invoiceNumber: "INV-900", description: "Beta again", costDate: "2026-09-01", lines } })).rejects.toMatchObject({ code: "DIRECT_COST_DUPLICATE_INVOICE" });
+    companies.mockRestore();
+    delete mockPrisma.$executeRaw;
+  });
+});

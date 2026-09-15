@@ -1146,3 +1146,22 @@ describe("Phase 21D — integrity (release challenge, thirteenth pass)", () => {
     expect(landed).toBe(100);
   });
 });
+
+describe("Phase 21D — integrity (release challenge, fourteenth pass)", () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockPrisma.$queryRaw.mockImplementation(async () => []);
+    store.items.clear(); store.warehouses.clear(); store.locations.clear();
+    store.balances.length = 0; store.transactions.length = 0; store.ledger.length = 0; store.costRecords.length = 0;
+    nextId = 1;
+  });
+  it("CX21-556: a direct receipt cannot report more damaged than it received, and nothing moves when it tries", async () => {
+    const item = seedItem();
+    const warehouse = seedWarehouse();
+    await service.receiveStock({ orgId: ORG, user: USER, payload: { itemId: item.id, warehouseId: warehouse.id, quantity: 100, unitCost: 10 } });
+    await expect(service.receiveStock({ orgId: ORG, user: USER, payload: { itemId: item.id, warehouseId: warehouse.id, quantity: 1, unitCost: 10, damagedQty: 100 } })).rejects.toMatchObject({ status: 400, code: "INV_DAMAGE_EXCEEDS_RECEIPT" });
+    // a damaged quantity within the receipt still works
+    await service.receiveStock({ orgId: ORG, user: USER, payload: { itemId: item.id, warehouseId: warehouse.id, quantity: 10, unitCost: 10, damagedQty: 3 } });
+    expect(balanceOf(item.id, warehouse.id).onHand).toBe(107); // 100 + (10 received − 3 damaged)
+  });
+});

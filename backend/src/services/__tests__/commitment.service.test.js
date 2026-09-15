@@ -270,3 +270,25 @@ describe("Phase 21D — integrity (release challenge, eleventh pass)", () => {
     delete mockPrisma.$queryRaw;
   });
 });
+
+describe("Phase 21D — integrity (release challenge, fourteenth pass)", () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockPrisma.project.findFirst.mockResolvedValue({ id: "project-1", name: "Tower", currency: "USD", defaultRetentionRate: 10 });
+  });
+  const otherParty = { id: "sub-x", role: "external_party", projectAccess: { partyScoped: true, partyAccess: [{ companyId: "vendor-OTHER" }] } };
+  it("CX21-554: a party-scoped actor whose company does not own the commitment cannot edit it, replace its lines, or act on its change order", async () => {
+    mockPrisma.$queryRaw = jest.fn(async () => []);
+    mockPrisma.commitment.findFirst.mockResolvedValue(commitment({ status: "draft" })); // vendor-1
+    await expect(service.updateCommitment({ orgId: "org-1", projectId: "project-1", commitmentId: "cm-1", payload: { title: "hijack" }, actor: otherParty })).rejects.toMatchObject({ status: 404, code: "COMMITMENT_NOT_FOUND" });
+    await expect(service.replaceLines({ orgId: "org-1", projectId: "project-1", commitmentId: "cm-1", payload: { lines: [] }, actor: otherParty })).rejects.toMatchObject({ status: 404 });
+    expect(mockPrisma.commitment.update).not.toHaveBeenCalled();
+    mockPrisma.commitmentChangeOrder.findFirst.mockResolvedValue({ id: "cco-1", ref: "SC-001-CO01", status: "draft", value: 100, createdBy: "user-qs", commitment: { id: "cm-1", ref: "SC-001", status: "draft", projectPartyId: "party-1", vendorCompanyId: "vendor-1", createdBy: "user-qs", title: "x", type: "subcontract" } });
+    await expect(service.updateChangeOrder({ orgId: "org-1", projectId: "project-1", changeOrderId: "cco-1", payload: { title: "hijack" }, actor: otherParty })).rejects.toMatchObject({ status: 404 });
+    // the owning company's own party is served
+    const ownParty = { id: "sub-1", role: "external_party", projectAccess: { partyScoped: true, partyAccess: [{ companyId: "vendor-1" }] } };
+    mockPrisma.commitment.findFirst.mockResolvedValue(commitment({ status: "draft" }));
+    mockPrisma.commitment.update.mockImplementation(async ({ data }) => commitment({ ...data }));
+    await expect(service.updateCommitment({ orgId: "org-1", projectId: "project-1", commitmentId: "cm-1", payload: { title: "ours" }, actor: ownParty })).resolves.toBeTruthy();
+  });
+});

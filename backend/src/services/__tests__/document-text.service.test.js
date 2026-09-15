@@ -391,5 +391,21 @@ describe("Phase 21D — integrity (release challenge, thirteenth pass)", () => {
     const hits = await service.searchDocumentContent({ orgId: "org-1", projectIds: ["project-1"], q: "x", viewerFor: () => party });
     expect(hits).toHaveLength(1);
     expect(mockPrisma.projectDocument.findMany.mock.calls.at(-1)[0].include.attachments.take).toBeUndefined();
+    // the returned records do not disclose the ten inaccessible links, only the accessible one (thirteenth-pass note)
+    expect(hits[0].records.map((record) => record.recordId)).toEqual(["rfi-mine"]);
+  });
+});
+
+describe("Phase 21D — integrity (release challenge, fourteenth pass)", () => {
+  afterEach(() => { delete mockPrisma.commitmentChangeOrder; });
+  it("CX21-550: a change order's attachment follows the parent commitment's rule, not the change order's own createdBy", async () => {
+    const doc = { id: "doc-cco", projectId: "project-1", orgId: "org-1", originalName: "co.pdf", fileName: "co.pdf", mimeType: "application/pdf", uploadedAt: new Date(), text: null, documentRevisions: [], attachments: [{ recordType: "commitment_change_order", recordId: "cco-b", role: "attachment" }] };
+    const party = { canRead: () => true, partyIds: ["party-a"], companyIds: ["co-a"], userId: "u" };
+    mockPrisma.commitmentChangeOrder = { findMany: jest.fn(async () => []) }; // parent belongs to another company
+    expect(service.documentVisible(doc, party, await service.recordRuleVisibleIds({ documents: [doc], viewer: party }))).toBe(false);
+    // the query asks the parent commitment's rule (vendor company or its creator), not the change order's own createdBy
+    expect(mockPrisma.commitmentChangeOrder.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { id: { in: ["cco-b"] }, OR: [{ commitment: { OR: [{ vendorCompanyId: { in: ["co-a"] } }, { createdBy: "u" }] } }] } }));
+    mockPrisma.commitmentChangeOrder.findMany.mockResolvedValue([{ id: "cco-b" }]); // parent is the party's
+    expect(service.documentVisible(doc, party, await service.recordRuleVisibleIds({ documents: [doc], viewer: party }))).toBe(true);
   });
 });

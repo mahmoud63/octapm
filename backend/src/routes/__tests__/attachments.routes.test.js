@@ -34,6 +34,7 @@ const mockService = {
     return map[recordType];
   },
   createAttachments: jest.fn(),
+  parseDocumentIds: (value) => (Array.isArray(value) ? value : value ? [value] : []),
   listAttachments: jest.fn(),
   getAttachment: jest.fn(),
   deleteAttachment: jest.fn(),
@@ -43,6 +44,7 @@ const mockService = {
   getPhotoFile: jest.fn(),
 };
 jest.mock("../../services/attachment.service", () => mockService);
+jest.mock("../../services/document-text.service", () => ({ recordVisibleToViewer: jest.fn(async () => true), documentReadableToViewer: jest.fn(async () => true) }));
 
 const attachmentsRouter = require("../attachments");
 const photosRouter = require("../photos");
@@ -81,12 +83,13 @@ describe("attachment routes", () => {
       .get("/projects/project-1/attachments?recordType=ncr&recordId=ncr-1")
       .set("x-role", "warehouse");
     expect(ok.status).toBe(200);
-    expect(mockService.listAttachments).toHaveBeenCalledWith({
+    expect(mockService.listAttachments).toHaveBeenCalledWith(expect.objectContaining({
       orgId: "org-1",
       projectId: "project-1",
       recordType: "ncr",
       recordId: "ncr-1",
-    });
+      viewer: expect.any(Object),
+    }));
 
     const bad = await request(app).get("/projects/project-1/attachments?recordType=invoice");
     expect(bad.status).toBe(400);
@@ -165,5 +168,46 @@ describe("attachment routes", () => {
 
     const badDate = await request(app).get("/projects/project-1/photos?from=not-a-date");
     expect(badDate.status).toBe(400);
+  });
+});
+
+describe("Phase 21D — integrity (release challenge, fourteenth pass)", () => {
+  const docText = require("../../services/document-text.service");
+  const DOC = "33333333-3333-4333-8333-333333333333";
+  beforeEach(() => {
+    jest.clearAllMocks();
+    docText.recordVisibleToViewer.mockResolvedValue(true);
+    docText.documentReadableToViewer.mockResolvedValue(true);
+    mockService.parseDocumentIds = (value) => (Array.isArray(value) ? value : value ? [value] : []);
+    mockService.listAttachments.mockResolvedValue({ items: [] });
+    mockService.getAttachment.mockResolvedValue({ id: ATTACHMENT_ID, recordType: "rfi", recordId: "rfi-1" });
+    mockService.deleteAttachment.mockResolvedValue({ deleted: true });
+    mockService.createAttachments.mockResolvedValue({ items: [] });
+    mockService.getDocumentFile.mockResolvedValue({ redirectUrl: "https://x/y" });
+  });
+
+  it("CX21-551: a record the viewer's rule excludes hides its attachment list and its download, and the list is scoped to the viewer", async () => {
+    const app = buildApp();
+    docText.recordVisibleToViewer.mockResolvedValue(false);
+    expect((await request(app).get(`/projects/project-1/attachments?recordType=rfi&recordId=rfi-b`).set("x-role", "pm")).status).toBe(404);
+    expect(mockService.listAttachments).not.toHaveBeenCalled();
+    docText.documentReadableToViewer.mockResolvedValue(false);
+    expect((await request(app).get(`/projects/project-1/attachments/documents/${DOC}`).set("x-role", "pm")).status).toBe(404);
+    expect(mockService.getDocumentFile).not.toHaveBeenCalled();
+    // a visible record passes and the list is called with a viewer
+    docText.recordVisibleToViewer.mockResolvedValue(true);
+    expect((await request(app).get(`/projects/project-1/attachments?recordType=rfi&recordId=rfi-a`).set("x-role", "pm")).status).toBe(200);
+    expect(mockService.listAttachments).toHaveBeenCalledWith(expect.objectContaining({ viewer: expect.any(Object) }));
+  });
+
+  it("CX21-552: linking pulls in only documents the viewer may see, and unlinking checks the record", async () => {
+    const app = buildApp();
+    docText.documentReadableToViewer.mockResolvedValue(false);
+    const link = await request(app).post(`/projects/project-1/attachments`).set("x-role", "pm").field("recordType", "rfi").field("recordId", "rfi-a").field("documentIds", DOC);
+    expect(link.status).toBe(404);
+    expect(mockService.createAttachments).not.toHaveBeenCalled();
+    docText.recordVisibleToViewer.mockResolvedValue(false);
+    expect((await request(app).delete(`/projects/project-1/attachments/${ATTACHMENT_ID}`).set("x-role", "pm")).status).toBe(404);
+    expect(mockService.deleteAttachment).not.toHaveBeenCalled();
   });
 });

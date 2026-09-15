@@ -461,7 +461,7 @@ const createAttachments = async ({
   return { items: created.map((row) => serializeAttachment(row, projectId)) };
 };
 
-const listAttachments = async ({ orgId, projectId, recordType, recordId }) => {
+const listAttachments = async ({ orgId, projectId, recordType, recordId, viewer = null }) => {
   await ensureProject({ orgId, projectId });
   if (recordType) moduleForRecordType(recordType);
   const rows = await prisma.attachment.findMany({
@@ -474,7 +474,16 @@ const listAttachments = async ({ orgId, projectId, recordType, recordId }) => {
     orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
     take: 500,
   });
-  return { items: rows.map((row) => serializeAttachment(row, projectId)) };
+  // A party-scoped viewer sees only the records their own rule admits — a
+  // list by record type alone returned every company's rows (Phase 21D, CX21-551).
+  let visible = rows;
+  if (viewer) {
+    const docText = require("./document-text.service");
+    const pairs = [...new Map(rows.map((row) => [`${row.recordType}:${row.recordId}`, { recordType: row.recordType, recordId: row.recordId }])).values()];
+    const ruled = await docText.recordRuleVisibleIds({ documents: [{ attachments: pairs }], viewer });
+    visible = rows.filter((row) => docText.attachmentVisible({ recordType: row.recordType, recordId: row.recordId, role: row.role }, viewer, ruled));
+  }
+  return { items: visible.map((row) => serializeAttachment(row, projectId)) };
 };
 
 const getAttachment = async ({ orgId, projectId, attachmentId }) => {

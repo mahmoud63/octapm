@@ -480,7 +480,7 @@ const RECORD_RULES = Object.freeze({
   timesheet: { model: "timesheet", party: true, clauses: ({ companyIds, userId }) => [some("companyId", companyIds), own("createdBy", userId)] },
   sub_pay_app: { model: "subPayApp", party: true, clauses: ({ companyIds, userId }) => [companyIds?.length ? { commitment: { vendorCompanyId: { in: companyIds } } } : null, own("createdBy", userId)] },
   commitment: { model: "commitment", party: true, clauses: ({ companyIds, userId }) => [some("vendorCompanyId", companyIds), own("createdBy", userId)] },
-  commitment_change_order: { model: "commitmentChangeOrder", party: true, clauses: ({ companyIds, userId }) => [companyIds?.length ? { commitment: { vendorCompanyId: { in: companyIds } } } : null, own("createdBy", userId)] },
+  commitment_change_order: { model: "commitmentChangeOrder", party: true, clauses: ({ companyIds, userId }) => [{ commitment: { OR: [...(companyIds?.length ? [{ vendorCompanyId: { in: companyIds } }] : []), ...(userId ? [{ createdBy: userId }] : [])] } }] },
   punch_item: { model: "punchItem", party: true, clauses: ({ companyIds, userId }) => [some("assigneeCompanyId", companyIds), own("createdBy", userId), own("assigneeUserId", userId)] },
   form_instance: { model: "formInstance", party: true, clauses: ({ companyIds, userId }) => [some("assigneeCompanyId", companyIds), own("createdBy", userId), own("assigneeUserId", userId), own("inspectorUserId", userId), own("approverUserId", userId)] },
   task: { model: "task", party: true, clauses: ({ userId }) => [own("assigneeId", userId), own("createdById", userId)] },
@@ -529,16 +529,52 @@ const documentVisible = (document, viewer, ruled = null) => {
   return [...modules].some((moduleName) => viewer.canRead(moduleName));
 };
 
-const serializeHit = ({ document, rank = 0, headline = null, semanticScore = null, matchedChunk = null }) => {
+const recordModuleName = (recordType) => RECORD_TYPE_MODULES[recordType] || "document_control";
+
+/** Whether one attachment link is one this viewer may see: its module readable, and — for a viewer a party rule binds — its own rule. */
+const attachmentVisible = (attachment, viewer, ruled) => {
+  if (!viewer) return true;
+  const rule = RECORD_RULES[attachment.recordType];
+  if (ruled && ruleApplies(rule, viewer) && !ruled.has(`${attachment.recordType}:${attachment.recordId}`)) return false;
+  return !viewer.canRead || viewer.canRead(recordModuleName(attachment.recordType));
+};
+
+/** Whether a viewer may see one record: its module read, and — for a viewer a party rule binds — its own rule (CX21-551, CX21-555). */
+const recordVisibleToViewer = async ({ recordType, recordId, viewer }) => {
+  if (!viewer) return true;
+  if (viewer.canRead && !viewer.canRead(recordModuleName(recordType))) return false;
+  const rule = RECORD_RULES[recordType];
+  if (!ruleApplies(rule, viewer)) return true;
+  const ruled = await recordRuleVisibleIds({ documents: [{ attachments: [{ recordType, recordId }] }], viewer });
+  return ruled.has(`${recordType}:${recordId}`);
+};
+
+/** Whether a viewer may read a document's bytes: it must be visible through a place it is linked from (CX21-551, the download path). */
+const documentReadableToViewer = async ({ orgId, projectId, documentId, viewer }) => {
+  if (!viewer) return true;
+  const document = await prisma.projectDocument.findFirst({ where: { id: documentId, orgId, projectId }, include: documentInclude });
+  if (!document) return false;
+  const ruled = await recordRuleVisibleIds({ documents: [document], viewer });
+  return documentVisible(document, viewer, ruled);
+};
+
+const serializeHit = ({ document, rank = 0, headline = null, semanticScore = null, matchedChunk = null, viewer = null, ruled = null }) => {
   const projectId = document.projectId;
   const revision = document.documentRevisions?.[0] || null;
-  const records = (document.attachments || []).slice(0, 10).map((attachment) => ({
-    recordType: attachment.recordType,
-    recordId: attachment.recordId,
-    role: attachment.role,
-    path: recordWorkspacePath({ projectId, recordType: attachment.recordType, recordId: attachment.recordId }),
-  }));
-  const path = revision
+  // Only the links this viewer may see are surfaced; an inaccessible record's
+  // id and path are not disclosed, and an accessible link beyond the first
+  // ten is not lost (Phase 21D, the note on CX21-530).
+  const records = (document.attachments || [])
+    .filter((attachment) => attachmentVisible(attachment, viewer, ruled))
+    .slice(0, 10)
+    .map((attachment) => ({
+      recordType: attachment.recordType,
+      recordId: attachment.recordId,
+      role: attachment.role,
+      path: recordWorkspacePath({ projectId, recordType: attachment.recordType, recordId: attachment.recordId }),
+    }));
+  const revisionReadable = revision && (!viewer || !viewer.canRead || viewer.canRead("document_control"));
+  const path = revisionReadable
     ? recordWorkspacePath({ projectId, recordType: revision.recordType, recordId: revision.recordId })
     : records[0]?.path || null;
   const title =
@@ -669,6 +705,8 @@ const searchDocuments = async ({
           headline: ranked?.headline || null,
           semanticScore,
           matchedChunk: hit?.text || null,
+          viewer,
+          ruled: partyVisible,
         }),
         score: Number(Math.max(textScore, semanticScore || 0).toFixed(4)),
       };
@@ -720,8 +758,9 @@ const searchDocumentContent = async ({ orgId, projectIds, q, limit = 10, viewerF
     .map((row) => {
       const document = byId.get(row.documentId);
       if (!document) return null;
-      if (viewerFor && !documentVisible(document, viewerFor(document.projectId), partyVisibleByProject.get(document.projectId))) return null;
-      return serializeHit({ document, rank: row.rank, headline: row.headline });
+      const viewer = viewerFor ? viewerFor(document.projectId) : null;
+      if (viewer && !documentVisible(document, viewer, partyVisibleByProject.get(document.projectId))) return null;
+      return serializeHit({ document, rank: row.rank, headline: row.headline, viewer, ruled: partyVisibleByProject.get(document.projectId) });
     })
     .filter(Boolean);
 };
@@ -748,6 +787,9 @@ module.exports = {
   TEXT_STATUS,
   documentVisible,
   recordRuleVisibleIds,
+  recordVisibleToViewer,
+  documentReadableToViewer,
+  attachmentVisible,
   RECORD_RULES,
   enqueueExtraction,
   getDocumentText,

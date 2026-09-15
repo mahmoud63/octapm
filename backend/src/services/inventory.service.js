@@ -930,6 +930,12 @@ const receiveStock = async ({ orgId, user, payload }) => {
   if (unitCost != null && (!Number.isFinite(unitCost) || unitCost < 0)) {
     throw new HttpError(400, "INV_NUMBER", "Unit cost must be zero or more");
   }
+  // Damaged on delivery is a part of what was delivered — more damaged than
+  // received would write off stock already on the shelf; checked before
+  // anything moves (Phase 21D, CX21-556).
+  if (payload.damagedQty != null && positive(payload.damagedQty, "Damaged quantity") > quantity) {
+    throw new HttpError(400, "INV_DAMAGE_EXCEEDS_RECEIPT", "More was reported damaged than was received");
+  }
 
   return prisma.$transaction(async (tx) => {
     const { item } = await loadItemAndWarehouse(tx, {

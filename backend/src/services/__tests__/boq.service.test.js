@@ -905,3 +905,21 @@ describe("Phase 21D — integrity (the twenty-third loop's own finding)", () => 
   });
 });
 
+describe("Phase 21D — integrity (release challenge, fourteenth pass)", () => {
+  it("CX21-553: deleting a BOQ row re-reads the allocations under the lock — a submission that landed since the eligibility check is caught, not overwritten", async () => {
+    const item = { id: "boq-1", projectId: "project-1", code: "1.1", description: "Excavation", isManual: true, isActive: true, sortOrder: 0, createdAt: new Date("2026-09-15T00:00:00.000Z") };
+    mockPrisma.project.findFirst.mockResolvedValue({ id: "project-1", orgId: "org-1" });
+    mockPrisma.boqRevision.findFirst.mockResolvedValue(null);
+    mockPrisma.scheduleRevision.findFirst.mockResolvedValue(null);
+    mockPrisma.boqItem.findFirst.mockResolvedValue(item);
+    mockPrisma.boqItem.findMany.mockResolvedValue([]);
+    // before the transaction the allocation is a draft; under the lock it is approved
+    mockPrisma.activityBoqAllocation.findMany
+      .mockResolvedValueOnce([{ id: "al-1", activityId: "act-1", status: "draft" }])
+      .mockResolvedValueOnce([{ id: "al-1", activityId: "act-1", status: "approved" }]);
+    mockPrisma.$queryRaw = jest.fn(async () => []);
+    await expect(service.deleteBoqItem("project-1", "boq-1", { orgId: "org-1", userId: "pm-1", userRole: "pm" })).rejects.toMatchObject({ status: 409, code: "BOQ_ITEM_HAS_LINKED_ALLOCATIONS" });
+    expect(mockPrisma.boqItem.delete).not.toHaveBeenCalled();
+    delete mockPrisma.$queryRaw;
+  });
+});

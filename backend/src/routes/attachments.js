@@ -12,6 +12,24 @@ const { uploadLimiter } = require("../middleware/rate-limit");
 const { validate } = require("../middleware/validate");
 const fileStorageService = require("../services/file-storage.service");
 const attachmentService = require("../services/attachment.service");
+const documentTextService = require("../services/document-text.service");
+const { isPartyScopedAccess } = require("../services/company-party.service");
+
+// A party-scoped person reaches an attachment through the record's own rule —
+// its company, its owner party, its author — not its module alone; a download
+// is refused unless the document is visible through a place it is linked from
+// (Phase 21D, CX21-551, CX21-552).
+const viewerFor = (req) => {
+  const partyScoped = isPartyScopedAccess(req.projectAccess || {});
+  const parties = req.projectAccess?.partyAccess || [];
+  return {
+    id: req.user.id,
+    userId: req.user.id,
+    canRead: (moduleName) => hasPermission(req, moduleName, "read"),
+    partyIds: partyScoped ? parties.map((party) => party.projectPartyId).filter(Boolean) : null,
+    companyIds: partyScoped ? [...new Set(parties.map((party) => party.companyId).filter(Boolean))] : null,
+  };
+};
 
 /**
  * One endpoint for attaching files to any record type. Permission follows the
@@ -80,11 +98,16 @@ router.get(
   ],
   asyncHandler(async (req, res) => {
     assertRecordAccess(req, req.query.recordType, ["read"]);
+    const viewer = viewerFor(req);
+    if (req.query.recordId && !(await documentTextService.recordVisibleToViewer({ recordType: req.query.recordType, recordId: req.query.recordId, viewer }))) {
+      throw new HttpError(404, "ATTACHMENT_RECORD_NOT_FOUND", "Record not found");
+    }
     const result = await attachmentService.listAttachments({
       orgId: req.user.orgId,
       projectId: req.params.projectId,
       recordType: req.query.recordType,
       recordId: req.query.recordId,
+      viewer,
     });
     return sendSuccess(res, result);
   }),
@@ -108,6 +131,15 @@ router.post(
   asyncHandler(async (req, res) => {
     try {
       assertRecordAccess(req, req.body.recordType, WRITE_ACTIONS);
+      const viewer = viewerFor(req);
+      if (!(await documentTextService.recordVisibleToViewer({ recordType: req.body.recordType, recordId: req.body.recordId, viewer }))) {
+        throw new HttpError(404, "ATTACHMENT_RECORD_NOT_FOUND", "Record not found");
+      }
+      for (const documentId of attachmentService.parseDocumentIds(req.body.documentIds)) {
+        if (!(await documentTextService.documentReadableToViewer({ orgId: req.user.orgId, projectId: req.params.projectId, documentId, viewer }))) {
+          throw new HttpError(404, "FILE_NOT_FOUND", "File not found");
+        }
+      }
       const result = await attachmentService.createAttachments({
         orgId: req.user.orgId,
         projectId: req.params.projectId,
@@ -134,6 +166,9 @@ router.get(
   "/documents/:documentId",
   [param("documentId").isUUID(), validate],
   asyncHandler(async (req, res) => {
+    if (!(await documentTextService.documentReadableToViewer({ orgId: req.user.orgId, projectId: req.params.projectId, documentId: req.params.documentId, viewer: viewerFor(req) }))) {
+      throw new HttpError(404, "FILE_NOT_FOUND", "File not found");
+    }
     const file = await attachmentService.getDocumentFile({
       orgId: req.user.orgId,
       projectId: req.params.projectId,
@@ -155,6 +190,9 @@ router.delete(
       attachmentId: req.params.attachmentId,
     });
     assertRecordAccess(req, attachment.recordType, WRITE_ACTIONS);
+    if (!(await documentTextService.recordVisibleToViewer({ recordType: attachment.recordType, recordId: attachment.recordId, viewer: viewerFor(req) }))) {
+      throw new HttpError(404, "ATTACHMENT_NOT_FOUND", "Attachment not found");
+    }
     const result = await attachmentService.deleteAttachment({
       orgId: req.user.orgId,
       projectId: req.params.projectId,

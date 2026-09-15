@@ -1733,9 +1733,18 @@ async function deleteBoqItem(projectId, itemId, options = {}) {
   }
 
   await prisma.$transaction(async (tx) => {
-    if (allocations.length > 0) {
+    // The eligibility check ran before the lock; hold the row and re-read the
+    // allocations under it, so a submission or approval that landed since is
+    // caught and not overwritten (Phase 21D, CX21-553).
+    if (tx.$queryRaw) await tx.$queryRaw`SELECT id FROM "BoqItem" WHERE id = ${itemId} FOR UPDATE`;
+    const held = tx.activityBoqAllocation.findMany
+      ? await tx.activityBoqAllocation.findMany({ where: { projectId, boqItemId: itemId, isActive: true }, select: { id: true, activityId: true, status: true } })
+      : allocations;
+    const heldProtected = held.find((allocation) => activeStatuses.includes(allocation.status) && allocation.status !== 'draft');
+    if (heldProtected) throw new HttpError(409, 'BOQ_ITEM_HAS_LINKED_ALLOCATIONS', 'BOQ rows with submitted or approved activity allocations must be revised through the allocation workflow.');
+    if (held.length > 0) {
       await tx.activityBoqAllocation.updateMany({
-        where: { id: { in: allocations.map((allocation) => allocation.id) } },
+        where: { id: { in: held.map((allocation) => allocation.id) } },
         data: {
           status: 'rejected',
           isActive: false,
@@ -1751,7 +1760,7 @@ async function deleteBoqItem(projectId, itemId, options = {}) {
       // stock issued against it (P21-169), and creation time was then taken
       // for origin (CX21-544).
       const minted = [];
-      for (const allocation of allocations) {
+      for (const allocation of held) {
         if (await retiresWithRow(tx, { projectId, activityId: allocation.activityId, boqItemId: itemId })) minted.push(allocation.activityId);
       }
       if (minted.length) {
@@ -2031,6 +2040,16 @@ async function deleteActivity(projectId, activityId, options = {}) {
 
   let activityRetired = false;
   await prisma.$transaction(async (tx) => {
+    // Held and re-read under the lock: the status was checked before the
+    // transaction, so a submission or approval that landed since is not
+    // overwritten (Phase 21D, CX21-553).
+    if (tx.$queryRaw) await tx.$queryRaw`SELECT id FROM "ActivityBoqAllocation" WHERE id = ${allocation.id} FOR UPDATE`;
+    const fresh = tx.activityBoqAllocation.findFirst
+      ? await tx.activityBoqAllocation.findFirst({ where: { id: allocation.id }, select: { status: true, isActive: true } })
+      : allocation;
+    if (fresh && (fresh.isActive === false || fresh.status !== 'draft')) {
+      throw new HttpError(409, 'ALLOCATION_NOT_EDITABLE', 'Submitted or approved activity allocations must be rejected or revised before removing the schedule activity');
+    }
     await tx.activityBoqAllocation.update({
       where: { id: allocation.id },
       data: {

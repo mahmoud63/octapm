@@ -259,18 +259,25 @@ const invoiceLockKey = ({ projectId, invoiceNumber }) =>
 const assertNoDuplicateInvoice = async ({ orgId = null, projectId, vendorCompanyId, vendorName, invoiceNumber, excludeId = null, tx = prisma }) => {
   if (!invoiceNumber) return;
   // The same vendor named by its company on one invoice and as text on the
-  // other is one vendor: both spellings are looked for (CX21-546).
-  const vendor = [];
+  // other is one vendor (CX21-546); but a name is matched only against a
+  // text-only row, so two invoices carrying two distinct company ids are
+  // never merged because they happen to share a name — a vendor edit that
+  // left a stale name did just that (the thirteenth pass's note).
+  const companyIds = new Set();
+  const names = new Set();
   if (vendorCompanyId) {
-    vendor.push({ vendorCompanyId });
+    companyIds.add(vendorCompanyId);
     const company = tx.company?.findFirst ? await tx.company.findFirst({ where: { id: vendorCompanyId }, select: { name: true } }) : null;
-    if (company?.name) vendor.push({ vendorName: { equals: company.name, mode: "insensitive" } });
+    if (company?.name) names.add(company.name.toLowerCase());
   }
   if (vendorName) {
-    vendor.push({ vendorName: { equals: vendorName, mode: "insensitive" } });
+    names.add(vendorName.toLowerCase());
     const named = tx.company?.findFirst ? await tx.company.findFirst({ where: { ...(orgId ? { orgId } : {}), name: { equals: vendorName, mode: "insensitive" } }, select: { id: true } }) : null;
-    if (named?.id && named.id !== vendorCompanyId) vendor.push({ vendorCompanyId: named.id });
+    if (named?.id) companyIds.add(named.id);
   }
+  const vendor = [];
+  if (companyIds.size) vendor.push({ vendorCompanyId: { in: [...companyIds] } });
+  for (const name of names) vendor.push({ vendorCompanyId: null, vendorName: { equals: name, mode: "insensitive" } });
   const clash = await tx.directCost.findFirst({ where: { projectId, invoiceNumber: { equals: invoiceNumber, mode: "insensitive" }, status: { not: STATUS.VOID }, ...(excludeId ? { id: { not: excludeId } } : {}), ...(vendor.length ? { OR: vendor } : {}) }, select: { id: true, ref: true } });
   if (clash) throw new HttpError(409, "DIRECT_COST_DUPLICATE_INVOICE", `Invoice ${invoiceNumber} from this vendor is already recorded as ${clash.ref}`, { directCostId: clash.id, ref: clash.ref });
 };
