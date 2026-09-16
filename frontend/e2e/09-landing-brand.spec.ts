@@ -12,7 +12,6 @@ import { SHOTS, watchForProblems } from './support'
  * Screenshots land under test-results (see SHOTS in support.ts).
  */
 
-
 /** Official values from the supplied brand book. */
 const BRAND = {
   midnightIndigo: 'rgb(15, 27, 100)',
@@ -75,7 +74,10 @@ test.describe('landing page brand', () => {
 
     // The brand book's own headline, not an invented one.
     await expect(
-      page.getByRole('heading', { level: 1, name: 'One Platform, Total Project Control' }),
+      page.getByRole('heading', {
+        level: 1,
+        name: 'One Platform, Total Project Control',
+      })
     ).toBeVisible()
 
     // The octagon tessellation is a ::before layer over the gradient.
@@ -84,16 +86,76 @@ test.describe('landing page brand', () => {
       return { image: style.backgroundImage, opacity: Number(style.opacity) }
     })
     expect(pattern.image, 'the hero has no tessellation layer').toContain('svg')
-    expect(pattern.opacity, 'the tessellation is invisible').toBeGreaterThan(0.1)
+    expect(pattern.opacity, 'the tessellation is invisible').toBeGreaterThan(
+      0.1
+    )
 
     // Headings are set in the brand typeface.
     const font = await page
       .getByRole('heading', { level: 1 })
       .evaluate((el) => getComputedStyle(el).fontFamily)
-    expect(font, `headline is not Space Grotesk, got ${font}`).toContain('Space Grotesk')
+    expect(font, `headline is not Space Grotesk, got ${font}`).toContain(
+      'Space Grotesk'
+    )
   })
 
-  test('the logo is the eight-octagon ring, not a text fallback', async ({ page }) => {
+  test('the hero reel plays, and cross-fades from one film to the next', async ({
+    page,
+  }) => {
+    test.slow() // the reel changes film every few seconds, so this one waits on real time
+    await page.goto('/landing')
+
+    const reel = page.getByTestId('uat-landing-hero-video')
+    const named = await reel.count()
+    test.skip(named === 0, 'this build names no film for the hero')
+
+    // It is scenery: no part of it reaches the keyboard or assistive technology.
+    await expect(reel).toHaveAttribute('aria-hidden', 'true')
+
+    const films = page.getByTestId(/uat-landing-hero-film-/)
+    await expect(films).toHaveCount(2)
+
+    const showing = async () =>
+      films.evaluateAll((layers) =>
+        layers
+          .map((layer) => {
+            const el = layer as HTMLVideoElement
+            return {
+              film: el.dataset.film ?? '',
+              front: Number(getComputedStyle(el).opacity) > 0.9,
+              running: !el.paused,
+            }
+          })
+          .find((layer) => layer.front)
+      )
+
+    await expect
+      .poll(async () => (await showing())?.running, { timeout: 15000 })
+      .toBe(true)
+    const first = await showing()
+    expect(first?.film, 'the film in view has no source').toBeTruthy()
+
+    // Wait for the reel to move on. Mid-fade neither layer is in front, so the
+    // check is for the next film settled in view, not merely for a change.
+    const seen: { next: { film: string; running: boolean } | null } = {
+      next: null,
+    }
+    await expect
+      .poll(
+        async () => {
+          const now = await showing()
+          if (now && now.film !== first?.film) seen.next = now
+          return seen.next !== null
+        },
+        { timeout: 25000, message: 'the reel never changed film' }
+      )
+      .toBe(true)
+    expect(seen.next?.running, 'the reel stalled after the fade').toBe(true)
+  })
+
+  test('the logo is the eight-octagon ring, not a text fallback', async ({
+    page,
+  }) => {
     await page.goto('/landing')
 
     // An <svg role="img"> named OctaPM — if this became styled text the
@@ -112,15 +174,19 @@ test.describe('landing page brand', () => {
     expect(shape.viewBox).toBeTruthy()
   })
 
-  test('Turquoise is the call to action, and stays an accent', async ({ page }) => {
+  test('Turquoise is the call to action, and stays an accent', async ({
+    page,
+  }) => {
     await page.goto('/landing')
     await settle(page)
 
     const cta = page.getByTestId('uat-landing-cta')
     await expect(cta).toBeVisible()
-    const background = await cta.evaluate((el) => getComputedStyle(el).backgroundColor)
+    const background = await cta.evaluate(
+      (el) => getComputedStyle(el).backgroundColor
+    )
     expect(background, 'the primary call to action is not Turquoise').toBe(
-      BRAND.turquoise,
+      BRAND.turquoise
     )
 
     // The book budgets the accent at roughly 5% of the identity, so it must
@@ -147,11 +213,16 @@ test.describe('landing page brand', () => {
       for (const el of document.querySelectorAll<HTMLElement>('body *')) {
         if (getComputedStyle(el).backgroundColor === colour) area += visible(el)
       }
-      const page = document.documentElement.scrollWidth * document.documentElement.scrollHeight
+      const page =
+        document.documentElement.scrollWidth *
+        document.documentElement.scrollHeight
       return area / page
     }, BRAND.turquoise)
 
-    expect(share, 'Turquoise has grown from an accent into a surface').toBeLessThan(0.05)
+    expect(
+      share,
+      'Turquoise has grown from an accent into a surface'
+    ).toBeLessThan(0.05)
   })
 
   test('every link on the page goes somewhere', async ({ page }) => {
@@ -161,7 +232,9 @@ test.describe('landing page brand', () => {
     const dead = await page.evaluate(() =>
       [...document.querySelectorAll('a')]
         .map((a) => a.getAttribute('href'))
-        .filter((href) => !href || href === '#' || href === 'javascript:void(0)'),
+        .filter(
+          (href) => !href || href === '#' || href === 'javascript:void(0)'
+        )
     )
     expect(dead, 'the page still has placeholder links').toEqual([])
 
@@ -169,12 +242,14 @@ test.describe('landing page brand', () => {
     const missing = await page.evaluate(() =>
       [...document.querySelectorAll('a[href^="#"]')]
         .map((a) => a.getAttribute('href')!.slice(1))
-        .filter((id) => id && !document.getElementById(id)),
+        .filter((id) => id && !document.getElementById(id))
     )
     expect(missing, 'anchors point at sections that do not exist').toEqual([])
   })
 
-  test('the calls to action reach sign-up and the legal pages', async ({ page }) => {
+  test('the calls to action reach sign-up and the legal pages', async ({
+    page,
+  }) => {
     await page.goto('/landing')
 
     await page.getByTestId('uat-landing-cta').click()
@@ -212,7 +287,11 @@ test.describe('landing page brand', () => {
         const contained = (el: HTMLElement) => {
           for (let node = el.parentElement; node; node = node.parentElement) {
             const overflowX = getComputedStyle(node).overflowX
-            if (overflowX === 'auto' || overflowX === 'scroll' || overflowX === 'hidden') {
+            if (
+              overflowX === 'auto' ||
+              overflowX === 'scroll' ||
+              overflowX === 'hidden'
+            ) {
               return true
             }
           }
@@ -220,26 +299,35 @@ test.describe('landing page brand', () => {
         }
 
         for (const el of document.querySelectorAll<HTMLElement>(
-          '[data-testid="uat-landing"] *',
+          '[data-testid="uat-landing"] *'
         )) {
           if (contained(el)) continue
           const box = el.getBoundingClientRect()
           const past = Math.max(box.right - limit, -box.left)
           if (past > over) {
             over = past
-            culprit = `${el.tagName.toLowerCase()}.${el.className}`.slice(0, 120)
+            culprit = `${el.tagName.toLowerCase()}.${el.className}`.slice(
+              0,
+              120
+            )
           }
         }
         return { over: Math.round(over), culprit }
       })
       expect(
         worst.over,
-        `${label} pushes ${worst.over}px past the viewport: ${worst.culprit}`,
+        `${label} pushes ${worst.over}px past the viewport: ${worst.culprit}`
       ).toBeLessThanOrEqual(2)
     }
 
-    expect(problems.consoleErrors, 'the landing page logged console errors').toEqual([])
-    expect(problems.failedRequests, 'the landing page has failing requests').toEqual([])
+    expect(
+      problems.consoleErrors,
+      'the landing page logged console errors'
+    ).toEqual([])
+    expect(
+      problems.failedRequests,
+      'the landing page has failing requests'
+    ).toEqual([])
   })
 
   test('captures the page for review', async ({ page }) => {
@@ -283,13 +371,18 @@ test.describe('landing page brand', () => {
       const [r, g, b] = colour.match(/\d+/g)!.map(Number)
       return (0.299 * r + 0.587 * g + 0.114 * b) / 255
     }
-    expect(luminance(background), 'the dark theme still has a light ground').toBeLessThan(0.3)
+    expect(
+      luminance(background),
+      'the dark theme still has a light ground'
+    ).toBeLessThan(0.3)
     expect(
       luminance(foreground),
-      'the text did not invert with the ground',
+      'the text did not invert with the ground'
     ).toBeGreaterThan(0.6)
 
-    await page.evaluate(() => document.querySelector('#platform')?.scrollIntoView())
+    await page.evaluate(() =>
+      document.querySelector('#platform')?.scrollIntoView()
+    )
     await page.waitForTimeout(900)
     await page.screenshot({ path: `${SHOTS}/18-landing-dark.png` })
   })
