@@ -16,13 +16,32 @@ import { useEffect, useRef, useState, type SyntheticEvent } from 'react'
  * for less motion get a still frame. A film that fails to load drops out of
  * the reel rather than leaving a hole, and if every film fails the reel steps
  * aside altogether.
+ *
+ * VITE_LANDING_VIDEO_BASE moves the whole reel somewhere else without touching
+ * the list: each name that is not already a full address is hung off it, so a
+ * bucket or a CDN that mirrors the same paths needs one line of configuration.
+ * Films are large and they are not code, so a deployment is expected to serve
+ * them from storage rather than from the application's own build.
  */
+const BASE = (
+  (import.meta.env.VITE_LANDING_VIDEO_BASE as string | undefined) ?? ''
+)
+  .trim()
+  .replace(/\/+$/, '')
+
+/** A name already carrying its own host is left alone; the rest hang off BASE. */
+const locate = (film: string) =>
+  !BASE || /^(https?:)?\/\//i.test(film)
+    ? film
+    : `${BASE}/${film.replace(/^\/+/, '')}`
+
 const SOURCES = (
   (import.meta.env.VITE_LANDING_VIDEO_URL as string | undefined) ?? ''
 )
   .split(',')
   .map((entry) => entry.trim())
   .filter(Boolean)
+  .map(locate)
 const POSTER =
   (import.meta.env.VITE_LANDING_VIDEO_POSTER as string | undefined)?.trim() ||
   undefined

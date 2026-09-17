@@ -40,3 +40,8 @@ frontend/blob-report/
 frontend/.playwright/
 # Rewritten on every run; the committed screenshots are the artefact worth reviewing.
 docs/testing/e2e-results.json
+
+# The landing hero films: served from object storage, kept locally for development.
+# See frontend/public/media/README.md.
+frontend/public/media/*.mp4
+frontend/public/media/*.webm
