@@ -149,7 +149,7 @@ export function HeroVideo() {
           key={layer}
           ref={layer === 0 ? layerOne : layerTwo}
           data-testid={`uat-landing-hero-film-${layer}`}
-          className='absolute inset-0 h-full w-full scale-[1.06] object-cover opacity-0 blur-[1px] brightness-[1.08] saturate-[0.92] transition-opacity ease-linear motion-reduce:transition-none'
+          className='absolute inset-0 h-full w-full scale-[1.06] object-cover opacity-0 brightness-[1.08] saturate-[0.92] transition-opacity ease-linear motion-reduce:transition-none'
           style={{
             opacity: front === layer ? 1 : 0,
             transitionDuration: `${FADE_MS}ms`,
@@ -167,9 +167,9 @@ export function HeroVideo() {
           site reads as OctaPM blue throughout without being covered over. The
           second is the gradient itself, thin, for its shape. */}
       <div className='absolute inset-0 bg-[var(--octa-royal-blue)] opacity-[0.62] mix-blend-color' />
-      <div className='octa-hero absolute inset-0 opacity-[0.2]' />
+      <div className='octa-hero absolute inset-0 opacity-[0.12]' />
       {/* and a scrim weighted to the copy column, which is where contrast has to hold */}
-      <div className='absolute inset-0 bg-[linear-gradient(180deg,rgba(7,14,48,0.78)_0%,rgba(7,14,48,0.6)_50%,rgba(7,14,48,0.78)_100%)] md:bg-[linear-gradient(100deg,rgba(7,14,48,0.92)_0%,rgba(7,14,48,0.86)_34%,rgba(7,14,48,0.56)_48%,rgba(7,14,48,0.14)_60%,rgba(7,14,48,0)_70%)]' />
+      <div className='absolute inset-0 bg-[linear-gradient(180deg,rgba(7,14,48,0.72)_0%,rgba(7,14,48,0.5)_50%,rgba(7,14,48,0.72)_100%)] md:bg-[linear-gradient(100deg,rgba(7,14,48,0.92)_0%,rgba(7,14,48,0.86)_32%,rgba(7,14,48,0.54)_46%,rgba(7,14,48,0.08)_58%,rgba(7,14,48,0)_68%)]' />
     </div>
   )
 }

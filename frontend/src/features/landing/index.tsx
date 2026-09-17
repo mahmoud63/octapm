@@ -200,11 +200,11 @@ export function OctaPMLanding() {
               Construction project controls
             </p>
 
-            <h1 className='font-display text-4xl leading-[1.06] font-bold tracking-tight text-balance text-white sm:text-5xl xl:text-6xl'>
+            <h1 className='font-display text-4xl leading-[1.06] font-bold tracking-tight text-balance text-white [text-shadow:0_2px_4px_rgba(6,12,44,0.75),0_4px_28px_rgba(6,12,44,0.5)] sm:text-5xl xl:text-6xl'>
               {BRAND.headline}
             </h1>
 
-            <p className='mt-6 max-w-xl text-base leading-relaxed text-white/90'>
+            <p className='mt-6 max-w-xl text-base leading-relaxed text-white [text-shadow:0_1px_2px_rgba(6,12,44,0.92),0_2px_14px_rgba(6,12,44,0.8)]'>
               {BRAND.promise}
             </p>
 
