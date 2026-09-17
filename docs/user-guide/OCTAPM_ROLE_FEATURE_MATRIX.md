@@ -1,6 +1,6 @@
 # OctaPM Role Feature Matrix
 
-Generated from the product's permission policy (`shared/permissions.json`) on 2026-09-15, not from menu visibility. A cell lists what the role may do on the feature: **CREATE** raise records, **EDIT** change them, **APPROVE** decide (approve, reject, certify), **CLOSE** close or complete them; **VIEW** means the role opens and reads the feature and may submit or export but not create; **READ ONLY** means read alone; **NOT AVAILABLE** means the feature is not offered and its pages do not open for the role. The Admin column is the Project Manager account, which also holds company administration.
+Taken from the permission rules the product itself enforces, read on 15 September 2026, not from what appears in a menu. A cell lists what the role may do on the feature: **CREATE** raise records, **EDIT** change them, **APPROVE** decide (approve, reject, certify), **CLOSE** close or complete them; **VIEW** means the role opens and reads the feature and may submit or export but not create; **READ ONLY** means read alone; **NOT AVAILABLE** means the feature is not offered and its pages do not open for the role. The Admin column is the Project Manager account, which also holds company administration.
 
 Supplier / Bidder works through the invitation link only (no login, no navigation): it prices, submits, revises and withdraws its bid, asks questions and sees the award outcome. Client / Owner and Subcontractor logins are **NOT SUPPORTED** in Pilot V1 (see the User Guide, chapter 11).
 

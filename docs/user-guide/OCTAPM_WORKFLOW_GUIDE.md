@@ -38,6 +38,14 @@ RFI  →  Official answer  →  Change order (with the RFI's letter as evidence)
 
 ## 1. RFI lifecycle
 
+```
+Site Engineer            Person asked              Project Manager
+   raise RFI      ──►   write the answer   ──►   close with a decision
+                                │
+                                ▼
+        Needs You · Notifications · Doc Control register · Overview counts
+```
+
 **Who starts it.** Site Engineer, Planner, Quality Engineer or PM.
 
 **Click path.** Workspace → Project → Doc Control → RFI → **New RFI**. Quick path: Workspace →
@@ -69,6 +77,13 @@ Screens: `images/rfi_start.png`, `images/rfi_new_form.png`, `images/rfi_created.
 `images/rfi_detail_answer.png`, `images/rfi_closed.png`.
 
 ## 2. Change order lifecycle
+
+```
+QS or Project Manager        Project Manager         Cost Control
+   raise change order   ──►    approve or reject  ──►  Revised Budget
+          │                                                  │
+   evidence: RFI answer, photos                    Forecast · Reports
+```
 
 **Who starts it.** QS (or PM).
 
@@ -150,6 +165,13 @@ actuals.
 
 ## 5. RFQ → Bid → Award
 
+```
+Procurement            Suppliers (portal)         Procurement
+  bid package    ──►    price and submit   ──►   compare and award
+       │                                               │
+  invitations sent                            winning bid becomes a commitment
+```
+
 **Who starts it.** Procurement or QS (PM).
 
 **Click path.** Workspace → Project → Commercial → Bids → **New package**.
@@ -183,6 +205,13 @@ Screens: `images/commercial_bids.png`, `images/supplier_portal_start.png`,
 
 ## 6. Award → Purchase Order
 
+```
+Award                Procurement package            Purchase order
+  decision   ──►   quantities and prices   ──►   issued to the supplier
+                                                        │
+                                                 Commitment on the budget line
+```
+
 **Who starts it.** Procurement (Planner may submit).
 
 **Click path.** Workspace → Project → Procurement → Packages → the package → the order; or
@@ -205,6 +234,14 @@ acknowledge").
 Screens: `images/procurement_packages.png`, `images/procurement_purchase_orders.png`.
 
 ## 7. Purchase Order → Goods Receipt
+
+```
+Delivery arrives        Storekeeper              Three-way match
+   at the gate    ──►   receive against PO  ──►  PO · receipt · invoice
+                              │
+                              ▼
+                     Stock on hand rises
+```
 
 **Who starts it.** Storekeeper (Procurement and PM may also post).
 
@@ -229,6 +266,13 @@ Screens: `images/goods_receipt_start.png`, `images/goods_receipt_order_found.png
 `images/goods_receipt_posted.png`, `images/inventory_items_after_receipt.png`.
 
 ## 8. Goods Receipt → Inventory
+
+```
+Goods receipt   ──►   Warehouse stock   ──►   Material issue to an activity
+                                                        │
+                                                        ▼
+                                                  Actual Cost on that activity
+```
 
 What the receipt leaves behind: the item's on-hand and available quantities, its average cost and
 stock value on Inventory → Items and Dashboard; the store and bin on Warehouses; the movement on
@@ -275,6 +319,13 @@ Screen: `images/cost_direct_costs.png`.
 
 ## 12. Timesheet → Labour Cost
 
+```
+Site Engineer          Project Manager           Cost Control
+  hours worked   ──►   approve the sheet  ──►   Actual Cost (labour)
+                                                      │
+                                              Forecast · Earned value
+```
+
 **Who starts it.** Site Engineer (Planner, Quality Engineer, PM).
 
 **Click path.** Workspace → Project → Site Reporting → Timesheets → **New timesheet**.
@@ -292,6 +343,14 @@ cost code; Actual Cost rises; productivity figures update.
 Screen: `images/site_reporting_timesheets.png`.
 
 ## 13. Subcontract → Pay Application
+
+```
+Subcontract        Subcontractor's work        QS certifies
+  commitment  ──►   pay application     ──►   the value done
+                                                    │
+                                                    ▼
+                                      Actual Cost  ──►  payment  ──►  Cash flow
+```
 
 **Who starts it.** QS (PM). A subcontract is a commitment: Commercial → Commitments, drafted by QS or
 Procurement, approved by the PM (`commitment.approve`), executed by the PM or Finance.
@@ -334,6 +393,13 @@ Screen: `images/commercial_cash_flow.png`.
 
 ## 16. Client Valuation (IPC)
 
+```
+Work done      QS prepares       Client certifies      Finance
+  on site  ──►  the valuation  ──►  the amount    ──►  invoice and receipt
+                                                             │
+                                                        Cash In · Cash flow
+```
+
 **Who starts it.** QS (PM).
 
 **Click path.** Workspace → Project → Commercial → IPC (and Client Billing for the statement;
@@ -364,6 +430,14 @@ Screens: `images/commercial_client_billing.png`, `images/commercial_ipc.png`.
 
 ## 19. Inspection → NCR
 
+```
+Quality Engineer        Work inspected          Non-conformance
+   raise inspection  ──►   pass or fail   ──►   NCR raised on failure
+                                                       │
+                                                       ▼
+                                          Assignee · corrective action
+```
+
 **Who starts it.** Site Engineer or Quality Engineer (Planner, QS, PM may start and sign).
 
 **Click path.** Workspace → Project → Quality → Inspections; templates under Company → Inspection
@@ -377,6 +451,14 @@ NCR is raised from Quality → NCR → **New NCR…** naming the inspection in i
 "Failed ITP" and "Major NCR" counts move.
 
 ## 20. NCR → Corrective Action → Closeout
+
+```
+NCR raised        Assignee fixes          Quality Engineer
+   on a party  ──►  and submits closeout ──►  approves the closeout
+                                                     │
+                                                     ▼
+                                   Closed · quality score · Overview counts
+```
 
 **Who starts it.** Quality Engineer (Site Engineer, Planner, PM).
 
@@ -450,6 +532,14 @@ Submittal workflows.
 Screen: `images/doc_control_submittals.png`.
 
 ## 24. Meetings → Actions → Tasks
+
+```
+Meeting held      Actions agreed         Owner's task list
+  and minuted  ──►  with an owner   ──►   appears in Needs You
+                                                │
+                                                ▼
+                                     Closed when the action is done
+```
 
 **Who starts it.** PM or Planner.
 
