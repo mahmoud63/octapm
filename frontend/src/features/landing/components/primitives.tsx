@@ -57,7 +57,10 @@ export function Reveal({
   return (
     <div
       ref={ref}
-      className={cn('motion-safe:transition-all motion-safe:duration-700', className)}
+      className={cn(
+        'motion-safe:transition-all motion-safe:duration-700',
+        className
+      )}
       style={{
         opacity: shown ? 1 : 0.001,
         transform: shown ? 'none' : 'translateY(18px)',
@@ -199,13 +202,15 @@ export function Eyebrow({
   return (
     <p
       className={cn(
-        'mb-4 flex items-center gap-3 text-[11px] font-semibold tracking-[0.18em] uppercase',
-        onDark ? 'text-white/70' : 'text-interactive'
+        'mb-4 inline-flex items-center gap-2.5 text-[11px] font-bold tracking-[0.2em] uppercase',
+        onDark ? 'text-white/75' : 'text-interactive'
       )}
     >
+      {/* the mark's own shape, small, so the label is anchored rather than adrift */}
       <span
         aria-hidden
-        className={cn('h-px w-8', onDark ? 'bg-white/40' : 'bg-interactive/50')}
+        className='octa-notch-all size-2 shrink-0 bg-current'
+        style={{ '--notch': '3px' } as React.CSSProperties}
       />
       {children}
     </p>

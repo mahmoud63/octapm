@@ -10,10 +10,22 @@ import {
   Sun,
   X,
 } from 'lucide-react'
-import { OctaLogo, OctaMark } from '@/components/brand/octa-logo'
-import { HeroVideo } from './components/hero-video'
-import { useTheme } from '@/context/theme-provider'
 import { cn } from '@/lib/utils'
+import { useTheme } from '@/context/theme-provider'
+import { OctaLogo, OctaMark } from '@/components/brand/octa-logo'
+import { DimensionRing } from './components/dimension-ring'
+import { HeroVideo } from './components/hero-video'
+import {
+  Counter,
+  Eyebrow,
+  OctaChip,
+  Panel,
+  Reveal,
+  Section,
+  SectionTitle,
+  type ChipTone,
+} from './components/primitives'
+import { ProductFrame } from './components/product-frame'
 import {
   AUDIENCES,
   BRAND,
@@ -29,18 +41,6 @@ import {
   STEPS,
   WORKS_WITH,
 } from './content'
-import { DimensionRing } from './components/dimension-ring'
-import { ProductFrame } from './components/product-frame'
-import {
-  Counter,
-  Eyebrow,
-  OctaChip,
-  Panel,
-  Reveal,
-  Section,
-  SectionTitle,
-  type ChipTone,
-} from './components/primitives'
 
 /**
  * The OctaPM marketing page.
@@ -73,7 +73,7 @@ export function OctaPMLanding() {
   return (
     <div
       data-testid='uat-landing'
-      className='font-sans min-h-svh bg-background text-foreground'
+      className='min-h-svh bg-background font-sans text-foreground'
     >
       {/* ── Top bar ─────────────────────────────────────────────────────── */}
       <header
@@ -110,7 +110,11 @@ export function OctaPMLanding() {
               className='octa-notch-all grid size-9 place-items-center text-white/70 transition-colors hover:bg-white/10 hover:text-white'
               style={{ '--notch': '9px' } as React.CSSProperties}
             >
-              {isDark ? <Sun className='size-4' /> : <Moon className='size-4' />}
+              {isDark ? (
+                <Sun className='size-4' />
+              ) : (
+                <Moon className='size-4' />
+              )}
             </button>
 
             <Link
@@ -139,7 +143,11 @@ export function OctaPMLanding() {
               className='octa-notch-all grid size-9 place-items-center text-white transition-colors hover:bg-white/10 lg:hidden'
               style={{ '--notch': '9px' } as React.CSSProperties}
             >
-              {menuOpen ? <X className='size-4' /> : <Menu className='size-4' />}
+              {menuOpen ? (
+                <X className='size-4' />
+              ) : (
+                <Menu className='size-4' />
+              )}
             </button>
           </div>
         </div>
@@ -196,7 +204,7 @@ export function OctaPMLanding() {
               {BRAND.headline}
             </h1>
 
-            <p className='mt-6 max-w-xl text-base leading-relaxed text-white/75'>
+            <p className='mt-6 max-w-xl text-base leading-relaxed text-white/90'>
               {BRAND.promise}
             </p>
 
@@ -211,7 +219,7 @@ export function OctaPMLanding() {
               </Link>
               <a
                 href='#platform'
-                className='octa-notch-all inline-flex items-center px-6 py-3.5 text-sm font-semibold text-white bg-white/12 transition-colors hover:bg-white/20'
+                className='octa-notch-all inline-flex items-center bg-white/12 px-6 py-3.5 text-sm font-semibold text-white transition-colors hover:bg-white/20'
                 style={{ '--notch': '11px' } as React.CSSProperties}
               >
                 See the platform
@@ -297,7 +305,7 @@ export function OctaPMLanding() {
                   <OctaChip tone={problem.tone as ChipTone}>
                     {problem.figure}
                   </OctaChip>
-                  <h3 className='font-display mt-5 text-lg font-bold text-primary'>
+                  <h3 className='mt-5 font-display text-lg font-bold text-primary'>
                     {problem.title}
                   </h3>
                   <p className='mt-2.5 text-[13.5px] leading-relaxed text-muted-foreground'>
@@ -325,7 +333,7 @@ export function OctaPMLanding() {
             <div className='grid lg:grid-cols-[1.25fr_1fr]'>
               <div className='p-8 sm:p-10'>
                 <OctaChip tone='accent'>{FLAGSHIP.eyebrow}</OctaChip>
-                <h3 className='font-display mt-5 text-2xl font-bold text-primary'>
+                <h3 className='mt-5 font-display text-2xl font-bold text-primary'>
                   {FLAGSHIP.title}
                 </h3>
                 <p className='mt-3 max-w-lg text-sm leading-relaxed text-muted-foreground'>
@@ -346,20 +354,45 @@ export function OctaPMLanding() {
                 </dl>
               </div>
 
-              <div className='octa-tess flex flex-col justify-center gap-4 bg-[var(--octa-midnight-indigo)] p-8 sm:p-10'>
-                {FLAGSHIP.passes.map((pass, i) => (
-                  <div key={pass} className='flex items-center gap-3.5'>
-                    <span
-                      className='octa-notch-all grid size-8 shrink-0 place-items-center bg-white/12 font-display text-xs font-bold text-white'
-                      style={{ '--notch': '8px' } as React.CSSProperties}
-                    >
-                      {i + 1}
-                    </span>
-                    <span className='text-[12.5px] leading-snug text-white/75'>
-                      {pass}
-                    </span>
-                  </div>
-                ))}
+              {/* The three passes as a run, not as three loose lines: the rule
+                  through the numbers is the engine going from one to the next. */}
+              <div className='octa-tess flex flex-col justify-center bg-[var(--octa-midnight-indigo)] p-8 sm:p-10'>
+                <Eyebrow onDark>What the engine does</Eyebrow>
+                <ol className='mt-2'>
+                  {FLAGSHIP.passes.map((pass, i) => {
+                    const subject = pass.split('—').slice(1).join('—').trim()
+                    const last = i === FLAGSHIP.passes.length - 1
+                    return (
+                      <li
+                        key={pass}
+                        className={cn('flex gap-4', !last && 'pb-5')}
+                      >
+                        <span className='flex flex-col items-center self-stretch'>
+                          <span
+                            className='octa-notch-all grid size-8 shrink-0 place-items-center bg-brand-accent font-display text-xs font-bold text-white'
+                            style={{ '--notch': '8px' } as React.CSSProperties}
+                          >
+                            {i + 1}
+                          </span>
+                          {!last && (
+                            <span
+                              aria-hidden
+                              className='mt-1.5 w-px flex-1 bg-white/25'
+                            />
+                          )}
+                        </span>
+                        <span className='pt-1'>
+                          <span className='block text-[10.5px] font-bold tracking-[0.16em] text-white/50 uppercase'>
+                            Pass {i + 1}
+                          </span>
+                          <span className='mt-0.5 block text-[13.5px] leading-snug text-white/90'>
+                            {subject || pass}
+                          </span>
+                        </span>
+                      </li>
+                    )
+                  })}
+                </ol>
               </div>
             </div>
           </Panel>
@@ -370,10 +403,13 @@ export function OctaPMLanding() {
             <Reveal key={feature.title} delay={i * 60}>
               <Panel className='h-full'>
                 <div className='flex h-full flex-col p-7'>
-                  <OctaChip tone={feature.tone as ChipTone} className='self-start'>
+                  <OctaChip
+                    tone={feature.tone as ChipTone}
+                    className='self-start'
+                  >
                     {feature.tag}
                   </OctaChip>
-                  <h3 className='font-display mt-5 text-base font-bold text-primary'>
+                  <h3 className='mt-5 font-display text-base font-bold text-primary'>
                     {feature.title}
                   </h3>
                   <p className='mt-2 text-[13px] leading-relaxed text-muted-foreground'>
@@ -424,7 +460,7 @@ export function OctaPMLanding() {
                 <div className='font-display text-3xl font-bold text-interactive tabular-nums'>
                   {step.n}
                 </div>
-                <h3 className='font-display mt-3 text-lg font-bold text-primary'>
+                <h3 className='mt-3 font-display text-lg font-bold text-primary'>
                   {step.title}
                 </h3>
                 <p className='mt-2 text-[13.5px] leading-relaxed text-muted-foreground'>
@@ -482,7 +518,10 @@ export function OctaPMLanding() {
               </thead>
               <tbody>
                 {COMPARISON.rows.map((row) => (
-                  <tr key={row[0]} className='border-b border-border last:border-0'>
+                  <tr
+                    key={row[0]}
+                    className='border-b border-border last:border-0'
+                  >
                     <th
                       scope='row'
                       className='px-6 py-3.5 text-[13px] font-semibold text-primary'
@@ -761,7 +800,7 @@ export function OctaPMLanding() {
               </Link>
               <Link
                 to='/sign-in'
-                className='octa-notch-all inline-flex items-center px-7 py-3.5 text-sm font-semibold text-white bg-white/12 transition-colors hover:bg-white/20'
+                className='octa-notch-all inline-flex items-center bg-white/12 px-7 py-3.5 text-sm font-semibold text-white transition-colors hover:bg-white/20'
                 style={{ '--notch': '11px' } as React.CSSProperties}
               >
                 Sign in
