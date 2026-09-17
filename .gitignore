@@ -45,3 +45,11 @@ docs/testing/e2e-results.json
 # See frontend/public/media/README.md.
 frontend/public/media/*.mp4
 frontend/public/media/*.webm
+
+# Temporary home for inspecting generated deliverables in the browser.
+frontend/public/__qa/
+
+# Client deliverables are generated from docs/user-guide by tools/publishing.
+# The manifest is tracked; the built files are not.
+deliverables/**
+!deliverables/OCTAPM_DELIVERY_MANIFEST.md

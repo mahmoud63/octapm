@@ -1,0 +1,14 @@
+{
+  "name": "@octapm/publishing",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Turns the canonical Markdown under docs/user-guide into the client documentation and training deliverables. Nothing here is part of the product build.",
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs"
+  },
+  "dependencies": {
+    "docx": "^9.5.1",
+    "markdown-it": "^14.1.0"
+  }
+}
