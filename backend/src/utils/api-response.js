@@ -16,6 +16,7 @@ const buildErrorEnvelope = ({
   code,
   message,
   details,
+  requestId,
   includeDetails = true,
 } = {}) => {
   const normalizedStatus = normalizeStatus(status);
@@ -35,6 +36,11 @@ const buildErrorEnvelope = ({
 
   if (includeDetails && details !== undefined) {
     error.details = normalizeMoneyTree(details);
+  }
+
+  // The reference a person can read out to support.
+  if (requestId) {
+    error.requestId = String(requestId);
   }
 
   return {

@@ -23,6 +23,7 @@ const {
   requireCloudFrontOriginSecret,
 } = require("./middleware/cloudfront-origin");
 const { errorHandler, notFoundHandler } = require("./middleware/error-handler");
+const { requestId } = require("./middleware/request-id");
 const {
   apiRateLimiter,
   stripeWebhookLimiter,
@@ -59,6 +60,7 @@ const createApp = () => {
 
   app.use(helmet());
   app.use(cors(createCorsOptions()));
+  app.use(requestId);
   if (process.env.NODE_ENV !== "test") {
     app.use(morgan("dev"));
   }

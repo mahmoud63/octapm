@@ -154,7 +154,11 @@ const buildAuthPayload = (user, refreshSession) => ({
 
 const createRefreshSession = async (tx, user, context = {}) => {
   const sessionId = randomUUID();
-  const refreshToken = createRefreshToken(user, sessionId);
+  const refreshToken = createRefreshToken(
+    user,
+    sessionId,
+    context.client || "web",
+  );
   const expiresAt = getRefreshTokenExpiresAt(refreshToken);
 
   await tx.refreshSession.create({
@@ -422,7 +426,12 @@ const completeMfaLogin = async ({ mfaToken, code }, context = {}) => {
   });
 };
 
-const refresh = async ({ refreshToken, userAgent, ipAddress }) => {
+const refresh = async ({
+  refreshToken,
+  userAgent,
+  ipAddress,
+  client = "web",
+}) => {
   let payload;
 
   try {
@@ -434,7 +443,17 @@ const refresh = async ({ refreshToken, userAgent, ipAddress }) => {
   const tokenHash = hashRefreshToken(refreshToken);
   const now = new Date();
 
-  return prisma.$transaction(async (tx) => {
+  // A refusal that must also revoke something is recorded here and acted on
+  // after the transaction. Throwing from inside the transaction rolls back
+  // everything it did, which would silently undo the very revocation that
+  // makes a replayed token dangerous to keep around.
+  let refusal = null;
+  const refuse = (session, scope, error) => {
+    refusal = { session, scope, error };
+    return null;
+  };
+
+  const result = await prisma.$transaction(async (tx) => {
     const session = await tx.refreshSession.findUnique({
       where: { id: payload.jti },
       include: { user: true },
@@ -449,32 +468,52 @@ const refresh = async ({ refreshToken, userAgent, ipAddress }) => {
       throw createInvalidRefreshTokenError();
     }
 
+    // A token that turns up on the channel it was not issued for has left the
+    // place it was stored. Treat it exactly like a replay.
+    if ((payload.cli || "web") !== client) {
+      return refuse(
+        session,
+        "family",
+        new HttpError(
+          401,
+          "REFRESH_TOKEN_CHANNEL_MISMATCH",
+          "Refresh token was issued for a different client",
+        ),
+      );
+    }
+
     if (session.revokedAt) {
-      await revokeSessionFamily(tx, session, now);
-      throw new HttpError(
-        401,
-        "REFRESH_TOKEN_REUSED",
-        "Refresh token has already been used",
+      return refuse(
+        session,
+        "family",
+        new HttpError(
+          401,
+          "REFRESH_TOKEN_REUSED",
+          "Refresh token has already been used",
+        ),
       );
     }
 
     if (session.expiresAt <= now) {
-      await revokeSessionIfActive(tx, session.id, now);
-      throw new HttpError(
-        401,
-        "REFRESH_TOKEN_EXPIRED",
-        "Refresh token has expired",
+      return refuse(
+        session,
+        "session",
+        new HttpError(
+          401,
+          "REFRESH_TOKEN_EXPIRED",
+          "Refresh token has expired",
+        ),
       );
     }
 
     if (!session.user || session.user.status !== "active") {
-      await revokeSessionIfActive(tx, session.id, now);
-      throw createInvalidRefreshTokenError();
+      return refuse(session, "session", createInvalidRefreshTokenError());
     }
 
     const nextSession = await createRefreshSession(tx, session.user, {
       userAgent,
       ipAddress,
+      client,
     });
 
     await tx.refreshSession.update({
@@ -487,9 +526,20 @@ const refresh = async ({ refreshToken, userAgent, ipAddress }) => {
 
     return buildAuthPayload(session.user, nextSession);
   });
+
+  if (refusal) {
+    if (refusal.scope === "family") {
+      await revokeSessionFamily(prisma, refusal.session, now);
+    } else {
+      await revokeSessionIfActive(prisma, refusal.session.id, now);
+    }
+    throw refusal.error;
+  }
+
+  return result;
 };
 
-const logout = async ({ refreshToken }) => {
+const logout = async ({ refreshToken, client = "web" }) => {
   if (!refreshToken) {
     return { revoked: false };
   }
@@ -498,6 +548,11 @@ const logout = async ({ refreshToken }) => {
   try {
     payload = verifyRefreshToken(refreshToken);
   } catch (_error) {
+    return { revoked: false };
+  }
+
+  // Only the channel a token was issued on may end its session.
+  if ((payload.cli || "web") !== client) {
     return { revoked: false };
   }
 

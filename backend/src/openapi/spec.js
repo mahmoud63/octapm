@@ -1239,6 +1239,17 @@ const components = {
           type: "integer",
           description: "Access-token lifetime in seconds; defaults to 900.",
         },
+        refreshToken: {
+          type: "string",
+          description:
+            "Native clients only (request header X-OctaPM-Client: mobile): the rotated refresh token, to be kept in the platform keychain and presented in the body of /auth/refresh and /auth/logout. Browser clients never receive it here; they get the httpOnly cookie.",
+        },
+        refreshTokenExpiresAt: {
+          type: "string",
+          format: "date-time",
+          nullable: true,
+          description: "Native clients only.",
+        },
       },
       ["accessToken", "tokenType", "expiresIn"],
     ),

@@ -11,7 +11,7 @@ const notFoundHandler = (req, _res, next) => {
   );
 };
 
-const errorHandler = (err, _req, res, next) => {
+const errorHandler = (err, req, res, next) => {
   if (res.headersSent) {
     return next(err);
   }
@@ -19,12 +19,13 @@ const errorHandler = (err, _req, res, next) => {
   if (process.env.NODE_ENV !== "test") {
     // Suppress logging for expected client errors (like 401 Unauthorized or 404 Not Found)
     if (!err.status || err.status >= 500) {
-      console.error(err.stack || err);
+      console.error(req.id ? `[${req.id}]` : "", err.stack || err);
     }
   }
 
   return sendError(res, err, undefined, undefined, undefined, {
     includeDetails: process.env.NODE_ENV !== "production",
+    requestId: req.id,
   });
 };
 

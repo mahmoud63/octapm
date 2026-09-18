@@ -62,7 +62,7 @@ const createAccessToken = (user) => {
   );
 };
 
-const createRefreshToken = (user, sessionId) => {
+const createRefreshToken = (user, sessionId, client = 'web') => {
   if (!sessionId) {
     throw new HttpError(
       500,
@@ -77,6 +77,10 @@ const createRefreshToken = (user, sessionId) => {
       orgId: user.orgId,
       role: user.role,
       type: 'refresh',
+      // The delivery channel this token was issued on: 'web' (httpOnly cookie)
+      // or 'mobile' (response body, kept in the device keychain). A token that
+      // turns up on the other channel is refused and its session family revoked.
+      cli: client,
     },
     getEnv('JWT_REFRESH_SECRET'),
     {

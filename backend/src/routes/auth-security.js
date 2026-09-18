@@ -13,7 +13,7 @@ const ssoService = require("../services/sso.service");
  * Two-factor and single sign-on endpoints (OCTA-SEC-AUTH-040), registered
  * on the `/auth` router so they share its cookie helpers and rate limits.
  */
-const register = (router, { setRefreshCookie, toPublicAuthResponse, getRequestContext }) => {
+const register = (router, { sendSession, getRequestContext }) => {
   // ── MFA: second login step ──
   router.post(
     "/mfa/verify",
@@ -21,8 +21,7 @@ const register = (router, { setRefreshCookie, toPublicAuthResponse, getRequestCo
     [body("mfaToken").isString().isLength({ min: 20 }), body("code").isString().trim().isLength({ min: 6, max: 12 }), validate],
     asyncHandler(async (req, res) => {
       const result = await authService.completeMfaLogin(req.body, getRequestContext(req));
-      setRefreshCookie(res, result);
-      return sendSuccess(res, toPublicAuthResponse(result));
+      return sendSession(req, res, result);
     }),
   );
 
@@ -49,8 +48,7 @@ const register = (router, { setRefreshCookie, toPublicAuthResponse, getRequestCo
     [body("ticket").isString().isLength({ min: 20, max: 200 }), validate],
     asyncHandler(async (req, res) => {
       const result = await ssoService.complete({ ticket: req.body.ticket }, getRequestContext(req));
-      setRefreshCookie(res, result);
-      return sendSuccess(res, toPublicAuthResponse(result));
+      return sendSession(req, res, result);
     }),
   );
 };

@@ -37,9 +37,33 @@ const parseCookieHeader = (header) => {
 const getRefreshTokenFromCookie = (req) =>
   parseCookieHeader(req.headers.cookie)[REFRESH_COOKIE_NAME];
 
+// ── Native clients ──
+// A native app cannot hold an httpOnly cookie in its keychain, so a request
+// that identifies itself as one receives the refresh token in the response
+// body and presents it back in the request body. The header chooses the
+// delivery channel and nothing else: authorization is decided by the same
+// middleware, on the same access token, for both kinds of client. A token is
+// bound to its channel by the service, so the header cannot be used to move a
+// cookie's token into a body or the reverse.
+const CLIENT_HEADER = "x-octapm-client";
+const clientOf = (req) =>
+  String(req.get(CLIENT_HEADER) || "")
+    .trim()
+    .toLowerCase() === "mobile"
+    ? "mobile"
+    : "web";
+const isNativeClient = (req) => clientOf(req) === "mobile";
+const getRefreshToken = (req) =>
+  isNativeClient(req)
+    ? typeof req.body?.refreshToken === "string"
+      ? req.body.refreshToken
+      : undefined
+    : getRefreshTokenFromCookie(req);
+
 const getRequestContext = (req) => ({
   userAgent: req.get("user-agent") || null,
   ipAddress: req.ip || req.socket?.remoteAddress || null,
+  client: clientOf(req),
 });
 
 const getRefreshCookieBaseOptions = () => ({
@@ -77,13 +101,38 @@ const toPublicAuthResponse = (result) => {
   return publicResult;
 };
 
-const requireRefreshCookie = (req) => {
-  const refreshToken = getRefreshTokenFromCookie(req);
+const toNativeAuthResponse = (result) => {
+  const { refreshToken, refreshTokenExpiresAt, ...publicResult } = result;
+  return {
+    ...publicResult,
+    tokens: {
+      ...publicResult.tokens,
+      refreshToken,
+      refreshTokenExpiresAt: refreshTokenExpiresAt
+        ? new Date(refreshTokenExpiresAt).toISOString()
+        : null,
+    },
+  };
+};
+
+/** Send a new session the way this client can keep it. */
+const sendSession = (req, res, result, status = 200) => {
+  if (isNativeClient(req)) {
+    return sendSuccess(res, toNativeAuthResponse(result), status);
+  }
+  setRefreshCookie(res, result);
+  return sendSuccess(res, toPublicAuthResponse(result), status);
+};
+
+const requireRefreshToken = (req) => {
+  const refreshToken = getRefreshToken(req);
   if (!refreshToken) {
     throw new HttpError(
       401,
       "REFRESH_SESSION_REQUIRED",
-      "Refresh session cookie is required",
+      isNativeClient(req)
+        ? "Refresh token is required"
+        : "Refresh session cookie is required",
     );
   }
 
@@ -102,8 +151,7 @@ router.post(
   ],
   asyncHandler(async (req, res) => {
     const result = await authService.register(req.body, getRequestContext(req));
-    setRefreshCookie(res, result);
-    return sendSuccess(res, toPublicAuthResponse(result), 201);
+    return sendSession(req, res, result, 201);
   }),
 );
 
@@ -119,14 +167,12 @@ router.post(
     const result = await authService.login(req.body, getRequestContext(req));
     // A second factor is pending: no session yet, only the challenge token.
     if (result.mfaRequired) return sendSuccess(res, result);
-    setRefreshCookie(res, result);
-    return sendSuccess(res, toPublicAuthResponse(result));
+    return sendSession(req, res, result);
   }),
 );
 
 require("./auth-security").register(router, {
-  setRefreshCookie,
-  toPublicAuthResponse,
+  sendSession,
   getRequestContext,
 });
 
@@ -196,21 +242,29 @@ router.post(
       req.body,
       getRequestContext(req),
     );
-    setRefreshCookie(res, result);
-    return sendSuccess(res, toPublicAuthResponse(result));
+    return sendSession(req, res, result);
   }),
 );
 
 router.post(
   "/refresh",
   refreshLimiter,
+  // Only a native client sends the token in the body; a browser's body is
+  // ignored entirely, so it is not validated either.
+  [
+    body("refreshToken")
+      .if((_value, { req }) => isNativeClient(req))
+      .optional()
+      .isString()
+      .isLength({ min: 20, max: 4096 }),
+    validate,
+  ],
   asyncHandler(async (req, res) => {
     const result = await authService.refresh({
-      refreshToken: requireRefreshCookie(req),
+      refreshToken: requireRefreshToken(req),
       ...getRequestContext(req),
     });
-    setRefreshCookie(res, result);
-    return sendSuccess(res, toPublicAuthResponse(result));
+    return sendSession(req, res, result);
   }),
 );
 
@@ -218,9 +272,10 @@ router.post(
   "/logout",
   asyncHandler(async (req, res) => {
     const result = await authService.logout({
-      refreshToken: getRefreshTokenFromCookie(req),
+      refreshToken: getRefreshToken(req),
+      client: clientOf(req),
     });
-    clearRefreshCookie(res);
+    if (!isNativeClient(req)) clearRefreshCookie(res);
     return sendSuccess(res, result);
   }),
 );

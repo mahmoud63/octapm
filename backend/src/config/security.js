@@ -86,6 +86,11 @@ const createCorsOriginDelegate =
 const createCorsOptions = (env = process.env) => ({
   origin: createCorsOriginDelegate(env),
   credentials: true,
+  // Browser scripts can read only the response headers a preflight exposes.
+  // The request id is the support reference every client shows, so a browser
+  // client (the web platform, or the mobile app running as a web build) must
+  // be able to read it too. Native apps are not subject to CORS.
+  exposedHeaders: ["X-Request-Id"],
 });
 
 const createSocketCorsOptions = (env = process.env) => ({

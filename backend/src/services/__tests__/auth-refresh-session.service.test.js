@@ -112,7 +112,7 @@ describe('auth refresh sessions', () => {
       replacedBySessionId: 'session-2',
       user: activeUser,
     });
-    mockTx.refreshSession.updateMany.mockResolvedValue({ count: 1 });
+    mockPrisma.refreshSession.updateMany.mockResolvedValue({ count: 1 });
 
     await expect(
       authService.refresh({ refreshToken: originalToken }),
@@ -121,7 +121,10 @@ describe('auth refresh sessions', () => {
       code: 'REFRESH_TOKEN_REUSED',
     });
 
-    expect(mockTx.refreshSession.updateMany).toHaveBeenCalledWith({
+    // The revocation is issued outside the transaction that found the replay,
+    // so the refusal cannot roll it back.
+    expect(mockTx.refreshSession.updateMany).not.toHaveBeenCalled();
+    expect(mockPrisma.refreshSession.updateMany).toHaveBeenCalledWith({
       where: {
         id: { in: ['session-1', 'session-2'] },
         revokedAt: null,
