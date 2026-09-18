@@ -75,6 +75,11 @@ const IN_APP_ROUTES: Record<string, (recordId: string) => string> = {
   rfi: (id) => `/rfi/${id}`,
   task: (id) => `/tasks/${id}`,
   sheet: (id) => `/drawings/${id}`,
+  activity: (id) => `/activities/${id}`,
+  progress_submission: (id) => `/activities/${id}`,
+  daily_log: (id) => (/^\d{4}-\d{2}-\d{2}$/.test(id) ? `/site?date=${id}` : '/site'),
+  photo: (id) => `/photos/${id}`,
+  timesheet: (id) => `/timesheets/${id}`,
 }
 
 export function appRouteForRecord(recordType: string | null | undefined, recordId: string | null | undefined): string | null {

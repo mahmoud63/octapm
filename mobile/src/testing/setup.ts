@@ -96,6 +96,25 @@ jest.mock('expo-file-system/legacy', () => ({ cacheDirectory: 'file:///cache/', 
 jest.mock('expo-sharing', () => ({ isAvailableAsync: jest.fn(async () => true), shareAsync: jest.fn(async () => undefined) }))
 jest.mock('react-native-webview', () => ({ WebView: () => null }))
 
+// Node's FormData refuses the { uri, name, type } file objects React Native's
+// FormData accepts. Under test those objects become empty blobs with the same
+// name and type, so an upload builds a real multipart request the fake server
+// can record.
+const RealFormData = globalThis.FormData
+class TestFormData extends RealFormData {
+  override append(name: string, value: unknown, filename?: string) {
+    if (value && typeof value === 'object' && 'uri' in value) {
+      const file = value as { name?: string; type?: string }
+      super.append(name, new Blob([''], { type: file.type ?? 'application/octet-stream' }), file.name ?? filename ?? 'file')
+      return
+    }
+    // A third argument selects the blob overload, so it is only passed when given.
+    if (filename !== undefined) super.append(name, value as Blob, filename)
+    else super.append(name, value as string)
+  }
+}
+;(globalThis as { FormData: unknown }).FormData = TestFormData
+
 jest.mock('react-native-safe-area-context', () => {
   const insets = { top: 0, right: 0, bottom: 0, left: 0 }
   const frame = { x: 0, y: 0, width: 390, height: 844 }

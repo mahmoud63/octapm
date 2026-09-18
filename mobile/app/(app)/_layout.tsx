@@ -44,6 +44,10 @@ export default function AppLayout() {
       <Tabs.Screen name="tasks" options={{ href: null }} />
       <Tabs.Screen name="documents" options={{ href: null }} />
       <Tabs.Screen name="drawings" options={{ href: null }} />
+      <Tabs.Screen name="site" options={{ href: null }} />
+      <Tabs.Screen name="activities" options={{ href: null }} />
+      <Tabs.Screen name="photos" options={{ href: null }} />
+      <Tabs.Screen name="timesheets" options={{ href: null }} />
     </Tabs>
   )
 }

@@ -61,7 +61,18 @@ Records (from Home, Needs You, Search and Notifications) ─ M2
              favourite · raise RFI from here
 ```
 
-Planned destinations reached from Home, Needs You and Search as their milestones land: daily logs, progress and photos (M3), quality home, inspections, punch, NCR, safety (M4), inventory home, scan, goods receipt, issue, transfer (M5), change events, workflow inbox, procurement views (M6), outbox and offline status (M7).
+Site and schedule (from Home) ─ M3
+  Daily log ─► the day: ‹ date › · status · totals · weather · summary
+               six sections with add and remove · copy yesterday · submit the day
+  Activities ─► today's work / mine / critical / milestones / delayed / all ─► activity
+               approved and pending progress · float · dates · method · submissions ·
+               attachments · Update progress (by method) · Raise RFI · Lookahead board
+  Photos ─► gallery (tags, search) ─► photo (caption, tags, camera details, records)
+            Take or choose a photo → caption → onto today's daily log
+  Timesheets ─► last two weeks ─► sheet (entries, submit) · New timesheet for a crew
+```
+
+Planned destinations reached from Home, Needs You and Search as their milestones land: quality home, inspections, punch, NCR, safety (M4), inventory home, scan, goods receipt, issue, transfer (M5), change events, workflow inbox, procurement views (M6), outbox and offline status (M7).
 
 ## 2. Navigation rules
 

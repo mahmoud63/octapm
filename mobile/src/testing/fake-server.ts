@@ -28,7 +28,15 @@ export function fakeServer(routes: Record<string, Route>): Call[] {
       headers[key.toLowerCase()] = value
     })
     const raw = await request.text()
-    const body = raw ? JSON.parse(raw) : undefined
+    let body: unknown = undefined
+    if (raw) {
+      try {
+        body = JSON.parse(raw)
+      } catch {
+        // A multipart upload: keep the raw text so a test can inspect it.
+        body = raw
+      }
+    }
     const query: Record<string, string> = {}
     url.searchParams.forEach((value, key) => {
       query[key] = value

@@ -76,10 +76,14 @@ export default function HomeScreen() {
     else void openOnWeb(destination.web)
   }
   const records = [
+    { id: 'site', title: 'Daily log', route: '/site', module: 'progress' },
+    { id: 'activities', title: 'Activities', route: '/activities', module: 'schedule' },
+    { id: 'photos', title: 'Photos', route: '/photos', module: 'document_control' },
     { id: 'rfi', title: 'RFIs', route: '/rfi', module: 'rfi' },
     { id: 'tasks', title: 'Tasks', route: '/tasks', module: 'task' },
     { id: 'documents', title: 'Documents', route: '/documents', module: 'document_control' },
     { id: 'drawings', title: 'Drawings', route: '/drawings', module: 'document_control' },
+    { id: 'timesheets', title: 'Timesheets', route: '/timesheets', module: 'timesheet' },
   ].filter((r) => permissions.allows(r.module, 'read'))
 
   return (

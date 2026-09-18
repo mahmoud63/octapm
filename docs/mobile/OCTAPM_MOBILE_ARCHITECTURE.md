@@ -243,4 +243,18 @@ Not verified here: everything on MOBILE_NATIVE_VERIFICATION_PENDING (section 11)
 
 Native items added to the verification list by M2: the camera and library photo upload on a record, sharing a downloaded file through the system sheet, iOS PDF rendering in the web view, and Android PDF rendering (a bundled pdf.js viewer is planned; until then Android hands the file to the system viewer).
 
+## 16. M3 verification record (2026-09-18)
+
+| Check | Result |
+|---|---|
+| Mobile TypeScript and ESLint | 0 errors, 0 warnings |
+| Mobile Jest | 138 passed in 29 suites (adds the daily log, activities and the progress sheet, the lookahead board, photos and timesheets) |
+| Playwright against the production web export and the local API | 34 passed: 17 checks on the phone viewport and the same 17 on the tablet viewport |
+| Daily log, live | a manpower entry posted to today's log with a client-generated replay key (201) and reflected in the section and the totals |
+| Progress, live | an activity raised for the run through the API, found in the list, and a progress draft submitted from the sheet with `source: 'mobile'`; the approved figure was not touched |
+| Timesheets, live | a worker ensured through the API, a sheet started for them from the form with a replay key |
+| Where writes went | the dedicated end-to-end organisation only |
+
+Native items added to the verification list by M3: the camera on the photos screen, the image library picker, authenticated image loading through the native image loader's headers, and the daily log under real connectivity changes.
+
 How the end-to-end run is made: `npm run export:web` produces the production web build and `npm run serve:web` serves it on port 8081; `npm run e2e` runs the checks. The Metro development bundle is not used for this: it is large and unminified, and on this machine a fresh browser context per test spent most of its budget parsing it and then froze under tracing. Two defects the run found and fixed before the record was taken: the search scope was decided before the remembered project had loaded on a cold start, so it searched every project; and selected chips and rows exposed no `aria-selected` on the web. A locator rule learned the same way: the tab navigator keeps inactive screens mounted, so every web check scopes its queries to the visible screen's test id.
