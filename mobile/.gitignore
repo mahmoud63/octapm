@@ -1,0 +1,39 @@
+# Dependencies
+node_modules/
+
+# Expo
+.expo/
+dist/
+web-build/
+expo-env.d.ts
+
+# Native projects are generated from app.json by `expo prebuild` (continuous
+# native generation). They are build output, not source.
+android/
+ios/
+
+# Generated from the backend at build time: the OpenAPI types and the copy of
+# the permission policy. `npm run generate` recreates both.
+src/api/generated/
+src/permissions/generated/
+
+# Local environment
+.env
+.env.local
+.env.*.local
+
+# Build artefacts and stores
+*.orig.*
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+*.keystore
+
+# Test output
+coverage/
+test-results/
+
+# OS
+.DS_Store

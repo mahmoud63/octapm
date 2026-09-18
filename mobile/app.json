@@ -1,0 +1,92 @@
+{
+  "expo": {
+    "name": "OctaPM",
+    "slug": "octapm",
+    "scheme": "octapm",
+    "version": "1.0.0",
+    "orientation": "default",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "automatic",
+    "newArchEnabled": true,
+    "backgroundColor": "#0F1B64",
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#0F1B64"
+    },
+    "ios": {
+      "bundleIdentifier": "com.octapm.app",
+      "supportsTablet": true,
+      "requireFullScreen": false,
+      "infoPlist": {
+        "NSCameraUsageDescription": "OctaPM uses the camera to take site photos, scan barcodes and QR codes, and capture delivery notes.",
+        "NSPhotoLibraryUsageDescription": "OctaPM attaches photos from your library to site records such as RFIs, inspections and daily logs.",
+        "NSFaceIDUsageDescription": "OctaPM can unlock your signed-in session with Face ID.",
+        "NSLocationWhenInUseUsageDescription": "OctaPM can tag a site photo with where it was taken, only when you choose to.",
+        "ITSAppUsesNonExemptEncryption": false
+      },
+      "associatedDomains": ["applinks:app.octapm.com", "applinks:octapm.com"]
+    },
+    "android": {
+      "package": "com.octapm.app",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#0F1B64"
+      },
+      "edgeToEdgeEnabled": true,
+      "permissions": ["CAMERA", "USE_BIOMETRIC", "USE_FINGERPRINT", "VIBRATE"],
+      "intentFilters": [
+        {
+          "action": "VIEW",
+          "autoVerify": true,
+          "data": [
+            { "scheme": "https", "host": "app.octapm.com", "pathPrefix": "/" },
+            { "scheme": "https", "host": "octapm.com", "pathPrefix": "/" }
+          ],
+          "category": ["BROWSABLE", "DEFAULT"]
+        }
+      ]
+    },
+    "web": {
+      "bundler": "metro",
+      "output": "single",
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-secure-store",
+      "expo-sqlite",
+      "expo-font",
+      "expo-web-browser",
+      [
+        "expo-splash-screen",
+        { "image": "./assets/splash-icon.png", "resizeMode": "contain", "backgroundColor": "#0F1B64" }
+      ],
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "OctaPM uses the camera to take site photos, scan barcodes and QR codes, and capture delivery notes.",
+          "recordAudioAndroid": false
+        }
+      ],
+      [
+        "expo-image-picker",
+        { "photosPermission": "OctaPM attaches photos from your library to site records such as RFIs, inspections and daily logs." }
+      ],
+      [
+        "expo-local-authentication",
+        { "faceIDPermission": "OctaPM can unlock your signed-in session with Face ID." }
+      ],
+      [
+        "expo-notifications",
+        { "icon": "./assets/notification-icon.png", "color": "#325FEC" }
+      ]
+    ],
+    "experiments": {
+      "typedRoutes": true
+    },
+    "extra": {
+      "eas": {}
+    }
+  }
+}
