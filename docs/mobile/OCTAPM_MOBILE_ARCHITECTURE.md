@@ -293,3 +293,19 @@ A defect the run found and fixed before the record was taken: closing a sheet an
 Native items added to the verification list by M5: the camera barcode scanner (the web target types the code instead).
 
 A defect the run found and fixed before the record was taken: the ledger filtered by project by default, and since inventory is organisation-level most movements carry no project, so transfers never appeared; the ledger now filters by warehouse, type or item only.
+
+## 19. M6 verification record (2026-09-18)
+
+| Check | Result |
+|---|---|
+| Mobile TypeScript and ESLint | 0 errors, 0 warnings |
+| Mobile Jest | 215 passed in 41 suites (adds the commercial home, change events, change orders, commitments, pay applications with the party submit and the over-claim refusal, the approvals inbox and instance, procurement with alert acknowledgement, the register and long lead; and the absence of every approve, certify and pay action) |
+| Playwright against the production web export and the local API | 56 passed: 28 checks on the phone viewport and the same 28 on the tablet viewport |
+| Approvals, live | a change-order template ensured on the end-to-end project; a change order raised with an affected activity and a supporting document through the workflow upload route, submitted (200); its approval step found in the inbox, answered "Approve" from the phone through the respond route (200, body `{ response: "approve" }`); the order then read back approved from the register, with no approve route called by the app |
+| Change events, live | raised from the field form as a site condition with a rough order of magnitude and days (201), opened, the web hand-over offered |
+| Procurement, live | the overview loaded; no open lead-time alert existed on the end-to-end project, so the acknowledge step ran in the rendered tests only (recorded as a note on the check); the register opened an issued order and handed the delivery to inventory |
+| Where writes went | the dedicated end-to-end organisation only |
+
+Native items added to the verification list by M6: none; every screen is read-and-respond.
+
+Two defects the run found and fixed before the record was taken: the change-order register answers `{ orders, summary }` where every other list answers `{ items }`, so the app's list was empty against the live server until the endpoint learned the shape and the rendered test's fake was corrected to match; and the approval workflow starts after the submit has replied, so an inbox read at once sees nothing (the app's inbox refetches on focus; the browser check polls). A rendered-test race was also fixed: the Home test read the project strip's placeholder as proof of the chooser and then asserted the rows synchronously, which failed under load; it now waits for a row.

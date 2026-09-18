@@ -95,7 +95,7 @@ Every level assumes the role holds the permission on the server for that project
 | Movement ledger, summary, low stock | VIEW | VIEW | FULL | M5 (built) | inventory readers | polled; no realtime for inventory |
 | Stock counts | NOT AVAILABLE | NOT AVAILABLE | NOT AVAILABLE | — | — | no endpoint exists |
 | Item and warehouse master data | VIEW | VIEW | FULL | M5 (built) | item/warehouse manage: PM, Proc, Store | create and edit stay on the web |
-| Procurement packages, suppliers, purchase orders, lead-time alerts | VIEW + acknowledge | VIEW + acknowledge | FULL | M6 | procurement readers; acknowledge: PM, Plan, Proc, Store | |
+| Procurement packages, purchase orders, lead-time alerts, long lead | VIEW + acknowledge | VIEW + acknowledge | FULL | M6 (built) | procurement readers; acknowledge: PM, Plan, Proc, Store | overview, packages with alerts and orders, the commercial register with lines and deliveries (Receive delivery hands over to Inventory), the long-lead register |
 | Purchase order submit, approve, issue, acknowledge, cancel, close | NOT AVAILABLE | NOT AVAILABLE | FULL | — | per policy | web only |
 | Deliveries against a PO (procurement route) | FULL | FULL | FULL | M5 | PM, Proc, Store | same writer as goods receipt |
 | Bids and RFQs | NOT AVAILABLE | NOT AVAILABLE | FULL | — | bid holders | supplier portals are web links |
@@ -104,12 +104,12 @@ Every level assumes the role holds the permission on the server for that project
 
 | Feature | Phone | Tablet | Web | Milestone | Roles | Notes |
 |---|---|---|---|---|---|---|
-| Change events: create, view, RFQ send | FULL | FULL | FULL | M6 | create: PM, Plan, QS, Site, Qual + contractor; RFQ: PM, QS, Proc + contractor | subcontractor parties have no access on the server |
-| Change events: quote accept, convert, close, void | NOT AVAILABLE | NOT AVAILABLE | FULL | — | PM, QS | |
-| Change orders | VIEW | VIEW | FULL | M6 | change_order readers | create/update are PM and QS on the web |
-| Workflow inbox: my steps, respond | FULL | FULL | FULL | M6 | step assignees | the safe way to answer a running workflow |
-| Commitments | VIEW | VIEW | FULL | M6 | commitment readers | |
-| Pay applications: view; submit as a party | LIMITED | LIMITED | FULL | M6 | readers; submit: contractor, subcontractor | review, approve, pay stay on the web |
+| Change events: create, view | FULL | FULL | FULL | M6 (built) | create: PM, Plan, QS, Site, Qual + contractor | kind, origin, activity, place, ROM and days from the field; lines, quotes and where it went are shown; subcontractor parties have no access on the server |
+| Change events: RFQ send, quote accept, convert, close, void | NOT AVAILABLE | NOT AVAILABLE | FULL | — | PM, QS, Proc | the event screen hands over to the web for these |
+| Change orders | VIEW | VIEW | FULL | M6 (built) | change_order readers | value, impact and who holds it; create, submit, approve and reject are the web's or the approval inbox's |
+| Workflow inbox: my steps, respond | FULL | FULL | FULL | M6 (built) | step assignees | this project or all; the template's answers, a comment where required, sent through the respond route; the server moves the record |
+| Commitments | VIEW | VIEW | FULL | M6 (built) | commitment readers | money, schedule of values, commitment change orders |
+| Pay applications: view; submit as a party | LIMITED | LIMITED | FULL | M6 (built) | readers; submit: contractor, subcontractor | the submit route only; an over-claim refusal lists the lines; review, approve, pay stay on the web |
 | IPC, budget, cost, direct costs, cash flow, EOT, weather delays, contract | NOT AVAILABLE | NOT AVAILABLE | FULL | — | commercial roles | financial posting stays on the web |
 | Weather delay from a daily-log delay entry | FULL | FULL | FULL | M3 | progress update holders | promotes the entry; the register stays on the web |
 

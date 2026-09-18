@@ -89,8 +89,14 @@ const IN_APP_ROUTES: Record<string, (recordId: string) => string> = {
   safety_incident: (id) => `/quality/safety/${id}`,
   material_test: (id) => `/quality/tests/${id}`,
   inventory_item: (id) => `/inventory/items/${id}`,
-  purchase_order: (id) => `/inventory/receive/${id}`,
+  purchase_order: (id) => `/procurement/orders/${id}`,
+  procurement_order: (id) => `/procurement/orders/${id}`,
   stock_transfer: (id) => `/inventory/transfers/${id}`,
+  change_event: (id) => `/commercial/change-events/${id}`,
+  change_order: (id) => `/commercial/change-orders/${id}`,
+  commitment: (id) => `/commercial/commitments/${id}`,
+  sub_pay_app: (id) => `/commercial/pay-apps/${id}`,
+  procurement_package: (id) => `/procurement/packages/${id}`,
 }
 
 export function appRouteForRecord(recordType: string | null | undefined, recordId: string | null | undefined): string | null {

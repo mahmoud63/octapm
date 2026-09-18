@@ -103,9 +103,31 @@ Inventory (from Home) ─ M5
   Transfers ─► by status ─► transfer: Dispatch · Receive line by line (received, damaged)
                New transfer: from, to, items and quantities
   Movements ─► the ledger by warehouse and type, or for one item
+
+Approvals (from Home) ─ M6
+  Inbox ─► the steps waiting on this person (this project / all projects) ─► the step
+           the record, every step with who answered what · the answers the template allows
+           (a negative answer asks for a comment) · Open the record
+           The answer goes through the respond route; the server moves the record
+
+Commercial (from Home) ─ M6
+  Commercial home ─► approvals waiting · change-event totals · doors by role
+  Change events ─► list (status · kind · search) ─► event: estimate, lines, quotes, where it went
+                   Raise change event (kind, origin, activity, place, ROM, days)
+  Change orders ─► list ─► order: value, impact, who holds it (read; decided on the web or in Approvals)
+  Commitments ─► list ─► commitment: money, schedule of values, change orders (read)
+  Pay applications ─► list ─► application: period, lines, money, payments
+                      Submit for review (the party that holds it); review, approve, pay stay on the web
+
+Procurement (from Home) ─ M6
+  Overview ─► counts · lead-time alerts (Acknowledge) · doors
+  Packages ─► list ─► package: dates, activity, alerts, orders
+  Purchase orders ─► register by status ─► order: who holds it, money, lines, deliveries ·
+                     Receive delivery (hands over to Inventory)
+  Long lead ─► the register
 ```
 
-Planned destinations reached from Home, Needs You and Search as their milestones land: change events, workflow inbox, procurement views (M6), outbox and offline status (M7).
+Planned destinations as their milestones land: outbox and offline status (M7).
 
 ## 2. Navigation rules
 
@@ -141,6 +163,8 @@ Planned destinations reached from Home, Needs You and Search as their milestones
 8. **Inspect and close out (M4).** Home → Quality → Inspections → New inspection → template → checklist → answers saved in one request → a failed item raises a punch item → Complete; the punch item goes ready for review and is closed by the approver. An NCR or a safety incident is closed out with a comment and evidence photos, then approved or rejected by quality.
 9. **Receive a delivery (M5).** Home → Inventory → Goods in → the order → Receive delivery → correct the pre-filled quantities from the delivery note, choose the bin → Post. The receipt number was made on the device, so posting again after a lost reply counts once.
 10. **Issue stock to the work (M5).** Home → Inventory → Scan → the item → Issue to site → warehouse, quantity, activity → Send. Offline, the sheet refuses; the movement is never queued.
+11. **Answer an approval (M6).** Home → Approvals → the step → Approve, or Reject with a comment → the server moves the change order, commitment or pay application; the app never calls an approve route itself.
+12. **Raise a change from the field (M6).** Home → Commercial → Change events → Raise change event → what changed, kind, origin, ROM, days → the event; pricing, quotes and conversion follow on the web.
 
 ## 5. Tablet flows
 

@@ -10,7 +10,8 @@ import { renderScreen } from '@/testing/render'
 
 import '@/auth/session'
 
-const rows = [notification(), notification({ id: 'n2', title: 'Task: close out punch list level 3', category: 'assignment', priority: 'normal', actionUrl: '/projects/p1?module=tasks&taskId=t7' })]
+// The second one carries a reminder entity with no screen of its own, so it opens on the web at the repaired task link.
+const rows = [notification(), notification({ id: 'n2', title: 'Task: close out punch list level 3', category: 'assignment', priority: 'normal', entityType: 'task_reminder', entityId: 't7', actionUrl: '/projects/p1?module=tasks&taskId=t7' })]
 let calls: Call[]
 const archived = new Set<string>()
 

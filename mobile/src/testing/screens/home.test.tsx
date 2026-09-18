@@ -18,8 +18,10 @@ const routes = {
   'GET /auth/me/permissions': () => ({ status: 200, body: envelope(pmMatrix) }),
 }
 
-beforeEach(() => {
+beforeEach(async () => {
   network.__reset(null)
+  // A fetch still in flight from the previous test would land in the shared cache after the clear: cancel it first.
+  await queryClient.cancelQueries()
   queryClient.clear()
   useAuthStore.setState({ status: 'signedIn', user, accessToken: 'access-1', accessExpiresAt: Date.now() + 900_000 })
   useProjectStore.setState({ currentProjectId: 'p1', hydrated: true })
@@ -58,8 +60,9 @@ describe('Home', () => {
     useProjectStore.setState({ currentProjectId: null, hydrated: true })
     fakeServer(routes)
     await renderScreen(<HomeScreen />)
-    expect(await screen.findAllByText('Choose a project')).not.toHaveLength(0)
-    expect(screen.getByText('Harbour Bridge')).toBeTruthy()
+    // The project strip says "Choose a project" before the list has loaded; the rows are what prove the chooser.
+    expect(await screen.findByText('Harbour Bridge')).toBeTruthy()
+    expect(screen.getAllByText('Choose a project').length).toBeGreaterThan(0)
     expect(screen.queryByText('Needs You')).toBeNull()
   })
 
