@@ -79,9 +79,9 @@ describe('the daily log', () => {
     await fireEvent.press(screen.getByTestId('entry-save'))
     await waitFor(() => expect(calls.some((c) => c.method === 'POST' && c.path.endsWith('/entries/manpower'))).toBe(true))
     const sent = calls.find((c) => c.path.endsWith('/entries/manpower'))!.body as Record<string, unknown>
-    expect(sent).toMatchObject({ companyName: 'Delta Steelfixing', workers: 6, hours: 9 })
+    expect(sent).toMatchObject({ companyName: 'Delta Steelfixing', trade: 'Steelfixers', workers: 6, hours: 9 })
     expect(String(sent.clientRequestId)).toMatch(/[0-9a-f-]{20,}/)
-    expect(await screen.findByText('Delta Steelfixing · 6 workers · 9 h each')).toBeTruthy()
+    expect(await screen.findByText('Delta Steelfixing · Steelfixers · 6 workers · 9 h each')).toBeTruthy()
     expect(screen.getByText('54')).toBeTruthy()
   })
 
