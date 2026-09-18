@@ -8,6 +8,7 @@ import { EmptyState, ErrorState, RecordRow, SkeletonList, spacing } from '@/desi
 import { useProjectStore } from '@/projects/store'
 import { humanise, money } from '@/utilities/format'
 import { PanePlaceholder, useSplitRole } from '@/navigation/split'
+import { listPerformance } from '@/components/listProps'
 
 /** Subcontracts and purchase-order commitments, read only. */
 export default function CommitmentsScreen() {
@@ -29,7 +30,7 @@ export default function CommitmentsScreen() {
 
   return (
     <Screen scroll={false} testID="screen-commitments">
-      <FlatList
+      <FlatList {...listPerformance}
         data={commitments.data ?? []}
         keyExtractor={(c) => c.id}
         ListHeaderComponent={

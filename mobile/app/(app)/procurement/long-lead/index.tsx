@@ -7,6 +7,7 @@ import { Screen } from '@/components/Screen'
 import { EmptyState, ErrorState, RecordRow, SkeletonList, Text, spacing } from '@/design-system'
 import { useProjectStore } from '@/projects/store'
 import { day, dueState, humanise } from '@/utilities/format'
+import { listPerformance } from '@/components/listProps'
 
 /** The long-lead register, read only: what must be ordered when, and where it stands. */
 export default function LongLeadScreen() {
@@ -24,7 +25,7 @@ export default function LongLeadScreen() {
 
   return (
     <Screen scroll={false} testID="screen-long-lead">
-      <FlatList
+      <FlatList {...listPerformance}
         data={items.data ?? []}
         keyExtractor={(i) => i.id}
         ListHeaderComponent={

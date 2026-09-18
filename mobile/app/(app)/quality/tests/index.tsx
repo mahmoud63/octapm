@@ -15,6 +15,7 @@ import { usePermissions } from '@/permissions/usePermissions'
 import { useProjectStore } from '@/projects/store'
 import { day, dueState, humanise } from '@/utilities/format'
 import { PanePlaceholder, useSplitRole } from '@/navigation/split'
+import { listPerformance } from '@/components/listProps'
 
 /** Material tests: pending first, then by result; a new test is scheduled from here. */
 export default function MaterialTestsScreen() {
@@ -68,7 +69,7 @@ export default function MaterialTestsScreen() {
   return (
     <>
       <Screen scroll={false} testID="screen-tests">
-        <FlatList
+        <FlatList {...listPerformance}
           data={rows}
           keyExtractor={(t) => t.id}
           keyboardShouldPersistTaps="handled"

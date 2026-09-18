@@ -41,6 +41,16 @@ jest.mock("../../middleware/auth", () => ({
 }));
 
 jest.mock("../../services/notification.service", () => mockNotificationService);
+const mockPushService = {
+  EXPO_TOKEN_PATTERN: /^Expo(nent)?PushToken\[[A-Za-z0-9_-]+\]$/,
+  isConfigured: jest.fn(() => false),
+  getPublicKey: jest.fn(() => null),
+  subscribe: jest.fn(async ({ subscription }) => ({ id: "sub-1", ...subscription })),
+  unsubscribe: jest.fn(async () => ({ removed: 1 })),
+  listSubscriptions: jest.fn(async () => ({ configured: false, items: [] })),
+  sendTest: jest.fn(),
+};
+jest.mock("../../services/push.service", () => mockPushService);
 
 const notificationsRouter = require("../notifications");
 
@@ -174,6 +184,22 @@ describe("notification routes", () => {
 });
 
 describe("Phase 21D — integrity (release challenge, ninth pass)", () => {
+  it("MOBILE-M9: the field app registers an Expo push token on the subscription route and removes it by token", async () => {
+    const app = buildApp();
+    const registered = await request(app).post("/notifications/push/subscriptions").send({ provider: "expo", token: "ExponentPushToken[abc-123]", platform: "android", deviceName: "Pixel 8" });
+    expect(registered.status).toBe(201);
+    expect(mockPushService.subscribe).toHaveBeenCalledWith(
+      expect.objectContaining({ orgId: "org-1", userId: "user-1", subscription: { provider: "expo", token: "ExponentPushToken[abc-123]", platform: "android" }, userAgent: "Pixel 8" }),
+    );
+    expect((await request(app).post("/notifications/push/subscriptions").send({ provider: "expo", token: "not-a-token", platform: "android" })).status).toBe(400);
+    expect((await request(app).post("/notifications/push/subscriptions").send({ provider: "expo", token: "ExponentPushToken[abc-123]", platform: "web" })).status).toBe(400);
+    // A browser still needs its endpoint and keys.
+    expect((await request(app).post("/notifications/push/subscriptions").send({ endpoint: "https://push.example/abc" })).status).toBe(400);
+    const removed = await request(app).delete("/notifications/push/subscriptions").send({ token: "ExponentPushToken[abc-123]" });
+    expect(removed.status).toBe(200);
+    expect(mockPushService.unsubscribe).toHaveBeenCalledWith({ userId: "user-1", endpoint: "ExponentPushToken[abc-123]" });
+  });
+
   it("CX21-494: a person's notifications, their summary and their preferences are not reached with an API key, whatever its scopes", async () => {
     const app = buildApp();
     for (const path of ["/notifications", "/notifications/summary", "/notifications/preferences", "/notifications/push/subscriptions"]) {

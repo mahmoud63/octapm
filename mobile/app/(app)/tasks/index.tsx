@@ -11,6 +11,7 @@ import { EmptyState, ErrorState, Input, KPI, RecordRow, SkeletonList, Text, spac
 import { useProjectStore } from '@/projects/store'
 import { dueState, humanise } from '@/utilities/format'
 import { PanePlaceholder, useSplitRole } from '@/navigation/split'
+import { listPerformance } from '@/components/listProps'
 
 /**
  * Tasks: mine first, on the current project by default. A task is the one
@@ -36,7 +37,7 @@ export default function TasksScreen() {
 
   return (
     <Screen scroll={false} testID="screen-tasks">
-      <FlatList
+      <FlatList {...listPerformance}
         data={rows}
         keyExtractor={(row) => row.id}
         keyboardShouldPersistTaps="handled"

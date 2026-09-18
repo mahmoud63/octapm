@@ -57,4 +57,6 @@ export const STORAGE_KEYS = {
   drawingPrefs: 'session.drawings',
   /** The warehouse this device works from, per project. */
   inventoryPrefs: 'session.inventory',
+  /** This device's Expo push token, kept so sign-out can remove it from the server. Not a session credential. */
+  pushToken: 'session.push',
 } as const

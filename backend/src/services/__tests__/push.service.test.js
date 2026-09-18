@@ -91,6 +91,67 @@ describe("push service", () => {
   it("refuses a test push when not configured", async () => {
     delete process.env.VAPID_PUBLIC_KEY;
     service.resetConfiguration();
+    mockPrisma.pushSubscription.findMany.mockResolvedValue([device()]);
     await expect(service.sendTest({ userId: "user-1" })).rejects.toMatchObject({ code: "PUSH_NOT_CONFIGURED" });
+  });
+
+  it("registers a native device's Expo token on the same table and validates it", async () => {
+    await expect(service.subscribe({ orgId: "org", userId: "user-1", subscription: { provider: "expo", token: "not-a-token", platform: "android" } })).rejects.toMatchObject({ code: "PUSH_TOKEN_INVALID" });
+    await expect(service.subscribe({ orgId: "org", userId: "user-1", subscription: { provider: "expo", token: "ExponentPushToken[abc-123]", platform: "windows" } })).rejects.toMatchObject({ code: "PUSH_PLATFORM_INVALID" });
+    const row = await service.subscribe({ orgId: "org", userId: "user-1", subscription: { provider: "expo", token: "ExponentPushToken[abc-123]", platform: "android" }, userAgent: "Pixel 8" });
+    expect(mockPrisma.pushSubscription.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { endpoint: "ExponentPushToken[abc-123]" },
+        create: expect.objectContaining({ endpoint: "ExponentPushToken[abc-123]", p256dh: "", auth: "", platform: "expo-android", userAgent: "Pixel 8", failureCount: 0 }),
+      }),
+    );
+    expect(row).toMatchObject({ provider: "expo", endpoint: "ExponentPushToken[abc-123]", platform: "expo-android" });
+  });
+
+  it("sends native devices one Expo batch without VAPID keys, drops unregistered tokens and routes the record in the data", async () => {
+    delete process.env.VAPID_PUBLIC_KEY;
+    service.resetConfiguration();
+    const fetchMock = jest.fn(async () => ({
+      ok: true,
+      json: async () => ({ data: [{ status: "ok", id: "t1" }, { status: "error", message: "gone", details: { error: "DeviceNotRegistered" } }] }),
+    }));
+    global.fetch = fetchMock;
+    mockPrisma.pushSubscription.findMany.mockResolvedValue([
+      device({ id: "exp-1", endpoint: "ExponentPushToken[one]", p256dh: "", auth: "", platform: "expo-android" }),
+      device({ id: "exp-2", endpoint: "ExponentPushToken[two]", p256dh: "", auth: "", platform: "expo-ios" }),
+      device({ id: "web-1", endpoint: "https://push.example/browser" }),
+    ]);
+    const payload = service.payloadFor({ id: "n9", title: "RFI-004 answered", message: "See the answer", actionUrl: "/projects/p/rfi?recordId=r4", entityType: "rfi", entityId: "r4", projectId: "p", category: "workflow", priority: "high" });
+    const result = await service.sendToUser({ userId: "user-1", payload, urgency: "high" });
+    expect(result).toMatchObject({ sent: 1, failed: 1, removed: 1, skipped: false, provider: "expo" });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe(service.EXPO_PUSH_URL);
+    const messages = JSON.parse(init.body);
+    expect(messages).toHaveLength(2);
+    expect(messages[0]).toMatchObject({ to: "ExponentPushToken[one]", title: "RFI-004 answered", priority: "high", data: { entityType: "rfi", entityId: "r4", projectId: "p", url: "/projects/p/rfi?recordId=r4" } });
+    // The browser row is not sent without VAPID keys and is left alone.
+    expect(mockWebPush.sendNotification).not.toHaveBeenCalled();
+    expect(mockPrisma.pushSubscription.delete).toHaveBeenCalledWith({ where: { id: "exp-2" } });
+    expect(mockPrisma.pushSubscription.delete).not.toHaveBeenCalledWith({ where: { id: "web-1" } });
+    expect(mockPrisma.pushSubscription.update).toHaveBeenCalledWith(expect.objectContaining({ where: { id: "exp-1" }, data: expect.objectContaining({ failureCount: 0 }) }));
+
+    // A pending attempt for that person is sent through Expo, not skipped as unconfigured.
+    jest.clearAllMocks();
+    fetchMock.mockResolvedValue({ ok: true, json: async () => ({ data: [{ status: "ok" }, { status: "ok" }] }) });
+    mockPrisma.notificationDeliveryAttempt.findMany.mockResolvedValue([{ id: "att-9", userId: "user-1", attemptNumber: 1, notification: { id: "n9", orgId: "org", title: "t", message: "m", category: "workflow", priority: "normal" } }]);
+    const processed = await service.processPendingPushDeliveries({ now: new Date("2026-09-18T10:00:00Z") });
+    expect(processed).toMatchObject({ sent: 1, skipped: 0 });
+    expect(mockPrisma.notificationDeliveryAttempt.update).toHaveBeenCalledWith(expect.objectContaining({ where: { id: "att-9" }, data: expect.objectContaining({ status: "sent", provider: "expo" }) }));
+
+    // When Expo itself is down the tokens are kept and the attempt fails for a retry.
+    jest.clearAllMocks();
+    fetchMock.mockRejectedValue(new Error("connect ECONNREFUSED"));
+    mockPrisma.notificationDeliveryAttempt.findMany.mockResolvedValue([{ id: "att-10", userId: "user-1", attemptNumber: 1, notification: { id: "n9", orgId: "org", title: "t", message: "m", category: "workflow", priority: "normal" } }]);
+    const failed = await service.processPendingPushDeliveries({ now: new Date("2026-09-18T10:00:00Z") });
+    expect(failed).toMatchObject({ failed: 1 });
+    expect(mockPrisma.pushSubscription.delete).not.toHaveBeenCalled();
+    expect(mockPrisma.notificationDeliveryAttempt.create).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ channel: "push", attemptNumber: 2 }) }));
+    delete global.fetch;
   });
 });

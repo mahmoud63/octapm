@@ -3,6 +3,7 @@ import { useMemo, useState } from 'react'
 import { FlatList, Modal, Pressable, StyleSheet, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { Button, Input, Text, radius, spacing, tapTarget, useTheme } from '@/design-system'
+import { listPerformance } from '@/components/listProps'
 
 export interface PickerOption {
   id: string
@@ -85,7 +86,7 @@ export function PickerField({ label, placeholder = 'Choose', options, value, onC
             <Button title="Done" variant="ghost" onPress={() => setOpen(false)} testID={testID ? `${testID}-done` : undefined} />
           </View>
           <Input label="Find" placeholder="Type to narrow the list" value={term} onChangeText={setTerm} autoCapitalize="none" autoCorrect={false} testID={testID ? `${testID}-search` : undefined} />
-          <FlatList
+          <FlatList {...listPerformance}
             data={filtered}
             keyExtractor={(o) => o.id}
             keyboardShouldPersistTaps="handled"

@@ -14,6 +14,7 @@ import { api, bindTokenSource, run } from '@/api/client'
 import { AppError, isAppError } from '@/api/errors'
 import { forgetEverything } from '@/api/query'
 import { offlineSessionEnded, offlineSessionLost, offlineSessionStarted } from '@/offline'
+import { registerPushDevice, unregisterPushDevice } from '@/notifications/push'
 import { clearPersistedCache } from '@/offline/persist'
 import { analytics } from '@/analytics'
 import { promptBiometric } from '@/auth/biometric'
@@ -64,6 +65,8 @@ async function applyResult(result: AuthResult, method: 'password' | 'biometric' 
   analytics.track({ name: 'mobile_login', method })
   // The read cache and the outbox belong to this person; a different person's queue is discarded here.
   await offlineSessionStarted(result.user.id).catch((error) => log.warn('sync', 'offline data could not be attached to the session', { message: String(error) }))
+  // Push registration never holds sign-in up and never fails it.
+  void registerPushDevice()
 }
 
 /**
@@ -129,6 +132,8 @@ export async function signIn(email: string, password: string): Promise<void> {
 
 export async function signOut(): Promise<void> {
   const stored = await secureStorage.get(STORAGE_KEYS.refreshToken)
+  // While the session can still be presented, take this device off the person's push list.
+  await unregisterPushDevice().catch(() => undefined)
   try {
     if (stored) await run(() => api.POST('/auth/logout', { body: { refreshToken: stored } as never }) as never, { retryOnUnauthorized: false })
   } catch (error) {

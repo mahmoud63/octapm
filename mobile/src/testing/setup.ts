@@ -161,3 +161,28 @@ jest.mock('react-native-safe-area-context', () => {
 jest.mock('expo-image', () => ({ Image: () => null }))
 jest.mock('expo-web-browser', () => ({ openBrowserAsync: jest.fn(async () => ({ type: 'dismiss' })) }))
 jest.mock('@expo/vector-icons', () => ({ Ionicons: () => null }))
+
+// Native push and the realtime socket: inert doubles. A simulator has no push token, so the
+// default device is "not a device"; the push test turns it on. Realtime's own test replaces the socket.
+jest.mock('expo-device', () => {
+  const state = { isDevice: false }
+  return { get isDevice() { return state.isDevice }, modelName: 'Test device', __setDevice: (value: boolean) => { state.isDevice = value } }
+})
+jest.mock('expo-notifications', () => ({
+  AndroidImportance: { DEFAULT: 3 },
+  setNotificationHandler: jest.fn(),
+  setNotificationChannelAsync: jest.fn(async () => null),
+  getPermissionsAsync: jest.fn(async () => ({ status: 'granted' })),
+  requestPermissionsAsync: jest.fn(async () => ({ status: 'granted' })),
+  getExpoPushTokenAsync: jest.fn(async () => ({ data: 'ExponentPushToken[test-device]' })),
+  addNotificationResponseReceivedListener: jest.fn(() => ({ remove: jest.fn() })),
+  getLastNotificationResponseAsync: jest.fn(async () => null),
+}))
+jest.mock('socket.io-client', () => ({
+  io: jest.fn(() => {
+    const socket: Record<string, unknown> = { connected: false, auth: {} }
+    for (const name of ['on', 'emit', 'connect', 'disconnect', 'removeAllListeners']) socket[name] = jest.fn(() => socket)
+    return socket
+  }),
+}))
+

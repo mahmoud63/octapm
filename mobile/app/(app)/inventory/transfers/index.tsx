@@ -11,6 +11,7 @@ import { usePermissions } from '@/permissions/usePermissions'
 import { useProjectStore } from '@/projects/store'
 import { day, humanise } from '@/utilities/format'
 import { PanePlaceholder, useSplitRole } from '@/navigation/split'
+import { listPerformance } from '@/components/listProps'
 
 const STATUSES = ['draft', 'in_transit', 'received'] as const
 
@@ -29,7 +30,7 @@ export default function TransfersScreen() {
 
   return (
     <Screen scroll={false} testID="screen-transfers">
-      <FlatList
+      <FlatList {...listPerformance}
         data={rows}
         keyExtractor={(t) => t.id}
         keyboardShouldPersistTaps="handled"

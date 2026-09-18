@@ -12,6 +12,8 @@ import { network } from '@/api/network'
 import { queryClient } from '@/api/query'
 import { analytics } from '@/analytics'
 import { startOffline } from '@/offline'
+import { startPushNotifications } from '@/notifications/push'
+import { startRealtime } from '@/realtime'
 import { bootstrap } from '@/auth/session'
 import { useAuthStore } from '@/auth/store'
 import { env } from '@/config/env'
@@ -37,9 +39,13 @@ export default function RootLayout() {
     analytics.configure(() => undefined, { env: env.name, appVersion: env.appVersion })
     const stopNetwork = network.start()
     const stopOffline = startOffline()
+    const stopRealtime = startRealtime()
+    const stopPush = startPushNotifications()
     useProjectStore.getState().hydrate().catch(() => undefined)
     bootstrap().catch((error) => log.error('auth', 'session bootstrap failed', { message: String(error) }))
     return () => {
+      stopPush()
+      stopRealtime()
       stopOffline()
       stopNetwork()
     }

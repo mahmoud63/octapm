@@ -17,7 +17,7 @@ Every level assumes the role holds the permission on the server for that project
 | Projects list and switch | FULL | FULL | FULL | M1 | all | switching clears project-scoped state |
 | Needs You | FULL | FULL | FULL | M1 | all | per project from the assignments endpoint; role-derived PO/commitment/pay-app items appear on the web only |
 | Global search | FULL | FULL | FULL | M1 | all | typed results, deep links into records |
-| Notifications | LIMITED | LIMITED | FULL | M1 / M9 | all | list, read, preferences view; native push delivery waits for a backend registration endpoint (M9) |
+| Notifications | FULL | FULL | FULL | M1 / M9 | all | list, read, preferences view; native push registered on sign-in and sent through Expo (M9); delivery on a device is on the native verification list |
 | Messages / conversations | VIEW | VIEW | FULL | M1 | all | read and reply later; not a field priority |
 | Portfolio, company settings, people, billing, reports | NOT AVAILABLE | NOT AVAILABLE | FULL | — | PM, admin | administration stays on the web |
 
@@ -51,7 +51,7 @@ Every level assumes the role holds the permission on the server for that project
 | Daily log submit, approve, distribute, entry review | LIMITED | LIMITED | FULL | M3 | submit/distribute: submit holders; approve: PM; entry review: PM, Plan, Site, Qual | approve stays on the web |
 | Daily reports and site diaries (create, submit) | FULL | FULL | FULL | M3 | progress submit holders | offline drafts with replay key |
 | Site photos: capture, caption, tags, location, association | FULL | FULL | FULL | M3 | document_control create | GPS never sent to the server; EXIF stays with the file |
-| Photo markup and annotation | NOT AVAILABLE | NOT AVAILABLE | LIMITED | M9 | as above | carried: the pad's drawing pieces (M8) are the base; annotating a photo before upload follows in the hardening milestone |
+| Photo markup and annotation | FULL | FULL | LIMITED | M9 | as above | freehand markup before upload on the photos and punch flows (four pen colours, undo, clear); the marked copy is uploaded in the original’s place; the web platform annotates after upload |
 | Today's work, activities, milestones, critical activities | FULL (view) | FULL (view) | FULL | M3 | schedule readers | no Gantt editing on phone |
 | Progress submission (percent, quantity, milestones, inspection, evidence) | FULL | FULL | FULL | M3 | progress submit holders, assigned engineers | `source: 'mobile'`; online only (no replay key) |
 | Progress approval | NOT AVAILABLE | APPROVE | FULL | M8 (built) | submission approve holders | on the wide screen only; approve and reject (with a reason) through the server's transitions; a hold-point warning when the method needs an inspection |
@@ -122,9 +122,9 @@ Every level assumes the role holds the permission on the server for that project
 | Offline capture and outbox | FULL | FULL | LIMITED | M7 (built) | as per feature | punch items with photos, inspections, daily-log entries, timesheets, goods receipts and photos onto the daily log queue with their replay keys; stock movements, approvals and other writes stay online only; the outbox shows waiting, sending, sent and needs-attention with the server's reason |
 | Sheets kept offline with supersession marking | FULL | FULL | LIMITED | M7 (built) | drawing readers | the kept revision is compared with the manifest; a superseded copy is marked on the register and in the viewer until the latest is kept; the web target keeps no file |
 | Background sync (outbox drain, manifest check while the app is closed) | NOT AVAILABLE | NOT AVAILABLE | — | M9 | all | the drain runs when the signal returns and when the app comes to the front; background tasks are on the native verification list |
-| Deep links and universal links | FULL | FULL | FULL | M9 | all | every record type in the API map's link table |
-| Push notifications | LIMITED | LIMITED | FULL (Web Push) | M9 | all | needs a native registration endpoint on the server |
-| Realtime updates | FULL | FULL | FULL | M9 | all | socket.io project rooms |
+| Deep links and universal links | FULL | FULL | FULL | M9 | all | every record type with a screen; the web platform’s own record paths, the octapm:// scheme and app.octapm.com links resolve through one resolver, and the opener switches project first |
+| Push notifications | FULL | FULL | FULL (Web Push) | M9 | all | Expo token registered on sign-in, removed on sign-out, taps open the record; delivery on a device is on the native verification list |
+| Realtime updates | FULL | FULL | FULL | M9 | all | socket.io project rooms; open screens refetch on the server’s domain events |
 | Master–detail layouts, rail, split view | — | FULL | — | M8 (built) | all | every route group with records splits on the expanded width class: the section's list on the left, the record on the right; back returns the pane to a placeholder; rotation keeps the record; iPad split view is a width like any other |
 | Keyboard and pointer | LIMITED | LIMITED | FULL | M8 | all | search fields submit on return and every control is a real button; shortcuts are not defined; hover states follow the platform |
 | Accessibility (labels, targets, dynamic type, reduced motion) | FULL | FULL | FULL | every milestone | all | |

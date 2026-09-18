@@ -36,9 +36,14 @@ router.get(
 router.post(
   "/push/subscriptions",
   [
-    body("endpoint").isString().trim().isLength({ min: 10, max: 2048 }),
-    body("keys.p256dh").isString().trim().notEmpty(),
-    body("keys.auth").isString().trim().notEmpty(),
+    // A browser sends its PushSubscription; the field app sends provider "expo" with its Expo token and platform.
+    body("provider").optional().isIn(["web", "expo"]),
+    body("endpoint").if(body("provider").not().equals("expo")).isString().trim().isLength({ min: 10, max: 2048 }),
+    body("keys.p256dh").if(body("provider").not().equals("expo")).isString().trim().notEmpty(),
+    body("keys.auth").if(body("provider").not().equals("expo")).isString().trim().notEmpty(),
+    body("token").if(body("provider").equals("expo")).isString().trim().matches(pushService.EXPO_TOKEN_PATTERN),
+    body("platform").if(body("provider").equals("expo")).isIn(["ios", "android"]),
+    body("deviceName").optional({ nullable: true }).isString().trim().isLength({ max: 120 }),
     validate,
   ],
   asyncHandler(async (req, res) =>
@@ -47,8 +52,11 @@ router.post(
       await pushService.subscribe({
         orgId: req.user.orgId,
         userId: req.user.id,
-        subscription: { endpoint: req.body.endpoint, keys: req.body.keys },
-        userAgent: req.headers["user-agent"] || null,
+        subscription:
+          req.body.provider === "expo"
+            ? { provider: "expo", token: req.body.token, platform: req.body.platform }
+            : { endpoint: req.body.endpoint, keys: req.body.keys },
+        userAgent: req.body.deviceName || req.headers["user-agent"] || null,
       }),
       201,
     ),
@@ -57,8 +65,12 @@ router.post(
 
 router.delete(
   "/push/subscriptions",
-  [body("endpoint").isString().trim().notEmpty(), validate],
-  asyncHandler(async (req, res) => sendSuccess(res, await pushService.unsubscribe({ userId: req.user.id, endpoint: req.body.endpoint }))),
+  [
+    body("endpoint").if(body("token").not().exists({ checkFalsy: true })).isString().trim().notEmpty(),
+    body("token").optional({ nullable: true }).isString().trim().notEmpty(),
+    validate,
+  ],
+  asyncHandler(async (req, res) => sendSuccess(res, await pushService.unsubscribe({ userId: req.user.id, endpoint: req.body.endpoint || req.body.token }))),
 );
 
 router.post(

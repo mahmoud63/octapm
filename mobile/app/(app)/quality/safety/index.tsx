@@ -12,6 +12,7 @@ import { usePermissions } from '@/permissions/usePermissions'
 import { useProjectStore } from '@/projects/store'
 import { day, dueState, humanise } from '@/utilities/format'
 import { PanePlaceholder, useSplitRole } from '@/navigation/split'
+import { listPerformance } from '@/components/listProps'
 
 /** Safety incidents and near misses on the project, filtered on the device. */
 export default function SafetyListScreen() {
@@ -48,7 +49,7 @@ export default function SafetyListScreen() {
 
   return (
     <Screen scroll={false} testID="screen-safety">
-      <FlatList
+      <FlatList {...listPerformance}
         data={rows}
         keyExtractor={(s) => s.id}
         keyboardShouldPersistTaps="handled"

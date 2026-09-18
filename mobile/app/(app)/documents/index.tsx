@@ -14,6 +14,7 @@ import { openApiFile } from '@/files/open'
 import { appRouteForRecord, openOnWeb, webPathForTarget } from '@/navigation/links'
 import { useProjectStore } from '@/projects/store'
 import { humanise } from '@/utilities/format'
+import { listPerformance } from '@/components/listProps'
 
 /**
  * The document register: every controlled document the person may read,
@@ -64,7 +65,7 @@ export default function DocumentsScreen() {
 
   return (
     <Screen scroll={false} testID="screen-documents">
-      <FlatList
+      <FlatList {...listPerformance}
         data={rows}
         keyExtractor={(row) => row.id}
         keyboardShouldPersistTaps="handled"

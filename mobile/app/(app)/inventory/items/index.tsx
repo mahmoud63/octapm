@@ -10,6 +10,7 @@ import { Button, EmptyState, ErrorState, Input, RecordRow, SkeletonList, spacing
 import { useProjectStore } from '@/projects/store'
 import { quantity } from '@/utilities/format'
 import { PanePlaceholder, useSplitRole } from '@/navigation/split'
+import { listPerformance } from '@/components/listProps'
 
 /** The item master with derived stock; the server searches and flags low stock. */
 export default function InventoryItemsScreen() {
@@ -37,7 +38,7 @@ export default function InventoryItemsScreen() {
 
   return (
     <Screen scroll={false} testID="screen-items">
-      <FlatList
+      <FlatList {...listPerformance}
         data={rows}
         keyExtractor={(i) => i.id}
         keyboardShouldPersistTaps="handled"

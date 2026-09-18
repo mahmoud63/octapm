@@ -10768,11 +10768,18 @@ add(
   "post",
   operation({
     tag: "Notifications",
-    summary: "Register (or refresh) this browser's push subscription. Upserts on endpoint.",
+    summary: "Register (or refresh) this device's push subscription: a browser's Web Push subscription, or the field app's Expo token. Upserts on endpoint (the token for Expo).",
     operationId: "createPushSubscription",
     requestBody: jsonBody(
-      objectSchema({ endpoint: { type: "string" }, keys: objectSchema({ p256dh: { type: "string" }, auth: { type: "string" } }, ["p256dh", "auth"]) }, ["endpoint", "keys"]),
-      "The `PushSubscription.toJSON()` of the browser.",
+      objectSchema({
+        provider: { type: "string", enum: ["web", "expo"], description: "Defaults to web. With expo, send token and platform instead of endpoint and keys." },
+        endpoint: { type: "string" },
+        keys: objectSchema({ p256dh: { type: "string" }, auth: { type: "string" } }, ["p256dh", "auth"]),
+        token: { type: "string", description: "Expo push token, ExponentPushToken[...]" },
+        platform: { type: "string", enum: ["ios", "android"] },
+        deviceName: { type: "string", nullable: true },
+      }),
+      "The browser's `PushSubscription.toJSON()`, or `{ provider: 'expo', token, platform, deviceName? }` from the field app.",
     ),
     responseSchema: pushSubscriptionSchema,
     permissions: authenticatedOnly,

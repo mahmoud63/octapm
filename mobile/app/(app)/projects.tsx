@@ -9,6 +9,7 @@ import { healthTone } from '@/components/HealthDimensions'
 import { Screen } from '@/components/Screen'
 import { EmptyState, ErrorState, Input, RecordRow, SkeletonList, Text, spacing } from '@/design-system'
 import { useProjectStore } from '@/projects/store'
+import { listPerformance } from '@/components/listProps'
 
 const trailingTone = { success: 'default', warning: 'warning', error: 'error', muted: 'muted' } as const
 
@@ -38,7 +39,7 @@ export default function ProjectsScreen() {
 
   return (
     <Screen title="Projects" subtitle={projects.data ? `${projects.data.length} project${projects.data.length === 1 ? '' : 's'}` : undefined} scroll={false} testID="screen-projects">
-      <FlatList
+      <FlatList {...listPerformance}
         data={rows}
         keyExtractor={(p) => p.id}
         keyboardShouldPersistTaps="handled"

@@ -15,6 +15,7 @@ import { useDrawingPrefs } from '@/drawings/preferences'
 import { useProjectStore } from '@/projects/store'
 import { humanise } from '@/utilities/format'
 import { PanePlaceholder, useSplitRole } from '@/navigation/split'
+import { listPerformance } from '@/components/listProps'
 
 type View_ = 'all' | 'favourites' | 'recent'
 
@@ -65,7 +66,7 @@ export default function DrawingsScreen() {
 
   return (
     <Screen scroll={false} testID="screen-drawings">
-      <FlatList
+      <FlatList {...listPerformance}
         data={rows}
         keyExtractor={(s) => s.id}
         keyboardShouldPersistTaps="handled"

@@ -344,3 +344,31 @@ Two things the run taught: Playwright's offline switch did not always raise the 
 Native items added to the verification list by M8: the view capture behind the signature pad (the web target draws the PNG on a canvas), iPad split view and rotation as real window changes, and stylus input on the pad.
 
 The rule the split rests on: a screen never knows it is on a tablet by device; it asks which side of the split it is drawn on. A list drawn by the stack while its list is already on the left shows the placeholder, so the same file serves the phone, the left pane and the right pane.
+
+## 22. Cross-device integration (M9)
+
+**Links.** Every way a link reaches the app ends in one resolver (`src/navigation/deepLinks.ts`): the `octapm://` scheme, an `https://app.octapm.com/...` universal link, the web platform's own record paths (the same ones the server puts in a notification's `actionUrl`), a push notification's data, and the app's own routes. The result is an app route and, when the link names one, the project it belongs to. On a device `app/+native-intent.ts` hands every incoming link to the resolver; a link naming another project goes through the opener screen (`/open`), which switches the project (dropping the previous project's cached records, as the Projects screen does) and then replaces itself with the record, so back lands on the record's own list. A link the app has no screen for lands on Home rather than a broken screen. The web target has no intent hook, so it opens links through the same opener with `?link=`.
+
+**Push.** The app asks for permission once, obtains its Expo push token and registers it on sign-in through the push subscription route as provider `expo`; sign-out removes it while the session can still be presented. The token is kept on the device only for that removal; it is not a session credential and the rule in section 5.3 is unchanged. A tap on a notification, including one that launched the app, opens the record through the resolver. The web target and simulators have no token and do nothing. On the server the same table serves browsers and devices: an Expo token is the `endpoint`, the key columns stay empty and `platform` is `expo-ios` or `expo-android`; the push service sends native rows in one batch per user through Expo's push API, drops tokens Expo reports unregistered, keeps them when Expo itself is unreachable, and needs no VAPID keys for people with a native device. Delivery on a device is on the native verification list.
+
+**Realtime.** A socket.io client presents the session's access token in its handshake, joins the current project's room (the server applies the same project access check as the REST layer) and listens for `domain.event`. The app never writes an event's payload into its cache: it marks the project's queries stale, coalesced over 400 ms, and the screens that are open refetch, so what is shown always comes from the API. The socket follows the session: it connects on sign-in, carries a fresh token after every refresh, rejoins the room on a project switch, reconnects when the app comes to the front and disconnects on sign-out. Nothing depends on it for correctness; without a socket the screens still refetch on focus and on pull.
+
+**Photo markup.** The signature pad's stroke capture (`src/components/strokes.tsx`, the platform's responder system, so a finger, a stylus and a mouse all draw) is shared with a markup sheet over a photo fitted inside the view. The strokes are mapped back onto the photo's own pixels and burnt into a JPEG copy (canvas on the web target, view capture on a device) that replaces the original in the upload; the maths is pure and tested.
+
+**Hardening.** Every record list carries the same rendering budget (`listPerformance`: a screenful first, windowed from there, clipped rows dropped natively) and the row component is memoised. The accessibility sweep gives every screen a heading and every control a name; a test walks Home and Notifications and fails on an unnamed button.
+
+## 23. M9 verification record (2026-09-18)
+
+| Check | Result |
+|---|---|
+| Mobile TypeScript and ESLint | 0 errors, 0 warnings |
+| Mobile Jest | 275 passed in 55 suites (adds the deep-link resolver, native push, the realtime client, the markup maths and the accessibility sweep) |
+| Backend Jest | push service, notification service and the notifications, forms and attachment suites green; the Expo provider proved by register, validate, batch send, drop-unregistered and Expo-down cases |
+| Playwright against the production web export and the local API | 75 passed on the phone and tablet viewports, 1 skipped by design (the tablet-only approval check on the phone); 4 new M9 checks on each viewport |
+| Deep link, live | an RFI raised for the run; the web platform's record path opened the record through the opener, the app's own route with the project named did the same, and a link naming no screen landed on Home |
+| Realtime, live | with the RFI list open, an RFI raised through the API appeared in the list without a reload, through the socket's event and the screen's own refetch |
+| Push, live | signing in on the web target made no push registration request |
+| Photo markup, live | a photo chosen on the photos screen, marked up in yellow on the markup sheet, uploaded as the marked copy with a caption; the daily log's attachments then listed a `-marked.jpg` file under that caption |
+| Where writes went | the dedicated end-to-end organisation only |
+
+Native items added to the verification list by M9: push permission, token and delivery on a device; a universal link and an `octapm://` link opening the installed app; the markup view capture; background sync while the app is closed.

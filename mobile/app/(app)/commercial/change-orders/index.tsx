@@ -11,6 +11,7 @@ import { EmptyState, ErrorState, RecordRow, SkeletonList, Text, spacing } from '
 import { useProjectStore } from '@/projects/store'
 import { humanise, money } from '@/utilities/format'
 import { PanePlaceholder, useSplitRole } from '@/navigation/split'
+import { listPerformance } from '@/components/listProps'
 
 const STATUSES = ['draft', 'pending', 'approved', 'rejected'] as const
 
@@ -37,7 +38,7 @@ export default function ChangeOrdersScreen() {
 
   return (
     <Screen scroll={false} testID="screen-change-orders">
-      <FlatList
+      <FlatList {...listPerformance}
         data={orders.data ?? []}
         keyExtractor={(o) => o.id}
         ListHeaderComponent={

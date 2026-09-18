@@ -10,6 +10,7 @@ import { EmptyState, ErrorState, RecordRow, SkeletonList, spacing } from '@/desi
 import { useProjectStore } from '@/projects/store'
 import { day, dueState, humanise, money } from '@/utilities/format'
 import { PanePlaceholder, useSplitRole } from '@/navigation/split'
+import { listPerformance } from '@/components/listProps'
 
 const STATUSES = ['planned', 'draft', 'pending_approval', 'approved', 'issued', 'acknowledged', 'partial', 'received', 'closed'] as const
 
@@ -34,7 +35,7 @@ export default function OrdersScreen() {
 
   return (
     <Screen scroll={false} testID="screen-orders">
-      <FlatList
+      <FlatList {...listPerformance}
         data={orders.data ?? []}
         keyExtractor={(o) => o.id}
         ListHeaderComponent={

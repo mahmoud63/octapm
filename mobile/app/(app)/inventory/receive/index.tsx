@@ -11,6 +11,7 @@ import { EmptyState, ErrorState, Input, RecordRow, SkeletonList, spacing } from 
 import { useProjectStore } from '@/projects/store'
 import { day, dueState, money } from '@/utilities/format'
 import { PanePlaceholder, useSplitRole } from '@/navigation/split'
+import { listPerformance } from '@/components/listProps'
 
 const receivable = new Set<string>(RECEIVABLE_PO_STATUSES)
 
@@ -43,7 +44,7 @@ export default function GoodsInScreen() {
 
   return (
     <Screen scroll={false} testID="screen-goods-in">
-      <FlatList
+      <FlatList {...listPerformance}
         data={rows}
         keyExtractor={(o) => o.id}
         keyboardShouldPersistTaps="handled"

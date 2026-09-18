@@ -11,6 +11,7 @@ import { usePermissions } from '@/permissions/usePermissions'
 import { useProjectStore } from '@/projects/store'
 import { dueState, humanise } from '@/utilities/format'
 import { PanePlaceholder, useSplitRole } from '@/navigation/split'
+import { listPerformance } from '@/components/listProps'
 
 const STATUSES = ['draft', 'open', 'ready_for_review', 'in_dispute', 'closed'] as const
 
@@ -44,7 +45,7 @@ export default function PunchListScreen() {
 
   return (
     <Screen scroll={false} testID="screen-punch">
-      <FlatList
+      <FlatList {...listPerformance}
         data={rows}
         keyExtractor={(p) => p.id}
         keyboardShouldPersistTaps="handled"

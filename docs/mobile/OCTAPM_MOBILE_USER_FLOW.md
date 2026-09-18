@@ -183,6 +183,9 @@ The rules are in the [offline policy](OCTAPM_MOBILE_OFFLINE_POLICY.md); on scree
 5. **The session is refused.** The queue is kept and locked; signing in again as the same person sends it. A different person signing in discards it.
 6. **A kept sheet goes stale.** The register marks it "Newer revision" and the viewer shows the superseded warning with "Keep the latest revision".
 
-## 7. Notification and deep-link flows (M9)
+## 7. Notification, deep-link and live-update flows (M9, as built)
 
-Push notification → tap → app opens on the record's screen, with the destination underneath. A universal link from an email or the web (`app.octapm.com/projects/…`) does the same. Until M9, notification rows open the record on the web.
+1. **A notification tap.** Push notification → tap → the record’s screen, with its list underneath so back lands somewhere sensible; a tap that launched the app is handled on start. A notification for a project other than the current one goes through the opener, which switches the project first.
+2. **A link from an email or the web.** `app.octapm.com/projects/…`, the web platform’s own record path or an `octapm://` link → the same resolver → the record. A link the app has no screen for lands on Home.
+3. **Someone else changes the record.** The socket carries the server’s event for the project; the open list or record refetches on its own and the freshness line updates. Nothing is applied from the event itself; what is shown always comes from the API.
+4. **Mark up a photo.** Take or choose a photo → Mark up photo → draw over it (four pen colours, undo, clear) → Use marked photo → caption → upload. The marked copy is what goes to the daily log or the punch item.

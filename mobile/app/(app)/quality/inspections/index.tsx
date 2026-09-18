@@ -11,6 +11,7 @@ import { usePermissions } from '@/permissions/usePermissions'
 import { useProjectStore } from '@/projects/store'
 import { dueState, humanise } from '@/utilities/format'
 import { PanePlaceholder, useSplitRole } from '@/navigation/split'
+import { listPerformance } from '@/components/listProps'
 
 const STATUSES = ['scheduled', 'in_progress', 'complete', 'closed'] as const
 const TYPES = ['inspection', 'itp', 'form', 'talk'] as const
@@ -44,7 +45,7 @@ export default function InspectionsScreen() {
 
   return (
     <Screen scroll={false} testID="screen-inspections">
-      <FlatList
+      <FlatList {...listPerformance}
         data={rows}
         keyExtractor={(f) => f.id}
         keyboardShouldPersistTaps="handled"

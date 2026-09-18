@@ -7,6 +7,7 @@ import { usePunchActions } from '@/api/quality-hooks'
 import { OBSERVATION_TYPES, PUNCH_PRIORITIES } from '@/api/quality-types'
 import { useActivities, useLocations, useTeam, useUploadAttachments } from '@/api/record-hooks'
 import { useAuthStore } from '@/auth/store'
+import { AnnotateSheet } from '@/components/AnnotateSheet'
 import { FilterChip } from '@/components/FilterChip'
 import { PickerField } from '@/components/PickerField'
 import { Screen } from '@/components/Screen'
@@ -48,6 +49,8 @@ export default function NewPunchScreen() {
   const [activityId, setActivityId] = useState<string | null>(params.activityId ?? null)
   const [dueDate, setDueDate] = useState('')
   const [photos, setPhotos] = useState<Picked[]>([])
+  /** Index of the photo being marked up, if any. */
+  const [marking, setMarking] = useState<number | null>(null)
   const [failure, setFailure] = useState<string | null>(null)
 
   const people = useMemo(() => (team.data ?? []).map((m) => ({ id: m.userId, label: m.name, sublabel: humanise(m.assignmentRole ?? m.orgRole) })), [team.data])
@@ -125,6 +128,13 @@ export default function NewPunchScreen() {
             <Button title={Platform.OS === 'web' ? 'Add photo' : 'Choose photo'} variant="secondary" onPress={() => void pick('library')} testID="punch-library" />
             {photos.length ? <Text tone="muted">{`${photos.length} photo${photos.length === 1 ? '' : 's'} ready`}</Text> : null}
           </View>
+          {photos.length ? (
+            <View style={styles.chips}>
+              {photos.map((file, index) => (
+                <Button key={`${file.uri}-${index}`} title={photos.length > 1 ? `Mark up photo ${index + 1}` : file.name.endsWith('-marked.jpg') ? 'Marked up · edit' : 'Mark up photo'} variant="secondary" onPress={() => setMarking(index)} testID={`punch-markup-${index}`} />
+              ))}
+            </View>
+          ) : null}
           <View style={styles.chips}>
             <FilterChip label="Punch item" selected={kind === 'punch'} onPress={() => setKind('punch')} testID="punch-kind-punch" />
             <FilterChip label="Observation" selected={kind === 'observation'} onPress={() => setKind('observation')} testID="punch-kind-observation" />
@@ -169,6 +179,15 @@ export default function NewPunchScreen() {
       <Button title={kind === 'observation' ? 'Raise observation' : 'Raise punch item'} size="lg" fullWidth disabled={!ready} loading={actions.create.isPending || upload.isPending} onPress={() => void save('open')} testID="punch-raise" />
       <Button title="Save as draft" variant="secondary" fullWidth disabled={!ready || actions.create.isPending} onPress={() => void save('draft')} testID="punch-draft" />
       <Button title="Cancel" variant="ghost" onPress={() => router.back()} />
+      <AnnotateSheet
+        visible={marking !== null}
+        photo={marking !== null ? (photos[marking] ?? null) : null}
+        onCancel={() => setMarking(null)}
+        onConfirm={(marked) => {
+          setPhotos((files) => files.map((file, index) => (index === marking ? marked : file)))
+          setMarking(null)
+        }}
+      />
     </Screen>
   )
 }

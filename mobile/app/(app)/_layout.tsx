@@ -44,6 +44,7 @@ export default function AppLayout() {
       <Tabs.Screen name="more" options={{ title: 'More', tabBarIcon: ({ color, size }) => <Ionicons name="ellipsis-horizontal-outline" color={color} size={size} /> }} />
       {/* Reached from Home, Needs You and Search; not destinations of their own. */}
       <Tabs.Screen name="notifications" options={{ href: null }} />
+      <Tabs.Screen name="open" options={{ href: null }} />
       <Tabs.Screen name="rfi" options={{ href: null }} />
       <Tabs.Screen name="tasks" options={{ href: null }} />
       <Tabs.Screen name="documents" options={{ href: null }} />

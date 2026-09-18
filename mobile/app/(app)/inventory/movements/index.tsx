@@ -12,6 +12,7 @@ import { EmptyState, ErrorState, SkeletonList, Text, spacing, useTheme } from '@
 import { useRememberedWarehouse } from '@/inventory/preferences'
 import { useProjectStore } from '@/projects/store'
 import { dateTime, humanise, quantity } from '@/utilities/format'
+import { listPerformance } from '@/components/listProps'
 
 const signed = (n: number) => (n > 0 ? `+${n}` : String(n))
 
@@ -34,7 +35,7 @@ export default function MovementsScreen() {
 
   return (
     <Screen scroll={false} testID="screen-movements">
-      <FlatList
+      <FlatList {...listPerformance}
         data={rows}
         keyExtractor={(m) => m.id}
         keyboardShouldPersistTaps="handled"

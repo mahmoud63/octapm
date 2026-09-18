@@ -11,6 +11,7 @@ import { Screen } from '@/components/Screen'
 import { Badge, Button, Card, EmptyState, ErrorState, SkeletonList, Text, radius, spacing, tapTarget, useTheme } from '@/design-system'
 import { destinationForNotification, openOnWeb } from '@/navigation/links'
 import { humanise, relative } from '@/utilities/format'
+import { listPerformance } from '@/components/listProps'
 
 function NotificationRow({ item, onOpen, onArchive }: { item: Notification; onOpen: () => void; onArchive: () => void }) {
   const theme = useTheme()
@@ -85,7 +86,7 @@ export default function NotificationsScreen() {
       }
       testID="screen-notifications"
     >
-      <FlatList
+      <FlatList {...listPerformance}
         data={rows}
         keyExtractor={(item) => item.id}
         ListHeaderComponent={

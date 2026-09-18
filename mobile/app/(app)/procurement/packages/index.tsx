@@ -8,6 +8,7 @@ import { EmptyState, ErrorState, RecordRow, SkeletonList, spacing } from '@/desi
 import { useProjectStore } from '@/projects/store'
 import { day, dueState } from '@/utilities/format'
 import { PanePlaceholder, useSplitRole } from '@/navigation/split'
+import { listPerformance } from '@/components/listProps'
 
 /** Procurement packages with their dates and the alerts against them, read only. */
 export default function PackagesScreen() {
@@ -29,7 +30,7 @@ export default function PackagesScreen() {
 
   return (
     <Screen scroll={false} testID="screen-packages">
-      <FlatList
+      <FlatList {...listPerformance}
         data={overview.data?.packages ?? []}
         keyExtractor={(p) => p.id}
         ListHeaderComponent={

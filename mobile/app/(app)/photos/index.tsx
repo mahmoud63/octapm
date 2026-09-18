@@ -12,6 +12,7 @@ import { AuthImage } from '@/components/AuthImage'
 import { FilterChip } from '@/components/FilterChip'
 import { Freshness } from '@/components/Freshness'
 import { ProjectSwitch } from '@/components/ProjectSwitch'
+import { AnnotateSheet } from '@/components/AnnotateSheet'
 import { PromptSheet } from '@/components/PromptSheet'
 import { Screen } from '@/components/Screen'
 import { Button, EmptyState, ErrorState, Input, SkeletonList, Text, radius, spacing, useTheme } from '@/design-system'
@@ -22,6 +23,7 @@ import { useProjectStore } from '@/projects/store'
 import { day } from '@/utilities/format'
 import { newId } from '@/utilities/id'
 import { PanePlaceholder, useSplitRole } from '@/navigation/split'
+import { listPerformance } from '@/components/listProps'
 
 const isoDay = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 
@@ -43,6 +45,8 @@ export default function PhotosScreen() {
   const [search, setSearch] = useState('')
   const [tag, setTag] = useState<string | null>(null)
   const [captioning, setCaptioning] = useState<{ uri: string; name: string; type: string }[] | null>(null)
+  /** Index of the picked photo being marked up, if any. */
+  const [marking, setMarking] = useState<number | null>(null)
   const [failure, setFailure] = useState<string | null>(null)
   const photos = usePhotos(projectId, { search: search || undefined, tag: tag ?? undefined })
   const upload = useUploadAttachments(projectId ?? '')
@@ -114,7 +118,7 @@ export default function PhotosScreen() {
   return (
     <>
       <Screen scroll={false} testID="screen-photos">
-        <FlatList
+        <FlatList {...listPerformance}
           key={columns}
           data={items}
           numColumns={columns}
@@ -168,7 +172,26 @@ export default function PhotosScreen() {
           contentContainerStyle={styles.list}
         />
       </Screen>
-      <PromptSheet visible={!!captioning} title={captioning && captioning.length > 1 ? `Caption for ${captioning.length} photos` : 'Caption'} body="Goes onto today’s daily log." label="Caption" placeholder="What the photo shows and where" confirmTitle="Upload" busy={upload.isPending} error={failure} onCancel={() => setCaptioning(null)} onConfirm={(text) => void send(text)} testID="prompt-caption" />
+      <PromptSheet visible={!!captioning} title={captioning && captioning.length > 1 ? `Caption for ${captioning.length} photos` : 'Caption'} body="Goes onto today’s daily log." label="Caption" placeholder="What the photo shows and where" confirmTitle="Upload" busy={upload.isPending} error={failure} onCancel={() => setCaptioning(null)} onConfirm={(text) => void send(text)} testID="prompt-caption"
+        extra={
+          captioning ? (
+            <View style={styles.markupRow}>
+              {captioning.map((file, index) => (
+                <Button key={`${file.uri}-${index}`} title={captioning.length > 1 ? `Mark up photo ${index + 1}` : file.name.endsWith('-marked.jpg') ? 'Marked up · edit' : 'Mark up photo'} variant="secondary" onPress={() => setMarking(index)} testID={`photo-markup-${index}`} />
+              ))}
+            </View>
+          ) : null
+        }
+      />
+      <AnnotateSheet
+        visible={marking !== null}
+        photo={marking !== null && captioning ? (captioning[marking] ?? null) : null}
+        onCancel={() => setMarking(null)}
+        onConfirm={(marked) => {
+          setCaptioning((files) => (files ? files.map((file, index) => (index === marking ? marked : file)) : files))
+          setMarking(null)
+        }}
+      />
     </>
   )
 }
@@ -176,6 +199,7 @@ export default function PhotosScreen() {
 const styles = StyleSheet.create({
   header: { gap: spacing.md, paddingBottom: spacing.sm },
   actions: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
+  markupRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
   chips: { flexDirection: 'row', gap: spacing.sm },
   rowWrap: { gap: spacing.sm },
   list: { gap: spacing.sm, paddingBottom: spacing.xl },

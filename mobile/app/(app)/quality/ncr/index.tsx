@@ -12,6 +12,7 @@ import { usePermissions } from '@/permissions/usePermissions'
 import { useProjectStore } from '@/projects/store'
 import { dueState, humanise } from '@/utilities/format'
 import { PanePlaceholder, useSplitRole } from '@/navigation/split'
+import { listPerformance } from '@/components/listProps'
 
 /** NCRs on the project. The server sends them all; the filters are applied here. */
 export default function NcrListScreen() {
@@ -50,7 +51,7 @@ export default function NcrListScreen() {
 
   return (
     <Screen scroll={false} testID="screen-ncrs">
-      <FlatList
+      <FlatList {...listPerformance}
         data={rows}
         keyExtractor={(n) => n.id}
         keyboardShouldPersistTaps="handled"

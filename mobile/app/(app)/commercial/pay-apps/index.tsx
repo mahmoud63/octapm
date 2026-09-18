@@ -10,6 +10,7 @@ import { EmptyState, ErrorState, RecordRow, SkeletonList, spacing } from '@/desi
 import { useProjectStore } from '@/projects/store'
 import { humanise, money } from '@/utilities/format'
 import { PanePlaceholder, useSplitRole } from '@/navigation/split'
+import { listPerformance } from '@/components/listProps'
 
 const STATUSES = ['draft', 'submitted', 'under_review', 'approved', 'paid', 'rejected'] as const
 
@@ -34,7 +35,7 @@ export default function PayAppsScreen() {
 
   return (
     <Screen scroll={false} testID="screen-pay-apps">
-      <FlatList
+      <FlatList {...listPerformance}
         data={payApps.data ?? []}
         keyExtractor={(p) => p.id}
         ListHeaderComponent={

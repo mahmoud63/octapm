@@ -1,3 +1,4 @@
+import { memo } from 'react'
 import { Pressable, StyleSheet, View } from 'react-native'
 import { Badge, toneForStatus } from './Badge'
 import { Text } from './Text'
@@ -24,7 +25,7 @@ export interface RecordRowProps {
  * one line of context. On a phone it is the whole unit of a register; on a
  * tablet it is the left pane of a master–detail view.
  */
-export function RecordRow({ reference, title, status, meta, trailing, trailingTone = 'muted', selected, onPress, testID }: RecordRowProps) {
+export const RecordRow = memo(function RecordRow({ reference, title, status, meta, trailing, trailingTone = 'muted', selected, onPress, testID }: RecordRowProps) {
   const theme = useTheme()
   return (
     <Pressable
@@ -62,7 +63,7 @@ export function RecordRow({ reference, title, status, meta, trailing, trailingTo
       ) : null}
     </Pressable>
   )
-}
+})
 
 const styles = StyleSheet.create({
   row: { minHeight: tapTarget + 16, flexDirection: 'row', alignItems: 'center', gap: spacing.md, paddingVertical: spacing.md, paddingHorizontal: spacing.lg, borderBottomWidth: StyleSheet.hairlineWidth },

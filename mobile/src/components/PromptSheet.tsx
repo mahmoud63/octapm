@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { Modal, StyleSheet, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { Button, Input, Text, spacing, useTheme } from '@/design-system'
@@ -7,6 +7,8 @@ interface Props {
   visible: boolean
   title: string
   body?: string
+  /** Extra controls under the body, such as a mark-up button for each photo being captioned. */
+  extra?: ReactNode
   label: string
   placeholder?: string
   required?: boolean
@@ -26,7 +28,7 @@ interface Props {
  * answer. The text is required when the server requires it, and the confirm
  * button says exactly what will happen.
  */
-export function PromptSheet({ visible, title, body, label, placeholder, required, confirmTitle, destructive, busy, error, toggle, onCancel, onConfirm, testID = 'prompt' }: Props) {
+export function PromptSheet({ visible, title, body, label, placeholder, required, confirmTitle, destructive, busy, error, toggle, extra, onCancel, onConfirm, testID = 'prompt' }: Props) {
   const theme = useTheme()
   const insets = useSafeAreaInsets()
   const [text, setText] = useState('')
@@ -41,6 +43,7 @@ export function PromptSheet({ visible, title, body, label, placeholder, required
         <View style={[styles.sheet, { backgroundColor: theme.colors.background, paddingBottom: insets.bottom + spacing.lg }]} testID={testID}>
           <Text variant="title">{title}</Text>
           {body ? <Text tone="muted">{body}</Text> : null}
+          {extra ?? null}
           <Input label={label} placeholder={placeholder} required={required} value={text} onChangeText={setText} multiline autoFocus testID={`${testID}-input`} />
           {toggle ? <Button title={`${toggle.value ? '☑' : '☐'}  ${toggle.label}`} variant="ghost" onPress={() => toggle.onChange(!toggle.value)} testID={`${testID}-toggle`} /> : null}
           {error ? (

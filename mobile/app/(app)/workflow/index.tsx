@@ -10,6 +10,7 @@ import { EmptyState, ErrorState, RecordRow, SkeletonList, Text, spacing } from '
 import { useProjectStore } from '@/projects/store'
 import { dueState } from '@/utilities/format'
 import { PanePlaceholder, useSplitRole } from '@/navigation/split'
+import { listPerformance } from '@/components/listProps'
 
 /**
  * The approvals waiting on this person across every project: each row is a
@@ -29,7 +30,7 @@ export default function WorkflowInboxScreen() {
 
   return (
     <Screen scroll={false} testID="screen-workflow">
-      <FlatList
+      <FlatList {...listPerformance}
         data={rows}
         keyExtractor={(s) => s.assignmentId}
         ListHeaderComponent={

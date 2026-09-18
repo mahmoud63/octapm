@@ -9,6 +9,7 @@ import { EmptyState, ErrorState, Input, RecordRow, SkeletonList, Text, spacing }
 import { destinationForSearchItem, openOnWeb } from '@/navigation/links'
 import { useProjectStore } from '@/projects/store'
 import { day } from '@/utilities/format'
+import { listPerformance } from '@/components/listProps'
 
 /**
  * One search box across every record the person may read: RFIs, submittals,
@@ -38,7 +39,7 @@ export default function SearchScreen() {
 
   return (
     <Screen title="Search" scroll={false} testID="screen-search">
-      <FlatList
+      <FlatList {...listPerformance}
         data={items}
         keyExtractor={(item) => `${item.type}:${item.id}`}
         keyboardShouldPersistTaps="handled"

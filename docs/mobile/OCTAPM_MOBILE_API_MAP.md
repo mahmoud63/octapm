@@ -145,9 +145,9 @@ Register lists accept `?ballInCourtUserId=me` on `/rfi`, `/submittals`, `/punch`
 | POST | `/notifications/:notificationId/retry-email` | Retry one email | 202; `MAX_EMAIL_ATTEMPTS` 3 |
 | POST | `/notifications/scan-due` | Due-date scan | `requireRoles('pm','planning_eng')`; `{ projectId?, horizonDays?(1-30, default 3) }` → 201 |
 | GET | `/notifications/push/public-key` | Web Push VAPID key | `{ configured, publicKey\|null }` |
-| GET | `/notifications/push/subscriptions` | Caller's push devices | `{ configured, publicKey, items[{ id, endpoint, userAgent, platform, failureCount, lastUsedAt, createdAt }] }` |
-| POST | `/notifications/push/subscriptions` | Register browser PushSubscription | `{ endpoint(https, 10-2048), keys:{ p256dh, auth } }` → 201; non-https → `PUSH_ENDPOINT_INVALID`. **Web Push only — no Expo/FCM/APNs** |
-| DELETE | `/notifications/push/subscriptions` | Unregister | body `{ endpoint }` |
+| GET | `/notifications/push/subscriptions` | Caller’s push devices | `{ configured, expoEnabled, publicKey, items[{ id, provider(web|expo), endpoint, userAgent, platform, failureCount, lastUsedAt, createdAt }] }` |
+| POST | `/notifications/push/subscriptions` | Register a device | Browser: `{ endpoint(https, 10-2048), keys:{ p256dh, auth } }`; field app (M9): `{ provider:"expo", token(ExponentPushToken[…]), platform(ios|android), deviceName? }` → 201, upserts on the endpoint or token; bad token → `PUSH_TOKEN_INVALID`, bad platform → `PUSH_PLATFORM_INVALID`. Expo rows are sent through Expo’s push API without VAPID keys; a token Expo reports unregistered is removed. |
+| DELETE | `/notifications/push/subscriptions` | Unregister | body `{ endpoint }` or `{ token }` |
 | POST | `/notifications/push/test` | Test push | 503 `PUSH_NOT_CONFIGURED` without VAPID keys |
 
 Creation rules: per-category preferences respected; actor never notifies self; `dedupeKey` unique; push attempted when `pushEnabled !== false` and a `PushSubscription` exists; endpoints answering 404/410 or 5 consecutive failures are deleted; flushed 750 ms after creation and hourly. `notification.service.js:58, 639, 708`, `push.service.js:15-18, 116-125`

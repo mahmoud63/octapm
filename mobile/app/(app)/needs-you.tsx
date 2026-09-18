@@ -12,6 +12,7 @@ import { Screen } from '@/components/Screen'
 import { EmptyState, ErrorState, KPI, SkeletonList, Text, spacing } from '@/design-system'
 import { destinationForTarget, openOnWeb } from '@/navigation/links'
 import { useProjectStore } from '@/projects/store'
+import { listPerformance } from '@/components/listProps'
 
 type Mode = 'all' | 'ballInCourt' | 'overdue'
 
@@ -54,7 +55,7 @@ export default function NeedsYouScreen() {
 
   return (
     <Screen title="Needs You" subtitle={summary ? `${summary.total} open item${summary.total === 1 ? '' : 's'}` : undefined} scroll={false} testID="screen-needs-you">
-      <FlatList
+      <FlatList {...listPerformance}
         data={rows}
         keyExtractor={(item) => `${item.recordType}:${item.recordId}`}
         ListHeaderComponent={

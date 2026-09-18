@@ -12,6 +12,7 @@ import { usePermissions } from '@/permissions/usePermissions'
 import { useProjectStore } from '@/projects/store'
 import { day, humanise } from '@/utilities/format'
 import { PanePlaceholder, useSplitRole } from '@/navigation/split'
+import { listPerformance } from '@/components/listProps'
 
 const isoDay = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 
@@ -45,7 +46,7 @@ export default function TimesheetsScreen() {
 
   return (
     <Screen scroll={false} testID="screen-timesheets">
-      <FlatList
+      <FlatList {...listPerformance}
         data={rows}
         keyExtractor={(t) => t.id}
         ListHeaderComponent={

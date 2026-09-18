@@ -13,6 +13,7 @@ import { usePermissions } from '@/permissions/usePermissions'
 import { useProjectStore } from '@/projects/store'
 import { humanise, money } from '@/utilities/format'
 import { PanePlaceholder, useSplitRole } from '@/navigation/split'
+import { listPerformance } from '@/components/listProps'
 
 /** Change events on the project; status, type and search are applied by the server. */
 export default function ChangeEventsScreen() {
@@ -44,7 +45,7 @@ export default function ChangeEventsScreen() {
 
   return (
     <Screen scroll={false} testID="screen-change-events">
-      <FlatList
+      <FlatList {...listPerformance}
         data={rows}
         keyExtractor={(e) => e.id}
         keyboardShouldPersistTaps="handled"

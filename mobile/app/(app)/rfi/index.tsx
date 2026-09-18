@@ -14,6 +14,7 @@ import { usePermissions } from '@/permissions/usePermissions'
 import { useProjectStore } from '@/projects/store'
 import { dueState, humanise } from '@/utilities/format'
 import { PanePlaceholder, useSplitRole } from '@/navigation/split'
+import { listPerformance } from '@/components/listProps'
 
 type Mode = 'all' | 'mine' | 'overdue'
 
@@ -54,7 +55,7 @@ export default function RfiListScreen() {
 
   return (
     <Screen scroll={false} testID="screen-rfis">
-      <FlatList
+      <FlatList {...listPerformance}
         data={rows}
         keyExtractor={(row) => row.id}
         keyboardShouldPersistTaps="handled"

@@ -16,6 +16,7 @@ import { useLayout } from '@/hooks/useLayout'
 import { useProjectStore } from '@/projects/store'
 import { day, humanise } from '@/utilities/format'
 import { PanePlaceholder, useSplitRole } from '@/navigation/split'
+import { listPerformance } from '@/components/listProps'
 
 type View_ = 'today' | 'mine' | 'critical' | 'milestones' | 'delayed' | 'all'
 
@@ -86,7 +87,7 @@ export default function ActivitiesScreen() {
 
   return (
     <Screen scroll={false} testID="screen-activities">
-      <FlatList
+      <FlatList {...listPerformance}
         data={timeline && isExpanded ? [] : rows}
         keyExtractor={(a) => a.id}
         keyboardShouldPersistTaps="handled"
