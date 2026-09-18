@@ -11,6 +11,8 @@ import { FilterChip } from '@/components/FilterChip'
 import { PickerField } from '@/components/PickerField'
 import { Screen } from '@/components/Screen'
 import { Button, Card, Input, Text, spacing } from '@/design-system'
+import { captureOrQueue, keepFilesForQueue } from '@/offline/capture'
+import { enqueue } from '@/offline/outbox'
 import { useProjectStore } from '@/projects/store'
 import { humanise } from '@/utilities/format'
 import { newId } from '@/utilities/id'
@@ -69,7 +71,7 @@ export default function NewPunchScreen() {
     if (!projectId) return
     setFailure(null)
     try {
-      const created = await actions.create.mutateAsync({
+      const body = {
         title: title.trim(),
         description: description.trim() || undefined,
         priority,
@@ -86,10 +88,19 @@ export default function NewPunchScreen() {
         dueDate: dueDate || undefined,
         status,
         clientRequestId: newId(),
-      })
+      }
+      const uploadKey = newId()
+      // The item carries a replay key, so it is sent now or kept for later; its photos follow it either way.
+      const outcome = await captureOrQueue({ projectId, kind: 'punch.create', summary: body.title, payload: { body }, clientRequestId: body.clientRequestId }, () => actions.create.mutateAsync(body))
+      if (outcome.queued) {
+        if (photos.length) await enqueue({ projectId, kind: 'attachment.upload', summary: `${photos.length} photo${photos.length === 1 ? '' : 's'} for ${body.title}`, payload: { recordType: 'punch_item', recordId: null, role: 'photo', files: await keepFilesForQueue(photos) }, clientRequestId: uploadKey, dependsOn: outcome.queued.id })
+        router.replace('/outbox')
+        return
+      }
+      const created = outcome.sent
       if (photos.length) {
         const files = Platform.OS === 'web' ? await Promise.all(photos.map(async (f) => new File([await (await fetch(f.uri)).blob()], f.name, { type: f.type }))) : photos
-        await upload.mutateAsync({ recordType: 'punch_item', recordId: created.id, role: 'photo', clientRequestId: newId(), files })
+        await captureOrQueue({ projectId, kind: 'attachment.upload', summary: `${photos.length} photo${photos.length === 1 ? '' : 's'} for ${body.title}`, payload: { recordType: 'punch_item', recordId: created.id, role: 'photo', files: Platform.OS === 'web' ? photos : await keepFilesForQueue(photos) }, clientRequestId: uploadKey }, () => upload.mutateAsync({ recordType: 'punch_item', recordId: created.id, role: 'photo', clientRequestId: uploadKey, files }))
       }
       router.replace(`/quality/punch/${created.id}`)
     } catch (error) {

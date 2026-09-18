@@ -65,4 +65,28 @@ describe('drawings', () => {
     expect(screen.getByText('SUPERSEDED DRAWING')).toBeTruthy()
     expect(screen.getByTestId('sheet-open-latest')).toBeTruthy()
   })
+
+  it('marks a sheet kept on the device as superseded once the server holds a newer revision, on the register and in the viewer', async () => {
+    useDrawingPrefs.setState({ kept: { s1: { revisionId: 'sr0', revision: 'A', keptAt: '2026-09-01T00:00:00.000Z', fileUri: 'file:///documents/offline-sheets/s1.pdf' } } })
+    fakeServer({
+      'GET /projects': () => ({ status: 200, body: envelope(page(projects)) }),
+      'GET /auth/me/permissions': () => ({ status: 200, body: envelope(pmFull) }),
+      'GET /projects/p1/drawings/sheets': () => ({ status: 200, body: envelope(sheetList) }),
+      'GET /projects/p1/drawings/sheets/offline-manifest': () => ({ status: 200, body: envelope({ generatedAt: '2026-09-18T00:00:00.000Z', items: [{ sheetId: 's1', number: 'S-101', title: 'Foundation plan', discipline: 'structural', revisionId: 'sr1', revision: 'B', documentId: 'doc1', pageNumber: 3, fileUrl: '/api/v1/x', fileName: 'S-101-B.pdf', sizeBytes: 240000, sha256: null, publishedAt: '2026-09-10T00:00:00.000Z' }], totals: { sheets: 1, documents: 1, bytes: 240000 } }) }),
+      'GET /projects/p1/drawings/sheets/s1': () => ({ status: 200, body: envelope(sheet()) }),
+      'GET /projects/p1/drawings/sheets/s1/pins': () => ({ status: 200, body: envelope({ items: [] }) }),
+    })
+    await renderScreen(<DrawingsScreen />)
+    expect(await screen.findByText('Newer revision')).toBeTruthy()
+    expect(screen.getByText(/Kept offline · Rev A/)).toBeTruthy()
+
+    ;(useLocalSearchParams as jest.Mock).mockReturnValue({ id: 's1' })
+    await renderScreen(<SheetScreen />)
+    expect(await screen.findByTestId('sheet-superseded')).toBeTruthy()
+    expect(screen.getByText(/The copy kept on this device is Rev A; the server now holds Rev B/)).toBeTruthy()
+    await fireEvent.press(screen.getByTestId('sheet-keep-latest'))
+    await waitFor(() => expect(useDrawingPrefs.getState().kept.s1?.revisionId).toBe('sr1'))
+    await waitFor(() => expect(screen.queryByTestId('sheet-superseded')).toBeNull())
+    expect(screen.getByTestId('sheet-release')).toBeTruthy()
+  })
 })

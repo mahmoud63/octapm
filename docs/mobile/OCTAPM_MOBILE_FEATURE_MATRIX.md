@@ -117,8 +117,10 @@ Every level assumes the role holds the permission on the server for that project
 
 | Feature | Phone | Tablet | Web | Milestone | Roles | Notes |
 |---|---|---|---|---|---|---|
-| Offline reading of cached records | FULL | FULL | NOT AVAILABLE | M7 | all | per the offline policy |
-| Offline capture and outbox | FULL | FULL | NOT AVAILABLE | M7 | as per feature | replay-safe endpoints only |
+| Offline reading of cached records | FULL | FULL | LIMITED | M7 (built) | all | the read cache is kept on the device for the person who signed in, within a budget, and goes with the session; every list says Live, Updated or Offline; the web target keeps it in local storage for verification only |
+| Offline capture and outbox | FULL | FULL | LIMITED | M7 (built) | as per feature | punch items with photos, inspections, daily-log entries, timesheets, goods receipts and photos onto the daily log queue with their replay keys; stock movements, approvals and other writes stay online only; the outbox shows waiting, sending, sent and needs-attention with the server's reason |
+| Sheets kept offline with supersession marking | FULL | FULL | LIMITED | M7 (built) | drawing readers | the kept revision is compared with the manifest; a superseded copy is marked on the register and in the viewer until the latest is kept; the web target keeps no file |
+| Background sync (outbox drain, manifest check while the app is closed) | NOT AVAILABLE | NOT AVAILABLE | — | M9 | all | the drain runs when the signal returns and when the app comes to the front; background tasks are on the native verification list |
 | Deep links and universal links | FULL | FULL | FULL | M9 | all | every record type in the API map's link table |
 | Push notifications | LIMITED | LIMITED | FULL (Web Push) | M9 | all | needs a native registration endpoint on the server |
 | Realtime updates | FULL | FULL | FULL | M9 | all | socket.io project rooms |

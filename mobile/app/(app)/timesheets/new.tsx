@@ -8,6 +8,7 @@ import type { TimesheetEntry } from '@/api/site-types'
 import { PickerField } from '@/components/PickerField'
 import { Screen } from '@/components/Screen'
 import { Button, Card, Input, Text, spacing, useTheme } from '@/design-system'
+import { captureOrQueue } from '@/offline/capture'
 import { useProjectStore } from '@/projects/store'
 import { newId } from '@/utilities/id'
 
@@ -55,8 +56,13 @@ export default function NewTimesheetScreen() {
     if (!projectId) return
     setFailure(null)
     try {
-      const created = await actions.create.mutateAsync({ date, crewId: crewId ?? undefined, notes: notes.trim() || undefined, clientRequestId: newId(), entries })
-      router.replace(`/timesheets/${created.id}`)
+      const body = { date, crewId: crewId ?? undefined, notes: notes.trim() || undefined, clientRequestId: newId(), entries }
+      const outcome = await captureOrQueue({ projectId, kind: 'timesheet.create', summary: `Timesheet for ${date}`, payload: { body }, clientRequestId: body.clientRequestId }, () => actions.create.mutateAsync(body))
+      if (outcome.queued) {
+        router.replace('/outbox')
+        return
+      }
+      router.replace(`/timesheets/${outcome.sent.id}`)
     } catch (error) {
       setFailure(userMessage(error))
     }

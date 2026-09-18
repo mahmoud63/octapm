@@ -64,7 +64,14 @@ export const network = {
       globalThis.addEventListener?.('online', on)
       globalThis.addEventListener?.('offline', off)
       known = typeof navigator !== 'undefined' && 'onLine' in navigator ? navigator.onLine : null
+      // Browsers do not always fire the events; the flag itself is checked as well.
+      const poll = setInterval(() => {
+        if (typeof navigator === 'undefined' || !('onLine' in navigator)) return
+        if (navigator.onLine === false && known !== false) off()
+        else if (navigator.onLine === true && known === false) on()
+      }, 2_000)
       return () => {
+        clearInterval(poll)
         globalThis.removeEventListener?.('online', on)
         globalThis.removeEventListener?.('offline', off)
       }

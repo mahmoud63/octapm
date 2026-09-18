@@ -21,7 +21,8 @@ interface FieldSpec {
 export const ENTRY_FIELDS: Record<DailyLogSection, FieldSpec[]> = {
   manpower: [
     { key: 'companyName', label: 'Company', kind: 'text', required: true },
-    { key: 'trade', label: 'Trade', kind: 'text', placeholder: 'e.g. Steelfixers' },
+    // The server refuses a manpower entry without a trade.
+    { key: 'trade', label: 'Trade', kind: 'text', required: true, placeholder: 'e.g. Steelfixers' },
     { key: 'workers', label: 'Workers', kind: 'number', required: true },
     { key: 'hours', label: 'Hours each', kind: 'number', required: true },
   ],

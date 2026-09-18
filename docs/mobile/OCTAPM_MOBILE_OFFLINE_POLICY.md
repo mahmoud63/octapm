@@ -1,7 +1,7 @@
 # OctaPM Mobile — Offline Policy
 
 **Audience:** engineers implementing sync, and the product owner deciding what a person may do on site without a signal.
-**Status:** policy of record, written before the offline milestone (M7) so that every earlier screen is built to fit it. Where the backend lacks a capability the policy depends on, the gap is named here and in section 8 of the [API map](OCTAPM_MOBILE_API_MAP.md).
+**Status:** policy of record, written before the offline milestone (M7) so that every earlier screen is built to fit it, and implemented in M7 on 2026-09-18; section 10 records what is built and what is carried. Where the backend lacks a capability the policy depends on, the gap is named here and in section 8 of the [API map](OCTAPM_MOBILE_API_MAP.md).
 
 ## 1. Principles
 
@@ -101,3 +101,11 @@ The database never holds a token, a password or an authorization header. Backups
 ## 9. Backend gaps this policy works around
 
 From section 8 of the API map: no delta sync; no generic idempotency key (replay only where listed above); no concurrency preconditions; no native push registration; inventory mutations not replay-safe; no per-page sheet images (source PDF only). Each gap is listed in the implementation plan with the milestone that would need it and whether a backend change is proposed.
+
+## 10. What M7 built, and what is carried (2026-09-18)
+
+Built as written above: the outbox (`mobile/src/offline/outbox.ts`) with the state machine of section 3 and the rules of section 4, its senders for punch items, inspections, daily-log entries, timesheets, photos and the goods receipt, and the capture-or-queue path every one of those screens takes; the read cache of section 2 kept on the device for the person who signed in, within a 4 MB budget, restored at sign-in and written as it changes; the lifetime rules of section 6 (sign-out wipes queue and cache; a refused session keeps the queue locked and drops the cache; a different person's sign-in discards the queue); the status line, bar, badges and outbox screen of section 8; and kept sheets with supersession marking from the manifest (section 5). Offline data lives in the app's SQLite database on a device and in local storage on the web target.
+
+Differences from the text above, all deliberate: the outbox is a key-value document rather than a table, since it is small and read as a whole; the read cache excludes searches, scans and the approvals inbox, which are momentary; a kept sheet stores the source PDF as a whole file (the server serves no per-page image) and the web target stores no file at all.
+
+Carried: background sync (section 7) — the drain runs when the signal returns and when the app comes to the front, and background tasks are on the native verification list for M9; realtime invalidation over socket.io (M9); the drafts-then-send-once path for RFIs, NCRs, tasks and change events (their create endpoints carry no replay key, so they stay online only for now); the delta endpoints and the generic idempotency key remain proposals to the backend.

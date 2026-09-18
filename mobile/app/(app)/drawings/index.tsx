@@ -10,6 +10,7 @@ import { Freshness } from '@/components/Freshness'
 import { ProjectSwitch } from '@/components/ProjectSwitch'
 import { Screen } from '@/components/Screen'
 import { EmptyState, ErrorState, Input, RecordRow, SkeletonList, Text, spacing } from '@/design-system'
+import { keptState } from '@/drawings/offline'
 import { useDrawingPrefs } from '@/drawings/preferences'
 import { useProjectStore } from '@/projects/store'
 import { humanise } from '@/utilities/format'
@@ -90,9 +91,9 @@ export default function DrawingsScreen() {
           <RecordRow
             reference={item.number}
             title={item.title ?? item.number}
-            status={item.status === 'obsolete' ? 'superseded' : item.currentRevision?.status ?? null}
-            meta={[humanise(item.discipline), item.currentRevision ? `Rev ${item.currentRevision.revision}` : 'No published revision', prefs.favourites.includes(item.id) ? '★ Favourite' : null].filter(Boolean).join(' · ')}
-            trailing={item.status === 'obsolete' ? 'Obsolete' : undefined}
+            status={item.status === 'obsolete' || keptState(item.id, prefs.kept, manifest.data).superseded ? 'superseded' : item.currentRevision?.status ?? null}
+            meta={[humanise(item.discipline), item.currentRevision ? `Rev ${item.currentRevision.revision}` : 'No published revision', prefs.favourites.includes(item.id) ? '★ Favourite' : null, prefs.kept[item.id] ? `⬇ Kept offline · Rev ${prefs.kept[item.id]!.revision}` : null].filter(Boolean).join(' · ')}
+            trailing={item.status === 'obsolete' ? 'Obsolete' : keptState(item.id, prefs.kept, manifest.data).superseded ? 'Newer revision' : undefined}
             trailingTone="error"
             onPress={() => router.push(`/drawings/${item.id}`)}
             testID={`sheet-row-${item.id}`}

@@ -170,9 +170,16 @@ Planned destinations as their milestones land: outbox and offline status (M7).
 
 Same destinations, laid out as a rail. Lists become master–detail on the expanded width class (M8): the list stays on the left, the record opens on the right, and the project strip spans the top. Rotation keeps the person on the same record.
 
-## 6. Offline and sync flows
+## 6. Offline and sync flows (M7, as built)
 
-Described in the [offline policy](OCTAPM_MOBILE_OFFLINE_POLICY.md). On screen: a freshness line on every list (Live / Updated n minutes ago / Offline), an outbox badge on Home and in More (M7), and a needs-attention list for queued items the server refused.
+The rules are in the [offline policy](OCTAPM_MOBILE_OFFLINE_POLICY.md); on screen they look like this.
+
+1. **The signal goes.** A bar across the top of the shell says "Offline · showing what was saved on this device"; every list's freshness line says Offline with the age of what it shows. Screens the person has opened before draw from the cache kept on the device.
+2. **Capturing offline.** Raising a punch item, starting an inspection, adding a daily-log entry, starting a timesheet, posting a goods receipt or taking photos onto the daily log saves the item to the outbox with its replay key. The form says so and goes to the outbox (or, on the daily log, shows the notice in place). Anything without a replay key, and every stock movement or approval, refuses politely and waits for a signal.
+3. **The signal returns.** The bar says "Sending n items…", the outbox drains oldest first, a photo only after the record it belongs to, and each item turns Sent. The same happens when the app comes back to the front.
+4. **The server refuses one.** The bar turns red: "1 item needs your attention". The outbox shows the server's reason under the item with Try again and Discard. Nothing is dropped quietly.
+5. **The session is refused.** The queue is kept and locked; signing in again as the same person sends it. A different person signing in discards it.
+6. **A kept sheet goes stale.** The register marks it "Newer revision" and the viewer shows the superseded warning with "Keep the latest revision".
 
 ## 7. Notification and deep-link flows (M9)
 

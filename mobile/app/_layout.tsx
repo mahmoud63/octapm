@@ -8,8 +8,10 @@ import { StatusBar } from 'expo-status-bar'
 import { useEffect } from 'react'
 import { GestureHandlerRootView } from 'react-native-gesture-handler'
 import { SafeAreaProvider } from 'react-native-safe-area-context'
+import { network } from '@/api/network'
 import { queryClient } from '@/api/query'
 import { analytics } from '@/analytics'
+import { startOffline } from '@/offline'
 import { bootstrap } from '@/auth/session'
 import { useAuthStore } from '@/auth/store'
 import { env } from '@/config/env'
@@ -33,8 +35,14 @@ export default function RootLayout() {
 
   useEffect(() => {
     analytics.configure(() => undefined, { env: env.name, appVersion: env.appVersion })
+    const stopNetwork = network.start()
+    const stopOffline = startOffline()
     useProjectStore.getState().hydrate().catch(() => undefined)
     bootstrap().catch((error) => log.error('auth', 'session bootstrap failed', { message: String(error) }))
+    return () => {
+      stopOffline()
+      stopNetwork()
+    }
   }, [])
 
   useEffect(() => {

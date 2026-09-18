@@ -13,6 +13,8 @@
 import { api, bindTokenSource, run } from '@/api/client'
 import { AppError, isAppError } from '@/api/errors'
 import { forgetEverything } from '@/api/query'
+import { offlineSessionEnded, offlineSessionLost, offlineSessionStarted } from '@/offline'
+import { clearPersistedCache } from '@/offline/persist'
 import { analytics } from '@/analytics'
 import { promptBiometric } from '@/auth/biometric'
 import { STORAGE_KEYS, secureStorage } from '@/auth/secure-storage'
@@ -60,6 +62,8 @@ async function applyResult(result: AuthResult, method: 'password' | 'biometric' 
   store().setSignedIn(result.user, result.tokens.accessToken, result.tokens.expiresIn)
   await secureStorage.set(STORAGE_KEYS.lastEmail, result.user.email)
   analytics.track({ name: 'mobile_login', method })
+  // The read cache and the outbox belong to this person; a different person's queue is discarded here.
+  await offlineSessionStarted(result.user.id).catch((error) => log.warn('sync', 'offline data could not be attached to the session', { message: String(error) }))
 }
 
 /**
@@ -101,7 +105,14 @@ export function refreshSession(): Promise<string | null> {
 }
 
 async function endLocally(reason: 'user' | 'expired' | 'revoked') {
+  const userId = store().user?.id ?? null
   forgetEverything()
+  // Sign-out takes the outbox with it; a refused session keeps the queue locked for the same person, but the cached records go.
+  if (reason === 'user') await offlineSessionEnded().catch(() => undefined)
+  else {
+    offlineSessionLost()
+    await clearPersistedCache(userId).catch(() => undefined)
+  }
   await useProjectStore.getState().clear()
   await Promise.all([secureStorage.remove(STORAGE_KEYS.refreshToken), secureStorage.remove(STORAGE_KEYS.profile)])
   store().setSignedOut(reason)

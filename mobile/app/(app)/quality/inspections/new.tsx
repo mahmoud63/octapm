@@ -8,6 +8,7 @@ import { FilterChip } from '@/components/FilterChip'
 import { PickerField } from '@/components/PickerField'
 import { Screen } from '@/components/Screen'
 import { Button, Card, Input, Text, spacing } from '@/design-system'
+import { captureOrQueue } from '@/offline/capture'
 import { useProjectStore } from '@/projects/store'
 import { humanise } from '@/utilities/format'
 import { newId } from '@/utilities/id'
@@ -48,8 +49,13 @@ export default function NewInspectionScreen() {
     if (!projectId || !templateId) return
     setFailure(null)
     try {
-      const instance = await actions.create.mutateAsync({ templateId, title: title.trim() || undefined, activityId: activityId ?? undefined, locationId: locationId ?? undefined, assigneeUserId: assigneeId ?? undefined, dueDate: dueDate || undefined, startNow, clientRequestId: newId(), clientCreatedAt: new Date().toISOString() })
-      router.replace(`/quality/inspections/${instance.id}`)
+      const body = { templateId, title: title.trim() || undefined, activityId: activityId ?? undefined, locationId: locationId ?? undefined, assigneeUserId: assigneeId ?? undefined, dueDate: dueDate || undefined, startNow, clientRequestId: newId(), clientCreatedAt: new Date().toISOString() }
+      const outcome = await captureOrQueue({ projectId, kind: 'form.create', summary: body.title ?? template?.name ?? 'Inspection', payload: { body }, clientRequestId: body.clientRequestId }, () => actions.create.mutateAsync(body))
+      if (outcome.queued) {
+        router.replace('/outbox')
+        return
+      }
+      router.replace(`/quality/inspections/${outcome.sent.id}`)
     } catch (error) {
       setFailure(userMessage(error))
     }

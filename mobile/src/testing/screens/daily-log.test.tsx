@@ -71,6 +71,9 @@ describe('the daily log', () => {
     await fireEvent.press(await screen.findByTestId('daily-log-add-manpower'))
     expect(screen.getByTestId('entry-save').props.accessibilityState?.disabled).toBe(true)
     await fireEvent.changeText(screen.getByTestId('entry-companyName'), 'Delta Steelfixing')
+    // The server refuses a manpower entry without a trade, so the sheet does too.
+    expect(screen.getByTestId('entry-save').props.accessibilityState?.disabled).toBe(true)
+    await fireEvent.changeText(screen.getByTestId('entry-trade'), 'Steelfixers')
     await fireEvent.changeText(screen.getByTestId('entry-workers'), '6')
     await fireEvent.changeText(screen.getByTestId('entry-hours'), '9')
     await fireEvent.press(screen.getByTestId('entry-save'))

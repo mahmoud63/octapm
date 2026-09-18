@@ -4,12 +4,12 @@ import { StyleSheet, View } from 'react-native'
 import { userMessage } from '@/api/errors'
 import { useGoodsReceipt, usePurchaseOrder, useWarehouseLocations, useWarehouses } from '@/api/inventory-hooks'
 import { RECEIVABLE_PO_STATUSES, type GoodsReceiptResult, type PoLine } from '@/api/inventory-types'
-import { network } from '@/api/network'
 import { PickerField } from '@/components/PickerField'
 import { RecordHeader } from '@/components/RecordHeader'
 import { Screen } from '@/components/Screen'
 import { Badge, Button, Card, ErrorState, Input, SkeletonList, Text, spacing, useTheme } from '@/design-system'
 import { useRememberedWarehouse } from '@/inventory/preferences'
+import { captureOrQueue } from '@/offline/capture'
 import { usePermissions } from '@/permissions/usePermissions'
 import { useProjectStore } from '@/projects/store'
 import { day, humanise, money, quantity } from '@/utilities/format'
@@ -48,6 +48,7 @@ export default function ReceiveScreen() {
   const [entries, setEntries] = useState<Record<string, LineEntry>>({})
   const [failure, setFailure] = useState<string | null>(null)
   const [posted, setPosted] = useState<GoodsReceiptResult | null>(null)
+  const [queued, setQueued] = useState(false)
 
   useEffect(() => {
     if (!warehouseId && remembered.warehouseId) setWarehouseId(remembered.warehouseId)
@@ -83,12 +84,8 @@ export default function ReceiveScreen() {
   const post = async () => {
     if (!order.data || !warehouseId) return
     setFailure(null)
-    if (network.isKnownOffline()) {
-      setFailure('You are offline. The receipt is sent only while connected; nothing is queued.')
-      return
-    }
     try {
-      const result = await receipt.mutateAsync({
+      const body = {
         orderId: order.data.id,
         warehouseId,
         receiptNumber,
@@ -97,8 +94,11 @@ export default function ReceiveScreen() {
         lines: outstanding
           .map((l) => ({ poLineId: l.id, acceptedQty: numeric(entry(l).accepted) || undefined, rejectedQty: numeric(entry(l).rejected) || undefined, locationId: entry(l).locationId ?? undefined }))
           .filter((l) => (l.acceptedQty ?? 0) > 0 || (l.rejectedQty ?? 0) > 0),
-      })
-      setPosted(result)
+      }
+      // The receipt number is a natural key on the server, so this is the one stock write that may wait in the outbox.
+      const outcome = await captureOrQueue({ projectId: projectId ?? order.data.projectId, kind: 'goods-receipt', summary: `Delivery ${receiptNumber} against ${order.data.ref}`, payload: { body }, clientRequestId: receiptNumber }, () => receipt.mutateAsync(body))
+      if (outcome.queued) setQueued(true)
+      else setPosted(outcome.sent)
       setReceiving(false)
       if (warehouseId !== remembered.warehouseId) void remembered.remember(warehouseId)
     } catch (error) {
@@ -135,6 +135,15 @@ export default function ReceiveScreen() {
     <Screen contentStyle={styles.content} testID="screen-receive">
       <RecordHeader reference={po.ref} title={po.supplier ?? 'Purchase order'} status={po.status} meta={[po.value != null ? money(po.value, po.currency) : null, po.orderDate ? `Ordered ${day(po.orderDate)}` : null, po.promisedDate ? `Promised ${day(po.promisedDate)}` : null, `Warehouse: ${humanise(po.warehouseStatus)}`].filter((v): v is string => !!v)} testID="po-header" />
 
+      {queued ? (
+        <Card edge={theme.colors.warning} testID="receipt-queued">
+          <View style={styles.stack}>
+            <Text variant="heading">Kept in the outbox</Text>
+            <Text>{`Receipt ${receiptNumber} will post when the signal returns. Its number is fixed, so it counts once however many times it is sent.`}</Text>
+            <Button title="Open the outbox" variant="secondary" onPress={() => router.push('/outbox')} testID="receipt-open-outbox" />
+          </View>
+        </Card>
+      ) : null}
       {posted ? (
         <Card edge={theme.colors.success} testID="receipt-posted">
           <View style={styles.stack}>
@@ -207,7 +216,7 @@ export default function ReceiveScreen() {
             <Button title="Cancel" variant="ghost" onPress={() => setReceiving(false)} disabled={receipt.isPending} />
           </View>
         </Card>
-      ) : canReceive && !posted ? (
+      ) : canReceive && !posted && !queued ? (
         <Button title="Receive delivery" size="lg" fullWidth onPress={start} testID="receipt-start" />
       ) : !receivable.has(po.status) ? (
         <Text tone="muted">This order is {humanise(po.status)}; nothing can be received against it.</Text>

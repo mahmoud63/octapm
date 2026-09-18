@@ -92,10 +92,30 @@ jest.mock('expo-image-picker', () => ({
   launchCameraAsync: jest.fn(async () => ({ canceled: true, assets: [] })),
   launchImageLibraryAsync: jest.fn(async () => ({ canceled: true, assets: [] })),
 }))
-jest.mock('expo-file-system/legacy', () => ({ cacheDirectory: 'file:///cache/', downloadAsync: jest.fn(async (_url: string, target: string) => ({ status: 200, uri: target })) }))
+jest.mock('expo-file-system/legacy', () => ({
+  cacheDirectory: 'file:///cache/',
+  documentDirectory: 'file:///documents/',
+  downloadAsync: jest.fn(async (_url: string, target: string) => ({ status: 200, uri: target })),
+  makeDirectoryAsync: jest.fn(async () => undefined),
+  copyAsync: jest.fn(async () => undefined),
+}))
 jest.mock('expo-sharing', () => ({ isAvailableAsync: jest.fn(async () => true), shareAsync: jest.fn(async () => undefined) }))
 jest.mock('react-native-webview', () => ({ WebView: () => null }))
 jest.mock('expo-camera', () => ({ CameraView: () => null, useCameraPermissions: jest.fn(() => [{ granted: true, canAskAgain: true }, jest.fn(async () => ({ granted: true }))]) }))
+// A memory-backed SQLite that understands the four statements the key-value store uses.
+jest.mock('expo-sqlite', () => {
+  const rows = new Map<string, string>()
+  const db = {
+    execAsync: async () => undefined,
+    runAsync: async (sql: string, ...params: (string | number)[]) => {
+      if (sql.startsWith('INSERT OR REPLACE')) rows.set(String(params[0]), String(params[1]))
+      else if (sql.startsWith('DELETE')) rows.delete(String(params[0]))
+    },
+    getFirstAsync: async (_sql: string, key: string) => (rows.has(key) ? { value: rows.get(key) } : null),
+    getAllAsync: async (_sql: string, like: string) => [...rows.keys()].filter((k) => k.startsWith(like.replace(/%$/, ''))).map((key) => ({ key })),
+  }
+  return { openDatabaseAsync: jest.fn(async () => db) }
+})
 
 // Node's FormData refuses the { uri, name, type } file objects React Native's
 // FormData accepts. Under test those objects become empty blobs with the same

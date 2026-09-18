@@ -154,7 +154,7 @@ The server is the authority. Every list the app shows and every action it offers
 
 ## 8. State and caching
 
-The query client keeps server records in memory with a short stale time and a long garbage-collection time, retries only errors the error model marks retryable, and runs in offline-first mode so cached data renders while the network is away. Keys are structured (`me`, `projects`, `project(id)`, `projectScoped(id, …)`, `needsYou(id)`, `notifications`, `search`) so a project can be forgotten as a unit and the whole cache can be cleared at sign-out. Durable offline data is a separate concern with its own rules, described in the offline policy.
+The query client keeps server records in memory with a short stale time and a long garbage-collection time, retries only errors the error model marks retryable, and runs in offline-first mode so cached data renders while the network is away. Keys are structured (`me`, `projects`, `project(id)`, `projectScoped(id, …)`, `needsYou(id)`, `notifications`, `search`) so a project can be forgotten as a unit and the whole cache can be cleared at sign-out. Since M7 the settled part of that cache is also kept on the device between launches, under the signed-in person's id and within a budget, and restored when they sign in; the outbox of captured writes and the sheets kept offline live beside it. The rules for all of it are in the offline policy, and `src/offline/` implements them.
 
 ## 9. Design system and layout
 
@@ -309,3 +309,18 @@ A defect the run found and fixed before the record was taken: the ledger filtere
 Native items added to the verification list by M6: none; every screen is read-and-respond.
 
 Two defects the run found and fixed before the record was taken: the change-order register answers `{ orders, summary }` where every other list answers `{ items }`, so the app's list was empty against the live server until the endpoint learned the shape and the rendered test's fake was corrected to match; and the approval workflow starts after the submit has replied, so an inbox read at once sees nothing (the app's inbox refetches on focus; the browser check polls). A rendered-test race was also fixed: the Home test read the project strip's placeholder as proof of the chooser and then asserted the rows synchronously, which failed under load; it now waits for a row.
+
+## 20. M7 verification record (2026-09-18)
+
+| Check | Result |
+|---|---|
+| Mobile TypeScript and ESLint | 0 errors, 0 warnings |
+| Mobile Jest | 239 passed in 46 suites (adds the outbox state machine against a scripted server — order, dependants, back-off, attention, refused, lock and adopt, discard, hydrate — the persisted cache, capture-or-queue, the offline screens and the kept-sheet supersession rule) |
+| Playwright against the production web export and the local API | 60 passed: 30 checks on the phone viewport and the same 30 on the tablet viewport |
+| Offline capture, live | with the browser taken offline by Playwright, a punch item raised from the form went to the outbox as Waiting with the bar reading "Offline · 1 item waiting to send"; when the connection returned it was posted once (201) with the replay key it was captured with, turned Sent, and appeared once in the register |
+| Refusal handling, live | a daily-log manpower entry captured offline without a trade was refused by the server on send (400 "trade is required"); the item turned Attention with that reason and the bar turned red, as the policy requires; the check now fills the trade and sees the entry sent (201) |
+| Where writes went | the dedicated end-to-end organisation only |
+
+Native items added to the verification list by M7: the SQLite store and the documents directory on a device (the web target uses local storage and keeps no files), the copy of picked photos into the app's documents for a queued upload, background drain while the app is closed, and the kept-sheet PDF opened from the device without a signal.
+
+Two things the run taught: Playwright's offline switch did not always raise the browser's offline event on the phone viewport, so the web listener now also polls the connectivity flag every two seconds; and a rendered-test gate started while edits were still landing reported a stale failure, so the gate is now started only once every edit is on disk.

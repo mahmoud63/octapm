@@ -10,9 +10,10 @@ import { Freshness } from '@/components/Freshness'
 import { HealthDimensions, healthTone } from '@/components/HealthDimensions'
 import { ProjectSwitch } from '@/components/ProjectSwitch'
 import { Screen } from '@/components/Screen'
-import { Badge, Button, Card, EmptyState, ErrorState, KPI, RecordRow, SkeletonList, Text, spacing } from '@/design-system'
+import { Badge, Button, Card, EmptyState, ErrorState, KPI, RecordRow, SkeletonList, Text, spacing, useTheme } from '@/design-system'
 import { availableQuickActions } from '@/home/quick-actions'
 import { destinationForTarget, openOnWeb } from '@/navigation/links'
+import { useOutboxStatus } from '@/offline/useOutboxStatus'
 import { roleLabel } from '@/permissions/policy'
 import { usePermissions } from '@/permissions/usePermissions'
 import { useProjectStore } from '@/projects/store'
@@ -37,6 +38,8 @@ export default function HomeScreen() {
   const user = useAuthStore((s) => s.user)
   const projectId = useProjectStore((s) => s.currentProjectId)
   const hydrated = useProjectStore((s) => s.hydrated)
+  const theme = useTheme()
+  const outbox = useOutboxStatus(projectId)
   const select = useProjectStore((s) => s.select)
 
   const projects = useProjects()
@@ -118,6 +121,16 @@ export default function HomeScreen() {
               ))
             )}
             {projects.data && projects.data.length > 5 ? <Button title="All projects" variant="secondary" onPress={() => router.push('/projects')} /> : null}
+          </View>
+        </Card>
+      ) : null}
+
+      {outbox.waiting + outbox.attention > 0 ? (
+        <Card edge={outbox.attention > 0 ? theme.colors.error : theme.colors.warning} testID="home-outbox">
+          <View style={styles.stack}>
+            <Text variant="heading">{outbox.attention > 0 ? `${outbox.attention} item${outbox.attention === 1 ? '' : 's'} need${outbox.attention === 1 ? 's' : ''} your attention` : `${outbox.waiting} item${outbox.waiting === 1 ? '' : 's'} waiting to send`}</Text>
+            <Text tone="muted">{outbox.offline ? 'They go when the signal returns.' : outbox.attention > 0 ? 'The server refused them; see why and try again or discard.' : 'Sending shortly.'}</Text>
+            <Button title="Open the outbox" variant="secondary" onPress={() => router.push('/outbox')} testID="home-outbox-open" />
           </View>
         </Card>
       ) : null}

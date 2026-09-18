@@ -1,6 +1,8 @@
 import { Ionicons } from '@expo/vector-icons'
 import { Redirect, Tabs } from 'expo-router'
+import { StyleSheet, View } from 'react-native'
 import { useAuthStore } from '@/auth/store'
+import { ConnectivityBar } from '@/components/ConnectivityBar'
 import { useTheme } from '@/design-system'
 import { useLayout } from '@/hooks/useLayout'
 
@@ -21,7 +23,9 @@ export default function AppLayout() {
   if (status === 'booting') return null
 
   return (
-    <Tabs
+    <View style={styles.root}>
+      <ConnectivityBar />
+      <Tabs
       screenOptions={{
         headerShown: false,
         tabBarPosition: isExpanded ? 'left' : 'bottom',
@@ -53,6 +57,10 @@ export default function AppLayout() {
       <Tabs.Screen name="commercial" options={{ href: null }} />
       <Tabs.Screen name="workflow" options={{ href: null }} />
       <Tabs.Screen name="procurement" options={{ href: null }} />
+      <Tabs.Screen name="outbox" options={{ href: null }} />
     </Tabs>
+    </View>
   )
 }
+
+const styles = StyleSheet.create({ root: { flex: 1 } })

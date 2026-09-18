@@ -17,7 +17,7 @@ import { ErrorState, Skeleton, Text, spacing } from '@/design-system'
  * a bundled pdf.js viewer is on the native verification list, and until
  * then the sheet opens in the system viewer through the share sheet.
  */
-export function PdfPage({ apiPath, page, fileName, testID }: { apiPath: string; page?: number | null; fileName?: string | null; testID?: string }) {
+export function PdfPage({ apiPath, page, fileName, localUri, testID }: { apiPath: string; page?: number | null; fileName?: string | null; /** A copy kept on the device: shown without touching the network. */ localUri?: string | null; testID?: string }) {
   const [state, setState] = useState<{ status: 'loading' } | { status: 'ready'; uri: string } | { status: 'error'; message: string }>({ status: 'loading' })
 
   useEffect(() => {
@@ -25,6 +25,10 @@ export function PdfPage({ apiPath, page, fileName, testID }: { apiPath: string; 
     let objectUrl: string | null = null
     const load = async () => {
       try {
+        if (localUri) {
+          if (!cancelled) setState({ status: 'ready', uri: localUri })
+          return
+        }
         if (network.isKnownOffline()) throw new AppError('OFFLINE')
         const token = useAuthStore.getState().accessToken
         if (!token) throw new AppError('AUTH_REQUIRED')
@@ -53,7 +57,7 @@ export function PdfPage({ apiPath, page, fileName, testID }: { apiPath: string; 
       cancelled = true
       if (objectUrl) URL.revokeObjectURL(objectUrl)
     }
-  }, [apiPath, page, fileName])
+  }, [apiPath, page, fileName, localUri])
 
   if (state.status === 'loading') {
     return (

@@ -11,6 +11,7 @@ import { ProjectSwitch } from '@/components/ProjectSwitch'
 import { PromptSheet } from '@/components/PromptSheet'
 import { Screen } from '@/components/Screen'
 import { Badge, Button, Card, EmptyState, ErrorState, KPI, SkeletonList, Text, spacing, toneForStatus, useTheme } from '@/design-system'
+import { captureOrQueue } from '@/offline/capture'
 import { usePermissions } from '@/permissions/usePermissions'
 import { useProjectStore } from '@/projects/store'
 import { day, humanise } from '@/utilities/format'
@@ -59,6 +60,7 @@ export default function DailyLogScreen() {
   const [adding, setAdding] = useState<DailyLogSection | null>(null)
   const [editingSummary, setEditingSummary] = useState(false)
   const [failure, setFailure] = useState<string | null>(null)
+  const [queuedNotice, setQueuedNotice] = useState<string | null>(null)
 
   const project = projects.data?.find((p) => p.id === projectId) ?? null
 
@@ -78,9 +80,12 @@ export default function DailyLogScreen() {
 
   const save = async (section: DailyLogSection, body: EntryInput) => {
     setFailure(null)
+    setQueuedNotice(null)
     try {
-      await actions.addEntry.mutateAsync({ section, body })
+      // Every entry carries a replay key: sent now, or kept in the outbox until the signal returns.
+      const outcome = await captureOrQueue({ projectId: projectId!, kind: 'daily-log.entry', summary: `${humanise(section)} entry for ${date}`, payload: { date, section, body }, clientRequestId: body.clientRequestId }, () => actions.addEntry.mutateAsync({ section, body }))
       setAdding(null)
+      if (outcome.queued) setQueuedNotice(`Saved to the outbox. The ${humanise(section).toLowerCase()} entry will be sent when the signal returns.`)
     } catch (error) {
       setFailure(userMessage(error))
     }
@@ -193,6 +198,14 @@ export default function DailyLogScreen() {
               )
             })}
 
+            {queuedNotice ? (
+              <Card edge={theme.colors.warning} testID="daily-log-queued">
+                <View style={styles.row}>
+                  <Text style={styles.grow}>{queuedNotice}</Text>
+                  <Button title="Outbox" variant="ghost" onPress={() => router.push('/outbox')} testID="daily-log-open-outbox" />
+                </View>
+              </Card>
+            ) : null}
             {failure ? (
               <Text tone="error" accessibilityRole="alert" testID="daily-log-failure">
                 {failure}

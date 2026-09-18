@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { FlatList, Platform, Pressable, ScrollView, StyleSheet, View, useWindowDimensions } from 'react-native'
 import { userMessage } from '@/api/errors'
 import { useProjects } from '@/api/hooks'
+import { network } from '@/api/network'
 import { useUploadAttachments } from '@/api/record-hooks'
 import { addDailyLogEntry, getDailyLog, photoThumbnailPath } from '@/api/site-endpoints'
 import { usePhotos } from '@/api/site-hooks'
@@ -14,6 +15,8 @@ import { ProjectSwitch } from '@/components/ProjectSwitch'
 import { PromptSheet } from '@/components/PromptSheet'
 import { Screen } from '@/components/Screen'
 import { Button, EmptyState, ErrorState, Input, SkeletonList, Text, radius, spacing, useTheme } from '@/design-system'
+import { captureOrQueue, keepFilesForQueue } from '@/offline/capture'
+import { enqueue } from '@/offline/outbox'
 import { usePermissions } from '@/permissions/usePermissions'
 import { useProjectStore } from '@/projects/store'
 import { day } from '@/utilities/format'
@@ -70,13 +73,25 @@ export default function PhotosScreen() {
     setFailure(null)
     try {
       const today = isoDay(new Date())
+      const count = `${captioning.length} photo${captioning.length === 1 ? '' : 's'}`
+      const uploadKey = newId()
+      if (network.isKnownOffline()) {
+        // Without a signal the day's log may not exist yet: a note starts it, and the photos wait for that note's answer.
+        const note = await enqueue({ projectId, kind: 'daily-log.entry', summary: `Site photos note for ${today}`, payload: { date: today, section: 'notes', body: { clientRequestId: newId(), kind: 'general', text: 'Site photos' } }, clientRequestId: newId() })
+        await enqueue({ projectId, kind: 'attachment.upload', summary: `${count} for the daily log of ${today}`, payload: { recordType: 'daily_log', recordId: null, role: 'photo', caption: caption || undefined, files: await keepFilesForQueue(captioning) }, clientRequestId: uploadKey, dependsOn: note.id })
+        setCaptioning(null)
+        router.push('/outbox')
+        return
+      }
       let log = await getDailyLog(projectId, today)
       if (!log.exists || !log.id) log = await addDailyLogEntry(projectId, today, 'notes', { clientRequestId: newId(), kind: 'general', text: 'Site photos' })
       if (!log.id) throw new Error('The daily log could not be started.')
+      const logId = log.id
       const files = Platform.OS === 'web' ? await Promise.all(captioning.map(async (f) => new File([await (await fetch(f.uri)).blob()], f.name, { type: f.type }))) : captioning
-      await upload.mutateAsync({ recordType: 'daily_log', recordId: log.id, role: 'photo', caption: caption || undefined, clientRequestId: newId(), files })
+      const outcome = await captureOrQueue({ projectId, kind: 'attachment.upload', summary: `${count} for the daily log of ${today}`, payload: { recordType: 'daily_log', recordId: logId, role: 'photo', caption: caption || undefined, files: Platform.OS === 'web' ? captioning : await keepFilesForQueue(captioning) }, clientRequestId: uploadKey }, () => upload.mutateAsync({ recordType: 'daily_log', recordId: logId, role: 'photo', caption: caption || undefined, clientRequestId: uploadKey, files }))
       setCaptioning(null)
-      await photos.refetch()
+      if (outcome.queued) router.push('/outbox')
+      else await photos.refetch()
     } catch (error) {
       setFailure(userMessage(error))
     }
