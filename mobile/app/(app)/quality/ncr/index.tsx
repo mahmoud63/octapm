@@ -11,10 +11,12 @@ import { Button, EmptyState, ErrorState, Input, KPI, RecordRow, SkeletonList, sp
 import { usePermissions } from '@/permissions/usePermissions'
 import { useProjectStore } from '@/projects/store'
 import { dueState, humanise } from '@/utilities/format'
+import { PanePlaceholder, useSplitRole } from '@/navigation/split'
 
 /** NCRs on the project. The server sends them all; the filters are applied here. */
 export default function NcrListScreen() {
   const router = useRouter()
+  const splitRole = useSplitRole()
   const projectId = useProjectStore((s) => s.currentProjectId)
   const me = useAuthStore((s) => s.user?.id ?? null)
   const permissions = usePermissions(projectId)
@@ -34,6 +36,9 @@ export default function NcrListScreen() {
       .filter((n) => !q || [n.ref, n.description, n.responsible, n.disposition].some((v) => v?.toLowerCase().includes(q)))
   }, [ncrs.data, mode, status, severity, term, me])
   const summary = ncrs.data?.summary
+
+  // On a tablet this list is already on the left; the stack's copy stands in for the record.
+  if (splitRole === 'pane') return <PanePlaceholder />
 
   if (!projectId) {
     return (

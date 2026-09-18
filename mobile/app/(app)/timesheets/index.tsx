@@ -11,12 +11,14 @@ import { Button, EmptyState, ErrorState, KPI, RecordRow, SkeletonList, spacing }
 import { usePermissions } from '@/permissions/usePermissions'
 import { useProjectStore } from '@/projects/store'
 import { day, humanise } from '@/utilities/format'
+import { PanePlaceholder, useSplitRole } from '@/navigation/split'
 
 const isoDay = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 
 /** The last two weeks of timesheets for the crews this person may see. */
 export default function TimesheetsScreen() {
   const router = useRouter()
+  const splitRole = useSplitRole()
   const projectId = useProjectStore((s) => s.currentProjectId)
   const projects = useProjects()
   const permissions = usePermissions(projectId)
@@ -28,6 +30,9 @@ export default function TimesheetsScreen() {
   const timesheets = useTimesheets(projectId, range)
   const project = projects.data?.find((p) => p.id === projectId) ?? null
   const rows = timesheets.data?.items ?? []
+
+  // On a tablet this list is already on the left; the stack's copy stands in for the record.
+  if (splitRole === 'pane') return <PanePlaceholder />
 
   if (!projectId) {
     return (

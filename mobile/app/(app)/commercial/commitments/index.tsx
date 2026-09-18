@@ -7,12 +7,17 @@ import { Screen } from '@/components/Screen'
 import { EmptyState, ErrorState, RecordRow, SkeletonList, spacing } from '@/design-system'
 import { useProjectStore } from '@/projects/store'
 import { humanise, money } from '@/utilities/format'
+import { PanePlaceholder, useSplitRole } from '@/navigation/split'
 
 /** Subcontracts and purchase-order commitments, read only. */
 export default function CommitmentsScreen() {
   const router = useRouter()
+  const splitRole = useSplitRole()
   const projectId = useProjectStore((s) => s.currentProjectId)
   const commitments = useCommitments(projectId)
+
+  // On a tablet this list is already on the left; the stack's copy stands in for the record.
+  if (splitRole === 'pane') return <PanePlaceholder />
 
   if (!projectId) {
     return (

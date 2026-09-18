@@ -14,6 +14,7 @@ import { keptState } from '@/drawings/offline'
 import { useDrawingPrefs } from '@/drawings/preferences'
 import { useProjectStore } from '@/projects/store'
 import { humanise } from '@/utilities/format'
+import { PanePlaceholder, useSplitRole } from '@/navigation/split'
 
 type View_ = 'all' | 'favourites' | 'recent'
 
@@ -24,6 +25,7 @@ type View_ = 'all' | 'favourites' | 'recent'
  */
 export default function DrawingsScreen() {
   const router = useRouter()
+  const splitRole = useSplitRole()
   const projectId = useProjectStore((s) => s.currentProjectId)
   const projects = useProjects()
   const prefs = useDrawingPrefs()
@@ -46,6 +48,9 @@ export default function DrawingsScreen() {
     if (view === 'recent') return prefs.recents.map((id) => items.find((s) => s.id === id)).filter((s): s is DrawingSheet => !!s)
     return items
   }, [sheets.data, view, prefs.favourites, prefs.recents])
+
+  // On a tablet this list is already on the left; the stack's copy stands in for the record.
+  if (splitRole === 'pane') return <PanePlaceholder />
 
   if (!projectId) {
     return (

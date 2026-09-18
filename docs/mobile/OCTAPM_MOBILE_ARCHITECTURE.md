@@ -160,6 +160,8 @@ The query client keeps server records in memory with a short stale time and a lo
 
 The design system implements the OctaPM brand book: the brand palette, Space Grotesk for display and Inter for text, the same status vocabulary as the web platform, and tap targets no smaller than the platform minimum. `useLayout` classifies the window as compact (phones), medium (large phones, small tablets and split view) or expanded (tablets), and screens use that classification rather than device names. The signed-in shell keeps the same five destinations everywhere: a bottom bar on a phone, the same bar as a left rail on a tablet, which frees the width for master–detail screens.
 
+On the expanded width class each route group splits itself (`src/navigation/split.tsx`): the section's list on the left, the group's stack on the right, so records open beside the list without any screen knowing the device. A list drawn by the stack while its list is already on the left shows a placeholder instead of itself.
+
 One rule for sheets: a screen never closes a sheet and pushes a route in the same tick. The navigator freezes the screen being left, so its "close the sheet" update does not commit, and on the web the sheet's focus trap then steals focus on the screen that was pushed. A screen that must navigate after a sheet asks `useNavigateAfterClose` to do it, which pushes only once the sheet is closed and its exit animation has finished.
 
 ## 10. Observability
@@ -324,3 +326,21 @@ Two defects the run found and fixed before the record was taken: the change-orde
 Native items added to the verification list by M7: the SQLite store and the documents directory on a device (the web target uses local storage and keeps no files), the copy of picked photos into the app's documents for a queued upload, background drain while the app is closed, and the kept-sheet PDF opened from the device without a signal.
 
 Two things the run taught: Playwright's offline switch did not always raise the browser's offline event on the phone viewport, so the web listener now also polls the connectivity flag every two seconds; and a rendered-test gate started while edits were still landing reported a stale failure, so the gate is now started only once every edit is on disk.
+
+## 21. M8 verification record (2026-09-18)
+
+| Check | Result |
+|---|---|
+| Mobile TypeScript and ESLint | 0 errors, 0 warnings |
+| Mobile Jest | 254 passed in 50 suites (adds the split by route group, the timeline scale and rows, the signature pad's helpers, tablet progress approval and rejection with the hold-point warning, and the signature item's pad) |
+| Playwright against the production web export and the local API | 67 passed: 33 checks on the phone viewport and 34 on the tablet viewport (the wide-screen checks assert their absence on the phone; the approval check runs on the tablet only and is skipped on the phone) |
+| Master–detail, live | on the tablet viewport the RFI list stayed on the left while the opened record filled the right pane; on the phone viewport the record took the screen and the list left it |
+| Signatures, live | a checklist raised for the run from a template with a signature item; the pad opened from the item, a stroke drawn with the mouse, the result posted as a PNG data URL with the signer's name and the item id (201), the item then shown as signed |
+| Timeline, live | offered on the wide screen only, drawn with a row per activity |
+| Progress approval, live | an activity raised for the run with the person as engineer, a 10% update submitted through the API as from mobile, approved from the tablet through the approve route (200), the activity's approved figure then read back as 10 |
+| Where writes went | the dedicated end-to-end organisation only |
+| Backend defect found by the live signature check | the form service stores a signature as an attachment under the role `signature`, which the attachment service refused with 400, so no client could sign; the role is now accepted and listed in the OpenAPI enum, and the attachment and form suites fail without it (proved by reverting the one line) |
+
+Native items added to the verification list by M8: the view capture behind the signature pad (the web target draws the PNG on a canvas), iPad split view and rotation as real window changes, and stylus input on the pad.
+
+The rule the split rests on: a screen never knows it is on a tablet by device; it asks which side of the split it is drawn on. A list drawn by the stack while its list is already on the left shows the placeholder, so the same file serves the phone, the left pane and the right pane.

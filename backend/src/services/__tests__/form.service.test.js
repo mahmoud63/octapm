@@ -30,7 +30,17 @@ const mockCreatePunch = jest.fn(async () => ({ id: "punch-1", ref: "PL-009" }));
 jest.mock("../../config/db", () => ({ prisma: mockPrisma }));
 jest.mock("../audit.service", () => mockAudit);
 jest.mock("../notification.service", () => mockNotifications);
-jest.mock("../attachment.service", () => ({ createAttachments: jest.fn(async () => ({ items: [] })) }));
+// The real role list, so a signature stored under a role the attachment service refuses fails here as it would live.
+jest.mock("../attachment.service", () => {
+  const { ATTACHMENT_ROLES } = jest.requireActual("../attachment.service");
+  return {
+    ATTACHMENT_ROLES,
+    createAttachments: jest.fn(async ({ role }) => {
+      if (role && !ATTACHMENT_ROLES.includes(role)) throw new Error(`Role must be one of ${ATTACHMENT_ROLES.join(", ")}`);
+      return { items: [] };
+    }),
+  };
+});
 jest.mock("../file-storage.service", () => ({
   DOCUMENT_TYPES: { WORKFLOW_ATTACHMENT: "workflow_attachment" },
   uploadProjectDocument: jest.fn(async () => ({ id: "doc-sig" })),

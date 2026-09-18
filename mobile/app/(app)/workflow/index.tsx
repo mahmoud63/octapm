@@ -9,6 +9,7 @@ import { Screen } from '@/components/Screen'
 import { EmptyState, ErrorState, RecordRow, SkeletonList, Text, spacing } from '@/design-system'
 import { useProjectStore } from '@/projects/store'
 import { dueState } from '@/utilities/format'
+import { PanePlaceholder, useSplitRole } from '@/navigation/split'
 
 /**
  * The approvals waiting on this person across every project: each row is a
@@ -17,10 +18,14 @@ import { dueState } from '@/utilities/format'
  */
 export default function WorkflowInboxScreen() {
   const router = useRouter()
+  const splitRole = useSplitRole()
   const projectId = useProjectStore((s) => s.currentProjectId)
   const steps = useMySteps()
   const [scope, setScope] = useState<'project' | 'all'>(projectId ? 'project' : 'all')
   const rows = useMemo(() => (steps.data ?? []).filter((s) => scope === 'all' || s.projectId === projectId), [steps.data, scope, projectId])
+
+  // On a tablet this list is already on the left; the stack's copy stands in for the record.
+  if (splitRole === 'pane') return <PanePlaceholder />
 
   return (
     <Screen scroll={false} testID="screen-workflow">

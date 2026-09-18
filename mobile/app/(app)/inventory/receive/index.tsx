@@ -10,12 +10,14 @@ import { Screen } from '@/components/Screen'
 import { EmptyState, ErrorState, Input, RecordRow, SkeletonList, spacing } from '@/design-system'
 import { useProjectStore } from '@/projects/store'
 import { day, dueState, money } from '@/utilities/format'
+import { PanePlaceholder, useSplitRole } from '@/navigation/split'
 
 const receivable = new Set<string>(RECEIVABLE_PO_STATUSES)
 
 /** Purchase orders a delivery can be received against; the rest are shown on request. */
 export default function GoodsInScreen() {
   const router = useRouter()
+  const splitRole = useSplitRole()
   const projectId = useProjectStore((s) => s.currentProjectId)
   const orders = usePurchaseOrders(projectId)
   const [mode, setMode] = useState<'receivable' | 'all'>('receivable')
@@ -27,6 +29,9 @@ export default function GoodsInScreen() {
       .filter((o) => (mode === 'receivable' ? receivable.has(o.status) : true))
       .filter((o) => !q || [o.ref, o.supplier, ...o.lines.map((l) => l.description)].some((v) => v?.toLowerCase().includes(q)))
   }, [orders.data, mode, term])
+
+  // On a tablet this list is already on the left; the stack's copy stands in for the record.
+  if (splitRole === 'pane') return <PanePlaceholder />
 
   if (!projectId) {
     return (

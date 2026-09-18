@@ -24,6 +24,8 @@ import {
   setLookaheadItemStatus,
   submitDailyLog,
   submitProgress,
+  approveProgressSubmission,
+  rejectProgressSubmission,
   submitTimesheet,
   updateDailyLogEntry,
   updateDailyLogSummary,
@@ -91,6 +93,20 @@ export function useSubmitProgress(projectId: string, activityId: string) {
       void client.invalidateQueries({ queryKey: scoped(projectId, 'health') })
     },
   })
+}
+
+/** Approve or reject a submitted update (tablet); the server moves the approved figure. */
+export function useProgressReview(projectId: string, activityId: string) {
+  const client = useQueryClient()
+  const settle = () => {
+    void client.invalidateQueries({ queryKey: scoped(projectId, 'activity', activityId) })
+    void client.invalidateQueries({ queryKey: scoped(projectId, 'activities') })
+    void client.invalidateQueries({ queryKey: scoped(projectId, 'health') })
+    void client.invalidateQueries({ queryKey: keys.needsYou(projectId) })
+  }
+  const approve = useMutation({ mutationFn: (submissionId: string) => approveProgressSubmission(projectId, activityId, submissionId), onSuccess: settle })
+  const reject = useMutation({ mutationFn: ({ submissionId, reason }: { submissionId: string; reason: string }) => rejectProgressSubmission(projectId, activityId, submissionId, reason), onSuccess: settle })
+  return { approve, reject }
 }
 
 // ── Lookaheads ──

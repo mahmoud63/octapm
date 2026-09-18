@@ -35,7 +35,8 @@ Every level assumes the role holds the permission on the server for that project
 | Drawing register, sheet viewer (zoom, pan, fit width), latest revision, favourites, recents | FULL | FULL | FULL | M2 | document_control readers | source PDF rendered on device; no server page images |
 | Superseded-drawing warning | FULL | FULL | FULL | M2 | all viewers | never silently shows an obsolete sheet |
 | Offline drawings | FULL | FULL | NOT AVAILABLE | M7 | all viewers | manifest-based; supersession marked after sync |
-| Drawing markups and pins (create punch/RFI/inspection from a pin) | FULL | FULL | FULL | M2 | per target module | personal markups; publish stays on web |
+| Drawing pins (open the record behind a pin, raise an RFI from the sheet) | FULL | FULL | FULL | M2 (built) | per target module | pins are listed and opened; placing a pin needs page geometry the PDF viewer does not give |
+| Drawing markups (draw on a sheet) | NOT AVAILABLE | NOT AVAILABLE | FULL | — | document readers | the server serves the source PDF only, no page image to draw over; markups stay on the web |
 | Transmittals, correspondence, specifications, emails | VIEW | VIEW | FULL | M2 | document_control readers | |
 | Comments, mentions, subscriptions on any record | FULL | FULL | FULL | M2 | all with read | |
 | Attachments and photos on any record | FULL | FULL | FULL | M2 / M3 | any of update/submit/create on the module | unified endpoint with replay key |
@@ -50,13 +51,13 @@ Every level assumes the role holds the permission on the server for that project
 | Daily log submit, approve, distribute, entry review | LIMITED | LIMITED | FULL | M3 | submit/distribute: submit holders; approve: PM; entry review: PM, Plan, Site, Qual | approve stays on the web |
 | Daily reports and site diaries (create, submit) | FULL | FULL | FULL | M3 | progress submit holders | offline drafts with replay key |
 | Site photos: capture, caption, tags, location, association | FULL | FULL | FULL | M3 | document_control create | GPS never sent to the server; EXIF stays with the file |
-| Photo markup and annotation | LIMITED | FULL | LIMITED | M3 | as above | arrows and text; richer on tablet |
+| Photo markup and annotation | NOT AVAILABLE | NOT AVAILABLE | LIMITED | M9 | as above | carried: the pad's drawing pieces (M8) are the base; annotating a photo before upload follows in the hardening milestone |
 | Today's work, activities, milestones, critical activities | FULL (view) | FULL (view) | FULL | M3 | schedule readers | no Gantt editing on phone |
 | Progress submission (percent, quantity, milestones, inspection, evidence) | FULL | FULL | FULL | M3 | progress submit holders, assigned engineers | `source: 'mobile'`; online only (no replay key) |
-| Progress approval | NOT AVAILABLE | APPROVE | FULL | M3 / M8 | PM, Plan, QS | tablet only, with hold-point warnings |
+| Progress approval | NOT AVAILABLE | APPROVE | FULL | M8 (built) | submission approve holders | on the wide screen only; approve and reject (with a reason) through the server's transitions; a hold-point warning when the method needs an inspection |
 | Lookahead items and field status | FULL | FULL | FULL | M3 | lookahead holders + contractor, subcontractor | variance reason required when not done |
 | Schedule revisions, baseline, activate, rollback, AI generation | NOT AVAILABLE | NOT AVAILABLE | FULL | — | PM, Plan | |
-| Gantt | NOT AVAILABLE | LIMITED | FULL | M8 | schedule readers | read-only timeline on tablet |
+| Gantt | NOT AVAILABLE | LIMITED | FULL | M8 (built) | schedule readers | a read-only timeline on the wide screen: a bar per activity from start to finish, coloured by state, the critical ones marked, a line for today; the Gantt proper stays on the web |
 | Earned value, health dimensions | LIMITED | LIMITED | FULL | M3 | health: all; EV report: cost readers | tiles from `/health`; the EV report stays on the web |
 | Risks | VIEW | VIEW | FULL | M3 | risk readers | |
 | Long lead | VIEW | VIEW | FULL | M3 / M5 | all with project access | |
@@ -69,7 +70,7 @@ Every level assumes the role holds the permission on the server for that project
 |---|---|---|---|---|---|---|
 | Quality home (due, failed, open NCRs, punch, tests, safety, overdue) | FULL | FULL | FULL | M4 | all with project access | from `/quality/dashboard` |
 | Inspections and forms: start, answer, photos per item, hold points, complete | FULL | FULL | FULL | M4 (built) | inspection submit: PM, Plan, Site, QS, Qual + consultant, contractor, subcontractor | answers saved in one request; completion gate enforced by the server; offline drafts come with M7 |
-| Inspection signatures | NOT AVAILABLE | NOT AVAILABLE | FULL | M8 | signature holders | the signature pad comes with the tablet work; the checklist says so on a signature item |
+| Inspection signatures | FULL | FULL | FULL | M8 (built) | inspection submit holders | a signature item offers the pad while the form is editable; the role is read from the item; the drawing is sent as a PNG with the signer's name through the signatures route; the device capture is on the native verification list |
 | Inspection close, reopen, void | APPROVE | APPROVE | FULL | M4 (built) | close/reopen: PM, Plan, Qual; void: PM, Qual | simple confirmations; safe on a phone |
 | Deficiency from a failed item (punch item) | FULL | FULL | FULL | M4 (built) | inspection complete + punch create | observation as the target stays on the web |
 | Form templates (project and company) | VIEW | VIEW | FULL | M4 (built) | readers; template admin on web | the active templates appear in the new-inspection picker |
@@ -124,7 +125,8 @@ Every level assumes the role holds the permission on the server for that project
 | Deep links and universal links | FULL | FULL | FULL | M9 | all | every record type in the API map's link table |
 | Push notifications | LIMITED | LIMITED | FULL (Web Push) | M9 | all | needs a native registration endpoint on the server |
 | Realtime updates | FULL | FULL | FULL | M9 | all | socket.io project rooms |
-| Master–detail layouts, rail, split view | — | FULL | — | M8 | all | tablet only |
+| Master–detail layouts, rail, split view | — | FULL | — | M8 (built) | all | every route group with records splits on the expanded width class: the section's list on the left, the record on the right; back returns the pane to a placeholder; rotation keeps the record; iPad split view is a width like any other |
+| Keyboard and pointer | LIMITED | LIMITED | FULL | M8 | all | search fields submit on return and every control is a real button; shortcuts are not defined; hover states follow the platform |
 | Accessibility (labels, targets, dynamic type, reduced motion) | FULL | FULL | FULL | every milestone | all | |
 | Custom fields on records | FULL | FULL | FULL | M2 | module holders | schema-driven |
 | AI assistant features (photo analysis, daily-log drafts, spec conflicts) | LIMITED | LIMITED | FULL | later | assistant readers | offered only where the org has AI enabled |

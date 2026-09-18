@@ -10,12 +10,14 @@ import { Button, EmptyState, ErrorState, Input, KPI, RecordRow, SkeletonList, sp
 import { usePermissions } from '@/permissions/usePermissions'
 import { useProjectStore } from '@/projects/store'
 import { dueState, humanise } from '@/utilities/format'
+import { PanePlaceholder, useSplitRole } from '@/navigation/split'
 
 const STATUSES = ['draft', 'open', 'ready_for_review', 'in_dispute', 'closed'] as const
 
 /** Punch items and observations: mine first, overdue next, then by status. */
 export default function PunchListScreen() {
   const router = useRouter()
+  const splitRole = useSplitRole()
   const params = useLocalSearchParams<{ kind?: string }>()
   const projectId = useProjectStore((s) => s.currentProjectId)
   const permissions = usePermissions(projectId)
@@ -28,6 +30,9 @@ export default function PunchListScreen() {
   const list = usePunchList(projectId, filters)
   const rows = list.data?.items ?? []
   const summary = list.data?.summary
+
+  // On a tablet this list is already on the left; the stack's copy stands in for the record.
+  if (splitRole === 'pane') return <PanePlaceholder />
 
   if (!projectId) {
     return (

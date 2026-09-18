@@ -9,6 +9,7 @@ import { Screen } from '@/components/Screen'
 import { Button, EmptyState, ErrorState, KPI, SkeletonList, Text, spacing } from '@/design-system'
 import { usePermissions } from '@/permissions/usePermissions'
 import { useProjectStore } from '@/projects/store'
+import { PanePlaceholder, useSplitRole } from '@/navigation/split'
 
 /**
  * Quality home: the score and what drives it, then the doors to
@@ -17,11 +18,15 @@ import { useProjectStore } from '@/projects/store'
  */
 export default function QualityHomeScreen() {
   const router = useRouter()
+  const splitRole = useSplitRole()
   const projectId = useProjectStore((s) => s.currentProjectId)
   const projects = useProjects()
   const permissions = usePermissions(projectId)
   const dashboard = useQualityDashboard(projectId)
   const project = projects.data?.find((p) => p.id === projectId) ?? null
+
+  // On a tablet this list is already on the left; the stack's copy stands in for the record.
+  if (splitRole === 'pane') return <PanePlaceholder />
 
   if (!projectId) {
     return (

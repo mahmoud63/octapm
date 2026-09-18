@@ -10,9 +10,12 @@ import { FilterChip } from '@/components/FilterChip'
 import { Freshness } from '@/components/Freshness'
 import { ProjectSwitch } from '@/components/ProjectSwitch'
 import { Screen } from '@/components/Screen'
+import { TimelineStrip } from '@/components/TimelineStrip'
 import { Button, EmptyState, ErrorState, Input, KPI, RecordRow, SkeletonList, spacing } from '@/design-system'
+import { useLayout } from '@/hooks/useLayout'
 import { useProjectStore } from '@/projects/store'
 import { day, humanise } from '@/utilities/format'
+import { PanePlaceholder, useSplitRole } from '@/navigation/split'
 
 type View_ = 'today' | 'mine' | 'critical' | 'milestones' | 'delayed' | 'all'
 
@@ -52,6 +55,7 @@ export function filterActivities(list: Activity[], view: View_, term: string, my
  */
 export default function ActivitiesScreen() {
   const router = useRouter()
+  const splitRole = useSplitRole()
   const projectId = useProjectStore((s) => s.currentProjectId)
   const me = useAuthStore((s) => s.user?.id ?? null)
   const projects = useProjects()
@@ -59,12 +63,17 @@ export default function ActivitiesScreen() {
   const health = useHealth(projectId)
   const [view, setView] = useState<View_>('today')
   const [term, setTerm] = useState('')
+  const [timeline, setTimeline] = useState(false)
+  const { isExpanded } = useLayout()
   const project = projects.data?.find((p) => p.id === projectId) ?? null
 
   const all = useMemo(() => activities.data ?? [], [activities.data])
   const rows = useMemo(() => filterActivities(all, view, term, me), [all, view, term, me])
   const counts = useMemo(() => ({ critical: all.filter((a) => a.isCritical && a.status !== 'complete').length, delayed: all.filter((a) => a.status === 'delayed').length, milestones: all.filter((a) => a.isMilestone).length }), [all])
   const schedule = health.data?.dimensions.find((d) => d.key === 'schedule')
+
+  // On a tablet this list is already on the left; the stack's copy stands in for the record.
+  if (splitRole === 'pane') return <PanePlaceholder />
 
   if (!projectId) {
     return (
@@ -78,7 +87,7 @@ export default function ActivitiesScreen() {
   return (
     <Screen scroll={false} testID="screen-activities">
       <FlatList
-        data={rows}
+        data={timeline && isExpanded ? [] : rows}
         keyExtractor={(a) => a.id}
         keyboardShouldPersistTaps="handled"
         ListHeaderComponent={
@@ -97,11 +106,13 @@ export default function ActivitiesScreen() {
               <FilterChip label="Milestones" count={counts.milestones} selected={view === 'milestones'} onPress={() => setView('milestones')} testID="activities-chip-milestones" />
               <FilterChip label="Delayed" count={counts.delayed} selected={view === 'delayed'} onPress={() => setView('delayed')} testID="activities-chip-delayed" />
               <FilterChip label="All" count={all.length} selected={view === 'all'} onPress={() => setView('all')} testID="activities-chip-all" />
+              {isExpanded ? <FilterChip label="Timeline" selected={timeline} onPress={() => setTimeline(!timeline)} testID="activities-chip-timeline" /> : null}
             </ScrollView>
             <View style={styles.row}>
               <Freshness updatedAt={activities.dataUpdatedAt || undefined} isFetching={activities.isFetching} />
               <Button title="Lookahead" variant="ghost" onPress={() => router.push('/activities/lookahead')} testID="activities-lookahead" />
             </View>
+            {timeline && isExpanded ? <TimelineStrip activities={rows} onOpen={(id) => router.push(`/activities/${id}`)} /> : null}
           </View>
         }
         renderItem={({ item }) => (

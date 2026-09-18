@@ -1,23 +1,19 @@
 import { Stack } from 'expo-router'
 import { useTheme } from '@/design-system'
+import { SplitGroup } from '@/navigation/split'
+import { stackScreenOptions } from '@/navigation/stackOptions'
+import ActivitiesScreen from './index'
 
-/** Schedule in the field: activities, one activity with its progress, and the lookahead. */
+/** Activities: the list, the lookahead and the record; on a tablet the list stays beside the record. */
 export default function ActivitiesLayout() {
   const theme = useTheme()
   return (
-    <Stack
-      screenOptions={{
-        headerShown: true,
-        headerTintColor: theme.colors.brand,
-        headerTitleStyle: { fontFamily: 'SpaceGrotesk_600SemiBold', color: theme.colors.text },
-        headerStyle: { backgroundColor: theme.colors.background },
-        headerShadowVisible: false,
-        contentStyle: { backgroundColor: theme.colors.background },
-      }}
-    >
-      <Stack.Screen name="index" options={{ title: 'Activities' }} />
-      <Stack.Screen name="lookahead" options={{ title: 'Lookahead' }} />
-      <Stack.Screen name="[id]" options={{ title: 'Activity' }} />
-    </Stack>
+    <SplitGroup sections={[{ prefix: '/activities', master: () => <ActivitiesScreen /> }]}>
+      <Stack screenOptions={stackScreenOptions(theme)}>
+        <Stack.Screen name="index" options={{ title: 'Activities' }} />
+        <Stack.Screen name="lookahead" options={{ title: 'Lookahead' }} />
+        <Stack.Screen name="[id]" options={{ title: 'Activity' }} />
+      </Stack>
+    </SplitGroup>
   )
 }

@@ -13,6 +13,7 @@ import { useProjects } from '@/api/hooks'
 import { usePermissions } from '@/permissions/usePermissions'
 import { useProjectStore } from '@/projects/store'
 import { dueState, humanise } from '@/utilities/format'
+import { PanePlaceholder, useSplitRole } from '@/navigation/split'
 
 type Mode = 'all' | 'mine' | 'overdue'
 
@@ -24,6 +25,7 @@ type Mode = 'all' | 'mine' | 'overdue'
  */
 export default function RfiListScreen() {
   const router = useRouter()
+  const splitRole = useSplitRole()
   const projectId = useProjectStore((s) => s.currentProjectId)
   const projects = useProjects()
   const permissions = usePermissions(projectId)
@@ -37,6 +39,9 @@ export default function RfiListScreen() {
   const project = projects.data?.find((p) => p.id === projectId) ?? null
   const rows = rfis.data?.rows ?? []
   const summary = rfis.data?.summary
+
+  // On a tablet this list is already on the left; the stack's copy stands in for the record.
+  if (splitRole === 'pane') return <PanePlaceholder />
 
   if (!projectId) {
     return (

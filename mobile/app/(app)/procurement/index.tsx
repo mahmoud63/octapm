@@ -11,11 +11,13 @@ import { Badge, Button, Card, EmptyState, ErrorState, KPI, SkeletonList, Text, s
 import { usePermissions } from '@/permissions/usePermissions'
 import { useProjectStore } from '@/projects/store'
 import { day, humanise } from '@/utilities/format'
+import { PanePlaceholder, useSplitRole } from '@/navigation/split'
 
 /** Procurement home: the counts, the lead-time alerts to acknowledge, and the doors to packages, orders and long lead. */
 export default function ProcurementHomeScreen() {
   const theme = useTheme()
   const router = useRouter()
+  const splitRole = useSplitRole()
   const projectId = useProjectStore((s) => s.currentProjectId)
   const projects = useProjects()
   const permissions = usePermissions(projectId)
@@ -23,6 +25,9 @@ export default function ProcurementHomeScreen() {
   const actions = useAlertActions(projectId ?? '')
   const [failure, setFailure] = useState<string | null>(null)
   const project = projects.data?.find((p) => p.id === projectId) ?? null
+
+  // On a tablet this list is already on the left; the stack's copy stands in for the record.
+  if (splitRole === 'pane') return <PanePlaceholder />
 
   if (!projectId) {
     return (

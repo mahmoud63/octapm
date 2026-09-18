@@ -11,10 +11,12 @@ import { Button, EmptyState, ErrorState, Input, KPI, RecordRow, SkeletonList, sp
 import { usePermissions } from '@/permissions/usePermissions'
 import { useProjectStore } from '@/projects/store'
 import { day, dueState, humanise } from '@/utilities/format'
+import { PanePlaceholder, useSplitRole } from '@/navigation/split'
 
 /** Safety incidents and near misses on the project, filtered on the device. */
 export default function SafetyListScreen() {
   const router = useRouter()
+  const splitRole = useSplitRole()
   const projectId = useProjectStore((s) => s.currentProjectId)
   const me = useAuthStore((s) => s.user?.id ?? null)
   const permissions = usePermissions(projectId)
@@ -32,6 +34,9 @@ export default function SafetyListScreen() {
       .filter((s) => !q || [s.ref, s.title, s.responsible].some((v) => v?.toLowerCase().includes(q)))
   }, [list.data, mode, status, term, me])
   const summary = list.data?.summary
+
+  // On a tablet this list is already on the left; the stack's copy stands in for the record.
+  if (splitRole === 'pane') return <PanePlaceholder />
 
   if (!projectId) {
     return (

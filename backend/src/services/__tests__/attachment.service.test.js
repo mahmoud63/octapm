@@ -185,6 +185,12 @@ describe("attachment service", () => {
     ).rejects.toMatchObject({ code: "NO_FILE" });
     expect(() => service.moduleForRecordType("rfi")).not.toThrow();
     expect(service.moduleForRecordType("daily_report")).toBe("progress");
+    // The form service stores a checklist signature as an attachment under this role; it must stay accepted.
+    expect(service.ATTACHMENT_ROLES).toContain("signature");
+    mockPrisma.projectDocument.findMany.mockResolvedValue([pdfDocument]);
+    await expect(
+      service.createAttachments({ orgId: "org-1", projectId: "project-1", recordType: "rfi", recordId: "x", role: "boss", documentIds: [DOC_PDF] }),
+    ).rejects.toMatchObject({ code: "ATTACHMENT_ROLE_INVALID" });
   });
 
   it("unlinks an attachment and audits the removal", async () => {

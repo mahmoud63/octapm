@@ -166,9 +166,11 @@ Planned destinations as their milestones land: outbox and offline status (M7).
 11. **Answer an approval (M6).** Home → Approvals → the step → Approve, or Reject with a comment → the server moves the change order, commitment or pay application; the app never calls an approve route itself.
 12. **Raise a change from the field (M6).** Home → Commercial → Change events → Raise change event → what changed, kind, origin, ROM, days → the event; pricing, quotes and conversion follow on the web.
 
-## 5. Tablet flows
+## 5. Tablet flows (M8, as built)
 
-Same destinations, laid out as a rail. Lists become master–detail on the expanded width class (M8): the list stays on the left, the record opens on the right, and the project strip spans the top. Rotation keeps the person on the same record.
+Same destinations, laid out as a rail. On the expanded width class every route group with records is master–detail: the section's list stays on the left with its filters and scroll, the record opens on the right, back returns the pane to "Choose a record on the left", and rotation keeps the person on the same record. Nested groups follow the section: Quality shows the punch list beside a punch item, Inventory the items beside an item, Commercial the change events beside one.
+
+Wide-screen work that the phone does not offer: the activities timeline (a bar per activity, the critical ones marked, a line for today), progress approval on an activity's submissions with a hold-point warning, and the signature pad on a checklist's signature item, drawn with a finger, a stylus or the mouse and sent as a PNG.
 
 ## 6. Offline and sync flows (M7, as built)
 

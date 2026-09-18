@@ -9,15 +9,20 @@ import { Screen } from '@/components/Screen'
 import { EmptyState, ErrorState, RecordRow, SkeletonList, spacing } from '@/design-system'
 import { useProjectStore } from '@/projects/store'
 import { day, dueState, humanise, money } from '@/utilities/format'
+import { PanePlaceholder, useSplitRole } from '@/navigation/split'
 
 const STATUSES = ['planned', 'draft', 'pending_approval', 'approved', 'issued', 'acknowledged', 'partial', 'received', 'closed'] as const
 
 /** The commercial purchase-order register, read only; the server filters by status. */
 export default function OrdersScreen() {
   const router = useRouter()
+  const splitRole = useSplitRole()
   const projectId = useProjectStore((s) => s.currentProjectId)
   const [status, setStatus] = useState<string | null>(null)
   const orders = useRegisterOrders(projectId, status ?? undefined)
+
+  // On a tablet this list is already on the left; the stack's copy stands in for the record.
+  if (splitRole === 'pane') return <PanePlaceholder />
 
   if (!projectId) {
     return (

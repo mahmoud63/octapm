@@ -2510,7 +2510,7 @@ const components = {
       documentId: uuid,
       role: {
         type: "string",
-        enum: ["attachment", "evidence", "photo", "reference"],
+        enum: ["attachment", "evidence", "photo", "reference", "signature"],
       },
       caption: { type: "string", nullable: true },
       sortOrder: { type: "integer" },
@@ -11496,7 +11496,7 @@ add(
         recordId: { type: "string" },
         role: {
           type: "string",
-          enum: ["attachment", "evidence", "photo", "reference"],
+          enum: ["attachment", "evidence", "photo", "reference", "signature"],
         },
         caption: { type: "string", maxLength: 500 },
         locationId: { type: "string", format: "uuid" },

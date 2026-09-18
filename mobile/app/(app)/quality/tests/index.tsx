@@ -14,10 +14,12 @@ import { useNavigateAfterClose } from '@/navigation/useNavigateAfterClose'
 import { usePermissions } from '@/permissions/usePermissions'
 import { useProjectStore } from '@/projects/store'
 import { day, dueState, humanise } from '@/utilities/format'
+import { PanePlaceholder, useSplitRole } from '@/navigation/split'
 
 /** Material tests: pending first, then by result; a new test is scheduled from here. */
 export default function MaterialTestsScreen() {
   const router = useRouter()
+  const splitRole = useSplitRole()
   const projectId = useProjectStore((s) => s.currentProjectId)
   const permissions = usePermissions(projectId)
   const tests = useMaterialTests(projectId)
@@ -40,6 +42,9 @@ export default function MaterialTestsScreen() {
   }, [tests.data, result, term])
   const work = useMemo(() => (activities.data ?? []).map((a) => ({ id: a.id, label: a.name, sublabel: [a.activityCode, a.wbsCode].filter(Boolean).join(' · ') })), [activities.data])
   const summary = tests.data?.summary
+
+  // On a tablet this list is already on the left; the stack's copy stands in for the record.
+  if (splitRole === 'pane') return <PanePlaceholder />
 
   if (!projectId) {
     return (

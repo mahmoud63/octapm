@@ -9,6 +9,7 @@ import { Button, EmptyState, KPI, Text, spacing } from '@/design-system'
 import { usePermissions } from '@/permissions/usePermissions'
 import { useProjectStore } from '@/projects/store'
 import { money } from '@/utilities/format'
+import { PanePlaceholder, useSplitRole } from '@/navigation/split'
 
 /**
  * Commercial home: what the change events add up to, the approvals waiting
@@ -17,6 +18,7 @@ import { money } from '@/utilities/format'
  */
 export default function CommercialHomeScreen() {
   const router = useRouter()
+  const splitRole = useSplitRole()
   const projectId = useProjectStore((s) => s.currentProjectId)
   const projects = useProjects()
   const permissions = usePermissions(projectId)
@@ -24,6 +26,9 @@ export default function CommercialHomeScreen() {
   const steps = useMySteps()
   const project = projects.data?.find((p) => p.id === projectId) ?? null
   const waiting = (steps.data ?? []).filter((s) => s.projectId === projectId).length
+
+  // On a tablet this list is already on the left; the stack's copy stands in for the record.
+  if (splitRole === 'pane') return <PanePlaceholder />
 
   if (!projectId) {
     return (

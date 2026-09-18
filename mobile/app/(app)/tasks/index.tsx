@@ -10,6 +10,7 @@ import { Screen } from '@/components/Screen'
 import { EmptyState, ErrorState, Input, KPI, RecordRow, SkeletonList, Text, spacing } from '@/design-system'
 import { useProjectStore } from '@/projects/store'
 import { dueState, humanise } from '@/utilities/format'
+import { PanePlaceholder, useSplitRole } from '@/navigation/split'
 
 /**
  * Tasks: mine first, on the current project by default. A task is the one
@@ -17,6 +18,7 @@ import { dueState, humanise } from '@/utilities/format'
  */
 export default function TasksScreen() {
   const router = useRouter()
+  const splitRole = useSplitRole()
   const projectId = useProjectStore((s) => s.currentProjectId)
   const [mine, setMine] = useState(true)
   const [scope, setScope] = useState<'project' | 'all'>(projectId ? 'project' : 'all')
@@ -28,6 +30,9 @@ export default function TasksScreen() {
   const filters = useMemo(() => ({ mine, projectId: scope === 'project' && projectId ? projectId : undefined, status: status ?? undefined, overdue: overdue || undefined, search: search || undefined }), [mine, scope, projectId, status, overdue, search])
   const tasks = useTasks(filters)
   const rows = tasks.data?.rows ?? []
+
+  // On a tablet this list is already on the left; the stack's copy stands in for the record.
+  if (splitRole === 'pane') return <PanePlaceholder />
 
   return (
     <Screen scroll={false} testID="screen-tasks">

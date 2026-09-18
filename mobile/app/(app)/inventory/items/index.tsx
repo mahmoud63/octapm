@@ -9,10 +9,12 @@ import { Screen } from '@/components/Screen'
 import { Button, EmptyState, ErrorState, Input, RecordRow, SkeletonList, spacing } from '@/design-system'
 import { useProjectStore } from '@/projects/store'
 import { quantity } from '@/utilities/format'
+import { PanePlaceholder, useSplitRole } from '@/navigation/split'
 
 /** The item master with derived stock; the server searches and flags low stock. */
 export default function InventoryItemsScreen() {
   const router = useRouter()
+  const splitRole = useSplitRole()
   const params = useLocalSearchParams<{ lowStock?: string }>()
   const projectId = useProjectStore((s) => s.currentProjectId)
   const [term, setTerm] = useState('')
@@ -21,6 +23,9 @@ export default function InventoryItemsScreen() {
   const filters = useMemo(() => ({ search: search || undefined, lowStock }), [search, lowStock])
   const items = useInventoryItems(projectId, filters)
   const rows = items.data ?? []
+
+  // On a tablet this list is already on the left; the stack's copy stands in for the record.
+  if (splitRole === 'pane') return <PanePlaceholder />
 
   if (!projectId) {
     return (

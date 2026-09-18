@@ -12,10 +12,12 @@ import { Button, EmptyState, ErrorState, Input, RecordRow, SkeletonList, spacing
 import { usePermissions } from '@/permissions/usePermissions'
 import { useProjectStore } from '@/projects/store'
 import { humanise, money } from '@/utilities/format'
+import { PanePlaceholder, useSplitRole } from '@/navigation/split'
 
 /** Change events on the project; status, type and search are applied by the server. */
 export default function ChangeEventsScreen() {
   const router = useRouter()
+  const splitRole = useSplitRole()
   const projectId = useProjectStore((s) => s.currentProjectId)
   const projects = useProjects()
   const permissions = usePermissions(projectId)
@@ -28,6 +30,9 @@ export default function ChangeEventsScreen() {
   const currency = projects.data?.find((p) => p.id === projectId)?.currency
   const rows = events.data?.items ?? []
   const summary = events.data?.summary
+
+  // On a tablet this list is already on the left; the stack's copy stands in for the record.
+  if (splitRole === 'pane') return <PanePlaceholder />
 
   if (!projectId) {
     return (

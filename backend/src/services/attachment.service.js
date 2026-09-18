@@ -21,7 +21,7 @@ const { JobError } = require("../jobs/errors");
  * attached to many records.
  */
 
-const ATTACHMENT_ROLES = Object.freeze(["attachment", "evidence", "photo", "reference"]);
+const ATTACHMENT_ROLES = Object.freeze(["attachment", "evidence", "photo", "reference", "signature"]);
 const THUMBNAIL_STATUS = Object.freeze({
   PENDING: "pending",
   READY: "ready",

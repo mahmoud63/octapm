@@ -13,6 +13,7 @@ import { useRememberedWarehouse } from '@/inventory/preferences'
 import { usePermissions } from '@/permissions/usePermissions'
 import { useProjectStore } from '@/projects/store'
 import { humanise, money } from '@/utilities/format'
+import { PanePlaceholder, useSplitRole } from '@/navigation/split'
 
 /**
  * The storekeeper's home: which warehouse this device works from, the
@@ -22,6 +23,7 @@ import { humanise, money } from '@/utilities/format'
  */
 export default function InventoryHomeScreen() {
   const router = useRouter()
+  const splitRole = useSplitRole()
   const projectId = useProjectStore((s) => s.currentProjectId)
   const projects = useProjects()
   const permissions = usePermissions(projectId)
@@ -30,6 +32,9 @@ export default function InventoryHomeScreen() {
   const remembered = useRememberedWarehouse(projectId)
   const project = projects.data?.find((p) => p.id === projectId) ?? null
   const warehouseOptions = useMemo(() => (warehouses.data ?? []).filter((w) => w.status !== 'archived').map((w) => ({ id: w.id, label: w.name, sublabel: [w.code, humanise(w.kind)].filter(Boolean).join(' · ') })), [warehouses.data])
+
+  // On a tablet this list is already on the left; the stack's copy stands in for the record.
+  if (splitRole === 'pane') return <PanePlaceholder />
 
   if (!projectId) {
     return (

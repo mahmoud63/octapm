@@ -10,6 +10,7 @@ import { Button, EmptyState, ErrorState, Input, RecordRow, SkeletonList, spacing
 import { usePermissions } from '@/permissions/usePermissions'
 import { useProjectStore } from '@/projects/store'
 import { dueState, humanise } from '@/utilities/format'
+import { PanePlaceholder, useSplitRole } from '@/navigation/split'
 
 const STATUSES = ['scheduled', 'in_progress', 'complete', 'closed'] as const
 const TYPES = ['inspection', 'itp', 'form', 'talk'] as const
@@ -17,6 +18,7 @@ const TYPES = ['inspection', 'itp', 'form', 'talk'] as const
 /** Inspections, ITPs, forms and toolbox talks: mine and overdue first, then by status and type. */
 export default function InspectionsScreen() {
   const router = useRouter()
+  const splitRole = useSplitRole()
   const projectId = useProjectStore((s) => s.currentProjectId)
   const permissions = usePermissions(projectId)
   const [mode, setMode] = useState<'all' | 'mine' | 'overdue'>('all')
@@ -28,6 +30,9 @@ export default function InspectionsScreen() {
   const forms = useForms(projectId, filters)
   const rows = forms.data?.items ?? []
   const summary = forms.data?.summary
+
+  // On a tablet this list is already on the left; the stack's copy stands in for the record.
+  if (splitRole === 'pane') return <PanePlaceholder />
 
   if (!projectId) {
     return (

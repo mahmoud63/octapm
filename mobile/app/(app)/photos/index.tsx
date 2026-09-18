@@ -21,6 +21,7 @@ import { usePermissions } from '@/permissions/usePermissions'
 import { useProjectStore } from '@/projects/store'
 import { day } from '@/utilities/format'
 import { newId } from '@/utilities/id'
+import { PanePlaceholder, useSplitRole } from '@/navigation/split'
 
 const isoDay = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 
@@ -32,6 +33,7 @@ const isoDay = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padSt
 export default function PhotosScreen() {
   const theme = useTheme()
   const router = useRouter()
+  const splitRole = useSplitRole()
   const params = useLocalSearchParams<{ add?: string }>()
   const { width } = useWindowDimensions()
   const projectId = useProjectStore((s) => s.currentProjectId)
@@ -96,6 +98,9 @@ export default function PhotosScreen() {
       setFailure(userMessage(error))
     }
   }
+
+  // On a tablet this list is already on the left; the stack's copy stands in for the record.
+  if (splitRole === 'pane') return <PanePlaceholder />
 
   if (!projectId) {
     return (

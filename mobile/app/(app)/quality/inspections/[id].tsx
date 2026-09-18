@@ -4,12 +4,14 @@ import { StyleSheet, View } from 'react-native'
 import { isAppError, userMessage } from '@/api/errors'
 import { useForm, useFormActions } from '@/api/quality-hooks'
 import type { FormInstance, InstanceItem } from '@/api/quality-types'
+import { useAuthStore } from '@/auth/store'
 import { ActionBar, type RecordAction } from '@/components/ActionBar'
 import { AttachmentList } from '@/components/AttachmentList'
 import { FilterChip } from '@/components/FilterChip'
 import { PromptSheet } from '@/components/PromptSheet'
 import { RecordHeader } from '@/components/RecordHeader'
 import { Screen } from '@/components/Screen'
+import { SignaturePad } from '@/components/SignaturePad'
 import { Badge, Button, Card, ErrorState, Input, SkeletonList, Text, spacing, useTheme } from '@/design-system'
 import { useNavigateAfterClose } from '@/navigation/useNavigateAfterClose'
 import { usePermissions } from '@/permissions/usePermissions'
@@ -21,6 +23,16 @@ type Prompt = { kind: 'close' } | { kind: 'reopen' } | { kind: 'void' } | { kind
 
 const optionList = (item: InstanceItem): { value: string; label: string }[] =>
   (item.options ?? []).map((o) => (typeof o === 'string' ? { value: o, label: humanise(o) } : { value: o.value, label: o.label }))
+
+/** Which of the server's signature roles a signature item asks for, read from its label; the inspector by default. */
+export const signatureRole = (item: Pick<InstanceItem, 'label' | 'inspectionPointType'>): 'inspector' | 'approver' | 'subcontractor' | 'witness' | 'attendee' => {
+  const text = `${item.label} ${item.inspectionPointType ?? ''}`.toLowerCase()
+  if (text.includes('approver') || text.includes('approval')) return 'approver'
+  if (text.includes('subcontractor')) return 'subcontractor'
+  if (text.includes('witness')) return 'witness'
+  if (text.includes('attendee')) return 'attendee'
+  return 'inspector'
+}
 
 export const isDeficient = (item: InstanceItem, value: Answer['value']) => {
   if (item.responseType === 'pass_fail') return value === 'fail'
@@ -52,6 +64,8 @@ export default function InspectionScreen() {
   const [prompt, setPrompt] = useState<Prompt>(null)
   const [failure, setFailure] = useState<string | null>(null)
   const [problems, setProblems] = useState<string[]>([])
+  const [signing, setSigning] = useState<InstanceItem | null>(null)
+  const me = useAuthStore((s) => s.user)
   const openAfterClose = useNavigateAfterClose(prompt !== null)
 
   useEffect(() => {
@@ -125,6 +139,16 @@ export default function InspectionScreen() {
     try {
       await actions.act.mutateAsync({ instanceId: instance.id, action, reason })
       setPrompt(null)
+    } catch (error) {
+      setFailure(userMessage(error))
+    }
+  }
+
+  const sign = async (item: InstanceItem, image: string, signerName: string) => {
+    setFailure(null)
+    try {
+      await actions.sign.mutateAsync({ instanceId: instance.id, body: { role: signatureRole(item), image, signerName: signerName || undefined, itemId: item.id } })
+      setSigning(null)
     } catch (error) {
       setFailure(userMessage(error))
     }
@@ -205,9 +229,17 @@ export default function InspectionScreen() {
                     ) : item.responseType === 'number' ? (
                       <Input label="Value" value={value == null ? '' : String(value)} onChangeText={(t) => setAnswer(item.id, { value: t === '' ? null : Number(t) })} keyboardType="decimal-pad" editable={editable} testID={`item-${item.id}-value`} />
                     ) : item.responseType === 'signature' ? (
-                      <Text variant="caption" tone="warning">
-                        {item.signature ? `Signed by ${item.signature.signerName ?? 'unknown'}` : 'Signature needed: the signature pad arrives with the tablet milestone; sign on the web platform until then.'}
-                      </Text>
+                      item.signature ? (
+                        <Text variant="caption" tone="muted" testID={`item-${item.id}-signed`}>
+                          {`Signed by ${item.signature.signerName ?? 'unknown'} as ${humanise(item.signature.role)} · ${day(item.signature.createdAt)}`}
+                        </Text>
+                      ) : editable ? (
+                        <Button title={`Sign as ${humanise(signatureRole(item))}`} variant="secondary" onPress={() => setSigning(item)} testID={`item-${item.id}-sign`} />
+                      ) : (
+                        <Text variant="caption" tone="muted">
+                          Not signed yet.
+                        </Text>
+                      )
                     ) : item.responseType === 'photo' ? null : (
                       <Input label="Answer" value={value == null ? '' : String(value)} onChangeText={(t) => setAnswer(item.id, { value: t })} multiline editable={editable} testID={`item-${item.id}-value`} />
                     )}
@@ -260,6 +292,7 @@ export default function InspectionScreen() {
       </Screen>
 
       <ActionBar actions={bar} />
+      <SignaturePad visible={!!signing} title={signing?.label ?? 'Sign'} roleLabel={signing ? humanise(signatureRole(signing)) : ''} defaultName={me?.name} busy={actions.sign.isPending} error={failure} onCancel={() => setSigning(null)} onConfirm={({ image, signerName }) => signing && void sign(signing, image, signerName)} />
       <PromptSheet visible={prompt?.kind === 'close'} title="Close the inspection" label="Reason" confirmTitle="Close" busy={busy} error={failure} onCancel={() => setPrompt(null)} onConfirm={(t) => void act('close', t || undefined)} testID="prompt-close" />
       <PromptSheet visible={prompt?.kind === 'reopen'} title="Reopen the inspection" label="Reason" required confirmTitle="Reopen" busy={busy} error={failure} onCancel={() => setPrompt(null)} onConfirm={(t) => void act('reopen', t)} testID="prompt-reopen" />
       <PromptSheet visible={prompt?.kind === 'void'} title="Void the inspection" body="A voided inspection is kept but counts for nothing." label="Reason" required confirmTitle="Void" destructive busy={busy} error={failure} onCancel={() => setPrompt(null)} onConfirm={(t) => void act('void', t)} testID="prompt-void" />

@@ -2,15 +2,17 @@ import { useLocalSearchParams, useRouter } from 'expo-router'
 import { useState } from 'react'
 import { StyleSheet, View } from 'react-native'
 import { userMessage } from '@/api/errors'
-import { useActivity, useProgressMethod, useProgressSubmissions, useSubmitProgress } from '@/api/site-hooks'
+import { useActivity, useProgressMethod, useProgressReview, useProgressSubmissions, useSubmitProgress } from '@/api/site-hooks'
 import type { ProgressInput } from '@/api/site-types'
 import { useAuthStore } from '@/auth/store'
 import { ActionBar, type RecordAction } from '@/components/ActionBar'
 import { AttachmentList } from '@/components/AttachmentList'
 import { ProgressSheet } from '@/components/ProgressSheet'
+import { PromptSheet } from '@/components/PromptSheet'
 import { RecordHeader } from '@/components/RecordHeader'
 import { Screen } from '@/components/Screen'
-import { Badge, Card, ErrorState, KPI, SkeletonList, Text, spacing, toneForStatus, useTheme } from '@/design-system'
+import { Badge, Button, Card, ErrorState, KPI, SkeletonList, Text, spacing, toneForStatus, useTheme } from '@/design-system'
+import { useLayout } from '@/hooks/useLayout'
 import { usePermissions } from '@/permissions/usePermissions'
 import { useProjectStore } from '@/projects/store'
 import { day, dateTime, humanise } from '@/utilities/format'
@@ -45,6 +47,9 @@ export default function ActivityScreen() {
   const submit = useSubmitProgress(projectId ?? '', id ?? '')
   const [updating, setUpdating] = useState(false)
   const [failure, setFailure] = useState<string | null>(null)
+  const [rejecting, setRejecting] = useState<string | null>(null)
+  const { isExpanded } = useLayout()
+  const review = useProgressReview(projectId ?? '', id ?? '')
 
   if (!projectId || !id) {
     return (
@@ -71,6 +76,17 @@ export default function ActivityScreen() {
   const a = activity.data
   const assignedToMe = !!me && a.assignedEngineers.some((e) => e.id === me.id)
   const canSubmit = permissions.allows('progress', 'submit') && (assignedToMe || me?.role === 'pm' || me?.role === 'planning_eng' || permissions.allows('progress', 'approve'))
+  // Approval is a tablet decision: the wide screen shows the submission beside the programme, never a phone in a trench.
+  const canReview = isExpanded && permissions.allowsTransition('progress', 'submission.approve')
+  const reviewRun = async (work: () => Promise<unknown>) => {
+    setFailure(null)
+    try {
+      await work()
+      setRejecting(null)
+    } catch (error) {
+      setFailure(userMessage(error))
+    }
+  }
   const open = a.status !== 'complete'
 
   const send = async (body: ProgressInput) => {
@@ -168,6 +184,19 @@ export default function ActivityScreen() {
                       Rejected: {s.rejectionReason}
                     </Text>
                   ) : null}
+                  {s.status === 'submitted' && canReview ? (
+                    <View style={styles.stack}>
+                      {method.data?.inspectionRequired ? (
+                        <Text variant="caption" tone="warning" testID={`submission-hold-${s.id}`}>
+                          Hold point: this activity needs an inspection before its progress is approved. Check the inspection record first.
+                        </Text>
+                      ) : null}
+                      <View style={styles.row}>
+                        <Button title="Approve" loading={review.approve.isPending} onPress={() => void reviewRun(() => review.approve.mutateAsync(s.id))} testID={`submission-approve-${s.id}`} />
+                        <Button title="Reject" variant="danger" onPress={() => setRejecting(s.id)} testID={`submission-reject-${s.id}`} />
+                      </View>
+                    </View>
+                  ) : null}
                 </View>
               ))
             )}
@@ -187,6 +216,7 @@ export default function ActivityScreen() {
 
       <ActionBar actions={bar} />
       <ProgressSheet visible={updating} method={method.data ?? null} approvedPct={a.pctComplete} busy={submit.isPending} error={failure} onCancel={() => setUpdating(false)} onSubmit={(body) => void send(body)} />
+      <PromptSheet visible={!!rejecting} title="Reject this progress update" body="It goes back to the engineer with your reason; the approved figure stays as it is." label="Reason" required confirmTitle="Reject" destructive busy={review.reject.isPending} error={failure} onCancel={() => setRejecting(null)} onConfirm={(reason) => rejecting && void reviewRun(() => review.reject.mutateAsync({ submissionId: rejecting, reason }))} testID="prompt-reject-progress" />
     </>
   )
 }

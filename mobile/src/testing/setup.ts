@@ -82,9 +82,25 @@ jest.mock('expo-router', () => {
     // Tests set the params of the screen under test: (useLocalSearchParams as jest.Mock).mockReturnValue({ id })
     useLocalSearchParams: jest.fn(() => ({})),
     useSegments: () => [],
-    usePathname: () => '/',
+    // Tests set the route of the screen under test: (usePathname as jest.Mock).mockReturnValue('/rfi/r1')
+    usePathname: jest.fn(() => '/'),
   }
 })
+
+// The root layout's gesture root view, and the signature pad's SVG and capture: the pad draws through the responder system, so plain stand-ins do.
+jest.mock('react-native-gesture-handler', () => {
+  const { View } = require('react-native')
+  const chain: Record<string, unknown> = {}
+  for (const m of ['minDistance', 'runOnJS', 'onBegin', 'onStart', 'onUpdate', 'onEnd', 'onFinalize']) chain[m] = () => chain
+  return { Gesture: { Pan: () => chain }, GestureDetector: ({ children }: { children?: ReactNode }) => children, GestureHandlerRootView: View, ScrollView: require('react-native').ScrollView, State: {}, Directions: {} }
+})
+jest.mock('react-native-svg', () => {
+  const React = require('react')
+  const { View } = require('react-native')
+  const Stub = (props: Record<string, unknown>) => React.createElement(View, { testID: props.testID as string | undefined }, props.children as ReactNode)
+  return { __esModule: true, default: Stub, Svg: Stub, Polyline: Stub, Path: Stub, Line: Stub, Rect: Stub, Circle: Stub, G: Stub }
+})
+jest.mock('react-native-view-shot', () => ({ captureRef: jest.fn(async () => 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUg==') }))
 
 jest.mock('expo-image-picker', () => ({
   requestCameraPermissionsAsync: jest.fn(async () => ({ granted: true })),

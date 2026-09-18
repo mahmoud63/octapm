@@ -7,12 +7,17 @@ import { Screen } from '@/components/Screen'
 import { EmptyState, ErrorState, RecordRow, SkeletonList, spacing } from '@/design-system'
 import { useProjectStore } from '@/projects/store'
 import { day, dueState } from '@/utilities/format'
+import { PanePlaceholder, useSplitRole } from '@/navigation/split'
 
 /** Procurement packages with their dates and the alerts against them, read only. */
 export default function PackagesScreen() {
   const router = useRouter()
+  const splitRole = useSplitRole()
   const projectId = useProjectStore((s) => s.currentProjectId)
   const overview = useProcurementOverview(projectId)
+
+  // On a tablet this list is already on the left; the stack's copy stands in for the record.
+  if (splitRole === 'pane') return <PanePlaceholder />
 
   if (!projectId) {
     return (

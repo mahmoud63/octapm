@@ -9,15 +9,20 @@ import { Screen } from '@/components/Screen'
 import { EmptyState, ErrorState, RecordRow, SkeletonList, spacing } from '@/design-system'
 import { useProjectStore } from '@/projects/store'
 import { humanise, money } from '@/utilities/format'
+import { PanePlaceholder, useSplitRole } from '@/navigation/split'
 
 const STATUSES = ['draft', 'submitted', 'under_review', 'approved', 'paid', 'rejected'] as const
 
 /** Subcontractor pay applications: read for the commercial roles, submit for the party that holds one. */
 export default function PayAppsScreen() {
   const router = useRouter()
+  const splitRole = useSplitRole()
   const projectId = useProjectStore((s) => s.currentProjectId)
   const [status, setStatus] = useState<string | null>(null)
   const payApps = usePayApps(projectId, status ?? undefined)
+
+  // On a tablet this list is already on the left; the stack's copy stands in for the record.
+  if (splitRole === 'pane') return <PanePlaceholder />
 
   if (!projectId) {
     return (

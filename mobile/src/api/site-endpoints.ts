@@ -76,6 +76,13 @@ export const listProgressSubmissions = (projectId: string, activityId: string, s
 export const submitProgress = (projectId: string, activityId: string, body: ProgressInput) =>
   send<ProgressSubmission>('POST', '/projects/{projectId}/activities/{id}/progress', { path: { projectId, id: activityId }, body })
 
+/** The review of a submitted update, through the server's own transitions; the approved figure is never written directly. */
+export const approveProgressSubmission = (projectId: string, activityId: string, submissionId: string) =>
+  send<ProgressSubmission>('POST', '/projects/{projectId}/activities/{id}/progress-submissions/{submissionId}/approve', { path: { projectId, id: activityId, submissionId }, body: {} })
+
+export const rejectProgressSubmission = (projectId: string, activityId: string, submissionId: string, reason: string) =>
+  send<ProgressSubmission>('POST', '/projects/{projectId}/activities/{id}/progress-submissions/{submissionId}/reject', { path: { projectId, id: activityId, submissionId }, body: { reason } })
+
 // ── Lookaheads ──
 
 export const listLookaheads = (projectId: string, signal?: AbortSignal) =>

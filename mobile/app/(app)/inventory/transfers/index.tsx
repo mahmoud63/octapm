@@ -10,17 +10,22 @@ import { Button, EmptyState, ErrorState, RecordRow, SkeletonList, spacing } from
 import { usePermissions } from '@/permissions/usePermissions'
 import { useProjectStore } from '@/projects/store'
 import { day, humanise } from '@/utilities/format'
+import { PanePlaceholder, useSplitRole } from '@/navigation/split'
 
 const STATUSES = ['draft', 'in_transit', 'received'] as const
 
 /** Stock on the move between warehouses; the server filters by status. */
 export default function TransfersScreen() {
   const router = useRouter()
+  const splitRole = useSplitRole()
   const projectId = useProjectStore((s) => s.currentProjectId)
   const permissions = usePermissions(projectId)
   const [status, setStatus] = useState<string | null>(null)
   const transfers = useTransfers(status ?? undefined)
   const rows = transfers.data ?? []
+
+  // On a tablet this list is already on the left; the stack's copy stands in for the record.
+  if (splitRole === 'pane') return <PanePlaceholder />
 
   return (
     <Screen scroll={false} testID="screen-transfers">

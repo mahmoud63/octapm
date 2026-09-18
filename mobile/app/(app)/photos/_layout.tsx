@@ -1,22 +1,18 @@
 import { Stack } from 'expo-router'
 import { useTheme } from '@/design-system'
+import { SplitGroup } from '@/navigation/split'
+import { stackScreenOptions } from '@/navigation/stackOptions'
+import PhotosScreen from './index'
 
-/** Photos: the gallery and one photo, as a stack inside the shell. */
+/** Photos: the gallery and the photo; on a tablet the gallery stays beside the photo. */
 export default function PhotosLayout() {
   const theme = useTheme()
   return (
-    <Stack
-      screenOptions={{
-        headerShown: true,
-        headerTintColor: theme.colors.brand,
-        headerTitleStyle: { fontFamily: 'SpaceGrotesk_600SemiBold', color: theme.colors.text },
-        headerStyle: { backgroundColor: theme.colors.background },
-        headerShadowVisible: false,
-        contentStyle: { backgroundColor: theme.colors.background },
-      }}
-    >
-      <Stack.Screen name="index" options={{ title: 'Photos' }} />
-      <Stack.Screen name="[id]" options={{ title: 'Photo' }} />
-    </Stack>
+    <SplitGroup sections={[{ prefix: '/photos', master: () => <PhotosScreen /> }]}>
+      <Stack screenOptions={stackScreenOptions(theme)}>
+        <Stack.Screen name="index" options={{ title: 'Photos' }} />
+        <Stack.Screen name="[id]" options={{ title: 'Photo' }} />
+      </Stack>
+    </SplitGroup>
   )
 }

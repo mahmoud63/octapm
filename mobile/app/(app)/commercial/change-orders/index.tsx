@@ -10,17 +10,22 @@ import { Screen } from '@/components/Screen'
 import { EmptyState, ErrorState, RecordRow, SkeletonList, Text, spacing } from '@/design-system'
 import { useProjectStore } from '@/projects/store'
 import { humanise, money } from '@/utilities/format'
+import { PanePlaceholder, useSplitRole } from '@/navigation/split'
 
 const STATUSES = ['draft', 'pending', 'approved', 'rejected'] as const
 
 /** Change orders, read only: the contract instruments the change events became. */
 export default function ChangeOrdersScreen() {
   const router = useRouter()
+  const splitRole = useSplitRole()
   const projectId = useProjectStore((s) => s.currentProjectId)
   const projects = useProjects()
   const [status, setStatus] = useState<string | null>(null)
   const orders = useChangeOrders(projectId, status ?? undefined)
   const currency = projects.data?.find((p) => p.id === projectId)?.currency
+
+  // On a tablet this list is already on the left; the stack's copy stands in for the record.
+  if (splitRole === 'pane') return <PanePlaceholder />
 
   if (!projectId) {
     return (
