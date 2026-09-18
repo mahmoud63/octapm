@@ -80,6 +80,14 @@ const IN_APP_ROUTES: Record<string, (recordId: string) => string> = {
   daily_log: (id) => (/^\d{4}-\d{2}-\d{2}$/.test(id) ? `/site?date=${id}` : '/site'),
   photo: (id) => `/photos/${id}`,
   timesheet: (id) => `/timesheets/${id}`,
+  form_instance: (id) => `/quality/inspections/${id}`,
+  itp: (id) => `/quality/inspections/${id}`,
+  punch_item: (id) => `/quality/punch/${id}`,
+  observation: (id) => `/quality/punch/${id}`,
+  defect: (id) => `/quality/punch/${id}`,
+  ncr: (id) => `/quality/ncr/${id}`,
+  safety_incident: (id) => `/quality/safety/${id}`,
+  material_test: (id) => `/quality/tests/${id}`,
 }
 
 export function appRouteForRecord(recordType: string | null | undefined, recordId: string | null | undefined): string | null {

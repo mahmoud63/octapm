@@ -68,16 +68,18 @@ Every level assumes the role holds the permission on the server for that project
 | Feature | Phone | Tablet | Web | Milestone | Roles | Notes |
 |---|---|---|---|---|---|---|
 | Quality home (due, failed, open NCRs, punch, tests, safety, overdue) | FULL | FULL | FULL | M4 | all with project access | from `/quality/dashboard` |
-| Inspections and forms: start, answer, photos per item, signatures, complete | FULL | FULL | FULL | M4 | inspection submit: PM, Plan, Site, QS, Qual + consultant, contractor, subcontractor | offline drafts; completion gate enforced by the server |
-| Inspection close, reopen, void | APPROVE | APPROVE | FULL | M4 | close/reopen: PM, Plan, Qual; void: PM, Qual | simple confirmations; safe on a phone |
-| Deficiency from a failed item (punch or observation) | FULL | FULL | FULL | M4 | inspection complete + punch create | |
-| Form templates (project and company) | VIEW | VIEW | FULL | M4 | readers; template admin on web | |
-| Punch items and observations: quick create from camera, transitions, closeout photo, bulk | FULL | FULL | FULL | M4 | create: PM, Plan, Site, QS, Qual + consultant, contractor; close/void: PM, Qual + consultant | replay key on create |
-| NCR: create, submit with evidence, view | FULL | FULL | FULL | M4 | PM, Plan, Site, Qual (no party access) | closeout evidence through workflow uploads, online |
-| NCR approve, reject, reopen | APPROVE | APPROVE | FULL | M4 | PM, Qual | |
-| Safety incidents: report, investigate, submit | FULL | FULL | FULL | M4 | PM, Site, Qual (no party access) | same closeout contract as NCR |
-| Safety approve, reject, reopen | APPROVE | APPROVE | FULL | M4 | PM, Qual | |
-| Material tests, legacy ITP, defects | LIMITED | LIMITED | FULL | M4 | inspection / punch holders | view and record result; no workflow exists on the server |
+| Inspections and forms: start, answer, photos per item, hold points, complete | FULL | FULL | FULL | M4 (built) | inspection submit: PM, Plan, Site, QS, Qual + consultant, contractor, subcontractor | answers saved in one request; completion gate enforced by the server; offline drafts come with M7 |
+| Inspection signatures | NOT AVAILABLE | NOT AVAILABLE | FULL | M8 | signature holders | the signature pad comes with the tablet work; the checklist says so on a signature item |
+| Inspection close, reopen, void | APPROVE | APPROVE | FULL | M4 (built) | close/reopen: PM, Plan, Qual; void: PM, Qual | simple confirmations; safe on a phone |
+| Deficiency from a failed item (punch item) | FULL | FULL | FULL | M4 (built) | inspection complete + punch create | observation as the target stays on the web |
+| Form templates (project and company) | VIEW | VIEW | FULL | M4 (built) | readers; template admin on web | the active templates appear in the new-inspection picker |
+| Punch items and observations: quick create from camera, transitions, photos | FULL | FULL | FULL | M4 (built) | create: PM, Plan, Site, QS, Qual + consultant, contractor; close/void: PM, Qual + consultant | replay key on create; bulk actions stay on the web |
+| NCR: create, submit with evidence, view | FULL | FULL | FULL | M4 (built) | PM, Plan, Site, Qual (no party access) | closeout evidence through workflow uploads, online; the list is filtered on the device (no single-record route) |
+| NCR approve, reject, reopen | APPROVE | APPROVE | FULL | M4 (built) | PM, Qual | |
+| Safety incidents: report, investigate, submit | FULL | FULL | FULL | M4 (built) | PM, Site, Qual (no party access) | same closeout contract as NCR |
+| Safety approve, reject, reopen | APPROVE | APPROVE | FULL | M4 (built) | PM, Qual | |
+| Material tests | LIMITED | LIMITED | FULL | M4 (built) | inspection holders | schedule and record the result; no workflow exists on the server |
+| Legacy ITP and defects registers | NOT AVAILABLE | NOT AVAILABLE | FULL | — | inspection / punch holders | superseded by forms and punch on the server; stay on the web |
 
 ## Inventory and procurement
 

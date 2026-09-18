@@ -66,14 +66,17 @@ describe('Search', () => {
   it('opens an RFI hit in the app, and a record without a screen on the web at the path the server named', async () => {
     calls = fakeServer({
       'GET /projects': () => ({ status: 200, body: envelope(page(projects)) }),
-      'GET /search': () => ({ status: 200, body: envelope({ query: 'x', items: [searchItem(), searchItem({ id: 'pl1', type: 'punch_item', typeLabel: 'Punch item', module: 'quality', identifier: 'PL-004', title: 'Chipped tile at lobby', url: '/projects/p1?module=quality&child=defects&recordId=pl1&source=punch_item' })], groups: [], filters: {}, meta: { limit: 30, total: 2 } }) }),
+      'GET /search': () => ({ status: 200, body: envelope({ query: 'x', items: [searchItem(), searchItem({ id: 'pl1', type: 'punch_item', typeLabel: 'Punch item', module: 'quality', identifier: 'PL-004', title: 'Chipped tile at lobby', url: '/projects/p1?module=quality&child=defects&recordId=pl1&source=punch_item' }), searchItem({ id: 's1', type: 'submittal', typeLabel: 'Submittal', module: 'docControl', identifier: 'SUB-007', title: 'Rebar mill certificates', url: '/projects/p1?module=docControl&child=submittals&recordId=s1&source=submittal' })], groups: [], filters: {}, meta: { limit: 30, total: 3 } }) }),
     })
     await renderScreen(<SearchScreen />)
     await fireEvent.changeText(screen.getByTestId('search-input'), 'excav')
     await fireEvent.press(await screen.findByText('Founding level at grid A-D against borehole BH-3'))
     expect(router.push).toHaveBeenCalledWith('/rfi/r1')
+    // A punch item has a screen since M4.
     await fireEvent.press(screen.getByText('Chipped tile at lobby'))
+    expect(router.push).toHaveBeenCalledWith('/quality/punch/pl1')
+    await fireEvent.press(screen.getByText('Rebar mill certificates'))
     await waitFor(() => expect(WebBrowser.openBrowserAsync).toHaveBeenCalledTimes(1))
-    expect((WebBrowser.openBrowserAsync as jest.Mock).mock.calls[0]![0]).toMatch(/\/projects\/p1\?module=quality&child=defects&recordId=pl1&source=punch_item$/)
+    expect((WebBrowser.openBrowserAsync as jest.Mock).mock.calls[0]![0]).toMatch(/\/projects\/p1\?module=docControl&child=submittals&recordId=s1&source=submittal$/)
   })
 })

@@ -59,7 +59,6 @@ Records (from Home, Needs You, Search and Notifications) ─ M2
   Drawings ─► sheets (disciplines · favourites · recent · obsolete) ──► sheet
              superseded warning first · page fitted to width · pins ·
              favourite · raise RFI from here
-```
 
 Site and schedule (from Home) ─ M3
   Daily log ─► the day: ‹ date › · status · totals · weather · summary
@@ -70,9 +69,29 @@ Site and schedule (from Home) ─ M3
   Photos ─► gallery (tags, search) ─► photo (caption, tags, camera details, records)
             Take or choose a photo → caption → onto today's daily log
   Timesheets ─► last two weeks ─► sheet (entries, submit) · New timesheet for a crew
+
+Quality (from Home) ─ M4
+  Quality home ─► score and what drives it · doors to each module the role may read
+  Inspections ─► list (mine / overdue / status / type / search) ─► checklist
+                 items by section · pass-fail, yes-no, options, number, text · note per item ·
+                 photos per answered item · hold points · Save answers (one request) · Complete ·
+                 close / reopen / void · Raise a punch item from a failed item
+                 New inspection from a template (also the Home quick action)
+  Punch list ─► punch / observations / both · mine · overdue · status ─► item
+                 photos · discussion · history · open · ready for review · close · reopen ·
+                 dispute · resolve · void, each only when the state and the server allow it
+                 New punch item or observation: photo first (also the Home quick action)
+  NCRs ─► list (mine / overdue / status / severity / search, filtered on the device) ─► NCR
+           disposition · responsible · evidence · history · Submit closeout (comment, due,
+           evidence through the workflow upload route) · approve / reject / reopen
+           Raise NCR
+  Safety ─► incidents (mine / overdue / status) ─► incident · same closeout and decisions
+             Report an incident
+  Material tests ─► pending first ─► test · Record result (pass / fail, value, date, lab)
+                    Schedule a test
 ```
 
-Planned destinations reached from Home, Needs You and Search as their milestones land: quality home, inspections, punch, NCR, safety (M4), inventory home, scan, goods receipt, issue, transfer (M5), change events, workflow inbox, procurement views (M6), outbox and offline status (M7).
+Planned destinations reached from Home, Needs You and Search as their milestones land: inventory home, scan, goods receipt, issue, transfer (M5), change events, workflow inbox, procurement views (M6), outbox and offline status (M7).
 
 ## 2. Navigation rules
 
@@ -105,7 +124,8 @@ Planned destinations reached from Home, Needs You and Search as their milestones
 5. **Raise something from the field (M2–M5).** Home → quick action → short form pre-filled with project, person and date → save (queued when offline) → record.
 6. **Walk the drawings (M2).** Documents → drawing → sheet → zoom, pan → pin → punch or RFI from the pin. A superseded sheet is flagged before anything else.
 7. **Close the day (M3).** Home → Daily log → today → sections → submit.
-8. **Receive a delivery (M5).** Inventory → scan → purchase order → quantities → post.
+8. **Inspect and close out (M4).** Home → Quality → Inspections → New inspection → template → checklist → answers saved in one request → a failed item raises a punch item → Complete; the punch item goes ready for review and is closed by the approver. An NCR or a safety incident is closed out with a comment and evidence photos, then approved or rejected by quality.
+9. **Receive a delivery (M5).** Inventory → scan → purchase order → quantities → post.
 
 ## 5. Tablet flows
 

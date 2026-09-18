@@ -1,4 +1,5 @@
 import { fireEvent, screen, waitFor } from '@testing-library/react-native'
+import { useRouter } from 'expo-router'
 import * as WebBrowser from 'expo-web-browser'
 import NeedsYouScreen from '../../../app/(app)/needs-you'
 import { network } from '@/api/network'
@@ -51,11 +52,15 @@ describe('Needs You', () => {
     expect(screen.queryByText('Founding level at grid A-D')).toBeNull()
   })
 
-  it('opens an item on the web at the exact record until its screen exists', async () => {
+  it('opens a record in the app when its screen exists, and on the web at the exact record otherwise', async () => {
+    const router = useRouter() as unknown as { push: jest.Mock }
     await renderScreen(<NeedsYouScreen />)
+    // The NCR has a screen since M4.
     await fireEvent.press(await screen.findByText('Honeycombing in column C4'))
+    expect(router.push).toHaveBeenCalledWith('/quality/ncr/n1')
+    await fireEvent.press(screen.getByText('Rebar mill certificates'))
     await waitFor(() => expect(WebBrowser.openBrowserAsync).toHaveBeenCalledTimes(1))
-    expect((WebBrowser.openBrowserAsync as jest.Mock).mock.calls[0]![0]).toMatch(/\/projects\/p1\/quality\/ncr\?recordId=n1&source=ncr$/)
+    expect((WebBrowser.openBrowserAsync as jest.Mock).mock.calls[0]![0]).toMatch(/\/projects\/p1\/doc-control\/submittals\?recordId=s1&source=submittal$/)
   })
 
   it('says so when nothing is waiting', async () => {

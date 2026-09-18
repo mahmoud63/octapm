@@ -22,10 +22,10 @@ export interface QuickAction {
 
 export const QUICK_ACTIONS: readonly QuickAction[] = [
   { id: 'rfi', title: 'New RFI', icon: 'help-circle-outline', module: 'rfi', action: 'create', route: '/rfi/new' },
-  { id: 'punch', title: 'Punch item', icon: 'flag-outline', module: 'punch', action: 'create' },
+  { id: 'punch', title: 'Punch item', icon: 'flag-outline', module: 'punch', action: 'create', route: '/quality/punch/new' },
   { id: 'photo', title: 'Photo', icon: 'camera-outline', module: 'document_control', action: 'create', route: '/photos?add=1' },
   { id: 'daily-log', title: 'Daily log', icon: 'today-outline', module: 'progress', action: 'submit', route: '/site' },
-  { id: 'inspection', title: 'Inspection', icon: 'checkbox-outline', module: 'inspection', action: 'create' },
+  { id: 'inspection', title: 'Inspection', icon: 'checkbox-outline', module: 'inspection', action: 'create', route: '/quality/inspections/new' },
   { id: 'goods-in', title: 'Goods in', icon: 'cube-outline', module: 'inventory', action: 'create' },
 ]
 

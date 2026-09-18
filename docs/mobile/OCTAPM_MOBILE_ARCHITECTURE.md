@@ -160,6 +160,8 @@ The query client keeps server records in memory with a short stale time and a lo
 
 The design system implements the OctaPM brand book: the brand palette, Space Grotesk for display and Inter for text, the same status vocabulary as the web platform, and tap targets no smaller than the platform minimum. `useLayout` classifies the window as compact (phones), medium (large phones, small tablets and split view) or expanded (tablets), and screens use that classification rather than device names. The signed-in shell keeps the same five destinations everywhere: a bottom bar on a phone, the same bar as a left rail on a tablet, which frees the width for master–detail screens.
 
+One rule for sheets: a screen never closes a sheet and pushes a route in the same tick. The navigator freezes the screen being left, so its "close the sheet" update does not commit, and on the web the sheet's focus trap then steals focus on the screen that was pushed. A screen that must navigate after a sheet asks `useNavigateAfterClose` to do it, which pushes only once the sheet is closed and its exit animation has finished.
+
 ## 10. Observability
 
 The logger keeps a bounded in-memory ring buffer, redacts sensitive keys before writing, and has no remote sink. Analytics events are allow-listed by name and carry no record content; the sink is a no-op until an environment configures one. Nothing about a person's session, tokens or credentials is ever an event or a log line.
@@ -258,3 +260,20 @@ Native items added to the verification list by M2: the camera and library photo 
 Native items added to the verification list by M3: the camera on the photos screen, the image library picker, authenticated image loading through the native image loader's headers, and the daily log under real connectivity changes.
 
 How the end-to-end run is made: `npm run export:web` produces the production web build and `npm run serve:web` serves it on port 8081; `npm run e2e` runs the checks. The Metro development bundle is not used for this: it is large and unminified, and on this machine a fresh browser context per test spent most of its budget parsing it and then froze under tracing. Two defects the run found and fixed before the record was taken: the search scope was decided before the remembered project had loaded on a cold start, so it searched every project; and selected chips and rows exposed no `aria-selected` on the web. A locator rule learned the same way: the tab navigator keeps inactive screens mounted, so every web check scopes its queries to the visible screen's test id.
+
+## 17. M4 verification record (2026-09-18)
+
+| Check | Result |
+|---|---|
+| Mobile TypeScript and ESLint | 0 errors, 0 warnings |
+| Mobile Jest | 169 passed in 33 suites (adds the quality home, inspections and the checklist, punch items, NCR and safety closeouts and decisions, material tests). One Home check, "asks which project when there are several", timed out twice while the browser run was still winding down on this machine and passed in the clean full run and in three solo runs after it; it waits on rendered text within the five-second budget and is sensitive to load, not to order |
+| Playwright against the production web export and the local API | 42 passed: 21 checks on the phone viewport and the same 21 on the tablet viewport |
+| Inspections, live | a project template ensured through the API, an instance created from it with a replay key (201), two answers saved in one request (200), completed through the complete route with outcome pass |
+| Punch, live | an item raised open with a replay key and high priority (201), moved to ready for review and then closed on the transition route (200, 200); no status patch anywhere |
+| NCR, live | raised open (201); the closeout submitted with a comment and a photo that went through the workflow upload route first (201) and arrived as an attachment reference on the submit (200); approved through the approve route (200) to closed |
+| Material tests, live | scheduled as pending (201); the result recorded with the actual value and the laboratory through a patch of the test (200) |
+| Where writes went | the dedicated end-to-end organisation only |
+
+Native items added to the verification list by M4: the camera and picker on the punch form and the closeout sheet, and the file picker behind evidence on the web target.
+
+A defect the run found and fixed before the record was taken: closing a sheet and pushing a route in the same tick leaves the previous screen frozen by the navigator with its sheet still mounted; on the web the sheet's focus trap then steals focus on the pushed screen and inputs lose every keystroke. `useNavigateAfterClose` now defers the push until the sheet is closed and its exit animation has finished, and the rule in §9 applies to every sheet that navigates.
