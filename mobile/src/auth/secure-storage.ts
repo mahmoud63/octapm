@@ -55,4 +55,6 @@ export const STORAGE_KEYS = {
   currentProject: 'session.project',
   /** Favourite and recent drawing sheets on this device. */
   drawingPrefs: 'session.drawings',
+  /** The warehouse this device works from, per project. */
+  inventoryPrefs: 'session.inventory',
 } as const

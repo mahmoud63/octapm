@@ -88,6 +88,9 @@ const IN_APP_ROUTES: Record<string, (recordId: string) => string> = {
   ncr: (id) => `/quality/ncr/${id}`,
   safety_incident: (id) => `/quality/safety/${id}`,
   material_test: (id) => `/quality/tests/${id}`,
+  inventory_item: (id) => `/inventory/items/${id}`,
+  purchase_order: (id) => `/inventory/receive/${id}`,
+  stock_transfer: (id) => `/inventory/transfers/${id}`,
 }
 
 export function appRouteForRecord(recordType: string | null | undefined, recordId: string | null | undefined): string | null {

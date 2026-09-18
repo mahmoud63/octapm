@@ -89,9 +89,23 @@ Quality (from Home) ─ M4
              Report an incident
   Material tests ─► pending first ─► test · Record result (pass / fail, value, date, lab)
                     Schedule a test
+
+Inventory (from Home) ─ M5
+  Inventory home ─► the warehouse this device works from (remembered) · the server's tiles ·
+                    doors: Scan · Items · Goods in · Transfers · Movements
+  Scan ─► camera on a phone or tablet, a typed code anywhere ─► the item and its stock by warehouse
+  Items ─► find · low stock ─► item: balances · where it is · recent movements ·
+           Move stock (issue, return, reserve or release, receive, adjust, damage, quarantine,
+           release) — each a sheet sent once, refused offline, never queued
+  Goods in ─► orders awaiting delivery ─► order: lines still due · Receive delivery
+              (accepted and rejected per line, put-away bin, delivery note; one receipt number
+              per delivery, so a retry counts once)
+  Transfers ─► by status ─► transfer: Dispatch · Receive line by line (received, damaged)
+               New transfer: from, to, items and quantities
+  Movements ─► the ledger by warehouse and type, or for one item
 ```
 
-Planned destinations reached from Home, Needs You and Search as their milestones land: inventory home, scan, goods receipt, issue, transfer (M5), change events, workflow inbox, procurement views (M6), outbox and offline status (M7).
+Planned destinations reached from Home, Needs You and Search as their milestones land: change events, workflow inbox, procurement views (M6), outbox and offline status (M7).
 
 ## 2. Navigation rules
 
@@ -125,7 +139,8 @@ Planned destinations reached from Home, Needs You and Search as their milestones
 6. **Walk the drawings (M2).** Documents → drawing → sheet → zoom, pan → pin → punch or RFI from the pin. A superseded sheet is flagged before anything else.
 7. **Close the day (M3).** Home → Daily log → today → sections → submit.
 8. **Inspect and close out (M4).** Home → Quality → Inspections → New inspection → template → checklist → answers saved in one request → a failed item raises a punch item → Complete; the punch item goes ready for review and is closed by the approver. An NCR or a safety incident is closed out with a comment and evidence photos, then approved or rejected by quality.
-9. **Receive a delivery (M5).** Inventory → scan → purchase order → quantities → post.
+9. **Receive a delivery (M5).** Home → Inventory → Goods in → the order → Receive delivery → correct the pre-filled quantities from the delivery note, choose the bin → Post. The receipt number was made on the device, so posting again after a lost reply counts once.
+10. **Issue stock to the work (M5).** Home → Inventory → Scan → the item → Issue to site → warehouse, quantity, activity → Send. Offline, the sheet refuses; the movement is never queued.
 
 ## 5. Tablet flows
 

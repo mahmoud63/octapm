@@ -9,6 +9,8 @@ describe('records with a screen in the app', () => {
     expect(appRouteForRecord('punch_item', 'x')).toBe('/quality/punch/x')
     expect(appRouteForRecord('form_instance', 'f1')).toBe('/quality/inspections/f1')
     expect(appRouteForRecord('safety_incident', 'si1')).toBe('/quality/safety/si1')
+    expect(appRouteForRecord('purchase_order', 'po1')).toBe('/inventory/receive/po1')
+    expect(appRouteForRecord('stock_transfer', 't1')).toBe('/inventory/transfers/t1')
     expect(appRouteForRecord('change_order', 'x')).toBeNull()
     expect(destinationForTarget({ projectId: 'p1', module: 'docControl', child: 'rfi', recordType: 'rfi', recordId: 'r1' })).toEqual({ app: '/rfi/r1' })
     expect(destinationForTarget({ projectId: 'p1', module: 'quality', child: 'ncr', recordType: 'ncr', recordId: 'n1' })).toEqual({ app: '/quality/ncr/n1' })

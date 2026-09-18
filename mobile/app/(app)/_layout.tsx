@@ -49,6 +49,7 @@ export default function AppLayout() {
       <Tabs.Screen name="photos" options={{ href: null }} />
       <Tabs.Screen name="timesheets" options={{ href: null }} />
       <Tabs.Screen name="quality" options={{ href: null }} />
+      <Tabs.Screen name="inventory" options={{ href: null }} />
     </Tabs>
   )
 }

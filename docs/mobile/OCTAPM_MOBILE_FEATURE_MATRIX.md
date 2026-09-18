@@ -85,16 +85,16 @@ Every level assumes the role holds the permission on the server for that project
 
 | Feature | Phone | Tablet | Web | Milestone | Roles | Notes |
 |---|---|---|---|---|---|---|
-| Inventory home, item search, item detail and balances | FULL | FULL | FULL | M5 | all nine roles read | balances shown with their age when cached |
-| Barcode / QR scan to resolve an item | FULL | FULL | NOT AVAILABLE | M5 | inventory readers | resolves items by barcode, QR or SKU; bins, warehouses and POs have no codes on the server |
-| Goods receipt against a purchase order | FULL | FULL | FULL | M5 | PM, Proc, Store | client receipt number; replay-safe |
-| Direct goods-in (no PO) | FULL | FULL | FULL | M5 | PM, Proc, Store | online only |
-| Issue, return, reserve | FULL | FULL | FULL | M5 | PM, Store, Site, Qual | online only; never auto-retried (cost posts) |
-| Adjust, damage, quarantine, release | FULL | FULL | FULL | M5 | PM, Store | online only |
-| Transfers: create, dispatch, receive | FULL | FULL | FULL | M5 | PM, Store | no cancel on the server |
-| Movement ledger, summary, low stock | VIEW | VIEW | FULL | M5 | inventory readers | polled; no realtime for inventory |
+| Inventory home, item search, item detail and balances | FULL | FULL | FULL | M5 (built) | all nine roles read | the warehouse the device works from is remembered per project; balances carry their age |
+| Barcode / QR scan to resolve an item | FULL | FULL | LIMITED | M5 (built) | inventory readers | camera on devices (native verification list); a typed barcode, QR or SKU everywhere; bins, warehouses and POs have no codes on the server |
+| Goods receipt against a purchase order | FULL | FULL | FULL | M5 (built) | PM, Proc, Store | lines pre-filled with what is due, over-receipt refused on the device; one device receipt number per delivery, so a retry counts once |
+| Direct goods-in (no PO) | FULL | FULL | FULL | M5 (built) | PM, Proc, Store | online only |
+| Issue, return, reserve | FULL | FULL | FULL | M5 (built) | PM, Store, Site, Qual | online only, sent once, never queued or retried (the issue posts cost); a lost reply says so and points at the ledger |
+| Adjust, damage, quarantine, release | FULL | FULL | FULL | M5 (built) | PM, Store | online only; adjust needs a reason |
+| Transfers: create, dispatch, receive | FULL | FULL | FULL | M5 (built) | PM, Store | received and damaged per line; no cancel on the server |
+| Movement ledger, summary, low stock | VIEW | VIEW | FULL | M5 (built) | inventory readers | polled; no realtime for inventory |
 | Stock counts | NOT AVAILABLE | NOT AVAILABLE | NOT AVAILABLE | — | — | no endpoint exists |
-| Item and warehouse master data | VIEW | LIMITED | FULL | M5 | item/warehouse manage: PM, Proc, Store | create/edit on tablet later; web preferred |
+| Item and warehouse master data | VIEW | VIEW | FULL | M5 (built) | item/warehouse manage: PM, Proc, Store | create and edit stay on the web |
 | Procurement packages, suppliers, purchase orders, lead-time alerts | VIEW + acknowledge | VIEW + acknowledge | FULL | M6 | procurement readers; acknowledge: PM, Plan, Proc, Store | |
 | Purchase order submit, approve, issue, acknowledge, cancel, close | NOT AVAILABLE | NOT AVAILABLE | FULL | — | per policy | web only |
 | Deliveries against a PO (procurement route) | FULL | FULL | FULL | M5 | PM, Proc, Store | same writer as goods receipt |

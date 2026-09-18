@@ -95,6 +95,7 @@ jest.mock('expo-image-picker', () => ({
 jest.mock('expo-file-system/legacy', () => ({ cacheDirectory: 'file:///cache/', downloadAsync: jest.fn(async (_url: string, target: string) => ({ status: 200, uri: target })) }))
 jest.mock('expo-sharing', () => ({ isAvailableAsync: jest.fn(async () => true), shareAsync: jest.fn(async () => undefined) }))
 jest.mock('react-native-webview', () => ({ WebView: () => null }))
+jest.mock('expo-camera', () => ({ CameraView: () => null, useCameraPermissions: jest.fn(() => [{ granted: true, canAskAgain: true }, jest.fn(async () => ({ granted: true }))]) }))
 
 // Node's FormData refuses the { uri, name, type } file objects React Native's
 // FormData accepts. Under test those objects become empty blobs with the same

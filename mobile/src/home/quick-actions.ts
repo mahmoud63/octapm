@@ -26,7 +26,7 @@ export const QUICK_ACTIONS: readonly QuickAction[] = [
   { id: 'photo', title: 'Photo', icon: 'camera-outline', module: 'document_control', action: 'create', route: '/photos?add=1' },
   { id: 'daily-log', title: 'Daily log', icon: 'today-outline', module: 'progress', action: 'submit', route: '/site' },
   { id: 'inspection', title: 'Inspection', icon: 'checkbox-outline', module: 'inspection', action: 'create', route: '/quality/inspections/new' },
-  { id: 'goods-in', title: 'Goods in', icon: 'cube-outline', module: 'inventory', action: 'create' },
+  { id: 'goods-in', title: 'Goods in', icon: 'cube-outline', module: 'inventory', action: 'create', route: '/inventory/receive' },
 ]
 
 /** The actions this person may take now, in the order they are shown. */

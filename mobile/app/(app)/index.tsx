@@ -80,6 +80,7 @@ export default function HomeScreen() {
     { id: 'activities', title: 'Activities', route: '/activities', module: 'schedule' },
     { id: 'photos', title: 'Photos', route: '/photos', module: 'document_control' },
     { id: 'quality', title: 'Quality', route: '/quality', module: 'punch' },
+    { id: 'inventory', title: 'Inventory', route: '/inventory', module: 'inventory' },
     { id: 'rfi', title: 'RFIs', route: '/rfi', module: 'rfi' },
     { id: 'tasks', title: 'Tasks', route: '/tasks', module: 'task' },
     { id: 'documents', title: 'Documents', route: '/documents', module: 'document_control' },

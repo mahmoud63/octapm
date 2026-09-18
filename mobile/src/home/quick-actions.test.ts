@@ -5,8 +5,10 @@ describe('quick actions on Home', () => {
   const built: QuickAction[] = QUICK_ACTIONS.map((action) => ({ ...action, route: `/${action.id}` }))
 
   it('shows only the actions whose screen exists, whatever the permission', () => {
-    // RFI (M2), photo and daily log (M3), punch item and inspection (M4) have screens; goods in arrives with M5.
-    expect(availableQuickActions(pmMatrix).map((a) => a.id)).toEqual(['rfi', 'punch', 'photo', 'daily-log', 'inspection'])
+    // Every registered action has a screen since M5, so the registry and the built list agree.
+    expect(availableQuickActions(pmMatrix).map((a) => a.id)).toEqual(['rfi', 'punch', 'photo', 'daily-log', 'inspection', 'goods-in'])
+    const unbuilt = QUICK_ACTIONS.map((a) => ({ ...a, route: a.id === 'goods-in' ? undefined : a.route }))
+    expect(availableQuickActions(pmMatrix, unbuilt).map((a) => a.id)).toEqual(['rfi', 'punch', 'photo', 'daily-log', 'inspection'])
   })
 
   it('shows a project manager every built action the server allows', () => {

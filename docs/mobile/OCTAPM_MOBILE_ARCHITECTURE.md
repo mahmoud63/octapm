@@ -277,3 +277,19 @@ How the end-to-end run is made: `npm run export:web` produces the production web
 Native items added to the verification list by M4: the camera and picker on the punch form and the closeout sheet, and the file picker behind evidence on the web target.
 
 A defect the run found and fixed before the record was taken: closing a sheet and pushing a route in the same tick leaves the previous screen frozen by the navigator with its sheet still mounted; on the web the sheet's focus trap then steals focus on the pushed screen and inputs lose every keystroke. `useNavigateAfterClose` now defers the push until the sheet is closed and its exit animation has finished, and the rule in §9 applies to every sheet that navigates.
+
+## 18. M5 verification record (2026-09-18)
+
+| Check | Result |
+|---|---|
+| Mobile TypeScript and ESLint | 0 errors, 0 warnings |
+| Mobile Jest | 192 passed in 37 suites (adds the inventory home and scan, items and the movement sheet with its offline refusal and lost-reply rule, goods in with the receipt replay rule and the over-receipt guard, transfers and the ledger) |
+| Playwright against the production web export and the local API | 48 passed: 24 checks on the phone viewport and the same 24 on the tablet viewport |
+| Scan and issue, live | a typed SKU resolved through the scan route; one bag issued to an activity from a stocked warehouse through the issue route (201), sent once |
+| Goods receipt, live | an order raised for the run through the procurement routes (draft, submit, approve, issue), its line received as 8 accepted and 2 rejected with the device's receipt number (201); the same body sent again was refused by the server as `RECEIPT_ALREADY_POSTED` (409), the answer the app shows as done |
+| Transfers, live | a draft with one line created (201), dispatched (200), received as 1 good and 1 damaged (200); the ledger then showed the transfer out |
+| Where writes went | the dedicated end-to-end organisation only |
+
+Native items added to the verification list by M5: the camera barcode scanner (the web target types the code instead).
+
+A defect the run found and fixed before the record was taken: the ledger filtered by project by default, and since inventory is organisation-level most movements carry no project, so transfers never appeared; the ledger now filters by warehouse, type or item only.
