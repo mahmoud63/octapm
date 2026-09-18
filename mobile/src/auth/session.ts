@@ -166,6 +166,9 @@ async function resume(method: 'biometric' | 'restored') {
     const me = await run<SessionUser>(() => api.GET('/auth/me') as never, { retryOnUnauthorized: false })
     store().setUser(me)
     await rememberProfile(me)
+    // A resumed session owns the same outbox and read cache a password sign-in does.
+    await offlineSessionStarted(me.id).catch((error) => log.warn('sync', 'offline data could not be attached to the resumed session', { message: String(error) }))
+    void registerPushDevice()
     analytics.track({ name: 'mobile_login', method })
   } catch (error) {
     if (isAppError(error) && error.retryable) {
@@ -175,6 +178,8 @@ async function resume(method: 'biometric' | 'restored') {
       const user = current.user ?? (await lastKnownProfile())
       if (user) {
         current.setSignedIn(user, current.accessToken ?? '', 0)
+        // Without a signal this is the only way the cached records reach the screens.
+        await offlineSessionStarted(user.id).catch(() => undefined)
         log.info('auth', 'opened offline with the last known session')
       } else {
         // Nothing is known about this person yet; the token stays for next time.

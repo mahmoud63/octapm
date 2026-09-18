@@ -201,14 +201,15 @@ export async function discardItem(id: string) {
 
 const classify = (error: unknown): { status: OutboxStatus; detail: OutboxError; lock?: boolean } => {
   if (isAppError(error)) {
-    const detail: OutboxError = { code: error.code, serverCode: error.serverCode, message: error.message, requestId: error.requestId }
+    // The outbox screen shows this line to the person, so it carries the sentence, not the server's own words.
+    const detail: OutboxError = { code: error.code, serverCode: error.serverCode, message: error.userMessage, requestId: error.requestId }
     if (error.code === 'AUTH_REQUIRED') return { status: 'waiting', detail, lock: true }
     if (ATTENTION.has(error.code)) return { status: 'attention', detail }
     if (REFUSED.has(error.code)) return { status: 'refused', detail }
     if (RETRYABLE.has(error.code)) return { status: 'waiting', detail }
     return { status: 'attention', detail }
   }
-  return { status: 'attention', detail: { code: 'UNKNOWN', message: error instanceof Error ? error.message : String(error) } }
+  return { status: 'attention', detail: { code: 'UNKNOWN', message: 'This could not be sent. Try again, and tell support what you captured if it keeps happening.' } }
 }
 
 const nextEligible = (items: OutboxItem[], now: number): OutboxItem | null => {

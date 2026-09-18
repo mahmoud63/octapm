@@ -2,10 +2,11 @@ import { Inter_400Regular, Inter_500Medium, Inter_600SemiBold } from '@expo-goog
 import { SpaceGrotesk_600SemiBold, SpaceGrotesk_700Bold } from '@expo-google-fonts/space-grotesk'
 import { QueryClientProvider } from '@tanstack/react-query'
 import { useFonts } from 'expo-font'
-import { Stack } from 'expo-router'
+import { Stack, type ErrorBoundaryProps } from 'expo-router'
 import * as SplashScreen from 'expo-splash-screen'
 import { StatusBar } from 'expo-status-bar'
 import { useEffect } from 'react'
+import { View } from 'react-native'
 import { GestureHandlerRootView } from 'react-native-gesture-handler'
 import { SafeAreaProvider } from 'react-native-safe-area-context'
 import { network } from '@/api/network'
@@ -18,7 +19,7 @@ import { bootstrap } from '@/auth/session'
 import { useAuthStore } from '@/auth/store'
 import { env } from '@/config/env'
 import { useProjectStore } from '@/projects/store'
-import { ThemeProvider, useTheme } from '@/design-system'
+import { Button, Text, ThemeProvider, spacing, useTheme } from '@/design-system'
 import { log } from '@/utilities/logger'
 
 SplashScreen.preventAutoHideAsync().catch(() => undefined)
@@ -81,5 +82,35 @@ function Chrome() {
         <Stack.Screen name="+not-found" options={{ headerShown: true, title: 'Not found' }} />
       </Stack>
     </>
+  )
+}
+
+/**
+ * The last line of defence: a render exception anywhere in the app reaches
+ * here instead of the router's default, which prints the exception text. A
+ * person on site sees a sentence and a way back; the detail goes to the log
+ * (certification MOB-P3, 2026-09-18).
+ */
+export function ErrorBoundary({ error, retry }: ErrorBoundaryProps) {
+  log.error('crash', 'a screen could not be drawn', { message: error?.message ?? String(error) })
+  return (
+    <SafeAreaProvider>
+      <ThemeProvider>
+        <CrashScreen onRetry={retry} />
+      </ThemeProvider>
+    </SafeAreaProvider>
+  )
+}
+
+function CrashScreen({ onRetry }: { onRetry: () => void }) {
+  const theme = useTheme()
+  return (
+    <View style={{ flex: 1, backgroundColor: theme.colors.background, justifyContent: 'center', padding: spacing.lg, gap: spacing.md }} testID="screen-crash">
+      <Text variant="title" accessibilityRole="header">
+        This screen could not be opened
+      </Text>
+      <Text tone="muted">Nothing you captured has been lost. Try again, and tell support what you were doing if it keeps happening.</Text>
+      <Button title="Try again" onPress={onRetry} testID="crash-retry" />
+    </View>
   )
 }

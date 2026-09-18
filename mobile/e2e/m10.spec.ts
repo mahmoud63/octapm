@@ -95,8 +95,10 @@ test.describe('M10 certification on the web target', () => {
 
     await signIn(page, otherOrgEmail)
     await page.goto(`/open?to=${encodeURIComponent(`/rfi/${rfiId}`)}&projectId=${projectId}`)
-    await expect(page.getByTestId('screen-rfi').last()).toBeVisible()
+    // Since the certification phase the opener checks the project with the server before switching to it,
+    // so the person is told plainly and keeps their own project instead of landing on a broken record screen.
+    await expect(page.getByTestId('screen-open')).toBeVisible()
+    await expect(page.getByText(/not on that project/i).first()).toBeVisible()
     await expect(page.getByText(`E2E isolation ${stamp}`)).toHaveCount(0)
-    await expect(page.getByText(/no longer available|not found|could not|no access|nothing here/i).first()).toBeVisible()
   })
 })

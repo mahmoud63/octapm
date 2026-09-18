@@ -1,5 +1,6 @@
 import { Pressable, StyleSheet } from 'react-native'
 import { Text, radius, spacing, useTheme } from '@/design-system'
+import { tapTarget } from '@/design-system/tokens'
 
 /**
  * A pill that narrows a list. Selected chips are filled with the brand
@@ -28,5 +29,6 @@ export function FilterChip({ label, count, selected, onPress, testID }: { label:
 }
 
 const styles = StyleSheet.create({
-  chip: { paddingHorizontal: spacing.md, paddingVertical: spacing.sm, borderRadius: radius.full, borderWidth: 1, minHeight: 36, justifyContent: 'center' },
+  // The tap-target floor (44) rather than 36: a chip is tapped with a gloved thumb as often as a button is (certification MOB-P3).
+  chip: { paddingHorizontal: spacing.md, paddingVertical: spacing.sm, borderRadius: radius.full, borderWidth: 1, minHeight: tapTarget, justifyContent: 'center' },
 })

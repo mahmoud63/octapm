@@ -41,7 +41,8 @@ Every level assumes the role holds the permission on the server for that project
 | Comments, mentions, subscriptions on any record | FULL | FULL | FULL | M2 | all with read | |
 | Attachments and photos on any record | FULL | FULL | FULL | M2 / M3 | any of update/submit/create on the module | unified endpoint with replay key |
 | Tasks (mine, cursor paging, close, comment) | FULL | FULL | FULL | M2 | all; parties comment | |
-| Meetings | VIEW | VIEW | FULL | M2 | meeting readers | action items surface as tasks |
+| Meetings | NOT AVAILABLE (opens on the web) | NOT AVAILABLE (opens on the web) | FULL | — | meeting readers | corrected at certification 2026-09-18: the app has no meetings screen; a meeting link hands over to the web platform. Action items reach the app as tasks, which is the field path |
+| Quantity overrun alerts (authorised vs installed, committed, received, forecast, variance) | NOT AVAILABLE | NOT AVAILABLE | NOT AVAILABLE | PLANNED / BACKEND DEPENDENCY | — | the server has cost-overrun forecasting (`/projects/:id/forecast`), not a BOQ quantity-exception engine; the app must not compute this itself, so it waits for the backend |
 
 ## Site and schedule
 

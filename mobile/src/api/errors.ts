@@ -13,6 +13,7 @@ export type AppErrorCode =
   | 'CONFLICT'
   | 'VALIDATION'
   | 'RATE_LIMITED'
+  | 'SUBSCRIPTION_REQUIRED'
   | 'OFFLINE'
   | 'TIMEOUT'
   | 'CANCELLED'
@@ -46,7 +47,7 @@ export class AppError extends Error {
     this.serverCode = options.serverCode
     this.requestId = options.requestId
     this.details = options.details
-    this.userMessage = describe(code, options.message)
+    this.userMessage = describe(code, options.message, options.serverCode, options.details)
     this.retryable = code === 'OFFLINE' || code === 'TIMEOUT' || code === 'SERVER_ERROR' || code === 'RATE_LIMITED'
   }
 
@@ -56,7 +57,14 @@ export class AppError extends Error {
   }
 }
 
-function describe(code: AppErrorCode, message: string | undefined): string {
+/** The first field message the server sent, when its own message is the generic one. */
+const firstDetail = (details: unknown): string | undefined => {
+  const list = Array.isArray(details) ? details : Array.isArray((details as { errors?: unknown[] })?.errors) ? (details as { errors: unknown[] }).errors : null
+  const first = list?.find((d) => typeof (d as { message?: unknown })?.message === 'string') as { message: string } | undefined
+  return first && !looksTechnical(first.message) ? first.message : undefined
+}
+
+function describe(code: AppErrorCode, message: string | undefined, serverCode?: string, details?: unknown): string {
   switch (code) {
     case 'OFFLINE':
       return 'You are offline. What you save will be kept and sent when the connection returns.'
@@ -65,6 +73,10 @@ function describe(code: AppErrorCode, message: string | undefined): string {
     case 'CANCELLED':
       return 'That request was cancelled.'
     case 'AUTH_REQUIRED':
+      // A refused sign-in is not an ended session: say which of the two it is.
+      if (serverCode === 'INVALID_CREDENTIALS') return 'That email and password do not match. Check them and try again.'
+      if (serverCode === 'USER_INACTIVE' || serverCode === 'ACCOUNT_DISABLED') return 'This account has been turned off. Ask your project manager or an administrator.'
+      if (serverCode === 'MFA_REQUIRED') return 'This account needs a verification code. Sign in on the web platform to finish setting it up.'
       return 'Your session has ended. Sign in again to continue.'
     case 'FORBIDDEN':
       return 'Your role does not allow this on this project. Ask your project manager if you think it should.'
@@ -72,8 +84,14 @@ function describe(code: AppErrorCode, message: string | undefined): string {
       return 'That record is no longer available. It may have been removed or moved to another project.'
     case 'CONFLICT':
       return 'Somebody else changed this record first. Review the latest version before saving again.'
-    case 'VALIDATION':
-      return message && !looksTechnical(message) ? message : 'Some of the details are missing or not valid. Check the highlighted fields.'
+    case 'VALIDATION': {
+      // "Validation failed" names nothing; the server's field detail does.
+      const generic = !message || looksTechnical(message) || /^(request )?validation failed\.?$/i.test(message)
+      if (!generic) return message
+      return firstDetail(details) ?? 'Some of the details are missing or not valid. Check the highlighted fields.'
+    }
+    case 'SUBSCRIPTION_REQUIRED':
+      return 'This organisation’s OctaPM subscription has ended. An administrator can renew it on the web platform.'
     case 'RATE_LIMITED':
       return 'Too many attempts in a short time. Wait a moment and try again.'
     case 'SERVER_ERROR':
@@ -100,6 +118,7 @@ export function fromStatus(status: number, body: ServerErrorBody | undefined, re
   if (status === 404) return new AppError('NOT_FOUND', base)
   if (status === 409 || status === 412) return new AppError('CONFLICT', base)
   if (status === 400 || status === 422) return new AppError('VALIDATION', base)
+  if (status === 402) return new AppError('SUBSCRIPTION_REQUIRED', base)
   if (status === 429) return new AppError('RATE_LIMITED', base)
   if (status >= 500) return new AppError('SERVER_ERROR', base)
   return new AppError('UNKNOWN', base)

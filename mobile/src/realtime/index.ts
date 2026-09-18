@@ -66,12 +66,20 @@ export function invalidateForEvent(client: QueryClient, event: DomainEventMessag
     void client.invalidateQueries({ queryKey: keys.tasks })
     touched.push('tasks')
   }
-  if (event.type === 'approval.decided') {
+  if (event.type === 'approval.decided' || event.entityType === 'approval_step' || event.entityType === 'workflow_instance') {
     void client.invalidateQueries({ queryKey: ['workflow', 'my-steps'] })
     touched.push('my-steps')
   }
+  // Inventory is org-level, so its keys sit outside the project scope above.
+  if (INVENTORY_ENTITIES.has(String(event.entityType))) {
+    void client.invalidateQueries({ queryKey: ['inventory'] })
+    touched.push('inventory')
+  }
   return touched
 }
+
+/** Entity types whose change moves a stock balance, a movement list or a delivery. */
+const INVENTORY_ENTITIES = new Set(['stock_transaction', 'stock_movement', 'inventory_item', 'stock_transfer', 'delivery_receipt', 'goods_receipt', 'procurement_order', 'purchase_order'])
 
 let socket: Socket | null = null
 let started = false

@@ -109,3 +109,30 @@ Built as written above: the outbox (`mobile/src/offline/outbox.ts`) with the sta
 Differences from the text above, all deliberate: the outbox is a key-value document rather than a table, since it is small and read as a whole; the read cache excludes searches, scans and the approvals inbox, which are momentary; a kept sheet stores the source PDF as a whole file (the server serves no per-page image) and the web target stores no file at all.
 
 Carried: background sync (section 7) — the drain runs when the signal returns and when the app comes to the front, and background tasks are on the native verification list; realtime invalidation over socket.io was built in M9 (the socket marks the project’s queries stale and open screens refetch; nothing from the event is written into the cache); the drafts-then-send-once path for RFIs, NCRs, tasks and change events (their create endpoints carry no replay key, so they stay online only for now); the delta endpoints and the generic idempotency key remain proposals to the backend.
+
+## 11. Offline architecture audit (certification, 2026-09-18)
+
+Every write the app makes, classified from the code by a read-only audit and checked against the server's replay keys. OFFLINE SAFE means the person can complete it with no signal and nothing is lost. OFFLINE QUEUED WITH SERVER REVALIDATION means it is kept with a client-generated key, sent later, and re-authorised and de-duplicated by the server on arrival. ONLINE REQUIRED means the app refuses politely and keeps the form. NOT IMPLEMENTED means the app does not offer it at all.
+
+| Workflow | Class | Replay key the server honours |
+|---|---|---|
+| Daily-log entry | OFFLINE QUEUED WITH SERVER REVALIDATION | `clientRequestId` on the entry, unique per project |
+| Punch item (and observation) | OFFLINE QUEUED WITH SERVER REVALIDATION | `clientRequestId`, unique per project |
+| Inspection created from a template | OFFLINE QUEUED WITH SERVER REVALIDATION | `clientRequestId`; the server starts the instance on replay |
+| Timesheet | OFFLINE QUEUED WITH SERVER REVALIDATION | `clientRequestId` |
+| Photo or attachment upload | OFFLINE QUEUED WITH SERVER REVALIDATION | `clientRequestId`; a photo queued behind a record is sent against the id that record's send returned |
+| Goods receipt | OFFLINE QUEUED WITH SERVER REVALIDATION | the device receipt number `GRN-M-…`, unique per project; a second post is answered `RECEIPT_ALREADY_POSTED` |
+| RFI create, RFI response | ONLINE REQUIRED | no replay key on the create route |
+| NCR create, NCR closeout, NCR decision | ONLINE REQUIRED | none |
+| Punch transitions (ready, close, reopen, dispute, void) | ONLINE REQUIRED | none |
+| Inspection start, checklist answers, complete, close, void | ONLINE REQUIRED | none (answers live in the screen until sent) |
+| Task comment, task complete | ONLINE REQUIRED | none |
+| Progress update | ONLINE REQUIRED | none |
+| Stock issue, receive, transfer, adjust, damage, quarantine | ONLINE REQUIRED, by policy | never queued: a stale stock request must not be replayed |
+| Workflow decision (approve, reject, respond) | ONLINE REQUIRED, by policy | never queued: an approval must be made against the record as it stands |
+| Change event create | ONLINE REQUIRED | none |
+| Background sync while the app is closed | NOT IMPLEMENTED | the drain runs when the signal returns and when the app comes to the front |
+
+Sync rules confirmed by the same audit: each queued item carries its own client-generated operation id, which is also the server's replay key; the queue is persisted (SQLite on a device, browser storage on the web target) and survives a restart; a dependent item is sent only after its parent, with the parent's returned id; retries back off (5 s doubling to 10 minutes); the server re-runs its permission checks on every replay, so an item queued before an access change is refused rather than honoured; a validation or conflict answer moves the item to "needs your attention" with the server's reason; a refused session locks the queue and keeps it for the same person.
+
+Carried from the certification phase: on the web target a queued photo is stored as base64 inside one storage document (a quota failure drops the queue) and a web-queued upload cannot be replayed as a file — both native-only paths are unaffected; photo copies kept for the queue are not deleted after a successful send or at sign-out; an item the server refused cannot be edited before retrying. These are listed as PILOT-05 to PILOT-08 in the [known issues](OCTAPM_MOBILE_KNOWN_ISSUES.md).

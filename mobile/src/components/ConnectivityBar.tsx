@@ -2,6 +2,7 @@ import { useRouter } from 'expo-router'
 import { Pressable, StyleSheet, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { Text, spacing, useTheme } from '@/design-system'
+import { tapTarget } from '@/design-system/tokens'
 import { useOutboxStatus } from '@/offline/useOutboxStatus'
 
 /**
@@ -33,7 +34,7 @@ export function ConnectivityBar() {
   if (!label) return null
 
   return (
-    <Pressable accessibilityRole="button" accessibilityLabel={`${label}. Open the outbox`} onPress={() => router.push('/outbox')} style={[styles.bar, { backgroundColor: tone, paddingTop: insets.top > 0 ? spacing.xs : spacing.xs }]} testID="connectivity-bar">
+    <Pressable accessibilityRole="button" accessibilityLabel={`${label}. Open the outbox`} onPress={() => router.push('/outbox')} style={[styles.bar, { backgroundColor: tone, paddingTop: insets.top + spacing.xs }]} testID="connectivity-bar">
       <View style={styles.row}>
         <Text variant="caption" style={{ color: theme.colors.textOnBrand }}>
           {label}
@@ -44,6 +45,6 @@ export function ConnectivityBar() {
 }
 
 const styles = StyleSheet.create({
-  bar: { paddingHorizontal: spacing.md, paddingBottom: spacing.xs },
+  bar: { paddingHorizontal: spacing.md, paddingBottom: spacing.xs, minHeight: tapTarget, justifyContent: 'center' },
   row: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center' },
 })

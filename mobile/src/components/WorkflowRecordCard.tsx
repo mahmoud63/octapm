@@ -1,4 +1,5 @@
 import { StyleSheet, View } from 'react-native'
+import { userMessage } from '@/api/errors'
 import type { AttachmentRef, WorkflowRecordBase } from '@/api/quality-types'
 import { Button, Card, Text, spacing, useTheme } from '@/design-system'
 import { openApiFile } from '@/files/open'
@@ -58,7 +59,7 @@ export function WorkflowRecordCard({ record, onOpenFailed }: { record: WorkflowR
                     <Button
                       title="Open"
                       variant="ghost"
-                      onPress={() => void openApiFile(path, ref.fileName ?? 'evidence').catch((e: unknown) => onOpenFailed(e instanceof Error ? e.message : 'Could not open the file'))}
+                      onPress={() => void openApiFile(path, ref.fileName ?? 'evidence').catch((e: unknown) => onOpenFailed(userMessage(e)))}
                     />
                   ) : null}
                 </View>

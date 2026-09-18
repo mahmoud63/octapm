@@ -41,9 +41,10 @@ export function registerSenders() {
 
   registerSender('daily-log.entry', async (item) => {
     const { date, section, body } = item.payload as { date: string; section: DailyLogSection; body: EntryInput }
-    await addDailyLogEntry(item.projectId, date, section, body)
+    const log = await addDailyLogEntry(item.projectId, date, section, body)
     refresh(item.projectId)
-    return { resultId: null }
+    // The day's log id is what photos queued behind this entry are uploaded against.
+    return { resultId: log.id ?? null }
   })
 
   registerSender('timesheet.create', async (item) => {

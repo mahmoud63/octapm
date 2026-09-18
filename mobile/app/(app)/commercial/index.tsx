@@ -5,7 +5,8 @@ import { useProjects } from '@/api/hooks'
 import { Freshness } from '@/components/Freshness'
 import { ProjectSwitch } from '@/components/ProjectSwitch'
 import { Screen } from '@/components/Screen'
-import { Button, EmptyState, KPI, Text, spacing } from '@/design-system'
+import { userMessage } from '@/api/errors'
+import { Button, EmptyState, ErrorState, KPI, SkeletonList, Text, spacing } from '@/design-system'
 import { usePermissions } from '@/permissions/usePermissions'
 import { useProjectStore } from '@/projects/store'
 import { money } from '@/utilities/format'
@@ -50,7 +51,12 @@ export default function CommercialHomeScreen() {
   return (
     <Screen contentStyle={styles.content} testID="screen-commercial">
       <ProjectSwitch project={project} />
-      {permissions.allows('workflow', 'read') ? <KPI label="Approvals waiting on you" value={String(waiting)} tone={waiting > 0 ? 'warning' : 'default'} onPress={() => router.push('/workflow')} /> : null}
+      {permissions.allows('workflow', 'read') ? (
+        // Until the inbox has answered, the count is unknown rather than zero.
+        <KPI label="Approvals waiting on you" value={steps.isPending ? '—' : steps.isError ? '—' : String(waiting)} tone={!steps.isPending && !steps.isError && waiting > 0 ? 'warning' : 'default'} onPress={() => router.push('/workflow')} />
+      ) : null}
+      {events.isPending ? <SkeletonList rows={2} /> : null}
+      {events.isError ? <ErrorState message={userMessage(events.error)} onRetry={() => void events.refetch()} /> : null}
       {s ? (
         <View style={styles.kpis}>
           <KPI label="Open change events" value={String((s.byStatus.open ?? 0) + (s.byStatus.pricing ?? 0) + (s.byStatus.priced ?? 0))} onPress={() => router.push('/commercial/change-events')} />

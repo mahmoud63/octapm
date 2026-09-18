@@ -53,8 +53,9 @@ export default function PhotoScreen() {
   }
 
   const canEdit = permissions.allows('document_control', 'create')
-  const size = Math.min(width - spacing.lg * 2, 1000)
-  const height = photo.width && photo.height ? Math.round((size * photo.height) / photo.width) : size
+  // The photo fills the column it is in, whatever the window: on a tablet this screen is the right pane, not the window.
+  const aspectRatio = photo.width && photo.height ? photo.width / photo.height : 1
+  const maxWidth = Math.min(width - spacing.lg * 2, 1000)
 
   const save = async (field: 'caption' | 'tags', text: string) => {
     setFailure(null)
@@ -69,7 +70,7 @@ export default function PhotoScreen() {
   return (
     <>
       <Screen contentStyle={styles.content} testID="screen-photo">
-        <AuthImage apiPath={photoFilePath(projectId, photo.id)} alt={photo.caption ?? 'Photo'} style={{ width: size, height, borderRadius: radius.md, alignSelf: 'center' }} testID="photo-image" />
+        <AuthImage apiPath={photoFilePath(projectId, photo.id)} alt={photo.caption ?? 'Photo'} style={{ width: '100%', maxWidth, aspectRatio, borderRadius: radius.md, alignSelf: 'center' }} testID="photo-image" />
         <Card>
           <View style={styles.stack}>
             <View style={styles.row}>

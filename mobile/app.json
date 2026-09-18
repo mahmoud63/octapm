@@ -25,7 +25,10 @@
         "NSLocationWhenInUseUsageDescription": "OctaPM can tag a site photo with where it was taken, only when you choose to.",
         "ITSAppUsesNonExemptEncryption": false
       },
-      "associatedDomains": ["applinks:app.octapm.com", "applinks:octapm.com"]
+      "associatedDomains": [
+        "applinks:app.octapm.com",
+        "applinks:octapm.com"
+      ]
     },
     "android": {
       "package": "com.octapm.app",
@@ -33,17 +36,32 @@
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#0F1B64"
       },
-      "edgeToEdgeEnabled": true,
-      "permissions": ["CAMERA", "USE_BIOMETRIC", "USE_FINGERPRINT", "VIBRATE"],
+      "permissions": [
+        "CAMERA",
+        "USE_BIOMETRIC",
+        "USE_FINGERPRINT",
+        "VIBRATE"
+      ],
       "intentFilters": [
         {
           "action": "VIEW",
           "autoVerify": true,
           "data": [
-            { "scheme": "https", "host": "app.octapm.com", "pathPrefix": "/" },
-            { "scheme": "https", "host": "octapm.com", "pathPrefix": "/" }
+            {
+              "scheme": "https",
+              "host": "app.octapm.com",
+              "pathPrefix": "/"
+            },
+            {
+              "scheme": "https",
+              "host": "octapm.com",
+              "pathPrefix": "/"
+            }
           ],
-          "category": ["BROWSABLE", "DEFAULT"]
+          "category": [
+            "BROWSABLE",
+            "DEFAULT"
+          ]
         }
       ]
     },
@@ -60,7 +78,11 @@
       "expo-web-browser",
       [
         "expo-splash-screen",
-        { "image": "./assets/splash-icon.png", "resizeMode": "contain", "backgroundColor": "#0F1B64" }
+        {
+          "image": "./assets/splash-icon.png",
+          "resizeMode": "contain",
+          "backgroundColor": "#0F1B64"
+        }
       ],
       [
         "expo-camera",
@@ -71,15 +93,22 @@
       ],
       [
         "expo-image-picker",
-        { "photosPermission": "OctaPM attaches photos from your library to site records such as RFIs, inspections and daily logs." }
+        {
+          "photosPermission": "OctaPM attaches photos from your library to site records such as RFIs, inspections and daily logs."
+        }
       ],
       [
         "expo-local-authentication",
-        { "faceIDPermission": "OctaPM can unlock your signed-in session with Face ID." }
+        {
+          "faceIDPermission": "OctaPM can unlock your signed-in session with Face ID."
+        }
       ],
       [
         "expo-notifications",
-        { "icon": "./assets/notification-icon.png", "color": "#325FEC" }
+        {
+          "icon": "./assets/notification-icon.png",
+          "color": "#325FEC"
+        }
       ]
     ],
     "experiments": {

@@ -6,6 +6,7 @@ const { asyncHandler } = require('../utils/async-handler');
 const { sendSuccess } = require('../utils/api-response');
 const { HttpError } = require('../utils/http-error');
 const { uploadLimiter } = require('../middleware/rate-limit');
+const { hasPermission } = require('../middleware/rbac');
 const fileStorageService = require('../services/file-storage.service');
 
 const router = express.Router({ mergeParams: true });
@@ -47,9 +48,30 @@ const upload = multer({
   },
 });
 
+/**
+ * Workflow evidence is written by the people who submit or decide the records
+ * that carry it (closeouts, change orders, approvals). Project membership on
+ * its own is not enough: a party-scoped person with no rights on any of these
+ * modules has nothing to attach and must not be able to fill the project's
+ * workflow storage (certification MOB-P2, 2026-09-18).
+ */
+// The modules whose records carry workflow evidence. `workflow` itself is not
+// on the list: every org role holds workflow.submit, so it would let anyone in.
+const EVIDENCE_MODULES = ['ncr', 'safety', 'punch', 'inspection', 'change_order', 'change_event', 'commitment', 'sub_pay_app', 'progress'];
+const EVIDENCE_ACTIONS = ['create', 'update', 'submit', 'approve'];
+
+const requireEvidenceRights = (req, _res, next) => {
+  const allowed = EVIDENCE_MODULES.some((moduleName) => EVIDENCE_ACTIONS.some((action) => hasPermission(req, moduleName, action)));
+  if (!allowed) {
+    return next(new HttpError(403, 'WORKFLOW_UPLOAD_FORBIDDEN', 'Your role does not allow you to attach evidence on this project'));
+  }
+  return next();
+};
+
 router.post(
   '/uploads',
   uploadLimiter,
+  requireEvidenceRights,
   upload.array('files', 10),
   asyncHandler(async (req, res) => {
     try {

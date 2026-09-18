@@ -52,8 +52,11 @@ export default function PhotosScreen() {
   const upload = useUploadAttachments(projectId ?? '')
   const project = projects.data?.find((p) => p.id === projectId) ?? null
 
-  const columns = width >= 900 ? 5 : width >= 600 ? 4 : 3
-  const tile = Math.floor((Math.min(width, 1100) - spacing.lg * 2 - spacing.sm * (columns - 1)) / columns)
+  // The grid is sized from its own width, not the window's: on a tablet this list sits in the 440-wide master pane.
+  const [gridWidth, setGridWidth] = useState(0)
+  const available = Math.min(gridWidth || width, 1100)
+  const columns = available >= 900 ? 5 : available >= 600 ? 4 : 3
+  const tile = Math.max(72, Math.floor((available - spacing.lg * 2 - spacing.sm * (columns - 1)) / columns))
   const items = useMemo(() => photos.data?.items ?? [], [photos.data])
   const canAdd = permissions.allows('progress', 'submit')
 
@@ -120,6 +123,7 @@ export default function PhotosScreen() {
       <Screen scroll={false} testID="screen-photos">
         <FlatList {...listPerformance}
           key={columns}
+          onLayout={(e) => setGridWidth(e.nativeEvent.layout.width)}
           data={items}
           numColumns={columns}
           keyExtractor={(p) => p.id}

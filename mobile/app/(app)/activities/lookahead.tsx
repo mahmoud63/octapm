@@ -127,7 +127,16 @@ export default function LookaheadScreen() {
             </Text>
             <Freshness updatedAt={lookahead.dataUpdatedAt || undefined} isFetching={lookahead.isFetching} />
           </View>
-          {lookahead.isPending ? <SkeletonList rows={3} /> : items.length === 0 ? <EmptyState title="No items on this lookahead" /> : items.map((item) => <ItemCard key={item.id} item={item} canUpdate={canUpdate} busy={update.isPending} onStatus={setStatus(item.id)} />)}
+          {lookahead.isPending ? (
+            <SkeletonList rows={3} />
+          ) : lookahead.isError ? (
+            // A failed fetch is not an empty lookahead: say so and offer the retry.
+            <ErrorState message={userMessage(lookahead.error)} onRetry={() => void lookahead.refetch()} />
+          ) : items.length === 0 ? (
+            <EmptyState title="No items on this lookahead" />
+          ) : (
+            items.map((item) => <ItemCard key={item.id} item={item} canUpdate={canUpdate} busy={update.isPending} onStatus={setStatus(item.id)} />)
+          )}
           {failure ? (
             <Text tone="error" accessibilityRole="alert" testID="lookahead-failure">
               {failure}

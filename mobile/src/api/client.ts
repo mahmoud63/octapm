@@ -131,8 +131,16 @@ export async function run<T>(attempt: () => Promise<Outcome<T>>, options: RunOpt
 
   const status = outcome.response.status
   if (status === 401 && retryOnUnauthorized) {
-    const fresh = await tokens.refresh().catch(() => null)
+    let fresh: string | null = null
+    let refreshFailure: unknown = null
+    try {
+      fresh = await tokens.refresh()
+    } catch (error) {
+      refreshFailure = error
+    }
     if (fresh) return run(attempt, { ...options, retryOnUnauthorized: false })
+    // A refused refresh ends the session; a lost signal or a server fault does not.
+    if (refreshFailure instanceof AppError && refreshFailure.retryable) throw refreshFailure
     tokens.onSessionLost()
   }
 

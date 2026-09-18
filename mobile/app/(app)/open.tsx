@@ -1,7 +1,8 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useLocalSearchParams, useRouter } from 'expo-router'
+import { getProject } from '@/api/endpoints'
 import { Screen } from '@/components/Screen'
-import { SkeletonList } from '@/design-system'
+import { EmptyState, SkeletonList } from '@/design-system'
 import { resolveLink, routeForResolvedLink } from '@/navigation/deepLinks'
 import { useProjectStore } from '@/projects/store'
 
@@ -18,6 +19,7 @@ export default function OpenLinkScreen() {
   const router = useRouter()
   const params = useLocalSearchParams<{ to?: string; projectId?: string; link?: string }>()
   const done = useRef(false)
+  const [refused, setRefused] = useState(false)
 
   useEffect(() => {
     if (done.current) return
@@ -37,7 +39,17 @@ export default function OpenLinkScreen() {
         return
       }
       const store = useProjectStore.getState()
-      if (projectId && projectId !== store.currentProjectId) await store.select(projectId)
+      if (projectId && projectId !== store.currentProjectId) {
+        // A link can name a project this person is not on; switching to it would break every screen. Ask the server first.
+        const allowed = await getProject(projectId)
+          .then(() => true)
+          .catch(() => false)
+        if (!allowed) {
+          setRefused(true)
+          return
+        }
+        await store.select(projectId)
+      }
       router.replace(routeForResolvedLink({ route, projectId: null }, null) as never)
     }
     void run()
@@ -45,7 +57,15 @@ export default function OpenLinkScreen() {
 
   return (
     <Screen testID="screen-open">
-      <SkeletonList rows={3} />
+      {refused ? (
+        <EmptyState
+          title="You are not on that project"
+          body="The link points at a project you do not have access to. Ask the project manager to add you, or open one of your own projects."
+          action={{ title: 'My projects', onPress: () => router.replace('/projects') }}
+        />
+      ) : (
+        <SkeletonList rows={3} />
+      )}
     </Screen>
   )
 }
