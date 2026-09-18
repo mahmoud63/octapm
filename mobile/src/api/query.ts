@@ -37,7 +37,14 @@ export const keys = {
   project: (projectId: string) => ['project', projectId] as const,
   projectScoped: (projectId: string, ...rest: readonly unknown[]) => ['project', projectId, ...rest] as const,
   needsYou: (projectId?: string) => ['needs-you', projectId ?? 'all'] as const,
+  permissions: (projectId: string) => ['project', projectId, 'permissions'] as const,
+  orgPermissions: ['permissions', 'org'] as const,
+  health: (projectId: string) => ['project', projectId, 'health'] as const,
+  workspace: ['workspace'] as const,
   notifications: ['notifications'] as const,
+  notificationList: (status: string) => ['notifications', 'list', status] as const,
+  notificationSummary: ['notifications', 'summary'] as const,
+  notificationPreferences: ['notifications', 'preferences'] as const,
   search: (term: string) => ['search', term] as const,
 }
 

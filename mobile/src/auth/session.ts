@@ -16,6 +16,7 @@ import { forgetEverything } from '@/api/query'
 import { analytics } from '@/analytics'
 import { promptBiometric } from '@/auth/biometric'
 import { STORAGE_KEYS, secureStorage } from '@/auth/secure-storage'
+import { useProjectStore } from '@/projects/store'
 import { useAuthStore, type SessionUser } from '@/auth/store'
 import { log } from '@/utilities/logger'
 
@@ -101,6 +102,7 @@ export function refreshSession(): Promise<string | null> {
 
 async function endLocally(reason: 'user' | 'expired' | 'revoked') {
   forgetEverything()
+  await useProjectStore.getState().clear()
   await Promise.all([secureStorage.remove(STORAGE_KEYS.refreshToken), secureStorage.remove(STORAGE_KEYS.profile)])
   store().setSignedOut(reason)
   if (reason !== 'user') analytics.track({ name: 'mobile_logout' })

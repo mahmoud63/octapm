@@ -23,6 +23,8 @@
 
 **Backend dependencies.** None new. Known gap: Needs You across projects omits role-derived PO, commitment, pay-app and bid items (map §8.18); shown per project as the server provides.
 
+**State.** Complete on this machine (2026-09-18). Built: Home (project strip, chooser, Needs You, Today, project health, notifications, quick-action registry), Projects (find, health, switch with scoped-cache clearing), Needs You (counts, ball-in-court, overdue and type filters), Search (debounced, project or all-projects scope, type chips), Notifications (unread/all, open marks read, long-press archive, mark all read, per-category preferences), hand-over links to the web for records without a screen yet, the current-project store, and the server permission hook. Proof: 92 unit and rendered tests in 18 suites; 16 Playwright checks (phone and tablet viewports) against the production web export and the local API, covering the sign-in contract, every M1 screen, the project switch, a refused refresh and sign-out. Native builds remain on the verification list.
+
 ### MOBILE-M2 — RFI, Tasks, Documents, Drawings
 
 **Scope.** RFI list, filters, ball-in-court, detail with responses and history, create (quick create from Home pre-filling project, person and date), respond, close and convert where permitted; tasks (`assignee=me`, cursor paging, close, comment); document register and search, extracted text; drawing register, sheet viewer (source PDF page rendered on device: zoom, pan, fit width), latest-revision guard with the superseded warning, favourites and recently viewed, pins that create punch items, links to RFI, NCR, inspection and task; attachments through the unified endpoint; comments and subscriptions; custom fields.

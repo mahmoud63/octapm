@@ -11,6 +11,8 @@ export interface Call {
   path: string
   headers: Record<string, string>
   body: unknown
+  /** The query string, decoded. */
+  query: Record<string, string>
 }
 
 export type Route = (call: Call) => { status: number; body?: unknown; headers?: Record<string, string> }
@@ -27,7 +29,11 @@ export function fakeServer(routes: Record<string, Route>): Call[] {
     })
     const raw = await request.text()
     const body = raw ? JSON.parse(raw) : undefined
-    const call: Call = { method: request.method, path, headers, body }
+    const query: Record<string, string> = {}
+    url.searchParams.forEach((value, key) => {
+      query[key] = value
+    })
+    const call: Call = { method: request.method, path, headers, body, query }
     calls.push(call)
     const route = routes[`${request.method} ${path}`]
     if (!route) {

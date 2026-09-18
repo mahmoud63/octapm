@@ -220,3 +220,14 @@ Web-target tests do not certify any of the following. Each item stays on the lis
 | Tokens in logs or persisted stores | none: no token near a log call, and no AsyncStorage, SQLite, persisted zustand or persisted query cache anywhere in `mobile/` |
 
 Not verified here: everything on MOBILE_NATIVE_VERIFICATION_PENDING (section 11). Two notes on the web-target run: pointer and key input through the browser pane did not activate react-native-web buttons, so the sign-out press was dispatched as a DOM click on the app's own button element; Playwright specs from M1 onwards carry this proof durably. The web target's secure store is browser session storage, as section 5.3 says.
+
+## 14. M1 verification record (2026-09-18)
+
+| Check | Result |
+|---|---|
+| Mobile TypeScript and ESLint | 0 errors, 0 warnings |
+| Mobile Jest | 92 passed in 18 suites (request layer, session, offline start, permissions hook, quick actions, links, and rendered Home, Projects, Needs You, Search, Notifications, sign-in, More and shell) |
+| Playwright against the production web export and the local API | 16 passed: 8 checks on a phone viewport (390×844) and the same 8 on a tablet viewport (1024×768) |
+| Playwright checks | sign-in through the native contract (mobile header, refresh token in the body, no cookie); Home cards with live permissions, assignments, health and notifications; project switch (strip changes, the new project's assignments are requested); Needs You counts and filters; Search request carries the bearer and widens scope; Notifications inbox, filters and preferences; refused refresh ends the session with the reason and clears storage; sign-out revokes on the server and clears storage |
+
+How the end-to-end run is made: `npm run export:web` produces the production web build and `npm run serve:web` serves it on port 8081; `npm run e2e` runs the checks. The Metro development bundle is not used for this: it is large and unminified, and on this machine a fresh browser context per test spent most of its budget parsing it and then froze under tracing. Two defects the run found and fixed before the record was taken: the search scope was decided before the remembered project had loaded on a cold start, so it searched every project; and selected chips and rows exposed no `aria-selected` on the web. A locator rule learned the same way: the tab navigator keeps inactive screens mounted, so every web check scopes its queries to the visible screen's test id.

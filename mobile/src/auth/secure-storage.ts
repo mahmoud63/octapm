@@ -51,4 +51,6 @@ export const STORAGE_KEYS = {
   lastEmail: 'session.email',
   /** The last known profile, so the app can open while offline. Never a token. */
   profile: 'session.profile',
+  /** The project the person was working in, so the app reopens there. */
+  currentProject: 'session.project',
 } as const

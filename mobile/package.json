@@ -72,7 +72,8 @@
     "test": "npm run generate && jest",
     "test:watch": "jest --watch",
     "e2e": "playwright test --config e2e/playwright.config.ts",
-    "check": "npm run typecheck && npm run lint && npm run test"
+    "check": "npm run typecheck && npm run lint && npm run test",
+    "serve:web": "node scripts/serve-web.mjs"
   },
   "private": true
 }

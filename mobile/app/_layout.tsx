@@ -13,6 +13,7 @@ import { analytics } from '@/analytics'
 import { bootstrap } from '@/auth/session'
 import { useAuthStore } from '@/auth/store'
 import { env } from '@/config/env'
+import { useProjectStore } from '@/projects/store'
 import { ThemeProvider, useTheme } from '@/design-system'
 import { log } from '@/utilities/logger'
 
@@ -32,6 +33,7 @@ export default function RootLayout() {
 
   useEffect(() => {
     analytics.configure(() => undefined, { env: env.name, appVersion: env.appVersion })
+    useProjectStore.getState().hydrate().catch(() => undefined)
     bootstrap().catch((error) => log.error('auth', 'session bootstrap failed', { message: String(error) }))
   }, [])
 

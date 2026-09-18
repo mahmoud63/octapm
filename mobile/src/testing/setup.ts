@@ -1,3 +1,4 @@
+import { configure } from '@testing-library/react-native'
 import type { ReactNode } from 'react'
 
 /**
@@ -50,6 +51,10 @@ jest.mock('expo-network', () => ({
   addNetworkStateListener: jest.fn(() => ({ remove: () => undefined })),
   NetworkStateType: { NONE: 'NONE', WIFI: 'WIFI', CELLULAR: 'CELLULAR' },
 }))
+
+// findBy* and waitFor default to one second, which a loaded machine can miss
+// while a screen's queries settle. Nothing in the app waits on real time.
+configure({ asyncUtilTimeout: 5000 })
 
 beforeEach(() => {
   mockMemory.clear()

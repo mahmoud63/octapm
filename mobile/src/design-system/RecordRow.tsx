@@ -16,6 +16,7 @@ export interface RecordRowProps {
   trailingTone?: 'default' | 'muted' | 'error' | 'warning'
   selected?: boolean
   onPress?: () => void
+  testID?: string
 }
 
 /**
@@ -23,13 +24,15 @@ export interface RecordRowProps {
  * one line of context. On a phone it is the whole unit of a register; on a
  * tablet it is the left pane of a master–detail view.
  */
-export function RecordRow({ reference, title, status, meta, trailing, trailingTone = 'muted', selected, onPress }: RecordRowProps) {
+export function RecordRow({ reference, title, status, meta, trailing, trailingTone = 'muted', selected, onPress, testID }: RecordRowProps) {
   const theme = useTheme()
   return (
     <Pressable
       accessibilityRole={onPress ? 'button' : undefined}
       accessibilityLabel={`${reference}, ${title}${status ? `, ${status}` : ''}${meta ? `, ${meta}` : ''}`}
       accessibilityState={{ selected: !!selected }}
+      aria-selected={!!selected}
+      testID={testID}
       onPress={onPress}
       style={({ pressed }) => [
         styles.row,
