@@ -74,6 +74,8 @@ describe('subscription gate route ordering', () => {
       error: {
         code: 'SUBSCRIPTION_REQUIRED',
         message: 'Your trial or subscription has ended. Subscribe to continue.',
+        // Every error carries the request id (M0 contract).
+        requestId: expect.any(String),
       },
     });
     expect(mockSubscriptionService.ensureSubscription).toHaveBeenCalledWith('org-1');
@@ -101,6 +103,8 @@ describe('subscription gate route ordering', () => {
       error: {
         code: 'SUBSCRIPTION_REQUIRED',
         message: 'Your trial or subscription has ended. Subscribe to continue.',
+        // Every error carries the request id (M0 contract).
+        requestId: expect.any(String),
       },
     });
     expect(mockSubscriptionService.ensureSubscription).toHaveBeenCalledWith('org-1');

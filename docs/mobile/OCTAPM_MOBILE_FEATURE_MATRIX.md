@@ -1,7 +1,7 @@
 # OctaPM Mobile — Feature Matrix
 
 **Audience:** the product owner, the mobile team and the UAT leads.
-**Status:** planned coverage per platform, as of 2026-09-18. "Phone" and "Tablet" describe the native app on Android and iOS/iPadOS; "Web" is the existing web platform, which remains the complete product. The milestone column refers to the [implementation plan](OCTAPM_MOBILE_IMPLEMENTATION_PLAN.md); roles come from the [permission matrix](OCTAPM_MOBILE_PERMISSION_MATRIX.md), which is generated from the backend policy.
+**Status:** coverage per platform as built through M9 and certified in M10, as of 2026-09-18 (the rows say what exists; the [final report](OCTAPM_MOBILE_FINAL_REPORT.md) says what has been proven on this machine and what waits for a device). "Phone" and "Tablet" describe the native app on Android and iOS/iPadOS; "Web" is the existing web platform, which remains the complete product. The milestone column refers to the [implementation plan](OCTAPM_MOBILE_IMPLEMENTATION_PLAN.md); roles come from the [permission matrix](OCTAPM_MOBILE_PERMISSION_MATRIX.md), which is generated from the backend policy.
 
 **Levels.** FULL = create, edit and every transition the role holds. VIEW = read only. APPROVE = the approve/decide step is available (only where the role holds it and the step is safe on a phone). LIMITED = a deliberate subset, described in the notes. NOT AVAILABLE = web only; the app hands over with a link.
 

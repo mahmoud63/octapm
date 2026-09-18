@@ -372,3 +372,20 @@ The rule the split rests on: a screen never knows it is on a tablet by device; i
 | Where writes went | the dedicated end-to-end organisation only |
 
 Native items added to the verification list by M9: push permission, token and delivery on a device; a universal link and an `octapm://` link opening the installed app; the markup view capture; background sync while the app is closed.
+
+## 24. M10 certification record (2026-09-18)
+
+The full record, the gates and the verdicts are in the [final report](OCTAPM_MOBILE_FINAL_REPORT.md); this is the machine's view.
+
+| Check | Result |
+|---|---|
+| Mobile TypeScript and ESLint | 0 errors, 0 warnings |
+| Mobile Jest | 275 passed in 55 suites |
+| Backend Jest | 2,217 tests in 199 suites, all passing |
+| Playwright against the production web export and the local API | 79 passed on the phone and tablet viewports (m1 to m10), one tablet-only check skipped on the phone by design |
+| Role gate, live | a site engineer signed in on the app saw no Approve or Reject on a submitted progress update and no Answer, Approve or Close on an open RFI; the manager sees them (m8, m2); the nine role accounts' effective matrices are tabled in the report |
+| Isolation gate, live | a project manager of another organisation got not-found from the API for this project's record and, following a link into the app, saw "That record is no longer available" and no record |
+| Financial reconciliation, live | change-order summary against its rows: approved 21,000.00, pending 4,500.00, count 14, all at delta 0.00; commitment SC-0001 original plus its approved change orders equals revised, and its schedule of values equals original, both at 0.00 |
+| Where writes went | the dedicated end-to-end organisation only; the demo organisation read once; the certified project never touched |
+
+Verdicts: NOT READY FOR INTERNAL MOBILE UAT (no native build produced or run here; the device list in the report turns it to READY) and NOT READY FOR FIELD PILOT (follows UAT; CONDITIONAL on four items once UAT passes). Nothing deployed or published.

@@ -185,6 +185,8 @@ describe('project object authorization', () => {
       error: {
         code: 'PROJECT_ACCESS_DENIED',
         message: 'You are not assigned to this project',
+        // Every error carries the request id (M0 contract).
+        requestId: expect.any(String),
       },
     });
     expect(mockProjectService.getProjectById).not.toHaveBeenCalled();

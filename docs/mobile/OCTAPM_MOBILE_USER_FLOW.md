@@ -1,7 +1,7 @@
 # OctaPM Mobile — User Flow
 
 **Audience:** designers, testers and the people writing the user guides.
-**Status:** the screens that exist after M1, plus the planned screens marked as such. Updated at each milestone. Companion: [Feature matrix](OCTAPM_MOBILE_FEATURE_MATRIX.md), [Implementation plan](OCTAPM_MOBILE_IMPLEMENTATION_PLAN.md).
+**Status:** the screens that exist after M9, as built; sections 5 to 7 cover the tablet, offline and link flows. Certified in M10 ([final report](OCTAPM_MOBILE_FINAL_REPORT.md)). Companion: [Feature matrix](OCTAPM_MOBILE_FEATURE_MATRIX.md), [Implementation plan](OCTAPM_MOBILE_IMPLEMENTATION_PLAN.md).
 
 ## 1. Screen map
 
