@@ -38,8 +38,12 @@ export default function AppLayout() {
       <Tabs.Screen name="needs-you" options={{ title: 'Needs You', tabBarIcon: ({ color, size }) => <Ionicons name="hand-right-outline" color={color} size={size} /> }} />
       <Tabs.Screen name="search" options={{ title: 'Search', tabBarIcon: ({ color, size }) => <Ionicons name="search-outline" color={color} size={size} /> }} />
       <Tabs.Screen name="more" options={{ title: 'More', tabBarIcon: ({ color, size }) => <Ionicons name="ellipsis-horizontal-outline" color={color} size={size} /> }} />
-      {/* Reached from Home, not a destination of its own. */}
+      {/* Reached from Home, Needs You and Search; not destinations of their own. */}
       <Tabs.Screen name="notifications" options={{ href: null }} />
+      <Tabs.Screen name="rfi" options={{ href: null }} />
+      <Tabs.Screen name="tasks" options={{ href: null }} />
+      <Tabs.Screen name="documents" options={{ href: null }} />
+      <Tabs.Screen name="drawings" options={{ href: null }} />
     </Tabs>
   )
 }

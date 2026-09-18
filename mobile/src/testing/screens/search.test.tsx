@@ -1,4 +1,5 @@
 import { fireEvent, screen, waitFor } from '@testing-library/react-native'
+import { router } from 'expo-router'
 import * as WebBrowser from 'expo-web-browser'
 import SearchScreen from '../../../app/(app)/search'
 import { network } from '@/api/network'
@@ -28,6 +29,7 @@ beforeEach(() => {
   network.__reset(null)
   queryClient.clear()
   ;(WebBrowser.openBrowserAsync as jest.Mock).mockClear()
+  ;(router.push as jest.Mock).mockClear()
   useAuthStore.setState({ status: 'signedIn', user, accessToken: 'access-1', accessExpiresAt: Date.now() + 900_000 })
   useProjectStore.setState({ currentProjectId: 'p1', hydrated: true })
   calls = fakeServer({ 'GET /projects': () => ({ status: 200, body: envelope(page(projects)) }), 'GET /search': results })
@@ -61,11 +63,17 @@ describe('Search', () => {
     expect(screen.getByText(/Harbour Bridge/)).toBeTruthy()
   })
 
-  it('opens a hit on the web at the record the server named', async () => {
+  it('opens an RFI hit in the app, and a record without a screen on the web at the path the server named', async () => {
+    calls = fakeServer({
+      'GET /projects': () => ({ status: 200, body: envelope(page(projects)) }),
+      'GET /search': () => ({ status: 200, body: envelope({ query: 'x', items: [searchItem(), searchItem({ id: 'pl1', type: 'punch_item', typeLabel: 'Punch item', module: 'quality', identifier: 'PL-004', title: 'Chipped tile at lobby', url: '/projects/p1?module=quality&child=defects&recordId=pl1&source=punch_item' })], groups: [], filters: {}, meta: { limit: 30, total: 2 } }) }),
+    })
     await renderScreen(<SearchScreen />)
     await fireEvent.changeText(screen.getByTestId('search-input'), 'excav')
     await fireEvent.press(await screen.findByText('Founding level at grid A-D against borehole BH-3'))
+    expect(router.push).toHaveBeenCalledWith('/rfi/r1')
+    await fireEvent.press(screen.getByText('Chipped tile at lobby'))
     await waitFor(() => expect(WebBrowser.openBrowserAsync).toHaveBeenCalledTimes(1))
-    expect((WebBrowser.openBrowserAsync as jest.Mock).mock.calls[0]![0]).toMatch(/\/projects\/p1\?module=docControl&child=rfi&recordId=r1&status=closed&source=rfi$/)
+    expect((WebBrowser.openBrowserAsync as jest.Mock).mock.calls[0]![0]).toMatch(/\/projects\/p1\?module=quality&child=defects&recordId=pl1&source=punch_item$/)
   })
 })

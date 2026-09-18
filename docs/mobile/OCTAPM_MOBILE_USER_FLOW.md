@@ -45,9 +45,23 @@ Notifications (from Home) ──────────────────
 
 More ────────────────────────────────────────────────────
   Signed in as · Unlock with biometrics (on / off) · This build · Sign out
+
+Records (from Home, Needs You, Search and Notifications) ─ M2
+  RFIs ──► list (mine / overdue / status / search) ──► record
+             │  question · official answer · responses · people · place ·
+             │  impacts · attachments · discussion · history
+             │  actions by state and permission: submit · answer · approve ·
+             │  reject · close · reopen · convert to change · add response
+             └─ New RFI (also the Home quick action)
+  Tasks ─► list (mine / all I can see · this project / all) ──► record
+             comments · history · start · blocked · mark done
+  Documents ─► register by folder ──► record in the app, or the latest file
+  Drawings ─► sheets (disciplines · favourites · recent · obsolete) ──► sheet
+             superseded warning first · page fitted to width · pins ·
+             favourite · raise RFI from here
 ```
 
-Planned destinations reached from Home, Needs You and Search as their milestones land: RFI list and record (M2), tasks (M2), documents and drawings with the sheet viewer (M2), daily logs, progress and photos (M3), quality home, inspections, punch, NCR, safety (M4), inventory home, scan, goods receipt, issue, transfer (M5), change events, workflow inbox, procurement views (M6), outbox and offline status (M7).
+Planned destinations reached from Home, Needs You and Search as their milestones land: daily logs, progress and photos (M3), quality home, inspections, punch, NCR, safety (M4), inventory home, scan, goods receipt, issue, transfer (M5), change events, workflow inbox, procurement views (M6), outbox and offline status (M7).
 
 ## 2. Navigation rules
 

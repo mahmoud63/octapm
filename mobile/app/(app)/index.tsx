@@ -12,7 +12,7 @@ import { ProjectSwitch } from '@/components/ProjectSwitch'
 import { Screen } from '@/components/Screen'
 import { Badge, Button, Card, EmptyState, ErrorState, KPI, RecordRow, SkeletonList, Text, spacing } from '@/design-system'
 import { availableQuickActions } from '@/home/quick-actions'
-import { openOnWeb, webPathForTarget } from '@/navigation/links'
+import { destinationForTarget, openOnWeb } from '@/navigation/links'
 import { roleLabel } from '@/permissions/policy'
 import { usePermissions } from '@/permissions/usePermissions'
 import { useProjectStore } from '@/projects/store'
@@ -70,7 +70,17 @@ export default function HomeScreen() {
   const items = assignments.data?.items ?? []
   const today = items.filter((item) => item.overdue || dueToday(item))
   const quickActions = availableQuickActions(permissions.matrix)
-  const open = (item: AssignmentItem) => void openOnWeb(webPathForTarget(item.target))
+  const open = (item: AssignmentItem) => {
+    const destination = destinationForTarget(item.target)
+    if ('app' in destination) router.push(destination.app as never)
+    else void openOnWeb(destination.web)
+  }
+  const records = [
+    { id: 'rfi', title: 'RFIs', route: '/rfi', module: 'rfi' },
+    { id: 'tasks', title: 'Tasks', route: '/tasks', module: 'task' },
+    { id: 'documents', title: 'Documents', route: '/documents', module: 'document_control' },
+    { id: 'drawings', title: 'Drawings', route: '/drawings', module: 'document_control' },
+  ].filter((r) => permissions.allows(r.module, 'read'))
 
   return (
     <Screen
@@ -107,6 +117,14 @@ export default function HomeScreen() {
         <View style={styles.actions} testID="quick-actions">
           {quickActions.map((action) => (
             <Button key={action.id} title={action.title} variant="secondary" onPress={() => router.push(action.route as never)} testID={`quick-${action.id}`} />
+          ))}
+        </View>
+      ) : null}
+
+      {projectId && records.length > 0 ? (
+        <View style={styles.actions} testID="records">
+          {records.map((r) => (
+            <Button key={r.id} title={r.title} variant="secondary" onPress={() => router.push(r.route as never)} testID={`records-${r.id}`} />
           ))}
         </View>
       ) : null}

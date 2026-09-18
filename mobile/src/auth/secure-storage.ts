@@ -53,4 +53,6 @@ export const STORAGE_KEYS = {
   profile: 'session.profile',
   /** The project the person was working in, so the app reopens there. */
   currentProject: 'session.project',
+  /** Favourite and recent drawing sheets on this device. */
+  drawingPrefs: 'session.drawings',
 } as const

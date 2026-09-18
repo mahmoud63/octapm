@@ -10,7 +10,7 @@ import { Freshness } from '@/components/Freshness'
 import { ProjectSwitch } from '@/components/ProjectSwitch'
 import { Screen } from '@/components/Screen'
 import { EmptyState, ErrorState, KPI, SkeletonList, Text, spacing } from '@/design-system'
-import { openOnWeb, webPathForTarget } from '@/navigation/links'
+import { destinationForTarget, openOnWeb } from '@/navigation/links'
 import { useProjectStore } from '@/projects/store'
 
 type Mode = 'all' | 'ballInCourt' | 'overdue'
@@ -35,7 +35,11 @@ export default function NeedsYouScreen() {
     () => items.filter((item) => (mode === 'ballInCourt' ? item.ballInCourt : mode === 'overdue' ? item.overdue : true)).filter((item) => (type ? item.recordType === type : true)),
     [items, mode, type]
   )
-  const open = (item: AssignmentItem) => void openOnWeb(webPathForTarget(item.target))
+  const open = (item: AssignmentItem) => {
+    const destination = destinationForTarget(item.target)
+    if ('app' in destination) router.push(destination.app as never)
+    else void openOnWeb(destination.web)
+  }
 
   if (!projectId) {
     return (
@@ -72,7 +76,7 @@ export default function NeedsYouScreen() {
             <Freshness updatedAt={assignments.dataUpdatedAt || undefined} isFetching={assignments.isFetching} />
             {rows.length > 0 ? (
               <Text variant="caption" tone="muted">
-                Tap an item to open it on the web. Record screens arrive with the next milestones.
+                RFIs and tasks open in the app; other records open on the web until their screens arrive.
               </Text>
             ) : null}
           </View>

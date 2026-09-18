@@ -1,3 +1,4 @@
+import { useRouter } from 'expo-router'
 import { useEffect, useState } from 'react'
 import { FlatList, ScrollView, StyleSheet, View } from 'react-native'
 import { userMessage } from '@/api/errors'
@@ -5,7 +6,7 @@ import { useProjects, useSearch } from '@/api/hooks'
 import { FilterChip } from '@/components/FilterChip'
 import { Screen } from '@/components/Screen'
 import { EmptyState, ErrorState, Input, RecordRow, SkeletonList, Text, spacing } from '@/design-system'
-import { openOnWeb, webPathForSearchItem } from '@/navigation/links'
+import { destinationForSearchItem, openOnWeb } from '@/navigation/links'
 import { useProjectStore } from '@/projects/store'
 import { day } from '@/utilities/format'
 
@@ -15,6 +16,7 @@ import { day } from '@/utilities/format'
  * by default, widened to every project with one tap.
  */
 export default function SearchScreen() {
+  const router = useRouter()
   const projectId = useProjectStore((s) => s.currentProjectId)
   const projects = useProjects()
   const [term, setTerm] = useState('')
@@ -64,7 +66,11 @@ export default function SearchScreen() {
             status={item.status}
             meta={[item.typeLabel, scope === 'all' ? item.projectName : null, item.subtitle].filter(Boolean).join(' · ')}
             trailing={item.date ? day(item.date) : undefined}
-            onPress={() => void openOnWeb(webPathForSearchItem(item))}
+            onPress={() => {
+              const destination = destinationForSearchItem(item)
+              if ('app' in destination) router.push(destination.app as never)
+              else void openOnWeb(destination.web)
+            }}
           />
         )}
         ListEmptyComponent={

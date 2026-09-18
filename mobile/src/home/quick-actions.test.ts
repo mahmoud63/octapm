@@ -4,8 +4,9 @@ import { matrix, pmMatrix } from '@/testing/fixtures'
 describe('quick actions on Home', () => {
   const built: QuickAction[] = QUICK_ACTIONS.map((action) => ({ ...action, route: `/${action.id}` }))
 
-  it('shows nothing until a screen exists, whatever the permission', () => {
-    expect(availableQuickActions(pmMatrix)).toEqual([])
+  it('shows only the actions whose screen exists, whatever the permission', () => {
+    // After M2 the RFI form exists; the others arrive with their milestones.
+    expect(availableQuickActions(pmMatrix).map((a) => a.id)).toEqual(['rfi'])
   })
 
   it('shows a project manager every built action the server allows', () => {

@@ -66,3 +66,37 @@ export function webPathForSearchItem(item: SearchItem): string {
 export async function openOnWeb(path: string): Promise<void> {
   await WebBrowser.openBrowserAsync(`${env.webOrigin}${path.startsWith('/') ? path : `/${path}`}`)
 }
+
+/**
+ * Record types that have a screen in the app, and the route that shows them.
+ * Everything else hands over to the web. Grows with the milestones.
+ */
+const IN_APP_ROUTES: Record<string, (recordId: string) => string> = {
+  rfi: (id) => `/rfi/${id}`,
+  task: (id) => `/tasks/${id}`,
+  sheet: (id) => `/drawings/${id}`,
+}
+
+export function appRouteForRecord(recordType: string | null | undefined, recordId: string | null | undefined): string | null {
+  if (!recordType || !recordId) return null
+  const route = IN_APP_ROUTES[recordType]
+  return route ? route(recordId) : null
+}
+
+/** Where a server target goes: an app route when the screen exists, otherwise the web path. */
+export function destinationForTarget(target: RecordTarget): { app: string } | { web: string } {
+  const app = appRouteForRecord(target.recordType ?? target.source, target.recordId)
+  return app ? { app } : { web: webPathForTarget(target) }
+}
+
+export function destinationForSearchItem(item: SearchItem): { app: string } | { web: string } {
+  const app = appRouteForRecord(item.type, item.id)
+  return app ? { app } : { web: webPathForSearchItem(item) }
+}
+
+export function destinationForNotification(notification: Notification): { app: string } | { web: string } | null {
+  const app = appRouteForRecord(notification.entityType, notification.entityId)
+  if (app) return { app }
+  const web = webPathForNotification(notification)
+  return web ? { web } : null
+}

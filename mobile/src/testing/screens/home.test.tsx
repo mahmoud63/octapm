@@ -41,8 +41,10 @@ describe('Home', () => {
     expect(screen.getByText(/2 items awaiting review/)).toBeTruthy()
     expect(await screen.findByText('4 unread')).toBeTruthy()
     expect(screen.getByText('Change order VO-01 needs approval')).toBeTruthy()
-    // No quick action has a screen yet, so none is offered.
-    expect(screen.queryByTestId('quick-actions')).toBeNull()
+    // The RFI form exists, so a project manager gets that quick action and the record screens.
+    expect(await screen.findByTestId('quick-rfi')).toBeTruthy()
+    expect(screen.getByTestId('records-rfi')).toBeTruthy()
+    expect(screen.getByTestId('records-documents')).toBeTruthy()
   })
 
   it('opens the only project without asking', async () => {

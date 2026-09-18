@@ -41,6 +41,8 @@ export const keys = {
   orgPermissions: ['permissions', 'org'] as const,
   health: (projectId: string) => ['project', projectId, 'health'] as const,
   workspace: ['workspace'] as const,
+  tasks: ['tasks'] as const,
+  task: (taskId: string) => ['tasks', 'task', taskId] as const,
   notifications: ['notifications'] as const,
   notificationList: (status: string) => ['notifications', 'list', status] as const,
   notificationSummary: ['notifications', 'summary'] as const,

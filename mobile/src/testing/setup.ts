@@ -79,11 +79,22 @@ jest.mock('expo-router', () => {
     Link: ({ children }: { children?: ReactNode }) => React.createElement(Text, null, children),
     Stack: Object.assign(Navigator, { Screen }),
     Tabs: Object.assign(Navigator, { Screen }),
-    useLocalSearchParams: () => ({}),
+    // Tests set the params of the screen under test: (useLocalSearchParams as jest.Mock).mockReturnValue({ id })
+    useLocalSearchParams: jest.fn(() => ({})),
     useSegments: () => [],
     usePathname: () => '/',
   }
 })
+
+jest.mock('expo-image-picker', () => ({
+  requestCameraPermissionsAsync: jest.fn(async () => ({ granted: true })),
+  requestMediaLibraryPermissionsAsync: jest.fn(async () => ({ granted: true })),
+  launchCameraAsync: jest.fn(async () => ({ canceled: true, assets: [] })),
+  launchImageLibraryAsync: jest.fn(async () => ({ canceled: true, assets: [] })),
+}))
+jest.mock('expo-file-system/legacy', () => ({ cacheDirectory: 'file:///cache/', downloadAsync: jest.fn(async (_url: string, target: string) => ({ status: 200, uri: target })) }))
+jest.mock('expo-sharing', () => ({ isAvailableAsync: jest.fn(async () => true), shareAsync: jest.fn(async () => undefined) }))
+jest.mock('react-native-webview', () => ({ WebView: () => null }))
 
 jest.mock('react-native-safe-area-context', () => {
   const insets = { top: 0, right: 0, bottom: 0, left: 0 }

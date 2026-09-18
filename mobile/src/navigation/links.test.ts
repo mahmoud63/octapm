@@ -1,5 +1,19 @@
-import { webPathForNotification, webPathForTarget } from '@/navigation/links'
-import { notification } from '@/testing/fixtures'
+import { appRouteForRecord, destinationForNotification, destinationForSearchItem, destinationForTarget, webPathForNotification, webPathForTarget } from '@/navigation/links'
+import { notification, searchItem } from '@/testing/fixtures'
+
+describe('records with a screen in the app', () => {
+  it('routes RFIs, tasks and sheets into the app and everything else to the web', () => {
+    expect(appRouteForRecord('rfi', 'r1')).toBe('/rfi/r1')
+    expect(appRouteForRecord('task', 't1')).toBe('/tasks/t1')
+    expect(appRouteForRecord('sheet', 's1')).toBe('/drawings/s1')
+    expect(appRouteForRecord('punch_item', 'x')).toBeNull()
+    expect(destinationForTarget({ projectId: 'p1', module: 'docControl', child: 'rfi', recordType: 'rfi', recordId: 'r1' })).toEqual({ app: '/rfi/r1' })
+    expect(destinationForTarget({ projectId: 'p1', module: 'quality', child: 'ncr', recordType: 'ncr', recordId: 'n1' })).toEqual({ web: '/projects/p1/quality/ncr?recordId=n1&source=ncr' })
+    expect(destinationForSearchItem(searchItem())).toEqual({ app: '/rfi/r1' })
+    expect(destinationForNotification(notification({ entityType: 'task', entityId: 't7' }))).toEqual({ app: '/tasks/t7' })
+    expect(destinationForNotification(notification())).toEqual({ web: '/projects/p1/commercial/change-orders?recordId=co1&source=change_order' })
+  })
+})
 
 describe('web hand-over links', () => {
   it('turns a server target with a legacy module key into the web path for that record', () => {

@@ -21,7 +21,7 @@ export interface QuickAction {
 }
 
 export const QUICK_ACTIONS: readonly QuickAction[] = [
-  { id: 'rfi', title: 'New RFI', icon: 'help-circle-outline', module: 'rfi', action: 'create' },
+  { id: 'rfi', title: 'New RFI', icon: 'help-circle-outline', module: 'rfi', action: 'create', route: '/rfi/new' },
   { id: 'punch', title: 'Punch item', icon: 'flag-outline', module: 'punch', action: 'create' },
   { id: 'photo', title: 'Photo', icon: 'camera-outline', module: 'document_control', action: 'create' },
   { id: 'daily-log', title: 'Daily log', icon: 'today-outline', module: 'progress', action: 'submit' },

@@ -9,7 +9,7 @@ import { FilterChip } from '@/components/FilterChip'
 import { Freshness } from '@/components/Freshness'
 import { Screen } from '@/components/Screen'
 import { Badge, Button, Card, EmptyState, ErrorState, SkeletonList, Text, radius, spacing, tapTarget, useTheme } from '@/design-system'
-import { openOnWeb, webPathForNotification } from '@/navigation/links'
+import { destinationForNotification, openOnWeb } from '@/navigation/links'
 import { humanise, relative } from '@/utilities/format'
 
 function NotificationRow({ item, onOpen, onArchive }: { item: Notification; onOpen: () => void; onArchive: () => void }) {
@@ -64,8 +64,10 @@ export default function NotificationsScreen() {
 
   const open = async (item: Notification) => {
     if (item.status === 'unread') actions.markRead.mutate({ id: item.id })
-    const path = webPathForNotification(item)
-    if (path) await openOnWeb(path)
+    const destination = destinationForNotification(item)
+    if (!destination) return
+    if ('app' in destination) router.push(destination.app as never)
+    else await openOnWeb(destination.web)
   }
 
   const toggle = (pref: NotificationPreference, field: 'inAppEnabled' | 'pushEnabled', value: boolean) =>

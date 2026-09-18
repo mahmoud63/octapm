@@ -52,5 +52,36 @@ async function copyPolicy() {
   console.log(`permission policy: ${(size / 1024).toFixed(1)} KB copied from shared/permissions.json`)
 }
 
+/**
+ * expo-router's typed routes (.expo/types/router.d.ts) are normally written
+ * by the dev server. Typecheck runs without one, so the same generator is
+ * invoked here; a stale declaration would otherwise reject every new screen.
+ */
+async function generateTypedRoutes() {
+  const expoRoot = path.dirname(require.resolve('expo/package.json'))
+  // The generator ships with the CLI, which expo nests under its own node_modules.
+  const roots = [path.join(expoRoot, 'node_modules', '@expo', 'cli'), path.dirname(require.resolve('expo-router/package.json')), expoRoot, mobile]
+  let modulePath = null
+  for (const root of roots) {
+    try {
+      modulePath = createRequire(path.join(root, 'package.json')).resolve('@expo/router-server/build/typed-routes')
+      break
+    } catch {
+      // try the next root
+    }
+  }
+  if (!modulePath) {
+    console.warn('typed routes: generator not found; leaving .expo/types/router.d.ts as it is')
+    return
+  }
+  process.env.EXPO_ROUTER_APP_ROOT = path.join(mobile, 'app')
+  const typesDirectory = path.join(mobile, '.expo', 'types')
+  await mkdir(typesDirectory, { recursive: true })
+  const generator = require(modulePath)
+  await generator.regenerateDeclarations(typesDirectory)
+  console.log('typed routes: .expo/types/router.d.ts regenerated')
+}
+
 await generateApiTypes()
 await copyPolicy()
+await generateTypedRoutes()
