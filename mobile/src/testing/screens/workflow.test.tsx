@@ -71,6 +71,29 @@ describe('an approval step', () => {
     expect(screen.getByTestId('workflow-step-pm_approval')).toBeTruthy()
   })
 
+  it('says what is being approved, and what it is worth, before the answer is given', async () => {
+    serve()
+    await renderScreen(<WorkflowInstanceScreen />)
+    expect(await screen.findByTestId('workflow-context')).toBeTruthy()
+    expect(screen.getByText('Change value')).toBeTruthy()
+    expect(screen.getByText(/18,500/)).toBeTruthy()
+    expect(screen.getByText('Design change')).toBeTruthy()
+    expect(screen.getByText('2 days')).toBeTruthy()
+    await fireEvent.press(screen.getByTestId('workflow-respond-approve'))
+    expect(await screen.findByText('Approve change order CO-001?')).toBeTruthy()
+    expect(screen.getByText(/Change value: .*18,500[\s\S]*record your approval in the project audit trail/)).toBeTruthy()
+  })
+
+  it('will not offer a money decision it has no figure for, and hands it to the web instead', async () => {
+    // An instance whose context carries no amount: the app cannot say what the
+    // approval is worth, so it must not present an approve button.
+    serve(instance({ context: { ref: 'CO-001', title: 'Second lift pit at grid F', status: 'pending' } }))
+    await renderScreen(<WorkflowInstanceScreen />)
+    expect(await screen.findByTestId('workflow-review-on-web')).toBeTruthy()
+    expect(screen.queryByTestId('workflow-respond-approve')).toBeNull()
+    expect(screen.queryByTestId('workflow-respond-reject')).toBeNull()
+  })
+
   it('needs a comment to reject, sends the answer through the respond route and shows the outcome', async () => {
     serve()
     await renderScreen(<WorkflowInstanceScreen />)

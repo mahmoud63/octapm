@@ -1,14 +1,15 @@
 import { useLocalSearchParams, useRouter } from 'expo-router'
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import { StyleSheet, View } from 'react-native'
 import { useChangeOrders } from '@/api/commercial-hooks'
 import { userMessage } from '@/api/errors'
 import { useProjects } from '@/api/hooks'
+import type { AttachmentRef } from '@/api/quality-types'
 import { Comments } from '@/components/Comments'
 import { History } from '@/components/History'
 import { RecordHeader } from '@/components/RecordHeader'
 import { Screen } from '@/components/Screen'
-import { Fact } from '@/components/WorkflowRecordCard'
+import { EvidenceCard, Fact } from '@/components/WorkflowRecordCard'
 import { Badge, Button, Card, ErrorState, KPI, SkeletonList, Text, spacing } from '@/design-system'
 import { openOnWeb, webPathForTarget } from '@/navigation/links'
 import { useProjectStore } from '@/projects/store'
@@ -23,6 +24,7 @@ export default function ChangeOrderScreen() {
   const orders = useChangeOrders(projectId)
   const currency = projects.data?.find((p) => p.id === projectId)?.currency
   const record = useMemo(() => orders.data?.find((o) => o.id === id) ?? null, [orders.data, id])
+  const [openFailure, setOpenFailure] = useState<string | null>(null)
 
   if (!projectId || !id) {
     return (
@@ -72,6 +74,12 @@ export default function ChangeOrderScreen() {
           <Fact label="Rejected because" value={o.rejectedReason} />
         </View>
       </Card>
+      <EvidenceCard refs={(o.attachmentRefs ?? []) as AttachmentRef[]} onOpenFailed={setOpenFailure} empty="Nothing attached to this change order." testIDPrefix="change-order-evidence" />
+      {openFailure ? (
+        <Text tone="error" accessibilityRole="alert" testID="change-order-open-failure">
+          {openFailure}
+        </Text>
+      ) : null}
       <Card>
         <Comments projectId={projectId} recordType="change_order" recordId={o.id} />
       </Card>

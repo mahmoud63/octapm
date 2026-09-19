@@ -206,7 +206,7 @@ export const instance = (over: Partial<WorkflowInstance> = {}): WorkflowInstance
   steps: [
     { key: 'pm_approval', name: 'PM approval', type: 'response', description: 'Approve the change order or send it back.', days: 5, requireAll: false, responses: stepItem().responses, status: 'active', result: null, startedAt: '2026-09-15T00:00:00.000Z', dueAt: '2030-01-10T00:00:00.000Z', completedAt: null, assignments: [{ id: 'as1', userId: 'u1', user: { id: 'u1', name: 'Dana Okafor' }, status: 'pending', response: null, responseLabel: null, comment: null, isOverride: false, dueAt: '2030-01-10T00:00:00.000Z', respondedAt: null, escalatedAt: null, overdue: false }] },
   ],
-  context: {},
+  context: { ref: 'CO-001', title: 'Second lift pit at grid F', amount: 18500, status: 'pending', category: 'design_change', scheduleImpact: 2 },
   applyStatus: null,
   applyError: null,
   escalationLevel: 0,
