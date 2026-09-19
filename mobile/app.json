@@ -42,6 +42,10 @@
         "USE_FINGERPRINT",
         "VIBRATE"
       ],
+      "blockedPermissions": [
+        "android.permission.SYSTEM_ALERT_WINDOW",
+        "android.permission.RECORD_AUDIO"
+      ],
       "intentFilters": [
         {
           "action": "VIEW",
@@ -94,7 +98,8 @@
       [
         "expo-image-picker",
         {
-          "photosPermission": "OctaPM attaches photos from your library to site records such as RFIs, inspections and daily logs."
+          "photosPermission": "OctaPM attaches photos from your library to site records such as RFIs, inspections and daily logs.",
+          "microphonePermission": false
         }
       ],
       [
