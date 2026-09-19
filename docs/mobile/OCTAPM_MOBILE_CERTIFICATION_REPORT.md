@@ -10,7 +10,7 @@
 |---|---|---|
 | Mobile web export certification | **PASS** | Every gate that can be proven in a browser is proven against the certified bundle: authentication and session, role-aware access for all nine roles, tenant and project isolation, deep links for every record type with a screen, phone and tablet and iPad-style layout, the eight web↔mobile handoffs, financial and inventory integrity with a delta of 0.00, and no technical text on any screen the checks visited. |
 | Native device readiness | **READY FOR DEVICE VERIFICATION** | The application is complete and its logic is proven; what is missing is a build. The toolchain is absent on this machine, the two guides say exactly what to install and run, and the register lists twelve device checks. Nothing blocks a build from starting today. |
-| Field pilot | **CONDITIONAL** | Two independent reasons, either of which alone would make it conditional. First, camera, barcode, SecureStore and push have not been exercised on a device and the pilot needs all four. Second, approvals score 3.8 of 5, below the 4.0 floor: a change order can be approved on the phone without the amount on screen. |
+| Field pilot | **CONDITIONAL** | Two independent reasons, either of which alone would make it conditional. First, camera, barcode, SecureStore and push have not been exercised on a device and the pilot needs all four. Second, approvals scored 3.8 of 5, below the 4.0 floor, because a change order could be approved on the phone without the amount on screen. That second reason was closed in the native device certification phase: approvals now score 4.2. The first stands, and the pilot verdict is set by the [field pilot readiness](OCTAPM_FIELD_PILOT_READINESS.md). |
 
 The words "production ready" do not appear in this report, by design.
 
@@ -86,7 +86,7 @@ The Playwright suite is the ten milestone specs (`m1`–`m10`) plus the eight ce
 | Tasks | PASS | assigned on the web, completed from the field |
 | Meetings | NOT IN THE APP | no meetings screen; a meeting link hands over to the web. The feature matrix was corrected in this phase, where it had claimed VIEW |
 | Change Events | PASS | raised on the screen and readable on the web at once |
-| Approvals | CONDITIONAL | the flow works end to end, but a change order can be approved without the amount, counterparty, retention or attachment on screen, and workflow steps for tools with no in-app record show only the step name (PILOT-01, PILOT-02, PILOT-03) |
+| Approvals | PASS with reservations | the flow works end to end and the decision now carries its own consequence: the money, the reason, the programme impact, the evidence and a confirmation that names all three (PILOT-01 and PILOT-02 closed). Reservations: commitment and pay-application documents are still web-only (PILOT-03), the inbox row shows no value (PILOT-16), and progress approval is still a single tap (PILOT-04) |
 | PM daily control centre | PARTIAL | Home answers what needs me, what is late and what I can do now, from live signals. Of the brief's morning list it does not yet surface long-lead risk, quantity overrun or commercial exposure as their own items; quantity overrun has no backend to read (section 9) |
 
 ## 5. Web ↔ mobile propagation
@@ -178,12 +178,24 @@ Scored honestly, one decimal, no rounding up.
 | RFI workflow | 4.7 |
 | Documents | 4.0 |
 | Drawings | 4.0 |
-| Approvals | **3.8** |
+| Approvals | **4.2** |
 | Visual professionalism | 4.7 |
 | Performance | 4.3 |
 | Responsibility clarity | 4.5 |
 
-Sum 75.3 over 17 areas. **Overall 4.43.** The target for an external field pilot is 4.5 with no core workflow below 4.0; this is below both, on approvals. 4.43 is not rounded to 4.5.
+Sum 75.7 over 17 areas. **Overall 4.4529…, stated as 4.45.** The target for an external field pilot is 4.5 with no core workflow below 4.0. Approvals now clears the 4.0 floor; the overall figure is still below 4.5. 4.4529 is not rounded to 4.5.
+
+**Approvals, re-scored after PILOT-02.** The score was 3.8 because a change order could be approved with nothing on screen but its reference and title. It is now 4.2, and that figure is built rather than chosen:
+
+| What the score is made of | Out of 5 | Why |
+|---|---|---|
+| Information sufficiency for a commercial decision | 4.6 | The decision card carries every field the server has for the tool, in the server’s own labels, plus the record’s cost impact, programme note, affected activity and evidence count; the evidence itself opens one tap away. Commitment and pay-application documents are still web-only (PILOT-03) |
+| Confirmation quality | 4.8 | "Approve change order VO-08? Change value: $1,500.00. This action will record your approval in the project audit trail." Named record, named figure, named consequence |
+| Refusal and safety behaviour | 4.7 | The app withholds an approve button for a money decision it has no figure for and offers the web instead; the server independently refuses a step that is not yours, an instance asked for under another project, and a response the template does not offer — all three verified live against the running API |
+| Triage in the inbox | 3.5 | The inbox row still shows no value, so a dozen waiting steps cannot be ranked without opening each (PILOT-16), and a step response publishes no domain event, so the inbox is REFRESH REQUIRED between steps (SRV-02) |
+| The other approval surfaces | 3.5 | Progress approval is still a single tap with no confirmation and does not name the submitter (PILOT-04). It was out of this phase’s scope and is unchanged |
+
+Mean of the five: 21.1 / 5 = **4.22, stated as 4.2**. It is not 4.5, because two of the five are genuinely mediocre and neither was touched.
 
 ## 11. Performance, as measured in this environment
 

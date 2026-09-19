@@ -19,10 +19,10 @@ The width classes the app uses: compact below 600 px, medium 600–899 px, expan
 
 | Platform | Form factor | OS floor | Build | Status |
 |---|---|---|---|---|
-| Android | phone (e.g. Pixel 7, Samsung A-series) | see the Android guide (minSdk from `expo prebuild`) | development build or release APK | NOT YET VERIFIED LOCALLY |
-| Android | tablet (10" and 12") | as above | as above | NOT YET VERIFIED LOCALLY |
-| iOS | iPhone (one recent, one three years old) | see the iOS guide (deployment target from `expo prebuild`) | development build via Xcode or EAS | DEVICE/MAC VERIFICATION REQUIRED |
-| iPadOS | iPad and iPad Pro | as above | as above | DEVICE/MAC VERIFICATION REQUIRED |
+| Android | phone (e.g. Pixel 7, Samsung A-series) | see the Android guide (minSdk from `expo prebuild`) | development build or release APK | NOT TESTED — the native project generates and was read (REAL CONFIG, [Android report](OCTAPM_ANDROID_NATIVE_REPORT.md)); no build, no device |
+| Android | tablet (10" and 12") | as above | as above | NOT TESTED |
+| iOS | iPhone (one recent, one three years old) | see the iOS guide (deployment target from `expo prebuild`) | development build via Xcode or EAS | NOT TESTED — Expo declines to generate the iOS project on Windows ([iOS report](OCTAPM_IOS_NATIVE_REPORT.md)) |
+| iPadOS | iPad and iPad Pro | as above | as above | NOT TESTED — layout validated at all four iPad geometries on the web target ([iPad report](OCTAPM_IPAD_NATIVE_REPORT.md)) |
 
 Per device, run the twelve-item list in the [native capability register](OCTAPM_MOBILE_NATIVE_VERIFICATION.md) and record build id, model, OS version, date, tester and outcome in the certification report appendix.
 
