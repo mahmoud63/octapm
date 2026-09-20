@@ -8,6 +8,7 @@ import { Screen } from '@/components/Screen'
 import { Fact } from '@/components/WorkflowRecordCard'
 import { Badge, Button, Card, ErrorState, KPI, SkeletonList, Text, spacing, useTheme } from '@/design-system'
 import { openOnWeb, webPathForTarget } from '@/navigation/links'
+import { Evidence } from '@/components/Evidence'
 import { usePermissions } from '@/permissions/usePermissions'
 import { useProjectStore } from '@/projects/store'
 import { day, humanise, money, quantity } from '@/utilities/format'
@@ -110,6 +111,18 @@ export default function OrderScreen() {
           ))}
         </View>
       </Card>
+      <Card>
+        <Evidence
+          projectId={projectId!}
+          recordType="procurement_order"
+          recordId={o.id}
+          recordRef={o.ref}
+          canAdd={permissions.allows('procurement', 'update') || permissions.allows('procurement', 'create')}
+          title="Delivery evidence"
+          emptyText="No photographs of the load, its condition or the delivery note yet."
+        />
+      </Card>
+
       <Text variant="caption" tone="muted">
         Submitting, approving, issuing and closing an order happen on the web or through your approvals.
       </Text>

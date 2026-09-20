@@ -34,7 +34,6 @@ test.describe('certification: financial and inventory integrity', () => {
     expect(holding, 'a warehouse with at least 3 units').toBeTruthy()
     const activities = items(await getData<{ id: string; name: string }[]>(request, pm.headers, `/projects/${project.id}/activities`))
     const costBefore = (await getData<{ rows: { activityId: string; material: number; actual: number }[] }>(request, pm.headers, `/projects/${project.id}/cost`)).rows
-    const movementsBefore = items(await getData<{ items: { id: string }[] } | { id: string }[]>(request, pm.headers, `/inventory/stock/transactions?itemId=${before.item.id}&limit=200`)).length
 
     await signIn(page, accounts.pm)
     await page.goto(`/inventory/items/${before.item.id}`)
@@ -79,8 +78,13 @@ test.describe('certification: financial and inventory integrity', () => {
     const after = await scan(request, pm.headers)
     const balance = { available: total(after.stock) }
     expect(balance.available).toBeCloseTo(startBalance - 2, 3)
-    const movementsAfter = items(await getData<{ items: { id: string }[] } | { id: string }[]>(request, pm.headers, `/inventory/stock/transactions?itemId=${before.item.id}&limit=200`)).length
-    expect(movementsAfter - movementsBefore).toBe(1)
+    // "Posts once" is a claim about this movement, not about a page count: the
+    // ledger for a busy item outgrows any page, and a saturated page can never
+    // show a delta. Assert the identity instead — this movement is in the
+    // ledger exactly once, and nothing else was written for it.
+    const ledger = items(await getData<{ items: { id: string }[] } | { id: string }[]>(request, pm.headers, `/inventory/stock/transactions?itemId=${before.item.id}&limit=200`))
+    const thisMovement = ledger.filter((row) => row.id === movement.id)
+    expect(thisMovement.length, 'the movement is in the ledger exactly once').toBe(1)
 
     // Cost: the activity's material and actual moved by exactly the movement's value.
     const costAfter = (await getData<{ rows: { activityId: string; material: number; actual: number }[] }>(request, pm.headers, `/projects/${project.id}/cost`)).rows
@@ -90,7 +94,7 @@ test.describe('certification: financial and inventory integrity', () => {
     const dActual = Number(rowAfter.actual) - Number(rowBefore?.actual ?? 0)
     expect(dActual).toBeCloseTo(value, 2)
     const activityName = activities.find((a) => a.id === activityId)?.name ?? activityId
-    test.info().annotations.push({ type: 'finance', description: `issue 2 × ${SKU} @ weighted average ${unitCost.toFixed(4)} = ${value.toFixed(2)}; stock ${startBalance} → ${balance.available}; movements +1; cost row "${activityName}": actual +${dActual.toFixed(2)}; delta ${(dActual - value).toFixed(2)}` })
+    test.info().annotations.push({ type: 'finance', description: `issue 2 × ${SKU} @ weighted average ${unitCost.toFixed(4)} = ${value.toFixed(2)}; stock ${startBalance} → ${balance.available}; movement recorded once; cost row "${activityName}": actual +${dActual.toFixed(2)}; delta ${(dActual - value).toFixed(2)}` })
     mkdirSync('test-results', { recursive: true })
     writeFileSync('test-results/finance.json', JSON.stringify({ projectId: project.id, activityId, itemId: before.item.id, movementId: movement.id, expectedValue: value, unitCost, quantity: 2, at: new Date().toISOString() }, null, 2))
   })
