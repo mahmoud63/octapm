@@ -52,7 +52,7 @@ export const logWithEntries = (): DailyLog =>
   emptyLog(today, {
     id: 'log1',
     exists: true,
-    weather: { condition: 'sunny', tempMinC: 24, tempMaxC: 38, rainMm: 0, windKph: 12 },
+    weather: { condition: 'sunny', tempMinC: 24, tempMaxC: 38, precipitationMm: 0, windMaxKph: 12 },
     summary: 'Raft pour at grid A-D completed by 15:00.',
     sections: { manpower: [manpowerEntry()], equipment: [{ id: 'e2', section: 'equipment', partyId: null, party: null, status: 'approved', createdBy: 'u1', clientRequestId: 'c2', name: '50 t crawler crane', count: 1, hoursOperated: 8, hoursIdle: 1 }], deliveries: [], visitors: [], delays: [{ id: 'e3', section: 'delays', partyId: null, party: null, status: 'approved', createdBy: 'u1', clientRequestId: 'c3', type: 'weather', hoursLost: 2, notes: 'Sandstorm 11:00–13:00' }], notes: [] },
     totals: { workers: 6, manHours: 54, companies: 1, equipmentCount: 1, equipmentHours: 8, idleHours: 1, deliveries: 0, visitors: 0, hoursLost: 2, notes: 0, entries: 3, awaitingReview: 0 },

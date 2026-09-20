@@ -7,8 +7,11 @@ import type { Named, Person } from '@/api/record-types'
 
 export type DailyLogSection = 'manpower' | 'equipment' | 'deliveries' | 'visitors' | 'delays' | 'notes'
 export const DAILY_LOG_SECTIONS: readonly DailyLogSection[] = ['manpower', 'equipment', 'deliveries', 'visitors', 'delays', 'notes']
-export const DELAY_TYPES = ['weather', 'design', 'material', 'labour', 'equipment', 'prerequisite', 'permit', 'space', 'other'] as const
-export const NOTE_KINDS = ['general', 'safety', 'quality', 'instruction', 'issue'] as const
+// The server's own nine (daily-log.service.js DELAY_TYPES). Offering a tenth
+// only produces a refusal at the end of a form someone has already filled in.
+export const DELAY_TYPES = ['weather', 'access', 'design', 'material', 'labour', 'equipment', 'inspection', 'utility', 'other'] as const
+// The server's own five (daily-log.service.js NOTE_KINDS).
+export const NOTE_KINDS = ['general', 'safety', 'instruction', 'inspection', 'issue'] as const
 
 export interface DailyLogEntry {
   id: string
@@ -61,9 +64,11 @@ export interface DailyLogWeather {
   condition?: string | null
   tempMinC?: number | null
   tempMaxC?: number | null
-  rainMm?: number | null
-  windKph?: number | null
+  /** The server's own names; asking for rainMm or windKph returned nothing at all. */
+  precipitationMm?: number | null
+  windMaxKph?: number | null
   summary?: string | null
+  alerts?: { metric?: string; message?: string }[] | null
 }
 
 export interface DailyLog {

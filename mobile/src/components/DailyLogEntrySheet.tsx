@@ -42,12 +42,21 @@ export const ENTRY_FIELDS: Record<DailyLogSection, FieldSpec[]> = {
     { key: 'deliveredAt', label: 'Delivered at', kind: 'time', placeholder: 'HH:MM' },
   ],
   visitors: [
-    { key: 'company', label: 'Company or person', kind: 'text', required: true },
+    // The server requires the visitor's name and treats the company as optional;
+    // offering only a company meant every visitor recorded here was refused.
+    { key: 'name', label: 'Name', kind: 'text', required: true },
+    { key: 'company', label: 'Company', kind: 'text' },
     { key: 'purpose', label: 'Purpose', kind: 'text' },
     { key: 'arrivedAt', label: 'Arrived', kind: 'time', placeholder: 'HH:MM' },
     { key: 'leftAt', label: 'Left', kind: 'time', placeholder: 'HH:MM' },
   ],
-  delays: [{ key: 'hoursLost', label: 'Hours lost', kind: 'number', required: true }],
+  delays: [
+    // The server requires a description; without this field every delay
+    // recorded on a phone was refused, which is the one entry a claim is
+    // later argued from.
+    { key: 'description', label: 'What happened', kind: 'text', required: true },
+    { key: 'hoursLost', label: 'Hours lost', kind: 'number', required: true },
+  ],
   notes: [{ key: 'text', label: 'Note', kind: 'multiline', required: true }],
 }
 

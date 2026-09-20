@@ -16,6 +16,7 @@ import {
   listActivitiesFull,
   listCrews,
   listDailyLogDays,
+  listProjectProgressSubmissions,
   listLookaheads,
   listPhotos,
   listProgressSubmissions,
@@ -117,6 +118,16 @@ export function useLookaheads(projectId: string | null) {
 }
 
 /** What is blocking planned work: lookahead items with an open constraint. */
+/** Progress recorded across the project, for the day the report is about. */
+export function useProjectProgressSubmissions(projectId: string | null) {
+  return useQuery({
+    queryKey: scoped(projectId ?? 'none', 'progress-submissions'),
+    queryFn: ({ signal }) => listProjectProgressSubmissions(projectId!, signal),
+    enabled: !!projectId,
+    select: (d) => d.items,
+  })
+}
+
 export function useConstraints(projectId: string | null) {
   return useQuery({ queryKey: scoped(projectId ?? 'none', 'constraints'), queryFn: ({ signal }) => getConstraints(projectId!, signal), enabled: !!projectId })
 }

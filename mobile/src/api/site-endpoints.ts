@@ -73,6 +73,20 @@ export const getProgressMethod = (projectId: string, activityId: string, signal?
 export const listProgressSubmissions = (projectId: string, activityId: string, signal?: AbortSignal) =>
   get<ProgressSubmission[]>('/projects/{projectId}/activities/{id}/progress-submissions', { path: { projectId, id: activityId }, signal })
 
+/**
+ * Every activity's progress in one call, each submission carrying its activity.
+ *
+ * The daily report needs the work recorded on one day, and an activity's own
+ * `pendingProgress` only ever shows what is still waiting: read that way, work
+ * disappeared from the report the moment it was approved. There is no date
+ * filter on the server, so the day is chosen here.
+ */
+export const listProjectProgressSubmissions = (projectId: string, signal?: AbortSignal) =>
+  get<{ items: (ProgressSubmission & { activity?: { id: string; name: string; activityCode?: string | null } | null })[] }>(
+    '/projects/{projectId}/activities/progress-submissions',
+    { path: { projectId }, signal },
+  )
+
 export const submitProgress = (projectId: string, activityId: string, body: ProgressInput) =>
   send<ProgressSubmission>('POST', '/projects/{projectId}/activities/{id}/progress', { path: { projectId, id: activityId }, body })
 

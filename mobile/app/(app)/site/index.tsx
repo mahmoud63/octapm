@@ -1,16 +1,18 @@
 import { useLocalSearchParams, useRouter } from 'expo-router'
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { StyleSheet, View } from 'react-native'
 import { userMessage } from '@/api/errors'
 import { useProjects } from '@/api/hooks'
-import { useDailyLog, useDailyLogActions, useDailyLogSettings } from '@/api/site-hooks'
+import { Evidence } from '@/components/Evidence'
+import { ReportStatus } from '@/site/ReportStatus'
+import { useConstraints, useDailyLog, useDailyLogActions, useDailyLogSettings, useProjectProgressSubmissions } from '@/api/site-hooks'
 import { DAILY_LOG_SECTIONS, type DailyLogEntry, type DailyLogSection, type EntryInput } from '@/api/site-types'
 import { DailyLogEntrySheet } from '@/components/DailyLogEntrySheet'
 import { Freshness } from '@/components/Freshness'
 import { ProjectSwitch } from '@/components/ProjectSwitch'
 import { PromptSheet } from '@/components/PromptSheet'
 import { Screen } from '@/components/Screen'
-import { Badge, Button, Card, EmptyState, ErrorState, KPI, SkeletonList, Text, spacing, toneForStatus, useTheme } from '@/design-system'
+import { Badge, Button, Card, EmptyState, ErrorState, SkeletonList, Text, spacing, toneForStatus, useTheme } from '@/design-system'
 import { captureOrQueue } from '@/offline/capture'
 import { usePermissions } from '@/permissions/usePermissions'
 import { useProjectStore } from '@/projects/store'
@@ -33,9 +35,11 @@ export function describeEntry(section: DailyLogSection, e: DailyLogEntry): strin
     case 'deliveries':
       return [e.supplierName, e.description, e.quantity != null ? `${e.quantity} ${e.unit ?? ''}`.trim() : null, e.poRef].filter(Boolean).join(' · ')
     case 'visitors':
-      return [e.company, e.purpose, e.arrivedAt ? `arrived ${e.arrivedAt}` : null].filter(Boolean).join(' · ')
+      return [e.name, e.company, e.purpose, e.arrivedAt ? `arrived ${e.arrivedAt}` : null].filter(Boolean).join(' · ')
     case 'delays':
-      return [humanise(e.type), e.hoursLost != null ? `${e.hoursLost} h lost` : null, e.notes].filter(Boolean).join(' · ')
+      // The description is the server's required account of what happened; older
+      // entries carry only a note, so that still shows rather than nothing.
+      return [humanise(e.type), e.hoursLost != null ? `${e.hoursLost} h lost` : null, e.description ?? e.notes].filter(Boolean).join(' · ')
     case 'notes':
       return [humanise(e.kind), e.text].filter(Boolean).join(': ')
   }
@@ -57,12 +61,25 @@ export default function DailyLogScreen() {
   const log = useDailyLog(projectId, date)
   const settings = useDailyLogSettings(projectId)
   const actions = useDailyLogActions(projectId ?? '', date)
+  const submissions = useProjectProgressSubmissions(projectId)
+  const constraints = useConstraints(projectId)
   const [adding, setAdding] = useState<DailyLogSection | null>(null)
   const [editingSummary, setEditingSummary] = useState(false)
   const [failure, setFailure] = useState<string | null>(null)
   const [queuedNotice, setQueuedNotice] = useState<string | null>(null)
 
   const project = projects.data?.find((p) => p.id === projectId) ?? null
+
+  // Work completed is not a section of its own. It is the progress recorded
+  // against real activities on this day, read back from the register so the
+  // report never holds a second opinion about how far a job has got — and read
+  // from the submissions rather than from each activity's pending one, or the
+  // work would leave the report at the moment it was approved.
+  const worked = useMemo(
+    () => (submissions.data ?? []).filter((s) => (s.submittedAt ?? s.createdAt)?.slice(0, 10) === date),
+    [submissions.data, date],
+  )
+  const openConstraints = constraints.data?.summary.open ?? 0
 
   if (!projectId) {
     return (
@@ -127,12 +144,23 @@ export default function DailyLogScreen() {
           <ErrorState message={userMessage(log.error)} onRetry={() => void log.refetch()} />
         ) : (
           <>
-            <View style={styles.kpis}>
-              <KPI label="Workers" value={String(log.data.totals.workers)} />
-              <KPI label="Man-hours" value={String(log.data.totals.manHours)} />
-              <KPI label="Equipment" value={String(log.data.totals.equipmentCount)} />
-              <KPI label="Hours lost" value={String(log.data.totals.hoursLost)} tone={log.data.totals.hoursLost > 0 ? 'warning' : 'default'} />
-            </View>
+            <ReportStatus
+              date={date}
+              status={log.data.status}
+              preparedBy={typeof log.data.submittedBy === 'object' && log.data.submittedBy ? log.data.submittedBy.name : null}
+              updatedAt={log.data.submittedAt}
+              lines={[
+                { id: 'work', label: 'Work completed', value: `${worked.length} activit${worked.length === 1 ? 'y' : 'ies'}`, onPress: () => router.push('/activities') },
+                { id: 'manpower', label: 'Manpower', value: `${log.data.totals.workers} worker${log.data.totals.workers === 1 ? '' : 's'}` },
+                { id: 'man-hours', label: 'Man-hours', value: String(log.data.totals.manHours) },
+                { id: 'equipment', label: 'Equipment', value: `${log.data.totals.equipmentCount} on site` },
+                { id: 'deliveries', label: 'Deliveries', value: String(log.data.totals.deliveries) },
+                { id: 'visitors', label: 'Visitors', value: String(log.data.totals.visitors) },
+                { id: 'delays', label: 'Delays', value: log.data.totals.hoursLost ? `${log.data.totals.hoursLost} h lost` : '0', tone: log.data.totals.hoursLost > 0 ? 'warning' : 'default' },
+                { id: 'constraints', label: 'Open constraints', value: String(openConstraints), tone: openConstraints > 0 ? 'warning' : 'default', onPress: () => router.push('/activities/lookahead') },
+              ]}
+              action={open && canSubmit ? { title: log.data.totals.entries === 0 ? 'Start the report' : 'Continue the report', onPress: () => setAdding('manpower'), testID: 'site-continue' } : null}
+            />
             <Freshness updatedAt={log.dataUpdatedAt || undefined} isFetching={log.isFetching} />
 
             <Card>
@@ -145,7 +173,7 @@ export default function DailyLogScreen() {
                 </View>
                 {log.data.weather ? (
                   <Text>
-                    {[log.data.weather.condition ? humanise(log.data.weather.condition) : null, log.data.weather.tempMinC != null && log.data.weather.tempMaxC != null ? `${log.data.weather.tempMinC}–${log.data.weather.tempMaxC} °C` : null, log.data.weather.rainMm != null ? `${log.data.weather.rainMm} mm rain` : null, log.data.weather.windKph != null ? `${log.data.weather.windKph} km/h wind` : null].filter(Boolean).join(' · ') || log.data.weather.summary || 'Recorded'}
+                    {[log.data.weather.condition ? humanise(log.data.weather.condition) : null, log.data.weather.tempMinC != null && log.data.weather.tempMaxC != null ? `${log.data.weather.tempMinC}–${log.data.weather.tempMaxC} °C` : null, log.data.weather.precipitationMm != null ? `${log.data.weather.precipitationMm} mm rain` : null, log.data.weather.windMaxKph != null ? `${log.data.weather.windMaxKph} km/h wind` : null].filter(Boolean).join(' · ') || log.data.weather.summary || 'Recorded'}
                   </Text>
                 ) : (
                   <Text tone="muted">No weather recorded for this day.</Text>
@@ -198,6 +226,141 @@ export default function DailyLogScreen() {
               )
             })}
 
+            {/* Work completed — the activities register's own progress, not a second copy of it. */}
+            <Card testID="site-work-completed">
+              <View style={styles.stack}>
+                <View style={styles.row}>
+                  <Text variant="label" label tone="muted" style={styles.grow}>
+                    Work completed
+                  </Text>
+                  <Badge label={String(worked.length)} tone={worked.length ? 'info' : 'neutral'} />
+                  {canSubmit ? <Button title="Record" variant="ghost" onPress={() => router.push('/progress')} testID="site-record-progress" /> : null}
+                </View>
+                {submissions.isPending ? (
+                  <SkeletonList rows={2} />
+                ) : worked.length === 0 ? (
+                  <Text tone="muted">No progress recorded against an activity today.</Text>
+                ) : (
+                  worked.map((s) => (
+                    <View key={s.id} style={[styles.entry, { borderColor: theme.colors.border }]} testID={`site-work-${s.id}`}>
+                      <View style={styles.grow}>
+                        <Text>{s.activity?.name ?? 'Activity'}</Text>
+                        <Text variant="caption" tone="muted">
+                          {[
+                            s.pctComplete != null ? `${s.pctComplete}% complete` : null,
+                            s.quantityComplete != null ? `${s.quantityComplete}${s.quantityUnit ? ` ${s.quantityUnit}` : ''} installed` : null,
+                            humanise(s.status),
+                          ]
+                            .filter(Boolean)
+                            .join(' · ')}
+                        </Text>
+                        {s.notes ? <Text variant="caption">{s.notes}</Text> : null}
+                      </View>
+                    </View>
+                  ))
+                )}
+              </View>
+            </Card>
+
+            {/* Photographs — the same evidence system as every other record. */}
+            <Card testID="site-photos">
+              {log.data.id ? (
+                <Evidence
+                  projectId={projectId}
+                  recordType="daily_log"
+                  recordId={log.data.id}
+                  recordRef={`Daily report ${date}`}
+                  canAdd={open && canSubmit}
+                  title="Photographs"
+                  emptyText="No photographs on today's report yet."
+                  testID="site-evidence"
+                />
+              ) : (
+                <Text tone="muted">Record something first; photographs attach to the day once it exists.</Text>
+              )}
+            </Card>
+
+            {/* Safety and quality summarise what the day's own notes carry and hand the rest to their modules. */}
+            {(['safety', 'quality'] as const).map((topic) => {
+              const kinds = topic === 'safety' ? ['safety'] : ['inspection', 'issue']
+              const notes = (log.data.sections.notes ?? []).filter((n) => kinds.includes(String(n.kind)))
+              return (
+                <Card key={topic} testID={`site-${topic}`}>
+                  <View style={styles.stack}>
+                    <View style={styles.row}>
+                      <Text variant="label" label tone="muted" style={styles.grow}>
+                        {topic === 'safety' ? 'Safety' : 'Quality'}
+                      </Text>
+                      <Badge label={String(notes.length)} tone={notes.length ? 'info' : 'neutral'} />
+                      <Button title="Open" variant="ghost" onPress={() => router.push(topic === 'safety' ? '/quality/safety' : '/quality')} testID={`site-${topic}-open`} />
+                    </View>
+                    {notes.length === 0 ? (
+                      <Text tone="muted">{topic === 'safety' ? 'Nothing raised on site today.' : 'No inspections or issues noted today.'}</Text>
+                    ) : (
+                      notes.map((n) => (
+                        <Text key={n.id} testID={`site-${topic}-note-${n.id}`}>
+                          {describeEntry('notes', n)}
+                        </Text>
+                      ))
+                    )}
+                    <Text variant="caption" tone="muted">
+                      {topic === 'safety' ? 'Incidents and near misses are records of their own; this is what the day noted.' : 'Inspections, NCRs and tests are records of their own; this is what the day noted.'}
+                    </Text>
+                  </View>
+                </Card>
+              )
+            })}
+
+            {/* Constraints — the lookahead's own, never a second list. */}
+            <Card testID="site-constraints">
+              <View style={styles.stack}>
+                <View style={styles.row}>
+                  <Text variant="label" label tone="muted" style={styles.grow}>
+                    Constraints
+                  </Text>
+                  <Badge label={String(openConstraints)} tone={openConstraints ? 'warning' : 'neutral'} />
+                  <Button title="Lookahead" variant="ghost" onPress={() => router.push('/activities/lookahead')} testID="site-constraints-open" />
+                </View>
+                {constraints.isPending ? (
+                  <SkeletonList rows={2} />
+                ) : openConstraints === 0 ? (
+                  <Text tone="muted">Nothing is holding the work up.</Text>
+                ) : (
+                  (constraints.data?.items ?? [])
+                    .filter((c) => c.constraintStatus === 'open')
+                    .slice(0, 5)
+                    .map((c) => (
+                      <View key={c.id} style={[styles.entry, { borderColor: theme.colors.border }]} testID={`site-constraint-${c.id}`}>
+                        <View style={styles.grow}>
+                          <Text>{c.constraint ?? c.name}</Text>
+                          <Text variant="caption" tone="muted">
+                            {[c.name, c.plannedStart ? `planned ${day(c.plannedStart)}` : null].filter(Boolean).join(' · ')}
+                          </Text>
+                        </View>
+                      </View>
+                    ))
+                )}
+              </View>
+            </Card>
+
+            {/* Tomorrow — the lookahead is the plan; the report only points at it. */}
+            <Card testID="site-tomorrow">
+              <View style={styles.stack}>
+                <View style={styles.row}>
+                  <Text variant="label" label tone="muted" style={styles.grow}>
+                    Tomorrow
+                  </Text>
+                  <Button title="Lookahead" variant="ghost" onPress={() => router.push('/activities/lookahead')} testID="site-tomorrow-open" />
+                </View>
+                <Text tone="muted">
+                  What is planned for tomorrow lives on the lookahead, with its crews, its constraints and the dates the programme holds. Anything the day needs to pass on goes in a note.
+                </Text>
+                {open && canSubmit ? <Button title="Leave a note for tomorrow" variant="secondary" onPress={() => setAdding('notes')} testID="site-tomorrow-note" /> : null}
+              </View>
+            </Card>
+
+            <Button title="Previous reports" variant="ghost" onPress={() => router.push('/site/previous')} testID="site-previous" />
+
             {queuedNotice ? (
               <Card edge={theme.colors.warning} testID="daily-log-queued">
                 <View style={styles.row}>
@@ -243,7 +406,6 @@ const styles = StyleSheet.create({
   center: { alignItems: 'center' },
   dateRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   dateText: { flex: 1, gap: spacing.xs, alignItems: 'center' },
-  kpis: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
   entry: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingVertical: spacing.sm, borderBottomWidth: 1 },
   actions: { gap: spacing.sm },
 })
