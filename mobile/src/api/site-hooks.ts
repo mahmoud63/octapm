@@ -2,7 +2,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { keys } from '@/api/query'
 import {
-  addDailyLogEntry,
+  getConstraints,  addDailyLogEntry,
   copyPreviousDailyLog,
   createTimesheet,
   deleteDailyLogEntry,
@@ -113,6 +113,11 @@ export function useProgressReview(projectId: string, activityId: string) {
 
 export function useLookaheads(projectId: string | null) {
   return useQuery({ queryKey: scoped(projectId ?? 'none', 'lookaheads'), queryFn: ({ signal }) => listLookaheads(projectId!, signal), enabled: !!projectId })
+}
+
+/** What is blocking planned work: lookahead items with an open constraint. */
+export function useConstraints(projectId: string | null) {
+  return useQuery({ queryKey: scoped(projectId ?? 'none', 'constraints'), queryFn: ({ signal }) => getConstraints(projectId!, signal), enabled: !!projectId })
 }
 
 export function useLookahead(projectId: string | null, lookaheadId: string | null) {

@@ -88,6 +88,12 @@ export const rejectProgressSubmission = (projectId: string, activityId: string, 
 export const listLookaheads = (projectId: string, signal?: AbortSignal) =>
   get<{ items: Lookahead[]; summary: { count: number; currentId: string | null; openConstraints: number } }>('/projects/{projectId}/lookaheads', { path: { projectId }, query: { status: 'published' }, signal })
 
+export const getConstraints = (projectId: string, signal?: AbortSignal) =>
+  get<{ items: (LookaheadItem & { lookahead: { id: string; ref: string; title: string; status: string } | null })[]; summary: { open: number; overdue: number; dueThisWeek: number } }>(
+    '/projects/{projectId}/lookaheads/constraints',
+    { path: { projectId }, signal },
+  )
+
 export const getLookahead = (projectId: string, lookaheadId: string, signal?: AbortSignal) =>
   get<Lookahead & { items: LookaheadItem[] }>('/projects/{projectId}/lookaheads/{lookaheadId}', { path: { projectId, lookaheadId }, signal })
 
