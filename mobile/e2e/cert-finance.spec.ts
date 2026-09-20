@@ -116,8 +116,13 @@ test.describe('certification: financial and inventory integrity', () => {
     for (const step of ['submit', 'approve', 'issue']) expect((await request.post(`${apiBase}/projects/${project.id}/purchase-orders/${orderId}/${step}`, { headers: pm.headers, data: {} })).status(), step).toBe(200)
     const order = await getData<{ lines: { id: string }[] }>(request, pm.headers, `/projects/${project.id}/purchase-orders/${orderId}`)
     const warehouses = items(await getData<{ items: { id: string }[] }>(request, pm.headers, '/inventory/warehouses'))
+    // A warehouse holds its stock in bins, so the scan answers with a row per
+    // bin. Taking the first one reads whichever bin happens to sort first and
+    // misses a receipt that lands in any other: the question here is what the
+    // warehouse holds, so add its rows up.
+    const heldAt = (rows: Stock[], warehouseId: string) => rows.filter((x) => x.warehouseId === warehouseId).reduce((total, row) => total + (row.available ?? 0), 0)
     const before = await scan(request, pm.headers)
-    const stockBefore = before.stock.find((x) => x.warehouseId === warehouses[0]!.id)?.available ?? 0
+    const stockBefore = heldAt(before.stock, warehouses[0]!.id)
     const data = { orderId, warehouseId: warehouses[0]!.id, receiptNumber: `GRN-M-replay${s}`, deliveryNote: `DN-replay-${s}`, lines: [{ poLineId: order.lines[0]!.id, acceptedQty: 3, rejectedQty: 0 }] }
     const first = await request.post(`${apiBase}/inventory/goods-receipt`, { headers: { ...warehouse.headers, 'x-octapm-client': 'mobile' }, data })
     expect(first.status(), await first.text()).toBe(201)
@@ -126,7 +131,7 @@ test.describe('certification: financial and inventory integrity', () => {
     const secondBody = (await second.json()) as { success: boolean; data?: { replayed?: boolean }; error?: { code: string } }
     expect(second.status() === 409 ? secondBody.error?.code : String(secondBody.data?.replayed)).toMatch(/RECEIPT_ALREADY_POSTED|true/)
     const after = await scan(request, pm.headers)
-    const stockAfter = after.stock.find((x) => x.warehouseId === warehouses[0]!.id)?.available ?? 0
+    const stockAfter = heldAt(after.stock, warehouses[0]!.id)
     expect(stockAfter - stockBefore).toBeCloseTo(3, 3)
     test.info().annotations.push({ type: 'finance', description: `receipt ${data.receiptNumber} posted twice: first 201, second ${second.status()} ${secondBody.error?.code ?? 'replayed'}; stock +3 once` })
   })

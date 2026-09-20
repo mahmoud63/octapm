@@ -7,7 +7,6 @@ export interface ReportLine {
   label: string
   value: string
   tone?: 'default' | 'muted' | 'error' | 'warning'
-  onPress?: () => void
 }
 
 /**
@@ -56,7 +55,10 @@ export function ReportStatus({
 
         <View style={[styles.lines, { borderColor: theme.colors.border }]}>
           {lines.map((line) => (
-            <View key={line.id} style={styles.line} accessibilityRole={line.onPress ? 'button' : undefined} onTouchEnd={line.onPress} testID={`${testID}-${line.id}`}>
+            // A tally, not a menu: a row of eight controls would either miss the
+            // forty-pixel tap target or make the card taller than the day it
+            // summarises. The sections below are where a person goes next.
+            <View key={line.id} style={styles.line} testID={`${testID}-${line.id}`}>
               <Text tone="muted" style={styles.grow}>
                 {line.label}
               </Text>

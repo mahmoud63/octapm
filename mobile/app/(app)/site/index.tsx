@@ -150,14 +150,14 @@ export default function DailyLogScreen() {
               preparedBy={typeof log.data.submittedBy === 'object' && log.data.submittedBy ? log.data.submittedBy.name : null}
               updatedAt={log.data.submittedAt}
               lines={[
-                { id: 'work', label: 'Work completed', value: `${worked.length} activit${worked.length === 1 ? 'y' : 'ies'}`, onPress: () => router.push('/activities') },
+                { id: 'work', label: 'Work completed', value: `${worked.length} activit${worked.length === 1 ? 'y' : 'ies'}` },
                 { id: 'manpower', label: 'Manpower', value: `${log.data.totals.workers} worker${log.data.totals.workers === 1 ? '' : 's'}` },
                 { id: 'man-hours', label: 'Man-hours', value: String(log.data.totals.manHours) },
                 { id: 'equipment', label: 'Equipment', value: `${log.data.totals.equipmentCount} on site` },
                 { id: 'deliveries', label: 'Deliveries', value: String(log.data.totals.deliveries) },
                 { id: 'visitors', label: 'Visitors', value: String(log.data.totals.visitors) },
                 { id: 'delays', label: 'Delays', value: log.data.totals.hoursLost ? `${log.data.totals.hoursLost} h lost` : '0', tone: log.data.totals.hoursLost > 0 ? 'warning' : 'default' },
-                { id: 'constraints', label: 'Open constraints', value: String(openConstraints), tone: openConstraints > 0 ? 'warning' : 'default', onPress: () => router.push('/activities/lookahead') },
+                { id: 'constraints', label: 'Open constraints', value: String(openConstraints), tone: openConstraints > 0 ? 'warning' : 'default' },
               ]}
               action={open && canSubmit ? { title: log.data.totals.entries === 0 ? 'Start the report' : 'Continue the report', onPress: () => setAdding('manpower'), testID: 'site-continue' } : null}
             />

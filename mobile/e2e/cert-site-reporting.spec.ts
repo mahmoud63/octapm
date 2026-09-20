@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { accounts, apiSession, getData, isWide, items, mainProject, openModule, signIn } from './cert-helpers'
+import { accounts, apiBase, apiSession, getData, isWide, items, mainProject, openModule, signIn } from './cert-helpers'
 
 const localDay = (d = new Date()) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 
@@ -125,6 +125,13 @@ test.describe('certification: a day recorded from site', () => {
     const log = await getData<{ status: string; submittedAt: string | null }>(request, pm.headers, `/projects/${project.id}/daily-logs/${localDay()}`)
     expect(['submitted', 'approved']).toContain(log.status)
     expect(log.submittedAt).toBeTruthy()
+
+    // Put the day back as it was found. A submitted day closes its sections,
+    // and every later spec that records anything on today would find the Add
+    // buttons gone — the suite would be failing on what this test left behind
+    // rather than on the code, which is the whole point of the reset.
+    const reopened = await request.post(`${apiBase}/projects/${project.id}/daily-logs/${localDay()}/reopen`, { headers: pm.headers, data: { reason: 'certification' } })
+    expect(reopened.status(), 'the day is left open for the rest of the run').toBe(200)
   })
 
   test('the project manager sees the day the site recorded, without it being typed twice', async ({ page, request }) => {

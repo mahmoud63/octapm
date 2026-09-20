@@ -68,11 +68,30 @@ test.describe('certification: one evidence system, every record', () => {
       const list = pick ? pick(data) : items<T>(data)
       return list[0]?.id ?? null
     }
+    // Raise the records this needs rather than hoping the day's other suites
+    // left some behind. The question is whether one evidence system serves
+    // every kind of record, and that must not depend on what happened first.
+    const stamp = Date.now() % 100000
+    const raise = async (path: string, data: Record<string, unknown>) => {
+      const response = await request.post(`${apiBase}${path}`, { headers: pm.headers, data })
+      return response.ok() ? ((await response.json()) as { data: { id: string } }).data.id : null
+    }
+    const ensure = async (existing: string | null, path: string, data: Record<string, unknown>) => existing ?? (await raise(path, data))
+
     targets.push({ recordType: 'activity', id: await first(`/projects/${project.id}/activities`) })
-    targets.push({ recordType: 'rfi', id: await first(`/projects/${project.id}/rfi`) })
+    targets.push({
+      recordType: 'rfi',
+      id: await ensure(await first(`/projects/${project.id}/rfi`), `/projects/${project.id}/rfi`, { subject: `Cert evidence RFI ${stamp}`, question: 'Which record types carry evidence?', status: 'open' }),
+    })
     targets.push({ recordType: 'punch_item', id: await first(`/projects/${project.id}/punch`) })
-    targets.push({ recordType: 'ncr', id: await first(`/projects/${project.id}/ncr`, (d: { rows: { id: string }[] }) => d.rows) })
-    targets.push({ recordType: 'task', id: await first(`/tasks?projectId=${project.id}`, (d: { rows: { id: string }[] }) => d.rows) })
+    targets.push({
+      recordType: 'ncr',
+      id: await ensure(await first(`/projects/${project.id}/ncr`, (d: { rows: { id: string }[] }) => d.rows), `/projects/${project.id}/ncr`, { severity: 'minor', description: `Cert evidence NCR ${stamp}` }),
+    })
+    targets.push({
+      recordType: 'task',
+      id: await ensure(await first(`/tasks?projectId=${project.id}`, (d: { rows: { id: string }[] }) => d.rows), '/tasks', { title: `Cert evidence task ${stamp}`, projectId: project.id, priority: 'high', label: 'field' }),
+    })
     targets.push({ recordType: 'change_event', id: await first(`/projects/${project.id}/change-events`) })
     targets.push({ recordType: 'procurement_order', id: await first(`/projects/${project.id}/purchase-orders`) })
 
