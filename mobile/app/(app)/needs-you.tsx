@@ -36,6 +36,11 @@ export default function NeedsYouScreen() {
     () => items.filter((item) => (mode === 'ballInCourt' ? item.ballInCourt : mode === 'overdue' ? item.overdue : true)).filter((item) => (type ? item.recordType === type : true)),
     [items, mode, type]
   )
+  // Counted, not asserted: the app routes twenty-two record types today and
+  // the number grows, so the sentence below is derived from these rows rather
+  // than from a hand-maintained list that goes stale.
+  const onWeb = useMemo(() => rows.filter((item) => !('app' in destinationForTarget(item.target))).length, [rows])
+
   const open = (item: AssignmentItem) => {
     const destination = destinationForTarget(item.target)
     if ('app' in destination) router.push(destination.app as never)
@@ -75,9 +80,9 @@ export default function NeedsYouScreen() {
               ))}
             </ScrollView>
             <Freshness updatedAt={assignments.dataUpdatedAt || undefined} isFetching={assignments.isFetching} />
-            {rows.length > 0 ? (
-              <Text variant="caption" tone="muted">
-                RFIs and tasks open in the app; other records open on the web until their screens arrive.
+            {onWeb > 0 ? (
+              <Text variant="caption" tone="muted" testID="needs-you-web-note">
+                Tap an item to open it in OctaPM. {onWeb} of these {onWeb === 1 ? 'continues' : 'continue'} on the web, where that record is edited.
               </Text>
             ) : null}
           </View>

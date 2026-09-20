@@ -1,67 +1,119 @@
 import { Ionicons } from '@expo/vector-icons'
 import { Redirect, Tabs } from 'expo-router'
+import { useState } from 'react'
 import { StyleSheet, View } from 'react-native'
 import { useAuthStore } from '@/auth/store'
+import { CaptureSheet } from '@/components/CaptureSheet'
 import { ConnectivityBar } from '@/components/ConnectivityBar'
 import { useTheme } from '@/design-system'
 import { useLayout } from '@/hooks/useLayout'
+import { ALL_SLOT_NAMES, resolveCaptureActions, resolveTabs } from '@/navigation/roleNav'
+import { usePermissions } from '@/permissions/usePermissions'
+import { useProjectStore } from '@/projects/store'
 
 /**
  * The signed-in shell.
  *
- * Five destinations, always the same five. On a phone they are a bar along
- * the bottom; on a tablet the same bar stands on the left as a rail, which
- * leaves the width for master–detail screens. Nothing here is a desktop
- * sidebar squeezed onto a phone.
+ * Five destinations, chosen for the job the person actually does: a site
+ * engineer lands on today's work with a camera under their thumb, a project
+ * manager on what needs deciding. The set is resolved from the role, the
+ * permission matrix and the company-admin capability — never hard-coded here
+ * — so a slot the server would refuse is simply not drawn.
+ *
+ * Role decides the shape. Permission decides what may be done. Nothing in
+ * this file authorises anything.
  */
 export default function AppLayout() {
   const status = useAuthStore((s) => s.status)
+  const role = useAuthStore((s) => s.user?.role ?? null)
+  const isCompanyAdmin = useAuthStore((s) => s.user?.isCompanyAdmin ?? false)
+  const projectId = useProjectStore((s) => s.currentProjectId)
+  const permissions = usePermissions(projectId)
   const theme = useTheme()
   const { isExpanded } = useLayout()
+  const [capturing, setCapturing] = useState(false)
 
   if (status === 'signedOut' || status === 'locked') return <Redirect href="/sign-in" />
   if (status === 'booting') return null
+
+  const context = { role, matrix: permissions.matrix, isCompanyAdmin, hasProject: !!projectId }
+  const slots = resolveTabs(context)
+  const captureActions = resolveCaptureActions(context)
+  const shown = new Set(slots.map((s) => s.name))
 
   return (
     <View style={styles.root}>
       <ConnectivityBar />
       <Tabs
-      screenOptions={{
-        headerShown: false,
-        tabBarPosition: isExpanded ? 'left' : 'bottom',
-        tabBarVariant: isExpanded ? 'material' : 'uikit',
-        tabBarActiveTintColor: theme.colors.brandStrong,
-        tabBarInactiveTintColor: theme.colors.textMuted,
-        tabBarStyle: { backgroundColor: theme.colors.surface, borderColor: theme.colors.border },
-        tabBarLabelStyle: { fontFamily: 'Inter_500Medium', fontSize: 11 },
-        sceneStyle: { backgroundColor: theme.colors.background },
-      }}
-    >
-      <Tabs.Screen name="index" options={{ title: 'Home', tabBarIcon: ({ color, size }) => <Ionicons name="home-outline" color={color} size={size} /> }} />
-      <Tabs.Screen name="projects" options={{ title: 'Projects', tabBarIcon: ({ color, size }) => <Ionicons name="business-outline" color={color} size={size} /> }} />
-      <Tabs.Screen name="needs-you" options={{ title: 'Needs You', tabBarIcon: ({ color, size }) => <Ionicons name="hand-right-outline" color={color} size={size} /> }} />
-      <Tabs.Screen name="search" options={{ title: 'Search', tabBarIcon: ({ color, size }) => <Ionicons name="search-outline" color={color} size={size} /> }} />
-      <Tabs.Screen name="more" options={{ title: 'More', tabBarIcon: ({ color, size }) => <Ionicons name="ellipsis-horizontal-outline" color={color} size={size} /> }} />
-      {/* Reached from Home, Needs You and Search; not destinations of their own. */}
-      <Tabs.Screen name="notifications" options={{ href: null }} />
-      <Tabs.Screen name="open" options={{ href: null }} />
-      <Tabs.Screen name="rfi" options={{ href: null }} />
-      <Tabs.Screen name="tasks" options={{ href: null }} />
-      <Tabs.Screen name="documents" options={{ href: null }} />
-      <Tabs.Screen name="drawings" options={{ href: null }} />
-      <Tabs.Screen name="site" options={{ href: null }} />
-      <Tabs.Screen name="activities" options={{ href: null }} />
-      <Tabs.Screen name="photos" options={{ href: null }} />
-      <Tabs.Screen name="timesheets" options={{ href: null }} />
-      <Tabs.Screen name="quality" options={{ href: null }} />
-      <Tabs.Screen name="inventory" options={{ href: null }} />
-      <Tabs.Screen name="commercial" options={{ href: null }} />
-      <Tabs.Screen name="workflow" options={{ href: null }} />
-      <Tabs.Screen name="procurement" options={{ href: null }} />
-      <Tabs.Screen name="outbox" options={{ href: null }} />
-    </Tabs>
+        screenOptions={{
+          headerShown: false,
+          tabBarPosition: isExpanded ? 'left' : 'bottom',
+          tabBarVariant: isExpanded ? 'material' : 'uikit',
+          tabBarActiveTintColor: theme.colors.brandStrong,
+          tabBarInactiveTintColor: theme.colors.textMuted,
+          tabBarStyle: { backgroundColor: theme.colors.surface, borderColor: theme.colors.border },
+          tabBarLabelStyle: { fontFamily: 'Inter_500Medium', fontSize: 11 },
+          sceneStyle: { backgroundColor: theme.colors.background },
+        }}
+      >
+        {slots.map((slot) => (
+          <Tabs.Screen
+            key={slot.name}
+            name={slot.name}
+            options={{
+              title: slot.title,
+              tabBarIcon: ({ color, size }) => <Ionicons name={slot.icon as never} color={color} size={slot.capture ? size + 10 : size} />,
+              // The centre slot opens the capture sheet instead of navigating.
+              ...(slot.capture
+                ? {
+                    tabBarButton: undefined,
+                    tabBarLabel: '',
+                  }
+                : {}),
+            }}
+            listeners={
+              slot.capture
+                ? {
+                    tabPress: (event) => {
+                      event.preventDefault()
+                      setCapturing(true)
+                    },
+                  }
+                : undefined
+            }
+          />
+        ))}
+        {/* Every other destination stays routable by link, and off the bar. */}
+        {Array.from(new Set([...ALL_SLOT_NAMES, ...HIDDEN]))
+          .filter((name) => !shown.has(name))
+          .map((name) => (
+            <Tabs.Screen key={name} name={name} options={{ href: null }} />
+          ))}
+      </Tabs>
+      <CaptureSheet visible={capturing} actions={captureActions} onClose={() => setCapturing(false)} />
     </View>
   )
 }
+
+/** Reached from a screen, a link or a notification — never a destination of its own. */
+const HIDDEN = [
+  'notifications',
+  'open',
+  'outbox',
+  'rfi',
+  'tasks',
+  'documents',
+  'drawings',
+  'site',
+  'activities',
+  'photos',
+  'timesheets',
+  'quality',
+  'inventory',
+  'commercial',
+  'workflow',
+  'procurement',
+  'capture',
+] as const
 
 const styles = StyleSheet.create({ root: { flex: 1 } })

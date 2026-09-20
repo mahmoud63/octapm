@@ -18,6 +18,7 @@ import type {
   Project,
   SearchResponse,
   WorkspaceDashboard,
+  Forecast,
 } from '@/api/types'
 
 type Query = Record<string, string | number | boolean | undefined>
@@ -40,6 +41,8 @@ export const getAssignments = (projectId: string, signal?: AbortSignal) =>
   get<Assignments>('/projects/{projectId}/assignments/mine', { path: { projectId }, query: { limit: 200 }, signal })
 
 export const getHealth = (projectId: string, signal?: AbortSignal) => get<Health>('/projects/{projectId}/health', { path: { projectId }, signal })
+
+export const getForecast = (projectId: string, signal?: AbortSignal) => get<Forecast>('/projects/{projectId}/forecast', { path: { projectId }, signal })
 
 export const getPermissions = (projectId: string | null, signal?: AbortSignal) =>
   get<PermissionMatrix>('/auth/me/permissions', { query: projectId ? { projectId } : {}, signal })

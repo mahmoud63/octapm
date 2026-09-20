@@ -166,13 +166,35 @@ export default function SignInScreen() {
             ) : null}
 
             <Button title="Sign in" size="lg" fullWidth loading={formState.isSubmitting} onPress={submit} testID="sign-in-submit" />
-            <Button
-              title="Sign in with company SSO"
-              variant="secondary"
-              fullWidth
-              onPress={() => WebBrowser.openBrowserAsync(`${env.webOrigin}/sign-in?sso=1`)}
-            />
-            <Button title="Forgot password?" variant="ghost" onPress={() => WebBrowser.openBrowserAsync(`${env.webOrigin}/forgot-password`)} />
+
+            {/*
+              The alternatives sit behind a divider and a deliberate gap. They
+              both leave the app for a browser, so a near-miss on "Sign in"
+              must land on inert space rather than on one of them.
+            */}
+            <View style={styles.alternatives}>
+              <View style={styles.dividerRow}>
+                <View style={[styles.rule, { backgroundColor: theme.colors.border }]} />
+                <Text variant="caption" tone="muted">
+                  or
+                </Text>
+                <View style={[styles.rule, { backgroundColor: theme.colors.border }]} />
+              </View>
+              <Button
+                title="Sign in with company SSO"
+                variant="ghost"
+                fullWidth
+                onPress={() => WebBrowser.openBrowserAsync(`${env.webOrigin}/sign-in?sso=1`)}
+                testID="sign-in-sso"
+              />
+              <Button
+                title="Forgot password?"
+                variant="ghost"
+                fullWidth
+                onPress={() => WebBrowser.openBrowserAsync(`${env.webOrigin}/forgot-password`)}
+                testID="sign-in-forgot"
+              />
+            </View>
           </View>
         </View>
       </ScrollView>
@@ -182,10 +204,17 @@ export default function SignInScreen() {
 
 const styles = StyleSheet.create({
   root: { flex: 1 },
-  scroll: { flexGrow: 1, paddingHorizontal: spacing.lg, justifyContent: 'center' },
+  // Top-aligned, not centred: a validation message or a session notice changes
+  // the card's height, and a centred card moves every control under the
+  // person's thumb as it does.
+  scroll: { flexGrow: 1, paddingHorizontal: spacing.lg, justifyContent: 'flex-start' },
   panel: { gap: spacing.xl, alignSelf: 'stretch' },
   panelWide: { maxWidth: 480, alignSelf: 'center', width: '100%' },
   headline: { maxWidth: 420 },
   card: { borderRadius: 16, padding: spacing.xl, gap: spacing.lg },
   lede: { marginTop: -spacing.sm },
+  /** Separated from the primary action so a near-miss lands on nothing. */
+  alternatives: { gap: spacing.xs, marginTop: spacing.sm },
+  dividerRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingBottom: spacing.xs },
+  rule: { flex: 1, height: StyleSheet.hairlineWidth },
 })

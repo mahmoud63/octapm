@@ -54,8 +54,8 @@ beforeEach(() => {
   useProjectStore.setState({ currentProjectId: 'p1', hydrated: true })
 })
 
-describe('progress approval on a tablet', () => {
-  it('offers approve and reject on a submitted update to a role that holds the transition, on the wide screen only', async () => {
+describe('progress approval', () => {
+  it('offers approve and reject on a submitted update to a role that holds the transition', async () => {
     wide(true)
     serve()
     await renderScreen(<ActivityScreen />)
@@ -64,16 +64,20 @@ describe('progress approval on a tablet', () => {
     expect(screen.queryByTestId('submission-hold-ps1')).toBeNull()
   })
 
-  it('offers nothing on a phone', async () => {
+  it('offers the same decision on a phone, because permission decides it and not the width', async () => {
+    // Needs You sends a project manager here on a phone. Refusing to show the
+    // decision because the screen is narrow left them stranded with no reason
+    // given; the tablet simply shows more of the record beside it.
     wide(false)
     serve()
     await renderScreen(<ActivityScreen />)
     await screen.findByText('Raft poured to grid D')
     await waitFor(() => expect(queryClient.getQueryData(['project', 'p1', 'permissions'])).toBeDefined())
-    expect(screen.queryByTestId('submission-approve-ps1')).toBeNull()
+    expect(await screen.findByTestId('submission-approve-ps1')).toBeTruthy()
+    expect(screen.getByTestId('submission-reject-ps1')).toBeTruthy()
   })
 
-  it('offers nothing to a site engineer, even on the wide screen', async () => {
+  it('offers nothing to a site engineer, on any screen', async () => {
     wide(true)
     serve(siteEngineerSite)
     await renderScreen(<ActivityScreen />)

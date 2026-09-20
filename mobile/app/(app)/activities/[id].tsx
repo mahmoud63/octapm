@@ -12,7 +12,6 @@ import { PromptSheet } from '@/components/PromptSheet'
 import { RecordHeader } from '@/components/RecordHeader'
 import { Screen } from '@/components/Screen'
 import { Badge, Button, Card, ErrorState, KPI, SkeletonList, Text, spacing, toneForStatus, useTheme } from '@/design-system'
-import { useLayout } from '@/hooks/useLayout'
 import { usePermissions } from '@/permissions/usePermissions'
 import { useProjectStore } from '@/projects/store'
 import { day, dateTime, humanise } from '@/utilities/format'
@@ -48,7 +47,6 @@ export default function ActivityScreen() {
   const [updating, setUpdating] = useState(false)
   const [failure, setFailure] = useState<string | null>(null)
   const [rejecting, setRejecting] = useState<string | null>(null)
-  const { isExpanded } = useLayout()
   const review = useProgressReview(projectId ?? '', id ?? '')
 
   if (!projectId || !id) {
@@ -76,8 +74,10 @@ export default function ActivityScreen() {
   const a = activity.data
   const assignedToMe = !!me && a.assignedEngineers.some((e) => e.id === me.id)
   const canSubmit = permissions.allows('progress', 'submit') && (assignedToMe || me?.role === 'pm' || me?.role === 'planning_eng' || permissions.allows('progress', 'approve'))
-  // Approval is a tablet decision: the wide screen shows the submission beside the programme, never a phone in a trench.
-  const canReview = isExpanded && permissions.allowsTransition('progress', 'submission.approve')
+  // Permission decides who may review, never the width of the screen. A PM
+  // sent here from Needs You on a phone must be able to act; the tablet shows
+  // the same decision with more of the record beside it.
+  const canReview = permissions.allowsTransition('progress', 'submission.approve')
   const reviewRun = async (work: () => Promise<unknown>) => {
     setFailure(null)
     try {

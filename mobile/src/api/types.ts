@@ -95,6 +95,34 @@ export interface Health {
   pendingReview: PendingReview
 }
 
+/** The server's own schedule and cost forecast. Every figure here is derived
+ * by the server; the app renders it and computes nothing. `spi` is genuinely
+ * nullable — a project without an earned-value basis has none. */
+export interface Forecast {
+  available: boolean
+  asOf: string | null
+  schedule: {
+    plannedFinish: string | null
+    projectedFinish: string | null
+    slipDays: number | null
+    basis: string | null
+    spi: number | null
+    cpi: number | null
+    criticalDriver: { id: string; name: string; slipDays: number | null } | null
+    counts: { activities: number; open: number; complete: number; critical: number; atRisk: { high: number; medium: number; low: number } }
+  } | null
+  cost: {
+    budget: number | null
+    eac: number | null
+    projected: number | null
+    overrun: number | null
+    overrunPct: number | null
+    actual: number | null
+    counts?: { atRisk: { high: number; medium: number; low: number }; lines: number }
+  } | null
+  summary: { scheduleLevel: string | null; costLevel: string | null } | null
+}
+
 export interface ProjectHealthRow {
   id: string
   name: string

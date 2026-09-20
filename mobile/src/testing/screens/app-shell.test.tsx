@@ -1,7 +1,8 @@
-import { render, screen } from '@testing-library/react-native'
+import { screen } from '@testing-library/react-native'
 import AppLayout from '../../../app/(app)/_layout'
 import AuthLayout from '../../../app/(auth)/_layout'
 import { useAuthStore } from '@/auth/store'
+import { renderScreen as render } from '@/testing/render'
 
 const user = { id: 'u1', orgId: 'o1', name: 'Dana Okafor', email: 'pm@octapm.demo', role: 'pm', isCompanyAdmin: true, status: 'active' }
 const setStatus = (status: 'booting' | 'signedOut' | 'locked' | 'signedIn') =>
@@ -26,11 +27,27 @@ describe('the signed-in shell', () => {
     expect(toJSON()).toBeNull()
   })
 
-  it('declares the same five destinations for everyone who is signed in', async () => {
+  it('gives a project manager the destinations of their job', async () => {
     setStatus('signedIn')
     await render(<AppLayout />)
-    for (const name of ['index', 'projects', 'needs-you', 'search', 'more']) expect(screen.getByTestId(`route-${name}`)).toBeTruthy()
+    for (const name of ['index', 'needs-you', 'project', 'controls', 'more']) expect(screen.getByTestId(`route-${name}`)).toBeTruthy()
     expect(screen.queryByTestId('redirect')).toBeNull()
+  })
+
+  it('keeps every other destination routable, off the bar', async () => {
+    setStatus('signedIn')
+    await render(<AppLayout />)
+    // A link, a notification tap or a search result must still reach these.
+    for (const name of ['rfi', 'quality', 'inventory', 'site', 'drawings', 'photos', 'workflow', 'search', 'projects']) {
+      expect(screen.getByTestId(`route-${name}`)).toBeTruthy()
+    }
+  })
+
+  it('declares each destination exactly once', async () => {
+    setStatus('signedIn')
+    await render(<AppLayout />)
+    const ids = screen.getAllByTestId(/^route-/).map((node) => node.props.testID)
+    expect(new Set(ids).size).toBe(ids.length)
   })
 })
 

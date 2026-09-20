@@ -40,6 +40,7 @@ export const keys = {
   permissions: (projectId: string) => ['project', projectId, 'permissions'] as const,
   orgPermissions: ['permissions', 'org'] as const,
   health: (projectId: string) => ['project', projectId, 'health'] as const,
+  forecast: (projectId: string) => ['project', projectId, 'forecast'] as const,
   workspace: ['workspace'] as const,
   tasks: ['tasks'] as const,
   task: (taskId: string) => ['tasks', 'task', taskId] as const,

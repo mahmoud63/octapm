@@ -20,6 +20,7 @@ import {
   search,
   setNotificationRead,
   updateNotificationPreferences,
+  getForecast,
 } from '@/api/endpoints'
 import { keys } from '@/api/query'
 import type { Notification, NotificationPreference, NotificationsPage } from '@/api/types'
@@ -42,6 +43,11 @@ export function useAssignments(projectId: string | null) {
 
 export function useHealth(projectId: string | null) {
   return useQuery({ queryKey: keys.health(projectId ?? 'none'), queryFn: ({ signal }) => getHealth(projectId!, signal), enabled: !!projectId })
+}
+
+/** The server's schedule and cost forecast: SPI, CPI, EAC, slip and the named critical driver. */
+export function useForecast(projectId: string | null) {
+  return useQuery({ queryKey: keys.forecast(projectId ?? 'none'), queryFn: ({ signal }) => getForecast(projectId!, signal), enabled: !!projectId })
 }
 
 export function useNotifications(status: 'active' | 'unread' | 'all' = 'active') {
