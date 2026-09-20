@@ -4,7 +4,7 @@ import { StyleSheet, View } from 'react-native'
 import { userMessage } from '@/api/errors'
 import { useMaterialTestActions, useMaterialTests } from '@/api/quality-hooks'
 import { ActionBar, type RecordAction } from '@/components/ActionBar'
-import { AttachmentList } from '@/components/AttachmentList'
+import { Evidence } from '@/components/Evidence'
 import { FilterChip } from '@/components/FilterChip'
 import { RecordHeader } from '@/components/RecordHeader'
 import { Screen } from '@/components/Screen'
@@ -118,7 +118,7 @@ export default function MaterialTestScreen() {
           </Card>
         ) : null}
         <Card>
-          <AttachmentList projectId={projectId} recordType="material_test" recordId={record.id} canAdd={canRecord || permissions.allows('inspection', 'submit')} />
+          <Evidence projectId={projectId} recordType="material_test" recordId={record.id} recordRef={record.ref} canAdd={canRecord || permissions.allows('inspection', 'submit')} />
         </Card>
       </Screen>
       <ActionBar actions={bar} />

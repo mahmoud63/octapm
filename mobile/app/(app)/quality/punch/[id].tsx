@@ -5,7 +5,7 @@ import { userMessage } from '@/api/errors'
 import { usePunchActions, usePunchItem } from '@/api/quality-hooks'
 import type { PunchAction } from '@/api/quality-types'
 import { ActionBar, type RecordAction } from '@/components/ActionBar'
-import { AttachmentList } from '@/components/AttachmentList'
+import { Evidence } from '@/components/Evidence'
 import { Comments } from '@/components/Comments'
 import { History } from '@/components/History'
 import { PromptSheet } from '@/components/PromptSheet'
@@ -134,7 +134,7 @@ export default function PunchItemScreen() {
           </View>
         </Card>
         <Card>
-          <AttachmentList projectId={projectId} recordType="punch_item" recordId={p.id} canAdd={status !== 'closed' && status !== 'void' && (permissions.allows('punch', 'update') || permissions.allows('punch', 'submit'))} />
+          <Evidence projectId={projectId} recordType="punch_item" recordId={p.id} recordRef={p.ref} locationId={p.locationId} canAdd={status !== 'closed' && status !== 'void' && (permissions.allows('punch', 'update') || permissions.allows('punch', 'submit'))} />
         </Card>
         <Card>
           <Comments projectId={projectId} recordType="punch_item" recordId={p.id} />

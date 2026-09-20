@@ -6,6 +6,7 @@ import { useTask, useTaskActions } from '@/api/record-hooks'
 import type { TaskStatus } from '@/api/record-types'
 import { ActionBar, type RecordAction } from '@/components/ActionBar'
 import { PromptSheet } from '@/components/PromptSheet'
+import { Evidence } from '@/components/Evidence'
 import { RecordHeader } from '@/components/RecordHeader'
 import { Screen } from '@/components/Screen'
 import { Button, Card, ErrorState, Input, SkeletonList, Text, spacing, useTheme } from '@/design-system'
@@ -105,6 +106,10 @@ export default function TaskDetailScreen() {
             <Fact label="Raised by" value={record.createdBy?.name} />
             <Fact label="Closed" value={record.closedAt ? dateTime(record.closedAt) : null} />
           </View>
+        </Card>
+
+        <Card>
+          <Evidence projectId={record.projectId ?? currentProjectId ?? ''} recordType="task" recordId={record.id} recordRef={record.taskNumber} canAdd={permissions.allows('task', 'update')} />
         </Card>
 
         <Card>

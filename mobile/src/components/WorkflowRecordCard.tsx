@@ -29,13 +29,13 @@ const apiPath = (ref: AttachmentRef) => {
  * the bearer attached. Used wherever someone has to see the evidence before
  * they act on the record — a closeout, a change order under approval.
  */
-export function EvidenceCard({ refs, onOpenFailed, empty = 'Nothing attached.', testIDPrefix = 'evidence' }: { refs: AttachmentRef[]; onOpenFailed: (message: string) => void; empty?: string; testIDPrefix?: string }) {
+export function EvidenceCard({ refs, onOpenFailed, empty = 'Nothing attached.', title = 'Evidence', testIDPrefix = 'evidence' }: { refs: AttachmentRef[]; onOpenFailed: (message: string) => void; empty?: string; title?: string; testIDPrefix?: string }) {
   const theme = useTheme()
   return (
     <Card testID={`${testIDPrefix}-card`}>
       <View style={styles.stack}>
         <Text variant="label" label tone="muted">
-          Evidence
+          {title}
         </Text>
         {refs.length === 0 ? (
           <Text tone="muted">{empty}</Text>
@@ -58,7 +58,7 @@ export function EvidenceCard({ refs, onOpenFailed, empty = 'Nothing attached.', 
 }
 
 /** The closeout, evidence and history that NCRs and safety incidents share. */
-export function WorkflowRecordCard({ record, onOpenFailed }: { record: WorkflowRecordBase; onOpenFailed: (message: string) => void }) {
+export function WorkflowRecordCard({ record, onOpenFailed, showEvidence = true }: { record: WorkflowRecordBase; onOpenFailed: (message: string) => void; showEvidence?: boolean }) {
   const theme = useTheme()
   return (
     <>
@@ -73,7 +73,7 @@ export function WorkflowRecordCard({ record, onOpenFailed }: { record: WorkflowR
           <Fact label="Reopened" value={record.reopenedAt ? dateTime(record.reopenedAt) : null} />
         </View>
       </Card>
-      <EvidenceCard refs={record.attachmentRefs} onOpenFailed={onOpenFailed} empty="No evidence yet. It is added when the closeout is submitted." />
+      {showEvidence ? <EvidenceCard refs={record.attachmentRefs} onOpenFailed={onOpenFailed} title="Closeout evidence" empty="No closeout evidence yet. It is added when the closeout is submitted." /> : null}
       <Card>
         <View style={styles.stack}>
           <Text variant="label" label tone="muted">

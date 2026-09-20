@@ -30,13 +30,13 @@ export function registerSenders() {
   registerSender('punch.create', async (item) => {
     const created = await createPunch(item.projectId, item.payload.body as PunchCreate)
     refresh(item.projectId)
-    return { resultId: created.id }
+    return { resultId: created.id, resultRef: created.ref }
   })
 
   registerSender('form.create', async (item) => {
     const created = await createForm(item.projectId, item.payload.body as FormCreate)
     refresh(item.projectId)
-    return { resultId: created.id }
+    return { resultId: created.id, resultRef: created.ref }
   })
 
   registerSender('daily-log.entry', async (item) => {
@@ -54,12 +54,15 @@ export function registerSenders() {
   })
 
   registerSender('attachment.upload', async (item, parent) => {
-    const payload = item.payload as { recordType: string; recordId: string | null; role?: 'attachment' | 'evidence' | 'photo' | 'reference'; caption?: string; files: QueuedFile[] }
+    const payload = item.payload as { recordType: string; recordId: string | null; recordRef?: string | null; role?: 'attachment' | 'evidence' | 'photo' | 'reference'; caption?: string; locationId?: string | null; files: QueuedFile[] }
     const recordId = payload.recordId ?? parent?.resultId ?? null
     if (!recordId) throw new Error('The record this photo belongs to has no id yet.')
-    await uploadAttachments(item.projectId, { recordType: payload.recordType, recordId, role: payload.role, caption: payload.caption, clientRequestId: item.clientRequestId, files: payload.files })
+    await uploadAttachments(item.projectId, { recordType: payload.recordType, recordId, role: payload.role, caption: payload.caption, locationId: payload.locationId, clientRequestId: item.clientRequestId, files: payload.files })
     refresh(item.projectId)
-    return { resultId: null }
+    void queryClient.invalidateQueries({ queryKey: keys.projectScoped(item.projectId, 'attachments', payload.recordType, recordId) })
+    // Evidence has no reference of its own; it belongs to the record it is on,
+    // and that is what the person is told it reached.
+    return { resultId: recordId, resultRef: payload.recordRef ?? null }
   })
 
   registerSender('goods-receipt', async (item: OutboxItem) => {
@@ -68,7 +71,8 @@ export function registerSenders() {
       const result = await postGoodsReceipt(body)
       refresh(item.projectId)
       void queryClient.invalidateQueries({ queryKey: ['inventory'] })
-      return { resultId: result.receiptId }
+      // The receipt number is the natural key and what the store calls it.
+      return { resultId: result.receiptId, resultRef: body.receiptNumber ?? null }
     } catch (error) {
       // The number is the natural key: the server already holds this receipt, so the earlier send counted.
       if (isAppError(error) && error.serverCode === 'RECEIPT_ALREADY_POSTED') {

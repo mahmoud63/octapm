@@ -9,6 +9,7 @@ import { ActionBar, type RecordAction } from '@/components/ActionBar'
 import { CloseoutSheet } from '@/components/CloseoutSheet'
 import { Comments } from '@/components/Comments'
 import { PromptSheet } from '@/components/PromptSheet'
+import { Evidence } from '@/components/Evidence'
 import { RecordHeader } from '@/components/RecordHeader'
 import { Screen } from '@/components/Screen'
 import { Fact, WorkflowRecordCard } from '@/components/WorkflowRecordCard'
@@ -106,6 +107,10 @@ export default function SafetyIncidentScreen() {
           </View>
         </Card>
         <WorkflowRecordCard record={record} onOpenFailed={setFailure} />
+
+        <Card>
+          <Evidence title="Photographs" emptyText="No photographs on this record yet." projectId={projectId} recordType="safety_incident" recordId={record.id} recordRef={record.ref} canAdd={permissions.allows('safety', 'update') || permissions.allows('safety', 'submit')} />
+        </Card>
         <Card>
           <Comments projectId={projectId} recordType="safety_incident" recordId={record.id} />
         </Card>

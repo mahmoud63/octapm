@@ -5,7 +5,7 @@ import { userMessage } from '@/api/errors'
 import { useRfi, useRfiActions } from '@/api/record-hooks'
 import type { RfiAction, RfiDetail } from '@/api/record-types'
 import { ActionBar, type RecordAction } from '@/components/ActionBar'
-import { AttachmentList } from '@/components/AttachmentList'
+import { Evidence } from '@/components/Evidence'
 import { Comments } from '@/components/Comments'
 import { History } from '@/components/History'
 import { PromptSheet } from '@/components/PromptSheet'
@@ -204,7 +204,7 @@ export default function RfiDetailScreen() {
         </Card>
 
         <Card>
-          <AttachmentList projectId={projectId} recordType="rfi" recordId={record.id} canAdd={permissions.allows('rfi', 'update') || canSubmit} />
+          <Evidence projectId={projectId} recordType="rfi" recordId={record.id} recordRef={record.ref} locationId={record.locationId} canAdd={permissions.allows('rfi', 'update') || canSubmit} />
         </Card>
         <Card>
           <Comments projectId={projectId} recordType="rfi" recordId={record.id} />

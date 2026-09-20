@@ -6,7 +6,7 @@ import { useActivity, useProgressMethod, useProgressReview, useProgressSubmissio
 import type { ProgressInput } from '@/api/site-types'
 import { useAuthStore } from '@/auth/store'
 import { ActionBar, type RecordAction } from '@/components/ActionBar'
-import { AttachmentList } from '@/components/AttachmentList'
+import { Evidence } from '@/components/Evidence'
 import { ProgressSheet } from '@/components/ProgressSheet'
 import { PromptSheet } from '@/components/PromptSheet'
 import { RecordHeader } from '@/components/RecordHeader'
@@ -204,7 +204,7 @@ export default function ActivityScreen() {
         </Card>
 
         <Card>
-          <AttachmentList projectId={projectId} recordType="activity" recordId={a.id} canAdd={permissions.allows('schedule', 'update') || permissions.allows('progress', 'submit')} />
+          <Evidence projectId={projectId} recordType="activity" recordId={a.id} recordRef={a.activityCode ?? a.wbsCode} canAdd={permissions.allows('schedule', 'update') || permissions.allows('progress', 'submit')} />
         </Card>
 
         {failure ? (

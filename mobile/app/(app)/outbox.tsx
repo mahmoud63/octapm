@@ -1,7 +1,9 @@
+import { useRouter } from 'expo-router'
 import { useMemo } from 'react'
 import { StyleSheet, View } from 'react-native'
 import { useProjects } from '@/api/hooks'
 import { Screen } from '@/components/Screen'
+import { appRouteForRecord } from '@/navigation/links'
 import { Badge, Button, Card, EmptyState, Text, spacing, useTheme } from '@/design-system'
 import { discardItem, drainOutbox, retryItem, useOutbox, type OutboxItem } from '@/offline/outbox'
 import { useOutboxStatus } from '@/offline/useOutboxStatus'
@@ -16,6 +18,14 @@ const KIND_LABELS: Record<string, string> = {
   'goods-receipt': 'Goods receipt',
 }
 
+/** What the server created, so a sent item can be opened where it landed. */
+const RECORD_TYPES: Record<string, string> = {
+  'punch.create': 'punch_item',
+  'form.create': 'form_instance',
+  'timesheet.create': 'timesheet',
+  'goods-receipt': 'inventory_item',
+}
+
 const tone = (status: OutboxItem['status']) => (status === 'sent' ? 'success' : status === 'attention' || status === 'refused' ? 'error' : status === 'sending' ? 'info' : 'warning') as 'success' | 'error' | 'info' | 'warning'
 
 /**
@@ -24,8 +34,19 @@ const tone = (status: OutboxItem['status']) => (status === 'sent' ? 'success' : 
  * item that the server refused says why, and the person retries or
  * discards it.
  */
+/** Where a sent item now lives, when the app has a screen for that record. */
+const openable = (item: OutboxItem): string | null => {
+  const recordType = RECORD_TYPES[item.kind]
+  if (item.kind === 'attachment.upload') {
+    const payload = item.payload as { recordType?: string }
+    return item.resultId && payload.recordType ? appRouteForRecord(payload.recordType, item.resultId) : null
+  }
+  return recordType && item.resultId ? appRouteForRecord(recordType, item.resultId) : null
+}
+
 export default function OutboxScreen() {
   const theme = useTheme()
+  const router = useRouter()
   const items = useOutbox((s) => s.items)
   const status = useOutboxStatus()
   const projects = useProjects()
@@ -59,6 +80,14 @@ export default function OutboxScreen() {
                       </View>
                       <Badge label={humanise(item.status)} tone={tone(item.status)} />
                     </View>
+                    {item.status === 'sent' ? (
+                      <View style={styles.row}>
+                        <Text variant="caption" tone="success" style={styles.grow} testID={`outbox-result-${item.id}`}>
+                          {item.resultRef ? `The office has this as ${item.resultRef}.` : 'The office has this.'}
+                        </Text>
+                        {openable(item) ? <Button title="Open record" variant="ghost" onPress={() => router.push(openable(item) as never)} testID={`outbox-open-${item.id}`} /> : null}
+                      </View>
+                    ) : null}
                     {item.error ? (
                       <Text variant="caption" tone={item.status === 'waiting' ? 'muted' : 'error'} testID={`outbox-error-${item.id}`}>
                         {item.status === 'waiting' ? `Last try: ${item.error.message}` : item.error.message}

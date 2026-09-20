@@ -41,10 +41,16 @@ export interface OutboxItem {
   sentAt: string | null
   /** The id the server gave the created record, for dependants. */
   resultId: string | null
+  /**
+   * What the office calls the record the server created — "RFI-034",
+   * "PUNCH-114". The id is for the app; this is for the person, so that a
+   * field user can prove the office received their work.
+   */
+  resultRef: string | null
   clientRequestId: string
 }
 
-export type Sender = (item: OutboxItem, parent: OutboxItem | null) => Promise<{ resultId: string | null }>
+export type Sender = (item: OutboxItem, parent: OutboxItem | null) => Promise<{ resultId: string | null; resultRef?: string | null }>
 
 interface OutboxState {
   items: OutboxItem[]
@@ -167,6 +173,7 @@ export async function enqueue(input: EnqueueInput): Promise<OutboxItem> {
     createdAt: new Date().toISOString(),
     sentAt: null,
     resultId: null,
+    resultRef: null,
     clientRequestId: input.clientRequestId,
   }
   useOutbox.setState((s) => ({ items: [...s.items, item] }))
@@ -251,7 +258,7 @@ export async function drainOutbox(reason: string): Promise<void> {
       update(item.id, { status: 'sending', error: null })
       try {
         const result = await sender(item, parent)
-        update(item.id, { status: 'sent', sentAt: new Date().toISOString(), resultId: result.resultId, error: null })
+        update(item.id, { status: 'sent', sentAt: new Date().toISOString(), resultId: result.resultId, resultRef: result.resultRef ?? null, error: null })
       } catch (error) {
         const verdict = classify(error)
         const attempts = item.attempts + 1

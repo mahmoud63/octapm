@@ -1,6 +1,7 @@
 /** Server state for the site-reporting and schedule screens (M3). */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { keys } from '@/api/query'
+import type { PhotoFilters } from '@/api/site-endpoints'
 import {
   getConstraints,  addDailyLogEntry,
   copyPreviousDailyLog,
@@ -134,7 +135,7 @@ export function useLookaheadItemStatus(projectId: string, lookaheadId: string) {
 
 // ── Photos ──
 
-export function usePhotos(projectId: string | null, filters: { search?: string; tag?: string; recordType?: string; recordId?: string } = {}) {
+export function usePhotos(projectId: string | null, filters: PhotoFilters = {}) {
   return useQuery({ queryKey: scoped(projectId ?? 'none', 'photos', filters), queryFn: ({ signal }) => listPhotos(projectId!, filters, signal), enabled: !!projectId, placeholderData: (previous) => previous })
 }
 

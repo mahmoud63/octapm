@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { FlatList, Platform, Pressable, ScrollView, StyleSheet, View, useWindowDimensions } from 'react-native'
 import { userMessage } from '@/api/errors'
 import { useProjects } from '@/api/hooks'
+import { Ionicons } from '@expo/vector-icons'
 import { network } from '@/api/network'
 import { useUploadAttachments } from '@/api/record-hooks'
 import { addDailyLogEntry, getDailyLog, photoThumbnailPath } from '@/api/site-endpoints'
@@ -32,6 +33,18 @@ const isoDay = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padSt
  * server extracted. A photo taken here goes onto today's daily log, with a
  * caption, through the unified attachment route with a replay key.
  */
+/** The record types a site gallery is actually asked about, in the server's own vocabulary. */
+const RECORD_FILTERS: { type: string; label: string }[] = [
+  { type: 'daily_log', label: 'Daily report' },
+  { type: 'progress_submission', label: 'Progress' },
+  { type: 'activity', label: 'Activity' },
+  { type: 'rfi', label: 'RFI' },
+  { type: 'ncr', label: 'NCR' },
+  { type: 'punch_item', label: 'Punch' },
+  { type: 'safety_incident', label: 'Safety' },
+  { type: 'delivery_receipt', label: 'Delivery' },
+]
+
 export default function PhotosScreen() {
   const theme = useTheme()
   const router = useRouter()
@@ -44,11 +57,20 @@ export default function PhotosScreen() {
   const [term, setTerm] = useState('')
   const [search, setSearch] = useState('')
   const [tag, setTag] = useState<string | null>(null)
+  const [when, setWhen] = useState<'all' | 'today' | 'week'>('all')
+  const [kind, setKind] = useState<string | null>(null)
   const [captioning, setCaptioning] = useState<{ uri: string; name: string; type: string }[] | null>(null)
   /** Index of the picked photo being marked up, if any. */
   const [marking, setMarking] = useState<number | null>(null)
   const [failure, setFailure] = useState<string | null>(null)
-  const photos = usePhotos(projectId, { search: search || undefined, tag: tag ?? undefined })
+  const since = useMemo(() => {
+    if (when === 'all') return undefined
+    const d = new Date()
+    d.setHours(0, 0, 0, 0)
+    if (when === 'week') d.setDate(d.getDate() - 6)
+    return d.toISOString()
+  }, [when])
+  const photos = usePhotos(projectId, { search: search || undefined, tag: tag ?? undefined, from: since, recordType: kind ?? undefined })
   const upload = useUploadAttachments(projectId ?? '')
   const project = projects.data?.find((p) => p.id === projectId) ?? null
 
@@ -139,6 +161,14 @@ export default function PhotosScreen() {
                 </View>
               ) : null}
               <Input label="Find" placeholder="Caption, tag or location" value={term} onChangeText={setTerm} onSubmitEditing={() => setSearch(term.trim())} onBlur={() => setSearch(term.trim())} returnKeyType="search" autoCapitalize="none" testID="photos-search" />
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chips} keyboardShouldPersistTaps="handled">
+                <FilterChip label="All" selected={when === 'all' && !kind} onPress={() => { setWhen('all'); setKind(null) }} testID="photos-when-all" />
+                <FilterChip label="Today" selected={when === 'today'} onPress={() => setWhen(when === 'today' ? 'all' : 'today')} testID="photos-when-today" />
+                <FilterChip label="This week" selected={when === 'week'} onPress={() => setWhen(when === 'week' ? 'all' : 'week')} testID="photos-when-week" />
+                {RECORD_FILTERS.map((f) => (
+                  <FilterChip key={f.type} label={f.label} selected={kind === f.type} onPress={() => setKind(kind === f.type ? null : f.type)} testID={`photos-kind-${f.type}`} />
+                ))}
+              </ScrollView>
               {(photos.data?.summary.tags ?? []).length ? (
                 <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chips} keyboardShouldPersistTaps="handled">
                   {(photos.data?.summary.tags ?? []).map((t) => (
@@ -156,7 +186,16 @@ export default function PhotosScreen() {
           }
           renderItem={({ item }) => (
             <Pressable accessibilityRole="imagebutton" accessibilityLabel={item.caption ?? 'Photo'} onPress={() => router.push(`/photos/${item.id}`)} style={[styles.tile, { width: tile, borderColor: theme.colors.border }]} testID={`photo-${item.id}`}>
-              <AuthImage apiPath={photoThumbnailPath(projectId, item.id)} alt={item.caption ?? 'Photo'} style={{ width: tile, height: tile, borderRadius: radius.md }} />
+              {/* The server generates previews in the background and says when
+                  one is ready; asking early returns a 500 and draws an empty
+                  tile, so until then the photograph is shown as itself. */}
+              {item.thumbnailStatus === 'ready' ? (
+                <AuthImage apiPath={photoThumbnailPath(projectId, item.id)} alt={item.caption ?? 'Photo'} style={{ width: tile, height: tile, borderRadius: radius.md }} />
+              ) : (
+                <View style={[styles.pending, { width: tile, height: tile, borderRadius: radius.md, backgroundColor: theme.colors.surfaceRaised }]} testID={`photo-pending-${item.id}`}>
+                  <Ionicons name="image-outline" size={24} color={theme.colors.textMuted} />
+                </View>
+              )}
               <Text variant="caption" numberOfLines={1}>
                 {item.caption || (item.takenAt ? day(item.takenAt) : 'Photo')}
               </Text>
@@ -168,7 +207,7 @@ export default function PhotosScreen() {
             ) : photos.isError ? (
               <ErrorState message={userMessage(photos.error)} onRetry={() => void photos.refetch()} />
             ) : (
-              <EmptyState title={search || tag ? 'No photo matches' : 'No photos yet'} body={canAdd && !search && !tag ? 'Take one from the button above; it goes onto today’s daily log.' : undefined} />
+              <EmptyState title={search || tag || kind || when !== 'all' ? 'No photograph matches these filters' : 'No photos yet'} body={canAdd && !search && !tag && !kind && when === 'all' ? 'Take one from the button above; it goes onto today’s daily log.' : undefined} />
             )
           }
           onRefresh={() => void photos.refetch()}
@@ -207,5 +246,6 @@ const styles = StyleSheet.create({
   chips: { flexDirection: 'row', gap: spacing.sm },
   rowWrap: { gap: spacing.sm },
   list: { gap: spacing.sm, paddingBottom: spacing.xl },
+  pending: { alignItems: 'center', justifyContent: 'center' },
   tile: { gap: spacing.xs },
 })

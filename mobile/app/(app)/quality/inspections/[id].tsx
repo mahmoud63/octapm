@@ -6,7 +6,7 @@ import { useForm, useFormActions } from '@/api/quality-hooks'
 import type { FormInstance, InstanceItem } from '@/api/quality-types'
 import { useAuthStore } from '@/auth/store'
 import { ActionBar, type RecordAction } from '@/components/ActionBar'
-import { AttachmentList } from '@/components/AttachmentList'
+import { Evidence } from '@/components/Evidence'
 import { FilterChip } from '@/components/FilterChip'
 import { PromptSheet } from '@/components/PromptSheet'
 import { RecordHeader } from '@/components/RecordHeader'
@@ -245,7 +245,7 @@ export default function InspectionScreen() {
                     )}
                     {editable && item.responseType !== 'signature' ? <Input label="Note" value={answer?.note ?? ''} onChangeText={(t) => setAnswer(item.id, { note: t })} testID={`item-${item.id}-note`} /> : answer?.note ? <Text tone="muted">{answer.note}</Text> : null}
                     {(item.photoRequired || item.responseType === 'photo') && item.response?.id ? (
-                      <AttachmentList projectId={projectId} recordType="form_response" recordId={item.response.id} canAdd={editable} />
+                      <Evidence projectId={projectId} recordType="form_response" recordId={item.response.id} recordRef={instance.ref} locationId={instance.locationId} canAdd={editable} testID={`evidence-${item.response.id}`} />
                     ) : item.photoRequired || item.responseType === 'photo' ? (
                       <Text variant="caption" tone="warning">
                         A photo is required. Save the answers first, then add it here.

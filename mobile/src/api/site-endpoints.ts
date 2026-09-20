@@ -102,8 +102,25 @@ export const setLookaheadItemStatus = (projectId: string, lookaheadId: string, i
 
 // ── Photos ──
 
-export const listPhotos = (projectId: string, filters: { search?: string; tag?: string; locationId?: string; recordType?: string; recordId?: string; cursor?: string } = {}, signal?: AbortSignal) =>
-  get<PhotosPage>('/projects/{projectId}/photos', { path: { projectId }, query: { limit: 60, search: filters.search || undefined, tag: filters.tag, locationId: filters.locationId, recordType: filters.recordType, recordId: filters.recordId, cursor: filters.cursor }, signal })
+/** Everything the photo register can be narrowed by, as the route accepts it. */
+export interface PhotoFilters {
+  search?: string
+  tag?: string
+  locationId?: string
+  recordType?: string
+  recordId?: string
+  /** ISO instants; the server filters on when the photograph was taken. */
+  from?: string
+  to?: string
+  cursor?: string
+}
+
+export const listPhotos = (projectId: string, filters: PhotoFilters = {}, signal?: AbortSignal) =>
+  get<PhotosPage>('/projects/{projectId}/photos', {
+    path: { projectId },
+    query: { limit: 60, search: filters.search || undefined, tag: filters.tag, locationId: filters.locationId, recordType: filters.recordType, recordId: filters.recordId, from: filters.from, to: filters.to, cursor: filters.cursor },
+    signal,
+  })
 
 export const updatePhoto = (projectId: string, photoId: string, body: { caption?: string; tags?: string[]; locationId?: string | null; takenAt?: string }) =>
   send<Photo>('PATCH', '/projects/{projectId}/photos/{photoId}', { path: { projectId, photoId }, body })

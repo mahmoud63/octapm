@@ -5,11 +5,13 @@ import { userMessage } from '@/api/errors'
 import { useProjects } from '@/api/hooks'
 import { Comments } from '@/components/Comments'
 import { History } from '@/components/History'
+import { Evidence } from '@/components/Evidence'
 import { RecordHeader } from '@/components/RecordHeader'
 import { Screen } from '@/components/Screen'
 import { Fact } from '@/components/WorkflowRecordCard'
 import { Badge, Button, Card, ErrorState, KPI, SkeletonList, Text, spacing, useTheme } from '@/design-system'
 import { appRouteForRecord, openOnWeb, webPathForTarget } from '@/navigation/links'
+import { usePermissions } from '@/permissions/usePermissions'
 import { useProjectStore } from '@/projects/store'
 import { day, humanise, money } from '@/utilities/format'
 
@@ -19,6 +21,7 @@ export default function ChangeEventScreen() {
   const router = useRouter()
   const { id } = useLocalSearchParams<{ id: string }>()
   const projectId = useProjectStore((s) => s.currentProjectId)
+  const permissions = usePermissions(projectId)
   const projects = useProjects()
   const event = useChangeEvent(projectId, id ?? null)
   const currency = projects.data?.find((p) => p.id === projectId)?.currency
@@ -80,6 +83,10 @@ export default function ChangeEventScreen() {
           {e.voidReason ? <Fact label="Voided because" value={e.voidReason} /> : null}
         </View>
       </Card>
+      <Card>
+        <Evidence projectId={projectId!} recordType="change_event" recordId={e.id} recordRef={e.ref} locationId={e.locationId} canAdd={permissions.allows('change_event', 'update') || permissions.allows('change_event', 'create')} />
+      </Card>
+
       <Card>
         <View style={styles.stack}>
           <Text variant="label" label tone="muted">

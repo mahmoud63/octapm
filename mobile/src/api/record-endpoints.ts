@@ -140,8 +140,11 @@ export const listAttachments = (projectId: string, recordType: string, recordId:
 export interface AttachmentUpload {
   recordType: string
   recordId: string
-  role?: 'attachment' | 'evidence' | 'photo' | 'reference'
+  role?: 'attachment' | 'evidence' | 'photo' | 'reference' | 'signature'
   caption?: string
+  /** Where on site this was taken. The gallery filters by the whole subtree. */
+  locationId?: string | null
+  tags?: string[]
   clientRequestId: string
   files: { uri: string; name: string; type: string }[] | File[]
 }
@@ -153,6 +156,8 @@ export const uploadAttachments = (projectId: string, upload: AttachmentUpload) =
   form.append('clientRequestId', upload.clientRequestId)
   if (upload.role) form.append('role', upload.role)
   if (upload.caption) form.append('caption', upload.caption)
+  if (upload.locationId) form.append('locationId', upload.locationId)
+  for (const tag of upload.tags ?? []) form.append('tags', tag)
   for (const file of upload.files) {
     // On native, fetch accepts { uri, name, type }; on the web target, a File.
     form.append('files', file as unknown as Blob)
