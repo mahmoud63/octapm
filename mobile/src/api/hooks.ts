@@ -6,6 +6,7 @@
  * known, and invalidate the rest.
  */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useAuthenticated } from '@/auth/store'
 import {
   archiveNotification,
   getAssignments,
@@ -26,7 +27,8 @@ import { keys } from '@/api/query'
 import type { Notification, NotificationPreference, NotificationsPage } from '@/api/types'
 
 export function useProjects() {
-  return useQuery({ queryKey: keys.projects, queryFn: ({ signal }) => listProjects(signal), select: (page) => page.items })
+  const authed = useAuthenticated()
+  return useQuery({ enabled: authed, queryKey: keys.projects, queryFn: ({ signal }) => listProjects(signal), select: (page) => page.items })
 }
 
 export function useProject(projectId: string | null) {
@@ -34,7 +36,8 @@ export function useProject(projectId: string | null) {
 }
 
 export function useWorkspace() {
-  return useQuery({ queryKey: keys.workspace, queryFn: ({ signal }) => getWorkspace(signal) })
+  const authed = useAuthenticated()
+  return useQuery({ enabled: authed, queryKey: keys.workspace, queryFn: ({ signal }) => getWorkspace(signal) })
 }
 
 export function useAssignments(projectId: string | null) {
@@ -51,15 +54,18 @@ export function useForecast(projectId: string | null) {
 }
 
 export function useNotifications(status: 'active' | 'unread' | 'all' = 'active') {
-  return useQuery({ queryKey: keys.notificationList(status), queryFn: ({ signal }) => listNotifications({ status }, signal) })
+  const authed = useAuthenticated()
+  return useQuery({ enabled: authed, queryKey: keys.notificationList(status), queryFn: ({ signal }) => listNotifications({ status }, signal) })
 }
 
 export function useNotificationSummary() {
-  return useQuery({ queryKey: keys.notificationSummary, queryFn: ({ signal }) => getNotificationSummary(signal), staleTime: 30_000 })
+  const authed = useAuthenticated()
+  return useQuery({ enabled: authed, queryKey: keys.notificationSummary, queryFn: ({ signal }) => getNotificationSummary(signal), staleTime: 30_000 })
 }
 
 export function useNotificationPreferences() {
-  return useQuery({ queryKey: keys.notificationPreferences, queryFn: ({ signal }) => getNotificationPreferences(signal), select: (data) => data.preferences })
+  const authed = useAuthenticated()
+  return useQuery({ enabled: authed, queryKey: keys.notificationPreferences, queryFn: ({ signal }) => getNotificationPreferences(signal), select: (data) => data.preferences })
 }
 
 const patchRow = (page: NotificationsPage | undefined, id: string, patch: Partial<Notification>) =>

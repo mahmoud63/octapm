@@ -27,6 +27,8 @@ const REQUEST_TIMEOUT_MS = 20_000
 /** Provided by the auth layer; kept as functions so this module has no store import. */
 export interface TokenSource {
   accessToken: () => string | null
+  /** Whether the app currently considers someone signed in, token or not. */
+  hasSession: () => boolean
   /** Returns a fresh access token, or null if the session is gone. */
   refresh: () => Promise<string | null>
   /** Called when a refresh fails for good: the session must end. */
@@ -35,6 +37,7 @@ export interface TokenSource {
 
 let tokens: TokenSource = {
   accessToken: () => null,
+  hasSession: () => false,
   refresh: async () => null,
   onSessionLost: () => undefined,
 }
@@ -115,6 +118,20 @@ export interface RunOptions {
 export async function run<T>(attempt: () => Promise<Outcome<T>>, options: RunOptions = {}): Promise<Payload<T>> {
   const { retryOnUnauthorized = true, failFastOffline = true } = options
   if (failFastOffline && network.isKnownOffline()) throw new AppError('OFFLINE')
+  // No session in memory, so this call would go out with no bearer at all. Its
+  // 401 would be indistinguishable from an expired token: the refresh below
+  // would run, the retry would be refused again and the session would end —
+  // throwing a person out of an app whose session had merely not arrived yet,
+  // or had just been given up on the way to the sign-in screen. A call that
+  // asks to be retried on 401 is by definition an authenticated one; the
+  // sign-in, refresh and sign-out calls pass retryOnUnauthorized: false and
+  // are unaffected.
+  //
+  // A session the app is holding without a token is a different thing and is
+  // left alone: opening offline with a saved session does exactly that, on
+  // purpose, and its requests should fail as offline rather than be refused
+  // here as if the person had been signed out.
+  if (retryOnUnauthorized && !tokens.accessToken() && !tokens.hasSession()) throw new AppError('AUTH_REQUIRED')
 
   let outcome: Outcome<T>
   try {

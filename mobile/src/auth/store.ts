@@ -68,3 +68,33 @@ export const useAuthStore = create<AuthState>((set) => ({
 export const selectUser = (s: AuthState) => s.user
 export const selectStatus = (s: AuthState) => s.status
 export const selectRole = (s: AuthState) => s.user?.role ?? null
+
+/**
+ * Session readiness, as three answers rather than one boolean.
+ *
+ * `Boolean(accessToken)` cannot tell a session still being restored from a
+ * person who is genuinely signed out, and the difference matters twice over.
+ * A request sent before the token is in memory carries no bearer; the client
+ * cannot tell that 401 from an expired one, so it refreshes, retries, is
+ * refused and ends the session. And a screen that reads "not ready" as "no
+ * data" tells the person their workspace is empty when it is merely still
+ * arriving.
+ *
+ * So: queries that need a session run only when `authenticated`, and screens
+ * render `restoring` as a loading state, never as empty.
+ */
+export type SessionReadiness = 'restoring' | 'authenticated' | 'unauthenticated'
+
+export const sessionReadiness = (status: AuthStatus): SessionReadiness => {
+  if (status === 'signedIn') return 'authenticated'
+  // 'locked' holds a saved session behind a biometric prompt: not signed out,
+  // and not something to send a request with either.
+  if (status === 'booting' || status === 'locked') return 'restoring'
+  return 'unauthenticated'
+}
+
+/** The readiness of the session right now. */
+export const useSessionReadiness = (): SessionReadiness => useAuthStore((s) => sessionReadiness(s.status))
+
+/** True only when there is a session to make an authenticated request with. */
+export const useAuthenticated = (): boolean => useAuthStore((s) => s.status === 'signedIn')

@@ -2,11 +2,16 @@ import { screen } from '@testing-library/react-native'
 import AppLayout from '../../../app/(app)/_layout'
 import AuthLayout from '../../../app/(auth)/_layout'
 import { useAuthStore } from '@/auth/store'
+import { useProjectStore } from '@/projects/store'
 import { renderScreen as render } from '@/testing/render'
 
 const user = { id: 'u1', orgId: 'o1', name: 'Dana Okafor', email: 'pm@octapm.demo', role: 'pm', isCompanyAdmin: true, status: 'active' }
-const setStatus = (status: 'booting' | 'signedOut' | 'locked' | 'signedIn') =>
+const setStatus = (status: 'booting' | 'signedOut' | 'locked' | 'signedIn') => {
   useAuthStore.setState({ status, user: status === 'signedIn' ? user : null, accessToken: status === 'signedIn' ? 'access-1' : null })
+  // A running app has already read the remembered project; the shell waits for
+  // that before it draws, so a signed-in test starts from the same place.
+  if (status === 'signedIn') useProjectStore.setState({ hydrated: true })
+}
 
 describe('the signed-in shell', () => {
   it('sends a signed-out person to sign in', async () => {
@@ -23,6 +28,16 @@ describe('the signed-in shell', () => {
 
   it('shows nothing while the saved session is still being checked', async () => {
     setStatus('booting')
+    const { toJSON } = await render(<AppLayout />)
+    expect(toJSON()).toBeNull()
+  })
+
+  it('shows nothing while the remembered project is still being read', async () => {
+    // Every project-scoped screen answers "choose a project first" when there is
+    // none. Drawn a moment too early they all said it at once, to a person who
+    // had chosen one. The shell waits instead.
+    setStatus('signedIn')
+    useProjectStore.setState({ hydrated: false })
     const { toJSON } = await render(<AppLayout />)
     expect(toJSON()).toBeNull()
   })

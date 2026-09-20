@@ -24,8 +24,15 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   hydrated: false,
 
   hydrate: async () => {
-    const remembered = await secureStorage.get(STORAGE_KEYS.currentProject)
-    set({ currentProjectId: remembered || null, hydrated: true })
+    // Settle either way. A device that cannot answer has simply remembered
+    // nothing, and the shell waits on this flag: if it never turned true the
+    // app would sit behind a blank screen for ever.
+    try {
+      const remembered = await secureStorage.get(STORAGE_KEYS.currentProject)
+      set({ currentProjectId: remembered || null, hydrated: true })
+    } catch {
+      set({ currentProjectId: null, hydrated: true })
+    }
   },
 
   select: async (projectId) => {

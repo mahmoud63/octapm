@@ -19,6 +19,8 @@ import { defineConfig, devices } from '@playwright/test'
  */
 export default defineConfig({
   testDir: '.',
+  // Every run starts from the seeded end-to-end organisation; see e2e/global-setup.ts.
+  globalSetup: './global-setup.ts',
   timeout: 45_000,
   expect: { timeout: 10_000 },
   fullyParallel: false,

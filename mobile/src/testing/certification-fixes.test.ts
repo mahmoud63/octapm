@@ -8,6 +8,8 @@ import { network } from '@/api/network'
 import { __useStoreForTests, memoryStore } from '@/offline/storage'
 import { registerSenders } from '@/offline/senders'
 import { envelope, fakeServer } from '@/testing/fake-server'
+import { useAuthStore } from '@/auth/store'
+import { user } from '@/testing/fixtures'
 
 /**
  * Regression tests for the defects the 2026-09-18 certification phase
@@ -20,6 +22,13 @@ const settled = async () => {
 }
 
 describe('certification fixes', () => {
+  // The outbox sends on behalf of a signed-in person. Without a session in
+  // memory the request layer refuses to send at all and the item waits, which
+  // is right in the app and merely unhelpful here.
+  beforeEach(() => {
+    useAuthStore.setState({ status: 'signedIn', user, accessToken: 'access-1', accessExpiresAt: Date.now() + 900_000 })
+  })
+
   it('MOB-P2: a refused sign-in is not reported as an ended session, and a disabled account says so', () => {
     expect(fromStatus(401, { code: 'INVALID_CREDENTIALS', message: 'Invalid credentials' }).userMessage).toMatch(/do not match/i)
     expect(fromStatus(401, { code: 'INVALID_CREDENTIALS', message: 'Invalid credentials' }).userMessage).not.toMatch(/session/i)

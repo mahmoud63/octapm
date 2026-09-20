@@ -73,6 +73,11 @@ configure({ asyncUtilTimeout: 5000 })
  */
 /* eslint-disable @typescript-eslint/no-require-imports */
 beforeEach(async () => {
+  // The app binds the session's refresh and token into the request layer as it
+  // starts. Tests get the same binding, so a call carries the token the store
+  // holds — without it the request layer sees no session at all and refuses to
+  // send, which is the app's correct behaviour and a confusing test failure.
+  require('@/auth/session')
   mockMemory.clear()
   ;(jest.requireMock('expo-sqlite') as { __rows?: Map<string, string> }).__rows?.clear()
 

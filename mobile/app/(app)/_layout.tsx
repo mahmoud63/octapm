@@ -28,13 +28,19 @@ export default function AppLayout() {
   const role = useAuthStore((s) => s.user?.role ?? null)
   const isCompanyAdmin = useAuthStore((s) => s.user?.isCompanyAdmin ?? false)
   const projectId = useProjectStore((s) => s.currentProjectId)
+  const projectHydrated = useProjectStore((s) => s.hydrated)
   const permissions = usePermissions(projectId)
   const theme = useTheme()
   const { isExpanded } = useLayout()
   const [capturing, setCapturing] = useState(false)
 
   if (status === 'signedOut' || status === 'locked') return <Redirect href="/sign-in" />
-  if (status === 'booting') return null
+  // Nothing is drawn until the session and the remembered project are both in
+  // hand. Fifty-seven screens ask "is there a project?" and answer "choose one
+  // first" when there is not; asked a moment too early, every one of them told
+  // the person to choose a project they had already chosen. Waiting here means
+  // a null project id means what it says everywhere else.
+  if (status === 'booting' || !projectHydrated) return null
 
   const context = { role, matrix: permissions.matrix, isCompanyAdmin, hasProject: !!projectId }
   const slots = resolveTabs(context)

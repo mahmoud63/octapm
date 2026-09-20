@@ -4,6 +4,7 @@
  * their own key and are cleared at sign-out with everything else.
  */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useAuthenticated } from '@/auth/store'
 import { keys } from '@/api/query'
 import {
   addTaskComment,
@@ -85,7 +86,8 @@ export function useRfiActions(projectId: string) {
 // ── Tasks ──
 
 export function useTasks(filters: TaskFilters = {}) {
-  return useQuery({ queryKey: [...keys.tasks, filters], queryFn: ({ signal }) => listTasks(filters, signal), placeholderData: (previous) => previous })
+  const authed = useAuthenticated()
+  return useQuery({ enabled: authed, queryKey: [...keys.tasks, filters], queryFn: ({ signal }) => listTasks(filters, signal), placeholderData: (previous) => previous })
 }
 
 export function useTask(taskId: string | null) {

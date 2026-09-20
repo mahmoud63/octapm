@@ -213,6 +213,7 @@ export async function sessionLost(): Promise<void> {
 
 bindTokenSource({
   accessToken: () => store().accessToken,
+  hasSession: () => store().status === 'signedIn',
   refresh: refreshSession,
   onSessionLost: () => {
     void sessionLost()

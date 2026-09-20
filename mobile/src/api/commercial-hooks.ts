@@ -1,5 +1,6 @@
 /** Server state for the commercial, workflow and procurement screens (M6). */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useAuthenticated } from '@/auth/store'
 import {
   acknowledgeAlert,
   createChangeEvent,
@@ -91,7 +92,8 @@ export function useMySteps() {
   // always refreshed on the way in: this is the screen a person opens to ask
   // what is waiting on them, and an answer half a minute out of date can be
   // missing the approval they were told about and came here to give.
-  return useQuery({ queryKey: MY_STEPS_KEY, queryFn: ({ signal }) => listMySteps(signal), staleTime: 30_000, refetchOnMount: 'always' })
+  const authed = useAuthenticated()
+  return useQuery({ enabled: authed, queryKey: MY_STEPS_KEY, queryFn: ({ signal }) => listMySteps(signal), staleTime: 30_000, refetchOnMount: 'always' })
 }
 
 export function useWorkflowInstance(projectId: string | null, instanceId: string | null) {

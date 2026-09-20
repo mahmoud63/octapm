@@ -5,6 +5,7 @@
  * invalidates both, since one movement changes balances, tiles and ledgers.
  */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useAuthenticated } from '@/auth/store'
 import { isAppError } from '@/api/errors'
 import {
   createTransfer,
@@ -64,7 +65,8 @@ export function useScan(code: string | null) {
 }
 
 export function useWarehouses(projectId: string | null) {
-  return useQuery({ queryKey: inv('warehouses', projectId ?? 'all'), queryFn: ({ signal }) => listWarehouses(projectId, signal), staleTime: 10 * 60_000 })
+  const authed = useAuthenticated()
+  return useQuery({ enabled: authed, queryKey: inv('warehouses', projectId ?? 'all'), queryFn: ({ signal }) => listWarehouses(projectId, signal), staleTime: 10 * 60_000 })
 }
 
 export function useWarehouseLocations(warehouseId: string | null) {
@@ -72,11 +74,13 @@ export function useWarehouseLocations(warehouseId: string | null) {
 }
 
 export function useStockMovements(filters: MovementFilters, enabled = true) {
-  return useQuery({ queryKey: inv('movements', filters), queryFn: ({ signal }) => listStockMovements(filters, signal), enabled, placeholderData: (previous) => previous })
+  const authed = useAuthenticated()
+  return useQuery({ queryKey: inv('movements', filters), queryFn: ({ signal }) => listStockMovements(filters, signal), enabled: enabled && authed, placeholderData: (previous) => previous })
 }
 
 export function useTransfers(status?: string) {
-  return useQuery({ queryKey: inv('transfers', status ?? 'all'), queryFn: ({ signal }) => listTransfers(status, signal), placeholderData: (previous) => previous })
+  const authed = useAuthenticated()
+  return useQuery({ enabled: authed, queryKey: inv('transfers', status ?? 'all'), queryFn: ({ signal }) => listTransfers(status, signal), placeholderData: (previous) => previous })
 }
 
 export function usePurchaseOrders(projectId: string | null) {
