@@ -1,4 +1,5 @@
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test'
+import { openModule } from './cert-helpers'
 
 /**
  * M5 on the web target: scan, issue, goods receipt against a purchase order
@@ -47,7 +48,7 @@ async function stockedWarehouse(request: APIRequestContext, headers: Record<stri
 }
 
 const openInventory = async (page: Page) => {
-  await page.getByTestId('records-inventory').click()
+  await openModule(page, 'inventory')
   await expect(page.getByTestId('screen-inventory')).toBeVisible()
 }
 

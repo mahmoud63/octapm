@@ -59,6 +59,19 @@ export async function signIn(page: Page, email: string, pass = password) {
 /** The sign-in screen has no screen id of its own; its submit button is the marker every spec uses. */
 export const signInScreen = (page: Page) => page.getByTestId('sign-in-submit')
 
+/**
+ * Open a project module the way a person does now.
+ *
+ * Home used to carry a wall of thirteen module buttons and every milestone
+ * spec clicked them; UX2-B moved that directory to Controls, where navigation
+ * belongs, so the specs go the same way.
+ */
+export async function openModule(page: Page, id: string) {
+  await page.goto('/controls')
+  await expect(page.getByTestId('screen-controls')).toBeVisible()
+  await page.getByTestId(`controls-${id}`).click()
+}
+
 export async function signOut(page: Page) {
   await page.goto('/more')
   await page.getByTestId('sign-out').click()

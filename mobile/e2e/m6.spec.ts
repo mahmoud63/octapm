@@ -1,6 +1,7 @@
 /// <reference types="node" />
 import { readFileSync } from 'node:fs'
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test'
+import { openModule } from './cert-helpers'
 
 /**
  * M6 on the web target: an approval answered through the respond route on
@@ -87,7 +88,7 @@ test.describe('M6 on the web target', () => {
       )
       .toBe(true)
 
-    await page.getByTestId('records-workflow').click()
+    await openModule(page, 'workflow')
     await expect(page.getByTestId('screen-workflow')).toBeVisible()
     await page.getByTestId(`step-row-${step!.assignmentId}`).click()
     await expect(page.getByTestId('screen-workflow-instance')).toBeVisible()
@@ -109,7 +110,7 @@ test.describe('M6 on the web target', () => {
 
   test('a change event is raised from the field form and opened', async ({ page }) => {
     await signIn(page)
-    await page.getByTestId('records-commercial').click()
+    await openModule(page, 'commercial')
     await expect(page.getByTestId('screen-commercial')).toBeVisible()
     await page.getByTestId('commercial-change-events').click()
     await expect(page.getByTestId('screen-change-events')).toBeVisible()
@@ -134,7 +135,7 @@ test.describe('M6 on the web target', () => {
     const { headers } = await apiSession(request)
     await signIn(page)
     const projectId = (await page.evaluate(() => sessionStorage.getItem('octapm.session.project')))!
-    await page.getByTestId('records-procurement').click()
+    await openModule(page, 'procurement')
     await expect(page.getByTestId('screen-procurement')).toBeVisible()
     await expect(page.getByTestId('procurement-doors')).toBeVisible()
     const alerts = await request.get(`${apiBase}/projects/${projectId}/procurement/lead-time-alerts?status=open`, { headers })

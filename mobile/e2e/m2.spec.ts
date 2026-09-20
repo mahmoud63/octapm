@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
+import { openModule } from './cert-helpers'
 
 /**
  * M2 on the web target: RFIs, tasks, documents and drawings.
@@ -26,13 +27,18 @@ async function signIn(page: Page) {
 }
 
 test.describe('M2 on the web target', () => {
-  test('Home offers the record screens and the RFI quick action to a project manager', async ({ page }) => {
+  test('a project manager gets their own home, and the record screens through the directory', async ({ page }) => {
     await signIn(page)
-    await expect(page.getByTestId('records-rfi')).toBeVisible()
-    await expect(page.getByTestId('records-tasks')).toBeVisible()
-    await expect(page.getByTestId('records-documents')).toBeVisible()
-    await expect(page.getByTestId('records-drawings')).toBeVisible()
+    // Home is the project manager's own content now, not a module directory.
+    await expect(page.getByTestId('pm-status')).toBeVisible()
+    await expect(page.getByTestId('pm-needs-you')).toBeVisible()
     await expect(page.getByTestId('quick-rfi')).toBeVisible()
+    // The doors live on Controls.
+    await page.goto('/controls')
+    await expect(page.getByTestId('screen-controls')).toBeVisible()
+    for (const id of ['rfi', 'tasks', 'documents', 'drawings']) {
+      await expect(page.getByTestId(`controls-${id}`), `door ${id}`).toBeVisible()
+    }
   })
 
   test('an RFI is raised from the field, answered officially and closed, every step through the server', async ({ page }) => {
@@ -77,7 +83,7 @@ test.describe('M2 on the web target', () => {
 
   test('the RFI list narrows to my court through the server and opens a record in the app', async ({ page }) => {
     await signIn(page)
-    await page.getByTestId('records-rfi').click()
+    await openModule(page, 'rfi')
     await expect(page.getByTestId('screen-rfis')).toBeVisible()
     const mine = page.waitForRequest((r) => r.url().includes('/rfi?') && r.url().includes('ballInCourtUserId=me'))
     await page.getByTestId('rfi-chip-mine').click()
@@ -103,7 +109,7 @@ test.describe('M2 on the web target', () => {
     const created = await request.post(`${apiBase}/tasks`, { headers: { authorization: `Bearer ${token}`, 'x-octapm-client': 'mobile' }, data: { title: `E2E task ${Date.now()}`, projectId, priority: 'high', label: 'field' } })
     expect(created.status()).toBe(201)
 
-    await page.getByTestId('records-tasks').click()
+    await openModule(page, 'tasks')
     await expect(page.getByTestId('screen-tasks')).toBeVisible()
     await page.getByTestId('task-chip-all').click()
     const rows = page.getByTestId('screen-tasks').locator('[data-testid^="task-row-"]')
@@ -118,7 +124,7 @@ test.describe('M2 on the web target', () => {
 
   test('the document register and the sheet register load for the project', async ({ page }) => {
     await signIn(page)
-    await page.getByTestId('records-documents').click()
+    await openModule(page, 'documents')
     await expect(page.getByTestId('screen-documents')).toBeVisible()
     await expect(page.getByTestId('documents-folder-all')).toBeVisible()
     await page.goto('/drawings')

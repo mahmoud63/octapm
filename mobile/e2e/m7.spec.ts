@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
+import { openModule } from './cert-helpers'
 
 /**
  * M7 on the web target: capture without a signal, then send when it
@@ -58,7 +59,7 @@ test.describe('M7 on the web target', () => {
 
   test('a daily-log entry captured offline says so on the screen and goes to the outbox', async ({ page, context }) => {
     await signIn(page)
-    await page.getByTestId('records-site').click()
+    await openModule(page, 'site')
     await expect(page.getByTestId('screen-daily-log')).toBeVisible()
     await expect(page.getByTestId('daily-log-add-manpower')).toBeVisible()
     await context.setOffline(true)

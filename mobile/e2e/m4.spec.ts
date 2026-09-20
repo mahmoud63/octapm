@@ -1,4 +1,5 @@
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test'
+import { openModule } from './cert-helpers'
 
 /**
  * M4 on the web target: inspections, the punch list, NCRs with closeout
@@ -33,7 +34,7 @@ async function apiSession(request: APIRequestContext) {
 }
 
 const openQuality = async (page: Page) => {
-  await page.getByTestId('records-quality').click()
+  await openModule(page, 'quality')
   await expect(page.getByTestId('screen-quality')).toBeVisible()
 }
 

@@ -3,10 +3,15 @@ import { ALLOWED_CAPS, accounts, apiSession, findLeaks, getData, isWide, mainPro
 
 /**
  * Certification: role-aware sign-in. Every role account in the end-to-end
- * organisation signs in on the web target; Home's quick actions and record
- * doors are compared, one by one, with the effective matrix the server
- * returns for that person, and Needs You opens. The matrix is the
- * authority: the screen may show a door only when the matrix grants it.
+ * organisation signs in on the web target; Home's quick actions and the
+ * module directory's doors are compared, one by one, with the effective
+ * matrix the server returns for that person, and Needs You opens. The matrix
+ * is the authority: the screen may show a door only when the matrix grants
+ * it.
+ *
+ * The doors moved with UX2-B. Home is the role's own content now and the
+ * directory lives on Controls, where navigation belongs — so that is where
+ * they are certified.
  */
 const QUICK_ACTIONS = [
   { id: 'rfi', module: 'rfi', action: 'create' },
@@ -20,7 +25,7 @@ const RECORD_DOORS = [
   { id: 'site', module: 'progress' },
   { id: 'activities', module: 'schedule' },
   { id: 'photos', module: 'document_control' },
-  { id: 'quality', module: 'punch' },
+  { id: 'quality', module: 'inspection' },
   { id: 'inventory', module: 'inventory' },
   { id: 'workflow', module: 'workflow' },
   { id: 'commercial', module: 'change_event' },
@@ -54,12 +59,19 @@ test.describe('certification: role-aware sign-in', () => {
         await expect(page.getByTestId(`quick-${q.id}`), `quick action ${q.id} for ${role}`).toHaveCount(expected ? 1 : 0)
         ;(expected ? shown : hidden).push(`quick:${q.id}`)
       }
+      expect(await findLeaks(page, ALLOWED_CAPS)).toEqual([])
+
+      // The module directory, on Controls.
+      await page.goto('/controls')
+      await expect(page.getByTestId('screen-controls')).toBeVisible()
       for (const d of RECORD_DOORS) {
         const expected = allows(matrix, d.module, 'read')
-        await expect(page.getByTestId(`records-${d.id}`), `door ${d.id} for ${role}`).toHaveCount(expected ? 1 : 0)
+        await expect(page.getByTestId(`controls-${d.id}`), `door ${d.id} for ${role}`).toHaveCount(expected ? 1 : 0)
         ;(expected ? shown : hidden).push(`door:${d.id}`)
       }
       expect(await findLeaks(page, ALLOWED_CAPS)).toEqual([])
+      await page.goto('/')
+      await expect(page.getByTestId('screen-home')).toBeVisible()
       test.info().annotations.push({ type: 'role', description: `${session.user.role}: shown ${shown.join(' ')} | hidden ${hidden.join(' ')}` })
 
       await page.getByTestId('home-needs-you-all').click()

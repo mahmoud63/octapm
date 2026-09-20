@@ -75,7 +75,7 @@ export function PmHome({ projectId, currency, actions }: { projectId: string; cu
       </Section>
 
       {/* 2 — what needs deciding */}
-      <Section title="Needs your attention" action={{ title: 'See all', onPress: () => router.push('/needs-you') }} testID="pm-needs-you">
+      <Section title="Needs your attention" action={{ title: 'See all', onPress: () => router.push('/needs-you'), testID: 'home-needs-you-all' }} testID="pm-needs-you">
         <Counts
           items={[
             { id: 'overdue', label: 'Overdue', value: String(summary?.overdue ?? '—'), tone: (summary?.overdue ?? 0) > 0 ? 'error' : 'default', onPress: () => router.push('/needs-you') },

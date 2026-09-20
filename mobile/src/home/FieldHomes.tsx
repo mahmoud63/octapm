@@ -107,7 +107,7 @@ export function SiteEngineerHome({ projectId, actions }: HomeProps) {
         )}
       </Section>
 
-      <Section title="Assigned to you" action={{ title: 'See all', onPress: () => router.push('/needs-you') }} testID="site-mine">
+      <Section title="Assigned to you" action={{ title: 'See all', onPress: () => router.push('/needs-you'), testID: 'home-needs-you-all' }} testID="site-mine">
         {assignments.isPending ? <SkeletonList rows={3} /> : mine.length === 0 ? <Text tone="muted">Nothing is waiting on you.</Text> : mine.map((item) => <AssignmentRow key={`${item.recordType}:${item.recordId}`} item={item} onPress={() => open(item)} />)}
       </Section>
 
@@ -166,7 +166,7 @@ export function QualityHome({ projectId, actions }: HomeProps) {
         )}
       </Section>
 
-      <Section title="Waiting on you" action={{ title: 'See all', onPress: () => router.push('/needs-you') }} testID="quality-mine">
+      <Section title="Waiting on you" action={{ title: 'See all', onPress: () => router.push('/needs-you'), testID: 'home-needs-you-all' }} testID="quality-mine">
         {assignments.isPending ? (
           <SkeletonList rows={3} />
         ) : awaitingMe.length === 0 ? (
@@ -174,6 +174,7 @@ export function QualityHome({ projectId, actions }: HomeProps) {
         ) : (
           awaitingMe.map((item) => <AssignmentRow key={`${item.recordType}:${item.recordId}`} item={item} onPress={() => open(item)} />)
         )}
+        <Freshness updatedAt={assignments.dataUpdatedAt || undefined} isFetching={assignments.isFetching} />
       </Section>
 
       <Section title="By trade" testID="quality-by-trade">
@@ -210,6 +211,9 @@ export function WarehouseHome({ projectId, actions }: HomeProps) {
   const router = useRouter()
   const summary = useInventorySummary(projectId)
   const overview = useProcurementOverview(projectId)
+  const assignments = useAssignments(projectId)
+  const open = useOpenAssignment()
+  const mine = useMemo(() => (assignments.data?.items ?? []).slice(0, 4), [assignments.data])
 
   const expected = useMemo(() => {
     const orders = overview.data?.orders ?? []
@@ -258,6 +262,17 @@ export function WarehouseHome({ projectId, actions }: HomeProps) {
             />
           ))
         )}
+      </Section>
+
+      <Section title="Waiting on you" action={{ title: 'See all', onPress: () => router.push('/needs-you'), testID: 'home-needs-you-all' }} testID="warehouse-mine">
+        {assignments.isPending ? (
+          <SkeletonList rows={2} />
+        ) : mine.length === 0 ? (
+          <Text tone="muted">Nothing is waiting on you.</Text>
+        ) : (
+          mine.map((item) => <AssignmentRow key={`${item.recordType}:${item.recordId}`} item={item} onPress={() => open(item)} />)
+        )}
+        <Freshness updatedAt={assignments.dataUpdatedAt || undefined} isFetching={assignments.isFetching} />
       </Section>
 
       <Section title="Record something" testID="warehouse-quick-actions">

@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
+import { openModule } from './cert-helpers'
 
 /**
  * M3 on the web target: the daily log, activities and progress, photos and
@@ -25,7 +26,7 @@ async function signIn(page: Page) {
 test.describe('M3 on the web target', () => {
   test('the daily log takes a manpower entry with a replay key and shows it in the totals', async ({ page }) => {
     await signIn(page)
-    await page.getByTestId('records-site').click()
+    await openModule(page, 'site')
     await expect(page.getByTestId('screen-daily-log')).toBeVisible()
     await page.getByTestId('daily-log-add-manpower').click()
     await page.getByTestId('entry-companyName').fill(`E2E Crew ${Date.now() % 10000}`)
@@ -59,7 +60,7 @@ test.describe('M3 on the web target', () => {
     expect(created.status()).toBe(201)
     const activityId = ((await created.json()) as { data: { id: string } }).data.id
 
-    await page.getByTestId('records-activities').click()
+    await openModule(page, 'activities')
     await expect(page.getByTestId('screen-activities')).toBeVisible()
     await page.getByTestId('activities-chip-all').click()
     await page.getByTestId('activities-search').fill(`E2E-${stamp % 100000}`)
@@ -81,7 +82,7 @@ test.describe('M3 on the web target', () => {
 
   test('the photo gallery and the timesheet list load, and a timesheet can be started for a crew', async ({ page, request }) => {
     await signIn(page)
-    await page.getByTestId('records-photos').click()
+    await openModule(page, 'photos')
     await expect(page.getByTestId('screen-photos')).toBeVisible()
     await expect(page.getByTestId('photos-library')).toBeVisible()
 

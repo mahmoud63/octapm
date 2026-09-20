@@ -15,7 +15,7 @@ import { photoThumbnailPath } from '@/api/site-endpoints'
  * these keeps nine homes consistent without making them identical.
  */
 
-export function Section({ title, action, children, testID }: { title: string; action?: { title: string; onPress: () => void }; children: React.ReactNode; testID?: string }) {
+export function Section({ title, action, children, testID }: { title: string; action?: { title: string; onPress: () => void; testID?: string }; children: React.ReactNode; testID?: string }) {
   return (
     <View style={styles.section} testID={testID}>
       <View style={styles.sectionHead}>
@@ -23,7 +23,7 @@ export function Section({ title, action, children, testID }: { title: string; ac
           {title}
         </Text>
         {action ? (
-          <Pressable accessibilityRole="link" onPress={action.onPress} hitSlop={8}>
+          <Pressable accessibilityRole="link" onPress={action.onPress} hitSlop={8} testID={action.testID}>
             <Text tone="link">{action.title}</Text>
           </Pressable>
         ) : null}

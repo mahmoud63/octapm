@@ -65,7 +65,7 @@ export function GeneralHome({ projectId, currency, actions, emphasis }: { projec
 
   return (
     <>
-      <Section title="Needs your attention" action={{ title: 'See all', onPress: () => router.push('/needs-you') }} testID="general-needs-you">
+      <Section title="Needs your attention" action={{ title: 'See all', onPress: () => router.push('/needs-you'), testID: 'home-needs-you-all' }} testID="general-needs-you">
         <Counts
           items={[
             { id: 'overdue', label: 'Overdue', value: String(summary?.overdue ?? '—'), tone: (summary?.overdue ?? 0) > 0 ? 'error' : 'default', onPress: () => router.push('/needs-you') },
