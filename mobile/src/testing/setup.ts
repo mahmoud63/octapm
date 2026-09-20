@@ -56,8 +56,47 @@ jest.mock('expo-network', () => ({
 // while a screen's queries settle. Nothing in the app waits on real time.
 configure({ asyncUtilTimeout: 5000 })
 
-beforeEach(() => {
+/**
+ * A deterministic starting state for every test.
+ *
+ * The app is built on module singletons — one query client, one outbox, one
+ * network signal, one auth store, one project store — and a test file shares
+ * all of them across its cases. Clearing the query cache is not enough on its
+ * own: `clear()` does not cancel what is already in flight, so a fetch started
+ * by the previous test lands in the cache *after* the clear and the next test
+ * sees an answer it never asked for. That is what made a permissions test
+ * read the server's matrix where it expected the offline fallback, and it is
+ * the kind of failure that moves from test to test between runs.
+ *
+ * This runs before any file's own `beforeEach`, so a file that sets up its own
+ * state still wins.
+ */
+/* eslint-disable @typescript-eslint/no-require-imports */
+beforeEach(async () => {
   mockMemory.clear()
+  ;(jest.requireMock('expo-sqlite') as { __rows?: Map<string, string> }).__rows?.clear()
+
+  const { queryClient } = require('@/api/query') as typeof import('@/api/query')
+  await queryClient.cancelQueries()
+  queryClient.clear()
+
+  const { network } = require('@/api/network') as typeof import('@/api/network')
+  network.__reset(null)
+
+  const { __resetOutboxForTests } = require('@/offline/outbox') as typeof import('@/offline/outbox')
+  __resetOutboxForTests()
+
+  const { useAuthStore } = require('@/auth/store') as typeof import('@/auth/store')
+  useAuthStore.setState({ status: 'signedOut', user: null, accessToken: null, accessExpiresAt: null })
+
+  const { useProjectStore } = require('@/projects/store') as typeof import('@/projects/store')
+  useProjectStore.setState({ currentProjectId: null, hydrated: false })
+})
+
+/** Nothing crosses the boundary: whatever a test left running is stopped here. */
+afterEach(async () => {
+  const { queryClient } = require('@/api/query') as typeof import('@/api/query')
+  await queryClient.cancelQueries()
 })
 
 export const testMemory = mockMemory
@@ -130,7 +169,7 @@ jest.mock('expo-sqlite', () => {
     getFirstAsync: async (_sql: string, key: string) => (rows.has(key) ? { value: rows.get(key) } : null),
     getAllAsync: async (_sql: string, like: string) => [...rows.keys()].filter((k) => k.startsWith(like.replace(/%$/, ''))).map((key) => ({ key })),
   }
-  return { openDatabaseAsync: jest.fn(async () => db) }
+  return { openDatabaseAsync: jest.fn(async () => db), __rows: rows }
 })
 
 // Node's FormData refuses the { uri, name, type } file objects React Native's

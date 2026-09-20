@@ -99,7 +99,7 @@ describe('evidence on a record', () => {
   it('says what it is in the record’s own words when a screen asks', async () => {
     fakeServer({ 'GET /projects/p1/attachments': () => ({ status: 200, body: envelope({ items: [] }) }) })
     await renderScreen(<Evidence projectId="p1" recordType="ncr" recordId="ncr-3" recordRef="NCR-014" canAdd title="Photographs" emptyText="No photographs on this record yet." />)
-    expect(await screen.findByText('Photographs')).toBeTruthy()
-    expect(screen.getByText('No photographs on this record yet.')).toBeTruthy()
+    expect(await screen.findByText('No photographs on this record yet.')).toBeTruthy()
+    expect(screen.getByText('Photographs')).toBeTruthy()
   })
 })
