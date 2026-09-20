@@ -36,13 +36,17 @@ test.describe('M1 on the web target', () => {
     await expect(page.getByTestId('project-switch')).toBeVisible()
   })
 
-  test('Home shows what needs the person, the day, the project health and the notifications', async ({ page }) => {
+  test("Home leads with the project's own standing, then what needs the person", async ({ page }) => {
     await signIn(page)
-    await expect(page.getByText('Needs You', { exact: true }).first()).toBeVisible()
-    await expect(page.getByText('Today', { exact: true })).toBeVisible()
-    await expect(page.getByText('Project health')).toBeVisible()
+    // UX2-B: a project manager's home is an exception report in a fixed order —
+    // where the project stands, what needs deciding, what is at risk, what the
+    // site did, then the numbers. The module directory moved to Controls.
+    await expect(page.getByTestId('pm-status')).toBeVisible()
     await expect(page.getByTestId('health-schedule')).toBeVisible()
-    await expect(page.getByText(/unread/)).toBeVisible()
+    await expect(page.getByTestId('pm-needs-you')).toBeVisible()
+    await expect(page.getByTestId('pm-risks')).toBeVisible()
+    await expect(page.getByTestId('pm-today-on-site')).toBeVisible()
+    await expect(page.getByTestId('pm-pulse')).toBeVisible()
     await expect(page.getByTestId('freshness').first()).toContainText(/Live|Updated/)
   })
 

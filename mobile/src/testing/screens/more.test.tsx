@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react-native'
+import { fireEvent, screen, waitFor } from '@testing-library/react-native'
 import MoreScreen from '../../../app/(app)/more'
 import { network } from '@/api/network'
 import { keys, queryClient } from '@/api/query'
@@ -7,6 +7,8 @@ import { useAuthStore } from '@/auth/store'
 import { deadNetwork, envelope, fakeServer } from '@/testing/fake-server'
 
 // Binds the session's refresh into the request layer.
+import { renderScreen as render } from '@/testing/render'
+
 import '@/auth/session'
 
 const user = { id: 'u1', orgId: 'o1', name: 'Dana Okafor', email: 'pm@octapm.demo', role: 'pm', isCompanyAdmin: true, status: 'active' }

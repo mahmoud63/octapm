@@ -91,14 +91,23 @@ describe('More is a directory, and administration is a capability', () => {
   it('lists only the modules the person may read', () => {
     const small = matrix(['progress', 'rfi'], ['read'])
     const groups = resolveMore(ctx('site_engineer', small))
-    expect(groups.map((g) => g.title)).toEqual(['Project modules'])
-    expect(groups[0]!.entries.map((e) => e.id).sort()).toEqual(['rfi', 'site'])
+    expect(groups.map((g) => g.title)).toEqual(['You', 'Project modules'])
+    expect(groups.find((g) => g.title === 'Project modules')!.entries.map((e) => e.id).sort()).toEqual(['rfi', 'site'])
+  })
+
+  it('always offers what belongs to the person, whatever the project allows', () => {
+    // Notifications and what is waiting to send are mine wherever I am; they
+    // are not a project module and no permission gates them.
+    const nothing = matrix([])
+    const groups = resolveMore(ctx('site_engineer', nothing))
+    const you = groups.find((g) => g.title === 'You')!
+    expect(you.entries.map((e) => e.id)).toEqual(['notifications', 'outbox'])
   })
 
   it('adds Administration for a company admin and never for anyone else', () => {
-    expect(resolveMore(ctx('pm')).map((g) => g.title)).toEqual(['Project modules'])
+    expect(resolveMore(ctx('pm')).map((g) => g.title)).toEqual(['You', 'Project modules'])
     const admin = resolveMore(ctx('pm', EVERYTHING, { isCompanyAdmin: true }))
-    expect(admin.map((g) => g.title)).toEqual(['Project modules', 'Administration'])
+    expect(admin.map((g) => g.title)).toEqual(['You', 'Project modules', 'Administration'])
   })
 
   it('still asks permission for each administration entry', () => {
@@ -110,7 +119,8 @@ describe('More is a directory, and administration is a capability', () => {
   })
 
   it('shows no module directory before a project is chosen', () => {
-    expect(resolveMore({ role: 'pm', matrix: EVERYTHING, hasProject: false })).toEqual([])
+    const groups = resolveMore({ role: 'pm', matrix: EVERYTHING, hasProject: false })
+    expect(groups.map((g) => g.title)).toEqual(['You'])
   })
 })
 

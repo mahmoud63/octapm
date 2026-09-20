@@ -182,6 +182,12 @@ const MODULE_DIRECTORY: MoreEntry[] = [
   { id: 'timesheets', title: 'Timesheets', route: '/timesheets', module: 'timesheet', action: 'read' },
 ]
 
+/** The "me" layer: mine wherever I am, and not a project module. */
+const PERSONAL: MoreEntry[] = [
+  { id: 'notifications', title: 'Notifications', route: '/notifications' },
+  { id: 'outbox', title: 'Waiting to send', route: '/outbox' },
+]
+
 const ADMINISTRATION: MoreEntry[] = [
   { id: 'users', title: 'People and permissions', route: '/admin/users', module: 'user_management', action: 'read' },
   { id: 'parties', title: 'Companies on this project', route: '/admin/parties', module: 'project_parties', action: 'read' },
@@ -194,7 +200,7 @@ const ADMINISTRATION: MoreEntry[] = [
  */
 export function resolveMore(context: NavContext): MoreGroup[] {
   const permitted = (entries: MoreEntry[]) => entries.filter((e) => !e.module || !e.action || allows(context.matrix, e.module, e.action))
-  const groups: MoreGroup[] = []
+  const groups: MoreGroup[] = [{ title: 'You', entries: PERSONAL }]
   const modules = context.hasProject ? permitted(MODULE_DIRECTORY) : []
   if (modules.length) groups.push({ title: 'Project modules', entries: modules })
   // The admin overlay: a capability on top of whatever role the person holds,

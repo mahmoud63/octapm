@@ -5,10 +5,13 @@ import { availableBiometric, biometricLabel, type BiometricKind } from '@/auth/b
 import { setBiometricUnlock, signOut } from '@/auth/session'
 import { useAuthStore } from '@/auth/store'
 import { Screen } from '@/components/Screen'
-import { Button, Card, Text, spacing } from '@/design-system'
+import { Button, Card, RecordRow, Text, spacing } from '@/design-system'
 import { env } from '@/config/env'
 import { useOutboxStatus } from '@/offline/useOutboxStatus'
+import { resolveMore } from '@/navigation/roleNav'
 import { roleLabel } from '@/permissions/policy'
+import { usePermissions } from '@/permissions/usePermissions'
+import { useProjectStore } from '@/projects/store'
 
 /**
  * Everything that is not a destination: who you are, how you unlock, which
@@ -18,6 +21,8 @@ export default function MoreScreen() {
   const user = useAuthStore((s) => s.user)
   const biometricEnabled = useAuthStore((s) => s.biometricEnabled)
   const [biometric, setBiometric] = useState<BiometricKind>('none')
+  const projectId = useProjectStore((st) => st.currentProjectId)
+  const permissions = usePermissions(projectId)
   const [busy, setBusy] = useState(false)
 
   const router = useRouter()
@@ -26,6 +31,8 @@ export default function MoreScreen() {
   useEffect(() => {
     availableBiometric().then(setBiometric)
   }, [])
+
+  const groups = resolveMore({ role: user?.role ?? null, matrix: permissions.matrix, isCompanyAdmin: user?.isCompanyAdmin ?? false, hasProject: !!projectId })
 
   return (
     <Screen title="More" testID="screen-more">
@@ -39,6 +46,19 @@ export default function MoreScreen() {
           <Text tone="muted">{roleLabel(user?.role)}</Text>
         </View>
       </Card>
+
+      {groups.map((group) => (
+        <Card key={group.title} testID={`more-group-${group.title.toLowerCase().replace(/s+/g, '-')}`}>
+          <View style={styles.stack}>
+            <Text variant="label" label tone="muted">
+              {group.title}
+            </Text>
+            {group.entries.map((entry) => (
+              <RecordRow key={entry.id} reference="" title={entry.title} onPress={() => router.push(entry.route as never)} testID={`more-${entry.id}`} />
+            ))}
+          </View>
+        </Card>
+      ))}
 
       {biometric !== 'none' ? (
         <Card>

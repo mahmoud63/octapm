@@ -56,9 +56,13 @@ test.describe('certification: financial and inventory integrity', () => {
     const issued = page.waitForResponse((r) => r.url().endsWith('/inventory/stock/issue') && r.request().method() === 'POST')
     const send = page.getByTestId('move-send')
     await expect(send).toBeEnabled()
-    await send.click()
-    // The second tap is what a gloved thumb does; the sheet must not send twice.
-    await send.click({ force: true, timeout: 2_000 }).catch(() => undefined)
+    // Both taps in one task, so no re-render can slip between them and disable
+    // the button. Clicking twice with an await in between only tests how fast
+    // React is: it passed with the guard removed. This tests the guard.
+    await send.evaluate((node: HTMLElement) => {
+      node.click()
+      node.click()
+    })
     const response = await issued
     expect(response.status()).toBe(201)
     await page.waitForTimeout(1500)

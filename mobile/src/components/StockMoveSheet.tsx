@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Modal, ScrollView, StyleSheet, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { isAppError, userMessage } from '@/api/errors'
@@ -71,7 +71,16 @@ export function StockMoveSheet({ visible, kind, item, projectId, defaultWarehous
   const amount = decimal.test(qty) ? Number(qty) : NaN
   const ready = !!warehouseId && amount > 0 && (!needsActivity || !!activityId) && (!needsNotes || notes.trim().length > 0) && (!unitCost || decimal.test(unitCost))
 
+  /**
+   * A stock movement is money. The send button is disabled while the mutation
+   * is in flight, but that depends on React having re-rendered — and a gloved
+   * double tap does not wait for a render. This guard is the one that holds:
+   * a second call while the first is still going is ignored outright.
+   */
+  const sending = useRef(false)
+
   const submit = async () => {
+    if (sending.current) return
     if (!warehouseId || !(amount > 0)) return
     setFailure(null)
     if (network.isKnownOffline()) {
@@ -89,6 +98,7 @@ export function StockMoveSheet({ visible, kind, item, projectId, defaultWarehous
       reference: reference.trim() || undefined,
       notes: notes.trim() || undefined,
     }
+    sending.current = true
     try {
       if (kind === 'reserve') {
         const state = await actions.reserve.mutateAsync(body)
@@ -102,6 +112,8 @@ export function StockMoveSheet({ visible, kind, item, projectId, defaultWarehous
         setUncertain(true)
         setFailure('The reply was lost. The movement may or may not have reached the server: check the recent movements before sending it again.')
       } else setFailure(userMessage(error))
+    } finally {
+      sending.current = false
     }
   }
 

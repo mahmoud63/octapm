@@ -26,6 +26,8 @@ const ICONS: Record<string, string> = {
   workflow: 'checkmark-done-outline',
   timesheets: 'time-outline',
   users: 'people-outline',
+  notifications: 'notifications-outline',
+  outbox: 'cloud-upload-outline',
   parties: 'business-outline',
 }
 
@@ -48,7 +50,8 @@ export default function ControlsScreen() {
   const projects = useProjects()
   const project = projects.data?.find((p) => p.id === projectId) ?? null
 
-  const groups = resolveMore({ role, matrix: permissions.matrix, isCompanyAdmin, hasProject: !!projectId })
+  // Controls is about this project; what belongs to the person lives in More.
+  const groups = resolveMore({ role, matrix: permissions.matrix, isCompanyAdmin, hasProject: !!projectId }).filter((g) => g.title !== 'You')
 
   return (
     <Screen title="Controls" subtitle={project?.name} contentStyle={styles.content} testID="screen-controls">
