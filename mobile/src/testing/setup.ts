@@ -94,9 +94,19 @@ beforeEach(async () => {
 })
 
 /** Nothing crosses the boundary: whatever a test left running is stopped here. */
+/**
+ * Leave nothing running behind the last test of a file.
+ *
+ * Every cached query schedules a garbage-collection timer, and the default
+ * lifetime is five minutes. Clearing only on the way *in* leaves the final
+ * test's timers alive, which is what held the worker open and earned the
+ * "failed to exit gracefully" warning on every run. Clearing on the way out
+ * destroys the queries and their timers with them.
+ */
 afterEach(async () => {
   const { queryClient } = require('@/api/query') as typeof import('@/api/query')
   await queryClient.cancelQueries()
+  queryClient.clear()
 })
 
 export const testMemory = mockMemory

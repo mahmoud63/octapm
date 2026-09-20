@@ -168,7 +168,7 @@ const resolveChallenge = async ({ mfaToken, code, context = {} }) => {
     await audit({ orgId: user.orgId, userId: user.id, action: "mfa.failed", context });
     throw new HttpError(401, "MFA_CODE_INVALID", "That code is not valid");
   }
-  authAbuseService.recordLoginSuccess({ email: user.email });
+  authAbuseService.recordLoginSuccess({ email: user.email, ipAddress: context.ipAddress });
   return user;
 };
 

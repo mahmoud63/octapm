@@ -31,10 +31,17 @@ export function visibleModules(matrix: PermissionMatrix | undefined): string[] {
 
 export function usePermissions(projectId: string | null) {
   const role = useAuthStore((s) => s.user?.role ?? null)
+  const signedIn = useAuthStore((s) => s.status === 'signedIn')
   const query = useQuery({
     queryKey: projectId ? keys.permissions(projectId) : keys.orgPermissions,
     queryFn: ({ signal }) => getPermissions(projectId, signal),
     staleTime: 5 * 60_000,
+    // Only ask once there is a session to ask with. A request sent while the
+    // session is still being restored carries no bearer, and its 401 is
+    // indistinguishable from an expired one: the client refreshes, retries,
+    // is refused a second time and ends the session. Opening a screen that
+    // reads permissions a moment too early used to sign the person out.
+    enabled: signedIn,
   })
   const matrix = query.data
   return {

@@ -90,7 +90,20 @@ test.describe('M6 on the web target', () => {
 
     await openModule(page, 'workflow')
     await expect(page.getByTestId('screen-workflow')).toBeVisible()
-    await page.getByTestId(`step-row-${step!.assignmentId}`).click()
+    // The inbox is a windowed list and this step, being the newest, sorts last:
+    // it is not in the page at all until the list has been scrolled near it, and
+    // scroll-into-view cannot reach an element that is not there. Drive the
+    // list's own scroller down until the row exists, as a person would.
+    const row = page.getByTestId(`step-row-${step!.assignmentId}`)
+    for (let i = 0; i < 40 && (await row.count()) === 0; i += 1) {
+      await page.evaluate(() => {
+        const scroller = [...document.querySelectorAll<HTMLElement>('*')].find((node) => node.scrollHeight > node.clientHeight + 50)
+        if (scroller) scroller.scrollTop = scroller.scrollHeight
+      })
+      await page.waitForTimeout(150)
+    }
+    await expect(row, 'the new step is reachable in the inbox').toBeVisible()
+    await row.click()
     await expect(page.getByTestId('screen-workflow-instance')).toBeVisible()
     await expect(page.getByTestId('workflow-my-step')).toBeVisible()
     await page.getByTestId('workflow-respond-approve').click()

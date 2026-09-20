@@ -17,7 +17,7 @@ export interface Call {
 
 export type Route = (call: Call) => { status: number; body?: unknown; headers?: Record<string, string> }
 
-export function fakeServer(routes: Record<string, Route>): Call[] {
+export function fakeServer(routes: Record<string, Route>, options: { until?: Promise<unknown> } = {}): Call[] {
   const calls: Call[] = []
   globalThis.fetch = jest.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const request = input instanceof Request ? input : new Request(input, init)
@@ -43,6 +43,8 @@ export function fakeServer(routes: Record<string, Route>): Call[] {
     })
     const call: Call = { method: request.method, path, headers, body, query }
     calls.push(call)
+    // A held server has taken the request but not yet answered it.
+    if (options.until) await options.until
     const route = routes[`${request.method} ${path}`]
     if (!route) {
       return new Response(JSON.stringify({ success: false, error: { code: 'NOT_FOUND', message: `no route for ${request.method} ${path}` } }), {
@@ -57,6 +59,24 @@ export function fakeServer(routes: Record<string, Route>): Call[] {
     })
   }) as unknown as typeof fetch
   return calls
+}
+
+/**
+ * A fake server that has received the request but has not answered yet.
+ *
+ * A test that asserts what the app shows *before* the server speaks cannot use
+ * the ordinary fake, whose answer is already a resolved promise: whether it
+ * lands before the next line depends on how many microtasks the render happens
+ * to drain. That is a race, and a race fails roughly one run in five. Here the
+ * request is recorded at once and the answer waits for `release()`, so "before
+ * the server has spoken" is a state the test holds open rather than hopes for.
+ */
+export function pendingServer(routes: Record<string, Route>) {
+  let release!: () => void
+  const until = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  return { calls: fakeServer(routes, { until }), release }
 }
 
 /** A fetch that never reaches a server. */

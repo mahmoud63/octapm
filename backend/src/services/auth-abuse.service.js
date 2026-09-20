@@ -108,11 +108,34 @@ function recordLoginFailure({ email, ipAddress }) {
   });
 }
 
-function recordLoginSuccess({ email }) {
+/**
+ * A successful sign-in clears that person’s own failure count outright, and
+ * repays the address they came from exactly one failure.
+ *
+ * The address is only repaid, never cleared, and an address already serving a
+ * lock serves it out in full: a correct password proves someone real is behind
+ * this address, not that a brute force is not also running through it.
+ *
+ * Without the repayment the per-address count only ever rises. A shared office
+ * or NAT egress reaches thirty lifetime failures in ordinary use; the lock then
+ * expires but the count does not, so the next single mistyped password re-locks
+ * every person behind that address for another fifteen minutes, again and again,
+ * with nothing they can do to clear it.
+ */
+function recordLoginSuccess({ email, ipAddress }) {
   const normalizedEmail = normalizeEmail(email);
   if (normalizedEmail) {
     emailAttempts.delete(normalizedEmail);
   }
+
+  if (!ipAddress || !ipAttempts.has(ipAddress)) return;
+  const entry = ipAttempts.get(ipAddress);
+  if (entry.lockedUntil && entry.lockedUntil > nowMs()) return;
+
+  entry.failures = Math.max(0, entry.failures - 1);
+  entry.lockedUntil = null;
+  entry.backoffUntil = null;
+  if (entry.failures === 0) ipAttempts.delete(ipAddress);
 }
 
 function resetAuthAbuseState() {

@@ -4,7 +4,7 @@ import type { ReactNode } from 'react'
 import { queryClient } from '@/api/query'
 import { useAuthStore } from '@/auth/store'
 import { allows, allowsTransition, usePermissions, visibleModules } from '@/permissions/usePermissions'
-import { envelope, fakeServer } from '@/testing/fake-server'
+import { envelope, fakeServer, pendingServer } from '@/testing/fake-server'
 import { matrix, user } from '@/testing/fixtures'
 
 // Binds the session's refresh into the request layer.
@@ -46,13 +46,16 @@ describe('the permissions hook', () => {
   it('answers from the shared policy until the server has spoken, then from the server only', async () => {
     useAuthStore.setState({ status: 'signedIn', user: { ...user, role: 'warehouse' }, accessToken: 'access-1' })
     // The server says this warehouse person may raise RFIs on this project (a template widened it).
-    fakeServer({ 'GET /auth/me/permissions': (call) => ({ status: 200, body: envelope(matrix('warehouse', { rfi: { actions: ['read', 'create'] }, ...(call.query.projectId === 'p1' ? {} : {}) })) }) })
+    // Held open: the server has the request but has not answered, so the first
+    // two assertions describe the fallback rather than racing the reply.
+    const { release } = pendingServer({ 'GET /auth/me/permissions': () => ({ status: 200, body: envelope(matrix('warehouse', { rfi: { actions: ['read', 'create'] } })) }) })
 
     const { result } = await renderHook(() => usePermissions('p1'), { wrapper })
     // Before the answer: the shared policy, where a warehouse role cannot create RFIs.
     expect(result.current.allows('rfi', 'create')).toBe(false)
     expect(result.current.allows('inventory', 'read')).toBe(true)
 
+    release()
     await waitFor(() => expect(result.current.matrix).toBeDefined())
     expect(result.current.allows('rfi', 'create')).toBe(true)
     // The server answer is complete: a module it does not list is not allowed, whatever the policy says.

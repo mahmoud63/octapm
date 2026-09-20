@@ -87,7 +87,11 @@ export function usePayAppActions(projectId: string) {
 // ── Workflow inbox ──
 
 export function useMySteps() {
-  return useQuery({ queryKey: MY_STEPS_KEY, queryFn: ({ signal }) => listMySteps(signal), staleTime: 30_000 })
+  // Kept for half a minute so moving between screens does not refetch, but
+  // always refreshed on the way in: this is the screen a person opens to ask
+  // what is waiting on them, and an answer half a minute out of date can be
+  // missing the approval they were told about and came here to give.
+  return useQuery({ queryKey: MY_STEPS_KEY, queryFn: ({ signal }) => listMySteps(signal), staleTime: 30_000, refetchOnMount: 'always' })
 }
 
 export function useWorkflowInstance(projectId: string | null, instanceId: string | null) {

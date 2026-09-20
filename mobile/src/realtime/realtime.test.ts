@@ -85,7 +85,12 @@ describe('realtime', () => {
     expect(invalidateForEvent(client, { type: 'record.changed', projectId: P, entityType: 'rfi', entityId: 'r1' })).toEqual([`project:${P}`])
     expect(spy).toHaveBeenCalledWith(expect.objectContaining({ queryKey: keys.projectScoped(P), refetchType: 'active' }))
     expect(spy).toHaveBeenCalledWith(expect.objectContaining({ queryKey: keys.needsYou(P) }))
-    expect(invalidateForEvent(client, { type: 'notification.created', entityType: 'rfi' })).toEqual(['notifications', 'needs-you'])
+    // A notification is the only announcement an approval makes when it is
+    // raised — the bus has approval.decided but nothing for a step appearing —
+    // so it has to refresh the approvals inbox too, or a change order submitted
+    // for this person waits out the list's half-minute before it shows.
+    expect(invalidateForEvent(client, { type: 'notification.created', entityType: 'rfi' })).toEqual(['notifications', 'needs-you', 'my-steps'])
+    expect(spy).toHaveBeenCalledWith(expect.objectContaining({ queryKey: ['workflow', 'my-steps'] }))
     expect(invalidateForEvent(client, { type: 'approval.decided', projectId: P, entityType: 'change_order' })).toEqual([`project:${P}`, 'my-steps'])
     expect(invalidateForEvent(client, { type: 'job.progress', projectId: P, entityType: 'background_job' })).toEqual([])
     expect(invalidateForEvent(client, { type: 'record.changed', projectId: P, entityType: 'task', entityId: 't1' })).toEqual([`project:${P}`, 'tasks'])

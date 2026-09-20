@@ -1196,6 +1196,10 @@ module.exports = {
   getBimModelFile,
   getBoqUploadFile,
   getImportUploadFile,
+  // Photos, attachments and document text all serve a project document
+  // through this. Defined here but never exported, so every caller got
+  // undefined and every photograph was a 500.
+  getProjectDocumentFile,
   getScheduleGenerationFile,
   getTempUploadDir,
   getWorkflowFile,

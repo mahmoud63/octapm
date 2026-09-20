@@ -339,7 +339,10 @@ const login = async ({ email, password }, context = {}) => {
       "Invalid email or password",
     );
   }
-  authAbuseService.recordLoginSuccess({ email: normalizedEmail });
+  authAbuseService.recordLoginSuccess({
+    email: normalizedEmail,
+    ipAddress: context.ipAddress,
+  });
 
   if (user.status !== "active") {
     throw new HttpError(403, "USER_INACTIVE", "Your account is not active");

@@ -53,7 +53,13 @@ export function invalidateForEvent(client: QueryClient, event: DomainEventMessag
   if (event.type === 'notification.created') {
     void client.invalidateQueries({ queryKey: keys.notifications })
     void client.invalidateQueries({ queryKey: ['needs-you'] })
-    touched.push('notifications', 'needs-you')
+    // An approval landing in someone's inbox is announced as a notification and
+    // nothing else: the bus has approval.decided but no event for a step being
+    // raised. Without this the approvals list stays as it was until its own
+    // half-minute runs out, so a change order submitted for your approval while
+    // you are looking at the screen simply does not appear.
+    void client.invalidateQueries({ queryKey: ['workflow', 'my-steps'] })
+    touched.push('notifications', 'needs-you', 'my-steps')
     return touched
   }
   if (event.projectId) {
