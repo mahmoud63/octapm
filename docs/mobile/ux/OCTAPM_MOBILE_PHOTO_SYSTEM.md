@@ -1,7 +1,7 @@
 # OctaPM Mobile — Field Evidence System
 
-**Audience:** whoever implements UX2-C, and the reviewer checking that mobile photos reach the office.
-**Date:** 2026-09-19. **Status:** design, grounded in the backend as it stands. Nothing here proposes a new store.
+**Audience:** whoever maintains the evidence system, and the reviewer checking that mobile photos reach the office.
+**Date:** 2026-09-20. **Status:** BUILT in UX2-C (`729b85f`). What follows is the design; §10 records what was implemented and what was left.
 
 ## 1. The finding that shapes everything
 
@@ -146,3 +146,30 @@ A photo captured from each of these reaches the server with the right project, r
 activity · daily report · RFI · inspection · NCR · punch · task · delivery · goods receipt · change event · global Capture.
 
 Each is a live check against the running API, in the dedicated end-to-end organisation, asserting the `Attachment` row's `recordType`/`recordId` and the `Photo` row's `projectId`, `uploadedBy`, `takenAt` and `locationId` — read back from the API, not from the app's own state.
+
+
+## 10. What UX2-C actually built
+
+One component, `mobile/src/components/Evidence.tsx`, is the whole capability. `AttachmentList` is gone and its five call sites moved across. Every record screen that carries evidence uses it, and none has a camera of its own.
+
+**Record types with evidence in the app today:** activity · RFI · inspection (form response) · punch item · material test · NCR · safety incident · task · change event. Purchase orders accept evidence through the same endpoint and were exercised live; their screen surfaces it in UX2-H.
+
+**Context is inherited.** The component takes `recordRef` and `locationId` from the screen the person was already on, and the upload carries both. `locationId` and `tags` were always accepted by `POST /projects/:id/attachments` (attachments.js:147–148) and the client simply never sent them.
+
+**Result state.** The outbox item now carries `resultRef` beside `resultId` — what the office calls the record. Senders return it: a punch item as its ref, an inspection as its ref, a goods receipt as its receipt number, a photograph as the record it landed on. The outbox says *"The office has this as PUNCH-114"* and offers **Open record**. `src/offline/result.test.ts` holds it; three of its four checks fail when the reference stops being persisted.
+
+**Offline.** A photograph is kept on the device, queued with its replay key through the existing `attachment.upload` kind, and shown **on its own record** as waiting to upload rather than only in the outbox. The dependency ordering that makes a photograph wait for its parent record (CERT-01) is unchanged and still tested.
+
+**Two defects fixed by looking at the running app.** The first was mine: the evidence component filtered inside the `useOutbox` selector, so the store's snapshot changed on every render and eight screens hit "Maximum update depth exceeded" — select the stable slice, narrow with `useMemo`. The second is the platform's: every photograph in the certified project reports `thumbnailStatus: "pending"` and that endpoint returns **500**, so both the gallery grid and the home strip were firing a failing request per tile and drawing "No preview". Both now ask only when the server says `ready`.
+
+**Gallery filters** now use what the route always supported: Today, This week, and by record type (daily report, progress, activity, RFI, NCR, punch, safety, delivery), alongside the existing search and tags.
+
+### Not built in this wave
+
+- **Markup** stays as it is: the existing pre-upload annotate path is unchanged, and the marked copy is still a derivative rather than an overwrite. A published, editable, attributed markup against `markups.js` is a later wave.
+- **A camera-first capture screen with a review step** (§8) — capture still starts from the record. The context-inheritance work that makes a global capture screen possible is done; the screen itself belongs with UX2-E, where Locations gives it somewhere to stand.
+- **Inventory item, stock movement and equipment** still cannot carry attachments; that is a backend record-type extension, classified EXTEND and not taken in this wave.
+
+### Proven live (`e2e/cert-evidence.spec.ts`)
+
+A photograph attached from an activity is readable by the office against that activity **and** appears in the project gallery from the same upload. Evidence was attached to seven record types in one run: activity, RFI, punch item, NCR, task, change event, purchase order. A record belonging to another project is refused. And `mobile_photo` is not a record type the platform has — there is no mobile-only silo to create one in.
