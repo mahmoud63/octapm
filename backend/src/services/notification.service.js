@@ -1145,8 +1145,8 @@ const nextRetryAt = (attemptNumber, now) =>
     now.getTime() + Math.min(60, 5 * 2 ** (attemptNumber - 1)) * 60 * 1000,
   );
 
-// How long a claimed delivery stays out of other processes' reach. Longer than
-// any single send (the email and push transports time out well inside it).
+// How long a claimed delivery stays out of other processes' reach: far longer
+// than one send normally takes.
 const DELIVERY_LEASE_MS = 5 * 60 * 1000;
 
 /**
@@ -1155,11 +1155,16 @@ const DELIVERY_LEASE_MS = 5 * 60 * 1000;
  * of two processes racing for it exactly one sees count 1. No new status is
  * introduced: the row stays `pending` with nextAttemptAt pushed past the lease,
  * which every reader already treats as "not due yet".
+ *
+ * The lease runs from the clock at the moment of the claim, not from the
+ * batch's `now`: a batch of a hundred sends can outlast five minutes, and a
+ * lease measured from its start would already have ended for the later rows,
+ * letting a fresh reader (the retry route, another task) send them again.
  */
 const claimDeliveryAttempt = async (attempt, now = new Date()) => {
   const claimed = await prisma.notificationDeliveryAttempt.updateMany({
     where: { id: attempt.id, status: "pending", updatedAt: attempt.updatedAt },
-    data: { nextAttemptAt: new Date(now.getTime() + DELIVERY_LEASE_MS) },
+    data: { nextAttemptAt: new Date(Math.max(now.getTime(), Date.now()) + DELIVERY_LEASE_MS) },
   });
   return claimed.count === 1;
 };

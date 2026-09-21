@@ -262,11 +262,13 @@ const DELIVERY_LEASE_MS = 5 * 60 * 1000;
  * it was read (updatedAt moves on every write), so of two racing processes
  * exactly one gets count 1. The row keeps its `pending` status; only
  * nextAttemptAt moves past the lease. The outcome update below restores it.
+ * The lease starts from the clock at the claim, not the batch's `now`, which
+ * may be minutes old by the time a long email batch hands over to push.
  */
 const claimDeliveryAttempt = async (attempt, now = new Date()) => {
   const claimed = await prisma.notificationDeliveryAttempt.updateMany({
     where: { id: attempt.id, status: "pending", updatedAt: attempt.updatedAt },
-    data: { nextAttemptAt: new Date(now.getTime() + DELIVERY_LEASE_MS) },
+    data: { nextAttemptAt: new Date(Math.max(now.getTime(), Date.now()) + DELIVERY_LEASE_MS) },
   });
   return claimed.count === 1;
 };
