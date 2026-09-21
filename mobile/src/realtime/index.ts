@@ -26,6 +26,8 @@ import { log } from '@/utilities/logger'
 
 export const DOMAIN_EVENT = 'domain.event'
 const COALESCE_MS = 400
+/** However busy it gets, a change reaches the screen within this. */
+const COALESCE_MAX_MS = 2_000
 
 export interface DomainEventMessage {
   type: string
@@ -90,17 +92,23 @@ const INVENTORY_ENTITIES = new Set(['stock_transaction', 'stock_movement', 'inve
 let socket: Socket | null = null
 let started = false
 let joined: string | null = null
-const pending = new Map<string, { timer: ReturnType<typeof setTimeout>; event: DomainEventMessage }>()
+const pending = new Map<string, { timer: ReturnType<typeof setTimeout>; event: DomainEventMessage; startedAt: number }>()
 
 const coalesce = (event: DomainEventMessage) => {
   const key = event.type === 'notification.created' ? 'notifications' : `${event.type}:${event.projectId ?? 'none'}`
   const existing = pending.get(key)
+  // Each new event pushes the wait back, which is the point of coalescing — but
+  // only up to a limit. A busy hour on a project can produce a change every few
+  // hundred milliseconds, and without a ceiling the refresh is postponed for as
+  // long as the work continues: exactly when the screen most needs to be right.
+  const startedAt = existing?.startedAt ?? Date.now()
   if (existing) clearTimeout(existing.timer)
+  const wait = Math.max(0, Math.min(COALESCE_MS, startedAt + COALESCE_MAX_MS - Date.now()))
   const timer = setTimeout(() => {
     pending.delete(key)
     invalidateForEvent(queryClient, event)
-  }, COALESCE_MS)
-  pending.set(key, { timer, event })
+  }, wait)
+  pending.set(key, { timer, event, startedAt })
 }
 
 const joinProject = (projectId: string | null) => {
@@ -117,6 +125,10 @@ const joinProject = (projectId: string | null) => {
     if (ack?.ok) {
       joined = wanted
       useRealtimeStore.setState({ room: wanted })
+      // Anything that changed before this room was joined — on a first load, or
+      // across a reconnection — arrived nowhere. Without this the screen keeps
+      // showing what it had when the signal went, and nothing ever tells it.
+      void queryClient.invalidateQueries({ queryKey: keys.projectScoped(wanted), refetchType: 'active' })
     } else {
       log.warn('sync', 'realtime project room refused', { projectId: wanted, code: ack?.code ?? 'unknown' })
     }

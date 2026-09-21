@@ -119,6 +119,40 @@ describe('realtime', () => {
     expect(rejoin.payload).toEqual({ projectId: other })
   })
 
+  it('catches up on what it missed the moment it is in the room', () => {
+    // Anything that changed before the room was joined — a first load, or a
+    // reconnection after the signal went — arrived nowhere. Without this the
+    // screen keeps showing what it had when it lost touch, and nothing tells it.
+    useAuthStore.setState({ status: 'signedIn', accessToken: 'token-1', user })
+    useProjectStore.setState({ currentProjectId: P })
+    stop = startRealtime()
+    jest.advanceTimersByTime(1)
+    const socket = sockets[0]!
+    const spy = jest.spyOn(queryClient, 'invalidateQueries')
+    socket.emitted.find((e) => e.event === 'project:join')!.ack?.({ ok: true, projectId: P })
+    expect(spy).toHaveBeenCalledWith(expect.objectContaining({ queryKey: keys.projectScoped(P), refetchType: 'active' }))
+    spy.mockRestore()
+  })
+
+  it('refreshes within the ceiling however long the burst goes on', () => {
+    useAuthStore.setState({ status: 'signedIn', accessToken: 'token-1', user })
+    useProjectStore.setState({ currentProjectId: P })
+    stop = startRealtime()
+    jest.advanceTimersByTime(1)
+    const socket = sockets[0]!
+    socket.emitted.find((e) => e.event === 'project:join')!.ack?.({ ok: true, projectId: P })
+
+    const spy = jest.spyOn(queryClient, 'invalidateQueries')
+    // A change every 300 ms for four seconds: each one pushes the 400 ms wait
+    // back, so without a ceiling the refresh never happens at all.
+    for (let elapsed = 0; elapsed < 4_000; elapsed += 300) {
+      socket.fire('domain.event', { type: 'record.changed', projectId: P, entityType: 'rfi', entityId: `r${elapsed}` })
+      jest.advanceTimersByTime(300)
+    }
+    expect(spy).toHaveBeenCalled()
+    spy.mockRestore()
+  })
+
   it('coalesces a burst of events into one invalidation and carries a refreshed token', () => {
     useAuthStore.setState({ status: 'signedIn', accessToken: 'token-1', user })
     useProjectStore.setState({ currentProjectId: P })

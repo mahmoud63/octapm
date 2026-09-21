@@ -2,9 +2,10 @@ import { useRouter } from 'expo-router'
 import { RefreshControl, StyleSheet, View } from 'react-native'
 import { userMessage } from '@/api/errors'
 import { useForecast, useHealth, useProjects } from '@/api/hooks'
-import { useDailyLog } from '@/api/site-hooks'
+import { useDailyLog, usePhotos } from '@/api/site-hooks'
 import { Freshness } from '@/components/Freshness'
 import { HealthDimensions, healthTone } from '@/components/HealthDimensions'
+import { PhotoStrip } from '@/home/sections'
 import { ProjectSwitch } from '@/components/ProjectSwitch'
 import { Screen } from '@/components/Screen'
 import { Button, Card, EmptyState, ErrorState, KPI, SkeletonList, Text, spacing } from '@/design-system'
@@ -38,6 +39,7 @@ export default function ProjectScreen() {
   const health = useHealth(projectId)
   const forecast = useForecast(projectId)
   const log = useDailyLog(projectId, today())
+  const photos = usePhotos(projectId)
   const [refreshing, setRefreshing] = useState(false)
 
   const project = projects.data?.find((p) => p.id === projectId) ?? null
@@ -161,6 +163,19 @@ export default function ProjectScreen() {
             </>
           )}
           <Freshness updatedAt={forecast.dataUpdatedAt || undefined} isFetching={forecast.isFetching && !refreshing} />
+        </View>
+      </Card>
+
+      {/* What the field actually sent, which is the part of a dashboard people believe. */}
+      <Card testID="project-photos">
+        <View style={styles.stack}>
+          <View style={styles.fact}>
+            <Text variant="label" label tone="muted" style={styles.grow}>
+              Recent site photographs
+            </Text>
+            <Button title="All photos" variant="ghost" onPress={() => router.push('/photos')} testID="project-photos-all" />
+          </View>
+          {photos.isPending ? <SkeletonList rows={1} /> : <PhotoStrip projectId={projectId} photos={(photos.data?.items ?? []).slice(0, 12)} onOpen={(p) => router.push(`/photos/${p.id}` as never)} testID="project-photo-strip" />}
         </View>
       </Card>
 
