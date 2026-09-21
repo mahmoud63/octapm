@@ -12,6 +12,8 @@
 !backend/prisma/
 !backend/src/
 !backend/scripts/e2e/
+# Build-time only (the rds-ca stage); it never reaches the runtime image.
+!backend/docker/pick-rds-ca.cjs
 
 # Re-exclude what the allowed folders contain but the image must not.
 **/.env

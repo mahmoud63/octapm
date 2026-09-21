@@ -5,8 +5,10 @@ name: Container Image
 # every credential below is a throwaway generated inside the job.
 #
 #   image              build; inspect; migrate an empty TLS Postgres 16 from
-#                      inside the image (twice); boot the API and the worker with
-#                      a production-shaped env; stop them; boot with a secret
+#                      inside the image (twice); show Prisma authenticates the
+#                      server (a decoy CA is refused with P1011) and pg reads a
+#                      CA bundle; boot the API and the worker with a
+#                      production-shaped env; stop them; boot with a secret
 #                      missing and watch it refuse.
 #   web-bundle         build the web app for api.octapm.com and scan the bundle.
 #   mobile-release     the Expo release-origin guard through `expo config`.
@@ -52,9 +54,13 @@ jobs:
       IMAGE: octapm-api:ci
       RELEASE_GIT_SHA: ${{ github.sha }}
       CI_TLS: ${{ github.workspace }}/ci-tls
-      # The image trusts /app/certs/rds-ca.pem; CI mounts its own bundle next
-      # to it and points sslcert there, so the baked RDS bundle is untouched.
+      # The image trusts /app/certs/rds-ca.pem, one RDS root. CI mounts its own
+      # single-root CA next to it and points sslcert there, the same shape.
       CI_CA_PATH: /app/certs/ci-ca.pem
+      # The root the RDS instance's CA chains to (rds-ca-rsa2048-g1, us-east-2).
+      # Prisma trusts only the first certificate of sslcert, so the image ships
+      # exactly this one; see backend/docker/pick-rds-ca.cjs.
+      RDS_CA_CN: Amazon RDS us-east-2 Root CA RSA2048 G1
 
     steps:
       - name: Checkout source
@@ -76,6 +82,7 @@ jobs:
           tags: ${{ env.IMAGE }}
           build-args: |
             RELEASE_GIT_SHA=${{ github.sha }}
+            RDS_CA_CN=${{ env.RDS_CA_CN }}
             RELEASE_BUILD_TIME=${{ github.event.head_commit.timestamp || github.event.pull_request.updated_at || '' }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
@@ -86,7 +93,7 @@ jobs:
           test "$(docker inspect -f '{{json .Config.Cmd}}' "$IMAGE")" = '["node","src/index.js"]'
           test "$(docker inspect -f '{{json .Config.Entrypoint}}' "$IMAGE")" = '["docker-entrypoint.sh"]'
           docker inspect -f '{{json .Config.Healthcheck}}' "$IMAGE" | grep -q '/api/health'
-          docker run --rm --entrypoint sh -e EXPECT_SHA="$RELEASE_GIT_SHA" "$IMAGE" -c '
+          docker run --rm --entrypoint sh -e EXPECT_SHA="$RELEASE_GIT_SHA" -e EXPECT_CN="$RDS_CA_CN" "$IMAGE" -c '
             set -eu
             echo "node $(node -v), npm $(npm -v), uid $(id -u)"
             test "$(id -u)" != 0
@@ -107,9 +114,16 @@ jobs:
             test -f /app/backend/prisma/seed.js
             test -f /app/backend/src/utils/data-script-guard.js
             test -f /app/shared/permissions.json
-            # the RDS CA: root-owned, world-readable, a multi-certificate bundle
+            # the RDS CA: root-owned, world-readable, exactly one certificate
+            # (Prisma reads no further), the named root, a CA, 30+ days to run
             test "$(stat -c %U:%a /app/certs/rds-ca.pem)" = root:644
-            test "$(grep -c "BEGIN CERTIFICATE" /app/certs/rds-ca.pem)" -gt 1
+            test "$(grep -c "BEGIN CERTIFICATE" /app/certs/rds-ca.pem)" = 1
+            node -e "
+              const c = new (require(\"crypto\").X509Certificate)(require(\"fs\").readFileSync(\"/app/certs/rds-ca.pem\"));
+              const cn = c.subject.split(String.fromCharCode(10)).find((l) => l.startsWith(\"CN=\"));
+              console.log(cn, \"until\", c.validTo);
+              if (cn !== \"CN=\" + process.env.EXPECT_CN || !c.ca || new Date(c.validTo) < Date.now() + 30 * 86400000) process.exit(1);
+            "
             # the node user cannot rewrite the app
             if touch /app/backend/src/index.js 2>/dev/null; then echo "/app is writable by node"; exit 1; fi
             touch /tmp/uploads-work
@@ -134,12 +148,14 @@ jobs:
           openssl req -newkey rsa:2048 -nodes -subj "/CN=localhost" -keyout server.key -out server.csr
           printf 'subjectAltName=DNS:localhost,IP:127.0.0.1\nbasicConstraints=CA:FALSE\nkeyUsage=critical,digitalSignature,keyEncipherment\nextendedKeyUsage=serverAuth\n' > server.ext
           openssl x509 -req -in server.csr -CA ca.crt -CAkey ca.key -CAcreateserial -days 2 -extfile server.ext -out server.crt
+          # ca.crt is what Prisma, the API and the worker trust (one root, as in
+          # the image). bundle.pem, decoy first, is for node-postgres only.
           cat decoy-ca.crt ca.crt > bundle.pem
           cp decoy-ca.crt decoy-only.pem
-          openssl verify -CAfile bundle.pem server.crt
+          openssl verify -CAfile ca.crt server.crt
           # TLS or nothing: a plaintext connection is rejected outright.
           printf 'local all all trust\nhostnossl all all all reject\nhostssl all all all scram-sha-256\n' > pg_hba.conf
-          chmod 0644 bundle.pem decoy-only.pem server.crt pg_hba.conf
+          chmod 0644 ca.crt bundle.pem decoy-only.pem server.crt pg_hba.conf
           echo "PGPASS=$(openssl rand -hex 16)" >> "$GITHUB_ENV"
 
       - name: Start Postgres 16 with TLS required
@@ -162,22 +178,14 @@ jobs:
           if docker exec pg psql "host=127.0.0.1 dbname=octapm_ci user=postgres password=$PGPASS sslmode=disable" -tAc 'select 1' 2>/dev/null; then
             echo "Postgres accepted a plaintext connection"; exit 1
           fi
-          base="postgresql://postgres:$PGPASS@localhost:5432/octapm_ci?sslmode=require&sslcert=$CI_CA_PATH"
+          base="postgresql://postgres:$PGPASS@localhost:5432/octapm_ci?sslmode=require&sslcert=$CI_CA_PATH&sslaccept=strict"
           echo "CI_DATABASE_URL=$base" >> "$GITHUB_ENV"
           # The migration one-off gets a two-connection pool, as in ECS.
           echo "CI_MIGRATE_URL=$base&connection_limit=2" >> "$GITHUB_ENV"
 
-      - name: A CA that did not sign the server is refused
-        run: |
-          if docker run --rm --network host -v "$CI_TLS/decoy-only.pem:$CI_CA_PATH:ro" \
-               -e DATABASE_URL="$CI_MIGRATE_URL" "$IMAGE" npx --no prisma migrate status > wrong-ca.log 2>&1; then
-            cat wrong-ca.log; echo "Prisma connected with a CA that did not sign the server"; exit 1
-          fi
-          cat wrong-ca.log
-
       - name: Migrate the empty database from inside the image
         run: |
-          docker run --rm --network host -v "$CI_TLS/bundle.pem:$CI_CA_PATH:ro" \
+          docker run --rm --network host -v "$CI_TLS/ca.crt:$CI_CA_PATH:ro" \
             -e DATABASE_URL="$CI_MIGRATE_URL" "$IMAGE" npx --no prisma migrate deploy
           expected=$(find backend/prisma/migrations -mindepth 1 -maxdepth 1 -type d | wc -l)
           applied=$(docker exec pg psql -U postgres -d octapm_ci -tAc \
@@ -187,9 +195,49 @@ jobs:
 
       - name: Migrating again changes nothing
         run: |
-          docker run --rm --network host -v "$CI_TLS/bundle.pem:$CI_CA_PATH:ro" \
+          docker run --rm --network host -v "$CI_TLS/ca.crt:$CI_CA_PATH:ro" \
             -e DATABASE_URL="$CI_MIGRATE_URL" "$IMAGE" npx --no prisma migrate deploy | tee migrate-again.log
           grep -q "No pending migrations to apply" migrate-again.log
+
+      - name: Prisma authenticates the server - the right root passes, a decoy is refused
+        run: |
+          # After migrate deploy, so `migrate status` exits 0 whenever it
+          # connects: a pending migration cannot pass for a refusal. The
+          # refusal must also say P1011 (TLS), not just exit non-zero.
+          # sslaccept=strict in the URL is what makes this hold; Prisma's
+          # default accepts any certificate.
+          docker run --rm --network host -v "$CI_TLS/ca.crt:$CI_CA_PATH:ro" \
+            -e DATABASE_URL="$CI_MIGRATE_URL" "$IMAGE" npx --no prisma migrate status | tee right-ca.log
+          grep -q "Database schema is up to date" right-ca.log
+          set +e
+          docker run --rm --network host -v "$CI_TLS/decoy-only.pem:$CI_CA_PATH:ro" \
+            -e DATABASE_URL="$CI_MIGRATE_URL" "$IMAGE" npx --no prisma migrate status > wrong-ca.log 2>&1
+          code=$?
+          set -e
+          cat wrong-ca.log
+          test "$code" -ne 0
+          if ! grep -q P1011 wrong-ca.log; then echo "Prisma did not refuse the decoy CA over TLS"; exit 1; fi
+
+      - name: node-postgres verifies against every certificate of a bundle
+        run: |
+          # The realtime adapter hands the sslcert file to pg as ssl.ca. pg reads
+          # a whole bundle: the decoy comes first here and the real root still
+          # verifies, while the decoy alone is refused.
+          check='
+            const { Client } = require("pg");
+            const client = new Client({ connectionString: process.env.PGURL,
+              ssl: { ca: require("fs").readFileSync("/ci/ca.pem", "utf8"), rejectUnauthorized: true, servername: "localhost" } });
+            client.connect()
+              .then(() => client.query("select ssl from pg_stat_ssl where pid = pg_backend_pid()"))
+              .then((r) => { console.log("connected, ssl=" + r.rows[0].ssl); process.exit(r.rows[0].ssl ? 0 : 1); },
+                    (e) => { console.log("refused: " + e.message); process.exit(3); });'
+          url="postgresql://postgres:$PGPASS@localhost:5432/octapm_ci"
+          docker run --rm --network host -v "$CI_TLS/bundle.pem:/ci/ca.pem:ro" -e PGURL="$url" "$IMAGE" node -e "$check"
+          set +e
+          docker run --rm --network host -v "$CI_TLS/decoy-only.pem:/ci/ca.pem:ro" -e PGURL="$url" "$IMAGE" node -e "$check"
+          code=$?
+          set -e
+          test "$code" -eq 3
 
       - name: Write a production-shaped environment of dummy values
         run: |
@@ -229,7 +277,7 @@ jobs:
         run: |
           docker run -d --name api --network host --env-file ci.env \
             -e SCHEDULERS_ENABLED=false -e JOB_WORKER_ENABLED=false -e SHUTDOWN_TIMEOUT_MS=25000 \
-            -v "$CI_TLS/bundle.pem:$CI_CA_PATH:ro" "$IMAGE"
+            -v "$CI_TLS/ca.crt:$CI_CA_PATH:ro" "$IMAGE"
           for i in $(seq 1 60); do
             if curl -fsS http://127.0.0.1:5000/api/health > health.json 2>/dev/null; then break; fi
             if [ "$(docker inspect -f '{{.State.Running}}' api)" != true ]; then docker logs api; echo "the API exited"; exit 1; fi
@@ -273,7 +321,7 @@ jobs:
         run: |
           docker run -d --name worker --network host --env-file ci.env --no-healthcheck \
             -e SCHEDULERS_ENABLED=true -e JOB_WORKER_ENABLED=true -e SHUTDOWN_TIMEOUT_MS=20000 \
-            -v "$CI_TLS/bundle.pem:$CI_CA_PATH:ro" "$IMAGE" node src/worker.js
+            -v "$CI_TLS/ca.crt:$CI_CA_PATH:ro" "$IMAGE" node src/worker.js
           job=$(docker exec pg psql -U postgres -d octapm_ci -tAc \
             "insert into \"BackgroundJob\" (id, \"orgId\", type, \"maxAttempts\", \"updatedAt\") values (gen_random_uuid()::text, 'ci-org', 'portfolio.refresh', 1, now()) returning id" | head -n1)
           for i in $(seq 1 30); do
@@ -304,7 +352,7 @@ jobs:
           set +e
           timeout 60 docker run --rm --network host --env-file ci.env -e JWT_SECRET= \
             -e SCHEDULERS_ENABLED=false -e JOB_WORKER_ENABLED=false \
-            -v "$CI_TLS/bundle.pem:$CI_CA_PATH:ro" "$IMAGE" > missing-secret.log 2>&1
+            -v "$CI_TLS/ca.crt:$CI_CA_PATH:ro" "$IMAGE" > missing-secret.log 2>&1
           code=$?
           set -e
           cat missing-secret.log

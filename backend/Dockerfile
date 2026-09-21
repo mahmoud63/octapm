@@ -58,6 +58,24 @@ COPY backend/prisma/schema.prisma backend/prisma/schema.prisma
 RUN node node_modules/prisma/build/index.js generate --schema backend/prisma/schema.prisma
 
 # ---------------------------------------------------------------------------
+# The database CA: one root out of the public RDS bundle.
+#
+# DATABASE_URL carries sslmode=require&sslcert=/app/certs/rds-ca.pem&
+# sslaccept=strict. Prisma reads only the FIRST certificate of that file (and
+# without sslaccept=strict verifies nothing at all), so the global bundle as
+# downloaded would make Prisma trust whichever region's root comes first and
+# refuse the real server. The file must hold exactly the root the RDS
+# instance's CA chains to: set RDS_CA_CN to match the instance's
+# --ca-certificate-identifier and region (rds-ca-rsa2048-g1 in us-east-2 is
+# "Amazon RDS us-east-2 Root CA RSA2048 G1"). The picker fails the build when
+# the bundle has no such root, or it has expired.
+FROM ${NODE_IMAGE} AS rds-ca
+ARG RDS_CA_CN="Amazon RDS us-east-2 Root CA RSA2048 G1"
+ADD https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem /tmp/rds-global-bundle.pem
+COPY backend/docker/pick-rds-ca.cjs /tmp/pick-rds-ca.cjs
+RUN node /tmp/pick-rds-ca.cjs /tmp/rds-global-bundle.pem "${RDS_CA_CN}" > /tmp/rds-ca.pem
+
+# ---------------------------------------------------------------------------
 FROM ${NODE_IMAGE} AS runtime
 
 RUN apt-get update \
@@ -69,10 +87,9 @@ ENV NODE_ENV=production \
     CHECKPOINT_DISABLE=1 \
     NPM_CONFIG_UPDATE_NOTIFIER=false
 
-# The public Amazon RDS CA bundle, for DATABASE_URL's
-# sslmode=require&sslcert=/app/certs/rds-ca.pem. ADD leaves a downloaded file
-# at 0600; the node user has to read it, and root keeps owning it.
-ADD --chmod=0644 https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem /app/certs/rds-ca.pem
+# The one RDS root picked above. Owned by root and world-readable: the node
+# user has to read it and must not be able to replace it.
+COPY --from=rds-ca --chown=root:root --chmod=0644 /tmp/rds-ca.pem /app/certs/rds-ca.pem
 
 WORKDIR /app
 
