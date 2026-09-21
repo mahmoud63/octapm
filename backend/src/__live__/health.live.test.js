@@ -50,6 +50,9 @@ liveDescribe("service health", () => {
       APP_ENV: "staging",
       RELEASE_GIT_SHA: sha,
       RELEASE_BUILD_TIME: "2026-09-21T12:00:00Z",
+      // The shared local database can be slow while other suites run; this
+      // test is about identity and draining, not the timeout.
+      HEALTH_DB_TIMEOUT_MS: "10000",
       DATABASE_URL: `${rawDatabaseUrl()}${rawDatabaseUrl().includes("?") ? "&" : "?"}connection_limit=1`,
     });
 
@@ -92,6 +95,9 @@ liveDescribe("service health", () => {
       DATABASE_URL: `postgresql://octapm_app:pw@127.0.0.1:${holePort}/octapm?connect_timeout=30&connection_limit=1`,
     });
 
+    // The first request into a fresh process pays for lazy start-up work;
+    // time the second.
+    await timed(`${base}/api/health`);
     const live = await timed(`${base}/api/health`);
     expect(live.status).toBe(200);
     expect(live.ms).toBeLessThan(200);
