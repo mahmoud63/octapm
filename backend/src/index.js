@@ -84,8 +84,12 @@ installGracefulShutdown({
     clearTimeout(cutAll);
     if (!jobs.drained) throw new Error(`${jobs.pending} job(s) still running at the deadline`);
 
-    await realtimeAdapter?.close();
+    // The bus publishes a request's event 150 ms after the request ends, and
+    // that publish goes out through the adapter's pool. Waiting it out first
+    // means a request that finished just before SIGTERM still reaches the
+    // clients on the other tasks; closing the pool first would drop it.
     await waitForEventBus();
+    await realtimeAdapter?.close();
     await prisma.$disconnect();
   },
 });

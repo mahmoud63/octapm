@@ -135,6 +135,7 @@ liveDescribe("realtime across API and worker processes", () => {
   const hookBodies = [];
   let apiA;
   let apiB;
+  let apiC;
   let worker;
   let portA;
   let portB;
@@ -195,7 +196,7 @@ liveDescribe("realtime across API and worker processes", () => {
       },
     });
 
-    const shared = {
+    shared = {
       REALTIME_ADAPTER: "postgres",
       REALTIME_CHANNEL_PREFIX: prefix,
       REALTIME_POOL_MAX: "2",
@@ -231,7 +232,7 @@ liveDescribe("realtime across API and worker processes", () => {
 
   afterAll(async () => {
     for (const socket of sockets) socket.close();
-    await Promise.all([apiA, apiB, worker].filter(Boolean).map((proc) => proc.kill()));
+    await Promise.all([apiA, apiB, apiC, worker].filter(Boolean).map((proc) => proc.kill()));
     hook?.close();
     if (live) {
       await prisma.backgroundJob.deleteMany({ where: { orgId: live.org.id } });
@@ -249,6 +250,7 @@ liveDescribe("realtime across API and worker processes", () => {
     });
 
   let locationEvent;
+  let shared;
 
   it("a record event raised by a request on A reaches a client connected to B", async () => {
     const onB = track(await connect(portB, live.token));
@@ -369,4 +371,31 @@ liveDescribe("realtime across API and worker processes", () => {
       proxy.close();
     }
   });
+
+  it("delivers the event of a request that finished just before SIGTERM", async () => {
+    // A third API task that is about to be replaced in a rolling deploy.
+    const portC = await freePort();
+    apiC = spawnNode("src/index.js", { env: { ...shared, PORT: String(portC) } });
+    await apiC.waitForOutput(/running on port/, 45_000);
+    await waitForHttp(`http://127.0.0.1:${portC}/api/health`);
+
+    const onB = track(await connect(portB, live.token));
+    expect(await joinProject(onB, project.id)).toMatchObject({ ok: true });
+    const arrival = nextEvent(onB, (event) => event.entityType === "location" && event.projectId === project.id, 8_000).then(
+      (event) => event,
+      () => null,
+    );
+
+    const response = await api(portC, `/projects/${project.id}/locations`, { method: "POST", body: { name: `Draining ${Date.now()}` } });
+    expect(response.status).toBe(201);
+    const created = (await response.json()).data;
+    // The event is still waiting out the bus delay when the signal lands.
+    await apiC.signal("SIGTERM");
+    const { code } = await apiC.exited;
+    expect(code).toBe(0);
+
+    const event = await arrival;
+    expect(event ? "received" : "lost").toBe("received");
+    expect(event.entityId).toBe(created.id);
+  }, 90_000);
 });
