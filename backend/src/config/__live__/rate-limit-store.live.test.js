@@ -18,7 +18,8 @@ const NODE_ENTRY = "src/services/__live__/shared-state-node.js";
 const startNode = async (env = {}) => {
   const port = await freePort();
   const node = spawnNode(NODE_ENTRY, { env: { PORT: String(port), ...env } });
-  await node.waitForOutput(/running on port/);
+  // Generous: a cold start loads the whole app, and the machine is shared.
+  await node.waitForOutput(/running on port/, 45_000);
   return { node, base: `http://127.0.0.1:${port}` };
 };
 
