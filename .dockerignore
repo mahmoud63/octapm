@@ -1,0 +1,24 @@
+# The build context is the repository root (docker build -f backend/Dockerfile .).
+# Everything is excluded, then only what backend/Dockerfile copies is let back
+# in. That keeps .env files, node_modules, the web app, the mobile app, docs and
+# test suites out of the context — and out of the image even if a COPY line is
+# ever widened by mistake.
+*
+
+!package.json
+!package-lock.json
+!shared/
+!backend/package.json
+!backend/prisma/
+!backend/src/
+!backend/scripts/e2e/
+
+# Re-exclude what the allowed folders contain but the image must not.
+**/.env
+**/.env.*
+**/node_modules
+**/__tests__
+**/__live__
+**/*.test.js
+**/*.test.mjs
+**/*.spec.js

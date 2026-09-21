@@ -1,0 +1,377 @@
+name: Container Image
+
+# Proves the one image ECS runs — API, worker and migrations — before anything
+# is pushed anywhere. Nothing here logs in to a registry or reads a secret:
+# every credential below is a throwaway generated inside the job.
+#
+#   image              build; inspect; migrate an empty TLS Postgres 16 from
+#                      inside the image (twice); boot the API and the worker with
+#                      a production-shaped env; stop them; boot with a secret
+#                      missing and watch it refuse.
+#   web-bundle         build the web app for api.octapm.com and scan the bundle.
+#   mobile-release     the Expo release-origin guard through `expo config`.
+
+on:
+  push:
+    branches: [main, 'feat/**']
+    paths:
+      - 'backend/**'
+      - 'shared/**'
+      - 'frontend/**'
+      - 'mobile/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.dockerignore'
+      - '.github/workflows/container-image.yml'
+  pull_request:
+    paths:
+      - 'backend/**'
+      - 'shared/**'
+      - 'frontend/**'
+      - 'mobile/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.dockerignore'
+      - '.github/workflows/container-image.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: container-image-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  image:
+    name: Backend image - build, migrate, boot, stop
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+
+    env:
+      IMAGE: octapm-api:ci
+      RELEASE_GIT_SHA: ${{ github.sha }}
+      CI_TLS: ${{ github.workspace }}/ci-tls
+      # The image trusts /app/certs/rds-ca.pem; CI mounts its own bundle next
+      # to it and points sslcert there, so the baked RDS bundle is untouched.
+      CI_CA_PATH: /app/certs/ci-ca.pem
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Plant a canary .env the image must not contain
+        run: printf 'OCTAPM_CI_CANARY=leaked-into-the-image\n' > backend/.env
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build the image (no push)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: backend/Dockerfile
+          load: true
+          push: false
+          tags: ${{ env.IMAGE }}
+          build-args: |
+            RELEASE_GIT_SHA=${{ github.sha }}
+            RELEASE_BUILD_TIME=${{ github.event.head_commit.timestamp || github.event.pull_request.updated_at || '' }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Inspect the image
+        run: |
+          test "$(docker inspect -f '{{.Config.User}}' "$IMAGE")" = node
+          test "$(docker inspect -f '{{json .Config.Cmd}}' "$IMAGE")" = '["node","src/index.js"]'
+          test "$(docker inspect -f '{{json .Config.Entrypoint}}' "$IMAGE")" = '["docker-entrypoint.sh"]'
+          docker inspect -f '{{json .Config.Healthcheck}}' "$IMAGE" | grep -q '/api/health'
+          docker run --rm --entrypoint sh -e EXPECT_SHA="$RELEASE_GIT_SHA" "$IMAGE" -c '
+            set -eu
+            echo "node $(node -v), npm $(npm -v), uid $(id -u)"
+            test "$(id -u)" != 0
+            test "$NODE_ENV" = production
+            test "$PORT" = 5000
+            test "$CHECKPOINT_DISABLE" = 1
+            test "$RELEASE_GIT_SHA" = "$EXPECT_SHA"
+            case "$(node -v)" in v24.*) ;; *) echo "wrong node $(node -v)"; exit 1 ;; esac
+            # nothing that is not the backend runtime
+            for path in /app/backend/.env /app/frontend /app/mobile /app/docs /app/e2e /app/infrastructure \
+                        /app/backend/scripts/qa /app/backend/scripts/demo /app/backend/package-lock.json; do
+              if [ -e "$path" ]; then echo "unexpected $path"; exit 1; fi
+            done
+            if grep -rqs OCTAPM_CI_CANARY /app --exclude-dir=node_modules; then echo "the canary .env reached the image"; exit 1; fi
+            leftovers="$(find /app -path /app/node_modules -prune -o -path /app/backend/node_modules -prune -o \( -name __tests__ -o -name __live__ -o -name "*.test.js" \) -print)"
+            if [ -n "$leftovers" ]; then echo "tests in the image: $leftovers"; exit 1; fi
+            test -f /app/backend/scripts/e2e/reset-e2e-org.js
+            test -f /app/backend/prisma/seed.js
+            test -f /app/backend/src/utils/data-script-guard.js
+            test -f /app/shared/permissions.json
+            # the RDS CA: root-owned, world-readable, a multi-certificate bundle
+            test "$(stat -c %U:%a /app/certs/rds-ca.pem)" = root:644
+            test "$(grep -c "BEGIN CERTIFICATE" /app/certs/rds-ca.pem)" -gt 1
+            # the node user cannot rewrite the app
+            if touch /app/backend/src/index.js 2>/dev/null; then echo "/app is writable by node"; exit 1; fi
+            touch /tmp/uploads-work
+            cd /app/backend
+            node -e "require(\"@prisma/client\"); require.resolve(\"prisma/package.json\"); require(\"@socket.io/postgres-adapter\"); require(\"pg\")"
+            if node -e "require.resolve(\"jest\")" 2>/dev/null; then echo "dev dependencies are installed"; exit 1; fi
+            if node -e "require.resolve(\"nodemon\")" 2>/dev/null; then echo "dev dependencies are installed"; exit 1; fi
+            npx --no prisma --version
+          '
+
+      - name: Make a CA pair, a decoy CA and a TLS server certificate
+        run: |
+          mkdir -p "$CI_TLS" && cd "$CI_TLS"
+          # A decoy CA first in the bundle: it signs nothing, so a client that
+          # only read the first certificate of the PEM would fail to connect.
+          openssl req -x509 -newkey rsa:2048 -nodes -days 2 -subj "/CN=OctaPM CI decoy CA" \
+            -addext "basicConstraints=critical,CA:TRUE" -addext "keyUsage=critical,keyCertSign,cRLSign" \
+            -keyout decoy-ca.key -out decoy-ca.crt
+          openssl req -x509 -newkey rsa:2048 -nodes -days 2 -subj "/CN=OctaPM CI CA" \
+            -addext "basicConstraints=critical,CA:TRUE" -addext "keyUsage=critical,keyCertSign,cRLSign" \
+            -keyout ca.key -out ca.crt
+          openssl req -newkey rsa:2048 -nodes -subj "/CN=localhost" -keyout server.key -out server.csr
+          printf 'subjectAltName=DNS:localhost,IP:127.0.0.1\nbasicConstraints=CA:FALSE\nkeyUsage=critical,digitalSignature,keyEncipherment\nextendedKeyUsage=serverAuth\n' > server.ext
+          openssl x509 -req -in server.csr -CA ca.crt -CAkey ca.key -CAcreateserial -days 2 -extfile server.ext -out server.crt
+          cat decoy-ca.crt ca.crt > bundle.pem
+          cp decoy-ca.crt decoy-only.pem
+          openssl verify -CAfile bundle.pem server.crt
+          # TLS or nothing: a plaintext connection is rejected outright.
+          printf 'local all all trust\nhostnossl all all all reject\nhostssl all all all scram-sha-256\n' > pg_hba.conf
+          chmod 0644 bundle.pem decoy-only.pem server.crt pg_hba.conf
+          echo "PGPASS=$(openssl rand -hex 16)" >> "$GITHUB_ENV"
+
+      - name: Start Postgres 16 with TLS required
+        run: |
+          docker run -d --name pg --network host \
+            -e POSTGRES_PASSWORD="$PGPASS" -e POSTGRES_DB=octapm_ci \
+            -v "$CI_TLS:/tls:ro" --entrypoint bash postgres:16 -c '
+              install -d -o postgres -g postgres -m 0700 /etc/pg-tls &&
+              install -o postgres -g postgres -m 0600 /tls/server.key /etc/pg-tls/server.key &&
+              install -o postgres -g postgres -m 0644 /tls/server.crt /etc/pg-tls/server.crt &&
+              install -o postgres -g postgres -m 0644 /tls/pg_hba.conf /etc/pg-tls/pg_hba.conf &&
+              exec docker-entrypoint.sh postgres -c ssl=on \
+                -c ssl_cert_file=/etc/pg-tls/server.crt -c ssl_key_file=/etc/pg-tls/server.key \
+                -c hba_file=/etc/pg-tls/pg_hba.conf'
+          for i in $(seq 1 60); do
+            if docker exec pg psql "host=127.0.0.1 dbname=octapm_ci user=postgres password=$PGPASS sslmode=verify-full sslrootcert=/tls/bundle.pem" -tAc 'select 1' >/dev/null 2>&1; then break; fi
+            sleep 1
+          done
+          docker exec pg psql "host=localhost dbname=octapm_ci user=postgres password=$PGPASS sslmode=verify-full sslrootcert=/tls/bundle.pem" -tAc 'select ssl from pg_stat_ssl where pid = pg_backend_pid()' | grep -qx t
+          if docker exec pg psql "host=127.0.0.1 dbname=octapm_ci user=postgres password=$PGPASS sslmode=disable" -tAc 'select 1' 2>/dev/null; then
+            echo "Postgres accepted a plaintext connection"; exit 1
+          fi
+          base="postgresql://postgres:$PGPASS@localhost:5432/octapm_ci?sslmode=require&sslcert=$CI_CA_PATH"
+          echo "CI_DATABASE_URL=$base" >> "$GITHUB_ENV"
+          # The migration one-off gets a two-connection pool, as in ECS.
+          echo "CI_MIGRATE_URL=$base&connection_limit=2" >> "$GITHUB_ENV"
+
+      - name: A CA that did not sign the server is refused
+        run: |
+          if docker run --rm --network host -v "$CI_TLS/decoy-only.pem:$CI_CA_PATH:ro" \
+               -e DATABASE_URL="$CI_MIGRATE_URL" "$IMAGE" npx --no prisma migrate status > wrong-ca.log 2>&1; then
+            cat wrong-ca.log; echo "Prisma connected with a CA that did not sign the server"; exit 1
+          fi
+          cat wrong-ca.log
+
+      - name: Migrate the empty database from inside the image
+        run: |
+          docker run --rm --network host -v "$CI_TLS/bundle.pem:$CI_CA_PATH:ro" \
+            -e DATABASE_URL="$CI_MIGRATE_URL" "$IMAGE" npx --no prisma migrate deploy
+          expected=$(find backend/prisma/migrations -mindepth 1 -maxdepth 1 -type d | wc -l)
+          applied=$(docker exec pg psql -U postgres -d octapm_ci -tAc \
+            "select count(*) from \"_prisma_migrations\" where finished_at is not null and rolled_back_at is null")
+          echo "migrations: $applied applied of $expected"
+          test "$applied" -eq "$expected"
+
+      - name: Migrating again changes nothing
+        run: |
+          docker run --rm --network host -v "$CI_TLS/bundle.pem:$CI_CA_PATH:ro" \
+            -e DATABASE_URL="$CI_MIGRATE_URL" "$IMAGE" npx --no prisma migrate deploy | tee migrate-again.log
+          grep -q "No pending migrations to apply" migrate-again.log
+
+      - name: Write a production-shaped environment of dummy values
+        run: |
+          secret() { openssl rand -hex 24; }
+          {
+            echo "APP_ENV=staging"
+            echo "DATABASE_URL=$CI_DATABASE_URL"
+            echo "DATABASE_CONNECTION_LIMIT=10"
+            echo "JWT_SECRET=$(secret)"
+            echo "JWT_REFRESH_SECRET=$(secret)"
+            echo "MFA_SECRET_KEY=$(secret)"
+            echo "INTEGRATION_SECRET_KEY=$(secret)"
+            echo "ANTHROPIC_API_KEY=sk-ant-ci-$(openssl rand -hex 16)"
+            echo "STRIPE_SECRET_KEY=sk_test_$(openssl rand -hex 16)"
+            echo "STRIPE_WEBHOOK_SECRET=whsec_$(openssl rand -hex 16)"
+            echo "STRIPE_PRICE_INDIVIDUAL_MONTHLY=price_ci_individual_monthly"
+            echo "STRIPE_PRICE_INDIVIDUAL_ANNUAL=price_ci_individual_annual"
+            echo "STRIPE_PRICE_BUSINESS_MONTHLY=price_ci_business_monthly"
+            echo "STRIPE_PRICE_BUSINESS_ANNUAL=price_ci_business_annual"
+            echo "STRIPE_SECRET_ROTATION_CONFIRMED_AT=2026-01-01"
+            echo "STRIPE_SECRET_ROTATION_TICKET=CI-DUMMY-0001"
+            echo "TRUST_PROXY_HOPS=1"
+            echo "CORS_ALLOWED_ORIGINS=https://app.staging.octapm.com"
+            echo "WEB_APP_URL=https://app.staging.octapm.com"
+            echo "API_BASE_URL=https://api.staging.octapm.com"
+            echo "EMAIL_PROVIDER=ses"
+            echo "EMAIL_FROM=OctaPM <no-reply@octapm.com>"
+            echo "SES_REGION=us-east-2"
+            echo "FILE_STORAGE_S3_BUCKET=octapm-ci-dummy"
+            echo "FILE_STORAGE_S3_REGION=us-east-2"
+            echo "AWS_EC2_METADATA_DISABLED=true"
+          } > ci.env
+          # the names only, never the values
+          cut -d= -f1 ci.env
+
+      - name: Boot the API
+        run: |
+          docker run -d --name api --network host --env-file ci.env \
+            -e SCHEDULERS_ENABLED=false -e JOB_WORKER_ENABLED=false -e SHUTDOWN_TIMEOUT_MS=25000 \
+            -v "$CI_TLS/bundle.pem:$CI_CA_PATH:ro" "$IMAGE"
+          for i in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:5000/api/health > health.json 2>/dev/null; then break; fi
+            if [ "$(docker inspect -f '{{.State.Running}}' api)" != true ]; then docker logs api; echo "the API exited"; exit 1; fi
+            sleep 1
+          done
+          jq -e '.success == true' health.json
+
+      - name: The API is live, ready, released and talks to Postgres
+        run: |
+          curl -fsS http://127.0.0.1:5000/api/health/live | jq -e '.success == true'
+          curl -fsS http://127.0.0.1:5000/api/health/ready | jq -e '.success == true'
+          release=$(curl -fsS -D - -o /dev/null http://127.0.0.1:5000/api/health | tr -d '\r' \
+            | awk 'tolower($1) == "x-octapm-release:" { print $2 }')
+          echo "X-OctaPM-Release: $release"
+          test "$release" = "$RELEASE_GIT_SHA"
+          # A real query through the Prisma engine and the TLS connection.
+          status=$(curl -sS -o login.json -w '%{http_code}' -X POST http://127.0.0.1:5000/api/v1/auth/login \
+            -H 'content-type: application/json' \
+            -d '{"email":"nobody@octapm-ci.test","password":"not-the-password-1A!"}')
+          cat login.json; echo
+          test "$status" = 401
+          jq -e '.success == false and (.error.code | type == "string")' login.json
+          # Every TCP connection the API holds is encrypted (this psql is on the
+          # local socket, so it is left out along with any other socket client).
+          tcp=$(docker exec pg psql -U postgres -d octapm_ci -tAc \
+            "select count(*) filter (where s.ssl), count(*) filter (where not s.ssl) from pg_stat_activity a join pg_stat_ssl s using (pid) where a.datname = 'octapm_ci' and a.backend_type = 'client backend' and a.client_addr is not null and a.pid <> pg_backend_pid()")
+          echo "API connections (tls|plaintext): $tcp"
+          test "${tcp#*|}" = 0
+          test "${tcp%|*}" -gt 0
+
+      - name: The Docker HEALTHCHECK reports healthy
+        run: |
+          for i in $(seq 1 45); do
+            state=$(docker inspect -f '{{.State.Health.Status}}' api)
+            if [ "$state" = healthy ]; then exit 0; fi
+            sleep 2
+          done
+          docker inspect -f '{{json .State.Health}}' api; exit 1
+
+      - name: The worker from the same image claims a job and stays up
+        run: |
+          docker run -d --name worker --network host --env-file ci.env --no-healthcheck \
+            -e SCHEDULERS_ENABLED=true -e JOB_WORKER_ENABLED=true -e SHUTDOWN_TIMEOUT_MS=20000 \
+            -v "$CI_TLS/bundle.pem:$CI_CA_PATH:ro" "$IMAGE" node src/worker.js
+          job=$(docker exec pg psql -U postgres -d octapm_ci -tAc \
+            "insert into \"BackgroundJob\" (id, \"orgId\", type, \"maxAttempts\", \"updatedAt\") values (gen_random_uuid()::text, 'ci-org', 'portfolio.refresh', 1, now()) returning id" | head -n1)
+          for i in $(seq 1 30); do
+            attempts=$(docker exec pg psql -U postgres -d octapm_ci -tAc "select attempts from \"BackgroundJob\" where id = '$job'")
+            if [ "$attempts" -gt 0 ]; then break; fi
+            sleep 1
+          done
+          docker exec pg psql -U postgres -d octapm_ci -tAc "select status, attempts, \"lockedBy\" from \"BackgroundJob\" where id = '$job'"
+          test "$attempts" -gt 0
+          sleep 15
+          test "$(docker inspect -f '{{.State.Running}} {{.RestartCount}}' worker)" = "true 0"
+
+      - name: SIGTERM drains both processes within fifteen seconds
+        run: |
+          for name in api worker; do
+            start=$(date +%s)
+            docker stop -t 30 "$name" > /dev/null
+            took=$(( $(date +%s) - start ))
+            code=$(docker inspect -f '{{.State.ExitCode}}' "$name")
+            echo "$name stopped in ${took}s with exit code $code"
+            test "$code" -eq 0
+            test "$took" -lt 15
+          done
+
+      - name: A missing secret stops the boot and names the variable
+        run: |
+          start=$(date +%s)
+          set +e
+          timeout 60 docker run --rm --network host --env-file ci.env -e JWT_SECRET= \
+            -e SCHEDULERS_ENABLED=false -e JOB_WORKER_ENABLED=false \
+            -v "$CI_TLS/bundle.pem:$CI_CA_PATH:ro" "$IMAGE" > missing-secret.log 2>&1
+          code=$?
+          set -e
+          cat missing-secret.log
+          echo "exit $code after $(( $(date +%s) - start ))s"
+          test "$code" -ne 0
+          test "$code" -ne 124
+          grep -q JWT_SECRET missing-secret.log
+
+      - name: Container logs
+        if: always()
+        run: |
+          for name in api worker pg; do
+            echo "::group::$name"
+            docker logs "$name" 2>&1 | tail -n 300 || true
+            echo "::endgroup::"
+          done
+
+  web-bundle:
+    name: Web bundle - built for the real API, no local origin
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+
+    env:
+      CI: true
+      VITE_API_URL: https://api.octapm.com/api/v1
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+
+      - name: Install workspace dependencies
+        run: npm ci
+
+      - name: Scanner self-test
+        run: node frontend/scripts/assert-release-bundle.mjs --self-test
+
+      - name: Build the web app
+        run: npm run build --workspace=frontend
+
+      - name: Scan the bundle
+        run: node frontend/scripts/assert-release-bundle.mjs --dist frontend/dist --expect-api "$VITE_API_URL"
+
+  mobile-release:
+    name: Mobile - release builds carry a public https origin
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+
+    defaults:
+      run:
+        working-directory: mobile
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+
+      - name: Install mobile dependencies
+        run: npm ci
+
+      - name: Release-origin guard through expo config
+        run: npm run test:release-config
