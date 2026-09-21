@@ -8218,3 +8218,54 @@ model ReferenceCounter {
   next      Int
   updatedAt DateTime @updatedAt
 }
+
+// ─── Shared state for running several API tasks at once ───
+// Everything below used to live in one process's memory. With more than one
+// API task behind a load balancer, memory is per task: a socket on task B
+// never heard an event raised on task A, and a login lockout on A meant
+// nothing on B. These tables are the one place every task agrees on.
+// They carry no org_id or activity_id: they sit below tenancy (a sign-in
+// attempt has no organisation yet) and hold no project data.
+
+/**
+ * Payloads too large for a Postgres NOTIFY (8,000 bytes), parked here for the
+ * socket.io Postgres adapter to fetch by id. The adapter owns this table: it
+ * queries it by this exact, unquoted name and deletes rows after 30 seconds.
+ */
+model SocketIoAttachment {
+  id        BigInt   @id @default(autoincrement())
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  payload   Bytes?
+
+  @@map("socket_io_attachments")
+}
+
+/**
+ * Failed sign-in counts, by email and by address — the same thresholds the
+ * in-memory lockout applies, held where every task can see them.
+ * `scope` is "email" or "ip".
+ */
+model AuthThrottle {
+  scope        String
+  key          String
+  failures     Int       @default(0)
+  backoffUntil DateTime?
+  lockedUntil  DateTime?
+  updatedAt    DateTime  @updatedAt
+
+  @@id([scope, key])
+  @@index([updatedAt])
+}
+
+/**
+ * Fixed-window request counters for the rate limiter. The migration creates
+ * the table UNLOGGED: a counter is worth nothing after a crash, and skipping
+ * the write-ahead log keeps a hit to one cheap upsert.
+ */
+model RateLimitBucket {
+  key     String   @id
+  count   Int
+  resetAt DateTime
+
+  @@index([resetAt])
+}

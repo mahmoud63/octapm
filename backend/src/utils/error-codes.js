@@ -340,6 +340,47 @@ const ERROR_CODE_CATALOG = Object.freeze({
     category: "procurement",
     message: "Procurement alert is already resolved",
   },
+  // Running on AWS: several API tasks, a worker, S3 through task roles.
+  PAYLOAD_TOO_LARGE: {
+    status: 413,
+    category: "validation",
+    message: "The request is too large",
+  },
+  FILE_TOO_LARGE: {
+    status: 413,
+    category: "validation",
+    message: "The file is too large",
+  },
+  SERVICE_UNAVAILABLE: {
+    status: 503,
+    category: "system",
+    message: "The service is temporarily unavailable",
+  },
+  SERVICE_NOT_READY: {
+    status: 503,
+    category: "system",
+    message: "The service is not ready to take requests",
+  },
+  FILE_STORAGE_UNAVAILABLE: {
+    status: 503,
+    category: "system",
+    message: "File storage is temporarily unavailable",
+  },
+  AWS_CREDENTIALS_UNAVAILABLE: {
+    status: 503,
+    category: "system",
+    message: "Cloud credentials are temporarily unavailable",
+  },
+  REGISTRATION_CLOSED: {
+    status: 403,
+    category: "auth",
+    message: "New organisations are created by invitation only",
+  },
+  BOOTSTRAP_NOT_EMPTY: {
+    status: 409,
+    category: "system",
+    message: "The first administrator can only be created in an empty database",
+  },
 });
 
 const DEFAULT_CODE_BY_STATUS = Object.freeze({
@@ -350,8 +391,10 @@ const DEFAULT_CODE_BY_STATUS = Object.freeze({
   404: "NOT_FOUND",
   409: "CONFLICT",
   422: "UNPROCESSABLE_ENTITY",
+  413: "PAYLOAD_TOO_LARGE",
   429: "RATE_LIMIT_EXCEEDED",
   500: "INTERNAL_ERROR",
+  503: "SERVICE_UNAVAILABLE",
 });
 
 const normalizeStatus = (status) => {
