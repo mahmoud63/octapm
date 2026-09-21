@@ -2,6 +2,15 @@ const { referenceCounterMock } = require("./helpers/reference-counter-mock");
 const store = { events: [], lines: [], rfqs: [], notifications: [], emails: [], changeOrders: [], commitmentChangeOrders: [] };
 let seq = 0;
 const nextId = (prefix) => `${prefix}-${(seq += 1)}`;
+/**
+ * Dates that stay in the future.
+ *
+ * An RFQ stops accepting quotes a day after it was due, which is right — and
+ * meant a hard-coded due date turned this test red the morning it passed,
+ * years after it was written, with nothing having changed. These follow the
+ * clock instead.
+ */
+const inDays = (days) => new Date(Date.now() + days * 86_400_000).toISOString().slice(0, 10);
 const DATE_KEYS = new Set(["createdAt", "updatedAt", "expiresAt", "dueDate", "sentAt", "viewedAt", "lastAccessAt", "quotedAt", "quoteValidUntil", "acceptedAt", "rejectedAt", "convertedAt", "closedAt"]);
 const clone = (row) => (row ? JSON.parse(JSON.stringify(row), (key, value) => (DATE_KEYS.has(key) && value ? new Date(value) : value)) : row);
 
@@ -143,7 +152,7 @@ describe("change events and RFQs", () => {
 
   it("sends RFQs with personal links, the vendor quotes through the portal, and the team is notified", async () => {
     const event = await createEvent();
-    const sent = await service.sendRfqs({ ...scope, actor, changeEventId: event.id, payload: { recipients: [{ commitmentId: "cmt-1" }, { companyName: "Volt Bros", contactName: "Vera", contactEmail: "Vera@volt.example" }], dueDate: "2026-09-20", instructions: "Price supply and install; exclude builder's work." } });
+    const sent = await service.sendRfqs({ ...scope, actor, changeEventId: event.id, payload: { recipients: [{ commitmentId: "cmt-1" }, { companyName: "Volt Bros", contactName: "Vera", contactEmail: "Vera@volt.example" }], dueDate: inDays(7), instructions: "Price supply and install; exclude builder's work." } });
     expect(sent.sent).toBe(2);
     expect(sent.rfqs.map((rfq) => [rfq.ref, rfq.companyName, rfq.commitmentId, rfq.status])).toEqual([
       ["CE-001-RFQ01", "Sparks LLC", "cmt-1", "sent"],
@@ -164,7 +173,7 @@ describe("change events and RFQs", () => {
     expect(view.rfq.contactEmail).toBeUndefined();
 
     const [lineA, lineB] = view.changeEvent.lines;
-    const quoted = await service.portalSubmitQuote(token, { lines: [{ lineId: lineA.id, amount: "11,250", note: "DB per spec" }, { lineId: lineB.id, amount: 1200 }], notes: "Valid 30 days", validUntil: "2026-10-20", leadTimeDays: 21, quotedBy: "Sam Spark" });
+    const quoted = await service.portalSubmitQuote(token, { lines: [{ lineId: lineA.id, amount: "11,250", note: "DB per spec" }, { lineId: lineB.id, amount: 1200 }], notes: "Valid 30 days", validUntil: inDays(37), leadTimeDays: 21, quotedBy: "Sam Spark" });
     expect(quoted.rfq.status).toBe("quoted");
     expect(quoted.quote).toMatchObject({ total: 12450, leadTimeDays: 21, quotedBy: "Sam Spark" });
     expect(store.notifications[0]).toMatchObject({ event: "rfq.quoted", recipientRoles: ["pm", "qs"], entityType: "change_event", entityId: event.id });
