@@ -1,4 +1,5 @@
 import { Link } from '@tanstack/react-router'
+import { useRegistrationOpen } from '@/services/config/api'
 import {
   Card,
   CardContent,
@@ -11,6 +12,8 @@ import { AuthLayout } from '../auth-layout'
 import { ForgotPasswordForm } from './components/forgot-password-form'
 
 export function ForgotPassword() {
+  const registrationOpen = useRegistrationOpen()
+
   return (
     <AuthLayout>
       <Card className='gap-4'>
@@ -29,13 +32,19 @@ export function ForgotPassword() {
         <CardFooter>
           <p className='mx-auto px-8 text-center text-sm text-balance text-muted-foreground'>
             Don't have an account?{' '}
-            <Link
-              to='/sign-up'
-              className='underline underline-offset-4 hover:text-primary'
-            >
-              Sign up
-            </Link>
-            .
+            {registrationOpen ? (
+              <>
+                <Link
+                  to='/sign-up'
+                  className='underline underline-offset-4 hover:text-primary'
+                >
+                  Sign up
+                </Link>
+                .
+              </>
+            ) : (
+              'Ask your company administrator for an invitation.'
+            )}
           </p>
         </CardFooter>
       </Card>

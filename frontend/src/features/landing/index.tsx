@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link } from '@tanstack/react-router'
+import { useRegistrationOpen } from '@/services/config/api'
 import {
   ArrowRight,
   Check,
@@ -56,6 +57,16 @@ import {
 export function OctaPMLanding() {
   const { resolvedTheme, setTheme } = useTheme()
   const isDark = resolvedTheme === 'dark'
+  // Where this deployment has self-service sign-up closed, every "get
+  // started" call to action leads to sign-in instead (which explains that
+  // organisations join by invitation), and the separate sign-in links that
+  // would then duplicate it are dropped.
+  const registrationOpen = useRegistrationOpen()
+  const startTo = registrationOpen ? '/sign-up' : '/sign-in'
+  const startLabel = registrationOpen ? 'Get started' : 'Sign in'
+  const workspaceLabel = registrationOpen
+    ? 'Create your workspace'
+    : 'Sign in to your workspace'
 
   const [scrolled, setScrolled] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
@@ -117,21 +128,23 @@ export function OctaPMLanding() {
               )}
             </button>
 
-            <Link
-              to='/sign-in'
-              data-testid='uat-landing-sign-in'
-              className='hidden px-3 py-2 text-[13px] font-medium text-white/80 transition-colors hover:text-white sm:block'
-            >
-              Sign in
-            </Link>
+            {registrationOpen && (
+              <Link
+                to='/sign-in'
+                data-testid='uat-landing-sign-in'
+                className='hidden px-3 py-2 text-[13px] font-medium text-white/80 transition-colors hover:text-white sm:block'
+              >
+                Sign in
+              </Link>
+            )}
 
             <Link
-              to='/sign-up'
+              to={startTo}
               data-testid='uat-landing-cta'
               className='octa-notch-all hidden bg-brand-accent px-4 py-2.5 text-[13px] font-bold text-white transition-colors hover:bg-octa-turquoise-hover sm:block'
               style={{ '--notch': '9px' } as React.CSSProperties}
             >
-              Get started
+              {startLabel}
             </Link>
 
             <button
@@ -166,19 +179,21 @@ export function OctaPMLanding() {
                 </a>
               ))}
               <div className='flex gap-2 py-4'>
+                {registrationOpen && (
+                  <Link
+                    to='/sign-in'
+                    className='octa-notch-all flex-1 bg-white/12 py-2.5 text-center text-sm font-medium text-white'
+                    style={{ '--notch': '9px' } as React.CSSProperties}
+                  >
+                    Sign in
+                  </Link>
+                )}
                 <Link
-                  to='/sign-in'
-                  className='octa-notch-all flex-1 bg-white/12 py-2.5 text-center text-sm font-medium text-white'
-                  style={{ '--notch': '9px' } as React.CSSProperties}
-                >
-                  Sign in
-                </Link>
-                <Link
-                  to='/sign-up'
+                  to={startTo}
                   className='octa-notch-all flex-1 bg-brand-accent py-2.5 text-center text-sm font-bold text-white'
                   style={{ '--notch': '9px' } as React.CSSProperties}
                 >
-                  Get started
+                  {startLabel}
                 </Link>
               </div>
             </nav>
@@ -210,11 +225,11 @@ export function OctaPMLanding() {
 
             <div className='mt-9 flex flex-wrap items-center gap-3'>
               <Link
-                to='/sign-up'
+                to={startTo}
                 className='octa-notch-all inline-flex items-center gap-2 bg-brand-accent px-6 py-3.5 text-sm font-bold text-white transition-colors hover:bg-octa-turquoise-hover'
                 style={{ '--notch': '11px' } as React.CSSProperties}
               >
-                Create your workspace
+                {workspaceLabel}
                 <ArrowRight className='size-4' />
               </Link>
               <a
@@ -714,7 +729,7 @@ export function OctaPMLanding() {
                   </ul>
 
                   <Link
-                    to='/sign-up'
+                    to={startTo}
                     className={cn(
                       // mt-auto pins the button to the bottom, so the three
                       // line up however long each feature list runs.
@@ -725,7 +740,7 @@ export function OctaPMLanding() {
                     )}
                     style={{ '--notch': '10px' } as React.CSSProperties}
                   >
-                    {plan.cta}
+                    {registrationOpen ? plan.cta : startLabel}
                   </Link>
                 </div>
               </Panel>
@@ -791,20 +806,22 @@ export function OctaPMLanding() {
             </p>
             <div className='mt-9 flex flex-wrap justify-center gap-3'>
               <Link
-                to='/sign-up'
+                to={startTo}
                 className='octa-notch-all inline-flex items-center gap-2 bg-brand-accent px-7 py-3.5 text-sm font-bold text-white transition-colors hover:bg-octa-turquoise-hover'
                 style={{ '--notch': '11px' } as React.CSSProperties}
               >
-                Create your workspace
+                {workspaceLabel}
                 <ArrowRight className='size-4' />
               </Link>
-              <Link
-                to='/sign-in'
-                className='octa-notch-all inline-flex items-center bg-white/12 px-7 py-3.5 text-sm font-semibold text-white transition-colors hover:bg-white/20'
-                style={{ '--notch': '11px' } as React.CSSProperties}
-              >
-                Sign in
-              </Link>
+              {registrationOpen && (
+                <Link
+                  to='/sign-in'
+                  className='octa-notch-all inline-flex items-center bg-white/12 px-7 py-3.5 text-sm font-semibold text-white transition-colors hover:bg-white/20'
+                  style={{ '--notch': '11px' } as React.CSSProperties}
+                >
+                  Sign in
+                </Link>
+              )}
             </div>
           </Reveal>
         </div>
@@ -836,7 +853,9 @@ export function OctaPMLanding() {
             <FooterColumn
               title='Get started'
               links={[
-                { label: 'Create an account', to: '/sign-up' },
+                ...(registrationOpen
+                  ? [{ label: 'Create an account', to: '/sign-up' }]
+                  : []),
                 { label: 'Sign in', to: '/sign-in' },
                 { label: 'Questions', href: '#faq' },
               ]}
