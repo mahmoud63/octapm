@@ -539,11 +539,32 @@ const listProgressSubmissions = async ({
   projectId,
   activityId = null,
   status = null,
+  from = null,
+  to = null,
 }) => {
   await ensureProject({ orgId, projectId });
   const where = { projectId };
   if (activityId) where.activityId = activityId;
   if (status) where.status = status;
+  // A daily report asks what was recorded on one day, and a day on site is a
+  // local one: work recorded at eight in the evening in Baton Rouge already
+  // belongs to tomorrow in UTC. So a caller that knows its own offset sends
+  // instants ("2026-09-20T05:00:00.000Z") and gets exactly its day; a caller
+  // that sends a bare date gets that date in UTC, which is what every reader
+  // of these timestamps assumed before there was a filter at all.
+  //
+  // A submission is dated by when it was sent, and one not sent yet by when it
+  // was made — the same pair these rows are already ordered by.
+  const boundary = (value, endOfDay) =>
+    String(value).includes("T")
+      ? new Date(value)
+      : new Date(`${value}T${endOfDay ? "23:59:59.999" : "00:00:00.000"}Z`);
+  if (from || to) {
+    const range = {};
+    if (from) range.gte = boundary(from, false);
+    if (to) range.lte = boundary(to, true);
+    where.OR = [{ submittedAt: range }, { submittedAt: null, createdAt: range }];
+  }
 
   const rows = await prisma.progressSubmission.findMany({
     where,

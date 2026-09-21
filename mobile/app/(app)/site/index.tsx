@@ -62,7 +62,7 @@ export default function DailyLogScreen() {
   const log = useDailyLog(projectId, date)
   const settings = useDailyLogSettings(projectId)
   const actions = useDailyLogActions(projectId ?? '', date)
-  const submissions = useProjectProgressSubmissions(projectId)
+  const submissions = useProjectProgressSubmissions(projectId, date)
   const constraints = useConstraints(projectId)
   const [adding, setAdding] = useState<DailyLogSection | null>(null)
   const [editingSummary, setEditingSummary] = useState(false)
@@ -75,11 +75,9 @@ export default function DailyLogScreen() {
   // against real activities on this day, read back from the register so the
   // report never holds a second opinion about how far a job has got — and read
   // from the submissions rather than from each activity's pending one, or the
-  // work would leave the report at the moment it was approved.
-  const worked = useMemo(
-    () => (submissions.data ?? []).filter((s) => (s.submittedAt ?? s.createdAt)?.slice(0, 10) === date),
-    [submissions.data, date],
-  )
+  // work would leave the report at the moment it was approved. The day is the
+  // server's to narrow now, against this device's own idea of when it began.
+  const worked = useMemo(() => submissions.data ?? [], [submissions.data])
   const openConstraints = constraints.data?.summary.open ?? 0
 
   if (!projectId) {

@@ -177,6 +177,12 @@ const MODULE_DIRECTORY: MoreEntry[] = [
   { id: 'drawings', title: 'Drawings', route: '/drawings', module: 'document_control', action: 'read' },
   { id: 'documents', title: 'Documents', route: '/documents', module: 'document_control', action: 'read' },
   { id: 'photos', title: 'Photos', route: '/photos', module: 'document_control', action: 'read' },
+  // Construction is argued about by place and by person long before it is
+  // argued about by record type.
+  { id: 'locations', title: 'Locations', route: '/locations', module: 'location', action: 'read' },
+  // The team endpoint carries no module permission of its own: anyone on the
+  // project may see who else is on it, so nothing is claimed here either.
+  { id: 'team', title: 'Team', route: '/team' },
   { id: 'inventory', title: 'Inventory', route: '/inventory', module: 'inventory', action: 'read' },
   { id: 'procurement', title: 'Procurement', route: '/procurement', module: 'procurement', action: 'read' },
   { id: 'commercial', title: 'Commercial', route: '/commercial', module: 'change_event', action: 'read' },

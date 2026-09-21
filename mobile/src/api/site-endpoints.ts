@@ -78,14 +78,27 @@ export const listProgressSubmissions = (projectId: string, activityId: string, s
  *
  * The daily report needs the work recorded on one day, and an activity's own
  * `pendingProgress` only ever shows what is still waiting: read that way, work
- * disappeared from the report the moment it was approved. There is no date
- * filter on the server, so the day is chosen here.
+ * disappeared from the report the moment it was approved.
  */
-export const listProjectProgressSubmissions = (projectId: string, signal?: AbortSignal) =>
+export const listProjectProgressSubmissions = (projectId: string, day?: string | null, signal?: AbortSignal) =>
   get<{ items: (ProgressSubmission & { activity?: { id: string; name: string; activityCode?: string | null } | null })[] }>(
     '/projects/{projectId}/activities/progress-submissions',
-    { path: { projectId }, signal },
+    { path: { projectId }, query: day ? { from: dayStartedAt(day), to: dayEndedAt(day) } : {}, signal },
   )
+
+/**
+ * A day on site is a local one. Eight in the evening in Baton Rouge is already
+ * tomorrow in UTC, so the report asks the server for its own day as instants
+ * rather than naming a date and hoping both ends agree what that means.
+ */
+const dayStartedAt = (day: string) => {
+  const [y, m, d] = day.split('-').map(Number)
+  return new Date(y!, m! - 1, d!, 0, 0, 0, 0).toISOString()
+}
+const dayEndedAt = (day: string) => {
+  const [y, m, d] = day.split('-').map(Number)
+  return new Date(y!, m! - 1, d!, 23, 59, 59, 999).toISOString()
+}
 
 export const submitProgress = (projectId: string, activityId: string, body: ProgressInput) =>
   send<ProgressSubmission>('POST', '/projects/{projectId}/activities/{id}/progress', { path: { projectId, id: activityId }, body })

@@ -143,6 +143,8 @@ router.get(
     query('status')
       .optional()
       .isIn(['draft', 'submitted', 'approved', 'rejected']),
+    query('from').optional().isISO8601({ strict: true }),
+    query('to').optional().isISO8601({ strict: true }),
     validate,
   ],
   asyncHandler(async (req, res) => {
@@ -150,6 +152,8 @@ router.get(
       orgId: req.user.orgId,
       projectId: req.params.projectId,
       status: req.query.status || null,
+      from: req.query.from || null,
+      to: req.query.to || null,
     });
     return sendSuccess(res, result);
   }),
