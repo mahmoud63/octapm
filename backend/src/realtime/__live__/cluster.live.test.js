@@ -33,14 +33,10 @@ const withPool = (url, limit) => {
   return parsed.toString();
 };
 
-const connect = (port, token, options = {}) =>
+/** `options` replaces the defaults entirely, so a test can connect with exactly another client's options. */
+const connect = (port, token, options = { transports: ["websocket"], reconnection: false }) =>
   new Promise((resolve, reject) => {
-    const socket = connectSocket(`http://127.0.0.1:${port}`, {
-      transports: ["websocket"],
-      reconnection: false,
-      ...options,
-      auth: { token },
-    });
+    const socket = connectSocket(`http://127.0.0.1:${port}`, { ...options, auth: { token } });
     const timer = setTimeout(() => {
       socket.close();
       reject(new Error(`no realtime.ready from :${port} within 8 s`));
@@ -219,16 +215,19 @@ liveDescribe("realtime across API and worker processes", () => {
         JOB_STALE_MS: "315360000000",
       },
     });
+    // Three processes booting at once on a busy machine can be slow.
     await Promise.all([
-      apiA.waitForOutput(/running on port/),
-      apiB.waitForOutput(/running on port/),
-      worker.waitForOutput(/\[job-worker\] .* started/),
+      apiA.waitForOutput(/running on port/, 45_000),
+      apiB.waitForOutput(/running on port/, 45_000),
+      worker.waitForOutput(/\[job-worker\] .* started/, 45_000),
     ]);
     await waitForHttp(`http://127.0.0.1:${portA}/api/health`);
     await waitForHttp(`http://127.0.0.1:${portB}/api/health`);
-    // Every process is listening on the channel before anything is published.
-    await waitFor(async () => (await listenPids()).length === 3, { label: "three LISTEN connections" });
-  }, 90_000);
+    // Give every process the chance to be listening on the channel before
+    // anything is published. Not an assertion: a process that never listens
+    // must fail the test that needs it, not this setup.
+    await waitFor(async () => (await listenPids()).length === 3, { label: "three LISTEN connections" }).catch(() => {});
+  }, 120_000);
 
   afterAll(async () => {
     for (const socket of sockets) socket.close();

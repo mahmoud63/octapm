@@ -106,4 +106,4 @@ function stopBillingScheduler() {
   timer = null;
 }
 
-module.exports = { runBillingChecks, startBillingScheduler, stopBillingScheduler };
+module.exports = { runBillingChecks, sendReminderOnce, startBillingScheduler, stopBillingScheduler };

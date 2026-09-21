@@ -60,12 +60,26 @@ liveDescribe("trial reminders", () => {
   });
 
   it("sends a reminder once when two runs overlap", async () => {
-    const { runBillingChecks } = require("../billing-scheduler");
+    const { runBillingChecks, sendReminderOnce } = require("../billing-scheduler");
+    const { templates } = require("../../services/email.service");
     const live = await trialOrg(36); // inside the two-day reminder, outside the one-day one
     answer = 200;
 
-    await Promise.all([runBillingChecks(new Date(), { orgIds: [live.org.id] }), runBillingChecks(new Date(), { orgIds: [live.org.id] })]);
+    // A second leader read the subscription before the first one sent...
+    const staleRead = await prisma.subscription.findUnique({ where: { orgId: live.org.id }, include: { org: true } });
+    expect(staleRead.reminderDay5SentAt).toBeNull();
+    // ...the first one sends...
+    await runBillingChecks(new Date(), { orgIds: [live.org.id] });
+    expect(sentTo(live)).toHaveLength(1);
+    // ...and the second acts on what it read.
+    const sentAgain = await sendReminderOnce({
+      sub: staleRead,
+      field: "reminderDay5SentAt",
+      template: templates.trialEndingIn2Days(staleRead.org.name),
+      now: new Date(),
+    });
 
+    expect(sentAgain).toBe(false);
     expect(sentTo(live)).toHaveLength(1);
     expect((await subscriptionOf(live)).reminderDay5SentAt).not.toBeNull();
   });
