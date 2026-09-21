@@ -21,7 +21,8 @@
  * fetch; a caller that will sign something long-lived (a presigned URL) asks
  * for credentials that stay valid at least that long; and if a refresh fails
  * while the cached credentials are still valid, those are used rather than
- * failing a request that would have worked.
+ * failing a request that would have worked. The agent is then left alone
+ * for up to thirty seconds, so an outage does not slow every request.
  */
 const fs = require('fs');
 const http = require('http');
@@ -34,6 +35,8 @@ const CONTAINER_HOST = '169.254.170.2';
 const REFRESH_MARGIN_MS = 5 * 60 * 1000;
 const CONTAINER_TIMEOUT_MS = 1000;
 const IMDS_TIMEOUT_MS = 1000;
+/** How long a failed refresh is left alone while the cached keys still work. */
+const REFRESH_BACKOFF_MS = 30 * 1000;
 
 /** Hosts a FULL_URI may name: loopback and the ECS / EKS link-local agents. */
 const ALLOWED_FULL_URI_HOSTS = new Set([
@@ -241,6 +244,11 @@ const fetchTemporaryCredentials = async () => {
 
 let cached = null;
 let inflight = null;
+// Set when a refresh failed but the cached keys were still valid. Until then
+// the cached keys are returned without another fetch: a hung agent would
+// otherwise cost every upload, download link and email two timeouts (~2 s)
+// and a warning, for as long as the keys last.
+let retryRefreshAt = 0;
 
 const hasValidityFor = (credentials, marginMs, now = Date.now()) =>
   Boolean(credentials) && (!credentials.expiration || credentials.expiration - now > marginMs);
@@ -258,11 +266,13 @@ const getAwsCredentials = async ({ minValidityMs = 0 } = {}) => {
 
   const marginMs = Math.max(REFRESH_MARGIN_MS, Number(minValidityMs) || 0);
   if (hasValidityFor(cached, marginMs)) return cached;
+  if (Date.now() < retryRefreshAt && hasValidityFor(cached, 0)) return cached;
 
   if (!inflight) {
     inflight = fetchTemporaryCredentials()
       .then((credentials) => {
         cached = credentials;
+        retryRefreshAt = 0;
         return credentials;
       })
       .finally(() => {
@@ -276,6 +286,12 @@ const getAwsCredentials = async ({ minValidityMs = 0 } = {}) => {
     // Stale but still valid beats failing: the refresh is retried on the next
     // call, and the request in hand still signs with keys AWS will accept.
     if (hasValidityFor(cached, 0)) {
+      // Wait at most thirty seconds, and never into the last minute of the
+      // keys' life, before asking the agent again.
+      const now = Date.now();
+      const untilLastMinute = cached.expiration ? cached.expiration - now - 60 * 1000 : REFRESH_BACKOFF_MS;
+      const backoffMs = Math.max(0, Math.min(REFRESH_BACKOFF_MS, untilLastMinute));
+      if (now >= retryRefreshAt) retryRefreshAt = now + backoffMs;
       console.warn(`[aws-credentials] refresh failed, using cached credentials until they expire: ${error.message}`);
       return cached;
     }
@@ -287,6 +303,7 @@ const getAwsCredentials = async ({ minValidityMs = 0 } = {}) => {
 const _resetAwsCredentialsCache = () => {
   cached = null;
   inflight = null;
+  retryRefreshAt = 0;
 };
 
 module.exports = {

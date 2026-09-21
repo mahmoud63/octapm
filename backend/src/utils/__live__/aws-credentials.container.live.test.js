@@ -33,6 +33,7 @@ const startFakeAgent = async () => {
     requiredAuthorization: 'secret-token',
     status: 200,
     delayMs: 0,
+    hang: false,
     credentials: null,
   };
   const server = http.createServer((req, res) => {
@@ -49,6 +50,9 @@ const startFakeAgent = async () => {
         res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify(state.credentials));
       }
     };
+    // A hung agent accepts the connection and never answers; the client's
+    // timeout is what ends the request.
+    if (state.hang) return;
     if (state.delayMs) setTimeout(answer, state.delayMs);
     else answer();
   });
@@ -102,6 +106,7 @@ liveDescribe('AWS credentials from the container endpoint', () => {
     agent.state.authorizations = [];
     agent.state.status = 200;
     agent.state.delayMs = 0;
+    agent.state.hang = false;
     agent.state.credentials = issue('ASIAFAKE1', 'tok-1', 60 * 60 * 1000);
     _resetAwsCredentialsCache();
   });
@@ -155,6 +160,53 @@ liveDescribe('AWS credentials from the container endpoint', () => {
       expect(stale.accessKeyId).toBe('ASIAFAKE1');
       expect(agent.state.hits).toBeGreaterThan(1);
       expect(warn).toHaveBeenCalled();
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('does not wait on a hung agent again while the cached keys still work', async () => {
+    agent.state.credentials = issue('ASIAFAKE1', 'tok-1', 4 * 60 * 1000);
+    await getAwsCredentials();
+    agent.state.hang = true;
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      // The first call after the agent hangs pays the timeouts once...
+      const first = await getAwsCredentials();
+      expect(first.accessKeyId).toBe('ASIAFAKE1');
+      const hitsAfterFailure = agent.state.hits;
+
+      // ...and the calls after it are answered from the cache at once.
+      for (let call = 0; call < 3; call += 1) {
+        const started = Date.now();
+        const again = await getAwsCredentials();
+        expect(Date.now() - started).toBeLessThan(50);
+        expect(again.accessKeyId).toBe('ASIAFAKE1');
+      }
+      expect(agent.state.hits).toBe(hitsAfterFailure);
+      expect(warn).toHaveBeenCalledTimes(1);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('asks the agent again once the back-off ends, never later than the last minute of the keys', async () => {
+    // 62 s of life leaves a two-second back-off before the final minute.
+    agent.state.credentials = issue('ASIAFAKE1', 'tok-1', 62 * 1000);
+    await getAwsCredentials();
+    agent.state.status = 500;
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      expect((await getAwsCredentials()).accessKeyId).toBe('ASIAFAKE1');
+      const hitsAfterFailure = agent.state.hits;
+      expect((await getAwsCredentials()).accessKeyId).toBe('ASIAFAKE1');
+      expect(agent.state.hits).toBe(hitsAfterFailure);
+
+      await new Promise((resolve) => setTimeout(resolve, 2200));
+      agent.state.status = 200;
+      agent.state.credentials = issue('ASIAFAKE2', 'tok-2', 60 * 60 * 1000);
+      expect((await getAwsCredentials()).accessKeyId).toBe('ASIAFAKE2');
+      expect(agent.state.hits).toBe(hitsAfterFailure + 1);
     } finally {
       warn.mockRestore();
     }
