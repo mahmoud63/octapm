@@ -9,11 +9,22 @@ const ORIGINAL_ENV = process.env;
 
 const fakeStripeSecretKey = (mode) => `sk_${mode}_validproductionreadiness`;
 
+// Any file that exists stands in for the RDS CA bundle: the check is that the
+// path is absolute and present, not what is inside it.
+const CA_BUNDLE = __filename;
+
+// The whole production contract (backend/.env.example, "Running on AWS"):
+// an ALB-only API on ECS with RDS over TLS, S3 and SES through the task role.
 const validProductionEnv = () => ({
   NODE_ENV: 'production',
-  DATABASE_URL: 'postgresql://user:password@db.example.com:5432/pmcopilots',
+  APP_ENV: 'production',
+  RELEASE_GIT_SHA: '0123456789abcdef0123456789abcdef01234567',
+  DATABASE_URL: `postgresql://user:password@db.example.com:5432/pmcopilots?sslmode=require&sslcert=${encodeURIComponent(CA_BUNDLE)}`,
+  DATABASE_CONNECTION_LIMIT: '10',
   JWT_SECRET: 'access-secret-with-at-least-32-characters',
   JWT_REFRESH_SECRET: 'refresh-secret-with-at-least-32-characters',
+  MFA_SECRET_KEY: 'mfa-key-with-at-least-thirty-two-characters',
+  INTEGRATION_SECRET_KEY: 'integration-key-with-at-least-32-characters',
   ANTHROPIC_API_KEY: 'sk-ant-production-placeholder-shape',
   STRIPE_SECRET_KEY: fakeStripeSecretKey('live'),
   STRIPE_WEBHOOK_SECRET: 'whsec_validproductionreadiness',
@@ -23,10 +34,18 @@ const validProductionEnv = () => ({
   STRIPE_PRICE_BUSINESS_ANNUAL: 'price_business_annual',
   STRIPE_SECRET_ROTATION_CONFIRMED_AT: '2026-06-10',
   STRIPE_SECRET_ROTATION_TICKET: 'SEC-1234',
-  CLOUDFRONT_SHARED_SECRET: 'cloudfront-secret-with-32-plus-chars',
+  TRUST_PROXY_HOPS: '1',
   CORS_ALLOWED_ORIGINS: 'https://app.example.com',
+  WEB_APP_URL: 'https://app.example.com',
+  API_BASE_URL: 'https://api.example.com',
+  EMAIL_PROVIDER: 'ses',
+  EMAIL_FROM: 'OctaPM <no-reply@example.com>',
+  SES_REGION: 'us-east-2',
   FILE_STORAGE_S3_BUCKET: 'pmcopilots-uploads-prod',
+  FILE_STORAGE_S3_REGION: 'us-east-2',
 });
+
+const CLOUDFRONT_SECRET = 'cloudfront-secret-with-32-plus-chars';
 
 describe('security configuration', () => {
   beforeEach(() => {
@@ -165,8 +184,140 @@ describe('security configuration', () => {
 
   it('fails production validation when unrelated secrets are reused', () => {
     const env = validProductionEnv();
+    env.TRUST_PROXY_HOPS = '2';
     env.CLOUDFRONT_SHARED_SECRET = env.JWT_SECRET;
 
     expect(() => validateProductionEnv(env)).toThrow(/JWT_SECRET and CLOUDFRONT_SHARED_SECRET/);
+  });
+
+  it('checks nothing outside production', () => {
+    expect(validateProductionEnv({ NODE_ENV: 'development' })).toEqual([]);
+    expect(validateProductionEnv({ NODE_ENV: 'test' })).toEqual([]);
+    expect(validateProductionEnv({})).toEqual([]);
+  });
+
+  it('serves an ALB-only production API without the CloudFront header', async () => {
+    process.env.NODE_ENV = 'production';
+    process.env.CORS_ALLOWED_ORIGINS = 'https://app.example.com';
+
+    const app = createApp();
+    await request(app).get('/api/v1/openapi.json').expect(200);
+    await request(app).get('/api/health').expect(200);
+  });
+
+  it('keeps the trust-proxy default of 1 in production and 0 elsewhere', () => {
+    const { getTrustProxyHops } = require('../security');
+    expect(getTrustProxyHops({ NODE_ENV: 'production' })).toBe(1);
+    expect(getTrustProxyHops({ NODE_ENV: 'development' })).toBe(0);
+    expect(getTrustProxyHops({})).toBe(0);
+    expect(getTrustProxyHops({ NODE_ENV: 'production', TRUST_PROXY_HOPS: '2' })).toBe(2);
+  });
+
+  describe('accepted production shapes', () => {
+    it.each([
+      ['CloudFront then ALB, with the secret', { TRUST_PROXY_HOPS: '2', CLOUDFRONT_SHARED_SECRET: CLOUDFRONT_SECRET }],
+      ['hops left to the default of 1', { TRUST_PROXY_HOPS: undefined }],
+      ['staging on Stripe test keys', { APP_ENV: 'staging', STRIPE_SECRET_KEY: fakeStripeSecretKey('test') }],
+      ['the pool size written into the URL', {
+        DATABASE_CONNECTION_LIMIT: undefined,
+        DATABASE_URL: `${validProductionEnv().DATABASE_URL}&connection_limit=10`,
+      }],
+      ['mail through an https webhook', { EMAIL_PROVIDER: 'webhook', EMAIL_WEBHOOK_URL: 'https://mail.example.com/send' }],
+      ['the SES region from the platform', { SES_REGION: undefined, AWS_REGION: 'us-east-2' }],
+      ['the bucket region from the platform', { FILE_STORAGE_S3_REGION: undefined, AWS_REGION: 'us-east-2' }],
+      ['API_BASE_URL spelled with /api/v1', { API_BASE_URL: 'https://api.example.com/api/v1' }],
+      ['inbound email with its own key', {
+        INBOUND_EMAIL_DOMAIN: 'in.example.com',
+        INBOUND_EMAIL_SECRET: 'inbound-secret-with-at-least-32-characters',
+      }],
+      ['postgres shared state named explicitly', {
+        REALTIME_ADAPTER: 'postgres', RATE_LIMIT_STORE: 'postgres', AUTH_THROTTLE_STORE: 'postgres',
+      }],
+      ['a redis rate-limit store with its URL', { RATE_LIMIT_STORE: 'redis', REDIS_URL: 'rediss://cache.example.com:6379' }],
+      ['a rotation window', { MFA_SECRET_KEY_PREVIOUS: 'the-old-mfa-key-with-at-least-32-characters' }],
+    ])('%s', (_label, overrides) => {
+      expect(validateProductionEnv({ ...validProductionEnv(), ...overrides })).toEqual([]);
+    });
+  });
+
+  // One case per rule: break exactly one thing in a valid environment and the
+  // boot must fail naming the variable. Deleting any rule turns its row red.
+  describe('refused production shapes', () => {
+    it.each([
+      // Edge: the hop count and the CloudFront secret describe one topology.
+      ['hops that are not a number', { TRUST_PROXY_HOPS: 'abc' }, /TRUST_PROXY_HOPS must be 1/],
+      ['zero hops', { TRUST_PROXY_HOPS: '0' }, /TRUST_PROXY_HOPS must be 1/],
+      ['three hops', { TRUST_PROXY_HOPS: '3' }, /TRUST_PROXY_HOPS must be 1/],
+      ['two hops without the CloudFront secret', { TRUST_PROXY_HOPS: '2' }, /CLOUDFRONT_SHARED_SECRET is required when TRUST_PROXY_HOPS=2/],
+      ['the CloudFront secret on an ALB-only API', { CLOUDFRONT_SHARED_SECRET: CLOUDFRONT_SECRET }, /CLOUDFRONT_SHARED_SECRET must be unset when TRUST_PROXY_HOPS=1/],
+      ['a short CloudFront secret', { TRUST_PROXY_HOPS: '2', CLOUDFRONT_SHARED_SECRET: 'short-secret' }, /CLOUDFRONT_SHARED_SECRET must be at least 32/],
+      // Links and mail.
+      ['no WEB_APP_URL', { WEB_APP_URL: undefined }, /WEB_APP_URL must be set/],
+      ['an http WEB_APP_URL', { WEB_APP_URL: 'http://app.example.com' }, /WEB_APP_URL must use https/],
+      ['a local WEB_APP_URL', { WEB_APP_URL: 'https://localhost:5173' }, /WEB_APP_URL must not point at a local/],
+      ['a WEB_APP_URL with a path', { WEB_APP_URL: 'https://app.example.com/app' }, /WEB_APP_URL must be an origin only/],
+      ['no API_BASE_URL', { API_BASE_URL: undefined }, /API_BASE_URL must be set/],
+      ['a local API_BASE_URL', { API_BASE_URL: 'https://127.0.0.1:5000' }, /API_BASE_URL must not point at a local/],
+      ['mail left on the log provider', { EMAIL_PROVIDER: undefined }, /EMAIL_PROVIDER must be ses or webhook in production/],
+      ['mail explicitly on the log provider', { EMAIL_PROVIDER: 'log' }, /EMAIL_PROVIDER must be ses or webhook in production/],
+      ['an unknown mail provider', { EMAIL_PROVIDER: 'smtp' }, /EMAIL_PROVIDER must be ses or webhook, not "smtp"/],
+      ['SES without a sender', { EMAIL_FROM: undefined }, /EMAIL_FROM must be set/],
+      ['SES with a sender that is not an address', { EMAIL_FROM: 'OctaPM' }, /EMAIL_FROM must be set/],
+      ['SES without a region', { SES_REGION: undefined }, /SES_REGION/],
+      ['an http mail webhook', { EMAIL_PROVIDER: 'webhook', EMAIL_WEBHOOK_URL: 'http://mail.example.com/send' }, /EMAIL_WEBHOOK_URL must be a public https URL/],
+      ['a webhook provider with no URL', { EMAIL_PROVIDER: 'webhook' }, /EMAIL_WEBHOOK_URL must be a public https URL/],
+      // Files.
+      ['no bucket region', { FILE_STORAGE_S3_REGION: undefined }, /FILE_STORAGE_S3_REGION \(or AWS_REGION\)/],
+      ['a bucket region that is not a region', { FILE_STORAGE_S3_REGION: 'ohio' }, /FILE_STORAGE_S3_REGION "ohio"/],
+      ['a bucket name with dots', { FILE_STORAGE_S3_BUCKET: 'uploads.example.com' }, /FILE_STORAGE_S3_BUCKET "uploads.example.com"/],
+      ['uploads forced to local disk', { FILE_STORAGE_DRIVER: 'local' }, /FILE_STORAGE_DRIVER=local/],
+      ['static AWS access key', { AWS_ACCESS_KEY_ID: 'AKIAEXAMPLE' }, /AWS_ACCESS_KEY_ID must not be set/],
+      ['static AWS secret key', { AWS_SECRET_ACCESS_KEY: 'secret' }, /AWS_SECRET_ACCESS_KEY must not be set/],
+      ['static AWS session token', { AWS_SESSION_TOKEN: 'token' }, /AWS_SESSION_TOKEN must not be set/],
+      ['an S3 endpoint override', { FILE_STORAGE_S3_ENDPOINT: 'http://127.0.0.1:9000' }, /FILE_STORAGE_S3_ENDPOINT must not be set/],
+      ['an SES endpoint override', { SES_ENDPOINT: 'https://ses.example.com' }, /SES_ENDPOINT must not be set/],
+      ['an armed data-script guard', { ALLOW_DATA_SCRIPT: 'db.example.com/pmcopilots' }, /ALLOW_DATA_SCRIPT must not be set/],
+      // Keys.
+      ['no MFA key', { MFA_SECRET_KEY: undefined }, /MFA_SECRET_KEY must be set/],
+      ['no integration key', { INTEGRATION_SECRET_KEY: undefined }, /INTEGRATION_SECRET_KEY must be set/],
+      ['a short MFA key', { MFA_SECRET_KEY: 'short' }, /MFA_SECRET_KEY must be at least 32/],
+      ['a short integration key', { INTEGRATION_SECRET_KEY: 'short' }, /INTEGRATION_SECRET_KEY must be at least 32/],
+      ['the MFA key reusing the JWT secret', { MFA_SECRET_KEY: 'access-secret-with-at-least-32-characters' }, /JWT_SECRET and MFA_SECRET_KEY/],
+      ['the MFA and integration keys the same', { INTEGRATION_SECRET_KEY: 'mfa-key-with-at-least-thirty-two-characters' }, /MFA_SECRET_KEY and INTEGRATION_SECRET_KEY/],
+      ['a previous key equal to the current one', { MFA_SECRET_KEY_PREVIOUS: 'mfa-key-with-at-least-thirty-two-characters' }, /MFA_SECRET_KEY and MFA_SECRET_KEY_PREVIOUS/],
+      ['inbound email without its key', { INBOUND_EMAIL_DOMAIN: 'in.example.com' }, /INBOUND_EMAIL_SECRET must be set/],
+      ['inbound email with a short key', { INBOUND_EMAIL_DOMAIN: 'in.example.com', INBOUND_EMAIL_SECRET: 'short' }, /INBOUND_EMAIL_SECRET must be at least 32/],
+      ['an Anthropic key of the wrong shape', { ANTHROPIC_API_KEY: 'not-an-anthropic-key' }, /ANTHROPIC_API_KEY must look like/],
+      // Database.
+      ['no TLS to the database', { DATABASE_URL: 'postgresql://user:password@db.example.com:5432/pmcopilots' }, /DATABASE_URL must set sslmode=require/],
+      ['libpq verify-full, which Prisma downgrades', { DATABASE_URL: validProductionEnv().DATABASE_URL.replace('sslmode=require', 'sslmode=verify-full') }, /sslmode=verify-full is not verified TLS/],
+      ['sslmode=prefer', { DATABASE_URL: validProductionEnv().DATABASE_URL.replace('sslmode=require', 'sslmode=prefer') }, /sslmode=prefer/],
+      ['sslmode=disable', { DATABASE_URL: validProductionEnv().DATABASE_URL.replace('sslmode=require', 'sslmode=disable') }, /sslmode=disable/],
+      ['certificate checks switched off', { DATABASE_URL: `${validProductionEnv().DATABASE_URL}&sslaccept=accept_invalid_certs` }, /sslaccept=accept_invalid_certs/],
+      ['no CA bundle', { DATABASE_URL: 'postgresql://user:password@db.example.com:5432/pmcopilots?sslmode=require' }, /DATABASE_URL must set sslcert/],
+      ['a relative CA path', { DATABASE_URL: 'postgresql://u:p@db.example.com/pm?sslmode=require&sslcert=certs/rds-ca.pem' }, /sslcert must be an absolute path/],
+      ['a CA bundle that is not there', { DATABASE_URL: `postgresql://u:p@db.example.com/pm?sslmode=require&sslcert=${encodeURIComponent(`${CA_BUNDLE}.missing`)}` }, /sslcert names a file that does not exist/],
+      ['no pool size', { DATABASE_CONNECTION_LIMIT: undefined }, /DATABASE_CONNECTION_LIMIT \(or connection_limit/],
+      ['a pool size that is not a number', { DATABASE_CONNECTION_LIMIT: 'abc' }, /DATABASE_CONNECTION_LIMIT must be a positive whole number/],
+      ['a pool timeout that is not a number', { DATABASE_POOL_TIMEOUT_SECONDS: '0' }, /DATABASE_POOL_TIMEOUT_SECONDS must be a positive whole number/],
+      // Release identity.
+      ['no commit', { RELEASE_GIT_SHA: undefined }, /RELEASE_GIT_SHA must be the full 40-character commit/],
+      ['a short commit', { RELEASE_GIT_SHA: '0123456' }, /RELEASE_GIT_SHA must be the full 40-character commit/],
+      ['no APP_ENV', { APP_ENV: undefined }, /APP_ENV must be production or staging/],
+      ['an unknown APP_ENV', { APP_ENV: 'prod' }, /APP_ENV must be production or staging, not "prod"/],
+      ['production on Stripe test keys', { STRIPE_SECRET_KEY: fakeStripeSecretKey('test') }, /sk_live_/],
+      // Shared state across tasks.
+      ['per-task realtime', { REALTIME_ADAPTER: 'memory' }, /REALTIME_ADAPTER must be postgres/],
+      ['per-task rate limits', { RATE_LIMIT_STORE: 'memory' }, /RATE_LIMIT_STORE must be postgres or redis/],
+      ['per-task login lockout', { AUTH_THROTTLE_STORE: 'memory' }, /AUTH_THROTTLE_STORE must be postgres/],
+      ['a redis store with no URL', { RATE_LIMIT_STORE: 'redis' }, /RATE_LIMIT_STORE=redis needs REDIS_URL/],
+      ['an unknown request log format', { REQUEST_LOG_FORMAT: 'xml' }, /REQUEST_LOG_FORMAT must be one of/],
+    ])('%s', (_label, overrides, message) => {
+      const env = { ...validProductionEnv(), ...overrides };
+      for (const [key, value] of Object.entries(overrides)) {
+        if (value === undefined) delete env[key];
+      }
+      expect(() => validateProductionEnv(env)).toThrow(message);
+    });
   });
 });

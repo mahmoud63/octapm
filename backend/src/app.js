@@ -4,7 +4,12 @@ const cors = require("cors");
 const helmet = require("helmet");
 const morgan = require("morgan");
 const swaggerUi = require("swagger-ui-express");
-const { createCorsOptions } = require("./config/security");
+const { createCorsOptions, getTrustProxyHops } = require("./config/security");
+const {
+  RELEASE_HEADER,
+  getRelease,
+  releaseHeaderValue,
+} = require("./config/release");
 const authRoutes = require("./routes/auth");
 const projectRoutes = require("./routes/projects");
 const userRoutes = require("./routes/users");
@@ -25,10 +30,14 @@ const {
 const { errorHandler, notFoundHandler } = require("./middleware/error-handler");
 const { requestId } = require("./middleware/request-id");
 const {
+  requestLog,
+  resolveRequestLogFormat,
+} = require("./middleware/request-log");
+const { createHealthRouter } = require("./routes/service-health");
+const {
   apiRateLimiter,
   stripeWebhookLimiter,
 } = require("./middleware/rate-limit");
-const { sendSuccess } = require("./utils/api-response");
 const { openApiSpec } = require("./openapi/spec");
 
 const swaggerDocsMiddleware = () => [
@@ -49,11 +58,9 @@ const swaggerDocsMiddleware = () => [
 
 const createApp = () => {
   const app = express();
-  const trustProxyHops = Number.parseInt(
-    process.env.TRUST_PROXY_HOPS ||
-      (process.env.NODE_ENV === "production" ? "1" : "0"),
-    10,
-  );
+  // One hop behind the load balancer, two behind CloudFront then the load
+  // balancer; production refuses anything else at boot (config/security.js).
+  const trustProxyHops = getTrustProxyHops();
   if (trustProxyHops > 0) {
     app.set("trust proxy", trustProxyHops);
   }
@@ -61,7 +68,19 @@ const createApp = () => {
   app.use(helmet());
   app.use(cors(createCorsOptions()));
   app.use(requestId);
-  if (process.env.NODE_ENV !== "test") {
+  // Which build answered, on every response, so a rolling deploy can be
+  // watched from outside and a support report names the release.
+  const release = getRelease();
+  app.use((_req, res, next) => {
+    res.setHeader(RELEASE_HEADER, releaseHeaderValue(release));
+    next();
+  });
+  // JSON lines with secrets masked in production, morgan's coloured lines in
+  // local development as always, nothing under jest (REQUEST_LOG_FORMAT).
+  const logFormat = resolveRequestLogFormat();
+  if (logFormat === "json") {
+    app.use(requestLog);
+  } else if (logFormat === "dev") {
     app.use(morgan("dev"));
   }
   app.use(requireCloudFrontOriginSecret);
@@ -89,12 +108,7 @@ const createApp = () => {
   );
   app.use(express.json({ limit: "10mb" }));
 
-  app.get("/api/health", (_req, res) => {
-    return sendSuccess(res, {
-      status: "ok",
-      timestamp: new Date().toISOString(),
-    });
-  });
+  app.use("/api/health", createHealthRouter({ release }));
 
   app.use("/api/v1/auth", authRoutes);
   app.use("/api/v1/projects", projectRoutes);
