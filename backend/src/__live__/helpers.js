@@ -43,6 +43,12 @@ const freePort = () =>
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+/** Adds a Prisma connection_limit to a database URL unless it already has one. */
+const withConnectionLimit = (url, limit) => {
+  if (!url || /[?&]connection_limit=/.test(url)) return url;
+  return `${url}${url.includes("?") ? "&" : "?"}connection_limit=${limit}`;
+};
+
 /** A short unique suffix for lock keys, channel prefixes and names. */
 const uniqueTag = (prefix = "live") => `${prefix}-${crypto.randomUUID().slice(0, 8)}`;
 
@@ -70,6 +76,7 @@ const spawnNode = (entry, { env = {}, args = [], cwd = BACKEND_ROOT } = {}) => {
       JOB_WORKER_ENABLED: "false",
       SCHEDULER_LOCK_KEY: uniqueTag("lock"),
       REALTIME_CHANNEL_PREFIX: uniqueTag("rt"),
+      DATABASE_URL: withConnectionLimit(process.env.DATABASE_URL, 5),
       ...env,
     },
     stdio: ["ignore", "pipe", "pipe", "ipc"],
@@ -253,4 +260,5 @@ module.exports = {
   spawnNode,
   uniqueTag,
   waitForHttp,
+  withConnectionLimit,
 };
