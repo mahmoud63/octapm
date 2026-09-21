@@ -1,58 +1,93 @@
 const { createServer } = require('http');
 const { Server } = require('socket.io');
 const { createApp } = require('./app');
+const { prisma } = require('./config/db');
 const { createSocketCorsOptions, validateProductionEnv } = require('./config/security');
-const { startBillingScheduler } = require('./jobs/billing-scheduler');
-const { startNotificationScheduler } = require('./jobs/notification-scheduler');
-const { startDailyLogScheduler } = require('./jobs/daily-log-scheduler');
-const { startReportScheduler } = require('./jobs/report-scheduler');
-const { startWorkflowScheduler } = require('./jobs/workflow-scheduler');
+const { startSchedulerLeadership, stopSchedulerLeadership } = require('./jobs/schedulers');
+const { createRealtimeAdapter } = require('./realtime/adapter');
 const { attachRealtime } = require('./realtime/socket');
 const { registerAutoSubscriptions } = require('./services/comment.service');
+const { registerWebhookSubscriber } = require('./services/webhook.service');
 const { startJobWorker, stopJobWorker } = require('./jobs/worker');
+const { installGracefulShutdown, waitForEventBus } = require('./utils/graceful-shutdown');
 
 validateProductionEnv();
 
+const readPositiveInt = (value, fallback) => {
+  const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+};
+
 const app = createApp();
+app.locals.draining = false;
 const httpServer = createServer(app);
+
+// The load balancer keeps idle connections open for 60 s; Node's default of
+// 5 s would close them first and the balancer would forward a request onto a
+// socket that is already gone (a sporadic 502). Stay longer than it does.
+httpServer.keepAliveTimeout = readPositiveInt(process.env.HTTP_KEEP_ALIVE_TIMEOUT_MS, 65_000);
+httpServer.headersTimeout = httpServer.keepAliveTimeout + 1000;
+
+// With several API tasks the adapter carries room broadcasts and
+// disconnectSockets to every task; in development it is null (in-memory).
+const realtimeAdapter = createRealtimeAdapter();
 const io = new Server(httpServer, {
   cors: createSocketCorsOptions(),
+  ...(realtimeAdapter ? { adapter: realtimeAdapter.adapter } : {}),
 });
 
 app.set('io', io);
 attachRealtime(io);
+// Side-effect subscribers run in the process that published the event, once.
 // Record creators and assignees follow their records (comment notifications).
 registerAutoSubscriptions();
+registerWebhookSubscriber();
 
 const PORT = process.env.PORT || 5000;
 httpServer.listen(PORT, () => {
   console.log(`PMcopilots API running on port ${PORT}`);
 });
 
-startBillingScheduler();
-startNotificationScheduler();
-// Daily log weather feed and evening distribution (OCTA-FLD-DAILY-022).
-startDailyLogScheduler();
-// Scheduled reports and portfolio snapshots (OCTA-RPT-BUILDER-023).
-startReportScheduler();
-// Workflow SLA escalation (OCTA-PLAT-WF-024).
-startWorkflowScheduler();
-require('./services/webhook.service').registerWebhookSubscriber();
-require('./jobs/accounting-scheduler').startAccountingScheduler();
+// Billing, notifications, daily logs, reports, workflow SLAs and accounting
+// polls — run by whichever process holds scheduler leadership. Production
+// API tasks set SCHEDULERS_ENABLED=false and leave them to the worker.
+startSchedulerLeadership();
 // Durable job worker (BOQ AI, schedule generation). Set JOB_WORKER_ENABLED=false
 // on API instances when running dedicated workers via `npm run worker`.
 startJobWorker();
 
-const shutdown = async (signal) => {
-  console.log(`[api] ${signal} received; finishing active jobs`);
-  try {
-    await stopJobWorker();
-  } finally {
-    httpServer.close(() => process.exit(0));
-    setTimeout(() => process.exit(0), 10_000).unref();
-  }
-};
-process.on('SIGTERM', () => shutdown('SIGTERM'));
-process.on('SIGINT', () => shutdown('SIGINT'));
+installGracefulShutdown({
+  label: 'api',
+  drain: async ({ deadline }) => {
+    // Readiness answers 503 from here on, so nothing new is routed here.
+    app.locals.draining = true;
+    // Leadership first: a successor can start the schedulers during our drain.
+    await stopSchedulerLeadership();
+
+    // Idle keep-alive connections go now; a request in flight finishes, and
+    // two seconds before the deadline every connection left is cut.
+    const cutAll = setTimeout(() => httpServer.closeAllConnections(), Math.max(0, deadline - Date.now() - 2000));
+    const [, jobs] = await Promise.all([
+      (async () => {
+        // No new connections; resolves once every connection has ended.
+        const httpClosed = new Promise((resolve) => httpServer.close(() => resolve()));
+        httpServer.closeIdleConnections();
+        // Upgraded WebSockets are not HTTP connections the server can close:
+        // socket.io closes them (the clients reconnect to another task, with
+        // their usual back-off) along with the adapter's LISTEN client. Its
+        // own attempt to close the already-closing HTTP server is a no-op.
+        await io.close();
+        await httpClosed;
+      })(),
+      stopJobWorker({ deadline }),
+    ]);
+    clearTimeout(cutAll);
+    if (!jobs.drained) throw new Error(`${jobs.pending} job(s) still running at the deadline`);
+
+    await realtimeAdapter?.close();
+    await waitForEventBus();
+    await prisma.$disconnect();
+  },
+});
 
 module.exports = { app, httpServer, io };

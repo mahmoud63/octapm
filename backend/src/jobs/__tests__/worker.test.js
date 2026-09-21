@@ -83,9 +83,11 @@ describe("job worker", () => {
       jobId: "job-1",
       progress: { step: "Pass 2", progress: 50 },
     });
+    // The outcome is written only while this worker still holds the job.
     expect(mockJobService.completeJob).toHaveBeenCalledWith({
       jobId: "job-1",
       result: { revisionId: "rev-1", echoed: "boq" },
+      workerId: "worker-test",
     });
     expect(mockRecordEvent).toHaveBeenCalledWith(
       expect.objectContaining({ action: "completed", entityType: "background_job" }),
@@ -113,6 +115,7 @@ describe("job worker", () => {
       jobId: "job-1",
       error: { code: "ECONNRESET", message: "socket hang up", details: null },
       retryable: true,
+      workerId: "w",
     });
     expect(mockCreateNotifications).not.toHaveBeenCalled();
   });

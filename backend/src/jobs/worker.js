@@ -81,9 +81,18 @@ const recordAudit = async (job, action, extra = {}) => {
   }
 };
 
+/** JOB_WORKER_TYPES: a comma list restricting what this process claims; unset means every registered type. */
+const typesFromEnv = (value = process.env.JOB_WORKER_TYPES) => {
+  const list = String(value || "")
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+  return list.length ? list : null;
+};
+
 const createJobWorker = ({
   workerId = `${os.hostname()}:${process.pid}`,
-  types = null,
+  types = typesFromEnv(),
   pollIntervalMs = readPositiveInt(process.env.JOB_POLL_INTERVAL_MS, 2000),
   concurrency = readPositiveInt(process.env.JOB_WORKER_CONCURRENCY, 2),
   heartbeatMs = readPositiveInt(process.env.JOB_HEARTBEAT_MS, 15_000),
@@ -110,14 +119,20 @@ const createJobWorker = ({
           message: `No handler registered for job type ${job.type}`,
         },
         retryable: false,
+        workerId,
       });
-      await recordAudit(result?.job || job, "failed");
+      if (result) await recordAudit(result.job, "failed");
       return result;
     }
 
     const heartbeat = setInterval(() => {
       jobService
         .heartbeatJob({ jobId: job.id, workerId })
+        .then((outcome) => {
+          if (outcome && outcome.count === 0) {
+            logger.warn(`[job-worker] ${job.type} ${job.id} is no longer held by ${workerId}; its outcome will not be recorded`);
+          }
+        })
         .catch((error) => logger.error("[job-worker] heartbeat", error));
     }, heartbeatMs);
     heartbeat.unref?.();
@@ -136,8 +151,15 @@ const createJobWorker = ({
       const completed = await jobService.completeJob({
         jobId: job.id,
         result: result && typeof result === "object" ? result : null,
+        workerId,
       });
-      await recordAudit(completed || job, "completed");
+      if (!completed) {
+        // Recovered by another process meanwhile (or otherwise moved on):
+        // the current owner records the outcome, not this worker.
+        logger.warn(`[job-worker] ${job.type} ${job.id} finished here but is no longer held by ${workerId}; outcome not recorded`);
+        return null;
+      }
+      await recordAudit(completed, "completed");
       return completed;
     } catch (error) {
       logger.error(`[job-worker] ${job.type} ${job.id} failed`, error);
@@ -145,7 +167,11 @@ const createJobWorker = ({
         jobId: job.id,
         error: errorPayload(error),
         retryable: isTransientError(error),
+        workerId,
       });
+      if (!failure) {
+        logger.warn(`[job-worker] ${job.type} ${job.id} failed here but is no longer held by ${workerId}; failure not recorded`);
+      }
       if (failure && !failure.willRetry) {
         await notifyRequester(failure.job, errorPayload(error));
         await recordAudit(failure.job, "failed", { error: errorPayload(error) });
@@ -186,12 +212,13 @@ const createJobWorker = ({
     pollTimer.unref?.();
   };
 
-  const recover = async () => {
+  const recover = async ({ rethrow = false } = {}) => {
     try {
       const result = await jobService.recoverStaleJobs({ staleMs });
       if (result.scanned) logger.warn("[job-worker] recovered stale jobs", result);
       return result;
     } catch (error) {
+      if (rethrow) throw error;
       logger.error("[job-worker] recover", error);
       return null;
     }
@@ -206,10 +233,21 @@ const createJobWorker = ({
     }
   };
 
-  const start = async () => {
+  /**
+   * With `strict`, the first recovery — also the first database contact —
+   * must work: the dedicated worker process that cannot reach its queue at
+   * start fails loudly (it exits and is restarted) instead of idling as if
+   * all were well. The API's in-process worker keeps polling through it.
+   */
+  const start = async ({ strict = false } = {}) => {
     if (running) return;
     running = true;
-    await recover();
+    try {
+      await recover({ rethrow: strict });
+    } catch (error) {
+      running = false;
+      throw error;
+    }
     await tick();
     schedule();
 
@@ -223,11 +261,29 @@ const createJobWorker = ({
     );
   };
 
-  const stop = async () => {
+  /**
+   * Stops claiming and waits for the jobs in hand. With a deadline (epoch ms)
+   * the wait ends there even if jobs are still running: they keep their
+   * claim, stop heartbeating when the process exits, and stale-job recovery
+   * re-queues them. Resolves { drained, pending }.
+   */
+  const stop = async ({ deadline = null } = {}) => {
     running = false;
     if (pollTimer) clearTimeout(pollTimer);
     for (const timer of timers.splice(0)) clearInterval(timer);
-    await Promise.allSettled([...active]);
+    const settled = Promise.allSettled([...active]).then(() => true);
+    if (!deadline) {
+      await settled;
+      return { drained: true, pending: 0 };
+    }
+    let expiry = null;
+    const expired = new Promise((resolve) => {
+      expiry = setTimeout(() => resolve(false), Math.max(0, deadline - Date.now()));
+    });
+    const drained = await Promise.race([settled, expired]);
+    clearTimeout(expiry);
+    if (!drained) logger.warn(`[job-worker] ${workerId} stopped with ${active.size} job(s) still running; recovery will re-queue them`);
+    return { drained, pending: drained ? 0 : active.size };
   };
 
   const runOnce = async () => {
@@ -252,7 +308,7 @@ const createJobWorker = ({
 
 let defaultWorker = null;
 
-const startJobWorker = (options = {}) => {
+const startJobWorker = ({ strictStart = false, ...options } = {}) => {
   if (String(process.env.JOB_WORKER_ENABLED || "true").toLowerCase() === "false") {
     console.log("[job-worker] disabled by JOB_WORKER_ENABLED=false");
     return null;
@@ -260,17 +316,24 @@ const startJobWorker = (options = {}) => {
   if (defaultWorker) return defaultWorker;
 
   require("./handlers").registerAllHandlers();
-  defaultWorker = createJobWorker(options);
-  defaultWorker
-    .start()
-    .catch((error) => console.error("[job-worker] failed to start", error));
-  return defaultWorker;
+  const worker = createJobWorker(options);
+  defaultWorker = worker;
+  // `ready` settles once the first start has run: the dedicated worker
+  // process awaits it and exits when it rejects; the API only logs.
+  worker.ready = worker.start({ strict: strictStart });
+  worker.ready.catch((error) => {
+    console.error("[job-worker] failed to start", error);
+    if (defaultWorker === worker) defaultWorker = null;
+  });
+  return worker;
 };
 
-const stopJobWorker = async () => {
-  if (!defaultWorker) return;
-  await defaultWorker.stop();
+/** Stops the process's job worker; `deadline` (epoch ms) bounds the wait for jobs in hand. */
+const stopJobWorker = async ({ deadline = null } = {}) => {
+  if (!defaultWorker) return { drained: true, pending: 0 };
+  const worker = defaultWorker;
   defaultWorker = null;
+  return worker.stop({ deadline });
 };
 
 module.exports = {
@@ -281,4 +344,5 @@ module.exports = {
   resetJobHandlers,
   startJobWorker,
   stopJobWorker,
+  typesFromEnv,
 };

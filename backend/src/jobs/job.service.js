@@ -337,6 +337,27 @@ const updateJobProgress = async ({ jobId, progress = {}, merge = true }) => {
   return serializeJob(job);
 };
 
+/**
+ * Writes a job's outcome. With a guard the write is compare-and-set: it lands
+ * only while the row still matches (the same worker holds it and it is still
+ * running), and returns null otherwise. That matters once several processes
+ * work the queue: a worker that ran past its lease, or one whose job was
+ * recovered by another process meanwhile, must not overwrite the outcome the
+ * current owner is producing.
+ */
+const writeJobOutcome = async ({ jobId, data, guard = null }) => {
+  if (!guard) return prisma.backgroundJob.update({ where: { id: jobId }, data });
+  const { count } = await prisma.backgroundJob.updateMany({
+    where: { id: jobId, ...guard },
+    data,
+  });
+  if (!count) return null;
+  return prisma.backgroundJob.findUnique({ where: { id: jobId } });
+};
+
+const ownedBy = (workerId) =>
+  workerId ? { lockedBy: workerId, status: JOB_STATUSES.RUNNING } : null;
+
 const heartbeatJob = async ({ jobId, workerId }) =>
   prisma.backgroundJob.updateMany({
     where: { id: jobId, lockedBy: workerId, status: JOB_STATUSES.RUNNING },
@@ -358,22 +379,28 @@ const claimNextJob = async ({ workerId, types = null }) => {
       ? Prisma.sql`AND "type" IN (${Prisma.join(types)})`
       : Prisma.empty;
 
+  // The columns are `timestamp without time zone` holding UTC, as Prisma
+  // writes them. Bare NOW() would be read in the session's time zone: on a
+  // database whose TimeZone is not UTC (this project's local Postgres runs
+  // America/Chicago) a job queued "now" was not runnable for hours, and a
+  // fresh claim's heartbeat already looked hours stale to recovery.
+  const utcNow = Prisma.sql`(NOW() AT TIME ZONE 'UTC')`;
   const rows = await prisma.$queryRaw`
     UPDATE "BackgroundJob"
     SET "status" = ${JOB_STATUSES.RUNNING},
         "lockedBy" = ${workerId},
-        "lockedAt" = NOW(),
-        "heartbeatAt" = NOW(),
-        "startedAt" = COALESCE("startedAt", NOW()),
+        "lockedAt" = ${utcNow},
+        "heartbeatAt" = ${utcNow},
+        "startedAt" = COALESCE("startedAt", ${utcNow}),
         "attempts" = "attempts" + 1,
         "errorCode" = NULL,
         "errorMessage" = NULL,
         "errorJson" = NULL,
-        "updatedAt" = NOW()
+        "updatedAt" = ${utcNow}
     WHERE "id" = (
       SELECT "id" FROM "BackgroundJob"
       WHERE "status" = ${JOB_STATUSES.QUEUED}
-        AND "runAfter" <= NOW()
+        AND "runAfter" <= ${utcNow}
         ${typeFilter}
       ORDER BY "priority" DESC, "runAfter" ASC, "createdAt" ASC
       FOR UPDATE SKIP LOCKED
@@ -388,12 +415,18 @@ const claimNextJob = async ({ workerId, types = null }) => {
   return serializeJob(row);
 };
 
-const completeJob = async ({ jobId, result = null, progress = {} }) => {
+/**
+ * Marks a job succeeded. A worker passes its workerId, and the write then
+ * lands only while that worker still holds the running job; null means it no
+ * longer does and nothing was written.
+ */
+const completeJob = async ({ jobId, result = null, progress = {}, workerId = null }) => {
   const current = await prisma.backgroundJob.findUnique({ where: { id: jobId } });
   if (!current) return null;
 
-  const job = await prisma.backgroundJob.update({
-    where: { id: jobId },
+  const job = await writeJobOutcome({
+    jobId,
+    guard: ownedBy(workerId),
     data: {
       status: JOB_STATUSES.SUCCEEDED,
       resultJson: {
@@ -413,6 +446,7 @@ const completeJob = async ({ jobId, result = null, progress = {} }) => {
       finishedAt: new Date(),
     },
   });
+  if (!job) return null;
 
   publishJobEvent(job);
   return serializeJob(job);
@@ -421,12 +455,18 @@ const completeJob = async ({ jobId, result = null, progress = {} }) => {
 /**
  * Records a failed attempt. Retryable failures under maxAttempts return the
  * job to the queue with a backoff; otherwise the job becomes failed.
+ *
+ * A worker passes its workerId (the write lands only while it still holds the
+ * running job); stale-job recovery passes the exact state it found instead.
+ * Either way null means the job moved on and nothing was written.
  */
 const failJob = async ({
   jobId,
   error = {},
   retryable = true,
   now = new Date(),
+  workerId = null,
+  guard = null,
 }) => {
   const current = await prisma.backgroundJob.findUnique({ where: { id: jobId } });
   if (!current) return null;
@@ -438,8 +478,9 @@ const failJob = async ({
   const errorJson = error.details ?? null;
   const delay = backoffMs(attempts);
 
-  const job = await prisma.backgroundJob.update({
-    where: { id: jobId },
+  const job = await writeJobOutcome({
+    jobId,
+    guard: guard || ownedBy(workerId),
     data: willRetry
       ? {
           status: JOB_STATUSES.QUEUED,
@@ -464,6 +505,7 @@ const failJob = async ({
           finishedAt: now,
         },
   });
+  if (!job) return null;
 
   publishJobEvent(job, { willRetry, retryInMs: willRetry ? delay : null });
   return { job: serializeJob(job), willRetry, retryInMs: willRetry ? delay : null };
@@ -546,22 +588,40 @@ const recoverStaleJobs = async ({ staleMs, now = new Date() }) => {
 
   let requeued = 0;
   let failed = 0;
+  let skipped = 0;
   for (const job of stale) {
-    const result = await failJob({
-      jobId: job.id,
-      error: {
-        code: "JOB_WORKER_LOST",
-        message: `Worker ${job.lockedBy || "unknown"} stopped responding`,
-      },
-      retryable: true,
-      now,
-    });
-    if (result?.willRetry) requeued += 1;
+    const result = await recoverJob({ job, now });
+    if (!result) skipped += 1;
+    else if (result.willRetry) requeued += 1;
     else failed += 1;
   }
 
-  return { scanned: stale.length, requeued, failed };
+  return { scanned: stale.length, requeued, failed, ...(skipped ? { skipped } : {}) };
 };
+
+/**
+ * Re-queues (or fails) one job found stale, only if it is still exactly as it
+ * was found: the same worker, the same attempt, no heartbeat since. Every
+ * worker process runs recovery, so two may find the same job, and the worker
+ * that owns it may heartbeat between the scan and this write; only the first
+ * recovery of an untouched job counts. Null when the job had moved on.
+ */
+const recoverJob = async ({ job, now = new Date() }) =>
+  failJob({
+    jobId: job.id,
+    error: {
+      code: "JOB_WORKER_LOST",
+      message: `Worker ${job.lockedBy || "unknown"} stopped responding`,
+    },
+    retryable: true,
+    now,
+    guard: {
+      status: JOB_STATUSES.RUNNING,
+      lockedBy: job.lockedBy ?? null,
+      attempts: job.attempts ?? 0,
+      heartbeatAt: job.heartbeatAt ?? null,
+    },
+  });
 
 const pruneExpiredJobs = async ({ now = new Date() } = {}) => {
   const result = await prisma.backgroundJob.deleteMany({
@@ -593,6 +653,7 @@ module.exports = {
   listJobs,
   pruneExpiredJobs,
   recordCompletedJob,
+  recoverJob,
   recoverStaleJobs,
   retryJob,
   serializeJob,
