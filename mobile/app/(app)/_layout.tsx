@@ -7,7 +7,7 @@ import { CaptureSheet } from '@/components/CaptureSheet'
 import { ConnectivityBar } from '@/components/ConnectivityBar'
 import { useTheme } from '@/design-system'
 import { useLayout } from '@/hooks/useLayout'
-import { ALL_SLOT_NAMES, resolveCaptureActions, resolveTabs } from '@/navigation/roleNav'
+import { ALL_SLOT_NAMES, HIDDEN_ROUTES, resolveCaptureActions, resolveTabs } from '@/navigation/roleNav'
 import { usePermissions } from '@/permissions/usePermissions'
 import { useProjectStore } from '@/projects/store'
 
@@ -90,7 +90,7 @@ export default function AppLayout() {
           />
         ))}
         {/* Every other destination stays routable by link, and off the bar. */}
-        {Array.from(new Set([...ALL_SLOT_NAMES, ...HIDDEN]))
+        {Array.from(new Set([...ALL_SLOT_NAMES, ...HIDDEN_ROUTES]))
           .filter((name) => !shown.has(name))
           .map((name) => (
             <Tabs.Screen key={name} name={name} options={{ href: null }} />
@@ -101,25 +101,5 @@ export default function AppLayout() {
   )
 }
 
-/** Reached from a screen, a link or a notification — never a destination of its own. */
-const HIDDEN = [
-  'notifications',
-  'open',
-  'outbox',
-  'rfi',
-  'tasks',
-  'documents',
-  'drawings',
-  'site',
-  'activities',
-  'photos',
-  'timesheets',
-  'quality',
-  'inventory',
-  'commercial',
-  'workflow',
-  'procurement',
-  'capture',
-] as const
 
 const styles = StyleSheet.create({ root: { flex: 1 } })

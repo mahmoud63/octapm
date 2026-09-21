@@ -224,3 +224,35 @@ export function resolveMore(context: NavContext): MoreGroup[] {
 
 /** Every tab name the shell knows about, so the layout can hide the rest. */
 export const ALL_SLOT_NAMES: readonly string[] = Array.from(new Set(Object.values(BY_ROLE).concat([FALLBACK]).flat().map((s) => s.name)))
+
+/**
+ * Every (app) route that is reached from a screen, a link or a notification,
+ * and is never a destination on the bar of its own.
+ *
+ * expo-router turns every file and folder under app/(app) into a tab unless it
+ * is named here or is some role's slot. A route missing from both lists is not
+ * an error it reports — it simply appears on everyone's tab bar. The shell
+ * test compares this list with the directory so that cannot happen quietly.
+ */
+export const HIDDEN_ROUTES: readonly string[] = [
+  'notifications',
+  'open',
+  'outbox',
+  'rfi',
+  'tasks',
+  'documents',
+  'drawings',
+  'site',
+  'activities',
+  'photos',
+  'timesheets',
+  'quality',
+  'inventory',
+  'commercial',
+  'workflow',
+  'procurement',
+  'capture',
+  'feed',
+  'locations',
+  'team',
+]

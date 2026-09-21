@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
-import { ALLOWED_CAPS, accounts, apiSession, findLeaks, getData, isWide, items, mainProject, signIn } from './cert-helpers'
+import { apiBase, ALLOWED_CAPS, accounts, apiSession, findLeaks, getData, isWide, items, mainProject, signIn } from './cert-helpers'
 
 /**
  * Certification: adaptive layout on the web target, labelled WEB/RESPONSIVE
@@ -128,8 +128,16 @@ test.describe('certification: responsive layout (web target)', () => {
     test.setTimeout(600_000)
     const admin = await apiSession(request, accounts.pm)
     const project = await mainProject(request, admin.headers)
+    // Master–detail needs a record to show beside its list. Raise one when the
+    // organisation has just been reset, rather than depending on an earlier
+    // spec in the same run having happened to leave one behind.
     const rfis = items(await getData<{ items: { id: string }[] }>(request, admin.headers, `/projects/${project.id}/rfi`))
-    const rfiId = rfis[0]!.id
+    let rfiId = rfis[0]?.id
+    if (!rfiId) {
+      const raised = await request.post(`${apiBase}/projects/${project.id}/rfi`, { headers: admin.headers, data: { subject: `Cert responsive RFI ${Date.now() % 100000}`, question: 'Does the record sit beside its list on a tablet?', status: 'open' } })
+      expect(raised.status(), await raised.text()).toBe(201)
+      rfiId = ((await raised.json()) as { data: { id: string } }).data.id
+    }
     await page.setViewportSize({ width: 1024, height: 768 })
     await signIn(page, accounts.pm)
     const report: string[] = []

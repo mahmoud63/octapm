@@ -13,6 +13,7 @@ import { Counts, PhotoStrip, Provenance, QuickActions, Section } from '@/home/se
 import type { CaptureAction } from '@/navigation/roleNav'
 import { destinationForTarget, openOnWeb } from '@/navigation/links'
 import { day, money } from '@/utilities/format'
+import { eacQualifier, forecastNotes } from '@/utilities/forecast'
 
 const localDay = (d = new Date()) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 const ratio = (v: number | null | undefined) => (v === null || v === undefined ? '—' : v.toFixed(2))
@@ -161,8 +162,11 @@ export function PmHome({ projectId, currency, actions }: { projectId: string; cu
           <KPI label="SPI" value={ratio(schedule?.spi)} tone={schedule?.spi != null && schedule.spi < 0.9 ? 'error' : 'default'} />
           <KPI label="CPI" value={ratio(schedule?.cpi)} tone={schedule?.cpi != null && schedule.cpi < 0.9 ? 'error' : 'default'} />
           <KPI label="Actual" value={money(cost?.actual ?? null, currency)} />
-          <KPI label="Forecast at completion" value={money(cost?.eac ?? null, currency)} tone={(cost?.overrun ?? 0) > 0 ? 'error' : 'default'} />
+          <KPI label="Forecast at completion" value={money(cost?.eac ?? null, currency)} qualifier={eacQualifier(forecast.data)} tone={(cost?.overrun ?? 0) > 0 ? 'error' : 'default'} />
         </View>
+        {forecastNotes(forecast.data).map((note) => (
+          <Provenance key={note}>{note}</Provenance>
+        ))}
       </Section>
 
       {/* 6 — what the field sent */}

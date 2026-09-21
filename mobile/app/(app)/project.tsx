@@ -12,6 +12,7 @@ import { Button, Card, EmptyState, ErrorState, KPI, SkeletonList, Text, spacing 
 import { usePermissions } from '@/permissions/usePermissions'
 import { useProjectStore } from '@/projects/store'
 import { day, money } from '@/utilities/format'
+import { eacQualifier, forecastNotes } from '@/utilities/forecast'
 import { useState } from 'react'
 
 const today = () => {
@@ -145,9 +146,15 @@ export default function ProjectScreen() {
               </View>
               <View style={styles.kpis}>
                 <KPI label="Budget" value={money(cost?.budget ?? null, currency)} />
-                <KPI label="Forecast at completion" value={money(cost?.eac ?? null, currency)} tone={(cost?.overrun ?? 0) > 0 ? 'error' : 'default'} />
+                <KPI label="Forecast at completion" value={money(cost?.eac ?? null, currency)} qualifier={eacQualifier(forecast.data)} tone={(cost?.overrun ?? 0) > 0 ? 'error' : 'default'} />
                 <KPI label="Actual" value={money(cost?.actual ?? null, currency)} />
               </View>
+              {/* The server's own account of what its figures cannot include yet. */}
+              {forecastNotes(forecast.data).map((note) => (
+                <Text key={note} variant="caption" tone="muted" testID="project-forecast-note">
+                  {note}
+                </Text>
+              ))}
               {schedule?.criticalDriver ? (
                 <Text variant="caption" tone="muted" testID="project-critical-driver">
                   Longest slip: {schedule.criticalDriver.name}

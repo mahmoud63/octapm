@@ -11,6 +11,7 @@ import { Counts, QuickActions, Section } from '@/home/sections'
 import { destinationForTarget, openOnWeb } from '@/navigation/links'
 import type { CaptureAction } from '@/navigation/roleNav'
 import { money } from '@/utilities/format'
+import { eacQualifier } from '@/utilities/forecast'
 
 const ratio = (v: number | null | undefined) => (v === null || v === undefined ? '—' : v.toFixed(2))
 
@@ -45,7 +46,7 @@ export function GeneralHome({ projectId, currency, actions, emphasis }: { projec
     <Counts
       items={[
         { id: 'budget', label: 'Budget', value: money(cost?.budget ?? null, currency) },
-        { id: 'eac', label: 'Forecast at completion', value: money(cost?.eac ?? null, currency), tone: (cost?.overrun ?? 0) > 0 ? 'error' : 'default' },
+        { id: 'eac', label: eacQualifier(forecast.data) ? 'Forecast at completion (the budget — no cost performance yet)' : 'Forecast at completion', value: money(cost?.eac ?? null, currency), tone: (cost?.overrun ?? 0) > 0 ? 'error' : 'default' },
         { id: 'actual', label: 'Actual to date', value: money(cost?.actual ?? null, currency) },
         { id: 'overrun', label: 'Overrun', value: cost?.overrunPct != null ? `${cost.overrunPct}%` : '—', tone: (cost?.overrunPct ?? 0) > 0 ? 'error' : 'default' },
       ]}

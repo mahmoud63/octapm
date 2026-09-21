@@ -121,6 +121,8 @@ export interface Forecast {
     counts?: { atRisk: { high: number; medium: number; low: number }; lines: number }
   } | null
   summary: { scheduleLevel: string | null; costLevel: string | null } | null
+  /** The server's plain-language notes on what its figures cannot yet include. */
+  dataQuality?: string[]
 }
 
 export interface ProjectHealthRow {
