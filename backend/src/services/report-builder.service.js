@@ -1047,7 +1047,10 @@ const queueDueSchedules = async ({ now = new Date(), enqueue }) => {
   const queued = [];
   for (const schedule of due) {
     const next = computeNextRun({ ...schedule, from: now });
-    await prisma.reportSchedule.update({ where: { id: schedule.id }, data: { nextRunAt: next } });
+    // Advance only from the value this tick read: if another process already
+    // moved nextRunAt on (a second scheduler during a deploy), it owns this run.
+    const claimed = await prisma.reportSchedule.updateMany({ where: { id: schedule.id, nextRunAt: schedule.nextRunAt }, data: { nextRunAt: next } });
+    if (claimed.count !== 1) continue;
     const run = await prisma.reportRun.create({ data: { orgId: schedule.orgId, reportId: schedule.reportId, scheduleId: schedule.id, status: "queued", trigger: "schedule", format: schedule.format, recipientsJson: schedule.recipientsJson, requestedBy: schedule.createdBy } });
     await enqueue({ orgId: schedule.orgId, projectId: schedule.report.projectId || null, payload: { runId: run.id, reportId: schedule.reportId, scheduleId: schedule.id } });
     queued.push({ scheduleId: schedule.id, runId: run.id, nextRunAt: toIso(next) });

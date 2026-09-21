@@ -1145,6 +1145,25 @@ const nextRetryAt = (attemptNumber, now) =>
     now.getTime() + Math.min(60, 5 * 2 ** (attemptNumber - 1)) * 60 * 1000,
   );
 
+// How long a claimed delivery stays out of other processes' reach. Longer than
+// any single send (the email and push transports time out well inside it).
+const DELIVERY_LEASE_MS = 5 * 60 * 1000;
+
+/**
+ * Claims one pending delivery attempt for this process. The row must still be
+ * pending and unchanged since it was read (updatedAt moves on every write), so
+ * of two processes racing for it exactly one sees count 1. No new status is
+ * introduced: the row stays `pending` with nextAttemptAt pushed past the lease,
+ * which every reader already treats as "not due yet".
+ */
+const claimDeliveryAttempt = async (attempt, now = new Date()) => {
+  const claimed = await prisma.notificationDeliveryAttempt.updateMany({
+    where: { id: attempt.id, status: "pending", updatedAt: attempt.updatedAt },
+    data: { nextAttemptAt: new Date(now.getTime() + DELIVERY_LEASE_MS) },
+  });
+  return claimed.count === 1;
+};
+
 const processPendingEmailDeliveries = async ({
   limit = 25,
   now = new Date(),
@@ -1179,6 +1198,12 @@ const processPendingEmailDeliveries = async ({
 
   const result = { sent: 0, failed: 0, skipped: 0, processed: 0 };
   for (const attempt of attempts) {
+    // Several processes can read the same pending row (every API task, the
+    // worker's scheduler, the manual retry route). Only the one whose
+    // conditional update lands may send it; the others see count 0 and move
+    // on. The claim pushes nextAttemptAt out by the lease, so if this process
+    // dies before recording the outcome the row is picked up again later.
+    if (!(await claimDeliveryAttempt(attempt, now))) continue;
     result.processed += 1;
     const notification = attempt.notification;
     const to = notification?.recipient?.email;
@@ -1187,6 +1212,7 @@ const processPendingEmailDeliveries = async ({
       await prisma.notificationDeliveryAttempt.update({
         where: { id: attempt.id },
         data: {
+          nextAttemptAt: attempt.nextAttemptAt ?? null,
           status: "skipped",
           errorCode: "EMAIL_RECIPIENT_MISSING",
           errorMessage: "Notification recipient email is missing",
@@ -1218,6 +1244,7 @@ const processPendingEmailDeliveries = async ({
       await prisma.notificationDeliveryAttempt.update({
         where: { id: attempt.id },
         data: {
+          nextAttemptAt: attempt.nextAttemptAt ?? null,
           status: "sent",
           provider: providerResult.provider || "unknown",
           sentAt: now,

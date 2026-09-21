@@ -190,15 +190,33 @@ describe("workflow engine", () => {
   it("escalates steps past their SLA to the assignee and the escalation roles", async () => {
     const now = new Date("2026-09-12T08:00:00Z");
     mockPrisma.workflowStepAssignment.findMany.mockResolvedValueOnce([
-      { id: "as-9", instanceId: "inst-9", stepKey: "pm_approval", stepName: "PM approval", userId: "pm-1", status: "pending", dueAt: new Date("2026-09-10T00:00:00Z"), escalatedAt: null, instance: { id: "inst-9", orgId: "org-1", projectId: "p1", tool: "change_order", recordId: "co-1", recordRef: "CO-007", recordTitle: "Extra piling", status: "running", currentStepKey: "pm_approval", templateId: "tpl-default", stepsJson: pmTemplate().stepsJson, assignments: [], template: { id: "tpl-default", name: "PM approval" } } },
+      { id: "as-9", instanceId: "inst-9", stepKey: "pm_approval", stepName: "PM approval", userId: "pm-1", status: "pending", dueAt: new Date("2026-09-10T00:00:00Z"), escalatedAt: null, instance: { id: "inst-9", orgId: "org-1", projectId: "p1", tool: "change_order", recordId: "co-1", recordRef: "CO-007", recordTitle: "Extra piling", status: "running", currentStepKey: "pm_approval", escalationLevel: 2, templateId: "tpl-default", stepsJson: pmTemplate().stepsJson, assignments: [], template: { id: "tpl-default", name: "PM approval" } } },
     ]);
     mockPrisma.projectAssignment.findMany.mockResolvedValue([{ userId: "pm-1", role: "pm" }, { userId: "pm-2", role: "pm" }]);
+    mockPrisma.workflowStepAssignment.updateMany.mockResolvedValueOnce({ count: 1 });
+    mockPrisma.workflowInstance.updateMany.mockResolvedValueOnce({ count: 1 });
     const result = await engine.runEscalationScan({ now });
     expect(result).toEqual({ scanned: 1, escalated: 1 });
-    expect(mockPrisma.workflowStepAssignment.update).toHaveBeenCalledWith({ where: { id: "as-9" }, data: { escalatedAt: now } });
-    expect(mockPrisma.workflowInstance.update).toHaveBeenCalledWith({ where: { id: "inst-9" }, data: { escalationLevel: { increment: 1 } } });
+    expect(mockPrisma.workflowStepAssignment.updateMany).toHaveBeenCalledWith({ where: { id: "as-9", escalatedAt: null }, data: { escalatedAt: now } });
+    expect(mockPrisma.workflowInstance.updateMany).toHaveBeenCalledWith({ where: { id: "inst-9", escalationLevel: 2 }, data: { escalationLevel: { increment: 1 } } });
     expect(mockNotifications.createNotifications).toHaveBeenCalledWith(expect.objectContaining({ event: "workflow.escalated", recipientUserIds: ["pm-2"] }));
     expect(mockNotifications.createNotifications).toHaveBeenCalledWith(expect.objectContaining({ event: "workflow.step_overdue", recipientUserIds: ["pm-1"] }));
+  });
+
+  it("leaves overdue rows another scan already escalated, and raises the level once per instance", async () => {
+    const now = new Date("2026-09-12T08:00:00Z");
+    const instance = { id: "inst-9", orgId: "org-1", projectId: "p1", tool: "change_order", recordId: "co-1", recordRef: "CO-007", recordTitle: "Extra piling", status: "running", currentStepKey: "pm_approval", escalationLevel: 0, templateId: "tpl-default", stepsJson: pmTemplate().stepsJson, assignments: [], template: { id: "tpl-default", name: "PM approval" } };
+    const overdue = (id, userId) => ({ id, instanceId: "inst-9", stepKey: "pm_approval", stepName: "PM approval", userId, status: "pending", dueAt: new Date("2026-09-10T00:00:00Z"), escalatedAt: null, instance });
+    mockPrisma.workflowStepAssignment.findMany.mockResolvedValueOnce([overdue("as-1", "pm-1"), overdue("as-2", "qs-1")]);
+    // The other scan won as-1 and already raised the level; this one wins as-2 only.
+    mockPrisma.workflowStepAssignment.updateMany.mockResolvedValueOnce({ count: 0 }).mockResolvedValueOnce({ count: 1 });
+    mockPrisma.workflowInstance.updateMany.mockResolvedValueOnce({ count: 0 });
+    const result = await engine.runEscalationScan({ now });
+    expect(result).toEqual({ scanned: 2, escalated: 1 });
+    expect(mockAudit.recordEvent).not.toHaveBeenCalled();
+    expect(mockPrisma.approvalWorkflowEvent.create).not.toHaveBeenCalled();
+    expect(mockNotifications.createNotifications).toHaveBeenCalledTimes(1);
+    expect(mockNotifications.createNotifications).toHaveBeenCalledWith(expect.objectContaining({ event: "workflow.step_overdue", recipientUserIds: ["qs-1"] }));
   });
 
   it("seeds one default per tool plus the worked example", async () => {

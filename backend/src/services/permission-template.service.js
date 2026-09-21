@@ -345,13 +345,36 @@ const invalidateTemplateCache = (templateId = null) => {
   else compiledCache.clear();
 };
 
+/** Both timestamps are known and equal to the millisecond. */
+const sameInstant = (a, b) => {
+  if (!a || !b) return false;
+  const left = new Date(a).getTime();
+  return Number.isFinite(left) && left === new Date(b).getTime();
+};
+
 const loadCompiledTemplate = async ({ tx = prisma, templateId, overrides = {} }) => {
   if (!templateId || !tx.permissionTemplate?.findFirst) return null;
   const hasOverrides =
     overrides && (Object.keys(overrides.tools || {}).length || (overrides.grants || []).length);
 
+  // The cache is per process, and an edit made on another API task cannot
+  // invalidate it here. So a cached entry is reused only after a cheap check
+  // that the template is still active and its updatedAt is the one the entry
+  // was compiled from: every edit and archive moves updatedAt in the same
+  // transaction as the tools and grants, so a revoke applies on the very next
+  // request on every task. The saving kept is the tools-and-grants load.
   const cached = compiledCache.get(templateId);
-  if (cached && cached.expiresAt > Date.now() && !hasOverrides) return cached.compiled;
+  if (cached && cached.expiresAt > Date.now() && !hasOverrides) {
+    const current = await tx.permissionTemplate.findFirst({
+      where: { id: templateId, status: TEMPLATE_STATUSES.ACTIVE },
+      select: { updatedAt: true },
+    });
+    if (!current) {
+      compiledCache.delete(templateId);
+      return null;
+    }
+    if (sameInstant(current.updatedAt, cached.updatedAt)) return cached.compiled;
+  }
 
   const template = await tx.permissionTemplate.findFirst({
     where: { id: templateId, status: TEMPLATE_STATUSES.ACTIVE },
@@ -361,7 +384,11 @@ const loadCompiledTemplate = async ({ tx = prisma, templateId, overrides = {} })
 
   const compiled = compileTemplate(template, overrides);
   if (!hasOverrides) {
-    compiledCache.set(templateId, { compiled, expiresAt: Date.now() + CACHE_TTL_MS });
+    compiledCache.set(templateId, {
+      compiled,
+      updatedAt: template.updatedAt ?? null,
+      expiresAt: Date.now() + CACHE_TTL_MS,
+    });
   }
   return compiled;
 };

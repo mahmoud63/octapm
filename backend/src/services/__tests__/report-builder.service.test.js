@@ -1,4 +1,4 @@
-const table = () => ({ findMany: jest.fn(async () => []), findFirst: jest.fn(async () => null), findUnique: jest.fn(async () => null), create: jest.fn(async ({ data }) => ({ id: "new-1", ...data })), update: jest.fn(async ({ data, where }) => ({ id: where.id, ...data })), delete: jest.fn(async () => ({})), deleteMany: jest.fn(async () => ({ count: 0 })) });
+const table = () => ({ findMany: jest.fn(async () => []), findFirst: jest.fn(async () => null), findUnique: jest.fn(async () => null), create: jest.fn(async ({ data }) => ({ id: "new-1", ...data })), update: jest.fn(async ({ data, where }) => ({ id: where.id, ...data })), updateMany: jest.fn(async () => ({ count: 1 })), delete: jest.fn(async () => ({})), deleteMany: jest.fn(async () => ({ count: 0 })) });
 
 const mockPrisma = {
   project: { findMany: jest.fn(async () => []), findFirst: jest.fn(async () => null) },
@@ -166,10 +166,22 @@ describe("report builder", () => {
     mockPrisma.reportSchedule.findMany.mockResolvedValueOnce([{ id: "s1", orgId: "org-1", reportId: "r1", frequency: "weekly", dayOfWeek: 1, dayOfMonth: 1, hour: 7, minute: 0, timezone: "Asia/Riyadh", format: "pdf", recipientsJson: { roles: ["pm"] }, createdBy: "pm-1", nextRunAt: new Date("2026-09-14T04:00:00Z"), report: { id: "r1", orgId: "org-1", projectId: null } }]);
     const enqueue = jest.fn(async () => ({}));
     const result = await service.queueDueSchedules({ now, enqueue });
-    expect(mockPrisma.reportSchedule.update).toHaveBeenCalledWith({ where: { id: "s1" }, data: { nextRunAt: new Date("2026-09-21T04:00:00.000Z") } });
+    expect(mockPrisma.reportSchedule.updateMany).toHaveBeenCalledWith({ where: { id: "s1", nextRunAt: new Date("2026-09-14T04:00:00Z") }, data: { nextRunAt: new Date("2026-09-21T04:00:00.000Z") } });
     expect(mockPrisma.reportRun.create).toHaveBeenCalledWith({ data: expect.objectContaining({ reportId: "r1", scheduleId: "s1", trigger: "schedule", format: "pdf", requestedBy: "pm-1" }) });
     expect(enqueue).toHaveBeenCalledWith({ orgId: "org-1", projectId: null, payload: { runId: "new-1", reportId: "r1", scheduleId: "s1" } });
     expect(result.queued).toHaveLength(1);
+  });
+
+  it("leaves a schedule another process already advanced", async () => {
+    const now = new Date("2026-09-14T04:05:00Z");
+    mockPrisma.reportSchedule.findMany.mockResolvedValueOnce([{ id: "s1", orgId: "org-1", reportId: "r1", frequency: "weekly", dayOfWeek: 1, dayOfMonth: 1, hour: 7, minute: 0, timezone: "UTC", format: "pdf", recipientsJson: {}, createdBy: "pm-1", nextRunAt: new Date("2026-09-14T04:00:00Z"), report: { id: "r1", orgId: "org-1", projectId: null } }]);
+    mockPrisma.reportSchedule.updateMany.mockResolvedValueOnce({ count: 0 });
+    mockPrisma.reportRun.create.mockClear();
+    const enqueue = jest.fn(async () => ({}));
+    const result = await service.queueDueSchedules({ now, enqueue });
+    expect(mockPrisma.reportRun.create).not.toHaveBeenCalled();
+    expect(enqueue).not.toHaveBeenCalled();
+    expect(result).toEqual({ due: 1, queued: [] });
   });
 
   it("only owners and PMs change or delete a saved report", async () => {

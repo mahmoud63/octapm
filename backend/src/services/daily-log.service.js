@@ -1316,7 +1316,10 @@ const queueScheduledDistributions = async ({ now = new Date(), enqueue }) => {
     if (row.distributedAt && localDateKey(new Date(row.distributedAt), tz) === today) continue;
     if (row.autoDistributeQueuedFor && localDateKey(new Date(row.autoDistributeQueuedFor), tz) === today) continue;
     if (totalsFor(row).entries === 0 && !row.weatherJson && !row.summary) continue;
-    await prisma.dailyLog.update({ where: { id: row.id }, data: { autoDistributeQueuedFor: now } });
+    // Claim from the value this tick read, so a second scheduler that saw the
+    // same log (two processes during a deploy) does not queue it again.
+    const claimed = await prisma.dailyLog.updateMany({ where: { id: row.id, autoDistributeQueuedFor: row.autoDistributeQueuedFor ?? null }, data: { autoDistributeQueuedFor: now } });
+    if (claimed.count !== 1) continue;
     await enqueue({ orgId: project.orgId, projectId: project.id, payload: { projectId: project.id, date: today, scheduled: true } });
     queued.push({ projectId: project.id, date: today });
   }

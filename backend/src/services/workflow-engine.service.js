@@ -793,12 +793,19 @@ const runEscalationScan = async ({ now = new Date(), limit = 500 } = {}) => {
     if (!instance || instance.currentStepKey !== row.stepKey) continue;
     const step = stepByKey(Array.isArray(instance.stepsJson) ? instance.stepsJson : [], row.stepKey);
     const tool = tools.getTool(instance.tool);
-    await prisma.workflowStepAssignment.update({ where: { id: row.id }, data: { escalatedAt: now } });
+    // Two scans can read the same overdue row (two schedulers during a
+    // deploy). Only the one that flips escalatedAt from null handles the row,
+    // so its reminder and the instance's escalation happen once.
+    const claimed = await prisma.workflowStepAssignment.updateMany({ where: { id: row.id, escalatedAt: null }, data: { escalatedAt: now } });
+    if (claimed.count !== 1) continue;
     if (!seenInstances.has(instance.id)) {
       seenInstances.add(instance.id);
-      await prisma.workflowInstance.update({ where: { id: instance.id }, data: { escalationLevel: { increment: 1 } } });
-      await recordEvent({ tx: prisma, instance, action: "workflow.escalated", metadata: { stepKey: row.stepKey, stepName: row.stepName, dueAt: toIso(row.dueAt) } });
-      const escalateTo = await resolveAssignees({ orgId: instance.orgId, projectId: instance.projectId, assignees: (step?.escalateRoles?.length ? step.escalateRoles : ["pm"]).map((role) => ({ type: "role", role })) });
+      // Several assignees on one step are several rows, and two scans may each
+      // win one of them: the level moves on only from the value this scan
+      // read, so the instance escalates once however the rows were shared out.
+      const raised = await prisma.workflowInstance.updateMany({ where: { id: instance.id, escalationLevel: instance.escalationLevel }, data: { escalationLevel: { increment: 1 } } });
+      if (raised.count === 1) await recordEvent({ tx: prisma, instance, action: "workflow.escalated", metadata: { stepKey: row.stepKey, stepName: row.stepName, dueAt: toIso(row.dueAt) } });
+      const escalateTo = raised.count === 1 ? await resolveAssignees({ orgId: instance.orgId, projectId: instance.projectId, assignees: (step?.escalateRoles?.length ? step.escalateRoles : ["pm"]).map((role) => ({ type: "role", role })) }) : [];
       const overdueUserIds = rows.filter((item) => item.instanceId === instance.id && item.stepKey === row.stepKey).map((item) => item.userId);
       if (escalateTo.filter((id) => !overdueUserIds.includes(id)).length) {
         await notify({

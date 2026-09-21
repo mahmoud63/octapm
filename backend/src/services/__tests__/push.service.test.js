@@ -9,6 +9,7 @@ const mockPrisma = {
   notificationDeliveryAttempt: {
     findMany: jest.fn(async () => []),
     update: jest.fn(async () => ({})),
+    updateMany: jest.fn(async () => ({ count: 1 })),
     create: jest.fn(async () => ({})),
   },
 };

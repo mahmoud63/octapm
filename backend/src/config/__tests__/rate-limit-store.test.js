@@ -2,7 +2,9 @@ const {
   createMemoryStore,
   createRedisStore,
   createResilientStore,
+  pruneSharedState,
   resolveRateLimitStore,
+  selectStoreKind,
 } = require("../rate-limit-store");
 
 const createFakeRedis = () => {
@@ -125,5 +127,51 @@ describe("rate limit stores", () => {
       expect.stringContaining("falling back to per-instance memory counters"),
     );
     jest.dontMock("ioredis");
+  });
+
+  it("selects the store from the environment, keeping memory for local development", () => {
+    expect(selectStoreKind({})).toBe("memory");
+    expect(selectStoreKind({ NODE_ENV: "development" })).toBe("memory");
+    expect(selectStoreKind({ NODE_ENV: "test" })).toBe("memory");
+    expect(selectStoreKind({ NODE_ENV: "production" })).toBe("postgres");
+    expect(selectStoreKind({ NODE_ENV: "production", REDIS_URL: "redis://r:6379" })).toBe("redis");
+    expect(selectStoreKind({ RATE_LIMIT_STORE: "postgres" })).toBe("postgres");
+    expect(selectStoreKind({ NODE_ENV: "production", RATE_LIMIT_STORE: "memory" })).toBe("memory");
+    expect(selectStoreKind({ REDIS_URL: "redis://r:6379", RATE_LIMIT_STORE: "postgres" })).toBe("postgres");
+  });
+
+  it("wraps the Postgres store with the memory fallback", async () => {
+    const logger = { warn: jest.fn(), error: jest.fn(), log: jest.fn() };
+    const prisma = { $queryRaw: jest.fn().mockRejectedValue(new Error("relation does not exist")) };
+    const store = resolveRateLimitStore({ env: { NODE_ENV: "production" }, logger, prisma });
+    expect(store.kind).toBe("postgres+fallback");
+    expect(await store.hit("k", 1_000, 10)).toEqual({ count: 1, resetAt: 1_010 });
+    expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining("postgres store unavailable"));
+  });
+
+  it("memory store forgets windows that have ended", async () => {
+    const store = createMemoryStore();
+    const start = 100_000;
+    await store.hit("once-a", 1_000, start);
+    await store.hit("once-b", 1_000, start);
+    expect(store.size()).toBe(2);
+    await store.hit("later", 1_000, start + 61_000);
+    expect(store.size()).toBe(1);
+  });
+
+  it("pruneSharedState removes ended windows and idle login-throttle rows only", async () => {
+    const now = new Date("2026-09-21T12:00:00.000Z");
+    const prisma = {
+      rateLimitBucket: { deleteMany: jest.fn().mockResolvedValue({ count: 3 }) },
+      authThrottle: { deleteMany: jest.fn().mockResolvedValue({ count: 2 }) },
+    };
+    expect(await pruneSharedState({ prisma, now })).toEqual({ rateLimitBuckets: 3, authThrottles: 2 });
+    expect(prisma.rateLimitBucket.deleteMany).toHaveBeenCalledWith({ where: { resetAt: { lte: now } } });
+    expect(prisma.authThrottle.deleteMany).toHaveBeenCalledWith({
+      where: {
+        updatedAt: { lt: new Date("2026-09-20T12:00:00.000Z") },
+        OR: [{ lockedUntil: null }, { lockedUntil: { lte: now } }],
+      },
+    });
   });
 });
