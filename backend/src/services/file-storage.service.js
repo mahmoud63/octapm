@@ -1,18 +1,22 @@
 const crypto = require('crypto');
 const fs = require('fs');
 const fsp = require('fs/promises');
-const http = require('http');
-const https = require('https');
 const os = require('os');
 const path = require('path');
 const { Readable } = require('stream');
 const { URL } = require('url');
 const { prisma } = require('../config/db');
 const { HttpError } = require('../utils/http-error');
+const { getAwsCredentials, httpRequest } = require('../utils/aws-credentials');
+const { UNSIGNED_PAYLOAD, encodePath, presignUrl, signHeaders } = require('../utils/aws-sigv4');
 
 const EICAR_SIGNATURE = 'EICAR-STANDARD-ANTIVIRUS-TEST-FILE';
 const DEFAULT_REGION = 'us-east-2';
 const PRESIGNED_DOWNLOAD_EXPIRES_SECONDS = 5 * 60;
+// A presigned URL is the capability to read a private object: an hour at most,
+// and not so short that a slow phone cannot start the download.
+const PRESIGNED_DOWNLOAD_MIN_SECONDS = 60;
+const PRESIGNED_DOWNLOAD_MAX_SECONDS = 60 * 60;
 
 const DOCUMENT_TYPES = Object.freeze({
   SITE_PHOTO: 'site_photo',
@@ -229,8 +233,26 @@ const getStorageConfig = (documentType) => {
       process.env.AWS_REGION ||
       process.env.AWS_DEFAULT_REGION ||
       DEFAULT_REGION,
+    // Path-style endpoint for a local fake S3 or MinIO. Production refuses it;
+    // unset, the URL is the real virtual-hosted one exactly as before.
+    endpoint: String(process.env.FILE_STORAGE_S3_ENDPOINT || '').trim() || null,
     localRoot: getCategoryLocalRoot(documentType),
   };
+};
+
+const presignedDownloadTtlSeconds = () => {
+  const requested = Number(process.env.FILE_PRESIGNED_URL_TTL_SECONDS);
+  const ttl = Number.isFinite(requested) && requested > 0
+    ? Math.floor(requested)
+    : PRESIGNED_DOWNLOAD_EXPIRES_SECONDS;
+  return Math.min(PRESIGNED_DOWNLOAD_MAX_SECONDS, Math.max(PRESIGNED_DOWNLOAD_MIN_SECONDS, ttl));
+};
+
+// What a client sees when S3 or the credentials behind it fail. The cause is
+// logged, never echoed: an S3 error body names the bucket and the key.
+const storageUnavailable = (operation, error) => {
+  console.error(`[file-storage] S3 ${operation} failed: ${error?.message || error}`);
+  return new HttpError(503, 'FILE_STORAGE_UNAVAILABLE', 'File storage is temporarily unavailable');
 };
 
 const retentionDaysFor = (documentType) => {
@@ -485,197 +507,37 @@ const writeLocalObject = async ({ file, localRoot, objectKey }) => {
   return null;
 };
 
-const encodeRfc3986 = (value) =>
-  encodeURIComponent(value).replace(/[!'()*]/g, (char) =>
-    `%${char.charCodeAt(0).toString(16).toUpperCase()}`,
-  );
-
-const canonicalUri = (objectKey) =>
-  `/${objectKey.split('/').map(encodeRfc3986).join('/')}`;
-
-const sha256Hex = (value) =>
-  crypto.createHash('sha256').update(value, 'utf8').digest('hex');
-
-const hmac = (key, value, encoding) =>
-  crypto.createHmac('sha256', key).update(value, 'utf8').digest(encoding);
-
-const awsDate = (date = new Date()) =>
-  date.toISOString().replace(/[:-]|\.\d{3}/g, '');
-
-const awsDateStamp = (date = new Date()) =>
-  date.toISOString().slice(0, 10).replace(/-/g, '');
-
-const normalizeHeaderValue = (value) =>
-  String(value).trim().replace(/\s+/g, ' ');
-
-const buildCanonicalHeaders = (headers) => {
-  const entries = Object.entries(headers)
-    .map(([key, value]) => [key.toLowerCase(), normalizeHeaderValue(value)])
-    .sort(([left], [right]) => left.localeCompare(right));
-  return {
-    canonicalHeaders: `${entries.map(([key, value]) => `${key}:${value}`).join('\n')}\n`,
-    signedHeaders: entries.map(([key]) => key).join(';'),
-  };
-};
-
-const signingKey = ({ secretAccessKey, dateStamp, region }) => {
-  const dateKey = hmac(`AWS4${secretAccessKey}`, dateStamp);
-  const regionKey = hmac(dateKey, region);
-  const serviceKey = hmac(regionKey, 's3');
-  return hmac(serviceKey, 'aws4_request');
-};
-
-const httpRequest = ({ method = 'GET', url, headers = {}, body = null, timeout = 3000 }) =>
-  new Promise((resolve, reject) => {
-    const target = new URL(url);
-    const transport = target.protocol === 'https:' ? https : http;
-    const req = transport.request(
-      target,
-      { method, headers, timeout },
-      (res) => {
-        const chunks = [];
-        res.on('data', (chunk) => chunks.push(chunk));
-        res.on('end', () => {
-          const payload = Buffer.concat(chunks);
-          if (res.statusCode >= 200 && res.statusCode < 300) {
-            resolve({ statusCode: res.statusCode, headers: res.headers, body: payload });
-            return;
-          }
-          reject(
-            new Error(
-              `HTTP ${res.statusCode || 0} from ${target.hostname}: ${payload
-                .toString('utf8')
-                .slice(0, 300)}`,
-            ),
-          );
-        });
-      },
-    );
-    req.on('timeout', () => req.destroy(new Error(`Request timed out: ${url}`)));
-    req.on('error', reject);
-    if (body) body.pipe ? body.pipe(req) : req.end(body);
-    else req.end();
-  });
-
-let cachedAwsCredentials = null;
-
-const getInstanceProfileCredentials = async () => {
-  const tokenResponse = await httpRequest({
-    method: 'PUT',
-    url: 'http://169.254.169.254/latest/api/token',
-    headers: { 'X-aws-ec2-metadata-token-ttl-seconds': '21600' },
-    timeout: 1000,
-  });
-  const token = tokenResponse.body.toString('utf8');
-  const roleResponse = await httpRequest({
-    url: 'http://169.254.169.254/latest/meta-data/iam/security-credentials/',
-    headers: { 'X-aws-ec2-metadata-token': token },
-    timeout: 1000,
-  });
-  const roleName = roleResponse.body.toString('utf8').split('\n')[0].trim();
-  if (!roleName) throw new Error('No EC2 instance profile role found');
-
-  const credentialsResponse = await httpRequest({
-    url: `http://169.254.169.254/latest/meta-data/iam/security-credentials/${encodeRfc3986(roleName)}`,
-    headers: { 'X-aws-ec2-metadata-token': token },
-    timeout: 1000,
-  });
-  const body = JSON.parse(credentialsResponse.body.toString('utf8'));
-  return {
-    accessKeyId: body.AccessKeyId,
-    secretAccessKey: body.SecretAccessKey,
-    sessionToken: body.Token,
-    expiration: body.Expiration ? new Date(body.Expiration).getTime() : 0,
-  };
-};
-
-const getAwsCredentials = async () => {
-  if (
-    cachedAwsCredentials &&
-    (!cachedAwsCredentials.expiration ||
-      cachedAwsCredentials.expiration - Date.now() > 5 * 60 * 1000)
-  ) {
-    return cachedAwsCredentials;
+/**
+ * Where an object lives on the wire. Unset FILE_STORAGE_S3_ENDPOINT gives the
+ * real virtual-hosted https://<bucket>.s3.<region>.amazonaws.com/<key>; a set
+ * one gives path-style <endpoint>/<bucket>/<key>, which is what a fake S3 on
+ * 127.0.0.1 or MinIO answers.
+ */
+const s3Location = ({ bucket, region, objectKey, endpoint }) => {
+  if (endpoint) {
+    const base = new URL(endpoint);
+    return { protocol: base.protocol, host: base.host, path: `/${bucket}/${objectKey}` };
   }
-
-  if (process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY) {
-    cachedAwsCredentials = {
-      accessKeyId: process.env.AWS_ACCESS_KEY_ID,
-      secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
-      sessionToken: process.env.AWS_SESSION_TOKEN || null,
-      expiration: 0,
-    };
-    return cachedAwsCredentials;
-  }
-
-  cachedAwsCredentials = await getInstanceProfileCredentials();
-  return cachedAwsCredentials;
-};
-
-const signS3Headers = async ({ method, bucket, region, objectKey, headers }) => {
-  const credentials = await getAwsCredentials();
-  const now = new Date();
-  const amzDate = awsDate(now);
-  const dateStamp = awsDateStamp(now);
-  const host = `${bucket}.s3.${region}.amazonaws.com`;
-  const signingHeaders = {
-    ...headers,
-    host,
-    'x-amz-content-sha256': 'UNSIGNED-PAYLOAD',
-    'x-amz-date': amzDate,
-  };
-  if (credentials.sessionToken) {
-    signingHeaders['x-amz-security-token'] = credentials.sessionToken;
-  }
-
-  const { canonicalHeaders, signedHeaders } = buildCanonicalHeaders(signingHeaders);
-  const canonicalRequest = [
-    method,
-    canonicalUri(objectKey),
-    '',
-    canonicalHeaders,
-    signedHeaders,
-    'UNSIGNED-PAYLOAD',
-  ].join('\n');
-  const scope = `${dateStamp}/${region}/s3/aws4_request`;
-  const stringToSign = [
-    'AWS4-HMAC-SHA256',
-    amzDate,
-    scope,
-    sha256Hex(canonicalRequest),
-  ].join('\n');
-  const signature = hmac(
-    signingKey({
-      secretAccessKey: credentials.secretAccessKey,
-      dateStamp,
-      region,
-    }),
-    stringToSign,
-    'hex',
-  );
-
-  return {
-    ...signingHeaders,
-    Authorization: `AWS4-HMAC-SHA256 Credential=${credentials.accessKeyId}/${scope}, SignedHeaders=${signedHeaders}, Signature=${signature}`,
-  };
+  return { protocol: 'https:', host: `${bucket}.s3.${region}.amazonaws.com`, path: `/${objectKey}` };
 };
 
 const putS3Object = async ({
   file,
   bucket,
   region,
+  endpoint,
   objectKey,
   mimeType,
   sizeBytes,
   sha256,
   documentType,
 }) => {
-  const host = `${bucket}.s3.${region}.amazonaws.com`;
-  const headers = await signS3Headers({
+  const location = s3Location({ bucket, region, objectKey, endpoint });
+  const credentials = await getAwsCredentials();
+  const headers = signHeaders({
     method: 'PUT',
-    bucket,
-    region,
-    objectKey,
+    host: location.host,
+    path: location.path,
     headers: {
       'content-length': sizeBytes,
       'content-type': mimeType,
@@ -683,11 +545,15 @@ const putS3Object = async ({
       'x-amz-meta-sha256': sha256,
       'x-amz-server-side-encryption': 'AES256',
     },
+    payloadHash: UNSIGNED_PAYLOAD,
+    service: 's3',
+    region,
+    credentials,
   });
   const body = Buffer.isBuffer(file.buffer) ? file.buffer : fs.createReadStream(file.path);
   const response = await httpRequest({
     method: 'PUT',
-    url: `https://${host}${canonicalUri(objectKey)}`,
+    url: `${location.protocol}//${location.host}${encodePath(location.path)}`,
     headers,
     body,
     timeout: 120000,
@@ -695,67 +561,40 @@ const putS3Object = async ({
   return response.headers['x-amz-version-id'] || null;
 };
 
-const createS3PresignedGetUrl = async ({ bucket, region, objectKey, expiresSeconds }) => {
-  const credentials = await getAwsCredentials();
-  const now = new Date();
-  const amzDate = awsDate(now);
-  const dateStamp = awsDateStamp(now);
-  const host = `${bucket}.s3.${region}.amazonaws.com`;
-  const scope = `${dateStamp}/${region}/s3/aws4_request`;
-  const query = {
-    'X-Amz-Algorithm': 'AWS4-HMAC-SHA256',
-    'X-Amz-Credential': `${credentials.accessKeyId}/${scope}`,
-    'X-Amz-Date': amzDate,
-    'X-Amz-Expires': String(expiresSeconds),
-    'X-Amz-SignedHeaders': 'host',
-  };
-  if (credentials.sessionToken) {
-    query['X-Amz-Security-Token'] = credentials.sessionToken;
-  }
-  const canonicalQuery = Object.entries(query)
-    .sort(([left], [right]) => left.localeCompare(right))
-    .map(([key, value]) => `${encodeRfc3986(key)}=${encodeRfc3986(value)}`)
-    .join('&');
-  const canonicalRequest = [
-    'GET',
-    canonicalUri(objectKey),
-    canonicalQuery,
-    `host:${host}\n`,
-    'host',
-    'UNSIGNED-PAYLOAD',
-  ].join('\n');
-  const stringToSign = [
-    'AWS4-HMAC-SHA256',
-    amzDate,
-    scope,
-    sha256Hex(canonicalRequest),
-  ].join('\n');
-  const signature = hmac(
-    signingKey({
-      secretAccessKey: credentials.secretAccessKey,
-      dateStamp,
-      region,
-    }),
-    stringToSign,
-    'hex',
-  );
-
-  return `https://${host}${canonicalUri(objectKey)}?${canonicalQuery}&X-Amz-Signature=${signature}`;
+const createS3PresignedGetUrl = async ({ bucket, region, endpoint, objectKey, expiresSeconds }) => {
+  // The credentials must outlive the URL, or it dies before X-Amz-Expires.
+  const credentials = await getAwsCredentials({ minValidityMs: (expiresSeconds + 60) * 1000 });
+  const location = s3Location({ bucket, region, objectKey, endpoint });
+  return presignUrl({
+    protocol: location.protocol,
+    host: location.host,
+    path: location.path,
+    service: 's3',
+    region,
+    credentials,
+    expiresSeconds,
+  });
 };
 
 const storeObject = async ({ file, documentType, objectKey, mimeType, sizeBytes, sha256 }) => {
   const config = getStorageConfig(documentType);
   if (config.provider === 's3') {
-    const versionId = await putS3Object({
-      file,
-      bucket: config.bucket,
-      region: config.region,
-      objectKey,
-      mimeType,
-      sizeBytes,
-      sha256,
-      documentType,
-    });
+    let versionId;
+    try {
+      versionId = await putS3Object({
+        file,
+        bucket: config.bucket,
+        region: config.region,
+        endpoint: config.endpoint,
+        objectKey,
+        mimeType,
+        sizeBytes,
+        sha256,
+        documentType,
+      });
+    } catch (error) {
+      throw storageUnavailable('upload', error);
+    }
     return { storageProvider: 's3', bucket: config.bucket, storageVersionId: versionId };
   }
 
@@ -1057,18 +896,23 @@ const getProjectDocumentFile = async ({ orgId, projectId, key, documentType }) =
   }
 
   if (document.storageProvider === 's3') {
-    return {
-      redirectUrl: await createS3PresignedGetUrl({
+    // Region and endpoint come from the one storage config, so an upload and
+    // its download link can never be signed for different regions.
+    const config = getStorageConfig(document.documentType);
+    let redirectUrl;
+    try {
+      redirectUrl = await createS3PresignedGetUrl({
         bucket: document.bucket,
-        region:
-          process.env.FILE_STORAGE_S3_REGION ||
-          process.env.AWS_REGION ||
-          process.env.AWS_DEFAULT_REGION ||
-          DEFAULT_REGION,
+        region: config.region,
+        endpoint: config.endpoint,
         objectKey: document.objectKey,
-        expiresSeconds: Number(process.env.FILE_PRESIGNED_URL_TTL_SECONDS) ||
-          PRESIGNED_DOWNLOAD_EXPIRES_SECONDS,
-      }),
+        expiresSeconds: presignedDownloadTtlSeconds(),
+      });
+    } catch (error) {
+      throw storageUnavailable('download link', error);
+    }
+    return {
+      redirectUrl,
       mimeType: document.mimeType,
       fileName: document.fileName,
     };
