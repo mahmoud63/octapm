@@ -1,4 +1,5 @@
 const crypto = require("crypto");
+const { keyring } = require("./keyring");
 
 /**
  * Inbound email addresses (OCTA-COMM-CONV-042). Dependency-free so both the
@@ -25,14 +26,24 @@ const trimOrNull = (value) => {
 };
 
 const inboundDomain = () => trimOrNull(process.env.INBOUND_EMAIL_DOMAIN)?.toLowerCase() || null;
-const inboundSecret = () => trimOrNull(process.env.INBOUND_EMAIL_SECRET) || trimOrNull(process.env.JWT_SECRET) || null;
+// A reply-to address lives on in mail threads long after it was sent, so the
+// key that signed it must keep verifying after a rotation: the old value goes
+// in INBOUND_EMAIL_SECRET_PREVIOUS. The JWT_SECRET fallback is honoured only
+// outside production, where local data was signed with it.
+const inboundKeys = () => keyring({ primary: "INBOUND_EMAIL_SECRET", previous: "INBOUND_EMAIL_SECRET_PREVIOUS", legacy: ["JWT_SECRET"], trim: true });
+const inboundSecret = () => inboundKeys().write;
 const isInboundConfigured = () => Boolean(inboundDomain() && inboundSecret());
+
+const hmac = (secret, value) => crypto.createHmac("sha256", secret).update(String(value)).digest("hex").slice(0, SIG_LENGTH);
 
 const sign = (value) => {
   const secret = inboundSecret();
   if (!secret) return null;
-  return crypto.createHmac("sha256", secret).update(String(value)).digest("hex").slice(0, SIG_LENGTH);
+  return hmac(secret, value);
 };
+
+/** True when `sig` is the signature of `value` under any key still accepted. */
+const signatureMatches = (value, sig) => inboundKeys().read.some((secret) => safeEqual(hmac(secret, value), sig));
 
 const safeEqual = (a, b) => {
   const left = Buffer.from(String(a || ""));
@@ -84,8 +95,8 @@ const parseTarget = (email) => {
 
 const verifyTargetSignature = (target) => {
   if (!target) return false;
-  if (target.kind === "record") return safeEqual(sign(`r:${target.recordType}:${target.recordId}`), target.sig);
-  if (target.kind === "conversation") return safeEqual(sign(`c:${target.conversationId}`), target.sig);
+  if (target.kind === "record") return signatureMatches(`r:${target.recordType}:${target.recordId}`, target.sig);
+  if (target.kind === "conversation") return signatureMatches(`c:${target.conversationId}`, target.sig);
   return true;
 };
 

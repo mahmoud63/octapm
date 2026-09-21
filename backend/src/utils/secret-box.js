@@ -1,16 +1,25 @@
 const crypto = require("crypto");
 const { HttpError } = require("./http-error");
+const { keyring } = require("./keyring");
 
 /**
  * AES-256-GCM box for integration credentials (OCTA-INT-API-026). The key
  * comes from INTEGRATION_SECRET_KEY (any string; hashed to 32 bytes). Stored
  * form: `v1.<iv>.<tag>.<ciphertext>` in base64url.
+ *
+ * During a key rotation the old value goes in INTEGRATION_SECRET_KEY_PREVIOUS:
+ * boxes still open under it, and every new or refreshed box is sealed with the
+ * primary. There is no fallback to any other secret, in any environment.
  */
 
+const derive = (raw) => crypto.createHash("sha256").update(String(raw)).digest();
+
+const integrationKeys = (env = process.env) =>
+  keyring({ primary: "INTEGRATION_SECRET_KEY", previous: "INTEGRATION_SECRET_KEY_PREVIOUS", env });
+
 const keyFromEnv = (env = process.env) => {
-  const raw = env.INTEGRATION_SECRET_KEY;
-  if (!raw) return null;
-  return crypto.createHash("sha256").update(String(raw)).digest();
+  const { write } = integrationKeys(env);
+  return write ? derive(write) : null;
 };
 
 const isConfigured = (env = process.env) => Boolean(keyFromEnv(env));
@@ -33,13 +42,22 @@ const encrypt = (value, env = process.env) => {
 
 const decrypt = (text, env = process.env) => {
   if (!text) return null;
-  const key = requireKey(env);
+  requireKey(env);
   const [version, iv, tag, payload] = String(text).split(".");
   if (version !== "v1" || !iv || !tag || !payload) throw new HttpError(500, "INTEGRATION_SECRET_CORRUPT", "Stored credentials are unreadable");
-  const decipher = crypto.createDecipheriv("aes-256-gcm", key, Buffer.from(iv, "base64url"));
-  decipher.setAuthTag(Buffer.from(tag, "base64url"));
-  const plain = Buffer.concat([decipher.update(Buffer.from(payload, "base64url")), decipher.final()]);
-  return JSON.parse(plain.toString("utf8"));
+  // GCM authenticates, so a wrong key fails outright rather than yielding
+  // garbage; each candidate is simply tried in turn.
+  for (const raw of integrationKeys(env).read) {
+    try {
+      const decipher = crypto.createDecipheriv("aes-256-gcm", derive(raw), Buffer.from(iv, "base64url"));
+      decipher.setAuthTag(Buffer.from(tag, "base64url"));
+      const plain = Buffer.concat([decipher.update(Buffer.from(payload, "base64url")), decipher.final()]);
+      return JSON.parse(plain.toString("utf8"));
+    } catch {
+      // Not this key; try the next.
+    }
+  }
+  throw new HttpError(500, "INTEGRATION_SECRET_CORRUPT", "Stored credentials are unreadable with the configured keys");
 };
 
 module.exports = { encrypt, decrypt, isConfigured };
