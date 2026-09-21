@@ -23,9 +23,21 @@
  *   node scripts/e2e/reset-e2e-org.js --count    # only print the row counts
  *
  * Playwright calls it from e2e/global-setup.ts before every run.
+ *
+ * The name test alone is not a safety: on a customer database "Acme E2E
+ * Builders" is an E2E name. So before any query the data-script guard refuses
+ * a database that is not on this machine, or any under NODE_ENV=production,
+ * unless ALLOW_DATA_SCRIPT names it as <host>/<database> — which is how a
+ * staging E2E run inside the VPC opts in. The seed it spawns inherits the same
+ * environment and makes the same check.
  */
 const { spawnSync } = require("child_process");
 const path = require("path");
+
+require("../../src/utils/data-script-guard").exitUnlessDataScriptAllowed(
+  process.argv.includes("--count") ? "e2e:reset --count" : "e2e:reset",
+);
+
 const { prisma } = require("../../src/config/db");
 
 const E2E_ORG_NAME = process.env.E2E_ORG_NAME || "OctaPM E2E";

@@ -9,6 +9,11 @@
  * result, the database result, the permission result, notifications raised, and
  * whether the connected module actually received the data.
  */
+// The scenarios write through this client (03-integration seeds form
+// templates directly), so it is a data script like the seed: refused against
+// a database that is not on this machine unless ALLOW_DATA_SCRIPT names it.
+require("../../src/utils/data-script-guard").exitUnlessDataScriptAllowed("qa");
+
 const { PrismaClient } = require("@prisma/client");
 
 const BASE = (process.env.QA_BASE_URL || "http://localhost:5000").replace(/\/+$/, "");
