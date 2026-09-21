@@ -26,23 +26,60 @@ const NODE_ENTRY = "src/services/__live__/shared-state-node.js";
 // either writes, short enough to keep the suite quick.
 const HOLD_MS = "900";
 
-/** A local HTTP endpoint that records every request body and answers `status`. */
-const fakeEndpoint = async ({ status = 200, respond = null } = {}) => {
+/**
+ * A local HTTP endpoint that records every request body and answers `status`.
+ * With holdFirst it keeps the first request waiting until release() (a send
+ * still in flight) and answers every later one at once; firstArrived resolves
+ * when that first request is in.
+ */
+const fakeEndpoint = async ({ status = 200, respond = null, holdFirst = false } = {}) => {
   const requests = [];
+  let release = () => {};
+  const released = new Promise((resolve) => {
+    release = resolve;
+  });
+  let arrived = () => {};
+  const firstArrived = new Promise((resolve) => {
+    arrived = resolve;
+  });
   const server = http.createServer((req, res) => {
     const chunks = [];
     req.on("data", (chunk) => chunks.push(chunk));
-    req.on("end", () => {
+    req.on("end", async () => {
       const raw = Buffer.concat(chunks);
       requests.push({ method: req.method, url: req.url, headers: req.headers, raw });
+      const held = holdFirst && requests.length === 1;
+      arrived();
+      if (held) await released;
       const answer = respond ? respond(req, raw) : { status, body: "{}" };
       res.writeHead(answer.status, { "content-type": "application/json" });
       res.end(answer.body);
     });
   });
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
-  return { requests, port: server.address().port, close: () => new Promise((resolve) => server.close(resolve)) };
+  const close = () => {
+    release();
+    server.closeAllConnections?.();
+    return new Promise((resolve) => server.close(resolve));
+  };
+  return { requests, port: server.address().port, firstArrived, release, close };
 };
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/** Polls `check` until it is truthy, or fails after `timeoutMs`. */
+const waitFor = async (check, timeoutMs = 20_000) => {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (await check()) return;
+    await sleep(50);
+  }
+  throw new Error("waitFor: condition not met in time");
+};
+
+// A batch that began six minutes ago: longer than the five-minute delivery
+// lease, as a scheduler batch of a hundred slow sends can be.
+const staleBatchNow = () => new Date(Date.now() - 6 * 60 * 1000).toISOString();
 
 const startNode = async (env = {}) => {
   const port = await freePort();
@@ -140,8 +177,9 @@ liveDescribe("side effects happen once across API tasks", () => {
     expect(attempts.map((row) => row.status)).toEqual(["sent", "sent", "sent"]);
   });
 
-  it("push: two processes flushing the same pending pushes reach the device once each", async () => {
-    const pushService = await fakeEndpoint({ status: 201 });
+  /** A web-push device whose push service is a fake on 127.0.0.1, and the env that reaches it. */
+  const webPushDevice = async ({ holdFirst = false } = {}) => {
+    const pushService = await fakeEndpoint({ status: 201, holdFirst });
     cleanups.push(pushService.close);
     const vapid = webPush.generateVAPIDKeys();
     const device = crypto.createECDH("prime256v1");
@@ -156,16 +194,73 @@ liveDescribe("side effects happen once across API tasks", () => {
       },
     });
     cleanups.push(() => prisma.pushSubscription.deleteMany({ where: { id: subscription.id } }));
-
     const env = {
       VAPID_PUBLIC_KEY: vapid.publicKey,
       VAPID_PRIVATE_KEY: vapid.privateKey,
       VAPID_SUBJECT: "mailto:live@octapm-live.test",
       EXPO_PUSH_ENABLED: "false",
       LIVE_HTTPS_TO_HTTP: "1",
-      LIVE_HOLD_AFTER_READ_MS: HOLD_MS,
-      LIVE_HOLD_MODELS: "notificationDeliveryAttempt",
     };
+    return { pushService, env };
+  };
+
+  it("email: a batch that began more than a lease ago still keeps its send from a fresh reader", async () => {
+    const webhook = await fakeEndpoint({ status: 200, holdFirst: true });
+    cleanups.push(webhook.close);
+    const env = { EMAIL_WEBHOOK_URL: `http://127.0.0.1:${webhook.port}/send` };
+    const [a, b] = await Promise.all([startNode(env), startNode(env)]);
+    nodes.push(a, b);
+
+    const notification = await notificationFor(live, "stale-batch");
+    await prisma.notificationDeliveryAttempt.create({
+      data: { notificationId: notification.id, orgId: live.org.id, userId: live.user.id, channel: "email", status: "pending", attemptNumber: 1 },
+    });
+
+    // Task A's scheduler batch, whose `now` was read six minutes ago, claims
+    // the row and is still waiting on the email provider...
+    const fromA = call(a, "email", { userId: live.user.id, now: staleBatchNow() });
+    await webhook.firstArrived;
+    // ...when the retry route on task B reads with its own, current clock.
+    const retried = await fetch(`${b.base}/api/v1/notifications/deliveries/retry`, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${live.token}` },
+      body: JSON.stringify({ limit: 25 }),
+    });
+    const fromB = (await retried.json()).data;
+    webhook.release();
+    const resultA = await fromA;
+
+    expect(fromB).toEqual({ sent: 0, failed: 0, skipped: 0, processed: 0 });
+    expect(resultA.sent).toBe(1);
+    const posts = webhook.requests.filter((request) => JSON.parse(request.raw.toString("utf8")).metadata?.notificationId === notification.id);
+    expect(posts).toHaveLength(1);
+  });
+
+  it("push: a batch that began more than a lease ago still keeps its push from a fresh reader", async () => {
+    const { pushService, env } = await webPushDevice({ holdFirst: true });
+    const [a, b] = await Promise.all([startNode(env), startNode(env)]);
+    nodes.push(a, b);
+
+    const notification = await notificationFor(live, "stale-push");
+    await prisma.notificationDeliveryAttempt.create({
+      data: { notificationId: notification.id, orgId: live.org.id, userId: live.user.id, channel: "push", status: "pending", attemptNumber: 1 },
+    });
+
+    const fromA = call(a, "push", { userId: live.user.id, now: staleBatchNow() });
+    await pushService.firstArrived;
+    const fromB = await call(b, "push", { userId: live.user.id });
+    pushService.release();
+    const resultA = await fromA;
+
+    expect(fromB).toEqual({ sent: 0, failed: 0, skipped: 0, processed: 0 });
+    expect(resultA.sent).toBe(1);
+    expect(pushService.requests).toHaveLength(1);
+  });
+
+  it("push: two processes flushing the same pending pushes reach the device once each", async () => {
+    const device = await webPushDevice();
+    const { pushService } = device;
+    const env = { ...device.env, LIVE_HOLD_AFTER_READ_MS: HOLD_MS, LIVE_HOLD_MODELS: "notificationDeliveryAttempt" };
     const [a, b] = await Promise.all([startNode(env), startNode(env)]);
     nodes.push(a, b);
 
@@ -211,11 +306,8 @@ liveDescribe("side effects happen once across API tasks", () => {
     expect(after.nextRunAt.toISOString()).toBe("2001-01-02T07:00:00.000Z");
   });
 
-  it("workflow escalation: two scans of the same overdue step raise the level once", async () => {
-    const env = { LIVE_HOLD_AFTER_READ_MS: HOLD_MS, LIVE_HOLD_MODELS: "workflowStepAssignment" };
-    const [a, b] = await Promise.all([startNode(env), startNode(env)]);
-    nodes.push(a, b);
-
+  /** A running workflow whose one step has two assignees, both overdue since 2001. */
+  const overdueStep = async () => {
     const second = await prisma.user.create({
       data: { orgId: live.org.id, name: "Live Reviewer", email: `live-reviewer-${crypto.randomUUID()}@octapm-live.test`, passwordHash: "x", role: "qs" },
     });
@@ -229,6 +321,14 @@ liveDescribe("side effects happen once across API tasks", () => {
     });
     const overdue = (userId) => ({ orgId: live.org.id, projectId: project.id, instanceId: instance.id, stepKey: "pm_approval", stepName: "PM approval", userId, dueAt: new Date("2001-01-01T00:00:00Z") });
     await prisma.workflowStepAssignment.createMany({ data: [overdue(live.user.id), overdue(second.id)] });
+    return instance;
+  };
+
+  it("workflow escalation: two scans of the same overdue step raise the level once", async () => {
+    const env = { LIVE_HOLD_AFTER_READ_MS: HOLD_MS, LIVE_HOLD_MODELS: "workflowStepAssignment" };
+    const [a, b] = await Promise.all([startNode(env), startNode(env)]);
+    nodes.push(a, b);
+    const instance = await overdueStep();
 
     const now = "2001-01-03T00:00:00.000Z";
     const [fromA, fromB] = await Promise.all([call(a, "escalation", { now }), call(b, "escalation", { now })]);
@@ -239,6 +339,30 @@ liveDescribe("side effects happen once across API tasks", () => {
     const events = await prisma.approvalWorkflowEvent.count({ where: { recordId: instance.recordId, action: "workflow.escalated" } });
     expect(events).toBe(1);
     expect(fromA.escalated + fromB.escalated).toBe(2); // each row handled by one scan
+    const rows = await prisma.workflowStepAssignment.findMany({ where: { instanceId: instance.id } });
+    expect(rows.every((row) => row.escalatedAt)).toBe(true);
+  });
+
+  it("workflow escalation: a scan that starts while another is part-way through the step leaves it alone", async () => {
+    // Task A pauses after its claim, while it looks up whom to escalate to:
+    // the window in which a scan claiming one row at a time had left the
+    // step's other assignee for anyone to take.
+    const [a, b] = await Promise.all([startNode({ LIVE_HOLD_AFTER_READ_MS: "2500", LIVE_HOLD_MODELS: "projectAssignment" }), startNode()]);
+    nodes.push(a, b);
+    const instance = await overdueStep();
+
+    const now = "2001-01-03T00:00:00.000Z";
+    const fromA = call(a, "escalation", { now });
+    await waitFor(async () => (await prisma.workflowStepAssignment.count({ where: { instanceId: instance.id, escalatedAt: { not: null } } })) > 0);
+    // Task B's scan starts now, reads whatever is still unclaimed, and runs to
+    // the end while A is still paused.
+    const fromB = await call(b, "escalation", { now });
+    const resultA = await fromA;
+
+    const after = await prisma.workflowInstance.findUnique({ where: { id: instance.id } });
+    const events = await prisma.approvalWorkflowEvent.count({ where: { recordId: instance.recordId, action: "workflow.escalated" } });
+    expect({ level: after.escalationLevel, events, escalatedByB: fromB.escalated }).toEqual({ level: 1, events: 1, escalatedByB: 0 });
+    expect(resultA.escalated).toBe(2); // A reminds both assignees
     const rows = await prisma.workflowStepAssignment.findMany({ where: { instanceId: instance.id } });
     expect(rows.every((row) => row.escalatedAt)).toBe(true);
   });

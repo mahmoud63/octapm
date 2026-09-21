@@ -10,6 +10,9 @@
  *
  *   child.send({ id, call: "push", args: { userId } })  ->  { id, result }
  *
+ * The push and email calls take the user they are scoped to and, optionally,
+ * the batch's `now`.
+ *
  * LIVE_HOLD_AFTER_READ_MS with LIVE_HOLD_MODELS (comma list of Prisma model
  * keys) makes each findMany on those models wait before returning. Two such
  * processes started together then both read the same rows before either
@@ -101,10 +104,18 @@ const pastOnly = (now) => {
   return at;
 };
 
+// A batch's `now` may be passed in, as the scheduler's does: it is read once at
+// the start of a batch and can be minutes old by the time a later row is sent.
+const batchNow = (now) => (now === undefined ? new Date() : new Date(now));
+
 const calls = {
-  push: ({ userId, limit = 50 }) => {
+  push: ({ userId, limit = 50, now }) => {
     if (!userId) throw new Error("push needs a userId");
-    return require("../push.service").processPendingPushDeliveries({ userId, limit });
+    return require("../push.service").processPendingPushDeliveries({ userId, limit, now: batchNow(now) });
+  },
+  email: ({ userId, limit = 25, now }) => {
+    if (!userId) throw new Error("email needs a userId");
+    return require("../notification.service").processPendingEmailDeliveries({ userId, limit, now: batchNow(now) });
   },
   reportSchedules: ({ now }) =>
     require("../report-builder.service").queueDueSchedules({ now: pastOnly(now), enqueue: noopEnqueue }),
