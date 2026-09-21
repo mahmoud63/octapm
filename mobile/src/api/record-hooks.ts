@@ -185,7 +185,7 @@ export function useRegister(projectId: string | null, filters: { folder?: string
   return useQuery({ queryKey: scoped(projectId ?? 'none', 'register', filters), queryFn: ({ signal }) => getRegister(projectId!, filters, signal), enabled: !!projectId, placeholderData: (previous) => previous })
 }
 
-export function useSheets(projectId: string | null, filters: { search?: string; discipline?: string; status?: 'current' | 'obsolete' | 'all' } = {}) {
+export function useSheets(projectId: string | null, filters: { search?: string; discipline?: string; status?: 'current' | 'obsolete' | 'all'; locationId?: string } = {}) {
   return useQuery({ queryKey: scoped(projectId ?? 'none', 'sheets', filters), queryFn: ({ signal }) => listSheets(projectId!, filters, signal), enabled: !!projectId, placeholderData: (previous) => previous })
 }
 

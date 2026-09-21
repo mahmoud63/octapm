@@ -4,6 +4,7 @@ import { StyleSheet, View } from 'react-native'
 import { userMessage } from '@/api/errors'
 import { useProjects } from '@/api/hooks'
 import { Evidence } from '@/components/Evidence'
+import { DeliveryState } from '@/site/DeliveryState'
 import { ReportStatus } from '@/site/ReportStatus'
 import { useConstraints, useDailyLog, useDailyLogActions, useDailyLogSettings, useProjectProgressSubmissions } from '@/api/site-hooks'
 import { DAILY_LOG_SECTIONS, type DailyLogEntry, type DailyLogSection, type EntryInput } from '@/api/site-types'
@@ -216,6 +217,13 @@ export default function DailyLogScreen() {
                             <Text variant="caption" tone="muted">
                               {[e.activity?.name, e.location?.name, e.party?.name, e.status !== 'approved' ? humanise(e.status) : null].filter(Boolean).join(' · ')}
                             </Text>
+                            {/*
+                              A delivery observed here is not stock received. The
+                              order's own state says what became of it, and the
+                              receipt — which is what actually moves stock — is
+                              posted by whoever is allowed to post one.
+                            */}
+                            {section === 'deliveries' ? <DeliveryState projectId={projectId} poRef={e.poRef} canReceive={permissions.allows('inventory', 'create')} testID={`delivery-${e.id}`} /> : null}
                           </View>
                           {open && canSubmit ? <Button title="Remove" variant="ghost" onPress={() => void run(() => actions.removeEntry.mutateAsync({ section, entryId: e.id }))} testID={`daily-log-remove-${e.id}`} /> : null}
                         </View>

@@ -47,6 +47,7 @@ const uploadForm = <T>(path: string, form: FormData, options: { path?: PathParam
 
 export interface RfiFilters {
   status?: string
+  locationId?: string
   ballInCourt?: boolean
   overdue?: boolean
   search?: string
@@ -58,6 +59,7 @@ export const listRfis = (projectId: string, filters: RfiFilters = {}, signal?: A
   get<RfiList>('/projects/{projectId}/rfi', {
     path: { projectId },
     query: {
+      locationId: filters.locationId,
       limit: filters.limit ?? 50,
       status: filters.status,
       ballInCourtUserId: filters.ballInCourt ? 'me' : undefined,
@@ -178,8 +180,8 @@ export const listActivities = (projectId: string, signal?: AbortSignal) => get<A
 export const getRegister = (projectId: string, filters: { folder?: string; search?: string; recordType?: string } = {}, signal?: AbortSignal) =>
   get<Register>('/projects/{projectId}/doc-control/register', { path: { projectId }, query: { folder: filters.folder, search: filters.search || undefined, recordType: filters.recordType }, signal })
 
-export const listSheets = (projectId: string, filters: { search?: string; discipline?: string; status?: 'current' | 'obsolete' | 'all' } = {}, signal?: AbortSignal) =>
-  get<SheetList>('/projects/{projectId}/drawings/sheets', { path: { projectId }, query: { search: filters.search || undefined, discipline: filters.discipline, status: filters.status }, signal })
+export const listSheets = (projectId: string, filters: { search?: string; discipline?: string; status?: 'current' | 'obsolete' | 'all'; locationId?: string } = {}, signal?: AbortSignal) =>
+  get<SheetList>('/projects/{projectId}/drawings/sheets', { path: { projectId }, query: { search: filters.search || undefined, discipline: filters.discipline, status: filters.status, locationId: filters.locationId }, signal })
 
 export const getSheet = (projectId: string, sheetId: string, signal?: AbortSignal) => get<DrawingSheet & { revisions?: SheetRevisionHistory[] }>('/projects/{projectId}/drawings/sheets/{sheetId}', { path: { projectId, sheetId }, signal })
 

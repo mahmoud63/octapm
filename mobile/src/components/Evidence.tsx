@@ -1,6 +1,7 @@
 import { Ionicons } from '@expo/vector-icons'
 import * as ImagePicker from 'expo-image-picker'
 import { useMemo, useState } from 'react'
+import { useRouter } from 'expo-router'
 import { Platform, Pressable, StyleSheet, View } from 'react-native'
 import { userMessage } from '@/api/errors'
 import { documentFilePath, uploadAttachments } from '@/api/record-endpoints'
@@ -49,6 +50,7 @@ export interface EvidenceProps {
  */
 export function Evidence({ projectId, recordType, recordId, recordRef, locationId, canAdd, title = 'Evidence', emptyText = 'No evidence yet.', role = 'photo', testID = 'evidence' }: EvidenceProps) {
   const theme = useTheme()
+  const router = useRouter()
   const attachments = useAttachments(projectId, recordType, recordId)
   // Select the stable slice and narrow it here: a selector that filters
   // returns a new array on every call, which makes the store's snapshot look
@@ -205,7 +207,21 @@ export function Evidence({ projectId, recordType, recordId, recordRef, locationI
 
       {canAdd ? (
         <View style={styles.actions}>
+          {/*
+            Two ways in, on purpose. "Take photo" is the quick one: a hand
+            already holding the phone, one tap, straight up — it carries no
+            caption because stopping to type one is exactly what it exists to
+            avoid. "Photograph and describe" opens the camera properly, shows
+            the still with Retake beside Use, and asks what it shows before
+            anything is sent.
+          */}
           {Platform.OS !== 'web' ? <Button title="Take photo" variant="secondary" onPress={() => void add('camera')} loading={busy} testID="evidence-camera" /> : null}
+          <Button
+            title="Photograph and describe"
+            variant="secondary"
+            onPress={() => router.push(`/photos/new?recordType=${encodeURIComponent(recordType)}&recordId=${encodeURIComponent(recordId)}&recordRef=${encodeURIComponent(nameFor(recordRef, recordType))}${locationId ? `&locationId=${encodeURIComponent(locationId)}` : ''}` as never)}
+            testID="evidence-describe"
+          />
           <Button title="Add evidence" variant="secondary" onPress={() => void add('library')} loading={busy} testID="evidence-add" />
         </View>
       ) : null}

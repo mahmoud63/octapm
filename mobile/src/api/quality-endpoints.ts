@@ -52,6 +52,7 @@ export const listFormTemplates = (projectId: string, signal?: AbortSignal) =>
 export interface FormFilters {
   status?: string
   type?: string
+  locationId?: string
   ballInCourt?: boolean
   overdue?: boolean
   search?: string
@@ -61,7 +62,7 @@ export interface FormFilters {
 export const listForms = (projectId: string, filters: FormFilters = {}, signal?: AbortSignal) =>
   get<FormList>('/projects/{projectId}/forms', {
     path: { projectId },
-    query: { status: filters.status, type: filters.type, ballInCourtUserId: filters.ballInCourt ? 'me' : undefined, overdue: filters.overdue ? true : undefined, search: filters.search || undefined, activityId: filters.activityId, limit: 200 },
+    query: { status: filters.status, type: filters.type, ballInCourtUserId: filters.ballInCourt ? 'me' : undefined, overdue: filters.overdue ? true : undefined, search: filters.search || undefined, activityId: filters.activityId, locationId: filters.locationId, limit: 200 },
     signal,
   })
 

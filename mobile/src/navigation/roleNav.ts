@@ -119,7 +119,9 @@ export interface CaptureAction {
  * filtered, as always, by what the server allows.
  */
 const CAPTURE_ACTIONS: readonly CaptureAction[] = [
-  { id: 'photo', title: 'Site photo', icon: 'camera-outline', module: 'document_control', action: 'create', route: '/photos?add=1' },
+  // The camera first, because that is what the person came to do; the photo
+  // register is where they go to look at what was taken.
+  { id: 'photo', title: 'Take a photograph', icon: 'camera-outline', module: 'document_control', action: 'create', route: '/photos/new' },
   { id: 'progress', title: 'Update progress', icon: 'trending-up-outline', module: 'progress', action: 'submit', route: '/activities?today=1' },
   { id: 'daily-log', title: 'Daily report', icon: 'today-outline', module: 'progress', action: 'submit', route: '/site' },
   { id: 'rfi', title: 'Raise RFI', icon: 'help-circle-outline', module: 'rfi', action: 'create', route: '/rfi/new' },
