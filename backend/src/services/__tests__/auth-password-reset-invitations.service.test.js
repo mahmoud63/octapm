@@ -143,6 +143,35 @@ describe("auth password reset and invitation tokens", () => {
     );
   });
 
+  it("still answers {sent:true} when the email cannot be delivered, and records why", async () => {
+    mockPrisma.user.findUnique.mockResolvedValue({
+      ...activeUser,
+      org: { id: "org-1", name: "Octa Builders" },
+    });
+    mockSendEmail.mockRejectedValue(
+      Object.assign(new Error("rejected"), {
+        code: "EMAIL_DELIVERY_FAILED",
+        details: { status: 500 },
+      }),
+    );
+    const errorLog = jest.spyOn(console, "error").mockImplementation(() => {});
+
+    await expect(
+      authService.requestPasswordReset({ email: "pm@example.com" }),
+    ).resolves.toEqual({ sent: true });
+
+    expect(mockPrisma.authAuditEvent.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          action: "password_reset_delivery_failed",
+          userId: activeUser.id,
+          metadataJson: { code: "EMAIL_DELIVERY_FAILED", status: 500 },
+        }),
+      }),
+    );
+    errorLog.mockRestore();
+  });
+
   it("keeps forgot-password responses neutral for unknown emails", async () => {
     mockPrisma.user.findUnique.mockResolvedValue(null);
 
@@ -205,6 +234,7 @@ describe("auth password reset and invitation tokens", () => {
       expiresAt: new Date(Date.now() + 60 * 60 * 1000),
       user: activeUser,
     });
+    mockTx.passwordResetToken.updateMany.mockResolvedValue({ count: 1 });
 
     await expect(
       authService.resetPassword({
@@ -217,8 +247,15 @@ describe("auth password reset and invitation tokens", () => {
       where: { id: activeUser.id },
       data: { passwordHash: expect.any(String) },
     });
-    expect(mockTx.passwordResetToken.update).toHaveBeenCalledWith({
-      where: { id: "reset-1" },
+    // Claimed by a conditional write, so two submissions of one link cannot
+    // both set a password.
+    expect(mockTx.passwordResetToken.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: "reset-1",
+        usedAt: null,
+        revokedAt: null,
+        expiresAt: { gt: expect.any(Date) },
+      },
       data: { usedAt: expect.any(Date) },
     });
     expect(mockTx.refreshSession.updateMany).toHaveBeenCalledWith({

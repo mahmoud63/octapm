@@ -19,6 +19,7 @@ const authAbuseService = require("./auth-abuse.service");
 const { ensureSubscription } = require("./subscription.service");
 const { sendEmail, templates } = require("./email.service");
 const companyPartyService = require("./company-party.service");
+const { isPublicRegistrationOpen } = require("../config/registration");
 
 const PASSWORD_RESET_EXPIRY_MINUTES = 60;
 const INVITATION_EXPIRY_DAYS = 7;
@@ -241,10 +242,61 @@ const revokeSessionIfActive = async (tx, sessionId, now) => {
   });
 };
 
+/**
+ * A new organisation with its first company administrator, its subscription
+ * and its default permission templates — everything self-service sign-up and
+ * the first-administrator bootstrap have in common. Runs inside the caller's
+ * transaction; the caller decides how the password hash was produced.
+ */
+const provisionOrganisation = async (
+  tx,
+  { orgName, name, email, phone = null, passwordHash },
+) => {
+  const createdOrg = await tx.organisation.create({
+    data: {
+      name: orgName?.trim() || `${name.trim()} Organisation`,
+    },
+  });
+
+  const createdUser = await tx.user.create({
+    data: {
+      orgId: createdOrg.id,
+      name: name.trim(),
+      email,
+      phone: phone || null,
+      passwordHash,
+      role: "pm",
+      isCompanyAdmin: true,
+    },
+  });
+
+  await ensureSubscription(createdOrg.id, tx);
+  // System permission templates (8 internal roles + 4 external party types).
+  await require("./permission-template.service").seedDefaultTemplates({
+    tx,
+    orgId: createdOrg.id,
+  });
+
+  return { org: createdOrg, user: createdUser };
+};
+
+const createRegistrationClosedError = () =>
+  new HttpError(
+    403,
+    "REGISTRATION_CLOSED",
+    "New organisations are created by invitation. Ask your company administrator for an invite.",
+  );
+
 const register = async (
   { orgName, name, email, password, phone },
   context = {},
 ) => {
+  // Checked before anything else, so a closed deployment reveals nothing —
+  // not even whether an email is already registered.
+  if (!isPublicRegistrationOpen()) {
+    throw createRegistrationClosedError();
+  }
+
   const normalizedEmail = email.trim().toLowerCase();
 
   const existingUser = await prisma.user.findUnique({
@@ -262,30 +314,10 @@ const register = async (
   const passwordHash = await bcrypt.hash(password, 12);
 
   return prisma.$transaction(async (tx) => {
-    const createdOrg = await tx.organisation.create({
-      data: {
-        name: orgName?.trim() || `${name.trim()} Organisation`,
-      },
-    });
-
-    const createdUser = await tx.user.create({
-      data: {
-        orgId: createdOrg.id,
-        name: name.trim(),
-        email: normalizedEmail,
-        phone: phone || null,
-        passwordHash,
-        role: "pm",
-        isCompanyAdmin: true,
-      },
-    });
-
-    await ensureSubscription(createdOrg.id, tx);
-    // System permission templates (8 internal roles + 4 external party types).
-    await require("./permission-template.service").seedDefaultTemplates({
+    const { org: createdOrg, user: createdUser } = await provisionOrganisation(
       tx,
-      orgId: createdOrg.id,
-    });
+      { orgName, name, email: normalizedEmail, phone, passwordHash },
+    );
     const authPayload = await createAuthSessionPayload(
       tx,
       createdUser,
@@ -306,11 +338,14 @@ const register = async (
 
 const login = async ({ email, password }, context = {}) => {
   const normalizedEmail = email.trim().toLowerCase();
-  authAbuseService.assertLoginAllowed({
+  await authAbuseService.assertLoginAllowed({
     email: normalizedEmail,
     ipAddress: context.ipAddress,
   });
 
+  // Awaited, not fired and forgotten: with the counts in Postgres, a failure
+  // that is still being written when the next attempt arrives would let that
+  // attempt through uncounted.
   const recordInvalidLogin = () =>
     authAbuseService.recordLoginFailure({
       email: normalizedEmail,
@@ -322,7 +357,7 @@ const login = async ({ email, password }, context = {}) => {
   });
 
   if (!user) {
-    recordInvalidLogin();
+    await recordInvalidLogin();
     throw new HttpError(
       401,
       "INVALID_CREDENTIALS",
@@ -332,14 +367,14 @@ const login = async ({ email, password }, context = {}) => {
 
   const isPasswordValid = await bcrypt.compare(password, user.passwordHash);
   if (!isPasswordValid) {
-    recordInvalidLogin();
+    await recordInvalidLogin();
     throw new HttpError(
       401,
       "INVALID_CREDENTIALS",
       "Invalid email or password",
     );
   }
-  authAbuseService.recordLoginSuccess({
+  await authAbuseService.recordLoginSuccess({
     email: normalizedEmail,
     ipAddress: context.ipAddress,
   });
@@ -513,6 +548,32 @@ const refresh = async ({
       return refuse(session, "session", createInvalidRefreshTokenError());
     }
 
+    // The read above is not a claim: two refreshes with the same token (a
+    // retry, two tabs, two API tasks) both see revokedAt still empty. The
+    // session is claimed by this conditional write instead. The loser waits
+    // on the winner's row lock, then finds revokedAt set and matches nothing,
+    // so exactly one of them mints a child session. The loser is treated as
+    // the replay it is, and re-reads the session so the family it revokes
+    // includes the child the winner has just created.
+    const claimed = await tx.refreshSession.updateMany({
+      where: { id: session.id, revokedAt: null },
+      data: { revokedAt: now },
+    });
+    if (claimed.count !== 1) {
+      const latest = await tx.refreshSession.findUnique({
+        where: { id: session.id },
+      });
+      return refuse(
+        latest || session,
+        "family",
+        new HttpError(
+          401,
+          "REFRESH_TOKEN_REUSED",
+          "Refresh token has already been used",
+        ),
+      );
+    }
+
     const nextSession = await createRefreshSession(tx, session.user, {
       userAgent,
       ipAddress,
@@ -522,7 +583,6 @@ const refresh = async ({
     await tx.refreshSession.update({
       where: { id: session.id },
       data: {
-        revokedAt: now,
         replacedBySessionId: nextSession.id,
       },
     });
@@ -659,16 +719,41 @@ const requestPasswordReset = async ({ email }, context = {}) => {
     expiresAt: resetToken.expiresAt,
   });
 
-  await sendEmail({
-    to: normalizedEmail,
-    ...template,
-    metadata: {
+  // A failed send is recorded, never reported. The answer has to be the same
+  // {sent:true} whether or not the address belongs to anyone: a 5xx here only
+  // for real accounts would tell a stranger which emails are registered. The
+  // person can simply ask again; the operator finds the failure in the audit
+  // trail and the log.
+  try {
+    await sendEmail({
+      to: normalizedEmail,
+      ...template,
+      metadata: {
+        orgId: user.orgId,
+        userId: user.id,
+        tokenId: resetToken.id,
+        type: "password_reset",
+      },
+    });
+  } catch (error) {
+    console.error(
+      `[auth] password reset email for user ${user.id} was not delivered: ${error?.code || error?.name || "ERROR"}`,
+    );
+    await recordAuthAuditEvent({
       orgId: user.orgId,
       userId: user.id,
-      tokenId: resetToken.id,
-      type: "password_reset",
-    },
-  });
+      entityType: "password_reset",
+      entityId: resetToken.id,
+      action: "password_reset_delivery_failed",
+      email: normalizedEmail,
+      ipAddress: context.ipAddress,
+      userAgent: context.userAgent,
+      metadata: {
+        code: error?.code || null,
+        status: error?.details?.status || error?.status || null,
+      },
+    }).catch(() => null);
+  }
 
   return { sent: true };
 };
@@ -716,14 +801,25 @@ const resetPassword = async ({ token, password }, context = {}) => {
   const passwordHash = await bcrypt.hash(password, 12);
 
   await prisma.$transaction(async (tx) => {
+    // Claimed first, by a conditional write: two submissions of one link both
+    // pass the check above, and only the one that wins this claim may set a
+    // password. The other throws here, which rolls its transaction back.
+    const claimed = await tx.passwordResetToken.updateMany({
+      where: {
+        id: resetToken.id,
+        usedAt: null,
+        revokedAt: null,
+        expiresAt: { gt: now },
+      },
+      data: { usedAt: now },
+    });
+    if (claimed.count !== 1) {
+      throw createInvalidResetTokenError();
+    }
+
     await tx.user.update({
       where: { id: resetToken.userId },
       data: { passwordHash },
-    });
-
-    await tx.passwordResetToken.update({
-      where: { id: resetToken.id },
-      data: { usedAt: now },
     });
 
     await tx.passwordResetToken.updateMany({
@@ -990,7 +1086,179 @@ const acceptInvitation = async (
   });
 };
 
+// ─── First administrator ────────────────────────────────────────────────────
+//
+// With self-service registration closed in production, a brand-new deployment
+// has no way in: nobody can register, and invitations need an inviter. These
+// two functions, run from `npm run admin:bootstrap` as a one-off task, create
+// the first organisation and its company administrator.
+//
+// No password is ever supplied. The administrator gets an unusable random
+// password (the plaintext is discarded at once, as SSO provisioning does) and
+// a single-use set-password link — an ordinary password-reset token, completed
+// by the existing reset page and POST /auth/reset-password.
+
+// Two-int advisory lock key: its own namespace, so it can never collide with
+// the single-bigint hashtext() locks the financial services take.
+const BOOTSTRAP_LOCK_CLASS = 918274;
+const BOOTSTRAP_LOCK_ID = 1;
+const BOOTSTRAP_TRANSACTION = { maxWait: 10_000, timeout: 30_000 };
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+const takeBootstrapLock = (tx) =>
+  tx.$executeRaw`SELECT pg_advisory_xact_lock(${BOOTSTRAP_LOCK_CLASS}::int, ${BOOTSTRAP_LOCK_ID}::int)`;
+
+const createBootstrapRefusal = (message) =>
+  new HttpError(409, "BOOTSTRAP_NOT_EMPTY", message);
+
+const issueSetPasswordToken = async (tx, user, now) => {
+  const rawToken = createAccountToken();
+  const created = await tx.passwordResetToken.create({
+    data: {
+      userId: user.id,
+      orgId: user.orgId,
+      email: user.email,
+      tokenHash: hashAccountToken(rawToken),
+      expiresAt: getPasswordResetExpiresAt(),
+      createdAt: now,
+    },
+  });
+  return { rawToken, token: created };
+};
+
+const bootstrapFirstAdministrator = async ({ orgName, name, email }) => {
+  const cleanOrgName = String(orgName || "").trim();
+  const cleanName = String(name || "").trim();
+  const normalizedEmail = String(email || "").trim().toLowerCase();
+  if (!cleanOrgName || !cleanName || !EMAIL_PATTERN.test(normalizedEmail)) {
+    throw new HttpError(
+      400,
+      "VALIDATION_ERROR",
+      "An organisation name, an administrator name and a valid email are required",
+    );
+  }
+
+  // Hashed outside the transaction: bcrypt at 12 rounds is slow, and the
+  // advisory lock should be held only while the database is being read and
+  // written.
+  const passwordHash = await bcrypt.hash(randomBytes(32).toString("base64url"), 12);
+  const now = new Date();
+
+  const result = await prisma.$transaction(async (tx) => {
+    // Serialises concurrent runs: the second waits here, then sees the first
+    // one's organisation and refuses, instead of both seeing an empty database.
+    await takeBootstrapLock(tx);
+
+    const [organisations, users] = await Promise.all([
+      tx.organisation.count(),
+      tx.user.count(),
+    ]);
+    if (organisations > 0 || users > 0) {
+      throw createBootstrapRefusal(
+        "The database already holds organisations or users; the first administrator can only be created in an empty database",
+      );
+    }
+
+    const { org, user } = await provisionOrganisation(tx, {
+      orgName: cleanOrgName,
+      name: cleanName,
+      email: normalizedEmail,
+      passwordHash,
+    });
+    const { rawToken, token } = await issueSetPasswordToken(tx, user, now);
+
+    await recordAuthAuditEvent({
+      tx,
+      orgId: org.id,
+      userId: user.id,
+      entityType: "organisation",
+      entityId: org.id,
+      action: "organisation_bootstrapped",
+      email: normalizedEmail,
+      metadata: { tokenId: token.id, expiresAt: token.expiresAt },
+    });
+
+    return { org, user, rawToken, token };
+  }, BOOTSTRAP_TRANSACTION);
+
+  return {
+    organisation: { id: result.org.id, name: result.org.name },
+    user: sanitizeUser(result.user),
+    setPasswordUrl: buildWebAppUrl("/reset-password", result.rawToken),
+    expiresAt: result.token.expiresAt,
+  };
+};
+
+/**
+ * A fresh link when the first one expired unused. Only while the deployment
+ * is still exactly as bootstrap left it — one organisation, one administrator
+ * who has never signed in or set a password — so it can never be used to take
+ * over an account that is already in use.
+ */
+const reissueBootstrapLink = async ({ email }) => {
+  const normalizedEmail = String(email || "").trim().toLowerCase();
+  const now = new Date();
+
+  const result = await prisma.$transaction(async (tx) => {
+    await takeBootstrapLock(tx);
+
+    const [organisations, users] = await Promise.all([
+      tx.organisation.count(),
+      tx.user.count(),
+    ]);
+    const user = normalizedEmail
+      ? await tx.user.findUnique({ where: { email: normalizedEmail } })
+      : null;
+    const passwordsSet = user
+      ? await tx.passwordResetToken.count({
+          where: { userId: user.id, usedAt: { not: null } },
+        })
+      : 0;
+    if (
+      organisations !== 1 ||
+      users !== 1 ||
+      !user ||
+      !user.isCompanyAdmin ||
+      user.status !== "active" ||
+      user.lastLogin ||
+      passwordsSet > 0
+    ) {
+      throw createBootstrapRefusal(
+        "A new link is only issued to the bootstrapped administrator, before their first sign-in",
+      );
+    }
+
+    await tx.passwordResetToken.updateMany({
+      where: { userId: user.id, usedAt: null, revokedAt: null },
+      data: { revokedAt: now },
+    });
+    const { rawToken, token } = await issueSetPasswordToken(tx, user, now);
+
+    await recordAuthAuditEvent({
+      tx,
+      orgId: user.orgId,
+      userId: user.id,
+      entityType: "organisation",
+      entityId: user.orgId,
+      action: "organisation_bootstrap_link_reissued",
+      email: normalizedEmail,
+      metadata: { tokenId: token.id, expiresAt: token.expiresAt },
+    });
+
+    return { user, rawToken, token };
+  }, BOOTSTRAP_TRANSACTION);
+
+  return {
+    user: sanitizeUser(result.user),
+    setPasswordUrl: buildWebAppUrl("/reset-password", result.rawToken),
+    expiresAt: result.token.expiresAt,
+  };
+};
+
 module.exports = {
+  bootstrapFirstAdministrator,
+  provisionOrganisation,
+  reissueBootstrapLink,
   register,
   login,
   completeMfaLogin,

@@ -5790,7 +5790,7 @@ add(
     tag: "Auth",
     summary: "Register an organization user.",
     description:
-      "Creates a server-side refresh session, sets it as an httpOnly cookie, and returns a short-lived access token.",
+      "Creates a new organisation with the caller as its company administrator, creates a server-side refresh session, sets it as an httpOnly cookie, and returns a short-lived access token. Self-service registration can be closed (it is closed in production unless PUBLIC_REGISTRATION=true); GET /config/public reports which. When closed the request is refused with 403 REGISTRATION_CLOSED before any other check.",
     operationId: "register",
     security: false,
     requestBody: jsonBody(ref("AuthRegisterRequest"), "Registration payload."),
@@ -5799,6 +5799,9 @@ add(
     },
     status: 201,
   }),
+);
+paths["/auth/register"].post.responses[403] = errorResponse(
+  "REGISTRATION_CLOSED: self-service registration is closed on this deployment; organisations join by invitation.",
 );
 
 add(
@@ -5825,7 +5828,7 @@ add(
     tag: "Auth",
     summary: "Request a password reset email.",
     description:
-      "Always returns a neutral success payload. When the email belongs to an active user, a hashed one-time reset token is stored and a reset link is sent by the configured email provider.",
+      "Always returns a neutral success payload. When the email belongs to an active user, a hashed one-time reset token is stored and a reset link is sent by the configured email provider. A delivery failure is recorded in the auth audit trail (password_reset_delivery_failed) and still answers the same neutral payload, so the response never reveals whether an address is registered.",
     operationId: "requestPasswordReset",
     security: false,
     requestBody: jsonBody(
@@ -10989,6 +10992,29 @@ add(
     responseSchema: ref("NotificationRetryResponse"),
     status: 202,
     permissions: authenticatedOnly,
+  }),
+);
+
+add(
+  "/config/public",
+  "get",
+  operation({
+    tag: "Config",
+    summary: "Public client configuration.",
+    description:
+      "Unauthenticated. Tells the sign-in and sign-up screens whether self-service registration is open. It is open outside production and closed in production unless PUBLIC_REGISTRATION=true; when closed, organisations are created by the first-administrator bootstrap and people join by invitation.",
+    operationId: "getPublicConfig",
+    security: false,
+    responseSchema: objectSchema(
+      {
+        registration: {
+          type: "string",
+          enum: ["open", "closed"],
+          description: "Whether POST /auth/register accepts new organisations.",
+        },
+      },
+      ["registration"],
+    ),
   }),
 );
 
