@@ -222,6 +222,10 @@ export interface AuditEvent {
   toStatus: string | null
   reason: string | null
   comment: string | null
+  /** What the record calls itself — a reference a person would recognise. */
+  recordType?: string | null
+  recordId?: string | null
+  summary?: { ref?: string; receiptNumber?: string; subject?: string; title?: string; name?: string; date?: string } | null
 }
 
 export interface AuditPage {

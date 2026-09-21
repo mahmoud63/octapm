@@ -1,6 +1,6 @@
 import * as ImagePicker from 'expo-image-picker'
 import { useLocalSearchParams, useRouter } from 'expo-router'
-import { useEffect, useRef, useState } from 'react'
+import { useRef, useState } from 'react'
 import { Image, Platform, StyleSheet, View } from 'react-native'
 import { userMessage } from '@/api/errors'
 import { uploadAttachments } from '@/api/record-endpoints'
@@ -51,7 +51,6 @@ export default function CapturePhotoScreen() {
   const [failure, setFailure] = useState<string | null>(null)
   const [queued, setQueued] = useState(false)
   const cameraRef = useRef<InstanceType<NonNullable<typeof camera>['CameraView']> | null>(null)
-  const askedOnWeb = useRef(false)
 
   // What this photograph is going onto. Without a record it belongs to the
   // project itself, which the photo register is the home of.
@@ -61,23 +60,12 @@ export default function CapturePhotoScreen() {
 
   const pickOnWeb = async () => {
     const picked = await ImagePicker.launchImageLibraryAsync({ quality: 0.7 })
-    if (picked.canceled || !picked.assets[0]) {
-      router.back()
-      return
-    }
+    // Changing their mind leaves them here, with the button still in front of
+    // them; it does not throw them off the screen they deliberately opened.
+    if (picked.canceled || !picked.assets[0]) return
     const asset = picked.assets[0]
     setShot({ uri: asset.uri, name: asset.fileName ?? `photo-${newId()}.jpg`, type: asset.mimeType ?? 'image/jpeg' })
   }
-
-  // The web target has no viewfinder to open, so it goes straight to the
-  // picker and lands on the same review step.
-  useEffect(() => {
-    if (Platform.OS === 'web' && !shot && !askedOnWeb.current) {
-      askedOnWeb.current = true
-      void pickOnWeb()
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
 
   const save = async () => {
     if (!shot || !projectId || !recordId) return

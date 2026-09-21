@@ -92,10 +92,11 @@ describe('More is a directory, and administration is a capability', () => {
     const small = matrix(['progress', 'rfi'], ['read'])
     const groups = resolveMore(ctx('site_engineer', small))
     expect(groups.map((g) => g.title)).toEqual(['You', 'Project modules'])
-    // Team is in there whatever the matrix says, and correctly so: the server
-    // gates it on being on the project at all, not on a module, so a person
-    // with two permissions may still see who else is here.
-    expect(groups.find((g) => g.title === 'Project modules')!.entries.map((e) => e.id).sort()).toEqual(['rfi', 'site', 'team'])
+    // Team and Activity are in there whatever the matrix says, and correctly
+    // so: the server gates both on being on the project at all rather than on a
+    // module, so a person with two permissions may still see who else is here
+    // and what has been happening.
+    expect(groups.find((g) => g.title === 'Project modules')!.entries.map((e) => e.id).sort()).toEqual(['feed', 'rfi', 'site', 'team'])
   })
 
   it('always offers what belongs to the person, whatever the project allows', () => {

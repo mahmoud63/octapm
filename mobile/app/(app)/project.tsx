@@ -8,6 +8,7 @@ import { HealthDimensions, healthTone } from '@/components/HealthDimensions'
 import { ProjectSwitch } from '@/components/ProjectSwitch'
 import { Screen } from '@/components/Screen'
 import { Button, Card, EmptyState, ErrorState, KPI, SkeletonList, Text, spacing } from '@/design-system'
+import { usePermissions } from '@/permissions/usePermissions'
 import { useProjectStore } from '@/projects/store'
 import { day, money } from '@/utilities/format'
 import { useState } from 'react'
@@ -33,6 +34,7 @@ export default function ProjectScreen() {
   const router = useRouter()
   const projectId = useProjectStore((s) => s.currentProjectId)
   const projects = useProjects()
+  const permissions = usePermissions(projectId)
   const health = useHealth(projectId)
   const forecast = useForecast(projectId)
   const log = useDailyLog(projectId, today())
@@ -63,6 +65,43 @@ export default function ProjectScreen() {
   return (
     <Screen title="Project" subtitle={project?.name} contentStyle={styles.content} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} />} testID="screen-project">
       <ProjectSwitch project={project} />
+
+      {/*
+        Who this job is for and on what terms. The contract value is the one
+        figure here that is not everybody's, so it is asked for rather than
+        assumed: the server decides, and a role without cost stays on the same
+        screen with one fewer line rather than being sent somewhere else.
+      */}
+      <Card testID="project-facts">
+        <View style={styles.stack}>
+          <Text variant="label" label tone="muted">
+            {project?.contractNumber ?? 'Project'}
+          </Text>
+          <Text variant="heading">{project?.name}</Text>
+          {[
+            { id: 'client', label: 'Client', value: project?.clientName },
+            { id: 'contractor', label: 'Main contractor', value: project?.contractorName },
+            { id: 'consultant', label: 'Consultant', value: project?.consultantName },
+            { id: 'where', label: 'Where', value: project?.location },
+            { id: 'dates', label: 'Programme', value: project?.startDate && project?.endDate ? `${day(project.startDate)} → ${day(project.endDate)}` : null },
+            ...(permissions.allows('cost', 'read') ? [{ id: 'value', label: 'Contract value', value: money(project?.contractValue ?? null, currency) }] : []),
+          ]
+            .filter((fact) => !!fact.value)
+            .map((fact) => (
+              <View key={fact.id} style={styles.fact} testID={`project-fact-${fact.id}`}>
+                <Text tone="muted" style={styles.grow}>
+                  {fact.label}
+                </Text>
+                <Text>{String(fact.value)}</Text>
+              </View>
+            ))}
+          <View style={styles.links}>
+            <Button title="Team" variant="secondary" onPress={() => router.push('/team')} testID="project-team" />
+            <Button title="Activity" variant="secondary" onPress={() => router.push('/feed')} testID="project-feed" />
+            <Button title="Locations" variant="secondary" onPress={() => router.push('/locations')} testID="project-locations" />
+          </View>
+        </View>
+      </Card>
 
       <Card testID="project-health">
         <View style={styles.stack}>
@@ -158,6 +197,9 @@ export default function ProjectScreen() {
 }
 
 const styles = StyleSheet.create({
+  fact: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  grow: { flex: 1 },
+  links: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
   content: { gap: spacing.md },
   stack: { gap: spacing.sm },
   kpis: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },

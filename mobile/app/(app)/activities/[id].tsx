@@ -2,11 +2,15 @@ import { useLocalSearchParams, useRouter } from 'expo-router'
 import { useState } from 'react'
 import { StyleSheet, View } from 'react-native'
 import { userMessage } from '@/api/errors'
-import { useActivity, useProgressMethod, useProgressReview, useProgressSubmissions, useSubmitProgress } from '@/api/site-hooks'
+import { useActivity, useConstraints, useProgressMethod, useProgressReview, useProgressSubmissions, useSubmitProgress } from '@/api/site-hooks'
+import { useForms } from '@/api/quality-hooks'
+import { useRfis } from '@/api/record-hooks'
+import { useStockMovements } from '@/api/inventory-hooks'
 import type { ProgressInput } from '@/api/site-types'
 import { useAuthStore } from '@/auth/store'
 import { ActionBar, type RecordAction } from '@/components/ActionBar'
 import { Evidence } from '@/components/Evidence'
+import { RelatedRecords } from '@/components/RelatedRecords'
 import { ProgressSheet } from '@/components/ProgressSheet'
 import { PromptSheet } from '@/components/PromptSheet'
 import { RecordHeader } from '@/components/RecordHeader'
@@ -41,6 +45,10 @@ export default function ActivityScreen() {
   const me = useAuthStore((s) => s.user)
   const permissions = usePermissions(projectId)
   const activity = useActivity(projectId, id ?? null)
+  const relatedRfis = useRfis(projectId, { activityId: id })
+  const relatedForms = useForms(projectId, { activityId: id })
+  const constraints = useConstraints(projectId)
+  const issued = useStockMovements({ projectId: projectId ?? undefined, activityId: id, type: 'issue' }, !!projectId && !!id)
   const method = useProgressMethod(projectId, id ?? null)
   const submissions = useProgressSubmissions(projectId, id ?? null)
   const submit = useSubmitProgress(projectId ?? '', id ?? '')
@@ -202,6 +210,55 @@ export default function ActivityScreen() {
             )}
           </View>
         </Card>
+
+        {/*
+          What else belongs to this job. Only the registers that can genuinely
+          be asked about an activity are here: RFIs, inspections, the material
+          issued to it, and the constraints the lookahead holds against it.
+          Punch, NCRs and tasks are not — nothing ties them to an activity — and
+          neither is a location, because no activity in this schema has one.
+        */}
+        <RelatedRecords
+          groups={[
+            {
+              id: 'rfis',
+              title: 'RFIs',
+              isPending: relatedRfis.isPending,
+              emptyText: 'Nothing has been asked about this activity.',
+              records: (relatedRfis.data?.rows ?? []).map((r) => ({ id: r.id, reference: r.ref, title: r.subject, status: r.status, onPress: () => router.push(`/rfi/${r.id}`) })),
+            },
+            {
+              id: 'inspections',
+              title: 'Inspections',
+              isPending: relatedForms.isPending,
+              emptyText: 'None have been raised against it.',
+              records: (relatedForms.data?.items ?? []).map((f) => ({ id: f.id, reference: f.ref, title: f.title, status: f.status, onPress: () => router.push(`/quality/inspections/${f.id}`) })),
+            },
+            {
+              id: 'constraints',
+              title: 'Constraints',
+              isPending: constraints.isPending,
+              emptyText: 'Nothing is holding this activity up.',
+              records: (constraints.data?.items ?? [])
+                .filter((c) => c.activityId === a.id && c.constraintStatus === 'open')
+                .map((c) => ({ id: c.id, reference: 'Constraint', title: c.constraint ?? c.name, onPress: () => router.push('/activities/lookahead') })),
+            },
+            {
+              id: 'materials',
+              title: 'Material issued',
+              isPending: issued.isPending,
+              emptyText: 'No material has been issued to it.',
+              records: (issued.data ?? []).map((m) => ({
+                id: m.id,
+                reference: m.item?.sku ?? 'Material',
+                title: m.item?.name ?? 'Issued',
+                meta: `${Math.abs(Number(m.quantity))} ${m.item?.unit ?? ''}`.trim(),
+                onPress: () => router.push('/inventory/movements'),
+              })),
+            },
+          ]}
+          testID="activity-related"
+        />
 
         <Card>
           <Evidence projectId={projectId} recordType="activity" recordId={a.id} recordRef={a.activityCode ?? a.wbsCode} canAdd={permissions.allows('schedule', 'update') || permissions.allows('progress', 'submit')} />

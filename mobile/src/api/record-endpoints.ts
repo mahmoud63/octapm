@@ -48,6 +48,7 @@ const uploadForm = <T>(path: string, form: FormData, options: { path?: PathParam
 export interface RfiFilters {
   status?: string
   locationId?: string
+  activityId?: string
   ballInCourt?: boolean
   overdue?: boolean
   search?: string
@@ -60,6 +61,7 @@ export const listRfis = (projectId: string, filters: RfiFilters = {}, signal?: A
     path: { projectId },
     query: {
       locationId: filters.locationId,
+      activityId: filters.activityId,
       limit: filters.limit ?? 50,
       status: filters.status,
       ballInCourtUserId: filters.ballInCourt ? 'me' : undefined,
@@ -133,6 +135,17 @@ export const postComment = (projectId: string, body: { recordType: string; recor
 
 export const listHistory = (projectId: string, entityType: string, entityId: string, signal?: AbortSignal) =>
   get<AuditPage>('/projects/{projectId}/audit', { path: { projectId }, query: { entityType, entityId, source: 'all', limit: 100, order: 'asc' }, signal })
+
+/**
+ * Everything that happened on this project, newest first.
+ *
+ * One call: the server already keeps a project-wide audit across every record,
+ * so nothing is stitched together here. Paging is deliberately not offered —
+ * the mixed-source cursor is ignored by the server, so a "load more" button
+ * would quietly return the same page again.
+ */
+export const listTimeline = (projectId: string, signal?: AbortSignal) =>
+  get<AuditPage>('/projects/{projectId}/audit', { path: { projectId }, query: { source: 'all', limit: 50, order: 'desc' }, signal })
 
 // ── Attachments ──
 

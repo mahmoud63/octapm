@@ -24,6 +24,7 @@ import {
   listComments,
   listHistory,
   listLocations,
+  listTimeline,
   listRfis,
   listSheetPins,
   listSheets,
@@ -166,6 +167,11 @@ export function useCustomFields(projectId: string | null, recordType: string, re
 }
 
 // ── Pickers ──
+
+/** The project's own timeline, from the canonical audit. */
+export function useTimeline(projectId: string | null) {
+  return useQuery({ queryKey: scoped(projectId ?? 'none', 'timeline'), queryFn: ({ signal }) => listTimeline(projectId!, signal), enabled: !!projectId, select: (page) => page.events })
+}
 
 export function useTeam(projectId: string | null) {
   return useQuery({ queryKey: scoped(projectId ?? 'none', 'team'), queryFn: ({ signal }) => listTeam(projectId!, signal), enabled: !!projectId, select: (d) => d.items.filter((m) => m.status === 'active'), staleTime: 10 * 60_000 })

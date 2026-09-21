@@ -183,6 +183,8 @@ const MODULE_DIRECTORY: MoreEntry[] = [
   // The team endpoint carries no module permission of its own: anyone on the
   // project may see who else is on it, so nothing is claimed here either.
   { id: 'team', title: 'Team', route: '/team' },
+  // The project's own audit, which every role may read.
+  { id: 'feed', title: 'Activity', route: '/feed' },
   { id: 'inventory', title: 'Inventory', route: '/inventory', module: 'inventory', action: 'read' },
   { id: 'procurement', title: 'Procurement', route: '/procurement', module: 'procurement', action: 'read' },
   { id: 'commercial', title: 'Commercial', route: '/commercial', module: 'change_event', action: 'read' },
