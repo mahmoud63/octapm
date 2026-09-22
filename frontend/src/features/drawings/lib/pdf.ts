@@ -64,6 +64,12 @@ const fetchSheetBytes = async (fileUrl: string): Promise<ArrayBuffer> => {
     const response = await apiClient.get<ArrayBuffer>(toApiPath(fileUrl), {
       responseType: 'arraybuffer',
       timeout: 5 * 60 * 1000,
+      // In the cloud the API answers with a 302 to a presigned S3 URL. A
+      // credentialed request that follows a cross-origin redirect arrives with
+      // Origin: null, which no S3 CORS rule can accept alongside credentials,
+      // so every sheet would fail. The bearer header still authenticates the
+      // API hop; the S3 hop needs no cookie, its signature is in the URL.
+      withCredentials: false,
     })
     return response.data
   } catch (error) {
