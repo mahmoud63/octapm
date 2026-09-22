@@ -38,6 +38,11 @@ const getStripeSecretKeyMode = (value) => {
   return match?.[1] ?? null;
 };
 
+// Staging runs NODE_ENV=production so it exercises the real production path,
+// but it must never take real money: APP_ENV=staging is the one place a
+// production process may carry an sk_test_ key.
+const allowsTestSecretKey = (env = process.env) => normalize(env.APP_ENV) === 'staging';
+
 const collectStripeConfigProblems = (env = process.env, options = {}) => {
   const {
     requireSecretKey = true,
@@ -55,8 +60,12 @@ const collectStripeConfigProblems = (env = process.env, options = {}) => {
       problems.push('STRIPE_SECRET_KEY must be set to a non-placeholder Stripe secret key');
     } else if (!STRIPE_SECRET_KEY_PATTERN.test(secretKey)) {
       problems.push('STRIPE_SECRET_KEY must look like a Stripe secret key');
-    } else if (requireLiveSecretKey && getStripeSecretKeyMode(secretKey) !== 'live') {
-      problems.push('STRIPE_SECRET_KEY must use an sk_live_ key for production payments');
+    } else if (
+      requireLiveSecretKey
+      && getStripeSecretKeyMode(secretKey) !== 'live'
+      && !allowsTestSecretKey(env)
+    ) {
+      problems.push('STRIPE_SECRET_KEY must use an sk_live_ key for production payments (sk_test_ is accepted only with APP_ENV=staging)');
     }
   }
 
@@ -128,6 +137,7 @@ function getStripe() {
 
 module.exports = {
   STRIPE_PRICE_ENV_KEYS,
+  allowsTestSecretKey,
   collectStripeConfigProblems,
   getStripe,
   getStripeSecretKeyMode,

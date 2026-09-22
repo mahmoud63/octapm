@@ -15309,6 +15309,63 @@ add(
   }),
 );
 
+// Service health (WS1, running on AWS). These live at /api/health, outside
+// /api/v1, so each operation names its own server. No authentication; bodies
+// carry the release identity and never a host or an error message.
+const serviceHealthServers = [{ url: "/api", description: "Current host, outside the versioned API" }];
+const serviceReleaseSchema = objectSchema({
+  version: { type: "string", description: "backend/package.json version." },
+  sha: { type: "string", nullable: true, description: "RELEASE_GIT_SHA the image was built from." },
+  builtAt: { type: "string", nullable: true, description: "RELEASE_BUILD_TIME, ISO 8601." },
+  environment: { type: "string", description: "APP_ENV (production | staging), else NODE_ENV." },
+});
+const serviceLivenessSchema = objectSchema({
+  status: { type: "string", enum: ["ok"] },
+  timestamp: dateString,
+  release: serviceReleaseSchema,
+});
+const serviceLiveness = (path, operationId, summary) =>
+  add(path, "get", {
+    ...operation({
+      tag: "Health",
+      summary,
+      description:
+        "Liveness: the process is up and serving HTTP. Touches nothing else, so a database outage never marks every task unhealthy at once. The load balancer checks GET /api/health. Every response from the API carries the X-OctaPM-Release header (the commit, or the package version locally).",
+      operationId,
+      security: false,
+      responseSchema: serviceLivenessSchema,
+    }),
+    servers: serviceHealthServers,
+  });
+
+serviceLiveness("/health", "getServiceHealth", "Liveness probe (the load balancer's health check).");
+serviceLiveness("/health/live", "getServiceLiveness", "Liveness probe (alias of /api/health).");
+add("/health/ready", "get", {
+  ...operation({
+    tag: "Health",
+    summary: "Readiness probe: the database answers and the process is not draining.",
+    description:
+      "Runs SELECT 1 against the database, abandoned after HEALTH_DB_TIMEOUT_MS (default 2000). Answers 503 SERVICE_NOT_READY when the database does not answer in time or the process is shutting down; the details hold only booleans, latencies and the release. For deploy gates and alarms, not for the load balancer.",
+    operationId: "getServiceReadiness",
+    security: false,
+    responses: {
+      200: jsonResponse(
+        "Ready.",
+        objectSchema({
+          status: { type: "string", enum: ["ready"] },
+          timestamp: dateString,
+          checks: objectSchema({
+            database: objectSchema({ ok: { type: "boolean" }, latencyMs: { type: "integer" } }),
+          }),
+          release: serviceReleaseSchema,
+        }),
+      ),
+      503: errorResponse("SERVICE_NOT_READY: the database did not answer in time, or the process is draining."),
+    },
+  }),
+  servers: serviceHealthServers,
+});
+
 const openApiSpec = {
   openapi: "3.0.3",
   info: {
