@@ -58,7 +58,15 @@ const FORBIDDEN_PRODUCTION_ENV = [
   ['FILE_STORAGE_S3_ENDPOINT', 'it is for local S3 stand-ins only'],
   ['SES_ENDPOINT', 'it is for local SES stand-ins only'],
   ['ALLOW_DATA_SCRIPT', 'data scripts must never be armed on a running service'],
+  // Inbound email is out of scope at launch (plan §1 item 6 and §3). The
+  // INBOUND_EMAIL_SECRET rule in validateProductionSecrets stays for the day
+  // this entry is removed.
+  ['INBOUND_EMAIL_DOMAIN', 'inbound email is not part of the launch'],
 ];
+
+// Parameters Prisma reads from DATABASE_URL where a second copy would
+// silently replace the one validateProductionDatabase checked.
+const DATABASE_URL_SINGLE_PARAMS = ['sslmode', 'sslcert', 'sslaccept', 'connection_limit', 'pool_timeout'];
 
 // Shared-state backends: each is per-process `memory` outside production and
 // must be shared across tasks in production.
@@ -321,8 +329,12 @@ const validateProductionEmailAndLinks = (env, problems) => {
 /**
  * The database connection: verified TLS and a bounded pool.
  *
- * Prisma understands sslmode=require with sslcert=<CA file> as "verify the
- * chain and the hostname" (sslaccept defaults to strict). It does not
+ * Prisma verifies the server only when all three are spelled out:
+ * sslmode=require, sslcert=<CA file> and sslaccept=strict. Its default for
+ * sslaccept is accept_invalid_certs — encrypted, but any certificate is taken,
+ * so a man in the middle is not detected — and the packaging workstream
+ * reproduced exactly that against a decoy CA. So strict is required, not
+ * merely allowed. It does not
  * understand libpq's verify-full / verify-ca: it silently treats them as
  * prefer, which falls back to plaintext. So the one spelling that works is
  * required and the look-alikes are refused by name. The CA path must be
@@ -341,6 +353,29 @@ const validateProductionDatabase = (env, problems) => {
 
     if (parsed) {
       const params = parsed.searchParams;
+
+      // Prisma honours the LAST copy of a repeated parameter while
+      // searchParams.get reads the first, so `sslmode=require&...&sslmode=disable`
+      // would pass the checks below and then connect in plaintext. A secret
+      // that says the same thing twice is a mis-edit either way: refuse it.
+      for (const key of DATABASE_URL_SINGLE_PARAMS) {
+        if (params.getAll(key).length > 1) {
+          problems.push(`DATABASE_URL sets ${key} more than once; keep exactly one`);
+        }
+      }
+
+      // A pool setting written into the URL outranks the environment (db.js),
+      // so it is held to the same rule as the environment's: an empty or
+      // non-numeric value makes every query fail after the task has booted,
+      // and Prisma takes connection_limit=0 as no bound at all.
+      for (const key of ['connection_limit', 'pool_timeout']) {
+        for (const value of params.getAll(key)) {
+          if (!/^\d+$/.test(value.trim()) || Number(value) < 1) {
+            problems.push(`DATABASE_URL ${key} must be a positive whole number (got "${value}")`);
+          }
+        }
+      }
+
       const sslmode = String(params.get('sslmode') ?? '').trim().toLowerCase();
       if (sslmode !== 'require') {
         problems.push(
@@ -360,8 +395,10 @@ const validateProductionDatabase = (env, problems) => {
       }
 
       const sslaccept = String(params.get('sslaccept') ?? '').trim().toLowerCase();
-      if (sslaccept && sslaccept !== 'strict') {
-        problems.push(`DATABASE_URL sslaccept=${sslaccept} turns certificate checking off; remove it`);
+      if (!sslaccept) {
+        problems.push('DATABASE_URL must set sslaccept=strict: without it Prisma accepts any server certificate');
+      } else if (sslaccept !== 'strict') {
+        problems.push(`DATABASE_URL sslaccept=${sslaccept} turns certificate checking off; use sslaccept=strict`);
       }
 
       if (!params.has('connection_limit') && !isSet(env.DATABASE_CONNECTION_LIMIT)) {

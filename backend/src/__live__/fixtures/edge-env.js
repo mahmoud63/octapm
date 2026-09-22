@@ -32,7 +32,7 @@ const productionEnv = (overrides = {}) => ({
   NODE_ENV: "production",
   APP_ENV: "staging",
   RELEASE_GIT_SHA: randomSha(),
-  DATABASE_URL: `postgresql://octapm_app:pw@db.example.invalid:5432/octapm?sslmode=require&sslcert=${encodeURIComponent(__filename)}`,
+  DATABASE_URL: `postgresql://octapm_app:pw@db.example.invalid:5432/octapm?sslmode=require&sslcert=${encodeURIComponent(__filename)}&sslaccept=strict`,
   DATABASE_CONNECTION_LIMIT: "3",
   JWT_SECRET: "live-access-secret-with-at-least-32-characters",
   JWT_REFRESH_SECRET: "live-refresh-secret-with-at-least-32-characters",
