@@ -3,6 +3,13 @@ import { createRequire } from 'node:module'
 const backendRequire = createRequire(
   new URL('../../backend/package.json', import.meta.url)
 )
+// These fixtures create people with a published password, so they only go
+// into a database on this machine unless ALLOW_DATA_SCRIPT names another one
+// exactly as <host>/<database>. Checked before a client exists.
+backendRequire('./src/utils/data-script-guard.js').exitUnlessDataScriptAllowed(
+  'uat:seed'
+)
+
 const { PrismaClient } = backendRequire('@prisma/client')
 const bcrypt = backendRequire('bcryptjs')
 

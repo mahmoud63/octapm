@@ -45,9 +45,14 @@
  */
 const fs = require("fs");
 const path = require("path");
-const { prisma } = require("../../src/config/db");
 
 const APPLY = process.argv.includes("--apply");
+// A dry run only reads, so it may classify any database. --apply changes
+// statuses and deletes companies, so it makes the data-script guard's check
+// first: a database on this machine, or one ALLOW_DATA_SCRIPT names exactly.
+if (APPLY) require("../../src/utils/data-script-guard").exitUnlessDataScriptAllowed("demo:archive-residue --apply");
+
+const { prisma } = require("../../src/config/db");
 const DELETE = process.argv.includes("--delete"); // remove residue companies nothing references; without it they are set inactive
 const CERTIFIED_PROJECT = "0ce999f2-b175-432b-8551-20182b4fc990"; // OCTA PHASE21 GREENFIELD 20260910093852 — certified
 const RIVERSIDE = "95c188f3-bd97-4d28-b466-17aa354ee24a"; // the original Riverside Tower fixture — archived in Phase 22B, its history kept

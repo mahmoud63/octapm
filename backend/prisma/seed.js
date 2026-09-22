@@ -9,8 +9,13 @@
  *   npm run db:seed --workspace=backend
  *
  * The demo password is deliberately weak and the accounts are obviously fake,
- * because this is for a local database. Never run it against anything shared.
+ * because this is for a local database. Never run it against anything shared:
+ * the image ships this file, so the data-script guard refuses a database that
+ * is not on this machine (or any under NODE_ENV=production) before a client
+ * exists, unless ALLOW_DATA_SCRIPT names it exactly as <host>/<database>.
  */
+require("../src/utils/data-script-guard").exitUnlessDataScriptAllowed("db:seed");
+
 const { PrismaClient } = require("@prisma/client");
 const bcrypt = require("bcryptjs");
 
@@ -582,6 +587,9 @@ const MATERIAL_PLAN = [
 async function purgeTestResidue(orgId) {
   const orders = await prisma.procurementOrder.findMany({
     where: {
+      // Only this organisation's orders. The ref is typed by users, so a
+      // customer's "PO-E2E-…" order in another tenant must never match.
+      project: { orgId },
       OR: [
         // Goods-receipt tests raise their own order per run.
         { ref: { startsWith: "PO-E2E-" } },
