@@ -79,6 +79,7 @@ class RealtimeClient {
   private readonly listeners = new Set<EventListener>()
   private readonly statusListeners = new Set<StatusListener>()
   private readonly joinedProjects = new Set<string>()
+  private teardownTimer: ReturnType<typeof setTimeout> | null = null
   status: RealtimeStatus = 'disconnected'
 
   connect(token: string) {
@@ -86,6 +87,11 @@ class RealtimeClient {
       this.disconnect()
       return
     }
+
+    // A connect straight after a disconnect is the same component mounting
+    // again (React StrictMode does this on every page load in development):
+    // keep the socket rather than close one that is still opening.
+    this.cancelTeardown()
 
     if (this.socket) {
       if (this.token === token) return
@@ -151,7 +157,36 @@ class RealtimeClient {
     this.socket = socket
   }
 
+  /**
+   * Closes the socket — one task later, not at once.
+   *
+   * Closing a WebSocket that is still opening makes the browser log
+   * "WebSocket is closed before the connection is established", and with the
+   * transport now WebSocket-only that is exactly what an unmount followed by
+   * an immediate remount did. Long-polling hid it: an aborted request is
+   * silent. Deferring the close by one task lets a remount's connect() keep
+   * the socket; a real sign-out still closes it straight after.
+   */
   disconnect() {
+    if (!this.socket) {
+      this.token = ''
+      this.setStatus('disconnected')
+      return
+    }
+    if (this.teardownTimer !== null) return
+    this.teardownTimer = setTimeout(() => {
+      this.teardownTimer = null
+      this.closeNow()
+    }, 0)
+  }
+
+  private cancelTeardown() {
+    if (this.teardownTimer === null) return
+    clearTimeout(this.teardownTimer)
+    this.teardownTimer = null
+  }
+
+  private closeNow() {
     if (this.socket) {
       this.socket.removeAllListeners()
       this.socket.io.removeAllListeners()
