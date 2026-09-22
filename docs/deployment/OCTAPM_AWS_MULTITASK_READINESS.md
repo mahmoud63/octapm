@@ -72,7 +72,9 @@ postgresql://octapm_app:<password>@<rds-endpoint>:5432/octapm?sslmode=require&ss
 
 Every behaviour above has a test that was run green, then run with the fix removed and seen to fail, then restored. The six workstreams were each reviewed by an independent agent that tried to break them, and the merged result by four more reviewers whose findings were each checked by a separate verifier; all confirmed findings are fixed.
 
-The container image has never been built on this machine (there is no Docker here). The Container Image workflow is its proof: it builds the image, migrates an empty Postgres 16 over TLS from inside it (twice), shows Prisma refuses a decoy CA, boots the API and the worker with a production-shaped environment, stops them within 15 seconds, and checks that a missing secret stops the boot.
+There is no Docker on this machine, so the image is proven by the **Container Image** workflow on GitHub (`.github/workflows/container-image.yml`), green on commit `e9ba3cc` (run 35682218268). All 19 steps of its backend job pass: the image runs as the non-root `node` user and holds no `.env`, tests or other workspaces; the RDS root it picks (`Amazon RDS us-east-2 Root CA RSA2048 G1`, valid until 2061) is in the real bundle; all 117 migrations apply to an empty Postgres 16 over TLS from inside the image, and a second run finds nothing pending; Prisma refuses a decoy CA (`P1011`); the API boots with a production-shaped environment and answers with `X-OctaPM-Release` equal to the commit; the worker takes scheduler leadership, claims a job and stays up; SIGTERM stops the API in 1 s and the worker in 0 s, both with exit code 0; and a boot with a secret missing is refused with the variable named. Its web job builds the app for `api.octapm.com` and finds no local origin in the bundle; its mobile job checks the release profiles through `expo config`.
+
+Its first run failed, usefully: `COPY --chmod` had created `/app` without the execute bit, so the `node` user could not reach its own code, and `npm ci` in `mobile/` needed the `--legacy-peer-deps` every local install already used (now `mobile/.npmrc`). Both fixed in `e9ba3cc`.
 
 ## Deferred, with reasons
 
@@ -81,7 +83,7 @@ The container image has never been built on this machine (there is no Docker her
 - **The commitments execute route leaks its temporary upload.** Pre-existing, harmless on Fargate (ephemeral disk) but should be closed.
 - **Web links (`<img src>`, `<a href>`) to `/api/v1/...` cannot send the bearer token**, so those downloads already fail before S3 is involved; a JSON download mode (`?redirect=false`) is the follow-up.
 - **Inbound email** needs a receiving path (SES receipt rules or a vendor webhook); production refuses `INBOUND_EMAIL_DOMAIN` until then.
-- **The RDS CA root** is chosen by `RDS_CA_CN` (default `Amazon RDS us-east-2 Root CA RSA2048 G1`); the RDS instance must use `rds-ca-rsa2048-g1`, and the first staging deploy should run `prisma migrate status` as a one-off task to confirm the chain.
+- **The RDS CA root** is chosen by `RDS_CA_CN` (default `Amazon RDS us-east-2 Root CA RSA2048 G1`, confirmed present in the real bundle by CI). The RDS instance must be created with `--ca-certificate-identifier rds-ca-rsa2048-g1`, and the first staging deploy should run `prisma migrate status` as a one-off task to confirm the chain end to end.
 - **One web spec (`30-console-quality`, package rows)** relies on packages created by earlier specs, so it passes only as part of the full run.
 
 ## What is still needed before AWS work can start
