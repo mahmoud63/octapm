@@ -2,7 +2,7 @@ process.env.INTEGRATION_SECRET_KEY = "test-secret-key";
 process.env.QBO_CLIENT_ID = "qbo-id";
 process.env.QBO_CLIENT_SECRET = "qbo-secret";
 
-const store = { connections: [], mappings: [], syncs: [] };
+const store = { connections: [], mappings: [], syncs: [], jobs: [] };
 let seq = 0;
 const nextId = (prefix) => `${prefix}-${(seq += 1)}`;
 const matches = (row, where = {}) =>
@@ -73,6 +73,7 @@ const mockPrisma = {
   accountingConnection: table(store.connections, "conn"),
   accountingCodeMapping: table(store.mappings, "map"),
   accountingSync: table(store.syncs, "sync", (row) => ({ ...row, project: { id: "p1", name: "Tower" } })),
+  backgroundJob: table(store.jobs, "job"),
   subPayApp: { findFirst: jest.fn(async () => payApp), findMany: jest.fn(async () => [payApp]) },
   commitmentSovLine: { findMany: jest.fn(async () => [{ id: "sov-1", costCodeId: "pcc-1", budgetLineId: null, description: "Piles" }, { id: "sov-2", costCodeId: null, budgetLineId: "bl-1", description: "Caps" }]) },
   budgetLine: { findMany: jest.fn(async () => [{ id: "bl-1", costCodeId: "pcc-2" }]) },
@@ -80,7 +81,7 @@ const mockPrisma = {
 };
 const mockAudit = { ENTITY_TYPES: { ACCOUNTING_CONNECTION: "accounting_connection" }, ACTIONS: { CREATED: "created", UPDATED: "updated" }, recordEvent: jest.fn(async () => ({})) };
 const mockNotifications = { NOTIFICATION_CATEGORIES: { COMMERCIAL: "commercial" }, createNotifications: jest.fn(async () => ({ created: 1 })) };
-const mockJobs = { JOB_TYPES: { ACCOUNTING_SYNC: "accounting.sync", ACCOUNTING_POLL: "accounting.poll" }, enqueueJob: jest.fn(async () => ({ id: "job-1" })) };
+const mockJobs = { JOB_TYPES: { ACCOUNTING_SYNC: "accounting.sync", ACCOUNTING_POLL: "accounting.poll" }, JOB_STATUSES: { QUEUED: "queued", RUNNING: "running" }, enqueueJob: jest.fn(async () => ({ id: "job-1" })) };
 const mockPayApps = { recordPayment: jest.fn(async () => ({ status: "paid" })) };
 
 jest.mock("../../config/db", () => ({ prisma: mockPrisma }));
@@ -196,6 +197,14 @@ describe("accounting connectors", () => {
     const outage = jest.fn(async () => jsonResponse({ Fault: { Error: [{ Message: "Service Unavailable" }] } }, 503));
     await expect(service.runSyncJob({ payload: { syncId: sync.id }, fetchImpl: outage })).rejects.toMatchObject({ retryable: true });
     expect(store.syncs[0]).toMatchObject({ status: "pending", attempts: 1 });
+  });
+
+  it("queues one poll per connected organisation and skips one that already has a poll waiting or running", async () => {
+    store.connections.push({ id: "c1", orgId: "org-1", status: "connected" }, { id: "c2", orgId: "org-2", status: "connected" }, { id: "c3", orgId: "org-3", status: "connected" });
+    store.jobs.push({ id: "j1", orgId: "org-2", type: "accounting.poll", status: "running" }, { id: "j2", orgId: "org-3", type: "accounting.poll", status: "succeeded" });
+    const result = await service.queuePollJobs();
+    expect(result).toEqual({ queued: 2 });
+    expect(mockJobs.enqueueJob.mock.calls.map((call) => call[0].orgId)).toEqual(["org-1", "org-3"]);
   });
 
   it("exports approved costs by cost code as XLSX and CSV", async () => {

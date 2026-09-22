@@ -778,62 +778,92 @@ const myAssignments = async ({ orgId, userId, projectId = null, projectIds = nul
     });
 };
 
+/**
+ * Marks every overdue, unescalated assignment of one step as escalated in a
+ * single statement and returns the rows this call changed. Concurrent callers
+ * lock the same rows in the same order; the second re-checks "escalatedAt" IS
+ * NULL once the first commits, and so gets none of them.
+ */
+const claimOverdueStep = ({ instanceId, stepKey, now }) =>
+  prisma.$queryRaw`
+    UPDATE "WorkflowStepAssignment"
+       SET "escalatedAt" = ${now}
+     WHERE "instanceId" = ${instanceId}
+       AND "stepKey" = ${stepKey}
+       AND "status" = ${ASSIGNMENT_STATUS.PENDING}
+       AND "escalatedAt" IS NULL
+       AND "dueAt" < ${now}
+    RETURNING "id", "userId", "stepName", "dueAt"`;
+
 /** SLA scan: overdue pending steps notify the assignee again and the step's escalation roles. */
 const runEscalationScan = async ({ now = new Date(), limit = 500 } = {}) => {
-  if (!prisma.workflowStepAssignment?.findMany) return { scanned: 0, escalated: 0 };
+  if (!prisma.workflowStepAssignment?.findMany || !prisma.$queryRaw) return { scanned: 0, escalated: 0 };
   const rows = await prisma.workflowStepAssignment.findMany({
     where: { status: ASSIGNMENT_STATUS.PENDING, escalatedAt: null, dueAt: { lt: now }, instance: { status: INSTANCE_STATUS.RUNNING } },
     include: { instance: { include: instanceInclude } },
     take: limit,
   });
   let escalated = 0;
-  const seenInstances = new Set();
+  const seenSteps = new Set();
+  // Reminders go out in the order the scan read the rows.
+  const order = new Map(rows.map((item, index) => [item.id, index]));
   for (const row of rows) {
     const instance = row.instance;
     if (!instance || instance.currentStepKey !== row.stepKey) continue;
+    // One step is escalated as a whole: its overdue assignees are several rows,
+    // and a scan that claimed them one at a time left the rest for a second
+    // scan (another scheduler during a deploy) that started a moment later and
+    // read only those, and it raised the level and warned the escalation roles
+    // again. The first scan to reach the step now claims every overdue row of
+    // it in one statement; any other scan, whatever it read and whenever it
+    // started, gets nothing back and leaves the step alone.
+    const stepId = JSON.stringify([instance.id, row.stepKey]);
+    if (seenSteps.has(stepId)) continue;
+    seenSteps.add(stepId);
+    const claimed = await claimOverdueStep({ instanceId: instance.id, stepKey: row.stepKey, now });
+    if (!claimed.length) continue;
+    claimed.sort((left, right) => (order.get(left.id) ?? rows.length) - (order.get(right.id) ?? rows.length) || String(left.id).localeCompare(String(right.id)));
     const step = stepByKey(Array.isArray(instance.stepsJson) ? instance.stepsJson : [], row.stepKey);
     const tool = tools.getTool(instance.tool);
-    await prisma.workflowStepAssignment.update({ where: { id: row.id }, data: { escalatedAt: now } });
-    if (!seenInstances.has(instance.id)) {
-      seenInstances.add(instance.id);
-      await prisma.workflowInstance.update({ where: { id: instance.id }, data: { escalationLevel: { increment: 1 } } });
-      await recordEvent({ tx: prisma, instance, action: "workflow.escalated", metadata: { stepKey: row.stepKey, stepName: row.stepName, dueAt: toIso(row.dueAt) } });
-      const escalateTo = await resolveAssignees({ orgId: instance.orgId, projectId: instance.projectId, assignees: (step?.escalateRoles?.length ? step.escalateRoles : ["pm"]).map((role) => ({ type: "role", role })) });
-      const overdueUserIds = rows.filter((item) => item.instanceId === instance.id && item.stepKey === row.stepKey).map((item) => item.userId);
-      if (escalateTo.filter((id) => !overdueUserIds.includes(id)).length) {
-        await notify({
-          orgId: instance.orgId,
-          projectId: instance.projectId,
-          recipientUserIds: escalateTo.filter((id) => !overdueUserIds.includes(id)),
-          type: "workflow",
-          category: notificationService.NOTIFICATION_CATEGORIES.OVERDUE,
-          event: "workflow.escalated",
-          title: `Overdue step: ${row.stepName} on ${tool?.label || instance.tool} ${instance.recordRef || ""}`.trim(),
-          message: `${instance.recordTitle || "The record"} has waited past its ${step?.days ?? ""} day SLA at "${row.stepName}".`,
-          priority: "high",
-          actionUrl: tool ? tool.path({ projectId: instance.projectId, recordId: instance.recordId }) : null,
-          entityType: instance.tool,
-          entityId: instance.recordId,
-          dedupeKeyBase: `workflow.escalated:${instance.id}:${row.stepKey}`,
-        });
-      }
+    await prisma.workflowInstance.update({ where: { id: instance.id }, data: { escalationLevel: { increment: 1 } } });
+    await recordEvent({ tx: prisma, instance, action: "workflow.escalated", metadata: { stepKey: row.stepKey, stepName: row.stepName, dueAt: toIso(row.dueAt) } });
+    const escalateTo = await resolveAssignees({ orgId: instance.orgId, projectId: instance.projectId, assignees: (step?.escalateRoles?.length ? step.escalateRoles : ["pm"]).map((role) => ({ type: "role", role })) });
+    const overdueUserIds = claimed.map((item) => item.userId);
+    if (escalateTo.filter((id) => !overdueUserIds.includes(id)).length) {
+      await notify({
+        orgId: instance.orgId,
+        projectId: instance.projectId,
+        recipientUserIds: escalateTo.filter((id) => !overdueUserIds.includes(id)),
+        type: "workflow",
+        category: notificationService.NOTIFICATION_CATEGORIES.OVERDUE,
+        event: "workflow.escalated",
+        title: `Overdue step: ${row.stepName} on ${tool?.label || instance.tool} ${instance.recordRef || ""}`.trim(),
+        message: `${instance.recordTitle || "The record"} has waited past its ${step?.days ?? ""} day SLA at "${row.stepName}".`,
+        priority: "high",
+        actionUrl: tool ? tool.path({ projectId: instance.projectId, recordId: instance.recordId }) : null,
+        entityType: instance.tool,
+        entityId: instance.recordId,
+        dedupeKeyBase: `workflow.escalated:${instance.id}:${row.stepKey}`,
+      });
     }
-    await notify({
-      orgId: instance.orgId,
-      projectId: instance.projectId,
-      recipientUserIds: [row.userId],
-      type: "workflow",
-      category: notificationService.NOTIFICATION_CATEGORIES.OVERDUE,
-      event: "workflow.step_overdue",
-      title: `Your response is overdue: ${row.stepName}`,
-      message: `${tool?.label || instance.tool} ${instance.recordRef || ""} — ${instance.recordTitle || ""}`.trim(),
-      priority: "high",
-      actionUrl: tool ? tool.path({ projectId: instance.projectId, recordId: instance.recordId }) : null,
-      entityType: instance.tool,
-      entityId: instance.recordId,
-      dedupeKeyBase: `workflow.step_overdue:${row.id}`,
-    });
-    escalated += 1;
+    for (const assignment of claimed) {
+      await notify({
+        orgId: instance.orgId,
+        projectId: instance.projectId,
+        recipientUserIds: [assignment.userId],
+        type: "workflow",
+        category: notificationService.NOTIFICATION_CATEGORIES.OVERDUE,
+        event: "workflow.step_overdue",
+        title: `Your response is overdue: ${assignment.stepName}`,
+        message: `${tool?.label || instance.tool} ${instance.recordRef || ""} — ${instance.recordTitle || ""}`.trim(),
+        priority: "high",
+        actionUrl: tool ? tool.path({ projectId: instance.projectId, recordId: instance.recordId }) : null,
+        entityType: instance.tool,
+        entityId: instance.recordId,
+        dedupeKeyBase: `workflow.step_overdue:${assignment.id}`,
+      });
+      escalated += 1;
+    }
   }
   return { scanned: rows.length, escalated };
 };

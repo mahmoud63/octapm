@@ -322,8 +322,17 @@ async function cancelSubscription(orgId) {
   const endDate = updated.currentPeriodEnd
     ? updated.currentPeriodEnd.toISOString().slice(0, 10)
     : 'the end of the billing period';
-  const tpl = templates.subscriptionCanceled(org?.name ?? 'there', planName, endDate);
-  await sendEmail({ to: await orgEmail(orgId), ...tpl });
+  // Stripe and the subscription row have already changed. A failed
+  // confirmation email must not turn that into an error the client would
+  // retry against a subscription that is no longer active, so it is logged.
+  try {
+    const tpl = templates.subscriptionCanceled(org?.name ?? 'there', planName, endDate);
+    await sendEmail({ to: await orgEmail(orgId), ...tpl });
+  } catch (error) {
+    console.error(
+      `[billing] cancellation confirmation email failed for org ${orgId}: ${error?.code || 'EMAIL_DELIVERY_FAILED'} ${error?.message || ''}`.trim(),
+    );
+  }
 
   return getCurrentSubscription(orgId);
 }

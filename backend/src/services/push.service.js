@@ -253,6 +253,26 @@ const sendToUser = async ({ userId, payload, urgency = "normal" }) => {
 
 const nextRetryAt = (attemptNumber, now) => new Date(now.getTime() + Math.min(2 ** attemptNumber, 60) * 60 * 1000);
 
+// How long a claimed push stays out of other processes' reach; far longer than
+// one send. A process that dies mid-send leaves the row to be retried after it.
+const DELIVERY_LEASE_MS = 5 * 60 * 1000;
+
+/**
+ * Claims a pending attempt for this process: still pending and unchanged since
+ * it was read (updatedAt moves on every write), so of two racing processes
+ * exactly one gets count 1. The row keeps its `pending` status; only
+ * nextAttemptAt moves past the lease. The outcome update below restores it.
+ * The lease starts from the clock at the claim, not the batch's `now`, which
+ * may be minutes old by the time a long email batch hands over to push.
+ */
+const claimDeliveryAttempt = async (attempt, now = new Date()) => {
+  const claimed = await prisma.notificationDeliveryAttempt.updateMany({
+    where: { id: attempt.id, status: "pending", updatedAt: attempt.updatedAt },
+    data: { nextAttemptAt: new Date(Math.max(now.getTime(), Date.now()) + DELIVERY_LEASE_MS) },
+  });
+  return claimed.count === 1;
+};
+
 /** Mirrors the email loop: pending `push` attempts are sent, retried or skipped. */
 const processPendingPushDeliveries = async ({ limit = 50, now = new Date(), userId = null, notificationId = null } = {}) => {
   if (!prisma.notificationDeliveryAttempt?.findMany) return { sent: 0, failed: 0, skipped: 0, processed: 0 };
@@ -272,6 +292,9 @@ const processPendingPushDeliveries = async ({ limit = 50, now = new Date(), user
   });
   const result = { sent: 0, failed: 0, skipped: 0, processed: 0 };
   for (const attempt of attempts) {
+    // The debounced flush and the scheduler on every task read the same
+    // pending rows; only the process whose claim lands sends the push.
+    if (!(await claimDeliveryAttempt(attempt, now))) continue;
     result.processed += 1;
     const notification = attempt.notification;
     const outcome = notification
@@ -281,6 +304,7 @@ const processPendingPushDeliveries = async ({ limit = 50, now = new Date(), user
       await prisma.notificationDeliveryAttempt.update({
         where: { id: attempt.id },
         data: {
+          nextAttemptAt: attempt.nextAttemptAt ?? null,
           status: "skipped",
           errorCode: notification ? "PUSH_NOT_CONFIGURED" : "PUSH_NOTIFICATION_MISSING",
           errorMessage: notification ? "Web Push has no VAPID keys and the person has no native device" : "Notification no longer exists",
@@ -292,7 +316,7 @@ const processPendingPushDeliveries = async ({ limit = 50, now = new Date(), user
     if (outcome.sent > 0 || (outcome.failed === 0 && outcome.removed === 0)) {
       await prisma.notificationDeliveryAttempt.update({
         where: { id: attempt.id },
-        data: { status: outcome.sent > 0 ? "sent" : "skipped", provider: outcome.provider, sentAt: outcome.sent > 0 ? now : null, errorCode: outcome.sent > 0 ? null : "PUSH_NO_DEVICES", errorMessage: outcome.sent > 0 ? null : "No registered device" },
+        data: { nextAttemptAt: attempt.nextAttemptAt ?? null, status: outcome.sent > 0 ? "sent" : "skipped", provider: outcome.provider, sentAt: outcome.sent > 0 ? now : null, errorCode: outcome.sent > 0 ? null : "PUSH_NO_DEVICES", errorMessage: outcome.sent > 0 ? null : "No registered device" },
       });
       if (outcome.sent > 0) result.sent += 1;
       else result.skipped += 1;
@@ -302,7 +326,7 @@ const processPendingPushDeliveries = async ({ limit = 50, now = new Date(), user
     const canRetry = nextAttemptNumber <= MAX_PUSH_ATTEMPTS && outcome.removed < outcome.failed;
     await prisma.notificationDeliveryAttempt.update({
       where: { id: attempt.id },
-      data: { status: "failed", provider: outcome.provider, errorCode: "PUSH_DELIVERY_FAILED", errorMessage: outcome.errors?.[0]?.message ? String(outcome.errors[0].message).slice(0, 500) : "Push delivery failed" },
+      data: { nextAttemptAt: attempt.nextAttemptAt ?? null, status: "failed", provider: outcome.provider, errorCode: "PUSH_DELIVERY_FAILED", errorMessage: outcome.errors?.[0]?.message ? String(outcome.errors[0].message).slice(0, 500) : "Push delivery failed" },
     });
     if (canRetry) {
       await prisma.notificationDeliveryAttempt.create({

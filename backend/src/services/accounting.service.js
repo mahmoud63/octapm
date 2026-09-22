@@ -405,6 +405,11 @@ const queuePollJobs = async () => {
   const rows = await prisma.accountingConnection.findMany({ where: { status: "connected" }, select: { orgId: true }, distinct: ["orgId"] });
   let queued = 0;
   for (const row of rows) {
+    // One poll per organisation at a time: a second scheduler (another task,
+    // or an overlap during a deploy) must not spend the provider's quota twice
+    // or run two payment-status updates side by side.
+    const pending = await prisma.backgroundJob.findFirst({ where: { orgId: row.orgId, type: jobService.JOB_TYPES.ACCOUNTING_POLL, status: { in: [jobService.JOB_STATUSES.QUEUED, jobService.JOB_STATUSES.RUNNING] } }, select: { id: true } });
+    if (pending) continue;
     await jobService.enqueueJob({ orgId: row.orgId, type: jobService.JOB_TYPES.ACCOUNTING_POLL, payload: { orgId: row.orgId }, maxAttempts: 2 }).then(() => (queued += 1)).catch(() => null);
   }
   return { queued };

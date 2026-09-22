@@ -10,6 +10,7 @@ const table = () => ({
 const state = { instance: null, assignments: [] };
 const mockPrisma = {
   $transaction: jest.fn((fn) => fn(mockPrisma)),
+  $queryRaw: jest.fn(async () => []),
   workflowTemplate: table(),
   workflowInstance: table(),
   workflowStepAssignment: table(),
@@ -190,15 +191,59 @@ describe("workflow engine", () => {
   it("escalates steps past their SLA to the assignee and the escalation roles", async () => {
     const now = new Date("2026-09-12T08:00:00Z");
     mockPrisma.workflowStepAssignment.findMany.mockResolvedValueOnce([
-      { id: "as-9", instanceId: "inst-9", stepKey: "pm_approval", stepName: "PM approval", userId: "pm-1", status: "pending", dueAt: new Date("2026-09-10T00:00:00Z"), escalatedAt: null, instance: { id: "inst-9", orgId: "org-1", projectId: "p1", tool: "change_order", recordId: "co-1", recordRef: "CO-007", recordTitle: "Extra piling", status: "running", currentStepKey: "pm_approval", templateId: "tpl-default", stepsJson: pmTemplate().stepsJson, assignments: [], template: { id: "tpl-default", name: "PM approval" } } },
+      { id: "as-9", instanceId: "inst-9", stepKey: "pm_approval", stepName: "PM approval", userId: "pm-1", status: "pending", dueAt: new Date("2026-09-10T00:00:00Z"), escalatedAt: null, instance: { id: "inst-9", orgId: "org-1", projectId: "p1", tool: "change_order", recordId: "co-1", recordRef: "CO-007", recordTitle: "Extra piling", status: "running", currentStepKey: "pm_approval", escalationLevel: 2, templateId: "tpl-default", stepsJson: pmTemplate().stepsJson, assignments: [], template: { id: "tpl-default", name: "PM approval" } } },
     ]);
     mockPrisma.projectAssignment.findMany.mockResolvedValue([{ userId: "pm-1", role: "pm" }, { userId: "pm-2", role: "pm" }]);
+    mockPrisma.$queryRaw.mockResolvedValueOnce([{ id: "as-9", userId: "pm-1", stepName: "PM approval", dueAt: new Date("2026-09-10T00:00:00Z") }]);
     const result = await engine.runEscalationScan({ now });
     expect(result).toEqual({ scanned: 1, escalated: 1 });
-    expect(mockPrisma.workflowStepAssignment.update).toHaveBeenCalledWith({ where: { id: "as-9" }, data: { escalatedAt: now } });
+    // One claim for the whole step, scoped to this instance and step and to
+    // rows still pending, unescalated and overdue.
+    expect(mockPrisma.$queryRaw).toHaveBeenCalledTimes(1);
+    const [sql, ...values] = mockPrisma.$queryRaw.mock.calls[0];
+    expect(sql.join("?")).toMatch(/UPDATE "WorkflowStepAssignment"[\s\S]*"escalatedAt" IS NULL[\s\S]*RETURNING/);
+    expect(values).toEqual([now, "inst-9", "pm_approval", "pending", now]);
     expect(mockPrisma.workflowInstance.update).toHaveBeenCalledWith({ where: { id: "inst-9" }, data: { escalationLevel: { increment: 1 } } });
     expect(mockNotifications.createNotifications).toHaveBeenCalledWith(expect.objectContaining({ event: "workflow.escalated", recipientUserIds: ["pm-2"] }));
     expect(mockNotifications.createNotifications).toHaveBeenCalledWith(expect.objectContaining({ event: "workflow.step_overdue", recipientUserIds: ["pm-1"] }));
+  });
+
+  it("leaves a step another scan already claimed, whatever this scan read", async () => {
+    const now = new Date("2026-09-12T08:00:00Z");
+    const instance = { id: "inst-9", orgId: "org-1", projectId: "p1", tool: "change_order", recordId: "co-1", recordRef: "CO-007", recordTitle: "Extra piling", status: "running", currentStepKey: "pm_approval", escalationLevel: 0, templateId: "tpl-default", stepsJson: pmTemplate().stepsJson, assignments: [], template: { id: "tpl-default", name: "PM approval" } };
+    const overdue = (id, userId) => ({ id, instanceId: "inst-9", stepKey: "pm_approval", stepName: "PM approval", userId, status: "pending", dueAt: new Date("2026-09-10T00:00:00Z"), escalatedAt: null, instance });
+    mockPrisma.workflowStepAssignment.findMany.mockResolvedValueOnce([overdue("as-1", "pm-1"), overdue("as-2", "qs-1")]);
+    // The other scan's claim took every overdue row of the step first.
+    mockPrisma.$queryRaw.mockResolvedValueOnce([]);
+    const result = await engine.runEscalationScan({ now });
+    expect(result).toEqual({ scanned: 2, escalated: 0 });
+    expect(mockPrisma.$queryRaw).toHaveBeenCalledTimes(1); // once per step, not per row
+    expect(mockPrisma.workflowInstance.update).not.toHaveBeenCalled();
+    expect(mockPrisma.approvalWorkflowEvent.create).not.toHaveBeenCalled();
+    expect(mockNotifications.createNotifications).not.toHaveBeenCalled();
+  });
+
+  it("reminds every assignee the step claim took, and escalates the instance once", async () => {
+    const now = new Date("2026-09-12T08:00:00Z");
+    const instance = { id: "inst-9", orgId: "org-1", projectId: "p1", tool: "change_order", recordId: "co-1", recordRef: "CO-007", recordTitle: "Extra piling", status: "running", currentStepKey: "pm_approval", escalationLevel: 0, templateId: "tpl-default", stepsJson: pmTemplate().stepsJson, assignments: [], template: { id: "tpl-default", name: "PM approval" } };
+    mockPrisma.workflowStepAssignment.findMany.mockResolvedValueOnce([
+      { id: "as-2", instanceId: "inst-9", stepKey: "pm_approval", stepName: "PM approval", userId: "qs-1", status: "pending", dueAt: new Date("2026-09-10T00:00:00Z"), escalatedAt: null, instance },
+    ]);
+    // The claim also took an overdue row this scan never read (beyond its page).
+    mockPrisma.$queryRaw.mockResolvedValueOnce([
+      { id: "as-1", userId: "pm-1", stepName: "PM approval", dueAt: new Date("2026-09-10T00:00:00Z") },
+      { id: "as-2", userId: "qs-1", stepName: "PM approval", dueAt: new Date("2026-09-10T00:00:00Z") },
+    ]);
+    mockPrisma.projectAssignment.findMany.mockResolvedValue([{ userId: "pm-1", role: "pm" }, { userId: "pm-2", role: "pm" }]);
+    const result = await engine.runEscalationScan({ now });
+    expect(result).toEqual({ scanned: 1, escalated: 2 });
+    expect(mockPrisma.workflowInstance.update).toHaveBeenCalledTimes(1);
+    const sent = mockNotifications.createNotifications.mock.calls.map(([payload]) => [payload.event, payload.recipientUserIds]);
+    expect(sent).toEqual([
+      ["workflow.escalated", ["pm-2"]],
+      ["workflow.step_overdue", ["qs-1"]],
+      ["workflow.step_overdue", ["pm-1"]],
+    ]);
   });
 
   it("seeds one default per tool plus the worked example", async () => {

@@ -17,7 +17,7 @@ const mockPrisma = {
   activity: { findFirst: jest.fn(async () => ({ id: "act-1" })), findMany: jest.fn(async () => [{ id: "act-1", name: "Slab pour", p6ActivityId: "A100", wbsCode: null }]) },
   location: { findFirst: jest.fn(async () => ({ id: "loc-1" })), findMany: jest.fn(async () => []) },
   equipment: { findFirst: jest.fn(async () => ({ name: "Tower crane" })), findMany: jest.fn(async () => []) },
-  dailyLog: { findUnique: jest.fn(), findMany: jest.fn(async () => []), create: jest.fn(async ({ data }) => ({ id: "log-1", ...data })), update: jest.fn(async ({ data }) => ({ id: "log-1", date: new Date("2026-09-05T00:00:00Z"), ...data })) },
+  dailyLog: { findUnique: jest.fn(), findMany: jest.fn(async () => []), create: jest.fn(async ({ data }) => ({ id: "log-1", ...data })), update: jest.fn(async ({ data }) => ({ id: "log-1", date: new Date("2026-09-05T00:00:00Z"), ...data })), updateMany: jest.fn(async () => ({ count: 1 })) },
   dailyLogManpower: table(),
   dailyLogEquipment: table(),
   dailyLogDelivery: table(),
@@ -175,12 +175,20 @@ describe("daily log", () => {
     const enqueue = jest.fn(async () => ({}));
     const result = await service.queueScheduledDistributions({ now, enqueue });
     expect(enqueue).toHaveBeenCalledWith({ orgId: "org-1", projectId: "project-1", payload: { projectId: "project-1", date: "2026-09-05", scheduled: true } });
-    expect(mockPrisma.dailyLog.update).toHaveBeenCalledWith(expect.objectContaining({ data: { autoDistributeQueuedFor: now } }));
+    expect(mockPrisma.dailyLog.updateMany).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({ autoDistributeQueuedFor: null }), data: { autoDistributeQueuedFor: now } }));
     expect(result.queued).toEqual([{ projectId: "project-1", date: "2026-09-05" }]);
 
     mockPrisma.project.findMany.mockResolvedValueOnce([{ id: "project-1", orgId: "org-1", timezone: "Asia/Riyadh", dailyLogSettingsJson: { autoDistributeAt: "18:00" } }]);
     const again = await service.queueScheduledDistributions({ now: new Date("2026-09-05T13:00:00Z"), enqueue });
     expect(again.queued).toEqual([]);
+
+    // Another process claimed the same log first: nothing is queued twice.
+    enqueue.mockClear();
+    mockPrisma.project.findMany.mockResolvedValueOnce([{ id: "project-1", orgId: "org-1", timezone: "Asia/Riyadh", dailyLogSettingsJson: { autoDistributeAt: "18:00" } }]);
+    mockPrisma.dailyLog.updateMany.mockResolvedValueOnce({ count: 0 });
+    const raced = await service.queueScheduledDistributions({ now, enqueue });
+    expect(raced.queued).toEqual([]);
+    expect(enqueue).not.toHaveBeenCalled();
   });
 
   it("logs a confirmed weather delay on the contractual register", async () => {

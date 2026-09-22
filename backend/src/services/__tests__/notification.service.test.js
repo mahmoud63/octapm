@@ -32,6 +32,7 @@ const mockPrisma = {
     create: jest.fn(),
     findMany: jest.fn(),
     update: jest.fn(),
+    updateMany: jest.fn(),
   },
 };
 
@@ -76,6 +77,7 @@ describe("notification service", () => {
       updatedAt: now,
     }));
     mockPrisma.notificationDeliveryAttempt.create.mockResolvedValue({});
+    mockPrisma.notificationDeliveryAttempt.updateMany.mockResolvedValue({ count: 1 });
     mockSendEmail.mockResolvedValue({ delivered: true, provider: "webhook" });
   });
 

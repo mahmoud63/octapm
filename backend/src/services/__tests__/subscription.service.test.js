@@ -84,3 +84,24 @@ describe("Phase 21D — integrity (release challenge, fourth pass)", () => {
     expect(mockStripe.subscriptions.update).not.toHaveBeenCalled();
   });
 });
+
+describe("cancelling when the confirmation email cannot be sent", () => {
+  beforeEach(() => { jest.clearAllMocks(); calls.length = 0; row = { ...baseRow, status: "active", cancelAtPeriodEnd: false }; });
+
+  it("keeps the committed cancellation and logs the failed email instead of throwing", async () => {
+    const { sendEmail, templates } = require("../email.service");
+    templates.subscriptionCanceled = () => ({ subject: "Cancelled", text: "Your plan ends later." });
+    sendEmail.mockRejectedValueOnce(Object.assign(new Error("provider down"), { code: "EMAIL_DELIVERY_FAILED" }));
+    const log = jest.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      await expect(service.cancelSubscription("org-1")).resolves.toBeTruthy();
+      expect(mockStripe.subscriptions.update).toHaveBeenCalledWith("sub_stripe_1", { cancel_at_period_end: true });
+      expect(row).toMatchObject({ status: "canceled", cancelAtPeriodEnd: true });
+      expect(sendEmail).toHaveBeenCalledTimes(1);
+      expect(log).toHaveBeenCalledWith(expect.stringContaining("cancellation confirmation email failed for org org-1: EMAIL_DELIVERY_FAILED"));
+    } finally {
+      log.mockRestore();
+      delete templates.subscriptionCanceled;
+    }
+  });
+});
