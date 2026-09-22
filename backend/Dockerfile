@@ -89,6 +89,12 @@ ENV NODE_ENV=production \
 
 # The one RDS root picked above. Owned by root and world-readable: the node
 # user has to read it and must not be able to replace it.
+#
+# The directories exist first: COPY --chmod gives the parents it has to create
+# the file's own mode, so /app and /app/certs came out 0644 — listable but not
+# enterable — and the node user could reach nothing under /app, not even its
+# own code. The container image workflow caught it on its first run.
+RUN mkdir -p /app/certs && chmod 0755 /app /app/certs
 COPY --from=rds-ca --chown=root:root --chmod=0644 /tmp/rds-ca.pem /app/certs/rds-ca.pem
 
 WORKDIR /app
