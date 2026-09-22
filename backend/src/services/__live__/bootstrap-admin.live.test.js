@@ -13,7 +13,10 @@
  *   - a single-use set-password link that really works, once;
  *   - a second run, or a run on any non-empty database, refuses (409);
  *   - concurrent runs create exactly one organisation;
- *   - --reissue replaces an unused link, and only before the first sign-in.
+ *   - --reissue replaces an unused link, and only before the first sign-in;
+ *   - the link lives BOOTSTRAP_LINK_MINUTES (30 by default), never the
+ *     password-reset lifetime, and a value outside 5..60 is refused before
+ *     anything is written.
  */
 const crypto = require("crypto");
 const path = require("path");
@@ -57,9 +60,15 @@ const createDatabase = async (name, template = null) => {
 
 const copyOfTemplate = (label) => createDatabase(`${TEMPLATE}_${label}`, TEMPLATE);
 
-const bootstrap = async (database, { email, args = ["--print-link"], viaNpm = false } = {}) => {
+const bootstrap = async (database, { email, args = ["--print-link"], viaNpm = false, env: extra = {} } = {}) => {
   const env = {
     DATABASE_URL: urlFor(database),
+    // Pinned so a value in backend/.env or the shell cannot change what these
+    // cases see; the reset lifetime is set far from 30 so the two cannot be
+    // confused.
+    BOOTSTRAP_LINK_MINUTES: "",
+    PASSWORD_RESET_TOKEN_MINUTES: "240",
+    ...extra,
     BOOTSTRAP_ORG_NAME: "Bootstrap Builders",
     BOOTSTRAP_ADMIN_NAME: "First Admin",
     BOOTSTRAP_ADMIN_EMAIL: email,
@@ -191,6 +200,48 @@ liveDescribe("first-administrator bootstrap", () => {
     const password = `Str0ng-${crypto.randomBytes(6).toString("hex")}`;
     expect((await api.post("/api/v1/auth/reset-password", { token: oldToken, password })).status).toBe(400);
     expect((await api.post("/api/v1/auth/reset-password", { token: newToken, password })).status).toBe(200);
+  }, 180_000);
+
+  it("gives the link its own short lifetime and refuses one outside 5..60", async () => {
+    const database = await copyOfTemplate("lifetime");
+    const email = `lifetime-admin-${stamp}@octapm-live.test`;
+    const db = openClient(database);
+    const lifetimeOf = (token) => token.expiresAt.getTime() - token.createdAt.getTime();
+
+    // Out of range, or not a whole number: refused, and nothing is created.
+    for (const value of ["61", "4", "0", "abc", "15.5", "1440"]) {
+      const refused = await bootstrap(database, { email, env: { BOOTSTRAP_LINK_MINUTES: value } });
+      expect({ value, code: refused.code }).toEqual({ value, code: 1 });
+      expect(refused.output).toContain("BOOTSTRAP_LINK_MINUTES_INVALID");
+      expect(refused.output).toContain("5 to 60");
+      expect(tokenFrom(refused.output)).toBeNull();
+    }
+    expect(await db.organisation.count()).toBe(0);
+    expect(await db.user.count()).toBe(0);
+
+    // Default: 30 minutes, not PASSWORD_RESET_TOKEN_MINUTES (240 here).
+    const first = await bootstrap(database, { email });
+    expect(first.code).toBe(0);
+    const firstToken = await db.passwordResetToken.findFirst({ where: { email } });
+    expect(lifetimeOf(firstToken)).toBe(30 * 60 * 1000);
+    // The printed output says when the link dies, and warns about the logs.
+    expect(first.output).toContain(`valid 30 minutes, expires ${firstToken.expiresAt.toISOString()}`);
+    expect(first.output).toMatch(/WARNING: .*CloudWatch.*restricted readers and short retention.*email/);
+
+    // A reissue honours BOOTSTRAP_LINK_MINUTES.
+    const reissued = await bootstrap(database, { email, args: ["--reissue", "--print-link"], env: { BOOTSTRAP_LINK_MINUTES: "10" } });
+    expect(reissued.code).toBe(0);
+    const reissuedToken = await db.passwordResetToken.findFirst({ where: { email, revokedAt: null, usedAt: null } });
+    expect(reissuedToken.id).not.toBe(firstToken.id);
+    expect(lifetimeOf(reissuedToken)).toBe(10 * 60 * 1000);
+    expect(reissued.output).toContain(`valid 10 minutes, expires ${reissuedToken.expiresAt.toISOString()}`);
+
+    // And a reissue with a refused value leaves the current link alone.
+    const refusedReissue = await bootstrap(database, { email, args: ["--reissue", "--print-link"], env: { BOOTSTRAP_LINK_MINUTES: "90" } });
+    expect(refusedReissue.code).toBe(1);
+    expect(refusedReissue.output).toContain("BOOTSTRAP_LINK_MINUTES_INVALID");
+    const current = await db.passwordResetToken.findMany({ where: { email, revokedAt: null, usedAt: null } });
+    expect(current.map((token) => token.id)).toEqual([reissuedToken.id]);
   }, 180_000);
 
   it("creates exactly one organisation when two runs start together", async () => {

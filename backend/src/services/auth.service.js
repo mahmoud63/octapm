@@ -1113,7 +1113,36 @@ const takeBootstrapLock = (tx) =>
 const createBootstrapRefusal = (message) =>
   new HttpError(409, "BOOTSTRAP_NOT_EMPTY", message);
 
-const issueSetPasswordToken = async (tx, user, now) => {
+// The bootstrap link has its own lifetime, deliberately not
+// PASSWORD_RESET_TOKEN_MINUTES: with --print-link it is written to stdout,
+// which on ECS is a CloudWatch log group, and anyone who can read that group
+// can set the password of the only company administrator until the link is
+// used or expires. So it is short by default and can never be long. A value
+// outside 5..60 (or not a whole number) is refused rather than clamped, so an
+// operator who asked for a day is told no instead of silently getting an hour.
+const BOOTSTRAP_LINK_DEFAULT_MINUTES = 30;
+const BOOTSTRAP_LINK_MIN_MINUTES = 5;
+const BOOTSTRAP_LINK_MAX_MINUTES = 60;
+
+const resolveBootstrapLinkMinutes = (value = process.env.BOOTSTRAP_LINK_MINUTES) => {
+  const raw = value === undefined || value === null ? "" : String(value).trim();
+  if (raw === "") return BOOTSTRAP_LINK_DEFAULT_MINUTES;
+  const minutes = /^\d+$/.test(raw) ? Number(raw) : Number.NaN;
+  if (
+    !Number.isSafeInteger(minutes) ||
+    minutes < BOOTSTRAP_LINK_MIN_MINUTES ||
+    minutes > BOOTSTRAP_LINK_MAX_MINUTES
+  ) {
+    throw new HttpError(
+      400,
+      "BOOTSTRAP_LINK_MINUTES_INVALID",
+      `BOOTSTRAP_LINK_MINUTES must be a whole number of minutes from ${BOOTSTRAP_LINK_MIN_MINUTES} to ${BOOTSTRAP_LINK_MAX_MINUTES} (default ${BOOTSTRAP_LINK_DEFAULT_MINUTES}); got "${raw}"`,
+    );
+  }
+  return minutes;
+};
+
+const issueSetPasswordToken = async (tx, user, now, lifetimeMinutes) => {
   const rawToken = createAccountToken();
   const created = await tx.passwordResetToken.create({
     data: {
@@ -1121,7 +1150,7 @@ const issueSetPasswordToken = async (tx, user, now) => {
       orgId: user.orgId,
       email: user.email,
       tokenHash: hashAccountToken(rawToken),
-      expiresAt: getPasswordResetExpiresAt(),
+      expiresAt: new Date(now.getTime() + lifetimeMinutes * 60 * 1000),
       createdAt: now,
     },
   });
@@ -1139,6 +1168,9 @@ const bootstrapFirstAdministrator = async ({ orgName, name, email }) => {
       "An organisation name, an administrator name and a valid email are required",
     );
   }
+  // Checked before anything is written: a refused lifetime must not leave an
+  // organisation behind with no link.
+  const linkMinutes = resolveBootstrapLinkMinutes();
 
   // Hashed outside the transaction: bcrypt at 12 rounds is slow, and the
   // advisory lock should be held only while the database is being read and
@@ -1167,7 +1199,7 @@ const bootstrapFirstAdministrator = async ({ orgName, name, email }) => {
       email: normalizedEmail,
       passwordHash,
     });
-    const { rawToken, token } = await issueSetPasswordToken(tx, user, now);
+    const { rawToken, token } = await issueSetPasswordToken(tx, user, now, linkMinutes);
 
     await recordAuthAuditEvent({
       tx,
@@ -1188,6 +1220,7 @@ const bootstrapFirstAdministrator = async ({ orgName, name, email }) => {
     user: sanitizeUser(result.user),
     setPasswordUrl: buildWebAppUrl("/reset-password", result.rawToken),
     expiresAt: result.token.expiresAt,
+    linkMinutes,
   };
 };
 
@@ -1199,6 +1232,7 @@ const bootstrapFirstAdministrator = async ({ orgName, name, email }) => {
  */
 const reissueBootstrapLink = async ({ email }) => {
   const normalizedEmail = String(email || "").trim().toLowerCase();
+  const linkMinutes = resolveBootstrapLinkMinutes();
   const now = new Date();
 
   const result = await prisma.$transaction(async (tx) => {
@@ -1234,7 +1268,7 @@ const reissueBootstrapLink = async ({ email }) => {
       where: { userId: user.id, usedAt: null, revokedAt: null },
       data: { revokedAt: now },
     });
-    const { rawToken, token } = await issueSetPasswordToken(tx, user, now);
+    const { rawToken, token } = await issueSetPasswordToken(tx, user, now, linkMinutes);
 
     await recordAuthAuditEvent({
       tx,
@@ -1254,6 +1288,7 @@ const reissueBootstrapLink = async ({ email }) => {
     user: sanitizeUser(result.user),
     setPasswordUrl: buildWebAppUrl("/reset-password", result.rawToken),
     expiresAt: result.token.expiresAt,
+    linkMinutes,
   };
 };
 
@@ -1261,6 +1296,7 @@ module.exports = {
   bootstrapFirstAdministrator,
   provisionOrganisation,
   reissueBootstrapLink,
+  resolveBootstrapLinkMinutes,
   register,
   login,
   completeMfaLogin,
