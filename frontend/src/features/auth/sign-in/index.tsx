@@ -1,4 +1,5 @@
 import { Link, useSearch } from '@tanstack/react-router'
+import { useRegistrationOpen } from '@/services/config/api'
 import {
   Card,
   CardContent,
@@ -12,6 +13,7 @@ import { UserAuthForm } from './components/user-auth-form'
 
 export function SignIn() {
   const { redirect } = useSearch({ from: '/(auth)/sign-in' })
+  const registrationOpen = useRegistrationOpen()
 
   return (
     <AuthLayout>
@@ -29,18 +31,28 @@ export function SignIn() {
           <UserAuthForm redirectTo={redirect} />
         </CardContent>
         <CardFooter className='flex-col gap-4'>
-          {/* Creating an account is a real path, not a footnote. */}
+          {/* Creating an account is a real path, not a footnote — where this
+              deployment offers it. Where it does not, say how people join. */}
           <div className='w-full border-t pt-4 text-center text-sm'>
             <span className='text-muted-foreground'>
               New to OctaPM?{' '}
             </span>
-            <Link
-              to='/sign-up'
-              data-testid='uat-sign-in-to-sign-up'
-              className='font-medium text-interactive underline-offset-4 hover:underline'
-            >
-              Create an account
-            </Link>
+            {registrationOpen ? (
+              <Link
+                to='/sign-up'
+                data-testid='uat-sign-in-to-sign-up'
+                className='font-medium text-interactive underline-offset-4 hover:underline'
+              >
+                Create an account
+              </Link>
+            ) : (
+              <span
+                className='text-muted-foreground'
+                data-testid='sign-in-invitation-only'
+              >
+                Ask your company administrator for an invitation.
+              </span>
+            )}
           </div>
 
           <p className='text-center text-xs text-muted-foreground'>

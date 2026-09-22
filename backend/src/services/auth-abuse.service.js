@@ -7,8 +7,9 @@ const IP_LOCK_AFTER = 30;
 const LOCKOUT_MS = 15 * 60_000;
 const MAX_BACKOFF_MS = 60_000;
 
-const emailAttempts = new Map();
-const ipAttempts = new Map();
+const EMAIL_LIMITS = { backoffAfter: EMAIL_BACKOFF_AFTER, lockAfter: EMAIL_LOCK_AFTER };
+const IP_LIMITS = { backoffAfter: IP_BACKOFF_AFTER, lockAfter: IP_LOCK_AFTER };
+
 let nowOverride = null;
 
 function nowMs() {
@@ -17,16 +18,6 @@ function nowMs() {
 
 function normalizeEmail(email) {
   return String(email || '').trim().toLowerCase();
-}
-
-function getEntry(store, key) {
-  const entry = store.get(key) || {
-    failures: 0,
-    backoffUntil: null,
-    lockedUntil: null,
-  };
-  store.set(key, entry);
-  return entry;
 }
 
 function retryAfterSeconds(until, now) {
@@ -64,48 +55,189 @@ function computeBackoffMs(failures, backoffAfter) {
   return Math.min(MAX_BACKOFF_MS, 2 ** (failures - backoffAfter) * 5_000);
 }
 
-function recordFailure(store, key, { backoffAfter, lockAfter }) {
-  if (!key) return;
-
-  const currentNow = nowMs();
-  const entry = getEntry(store, key);
-  entry.failures += 1;
-
-  if (entry.failures >= lockAfter) {
-    entry.lockedUntil = currentNow + LOCKOUT_MS;
-    entry.backoffUntil = null;
-    return;
+/**
+ * What a failure count means, given when it happened: the lock or backoff to
+ * apply, or null when the count is still below both thresholds. Both stores
+ * call this one function, so the thresholds and the curve cannot drift apart.
+ */
+function penaltyFor(failures, { backoffAfter, lockAfter }, currentNow) {
+  if (failures >= lockAfter) {
+    return { lockedUntil: currentNow + LOCKOUT_MS, backoffUntil: null };
   }
-
-  const backoffMs = computeBackoffMs(entry.failures, backoffAfter);
-  if (backoffMs) {
-    entry.backoffUntil = currentNow + backoffMs;
-  }
+  const backoffMs = computeBackoffMs(failures, backoffAfter);
+  return backoffMs ? { backoffUntil: currentNow + backoffMs } : null;
 }
 
-function assertLoginAllowed({ email, ipAddress }) {
+// ─── Stores ────────────────────────────────────────────────────────────────
+//
+// Timestamps travel as epoch milliseconds between this module and a store.
+// Every store answers the same four questions, so the rules above are written
+// once and the only thing that changes between one API task and several is
+// where the counts are kept.
+
+/**
+ * Counts held in this process. What development, the tests and a single
+ * instance have always used; with more than one task each task would count
+ * on its own, and an attacker spread across them would get N times the tries.
+ */
+function createMemoryThrottleStore() {
+  const scopes = { email: new Map(), ip: new Map() };
+
+  return {
+    kind: 'memory',
+    async read(scope, key) {
+      return scopes[scope].get(key) || null;
+    },
+    async recordFailure(scope, key, limits, currentNow) {
+      const store = scopes[scope];
+      const entry = store.get(key) || { failures: 0, backoffUntil: null, lockedUntil: null };
+      store.set(key, entry);
+      entry.failures += 1;
+      Object.assign(entry, penaltyFor(entry.failures, limits, currentNow) || {});
+    },
+    async clear(scope, key) {
+      scopes[scope].delete(key);
+    },
+    async repay(scope, key, currentNow) {
+      const store = scopes[scope];
+      const entry = store.get(key);
+      if (!entry) return;
+      if (entry.lockedUntil && entry.lockedUntil > currentNow) return;
+      entry.failures = Math.max(0, entry.failures - 1);
+      entry.lockedUntil = null;
+      entry.backoffUntil = null;
+      if (entry.failures === 0) store.delete(key);
+    },
+    reset() {
+      scopes.email.clear();
+      scopes.ip.clear();
+    },
+  };
+}
+
+const toMs = (value) => (value ? new Date(value).getTime() : null);
+const toDate = (value) => (value === null || value === undefined ? value : new Date(value));
+
+/**
+ * Counts held in the AuthThrottle table, where every API task sees the same
+ * number. Each change is a single conditional statement, so two tasks failing
+ * the same email at the same instant both count, and a repayment cannot undo
+ * a lock another task has just imposed.
+ */
+function createPostgresThrottleStore({ prisma }) {
+  return {
+    kind: 'postgres',
+    async read(scope, key) {
+      const row = await prisma.authThrottle.findUnique({
+        where: { scope_key: { scope, key } },
+      });
+      if (!row) return null;
+      return {
+        failures: row.failures,
+        backoffUntil: toMs(row.backoffUntil),
+        lockedUntil: toMs(row.lockedUntil),
+      };
+    },
+    async recordFailure(scope, key, limits, currentNow) {
+      // The increment is one upsert, so concurrent failures on different
+      // tasks never read the same count and write back the same "+1".
+      // updatedAt is stored as UTC wall-clock time, as Prisma stores it.
+      const rows = await prisma.$queryRaw`
+        INSERT INTO "AuthThrottle" ("scope", "key", "failures", "updatedAt")
+        VALUES (${scope}, ${key}, 1, (now() AT TIME ZONE 'UTC'))
+        ON CONFLICT ("scope", "key") DO UPDATE
+          SET "failures" = "AuthThrottle"."failures" + 1,
+              "updatedAt" = EXCLUDED."updatedAt"
+        RETURNING "failures"`;
+      const failures = Number(rows[0]?.failures || 0);
+      const penalty = penaltyFor(failures, limits, currentNow);
+      if (!penalty) return;
+      // Applied only while the count is still the one this failure produced:
+      // if another task has already counted a later failure, its penalty is
+      // the newer one and must not be overwritten by this older, lighter one.
+      await prisma.authThrottle.updateMany({
+        where: { scope, key, failures },
+        data: {
+          ...('lockedUntil' in penalty ? { lockedUntil: toDate(penalty.lockedUntil) } : {}),
+          backoffUntil: toDate(penalty.backoffUntil),
+        },
+      });
+    },
+    async clear(scope, key) {
+      await prisma.authThrottle.deleteMany({ where: { scope, key } });
+    },
+    async repay(scope, key, currentNow) {
+      const now = new Date(currentNow);
+      // A running lock is served in full, exactly as in memory: the condition
+      // on lockedUntil is part of the statement, not a check made beforehand.
+      await prisma.authThrottle.updateMany({
+        where: {
+          scope,
+          key,
+          OR: [{ lockedUntil: null }, { lockedUntil: { lte: now } }],
+        },
+        data: {
+          failures: { decrement: 1 },
+          lockedUntil: null,
+          backoffUntil: null,
+        },
+      });
+      await prisma.authThrottle.deleteMany({ where: { scope, key, failures: { lte: 0 } } });
+    },
+    reset() {},
+  };
+}
+
+const memoryStore = createMemoryThrottleStore();
+let postgresStore = null;
+let storeOverride = null;
+
+/**
+ * `memory` unless NODE_ENV=production, where the counts must be shared by
+ * every task; AUTH_THROTTLE_STORE names either one explicitly. Production
+ * refusing `memory` is the boot check's job (config/security.js).
+ */
+function resolveAuthThrottleStoreKind(env = process.env) {
+  const requested = String(env.AUTH_THROTTLE_STORE || '').trim().toLowerCase();
+  if (requested === 'postgres' || requested === 'memory') return requested;
+  return env.NODE_ENV === 'production' ? 'postgres' : 'memory';
+}
+
+function getStore() {
+  if (storeOverride) return storeOverride;
+  if (resolveAuthThrottleStoreKind() === 'memory') return memoryStore;
+  if (!postgresStore) {
+    postgresStore = createPostgresThrottleStore({ prisma: require('../config/db').prisma });
+  }
+  return postgresStore;
+}
+
+// ─── The rules ─────────────────────────────────────────────────────────────
+
+async function assertLoginAllowed({ email, ipAddress }) {
+  const store = getStore();
   const currentNow = nowMs();
   const normalizedEmail = normalizeEmail(email);
 
-  if (normalizedEmail && emailAttempts.has(normalizedEmail)) {
-    throwIfBlocked(emailAttempts.get(normalizedEmail), 'email', currentNow);
-  }
+  const [emailEntry, ipEntry] = await Promise.all([
+    normalizedEmail ? store.read('email', normalizedEmail) : null,
+    ipAddress ? store.read('ip', ipAddress) : null,
+  ]);
 
-  if (ipAddress && ipAttempts.has(ipAddress)) {
-    throwIfBlocked(ipAttempts.get(ipAddress), 'ip', currentNow);
-  }
+  if (emailEntry) throwIfBlocked(emailEntry, 'email', currentNow);
+  if (ipEntry) throwIfBlocked(ipEntry, 'ip', currentNow);
 }
 
-function recordLoginFailure({ email, ipAddress }) {
+async function recordLoginFailure({ email, ipAddress }) {
+  const store = getStore();
+  const currentNow = nowMs();
   const normalizedEmail = normalizeEmail(email);
-  recordFailure(emailAttempts, normalizedEmail, {
-    backoffAfter: EMAIL_BACKOFF_AFTER,
-    lockAfter: EMAIL_LOCK_AFTER,
-  });
-  recordFailure(ipAttempts, ipAddress, {
-    backoffAfter: IP_BACKOFF_AFTER,
-    lockAfter: IP_LOCK_AFTER,
-  });
+  if (normalizedEmail) {
+    await store.recordFailure('email', normalizedEmail, EMAIL_LIMITS, currentNow);
+  }
+  if (ipAddress) {
+    await store.recordFailure('ip', ipAddress, IP_LIMITS, currentNow);
+  }
 }
 
 /**
@@ -122,35 +254,57 @@ function recordLoginFailure({ email, ipAddress }) {
  * every person behind that address for another fifteen minutes, again and again,
  * with nothing they can do to clear it.
  */
-function recordLoginSuccess({ email, ipAddress }) {
+async function recordLoginSuccess({ email, ipAddress }) {
+  const store = getStore();
   const normalizedEmail = normalizeEmail(email);
   if (normalizedEmail) {
-    emailAttempts.delete(normalizedEmail);
+    await store.clear('email', normalizedEmail);
   }
-
-  if (!ipAddress || !ipAttempts.has(ipAddress)) return;
-  const entry = ipAttempts.get(ipAddress);
-  if (entry.lockedUntil && entry.lockedUntil > nowMs()) return;
-
-  entry.failures = Math.max(0, entry.failures - 1);
-  entry.lockedUntil = null;
-  entry.backoffUntil = null;
-  if (entry.failures === 0) ipAttempts.delete(ipAddress);
+  if (ipAddress) {
+    await store.repay('ip', ipAddress, nowMs());
+  }
 }
 
+/**
+ * Drops Postgres rows nobody has failed on for a day and that hold no running
+ * lock. Nothing reads a row that old for anything but its lock, so pruning it
+ * changes no decision. Meant for the worker's periodic prune.
+ */
+async function pruneAuthThrottles({ prisma = require('../config/db').prisma, olderThanMs = 24 * 60 * 60_000 } = {}) {
+  const cutoff = new Date(Date.now() - olderThanMs);
+  const now = new Date();
+  const result = await prisma.authThrottle.deleteMany({
+    where: {
+      updatedAt: { lt: cutoff },
+      OR: [{ lockedUntil: null }, { lockedUntil: { lte: now } }],
+    },
+  });
+  return result.count;
+}
+
+/** Test hook: forgets the in-process counts. Shared Postgres rows are left alone. */
 function resetAuthAbuseState() {
-  emailAttempts.clear();
-  ipAttempts.clear();
+  memoryStore.reset();
 }
 
 function setAuthAbuseNow(value) {
   nowOverride = value ? new Date(value) : null;
 }
 
+/** Test hook: use a specific store (null restores the configured one). */
+function setAuthThrottleStore(store) {
+  storeOverride = store || null;
+}
+
 module.exports = {
   assertLoginAllowed,
+  createMemoryThrottleStore,
+  createPostgresThrottleStore,
+  pruneAuthThrottles,
   recordLoginFailure,
   recordLoginSuccess,
   resetAuthAbuseState,
+  resolveAuthThrottleStoreKind,
   setAuthAbuseNow,
+  setAuthThrottleStore,
 };

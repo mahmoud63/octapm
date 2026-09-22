@@ -59,11 +59,19 @@ describe('auth refresh sessions', () => {
     });
     mockTx.refreshSession.create.mockImplementation(async ({ data }) => data);
     mockTx.refreshSession.update.mockResolvedValue({});
+    mockTx.refreshSession.updateMany.mockResolvedValue({ count: 1 });
 
     const result = await authService.refresh({
       refreshToken: originalToken,
       userAgent: 'Jest',
       ipAddress: '127.0.0.1',
+    });
+
+    // The old session is claimed by a conditional write before the new one
+    // exists, so a concurrent refresh with the same token cannot also win.
+    expect(mockTx.refreshSession.updateMany).toHaveBeenCalledWith({
+      where: { id: 'session-1', revokedAt: null },
+      data: { revokedAt: expect.any(Date) },
     });
 
     expect(result.tokens).toEqual(
@@ -92,9 +100,37 @@ describe('auth refresh sessions', () => {
     expect(mockTx.refreshSession.update).toHaveBeenCalledWith({
       where: { id: 'session-1' },
       data: expect.objectContaining({
-        revokedAt: expect.any(Date),
         replacedBySessionId: createCall.data.id,
       }),
+    });
+  });
+
+  it('lets only one of two concurrent refreshes with the same token win', async () => {
+    const originalToken = createRefreshToken(activeUser, 'session-1');
+    mockTx.refreshSession.findUnique
+      .mockResolvedValueOnce({
+        id: 'session-1',
+        userId: activeUser.id,
+        orgId: activeUser.orgId,
+        tokenHash: hashRefreshToken(originalToken),
+        expiresAt: new Date(Date.now() + 60 * 60 * 1000),
+        revokedAt: null,
+        replacedBySessionId: null,
+        user: activeUser,
+      })
+      // Re-read after losing the claim: the winner has committed its child.
+      .mockResolvedValueOnce({ id: 'session-1', revokedAt: new Date(), replacedBySessionId: 'session-2' });
+    mockTx.refreshSession.updateMany.mockResolvedValue({ count: 0 });
+    mockPrisma.refreshSession.updateMany.mockResolvedValue({ count: 1 });
+
+    await expect(authService.refresh({ refreshToken: originalToken })).rejects.toMatchObject({
+      status: 401,
+      code: 'REFRESH_TOKEN_REUSED',
+    });
+    expect(mockTx.refreshSession.create).not.toHaveBeenCalled();
+    expect(mockPrisma.refreshSession.updateMany).toHaveBeenCalledWith({
+      where: { id: { in: ['session-1', 'session-2'] }, revokedAt: null },
+      data: { revokedAt: expect.any(Date) },
     });
   });
 

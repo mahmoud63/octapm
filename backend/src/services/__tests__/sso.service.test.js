@@ -50,6 +50,12 @@ const mockPrisma = {
       store.tickets[index] = { ...store.tickets[index], ...data };
       return store.tickets[index];
     }),
+    updateMany: jest.fn(async ({ where, data }) => {
+      const index = store.tickets.findIndex((ticket) => ticket.id === where.id && (where.usedAt !== null || !ticket.usedAt) && (!where.expiresAt || ticket.expiresAt >= where.expiresAt.gte));
+      if (index < 0) return { count: 0 };
+      store.tickets[index] = { ...store.tickets[index], ...data };
+      return { count: 1 };
+    }),
   },
   refreshSession: { create: jest.fn(async ({ data }) => store.sessions.push(data)) },
   authAuditEvent: { create: jest.fn(async ({ data }) => store.audit.push(data)) },

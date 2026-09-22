@@ -256,8 +256,13 @@ const callback = async ({ code, state, error = null, errorDescription = null }, 
 /** Exchanges the one-time ticket for the normal session payload. */
 const complete = async ({ ticket }, context = {}) => {
   const row = trimOrNull(ticket) ? await prisma.ssoTicket.findUnique({ where: { tokenHash: hashToken(String(ticket).trim()) }, include: { user: true } }) : null;
-  if (!row || row.usedAt || row.expiresAt < new Date()) throw new HttpError(401, "SSO_TICKET_INVALID", "The sign-in link has expired — start again");
-  await prisma.ssoTicket.update({ where: { id: row.id }, data: { usedAt: new Date() } });
+  const now = new Date();
+  if (!row || row.usedAt || row.expiresAt < now) throw new HttpError(401, "SSO_TICKET_INVALID", "The sign-in link has expired — start again");
+  // The ticket is claimed by a conditional write, not by the read above: two
+  // requests carrying the same ticket (a double-submit, or a retry that lands
+  // on another API task) both pass the read, and only one may win the claim.
+  const claimed = await prisma.ssoTicket.updateMany({ where: { id: row.id, usedAt: null, expiresAt: { gte: now } }, data: { usedAt: now } });
+  if (claimed.count !== 1) throw new HttpError(401, "SSO_TICKET_INVALID", "The sign-in link has expired — start again");
   if (!row.user || row.user.status !== "active") throw new HttpError(403, "USER_INACTIVE", "Your account is not active");
   const authService = require("./auth.service");
   const user = await prisma.user.update({ where: { id: row.user.id }, data: { lastLogin: new Date() } });

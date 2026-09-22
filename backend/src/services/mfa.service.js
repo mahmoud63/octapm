@@ -6,38 +6,58 @@ const { HttpError } = require("../utils/http-error");
 const { generateSecret, verifyTotp, otpauthUrl } = require("../utils/totp");
 const { qrToSvg } = require("../utils/qr");
 const authAbuseService = require("./auth-abuse.service");
+const { keyring } = require("../utils/keyring");
 
 /**
  * Two-factor authentication (OCTA-SEC-AUTH-040): TOTP with an authenticator
  * app, ten single-use backup codes, an organisation-wide requirement, and
  * a short-lived challenge token between the password and the code at login.
- * Secrets are stored encrypted (AES-256-GCM, key from MFA_SECRET_KEY,
- * INTEGRATION_SECRET_KEY or JWT_SECRET); backup codes are stored hashed.
+ * Secrets are stored encrypted (AES-256-GCM) under MFA_SECRET_KEY, and still
+ * open under MFA_SECRET_KEY_PREVIOUS during a rotation; backup codes are
+ * stored hashed. Outside production the key falls back to the variables it
+ * was once derived from (INTEGRATION_SECRET_KEY, then JWT_SECRET), so local
+ * enrolments keep working — production never derives it from a JWT secret.
  */
 
 const BACKUP_CODE_COUNT = 10;
 const CHALLENGE_EXPIRY = "5m";
 const ISSUER = () => process.env.MFA_ISSUER || process.env.APP_NAME || "OctaPM";
 
-const keyMaterial = () => {
-  const source = process.env.MFA_SECRET_KEY || process.env.INTEGRATION_SECRET_KEY || process.env.JWT_SECRET;
-  if (!source) throw new HttpError(500, "CONFIG_ERROR", "Missing environment variable: MFA_SECRET_KEY (or JWT_SECRET)");
-  return crypto.createHash("sha256").update(String(source)).digest();
-};
+const mfaKeys = () => keyring({ primary: "MFA_SECRET_KEY", previous: "MFA_SECRET_KEY_PREVIOUS", legacy: ["INTEGRATION_SECRET_KEY", "JWT_SECRET"] });
+const derive = (source) => crypto.createHash("sha256").update(String(source)).digest();
 const seal = (value) => {
+  const { write } = mfaKeys();
+  if (!write) throw new HttpError(500, "CONFIG_ERROR", "Missing environment variable: MFA_SECRET_KEY");
   const iv = crypto.randomBytes(12);
-  const cipher = crypto.createCipheriv("aes-256-gcm", keyMaterial(), iv);
+  const cipher = crypto.createCipheriv("aes-256-gcm", derive(write), iv);
   const payload = Buffer.concat([cipher.update(String(value), "utf8"), cipher.final()]);
   return `v1.${iv.toString("base64url")}.${cipher.getAuthTag().toString("base64url")}.${payload.toString("base64url")}`;
 };
-const open = (text) => {
+/**
+ * Opens a sealed value with whichever key authenticates it. GCM rejects a
+ * wrong key outright, so trying each in turn cannot produce a false match.
+ * Returns null — never throws — when nothing opens it: an unreadable seed
+ * must fail the code check, not the whole request, so backup codes still work.
+ * `stale` says the value opened under a key other than the current one.
+ */
+const unseal = (text) => {
   if (!text) return null;
   const [version, iv, tag, payload] = String(text).split(".");
   if (version !== "v1" || !iv || !tag || !payload) return null;
-  const decipher = crypto.createDecipheriv("aes-256-gcm", keyMaterial(), Buffer.from(iv, "base64url"));
-  decipher.setAuthTag(Buffer.from(tag, "base64url"));
-  return Buffer.concat([decipher.update(Buffer.from(payload, "base64url")), decipher.final()]).toString("utf8");
+  const { write, read } = mfaKeys();
+  for (const key of read) {
+    try {
+      const decipher = crypto.createDecipheriv("aes-256-gcm", derive(key), Buffer.from(iv, "base64url"));
+      decipher.setAuthTag(Buffer.from(tag, "base64url"));
+      const value = Buffer.concat([decipher.update(Buffer.from(payload, "base64url")), decipher.final()]).toString("utf8");
+      return { value, stale: key !== write };
+    } catch {
+      // Not this key; try the next.
+    }
+  }
+  return null;
 };
+const open = (text) => unseal(text)?.value ?? null;
 
 const hashCode = (code) => crypto.createHash("sha256").update(String(code).toLowerCase().replace(/[^a-z0-9]/g, "")).digest("hex");
 const newBackupCodes = () => Array.from({ length: BACKUP_CODE_COUNT }, () => {
@@ -81,11 +101,11 @@ const beginEnrollment = async ({ userId }) => {
 /** Confirms the enrolment with a code from the app; returns the backup codes once. */
 const enable = async ({ userId, code, context = {} }) => {
   const user = await loadUser(userId);
-  const secret = open(user.mfaPendingSecretEnc);
-  if (!secret) throw new HttpError(409, "MFA_NOT_PENDING", "Start the setup first to get a QR code");
-  if (!verifyTotp(secret, code)) throw new HttpError(400, "MFA_CODE_INVALID", "That code is not valid — check the time on your device and try the next code");
+  const pending = unseal(user.mfaPendingSecretEnc);
+  if (!pending) throw new HttpError(409, "MFA_NOT_PENDING", "Start the setup first to get a QR code");
+  if (!verifyTotp(pending.value, code)) throw new HttpError(400, "MFA_CODE_INVALID", "That code is not valid — check the time on your device and try the next code");
   const codes = newBackupCodes();
-  await prisma.user.update({ where: { id: userId }, data: { mfaEnabled: true, mfaSecretEnc: user.mfaPendingSecretEnc, mfaPendingSecretEnc: null, mfaEnrolledAt: new Date(), mfaBackupCodesJson: codes.map((value) => ({ hash: hashCode(value), usedAt: null })) } });
+  await prisma.user.update({ where: { id: userId }, data: { mfaEnabled: true, mfaSecretEnc: pending.stale ? seal(pending.value) : user.mfaPendingSecretEnc, mfaPendingSecretEnc: null, mfaEnrolledAt: new Date(), mfaBackupCodesJson: codes.map((value) => ({ hash: hashCode(value), usedAt: null })) } });
   await audit({ orgId: user.orgId, userId, action: "mfa.enabled", context });
   return { enabled: true, backupCodes: codes };
 };
@@ -94,15 +114,31 @@ const enable = async ({ userId, code, context = {} }) => {
 const verifyCode = async ({ user, code }) => {
   const clean = String(code || "").trim();
   if (!clean) return false;
-  const secret = open(user.mfaSecretEnc);
-  if (secret && verifyTotp(secret, clean)) return true;
+  const opened = unseal(user.mfaSecretEnc);
+  if (opened && verifyTotp(opened.value, clean)) {
+    await resealIfStale(user, opened);
+    return true;
+  }
   const rows = backupRows(user);
   const hash = hashCode(clean);
   const index = rows.findIndex((row) => !row.usedAt && row.hash === hash);
   if (index < 0) return false;
   rows[index] = { ...rows[index], usedAt: new Date().toISOString() };
   await prisma.user.update({ where: { id: user.id }, data: { mfaBackupCodesJson: rows } });
+  await resealIfStale(user, opened);
   return true;
+};
+
+/**
+ * A seed that only opened under MFA_SECRET_KEY_PREVIOUS (or a local legacy
+ * key) is sealed again under the current key the first time it proves
+ * itself, so PREVIOUS can be retired once everyone has signed in. The write is
+ * conditional on the stored value being the one just read, so it can never
+ * resurrect a seed that a concurrent disable or admin reset has cleared.
+ */
+const resealIfStale = async (user, opened) => {
+  if (!opened?.stale) return;
+  await prisma.user.updateMany({ where: { id: user.id, mfaSecretEnc: user.mfaSecretEnc }, data: { mfaSecretEnc: seal(opened.value) } });
 };
 
 const disable = async ({ userId, password, code, context = {} }) => {
@@ -162,13 +198,13 @@ const resolveChallenge = async ({ mfaToken, code, context = {} }) => {
   const payload = verifyChallenge(mfaToken);
   const user = await prisma.user.findUnique({ where: { id: payload.sub } });
   if (!user || user.status !== "active") throw new HttpError(401, "MFA_CHALLENGE_INVALID", "Start the sign-in again");
-  authAbuseService.assertLoginAllowed({ email: user.email, ipAddress: context.ipAddress });
+  await authAbuseService.assertLoginAllowed({ email: user.email, ipAddress: context.ipAddress });
   if (!user.mfaEnabled || !(await verifyCode({ user, code }))) {
-    authAbuseService.recordLoginFailure({ email: user.email, ipAddress: context.ipAddress });
+    await authAbuseService.recordLoginFailure({ email: user.email, ipAddress: context.ipAddress });
     await audit({ orgId: user.orgId, userId: user.id, action: "mfa.failed", context });
     throw new HttpError(401, "MFA_CODE_INVALID", "That code is not valid");
   }
-  authAbuseService.recordLoginSuccess({ email: user.email, ipAddress: context.ipAddress });
+  await authAbuseService.recordLoginSuccess({ email: user.email, ipAddress: context.ipAddress });
   return user;
 };
 
