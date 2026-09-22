@@ -291,8 +291,10 @@ const register = async (
   { orgName, name, email, password, phone },
   context = {},
 ) => {
-  // Checked before anything else, so a closed deployment reveals nothing —
-  // not even whether an email is already registered.
+  // Checked before any account lookup, so a closed deployment reveals
+  // nothing — not even whether an email is already registered. The route's
+  // field validation runs earlier, so a malformed body still gets its 400;
+  // those errors describe only the request.
   if (!isPublicRegistrationOpen()) {
     throw createRegistrationClosedError();
   }

@@ -6,12 +6,16 @@
  *   production, nothing set             → closed (403)
  *   production, PUBLIC_REGISTRATION=true  → open   (201)
  *
- * GET /api/v1/config/public, unauthenticated, reports the same answer. Every
+ * GET /api/v1/config/public, unauthenticated, reports the same answer. While
+ * closed, a well-formed request for an email that already has an account is
+ * still 403 (never 409 EMAIL_ALREADY_EXISTS: the gate runs before any account
+ * lookup), and a malformed body still gets its 400 VALIDATION_ERROR, as the
+ * OpenAPI description says. Every
  * organisation this creates is named `LiveTest <uuid>` and deleted afterwards.
  */
 const crypto = require("crypto");
 const { prisma } = require("../../config/db");
-const { dropLiveOrg, liveDescribe } = require("../../__live__/helpers");
+const { createLiveOrg, dropLiveOrg, liveDescribe } = require("../../__live__/helpers");
 const { startApi } = require("./auth-live-kit");
 
 // What the production app needs to construct itself; the full boot check in
@@ -27,6 +31,12 @@ const PRODUCTION = {
 
 liveDescribe("self-service registration switch", () => {
   const createdOrgIds = [];
+  let existing;
+
+  beforeAll(async () => {
+    existing = await createLiveOrg(prisma);
+    createdOrgIds.push(existing.org.id);
+  });
 
   afterAll(async () => {
     for (const orgId of createdOrgIds) await dropLiveOrg(prisma, orgId);
@@ -62,6 +72,23 @@ liveDescribe("self-service registration switch", () => {
         expect(response.status).toBe(403);
         expect(response.body).toMatchObject({ success: false, error: { code: "REGISTRATION_CLOSED" } });
         expect(created).toBe(0);
+
+        // An email that is already registered gets the same 403: a closed
+        // deployment never confirms that an account exists.
+        const taken = await api.post("/api/v1/auth/register", {
+          orgName: "Probe Org",
+          name: "Probe",
+          email: existing.user.email,
+          password: "Live-Register-Pass1!",
+        });
+        expect(taken.status).toBe(403);
+        expect(taken.body).toMatchObject({ success: false, error: { code: "REGISTRATION_CLOSED" } });
+
+        // Field validation runs ahead of the gate; its errors describe only
+        // the request.
+        const malformed = await api.post("/api/v1/auth/register", {});
+        expect(malformed.status).toBe(400);
+        expect(malformed.body).toMatchObject({ success: false, error: { code: "VALIDATION_ERROR" } });
       }
     } finally {
       await api.stop();

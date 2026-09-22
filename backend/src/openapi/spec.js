@@ -5790,7 +5790,7 @@ add(
     tag: "Auth",
     summary: "Register an organization user.",
     description:
-      "Creates a new organisation with the caller as its company administrator, creates a server-side refresh session, sets it as an httpOnly cookie, and returns a short-lived access token. Self-service registration can be closed (it is closed in production unless PUBLIC_REGISTRATION=true); GET /config/public reports which. When closed the request is refused with 403 REGISTRATION_CLOSED before any other check.",
+      "Creates a new organisation with the caller as its company administrator, creates a server-side refresh session, sets it as an httpOnly cookie, and returns a short-lived access token. Self-service registration can be closed (it is closed in production unless PUBLIC_REGISTRATION=true); GET /config/public reports which. When closed, a well-formed request is refused with 403 REGISTRATION_CLOSED before any account lookup, so the answer never reveals whether an email is registered; a malformed body still gets 400 VALIDATION_ERROR first, because field validation runs ahead of the gate and its errors describe only the request.",
     operationId: "register",
     security: false,
     requestBody: jsonBody(ref("AuthRegisterRequest"), "Registration payload."),
