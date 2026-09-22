@@ -105,6 +105,11 @@ const createJobWorker = ({
   const timers = [];
   let running = false;
   let pollTimer = null;
+  // The tick in progress, if any. A tick can be inside claimNextJob when
+  // stop() runs: clearing the poll timer does not cancel it, and the job the
+  // claim returns joins `active` only afterwards. stop() waits for this
+  // before it looks at `active`, so that job is awaited, not missed.
+  let ticking = null;
 
   const resolvedTypes = () =>
     Array.isArray(types) && types.length ? types : getRegisteredJobTypes();
@@ -196,6 +201,10 @@ const createJobWorker = ({
       }
       if (!job) break;
 
+      // Claimed even if stop() ran meanwhile: the job is ours now, so it is
+      // run and tracked in `active` for stop() to await (the loop then ends
+      // on `running`). Walking away would leave it 'running' under this
+      // worker until stale recovery re-queues it and it runs a second time.
       const promise = runJob(job)
         .catch((error) => logger.error("[job-worker] run", error))
         .finally(() => active.delete(promise));
@@ -203,10 +212,20 @@ const createJobWorker = ({
     }
   };
 
+  /** Runs one tick, or joins the one already in progress. */
+  const trackedTick = () => {
+    if (!ticking) {
+      ticking = tick().finally(() => {
+        ticking = null;
+      });
+    }
+    return ticking;
+  };
+
   const schedule = () => {
     if (!running) return;
     pollTimer = setTimeout(async () => {
-      await tick();
+      await trackedTick();
       schedule();
     }, pollIntervalMs);
     pollTimer.unref?.();
@@ -248,7 +267,10 @@ const createJobWorker = ({
       running = false;
       throw error;
     }
-    await tick();
+    await trackedTick();
+    // Stopped during that first tick: stop() has already cleared the timers,
+    // so none may be created after it.
+    if (!running) return;
     schedule();
 
     const recoverTimer = setInterval(recover, recoverIntervalMs);
@@ -271,7 +293,14 @@ const createJobWorker = ({
     running = false;
     if (pollTimer) clearTimeout(pollTimer);
     for (const timer of timers.splice(0)) clearInterval(timer);
-    const settled = Promise.allSettled([...active]).then(() => true);
+    // Let a tick caught mid-claim settle first (it claims nothing more, as
+    // `running` is false), then snapshot `active` with its job in it. The
+    // deadline below bounds this wait too.
+    const settled = (async () => {
+      if (ticking) await ticking.catch(() => {});
+      await Promise.allSettled([...active]);
+      return true;
+    })();
     if (!deadline) {
       await settled;
       return { drained: true, pending: 0 };
@@ -288,7 +317,7 @@ const createJobWorker = ({
 
   const runOnce = async () => {
     running = true;
-    await tick();
+    await trackedTick();
     await Promise.allSettled([...active]);
     running = false;
   };
