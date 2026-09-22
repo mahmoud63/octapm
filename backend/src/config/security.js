@@ -416,6 +416,58 @@ const validateProductionDatabase = (env, problems) => {
       problems.push(error.message);
     }
   }
+
+  validateProductionRealtimeDatabase(env, problems);
+};
+
+/**
+ * REALTIME_DATABASE_URL, when set, is the connection the realtime adapter's
+ * node-postgres pool opens instead of DATABASE_URL (realtime/adapter.js). It
+ * carries the database credentials and every cross-task NOTIFY payload, so it
+ * is held to the DATABASE_URL rules that node-postgres honours: without
+ * sslmode=require the adapter connects in plaintext, and a relative sslcert is
+ * resolved against the schema folder, so it is refused here as it is there.
+ * A parameter given twice is refused for the same reason as above: the first
+ * copy is what this check reads, not necessarily what the pool uses.
+ * sslaccept and connection_limit are Prisma's; pg ignores them, so they are
+ * not required.
+ */
+const validateProductionRealtimeDatabase = (env, problems) => {
+  const raw = String(env.REALTIME_DATABASE_URL ?? '').trim();
+  if (!raw) return;
+
+  let parsed = null;
+  try {
+    parsed = new URL(raw);
+  } catch {
+    problems.push('REALTIME_DATABASE_URL must be a postgresql:// URL');
+    return;
+  }
+  const params = parsed.searchParams;
+
+  for (const key of ['sslmode', 'sslcert', 'sslaccept']) {
+    if (params.getAll(key).length > 1) {
+      problems.push(`REALTIME_DATABASE_URL sets ${key} more than once; keep exactly one`);
+    }
+  }
+
+  const sslmode = String(params.get('sslmode') ?? '').trim().toLowerCase();
+  if (sslmode !== 'require') {
+    problems.push(
+      sslmode
+        ? `REALTIME_DATABASE_URL sslmode=${sslmode} is not the TLS the boot check verifies; use sslmode=require with sslcert=<absolute CA path>`
+        : 'REALTIME_DATABASE_URL must set sslmode=require and sslcert=<absolute CA path> (TLS to the database)',
+    );
+  }
+
+  const sslcert = String(params.get('sslcert') ?? '').trim();
+  if (!sslcert) {
+    problems.push('REALTIME_DATABASE_URL must set sslcert to the absolute path of the database CA bundle');
+  } else if (!path.isAbsolute(sslcert)) {
+    problems.push(`REALTIME_DATABASE_URL sslcert must be an absolute path, not "${sslcert}"`);
+  } else if (!fs.existsSync(sslcert)) {
+    problems.push(`REALTIME_DATABASE_URL sslcert names a file that does not exist: ${sslcert}`);
+  }
 };
 
 /**
@@ -566,6 +618,21 @@ const validateProductionFileStorage = (env, problems) => {
   }
 };
 
+/**
+ * Emailed one-time links are bearer credentials for as long as they live.
+ * PASSWORD_RESET_TOKEN_MINUTES had no ceiling, so a mistyped 14400 made every
+ * reset link a ten-day key to the account. Production takes 5 minutes to a
+ * day; unset keeps the one-hour default. (The bootstrap link has its own,
+ * shorter BOOTSTRAP_LINK_MINUTES, checked by the bootstrap command itself.)
+ */
+const validateProductionTokenLifetimes = (env, problems) => {
+  const raw = String(env.PASSWORD_RESET_TOKEN_MINUTES ?? '').trim();
+  if (!raw) return;
+  if (!/^\d+$/.test(raw) || Number(raw) < 5 || Number(raw) > 1440) {
+    problems.push(`PASSWORD_RESET_TOKEN_MINUTES must be a whole number from 5 to 1440 (got "${raw}")`);
+  }
+};
+
 const validateProductionEnv = (env = process.env) => {
   // 'productio' on main (a typo introduced in e2b95be) made this return early
   // for NODE_ENV=production, so every check below — secret length, secret
@@ -599,6 +666,7 @@ const validateProductionEnv = (env = process.env) => {
   validateProductionEmailAndLinks(env, problems);
   validateProductionFileStorage(env, problems);
   validateProductionDatabase(env, problems);
+  validateProductionTokenLifetimes(env, problems);
   validateProductionRelease(env, problems);
   validateProductionSharedState(env, problems);
   validateProductionForbidden(env, problems);

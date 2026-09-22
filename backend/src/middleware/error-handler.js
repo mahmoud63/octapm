@@ -1,5 +1,6 @@
 const { sendError } = require("../utils/api-response");
 const { HttpError } = require("../utils/http-error");
+const { catalogEntryFor, defaultCodeForStatus } = require("../utils/error-codes");
 const { redactPath } = require("./request-log");
 
 const notFoundHandler = (req, _res, next) => {
@@ -31,7 +32,12 @@ const isPrismaKnownError = (err) =>
  *
  * In order:
  * 1. HttpError: deliberate, passed through unchanged (details are still
- *    dropped in production by sendError).
+ *    dropped in production by sendError) — except a 5xx in production, which
+ *    keeps its status and code but takes the catalogue message for the code
+ *    (or the status default). A server-side failure is where upstream text
+ *    ends up: ai-provider wraps the provider's own error sentence into a 503,
+ *    and that sentence can carry hostnames or a masked API key. A 5xx whose
+ *    message was written for the client says so with `err.expose = true`.
  * 2. Multer: its messages are fixed library text; an oversized file is a 413,
  *    anything else a 400 — today both were 500s.
  * 3. body-parser / http-errors 4xx marked `expose`: malformed JSON, a body over
@@ -44,9 +50,17 @@ const isPrismaKnownError = (err) =>
  *    local development sees exactly what it always saw.
  */
 const toClientError = (err) => {
-  if (err instanceof HttpError) return err;
-
   const production = isProduction();
+
+  if (err instanceof HttpError) {
+    if (production && err.status >= 500 && err.expose !== true) {
+      const message =
+        catalogEntryFor(err.code)?.message ||
+        catalogEntryFor(defaultCodeForStatus(err.status))?.message;
+      return new HttpError(err.status, err.code, message);
+    }
+    return err;
+  }
 
   if (err?.name === "MulterError") {
     return err.code === "LIMIT_FILE_SIZE"

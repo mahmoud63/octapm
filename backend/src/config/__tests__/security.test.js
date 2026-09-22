@@ -217,6 +217,7 @@ describe('security configuration', () => {
     it.each([
       ['CloudFront then ALB, with the secret', { TRUST_PROXY_HOPS: '2', CLOUDFRONT_SHARED_SECRET: CLOUDFRONT_SECRET }],
       ['hops left to the default of 1', { TRUST_PROXY_HOPS: undefined }],
+      ['a reset link that lasts half an hour', { PASSWORD_RESET_TOKEN_MINUTES: '30' }],
       ['staging on Stripe test keys', { APP_ENV: 'staging', STRIPE_SECRET_KEY: fakeStripeSecretKey('test') }],
       ['the pool size written into the URL', {
         DATABASE_CONNECTION_LIMIT: undefined,
@@ -235,6 +236,10 @@ describe('security configuration', () => {
       }],
       ['a redis rate-limit store with its URL', { RATE_LIMIT_STORE: 'redis', REDIS_URL: 'rediss://cache.example.com:6379' }],
       ['a rotation window', { MFA_SECRET_KEY_PREVIOUS: 'the-old-mfa-key-with-at-least-32-characters' }],
+      // pg ignores sslaccept and connection_limit, so the realtime URL needs neither.
+      ['a direct realtime connection over TLS', {
+        REALTIME_DATABASE_URL: `postgresql://user:password@db-direct.example.com:5432/pmcopilots?sslmode=require&sslcert=${encodeURIComponent(CA_BUNDLE)}`,
+      }],
     ])('%s', (_label, overrides) => {
       expect(validateProductionEnv({ ...validProductionEnv(), ...overrides })).toEqual([]);
     });
@@ -310,10 +315,23 @@ describe('security configuration', () => {
       ['a pool timeout in the URL that is not a number', { DATABASE_URL: `${validProductionEnv().DATABASE_URL}&pool_timeout=soon` }, /DATABASE_URL pool_timeout must be a positive whole number/],
       ['no CA bundle', { DATABASE_URL: 'postgresql://user:password@db.example.com:5432/pmcopilots?sslmode=require' }, /DATABASE_URL must set sslcert/],
       ['a relative CA path', { DATABASE_URL: 'postgresql://u:p@db.example.com/pm?sslmode=require&sslcert=certs/rds-ca.pem' }, /sslcert must be an absolute path/],
+      ['a reset link that lasts ten days', { PASSWORD_RESET_TOKEN_MINUTES: '14400' }, /PASSWORD_RESET_TOKEN_MINUTES must be a whole number from 5 to 1440 \(got "14400"\)/],
+      ['a reset link that lasts no time at all', { PASSWORD_RESET_TOKEN_MINUTES: '0' }, /PASSWORD_RESET_TOKEN_MINUTES must be a whole number from 5 to 1440/],
+      ['a reset lifetime that is not a number', { PASSWORD_RESET_TOKEN_MINUTES: 'an hour' }, /PASSWORD_RESET_TOKEN_MINUTES must be a whole number from 5 to 1440/],
       ['a CA bundle that is not there', { DATABASE_URL: `postgresql://u:p@db.example.com/pm?sslmode=require&sslcert=${encodeURIComponent(`${CA_BUNDLE}.missing`)}` }, /sslcert names a file that does not exist/],
       ['no pool size', { DATABASE_CONNECTION_LIMIT: undefined }, /DATABASE_CONNECTION_LIMIT \(or connection_limit/],
       ['a pool size that is not a number', { DATABASE_CONNECTION_LIMIT: 'abc' }, /DATABASE_CONNECTION_LIMIT must be a positive whole number/],
       ['a pool timeout that is not a number', { DATABASE_POOL_TIMEOUT_SECONDS: '0' }, /DATABASE_POOL_TIMEOUT_SECONDS must be a positive whole number/],
+      // The realtime adapter's own connection, when it has one.
+      ['a realtime URL that is not a URL', { REALTIME_DATABASE_URL: 'not a url' }, /REALTIME_DATABASE_URL must be a postgresql:\/\/ URL/],
+      ['a realtime connection without TLS', { REALTIME_DATABASE_URL: 'postgresql://u:p@db.example.com:5432/pm' }, /REALTIME_DATABASE_URL must set sslmode=require/],
+      ['a realtime connection on sslmode=prefer', { REALTIME_DATABASE_URL: `postgresql://u:p@db.example.com/pm?sslmode=prefer&sslcert=${encodeURIComponent(CA_BUNDLE)}` }, /REALTIME_DATABASE_URL sslmode=prefer/],
+      ['a realtime connection with no CA bundle', { REALTIME_DATABASE_URL: 'postgresql://u:p@db.example.com/pm?sslmode=require' }, /REALTIME_DATABASE_URL must set sslcert/],
+      ['a relative realtime CA path', { REALTIME_DATABASE_URL: 'postgresql://u:p@db.example.com/pm?sslmode=require&sslcert=relative.pem' }, /REALTIME_DATABASE_URL sslcert must be an absolute path/],
+      ['a realtime CA bundle that is not there', { REALTIME_DATABASE_URL: `postgresql://u:p@db.example.com/pm?sslmode=require&sslcert=${encodeURIComponent(`${CA_BUNDLE}.missing`)}` }, /REALTIME_DATABASE_URL sslcert names a file that does not exist/],
+      ['a second realtime sslmode that turns TLS off', { REALTIME_DATABASE_URL: `postgresql://u:p@db.example.com/pm?sslmode=require&sslcert=${encodeURIComponent(CA_BUNDLE)}&sslmode=disable` }, /REALTIME_DATABASE_URL sets sslmode more than once/],
+      ['a second realtime sslcert', { REALTIME_DATABASE_URL: `postgresql://u:p@db.example.com/pm?sslmode=require&sslcert=${encodeURIComponent(CA_BUNDLE)}&sslcert=%2Ftmp%2Fother.pem` }, /REALTIME_DATABASE_URL sets sslcert more than once/],
+      ['a second realtime sslaccept', { REALTIME_DATABASE_URL: `postgresql://u:p@db.example.com/pm?sslmode=require&sslcert=${encodeURIComponent(CA_BUNDLE)}&sslaccept=strict&sslaccept=accept_invalid_certs` }, /REALTIME_DATABASE_URL sets sslaccept more than once/],
       // Release identity.
       ['no commit', { RELEASE_GIT_SHA: undefined }, /RELEASE_GIT_SHA must be the full 40-character commit/],
       ['a short commit', { RELEASE_GIT_SHA: '0123456' }, /RELEASE_GIT_SHA must be the full 40-character commit/],

@@ -381,6 +381,69 @@ const ERROR_CODE_CATALOG = Object.freeze({
     category: "system",
     message: "The first administrator can only be created in an empty database",
   },
+  // Deliberate 5xx answers. In production a 5xx body carries the catalogue
+  // message, never the thrower's text, so these say what happened without
+  // naming hosts, keys or configuration.
+  AI_NOT_CONFIGURED: {
+    status: 503,
+    category: "system",
+    message: "AI features are not configured on this server",
+  },
+  AI_UNAVAILABLE: {
+    status: 503,
+    category: "system",
+    message: "The AI provider did not answer. Try again shortly.",
+  },
+  AI_TRANSCRIPTION_NOT_CONFIGURED: {
+    status: 503,
+    category: "system",
+    message: "Voice transcription is not configured on this server",
+  },
+  AI_TRANSCRIPTION_FAILED: {
+    status: 503,
+    category: "system",
+    message: "Transcription failed. Try again shortly.",
+  },
+  ASSISTANT_UNAVAILABLE: {
+    status: 503,
+    category: "system",
+    message: "The assistant is unavailable right now",
+  },
+  PUSH_NOT_CONFIGURED: {
+    status: 503,
+    category: "system",
+    message: "Push notifications are not configured on this server",
+  },
+  INBOUND_EMAIL_NOT_CONFIGURED: {
+    status: 503,
+    category: "system",
+    message: "Replying by email is not configured on this server",
+  },
+  WEATHER_FEED_UNAVAILABLE: {
+    status: 502,
+    category: "system",
+    message: "The weather service could not be reached",
+  },
+  WEATHER_FEED_NO_DATA: {
+    status: 502,
+    category: "system",
+    message: "The weather service returned no data for this site and day",
+  },
+  SSO_DISCOVERY_FAILED: {
+    status: 502,
+    category: "system",
+    message: "The identity provider could not be reached",
+  },
+  SSO_DISCOVERY_INVALID: {
+    status: 502,
+    category: "system",
+    message: "The identity provider's configuration could not be read",
+  },
+  SSO_JWKS_FAILED: {
+    status: 502,
+    category: "system",
+    message: "The identity provider's signing keys could not be read",
+  },
 });
 
 const DEFAULT_CODE_BY_STATUS = Object.freeze({

@@ -59,7 +59,8 @@ startJobWorker();
 installGracefulShutdown({
   label: 'api',
   drain: async ({ deadline }) => {
-    // Readiness answers 503 from here on, so nothing new is routed here.
+    // /api/health (the load balancer's check) and /api/health/ready answer
+    // 503 from here on, so the balancer stops routing new requests here.
     app.locals.draining = true;
     // Leadership first: a successor can start the schedulers during our drain.
     await stopSchedulerLeadership();

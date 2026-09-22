@@ -9,7 +9,8 @@
  *   GET  /p2010       raw query on a relation that does not exist
  *   POST /p2002       a user whose email is already taken (body: orgId, email)
  *   GET  /type-error  a TypeError
- *   GET  /http-error  a deliberate HttpError 503
+ *   GET  /http-error  a deliberate HttpError 503 marked expose
+ *   GET  /upstream-5xx an HttpError 502 wrapping upstream provider text
  *   GET  /upstream    a plain Error carrying an upstream 401
  *   POST /json        express.json (send it malformed JSON)
  *   POST /upload      multer with a 10-byte file limit
@@ -47,7 +48,19 @@ app.get("/type-error", wrap(async () => {
   return missing.property;
 }));
 app.get("/http-error", () => {
-  throw new HttpError(503, "AI_NOT_CONFIGURED", "No AI provider is configured for this workspace");
+  // Written for the client, and marked so.
+  throw Object.assign(
+    new HttpError(503, "AI_NOT_CONFIGURED", "No AI provider is configured for this workspace"),
+    { expose: true },
+  );
+});
+app.get("/upstream-5xx", () => {
+  // What ai-provider.service builds from a provider's own error text.
+  throw new HttpError(
+    502,
+    "AI_PROVIDER_ERROR",
+    "The AI provider did not answer: getaddrinfo ENOTFOUND api.anthropic.com / invalid x-api-key sk-ant-api03-LEAKEDSECRET",
+  );
 });
 app.get("/upstream", () => {
   throw Object.assign(new Error("Anthropic answered 401: invalid x-api-key"), { status: 401 });

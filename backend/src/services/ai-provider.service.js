@@ -134,7 +134,11 @@ const complete = async ({ system, messages, maxTokens = 1500, temperature = 0.2,
       break;
     }
   }
-  const wrapped = new HttpError(503, "AI_UNAVAILABLE", `The AI provider did not answer: ${lastError?.message || "unknown error"}`);
+  // The provider's own words (a host name, a quota message, an echoed key
+  // prefix) go to the server log, not into the error: callers put this
+  // message in 200 "degraded" answers, and production 5xx bodies carry it too.
+  console.error(`[ai] ${resolved?.provider || "test"} did not answer: ${lastError?.message || "unknown error"}`);
+  const wrapped = new HttpError(503, "AI_UNAVAILABLE", "The AI provider did not answer. Try again shortly.");
   wrapped.retryable = true;
   throw wrapped;
 };
@@ -170,7 +174,8 @@ const transcribeAudio = async ({ buffer, mimeType = "audio/webm", fileName = "au
   const response = await send("https://api.openai.com/v1/audio/transcriptions", { method: "POST", headers: { authorization: `Bearer ${env("OPENAI_API_KEY")}` }, body: form });
   const json = await readJson(response);
   if (!response.ok) {
-    const failed = new HttpError(503, "AI_TRANSCRIPTION_FAILED", `Transcription failed: ${json?.error?.message || `OpenAI answered ${response.status}`}`);
+    console.error(`[ai] transcription failed (${response.status}): ${json?.error?.message || "no message"}`);
+    const failed = new HttpError(503, "AI_TRANSCRIPTION_FAILED", "Transcription failed. Try again shortly.");
     failed.retryable = [429, 500, 502, 503].includes(Number(response.status));
     throw failed;
   }

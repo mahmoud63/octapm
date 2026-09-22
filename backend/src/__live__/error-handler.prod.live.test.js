@@ -109,6 +109,32 @@ liveDescribe("error bodies", () => {
     expect(upload.body.error.code).toBe("FILE_TOO_LARGE");
   });
 
+  it("keeps a 5xx HttpError's code but not the upstream text it wraps, in production only", async () => {
+    const upstream = /ENOTFOUND|anthropic|x-api-key|sk-ant|LEAKEDSECRET|did not answer/i;
+
+    const res = await call(production.base, "/upstream-5xx");
+    expect(res.status).toBe(502);
+    // AI_PROVIDER_ERROR has no catalogue entry and 502 no status default of
+    // its own, so the message is the generic server one.
+    expect(res.body).toEqual({
+      success: false,
+      error: { code: "AI_PROVIDER_ERROR", message: "Unexpected server error", requestId: res.requestId },
+    });
+    expect(res.text).not.toMatch(upstream);
+
+    // The log still has the provider's words, next to the request id.
+    await production.proc.waitForOutput(new RegExp(`"requestId":"${res.requestId}"`));
+    const line = production.proc
+      .output()
+      .split(/\r?\n/)
+      .find((entry) => entry.includes(`"requestId":"${res.requestId}"`));
+    expect(JSON.parse(line).message).toMatch(/ENOTFOUND api\.anthropic\.com/);
+
+    const dev = await call(development.base, "/upstream-5xx");
+    expect(dev.status).toBe(502);
+    expect(dev.body.error).toMatchObject({ code: "AI_PROVIDER_ERROR", message: expect.stringMatching(/sk-ant-api03-LEAKEDSECRET/) });
+  });
+
   it("logs a production 500 as one JSON line with the request id and the real error", async () => {
     const res = await call(production.base, "/p2010");
     await production.proc.waitForOutput(new RegExp(`"requestId":"${res.requestId}"`));

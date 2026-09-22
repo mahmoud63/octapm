@@ -865,6 +865,18 @@ const components = {
         "AWS_CREDENTIALS_UNAVAILABLE",
         "REGISTRATION_CLOSED",
         "BOOTSTRAP_NOT_EMPTY",
+        "AI_NOT_CONFIGURED",
+        "AI_UNAVAILABLE",
+        "AI_TRANSCRIPTION_NOT_CONFIGURED",
+        "AI_TRANSCRIPTION_FAILED",
+        "ASSISTANT_UNAVAILABLE",
+        "PUSH_NOT_CONFIGURED",
+        "INBOUND_EMAIL_NOT_CONFIGURED",
+        "WEATHER_FEED_UNAVAILABLE",
+        "WEATHER_FEED_NO_DATA",
+        "SSO_DISCOVERY_FAILED",
+        "SSO_DISCOVERY_INVALID",
+        "SSO_JWKS_FAILED",
         "PROCUREMENT_ALERT_NOT_FOUND",
         "PROCUREMENT_ALERT_WORKFLOW_ENDPOINT_REQUIRED",
         "PROCUREMENT_ORDER_NOT_FOUND",
@@ -15364,8 +15376,22 @@ const serviceLiveness = (path, operationId, summary) =>
     servers: serviceHealthServers,
   });
 
-serviceLiveness("/health", "getServiceHealth", "Liveness probe (the load balancer's health check).");
-serviceLiveness("/health/live", "getServiceLiveness", "Liveness probe (alias of /api/health).");
+add("/health", "get", {
+  ...operation({
+    tag: "Health",
+    summary: "The load balancer's health check.",
+    description:
+      "Touches nothing but the process, so a database outage never marks every task unhealthy at once. Answers 503 SERVICE_NOT_READY while the task is shutting down, so the load balancer stops sending it new requests; /api/health/live stays 200 until the process exits. Every response from the API carries the X-OctaPM-Release header (the commit, or the package version locally).",
+    operationId: "getServiceHealth",
+    security: false,
+    responses: {
+      200: jsonResponse("Up and taking requests.", serviceLivenessSchema),
+      503: errorResponse("SERVICE_NOT_READY: the task is shutting down."),
+    },
+  }),
+  servers: serviceHealthServers,
+});
+serviceLiveness("/health/live", "getServiceLiveness", "Liveness probe: 200 while the process is alive, draining or not.");
 add("/health/ready", "get", {
   ...operation({
     tag: "Health",

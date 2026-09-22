@@ -1,11 +1,17 @@
 /**
  * Health routes, outside /api/v1 and outside authentication.
  *
- * - GET /api/health and GET /api/health/live: liveness. The process is up and
- *   serving HTTP; nothing else is touched. This is what the load balancer
- *   checks. If it looked at the database, one database blip would mark every
- *   task unhealthy at once and ECS would replace them all — with no benefit,
- *   since the replacements share the same database.
+ * - GET /api/health: the load balancer's check. The process is up and
+ *   serving HTTP and is not draining; nothing else is touched. If it looked
+ *   at the database, one database blip would mark every task unhealthy at
+ *   once and ECS would replace them all — with no benefit, since the
+ *   replacements share the same database. It does read the drain flag: once
+ *   shutdown sets app.locals.draining it answers 503 SERVICE_NOT_READY, so
+ *   the balancer stops sending new requests to this task even if the task
+ *   was not deregistered first. The flag is in memory, so this costs nothing.
+ * - GET /api/health/live: liveness only — 200 while the process is alive,
+ *   draining or not. It is the "should this process be restarted" probe, and
+ *   a draining task must not be restarted mid-drain.
  * - GET /api/health/ready: readiness. `SELECT 1` against the database, given
  *   up after HEALTH_DB_TIMEOUT_MS (Prisma alone would wait out its connect
  *   and pool timeouts), and a 503 while the process is draining for shutdown.
@@ -66,7 +72,20 @@ const createHealthRouter = ({ release }) => {
       release,
     });
 
-  router.get("/", noStore, live);
+  const balancerCheck = (req, res) => {
+    if (!req.app.locals.draining) return live(req, res);
+    const envelope = buildErrorEnvelope({
+      status: 503,
+      code: "SERVICE_NOT_READY",
+      message: "The service is shutting down",
+      details: { draining: true, release },
+      includeDetails: true,
+      requestId: req.id,
+    });
+    return res.status(envelope.status).json(envelope.body);
+  };
+
+  router.get("/", noStore, balancerCheck);
   router.get("/live", noStore, live);
 
   router.get("/ready", noStore, async (req, res) => {

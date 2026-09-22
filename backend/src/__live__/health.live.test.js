@@ -3,7 +3,8 @@
  *
  * - Liveness (/api/health, the load balancer's check, and /api/health/live)
  *   never touches the database, so it answers at once even when the database
- *   does not.
+ *   does not. While the process drains /api/health answers 503 so the
+ *   balancer stops routing here; /api/health/live stays 200.
  * - Readiness gives up on a database that accepts connections and never
  *   answers after HEALTH_DB_TIMEOUT_MS, and answers 503 SERVICE_NOT_READY
  *   with no host or driver text; it also turns 503 while the process drains.
@@ -43,7 +44,7 @@ liveDescribe("service health", () => {
     if (blackHole) await new Promise((resolve) => blackHole.close(resolve));
   });
 
-  it("reports the release and a ready database, then refuses readiness while draining", async () => {
+  it("reports the release and a ready database, then refuses readiness and the balancer's check while draining", async () => {
     const sha = randomSha();
     const { proc, base } = await startApp({
       NODE_ENV: "development",
@@ -75,7 +76,23 @@ liveDescribe("service health", () => {
     const draining = await timed(`${base}/api/health/ready`);
     expect(draining.status).toBe(503);
     expect(draining.body.error).toMatchObject({ code: "SERVICE_NOT_READY", details: { draining: true } });
-    expect((await timed(`${base}/api/health`)).status).toBe(200);
+
+    // The load balancer's check turns too, so no new request is routed here;
+    // it still names the release and still touches nothing but memory.
+    const balancer = await timed(`${base}/api/health`);
+    expect(balancer.status).toBe(503);
+    expect(balancer.headers.get("x-octapm-release")).toBe(sha);
+    expect(balancer.body.error).toMatchObject({
+      code: "SERVICE_NOT_READY",
+      details: { draining: true, release: { sha } },
+    });
+    expect(balancer.body.error.details).not.toHaveProperty("checks");
+
+    // Liveness is only "the process is alive": a draining task must not be
+    // restarted mid-drain.
+    const alive = await timed(`${base}/api/health/live`);
+    expect(alive.status).toBe(200);
+    expect(alive.body.data).toMatchObject({ status: "ok", release: { sha } });
   });
 
   it("stays live and turns not-ready within the timeout when the database never answers", async () => {
