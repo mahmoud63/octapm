@@ -88,7 +88,7 @@ assert.match(projectDetail, /useProjectRealtime\(/, 'project workspace joins its
 
 // ── Locations module ─────────────────────────────────────────────────────
 assert.match(projectDetail, /key: 'locations', label: 'Locations'/, 'Locations module in workspace nav')
-assert.match(projectDetail, /<LocationsPanel projectId=\{projectId\} \/>/, 'Locations panel rendered')
+assert.match(projectDetail, /<LocationsPanel projectId=\{projectId\}[\s/]/, 'Locations panel rendered')
 
 const locationsPanel = read('src/features/locations/components/locations-panel.tsx')
 const locationsHook = read('src/features/locations/hooks/use-locations.ts')

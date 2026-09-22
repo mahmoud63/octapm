@@ -55,8 +55,12 @@ const assertions = [
     checks: ['MONEY_INPUT_STEP', 'hasMoneyPrecision', 'toMoneyNumber'],
   },
   {
+    // Legacy sub-valuations became read-only (a96a240): the rule is that any
+    // money field it grows must carry the precision helpers, not that the
+    // helpers be imported by a panel with no fields at all.
     file: 'src/features/commercial/components/sub-valuations-panel.tsx',
     checks: ['MONEY_INPUT_STEP', 'hasMoneyPrecision', 'toMoneyNumber'],
+    onlyWhen: /<Input|type=["']number["']/,
   },
   {
     file: 'src/features/commercial/components/change-order-form.tsx',
@@ -70,6 +74,7 @@ const assertions = [
 
 for (const assertion of assertions) {
   const source = read(assertion.file)
+  if (assertion.onlyWhen && !assertion.onlyWhen.test(source)) continue
   for (const check of assertion.checks) {
     if (!source.includes(check)) {
       throw new Error(`${assertion.file} is missing ${check}`)
