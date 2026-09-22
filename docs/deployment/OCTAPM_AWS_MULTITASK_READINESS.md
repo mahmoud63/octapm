@@ -76,10 +76,19 @@ There is no Docker on this machine, so the image is proven by the **Container Im
 
 Its first run failed, usefully: `COPY --chmod` had created `/app` without the execute bit, so the `node` user could not reach its own code, and `npm ci` in `mobile/` needed the `--legacy-peer-deps` every local install already used (now `mobile/.npmrc`). Both fixed in `e9ba3cc`.
 
+## Closed since: webhooks could reach private addresses (SSRF)
+
+An organisation chose a webhook URL and the API made the request from inside the VPC, so a webhook could be aimed at the task's credentials endpoint (169.254.170.2), instance metadata (169.254.169.254, fd00:ec2::254) or any internal host. Now (`utils/public-address.js`, `services/webhook.service.js`):
+
+- **At save** (create, URL change, re-enable) the host is resolved and refused with 400 `WEBHOOK_TARGET_REFUSED` if any address is loopback, private (10/8, 172.16/12, 192.168/16), link-local (169.254/16, fe80::/10), unique-local (fc00::/7), CGNAT (100.64/10), 0.0.0.0/8, multicast or reserved — including the IPv4-mapped, translated, compatible, NAT64 and 6to4 IPv6 forms of those. A host that does not resolve is refused with `WEBHOOK_URL_UNRESOLVED`.
+- **At every delivery** the socket connects only to an address the check accepted: the check runs inside the connection's own DNS lookup, so a second, different answer (DNS rebinding) is never asked for. Only 307/308 redirects are followed (at most three), each hop checked the same way; other redirects fail the attempt with their status. A refused delivery is an ordinary failed delivery — retried, then dead — with `Refused: <host> resolves to <address>, a <kind> address (<range>)` as its error.
+- **`WEBHOOK_ALLOW_HTTP=true`** still lets a developer use a receiver on their own machine (plain http, loopback only). It is ignored under `NODE_ENV=production`, and never opens private, link-local or metadata addresses.
+
+Proof: `services/__live__/webhook-ssrf.live` (47 tests: real Postgres, receivers on 127.0.0.1 that count TCP connections, a fake DNS zone, the real API for the error envelope and *Send test*). Removing the address check fails 41; removing the pinning (check on one lookup, connect on another) fails the rebinding test with a connection to the internal receiver; removing the delivery-time check fails the 12 delivery tests. The check is an address list; the task security group's egress rules (AWS-2) are the second layer, and the only one that knows about a VPC built on non-RFC 1918 ranges.
+
 ## Deferred, with reasons
 
 - **TOTP codes can be replayed within their 90-second window, and a backup code can be spent twice by two requests at once.** Needs a column (`User.mfaLastTotpStep`) and a compare-and-set; it is not specific to running several tasks.
-- **Webhooks can target private addresses** (SSRF). Pre-existing; needs an address check at delivery time.
 - **The commitments execute route leaks its temporary upload.** Pre-existing, harmless on Fargate (ephemeral disk) but should be closed.
 - **Web links (`<img src>`, `<a href>`) to `/api/v1/...` cannot send the bearer token**, so those downloads already fail before S3 is involved; a JSON download mode (`?redirect=false`) is the follow-up.
 - **Inbound email** needs a receiving path (SES receipt rules or a vendor webhook); production refuses `INBOUND_EMAIL_DOMAIN` until then.

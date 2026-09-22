@@ -196,11 +196,15 @@ liveDescribe("realtime across API and worker processes", () => {
       },
     });
 
+    // The hook listens on 127.0.0.1, which webhooks reach only through the
+    // local-development escape hatch — here and in every spawned process.
+    process.env.WEBHOOK_ALLOW_HTTP = "true";
     shared = {
       REALTIME_ADAPTER: "postgres",
       REALTIME_CHANNEL_PREFIX: prefix,
       REALTIME_POOL_MAX: "2",
       DATABASE_URL: withPool(process.env.DATABASE_URL, 3),
+      WEBHOOK_ALLOW_HTTP: "true",
     };
     [portA, portB] = [await freePort(), await freePort()];
     apiA = spawnNode("src/index.js", { env: { ...shared, PORT: String(portA) } });

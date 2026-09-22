@@ -46,8 +46,16 @@ jest.mock("../audit.service", () => mockAudit);
 jest.mock("../../jobs/job.service", () => mockJobs);
 jest.mock("../notification.service", () => mockNotifications);
 
+const dns = require("dns");
 const bus = require("../../events/bus");
 const service = require("../webhook.service");
+
+// Saving a subscription resolves its host; these names answer from here.
+const fakeDns = { "erp.example.com": [{ address: "93.184.215.14", family: 4 }], "intranet.example.com": [{ address: "10.20.30.40", family: 4 }], "split.example.com": [{ address: "93.184.215.14", family: 4 }, { address: "fd00:ec2::254", family: 6 }] };
+jest.spyOn(dns, "lookup").mockImplementation((hostname, options, callback) => {
+  if (fakeDns[hostname]) return callback(null, fakeDns[hostname]);
+  return callback(Object.assign(new Error(`getaddrinfo ENOTFOUND ${hostname}`), { code: "ENOTFOUND", hostname }));
+});
 
 const actor = { id: "admin-1" };
 const okResponse = (status = 200, text = "ok") => ({ status, text: async () => text });
@@ -68,6 +76,38 @@ describe("webhooks", () => {
     const listed = await service.listSubscriptions({ orgId: "org-1" });
     expect(listed[0].secret).toBeNull();
     expect(listed[0].secretHint).toMatch(/^whsec_/);
+  });
+
+  it("refuses, at save, a target that is or resolves to a non-public address", async () => {
+    const save = (url) => service.createSubscription({ orgId: "org-1", actor, payload: { name: "Inside", url, eventTypes: ["*"] } });
+    await expect(save("https://169.254.169.254/latest/meta-data/")).rejects.toMatchObject({ code: "WEBHOOK_TARGET_REFUSED", message: expect.stringContaining("169.254.169.254 is a link-local address") });
+    await expect(save("https://[::ffff:127.0.0.1]/hook")).rejects.toMatchObject({ code: "WEBHOOK_TARGET_REFUSED", message: expect.stringContaining("in IPv4-mapped form") });
+    await expect(save("https://intranet.example.com/hook")).rejects.toMatchObject({ code: "WEBHOOK_TARGET_REFUSED", message: expect.stringContaining("intranet.example.com resolves to 10.20.30.40, a private address") });
+    await expect(save("https://split.example.com/hook")).rejects.toMatchObject({ code: "WEBHOOK_TARGET_REFUSED", message: expect.stringContaining("fd00:ec2::254, a unique-local address") });
+    await expect(save("https://nowhere.example.com/hook")).rejects.toMatchObject({ code: "WEBHOOK_URL_UNRESOLVED" });
+    expect(store.subscriptions).toHaveLength(0);
+
+    const sub = await save("https://erp.example.com/hook");
+    await expect(service.updateSubscription({ orgId: "org-1", actor, subscriptionId: sub.id, payload: { url: "https://intranet.example.com/hook" } })).rejects.toMatchObject({ code: "WEBHOOK_TARGET_REFUSED" });
+    expect(store.subscriptions[0].url).toBe("https://erp.example.com/hook");
+  });
+
+  it("honours WEBHOOK_ALLOW_HTTP for loopback receivers only, and never under production", async () => {
+    const saved = { NODE_ENV: process.env.NODE_ENV, WEBHOOK_ALLOW_HTTP: process.env.WEBHOOK_ALLOW_HTTP };
+    const save = (url) => service.createSubscription({ orgId: "org-1", actor, payload: { name: "Local", url, eventTypes: ["*"] } });
+    try {
+      process.env.WEBHOOK_ALLOW_HTTP = "true";
+      await expect(save("http://127.0.0.1:4000/hook")).resolves.toMatchObject({ url: "http://127.0.0.1:4000/hook" });
+      await expect(save("http://10.0.0.5/hook")).rejects.toMatchObject({ code: "WEBHOOK_TARGET_REFUSED" });
+      process.env.NODE_ENV = "production";
+      await expect(save("http://127.0.0.1:4000/hook")).rejects.toMatchObject({ code: "WEBHOOK_URL_INVALID" });
+      await expect(save("https://127.0.0.1:4000/hook")).rejects.toMatchObject({ code: "WEBHOOK_TARGET_REFUSED" });
+    } finally {
+      for (const [key, value] of Object.entries(saved)) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+    }
   });
 
   it("matches events by bus type or <entity>.<action> and honours project scope", () => {

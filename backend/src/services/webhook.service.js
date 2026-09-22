@@ -1,6 +1,10 @@
 const crypto = require("crypto");
+const http = require("http");
+const https = require("https");
+const net = require("net");
 const { prisma } = require("../config/db");
 const { HttpError } = require("../utils/http-error");
+const { AddressRefusedError, bareAddress, publicLookup, refusedRange, resolvePublicAddresses } = require("../utils/public-address");
 const domainEvents = require("../events/bus");
 const auditService = require("./audit.service");
 
@@ -10,14 +14,35 @@ const auditService = require("./audit.service");
  * WebhookDelivery row and a `webhook.deliver` job. Deliveries are signed
  * (HMAC-SHA256 over `<timestamp>.<body>`) and retried by the job queue up to
  * MAX_ATTEMPTS times before they are marked dead.
+ *
+ * A webhook may only reach a public address. The organisation picks the URL
+ * but the server makes the request, from inside the VPC, next to the task's
+ * credentials endpoint and every internal host. So the target is resolved and
+ * checked when the subscription is saved, and again on every delivery — there
+ * against the very address the socket connects to (publicLookup), and on every
+ * redirect hop.
  */
 
 const MAX_ATTEMPTS = 5;
 const TIMEOUT_MS = 10_000;
 const RESPONSE_BODY_LIMIT = 1000;
+const RESPONSE_READ_LIMIT = RESPONSE_BODY_LIMIT * 4;
 const DISABLE_AFTER_DEAD = 10;
+const MAX_REDIRECTS = 3;
+// The two redirects that keep the method and the body; anything else would
+// turn the signed POST into a bodyless GET, so it is answered as it stands.
+const FOLLOWED_REDIRECTS = new Set([307, 308]);
 const SIGNATURE_HEADER = "x-octapm-signature";
 const SIGNATURE_TOLERANCE_S = 300;
+
+/**
+ * WEBHOOK_ALLOW_HTTP=true is for a developer's own receiver: plain http, and
+ * loopback addresses. Never honoured under NODE_ENV=production, and even with
+ * it every other refused range (private, link-local, metadata, CGNAT) stays
+ * refused.
+ */
+const localReceiversAllowed = () => process.env.NODE_ENV !== "production" && process.env.WEBHOOK_ALLOW_HTTP === "true";
+const httpAllowed = () => localReceiversAllowed() || process.env.NODE_ENV === "test";
 
 const EVENT_TYPES = Object.freeze([
   { key: "*", label: "Everything" },
@@ -70,9 +95,21 @@ const normalizeUrl = (value) => {
   } catch {
     throw new HttpError(400, "WEBHOOK_URL_INVALID", "The URL is not valid");
   }
-  const allowHttp = process.env.WEBHOOK_ALLOW_HTTP === "true" || process.env.NODE_ENV === "test";
-  if (url.protocol !== "https:" && !(allowHttp && url.protocol === "http:")) throw new HttpError(400, "WEBHOOK_URL_INVALID", "Webhooks must use https");
+  if (url.protocol !== "https:" && !(httpAllowed() && url.protocol === "http:")) throw new HttpError(400, "WEBHOOK_URL_INVALID", "Webhooks must use https");
   return url.toString();
+};
+
+/** normalizeUrl, then the address check every delivery repeats. */
+const checkedUrl = async (value) => {
+  const url = normalizeUrl(value);
+  const { hostname } = new URL(url);
+  try {
+    await resolvePublicAddresses(hostname, { allowLoopback: localReceiversAllowed() });
+  } catch (error) {
+    if (error instanceof AddressRefusedError) throw new HttpError(400, "WEBHOOK_TARGET_REFUSED", `${error.message}. Webhooks can only be delivered to public internet addresses.`);
+    throw new HttpError(400, "WEBHOOK_URL_UNRESOLVED", `${bareAddress(hostname)} could not be resolved (${error.code || error.message})`);
+  }
+  return url;
 };
 
 const newSecret = () => `whsec_${crypto.randomBytes(24).toString("base64url")}`;
@@ -134,7 +171,7 @@ const getSubscription = async ({ orgId, subscriptionId, revealSecret = false }) 
 const createSubscription = async ({ orgId, actor, payload = {} }) => {
   const name = trimOrNull(payload.name);
   if (!name) throw new HttpError(400, "WEBHOOK_NAME_REQUIRED", "Give the webhook a name");
-  const url = normalizeUrl(payload.url);
+  const url = await checkedUrl(payload.url);
   const eventTypes = normalizeEventTypes(payload.eventTypes);
   const projectId = trimOrNull(payload.projectId);
   if (projectId) {
@@ -155,12 +192,14 @@ const updateSubscription = async ({ orgId, actor, subscriptionId, payload = {} }
     if (!data.name) throw new HttpError(400, "WEBHOOK_NAME_REQUIRED", "Give the webhook a name");
   }
   if (payload.description !== undefined) data.description = trimOrNull(payload.description);
-  if (payload.url !== undefined) data.url = normalizeUrl(payload.url);
+  if (payload.url !== undefined) data.url = await checkedUrl(payload.url);
   if (payload.eventTypes !== undefined) data.eventTypes = normalizeEventTypes(payload.eventTypes);
   if (payload.status !== undefined) {
     if (!["active", "paused"].includes(payload.status)) throw new HttpError(400, "WEBHOOK_STATUS", "Status must be active or paused");
     data.status = payload.status;
     if (payload.status === "active") data.failureCount = 0;
+    // Re-enabling puts a URL saved earlier back into service: check it again.
+    if (payload.status === "active" && data.url === undefined) await checkedUrl(existing.url);
   }
   const row = await prisma.webhookSubscription.update({ where: { id: existing.id }, data, include });
   await auditService.recordEvent({ orgId, projectId: row.projectId, entityType: auditService.ENTITY_TYPES.WEBHOOK || "webhook", entityId: row.id, action: auditService.ACTIONS.UPDATED, actorId: actor?.id || null, summary: { name: row.name, fields: Object.keys(payload) } }).catch(() => null);
@@ -252,8 +291,62 @@ const fanOut = async (event) => {
 
 const truncate = (text) => (text ? String(text).slice(0, RESPONSE_BODY_LIMIT) : null);
 
+const refused = (detail) => Object.assign(new Error(`Refused: ${detail}; webhooks are delivered to public internet addresses only`), { code: "WEBHOOK_TARGET_REFUSED" });
+
+/** One POST whose socket connects only to an address that passed the check. */
+const postOnce = (url, { headers, body, signal }) =>
+  new Promise((resolve, reject) => {
+    const allowLoopback = localReceiversAllowed();
+    const host = bareAddress(url.hostname);
+    // Node does not call `lookup` for an IP literal, so a literal is judged here.
+    const refusal = net.isIP(host) ? refusedRange(host, { allowLoopback }) : null;
+    if (refusal) return reject(new AddressRefusedError({ address: host, refusal }));
+    const request = (url.protocol === "https:" ? https : http).request(
+      url,
+      { method: "POST", headers: { ...headers, "content-length": Buffer.byteLength(body) }, agent: false, lookup: publicLookup({ allowLoopback }), signal },
+      (response) => {
+        const chunks = [];
+        let size = 0;
+        const finish = () => resolve({ status: response.statusCode, headers: response.headers, text: async () => Buffer.concat(chunks).toString("utf8") });
+        response.on("data", (chunk) => {
+          chunks.push(chunk);
+          size += chunk.length;
+          if (size >= RESPONSE_READ_LIMIT) response.destroy();
+        });
+        response.on("end", finish);
+        response.on("close", finish);
+      },
+    );
+    request.on("error", reject);
+    request.end(body);
+  });
+
+/**
+ * runDeliveryJob's transport. POSTs the signed body and follows up to
+ * MAX_REDIRECTS 307/308 redirects, each hop held to the same scheme and
+ * address rules as the first; a hop that breaks them fails the attempt.
+ */
+const deliverRequest = async (target, { headers, body, signal }) => {
+  let url = new URL(target);
+  for (let hop = 0; ; hop += 1) {
+    const via = hop ? `redirect to ${url.href}: ` : "";
+    if (url.protocol !== "https:" && !(url.protocol === "http:" && httpAllowed())) throw refused(`${via}webhooks must use https, not ${url.protocol.replace(/:$/, "")}`);
+    let response;
+    try {
+      response = await postOnce(url, { headers, body, signal });
+    } catch (error) {
+      if (error instanceof AddressRefusedError) throw refused(`${via}${error.message}`);
+      throw error;
+    }
+    const location = response.headers.location;
+    if (!FOLLOWED_REDIRECTS.has(response.status) || !location) return response;
+    if (hop === MAX_REDIRECTS) throw new Error(`Gave up after ${MAX_REDIRECTS} redirects`);
+    url = new URL(location, url);
+  }
+};
+
 /** Job handler: one HTTP attempt for one delivery. Throws retryable errors until MAX_ATTEMPTS. */
-const runDeliveryJob = async ({ payload = {}, fetchImpl = globalThis.fetch, now = () => new Date() } = {}) => {
+const runDeliveryJob = async ({ payload = {}, fetchImpl = deliverRequest, now = () => new Date() } = {}) => {
   const delivery = await prisma.webhookDelivery.findUnique({ where: { id: payload.deliveryId }, include: { subscription: true } });
   if (!delivery) return { skipped: "missing" };
   if (delivery.status === "delivered") return { skipped: "delivered" };
@@ -285,6 +378,7 @@ const runDeliveryJob = async ({ payload = {}, fetchImpl = globalThis.fetch, now 
       responseStatus = response.status;
       responseBody = truncate(await response.text().catch(() => ""));
       if (response.status < 200 || response.status >= 300) error = `Endpoint answered ${response.status}`;
+      if (response.status >= 300 && response.status < 400 && !FOLLOWED_REDIRECTS.has(response.status)) error += " (only 307 and 308 redirects are followed)";
     } finally {
       if (timer) clearTimeout(timer);
     }
@@ -329,7 +423,7 @@ const redeliver = async ({ orgId, actor, deliveryId }) => {
 };
 
 /** Sends a synthetic `webhook.test` event to one subscription right away. */
-const sendTest = async ({ orgId, actor, subscriptionId, fetchImpl = globalThis.fetch }) => {
+const sendTest = async ({ orgId, actor, subscriptionId, fetchImpl = deliverRequest }) => {
   const subscription = await prisma.webhookSubscription.findFirst({ where: { id: subscriptionId, orgId } });
   if (!subscription) throw new HttpError(404, "WEBHOOK_NOT_FOUND", "Webhook not found");
   const event = { id: crypto.randomUUID(), type: "webhook.test", orgId, projectId: subscription.projectId || null, entityType: "webhook", entityId: subscription.id, action: "test", actorId: actor?.id || null, occurredAt: new Date(), payload: { message: "Test delivery from OctaPM" } };
