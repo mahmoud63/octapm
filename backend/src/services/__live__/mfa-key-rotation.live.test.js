@@ -60,6 +60,15 @@ liveDescribe("MFA through key rotations", () => {
   const storedSeed = async () =>
     (await prisma.user.findUnique({ where: { id: live.user.id }, select: { mfaSecretEnc: true } })).mfaSecretEnc;
 
+  // The steps below sign in seconds apart, well inside one code's lifetime,
+  // and a code is good once (mfa-totp-replay.live.test.js). This test is about
+  // keys, so each step forgets the last accepted code first; that also keeps
+  // the wrong-key refusal the key's doing rather than the replay rule's.
+  const freshCode = async () => {
+    await prisma.user.update({ where: { id: live.user.id }, data: { mfaLastTotpStep: null } });
+    return totp(secret);
+  };
+
   beforeAll(async () => {
     live = await createLiveOrg(prisma);
   });
@@ -85,14 +94,14 @@ liveDescribe("MFA through key rotations", () => {
 
   it("survives a JWT_SECRET rotation", async () => {
     await withApi({ MFA_SECRET_KEY: K1, JWT_SECRET: J2 }, async (target) => {
-      const verified = await signIn(target, totp(secret));
+      const verified = await signIn(target, await freshCode());
       expect(verified.status).toBe(200);
     });
   });
 
   it("moves from K1 to K2 with K1 as PREVIOUS, and re-seals the seed under K2", async () => {
     await withApi({ MFA_SECRET_KEY: K2, MFA_SECRET_KEY_PREVIOUS: K1 }, async (target) => {
-      const verified = await signIn(target, totp(secret));
+      const verified = await signIn(target, await freshCode());
       expect(verified.status).toBe(200);
     });
     const sealed = await storedSeed();
@@ -102,14 +111,14 @@ liveDescribe("MFA through key rotations", () => {
 
   it("keeps working once PREVIOUS is removed", async () => {
     await withApi({ MFA_SECRET_KEY: K2 }, async (target) => {
-      const verified = await signIn(target, totp(secret));
+      const verified = await signIn(target, await freshCode());
       expect(verified.status).toBe(200);
     });
   });
 
   it("under a key that opens nothing, refuses the code cleanly and still accepts a backup code", async () => {
     await withApi({ MFA_SECRET_KEY: WRONG }, async (target) => {
-      const refused = await signIn(target, totp(secret));
+      const refused = await signIn(target, await freshCode());
       expect(refused.status).toBe(401);
       expect(refused.body.error.code).toBe("MFA_CODE_INVALID");
       const viaBackup = await signIn(target, backupCodes[0]);

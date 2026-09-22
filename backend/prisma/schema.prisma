@@ -171,6 +171,7 @@ model User {
   mfaPendingSecretEnc String?
   mfaEnrolledAt       DateTime?
   mfaBackupCodesJson  Json      @default("[]")
+  mfaLastTotpStep     Int? // newest 30-second step a TOTP code was accepted for; that step or an earlier one is a replay
   ssoSubject          String?
   ssoProvider         String?
   ssoLinkedAt         DateTime?

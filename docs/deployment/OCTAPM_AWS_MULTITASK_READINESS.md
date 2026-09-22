@@ -86,9 +86,18 @@ An organisation chose a webhook URL and the API made the request from inside the
 
 Proof: `services/__live__/webhook-ssrf.live` (47 tests: real Postgres, receivers on 127.0.0.1 that count TCP connections, a fake DNS zone, the real API for the error envelope and *Send test*). Removing the address check fails 41; removing the pinning (check on one lookup, connect on another) fails the rebinding test with a connection to the internal receiver; removing the delivery-time check fails the 12 delivery tests. The check is an address list; the task security group's egress rules (AWS-2) are the second layer, and the only one that knows about a VPC built on non-RFC 1918 ranges.
 
+## Closed since: two-factor codes could be used twice
+
+A TOTP code stays valid for about 90 seconds (its own step and one either side, for clock drift), and nothing recorded that it had been used: the same six digits could sign in again, on any task, or turn two-factor off. Backup codes were spent with a read-modify-write of one JSON column, so two sign-ins at the same moment could both get in on one code — and a sign-in spending a *different* code at the same moment could write back its older list and un-spend the first. Now (`utils/totp.js`, `services/mfa.service.js`, migration `20261003090000_user_mfa_last_totp_step`):
+
+- **`verifyTotp` returns the step a code matched**, and a code is accepted only by `updateMany … where mfaLastTotpStep is null or < step`, which moves `User.mfaLastTotpStep` forward. Of two requests with one code — on one task or two — exactly one updates a row; the other is refused with the same 401 `MFA_CODE_INVALID` as a wrong code (and counts toward the sign-in lockout like one). This covers sign-in, turning two-factor off and regenerating backup codes; the enrolment code counts as used too, and disabling or an admin reset clears the step with the seed.
+- **A backup code is spent by compare-and-set** on the list exactly as read (`updateMany … where mfaBackupCodesJson equals <read>`). The loser of a race reads again and tries once more, so a different code still gets in and neither mark is lost.
+- **Deploy order:** the migration adds a nullable column and nothing else, so it can run before the new image (old code ignores the column); the new code needs it.
+
+Proof: `services/__live__/mfa-totp-replay.live` (two API processes on one database: one code sent to both at once gets in once; replays on either task, the enrolment code, and a spent code offered to *regenerate backup codes* or *turn off* are all refused exactly like a wrong code; the next step's code still works) and `services/__live__/mfa-backup-code-race.live` (the two-reads-before-either-write interleaving through the real service and database, then concurrent HTTP requests to two API processes). With `mfa.service.js` and `totp.js` put back as they were, all four tests fail — both tasks accept one TOTP code, a code regenerates backup codes twice, a spent backup code is spent again, both tasks accept one backup code — and pass again with the fix. `mfa-key-rotation.live` signs in several times within seconds, so it now forgets the last accepted step before each sign-in; it is about keys, and replay has its own test.
+
 ## Deferred, with reasons
 
-- **TOTP codes can be replayed within their 90-second window, and a backup code can be spent twice by two requests at once.** Needs a column (`User.mfaLastTotpStep`) and a compare-and-set; it is not specific to running several tasks.
 - **The commitments execute route leaks its temporary upload.** Pre-existing, harmless on Fargate (ephemeral disk) but should be closed.
 - **Web links (`<img src>`, `<a href>`) to `/api/v1/...` cannot send the bearer token**, so those downloads already fail before S3 is involved; a JSON download mode (`?redirect=false`) is the follow-up.
 - **Inbound email** needs a receiving path (SES receipt rules or a vendor webhook); production refuses `INBOUND_EMAIL_DOMAIN` until then.

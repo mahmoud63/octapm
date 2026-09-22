@@ -19,15 +19,20 @@ describe("totp", () => {
     expect(totp(SECRET, { time: 20000000000 * 1000 })).toBe("353130");
   });
 
-  it("verifies within one step of drift and rejects malformed codes", () => {
+  it("verifies within one step of drift, returns the step the code belongs to, and rejects malformed codes", () => {
     const time = 1111111109 * 1000;
-    expect(verifyTotp(SECRET, "081804", { time })).toBe(true);
-    expect(verifyTotp(SECRET, "081 804", { time })).toBe(true);
-    expect(verifyTotp(SECRET, "081804", { time: time + 30 * 1000 })).toBe(true);
-    expect(verifyTotp(SECRET, "081804", { time: time + 90 * 1000 })).toBe(false);
-    expect(verifyTotp(SECRET, "000000", { time })).toBe(false);
-    expect(verifyTotp(SECRET, "81804", { time })).toBe(false);
-    expect(verifyTotp(SECRET, "", { time })).toBe(false);
+    const step = Math.floor(1111111109 / 30);
+    expect(verifyTotp(SECRET, "081804", { time })).toBe(step);
+    expect(verifyTotp(SECRET, "081 804", { time })).toBe(step);
+    // Thirty seconds later the same code still matches — as the step it was made for.
+    expect(verifyTotp(SECRET, "081804", { time: time + 30 * 1000 })).toBe(step);
+    expect(verifyTotp(SECRET, hotp(SECRET, step + 1), { time })).toBe(step + 1);
+    expect(verifyTotp(SECRET, "081804", { time: time + 90 * 1000 })).toBeNull();
+    expect(verifyTotp(SECRET, "000000", { time })).toBeNull();
+    expect(verifyTotp(SECRET, "81804", { time })).toBeNull();
+    expect(verifyTotp(SECRET, "", { time })).toBeNull();
+    // Step 0 is a real step, not a miss — callers compare with null.
+    expect(verifyTotp(SECRET, hotp(SECRET, 0), { time: 0, window: 0 })).toBe(0);
   });
 
   it("builds the otpauth URL authenticator apps scan", () => {

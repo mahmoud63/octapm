@@ -56,16 +56,22 @@ const counterFor = (time, step) => Math.floor(time / 1000 / step);
 
 const totp = (secret, { time = Date.now(), step = 30, digits = 6 } = {}) => hotp(secret, counterFor(time, step), digits);
 
-/** True when `code` matches the current step or one step either side (clock drift). */
+/**
+ * The time step `code` matches — the current one or one either side (clock
+ * drift) — or null when it matches none. A match alone does not make a code
+ * good: the caller must also refuse a step it has already accepted a code for
+ * (RFC 6238 §5.2), which is why the step is returned rather than a boolean.
+ * Compare with `!== null`, not truthiness: 0 is a step.
+ */
 const verifyTotp = (secret, code, { time = Date.now(), step = 30, digits = 6, window = 1 } = {}) => {
   const clean = String(code || "").replace(/[\s-]/g, "");
-  if (!new RegExp(`^\\d{${digits}}$`).test(clean)) return false;
+  if (!new RegExp(`^\\d{${digits}}$`).test(clean)) return null;
   const counter = counterFor(time, step);
   for (let drift = -window; drift <= window; drift += 1) {
     const expected = hotp(secret, counter + drift, digits);
-    if (expected.length === clean.length && crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(clean))) return true;
+    if (expected.length === clean.length && crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(clean))) return counter + drift;
   }
-  return false;
+  return null;
 };
 
 const otpauthUrl = ({ issuer, account, secret, digits = 6, period = 30 }) =>

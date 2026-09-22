@@ -3,6 +3,15 @@ const bcrypt = require("bcryptjs");
 const store = { users: [], sessions: [], audit: [] };
 const ORG = { id: "org-1", name: "Constech", mfaRequired: false, ssoEnabled: false, ssoRequired: false, ssoDomainsJson: [] };
 
+// Just enough of Prisma's filters for the service's conditional writes.
+const matches = (row, where) =>
+  Object.entries(where).every(([key, condition]) => {
+    if (key === "OR") return condition.some((branch) => matches(row, branch));
+    if (condition && typeof condition === "object" && "lt" in condition) return row[key] !== null && row[key] < condition.lt;
+    if (condition && typeof condition === "object" && "equals" in condition) return JSON.stringify(row[key]) === JSON.stringify(condition.equals);
+    return row[key] === condition;
+  });
+
 const mockPrisma = {
   organisation: { findUnique: jest.fn(async ({ where }) => (where.id === ORG.id ? { ...ORG } : null)) },
   user: {
@@ -20,6 +29,11 @@ const mockPrisma = {
       store.users[index] = { ...store.users[index], ...data };
       return { ...store.users[index] };
     }),
+    updateMany: jest.fn(async ({ where, data }) => {
+      let count = 0;
+      store.users = store.users.map((user) => (matches(user, where) ? (count += 1, { ...user, ...data }) : user));
+      return { count };
+    }),
   },
   refreshSession: { create: jest.fn(async ({ data }) => store.sessions.push(data)) },
   authAuditEvent: { create: jest.fn(async ({ data }) => store.audit.push(data)) },
@@ -34,6 +48,9 @@ const authService = require("../auth.service");
 const authAbuse = require("../auth-abuse.service");
 
 const password = "Sunny-Day-42";
+// A code is good once, so each accepted use takes its own step inside the
+// drift window: -1 the previous step's code, 0 the current one, 1 the next.
+const codeFor = (secret, offset = 0) => totp(secret, { time: Date.now() + offset * 30_000 });
 
 describe("two-factor authentication", () => {
   beforeAll(() => {
@@ -42,7 +59,7 @@ describe("two-factor authentication", () => {
     process.env.MFA_SECRET_KEY = "test-mfa-key";
   });
   beforeEach(() => {
-    store.users = [{ id: "u-1", orgId: "org-1", name: "Pat", email: "pat@example.com", passwordHash: bcrypt.hashSync(password, 4), role: "pm", isCompanyAdmin: false, status: "active", mfaEnabled: false, mfaSecretEnc: null, mfaPendingSecretEnc: null, mfaEnrolledAt: null, mfaBackupCodesJson: [], ssoSubject: null }];
+    store.users = [{ id: "u-1", orgId: "org-1", name: "Pat", email: "pat@example.com", passwordHash: bcrypt.hashSync(password, 4), role: "pm", isCompanyAdmin: false, status: "active", mfaEnabled: false, mfaSecretEnc: null, mfaPendingSecretEnc: null, mfaEnrolledAt: null, mfaLastTotpStep: null, mfaBackupCodesJson: [], ssoSubject: null }];
     store.sessions = [];
     store.audit = [];
     ORG.mfaRequired = false;
@@ -80,12 +97,16 @@ describe("two-factor authentication", () => {
 
     await expect(authService.completeMfaLogin({ mfaToken: challenge.mfaToken, code: "123456" })).rejects.toMatchObject({ code: "MFA_CODE_INVALID" });
     await expect(authService.completeMfaLogin({ mfaToken: "not-a-token", code: totp(setup.secret) })).rejects.toMatchObject({ code: "MFA_CHALLENGE_INVALID" });
-    const session = await authService.completeMfaLogin({ mfaToken: challenge.mfaToken, code: totp(setup.secret) }, { ipAddress: "10.0.0.1" });
+    // The enrolment code is spent; the next step's code is not.
+    await expect(authService.completeMfaLogin({ mfaToken: challenge.mfaToken, code: totp(setup.secret) })).rejects.toMatchObject({ code: "MFA_CODE_INVALID" });
+    const loginCode = codeFor(setup.secret, 1);
+    const session = await authService.completeMfaLogin({ mfaToken: challenge.mfaToken, code: loginCode }, { ipAddress: "10.0.0.1" });
     expect(session.user).toMatchObject({ id: "u-1", mfaEnabled: true });
     expect(session.tokens.accessToken).toMatch(/^eyJ/);
     expect(session.refreshToken).toMatch(/^eyJ/);
     expect(store.sessions).toHaveLength(1);
     expect(store.audit.map((row) => row.action)).toEqual(expect.arrayContaining(["mfa.challenged", "mfa.verified"]));
+    await expect(authService.completeMfaLogin({ mfaToken: challenge.mfaToken, code: loginCode })).rejects.toMatchObject({ code: "MFA_CODE_INVALID" });
 
     const again = await authService.login({ email: "pat@example.com", password }, {});
     const viaBackup = await authService.completeMfaLogin({ mfaToken: again.mfaToken, code: backupCodes[3] });
@@ -102,19 +123,22 @@ describe("two-factor authentication", () => {
     expect((await mfaService.status({ userId: "u-1" })).enrollmentRequired).toBe(true);
     const setup = await mfaService.beginEnrollment({ userId: "u-1" });
     await mfaService.enable({ userId: "u-1", code: totp(setup.secret) });
-    await expect(mfaService.disable({ userId: "u-1", password, code: totp(setup.secret) })).rejects.toMatchObject({ code: "MFA_REQUIRED_BY_ORG" });
+    await expect(mfaService.disable({ userId: "u-1", password, code: codeFor(setup.secret, 1) })).rejects.toMatchObject({ code: "MFA_REQUIRED_BY_ORG" });
     await expect(mfaService.disable({ userId: "u-1", password: "wrong", code: totp(setup.secret) })).rejects.toMatchObject({ code: "INVALID_CREDENTIALS" });
     const reset = await mfaService.adminReset({ orgId: "org-1", userId: "u-1", actor: { id: "u-admin" } });
     expect(reset.reset).toBe(true);
-    expect(store.users[0]).toMatchObject({ mfaEnabled: false, mfaSecretEnc: null, mfaBackupCodesJson: [] });
+    expect(store.users[0]).toMatchObject({ mfaEnabled: false, mfaSecretEnc: null, mfaLastTotpStep: null, mfaBackupCodesJson: [] });
     expect(store.audit.at(-1)).toMatchObject({ action: "mfa.reset_by_admin", actorId: "u-admin" });
     ORG.mfaRequired = false;
     const setupAgain = await mfaService.beginEnrollment({ userId: "u-1" });
-    await mfaService.enable({ userId: "u-1", code: totp(setupAgain.secret) });
-    const regenerated = await mfaService.regenerateBackupCodes({ userId: "u-1", code: totp(setupAgain.secret) });
+    await mfaService.enable({ userId: "u-1", code: codeFor(setupAgain.secret, -1) });
+    const regenerateCode = codeFor(setupAgain.secret, 0);
+    const regenerated = await mfaService.regenerateBackupCodes({ userId: "u-1", code: regenerateCode });
     expect(regenerated.backupCodes).toHaveLength(10);
-    const disabled = await mfaService.disable({ userId: "u-1", password, code: totp(setupAgain.secret) });
+    await expect(mfaService.regenerateBackupCodes({ userId: "u-1", code: regenerateCode })).rejects.toMatchObject({ code: "MFA_CODE_INVALID" });
+    const disabled = await mfaService.disable({ userId: "u-1", password, code: codeFor(setupAgain.secret, 1) });
     expect(disabled.enabled).toBe(false);
+    expect(store.users[0].mfaLastTotpStep).toBeNull();
   });
 
   it("refuses password login for SSO-only domains except company admins", async () => {

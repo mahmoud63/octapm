@@ -103,28 +103,65 @@ const enable = async ({ userId, code, context = {} }) => {
   const user = await loadUser(userId);
   const pending = unseal(user.mfaPendingSecretEnc);
   if (!pending) throw new HttpError(409, "MFA_NOT_PENDING", "Start the setup first to get a QR code");
-  if (!verifyTotp(pending.value, code)) throw new HttpError(400, "MFA_CODE_INVALID", "That code is not valid — check the time on your device and try the next code");
+  const step = verifyTotp(pending.value, code);
+  if (step === null) throw new HttpError(400, "MFA_CODE_INVALID", "That code is not valid — check the time on your device and try the next code");
   const codes = newBackupCodes();
-  await prisma.user.update({ where: { id: userId }, data: { mfaEnabled: true, mfaSecretEnc: pending.stale ? seal(pending.value) : user.mfaPendingSecretEnc, mfaPendingSecretEnc: null, mfaEnrolledAt: new Date(), mfaBackupCodesJson: codes.map((value) => ({ hash: hashCode(value), usedAt: null })) } });
+  // The enrolment code counts as used, so it cannot then sign in as well.
+  await prisma.user.update({ where: { id: userId }, data: { mfaEnabled: true, mfaSecretEnc: pending.stale ? seal(pending.value) : user.mfaPendingSecretEnc, mfaPendingSecretEnc: null, mfaEnrolledAt: new Date(), mfaLastTotpStep: step, mfaBackupCodesJson: codes.map((value) => ({ hash: hashCode(value), usedAt: null })) } });
   await audit({ orgId: user.orgId, userId, action: "mfa.enabled", context });
   return { enabled: true, backupCodes: codes };
 };
 
-/** Checks a TOTP code or consumes a backup code. */
+/**
+ * Spends the time step a TOTP code matched. A code is good once (RFC 6238
+ * §5.2): the newest accepted step is kept on the user, and a code only counts
+ * for a later one. The write is conditional, so when the same code arrives
+ * twice at once — on one API task or on two — exactly one request moves the
+ * step forward and the other updates nothing and is refused.
+ */
+const spendTotpStep = async (userId, step) => {
+  const { count } = await prisma.user.updateMany({ where: { id: userId, OR: [{ mfaLastTotpStep: null }, { mfaLastTotpStep: { lt: step } }] }, data: { mfaLastTotpStep: step } });
+  return count > 0;
+};
+
+/**
+ * Marks a backup code used. The codes live in one JSON column, so the write is
+ * a compare-and-set on the list exactly as it was read: of two sign-ins
+ * spending the same code at once only one succeeds, and neither can overwrite
+ * the other's mark with its older copy of the list. The loser of a race reads
+ * the list again and tries once more — its own code may still be unspent.
+ */
+const spendBackupCode = async (user, code) => {
+  const hash = hashCode(code);
+  let read = user.mfaBackupCodesJson;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    if (attempt > 0) {
+      const fresh = await prisma.user.findUnique({ where: { id: user.id }, select: { mfaBackupCodesJson: true } });
+      if (!fresh) return false;
+      read = fresh.mfaBackupCodesJson;
+    }
+    const rows = backupRows({ mfaBackupCodesJson: read });
+    const index = rows.findIndex((row) => !row.usedAt && row.hash === hash);
+    if (index < 0) return false;
+    const next = rows.map((row, position) => (position === index ? { ...row, usedAt: new Date().toISOString() } : row));
+    const { count } = await prisma.user.updateMany({ where: { id: user.id, mfaBackupCodesJson: { equals: read } }, data: { mfaBackupCodesJson: next } });
+    if (count > 0) return true;
+  }
+  return false;
+};
+
+/** Checks a TOTP code or consumes a backup code; a replayed code fails exactly like a wrong one. */
 const verifyCode = async ({ user, code }) => {
   const clean = String(code || "").trim();
   if (!clean) return false;
   const opened = unseal(user.mfaSecretEnc);
-  if (opened && verifyTotp(opened.value, clean)) {
+  const step = opened ? verifyTotp(opened.value, clean) : null;
+  if (step !== null) {
+    if (!(await spendTotpStep(user.id, step))) return false;
     await resealIfStale(user, opened);
     return true;
   }
-  const rows = backupRows(user);
-  const hash = hashCode(clean);
-  const index = rows.findIndex((row) => !row.usedAt && row.hash === hash);
-  if (index < 0) return false;
-  rows[index] = { ...rows[index], usedAt: new Date().toISOString() };
-  await prisma.user.update({ where: { id: user.id }, data: { mfaBackupCodesJson: rows } });
+  if (!(await spendBackupCode(user, clean))) return false;
   await resealIfStale(user, opened);
   return true;
 };
@@ -147,7 +184,7 @@ const disable = async ({ userId, password, code, context = {} }) => {
   if (!password || !(await bcrypt.compare(String(password), user.passwordHash))) throw new HttpError(401, "INVALID_CREDENTIALS", "Password is incorrect");
   if (!(await verifyCode({ user, code }))) throw new HttpError(400, "MFA_CODE_INVALID", "That code is not valid");
   if (user.org?.mfaRequired && !user.isCompanyAdmin) throw new HttpError(403, "MFA_REQUIRED_BY_ORG", "Your organisation requires two-factor authentication; ask a company admin to reset it instead");
-  await prisma.user.update({ where: { id: userId }, data: { mfaEnabled: false, mfaSecretEnc: null, mfaPendingSecretEnc: null, mfaEnrolledAt: null, mfaBackupCodesJson: [] } });
+  await prisma.user.update({ where: { id: userId }, data: { mfaEnabled: false, mfaSecretEnc: null, mfaPendingSecretEnc: null, mfaEnrolledAt: null, mfaLastTotpStep: null, mfaBackupCodesJson: [] } });
   await audit({ orgId: user.orgId, userId, action: "mfa.disabled", context });
   return { enabled: false };
 };
@@ -156,7 +193,8 @@ const regenerateBackupCodes = async ({ userId, code, context = {} }) => {
   const user = await loadUser(userId);
   if (!user.mfaEnabled) throw new HttpError(409, "MFA_NOT_ENABLED", "Two-factor authentication is not enabled");
   const secret = open(user.mfaSecretEnc);
-  if (!secret || !verifyTotp(secret, code)) throw new HttpError(400, "MFA_CODE_INVALID", "Enter a current code from your authenticator app");
+  const step = secret ? verifyTotp(secret, code) : null;
+  if (step === null || !(await spendTotpStep(userId, step))) throw new HttpError(400, "MFA_CODE_INVALID", "Enter a current code from your authenticator app");
   const codes = newBackupCodes();
   await prisma.user.update({ where: { id: userId }, data: { mfaBackupCodesJson: codes.map((value) => ({ hash: hashCode(value), usedAt: null })) } });
   await audit({ orgId: user.orgId, userId, action: "mfa.backup_codes_regenerated", context });
@@ -167,7 +205,7 @@ const regenerateBackupCodes = async ({ userId, code, context = {} }) => {
 const adminReset = async ({ orgId, userId, actor, context = {} }) => {
   const user = await prisma.user.findFirst({ where: { id: userId, orgId } });
   if (!user) throw new HttpError(404, "USER_NOT_FOUND", "User not found");
-  await prisma.user.update({ where: { id: userId }, data: { mfaEnabled: false, mfaSecretEnc: null, mfaPendingSecretEnc: null, mfaEnrolledAt: null, mfaBackupCodesJson: [] } });
+  await prisma.user.update({ where: { id: userId }, data: { mfaEnabled: false, mfaSecretEnc: null, mfaPendingSecretEnc: null, mfaEnrolledAt: null, mfaLastTotpStep: null, mfaBackupCodesJson: [] } });
   await audit({ orgId, userId, actorId: actor?.id || null, action: "mfa.reset_by_admin", context });
   return { reset: true };
 };
