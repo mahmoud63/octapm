@@ -65,6 +65,18 @@ const projectDetail = read(
 
 assert.match(realtimeLib, /auth: \{ token \}/, 'socket authenticates with the access token')
 assert.match(realtimeLib, /'project:join'/, 'client joins project rooms')
+// Several API tasks without sticky sessions: polling would scatter one
+// session's requests across tasks (backend/src/realtime/__live__/cluster.live.test.js).
+assert.match(
+  realtimeLib,
+  /REALTIME_SOCKET_OPTIONS[^=]*= \{\s*transports: \['websocket'\],/,
+  'socket is WebSocket-only'
+)
+assert.match(
+  realtimeLib,
+  /io\(resolveSocketUrl\(\), \{\s*\.\.\.REALTIME_SOCKET_OPTIONS,/,
+  'the socket is opened with those options'
+)
 assert.match(realtimeLib, /'domain\.event'/, 'client listens for domain events')
 assert.match(
   realtimeHook,

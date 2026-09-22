@@ -45,7 +45,10 @@ async function runDistributionTick(now = new Date()) {
   });
 }
 
+let timers = null;
+
 function startDailyLogScheduler() {
+  if (timers) return timers;
   if (String(process.env.DAILY_LOG_SCHEDULER_ENABLED ?? "true").toLowerCase() === "false") {
     console.log("[daily-log-scheduler] disabled by DAILY_LOG_SCHEDULER_ENABLED=false");
     return null;
@@ -57,7 +60,15 @@ function startDailyLogScheduler() {
   const distributionTimer = setInterval(safe("distribution", runDistributionTick), DISTRIBUTION_INTERVAL_MS);
   weatherTimer.unref?.();
   distributionTimer.unref?.();
-  return { weatherTimer, distributionTimer };
+  timers = { weatherTimer, distributionTimer };
+  return timers;
 }
 
-module.exports = { runDistributionTick, runWeatherTick, startDailyLogScheduler };
+function stopDailyLogScheduler() {
+  if (!timers) return;
+  clearInterval(timers.weatherTimer);
+  clearInterval(timers.distributionTimer);
+  timers = null;
+}
+
+module.exports = { runDistributionTick, runWeatherTick, startDailyLogScheduler, stopDailyLogScheduler };

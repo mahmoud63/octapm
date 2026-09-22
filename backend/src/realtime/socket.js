@@ -206,6 +206,21 @@ const disconnectUser = (io, userId) => {
   return true;
 };
 
+/**
+ * Relays this process's domain events to socket rooms. With a cluster adapter
+ * the emit reaches sockets on every task, so a process that serves no sockets
+ * of its own (the job worker) still calls this to reach the people waiting on
+ * its events. Returns the unsubscribe function.
+ */
+const subscribeBroadcasts = (io) =>
+  subscribe((event) => {
+    try {
+      broadcastDomainEvent(io, event);
+    } catch (error) {
+      console.error("[realtime] broadcast failure", error);
+    }
+  });
+
 const attachRealtime = (io) => {
   io.use(authenticateSocket);
 
@@ -232,13 +247,7 @@ const attachRealtime = (io) => {
     });
   });
 
-  const unsubscribe = subscribe((event) => {
-    try {
-      broadcastDomainEvent(io, event);
-    } catch (error) {
-      console.error("[realtime] broadcast failure", error);
-    }
-  });
+  const unsubscribe = subscribeBroadcasts(io);
 
   return {
     broadcast: (event) => broadcastDomainEvent(io, event),
@@ -255,5 +264,6 @@ module.exports = {
   disconnectUser,
   handleProjectJoin,
   handleProjectLeave,
+  subscribeBroadcasts,
   targetRoomsFor,
 };

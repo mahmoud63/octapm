@@ -298,8 +298,15 @@ describe("job service", () => {
       ),
     );
 
+    // Recovery writes only while the job is exactly as it was found.
+    mockPrisma.backgroundJob.updateMany.mockResolvedValue({ count: 1 });
     const recovered = await jobService.recoverStaleJobs({ staleMs: 60_000 });
     expect(recovered).toEqual({ scanned: 2, requeued: 1, failed: 1 });
+    expect(mockPrisma.backgroundJob.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ id: "stale-1", status: "running", lockedBy: "dead", attempts: 1 }),
+      }),
+    );
 
     mockPrisma.backgroundJob.deleteMany.mockResolvedValue({ count: 4 });
     await expect(jobService.pruneExpiredJobs()).resolves.toEqual({ deleted: 4 });

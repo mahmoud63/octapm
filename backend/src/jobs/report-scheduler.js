@@ -35,7 +35,10 @@ async function runPortfolioTick(now = new Date()) {
   return { orgs: orgs.length, queued };
 }
 
+let timers = null;
+
 function startReportScheduler() {
+  if (timers) return timers;
   if (String(process.env.REPORT_SCHEDULER_ENABLED ?? "true").toLowerCase() === "false") {
     console.log("[report-scheduler] disabled by REPORT_SCHEDULER_ENABLED=false");
     return null;
@@ -47,7 +50,15 @@ function startReportScheduler() {
   const portfolioTimer = setInterval(safe("portfolio", runPortfolioTick), PORTFOLIO_INTERVAL_MS);
   scheduleTimer.unref?.();
   portfolioTimer.unref?.();
-  return { scheduleTimer, portfolioTimer };
+  timers = { scheduleTimer, portfolioTimer };
+  return timers;
 }
 
-module.exports = { runPortfolioTick, runScheduleTick, startReportScheduler };
+function stopReportScheduler() {
+  if (!timers) return;
+  clearInterval(timers.scheduleTimer);
+  clearInterval(timers.portfolioTimer);
+  timers = null;
+}
+
+module.exports = { runPortfolioTick, runScheduleTick, startReportScheduler, stopReportScheduler };

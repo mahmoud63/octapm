@@ -1,4 +1,9 @@
-import { io, type Socket } from 'socket.io-client'
+import {
+  io,
+  type ManagerOptions,
+  type Socket,
+  type SocketOptions,
+} from 'socket.io-client'
 
 /**
  * Realtime client for the authenticated socket.io transport.
@@ -49,6 +54,25 @@ const resolveSocketUrl = (): string | undefined => {
   return undefined
 }
 
+/**
+ * Connection options (the token is added per connection).
+ *
+ * WebSocket only, like the mobile app. The API runs as several tasks behind
+ * a load balancer without sticky sessions; socket.io's default of long-polling
+ * first sends the handshake and the following polls to different tasks, which
+ * answer "Session ID unknown", and the client loops through reconnects. A
+ * WebSocket is one connection pinned to one task. The server still accepts
+ * polling for older clients.
+ */
+export const REALTIME_SOCKET_OPTIONS: Partial<ManagerOptions & SocketOptions> = {
+  transports: ['websocket'],
+  withCredentials: true,
+  autoConnect: true,
+  reconnection: true,
+  reconnectionDelay: 1000,
+  reconnectionDelayMax: 10000,
+}
+
 class RealtimeClient {
   private socket: Socket | null = null
   private token = ''
@@ -79,12 +103,8 @@ class RealtimeClient {
     this.setStatus('connecting')
 
     const socket = io(resolveSocketUrl(), {
+      ...REALTIME_SOCKET_OPTIONS,
       auth: { token },
-      withCredentials: true,
-      autoConnect: true,
-      reconnection: true,
-      reconnectionDelay: 1000,
-      reconnectionDelayMax: 10000,
     })
 
     socket.on('connect', () => {

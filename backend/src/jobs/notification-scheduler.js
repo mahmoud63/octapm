@@ -33,7 +33,14 @@ async function runDailyDueScan(now = new Date()) {
   return { orgs: orgs.length, created };
 }
 
+let timers = null;
+
 function startNotificationScheduler() {
+  if (timers) return timers;
+  if (String(process.env.NOTIFICATION_SCHEDULER_ENABLED ?? "true").toLowerCase() === "false") {
+    console.log("[notification-scheduler] disabled by NOTIFICATION_SCHEDULER_ENABLED=false");
+    return null;
+  }
   runNotificationChecks().catch((error) =>
     console.error("[notification-scheduler]", error),
   );
@@ -55,10 +62,20 @@ function startNotificationScheduler() {
 
   deliveryTimer.unref?.();
   dueTimer.unref?.();
+  timers = { deliveryTimer, dueTimer };
+  return timers;
+}
+
+function stopNotificationScheduler() {
+  if (!timers) return;
+  clearInterval(timers.deliveryTimer);
+  clearInterval(timers.dueTimer);
+  timers = null;
 }
 
 module.exports = {
   runDailyDueScan,
   runNotificationChecks,
   startNotificationScheduler,
+  stopNotificationScheduler,
 };

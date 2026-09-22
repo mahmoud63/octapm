@@ -8,6 +8,7 @@ const logger = console;
 const INTERVAL_MS = Number(process.env.ACCOUNTING_POLL_INTERVAL_MS || 60 * 60_000);
 
 let timer = null;
+let kickoff = null;
 
 const runPollTick = async () => {
   try {
@@ -24,13 +25,17 @@ const startAccountingScheduler = () => {
   if (timer || process.env.ACCOUNTING_SCHEDULER_ENABLED === "false" || process.env.NODE_ENV === "test") return null;
   timer = setInterval(runPollTick, INTERVAL_MS);
   timer.unref?.();
-  setTimeout(runPollTick, 90_000).unref?.();
+  // The first poll waits 90 s; its handle is kept so a stop before then cancels it too.
+  kickoff = setTimeout(runPollTick, 90_000);
+  kickoff.unref?.();
   return timer;
 };
 
 const stopAccountingScheduler = () => {
   if (timer) clearInterval(timer);
+  if (kickoff) clearTimeout(kickoff);
   timer = null;
+  kickoff = null;
 };
 
 module.exports = { startAccountingScheduler, stopAccountingScheduler, runPollTick };
