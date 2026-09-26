@@ -60,15 +60,17 @@ const socketError = (code, message) => {
   return error;
 };
 
-/** The account a token names, as it stands now — or null when it is gone, inactive or in another organisation. */
-const accountStanding = async ({ userId, orgId }) => {
+/**
+ * The membership a token names, as it stands now — or null when it is gone,
+ * suspended, the person inactive or the organisation not the token's. The
+ * same resolver the REST layer uses (architecture doc §2.1 step 5): the
+ * membership when there is one, the User columns for a person seeded before
+ * memberships or a token minted before this wave (no `mid`).
+ */
+const accountStanding = async ({ userId, orgId, membershipId = null }) => {
   if (!userId || !prisma?.user?.findUnique) return null;
-  const account = await prisma.user.findUnique({
-    where: { id: userId },
-    select: { id: true, orgId: true, role: true, status: true, isCompanyAdmin: true },
-  });
-  if (!account || account.orgId !== orgId || account.status !== "active") return null;
-  return account;
+  const { resolveRequestPrincipal } = require("../services/membership.service");
+  return resolveRequestPrincipal({ tx: prisma, userId, orgId, membershipId });
 };
 
 const authenticateSocket = async (socket, next) => {
@@ -87,17 +89,18 @@ const authenticateSocket = async (socket, next) => {
   }
 
   try {
-    const account = await accountStanding({ userId: payload.sub, orgId: payload.orgId });
+    const account = await accountStanding({ userId: payload.sub, orgId: payload.orgId, membershipId: payload.mid || null });
     if (!account) {
       return next(socketError("USER_INACTIVE", "This account is no longer active"));
     }
     socket.data = socket.data || {};
     socket.data.user = {
+      ...account,
       id: payload.sub,
       orgId: payload.orgId,
       role: account.role || payload.role,
-      email: payload.email,
-      name: payload.name,
+      email: account.email || payload.email,
+      name: account.name || payload.name,
       isCompanyAdmin: Boolean(account.isCompanyAdmin),
     };
     return next();
@@ -123,7 +126,7 @@ const handleProjectJoin = async (socket, payload, ack) => {
 
   try {
     // The account as it stands now decides, not the socket's copy of it (CX21-491).
-    const account = await accountStanding({ userId: user.id, orgId: user.orgId });
+    const account = await accountStanding({ userId: user.id, orgId: user.orgId, membershipId: user.membershipId || null });
     if (!account) {
       return ackSafely(ack, { ok: false, projectId, code: "USER_INACTIVE" });
     }
