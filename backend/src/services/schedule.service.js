@@ -399,9 +399,29 @@ const buildScheduleReadiness = ({
   }
   const dependencyCycle = findDependencyCycle(activities, dependencyRows);
 
+  // Rows whose mapping rule is not_applicable (preliminaries, provisional
+  // sums, dayworks) are never scheduled: the check judges the allocatable
+  // value beside the BOQ total, and the summary already leaves them out of
+  // "unallocated" (PC-3). An optional row's remainder stays in unallocated
+  // but does not fail the check (mapping §3).
   const totalBoqAmount = toNumber(allocationSummary?.totalBoqAmount);
+  const notApplicableAmount = toNumber(allocationSummary?.notApplicableAmount);
+  const allocatableBoqAmount = Math.max(0, totalBoqAmount - notApplicableAmount);
   const unallocatedAmount = toNumber(
     allocationSummary?.unallocatedAmount ?? allocationSummary?.unscheduledValue,
+  );
+  const optionalUnallocatedAmount = toNumber(
+    allocationSummary?.optionalUnallocatedAmount,
+  );
+  const requiredUnallocatedAmount = Math.max(
+    0,
+    unallocatedAmount - optionalUnallocatedAmount,
+  );
+  // What the baseline must cover: the allocatable value less the optional
+  // remainder. A bill that is optional throughout passes with a note.
+  const requiredBoqAmount = Math.max(
+    0,
+    allocatableBoqAmount - optionalUnallocatedAmount,
   );
   const approvedAllocatedAmount = toNumber(
     allocationSummary?.approvedAllocatedAmount ??
@@ -515,20 +535,25 @@ const buildScheduleReadiness = ({
       key: "allocations",
       label: "BOQ allocations",
       passed:
-        totalBoqAmount <= 0 ||
-        (approvedAllocatedAmount > 0 && unallocatedAmount <= 0.01),
-      severity: totalBoqAmount <= 0 ? "warning" : "blocking",
+        requiredBoqAmount <= 0.01 ||
+        (approvedAllocatedAmount > 0 && requiredUnallocatedAmount <= 0.01),
+      severity: allocatableBoqAmount <= 0 ? "warning" : "blocking",
       message:
-        totalBoqAmount <= 0
+        allocatableBoqAmount <= 0
           ? "No BOQ value found for allocation checks."
-          : unallocatedAmount > 0.01
+          : requiredUnallocatedAmount > 0.01
             ? "BOQ value remains unallocated to approved schedule activities."
-            : "Approved allocations cover the BOQ value.",
+            : approvedAllocatedAmount <= 0
+              ? "Only optional BOQ value is unallocated; nothing blocks the baseline."
+              : "Approved allocations cover the BOQ value.",
       details: {
         totalBoqAmount,
+        allocatableBoqAmount,
         approvedAllocatedAmount,
         pendingAllocatedAmount,
         unallocatedAmount,
+        optionalUnallocatedAmount,
+        notApplicableAmount,
       },
     },
     {

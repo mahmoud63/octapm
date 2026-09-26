@@ -592,6 +592,56 @@ const ERROR_CODE_CATALOG = Object.freeze({
     category: "system",
     message: "The job carries no organisation",
   },
+  // BOQ ↔ activity mapping (PC-3).
+  MAPPING_NOT_APPLICABLE: {
+    status: 409,
+    category: "conflict",
+    message:
+      "This BOQ item is marked not applicable for scheduling and cannot be allocated",
+  },
+  MAPPING_RULE_HAS_APPROVED_ALLOCATION: {
+    status: 409,
+    category: "conflict",
+    message:
+      "An item with an approved allocation cannot be marked not applicable until the allocation is rejected",
+  },
+  INVALID_MAPPING_RULE: {
+    status: 400,
+    category: "validation",
+    message: "mappingRule must be required, optional or not_applicable",
+  },
+  INVALID_ALLOCATION_BASIS: {
+    status: 400,
+    category: "validation",
+    message: "Allocation basis must be quantity, amount or weight",
+  },
+  INVALID_SUGGESTION_SOURCE: {
+    status: 400,
+    category: "validation",
+    message: "suggestedBy names a source the mapping service does not know",
+  },
+  INVALID_SUGGESTION_CONFIDENCE: {
+    status: 400,
+    category: "validation",
+    message: "confidence must be a number between 0 and 1",
+  },
+  LOCATION_OUTSIDE_SUBTREE: {
+    status: 422,
+    category: "validation",
+    message:
+      "The allocation's location must be the BOQ item's (and the activity's) location or a descendant of it",
+  },
+  MAPPING_IMPORT_INVALID: {
+    status: 400,
+    category: "validation",
+    message:
+      "The mapping file needs boq_code and activity_code columns and one of quantity, amount or weight",
+  },
+  MAPPING_IMPORT_BATCH_NOT_FOUND: {
+    status: 404,
+    category: "not_found",
+    message: "No allocations carry this import batch id",
+  },
 });
 
 const DEFAULT_CODE_BY_STATUS = Object.freeze({

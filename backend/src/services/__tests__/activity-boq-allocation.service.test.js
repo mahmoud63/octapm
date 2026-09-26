@@ -85,6 +85,12 @@ describe('activity BOQ allocation service', () => {
       qty: 10,
       amount: 100,
     });
+    // Approval re-reads the activity for the mapping warnings (PC-3).
+    mockPrisma.activity.findFirst.mockResolvedValue({
+      id: 'activity-1',
+      projectId: 'project-1',
+      progressMethod: null,
+    });
     mockPrisma.activityBoqAllocation.findMany.mockResolvedValue([]);
     mockPrisma.activityBoqAllocation.update.mockResolvedValue({
       id: 'allocation-1',

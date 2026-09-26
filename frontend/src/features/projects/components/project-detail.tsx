@@ -132,6 +132,11 @@ const StructurePage = lazy(() =>
     (m) => ({ default: m.StructurePage })
   )
 )
+const MappingPage = lazy(() =>
+  import('@/features/controls/mapping/components/mapping-page').then((m) => ({
+    default: m.MappingPage,
+  }))
+)
 const LocationsPanel = lazy(() =>
   import('@/features/locations/components/locations-panel').then((m) => ({
     default: m.LocationsPanel,
@@ -358,7 +363,10 @@ export function ProjectDetail({
       {
         key: 'controls',
         label: 'Project Controls',
-        children: [{ key: 'structure', label: 'Structure' }],
+        children: [
+          { key: 'structure', label: 'Structure' },
+          { key: 'mapping', label: 'Mapping' },
+        ],
       },
       { key: 'bim', label: 'BIM' },
       { key: 'activities', label: 'Activities' },
@@ -667,9 +675,13 @@ export function ProjectDetail({
         return <EquipmentSection projectId={projectId} />
 
       case 'controls':
-        // One sub-tab for now (structure); mapping and exceptions follow in
-        // the later project-controls waves and pick their child here.
-        return <StructurePage projectId={projectId} />
+        // Structure (PC-1) and mapping (PC-3); exceptions follow in a later
+        // project-controls wave and pick their child here.
+        return childState.controls === 'mapping' ? (
+          <MappingPage projectId={projectId} />
+        ) : (
+          <StructurePage projectId={projectId} />
+        )
 
       case 'locations':
         return (

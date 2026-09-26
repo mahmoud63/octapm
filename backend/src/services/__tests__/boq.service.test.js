@@ -81,12 +81,20 @@ jest.mock("../../middleware/subscription-gate", () => ({
 }));
 jest.mock("../activity-boq-allocation.service", () => ({
   assertAllocationCapacity: mockAssertAllocationCapacity,
+  // The not_applicable guard on the official path is proven live; here it
+  // only has to exist so the create paths stay callable.
+  assertMappingRuleAllows: jest.fn(),
   buildAllocationSummary: mockBuildAllocationSummary,
   computeDefaultWeight: jest.fn(({ amount, boqItem }) =>
     Number(boqItem?.amount || 0) > 0
       ? (Number(amount || 0) / Number(boqItem.amount)) * 100
       : 0,
   ),
+  // A rate edit re-derives draft allocations (PC-3); the live test proves
+  // the figures, this mock only keeps the edit path callable.
+  rederiveAllocationsForBoqItem: jest
+    .fn()
+    .mockResolvedValue({ rederived: [], warnings: [] }),
 }));
 jest.mock("../boq-calculation.service", () => ({
   calculateFinancials: jest.fn((items, summary) =>

@@ -17,8 +17,10 @@ const {
 } = require('../middleware/subscription-gate');
 const {
   assertAllocationCapacity,
+  assertMappingRuleAllows,
   buildAllocationSummary,
   computeDefaultWeight,
+  rederiveAllocationsForBoqItem,
 } = require('./activity-boq-allocation.service');
 const {
   replaceActivityDependencies,
@@ -449,6 +451,7 @@ function boqItemData(projectId, revisionId, item, overrides = {}) {
     isManual: false,
     isActive,
     sortOrder: item.sortOrder,
+    ...(item.mappingRule ? { mappingRule: item.mappingRule } : {}),
     ...overrides,
   };
 }
@@ -630,6 +633,10 @@ async function createOfficialBoqActivityAllocation(
     calendarId = null,
   },
 ) {
+  // Whatever brings the row here — an activity added to a bill row, a manual
+  // item naming one, or the structuring job — a not_applicable item refuses
+  // it (mapping §3); the allocation routes apply the same guard to theirs.
+  assertMappingRuleAllows(boqItem);
   const quantity = toNumber(payload.quantity);
   const rate = toMoneyNumber(payload.rate ?? boqItem.rate);
   const amount =
@@ -1142,6 +1149,9 @@ async function processBoqUpload(projectId, fileBuffer, label, options = {}) {
       amount: multiplyMoney(row.quantity, row.rate),
       isManual: false,
       sortOrder: idx,
+      // The optional mapping_rule column (PC-3): a named rule travels with
+      // the row; an absent column or empty cell leaves the rule alone.
+      ...(typeof row.mappingRule === 'string' ? { mappingRule: row.mappingRule } : {}),
     }));
   } catch (error) {
     if (options.documentId) {
@@ -1171,7 +1181,23 @@ async function processBoqUpload(projectId, fileBuffer, label, options = {}) {
   });
 
   if (options.dryRun) {
-    return buildBoqUploadDryRun(projectId, itemsWithAmounts, label, { unitWarnings });
+    // The mapping_rule column is previewed as counts: how many rows the file
+    // marks required, optional or not applicable, and how many say nothing.
+    const mappingRules = itemsWithAmounts.reduce(
+      (acc, item) => {
+        const key =
+          item.mappingRule === 'not_applicable'
+            ? 'notApplicable'
+            : item.mappingRule || 'unspecified';
+        acc[key] += 1;
+        return acc;
+      },
+      { required: 0, optional: 0, notApplicable: 0, unspecified: 0 },
+    );
+    return buildBoqUploadDryRun(projectId, itemsWithAmounts, label, {
+      unitWarnings,
+      mappingRules,
+    });
   }
 
   // Step 4: Persist a revision and compare/import without deleting current rows.
@@ -1179,6 +1205,7 @@ async function processBoqUpload(projectId, fileBuffer, label, options = {}) {
   let comparison;
   let baseline;
   let mode = BOQ_REVISION_STATUS.IMPORTED;
+  const mappingRuleWarnings = [];
   try {
     await prisma.$transaction(async (trx) => {
       await assertNoManualCodeConflicts(
@@ -1231,6 +1258,29 @@ async function processBoqUpload(projectId, fileBuffer, label, options = {}) {
 
       const existingByCode = new Map(
         existingUploadedItems.map((item) => [rowCodeKey(item.code), item]),
+      );
+
+      // mapping_rule column (PC-3): a row that would move an item with an
+      // approved allocation to not_applicable keeps its rule — the approved
+      // row is an official EV basis and must be rejected first — and the
+      // upload says so rather than refusing the whole bill.
+      const notApplicableItemIds = itemsWithAmounts
+        .filter((item) => item.mappingRule === 'not_applicable')
+        .map((item) => existingByCode.get(rowCodeKey(item.code))?.id)
+        .filter(Boolean);
+      const blockedByApprovedAllocation = new Set(
+        notApplicableItemIds.length > 0
+          ? (
+              await trx.activityBoqAllocation.findMany({
+                where: {
+                  boqItemId: { in: notApplicableItemIds },
+                  isActive: true,
+                  status: 'approved',
+                },
+                select: { boqItemId: true },
+              })
+            ).map((row) => row.boqItemId)
+          : [],
       );
 
       if (baseline.locked) {
@@ -1302,6 +1352,18 @@ async function processBoqUpload(projectId, fileBuffer, label, options = {}) {
       for (const item of itemsWithAmounts) {
         const existing = existingByCode.get(rowCodeKey(item.code));
         if (existing) {
+          const ruleBlocked =
+            item.mappingRule === 'not_applicable' &&
+            blockedByApprovedAllocation.has(existing.id);
+          if (ruleBlocked) {
+            mappingRuleWarnings.push({
+              code: 'MAPPING_RULE_HAS_APPROVED_ALLOCATION',
+              row: item.sortOrder + 1,
+              itemCode: item.code,
+              boqItemId: existing.id,
+              message: `Row ${item.code} has an approved allocation and keeps its mapping rule; reject the allocation before marking it not applicable`,
+            });
+          }
           await trx.boqItem.update({
             where: { id: existing.id },
             data: {
@@ -1316,6 +1378,9 @@ async function processBoqUpload(projectId, fileBuffer, label, options = {}) {
               amount: item.amount,
               sortOrder: item.sortOrder,
               isActive: true,
+              ...(item.mappingRule && !ruleBlocked
+                ? { mappingRule: item.mappingRule }
+                : {}),
             },
           });
         } else {
@@ -1427,6 +1492,7 @@ async function processBoqUpload(projectId, fileBuffer, label, options = {}) {
       baselineLocked: true,
       comparison: comparison?.summary ?? null,
       unitWarnings,
+      mappingRuleWarnings,
     };
   }
 
@@ -1454,6 +1520,7 @@ async function processBoqUpload(projectId, fileBuffer, label, options = {}) {
     baselineLocked: false,
     comparison: comparison?.summary ?? null,
     unitWarnings,
+    mappingRuleWarnings,
   };
 }
 
@@ -1550,6 +1617,7 @@ async function runBoqActivityJob({ job, payload = {}, updateProgress }) {
         unit: true,
         rate: true,
         amount: true,
+        mappingRule: true,
         activityBoqAllocations: {
           where: { isActive: true },
           select: { id: true },
@@ -1567,6 +1635,7 @@ async function runBoqActivityJob({ job, payload = {}, updateProgress }) {
           unit: i.unit,
           rate: i.rate,
           amount: i.amount,
+          mappingRule: i.mappingRule,
           hasActivities: (i.activityBoqAllocations ?? []).length > 0,
         },
       ]),
@@ -1578,7 +1647,16 @@ async function runBoqActivityJob({ job, payload = {}, updateProgress }) {
 
     for (const boqResult of parsed.boqActivities ?? []) {
       const boqItem = itemByCode[boqResult.boqCode];
-      if (!boqItem || boqItem.hasActivities) continue;
+      // A not_applicable row (preliminaries, provisional sums) is priced but
+      // never scheduled: the job leaves it alone rather than failing the
+      // whole bill on the guard in createOfficialBoqActivityAllocation.
+      if (
+        !boqItem ||
+        boqItem.hasActivities ||
+        boqItem.mappingRule === 'not_applicable'
+      ) {
+        continue;
+      }
 
       const codes = [];
       const activities = (boqResult.activities ?? []).filter((act) =>
@@ -1949,6 +2027,8 @@ async function updateBoqItem(projectId, itemId, data, options = {}) {
   }
 
   let updated;
+  let allocationWarnings = [];
+  let rederivedAllocations = [];
   try {
     updated = await prisma.$transaction(async (tx) => {
       const row = await tx.boqItem.update({
@@ -1974,6 +2054,17 @@ async function updateBoqItem(projectId, itemId, data, options = {}) {
         },
         metadata: { source: 'boq.manual_grid' },
       });
+      // A rate or quantity change on an unlocked row (PC-3): draft
+      // allocations are re-derived from what was typed for them; approved
+      // rows are source rows and are only reported.
+      if (updateData.rate !== undefined || updateData.qty !== undefined) {
+        const rederived = await rederiveAllocationsForBoqItem(
+          { projectId, boqItemId: itemId, userId: options.userId || null },
+          tx,
+        );
+        allocationWarnings = rederived.warnings;
+        rederivedAllocations = rederived.rederived;
+      }
       return row;
     });
   } catch (error) {
@@ -1995,6 +2086,8 @@ async function updateBoqItem(projectId, itemId, data, options = {}) {
     item: mapBoqItem(updated, allocationByItem.get(updated.id)),
     financial,
     unitWarning,
+    allocationWarnings,
+    rederivedAllocations,
   };
 }
 

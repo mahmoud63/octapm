@@ -269,6 +269,14 @@ const getSetupReadiness = async ({ orgId, projectId }) => {
     (activity) => activity.isMilestone,
   ).length;
   const totalBoqFromSummary = toNumber(allocationSummary.totalBoqAmount);
+  // Rows marked not_applicable (preliminaries, provisional sums, dayworks)
+  // are never scheduled: the allocation step judges the allocatable value
+  // and the summary already keeps them out of "unallocated" (PC-3).
+  const notApplicableAmount = toNumber(allocationSummary.notApplicableAmount);
+  const allocatableBoqAmount = Math.max(
+    0,
+    totalBoqFromSummary - notApplicableAmount,
+  );
   const approvedAllocatedAmount = toNumber(
     allocationSummary.approvedAllocatedAmount,
   );
@@ -276,6 +284,23 @@ const getSetupReadiness = async ({ orgId, projectId }) => {
     allocationSummary.pendingAllocatedAmount,
   );
   const unallocatedAmount = toNumber(allocationSummary.unallocatedAmount);
+  // An optional row's remaining value is inside unallocatedAmount but does
+  // not block the baseline (mapping §3): the step blocks on what required
+  // rows still leave, and warns about the optional remainder.
+  const optionalUnallocatedAmount = toNumber(
+    allocationSummary.optionalUnallocatedAmount,
+  );
+  const requiredUnallocatedAmount = Math.max(
+    0,
+    unallocatedAmount - optionalUnallocatedAmount,
+  );
+  // The value the baseline must cover: the allocatable value less what the
+  // optional rows still leave open. A bill that is optional throughout has
+  // nothing that must be approved.
+  const requiredBoqAmount = Math.max(
+    0,
+    allocatableBoqAmount - optionalUnallocatedAmount,
+  );
   const baselineLocked = Boolean(
     baselinedRevision || revisionStatus === "baselined",
   );
@@ -362,21 +387,33 @@ const getSetupReadiness = async ({ orgId, projectId }) => {
         "Generate or import a schedule before mapping allocations.",
       ),
     boqCount > 0 &&
+      requiredBoqAmount > MONEY_EPSILON &&
       approvedAllocatedAmount <= MONEY_EPSILON &&
       issue(
         "NO_APPROVED_ALLOCATIONS",
         "No approved BOQ allocations are linked to schedule activities.",
       ),
-    totalBoqFromSummary > MONEY_EPSILON &&
-      unallocatedAmount > MONEY_EPSILON &&
+    allocatableBoqAmount > MONEY_EPSILON &&
+      requiredUnallocatedAmount > MONEY_EPSILON &&
       issue(
         "UNALLOCATED_BOQ",
         "BOQ value remains unallocated to approved schedule activities.",
         "blocking",
-        { unallocatedAmount },
+        {
+          unallocatedAmount: requiredUnallocatedAmount,
+          optionalUnallocatedAmount,
+          notApplicableAmount,
+        },
       ),
   ];
   const allocationWarnings = [
+    optionalUnallocatedAmount > MONEY_EPSILON &&
+      issue(
+        "OPTIONAL_UNALLOCATED",
+        "Optional BOQ value is not allocated; it does not block the baseline.",
+        "warning",
+        { optionalUnallocatedAmount },
+      ),
     pendingAllocatedAmount > MONEY_EPSILON &&
       issue(
         "PENDING_ALLOCATIONS",
@@ -560,9 +597,12 @@ const getSetupReadiness = async ({ orgId, projectId }) => {
       warnings: allocationWarnings,
       counts: {
         totalBoqAmount: totalBoqFromSummary,
+        allocatableBoqAmount,
         approvedAllocatedAmount,
         pendingAllocatedAmount,
         unallocatedAmount,
+        optionalUnallocatedAmount,
+        notApplicableAmount,
       },
       successMessage: "Approved allocations cover the BOQ value.",
     }),
