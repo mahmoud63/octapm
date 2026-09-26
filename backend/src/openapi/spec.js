@@ -1798,6 +1798,38 @@ const components = {
       message: { type: "string" },
       details: ref("GenericObject"),
     }),
+    MappingRuleWarning: objectSchema({
+      code: { type: "string", enum: ["MAPPING_RULE_HAS_APPROVED_ALLOCATION"] },
+      row: { type: "integer", description: "1-based row in the uploaded workbook." },
+      itemCode: { type: "string" },
+      boqItemId: uuid,
+      message: { type: "string" },
+    }),
+    BoqUploadMappingRuleCounts: objectSchema({
+      required: { type: "integer" },
+      optional: { type: "integer" },
+      notApplicable: { type: "integer" },
+      unspecified: { type: "integer", description: "Rows whose mapping_rule cell is blank; they keep or default to required." },
+    }),
+    RederivedAllocation: objectSchema({
+      allocationId: uuid,
+      basis: { type: "string", enum: ["quantity", "amount", "weight"] },
+      before: ref("GenericObject"),
+      after: ref("GenericObject"),
+    }),
+    BoqItemUpdateResponse: objectSchema({
+      item: ref("GenericObject"),
+      financial: ref("GenericObject"),
+      unitWarning: nullableRef("UnitWarning"),
+      allocationWarnings: {
+        ...arrayOf(ref("MappingWarning")),
+        description: "ALLOCATION_RATE_DRIFT for each approved or submitted allocation the rate change left disagreeing with the item; those rows are never rewritten.",
+      },
+      rederivedAllocations: {
+        ...arrayOf(ref("RederivedAllocation")),
+        description: "Draft allocations re-derived from their basis after a rate or quantity change on the unlocked item.",
+      },
+    }),
     AllocationCoverageCounts: objectSchema({
       unmapped: { type: "integer" },
       partial: { type: "integer" },
@@ -1819,6 +1851,8 @@ const components = {
       pendingAllocatedAmount: money,
       unallocatedQuantity: { type: "number" },
       unallocatedAmount: money,
+      optionalUnallocatedQuantity: { type: "number" },
+      optionalUnallocatedAmount: money,
       notApplicableQuantity: { type: "number" },
       notApplicableAmount: money,
       earnedValue: money,
@@ -1835,6 +1869,10 @@ const components = {
       approvedAllocatedAmount: money,
       pendingAllocatedAmount: money,
       unallocatedAmount: money,
+      optionalUnallocatedAmount: {
+        ...money,
+        description: "Remaining value of items whose mappingRule is optional: inside unallocatedAmount, reported apart because readiness warns about it instead of blocking on it.",
+      },
       notApplicableAmount: {
         ...money,
         description: "Value of items whose mappingRule is not_applicable: BOQ total = approved allocated + unallocated + not applicable.",
@@ -2034,6 +2072,10 @@ const components = {
         comparison: ref("BoqRevisionComparisonSummary"),
         document: ref("ProjectDocumentUpload"),
         unitWarnings: arrayOf(ref("UnitWarning")),
+        mappingRuleWarnings: {
+          ...arrayOf(ref("MappingRuleWarning")),
+          description: "Rows the file marks not applicable that kept their rule because an approved allocation exists.",
+        },
       },
       ["jobId", "revisionId", "mode", "baselineLocked", "document"],
     ),
@@ -2056,6 +2098,7 @@ const components = {
           rowLimit: { type: "integer" },
         }),
         unitWarnings: arrayOf(ref("UnitWarning")),
+        mappingRules: ref("BoqUploadMappingRuleCounts"),
       },
       ["dryRun", "mode", "baselineLocked", "rowCount", "comparison"],
     ),
@@ -7250,6 +7293,7 @@ add(
       "Partial BOQ item payload.",
       false,
     ),
+    responseSchema: ref("BoqItemUpdateResponse"),
   }),
 );
 
@@ -10246,7 +10290,7 @@ const activityMaterialRecordParams = [
     path: "/projects/{projectId}/activity-boq-allocations/mapping-rules",
     summary: "Set the mapping rule (required, optional, not_applicable) on a set of BOQ rows or a whole section.",
     description:
-      "A row marked not_applicable refuses allocations (409 MAPPING_NOT_APPLICABLE) and is excluded from unallocated value and readiness blockers. Moving a row with an approved allocation to not_applicable is refused (409 MAPPING_RULE_HAS_APPROVED_ALLOCATION) until the allocation is rejected.",
+      "A row marked not_applicable refuses allocations (409 MAPPING_NOT_APPLICABLE) and is excluded from unallocated value and readiness blockers. An optional row's remaining value is reported apart (optionalUnallocatedAmount) and warns instead of blocking. Moving a row with an approved allocation to not_applicable is refused (409 MAPPING_RULE_HAS_APPROVED_ALLOCATION) until the allocation is rejected. A mapping rule is a bill edit: on a baseline-locked project every change is refused (409 BOQ_BASELINE_LOCKED).",
     operationId: "setBoqMappingRules",
     permissions: modulePermission("boq", "update", "allocation.update"),
     requestBody: jsonBody(ref("MappingRulesMutation"), "The rule and the rows (itemIds) or section it applies to."),
@@ -10257,7 +10301,7 @@ const activityMaterialRecordParams = [
     path: "/projects/{projectId}/activity-boq-allocations/bulk",
     summary: "Create several draft allocations in one call; each row is judged on its own and reported.",
     description:
-      "The matrix's allocate-evenly / by-duration / by-remaining-capacity actions send their rows here. A row that breaks a rule (capacity, duplicate pair, not_applicable item, location subtree) is listed under failed with its error code; the others are created. 201 when at least one row was created, 200 otherwise.",
+      "The matrix's allocate-evenly / by-duration / by-remaining-capacity actions send their rows here. A row that breaks a rule (capacity, duplicate pair, not_applicable item, location subtree) is listed under failed with its error code; the others are created. 201 when at least one row was created, 200 otherwise. An amount obeys the same money rule as the single create (two decimals, at least 0.01), so a row with more precision fails validation for the whole call (400 VALIDATION_ERROR).",
     operationId: "createActivityBoqAllocationsBulk",
     permissions: modulePermission("boq", "create", "allocation.create"),
     requestBody: jsonBody(ref("ActivityBoqAllocationBulkMutation"), "Up to 500 draft allocation payloads."),

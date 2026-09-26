@@ -154,7 +154,9 @@ router.post(
     body('allocations.*.boqItemId').isUUID(),
     body('allocations.*.activityId').isUUID(),
     body('allocations.*.quantity').optional().isFloat({ gt: 0 }).toFloat(),
-    body('allocations.*.amount').optional().isFloat({ gt: 0 }).toFloat(),
+    // Money is money on every path: the same two-decimal rule as the single
+    // create, so a bulk row cannot carry a figure the service would round.
+    moneyBody('allocations.*.amount', { min: 0.01 }),
     body('allocations.*.weight').optional().isFloat({ min: 0 }).toFloat(),
     body('allocations.*.basis').optional().isIn(allocationService.VALID_BASES),
     body('allocations.*.notes').optional({ nullable: true }).isString().trim(),

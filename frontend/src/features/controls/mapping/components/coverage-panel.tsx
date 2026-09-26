@@ -106,7 +106,16 @@ export function CoveragePanel({
     {
       label: 'Unallocated',
       value: fmtMoney(currency, summary.unallocatedAmount),
-      tone: summary.unallocatedAmount > 0.01 ? 'text-destructive' : undefined,
+      // Only what required rows still leave open blocks the baseline.
+      tone:
+        summary.unallocatedAmount - summary.optionalUnallocatedAmount > 0.01
+          ? 'text-destructive'
+          : undefined,
+    },
+    {
+      label: 'Optional, unallocated',
+      value: fmtMoney(currency, summary.optionalUnallocatedAmount),
+      tone: 'text-amber-600',
     },
     {
       label: 'Not applicable',

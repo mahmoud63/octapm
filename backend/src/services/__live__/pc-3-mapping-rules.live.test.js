@@ -2,9 +2,11 @@
  * PC-3 — BOQ ↔ activity mapping, proven against a real API process and the
  * real local Postgres.
  *
- *   rules: a not_applicable row refuses an allocation (409); a row with an
+ *   rules: a not_applicable row refuses an allocation (409) on the allocation
+ *     routes and on the older BOQ-activity path alike; a row with an
  *     approved allocation cannot be moved to not_applicable (409); a bulk
- *     rule by section; the mapping_rule column on a BOQ upload
+ *     rule by section; the mapping_rule column on a BOQ upload; a rule
+ *     change on a baselined bill is refused (409 BOQ_BASELINE_LOCKED)
  *   validation §70-§72: unit mismatch and WBS subtree are warnings in the
  *     write response; the location subtree rule blocks a new row (422)
  *   basis: what was typed is recorded and the other two figures derived
@@ -12,7 +14,9 @@
  *     reports approved rows
  *   coverage: BOQ total = approved allocated + unallocated + not applicable
  *     on the project, per group and in the readiness step, which ignores
- *     not_applicable rows, as does the schedule readiness check
+ *     not_applicable rows, as does the schedule readiness check; an optional
+ *     row's remainder is reported apart and warns instead of blocking; a
+ *     bulk row's money obeys the two-decimal rule
  *   import: dry run writes nothing; apply creates import drafts under one
  *     batch; the same file again creates nothing; undo rejects the drafts
  *   suggestions: ranked with the doc's confidences, and never written
@@ -158,6 +162,16 @@ liveDescribe("PC-3: BOQ ↔ activity mapping rules, coverage, import and suggest
       expect(invalid.status).toBe(400);
     });
 
+    it("the older BOQ-activity path refuses a not-applicable item too, whether it names an activity or creates one", async () => {
+      const route = `/api/v1/projects/${project.id}/boq/items/${base.items.prelims.id}/activities`;
+      const named = await post(route, { activityId: base.activities.pour.id, unit: "sum", quantity: 1, rate: 30000 });
+      expect([named.status, named.body?.error?.code]).toEqual([409, "MAPPING_NOT_APPLICABLE"]);
+      const created = await post(route, { activityName: "Mobilise site", unit: "sum", quantity: 1, rate: 30000 });
+      expect([created.status, created.body?.error?.code]).toEqual([409, "MAPPING_NOT_APPLICABLE"]);
+      expect(await prisma.activityBoqAllocation.count({ where: { boqItemId: base.items.prelims.id } })).toBe(0);
+      expect(await prisma.activity.count({ where: { projectId: project.id, name: "Mobilise site" } })).toBe(0);
+    });
+
     it("an item with an approved allocation cannot be moved to not_applicable until the allocation is rejected", async () => {
       const created = await allocate({ boqItemId: base.items.columns.id, activityId: base.activities.columns.id, quantity: 10 });
       expect([created.status, created.body?.error]).toEqual([201, undefined]);
@@ -212,6 +226,28 @@ liveDescribe("PC-3: BOQ ↔ activity mapping rules, coverage, import and suggest
       expect([second.status, second.body?.error]).toEqual([200, undefined]);
       expect(second.body.data.mappingRuleWarnings).toEqual([expect.objectContaining({ code: "MAPPING_RULE_HAS_APPROVED_ALLOCATION", itemCode: "1.1", boqItemId: concrete.id })]);
       expect((await prisma.boqItem.findUnique({ where: { id: concrete.id } })).mappingRule).toBe("required");
+    });
+
+    it("a rule change on a baselined bill is refused, and the readiness step stays blocked", async () => {
+      const lockedProject = await prisma.project.create({ data: { orgId: live.org.id, name: "LiveTest PC-3 locked", startDate: new Date("2026-01-05"), endDate: new Date("2026-06-30") } });
+      const item = (await post(`/api/v1/projects/${lockedProject.id}/boq/items`, { code: "1.1", description: "Concrete", quantity: 100, unit: "m3", rate: 200 })).body.data.item;
+      const activity = await createActivity({ name: "Pour", activityCode: "L1", duration: 2 }, lockedProject.id);
+      expect([item?.id, activity?.id].every(Boolean)).toBe(true);
+      // A baselined schedule revision is what locks the bill (PC-2).
+      await prisma.scheduleRevision.create({ data: { projectId: lockedProject.id, status: "baselined", baselinedAt: new Date(), activityCount: 1 } });
+
+      const route = `/api/v1/projects/${lockedProject.id}/activity-boq-allocations/mapping-rules`;
+      const refused = await patch(route, { rule: "not_applicable", itemIds: [item.id] });
+      expect([refused.status, refused.body?.error?.code]).toEqual([409, "BOQ_BASELINE_LOCKED"]);
+      expect(refused.body.error.details.baseline).toMatchObject({ locked: true, source: "schedule_baseline" });
+      const optional = await patch(route, { rule: "optional", itemIds: [item.id] });
+      expect([optional.status, optional.body?.error?.code]).toEqual([409, "BOQ_BASELINE_LOCKED"]);
+      expect((await prisma.boqItem.findUnique({ where: { id: item.id } })).mappingRule).toBe("required");
+
+      const readiness = await get(`/api/v1/projects/${lockedProject.id}/setup-readiness`);
+      const step = readiness.body.data.steps.find((s) => s.key === "boq_allocation");
+      expect(step.blockers.map((b) => b.code).sort()).toEqual(["NO_APPROVED_ALLOCATIONS", "UNALLOCATED_BOQ"]);
+      expect(step.counts).toMatchObject({ totalBoqAmount: 20000, allocatableBoqAmount: 20000, notApplicableAmount: 0 });
     });
   });
 
@@ -313,6 +349,19 @@ liveDescribe("PC-3: BOQ ↔ activity mapping rules, coverage, import and suggest
     });
   });
 
+  describe("bulk create money (§4)", () => {
+    it("a bulk row's amount obeys the same two-decimal rule as a single create", async () => {
+      const before = await prisma.activityBoqAllocation.count({ where: { projectId: project.id } });
+      const row = { boqItemId: base.items.rebar.id, activityId: base.activities.columns.id, amount: 100.005 };
+      const bulk = await post(`${allocationsRoute()}/bulk`, { allocations: [row] });
+      expect([bulk.status, bulk.body?.error?.code]).toEqual([400, "VALIDATION_ERROR"]);
+      expect(bulk.body.error.details.some((d) => /amount/.test(String(d.field)))).toBe(true);
+      const single = await allocate(row);
+      expect([single.status, single.body?.error?.code]).toEqual([400, "VALIDATION_ERROR"]);
+      expect(await prisma.activityBoqAllocation.count({ where: { projectId: project.id } })).toBe(before);
+    });
+  });
+
   describe("coverage (§69) and readiness", () => {
     it("BOQ total = approved allocated + unallocated + not applicable, per group and in total; readiness ignores n/a rows", async () => {
       const summary = await coverage();
@@ -357,6 +406,29 @@ liveDescribe("PC-3: BOQ ↔ activity mapping rules, coverage, import and suggest
       expect(money(step.blockers[0].details.unallocatedAmount)).toBe(money(85000 - 3734.56));
     });
 
+    it("an optional row's remainder is reported apart, warns, and does not block", async () => {
+      const ruled = await patch(`${allocationsRoute()}/mapping-rules`, { rule: "optional", itemIds: [base.items.rebar.id] });
+      expect([ruled.status, ruled.body.data.updated]).toEqual([200, 1]);
+      // 1.2 (50,000) carries only a draft: all of it is optional remainder,
+      // still inside unallocated, so the invariant is untouched.
+      const summary = await coverage("?groupBy=section");
+      expect(money(summary.optionalUnallocatedAmount)).toBe(50000);
+      expect(money(summary.unallocatedAmount)).toBe(money(85000 - 3734.56));
+      expectInvariant(summary);
+      expect(summary.groups.find((g) => g.label === "Substructure")).toMatchObject({ optionalUnallocatedAmount: 50000 });
+      expect(summary.items.find((i) => i.boqItemId === base.items.rebar.id)).toMatchObject({ mappingRule: "optional", optionalUnallocatedAmount: 50000, unallocatedAmount: 50000 });
+
+      const readiness = await get(`/api/v1/projects/${project.id}/setup-readiness`);
+      const step = readiness.body.data.steps.find((s) => s.key === "boq_allocation");
+      expect(step.blockers.map((b) => b.code)).toEqual(["UNALLOCATED_BOQ"]);
+      expect(money(step.blockers[0].details.unallocatedAmount)).toBe(money(85000 - 3734.56 - 50000));
+      expect(step.warnings.filter(Boolean).map((w) => w.code)).toContain("OPTIONAL_UNALLOCATED");
+      expect(money(step.counts.optionalUnallocatedAmount)).toBe(50000);
+
+      const back = await patch(`${allocationsRoute()}/mapping-rules`, { rule: "required", itemIds: [base.items.rebar.id] });
+      expect(back.body.data.updated).toBe(1);
+    });
+
     it("a project whose only value is not applicable has nothing to allocate: the readiness step and the schedule check both pass", async () => {
       const naProject = await prisma.project.create({ data: { orgId: live.org.id, name: "LiveTest PC-3 n/a only", startDate: new Date("2026-01-05"), endDate: new Date("2026-06-30") } });
       const item = (await post(`/api/v1/projects/${naProject.id}/boq/items`, { code: "P.1", description: "Preliminaries", quantity: 1, unit: "sum", rate: 8000 })).body.data.item;
@@ -367,17 +439,34 @@ liveDescribe("PC-3: BOQ ↔ activity mapping rules, coverage, import and suggest
       const stepBefore = blockedBefore.body.data.steps.find((s) => s.key === "boq_allocation");
       expect(stepBefore.blockers.map((b) => b.code).sort()).toEqual(["NO_APPROVED_ALLOCATIONS", "UNALLOCATED_BOQ"]);
 
-      const ruled = await patch(`/api/v1/projects/${naProject.id}/activity-boq-allocations/mapping-rules`, { rule: "not_applicable", itemIds: [item.id] });
-      expect(ruled.status).toBe(200);
       // The schedule checks are only computed once a revision exists; a bare
       // draft revision is enough for the allocations check to be judged.
       await prisma.scheduleRevision.create({ data: { projectId: naProject.id, status: "draft", activityCount: 1 } });
+
+      // Optional first: the whole value is optional remainder, so nothing
+      // must be approved — the step and the schedule check both pass with
+      // a warning, and the figures keep the BOQ total beside the allocatable.
+      const rules = `/api/v1/projects/${naProject.id}/activity-boq-allocations/mapping-rules`;
+      const optional = await patch(rules, { rule: "optional", itemIds: [item.id] });
+      expect([optional.status, optional.body.data.updated]).toEqual([200, 1]);
+      const whileOptional = await get(`/api/v1/projects/${naProject.id}/setup-readiness`);
+      const stepOptional = whileOptional.body.data.steps.find((s) => s.key === "boq_allocation");
+      expect(stepOptional.blockers).toEqual([]);
+      expect(stepOptional.warnings.filter(Boolean).map((w) => w.code)).toContain("OPTIONAL_UNALLOCATED");
+      expect(stepOptional.counts).toMatchObject({ totalBoqAmount: 8000, allocatableBoqAmount: 8000, unallocatedAmount: 8000, optionalUnallocatedAmount: 8000, notApplicableAmount: 0 });
+      const optionalCheck = whileOptional.body.data.context?.scheduleReadiness?.checks?.find((c) => c.key === "allocations");
+      expect(optionalCheck).toMatchObject({ passed: true, details: expect.objectContaining({ totalBoqAmount: 8000, allocatableBoqAmount: 8000, optionalUnallocatedAmount: 8000, notApplicableAmount: 0 }) });
+
+      const ruled = await patch(rules, { rule: "not_applicable", itemIds: [item.id] });
+      expect(ruled.status).toBe(200);
       const after = await get(`/api/v1/projects/${naProject.id}/setup-readiness`);
       const stepAfter = after.body.data.steps.find((s) => s.key === "boq_allocation");
       expect(stepAfter.blockers).toEqual([]);
       expect(stepAfter.status).toBe("complete");
+      // The check keeps the BOQ total as the total and judges the allocatable
+      // value beside it (the readiness step reports the same two figures).
       const allocationsCheck = after.body.data.context?.scheduleReadiness?.checks?.find((c) => c.key === "allocations");
-      expect(allocationsCheck).toMatchObject({ passed: true, details: expect.objectContaining({ notApplicableAmount: 8000, totalBoqAmount: 0 }) });
+      expect(allocationsCheck).toMatchObject({ passed: true, details: expect.objectContaining({ notApplicableAmount: 8000, totalBoqAmount: 8000, allocatableBoqAmount: 0, optionalUnallocatedAmount: 0 }) });
     });
   });
 

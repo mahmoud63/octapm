@@ -22,6 +22,7 @@ const VALID_BASES = ['quantity', 'amount', 'weight'];
 const DEFAULT_BASIS = 'amount';
 const MAPPING_RULES = ['required', 'optional', 'not_applicable'];
 const NOT_APPLICABLE = 'not_applicable';
+const OPTIONAL = 'optional';
 const SUGGESTION_SOURCES = [
   'ai',
   'rule:code',
@@ -590,6 +591,8 @@ const emptyGroupTotals = (key, label, extra = {}) => ({
   pendingAllocatedAmount: 0,
   unallocatedQuantity: 0,
   unallocatedAmount: 0,
+  optionalUnallocatedQuantity: 0,
+  optionalUnallocatedAmount: 0,
   notApplicableQuantity: 0,
   notApplicableAmount: 0,
   earnedValue: 0,
@@ -613,6 +616,11 @@ const addItemToGroup = (group, item) => {
   );
   group.unallocatedQuantity += item.unallocatedQuantity;
   group.unallocatedAmount = addMoney(group.unallocatedAmount, item.unallocatedAmount);
+  group.optionalUnallocatedQuantity += item.optionalUnallocatedQuantity;
+  group.optionalUnallocatedAmount = addMoney(
+    group.optionalUnallocatedAmount,
+    item.optionalUnallocatedAmount,
+  );
   group.notApplicableQuantity += item.notApplicableQuantity;
   group.notApplicableAmount = addMoney(
     group.notApplicableAmount,
@@ -862,6 +870,12 @@ const buildAllocationSummary = async (
     const notApplicable = mappingRule === NOT_APPLICABLE;
     const unscheduledQuantity = notApplicable ? 0 : remainingQuantity;
     const unscheduledValue = notApplicable ? 0 : remainingValue;
+    // What is left of an optional row stays inside "unallocated" (so BOQ
+    // total = allocated + unallocated + n/a still holds) but is reported on
+    // its own: readiness warns about it instead of blocking on it (§3).
+    const optional = mappingRule === OPTIONAL;
+    const optionalUnallocatedQuantity = optional ? remainingQuantity : 0;
+    const optionalUnallocatedAmount = optional ? remainingValue : 0;
 
     return {
       boqItemId: item.id,
@@ -888,6 +902,8 @@ const buildAllocationSummary = async (
       certifiedValue: certifiedByBoqItem.get(item.id) || 0,
       unallocatedQuantity: unscheduledQuantity,
       unallocatedAmount: unscheduledValue,
+      optionalUnallocatedQuantity,
+      optionalUnallocatedAmount,
       notApplicableQuantity: notApplicable ? remainingQuantity : 0,
       notApplicableAmount: notApplicable ? remainingValue : 0,
       allocationCount: totals.allocationCount,
@@ -933,6 +949,11 @@ const buildAllocationSummary = async (
         acc.unallocatedAmount,
         item.unallocatedAmount,
       );
+      acc.optionalUnallocatedQuantity += item.optionalUnallocatedQuantity;
+      acc.optionalUnallocatedAmount = addMoney(
+        acc.optionalUnallocatedAmount,
+        item.optionalUnallocatedAmount,
+      );
       acc.notApplicableQuantity += item.notApplicableQuantity;
       acc.notApplicableAmount = addMoney(
         acc.notApplicableAmount,
@@ -973,6 +994,8 @@ const buildAllocationSummary = async (
       certifiedValue: 0,
       unallocatedQuantity: 0,
       unallocatedAmount: 0,
+      optionalUnallocatedQuantity: 0,
+      optionalUnallocatedAmount: 0,
       notApplicableQuantity: 0,
       notApplicableAmount: 0,
       counts: { unmapped: 0, partial: 0, complete: 0, over: 0, notApplicable: 0 },
@@ -1634,6 +1657,21 @@ const setMappingRules = async ({ orgId, projectId, userId, payload }) =>
         400,
         'VALIDATION_ERROR',
         'Name the BOQ items (itemIds) or a section to apply the rule to',
+      );
+    }
+
+    // A mapping rule decides what the bill asks to be scheduled, so it is a
+    // bill edit and a baselined project refuses it like any other row edit
+    // (a comparison revision is the only way in, and it drops the column).
+    // boq.service requires this module, so its lock reader is loaded here.
+    const { getBoqBaselineLock } = require('./boq.service');
+    const baseline = await getBoqBaselineLock(projectId, tx);
+    if (baseline.locked) {
+      throw new HttpError(
+        409,
+        'BOQ_BASELINE_LOCKED',
+        'BOQ baseline is locked. Mapping rules cannot change on a baselined bill.',
+        { baseline },
       );
     }
 

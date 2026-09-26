@@ -128,6 +128,9 @@ export interface CoverageItem {
   pendingAllocatedAmount: number
   unallocatedQuantity: number
   unallocatedAmount: number
+  /** An optional row's remainder: inside unallocated, reported apart. */
+  optionalUnallocatedQuantity: number
+  optionalUnallocatedAmount: number
   notApplicableQuantity: number
   notApplicableAmount: number
   earnedValue: number
@@ -152,6 +155,8 @@ export interface CoverageGroup {
   pendingAllocatedAmount: number
   unallocatedQuantity: number
   unallocatedAmount: number
+  optionalUnallocatedQuantity: number
+  optionalUnallocatedAmount: number
   notApplicableQuantity: number
   notApplicableAmount: number
   earnedValue: number
@@ -170,6 +175,8 @@ export interface CoverageSummary {
   approvedAllocatedAmount: number
   pendingAllocatedAmount: number
   unallocatedAmount: number
+  /** Inside unallocatedAmount; readiness warns about it rather than blocking. */
+  optionalUnallocatedAmount: number
   notApplicableAmount: number
   earnedValue: number
   certifiedValue: number

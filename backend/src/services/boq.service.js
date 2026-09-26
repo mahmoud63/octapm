@@ -17,6 +17,7 @@ const {
 } = require('../middleware/subscription-gate');
 const {
   assertAllocationCapacity,
+  assertMappingRuleAllows,
   buildAllocationSummary,
   computeDefaultWeight,
   rederiveAllocationsForBoqItem,
@@ -631,6 +632,10 @@ async function createOfficialBoqActivityAllocation(
     calendarId = null,
   },
 ) {
+  // Whatever brings the row here — an activity added to a bill row, a manual
+  // item naming one, or the structuring job — a not_applicable item refuses
+  // it (mapping §3); the allocation routes apply the same guard to theirs.
+  assertMappingRuleAllows(boqItem);
   const quantity = toNumber(payload.quantity);
   const rate = toMoneyNumber(payload.rate ?? boqItem.rate);
   const amount =
@@ -1602,6 +1607,7 @@ async function runBoqActivityJob({ job, payload = {}, updateProgress }) {
         unit: true,
         rate: true,
         amount: true,
+        mappingRule: true,
         activityBoqAllocations: {
           where: { isActive: true },
           select: { id: true },
@@ -1619,6 +1625,7 @@ async function runBoqActivityJob({ job, payload = {}, updateProgress }) {
           unit: i.unit,
           rate: i.rate,
           amount: i.amount,
+          mappingRule: i.mappingRule,
           hasActivities: (i.activityBoqAllocations ?? []).length > 0,
         },
       ]),
@@ -1630,7 +1637,16 @@ async function runBoqActivityJob({ job, payload = {}, updateProgress }) {
 
     for (const boqResult of parsed.boqActivities ?? []) {
       const boqItem = itemByCode[boqResult.boqCode];
-      if (!boqItem || boqItem.hasActivities) continue;
+      // A not_applicable row (preliminaries, provisional sums) is priced but
+      // never scheduled: the job leaves it alone rather than failing the
+      // whole bill on the guard in createOfficialBoqActivityAllocation.
+      if (
+        !boqItem ||
+        boqItem.hasActivities ||
+        boqItem.mappingRule === 'not_applicable'
+      ) {
+        continue;
+      }
 
       const codes = [];
       const activities = (boqResult.activities ?? []).filter((act) =>
