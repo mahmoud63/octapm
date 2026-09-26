@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test'
-import { apiClient } from './support'
+import { API, apiClient } from './support'
 import {
   apiJson,
   createProject,
@@ -228,4 +228,181 @@ test('overview landing shows the controls strip; the wizard lists the offending 
   await (await openControls()).getByTestId('uat-module-child-controls-overview').click()
   await expect(page).toHaveURL(new RegExp(`${escaped}/overview$`), { timeout: 30_000 })
   await expect(page.getByTestId('uat-controls-strip')).toBeVisible({ timeout: 30_000 })
+})
+
+/**
+ * §22 and §20 on screen: an uploaded bill's revision on the approval card —
+ * revision, status, scope, value, changes and the review trail with the
+ * people named — and the strip's money and progress figures, each the
+ * figure the cost summary and the forecast state. The strip asks for those
+ * only once this person's permission matrix has arrived (Phase 22B): the
+ * matrix is held back here, and no figure request may go out before it.
+ */
+test('the bill revision on the approval card, the strip figures as the services state them, and no figure asked for before the permissions', async ({ page }) => {
+  const client = await apiClient()
+  const setup = await (async () => {
+    try {
+      if (!org) org = await registerLiveOrg(client, 'pc4')
+      const token = org.adminToken
+      const projectId = await createProject(client, token, `Setup revision ${Date.now()}`)
+
+      // The product's own BOQ template, downloaded and uploaded as the bill:
+      // three priced rows (revision 1, three added).
+      const template = await client.get(`${API}/projects/${projectId}/boq/template`, {
+        headers: { authorization: `Bearer ${token}` },
+      })
+      expect(template.status(), 'download the BOQ template').toBe(200)
+      const upload = await client.post(`${API}/projects/${projectId}/boq/upload`, {
+        headers: { authorization: `Bearer ${token}` },
+        multipart: {
+          file: {
+            name: 'boq-template.xlsx',
+            mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            buffer: await template.body(),
+          },
+        },
+      })
+      const uploaded = (await upload.json()) as { data?: { revisionId?: string; mode?: string }; error?: unknown }
+      expect(upload.status(), `upload the bill -> ${JSON.stringify(uploaded.error)}`).toBe(200)
+      expect(uploaded.data?.mode).toBe('imported')
+      const revisionId = uploaded.data!.revisionId as string
+      const submitted = await apiJson(client, 'post', `/projects/${projectId}/boq/revisions/${revisionId}/submit`, {
+        token,
+        data: {},
+      })
+      expect(submitted.status, `submit -> ${JSON.stringify(submitted.body?.error)}`).toBe(200)
+
+      // One activity with a cost row whose forecast is above its budget, so
+      // the budget and the forecast at completion are different figures.
+      const activity = await apiJson(client, 'post', `/projects/${projectId}/activities`, {
+        token,
+        data: {
+          name: 'Bulk excavation',
+          activityCode: '1.2',
+          duration: 5,
+          startDate: '2026-02-02',
+          endDate: '2026-02-06',
+          engineerIds: [org.adminId],
+        },
+      })
+      expect(activity.status, `create activity -> ${JSON.stringify(activity.body?.error)}`).toBe(201)
+      const cost = await apiJson(client, 'post', `/projects/${projectId}/cost/activity/${activity.body!.data!.id}`, {
+        token,
+        data: { budget: 5000, forecast: 6400 },
+      })
+      expect(cost.status, `cost row -> ${JSON.stringify(cost.body?.error)}`).toBe(201)
+      return { projectId, revisionId, token }
+    } finally {
+      await client.dispose()
+    }
+  })()
+
+  await signInForm(page, org!.adminEmail)
+  const base = `/o/${org!.segment}/projects/${setup.projectId}`
+
+  // Hold the permission matrix back and record when the figure requests go out.
+  let permissionsAnsweredAt = Number.POSITIVE_INFINITY
+  const figureRequests: { url: string; at: number }[] = []
+  const isFigure = (url: string) =>
+    new RegExp(`/projects/${setup.projectId}/(cost/summary|forecast)(\\?|$)`).test(url)
+  page.on('request', (request) => {
+    if (isFigure(request.url())) figureRequests.push({ url: request.url(), at: Date.now() })
+  })
+  await page.route('**/auth/me/permissions**', async (route) => {
+    await new Promise((resolve) => setTimeout(resolve, 3_000))
+    const response = await route.fetch()
+    permissionsAnsweredAt = Date.now()
+    await route.fulfill({ response })
+  })
+
+  const figureResponse = page.waitForResponse((response) => /\/cost\/summary(\?|$)/.test(response.url()), {
+    timeout: 30_000,
+  })
+  await page.goto(base)
+  await expect(page.getByTestId('uat-controls-strip')).toBeVisible({ timeout: 30_000 })
+  await figureResponse
+  expect(figureRequests.length, 'the strip reads the cost summary and the forecast').toBeGreaterThan(0)
+  for (const request of figureRequests) {
+    expect(request.at, `${request.url} went out before the permission matrix`).toBeGreaterThanOrEqual(permissionsAnsweredAt)
+  }
+  await page.unroute('**/auth/me/permissions**')
+
+  // §20: budget, actual, forecast at completion and progress are what the
+  // cost summary and the forecast say, formatted as the strip formats money.
+  const figuresClient = await apiClient()
+  const [summaryResponse, forecastResponse, projectResponse] = await Promise.all([
+    apiJson(figuresClient, 'get', `/projects/${setup.projectId}/cost/summary`, { token: setup.token }),
+    apiJson(figuresClient, 'get', `/projects/${setup.projectId}/forecast`, { token: setup.token }),
+    apiJson(figuresClient, 'get', `/projects/${setup.projectId}`, { token: setup.token }),
+  ])
+  await figuresClient.dispose()
+  type Summary = {
+    budget?: { revisedBudget?: number | null }
+    totals: { budget: number; actual: number }
+    eac?: { mostLikely?: number | null }
+  }
+  type Forecast = {
+    schedule?: { counts?: { complete: number; activities: number } }
+    dataQuality?: string[]
+  }
+  const summary = summaryResponse.body!.data as unknown as Summary
+  const forecast = forecastResponse.body!.data as unknown as Forecast
+  const currency = ((projectResponse.body!.data as { currency?: string | null }).currency ?? null) as string | null
+  const budget = summary.budget?.revisedBudget ?? summary.totals.budget
+  const eac = summary.eac?.mostLikely as number
+  expect(eac, 'the fixture keeps the forecast apart from the budget').not.toBe(budget)
+  const money = (value: number) =>
+    page.evaluate(
+      ([code, amount]) =>
+        `${code ? `${code} ` : ''}${Number(amount).toLocaleString(undefined, { maximumFractionDigits: 0 })}`,
+      [currency, value] as const,
+    )
+  await expect(page.getByTestId('uat-controls-figure-budget-value')).toHaveText(await money(budget))
+  await expect(page.getByTestId('uat-controls-figure-actual-value')).toHaveText(await money(summary.totals.actual))
+  await expect(page.getByTestId('uat-controls-figure-forecast-value')).toHaveText(await money(eac))
+  const counts = forecast.schedule!.counts!
+  await expect(page.getByTestId('uat-controls-figure-progress-value')).toHaveText(
+    `${counts.complete.toLocaleString()}/${counts.activities.toLocaleString()}`,
+  )
+  await expect(page.getByTestId('uat-controls-figure-data-quality-value')).toHaveText(
+    String((forecast.dataQuality ?? []).length),
+  )
+
+  // §22: the bill under review — revision, status, scope, value, changes
+  // and the trail so far.
+  await expect(page.getByTestId('uat-controls-boq-revision')).toHaveText('Rev 1')
+  const expand = page.getByTestId('uat-setup-readiness-expand')
+  if (await expand.isVisible().catch(() => false)) await expand.click()
+  const approvalCard = page.getByTestId('uat-setup-step-boq_approval')
+  const revision = approvalCard.getByTestId('uat-setup-boq-revision')
+  await expect(revision).toBeVisible()
+  await expect(revision.getByTestId('uat-setup-boq-revision-number')).toContainText('Rev 1')
+  await expect(revision.getByTestId('uat-setup-boq-revision-status')).toContainText('Under review')
+  await expect(revision.getByTestId('uat-setup-boq-revision-scope')).toContainText('3 rows')
+  await expect(revision.getByTestId('uat-setup-boq-revision-scope')).toContainText(await money(252_500))
+  await expect(revision.getByTestId('uat-setup-boq-revision-changes')).toContainText('+3 added')
+  const history = revision.getByTestId('uat-setup-boq-revision-history')
+  await expect(history).toContainText('Submitted by pc4 Admin')
+  await expect(history).not.toContainText('Approved by')
+  await expect(approvalCard.getByTestId('uat-setup-issue-PENDING_BOQ_REVISION')).toBeVisible()
+
+  // Approved: the card says so and the trail names the approver.
+  const approveClient = await apiClient()
+  const approved = await apiJson(
+    approveClient,
+    'post',
+    `/projects/${setup.projectId}/boq/revisions/${setup.revisionId}/approve`,
+    { token: setup.token, data: {} },
+  )
+  await approveClient.dispose()
+  expect(approved.status, `approve -> ${JSON.stringify(approved.body?.error)}`).toBe(200)
+  await page.reload()
+  const approvedCard = page.getByTestId('uat-setup-step-boq_approval')
+  const expandAgain = page.getByTestId('uat-setup-readiness-expand')
+  if (await expandAgain.isVisible({ timeout: 5_000 }).catch(() => false)) await expandAgain.click()
+  await expect(approvedCard.getByTestId('uat-setup-boq-revision-status')).toContainText('Approved', { timeout: 30_000 })
+  await expect(approvedCard.getByTestId('uat-setup-boq-revision-history')).toContainText('Submitted by pc4 Admin')
+  await expect(approvedCard.getByTestId('uat-setup-boq-revision-history')).toContainText('Approved by pc4 Admin')
+  await expect(page.getByTestId('uat-controls-boq-revision')).toHaveText('Rev 1')
+  await expect(page.getByTestId('uat-controls-boq')).toContainText('Approved')
 })

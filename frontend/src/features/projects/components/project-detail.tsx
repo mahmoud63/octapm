@@ -852,6 +852,9 @@ export function ProjectDetail({
                 isLoading={setupReadinessLoading}
                 currency={project.currency}
                 onNavigate={handleSetupNavigate}
+                // The strip mounts outside the module guard below; its
+                // figure requests wait for the permission matrix the same way.
+                permissionsSettling={permissionsSettling}
               />
             )}
 

@@ -21,6 +21,12 @@ type Props = {
   isLoading?: boolean
   currency?: string | null
   onNavigate: (target: ProjectSetupTarget) => void
+  /**
+   * True until this person's permission matrix for the project has arrived.
+   * Until then useCanPerform answers from the role alone, and a template may
+   * still take cost or schedule away, so no figure request is fired.
+   */
+  permissionsSettling?: boolean
 }
 
 const TARGETS = {
@@ -196,14 +202,23 @@ function Tile({
  * none of them again — three truths: what is shown here is the same number
  * the module pages show, and nothing on this strip is stored.
  */
-export function ControlsStrip({ projectId, readiness, isLoading, currency, onNavigate }: Props) {
+export function ControlsStrip({
+  projectId,
+  readiness,
+  isLoading,
+  currency,
+  onNavigate,
+  permissionsSettling = false,
+}: Props) {
   // The money figures come from the cost summary (budget register, ledger
   // projections, EAC) and the forecast service, read only when the policy
   // lets this person open those modules: a hidden module never fires the
-  // request it would be refused (Phase 22B). The hooks take an empty id to
-  // stay idle. Role shapes what shows; the API decides what is allowed.
-  const canSeeCost = useCanPerform('cost', 'read')
-  const canSeeSchedule = useCanPerform('schedule', 'read')
+  // request it would be refused (Phase 22B) — and nothing is asked before
+  // the permission matrix has settled, since until then the answer is the
+  // role's, which a template may narrow. The hooks take an empty id to stay
+  // idle. Role shapes what shows; the API decides what is allowed.
+  const canSeeCost = useCanPerform('cost', 'read') && !permissionsSettling
+  const canSeeSchedule = useCanPerform('schedule', 'read') && !permissionsSettling
   const { data: costSummary } = useCostSummary(canSeeCost ? projectId : '')
   const { data: forecast } = useForecast(projectId, canSeeSchedule)
 
@@ -219,6 +234,10 @@ export function ControlsStrip({ projectId, readiness, isLoading, currency, onNav
   if (!readiness) return null
 
   const { summary, gates, coverage, context } = readiness
+  // The readiness check leaves the bill's values out for a person who may
+  // not read the BOQ; the strip then shows the shares and counts only.
+  const coverageValuesShown = coverage?.totalBoqAmount != null
+  const nextAction = summary.nextAction ?? summary.advisoryAction ?? null
   const stepCounts = (key: string) =>
     (readiness.steps.find((step) => step.key === key)?.counts ?? {}) as Record<string, unknown>
 
@@ -342,8 +361,8 @@ export function ControlsStrip({ projectId, readiness, isLoading, currency, onNav
             steps complete · derived check, not stored
           </>
         }
-        action={summary.nextAction ? summary.nextAction.label : 'Review setup'}
-        onClick={() => onNavigate(summary.nextAction?.target ?? TARGETS.overview)}
+        action={nextAction ? nextAction.label : 'Review setup'}
+        onClick={() => onNavigate(nextAction?.target ?? TARGETS.overview)}
         testId='uat-controls-readiness'
       />
       <Tile
@@ -355,7 +374,13 @@ export function ControlsStrip({ projectId, readiness, isLoading, currency, onNav
         badge={boqBadge}
         detail={
           boqRevision
-            ? `${boqRevision.itemCount.toLocaleString()} rows · ${formatMoney(currency, boqRevision.totalAmount)}${boqRevision.label ? ` · ${boqRevision.label}` : ''}`
+            ? [
+                `${boqRevision.itemCount.toLocaleString()} rows`,
+                boqRevision.totalAmount != null && formatMoney(currency, boqRevision.totalAmount),
+                boqRevision.label,
+              ]
+                .filter(Boolean)
+                .join(' · ')
             : boqItems > 0
               ? 'Entered by hand; approved by locking the BOQ baseline'
               : 'Upload the bill to start'
@@ -376,6 +401,11 @@ export function ControlsStrip({ projectId, readiness, isLoading, currency, onNav
             : 'No bill'
         }
         detail={
+          !coverageValuesShown ? (
+            <span data-testid='uat-controls-coverage-values-withheld'>
+              Values are shown to people who can open the BOQ
+            </span>
+          ) : (
           <>
             {formatMoney(currency, coverage?.approvedAllocatedAmount)} approved of{' '}
             {formatMoney(currency, coverage?.allocatableBoqAmount ?? coverage?.totalBoqAmount)}{' '}
@@ -385,6 +415,7 @@ export function ControlsStrip({ projectId, readiness, isLoading, currency, onNav
             </span>
             {counts && counts.notApplicable > 0 ? ` (${counts.notApplicable} rows)` : ''}
           </>
+          )
         }
         action='Open mapping'
         onClick={() => onNavigate(TARGETS.mapping)}

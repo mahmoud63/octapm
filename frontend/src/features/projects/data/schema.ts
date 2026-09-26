@@ -198,6 +198,11 @@ export type ProjectSetupIssue = {
   /** The offending records, capped at 50; `count` is the whole number. */
   items?: ProjectSetupItem[]
   count?: number
+  /**
+   * True when the caller may not read the BOQ and the BOQ records behind
+   * the issue were left out of `items`; `count` is still the whole number.
+   */
+  itemsWithheld?: boolean
   stepKey?: string
   stepLabel?: string
   actionLabel?: string
@@ -294,7 +299,18 @@ export type ProjectSetupReadiness = {
     /** The §33 status line, in reading order. */
     headline?: ProjectSetupHeadlineEntry[]
     criticalUnmappedActivities?: number
+    /** From the ten original steps only (setup doc §3: unchanged). */
     nextAction: {
+      stepKey: string
+      label: string
+      target: ProjectSetupTarget
+      message: string
+    } | null
+    /**
+     * The first of the two advisory steps (structure_setup, boq_approval)
+     * still asking for something, offered apart from nextAction.
+     */
+    advisoryAction?: {
       stepKey: string
       label: string
       target: ProjectSetupTarget
@@ -334,14 +350,15 @@ export type ProjectSetupReadiness = {
   }
   /**
    * The §69 coverage totals, exactly as the coverage endpoint reports them
-   * (PC-3) — the readiness check never recomputes them.
+   * (PC-3) — the readiness check never recomputes them. A caller who may not
+   * read the BOQ gets only `coveragePct` and `counts`.
    */
   coverage?: {
-    totalBoqAmount: number
+    totalBoqAmount?: number
     allocatableBoqAmount?: number
-    approvedAllocatedAmount: number
-    pendingAllocatedAmount: number
-    unallocatedAmount: number
+    approvedAllocatedAmount?: number
+    pendingAllocatedAmount?: number
+    unallocatedAmount?: number
     optionalUnallocatedAmount?: number
     notApplicableAmount?: number
     earnedValue?: number
@@ -374,7 +391,8 @@ export type ProjectSetupReadiness = {
       baselineLocked: boolean
       lockedAt: string | null
       itemCount: number
-      totalAmount: number
+      /** Only for a caller who may read the BOQ. */
+      totalAmount?: number
       /** The upload's comparison against the bill before it (PC-2). */
       changes?: {
         added: number
@@ -389,9 +407,13 @@ export type ProjectSetupReadiness = {
         blocked: Array<{
           code: string | null
           description: string | null
+          /** The machine code PC-2 recorded, e.g. DUPLICATE_BOQ_ITEM_CODE. */
           reason: string | null
+          /** The sentence to show. */
+          message?: string | null
         }>
       }
+      /** Only for a caller who may read the BOQ. */
       history?: BoqRevisionHistoryEntry[]
       createdAt?: string | null
     } | null

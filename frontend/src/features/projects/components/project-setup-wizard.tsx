@@ -182,6 +182,14 @@ function IssueDetail({ issue }: { issue: ProjectSetupIssue }) {
           )}
         </ul>
       )}
+      {issue.itemsWithheld && (
+        <p
+          className='ms-3 text-[11px] text-muted-foreground'
+          data-testid={`uat-setup-issue-withheld-${issue.code}`}
+        >
+          The BOQ records behind this are listed for people who can open the BOQ.
+        </p>
+      )}
     </li>
   )
 }
@@ -321,7 +329,9 @@ function RevisionDetail({
       <div className='flex flex-wrap gap-x-2 text-muted-foreground'>
         <dt className='sr-only'>Scope</dt>
         <dd className='octa-numeric' data-testid='uat-setup-boq-revision-scope'>
-          {revision.itemCount.toLocaleString()} rows · {formatMoney(currency, revision.totalAmount)}
+          {revision.itemCount.toLocaleString()} rows
+          {/* The value is sent only to people who may read the BOQ. */}
+          {revision.totalAmount != null ? ` · ${formatMoney(currency, revision.totalAmount)}` : ''}
         </dd>
         {changes && (
           <>
@@ -341,7 +351,8 @@ function RevisionDetail({
           {blocked.slice(0, 3).map((row, index) => (
             <dd key={`${row.code ?? index}`} className='truncate text-muted-foreground'>
               {[row.code, row.description].filter(Boolean).join(' · ')}
-              {row.reason ? ` — ${row.reason}` : ''}
+              {/* The sentence PC-2 wrote, not its machine code. */}
+              {(row.message ?? row.reason) ? ` — ${row.message ?? row.reason}` : ''}
             </dd>
           ))}
         </div>
@@ -536,6 +547,10 @@ export function ProjectSetupWizard({
         )
       : 0
   const nextAction = readiness.summary.nextAction
+  // The advisory steps (structure, the bill's approval) never take the next
+  // action from the ten gated steps; once those are clear, the first of
+  // them still asking for something is offered on its own.
+  const advisoryAction = nextAction ? null : (readiness.summary.advisoryAction ?? null)
   const progressGate = readiness.gates.progress
   const baselineGate = readiness.gates.baseline
   const reportingGate = readiness.gates.reporting
@@ -652,8 +667,15 @@ export function ProjectSetupWizard({
             )}
           </div>
 
-          <div className='max-w-3xl text-sm text-muted-foreground'>
-            {nextAction ? nextAction.message : 'All setup checks are clear.'}
+          <div
+            className='max-w-3xl text-sm text-muted-foreground'
+            data-testid='uat-setup-next-message'
+          >
+            {nextAction
+              ? nextAction.message
+              : advisoryAction
+                ? `Gated setup checks are clear. Advisory: ${advisoryAction.message}`
+                : 'All setup checks are clear.'}
           </div>
 
           {readiness.summary.headline && readiness.summary.headline.length > 0 && (
@@ -690,6 +712,18 @@ export function ProjectSetupWizard({
             className='w-full sm:w-fit'
           >
             {nextAction.label}
+            <ArrowRight className='h-4 w-4' />
+          </Button>
+        )}
+        {advisoryAction && (
+          <Button
+            type='button'
+            variant='outline'
+            onClick={() => onNavigate(advisoryAction.target)}
+            className='w-full sm:w-fit'
+            data-testid='uat-setup-advisory-action'
+          >
+            {advisoryAction.label}
             <ArrowRight className='h-4 w-4' />
           </Button>
         )}
