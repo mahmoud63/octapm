@@ -5,6 +5,7 @@ import {
   FolderKanban,
   GitBranch,
   Hash,
+  Landmark,
   Lock,
   Plug,
   ShieldCheck,
@@ -19,6 +20,11 @@ import { Main } from '@/components/layout/main'
 import { SidebarNav } from '@/features/settings/components/sidebar-nav'
 
 const navItems = [
+  {
+    title: 'Workspace',
+    href: '/company/workspace',
+    icon: <Landmark size={18} />,
+  },
   {
     title: 'Directory',
     href: '/company/directory',
