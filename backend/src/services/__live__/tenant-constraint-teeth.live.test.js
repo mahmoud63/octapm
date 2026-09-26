@@ -102,4 +102,25 @@ liveDescribe("Tenant constraint teeth (M7)", () => {
     const row = await prisma.projectAssignment.findFirst({ where: { projectId: projectA.id, userId: a.user.id } });
     expect(row.orgId).toBe(a.org.id);
   });
+
+  test("a project hard delete nulls only a stock transaction's projectId; its organisation stays (021100)", async () => {
+    // A stock movement outlives its project (SET NULL), but the pair key must
+    // null the project alone: orgId is NOT NULL, and nulling both made every
+    // hard delete of a project with a movement fail on the row, not on a key.
+    const project = await prisma.project.create({ data: { orgId: a.org.id, name: "Teeth stock", status: "active" } });
+    // A central warehouse and a company-owned item (no project), so nothing
+    // but the pair key decides what happens to the movement.
+    const warehouse = await prisma.warehouse.create({ data: { orgId: a.org.id, code: `W-${crypto.randomUUID().slice(0, 6)}`, name: "Teeth yard" } });
+    const item = await prisma.inventoryItem.create({ data: { orgId: a.org.id, sku: `SKU-${crypto.randomUUID().slice(0, 6)}`, name: "Teeth rebar", unit: "t" } });
+    const movement = await prisma.stockTransaction.create({
+      data: { orgId: a.org.id, projectId: project.id, itemId: item.id, warehouseId: warehouse.id, type: "receipt", quantity: 4 },
+    });
+
+    await prisma.$executeRaw`DELETE FROM "Project" WHERE "id" = ${project.id}`;
+
+    const after = await prisma.stockTransaction.findUnique({ where: { id: movement.id } });
+    expect(after).not.toBeNull();
+    expect(after.projectId).toBeNull();
+    expect(after.orgId).toBe(a.org.id);
+  });
 });
