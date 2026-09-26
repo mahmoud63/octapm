@@ -38,6 +38,9 @@ export type ModuleItem = { key: ModuleKey; label: string; children?: ModuleChild
 const PRIMARY_ORDER: ModuleKey[] = [
   'overview',
   'schedule',
+  // The bill, the programme and the mapping as one group (§19), beside the
+  // schedule it belongs with rather than folded into More.
+  'controls',
   'siteReporting',
   'cost',
   'commercial',

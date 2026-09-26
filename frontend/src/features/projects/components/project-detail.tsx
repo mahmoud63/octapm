@@ -5,6 +5,7 @@ import { Link, useNavigate } from '@tanstack/react-router'
 import { formatShortDate } from '@/lib/dates'
 import { ProjectPermissionProvider } from '@/lib/permissions'
 import { useProjectRealtime } from '@/hooks/use-realtime'
+import { projectControlsGroup } from '@/components/layout/data/sidebar-data'
 import { Main } from '@/components/layout/main'
 import { useMyProjectPermissions } from '@/features/permissions/hooks/use-permissions'
 import {
@@ -177,6 +178,12 @@ const CaptureHome = lazy(() =>
 type MenuChild = {
   key: string
   label: string
+  /**
+   * Where the entry opens when it is not a sub-tab of its own module: the
+   * Project Controls group lists the bill, the programme and the mapping
+   * together (§19), and most of those pages belong to other modules.
+   */
+  target?: { module: ModuleKey; child?: string }
 }
 
 type MenuItem = {
@@ -287,6 +294,27 @@ export function ProjectDetail({
       scheduleChildren.splice(10, 0, { key: 'wbs', label: 'WBS' })
     }
 
+    // The Project Controls group (§19): Overview, Structure, Schedule, BOQ,
+    // Mapping, Progress, Cost, Forecast, Resources, Risks, Baselines. The
+    // group's own pages (structure, mapping) are its sub-tabs; every other
+    // entry opens the module that owns the page, and is offered only when
+    // that module is. Role shapes the list; the API decides what is allowed.
+    const controlsChildren: MenuChild[] = projectControlsGroup.items
+      .filter(
+        (entry) =>
+          isModuleVisible(permissionMatrix, entry.module) &&
+          (!entry.child || isChildVisible(permissionMatrix, entry.module, entry.child))
+      )
+      .map((entry) =>
+        entry.module === 'controls'
+          ? { key: entry.child ?? entry.key, label: entry.title }
+          : {
+              key: entry.key,
+              label: entry.title,
+              target: { module: entry.module, child: entry.child },
+            }
+      )
+
     return [
       { key: 'capture', label: 'Capture' },
       { key: 'schedule', label: 'Schedule', children: scheduleChildren },
@@ -363,10 +391,7 @@ export function ProjectDetail({
       {
         key: 'controls',
         label: 'Project Controls',
-        children: [
-          { key: 'structure', label: 'Structure' },
-          { key: 'mapping', label: 'Mapping' },
-        ],
+        children: controlsChildren,
       },
       { key: 'bim', label: 'BIM' },
       { key: 'activities', label: 'Activities' },
@@ -411,7 +436,10 @@ export function ProjectDetail({
   const childFor = useCallback(
     (module: ModuleWithChildren) => {
       const item = menuItems.find((entry) => entry.key === module)
-      const allowed = new Set(item?.children?.map((entry) => entry.key) ?? [])
+      // An entry that opens another module is not a sub-tab of this one.
+      const allowed = new Set(
+        item?.children?.filter((entry) => !entry.target).map((entry) => entry.key) ?? []
+      )
       const requested =
         module === visibleModule && childSlug && allowed.has(childSlug)
           ? childSlug
@@ -419,7 +447,7 @@ export function ProjectDetail({
       // the module's usual first tab, unless the policy hides it — then the first offered
       const fallback = allowed.has(DEFAULT_CHILD[module])
         ? DEFAULT_CHILD[module]
-        : (item?.children?.[0]?.key ?? DEFAULT_CHILD[module])
+        : (item?.children?.find((entry) => !entry.target)?.key ?? DEFAULT_CHILD[module])
       return requested ?? fallback
     },
     [childSlug, menuItems, visibleModule]
@@ -495,6 +523,22 @@ export function ProjectDetail({
   const setModuleChild = useCallback(
     (module: ModuleWithChildren, child: string) => goTo(module, child),
     [goTo]
+  )
+
+  // A menu entry either is a sub-tab of its module or names the module that
+  // owns the page (the Project Controls group); both end in one address.
+  const selectChild = useCallback(
+    (module: ModuleKey, child: string) => {
+      const entry = menuItems
+        .find((item) => item.key === module)
+        ?.children?.find((candidate) => candidate.key === child)
+      if (entry?.target) {
+        goTo(entry.target.module, entry.target.child ?? null)
+        return
+      }
+      goTo(module, child)
+    },
+    [goTo, menuItems]
   )
 
   const handleModuleSelect = (item: MenuItem) => {
@@ -741,12 +785,7 @@ export function ProjectDetail({
               : undefined
           }
           onSelectModule={handleModuleSelect}
-          onSelectChild={(module: ModuleKey, child: string) =>
-            navigate({
-              to: '/projects/$projectId/$module/$child',
-              params: { projectId, module: slugForModule(module), child },
-            })
-          }
+          onSelectChild={selectChild}
         />
       )}
 
