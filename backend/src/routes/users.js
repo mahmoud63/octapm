@@ -7,7 +7,7 @@ const { requirePermission } = require("../middleware/rbac");
 const { subscriptionGate } = require("../middleware/subscription-gate");
 const { validate } = require("../middleware/validate");
 const userService = require("../services/user.service");
-const { disconnectUser } = require("../realtime/socket");
+const { disconnectStanding } = require("../realtime/socket");
 
 const router = express.Router();
 router.use(authenticate);
@@ -140,8 +140,12 @@ router.patch(
     });
     // A changed role or standing reaches their open sockets too (Phase 21D,
     // CX21-491) — a change, not an edit that repeats the same values (the
-    // tenth pass's note).
-    if (before.role !== result.role || Boolean(before.isCompanyAdmin) !== Boolean(result.isCompanyAdmin)) disconnectUser(req.app.get("io"), req.params.id);
+    // tenth pass's note). It is this workspace's membership that changed, so
+    // only its sockets go; the person's socket in another workspace stays
+    // connected (ENT-5).
+    if (before.role !== result.role || Boolean(before.isCompanyAdmin) !== Boolean(result.isCompanyAdmin) || Boolean(before.isOwner) !== Boolean(result.isOwner)) {
+      await disconnectStanding(req.app.get("io"), { orgId: req.user.orgId, userId: req.params.id });
+    }
     return sendSuccess(res, result);
   }),
 );
@@ -187,7 +191,10 @@ router.patch(
       actor: req.user,
       context: getRequestContext(req),
     });
-    disconnectUser(req.app.get("io"), req.params.id); // their sockets go with the account (CX21-491)
+    // Their sockets in this workspace go with the membership (CX21-491); when
+    // this was the last workspace the identity could enter, the account is
+    // closed and every socket goes with it (membership doc §5.1).
+    await disconnectStanding(req.app.get("io"), { orgId: req.user.orgId, userId: req.params.id });
     return sendSuccess(res, result);
   }),
 );

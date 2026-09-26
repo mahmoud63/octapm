@@ -531,10 +531,20 @@ const resolveNotificationRecipients = async ({
       .filter(Boolean),
   );
   const select = { id: true, email: true, name: true, role: true };
+  // A person addressed by id belongs to this workspace by membership as much
+  // as by their User.orgId (ENT-5): a member whose home is another workspace
+  // is still notified here, and the socket router then delivers it to their
+  // member room in this workspace and nowhere else.
+  const membershipService = require("./membership.service");
+  const byMembership = membershipService.hasMembershipModel(tx) && membershipService.isMembershipReadEnabled();
+  const inThisWorkspace = (where) =>
+    byMembership
+      ? { ...where, OR: [{ orgId }, { memberships: { some: { orgId, status: membershipService.MEMBERSHIP_STATUSES.ACTIVE } } }] }
+      : { ...where, orgId };
 
   if (directIds.length) {
     const users = await tx.user.findMany({
-      where: { orgId, id: { in: directIds }, status: "active" },
+      where: inThisWorkspace({ id: { in: directIds }, status: "active" }),
       select,
     });
     addUsersToMap(recipients, users, actorId);
@@ -545,7 +555,7 @@ const resolveNotificationRecipients = async ({
   const refIds = refs.filter((ref) => isUuidLike(ref) && !directIds.includes(ref));
   if (refIds.length) {
     const users = await tx.user.findMany({
-      where: { orgId, status: "active", id: { in: refIds } },
+      where: inThisWorkspace({ status: "active", id: { in: refIds } }),
       select,
     });
     addUsersToMap(recipients, users, actorId);
