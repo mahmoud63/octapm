@@ -114,7 +114,10 @@ const normalizeRevisionStatus = (status) => {
 /**
  * Where a record is fixed: the module page under the project's workspace,
  * with the record in the URL (`?recordId=&source=`) as notification links
- * carry it, so the page opens with the record selected where it can.
+ * carry it. The link opens the module that holds the record; the BOQ grid,
+ * the activities list and the mapping matrix do not yet select the record
+ * named in the URL (a follow-up for those modules' owners), so the address
+ * carries it for the day they do.
  */
 const hrefFor = ({ workspace, projectId, target, record = null }) => {
   const base = `/projects/${encodeURIComponent(projectId)}/${target.module}${
@@ -217,6 +220,43 @@ const firstNextAction = (steps) =>
   steps.find((step) => step.status === STATUS.PENDING) ||
   null;
 
+// The two steps PC-4 inserts (setup doc §2). They are advisory and the
+// doc keeps `nextAction` unchanged (§3), so they never take it from the ten
+// original steps: a project whose ten steps are clear keeps a null
+// nextAction, and the first of these two still asking for something is
+// offered apart, as `summary.advisoryAction`.
+const ADVISORY_STEP_KEYS = new Set(["structure_setup", "boq_approval"]);
+
+const toAction = (step) =>
+  step
+    ? {
+        stepKey: step.key,
+        label: step.action.label,
+        target: step.action.target,
+        message: step.message,
+      }
+    : null;
+
+// What a person who cannot read the BOQ (boq:read) is not shown: the
+// records behind an issue that are BOQ rows, their allocations, the bill's
+// revisions and the unit spellings typed on its rows. The issue itself,
+// its code, message and count stay — so every gate and blocker is the same
+// for every caller — only the named records are withheld.
+const BOQ_ITEM_TYPES = new Set(["boq_item", "allocation", "boq_revision", "unit"]);
+
+const withoutBoqRecords = (entry) => {
+  const items = (entry.items || []).filter((item) => !BOQ_ITEM_TYPES.has(item.type));
+  return items.length === (entry.items || []).length
+    ? entry
+    : { ...entry, items, itemsWithheld: true };
+};
+
+// The official reporting gate as the base shaped it: EV stores it in the
+// locked period's snapshot basis and in the override's audit metadata, so
+// the per-item detail (records, links under the workspace slug) stays on
+// the interactive readiness answer and never enters a frozen record.
+const withoutItemDetail = ({ items, count, itemsWithheld, ...entry }) => entry;
+
 const getActiveRevision = (projectId) =>
   prisma.scheduleRevision.findFirst({
     where: { projectId, isActive: true },
@@ -276,7 +316,15 @@ const itemsFromCheckDetails = (check, activityById, toActivityItem) => {
   return items;
 };
 
-const getSetupReadiness = async ({ orgId, projectId }) => {
+/**
+ * The setup check. `canReadBoq` is whether the caller may read the BOQ
+ * (the route resolves it from the caller's permission; an internal caller
+ * such as the EV lock reads the gates only and leaves it at its default).
+ * Without it the answer keeps every step, gate, code and count, and leaves
+ * out the bill's rows, values and review trail that the BOQ and coverage
+ * endpoints would refuse the same person.
+ */
+const getSetupReadiness = async ({ orgId, projectId, canReadBoq = true }) => {
   const project = await prisma.project.findFirst({
     where: { id: projectId, orgId },
   });
@@ -619,7 +667,20 @@ const getSetupReadiness = async ({ orgId, projectId }) => {
     boqRevisions.find((revision) =>
       BOQ_CURRENT_REVISION_STATUSES.includes(revision.status),
     ) || null;
-  const lockedBoqRevision = boqRevisions.find((revision) => revision.baselineLocked) || null;
+  // The locked revision is the one locked last, and a baselined schedule
+  // names the lock before it — the same decision boq.service's
+  // getBoqBaselineLock makes (newest lockedAt, a missing one first as
+  // Postgres sorts it; schedule_baseline first), so
+  // the Overview and the BOQ page name the same source and revision.
+  const lockedBoqRevision =
+    boqRevisions
+      .filter((revision) => revision.baselineLocked)
+      .sort(
+        (a, b) =>
+          (b.lockedAt ? new Date(b.lockedAt).getTime() : Infinity) -
+            (a.lockedAt ? new Date(a.lockedAt).getTime() : Infinity) ||
+          new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+      )[0] || null;
   const boqRevisionStatus = currentBoqRevision?.status || null;
   // The BOQ counts as locked once the schedule is baselined too, exactly as
   // boq.service's getBoqBaselineLock answers it.
@@ -721,7 +782,11 @@ const getSetupReadiness = async ({ orgId, projectId }) => {
     ? currentBoqRevision.compareJson.blocked.slice(0, ITEM_CAP).map((row) => ({
         code: row.code ?? null,
         description: row.description ?? null,
-        reason: row.reason ?? row.message ?? null,
+        // PC-2 records the machine code (`reason`, e.g.
+        // DUPLICATE_BOQ_ITEM_CODE) and the sentence a person reads
+        // (`message`); both are passed on, and the wizard shows the sentence.
+        reason: row.reason ?? null,
+        message: row.message ?? row.reason ?? null,
       }))
     : [];
 
@@ -1321,7 +1386,7 @@ const getSetupReadiness = async ({ orgId, projectId }) => {
   // The §89 sequence: structure between profile and BOQ upload, the bill's
   // approval right after its upload. The ten original steps keep their keys,
   // their gates and their meaning.
-  const steps = [
+  const builtSteps = [
     buildStep({
       key: "project_profile",
       label: "Project Profile",
@@ -1568,6 +1633,16 @@ const getSetupReadiness = async ({ orgId, projectId }) => {
       successMessage: "Project is ready for progress entry.",
     }),
   ];
+  // The same steps for everyone; a caller who cannot read the BOQ gets them
+  // without the BOQ records named under each issue. Statuses, codes and
+  // counts are untouched, so the gates below are identical for every caller.
+  const steps = canReadBoq
+    ? builtSteps
+    : builtSteps.map((step) => ({
+        ...step,
+        blockers: step.blockers.map(withoutBoqRecords),
+        warnings: step.warnings.map(withoutBoqRecords),
+      }));
 
   const baselineBlockers = addStepContext(
     steps.filter((step) => step.requiredFor.includes("baseline")),
@@ -1581,15 +1656,24 @@ const getSetupReadiness = async ({ orgId, projectId }) => {
   const reportingWarningDetails = addStepWarningContext(
     steps.filter((step) => step.requiredFor.includes("reporting")),
   );
-  const nextStep = firstNextAction(steps);
+  const nextStep = firstNextAction(steps.filter((step) => !ADVISORY_STEP_KEYS.has(step.key)));
+  const advisoryStep = firstNextAction(steps.filter((step) => ADVISORY_STEP_KEYS.has(step.key)));
 
   // The §69 coverage totals, exactly as PC-3's summary reports them (the
   // per-item rows stay on the coverage endpoint). Never recomputed here.
-  const coverage = Object.fromEntries(
-    Object.entries(allocationSummary).filter(
-      ([key]) => !["items", "groups"].includes(key),
-    ),
-  );
+  // The coverage endpoint needs boq:read; without it only the share covered
+  // and the row counts are given — no quantity, value, earned or certified
+  // figure.
+  const coverage = canReadBoq
+    ? Object.fromEntries(
+        Object.entries(allocationSummary).filter(
+          ([key]) => !["items", "groups"].includes(key),
+        ),
+      )
+    : {
+        coveragePct: allocationSummary.coveragePct,
+        counts: allocationSummary.counts,
+      };
 
   // The §33 headline: one line a person reads before the cards — "BOQ
   // imported PASS · Schedule imported PASS · Mapping 83% · …". Every entry
@@ -1605,6 +1689,41 @@ const getSetupReadiness = async ({ orgId, projectId }) => {
   const boqImported = boqBlockers.filter(Boolean).length === 0;
   const scheduleImported = scheduleBlockers.filter(Boolean).length === 0;
   const costLoadingComplete = approvedCostLoadingCount > 0 && reportingPeriodCount > 0;
+  // §33's "Unmapped BOQ quantity 1,250 m3": the unallocated quantity PC-3's
+  // summary already gives each row, grouped by the row's unit — quantities
+  // in different units are never added together. The units are listed by
+  // the value they leave open, the three largest, then how many more.
+  const unmappedByUnit = new Map();
+  for (const summaryItem of summaryItems) {
+    const quantity = toNumber(summaryItem.unallocatedQuantity);
+    if (quantity <= 0) continue;
+    const row = boqItemById.get(summaryItem.boqItemId) || {};
+    const typed = String(row.unit || "").trim();
+    const key = resolvedUnitOf(row) || unitKey(typed) || "";
+    const entry = unmappedByUnit.get(key) || { unit: typed || null, quantity: 0, amount: 0 };
+    entry.quantity += quantity;
+    entry.amount = addMoney(entry.amount, summaryItem.unallocatedAmount);
+    unmappedByUnit.set(key, entry);
+  }
+  const unmappedQuantities = [...unmappedByUnit.values()].sort((a, b) => b.amount - a.amount);
+  const UNMAPPED_UNITS_SHOWN = 3;
+  const unmappedQuantityText =
+    unmappedQuantities.length === 0
+      ? "0"
+      : [
+          ...unmappedQuantities.slice(0, UNMAPPED_UNITS_SHOWN).map(
+            (entry) =>
+              `${entry.quantity.toLocaleString("en-US", { maximumFractionDigits: 2 })} ${
+                entry.unit || "(no unit)"
+              }`,
+          ),
+          unmappedQuantities.length > UNMAPPED_UNITS_SHOWN &&
+            `+${unmappedQuantities.length - UNMAPPED_UNITS_SHOWN} more unit${
+              unmappedQuantities.length - UNMAPPED_UNITS_SHOWN === 1 ? "" : "s"
+            }`,
+        ]
+          .filter(Boolean)
+          .join(" · ");
   const headline = [
     headlineItem(
       "boq_imported",
@@ -1632,13 +1751,23 @@ const getSetupReadiness = async ({ orgId, projectId }) => {
           : "review",
       coveragePct,
     ),
-    headlineItem(
-      "unmapped_boq",
-      "Unmapped BOQ value",
-      formatHeadlineMoney(unallocatedAmount),
-      unallocatedAmount > MONEY_EPSILON ? "review" : "done",
-      unallocatedAmount,
-    ),
+    // The bill's quantities and value are for those who may read the BOQ.
+    canReadBoq &&
+      headlineItem(
+        "unmapped_quantity",
+        "Unmapped BOQ quantity",
+        unmappedQuantityText,
+        unmappedQuantities.length > 0 ? "review" : "done",
+        unmappedQuantities.map(({ unit, quantity }) => ({ unit, quantity })),
+      ),
+    canReadBoq &&
+      headlineItem(
+        "unmapped_boq",
+        "Unmapped BOQ value",
+        formatHeadlineMoney(unallocatedAmount),
+        unallocatedAmount > MONEY_EPSILON ? "review" : "done",
+        unallocatedAmount,
+      ),
     headlineItem(
       "critical_unmapped",
       "Critical unmapped activities",
@@ -1660,7 +1789,7 @@ const getSetupReadiness = async ({ orgId, projectId }) => {
       costLoadingComplete ? "done" : "review",
       costLoadingComplete,
     ),
-  ];
+  ].filter(Boolean);
 
   return {
     projectId,
@@ -1683,14 +1812,8 @@ const getSetupReadiness = async ({ orgId, projectId }) => {
       readyForReporting: reportingBlockerDetails.length === 0,
       headline,
       criticalUnmappedActivities: criticalUnmappedActivities.length,
-      nextAction: nextStep
-        ? {
-            stepKey: nextStep.key,
-            label: nextStep.action.label,
-            target: nextStep.action.target,
-            message: nextStep.message,
-          }
-        : null,
+      nextAction: toAction(nextStep),
+      advisoryAction: toAction(advisoryStep),
     },
     gates: {
       baseline: {
@@ -1765,7 +1888,6 @@ const getSetupReadiness = async ({ orgId, projectId }) => {
             baselineLocked: Boolean(currentBoqRevision.baselineLocked),
             lockedAt: toIso(currentBoqRevision.lockedAt),
             itemCount: currentBoqRevision.itemCount,
-            totalAmount: toNumber(currentBoqRevision.totalAmount),
             // What the upload changed against the bill before it (PC-2's
             // comparison), the rows it could not apply, and its review
             // trail — the revision's own record, shown, not re-derived.
@@ -1778,18 +1900,26 @@ const getSetupReadiness = async ({ orgId, projectId }) => {
             },
             validation: {
               blockedCount: currentBoqRevision.blockedCount,
-              blocked: boqRevisionBlockedRows,
+              // The rows themselves (codes, descriptions) are the bill's.
+              blocked: canReadBoq ? boqRevisionBlockedRows : [],
             },
-            history: boqRevisionHistory,
+            // The value and the review trail (who approved, their
+            // comments) are for those who may read the BOQ.
+            ...(canReadBoq
+              ? {
+                  totalAmount: toNumber(currentBoqRevision.totalAmount),
+                  history: boqRevisionHistory,
+                }
+              : {}),
             createdAt: toIso(currentBoqRevision.createdAt),
           }
         : null,
       boqBaseline: {
         locked: boqLocked,
-        source: lockedBoqRevision
-          ? "boq_revision"
-          : baselineLocked
-            ? "schedule_baseline"
+        source: baselineLocked
+          ? "schedule_baseline"
+          : lockedBoqRevision
+            ? "boq_revision"
             : null,
         boqRevisionId: lockedBoqRevision?.id || null,
       },
@@ -1814,7 +1944,14 @@ const getSetupReadiness = async ({ orgId, projectId }) => {
 
 const getOfficialReportingGate = async ({ orgId, projectId }) => {
   const readiness = await getSetupReadiness({ orgId, projectId });
-  return readiness.gates.reporting;
+  const gate = readiness.gates.reporting;
+  // Each blocker and warning in the shape it had before PC-4: this gate is
+  // frozen into EvPeriodSnapshot.basisJson and the override's audit row.
+  return {
+    ...gate,
+    blockers: gate.blockers.map(withoutItemDetail),
+    warnings: gate.warnings.map(withoutItemDetail),
+  };
 };
 
 module.exports = {

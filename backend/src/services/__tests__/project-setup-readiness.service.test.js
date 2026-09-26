@@ -213,6 +213,7 @@ describe("project setup readiness service", () => {
       "BOQ imported FAIL",
       "Schedule imported FAIL",
       "Mapping 0%",
+      "Unmapped BOQ quantity 0",
       "Unmapped BOQ value 0",
       "Critical unmapped activities 0",
       "Baseline NOT APPROVED",
@@ -241,7 +242,16 @@ describe("project setup readiness service", () => {
         blockedCount: 1,
         totalAmount: 300,
         compareJson: {
-          blocked: [{ code: "1.3", description: "Blinding", reason: "Manual row with the same code" }],
+          // As PC-2 writes a row it could not apply: the machine code and
+          // the sentence a person reads.
+          blocked: [
+            {
+              code: "1.3",
+              description: "Blinding",
+              reason: "DUPLICATE_BOQ_ITEM_CODE",
+              message: 'BOQ item code "1.3" belongs to a hand-entered row',
+            },
+          ],
         },
         createdAt: new Date("2026-01-12T00:00:00.000Z"),
       },
@@ -285,8 +295,8 @@ describe("project setup readiness service", () => {
       pendingAllocatedAmount: 0,
       unallocatedAmount: 300,
       items: [
-        { boqItemId: "boq-1", code: "1.1", description: "Concrete", mappingRule: "required", unallocatedAmount: 100 },
-        { boqItemId: "boq-2", code: "1.2", description: "Rebar", mappingRule: "required", unallocatedAmount: 200 },
+        { boqItemId: "boq-1", code: "1.1", description: "Concrete", mappingRule: "required", unallocatedQuantity: 10, unallocatedAmount: 100 },
+        { boqItemId: "boq-2", code: "1.2", description: "Rebar", mappingRule: "required", unallocatedQuantity: 5, unallocatedAmount: 200 },
       ],
     });
     mockPrisma.activity.findMany.mockResolvedValue([
@@ -351,7 +361,14 @@ describe("project setup readiness service", () => {
       changes: { added: 1, updated: 1, removed: 0, unchanged: 0, blocked: 1 },
       validation: {
         blockedCount: 1,
-        blocked: [{ code: "1.3", description: "Blinding", reason: "Manual row with the same code" }],
+        blocked: [
+          {
+            code: "1.3",
+            description: "Blinding",
+            reason: "DUPLICATE_BOQ_ITEM_CODE",
+            message: 'BOQ item code "1.3" belongs to a hand-entered row',
+          },
+        ],
       },
       history: [
         expect.objectContaining({
@@ -410,6 +427,8 @@ describe("project setup readiness service", () => {
       // Activities without a revision count as a schedule, as the step says.
       "Schedule imported PASS",
       "Mapping 0%",
+      // By unit, never added across units; the unit leaving most value open first.
+      "Unmapped BOQ quantity 5 tonnes-ish · 10 m3",
       "Unmapped BOQ value 300",
       "Critical unmapped activities 1",
       "Baseline NOT APPROVED",
@@ -432,6 +451,151 @@ describe("project setup readiness service", () => {
       status: "attention",
       detail: "0% covered · 1 row without a rule · 2 required rows open",
       href: "/o/acme/projects/project-1/controls/mapping",
+    });
+
+    // A member who may not read the BOQ gets the same steps, statuses,
+    // codes, counts and gates — and none of the bill's rows, values,
+    // quantities or review trail.
+    const restricted = await setupReadinessService.getSetupReadiness({
+      orgId: "org-1",
+      projectId: "project-1",
+      canReadBoq: false,
+    });
+    const shape = (readiness) =>
+      readiness.steps.map((step) => [
+        step.key,
+        step.status,
+        step.blockers.map((issue) => [issue.code, issue.count]),
+        step.warnings.map((issue) => [issue.code, issue.count]),
+      ]);
+    expect(shape(restricted)).toEqual(shape(result));
+    for (const name of ["baseline", "progress", "reporting"]) {
+      expect(restricted.gates[name].ready).toBe(result.gates[name].ready);
+      expect(restricted.gates[name].blockers.map((b) => b.code)).toEqual(
+        result.gates[name].blockers.map((b) => b.code),
+      );
+    }
+    expect(restricted.summary.nextAction).toEqual(result.summary.nextAction);
+    const restrictedIssues = restricted.steps.flatMap((step) => [...step.blockers, ...step.warnings]);
+    for (const issue of restrictedIssues) {
+      for (const item of issue.items) {
+        expect(["boq_item", "allocation", "boq_revision", "unit"]).not.toContain(item.type);
+      }
+    }
+    const restrictedUnallocated = restricted.steps
+      .find((step) => step.key === "boq_allocation")
+      .blockers.find((b) => b.code === "UNALLOCATED_BOQ");
+    expect(restrictedUnallocated).toMatchObject({ count: 2, items: [], itemsWithheld: true });
+    // Activities are not the bill's: they are still named.
+    expect(
+      restricted.steps.find((step) => step.key === "schedule_generation").warnings[1].items[0].id,
+    ).toBe("activity-1");
+    expect(Object.keys(restricted.coverage).sort()).toEqual(["counts", "coveragePct"]);
+    expect(restricted.context.boqRevision).not.toHaveProperty("totalAmount");
+    expect(restricted.context.boqRevision).not.toHaveProperty("history");
+    expect(restricted.context.boqRevision.validation).toEqual({ blockedCount: 1, blocked: [] });
+    const restrictedHeadline = restricted.summary.headline.map((entry) => entry.key);
+    expect(restrictedHeadline).not.toContain("unmapped_boq");
+    expect(restrictedHeadline).not.toContain("unmapped_quantity");
+    const text = JSON.stringify(restricted);
+    for (const secret of ["Rebar", "Concrete", "tonnes-ish", "Quinn Surveyor", "Blinding", "Please review"]) {
+      expect(text).not.toContain(secret);
+    }
+
+    // The official reporting gate EV freezes into a locked period keeps the
+    // shape it had before PC-4: no records, no links, no count.
+    const gate = await setupReadinessService.getOfficialReportingGate({
+      orgId: "org-1",
+      projectId: "project-1",
+    });
+    expect(gate.blockers.map((b) => b.code)).toEqual(result.gates.reporting.blockers.map((b) => b.code));
+    expect(gate.blockers.length).toBeGreaterThan(0);
+    for (const entry of [...gate.blockers, ...gate.warnings]) {
+      expect(entry).not.toHaveProperty("items");
+      expect(entry).not.toHaveProperty("count");
+      expect(entry).toEqual(expect.objectContaining({ code: expect.any(String), stepKey: expect.any(String) }));
+    }
+  });
+
+  it("keeps nextAction on the ten original steps and offers the advisory steps apart", async () => {
+    // Everything the ten steps need, but no structure and a bill entered by
+    // hand: the ten are clear, the two advisory steps are not.
+    const baselinedRevision = {
+      id: "revision-1",
+      label: "Baseline",
+      status: "baselined",
+      isActive: true,
+      activityCount: 1,
+      approvedAt: new Date("2026-02-01T00:00:00.000Z"),
+      baselinedAt: new Date("2026-02-02T00:00:00.000Z"),
+    };
+    mockPrisma.boqItem.findMany.mockResolvedValue([{ ...filedBoqItem, wbsNodeId: null }]);
+    mockBuildAllocationSummary.mockResolvedValue({
+      totalBoqAmount: 100,
+      approvedAllocatedAmount: 100,
+      pendingAllocatedAmount: 0,
+      unallocatedAmount: 0,
+    });
+    mockPrisma.activity.findMany.mockResolvedValue([
+      {
+        id: "activity-1",
+        name: "Foundations",
+        wbsNodeId: null,
+        isMilestone: false,
+        isCritical: true,
+        assignments: [{ id: "assignment-1" }],
+        progressMethod: { id: "method-1", method: "quantity", quantityUnit: "m3" },
+        predecessorLinks: [],
+      },
+    ]);
+    mockPrisma.scheduleRevision.findFirst.mockReset();
+    mockPrisma.scheduleRevision.findFirst.mockResolvedValue(baselinedRevision);
+    mockPrisma.costRecord.count.mockResolvedValue(1);
+    mockPrisma.activityCostLoading.count.mockResolvedValue(1);
+    mockPrisma.reportingPeriod.count.mockResolvedValue(1);
+
+    const result = await setupReadinessService.getSetupReadiness({
+      orgId: "org-1",
+      projectId: "project-1",
+    });
+
+    const original = result.steps.filter(
+      (step) => !["structure_setup", "boq_approval"].includes(step.key),
+    );
+    expect(original.map((step) => [step.key, step.status]).filter(([, status]) => status !== "complete")).toEqual([]);
+    expect(result.steps.find((step) => step.key === "structure_setup").status).toBe("attention");
+    expect(result.summary.nextAction).toBeNull();
+    expect(result.summary.advisoryAction).toMatchObject({
+      stepKey: "structure_setup",
+      label: "Open Structure",
+      target: { module: "controls", child: "structure" },
+    });
+    // The schedule baseline locks the bill, so the approval step is done.
+    expect(result.context.boqBaseline).toEqual({
+      locked: true,
+      source: "schedule_baseline",
+      boqRevisionId: null,
+    });
+  });
+
+  it("names the BOQ lock the way the BOQ page does: the schedule baseline first, then the revision locked last", async () => {
+    mockPrisma.boqRevision.findMany.mockResolvedValue([
+      // Newest number first, as the query orders them; revision 1 was locked
+      // after revision 2.
+      { id: "boq-rev-2", revisionNumber: 2, status: "superseded", baselineLocked: true, lockedAt: new Date("2026-01-05T00:00:00.000Z"), createdAt: new Date("2026-01-04T00:00:00.000Z") },
+      { id: "boq-rev-1", revisionNumber: 1, status: "baselined", baselineLocked: true, lockedAt: new Date("2026-02-05T00:00:00.000Z"), createdAt: new Date("2026-01-01T00:00:00.000Z") },
+    ]);
+    const bare = await setupReadinessService.getSetupReadiness({ orgId: "org-1", projectId: "project-1" });
+    expect(bare.context.boqBaseline).toEqual({ locked: true, source: "boq_revision", boqRevisionId: "boq-rev-1" });
+
+    const baselined = { id: "revision-9", status: "baselined", isActive: true, activityCount: 0, baselinedAt: new Date("2026-03-01T00:00:00.000Z") };
+    mockPrisma.scheduleRevision.findFirst.mockReset();
+    mockPrisma.scheduleRevision.findFirst.mockResolvedValue(baselined);
+    const withSchedule = await setupReadinessService.getSetupReadiness({ orgId: "org-1", projectId: "project-1" });
+    expect(withSchedule.context.boqBaseline).toEqual({
+      locked: true,
+      source: "schedule_baseline",
+      boqRevisionId: "boq-rev-1",
     });
   });
 

@@ -1897,9 +1897,18 @@ const components = {
       totalBoqQuantity: { type: "number" },
       totalBoqAmount: money,
       allocatableBoqAmount: money,
+      activeAllocatedQuantity: { type: "number" },
+      activeAllocatedAmount: money,
+      approvedAllocatedQuantity: { type: "number" },
       approvedAllocatedAmount: money,
       pendingAllocatedAmount: money,
+      scheduledQuantity: { type: "number" },
+      scheduledValue: money,
+      unscheduledQuantity: { type: "number" },
+      unscheduledValue: money,
+      unallocatedQuantity: { type: "number" },
       unallocatedAmount: money,
+      optionalUnallocatedQuantity: { type: "number" },
       optionalUnallocatedAmount: {
         ...money,
         description: "Remaining value of items whose mappingRule is optional: inside unallocatedAmount, reported apart because readiness warns about it instead of blocking on it.",
@@ -1908,6 +1917,7 @@ const components = {
         ...money,
         description: "Value of items whose mappingRule is not_applicable: BOQ total = approved allocated + unallocated + not applicable.",
       },
+      notApplicableQuantity: { type: "number" },
       earnedValue: money,
       certifiedValue: money,
       coveragePct: percent,
@@ -1994,6 +2004,11 @@ const components = {
           description: "The offending records, capped at 50; `count` is the whole number.",
         },
         count: { type: "integer" },
+        itemsWithheld: {
+          type: "boolean",
+          description:
+            "Present and true when the caller may not read the BOQ and the BOQ records behind the issue (rows, allocations, revisions, unit spellings) were left out of items; count is still the whole number.",
+        },
         stepKey: { type: "string" },
         stepLabel: { type: "string" },
         actionLabel: { type: "string" },
@@ -2064,7 +2079,9 @@ const components = {
       {
         key: {
           type: "string",
-          enum: ["boq_imported", "schedule_imported", "mapping", "unmapped_boq", "critical_unmapped", "baseline", "cost_loading"],
+          enum: ["boq_imported", "schedule_imported", "mapping", "unmapped_quantity", "unmapped_boq", "critical_unmapped", "baseline", "cost_loading"],
+          description:
+            "unmapped_quantity and unmapped_boq are given only to a caller who may read the BOQ; unmapped_quantity lists the open quantity by unit (never added across units), the three units leaving most value open first.",
         },
         label: { type: "string" },
         value: { type: "string", description: "As shown: PASS / FAIL, a percentage, a money figure, a count, or a state." },
@@ -2090,7 +2107,7 @@ const components = {
         summary: {
           ...ref("GenericObject"),
           description:
-            "Step counts, the three ready flags, nextAction, and `headline` — the §33 status line (BOQ imported, schedule imported, mapping %, unmapped BOQ value, critical unmapped activities, baseline, cost loading), each entry a ProjectSetupHeadlineEntry.",
+            "Step counts, the three ready flags, nextAction (chosen from the ten original steps only, as before PC-4), advisoryAction (the first of the two advisory steps, structure_setup and boq_approval, still asking for something, or null), and `headline` — the §33 status line (BOQ imported, schedule imported, mapping %, unmapped BOQ quantity by unit, unmapped BOQ value, critical unmapped activities, baseline, cost loading), each entry a ProjectSetupHeadlineEntry.",
         },
         gates: {
           ...ref("GenericObject"),
@@ -2099,12 +2116,13 @@ const components = {
         structure: ref("ProjectSetupStructure"),
         coverage: {
           ...ref("AllocationCoverageSummary"),
-          description: "The §69 coverage totals as the coverage endpoint reports them, without the per-item rows.",
+          description:
+            "The §69 coverage totals as the coverage endpoint reports them, without the per-item rows. A caller who may not read the BOQ gets only coveragePct and counts.",
         },
         context: {
           ...ref("GenericObject"),
           description:
-            "workspace, currentRevision (schedule), boqRevision (revision, status, source, item count, value, `changes` from the upload comparison, `validation.blocked` rows, `history` of workflow transitions with the actor named), boqBaseline, progressMethods, allocationSummary.",
+            "workspace, currentRevision (schedule), boqRevision (revision, status, source, item count, value, `changes` from the upload comparison, `validation.blocked` rows each with code, description, reason (the machine code) and message (the sentence to show), `history` of workflow transitions with the actor named — value, blocked rows and history only for a caller who may read the BOQ), boqBaseline (source schedule_baseline before boq_revision, as GET /boq names it), progressMethods, allocationSummary.",
         },
         steps: arrayOf(ref("ProjectSetupStep")),
       },

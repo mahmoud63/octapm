@@ -15,6 +15,13 @@
  *   warnings: unmapped calendar, unknown unit, quantity method without a
  *     unit, unit mismatch, missing mapping rule and the bill's approval each
  *     appear when the data is wrong and disappear when it is fixed
+ *   access: a member whose template takes the BOQ away (the BOQ and
+ *     coverage endpoints refuse them) gets the same steps, codes and gates
+ *     from readiness, without the bill's rows, values, quantities or trail
+ *   lock: the bill's lock is named as GET /boq names it
+ *   validation: a row an upload could not apply reads as PC-2's sentence
+ *   frozen gate: a period locked over the reporting gate stores it in the
+ *     shape it had before PC-4 (no records, links or counts)
  *
  * Everything lives in a throwaway "LiveTest <uuid>" organisation that is
  * dropped afterwards. The API is started on a free port with the job worker
@@ -26,7 +33,13 @@ const { execFileSync } = require("node:child_process");
 const path = require("node:path");
 const XLSX = require("@e965/xlsx");
 const { prisma } = require("../../config/db");
-const { createLiveOrg, dropLiveOrg, liveDescribe } = require("../../__live__/helpers");
+const {
+  createLiveOrg,
+  createLiveUser,
+  dropLiveOrg,
+  liveDescribe,
+  mintAccessToken,
+} = require("../../__live__/helpers");
 const { startApi } = require("./auth-live-kit");
 
 // The readiness service as the base built it, read out of git and loaded
@@ -130,6 +143,9 @@ const expectGatesAsBase = async (readiness, orgId) => {
     expect(gate.blockers.map((b) => b.stepKey)).not.toContain("structure_setup");
     expect(gate.blockers.map((b) => b.stepKey)).not.toContain("boq_approval");
   }
+  // §3: nextAction unchanged — the two advisory steps never take it.
+  expect(readiness.summary.nextAction).toEqual(baseResult.summary.nextAction);
+  return baseResult;
 };
 
 liveDescribe("PC-4: setup flow — structure and BOQ approval steps, per-item detail, unchanged gates", () => {
@@ -138,6 +154,8 @@ liveDescribe("PC-4: setup flow — structure and BOQ approval steps, per-item de
   let project;
   let base;
   let segment;
+  // The uploaded, approved bill from the §22 test, for the tests after it.
+  let uploaded1 = null;
   const auth = () => ({ authorization: `Bearer ${live.token}` });
   const post = (route, body) => api.post(route, body, auth());
   const get = (route) => api.get(route, auth());
@@ -338,6 +356,11 @@ liveDescribe("PC-4: setup flow — structure and BOQ approval steps, per-item de
       };
       const before = await compare();
       expect(before).toMatchObject({ totalBoqAmount: 100000, notApplicableAmount: 30000, allocatableBoqAmount: 70000, coveragePct: 0 });
+      // §33 "Unmapped BOQ quantity": the rows' open quantities by unit —
+      // 50 t (50,000 open) before 100 m3 (20,000 open); the n/a row's "sum"
+      // is not unmapped, and m3 and t are never added together.
+      const headlineOf = (result) => Object.fromEntries(result.summary.headline.map((entry) => [entry.key, entry.value]));
+      expect(headlineOf(await readiness())).toMatchObject({ unmapped_quantity: "50 t · 100 m3", unmapped_boq: "70,000 USD" });
 
       const allocation = await post(allocationsRoute(), { boqItemId: base.items.rebar.id, activityId: base.activities.fix.id, quantity: 50 });
       expect([allocation.status, allocation.body?.error]).toEqual([201, undefined]);
@@ -346,6 +369,7 @@ liveDescribe("PC-4: setup flow — structure and BOQ approval steps, per-item de
       const after = await compare();
       expect(after).toMatchObject({ approvedAllocatedAmount: 50000, unallocatedAmount: 20000 });
       expect(money(after.coveragePct)).toBe(money((50000 / 70000) * 100));
+      expect(headlineOf(await readiness())).toMatchObject({ unmapped_quantity: "100 m3", unmapped_boq: "20,000 USD" });
     });
   });
 
@@ -441,12 +465,16 @@ liveDescribe("PC-4: setup flow — structure and BOQ approval steps, per-item de
       ]);
       expect(notApproved.context.boqRevision).toMatchObject({ id: revision.id, status: "imported", baselineLocked: false });
       const gatesBefore = JSON.stringify(notApproved.gates);
+      // Each stage against the base service run on the rows as they stand
+      // at that stage, before the next change.
+      await expectGatesAsBase(notApproved, live.org.id);
 
       const submitted = await post(`/api/v1/projects/${uploadProject.id}/boq/revisions/${revision.id}/submit`, {});
       expect([submitted.status, submitted.body?.error]).toEqual([200, undefined]);
       const underReview = await readiness(uploadProject.id);
       expect(step(underReview, "boq_approval").warnings.map((w) => w.code)).toEqual(["PENDING_BOQ_REVISION"]);
       expect(warning(underReview, "boq_approval", "PENDING_BOQ_REVISION").items[0]).toMatchObject({ type: "boq_revision", id: revision.id, missing: "Approval" });
+      await expectGatesAsBase(underReview, live.org.id);
 
       const approved = await post(`/api/v1/projects/${uploadProject.id}/boq/revisions/${revision.id}/approve`, {});
       expect([approved.status, approved.body?.error]).toEqual([200, undefined]);
@@ -473,6 +501,8 @@ liveDescribe("PC-4: setup flow — structure and BOQ approval steps, per-item de
         ["boq_imported", "PASS"],
         ["schedule_imported", "FAIL"],
         ["mapping", "0%"],
+        // Equal value open in each unit: the rows keep the bill's order.
+        ["unmapped_quantity", "10 m3 · 20 m2"],
         ["unmapped_boq", "2,000 USD"],
         ["critical_unmapped", "0"],
         ["baseline", "NOT APPROVED"],
@@ -481,9 +511,193 @@ liveDescribe("PC-4: setup flow — structure and BOQ approval steps, per-item de
       // The bill's approval is advisory: the gates before and after are the
       // same, and the same as the base service reports at every stage.
       expect(JSON.stringify(done.gates)).toBe(gatesBefore);
-      await expectGatesAsBase(notApproved, live.org.id);
-      await expectGatesAsBase(underReview, live.org.id);
       await expectGatesAsBase(done, live.org.id);
+      uploaded1 = { projectId: uploadProject.id, revisionId: revision.id };
+    });
+  });
+  describe("what readiness tells a member who may not read the BOQ", () => {
+    it("the same steps, statuses, codes and gates — without the bill's rows, values, quantities or review trail", async () => {
+      expect(uploaded1).toBeTruthy();
+      // A site engineer on both projects whose permission template takes the
+      // BOQ away: the BOQ and coverage endpoints refuse them.
+      const tag = Date.now();
+      const member = await createLiveUser(prisma, {
+        orgId: live.org.id,
+        name: "LiveTest Site Engineer",
+        email: `live-se-${tag}@octapm-live.test`,
+        role: "site_engineer",
+      });
+      const template = await prisma.permissionTemplate.create({
+        data: {
+          orgId: live.org.id,
+          name: `LiveTest no BOQ ${tag}`,
+          baseRole: "site_engineer",
+          tools: { create: [{ module: "boq", level: "none" }] },
+        },
+      });
+      const projectIds = [project.id, uploaded1.projectId];
+      for (const projectId of projectIds) {
+        await prisma.projectAssignment.create({
+          data: { projectId, userId: member.id, role: "site_engineer", orgId: live.org.id },
+        });
+        await prisma.projectUserPermission.create({
+          data: { orgId: live.org.id, projectId, userId: member.id, templateId: template.id },
+        });
+      }
+      const memberAuth = { authorization: `Bearer ${mintAccessToken(member)}` };
+      const shape = (result) =>
+        result.steps.map((entry) => [
+          entry.key,
+          entry.status,
+          entry.blockers.map((issue) => [issue.code, issue.count]),
+          entry.warnings.map((issue) => [issue.code, issue.count]),
+        ]);
+      const boqTypes = new Set(["boq_item", "allocation", "boq_revision", "unit"]);
+      const issuesOf = (result) => result.steps.flatMap((entry) => [...entry.blockers, ...entry.warnings]);
+
+      // What the bill says that only a BOQ reader may see, per project: a
+      // row's description on the main project, the approver's name and the
+      // rows on the uploaded one.
+      const secrets = { [project.id]: ["Concrete in foundations"], [uploaded1.projectId]: ["Formwork", "Live Test Admin"] };
+
+      for (const projectId of projectIds) {
+        expect((await api.get(`/api/v1/projects/${projectId}/boq`, memberAuth)).status).toBe(403);
+        expect((await api.get(`${allocationsRoute(projectId)}/coverage`, memberAuth)).status).toBe(403);
+
+        const full = await readiness(projectId);
+        const response = await api.get(`/api/v1/projects/${projectId}/setup-readiness`, memberAuth);
+        expect([response.status, response.body?.error]).toEqual([200, undefined]);
+        const limited = response.body.data;
+
+        // Everything that decides anything is the same for both callers.
+        expect(shape(limited)).toEqual(shape(full));
+        for (const name of ["baseline", "progress", "reporting"]) {
+          expect(limited.gates[name].ready).toBe(full.gates[name].ready);
+          expect(limited.gates[name].blockers.map((b) => b.code)).toEqual(full.gates[name].blockers.map((b) => b.code));
+        }
+        expect(limited.summary.nextAction).toEqual(full.summary.nextAction);
+
+        // The full answer names BOQ records; the limited one names none.
+        expect(issuesOf(full).some((issue) => issue.items.some((item) => boqTypes.has(item.type)))).toBe(true);
+        for (const issue of issuesOf(limited)) {
+          for (const item of issue.items) expect(boqTypes.has(item.type)).toBe(false);
+        }
+        expect(Object.keys(limited.coverage).sort()).toEqual(["counts", "coveragePct"]);
+        expect(limited.coverage).toEqual({ coveragePct: full.coverage.coveragePct, counts: full.coverage.counts });
+        const limitedHeadline = limited.summary.headline.map((entry) => entry.key);
+        expect(limitedHeadline).not.toContain("unmapped_boq");
+        expect(limitedHeadline).not.toContain("unmapped_quantity");
+        const fullText = JSON.stringify(full);
+        const limitedText = JSON.stringify(limited);
+        for (const secret of secrets[projectId]) {
+          expect(fullText).toContain(secret);
+          expect(limitedText).not.toContain(secret);
+        }
+      }
+      // The bill's revision: its number, status and counts, not its value or trail.
+      const revision = (await api.get(`/api/v1/projects/${uploaded1.projectId}/setup-readiness`, memberAuth)).body.data.context.boqRevision;
+      expect(revision).toMatchObject({ id: uploaded1.revisionId, status: "approved", itemCount: 2, changes: { added: 2 } });
+      expect(revision).not.toHaveProperty("totalAmount");
+      expect(revision).not.toHaveProperty("history");
+    });
+  });
+
+  describe("the bill's lock, as the BOQ page names it", () => {
+    it("the locked revision, then the schedule baseline once one exists — the same answer GET /boq gives", async () => {
+      expect(uploaded1).toBeTruthy();
+      const { projectId, revisionId } = uploaded1;
+      const locked = await post(`/api/v1/projects/${projectId}/boq/revisions/${revisionId}/lock`, {});
+      expect([locked.status, locked.body?.error]).toEqual([200, undefined]);
+      const compareLock = async () => {
+        const [result, boq] = await Promise.all([readiness(projectId), get(`/api/v1/projects/${projectId}/boq`)]);
+        expect([boq.status, boq.body?.error]).toEqual([200, undefined]);
+        const page = boq.body.data.baseline;
+        expect(result.context.boqBaseline).toEqual({ locked: page.locked, source: page.source, boqRevisionId: page.boqRevisionId });
+        return result.context.boqBaseline;
+      };
+      expect(await compareLock()).toEqual({ locked: true, source: "boq_revision", boqRevisionId: revisionId });
+
+      await prisma.scheduleRevision.create({
+        data: { projectId, label: "Rev B", status: "baselined", isActive: true, activityCount: 0, approvedAt: new Date(), activatedAt: new Date(), baselinedAt: new Date() },
+      });
+      expect(await compareLock()).toEqual({ locked: true, source: "schedule_baseline", boqRevisionId: revisionId });
+    });
+  });
+
+  describe("the rows an upload could not apply (§22 validation)", () => {
+    it("read as the sentence PC-2 wrote, with its code beside it", async () => {
+      const blockedProject = await prisma.project.create({
+        data: { orgId: live.org.id, name: "LiveTest PC-4 blocked rows", startDate: new Date("2026-01-05"), endDate: new Date("2026-12-18") },
+      });
+      await createItem({ code: "9.1", description: "Hand-entered row", quantity: 1, unit: "m3", rate: 10 }, blockedProject.id);
+      // PC-2's own comparison of a bill whose row 9.1 was entered by hand:
+      // the dry run reports the row it cannot apply.
+      const dry = await uploadWorkbook(`/api/v1/projects/${blockedProject.id}/boq/upload?dryRun=true`, [
+        ["Item No", "Description", "Qty", "Unit", "Rate"],
+        ["9.1", "Uploaded row", 2, "m3", 10],
+        ["9.2", "Another row", 3, "m3", 10],
+      ]);
+      expect([dry.status, dry.body?.error]).toEqual([200, undefined]);
+      const blocked = dry.body.data.comparison.blocked;
+      expect(blocked).toEqual([expect.objectContaining({ code: "9.1", reason: "DUPLICATE_BOQ_ITEM_CODE", message: expect.any(String) })]);
+      // A revision carrying that comparison, as PC-2 stores one.
+      await prisma.boqRevision.create({
+        data: {
+          projectId: blockedProject.id,
+          revisionNumber: 1,
+          label: "LiveTest blocked",
+          status: "imported",
+          baselineLocked: false,
+          itemCount: 1,
+          addedCount: 1,
+          blockedCount: 1,
+          totalAmount: 30,
+          compareJson: { added: [], updated: [], removed: [], unchanged: [], blocked },
+        },
+      });
+      const result = await readiness(blockedProject.id);
+      expect(result.context.boqRevision.validation).toEqual({
+        blockedCount: 1,
+        blocked: [{ code: "9.1", description: null, reason: "DUPLICATE_BOQ_ITEM_CODE", message: blocked[0].message }],
+      });
+      expect(result.context.boqRevision.validation.blocked[0].message).toMatch(/hand-entered/);
+    });
+  });
+
+  describe("the official reporting gate EV freezes (§121: the snapshot keeps its shape)", () => {
+    it("a period locked over the gate stores the blockers and warnings without records, links or counts", async () => {
+      const period = await post(`/api/v1/projects/${project.id}/reports/periods`, {
+        periodStart: "2026-01-01",
+        periodEnd: "2026-01-31",
+        cutoffDate: "2026-01-31",
+      });
+      expect([period.status, period.body?.error]).toEqual([201, undefined]);
+      // The gate as it stands when the period is locked.
+      const reporting = (await readiness()).gates.reporting;
+      expect(reporting.ready).toBe(false);
+      // The interactive answer carries the per-item detail ...
+      expect(reporting.blockers.some((blocker) => blocker.items.length > 0)).toBe(true);
+      const lock = await post(`/api/v1/projects/${project.id}/reports/periods/${period.body.data.id}/lock`, {
+        overrideReason: "LiveTest PC-4: the stored gate keeps its shape",
+      });
+      expect([lock.status, lock.body?.error]).toEqual([200, undefined]);
+
+      // ... the frozen copies do not: the snapshot basis and the override's audit row.
+      const snapshot = await prisma.evPeriodSnapshot.findUnique({ where: { reportingPeriodId: period.body.data.id } });
+      const audit = await prisma.auditEvent.findFirst({
+        where: { orgId: live.org.id, projectId: project.id, entityType: "project_setup_readiness", action: "overridden" },
+        orderBy: { createdAt: "desc" },
+      });
+      for (const stored of [snapshot.basisJson.readinessGate, audit.metadataJson.readinessGate]) {
+        expect(stored.blockers.map((blocker) => blocker.code)).toEqual(reporting.blockers.map((blocker) => blocker.code));
+        expect(stored.warnings.map((warning) => warning.code)).toEqual(reporting.warnings.map((warning) => warning.code));
+        for (const entry of [...stored.blockers, ...stored.warnings]) {
+          expect(Object.keys(entry)).not.toEqual(expect.arrayContaining(["items"]));
+          expect(entry).not.toHaveProperty("count");
+          expect(entry).toEqual(expect.objectContaining({ code: expect.any(String), stepKey: expect.any(String), message: expect.any(String) }));
+        }
+        expect(JSON.stringify(stored)).not.toContain(`/o/${segment}/`);
+      }
     });
   });
 });
