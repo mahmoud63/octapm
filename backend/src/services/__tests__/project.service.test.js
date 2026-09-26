@@ -1,5 +1,7 @@
 const mockPrisma = {
   $transaction: jest.fn((fn) => fn(mockPrisma)),
+  // The archive purges the project's reference counters with one raw statement (ENT-3).
+  $queryRaw: jest.fn(async () => []),
   project: {
     create: jest.fn(),
     findFirst: jest.fn(),

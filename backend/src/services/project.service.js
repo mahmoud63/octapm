@@ -2,6 +2,7 @@ const { prisma } = require("../config/db");
 const { normalizeRoleId } = require("../config/permissions");
 const { HttpError } = require("../utils/http-error");
 const { toMoneyNumber } = require("../utils/money");
+const { purgeReferenceCounters } = require("../utils/reference-number");
 const {
   canAccessAllProjects,
   getProjectAccessWhere,
@@ -509,6 +510,10 @@ const deleteProject = async ({ orgId, projectId, userId, role }) => {
         archivedBy: userId || null,
       },
     });
+
+    // The project's reference counters go with it (ENT-3); a project brought
+    // back reseeds them from its registers.
+    await purgeReferenceCounters(tx, { projectId });
 
     await auditService.recordEvent({
       tx,

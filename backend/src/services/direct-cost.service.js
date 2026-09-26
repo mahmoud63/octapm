@@ -267,7 +267,10 @@ const assertNoDuplicateInvoice = async ({ orgId = null, projectId, vendorCompany
   const names = new Set();
   if (vendorCompanyId) {
     companyIds.add(vendorCompanyId);
-    const company = tx.company?.findFirst ? await tx.company.findFirst({ where: { id: vendorCompanyId }, select: { name: true } }) : null;
+    // The company is read inside the organisation, as the name lookup below
+    // already is: a company id of another organisation must not lend its name
+    // to this duplicate check (architecture doc §7; wave ENT-3).
+    const company = tx.company?.findFirst ? await tx.company.findFirst({ where: { id: vendorCompanyId, ...(orgId ? { orgId } : {}) }, select: { name: true } }) : null;
     if (company?.name) names.add(company.name.toLowerCase());
   }
   if (vendorName) {
@@ -609,4 +612,4 @@ const recordPayment = async ({ orgId, projectId, directCostId, payload = {}, act
   return out(row, { detail: true });
 };
 
-module.exports = { STATUS, TYPES, COST_TYPES, DEFAULT_COST_TYPE, listDirectCosts, getDirectCost, createDirectCost, updateDirectCost, deleteDirectCost, submitDirectCost, approveDirectCost, rejectDirectCost, voidDirectCost, recordPayment };
+module.exports = { STATUS, TYPES, COST_TYPES, DEFAULT_COST_TYPE, listDirectCosts, getDirectCost, createDirectCost, updateDirectCost, deleteDirectCost, submitDirectCost, approveDirectCost, rejectDirectCost, voidDirectCost, recordPayment, assertNoDuplicateInvoice };
