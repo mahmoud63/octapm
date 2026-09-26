@@ -767,10 +767,18 @@ const buildProjectAccess = ({ project, role }) => {
   };
 };
 
+/**
+ * The projects a person may search, decided exactly as the project routes
+ * decide it: `isCompanyAdmin` opens every project of the workspace, as
+ * `assertProjectAccess` does — search used to leave the flag out and answered
+ * an administrator narrower than REST (architecture doc §3, Search). The
+ * assignment predicate is bound to the workspace's orgId for the same reason.
+ */
 const listAccessibleProjects = async ({
   orgId,
   userId,
   role,
+  isCompanyAdmin = false,
   projectId = null,
   includeArchived = false,
 }) => {
@@ -789,7 +797,7 @@ const listAccessibleProjects = async ({
     updatedAt: true,
   };
 
-  if (!canAccessAllProjects(normalizedRole)) {
+  if (!canAccessAllProjects(normalizedRole, { isCompanyAdmin })) {
     select.assignments = {
       where: { userId },
       select: { role: true },
@@ -803,7 +811,7 @@ const listAccessibleProjects = async ({
       orgId,
       ...(projectId ? { id: projectId } : {}),
       ...(includeArchived ? {} : { archivedAt: null }),
-      ...getProjectAccessWhere({ userId, role: normalizedRole }),
+      ...getProjectAccessWhere({ userId, role: normalizedRole, isCompanyAdmin, orgId }),
     },
     select,
     orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
@@ -1069,6 +1077,7 @@ const globalSearch = async ({
   orgId,
   userId,
   role,
+  isCompanyAdmin = false,
   query: rawQuery = {},
   apiClient = null,
 }) => {
@@ -1127,6 +1136,7 @@ const globalSearch = async ({
     orgId,
     userId,
     role,
+    isCompanyAdmin,
     projectId,
     includeArchived,
   });
@@ -1275,4 +1285,5 @@ const globalSearch = async ({
 module.exports = {
   SEARCHABLE_TYPES,
   globalSearch,
+  listAccessibleProjects,
 };

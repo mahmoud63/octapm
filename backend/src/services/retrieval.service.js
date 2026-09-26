@@ -104,7 +104,7 @@ const retrieve = async ({ orgId, user, projectId = null, query, limit = DEFAULT_
   const text = trimOrNull(query);
   if (!text) throw new HttpError(400, "ASSISTANT_QUESTION_REQUIRED", "Ask a question");
   const searchService = require("./search.service");
-  const search = await searchService.globalSearch({ orgId, userId: user.id, role: user.role, query: { q: text, projectId: projectId || undefined, limit: Math.max(20, limit * 2), ...(Array.isArray(types) && types.length ? { types } : {}) } });
+  const search = await searchService.globalSearch({ orgId, userId: user.id, role: user.role, isCompanyAdmin: Boolean(user.isCompanyAdmin), query: { q: text, projectId: projectId || undefined, limit: Math.max(20, limit * 2), ...(Array.isArray(types) && types.length ? { types } : {}) } });
   const excluded = new Set((exclude || []).filter(Boolean));
   const candidates = [];
   for (const item of search.items || []) {
