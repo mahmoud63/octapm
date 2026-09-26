@@ -10,7 +10,8 @@
  *   - Organisation.slug from the name (lib.slugifyName), with a numeric
  *     suffix when the base is taken — 13 local organisations share the name
  *     "Other Corp Contracting", so the order is fixed (createdAt, id) and a
- *     re-run reproduces the same handles;
+ *     re-run reproduces the same handles (the write is lib.writeSlugs, which
+ *     re-plans from the base when another process wins the race for a slug);
  *   - ProjectAssignment.orgId = Project.orgId (denormalised for the M7 FK);
  *   - RefreshSession.membershipId, ApiClient.membershipId from (orgId, userId);
  *   - InvitationToken.membershipId from (orgId, acceptedById) on accepted rows.
@@ -23,7 +24,7 @@ require("../../src/utils/data-script-guard").exitUnlessDataScriptAllowed("enterp
 
 const { Prisma } = require("@prisma/client");
 const { prisma } = require("../../src/config/db");
-const { nextFreeSlug, parseArgs, printCounts, printHeader, printResult, slugifyName } = require("./lib");
+const { nextFreeSlug, parseArgs, printCounts, printHeader, printResult, slugifyName, takenSlugs, writeSlugs } = require("./lib");
 
 const count = async (sql) => Number((await prisma.$queryRaw(sql))[0].count);
 
@@ -31,9 +32,7 @@ const orgFilter = (column, orgId) => (orgId ? Prisma.sql`AND ${column} = ${orgId
 
 /** Slugs: which organisations still lack one and what each would get. */
 const planSlugs = async (orgId) => {
-  const taken = new Set(
-    (await prisma.organisation.findMany({ where: { slug: { not: null } }, select: { slug: true } })).map((row) => row.slug),
-  );
+  const taken = await takenSlugs(prisma);
   const pending = await prisma.organisation.findMany({
     where: { slug: null, ...(orgId ? { id: orgId } : {}) },
     select: { id: true, name: true },
@@ -51,27 +50,6 @@ const planSlugs = async (orgId) => {
   return { assignments, collisions, alreadyFilled: taken.size - assignments.length };
 };
 
-const applySlugs = async (assignments) => {
-  for (const row of assignments) {
-    let slug = row.slug;
-    // Another process may have taken the slug between plan and write; walk on
-    // to the next free suffix rather than fail the whole run.
-    for (let attempt = 0; attempt < 50; attempt += 1) {
-      try {
-        // updateMany, not update: a unique-where cannot say "slug IS NULL",
-        // and a count of 0 means someone filled it meanwhile — nothing to do.
-        const { count: written } = await prisma.organisation.updateMany({ where: { id: row.orgId, slug: null }, data: { slug } });
-        if (written) row.slug = slug;
-        else row.skipped = true;
-        break;
-      } catch (error) {
-        if (error.code !== "P2002") throw error;
-        slug = `${slug}-${attempt + 2}`;
-      }
-    }
-  }
-};
-
 const main = async () => {
   const args = parseArgs();
   printHeader("OctaPM tenant column backfill (M3)", args);
@@ -85,7 +63,7 @@ const main = async () => {
     collisions: slugs.collisions,
   });
   for (const row of slugs.assignments) console.log(`   ${row.name.padEnd(40)} → ${row.slug}`);
-  if (args.apply) await applySlugs(slugs.assignments);
+  if (args.apply) await writeSlugs(prisma, slugs.assignments);
 
   // ── ProjectAssignment.orgId ─────────────────────────────────────────────
   const assignmentsMissing = await count(Prisma.sql`

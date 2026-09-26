@@ -48,7 +48,11 @@ const planOrganisation = (org) => {
   let unchanged = 0;
   for (const user of org.users) {
     const existing = existingByUser.get(user.id);
-    const isOwner = existing ? existing.isOwner : decision?.ownerUserId === user.id;
+    // Ownership already held is kept (a re-run never moves it); the decision
+    // this run reports lands on its chosen person whether their row is being
+    // created or already exists — an organisation whose only owner row was
+    // suspended or un-owned by hand gets its owner back on the next run.
+    const isOwner = Boolean(existing?.isOwner) || decision?.ownerUserId === user.id;
     const desired = membershipFromUser(user, { isOwner });
     if (!existing) {
       creates.push(desired);
@@ -92,6 +96,7 @@ const main = async () => {
   let unchanged = 0;
   const owners = [];
   const ownerless = [];
+  const pending = [];
 
   for (const org of orgs) {
     const plan = planOrganisation(org);
@@ -107,6 +112,7 @@ const main = async () => {
       console.log(
         `${org.name}  (${org.id}): ${plan.creates.length} to create, ${plan.updates.length} to update, ${plan.unchanged} unchanged`,
       );
+      pending.push({ orgId: org.id, orgName: org.name, creates: plan.creates.length, updates: plan.updates.length });
     }
     if (args.apply && (plan.creates.length || plan.updates.length)) {
       // One transaction per organisation: its owner and its members land together.
@@ -152,6 +158,7 @@ const main = async () => {
     updated,
     unchanged,
     changes: created + updated,
+    pending,
     owners,
     ownerless,
   });

@@ -59,6 +59,44 @@ const nextFreeSlug = (base, taken) => {
   }
 };
 
+/** Every slug the platform holds right now. */
+const takenSlugs = async (prisma) =>
+  new Set((await prisma.organisation.findMany({ where: { slug: { not: null } }, select: { slug: true } })).map((row) => row.slug));
+
+/**
+ * Writes the planned slugs, one organisation at a time, touching only rows
+ * whose slug is still NULL. Each assignment is `{ orgId, name, slug }`; on
+ * return `slug` is what was written, or `skipped` is set when another process
+ * filled the column meanwhile.
+ *
+ * Another process may also claim the planned slug between plan and write. The
+ * unique index answers with P2002; the row then gets the next free suffix of
+ * its own base, re-read from the database — never a suffix chained onto the
+ * suffix ("other-corp-contracting-2-2"), which would be a handle no one
+ * planned while the base's next number stayed unused.
+ */
+const writeSlugs = async (prisma, assignments) => {
+  for (const row of assignments) {
+    let slug = row.slug;
+    for (let attempt = 0; attempt < 50; attempt += 1) {
+      try {
+        // updateMany, not update: a unique-where cannot say "slug IS NULL",
+        // and a count of 0 means someone filled it meanwhile — nothing to do.
+        const { count: written } = await prisma.organisation.updateMany({ where: { id: row.orgId, slug: null }, data: { slug } });
+        if (written) row.slug = slug;
+        else row.skipped = true;
+        break;
+      } catch (error) {
+        if (error.code !== "P2002") throw error;
+        const taken = await takenSlugs(prisma);
+        taken.add(slug);
+        slug = nextFreeSlug(slugifyName(row.name), taken);
+      }
+    }
+  }
+  return assignments;
+};
+
 const printHeader = (title, { apply, orgId }) => {
   console.log(`${title} — ${apply ? "APPLY" : "DRY RUN (nothing is written)"}${orgId ? ` — organisation ${orgId}` : ""}\n`);
 };
@@ -96,4 +134,6 @@ module.exports = {
   printHeader,
   printResult,
   slugifyName,
+  takenSlugs,
+  writeSlugs,
 };

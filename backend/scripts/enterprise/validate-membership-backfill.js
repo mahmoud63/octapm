@@ -13,10 +13,11 @@
  * process exits 1 when any row stops, so a pipeline halts on it.
  *
  * --apply performs exactly the repairs the table names and nothing else:
- * revoke a live refresh session whose organisation the person no longer
- * belongs to, revoke an API key whose owner has no membership there, and give
- * a party member without a membership a guest one. Each is idempotent: the
- * next dry run finds the row clean.
+ * revoke the whole session family of a live refresh session whose
+ * organisation the person no longer belongs to (every link of its rotation
+ * chain, not just the mismatched one), revoke an API key whose owner has no
+ * membership there, and give a party member without a membership a guest one.
+ * Each is idempotent: the next dry run finds the row clean.
  *
  * Identity-level checks (duplicate e-mails, slug uniqueness) are always
  * global; --org narrows the organisation-level ones.
@@ -107,7 +108,13 @@ const checks = {
     return row("owner_implies_admin", "all", bad.length ? `${bad.length} owner(s) not admin` : "all", bad.length ? "stop" : "ok", bad);
   },
 
-  /** live RefreshSession rows whose person has no membership in the session's organisation → revoke. */
+  /**
+   * live RefreshSession rows whose person has no membership in the session's
+   * organisation → revoke the session family (membership doc §7). A rotated
+   * chain (replacedBySessionId, both directions) is one sign-in; revoking the
+   * mismatched link alone would leave its predecessor or successor usable, so
+   * the whole family goes, whichever organisation each link names.
+   */
   async refresh_sessions_match_membership({ orgId, apply }) {
     const mismatched = await rows(Prisma.sql`
       SELECT rs."id", rs."orgId", rs."userId" FROM "RefreshSession" rs
@@ -115,12 +122,18 @@ const checks = {
       WHERE rs."revokedAt" IS NULL AND rs."expiresAt" > now() AND m."id" IS NULL ${orgFilter(Prisma.sql`rs."orgId"`, orgId)}`);
     let revoked = 0;
     if (apply && mismatched.length) {
-      revoked = (await prisma.refreshSession.updateMany({
-        where: { id: { in: mismatched.map((item) => item.id) }, revokedAt: null },
-        data: { revokedAt: new Date() },
-      })).count;
+      revoked = await prisma.$executeRaw(Prisma.sql`
+        WITH RECURSIVE family AS (
+          SELECT rs."id", rs."replacedBySessionId" FROM "RefreshSession" rs
+          WHERE rs."id" IN (${Prisma.join(mismatched.map((item) => item.id))})
+          UNION
+          SELECT rs."id", rs."replacedBySessionId" FROM "RefreshSession" rs
+          JOIN family f ON rs."id" = f."replacedBySessionId" OR rs."replacedBySessionId" = f."id"
+        )
+        UPDATE "RefreshSession" rs SET "revokedAt" = now(), "updatedAt" = now()
+        FROM family f WHERE rs."id" = f."id" AND rs."revokedAt" IS NULL`);
     }
-    return row("refresh_sessions_match_membership", "0 mismatches", `${mismatched.length} mismatches${apply ? `, ${revoked} revoked` : ""}`, mismatched.length ? "warn" : "ok", mismatched);
+    return row("refresh_sessions_match_membership", "0 mismatches", `${mismatched.length} mismatches${apply ? `, ${revoked} revoked (families)` : ""}`, mismatched.length ? "warn" : "ok", mismatched);
   },
 
   /** ProjectAssignment.user has a membership in the project's organisation → list (would block the M7 FK). */
