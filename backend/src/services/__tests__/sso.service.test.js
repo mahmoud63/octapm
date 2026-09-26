@@ -22,7 +22,14 @@ const mockPrisma = {
       if (!row) return null;
       return select?.org ? { ...row, org: store.orgs.find((org) => org.id === row.orgId) } : { ...row };
     }),
-    findFirst: jest.fn(async ({ where }) => store.users.find((user) => user.orgId === where.orgId && (where.OR ? where.OR.some((clause) => (clause.ssoSubject && user.ssoSubject === clause.ssoSubject) || (clause.email && user.email === clause.email)) : true)) || null),
+    // The callback looks a subject up within one organisation (ssoSubject plus an OR of orgId / membership clauses); other callers narrow by orgId.
+    findFirst: jest.fn(async ({ where }) =>
+      store.users.find(
+        (user) =>
+          (where.orgId === undefined || user.orgId === where.orgId) &&
+          (where.ssoSubject === undefined || user.ssoSubject === where.ssoSubject) &&
+          (where.OR ? where.OR.some((clause) => (clause.orgId && user.orgId === clause.orgId) || (clause.ssoSubject && user.ssoSubject === clause.ssoSubject) || (clause.email && user.email === clause.email)) : true),
+      ) || null),
     findMany: jest.fn(async ({ where }) => store.users.filter((user) => user.orgId === where.orgId).map((user) => ({ ...user }))),
     create: jest.fn(async ({ data }) => {
       const row = { id: nextId("user"), ...data };
@@ -184,6 +191,26 @@ describe("single sign-on", () => {
     expect(refused.error).toBe("SSO_USER_NOT_FOUND");
     expect(refused.redirectUrl).toBe("https://app.example.test/sign-in?ssoError=SSO_USER_NOT_FOUND");
     expect(store.audit.at(-1)).toMatchObject({ action: "sso.login_failed" });
+  });
+
+  it("scopes a subject match to this organisation's IdP: another organisation's equal subject is no conflict, this one's is", async () => {
+    await configure();
+    // Another organisation's IdP linked the same subject string to another
+    // identity; it comes first in the store, where an unordered global
+    // lookup would find it and refuse Pat.
+    store.users.unshift({ id: "u-elsewhere", orgId: "org-2", name: "Elsewhere", email: "elsewhere@other.test", passwordHash: "x", role: "pm", isCompanyAdmin: false, status: "active", ssoSubject: "idp-shared" });
+    const first = await ssoService.start({ email: "pat@constech.test", fetchImpl });
+    idTokenClaims = { iss: ISSUER, aud: CLIENT_ID, sub: "idp-shared", email: "pat@constech.test", nonce: nonceOf(first.authorizationUrl) };
+    const linked = await ssoService.callback({ code: "good-code", state: stateOf(first.authorizationUrl) }, {}, { fetchImpl });
+    expect(linked.error).toBeNull();
+    expect(store.users.find((user) => user.id === "u-1")).toMatchObject({ email: "pat@constech.test", ssoSubject: "idp-shared" });
+
+    // This organisation's own link presenting a different email is the conflict.
+    const second = await ssoService.start({ email: "renamed@constech.test", fetchImpl });
+    idTokenClaims = { iss: ISSUER, aud: CLIENT_ID, sub: "idp-shared", email: "renamed@constech.test", nonce: nonceOf(second.authorizationUrl) };
+    const refused = await ssoService.callback({ code: "good-code", state: stateOf(second.authorizationUrl) }, {}, { fetchImpl });
+    expect(refused.error).toBe("SSO_IDENTITY_CONFLICT");
+    expect(store.users.find((user) => user.email === "renamed@constech.test")).toBeUndefined();
   });
 
   it("rejects a bad nonce, a wrong audience, a refused code and a tampered state", async () => {

@@ -76,10 +76,14 @@ describe("company workspace routes", () => {
     expect(mockWorkspace.listVendors).toHaveBeenCalledWith({ orgId: "org-1", query: expect.objectContaining({ trade: "steel" }) });
   });
 
-  it("gates writes and the migration report to company admins and PMs", async () => {
+  it("gates writes and the migration report to company admins and owners", async () => {
     const app = buildApp();
     const denied = await request(app).post("/company/vendors").set("x-role", "qs").send({ name: "Acme" });
     expect(denied.status).toBe(403);
+    // A PM without the admin flag is a member like any other here (ENT-2,
+    // product-owner decision 1: the PM shortcut is retired).
+    const plainPm = await request(app).post("/company/vendors").set("x-role", "pm").send({ name: "Acme" });
+    expect(plainPm.status).toBe(403);
     const deniedReport = await request(app).get("/company/vendors/migration-report").set("x-role", "qs");
     expect(deniedReport.status).toBe(403);
 
@@ -95,13 +99,13 @@ describe("company workspace routes", () => {
 
     const imported = await request(app)
       .post("/company/cost-codes/import")
-      .set("x-role", "pm")
+      .set("x-role", "pm").set("x-company-admin", "1")
       .send({ rows: [{ code: "01", name: "General" }] });
     expect(imported.status).toBe(200);
 
     const fromTemplate = await request(app)
       .post(`/company/project-templates/${ID}/create-project`)
-      .set("x-role", "pm")
+      .set("x-role", "pm").set("x-company-admin", "1")
       .send({ name: "Marina Heights", startDate: "2026-10-01", endDate: "2027-10-01" });
     expect(fromTemplate.status).toBe(201);
     expect(mockTemplates.createProjectFromTemplate).toHaveBeenCalledWith(
@@ -111,12 +115,12 @@ describe("company workspace routes", () => {
 
   it("validates payloads", async () => {
     const app = buildApp();
-    expect((await request(app).post("/company/vendors").set("x-role", "pm").send({})).status).toBe(400);
-    expect((await request(app).post("/company/cost-codes").set("x-role", "pm").send({ code: "01" })).status).toBe(400);
-    expect((await request(app).post("/company/cost-codes").set("x-role", "pm").send({ code: "01", name: "x", category: "plumbing" })).status).toBe(400);
-    expect((await request(app).post("/company/equipment").set("x-role", "pm").send({ name: "Crane", rateType: "weekly" })).status).toBe(400);
-    expect((await request(app).post("/company/cost-codes/import").set("x-role", "pm").send({ rows: [] })).status).toBe(400);
-    expect((await request(app).post(`/company/project-templates/${ID}/create-project`).set("x-role", "pm").send({})).status).toBe(400);
-    expect((await request(app).patch("/company/vendors/not-a-uuid").set("x-role", "pm").send({ name: "x" })).status).toBe(400);
+    expect((await request(app).post("/company/vendors").set("x-role", "pm").set("x-company-admin", "1").send({})).status).toBe(400);
+    expect((await request(app).post("/company/cost-codes").set("x-role", "pm").set("x-company-admin", "1").send({ code: "01" })).status).toBe(400);
+    expect((await request(app).post("/company/cost-codes").set("x-role", "pm").set("x-company-admin", "1").send({ code: "01", name: "x", category: "plumbing" })).status).toBe(400);
+    expect((await request(app).post("/company/equipment").set("x-role", "pm").set("x-company-admin", "1").send({ name: "Crane", rateType: "weekly" })).status).toBe(400);
+    expect((await request(app).post("/company/cost-codes/import").set("x-role", "pm").set("x-company-admin", "1").send({ rows: [] })).status).toBe(400);
+    expect((await request(app).post(`/company/project-templates/${ID}/create-project`).set("x-role", "pm").set("x-company-admin", "1").send({})).status).toBe(400);
+    expect((await request(app).patch("/company/vendors/not-a-uuid").set("x-role", "pm").set("x-company-admin", "1").send({ name: "x" })).status).toBe(400);
   });
 });

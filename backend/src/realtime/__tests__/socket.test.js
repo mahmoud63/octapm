@@ -94,6 +94,8 @@ describe("realtime socket auth", () => {
     await authenticateSocket(socket, next);
 
     expect(next).toHaveBeenCalledWith();
+    // The principal shape authenticate builds (membership doc §3); with no
+    // membership row the User columns speak and membershipId is null.
     expect(socket.data.user).toEqual({
       id: "user-1",
       orgId: "org-1",
@@ -101,6 +103,12 @@ describe("realtime socket auth", () => {
       email: "pm@example.com",
       name: "PM",
       isCompanyAdmin: false,
+      isAdmin: false,
+      isOwner: false,
+      kind: "member",
+      membershipId: null,
+      orgKind: "company",
+      orgSlug: null,
     });
   });
 });

@@ -165,13 +165,21 @@ router.post(
   ],
   asyncHandler(async (req, res) => {
     const result = await authService.login(req.body, getRequestContext(req));
-    // A second factor is pending: no session yet, only the challenge token.
-    if (result.mfaRequired) return sendSuccess(res, result);
+    // A second factor is pending, or the identity has no single workspace to
+    // enter (membership doc §6): no session yet, only the token for the next
+    // step — the challenge, or POST /auth/workspaces/:orgId/session.
+    if (result.mfaRequired || result.chooseWorkspace || result.needsWorkspace) {
+      return sendSuccess(res, result);
+    }
     return sendSession(req, res, result);
   }),
 );
 
 require("./auth-security").register(router, {
+  sendSession,
+  getRequestContext,
+});
+require("./workspaces").register(router, {
   sendSession,
   getRequestContext,
 });
@@ -237,9 +245,12 @@ router.post(
     body("phone").optional().isString().trim(),
     validate,
   ],
+  // A bearer, when the invitee is signed in, proves the existing identity
+  // the invitation names (membership doc §5); the password does otherwise.
+  require("./workspaces").optionalTokenSubject,
   asyncHandler(async (req, res) => {
     const result = await authService.acceptInvitation(
-      req.body,
+      { ...req.body, identityUserId: req.tokenSubject?.userId || null },
       getRequestContext(req),
     );
     return sendSession(req, res, result);
@@ -287,6 +298,7 @@ router.get(
     const result = await authService.getProfile({
       userId: req.user.id,
       orgId: req.user.orgId,
+      principal: req.user,
     });
 
     return sendSuccess(res, result);

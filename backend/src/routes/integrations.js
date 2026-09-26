@@ -3,7 +3,7 @@ const { body, param, query } = require("express-validator");
 const { asyncHandler } = require("../utils/async-handler");
 const { sendSuccess } = require("../utils/api-response");
 const { HttpError } = require("../utils/http-error");
-const { authenticate } = require("../middleware/auth");
+const { requireOrganizationMembership } = require("../middleware/auth");
 const { requireCompanyAdmin, getEffectiveRole } = require("../middleware/rbac");
 const { validate } = require("../middleware/validate");
 const apiClients = require("../services/api-client.service");
@@ -30,7 +30,11 @@ router.get(
   }),
 );
 
-router.use(authenticate);
+// Everything below the callback is company administration behind the
+// membership gate (architecture doc §2.3), which authenticates the request
+// itself; it is mounted here rather than in app.js so the callback above
+// stays reachable without a bearer.
+router.use(requireOrganizationMembership({ kind: "member" }));
 router.use(requireCompanyAdmin);
 
 // ─── API keys ──────────────────────────────────────────────────────────────

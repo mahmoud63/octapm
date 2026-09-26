@@ -65,14 +65,17 @@ describe("permission template routes", () => {
     expect(mockService.getCatalog).toHaveBeenCalled();
   });
 
-  it("restricts template administration to PMs and company admins", async () => {
+  it("restricts template administration to company admins and owners", async () => {
     const app = buildApp();
 
     const denied = await request(app).get("/permissions/templates").set("x-role", "qs");
     expect(denied.status).toBe(403);
     expect(denied.body.error.code).toBe("FORBIDDEN");
+    // A PM without the admin flag is refused too (ENT-2: the PM shortcut is retired).
+    const plainPm = await request(app).get("/permissions/templates").set("x-role", "pm");
+    expect(plainPm.status).toBe(403);
 
-    const asPm = await request(app).get("/permissions/templates?kind=external").set("x-role", "pm");
+    const asPm = await request(app).get("/permissions/templates?kind=external").set("x-role", "pm").set("x-company-admin", "1");
     expect(asPm.status).toBe(200);
     expect(mockService.listTemplates).toHaveBeenCalledWith({
       orgId: "org-1",
@@ -104,31 +107,31 @@ describe("permission template routes", () => {
 
     const missingName = await request(app)
       .post("/permissions/templates")
-      .set("x-role", "pm")
+      .set("x-role", "pm").set("x-company-admin", "1")
       .send({ tools: [] });
     expect(missingName.status).toBe(400);
 
     const badLevel = await request(app)
       .patch(`/permissions/templates/${TEMPLATE_ID}`)
-      .set("x-role", "pm")
+      .set("x-role", "pm").set("x-company-admin", "1")
       .send({ tools: [{ module: "cost", level: "owner" }] });
     expect(badLevel.status).toBe(400);
     expect(mockService.updateTemplate).not.toHaveBeenCalled();
 
-    const badId = await request(app).delete("/permissions/templates/not-a-uuid").set("x-role", "pm");
+    const badId = await request(app).delete("/permissions/templates/not-a-uuid").set("x-role", "pm").set("x-company-admin", "1");
     expect(badId.status).toBe(400);
   });
 
   it("archives and duplicates through the service", async () => {
     const app = buildApp();
-    await request(app).delete(`/permissions/templates/${TEMPLATE_ID}`).set("x-role", "pm").expect(200);
+    await request(app).delete(`/permissions/templates/${TEMPLATE_ID}`).set("x-role", "pm").set("x-company-admin", "1").expect(200);
     expect(mockService.archiveTemplate).toHaveBeenCalledWith(
       expect.objectContaining({ orgId: "org-1", templateId: TEMPLATE_ID }),
     );
 
     await request(app)
       .post(`/permissions/templates/${TEMPLATE_ID}/duplicate`)
-      .set("x-role", "pm")
+      .set("x-role", "pm").set("x-company-admin", "1")
       .send({ name: "Copy" })
       .expect(201);
     expect(mockService.duplicateTemplate).toHaveBeenCalledWith(

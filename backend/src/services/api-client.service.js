@@ -92,13 +92,18 @@ const createApiClient = async ({ orgId, actor, payload = {} }) => {
   const scopes = normalizeScopes(payload.scopes);
   const projectIds = await resolveProjectIds({ orgId, projectIds: payload.projectIds });
   const ownerId = trimOrNull(payload.userId) || actor?.id;
-  const owner = await prisma.user.findFirst({ where: { id: ownerId, orgId, status: "active" }, ...userSelect });
-  if (!owner) throw new HttpError(400, "API_OWNER_UNKNOWN", "The key must act as an active person in this organisation");
+  // The owner must belong to this workspace — by membership, or by the User
+  // column for a person seeded before memberships — and the key remembers
+  // which membership it acts as.
+  const { findUserInOrg, findMembership } = require("./membership.service");
+  const owner = await findUserInOrg({ tx: prisma, orgId, userId: ownerId, select: { ...userSelect.select } });
+  const ownerMembership = owner ? await findMembership({ tx: prisma, orgId, userId: owner.id }) : null;
+  if (!owner || owner.status !== "active" || (ownerMembership && ownerMembership.status !== "active")) throw new HttpError(400, "API_OWNER_UNKNOWN", "The key must act as an active person in this organisation");
   const expiresAt = payload.expiresAt ? new Date(payload.expiresAt) : null;
   if (expiresAt && Number.isNaN(expiresAt.getTime())) throw new HttpError(400, "API_EXPIRY_INVALID", "Expiry must be a date");
   const token = `${API_KEY_PREFIX}${crypto.randomBytes(24).toString("base64url")}`;
   const row = await prisma.apiClient.create({
-    data: { orgId, userId: owner.id, name, description: trimOrNull(payload.description), keyPrefix: token.slice(0, API_KEY_PREFIX.length + 8), keyHash: hashKey(token), scopes, projectIds, expiresAt, createdBy: actor?.id || null },
+    data: { orgId, userId: owner.id, name, description: trimOrNull(payload.description), keyPrefix: token.slice(0, API_KEY_PREFIX.length + 8), keyHash: hashKey(token), scopes, projectIds, expiresAt, createdBy: actor?.id || null, ...(ownerMembership ? { membershipId: ownerMembership.id } : {}) },
     include: { user: userSelect },
   });
   await auditService.recordEvent({ orgId, projectId: null, entityType: auditService.ENTITY_TYPES.API_CLIENT || "api_client", entityId: row.id, action: auditService.ACTIONS.CREATED, actorId: actor?.id || null, summary: { name, scopes, projectIds: projectIds.length, owner: owner.email } }).catch(() => null);
@@ -132,17 +137,31 @@ const updateApiClient = async ({ orgId, actor, apiClientId, payload = {} }) => {
 
 const revokeApiClient = ({ orgId, actor, apiClientId }) => updateApiClient({ orgId, actor, apiClientId, payload: { status: "revoked" } });
 
-/** Turns a raw key into the principal it acts as; throws 401 when it cannot. */
+/**
+ * Turns a raw key into the principal it acts as; throws 401 when it cannot.
+ * A key acts as one person in one workspace: the owner's membership in the
+ * key's organisation (`membershipId`, backfilled) decides their role and
+ * standing, as it does for a bearer token (architecture doc §2.1); the User
+ * columns decide only when the owner has no membership row there.
+ */
 const authenticateApiKey = async (token) => {
   const row = await prisma.apiClient.findUnique({ where: { keyHash: hashKey(token) }, include: { user: userSelect } });
   if (!row || row.status !== "active") throw new HttpError(401, "API_KEY_INVALID", "API key is invalid or revoked");
   if (row.expiresAt && row.expiresAt < new Date()) throw new HttpError(401, "API_KEY_EXPIRED", "API key has expired");
-  if (!row.user || row.user.status !== "active" || row.user.orgId !== row.orgId) throw new HttpError(401, "API_KEY_OWNER_INACTIVE", "The person this key acts as is no longer active");
+  const ownerInactive = () => new HttpError(401, "API_KEY_OWNER_INACTIVE", "The person this key acts as is no longer active");
+  const { resolveMembershipPrincipal, principalFromUser } = require("./membership.service");
+  const standing = await resolveMembershipPrincipal({ tx: prisma, userId: row.userId, orgId: row.orgId, membershipId: row.membershipId || null });
+  if (standing.inactive) throw ownerInactive();
+  let user = standing.principal;
+  if (!user) {
+    if (!row.user || row.user.status !== "active" || row.user.orgId !== row.orgId) throw ownerInactive();
+    user = principalFromUser(row.user);
+  }
   if (!row.lastUsedAt || Date.now() - new Date(row.lastUsedAt).getTime() > LAST_USED_THROTTLE_MS) {
     prisma.apiClient.update({ where: { id: row.id }, data: { lastUsedAt: new Date() } }).catch(() => null);
   }
   return {
-    user: { id: row.user.id, orgId: row.orgId, role: row.user.role, email: row.user.email, name: row.user.name, isCompanyAdmin: Boolean(row.user.isCompanyAdmin) },
+    user: { ...user, email: user.email || row.user?.email || null, name: user.name || row.user?.name || null },
     apiClient: { id: row.id, name: row.name, scopes: row.scopes || [], projectIds: row.projectIds || [] },
   };
 };

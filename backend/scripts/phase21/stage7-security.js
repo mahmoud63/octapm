@@ -13,7 +13,7 @@
  */
 const fs = require("fs");
 const path = require("path");
-const { GET, POST, probe, check, note, section, summary, readLedger } = require("./harness");
+const { API, GET, POST, probe, check, note, section, summary, readLedger } = require("./harness");
 
 const CONTEXT = path.join(__dirname, "context.json");
 const ctx = JSON.parse(fs.readFileSync(CONTEXT, "utf8"));
@@ -35,7 +35,7 @@ const OUTSIDER = process.env.P21_OUTSIDER || "owner@buildright.test";
  */
 async function findOutsider() {
   const email = `outsider-${ctx.stamp}@rival.test`;
-  const res = await fetch("http://127.0.0.1:5000/api/v1/auth/register", {
+  const res = await fetch(`${API}/auth/register`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({

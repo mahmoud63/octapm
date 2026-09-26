@@ -139,6 +139,14 @@ Target rules [D]:
 
 `InvitationToken` (`schema.prisma:759-798`) is reused unchanged; it already spans org + optional project + company + party [C]. Add `membershipId?` filled on acceptance.
 
+### 5.1 Identity standing, acceptance proof and standing grants (ENT-2 review decisions) [D]
+
+- **`User.status` belongs to the identity's home workspace** (`User.orgId`), as name, email and password already do. Deactivation closes the identity only from home and only when no other active membership remains; reactivation from another workspace reopens that workspace's membership and answers `403 FORBIDDEN` when the identity itself is closed; a re-invitation from home reopens the identity (new password, `status = active`, the pre-membership contract) and a re-invitation from anywhere else is refused `403 USER_INACTIVE`. `resolveSessionPrincipal` refuses a session for an inactive identity on every path.
+- **Acceptance by an existing identity requires proof** that the caller is that identity: an `Authorization` bearer for the same `sub` (an access or identity token) on `POST /auth/invitations/accept`, or the account password in the body (compared, never rewritten). Otherwise `401 INVITATION_SIGN_IN_REQUIRED`. The preview reports `requiresPassword: true` for every invitation so a client without a session asks for it. A brand-new identity still sets its password with the token alone.
+- **An active member's role is not re-graded by an invitation.** A project or party invitation to someone already an active member assigns the project and leaves the membership (and the home `User.role`) alone; role changes go through `changeMembership`, with its guards and `membership.role_changed`.
+- **Only an owner grants or revokes `isAdmin`**, as §2.1 lists, not merely `isOwner`: two PMs must not be able to make each other administrators (`403 OWNER_REQUIRED`). In a workspace with no membership rows of its own (seeded before the backfill, no owner exists) a company administrator grants it, as before.
+- **SSO subject matching is issuer-scoped**: the identity is found by email; a subject match speaks only for an identity this organisation's IdP linked (`User.orgId` or a membership here), and then a different email is `403 SSO_IDENTITY_CONFLICT`. Another organisation's IdP issuing the same subject string is not a conflict.
+
 ---
 
 ## 6. Login with 0 / 1 / many workspaces (§116)

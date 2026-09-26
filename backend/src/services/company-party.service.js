@@ -571,13 +571,36 @@ const addProjectPartyMemberWithTx = async ({
   invitedAt = null,
   acceptedAt = null,
 }) => {
+  // The person may belong to this workspace already, or be an identity from
+  // another one joining as a guest (architecture doc §6): either way they
+  // hold a membership here afterwards — a guest one when they had none, and
+  // whatever they had otherwise (a member is never downgraded).
+  const membershipService = require("./membership.service");
   const [party, user] = await Promise.all([
     assertProjectParty({ tx, orgId, projectId, partyId }),
-    tx.user.findFirst({ where: { id: userId, orgId } }),
+    membershipService.findUserInOrg({ tx, orgId, userId }),
   ]);
 
   if (!user) {
     throw new HttpError(404, "USER_NOT_FOUND", "User not found");
+  }
+
+  const ensured = await membershipService.ensureMembership({
+    tx,
+    orgId,
+    userId,
+    role: membershipService.GUEST_ROLE,
+    kind: membershipService.MEMBERSHIP_KINDS.GUEST,
+    joinedAt: acceptedAt || new Date(),
+  });
+  if (ensured?.created) {
+    await membershipService.recordMembershipEvent({
+      tx,
+      orgId,
+      membership: ensured.membership,
+      action: "membership.created",
+      metadata: { kind: "guest", projectId, projectPartyId: partyId },
+    });
   }
 
   const companyMembership = await tx.companyMembership.upsert({

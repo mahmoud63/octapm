@@ -52,7 +52,7 @@ const peopleWhere = ({ orgId, projectId }) => ({
   ...(projectId
     ? {
         OR: [
-          { role: { in: ["pm", "super_admin"] } },
+          { role: "pm" },
           { isCompanyAdmin: true },
           { projectAssignments: { some: { projectId } } },
           { projectPartyMemberships: { some: { status: "active", projectParty: { projectId, status: "active" } } } },

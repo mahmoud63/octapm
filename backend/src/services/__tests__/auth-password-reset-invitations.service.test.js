@@ -307,8 +307,9 @@ describe("auth password reset and invitation tokens", () => {
         projectId: pendingInvitation.projectId,
         userId: "new-user-1",
         role: pendingInvitation.role,
+        orgId: "org-1",
       },
-      update: { role: pendingInvitation.role },
+      update: { role: pendingInvitation.role, orgId: "org-1" },
     });
     expect(mockTx.invitationToken.update).toHaveBeenCalledWith({
       where: { id: pendingInvitation.id },
@@ -317,5 +318,61 @@ describe("auth password reset and invitation tokens", () => {
         acceptedById: "new-user-1",
       }),
     });
+  });
+
+  it("needs proof of an existing identity: the link alone is refused; a bearer for it or its password accepts, and the password is never rewritten", async () => {
+    const bcrypt = require("bcryptjs");
+    const existing = {
+      ...activeUser,
+      id: "existing-1",
+      orgId: "other-org",
+      email: pendingInvitation.email,
+      passwordHash: bcrypt.hashSync("Password1", 4),
+    };
+    mockPrisma.invitationToken.findUnique.mockResolvedValue(pendingInvitation);
+    mockPrisma.user.findUnique.mockResolvedValue(existing);
+    mockTx.invitationToken.update.mockResolvedValue({});
+    mockTx.invitationToken.updateMany.mockResolvedValue({ count: 0 });
+    mockTx.projectAssignment.upsert.mockResolvedValue({});
+
+    const accept = (payload) => authService.acceptInvitation({ token: "invite-token", name: "Existing", ...payload });
+    await expect(accept({})).rejects.toMatchObject({ code: "INVITATION_SIGN_IN_REQUIRED" });
+    await expect(accept({ password: "Wrong-Passw0rd" })).rejects.toMatchObject({ code: "INVITATION_SIGN_IN_REQUIRED" });
+    await expect(accept({ identityUserId: "somebody-else" })).rejects.toMatchObject({ code: "INVITATION_SIGN_IN_REQUIRED" });
+    expect(mockTx.invitationToken.update).not.toHaveBeenCalled();
+    expect(mockPrisma.authAuditEvent.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ action: "invitation_accept_rejected", metadataJson: { reason: "INVITATION_SIGN_IN_REQUIRED" } }) }),
+    );
+
+    const byPassword = await accept({ password: "Password1" });
+    expect(byPassword.user).toMatchObject({ id: "existing-1", orgId: "org-1" });
+    const bySession = await accept({ identityUserId: "existing-1" });
+    expect(bySession.user).toMatchObject({ id: "existing-1", orgId: "org-1" });
+    // Not the identity's home: nothing on the User row is written, the password least of all.
+    expect(mockTx.user.update).not.toHaveBeenCalled();
+    expect(mockTx.invitationToken.update).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not reopen an identity its home workspace closed: another workspace's invitation is refused, home's reopens it with a new password", async () => {
+    const closed = { ...activeUser, id: "closed-1", orgId: "other-org", email: pendingInvitation.email, status: "inactive" };
+    mockPrisma.invitationToken.findUnique.mockResolvedValue(pendingInvitation);
+    mockPrisma.user.findUnique.mockResolvedValue(closed);
+    await expect(
+      authService.acceptInvitation({ token: "invite-token", name: "Closed", password: "Password1" }),
+    ).rejects.toMatchObject({ code: "USER_INACTIVE" });
+    expect(mockTx.invitationToken.update).not.toHaveBeenCalled();
+    expect(mockTx.refreshSession.create).not.toHaveBeenCalled();
+
+    mockPrisma.user.findUnique.mockResolvedValue({ ...closed, orgId: "org-1" });
+    mockTx.user.update.mockImplementation(async ({ data }) => ({ ...closed, orgId: "org-1", ...data }));
+    mockTx.invitationToken.update.mockResolvedValue({});
+    mockTx.invitationToken.updateMany.mockResolvedValue({ count: 0 });
+    mockTx.projectAssignment.upsert.mockResolvedValue({});
+    await expect(authService.acceptInvitation({ token: "invite-token", name: "Closed" })).rejects.toMatchObject({ code: "INVITATION_PASSWORD_REQUIRED" });
+    const reopened = await authService.acceptInvitation({ token: "invite-token", name: "Closed", password: "Password1" });
+    expect(reopened.user).toMatchObject({ id: "closed-1", status: "active" });
+    expect(mockTx.user.update).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ status: "active", passwordHash: expect.any(String) }) }),
+    );
   });
 });

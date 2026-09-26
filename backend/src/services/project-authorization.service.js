@@ -4,10 +4,12 @@ const { HttpError } = require('../utils/http-error');
 
 const PROJECT_ACCESS_DENIED_CODE = 'PROJECT_ACCESS_DENIED';
 const PROJECT_ACCESS_DENIED_MESSAGE = 'You are not assigned to this project';
-const ORG_WIDE_PROJECT_ACCESS_ROLES = new Set(['pm', 'super_admin']);
+// `super_admin` is gone from this set: it was never in the catalogue and never
+// assignable; workspace admins and owners carry the intent (membership doc §1).
+const ORG_WIDE_PROJECT_ACCESS_ROLES = new Set(['pm']);
 
-// Org-wide project visibility: PM / super_admin roles, plus company admins
-// (User.isCompanyAdmin) regardless of their functional role.
+// Org-wide project visibility: the PM role, plus the workspace's admins and
+// owners (membership isAdmin || isOwner) regardless of their functional role.
 const canAccessAllProjects = (role, options = {}) =>
   Boolean(options?.isCompanyAdmin) ||
   ORG_WIDE_PROJECT_ACCESS_ROLES.has(normalizeRoleId(role));
@@ -19,7 +21,7 @@ const projectAccessDenied = () =>
     PROJECT_ACCESS_DENIED_MESSAGE,
   );
 
-const getProjectAccessWhere = ({ userId, role, isCompanyAdmin = false }) => {
+const getProjectAccessWhere = ({ userId, role, isCompanyAdmin = false, orgId = null }) => {
   if (canAccessAllProjects(role, { isCompanyAdmin })) {
     return {};
   }
@@ -28,13 +30,19 @@ const getProjectAccessWhere = ({ userId, role, isCompanyAdmin = false }) => {
     throw projectAccessDenied();
   }
 
+  // An assignment counts only inside the workspace the token is for
+  // (architecture doc §2.2) — redundant once the composite FK lands in M7,
+  // kept as defence in depth. Rows written before the column existed carry
+  // no orgId and keep counting until M7 fills and constrains them.
+  const assignmentWhere = orgId
+    ? { userId, OR: [{ orgId }, { orgId: null }] }
+    : { userId };
+
   return {
     OR: [
       {
         assignments: {
-          some: {
-            userId,
-          },
+          some: assignmentWhere,
         },
       },
       {
@@ -149,7 +157,7 @@ const assertProjectAccess = async ({
     where: {
       id: projectId,
       orgId,
-      ...getProjectAccessWhere({ userId, role, isCompanyAdmin }),
+      ...getProjectAccessWhere({ userId, role, isCompanyAdmin, orgId }),
     },
     select,
   });

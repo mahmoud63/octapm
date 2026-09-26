@@ -82,9 +82,17 @@ describe("assignment routes", () => {
       projectId: "project-1",
     });
 
+    // A PM without the admin flag is refused too (ENT-2: the PM shortcut is retired).
+    const plainPm = await request(app)
+      .post("/projects/project-1/assignments/resolve")
+      .set("x-role", "pm")
+      .send({ recordType: "ncr", recordId: RECORD, field: "assigneeUserId", userId: USER });
+    expect(plainPm.status).toBe(403);
+
     const resolved = await request(app)
       .post("/projects/project-1/assignments/resolve")
       .set("x-role", "pm")
+      .set("x-company-admin", "1")
       .send({ recordType: "ncr", recordId: RECORD, field: "assigneeUserId", userId: USER });
     expect(resolved.status).toBe(200);
     expect(mockService.resolveAssignment).toHaveBeenCalledWith(
@@ -102,18 +110,21 @@ describe("assignment routes", () => {
     const badType = await request(app)
       .post("/projects/project-1/assignments/resolve")
       .set("x-role", "pm")
+      .set("x-company-admin", "1")
       .send({ recordType: "invoice", recordId: RECORD, field: "ownerUserId", userId: USER });
     expect(badType.status).toBe(400);
 
     const badField = await request(app)
       .post("/projects/project-1/assignments/resolve")
       .set("x-role", "pm")
+      .set("x-company-admin", "1")
       .send({ recordType: "rfi", recordId: RECORD, field: "owner", userId: USER });
     expect(badField.status).toBe(400);
 
     const badUser = await request(app)
       .post("/projects/project-1/assignments/resolve")
       .set("x-role", "pm")
+      .set("x-company-admin", "1")
       .send({ recordType: "rfi", recordId: RECORD, field: "ownerUserId", userId: "nope" });
     expect(badUser.status).toBe(400);
     expect(mockService.resolveAssignment).not.toHaveBeenCalled();

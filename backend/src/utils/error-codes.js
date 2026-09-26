@@ -24,15 +24,55 @@ const ERROR_CODE_CATALOG = Object.freeze({
     category: "auth",
     message: "Invitation token is invalid, expired, or already used",
   },
-  INVITATION_EMAIL_IN_OTHER_ORG: {
+  ALREADY_MEMBER: {
     status: 409,
     category: "auth",
-    message: "Email is already registered to another organization",
+    message: "This person is already a member of the workspace",
+  },
+  LAST_OWNER: {
+    status: 409,
+    category: "auth",
+    message: "This workspace needs at least one active owner",
+  },
+  SELF_ELEVATION_FORBIDDEN: {
+    status: 403,
+    category: "auth",
+    message: "You cannot change your own role or standing",
+  },
+  OWNER_REQUIRED: {
+    status: 403,
+    category: "auth",
+    message: "Only a workspace owner can grant or revoke ownership or administration",
+  },
+  GUEST_FORBIDDEN: {
+    status: 403,
+    category: "auth",
+    message: "Guests of this workspace cannot reach company-wide features",
+  },
+  WORKSPACE_REQUIRED: {
+    status: 401,
+    category: "auth",
+    message: "Choose a workspace before using this token",
+  },
+  WORKSPACE_NOT_FOUND: {
+    status: 404,
+    category: "auth",
+    message: "You are not a member of this workspace",
+  },
+  SSO_IDENTITY_CONFLICT: {
+    status: 403,
+    category: "auth",
+    message: "This sign-in belongs to a different account",
   },
   INVITATION_PASSWORD_REQUIRED: {
     status: 400,
     category: "auth",
     message: "A password is required to accept this invitation",
+  },
+  INVITATION_SIGN_IN_REQUIRED: {
+    status: 401,
+    category: "auth",
+    message: "Sign in as the invited account, or enter its password, to accept this invitation",
   },
   TOKEN_EXPIRED: {
     status: 401,

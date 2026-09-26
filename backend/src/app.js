@@ -27,6 +27,7 @@ const workflowInboxRoutes = require("./routes/workflow-inbox");
 const {
   requireCloudFrontOriginSecret,
 } = require("./middleware/cloudfront-origin");
+const { requireOrganizationMembership } = require("./middleware/auth");
 const { errorHandler, notFoundHandler } = require("./middleware/error-handler");
 const { requestId } = require("./middleware/request-id");
 const {
@@ -110,23 +111,34 @@ const createApp = () => {
 
   app.use("/api/health", createHealthRouter({ release }));
 
+  // Org-level routers stand behind the membership gate (architecture doc
+  // §2.3): a workspace-bound token, and for these a member rather than a
+  // guest — a party member reaches their projects through the project tree
+  // and nothing company-wide. Person-level routers (notifications, tasks,
+  // search, workflow inbox, conversations, assistant, config) are not gated
+  // here: a guest has work of their own in them, scoped by the services.
+  // The integrations router carries the gate itself: its accounting OAuth
+  // callback is public (the provider redirects the browser to it with no
+  // bearer), so the gate has to land after that route, inside the router.
+  const membersOnly = requireOrganizationMembership({ kind: "member" });
+
   app.use("/api/v1/auth", authRoutes);
   app.use("/api/v1/projects", projectRoutes);
-  app.use("/api/v1/companies", companyRoutes);
-  app.use("/api/v1/users", userRoutes);
+  app.use("/api/v1/companies", membersOnly, companyRoutes);
+  app.use("/api/v1/users", membersOnly, userRoutes);
   app.use("/api/v1/config", configRoutes);
-  app.use("/api/v1/billing", billingRoutes);
+  app.use("/api/v1/billing", membersOnly, billingRoutes);
   app.use("/api/v1/notifications", notificationRoutes);
   app.use("/api/v1/tasks", taskRoutes);
   app.use("/api/v1/search", searchRoutes);
-  app.use("/api/v1/permissions", permissionRoutes);
-  app.use("/api/v1/company", companyWorkspaceRoutes);
-  app.use("/api/v1/inventory", require("./routes/inventory"));
-  app.use("/api/v1/reports", reportBuilderRoutes);
-  app.use("/api/v1/portfolio", portfolioRoutes);
+  app.use("/api/v1/permissions", membersOnly, permissionRoutes);
+  app.use("/api/v1/company", membersOnly, companyWorkspaceRoutes);
+  app.use("/api/v1/inventory", membersOnly, require("./routes/inventory"));
+  app.use("/api/v1/reports", membersOnly, reportBuilderRoutes);
+  app.use("/api/v1/portfolio", membersOnly, portfolioRoutes);
   app.use("/api/v1/workflows", workflowInboxRoutes);
   app.use("/api/v1/integrations", require("./routes/integrations"));
-  app.use("/api/v1/company", require("./routes/company-security"));
+  app.use("/api/v1/company", membersOnly, require("./routes/company-security"));
   app.use("/api/v1/public/bids", require("./routes/bid-portal"));
   app.use("/api/v1/public/rfqs", require("./routes/rfq-portal"));
   app.use("/api/v1/assistant", require("./routes/assistant").orgRouter);

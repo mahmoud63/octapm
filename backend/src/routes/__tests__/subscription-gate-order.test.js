@@ -19,17 +19,20 @@ const mockSubscriptionService = {
   createEnterpriseLead: jest.fn(),
 };
 
+const fakeAuthenticate = (req, _res, next) => {
+  req.user = {
+    id: 'user-1',
+    orgId: 'org-1',
+    role: 'pm',
+    email: 'pm@example.com',
+    name: 'Project Manager',
+  };
+  next();
+};
 jest.mock('../../middleware/auth', () => ({
-  authenticate: (req, _res, next) => {
-    req.user = {
-      id: 'user-1',
-      orgId: 'org-1',
-      role: 'pm',
-      email: 'pm@example.com',
-      name: 'Project Manager',
-    };
-    next();
-  },
+  authenticate: fakeAuthenticate,
+  // The org-level gate app.js mounts: authenticates the same way here.
+  requireOrganizationMembership: () => fakeAuthenticate,
 }));
 jest.mock('../../services/project.service', () => mockProjectService);
 jest.mock('../../services/user.service', () => mockUserService);
@@ -164,14 +167,19 @@ describe('subscription gate route ordering', () => {
       },
     });
     expect(mockSubscriptionService.ensureSubscription).toHaveBeenCalledWith('org-1');
-    expect(mockUserService.createUser).toHaveBeenCalledWith({
-      orgId: 'org-1',
-      payload: {
-        name: 'Site Engineer',
-        email: 'site.engineer@example.com',
-        password: 'Password1',
-        role: 'site_engineer',
-      },
-    });
+    // The route also hands the service the actor and request context (ENT-2:
+    // the membership audit trail names who added the person).
+    expect(mockUserService.createUser).toHaveBeenCalledWith(
+      expect.objectContaining({
+        orgId: 'org-1',
+        actor: expect.objectContaining({ id: 'user-1', orgId: 'org-1' }),
+        payload: {
+          name: 'Site Engineer',
+          email: 'site.engineer@example.com',
+          password: 'Password1',
+          role: 'site_engineer',
+        },
+      }),
+    );
   });
 });
