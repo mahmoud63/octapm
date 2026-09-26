@@ -300,13 +300,22 @@ export const getModuleLevel = (
   moduleName: PermissionModule
 ): PermissionLevel | null => matrix?.modules?.[moduleName]?.level ?? null
 
+/**
+ * The role the person holds in the active workspace (workspace switching doc
+ * §3): the membership's role, which differs per workspace for one identity —
+ * a QS in one company, a PM in another. `user.role` is the same value as the
+ * token's workspace sees it, and stands in until the workspace is known.
+ */
+export const useWorkspaceRole = () =>
+  useAuthStore((state) => state.auth.workspace?.role ?? state.auth.user?.role)
+
 export const useCanPerform = (
   moduleName: PermissionModule,
   action: PermissionAction,
   transition?: string,
   projectRole?: string | null
 ) => {
-  const authRole = useAuthStore((state) => state.auth.user?.role)
+  const authRole = useWorkspaceRole()
   const projectContext = useContext(ProjectPermissionContext)
 
   // A resolved matrix (templates, party templates, company admin) wins.
@@ -337,7 +346,7 @@ export const useCanPerform = (
  * `none`; otherwise falls back to whether the role can read the module.
  */
 export const useModuleAccess = (moduleName: PermissionModule) => {
-  const authRole = useAuthStore((state) => state.auth.user?.role)
+  const authRole = useWorkspaceRole()
   const projectContext = useContext(ProjectPermissionContext)
   const entry = projectContext?.matrix?.modules?.[moduleName]
   if (entry) {
@@ -355,8 +364,16 @@ export const useModuleAccess = (moduleName: PermissionModule) => {
   return { level: visible ? ('standard' as const) : ('none' as const), visible }
 }
 
-/** Company admins and project managers administer users, parties and templates. */
+/**
+ * Company admins and project managers administer users, parties and
+ * templates. Administration is the membership's (admin or owner in the
+ * active workspace, membership doc §4), never the identity's.
+ */
 export const useIsCompanyAdmin = () => {
   const user = useAuthStore((state) => state.auth.user)
-  return Boolean(user?.isCompanyAdmin) || normalizeRoleId(user?.role) === 'pm'
+  const workspace = useAuthStore((state) => state.auth.workspace)
+  const isAdmin = workspace
+    ? workspace.isAdmin || workspace.isOwner
+    : Boolean(user?.isCompanyAdmin)
+  return isAdmin || normalizeRoleId(workspace?.role ?? user?.role) === 'pm'
 }

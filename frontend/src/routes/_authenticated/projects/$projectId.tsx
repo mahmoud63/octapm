@@ -1,15 +1,14 @@
-import { createFileRoute, Outlet, redirect } from '@tanstack/react-router'
-import {
-  DEFAULT_CHILD,
-  isModuleWithChildren,
-  moduleFromSlug,
-  slugForModule,
-} from '@/features/projects/lib/project-modules'
+import { createFileRoute } from '@tanstack/react-router'
+import { legacyProjectRedirect } from '@/lib/workspace/legacy'
 
 /**
- * Legacy deep-links used `?module=&child=` on the project root. They are
- * redirected to the module routes so old bookmarks and notification links keep
- * working (OCTA-FE-ROUTES-008).
+ * Legacy project path (ENT-4): `/projects/:id/…` — every notification and
+ * comment link minted before this wave, every bookmark, and the typed
+ * in-app navigations across the product — opens the same page under the
+ * workspace that owns the project, `/o/{workspace}/projects/:id/…`. A
+ * project of another of the person's workspaces offers the switch; one of
+ * no workspace of theirs is not found. The `?module=&child=` shape of the
+ * older deep-links is carried along and resolved by the workspace route.
  */
 type ProjectSearch = {
   module?: string
@@ -34,38 +33,10 @@ export const Route = createFileRoute('/_authenticated/projects/$projectId')({
     date: typeof search.date === 'string' ? search.date : undefined,
     new: typeof search.new === 'string' ? search.new : undefined,
   }),
-  beforeLoad: ({ params, search }) => {
-    const module = moduleFromSlug(search.module)
-    if (!module) return
-    const child =
-      search.child ??
-      (isModuleWithChildren(module) ? DEFAULT_CHILD[module] : undefined)
-    const rest = {
-      status: search.status,
-      source: search.source,
-      recordId: search.recordId,
-      pin: search.pin,
-      date: search.date,
-      new: search.new,
-    }
-    if (child && isModuleWithChildren(module)) {
-      throw redirect({
-        to: '/projects/$projectId/$module/$child',
-        params: {
-          projectId: params.projectId,
-          module: slugForModule(module),
-          child,
-        },
-        search: rest,
-        replace: true,
-      })
-    }
-    throw redirect({
-      to: '/projects/$projectId/$module',
-      params: { projectId: params.projectId, module: slugForModule(module) },
-      search: rest,
-      replace: true,
-    })
-  },
-  component: Outlet,
+  beforeLoad: ({ params, location, context }) =>
+    legacyProjectRedirect({
+      projectId: params.projectId,
+      location,
+      queryClient: context.queryClient,
+    }),
 })

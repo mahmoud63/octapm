@@ -5,17 +5,32 @@ import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { Link, useNavigate } from '@tanstack/react-router'
 import { useQueryClient } from '@tanstack/react-query'
-import { login, ssoLookup, ssoStart, verifyMfa } from '@/services/auth/api'
+import {
+  enterWorkspace,
+  login,
+  ssoLookup,
+  ssoStart,
+  verifyMfa,
+} from '@/services/auth/api'
 import {
   isMfaChallenge,
+  isWorkspaceChoice,
   type ApiErrorEnvelope,
   type AuthSession,
   type SsoLookup,
+  type WorkspaceChoice,
+  type WorkspaceMembership,
 } from '@/services/auth/types'
 import { Building2, KeyRound, Loader2, LogIn } from 'lucide-react'
 import { toast } from 'sonner'
-import { useAuthStore } from '@/stores/auth-store'
+import { useAuthStore, workspaceSegment } from '@/stores/auth-store'
 import { cn } from '@/lib/utils'
+import {
+  preferredMembership,
+  rememberWorkspace,
+  splitWorkspacePath,
+  workspaceHref,
+} from '@/lib/workspace/paths'
 import { Button } from '@/components/ui/button'
 import {
   Form,
@@ -33,6 +48,7 @@ import {
   InputOTPSlot,
 } from '@/components/ui/input-otp'
 import { PasswordInput } from '@/components/password-input'
+import { WorkspacePicker } from './workspace-picker'
 
 const formSchema = z.object({
   email: z.email({
@@ -82,6 +98,7 @@ export function UserAuthForm({
 }: UserAuthFormProps) {
   const [isLoading, setIsLoading] = useState(false)
   const [challenge, setChallenge] = useState<{ mfaToken: string } | null>(null)
+  const [choice, setChoice] = useState<WorkspaceChoice | null>(null)
   const [code, setCode] = useState('')
   const [useBackup, setUseBackup] = useState(false)
   const [sso, setSso] = useState<SsoLookup | null>(null)
@@ -116,9 +133,48 @@ export function UserAuthForm({
   const finish = (session: AuthSession) => {
     // Nothing fetched before this sign-in may be shown to this person (CX21-456).
     queryClient.clear()
-    auth.setSession(session.user, session.tokens.accessToken)
+    auth.setSession(session.user, session.tokens.accessToken, {
+      workspace: session.workspace ?? null,
+      memberships: session.memberships,
+    })
+    const workspace = useAuthStore.getState().auth.workspace
+    if (workspace) rememberWorkspace(workspace.segment)
+    // A redirect into another workspace than the one entered would only be
+    // switched again on arrival; it is honoured as it stands (the `/o/`
+    // guard makes the switch), and a legacy redirect is carried over.
     navigate({ to: redirectTo || '/', replace: true })
     return `Welcome back, ${session.user.name}!`
+  }
+
+  /**
+   * Several workspaces (membership doc §6): the identity token opens the
+   * chosen one. A deep link names its workspace in the URL; entering that
+   * one first saves a switch on arrival.
+   */
+  const pickWorkspace = async (membership: WorkspaceMembership) => {
+    if (!choice) return
+    try {
+      const session = await enterWorkspace(membership.orgId, {
+        identityToken: choice.identityToken,
+      })
+      const segment = workspaceSegment(session.workspace ?? membership)
+      const target =
+        redirectTo && splitWorkspacePath(redirectTo).segment === segment
+          ? redirectTo
+          : redirectTo && !splitWorkspacePath(redirectTo).segment
+            ? workspaceHref(segment, redirectTo)
+            : `/o/${encodeURIComponent(segment)}`
+      queryClient.clear()
+      auth.setSession(session.user, session.tokens.accessToken, {
+        workspace: session.workspace ?? membership,
+        memberships: session.memberships ?? choice.memberships,
+      })
+      rememberWorkspace(segment)
+      toast.success(`Welcome back, ${session.user.name}!`)
+      navigate({ href: target, replace: true })
+    } catch (error) {
+      toast.error(getErrorMessage(error, 'That workspace could not be opened'))
+    }
   }
 
   const onEmailChange = (value: string) => {
@@ -175,6 +231,12 @@ export function UserAuthForm({
           setCode('')
           return 'Enter the code from your authenticator app'
         }
+        if (isWorkspaceChoice(result)) {
+          setChoice(result)
+          return result.memberships.some((entry) => entry.status === 'active')
+            ? 'Choose a workspace to open'
+            : 'You have no workspace to open yet'
+        }
         return finish(result)
       },
       error: (error) => {
@@ -196,6 +258,13 @@ export function UserAuthForm({
       loading: 'Checking the code...',
       success: (session) => {
         setIsLoading(false)
+        // The second factor proves the identity the same way the password
+        // did; with several workspaces the choice follows here too.
+        if (isWorkspaceChoice(session)) {
+          setChallenge(null)
+          setChoice(session)
+          return 'Choose a workspace to open'
+        }
         return finish(session)
       },
       error: (error) => {
@@ -210,6 +279,19 @@ export function UserAuthForm({
         return getErrorMessage(error, 'That code is not valid')
       },
     })
+  }
+
+  if (choice) {
+    return (
+      <div className={cn('grid gap-3', className)}>
+        <WorkspacePicker
+          memberships={choice.memberships}
+          preferred={preferredMembership(choice.memberships, redirectTo)}
+          onPick={pickWorkspace}
+          onBack={() => setChoice(null)}
+        />
+      </div>
+    )
   }
 
   if (challenge) {

@@ -1,3 +1,26 @@
+/**
+ * One workspace the identity belongs to (membership doc §3, §6). `slug` is
+ * the URL handle under `/o/`; an organisation that has none yet is addressed
+ * by its id instead (`workspaceSegment`).
+ */
+export interface WorkspaceMembership {
+  orgId: string
+  membershipId: string | null
+  slug: string | null
+  name: string | null
+  kind: 'personal' | 'company'
+  role: string
+  isAdmin: boolean
+  isOwner: boolean
+  status: 'invited' | 'active' | 'suspended'
+}
+
+/** The workspace the session's token is bound to (workspace switching doc §1). */
+export interface ActiveWorkspace extends WorkspaceMembership {
+  /** What goes after `/o/` in every URL of this workspace. */
+  segment: string
+}
+
 export interface AuthUser {
   id: string
   orgId: string
@@ -17,6 +40,10 @@ export interface AuthUser {
   mfaEnrollmentRequired?: boolean
   createdAt?: string
   updatedAt?: string
+  /** Every workspace the identity belongs to — only on `GET /auth/me`. */
+  memberships?: WorkspaceMembership[]
+  /** The workspace this token is bound to — only on `GET /auth/me`; null for an identity token. */
+  active?: { orgId: string; membershipId: string | null } | null
 }
 
 export interface MfaChallenge {
@@ -25,10 +52,37 @@ export interface MfaChallenge {
   methods: Array<'totp' | 'backup_code'>
 }
 
-export type LoginResult = AuthSession | MfaChallenge
+/**
+ * A sign-in that proved the identity but could not pick a workspace for it
+ * (membership doc §6): several to choose from, or none it can enter. The
+ * identity token opens exactly `POST /auth/workspaces/:orgId/session`,
+ * `GET /auth/me` and `GET /auth/workspaces/resolve`.
+ */
+export interface WorkspaceChoice {
+  chooseWorkspace?: true
+  needsWorkspace?: true
+  identityToken: string
+  memberships: WorkspaceMembership[]
+}
+
+export type LoginResult = AuthSession | MfaChallenge | WorkspaceChoice
 
 export const isMfaChallenge = (result: LoginResult): result is MfaChallenge =>
   (result as MfaChallenge).mfaRequired === true
+
+export const isWorkspaceChoice = (
+  result: LoginResult
+): result is WorkspaceChoice =>
+  typeof (result as WorkspaceChoice).identityToken === 'string' &&
+  Array.isArray((result as WorkspaceChoice).memberships)
+
+/** `GET /auth/workspaces/resolve?projectId=`: which workspace a legacy link belongs to. */
+export interface WorkspaceResolution {
+  project: { id: string; name: string }
+  workspace: WorkspaceMembership & { segment: string }
+  /** Whether that workspace is the one the token is bound to; null for an identity token. */
+  active: boolean | null
+}
 
 export interface MfaVerifyPayload {
   mfaToken: string
@@ -68,6 +122,10 @@ export interface AuthTokens {
 export interface AuthSession {
   user: AuthUser
   tokens: AuthTokens
+  /** The workspace the new session is bound to — on a workspace session issue. */
+  workspace?: WorkspaceMembership
+  /** Every workspace the identity belongs to — on a workspace session issue. */
+  memberships?: WorkspaceMembership[]
 }
 
 export interface RegisterPayload {

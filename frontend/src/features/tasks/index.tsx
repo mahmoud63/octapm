@@ -41,7 +41,7 @@ function OpenNewTask({ wanted }: { wanted: boolean }) {
 }
 
 export function Tasks() {
-  const search = useSearch({ from: '/_authenticated/tasks/' })
+  const search = useSearch({ from: '/_authenticated/o/$orgSlug/tasks/' })
   const { data, isError, isLoading } = useTasksQuery({
     sortBy: 'due',
     sortDir: 'asc',

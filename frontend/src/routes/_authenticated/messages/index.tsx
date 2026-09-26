@@ -1,9 +1,9 @@
 import { createFileRoute } from '@tanstack/react-router'
-import { MessagesPage } from '@/features/messages/messages-page'
+import { legacyWorkspaceRedirect } from '@/lib/workspace/legacy'
 
 type MessagesSearch = { conversationId?: string }
 
-/** Messages (OCTA-COMM-CONV-042): `/messages?conversationId=`. */
+/** Legacy path: `/messages?conversationId=` opens under the active workspace, `/o/{workspace}/messages` (ENT-4). */
 export const Route = createFileRoute('/_authenticated/messages/')({
   validateSearch: (search: Record<string, unknown>): MessagesSearch => ({
     conversationId:
@@ -11,8 +11,5 @@ export const Route = createFileRoute('/_authenticated/messages/')({
         ? search.conversationId
         : undefined,
   }),
-  component: function MessagesRoute() {
-    const { conversationId } = Route.useSearch()
-    return <MessagesPage conversationId={conversationId ?? null} />
-  },
+  beforeLoad: legacyWorkspaceRedirect,
 })

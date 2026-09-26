@@ -1,6 +1,7 @@
 import { createFileRoute } from '@tanstack/react-router'
-import { HelpCenter } from '@/features/help-center'
+import { legacyWorkspaceRedirect } from '@/lib/workspace/legacy'
 
+/** Legacy path: the same page under the active workspace, `/o/{workspace}/help-center/` (ENT-4). */
 export const Route = createFileRoute('/_authenticated/help-center/')({
-  component: HelpCenter,
+  beforeLoad: legacyWorkspaceRedirect,
 })

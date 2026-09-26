@@ -17,7 +17,9 @@ import { Route as AuthenticatedIndexRouteImport } from './routes/_authenticated/
 import { Route as RfqTokenRouteImport } from './routes/rfq.$token'
 import { Route as BidTokenRouteImport } from './routes/bid.$token'
 import { Route as AuthenticatedVendorsRouteImport } from './routes/_authenticated/vendors'
+import { Route as AuthenticatedSwitchRouteImport } from './routes/_authenticated/switch'
 import { Route as AuthenticatedInventoryRouteImport } from './routes/_authenticated/inventory'
+import { Route as AuthenticatedHomeRouteImport } from './routes/_authenticated/home'
 import { Route as AuthenticatedDirectoryRouteImport } from './routes/_authenticated/directory'
 import { Route as AuthenticatedCostCodesRouteImport } from './routes/_authenticated/cost-codes'
 import { Route as errors503RouteImport } from './routes/(errors)/503'
@@ -66,9 +68,52 @@ import { Route as AuthenticatedCompanyCustomFieldsRouteImport } from './routes/_
 import { Route as AuthenticatedCompanyCostCodesRouteImport } from './routes/_authenticated/company/cost-codes'
 import { Route as AuthenticatedBillingCheckoutRouteImport } from './routes/_authenticated/billing/checkout'
 import { Route as authSsoCompleteRouteImport } from './routes/(auth)/sso.complete'
+import { Route as AuthenticatedOOrgSlugRouteRouteImport } from './routes/_authenticated/o/$orgSlug/route'
 import { Route as AuthenticatedProjectsProjectIdIndexRouteImport } from './routes/_authenticated/projects/$projectId/index'
+import { Route as AuthenticatedOOrgSlugIndexRouteImport } from './routes/_authenticated/o/$orgSlug/index'
+import { Route as AuthenticatedOOrgSlugVendorsRouteImport } from './routes/_authenticated/o/$orgSlug/vendors'
+import { Route as AuthenticatedOOrgSlugInventoryRouteImport } from './routes/_authenticated/o/$orgSlug/inventory'
+import { Route as AuthenticatedOOrgSlugDirectoryRouteImport } from './routes/_authenticated/o/$orgSlug/directory'
+import { Route as AuthenticatedOOrgSlugCostCodesRouteImport } from './routes/_authenticated/o/$orgSlug/cost-codes'
+import { Route as AuthenticatedOOrgSlugSettingsRouteRouteImport } from './routes/_authenticated/o/$orgSlug/settings/route'
+import { Route as AuthenticatedOOrgSlugCompanyRouteRouteImport } from './routes/_authenticated/o/$orgSlug/company/route'
 import { Route as AuthenticatedProjectsProjectIdModuleIndexRouteImport } from './routes/_authenticated/projects/$projectId/$module/index'
+import { Route as AuthenticatedOOrgSlugUsersIndexRouteImport } from './routes/_authenticated/o/$orgSlug/users/index'
+import { Route as AuthenticatedOOrgSlugTasksIndexRouteImport } from './routes/_authenticated/o/$orgSlug/tasks/index'
+import { Route as AuthenticatedOOrgSlugSettingsIndexRouteImport } from './routes/_authenticated/o/$orgSlug/settings/index'
+import { Route as AuthenticatedOOrgSlugReportsIndexRouteImport } from './routes/_authenticated/o/$orgSlug/reports/index'
+import { Route as AuthenticatedOOrgSlugProjectsIndexRouteImport } from './routes/_authenticated/o/$orgSlug/projects/index'
+import { Route as AuthenticatedOOrgSlugPortfolioIndexRouteImport } from './routes/_authenticated/o/$orgSlug/portfolio/index'
+import { Route as AuthenticatedOOrgSlugMessagesIndexRouteImport } from './routes/_authenticated/o/$orgSlug/messages/index'
+import { Route as AuthenticatedOOrgSlugHelpCenterIndexRouteImport } from './routes/_authenticated/o/$orgSlug/help-center/index'
+import { Route as AuthenticatedOOrgSlugCompanyIndexRouteImport } from './routes/_authenticated/o/$orgSlug/company/index'
+import { Route as AuthenticatedOOrgSlugBillingIndexRouteImport } from './routes/_authenticated/o/$orgSlug/billing/index'
 import { Route as AuthenticatedProjectsProjectIdModuleChildRouteImport } from './routes/_authenticated/projects/$projectId/$module/$child'
+import { Route as AuthenticatedOOrgSlugSettingsSecurityRouteImport } from './routes/_authenticated/o/$orgSlug/settings/security'
+import { Route as AuthenticatedOOrgSlugSettingsPermissionsRouteImport } from './routes/_authenticated/o/$orgSlug/settings/permissions'
+import { Route as AuthenticatedOOrgSlugSettingsNotificationsRouteImport } from './routes/_authenticated/o/$orgSlug/settings/notifications'
+import { Route as AuthenticatedOOrgSlugSettingsDisplayRouteImport } from './routes/_authenticated/o/$orgSlug/settings/display'
+import { Route as AuthenticatedOOrgSlugSettingsBillingRouteImport } from './routes/_authenticated/o/$orgSlug/settings/billing'
+import { Route as AuthenticatedOOrgSlugSettingsAppearanceRouteImport } from './routes/_authenticated/o/$orgSlug/settings/appearance'
+import { Route as AuthenticatedOOrgSlugSettingsAccountRouteImport } from './routes/_authenticated/o/$orgSlug/settings/account'
+import { Route as AuthenticatedOOrgSlugProjectsProjectIdRouteImport } from './routes/_authenticated/o/$orgSlug/projects/$projectId'
+import { Route as AuthenticatedOOrgSlugErrorsErrorRouteImport } from './routes/_authenticated/o/$orgSlug/errors/$error'
+import { Route as AuthenticatedOOrgSlugCompanyWorkflowsRouteImport } from './routes/_authenticated/o/$orgSlug/company/workflows'
+import { Route as AuthenticatedOOrgSlugCompanyVendorsRouteImport } from './routes/_authenticated/o/$orgSlug/company/vendors'
+import { Route as AuthenticatedOOrgSlugCompanyTemplatesRouteImport } from './routes/_authenticated/o/$orgSlug/company/templates'
+import { Route as AuthenticatedOOrgSlugCompanySubmittalWorkflowsRouteImport } from './routes/_authenticated/o/$orgSlug/company/submittal-workflows'
+import { Route as AuthenticatedOOrgSlugCompanySecurityRouteImport } from './routes/_authenticated/o/$orgSlug/company/security'
+import { Route as AuthenticatedOOrgSlugCompanyPermissionsRouteImport } from './routes/_authenticated/o/$orgSlug/company/permissions'
+import { Route as AuthenticatedOOrgSlugCompanyIntegrationsRouteImport } from './routes/_authenticated/o/$orgSlug/company/integrations'
+import { Route as AuthenticatedOOrgSlugCompanyFormTemplatesRouteImport } from './routes/_authenticated/o/$orgSlug/company/form-templates'
+import { Route as AuthenticatedOOrgSlugCompanyEquipmentRouteImport } from './routes/_authenticated/o/$orgSlug/company/equipment'
+import { Route as AuthenticatedOOrgSlugCompanyDirectoryRouteImport } from './routes/_authenticated/o/$orgSlug/company/directory'
+import { Route as AuthenticatedOOrgSlugCompanyCustomFieldsRouteImport } from './routes/_authenticated/o/$orgSlug/company/custom-fields'
+import { Route as AuthenticatedOOrgSlugCompanyCostCodesRouteImport } from './routes/_authenticated/o/$orgSlug/company/cost-codes'
+import { Route as AuthenticatedOOrgSlugBillingCheckoutRouteImport } from './routes/_authenticated/o/$orgSlug/billing/checkout'
+import { Route as AuthenticatedOOrgSlugProjectsProjectIdIndexRouteImport } from './routes/_authenticated/o/$orgSlug/projects/$projectId/index'
+import { Route as AuthenticatedOOrgSlugProjectsProjectIdModuleIndexRouteImport } from './routes/_authenticated/o/$orgSlug/projects/$projectId/$module/index'
+import { Route as AuthenticatedOOrgSlugProjectsProjectIdModuleChildRouteImport } from './routes/_authenticated/o/$orgSlug/projects/$projectId/$module/$child'
 
 const TermsRoute = TermsRouteImport.update({
   id: '/terms',
@@ -109,9 +154,19 @@ const AuthenticatedVendorsRoute = AuthenticatedVendorsRouteImport.update({
   path: '/vendors',
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
+const AuthenticatedSwitchRoute = AuthenticatedSwitchRouteImport.update({
+  id: '/switch',
+  path: '/switch',
+  getParentRoute: () => AuthenticatedRouteRoute,
+} as any)
 const AuthenticatedInventoryRoute = AuthenticatedInventoryRouteImport.update({
   id: '/inventory',
   path: '/inventory',
+  getParentRoute: () => AuthenticatedRouteRoute,
+} as any)
+const AuthenticatedHomeRoute = AuthenticatedHomeRouteImport.update({
+  id: '/home',
+  path: '/home',
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
 const AuthenticatedDirectoryRoute = AuthenticatedDirectoryRouteImport.update({
@@ -386,11 +441,59 @@ const authSsoCompleteRoute = authSsoCompleteRouteImport.update({
   path: '/sso/complete',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AuthenticatedOOrgSlugRouteRoute =
+  AuthenticatedOOrgSlugRouteRouteImport.update({
+    id: '/o/$orgSlug',
+    path: '/o/$orgSlug',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
 const AuthenticatedProjectsProjectIdIndexRoute =
   AuthenticatedProjectsProjectIdIndexRouteImport.update({
     id: '/',
     path: '/',
     getParentRoute: () => AuthenticatedProjectsProjectIdRoute,
+  } as any)
+const AuthenticatedOOrgSlugIndexRoute =
+  AuthenticatedOOrgSlugIndexRouteImport.update({
+    id: '/',
+    path: '/',
+    getParentRoute: () => AuthenticatedOOrgSlugRouteRoute,
+  } as any)
+const AuthenticatedOOrgSlugVendorsRoute =
+  AuthenticatedOOrgSlugVendorsRouteImport.update({
+    id: '/vendors',
+    path: '/vendors',
+    getParentRoute: () => AuthenticatedOOrgSlugRouteRoute,
+  } as any)
+const AuthenticatedOOrgSlugInventoryRoute =
+  AuthenticatedOOrgSlugInventoryRouteImport.update({
+    id: '/inventory',
+    path: '/inventory',
+    getParentRoute: () => AuthenticatedOOrgSlugRouteRoute,
+  } as any)
+const AuthenticatedOOrgSlugDirectoryRoute =
+  AuthenticatedOOrgSlugDirectoryRouteImport.update({
+    id: '/directory',
+    path: '/directory',
+    getParentRoute: () => AuthenticatedOOrgSlugRouteRoute,
+  } as any)
+const AuthenticatedOOrgSlugCostCodesRoute =
+  AuthenticatedOOrgSlugCostCodesRouteImport.update({
+    id: '/cost-codes',
+    path: '/cost-codes',
+    getParentRoute: () => AuthenticatedOOrgSlugRouteRoute,
+  } as any)
+const AuthenticatedOOrgSlugSettingsRouteRoute =
+  AuthenticatedOOrgSlugSettingsRouteRouteImport.update({
+    id: '/settings',
+    path: '/settings',
+    getParentRoute: () => AuthenticatedOOrgSlugRouteRoute,
+  } as any)
+const AuthenticatedOOrgSlugCompanyRouteRoute =
+  AuthenticatedOOrgSlugCompanyRouteRouteImport.update({
+    id: '/company',
+    path: '/company',
+    getParentRoute: () => AuthenticatedOOrgSlugRouteRoute,
   } as any)
 const AuthenticatedProjectsProjectIdModuleIndexRoute =
   AuthenticatedProjectsProjectIdModuleIndexRouteImport.update({
@@ -398,11 +501,221 @@ const AuthenticatedProjectsProjectIdModuleIndexRoute =
     path: '/$module/',
     getParentRoute: () => AuthenticatedProjectsProjectIdRoute,
   } as any)
+const AuthenticatedOOrgSlugUsersIndexRoute =
+  AuthenticatedOOrgSlugUsersIndexRouteImport.update({
+    id: '/users/',
+    path: '/users/',
+    getParentRoute: () => AuthenticatedOOrgSlugRouteRoute,
+  } as any)
+const AuthenticatedOOrgSlugTasksIndexRoute =
+  AuthenticatedOOrgSlugTasksIndexRouteImport.update({
+    id: '/tasks/',
+    path: '/tasks/',
+    getParentRoute: () => AuthenticatedOOrgSlugRouteRoute,
+  } as any)
+const AuthenticatedOOrgSlugSettingsIndexRoute =
+  AuthenticatedOOrgSlugSettingsIndexRouteImport.update({
+    id: '/',
+    path: '/',
+    getParentRoute: () => AuthenticatedOOrgSlugSettingsRouteRoute,
+  } as any)
+const AuthenticatedOOrgSlugReportsIndexRoute =
+  AuthenticatedOOrgSlugReportsIndexRouteImport.update({
+    id: '/reports/',
+    path: '/reports/',
+    getParentRoute: () => AuthenticatedOOrgSlugRouteRoute,
+  } as any)
+const AuthenticatedOOrgSlugProjectsIndexRoute =
+  AuthenticatedOOrgSlugProjectsIndexRouteImport.update({
+    id: '/projects/',
+    path: '/projects/',
+    getParentRoute: () => AuthenticatedOOrgSlugRouteRoute,
+  } as any)
+const AuthenticatedOOrgSlugPortfolioIndexRoute =
+  AuthenticatedOOrgSlugPortfolioIndexRouteImport.update({
+    id: '/portfolio/',
+    path: '/portfolio/',
+    getParentRoute: () => AuthenticatedOOrgSlugRouteRoute,
+  } as any)
+const AuthenticatedOOrgSlugMessagesIndexRoute =
+  AuthenticatedOOrgSlugMessagesIndexRouteImport.update({
+    id: '/messages/',
+    path: '/messages/',
+    getParentRoute: () => AuthenticatedOOrgSlugRouteRoute,
+  } as any)
+const AuthenticatedOOrgSlugHelpCenterIndexRoute =
+  AuthenticatedOOrgSlugHelpCenterIndexRouteImport.update({
+    id: '/help-center/',
+    path: '/help-center/',
+    getParentRoute: () => AuthenticatedOOrgSlugRouteRoute,
+  } as any)
+const AuthenticatedOOrgSlugCompanyIndexRoute =
+  AuthenticatedOOrgSlugCompanyIndexRouteImport.update({
+    id: '/',
+    path: '/',
+    getParentRoute: () => AuthenticatedOOrgSlugCompanyRouteRoute,
+  } as any)
+const AuthenticatedOOrgSlugBillingIndexRoute =
+  AuthenticatedOOrgSlugBillingIndexRouteImport.update({
+    id: '/billing/',
+    path: '/billing/',
+    getParentRoute: () => AuthenticatedOOrgSlugRouteRoute,
+  } as any)
 const AuthenticatedProjectsProjectIdModuleChildRoute =
   AuthenticatedProjectsProjectIdModuleChildRouteImport.update({
     id: '/$module/$child',
     path: '/$module/$child',
     getParentRoute: () => AuthenticatedProjectsProjectIdRoute,
+  } as any)
+const AuthenticatedOOrgSlugSettingsSecurityRoute =
+  AuthenticatedOOrgSlugSettingsSecurityRouteImport.update({
+    id: '/security',
+    path: '/security',
+    getParentRoute: () => AuthenticatedOOrgSlugSettingsRouteRoute,
+  } as any)
+const AuthenticatedOOrgSlugSettingsPermissionsRoute =
+  AuthenticatedOOrgSlugSettingsPermissionsRouteImport.update({
+    id: '/permissions',
+    path: '/permissions',
+    getParentRoute: () => AuthenticatedOOrgSlugSettingsRouteRoute,
+  } as any)
+const AuthenticatedOOrgSlugSettingsNotificationsRoute =
+  AuthenticatedOOrgSlugSettingsNotificationsRouteImport.update({
+    id: '/notifications',
+    path: '/notifications',
+    getParentRoute: () => AuthenticatedOOrgSlugSettingsRouteRoute,
+  } as any)
+const AuthenticatedOOrgSlugSettingsDisplayRoute =
+  AuthenticatedOOrgSlugSettingsDisplayRouteImport.update({
+    id: '/display',
+    path: '/display',
+    getParentRoute: () => AuthenticatedOOrgSlugSettingsRouteRoute,
+  } as any)
+const AuthenticatedOOrgSlugSettingsBillingRoute =
+  AuthenticatedOOrgSlugSettingsBillingRouteImport.update({
+    id: '/billing',
+    path: '/billing',
+    getParentRoute: () => AuthenticatedOOrgSlugSettingsRouteRoute,
+  } as any)
+const AuthenticatedOOrgSlugSettingsAppearanceRoute =
+  AuthenticatedOOrgSlugSettingsAppearanceRouteImport.update({
+    id: '/appearance',
+    path: '/appearance',
+    getParentRoute: () => AuthenticatedOOrgSlugSettingsRouteRoute,
+  } as any)
+const AuthenticatedOOrgSlugSettingsAccountRoute =
+  AuthenticatedOOrgSlugSettingsAccountRouteImport.update({
+    id: '/account',
+    path: '/account',
+    getParentRoute: () => AuthenticatedOOrgSlugSettingsRouteRoute,
+  } as any)
+const AuthenticatedOOrgSlugProjectsProjectIdRoute =
+  AuthenticatedOOrgSlugProjectsProjectIdRouteImport.update({
+    id: '/projects/$projectId',
+    path: '/projects/$projectId',
+    getParentRoute: () => AuthenticatedOOrgSlugRouteRoute,
+  } as any)
+const AuthenticatedOOrgSlugErrorsErrorRoute =
+  AuthenticatedOOrgSlugErrorsErrorRouteImport.update({
+    id: '/errors/$error',
+    path: '/errors/$error',
+    getParentRoute: () => AuthenticatedOOrgSlugRouteRoute,
+  } as any)
+const AuthenticatedOOrgSlugCompanyWorkflowsRoute =
+  AuthenticatedOOrgSlugCompanyWorkflowsRouteImport.update({
+    id: '/workflows',
+    path: '/workflows',
+    getParentRoute: () => AuthenticatedOOrgSlugCompanyRouteRoute,
+  } as any)
+const AuthenticatedOOrgSlugCompanyVendorsRoute =
+  AuthenticatedOOrgSlugCompanyVendorsRouteImport.update({
+    id: '/vendors',
+    path: '/vendors',
+    getParentRoute: () => AuthenticatedOOrgSlugCompanyRouteRoute,
+  } as any)
+const AuthenticatedOOrgSlugCompanyTemplatesRoute =
+  AuthenticatedOOrgSlugCompanyTemplatesRouteImport.update({
+    id: '/templates',
+    path: '/templates',
+    getParentRoute: () => AuthenticatedOOrgSlugCompanyRouteRoute,
+  } as any)
+const AuthenticatedOOrgSlugCompanySubmittalWorkflowsRoute =
+  AuthenticatedOOrgSlugCompanySubmittalWorkflowsRouteImport.update({
+    id: '/submittal-workflows',
+    path: '/submittal-workflows',
+    getParentRoute: () => AuthenticatedOOrgSlugCompanyRouteRoute,
+  } as any)
+const AuthenticatedOOrgSlugCompanySecurityRoute =
+  AuthenticatedOOrgSlugCompanySecurityRouteImport.update({
+    id: '/security',
+    path: '/security',
+    getParentRoute: () => AuthenticatedOOrgSlugCompanyRouteRoute,
+  } as any)
+const AuthenticatedOOrgSlugCompanyPermissionsRoute =
+  AuthenticatedOOrgSlugCompanyPermissionsRouteImport.update({
+    id: '/permissions',
+    path: '/permissions',
+    getParentRoute: () => AuthenticatedOOrgSlugCompanyRouteRoute,
+  } as any)
+const AuthenticatedOOrgSlugCompanyIntegrationsRoute =
+  AuthenticatedOOrgSlugCompanyIntegrationsRouteImport.update({
+    id: '/integrations',
+    path: '/integrations',
+    getParentRoute: () => AuthenticatedOOrgSlugCompanyRouteRoute,
+  } as any)
+const AuthenticatedOOrgSlugCompanyFormTemplatesRoute =
+  AuthenticatedOOrgSlugCompanyFormTemplatesRouteImport.update({
+    id: '/form-templates',
+    path: '/form-templates',
+    getParentRoute: () => AuthenticatedOOrgSlugCompanyRouteRoute,
+  } as any)
+const AuthenticatedOOrgSlugCompanyEquipmentRoute =
+  AuthenticatedOOrgSlugCompanyEquipmentRouteImport.update({
+    id: '/equipment',
+    path: '/equipment',
+    getParentRoute: () => AuthenticatedOOrgSlugCompanyRouteRoute,
+  } as any)
+const AuthenticatedOOrgSlugCompanyDirectoryRoute =
+  AuthenticatedOOrgSlugCompanyDirectoryRouteImport.update({
+    id: '/directory',
+    path: '/directory',
+    getParentRoute: () => AuthenticatedOOrgSlugCompanyRouteRoute,
+  } as any)
+const AuthenticatedOOrgSlugCompanyCustomFieldsRoute =
+  AuthenticatedOOrgSlugCompanyCustomFieldsRouteImport.update({
+    id: '/custom-fields',
+    path: '/custom-fields',
+    getParentRoute: () => AuthenticatedOOrgSlugCompanyRouteRoute,
+  } as any)
+const AuthenticatedOOrgSlugCompanyCostCodesRoute =
+  AuthenticatedOOrgSlugCompanyCostCodesRouteImport.update({
+    id: '/cost-codes',
+    path: '/cost-codes',
+    getParentRoute: () => AuthenticatedOOrgSlugCompanyRouteRoute,
+  } as any)
+const AuthenticatedOOrgSlugBillingCheckoutRoute =
+  AuthenticatedOOrgSlugBillingCheckoutRouteImport.update({
+    id: '/billing/checkout',
+    path: '/billing/checkout',
+    getParentRoute: () => AuthenticatedOOrgSlugRouteRoute,
+  } as any)
+const AuthenticatedOOrgSlugProjectsProjectIdIndexRoute =
+  AuthenticatedOOrgSlugProjectsProjectIdIndexRouteImport.update({
+    id: '/',
+    path: '/',
+    getParentRoute: () => AuthenticatedOOrgSlugProjectsProjectIdRoute,
+  } as any)
+const AuthenticatedOOrgSlugProjectsProjectIdModuleIndexRoute =
+  AuthenticatedOOrgSlugProjectsProjectIdModuleIndexRouteImport.update({
+    id: '/$module/',
+    path: '/$module/',
+    getParentRoute: () => AuthenticatedOOrgSlugProjectsProjectIdRoute,
+  } as any)
+const AuthenticatedOOrgSlugProjectsProjectIdModuleChildRoute =
+  AuthenticatedOOrgSlugProjectsProjectIdModuleChildRouteImport.update({
+    id: '/$module/$child',
+    path: '/$module/$child',
+    getParentRoute: () => AuthenticatedOOrgSlugProjectsProjectIdRoute,
   } as any)
 
 export interface FileRoutesByFullPath {
@@ -425,10 +738,13 @@ export interface FileRoutesByFullPath {
   '/503': typeof errors503Route
   '/cost-codes': typeof AuthenticatedCostCodesRoute
   '/directory': typeof AuthenticatedDirectoryRoute
+  '/home': typeof AuthenticatedHomeRoute
   '/inventory': typeof AuthenticatedInventoryRoute
+  '/switch': typeof AuthenticatedSwitchRoute
   '/vendors': typeof AuthenticatedVendorsRoute
   '/bid/$token': typeof BidTokenRoute
   '/rfq/$token': typeof RfqTokenRoute
+  '/o/$orgSlug': typeof AuthenticatedOOrgSlugRouteRouteWithChildren
   '/sso/complete': typeof authSsoCompleteRoute
   '/billing/checkout': typeof AuthenticatedBillingCheckoutRoute
   '/company/cost-codes': typeof AuthenticatedCompanyCostCodesRoute
@@ -462,9 +778,51 @@ export interface FileRoutesByFullPath {
   '/settings/': typeof AuthenticatedSettingsIndexRoute
   '/tasks/': typeof AuthenticatedTasksIndexRoute
   '/users/': typeof AuthenticatedUsersIndexRoute
+  '/o/$orgSlug/company': typeof AuthenticatedOOrgSlugCompanyRouteRouteWithChildren
+  '/o/$orgSlug/settings': typeof AuthenticatedOOrgSlugSettingsRouteRouteWithChildren
+  '/o/$orgSlug/cost-codes': typeof AuthenticatedOOrgSlugCostCodesRoute
+  '/o/$orgSlug/directory': typeof AuthenticatedOOrgSlugDirectoryRoute
+  '/o/$orgSlug/inventory': typeof AuthenticatedOOrgSlugInventoryRoute
+  '/o/$orgSlug/vendors': typeof AuthenticatedOOrgSlugVendorsRoute
+  '/o/$orgSlug/': typeof AuthenticatedOOrgSlugIndexRoute
   '/projects/$projectId/': typeof AuthenticatedProjectsProjectIdIndexRoute
+  '/o/$orgSlug/billing/checkout': typeof AuthenticatedOOrgSlugBillingCheckoutRoute
+  '/o/$orgSlug/company/cost-codes': typeof AuthenticatedOOrgSlugCompanyCostCodesRoute
+  '/o/$orgSlug/company/custom-fields': typeof AuthenticatedOOrgSlugCompanyCustomFieldsRoute
+  '/o/$orgSlug/company/directory': typeof AuthenticatedOOrgSlugCompanyDirectoryRoute
+  '/o/$orgSlug/company/equipment': typeof AuthenticatedOOrgSlugCompanyEquipmentRoute
+  '/o/$orgSlug/company/form-templates': typeof AuthenticatedOOrgSlugCompanyFormTemplatesRoute
+  '/o/$orgSlug/company/integrations': typeof AuthenticatedOOrgSlugCompanyIntegrationsRoute
+  '/o/$orgSlug/company/permissions': typeof AuthenticatedOOrgSlugCompanyPermissionsRoute
+  '/o/$orgSlug/company/security': typeof AuthenticatedOOrgSlugCompanySecurityRoute
+  '/o/$orgSlug/company/submittal-workflows': typeof AuthenticatedOOrgSlugCompanySubmittalWorkflowsRoute
+  '/o/$orgSlug/company/templates': typeof AuthenticatedOOrgSlugCompanyTemplatesRoute
+  '/o/$orgSlug/company/vendors': typeof AuthenticatedOOrgSlugCompanyVendorsRoute
+  '/o/$orgSlug/company/workflows': typeof AuthenticatedOOrgSlugCompanyWorkflowsRoute
+  '/o/$orgSlug/errors/$error': typeof AuthenticatedOOrgSlugErrorsErrorRoute
+  '/o/$orgSlug/projects/$projectId': typeof AuthenticatedOOrgSlugProjectsProjectIdRouteWithChildren
+  '/o/$orgSlug/settings/account': typeof AuthenticatedOOrgSlugSettingsAccountRoute
+  '/o/$orgSlug/settings/appearance': typeof AuthenticatedOOrgSlugSettingsAppearanceRoute
+  '/o/$orgSlug/settings/billing': typeof AuthenticatedOOrgSlugSettingsBillingRoute
+  '/o/$orgSlug/settings/display': typeof AuthenticatedOOrgSlugSettingsDisplayRoute
+  '/o/$orgSlug/settings/notifications': typeof AuthenticatedOOrgSlugSettingsNotificationsRoute
+  '/o/$orgSlug/settings/permissions': typeof AuthenticatedOOrgSlugSettingsPermissionsRoute
+  '/o/$orgSlug/settings/security': typeof AuthenticatedOOrgSlugSettingsSecurityRoute
   '/projects/$projectId/$module/$child': typeof AuthenticatedProjectsProjectIdModuleChildRoute
+  '/o/$orgSlug/billing/': typeof AuthenticatedOOrgSlugBillingIndexRoute
+  '/o/$orgSlug/company/': typeof AuthenticatedOOrgSlugCompanyIndexRoute
+  '/o/$orgSlug/help-center/': typeof AuthenticatedOOrgSlugHelpCenterIndexRoute
+  '/o/$orgSlug/messages/': typeof AuthenticatedOOrgSlugMessagesIndexRoute
+  '/o/$orgSlug/portfolio/': typeof AuthenticatedOOrgSlugPortfolioIndexRoute
+  '/o/$orgSlug/projects/': typeof AuthenticatedOOrgSlugProjectsIndexRoute
+  '/o/$orgSlug/reports/': typeof AuthenticatedOOrgSlugReportsIndexRoute
+  '/o/$orgSlug/settings/': typeof AuthenticatedOOrgSlugSettingsIndexRoute
+  '/o/$orgSlug/tasks/': typeof AuthenticatedOOrgSlugTasksIndexRoute
+  '/o/$orgSlug/users/': typeof AuthenticatedOOrgSlugUsersIndexRoute
   '/projects/$projectId/$module/': typeof AuthenticatedProjectsProjectIdModuleIndexRoute
+  '/o/$orgSlug/projects/$projectId/': typeof AuthenticatedOOrgSlugProjectsProjectIdIndexRoute
+  '/o/$orgSlug/projects/$projectId/$module/$child': typeof AuthenticatedOOrgSlugProjectsProjectIdModuleChildRoute
+  '/o/$orgSlug/projects/$projectId/$module/': typeof AuthenticatedOOrgSlugProjectsProjectIdModuleIndexRoute
 }
 export interface FileRoutesByTo {
   '/landing': typeof LandingRoute
@@ -483,7 +841,9 @@ export interface FileRoutesByTo {
   '/503': typeof errors503Route
   '/cost-codes': typeof AuthenticatedCostCodesRoute
   '/directory': typeof AuthenticatedDirectoryRoute
+  '/home': typeof AuthenticatedHomeRoute
   '/inventory': typeof AuthenticatedInventoryRoute
+  '/switch': typeof AuthenticatedSwitchRoute
   '/vendors': typeof AuthenticatedVendorsRoute
   '/bid/$token': typeof BidTokenRoute
   '/rfq/$token': typeof RfqTokenRoute
@@ -520,9 +880,48 @@ export interface FileRoutesByTo {
   '/settings': typeof AuthenticatedSettingsIndexRoute
   '/tasks': typeof AuthenticatedTasksIndexRoute
   '/users': typeof AuthenticatedUsersIndexRoute
+  '/o/$orgSlug/cost-codes': typeof AuthenticatedOOrgSlugCostCodesRoute
+  '/o/$orgSlug/directory': typeof AuthenticatedOOrgSlugDirectoryRoute
+  '/o/$orgSlug/inventory': typeof AuthenticatedOOrgSlugInventoryRoute
+  '/o/$orgSlug/vendors': typeof AuthenticatedOOrgSlugVendorsRoute
+  '/o/$orgSlug': typeof AuthenticatedOOrgSlugIndexRoute
   '/projects/$projectId': typeof AuthenticatedProjectsProjectIdIndexRoute
+  '/o/$orgSlug/billing/checkout': typeof AuthenticatedOOrgSlugBillingCheckoutRoute
+  '/o/$orgSlug/company/cost-codes': typeof AuthenticatedOOrgSlugCompanyCostCodesRoute
+  '/o/$orgSlug/company/custom-fields': typeof AuthenticatedOOrgSlugCompanyCustomFieldsRoute
+  '/o/$orgSlug/company/directory': typeof AuthenticatedOOrgSlugCompanyDirectoryRoute
+  '/o/$orgSlug/company/equipment': typeof AuthenticatedOOrgSlugCompanyEquipmentRoute
+  '/o/$orgSlug/company/form-templates': typeof AuthenticatedOOrgSlugCompanyFormTemplatesRoute
+  '/o/$orgSlug/company/integrations': typeof AuthenticatedOOrgSlugCompanyIntegrationsRoute
+  '/o/$orgSlug/company/permissions': typeof AuthenticatedOOrgSlugCompanyPermissionsRoute
+  '/o/$orgSlug/company/security': typeof AuthenticatedOOrgSlugCompanySecurityRoute
+  '/o/$orgSlug/company/submittal-workflows': typeof AuthenticatedOOrgSlugCompanySubmittalWorkflowsRoute
+  '/o/$orgSlug/company/templates': typeof AuthenticatedOOrgSlugCompanyTemplatesRoute
+  '/o/$orgSlug/company/vendors': typeof AuthenticatedOOrgSlugCompanyVendorsRoute
+  '/o/$orgSlug/company/workflows': typeof AuthenticatedOOrgSlugCompanyWorkflowsRoute
+  '/o/$orgSlug/errors/$error': typeof AuthenticatedOOrgSlugErrorsErrorRoute
+  '/o/$orgSlug/settings/account': typeof AuthenticatedOOrgSlugSettingsAccountRoute
+  '/o/$orgSlug/settings/appearance': typeof AuthenticatedOOrgSlugSettingsAppearanceRoute
+  '/o/$orgSlug/settings/billing': typeof AuthenticatedOOrgSlugSettingsBillingRoute
+  '/o/$orgSlug/settings/display': typeof AuthenticatedOOrgSlugSettingsDisplayRoute
+  '/o/$orgSlug/settings/notifications': typeof AuthenticatedOOrgSlugSettingsNotificationsRoute
+  '/o/$orgSlug/settings/permissions': typeof AuthenticatedOOrgSlugSettingsPermissionsRoute
+  '/o/$orgSlug/settings/security': typeof AuthenticatedOOrgSlugSettingsSecurityRoute
   '/projects/$projectId/$module/$child': typeof AuthenticatedProjectsProjectIdModuleChildRoute
+  '/o/$orgSlug/billing': typeof AuthenticatedOOrgSlugBillingIndexRoute
+  '/o/$orgSlug/company': typeof AuthenticatedOOrgSlugCompanyIndexRoute
+  '/o/$orgSlug/help-center': typeof AuthenticatedOOrgSlugHelpCenterIndexRoute
+  '/o/$orgSlug/messages': typeof AuthenticatedOOrgSlugMessagesIndexRoute
+  '/o/$orgSlug/portfolio': typeof AuthenticatedOOrgSlugPortfolioIndexRoute
+  '/o/$orgSlug/projects': typeof AuthenticatedOOrgSlugProjectsIndexRoute
+  '/o/$orgSlug/reports': typeof AuthenticatedOOrgSlugReportsIndexRoute
+  '/o/$orgSlug/settings': typeof AuthenticatedOOrgSlugSettingsIndexRoute
+  '/o/$orgSlug/tasks': typeof AuthenticatedOOrgSlugTasksIndexRoute
+  '/o/$orgSlug/users': typeof AuthenticatedOOrgSlugUsersIndexRoute
   '/projects/$projectId/$module': typeof AuthenticatedProjectsProjectIdModuleIndexRoute
+  '/o/$orgSlug/projects/$projectId': typeof AuthenticatedOOrgSlugProjectsProjectIdIndexRoute
+  '/o/$orgSlug/projects/$projectId/$module/$child': typeof AuthenticatedOOrgSlugProjectsProjectIdModuleChildRoute
+  '/o/$orgSlug/projects/$projectId/$module': typeof AuthenticatedOOrgSlugProjectsProjectIdModuleIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -545,11 +944,14 @@ export interface FileRoutesById {
   '/(errors)/503': typeof errors503Route
   '/_authenticated/cost-codes': typeof AuthenticatedCostCodesRoute
   '/_authenticated/directory': typeof AuthenticatedDirectoryRoute
+  '/_authenticated/home': typeof AuthenticatedHomeRoute
   '/_authenticated/inventory': typeof AuthenticatedInventoryRoute
+  '/_authenticated/switch': typeof AuthenticatedSwitchRoute
   '/_authenticated/vendors': typeof AuthenticatedVendorsRoute
   '/bid/$token': typeof BidTokenRoute
   '/rfq/$token': typeof RfqTokenRoute
   '/_authenticated/': typeof AuthenticatedIndexRoute
+  '/_authenticated/o/$orgSlug': typeof AuthenticatedOOrgSlugRouteRouteWithChildren
   '/(auth)/sso/complete': typeof authSsoCompleteRoute
   '/_authenticated/billing/checkout': typeof AuthenticatedBillingCheckoutRoute
   '/_authenticated/company/cost-codes': typeof AuthenticatedCompanyCostCodesRoute
@@ -583,9 +985,51 @@ export interface FileRoutesById {
   '/_authenticated/settings/': typeof AuthenticatedSettingsIndexRoute
   '/_authenticated/tasks/': typeof AuthenticatedTasksIndexRoute
   '/_authenticated/users/': typeof AuthenticatedUsersIndexRoute
+  '/_authenticated/o/$orgSlug/company': typeof AuthenticatedOOrgSlugCompanyRouteRouteWithChildren
+  '/_authenticated/o/$orgSlug/settings': typeof AuthenticatedOOrgSlugSettingsRouteRouteWithChildren
+  '/_authenticated/o/$orgSlug/cost-codes': typeof AuthenticatedOOrgSlugCostCodesRoute
+  '/_authenticated/o/$orgSlug/directory': typeof AuthenticatedOOrgSlugDirectoryRoute
+  '/_authenticated/o/$orgSlug/inventory': typeof AuthenticatedOOrgSlugInventoryRoute
+  '/_authenticated/o/$orgSlug/vendors': typeof AuthenticatedOOrgSlugVendorsRoute
+  '/_authenticated/o/$orgSlug/': typeof AuthenticatedOOrgSlugIndexRoute
   '/_authenticated/projects/$projectId/': typeof AuthenticatedProjectsProjectIdIndexRoute
+  '/_authenticated/o/$orgSlug/billing/checkout': typeof AuthenticatedOOrgSlugBillingCheckoutRoute
+  '/_authenticated/o/$orgSlug/company/cost-codes': typeof AuthenticatedOOrgSlugCompanyCostCodesRoute
+  '/_authenticated/o/$orgSlug/company/custom-fields': typeof AuthenticatedOOrgSlugCompanyCustomFieldsRoute
+  '/_authenticated/o/$orgSlug/company/directory': typeof AuthenticatedOOrgSlugCompanyDirectoryRoute
+  '/_authenticated/o/$orgSlug/company/equipment': typeof AuthenticatedOOrgSlugCompanyEquipmentRoute
+  '/_authenticated/o/$orgSlug/company/form-templates': typeof AuthenticatedOOrgSlugCompanyFormTemplatesRoute
+  '/_authenticated/o/$orgSlug/company/integrations': typeof AuthenticatedOOrgSlugCompanyIntegrationsRoute
+  '/_authenticated/o/$orgSlug/company/permissions': typeof AuthenticatedOOrgSlugCompanyPermissionsRoute
+  '/_authenticated/o/$orgSlug/company/security': typeof AuthenticatedOOrgSlugCompanySecurityRoute
+  '/_authenticated/o/$orgSlug/company/submittal-workflows': typeof AuthenticatedOOrgSlugCompanySubmittalWorkflowsRoute
+  '/_authenticated/o/$orgSlug/company/templates': typeof AuthenticatedOOrgSlugCompanyTemplatesRoute
+  '/_authenticated/o/$orgSlug/company/vendors': typeof AuthenticatedOOrgSlugCompanyVendorsRoute
+  '/_authenticated/o/$orgSlug/company/workflows': typeof AuthenticatedOOrgSlugCompanyWorkflowsRoute
+  '/_authenticated/o/$orgSlug/errors/$error': typeof AuthenticatedOOrgSlugErrorsErrorRoute
+  '/_authenticated/o/$orgSlug/projects/$projectId': typeof AuthenticatedOOrgSlugProjectsProjectIdRouteWithChildren
+  '/_authenticated/o/$orgSlug/settings/account': typeof AuthenticatedOOrgSlugSettingsAccountRoute
+  '/_authenticated/o/$orgSlug/settings/appearance': typeof AuthenticatedOOrgSlugSettingsAppearanceRoute
+  '/_authenticated/o/$orgSlug/settings/billing': typeof AuthenticatedOOrgSlugSettingsBillingRoute
+  '/_authenticated/o/$orgSlug/settings/display': typeof AuthenticatedOOrgSlugSettingsDisplayRoute
+  '/_authenticated/o/$orgSlug/settings/notifications': typeof AuthenticatedOOrgSlugSettingsNotificationsRoute
+  '/_authenticated/o/$orgSlug/settings/permissions': typeof AuthenticatedOOrgSlugSettingsPermissionsRoute
+  '/_authenticated/o/$orgSlug/settings/security': typeof AuthenticatedOOrgSlugSettingsSecurityRoute
   '/_authenticated/projects/$projectId/$module/$child': typeof AuthenticatedProjectsProjectIdModuleChildRoute
+  '/_authenticated/o/$orgSlug/billing/': typeof AuthenticatedOOrgSlugBillingIndexRoute
+  '/_authenticated/o/$orgSlug/company/': typeof AuthenticatedOOrgSlugCompanyIndexRoute
+  '/_authenticated/o/$orgSlug/help-center/': typeof AuthenticatedOOrgSlugHelpCenterIndexRoute
+  '/_authenticated/o/$orgSlug/messages/': typeof AuthenticatedOOrgSlugMessagesIndexRoute
+  '/_authenticated/o/$orgSlug/portfolio/': typeof AuthenticatedOOrgSlugPortfolioIndexRoute
+  '/_authenticated/o/$orgSlug/projects/': typeof AuthenticatedOOrgSlugProjectsIndexRoute
+  '/_authenticated/o/$orgSlug/reports/': typeof AuthenticatedOOrgSlugReportsIndexRoute
+  '/_authenticated/o/$orgSlug/settings/': typeof AuthenticatedOOrgSlugSettingsIndexRoute
+  '/_authenticated/o/$orgSlug/tasks/': typeof AuthenticatedOOrgSlugTasksIndexRoute
+  '/_authenticated/o/$orgSlug/users/': typeof AuthenticatedOOrgSlugUsersIndexRoute
   '/_authenticated/projects/$projectId/$module/': typeof AuthenticatedProjectsProjectIdModuleIndexRoute
+  '/_authenticated/o/$orgSlug/projects/$projectId/': typeof AuthenticatedOOrgSlugProjectsProjectIdIndexRoute
+  '/_authenticated/o/$orgSlug/projects/$projectId/$module/$child': typeof AuthenticatedOOrgSlugProjectsProjectIdModuleChildRoute
+  '/_authenticated/o/$orgSlug/projects/$projectId/$module/': typeof AuthenticatedOOrgSlugProjectsProjectIdModuleIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -609,10 +1053,13 @@ export interface FileRouteTypes {
     | '/503'
     | '/cost-codes'
     | '/directory'
+    | '/home'
     | '/inventory'
+    | '/switch'
     | '/vendors'
     | '/bid/$token'
     | '/rfq/$token'
+    | '/o/$orgSlug'
     | '/sso/complete'
     | '/billing/checkout'
     | '/company/cost-codes'
@@ -646,9 +1093,51 @@ export interface FileRouteTypes {
     | '/settings/'
     | '/tasks/'
     | '/users/'
+    | '/o/$orgSlug/company'
+    | '/o/$orgSlug/settings'
+    | '/o/$orgSlug/cost-codes'
+    | '/o/$orgSlug/directory'
+    | '/o/$orgSlug/inventory'
+    | '/o/$orgSlug/vendors'
+    | '/o/$orgSlug/'
     | '/projects/$projectId/'
+    | '/o/$orgSlug/billing/checkout'
+    | '/o/$orgSlug/company/cost-codes'
+    | '/o/$orgSlug/company/custom-fields'
+    | '/o/$orgSlug/company/directory'
+    | '/o/$orgSlug/company/equipment'
+    | '/o/$orgSlug/company/form-templates'
+    | '/o/$orgSlug/company/integrations'
+    | '/o/$orgSlug/company/permissions'
+    | '/o/$orgSlug/company/security'
+    | '/o/$orgSlug/company/submittal-workflows'
+    | '/o/$orgSlug/company/templates'
+    | '/o/$orgSlug/company/vendors'
+    | '/o/$orgSlug/company/workflows'
+    | '/o/$orgSlug/errors/$error'
+    | '/o/$orgSlug/projects/$projectId'
+    | '/o/$orgSlug/settings/account'
+    | '/o/$orgSlug/settings/appearance'
+    | '/o/$orgSlug/settings/billing'
+    | '/o/$orgSlug/settings/display'
+    | '/o/$orgSlug/settings/notifications'
+    | '/o/$orgSlug/settings/permissions'
+    | '/o/$orgSlug/settings/security'
     | '/projects/$projectId/$module/$child'
+    | '/o/$orgSlug/billing/'
+    | '/o/$orgSlug/company/'
+    | '/o/$orgSlug/help-center/'
+    | '/o/$orgSlug/messages/'
+    | '/o/$orgSlug/portfolio/'
+    | '/o/$orgSlug/projects/'
+    | '/o/$orgSlug/reports/'
+    | '/o/$orgSlug/settings/'
+    | '/o/$orgSlug/tasks/'
+    | '/o/$orgSlug/users/'
     | '/projects/$projectId/$module/'
+    | '/o/$orgSlug/projects/$projectId/'
+    | '/o/$orgSlug/projects/$projectId/$module/$child'
+    | '/o/$orgSlug/projects/$projectId/$module/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/landing'
@@ -667,7 +1156,9 @@ export interface FileRouteTypes {
     | '/503'
     | '/cost-codes'
     | '/directory'
+    | '/home'
     | '/inventory'
+    | '/switch'
     | '/vendors'
     | '/bid/$token'
     | '/rfq/$token'
@@ -704,9 +1195,48 @@ export interface FileRouteTypes {
     | '/settings'
     | '/tasks'
     | '/users'
+    | '/o/$orgSlug/cost-codes'
+    | '/o/$orgSlug/directory'
+    | '/o/$orgSlug/inventory'
+    | '/o/$orgSlug/vendors'
+    | '/o/$orgSlug'
     | '/projects/$projectId'
+    | '/o/$orgSlug/billing/checkout'
+    | '/o/$orgSlug/company/cost-codes'
+    | '/o/$orgSlug/company/custom-fields'
+    | '/o/$orgSlug/company/directory'
+    | '/o/$orgSlug/company/equipment'
+    | '/o/$orgSlug/company/form-templates'
+    | '/o/$orgSlug/company/integrations'
+    | '/o/$orgSlug/company/permissions'
+    | '/o/$orgSlug/company/security'
+    | '/o/$orgSlug/company/submittal-workflows'
+    | '/o/$orgSlug/company/templates'
+    | '/o/$orgSlug/company/vendors'
+    | '/o/$orgSlug/company/workflows'
+    | '/o/$orgSlug/errors/$error'
+    | '/o/$orgSlug/settings/account'
+    | '/o/$orgSlug/settings/appearance'
+    | '/o/$orgSlug/settings/billing'
+    | '/o/$orgSlug/settings/display'
+    | '/o/$orgSlug/settings/notifications'
+    | '/o/$orgSlug/settings/permissions'
+    | '/o/$orgSlug/settings/security'
     | '/projects/$projectId/$module/$child'
+    | '/o/$orgSlug/billing'
+    | '/o/$orgSlug/company'
+    | '/o/$orgSlug/help-center'
+    | '/o/$orgSlug/messages'
+    | '/o/$orgSlug/portfolio'
+    | '/o/$orgSlug/projects'
+    | '/o/$orgSlug/reports'
+    | '/o/$orgSlug/settings'
+    | '/o/$orgSlug/tasks'
+    | '/o/$orgSlug/users'
     | '/projects/$projectId/$module'
+    | '/o/$orgSlug/projects/$projectId'
+    | '/o/$orgSlug/projects/$projectId/$module/$child'
+    | '/o/$orgSlug/projects/$projectId/$module'
   id:
     | '__root__'
     | '/_authenticated'
@@ -728,11 +1258,14 @@ export interface FileRouteTypes {
     | '/(errors)/503'
     | '/_authenticated/cost-codes'
     | '/_authenticated/directory'
+    | '/_authenticated/home'
     | '/_authenticated/inventory'
+    | '/_authenticated/switch'
     | '/_authenticated/vendors'
     | '/bid/$token'
     | '/rfq/$token'
     | '/_authenticated/'
+    | '/_authenticated/o/$orgSlug'
     | '/(auth)/sso/complete'
     | '/_authenticated/billing/checkout'
     | '/_authenticated/company/cost-codes'
@@ -766,9 +1299,51 @@ export interface FileRouteTypes {
     | '/_authenticated/settings/'
     | '/_authenticated/tasks/'
     | '/_authenticated/users/'
+    | '/_authenticated/o/$orgSlug/company'
+    | '/_authenticated/o/$orgSlug/settings'
+    | '/_authenticated/o/$orgSlug/cost-codes'
+    | '/_authenticated/o/$orgSlug/directory'
+    | '/_authenticated/o/$orgSlug/inventory'
+    | '/_authenticated/o/$orgSlug/vendors'
+    | '/_authenticated/o/$orgSlug/'
     | '/_authenticated/projects/$projectId/'
+    | '/_authenticated/o/$orgSlug/billing/checkout'
+    | '/_authenticated/o/$orgSlug/company/cost-codes'
+    | '/_authenticated/o/$orgSlug/company/custom-fields'
+    | '/_authenticated/o/$orgSlug/company/directory'
+    | '/_authenticated/o/$orgSlug/company/equipment'
+    | '/_authenticated/o/$orgSlug/company/form-templates'
+    | '/_authenticated/o/$orgSlug/company/integrations'
+    | '/_authenticated/o/$orgSlug/company/permissions'
+    | '/_authenticated/o/$orgSlug/company/security'
+    | '/_authenticated/o/$orgSlug/company/submittal-workflows'
+    | '/_authenticated/o/$orgSlug/company/templates'
+    | '/_authenticated/o/$orgSlug/company/vendors'
+    | '/_authenticated/o/$orgSlug/company/workflows'
+    | '/_authenticated/o/$orgSlug/errors/$error'
+    | '/_authenticated/o/$orgSlug/projects/$projectId'
+    | '/_authenticated/o/$orgSlug/settings/account'
+    | '/_authenticated/o/$orgSlug/settings/appearance'
+    | '/_authenticated/o/$orgSlug/settings/billing'
+    | '/_authenticated/o/$orgSlug/settings/display'
+    | '/_authenticated/o/$orgSlug/settings/notifications'
+    | '/_authenticated/o/$orgSlug/settings/permissions'
+    | '/_authenticated/o/$orgSlug/settings/security'
     | '/_authenticated/projects/$projectId/$module/$child'
+    | '/_authenticated/o/$orgSlug/billing/'
+    | '/_authenticated/o/$orgSlug/company/'
+    | '/_authenticated/o/$orgSlug/help-center/'
+    | '/_authenticated/o/$orgSlug/messages/'
+    | '/_authenticated/o/$orgSlug/portfolio/'
+    | '/_authenticated/o/$orgSlug/projects/'
+    | '/_authenticated/o/$orgSlug/reports/'
+    | '/_authenticated/o/$orgSlug/settings/'
+    | '/_authenticated/o/$orgSlug/tasks/'
+    | '/_authenticated/o/$orgSlug/users/'
     | '/_authenticated/projects/$projectId/$module/'
+    | '/_authenticated/o/$orgSlug/projects/$projectId/'
+    | '/_authenticated/o/$orgSlug/projects/$projectId/$module/$child'
+    | '/_authenticated/o/$orgSlug/projects/$projectId/$module/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -850,11 +1425,25 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedVendorsRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/_authenticated/switch': {
+      id: '/_authenticated/switch'
+      path: '/switch'
+      fullPath: '/switch'
+      preLoaderRoute: typeof AuthenticatedSwitchRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
     '/_authenticated/inventory': {
       id: '/_authenticated/inventory'
       path: '/inventory'
       fullPath: '/inventory'
       preLoaderRoute: typeof AuthenticatedInventoryRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/home': {
+      id: '/_authenticated/home'
+      path: '/home'
+      fullPath: '/home'
+      preLoaderRoute: typeof AuthenticatedHomeRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
     '/_authenticated/directory': {
@@ -1193,12 +1782,68 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof authSsoCompleteRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/_authenticated/o/$orgSlug': {
+      id: '/_authenticated/o/$orgSlug'
+      path: '/o/$orgSlug'
+      fullPath: '/o/$orgSlug'
+      preLoaderRoute: typeof AuthenticatedOOrgSlugRouteRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
     '/_authenticated/projects/$projectId/': {
       id: '/_authenticated/projects/$projectId/'
       path: '/'
       fullPath: '/projects/$projectId/'
       preLoaderRoute: typeof AuthenticatedProjectsProjectIdIndexRouteImport
       parentRoute: typeof AuthenticatedProjectsProjectIdRoute
+    }
+    '/_authenticated/o/$orgSlug/': {
+      id: '/_authenticated/o/$orgSlug/'
+      path: '/'
+      fullPath: '/o/$orgSlug/'
+      preLoaderRoute: typeof AuthenticatedOOrgSlugIndexRouteImport
+      parentRoute: typeof AuthenticatedOOrgSlugRouteRoute
+    }
+    '/_authenticated/o/$orgSlug/vendors': {
+      id: '/_authenticated/o/$orgSlug/vendors'
+      path: '/vendors'
+      fullPath: '/o/$orgSlug/vendors'
+      preLoaderRoute: typeof AuthenticatedOOrgSlugVendorsRouteImport
+      parentRoute: typeof AuthenticatedOOrgSlugRouteRoute
+    }
+    '/_authenticated/o/$orgSlug/inventory': {
+      id: '/_authenticated/o/$orgSlug/inventory'
+      path: '/inventory'
+      fullPath: '/o/$orgSlug/inventory'
+      preLoaderRoute: typeof AuthenticatedOOrgSlugInventoryRouteImport
+      parentRoute: typeof AuthenticatedOOrgSlugRouteRoute
+    }
+    '/_authenticated/o/$orgSlug/directory': {
+      id: '/_authenticated/o/$orgSlug/directory'
+      path: '/directory'
+      fullPath: '/o/$orgSlug/directory'
+      preLoaderRoute: typeof AuthenticatedOOrgSlugDirectoryRouteImport
+      parentRoute: typeof AuthenticatedOOrgSlugRouteRoute
+    }
+    '/_authenticated/o/$orgSlug/cost-codes': {
+      id: '/_authenticated/o/$orgSlug/cost-codes'
+      path: '/cost-codes'
+      fullPath: '/o/$orgSlug/cost-codes'
+      preLoaderRoute: typeof AuthenticatedOOrgSlugCostCodesRouteImport
+      parentRoute: typeof AuthenticatedOOrgSlugRouteRoute
+    }
+    '/_authenticated/o/$orgSlug/settings': {
+      id: '/_authenticated/o/$orgSlug/settings'
+      path: '/settings'
+      fullPath: '/o/$orgSlug/settings'
+      preLoaderRoute: typeof AuthenticatedOOrgSlugSettingsRouteRouteImport
+      parentRoute: typeof AuthenticatedOOrgSlugRouteRoute
+    }
+    '/_authenticated/o/$orgSlug/company': {
+      id: '/_authenticated/o/$orgSlug/company'
+      path: '/company'
+      fullPath: '/o/$orgSlug/company'
+      preLoaderRoute: typeof AuthenticatedOOrgSlugCompanyRouteRouteImport
+      parentRoute: typeof AuthenticatedOOrgSlugRouteRoute
     }
     '/_authenticated/projects/$projectId/$module/': {
       id: '/_authenticated/projects/$projectId/$module/'
@@ -1207,12 +1852,257 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedProjectsProjectIdModuleIndexRouteImport
       parentRoute: typeof AuthenticatedProjectsProjectIdRoute
     }
+    '/_authenticated/o/$orgSlug/users/': {
+      id: '/_authenticated/o/$orgSlug/users/'
+      path: '/users'
+      fullPath: '/o/$orgSlug/users/'
+      preLoaderRoute: typeof AuthenticatedOOrgSlugUsersIndexRouteImport
+      parentRoute: typeof AuthenticatedOOrgSlugRouteRoute
+    }
+    '/_authenticated/o/$orgSlug/tasks/': {
+      id: '/_authenticated/o/$orgSlug/tasks/'
+      path: '/tasks'
+      fullPath: '/o/$orgSlug/tasks/'
+      preLoaderRoute: typeof AuthenticatedOOrgSlugTasksIndexRouteImport
+      parentRoute: typeof AuthenticatedOOrgSlugRouteRoute
+    }
+    '/_authenticated/o/$orgSlug/settings/': {
+      id: '/_authenticated/o/$orgSlug/settings/'
+      path: '/'
+      fullPath: '/o/$orgSlug/settings/'
+      preLoaderRoute: typeof AuthenticatedOOrgSlugSettingsIndexRouteImport
+      parentRoute: typeof AuthenticatedOOrgSlugSettingsRouteRoute
+    }
+    '/_authenticated/o/$orgSlug/reports/': {
+      id: '/_authenticated/o/$orgSlug/reports/'
+      path: '/reports'
+      fullPath: '/o/$orgSlug/reports/'
+      preLoaderRoute: typeof AuthenticatedOOrgSlugReportsIndexRouteImport
+      parentRoute: typeof AuthenticatedOOrgSlugRouteRoute
+    }
+    '/_authenticated/o/$orgSlug/projects/': {
+      id: '/_authenticated/o/$orgSlug/projects/'
+      path: '/projects'
+      fullPath: '/o/$orgSlug/projects/'
+      preLoaderRoute: typeof AuthenticatedOOrgSlugProjectsIndexRouteImport
+      parentRoute: typeof AuthenticatedOOrgSlugRouteRoute
+    }
+    '/_authenticated/o/$orgSlug/portfolio/': {
+      id: '/_authenticated/o/$orgSlug/portfolio/'
+      path: '/portfolio'
+      fullPath: '/o/$orgSlug/portfolio/'
+      preLoaderRoute: typeof AuthenticatedOOrgSlugPortfolioIndexRouteImport
+      parentRoute: typeof AuthenticatedOOrgSlugRouteRoute
+    }
+    '/_authenticated/o/$orgSlug/messages/': {
+      id: '/_authenticated/o/$orgSlug/messages/'
+      path: '/messages'
+      fullPath: '/o/$orgSlug/messages/'
+      preLoaderRoute: typeof AuthenticatedOOrgSlugMessagesIndexRouteImport
+      parentRoute: typeof AuthenticatedOOrgSlugRouteRoute
+    }
+    '/_authenticated/o/$orgSlug/help-center/': {
+      id: '/_authenticated/o/$orgSlug/help-center/'
+      path: '/help-center'
+      fullPath: '/o/$orgSlug/help-center/'
+      preLoaderRoute: typeof AuthenticatedOOrgSlugHelpCenterIndexRouteImport
+      parentRoute: typeof AuthenticatedOOrgSlugRouteRoute
+    }
+    '/_authenticated/o/$orgSlug/company/': {
+      id: '/_authenticated/o/$orgSlug/company/'
+      path: '/'
+      fullPath: '/o/$orgSlug/company/'
+      preLoaderRoute: typeof AuthenticatedOOrgSlugCompanyIndexRouteImport
+      parentRoute: typeof AuthenticatedOOrgSlugCompanyRouteRoute
+    }
+    '/_authenticated/o/$orgSlug/billing/': {
+      id: '/_authenticated/o/$orgSlug/billing/'
+      path: '/billing'
+      fullPath: '/o/$orgSlug/billing/'
+      preLoaderRoute: typeof AuthenticatedOOrgSlugBillingIndexRouteImport
+      parentRoute: typeof AuthenticatedOOrgSlugRouteRoute
+    }
     '/_authenticated/projects/$projectId/$module/$child': {
       id: '/_authenticated/projects/$projectId/$module/$child'
       path: '/$module/$child'
       fullPath: '/projects/$projectId/$module/$child'
       preLoaderRoute: typeof AuthenticatedProjectsProjectIdModuleChildRouteImport
       parentRoute: typeof AuthenticatedProjectsProjectIdRoute
+    }
+    '/_authenticated/o/$orgSlug/settings/security': {
+      id: '/_authenticated/o/$orgSlug/settings/security'
+      path: '/security'
+      fullPath: '/o/$orgSlug/settings/security'
+      preLoaderRoute: typeof AuthenticatedOOrgSlugSettingsSecurityRouteImport
+      parentRoute: typeof AuthenticatedOOrgSlugSettingsRouteRoute
+    }
+    '/_authenticated/o/$orgSlug/settings/permissions': {
+      id: '/_authenticated/o/$orgSlug/settings/permissions'
+      path: '/permissions'
+      fullPath: '/o/$orgSlug/settings/permissions'
+      preLoaderRoute: typeof AuthenticatedOOrgSlugSettingsPermissionsRouteImport
+      parentRoute: typeof AuthenticatedOOrgSlugSettingsRouteRoute
+    }
+    '/_authenticated/o/$orgSlug/settings/notifications': {
+      id: '/_authenticated/o/$orgSlug/settings/notifications'
+      path: '/notifications'
+      fullPath: '/o/$orgSlug/settings/notifications'
+      preLoaderRoute: typeof AuthenticatedOOrgSlugSettingsNotificationsRouteImport
+      parentRoute: typeof AuthenticatedOOrgSlugSettingsRouteRoute
+    }
+    '/_authenticated/o/$orgSlug/settings/display': {
+      id: '/_authenticated/o/$orgSlug/settings/display'
+      path: '/display'
+      fullPath: '/o/$orgSlug/settings/display'
+      preLoaderRoute: typeof AuthenticatedOOrgSlugSettingsDisplayRouteImport
+      parentRoute: typeof AuthenticatedOOrgSlugSettingsRouteRoute
+    }
+    '/_authenticated/o/$orgSlug/settings/billing': {
+      id: '/_authenticated/o/$orgSlug/settings/billing'
+      path: '/billing'
+      fullPath: '/o/$orgSlug/settings/billing'
+      preLoaderRoute: typeof AuthenticatedOOrgSlugSettingsBillingRouteImport
+      parentRoute: typeof AuthenticatedOOrgSlugSettingsRouteRoute
+    }
+    '/_authenticated/o/$orgSlug/settings/appearance': {
+      id: '/_authenticated/o/$orgSlug/settings/appearance'
+      path: '/appearance'
+      fullPath: '/o/$orgSlug/settings/appearance'
+      preLoaderRoute: typeof AuthenticatedOOrgSlugSettingsAppearanceRouteImport
+      parentRoute: typeof AuthenticatedOOrgSlugSettingsRouteRoute
+    }
+    '/_authenticated/o/$orgSlug/settings/account': {
+      id: '/_authenticated/o/$orgSlug/settings/account'
+      path: '/account'
+      fullPath: '/o/$orgSlug/settings/account'
+      preLoaderRoute: typeof AuthenticatedOOrgSlugSettingsAccountRouteImport
+      parentRoute: typeof AuthenticatedOOrgSlugSettingsRouteRoute
+    }
+    '/_authenticated/o/$orgSlug/projects/$projectId': {
+      id: '/_authenticated/o/$orgSlug/projects/$projectId'
+      path: '/projects/$projectId'
+      fullPath: '/o/$orgSlug/projects/$projectId'
+      preLoaderRoute: typeof AuthenticatedOOrgSlugProjectsProjectIdRouteImport
+      parentRoute: typeof AuthenticatedOOrgSlugRouteRoute
+    }
+    '/_authenticated/o/$orgSlug/errors/$error': {
+      id: '/_authenticated/o/$orgSlug/errors/$error'
+      path: '/errors/$error'
+      fullPath: '/o/$orgSlug/errors/$error'
+      preLoaderRoute: typeof AuthenticatedOOrgSlugErrorsErrorRouteImport
+      parentRoute: typeof AuthenticatedOOrgSlugRouteRoute
+    }
+    '/_authenticated/o/$orgSlug/company/workflows': {
+      id: '/_authenticated/o/$orgSlug/company/workflows'
+      path: '/workflows'
+      fullPath: '/o/$orgSlug/company/workflows'
+      preLoaderRoute: typeof AuthenticatedOOrgSlugCompanyWorkflowsRouteImport
+      parentRoute: typeof AuthenticatedOOrgSlugCompanyRouteRoute
+    }
+    '/_authenticated/o/$orgSlug/company/vendors': {
+      id: '/_authenticated/o/$orgSlug/company/vendors'
+      path: '/vendors'
+      fullPath: '/o/$orgSlug/company/vendors'
+      preLoaderRoute: typeof AuthenticatedOOrgSlugCompanyVendorsRouteImport
+      parentRoute: typeof AuthenticatedOOrgSlugCompanyRouteRoute
+    }
+    '/_authenticated/o/$orgSlug/company/templates': {
+      id: '/_authenticated/o/$orgSlug/company/templates'
+      path: '/templates'
+      fullPath: '/o/$orgSlug/company/templates'
+      preLoaderRoute: typeof AuthenticatedOOrgSlugCompanyTemplatesRouteImport
+      parentRoute: typeof AuthenticatedOOrgSlugCompanyRouteRoute
+    }
+    '/_authenticated/o/$orgSlug/company/submittal-workflows': {
+      id: '/_authenticated/o/$orgSlug/company/submittal-workflows'
+      path: '/submittal-workflows'
+      fullPath: '/o/$orgSlug/company/submittal-workflows'
+      preLoaderRoute: typeof AuthenticatedOOrgSlugCompanySubmittalWorkflowsRouteImport
+      parentRoute: typeof AuthenticatedOOrgSlugCompanyRouteRoute
+    }
+    '/_authenticated/o/$orgSlug/company/security': {
+      id: '/_authenticated/o/$orgSlug/company/security'
+      path: '/security'
+      fullPath: '/o/$orgSlug/company/security'
+      preLoaderRoute: typeof AuthenticatedOOrgSlugCompanySecurityRouteImport
+      parentRoute: typeof AuthenticatedOOrgSlugCompanyRouteRoute
+    }
+    '/_authenticated/o/$orgSlug/company/permissions': {
+      id: '/_authenticated/o/$orgSlug/company/permissions'
+      path: '/permissions'
+      fullPath: '/o/$orgSlug/company/permissions'
+      preLoaderRoute: typeof AuthenticatedOOrgSlugCompanyPermissionsRouteImport
+      parentRoute: typeof AuthenticatedOOrgSlugCompanyRouteRoute
+    }
+    '/_authenticated/o/$orgSlug/company/integrations': {
+      id: '/_authenticated/o/$orgSlug/company/integrations'
+      path: '/integrations'
+      fullPath: '/o/$orgSlug/company/integrations'
+      preLoaderRoute: typeof AuthenticatedOOrgSlugCompanyIntegrationsRouteImport
+      parentRoute: typeof AuthenticatedOOrgSlugCompanyRouteRoute
+    }
+    '/_authenticated/o/$orgSlug/company/form-templates': {
+      id: '/_authenticated/o/$orgSlug/company/form-templates'
+      path: '/form-templates'
+      fullPath: '/o/$orgSlug/company/form-templates'
+      preLoaderRoute: typeof AuthenticatedOOrgSlugCompanyFormTemplatesRouteImport
+      parentRoute: typeof AuthenticatedOOrgSlugCompanyRouteRoute
+    }
+    '/_authenticated/o/$orgSlug/company/equipment': {
+      id: '/_authenticated/o/$orgSlug/company/equipment'
+      path: '/equipment'
+      fullPath: '/o/$orgSlug/company/equipment'
+      preLoaderRoute: typeof AuthenticatedOOrgSlugCompanyEquipmentRouteImport
+      parentRoute: typeof AuthenticatedOOrgSlugCompanyRouteRoute
+    }
+    '/_authenticated/o/$orgSlug/company/directory': {
+      id: '/_authenticated/o/$orgSlug/company/directory'
+      path: '/directory'
+      fullPath: '/o/$orgSlug/company/directory'
+      preLoaderRoute: typeof AuthenticatedOOrgSlugCompanyDirectoryRouteImport
+      parentRoute: typeof AuthenticatedOOrgSlugCompanyRouteRoute
+    }
+    '/_authenticated/o/$orgSlug/company/custom-fields': {
+      id: '/_authenticated/o/$orgSlug/company/custom-fields'
+      path: '/custom-fields'
+      fullPath: '/o/$orgSlug/company/custom-fields'
+      preLoaderRoute: typeof AuthenticatedOOrgSlugCompanyCustomFieldsRouteImport
+      parentRoute: typeof AuthenticatedOOrgSlugCompanyRouteRoute
+    }
+    '/_authenticated/o/$orgSlug/company/cost-codes': {
+      id: '/_authenticated/o/$orgSlug/company/cost-codes'
+      path: '/cost-codes'
+      fullPath: '/o/$orgSlug/company/cost-codes'
+      preLoaderRoute: typeof AuthenticatedOOrgSlugCompanyCostCodesRouteImport
+      parentRoute: typeof AuthenticatedOOrgSlugCompanyRouteRoute
+    }
+    '/_authenticated/o/$orgSlug/billing/checkout': {
+      id: '/_authenticated/o/$orgSlug/billing/checkout'
+      path: '/billing/checkout'
+      fullPath: '/o/$orgSlug/billing/checkout'
+      preLoaderRoute: typeof AuthenticatedOOrgSlugBillingCheckoutRouteImport
+      parentRoute: typeof AuthenticatedOOrgSlugRouteRoute
+    }
+    '/_authenticated/o/$orgSlug/projects/$projectId/': {
+      id: '/_authenticated/o/$orgSlug/projects/$projectId/'
+      path: '/'
+      fullPath: '/o/$orgSlug/projects/$projectId/'
+      preLoaderRoute: typeof AuthenticatedOOrgSlugProjectsProjectIdIndexRouteImport
+      parentRoute: typeof AuthenticatedOOrgSlugProjectsProjectIdRoute
+    }
+    '/_authenticated/o/$orgSlug/projects/$projectId/$module/': {
+      id: '/_authenticated/o/$orgSlug/projects/$projectId/$module/'
+      path: '/$module'
+      fullPath: '/o/$orgSlug/projects/$projectId/$module/'
+      preLoaderRoute: typeof AuthenticatedOOrgSlugProjectsProjectIdModuleIndexRouteImport
+      parentRoute: typeof AuthenticatedOOrgSlugProjectsProjectIdRoute
+    }
+    '/_authenticated/o/$orgSlug/projects/$projectId/$module/$child': {
+      id: '/_authenticated/o/$orgSlug/projects/$projectId/$module/$child'
+      path: '/$module/$child'
+      fullPath: '/o/$orgSlug/projects/$projectId/$module/$child'
+      preLoaderRoute: typeof AuthenticatedOOrgSlugProjectsProjectIdModuleChildRouteImport
+      parentRoute: typeof AuthenticatedOOrgSlugProjectsProjectIdRoute
     }
   }
 }
@@ -1289,6 +2179,173 @@ const AuthenticatedSettingsRouteRouteWithChildren =
     AuthenticatedSettingsRouteRouteChildren,
   )
 
+interface AuthenticatedOOrgSlugCompanyRouteRouteChildren {
+  AuthenticatedOOrgSlugCompanyCostCodesRoute: typeof AuthenticatedOOrgSlugCompanyCostCodesRoute
+  AuthenticatedOOrgSlugCompanyCustomFieldsRoute: typeof AuthenticatedOOrgSlugCompanyCustomFieldsRoute
+  AuthenticatedOOrgSlugCompanyDirectoryRoute: typeof AuthenticatedOOrgSlugCompanyDirectoryRoute
+  AuthenticatedOOrgSlugCompanyEquipmentRoute: typeof AuthenticatedOOrgSlugCompanyEquipmentRoute
+  AuthenticatedOOrgSlugCompanyFormTemplatesRoute: typeof AuthenticatedOOrgSlugCompanyFormTemplatesRoute
+  AuthenticatedOOrgSlugCompanyIntegrationsRoute: typeof AuthenticatedOOrgSlugCompanyIntegrationsRoute
+  AuthenticatedOOrgSlugCompanyPermissionsRoute: typeof AuthenticatedOOrgSlugCompanyPermissionsRoute
+  AuthenticatedOOrgSlugCompanySecurityRoute: typeof AuthenticatedOOrgSlugCompanySecurityRoute
+  AuthenticatedOOrgSlugCompanySubmittalWorkflowsRoute: typeof AuthenticatedOOrgSlugCompanySubmittalWorkflowsRoute
+  AuthenticatedOOrgSlugCompanyTemplatesRoute: typeof AuthenticatedOOrgSlugCompanyTemplatesRoute
+  AuthenticatedOOrgSlugCompanyVendorsRoute: typeof AuthenticatedOOrgSlugCompanyVendorsRoute
+  AuthenticatedOOrgSlugCompanyWorkflowsRoute: typeof AuthenticatedOOrgSlugCompanyWorkflowsRoute
+  AuthenticatedOOrgSlugCompanyIndexRoute: typeof AuthenticatedOOrgSlugCompanyIndexRoute
+}
+
+const AuthenticatedOOrgSlugCompanyRouteRouteChildren: AuthenticatedOOrgSlugCompanyRouteRouteChildren =
+  {
+    AuthenticatedOOrgSlugCompanyCostCodesRoute:
+      AuthenticatedOOrgSlugCompanyCostCodesRoute,
+    AuthenticatedOOrgSlugCompanyCustomFieldsRoute:
+      AuthenticatedOOrgSlugCompanyCustomFieldsRoute,
+    AuthenticatedOOrgSlugCompanyDirectoryRoute:
+      AuthenticatedOOrgSlugCompanyDirectoryRoute,
+    AuthenticatedOOrgSlugCompanyEquipmentRoute:
+      AuthenticatedOOrgSlugCompanyEquipmentRoute,
+    AuthenticatedOOrgSlugCompanyFormTemplatesRoute:
+      AuthenticatedOOrgSlugCompanyFormTemplatesRoute,
+    AuthenticatedOOrgSlugCompanyIntegrationsRoute:
+      AuthenticatedOOrgSlugCompanyIntegrationsRoute,
+    AuthenticatedOOrgSlugCompanyPermissionsRoute:
+      AuthenticatedOOrgSlugCompanyPermissionsRoute,
+    AuthenticatedOOrgSlugCompanySecurityRoute:
+      AuthenticatedOOrgSlugCompanySecurityRoute,
+    AuthenticatedOOrgSlugCompanySubmittalWorkflowsRoute:
+      AuthenticatedOOrgSlugCompanySubmittalWorkflowsRoute,
+    AuthenticatedOOrgSlugCompanyTemplatesRoute:
+      AuthenticatedOOrgSlugCompanyTemplatesRoute,
+    AuthenticatedOOrgSlugCompanyVendorsRoute:
+      AuthenticatedOOrgSlugCompanyVendorsRoute,
+    AuthenticatedOOrgSlugCompanyWorkflowsRoute:
+      AuthenticatedOOrgSlugCompanyWorkflowsRoute,
+    AuthenticatedOOrgSlugCompanyIndexRoute:
+      AuthenticatedOOrgSlugCompanyIndexRoute,
+  }
+
+const AuthenticatedOOrgSlugCompanyRouteRouteWithChildren =
+  AuthenticatedOOrgSlugCompanyRouteRoute._addFileChildren(
+    AuthenticatedOOrgSlugCompanyRouteRouteChildren,
+  )
+
+interface AuthenticatedOOrgSlugSettingsRouteRouteChildren {
+  AuthenticatedOOrgSlugSettingsAccountRoute: typeof AuthenticatedOOrgSlugSettingsAccountRoute
+  AuthenticatedOOrgSlugSettingsAppearanceRoute: typeof AuthenticatedOOrgSlugSettingsAppearanceRoute
+  AuthenticatedOOrgSlugSettingsBillingRoute: typeof AuthenticatedOOrgSlugSettingsBillingRoute
+  AuthenticatedOOrgSlugSettingsDisplayRoute: typeof AuthenticatedOOrgSlugSettingsDisplayRoute
+  AuthenticatedOOrgSlugSettingsNotificationsRoute: typeof AuthenticatedOOrgSlugSettingsNotificationsRoute
+  AuthenticatedOOrgSlugSettingsPermissionsRoute: typeof AuthenticatedOOrgSlugSettingsPermissionsRoute
+  AuthenticatedOOrgSlugSettingsSecurityRoute: typeof AuthenticatedOOrgSlugSettingsSecurityRoute
+  AuthenticatedOOrgSlugSettingsIndexRoute: typeof AuthenticatedOOrgSlugSettingsIndexRoute
+}
+
+const AuthenticatedOOrgSlugSettingsRouteRouteChildren: AuthenticatedOOrgSlugSettingsRouteRouteChildren =
+  {
+    AuthenticatedOOrgSlugSettingsAccountRoute:
+      AuthenticatedOOrgSlugSettingsAccountRoute,
+    AuthenticatedOOrgSlugSettingsAppearanceRoute:
+      AuthenticatedOOrgSlugSettingsAppearanceRoute,
+    AuthenticatedOOrgSlugSettingsBillingRoute:
+      AuthenticatedOOrgSlugSettingsBillingRoute,
+    AuthenticatedOOrgSlugSettingsDisplayRoute:
+      AuthenticatedOOrgSlugSettingsDisplayRoute,
+    AuthenticatedOOrgSlugSettingsNotificationsRoute:
+      AuthenticatedOOrgSlugSettingsNotificationsRoute,
+    AuthenticatedOOrgSlugSettingsPermissionsRoute:
+      AuthenticatedOOrgSlugSettingsPermissionsRoute,
+    AuthenticatedOOrgSlugSettingsSecurityRoute:
+      AuthenticatedOOrgSlugSettingsSecurityRoute,
+    AuthenticatedOOrgSlugSettingsIndexRoute:
+      AuthenticatedOOrgSlugSettingsIndexRoute,
+  }
+
+const AuthenticatedOOrgSlugSettingsRouteRouteWithChildren =
+  AuthenticatedOOrgSlugSettingsRouteRoute._addFileChildren(
+    AuthenticatedOOrgSlugSettingsRouteRouteChildren,
+  )
+
+interface AuthenticatedOOrgSlugProjectsProjectIdRouteChildren {
+  AuthenticatedOOrgSlugProjectsProjectIdIndexRoute: typeof AuthenticatedOOrgSlugProjectsProjectIdIndexRoute
+  AuthenticatedOOrgSlugProjectsProjectIdModuleChildRoute: typeof AuthenticatedOOrgSlugProjectsProjectIdModuleChildRoute
+  AuthenticatedOOrgSlugProjectsProjectIdModuleIndexRoute: typeof AuthenticatedOOrgSlugProjectsProjectIdModuleIndexRoute
+}
+
+const AuthenticatedOOrgSlugProjectsProjectIdRouteChildren: AuthenticatedOOrgSlugProjectsProjectIdRouteChildren =
+  {
+    AuthenticatedOOrgSlugProjectsProjectIdIndexRoute:
+      AuthenticatedOOrgSlugProjectsProjectIdIndexRoute,
+    AuthenticatedOOrgSlugProjectsProjectIdModuleChildRoute:
+      AuthenticatedOOrgSlugProjectsProjectIdModuleChildRoute,
+    AuthenticatedOOrgSlugProjectsProjectIdModuleIndexRoute:
+      AuthenticatedOOrgSlugProjectsProjectIdModuleIndexRoute,
+  }
+
+const AuthenticatedOOrgSlugProjectsProjectIdRouteWithChildren =
+  AuthenticatedOOrgSlugProjectsProjectIdRoute._addFileChildren(
+    AuthenticatedOOrgSlugProjectsProjectIdRouteChildren,
+  )
+
+interface AuthenticatedOOrgSlugRouteRouteChildren {
+  AuthenticatedOOrgSlugCompanyRouteRoute: typeof AuthenticatedOOrgSlugCompanyRouteRouteWithChildren
+  AuthenticatedOOrgSlugSettingsRouteRoute: typeof AuthenticatedOOrgSlugSettingsRouteRouteWithChildren
+  AuthenticatedOOrgSlugCostCodesRoute: typeof AuthenticatedOOrgSlugCostCodesRoute
+  AuthenticatedOOrgSlugDirectoryRoute: typeof AuthenticatedOOrgSlugDirectoryRoute
+  AuthenticatedOOrgSlugInventoryRoute: typeof AuthenticatedOOrgSlugInventoryRoute
+  AuthenticatedOOrgSlugVendorsRoute: typeof AuthenticatedOOrgSlugVendorsRoute
+  AuthenticatedOOrgSlugIndexRoute: typeof AuthenticatedOOrgSlugIndexRoute
+  AuthenticatedOOrgSlugBillingCheckoutRoute: typeof AuthenticatedOOrgSlugBillingCheckoutRoute
+  AuthenticatedOOrgSlugErrorsErrorRoute: typeof AuthenticatedOOrgSlugErrorsErrorRoute
+  AuthenticatedOOrgSlugProjectsProjectIdRoute: typeof AuthenticatedOOrgSlugProjectsProjectIdRouteWithChildren
+  AuthenticatedOOrgSlugBillingIndexRoute: typeof AuthenticatedOOrgSlugBillingIndexRoute
+  AuthenticatedOOrgSlugHelpCenterIndexRoute: typeof AuthenticatedOOrgSlugHelpCenterIndexRoute
+  AuthenticatedOOrgSlugMessagesIndexRoute: typeof AuthenticatedOOrgSlugMessagesIndexRoute
+  AuthenticatedOOrgSlugPortfolioIndexRoute: typeof AuthenticatedOOrgSlugPortfolioIndexRoute
+  AuthenticatedOOrgSlugProjectsIndexRoute: typeof AuthenticatedOOrgSlugProjectsIndexRoute
+  AuthenticatedOOrgSlugReportsIndexRoute: typeof AuthenticatedOOrgSlugReportsIndexRoute
+  AuthenticatedOOrgSlugTasksIndexRoute: typeof AuthenticatedOOrgSlugTasksIndexRoute
+  AuthenticatedOOrgSlugUsersIndexRoute: typeof AuthenticatedOOrgSlugUsersIndexRoute
+}
+
+const AuthenticatedOOrgSlugRouteRouteChildren: AuthenticatedOOrgSlugRouteRouteChildren =
+  {
+    AuthenticatedOOrgSlugCompanyRouteRoute:
+      AuthenticatedOOrgSlugCompanyRouteRouteWithChildren,
+    AuthenticatedOOrgSlugSettingsRouteRoute:
+      AuthenticatedOOrgSlugSettingsRouteRouteWithChildren,
+    AuthenticatedOOrgSlugCostCodesRoute: AuthenticatedOOrgSlugCostCodesRoute,
+    AuthenticatedOOrgSlugDirectoryRoute: AuthenticatedOOrgSlugDirectoryRoute,
+    AuthenticatedOOrgSlugInventoryRoute: AuthenticatedOOrgSlugInventoryRoute,
+    AuthenticatedOOrgSlugVendorsRoute: AuthenticatedOOrgSlugVendorsRoute,
+    AuthenticatedOOrgSlugIndexRoute: AuthenticatedOOrgSlugIndexRoute,
+    AuthenticatedOOrgSlugBillingCheckoutRoute:
+      AuthenticatedOOrgSlugBillingCheckoutRoute,
+    AuthenticatedOOrgSlugErrorsErrorRoute:
+      AuthenticatedOOrgSlugErrorsErrorRoute,
+    AuthenticatedOOrgSlugProjectsProjectIdRoute:
+      AuthenticatedOOrgSlugProjectsProjectIdRouteWithChildren,
+    AuthenticatedOOrgSlugBillingIndexRoute:
+      AuthenticatedOOrgSlugBillingIndexRoute,
+    AuthenticatedOOrgSlugHelpCenterIndexRoute:
+      AuthenticatedOOrgSlugHelpCenterIndexRoute,
+    AuthenticatedOOrgSlugMessagesIndexRoute:
+      AuthenticatedOOrgSlugMessagesIndexRoute,
+    AuthenticatedOOrgSlugPortfolioIndexRoute:
+      AuthenticatedOOrgSlugPortfolioIndexRoute,
+    AuthenticatedOOrgSlugProjectsIndexRoute:
+      AuthenticatedOOrgSlugProjectsIndexRoute,
+    AuthenticatedOOrgSlugReportsIndexRoute:
+      AuthenticatedOOrgSlugReportsIndexRoute,
+    AuthenticatedOOrgSlugTasksIndexRoute: AuthenticatedOOrgSlugTasksIndexRoute,
+    AuthenticatedOOrgSlugUsersIndexRoute: AuthenticatedOOrgSlugUsersIndexRoute,
+  }
+
+const AuthenticatedOOrgSlugRouteRouteWithChildren =
+  AuthenticatedOOrgSlugRouteRoute._addFileChildren(
+    AuthenticatedOOrgSlugRouteRouteChildren,
+  )
+
 interface AuthenticatedProjectsProjectIdRouteChildren {
   AuthenticatedProjectsProjectIdIndexRoute: typeof AuthenticatedProjectsProjectIdIndexRoute
   AuthenticatedProjectsProjectIdModuleChildRoute: typeof AuthenticatedProjectsProjectIdModuleChildRoute
@@ -1315,9 +2372,12 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedSettingsRouteRoute: typeof AuthenticatedSettingsRouteRouteWithChildren
   AuthenticatedCostCodesRoute: typeof AuthenticatedCostCodesRoute
   AuthenticatedDirectoryRoute: typeof AuthenticatedDirectoryRoute
+  AuthenticatedHomeRoute: typeof AuthenticatedHomeRoute
   AuthenticatedInventoryRoute: typeof AuthenticatedInventoryRoute
+  AuthenticatedSwitchRoute: typeof AuthenticatedSwitchRoute
   AuthenticatedVendorsRoute: typeof AuthenticatedVendorsRoute
   AuthenticatedIndexRoute: typeof AuthenticatedIndexRoute
+  AuthenticatedOOrgSlugRouteRoute: typeof AuthenticatedOOrgSlugRouteRouteWithChildren
   AuthenticatedBillingCheckoutRoute: typeof AuthenticatedBillingCheckoutRoute
   AuthenticatedErrorsErrorRoute: typeof AuthenticatedErrorsErrorRoute
   AuthenticatedProjectsProjectIdRoute: typeof AuthenticatedProjectsProjectIdRouteWithChildren
@@ -1336,9 +2396,12 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedSettingsRouteRoute: AuthenticatedSettingsRouteRouteWithChildren,
   AuthenticatedCostCodesRoute: AuthenticatedCostCodesRoute,
   AuthenticatedDirectoryRoute: AuthenticatedDirectoryRoute,
+  AuthenticatedHomeRoute: AuthenticatedHomeRoute,
   AuthenticatedInventoryRoute: AuthenticatedInventoryRoute,
+  AuthenticatedSwitchRoute: AuthenticatedSwitchRoute,
   AuthenticatedVendorsRoute: AuthenticatedVendorsRoute,
   AuthenticatedIndexRoute: AuthenticatedIndexRoute,
+  AuthenticatedOOrgSlugRouteRoute: AuthenticatedOOrgSlugRouteRouteWithChildren,
   AuthenticatedBillingCheckoutRoute: AuthenticatedBillingCheckoutRoute,
   AuthenticatedErrorsErrorRoute: AuthenticatedErrorsErrorRoute,
   AuthenticatedProjectsProjectIdRoute:

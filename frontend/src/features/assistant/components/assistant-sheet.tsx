@@ -43,7 +43,8 @@ const formatDate = (value?: string | null) =>
 /** Reads the project id from the current URL so the assistant scopes itself. */
 export const useCurrentProjectId = () => {
   const location = useLocation()
-  const match = /^\/projects\/([^/]+)/.exec(location.pathname)
+  // The project path lives under its workspace, `/o/{workspace}/projects/:id` (ENT-4).
+  const match = /^(?:\/o\/[^/]+)?\/projects\/([^/]+)/.exec(location.pathname)
   return match?.[1] ?? null
 }
 

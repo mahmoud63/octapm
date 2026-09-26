@@ -1,6 +1,7 @@
 import { useState, type JSX } from 'react'
 import { useLocation, useNavigate, Link } from '@tanstack/react-router'
 import { cn } from '@/lib/utils'
+import { stripWorkspacePrefix } from '@/lib/workspace/paths'
 import { buttonVariants } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import {
@@ -20,7 +21,9 @@ type SidebarNavProps = React.HTMLAttributes<HTMLElement> & {
 }
 
 export function SidebarNav({ className, items, ...props }: SidebarNavProps) {
-  const { pathname } = useLocation()
+  // Items are written workspace-relative (`/settings/account`); the address
+  // bar carries the workspace, `/o/{workspace}/settings/account` (ENT-4).
+  const pathname = stripWorkspacePrefix(useLocation().pathname)
   const navigate = useNavigate()
   const [val, setVal] = useState(pathname ?? '/settings')
 

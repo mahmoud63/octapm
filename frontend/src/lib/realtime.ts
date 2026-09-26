@@ -213,6 +213,28 @@ class RealtimeClient {
     }
   }
 
+  /**
+   * Leaves every project room and forgets them (workspace switching doc §3,
+   * step 2). The set used to survive a token change, so a reconnect under
+   * the next workspace's token re-joined the previous workspace's rooms —
+   * refused by the server, but a request for another tenant's rooms all the
+   * same. After a switch the rooms are re-joined by the project pages that
+   * are actually open.
+   */
+  leaveAll() {
+    if (this.socket?.connected) {
+      for (const projectId of this.joinedProjects) {
+        this.socket.emit('project:leave', { projectId })
+      }
+    }
+    this.joinedProjects.clear()
+  }
+
+  /** The project rooms this client asks for on every (re)connect. */
+  joinedRooms(): string[] {
+    return [...this.joinedProjects]
+  }
+
   subscribe(listener: EventListener) {
     this.listeners.add(listener)
     return () => {

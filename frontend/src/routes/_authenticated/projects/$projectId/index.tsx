@@ -1,20 +1,8 @@
-import { createFileRoute, redirect } from '@tanstack/react-router'
-import {
-  DEFAULT_CHILD,
-  slugForModule,
-} from '@/features/projects/lib/project-modules'
+import { createFileRoute } from '@tanstack/react-router'
 
-/** `/projects/:id` opens the default module (schedule › gantt). */
-export const Route = createFileRoute('/_authenticated/projects/$projectId/')({
-  beforeLoad: ({ params }) => {
-    throw redirect({
-      to: '/projects/$projectId/$module/$child',
-      params: {
-        projectId: params.projectId,
-        module: slugForModule('schedule'),
-        child: DEFAULT_CHILD.schedule,
-      },
-      replace: true,
-    })
-  },
-})
+/**
+ * Legacy path, kept so typed links to it still compile. Its parent route
+ * redirects every visit to the same page under the active workspace,
+ * `/o/{workspace}/projects/$projectId/` (ENT-4), before this route loads.
+ */
+export const Route = createFileRoute('/_authenticated/projects/$projectId/')({})

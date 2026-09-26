@@ -1,18 +1,13 @@
 import { createFileRoute } from '@tanstack/react-router'
-import { ReportBuilderPage } from '@/features/reports/report-builder-page'
+import { legacyWorkspaceRedirect } from '@/lib/workspace/legacy'
 
 type ReportsSearch = { reportId?: string; runId?: string }
 
-/** Report builder (OCTA-RPT-BUILDER-023): `/reports?reportId=&runId=`. */
+/** Legacy path: `/reports?reportId=&runId=` opens under the active workspace, `/o/{workspace}/reports` (ENT-4). */
 export const Route = createFileRoute('/_authenticated/reports/')({
   validateSearch: (search: Record<string, unknown>): ReportsSearch => ({
     reportId: typeof search.reportId === 'string' ? search.reportId : undefined,
     runId: typeof search.runId === 'string' ? search.runId : undefined,
   }),
-  component: function ReportsRoute() {
-    const { reportId, runId } = Route.useSearch()
-    return (
-      <ReportBuilderPage reportId={reportId ?? null} runId={runId ?? null} />
-    )
-  },
+  beforeLoad: legacyWorkspaceRedirect,
 })

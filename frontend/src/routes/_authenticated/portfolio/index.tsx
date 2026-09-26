@@ -1,7 +1,7 @@
 import { createFileRoute } from '@tanstack/react-router'
-import { PortfolioPage } from '@/features/reports/portfolio-page'
+import { legacyWorkspaceRedirect } from '@/lib/workspace/legacy'
 
-/** Portfolio (OCTA-RPT-BUILDER-023): `/portfolio`. */
+/** Legacy path: the same page under the active workspace, `/o/{workspace}/portfolio/` (ENT-4). */
 export const Route = createFileRoute('/_authenticated/portfolio/')({
-  component: PortfolioPage,
+  beforeLoad: legacyWorkspaceRedirect,
 })

@@ -1,8 +1,8 @@
 import { createFileRoute } from '@tanstack/react-router'
-import { CompanySubmittalWorkflows } from '@/features/company/submittal-workflows'
 
-export const Route = createFileRoute(
-  '/_authenticated/company/submittal-workflows'
-)({
-  component: CompanySubmittalWorkflows,
-})
+/**
+ * Legacy path, kept so typed links to it still compile. Its parent route
+ * redirects every visit to the same page under the active workspace,
+ * `/o/{workspace}/company/submittal-workflows` (ENT-4), before this route loads.
+ */
+export const Route = createFileRoute('/_authenticated/company/submittal-workflows')({})

@@ -17,6 +17,7 @@ import type {
   ResetPasswordPayload,
   ResetPasswordResponse,
   SsoLookup,
+  WorkspaceResolution,
 } from '@/services/auth/types'
 
 const unwrapData = <T>(response: { data: ApiSuccess<T> }): T => {
@@ -132,6 +133,38 @@ export const logout = async (): Promise<{ revoked: boolean }> => {
 
 export const getMyProfile = async (): Promise<AuthUser> => {
   const response = await apiClient.get<ApiSuccess<AuthUser>>('/auth/me')
+  return unwrapData(response)
+}
+
+/**
+ * Enter a workspace (workspace switching doc §2): a new access + refresh pair
+ * bound to the identity's membership in `orgId`. With the session's own
+ * token this is a switch; with the identity token a sign-in returned it is
+ * the second step of that sign-in. The other workspace's session is not
+ * revoked, so Back can switch straight back.
+ */
+export const enterWorkspace = async (
+  orgId: string,
+  options: { identityToken?: string } = {}
+): Promise<AuthSession> => {
+  const response = await apiClient.post<ApiSuccess<AuthSession>>(
+    `/auth/workspaces/${encodeURIComponent(orgId)}/session`,
+    {},
+    options.identityToken
+      ? { headers: { Authorization: `Bearer ${options.identityToken}` } }
+      : undefined
+  )
+  return unwrapData(response)
+}
+
+/** Which of the identity's workspaces owns a project, for a legacy `/projects/:id` link (404 when none). */
+export const resolveProjectWorkspace = async (
+  projectId: string
+): Promise<WorkspaceResolution> => {
+  const response = await apiClient.get<ApiSuccess<WorkspaceResolution>>(
+    '/auth/workspaces/resolve',
+    { params: { projectId } }
+  )
   return unwrapData(response)
 }
 

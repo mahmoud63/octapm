@@ -1,6 +1,7 @@
 import { createFileRoute } from '@tanstack/react-router'
-import { Projects } from '@/features/projects'
+import { legacyWorkspaceRedirect } from '@/lib/workspace/legacy'
 
+/** Legacy path: the same page under the active workspace, `/o/{workspace}/projects/` (ENT-4). */
 export const Route = createFileRoute('/_authenticated/projects/')({
-  component: Projects,
+  beforeLoad: legacyWorkspaceRedirect,
 })
