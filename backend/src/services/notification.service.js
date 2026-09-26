@@ -531,15 +531,33 @@ const resolveNotificationRecipients = async ({
       .filter(Boolean),
   );
   const select = { id: true, email: true, name: true, role: true };
-  // A person addressed by id belongs to this workspace by membership as much
-  // as by their User.orgId (ENT-5): a member whose home is another workspace
-  // is still notified here, and the socket router then delivers it to their
-  // member room in this workspace and nowhere else.
+  // A person addressed by id belongs to this workspace through an active
+  // membership in it (ENT-5): a member whose home is another workspace is
+  // still notified here, and the socket router then delivers it to their
+  // member room in this workspace and nowhere else. User.orgId alone no
+  // longer qualifies anyone: a person removed from their home workspace keeps
+  // User.orgId and an active identity while another workspace remains, and a
+  // revoked membership must lose the workspace's notifications and pushes
+  // (§11). Only a person with no membership row here at all — an account from
+  // before memberships — is still recognised by User.orgId.
   const membershipService = require("./membership.service");
   const byMembership = membershipService.hasMembershipModel(tx) && membershipService.isMembershipReadEnabled();
+  const ACTIVE_MEMBERSHIP = membershipService.MEMBERSHIP_STATUSES.ACTIVE;
   const inThisWorkspace = (where) =>
     byMembership
-      ? { ...where, OR: [{ orgId }, { memberships: { some: { orgId, status: membershipService.MEMBERSHIP_STATUSES.ACTIVE } } }] }
+      ? {
+          ...where,
+          OR: [
+            { memberships: { some: { orgId, status: ACTIVE_MEMBERSHIP } } },
+            { orgId, memberships: { none: { orgId } } },
+          ],
+        }
+      : { ...where, orgId };
+  // Role-addressed lookups keep their home-workspace reading of User.role;
+  // they only lose the person whose membership here is not active.
+  const homeInGoodStanding = (where) =>
+    byMembership
+      ? { ...where, orgId, NOT: { memberships: { some: { orgId, status: { not: ACTIVE_MEMBERSHIP } } } } }
       : { ...where, orgId };
 
   if (directIds.length) {
@@ -564,18 +582,17 @@ const resolveNotificationRecipients = async ({
   if (roleSet.size) {
     const roles = [...roleSet];
     const orgRoleUsers = await tx.user.findMany({
-      where: { orgId, status: "active", role: { in: roles } },
+      where: homeInGoodStanding({ status: "active", role: { in: roles } }),
       select,
     });
     addUsersToMap(recipients, orgRoleUsers, actorId);
 
     if (projectId) {
       const projectRoleUsers = await tx.user.findMany({
-        where: {
-          orgId,
+        where: homeInGoodStanding({
           status: "active",
           projectAssignments: { some: { projectId } },
-        },
+        }),
         select: {
           ...select,
           projectAssignments: {

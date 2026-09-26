@@ -7,7 +7,10 @@
  *   - a notification created in A reaches the A socket and not the B socket;
  *   - a membership change in A drops the A socket and B stays connected;
  *   - a deactivation in A (B remains) drops A's socket only;
- *   - a push payload built for A carries A's orgId, slug and membership id.
+ *   - a push payload built for A carries A's orgId, slug and membership id;
+ *   - once A has removed the person (B remains), nothing of A reaches them:
+ *     no notification row, no push attempt, and a push queued before the
+ *     removal is skipped — while B still notifies them.
  *
  *   npm run test:live -- src/realtime/__live__/membership-rooms.live.test.js
  */
@@ -15,6 +18,7 @@ const crypto = require("crypto");
 const { io: connectSocket } = require("socket.io-client");
 const { prisma } = require("../../config/db");
 const membershipService = require("../../services/membership.service");
+const notificationService = require("../../services/notification.service");
 const pushService = require("../../services/push.service");
 const { allocateSlug } = require("../../utils/workspace-slug");
 const {
@@ -279,5 +283,54 @@ liveDescribe("realtime rooms keyed by membership (ENT-5)", () => {
     expect(user.status).toBe("active");
     expect((await prisma.organizationMembership.findUnique({ where: { id: membershipA.id } })).status).toBe("suspended");
     expect((await prisma.organizationMembership.findUnique({ where: { id: membershipB.id } })).status).toBe("active");
+  }, 30_000);
+
+  it("removed from A while B remains (§11): A's notifications — by id, by role, by project role — create no row and no push for the person; B's still do", async () => {
+    // A device of the person, so a push attempt would be queued if they were
+    // still a recipient. Expo is switched off in this process: nothing leaves.
+    process.env.EXPO_PUSH_ENABLED = "false";
+    await prisma.pushSubscription.create({
+      data: { orgId: a.org.id, userId: person.id, endpoint: `ExponentPushToken[live-${crypto.randomUUID()}]`, p256dh: "", auth: "", platform: "expo-android" },
+    });
+    const { role: homeRole } = await prisma.user.findUnique({ where: { id: person.id }, select: { role: true } });
+    const inA = await notificationService.createNotifications({
+      tx: prisma,
+      orgId: a.org.id,
+      projectId: projectA.id,
+      recipientUserIds: [person.id],
+      assignmentRefs: [person.id],
+      recipientRoles: [homeRole, "site_engineer"],
+      event: "live.removed-member",
+      title: "A notice for A",
+      message: "Only A's active members should read this.",
+    });
+    expect(inA.recipients).not.toContain(person.id);
+    expect(await prisma.notification.count({ where: { orgId: a.org.id, recipientUserId: person.id, event: "live.removed-member" } })).toBe(0);
+    expect(await prisma.notificationDeliveryAttempt.count({ where: { orgId: a.org.id, userId: person.id, notification: { event: "live.removed-member" } } })).toBe(0);
+
+    // The same person is still B's member: B reaches them, with a push attempt.
+    const inB = await notificationService.createNotifications({
+      tx: prisma,
+      orgId: b.org.id,
+      recipientUserIds: [person.id],
+      event: "live.still-member",
+      title: "A notice for B",
+      message: "B still counts this person.",
+    });
+    expect(inB.created).toBe(1);
+    expect(await prisma.notificationDeliveryAttempt.count({ where: { orgId: b.org.id, userId: person.id, channel: "push" } })).toBe(1);
+  }, 30_000);
+
+  it("a push queued in A before the removal is skipped, not sent, and its payload is never built with the old membership", async () => {
+    process.env.EXPO_PUSH_ENABLED = "false";
+    const notification = await prisma.notification.create({
+      data: { orgId: a.org.id, projectId: projectA.id, recipientUserId: person.id, type: "workflow", category: "workflow", event: "live.queued-before", title: "Queued in A", message: "Queued before the removal." },
+    });
+    const attempt = await prisma.notificationDeliveryAttempt.create({
+      data: { notificationId: notification.id, orgId: a.org.id, userId: person.id, channel: "push", status: "pending", attemptNumber: 1, nextAttemptAt: new Date(Date.now() - 1_000) },
+    });
+    expect(await pushService.buildPushPayload({ notification, userId: person.id })).toBeNull();
+    await pushService.processPendingPushDeliveries({ notificationId: notification.id });
+    expect(await prisma.notificationDeliveryAttempt.findUnique({ where: { id: attempt.id } })).toMatchObject({ status: "skipped", errorCode: "PUSH_RECIPIENT_NOT_MEMBER", sentAt: null });
   }, 30_000);
 });

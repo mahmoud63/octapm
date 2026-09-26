@@ -26,6 +26,9 @@ const FLUSH_DELAY_MS = 750;
 const EXPO_PUSH_URL = "https://exp.host/--/api/v2/push/send";
 const EXPO_TOKEN_PATTERN = /^Expo(nent)?PushToken\[[A-Za-z0-9_-]+\]$/;
 const EXPO_PLATFORMS = new Set(["ios", "android"]);
+// Mirrors membership.service's MEMBERSHIP_STATUSES.ACTIVE; read as a literal
+// so this module does not load the membership service and its dependencies.
+const ACTIVE_MEMBERSHIP = "active";
 
 let webPush = null;
 let configured = null;
@@ -189,24 +192,37 @@ const workspaceSlugFor = async (orgId) => {
  * before memberships, or a client that does not know the model, gives a
  * payload with the orgId alone; the app then falls back to the slug-less
  * comparison it makes for any link.
+ *
+ * `revoked` is true when the person has a membership row in the workspace
+ * that is not active (suspended, invited, left): the workspace has removed
+ * them, so nothing of it may reach their devices (§11) — a push queued
+ * before the removal included. Only an active membership lends its id.
  */
 const workspaceFor = async ({ orgId, userId }) => {
   const slug = await workspaceSlugFor(orgId);
   let membershipId = null;
+  let revoked = false;
   if (orgId && userId && typeof prisma?.organizationMembership?.findFirst === "function") {
     try {
-      const row = await prisma.organizationMembership.findFirst({ where: { orgId, userId }, select: { id: true } });
-      membershipId = row?.id || null;
+      const row = await prisma.organizationMembership.findFirst({ where: { orgId, userId }, select: { id: true, status: true } });
+      if (row && row.status === ACTIVE_MEMBERSHIP) membershipId = row.id;
+      else if (row) revoked = true;
     } catch {
       membershipId = null;
     }
   }
-  return { orgId: orgId || null, slug, membershipId };
+  return { orgId: orgId || null, slug, membershipId, revoked };
 };
 
-/** The payload for one recipient of a notification: the row plus their workspace. */
-const buildPushPayload = async ({ notification, userId }) =>
-  payloadFor(notification, await workspaceFor({ orgId: notification.orgId, userId }));
+/**
+ * The payload for one recipient of a notification: the row plus their
+ * workspace — or null when the recipient's membership in that workspace is
+ * no longer active, so the caller sends nothing.
+ */
+const buildPushPayload = async ({ notification, userId }) => {
+  const workspace = await workspaceFor({ orgId: notification.orgId, userId });
+  return workspace.revoked ? null : payloadFor(notification, workspace);
+};
 
 /** Test hook: forget the remembered slugs. */
 const resetWorkspaceCache = () => workspaceSlugCache.clear();
@@ -363,8 +379,19 @@ const processPendingPushDeliveries = async ({ limit = 50, now = new Date(), user
     const notification = attempt.notification;
     // Every device of the person gets the same payload: the device belongs to
     // the identity, the payload names the workspace (fan-out per identity).
+    const payload = notification ? await buildPushPayload({ notification, userId: attempt.userId }) : null;
+    if (notification && !payload) {
+      // Queued before the workspace removed the person: their other
+      // workspaces keep the devices, this one no longer reaches them.
+      await prisma.notificationDeliveryAttempt.update({
+        where: { id: attempt.id },
+        data: { nextAttemptAt: attempt.nextAttemptAt ?? null, status: "skipped", errorCode: "PUSH_RECIPIENT_NOT_MEMBER", errorMessage: "The recipient is no longer an active member of the notification's workspace" },
+      });
+      result.skipped += 1;
+      continue;
+    }
     const outcome = notification
-      ? await sendToUser({ userId: attempt.userId, payload: await buildPushPayload({ notification, userId: attempt.userId }), urgency: notification.priority === "high" ? "high" : "normal" })
+      ? await sendToUser({ userId: attempt.userId, payload, urgency: notification.priority === "high" ? "high" : "normal" })
       : null;
     if (!notification || outcome.skipped) {
       await prisma.notificationDeliveryAttempt.update({
