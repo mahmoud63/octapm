@@ -2,7 +2,7 @@ const express = require('express');
 const crypto = require('crypto');
 const multer = require('multer');
 const path = require('path');
-const { body, param } = require('express-validator');
+const { body, param, query } = require('express-validator');
 const { validate } = require('../middleware/validate');
 const { asyncHandler } = require('../utils/async-handler');
 const { sendSuccess } = require('../utils/api-response');
@@ -127,12 +127,17 @@ router.get(
 );
 
 // POST /projects/:projectId/boq/upload
+//
+// With ?dryRun=true the workbook is parsed and compared with the current bill
+// and the answer is the comparison alone: no document, no revision, no rows,
+// no job. The real upload is the same request without the flag.
 router.post(
   '/upload',
   authenticate,
   CAN_MODIFY,
   uploadLimiter,
   aiGenerationLimiter,
+  [query('dryRun').optional().isBoolean().toBoolean(), validate],
   upload.single('file'),
   asyncHandler(async (req, res) => {
     if (!req.file) throw new HttpError(400, 'NO_FILE', 'No file uploaded');
@@ -140,6 +145,16 @@ router.post(
     const label = req.body?.label || null;
 
     try {
+      if (req.query.dryRun === true) {
+        const preview = await boqService.processBoqUpload(
+          projectId,
+          { path: req.file.path },
+          label,
+          { orgId: req.user.orgId, userId: req.user.id, dryRun: true },
+        );
+        return sendSuccess(res, preview);
+      }
+
       const document = await fileStorageService.uploadBoqFile({
         orgId: req.user.orgId,
         projectId,

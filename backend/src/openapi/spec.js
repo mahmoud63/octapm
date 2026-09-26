@@ -1757,6 +1757,27 @@ const components = {
       },
       ["jobId", "revisionId", "mode", "baselineLocked", "document"],
     ),
+    BoqUploadDryRunResponse: objectSchema(
+      {
+        dryRun: { type: "boolean", enum: [true] },
+        mode: { type: "string", enum: ["imported", "comparison_only"] },
+        baselineLocked: { type: "boolean" },
+        baseline: ref("BoqBaselineState"),
+        label: { type: "string", nullable: true },
+        rowCount: { type: "integer", minimum: 0 },
+        totalAmount: money,
+        comparison: objectSchema({
+          summary: ref("BoqRevisionComparisonSummary"),
+          added: arrayOf(ref("GenericObject")),
+          updated: arrayOf(ref("GenericObject")),
+          removed: arrayOf(ref("GenericObject")),
+          unchanged: arrayOf(ref("GenericObject")),
+          blocked: arrayOf(ref("GenericObject")),
+          rowLimit: { type: "integer" },
+        }),
+      },
+      ["dryRun", "mode", "baselineLocked", "rowCount", "comparison"],
+    ),
     BoqRevisionDetail: {
       allOf: [
         ref("BoqRevisionSummary"),
@@ -6578,9 +6599,16 @@ add(
     tag: "BOQ",
     summary: "Upload and process an Excel BOQ revision file.",
     description:
-      "Scans and type-checks the workbook, stores the original upload as private project document metadata, creates a BOQ revision, and compares it with current active BOQ rows. Unlocked projects import changed/new rows without deleting omitted rows. Baseline-locked projects save a comparison-only revision and do not mutate current BOQ rows, allocations, progress, IPC, or reporting basis.",
+      "Scans and type-checks the workbook, stores the original upload as private project document metadata, creates a BOQ revision, and compares it with current active BOQ rows. Unlocked projects import changed/new rows without deleting omitted rows. Baseline-locked projects save a comparison-only revision and do not mutate current BOQ rows, allocations, progress, IPC, or reporting basis. With dryRun=true the workbook is parsed and compared and the comparison is returned (BoqUploadDryRunResponse) without storing a document, a revision, any rows or a job.",
     operationId: "uploadBoq",
-    parameters: projectParams,
+    parameters: [
+      ...projectParams,
+      queryParam(
+        "dryRun",
+        "Parse and compare only; nothing is written.",
+        { type: "boolean", default: false },
+      ),
+    ],
     permissions: rolesPermission("pm", "planning_eng", "qs"),
     requestBody: fileUploadBody({
       description:
@@ -6588,7 +6616,9 @@ add(
       accepted: ".xlsx or .xls workbook, maximum 50 MB.",
       extraProperties: { label: { type: "string" } },
     }),
-    responseSchema: ref("BoqUploadResponse"),
+    responseSchema: {
+      oneOf: [ref("BoqUploadResponse"), ref("BoqUploadDryRunResponse")],
+    },
   }),
 );
 

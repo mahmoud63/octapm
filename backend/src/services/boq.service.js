@@ -52,6 +52,10 @@ const CURRENT_REVISION_STATUSES = [
   BOQ_REVISION_STATUS.BASELINED,
 ];
 
+// How many rows of each comparison list a dry-run report carries back. The
+// counts are always complete; the rows are a sample big enough to review.
+const DRY_RUN_ROW_LIMIT = 100;
+
 const BOQ_BASELINE_LOCK_REASON =
   'Pending BOQ revision comparison; baseline is locked';
 
@@ -729,6 +733,81 @@ async function createOfficialBoqActivityAllocation(
   return mapActivityAllocation({ ...allocation, activity }, boqItem);
 }
 
+/**
+ * What an upload would do, without doing it.
+ *
+ * The same comparison the real upload runs, against the same current rows and
+ * the same lock, but read-only: no revision, no rows, no document, no job. The
+ * codes that clash with hand-entered rows are reported as blocked rather than
+ * thrown, because the point of a preview is to see every problem at once.
+ */
+async function buildBoqUploadDryRun(projectId, itemsWithAmounts, label) {
+  const [existingUploadedItems, baseline, manualConflicts] = await Promise.all([
+    prisma.boqItem.findMany({
+      where: { projectId, isManual: false, isActive: true },
+      select: {
+        id: true,
+        code: true,
+        description: true,
+        qty: true,
+        unit: true,
+        rate: true,
+        amount: true,
+        sortOrder: true,
+        baselineLocked: true,
+      },
+    }),
+    getBoqBaselineLock(projectId),
+    prisma.boqItem.findMany({
+      where: {
+        projectId,
+        isManual: true,
+        isActive: true,
+        activeCodeKey: {
+          in: [...new Set(itemsWithAmounts.map((item) => item.code).filter(Boolean))],
+        },
+      },
+      select: { id: true, code: true },
+    }),
+  ]);
+
+  const comparison = buildBoqComparison(existingUploadedItems, itemsWithAmounts);
+  comparison.blocked = manualConflicts.map((item) => ({
+    code: normalizeCode(item.code),
+    existingId: item.id,
+    reason: 'DUPLICATE_BOQ_ITEM_CODE',
+    message: `BOQ item code "${item.code}" belongs to a hand-entered row; the upload would be refused`,
+  }));
+  comparison.summary.blocked = comparison.blocked.length;
+
+  const mode = baseline.locked
+    ? BOQ_REVISION_STATUS.COMPARISON_ONLY
+    : BOQ_REVISION_STATUS.IMPORTED;
+  const sample = (rows) => rows.slice(0, DRY_RUN_ROW_LIMIT);
+
+  return {
+    dryRun: true,
+    mode,
+    baselineLocked: baseline.locked,
+    baseline,
+    label: trimOrNull(label),
+    rowCount: itemsWithAmounts.length,
+    totalAmount: itemsWithAmounts.reduce(
+      (sum, row) => addMoney(sum, row.amount),
+      0,
+    ),
+    comparison: {
+      summary: comparison.summary,
+      added: sample(comparison.added),
+      updated: sample(comparison.updated),
+      removed: sample(comparison.removed),
+      unchanged: sample(comparison.unchanged),
+      blocked: sample(comparison.blocked),
+      rowLimit: DRY_RUN_ROW_LIMIT,
+    },
+  };
+}
+
 async function findBoqRevisionInProject(projectId, revisionId, tx = prisma) {
   const revision = await tx.boqRevision.findFirst({
     where: { id: revisionId, projectId },
@@ -977,7 +1056,9 @@ async function processBoqUpload(projectId, fileBuffer, label, options = {}) {
       });
   if (!project)
     throw new HttpError(404, 'PROJECT_NOT_FOUND', 'Project not found');
-  await assertAiQuota(project.orgId);
+  // A dry run parses and compares only; nothing is written and no AI job is
+  // queued, so it does not spend the organisation's AI quota.
+  if (!options.dryRun) await assertAiQuota(project.orgId);
 
   let itemsWithAmounts;
   try {
@@ -1000,6 +1081,8 @@ async function processBoqUpload(projectId, fileBuffer, label, options = {}) {
         'BOQ file contains validation errors',
         {
           errors: validation.errors,
+          errorCount: validation.errorCount ?? validation.errors.length,
+          truncated: Boolean(validation.truncated),
         },
       );
     }
@@ -1026,6 +1109,10 @@ async function processBoqUpload(projectId, fileBuffer, label, options = {}) {
         .catch(() => {});
     }
     throw error;
+  }
+
+  if (options.dryRun) {
+    return buildBoqUploadDryRun(projectId, itemsWithAmounts, label);
   }
 
   // Step 4: Persist a revision and compare/import without deleting current rows.

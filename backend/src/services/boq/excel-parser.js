@@ -6,25 +6,53 @@ const { normalizeBoqCode } = require("../../utils/boq-code");
 const REQUIRED_HEADERS = ["code", "description", "quantity", "unit", "rate"];
 const HEADER_ALIASES = {
   "item no": "code",
+  "item no.": "code",
   "item number": "code",
   "item code": "code",
+  item: "code",
+  "s.n.": "code",
+  "s.n": "code",
+  sn: "code",
+  "sr no": "code",
+  "sr. no.": "code",
+  "ref": "code",
   no: "code",
   "no.": "code",
   desc: "description",
   "item description": "description",
   "work description": "description",
+  "description of work": "description",
+  "description of works": "description",
+  uom: "unit",
+  "unit of measure": "unit",
+  "unit of measurement": "unit",
   qty: "quantity",
   "qty.": "quantity",
   "unit rate": "rate",
   "unit price": "rate",
+  "rate per unit": "rate",
   total: "amount",
   "total amount": "amount",
   "line total": "amount",
 };
 
+// A validation failure on a big workbook must come back as one readable
+// answer, not one line per row of a 7,000-row tender bill.
+const MAX_REPORTED_ERRORS = 200;
+
+// "Unit Rate ($)", "Amount (AED)": the currency in brackets is a label, not a
+// different column.
 function normalizeHeader(header) {
-  return (header ?? "").toString().toLowerCase().trim().replace(/\s+/g, " ");
+  return (header ?? "")
+    .toString()
+    .toLowerCase()
+    .replace(/\([^)]*\)/g, " ")
+    .trim()
+    .replace(/\s+/g, " ");
 }
+
+const isNumeric = (value) =>
+  value !== "" && value !== null && value !== undefined && Number.isFinite(Number(value));
 
 function parseWorkbookRows(workbook) {
   const sheetName = workbook.SheetNames[0];
@@ -84,6 +112,10 @@ function parseWorkbookRows(workbook) {
 
     if (!rawCode && !rawDesc && !rawQty && !rawUnit && !rawRate) continue;
     if (!rawQty && !rawRate) continue;
+    // A second header line under the first ("In figure" / "In words" beneath
+    // "Rate") has words where the numbers go and no item code: a label, not
+    // a row to price.
+    if (!rawCode && !isNumeric(rawQty) && !isNumeric(rawRate)) continue;
 
     parsed.push({
       rowIndex: i + headerRowIdx + 2,
@@ -188,7 +220,12 @@ function validateBoqRows(rows) {
     }
   });
 
-  return { valid: errors.length === 0, errors };
+  return {
+    valid: errors.length === 0,
+    errors: errors.slice(0, MAX_REPORTED_ERRORS),
+    errorCount: errors.length,
+    truncated: errors.length > MAX_REPORTED_ERRORS,
+  };
 }
 
 module.exports = {
