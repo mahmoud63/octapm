@@ -92,9 +92,11 @@ const deleteOrganisation = async (org) => {
   // the reason sits at the end of a Prisma message; the start is a code frame
   const reasonOf = (error) => error.message.split("\n").map((line) => line.trim()).filter(Boolean).slice(-4).join(" ").slice(0, 400);
   const blockerOf = (error) => {
-    const match = /constraint \\?"([A-Za-z0-9]+)_([A-Za-z0-9]+)_fkey\\?"/.exec(error.message);
+    // Prisma names a constraint Table_column_fkey — and, since the tenant
+    // keys, Table_column_orgId_fkey: the first column is the one to clear by.
+    const match = /constraint \\?"([A-Za-z0-9]+)_([A-Za-z0-9_]+?)_fkey\\?"/.exec(error.message);
     const modelKey = match ? modelKeyFor(match[1]) : null;
-    return modelKey ? { table: match[1], modelKey, column: match[2] } : null;
+    return modelKey ? { table: match[1], modelKey, column: match[2].split("_")[0] } : null;
   };
   // Delete the rows of `modelKey` where `column` is one of `ids`; when a RESTRICT
   // constraint answers, clear the blocking table's rows that point at these rows
