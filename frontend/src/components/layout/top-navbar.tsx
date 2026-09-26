@@ -312,6 +312,8 @@ function UserDropdown() {
 // ── Mobile sheet nav ──────────────────────────────────────────────────────
 function MobileNav({ href, items }: { href: string; items: NavItem[] }) {
   const [open, setOpen] = React.useState(false)
+  const workspace = useAuthStore((state) => state.auth.workspace)
+  const memberships = useAuthStore((state) => state.auth.memberships)
 
   return (
     <Sheet open={open} onOpenChange={setOpen}>
@@ -334,6 +336,41 @@ function MobileNav({ href, items }: { href: string; items: NavItem[] }) {
           </SheetTitle>
         </SheetHeader>
         <nav className='flex flex-col gap-0.5 p-3'>
+          {/* The workspace, on phone widths where the header has no room for
+              the switcher (switching doc §6): the current one named, the
+              others one tap away. */}
+          {workspace && (
+            <div className='mb-2 border-b pb-2' data-testid='mobile-workspaces'>
+              <div className='flex items-center gap-2 px-3 py-1.5 text-xs font-semibold tracking-wider text-muted-foreground uppercase'>
+                Workspace
+                <WorkspaceKindBadge kind={workspace.kind} />
+              </div>
+              {memberships.map((membership) => {
+                const segment = workspaceSegment(membership)
+                const current = membership.orgId === workspace.orgId
+                return (
+                  <Link
+                    key={membership.orgId}
+                    to='/o/$orgSlug'
+                    params={{ orgSlug: segment }}
+                    onClick={() => setOpen(false)}
+                    disabled={membership.status !== 'active'}
+                    className={cn(
+                      'flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium',
+                      current
+                        ? 'bg-accent text-accent-foreground'
+                        : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground'
+                    )}
+                  >
+                    <span className='truncate'>{membership.name ?? segment}</span>
+                    {current && (
+                      <span className='ms-auto text-[10px] uppercase'>current</span>
+                    )}
+                  </Link>
+                )
+              })}
+            </div>
+          )}
           {items.map((item) => {
             if (isNavLink(item)) {
               const active =
@@ -470,9 +507,10 @@ export function TopNavbar() {
         </Link>
 
         {/* Workspace first, then the project inside it (switching doc §6).
-            The workspace switcher stays visible below md; the project
-            switcher hides there as before. */}
-        <WorkspaceSwitcher className='max-w-40 sm:max-w-56' />
+            The workspace switcher stays visible below md, where the project
+            switcher hides as before; on phone widths the workspace moves
+            into the sheet menu so the header cannot overflow. */}
+        <WorkspaceSwitcher className='hidden min-w-0 shrink sm:inline-flex sm:max-w-36 lg:max-w-56' />
         <ProjectSwitcher className='hidden md:inline-flex' />
 
         {/* Desktop nav */}
@@ -499,7 +537,7 @@ export function TopNavbar() {
 
         {/* Right actions */}
         <div className='ms-auto flex items-center gap-2'>
-          <CreateMenu className='hidden sm:inline-flex' />
+          <CreateMenu className='hidden lg:inline-flex' />
           <OutboxStatus />
           <RealtimeStatus className='hidden sm:inline-flex' />
           <Search className='hidden sm:flex' />
