@@ -170,6 +170,20 @@ liveDescribe("PC-2: BOQ revisions, upload dry-run and xlsx schedule import", () 
       expect(detail.body.data.workflowEvents.map((e) => e.toStatus)).toEqual(["imported"]);
     });
 
+    it("reviews only the current revision: the older one is refused while a newer one has applied its rows", async () => {
+      // Revision 2's rows replaced seven of revision 1's; signing off or
+      // locking revision 1 would baseline rows its comparison never saw.
+      for (const step of ["submit", "approve", "lock"]) {
+        const refused = await post(`/api/v1/projects/${project.id}/boq/revisions/${firstRevisionId}/${step}`, {});
+        expect([step, refused.status]).toEqual([step, 409]);
+        expect([step, refused.body.error.code]).toEqual([step, "BOQ_REVISION_NOT_CURRENT"]);
+        expect(refused.body.error.details).toMatchObject({ revisionNumber: 1, currentRevisionId: secondRevisionId, currentRevisionNumber: 2 });
+      }
+      const rows = await prisma.boqRevision.findMany({ where: { projectId: project.id }, orderBy: { revisionNumber: "asc" } });
+      expect(rows.map((r) => [r.revisionNumber, r.status, r.baselineLocked])).toEqual([[1, "imported", false], [2, "imported", false]]);
+      expect(await prisma.approvalWorkflowEvent.count({ where: { recordType: "boq_revision", recordId: firstRevisionId } })).toBe(1);
+    });
+
     it("submits and approves the revision, recording each step", async () => {
       const locked = await post(`/api/v1/projects/${project.id}/boq/revisions/${secondRevisionId}/lock`, {});
       expect(locked.status).toBe(409);
@@ -233,6 +247,19 @@ liveDescribe("PC-2: BOQ revisions, upload dry-run and xlsx schedule import", () 
       const audit = await prisma.auditEvent.findFirst({ where: { entityType: "boq_revision", entityId: secondRevisionId, action: "baseline_locked" } });
       expect(audit).not.toBeNull();
       expect(audit.actorId).toBe(live.user.id);
+
+      // Revision 1's rows were replaced by revision 2's; the lock supersedes
+      // it so one revision is the baseline and the trail says which one.
+      const first = await prisma.boqRevision.findUnique({ where: { id: firstRevisionId } });
+      expect(first).toMatchObject({ status: "superseded", baselineLocked: false });
+      expect(after.revisions.map((r) => [r.revisionNumber, r.status])).toEqual([[2, "baselined"], [1, "superseded"]]);
+      const supersededEvent = await prisma.approvalWorkflowEvent.findFirst({
+        where: { recordType: "boq_revision", recordId: firstRevisionId, toStatus: "superseded" },
+      });
+      expect(supersededEvent).toMatchObject({ fromStatus: "imported", actorId: live.user.id });
+      expect(supersededEvent.metadataJson).toMatchObject({ supersededByRevisionId: secondRevisionId });
+      const supersededAudit = await prisma.auditEvent.findFirst({ where: { entityType: "boq_revision", entityId: firstRevisionId, action: "superseded" } });
+      expect(supersededAudit).not.toBeNull();
     });
 
     it("saves a third upload as comparison_only without touching the rows", async () => {
@@ -337,6 +364,55 @@ liveDescribe("PC-2: BOQ revisions, upload dry-run and xlsx schedule import", () 
       expect(details.truncated).toBe(true);
       expect(details.errors[0]).toMatchObject({ row: expect.any(Number), field: expect.any(String), message: expect.any(String) });
       expect(await footprint(secondProject.id)).toEqual(before);
+    });
+  });
+
+  describe("upload dry-run and the AI generation limit", () => {
+    // An API of its own with one AI generation per hour, so the counters
+    // (process memory without Redis) start empty and the limit is visible.
+    let limitedApi;
+    let limitedProject;
+    const limitedUpload = async (dryRun) => {
+      const form = new FormData();
+      form.append("file", new Blob([fs.readFileSync(CONSTRUCTION_BOQ)], { type: XLSX_MIME }), "Construction_BOQ.xlsx");
+      const response = await fetch(`${limitedApi.base}/api/v1/projects/${limitedProject.id}/boq/upload${dryRun ? "?dryRun=true" : ""}`, {
+        method: "POST",
+        headers: auth(),
+        body: form,
+      });
+      return { status: response.status, body: await response.json() };
+    };
+
+    beforeAll(async () => {
+      limitedProject = await prisma.project.create({ data: { orgId: live.org.id, name: "LiveTest PC-2 AI limit" } });
+      limitedApi = await startApi({ RATE_LIMIT_AI_MAX: "1", RATE_LIMIT_UPLOAD_MAX: "1000" });
+    });
+
+    afterAll(async () => {
+      if (limitedApi) await limitedApi.stop();
+    });
+
+    it("does not count a dry run against the AI generation window", async () => {
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        const preview = await limitedUpload(true);
+        expect([attempt, preview.status]).toEqual([attempt, 200]);
+        expect(preview.body.data.dryRun).toBe(true);
+      }
+      expect(await footprint(limitedProject.id)).toMatchObject({ revisions: 0, items: 0, jobs: 0 });
+
+      // The one real upload of the hour still goes through after the previews...
+      const real = await limitedUpload(false);
+      expect(real.status).toBe(200);
+      expect(real.body.data.mode).toBe("imported");
+      const afterReal = await footprint(limitedProject.id);
+      expect(afterReal).toMatchObject({ revisions: 1, items: 10 });
+      expect(afterReal.jobs).toBeGreaterThan(0);
+
+      // ...and the AI window still guards the second one.
+      const second = await limitedUpload(false);
+      expect(second.status).toBe(429);
+      expect(second.body.error.details).toMatchObject({ bucket: "ai-generation" });
+      expect(await footprint(limitedProject.id)).toEqual(afterReal);
     });
   });
 

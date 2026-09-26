@@ -155,12 +155,19 @@ export function BoqRevisionPanel({
           </thead>
           <tbody>
             {revisions.map((revision) => {
+              // Only the current revision — the newest whose rows are on
+              // the bill — can be reviewed; the API refuses the others with
+              // BOQ_REVISION_NOT_CURRENT, so the buttons are not offered.
               const isCurrent = revision.id === currentRevisionId
-              const showSubmit = canSubmit && revision.status === 'imported'
+              const showSubmit =
+                isCurrent && canSubmit && revision.status === 'imported'
               const showApprove =
-                canApprove && revision.status === 'under_review'
+                isCurrent && canApprove && revision.status === 'under_review'
               const showLock =
-                canApprove && revision.status === 'approved' && !locked
+                isCurrent &&
+                canApprove &&
+                revision.status === 'approved' &&
+                !locked
               return (
                 <tr
                   key={revision.id}

@@ -891,11 +891,44 @@ function refuseComparisonOnlyReview(revision) {
   );
 }
 
+/**
+ * The revision under review must be the one whose rows are the bill.
+ *
+ * A later upload applies its rows over the earlier revision's, so signing
+ * off — let alone locking — an earlier revision would baseline rows its own
+ * comparison never described. The newest applied revision is the only one
+ * that can be reviewed; the older ones are superseded when the bill locks.
+ */
+async function assertBoqRevisionCurrent(tx, projectId, revision) {
+  const newer = await tx.boqRevision.findFirst({
+    where: {
+      projectId,
+      status: { in: CURRENT_REVISION_STATUSES },
+      revisionNumber: { gt: revision.revisionNumber },
+    },
+    orderBy: { revisionNumber: 'desc' },
+    select: { id: true, revisionNumber: true, status: true },
+  });
+  if (!newer) return;
+  throw new HttpError(
+    409,
+    'BOQ_REVISION_NOT_CURRENT',
+    `Revision ${revision.revisionNumber} is no longer the current BOQ: revision ${newer.revisionNumber} has applied its rows since. Review the current revision instead`,
+    {
+      revisionId: revision.id,
+      revisionNumber: revision.revisionNumber,
+      currentRevisionId: newer.id,
+      currentRevisionNumber: newer.revisionNumber,
+    },
+  );
+}
+
 async function submitBoqRevision(projectId, revisionId, options = {}) {
   await assertProjectAccess(projectId, options.orgId);
   const result = await prisma.$transaction(async (tx) => {
     const revision = await findBoqRevisionInProject(projectId, revisionId, tx);
     refuseComparisonOnlyReview(revision);
+    await assertBoqRevisionCurrent(tx, projectId, revision);
     return transitionBoqRevision(tx, {
       orgId: options.orgId,
       projectId,
@@ -915,6 +948,7 @@ async function approveBoqRevision(projectId, revisionId, options = {}) {
   const result = await prisma.$transaction(async (tx) => {
     const revision = await findBoqRevisionInProject(projectId, revisionId, tx);
     refuseComparisonOnlyReview(revision);
+    await assertBoqRevisionCurrent(tx, projectId, revision);
     return transitionBoqRevision(tx, {
       orgId: options.orgId,
       projectId,
@@ -938,8 +972,10 @@ async function approveBoqRevision(projectId, revisionId, options = {}) {
  * instead of it: `getBoqBaselineLock` answers "locked" for either. Once
  * locked there is no unlock, exactly as a baselined schedule has none; a
  * later upload becomes a comparison-only revision, and a later lock is
- * refused. The previously baselined revision, if any, is superseded so one
- * revision is the baseline at a time.
+ * refused. Only the current revision — the newest one whose rows were
+ * applied — can be locked; the earlier applied revisions, whose rows it
+ * replaced, are superseded at that moment so one revision is the baseline
+ * and the audit trail says which uploads led up to it.
  */
 async function lockBoqBaseline(projectId, revisionId, options = {}) {
   await assertProjectAccess(projectId, options.orgId);
@@ -961,6 +997,7 @@ async function lockBoqBaseline(projectId, revisionId, options = {}) {
         { baseline: { locked: true, source: 'boq_revision', boqRevisionId: alreadyLocked.id, revisionNumber: alreadyLocked.revisionNumber, lockedAt: alreadyLocked.lockedAt, lockedBy: alreadyLocked.lockedBy } },
       );
     }
+    await assertBoqRevisionCurrent(tx, projectId, revision);
     if (revision.status !== BOQ_REVISION_STATUS.APPROVED) {
       throw new HttpError(
         409,
@@ -971,12 +1008,16 @@ async function lockBoqBaseline(projectId, revisionId, options = {}) {
     }
 
     const at = new Date();
+    // The earlier applied revisions: each one's rows were replaced by the
+    // next upload's, and the bill being locked is the sum of them all under
+    // this revision's comparison. They stop being reviewable here.
     const previous = await tx.boqRevision.findMany({
       where: {
         projectId,
         id: { not: revision.id },
-        status: BOQ_REVISION_STATUS.BASELINED,
+        status: { in: CURRENT_REVISION_STATUSES },
       },
+      orderBy: { revisionNumber: 'asc' },
     });
     for (const old of previous) {
       await transitionBoqRevision(tx, {
@@ -985,7 +1026,7 @@ async function lockBoqBaseline(projectId, revisionId, options = {}) {
         revision: old,
         toStatus: BOQ_REVISION_STATUS.SUPERSEDED,
         action: auditService.ACTIONS.SUPERSEDED,
-        comment: 'Superseded by a newer BOQ baseline',
+        comment: `Superseded by the BOQ baseline locked on revision ${revision.revisionNumber}`,
         options,
         metadata: { transition: 'revision.supersede_for_baseline', supersededByRevisionId: revision.id },
       });
