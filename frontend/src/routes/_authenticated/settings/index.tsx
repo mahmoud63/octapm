@@ -1,6 +1,8 @@
 import { createFileRoute } from '@tanstack/react-router'
-import { SettingsProfile } from '@/features/settings/profile'
 
-export const Route = createFileRoute('/_authenticated/settings/')({
-  component: SettingsProfile,
-})
+/**
+ * Legacy path, kept so typed links to it still compile. Its parent route
+ * redirects every visit to the same page under the active workspace,
+ * `/o/{workspace}/settings/` (ENT-4), before this route loads.
+ */
+export const Route = createFileRoute('/_authenticated/settings/')({})

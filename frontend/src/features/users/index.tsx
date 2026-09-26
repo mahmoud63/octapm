@@ -11,7 +11,7 @@ import { useUsers, UsersProvider } from './components/users-provider'
 import { UsersTable } from './components/users-table'
 import { useUsersQuery } from './hooks/use-users'
 
-const route = getRouteApi('/_authenticated/users/')
+const route = getRouteApi('/_authenticated/o/$orgSlug/users/')
 
 // Maps TanStack column ids to the API's `sortBy` values.
 const SORT_COLUMN_MAP: Record<string, 'name' | 'email' | 'projects'> = {

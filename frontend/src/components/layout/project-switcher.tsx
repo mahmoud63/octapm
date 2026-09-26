@@ -1,6 +1,7 @@
 import * as React from 'react'
 import { Link, useNavigate, useParams } from '@tanstack/react-router'
 import { Check, ChevronsUpDown, FolderKanban, Plus } from 'lucide-react'
+import { useAuthStore } from '@/stores/auth-store'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import {
@@ -24,12 +25,15 @@ const statusLabel = (status: string | null | undefined) =>
 
 /**
  * Header project picker: shows the project currently open (from the route)
- * and lets the user jump to any other project they can access.
+ * and lets the user jump to any other project they can access. The list is
+ * the active workspace's (`/projects` is org-scoped by the token), and every
+ * destination is written under that workspace (ENT-4).
  */
 export function ProjectSwitcher({ className }: { className?: string }) {
   const navigate = useNavigate()
   const params = useParams({ strict: false }) as { projectId?: string }
   const currentProjectId = params.projectId
+  const orgSlug = useAuthStore((state) => state.auth.workspace?.segment ?? '')
   const { data, isLoading } = useProjects()
   const [open, setOpen] = React.useState(false)
 
@@ -40,8 +44,8 @@ export function ProjectSwitcher({ className }: { className?: string }) {
     setOpen(false)
     if (projectId === currentProjectId) return
     navigate({
-      to: '/projects/$projectId',
-      params: { projectId },
+      to: '/o/$orgSlug/projects/$projectId',
+      params: { orgSlug, projectId },
     })
   }
 
@@ -108,13 +112,21 @@ export function ProjectSwitcher({ className }: { className?: string }) {
             <CommandSeparator />
             <CommandGroup>
               <CommandItem asChild value='all projects'>
-                <Link to='/projects' onClick={() => setOpen(false)}>
+                <Link
+                  to='/o/$orgSlug/projects'
+                  params={{ orgSlug }}
+                  onClick={() => setOpen(false)}
+                >
                   <FolderKanban className='size-4' />
                   All projects
                 </Link>
               </CommandItem>
               <CommandItem asChild value='new project'>
-                <Link to='/projects' onClick={() => setOpen(false)}>
+                <Link
+                  to='/o/$orgSlug/projects'
+                  params={{ orgSlug }}
+                  onClick={() => setOpen(false)}
+                >
                   <Plus className='size-4' />
                   New project
                 </Link>

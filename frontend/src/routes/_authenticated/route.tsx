@@ -27,7 +27,22 @@ export const Route = createFileRoute('/_authenticated')({
   beforeLoad: async () => {
     const { auth } = useAuthStore.getState()
 
-    if (auth.user) return
+    if (auth.user) {
+      // A sign-in installs the person but not their workspaces; the routes
+      // below need both (the `/o/{workspace}` guard, the legacy redirects),
+      // and the profile is the one place that carries them (ENT-4).
+      if (!auth.membershipsLoaded) {
+        try {
+          auth.setUser(await getMyProfile())
+        } catch (error) {
+          if (isUnauthenticated(error)) {
+            auth.reset()
+            throw redirect({ to: '/landing' })
+          }
+        }
+      }
+      return
+    }
 
     try {
       auth.setUser(await getMyProfile())

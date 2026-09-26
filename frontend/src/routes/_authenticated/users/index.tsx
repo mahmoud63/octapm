@@ -1,6 +1,6 @@
 import z from 'zod'
 import { createFileRoute } from '@tanstack/react-router'
-import { UsersGate } from '@/features/users'
+import { legacyWorkspaceRedirect } from '@/lib/workspace/legacy'
 import { roles } from '@/features/users/data/data'
 
 const usersSearchSchema = z.object({
@@ -19,7 +19,8 @@ const usersSearchSchema = z.object({
   filter: z.string().optional().catch(''),
 })
 
+/** Legacy path: the same page under the active workspace, `/o/{workspace}/users` (ENT-4). */
 export const Route = createFileRoute('/_authenticated/users/')({
   validateSearch: usersSearchSchema,
-  component: UsersGate,
+  beforeLoad: legacyWorkspaceRedirect,
 })

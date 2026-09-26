@@ -20,6 +20,8 @@ import {
 import { useProjects } from '@/features/projects/hooks/use-projects'
 
 const REMEMBER_KEY = 'octa.quickActions.projectId'
+/** The header's "+ Create" menu (ENT-4) reads the same remembered project. */
+export const QUICK_ACTIONS_PROJECT_KEY = REMEMBER_KEY
 
 type QuickAction = {
   key: string
@@ -30,7 +32,8 @@ type QuickAction = {
   to: (projectId: string) => { to: string; params?: Record<string, string>; search: Record<string, string> }
 }
 
-const ACTIONS: QuickAction[] = [
+/** The record quick actions, the one source for the dashboard and the header's "+ Create" menu (ENT-4). */
+export const QUICK_ACTIONS: QuickAction[] = [
   {
     key: 'rfi',
     label: 'New RFI',
@@ -109,7 +112,7 @@ export function QuickActions() {
     }
   }
 
-  const allowed = ACTIONS.filter((action) => canPerform(role, action.module, 'create'))
+  const allowed = QUICK_ACTIONS.filter((action) => canPerform(role, action.module, 'create'))
   if (!allowed.length) return null
 
   return (

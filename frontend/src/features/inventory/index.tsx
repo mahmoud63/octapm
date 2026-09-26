@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
-import { Route } from '@/routes/_authenticated/inventory'
+import { Route } from '@/routes/_authenticated/o/$orgSlug/inventory'
 import { useAuthStore } from '@/stores/auth-store'
 import { Navigate } from '@tanstack/react-router'
 import { useCanPerform } from '@/lib/permissions'

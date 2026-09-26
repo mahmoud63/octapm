@@ -11,7 +11,13 @@ import { toast } from 'sonner'
 import { registerSW } from 'virtual:pwa-register'
 import { useAuthStore } from '@/stores/auth-store'
 import { handleServerError } from '@/lib/handle-server-error'
-import { onOutboxSynced, startOutbox } from '@/lib/offline/outbox'
+import {
+  lockOutbox,
+  onOutboxSynced,
+  outboxOwnerKey,
+  setOutboxOwner,
+  startOutbox,
+} from '@/lib/offline/outbox'
 import { DirectionProvider } from './context/direction-provider'
 import { FontProvider } from './context/font-provider'
 import { ThemeProvider } from './context/theme-provider'
@@ -78,11 +84,23 @@ const queryClient = new QueryClient({
   }),
 })
 
-// Everything fetched belongs to the person who is signed in. Whenever the
-// identity changes — sign-in, sign-out, or a refresh that installs another
-// person's session — the cache is emptied (Phase 21D, CX21-456 / CX21-467).
+// Everything fetched belongs to the person who is signed in, in the workspace
+// they are signed in to. Whenever the identity changes — sign-in, sign-out, or
+// a refresh that installs another person's session — or the membership the
+// token is bound to changes (a workspace switch, ENT-4), the cache is emptied
+// (Phase 21D, CX21-456 / CX21-467; workspace switching doc §3, step 5).
+const membershipKey = (state: ReturnType<typeof useAuthStore.getState>) =>
+  state.auth.workspace
+    ? `${state.auth.workspace.orgId}:${state.auth.workspace.membershipId ?? ''}`
+    : null
 useAuthStore.subscribe((state, previous) => {
-  if (state.auth.user?.id !== previous.auth.user?.id) queryClient.clear()
+  if (state.auth.user?.id !== previous.auth.user?.id) {
+    queryClient.clear()
+    return
+  }
+  const before = membershipKey(previous)
+  const after = membershipKey(state)
+  if (before && after && before !== after) queryClient.clear()
 })
 
 // Create a new router instance
@@ -112,7 +130,25 @@ if ('serviceWorker' in navigator && import.meta.env.PROD) {
     onOfflineReady: () => toast.success('OctaPM is ready to work offline'),
   })
 }
-startOutbox()
+// The outbox replays only for the workspace the session is bound to
+// (workspace switching doc §4, rule 3): it starts once a session names its
+// workspace, keyed `userId:orgId`, and never before. Items queued before this
+// wave carry no owner and are claimed by the first owner set on this browser;
+// another person's items are dropped, another workspace's are kept locked.
+let outboxOwner: string | null = null
+const followSession = (state: ReturnType<typeof useAuthStore.getState>) => {
+  const { user, workspace } = state.auth
+  const owner = user && workspace ? outboxOwnerKey(user.id, workspace.orgId) : null
+  if (owner === outboxOwner) return
+  outboxOwner = owner
+  if (!owner) {
+    lockOutbox()
+    return
+  }
+  void setOutboxOwner(owner).then(() => startOutbox())
+}
+useAuthStore.subscribe(followSession)
+followSession(useAuthStore.getState())
 onOutboxSynced((projectIds) => {
   toast.success(
     projectIds.length === 1

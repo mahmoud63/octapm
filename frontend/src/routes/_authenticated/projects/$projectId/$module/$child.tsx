@@ -1,13 +1,8 @@
-import { createFileRoute, notFound } from '@tanstack/react-router'
-import { ProjectDetailPage } from '@/features/projects/components/project-detail-page'
-import { moduleFromSlug } from '@/features/projects/lib/project-modules'
+import { createFileRoute } from '@tanstack/react-router'
 
-/** A module sub-tab, e.g. `/projects/:id/quality/ncr` or `/projects/:id/schedule/gantt`. */
-export const Route = createFileRoute(
-  '/_authenticated/projects/$projectId/$module/$child'
-)({
-  beforeLoad: ({ params }) => {
-    if (!moduleFromSlug(params.module)) throw notFound()
-  },
-  component: ProjectDetailPage,
-})
+/**
+ * Legacy path, kept so typed links to it still compile. Its parent route
+ * redirects every visit to the same page under the active workspace,
+ * `/o/{workspace}/projects/$projectId/$module/$child` (ENT-4), before this route loads.
+ */
+export const Route = createFileRoute('/_authenticated/projects/$projectId/$module/$child')({})
