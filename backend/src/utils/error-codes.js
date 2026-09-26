@@ -575,6 +575,23 @@ const ERROR_CODE_CATALOG = Object.freeze({
     category: "conflict",
     message: "A unit with this code already exists for this organisation",
   },
+  // Tenant hardening (ENT-3): a job's subject is loaded inside the job's
+  // organisation. These land in a job's result rather than in a response.
+  BOQ_JOB_PROJECT_NOT_FOUND: {
+    status: 404,
+    category: "boq",
+    message: "The BOQ job's project does not exist in the job's organisation",
+  },
+  JOB_ORG_MISMATCH: {
+    status: 400,
+    category: "system",
+    message: "The job's payload names an organisation other than the job's",
+  },
+  JOB_ORG_REQUIRED: {
+    status: 400,
+    category: "system",
+    message: "The job carries no organisation",
+  },
 });
 
 const DEFAULT_CODE_BY_STATUS = Object.freeze({

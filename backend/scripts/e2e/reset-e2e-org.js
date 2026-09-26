@@ -39,6 +39,7 @@ require("../../src/utils/data-script-guard").exitUnlessDataScriptAllowed(
 );
 
 const { prisma } = require("../../src/config/db");
+const { purgeReferenceCounters } = require("../../src/utils/reference-number");
 
 const E2E_ORG_NAME = process.env.E2E_ORG_NAME || "OctaPM E2E";
 const E2E_EMAIL_DOMAIN = process.env.E2E_EMAIL_DOMAIN || "octapm-e2e.test";
@@ -137,6 +138,13 @@ const deleteOrganisation = async (org) => {
       }
     }
   }
+  // ReferenceCounter carries the tenant in its scope key, not in a column, so
+  // nothing cascades it: the re-seeded organisation gets new ids, and the old
+  // counters would otherwise pile up one set per run (ENT-3).
+  let counters = 0;
+  for (const projectId of projectIds) counters += await purgeReferenceCounters(prisma, { projectId });
+  counters += await purgeReferenceCounters(prisma, { orgId: org.id });
+  console.log(`  purged ${counters} reference counters`);
 };
 
 const printCounts = (label, counts) => {

@@ -35,6 +35,7 @@ router.get(
       orgId: req.user.orgId,
       userId: req.user.id,
       role: req.user.role,
+      isCompanyAdmin: Boolean(req.user.isCompanyAdmin),
       query: req.query,
       apiClient: req.apiClient || null,
     });

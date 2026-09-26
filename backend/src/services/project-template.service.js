@@ -356,7 +356,7 @@ const createProjectFromTemplate = async ({
     for (const assignment of toArray(template.assignmentsJson)) {
       await tx.projectAssignment.upsert({
         where: { projectId_userId: { projectId: project.id, userId: assignment.userId } },
-        create: { projectId: project.id, userId: assignment.userId, role: assignment.role || "project_member" },
+        create: { orgId, projectId: project.id, userId: assignment.userId, role: assignment.role || "project_member" },
         update: { role: assignment.role || "project_member" },
       });
       if (assignment.permissionTemplateId && tx.projectUserPermission?.upsert) {

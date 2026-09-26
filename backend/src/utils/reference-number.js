@@ -183,4 +183,35 @@ const nextNumber = async (client, spec) => {
   return number;
 };
 
-module.exports = { nextReference, nextRef, nextNumber, prisma };
+/**
+ * Drops the counters of a project or an organisation once it is gone.
+ *
+ * ReferenceCounter sits below tenancy on purpose (schema comment): its rows
+ * carry the tenant in the scope key rather than in a column, so no foreign
+ * key cascades them away. Both key shapes embed the id — `projectId:<id>|…`
+ * / `orgId:<id>|…` for nextReference, and `…|projectId:<id>` /
+ * `…|orgId:<id>` for nextNumber — so a purge is a prefix-or-segment match on
+ * the scope string (tenant matrix §1.5, ENT-3).
+ *
+ * For a hard delete only — never an archive. A counter dropped while the
+ * register still exists reseeds from the register's highest reference the
+ * next time the scope is used, and any reference whose row was deleted before
+ * that would be handed out again; the archive keeps its counters for that
+ * reason. Today no product path hard deletes a project or an organisation:
+ * the callers are the E2E reset and the live kit, which delete throwaway
+ * organisations outright and would otherwise leave their counters behind.
+ */
+const purgeReferenceCounters = async (client, { projectId = null, orgId = null } = {}) => {
+  const column = projectId ? "projectId" : orgId ? "orgId" : null;
+  const id = projectId || orgId;
+  if (!column) throw new Error("reference-number: purge needs a projectId or an orgId");
+  const segment = `${column}:${id}`;
+  const rows = await client.$queryRaw`
+    DELETE FROM "ReferenceCounter"
+    WHERE "scope" LIKE ${`${segment}|%`} OR "scope" LIKE ${`%|${segment}`} OR "scope" LIKE ${`%|${segment}|%`}
+    RETURNING "scope"
+  `;
+  return rows.length;
+};
+
+module.exports = { nextReference, nextRef, nextNumber, purgeReferenceCounters, prisma };

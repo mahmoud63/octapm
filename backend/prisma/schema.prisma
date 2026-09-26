@@ -165,6 +165,26 @@ model Organisation {
   subcontractorEvaluations SubcontractorEvaluation[]
 
   costLedgerEntries       CostLedgerEntry[]
+  signatures                   Signature[]
+  dailyLogManpower             DailyLogManpower[]
+  dailyLogEquipment            DailyLogEquipment[]
+  dailyLogDeliveries           DailyLogDelivery[]
+  dailyLogVisitors             DailyLogVisitor[]
+  dailyLogDelays               DailyLogDelay[]
+  dailyLogNotes                DailyLogNote[]
+  rfiResponses                 RfiResponse[]
+  approvalWorkflowEvents       ApprovalWorkflowEvent[]
+  notificationDeliveryAttempts NotificationDeliveryAttempt[]
+  bidPackageLines              BidPackageLine[]
+  bidAddenda                   BidAddendum[]
+  bidInvitations               BidInvitation[]
+  bidQuestions                 BidQuestion[]
+  bids                         Bid[]
+  bidLines                     BidLine[]
+  assistantMessages            AssistantMessage[]
+  prequalCriteria              PrequalCriterion[]
+  evaluationCriteria           EvaluationCriterion[]
+
 }
 
 model User {
@@ -645,6 +665,16 @@ model Project {
   costLedgerEntries             CostLedgerEntry[]
 
   // Target for the composite tenant foreign keys (projectId, orgId) added in M7.
+  signatures                  Signature[]
+  dailyLogManpower            DailyLogManpower[]
+  dailyLogEquipment           DailyLogEquipment[]
+  dailyLogDeliveries          DailyLogDelivery[]
+  dailyLogVisitors            DailyLogVisitor[]
+  dailyLogDelays              DailyLogDelay[]
+  dailyLogNotes               DailyLogNote[]
+  rfiResponses                RfiResponse[]
+  boqItemCodeIntegrityReports BoqItemCodeIntegrityReport[]
+
   @@unique([id, orgId])
   @@index([orgId])
   @@index([orgId, status, archivedAt])
@@ -719,10 +749,11 @@ model ProjectAssignment {
   role      String // role within this project
   // Denormalised from Project.orgId (backfilled in M3, NOT NULL in M7) so the
   // database can state "assigned only within a company you belong to".
-  orgId     String?
+  orgId     String 
 
-  project Project @relation(fields: [projectId], references: [id])
+  project Project @relation(fields: [projectId, orgId], references: [id, orgId])
   user    User    @relation(fields: [userId], references: [id])
+  membership OrganizationMembership @relation(fields: [orgId, userId], references: [orgId, userId], onDelete: NoAction, onUpdate: NoAction)
 
   @@unique([projectId, userId])
   @@index([userId, projectId])
@@ -761,6 +792,8 @@ model OrganizationMembership {
   apiClients       ApiClient[]
   invitationTokens InvitationToken[]
   notifications    Notification[]
+  projectAssignments     ProjectAssignment[]
+  projectUserPermissions ProjectUserPermission[]
 
   @@unique([orgId, userId])
   @@index([userId, status])
@@ -842,7 +875,7 @@ model InvitationToken {
   updatedAt    DateTime  @updatedAt
 
   org        Organisation @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  project    Project?     @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  project    Project?     @relation(fields: [projectId, orgId], references: [id, orgId], onDelete: Cascade)
   company    Company?     @relation(fields: [companyId], references: [id], onDelete: SetNull)
   projectParty ProjectParty? @relation(fields: [projectPartyId], references: [id], onDelete: SetNull)
   invitedBy  User?        @relation("InvitationInvitedBy", fields: [invitedById], references: [id], onDelete: SetNull)
@@ -990,7 +1023,7 @@ model Task {
   updatedAt   DateTime  @updatedAt
 
   org         Organisation    @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  project     Project         @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  project     Project         @relation(fields: [projectId, orgId], references: [id, orgId], onDelete: Cascade)
   activity    Activity?       @relation(fields: [activityId], references: [id], onDelete: SetNull)
   assignee    User?           @relation("TaskAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
   createdBy   User?           @relation("TaskCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
@@ -1023,7 +1056,7 @@ model TaskComment {
   updatedAt DateTime @updatedAt
 
   org     Organisation @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  project Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  project Project      @relation(fields: [projectId, orgId], references: [id, orgId], onDelete: Cascade)
   task    Task         @relation(fields: [taskId], references: [id], onDelete: Cascade)
   author  User?        @relation("TaskCommentAuthor", fields: [authorId], references: [id], onDelete: SetNull)
 
@@ -1046,7 +1079,7 @@ model TaskAttachment {
   createdAt         DateTime @default(now())
 
   org             Organisation     @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  project         Project          @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  project         Project          @relation(fields: [projectId, orgId], references: [id, orgId], onDelete: Cascade)
   task            Task             @relation(fields: [taskId], references: [id], onDelete: Cascade)
   projectDocument ProjectDocument? @relation(fields: [projectDocumentId], references: [id], onDelete: SetNull)
   uploadedBy      User?            @relation("TaskAttachmentUploader", fields: [uploadedById], references: [id], onDelete: SetNull)
@@ -1073,7 +1106,7 @@ model TaskHistory {
   createdAt    DateTime @default(now())
 
   org     Organisation @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  project Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  project Project      @relation(fields: [projectId, orgId], references: [id, orgId], onDelete: Cascade)
   task    Task         @relation(fields: [taskId], references: [id], onDelete: Cascade)
   actor   User?        @relation("TaskHistoryActor", fields: [actorId], references: [id], onDelete: SetNull)
 
@@ -1111,7 +1144,7 @@ model Meeting {
   updatedAt       DateTime  @updatedAt
 
   org             Organisation          @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  project         Project               @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  project         Project               @relation(fields: [projectId, orgId], references: [id, orgId], onDelete: Cascade)
   activity        Activity?             @relation(fields: [activityId], references: [id], onDelete: SetNull)
   chair           User?                 @relation("MeetingChair", fields: [chairId], references: [id], onDelete: SetNull)
   createdBy       User?                 @relation("MeetingCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
@@ -1155,7 +1188,7 @@ model MeetingAttendee {
   updatedAt            DateTime @updatedAt
 
   org          Organisation @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  project      Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  project      Project      @relation(fields: [projectId, orgId], references: [id, orgId], onDelete: Cascade)
   meeting      Meeting      @relation(fields: [meetingId], references: [id], onDelete: Cascade)
   activity     Activity?    @relation(fields: [activityId], references: [id], onDelete: SetNull)
   user         User?        @relation("MeetingAttendeeUser", fields: [userId], references: [id], onDelete: SetNull)
@@ -1185,7 +1218,7 @@ model MeetingAgendaItem {
   updatedAt   DateTime @updatedAt
 
   org       Organisation @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  project   Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  project   Project      @relation(fields: [projectId, orgId], references: [id, orgId], onDelete: Cascade)
   meeting   Meeting      @relation(fields: [meetingId], references: [id], onDelete: Cascade)
   activity  Activity?    @relation(fields: [activityId], references: [id], onDelete: SetNull)
   presenter User?        @relation("MeetingAgendaPresenter", fields: [presenterId], references: [id], onDelete: SetNull)
@@ -1212,7 +1245,7 @@ model MeetingDecision {
   updatedAt   DateTime @updatedAt
 
   org       Organisation @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  project   Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  project   Project      @relation(fields: [projectId, orgId], references: [id, orgId], onDelete: Cascade)
   meeting   Meeting      @relation(fields: [meetingId], references: [id], onDelete: Cascade)
   activity  Activity?    @relation(fields: [activityId], references: [id], onDelete: SetNull)
   decidedBy User?        @relation("MeetingDecisionDecidedBy", fields: [decidedById], references: [id], onDelete: SetNull)
@@ -1245,7 +1278,7 @@ model MeetingActionItem {
   updatedAt   DateTime  @updatedAt
 
   org      Organisation @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  project  Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  project  Project      @relation(fields: [projectId, orgId], references: [id, orgId], onDelete: Cascade)
   meeting  Meeting      @relation(fields: [meetingId], references: [id], onDelete: Cascade)
   activity Activity?    @relation(fields: [activityId], references: [id], onDelete: SetNull)
   task     Task?        @relation(fields: [taskId], references: [id], onDelete: SetNull)
@@ -1282,7 +1315,7 @@ model MeetingDistribution {
   updatedAt       DateTime @updatedAt
 
   org           Organisation @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  project       Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  project       Project      @relation(fields: [projectId, orgId], references: [id, orgId], onDelete: Cascade)
   meeting       Meeting      @relation(fields: [meetingId], references: [id], onDelete: Cascade)
   activity      Activity?    @relation(fields: [activityId], references: [id], onDelete: SetNull)
   recipientUser User?        @relation("MeetingDistributionRecipient", fields: [recipientUserId], references: [id], onDelete: SetNull)
@@ -1310,7 +1343,7 @@ model MeetingComment {
   updatedAt  DateTime @updatedAt
 
   org      Organisation @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  project  Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  project  Project      @relation(fields: [projectId, orgId], references: [id, orgId], onDelete: Cascade)
   meeting  Meeting      @relation(fields: [meetingId], references: [id], onDelete: Cascade)
   activity Activity?    @relation(fields: [activityId], references: [id], onDelete: SetNull)
   author   User?        @relation("MeetingCommentAuthor", fields: [authorId], references: [id], onDelete: SetNull)
@@ -1421,6 +1454,7 @@ model BoqItemCodeIntegrityReport {
   codeVariants    Json
   reason          String
   createdAt       DateTime @default(now())
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
 
   @@index([projectId])
   @@index([createdAt])
@@ -1460,7 +1494,7 @@ model ProjectDocument {
   updatedAt          DateTime  @updatedAt
 
   org                      Organisation              @relation(fields: [orgId], references: [id])
-  project                  Project                   @relation(fields: [projectId], references: [id])
+  project                  Project                   @relation(fields: [projectId, orgId], references: [id, orgId])
   boqRevisions             BoqRevision[]
   commercialAttachmentRefs CommercialAttachmentRef[]
   documentRevisions        DocumentRevision[]
@@ -2365,10 +2399,11 @@ model PrimeContract {
   updatedAt              DateTime  @updatedAt
 
   org           Organisation           @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  project       Project                @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  project       Project                @relation(fields: [projectId, orgId], references: [id, orgId], onDelete: Cascade)
   clientCompany Company?               @relation("PrimeContractClient", fields: [clientCompanyId], references: [id], onDelete: SetNull)
   advances      PrimeContractAdvance[]
 
+  @@unique([projectId, orgId])
   @@unique([orgId, ref])
   @@index([orgId])
   @@index([clientCompanyId])
@@ -2396,7 +2431,7 @@ model PrimeContractAdvance {
   createdAt     DateTime @default(now())
 
   org      Organisation  @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  project  Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  project  Project       @relation(fields: [projectId, orgId], references: [id, orgId], onDelete: Cascade)
   contract PrimeContract @relation(fields: [contractId], references: [id], onDelete: Cascade)
 
   @@unique([projectId, reference])
@@ -3173,7 +3208,7 @@ model InventoryItem {
   updatedAt          DateTime @updatedAt
 
   org               Organisation         @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  project           Project?             @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  project           Project?             @relation(fields: [projectId, orgId], references: [id, orgId], onDelete: Cascade)
   preferredSupplier ProcurementSupplier? @relation(fields: [preferredSupplierId], references: [id], onDelete: SetNull)
   balances          StockBalance[]
   transactions      StockTransaction[]
@@ -3207,7 +3242,7 @@ model Warehouse {
   updatedAt   DateTime  @updatedAt
 
   org           Organisation        @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  project       Project?            @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  project       Project?            @relation(fields: [projectId, orgId], references: [id, orgId], onDelete: Cascade)
   manager       User?               @relation("WarehouseManager", fields: [managerId], references: [id], onDelete: SetNull)
   locations     WarehouseLocation[]
   balances      StockBalance[]
@@ -3336,7 +3371,7 @@ model StockTransaction {
   item        InventoryItem      @relation(fields: [itemId], references: [id], onDelete: Cascade)
   warehouse   Warehouse          @relation(fields: [warehouseId], references: [id], onDelete: Cascade)
   location    WarehouseLocation? @relation(fields: [locationId], references: [id], onDelete: SetNull)
-  project     Project?           @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  project     Project?           @relation(fields: [projectId, orgId], references: [id, orgId], onDelete: SetNull)
   activity    Activity?          @relation(fields: [activityId], references: [id], onDelete: SetNull)
   costCode    CostCode?          @relation(fields: [costCodeId], references: [id], onDelete: SetNull)
   boqItem     BoqItem?           @relation(fields: [boqItemId], references: [id], onDelete: SetNull)
@@ -4032,6 +4067,8 @@ model RfiResponse {
 
   rfi    Rfi   @relation(fields: [rfiId], references: [id], onDelete: Cascade)
   author User? @relation("RfiResponseAuthor", fields: [authorId], references: [id], onDelete: SetNull)
+  org     Organisation @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  project Project      @relation(fields: [projectId, orgId], references: [id, orgId], onDelete: Cascade)
 
   @@index([rfiId, createdAt])
   @@index([projectId])
@@ -4221,7 +4258,8 @@ model ApprovalWorkflowEvent {
   metadataJson Json     @default("{}")
   createdAt    DateTime @default(now())
 
-  project Project @relation(fields: [projectId], references: [id])
+  project Project @relation(fields: [projectId, orgId], references: [id, orgId])
+  org Organisation @relation(fields: [orgId], references: [id], onDelete: Cascade)
 
   @@index([orgId])
   @@index([projectId])
@@ -4257,7 +4295,7 @@ model Notification {
   updatedAt       DateTime  @updatedAt
 
   org              Organisation                  @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  project          Project?                      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  project          Project?                      @relation(fields: [projectId, orgId], references: [id, orgId], onDelete: Cascade)
   recipient        User                          @relation("NotificationRecipient", fields: [recipientUserId], references: [id], onDelete: Cascade)
   actor            User?                         @relation("NotificationActor", fields: [actorId], references: [id], onDelete: SetNull)
   membership       OrganizationMembership?       @relation(fields: [membershipId], references: [id], onDelete: SetNull)
@@ -4337,6 +4375,7 @@ model NotificationDeliveryAttempt {
   updatedAt      DateTime  @updatedAt
 
   notification Notification @relation(fields: [notificationId], references: [id], onDelete: Cascade)
+  org Organisation @relation(fields: [orgId], references: [id], onDelete: Cascade)
 
   @@index([notificationId])
   @@index([orgId, userId, createdAt])
@@ -4729,7 +4768,7 @@ model Location {
   updatedAt   DateTime  @updatedAt
 
   org      Organisation @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  project  Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  project  Project      @relation(fields: [projectId, orgId], references: [id, orgId], onDelete: Cascade)
   parent   Location?    @relation("LocationChildren", fields: [parentId], references: [id], onDelete: Restrict)
   children   Location[]   @relation("LocationChildren")
   photos     Photo[]
@@ -4873,8 +4912,8 @@ model ProjectCostCode {
   updatedAt  DateTime @updatedAt
 
   org      Organisation @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  project  Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  costCode CostCode     @relation(fields: [costCodeId], references: [id], onDelete: Cascade)
+  project  Project      @relation(fields: [projectId, orgId], references: [id, orgId], onDelete: Cascade)
+  costCode CostCode     @relation(fields: [costCodeId, orgId], references: [id, orgId], onDelete: Cascade)
 
   @@unique([projectId, costCodeId])
   @@index([orgId])
@@ -4905,8 +4944,8 @@ model BudgetLine {
   updatedAt      DateTime @updatedAt
 
   org         Organisation                   @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  project     Project                        @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  costCode    CostCode                       @relation(fields: [costCodeId], references: [id], onDelete: Restrict)
+  project     Project                        @relation(fields: [projectId, orgId], references: [id, orgId], onDelete: Cascade)
+  costCode    CostCode                       @relation(fields: [costCodeId, orgId], references: [id, orgId], onDelete: Restrict)
   changes     BudgetLineChange[]
   allocations BudgetLineActivityAllocation[]
   changeOrders ChangeOrder[]
@@ -4936,7 +4975,7 @@ model BudgetLineChange {
   createdAt         DateTime @default(now())
 
   org         Organisation @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  project     Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  project     Project      @relation(fields: [projectId, orgId], references: [id, orgId], onDelete: Cascade)
   budgetLine  BudgetLine   @relation(fields: [budgetLineId], references: [id], onDelete: Cascade)
   changeOrder ChangeOrder? @relation(fields: [changeOrderId], references: [id], onDelete: SetNull)
 
@@ -4980,7 +5019,7 @@ model BudgetSnapshot {
   createdAt          DateTime @default(now())
 
   org             Organisation     @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  project         Project          @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  project         Project          @relation(fields: [projectId, orgId], references: [id, orgId], onDelete: Cascade)
   reportingPeriod ReportingPeriod? @relation(fields: [reportingPeriodId], references: [id], onDelete: SetNull)
 
   @@index([orgId])
@@ -5025,7 +5064,7 @@ model Commitment {
   updatedAt          DateTime  @updatedAt
 
   org               Organisation            @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  project           Project                 @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  project           Project                 @relation(fields: [projectId, orgId], references: [id, orgId], onDelete: Cascade)
   vendorCompany     Company?                @relation("CommitmentVendor", fields: [vendorCompanyId], references: [id], onDelete: SetNull)
   projectParty      ProjectParty?           @relation(fields: [projectPartyId], references: [id], onDelete: SetNull)
   supplier          ProcurementSupplier?    @relation(fields: [supplierId], references: [id], onDelete: SetNull)
@@ -5071,9 +5110,9 @@ model CommitmentSovLine {
   updatedAt    DateTime @updatedAt
 
   org        Organisation @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  project    Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  project    Project      @relation(fields: [projectId, orgId], references: [id, orgId], onDelete: Cascade)
   commitment Commitment   @relation(fields: [commitmentId], references: [id], onDelete: Cascade)
-  costCode   CostCode?    @relation(fields: [costCodeId], references: [id], onDelete: SetNull)
+  costCode   CostCode?    @relation(fields: [costCodeId, orgId], references: [id, orgId], onDelete: SetNull)
   budgetLine BudgetLine?  @relation(fields: [budgetLineId], references: [id], onDelete: SetNull)
   boqItem    BoqItem?     @relation(fields: [boqItemId], references: [id], onDelete: SetNull)
   activity   Activity?    @relation(fields: [activityId], references: [id], onDelete: SetNull)
@@ -5115,7 +5154,7 @@ model CommitmentChangeOrder {
   updatedAt          DateTime  @updatedAt
 
   org              Organisation @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  project          Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  project          Project      @relation(fields: [projectId, orgId], references: [id, orgId], onDelete: Cascade)
   commitment       Commitment   @relation(fields: [commitmentId], references: [id], onDelete: Cascade)
   primeChangeOrder ChangeOrder? @relation(fields: [primeChangeOrderId], references: [id], onDelete: SetNull)
   rfqs             Rfq[]
@@ -5157,7 +5196,7 @@ model ScopeMatrix {
   updatedAt    DateTime @updatedAt
 
   org        Organisation @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  project    Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  project    Project      @relation(fields: [projectId, orgId], references: [id, orgId], onDelete: Cascade)
   commitment Commitment?  @relation(fields: [commitmentId], references: [id], onDelete: Cascade)
   bidPackage BidPackage?  @relation(fields: [bidPackageId], references: [id], onDelete: Cascade)
   items      ScopeMatrixItem[]
@@ -5191,7 +5230,7 @@ model ScopeMatrixItem {
   updatedAt      DateTime @updatedAt
 
   org     Organisation @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  project Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  project Project      @relation(fields: [projectId, orgId], references: [id, orgId], onDelete: Cascade)
   matrix  ScopeMatrix  @relation(fields: [matrixId], references: [id], onDelete: Cascade)
 
   @@index([orgId])
@@ -5228,7 +5267,7 @@ model SubcontractCloseout {
   updatedAt    DateTime  @updatedAt
 
   org        Organisation   @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  project    Project        @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  project    Project        @relation(fields: [projectId, orgId], references: [id, orgId], onDelete: Cascade)
   commitment Commitment     @relation(fields: [commitmentId], references: [id], onDelete: Cascade)
   items      CloseoutItem[]
 
@@ -5263,7 +5302,7 @@ model CloseoutItem {
   updatedAt    DateTime  @updatedAt
 
   org      Organisation        @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  project  Project             @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  project  Project             @relation(fields: [projectId, orgId], references: [id, orgId], onDelete: Cascade)
   closeout SubcontractCloseout @relation(fields: [closeoutId], references: [id], onDelete: Cascade)
   document ProjectDocument?    @relation("CloseoutItemEvidence", fields: [documentId], references: [id], onDelete: SetNull)
 
@@ -5337,7 +5376,7 @@ model SubPayApp {
   updatedAt                DateTime  @updatedAt
 
   org            Organisation       @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  project        Project            @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  project        Project            @relation(fields: [projectId, orgId], references: [id, orgId], onDelete: Cascade)
   commitment     Commitment         @relation(fields: [commitmentId], references: [id], onDelete: Cascade)
   waiverDocument ProjectDocument?   @relation("SubPayAppWaiverDocument", fields: [waiverDocumentId], references: [id], onDelete: SetNull)
   lines          SubPayAppLine[]
@@ -5377,7 +5416,7 @@ model SubPayAppLine {
   updatedAt        DateTime @updatedAt
 
   org     Organisation      @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  project Project           @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  project Project           @relation(fields: [projectId, orgId], references: [id, orgId], onDelete: Cascade)
   payApp  SubPayApp         @relation(fields: [payAppId], references: [id], onDelete: Cascade)
   sovLine CommitmentSovLine @relation(fields: [sovLineId], references: [id], onDelete: Cascade)
 
@@ -5401,7 +5440,7 @@ model SubPayAppPayment {
   createdAt DateTime @default(now())
 
   org     Organisation @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  project Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  project Project      @relation(fields: [projectId, orgId], references: [id, orgId], onDelete: Cascade)
   payApp  SubPayApp    @relation(fields: [payAppId], references: [id], onDelete: Cascade)
 
   @@index([orgId])
@@ -5474,7 +5513,7 @@ model Attachment {
   updatedAt  DateTime @updatedAt
 
   org      Organisation    @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  project  Project         @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  project  Project         @relation(fields: [projectId, orgId], references: [id, orgId], onDelete: Cascade)
   document ProjectDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
 
   @@unique([recordType, recordId, documentId])
@@ -5510,7 +5549,7 @@ model Photo {
   updatedAt       DateTime  @updatedAt
 
   org      Organisation    @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  project  Project         @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  project  Project         @relation(fields: [projectId, orgId], references: [id, orgId], onDelete: Cascade)
   document ProjectDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
   location Location?       @relation(fields: [locationId], references: [id], onDelete: SetNull)
 
@@ -5547,7 +5586,7 @@ model DrawingSet {
   updatedAt            DateTime  @updatedAt
 
   org            Organisation     @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  project        Project          @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  project        Project          @relation(fields: [projectId, orgId], references: [id, orgId], onDelete: Cascade)
   sourceDocument ProjectDocument? @relation("DrawingSetSource", fields: [sourceDocumentId], references: [id], onDelete: SetNull)
   revisions      SheetRevision[]
 
@@ -5575,7 +5614,7 @@ model Sheet {
   updatedAt         DateTime  @updatedAt
 
   org       Organisation    @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  project   Project         @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  project   Project         @relation(fields: [projectId, orgId], references: [id, orgId], onDelete: Cascade)
   location  Location?       @relation(fields: [locationId], references: [id], onDelete: SetNull)
   revisions  SheetRevision[]
   markups    Markup[]
@@ -5627,7 +5666,7 @@ model SheetRevision {
   updatedAt          DateTime  @updatedAt
 
   org      Organisation    @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  project  Project         @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  project  Project         @relation(fields: [projectId, orgId], references: [id, orgId], onDelete: Cascade)
   sheet    Sheet?          @relation(fields: [sheetId], references: [id], onDelete: SetNull)
   set      DrawingSet?     @relation(fields: [setId], references: [id], onDelete: SetNull)
   document ProjectDocument @relation("SheetRevisionDocument", fields: [documentId], references: [id], onDelete: Cascade)
@@ -5683,7 +5722,7 @@ model PunchItem {
   updatedAt           DateTime  @updatedAt
 
   org               Organisation     @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  project           Project          @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  project           Project          @relation(fields: [projectId, orgId], references: [id, orgId], onDelete: Cascade)
   activity          Activity?        @relation(fields: [activityId], references: [id], onDelete: SetNull)
   location          Location?        @relation(fields: [locationId], references: [id], onDelete: SetNull)
   sheet             Sheet?           @relation(fields: [sheetId], references: [id], onDelete: SetNull)
@@ -5727,7 +5766,7 @@ model PunchItemEvent {
   createdAt    DateTime @default(now())
 
   org       Organisation @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  project   Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  project   Project      @relation(fields: [projectId, orgId], references: [id, orgId], onDelete: Cascade)
   punchItem PunchItem    @relation(fields: [punchItemId], references: [id], onDelete: Cascade)
 
   @@index([orgId])
@@ -5752,7 +5791,7 @@ model Markup {
   updatedAt       DateTime  @updatedAt
 
   org     Organisation @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  project Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  project Project      @relation(fields: [projectId, orgId], references: [id, orgId], onDelete: Cascade)
   sheet   Sheet        @relation(fields: [sheetId], references: [id], onDelete: Cascade)
 
   @@index([orgId])
@@ -5777,7 +5816,7 @@ model Pin {
   updatedAt       DateTime @updatedAt
 
   org     Organisation @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  project Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  project Project      @relation(fields: [projectId, orgId], references: [id, orgId], onDelete: Cascade)
   sheet   Sheet        @relation(fields: [sheetId], references: [id], onDelete: Cascade)
 
   @@index([orgId])
@@ -5802,7 +5841,7 @@ model SheetReference {
   updatedAt     DateTime @updatedAt
 
   org         Organisation @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  project     Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  project     Project      @relation(fields: [projectId, orgId], references: [id, orgId], onDelete: Cascade)
   sheet       Sheet        @relation("SheetReferenceFrom", fields: [sheetId], references: [id], onDelete: Cascade)
   targetSheet Sheet?       @relation("SheetReferenceTo", fields: [targetSheetId], references: [id], onDelete: SetNull)
 
@@ -5832,7 +5871,7 @@ model SpecSection {
   updatedAt  DateTime @updatedAt
 
   org      Organisation    @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  project  Project         @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  project  Project         @relation(fields: [projectId, orgId], references: [id, orgId], onDelete: Cascade)
   document ProjectDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
 
   @@unique([documentId, charStart])
@@ -5889,7 +5928,7 @@ model Crew {
   updatedAt         DateTime @updatedAt
 
   org        Organisation @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  project    Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  project    Project      @relation(fields: [projectId, orgId], references: [id, orgId], onDelete: Cascade)
   company    Company?     @relation(fields: [companyId], references: [id], onDelete: SetNull)
   members        CrewMember[]
   timesheets     Timesheet[]
@@ -5952,7 +5991,7 @@ model BimModel {
   updatedAt      DateTime  @updatedAt
 
   org            Organisation     @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  project        Project          @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  project        Project          @relation(fields: [projectId, orgId], references: [id, orgId], onDelete: Cascade)
   sourceDocument ProjectDocument? @relation("BimModelSource", fields: [documentId], references: [id], onDelete: SetNull)
   elements       BimElement[]
   links          BimElementLink[]
@@ -5998,7 +6037,7 @@ model BimElement {
   createdAt      DateTime @default(now())
 
   org     Organisation     @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  project Project          @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  project Project          @relation(fields: [projectId, orgId], references: [id, orgId], onDelete: Cascade)
   model   BimModel         @relation(fields: [modelId], references: [id], onDelete: Cascade)
   links   BimElementLink[]
 
@@ -6025,7 +6064,7 @@ model BimElementLink {
   createdAt    DateTime @default(now())
 
   org     Organisation @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  project Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  project Project      @relation(fields: [projectId, orgId], references: [id, orgId], onDelete: Cascade)
   model   BimModel     @relation(fields: [modelId], references: [id], onDelete: Cascade)
   element BimElement   @relation(fields: [elementId], references: [id], onDelete: Cascade)
 
@@ -6059,7 +6098,7 @@ model Conversation {
   updatedAt          DateTime  @updatedAt
 
   org           Organisation          @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  project       Project?              @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  project       Project?              @relation(fields: [projectId, orgId], references: [id, orgId], onDelete: Cascade)
   members       ConversationMember[]
   messages      ConversationMessage[]
   inboundEmails InboundEmail[]
@@ -6152,7 +6191,7 @@ model InboundEmail {
   updatedAt        DateTime  @updatedAt
 
   org          Organisation  @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  project      Project?      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  project      Project?      @relation(fields: [projectId, orgId], references: [id, orgId], onDelete: Cascade)
   conversation Conversation? @relation(fields: [conversationId], references: [id], onDelete: SetNull)
 
   @@unique([orgId, provider, messageId])
@@ -6190,7 +6229,7 @@ model Lookahead {
   updatedAt    DateTime  @updatedAt
 
   org     Organisation    @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  project Project         @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  project Project         @relation(fields: [projectId, orgId], references: [id, orgId], onDelete: Cascade)
   items   LookaheadItem[]
 
   @@unique([projectId, number])
@@ -6238,7 +6277,7 @@ model LookaheadItem {
   updatedAt             DateTime  @updatedAt
 
   org       Organisation @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  project   Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  project   Project      @relation(fields: [projectId, orgId], references: [id, orgId], onDelete: Cascade)
   lookahead Lookahead    @relation(fields: [lookaheadId], references: [id], onDelete: Cascade)
   activity  Activity?    @relation(fields: [activityId], references: [id], onDelete: SetNull)
   crew      Crew?        @relation(fields: [crewId], references: [id], onDelete: SetNull)
@@ -6279,7 +6318,7 @@ model Timesheet {
   updatedAt       DateTime  @updatedAt
 
   org     Organisation @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  project Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  project Project      @relation(fields: [projectId, orgId], references: [id, orgId], onDelete: Cascade)
   crew    Crew?        @relation(fields: [crewId], references: [id], onDelete: SetNull)
   entries TimeEntry[]
 
@@ -6315,11 +6354,11 @@ model TimeEntry {
   updatedAt    DateTime @updatedAt
 
   org       Organisation @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  project   Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  project   Project      @relation(fields: [projectId, orgId], references: [id, orgId], onDelete: Cascade)
   timesheet Timesheet    @relation(fields: [timesheetId], references: [id], onDelete: Cascade)
   worker    Worker       @relation(fields: [workerId], references: [id], onDelete: Restrict)
   activity  Activity?    @relation(fields: [activityId], references: [id], onDelete: SetNull)
-  costCode  CostCode?    @relation(fields: [costCodeId], references: [id], onDelete: SetNull)
+  costCode  CostCode?    @relation(fields: [costCodeId, orgId], references: [id, orgId], onDelete: SetNull)
   location  Location?    @relation(fields: [locationId], references: [id], onDelete: SetNull)
 
   @@index([orgId])
@@ -6361,7 +6400,7 @@ model ChangeEvent {
   updatedAt          DateTime  @updatedAt
 
   org         Organisation      @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  project     Project           @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  project     Project           @relation(fields: [projectId, orgId], references: [id, orgId], onDelete: Cascade)
   activity    Activity?         @relation(fields: [activityId], references: [id], onDelete: SetNull)
   location    Location?         @relation(fields: [locationId], references: [id], onDelete: SetNull)
   changeOrder ChangeOrder?      @relation(fields: [changeOrderId], references: [id], onDelete: SetNull)
@@ -6397,9 +6436,9 @@ model ChangeEventLine {
   updatedAt     DateTime @updatedAt
 
   org         Organisation @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  project     Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  project     Project      @relation(fields: [projectId, orgId], references: [id, orgId], onDelete: Cascade)
   changeEvent ChangeEvent  @relation(fields: [changeEventId], references: [id], onDelete: Cascade)
-  costCode    CostCode?    @relation(fields: [costCodeId], references: [id], onDelete: SetNull)
+  costCode    CostCode?    @relation(fields: [costCodeId, orgId], references: [id, orgId], onDelete: SetNull)
   budgetLine  BudgetLine?  @relation(fields: [budgetLineId], references: [id], onDelete: SetNull)
   activity    Activity?    @relation(fields: [activityId], references: [id], onDelete: SetNull)
   commitment  Commitment?  @relation(fields: [commitmentId], references: [id], onDelete: SetNull)
@@ -6451,7 +6490,7 @@ model Rfq {
   updatedAt               DateTime  @updatedAt
 
   org                   Organisation           @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  project               Project                @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  project               Project                @relation(fields: [projectId, orgId], references: [id, orgId], onDelete: Cascade)
   changeEvent           ChangeEvent            @relation(fields: [changeEventId], references: [id], onDelete: Cascade)
   commitment            Commitment?            @relation(fields: [commitmentId], references: [id], onDelete: SetNull)
   vendorCompany         Company?               @relation("RfqVendor", fields: [vendorCompanyId], references: [id], onDelete: SetNull)
@@ -6527,7 +6566,7 @@ model DirectCost {
   updatedAt       DateTime  @updatedAt
 
   org           Organisation        @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  project       Project             @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  project       Project             @relation(fields: [projectId, orgId], references: [id, orgId], onDelete: Cascade)
   vendorCompany Company?            @relation("DirectCostVendor", fields: [vendorCompanyId], references: [id], onDelete: SetNull)
   purchaseOrder ProcurementOrder?   @relation(fields: [purchaseOrderId], references: [id], onDelete: SetNull)
   lines         DirectCostLine[]
@@ -6566,9 +6605,9 @@ model DirectCostLine {
   updatedAt    DateTime @updatedAt
 
   org        Organisation @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  project    Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  project    Project      @relation(fields: [projectId, orgId], references: [id, orgId], onDelete: Cascade)
   directCost DirectCost   @relation(fields: [directCostId], references: [id], onDelete: Cascade)
-  costCode   CostCode?    @relation(fields: [costCodeId], references: [id], onDelete: SetNull)
+  costCode   CostCode?    @relation(fields: [costCodeId, orgId], references: [id, orgId], onDelete: SetNull)
   budgetLine BudgetLine?  @relation(fields: [budgetLineId], references: [id], onDelete: SetNull)
   activity   Activity?    @relation(fields: [activityId], references: [id], onDelete: SetNull)
   poLine     ProcurementPoLine? @relation(fields: [poLineId], references: [id], onDelete: SetNull)
@@ -6594,7 +6633,7 @@ model DirectCostPayment {
   createdAt    DateTime @default(now())
 
   org        Organisation @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  project    Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  project    Project      @relation(fields: [projectId, orgId], references: [id, orgId], onDelete: Cascade)
   directCost DirectCost   @relation(fields: [directCostId], references: [id], onDelete: Cascade)
 
   @@index([orgId])
@@ -6626,7 +6665,7 @@ model DocumentText {
   searchVector    Unsupported("tsvector")?
 
   org      Organisation    @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  project  Project         @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  project  Project         @relation(fields: [projectId, orgId], references: [id, orgId], onDelete: Cascade)
   document ProjectDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
   chunks   DocumentChunk[]
 
@@ -6649,7 +6688,7 @@ model DocumentChunk {
   createdAt      DateTime @default(now())
 
   org          Organisation    @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  project      Project         @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  project      Project         @relation(fields: [projectId, orgId], references: [id, orgId], onDelete: Cascade)
   document     ProjectDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
   documentText DocumentText    @relation(fields: [documentTextId], references: [id], onDelete: Cascade)
 
@@ -6676,7 +6715,7 @@ model Comment {
   updatedAt  DateTime  @updatedAt
 
   org      Organisation     @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  project  Project          @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  project  Project          @relation(fields: [projectId, orgId], references: [id, orgId], onDelete: Cascade)
   author   User?            @relation("CommentAuthor", fields: [authorId], references: [id], onDelete: SetNull)
   parent   Comment?         @relation("CommentReplies", fields: [parentId], references: [id], onDelete: SetNull)
   replies  Comment[]        @relation("CommentReplies")
@@ -6717,7 +6756,7 @@ model RecordSubscription {
   updatedAt  DateTime @updatedAt
 
   org     Organisation @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  project Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  project Project      @relation(fields: [projectId, orgId], references: [id, orgId], onDelete: Cascade)
   user    User         @relation("RecordSubscriptionUser", fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([recordType, recordId, userId])
@@ -6794,9 +6833,10 @@ model ProjectUserPermission {
   updatedAt     DateTime @updatedAt
 
   org      Organisation        @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  project  Project             @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  project  Project             @relation(fields: [projectId, orgId], references: [id, orgId], onDelete: Cascade)
   user     User                @relation("ProjectUserPermissionUser", fields: [userId], references: [id], onDelete: Cascade)
   template PermissionTemplate? @relation(fields: [templateId], references: [id], onDelete: SetNull)
+  membership OrganizationMembership @relation(fields: [orgId, userId], references: [orgId, userId], onDelete: NoAction, onUpdate: NoAction)
 
   @@unique([projectId, userId])
   @@index([orgId])
@@ -6887,7 +6927,7 @@ model FormTemplate {
   updatedAt        DateTime @updatedAt
 
   org       Organisation   @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  project   Project?       @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  project   Project?       @relation(fields: [projectId, orgId], references: [id, orgId], onDelete: Cascade)
   sections  FormSection[]
   items     FormItem[]
   instances FormInstance[]
@@ -6976,7 +7016,7 @@ model FormInstance {
   updatedAt         DateTime  @updatedAt
 
   org             Organisation       @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  project         Project            @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  project         Project            @relation(fields: [projectId, orgId], references: [id, orgId], onDelete: Cascade)
   template        FormTemplate       @relation(fields: [templateId], references: [id], onDelete: Restrict)
   activity        Activity?          @relation(fields: [activityId], references: [id], onDelete: SetNull)
   location        Location?          @relation(fields: [locationId], references: [id], onDelete: SetNull)
@@ -7046,6 +7086,8 @@ model Signature {
   item     FormItem?        @relation(fields: [itemId], references: [id], onDelete: SetNull)
   user     User?            @relation("SignatureUser", fields: [userId], references: [id], onDelete: SetNull)
   document ProjectDocument? @relation(fields: [documentId], references: [id], onDelete: SetNull)
+  org     Organisation @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  project Project      @relation(fields: [projectId, orgId], references: [id, orgId], onDelete: Cascade)
 
   @@index([recordType, recordId])
   @@index([projectId])
@@ -7070,7 +7112,7 @@ model SubmittalPackage {
   updatedAt      DateTime  @updatedAt
 
   org         Organisation @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  project     Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  project     Project      @relation(fields: [projectId, orgId], references: [id, orgId], onDelete: Cascade)
   activity    Activity?    @relation(fields: [activityId], references: [id], onDelete: SetNull)
   managerUser User?        @relation("SubmittalPackageManager", fields: [managerUserId], references: [id], onDelete: SetNull)
   submittals  Submittal[]
@@ -7098,7 +7140,7 @@ model SubmittalWorkflowTemplate {
   updatedAt   DateTime @updatedAt
 
   org        Organisation @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  project    Project?     @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  project    Project?     @relation(fields: [projectId, orgId], references: [id, orgId], onDelete: Cascade)
   submittals Submittal[]
 
   @@index([orgId, projectId, status])
@@ -7174,7 +7216,7 @@ model DailyLog {
   updatedAt               DateTime  @updatedAt
 
   org         Organisation     @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  project     Project          @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  project     Project          @relation(fields: [projectId, orgId], references: [id, orgId], onDelete: Cascade)
   pdfDocument ProjectDocument? @relation("DailyLogPdf", fields: [pdfDocumentId], references: [id], onDelete: SetNull)
   manpower    DailyLogManpower[]
   equipment   DailyLogEquipment[]
@@ -7215,6 +7257,8 @@ model DailyLogManpower {
   updatedAt       DateTime  @updatedAt
 
   dailyLog DailyLog @relation(fields: [dailyLogId], references: [id], onDelete: Cascade)
+  org     Organisation @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  project Project      @relation(fields: [projectId, orgId], references: [id, orgId], onDelete: Cascade)
 
   @@unique([projectId, clientRequestId])
   @@index([dailyLogId])
@@ -7250,6 +7294,8 @@ model DailyLogEquipment {
   updatedAt       DateTime  @updatedAt
 
   dailyLog DailyLog @relation(fields: [dailyLogId], references: [id], onDelete: Cascade)
+  org     Organisation @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  project Project      @relation(fields: [projectId, orgId], references: [id, orgId], onDelete: Cascade)
 
   @@unique([projectId, clientRequestId])
   @@index([dailyLogId])
@@ -7285,6 +7331,8 @@ model DailyLogDelivery {
   updatedAt       DateTime  @updatedAt
 
   dailyLog DailyLog @relation(fields: [dailyLogId], references: [id], onDelete: Cascade)
+  org     Organisation @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  project Project      @relation(fields: [projectId, orgId], references: [id, orgId], onDelete: Cascade)
 
   @@unique([projectId, clientRequestId])
   @@index([dailyLogId])
@@ -7315,6 +7363,8 @@ model DailyLogVisitor {
   updatedAt       DateTime  @updatedAt
 
   dailyLog DailyLog @relation(fields: [dailyLogId], references: [id], onDelete: Cascade)
+  org     Organisation @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  project Project      @relation(fields: [projectId, orgId], references: [id, orgId], onDelete: Cascade)
 
   @@unique([projectId, clientRequestId])
   @@index([dailyLogId])
@@ -7347,6 +7397,8 @@ model DailyLogDelay {
   updatedAt       DateTime  @updatedAt
 
   dailyLog DailyLog @relation(fields: [dailyLogId], references: [id], onDelete: Cascade)
+  org     Organisation @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  project Project      @relation(fields: [projectId, orgId], references: [id, orgId], onDelete: Cascade)
 
   @@unique([projectId, clientRequestId])
   @@index([dailyLogId])
@@ -7376,6 +7428,8 @@ model DailyLogNote {
   updatedAt       DateTime  @updatedAt
 
   dailyLog DailyLog @relation(fields: [dailyLogId], references: [id], onDelete: Cascade)
+  org     Organisation @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  project Project      @relation(fields: [projectId, orgId], references: [id, orgId], onDelete: Cascade)
 
   @@unique([projectId, clientRequestId])
   @@index([dailyLogId])
@@ -7405,7 +7459,7 @@ model ReportDefinition {
   updatedAt      DateTime  @updatedAt
 
   org       Organisation     @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  project   Project?         @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  project   Project?         @relation(fields: [projectId, orgId], references: [id, orgId], onDelete: Cascade)
   schedules ReportSchedule[]
   runs      ReportRun[]
 
@@ -7437,7 +7491,7 @@ model GanttLayout {
   updatedAt  DateTime @updatedAt
 
   org     Organisation @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  project Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  project Project      @relation(fields: [projectId, orgId], references: [id, orgId], onDelete: Cascade)
 
   // One name per author per project, so "save" updates rather than duplicates.
   @@unique([projectId, createdBy, name])
@@ -7539,8 +7593,9 @@ model ProjectHealthSnapshot {
   computedAt          DateTime @default(now())
 
   org     Organisation @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  project Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  project Project      @relation(fields: [projectId, orgId], references: [id, orgId], onDelete: Cascade)
 
+  @@unique([projectId, orgId])
   @@index([orgId, overallScore])
 }
 
@@ -7567,7 +7622,7 @@ model WorkflowTemplate {
   updatedAt     DateTime  @updatedAt
 
   org       Organisation       @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  project   Project?           @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  project   Project?           @relation(fields: [projectId, orgId], references: [id, orgId], onDelete: Cascade)
   instances WorkflowInstance[]
 
   @@index([orgId, tool, status])
@@ -7601,7 +7656,7 @@ model WorkflowInstance {
   updatedAt       DateTime  @updatedAt
 
   org         Organisation             @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  project     Project                  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  project     Project                  @relation(fields: [projectId, orgId], references: [id, orgId], onDelete: Cascade)
   template    WorkflowTemplate         @relation(fields: [templateId], references: [id], onDelete: Restrict)
   assignments WorkflowStepAssignment[]
 
@@ -7629,7 +7684,7 @@ model WorkflowStepAssignment {
   createdAt   DateTime  @default(now())
 
   org      Organisation     @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  project  Project          @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  project  Project          @relation(fields: [projectId, orgId], references: [id, orgId], onDelete: Cascade)
   instance WorkflowInstance @relation(fields: [instanceId], references: [id], onDelete: Cascade)
 
   @@index([instanceId, stepKey])
@@ -7663,7 +7718,7 @@ model CustomFieldDefinition {
   updatedAt      DateTime  @updatedAt
 
   organisation Organisation       @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  project      Project?           @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  project      Project?           @relation(fields: [projectId, orgId], references: [id, orgId], onDelete: Cascade)
   values       CustomFieldValue[]
 
   @@unique([orgId, recordType, key])
@@ -7704,7 +7759,7 @@ model ProjectFieldset {
   updatedAt  DateTime @updatedAt
 
   organisation Organisation   @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  project      Project        @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  project      Project        @relation(fields: [projectId, orgId], references: [id, orgId], onDelete: Cascade)
   fieldset     CustomFieldset @relation(fields: [fieldsetId], references: [id], onDelete: Cascade)
 
   @@unique([projectId, recordType])
@@ -7748,7 +7803,7 @@ model CustomFieldValue {
   updatedAt  DateTime @updatedAt
 
   organisation Organisation          @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  project      Project               @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  project      Project               @relation(fields: [projectId, orgId], references: [id, orgId], onDelete: Cascade)
   field        CustomFieldDefinition @relation(fields: [fieldId], references: [id], onDelete: Cascade)
 
   @@unique([recordId, fieldId])
@@ -7806,7 +7861,7 @@ model WebhookSubscription {
   updatedAt      DateTime  @updatedAt
 
   organisation Organisation      @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  project      Project?          @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  project      Project?          @relation(fields: [projectId, orgId], references: [id, orgId], onDelete: Cascade)
   deliveries   WebhookDelivery[]
 
   @@index([orgId, status])
@@ -7900,7 +7955,7 @@ model AccountingSync {
   updatedAt        DateTime  @updatedAt
 
   organisation Organisation @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  project      Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  project      Project      @relation(fields: [projectId, orgId], references: [id, orgId], onDelete: Cascade)
 
   @@unique([provider, recordType, recordId])
   @@index([orgId, status])
@@ -7944,7 +7999,7 @@ model BidPackage {
   updatedAt           DateTime  @updatedAt
 
   organisation Organisation     @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  project      Project          @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  project      Project          @relation(fields: [projectId, orgId], references: [id, orgId], onDelete: Cascade)
   lines        BidPackageLine[]
   addenda      BidAddendum[]
   invitations  BidInvitation[]
@@ -7980,6 +8035,7 @@ model BidPackageLine {
 
   package  BidPackage @relation(fields: [packageId], references: [id], onDelete: Cascade)
   bidLines BidLine[]
+  org Organisation @relation(fields: [orgId], references: [id], onDelete: Cascade)
 
   @@index([packageId])
 }
@@ -7996,6 +8052,7 @@ model BidAddendum {
   createdAt DateTime @default(now())
 
   package BidPackage @relation(fields: [packageId], references: [id], onDelete: Cascade)
+  org Organisation @relation(fields: [orgId], references: [id], onDelete: Cascade)
 
   @@index([packageId])
 }
@@ -8023,6 +8080,7 @@ model BidInvitation {
   package   BidPackage    @relation(fields: [packageId], references: [id], onDelete: Cascade)
   questions BidQuestion[]
   bids      Bid[]
+  org Organisation @relation(fields: [orgId], references: [id], onDelete: Cascade)
 
   @@unique([packageId, contactEmail])
   @@index([packageId, status])
@@ -8046,6 +8104,7 @@ model BidQuestion {
 
   package    BidPackage     @relation(fields: [packageId], references: [id], onDelete: Cascade)
   invitation BidInvitation? @relation(fields: [invitationId], references: [id], onDelete: SetNull)
+  org Organisation @relation(fields: [orgId], references: [id], onDelete: Cascade)
 
   @@index([packageId, status])
 }
@@ -8075,6 +8134,7 @@ model Bid {
   package    BidPackage    @relation(fields: [packageId], references: [id], onDelete: Cascade)
   invitation BidInvitation @relation(fields: [invitationId], references: [id], onDelete: Cascade)
   lines      BidLine[]
+  org Organisation @relation(fields: [orgId], references: [id], onDelete: Cascade)
 
   @@index([packageId, status])
 }
@@ -8093,6 +8153,7 @@ model BidLine {
 
   bid         Bid            @relation(fields: [bidId], references: [id], onDelete: Cascade)
   packageLine BidPackageLine @relation(fields: [packageLineId], references: [id], onDelete: Cascade)
+  org Organisation @relation(fields: [orgId], references: [id], onDelete: Cascade)
 
   @@unique([bidId, packageLineId])
 }
@@ -8114,7 +8175,7 @@ model AssistantConversation {
   updatedAt     DateTime  @updatedAt
 
   organisation Organisation       @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  project      Project?           @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  project      Project?           @relation(fields: [projectId, orgId], references: [id, orgId], onDelete: Cascade)
   user         User               @relation(fields: [userId], references: [id], onDelete: Cascade)
   messages     AssistantMessage[]
 
@@ -8140,6 +8201,7 @@ model AssistantMessage {
   createdAt      DateTime @default(now())
 
   conversation AssistantConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  org Organisation @relation(fields: [orgId], references: [id], onDelete: Cascade)
 
   @@index([conversationId, createdAt])
 }
@@ -8172,8 +8234,9 @@ model ContractProfile {
   updatedAt            DateTime  @updatedAt
 
   org     Organisation @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  project Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  project Project      @relation(fields: [projectId, orgId], references: [id, orgId], onDelete: Cascade)
 
+  @@unique([projectId, orgId])
   @@index([orgId])
 }
 
@@ -8242,6 +8305,7 @@ model PrequalCriterion {
   updatedAt  DateTime  @updatedAt
 
   prequalification VendorPrequalification @relation(fields: [prequalId], references: [id], onDelete: Cascade)
+  org Organisation @relation(fields: [orgId], references: [id], onDelete: Cascade)
 
   @@unique([prequalId, key])
   @@index([prequalId])
@@ -8277,7 +8341,7 @@ model SubcontractorEvaluation {
   updatedAt    DateTime  @updatedAt
 
   org        Organisation          @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  project    Project               @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  project    Project               @relation(fields: [projectId, orgId], references: [id, orgId], onDelete: Cascade)
   commitment Commitment            @relation(fields: [commitmentId], references: [id], onDelete: Cascade)
   criteria   EvaluationCriterion[]
 
@@ -8311,6 +8375,7 @@ model EvaluationCriterion {
   updatedAt      DateTime @updatedAt
 
   evaluation SubcontractorEvaluation @relation(fields: [evaluationId], references: [id], onDelete: Cascade)
+  org Organisation @relation(fields: [orgId], references: [id], onDelete: Cascade)
 
   @@unique([evaluationId, key])
   @@index([evaluationId])
@@ -8374,7 +8439,7 @@ model CostLedgerEntry {
   createdAt    DateTime @default(now())
 
   org        Organisation     @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  project    Project          @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  project    Project          @relation(fields: [projectId, orgId], references: [id, orgId], onDelete: Cascade)
   activity   Activity?        @relation(fields: [activityId], references: [id], onDelete: SetNull)
   budgetLine BudgetLine?      @relation(fields: [budgetLineId], references: [id], onDelete: SetNull)
   reversalOf CostLedgerEntry? @relation("CostLedgerReversal", fields: [reversalOfId], references: [id], onDelete: SetNull)

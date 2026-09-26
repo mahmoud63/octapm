@@ -31,12 +31,10 @@ const getProjectAccessWhere = ({ userId, role, isCompanyAdmin = false, orgId = n
   }
 
   // An assignment counts only inside the workspace the token is for
-  // (architecture doc §2.2) — redundant once the composite FK lands in M7,
-  // kept as defence in depth. Rows written before the column existed carry
-  // no orgId and keep counting until M7 fills and constrains them.
-  const assignmentWhere = orgId
-    ? { userId, OR: [{ orgId }, { orgId: null }] }
-    : { userId };
+  // (architecture doc §2.2) — redundant now the composite key of M7 holds
+  // the pair, kept as defence in depth. M7 filled and constrained the column
+  // (NOT NULL), so a row without an orgId no longer exists.
+  const assignmentWhere = orgId ? { userId, orgId } : { userId };
 
   return {
     OR: [

@@ -132,7 +132,7 @@ describe("webhooks", () => {
 
     // first attempt: endpoint down → retryable failure
     const fetchImpl = jest.fn(async () => okResponse(503, "down"));
-    await expect(service.runDeliveryJob({ payload: { deliveryId: store.deliveries[0].id }, fetchImpl })).rejects.toMatchObject({ retryable: true, code: "WEBHOOK_RETRY" });
+    await expect(service.runDeliveryJob({ job: { orgId: "org-1" }, payload: { deliveryId: store.deliveries[0].id }, fetchImpl })).rejects.toMatchObject({ retryable: true, code: "WEBHOOK_RETRY" });
     expect(store.deliveries[0]).toMatchObject({ attempt: 1, status: "failed", responseStatus: 503, error: "Endpoint answered 503" });
     expect(store.subscriptions[0].lastStatus).toBe("failed");
 
@@ -149,10 +149,10 @@ describe("webhooks", () => {
 
     // second attempt succeeds
     const ok = jest.fn(async () => okResponse(202, "queued"));
-    await expect(service.runDeliveryJob({ payload: { deliveryId: store.deliveries[0].id }, fetchImpl: ok })).resolves.toMatchObject({ delivered: true, attempt: 2, responseStatus: 202 });
+    await expect(service.runDeliveryJob({ job: { orgId: "org-1" }, payload: { deliveryId: store.deliveries[0].id }, fetchImpl: ok })).resolves.toMatchObject({ delivered: true, attempt: 2, responseStatus: 202 });
     expect(store.deliveries[0]).toMatchObject({ status: "delivered", attempt: 2, error: null });
     expect(store.subscriptions[0]).toMatchObject({ lastStatus: "delivered", failureCount: 0 });
-    await expect(service.runDeliveryJob({ payload: { deliveryId: store.deliveries[0].id }, fetchImpl: ok })).resolves.toEqual({ skipped: "delivered" });
+    await expect(service.runDeliveryJob({ job: { orgId: "org-1" }, payload: { deliveryId: store.deliveries[0].id }, fetchImpl: ok })).resolves.toEqual({ skipped: "delivered" });
   });
 
   it("marks a delivery dead after the fifth failure, counts it on the subscription and disables after ten dead in a row", async () => {
@@ -162,8 +162,8 @@ describe("webhooks", () => {
     });
     for (let round = 1; round <= 10; round += 1) {
       const delivery = await mockPrisma.webhookDelivery.create({ data: { orgId: "org-1", subscriptionId: sub.id, eventId: `evt-${round}`, eventType: "rfi.created", payloadJson: {} } });
-      for (let attempt = 1; attempt <= 4; attempt += 1) await expect(service.runDeliveryJob({ payload: { deliveryId: delivery.id }, fetchImpl: failing })).rejects.toMatchObject({ retryable: true });
-      await expect(service.runDeliveryJob({ payload: { deliveryId: delivery.id }, fetchImpl: failing })).rejects.toMatchObject({ retryable: false, code: "WEBHOOK_DEAD" });
+      for (let attempt = 1; attempt <= 4; attempt += 1) await expect(service.runDeliveryJob({ job: { orgId: "org-1" }, payload: { deliveryId: delivery.id }, fetchImpl: failing })).rejects.toMatchObject({ retryable: true });
+      await expect(service.runDeliveryJob({ job: { orgId: "org-1" }, payload: { deliveryId: delivery.id }, fetchImpl: failing })).rejects.toMatchObject({ retryable: false, code: "WEBHOOK_DEAD" });
       expect(store.deliveries.find((row) => row.id === delivery.id)).toMatchObject({ status: "dead", attempt: 5, error: "connect ECONNREFUSED" });
       expect(store.subscriptions[0].failureCount).toBe(round);
     }

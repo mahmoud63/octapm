@@ -510,6 +510,12 @@ const deleteProject = async ({ orgId, projectId, userId, role }) => {
       },
     });
 
+    // The project's reference counters stay: an archive is a soft state, and
+    // a counter dropped here would reseed from the register's highest row when
+    // the project came back — reissuing any reference whose row was deleted
+    // before the archive. Counters are purged only by the paths that hard
+    // delete a project or an organisation (utils/reference-number.js).
+
     await auditService.recordEvent({
       tx,
       orgId,

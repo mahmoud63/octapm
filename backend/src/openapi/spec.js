@@ -1048,6 +1048,10 @@ const components = {
         "UNIT_NAME_TOO_LONG",
         "UNIT_DIMENSION_INVALID",
         "UNIT_DUPLICATE_CODE",
+        // Tenant hardening (ENT-3): job results
+        "BOQ_JOB_PROJECT_NOT_FOUND",
+        "JOB_ORG_MISMATCH",
+        "JOB_ORG_REQUIRED",
       ],
     },
     CursorPage: objectSchema({
@@ -2176,6 +2180,32 @@ const components = {
         maxDepth: { type: "integer" },
       }),
     }),
+    ExtraService: objectSchema(
+      {
+        id: { type: "string", format: "uuid", nullable: true },
+        orgId: { type: "string", format: "uuid", nullable: true },
+        label: { type: "string", maxLength: 80 },
+        percentage: { type: "number", minimum: 0 },
+        sortOrder: { type: "integer", minimum: 0, nullable: true },
+      },
+      ["label", "percentage"],
+    ),
+    ExtraServicesPayload: objectSchema(
+      {
+        services: {
+          type: "array",
+          maxItems: 20,
+          items: objectSchema(
+            {
+              label: { type: "string", minLength: 1, maxLength: 80 },
+              percentage: { type: "number", minimum: 0, maximum: 1000 },
+            },
+            ["label", "percentage"],
+          ),
+        },
+      },
+      ["services"],
+    ),
     LocationMutation: objectSchema({
       name: { type: "string", maxLength: 120 },
       code: { type: "string", maxLength: 40, nullable: true },
@@ -11484,9 +11514,27 @@ add(
   "get",
   operation({
     tag: "Config",
-    summary: "List configurable extra BOQ services.",
+    summary: "List the caller's organisation's extra BOQ services (VAT, overhead, contingency), or the platform defaults when it has none.",
     operationId: "getExtraServices",
     permissions: authenticatedOnly,
+    responseSchema: { type: "array", items: ref("ExtraService") },
+  }),
+);
+
+add(
+  "/config/extra-services",
+  "put",
+  operation({
+    tag: "Config",
+    summary: "Replace the caller's organisation's extra BOQ services, in order. Labels must be unique within the organisation.",
+    operationId: "setExtraServices",
+    permissions: {
+      auth: "bearer",
+      roles: ["pm"],
+      note: "Company administrators and owners (requireCompanyAdmin).",
+    },
+    requestBody: jsonBody(ref("ExtraServicesPayload"), "The organisation's list, replacing the current one.", true),
+    responseSchema: { type: "array", items: ref("ExtraService") },
   }),
 );
 

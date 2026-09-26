@@ -1126,9 +1126,11 @@ const addProjectMember = async ({
   });
 
   const assignment = await prisma.$transaction(async (tx) => {
+    // orgId is the project's, written by the service (M7 makes the column
+    // NOT NULL with a composite key to Project and to the membership).
     const row = await tx.projectAssignment.upsert({
       where: { projectId_userId: { projectId, userId } },
-      create: { projectId, userId, role: projectRole },
+      create: { projectId, userId, role: projectRole, orgId },
       update: { role: projectRole },
     });
 
