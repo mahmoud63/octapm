@@ -642,6 +642,17 @@ const ERROR_CODE_CATALOG = Object.freeze({
     category: "not_found",
     message: "No allocations carry this import batch id",
   },
+  // ENT-6 personal workspaces and conversion
+  PERSONAL_WORKSPACE_CONVERT_REQUIRED: {
+    status: 409,
+    category: "conflict",
+    message: "A personal workspace has one member. Convert it to a company workspace to invite people.",
+  },
+  WORKSPACE_ALREADY_COMPANY: {
+    status: 409,
+    category: "conflict",
+    message: "This workspace is already a company workspace",
+  },
 });
 
 const DEFAULT_CODE_BY_STATUS = Object.freeze({

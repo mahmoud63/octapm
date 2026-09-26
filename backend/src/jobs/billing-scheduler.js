@@ -1,5 +1,6 @@
 const { prisma } = require('../config/db');
 const { sendEmail, templates } = require('../services/email.service');
+const { findBillingRecipient } = require('../services/membership.service');
 
 const DAY = 24 * 60 * 60 * 1000;
 
@@ -77,7 +78,15 @@ async function runBillingChecks(now = new Date(), { orgIds = null } = {}) {
   });
 }
 
+/**
+ * Where a trial reminder goes: the workspace's owner (ENT-6 — personal and
+ * company alike, the owner membership's user), and only for a workspace
+ * seeded before memberships, the earliest PM, as before. Nothing about what
+ * the reminder says or when it is sent changes here.
+ */
 async function pmEmail(orgId) {
+  const owner = await findBillingRecipient({ orgId });
+  if (owner?.email) return owner.email;
   const u = await prisma.user.findFirst({
     where: { orgId, role: 'pm' }, orderBy: { createdAt: 'asc' },
   });

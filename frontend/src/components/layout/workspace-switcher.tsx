@@ -1,6 +1,13 @@
 import * as React from 'react'
 import { Link, useNavigate } from '@tanstack/react-router'
-import { Building2, Check, ChevronsUpDown, Plus, Settings2, User } from 'lucide-react'
+import {
+  Building2,
+  Check,
+  ChevronsUpDown,
+  Plus,
+  Settings2,
+  User,
+} from 'lucide-react'
 import { useAuthStore, workspaceSegment } from '@/stores/auth-store'
 import { useIsCompanyAdmin } from '@/lib/permissions'
 import { cn } from '@/lib/utils'
@@ -14,6 +21,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
+import { CreateWorkspaceDialog } from '@/features/company/components/create-workspace-dialog'
 import { WorkspaceKindBadge } from '@/features/home/workspace-badge'
 import { membershipStanding } from '@/features/home/workspace-standing'
 
@@ -24,9 +32,9 @@ import { membershipStanding } from '@/features/home/workspace-standing'
  * `/o/{workspace}` route performs the switch, so the URL stays the source
  * of truth and browser Back reverses it.
  *
- * "Create workspace" and "Convert to company" are the next wave's (personal
- * workspaces, ENT-6); they are shown disabled so the menu already has its
- * shape and nobody looks for them elsewhere.
+ * "Create workspace" makes a further company workspace for the identity
+ * and "Convert to company" opens the workspace settings of a personal one
+ * for its owner (ENT-6).
  */
 export function WorkspaceSwitcher({ className }: { className?: string }) {
   const navigate = useNavigate()
@@ -35,6 +43,7 @@ export function WorkspaceSwitcher({ className }: { className?: string }) {
   const switching = useAuthStore((state) => state.auth.switching)
   const isAdmin = useIsCompanyAdmin()
   const [open, setOpen] = React.useState(false)
+  const [creating, setCreating] = React.useState(false)
 
   const select = (segment: string) => {
     setOpen(false)
@@ -52,7 +61,10 @@ export function WorkspaceSwitcher({ className }: { className?: string }) {
           size='sm'
           aria-label='Switch workspace'
           data-testid='workspace-switcher'
-          className={cn('h-8 max-w-64 justify-between gap-2 px-2.5 font-medium', className)}
+          className={cn(
+            'h-8 max-w-64 justify-between gap-2 px-2.5 font-medium',
+            className
+          )}
         >
           <Icon className='size-4 shrink-0 text-muted-foreground' />
           <span className='truncate' data-testid='workspace-switcher-name'>
@@ -61,7 +73,10 @@ export function WorkspaceSwitcher({ className }: { className?: string }) {
               : (workspace?.name ?? workspace?.segment ?? 'Workspace')}
           </span>
           {workspace && (
-            <WorkspaceKindBadge kind={workspace.kind} className='hidden lg:inline-flex' />
+            <WorkspaceKindBadge
+              kind={workspace.kind}
+              className='hidden lg:inline-flex'
+            />
           )}
           <ChevronsUpDown className='size-3.5 shrink-0 opacity-60' />
         </Button>
@@ -83,10 +98,17 @@ export function WorkspaceSwitcher({ className }: { className?: string }) {
                 className='gap-2'
                 data-testid={`workspace-option-${segment}`}
               >
-                <Check className={cn('size-4 shrink-0', current ? 'opacity-100' : 'opacity-0')} />
+                <Check
+                  className={cn(
+                    'size-4 shrink-0',
+                    current ? 'opacity-100' : 'opacity-0'
+                  )}
+                />
                 <div className='min-w-0 flex-1'>
                   <div className='flex items-center gap-2'>
-                    <span className='truncate'>{membership.name ?? segment}</span>
+                    <span className='truncate'>
+                      {membership.name ?? segment}
+                    </span>
                     <WorkspaceKindBadge kind={membership.kind} />
                   </div>
                   <p className='truncate text-[11px] text-muted-foreground'>
@@ -119,22 +141,34 @@ export function WorkspaceSwitcher({ className }: { className?: string }) {
               </Link>
             </DropdownMenuItem>
           )}
-          {/* Personal workspaces and conversion arrive with ENT-6; the entry
-              points are here, disabled, so the menu's shape is settled. */}
-          <DropdownMenuItem disabled data-testid='workspace-create'>
+          {/* A further company workspace for this identity (ENT-6); the
+              dialog lives outside the menu so closing the menu keeps it. */}
+          <DropdownMenuItem
+            onSelect={() => {
+              setOpen(false)
+              setCreating(true)
+            }}
+            data-testid='workspace-create'
+          >
             <Plus className='size-4' />
             Create workspace
-            <span className='ms-auto text-[10px] text-muted-foreground'>Soon</span>
           </DropdownMenuItem>
           {workspace?.kind === 'personal' && workspace.isOwner && (
-            <DropdownMenuItem disabled>
-              <Building2 className='size-4' />
-              Convert to company
-              <span className='ms-auto text-[10px] text-muted-foreground'>Soon</span>
+            <DropdownMenuItem asChild>
+              <Link
+                to='/o/$orgSlug/company/workspace'
+                params={{ orgSlug: workspace.segment }}
+                onClick={() => setOpen(false)}
+                data-testid='workspace-convert-link'
+              >
+                <Building2 className='size-4' />
+                Convert to company
+              </Link>
             </DropdownMenuItem>
           )}
         </DropdownMenuGroup>
       </DropdownMenuContent>
+      <CreateWorkspaceDialog open={creating} onOpenChange={setCreating} />
     </DropdownMenu>
   )
 }

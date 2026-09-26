@@ -292,6 +292,10 @@ const createUser = async ({ orgId, actor = null, payload, context = {} }) => {
   if (!payload.password) {
     throw new HttpError(400, "VALIDATION_ERROR", "A password is required for a new account");
   }
+  // Asked before the account exists: a personal workspace's one-member rule
+  // (ENT-6) refuses the seat, and must not leave an identity behind with no
+  // membership when it does.
+  await membershipService.assertWorkspaceAcceptsMember({ tx: prisma, orgId });
   const passwordHash = await bcrypt.hash(payload.password, 12);
 
   const user = await prisma.user.create({
@@ -628,6 +632,14 @@ const inviteUser = async ({ orgId, actor, payload, context = {} }) => {
     : Boolean(existingUser && existingUser.orgId === orgId && existingUser.status === "active");
   if (activeHere && !projectId && !companyId && !projectPartyId) {
     throw new HttpError(409, "ALREADY_MEMBER", "This person is already a member of the workspace");
+  }
+  // A workspace or project invitation seats a member; a party invitation
+  // seats a guest. A personal workspace refuses the former before the
+  // invitation is minted (ENT-6), so nobody is sent a link that acceptance
+  // would refuse — except somebody already seated here, who is only being
+  // assigned a project.
+  if (!companyId && !projectPartyId && !activeHere) {
+    await membershipService.assertWorkspaceAcceptsMember({ tx: prisma, orgId, userId: existingUser?.id || null });
   }
 
   const rawToken = createAccountToken();

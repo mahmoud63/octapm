@@ -509,6 +509,43 @@ const components = {
       },
       ["project", "workspace", "active"],
     ),
+    // ENT-6 personal workspaces and conversion
+    OrganisationSummary: objectSchema(
+      {
+        id: uuid,
+        name: { type: "string" },
+        kind: { type: "string", enum: ["personal", "company"] },
+        slug: { type: "string", nullable: true },
+        plan: { type: "string", description: "The organisation's plan label: individual for a personal workspace, standard for a company." },
+        status: { type: "string" },
+      },
+      ["id", "name", "kind", "plan", "status"],
+    ),
+    OrganisationCreateRequest: objectSchema(
+      {
+        name: { type: "string", minLength: 2, maxLength: 120, description: "The company workspace's name; its URL handle is allocated from it." },
+      },
+      ["name"],
+    ),
+    OrganisationConvertRequest: objectSchema({
+      name: {
+        type: "string",
+        minLength: 2,
+        maxLength: 120,
+        description: "A new name for the company workspace; omitted, the personal workspace's name is kept. The URL handle is always kept.",
+      },
+    }),
+    OrganisationWorkspaceResponse: objectSchema(
+      {
+        organisation: ref("OrganisationSummary"),
+        workspace: {
+          allOf: [ref("WorkspaceMembership")],
+          description: "The caller's membership in the workspace: the seat to enter with POST /auth/workspaces/{orgId}/session.",
+        },
+        memberships: arrayOf(ref("WorkspaceMembership")),
+      },
+      ["organisation", "workspace", "memberships"],
+    ),
     UserSettingsProfile: objectSchema(
       {
         username: { type: "string", minLength: 2, maxLength: 30 },
@@ -1089,6 +1126,9 @@ const components = {
         "LOCATION_OUTSIDE_SUBTREE",
         "MAPPING_IMPORT_INVALID",
         "MAPPING_IMPORT_BATCH_NOT_FOUND",
+        // ENT-6 personal workspaces and conversion
+        "PERSONAL_WORKSPACE_CONVERT_REQUIRED",
+        "WORKSPACE_ALREADY_COMPANY",
       ],
     },
     CursorPage: objectSchema({
@@ -6472,6 +6512,39 @@ add(
     permissions: { ...authenticatedOnly, note: "Any valid access token (bound to whichever workspace) or the identity token a sign-in returns; the answer is drawn only from the caller's own memberships." },
     parameters: [queryParam("projectId", "Project UUID from the legacy link.", uuid, { required: true })],
     responseSchema: ref("AuthWorkspaceResolveResponse"),
+  }),
+);
+
+// ENT-6 personal workspaces and conversion
+add(
+  "/organisations",
+  "post",
+  operation({
+    tag: "Workspaces",
+    summary: "Create a company workspace for the signed-in identity.",
+    description:
+      "Sign-up makes a personal workspace (one member — its owner — plus guests, on the individual plan); this makes a further, company workspace with the caller as its owner and administrator, fully provisioned: an owner membership, a subscription, the twelve system permission templates and the default units of measure. Any active identity may create one. The answer carries the new membership so the client can enter it with POST /auth/workspaces/{orgId}/session; the caller's current session is untouched. Recorded as workspace.created. API keys are refused (403 API_KEY_FORBIDDEN).",
+    operationId: "createOrganisation",
+    permissions: { ...authenticatedOnly, note: "Any active workspace-bound session; the new workspace is the caller's own. API keys are refused." },
+    requestBody: jsonBody(ref("OrganisationCreateRequest"), "The workspace's name."),
+    responseSchema: ref("OrganisationWorkspaceResponse"),
+    status: 201,
+  }),
+);
+
+add(
+  "/organisations/{id}/convert",
+  "post",
+  operation({
+    tag: "Workspaces",
+    summary: "Convert a personal workspace to a company workspace.",
+    description:
+      "By the workspace's owner, for the workspace the token is bound to. The kind becomes company, the plan label becomes the company one, and the name changes when a new one is given; the URL handle is kept. Nothing else changes: every project, record and figure already carries this workspace's id, no row moves or is re-keyed, ledger and budget rows are untouched, the owner stays owner, and the workspace can then invite people (a personal workspace refuses a second member with 409 PERSONAL_WORKSPACE_CONVERT_REQUIRED). 403 OWNER_REQUIRED for a member who is not an owner; 404 WORKSPACE_NOT_FOUND when {id} is not the session's workspace; 409 WORKSPACE_ALREADY_COMPANY for a company workspace. Recorded as workspace.converted.",
+    operationId: "convertOrganisation",
+    permissions: { ...authenticatedOnly, note: "The owner of the workspace the session is bound to (membership isOwner)." },
+    parameters: [pathParam("id", "Organisation (workspace) UUID — the session's own.")],
+    requestBody: jsonBody(ref("OrganisationConvertRequest"), "An optional new name.", false),
+    responseSchema: ref("OrganisationWorkspaceResponse"),
   }),
 );
 
@@ -16522,6 +16595,11 @@ const openApiSpec = {
     },
     { name: "Exports", description: "Project export APIs." },
     { name: "Users", description: "Organization user management." },
+    {
+      name: "Workspaces",
+      description:
+        "Workspaces as things that are made and change kind (ENT-6): a further company workspace for a signed-in identity, and personal → company conversion. Entering a workspace is POST /auth/workspaces/{orgId}/session under Auth.",
+    },
     {
       name: "Config",
       description: "Shared application configuration endpoints.",

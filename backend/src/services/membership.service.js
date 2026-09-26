@@ -379,6 +379,41 @@ const assertRoleForKind = ({ role, kind }) => {
   return role;
 };
 
+/** One wording for every refusal of a second member in a personal workspace (utils/error-codes.js keeps the same). */
+const PERSONAL_WORKSPACE_MESSAGE =
+  "A personal workspace has one member. Convert it to a company workspace to invite people.";
+
+/**
+ * The one-member rule of a personal workspace (wave plan, product-owner
+ * decision 5): it holds exactly its owner, plus guests. Every path that would
+ * give a second person a member-kind membership — a direct add, a workspace
+ * or project invitation, invitation acceptance, SSO auto-provisioning — asks
+ * here first and is refused with 409 PERSONAL_WORKSPACE_CONVERT_REQUIRED,
+ * which names the way out. A guest (party member) is not a member and is not
+ * counted or refused. A client that does not know the organisation model (a
+ * test double) has no personal workspaces.
+ *
+ * `userId` is the person about to join: their own row, whatever its state,
+ * never counts against them (the owner's sign-up membership; a member coming
+ * back after leaving is refused only when somebody else holds the seat).
+ */
+const assertWorkspaceAcceptsMember = async ({ tx = prisma, orgId, userId = null, kind = MEMBERSHIP_KINDS.MEMBER }) => {
+  if (kind === MEMBERSHIP_KINDS.GUEST || !orgId || !hasMembershipModel(tx) || !tx?.organisation?.findUnique) return;
+  const org = await tx.organisation.findUnique({ where: { id: orgId }, select: { kind: true } });
+  if (!org || org.kind !== "personal") return;
+  const seated = await tx.organizationMembership.count({
+    where: {
+      orgId,
+      kind: MEMBERSHIP_KINDS.MEMBER,
+      status: { not: MEMBERSHIP_STATUSES.LEFT },
+      ...(userId ? { userId: { not: userId } } : {}),
+    },
+  });
+  if (seated > 0) {
+    throw new HttpError(409, "PERSONAL_WORKSPACE_CONVERT_REQUIRED", PERSONAL_WORKSPACE_MESSAGE);
+  }
+};
+
 /**
  * Creates or reactivates a membership (invitation acceptance, direct add,
  * SSO provisioning, sign-up, party-member add). Idempotent on (org, user).
@@ -408,6 +443,13 @@ const ensureMembership = async ({
   if (!isMembershipWriteEnabled() || !hasMembershipModel(tx)) return null;
   const wantedRole = assertRoleForKind({ role, kind });
   const existing = await tx.organizationMembership.findFirst({ where: { orgId, userId } });
+
+  // A member-kind membership that is new, or was a guest's or a left one, is
+  // a seat being taken: the personal-workspace rule decides whether there is one.
+  const takesSeat =
+    kind === MEMBERSHIP_KINDS.MEMBER &&
+    (!existing || existing.kind === MEMBERSHIP_KINDS.GUEST || existing.status === MEMBERSHIP_STATUSES.LEFT);
+  if (takesSeat) await assertWorkspaceAcceptsMember({ tx, orgId, userId, kind });
 
   if (!existing) {
     const membership = await tx.organizationMembership.create({
@@ -601,8 +643,27 @@ const hasOtherActiveMembership = async ({ tx = prisma, orgId, userId }) => {
   return count > 0;
 };
 
+/**
+ * Who a workspace's bills and trial reminders go to: its owner (ENT-6,
+ * personal and company alike) — the earliest active owner membership's
+ * user, since ownership is a membership fact. A workspace with no owner row
+ * (seeded before the backfill) answers null and the caller keeps its older
+ * pick. Only the address and name are read; no billing figure lives here.
+ */
+const findBillingRecipient = async ({ tx = prisma, orgId }) => {
+  if (!orgId || !hasMembershipModel(tx)) return null;
+  const owner = await tx.organizationMembership.findFirst({
+    where: { orgId, isOwner: true, status: MEMBERSHIP_STATUSES.ACTIVE, user: { status: "active" } },
+    orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+    select: { userId: true, user: { select: { id: true, email: true, name: true } } },
+  });
+  return owner?.user ?? null;
+};
+
 module.exports = {
   CATALOGUE_ROLES,
+  assertWorkspaceAcceptsMember,
+  findBillingRecipient,
   GUEST_ROLE,
   MEMBERSHIP_KINDS,
   MEMBERSHIP_STATUSES,

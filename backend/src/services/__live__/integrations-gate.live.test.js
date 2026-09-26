@@ -34,6 +34,10 @@ liveDescribe("integrations: the OAuth callback is public, the rest is gated", ()
       where: { orgId: org.orgId },
       data: { plan: "business", status: "active", seats: 25, currentPeriodEnd: new Date(Date.now() + 30 * 86_400_000) },
     });
+    // Sign-up makes a personal workspace, which seats nobody but its owner
+    // (ENT-6); this test seats a member, so the workspace is converted first.
+    const converted = await api.post(`/api/v1/organisations/${org.orgId}/convert`, {}, bearer(org.token));
+    if (converted.status !== 200) throw new Error(`convert: ${converted.status} ${converted.text}`);
   }, 120_000);
 
   afterAll(async () => {

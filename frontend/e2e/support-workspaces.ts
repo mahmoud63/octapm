@@ -58,8 +58,19 @@ export const apiJson = async (
   return { status: response.status(), body }
 }
 
-/** A workspace registered through the product's sign-up, with a plan. */
-export async function registerLiveOrg(client: APIRequestContext, label: string): Promise<LiveOrg> {
+/**
+ * A workspace registered through the product's sign-up, with a plan.
+ *
+ * Sign-up makes a personal workspace (ENT-6), which seats nobody but its
+ * owner; the suites that add members need a company, so by default the
+ * workspace is converted through the product's own route before it is
+ * handed back. `personal: true` keeps it as sign-up made it.
+ */
+export async function registerLiveOrg(
+  client: APIRequestContext,
+  label: string,
+  { personal = false }: { personal?: boolean } = {},
+): Promise<LiveOrg> {
   const id = crypto.randomUUID()
   const adminEmail = `live-${label}-${id}@octapm-live.test`
   const registered = await apiJson(client, 'post', '/auth/register', {
@@ -69,6 +80,10 @@ export async function registerLiveOrg(client: APIRequestContext, label: string):
   const user = registered.body!.data!.user as { id: string; orgId: string }
   const tokens = registered.body!.data!.tokens as { accessToken: string }
   liveOrgScript('activate', user.orgId)
+  if (!personal) {
+    const converted = await apiJson(client, 'post', `/organisations/${user.orgId}/convert`, { token: tokens.accessToken })
+    expect(converted.status, `convert ${label}: ${JSON.stringify(converted.body?.error)}`).toBe(200)
+  }
   const me = await apiJson(client, 'get', '/auth/me', { token: tokens.accessToken })
   const membership = (me.body!.data!.memberships as Array<{ orgId: string; slug: string | null; name: string }>).find(
     (entry) => entry.orgId === user.orgId,

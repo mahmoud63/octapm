@@ -76,6 +76,11 @@ liveDescribe("workspaces: one identity, several organisations", () => {
       where: { orgId: user.orgId },
       data: { plan: "business", status: "active", seats: 25, currentPeriodEnd: new Date(Date.now() + 30 * 86_400_000) },
     });
+    // Sign-up makes a personal workspace, which seats nobody but its owner
+    // (ENT-6); these are teams, so each is converted through the product's
+    // own route — the owner's, of the session's workspace.
+    const converted = await api.post(`/api/v1/organisations/${user.orgId}/convert`, {}, bearer(tokens.accessToken));
+    if (converted.status !== 200) throw new Error(`convert ${label}: ${converted.status} ${converted.text}`);
     return { label, orgId: user.orgId, admin: user, token: tokens.accessToken, refreshToken: tokens.refreshToken, email: user.email };
   };
 

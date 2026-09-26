@@ -123,6 +123,7 @@ const createApp = () => {
   const membersOnly = requireOrganizationMembership({ kind: "member" });
 
   app.use("/api/v1/auth", authRoutes);
+  app.use("/api/v1/organisations", require("./routes/organisations"));
   app.use("/api/v1/projects", projectRoutes);
   app.use("/api/v1/companies", membersOnly, companyRoutes);
   app.use("/api/v1/users", membersOnly, userRoutes);

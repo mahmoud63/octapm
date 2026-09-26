@@ -170,7 +170,11 @@ async function confirmTrial(orgId, stripePaymentMethodId) {
   return getCurrentSubscription(orgId);
 }
 
+// Billing mail goes to the workspace's owner (ENT-6); the earliest PM only
+// for a workspace seeded before memberships. Amounts and rules are untouched.
 async function orgEmail(orgId) {
+  const owner = await require('./membership.service').findBillingRecipient({ orgId });
+  if (owner?.email) return owner.email;
   const user = await prisma.user.findFirst({
     where: { orgId, role: 'pm' },
     orderBy: { createdAt: 'asc' },

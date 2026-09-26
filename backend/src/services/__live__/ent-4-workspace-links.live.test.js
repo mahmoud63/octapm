@@ -49,6 +49,10 @@ liveDescribe("workspace links: notification paths and the legacy-link resolver",
       where: { orgId: user.orgId },
       data: { plan: "business", status: "active", seats: 25, currentPeriodEnd: new Date(Date.now() + 30 * 86_400_000) },
     });
+    // Sign-up makes a personal workspace, which seats nobody but its owner
+    // (ENT-6); these are teams, so each is converted through the product's route.
+    const converted = await api.post(`/api/v1/organisations/${user.orgId}/convert`, {}, bearer(issued.accessToken));
+    if (converted.status !== 200) throw new Error(`convert ${label}: ${converted.status} ${converted.text}`);
     const org = await prisma.organisation.findUnique({ where: { id: user.orgId }, select: { slug: true } });
     return { label, orgId: user.orgId, slug: org.slug, admin: user, token: issued.accessToken };
   };

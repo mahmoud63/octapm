@@ -14,8 +14,10 @@ import {
   Plus,
   ShieldCheck,
   TrendingDown,
+  User,
   WalletCards,
 } from 'lucide-react'
+import { useAuthStore } from '@/stores/auth-store'
 import { statusBadge } from '@/lib/status'
 import { cn } from '@/lib/utils'
 import { Badge } from '@/components/ui/badge'
@@ -812,8 +814,51 @@ function EmptyWorkspace({ data }: { data: WorkspaceDashboard }) {
   )
 }
 
+/**
+ * The personal variant of the workspace dashboard (workspace switching doc
+ * §7, ENT-6): a personal workspace is one person's, so the page is titled
+ * as theirs and the team sections — workflow queues, the project watchlist
+ * — stay hidden until it holds more than one project. No new data: the same
+ * dashboard answer, with labels and visibility for one person.
+ */
+function PersonalWorkspaceNote({
+  segment,
+  isOwner,
+}: {
+  segment: string
+  isOwner: boolean
+}) {
+  return (
+    <Card className='border-dashed' data-testid='dashboard-personal-note'>
+      <CardContent className='flex flex-col gap-3 py-4 text-sm sm:flex-row sm:items-center sm:justify-between'>
+        <div className='flex items-start gap-3'>
+          <User className='mt-0.5 size-4 shrink-0 text-muted-foreground' />
+          <p className='text-muted-foreground'>
+            This is your personal workspace: one member, you, plus any guests
+            you bring onto a project. To work with a team, convert it to a
+            company workspace.
+          </p>
+        </div>
+        {isOwner && (
+          <Button asChild variant='outline' size='sm' className='shrink-0'>
+            <Link
+              to='/o/$orgSlug/company/workspace'
+              params={{ orgSlug: segment }}
+              data-testid='dashboard-personal-convert'
+            >
+              Convert to company
+            </Link>
+          </Button>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
+
 export function Dashboard() {
   const { data, isLoading, isError } = useWorkspaceDashboard()
+  const workspace = useAuthStore((state) => state.auth.workspace)
+  const personal = workspace?.kind === 'personal'
 
   if (isLoading) {
     return (
@@ -899,17 +944,29 @@ export function Dashboard() {
           target: { projectId: null, module: 'projects' },
         }))
   const pendingMetrics = data.pendingReview?.metrics || []
+  // A personal workspace shows its team sections only once it holds more
+  // than one project (workspace switching doc §7).
+  const showTeamSections = !personal || summary.totalProjects > 1
 
   return (
     <Main>
-      <div data-testid='workspace-dashboard' className='space-y-6'>
+      <div
+        data-testid='workspace-dashboard'
+        data-workspace-kind={personal ? 'personal' : 'company'}
+        className='space-y-6'
+      >
         <div className='flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between'>
           <div>
-            <h1 className='text-2xl font-bold tracking-tight'>
-              Workspace Control
+            <h1
+              className='text-2xl font-bold tracking-tight'
+              data-testid='dashboard-title'
+            >
+              {personal ? 'My Workspace' : 'Workspace Control'}
             </h1>
             <p className='text-sm text-muted-foreground'>
-              Construction health, approval queues, and project risk signals.
+              {personal
+                ? 'Your projects, open items and progress signals.'
+                : 'Construction health, approval queues, and project risk signals.'}
             </p>
             <p className='mt-1 text-xs text-muted-foreground'>
               Official cutoff {formatCutoff(data.dataFreshness?.cutoffDate)} |
@@ -929,6 +986,13 @@ export function Dashboard() {
             </Link>
           </Button>
         </div>
+
+        {personal && workspace && (
+          <PersonalWorkspaceNote
+            segment={workspace.segment}
+            isOwner={workspace.isOwner}
+          />
+        )}
 
         {!data.emptyState && <QuickActions />}
 
@@ -997,20 +1061,30 @@ export function Dashboard() {
               </section>
             )}
 
-            <div className='grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]'>
-              <section className='space-y-3'>
-                <div>
-                  <h2 className='text-lg font-semibold'>Workflow Queues</h2>
-                  <p className='text-sm text-muted-foreground'>
-                    Approvals and overdue actions across the workspace
-                  </p>
-                </div>
-                <div className='grid gap-4 md:grid-cols-2 2xl:grid-cols-3'>
-                  {data.workflowQueues.map((queue) => (
-                    <WorkflowQueueCard key={queue.key} queue={queue} />
-                  ))}
-                </div>
-              </section>
+            <div
+              className={cn(
+                'grid gap-4',
+                showTeamSections && 'xl:grid-cols-[minmax(0,1fr)_360px]'
+              )}
+            >
+              {showTeamSections && (
+                <section
+                  className='space-y-3'
+                  data-testid='dashboard-workflow-queues'
+                >
+                  <div>
+                    <h2 className='text-lg font-semibold'>Workflow Queues</h2>
+                    <p className='text-sm text-muted-foreground'>
+                      Approvals and overdue actions across the workspace
+                    </p>
+                  </div>
+                  <div className='grid gap-4 md:grid-cols-2 2xl:grid-cols-3'>
+                    {data.workflowQueues.map((queue) => (
+                      <WorkflowQueueCard key={queue.key} queue={queue} />
+                    ))}
+                  </div>
+                </section>
+              )}
 
               <Card>
                 <CardHeader>
@@ -1030,35 +1104,37 @@ export function Dashboard() {
               </Card>
             </div>
 
-            <Card>
-              <CardHeader className='flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between'>
-                <div>
-                  <CardTitle>Project Health Watchlist</CardTitle>
-                  <CardDescription>
-                    Lowest health scores and highest workflow pressure
-                  </CardDescription>
-                </div>
-                <Button asChild variant='outline' size='sm'>
-                  <Link to='/projects'>
-                    View All
-                    <ArrowUpRight />
-                  </Link>
-                </Button>
-              </CardHeader>
-              <CardContent>
-                {data.projectHealth.length === 0 ? (
-                  <div className='rounded-md border border-dashed p-8 text-center text-sm text-muted-foreground'>
-                    No project health records yet
+            {showTeamSections && (
+              <Card data-testid='dashboard-project-watchlist'>
+                <CardHeader className='flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between'>
+                  <div>
+                    <CardTitle>Project Health Watchlist</CardTitle>
+                    <CardDescription>
+                      Lowest health scores and highest workflow pressure
+                    </CardDescription>
                   </div>
-                ) : (
-                  <div className='space-y-3'>
-                    {data.projectHealth.map((project) => (
-                      <ProjectHealthRow key={project.id} project={project} />
-                    ))}
-                  </div>
-                )}
-              </CardContent>
-            </Card>
+                  <Button asChild variant='outline' size='sm'>
+                    <Link to='/projects'>
+                      View All
+                      <ArrowUpRight />
+                    </Link>
+                  </Button>
+                </CardHeader>
+                <CardContent>
+                  {data.projectHealth.length === 0 ? (
+                    <div className='rounded-md border border-dashed p-8 text-center text-sm text-muted-foreground'>
+                      No project health records yet
+                    </div>
+                  ) : (
+                    <div className='space-y-3'>
+                      {data.projectHealth.map((project) => (
+                        <ProjectHealthRow key={project.id} project={project} />
+                      ))}
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            )}
 
             <div className='grid gap-4 lg:grid-cols-3'>
               <Card>
