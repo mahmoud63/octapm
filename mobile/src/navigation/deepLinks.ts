@@ -106,6 +106,10 @@ export function normaliseLinkPath(input: string): { path: string; params: URLSea
         return s
       }
     })
+  // Web links carry the workspace first (`/o/{workspace}/projects/…`, ENT-4);
+  // the app's session is bound to one workspace at a time, so the segment
+  // is dropped and the path underneath resolves as before.
+  if (segments[0] === 'o' && segments.length >= 2) segments.splice(0, 2)
   return { path: `/${segments.join('/')}`, params: new URLSearchParams(query) }
 }
 

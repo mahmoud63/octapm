@@ -7,6 +7,9 @@ describe('deep links', () => {
     expect(normaliseLinkPath('octapm://rfi/abc?x=1')).toEqual({ path: '/rfi/abc', params: new URLSearchParams('x=1') })
     expect(normaliseLinkPath('https://app.octapm.com/tasks?recordId=t1')?.path).toBe('/tasks')
     expect(normaliseLinkPath('/(app)/rfi/abc')?.path).toBe('/rfi/abc')
+    // A workspace-prefixed web link (ENT-4) resolves to the path under the workspace.
+    expect(normaliseLinkPath('/o/acme/tasks?recordId=t1')?.path).toBe('/tasks')
+    expect(normaliseLinkPath('https://app.octapm.com/o/acme/projects/p1/quality/ncr')?.path).toBe('/projects/p1/quality/ncr')
     expect(normaliseLinkPath('')).toBeNull()
   })
 
@@ -20,6 +23,9 @@ describe('deep links', () => {
 
   it('lands on a module home when the record has no screen, and on Home for the project itself', () => {
     expect(resolveLink(`/projects/${P}/quality`)).toEqual({ route: '/quality', projectId: P })
+    // The same link as the web now mints it, with its workspace in front (ENT-4).
+    expect(resolveLink(`/o/acme/projects/${P}/quality`)).toEqual({ route: '/quality', projectId: P })
+    expect(resolveLink(`https://app.octapm.com/o/acme/projects/${P}/rfi?recordId=r1&source=rfi`)).toEqual({ route: '/rfi/r1', projectId: P })
     expect(resolveLink(`/projects/${P}/cost?recordId=x&source=ipc_certificate`)).toBeNull()
     expect(resolveLink(`/projects/${P}`)).toEqual({ route: '/', projectId: P })
     expect(resolveLink('/projects/not-a-uuid/rfi')).toBeNull()
