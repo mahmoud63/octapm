@@ -9,12 +9,14 @@ const { prisma } = require("../config/db");
 const { HttpError } = require("../utils/http-error");
 const {
   createAccessToken,
+  createIdentityToken,
   createRefreshToken,
   getAccessTokenExpiresInSeconds,
   getRefreshTokenExpiresAt,
   hashRefreshToken,
   verifyRefreshToken,
 } = require("../utils/tokens");
+const membershipService = require("./membership.service");
 const authAbuseService = require("./auth-abuse.service");
 const { ensureSubscription } = require("./subscription.service");
 const { sendEmail, templates } = require("./email.service");
@@ -124,14 +126,21 @@ const createInvalidInvitationTokenError = () =>
     "Invitation token is invalid, expired, or already used",
   );
 
-const sanitizeUser = (user) => ({
+/**
+ * The user as a session describes them. With a principal (the membership the
+ * session is bound to) the workspace fields — orgId, role, isCompanyAdmin —
+ * are the membership's, so a person who is a QS in one workspace and a PM in
+ * another is described correctly in each; for the one-membership identities
+ * every existing user is, they equal the User columns and nothing changes.
+ */
+const sanitizeUser = (user, principal = null) => ({
   id: user.id,
-  orgId: user.orgId,
+  orgId: principal?.orgId ?? user.orgId,
   name: user.name,
   email: user.email,
   phone: user.phone,
-  role: user.role,
-  isCompanyAdmin: Boolean(user.isCompanyAdmin),
+  role: principal?.role ?? user.role,
+  isCompanyAdmin: Boolean(principal ? principal.isCompanyAdmin : user.isCompanyAdmin),
   status: user.status,
   lastLogin: user.lastLogin,
   mfaEnabled: Boolean(user.mfaEnabled),
@@ -140,23 +149,28 @@ const sanitizeUser = (user) => ({
   updatedAt: user.updatedAt,
 });
 
-const buildTokenPayload = (user) => ({
-  accessToken: createAccessToken(user),
+const buildTokenPayload = (principal) => ({
+  accessToken: createAccessToken(principal),
   tokenType: "Bearer",
   expiresIn: getAccessTokenExpiresInSeconds(),
 });
 
-const buildAuthPayload = (user, refreshSession) => ({
-  user: sanitizeUser(user),
-  tokens: buildTokenPayload(user),
+const buildAuthPayload = (user, principal, refreshSession) => ({
+  user: sanitizeUser(user, principal),
+  tokens: buildTokenPayload(principal),
   refreshToken: refreshSession.refreshToken,
   refreshTokenExpiresAt: refreshSession.expiresAt,
 });
 
-const createRefreshSession = async (tx, user, context = {}) => {
+/**
+ * A refresh session for a principal. The session row records the membership
+ * it was issued for, and the refresh token carries the same `mid`, so a
+ * refresh can hold the two to each other and re-mint from the membership.
+ */
+const createRefreshSession = async (tx, principal, context = {}) => {
   const sessionId = randomUUID();
   const refreshToken = createRefreshToken(
-    user,
+    principal,
     sessionId,
     context.client || "web",
   );
@@ -165,12 +179,13 @@ const createRefreshSession = async (tx, user, context = {}) => {
   await tx.refreshSession.create({
     data: {
       id: sessionId,
-      userId: user.id,
-      orgId: user.orgId,
+      userId: principal.id,
+      orgId: principal.orgId,
       tokenHash: hashRefreshToken(refreshToken),
       userAgent: context.userAgent || null,
       ipAddress: context.ipAddress || null,
       expiresAt,
+      ...(principal.membershipId ? { membershipId: principal.membershipId } : {}),
     },
   });
 
@@ -181,9 +196,14 @@ const createRefreshSession = async (tx, user, context = {}) => {
   };
 };
 
-const createAuthSessionPayload = async (tx, user, context = {}) => {
-  const refreshSession = await createRefreshSession(tx, user, context);
-  return buildAuthPayload(user, refreshSession);
+/**
+ * A session for a user row, bound to their membership in `orgId` (their own
+ * organisation unless the caller names another workspace they belong to).
+ */
+const createAuthSessionPayload = async (tx, user, context = {}, { orgId = null } = {}) => {
+  const principal = await membershipService.resolveSessionPrincipal(tx, user, { orgId });
+  const refreshSession = await createRefreshSession(tx, principal, context);
+  return buildAuthPayload(user, principal, refreshSession);
 };
 
 const createInvalidRefreshTokenError = () =>
@@ -243,6 +263,22 @@ const revokeSessionIfActive = async (tx, sessionId, now) => {
 };
 
 /**
+ * The URL handle of a new workspace: the name slugified, suffixed when taken.
+ * The backfill's helper decides the spelling so a workspace created here and
+ * one backfilled from an old row are named the same way. A client that does
+ * not know the column (a test double) gets no slug, as before.
+ */
+const allocateWorkspaceSlug = async (tx, name) => {
+  if (!tx?.organisation?.findMany) return undefined;
+  const { nextFreeSlug, slugifyName, takenSlugs } = require("../../scripts/enterprise/lib");
+  try {
+    return nextFreeSlug(slugifyName(name), await takenSlugs(tx));
+  } catch {
+    return undefined;
+  }
+};
+
+/**
  * A new organisation with its first company administrator, its subscription
  * and its default permission templates — everything self-service sign-up and
  * the first-administrator bootstrap have in common. Runs inside the caller's
@@ -250,11 +286,14 @@ const revokeSessionIfActive = async (tx, sessionId, now) => {
  */
 const provisionOrganisation = async (
   tx,
-  { orgName, name, email, phone = null, passwordHash },
+  { orgName, name, email, phone = null, passwordHash, kind = "company" },
 ) => {
+  const workspaceName = orgName?.trim() || `${name.trim()} Organisation`;
   const createdOrg = await tx.organisation.create({
     data: {
-      name: orgName?.trim() || `${name.trim()} Organisation`,
+      name: workspaceName,
+      kind,
+      slug: await allocateWorkspaceSlug(tx, workspaceName),
     },
   });
 
@@ -268,6 +307,31 @@ const provisionOrganisation = async (
       role: "pm",
       isCompanyAdmin: true,
     },
+  });
+
+  // The person who created the workspace owns it: the one membership that
+  // sign-up may create with ownership (membership doc §1).
+  await tx.organisation.update({
+    where: { id: createdOrg.id },
+    data: { createdByUserId: createdUser.id },
+  });
+  await membershipService.ensureMembership({
+    tx,
+    orgId: createdOrg.id,
+    userId: createdUser.id,
+    role: "pm",
+    isAdmin: true,
+    isOwner: true,
+  });
+  await recordAuthAuditEvent({
+    tx,
+    orgId: createdOrg.id,
+    userId: createdUser.id,
+    entityType: "organisation",
+    entityId: createdOrg.id,
+    action: "workspace.created",
+    email,
+    metadata: { kind, name: workspaceName },
   });
 
   await ensureSubscription(createdOrg.id, tx);
@@ -385,29 +449,14 @@ const login = async ({ email, password }, context = {}) => {
     throw new HttpError(403, "USER_INACTIVE", "Your account is not active");
   }
 
-  // Organisation policies (OCTA-SEC-AUTH-040): SSO-only domains and a second factor.
-  const org = prisma.organisation?.findUnique
-    ? await prisma.organisation.findUnique({
-        where: { id: user.orgId },
-        select: {
-          ssoEnabled: true,
-          ssoRequired: true,
-          ssoDomainsJson: true,
-          mfaRequired: true,
-        },
-      })
-    : null;
-  if (
-    org?.ssoEnabled &&
-    org.ssoRequired &&
-    !user.isCompanyAdmin &&
-    require("./sso.service").domainMatches(normalizedEmail, org.ssoDomainsJson)
-  ) {
-    throw new HttpError(
-      403,
-      "SSO_REQUIRED",
-      "Your organisation signs in with single sign-on — use the SSO button",
-    );
+  // Organisation policies (OCTA-SEC-AUTH-040): SSO-only domains and a second
+  // factor. They belong to the workspace being entered, so with one workspace
+  // they are checked here as they always were; with several, at the workspace
+  // session issue (membership doc §6).
+  const entry = await resolveLoginEntry(user);
+  const org = entry.orgId ? await readWorkspacePolicy(entry.orgId) : null;
+  if (entry.orgId) {
+    assertWorkspacePolicy({ org, email: normalizedEmail, isCompanyAdmin: entry.isCompanyAdmin });
   }
   if (user.mfaEnabled) {
     const mfaService = require("./mfa.service");
@@ -428,41 +477,178 @@ const login = async ({ email, password }, context = {}) => {
     };
   }
 
-  return prisma.$transaction(async (tx) => {
-    const updatedUser = await tx.user.update({
-      where: { id: user.id },
-      data: { lastLogin: new Date() },
-    });
-
-    const payload = await createAuthSessionPayload(tx, updatedUser, context);
-    payload.user.mfaEnrollmentRequired = Boolean(
-      org?.mfaRequired && !updatedUser.mfaEnabled,
-    );
-    return payload;
-  });
+  return issueLoginOutcome({ user, entry, org, context });
 };
 
 /** Second step of a login with two-factor: the challenge token plus a code from the app or a backup code. */
 const completeMfaLogin = async ({ mfaToken, code }, context = {}) => {
   const mfaService = require("./mfa.service");
   const user = await mfaService.resolveChallenge({ mfaToken, code, context });
-  return prisma.$transaction(async (tx) => {
+  await recordAuthAuditEvent({
+    orgId: user.orgId,
+    userId: user.id,
+    entityType: "user",
+    entityId: user.id,
+    action: "mfa.verified",
+    email: user.email,
+    ipAddress: context.ipAddress,
+    userAgent: context.userAgent,
+  });
+  const entry = await resolveLoginEntry(user);
+  const org = entry.orgId ? await readWorkspacePolicy(entry.orgId) : null;
+  return issueLoginOutcome({ user, entry, org, context });
+};
+
+// ─── Workspaces ─────────────────────────────────────────────────────────────
+
+const WORKSPACE_POLICY_SELECT = {
+  id: true,
+  name: true,
+  slug: true,
+  kind: true,
+  status: true,
+  ssoEnabled: true,
+  ssoRequired: true,
+  ssoDomainsJson: true,
+  mfaRequired: true,
+};
+
+const readWorkspacePolicy = async (orgId) =>
+  prisma.organisation?.findUnique
+    ? prisma.organisation.findUnique({ where: { id: orgId }, select: WORKSPACE_POLICY_SELECT })
+    : null;
+
+/**
+ * The SSO-only policy of the workspace being entered. Administrators are
+ * exempt — scoped: the exemption is the target workspace's admin flag, not a
+ * global one (membership doc §2.1).
+ */
+const assertWorkspacePolicy = ({ org, email, isCompanyAdmin }) => {
+  if (
+    org?.ssoEnabled &&
+    org.ssoRequired &&
+    !isCompanyAdmin &&
+    require("./sso.service").domainMatches(email, org.ssoDomainsJson)
+  ) {
+    throw new HttpError(
+      403,
+      "SSO_REQUIRED",
+      "Your organisation signs in with single sign-on — use the SSO button",
+    );
+  }
+};
+
+/**
+ * Where a verified sign-in leads (membership doc §6):
+ *   - `legacy`: the person has no membership row at all (seeded before the
+ *     backfill) — their User columns name the one workspace, as always;
+ *   - `single`: exactly one active membership — tokens bound to it, today's
+ *     response for every existing user;
+ *   - `none` / `many`: an identity token and the list, for the picker.
+ */
+const resolveLoginEntry = async (user) => {
+  const rows =
+    membershipService.hasMembershipModel(prisma) && membershipService.isMembershipReadEnabled()
+      ? await membershipService.listMembershipsForUser(user.id)
+      : [];
+  if (!rows.length) {
+    // No row that is not `left`. A row that is `left` means the person was in
+    // a workspace and is no longer: that is "no workspace", not "before
+    // memberships"; only a person with no row at all is a legacy sign-in.
+    const anyRow =
+      membershipService.hasMembershipModel(prisma) && membershipService.isMembershipReadEnabled()
+        ? await prisma.organizationMembership.count({ where: { userId: user.id } })
+        : 0;
+    if (!anyRow) {
+      return { mode: "legacy", orgId: user.orgId, isCompanyAdmin: Boolean(user.isCompanyAdmin), workspaces: [] };
+    }
+  }
+  const workspaces = rows
+    .filter((row) => (row.org?.status ?? "active") === "active")
+    .map(membershipService.workspaceEntry);
+  const active = workspaces.filter((workspace) => workspace.status === "active");
+  if (active.length === 1) {
+    return { mode: "single", orgId: active[0].orgId, isCompanyAdmin: active[0].isAdmin || active[0].isOwner, workspaces };
+  }
+  return { mode: active.length ? "many" : "none", orgId: null, isCompanyAdmin: false, workspaces };
+};
+
+const issueLoginOutcome = async ({ user, entry, org, context }) =>
+  prisma.$transaction(async (tx) => {
     const updatedUser = await tx.user.update({
       where: { id: user.id },
       data: { lastLogin: new Date() },
     });
-    await recordAuthAuditEvent({
-      tx,
-      orgId: user.orgId,
-      userId: user.id,
-      entityType: "user",
-      entityId: user.id,
-      action: "mfa.verified",
-      email: user.email,
-      ipAddress: context.ipAddress,
-      userAgent: context.userAgent,
-    });
-    return createAuthSessionPayload(tx, updatedUser, context);
+
+    if (!entry.orgId) {
+      // No single workspace to enter: the identity is proven, the workspace
+      // is chosen with POST /auth/workspaces/:orgId/session.
+      return {
+        ...(entry.mode === "many" ? { chooseWorkspace: true } : { needsWorkspace: true }),
+        identityToken: createIdentityToken(updatedUser),
+        memberships: entry.workspaces,
+      };
+    }
+
+    const payload = await createAuthSessionPayload(tx, updatedUser, context, { orgId: entry.orgId });
+    payload.user.mfaEnrollmentRequired = Boolean(
+      org?.mfaRequired && !updatedUser.mfaEnabled,
+    );
+    return payload;
+  });
+
+/**
+ * POST /auth/workspaces/:orgId/session (workspace switching doc §2): a valid
+ * session or identity token for `userId`, an active membership in `orgId`,
+ * the target workspace's policies — and a fresh access + refresh pair bound to
+ * that membership on the caller's channel. Nothing is revoked: the other
+ * workspace's session family stays valid so the person can switch back.
+ */
+const issueWorkspaceSession = async ({ userId, orgId }, context = {}) => {
+  const user = await prisma.user.findUnique({ where: { id: userId } });
+  if (!user || user.status !== "active") {
+    throw new HttpError(401, "USER_INACTIVE", "Your account is not active");
+  }
+  const membership = await membershipService.findMembership({ tx: prisma, orgId, userId });
+  const legacyHome = !membership && user.orgId === orgId;
+  if (!membership && !legacyHome) {
+    throw new HttpError(404, "WORKSPACE_NOT_FOUND", "You are not a member of this workspace");
+  }
+  if (membership && membership.status !== "active") {
+    throw new HttpError(403, "USER_INACTIVE", "Your access to this workspace is not active");
+  }
+  const org = await readWorkspacePolicy(orgId);
+  if (!org || org.status !== "active") {
+    throw new HttpError(404, "WORKSPACE_NOT_FOUND", "You are not a member of this workspace");
+  }
+  assertWorkspacePolicy({
+    org,
+    email: user.email,
+    isCompanyAdmin: membership ? membership.isAdmin || membership.isOwner : Boolean(user.isCompanyAdmin),
+  });
+
+  const memberships = await membershipService.listWorkspacesForUser(userId);
+  return prisma.$transaction(async (tx) => {
+    const payload = await createAuthSessionPayload(tx, user, context, { orgId });
+    payload.user.mfaEnrollmentRequired = Boolean(org.mfaRequired && !user.mfaEnabled);
+    const workspace = membership
+      ? membershipService.workspaceEntry({ ...membership, org })
+      : { orgId, membershipId: null, slug: org.slug, name: org.name, kind: org.kind, role: user.role, isAdmin: Boolean(user.isCompanyAdmin), isOwner: false, status: "active" };
+    for (const action of ["workspace.switched", "session.workspace_issued"]) {
+      await recordAuthAuditEvent({
+        tx,
+        orgId,
+        userId,
+        entityType: "membership",
+        entityId: membership?.id || null,
+        action,
+        email: user.email,
+        ipAddress: context.ipAddress,
+        userAgent: context.userAgent,
+        metadata: { membershipId: membership?.id || null, client: context.client || "web" },
+      });
+    }
+    return { ...payload, workspace, memberships };
   });
 };
 
@@ -550,6 +736,26 @@ const refresh = async ({
       return refuse(session, "session", createInvalidRefreshTokenError());
     }
 
+    // The token and the stored session must name the same membership, and
+    // that membership must still be live: the new pair is minted from the
+    // membership row, not from the session's copy of the user (M4). A token
+    // issued before memberships carries no `mid` and is held to the person's
+    // membership in the session's organisation, or to the User columns when
+    // there is none.
+    if (payload.mid && session.membershipId && payload.mid !== session.membershipId) {
+      throw createInvalidRefreshTokenError();
+    }
+    const standing = await membershipService.resolveMembershipPrincipal({
+      tx,
+      userId: session.userId,
+      orgId: session.orgId,
+      membershipId: payload.mid || session.membershipId || null,
+    });
+    if (standing.inactive) {
+      return refuse(session, "session", createInvalidRefreshTokenError());
+    }
+    const principal = standing.principal || membershipService.principalFromUser(session.user);
+
     // The read above is not a claim: two refreshes with the same token (a
     // retry, two tabs, two API tasks) both see revokedAt still empty. The
     // session is claimed by this conditional write instead. The loser waits
@@ -576,7 +782,7 @@ const refresh = async ({
       );
     }
 
-    const nextSession = await createRefreshSession(tx, session.user, {
+    const nextSession = await createRefreshSession(tx, principal, {
       userAgent,
       ipAddress,
       client,
@@ -589,7 +795,7 @@ const refresh = async ({
       },
     });
 
-    return buildAuthPayload(session.user, nextSession);
+    return buildAuthPayload(session.user, principal, nextSession);
   });
 
   if (refusal) {
@@ -633,19 +839,29 @@ const logout = async ({ refreshToken, client = "web" }) => {
   return { revoked: result.count > 0 };
 };
 
-const getProfile = async ({ userId, orgId }) => {
-  const user = await prisma.user.findFirst({
-    where: {
-      id: userId,
-      orgId,
-    },
-  });
+/**
+ * GET /auth/me: the identity, described in the active workspace (every field
+ * as before), plus every workspace the person belongs to and which one the
+ * token is for (membership doc §3). With an identity token there is no active
+ * workspace and the identity is described from its own columns.
+ */
+const getProfile = async ({ userId, orgId, principal = null }) => {
+  const user = principal?.membershipId || !orgId
+    ? await prisma.user.findUnique({ where: { id: userId } })
+    : await prisma.user.findFirst({ where: { id: userId, orgId } });
 
   if (!user) {
     throw new HttpError(404, "USER_NOT_FOUND", "User not found");
   }
 
-  return sanitizeUser(user);
+  const memberships = await membershipService.listWorkspacesForUser(user.id);
+  return {
+    ...sanitizeUser(user, principal?.orgId ? principal : null),
+    memberships,
+    active: principal?.orgId
+      ? { orgId: principal.orgId, membershipId: principal.membershipId || null }
+      : null,
+  };
 };
 
 const requestPasswordReset = async ({ email }, context = {}) => {
@@ -891,18 +1107,12 @@ const getInvitationPreview = async ({ token }) => {
   const invitation = await getInvitationByRawToken(token);
   assertUsableInvitationToken(invitation);
 
+  // An identity that already exists elsewhere is invited like any other
+  // (membership doc §5): acceptance gives it a second membership.
   const existingUser = await prisma.user.findUnique({
     where: { email: invitation.email },
     select: { id: true, orgId: true, status: true },
   });
-
-  if (existingUser && existingUser.orgId !== invitation.orgId) {
-    throw new HttpError(
-      409,
-      "INVITATION_EMAIL_IN_OTHER_ORG",
-      "Email is already registered to another organization",
-    );
-  }
 
   return {
     email: invitation.email,
@@ -967,14 +1177,6 @@ const acceptInvitation = async (
     where: { email: invitation.email },
   });
 
-  if (existingUser && existingUser.orgId !== invitation.orgId) {
-    throw new HttpError(
-      409,
-      "INVITATION_EMAIL_IN_OTHER_ORG",
-      "Email is already registered to another organization",
-    );
-  }
-
   const requiresPassword = !existingUser || existingUser.status !== "active";
   if (requiresPassword && !password) {
     throw new HttpError(
@@ -986,21 +1188,31 @@ const acceptInvitation = async (
 
   const passwordHash = password ? await bcrypt.hash(password, 12) : null;
 
+  // The invited membership: a party invitation makes a guest, anything else
+  // a member with the invited role. The User columns mirror the membership
+  // only in the identity's own organisation (M5 dual-write); an identity
+  // invited into a second workspace keeps its name, password and home role.
+  const isPartyInvitation = Boolean(invitation.projectPartyId);
+  const homeOrg = !existingUser || existingUser.orgId === invitation.orgId;
+
   return prisma.$transaction(async (tx) => {
     let user;
     if (existingUser) {
-      const data = {
-        role: invitation.role,
-        status: "active",
-      };
-      if (name?.trim()) data.name = name.trim();
-      if (phone !== undefined) data.phone = phone || null;
-      if (passwordHash) data.passwordHash = passwordHash;
+      const data = {};
+      if (homeOrg) {
+        data.role = invitation.role;
+        data.status = "active";
+        if (name?.trim()) data.name = name.trim();
+        if (phone !== undefined) data.phone = phone || null;
+        if (passwordHash) data.passwordHash = passwordHash;
+      }
 
-      user = await tx.user.update({
-        where: { id: existingUser.id },
-        data,
-      });
+      user = Object.keys(data).length
+        ? await tx.user.update({
+            where: { id: existingUser.id },
+            data,
+          })
+        : existingUser;
     } else {
       user = await tx.user.create({
         data: {
@@ -1012,6 +1224,28 @@ const acceptInvitation = async (
           role: invitation.role,
           status: "active",
         },
+      });
+    }
+
+    const ensured = await membershipService.ensureMembership({
+      tx,
+      orgId: invitation.orgId,
+      userId: user.id,
+      role: isPartyInvitation ? membershipService.GUEST_ROLE : invitation.role,
+      kind: isPartyInvitation ? membershipService.MEMBERSHIP_KINDS.GUEST : membershipService.MEMBERSHIP_KINDS.MEMBER,
+      invitedById: invitation.invitedById || null,
+      invitationId: invitation.id,
+      joinedAt: now,
+    });
+    if (ensured) {
+      await membershipService.recordMembershipEvent({
+        tx,
+        orgId: invitation.orgId,
+        membership: ensured.membership,
+        action: "membership.invitation_accepted",
+        actor: invitation.invitedById ? { id: invitation.invitedById } : null,
+        context,
+        metadata: { invitationId: invitation.id, created: ensured.created, reactivated: ensured.reactivated, kind: ensured.membership.kind },
       });
     }
 
@@ -1033,9 +1267,11 @@ const acceptInvitation = async (
           projectId: invitation.projectId,
           userId: user.id,
           role: invitation.role,
+          orgId: invitation.orgId,
         },
         update: {
           role: invitation.role,
+          orgId: invitation.orgId,
         },
       });
     }
@@ -1046,6 +1282,7 @@ const acceptInvitation = async (
         status: "accepted",
         acceptedAt: now,
         acceptedById: user.id,
+        ...(ensured ? { membershipId: ensured.membership.id } : {}),
       },
     });
 
@@ -1084,7 +1321,7 @@ const acceptInvitation = async (
       },
     });
 
-    return createAuthSessionPayload(tx, user, context);
+    return createAuthSessionPayload(tx, user, context, { orgId: invitation.orgId });
   });
 };
 
@@ -1308,5 +1545,6 @@ module.exports = {
   getInvitationPreview,
   acceptInvitation,
   createAuthSessionPayload,
+  issueWorkspaceSession,
   sanitizeUser,
 };

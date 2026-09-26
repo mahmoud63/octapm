@@ -418,10 +418,69 @@ const components = {
         },
         status: { type: "string" },
         lastLogin: nullableDateString,
+        mfaEnabled: { type: "boolean" },
+        ssoLinked: { type: "boolean" },
+        mfaEnrollmentRequired: { type: "boolean" },
         createdAt: nullableDateString,
         updatedAt: nullableDateString,
+        memberships: {
+          type: "array",
+          description:
+            "Every workspace the identity belongs to (memberships that were left are not listed; suspended ones carry their status). Present on GET /auth/me and on a workspace session.",
+          items: ref("WorkspaceMembership"),
+        },
+        active: {
+          nullable: true,
+          description:
+            "The workspace and membership the presented token is bound to; null for an identity token.",
+          allOf: [
+            objectSchema({ orgId: uuid, membershipId: nullableUuid }, ["orgId"]),
+          ],
+        },
       },
       ["id", "orgId", "name", "email", "role", "status"],
+    ),
+    WorkspaceMembership: objectSchema(
+      {
+        orgId: uuid,
+        membershipId: uuid,
+        slug: { type: "string", nullable: true },
+        name: { type: "string", nullable: true },
+        kind: { type: "string", enum: ["personal", "company"] },
+        role: { type: "string" },
+        isAdmin: { type: "boolean" },
+        isOwner: { type: "boolean" },
+        status: { type: "string", enum: ["invited", "active", "suspended"] },
+      },
+      ["orgId", "membershipId", "kind", "role", "isAdmin", "isOwner", "status"],
+    ),
+    AuthWorkspaceChoiceResponse: objectSchema(
+      {
+        chooseWorkspace: {
+          type: "boolean",
+          description: "The identity has several active workspaces: pick one with POST /auth/workspaces/{orgId}/session.",
+        },
+        needsWorkspace: {
+          type: "boolean",
+          description: "The identity has no workspace it can enter (every membership left or suspended).",
+        },
+        identityToken: {
+          type: "string",
+          description:
+            "A short-lived token that names the identity and no workspace. Accepted only by GET /auth/me and POST /auth/workspaces/{orgId}/session.",
+        },
+        memberships: arrayOf(ref("WorkspaceMembership")),
+      },
+      ["identityToken", "memberships"],
+    ),
+    AuthWorkspaceSessionResponse: objectSchema(
+      {
+        user: ref("GenericObject"),
+        tokens: ref("AuthTokens"),
+        workspace: ref("WorkspaceMembership"),
+        memberships: arrayOf(ref("WorkspaceMembership")),
+      },
+      ["user", "tokens", "workspace", "memberships"],
     ),
     UserSettingsProfile: objectSchema(
       {
@@ -789,7 +848,6 @@ const components = {
         "INVALID_SHIFT",
         "INVALID_SITE_PHOTO_REFERENCE",
         "INVALID_PLAN",
-        "INVITATION_EMAIL_IN_OTHER_ORG",
         "INVITATION_PASSWORD_REQUIRED",
         "INVITATION_TOKEN_INVALID",
         "INVALID_REFRESH_TOKEN",
@@ -960,6 +1018,15 @@ const components = {
         "USER_INACTIVE",
         "USER_NOT_FOUND",
         "VALIDATION_ERROR",
+        // Workspace membership (enterprise programme, ENT-2)
+        "ALREADY_MEMBER",
+        "LAST_OWNER",
+        "SELF_ELEVATION_FORBIDDEN",
+        "OWNER_REQUIRED",
+        "GUEST_FORBIDDEN",
+        "WORKSPACE_REQUIRED",
+        "WORKSPACE_NOT_FOUND",
+        "SSO_IDENTITY_CONFLICT",
         "WORKFLOW_ACTIVITY_NOT_FOUND",
         "WORKFLOW_PROJECT_PARTY_NOT_FOUND",
       ],
@@ -5897,12 +5964,32 @@ add(
     tag: "Auth",
     summary: "Exchange email and password for an access token.",
     description:
-      "Creates a server-side refresh session, sets it as an httpOnly cookie, and returns a short-lived access token.",
+      "Creates a server-side refresh session, sets it as an httpOnly cookie, and returns a short-lived access token bound to the identity's workspace membership. An identity with exactly one active workspace (every existing user) gets the session directly; one with several gets { chooseWorkspace: true, identityToken, memberships } and picks with POST /auth/workspaces/{orgId}/session; one with none gets { needsWorkspace: true, identityToken, memberships: [] }. A second factor, when enrolled, is challenged first ({ mfaRequired: true, mfaToken }).",
     operationId: "login",
     security: false,
     requestBody: jsonBody(ref("AuthLoginRequest"), "Login credentials."),
     responses: {
-      200: authSessionResponse("Authenticated."),
+      200: authSessionResponse("Authenticated, a second-factor challenge, or a workspace choice.", {
+        oneOf: [ref("AuthTokenResponse"), ref("AuthWorkspaceChoiceResponse"), ref("GenericObject")],
+      }),
+    },
+  }),
+);
+
+add(
+  "/auth/workspaces/{orgId}/session",
+  "post",
+  operation({
+    tag: "Auth",
+    summary: "Enter a workspace: a new session bound to the caller's membership in it.",
+    description:
+      "Takes any valid access token (bound to whichever workspace) or the identity token a sign-in returns when the identity has several workspaces, and answers with a fresh access + refresh pair bound to the caller's active membership in {orgId}, on the caller's channel (refresh cookie for browsers, body for X-OctaPM-Client: mobile). The target workspace's SSO-only policy is evaluated (403 SSO_REQUIRED for a non-admin on an SSO-only domain); its MFA policy is reported as user.mfaEnrollmentRequired. Nothing is revoked: the other workspace's session stays valid so the person can switch back. 404 WORKSPACE_NOT_FOUND when the identity is not a member; 403 USER_INACTIVE when its membership there is suspended. Recorded as workspace.switched and session.workspace_issued.",
+    operationId: "issueWorkspaceSession",
+    security: true,
+    permissions: { ...authenticatedOnly, note: "Any valid access token (bound to whichever workspace) or the identity token a sign-in returns, for the same identity; API keys are refused." },
+    parameters: [pathParam("orgId", "Organisation (workspace) UUID.")],
+    responses: {
+      200: authSessionResponse("Session issued for the workspace.", ref("AuthWorkspaceSessionResponse")),
     },
   }),
 );
@@ -5967,7 +6054,7 @@ add(
     tag: "Auth",
     summary: "Accept an invitation and start a session.",
     description:
-      "Creates a user or links an existing same-organization user, assigns the invitation role/project, marks the token accepted, audits the event, and issues the normal refresh cookie plus access token response.",
+      "Creates a user and their membership, or gives an existing identity a membership in the inviting workspace — an identity that already exists in another workspace is welcome, keeps its name and password, and gets a second workspace (a party invitation makes a guest membership). Assigns the invitation role/project, marks the token accepted, audits the event, and issues the normal refresh cookie plus access token response, bound to the invited workspace.",
     operationId: "acceptInvitation",
     security: false,
     requestBody: jsonBody(
@@ -6026,6 +6113,8 @@ add(
   operation({
     tag: "Auth",
     summary: "Return the authenticated user profile.",
+    description:
+      "The identity as the active workspace sees it (orgId, role and isCompanyAdmin are the membership's), plus memberships[] — every workspace the identity belongs to — and active { orgId, membershipId }. Also answers an identity token (the only route that does besides the workspace session issue): then active is null and the workspace fields describe the identity's own organisation.",
     operationId: "getCurrentUser",
     responseSchema: ref("AuthUser"),
   }),
@@ -10827,7 +10916,7 @@ add(
     tag: "Users",
     summary: "Invite a user to the organization or a project.",
     description:
-      "PM-only onboarding flow. Stores a hashed invitation token, sends an email invite, and audits the invitation. The invite can optionally assign a project role when accepted.",
+      "Stores a hashed invitation token, sends an email invite, and audits the invitation. The invite can optionally assign a project role when accepted. An email that already belongs to an identity in another workspace may be invited (acceptance gives it a second membership); one that is already an active member here is refused with 409 ALREADY_MEMBER unless the invitation is for a project or party.",
     operationId: "inviteUser",
     permissions: modulePermission("user_management", "submit", "user.invite"),
     requestBody: jsonBody(ref("UserInvitationRequest"), "Invitation payload."),
@@ -10840,7 +10929,9 @@ add(
   {
     method: "post",
     path: "/users",
-    summary: "Create an organization user.",
+    summary: "Create an organization user, or add an existing identity to this workspace.",
+    description:
+      "A new email creates an identity (password required) and its membership. An email that already belongs to an identity in another workspace gets a membership here instead: the response carries existingIdentity: true, the password is ignored, and the identity's name and password are untouched. 409 EMAIL_EXISTS when the identity is already in this workspace.",
     operationId: "createUser",
     permissions: modulePermission("user_management", "create"),
     requestBody: genericPayloadBody("User creation payload.", true),

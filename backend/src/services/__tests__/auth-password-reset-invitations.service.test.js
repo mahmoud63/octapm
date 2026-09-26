@@ -307,8 +307,9 @@ describe("auth password reset and invitation tokens", () => {
         projectId: pendingInvitation.projectId,
         userId: "new-user-1",
         role: pendingInvitation.role,
+        orgId: "org-1",
       },
-      update: { role: pendingInvitation.role },
+      update: { role: pendingInvitation.role, orgId: "org-1" },
     });
     expect(mockTx.invitationToken.update).toHaveBeenCalledWith({
       where: { id: pendingInvitation.id },

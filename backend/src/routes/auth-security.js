@@ -21,6 +21,9 @@ const register = (router, { sendSession, getRequestContext }) => {
     [body("mfaToken").isString().isLength({ min: 20 }), body("code").isString().trim().isLength({ min: 6, max: 12 }), validate],
     asyncHandler(async (req, res) => {
       const result = await authService.completeMfaLogin(req.body, getRequestContext(req));
+      // The second factor is proven; with no single workspace to enter the
+      // answer is the workspace choice, as at the first login step.
+      if (result.chooseWorkspace || result.needsWorkspace) return sendSuccess(res, result);
       return sendSession(req, res, result);
     }),
   );

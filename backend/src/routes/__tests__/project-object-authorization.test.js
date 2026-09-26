@@ -39,17 +39,20 @@ const mockSubscriptionService = {
 };
 
 jest.mock('../../config/db', () => ({ prisma: mockPrisma }));
+const fakeAuthenticate = (req, _res, next) => {
+  req.user = {
+    id: req.get('x-user-id') || 'site-1',
+    orgId: req.get('x-org-id') || 'org-1',
+    role: req.get('x-role') || 'site_engineer',
+    email: 'site@example.com',
+    name: 'Site Engineer',
+  };
+  next();
+};
 jest.mock('../../middleware/auth', () => ({
-  authenticate: (req, _res, next) => {
-    req.user = {
-      id: req.get('x-user-id') || 'site-1',
-      orgId: req.get('x-org-id') || 'org-1',
-      role: req.get('x-role') || 'site_engineer',
-      email: 'site@example.com',
-      name: 'Site Engineer',
-    };
-    next();
-  },
+  authenticate: fakeAuthenticate,
+  // The org-level gate app.js mounts: authenticates the same way here.
+  requireOrganizationMembership: () => fakeAuthenticate,
 }));
 jest.mock('../../services/project.service', () => mockProjectService);
 jest.mock('../../services/schedule.service', () => mockScheduleService);
