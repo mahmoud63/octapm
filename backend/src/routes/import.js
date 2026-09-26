@@ -5,10 +5,12 @@ const multer = require('multer');
 const path = require('path');
 const { asyncHandler } = require('../utils/async-handler');
 const { sendSuccess } = require('../utils/api-response');
+const { query } = require('express-validator');
 const { HttpError } = require('../utils/http-error');
 const { authenticate } = require('../middleware/auth');
 const { uploadLimiter } = require('../middleware/rate-limit');
 const { requirePermission } = require('../middleware/rbac');
+const { validate } = require('../middleware/validate');
 const importService = require('../services/import.service');
 const fileStorageService = require('../services/file-storage.service');
 
@@ -33,9 +35,9 @@ const upload = multer({
       .split('.')
       .pop()
       ?.toLowerCase()}`;
-    if (!['.xer', '.xml'].includes(ext)) {
+    if (!['.xer', '.xml', '.xlsx'].includes(ext)) {
       return cb(
-        new HttpError(400, 'UNSUPPORTED_FORMAT', 'Allowed formats: .xer, .xml'),
+        new HttpError(400, 'UNSUPPORTED_FORMAT', 'Allowed formats: .xer, .xml, .xlsx'),
       );
     }
     return cb(null, true);
@@ -171,6 +173,65 @@ router.post(
         orgId: req.user.orgId,
         xmlContent: await readUploadText(req.file),
         replaceExisting,
+        userId: req.user.id,
+      });
+      await fileStorageService.markDocumentLinked({
+        documentId: document.documentId,
+        entityType: 'schedule_revision',
+        entityId: result.revisionId,
+      });
+
+      return sendSuccess(res, { ...result, document }, 201);
+    } catch (error) {
+      if (document?.documentId) {
+        await fileStorageService.markDocumentRejected({
+          documentId: document.documentId,
+          code: error.code || 'SCHEDULE_IMPORT_FAILED',
+          message: error.message,
+        }).catch(() => {});
+      }
+      throw error;
+    } finally {
+      await fileStorageService.cleanupTempFiles(req.file);
+    }
+  }),
+);
+
+// POST /projects/:projectId/import/xlsx — a programme from a workbook, staged
+// like the other formats. With ?dryRun=true the workbook is parsed and the
+// staged snapshot reported, and nothing is stored: no document, no revision.
+router.post(
+  '/xlsx',
+  requirePermission('schedule', 'create'),
+  uploadLimiter,
+  [query('dryRun').optional().isBoolean().toBoolean(), validate],
+  upload.single('file'),
+  asyncHandler(async (req, res) => {
+    if (!req.file) throw new HttpError(400, 'NO_FILE', 'No file uploaded');
+
+    let document = null;
+    try {
+      if (req.query.dryRun === true) {
+        const report = await importService.importScheduleXlsx({
+          projectId: req.params.projectId,
+          orgId: req.user.orgId,
+          input: { path: req.file.path },
+          dryRun: true,
+          userId: req.user.id,
+        });
+        return sendSuccess(res, report);
+      }
+
+      document = await fileStorageService.uploadScheduleImportFile({
+        projectId: req.params.projectId,
+        orgId: req.user.orgId,
+        userId: req.user.id,
+        file: req.file,
+      });
+      const result = await importService.importScheduleXlsx({
+        projectId: req.params.projectId,
+        orgId: req.user.orgId,
+        input: { path: req.file.path },
         userId: req.user.id,
       });
       await fileStorageService.markDocumentLinked({

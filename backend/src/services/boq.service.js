@@ -34,7 +34,27 @@ const { generateBoqTemplate } = require("./boq/template");
 const BOQ_REVISION_STATUS = Object.freeze({
   IMPORTED: 'imported',
   COMPARISON_ONLY: 'comparison_only',
+  UNDER_REVIEW: 'under_review',
+  APPROVED: 'approved',
+  BASELINED: 'baselined',
+  SUPERSEDED: 'superseded',
 });
+
+// The revisions whose rows are the current bill: an upload applies its rows
+// at once (unless the baseline is locked), and the review that follows —
+// submit, approve, lock — changes the revision's standing, not its rows. A
+// comparison-only revision never applied anything; a superseded one has been
+// replaced as the baseline.
+const CURRENT_REVISION_STATUSES = [
+  BOQ_REVISION_STATUS.IMPORTED,
+  BOQ_REVISION_STATUS.UNDER_REVIEW,
+  BOQ_REVISION_STATUS.APPROVED,
+  BOQ_REVISION_STATUS.BASELINED,
+];
+
+// How many rows of each comparison list a dry-run report carries back. The
+// counts are always complete; the rows are a sample big enough to review.
+const DRY_RUN_ROW_LIMIT = 100;
 
 const BOQ_BASELINE_LOCK_REASON =
   'Pending BOQ revision comparison; baseline is locked';
@@ -205,6 +225,7 @@ function serializeBoqRevision(revision) {
     status: revision.status,
     baselineLocked: Boolean(revision.baselineLocked),
     lockedAt: revision.lockedAt ?? null,
+    lockedBy: revision.lockedBy ?? null,
     itemCount: revision.itemCount ?? 0,
     addedCount: revision.addedCount ?? 0,
     updatedCount: revision.updatedCount ?? 0,
@@ -712,6 +733,358 @@ async function createOfficialBoqActivityAllocation(
   return mapActivityAllocation({ ...allocation, activity }, boqItem);
 }
 
+/**
+ * What an upload would do, without doing it.
+ *
+ * The same comparison the real upload runs, against the same current rows and
+ * the same lock, but read-only: no revision, no rows, no document, no job. The
+ * codes that clash with hand-entered rows are reported as blocked rather than
+ * thrown, because the point of a preview is to see every problem at once.
+ */
+async function buildBoqUploadDryRun(projectId, itemsWithAmounts, label) {
+  const [existingUploadedItems, baseline, manualConflicts] = await Promise.all([
+    prisma.boqItem.findMany({
+      where: { projectId, isManual: false, isActive: true },
+      select: {
+        id: true,
+        code: true,
+        description: true,
+        qty: true,
+        unit: true,
+        rate: true,
+        amount: true,
+        sortOrder: true,
+        baselineLocked: true,
+      },
+    }),
+    getBoqBaselineLock(projectId),
+    prisma.boqItem.findMany({
+      where: {
+        projectId,
+        isManual: true,
+        isActive: true,
+        activeCodeKey: {
+          in: [...new Set(itemsWithAmounts.map((item) => item.code).filter(Boolean))],
+        },
+      },
+      select: { id: true, code: true },
+    }),
+  ]);
+
+  const comparison = buildBoqComparison(existingUploadedItems, itemsWithAmounts);
+  comparison.blocked = manualConflicts.map((item) => ({
+    code: normalizeCode(item.code),
+    existingId: item.id,
+    reason: 'DUPLICATE_BOQ_ITEM_CODE',
+    message: `BOQ item code "${item.code}" belongs to a hand-entered row; the upload would be refused`,
+  }));
+  comparison.summary.blocked = comparison.blocked.length;
+
+  const mode = baseline.locked
+    ? BOQ_REVISION_STATUS.COMPARISON_ONLY
+    : BOQ_REVISION_STATUS.IMPORTED;
+  const sample = (rows) => rows.slice(0, DRY_RUN_ROW_LIMIT);
+
+  return {
+    dryRun: true,
+    mode,
+    baselineLocked: baseline.locked,
+    baseline,
+    label: trimOrNull(label),
+    rowCount: itemsWithAmounts.length,
+    totalAmount: itemsWithAmounts.reduce(
+      (sum, row) => addMoney(sum, row.amount),
+      0,
+    ),
+    comparison: {
+      summary: comparison.summary,
+      added: sample(comparison.added),
+      updated: sample(comparison.updated),
+      removed: sample(comparison.removed),
+      unchanged: sample(comparison.unchanged),
+      blocked: sample(comparison.blocked),
+      rowLimit: DRY_RUN_ROW_LIMIT,
+    },
+  };
+}
+
+async function findBoqRevisionInProject(projectId, revisionId, tx = prisma) {
+  const revision = await tx.boqRevision.findFirst({
+    where: { id: revisionId, projectId },
+  });
+  if (!revision) {
+    throw new HttpError(404, 'BOQ_REVISION_NOT_FOUND', 'BOQ revision not found');
+  }
+  return revision;
+}
+
+/**
+ * Moves a revision through its review, recording the step the way every
+ * other approval on the platform is recorded: the workflow service decides
+ * whether the step is allowed from where the revision stands (409 otherwise),
+ * and the audit trail keeps who did it and what the revision looked like.
+ */
+async function transitionBoqRevision(
+  tx,
+  { orgId, projectId, revision, toStatus, data = {}, action, reason = null, comment = null, options = {}, metadata = {} },
+) {
+  approvalWorkflowService.assertAllowedTransition({
+    recordType: approvalWorkflowService.RECORD_TYPES.BOQ_REVISION,
+    fromStatus: revision.status,
+    toStatus,
+    reason,
+    comment,
+  });
+
+  const updated = await tx.boqRevision.update({
+    where: { id: revision.id },
+    data: { status: toStatus, ...data },
+  });
+
+  await recordBoqAudit({
+    tx,
+    orgId,
+    projectId,
+    entityType: auditService.ENTITY_TYPES.BOQ_REVISION,
+    entityId: revision.id,
+    action,
+    actorId: options.userId || null,
+    actorRole: options.userRole || null,
+    oldStatus: revision.status,
+    newStatus: toStatus,
+    oldSummary: boqRevisionAuditSummary(revision),
+    newSummary: boqRevisionAuditSummary(updated),
+    reason: reason || comment || null,
+    summary: { revisionNumber: revision.revisionNumber, ...metadata },
+    metadata: { source: 'boq.revision', ...metadata },
+  });
+  if (orgId) {
+    await approvalWorkflowService.recordTransition({
+      tx,
+      orgId,
+      projectId,
+      recordType: approvalWorkflowService.RECORD_TYPES.BOQ_REVISION,
+      recordId: revision.id,
+      fromStatus: revision.status,
+      toStatus,
+      actorId: options.userId || null,
+      actorRole: options.userRole || null,
+      reason,
+      comment,
+      metadata: { revisionNumber: revision.revisionNumber, ...metadata },
+    });
+  }
+
+  return updated;
+}
+
+function refuseComparisonOnlyReview(revision) {
+  if (revision.status !== BOQ_REVISION_STATUS.COMPARISON_ONLY) return;
+  // Its rows were never applied — the baseline was locked when it arrived —
+  // so there is nothing on the current bill to sign off. Reviewing it would
+  // mean adopting it as the new baseline, which is a different operation.
+  throw new HttpError(
+    409,
+    'BOQ_REVISION_COMPARISON_ONLY',
+    'This revision was saved for comparison only while the baseline was locked; its rows are not on the current BOQ and cannot be reviewed',
+    { revisionId: revision.id, status: revision.status },
+  );
+}
+
+/**
+ * The revision under review must be the one whose rows are the bill.
+ *
+ * A later upload applies its rows over the earlier revision's, so signing
+ * off — let alone locking — an earlier revision would baseline rows its own
+ * comparison never described. The newest applied revision is the only one
+ * that can be reviewed; the older ones are superseded when the bill locks.
+ */
+async function assertBoqRevisionCurrent(tx, projectId, revision) {
+  const newer = await tx.boqRevision.findFirst({
+    where: {
+      projectId,
+      status: { in: CURRENT_REVISION_STATUSES },
+      revisionNumber: { gt: revision.revisionNumber },
+    },
+    orderBy: { revisionNumber: 'desc' },
+    select: { id: true, revisionNumber: true, status: true },
+  });
+  if (!newer) return;
+  throw new HttpError(
+    409,
+    'BOQ_REVISION_NOT_CURRENT',
+    `Revision ${revision.revisionNumber} is no longer the current BOQ: revision ${newer.revisionNumber} has applied its rows since. Review the current revision instead`,
+    {
+      revisionId: revision.id,
+      revisionNumber: revision.revisionNumber,
+      currentRevisionId: newer.id,
+      currentRevisionNumber: newer.revisionNumber,
+    },
+  );
+}
+
+async function submitBoqRevision(projectId, revisionId, options = {}) {
+  await assertProjectAccess(projectId, options.orgId);
+  const result = await prisma.$transaction(async (tx) => {
+    const revision = await findBoqRevisionInProject(projectId, revisionId, tx);
+    refuseComparisonOnlyReview(revision);
+    await assertBoqRevisionCurrent(tx, projectId, revision);
+    return transitionBoqRevision(tx, {
+      orgId: options.orgId,
+      projectId,
+      revision,
+      toStatus: BOQ_REVISION_STATUS.UNDER_REVIEW,
+      action: auditService.ACTIONS.STATUS_CHANGED,
+      comment: trimOrNull(options.comment),
+      options,
+      metadata: { transition: 'revision.submit' },
+    });
+  });
+  return serializeBoqRevision(result);
+}
+
+async function approveBoqRevision(projectId, revisionId, options = {}) {
+  await assertProjectAccess(projectId, options.orgId);
+  const result = await prisma.$transaction(async (tx) => {
+    const revision = await findBoqRevisionInProject(projectId, revisionId, tx);
+    refuseComparisonOnlyReview(revision);
+    await assertBoqRevisionCurrent(tx, projectId, revision);
+    return transitionBoqRevision(tx, {
+      orgId: options.orgId,
+      projectId,
+      revision,
+      toStatus: BOQ_REVISION_STATUS.APPROVED,
+      action: auditService.ACTIONS.APPROVED,
+      comment: trimOrNull(options.comment),
+      options,
+      metadata: { transition: 'revision.approve' },
+    });
+  });
+  return serializeBoqRevision(result);
+}
+
+/**
+ * Locks the bill on an approved revision.
+ *
+ * The lock the product already had was only ever derived — the BOQ counted as
+ * locked once the schedule was baselined — so the columns for an explicit
+ * lock were never written. This writes them, beside the derived rule, never
+ * instead of it: `getBoqBaselineLock` answers "locked" for either. Once
+ * locked there is no unlock, exactly as a baselined schedule has none; a
+ * later upload becomes a comparison-only revision, and a later lock is
+ * refused. Only the current revision — the newest one whose rows were
+ * applied — can be locked; the earlier applied revisions, whose rows it
+ * replaced, are superseded at that moment so one revision is the baseline
+ * and the audit trail says which uploads led up to it.
+ */
+async function lockBoqBaseline(projectId, revisionId, options = {}) {
+  await assertProjectAccess(projectId, options.orgId);
+  const comment = trimOrNull(options.comment);
+
+  const result = await prisma.$transaction(async (tx) => {
+    const revision = await findBoqRevisionInProject(projectId, revisionId, tx);
+    refuseComparisonOnlyReview(revision);
+
+    const alreadyLocked = await tx.boqRevision.findFirst({
+      where: { projectId, baselineLocked: true },
+      select: { id: true, revisionNumber: true, lockedAt: true, lockedBy: true },
+    });
+    if (alreadyLocked) {
+      throw new HttpError(
+        409,
+        'BOQ_BASELINE_LOCKED',
+        `BOQ baseline is already locked on revision ${alreadyLocked.revisionNumber}; a locked baseline cannot be unlocked or replaced`,
+        { baseline: { locked: true, source: 'boq_revision', boqRevisionId: alreadyLocked.id, revisionNumber: alreadyLocked.revisionNumber, lockedAt: alreadyLocked.lockedAt, lockedBy: alreadyLocked.lockedBy } },
+      );
+    }
+    await assertBoqRevisionCurrent(tx, projectId, revision);
+    if (revision.status !== BOQ_REVISION_STATUS.APPROVED) {
+      throw new HttpError(
+        409,
+        'BOQ_REVISION_NOT_APPROVED',
+        'Only an approved BOQ revision can be locked as the baseline',
+        { revisionId: revision.id, status: revision.status },
+      );
+    }
+
+    const at = new Date();
+    // The earlier applied revisions: each one's rows were replaced by the
+    // next upload's, and the bill being locked is the sum of them all under
+    // this revision's comparison. They stop being reviewable here.
+    const previous = await tx.boqRevision.findMany({
+      where: {
+        projectId,
+        id: { not: revision.id },
+        status: { in: CURRENT_REVISION_STATUSES },
+      },
+      orderBy: { revisionNumber: 'asc' },
+    });
+    for (const old of previous) {
+      await transitionBoqRevision(tx, {
+        orgId: options.orgId,
+        projectId,
+        revision: old,
+        toStatus: BOQ_REVISION_STATUS.SUPERSEDED,
+        action: auditService.ACTIONS.SUPERSEDED,
+        comment: `Superseded by the BOQ baseline locked on revision ${revision.revisionNumber}`,
+        options,
+        metadata: { transition: 'revision.supersede_for_baseline', supersededByRevisionId: revision.id },
+      });
+    }
+
+    const locked = await transitionBoqRevision(tx, {
+      orgId: options.orgId,
+      projectId,
+      revision,
+      toStatus: BOQ_REVISION_STATUS.BASELINED,
+      data: {
+        baselineLocked: true,
+        lockedBy: options.userId || null,
+        lockedAt: at,
+      },
+      action: auditService.ACTIONS.BASELINE_LOCKED,
+      comment,
+      options,
+      metadata: { transition: 'revision.baseline' },
+    });
+
+    // The rows carry the lock too, so the grid can say so row by row.
+    const lockedRows = await tx.boqItem.updateMany({
+      where: { projectId, isActive: true, baselineLocked: false },
+      data: { baselineLocked: true },
+    });
+
+    return { revision: locked, lockedRows: lockedRows.count };
+  });
+
+  return {
+    revision: serializeBoqRevision(result.revision),
+    lockedRows: result.lockedRows,
+    baseline: await getBoqBaselineLock(projectId),
+  };
+}
+
+/** One revision with its comparison and the review steps recorded on it. */
+async function getBoqRevision(projectId, revisionId, options = {}) {
+  await assertProjectAccess(projectId, options.orgId);
+  const revision = await findBoqRevisionInProject(projectId, revisionId);
+  const events = await approvalWorkflowService.listEventsForRecords({
+    projectId,
+    recordType: approvalWorkflowService.RECORD_TYPES.BOQ_REVISION,
+    recordIds: [revision.id],
+  });
+  return {
+    ...serializeBoqRevision(revision),
+    source: revision.source,
+    createdBy: revision.createdBy ?? null,
+    comparison: revision.compareJson ?? {},
+    importedRows: Array.isArray(revision.importedRowsJson)
+      ? revision.importedRowsJson
+      : [],
+    workflowEvents: events.get(revision.id) || [],
+  };
+}
+
 async function processBoqUpload(projectId, fileBuffer, label, options = {}) {
   const project = options.orgId
     ? await prisma.project.findFirst({
@@ -724,7 +1097,9 @@ async function processBoqUpload(projectId, fileBuffer, label, options = {}) {
       });
   if (!project)
     throw new HttpError(404, 'PROJECT_NOT_FOUND', 'Project not found');
-  await assertAiQuota(project.orgId);
+  // A dry run parses and compares only; nothing is written and no AI job is
+  // queued, so it does not spend the organisation's AI quota.
+  if (!options.dryRun) await assertAiQuota(project.orgId);
 
   let itemsWithAmounts;
   try {
@@ -747,6 +1122,8 @@ async function processBoqUpload(projectId, fileBuffer, label, options = {}) {
         'BOQ file contains validation errors',
         {
           errors: validation.errors,
+          errorCount: validation.errorCount ?? validation.errors.length,
+          truncated: Boolean(validation.truncated),
         },
       );
     }
@@ -773,6 +1150,10 @@ async function processBoqUpload(projectId, fileBuffer, label, options = {}) {
         .catch(() => {});
     }
     throw error;
+  }
+
+  if (options.dryRun) {
+    return buildBoqUploadDryRun(projectId, itemsWithAmounts, label);
   }
 
   // Step 4: Persist a revision and compare/import without deleting current rows.
@@ -1367,8 +1748,8 @@ async function getProjectBoq(projectId, options = {}) {
 
   const serializedRevisions = revisions.map(serializeBoqRevision);
   const currentRevision =
-    serializedRevisions.find(
-      (revision) => revision.status === BOQ_REVISION_STATUS.IMPORTED,
+    serializedRevisions.find((revision) =>
+      CURRENT_REVISION_STATUSES.includes(revision.status),
     ) || null;
   const latestRevision = serializedRevisions[0] || null;
 
@@ -2175,6 +2556,12 @@ module.exports = {
   generateBoqTemplate,
   processBoqUpload,
   getProjectBoq,
+  getBoqRevision,
+  submitBoqRevision,
+  approveBoqRevision,
+  lockBoqBaseline,
+  getBoqBaselineLock,
+  BOQ_REVISION_STATUS,
   updateBoqItem,
   createManualBoqItem,
   deleteBoqItem,

@@ -131,14 +131,16 @@ const DOCUMENT_POLICIES = {
       'text/plain',
       'application/xml',
       'text/xml',
+      // A programme from a workbook (PC-2) is kept like an XER or MSPDI source.
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
     ]),
-    allowedExtensions: ['.xer', '.xml'],
+    allowedExtensions: ['.xer', '.xml', '.xlsx'],
     maxBytes: 50 * 1024 * 1024,
     prefix: 'schedule-imports',
     retentionEnv: 'SCHEDULE_IMPORT_RETENTION_DAYS',
     defaultRetentionDays: 3650,
     unsupportedCode: 'UNSUPPORTED_FORMAT',
-    unsupportedMessage: 'Allowed formats: .xer, .xml',
+    unsupportedMessage: 'Allowed formats: .xer, .xml, .xlsx',
   },
   [DOCUMENT_TYPES.SCHEDULE_GENERATION_SOURCE]: {
     allowedMime: new Set([

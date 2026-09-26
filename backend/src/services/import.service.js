@@ -15,7 +15,12 @@ const {
   parseLagDays,
   tenthsOfMinutesToDays,
 } = require('../parsers/msp-parser');
+const { parseScheduleXlsx } = require('../parsers/schedule-xlsx-parser');
 const { applyCpmToProject, dateToWorkingDay } = require('./cpm.service');
+
+// How many staged activities and dependencies a dry-run report carries back;
+// the counts are complete, the rows are a sample to review.
+const DRY_RUN_ROW_LIMIT = 50;
 const { runPostImportSeeding } = require('./post-import.service');
 
 const REVISION_STATUS = Object.freeze({
@@ -464,6 +469,60 @@ async function importMsp({
   });
 }
 
+/**
+ * Excel schedule import (PC-2). The workbook parser produces the same
+ * activities / relationships / WBS shape as the XER and MSPDI parsers, so
+ * the staged revision is built and persisted by the same code and activates
+ * through the same mapping review. With `dryRun` the staged snapshot is built
+ * and reported but nothing is written.
+ */
+async function importScheduleXlsx({
+  projectId,
+  orgId,
+  input,
+  dryRun = false,
+  userId = null,
+}) {
+  const project = await ensureProject(orgId, projectId);
+  const parsed = parseScheduleXlsx(input);
+
+  if (!parsed.activities.length) {
+    throw new HttpError(400, 'PARSE_ERROR', 'No activities found in schedule workbook');
+  }
+
+  const staged = {
+    project,
+    activities: parsed.activities,
+    relationships: parsed.relationships,
+    wbsNodes: parsed.wbsNodes,
+    calendars: parsed.calendars,
+    source: 'xlsx',
+    userId,
+  };
+
+  if (dryRun) {
+    const snapshot = buildImportSnapshot(staged);
+    return {
+      dryRun: true,
+      staged: false,
+      source: 'xlsx',
+      activityCount: snapshot.activities.length,
+      dependencyCount: snapshot.dependencies.length,
+      wbsNodeCount: parsed.wbsNodes.length,
+      criticalActivities: snapshot.activities.filter((item) => item.isCritical).length,
+      issueCount: parsed.issues.length,
+      issues: parsed.issues.slice(0, 200),
+      activities: snapshot.activities.slice(0, DRY_RUN_ROW_LIMIT),
+      dependencies: snapshot.dependencies.slice(0, DRY_RUN_ROW_LIMIT),
+      rowLimit: DRY_RUN_ROW_LIMIT,
+      message: 'Dry run: nothing was written. Import without dryRun to stage this schedule as a draft revision.',
+    };
+  }
+
+  const result = await persistImport(staged);
+  return { ...result, issues: parsed.issues, issueCount: parsed.issues.length };
+}
+
 async function importProgress({ projectId, orgId, format, content }) {
   await ensureProject(orgId, projectId);
 
@@ -550,6 +609,7 @@ module.exports = {
   importXer,
   importP6Xml,
   importMsp,
+  importScheduleXlsx,
   importProgress,
   recalculateProjectCpm,
   seedLinkedModules,

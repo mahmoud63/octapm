@@ -724,6 +724,10 @@ const components = {
         "BOQ_ITEM_INACTIVE",
         "BOQ_ITEM_NOT_DELETABLE",
         "BOQ_ITEM_NOT_FOUND",
+        "BOQ_REVISION_COMPARISON_ONLY",
+        "BOQ_REVISION_NOT_APPROVED",
+        "BOQ_REVISION_NOT_CURRENT",
+        "BOQ_REVISION_NOT_FOUND",
         "BOQ_VALIDATION_FAILED",
         "CARD_DECLINED",
         "CHANGE_ORDER_APPROVED_LOCKED",
@@ -1703,10 +1707,18 @@ const components = {
       label: { type: "string", nullable: true },
       status: {
         type: "string",
-        enum: ["imported", "comparison_only", "baselined", "superseded"],
+        enum: [
+          "imported",
+          "comparison_only",
+          "under_review",
+          "approved",
+          "baselined",
+          "superseded",
+        ],
       },
       baselineLocked: { type: "boolean" },
       lockedAt: nullableDateString,
+      lockedBy: nullableUuid,
       itemCount: { type: "integer", minimum: 0 },
       addedCount: { type: "integer", minimum: 0 },
       updatedCount: { type: "integer", minimum: 0 },
@@ -1748,6 +1760,68 @@ const components = {
         document: ref("ProjectDocumentUpload"),
       },
       ["jobId", "revisionId", "mode", "baselineLocked", "document"],
+    ),
+    BoqUploadDryRunResponse: objectSchema(
+      {
+        dryRun: { type: "boolean", enum: [true] },
+        mode: { type: "string", enum: ["imported", "comparison_only"] },
+        baselineLocked: { type: "boolean" },
+        baseline: ref("BoqBaselineState"),
+        label: { type: "string", nullable: true },
+        rowCount: { type: "integer", minimum: 0 },
+        totalAmount: money,
+        comparison: objectSchema({
+          summary: ref("BoqRevisionComparisonSummary"),
+          added: arrayOf(ref("GenericObject")),
+          updated: arrayOf(ref("GenericObject")),
+          removed: arrayOf(ref("GenericObject")),
+          unchanged: arrayOf(ref("GenericObject")),
+          blocked: arrayOf(ref("GenericObject")),
+          rowLimit: { type: "integer" },
+        }),
+      },
+      ["dryRun", "mode", "baselineLocked", "rowCount", "comparison"],
+    ),
+    BoqRevisionDetail: {
+      allOf: [
+        ref("BoqRevisionSummary"),
+        objectSchema({
+          source: { type: "string" },
+          createdBy: nullableUuid,
+          comparison: ref("GenericObject"),
+          importedRows: arrayOf(ref("GenericObject")),
+          workflowEvents: arrayOf(ref("GenericObject")),
+        }),
+      ],
+    },
+    BoqRevisionReviewRequest: objectSchema({
+      comment: { type: "string", nullable: true, maxLength: 2000 },
+    }),
+    BoqBaselineLockResponse: objectSchema(
+      {
+        revision: ref("BoqRevisionSummary"),
+        lockedRows: { type: "integer", minimum: 0 },
+        baseline: ref("BoqBaselineState"),
+      },
+      ["revision", "lockedRows", "baseline"],
+    ),
+    ScheduleXlsxDryRunResponse: objectSchema(
+      {
+        dryRun: { type: "boolean", enum: [true] },
+        staged: { type: "boolean", enum: [false] },
+        source: { type: "string", enum: ["xlsx"] },
+        activityCount: { type: "integer", minimum: 0 },
+        dependencyCount: { type: "integer", minimum: 0 },
+        wbsNodeCount: { type: "integer", minimum: 0 },
+        criticalActivities: { type: "integer", minimum: 0 },
+        issueCount: { type: "integer", minimum: 0 },
+        issues: arrayOf(ref("GenericObject")),
+        activities: arrayOf(ref("GenericObject")),
+        dependencies: arrayOf(ref("GenericObject")),
+        rowLimit: { type: "integer" },
+        message: { type: "string" },
+      },
+      ["dryRun", "activityCount", "dependencyCount", "issues"],
     ),
     ScheduleGenerateResponse: objectSchema(
       {
@@ -6547,9 +6621,16 @@ add(
     tag: "BOQ",
     summary: "Upload and process an Excel BOQ revision file.",
     description:
-      "Scans and type-checks the workbook, stores the original upload as private project document metadata, creates a BOQ revision, and compares it with current active BOQ rows. Unlocked projects import changed/new rows without deleting omitted rows. Baseline-locked projects save a comparison-only revision and do not mutate current BOQ rows, allocations, progress, IPC, or reporting basis.",
+      "Scans and type-checks the workbook, stores the original upload as private project document metadata, creates a BOQ revision, and compares it with current active BOQ rows. Unlocked projects import changed/new rows without deleting omitted rows. Baseline-locked projects save a comparison-only revision and do not mutate current BOQ rows, allocations, progress, IPC, or reporting basis. With dryRun=true the workbook is parsed and compared and the comparison is returned (BoqUploadDryRunResponse) without storing a document, a revision, any rows or a job; a dry run counts against the upload rate limit but not the AI generation limit.",
     operationId: "uploadBoq",
-    parameters: projectParams,
+    parameters: [
+      ...projectParams,
+      queryParam(
+        "dryRun",
+        "Parse and compare only; nothing is written.",
+        { type: "boolean", default: false },
+      ),
+    ],
     permissions: rolesPermission("pm", "planning_eng", "qs"),
     requestBody: fileUploadBody({
       description:
@@ -6557,9 +6638,73 @@ add(
       accepted: ".xlsx or .xls workbook, maximum 50 MB.",
       extraProperties: { label: { type: "string" } },
     }),
-    responseSchema: ref("BoqUploadResponse"),
+    responseSchema: {
+      oneOf: [ref("BoqUploadResponse"), ref("BoqUploadDryRunResponse")],
+    },
   }),
 );
+
+add(
+  "/projects/{projectId}/boq/revisions/{revisionId}",
+  "get",
+  operation({
+    tag: "BOQ",
+    summary: "Get one BOQ revision with its comparison and review history.",
+    operationId: "getBoqRevision",
+    parameters: [...projectParams, pathParam("revisionId", "BOQ revision UUID.")],
+    permissions: modulePermission("boq", "read"),
+    responseSchema: ref("BoqRevisionDetail"),
+  }),
+);
+
+[
+  [
+    "submit",
+    "submitBoqRevision",
+    "Submit an imported BOQ revision for review.",
+    "The revision moves from imported to under_review. Only the current revision — the newest whose rows were applied to the BOQ — can be reviewed; an older one is refused with BOQ_REVISION_NOT_CURRENT. A comparison-only revision (saved while the baseline was locked) cannot be reviewed: its rows are not on the current BOQ.",
+    "submit",
+    ref("BoqRevisionSummary"),
+  ],
+  [
+    "approve",
+    "approveBoqRevision",
+    "Approve a BOQ revision under review.",
+    "The revision moves from under_review to approved. Approval signs off the rows already on the current BOQ; it does not change them. Only the current revision can be approved (BOQ_REVISION_NOT_CURRENT otherwise).",
+    "approve",
+    ref("BoqRevisionSummary"),
+  ],
+  [
+    "lock",
+    "lockBoqBaseline",
+    "Lock the BOQ baseline on an approved revision.",
+    "Writes the explicit lock (baselineLocked, lockedBy, lockedAt, status baselined) beside the derived rule that a baselined schedule locks the BOQ; either one makes the BOQ locked. Only the current revision can be locked (BOQ_REVISION_NOT_CURRENT otherwise); the earlier applied revisions, whose rows it replaced, become superseded. Once locked, rows cannot be edited, later uploads are saved as comparison-only revisions, and a second lock is refused with BOQ_BASELINE_LOCKED. There is no unlock, as there is none for a schedule baseline.",
+    "approve",
+    ref("BoqBaselineLockResponse"),
+  ],
+].forEach(([suffix, operationId, summary, description, action, responseSchema]) => {
+  add(
+    `/projects/{projectId}/boq/revisions/{revisionId}/${suffix}`,
+    "post",
+    operation({
+      tag: "BOQ",
+      summary,
+      description,
+      operationId,
+      parameters: [
+        ...projectParams,
+        pathParam("revisionId", "BOQ revision UUID."),
+      ],
+      permissions: modulePermission("boq", action),
+      requestBody: jsonBody(
+        ref("BoqRevisionReviewRequest"),
+        "Optional review comment.",
+        false,
+      ),
+      responseSchema,
+    }),
+  );
+});
 
 add(
   "/projects/{projectId}/boq/uploads/{documentId}",
@@ -7288,6 +7433,35 @@ add(
     }),
   );
 });
+
+add(
+  "/projects/{projectId}/import/xlsx",
+  "post",
+  operation({
+    tag: "Imports",
+    summary: "Import a programme from an Excel workbook.",
+    description:
+      "Columns: activity_code and name (required); wbs_code, start, finish, duration_days, predecessors (\"A100, A110FS+2, A120 SS -1\"), percent_complete, calendar (optional). Staged as a draft schedule revision exactly like an XER or MSPDI import, to be activated after mapping review. With dryRun=true the workbook is parsed and the staged snapshot reported (ScheduleXlsxDryRunResponse) and nothing is stored.",
+    operationId: "importXlsxSchedule",
+    parameters: [
+      ...projectParams,
+      queryParam(
+        "dryRun",
+        "Parse and report only; nothing is written.",
+        { type: "boolean", default: false },
+      ),
+    ],
+    permissions: modulePermission("schedule", "create"),
+    requestBody: fileUploadBody({
+      description: "Schedule workbook upload.",
+      accepted: ".xlsx workbook, maximum 50 MB.",
+    }),
+    responseSchema: {
+      oneOf: [ref("ImportResponse"), ref("ScheduleXlsxDryRunResponse")],
+    },
+    status: 201,
+  }),
+);
 
 add(
   "/projects/{projectId}/import/progress",

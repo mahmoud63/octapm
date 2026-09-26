@@ -2,6 +2,8 @@ const express = require('express');
 const crypto = require('crypto');
 const multer = require('multer');
 const path = require('path');
+const { body, param, query } = require('express-validator');
+const { validate } = require('../middleware/validate');
 const { asyncHandler } = require('../utils/async-handler');
 const { sendSuccess } = require('../utils/api-response');
 const { HttpError } = require('../utils/http-error');
@@ -125,12 +127,25 @@ router.get(
 );
 
 // POST /projects/:projectId/boq/upload
+//
+// With ?dryRun=true the workbook is parsed and compared with the current bill
+// and the answer is the comparison alone: no document, no revision, no rows,
+// no job. The real upload is the same request without the flag.
+//
+// A dry run queues no AI job and spends no AI quota, so it is not counted
+// against the AI generation window: previewing a workbook a few times must
+// not lock the person out of the real upload for the rest of the hour. The
+// upload window still counts it, since it is still a file the API parses.
+const aiGenerationLimiterUnlessDryRun = (req, res, next) =>
+  req.query.dryRun === true ? next() : aiGenerationLimiter(req, res, next);
+
 router.post(
   '/upload',
   authenticate,
   CAN_MODIFY,
+  [query('dryRun').optional().isBoolean().toBoolean(), validate],
   uploadLimiter,
-  aiGenerationLimiter,
+  aiGenerationLimiterUnlessDryRun,
   upload.single('file'),
   asyncHandler(async (req, res) => {
     if (!req.file) throw new HttpError(400, 'NO_FILE', 'No file uploaded');
@@ -138,6 +153,16 @@ router.post(
     const label = req.body?.label || null;
 
     try {
+      if (req.query.dryRun === true) {
+        const preview = await boqService.processBoqUpload(
+          projectId,
+          { path: req.file.path },
+          label,
+          { orgId: req.user.orgId, userId: req.user.id, dryRun: true },
+        );
+        return sendSuccess(res, preview);
+      }
+
       const document = await fileStorageService.uploadBoqFile({
         orgId: req.user.orgId,
         projectId,
@@ -250,6 +275,87 @@ router.get(
       orgId: req.user.orgId,
     });
     return sendSuccess(res, data);
+  }),
+);
+
+// The revision review (PC-2). Submit and approve are the BOQ module's own
+// submit / approve actions; the lock is an approval too — the policy's
+// `baseline` action on the BOQ module names no role, so it cannot gate
+// anything yet. There is no unlock, as there is none for a schedule baseline.
+const revisionParams = [param('revisionId').isUUID()];
+const reviewComment = body('comment')
+  .optional({ nullable: true })
+  .isString()
+  .trim()
+  .isLength({ max: 2000 });
+const revisionOptions = (req) => ({
+  orgId: req.user.orgId,
+  userId: req.user.id,
+  userRole: getEffectiveRole(req),
+  comment: req.body?.comment || null,
+});
+
+// GET /projects/:projectId/boq/revisions/:revisionId
+router.get(
+  '/revisions/:revisionId',
+  authenticate,
+  requirePermission('boq', 'read'),
+  [...revisionParams, validate],
+  asyncHandler(async (req, res) => {
+    const revision = await boqService.getBoqRevision(
+      req.params.projectId,
+      req.params.revisionId,
+      { orgId: req.user.orgId },
+    );
+    return sendSuccess(res, revision);
+  }),
+);
+
+// POST /projects/:projectId/boq/revisions/:revisionId/submit
+router.post(
+  '/revisions/:revisionId/submit',
+  authenticate,
+  requirePermission('boq', 'submit'),
+  [...revisionParams, reviewComment, validate],
+  asyncHandler(async (req, res) => {
+    const revision = await boqService.submitBoqRevision(
+      req.params.projectId,
+      req.params.revisionId,
+      revisionOptions(req),
+    );
+    return sendSuccess(res, revision);
+  }),
+);
+
+// POST /projects/:projectId/boq/revisions/:revisionId/approve
+router.post(
+  '/revisions/:revisionId/approve',
+  authenticate,
+  requirePermission('boq', 'approve'),
+  [...revisionParams, reviewComment, validate],
+  asyncHandler(async (req, res) => {
+    const revision = await boqService.approveBoqRevision(
+      req.params.projectId,
+      req.params.revisionId,
+      revisionOptions(req),
+    );
+    return sendSuccess(res, revision);
+  }),
+);
+
+// POST /projects/:projectId/boq/revisions/:revisionId/lock
+router.post(
+  '/revisions/:revisionId/lock',
+  authenticate,
+  requirePermission('boq', 'approve'),
+  [...revisionParams, reviewComment, validate],
+  asyncHandler(async (req, res) => {
+    const result = await boqService.lockBoqBaseline(
+      req.params.projectId,
+      req.params.revisionId,
+      revisionOptions(req),
+    );
+    return sendSuccess(res, result);
   }),
 );
 

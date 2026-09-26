@@ -6,6 +6,7 @@ import { BoqUploadZone } from './boq-upload-zone'
 import { BoqAllocationPanel } from './boq-allocation-panel'
 import { BoqEditableGrid } from './boq-editable-grid'
 import { BoqFinancialSummary } from './boq-financial-summary'
+import { BoqRevisionPanel } from './revision-panel'
 
 interface Props {
   projectId: string
@@ -92,6 +93,13 @@ function BoqContent({ projectId }: { projectId: string }) {
               currency={project?.currency ?? 'USD'}
             />
           )}
+          <BoqRevisionPanel
+            projectId={projectId}
+            revisions={boq.revisions ?? []}
+            baseline={boq.baseline}
+            currentRevisionId={boq.currentRevision?.id ?? null}
+            currency={project?.currency ?? 'USD'}
+          />
           <div className='grid gap-3 lg:grid-cols-2'>
             <AuditHistoryPanel
               projectId={projectId}
