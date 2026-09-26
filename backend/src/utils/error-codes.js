@@ -484,6 +484,97 @@ const ERROR_CODE_CATALOG = Object.freeze({
     category: "system",
     message: "The identity provider's signing keys could not be read",
   },
+  // Project-controls structure (PC-1): WBS nodes and units of measure.
+  WBS_NODE_NOT_FOUND: {
+    status: 404,
+    category: "not_found",
+    message: "WBS node not found",
+  },
+  WBS_NODE_CODE_REQUIRED: {
+    status: 400,
+    category: "validation",
+    message: "WBS code is required",
+  },
+  WBS_NODE_CODE_TOO_LONG: {
+    status: 400,
+    category: "validation",
+    message: "WBS code must be 60 characters or fewer",
+  },
+  WBS_NODE_NAME_REQUIRED: {
+    status: 400,
+    category: "validation",
+    message: "WBS node name is required",
+  },
+  WBS_NODE_NAME_TOO_LONG: {
+    status: 400,
+    category: "validation",
+    message: "WBS node name must be 160 characters or fewer",
+  },
+  WBS_NODE_DUPLICATE_CODE: {
+    status: 409,
+    category: "conflict",
+    message: "A WBS node with this code already exists in this project",
+  },
+  WBS_NODE_PARENT_INVALID: {
+    status: 400,
+    category: "validation",
+    message: "Parent WBS node does not belong to this project",
+  },
+  WBS_NODE_PARENT_ARCHIVED: {
+    status: 409,
+    category: "conflict",
+    message: "The parent WBS node is archived",
+  },
+  WBS_NODE_INVALID_PARENT: {
+    status: 400,
+    category: "validation",
+    message: "A WBS node cannot be moved under itself or one of its descendants",
+  },
+  WBS_NODE_DEPTH_EXCEEDED: {
+    status: 400,
+    category: "validation",
+    message: "The WBS tree depth limit would be exceeded",
+  },
+  WBS_NODE_ARCHIVED: {
+    status: 409,
+    category: "conflict",
+    message: "Archived WBS nodes must be restored before they can be edited",
+  },
+  WBS_PACKAGE_OWNER_INVALID: {
+    status: 400,
+    category: "validation",
+    message: "Owner party does not belong to this project",
+  },
+  WBS_PACKAGE_COMMITMENT_INVALID: {
+    status: 400,
+    category: "validation",
+    message: "Commitment does not belong to this project",
+  },
+  UNIT_CODE_REQUIRED: {
+    status: 400,
+    category: "validation",
+    message: "Unit code is required",
+  },
+  UNIT_CODE_TOO_LONG: {
+    status: 400,
+    category: "validation",
+    message: "Unit code must be 16 characters or fewer",
+  },
+  UNIT_NAME_TOO_LONG: {
+    status: 400,
+    category: "validation",
+    message: "Unit name must be 80 characters or fewer",
+  },
+  UNIT_DIMENSION_INVALID: {
+    status: 400,
+    category: "validation",
+    message: "Unit dimension is not one of the supported dimensions",
+  },
+  UNIT_DUPLICATE_CODE: {
+    status: 409,
+    category: "conflict",
+    message: "A unit with this code already exists for this organisation",
+  },
 });
 
 const DEFAULT_CODE_BY_STATUS = Object.freeze({

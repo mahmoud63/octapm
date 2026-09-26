@@ -22,6 +22,7 @@ const {
 } = require("./activity-dependency.service");
 const auditService = require("./audit.service");
 const approvalWorkflowService = require("./approval-workflow.service");
+const wbsService = require("./wbs.service");
 const { summarizeRiskActivityLinks } = require("./risk.service");
 const jobService = require("../jobs/job.service");
 const { JobError, isTransientError } = require("../jobs/errors");
@@ -2637,6 +2638,38 @@ async function activateRevisionSnapshot({
       retiredActivityIds.push(activity.id);
     }
 
+    // The WBS the revision carried becomes rows of its own (PC-1). Nodes are
+    // upserted — a planner's renames and moves survive a re-activation — and
+    // each activated activity is pointed at its node by code (its dotted
+    // prefixes for an MS Project task), then by external id. Activity.wbsCode
+    // is left exactly as imported: the string is the planner's, the link is
+    // ours, and an unmatched code simply stays unlinked. A file import
+    // (revision.source is the file kind: xer, p6xml, msp, xlsx) always
+    // carries its node list, empty for a flat programme, so only a generated
+    // revision or an older snapshot without one falls back to the
+    // activities' codes.
+    const generated = revision.source === "ai";
+    const wbsLookups = await wbsService.upsertNodesFromSnapshot({
+      tx,
+      orgId: project.orgId,
+      projectId: project.id,
+      nodes: Array.isArray(snapshot.wbs) ? snapshot.wbs : [],
+      activityCodes:
+        generated || !Array.isArray(snapshot.wbs)
+          ? stagedActivities.map((staged) => staged.wbsCode)
+          : [],
+      source: generated ? "ai" : "import",
+      userId,
+    });
+    const wbsLinks = await wbsService.linkActivitiesToNodes({
+      tx,
+      lookups: wbsLookups,
+      activities: stagedActivities.map((staged) => ({
+        id: draftKeyToActivityId.get(staged.draftKey),
+        wbsCode: staged.wbsCode,
+      })),
+    });
+
     await tx.activityDependency.deleteMany({
       where: { projectId: project.id },
     });
@@ -2786,6 +2819,10 @@ async function activateRevisionSnapshot({
       dependencyCount: dependencyRows.length,
       costRecordsCreated: costRows.length,
       resourceAllocationsCreated: resourceRows.length,
+      wbsNodesCreated: wbsLookups.created,
+      wbsNodesExisting: wbsLookups.existing,
+      wbsActivitiesLinked: wbsLinks.linked,
+      wbsActivitiesUnmatched: wbsLinks.unmatched,
     };
 
     const updatedRevision = await tx.scheduleRevision.update({

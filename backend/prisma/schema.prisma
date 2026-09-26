@@ -67,6 +67,8 @@ model Organisation {
   subscription        Subscription?
   enterpriseLeads     EnterpriseLead[]
   locations           Location[]
+  wbsNodes            WbsNode[]
+  unitsOfMeasure      UnitOfMeasure[]
   permissionTemplates PermissionTemplate[]
   projectUserPermissions ProjectUserPermission[]
   attachments         Attachment[]
@@ -620,6 +622,7 @@ model Project {
   taskHistoryEvents             TaskHistory[]
   notifications                 Notification[]
   locations                     Location[]
+  wbsNodes                      WbsNode[]
   userPermissions               ProjectUserPermission[]
   attachments                   Attachment[]
   photos                        Photo[]
@@ -1340,11 +1343,22 @@ model BoqItem {
   supersededByRevisionId String?
   supersededReason       String?
   sortOrder              Int       @default(0)
+  // Project-controls structure keys (PC-1): where the row sits in the WBS,
+  // where the work is, which budget bucket it belongs to, and the normalised
+  // unit beside the unit as typed. `unit` is never rewritten by normalisation.
+  wbsNodeId              String?
+  locationId             String?
+  costCodeId             String?
+  unitCode               String?
+  mappingRule            String    @default("required") // required, optional, not_applicable
   createdAt              DateTime  @default(now())
   updatedAt              DateTime  @updatedAt
 
   project                 Project                      @relation(fields: [projectId], references: [id])
   boqRevision             BoqRevision?                 @relation(fields: [revisionId], references: [id], onDelete: SetNull)
+  wbsNode                 WbsNode?                     @relation(fields: [wbsNodeId], references: [id], onDelete: SetNull)
+  location                Location?                    @relation(fields: [locationId], references: [id], onDelete: SetNull)
+  costCode                CostCode?                    @relation(fields: [costCodeId], references: [id], onDelete: SetNull)
   ipcItems                IpcItem[]
   boqActivities           BoqActivity[]
   activityBoqAllocations  ActivityBoqAllocation[]
@@ -1358,6 +1372,9 @@ model BoqItem {
   @@index([projectId, isActive])
   @@index([projectId, code])
   @@index([revisionId])
+  @@index([wbsNodeId])
+  @@index([locationId])
+  @@index([costCodeId])
 }
 
 model BoqRevision {
@@ -1547,6 +1564,10 @@ model Activity {
   predecessors      String? // comma-separated: "ACT-01 FS, ACT-02 SS+2"
   batchId           String? // for chunked generation: B1, B2, etc.
   mintedByBoqItemId String? // the BOQ row that created this activity, if one did (Phase 21D, CX21-544)
+  // Structure keys (PC-1). wbsCode stays as imported; wbsNodeId is the link
+  // to the WbsNode row activation resolved for it, and is null when none did.
+  wbsNodeId         String?
+  locationId        String?
   isActive          Boolean   @default(true)
   retiredAt         DateTime?
   retiredBy         String?
@@ -1557,6 +1578,8 @@ model Activity {
   updatedAt         DateTime  @updatedAt
 
   project                Project                    @relation(fields: [projectId], references: [id])
+  wbsNode                WbsNode?                   @relation(fields: [wbsNodeId], references: [id], onDelete: SetNull)
+  location               Location?                  @relation(fields: [locationId], references: [id], onDelete: SetNull)
   progress               ActivityProgress[]
   costRecords            CostRecord[]
   budgetLineAllocations  BudgetLineActivityAllocation[]
@@ -1626,6 +1649,8 @@ model Activity {
   @@index([projectId, activityCode])
   @@index([projectId, p6ActivityId])
   @@index([projectId, wbsCode])
+  @@index([wbsNodeId])
+  @@index([locationId])
 }
 
 model ActivityDependency {
@@ -1675,12 +1700,17 @@ model ActivityBoqAllocation {
   rejectedReason String?
   createdBy      String?
   updatedBy      String?
+  // Structure keys (PC-1): the zone this share of the item is delivered in,
+  // and the item's normalised unit at the time of writing (kept for history).
+  locationId     String?
+  unitCode       String?
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
 
   project           Project                      @relation(fields: [projectId], references: [id])
   boqItem           BoqItem                      @relation(fields: [boqItemId], references: [id], onDelete: Cascade)
   activity          Activity                     @relation(fields: [activityId], references: [id], onDelete: Cascade)
+  location          Location?                    @relation(fields: [locationId], references: [id], onDelete: SetNull)
   ipcItems          IpcItem[]
   changeOrderLinks  ChangeOrderAllocationLink[]
   ipcProgressLinks  IpcItemProgressLink[]
@@ -1694,6 +1724,7 @@ model ActivityBoqAllocation {
   @@index([activityId])
   @@index([projectId, boqItemId, activityId])
   @@index([projectId, status])
+  @@index([locationId])
 }
 
 model ActivityProgress {
@@ -1776,18 +1807,21 @@ model ProgressSubmission {
   rejectionReason       String?
   createdBy             String?
   updatedBy             String?
+  locationId            String? // where the progress was measured (PC-1)
   createdAt             DateTime  @default(now())
   updatedAt             DateTime  @updatedAt
 
   project          Project           @relation(fields: [projectId], references: [id])
   activity         Activity          @relation(fields: [activityId], references: [id], onDelete: Cascade)
   dailyReport      DailyReport?      @relation(fields: [dailyReportId], references: [id], onDelete: SetNull)
+  location         Location?         @relation(fields: [locationId], references: [id], onDelete: SetNull)
   approvedProgress ActivityProgress?
 
   @@index([projectId])
   @@index([activityId])
   @@index([projectId, status])
   @@index([dailyReportId])
+  @@index([locationId])
 }
 
 // â”€â”€â”€ Schedule Revisions â”€â”€â”€
@@ -4707,6 +4741,10 @@ model Location {
   changeEvents ChangeEvent[]
   lookaheadItems LookaheadItem[]
   procurementOrders ProcurementOrder[] @relation("PurchaseOrderDeliveryLocation")
+  activities          Activity[]
+  boqItems            BoqItem[]
+  boqAllocations      ActivityBoqAllocation[]
+  progressSubmissions ProgressSubmission[]
 
   @@unique([projectId, code])
   @@index([orgId])
@@ -4715,6 +4753,74 @@ model Location {
   @@index([projectId, parentId, sortOrder])
   @@index([parentId])
   @@index([projectId, path])
+}
+
+// ─── Project-controls structure (PC-1) ───────────────────────────────────────
+// The WBS answers "what part of the scope?" for every BOQ row and activity.
+// A node is project-owned and carries orgId with a composite foreign key to
+// Project(id, orgId), so Postgres itself refuses a node filed under another
+// organisation's project. `path` is a materialised path of ids like Location;
+// a move rewrites the subtree's path and depth. A node flagged `isPackage`
+// is a work package: the scope one party delivers under one commitment
+// (control-model doc §1, decision 3) — no separate entity exists for it.
+model WbsNode {
+  id           String    @id @default(uuid())
+  projectId    String
+  orgId        String
+  parentId     String?
+  code         String
+  name         String
+  path         String
+  depth        Int       @default(0)
+  sortOrder    Int       @default(0)
+  source       String    @default("manual") // manual, import, ai
+  externalId   String? // P6 wbs_id / MSP outline code as imported
+  isPackage    Boolean   @default(false)
+  ownerPartyId String?
+  commitmentId String?
+  status       String    @default("active") // active, archived
+  createdBy    String?
+  updatedBy    String?
+  archivedAt   DateTime?
+  archivedBy   String?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  org      Organisation @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  project  Project      @relation(fields: [projectId, orgId], references: [id, orgId], onDelete: Cascade)
+  parent   WbsNode?     @relation("WbsNodeChildren", fields: [parentId], references: [id], onDelete: Restrict)
+  children WbsNode[]    @relation("WbsNodeChildren")
+  activities Activity[]
+  boqItems   BoqItem[]
+
+  @@unique([projectId, code])
+  @@index([orgId])
+  @@index([projectId, path])
+  @@index([projectId, parentId, sortOrder])
+  @@index([projectId, externalId])
+  @@index([parentId])
+}
+
+// Units of measure are an organisation master: the codes a bill may be
+// priced in, with the spellings that mean the same thing ("M3", "cu.m").
+// BoqItem.unit keeps what was typed; BoqItem.unitCode is the match here.
+model UnitOfMeasure {
+  id          String   @id @default(uuid())
+  orgId       String
+  code        String
+  name        String
+  aliasesJson Json     @default("[]")
+  dimension   String   @default("count") // length, area, volume, mass, time, count, money
+  isSystem    Boolean  @default(false)
+  status      String   @default("active") // active, archived
+  sortOrder   Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  org Organisation @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@unique([orgId, code])
+  @@index([orgId, status])
 }
 
 // â”€â”€â”€ Company workspace masters (OCTA-ADM-COMPANY-007) â”€â”€â”€
@@ -4744,6 +4850,7 @@ model CostCode {
   changeEventLines   ChangeEventLine[]
   directCostLines    DirectCostLine[]
   stockTransactions  StockTransaction[]
+  boqItems           BoqItem[]
 
   @@unique([orgId, code])
   @@unique([id, orgId]) // target for composite tenant foreign keys (M7)

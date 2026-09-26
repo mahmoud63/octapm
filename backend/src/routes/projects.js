@@ -279,6 +279,7 @@ router.use(
   nestedProjectAccess,
   require("./locations"),
 );
+router.use("/:projectId/structure", nestedProjectAccess, require("./structure"));
 router.use("/:projectId/jobs", nestedProjectAccess, require("./jobs"));
 router.use("/:projectId/custom-fields", nestedProjectAccess, require("./custom-fields"));
 router.use("/:projectId/accounting", nestedProjectAccess, require("./project-accounting"));

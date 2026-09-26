@@ -127,6 +127,11 @@ const EquipmentSection = lazy(() =>
     default: m.EquipmentSection,
   }))
 )
+const StructurePage = lazy(() =>
+  import('@/features/controls/structure/components/structure-page').then(
+    (m) => ({ default: m.StructurePage })
+  )
+)
 const LocationsPanel = lazy(() =>
   import('@/features/locations/components/locations-panel').then((m) => ({
     default: m.LocationsPanel,
@@ -350,6 +355,11 @@ export function ProjectDetail({
       },
       { key: 'meetings', label: 'Meetings' },
       { key: 'boq', label: 'BOQ' },
+      {
+        key: 'controls',
+        label: 'Project Controls',
+        children: [{ key: 'structure', label: 'Structure' }],
+      },
       { key: 'bim', label: 'BIM' },
       { key: 'activities', label: 'Activities' },
       { key: 'equipment', label: 'Equipment' },
@@ -414,6 +424,7 @@ export function ProjectDetail({
     procurement: childFor('procurement'),
     quality: childFor('quality'),
     docControl: childFor('docControl'),
+    controls: childFor('controls'),
   }
 
   // A URL to a module or sub-tab the policy hides lands on what is offered, and the
@@ -654,6 +665,11 @@ export function ProjectDetail({
 
       case 'equipment':
         return <EquipmentSection projectId={projectId} />
+
+      case 'controls':
+        // One sub-tab for now (structure); mapping and exceptions follow in
+        // the later project-controls waves and pick their child here.
+        return <StructurePage projectId={projectId} />
 
       case 'locations':
         return (

@@ -1030,6 +1030,24 @@ const components = {
         "INVITATION_SIGN_IN_REQUIRED",
         "WORKFLOW_ACTIVITY_NOT_FOUND",
         "WORKFLOW_PROJECT_PARTY_NOT_FOUND",
+        "WBS_NODE_NOT_FOUND",
+        "WBS_NODE_CODE_REQUIRED",
+        "WBS_NODE_CODE_TOO_LONG",
+        "WBS_NODE_NAME_REQUIRED",
+        "WBS_NODE_NAME_TOO_LONG",
+        "WBS_NODE_DUPLICATE_CODE",
+        "WBS_NODE_PARENT_INVALID",
+        "WBS_NODE_PARENT_ARCHIVED",
+        "WBS_NODE_INVALID_PARENT",
+        "WBS_NODE_DEPTH_EXCEEDED",
+        "WBS_NODE_ARCHIVED",
+        "WBS_PACKAGE_OWNER_INVALID",
+        "WBS_PACKAGE_COMMITMENT_INVALID",
+        "UNIT_CODE_REQUIRED",
+        "UNIT_CODE_TOO_LONG",
+        "UNIT_NAME_TOO_LONG",
+        "UNIT_DIMENSION_INVALID",
+        "UNIT_DUPLICATE_CODE",
       ],
     },
     CursorPage: objectSchema({
@@ -1834,6 +1852,7 @@ const components = {
         baselineLocked: { type: "boolean" },
         comparison: ref("BoqRevisionComparisonSummary"),
         document: ref("ProjectDocumentUpload"),
+        unitWarnings: arrayOf(ref("UnitWarning")),
       },
       ["jobId", "revisionId", "mode", "baselineLocked", "document"],
     ),
@@ -1855,6 +1874,7 @@ const components = {
           blocked: arrayOf(ref("GenericObject")),
           rowLimit: { type: "integer" },
         }),
+        unitWarnings: arrayOf(ref("UnitWarning")),
       },
       ["dryRun", "mode", "baselineLocked", "rowCount", "comparison"],
     ),
@@ -2184,6 +2204,161 @@ const components = {
       deleted: { type: "boolean" },
       affectedCount: { type: "integer" },
       affectedIds: arrayOf(uuid),
+    }),
+    // Project-controls structure (PC-1): WBS nodes and units of measure.
+    WbsNodeRecord: objectSchema({
+      id: uuid,
+      projectId: uuid,
+      parentId: { type: "string", format: "uuid", nullable: true },
+      code: { type: "string" },
+      name: { type: "string" },
+      path: {
+        type: "string",
+        description: "Materialized path of node ids from the root.",
+      },
+      pathNames: arrayOf({ type: "string" }),
+      fullName: { type: "string" },
+      depth: { type: "integer" },
+      sortOrder: { type: "integer" },
+      source: { type: "string", enum: ["manual", "import", "ai"] },
+      externalId: {
+        type: "string",
+        nullable: true,
+        description: "P6 wbs_id / MSP outline code the node was imported with.",
+      },
+      isPackage: {
+        type: "boolean",
+        description:
+          "A work package: the scope one party delivers under one commitment. There is no separate package entity.",
+      },
+      ownerPartyId: { type: "string", format: "uuid", nullable: true },
+      commitmentId: { type: "string", format: "uuid", nullable: true },
+      status: { type: "string", enum: ["active", "archived"] },
+      childCount: { type: "integer" },
+      activityCount: { type: "integer" },
+      boqItemCount: { type: "integer" },
+      createdBy: { type: "string", nullable: true },
+      updatedBy: { type: "string", nullable: true },
+      archivedAt: nullableDateString,
+      archivedBy: { type: "string", nullable: true },
+      createdAt: nullableDateString,
+      updatedAt: nullableDateString,
+    }),
+    WbsNodeTreeNode: {
+      allOf: [
+        ref("WbsNodeRecord"),
+        objectSchema({ children: arrayOf(ref("GenericObject")) }),
+      ],
+    },
+    WbsNodeListResponse: objectSchema({
+      items: arrayOf(ref("WbsNodeRecord")),
+      tree: arrayOf(ref("WbsNodeTreeNode")),
+      summary: objectSchema({
+        total: { type: "integer" },
+        active: { type: "integer" },
+        archived: { type: "integer" },
+        packages: { type: "integer" },
+        roots: { type: "integer" },
+        maxDepth: { type: "integer" },
+        linkedActivities: { type: "integer" },
+        linkedBoqItems: { type: "integer" },
+      }),
+    }),
+    WbsNodeMutation: objectSchema({
+      code: { type: "string", maxLength: 60 },
+      name: { type: "string", maxLength: 160 },
+      parentId: {
+        type: "string",
+        format: "uuid",
+        nullable: true,
+        description:
+          "Moving a node rewrites the path and depth of its whole subtree.",
+      },
+      sortOrder: { type: "integer", minimum: 0, nullable: true },
+      isPackage: { type: "boolean" },
+      ownerPartyId: {
+        type: "string",
+        format: "uuid",
+        nullable: true,
+        description: "Must be a party on this project.",
+      },
+      commitmentId: {
+        type: "string",
+        format: "uuid",
+        nullable: true,
+        description: "Must be a commitment of this project.",
+      },
+      externalId: { type: "string", maxLength: 120, nullable: true },
+    }),
+    WbsNodeReasonPayload: objectSchema({
+      reason: { type: "string", maxLength: 500, nullable: true },
+    }),
+    WbsNodeArchiveResponse: objectSchema({
+      id: uuid,
+      status: { type: "string", enum: ["archived"] },
+      archived: { type: "boolean" },
+      deleted: { type: "boolean" },
+      affectedCount: { type: "integer" },
+      affectedIds: arrayOf(uuid),
+    }),
+    UnitOfMeasureRecord: objectSchema({
+      id: uuid,
+      orgId: uuid,
+      code: { type: "string" },
+      name: { type: "string" },
+      aliases: arrayOf({ type: "string" }),
+      dimension: {
+        type: "string",
+        enum: ["length", "area", "volume", "mass", "time", "count", "money"],
+      },
+      isSystem: { type: "boolean" },
+      status: { type: "string", enum: ["active", "archived"] },
+      sortOrder: { type: "integer" },
+      createdAt: nullableDateString,
+      updatedAt: nullableDateString,
+    }),
+    UnitListResponse: objectSchema({
+      items: arrayOf(ref("UnitOfMeasureRecord")),
+      seeded: {
+        type: "boolean",
+        description:
+          "False while the organisation has no unit rows yet; normalisation then answers from the default list, returned in `defaults`.",
+      },
+      defaults: arrayOf(ref("GenericObject")),
+      summary: objectSchema({
+        total: { type: "integer" },
+        active: { type: "integer" },
+        archived: { type: "integer" },
+      }),
+    }),
+    UnitMutation: objectSchema(
+      {
+        code: { type: "string", maxLength: 16 },
+        name: { type: "string", maxLength: 80, nullable: true },
+        dimension: {
+          type: "string",
+          enum: ["length", "area", "volume", "mass", "time", "count", "money"],
+          nullable: true,
+        },
+        aliases: arrayOf({ type: "string", maxLength: 40 }),
+      },
+      ["code"],
+    ),
+    UnitWarning: objectSchema({
+      code: { type: "string", enum: ["UNIT_UNRECOGNISED"] },
+      unit: { type: "string", description: "The unit exactly as typed; never rewritten." },
+      message: { type: "string" },
+      count: { type: "integer", nullable: true },
+      rows: arrayOf({ type: "integer" }),
+    }),
+    UnitNormaliseResponse: objectSchema({
+      unit: { type: "string", nullable: true },
+      unitCode: {
+        type: "string",
+        nullable: true,
+        description: "The organisation's unit code the spelling resolves to, or null.",
+      },
+      warning: { allOf: [ref("UnitWarning")], nullable: true },
     }),
     BackgroundJob: objectSchema({
       id: uuid,
@@ -11395,6 +11570,100 @@ add(
   }),
 );
 
+// Project-controls structure (PC-1). Gated by the boq module: structure is
+// what the bill and the programme are grouped by (integration doc §2).
+[
+  {
+    method: "get",
+    path: "/projects/{projectId}/structure/wbs",
+    summary:
+      "List the project WBS (flat ordered rows plus nested tree, with linked activity and BOQ row counts).",
+    operationId: "listWbsNodes",
+    parameters: [...projectParams, includeArchivedParam],
+    permissions: modulePermission("boq", "read"),
+    responseSchema: ref("WbsNodeListResponse"),
+  },
+  {
+    method: "post",
+    path: "/projects/{projectId}/structure/wbs",
+    summary: "Create a WBS node under an optional parent.",
+    operationId: "createWbsNode",
+    permissions: modulePermission("boq", "update"),
+    requestBody: jsonBody(ref("WbsNodeMutation"), "WBS node payload (code and name required).", true),
+    responseSchema: ref("WbsNodeRecord"),
+    status: 201,
+  },
+  {
+    method: "patch",
+    path: "/projects/{projectId}/structure/wbs/{id}",
+    summary:
+      "Rename, recode, reorder, move, or flag a WBS node as a work package. A move rewrites the subtree's path and depth.",
+    operationId: "updateWbsNode",
+    parameters: projectRecordParams,
+    permissions: modulePermission("boq", "update"),
+    requestBody: jsonBody(ref("WbsNodeMutation"), "Partial WBS node payload."),
+    responseSchema: ref("WbsNodeRecord"),
+  },
+  {
+    method: "post",
+    path: "/projects/{projectId}/structure/wbs/{id}/archive",
+    summary:
+      "Archive a WBS node and its subtree. Linked activities and BOQ rows keep their wbsNodeId.",
+    operationId: "archiveWbsNode",
+    parameters: projectRecordParams,
+    permissions: modulePermission("boq", "update"),
+    requestBody: jsonBody(ref("WbsNodeReasonPayload"), "Optional reason.", false),
+    responseSchema: ref("WbsNodeArchiveResponse"),
+  },
+  {
+    method: "post",
+    path: "/projects/{projectId}/structure/wbs/{id}/restore",
+    summary: "Restore an archived WBS node (parent must be active).",
+    operationId: "restoreWbsNode",
+    parameters: projectRecordParams,
+    permissions: modulePermission("boq", "update"),
+    requestBody: jsonBody(ref("WbsNodeReasonPayload"), "Optional reason.", false),
+    responseSchema: ref("WbsNodeRecord"),
+  },
+  {
+    method: "get",
+    path: "/projects/{projectId}/structure/units",
+    summary: "List the organisation's units of measure.",
+    operationId: "listUnitsOfMeasure",
+    parameters: [...projectParams, includeArchivedParam],
+    permissions: modulePermission("boq", "read"),
+    responseSchema: ref("UnitListResponse"),
+  },
+  {
+    method: "get",
+    path: "/projects/{projectId}/structure/units/normalise",
+    summary:
+      "Resolve a unit spelling to the organisation's unit code. What was typed is returned unchanged; an unknown spelling comes back with a warning, never rewritten.",
+    operationId: "normaliseUnitOfMeasure",
+    parameters: [
+      ...projectParams,
+      queryParam("unit", "The unit as typed, e.g. M3 or cu.m.", { type: "string" }, { required: true }),
+    ],
+    permissions: modulePermission("boq", "read"),
+    responseSchema: ref("UnitNormaliseResponse"),
+  },
+  {
+    method: "post",
+    path: "/projects/{projectId}/structure/units",
+    summary: "Add a unit of measure to the organisation's list (seeds the defaults first when the list is empty).",
+    operationId: "createUnitOfMeasure",
+    permissions: modulePermission("boq", "update"),
+    requestBody: jsonBody(ref("UnitMutation"), "Unit payload.", true),
+    responseSchema: ref("UnitOfMeasureRecord"),
+    status: 201,
+  },
+].forEach((route) =>
+  addGenericRoute({
+    tag: "Structure",
+    ...route,
+  }),
+);
+
 const backgroundJobIdParam = pathParam("jobId", "Background job UUID.");
 const projectJobParams = [projectIdParam, backgroundJobIdParam];
 
@@ -15866,6 +16135,11 @@ const openApiSpec = {
       name: "Locations",
       description:
         "Hierarchical project locations (site, building, level, zone, room) used as the spatial key for field records.",
+    },
+    {
+      name: "Structure",
+      description:
+        "Project-controls structure: the project WBS (nodes populated from schedule imports, editable, with work-package flags) and the organisation's units of measure with normalisation.",
     },
     {
       name: "Jobs",

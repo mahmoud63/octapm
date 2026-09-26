@@ -30,6 +30,7 @@ const jobService = require("../jobs/job.service");
 const { JobError, isTransientError } = require("../jobs/errors");
 const { parseExcelInput, validateBoqRows } = require("./boq/excel-parser");
 const { generateBoqTemplate } = require("./boq/template");
+const uomService = require("./uom.service");
 
 const BOQ_REVISION_STATUS = Object.freeze({
   IMPORTED: 'imported',
@@ -442,6 +443,7 @@ function boqItemData(projectId, revisionId, item, overrides = {}) {
     description: item.description,
     qty: item.qty,
     unit: item.unit,
+    unitCode: item.unitCode ?? null,
     rate: item.rate,
     amount: item.amount,
     isManual: false,
@@ -741,7 +743,7 @@ async function createOfficialBoqActivityAllocation(
  * codes that clash with hand-entered rows are reported as blocked rather than
  * thrown, because the point of a preview is to see every problem at once.
  */
-async function buildBoqUploadDryRun(projectId, itemsWithAmounts, label) {
+async function buildBoqUploadDryRun(projectId, itemsWithAmounts, label, extras = {}) {
   const [existingUploadedItems, baseline, manualConflicts] = await Promise.all([
     prisma.boqItem.findMany({
       where: { projectId, isManual: false, isActive: true },
@@ -805,6 +807,7 @@ async function buildBoqUploadDryRun(projectId, itemsWithAmounts, label) {
       blocked: sample(comparison.blocked),
       rowLimit: DRY_RUN_ROW_LIMIT,
     },
+    ...extras,
   };
 }
 
@@ -1152,8 +1155,22 @@ async function processBoqUpload(projectId, fileBuffer, label, options = {}) {
     throw error;
   }
 
+  // Step 3b: normalise the units against the organisation's list (PC-1).
+  // The unit as typed is kept on every row; the code beside it is the match,
+  // and a spelling nobody recognises comes back as a warning — the upload is
+  // never refused for it and the cell is never corrected behind the QS.
+  const unitIndex = await uomService.loadUnitIndex(project.orgId);
+  const { codes: unitCodes, warnings: unitWarnings } = uomService.normaliseRows(
+    unitIndex,
+    itemsWithAmounts,
+    { rowNumberOf: (row) => row.sortOrder + 1 },
+  );
+  itemsWithAmounts.forEach((item, index) => {
+    item.unitCode = unitCodes[index];
+  });
+
   if (options.dryRun) {
-    return buildBoqUploadDryRun(projectId, itemsWithAmounts, label);
+    return buildBoqUploadDryRun(projectId, itemsWithAmounts, label, { unitWarnings });
   }
 
   // Step 4: Persist a revision and compare/import without deleting current rows.
@@ -1293,6 +1310,7 @@ async function processBoqUpload(projectId, fileBuffer, label, options = {}) {
               description: item.description,
               qty: item.qty,
               unit: item.unit,
+              unitCode: item.unitCode ?? null,
               rate: item.rate,
               amount: item.amount,
               sortOrder: item.sortOrder,
@@ -1407,6 +1425,7 @@ async function processBoqUpload(projectId, fileBuffer, label, options = {}) {
       mode,
       baselineLocked: true,
       comparison: comparison?.summary ?? null,
+      unitWarnings,
     };
   }
 
@@ -1433,6 +1452,7 @@ async function processBoqUpload(projectId, fileBuffer, label, options = {}) {
     mode,
     baselineLocked: false,
     comparison: comparison?.summary ?? null,
+    unitWarnings,
   };
 }
 
@@ -1802,6 +1822,14 @@ function mapBoqItem(item, allocationTotals = null) {
     description: item.description,
     quantity: item.qty,
     unit: item.unit,
+    // Structure keys (PC-1): unitCode is the normalised unit beside the one
+    // typed; the rest say where the row sits in the WBS, on site and in the
+    // budget, and whether it must be scheduled at all.
+    unitCode: item.unitCode ?? null,
+    wbsNodeId: item.wbsNodeId ?? null,
+    locationId: item.locationId ?? null,
+    costCodeId: item.costCodeId ?? null,
+    mappingRule: item.mappingRule ?? 'required',
     rate: item.rate,
     amount: item.amount,
     isManual: item.isManual,
@@ -1892,7 +1920,15 @@ async function updateBoqItem(projectId, itemId, data, options = {}) {
   if (data.quantity !== undefined) {
     updateData.qty = Number(data.quantity);
   }
-  if (data.unit !== undefined) updateData.unit = data.unit;
+  // A unit edit keeps what was typed and refreshes the normalised code beside
+  // it; a spelling the organisation does not know is a warning, not a refusal.
+  let unitWarning = null;
+  if (data.unit !== undefined) {
+    updateData.unit = data.unit;
+    const normalised = await uomService.normalise({ orgId: options.orgId, unit: data.unit });
+    updateData.unitCode = normalised.unitCode;
+    unitWarning = normalised.warning;
+  }
   if (data.rate !== undefined) updateData.rate = toMoneyNumber(data.rate);
 
   // Recalculate amount if qty or rate changed
@@ -1948,6 +1984,7 @@ async function updateBoqItem(projectId, itemId, data, options = {}) {
   return {
     item: mapBoqItem(updated, allocationByItem.get(updated.id)),
     financial,
+    unitWarning,
   };
 }
 
@@ -1957,6 +1994,9 @@ async function createManualBoqItem(projectId, data, options = {}) {
   await assertBoqEditable(projectId);
   const code = normalizeCode(data.code);
   const amount = multiplyMoney(data.quantity, data.rate);
+  // The unit stays as typed; the code beside it is the organisation's match,
+  // and an unknown spelling is reported back as a warning (PC-1).
+  const normalisedUnit = await uomService.normalise({ orgId: options.orgId, unit: data.unit });
 
   let itemWithActivities;
   try {
@@ -1973,6 +2013,7 @@ async function createManualBoqItem(projectId, data, options = {}) {
           description: data.description,
           qty: Number(data.quantity),
           unit: data.unit,
+          unitCode: normalisedUnit.unitCode,
           rate: toMoneyNumber(data.rate),
           amount,
           isManual: true,
@@ -2046,6 +2087,7 @@ async function createManualBoqItem(projectId, data, options = {}) {
       allocationByItem.get(itemWithActivities.id),
     ),
     financial,
+    unitWarning: normalisedUnit.warning,
   };
 }
 
