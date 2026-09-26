@@ -137,7 +137,15 @@ const listSubscriptions = async ({ userId }) => {
   return { configured: isConfigured(), expoEnabled: expoEnabled(), publicKey: getPublicKey(), items: rows.map(serializeSubscription) };
 };
 
-const payloadFor = (notification) => ({
+/**
+ * The payload one device receives. `workspace` names the recipient's place
+ * in the notification's workspace — its slug and their membership id — so
+ * the field app, whose session is bound to one workspace at a time, can tell
+ * whether a tapped notification belongs to the active workspace, offer the
+ * switch when it does not, and never route it silently into the wrong one
+ * (workspace switching doc §5). The orgId comes from the row itself.
+ */
+const payloadFor = (notification, workspace = null) => ({
   title: notification.title,
   body: notification.message,
   url: notification.actionUrl || "/",
@@ -149,7 +157,59 @@ const payloadFor = (notification) => ({
   entityType: notification.entityType || null,
   entityId: notification.entityId || null,
   projectId: notification.projectId || null,
+  orgId: notification.orgId || null,
+  orgSlug: workspace?.slug || null,
+  membershipId: workspace?.membershipId || null,
 });
+
+// The slug is read once a minute per workspace, not once per device: a
+// burst of pushes for one workspace is the common case.
+const WORKSPACE_SLUG_TTL_MS = 60_000;
+const workspaceSlugCache = new Map();
+
+const workspaceSlugFor = async (orgId) => {
+  if (!orgId) return null;
+  const cached = workspaceSlugCache.get(orgId);
+  if (cached && cached.until > Date.now()) return cached.slug;
+  let slug = null;
+  if (typeof prisma?.organisation?.findUnique === "function") {
+    try {
+      const org = await prisma.organisation.findUnique({ where: { id: orgId }, select: { slug: true } });
+      slug = org?.slug || null;
+    } catch {
+      slug = null;
+    }
+  }
+  workspaceSlugCache.set(orgId, { slug, until: Date.now() + WORKSPACE_SLUG_TTL_MS });
+  return slug;
+};
+
+/**
+ * The recipient's place in the notification's workspace. A person seeded
+ * before memberships, or a client that does not know the model, gives a
+ * payload with the orgId alone; the app then falls back to the slug-less
+ * comparison it makes for any link.
+ */
+const workspaceFor = async ({ orgId, userId }) => {
+  const slug = await workspaceSlugFor(orgId);
+  let membershipId = null;
+  if (orgId && userId && typeof prisma?.organizationMembership?.findFirst === "function") {
+    try {
+      const row = await prisma.organizationMembership.findFirst({ where: { orgId, userId }, select: { id: true } });
+      membershipId = row?.id || null;
+    } catch {
+      membershipId = null;
+    }
+  }
+  return { orgId: orgId || null, slug, membershipId };
+};
+
+/** The payload for one recipient of a notification: the row plus their workspace. */
+const buildPushPayload = async ({ notification, userId }) =>
+  payloadFor(notification, await workspaceFor({ orgId: notification.orgId, userId }));
+
+/** Test hook: forget the remembered slugs. */
+const resetWorkspaceCache = () => workspaceSlugCache.clear();
 
 const GONE_STATUSES = new Set([404, 410]);
 
@@ -178,6 +238,10 @@ const sendThroughExpo = async (rows, payload, urgency, result) => {
       entityType: payload.entityType || null,
       entityId: payload.entityId || null,
       projectId: payload.projectId || null,
+      // The workspace the notification belongs to (workspace switching doc §5).
+      orgId: payload.orgId || null,
+      orgSlug: payload.orgSlug || null,
+      membershipId: payload.membershipId || null,
     },
     sound: "default",
     priority: urgency === "high" ? "high" : "default",
@@ -297,8 +361,10 @@ const processPendingPushDeliveries = async ({ limit = 50, now = new Date(), user
     if (!(await claimDeliveryAttempt(attempt, now))) continue;
     result.processed += 1;
     const notification = attempt.notification;
+    // Every device of the person gets the same payload: the device belongs to
+    // the identity, the payload names the workspace (fan-out per identity).
     const outcome = notification
-      ? await sendToUser({ userId: attempt.userId, payload: payloadFor(notification), urgency: notification.priority === "high" ? "high" : "normal" })
+      ? await sendToUser({ userId: attempt.userId, payload: await buildPushPayload({ notification, userId: attempt.userId }), urgency: notification.priority === "high" ? "high" : "normal" })
       : null;
     if (!notification || outcome.skipped) {
       await prisma.notificationDeliveryAttempt.update({
@@ -373,6 +439,9 @@ module.exports = {
   sendToUser,
   sendTest,
   payloadFor,
+  buildPushPayload,
+  workspaceFor,
+  resetWorkspaceCache,
   processPendingPushDeliveries,
   scheduleFlush,
   normalizeSubscription,

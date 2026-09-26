@@ -156,3 +156,39 @@ describe("push service", () => {
     delete global.fetch;
   });
 });
+
+describe("ENT-5 — the push payload carries the workspace", () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    service.resetWorkspaceCache();
+    delete mockPrisma.organisation;
+    delete mockPrisma.organizationMembership;
+  });
+
+  it("names the notification's workspace and the recipient's membership in it, per identity device", async () => {
+    mockPrisma.organisation = { findUnique: jest.fn(async () => ({ slug: "acme" })) };
+    mockPrisma.organizationMembership = { findFirst: jest.fn(async ({ where }) => (where.userId === "user-1" ? { id: "mem-1" } : null)) };
+    const notification = { id: "n1", orgId: "org-a", title: "t", message: "m", entityType: "rfi", entityId: "r1", projectId: "p", category: "workflow", priority: "normal" };
+    const payload = await service.buildPushPayload({ notification, userId: "user-1" });
+    expect(payload).toMatchObject({ orgId: "org-a", orgSlug: "acme", membershipId: "mem-1", entityType: "rfi", projectId: "p" });
+    expect(mockPrisma.organizationMembership.findFirst).toHaveBeenCalledWith({ where: { orgId: "org-a", userId: "user-1" }, select: { id: true } });
+    // Another recipient of the same workspace: the slug is remembered, the membership is theirs.
+    const other = await service.buildPushPayload({ notification, userId: "user-2" });
+    expect(other).toMatchObject({ orgId: "org-a", orgSlug: "acme", membershipId: null });
+    expect(mockPrisma.organisation.findUnique).toHaveBeenCalledTimes(1);
+    // The Expo message carries the three fields in its data.
+    const fetchMock = jest.fn(async () => ({ ok: true, json: async () => ({ data: [{ status: "ok" }] }) }));
+    global.fetch = fetchMock;
+    mockPrisma.pushSubscription.findMany.mockResolvedValue([device({ id: "exp-1", endpoint: "ExponentPushToken[one]", p256dh: "", auth: "", platform: "expo-android" })]);
+    delete process.env.VAPID_PRIVATE_KEY;
+    service.resetConfiguration();
+    await service.sendToUser({ userId: "user-1", payload });
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)[0].data).toMatchObject({ orgId: "org-a", orgSlug: "acme", membershipId: "mem-1" });
+    delete global.fetch;
+  });
+
+  it("a client without the workspace models still gets the orgId", async () => {
+    const payload = await service.buildPushPayload({ notification: { id: "n2", orgId: "org-b", title: "t", message: "m" }, userId: "user-1" });
+    expect(payload).toMatchObject({ orgId: "org-b", orgSlug: null, membershipId: null });
+  });
+});
