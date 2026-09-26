@@ -20,6 +20,11 @@ import {
  *   - the workspace dashboard is the personal variant: titled as the
  *     person's, with the personal note, the team sections (workflow
  *     queues, project watchlist) hidden, and a Personal badge in the header;
+ *   - inviting people from the personal workspace leads to the conversion:
+ *     "+ Create → Invite people" opens the workspace settings, and an
+ *     invitation the server refuses (409 PERSONAL_WORKSPACE_CONVERT_REQUIRED)
+ *     shows the conversion prompt, not an error toast, whose link opens the
+ *     settings;
  *   - the switcher offers "Create workspace"; creating one lands in the new
  *     company workspace, which the switcher now lists beside the personal one;
  *   - the owner converts the personal workspace from its settings, reading
@@ -84,6 +89,40 @@ test('the dashboard is the personal variant, the switcher creates a company work
   await expect(page.getByTestId('dashboard-project-watchlist')).toHaveCount(0)
   // The person's own sections are still there.
   await expect(page.getByRole('heading', { name: 'Official KPIs' })).toBeVisible()
+
+  // ── Inviting people starts with the conversion ─────────────────────────
+  await page.getByTestId('create-menu').click()
+  const inviteEntry = page.getByTestId('create-menu-invite')
+  await expect(inviteEntry).toContainText('convert first')
+  await inviteEntry.click()
+  await expect(page).toHaveURL(new RegExp(`/o/${escapeRegExp(personal.segment)}/company/workspace`), { timeout: 30_000 })
+  await expect(page.getByTestId('workspace-convert-card')).toBeVisible({ timeout: 30_000 })
+
+  // The people page's own invitation: the server refuses the member seat and
+  // the dialog shows the way to the conversion.
+  await page.goto(`/o/${personal.segment}/users`)
+  await page.getByRole('button', { name: 'Invite by email' }).click()
+  const inviteDialog = page.getByRole('dialog')
+  await expect(inviteDialog).toBeVisible()
+  await inviteDialog.getByLabel('Email').fill(`live-invitee-${crypto.randomUUID()}@octapm-live.test`)
+  await inviteDialog.getByRole('combobox').filter({ hasText: 'Select a role' }).click()
+  await page.getByRole('option', { name: 'Quantity Surveyor' }).click()
+  const refusedInvite = page.waitForResponse(
+    (r) => r.url().endsWith('/users/invitations') && r.request().method() === 'POST',
+    { timeout: 30_000 },
+  )
+  await inviteDialog.getByRole('button', { name: 'Invite' }).click()
+  const refusal = await refusedInvite
+  expect(refusal.status()).toBe(409)
+  expect(((await refusal.json()) as { error?: { code?: string } }).error?.code).toBe('PERSONAL_WORKSPACE_CONVERT_REQUIRED')
+  const prompt = inviteDialog.getByTestId('convert-required-prompt')
+  await expect(prompt).toBeVisible()
+  await expect(prompt).toContainText('Convert to a company workspace')
+  await prompt.getByTestId('convert-required-open').click()
+  await expect(page).toHaveURL(new RegExp(`/o/${escapeRegExp(personal.segment)}/company/workspace`), { timeout: 30_000 })
+  await expect(page.getByTestId('workspace-convert-card')).toBeVisible({ timeout: 30_000 })
+  await page.goto(`/o/${personal.segment}`)
+  await expect(page.getByTestId('workspace-dashboard')).toBeVisible({ timeout: 30_000 })
 
   // ── Create a company workspace from the switcher ───────────────────────
   await openSwitcher(page)

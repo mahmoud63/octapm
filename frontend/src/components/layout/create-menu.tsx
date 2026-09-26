@@ -66,6 +66,7 @@ export function CreateMenu({ className }: { className?: string }) {
     return null
   }
   const close = () => setOpen(false)
+  const personal = workspace.kind === 'personal'
 
   return (
     <DropdownMenu open={open} onOpenChange={setOpen}>
@@ -103,14 +104,26 @@ export function CreateMenu({ className }: { className?: string }) {
               )}
               {isAdmin && (
                 <DropdownMenuItem asChild>
+                  {/* A personal workspace seats one member (ENT-6): inviting
+                      people starts with the conversion, so the entry opens
+                      the workspace settings, where it is explained. */}
                   <Link
-                    to='/o/$orgSlug/users'
+                    to={
+                      personal
+                        ? '/o/$orgSlug/company/workspace'
+                        : '/o/$orgSlug/users'
+                    }
                     params={{ orgSlug: workspace.segment }}
                     onClick={close}
                     data-testid='create-menu-invite'
                   >
                     <UserPlus className='size-4' />
                     Invite people
+                    {personal && (
+                      <span className='ms-auto text-[10px] text-muted-foreground'>
+                        convert first
+                      </span>
+                    )}
                   </Link>
                 </DropdownMenuItem>
               )}
