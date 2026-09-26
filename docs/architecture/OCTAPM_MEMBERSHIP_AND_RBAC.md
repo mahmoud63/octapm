@@ -44,7 +44,7 @@ Rules enforced in `membership.service.js` (new) and by constraints:
 | Owner implies admin | `isOwner → isAdmin` written by the service; validation report checks it |
 | Guests: `kind='guest'` ⇒ `role='external_party'`, `isAdmin=false`, `isOwner=false` | service + CHECK constraint `("kind" <> 'guest' OR ("role" = 'external_party' AND NOT "isAdmin" AND NOT "isOwner"))` |
 | Role must be in the catalogue | `ALLOWED_ROLES` from `backend/src/config/permissions.js:3-7` [C] — same list `user.service.js:10, 196-199` already uses [C] |
-| Personal workspace: exactly one `member` membership | service refuses a second `member` on `Organisation.kind='personal'` (`409 WORKSPACE_IS_PERSONAL`) |
+| Personal workspace: exactly one `member` membership | service refuses a second `member` on `Organisation.kind='personal'` (`409 WORKSPACE_IS_PERSONAL`; *as shipped in ENT-6: `409 PERSONAL_WORKSPACE_CONVERT_REQUIRED`*) |
 | `super_admin` | not a membership role. It is honoured in five code sites but absent from the catalogue and unassignable, 0 users [C] (`project-authorization.service.js:7`, `conversation.service.js:55`, `meeting.service.js:437`, `task.service.js:311`, `search.service.js:15`). ENT-2 removes it from those sets; `isAdmin`/`isOwner` cover the intent. |
 
 Status meanings: `invited` (row created on invitation, no access), `active`, `suspended` (org admin paused this person; token refused), `left` (person left or was removed; row kept for audit, unique still holds — re-invitation flips it back to `invited`).
@@ -203,7 +203,7 @@ The report is re-run after M6 (dual-write) and after M8 (User columns nulled) an
 
 All through `recordAuthAuditEvent` (`AuthAuditEvent`, `schema.prisma:800-828`) with `orgId` and new `membershipId?`:
 
-`membership.invited`, `membership.invitation_accepted`, `membership.created` (direct add), `membership.role_changed` (from, to), `membership.admin_granted`, `membership.admin_revoked`, `membership.owner_granted`, `membership.owner_revoked`, `membership.suspended`, `membership.reactivated`, `membership.left`, `membership.removed`, `workspace.switched` (identity-level; orgId = target), `workspace.created` (personal/company), `organisation.converted` (personal → company), `session.workspace_issued`. Existing events (`login`, `invitation.sent`, etc.) are kept.
+`membership.invited`, `membership.invitation_accepted`, `membership.created` (direct add), `membership.role_changed` (from, to), `membership.admin_granted`, `membership.admin_revoked`, `membership.owner_granted`, `membership.owner_revoked`, `membership.suspended`, `membership.reactivated`, `membership.left`, `membership.removed`, `workspace.switched` (identity-level; orgId = target), `workspace.created` (personal/company), `organisation.converted` (personal → company; *as shipped in ENT-6: `workspace.converted`*), `session.workspace_issued`. Existing events (`login`, `invitation.sent`, etc.) are kept.
 
 `AuditEvent` (`:830`) records the corresponding domain-level entries where the change is visible in the company workspace UI (user list), as `user.service.js` does today for role changes.
 

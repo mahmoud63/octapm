@@ -53,3 +53,29 @@ Legend for "Owner": **Company** = row carries `orgId` and no project; **Company 
 **Moving a project between companies** is **not supported** by this programme: it would re-key `CostLedgerEntry.orgId` (idempotency key) and strand cost codes and vendor identities (project-controls-money stop condition). If ever required it is a copy-with-new-ids operation, not a re-key.
 
 **Guests (§99).** A guest membership owns nothing at company level; its project access is exactly the party predicate. A guest cannot see the company directory, cost codes or inventory.
+
+## Workspace project defaults (ENT-6, acceptance §16)
+
+`Organisation.defaultCurrency` (ISO 4217, default `USD`) and `Organisation.defaultTimezone` (IANA zone, nullable) are what a new project of the workspace starts with when its creator names no currency or zone (`project.service.js createProject`). They are optional on sign-up and on `POST /organisations` (validated in `middleware/workspace-defaults.js`), returned in the organisation summary, and never rewrite an existing project: `Project.currency` and `Project.timezone` stay the values of record. A workspace that names no zone gives its projects none, which is what every project created before ENT-6 already has. Migration `20261005040000_organisation_defaults` is additive (a defaulted and a nullable column; no backfill).
+
+## Billing recipient (ENT-6, acceptance §18)
+
+Billing mail — the trial reminders (`jobs/billing-scheduler.js pmEmail`) and the cancellation email (`subscription.service.js orgEmail`) — goes to the workspace's **owner**: the earliest active owner membership's user, for personal and company workspaces alike. Both call sites ask one function, `membership.service.js findBillingRecipient`; a workspace with no owner row (seeded before the membership backfill) answers null there and the caller keeps its legacy pick, the earliest user with role `pm`.
+
+**Extension point [D].** The billing model has no organisation-level contact today (`Organisation` and `Subscription` carry no billing e-mail), so the owner is only the default and billing must not stay tied to one person's permanent address. When an organisation billing contact is added — a column such as `Organisation.billingContactEmail` (or `Subscription.billingEmail`, or a `BillingContact` row) — it is read inside `findBillingRecipient`, first, and takes precedence over the owner. The resolution order is then:
+
+1. the organisation's billing contact, when set;
+2. the owner membership's user;
+3. the legacy earliest `pm` (in the two callers, only when 1 and 2 give nothing).
+
+No caller changes when the contact is added: `findBillingRecipient` is the single hook.
+
+## Personal → company, as shipped (ENT-6)
+
+The conversion described above is `POST /organisations/:id/convert` (owner only, the session's own workspace). What shipped differs in three names from the earlier design text, and the design documents are aligned to it:
+
+- the audit event is `AuthAuditEvent` **`workspace.converted`** (metadata: from/to kind, plan, name, slug), alongside `workspace.created`;
+- the refusal of a second member in a personal workspace is **`409 PERSONAL_WORKSPACE_CONVERT_REQUIRED`** (the code names the way out); it covers direct add, workspace, project and company-directory invitations (refused before an invitation is minted), invitation acceptance, SSO auto-provisioning (the identity and its seat are one transaction, so a refusal leaves no identity behind) and the membership backfill (which reports such a person as `held` and never seats them). The seat check is serialised on the organisation row (`SELECT … FOR NO KEY UPDATE` inside the seating transaction);
+- the plan that changes is the label `Organisation.plan` (`individual` → `standard`); **`Subscription` is not touched**, so a conversion never re-prices billing — moving the subscription to a team plan stays the billing flow's decision.
+
+The web app routes an invitation attempt in a personal workspace to the conversion: "+ Create → Invite people" opens the workspace settings, and a refused invite or add shows the conversion prompt instead of an error toast.
