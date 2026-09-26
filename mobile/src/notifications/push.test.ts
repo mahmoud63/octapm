@@ -74,6 +74,21 @@ describe('native push', () => {
     expect(routeForNotificationResponse(null)).toBeNull()
   })
 
+  it('routes a tapped notification of another workspace through the opener, naming the workspace, and one of the active workspace straight to the record', () => {
+    const response = (data: Record<string, unknown>) => ({ notification: { request: { content: { data } } } })
+    const ORG_A = '0f6f1a2e-0000-4000-8000-00000000000a'
+    const ORG_B = '0f6f1a2e-0000-4000-8000-00000000000b'
+    useAuthStore.setState({ workspace: { orgId: ORG_A, membershipId: 'm-a', slug: 'acme', name: 'Acme', kind: 'company', role: 'pm', isAdmin: true, isOwner: false, status: 'active' } })
+    // The payload the server builds (push.service payloadFor): orgId, orgSlug and membershipId beside the record.
+    expect(routeForNotificationResponse(response({ entityType: 'rfi', entityId: 'r1', projectId: P, orgId: ORG_A, orgSlug: 'acme', membershipId: 'm-a' }))).toBe('/rfi/r1')
+    expect(routeForNotificationResponse(response({ entityType: 'rfi', entityId: 'r1', projectId: P, orgId: ORG_B, orgSlug: 'beta', membershipId: 'm-b' }))).toBe(`/open?to=%2Frfi%2Fr1&projectId=${P}&orgId=${ORG_B}&orgSlug=beta`)
+    // A payload from before the workspace fields belongs to the active workspace, as it always did.
+    expect(routeForNotificationResponse(response({ entityType: 'rfi', entityId: 'r1', projectId: P }))).toBe('/rfi/r1')
+    // The web URL alone names the workspace by its handle.
+    expect(routeForNotificationResponse(response({ url: `/o/beta/projects/${P}/tasks?recordId=t1&source=task` }))).toBe(`/open?to=%2Ftasks%2Ft1&projectId=${P}&orgSlug=beta`)
+    useAuthStore.setState({ workspace: null })
+  })
+
   it('listens for taps and opens the record, falling back to the notifications list', () => {
     const stop = startPushNotifications()
     expect(notifications.setNotificationHandler).toHaveBeenCalled()

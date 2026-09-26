@@ -199,6 +199,56 @@ liveDescribe("realtime rooms keyed by membership (ENT-5)", () => {
     expect(forB.membershipId).not.toBe(forA.membershipId);
   });
 
+  it("joining needs authorisation (§11): the B socket is refused A's project room; A's write replayed under B's token is refused (§10), and goes under A's", async () => {
+    // The same person, connected in B, cannot listen to A's project.
+    expect(await joinProject(onB, projectA.id)).toMatchObject({ ok: false, projectId: projectA.id });
+    expect(await joinProject(onA, projectA.id)).toMatchObject({ ok: true, projectId: projectA.id });
+    // An item captured in A and replayed under B's token: the server re-reads
+    // the project's workspace against the token's and answers as if the
+    // project did not exist. The same item under A's own token is created.
+    const body = { title: `Live replay ${Date.now()}`, clientRequestId: crypto.randomUUID() };
+    const underB = await call(tokenFor(b.org, membershipB), `/projects/${projectA.id}/punch`, { method: "POST", body });
+    expect(underB.status).toBe(404);
+    const underA = await call(tokenFor(a.org, membershipA), `/projects/${projectA.id}/punch`, { method: "POST", body });
+    expect(underA.status).toBe(201);
+    const created = (await underA.json()).data;
+    expect(created).toMatchObject({ projectId: projectA.id, title: body.title });
+    expect(await prisma.punchItem.count({ where: { orgId: b.org.id } })).toBe(0);
+  }, 20_000);
+
+  it("a workspace switch (§9, §11): the socket in A closes with A's rooms; the one on the token the switch issues is B's member and never hears A's project", async () => {
+    // What the field app does: a socket in A on A's project, then the switch —
+    // POST /auth/workspaces/B/session with A's own token, the old socket
+    // dropped, a fresh one on the new token.
+    const inA = track(await connect(port, tokenFor(a.org, membershipA)));
+    expect(await joinProject(inA, projectA.id)).toMatchObject({ ok: true });
+    const heardInA = nextEvent(inA, (event) => event.entityType === "location" && event.projectId === projectA.id);
+    expect((await call(a.token, `/projects/${projectA.id}/locations`, { method: "POST", body: { name: `Level A ${Date.now()}` } })).status).toBe(201);
+    expect(await heardInA).toMatchObject({ orgId: a.org.id });
+
+    const issued = await fetch(`http://127.0.0.1:${port}/api/v1/auth/workspaces/${b.org.id}/session`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${tokenFor(a.org, membershipA)}`, "x-octapm-client": "mobile" },
+    });
+    expect(issued.status).toBe(200);
+    const session = (await issued.json()).data;
+    expect(session.workspace).toMatchObject({ orgId: b.org.id, membershipId: membershipB.id, slug: b.org.slug });
+    inA.close();
+
+    const inB = track(await connect(port, session.tokens.accessToken));
+    expect(inB.ready).toMatchObject({ userId: person.id, orgId: b.org.id, membershipId: membershipB.id });
+    // B's rooms are joined on authorisation; A's project room is refused to it.
+    expect(await joinProject(inB, projectA.id)).toMatchObject({ ok: false });
+    expect(await joinProject(inB, projectB.id)).toMatchObject({ ok: true });
+    const heardOfA = eventsWithin(inB, (event) => event.orgId === a.org.id || event.projectId === projectA.id, 2_500);
+    const heardOfB = nextEvent(inB, (event) => event.entityType === "location" && event.projectId === projectB.id);
+    expect((await call(a.token, `/projects/${projectA.id}/locations`, { method: "POST", body: { name: `Level A2 ${Date.now()}` } })).status).toBe(201);
+    expect((await call(b.token, `/projects/${projectB.id}/locations`, { method: "POST", body: { name: `Level B ${Date.now()}` } })).status).toBe(201);
+    expect(await heardOfB).toMatchObject({ orgId: b.org.id });
+    expect(await heardOfA).toEqual([]);
+    inB.close();
+  }, 30_000);
+
   it("a membership change in A drops the A socket; B stays connected and still receives its project's events", async () => {
     expect(await joinProject(onB, projectB.id)).toMatchObject({ ok: true });
     const goneA = disconnected(onA);

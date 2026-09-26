@@ -9,7 +9,7 @@ import { useTheme } from '@/design-system'
 import { useLayout } from '@/hooks/useLayout'
 import { ALL_SLOT_NAMES, HIDDEN_ROUTES, resolveCaptureActions, resolveTabs } from '@/navigation/roleNav'
 import { usePermissions } from '@/permissions/usePermissions'
-import { useProjectStore } from '@/projects/store'
+import { projectBelongsTo, useProjectStore } from '@/projects/store'
 
 /**
  * The signed-in shell.
@@ -27,7 +27,10 @@ export default function AppLayout() {
   const status = useAuthStore((s) => s.status)
   const role = useAuthStore((s) => s.user?.role ?? null)
   const isCompanyAdmin = useAuthStore((s) => s.user?.isCompanyAdmin ?? false)
-  const projectId = useProjectStore((s) => s.currentProjectId)
+  const activeOrgId = useAuthStore((s) => s.workspace?.orgId ?? null)
+  // A project of another workspace is not this session's project: until the
+  // session settles it (session.ensureWorkspace), the shell treats it as none.
+  const projectId = useProjectStore((s) => (projectBelongsTo(s, activeOrgId) ? s.currentProjectId : null))
   const projectHydrated = useProjectStore((s) => s.hydrated)
   const permissions = usePermissions(projectId)
   const theme = useTheme()

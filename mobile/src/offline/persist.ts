@@ -2,8 +2,11 @@
  * The read cache, kept across launches so a screen the person has seen
  * draws at once without a signal, marked with its age. Only settled
  * answers are written; searches, scans and the approvals inbox are not,
- * since they are momentary. The whole cache is one document under the
- * person's id, written a little after it changes and never past a budget.
+ * since they are momentary. The whole cache is one document per person and
+ * workspace, written a little after it changes and never past a budget: a
+ * switch leaves the previous workspace's document on disk and restores the
+ * target's, so nothing read in one workspace is ever drawn in another
+ * (workspace switching doc §3, step 5).
  */
 import { dehydrate, hydrate, type QueryClient, type QueryKey } from '@tanstack/react-query'
 import { offlineStore } from '@/offline/storage'
@@ -17,7 +20,8 @@ const EXCLUDED_PAIRS: [string, string][] = [
   ['workflow', 'my-steps'],
 ]
 
-const cacheKey = (userId: string) => `cache:v1:${userId}`
+/** One document per person and workspace; the pre-workspace key is kept for a session that names no workspace. */
+export const cacheKey = (userId: string, orgId?: string | null) => (orgId ? `cache:v1:${userId}:${orgId}` : `cache:v1:${userId}`)
 
 export const isPersistable = (queryKey: QueryKey): boolean => {
   const [head, second] = queryKey as [unknown, unknown]
@@ -27,9 +31,9 @@ export const isPersistable = (queryKey: QueryKey): boolean => {
 }
 
 /** Put back what was saved for this person. Older entries look stale to the cache and refresh behind the screen. */
-export async function restoreQueryCache(client: QueryClient, userId: string): Promise<number> {
+export async function restoreQueryCache(client: QueryClient, userId: string, orgId?: string | null): Promise<number> {
   try {
-    const raw = await offlineStore().get(cacheKey(userId))
+    const raw = await offlineStore().get(cacheKey(userId, orgId))
     if (!raw) return 0
     const state = JSON.parse(raw) as { queries?: unknown[] }
     hydrate(client, state as never)
@@ -41,7 +45,7 @@ export async function restoreQueryCache(client: QueryClient, userId: string): Pr
 }
 
 /** Write the cache whenever it settles, within the budget; returns a stop function. */
-export function startQueryPersistence(client: QueryClient, userId: string): () => void {
+export function startQueryPersistence(client: QueryClient, userId: string, orgId?: string | null): () => void {
   let timer: ReturnType<typeof setTimeout> | null = null
   const write = async () => {
     timer = null
@@ -54,7 +58,7 @@ export function startQueryPersistence(client: QueryClient, userId: string): () =
         state.queries.shift()
         json = JSON.stringify(state)
       }
-      await offlineStore().set(cacheKey(userId), json)
+      await offlineStore().set(cacheKey(userId, orgId), json)
     } catch (error) {
       log.warn('sync', 'could not persist the read cache', { message: String(error) })
     }

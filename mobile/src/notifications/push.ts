@@ -19,8 +19,9 @@ import * as Notifications from 'expo-notifications'
 import { router } from 'expo-router'
 import { api, run } from '@/api/client'
 import { STORAGE_KEYS, secureStorage } from '@/auth/secure-storage'
+import { useAuthStore } from '@/auth/store'
 import { env } from '@/config/env'
-import { resolveNotificationData, routeForResolvedLink } from '@/navigation/deepLinks'
+import { resolveNotificationData, routeForResolvedLink, type NotificationLinkData } from '@/navigation/deepLinks'
 import { useProjectStore } from '@/projects/store'
 import { log } from '@/utilities/logger'
 
@@ -66,12 +67,19 @@ export async function unregisterPushDevice(): Promise<void> {
 
 type ResponseLike = { notification: { request: { content: { data?: Record<string, unknown> | null } } } }
 
-/** The app route a tapped notification opens, through the opener when the project must change. Null when it names nothing. */
+/**
+ * The app route a tapped notification opens: the record when it belongs to
+ * the active workspace and project, the opener when the project must change,
+ * and the opener again — which asks before switching — when the payload
+ * names another workspace (its orgId / orgSlug, workspace switching doc §5).
+ * Null when it names nothing.
+ */
 export function routeForNotificationResponse(response: ResponseLike | null | undefined): string | null {
-  const data = response?.notification?.request?.content?.data as { entityType?: string | null; entityId?: string | null; projectId?: string | null; url?: string | null } | null | undefined
+  const data = response?.notification?.request?.content?.data as NotificationLinkData | null | undefined
   const resolved = resolveNotificationData(data)
   if (!resolved) return null
-  return routeForResolvedLink(resolved, useProjectStore.getState().currentProjectId)
+  const workspace = useAuthStore.getState().workspace
+  return routeForResolvedLink(resolved, useProjectStore.getState().currentProjectId, workspace ? { orgId: workspace.orgId, slug: workspace.slug } : null)
 }
 
 const openResponse = (response: ResponseLike | null | undefined) => {

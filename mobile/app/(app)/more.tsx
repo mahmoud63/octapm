@@ -5,6 +5,7 @@ import { availableBiometric, biometricLabel, type BiometricKind } from '@/auth/b
 import { setBiometricUnlock, signOut } from '@/auth/session'
 import { useAuthStore } from '@/auth/store'
 import { Screen } from '@/components/Screen'
+import { WorkspaceSheet, WorkspaceStrip } from '@/components/WorkspaceSheet'
 import { Button, Card, RecordRow, Text, spacing } from '@/design-system'
 import { env } from '@/config/env'
 import { useOutboxStatus } from '@/offline/useOutboxStatus'
@@ -24,6 +25,7 @@ export default function MoreScreen() {
   const projectId = useProjectStore((st) => st.currentProjectId)
   const permissions = usePermissions(projectId)
   const [busy, setBusy] = useState(false)
+  const [choosingWorkspace, setChoosingWorkspace] = useState(false)
 
   const router = useRouter()
   const outbox = useOutboxStatus()
@@ -46,6 +48,10 @@ export default function MoreScreen() {
           <Text tone="muted">{roleLabel(user?.role)}</Text>
         </View>
       </Card>
+
+      {/* The workspace the session is in; the sheet switches it. */}
+      <WorkspaceStrip onPress={() => setChoosingWorkspace(true)} />
+      <WorkspaceSheet visible={choosingWorkspace} onClose={() => setChoosingWorkspace(false)} />
 
       {groups.map((group) => (
         <Card key={group.title} testID={`more-group-${group.title.toLowerCase().replace(/s+/g, '-')}`}>
