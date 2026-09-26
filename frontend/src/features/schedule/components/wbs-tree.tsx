@@ -137,7 +137,10 @@ function WbsRow({ node, depth, expanded, toggle }: RowProps) {
 
   return (
     <>
-      <tr className='border-b hover:bg-muted/25'>
+      <tr
+        className='border-b hover:bg-muted/25'
+        data-testid={`uat-schedule-wbs-row-${node.code}`}
+      >
         <td className='p-2' style={{ paddingLeft: `${depth * 20 + 8}px` }}>
           <div className='flex items-center gap-1'>
             {hasChildren ? (
@@ -239,15 +242,24 @@ export function WbsTree({
     [tree]
   )
 
-  const [expanded, setExpanded] = useState<Set<string>>(initialExpanded)
+  // The roots start open. The tree's keys change with its source — snapshot
+  // codes until the project's WbsNode rows arrive, row ids after — so a
+  // choice the viewer made is kept only for the source it was made on; the
+  // other source starts open again rather than with every root collapsed
+  // under keys that no longer exist.
+  const [chosen, setChosen] = useState<{
+    fromRows: boolean
+    keys: Set<string>
+  } | null>(null)
+  const expanded =
+    chosen && chosen.fromRows === fromRows ? chosen.keys : initialExpanded
+  const setExpanded = (keys: Set<string>) => setChosen({ fromRows, keys })
 
   const toggle = (key: string) => {
-    setExpanded((prev) => {
-      const next = new Set(prev)
-      if (next.has(key)) next.delete(key)
-      else next.add(key)
-      return next
-    })
+    const next = new Set(expanded)
+    if (next.has(key)) next.delete(key)
+    else next.add(key)
+    setExpanded(next)
   }
 
   return (

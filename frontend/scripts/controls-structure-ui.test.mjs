@@ -42,10 +42,24 @@ assert.match(detail, /key: 'controls',\s*label: 'Project Controls'/, 'the module
 assert.match(detail, /case 'controls':/, 'the shell renders the controls module')
 assert.match(detail, /controls: childFor\('controls'\)/, 'the controls sub-tab comes from the URL')
 
+// A package names its party and commitment from the project's own lists,
+// never as ids typed by hand.
+assert.match(page, /useProjectParties\(projectId\)/, 'the package owner is picked from the project parties')
+assert.match(page, /useCommitments\(projectId/, 'the package commitment is picked from the project commitments')
+;["data-testid='uat-wbs-owner'", "data-testid='uat-wbs-commitment'"].forEach(
+  (fragment) => assert.ok(page.includes(fragment), `page exposes ${fragment}`)
+)
+assert.ok(!/Owner party id|Commitment id/.test(page), 'no raw id inputs remain on the package')
+
 // ── Schedule WBS tab reads WbsNode first ─────────────────────────────────
 const tree = read('src/features/schedule/components/wbs-tree.tsx')
 assert.match(tree, /useWbsNodes\(/, 'the WBS tab reads project WbsNode rows')
 assert.match(tree, /buildTreeFromCodes/, 'the dotted-code fallback is kept for older revisions')
+// The roots start open whichever source the tree came from: the expansion
+// the viewer chose is kept per source, not seeded once from the snapshot's
+// keys and left empty when the row ids arrive.
+assert.match(tree, /chosen && chosen\.fromRows === fromRows \? chosen\.keys : initialExpanded/, 'expansion follows the tree source')
+assert.ok(!tree.includes('useState<Set<string>>(initialExpanded)'), 'expansion is not seeded once from the first tree')
 const dashboard = read('src/features/schedule/components/schedule-dashboard.tsx')
 assert.match(dashboard, /<WbsTree nodes=\{revision\.wbs \|\| \[\]\} projectId=\{projectId\} \/>/, 'the dashboard hands the tab its project')
 

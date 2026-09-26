@@ -44,6 +44,9 @@ import {
 import { Skeleton } from '@/components/ui/skeleton'
 import { Switch } from '@/components/ui/switch'
 import { ConfirmDialog } from '@/components/confirm-dialog'
+import { useCommitments } from '@/features/commercial/hooks/use-commitments'
+import type { ProjectParty } from '@/features/projects/data/schema'
+import { useProjectParties } from '@/features/projects/hooks/use-projects'
 import {
   normaliseUnit,
   unitDimensions,
@@ -79,6 +82,10 @@ type EditorState =
 
 const isInSubtree = (candidate: WbsNodeRecord, root: WbsNodeRecord) =>
   candidate.path === root.path || candidate.path.startsWith(`${root.path}/`)
+
+/** A party as the planner knows it: the company, and its role on the job. */
+const partyLabel = (party: ProjectParty) =>
+  `${party.company?.name ?? party.contactName ?? 'Unnamed party'} · ${party.roleLabel ?? party.role}`
 
 function WbsNodeEditor({
   projectId,
@@ -127,6 +134,15 @@ function WbsNodeEditor({
     (node) =>
       node.status === 'active' && (!editing || !isInSubtree(node, editing))
   )
+
+  // A package names the party that delivers it and the commitment it is
+  // delivered under, from the project's own lists; the API refuses any other.
+  const { data: partiesData } = useProjectParties(projectId)
+  const { data: commitmentsData } = useCommitments(projectId, {}, {
+    enabled: Boolean(state),
+  })
+  const parties = partiesData?.items ?? []
+  const commitments = commitmentsData?.items ?? []
 
   const busy = create.isPending || update.isPending
 
@@ -235,22 +251,46 @@ function WbsNodeEditor({
             {isPackage && (
               <div className='grid grid-cols-2 gap-3'>
                 <div className='grid gap-1.5'>
-                  <Label htmlFor='wbs-owner'>Owner party id</Label>
-                  <Input
-                    id='wbs-owner'
-                    value={ownerPartyId}
-                    onChange={(event) => setOwnerPartyId(event.target.value)}
-                    placeholder='Project party (optional)'
-                  />
+                  <Label>Delivered by</Label>
+                  <Select
+                    value={ownerPartyId || NONE}
+                    onValueChange={(value) =>
+                      setOwnerPartyId(value === NONE ? '' : value)
+                    }
+                  >
+                    <SelectTrigger data-testid='uat-wbs-owner'>
+                      <SelectValue placeholder='No party yet' />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value={NONE}>No party yet</SelectItem>
+                      {parties.map((party) => (
+                        <SelectItem key={party.id} value={party.id}>
+                          {partyLabel(party)}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
                 <div className='grid gap-1.5'>
-                  <Label htmlFor='wbs-commitment'>Commitment id</Label>
-                  <Input
-                    id='wbs-commitment'
-                    value={commitmentId}
-                    onChange={(event) => setCommitmentId(event.target.value)}
-                    placeholder='Commitment (optional)'
-                  />
+                  <Label>Under commitment</Label>
+                  <Select
+                    value={commitmentId || NONE}
+                    onValueChange={(value) =>
+                      setCommitmentId(value === NONE ? '' : value)
+                    }
+                  >
+                    <SelectTrigger data-testid='uat-wbs-commitment'>
+                      <SelectValue placeholder='No commitment yet' />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value={NONE}>No commitment yet</SelectItem>
+                      {commitments.map((commitment) => (
+                        <SelectItem key={commitment.id} value={commitment.id}>
+                          {commitment.ref} · {commitment.title}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
               </div>
             )}
