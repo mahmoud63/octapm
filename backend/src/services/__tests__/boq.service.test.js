@@ -87,6 +87,11 @@ jest.mock("../activity-boq-allocation.service", () => ({
       ? (Number(amount || 0) / Number(boqItem.amount)) * 100
       : 0,
   ),
+  // A rate edit re-derives draft allocations (PC-3); the live test proves
+  // the figures, this mock only keeps the edit path callable.
+  rederiveAllocationsForBoqItem: jest
+    .fn()
+    .mockResolvedValue({ rederived: [], warnings: [] }),
 }));
 jest.mock("../boq-calculation.service", () => ({
   calculateFinancials: jest.fn((items, summary) =>

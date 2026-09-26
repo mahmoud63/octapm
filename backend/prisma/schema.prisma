@@ -1704,6 +1704,20 @@ model ActivityBoqAllocation {
   // and the item's normalised unit at the time of writing (kept for history).
   locationId     String?
   unitCode       String?
+  // Mapping fields (PC-3). `basis` records which of quantity, amount and
+  // weight the user typed; the other two are derived from the item, so a rate
+  // change can re-derive a draft without guessing which figure was meant.
+  // Legacy rows default to amount, the figure EV and IPC always read.
+  // `suggestedBy` and `confidence` are the provenance of a suggestion that
+  // became a row (ai, rule:code, rule:wbs, rule:location, rule:name,
+  // rule:costcode, import); `importBatchId` lets a mapping-file import be
+  // undone as a unit; `supersededByAllocationId` is the audit chain when a
+  // row is replaced rather than edited.
+  basis                    String    @default("amount") // quantity, amount, weight
+  suggestedBy              String?
+  confidence               Float?
+  importBatchId            String?
+  supersededByAllocationId String?
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
 
@@ -1711,6 +1725,8 @@ model ActivityBoqAllocation {
   boqItem           BoqItem                      @relation(fields: [boqItemId], references: [id], onDelete: Cascade)
   activity          Activity                     @relation(fields: [activityId], references: [id], onDelete: Cascade)
   location          Location?                    @relation(fields: [locationId], references: [id], onDelete: SetNull)
+  supersededBy      ActivityBoqAllocation?       @relation("ActivityBoqAllocationSupersession", fields: [supersededByAllocationId], references: [id], onDelete: SetNull)
+  supersedes        ActivityBoqAllocation[]      @relation("ActivityBoqAllocationSupersession")
   ipcItems          IpcItem[]
   changeOrderLinks  ChangeOrderAllocationLink[]
   ipcProgressLinks  IpcItemProgressLink[]
@@ -1725,6 +1741,8 @@ model ActivityBoqAllocation {
   @@index([projectId, boqItemId, activityId])
   @@index([projectId, status])
   @@index([locationId])
+  @@index([importBatchId])
+  @@index([supersededByAllocationId])
 }
 
 model ActivityProgress {

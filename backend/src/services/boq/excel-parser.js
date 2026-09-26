@@ -39,6 +39,40 @@ const HEADER_ALIASES = {
 // column names it outright.
 const FALLBACK_CODE_HEADERS = new Set(["item", "ref", "ref."]);
 
+// Optional columns (PC-3): `mapping_rule` says whether the row must be
+// scheduled — required (the default), optional, or not_applicable for
+// preliminaries, provisional sums and dayworks. It is read when present and
+// never required; a row without it keeps whatever rule it already has.
+const OPTIONAL_HEADERS = {
+  mapping_rule: "mappingRule",
+  "mapping rule": "mappingRule",
+  "schedule rule": "mappingRule",
+  "mapping": "mappingRule",
+};
+const MAPPING_RULE_ALIASES = {
+  required: "required",
+  req: "required",
+  optional: "optional",
+  opt: "optional",
+  not_applicable: "not_applicable",
+  "not applicable": "not_applicable",
+  "n/a": "not_applicable",
+  na: "not_applicable",
+  none: "not_applicable",
+};
+
+/**
+ * The mapping rule a cell names, or null for an empty cell. An unknown word
+ * is returned as `{ invalid }` so validation can report the row rather than
+ * silently treating it as required.
+ */
+function parseMappingRule(value) {
+  const text = String(value ?? "").trim().toLowerCase().replace(/\s+/g, " ");
+  if (!text) return null;
+  const rule = MAPPING_RULE_ALIASES[text];
+  return rule ? rule : { invalid: String(value).trim() };
+}
+
 // A validation failure on a big workbook must come back as one readable
 // answer, not one line per row of a 7,000-row tender bill.
 const MAX_REPORTED_ERRORS = 200;
@@ -72,10 +106,15 @@ function parseWorkbookRows(workbook) {
   for (let i = 0; i < Math.min(5, rows.length); i += 1) {
     const rowHeaders = rows[i].map(normalizeHeader);
     const map = {};
+    const optional = {};
     let fallbackCode;
     rowHeaders.forEach((header, index) => {
       if (FALLBACK_CODE_HEADERS.has(header)) {
         if (fallbackCode === undefined) fallbackCode = index;
+        return;
+      }
+      if (OPTIONAL_HEADERS[header] && optional[OPTIONAL_HEADERS[header]] === undefined) {
+        optional[OPTIONAL_HEADERS[header]] = index;
         return;
       }
       const canonical = HEADER_ALIASES[header] || header;
@@ -88,9 +127,11 @@ function parseWorkbookRows(workbook) {
     if (map.code === undefined && fallbackCode !== undefined) {
       map.code = fallbackCode;
     }
+    // Only the named bill columns decide which row is the header; an
+    // optional column rides along once one is found.
     if (Object.keys(map).length >= 3) {
       headerRowIdx = i;
-      columnMap = map;
+      columnMap = { ...map, ...optional };
       break;
     }
   }
@@ -149,6 +190,9 @@ function parseWorkbookRows(workbook) {
       quantity: rawQty,
       unit: rawUnit?.toString().trim() || "",
       rate: rawRate,
+      ...(columnMap.mappingRule !== undefined
+        ? { mappingRule: parseMappingRule(row[columnMap.mappingRule]) }
+        : {}),
     });
   }
 
@@ -226,6 +270,14 @@ function validateBoqRows(rows) {
         row: rowIndex,
         field: "description",
         message: "Description exceeds 500 characters",
+      });
+    }
+
+    if (row.mappingRule && typeof row.mappingRule === "object" && row.mappingRule.invalid) {
+      errors.push({
+        row: rowIndex,
+        field: "mapping_rule",
+        message: `Mapping rule "${row.mappingRule.invalid}" is not required, optional or not_applicable`,
       });
     }
 
