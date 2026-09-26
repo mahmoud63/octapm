@@ -1108,7 +1108,10 @@ const getInvitationPreview = async ({ token }) => {
   assertUsableInvitationToken(invitation);
 
   // An identity that already exists elsewhere is invited like any other
-  // (membership doc §5): acceptance gives it a second membership.
+  // (membership doc §5): acceptance gives it a second membership — once the
+  // invitee has proved they are that identity, by password or by a session
+  // of their own, so `requiresPassword` is true for every existing identity
+  // (a client without a session asks for the password it already knows).
   const existingUser = await prisma.user.findUnique({
     where: { email: invitation.email },
     select: { id: true, orgId: true, status: true },
@@ -1129,12 +1132,33 @@ const getInvitationPreview = async ({ token }) => {
       : null,
     expiresAt: invitation.expiresAt,
     existingUser: Boolean(existingUser),
-    requiresPassword: !existingUser || existingUser.status !== "active",
+    // A new identity chooses one; an existing identity proves itself with it.
+    requiresPassword: true,
   };
 };
 
+/**
+ * Acceptance by an identity that already exists needs proof that the caller
+ * is that identity (membership doc §5 [D]): the emailed link alone would
+ * turn a leaked or forwarded invitation into a session for the victim, and
+ * from there into every workspace they belong to. The proof is a session of
+ * their own — an access or identity token for the same `sub`, passed by the
+ * route as `identityUserId` — or the account password, which is compared and
+ * never rewritten. A brand-new identity still sets its password with the
+ * token alone, as it always has.
+ */
+const assertInvitationIdentityProof = async ({ existingUser, identityUserId, password }) => {
+  if (identityUserId && identityUserId === existingUser.id) return;
+  if (password && (await bcrypt.compare(password, existingUser.passwordHash))) return;
+  throw new HttpError(
+    401,
+    "INVITATION_SIGN_IN_REQUIRED",
+    "Sign in as the invited account, or enter its password, to accept this invitation",
+  );
+};
+
 const acceptInvitation = async (
-  { token, name, password, phone },
+  { token, name, password, phone, identityUserId = null },
   context = {},
 ) => {
   const tokenHash = hashAccountToken(token);
@@ -1177,31 +1201,72 @@ const acceptInvitation = async (
     where: { email: invitation.email },
   });
 
-  const requiresPassword = !existingUser || existingUser.status !== "active";
-  if (requiresPassword && !password) {
+  const homeOrg = !existingUser || existingUser.orgId === invitation.orgId;
+  // User.status belongs to the identity's home workspace (as deactivation
+  // already assumes): an identity its home closed is reopened by a
+  // re-invitation from home — the pre-membership contract, a new password
+  // and status back to active — and by nothing else, so no session is ever
+  // minted for an account another workspace cannot see is closed.
+  const reactivatesIdentity = Boolean(existingUser) && existingUser.status !== "active";
+  try {
+    if (reactivatesIdentity && !homeOrg) {
+      throw new HttpError(403, "USER_INACTIVE", "This account was closed by its own workspace");
+    }
+    if (existingUser && !reactivatesIdentity) {
+      await assertInvitationIdentityProof({ existingUser, identityUserId, password });
+    }
+  } catch (error) {
+    await recordAuthAuditEvent({
+      orgId: invitation.orgId,
+      projectId: invitation.projectId,
+      userId: existingUser?.id || null,
+      entityType: "invitation",
+      entityId: invitation.id,
+      action: "invitation_accept_rejected",
+      email: invitation.email,
+      ipAddress: context.ipAddress,
+      userAgent: context.userAgent,
+      metadata: { reason: error.code || "refused" },
+    });
+    throw error;
+  }
+
+  // Only a new identity, or one being reopened by its home, sets a password
+  // here; an active identity's password was its proof and is left alone.
+  const setsPassword = !existingUser || reactivatesIdentity;
+  if (setsPassword && !password) {
     throw new HttpError(
       400,
       "INVITATION_PASSWORD_REQUIRED",
       "A password is required to accept this invitation",
     );
   }
-
-  const passwordHash = password ? await bcrypt.hash(password, 12) : null;
+  const passwordHash = setsPassword ? await bcrypt.hash(password, 12) : null;
 
   // The invited membership: a party invitation makes a guest, anything else
   // a member with the invited role. The User columns mirror the membership
   // only in the identity's own organisation (M5 dual-write); an identity
   // invited into a second workspace keeps its name, password and home role.
+  // An identity already an active member here keeps its role too: a project
+  // or party invitation to them assigns the project and does not re-grade
+  // them — a role change goes through changeMembership, with its guards
+  // and its audit line.
   const isPartyInvitation = Boolean(invitation.projectPartyId);
-  const homeOrg = !existingUser || existingUser.orgId === invitation.orgId;
+  const currentMembership = existingUser
+    ? await membershipService.findMembership({ tx: prisma, orgId: invitation.orgId, userId: existingUser.id })
+    : null;
+  const keepsRole =
+    Boolean(currentMembership) &&
+    currentMembership.status === membershipService.MEMBERSHIP_STATUSES.ACTIVE &&
+    currentMembership.kind === membershipService.MEMBERSHIP_KINDS.MEMBER;
 
   return prisma.$transaction(async (tx) => {
     let user;
     if (existingUser) {
       const data = {};
       if (homeOrg) {
-        data.role = invitation.role;
-        data.status = "active";
+        if (!keepsRole) data.role = invitation.role;
+        if (reactivatesIdentity) data.status = "active";
         if (name?.trim()) data.name = name.trim();
         if (phone !== undefined) data.phone = phone || null;
         if (passwordHash) data.passwordHash = passwordHash;
@@ -1227,16 +1292,18 @@ const acceptInvitation = async (
       });
     }
 
-    const ensured = await membershipService.ensureMembership({
-      tx,
-      orgId: invitation.orgId,
-      userId: user.id,
-      role: isPartyInvitation ? membershipService.GUEST_ROLE : invitation.role,
-      kind: isPartyInvitation ? membershipService.MEMBERSHIP_KINDS.GUEST : membershipService.MEMBERSHIP_KINDS.MEMBER,
-      invitedById: invitation.invitedById || null,
-      invitationId: invitation.id,
-      joinedAt: now,
-    });
+    const ensured = keepsRole
+      ? { membership: currentMembership, created: false, reactivated: false }
+      : await membershipService.ensureMembership({
+          tx,
+          orgId: invitation.orgId,
+          userId: user.id,
+          role: isPartyInvitation ? membershipService.GUEST_ROLE : invitation.role,
+          kind: isPartyInvitation ? membershipService.MEMBERSHIP_KINDS.GUEST : membershipService.MEMBERSHIP_KINDS.MEMBER,
+          invitedById: invitation.invitedById || null,
+          invitationId: invitation.id,
+          joinedAt: now,
+        });
     if (ensured) {
       await membershipService.recordMembershipEvent({
         tx,
@@ -1245,7 +1312,14 @@ const acceptInvitation = async (
         action: "membership.invitation_accepted",
         actor: invitation.invitedById ? { id: invitation.invitedById } : null,
         context,
-        metadata: { invitationId: invitation.id, created: ensured.created, reactivated: ensured.reactivated, kind: ensured.membership.kind },
+        metadata: {
+          invitationId: invitation.id,
+          created: ensured.created,
+          reactivated: ensured.reactivated,
+          roleKept: keepsRole,
+          kind: ensured.membership.kind,
+          provedBy: existingUser && !reactivatesIdentity ? (identityUserId ? "session" : "password") : null,
+        },
       });
     }
 

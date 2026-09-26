@@ -139,18 +139,35 @@ liveDescribe("workspaces: one identity, several organisations", () => {
     expect(created.body.data.existingIdentity).toBeUndefined();
     persona.id = created.body.data.id;
 
-    // B invites the same email as a PM; the preview and the acceptance welcome
-    // the existing identity and bind the session to B.
+    // B invites the same email as a PM; the preview welcomes the existing
+    // identity, and the acceptance needs proof of it (membership doc §5):
+    // the emailed link alone is refused, so is a wrong password; the
+    // identity's own session — or its password — binds the session to B.
     const invited = await api.post("/api/v1/users/invitations", { email: persona.email, role: "pm" }, bearer(orgs.b.token));
     expect(invited.status).toBe(201);
     const token = acceptLinkFor(persona.email);
     const preview = await api.get(`/api/v1/auth/invitations/${token}`);
     expect(preview.status).toBe(200);
-    expect(preview.body.data).toMatchObject({ existingUser: true, requiresPassword: false, role: "pm" });
-    const accepted = await api.post("/api/v1/auth/invitations/accept", { token, name: "Persona" }, MOBILE);
+    expect(preview.body.data).toMatchObject({ existingUser: true, requiresPassword: true, role: "pm" });
+    const linkAlone = await api.post("/api/v1/auth/invitations/accept", { token, name: "Persona" }, MOBILE);
+    expect(linkAlone.status).toBe(401);
+    expect(linkAlone.body.error.code).toBe("INVITATION_SIGN_IN_REQUIRED");
+    const wrongPassword = await api.post("/api/v1/auth/invitations/accept", { token, name: "Persona", password: "Not-The-Passw0rd" }, MOBILE);
+    expect(wrongPassword.status).toBe(401);
+    expect(wrongPassword.body.error.code).toBe("INVITATION_SIGN_IN_REQUIRED");
+    const someoneElse = await api.post("/api/v1/auth/invitations/accept", { token, name: "Persona" }, bearer(orgs.c.token));
+    expect(someoneElse.status).toBe(401);
+    expect(someoneElse.body.error.code).toBe("INVITATION_SIGN_IN_REQUIRED");
+    expect(await prisma.organizationMembership.findFirst({ where: { orgId: orgs.b.orgId, userId: persona.id } })).toBeNull();
+
+    const own = await login(persona.email);
+    expect(own.status).toBe(200);
+    const accepted = await api.post("/api/v1/auth/invitations/accept", { token, name: "Persona" }, bearer(own.body.data.tokens.accessToken));
     expect(accepted.status).toBe(200);
     expect(accepted.body.data.user).toMatchObject({ id: persona.id, orgId: orgs.b.orgId, role: "pm", name: "Persona" });
     expect(decode(accepted.body.data.tokens.accessToken)).toMatchObject({ orgId: orgs.b.orgId, role: "pm", adm: false, own: false });
+    // The password was proof-or-nothing, never rewritten: it still signs in.
+    expect((await login(persona.email)).status).toBe(200);
 
     // The identity's own columns are untouched: A is still home, still a QS.
     const row = await prisma.user.findUnique({ where: { id: persona.id } });
@@ -278,6 +295,30 @@ liveDescribe("workspaces: one identity, several organisations", () => {
     expect(await prisma.user.findUnique({ where: { id: persona.id }, select: { isCompanyAdmin: true } })).toEqual({ isCompanyAdmin: false });
     expect((await me(sessions.a.accessToken)).body.data.isCompanyAdmin).toBe(false);
 
+    // Standing is an owner's to grant (membership doc §2.1): a plain PM may
+    // change a colleague's role but not make them an administrator, and an
+    // administrator who is not an owner may not either — otherwise two PMs
+    // would make each other administrators with no owner involved.
+    const plainPm = await api.post("/api/v1/users", { name: "Plain PM", email: `live-plain-${crypto.randomUUID()}@octapm-live.test`, password: PASSWORD, role: "pm" }, bearer(orgs.b.token));
+    expect(plainPm.status).toBe(201);
+    const plainSession = await login(plainPm.body.data.email);
+    expect(plainSession.status).toBe(200);
+    expect(plainSession.body.data.user).toMatchObject({ orgId: orgs.b.orgId, role: "pm", isCompanyAdmin: false });
+    const plainToken = plainSession.body.data.tokens.accessToken;
+    const byPlainPm = await api.request("PATCH", `/api/v1/users/${persona.id}`, { body: { isCompanyAdmin: false }, headers: bearer(plainToken) });
+    expect(byPlainPm.status).toBe(403);
+    expect(byPlainPm.body.error.code).toBe("OWNER_REQUIRED");
+    const byAdmin = await api.request("PATCH", `/api/v1/users/${plainPm.body.data.id}`, { body: { isCompanyAdmin: true }, headers: bearer(sessions.b.accessToken) });
+    expect(byAdmin.status).toBe(403);
+    expect(byAdmin.body.error.code).toBe("OWNER_REQUIRED");
+    expect((await me(plainToken)).body.data.isCompanyAdmin).toBe(false);
+    expect((await me(sessions.b.accessToken)).body.data.isCompanyAdmin).toBe(true);
+    const roleByPlainPm = await api.request("PATCH", `/api/v1/users/${persona.id}`, { body: { role: "planning_eng" }, headers: bearer(plainToken) });
+    expect(roleByPlainPm.status).toBe(200);
+    expect(roleByPlainPm.body.data).toMatchObject({ role: "planning_eng", isCompanyAdmin: true });
+    const roleBack = await api.request("PATCH", `/api/v1/users/${persona.id}`, { body: { role: "pm" }, headers: bearer(orgs.b.token) });
+    expect(roleBack.status).toBe(200);
+
     // An administrator who is not an owner may not touch ownership, and may
     // not suspend the only owner.
     const ownership = await api.request("PATCH", `/api/v1/users/${orgs.b.admin.id}`, { body: { isOwner: false }, headers: bearer(sessions.b.accessToken) });
@@ -337,7 +378,8 @@ liveDescribe("workspaces: one identity, several organisations", () => {
       bearer(orgs.a.token),
     );
     expect(invited.status).toBe(201);
-    const accepted = await api.post("/api/v1/auth/invitations/accept", { token: acceptLinkFor(guest.email), name: "Guest" }, MOBILE);
+    // The guest proves the identity with its password (no session of its own here).
+    const accepted = await api.post("/api/v1/auth/invitations/accept", { token: acceptLinkFor(guest.email), name: "Guest", password: PASSWORD }, MOBILE);
     expect(accepted.status).toBe(200);
     expect(accepted.body.data.user).toMatchObject({ id: guest.id, orgId: orgs.a.orgId, role: "external_party" });
     const claims = decode(accepted.body.data.tokens.accessToken);
@@ -353,5 +395,70 @@ liveDescribe("workspaces: one identity, several organisations", () => {
     expect(profile.body.data.memberships.find((m) => m.orgId === orgs.a.orgId)).toMatchObject({ role: "external_party", kind: "company" });
     const membership = await prisma.organizationMembership.findFirst({ where: { orgId: orgs.a.orgId, userId: guest.id } });
     expect(membership).toMatchObject({ kind: "guest", role: "external_party", isAdmin: false, isOwner: false, status: "active" });
+  }, 60_000);
+
+  it("a project invitation to an active member assigns the project and leaves their role alone", async () => {
+    // The persona is a PM and administrator in B. A project invitation at a
+    // lower role assigns the project at that role; the membership, the audit
+    // trail and the token are untouched — a role change is changeMembership's.
+    const roleChangesBefore = await prisma.authAuditEvent.count({ where: { orgId: orgs.b.orgId, userId: persona.id, action: "membership.role_changed" } });
+    const invited = await api.post("/api/v1/users/invitations", { email: persona.email, role: "qs", projectId: orgs.b.projectId }, bearer(orgs.b.token));
+    expect(invited.status).toBe(201);
+    const accepted = await api.post("/api/v1/auth/invitations/accept", { token: acceptLinkFor(persona.email), name: "Persona", password: PASSWORD }, MOBILE);
+    expect(accepted.status).toBe(200);
+    expect(accepted.body.data.user).toMatchObject({ id: persona.id, orgId: orgs.b.orgId, role: "pm", isCompanyAdmin: true });
+    expect(decode(accepted.body.data.tokens.accessToken)).toMatchObject({ orgId: orgs.b.orgId, role: "pm", adm: true });
+    const membership = await prisma.organizationMembership.findFirst({ where: { orgId: orgs.b.orgId, userId: persona.id } });
+    expect(membership).toMatchObject({ role: "pm", isAdmin: true, kind: "member", status: "active" });
+    const assignment = await prisma.projectAssignment.findFirst({ where: { projectId: orgs.b.projectId, userId: persona.id } });
+    expect(assignment).toMatchObject({ role: "qs", orgId: orgs.b.orgId });
+    const roleChangesAfter = await prisma.authAuditEvent.count({ where: { orgId: orgs.b.orgId, userId: persona.id, action: "membership.role_changed" } });
+    expect(roleChangesAfter).toBe(roleChangesBefore);
+  }, 60_000);
+
+  it("the identity's standing belongs to its home workspace: closed there, it is reopened nowhere else", async () => {
+    const email = `live-closed-${crypto.randomUUID()}@octapm-live.test`;
+    const born = await api.post("/api/v1/users", { name: "Closed", email, password: PASSWORD, role: "site_engineer" }, bearer(orgs.a.token));
+    expect(born.status).toBe(201);
+    const id = born.body.data.id;
+    // C adds the identity directly; B invites it and holds the link.
+    expect((await api.post("/api/v1/users", { name: "Closed", email, role: "site_engineer" }, bearer(orgs.c.token))).status).toBe(201);
+    expect((await api.post("/api/v1/users/invitations", { email, role: "qs" }, bearer(orgs.b.token))).status).toBe(201);
+    const token = acceptLinkFor(email);
+
+    // C closes its membership: not home, the identity stays open. Then A,
+    // the home, with no other active membership left, closes the identity.
+    expect((await api.request("PATCH", `/api/v1/users/${id}/deactivate`, { headers: bearer(orgs.c.token) })).status).toBe(200);
+    expect(await prisma.user.findUnique({ where: { id }, select: { status: true } })).toEqual({ status: "active" });
+    expect((await api.request("PATCH", `/api/v1/users/${id}/deactivate`, { headers: bearer(orgs.a.token) })).status).toBe(200);
+    expect(await prisma.user.findUnique({ where: { id }, select: { status: true } })).toEqual({ status: "inactive" });
+
+    // Closed by home: B's invitation does not mint a session, C cannot
+    // reopen the identity, and the sign-in is refused.
+    const acceptedElsewhere = await api.post("/api/v1/auth/invitations/accept", { token, name: "Closed", password: PASSWORD }, MOBILE);
+    expect(acceptedElsewhere.status).toBe(403);
+    expect(acceptedElsewhere.body.error.code).toBe("USER_INACTIVE");
+    expect(acceptedElsewhere.body.data).toBeUndefined();
+    expect(await prisma.organizationMembership.findFirst({ where: { orgId: orgs.b.orgId, userId: id } })).toBeNull();
+    const reopenedByC = await api.request("PATCH", `/api/v1/users/${id}/activate`, { headers: bearer(orgs.c.token) });
+    expect(reopenedByC.status).toBe(403);
+    expect(reopenedByC.body.error.code).toBe("FORBIDDEN");
+    expect(await prisma.user.findUnique({ where: { id }, select: { status: true } })).toEqual({ status: "inactive" });
+    expect(await prisma.organizationMembership.findFirst({ where: { orgId: orgs.c.orgId, userId: id }, select: { status: true } })).toEqual({ status: "suspended" });
+    const refused = await login(email);
+    expect(refused.status).toBe(403);
+    expect(refused.body.error.code).toBe("USER_INACTIVE");
+
+    // Home reopens the identity; C then reopens its own membership; and B's
+    // invitation, with the password as proof, now gives the third workspace.
+    expect((await api.request("PATCH", `/api/v1/users/${id}/activate`, { headers: bearer(orgs.a.token) })).status).toBe(200);
+    expect(await prisma.user.findUnique({ where: { id }, select: { status: true } })).toEqual({ status: "active" });
+    expect((await api.request("PATCH", `/api/v1/users/${id}/activate`, { headers: bearer(orgs.c.token) })).status).toBe(200);
+    const accepted = await api.post("/api/v1/auth/invitations/accept", { token, name: "Closed", password: PASSWORD }, MOBILE);
+    expect(accepted.status).toBe(200);
+    expect(accepted.body.data.user).toMatchObject({ id, orgId: orgs.b.orgId, role: "qs", status: "active" });
+    const choice = await login(email);
+    expect(choice.body.data.chooseWorkspace).toBe(true);
+    expect(choice.body.data.memberships.map((m) => m.orgId).sort()).toEqual([orgs.a.orgId, orgs.b.orgId, orgs.c.orgId].sort());
   }, 60_000);
 });

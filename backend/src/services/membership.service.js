@@ -40,6 +40,9 @@ const MEMBERSHIP_STATUSES = Object.freeze({
 /** Catalogue roles a member-kind membership may carry (shared/permissions.json). */
 const CATALOGUE_ROLES = Object.freeze([...ALL_ROLES]);
 
+/** One wording for every refusal of a standing change (utils/error-codes.js keeps the same). */
+const OWNER_REQUIRED_MESSAGE = "Only a workspace owner can grant or revoke ownership or administration";
+
 const flagOn = (name) =>
   String(process.env[name] ?? "true").trim().toLowerCase() !== "false";
 
@@ -242,11 +245,16 @@ const resolveRequestPrincipal = async ({ tx = prisma, userId, orgId, membershipI
  * membership in `orgId` (their User.orgId unless the caller says otherwise)
  * is read and the tokens are bound to it. A row that is not active refuses
  * the session — a suspended member does not get in through a path that read
- * only the User columns. No row at all means the pre-membership fallback.
+ * only the User columns — and so does an identity that its home workspace
+ * closed (User.status): no path mints a session for an inactive account.
+ * No row at all means the pre-membership fallback.
  */
 const resolveSessionPrincipal = async (tx, user, { orgId = null } = {}) => {
   if (!user) throw new HttpError(401, "USER_INACTIVE", "Your account is not active");
   if (user.membershipId) return user;
+  if (user.status !== undefined && user.status !== "active") {
+    throw new HttpError(403, "USER_INACTIVE", "Your account is not active");
+  }
   const targetOrgId = orgId || user.orgId;
   if (!isMembershipReadEnabled() || !hasMembershipModel(tx)) {
     return principalFromUser({ ...user, orgId: targetOrgId });
@@ -480,7 +488,9 @@ const countActiveOwners = async ({ tx = prisma, orgId, excludeUserId = null }) =
  *
  *   - nobody changes their own role, admin flag, ownership or status
  *     (403 SELF_ELEVATION_FORBIDDEN);
- *   - only an owner grants or revokes ownership (403 OWNER_REQUIRED);
+ *   - only an owner grants or revokes ownership or administration
+ *     (403 OWNER_REQUIRED); in a workspace with no membership rows of its
+ *     own a company administrator grants administration, as before;
  *   - the last active owner cannot be demoted, suspended or removed
  *     (409 LAST_OWNER);
  *   - an owner is always an administrator (isOwner ⇒ isAdmin, written here);
@@ -521,8 +531,17 @@ const changeMembership = async ({ tx = prisma, orgId, userId, actor = null, chan
   if (actor?.id && actor.id === userId) {
     throw new HttpError(403, "SELF_ELEVATION_FORBIDDEN", "You cannot change your own role or standing");
   }
+  // Standing is granted by an owner (membership doc §2.1): admin as much as
+  // ownership, or two PMs could make each other administrators and hollow
+  // out the retired PM shortcut. An actor with no membership row of their
+  // own (a workspace seeded before the backfill, where nobody is an owner)
+  // grants it as a company administrator, which is all that workspace has.
+  const mayGrantStanding = actor?.isOwner || (!actor?.membershipId && actor?.isCompanyAdmin);
+  if ((changed.includes("isOwner") || changed.includes("isAdmin")) && !mayGrantStanding) {
+    throw new HttpError(403, "OWNER_REQUIRED", OWNER_REQUIRED_MESSAGE);
+  }
   if (changed.includes("isOwner") && !actor?.isOwner) {
-    throw new HttpError(403, "OWNER_REQUIRED", "Only a workspace owner can grant or revoke ownership");
+    throw new HttpError(403, "OWNER_REQUIRED", OWNER_REQUIRED_MESSAGE);
   }
 
   const losesOwnership =

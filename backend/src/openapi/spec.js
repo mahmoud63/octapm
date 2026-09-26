@@ -1027,6 +1027,7 @@ const components = {
         "WORKSPACE_REQUIRED",
         "WORKSPACE_NOT_FOUND",
         "SSO_IDENTITY_CONFLICT",
+        "INVITATION_SIGN_IN_REQUIRED",
         "WORKFLOW_ACTIVITY_NOT_FOUND",
         "WORKFLOW_PROJECT_PARTY_NOT_FOUND",
       ],
@@ -1265,8 +1266,16 @@ const components = {
           ],
         },
         expiresAt: dateString,
-        existingUser: { type: "boolean" },
-        requiresPassword: { type: "boolean" },
+        existingUser: {
+          type: "boolean",
+          description:
+            "The invited email already belongs to an identity (here or in another workspace). Acceptance then needs proof of that identity: a bearer for it on the accept request, or its password.",
+        },
+        requiresPassword: {
+          type: "boolean",
+          description:
+            "Always true: a new identity chooses its password; an existing one proves itself with the password it has (unless the accept request carries a bearer for it).",
+        },
       },
       [
         "email",
@@ -6054,7 +6063,7 @@ add(
     tag: "Auth",
     summary: "Accept an invitation and start a session.",
     description:
-      "Creates a user and their membership, or gives an existing identity a membership in the inviting workspace — an identity that already exists in another workspace is welcome, keeps its name and password, and gets a second workspace (a party invitation makes a guest membership). Assigns the invitation role/project, marks the token accepted, audits the event, and issues the normal refresh cookie plus access token response, bound to the invited workspace.",
+      "Creates a user and their membership, or gives an existing identity a membership in the inviting workspace — an identity that already exists in another workspace is welcome, keeps its name and password, and gets a second workspace (a party invitation makes a guest membership). An existing identity must prove it is the invitee: an Authorization bearer for that identity (an access or identity token) on this request, or the account password in the body; otherwise 401 INVITATION_SIGN_IN_REQUIRED. An identity its own workspace deactivated can be reopened only by a re-invitation from that workspace (403 USER_INACTIVE from any other). An identity already an active member here keeps its workspace role; the invitation assigns the project. Assigns the invitation role/project, marks the token accepted, audits the event, and issues the normal refresh cookie plus access token response, bound to the invited workspace.",
     operationId: "acceptInvitation",
     security: false,
     requestBody: jsonBody(
@@ -10916,7 +10925,7 @@ add(
     tag: "Users",
     summary: "Invite a user to the organization or a project.",
     description:
-      "Stores a hashed invitation token, sends an email invite, and audits the invitation. The invite can optionally assign a project role when accepted. An email that already belongs to an identity in another workspace may be invited (acceptance gives it a second membership); one that is already an active member here is refused with 409 ALREADY_MEMBER unless the invitation is for a project or party.",
+      "Stores a hashed invitation token, sends an email invite, and audits the invitation. The invite can optionally assign a project role when accepted. An email that already belongs to an identity in another workspace may be invited (acceptance gives it a second membership); one that is already an active member here is refused with 409 ALREADY_MEMBER unless the invitation is for a project or party — and then it assigns the project without changing the member's workspace role.",
     operationId: "inviteUser",
     permissions: modulePermission("user_management", "submit", "user.invite"),
     requestBody: jsonBody(ref("UserInvitationRequest"), "Invitation payload."),

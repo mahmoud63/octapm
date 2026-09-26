@@ -234,11 +234,24 @@ const callback = async ({ code, state, error = null, errorDescription = null }, 
     if (claims.email_verified === false) throw new HttpError(401, "SSO_EMAIL_UNVERIFIED", "The identity provider reports the email as unverified");
     // The identity is found by its subject or its email wherever it lives
     // (membership doc §5): an email that exists in another workspace is
-    // linked and given a membership here, not refused. A subject already
-    // linked to a different identity, or an identity already linked to a
-    // different subject, is an identity-level conflict and is refused.
+    // linked and given a membership here, not refused. The identity is the
+    // email's; an OIDC subject is issuer-scoped, not unique across
+    // providers, so a subject match speaks only for an identity this
+    // organisation's IdP linked — one that now presents a different email,
+    // or an identity already linked to a different subject, is an
+    // identity-level conflict and is refused. Another organisation's IdP
+    // happening to issue the same subject string is not.
     const subject = String(claims.sub);
-    let user = await prisma.user.findFirst({ where: { OR: [{ ssoSubject: subject }, { email }] } });
+    let user = await prisma.user.findUnique({ where: { email } });
+    if (!user) {
+      const linkedHere = await prisma.user.findFirst({
+        where: {
+          ssoSubject: subject,
+          OR: [{ orgId: org.id }, ...(membershipService.hasMembershipModel(prisma) ? [{ memberships: { some: { orgId: org.id } } }] : [])],
+        },
+      });
+      if (linkedHere) throw new HttpError(403, "SSO_IDENTITY_CONFLICT", "This sign-in belongs to a different account");
+    }
     const canProvision = (whom) => {
       if (!org.ssoAutoProvision) throw new HttpError(403, "SSO_USER_NOT_FOUND", `No ${whom} exists for this email — ask a company admin to invite you`);
       if (!domainMatches(email, org.ssoDomainsJson) && (Array.isArray(org.ssoDomainsJson) ? org.ssoDomainsJson : []).length) throw new HttpError(403, "SSO_DOMAIN_NOT_ALLOWED", "This email domain is not allowed to sign in here");
@@ -249,7 +262,7 @@ const callback = async ({ code, state, error = null, errorDescription = null }, 
       user = await prisma.user.create({ data: { orgId: org.id, name: trimOrNull(claims.name) || [claims.given_name, claims.family_name].filter(Boolean).join(" ") || email.split("@")[0], email, passwordHash: await bcrypt.hash(crypto.randomBytes(24).toString("base64url"), 12), role: org.ssoDefaultRole || "site_engineer", status: "active", ssoSubject: subject, ssoProvider: "oidc", ssoLinkedAt: new Date() } });
       if (prisma.authAuditEvent?.create) await prisma.authAuditEvent.create({ data: { orgId: org.id, userId: user.id, entityType: "user", entityId: user.id, action: "sso.user_provisioned", email, ipAddress: context.ipAddress || null, userAgent: context.userAgent || null, metadataJson: { issuer: org.ssoIssuer, role: user.role } } }).catch(() => null);
     } else if (user.status !== "active") throw new HttpError(403, "USER_INACTIVE", "Your account is not active");
-    else if (user.email !== email || (user.ssoSubject && user.ssoSubject !== subject)) throw new HttpError(403, "SSO_IDENTITY_CONFLICT", "This sign-in belongs to a different account");
+    else if (user.ssoSubject && user.ssoSubject !== subject) throw new HttpError(403, "SSO_IDENTITY_CONFLICT", "This sign-in belongs to a different account");
     else if (!user.ssoSubject) user = await prisma.user.update({ where: { id: user.id }, data: { ssoSubject: subject, ssoProvider: "oidc", ssoLinkedAt: new Date() } });
     // The membership in the SSO organisation: an existing one decides the
     // role and must be live; a missing one is provisioned with the default

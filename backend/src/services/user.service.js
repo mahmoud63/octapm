@@ -381,6 +381,12 @@ const deactivateUser = async ({ orgId, userId, actor = null, context = {} }) => 
   return updated;
 };
 
+/**
+ * Reactivation mirrors deactivation: the membership is this workspace's to
+ * reopen; the identity (User.status) belongs to its home workspace and is
+ * reopened only from there. Another workspace that finds the identity itself
+ * closed is refused, as it is for the name, email and password.
+ */
 const activateUser = async ({ orgId, userId, actor = null, context = {} }) => {
   const user = await findUserInOrg({ orgId, userId });
   if (!user) throw new HttpError(404, "USER_NOT_FOUND", "User not found");
@@ -388,6 +394,10 @@ const activateUser = async ({ orgId, userId, actor = null, context = {} }) => {
   const membershipActive = !membership || membership.status === membershipService.MEMBERSHIP_STATUSES.ACTIVE;
   if (user.status === "active" && membershipActive) {
     throw new HttpError(400, "ALREADY_ACTIVE", "User is already active");
+  }
+  const homeOrg = user.orgId === orgId;
+  if (user.status !== "active" && !homeOrg) {
+    throw new HttpError(403, "FORBIDDEN", "This person's account is managed by their own workspace");
   }
 
   const membershipAware = Boolean(membership) && membershipService.isMembershipWriteEnabled();
@@ -484,6 +494,13 @@ const updateUser = async ({ orgId, userId, actor = null, payload, context = {} }
         payload.isCompanyAdmin !== undefined && Boolean(payload.isCompanyAdmin) !== Boolean(user.isCompanyAdmin);
       if (actor?.id && actor.id === userId && (roleChanges || adminChanges)) {
         throw new HttpError(403, "SELF_ELEVATION_FORBIDDEN", "You cannot change your own role or standing");
+      }
+      // Standing is granted by the workspace's administration here too: a
+      // client that knows no memberships must not be the way a PM mints
+      // an administrator (membership doc §2.1).
+      const wantsOwner = payload.isOwner !== undefined && Boolean(payload.isOwner);
+      if ((adminChanges || wantsOwner) && !actor?.isCompanyAdmin) {
+        throw new HttpError(403, "OWNER_REQUIRED", "Only a workspace owner can grant or revoke ownership or administration");
       }
       if (payload.role !== undefined) data.role = payload.role;
       if (payload.isCompanyAdmin !== undefined) data.isCompanyAdmin = Boolean(payload.isCompanyAdmin);

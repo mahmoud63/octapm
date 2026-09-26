@@ -245,9 +245,12 @@ router.post(
     body("phone").optional().isString().trim(),
     validate,
   ],
+  // A bearer, when the invitee is signed in, proves the existing identity
+  // the invitation names (membership doc §5); the password does otherwise.
+  require("./workspaces").optionalTokenSubject,
   asyncHandler(async (req, res) => {
     const result = await authService.acceptInvitation(
-      req.body,
+      { ...req.body, identityUserId: req.tokenSubject?.userId || null },
       getRequestContext(req),
     );
     return sendSession(req, res, result);

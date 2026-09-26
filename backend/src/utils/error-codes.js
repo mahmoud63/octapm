@@ -42,7 +42,7 @@ const ERROR_CODE_CATALOG = Object.freeze({
   OWNER_REQUIRED: {
     status: 403,
     category: "auth",
-    message: "Only a workspace owner can grant or revoke ownership",
+    message: "Only a workspace owner can grant or revoke ownership or administration",
   },
   GUEST_FORBIDDEN: {
     status: 403,
@@ -68,6 +68,11 @@ const ERROR_CODE_CATALOG = Object.freeze({
     status: 400,
     category: "auth",
     message: "A password is required to accept this invitation",
+  },
+  INVITATION_SIGN_IN_REQUIRED: {
+    status: 401,
+    category: "auth",
+    message: "Sign in as the invited account, or enter its password, to accept this invitation",
   },
   TOKEN_EXPIRED: {
     status: 401,

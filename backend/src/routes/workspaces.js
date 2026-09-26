@@ -50,6 +50,21 @@ const subjectOfToken = (req, _res, next) => {
   return next();
 };
 
+/**
+ * The same, for a route that works without a session but honours one when
+ * it is offered: invitation acceptance, where a bearer for the invited
+ * identity is its proof (membership doc §5, §6). No header means no subject;
+ * a header that is present must be a valid token — a stale one is an error,
+ * not silently nobody.
+ */
+const optionalTokenSubject = (req, res, next) => {
+  if (!req.headers.authorization) {
+    req.tokenSubject = null;
+    return next();
+  }
+  return subjectOfToken(req, res, next);
+};
+
 const register = (router, { sendSession, getRequestContext }) => {
   router.post(
     "/workspaces/:orgId/session",
@@ -66,4 +81,4 @@ const register = (router, { sendSession, getRequestContext }) => {
   );
 };
 
-module.exports = { register, subjectOfToken };
+module.exports = { register, subjectOfToken, optionalTokenSubject };
