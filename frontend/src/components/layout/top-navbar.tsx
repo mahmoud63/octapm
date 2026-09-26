@@ -282,7 +282,12 @@ function UserDropdown() {
                       asChild
                       disabled={membership.status !== 'active'}
                     >
-                      <Link to='/o/$orgSlug' params={{ orgSlug: segment }}>
+                      <Link
+                        to='/o/$orgSlug'
+                        params={{ orgSlug: segment }}
+                        preload={false}
+                        data-testid={`user-menu-workspace-${segment}`}
+                      >
                         <span className='truncate'>{membership.name ?? segment}</span>
                         <WorkspaceKindBadge kind={membership.kind} />
                         {membership.orgId === workspace?.orgId && (
@@ -353,6 +358,7 @@ function MobileNav({ href, items }: { href: string; items: NavItem[] }) {
                     key={membership.orgId}
                     to='/o/$orgSlug'
                     params={{ orgSlug: segment }}
+                    preload={false}
                     onClick={() => setOpen(false)}
                     disabled={membership.status !== 'active'}
                     className={cn(

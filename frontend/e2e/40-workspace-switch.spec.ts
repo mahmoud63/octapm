@@ -41,25 +41,44 @@ const persona = {
 let orgA: LiveOrg
 let orgB: LiveOrg
 let alphaId = ''
-let betaId = ''
 
 const hrefOf = (page: Page) => new URL(page.url()).pathname
 
 /**
- * The app's own outbox module instance, from inside the page. The dev server
- * may serve a module it has hot-updated under a `?t=` query; importing the
- * bare path then gives a second, empty instance, so the URL the app itself
- * loaded is used.
+ * One of the app's own module instances, from inside the page. The dev
+ * server may serve a module it has hot-updated under a `?t=` query;
+ * importing the bare path then gives a second, empty instance, so the URL
+ * the app itself loaded is used.
  */
-const outboxInPage = async (page: Page) =>
-  page.evaluateHandle(async () => {
+const moduleInPage = <T,>(page: Page, modulePath: string) =>
+  page.evaluateHandle(async (modulePath) => {
     const loaded = performance
       .getEntriesByType('resource')
       .map((entry) => entry.name)
-      .find((name) => name.includes('/src/lib/offline/outbox.ts'))
-    const url = loaded ? new URL(loaded).pathname + new URL(loaded).search : '/src/lib/offline/outbox.ts'
-    return (await import(/* @vite-ignore */ url)) as typeof import('../src/lib/offline/outbox')
+      .find((name) => name.includes(modulePath))
+    const url = loaded ? new URL(loaded).pathname + new URL(loaded).search : modulePath
+    return (await import(/* @vite-ignore */ url)) as T
+  }, modulePath)
+
+const outboxInPage = (page: Page) =>
+  moduleInPage<typeof import('../src/lib/offline/outbox')>(page, '/src/lib/offline/outbox.ts')
+
+/** The workspace a JWT is bound to, from its payload. */
+const orgOfToken = (token: string) => {
+  const payload = token.split('.')[1] ?? ''
+  return (JSON.parse(Buffer.from(payload, 'base64url').toString('utf8')) as { orgId?: string }).orgId ?? null
+}
+
+const SESSION_ISSUE = /\/auth\/workspaces\/[0-9a-f-]{36}\/session$/
+
+/** Every workspace session the page asks for, from now on. */
+const sessionIssues = (page: Page) => {
+  const issued: string[] = []
+  page.on('request', (request) => {
+    if (request.method() === 'POST' && SESSION_ISSUE.test(request.url())) issued.push(request.url())
   })
+  return issued
+}
 
 test.beforeAll(async () => {
   const client = await apiClient()
@@ -73,7 +92,11 @@ test.beforeAll(async () => {
     expect(again).toBe(persona.id)
     await makeCompanyAdmin(client, orgB, persona.id)
     alphaId = await createProject(client, orgA.adminToken, 'Alpha Project')
-    betaId = await createProject(client, orgB.adminToken, 'Beta Project')
+    await createProject(client, orgB.adminToken, 'Beta Project')
+  } catch (error) {
+    // A setup that fails part-way leaves nothing behind in the shared database.
+    for (const org of [orgA, orgB]) if (org) dropLiveOrg(org.orgId)
+    throw error
   } finally {
     await client.dispose()
   }
@@ -98,6 +121,28 @@ test('sign in shows the picker, a switch shows only the other workspace, Back re
   await expect(page).toHaveURL(new RegExp(`/o/${escapeRegExp(orgA.segment)}(/|$|\\?)`), { timeout: 30_000 })
   await expect(page.getByText('Workspace Control')).toBeVisible({ timeout: 30_000 })
   await expect(headerWorkspace(page)).toHaveText(orgA.name)
+
+  // ── Hovering a link into B is not a switch ─────────────────────────────
+  // The router preloads a hovered link's route, and the workspace guard
+  // runs on a preload too; it must not switch there. The Home cards and the
+  // account menu's list both link into other workspaces.
+  const issued = sessionIssues(page)
+  await page.getByTestId('workspace-switcher').click()
+  await page.getByRole('menuitem', { name: /all workspaces/i }).click()
+  await expect(page).toHaveURL(/\/home(\?|$)/, { timeout: 30_000 })
+  const openB = page.getByTestId(`home-open-${orgB.segment}`)
+  await expect(openB).toBeVisible({ timeout: 30_000 })
+  await openB.hover()
+  await page.waitForTimeout(1_500)
+  await openB.focus()
+  await page.waitForTimeout(500)
+  await page.getByRole('button', { name: 'Account menu' }).click()
+  await page.getByTestId(`user-menu-workspace-${orgB.segment}`).hover()
+  await page.waitForTimeout(1_500)
+  await page.keyboard.press('Escape')
+  expect(issued, 'a hover must not issue a workspace session').toEqual([])
+  await expect(headerWorkspace(page)).toHaveText(orgA.name)
+  expect(hrefOf(page)).toBe('/home')
 
   // A's projects, and only A's.
   await page.goto(`/o/${orgA.segment}/projects`)
@@ -206,4 +251,71 @@ test('sign in shows the picker, a switch shows only the other workspace, Back re
     await verify.dispose()
   }
   expect(hrefOf(page)).toContain(`/o/${orgA.segment}`)
+
+  // ── Sign-out forgets the last workspace (switching doc §3) ─────────────
+  // The hint is a per-browser convenience; the next person to sign in here
+  // must not be pre-selected into this person's workspace.
+  const lastWorkspace = () => page.evaluate(() => window.localStorage.getItem('octa.lastWorkspace'))
+  expect(await lastWorkspace()).toBe(orgA.segment)
+  await page.getByRole('button', { name: 'Account menu' }).click()
+  await page.getByRole('menuitem', { name: /sign out/i }).click()
+  await page.getByRole('alertdialog').getByRole('button', { name: /^sign out$/i }).click()
+  await expect(page).toHaveURL(/\/sign-in/, { timeout: 30_000 })
+  expect(await lastWorkspace()).toBeNull()
+})
+
+test('a refresh answered for the workspace another tab switched to is not installed under this one', async ({
+  context,
+  page,
+}) => {
+  // The refresh cookie is one per browser (switching doc §2, step 4): a
+  // switch in a second tab replaces it. When this tab's access token next
+  // expires, the refresh comes back bound to B — and this tab is on A.
+  await signInForm(page, persona.email)
+  await page.getByTestId(`uat-sign-in-workspace-${orgA.segment}`).click()
+  await expect(page).toHaveURL(new RegExp(`/o/${escapeRegExp(orgA.segment)}(/|$|\\?)`), { timeout: 30_000 })
+  await page.goto(`/o/${orgA.segment}/projects`)
+  await expect(page.getByText('Alpha Project')).toBeVisible({ timeout: 30_000 })
+
+  const other = await context.newPage()
+  await other.goto(`/o/${orgB.segment}`)
+  await expect(headerWorkspace(other)).toHaveText(orgB.name, { timeout: 30_000 })
+
+  // Back in the first tab: the access token is dropped, so the next request
+  // refreshes. The tab must come back with a token bound to A, A's data,
+  // and its own workspace still named.
+  const reentered = sessionIssues(page)
+  const store = await moduleInPage<typeof import('../src/stores/auth-store')>(page, '/src/stores/auth-store.ts')
+  const client = await moduleInPage<typeof import('../src/services/api/client')>(page, '/src/services/api/client.ts')
+  const afterRefresh = await page.evaluate(
+    async ([store, client]) => {
+      store.useAuthStore.getState().auth.setAccessToken('')
+      const response = await client.apiClient.get<{ data: { items: Array<{ name: string }> } }>('/projects')
+      const { auth } = store.useAuthStore.getState()
+      return {
+        projects: response.data.data.items.map((project) => project.name),
+        workspace: auth.workspace?.orgId ?? null,
+        userOrg: auth.user?.orgId ?? null,
+        token: auth.accessToken,
+      }
+    },
+    [store, client] as const,
+  )
+  // A's one project (the previous test may have renamed it through the outbox).
+  expect(afterRefresh.projects).toHaveLength(1)
+  expect(afterRefresh.projects[0]).toMatch(/^Alpha Project/)
+  expect(afterRefresh.workspace).toBe(orgA.orgId)
+  expect(afterRefresh.userOrg).toBe(orgA.orgId)
+  expect(orgOfToken(afterRefresh.token)).toBe(orgA.orgId)
+  // The tab re-entered its own workspace with the refreshed token.
+  expect(reentered).toHaveLength(1)
+  expect(reentered[0]).toMatch(new RegExp(`/auth/workspaces/${orgA.orgId}/session$`))
+  await expect(headerWorkspace(page)).toHaveText(orgA.name)
+
+  // What the tab renders next is A's — an in-app navigation, no reload.
+  await page.locator('header nav a[href="/projects"]').first().click({ noWaitAfter: true })
+  await expect(page).toHaveURL(new RegExp(`/o/${escapeRegExp(orgA.segment)}/projects`), { timeout: 30_000 })
+  await expect(page.getByText('Alpha Project')).toBeVisible({ timeout: 30_000 })
+  await expect(page.getByText('Beta Project')).toHaveCount(0)
+  await other.close()
 })

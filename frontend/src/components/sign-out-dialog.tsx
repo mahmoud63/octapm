@@ -5,6 +5,7 @@ import { logout } from '@/services/auth/api'
 import { toast } from 'sonner'
 import { useAuthStore } from '@/stores/auth-store'
 import { clearOfflineData } from '@/lib/offline/outbox'
+import { forgetLastWorkspace } from '@/lib/workspace/paths'
 import { ConfirmDialog } from '@/components/confirm-dialog'
 
 interface SignOutDialogProps {
@@ -29,6 +30,9 @@ export function SignOutDialog({ open, onOpenChange }: SignOutDialogProps) {
       queryClient.clear()
       // Offline caches and the outbox belong to the signed-in user.
       void clearOfflineData()
+      // So does the last-workspace hint (workspace switching doc §3): the next
+      // person to sign in on this browser is not pre-selected into it.
+      forgetLastWorkspace()
       onOpenChange(false)
       toast.success('Signed out')
 

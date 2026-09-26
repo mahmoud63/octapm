@@ -115,6 +115,9 @@ function WorkspaceCard({
             <Link
               to='/o/$orgSlug'
               params={{ orgSlug: segment }}
+              // Hovering must not switch the session: the guard switches on
+              // arrival, never on a preload.
+              preload={false}
               data-testid={`home-open-${segment}`}
             >
               {current ? 'Dashboard' : 'Open'}

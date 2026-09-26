@@ -56,6 +56,10 @@ test.beforeAll(async () => {
     alphaId = await createProject(client, orgA.adminToken, 'Alpha Project')
     betaId = await createProject(client, orgB.adminToken, 'Beta Project')
     gammaId = await createProject(client, orgC.adminToken, 'Gamma Project')
+  } catch (error) {
+    // A setup that fails part-way leaves nothing behind in the shared database.
+    for (const org of [orgA, orgB, orgC]) if (org) dropLiveOrg(org.orgId)
+    throw error
   } finally {
     await client.dispose()
   }
@@ -78,6 +82,31 @@ test('legacy links land in their workspace; another workspace is offered; a stra
     { timeout: 30_000 },
   )
   await expect(headerWorkspace(page)).toHaveText(orgA.name)
+
+  // ── The same legacy link again, after a switch away: offered, not taken ──
+  // The tab remembers which workspace owns the project; it must not
+  // remember that the project was reachable. A switch to B from the header,
+  // then the link once more, in-app (no reload, so the tab's memory holds).
+  await page.getByTestId('workspace-switcher').click()
+  await page.getByTestId(`workspace-option-${orgB.segment}`).click()
+  await expect(headerWorkspace(page)).toHaveText(orgB.name, { timeout: 30_000 })
+  await page.evaluate((path) => {
+    window.history.pushState({}, '', path)
+    window.dispatchEvent(new PopStateEvent('popstate'))
+  }, `/projects/${alphaId}/schedule/gantt`)
+  const offerAgain = page.getByTestId('switch-offer')
+  await expect(offerAgain).toBeVisible({ timeout: 30_000 })
+  await expect(offerAgain).toContainText(orgA.name)
+  await expect(offerAgain).toContainText('Alpha Project')
+  await expect(headerWorkspace(page)).toHaveText(orgB.name)
+  await page.getByTestId('switch-offer-stay').click()
+  await expect(page).toHaveURL(new RegExp(`/o/${escapeRegExp(orgB.segment)}(/|$|\\?)`), { timeout: 30_000 })
+  await expect(headerWorkspace(page)).toHaveText(orgB.name)
+  // Back to A for the rest.
+  await page.getByTestId('workspace-switcher').click()
+  await page.getByTestId(`workspace-option-${orgA.segment}`).click()
+  await expect(headerWorkspace(page)).toHaveText(orgA.name, { timeout: 30_000 })
+
   // The workspace-level pages redirect the same way.
   await page.goto('/tasks')
   await expect(page).toHaveURL(new RegExp(`/o/${escapeRegExp(orgA.segment)}/tasks`), { timeout: 30_000 })

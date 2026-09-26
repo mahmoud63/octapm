@@ -3,7 +3,7 @@ import { notFound, redirect, type ParsedLocation } from '@tanstack/react-router'
 import axios from 'axios'
 import { resolveProjectWorkspace } from '@/services/auth/api'
 import { useAuthStore } from '@/stores/auth-store'
-import { workspaceSegment } from './paths'
+import { membershipForSegment, workspaceSegment } from './paths'
 
 /**
  * Legacy (workspace-less) URLs (workspace switching doc §5).
@@ -56,12 +56,16 @@ export const legacyWorkspaceRedirect = ({
 }
 
 /**
- * Projects already resolved on this tab: `projectId` → workspace segment.
- * In-app navigation between a project's modules goes through the legacy
- * route dozens of times a session; the workspace of a project cannot change
- * (ownership doc), so one answer per project per page load is enough.
+ * Projects already resolved on this tab: `projectId` → the workspace that
+ * owns it. In-app navigation between a project's modules goes through the
+ * legacy route dozens of times a session; the workspace of a project cannot
+ * change (ownership doc), so one answer per project per page load is enough.
+ * The answer is only which workspace owns the project — whether that is the
+ * active one is decided again on every visit, since the person may have
+ * switched in between.
  */
-const resolvedProjects = new Map<string, string>()
+type ResolvedProject = { segment: string; workspaceName: string | null; projectName?: string }
+const resolvedProjects = new Map<string, ResolvedProject>()
 
 /** What the active workspace's cached project list says, without a request. */
 const projectInActiveWorkspace = (
@@ -80,7 +84,9 @@ const projectInActiveWorkspace = (
  *   - the active workspace → straight there, no request when the project is
  *     already known here;
  *   - another of the caller's workspaces → the switch is offered, never made
- *     silently, so the person sees which workspace they are about to enter;
+ *     silently, so the person sees which workspace they are about to enter —
+ *     on every visit, including a link resolved earlier under the workspace
+ *     that owns it and opened again after a switch away from it;
  *   - none of them → not found, the same page as a project that does not exist.
  */
 export const legacyProjectRedirect = async ({
@@ -95,31 +101,51 @@ export const legacyProjectRedirect = async ({
   const { auth } = useAuthStore.getState()
   const active = auth.workspace
   const href = currentHref(location)
-  const go = (segment: string): never => {
-    resolvedProjects.set(projectId, segment)
-    return workspaceRedirect(segment, location)
+  const go = (owner: ResolvedProject): never => {
+    resolvedProjects.set(projectId, owner)
+    return workspaceRedirect(owner.segment, location)
+  }
+  const offer = (owner: ResolvedProject): never => {
+    resolvedProjects.set(projectId, owner)
+    throw redirect({
+      to: '/switch',
+      search: {
+        to: owner.segment,
+        next: href,
+        name: owner.workspaceName ?? owner.segment,
+        project: owner.projectName,
+      },
+      replace: true,
+    })
   }
 
+  // Known on this tab: straight in when its workspace is the active one (or
+  // none is active yet — an identity token binds to none); otherwise the
+  // offer, from what is known, without a request.
   const known = resolvedProjects.get(projectId)
-  if (known) return go(known)
+  if (known && (!active || known.segment === active.segment)) return go(known)
   if (active && projectInActiveWorkspace(queryClient, projectId)) {
-    return go(active.segment)
+    return go({
+      segment: active.segment,
+      workspaceName: active.name,
+      projectName: known?.projectName,
+    })
   }
+  if (known) return offer(known)
 
   try {
     const resolution = await resolveProjectWorkspace(projectId)
     const segment = resolution.workspace.segment || workspaceSegment(resolution.workspace)
-    if (!active || resolution.workspace.orgId === active.orgId) return go(segment)
-    throw redirect({
-      to: '/switch',
-      search: {
-        to: segment,
-        next: href,
-        name: resolution.workspace.name ?? segment,
-        project: resolution.project.name,
-      },
-      replace: true,
-    })
+    const owner: ResolvedProject = {
+      segment,
+      workspaceName:
+        resolution.workspace.name ??
+        membershipForSegment(auth.memberships, segment)?.name ??
+        null,
+      projectName: resolution.project.name,
+    }
+    if (!active || resolution.workspace.orgId === active.orgId) return go(owner)
+    return offer(owner)
   } catch (error) {
     if (axios.isAxiosError(error) && error.response?.status === 404) {
       throw notFound()

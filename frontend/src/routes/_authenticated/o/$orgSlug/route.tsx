@@ -14,21 +14,28 @@ import { WorkspaceGate } from '@/features/home/workspace-gate'
  * A segment that names none of the identity's workspaces is not silently
  * replaced by another one: the page says so and lists the workspaces the
  * person can open (deep-link rule §108).
+ *
+ * The router also runs this guard when a link is only hovered or focused
+ * (`defaultPreload: 'intent'`). A preload must never switch: the URL has not
+ * changed, so switching would bind the session to a workspace the address
+ * bar does not name — the header flipping to `beta` under an `acme` URL on
+ * mouse-over. A preload into another workspace is simply not performed.
  */
 export const Route = createFileRoute('/_authenticated/o/$orgSlug')({
-  beforeLoad: async ({ params, context }) => {
+  beforeLoad: async ({ params, context, preload }) => {
     const { auth } = useAuthStore.getState()
     const membership = membershipForSegment(auth.memberships, params.orgSlug)
     if (!membership || membership.status !== 'active') {
       return { workspace: null, membership }
     }
     if (auth.workspace?.orgId !== membership.orgId) {
+      if (preload) return { workspace: null, membership }
       await switchWorkspace({
         queryClient: context.queryClient,
         orgId: membership.orgId,
       })
     }
-    rememberWorkspace(params.orgSlug)
+    if (!preload) rememberWorkspace(params.orgSlug)
     return {
       workspace: useAuthStore.getState().auth.workspace,
       membership,

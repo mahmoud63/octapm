@@ -36,6 +36,32 @@ export const apiClient = axios.create({
   withCredentials: true,
 })
 
+/**
+ * The web refresh cookie is one per browser, and every workspace switch
+ * replaces it (workspace switching doc §2, step 4). A tab on `/o/acme` whose
+ * refresh comes back bound to `beta` — another tab switched — must not
+ * install that token under its own workspace: from then on every request
+ * would be answered for `beta` under `acme`'s name and URL, and a write from
+ * the tab would land in `beta`. The tab re-enters the workspace its URL
+ * names with the refreshed token first (the same reverse switch browser Back
+ * relies on), and only a session bound to that workspace is installed. A
+ * re-entry that is refused (the person's access there ended meanwhile) fails
+ * the refresh, which ends this tab's session rather than continuing it under
+ * a workspace it is no longer in.
+ */
+const boundToCurrentWorkspace = async (
+  session: AuthSession
+): Promise<AuthSession> => {
+  const bound = useAuthStore.getState().auth.workspace
+  if (!bound || session.user.orgId === bound.orgId) return session
+  const response = await authlessClient.post<ApiSuccess<AuthSession>>(
+    `/auth/workspaces/${encodeURIComponent(bound.orgId)}/session`,
+    {},
+    { headers: { Authorization: `Bearer ${session.tokens.accessToken}` } }
+  )
+  return response.data.data
+}
+
 const flushPendingRequests = (error: unknown, token?: string) => {
   while (pendingRequests.length) {
     const pending = pendingRequests.shift()
@@ -111,7 +137,7 @@ apiClient.interceptors.response.use(
         ApiSuccess<AuthSession>
       >('/auth/refresh')
 
-      const session = refreshResponse.data.data
+      const session = await boundToCurrentWorkspace(refreshResponse.data.data)
       // The identity may have changed while the refresh was in flight — a
       // sign-out, or another person signing in on this tab. A late answer
       // for the previous person must not be installed over the current one
@@ -125,7 +151,10 @@ apiClient.interceptors.response.use(
         flushPendingRequests(stale)
         return Promise.reject(stale)
       }
-      auth.setSession(session.user, session.tokens.accessToken)
+      auth.setSession(session.user, session.tokens.accessToken, {
+        workspace: session.workspace,
+        memberships: session.memberships,
+      })
 
       flushPendingRequests(null, session.tokens.accessToken)
 

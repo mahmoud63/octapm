@@ -60,7 +60,7 @@ export function WorkspaceGate({
                   </p>
                 </div>
                 <Button asChild size='sm' variant='outline'>
-                  <Link to='/o/$orgSlug' params={{ orgSlug: target }}>
+                  <Link to='/o/$orgSlug' params={{ orgSlug: target }} preload={false}>
                     Open
                   </Link>
                 </Button>
