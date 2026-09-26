@@ -13,7 +13,10 @@
  *   - money is compared as integer minor units, never as floats
  */
 
-const API = "http://127.0.0.1:5000/api/v1";
+// The API under test: the local stack on :5000 unless P21_API_BASE names
+// another origin (a wave's own API on a free port, so the stages can be
+// re-run against code the running API does not have yet).
+const API = `${(process.env.P21_API_BASE || "http://127.0.0.1:5000").replace(/\/$/, "")}/api/v1`;
 const PASSWORD = "DemoPassw0rd!";
 
 /** Well under the 15-minute JWT_EXPIRY. */
