@@ -131,13 +131,21 @@ router.get(
 // With ?dryRun=true the workbook is parsed and compared with the current bill
 // and the answer is the comparison alone: no document, no revision, no rows,
 // no job. The real upload is the same request without the flag.
+//
+// A dry run queues no AI job and spends no AI quota, so it is not counted
+// against the AI generation window: previewing a workbook a few times must
+// not lock the person out of the real upload for the rest of the hour. The
+// upload window still counts it, since it is still a file the API parses.
+const aiGenerationLimiterUnlessDryRun = (req, res, next) =>
+  req.query.dryRun === true ? next() : aiGenerationLimiter(req, res, next);
+
 router.post(
   '/upload',
   authenticate,
   CAN_MODIFY,
-  uploadLimiter,
-  aiGenerationLimiter,
   [query('dryRun').optional().isBoolean().toBoolean(), validate],
+  uploadLimiter,
+  aiGenerationLimiterUnlessDryRun,
   upload.single('file'),
   asyncHandler(async (req, res) => {
     if (!req.file) throw new HttpError(400, 'NO_FILE', 'No file uploaded');
