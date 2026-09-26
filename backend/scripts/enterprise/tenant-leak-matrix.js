@@ -3,6 +3,7 @@
  *
  *   P21_API_BASE=http://127.0.0.1:5000 node scripts/enterprise/tenant-leak-matrix.js
  *   P21_API_BASE=... node scripts/enterprise/tenant-leak-matrix.js --json <path>
+ *   ... --allow-unexercised   # a row answered 400 for both ids is reported, not failed
  *
  * Phase 21's stage 7 asked one question of one project: can an outsider read
  * or change it? This asks it of every row of the §53 table — project, BOQ,
@@ -259,20 +260,29 @@ const main = async () => {
   ];
 
   let leaks = 0;
+  const unexercised = [];
+  const allowUnexercised = process.argv.includes("--allow-unexercised");
   const outcomes = [];
   for (const [label, method, real, fake, payload] of rows) {
     const r = await request(method, real(), { token: tokenB, body: payload });
     const f = await request(method, fake(FAKE), { token: tokenB, body: payload });
     if (r.status === 401 || f.status === 401) throw new Error(`the attacker never authenticated on "${label}" (401) — this proves nothing`);
     const refused = REFUSALS.has(r.status) && REFUSALS.has(f.status);
-    // A validation refusal (400) on an id-shaped path counts as refused only
-    // when the non-existent id gets the same; 2xx on a real id is a leak.
-    const validationOnly = r.status === 400 && f.status === 400;
+    // A validation refusal (400) for both ids means the payload never reached
+    // the tenant check: the row proves nothing either way, so it is counted as
+    // not exercised rather than as refused. 2xx on a real id is a leak.
+    const unexercisedRow = r.status === 400 && f.status === 400;
+    if (unexercisedRow) unexercised.push(label);
     const leak = r.status >= 200 && r.status < 300;
     if (leak) leaks += 1;
     const same = `${r.status} ${r.code}` === `${f.status} ${f.code}`;
-    outcomes.push({ label, method, real: `${r.status} ${r.code}`, fake: `${f.status} ${f.code}`, refused: refused || validationOnly, same, leak });
-    check(`${label}: refused`, true, refused || validationOnly);
+    outcomes.push({ label, method, real: `${r.status} ${r.code}`, fake: `${f.status} ${f.code}`, refused, same, leak, exercised: !unexercisedRow });
+    if (unexercisedRow) {
+      check(`${label}: exercised (the payload reached the tenant check)`, true, allowUnexercised ? true : false);
+      if (allowUnexercised) note(`  NOT EXERCISED ${label}`, `400 for both ids (${r.code}) — allowed by --allow-unexercised`);
+    } else {
+      check(`${label}: refused`, true, refused);
+    }
     check(`${label}: a real id answers exactly like a non-existent one`, `${f.status} ${f.code}`, `${r.status} ${r.code}`);
     if (leak) note(`  LEAK ${label}`, r.text.slice(0, 160));
   }
@@ -297,13 +307,18 @@ const main = async () => {
   check("inbound email: B cannot read A's mail", true, REFUSALS.has(inboundReal.status));
   check("inbound email: real answers like non-existent", `${inboundFake.status} ${inboundFake.code}`, `${inboundReal.status} ${inboundReal.code}`);
 
+  // The probe must reach the room handler: a socket that never connects, or a
+  // join that never answers, is a failed check, not a skipped one — otherwise
+  // a broken realtime gate would pass the matrix by being unreachable.
   try {
     const joinReal = await realtimeJoin(tokenB, P);
     const joinFake = await realtimeJoin(tokenB, FAKE);
+    const answered = (join) => typeof join.ok === "boolean";
+    check("realtime: the probe connected and the join was answered", true, answered(joinReal) && answered(joinFake));
     check("realtime: B cannot join A's project room", false, Boolean(joinReal.ok));
     check("realtime: a real room answers like a non-existent one", JSON.stringify({ ok: joinFake.ok, code: joinFake.code }), JSON.stringify({ ok: joinReal.ok, code: joinReal.code }));
   } catch (error) {
-    note("realtime probe could not connect (not counted)", error.message);
+    check("realtime: the probe connected and the join was answered", true, `could not connect: ${error.message}`);
   }
 
   // ── A is still A ──────────────────────────────────────────────────────────
@@ -335,11 +350,11 @@ const main = async () => {
   const cleaned = keepSeeds ? 0 : await removeSeeds(a);
   note(keepSeeds ? "seed rows kept" : "seed rows removed", keepSeeds ? Object.keys(seeds).length : cleaned);
 
-  const report = { generatedAt: new Date().toISOString(), api: API, victim: a.id, attacker: b.id, fixtureOrgs, leaks, failed, outcomes, timings, results };
+  const report = { generatedAt: new Date().toISOString(), api: API, victim: a.id, attacker: b.id, fixtureOrgs, leaks, failed, unexercised, outcomes, timings, results };
   const jsonPath = args.jsonPath || defaultReportPath("tenant-leak-matrix");
   fs.writeFileSync(jsonPath, JSON.stringify(report, null, 2));
-  console.log(`\n${failed ? `${failed} check(s) FAILED` : `All ${results.length} checks passed`}; ${leaks} leak(s). Report written to ${jsonPath}`);
-  printResult({ ok: failed === 0, checks: results.length, failed, leaks, fixtureOrgs, timings, jsonPath });
+  console.log(`\n${failed ? `${failed} check(s) FAILED` : `All ${results.length} checks passed`}; ${leaks} leak(s); ${unexercised.length} row(s) not exercised. Report written to ${jsonPath}`);
+  printResult({ ok: failed === 0, checks: results.length, failed, leaks, unexercised: unexercised.length, fixtureOrgs, timings, jsonPath });
   if (failed) process.exitCode = 1;
 };
 

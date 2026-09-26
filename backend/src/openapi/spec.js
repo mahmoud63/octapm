@@ -1048,6 +1048,10 @@ const components = {
         "UNIT_NAME_TOO_LONG",
         "UNIT_DIMENSION_INVALID",
         "UNIT_DUPLICATE_CODE",
+        // Tenant hardening (ENT-3): job results
+        "BOQ_JOB_PROJECT_NOT_FOUND",
+        "JOB_ORG_MISMATCH",
+        "JOB_ORG_REQUIRED",
       ],
     },
     CursorPage: objectSchema({
