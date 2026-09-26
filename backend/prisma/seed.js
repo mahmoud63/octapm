@@ -249,10 +249,14 @@ async function upsertProject(orgId) {
 }
 
 async function assignEveryone(projectId, people) {
+  // An assignment carries its organisation since M7 (ENT-3): the column is
+  // NOT NULL and the client requires it. It is the project's, read here so
+  // the call site stays as it was.
+  const { orgId } = await prisma.project.findUniqueOrThrow({ where: { id: projectId }, select: { orgId: true } });
   for (const user of Object.values(people)) {
     await prisma.projectAssignment.upsert({
       where: { projectId_userId: { projectId, userId: user.id } },
-      create: { projectId, userId: user.id, role: user.role },
+      create: { projectId, orgId, userId: user.id, role: user.role },
       update: { role: user.role },
     });
   }

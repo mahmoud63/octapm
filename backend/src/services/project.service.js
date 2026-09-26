@@ -2,7 +2,6 @@ const { prisma } = require("../config/db");
 const { normalizeRoleId } = require("../config/permissions");
 const { HttpError } = require("../utils/http-error");
 const { toMoneyNumber } = require("../utils/money");
-const { purgeReferenceCounters } = require("../utils/reference-number");
 const {
   canAccessAllProjects,
   getProjectAccessWhere,
@@ -511,9 +510,11 @@ const deleteProject = async ({ orgId, projectId, userId, role }) => {
       },
     });
 
-    // The project's reference counters go with it (ENT-3); a project brought
-    // back reseeds them from its registers.
-    await purgeReferenceCounters(tx, { projectId });
+    // The project's reference counters stay: an archive is a soft state, and
+    // a counter dropped here would reseed from the register's highest row when
+    // the project came back — reissuing any reference whose row was deleted
+    // before the archive. Counters are purged only by the paths that hard
+    // delete a project or an organisation (utils/reference-number.js).
 
     await auditService.recordEvent({
       tx,

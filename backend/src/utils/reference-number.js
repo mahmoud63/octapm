@@ -193,10 +193,13 @@ const nextNumber = async (client, spec) => {
  * `…|orgId:<id>` for nextNumber — so a purge is a prefix-or-segment match on
  * the scope string (tenant matrix §1.5, ENT-3).
  *
- * Safe to call on an archive as well as a delete: a project brought back
- * reseeds each counter from its register's highest reference, so no reference
- * is issued twice unless the register's newest row was deleted meanwhile —
- * which an archived project cannot do.
+ * For a hard delete only — never an archive. A counter dropped while the
+ * register still exists reseeds from the register's highest reference the
+ * next time the scope is used, and any reference whose row was deleted before
+ * that would be handed out again; the archive keeps its counters for that
+ * reason. Today no product path hard deletes a project or an organisation:
+ * the callers are the E2E reset and the live kit, which delete throwaway
+ * organisations outright and would otherwise leave their counters behind.
  */
 const purgeReferenceCounters = async (client, { projectId = null, orgId = null } = {}) => {
   const column = projectId ? "projectId" : orgId ? "orgId" : null;

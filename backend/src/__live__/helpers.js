@@ -248,6 +248,12 @@ const dropLiveOrg = async (prisma, orgId) => {
       }
     }
   }
+  // ReferenceCounter carries the tenant in its scope key, not in a column, so
+  // no cascade reaches it: the organisation's and its projects' counters are
+  // purged by hand, the one place a hard delete happens (ENT-3).
+  const { purgeReferenceCounters } = require("../utils/reference-number");
+  for (const projectId of projectIds) await purgeReferenceCounters(prisma, { projectId });
+  await purgeReferenceCounters(prisma, { orgId });
 };
 
 module.exports = {
