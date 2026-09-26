@@ -28,10 +28,12 @@ interface ProjectState {
   clear: () => Promise<void>
   /**
    * The session settled in a workspace: a remembered project of another
-   * workspace goes; one remembered before workspaces is stamped with this
-   * one, once, so it carries it from now on.
+   * workspace goes. One remembered before workspaces belongs to the workspace
+   * the device then knew (`legacyOrgId`): kept and stamped when that is this
+   * one, dropped otherwise — and dropped when the device cannot tell, rather
+   * than handed to whichever workspace settles first.
    */
-  ensureWorkspace: (orgId: string) => Promise<void>
+  ensureWorkspace: (orgId: string, legacyOrgId?: string | null) => Promise<void>
 }
 
 interface RememberedProject {
@@ -89,10 +91,11 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     await secureStorage.remove(STORAGE_KEYS.currentProject)
   },
 
-  ensureWorkspace: async (orgId) => {
+  ensureWorkspace: async (orgId, legacyOrgId = null) => {
     const { currentProjectId, currentProjectOrgId } = get()
     if (!currentProjectId) return
-    if (currentProjectOrgId && currentProjectOrgId !== orgId) {
+    const owner = currentProjectOrgId ?? legacyOrgId
+    if (owner !== orgId) {
       await get().clear()
       return
     }

@@ -244,24 +244,51 @@ describe('the outbox across workspaces (workspace switching doc §4)', () => {
     expect(statusOf(inA.id)).toBe('waiting')
   })
 
-  it('migrates items queued before the app knew workspaces to the first workspace that adopts them, once', async () => {
-    // A queue written by the previous version: no orgId on the items, the owner alone.
+  // A queue written by the previous version: no orgId field on the items, the owner alone.
+  const previousVersionQueue = async () => {
     await store.set('outbox:v1:items', JSON.stringify([{ id: 'old-1', projectId: 'p1', kind: 'punch.create', summary: 'Old', payload: {}, dependsOn: null, status: 'waiting', attempts: 0, nextAttemptAt: null, error: null, createdAt: '2026-01-01T00:00:00.000Z', sentAt: null, resultId: null, resultRef: null, clientRequestId: 'old' }]))
     await store.set('outbox:v1:owner', 'u1')
     __resetOutboxForTests()
     network.__reset(false)
     await hydrateOutbox()
-    expect(items()[0]!.orgId).toBeNull()
-    await adoptOutboxOwner('u1', ORG_A)
+    expect(items()[0]).toMatchObject({ orgId: null, legacy: true })
+  }
+
+  it('stamps an item of the version before workspaces with the workspace it was captured in — not the one that adopts the queue first — once', async () => {
+    await previousVersionQueue()
+    // The person signs in to B; the device's old profile says the queue was A's.
+    await adoptOutboxOwner('u1', ORG_B, ORG_A)
     expect(items()[0]!.orgId).toBe(ORG_A)
+    expect(items()[0]!.legacy).toBeUndefined()
     expect(JSON.parse((await store.get('outbox:v1:items')) ?? '[]')[0].orgId).toBe(ORG_A)
-    // A later adoption in B does not restamp it: it is A's.
-    lockOutbox()
-    await adoptOutboxOwner('u1', ORG_B)
-    expect(items()[0]!.orgId).toBe(ORG_A)
     network.__reset(true)
     await drainOutbox('in-b')
     expect(sent).toHaveLength(0)
+    // Back in A it goes, under A.
+    lockOutbox()
+    await adoptOutboxOwner('u1', ORG_A)
+    await settled()
+    expect(sent.map((s) => [s.clientRequestId, s.orgId])).toEqual([['old', ORG_A]])
+  })
+
+  it('holds an item of the version before workspaces when the device cannot tell its workspace: never sent, and never stamped by whichever comes first', async () => {
+    await previousVersionQueue()
+    await adoptOutboxOwner('u1', ORG_B)
+    network.__reset(true)
+    await drainOutbox('in-b')
+    lockOutbox()
+    await adoptOutboxOwner('u1', ORG_A)
+    await drainOutbox('in-a')
+    expect(sent).toHaveLength(0)
+    expect(items()[0]).toMatchObject({ orgId: null, legacy: true, status: 'waiting' })
+    expect(outboxCounts(items(), null, ORG_A)).toMatchObject({ waiting: 0, elsewhere: 1 })
+    // An item of this version queued before any session adopted the queue is the adopting session's.
+    __resetOutboxForTests()
+    await hydrateOutbox()
+    const early = await queue({ clientRequestId: 'early' })
+    expect(early.orgId).toBeNull()
+    await adoptOutboxOwner('u1', ORG_A)
+    expect(items().find((i) => i.id === early.id)?.orgId).toBe(ORG_A)
   })
 
   it('counts what waits here and what waits elsewhere apart, so a badge never promises another workspace’s items', async () => {

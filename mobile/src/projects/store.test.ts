@@ -53,10 +53,22 @@ describe('the remembered project and its workspace', () => {
     expect(useProjectStore.getState().currentProjectId).toBe(P_A)
   })
 
-  it('stamps a project remembered before workspaces with the first workspace that settles, once', async () => {
+  it('stamps a project remembered before workspaces with the workspace the device then knew, once — and drops it anywhere else, or when that is unknown', async () => {
+    // The device's old profile says A, the session settles in B: not B's project.
+    await secureStorage.set(STORAGE_KEYS.currentProject, P_A)
+    await useProjectStore.getState().hydrate()
+    await useProjectStore.getState().ensureWorkspace('org-b', 'org-a')
+    expect(useProjectStore.getState().currentProjectId).toBeNull()
+    expect(await secureStorage.get(STORAGE_KEYS.currentProject)).toBeNull()
+    // Nothing tells whose it was: dropped, not handed to the first workspace that settles.
     await secureStorage.set(STORAGE_KEYS.currentProject, P_A)
     await useProjectStore.getState().hydrate()
     await useProjectStore.getState().ensureWorkspace('org-a')
+    expect(useProjectStore.getState().currentProjectId).toBeNull()
+    // The old profile says A and the session is A's: kept, and stamped.
+    await secureStorage.set(STORAGE_KEYS.currentProject, P_A)
+    await useProjectStore.getState().hydrate()
+    await useProjectStore.getState().ensureWorkspace('org-a', 'org-a')
     expect(useProjectStore.getState()).toMatchObject({ currentProjectId: P_A, currentProjectOrgId: 'org-a' })
     expect(JSON.parse((await secureStorage.get(STORAGE_KEYS.currentProject)) ?? '{}')).toEqual({ projectId: P_A, orgId: 'org-a' })
     // Stamped as A's, it does not follow the session into B.

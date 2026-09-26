@@ -68,6 +68,23 @@ interface StoredProfile extends SessionUser {
 
 let refreshing: Promise<string | null> | null = null
 
+/**
+ * Which session this is. It moves on whenever the session becomes another
+ * one — a sign-in, a workspace switch, the end — so a refresh that set out
+ * under one session can tell, when its answer arrives, that it now belongs to
+ * none: its tokens are another workspace's and must not be put back.
+ */
+let sessionEpoch = 0
+const nextSession = () => {
+  sessionEpoch += 1
+}
+
+/** A rotated refresh token that no session holds any more: revoked on the server, best-effort. */
+function discardStrayRefreshToken(refreshToken: string | undefined) {
+  if (!refreshToken) return
+  void run(() => api.POST('/auth/logout', { body: { refreshToken } as never }) as never, { retryOnUnauthorized: false }).catch(() => undefined)
+}
+
 const store = () => useAuthStore.getState()
 
 const isChoice = (result: LoginResponse): result is LoginChoice => 'identityToken' in result && !('tokens' in result)
@@ -89,6 +106,37 @@ async function lastKnownProfile(): Promise<StoredProfile | null> {
   } catch {
     return null
   }
+}
+
+// ── The version before workspaces ──
+
+/**
+ * The profile the version before workspaces kept: the user of its one
+ * session, without a `workspace`. It names the workspace a queue or a
+ * remembered project from that version was captured in. Read once per run,
+ * before this run writes the profile, and lent only to the same person.
+ */
+let legacyProfile: Promise<StoredProfile | null> | null = null
+const readLegacyProfile = () =>
+  (legacyProfile ??= lastKnownProfile()
+    .then((profile) => (profile && !('workspace' in profile) ? profile : null))
+    .catch(() => null))
+
+async function legacyWorkspaceFor(userId: string): Promise<string | null> {
+  const profile = await readLegacyProfile()
+  return profile && profile.id === userId && profile.orgId ? profile.orgId : null
+}
+
+/** The session settled in a workspace: its project, then its cache and queue — with what the device knows of the version before. */
+async function settleIn(userId: string, orgId: string, label: string) {
+  const legacyOrgId = await legacyWorkspaceFor(userId)
+  await useProjectStore.getState().ensureWorkspace(orgId, legacyOrgId)
+  await offlineSessionStarted(userId, orgId, legacyOrgId).catch((error) => log.warn('sync', `offline data could not be attached ${label}`, { message: String(error) }))
+}
+
+/** Test hook: the next read looks at the device again. */
+export function __forgetLegacyProfileForTests() {
+  legacyProfile = null
 }
 
 // ── The last workspace, per identity ──
@@ -121,6 +169,8 @@ async function rememberWorkspace(email: string, orgId: string) {
 const workspaceOf = (result: AuthResult): WorkspaceMembership => result.workspace ?? workspaceFromUser(result.user, result.memberships ?? result.user.memberships)
 
 async function applyResult(result: AuthResult, method: 'password' | 'biometric' | 'restored') {
+  nextSession()
+  await readLegacyProfile()
   await keepRefreshToken(result.tokens)
   const workspace = workspaceOf(result)
   const memberships = result.memberships ?? result.user.memberships ?? null
@@ -129,10 +179,10 @@ async function applyResult(result: AuthResult, method: 'password' | 'biometric' 
   await secureStorage.set(STORAGE_KEYS.lastEmail, result.user.email)
   await rememberWorkspace(result.user.email, workspace.orgId)
   analytics.track({ name: 'mobile_login', method })
-  // A project remembered in another workspace is not this session's.
-  await useProjectStore.getState().ensureWorkspace(workspace.orgId)
-  // The read cache and the outbox belong to this person in this workspace; a different person's queue is discarded here.
-  await offlineSessionStarted(result.user.id, workspace.orgId).catch((error) => log.warn('sync', 'offline data could not be attached to the session', { message: String(error) }))
+  // A project remembered in another workspace is not this session's. The read
+  // cache and the outbox belong to this person in this workspace; a different
+  // person's queue is discarded here.
+  await settleIn(result.user.id, workspace.orgId, 'to the session')
   // Push registration never holds sign-in up and never fails it.
   void registerPushDevice()
   // A plain login names no memberships; the list for the switcher arrives behind the screen.
@@ -146,6 +196,11 @@ async function applyResult(result: AuthResult, method: 'password' | 'biometric' 
 export function refreshSession(): Promise<string | null> {
   if (refreshing) return refreshing
   refreshing = (async () => {
+    // The session this refresh serves. A switch that completes while the
+    // answer is on its way makes it another workspace's answer.
+    const epoch = sessionEpoch
+    // Before this refresh rewrites the profile, the one the previous version kept is read.
+    await readLegacyProfile()
     const stored = await secureStorage.get(STORAGE_KEYS.refreshToken)
     if (!stored) return null
     try {
@@ -153,6 +208,18 @@ export function refreshSession(): Promise<string | null> {
         () => api.POST('/auth/refresh', { body: { refreshToken: stored } as never }) as never,
         { retryOnUnauthorized: false }
       )
+      const settled = store().workspace
+      if (epoch !== sessionEpoch || (settled && workspaceOf(result).orgId !== settled.orgId)) {
+        // Nothing of it is kept: not the refresh token over the new session's,
+        // not the access token the requests, the queue and the socket would
+        // then carry into the other workspace. The request that asked for it
+        // fails as a transient fault and is tried again under the session
+        // that is current by then — a queued item only while its own
+        // workspace is active.
+        log.info('auth', 'a refresh answered for a session that has since changed; discarded')
+        discardStrayRefreshToken(result.tokens?.refreshToken)
+        throw new AppError('SERVER_ERROR', { serverCode: 'SESSION_CHANGED', message: 'The workspace changed while this request was waiting; it was not repeated.' })
+      }
       await keepRefreshToken(result.tokens)
       const current = store()
       // A refresh answers the user alone. After a restart the workspace the
@@ -184,6 +251,7 @@ export function refreshSession(): Promise<string | null> {
 }
 
 async function endLocally(reason: 'user' | 'expired' | 'revoked') {
+  nextSession()
   const userId = store().user?.id ?? null
   forgetEverything()
   // Sign-out takes the outbox with it; a refused session keeps the queue locked for the same person, but the cached records go.
@@ -285,9 +353,16 @@ export async function refreshWorkspaces(): Promise<void> {
  *      and outbox owner `userId:orgId` (its own items replay now);
  *   7. unfreeze — the socket reconnects with the new token.
  *
- * A failed switch leaves the previous session exactly as it was.
+ * A switch the server refuses leaves the previous session exactly as it was.
+ * Once the new tokens are in the store the switch has happened: a step that
+ * fails after that finishes the move to the new workspace — its queue and
+ * cache owner, no project — and never hands the old workspace's queue or
+ * cache document to the new workspace's token.
  */
 export async function switchWorkspace(orgId: string): Promise<void> {
+  // A refresh already on its way belongs to the session being left: let it
+  // land first, so its answer cannot arrive after the new tokens.
+  if (refreshing) await refreshing.catch(() => null)
   const current = store()
   if (current.status !== 'signedIn' || !current.user) throw new AppError('AUTH_REQUIRED')
   const previous = current.workspace
@@ -296,6 +371,8 @@ export async function switchWorkspace(orgId: string): Promise<void> {
   const userId = current.user.id
   current.setSwitching(true)
   offlineSwitchBegan()
+  nextSession()
+  let committed: WorkspaceMembership | null = null
   try {
     const result = await requestWorkspaceSession(orgId)
     const workspace = workspaceOf(result)
@@ -306,7 +383,10 @@ export async function switchWorkspace(orgId: string): Promise<void> {
     await keepRefreshToken(result.tokens)
     await rememberProfile(result.user, workspace)
     // The freeze flag stays up through this: setSignedIn does not touch it.
+    // A refresh that set out during the switch answers for the session left.
+    nextSession()
     store().setSignedIn(result.user, result.tokens.accessToken, result.tokens.expiresIn, { workspace, memberships: result.memberships ?? null })
+    committed = workspace
     forgetEverything()
     await useProjectStore.getState().clear()
     await rememberWorkspace(result.user.email, workspace.orgId)
@@ -314,9 +394,25 @@ export async function switchWorkspace(orgId: string): Promise<void> {
     log.info('auth', 'workspace switched', { from: previous?.orgId ?? null, to: workspace.orgId })
     if (!result.memberships) void refreshWorkspaces()
   } catch (error) {
-    // The previous workspace stays the session: its queue is its own again.
-    if (previous) await offlineSessionStarted(userId, previous.orgId).catch(() => undefined)
-    throw error
+    if (!committed) {
+      // Refused before the new tokens were in: the previous workspace stays
+      // the session, and its queue is its own again.
+      if (previous) await offlineSessionStarted(userId, previous.orgId).catch(() => undefined)
+      throw error
+    }
+    // The new workspace's tokens are the session's now. Finish the move with
+    // what can still be done; pairing the old workspace's queue and cache
+    // document with the new token is the one thing that must not happen.
+    const landed: WorkspaceMembership = committed
+    log.warn('auth', 'a step after the workspace switch failed; finishing the move', { to: landed.orgId, message: String(error) })
+    try {
+      forgetEverything()
+    } catch {
+      // Emptying the cache is best-effort here; the owner change below restores the new workspace's own document.
+    }
+    useProjectStore.setState({ currentProjectId: null, currentProjectOrgId: null, hydrated: true })
+    await secureStorage.remove(STORAGE_KEYS.currentProject).catch(() => undefined)
+    await offlineSessionStarted(userId, landed.orgId).catch((failure) => log.warn('sync', 'offline data could not be attached after the switch', { message: String(failure) }))
   } finally {
     store().setSwitching(false)
   }
@@ -338,6 +434,7 @@ export async function signOut(): Promise<void> {
 
 /** On launch: is there a session to resume, and is it still honoured? */
 export async function bootstrap(): Promise<void> {
+  await readLegacyProfile()
   const [stored, biometric] = await Promise.all([secureStorage.get(STORAGE_KEYS.refreshToken), secureStorage.get(STORAGE_KEYS.biometricUnlock)])
   store().setBiometricEnabled(biometric === 'on')
   if (!stored) {
@@ -362,9 +459,8 @@ async function resume(method: 'biometric' | 'restored') {
     current.setWorkspace(workspace, me.memberships ?? [])
     await rememberProfile(me, workspace)
     await rememberWorkspace(me.email, workspace.orgId)
-    await useProjectStore.getState().ensureWorkspace(workspace.orgId)
-    // A resumed session owns the same outbox and read cache a password sign-in does.
-    await offlineSessionStarted(me.id, workspace.orgId).catch((error) => log.warn('sync', 'offline data could not be attached to the resumed session', { message: String(error) }))
+    // A resumed session owns the same project check, outbox and read cache a password sign-in does.
+    await settleIn(me.id, workspace.orgId, 'to the resumed session')
     void registerPushDevice()
     analytics.track({ name: 'mobile_login', method })
   } catch (error) {
@@ -377,9 +473,8 @@ async function resume(method: 'biometric' | 'restored') {
         const { workspace: stored, ...user } = profile
         const workspace = stored ?? workspaceFromUser(user)
         current.setSignedIn(user, current.accessToken ?? '', 0, { workspace })
-        await useProjectStore.getState().ensureWorkspace(workspace.orgId)
         // Without a signal this is the only way the cached records reach the screens.
-        await offlineSessionStarted(user.id, workspace.orgId).catch(() => undefined)
+        await settleIn(user.id, workspace.orgId, 'offline')
         log.info('auth', 'opened offline with the last known session')
       } else {
         // Nothing is known about this person yet; the token stays for next time.

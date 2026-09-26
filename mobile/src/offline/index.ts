@@ -44,9 +44,10 @@ export function startOffline(): () => void {
 /**
  * The person is signed in, in a workspace: that workspace's cache comes
  * back, the queue is theirs under `userId:orgId`, the drain may run for
- * that workspace's items.
+ * that workspace's items. `legacyOrgId` is the workspace a queue from the
+ * version before workspaces was captured in, when the device can tell.
  */
-export async function offlineSessionStarted(userId: string, orgId: string) {
+export async function offlineSessionStarted(userId: string, orgId: string, legacyOrgId: string | null = null) {
   const key = ownerKeyOf(userId, orgId)
   if (owner !== key) {
     stopPersistence?.()
@@ -55,7 +56,7 @@ export async function offlineSessionStarted(userId: string, orgId: string) {
     await restoreQueryCache(queryClient, userId, orgId)
     stopPersistence = startQueryPersistence(queryClient, userId, orgId)
   }
-  await adoptOutboxOwner(userId, orgId)
+  await adoptOutboxOwner(userId, orgId, legacyOrgId)
 }
 
 /**

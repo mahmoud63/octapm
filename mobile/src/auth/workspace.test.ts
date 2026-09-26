@@ -5,9 +5,9 @@ import { __resetOutboxForTests, enqueue, hydrateOutbox, registerSender, useOutbo
 import { cacheKey } from '@/offline/persist'
 import { __useStoreForTests, memoryStore, type KeyValueStore } from '@/offline/storage'
 import { useProjectStore } from '@/projects/store'
-import { envelope, failure, fakeServer, type Call } from '@/testing/fake-server'
+import { envelope, failure, fakeServer, type Call, type Route } from '@/testing/fake-server'
 import { STORAGE_KEYS, secureStorage } from './secure-storage'
-import { enterWorkspace, refreshSession, rememberedWorkspace, signIn, switchWorkspace } from './session'
+import { __forgetLegacyProfileForTests, enterWorkspace, refreshSession, rememberedWorkspace, signIn, switchWorkspace } from './session'
 import { useAuthStore, type WorkspaceMembership } from './store'
 
 /**
@@ -43,11 +43,48 @@ beforeEach(async () => {
   useProjectStore.setState({ currentProjectId: null, currentProjectOrgId: null, hydrated: true })
   await secureStorage.remove(STORAGE_KEYS.lastWorkspace)
   await secureStorage.remove(STORAGE_KEYS.currentProject)
+  await secureStorage.remove(STORAGE_KEYS.profile)
+  __forgetLegacyProfileForTests()
 })
 
 afterAll(() => __useStoreForTests(null))
 
 const workspaceSessionPath = (orgId: string) => `POST /auth/workspaces/${orgId}/session`
+
+/**
+ * The fake server with some routes held: a held request has reached the
+ * server and waits for `release`, the others answer at once — so a test can
+ * keep one answer (a refresh) on its way while another sequence completes.
+ */
+const heldServer = (routes: Record<string, Route>, held: string[]) => {
+  const calls = fakeServer(routes)
+  const answer = globalThis.fetch
+  const gates = new Map<string, { opened: Promise<void>; open: () => void }>()
+  const arrived = new Set<string>()
+  for (const key of held) {
+    let open!: () => void
+    const opened = new Promise<void>((resolve) => {
+      open = resolve
+    })
+    gates.set(key, { opened, open })
+  }
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const request = input instanceof Request ? input : new Request(input, init)
+    const key = `${request.method} ${new URL(request.url).pathname.replace(/^\/api\/v1/, '')}`
+    const gate = gates.get(key)
+    if (gate) {
+      arrived.add(key)
+      await gate.opened
+    }
+    return answer(request)
+  }) as typeof fetch
+  return { calls, release: (key: string) => gates.get(key)?.open(), arrived: (key: string) => arrived.has(key) }
+}
+
+const eventually = async (condition: () => boolean, what: string) => {
+  for (let i = 0; i < 400 && !condition(); i += 1) await new Promise((resolve) => setTimeout(resolve, 5))
+  if (!condition()) throw new Error(`never happened: ${what}`)
+}
 
 describe('signing in with several workspaces', () => {
   it('shows the chooser: nothing is signed in until a workspace is chosen, and the choice completes the sign-in with the identity token', async () => {
@@ -110,6 +147,41 @@ describe('signing in with several workspaces', () => {
     await new Promise((r) => setTimeout(r, 20))
     expect(useAuthStore.getState().workspace).toEqual(acme)
     expect(useAuthStore.getState().memberships).toEqual([acme, beta])
+  })
+
+  describe('a queue from the version before workspaces', () => {
+    const previousVersion = async (profile: object | null) => {
+      if (profile) await secureStorage.set(STORAGE_KEYS.profile, JSON.stringify(profile))
+      await store.set('outbox:v1:items', JSON.stringify([{ id: 'old-1', projectId: P_A, kind: 'punch.create', summary: 'Old', payload: {}, dependsOn: null, status: 'waiting', attempts: 0, nextAttemptAt: null, error: null, createdAt: '2026-01-01T00:00:00.000Z', sentAt: null, resultId: null, resultRef: null, clientRequestId: 'old' }]))
+      await store.set('outbox:v1:owner', 'u1')
+      await secureStorage.set(STORAGE_KEYS.currentProject, P_A)
+      __resetOutboxForTests()
+      await hydrateOutbox()
+      await useProjectStore.getState().hydrate()
+      const sentWith: (string | null)[] = []
+      registerSender('punch.create', async () => {
+        sentWith.push(useAuthStore.getState().accessToken)
+        return { resultId: 'srv' }
+      })
+      fakeServer({ 'POST /auth/login': chooser, [workspaceSessionPath(ORG_B)]: () => ({ status: 200, body: sessionFor(beta, 'b') }) })
+      expect((await signIn('dana@octapm.demo', 'DemoPassw0rd!')).kind).toBe('chooseWorkspace')
+      await enterWorkspace(ORG_B)
+      await new Promise((resolve) => setTimeout(resolve, 20))
+      return sentWith
+    }
+
+    it('signed in to B, it stays the workspace the old profile names: stamped A, never sent under B, and the old project is not B’s', async () => {
+      const sentWith = await previousVersion(userIn(acme))
+      expect(useOutbox.getState().items.map((i) => [i.clientRequestId, i.orgId, i.status])).toEqual([['old', ORG_A, 'waiting']])
+      expect(sentWith).toEqual([])
+      expect(useProjectStore.getState().currentProjectId).toBeNull()
+    })
+
+    it('with no old profile to tell (the session had expired), it is held — not stamped B, not sent', async () => {
+      const sentWith = await previousVersion(null)
+      expect(useOutbox.getState().items.map((i) => [i.clientRequestId, i.orgId, i.status])).toEqual([['old', null, 'waiting']])
+      expect(sentWith).toEqual([])
+    })
   })
 
   it('an identity with no workspace to enter is told so, and nothing is signed in', async () => {
@@ -193,6 +265,105 @@ describe('switching workspace', () => {
     expect(queryClient.getQueryData(['projects'])).toEqual([{ id: P_A, name: 'Riverside' }])
     expect(useOutbox.getState()).toMatchObject({ activeOrgId: ORG_A, locked: false })
     expect(await secureStorage.get(STORAGE_KEYS.refreshToken)).toBe('refresh-acme')
+  })
+
+  it('a refresh on its way when the switch is asked for lands first, in A; the switch then presents it and B is the session', async () => {
+    await signedInAs(acme)
+    const server = heldServer(
+      {
+        'POST /auth/refresh': () => ({ status: 200, body: envelope({ user: userIn(acme), tokens: tokens('a1') }) }),
+        [workspaceSessionPath(ORG_B)]: () => ({ status: 200, body: sessionFor(beta, 'b') }),
+      },
+      ['POST /auth/refresh']
+    )
+    const refreshed = refreshSession()
+    await eventually(() => server.arrived('POST /auth/refresh'), 'the refresh reached the server')
+    const switched = switchWorkspace(ORG_B)
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    // The switch waits for the refresh; nothing of B has been asked for yet.
+    expect(server.calls.some((c) => c.path === `/auth/workspaces/${ORG_B}/session`)).toBe(false)
+    server.release('POST /auth/refresh')
+    await expect(refreshed).resolves.toBe('access-a1')
+    await switched
+    // The switch was asked for with the refreshed A token, and B is what stands.
+    expect(server.calls.find((c) => c.path === `/auth/workspaces/${ORG_B}/session`)?.headers.authorization).toBe('Bearer access-a1')
+    expect(useAuthStore.getState()).toMatchObject({ accessToken: 'access-b', switching: false })
+    expect(useAuthStore.getState().workspace).toEqual(beta)
+    expect(await secureStorage.get(STORAGE_KEYS.refreshToken)).toBe('refresh-b')
+    expect(useOutbox.getState()).toMatchObject({ activeOrgId: ORG_B })
+  })
+
+  it('a refresh that set out during the switch and answers after it is discarded: A’s tokens never come back into B’s session', async () => {
+    await signedInAs(acme)
+    const server = heldServer(
+      {
+        'POST /auth/refresh': () => ({ status: 200, body: envelope({ user: userIn(acme), tokens: tokens('a1') }) }),
+        [workspaceSessionPath(ORG_B)]: () => ({ status: 200, body: sessionFor(beta, 'b') }),
+        'POST /auth/logout': () => ({ status: 200, body: envelope({ loggedOut: true }) }),
+      },
+      ['POST /auth/refresh', workspaceSessionPath(ORG_B)]
+    )
+    const switched = switchWorkspace(ORG_B)
+    await eventually(() => server.arrived(workspaceSessionPath(ORG_B)), 'the switch reached the server')
+    // A request of the session being left meets a 401 while the switch is under way.
+    const late = refreshSession()
+    await eventually(() => server.arrived('POST /auth/refresh'), 'the refresh reached the server')
+    server.release(workspaceSessionPath(ORG_B))
+    await switched
+    expect(useAuthStore.getState().accessToken).toBe('access-b')
+    server.release('POST /auth/refresh')
+    // The request that asked for it fails as a transient fault; the session is not ended.
+    await expect(late).rejects.toMatchObject({ code: 'SERVER_ERROR', serverCode: 'SESSION_CHANGED', retryable: true })
+    const state = useAuthStore.getState()
+    expect(state).toMatchObject({ status: 'signedIn', accessToken: 'access-b' })
+    expect(state.workspace).toEqual(beta)
+    expect(await secureStorage.get(STORAGE_KEYS.refreshToken)).toBe('refresh-b')
+    expect(useOutbox.getState()).toMatchObject({ activeOrgId: ORG_B })
+    // The stray A refresh token is handed back to the server, not kept.
+    await eventually(() => server.calls.some((c) => c.path === '/auth/logout'), 'the stray token was revoked')
+    expect(server.calls.find((c) => c.path === '/auth/logout')?.body).toEqual({ refreshToken: 'refresh-a1' })
+  })
+
+  it('a step that fails after the new tokens are in finishes the move to B: A’s queue is never sent with B’s token, A’s cache document never holds B’s records', async () => {
+    await signedInAs(acme)
+    await useProjectStore.getState().select(P_A)
+    queryClient.setQueryData(['projects'], [{ id: P_A, name: 'Riverside' }])
+    const sentWith: (string | null)[] = []
+    registerSender('punch.create', async () => {
+      sentWith.push(useAuthStore.getState().accessToken)
+      return { resultId: 'srv' }
+    })
+    useOutbox.setState({ locked: false })
+    network.__reset(false)
+    await enqueue({ projectId: P_A, kind: 'punch.create', summary: 'Chipped tile', payload: {}, clientRequestId: 'a-1' })
+    network.__reset(true)
+    // The device refuses to forget the project: the step after the token change throws.
+    const clear = useProjectStore.getState().clear
+    useProjectStore.setState({
+      clear: async () => {
+        throw new Error('keychain unavailable')
+      },
+    })
+    fakeServer({ [workspaceSessionPath(ORG_B)]: () => ({ status: 200, body: sessionFor(beta, 'b') }) })
+    try {
+      await switchWorkspace(ORG_B).catch(() => undefined)
+    } finally {
+      useProjectStore.setState({ clear })
+    }
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    const state = useAuthStore.getState()
+    expect(state).toMatchObject({ accessToken: 'access-b', switching: false })
+    expect(state.workspace).toEqual(beta)
+    // The queue and the cache belong to B with B's token; A's item waits for A.
+    expect(useOutbox.getState()).toMatchObject({ activeOrgId: ORG_B, locked: false })
+    expect(sentWith).not.toContain('access-b')
+    expect(useOutbox.getState().items.map((i) => [i.clientRequestId, i.orgId, i.status])).toEqual([['a-1', ORG_A, 'waiting']])
+    expect(useProjectStore.getState().currentProjectId).toBeNull()
+    // Records fetched under B are written to B's document, never to A's.
+    queryClient.setQueryData(['projects'], [{ id: 'p-b-only', name: 'Beta Tower' }])
+    await new Promise((resolve) => setTimeout(resolve, 1_700))
+    expect((await store.get(cacheKey('u1', ORG_A))) ?? '').not.toContain('p-b-only')
+    expect((await store.get(cacheKey('u1', ORG_B))) ?? '').toContain('p-b-only')
   })
 
   it('does nothing for the workspace the session is already in, and refuses a switch while one runs', async () => {

@@ -68,7 +68,13 @@ export default function OutboxScreen() {
       const key = item.orgId ?? ''
       byWorkspace.set(key, [...(byWorkspace.get(key) ?? []), item])
     }
-    return [...byWorkspace.entries()].map(([orgId, held]) => ({ orgId, membership: memberships.find((m) => m.orgId === orgId) ?? null, items: held.sort((a, b) => a.createdAt.localeCompare(b.createdAt)) }))
+    return [...byWorkspace.entries()].map(([orgId, held]) => {
+      const membership = orgId ? (memberships.find((m) => m.orgId === orgId) ?? null) : null
+      // Only a workspace the person can still enter will ever send these;
+      // anything else — left, suspended, or never known (captured before
+      // workspaces) — can only be kept or discarded.
+      return { orgId, membership, reachable: membership?.status === 'active', items: held.sort((a, b) => a.createdAt.localeCompare(b.createdAt)) }
+    })
   }, [allItems, memberships, status.activeOrgId])
   const groups = useMemo(() => {
     const order: OutboxItem['status'][] = ['attention', 'refused', 'sending', 'waiting', 'sent']
@@ -140,13 +146,15 @@ export default function OutboxScreen() {
             </Card>
           ))}
           {elsewhere.map((group) => (
-            <Card key={group.orgId || 'unknown'} testID={`outbox-elsewhere-${group.orgId}`}>
+            <Card key={group.orgId || 'unknown'} testID={`outbox-elsewhere-${group.orgId || 'unknown'}`}>
               <View style={styles.stack}>
                 <Text variant="label" label tone="muted">
-                  Waiting in {workspaceLabel(group.membership)}
+                  {group.orgId ? `Waiting in ${workspaceLabel(group.membership)}` : 'Saved before workspaces'}
                 </Text>
                 <Text variant="caption" tone="muted">
-                  {group.items.length} item{group.items.length === 1 ? '' : 's'} captured in {workspaceLabel(group.membership)}. They are sent only from that workspace, never from {workspaceLabel(active)}.
+                  {group.orgId
+                    ? `${group.items.length} item${group.items.length === 1 ? '' : 's'} captured in ${workspaceLabel(group.membership)}. They are sent only from that workspace, never from ${workspaceLabel(active)}.`
+                    : `${group.items.length} item${group.items.length === 1 ? '' : 's'} captured before this app knew workspaces. This device cannot tell which workspace ${group.items.length === 1 ? 'it belongs' : 'they belong'} to, so ${group.items.length === 1 ? 'it is' : 'they are'} not sent from any.`}
                 </Text>
                 {group.items.map((item) => (
                   <View key={item.id} style={[styles.item, { borderColor: theme.colors.border }]} testID={`outbox-item-${item.id}`}>
@@ -159,15 +167,20 @@ export default function OutboxScreen() {
                       </View>
                       <Badge label="Held" tone="warning" />
                     </View>
+                    {group.reachable ? null : (
+                      <View style={styles.actions}>
+                        <Button title="Discard" variant="danger" onPress={() => void discardItem(item.id)} testID={`outbox-discard-${item.id}`} />
+                      </View>
+                    )}
                   </View>
                 ))}
-                {group.membership && group.membership.status === 'active' ? (
+                {group.reachable && group.membership ? (
                   <Button title={`Switch to ${workspaceLabel(group.membership)} to send`} variant="secondary" loading={switching} onPress={() => void goTo(group.orgId)} testID={`outbox-switch-${group.orgId}`} />
-                ) : (
+                ) : group.orgId ? (
                   <Text variant="caption" tone="muted">
-                    You no longer have access to that workspace on this account; the items stay on this device.
+                    You no longer have access to that workspace on this account, so these cannot be sent. They stay on this device until you discard them.
                   </Text>
-                )}
+                ) : null}
               </View>
             </Card>
           ))}

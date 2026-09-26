@@ -57,6 +57,13 @@ export interface OutboxItem {
    */
   resultRef: string | null
   clientRequestId: string
+  /**
+   * Captured by the version of the app that did not know workspaces. Its
+   * workspace is not on the item; only the device's profile from that version
+   * can tell it, and until it does the item is held — never sent under
+   * whichever workspace happens to be active.
+   */
+  legacy?: boolean
 }
 
 export type Sender = (item: OutboxItem, parent: OutboxItem | null) => Promise<{ resultId: string | null; resultRef?: string | null }>
@@ -137,8 +144,10 @@ export async function hydrateOutbox() {
     const [raw, owner] = await Promise.all([offlineStore().get(ITEMS_KEY), offlineStore().get(OWNER_KEY)])
     const items = raw ? (JSON.parse(raw) as Partial<OutboxItem>[]) : []
     // Nothing was mid-flight when the app closed: anything marked sending goes back to waiting.
+    // An item without the orgId field at all was written by the version before
+    // workspaces; one of this version always carries the field, if only null.
     useOutbox.setState({
-      items: items.map((i) => ({ ...(i as OutboxItem), orgId: i.orgId ?? null, status: i.status === 'sending' ? 'waiting' : (i.status as OutboxStatus) })),
+      items: items.map((i) => ({ ...(i as OutboxItem), orgId: i.orgId ?? null, ...(!('orgId' in i) ? { legacy: true } : {}), status: i.status === 'sending' ? 'waiting' : (i.status as OutboxStatus) })),
       owner,
       hydrated: true,
     })
@@ -154,10 +163,17 @@ export async function hydrateOutbox() {
  * signing in on the same device wipes the queue: nobody sends another
  * person's work. The same person in another workspace keeps every item —
  * those of the previous workspace stay, locked to it, until it is active
- * again. Items queued before the app knew workspaces are stamped with the
- * first workspace that adopts them, once: from then on they carry it.
+ * again.
+ *
+ * Items queued by the version before workspaces are stamped, once, with the
+ * workspace they were captured in — `legacyOrgId`, the one workspace the
+ * device's profile from that version names — and never with the adopting
+ * workspace merely because it came first (§10). Without that knowledge they
+ * stay held, and the outbox screen offers to discard them. An item of this
+ * version queued before a session adopted the queue was captured in the
+ * session now adopting it, and takes its workspace.
  */
-export async function adoptOutboxOwner(userId: string, orgId: string) {
+export async function adoptOutboxOwner(userId: string, orgId: string, legacyOrgId: string | null = null) {
   const { owner, hydrated } = useOutbox.getState()
   if (!hydrated) await hydrateOutbox()
   const previous = useOutbox.getState().owner ?? owner
@@ -165,11 +181,22 @@ export async function adoptOutboxOwner(userId: string, orgId: string) {
     log.info('sync', 'a different person signed in; the previous outbox is discarded')
     useOutbox.setState({ items: [] })
   }
-  const migrated = useOutbox.getState().items.filter((i) => i.orgId == null).length
+  const stampFor = (item: OutboxItem): string | null => (item.orgId != null ? item.orgId : item.legacy ? legacyOrgId : orgId)
+  const migrated = useOutbox.getState().items.filter((i) => i.orgId == null && stampFor(i) != null).length
   if (migrated) log.info('sync', `stamping ${migrated} queued item${migrated === 1 ? '' : 's'} with the workspace`)
   // The owner changes first and the lock lifts second, so nothing can be sent
   // in the moment between the two under the wrong workspace.
-  useOutbox.setState((s) => ({ items: s.items.map((i) => (i.orgId == null ? { ...i, orgId } : i)), owner: userId, activeOrgId: orgId }))
+  useOutbox.setState((s) => ({
+    items: s.items.map((i) => {
+      if (i.orgId != null) return i
+      const stamped = stampFor(i)
+      if (!stamped) return i
+      const { legacy: _legacy, ...rest } = i
+      return { ...rest, orgId: stamped }
+    }),
+    owner: userId,
+    activeOrgId: orgId,
+  }))
   useOutbox.setState({ locked: false })
   await persist()
   void drainOutbox('sign-in')
