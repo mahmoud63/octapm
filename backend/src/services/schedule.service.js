@@ -399,7 +399,14 @@ const buildScheduleReadiness = ({
   }
   const dependencyCycle = findDependencyCycle(activities, dependencyRows);
 
-  const totalBoqAmount = toNumber(allocationSummary?.totalBoqAmount);
+  // Rows whose mapping rule is not_applicable (preliminaries, provisional
+  // sums, dayworks) are never scheduled: the check reads the allocatable
+  // value, and the summary already leaves them out of "unallocated" (PC-3).
+  const notApplicableAmount = toNumber(allocationSummary?.notApplicableAmount);
+  const totalBoqAmount = Math.max(
+    0,
+    toNumber(allocationSummary?.totalBoqAmount) - notApplicableAmount,
+  );
   const unallocatedAmount = toNumber(
     allocationSummary?.unallocatedAmount ?? allocationSummary?.unscheduledValue,
   );
@@ -529,6 +536,7 @@ const buildScheduleReadiness = ({
         approvedAllocatedAmount,
         pendingAllocatedAmount,
         unallocatedAmount,
+        notApplicableAmount,
       },
     },
     {

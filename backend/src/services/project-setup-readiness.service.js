@@ -269,6 +269,14 @@ const getSetupReadiness = async ({ orgId, projectId }) => {
     (activity) => activity.isMilestone,
   ).length;
   const totalBoqFromSummary = toNumber(allocationSummary.totalBoqAmount);
+  // Rows marked not_applicable (preliminaries, provisional sums, dayworks)
+  // are never scheduled: the allocation step judges the allocatable value
+  // and the summary already keeps them out of "unallocated" (PC-3).
+  const notApplicableAmount = toNumber(allocationSummary.notApplicableAmount);
+  const allocatableBoqAmount = Math.max(
+    0,
+    totalBoqFromSummary - notApplicableAmount,
+  );
   const approvedAllocatedAmount = toNumber(
     allocationSummary.approvedAllocatedAmount,
   );
@@ -362,18 +370,19 @@ const getSetupReadiness = async ({ orgId, projectId }) => {
         "Generate or import a schedule before mapping allocations.",
       ),
     boqCount > 0 &&
+      allocatableBoqAmount > MONEY_EPSILON &&
       approvedAllocatedAmount <= MONEY_EPSILON &&
       issue(
         "NO_APPROVED_ALLOCATIONS",
         "No approved BOQ allocations are linked to schedule activities.",
       ),
-    totalBoqFromSummary > MONEY_EPSILON &&
+    allocatableBoqAmount > MONEY_EPSILON &&
       unallocatedAmount > MONEY_EPSILON &&
       issue(
         "UNALLOCATED_BOQ",
         "BOQ value remains unallocated to approved schedule activities.",
         "blocking",
-        { unallocatedAmount },
+        { unallocatedAmount, notApplicableAmount },
       ),
   ];
   const allocationWarnings = [
@@ -560,9 +569,11 @@ const getSetupReadiness = async ({ orgId, projectId }) => {
       warnings: allocationWarnings,
       counts: {
         totalBoqAmount: totalBoqFromSummary,
+        allocatableBoqAmount,
         approvedAllocatedAmount,
         pendingAllocatedAmount,
         unallocatedAmount,
+        notApplicableAmount,
       },
       successMessage: "Approved allocations cover the BOQ value.",
     }),
