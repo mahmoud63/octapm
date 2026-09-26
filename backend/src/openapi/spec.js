@@ -1957,6 +1957,159 @@ const components = {
       updated: { type: "integer" },
       itemIds: arrayOf(uuid),
     }),
+    // ── Setup readiness (PC-4): the twelve-step check with per-item detail ──
+    ProjectSetupTarget: objectSchema(
+      {
+        module: { type: "string" },
+        child: { type: "string" },
+      },
+      ["module"],
+    ),
+    ProjectSetupItem: objectSchema(
+      {
+        type: {
+          type: "string",
+          description:
+            "The record behind the issue: project, boq_item, boq_revision, activity, allocation, schedule_revision, unit, wbs, location or cost_code.",
+        },
+        id: { type: "string", nullable: true },
+        code: { type: "string", nullable: true },
+        label: { type: "string", nullable: true },
+        missing: { type: "string", description: "What the record lacks." },
+        href: {
+          type: "string",
+          description: "Where to fix it: the module page under the project's workspace, with the record in the URL.",
+        },
+      },
+      ["type", "missing", "href"],
+    ),
+    ProjectSetupIssue: objectSchema(
+      {
+        code: { type: "string" },
+        message: { type: "string" },
+        severity: { type: "string", enum: ["blocking", "warning"] },
+        details: ref("GenericObject"),
+        items: {
+          ...arrayOf(ref("ProjectSetupItem")),
+          description: "The offending records, capped at 50; `count` is the whole number.",
+        },
+        count: { type: "integer" },
+        stepKey: { type: "string" },
+        stepLabel: { type: "string" },
+        actionLabel: { type: "string" },
+        target: ref("ProjectSetupTarget"),
+      },
+      ["code", "message", "severity", "items", "count"],
+    ),
+    ProjectSetupStep: objectSchema(
+      {
+        key: {
+          type: "string",
+          enum: [
+            "project_profile",
+            "structure_setup",
+            "boq_upload",
+            "boq_approval",
+            "schedule_generation",
+            "boq_allocation",
+            "cost_loading_review",
+            "engineer_assignment",
+            "progress_method_configuration",
+            "schedule_approval",
+            "baseline_readiness",
+            "progress_readiness",
+          ],
+        },
+        label: { type: "string" },
+        description: { type: "string" },
+        status: { type: "string", enum: ["complete", "attention", "blocked", "pending"] },
+        requiredFor: arrayOf({ type: "string", enum: ["baseline", "progress", "reporting"] }),
+        critical: { type: "boolean" },
+        message: { type: "string" },
+        blockers: arrayOf(ref("ProjectSetupIssue")),
+        warnings: arrayOf(ref("ProjectSetupIssue")),
+        counts: ref("GenericObject"),
+        action: objectSchema(
+          { label: { type: "string" }, target: ref("ProjectSetupTarget") },
+          ["label", "target"],
+        ),
+        guides: {
+          ...arrayOf(ref("ProjectSetupGuide")),
+          description:
+            "On structure_setup only: WBS, locations, cost codes, BOQ structure, schedule structure and mapping readiness, each with its state and where it is done.",
+        },
+      },
+      ["key", "label", "status", "requiredFor", "critical", "message", "blockers", "warnings", "counts", "action"],
+    ),
+    ProjectSetupGuide: objectSchema(
+      {
+        key: {
+          type: "string",
+          enum: ["wbs", "locations", "cost_codes", "boq_structure", "schedule_structure", "mapping_readiness"],
+        },
+        label: { type: "string" },
+        status: {
+          type: "string",
+          enum: ["complete", "attention", "pending"],
+          description: "pending when the thing it guides needs the bill or the schedule first.",
+        },
+        count: { type: "integer", description: "What is in place, or what is still to file." },
+        detail: { type: "string" },
+        target: ref("ProjectSetupTarget"),
+        href: { type: "string", description: "The page under the project's workspace where it is done." },
+      },
+      ["key", "label", "status", "count", "detail", "target", "href"],
+    ),
+    ProjectSetupHeadlineEntry: objectSchema(
+      {
+        key: {
+          type: "string",
+          enum: ["boq_imported", "schedule_imported", "mapping", "unmapped_boq", "critical_unmapped", "baseline", "cost_loading"],
+        },
+        label: { type: "string" },
+        value: { type: "string", description: "As shown: PASS / FAIL, a percentage, a money figure, a count, or a state." },
+        tone: { type: "string", enum: ["done", "review", "blocked", "info"] },
+        raw: { description: "The figure behind the text, when there is one." },
+      },
+      ["key", "label", "value", "tone"],
+    ),
+    ProjectSetupStructure: objectSchema(
+      {
+        wbsNodes: { type: "integer" },
+        locations: { type: "integer" },
+        projectCostCodes: { type: "integer" },
+        unitsUnresolved: { type: "integer", description: "Distinct unit spellings not in the organisation's unit list." },
+      },
+      ["wbsNodes", "locations", "projectCostCodes", "unitsUnresolved"],
+    ),
+    ProjectSetupReadiness: objectSchema(
+      {
+        projectId: uuid,
+        rulesetVersion: { type: "string" },
+        checkedAt: { type: "string", format: "date-time" },
+        summary: {
+          ...ref("GenericObject"),
+          description:
+            "Step counts, the three ready flags, nextAction, and `headline` — the §33 status line (BOQ imported, schedule imported, mapping %, unmapped BOQ value, critical unmapped activities, baseline, cost loading), each entry a ProjectSetupHeadlineEntry.",
+        },
+        gates: {
+          ...ref("GenericObject"),
+          description: "baseline (block), progress (warn) and reporting (block, PM override) — unchanged by the structure and approval steps, which are advisory.",
+        },
+        structure: ref("ProjectSetupStructure"),
+        coverage: {
+          ...ref("AllocationCoverageSummary"),
+          description: "The §69 coverage totals as the coverage endpoint reports them, without the per-item rows.",
+        },
+        context: {
+          ...ref("GenericObject"),
+          description:
+            "workspace, currentRevision (schedule), boqRevision (revision, status, source, item count, value, `changes` from the upload comparison, `validation.blocked` rows, `history` of workflow transitions with the actor named), boqBaseline, progressMethods, allocationSummary.",
+        },
+        steps: arrayOf(ref("ProjectSetupStep")),
+      },
+      ["projectId", "rulesetVersion", "checkedAt", "summary", "gates", "structure", "coverage", "context", "steps"],
+    ),
     ActivityBoqAllocationBulkMutation: objectSchema(
       { allocations: arrayOf(ref("ActivityBoqAllocationMutation")) },
       ["allocations"],
@@ -7107,8 +7260,11 @@ add(
     tag: "Projects",
     summary:
       "Get setup readiness gates for BOQ, schedule, allocations, baseline, and progress.",
+    description:
+      "The §89 setup sequence as twelve steps — profile, structure, BOQ upload, BOQ approval, schedule, allocation, cost loading, engineers, progress methods, schedule approval, baseline, progress — each with its blockers and warnings and, on every issue, the offending records (`items`, capped at 50, `count` the whole number) with a link to fix each one. The three gates keep their shape and meaning; the structure and approval steps are advisory. `structure` counts the project's WBS nodes, locations, cost codes and unresolved units; `coverage` is the allocation coverage summary (never recomputed here).",
     operationId: "getProjectSetupReadiness",
     parameters: projectParams,
+    responseSchema: ref("ProjectSetupReadiness"),
   }),
 );
 

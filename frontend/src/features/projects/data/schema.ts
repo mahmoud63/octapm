@@ -176,11 +176,28 @@ export type Company = z.infer<typeof companySchema>
 export type ProjectParty = z.infer<typeof projectPartySchema>
 export type ProjectPartyRole = z.infer<typeof projectPartyRoleSchema>
 
+/**
+ * One record behind a readiness issue (PC-4): what it is, what it lacks and
+ * where to fix it — `href` is the module page under the project's workspace
+ * with the record in the URL, as notification links carry it.
+ */
+export type ProjectSetupItem = {
+  type: string
+  id: string | null
+  code: string | null
+  label: string | null
+  missing: string
+  href: string
+}
+
 export type ProjectSetupIssue = {
   code: string
   message: string
   severity: 'blocking' | 'warning' | string
   details?: Record<string, unknown>
+  /** The offending records, capped at 50; `count` is the whole number. */
+  items?: ProjectSetupItem[]
+  count?: number
   stepKey?: string
   stepLabel?: string
   actionLabel?: string
@@ -201,6 +218,30 @@ export type ProjectSetupTarget = {
   new?: string
 }
 
+/**
+ * One thing the structure step guides (§21): WBS, locations, cost codes,
+ * BOQ structure, schedule structure or mapping readiness — its state, what
+ * is still to file, and where that is done.
+ */
+export type ProjectSetupGuide = {
+  key: string
+  label: string
+  status: 'complete' | 'attention' | 'pending'
+  count: number
+  detail: string
+  target: ProjectSetupTarget
+  href: string
+}
+
+/** One entry of the §33 status line: "BOQ imported PASS", "Mapping 83%", … */
+export type ProjectSetupHeadlineEntry = {
+  key: string
+  label: string
+  value: string
+  tone: 'done' | 'review' | 'blocked' | 'info'
+  raw?: unknown
+}
+
 export type ProjectSetupStep = {
   key: string
   label: string
@@ -216,6 +257,23 @@ export type ProjectSetupStep = {
     label: string
     target: ProjectSetupTarget
   }
+  /** On structure_setup only. */
+  guides?: ProjectSetupGuide[]
+}
+
+/** A transition the approval workflow recorded on a BOQ revision (PC-2). */
+export type BoqRevisionHistoryEntry = {
+  id: string
+  action: string
+  fromStatus: string | null
+  toStatus: string | null
+  actorId: string | null
+  actorName: string | null
+  actorRole: string | null
+  decision: string | null
+  reason: string | null
+  comment: string | null
+  at: string | null
 }
 
 export type ProjectSetupReadiness = {
@@ -233,6 +291,9 @@ export type ProjectSetupReadiness = {
     readyForBaseline: boolean
     readyForProgress: boolean
     readyForReporting?: boolean
+    /** The §33 status line, in reading order. */
+    headline?: ProjectSetupHeadlineEntry[]
+    criticalUnmappedActivities?: number
     nextAction: {
       stepKey: string
       label: string
@@ -264,7 +325,89 @@ export type ProjectSetupReadiness = {
       message: string
     }
   }
-  context?: Record<string, unknown>
+  /** The structure dimension (PC-1) as the check found it. */
+  structure?: {
+    wbsNodes: number
+    locations: number
+    projectCostCodes: number
+    unitsUnresolved: number
+  }
+  /**
+   * The §69 coverage totals, exactly as the coverage endpoint reports them
+   * (PC-3) — the readiness check never recomputes them.
+   */
+  coverage?: {
+    totalBoqAmount: number
+    allocatableBoqAmount?: number
+    approvedAllocatedAmount: number
+    pendingAllocatedAmount: number
+    unallocatedAmount: number
+    optionalUnallocatedAmount?: number
+    notApplicableAmount?: number
+    earnedValue?: number
+    certifiedValue?: number
+    coveragePct?: number
+    counts?: {
+      unmapped: number
+      partial: number
+      complete: number
+      over: number
+      notApplicable: number
+    }
+  }
+  context?: {
+    workspace?: { orgId: string; segment: string }
+    currentRevision?: {
+      id: string
+      label: string | null
+      status: string
+      isActive: boolean
+      approvedAt: string | null
+      baselinedAt: string | null
+    } | null
+    boqRevision?: {
+      id: string
+      revisionNumber: number
+      label: string | null
+      source?: string
+      status: string
+      baselineLocked: boolean
+      lockedAt: string | null
+      itemCount: number
+      totalAmount: number
+      /** The upload's comparison against the bill before it (PC-2). */
+      changes?: {
+        added: number
+        updated: number
+        removed: number
+        unchanged: number
+        blocked: number
+      }
+      /** The rows the comparison could not apply. */
+      validation?: {
+        blockedCount: number
+        blocked: Array<{
+          code: string | null
+          description: string | null
+          reason: string | null
+        }>
+      }
+      history?: BoqRevisionHistoryEntry[]
+      createdAt?: string | null
+    } | null
+    boqBaseline?: {
+      locked: boolean
+      source: 'boq_revision' | 'schedule_baseline' | null
+      boqRevisionId: string | null
+    }
+    progressMethods?: {
+      configured: number
+      total: number
+      byMethod: Record<string, number>
+      quantityWithoutUnit: number
+    }
+    [key: string]: unknown
+  }
   steps: ProjectSetupStep[]
 }
 

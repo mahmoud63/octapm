@@ -808,6 +808,7 @@ export function ProjectDetail({
               <ProjectSetupWizard
                 readiness={setupReadiness}
                 isLoading={setupReadinessLoading}
+                currency={project.currency}
                 onNavigate={handleSetupNavigate}
                 collapsed={readinessCollapsed}
                 onCollapsedChange={setReadinessCollapsed}

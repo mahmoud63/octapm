@@ -6,6 +6,14 @@ const mockPrisma = {
   costRecord: { count: jest.fn() },
   activityCostLoading: { count: jest.fn() },
   reportingPeriod: { count: jest.fn() },
+  organisation: { findUnique: jest.fn() },
+  wbsNode: { findMany: jest.fn() },
+  location: { findMany: jest.fn() },
+  projectCostCode: { count: jest.fn() },
+  boqRevision: { findMany: jest.fn() },
+  activityBoqAllocation: { findMany: jest.fn() },
+  approvalWorkflowEvent: { findMany: jest.fn() },
+  organizationMembership: { findMany: jest.fn() },
 };
 
 const mockBuildAllocationSummary = jest.fn();
@@ -54,12 +62,58 @@ describe("project setup readiness service", () => {
     mockPrisma.costRecord.count.mockResolvedValue(0);
     mockPrisma.activityCostLoading.count.mockResolvedValue(0);
     mockPrisma.reportingPeriod.count.mockResolvedValue(0);
+    mockPrisma.organisation.findUnique.mockResolvedValue({ id: "org-1", slug: "acme" });
+    mockPrisma.wbsNode.findMany.mockResolvedValue([]);
+    mockPrisma.location.findMany.mockResolvedValue([]);
+    mockPrisma.projectCostCode.count.mockResolvedValue(0);
+    mockPrisma.boqRevision.findMany.mockResolvedValue([]);
+    mockPrisma.activityBoqAllocation.findMany.mockResolvedValue([]);
+    mockPrisma.approvalWorkflowEvent.findMany.mockResolvedValue([]);
+    mockPrisma.organizationMembership.findMany.mockResolvedValue([]);
     mockBuildScheduleReadiness.mockReturnValue({
       ready: true,
       blockingCount: 0,
       checks: [],
     });
   });
+
+  // A project with its structure in place and its bill approved: what the
+  // "everything complete" scenario below builds on.
+  const structureInPlace = () => {
+    mockPrisma.wbsNode.findMany.mockResolvedValue([
+      { id: "wbs-1", code: "A", name: "Substructure" },
+    ]);
+    mockPrisma.location.findMany.mockResolvedValue([
+      { id: "loc-1", code: "B1", name: "Block 1", path: "loc-1" },
+    ]);
+    mockPrisma.projectCostCode.count.mockResolvedValue(3);
+    mockPrisma.boqRevision.findMany.mockResolvedValue([
+      {
+        id: "boq-rev-1",
+        revisionNumber: 1,
+        label: "Tender bill",
+        status: "approved",
+        baselineLocked: false,
+        lockedAt: null,
+        itemCount: 1,
+        totalAmount: 100,
+        createdAt: new Date("2026-01-10T00:00:00.000Z"),
+      },
+    ]);
+  };
+  const filedBoqItem = {
+    id: "boq-1",
+    code: "1.1",
+    description: "Concrete",
+    qty: 10,
+    amount: 100,
+    unit: "m3",
+    unitCode: "M3",
+    wbsNodeId: "wbs-1",
+    locationId: "loc-1",
+    costCodeId: "cc-1",
+    mappingRule: "required",
+  };
 
   it("surfaces critical blockers for an empty project", async () => {
     const result = await setupReadinessService.getSetupReadiness({
@@ -107,6 +161,278 @@ describe("project setup readiness service", () => {
       }),
     );
     expect(mockBuildScheduleReadiness).not.toHaveBeenCalled();
+
+    // The §89 sequence: structure between the profile and the upload, the
+    // bill's approval right after the upload (PC-4). Both are advisory.
+    expect(result.steps.map((step) => step.key).slice(0, 5)).toEqual([
+      "project_profile",
+      "structure_setup",
+      "boq_upload",
+      "boq_approval",
+      "schedule_generation",
+    ]);
+    expect(result.summary.totalSteps).toBe(12);
+    const structure = result.steps.find((step) => step.key === "structure_setup");
+    expect(structure.requiredFor).toEqual([]);
+    expect(structure.status).toBe("attention");
+    expect(structure.warnings.map((warning) => warning.code)).toEqual([
+      "NO_WBS",
+      "NO_LOCATIONS",
+      "NO_PROJECT_COST_CODES",
+    ]);
+    expect(structure.warnings[0].items[0].href).toBe(
+      "/o/acme/projects/project-1/controls/structure",
+    );
+    expect(result.steps.find((step) => step.key === "boq_approval").status).toBe("pending");
+    expect(result.structure).toEqual({
+      wbsNodes: 0,
+      locations: 0,
+      projectCostCodes: 0,
+      unitsUnresolved: 0,
+    });
+    // Every issue carries its per-item detail, even when the record is the project.
+    expect(result.gates.progress.blockers[0]).toEqual(
+      expect.objectContaining({ items: expect.any(Array), count: expect.any(Number) }),
+    );
+    // The structure step guides six things (§21), each pointing at where it
+    // is done; the ones that need the bill or the schedule first are pending.
+    expect(structure.guides.map((guide) => [guide.key, guide.status])).toEqual([
+      ["wbs", "attention"],
+      ["locations", "attention"],
+      ["cost_codes", "attention"],
+      ["boq_structure", "pending"],
+      ["schedule_structure", "pending"],
+      ["mapping_readiness", "pending"],
+    ]);
+    expect(structure.guides[1].href).toBe("/o/acme/projects/project-1/locations");
+    expect(result.steps.filter((step) => step.guides).map((step) => step.key)).toEqual([
+      "structure_setup",
+    ]);
+    // The §33 headline reads left to right as the checks fall.
+    expect(result.summary.headline.map((entry) => `${entry.label} ${entry.value}`)).toEqual([
+      "BOQ imported FAIL",
+      "Schedule imported FAIL",
+      "Mapping 0%",
+      "Unmapped BOQ value 0",
+      "Critical unmapped activities 0",
+      "Baseline NOT APPROVED",
+      "Cost loading INCOMPLETE",
+    ]);
+    expect(result.summary.headline[0].tone).toBe("blocked");
+    expect(mockPrisma.approvalWorkflowEvent.findMany).not.toHaveBeenCalled();
+  });
+
+  it("names the offending rows with a link to fix them, and warns about the bill's approval without blocking", async () => {
+    structureInPlace();
+    mockPrisma.boqRevision.findMany.mockResolvedValue([
+      {
+        id: "boq-rev-2",
+        revisionNumber: 2,
+        label: null,
+        source: "upload",
+        status: "imported",
+        baselineLocked: false,
+        lockedAt: null,
+        itemCount: 2,
+        addedCount: 1,
+        updatedCount: 1,
+        removedCount: 0,
+        unchangedCount: 0,
+        blockedCount: 1,
+        totalAmount: 300,
+        compareJson: {
+          blocked: [{ code: "1.3", description: "Blinding", reason: "Manual row with the same code" }],
+        },
+        createdAt: new Date("2026-01-12T00:00:00.000Z"),
+      },
+    ]);
+    mockPrisma.approvalWorkflowEvent.findMany.mockResolvedValue([
+      {
+        id: "event-1",
+        action: "submit",
+        fromStatus: "imported",
+        toStatus: "under_review",
+        actorId: "user-qs",
+        actorRole: "qs",
+        decision: null,
+        reason: null,
+        comment: "Please review",
+        createdAt: new Date("2026-01-13T00:00:00.000Z"),
+      },
+    ]);
+    mockPrisma.organizationMembership.findMany.mockResolvedValue([
+      { userId: "user-qs", user: { name: "Quinn Surveyor" } },
+    ]);
+    mockPrisma.boqItem.findMany.mockResolvedValue([
+      filedBoqItem,
+      {
+        id: "boq-2",
+        code: "1.2",
+        description: "Rebar",
+        qty: 5,
+        amount: 200,
+        unit: "tonnes-ish",
+        unitCode: null,
+        wbsNodeId: null,
+        locationId: null,
+        costCodeId: null,
+        mappingRule: "",
+      },
+    ]);
+    mockBuildAllocationSummary.mockResolvedValue({
+      totalBoqAmount: 300,
+      approvedAllocatedAmount: 0,
+      pendingAllocatedAmount: 0,
+      unallocatedAmount: 300,
+      items: [
+        { boqItemId: "boq-1", code: "1.1", description: "Concrete", mappingRule: "required", unallocatedAmount: 100 },
+        { boqItemId: "boq-2", code: "1.2", description: "Rebar", mappingRule: "required", unallocatedAmount: 200 },
+      ],
+    });
+    mockPrisma.activity.findMany.mockResolvedValue([
+      {
+        id: "activity-1",
+        name: "Foundations",
+        activityCode: "A100",
+        wbsNodeId: null,
+        calendarId: "1",
+        isMilestone: false,
+        isCritical: true,
+        assignments: [],
+        progressMethod: null,
+        predecessorLinks: [],
+      },
+    ]);
+
+    const result = await setupReadinessService.getSetupReadiness({
+      orgId: "org-1",
+      projectId: "project-1",
+    });
+
+    const boqUpload = result.steps.find((step) => step.key === "boq_upload");
+    expect(boqUpload.status).toBe("attention");
+    expect(boqUpload.warnings.map((warning) => warning.code)).toEqual([
+      "BOQ_ITEMS_WITHOUT_WBS",
+      "BOQ_ITEMS_WITHOUT_COST_CODE",
+      "BOQ_UNIT_UNRESOLVED",
+    ]);
+    expect(boqUpload.warnings[0]).toEqual(
+      expect.objectContaining({
+        count: 1,
+        items: [
+          {
+            type: "boq_item",
+            id: "boq-2",
+            code: "1.2",
+            label: "Rebar",
+            missing: "WBS node",
+            href: "/o/acme/projects/project-1/boq?recordId=boq-2&source=boq_item",
+          },
+        ],
+      }),
+    );
+
+    const approval = result.steps.find((step) => step.key === "boq_approval");
+    expect(approval.status).toBe("attention");
+    expect(approval.blockers).toEqual([]);
+    expect(approval.warnings.map((warning) => warning.code)).toEqual([
+      "BOQ_REVISION_NOT_APPROVED",
+      "BOQ_MAPPING_RULE_UNSET",
+    ]);
+    expect(approval.warnings[0].items[0]).toEqual(
+      expect.objectContaining({ type: "boq_revision", id: "boq-rev-2", code: "Rev 2" }),
+    );
+    expect(approval.warnings[1].items[0].id).toBe("boq-2");
+    // The revision's own record (§22): changes, the rows it could not apply,
+    // and its review trail with the actor named through the membership.
+    expect(result.context.boqRevision).toMatchObject({
+      id: "boq-rev-2",
+      source: "upload",
+      changes: { added: 1, updated: 1, removed: 0, unchanged: 0, blocked: 1 },
+      validation: {
+        blockedCount: 1,
+        blocked: [{ code: "1.3", description: "Blinding", reason: "Manual row with the same code" }],
+      },
+      history: [
+        expect.objectContaining({
+          action: "submit",
+          toStatus: "under_review",
+          actorName: "Quinn Surveyor",
+          at: "2026-01-13T00:00:00.000Z",
+        }),
+      ],
+    });
+    expect(mockPrisma.organizationMembership.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { orgId: "org-1", userId: { in: ["user-qs"] } } }),
+    );
+    expect(approval.counts).toMatchObject({ revisionItems: 2, revisionChanges: 2, revisionBlockedRows: 1 });
+    // The gates do not know the new steps: nothing soft became hard.
+    expect(result.gates.baseline.blockers.map((b) => b.code)).not.toContain(
+      "BOQ_REVISION_NOT_APPROVED",
+    );
+
+    const structure = result.steps.find((step) => step.key === "structure_setup");
+    expect(structure.warnings.map((warning) => warning.code)).toEqual(["UOM_UNRESOLVED"]);
+    expect(structure.warnings[0].items[0]).toEqual(
+      expect.objectContaining({ type: "unit", code: "tonnes-ish" }),
+    );
+
+    const schedule = result.steps.find((step) => step.key === "schedule_generation");
+    expect(schedule.warnings.map((warning) => warning.code)).toEqual([
+      "ACTIVITIES_WITHOUT_WBS",
+      "IMPORTED_CALENDAR_UNMAPPED",
+    ]);
+    expect(schedule.warnings[1].items[0]).toEqual(
+      expect.objectContaining({
+        type: "activity",
+        id: "activity-1",
+        code: "A100",
+        href: "/o/acme/projects/project-1/activities?recordId=activity-1&source=activity",
+      }),
+    );
+
+    const allocation = result.steps.find((step) => step.key === "boq_allocation");
+    const unallocated = allocation.blockers.find((b) => b.code === "UNALLOCATED_BOQ");
+    expect(unallocated.count).toBe(2);
+    expect(unallocated.items.map((item) => item.id)).toEqual(["boq-1", "boq-2"]);
+    expect(unallocated.items[0].href).toBe(
+      "/o/acme/projects/project-1/controls/mapping?recordId=boq-1&source=boq_item",
+    );
+    expect(result.coverage).toEqual(
+      expect.objectContaining({ totalBoqAmount: 300, unallocatedAmount: 300 }),
+    );
+    expect(result.coverage.items).toBeUndefined();
+    // The critical activity has no approved allocation: the headline says so,
+    // and the structure guides name what is still to file.
+    expect(result.summary.criticalUnmappedActivities).toBe(1);
+    expect(result.summary.headline.map((entry) => `${entry.label} ${entry.value}`)).toEqual([
+      "BOQ imported PASS",
+      // Activities without a revision count as a schedule, as the step says.
+      "Schedule imported PASS",
+      "Mapping 0%",
+      "Unmapped BOQ value 300",
+      "Critical unmapped activities 1",
+      "Baseline NOT APPROVED",
+      "Cost loading INCOMPLETE",
+    ]);
+    expect(result.summary.headline.find((entry) => entry.key === "mapping").tone).toBe("blocked");
+    const structureGuides = result.steps.find((step) => step.key === "structure_setup").guides;
+    expect(structureGuides.find((guide) => guide.key === "boq_structure")).toMatchObject({
+      status: "attention",
+      count: 2,
+      detail: "1 row without a WBS node · 1 with an unknown unit",
+      href: "/o/acme/projects/project-1/boq",
+    });
+    expect(structureGuides.find((guide) => guide.key === "schedule_structure")).toMatchObject({
+      status: "attention",
+      count: 2,
+      detail: "1 activity without a WBS node · 1 on an unmapped calendar",
+    });
+    expect(structureGuides.find((guide) => guide.key === "mapping_readiness")).toMatchObject({
+      status: "attention",
+      detail: "0% covered · 1 row without a rule · 2 required rows open",
+      href: "/o/acme/projects/project-1/controls/mapping",
+    });
   });
 
   it("reports ready-for-progress after BOQ, allocation, baseline, assignments, and EV basis are complete", async () => {
@@ -119,9 +445,8 @@ describe("project setup readiness service", () => {
       approvedAt: new Date("2026-02-01T00:00:00.000Z"),
       baselinedAt: new Date("2026-02-02T00:00:00.000Z"),
     };
-    mockPrisma.boqItem.findMany.mockResolvedValue([
-      { id: "boq-1", qty: 10, amount: 100 },
-    ]);
+    structureInPlace();
+    mockPrisma.boqItem.findMany.mockResolvedValue([filedBoqItem]);
     mockBuildAllocationSummary.mockResolvedValue({
       totalBoqAmount: 100,
       approvedAllocatedAmount: 100,
@@ -132,10 +457,11 @@ describe("project setup readiness service", () => {
       {
         id: "activity-1",
         name: "Foundations",
+        wbsNodeId: "wbs-1",
         isMilestone: false,
         isCritical: true,
         assignments: [{ id: "assignment-1" }],
-        progressMethod: { id: "method-1", method: "quantity" },
+        progressMethod: { id: "method-1", method: "quantity", quantityUnit: "m3" },
         predecessorLinks: [],
       },
     ]);
