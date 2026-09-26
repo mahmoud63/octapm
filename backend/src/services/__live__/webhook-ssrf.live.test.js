@@ -88,7 +88,8 @@ liveDescribe("webhooks reach public addresses only", () => {
   const stored = (url) => prisma.webhookSubscription.create({ data: { orgId: live.org.id, name: "LiveTest stored webhook", url, secret: SECRET, eventTypes: QUIET_EVENTS } });
   const newDelivery = (subscription) =>
     prisma.webhookDelivery.create({ data: { orgId: live.org.id, subscriptionId: subscription.id, eventId: crypto.randomUUID(), eventType: "rfi.status_changed", payloadJson: { id: crypto.randomUUID(), type: "record.changed", event: "rfi.status_changed" } } });
-  const run = async (deliveryId) => webhooks.runDeliveryJob({ payload: { deliveryId } }).then((result) => ({ result }), (error) => ({ error }));
+  /** One attempt as the worker runs it: inside the job's organisation. */
+  const run = async (deliveryId) => webhooks.runDeliveryJob({ orgId: live.org.id, payload: { deliveryId } }).then((result) => ({ result }), (error) => ({ error }));
   /** One delivery attempt through the real transport, and the row it left. */
   const attempt = async (subscription) => {
     const delivery = await newDelivery(subscription);

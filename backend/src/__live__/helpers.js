@@ -154,10 +154,43 @@ const waitForHttp = async (url, { timeoutMs = 20_000, intervalMs = 150 } = {}) =
 const mintAccessToken = (user) => require("../utils/tokens").createAccessToken(user);
 
 /**
- * A throwaway organisation with an active subscription and one company
- * administrator. The password is random and returned so a test can sign in.
+ * The membership row a user of a live organisation holds: what sign-up and
+ * the M2 backfill write for that person. Since the tenant keys (ENT-3) an
+ * assignment, a permission or an API client needs it, so the kit makes it
+ * with the user rather than leaving each test to remember.
  */
-const createLiveOrg = async (prisma, { role = "pm", isCompanyAdmin = true } = {}) => {
+const createLiveMembership = (prisma, user, { isOwner = false } = {}) =>
+  prisma.organizationMembership.create({
+    data: {
+      orgId: user.orgId,
+      userId: user.id,
+      role: user.role,
+      kind: "member",
+      isAdmin: Boolean(user.isCompanyAdmin) || isOwner,
+      isOwner,
+      status: "active",
+      joinedAt: user.createdAt,
+    },
+  });
+
+/**
+ * A further person in a live organisation, with the membership the tenant
+ * keys require. Pass the User columns; the password hash defaults to an
+ * unusable one.
+ */
+const createLiveUser = async (prisma, { orgId, ...data }) => {
+  const user = await prisma.user.create({ data: { orgId, passwordHash: "x", ...data } });
+  user.membership = await createLiveMembership(prisma, user);
+  return user;
+};
+
+/**
+ * A throwaway organisation with an active subscription and one company
+ * administrator, who owns it. The password is random and returned so a test
+ * can sign in. `legacy` makes the organisation as it stood before M2 — a
+ * person without a membership row — for the tests of the backfill itself.
+ */
+const createLiveOrg = async (prisma, { role = "pm", isCompanyAdmin = true, legacy = false } = {}) => {
   const tag = crypto.randomUUID();
   const password = `Live-${crypto.randomBytes(12).toString("base64url")}!9a`;
   const org = await prisma.organisation.create({
@@ -183,7 +216,8 @@ const createLiveOrg = async (prisma, { role = "pm", isCompanyAdmin = true } = {}
       isCompanyAdmin,
     },
   });
-  return { org, user, password, token: mintAccessToken(user) };
+  const membership = legacy ? null : await createLiveMembership(prisma, user, { isOwner: isCompanyAdmin });
+  return { org, user, membership, password, token: mintAccessToken(user) };
 };
 
 /**
@@ -258,7 +292,9 @@ const dropLiveOrg = async (prisma, orgId) => {
 
 module.exports = {
   BACKEND_ROOT,
+  createLiveMembership,
   createLiveOrg,
+  createLiveUser,
   dropLiveOrg,
   freePort,
   isLive,

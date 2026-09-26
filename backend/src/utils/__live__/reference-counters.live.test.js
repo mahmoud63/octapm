@@ -35,9 +35,6 @@ liveDescribe("Reference counters on archive and hard delete", () => {
 
   beforeAll(async () => {
     a = await createLiveOrg(prisma);
-    await prisma.organizationMembership.create({
-      data: { orgId: a.org.id, userId: a.user.id, role: "pm", kind: "member", isAdmin: true, isOwner: true, status: "active" },
-    });
   });
 
   afterAll(async () => {

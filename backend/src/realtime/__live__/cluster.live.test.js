@@ -17,6 +17,7 @@ const { io: connectSocket } = require("socket.io-client");
 const { prisma } = require("../../config/db");
 const {
   createLiveOrg,
+  createLiveUser,
   dropLiveOrg,
   freePort,
   liveDescribe,
@@ -165,14 +166,12 @@ liveDescribe("realtime across API and worker processes", () => {
 
   beforeAll(async () => {
     live = await createLiveOrg(prisma);
-    other = await prisma.user.create({
-      data: {
-        orgId: live.org.id,
-        name: "Live Test Site Engineer",
-        email: `live-other-${crypto.randomUUID()}@octapm-live.test`,
-        passwordHash: await bcrypt.hash(`Live-${crypto.randomUUID()}`, 4),
-        role: "site_engineer",
-      },
+    other = await createLiveUser(prisma, {
+      orgId: live.org.id,
+      name: "Live Test Site Engineer",
+      email: `live-other-${crypto.randomUUID()}@octapm-live.test`,
+      passwordHash: await bcrypt.hash(`Live-${crypto.randomUUID()}`, 4),
+      role: "site_engineer",
     });
     project = await prisma.project.create({ data: { orgId: live.org.id, name: "LiveTest realtime project" } });
 
@@ -312,7 +311,8 @@ liveDescribe("realtime across API and worker processes", () => {
     try {
       await waitFor(() => heard() >= 1, { timeoutMs: 8_000, label: "webhook POST" });
     } catch {
-      await require("../../services/webhook.service").runDeliveryJob({ payload: { deliveryId: deliveries[0].id } });
+      // Inline, as the worker runs it: inside the job's organisation.
+      await require("../../services/webhook.service").runDeliveryJob({ orgId: live.org.id, payload: { deliveryId: deliveries[0].id } });
     }
     await sleep(1_000);
     expect(heard()).toBe(1);

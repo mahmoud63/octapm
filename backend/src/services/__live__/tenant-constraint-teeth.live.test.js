@@ -57,9 +57,6 @@ liveDescribe("Tenant constraint teeth (M7)", () => {
     });
     costCodeA = await prisma.costCode.create({ data: { orgId: a.org.id, code: "01-100", name: "General A" } });
     costCodeB = await prisma.costCode.create({ data: { orgId: b.org.id, code: "01-100", name: "General B" } });
-    await prisma.organizationMembership.create({
-      data: { orgId: a.org.id, userId: a.user.id, role: "pm", kind: "member", isAdmin: true, isOwner: true, status: "active" },
-    });
   });
 
   afterAll(async () => {

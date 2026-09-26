@@ -14,6 +14,7 @@ const webPush = require("web-push");
 const { prisma } = require("../../config/db");
 const {
   createLiveOrg,
+  createLiveUser,
   dropLiveOrg,
   freePort,
   liveDescribe,
@@ -416,9 +417,7 @@ liveDescribe("side effects happen once across API tasks", () => {
     nodes.push(a, b);
 
     const project = await prisma.project.create({ data: { orgId: live.org.id, name: "Permission check" } });
-    const member = await prisma.user.create({
-      data: { orgId: live.org.id, name: "Live Member", email: `live-member-${crypto.randomUUID()}@octapm-live.test`, passwordHash: "x", role: "pm", isCompanyAdmin: false },
-    });
+    const member = await createLiveUser(prisma, { orgId: live.org.id, name: "Live Member", email: `live-member-${crypto.randomUUID()}@octapm-live.test`, role: "pm", isCompanyAdmin: false });
     const template = await prisma.permissionTemplate.create({
       data: { orgId: live.org.id, name: `Live schedule reader ${crypto.randomUUID().slice(0, 8)}`, kind: "internal", baseRole: "pm", tools: { create: [{ module: "schedule", level: "read_only" }] } },
     });

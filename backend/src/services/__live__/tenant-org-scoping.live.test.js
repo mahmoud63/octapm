@@ -26,7 +26,7 @@ process.env.ANTHROPIC_API_KEY ||= "live-test-placeholder-key";
 
 const crypto = require("crypto");
 const { PrismaClient } = require("@prisma/client");
-const { createLiveOrg, dropLiveOrg, liveDescribe } = require("../../__live__/helpers");
+const { createLiveOrg, createLiveUser, dropLiveOrg, liveDescribe } = require("../../__live__/helpers");
 const { startApi } = require("./auth-live-kit");
 
 liveDescribe("Tenant org scoping (jobs, search, masters)", () => {
@@ -36,16 +36,9 @@ liveDescribe("Tenant org scoping (jobs, search, masters)", () => {
   let projectA;
   let api;
 
-  const membership = (org, user, extra = {}) =>
-    prisma.organizationMembership.create({
-      data: { orgId: org.id, userId: user.id, role: user.role, kind: "member", isAdmin: Boolean(user.isCompanyAdmin), isOwner: Boolean(user.isCompanyAdmin), status: "active", ...extra },
-    });
-
   beforeAll(async () => {
     a = await createLiveOrg(prisma);
     b = await createLiveOrg(prisma);
-    await membership(a.org, a.user);
-    await membership(b.org, b.user);
     projectA = await prisma.project.create({ data: { orgId: a.org.id, name: "Scoping A", status: "active" } });
     api = await startApi();
   });
@@ -101,10 +94,7 @@ liveDescribe("Tenant org scoping (jobs, search, masters)", () => {
 
   test("a company administrator searches every project of the workspace; the same person without the flag sees only assignments", async () => {
     const { listAccessibleProjects } = require("../search.service");
-    const engineer = await prisma.user.create({
-      data: { orgId: a.org.id, name: "Site Engineer", email: `se-${crypto.randomUUID()}@octapm-live.test`, passwordHash: "x", role: "site_engineer", isCompanyAdmin: false },
-    });
-    await membership(a.org, engineer);
+    const engineer = await createLiveUser(prisma, { orgId: a.org.id, name: "Site Engineer", email: `se-${crypto.randomUUID()}@octapm-live.test`, role: "site_engineer", isCompanyAdmin: false });
 
     const asMember = await listAccessibleProjects({ orgId: a.org.id, userId: engineer.id, role: "site_engineer", isCompanyAdmin: false });
     expect(asMember.map(({ project }) => project.id)).toEqual([]);
@@ -144,10 +134,7 @@ liveDescribe("Tenant org scoping (jobs, search, masters)", () => {
     // A repeated label, and an outsider's attempt, are refused.
     const duplicate = await api.request("PUT", "/api/v1/config/extra-services", { body: { services: [{ label: "VAT", percentage: 1 }, { label: "vat", percentage: 2 }] }, headers: auth(a.token) });
     expect(duplicate.status).toBe(400);
-    const engineer = await prisma.user.create({
-      data: { orgId: a.org.id, name: "Plain Member", email: `pm-${crypto.randomUUID()}@octapm-live.test`, passwordHash: "x", role: "site_engineer", isCompanyAdmin: false },
-    });
-    await membership(a.org, engineer);
+    const engineer = await createLiveUser(prisma, { orgId: a.org.id, name: "Plain Member", email: `pm-${crypto.randomUUID()}@octapm-live.test`, role: "site_engineer", isCompanyAdmin: false });
     const { mintAccessToken } = require("../../__live__/helpers");
     const forbidden = await api.request("PUT", "/api/v1/config/extra-services", { body: { services: [] }, headers: auth(mintAccessToken(engineer)) });
     expect(forbidden.status).toBe(403);

@@ -78,7 +78,8 @@ liveDescribe("membership backfill (M2, M3) and the §50 report", () => {
   };
 
   beforeAll(async () => {
-    const live = await createLiveOrg(prisma, { role: "pm", isCompanyAdmin: true });
+    // As the organisation stood before M2: people, and no membership rows.
+    const live = await createLiveOrg(prisma, { role: "pm", isCompanyAdmin: true, legacy: true });
     org = live.org;
     admin = live.user;
     qs = await prisma.user.create({
@@ -92,12 +93,10 @@ liveDescribe("membership backfill (M2, M3) and the §50 report", () => {
       },
     });
     project = await prisma.project.create({ data: { orgId: org.id, name: "Backfill Project", status: "active" } });
-    await prisma.projectAssignment.createMany({
-      data: [
-        { projectId: project.id, userId: admin.id, role: "pm" },
-        { projectId: project.id, userId: qs.id, role: "qs" },
-      ],
-    });
+    // The project assignments are made later, in the tenant-column case:
+    // since the tenant keys (ENT-3) an assignment needs its person to hold a
+    // membership, and the first case here is exactly the backfill that makes
+    // those memberships.
   });
 
   afterAll(async () => {
@@ -157,11 +156,21 @@ liveDescribe("membership backfill (M2, M3) and the §50 report", () => {
     expect(report.result.rows.find((row) => row.check === "org_has_active_owner").status).toBe("ok");
   });
 
-  test("the tenant-column backfill fills slug and assignment orgId, then finds nothing to do", async () => {
+  test("the tenant-column backfill fills the slug; assignments already carry their organisation, so it finds nothing to fill", async () => {
+    // Assignments can only be made once the memberships exist (the previous
+    // cases made them), and since the tenant keys every assignment carries
+    // its organisation from the start — required by the client, filled by
+    // the database trigger for anything older — so the M3 fill is history.
+    await prisma.projectAssignment.createMany({
+      data: [
+        { projectId: project.id, orgId: org.id, userId: admin.id, role: "pm" },
+        { projectId: project.id, orgId: org.id, userId: qs.id, role: "qs" },
+      ],
+    });
     const applied = await runScript("backfill-tenant-columns.js", ["--apply", "--org", org.id]);
     expect(applied.code).toBe(0);
     expect(applied.result.slugs.assigned).toEqual([expect.objectContaining({ orgId: org.id, slug: expect.stringMatching(/^livetest-[0-9a-f]/) })]);
-    expect(applied.result.assignments).toEqual({ missing: 2, filled: 2 });
+    expect(applied.result.assignments).toEqual({ missing: 0, filled: 0 });
 
     const reloaded = await prisma.organisation.findUnique({ where: { id: org.id }, select: { slug: true } });
     expect(reloaded.slug).toBe(applied.result.slugs.assigned[0].slug);
@@ -177,7 +186,7 @@ liveDescribe("membership backfill (M2, M3) and the §50 report", () => {
 
   test("the report is clean on the organisation, and unscoped dry runs find nothing left on any durable tenant", async () => {
     const scoped = await runScript("validate-membership-backfill.js", ["--org", org.id]);
-    expect(scoped.code).toBe(0);
+    expect({ code: scoped.code, report: scoped.output.slice(-2500) }).toMatchObject({ code: 0 });
     expect(scoped.result).toMatchObject({ ok: true, stops: 0, warnings: 0 });
     expect(scoped.result.rows.find((row) => row.check === "users_have_membership").status).toBe("ok");
     expect(scoped.result.rows.find((row) => row.check === "assignments_have_membership").status).toBe("ok");
