@@ -24,6 +24,7 @@ const prisma = new PrismaClient();
 // the seeded balances are produced by the same ledger the product uses.
 const inventoryService = require("../src/services/inventory.service");
 const budgetService = require("../src/services/budget.service");
+const membershipService = require("../src/services/membership.service");
 
 const PASSWORD = process.env.SEED_PASSWORD || "DemoPassw0rd!";
 const ORG_NAME = process.env.SEED_ORG_NAME || "OctaPM Demo Contracting";
@@ -186,6 +187,32 @@ async function upsertPeople(orgId) {
     data: { isCompanyAdmin: true },
   });
   return people;
+}
+
+/**
+ * The memberships the seeded people imply (membership doc §7): one per
+ * person, and the PM — the company administrator — as owner, chosen by the
+ * same owner rule the backfill applies. Upserted, so a re-seed rewrites
+ * nothing that is already right.
+ *
+ * Sign-in reads the membership now. The E2E reset re-seeds this organisation
+ * before every browser run, and without this its nine accounts came back as
+ * users with no membership: the §50 report stopped on them, and only the
+ * legacy fallback to the User columns let them in.
+ */
+async function upsertMemberships(orgId, people) {
+  const users = await prisma.user.findMany({
+    where: { id: { in: Object.values(people).map((person) => person.id) } },
+  });
+  const { ownerUserId } = membershipService.ownerRule(users);
+  for (const user of users) {
+    const row = membershipService.membershipFromUser(user, { isOwner: user.id === ownerUserId });
+    await prisma.organizationMembership.upsert({
+      where: { orgId_userId: { orgId, userId: user.id } },
+      create: row,
+      update: { role: row.role, isAdmin: row.isAdmin, isOwner: row.isOwner, status: row.status },
+    });
+  }
 }
 
 async function upsertProject(orgId) {
@@ -1476,6 +1503,7 @@ async function main() {
   const org = await upsertOrganisation();
   await ensureSubscription(org.id);
   const people = await upsertPeople(org.id);
+  await upsertMemberships(org.id, people);
   const project = await upsertProject(org.id);
   await assignEveryone(project.id, people);
 

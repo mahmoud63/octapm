@@ -207,9 +207,11 @@ const dropLiveOrg = async (prisma, orgId) => {
     return prisma[key]?.deleteMany ? key : null;
   };
   const blockerOf = (error) => {
-    const match = /constraint \\?"([A-Za-z0-9]+)_([A-Za-z0-9]+)_fkey\\?"/.exec(error.message);
+    // Table_column_fkey, or Table_column_orgId_fkey since the tenant keys:
+    // the first column is the one to clear by.
+    const match = /constraint \\?"([A-Za-z0-9]+)_([A-Za-z0-9_]+?)_fkey\\?"/.exec(error.message);
     const modelKey = match ? modelKeyFor(match[1]) : null;
-    return modelKey ? { modelKey, column: match[2] } : null;
+    return modelKey ? { modelKey, column: match[2].split("_")[0] } : null;
   };
   const clearRows = async (modelKey, column, ids, depth = 0) => {
     if (!ids.length) return;
