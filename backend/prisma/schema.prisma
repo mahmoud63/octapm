@@ -34,6 +34,12 @@ model Organisation {
   kind               String    @default("company") // personal | company
   slug               String?   @unique
   createdByUserId    String?   // who created the workspace; ownership itself lives on the membership
+  // Workspace defaults (ENT-6, acceptance §16): what a new project of this
+  // workspace starts with when its creator names no currency or time zone.
+  // Only a default — Project.currency and Project.timezone stay the values
+  // of record, and changing these never rewrites an existing project.
+  defaultCurrency    String    @default("USD") // ISO 4217
+  defaultTimezone    String?   // IANA zone name; null = none chosen (a project then has none either)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 

@@ -401,6 +401,19 @@ const assertWorkspaceAcceptsMember = async ({ tx = prisma, orgId, userId = null,
   if (kind === MEMBERSHIP_KINDS.GUEST || !orgId || !hasMembershipModel(tx) || !tx?.organisation?.findUnique) return;
   const org = await tx.organisation.findUnique({ where: { id: orgId }, select: { kind: true } });
   if (!org || org.kind !== "personal") return;
+  // Count-then-insert is serialised on the organisation row: two seats taken
+  // at once in an empty personal workspace would otherwise both count zero.
+  // FOR NO KEY UPDATE, not FOR UPDATE: it queues seat checks behind each
+  // other and behind a conversion (an UPDATE of the row), but not behind the
+  // key-share locks every insert of a row pointing at the organisation takes.
+  // The lock lasts until the caller's transaction ends, which is why callers
+  // that seat a member run the check and the insert in one transaction.
+  // The kind is re-read under the lock: a conversion that won the race has
+  // made the workspace a company, and a company takes any number of members.
+  if (typeof tx.$queryRaw === "function") {
+    const [locked] = await tx.$queryRaw`SELECT "kind" FROM "Organisation" WHERE "id" = ${orgId} FOR NO KEY UPDATE`;
+    if (!locked || locked.kind !== "personal") return;
+  }
   const seated = await tx.organizationMembership.count({
     where: {
       orgId,
@@ -649,6 +662,22 @@ const hasOtherActiveMembership = async ({ tx = prisma, orgId, userId }) => {
  * user, since ownership is a membership fact. A workspace with no owner row
  * (seeded before the backfill) answers null and the caller keeps its older
  * pick. Only the address and name are read; no billing figure lives here.
+ *
+ * EXTENSION POINT (acceptance §18; ownership doc, "Billing recipient"): the
+ * billing model has no organisation-level contact yet, so the owner is the
+ * default. When one is added — a column such as
+ * `Organisation.billingContactEmail` (or `Subscription.billingEmail`, or a
+ * BillingContact row) — it is read HERE, first, and takes precedence over
+ * the owner. The resolution order is then:
+ *
+ *   1. the organisation's billing contact, when set;
+ *   2. the owner membership's user (this query);
+ *   3. null — and the two callers fall back to the legacy earliest PM.
+ *
+ * This is the one place to change: billing-scheduler.js pmEmail and
+ * subscription.service.js orgEmail both ask here and nowhere else, so a
+ * billing contact never has to be threaded through them, and billing never
+ * hangs on one person's permanent address.
  */
 const findBillingRecipient = async ({ tx = prisma, orgId }) => {
   if (!orgId || !hasMembershipModel(tx)) return null;

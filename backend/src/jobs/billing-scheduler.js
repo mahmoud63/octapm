@@ -82,7 +82,9 @@ async function runBillingChecks(now = new Date(), { orgIds = null } = {}) {
  * Where a trial reminder goes: the workspace's owner (ENT-6 — personal and
  * company alike, the owner membership's user), and only for a workspace
  * seeded before memberships, the earliest PM, as before. Nothing about what
- * the reminder says or when it is sent changes here.
+ * the reminder says or when it is sent changes here. A future organisation
+ * billing contact (e.g. Organisation.billingContactEmail) overrides the owner
+ * inside findBillingRecipient, the one place it is to be read — not here.
  */
 async function pmEmail(orgId) {
   const owner = await findBillingRecipient({ orgId });

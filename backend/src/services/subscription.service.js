@@ -172,6 +172,9 @@ async function confirmTrial(orgId, stripePaymentMethodId) {
 
 // Billing mail goes to the workspace's owner (ENT-6); the earliest PM only
 // for a workspace seeded before memberships. Amounts and rules are untouched.
+// A future organisation billing contact (e.g. Organisation.billingContactEmail)
+// overrides the owner inside membership.service findBillingRecipient, the one
+// place it is to be read — not here.
 async function orgEmail(orgId) {
   const owner = await require('./membership.service').findBillingRecipient({ orgId });
   if (owner?.email) return owner.email;
@@ -371,4 +374,6 @@ module.exports = {
   getCurrentSubscription, getPlansForOrg,
   startTrialSetup, confirmTrial,
   subscribe, cancelSubscription, listInvoices, createEnterpriseLead,
+  // Exported for the lifecycle live test, which proves billing mail names the owner.
+  orgEmail,
 };

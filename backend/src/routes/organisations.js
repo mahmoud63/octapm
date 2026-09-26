@@ -5,6 +5,7 @@ const { sendSuccess } = require("../utils/api-response");
 const { HttpError } = require("../utils/http-error");
 const { authenticate } = require("../middleware/auth");
 const { validate } = require("../middleware/validate");
+const { workspaceDefaultValidators } = require("../middleware/workspace-defaults");
 const organisationService = require("../services/organisation.service");
 
 /**
@@ -35,11 +36,17 @@ const refuseApiKeys = (req, res, next) => {
 router.post(
   "/",
   refuseApiKeys,
-  [body("name").isString().trim().isLength({ min: 2, max: 120 }), validate],
+  [
+    body("name").isString().trim().isLength({ min: 2, max: 120 }),
+    ...workspaceDefaultValidators,
+    validate,
+  ],
   asyncHandler(async (req, res) => {
     const result = await organisationService.createWorkspace({
       userId: req.user.id,
       name: req.body.name,
+      currency: req.body.currency,
+      timezone: req.body.timezone,
       actor: req.user,
       context: getRequestContext(req),
     });

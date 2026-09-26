@@ -633,12 +633,16 @@ const inviteUser = async ({ orgId, actor, payload, context = {} }) => {
   if (activeHere && !projectId && !companyId && !projectPartyId) {
     throw new HttpError(409, "ALREADY_MEMBER", "This person is already a member of the workspace");
   }
-  // A workspace or project invitation seats a member; a party invitation
-  // seats a guest. A personal workspace refuses the former before the
-  // invitation is minted (ENT-6), so nobody is sent a link that acceptance
-  // would refuse — except somebody already seated here, who is only being
-  // assigned a project.
-  if (!companyId && !projectPartyId && !activeHere) {
+  // Acceptance seats a guest only for a party invitation (auth.service
+  // isPartyInvitation: a projectPartyId); every other invitation — a
+  // workspace, project or company-directory one — seats a member. A personal
+  // workspace refuses those before the invitation is minted (ENT-6), so
+  // nobody is sent a link that acceptance would refuse. The one exemption is
+  // somebody already holding a member seat here, who is only being assigned
+  // a project; an active guest is not, and accepting would take a seat.
+  const seatedMemberHere =
+    activeHere && existingMembership?.kind === membershipService.MEMBERSHIP_KINDS.MEMBER;
+  if (!projectPartyId && !seatedMemberHere) {
     await membershipService.assertWorkspaceAcceptsMember({ tx: prisma, orgId, userId: existingUser?.id || null });
   }
 

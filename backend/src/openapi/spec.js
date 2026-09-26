@@ -518,12 +518,16 @@ const components = {
         slug: { type: "string", nullable: true },
         plan: { type: "string", description: "The organisation's plan label: individual for a personal workspace, standard for a company." },
         status: { type: "string" },
+        defaultCurrency: { type: "string", description: "ISO 4217 currency a new project of this workspace starts with when it names none (default USD)." },
+        defaultTimezone: { type: "string", nullable: true, description: "IANA time zone a new project of this workspace starts with when it names none; null when none was chosen." },
       },
-      ["id", "name", "kind", "plan", "status"],
+      ["id", "name", "kind", "plan", "status", "defaultCurrency", "defaultTimezone"],
     ),
     OrganisationCreateRequest: objectSchema(
       {
         name: { type: "string", minLength: 2, maxLength: 120, description: "The company workspace's name; its URL handle is allocated from it." },
+        currency: { type: "string", pattern: "^[A-Za-z]{3}$", description: "ISO 4217 currency code (e.g. USD, AED); stored upper-case. New projects of the workspace default to it when they name none." },
+        timezone: { type: "string", description: "IANA time zone name (e.g. Asia/Dubai). New projects of the workspace default to it when they name none." },
       },
       ["name"],
     ),
@@ -1287,6 +1291,9 @@ const components = {
         email: { type: "string", format: "email" },
         password: { type: "string", format: "password", minLength: 8 },
         phone: { type: "string" },
+        // ENT-6 (§16): the personal workspace's project defaults, optional.
+        currency: { type: "string", pattern: "^[A-Za-z]{3}$", description: "ISO 4217 currency code (e.g. USD, AED); stored upper-case. New projects of the workspace default to it when they name none." },
+        timezone: { type: "string", description: "IANA time zone name (e.g. Asia/Dubai). New projects of the workspace default to it when they name none." },
       },
       ["name", "email", "password"],
     ),
@@ -6448,7 +6455,7 @@ add(
     tag: "Auth",
     summary: "Register an organization user.",
     description:
-      "Creates a new organisation with the caller as its company administrator, creates a server-side refresh session, sets it as an httpOnly cookie, and returns a short-lived access token. Self-service registration can be closed (it is closed in production unless PUBLIC_REGISTRATION=true); GET /config/public reports which. When closed, a well-formed request is refused with 403 REGISTRATION_CLOSED before any account lookup, so the answer never reveals whether an email is registered; a malformed body still gets 400 VALIDATION_ERROR first, because field validation runs ahead of the gate and its errors describe only the request.",
+      "Creates a new personal workspace (ENT-6: kind personal, the individual plan, one member — the caller, its owner and administrator — plus guests; optional currency and timezone set its project defaults) and a server-side refresh session, sets it as an httpOnly cookie, and returns a short-lived access token. Self-service registration can be closed (it is closed in production unless PUBLIC_REGISTRATION=true); GET /config/public reports which. When closed, a well-formed request is refused with 403 REGISTRATION_CLOSED before any account lookup, so the answer never reveals whether an email is registered; a malformed body still gets 400 VALIDATION_ERROR first, because field validation runs ahead of the gate and its errors describe only the request.",
     operationId: "register",
     security: false,
     requestBody: jsonBody(ref("AuthRegisterRequest"), "Registration payload."),
@@ -6523,7 +6530,7 @@ add(
     tag: "Workspaces",
     summary: "Create a company workspace for the signed-in identity.",
     description:
-      "Sign-up makes a personal workspace (one member — its owner — plus guests, on the individual plan); this makes a further, company workspace with the caller as its owner and administrator, fully provisioned: an owner membership, a subscription, the twelve system permission templates and the default units of measure. Any active identity may create one. The answer carries the new membership so the client can enter it with POST /auth/workspaces/{orgId}/session; the caller's current session is untouched. Recorded as workspace.created. API keys are refused (403 API_KEY_FORBIDDEN).",
+      "Sign-up makes a personal workspace (one member — its owner — plus guests, on the individual plan); this makes a further, company workspace with the caller as its owner and administrator, fully provisioned: an owner membership, a subscription, the twelve system permission templates and the default units of measure, plus the project defaults (currency, default USD; time zone, default none) the caller names — 400 VALIDATION_ERROR for a currency that is not ISO 4217 or a zone that is not IANA. Everything is written in one transaction: a failure after the organisation row leaves no workspace behind. Any active identity may create one. The answer carries the new membership so the client can enter it with POST /auth/workspaces/{orgId}/session; the caller's current session is untouched. Recorded as workspace.created. API keys are refused (403 API_KEY_FORBIDDEN).",
     operationId: "createOrganisation",
     permissions: { ...authenticatedOnly, note: "Any active workspace-bound session; the new workspace is the caller's own. API keys are refused." },
     requestBody: jsonBody(ref("OrganisationCreateRequest"), "The workspace's name."),

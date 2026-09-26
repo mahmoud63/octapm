@@ -72,8 +72,56 @@ const recordWorkspaceEvent = async ({ tx, orgId, userId = null, actor = null, ac
   }
 };
 
-/** The organisation row of a new workspace: name, kind, plan and handle. */
-const createOrganisationRow = async (tx, { name, kind = WORKSPACE_KINDS.COMPANY, createdByUserId = null }) => {
+/**
+ * A workspace's defaults for the projects created in it (acceptance §16).
+ * The column defaults are the answer when a creator names none: USD, and no
+ * time zone — a project with no zone is what every project created before
+ * this wave already is, so "none chosen" changes nothing for anybody.
+ */
+const DEFAULT_WORKSPACE_CURRENCY = "USD";
+
+/** ISO 4217: three letters the runtime's currency table knows. */
+const isCurrencyCode = (value) => {
+  if (typeof value !== "string" || !/^[A-Za-z]{3}$/.test(value.trim())) return false;
+  const code = value.trim().toUpperCase();
+  const known = typeof Intl.supportedValuesOf === "function" ? Intl.supportedValuesOf("currency") : null;
+  return known ? known.includes(code) : true;
+};
+
+/** An IANA zone name the runtime can format dates in ("Asia/Dubai", "UTC"). */
+const isTimeZoneName = (value) => {
+  if (typeof value !== "string" || !value.trim()) return false;
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: value.trim() });
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+/**
+ * The defaults as they are stored, or a 400 naming the bad field. Absent or
+ * empty means "the column's default". The routes validate the same way first;
+ * this is the service's own guard, since sign-up and bootstrap call it too.
+ */
+const workspaceDefaults = ({ currency = null, timezone = null } = {}) => {
+  const data = {};
+  if (currency !== null && currency !== undefined && String(currency).trim() !== "") {
+    if (!isCurrencyCode(currency)) throw new HttpError(400, "VALIDATION_ERROR", "currency must be an ISO 4217 code such as USD");
+    data.defaultCurrency = String(currency).trim().toUpperCase();
+  }
+  if (timezone !== null && timezone !== undefined && String(timezone).trim() !== "") {
+    if (!isTimeZoneName(timezone)) throw new HttpError(400, "VALIDATION_ERROR", "timezone must be an IANA time zone such as Asia/Dubai");
+    data.defaultTimezone = String(timezone).trim();
+  }
+  return data;
+};
+
+/** The organisation row of a new workspace: name, kind, plan, handle and project defaults. */
+const createOrganisationRow = async (
+  tx,
+  { name, kind = WORKSPACE_KINDS.COMPANY, createdByUserId = null, currency = null, timezone = null },
+) => {
   const workspaceName = String(name || "").trim();
   return tx.organisation.create({
     data: {
@@ -81,6 +129,7 @@ const createOrganisationRow = async (tx, { name, kind = WORKSPACE_KINDS.COMPANY,
       kind,
       plan: planForKind(kind),
       slug: await allocateWorkspaceSlug(tx, workspaceName),
+      ...workspaceDefaults({ currency, timezone }),
       ...(createdByUserId ? { createdByUserId } : {}),
     },
   });
@@ -146,6 +195,8 @@ const organisationView = (org) => ({
   slug: org.slug ?? null,
   plan: org.plan,
   status: org.status,
+  defaultCurrency: org.defaultCurrency ?? DEFAULT_WORKSPACE_CURRENCY,
+  defaultTimezone: org.defaultTimezone ?? null,
 });
 
 /** The answer of a create or a convert: the workspace, the caller's seat in it, every seat they hold. */
@@ -162,15 +213,29 @@ const workspaceResult = async ({ tx, org, membership, userId }) => ({
  * membership — the identity's home workspace (User.orgId) is untouched, so
  * nothing about where the person already works changes.
  */
-const createWorkspace = async ({ userId, name, kind = WORKSPACE_KINDS.COMPANY, actor = null, context = {} }) => {
+const createWorkspace = async ({
+  userId,
+  name,
+  kind = WORKSPACE_KINDS.COMPANY,
+  currency = null,
+  timezone = null,
+  actor = null,
+  context = {},
+}) => {
   if (kind !== WORKSPACE_KINDS.COMPANY) {
     throw new HttpError(400, "VALIDATION_ERROR", "A signed-in identity creates company workspaces; a personal one is made at sign-up");
   }
   const workspaceName = String(name || "").trim();
   if (!workspaceName) throw new HttpError(400, "VALIDATION_ERROR", "A workspace name is required");
+  // Checked before the transaction opens: a bad default is the caller's
+  // mistake, not a half-written workspace to roll back.
+  workspaceDefaults({ currency, timezone });
 
+  // One transaction for the row, the owner seat and the furniture: a failure
+  // anywhere after the organisation row leaves no organisation behind with no
+  // owner (acceptance §16; the lifecycle live test injects one).
   return prisma.$transaction(async (tx) => {
-    const org = await createOrganisationRow(tx, { name: workspaceName, kind, createdByUserId: userId });
+    const org = await createOrganisationRow(tx, { name: workspaceName, kind, createdByUserId: userId, currency, timezone });
     const membership = await provisionWorkspace({ tx, org, ownerUserId: userId, actor, context });
     return workspaceResult({ tx, org, membership, userId });
   });
@@ -229,12 +294,16 @@ const convertToCompany = async ({ orgId, actor, name = undefined, context = {} }
 };
 
 module.exports = {
+  DEFAULT_WORKSPACE_CURRENCY,
   WORKSPACE_KINDS,
   convertToCompany,
   createOrganisationRow,
   createWorkspace,
+  isCurrencyCode,
+  isTimeZoneName,
   organisationView,
   planForKind,
   provisionWorkspace,
   provisionWorkspaceDefaults,
+  workspaceDefaults,
 };

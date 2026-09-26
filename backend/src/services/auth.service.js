@@ -275,7 +275,16 @@ const revokeSessionIfActive = async (tx, sessionId, now) => {
  */
 const provisionOrganisation = async (
   tx,
-  { orgName, name, email, phone = null, passwordHash, kind = organisationService.WORKSPACE_KINDS.COMPANY },
+  {
+    orgName,
+    name,
+    email,
+    phone = null,
+    passwordHash,
+    kind = organisationService.WORKSPACE_KINDS.COMPANY,
+    currency = null,
+    timezone = null,
+  },
 ) => {
   // A personal workspace with no name given is the person's, not an
   // "Organisation" — the header shows this name beside a Personal badge.
@@ -284,7 +293,12 @@ const provisionOrganisation = async (
       ? `${name.trim()}'s workspace`
       : `${name.trim()} Organisation`;
   const workspaceName = orgName?.trim() || fallbackName;
-  const createdOrg = await organisationService.createOrganisationRow(tx, { name: workspaceName, kind });
+  const createdOrg = await organisationService.createOrganisationRow(tx, {
+    name: workspaceName,
+    kind,
+    currency,
+    timezone,
+  });
 
   const createdUser = await tx.user.create({
     data: {
@@ -316,7 +330,7 @@ const createRegistrationClosedError = () =>
   );
 
 const register = async (
-  { orgName, name, email, password, phone },
+  { orgName, name, email, password, phone, currency = null, timezone = null },
   context = {},
 ) => {
   // Checked before any account lookup, so a closed deployment reveals
@@ -356,6 +370,8 @@ const register = async (
         phone,
         passwordHash,
         kind: organisationService.WORKSPACE_KINDS.PERSONAL,
+        currency,
+        timezone,
       },
     );
     const authPayload = await createAuthSessionPayload(
@@ -371,6 +387,8 @@ const register = async (
         kind: createdOrg.kind,
         plan: createdOrg.plan,
         status: createdOrg.status,
+        defaultCurrency: createdOrg.defaultCurrency ?? null,
+        defaultTimezone: createdOrg.defaultTimezone ?? null,
       },
       ...authPayload,
     };

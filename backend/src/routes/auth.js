@@ -4,6 +4,7 @@ const { asyncHandler } = require("../utils/async-handler");
 const { sendSuccess } = require("../utils/api-response");
 const { HttpError } = require("../utils/http-error");
 const { validate } = require("../middleware/validate");
+const { workspaceDefaultValidators } = require("../middleware/workspace-defaults");
 const { authenticate } = require("../middleware/auth");
 const {
   authLimiter,
@@ -147,6 +148,8 @@ router.post(
     body("email").isEmail().normalizeEmail(),
     body("password").isString().isLength({ min: 8 }),
     body("phone").optional().isString().trim().notEmpty(),
+    // The personal workspace's project defaults (ENT-6 §16), optional.
+    ...workspaceDefaultValidators,
     validate,
   ],
   asyncHandler(async (req, res) => {
