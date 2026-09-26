@@ -22,7 +22,8 @@ const mockPrisma = {
       if (!row) return null;
       return select?.org ? { ...row, org: store.orgs.find((org) => org.id === row.orgId) } : { ...row };
     }),
-    findFirst: jest.fn(async ({ where }) => store.users.find((user) => user.orgId === where.orgId && (where.OR ? where.OR.some((clause) => (clause.ssoSubject && user.ssoSubject === clause.ssoSubject) || (clause.email && user.email === clause.email)) : true)) || null),
+    // The callback finds the identity wherever it lives (no orgId in the where); other callers still narrow by orgId.
+    findFirst: jest.fn(async ({ where }) => store.users.find((user) => (where.orgId === undefined || user.orgId === where.orgId) && (where.OR ? where.OR.some((clause) => (clause.ssoSubject && user.ssoSubject === clause.ssoSubject) || (clause.email && user.email === clause.email)) : true)) || null),
     findMany: jest.fn(async ({ where }) => store.users.filter((user) => user.orgId === where.orgId).map((user) => ({ ...user }))),
     create: jest.fn(async ({ data }) => {
       const row = { id: nextId("user"), ...data };

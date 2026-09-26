@@ -45,7 +45,12 @@ router.post(
   [
     body("name").isString().trim().notEmpty(),
     body("email").isEmail().normalizeEmail(),
+    // Optional here because an email that already belongs to an identity in
+    // another workspace gets a membership, not a new account, and its
+    // password is not this workspace's to set; the service still demands a
+    // password for a new identity.
     body("password")
+      .optional({ values: "falsy" })
       .isString()
       .isLength({ min: 8 })
       .matches(/[a-z]/)
@@ -59,7 +64,9 @@ router.post(
   asyncHandler(async (req, res) => {
     const result = await userService.createUser({
       orgId: req.user.orgId,
+      actor: req.user,
       payload: req.body,
+      context: getRequestContext(req),
     });
     return sendSuccess(res, result, 201);
   }),
@@ -119,6 +126,7 @@ router.patch(
     body("phone").optional().isString().trim(),
     body("role").optional().isString(),
     body("isCompanyAdmin").optional().isBoolean().toBoolean(),
+    body("isOwner").optional().isBoolean().toBoolean(),
     validate,
   ],
   asyncHandler(async (req, res) => {
@@ -126,7 +134,9 @@ router.patch(
     const result = await userService.updateUser({
       orgId: req.user.orgId,
       userId: req.params.id,
+      actor: req.user,
       payload: req.body,
+      context: getRequestContext(req),
     });
     // A changed role or standing reaches their open sockets too (Phase 21D,
     // CX21-491) — a change, not an edit that repeats the same values (the
@@ -174,6 +184,8 @@ router.patch(
     const result = await userService.deactivateUser({
       orgId: req.user.orgId,
       userId: req.params.id,
+      actor: req.user,
+      context: getRequestContext(req),
     });
     disconnectUser(req.app.get("io"), req.params.id); // their sockets go with the account (CX21-491)
     return sendSuccess(res, result);
@@ -190,6 +202,8 @@ router.patch(
     const result = await userService.activateUser({
       orgId: req.user.orgId,
       userId: req.params.id,
+      actor: req.user,
+      context: getRequestContext(req),
     });
     return sendSuccess(res, result);
   }),

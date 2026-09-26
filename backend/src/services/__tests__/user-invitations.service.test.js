@@ -141,28 +141,33 @@ describe("user invitations", () => {
     );
   });
 
-  it("rejects invitations for emails owned by another organization", async () => {
+  // An identity that lives in another workspace may be invited (membership
+  // doc §5): acceptance gives it a second membership. The refusal this test
+  // used to assert (INVITATION_EMAIL_IN_OTHER_ORG) is retired.
+  it("invites an email that already belongs to an identity in another organization", async () => {
     mockPrisma.user.findUnique.mockResolvedValue({
       id: "other-user",
       orgId: "other-org",
       email: "new.user@example.com",
+      status: "active",
     });
 
-    await expect(
-      userService.inviteUser({
-        orgId: "org-1",
-        actor: { id: "pm-1", role: "pm" },
-        payload: {
-          email: "new.user@example.com",
-          role: "site_engineer",
-        },
-      }),
-    ).rejects.toMatchObject({
-      status: 409,
-      code: "INVITATION_EMAIL_IN_OTHER_ORG",
+    const invitation = await userService.inviteUser({
+      orgId: "org-1",
+      actor: { id: "pm-1", role: "pm" },
+      payload: {
+        email: "new.user@example.com",
+        role: "site_engineer",
+      },
     });
 
-    expect(mockTx.invitationToken.create).not.toHaveBeenCalled();
-    expect(mockSendEmail).not.toHaveBeenCalled();
+    expect(invitation).toMatchObject({ email: "new.user@example.com", role: "site_engineer", status: "pending" });
+    expect(mockTx.invitationToken.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ orgId: "org-1", email: "new.user@example.com" }) }),
+    );
+    expect(mockTx.authAuditEvent.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ action: "invitation_created", userId: "other-user", metadataJson: expect.objectContaining({ existingUser: true }) }) }),
+    );
+    expect(mockSendEmail).toHaveBeenCalledTimes(1);
   });
 });
