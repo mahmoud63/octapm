@@ -25,10 +25,21 @@ model Organisation {
   ssoRequired        Boolean   @default(false)
   ssoUpdatedAt       DateTime?
   mfaRequired        Boolean   @default(false)
+  // Workspace identity (enterprise programme, M1). A personal workspace is an
+  // organisation with kind "personal"; nothing else about it differs. The slug
+  // is the URL handle for deep links; it stays nullable until M3 has backfilled
+  // it from the name (13 organisations share one name, so a suffix is needed),
+  // and Postgres treats NULLs as distinct so the unique index already holds
+  // wherever a slug is present.
+  kind               String    @default("company") // personal | company
+  slug               String?   @unique
+  createdByUserId    String?   // who created the workspace; ownership itself lives on the membership
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   users               User[]
+  memberships         OrganizationMembership[]
+  extraServicesConfigs ExtraServicesConfig[]
   ssoTickets          SsoTicket[]
   refreshSessions     RefreshSession[]
   passwordResetTokens PasswordResetToken[]
@@ -297,6 +308,7 @@ model User {
   correspondenceBallInCourt Correspondence[]  @relation("CorrespondenceBallInCourtUser")
 
   apiClients   ApiClient[]
+  memberships  OrganizationMembership[]
   assistantConversations AssistantConversation[]
   managedWarehouses Warehouse[] @relation("WarehouseManager")
   @@index([orgId])
@@ -629,6 +641,8 @@ model Project {
   subcontractorEvaluations      SubcontractorEvaluation[]
   costLedgerEntries             CostLedgerEntry[]
 
+  // Target for the composite tenant foreign keys (projectId, orgId) added in M7.
+  @@unique([id, orgId])
   @@index([orgId])
   @@index([orgId, status, archivedAt])
   @@index([templateId])
@@ -700,12 +714,55 @@ model ProjectAssignment {
   projectId String
   userId    String
   role      String // role within this project
+  // Denormalised from Project.orgId (backfilled in M3, NOT NULL in M7) so the
+  // database can state "assigned only within a company you belong to".
+  orgId     String?
 
   project Project @relation(fields: [projectId], references: [id])
   user    User    @relation(fields: [userId], references: [id])
 
   @@unique([projectId, userId])
   @@index([userId, projectId])
+  @@index([orgId, userId])
+}
+
+/// One person's place in one workspace: the role, administration and
+/// ownership that used to be global columns on User (enterprise programme,
+/// membership doc §1). A person holds one row per organisation; a guest row
+/// (party members) can only carry the external_party role and never admin or
+/// ownership — a CHECK constraint in the migration enforces that, since Prisma
+/// cannot express it.
+model OrganizationMembership {
+  id               String    @id @default(uuid())
+  orgId            String
+  userId           String
+  role             String                       // catalogue role id (shared/permissions.json roles) or 'external_party' for guests
+  kind             String    @default("member") // member | guest
+  isAdmin          Boolean   @default(false)    // company administration (was User.isCompanyAdmin)
+  isOwner          Boolean   @default(false)    // ownership: billing, conversion, cannot be removed while last
+  status           String    @default("active") // invited | active | suspended | left
+  invitedById      String?
+  invitationId     String?                      // InvitationToken that created it
+  joinedAt         DateTime?
+  leftAt           DateTime?
+  lastActiveAt     DateTime?
+  defaultProjectId String?                      // last project opened in this workspace (client convenience, nullable)
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  org  Organisation @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  user User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  refreshSessions  RefreshSession[]
+  ssoTickets       SsoTicket[]
+  apiClients       ApiClient[]
+  invitationTokens InvitationToken[]
+  notifications    Notification[]
+
+  @@unique([orgId, userId])
+  @@index([userId, status])
+  @@index([orgId, status])
+  @@index([orgId, isOwner])
 }
 
 model RefreshSession {
@@ -718,15 +775,18 @@ model RefreshSession {
   expiresAt           DateTime
   revokedAt           DateTime?
   replacedBySessionId String?
+  membershipId        String?   // the workspace membership this session was issued for (M3 backfill; M4 dual-read)
   createdAt           DateTime  @default(now())
   updatedAt           DateTime  @updatedAt
 
-  user User         @relation(fields: [userId], references: [id], onDelete: Cascade)
-  org  Organisation @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  user       User                    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  org        Organisation            @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  membership OrganizationMembership? @relation(fields: [membershipId], references: [id], onDelete: SetNull)
 
   @@index([userId])
   @@index([orgId])
   @@index([orgId, userId])
+  @@index([membershipId])
   @@index([expiresAt])
   @@index([revokedAt])
 }
@@ -774,6 +834,7 @@ model InvitationToken {
   expiresAt    DateTime
   acceptedAt   DateTime?
   revokedAt    DateTime?
+  membershipId String?   // the membership acceptance created or activated (M3 backfill for accepted rows)
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
 
@@ -783,11 +844,13 @@ model InvitationToken {
   projectParty ProjectParty? @relation(fields: [projectPartyId], references: [id], onDelete: SetNull)
   invitedBy  User?        @relation("InvitationInvitedBy", fields: [invitedById], references: [id], onDelete: SetNull)
   acceptedBy User?        @relation("InvitationAcceptedBy", fields: [acceptedById], references: [id], onDelete: SetNull)
+  membership OrganizationMembership? @relation(fields: [membershipId], references: [id], onDelete: SetNull)
 
   @@index([orgId])
   @@index([projectId])
   @@index([companyId])
   @@index([projectPartyId])
+  @@index([membershipId])
   @@index([orgId, email])
   @@index([orgId, status])
   @@index([invitedById])
@@ -1443,9 +1506,16 @@ model BoqActivity {
 
 model ExtraServicesConfig {
   id         String @id @default(uuid())
+  // Owned per organisation (M1). The table had no owner and was read for every
+  // tenant; it held 0 rows when the column arrived, which the migration checks.
+  orgId      String
   label      String
   percentage Float  @default(0)
   sortOrder  Int    @default(0)
+
+  org Organisation @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@unique([orgId, label])
 }
 
 // â”€â”€â”€ Activities (THE CORE â€” everything links here) â”€â”€â”€
@@ -4148,6 +4218,7 @@ model Notification {
   entityId        String?
   dedupeKey       String?   @unique
   metadataJson    Json      @default("{}")
+  membershipId    String?   // the recipient's membership in orgId (ENT-5 routes realtime by it)
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
 
@@ -4155,11 +4226,13 @@ model Notification {
   project          Project?                      @relation(fields: [projectId], references: [id], onDelete: Cascade)
   recipient        User                          @relation("NotificationRecipient", fields: [recipientUserId], references: [id], onDelete: Cascade)
   actor            User?                         @relation("NotificationActor", fields: [actorId], references: [id], onDelete: SetNull)
+  membership       OrganizationMembership?       @relation(fields: [membershipId], references: [id], onDelete: SetNull)
   deliveryAttempts NotificationDeliveryAttempt[]
 
   @@index([orgId])
   @@index([projectId])
   @@index([recipientUserId])
+  @@index([membershipId])
   @@index([orgId, recipientUserId, createdAt])
   @@index([orgId, recipientUserId, readAt, archivedAt])
   @@index([orgId, recipientUserId, category, createdAt])
@@ -4673,6 +4746,7 @@ model CostCode {
   stockTransactions  StockTransaction[]
 
   @@unique([orgId, code])
+  @@unique([id, orgId]) // target for composite tenant foreign keys (M7)
   @@index([orgId, status])
   @@index([parentId])
 }
@@ -6294,12 +6368,15 @@ model SsoTicket {
   expiresAt DateTime
   usedAt    DateTime?
   ipAddress String?
+  membershipId String? // the membership the ticket signs into (M4 dual-read)
   createdAt DateTime  @default(now())
 
-  org  Organisation @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  user User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  org        Organisation            @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  user       User                    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  membership OrganizationMembership? @relation(fields: [membershipId], references: [id], onDelete: SetNull)
 
   @@index([userId])
+  @@index([membershipId])
   @@index([expiresAt])
 }
 
@@ -6567,6 +6644,7 @@ model PermissionTemplate {
   projectParties  ProjectParty[]
 
   @@unique([orgId, name])
+  @@unique([id, orgId]) // target for composite tenant foreign keys (M7)
   @@index([orgId, status])
   @@index([orgId, kind, clientType])
 }
@@ -6643,6 +6721,9 @@ model BackgroundJob {
   startedAt    DateTime?
   finishedAt   DateTime?
   expiresAt    DateTime?
+  // Scalar only, no relation: this table keeps rows of deleted organisations
+  // (matrix doc §3.3) and never gets a tenant-side foreign key.
+  membershipId String?
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
 
@@ -6704,6 +6785,7 @@ model FormTemplate {
   items     FormItem[]
   instances FormInstance[]
 
+  @@unique([id, orgId]) // target for composite tenant foreign keys (M7)
   @@index([orgId, projectId, type, status])
   @@index([projectId, status])
 }
@@ -7501,6 +7583,7 @@ model CustomFieldset {
   projectFieldsets ProjectFieldset[]
   recordTypes     RecordTypeDefinition[]
 
+  @@unique([id, orgId]) // target for composite tenant foreign keys (M7)
   @@index([orgId, recordType, status])
 }
 
@@ -7584,14 +7667,17 @@ model ApiClient {
   expiresAt   DateTime?
   createdBy   String?
   revokedAt   DateTime?
+  membershipId String?  // the owner's membership in orgId (M3 backfill; M4 dual-read)
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
 
-  organisation Organisation @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organisation Organisation            @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  user         User                    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  membership   OrganizationMembership? @relation(fields: [membershipId], references: [id], onDelete: SetNull)
 
   @@index([orgId, status])
   @@index([userId])
+  @@index([membershipId])
 }
 
 model WebhookSubscription {
