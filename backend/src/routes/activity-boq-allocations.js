@@ -1,12 +1,16 @@
 const express = require('express');
+const multer = require('multer');
 const { body, param, query } = require('express-validator');
 const { asyncHandler } = require('../utils/async-handler');
 const { sendSuccess } = require('../utils/api-response');
+const { HttpError } = require('../utils/http-error');
 const { authenticate } = require('../middleware/auth');
 const { requirePermission } = require('../middleware/rbac');
 const { validate } = require('../middleware/validate');
 const { moneyBody } = require('../utils/money');
 const allocationService = require('../services/activity-boq-allocation.service');
+const suggestionService = require('../services/mapping-suggestion.service');
+const importService = require('../services/mapping-import.service');
 
 const router = express.Router({ mergeParams: true });
 const CAN_CREATE = requirePermission('boq', 'create', {
@@ -24,6 +28,30 @@ const CAN_APPROVE = requirePermission('boq', 'approve', {
 const CAN_REJECT = requirePermission('boq', 'approve', {
   transition: 'allocation.reject',
 });
+
+// A mapping file is small (two code columns and a figure) and read once, so
+// it stays in memory: no temp file, no document record, nothing to clean up.
+const mappingUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024, files: 1 },
+  fileFilter: (_req, file, cb) => {
+    const ext = `.${String(file.originalname || '').split('.').pop().toLowerCase()}`;
+    if (['.xlsx', '.xls', '.csv'].includes(ext)) return cb(null, true);
+    return cb(new HttpError(400, 'MAPPING_IMPORT_INVALID', 'Upload an .xlsx, .xls or .csv mapping file'));
+  },
+});
+
+const allocationFigureValidators = () => [
+  body('quantity').optional().isFloat({ gt: 0 }).toFloat(),
+  moneyBody('amount', { min: 0.01 }),
+  body('weight').optional().isFloat({ min: 0 }).toFloat(),
+  body('basis').optional().isIn(allocationService.VALID_BASES),
+  body('source').optional().isIn(['manual', 'import', 'ai', 'migration']),
+  body('notes').optional({ nullable: true }).isString().trim(),
+  body('locationId').optional({ nullable: true }).isUUID(),
+  body('suggestedBy').optional({ nullable: true }).isIn(allocationService.SUGGESTION_SOURCES),
+  body('confidence').optional({ nullable: true }).isFloat({ min: 0, max: 1 }).toFloat(),
+];
 
 router.use(authenticate);
 
@@ -53,17 +81,144 @@ router.get(
   }),
 );
 
+// Coverage (§69): the allocation summary grouped by a structure dimension,
+// as of an optional cutoff date.
+router.get(
+  '/coverage',
+  requirePermission('boq', 'read'),
+  [
+    query('groupBy').optional().isIn(allocationService.GROUP_BY_OPTIONS),
+    query('cutoffDate').optional().isISO8601(),
+    validate,
+  ],
+  asyncHandler(async (req, res) => {
+    const result = await allocationService.getCoverage({
+      orgId: req.user.orgId,
+      projectId: req.params.projectId,
+      groupBy: req.query.groupBy || 'none',
+      cutoffDate: req.query.cutoffDate || null,
+    });
+    return sendSuccess(res, result);
+  }),
+);
+
+// Suggestions (§94-§95): ranked candidates with provenance; never writes.
+router.get(
+  '/suggestions',
+  requirePermission('boq', 'read'),
+  [
+    query('boqItemId').optional().isUUID(),
+    query('limit').optional().isInt({ min: 1, max: 20 }).toInt(),
+    validate,
+  ],
+  asyncHandler(async (req, res) => {
+    const result = await suggestionService.listSuggestions({
+      orgId: req.user.orgId,
+      projectId: req.params.projectId,
+      boqItemId: req.query.boqItemId || null,
+      limit: req.query.limit,
+    });
+    return sendSuccess(res, result);
+  }),
+);
+
+// Mapping rule (§66-§68) on a set of rows or a whole section.
+router.patch(
+  '/mapping-rules',
+  CAN_UPDATE,
+  [
+    body('rule').isIn(allocationService.MAPPING_RULES),
+    body('itemIds').optional().isArray({ max: 2000 }),
+    body('itemIds.*').isUUID(),
+    body('section').optional({ nullable: true }).isString().trim().isLength({ max: 200 }),
+    validate,
+  ],
+  asyncHandler(async (req, res) => {
+    const result = await allocationService.setMappingRules({
+      orgId: req.user.orgId,
+      projectId: req.params.projectId,
+      userId: req.user.id,
+      payload: req.body,
+    });
+    return sendSuccess(res, result);
+  }),
+);
+
+// Several drafts in one call (the matrix's bulk allocate); each row is judged
+// on its own and reported.
+router.post(
+  '/bulk',
+  CAN_CREATE,
+  [
+    body('allocations').isArray({ min: 1, max: 500 }),
+    body('allocations.*.boqItemId').isUUID(),
+    body('allocations.*.activityId').isUUID(),
+    body('allocations.*.quantity').optional().isFloat({ gt: 0 }).toFloat(),
+    body('allocations.*.amount').optional().isFloat({ gt: 0 }).toFloat(),
+    body('allocations.*.weight').optional().isFloat({ min: 0 }).toFloat(),
+    body('allocations.*.basis').optional().isIn(allocationService.VALID_BASES),
+    body('allocations.*.notes').optional({ nullable: true }).isString().trim(),
+    body('allocations.*.locationId').optional({ nullable: true }).isUUID(),
+    body('allocations.*.suggestedBy').optional({ nullable: true }).isIn(allocationService.SUGGESTION_SOURCES),
+    body('allocations.*.confidence').optional({ nullable: true }).isFloat({ min: 0, max: 1 }).toFloat(),
+    validate,
+  ],
+  asyncHandler(async (req, res) => {
+    const result = await allocationService.createAllocationsBulk({
+      orgId: req.user.orgId,
+      projectId: req.params.projectId,
+      userId: req.user.id,
+      allocations: req.body.allocations,
+    });
+    return sendSuccess(res, result, result.createdCount > 0 ? 201 : 200);
+  }),
+);
+
+// Mapping-file import: ?dryRun=true reports; without it, applies as drafts
+// under one batch id.
+router.post(
+  '/import',
+  CAN_CREATE,
+  [query('dryRun').optional().isBoolean().toBoolean(), validate],
+  mappingUpload.single('file'),
+  asyncHandler(async (req, res) => {
+    if (!req.file?.buffer) throw new HttpError(400, 'NO_FILE', 'No file uploaded');
+    const args = {
+      orgId: req.user.orgId,
+      projectId: req.params.projectId,
+      userId: req.user.id,
+      file: req.file.buffer,
+    };
+    if (req.query.dryRun === true) {
+      return sendSuccess(res, await importService.dryRunImport(args));
+    }
+    const result = await importService.applyImport(args);
+    return sendSuccess(res, result, result.summary.created > 0 ? 201 : 200);
+  }),
+);
+
+router.post(
+  '/import/:batchId/undo',
+  CAN_REJECT,
+  [param('batchId').isUUID(), validate],
+  asyncHandler(async (req, res) => {
+    const result = await importService.undoImportBatch({
+      orgId: req.user.orgId,
+      projectId: req.params.projectId,
+      userId: req.user.id,
+      batchId: req.params.batchId,
+    });
+    return sendSuccess(res, result);
+  }),
+);
+
 router.post(
   '/',
   CAN_CREATE,
   [
     body('boqItemId').isUUID(),
     body('activityId').isUUID(),
-    body('quantity').isFloat({ gt: 0 }).toFloat(),
-    moneyBody('amount', { min: 0.01 }),
-    body('weight').optional().isFloat({ min: 0 }).toFloat(),
-    body('source').optional().isIn(['manual', 'import', 'ai', 'migration']),
-    body('notes').optional({ nullable: true }).isString().trim(),
+    ...allocationFigureValidators(),
     validate,
   ],
   asyncHandler(async (req, res) => {
@@ -85,11 +240,7 @@ router.patch(
     param('id').isUUID(),
     body('boqItemId').optional().isUUID(),
     body('activityId').optional().isUUID(),
-    body('quantity').optional().isFloat({ gt: 0 }).toFloat(),
-    moneyBody('amount', { min: 0.01 }),
-    body('weight').optional().isFloat({ min: 0 }).toFloat(),
-    body('source').optional().isIn(['manual', 'import', 'ai', 'migration']),
-    body('notes').optional({ nullable: true }).isString().trim(),
+    ...allocationFigureValidators(),
     validate,
   ],
   asyncHandler(async (req, res) => {

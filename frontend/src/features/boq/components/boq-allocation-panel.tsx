@@ -1,7 +1,9 @@
 import { useMemo, useState } from 'react'
+import { Link } from '@tanstack/react-router'
 import {
   Check,
   CircleDollarSign,
+  Grid3X3,
   History,
   Link2,
   Pencil,
@@ -18,7 +20,16 @@ import {
 import { useCanPerform } from '@/lib/permissions'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 import {
   Select,
   SelectContent,
@@ -72,6 +83,13 @@ const statusLabel: Record<string, string> = {
   rejected: 'Rejected',
 }
 
+type EditState = { id: string; quantity: string; amount: string }
+
+/**
+ * The allocation workflow on the BOQ page: create a draft, edit it inline,
+ * submit, approve or reject with a reason. The matrix, coverage by structure
+ * and the mapping-file import live under Project Controls › Mapping (PC-3).
+ */
 export function BoqAllocationPanel({ projectId, items, currency }: Props) {
   const { data: activities = [] } = useActivities(projectId)
   const { data, isLoading } = useActivityBoqAllocations(projectId)
@@ -114,6 +132,9 @@ export function BoqAllocationPanel({ projectId, items, currency }: Props) {
   const [historyAllocationId, setHistoryAllocationId] = useState<string | null>(
     null
   )
+  const [editing, setEditing] = useState<EditState | null>(null)
+  const [rejectingId, setRejectingId] = useState<string | null>(null)
+  const [rejectReason, setRejectReason] = useState('')
 
   const selectedBoqItem = useMemo(
     () => items.find((item) => item.id === boqItemId) ?? null,
@@ -160,34 +181,36 @@ export function BoqAllocationPanel({ projectId, items, currency }: Props) {
     resetForm()
   }
 
-  const handleEdit = (
-    allocationId: string,
-    currentQty: number,
-    currentAmount: number
-  ) => {
-    const nextQty = window.prompt('Quantity', String(currentQty))
-    if (nextQty === null) return
-
-    const nextAmount = window.prompt('Amount', String(currentAmount))
-    if (nextAmount === null) return
-    if (!hasMoneyPrecision(nextAmount)) {
-      toast.error(MONEY_PRECISION_MESSAGE)
+  // Inline edit of a draft: the figure that changed is what is sent, so the
+  // service records it as the row's basis and derives the other from it.
+  const saveEdit = async (current: { id: string; quantity: number; amount: number }) => {
+    if (!editing || editing.id !== current.id) return
+    const payload: { quantity?: number; amount?: number } = {}
+    if (Number(editing.amount) !== current.amount) {
+      if (!hasMoneyPrecision(editing.amount)) {
+        toast.error(MONEY_PRECISION_MESSAGE)
+        return
+      }
+      payload.amount = toMoneyNumber(editing.amount)
+    } else if (Number(editing.quantity) !== current.quantity) {
+      payload.quantity = Number(editing.quantity)
+    }
+    if (Object.keys(payload).length === 0) {
+      setEditing(null)
       return
     }
-
-    updateAllocation.mutate({
-      allocationId,
-      data: {
-        quantity: Number(nextQty),
-        amount: toMoneyNumber(nextAmount),
-      },
-    })
+    await updateAllocation.mutateAsync({ allocationId: current.id, data: payload })
+    setEditing(null)
   }
 
-  const handleReject = (allocationId: string) => {
-    const reason = window.prompt('Rejection reason')
-    if (!reason?.trim()) return
-    rejectAllocation.mutate({ allocationId, reason: reason.trim() })
+  const submitReject = async () => {
+    if (!rejectingId || !rejectReason.trim()) return
+    await rejectAllocation.mutateAsync({
+      allocationId: rejectingId,
+      reason: rejectReason.trim(),
+    })
+    setRejectingId(null)
+    setRejectReason('')
   }
 
   return (
@@ -200,9 +223,19 @@ export function BoqAllocationPanel({ projectId, items, currency }: Props) {
               BOQ Allocation Workflow
             </h3>
           </div>
+          <Button asChild variant='link' size='sm' className='h-auto px-0 text-xs'>
+            <Link
+              to='/projects/$projectId/$module/$child'
+              params={{ projectId, module: 'controls', child: 'mapping' }}
+              data-testid='uat-boq-open-mapping'
+            >
+              <Grid3X3 className='h-3.5 w-3.5' />
+              Open the mapping matrix
+            </Link>
+          </Button>
         </div>
 
-        <div className='grid grid-cols-2 gap-2 text-right text-sm lg:grid-cols-4'>
+        <div className='grid grid-cols-2 gap-2 text-right text-sm lg:grid-cols-5'>
           <div className='rounded-md border px-3 py-2'>
             <p className='text-xs text-muted-foreground'>Allocated</p>
             <p className='font-semibold'>
@@ -225,6 +258,16 @@ export function BoqAllocationPanel({ projectId, items, currency }: Props) {
             <p className='text-xs text-muted-foreground'>Unallocated</p>
             <p className='font-semibold text-amber-600'>
               {fmtMoney(currency, summary?.unallocatedAmount ?? 0)}
+            </p>
+          </div>
+          <div className='rounded-md border px-3 py-2'>
+            <p className='text-xs text-muted-foreground'>Not applicable</p>
+            <p className='font-semibold text-muted-foreground'>
+              {fmtMoney(
+                currency,
+                (summary as { notApplicableAmount?: number } | undefined)
+                  ?.notApplicableAmount ?? 0
+              )}
             </p>
           </div>
         </div>
@@ -322,119 +365,181 @@ export function BoqAllocationPanel({ projectId, items, currency }: Props) {
               </tr>
             </thead>
             <tbody>
-              {allocations.map((allocation) => (
-                <tr key={allocation.id} className='border-b last:border-b-0'>
-                  <td className='max-w-64 px-3 py-2'>
-                    <div className='truncate font-medium'>
-                      {allocation.boqItem?.code || 'BOQ'}
-                    </div>
-                    <div className='truncate text-xs text-muted-foreground'>
-                      {allocation.boqItem?.description}
-                    </div>
-                  </td>
-                  <td className='max-w-72 px-3 py-2'>
-                    <div className='truncate font-medium'>
-                      {allocation.activity?.activityId}
-                    </div>
-                    <div className='truncate text-xs text-muted-foreground'>
-                      {allocation.activity?.name}
-                    </div>
-                  </td>
-                  <td className='px-3 py-2 text-right'>
-                    {fmtNumber(allocation.quantity)}
-                  </td>
-                  <td className='px-3 py-2 text-right'>
-                    {fmtMoney(currency, allocation.amount)}
-                  </td>
-                  <td className='px-3 py-2 text-right'>
-                    {fmtNumber(allocation.weight)}%
-                  </td>
-                  <td className='px-3 py-2 text-center'>
-                    <Badge variant={statusVariant[allocation.status]}>
-                      {statusLabel[allocation.status] ?? allocation.status}
-                    </Badge>
-                  </td>
-                  <td className='px-3 py-2'>
-                    <div className='flex justify-end gap-1'>
-                      {allocation.status === 'draft' && (
-                        <>
-                          {canUpdateAllocation && (
-                            <Button
-                              variant='ghost'
-                              size='icon'
-                              className='size-8'
-                              onClick={() =>
-                                handleEdit(
-                                  allocation.id,
-                                  allocation.quantity,
-                                  allocation.amount
-                                )
-                              }
-                              title='Edit allocation'
-                            >
-                              <Pencil className='h-4 w-4' />
-                            </Button>
-                          )}
-                          {canSubmitAllocation && (
-                            <Button
-                              variant='ghost'
-                              size='icon'
-                              className='size-8'
-                              onClick={() =>
-                                submitAllocation.mutate(allocation.id)
-                              }
-                              title='Submit allocation'
-                            >
-                              <Send className='h-4 w-4' />
-                            </Button>
-                          )}
-                        </>
+              {allocations.map((allocation) => {
+                const isEditing = editing?.id === allocation.id
+                return (
+                  <tr key={allocation.id} className='border-b last:border-b-0'>
+                    <td className='max-w-64 px-3 py-2'>
+                      <div className='truncate font-medium'>
+                        {allocation.boqItem?.code || 'BOQ'}
+                      </div>
+                      <div className='truncate text-xs text-muted-foreground'>
+                        {allocation.boqItem?.description}
+                      </div>
+                    </td>
+                    <td className='max-w-72 px-3 py-2'>
+                      <div className='truncate font-medium'>
+                        {allocation.activity?.activityId}
+                      </div>
+                      <div className='truncate text-xs text-muted-foreground'>
+                        {allocation.activity?.name}
+                      </div>
+                    </td>
+                    <td className='px-3 py-2 text-right'>
+                      {isEditing ? (
+                        <Input
+                          type='number'
+                          min='0'
+                          step='0.001'
+                          className='h-8 w-24 text-right'
+                          value={editing.quantity}
+                          onChange={(event) =>
+                            setEditing({ ...editing, quantity: event.target.value })
+                          }
+                          onKeyDown={(event) => {
+                            if (event.key === 'Enter') void saveEdit(allocation)
+                            if (event.key === 'Escape') setEditing(null)
+                          }}
+                          aria-label='Quantity'
+                        />
+                      ) : (
+                        fmtNumber(allocation.quantity)
                       )}
-                      {allocation.status === 'submitted' && (
-                        <>
-                          {canApproveAllocation && (
+                    </td>
+                    <td className='px-3 py-2 text-right'>
+                      {isEditing ? (
+                        <Input
+                          type='number'
+                          min='0'
+                          step={MONEY_INPUT_STEP}
+                          className='h-8 w-28 text-right'
+                          value={editing.amount}
+                          onChange={(event) =>
+                            setEditing({ ...editing, amount: event.target.value })
+                          }
+                          onKeyDown={(event) => {
+                            if (event.key === 'Enter') void saveEdit(allocation)
+                            if (event.key === 'Escape') setEditing(null)
+                          }}
+                          aria-label='Amount'
+                        />
+                      ) : (
+                        fmtMoney(currency, allocation.amount)
+                      )}
+                    </td>
+                    <td className='px-3 py-2 text-right'>
+                      {fmtNumber(allocation.weight)}%
+                    </td>
+                    <td className='px-3 py-2 text-center'>
+                      <Badge variant={statusVariant[allocation.status]}>
+                        {statusLabel[allocation.status] ?? allocation.status}
+                      </Badge>
+                    </td>
+                    <td className='px-3 py-2'>
+                      <div className='flex justify-end gap-1'>
+                        {allocation.status === 'draft' && isEditing && (
+                          <>
                             <Button
                               variant='ghost'
                               size='icon'
                               className='size-8 text-green-600'
-                              onClick={() =>
-                                approveAllocation.mutate(allocation.id)
-                              }
-                              title='Approve allocation'
+                              onClick={() => void saveEdit(allocation)}
+                              disabled={updateAllocation.isPending}
+                              title='Save'
                             >
                               <Check className='h-4 w-4' />
                             </Button>
-                          )}
-                          {canRejectAllocation && (
                             <Button
                               variant='ghost'
                               size='icon'
-                              className='size-8 text-destructive'
-                              onClick={() => handleReject(allocation.id)}
-                              title='Reject allocation'
+                              className='size-8'
+                              onClick={() => setEditing(null)}
+                              title='Cancel'
                             >
                               <X className='h-4 w-4' />
                             </Button>
-                          )}
-                        </>
-                      )}
-                      <Button
-                        variant={
-                          selectedHistoryAllocation?.id === allocation.id
-                            ? 'secondary'
-                            : 'ghost'
-                        }
-                        size='icon'
-                        className='size-8'
-                        onClick={() => setHistoryAllocationId(allocation.id)}
-                        title='Allocation history'
-                      >
-                        <History className='h-4 w-4' />
-                      </Button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
+                          </>
+                        )}
+                        {allocation.status === 'draft' && !isEditing && (
+                          <>
+                            {canUpdateAllocation && (
+                              <Button
+                                variant='ghost'
+                                size='icon'
+                                className='size-8'
+                                onClick={() =>
+                                  setEditing({
+                                    id: allocation.id,
+                                    quantity: String(allocation.quantity),
+                                    amount: String(allocation.amount),
+                                  })
+                                }
+                                title='Edit allocation'
+                              >
+                                <Pencil className='h-4 w-4' />
+                              </Button>
+                            )}
+                            {canSubmitAllocation && (
+                              <Button
+                                variant='ghost'
+                                size='icon'
+                                className='size-8'
+                                onClick={() =>
+                                  submitAllocation.mutate(allocation.id)
+                                }
+                                title='Submit allocation'
+                              >
+                                <Send className='h-4 w-4' />
+                              </Button>
+                            )}
+                          </>
+                        )}
+                        {allocation.status === 'submitted' && (
+                          <>
+                            {canApproveAllocation && (
+                              <Button
+                                variant='ghost'
+                                size='icon'
+                                className='size-8 text-green-600'
+                                onClick={() =>
+                                  approveAllocation.mutate(allocation.id)
+                                }
+                                title='Approve allocation'
+                              >
+                                <Check className='h-4 w-4' />
+                              </Button>
+                            )}
+                            {canRejectAllocation && (
+                              <Button
+                                variant='ghost'
+                                size='icon'
+                                className='size-8 text-destructive'
+                                onClick={() => setRejectingId(allocation.id)}
+                                title='Reject allocation'
+                              >
+                                <X className='h-4 w-4' />
+                              </Button>
+                            )}
+                          </>
+                        )}
+                        <Button
+                          variant={
+                            selectedHistoryAllocation?.id === allocation.id
+                              ? 'secondary'
+                              : 'ghost'
+                          }
+                          size='icon'
+                          className='size-8'
+                          onClick={() => setHistoryAllocationId(allocation.id)}
+                          title='Allocation history'
+                        >
+                          <History className='h-4 w-4' />
+                        </Button>
+                      </div>
+                    </td>
+                  </tr>
+                )
+              })}
             </tbody>
           </table>
         </div>
@@ -450,6 +555,48 @@ export function BoqAllocationPanel({ projectId, items, currency }: Props) {
           />
         </div>
       )}
+
+      <Dialog
+        open={Boolean(rejectingId)}
+        onOpenChange={(open) => {
+          if (!open) {
+            setRejectingId(null)
+            setRejectReason('')
+          }
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Reject allocation</DialogTitle>
+            <DialogDescription>
+              The row is retired and its value returns to the item's
+              unallocated balance.
+            </DialogDescription>
+          </DialogHeader>
+          <div className='space-y-2'>
+            <Label htmlFor='boq-allocation-reject-reason'>Reason</Label>
+            <Textarea
+              id='boq-allocation-reject-reason'
+              value={rejectReason}
+              onChange={(event) => setRejectReason(event.target.value)}
+              placeholder='Why this allocation is wrong'
+              className='min-h-20'
+            />
+          </div>
+          <DialogFooter>
+            <Button variant='outline' onClick={() => setRejectingId(null)}>
+              Cancel
+            </Button>
+            <Button
+              variant='destructive'
+              onClick={() => void submitReject()}
+              disabled={!rejectReason.trim() || rejectAllocation.isPending}
+            >
+              Reject
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
