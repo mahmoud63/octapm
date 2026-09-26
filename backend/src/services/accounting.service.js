@@ -396,7 +396,20 @@ const pollPayments = async ({ orgId, fetchImpl = globalThis.fetch, now = () => n
   return { checked, paid };
 };
 
-const runPollJob = async ({ payload = {}, fetchImpl = globalThis.fetch } = {}) => pollPayments({ orgId: payload.orgId, fetchImpl });
+/**
+ * Job handler: the organisation polled is the job row's, never the payload's.
+ * enqueueJob already requires orgId, so the payload copy is redundant at best
+ * and, were a payload ever forged or replayed, the one thing an attacker could
+ * choose (architecture doc §3, Jobs).
+ */
+const runPollJob = async ({ job, payload = {}, fetchImpl = globalThis.fetch } = {}) => {
+  const orgId = job?.orgId || null;
+  if (!orgId) throw Object.assign(new Error("Accounting poll job has no organisation"), { code: "JOB_ORG_REQUIRED", retryable: false });
+  if (payload.orgId && payload.orgId !== orgId) {
+    throw Object.assign(new Error("Accounting poll payload names another organisation"), { code: "JOB_ORG_MISMATCH", retryable: false });
+  }
+  return pollPayments({ orgId, fetchImpl });
+};
 
 /** Hourly: one poll job per organisation with a connected provider. */
 const queuePollJobs = async () => {

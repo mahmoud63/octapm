@@ -345,9 +345,17 @@ const deliverRequest = async (target, { headers, body, signal }) => {
   }
 };
 
-/** Job handler: one HTTP attempt for one delivery. Throws retryable errors until MAX_ATTEMPTS. */
-const runDeliveryJob = async ({ payload = {}, fetchImpl = deliverRequest, now = () => new Date() } = {}) => {
-  const delivery = await prisma.webhookDelivery.findUnique({ where: { id: payload.deliveryId }, include: { subscription: true } });
+/**
+ * Job handler: one HTTP attempt for one delivery. Throws retryable errors until MAX_ATTEMPTS.
+ *
+ * The delivery is loaded inside the job's organisation (`orgId` on the job
+ * row, or the caller's when the test send runs it inline), never by the
+ * payload's id alone: a delivery of another organisation answers "missing"
+ * exactly as a deleted one does (architecture doc §3, Jobs).
+ */
+const runDeliveryJob = async ({ job, orgId = job?.orgId || null, payload = {}, fetchImpl = deliverRequest, now = () => new Date() } = {}) => {
+  if (!orgId) return { skipped: "missing" };
+  const delivery = await prisma.webhookDelivery.findFirst({ where: { id: payload.deliveryId, orgId }, include: { subscription: true } });
   if (!delivery) return { skipped: "missing" };
   if (delivery.status === "delivered") return { skipped: "delivered" };
   const subscription = delivery.subscription;
@@ -429,7 +437,7 @@ const sendTest = async ({ orgId, actor, subscriptionId, fetchImpl = deliverReque
   const event = { id: crypto.randomUUID(), type: "webhook.test", orgId, projectId: subscription.projectId || null, entityType: "webhook", entityId: subscription.id, action: "test", actorId: actor?.id || null, occurredAt: new Date(), payload: { message: "Test delivery from OctaPM" } };
   const delivery = await prisma.webhookDelivery.create({ data: { orgId, subscriptionId: subscription.id, eventId: event.id, eventType: "webhook.test", payloadJson: buildPayload({ event, subscription }) } });
   try {
-    const result = await runDeliveryJob({ payload: { deliveryId: delivery.id }, fetchImpl });
+    const result = await runDeliveryJob({ orgId, payload: { deliveryId: delivery.id }, fetchImpl });
     return { ok: true, ...result, delivery: serializeDelivery(await prisma.webhookDelivery.findUnique({ where: { id: delivery.id } })) };
   } catch (error) {
     return { ok: false, error: error.message, delivery: serializeDelivery(await prisma.webhookDelivery.findUnique({ where: { id: delivery.id } })) };

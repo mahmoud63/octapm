@@ -456,7 +456,8 @@ function boqItemData(projectId, revisionId, item, overrides = {}) {
 async function calculateProjectFinancials(projectId, items, summary = null) {
   const allocationSummary =
     summary || (await buildAllocationSummary({ projectId }));
-  return calculateFinancials(items, allocationSummary);
+  // The extra services are the project's organisation's (wave ENT-3).
+  return calculateFinancials(items, allocationSummary, { projectId });
 }
 
 const boqItemActivityAllocationInclude = {
@@ -1493,8 +1494,12 @@ async function runBoqActivityJob({ job, payload = {}, updateProgress }) {
       progress: 30,
     });
 
-    const project = await prisma.project.findUnique({
-      where: { id: projectId },
+    // The project is read inside the job's organisation, never by id alone:
+    // the payload names the project, but the organisation is the row's
+    // (architecture doc §3, Jobs). A project of another organisation, or one
+    // archived meanwhile, ends the job rather than feeding its BOQ to the AI.
+    const project = await prisma.project.findFirst({
+      where: { id: projectId, orgId: job.orgId },
       select: {
         name: true,
         startDate: true,
@@ -1505,6 +1510,11 @@ async function runBoqActivityJob({ job, payload = {}, updateProgress }) {
         projectCalendar: true,
       },
     });
+    if (!project) {
+      throw new JobError("BOQ_JOB_PROJECT_NOT_FOUND", "The project is not in this job's organisation", {
+        retryable: false,
+      });
+    }
 
     const prompt = buildBoqActivityPrompt(project, items);
 
