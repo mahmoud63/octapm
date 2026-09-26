@@ -144,4 +144,13 @@ self.addEventListener('notificationclick', (event) => {
 
 self.addEventListener('message', (event) => {
   if (event.data?.type === 'SKIP_WAITING') void self.skipWaiting()
+  // A workspace switch drops the API read cache (workspace switching doc §4,
+  // rule 6): the cache is keyed by URL, and the same `/api/v1/projects` is a
+  // different list in each workspace. The page deletes the cache itself as
+  // well; the worker doing it too covers a page whose Cache API access is
+  // restricted. A stale expiration index entry for a missing response is
+  // harmless: workbox skips what it cannot find.
+  if (event.data?.type === 'DROP_API_CACHE') {
+    event.waitUntil(caches.delete(API_CACHE).catch(() => false))
+  }
 })

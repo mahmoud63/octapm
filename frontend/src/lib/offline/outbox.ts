@@ -35,6 +35,13 @@ export type OutboxStatus = 'queued' | 'syncing' | 'failed'
 export interface OutboxItem {
   id: string
   projectId: string
+  /**
+   * Who queued it: `userId:orgId` (workspace switching doc §4). An item
+   * replays only under the workspace it was queued in; items of another
+   * workspace of the same person wait, and a different person's items are
+   * wiped when they sign in on this browser.
+   */
+  ownerKey?: string | null
   /** Record family, for grouping and labels (punch, observation, form, attachment, daily_report, site_diary). */
   kind: string
   label: string
@@ -72,20 +79,31 @@ export const isQueued = (value: unknown): value is QueuedResult =>
   )
 
 export interface OutboxState {
+  /** Items of the active workspace: what replays, and what the header counts. */
   items: OutboxItem[]
+  /** Items queued in another workspace of the same person: kept, shown, never replayed here. */
+  locked: OutboxItem[]
   syncing: boolean
   lastSyncAt: string | null
   available: boolean
+  /** `userId:orgId` of the active workspace, or null until a session is known. */
+  ownerKey: string | null
 }
 
 type IdMapEntry = { tempId: string; serverId: string; at: string }
 
+/** The owner key of a session (workspace switching doc §4). */
+export const outboxOwnerKey = (userId: string, orgId: string) =>
+  `${userId}:${orgId}`
+
 const listeners = new Set<() => void>()
 let state: OutboxState = {
   items: [],
+  locked: [],
   syncing: false,
   lastSyncAt: null,
   available: indexedDbAvailable(),
+  ownerKey: null,
 }
 let syncPromise: Promise<void> | null = null
 let started = false
@@ -124,9 +142,14 @@ const PLACEHOLDER = /\{\{tmp:([^}]+)\}\}/g
 const refreshFromDb = async () => {
   if (!state.available) return
   try {
-    const items = await dbGetAll<OutboxItem>('outbox')
-    items.sort((a, b) => a.createdAt.localeCompare(b.createdAt))
-    setState({ items })
+    const all = await dbGetAll<OutboxItem>('outbox')
+    all.sort((a, b) => a.createdAt.localeCompare(b.createdAt))
+    // Until a session is known nothing is the active workspace's, so nothing
+    // replays (workspace switching doc §4, rule 3).
+    const owner = state.ownerKey
+    const items = owner ? all.filter((item) => item.ownerKey === owner) : []
+    const locked = all.filter((item) => item.ownerKey !== owner)
+    setState({ items, locked })
   } catch {
     setState({ available: false })
   }
@@ -137,13 +160,65 @@ export const listOutbox = async () => {
   return state.items
 }
 
+/** The owner key replay currently runs for, or null while the outbox is locked. */
+export const getOutboxOwner = () => state.ownerKey
+
+/**
+ * Locks the outbox: nothing replays until an owner is set again. Called at
+ * the start of a workspace switch, so an item queued in the workspace being
+ * left cannot be sent under the next workspace's token.
+ */
+export const lockOutbox = () => {
+  const all = [...state.items, ...state.locked].sort((a, b) =>
+    a.createdAt.localeCompare(b.createdAt)
+  )
+  setState({ ownerKey: null, items: [], locked: all })
+}
+
+/**
+ * Sets the workspace whose items may replay (workspace switching doc §4).
+ *
+ * Items queued before this wave carry no owner. They were queued by whoever
+ * is signed in on this browser — there was only ever one workspace — so the
+ * first owner set after the upgrade claims them, once; an item that already
+ * names an owner is never re-keyed. A different *person* signing in wipes
+ * the queue, as the mobile app already does; a different *workspace* of the
+ * same person locks the other workspace's items and leaves them in place.
+ */
+export const setOutboxOwner = async (ownerKey: string) => {
+  if (!state.available) {
+    setState({ ownerKey })
+    return
+  }
+  const [userId] = ownerKey.split(':')
+  try {
+    const all = await dbGetAll<OutboxItem>('outbox')
+    for (const item of all) {
+      if (!item.ownerKey) {
+        await dbPut('outbox', { ...item, ownerKey })
+        continue
+      }
+      if (item.ownerKey.split(':')[0] !== userId) {
+        await dbDelete('outbox', item.id)
+      }
+    }
+  } catch {
+    // storage may be unavailable; the owner still gates replay in memory
+  }
+  setState({ ownerKey })
+  await refreshFromDb()
+}
+
 export const enqueue = async (
   input: Omit<OutboxItem, 'id' | 'createdAt' | 'attempts' | 'status'>
 ): Promise<QueuedResult> => {
   if (!state.available)
     throw new Error('Offline storage is not available on this device')
+  if (!state.ownerKey)
+    throw new Error('Offline changes need a workspace to be queued in')
   const item: OutboxItem = {
     ...input,
+    ownerKey: input.ownerKey ?? state.ownerKey,
     id: newClientRequestId('outbox'),
     createdAt: new Date().toISOString(),
     attempts: 0,
@@ -173,6 +248,21 @@ export const retryOutboxItem = async (id: string) => {
   void syncOutbox()
 }
 
+/**
+ * Drops the service worker's API read cache. On a workspace switch this is
+ * what stops the 8-second network-timeout fallback from ever serving the
+ * previous workspace's lists (workspace switching doc §4, rule 6). The
+ * worker is told as well, so its expiration index forgets the entries too.
+ */
+export const dropApiCache = async () => {
+  if (typeof caches !== 'undefined') {
+    await caches.delete('octapm-api').catch(() => false)
+  }
+  if (typeof navigator !== 'undefined' && navigator.serviceWorker) {
+    navigator.serviceWorker.controller?.postMessage({ type: 'DROP_API_CACHE' })
+  }
+}
+
 export const clearOfflineData = async () => {
   try {
     await dbClear('outbox')
@@ -187,6 +277,7 @@ export const clearOfflineData = async () => {
       )
     )
   }
+  setState({ ownerKey: null })
   await refreshFromDb()
 }
 
@@ -295,13 +386,22 @@ export const syncOutbox = async () => {
   syncPromise = (async () => {
     if (!state.available) return
     if (typeof navigator !== 'undefined' && navigator.onLine === false) return
+    // Locked (no session, or a switch in progress): nothing is the active
+    // workspace's, so nothing may go out under the current token.
+    const owner = state.ownerKey
+    if (!owner) return
     await refreshFromDb()
-    const pending = state.items.filter((item) => item.status !== 'failed')
+    const pending = state.items.filter(
+      (item) => item.status !== 'failed' && item.ownerKey === owner
+    )
     if (!pending.length) return
     setState({ syncing: true })
     const touched = new Set<string>()
     try {
       for (const item of pending) {
+        // The workspace changed under a running replay: stop before an item
+        // of the previous workspace is sent with the next workspace's token.
+        if (state.ownerKey !== owner) break
         try {
           await dbPut('outbox', { ...item, status: 'syncing' })
           const response = await send(item)
@@ -327,11 +427,17 @@ export const syncOutbox = async () => {
           const status = axios.isAxiosError(error)
             ? (error.response?.status ?? 0)
             : 0
+          // The server answers 404 for a project outside the token's
+          // workspace: the item was queued elsewhere and is not retried here
+          // (workspace switching doc §4, rule 5).
+          const wrongWorkspace = status === 404 || status === 403
           await dbPut('outbox', {
             ...item,
             status: retriableStatus(status) ? 'queued' : 'failed',
             attempts: item.attempts + 1,
-            lastError: errorText(error),
+            lastError: wrongWorkspace
+              ? `${errorText(error)} (wrong workspace?)`
+              : errorText(error),
           })
           if (retriableStatus(status)) break
         }
