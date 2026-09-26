@@ -1387,7 +1387,7 @@ export function ScheduleDashboard({
         {/* WBS tab */}
         {(revision.wbs || []).length > 0 && (
           <TabsContent value='wbs' className='mt-4'>
-            <WbsTree nodes={revision.wbs || []} />
+            <WbsTree nodes={revision.wbs || []} projectId={projectId} />
           </TabsContent>
         )}
 

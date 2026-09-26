@@ -25,6 +25,7 @@ export type ModuleKey =
   | 'overview'
   | 'boq'
   | 'bim'
+  | 'controls'
 
 export type ModuleWithChildren =
   | 'schedule'
@@ -33,6 +34,7 @@ export type ModuleWithChildren =
   | 'procurement'
   | 'quality'
   | 'docControl'
+  | 'controls'
 
 export const DEFAULT_MODULE: ModuleKey = 'schedule'
 
@@ -55,6 +57,7 @@ export const MODULE_SLUGS: Record<ModuleKey, string> = {
   overview: 'overview',
   boq: 'boq',
   bim: 'bim',
+  controls: 'controls',
 }
 
 const MODULE_BY_SLUG: Record<string, ModuleKey> = Object.fromEntries(
@@ -70,6 +73,7 @@ export const DEFAULT_CHILD: Record<ModuleWithChildren, string> = {
   procurement: 'purchase-orders',
   quality: 'ncr',
   docControl: 'rfi',
+  controls: 'structure',
 }
 
 export const isModuleKey = (value: unknown): value is ModuleKey =>
@@ -110,6 +114,9 @@ export const MODULE_PERMISSIONS: Partial<
   meetings: ['meeting'],
   boq: ['boq'],
   bim: ['bim'],
+  // Project Controls pages reuse boq read/update (integration doc §2): no
+  // new catalogue module gates them.
+  controls: ['boq'],
   activities: ['schedule'],
   equipment: ['schedule', 'cost'],
   locations: ['location'],
