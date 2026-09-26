@@ -117,6 +117,9 @@ const createApp = () => {
   // and nothing company-wide. Person-level routers (notifications, tasks,
   // search, workflow inbox, conversations, assistant, config) are not gated
   // here: a guest has work of their own in them, scoped by the services.
+  // The integrations router carries the gate itself: its accounting OAuth
+  // callback is public (the provider redirects the browser to it with no
+  // bearer), so the gate has to land after that route, inside the router.
   const membersOnly = requireOrganizationMembership({ kind: "member" });
 
   app.use("/api/v1/auth", authRoutes);
@@ -134,7 +137,7 @@ const createApp = () => {
   app.use("/api/v1/reports", membersOnly, reportBuilderRoutes);
   app.use("/api/v1/portfolio", membersOnly, portfolioRoutes);
   app.use("/api/v1/workflows", workflowInboxRoutes);
-  app.use("/api/v1/integrations", membersOnly, require("./routes/integrations"));
+  app.use("/api/v1/integrations", require("./routes/integrations"));
   app.use("/api/v1/company", membersOnly, require("./routes/company-security"));
   app.use("/api/v1/public/bids", require("./routes/bid-portal"));
   app.use("/api/v1/public/rfqs", require("./routes/rfq-portal"));
