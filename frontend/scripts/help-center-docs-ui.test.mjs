@@ -2,6 +2,13 @@ import { readFile } from 'node:fs/promises'
 
 const routeSource = await readFile(
   new URL(
+    '../src/routes/_authenticated/o/$orgSlug/help-center/index.tsx',
+    import.meta.url
+  ),
+  'utf8'
+)
+const legacyRouteSource = await readFile(
+  new URL(
     '../src/routes/_authenticated/help-center/index.tsx',
     import.meta.url
   ),
@@ -25,6 +32,11 @@ assert(
 assert(
   routeSource.includes('HelpCenter'),
   'Help Center route must render the real HelpCenter component'
+)
+assert(
+  legacyRouteSource.includes('legacyWorkspaceRedirect') &&
+    !legacyRouteSource.includes('ComingSoon'),
+  'the pre-workspace /help-center path must redirect into the active workspace'
 )
 
 for (const requiredText of [

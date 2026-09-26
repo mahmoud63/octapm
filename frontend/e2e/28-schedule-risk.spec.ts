@@ -2,6 +2,14 @@ import { test, expect } from '@playwright/test'
 import { API, apiClient, apiGet, apiToken, openProject, signIn } from './support'
 import { cachedToken, observe } from './support-ux'
 
+type ScheduleRow = {
+  id: string
+  activityCode?: string
+  earlyStart?: string
+  earlyFinish?: string
+  procurementRiskSummary?: { highestSeverity?: string; daysAtRisk?: number; reason?: string }
+}
+
 /**
  * A late delivery, said out loud on the programme.
  *
@@ -46,7 +54,7 @@ test('a package that cannot arrive in time says so on the programme', async ({ p
     expect(created.status(), 'the late requirement is recorded').toBeLessThan(300)
 
     const schedule = (await apiGet(client, `/projects/${projectId}/schedule`, token)).body.data
-    const risky = (schedule.activities ?? []).find((row: any) => row.id === activityId)
+    const risky = (schedule.activities ?? []).find((row: ScheduleRow) => row.id === activityId)
     observe('SCHEDULE_PROCUREMENT_RISK', {
       activity: risky?.activityCode,
       severity: risky?.procurementRiskSummary?.highestSeverity,
@@ -78,7 +86,7 @@ test('a package that cannot arrive in time says so on the programme', async ({ p
   try {
     const token = await cachedToken('sched-risk', () => apiToken(client2, 'pm'))
     const after = (await apiGet(client2, `/projects/${projectId}/schedule`, token)).body.data
-    const row = (after.activities ?? []).find((a: any) => a.id === activityId)
+    const row = (after.activities ?? []).find((a: ScheduleRow) => a.id === activityId)
     expect(row.earlyStart, 'the risk did not move the activity').toBeDefined()
     observe('SCHEDULE_UNCHANGED_BY_RISK', {
       earlyStart: row.earlyStart,

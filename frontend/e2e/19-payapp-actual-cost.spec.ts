@@ -1,5 +1,5 @@
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test'
-import { API, apiClient, apiGet, apiToken, openProject, signIn } from './support'
+import { API, apiClient, apiToken, openProject, signIn } from './support'
 
 /**
  * Certified subcontractor work becoming actual cost — the chain the audit found
@@ -39,12 +39,7 @@ async function send(
       headers: { authorization: `Bearer ${token}` },
       data,
     })
-    let body: any = null
-    try {
-      body = await response.json()
-    } catch {
-      body = null
-    }
+    const body = await response.json().catch(() => null)
     return { status: response.status(), body }
   })
 }

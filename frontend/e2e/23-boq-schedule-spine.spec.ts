@@ -27,12 +27,8 @@ const post = async (
   })
   // Keep the body even when it failed — a refusal that says why is the most
   // useful thing a set-up step can hand back when it goes wrong.
-  let body: { data?: unknown; error?: { code?: string; message?: string } } | null = null
-  try {
-    body = await response.json()
-  } catch {
-    body = null
-  }
+  const body: { data?: unknown; error?: { code?: string; message?: string } } | null =
+    await response.json().catch(() => null)
   return { status: response.status(), body, error: body?.error }
 }
 

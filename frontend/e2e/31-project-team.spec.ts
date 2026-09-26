@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test'
-import { API, PASSWORD, PEOPLE, apiClient, apiGet, apiToken, signIn } from './support'
+import { API, PASSWORD, PEOPLE, apiClient, apiToken, signIn } from './support'
 import { observe } from './support-ux'
 
 /**

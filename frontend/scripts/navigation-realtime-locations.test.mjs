@@ -51,8 +51,8 @@ const projectSwitcher = read('src/components/layout/project-switcher.tsx')
 assert.match(projectSwitcher, /useProjects\(\)/, 'switcher lists real projects')
 assert.match(
   projectSwitcher,
-  /to: '\/projects\/\$projectId'/,
-  'switcher navigates to the project workspace'
+  /to: '\/o\/\$orgSlug\/projects\/\$projectId'/,
+  'switcher navigates to the project inside its workspace'
 )
 
 // ── Realtime client wiring ───────────────────────────────────────────────

@@ -22,7 +22,7 @@ assert.ok(
 
 assert.ok(
   authStore.includes('accessToken: string') &&
-    authStore.includes('setSession: (user: AuthUser, accessToken: string)'),
+    /setSession: \(\s*user: AuthUser,\s*accessToken: string,/.test(authStore),
   'auth store keeps only the short-lived access token in memory'
 )
 
@@ -45,8 +45,9 @@ assert.ok(
 )
 
 assert.ok(
-  signInForm.includes('auth.setSession(session.user, session.tokens.accessToken)'),
-  'sign-in stores only the access token returned by the API'
+  signInForm.includes('auth.setSession(session.user, session.tokens.accessToken, {') &&
+    !signInForm.includes('refreshToken'),
+  'sign-in stores only the access token returned by the API, with the workspace it belongs to'
 )
 
 assert.ok(

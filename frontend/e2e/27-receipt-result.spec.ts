@@ -2,6 +2,9 @@ import { test, expect } from '@playwright/test'
 import { API, apiClient, apiGet, apiToken, openProject, signIn } from './support'
 import { cachedToken, observe } from './support-ux'
 
+type OrderLine = { orderedQty?: number | string; receivedQty?: number | string }
+type Order = { ref: string; lines?: OrderLine[] }
+
 /**
  * What the storeman is told after a delivery.
  *
@@ -18,28 +21,29 @@ test('a posted delivery says what it did', async ({ page }) => {
   // Find an order with something still outstanding, through the API, so the
   // test is about the result surface and not about finding a fixture.
   const client = await apiClient()
-  let orderRef: string | null = null
-  try {
-    const token = await cachedToken('wh-receipt', () => apiToken(client, 'warehouse'))
-    const { body } = await apiGet(
-      client,
-      `/projects/${projectId}/purchase-orders?status=issued`,
-      token,
-    )
-    const orders = body?.data?.items ?? body?.data ?? []
-    const found = orders.find((order: any) =>
-      (order.lines ?? []).some(
-        (line: any) => Number(line.orderedQty) > Number(line.receivedQty ?? 0),
-      ),
-    )
-    expect(found, 'an order with an outstanding line exists').toBeTruthy()
-    orderRef = found.ref
-    expect(API).toBeTruthy()
-  } finally {
-    await client.dispose()
-  }
+  const orderRef = await (async () => {
+    try {
+      const token = await cachedToken('wh-receipt', () => apiToken(client, 'warehouse'))
+      const { body } = await apiGet(
+        client,
+        `/projects/${projectId}/purchase-orders?status=issued`,
+        token,
+      )
+      const orders: Order[] = body?.data?.items ?? body?.data ?? []
+      const found = orders.find((order) =>
+        (order.lines ?? []).some(
+          (line) => Number(line.orderedQty) > Number(line.receivedQty ?? 0),
+        ),
+      )
+      expect(found, 'an order with an outstanding line exists').toBeTruthy()
+      expect(API).toBeTruthy()
+      return found?.ref ?? ''
+    } finally {
+      await client.dispose()
+    }
+  })()
 
-  await page.goto(`/inventory?tab=receive&orderRef=${encodeURIComponent(orderRef!)}`)
+  await page.goto(`/inventory?tab=receive&orderRef=${encodeURIComponent(orderRef)}`)
   await expect(page.getByTestId('uat-po-result')).toBeVisible({ timeout: 30_000 })
 
   // Accept one of whatever the first outstanding line is.

@@ -45,12 +45,7 @@ async function send(
       headers: { authorization: `Bearer ${token}` },
       data,
     })
-    let body: any = null
-    try {
-      body = await response.json()
-    } catch {
-      body = null
-    }
+    const body = await response.json().catch(() => null)
     return { status: response.status(), body }
   }, who)
 }
