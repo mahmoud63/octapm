@@ -270,9 +270,11 @@ const revokeSessionIfActive = async (tx, sessionId, now) => {
  */
 const allocateWorkspaceSlug = async (tx, name) => {
   if (!tx?.organisation?.findMany) return undefined;
-  const { nextFreeSlug, slugifyName, takenSlugs } = require("../../scripts/enterprise/lib");
+  // From src, not scripts/: the image ships src and not the scripts, and a
+  // failed require in here used to be swallowed into a workspace with no handle.
+  const { allocateSlug } = require("../utils/workspace-slug");
   try {
-    return nextFreeSlug(slugifyName(name), await takenSlugs(tx));
+    return await allocateSlug(tx, name);
   } catch {
     return undefined;
   }

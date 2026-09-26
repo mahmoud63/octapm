@@ -25,6 +25,7 @@ const prisma = new PrismaClient();
 const inventoryService = require("../src/services/inventory.service");
 const budgetService = require("../src/services/budget.service");
 const membershipService = require("../src/services/membership.service");
+const { allocateSlug } = require("../src/utils/workspace-slug");
 
 const PASSWORD = process.env.SEED_PASSWORD || "DemoPassw0rd!";
 const ORG_NAME = process.env.SEED_ORG_NAME || "OctaPM Demo Contracting";
@@ -141,14 +142,18 @@ const SEED_PLAN = "business";
 
 async function upsertOrganisation() {
   const existing = await prisma.organisation.findFirst({ where: { name: ORG_NAME } });
+  // The URL handle every workspace carries since ENT-1, spelled the way
+  // sign-up spells it. A re-seeded organisation is a new row, and the web
+  // app's workspace routes have nowhere to send anyone without it.
+  const slug = existing?.slug ?? (await allocateSlug(prisma, ORG_NAME));
   if (existing) {
     return prisma.organisation.update({
       where: { id: existing.id },
-      data: { status: "active", plan: SEED_PLAN },
+      data: { status: "active", plan: SEED_PLAN, slug },
     });
   }
   return prisma.organisation.create({
-    data: { name: ORG_NAME, status: "active", plan: SEED_PLAN },
+    data: { name: ORG_NAME, status: "active", plan: SEED_PLAN, slug },
   });
 }
 

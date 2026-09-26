@@ -31,37 +31,9 @@ const parseArgs = (argv = process.argv.slice(2)) => {
   };
 };
 
-/**
- * A URL-safe handle from a workspace name: ASCII letters and digits, hyphens
- * between words, at most 48 characters, never empty. Diacritics are folded
- * ("Société" → "societe") so an accent does not become a hyphen. Uniqueness is
- * the caller's job — the name is not unique, so a numeric suffix is appended
- * when the base is taken (backfill-tenant-columns.js).
- */
-const slugifyName = (name) => {
-  const base = String(name ?? "")
-    .normalize("NFKD")
-    .replace(/[̀-ͯ]/g, "")
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 48)
-    .replace(/-+$/g, "");
-  return base || "workspace";
-};
-
-/** The first free slug for a base given the ones already taken. */
-const nextFreeSlug = (base, taken) => {
-  if (!taken.has(base)) return base;
-  for (let n = 2; ; n += 1) {
-    const candidate = `${base}-${n}`;
-    if (!taken.has(candidate)) return candidate;
-  }
-};
-
-/** Every slug the platform holds right now. */
-const takenSlugs = async (prisma) =>
-  new Set((await prisma.organisation.findMany({ where: { slug: { not: null } }, select: { slug: true } })).map((row) => row.slug));
+// The slug spelling lives in src (the image ships src, not scripts), and the
+// three helpers are re-exported here so the backfill keeps its imports.
+const { nextFreeSlug, slugifyName, takenSlugs } = require("../../src/utils/workspace-slug");
 
 /**
  * Writes the planned slugs, one organisation at a time, touching only rows
