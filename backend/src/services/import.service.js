@@ -407,18 +407,21 @@ async function importP6Xml({
 /**
  * The WBS an MSPDI file carries, in the snapshot node shape the XER and xlsx
  * parsers use (`wbsId`, `parentWbsId`, `code`, `name`, `seqNum`). Project
- * writes the outline code on every task; every prefix of a dotted code is a
- * node, and a summary task gives its node a proper name.
+ * writes a unique outline number on every task, summary or not, so the
+ * nodes are the summary tasks and every prefix above them: a work task is
+ * the activity, not a node of its own, and only the outline above it ("1.2"
+ * for task "1.2.3") is taken. A summary task gives its node a proper name.
  */
 function mspWbsNodes(tasks) {
   const nodes = new Map();
   for (const task of tasks || []) {
     // UID 0 is the project summary row Project writes above the outline.
     if (task.uid === '0') continue;
-    const parts = String(task.wbsCode || '')
+    const outline = String(task.wbsCode || '')
       .split('.')
       .map((part) => part.trim())
       .filter(Boolean);
+    const parts = task.isSummary ? outline : outline.slice(0, -1);
     let parent = null;
     let code = '';
     for (const part of parts) {

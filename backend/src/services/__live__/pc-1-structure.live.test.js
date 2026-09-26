@@ -4,9 +4,14 @@
  *
  *   units: the seed script writes the default list once and is idempotent;
  *     "M3" normalises to m3 and the unit as typed is never rewritten
- *   schedule import → activation creates the WBS tree, links each activity to
- *     its node, and leaves wbsCode and the dependencies exactly as imported
+ *   schedule import → activation creates the WBS tree (one node per summary
+ *     task, never one per work task), links each activity to its summary's
+ *     node, and leaves wbsCode and the dependencies exactly as imported
  *   a second activation keeps the planner's rename (upsert, not rebuild)
+ *   a generated revision's id-less { code, level, name } nodes activate into
+ *     a tree, with a missing ancestor materialised
+ *   a colliding P6 wbs_id is not reused unless the code or name agrees, and
+ *     an activity's wbsCode is looked up as a code before an external id
  *   moving a node rewrites its descendants' path and depth; a cycle is refused
  *   a package flag must name a party and a commitment of this project
  *   Postgres refuses a node filed under another organisation's project
@@ -24,11 +29,14 @@ const { prisma } = require("../../config/db");
 const { BACKEND_ROOT, createLiveOrg, dropLiveOrg, liveDescribe } = require("../../__live__/helpers");
 const { parseResult } = require("../../../scripts/enterprise/lib");
 const { startApi } = require("./auth-live-kit");
+const wbsService = require("../wbs.service");
 
 const SEED_SCRIPT = path.join(BACKEND_ROOT, "scripts", "enterprise", "seed-units.js");
 
-// The programme the schedule tests import: three summary rows with names, and
-// five work tasks under them with logic between them.
+// The programme the schedule tests import: four summary rows with names, and
+// five work tasks under them with logic between them. As MS Project writes
+// it, every task carries its own outline number: a work task's is one level
+// below its summary's, and no two tasks share one.
 const SUMMARIES = [
   { uid: 101, wbs: "1", name: "Substructure" },
   { uid: 102, wbs: "1.1", name: "Site setup" },
@@ -36,17 +44,35 @@ const SUMMARIES = [
   { uid: 104, wbs: "1.3", name: "Foundations" },
 ];
 const PROGRAMME = [
-  { code: "A100", name: "Mobilise", wbs: "1.1", start: "2026-01-05", finish: "2026-01-09", days: 5, preds: "", pct: 0 },
-  { code: "A110", name: "Excavate", wbs: "1.2", start: "2026-01-12", finish: "2026-01-23", days: 10, preds: "A100", pct: 0 },
-  { code: "A120", name: "Blinding", wbs: "1.2", start: "2026-01-27", finish: "2026-01-28", days: 2, preds: "A110FS+1", pct: 0 },
-  { code: "A130", name: "Rebar", wbs: "1.3", start: "2026-01-29", finish: "2026-02-05", days: 6, preds: "A120, A110 SS -1", pct: 0 },
-  { code: "A140", name: "Pour", wbs: "1.3", start: "2026-02-09", finish: "2026-02-12", days: 4, preds: "A130FF+2", pct: 0 },
+  { code: "A100", name: "Mobilise", wbs: "1.1.1", start: "2026-01-05", finish: "2026-01-09", days: 5, preds: "", pct: 0 },
+  { code: "A110", name: "Excavate", wbs: "1.2.1", start: "2026-01-12", finish: "2026-01-23", days: 10, preds: "A100", pct: 0 },
+  { code: "A120", name: "Blinding", wbs: "1.2.2", start: "2026-01-27", finish: "2026-01-28", days: 2, preds: "A110FS+1", pct: 0 },
+  { code: "A130", name: "Rebar", wbs: "1.3.1", start: "2026-01-29", finish: "2026-02-05", days: 6, preds: "A120, A110 SS -1", pct: 0 },
+  { code: "A140", name: "Pour", wbs: "1.3.2", start: "2026-02-09", finish: "2026-02-12", days: 4, preds: "A130FF+2", pct: 0 },
 ];
+const summaryOf = (outline) => outline.split(".").slice(0, -1).join(".");
+
+// What the AI schedule generator stages: nodes as `{ code, level, name }`
+// with no ids, and activities carrying the node's code as `wbs`. "2.1" is
+// listed without a "2" above it, as a model sometimes does.
+const GENERATED = {
+  wbs: [
+    { code: "1", level: 1, name: "Substructure", budget: 0 },
+    { code: "1.1", level: 2, name: "Earthworks", budget: 0 },
+    { code: "1.2", level: 2, name: "Foundations", budget: 0 },
+    { code: "2.1", level: 2, name: "Frame", budget: 0 },
+  ],
+  activities: [
+    { id: "G1", wbs: "1.1", name: "Excavate", phase: "Substructure", duration: 5, earlyStart: 0, earlyFinish: 5, predecessors: "" },
+    { id: "G2", wbs: "1.2", name: "Pour footings", phase: "Substructure", duration: 4, earlyStart: 5, earlyFinish: 9, predecessors: "G1" },
+    { id: "G3", wbs: "2.1", name: "Columns", phase: "Frame", duration: 6, earlyStart: 9, earlyFinish: 15, predecessors: "G2" },
+  ],
+};
 
 // MSPDI: summary tasks carry the outline names; work tasks carry the logic
 // (Type 1=FS 3=SS 0=FF, LinkLag in tenths of a minute, 4800 per day).
-const programmeMspdi = () => {
-  const uidOf = new Map(PROGRAMME.map((a, index) => [a.code, index + 1]));
+const programmeMspdi = (summaries = SUMMARIES, programme = PROGRAMME) => {
+  const uidOf = new Map(programme.map((a, index) => [a.code, index + 1]));
   const type = { FS: 1, SS: 3, FF: 0, SF: 2 };
   const links = (preds) =>
     preds
@@ -59,15 +85,22 @@ const programmeMspdi = () => {
         return `<PredecessorLink><PredecessorUID>${uidOf.get(match[1])}</PredecessorUID><Type>${type[match[2] || "FS"]}</Type><LinkLag>${lagDays * 4800}</LinkLag></PredecessorLink>`;
       })
       .join("");
-  const summaries = SUMMARIES.map(
+  const summaryRows = summaries.map(
     (s) => `<Task><UID>${s.uid}</UID><ID>${s.uid}</ID><Name>${s.name}</Name><WBS>${s.wbs}</WBS><OutlineLevel>${s.wbs.split(".").length}</OutlineLevel><Summary>1</Summary><Milestone>0</Milestone></Task>`,
   ).join("");
-  const tasks = PROGRAMME.map(
+  const taskRows = programme.map(
     (a, index) =>
-      `<Task><UID>${index + 1}</UID><ID>${index + 1}</ID><Name>${a.name}</Name><WBS>${a.wbs}</WBS><OutlineLevel>3</OutlineLevel><Summary>0</Summary><Milestone>0</Milestone><Duration>PT${a.days * 8}H0M0S</Duration><Start>${a.start}T08:00:00</Start><Finish>${a.finish}T17:00:00</Finish><PercentComplete>${a.pct}</PercentComplete>${links(a.preds)}</Task>`,
+      `<Task><UID>${index + 1}</UID><ID>${index + 1}</ID><Name>${a.name}</Name><WBS>${a.wbs}</WBS><OutlineLevel>${a.wbs.split(".").length}</OutlineLevel><Summary>0</Summary><Milestone>0</Milestone><Duration>PT${a.days * 8}H0M0S</Duration><Start>${a.start}T08:00:00</Start><Finish>${a.finish}T17:00:00</Finish><PercentComplete>${a.pct}</PercentComplete>${links(a.preds)}</Task>`,
   ).join("");
-  return `<?xml version="1.0" encoding="UTF-8"?><Project xmlns="http://schemas.microsoft.com/project"><Name>Programme</Name><Tasks>${summaries}${tasks}</Tasks></Project>`;
+  return `<?xml version="1.0" encoding="UTF-8"?><Project xmlns="http://schemas.microsoft.com/project"><Name>Programme</Name><Tasks>${summaryRows}${taskRows}</Tasks></Project>`;
 };
+
+// A programme with no summary tasks at all: two work tasks at the top of the
+// outline. It has activities with WBS strings and no WBS.
+const FLAT_PROGRAMME = [
+  { code: "F100", name: "Set up", wbs: "1", start: "2026-01-05", finish: "2026-01-09", days: 5, preds: "", pct: 0 },
+  { code: "F110", name: "Build", wbs: "2", start: "2026-01-12", finish: "2026-01-23", days: 10, preds: "F100", pct: 0 },
+];
 
 liveDescribe("PC-1: WBS nodes, units of measure and structure keys", () => {
   let live;
@@ -80,9 +113,9 @@ liveDescribe("PC-1: WBS nodes, units of measure and structure keys", () => {
   const get = (route) => api.get(route, auth());
   const patch = (route, body) => api.request("PATCH", route, { body, headers: auth() });
 
-  const uploadMspdi = async (projectId) => {
+  const uploadMspdi = async (projectId, xml = programmeMspdi()) => {
     const form = new FormData();
-    form.append("file", new Blob([programmeMspdi()], { type: "application/xml" }), "programme.xml");
+    form.append("file", new Blob([xml], { type: "application/xml" }), "programme.xml");
     const response = await fetch(`${api.base}/api/v1/projects/${projectId}/import/msp`, { method: "POST", headers: auth(), body: form });
     return { status: response.status, body: await response.json() };
   };
@@ -219,8 +252,10 @@ liveDescribe("PC-1: WBS nodes, units of measure and structure keys", () => {
       // Nothing is written before activation.
       expect(await prisma.wbsNode.count({ where: { projectId: project.id } })).toBe(0);
 
+      // One node per summary task — a work task is an activity, not a node
+      // of its own, however unique its outline number.
       const activated = await activate(project.id, firstRevisionId);
-      expect(activated.activation).toMatchObject({ wbsNodesCreated: 4, wbsNodesExisting: 0, wbsActivitiesLinked: 5, wbsActivitiesUnmatched: 0, dependencyCount: 5 });
+      expect(activated.activation).toMatchObject({ wbsNodesCreated: SUMMARIES.length, wbsNodesExisting: 0, wbsActivitiesLinked: 5, wbsActivitiesUnmatched: 0, dependencyCount: 5 });
 
       const nodes = await prisma.wbsNode.findMany({ where: { projectId: project.id }, orderBy: [{ depth: "asc" }, { sortOrder: "asc" }] });
       const byCode = new Map(nodes.map((n) => [n.code, n]));
@@ -237,9 +272,10 @@ liveDescribe("PC-1: WBS nodes, units of measure and structure keys", () => {
       expect(byCode.get("1").path).toBe(byCode.get("1").id);
 
       // An MSPDI import keys activities by task UID; the WBS string is the
-      // outline code as imported, and the link is the node with that code.
+      // task's own outline number as imported, and the link is the node of
+      // the summary above it.
       const activities = await activityRows();
-      expect(activities.map((a) => [a.p6ActivityId, a.name, a.wbsCode, byCode.get(a.wbsCode)?.id === a.wbsNodeId])).toEqual(
+      expect(activities.map((a) => [a.p6ActivityId, a.name, a.wbsCode, byCode.get(summaryOf(a.wbsCode))?.id === a.wbsNodeId])).toEqual(
         PROGRAMME.map((a, index) => [String(index + 1), a.name, a.wbs, true]),
       );
       expect(await prisma.activityDependency.count({ where: { projectId: project.id } })).toBe(5);
@@ -274,6 +310,111 @@ liveDescribe("PC-1: WBS nodes, units of measure and structure keys", () => {
       expect((await activityRows()).map((a) => [a.id, a.wbsCode])).toEqual(wbsCodesBefore);
       expect((await activityRows()).every((a) => a.wbsNodeId)).toBe(true);
       expect(await prisma.activityDependency.count({ where: { projectId: project.id } })).toBe(5);
+    });
+  });
+
+  describe("WBS from a flat programme", () => {
+    it("a file with no summary tasks makes no nodes — never one per work task", async () => {
+      const flatProject = await prisma.project.create({ data: { orgId: live.org.id, name: "LiveTest PC-1 flat" } });
+      const imported = await uploadMspdi(flatProject.id, programmeMspdi([], FLAT_PROGRAMME));
+      expect([imported.status, imported.body?.error]).toEqual([201, undefined]);
+      const revision = await prisma.scheduleRevision.findUnique({ where: { id: imported.body.data.revisionId } });
+      expect(revision.snapshotJson.wbs).toEqual([]);
+
+      const activated = await activate(flatProject.id, imported.body.data.revisionId);
+      expect(activated.activation).toMatchObject({ wbsNodesCreated: 0, wbsNodesExisting: 0, wbsActivitiesLinked: 0, wbsActivitiesUnmatched: 2 });
+      expect(await prisma.wbsNode.count({ where: { projectId: flatProject.id } })).toBe(0);
+      const activities = await prisma.activity.findMany({ where: { projectId: flatProject.id, isActive: true }, orderBy: { sortOrder: "asc" } });
+      expect(activities.map((a) => [a.name, a.wbsCode, a.wbsNodeId])).toEqual(FLAT_PROGRAMME.map((a) => [a.name, a.wbs, null]));
+    });
+  });
+
+  describe("WBS from a generated schedule", () => {
+    it("activation builds the tree from { code, level, name } nodes without ids, and links each activity", async () => {
+      const aiProject = await prisma.project.create({ data: { orgId: live.org.id, name: "LiveTest PC-1 generated" } });
+      // The row the generator writes (schedule.service createScheduleRevision
+      // with source "ai"), already approved: the readiness gate is the
+      // product's own and is not what this test is about.
+      const revision = await prisma.scheduleRevision.create({
+        data: {
+          projectId: aiProject.id,
+          label: "AI Generated",
+          source: "ai",
+          status: "approved",
+          activityCount: GENERATED.activities.length,
+          snapshotJson: { ...GENERATED, source: "ai", stagedAt: new Date().toISOString(), boqRows: [] },
+        },
+      });
+      const activated = await post(`/api/v1/projects/${aiProject.id}/schedule/revisions/${revision.id}/activate`, { mappings: [], unmappedRemovals: [] });
+      expect([activated.status, activated.body?.error]).toEqual([200, undefined]);
+      // Four listed nodes plus the "2" the list left out above "2.1".
+      expect(activated.body.data.activation).toMatchObject({ wbsNodesCreated: 5, wbsActivitiesLinked: 3, wbsActivitiesUnmatched: 0 });
+
+      const nodes = await prisma.wbsNode.findMany({ where: { projectId: aiProject.id }, orderBy: [{ depth: "asc" }, { code: "asc" }] });
+      const byCode = new Map(nodes.map((n) => [n.code, n]));
+      expect(nodes.map((n) => [n.code, n.name, n.depth, n.source, byCode.get(summaryOf(n.code))?.id ?? null])).toEqual([
+        ["1", "Substructure", 0, "ai", null],
+        ["2", "2", 0, "ai", null],
+        ["1.1", "Earthworks", 1, "ai", byCode.get("1").id],
+        ["1.2", "Foundations", 1, "ai", byCode.get("1").id],
+        ["2.1", "Frame", 1, "ai", byCode.get("2").id],
+      ]);
+      expect(nodes.map((n) => [n.parentId, n.path])).toEqual(
+        nodes.map((n) => {
+          const parent = byCode.get(summaryOf(n.code)) || null;
+          return [parent ? parent.id : null, parent ? `${parent.id}/${n.id}` : n.id];
+        }),
+      );
+      const activities = await prisma.activity.findMany({ where: { projectId: aiProject.id, isActive: true }, orderBy: { sortOrder: "asc" } });
+      expect(activities.map((a) => [a.name, a.wbsCode, byCode.get(a.wbsCode)?.id === a.wbsNodeId])).toEqual(
+        GENERATED.activities.map((a) => [a.name, a.wbs, true]),
+      );
+    });
+  });
+
+  describe("matching nodes on a re-import", () => {
+    const upsert = (projectId, nodes) =>
+      prisma.$transaction((tx) => wbsService.upsertNodesFromSnapshot({ tx, orgId: live.org.id, projectId, nodes, source: "import" }));
+
+    it("a wbs_id from another P6 database is not the same node unless the code or name agrees", async () => {
+      const p6Project = await prisma.project.create({ data: { orgId: live.org.id, name: "LiveTest PC-1 re-import" } });
+      const first = await upsert(p6Project.id, [{ wbsId: "5", parentWbsId: null, code: "STR", name: "Structure", seqNum: 1 }]);
+      expect([first.created, first.existing]).toEqual([1, 0]);
+
+      // Another database's export happens to number an unrelated node 5.
+      const collision = await upsert(p6Project.id, [{ wbsId: "5", parentWbsId: null, code: "CIV", name: "Civil works", seqNum: 1 }]);
+      expect([collision.created, collision.existing]).toEqual([1, 0]);
+      expect((await prisma.wbsNode.findMany({ where: { projectId: p6Project.id }, orderBy: { code: "asc" } })).map((n) => [n.code, n.name, n.externalId])).toEqual([
+        ["CIV", "Civil works", "5"],
+        ["STR", "Structure", "5"],
+      ]);
+
+      // The same database renamed the short name: the name still agrees, so
+      // the node is kept, not duplicated.
+      const renamed = await upsert(p6Project.id, [{ wbsId: "5", parentWbsId: null, code: "STRUCT", name: "Structure", seqNum: 1 }]);
+      expect([renamed.created, renamed.existing]).toEqual([0, 1]);
+      expect(await prisma.wbsNode.count({ where: { projectId: p6Project.id } })).toBe(2);
+    });
+
+    it("an activity's wbsCode is a code before it is an external id", async () => {
+      const xerProject = await prisma.project.create({ data: { orgId: live.org.id, name: "LiveTest PC-1 precedence" } });
+      // XER: node 7 has the numeric short name "9"; node 9 is the roof.
+      const lookups = await upsert(xerProject.id, [
+        { wbsId: "7", parentWbsId: null, code: "9", name: "Nine", seqNum: 1 },
+        { wbsId: "9", parentWbsId: null, code: "ROOF", name: "Roof", seqNum: 2 },
+      ]);
+      expect(wbsService.resolveNodeForCode(lookups, "9").code).toBe("9");
+      expect(wbsService.resolveNodeForCode(lookups, "ROOF").code).toBe("ROOF");
+      // An MS Project work task's outline number walks up to its summary.
+      expect(wbsService.resolveNodeForCode(lookups, "9.4.2").code).toBe("9");
+      expect(wbsService.resolveNodeForCode(lookups, "8.1")).toBeNull();
+
+      const activity = await prisma.activity.create({ data: { projectId: xerProject.id, name: "Cast slab", wbsCode: "9" } });
+      const links = await prisma.$transaction((tx) => wbsService.linkActivitiesToNodes({ tx, lookups, activities: [{ id: activity.id, wbsCode: "9" }, { id: activity.id, wbsCode: "8.1" }] }));
+      expect(links).toEqual({ linked: 1, unmatched: 1 });
+      const linked = await prisma.activity.findUnique({ where: { id: activity.id } });
+      expect(linked.wbsNodeId).toBe(lookups.byCode.get("9").id);
+      expect(linked.wbsCode).toBe("9");
     });
   });
 
