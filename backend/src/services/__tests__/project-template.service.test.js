@@ -111,7 +111,7 @@ describe("create project from template", () => {
     expect(mockPrisma.projectAssignment.upsert).toHaveBeenCalledWith(
       expect.objectContaining({
         where: { projectId_userId: { projectId: "project-1", userId: USER_ID } },
-        create: { projectId: "project-1", userId: USER_ID, role: "site_engineer" },
+        create: { orgId: "org-1", projectId: "project-1", userId: USER_ID, role: "site_engineer" },
       }),
     );
     expect(mockPrisma.projectUserPermission.upsert).toHaveBeenCalledWith(
