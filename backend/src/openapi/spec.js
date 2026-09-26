@@ -1801,6 +1801,24 @@ const components = {
       },
       ["revision", "lockedRows", "baseline"],
     ),
+    ScheduleXlsxDryRunResponse: objectSchema(
+      {
+        dryRun: { type: "boolean", enum: [true] },
+        staged: { type: "boolean", enum: [false] },
+        source: { type: "string", enum: ["xlsx"] },
+        activityCount: { type: "integer", minimum: 0 },
+        dependencyCount: { type: "integer", minimum: 0 },
+        wbsNodeCount: { type: "integer", minimum: 0 },
+        criticalActivities: { type: "integer", minimum: 0 },
+        issueCount: { type: "integer", minimum: 0 },
+        issues: arrayOf(ref("GenericObject")),
+        activities: arrayOf(ref("GenericObject")),
+        dependencies: arrayOf(ref("GenericObject")),
+        rowLimit: { type: "integer" },
+        message: { type: "string" },
+      },
+      ["dryRun", "activityCount", "dependencyCount", "issues"],
+    ),
     ScheduleGenerateResponse: objectSchema(
       {
         jobId: { type: "string" },
@@ -7411,6 +7429,35 @@ add(
     }),
   );
 });
+
+add(
+  "/projects/{projectId}/import/xlsx",
+  "post",
+  operation({
+    tag: "Imports",
+    summary: "Import a programme from an Excel workbook.",
+    description:
+      "Columns: activity_code and name (required); wbs_code, start, finish, duration_days, predecessors (\"A100, A110FS+2, A120 SS -1\"), percent_complete, calendar (optional). Staged as a draft schedule revision exactly like an XER or MSPDI import, to be activated after mapping review. With dryRun=true the workbook is parsed and the staged snapshot reported (ScheduleXlsxDryRunResponse) and nothing is stored.",
+    operationId: "importXlsxSchedule",
+    parameters: [
+      ...projectParams,
+      queryParam(
+        "dryRun",
+        "Parse and report only; nothing is written.",
+        { type: "boolean", default: false },
+      ),
+    ],
+    permissions: modulePermission("schedule", "create"),
+    requestBody: fileUploadBody({
+      description: "Schedule workbook upload.",
+      accepted: ".xlsx workbook, maximum 50 MB.",
+    }),
+    responseSchema: {
+      oneOf: [ref("ImportResponse"), ref("ScheduleXlsxDryRunResponse")],
+    },
+    status: 201,
+  }),
+);
 
 add(
   "/projects/{projectId}/import/progress",
