@@ -1703,10 +1703,18 @@ const components = {
       label: { type: "string", nullable: true },
       status: {
         type: "string",
-        enum: ["imported", "comparison_only", "baselined", "superseded"],
+        enum: [
+          "imported",
+          "comparison_only",
+          "under_review",
+          "approved",
+          "baselined",
+          "superseded",
+        ],
       },
       baselineLocked: { type: "boolean" },
       lockedAt: nullableDateString,
+      lockedBy: nullableUuid,
       itemCount: { type: "integer", minimum: 0 },
       addedCount: { type: "integer", minimum: 0 },
       updatedCount: { type: "integer", minimum: 0 },
@@ -1748,6 +1756,29 @@ const components = {
         document: ref("ProjectDocumentUpload"),
       },
       ["jobId", "revisionId", "mode", "baselineLocked", "document"],
+    ),
+    BoqRevisionDetail: {
+      allOf: [
+        ref("BoqRevisionSummary"),
+        objectSchema({
+          source: { type: "string" },
+          createdBy: nullableUuid,
+          comparison: ref("GenericObject"),
+          importedRows: arrayOf(ref("GenericObject")),
+          workflowEvents: arrayOf(ref("GenericObject")),
+        }),
+      ],
+    },
+    BoqRevisionReviewRequest: objectSchema({
+      comment: { type: "string", nullable: true, maxLength: 2000 },
+    }),
+    BoqBaselineLockResponse: objectSchema(
+      {
+        revision: ref("BoqRevisionSummary"),
+        lockedRows: { type: "integer", minimum: 0 },
+        baseline: ref("BoqBaselineState"),
+      },
+      ["revision", "lockedRows", "baseline"],
     ),
     ScheduleGenerateResponse: objectSchema(
       {
@@ -6560,6 +6591,68 @@ add(
     responseSchema: ref("BoqUploadResponse"),
   }),
 );
+
+add(
+  "/projects/{projectId}/boq/revisions/{revisionId}",
+  "get",
+  operation({
+    tag: "BOQ",
+    summary: "Get one BOQ revision with its comparison and review history.",
+    operationId: "getBoqRevision",
+    parameters: [...projectParams, pathParam("revisionId", "BOQ revision UUID.")],
+    permissions: modulePermission("boq", "read"),
+    responseSchema: ref("BoqRevisionDetail"),
+  }),
+);
+
+[
+  [
+    "submit",
+    "submitBoqRevision",
+    "Submit an imported BOQ revision for review.",
+    "The revision moves from imported to under_review. A comparison-only revision (saved while the baseline was locked) cannot be reviewed: its rows are not on the current BOQ.",
+    "submit",
+    ref("BoqRevisionSummary"),
+  ],
+  [
+    "approve",
+    "approveBoqRevision",
+    "Approve a BOQ revision under review.",
+    "The revision moves from under_review to approved. Approval signs off the rows already on the current BOQ; it does not change them.",
+    "approve",
+    ref("BoqRevisionSummary"),
+  ],
+  [
+    "lock",
+    "lockBoqBaseline",
+    "Lock the BOQ baseline on an approved revision.",
+    "Writes the explicit lock (baselineLocked, lockedBy, lockedAt, status baselined) beside the derived rule that a baselined schedule locks the BOQ; either one makes the BOQ locked. Once locked, rows cannot be edited, later uploads are saved as comparison-only revisions, and a second lock is refused with BOQ_BASELINE_LOCKED. There is no unlock, as there is none for a schedule baseline.",
+    "approve",
+    ref("BoqBaselineLockResponse"),
+  ],
+].forEach(([suffix, operationId, summary, description, action, responseSchema]) => {
+  add(
+    `/projects/{projectId}/boq/revisions/{revisionId}/${suffix}`,
+    "post",
+    operation({
+      tag: "BOQ",
+      summary,
+      description,
+      operationId,
+      parameters: [
+        ...projectParams,
+        pathParam("revisionId", "BOQ revision UUID."),
+      ],
+      permissions: modulePermission("boq", action),
+      requestBody: jsonBody(
+        ref("BoqRevisionReviewRequest"),
+        "Optional review comment.",
+        false,
+      ),
+      responseSchema,
+    }),
+  );
+});
 
 add(
   "/projects/{projectId}/boq/uploads/{documentId}",

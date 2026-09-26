@@ -96,14 +96,28 @@ const TRANSITIONS = Object.freeze({
       action: ACTIONS.IMPORTED,
       decision: DECISIONS.CREATED,
     }),
+    // A BOQ revision is reviewed before it becomes the baseline (PC-2): the
+    // upload applies its rows at once, the review is about signing them off.
     rule({
-      from: ["imported", "comparison_only"],
+      from: "imported",
+      to: "under_review",
+      action: ACTIONS.SUBMITTED,
+      decision: DECISIONS.SUBMITTED,
+    }),
+    rule({
+      from: "under_review",
+      to: "approved",
+      action: ACTIONS.APPROVED,
+      decision: DECISIONS.APPROVED,
+    }),
+    rule({
+      from: ["imported", "comparison_only", "approved"],
       to: "baselined",
       action: ACTIONS.BASELINE_LOCKED,
       decision: DECISIONS.APPROVED,
     }),
     rule({
-      from: ["imported", "comparison_only", "baselined"],
+      from: ["imported", "comparison_only", "under_review", "approved", "baselined"],
       to: "superseded",
       action: ACTIONS.SUPERSEDED,
       decision: DECISIONS.SUPERSEDED,
