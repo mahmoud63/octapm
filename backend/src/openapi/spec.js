@@ -482,6 +482,33 @@ const components = {
       },
       ["user", "tokens", "workspace", "memberships"],
     ),
+    AuthWorkspaceResolveResponse: objectSchema(
+      {
+        project: objectSchema({ id: uuid, name: { type: "string" } }, ["id", "name"]),
+        workspace: {
+          allOf: [
+            ref("WorkspaceMembership"),
+            objectSchema(
+              {
+                segment: {
+                  type: "string",
+                  description:
+                    "The URL segment the web client puts the project under: the workspace's slug, or its id while it has no slug.",
+                },
+              },
+              ["segment"],
+            ),
+          ],
+        },
+        active: {
+          type: "boolean",
+          nullable: true,
+          description:
+            "Whether the project's workspace is the one the caller's token is bound to; null for an identity token, which is bound to none.",
+        },
+      },
+      ["project", "workspace", "active"],
+    ),
     UserSettingsProfile: objectSchema(
       {
         username: { type: "string", minLength: 2, maxLength: 30 },
@@ -6175,6 +6202,22 @@ add(
     responses: {
       200: authSessionResponse("Session issued for the workspace.", ref("AuthWorkspaceSessionResponse")),
     },
+  }),
+);
+
+add(
+  "/auth/workspaces/resolve",
+  "get",
+  operation({
+    tag: "Auth",
+    summary: "Which of the caller's workspaces owns a project, for a legacy /projects/:id link.",
+    description:
+      "Links minted before workspace-prefixed URLs name a project and no workspace. The web client asks here which of the identity's own workspaces owns the project, so it can open the link under /o/{segment}/projects/… or offer a switch when that workspace is not the one the session is bound to (workspace switching doc §5, deep-link rule §108). Any token of the identity is accepted, including the identity token a sign-in with several workspaces returns. A project of an organisation the identity does not belong to answers 404 PROJECT_NOT_FOUND, the same as a project that does not exist; whether the member may open the project is the project route's question.",
+    operationId: "resolveProjectWorkspace",
+    security: true,
+    permissions: { ...authenticatedOnly, note: "Any valid access token (bound to whichever workspace) or the identity token a sign-in returns; the answer is drawn only from the caller's own memberships." },
+    parameters: [queryParam("projectId", "Project UUID from the legacy link.", uuid, { required: true })],
+    responseSchema: ref("AuthWorkspaceResolveResponse"),
   }),
 );
 

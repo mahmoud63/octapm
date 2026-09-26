@@ -1,11 +1,13 @@
-const { param } = require("express-validator");
+const { param, query } = require("express-validator");
 const { asyncHandler } = require("../utils/async-handler");
+const { sendSuccess } = require("../utils/api-response");
 const { HttpError } = require("../utils/http-error");
 const { validate } = require("../middleware/validate");
 const { loginLimiter } = require("../middleware/rate-limit");
 const { verifyAccessToken } = require("../utils/tokens");
 const { API_KEY_PREFIX } = require("../services/api-client.service");
 const authService = require("../services/auth.service");
+const workspaceLinkService = require("../services/workspace-link.service");
 
 /**
  * Workspace session issue (workspace switching doc §2), registered on the
@@ -46,7 +48,10 @@ const subjectOfToken = (req, _res, next) => {
   } catch (error) {
     return next(tokenError(error));
   }
-  req.tokenSubject = { userId: payload.sub, type: payload.type };
+  // An identity token names no workspace; an access token names the one the
+  // session is bound to, which is what "is this link's project in the active
+  // workspace" is answered against.
+  req.tokenSubject = { userId: payload.sub, type: payload.type, orgId: payload.orgId || null };
   return next();
 };
 
@@ -66,6 +71,27 @@ const optionalTokenSubject = (req, res, next) => {
 };
 
 const register = (router, { sendSession, getRequestContext }) => {
+  /**
+   * GET /auth/workspaces/resolve?projectId= (workspace switching doc §5): which
+   * of the caller's workspaces owns this project, for the web client's legacy
+   * `/projects/:id` redirect. Any token of the identity will do, including
+   * the identity token from a sign-in with several workspaces, because the
+   * question is about the identity's memberships, not one session.
+   */
+  router.get(
+    "/workspaces/resolve",
+    [query("projectId").isUUID(), validate],
+    subjectOfToken,
+    asyncHandler(async (req, res) => {
+      const result = await workspaceLinkService.resolveProjectWorkspace({
+        userId: req.tokenSubject.userId,
+        projectId: req.query.projectId,
+        activeOrgId: req.tokenSubject.orgId,
+      });
+      return sendSuccess(res, result);
+    }),
+  );
+
   router.post(
     "/workspaces/:orgId/session",
     loginLimiter,

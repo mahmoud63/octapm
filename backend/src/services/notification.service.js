@@ -3,7 +3,7 @@ const { normalizeRoleId } = require("../config/permissions");
 const { sendEmail } = require("./email.service");
 const { HttpError } = require("../utils/http-error");
 const domainEvents = require("../events/bus");
-const { recordWorkspacePath } = require("../utils/record-links");
+const { recordWorkspacePath, workspacePath, workspaceSegment } = require("../utils/record-links");
 const {
   cursorArgs,
   normalizeListQuery,
@@ -589,6 +589,41 @@ const resolveNotificationRecipients = async ({
   return [...recipients.values()];
 };
 
+/**
+ * The workspace segment a notification link is stored under (workspace
+ * switching doc §5). Callers build links from the project alone, so the
+ * workspace is added here, once, before the row is written: every actionUrl,
+ * and the email that quotes it, then opens under `/o/{slug}/…`. The segment
+ * is remembered for a minute so a burst of notifications for one workspace
+ * does not read its organisation row once per recipient; a client that does
+ * not know the organisation model (a test double) leaves the link as built.
+ */
+const WORKSPACE_SEGMENT_TTL_MS = 60_000;
+const workspaceSegmentCache = new Map();
+
+const workspaceSegmentFor = async (tx, orgId) => {
+  if (!orgId) return null;
+  const cached = workspaceSegmentCache.get(orgId);
+  if (cached && cached.until > Date.now()) return cached.segment;
+  const client = typeof tx?.organisation?.findUnique === "function" ? tx : prisma;
+  if (typeof client?.organisation?.findUnique !== "function") return null;
+  let segment = null;
+  try {
+    const org = await client.organisation.findUnique({
+      where: { id: orgId },
+      select: { id: true, slug: true },
+    });
+    segment = org && org.id === orgId ? workspaceSegment(org) : null;
+  } catch {
+    segment = null;
+  }
+  workspaceSegmentCache.set(orgId, { segment, until: Date.now() + WORKSPACE_SEGMENT_TTL_MS });
+  return segment;
+};
+
+const workspaceActionUrl = async (tx, orgId, actionUrl) =>
+  actionUrl ? workspacePath(actionUrl, await workspaceSegmentFor(tx, orgId)) : actionUrl;
+
 const createNotifications = async ({
   tx = prisma,
   orgId,
@@ -632,6 +667,10 @@ const createNotifications = async ({
     category,
   });
 
+  // Stored once with its workspace, so the in-app link, the email and a push
+  // all open under `/o/{slug}/…` (workspace switching doc §5).
+  const storedActionUrl = await workspaceActionUrl(tx, orgId, actionUrl);
+
   // Web Push (OCTA-MOB-PWA-018): only users with a registered device get a
   // push attempt; the preference can switch it off per category.
   const pushCandidates = recipients
@@ -667,7 +706,7 @@ const createNotifications = async ({
           priority,
           inAppVisible: preference.inAppEnabled,
           dueAt: dueAt ? new Date(dueAt) : null,
-          actionUrl,
+          actionUrl: storedActionUrl,
           entityType,
           entityId,
           dedupeKey: dedupeKeyBase ? `${dedupeKeyBase}:${recipient.id}` : null,

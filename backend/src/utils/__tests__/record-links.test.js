@@ -1,4 +1,4 @@
-const { RECORD_WORKSPACE, recordWorkspacePath } = require("../record-links");
+const { RECORD_WORKSPACE, recordWorkspacePath, workspacePath, workspaceSegment } = require("../record-links");
 
 describe("record-links", () => {
   it("opens the record's workspace module with the record pre-selected", () => {
@@ -58,5 +58,26 @@ describe("record-links", () => {
       if (target.path) continue;
       expect(slugs.has(target.module)).toBe(true);
     }
+  });
+
+  // Every authenticated page lives under `/o/{workspace}` (ENT-4). A link
+  // that names its workspace opens there directly; one that does not keeps
+  // the legacy shape the web client redirects.
+  it("puts a link inside its workspace when the workspace is known", () => {
+    expect(
+      recordWorkspacePath({ projectId: "p1", recordType: "rfi", recordId: "r-1", orgSlug: "acme" }),
+    ).toBe("/o/acme/projects/p1/doc-control/rfi?recordId=r-1&source=rfi");
+    expect(recordWorkspacePath({ projectId: "p1", recordType: "task", recordId: "t1", orgSlug: "acme" })).toBe(
+      "/o/acme/tasks?recordId=t1",
+    );
+    expect(workspacePath("/projects/p1", { slug: "acme", id: "org-1" })).toBe("/o/acme/projects/p1");
+    // An organisation without a slug is named by its id; the client accepts both.
+    expect(workspacePath("/projects/p1", { slug: null, id: "org-1" })).toBe("/o/org-1/projects/p1");
+    expect(workspacePath("/o/acme/projects/p1", "acme")).toBe("/o/acme/projects/p1");
+    expect(workspacePath("https://example.test/x", "acme")).toBe("https://example.test/x");
+    expect(workspacePath("/projects/p1", null)).toBe("/projects/p1");
+    expect(workspacePath(null, "acme")).toBeNull();
+    expect(workspaceSegment({ slug: "a b", id: "org-1" })).toBe("a b");
+    expect(workspacePath("/tasks", "a b")).toBe("/o/a%20b/tasks");
   });
 });
