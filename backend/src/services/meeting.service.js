@@ -434,7 +434,7 @@ const projectUserWhere = ({ orgId, projectId, userIds }) => ({
   orgId,
   status: "active",
   OR: [
-    { role: { in: ["pm", "super_admin"] } },
+    { role: "pm" },
     { projectAssignments: { some: { projectId } } },
     {
       projectPartyMemberships: {

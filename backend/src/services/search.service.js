@@ -12,7 +12,7 @@ const {
 const DEFAULT_LIMIT = 20;
 const MAX_LIMIT = 50;
 const CURRENT_ONLY_DOCUMENT_ROLES = new Set(["site_engineer", "warehouse"]);
-const PROJECT_WIDE_TASK_ROLES = new Set(["pm", "planning_eng", "super_admin"]);
+const PROJECT_WIDE_TASK_ROLES = new Set(["pm", "planning_eng"]);
 
 const SEARCH_TYPE_ALIASES = {
   activities: "activity",

@@ -184,7 +184,14 @@ const requirePermissionOr = (moduleName, action, options = {}, allowRecord = asy
     });
 };
 
-/** Company administration: company admins and project managers. */
+/**
+ * Company administration: the workspace's administrators and owners
+ * (`req.user.isCompanyAdmin` is membership admin || owner). Any project
+ * manager used to pass here too; that shortcut is retired (membership doc
+ * §4, product-owner decision 1): every current administrator is a PM and the
+ * one organisation with no administrator had its PM promoted by the backfill,
+ * so nobody loses a power they exercise today, and a future PM needs the flag.
+ */
 const requireCompanyAdmin = (req, res, next) => {
   if (!req.user) {
     return next(
@@ -196,13 +203,13 @@ const requireCompanyAdmin = (req, res, next) => {
       new HttpError(403, 'API_KEY_FORBIDDEN', 'API keys cannot administer the company'),
     );
   }
-  if (isCompanyAdmin(req) || getEffectiveRole(req) === 'pm') {
+  if (isCompanyAdmin(req)) {
     return next();
   }
   const error = new HttpError(
     403,
     'FORBIDDEN',
-    'Company administration requires a company admin or project manager',
+    'Company administration requires a company administrator or owner',
   );
   error.details = { requires: 'company_admin' };
   return next(error);

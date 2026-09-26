@@ -115,8 +115,12 @@ describe("requirePermission with permission templates", () => {
     const plain = buildApp({ user: { id: "u2", role: "warehouse" } });
     await request(plain).get("/admin").expect(403);
     await request(plain).get("/users").expect(403);
+    // The "any PM administers the company" shortcut is retired (ENT-2,
+    // product-owner decision 1): a PM needs the admin or owner flag.
     const pm = buildApp({ user: { id: "u3", role: "pm" } });
-    await request(pm).get("/admin").expect(200);
+    await request(pm).get("/admin").expect(403);
+    const owner = buildApp({ user: { id: "u4", role: "pm", isCompanyAdmin: true, isOwner: true } });
+    await request(owner).get("/admin").expect(200);
   });
 
   it("exposes hasPermission for in-handler checks", () => {

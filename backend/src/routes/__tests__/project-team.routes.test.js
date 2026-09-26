@@ -59,7 +59,7 @@ describe("project team routes", () => {
     });
   });
 
-  it("only PMs and company admins may change template assignments", async () => {
+  it("only company admins and owners may change template assignments", async () => {
     const app = buildApp();
 
     const denied = await request(app)
@@ -67,6 +67,12 @@ describe("project team routes", () => {
       .set("x-role", "planning_eng")
       .send({ templateId: TEMPLATE_ID });
     expect(denied.status).toBe(403);
+    // A PM without the admin flag is refused too (ENT-2: the PM shortcut is retired).
+    const plainPm = await request(app)
+      .put(`/projects/project-1/team/${USER_ID}/permissions`)
+      .set("x-role", "pm")
+      .send({ templateId: TEMPLATE_ID });
+    expect(plainPm.status).toBe(403);
     expect(mockService.setProjectUserPermission).not.toHaveBeenCalled();
 
     const asAdmin = await request(app)
@@ -85,13 +91,13 @@ describe("project team routes", () => {
 
     await request(app)
       .delete(`/projects/project-1/team/${USER_ID}/permissions`)
-      .set("x-role", "pm")
+      .set("x-role", "pm").set("x-company-admin", "1")
       .expect(200);
     expect(mockService.removeProjectUserPermission).toHaveBeenCalled();
 
     await request(app)
       .put(`/projects/project-1/team/parties/${PARTY_ID}/permissions`)
-      .set("x-role", "pm")
+      .set("x-role", "pm").set("x-company-admin", "1")
       .send({ templateId: null })
       .expect(200);
     expect(mockService.setPartyTemplate).toHaveBeenCalledWith(
@@ -103,13 +109,13 @@ describe("project team routes", () => {
     const app = buildApp();
     const badUser = await request(app)
       .put("/projects/project-1/team/not-a-uuid/permissions")
-      .set("x-role", "pm")
+      .set("x-role", "pm").set("x-company-admin", "1")
       .send({ templateId: TEMPLATE_ID });
     expect(badUser.status).toBe(400);
 
     const badTemplate = await request(app)
       .put(`/projects/project-1/team/${USER_ID}/permissions`)
-      .set("x-role", "pm")
+      .set("x-role", "pm").set("x-company-admin", "1")
       .send({ templateId: "nope" });
     expect(badTemplate.status).toBe(400);
   });
