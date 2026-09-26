@@ -68,4 +68,60 @@ describe("BOQ Excel parser", () => {
 
     expect(rows[0].code).toBe("A 01");
   });
+
+  it("keeps the first code column when a trailing Ref column follows it", () => {
+    const rows = parseExcelInput(
+      makeWorkbookBuffer([
+        ["Item No.", "Description", "Unit", "Qty", "Rate", "Ref"],
+        ["A1", "Excavation", "m3", 10, 5, "DWG-01"],
+      ]),
+    );
+
+    expect(rows).toEqual([
+      expect.objectContaining({ code: "A1", description: "Excavation", rate: 5 }),
+    ]);
+  });
+
+  it("keeps the first code column when a trailing Item column follows it", () => {
+    const rows = parseExcelInput(
+      makeWorkbookBuffer([
+        ["No.", "Description", "Unit", "Qty", "Rate", "Item"],
+        ["A1", "Excavation", "m3", 10, 5, "Prelims"],
+      ]),
+    );
+
+    expect(rows[0].code).toBe("A1");
+  });
+
+  it("falls back to an Item column only when nothing names the code", () => {
+    const rows = parseExcelInput(
+      makeWorkbookBuffer([
+        ["Page", "Item", "Description", "Uom", "Quantity", "Rate"],
+        [1, "1.1", "Excavation", "m3", 10, 5],
+      ]),
+    );
+
+    expect(rows[0].code).toBe("1.1");
+  });
+
+  it("skips the label line under the header but reports a row with words for numbers", () => {
+    const rows = parseExcelInput(
+      makeWorkbookBuffer([
+        ["S.N.", "Description", "Unit", "Quantity", "Rate per unit"],
+        ["", "", "", "", "In Figure"],
+        ["A1", "Excavation", "m3", 10, 5],
+        ["", "Backfill", "m3", "TBD", "TBD"],
+      ]),
+    );
+
+    expect(rows.map((row) => row.description)).toEqual(["Excavation", "Backfill"]);
+    const result = validateBoqRows(rows);
+    expect(result.valid).toBe(false);
+    expect(result.errors).toContainEqual(
+      expect.objectContaining({ row: 4, field: "quantity" }),
+    );
+    expect(result.errors).toContainEqual(
+      expect.objectContaining({ row: 4, field: "code" }),
+    );
+  });
 });

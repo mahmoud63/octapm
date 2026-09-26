@@ -9,13 +9,11 @@ const HEADER_ALIASES = {
   "item no.": "code",
   "item number": "code",
   "item code": "code",
-  item: "code",
   "s.n.": "code",
   "s.n": "code",
   sn: "code",
   "sr no": "code",
   "sr. no.": "code",
-  "ref": "code",
   no: "code",
   "no.": "code",
   desc: "description",
@@ -35,6 +33,11 @@ const HEADER_ALIASES = {
   "total amount": "amount",
   "line total": "amount",
 };
+
+// "Item" and "Ref" name the code column on some tender bills and a drawing
+// or clause reference on others, so they stand in for the code only when no
+// column names it outright.
+const FALLBACK_CODE_HEADERS = new Set(["item", "ref", "ref."]);
 
 // A validation failure on a big workbook must come back as one readable
 // answer, not one line per row of a 7,000-row tender bill.
@@ -69,10 +72,22 @@ function parseWorkbookRows(workbook) {
   for (let i = 0; i < Math.min(5, rows.length); i += 1) {
     const rowHeaders = rows[i].map(normalizeHeader);
     const map = {};
+    let fallbackCode;
     rowHeaders.forEach((header, index) => {
+      if (FALLBACK_CODE_HEADERS.has(header)) {
+        if (fallbackCode === undefined) fallbackCode = index;
+        return;
+      }
       const canonical = HEADER_ALIASES[header] || header;
-      if (REQUIRED_HEADERS.includes(canonical)) map[canonical] = index;
+      // The first column with a name wins: a trailing "Ref" or "Item"
+      // column must never quietly take the place of "Item No".
+      if (REQUIRED_HEADERS.includes(canonical) && map[canonical] === undefined) {
+        map[canonical] = index;
+      }
     });
+    if (map.code === undefined && fallbackCode !== undefined) {
+      map.code = fallbackCode;
+    }
     if (Object.keys(map).length >= 3) {
       headerRowIdx = i;
       columnMap = map;
@@ -113,9 +128,19 @@ function parseWorkbookRows(workbook) {
     if (!rawCode && !rawDesc && !rawQty && !rawUnit && !rawRate) continue;
     if (!rawQty && !rawRate) continue;
     // A second header line under the first ("In figure" / "In words" beneath
-    // "Rate") has words where the numbers go and no item code: a label, not
-    // a row to price.
-    if (!rawCode && !isNumeric(rawQty) && !isNumeric(rawRate)) continue;
+    // "Rate") has words where the numbers go and neither code nor
+    // description: a label, not a row to price. Only the line directly under
+    // the header, or a line with nothing to identify it, is a label — a real
+    // row with "TBD" for its quantity must reach validation and be reported,
+    // never dropped in silence.
+    if (
+      !rawCode &&
+      !isNumeric(rawQty) &&
+      !isNumeric(rawRate) &&
+      (i === 0 || !rawDesc)
+    ) {
+      continue;
+    }
 
     parsed.push({
       rowIndex: i + headerRowIdx + 2,
