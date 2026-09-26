@@ -176,9 +176,17 @@ export const BoqRevisionSummarySchema = z.object({
   projectId: z.string(),
   revisionNumber: z.number(),
   label: z.string().nullable(),
-  status: z.enum(['imported', 'comparison_only', 'baselined', 'superseded']),
+  status: z.enum([
+    'imported',
+    'comparison_only',
+    'under_review',
+    'approved',
+    'baselined',
+    'superseded',
+  ]),
   baselineLocked: z.boolean(),
   lockedAt: z.string().nullable().optional(),
+  lockedBy: z.string().nullable().optional(),
   itemCount: z.number(),
   addedCount: z.number(),
   updatedCount: z.number(),
@@ -244,6 +252,7 @@ export type ActivityBoqAllocation = z.infer<typeof ActivityBoqAllocationSchema>
 export type AllocationSummary = z.infer<typeof AllocationSummarySchema>
 export type BoqBaselineState = z.infer<typeof BoqBaselineStateSchema>
 export type BoqRevisionSummary = z.infer<typeof BoqRevisionSummarySchema>
+export type BoqRevisionStatus = BoqRevisionSummary['status']
 export type ProjectBoq = z.infer<typeof ProjectBoqSchema>
 export type ExtraService = z.infer<typeof ExtraServiceSchema>
 export type CreateBoqItemInput = z.infer<typeof CreateBoqItemInputSchema>

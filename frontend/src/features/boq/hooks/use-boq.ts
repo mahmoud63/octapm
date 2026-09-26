@@ -7,6 +7,8 @@ import type {
   ProjectBoq,
   ActivityBoqAllocation,
   AllocationSummary,
+  BoqBaselineState,
+  BoqRevisionSummary,
   CreateBoqItemInput,
   CreateBoqActivityInput,
   UpdateBoqActivityInput,
@@ -410,6 +412,92 @@ export function useRejectActivityBoqAllocation(projectId: string) {
       toast.error(
         err.response?.data?.error?.message ?? 'Failed to reject allocation'
       )
+    },
+  })
+}
+
+// The revision review (PC-2): submit → approve → lock. Each step changes the
+// revision's standing, never its rows, so the bill, its history and the
+// readiness gates are refreshed and nothing else.
+const invalidateRevisionConsumers = async (
+  qc: ReturnType<typeof useQueryClient>,
+  projectId: string
+) => {
+  await Promise.all([
+    qc.invalidateQueries({ queryKey: ['boq', projectId] }),
+    qc.invalidateQueries({ queryKey: ['audit-events', projectId] }),
+    qc.invalidateQueries({ queryKey: projectSetupReadinessKey(projectId) }),
+  ])
+}
+
+type RevisionReviewInput = { revisionId: string; comment?: string | null }
+
+const reviewRevision = (
+  projectId: string,
+  step: 'submit' | 'approve',
+  { revisionId, comment }: RevisionReviewInput
+) =>
+  apiClient
+    .post(
+      `/projects/${projectId}/boq/revisions/${revisionId}/${step}`,
+      comment?.trim() ? { comment: comment.trim() } : {}
+    )
+    .then((r) => r.data.data as BoqRevisionSummary)
+
+export function useSubmitBoqRevision(projectId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (input: RevisionReviewInput) =>
+      reviewRevision(projectId, 'submit', input),
+    onSuccess: async () => {
+      toast.success('BOQ revision submitted for review')
+      await invalidateRevisionConsumers(qc, projectId)
+    },
+    onError: (err: AxiosError<ApiErrorResponse>) => {
+      toast.error(apiErrorMessage(err, 'Failed to submit revision'))
+    },
+  })
+}
+
+export function useApproveBoqRevision(projectId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (input: RevisionReviewInput) =>
+      reviewRevision(projectId, 'approve', input),
+    onSuccess: async () => {
+      toast.success('BOQ revision approved')
+      await invalidateRevisionConsumers(qc, projectId)
+    },
+    onError: (err: AxiosError<ApiErrorResponse>) => {
+      toast.error(apiErrorMessage(err, 'Failed to approve revision'))
+    },
+  })
+}
+
+export type BoqBaselineLockResult = {
+  revision: BoqRevisionSummary
+  lockedRows: number
+  baseline: BoqBaselineState
+}
+
+export function useLockBoqBaseline(projectId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ revisionId, comment }: RevisionReviewInput) =>
+      apiClient
+        .post(
+          `/projects/${projectId}/boq/revisions/${revisionId}/lock`,
+          comment?.trim() ? { comment: comment.trim() } : {}
+        )
+        .then((r) => r.data.data as BoqBaselineLockResult),
+    onSuccess: async (result) => {
+      toast.success(
+        `BOQ baseline locked on revision ${result.revision.revisionNumber}`
+      )
+      await invalidateRevisionConsumers(qc, projectId)
+    },
+    onError: (err: AxiosError<ApiErrorResponse>) => {
+      toast.error(apiErrorMessage(err, 'Failed to lock the BOQ baseline'))
     },
   })
 }
