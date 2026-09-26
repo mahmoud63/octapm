@@ -26,6 +26,7 @@ import {
   type ModuleKey,
   type ModuleWithChildren,
 } from '../lib/project-modules'
+import { ControlsStrip } from './controls-strip'
 import { ProjectModuleBar } from './project-module-bar'
 import { ProjectSetupWizard } from './project-setup-wizard'
 import { ProjectStatusBadge } from './project-status-badge'
@@ -839,6 +840,20 @@ export function ProjectDetail({
               </span>
               <ProjectStatusBadge status={project.status} />
             </div>
+
+            {/* The Overview is the project landing (L3): the controls strip
+                first — readiness, BOQ revision, coverage, schedule, progress
+                method, every figure from the readiness check's derived
+                services — then the setup checklist under it. */}
+            {visibleModule === 'overview' && (
+              <ControlsStrip
+                projectId={projectId}
+                readiness={setupReadiness}
+                isLoading={setupReadinessLoading}
+                currency={project.currency}
+                onNavigate={handleSetupNavigate}
+              />
+            )}
 
             {/* Setup Readiness is a project setup checklist, so it belongs on
                 Overview. Carrying it into Budget, Gantt or Drawings would take

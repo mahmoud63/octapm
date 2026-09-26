@@ -1,21 +1,13 @@
-import { createFileRoute, redirect } from '@tanstack/react-router'
-import {
-  DEFAULT_CHILD,
-  slugForModule,
-} from '@/features/projects/lib/project-modules'
+import { createFileRoute } from '@tanstack/react-router'
+import { ProjectOverviewPage } from '@/features/projects/components/project-detail-page'
 
-/** `/o/:workspace/projects/:id` opens the default module (schedule › gantt). */
+/**
+ * `/o/:workspace/projects/:id` lands on the Overview (L3, workspace
+ * switching doc §7): the controls strip and the setup readiness checklist,
+ * then the project's details. The Gantt is one module away in the module
+ * bar; it used to be the landing, which put a planner's working screen in
+ * front of everyone who opened the project.
+ */
 export const Route = createFileRoute('/_authenticated/o/$orgSlug/projects/$projectId/')({
-  beforeLoad: ({ params }) => {
-    throw redirect({
-      to: '/o/$orgSlug/projects/$projectId/$module/$child',
-      params: {
-        orgSlug: params.orgSlug,
-        projectId: params.projectId,
-        module: slugForModule('schedule'),
-        child: DEFAULT_CHILD.schedule,
-      },
-      replace: true,
-    })
-  },
+  component: ProjectOverviewPage,
 })
