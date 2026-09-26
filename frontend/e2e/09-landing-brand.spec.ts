@@ -153,6 +153,74 @@ test.describe('landing page brand', () => {
     expect(seen.next?.running, 'the reel stalled after the fade').toBe(true)
   })
 
+  test('the product frame plays the workspace, silently and on a loop', async ({
+    page,
+  }) => {
+    await page.goto('/landing')
+
+    const frame = page.getByTestId('uat-landing-product-frame')
+    await expect(frame).toBeVisible()
+
+    // The still is always there: it is what a browser that will not play WebM
+    // shows, and what fills the frame until the film arrives.
+    const poster = frame.locator('img').first()
+    await expect(poster).toBeVisible()
+    const stillLoaded = await poster.evaluate(
+      (el) => (el as HTMLImageElement).naturalWidth > 0
+    )
+    expect(stillLoaded, 'the poster still did not load').toBe(true)
+
+    const film = page.getByTestId('uat-landing-product-film')
+    await expect(film).toHaveCount(1)
+
+    // A picture, not a player: silent, looping, no controls, and out of reach
+    // of the keyboard and assistive technology — the caption speaks for it.
+    const shape = await film.evaluate((el) => {
+      const video = el as HTMLVideoElement
+      return {
+        muted: video.muted,
+        loop: video.loop,
+        controls: video.controls,
+        hidden: video.getAttribute('aria-hidden'),
+        tabIndex: video.tabIndex,
+        source: video.currentSrc || video.src,
+      }
+    })
+    expect(shape.muted, 'the film would make noise').toBe(true)
+    expect(shape.loop, 'the film would stop at the end').toBe(true)
+    expect(shape.controls).toBe(false)
+    expect(shape.hidden).toBe('true')
+    expect(shape.tabIndex).toBe(-1)
+    expect(shape.source, 'the film has no source').toBeTruthy()
+
+    // The file is really served, and it is really a film.
+    const answer = await page.request.get(shape.source)
+    expect(answer.status(), 'the film is not served').toBe(200)
+    expect(answer.headers()['content-type'] ?? '').toMatch(/video/)
+
+    // And it is moving.
+    await expect
+      .poll(
+        async () => film.evaluate((el) => (el as HTMLVideoElement).currentTime),
+        { timeout: 15000, message: 'the film never started' }
+      )
+      .toBeGreaterThan(0)
+  })
+
+  test.describe('with less motion asked for', () => {
+    test.use({ reducedMotion: 'reduce' })
+
+    test('the frame holds still instead of playing', async ({ page }) => {
+      await page.goto('/landing')
+
+      const frame = page.getByTestId('uat-landing-product-frame')
+      await expect(frame).toBeVisible()
+      await expect(frame.locator('img').first()).toBeVisible()
+      // No film is rendered at all, so nothing is fetched to play.
+      await expect(page.getByTestId('uat-landing-product-film')).toHaveCount(0)
+    })
+  })
+
   test('the logo is the eight-octagon ring, not a text fallback', async ({
     page,
   }) => {

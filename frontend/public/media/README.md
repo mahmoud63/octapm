@@ -64,3 +64,23 @@ VITE_LANDING_VIDEO_BASE=https://octapm-web-media.s3.eu-west-1.amazonaws.com
 `VITE_LANDING_VIDEO_URL` keeps the same list of names; the base is what moves them. With no base
 set the names are used as they stand, which is how they are served from this directory in
 development. With no films named at all, the hero paints the brand ground and requests nothing.
+
+## The product tour
+
+The hero's window frame plays `product-tour.webm`: eight seconds of the real workspace, filmed
+on the seeded showcase project and looping without a cut. It follows the same rule as the reel —
+served from object storage, ignored by git — while `product-tour-poster.png` beside it is
+committed: it is the still that fills the frame until the film arrives, that older Safari (which
+does not play WebM) shows instead, and that people who ask for less motion keep.
+
+To film it again after the interface changes:
+
+```bash
+cd frontend
+node scripts/film-product-tour.mjs <showcase project id>
+```
+
+It needs the API on :5000 and the web app on :5173, and the showcase project from
+`node backend/scripts/demo/seed-showcase-project.js`. The deployment points
+`VITE_PRODUCT_FILM_URL` at the published film, or leaves it and lets `VITE_LANDING_VIDEO_BASE`
+carry it with the reel.
