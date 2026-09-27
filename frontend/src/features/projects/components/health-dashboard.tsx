@@ -1,4 +1,5 @@
 import { formatLongDate } from '@/lib/dates'
+import { formatEvCutoff, formatEvCutoffDate, type EvCutoff } from '@/lib/ev-cutoff'
 import { statusBadge } from '@/lib/status'
 import { cn } from '@/lib/utils'
 import { Badge } from '@/components/ui/badge'
@@ -56,6 +57,9 @@ type HealthResponse = {
   dataFreshness?: {
     generatedAt?: string
     cutoffDate?: string | null
+    cutoffLocalDate?: string | null
+    cutoffTimeZone?: string | null
+    cutoffTimeZoneSource?: string | null
     sourceUpdatedAt?: string | null
     note?: string
   }
@@ -85,8 +89,9 @@ function scoreLabel(score: number) {
   return 'Poor'
 }
 
-// A reporting cutoff is a calendar date: render it in UTC so it does not shift
-// a day for anyone west of it. See lib/dates.ts.
+// A stored calendar date: render it in UTC so it does not shift a day for
+// anyone west of it (lib/dates.ts). The EV cutoff is stated by
+// lib/ev-cutoff.ts, in the project's time zone.
 function formatDate(value?: string | null) {
   if (!value) return 'No cutoff'
   return formatLongDate(value)
@@ -229,7 +234,7 @@ function DimensionCard({
   score,
   detail,
   sourceRule,
-  cutoffDate,
+  cutoffLabel,
   currency,
 }: {
   dimensionKey: string
@@ -237,7 +242,8 @@ function DimensionCard({
   score: number
   detail: HealthDimensionDetail
   sourceRule?: HealthDimension['sourceRule']
-  cutoffDate?: string | null
+  /** The EV cutoff's calendar date, as the one formatter states it. */
+  cutoffLabel: string
   currency?: string | null
 }) {
   const color = scoreColor(score)
@@ -246,7 +252,7 @@ function DimensionCard({
     : []
   const metrics = readableMetrics(dimensionKey, detail, currency)
   const anyWithheld = metrics.some((metric) => metric.withheld)
-  const provenance = `${sourceRule?.source || 'Official source'} through ${formatDate(cutoffDate)}`
+  const provenance = `${sourceRule?.source || 'Official source'} through ${cutoffLabel}`
 
   return (
     <div
@@ -347,6 +353,16 @@ export function HealthDashboard({ projectId, currency }: Props) {
   const dimensions = data.dimensions || []
   const pendingReview = data.pendingReview?.metrics || []
   const freshness = data.dataFreshness
+  // One cutoff for every card: the end of this date in the project's zone.
+  const evCutoff: EvCutoff = {
+    cutoffDate: freshness?.cutoffDate,
+    cutoffLocalDate: freshness?.cutoffLocalDate,
+    timeZone: freshness?.cutoffTimeZone,
+    timeZoneSource: freshness?.cutoffTimeZoneSource,
+  }
+  // A card's cutoff is the report's; any other date is shown as a date.
+  const cutoffLabel = (value?: string | null) =>
+    !value || value === freshness?.cutoffDate ? formatEvCutoffDate(evCutoff) : formatDate(value)
   const radarData = dimensions.map((d) => ({
     subject: d.label,
     score: d.score,
@@ -365,7 +381,7 @@ export function HealthDashboard({ projectId, currency }: Props) {
             {scoreLabel(overallScore)}
           </p>
           <p className='mt-2 text-xs text-muted-foreground' data-testid='uat-health-cutoff'>
-            EV cutoff {formatDate(freshness?.cutoffDate)}
+            EV cutoff {formatEvCutoff(evCutoff)}
           </p>
         </div>
 
@@ -399,7 +415,7 @@ export function HealthDashboard({ projectId, currency }: Props) {
               d.sourceRule ||
               (d.detail?.sourceRule as HealthDimension['sourceRule'])
             }
-            cutoffDate={d.cutoffDate || (d.detail?.cutoffDate as string | null)}
+            cutoffLabel={cutoffLabel(d.cutoffDate || (d.detail?.cutoffDate as string | null))}
           />
         ))}
       </div>
@@ -409,7 +425,7 @@ export function HealthDashboard({ projectId, currency }: Props) {
           {pendingReview.map((metric) => (
             <div
               key={metric.key}
-              title={`${labelForMetric(metric.source)} through ${formatDate(metric.cutoffDate)}`}
+              title={`${labelForMetric(metric.source)} through ${cutoffLabel(metric.cutoffDate)}`}
               className='relative overflow-hidden rounded-md border bg-card p-3 shadow-[var(--shadow-card)]'
             >
               <span aria-hidden className='absolute inset-y-0 left-0 w-[3px] bg-warning' />
@@ -428,7 +444,7 @@ export function HealthDashboard({ projectId, currency }: Props) {
                 Pending review
               </Badge>
               <p className='mt-2 truncate text-[11px] text-muted-foreground'>
-                {labelForMetric(metric.source)} · {formatDate(metric.cutoffDate)}
+                {labelForMetric(metric.source)} · {cutoffLabel(metric.cutoffDate)}
               </p>
             </div>
           ))}

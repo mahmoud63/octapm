@@ -317,6 +317,13 @@ const buildForecast = async ({ orgId, projectId, asOf = new Date() }) => {
   const projectedCost = round(Math.max(eac ?? 0, bottomUp), 2);
   const costOverrun = round(projectedCost - totalBudget, 2);
   const lines = budgetLineRisks(ctx.budgetLines);
+  // Which rule gave the EAC (the EV report's, unchanged): revised BAC / CPI
+  // when there is cost performance, the revised BAC itself when there is
+  // none — said, so no screen presents the budget as a projection.
+  const eacBasis = !ev || eac === null ? null : bac <= 0 ? "no_budget" : ev.cpi !== null && ev.cpi !== undefined && Number(ev.cpi) > 0 ? "budget_over_cpi" : "budget_no_cost_performance";
+  const earnedValueCutoff = ev && ev.reporting
+    ? { cutoffDate: ev.reporting.cutoffDate || null, cutoffLocalDate: ev.reporting.cutoffLocalDate || null, timeZone: ev.reporting.timeZone || null, timeZoneSource: ev.reporting.timeZoneSource || null }
+    : null;
 
   const scheduleRisks = open.filter((activity) => activity.score > 0).sort((a, b) => b.score - a.score || b.slipDays - a.slipDays).slice(0, 15);
   const costRisks = activities.filter((activity) => activity.cost.overrun > 0).sort((a, b) => b.cost.overrun - a.cost.overrun).slice(0, 10);
@@ -353,9 +360,16 @@ const buildForecast = async ({ orgId, projectId, asOf = new Date() }) => {
       counts: { activities: activities.length, open: open.length, complete: activities.length - open.length, critical: open.filter((activity) => activity.isCritical).length, atRisk: levels(scheduleRisks) },
       topRisks: scheduleRisks,
     },
+    // The earned-value cutoff the SPI, CPI and EAC above were measured
+    // through: the end of this calendar date in this time zone.
+    earnedValueCutoff,
     cost: {
       budget: round(totalBudget, 2),
+      // The revised BAC the EAC was computed from (the EV report's
+      // totalBudget: approved allocations plus approved budget revisions).
+      bac: ev ? round(bac, 2) : null,
       eac,
+      eacBasis,
       bottomUp,
       projected: projectedCost,
       overrun: costOverrun,

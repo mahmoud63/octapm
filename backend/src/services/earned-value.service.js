@@ -15,6 +15,11 @@ const approvalWorkflowService = require("./approval-workflow.service");
 const auditService = require("./audit.service");
 const setupReadinessService = require("./project-setup-readiness.service");
 const { normalizeRoleId } = require("../config/permissions");
+const {
+  isValidTimeZone,
+  resolveReportingCutoff,
+  resolveReportingTimeZone,
+} = require("../utils/reporting-cutoff");
 
 const FORMULA_VERSION = "ev.v2";
 const APPROVED = "approved";
@@ -50,7 +55,7 @@ const EV_FORMULAS = Object.freeze({
   cpi: "CPI = EV / AC when AC > 0; otherwise null",
   eac: "EAC = revised BAC / CPI when CPI > 0; otherwise revised BAC",
   cutoff:
-    "A reporting period cutoffDate is authoritative. Ad hoc cutoffDate is allowed for open calculations but is not a locked snapshot.",
+    "A reporting period cutoffDate is authoritative. It is a calendar date that ends at the end of that date in the project time zone (Project.timezone, else the organisation default time zone, else UTC); PV, EV and AC are selected against that one instant. Ad hoc cutoffDate is allowed for open calculations but is not a locked snapshot.",
   budgetRevisions:
     "Approved BudgetRevision rows effective on/before cutoffDate adjust revised BAC. PV still requires approved time-phased cost loading.",
   progressMethods:
@@ -76,12 +81,38 @@ const parseDate = (value, field = "date") => {
 
 const toIso = (value) => (value ? new Date(value).toISOString() : null);
 
-const dateKey = (date) => new Date(date).toISOString().slice(0, 10);
+/**
+ * The zone a project's reporting cutoff is read in (owner decision D1):
+ * Project.timezone, else the workspace's Organisation.defaultTimezone, else
+ * UTC. The organisation row is read whole so a client generated before the
+ * column existed simply finds none and falls back to UTC.
+ */
+const resolveProjectReportingZone = async (project, tx = prisma) => {
+  let organisation = null;
+  if (!isValidTimeZone(project?.timezone) && project?.orgId) {
+    organisation =
+      (await tx.organisation?.findUnique?.({ where: { id: project.orgId } })) ||
+      null;
+  }
+  return resolveReportingTimeZone({ project, organisation });
+};
 
-const endOfDay = (date) => {
-  const next = new Date(date);
-  next.setHours(23, 59, 59, 999);
-  return next;
+/**
+ * THE reporting cutoff: the end of the cutoff's calendar date in the
+ * project's reporting zone. PV, EV and AC — and the budget revisions in
+ * force — are all selected against the one instant this returns; the
+ * server's own time zone plays no part (utils/reporting-cutoff).
+ */
+const resolveCutoff = (value, zone) => {
+  try {
+    return resolveReportingCutoff({
+      value,
+      timeZone: zone.timeZone,
+      timeZoneSource: zone.source,
+    });
+  } catch {
+    throw new HttpError(400, "INVALID_DATE", "cutoffDate is invalid");
+  }
 };
 
 const isOnOrBefore = (value, cutoffDate) => {
@@ -199,26 +230,28 @@ const serializePeriod = (period) =>
       }
     : null;
 
-const buildVirtualPeriod = ({ project, cutoffDate }) => {
-  const cutoff = endOfDay(cutoffDate || new Date());
-  const periodStart = buildMonthStart(cutoff);
-  const code = `ADHOC-${dateKey(cutoff)}`;
+// An ad hoc period: the calendar date asked for (or today, in the project's
+// reporting zone), ending at that local day's end.
+const buildVirtualPeriod = ({ project, cutoffDate, zone }) => {
+  const cutoff = resolveCutoff(cutoffDate || new Date(), zone);
+  const periodStart = new Date(`${cutoff.localDate.slice(0, 7)}-01T00:00:00.000Z`);
+  const code = `ADHOC-${cutoff.localDate}`;
 
   return {
     id: null,
     projectId: project.id,
     code,
-    label: `Ad hoc ${dateKey(cutoff)}`,
+    label: `Ad hoc ${cutoff.localDate}`,
     periodStart,
-    periodEnd: cutoff,
-    cutoffDate: cutoff,
+    periodEnd: cutoff.cutoffDate,
+    cutoffDate: cutoff.cutoffDate,
     status: OPEN_PERIOD,
     isVirtual: true,
   };
 };
 
 const resolveReportingPeriod = async (
-  { project, periodId = null, cutoffDate = null },
+  { project, periodId = null, cutoffDate = null, zone },
   tx = prisma,
 ) => {
   if (periodId) {
@@ -239,10 +272,9 @@ const resolveReportingPeriod = async (
   }
 
   if (cutoffDate) {
-    return buildVirtualPeriod({
-      project,
-      cutoffDate: parseDate(cutoffDate, "cutoffDate"),
-    });
+    // A calendar date (YYYY-MM-DD) is that date; a date-time names the date
+    // it falls on in the reporting zone.
+    return buildVirtualPeriod({ project, cutoffDate, zone });
   }
 
   const latest = await tx.reportingPeriod.findFirst({
@@ -251,7 +283,7 @@ const resolveReportingPeriod = async (
     include: { evSnapshot: true },
   });
 
-  return latest || buildVirtualPeriod({ project, cutoffDate: new Date() });
+  return latest || buildVirtualPeriod({ project, cutoffDate: new Date(), zone });
 };
 
 const getApprovedBudgetRevisions = async (
@@ -492,15 +524,22 @@ const buildOfficialEvReport = async ({
   tx = prisma,
 }) => {
   const project = await ensureProject({ orgId, projectId }, tx);
+  const zone = await resolveProjectReportingZone(project, tx);
   const period = await resolveReportingPeriod(
-    { project, periodId, cutoffDate },
+    { project, periodId, cutoffDate, zone },
     tx,
   );
-  const resolvedCutoffDate = endOfDay(period.cutoffDate);
 
+  // A locked period answers with what it stored: never recomputed, never
+  // re-read against today's zone.
   if (useLockedSnapshot && period.evSnapshot) {
     return snapshotToReport({ snapshot: period.evSnapshot, period });
   }
+
+  // One instant for PV, EV, AC and the budget revisions in force: the end
+  // of the period's cutoff date in the project's reporting zone (D1).
+  const cutoff = resolveCutoff(period.cutoffDate, zone);
+  const resolvedCutoffDate = cutoff.cutoffDate;
 
   const [
     activities,
@@ -723,6 +762,11 @@ const buildOfficialEvReport = async ({
       projectCalendar: project.projectCalendar || null,
       asOfDate: new Date().toISOString(),
       cutoffDate: toIso(resolvedCutoffDate),
+      // What the instant is: the end of this calendar date in this zone,
+      // and where the zone came from (project, organisation or utc).
+      cutoffLocalDate: cutoff.localDate,
+      timeZone: cutoff.timeZone,
+      timeZoneSource: cutoff.timeZoneSource,
       period: serializePeriod(period),
       formulaVersion: FORMULA_VERSION,
       isSnapshot: false,
@@ -794,9 +838,16 @@ const listReportingPeriods = async ({ orgId, projectId }) => {
     orderBy: [{ cutoffDate: "desc" }, { createdAt: "desc" }],
   });
 
+  // Each period's cutoff date as the reports read it back: the calendar date
+  // its stored instant falls on in the project's reporting zone.
+  const zone = await resolveProjectReportingZone(project);
   return {
     periods: rows.map((row) => ({
       ...serializePeriod(row),
+      cutoffLocalDate: row.cutoffDate
+        ? resolveCutoff(row.cutoffDate, zone).localDate
+        : null,
+      timeZone: zone.timeZone,
       snapshot: row.evSnapshot
         ? {
             id: row.evSnapshot.id,
@@ -814,14 +865,14 @@ const listReportingPeriods = async ({ orgId, projectId }) => {
 };
 
 const createReportingPeriod = async ({ orgId, projectId, userId, payload }) => {
-  await ensureProject({ orgId, projectId });
+  const project = await ensureProject({ orgId, projectId });
   const periodStart = parseDate(payload.periodStart, "periodStart");
   const periodEnd = parseDate(payload.periodEnd, "periodEnd");
-  const cutoffDate = endOfDay(
-    payload.cutoffDate
-      ? parseDate(payload.cutoffDate, "cutoffDate")
-      : periodEnd,
-  );
+  // The stored cutoff is the instant the period's cutoff date ends in the
+  // project's reporting zone (D1); a report reads the same date back from it.
+  const zone = await resolveProjectReportingZone(project);
+  const cutoff = resolveCutoff(payload.cutoffDate || payload.periodEnd, zone);
+  const cutoffDate = cutoff.cutoffDate;
 
   if (periodEnd < periodStart) {
     throw new HttpError(
@@ -831,12 +882,7 @@ const createReportingPeriod = async ({ orgId, projectId, userId, payload }) => {
     );
   }
 
-  const code =
-    payload.code?.trim() ||
-    `${cutoffDate.getFullYear()}-${String(cutoffDate.getMonth() + 1).padStart(
-      2,
-      "0",
-    )}`;
+  const code = payload.code?.trim() || cutoff.localDate.slice(0, 7);
 
   return prisma.reportingPeriod.create({
     data: {

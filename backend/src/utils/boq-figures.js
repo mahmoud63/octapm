@@ -190,7 +190,7 @@ const withheldEvReport = (report, access = FULL_ACCESS) => {
 // the reasons, which state them), the project's budget, EAC, bottom-up,
 // projection, overrun and spend, and each budget line's amounts.
 const FORECAST_ACTIVITY_COST_KEYS = ["budget", "actual", "committed", "projected", "overrun", "overrunPct", "reasons"];
-const FORECAST_COST_KEYS = ["budget", "eac", "bottomUp", "projected", "overrun", "overrunPct", "actual"];
+const FORECAST_COST_KEYS = ["budget", "bac", "eac", "bottomUp", "projected", "overrun", "overrunPct", "actual"];
 const FORECAST_LINE_KEYS = ["revised", "committed", "actual", "forecast", "overrun", "overrunPct"];
 
 const withheldForecastActivity = (activity) =>

@@ -669,6 +669,12 @@ router.get(
       dataFreshness: {
         generatedAt,
         cutoffDate,
+        // The EV cutoff is the end of this calendar date in this time zone
+        // (the project's, else the organisation's, else UTC). A locked
+        // period stored before the zone was recorded carries none.
+        cutoffLocalDate: evReport.reporting?.cutoffLocalDate || null,
+        cutoffTimeZone: evReport.reporting?.timeZone || null,
+        cutoffTimeZoneSource: evReport.reporting?.timeZoneSource || null,
         sourceUpdatedAt: toIso(project.updatedAt),
         note: "Official health dimensions use approved or active source records through cutoff; pending-review metrics are displayed separately.",
       },

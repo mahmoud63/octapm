@@ -4863,7 +4863,11 @@ const components = {
         label: { type: "string", maxLength: 120 },
         periodStart: dateString,
         periodEnd: dateString,
-        cutoffDate: dateString,
+        cutoffDate: {
+          ...dateString,
+          description:
+            "The period's cutoff date (defaults to periodEnd). A calendar date (YYYY-MM-DD) is that date; a date-time names the date it falls on in the project's reporting time zone. The cutoff ends at the END of that date in Project.timezone, else the organisation's defaultTimezone, else UTC — the stored cutoffDate is that instant, and PV, EV and AC are all selected against it.",
+        },
       },
       ["periodStart", "periodEnd"],
     ),
@@ -5008,7 +5012,11 @@ const components = {
         sv: signedMoney,
         cv: signedMoney,
         etc: signedMoney,
-        reporting: ref("GenericObject"),
+        reporting: {
+          ...ref("GenericObject"),
+          description:
+            "cutoffDate is the one instant PV (approved cost loading planned on or before it), EV (progress approved on or before it) and AC (cost records whose actualThroughDate is on or before it) are selected against: the end of cutoffLocalDate (YYYY-MM-DD) in timeZone (IANA), whose timeZoneSource says where the zone came from — project (Project.timezone), organisation (Organisation.defaultTimezone) or utc. A locked period answers with its stored snapshot (isSnapshot true), never recomputed; a snapshot stored before the zone was recorded carries no timeZone.",
+        },
         basis: ref("GenericObject"),
         sourceSummary: ref("GenericObject"),
         estimates: ref("GenericObject"),
@@ -8480,7 +8488,11 @@ add(
     parameters: [
       ...projectParams,
       queryParam("periodId", "Optional reporting period UUID.", uuid),
-      queryParam("cutoffDate", "Optional ISO cutoff date.", dateString),
+      queryParam(
+        "cutoffDate",
+        "Optional ad hoc cutoff: a calendar date (YYYY-MM-DD) or a date-time (the date it falls on in the project's reporting time zone). The report runs to the end of that date in Project.timezone, else the organisation's defaultTimezone, else UTC.",
+        dateString,
+      ),
     ],
     permissions: modulePermission("cost", "read"),
   }),
@@ -11044,7 +11056,7 @@ addGenericRoute({
   tag: "Health",
   summary: "Get seven-dimension project health scoring.",
   description:
-    "Returns official project health dimensions with sourceRule, cutoffDate, and drill-through targets, plus a separate pendingReview block for submitted progress, IPC, change orders, and submittals that do not feed official scores. The cost dimension's unallocatedBoqAmount is given only to a caller who may read the BOQ; its ac and ev only to a caller who may read the BOQ or the cost module (absent, not zero, otherwise — the score and cpi stay). The schedule dimension's delayedActivities is counted as of today (the latest progress), not as of the cutoff.",
+    "Returns official project health dimensions with sourceRule, cutoffDate, and drill-through targets, plus a separate pendingReview block for submitted progress, IPC, change orders, and submittals that do not feed official scores. The cost dimension's unallocatedBoqAmount is given only to a caller who may read the BOQ; its ac and ev only to a caller who may read the BOQ or the cost module (absent, not zero, otherwise — the score and cpi stay). The schedule dimension's delayedActivities is counted as of today (the latest progress), not as of the cutoff. dataFreshness.cutoffDate is the earned-value cutoff instant: the end of dataFreshness.cutoffLocalDate in dataFreshness.cutoffTimeZone (the project's time zone, else the organisation's default, else UTC — cutoffTimeZoneSource says which); a locked period stored before the zone was recorded gives null for the zone.",
   operationId: "getProjectHealth",
 });
 

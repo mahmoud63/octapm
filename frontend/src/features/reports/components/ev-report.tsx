@@ -35,6 +35,7 @@ import type {
 } from '@/features/projects/data/schema'
 import { useProjectSetupReadiness } from '@/features/projects/hooks/use-projects'
 import { formatLongDate } from '@/lib/dates'
+import { formatEvCutoff } from '@/lib/ev-cutoff'
 
 interface Props {
   projectId: string
@@ -47,6 +48,8 @@ type ReportingPeriod = {
   code: string
   label: string
   cutoffDate: string
+  /** The cutoff's calendar date in the project's reporting time zone. */
+  cutoffLocalDate?: string | null
   status: string
   /** A locked period's stored EV figures (GET /reports/periods). */
   snapshot?: { ev?: number | string | null; lockedAt?: string | null } | null
@@ -86,6 +89,9 @@ type EvReportResponse = {
   reporting?: {
     period?: Pick<ReportingPeriod, 'label' | 'code'> | null
     cutoffDate?: string | null
+    cutoffLocalDate?: string | null
+    timeZone?: string | null
+    timeZoneSource?: string | null
     isSnapshot?: boolean
   }
   sourceSummary?: {
@@ -118,23 +124,6 @@ function fmt(value: number | null | undefined) {
   return `${prefix}${abs.toFixed(0)}`
 }
 
-/**
- * The reporting cutoff is a calendar date (the period's end): it is shown
- * as that date, in UTC, exactly as the Overview's health card shows it, so
- * the two never disagree by a day. The instant the figures were evaluated
- * through is stated beside it, with its time zone.
- */
-function formatCutoff(value: string | null | undefined) {
-  return value ? formatLongDate(value) : '-'
-}
-
-function formatCutoffInstant(value: string | null | undefined) {
-  if (!value) return null
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return null
-  return `${date.toISOString().slice(0, 19).replace('T', ' ')} UTC`
-}
-
 // The S-curve's months are labelled "Aug 26" (the server's month labels).
 const monthLabel = (value: string) =>
   new Intl.DateTimeFormat('en-GB', {
@@ -162,12 +151,15 @@ type SCurvePoint = { label: string; pv: number | null; ev: number | null }
 function shapeSCurve({
   sCurve,
   cutoffDate,
+  cutoffLocalDate,
   ev,
   pv,
   periods,
 }: {
   sCurve?: Record<string, string | number | null>[]
   cutoffDate?: string | null
+  /** The cutoff's calendar date in the project's zone: its month is the point's. */
+  cutoffLocalDate?: string | null
   ev: number | null
   pv: number | null
   periods: ReportingPeriod[]
@@ -179,9 +171,11 @@ function shapeSCurve({
   }))
   const reportCutoff = cutoffDate ? new Date(cutoffDate).getTime() : Number.POSITIVE_INFINITY
   const measured = new Map<string, { at: number; ev: number }>()
-  const record = (at: string, value: number) => {
+  // A cutoff belongs to the month of its calendar date in the project's
+  // zone (the instant may already be the next month in UTC).
+  const record = (at: string, value: number, localDate?: string | null) => {
     const time = new Date(at).getTime()
-    const label = monthLabel(at)
+    const label = monthLabel(localDate || at)
     const current = measured.get(label)
     if (!current || current.at <= time) measured.set(label, { at: time, ev: value })
   }
@@ -189,11 +183,11 @@ function shapeSCurve({
     const stored = period.snapshot?.ev
     if (stored === null || stored === undefined || !period.cutoffDate) continue
     if (new Date(period.cutoffDate).getTime() > reportCutoff) continue
-    record(period.cutoffDate, Number(stored))
+    record(period.cutoffDate, Number(stored), period.cutoffLocalDate)
   }
-  if (cutoffDate && ev !== null && ev !== undefined) record(cutoffDate, ev)
+  if (cutoffDate && ev !== null && ev !== undefined) record(cutoffDate, ev, cutoffLocalDate)
 
-  const cutoffLabel = cutoffDate ? monthLabel(cutoffDate) : null
+  const cutoffLabel = cutoffDate ? monthLabel(cutoffLocalDate || cutoffDate) : null
   for (const [label, { ev: value }] of measured) {
     const row = points.find((point) => point.label === label)
     if (row) row.ev = value
@@ -323,10 +317,10 @@ export function EvReport({ projectId, readiness, onNavigate }: Props) {
     readiness?.gates.reporting ||
     fetchedReadiness?.gates.reporting
   const readinessBlockers = readinessGate?.blockers ?? []
-  const cutoffInstant = formatCutoffInstant(reporting?.cutoffDate)
   const curve = shapeSCurve({
     sCurve,
     cutoffDate: reporting?.cutoffDate,
+    cutoffLocalDate: reporting?.cutoffLocalDate,
     ev,
     pv,
     periods,
@@ -339,13 +333,9 @@ export function EvReport({ projectId, readiness, onNavigate }: Props) {
           <p className='text-sm font-semibold'>Official EV Basis</p>
           <p className='text-xs text-muted-foreground'>
             {selectedPeriod?.label || 'Ad hoc current cutoff'} - cutoff{' '}
-            <span data-testid='uat-ev-cutoff'>{formatCutoff(reporting?.cutoffDate)}</span>
-            {cutoffInstant && (
-              <span data-testid='uat-ev-cutoff-instant'>
-                {' '}
-                · figures through {cutoffInstant}
-              </span>
-            )}
+            {/* PV, EV and AC are all selected against this one instant: the
+                end of the cutoff date in the project's time zone. */}
+            <span data-testid='uat-ev-cutoff'>{formatEvCutoff(reporting)}</span>
           </p>
         </div>
         <div className='flex flex-wrap items-center gap-2'>
