@@ -119,6 +119,12 @@ export function RevisionHistoryPanel({
   const { data: activationMapping, isLoading: loadingActivationMapping } =
     useScheduleRevisionMapping(projectId, activateRevisionId)
   const workflow = useScheduleRevisionWorkflow(projectId)
+  // A rollback restores the previous revision's stored activities: offered
+  // only when that revision stored some (the server refuses it otherwise).
+  const canRestore = (rev: { previousActiveRevisionId?: string | null }) => {
+    const target = revisions?.find((entry) => entry.id === rev.previousActiveRevisionId)
+    return Boolean(target) && (target!.snapshotActivityCount ?? 0) > 0
+  }
 
   const currentNames = useMemo(() => {
     return new Set(
@@ -331,7 +337,8 @@ export function RevisionHistoryPanel({
                           )}
                         {canRollbackRevision &&
                           rev.isActive &&
-                          rev.previousActiveRevisionId && (
+                          rev.previousActiveRevisionId &&
+                          canRestore(rev) && (
                             <Button
                               size='sm'
                               variant='outline'

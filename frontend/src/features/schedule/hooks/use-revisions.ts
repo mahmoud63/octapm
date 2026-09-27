@@ -56,6 +56,8 @@ export interface ScheduleRevisionListItem {
   activatedAt?: string | null
   activationComment?: string | null
   previousActiveRevisionId?: string | null
+  /** How many activities the revision's snapshot stores (the list only). */
+  snapshotActivityCount?: number
   rolledBackBy?: string | null
   rolledBackAt?: string | null
   rollbackReason?: string | null

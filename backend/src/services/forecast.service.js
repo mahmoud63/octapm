@@ -328,7 +328,13 @@ const buildForecast = async ({ orgId, projectId, asOf = new Date() }) => {
   const noHistory = open.filter((activity) => activity.pct > 0 && activity.velocity === null).length;
   if (noHistory) dataQuality.push(`${plural(noHistory, "activity", "activities")} in progress ${noHistory === 1 ? "has" : "have"} fewer than two approved progress updates in the last ${HISTORY_DAYS} days; the pace is estimated from time used.`);
   if (!ev) dataQuality.push("Official earned value could not be computed; the finish and cost projections use activity data only.");
-  else if (spi === null || cpi === null) dataQuality.push("SPI / CPI are not available yet (no approved cost loading or actuals through the cutoff).");
+  else {
+    // One note per missing index, each with its own cause: SPI is EV / PV
+    // and PV is the approved time-phased cost loading; CPI is EV / AC and AC
+    // is the official cost-record actuals. Messages only — no figure moves.
+    if (spi === null) dataQuality.push("SPI is not available yet: no approved time-phased cost loading through the cutoff, so there is no planned value to measure progress against.");
+    if (cpi === null) dataQuality.push("CPI is not available yet: no official cost-record actuals through the cutoff, so the earned-value estimate at completion falls back to the budget.");
+  }
   if (!ctx.budgetLines.length) dataQuality.push("No budget lines by cost code; the cost view uses activity budgets only.");
 
   return {

@@ -2421,7 +2421,16 @@ const listRevisions = async ({ orgId, projectId }) => {
     orderBy: { createdAt: "desc" },
   });
 
-  return revisions.map((revision) => serializeRevision(revision));
+  // How many activities each revision's snapshot stores: a rollback
+  // restores the previous revision's stored activities, so the screen offers
+  // it only when there are some (the list carries no snapshot of its own).
+  return revisions.map((revision) =>
+    serializeRevision(revision, {
+      snapshotActivityCount: Array.isArray(revision.snapshotJson?.activities)
+        ? revision.snapshotJson.activities.length
+        : 0,
+    }),
+  );
 };
 
 const getRevision = async ({ orgId, projectId, revisionId }) => {
@@ -2970,6 +2979,19 @@ const rollbackRevision = async ({
       404,
       "ROLLBACK_TARGET_NOT_FOUND",
       "Previous active schedule revision was not found.",
+    );
+  }
+
+  // A rollback restores the previous revision's stored activities; a
+  // revision stored without any (one recorded by hand, or before snapshots
+  // kept them) has nothing to restore. Said as what it means to the person
+  // rolling back, not as activation's "no staged activities".
+  if (getSnapshotActivities(targetRevision, project).length === 0) {
+    throw new HttpError(
+      409,
+      "ROLLBACK_TARGET_HAS_NO_ACTIVITIES",
+      "The previous revision has no stored activities to restore; import or activate a revision instead.",
+      { targetRevisionId: targetRevision.id },
     );
   }
 

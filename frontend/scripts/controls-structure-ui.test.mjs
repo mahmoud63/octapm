@@ -54,7 +54,11 @@ assert.ok(!/Owner party id|Commitment id/.test(page), 'no raw id inputs remain o
 // ── Schedule WBS tab reads WbsNode first ─────────────────────────────────
 const tree = read('src/features/schedule/components/wbs-tree.tsx')
 assert.match(tree, /useWbsNodes\(/, 'the WBS tab reads project WbsNode rows')
-assert.match(tree, /buildTreeFromCodes/, 'the dotted-code fallback is kept for older revisions')
+assert.match(tree, /buildTreeFromSnapshot/, 'the snapshot fallback is kept for older revisions')
+// The snapshot's own parent ids come first (an imported P6 or MS Project
+// WBS); the dotted code only places the generator's id-less nodes.
+assert.ok(tree.includes('raw.parentWbsId ?? raw.parentObjectId'), 'the snapshot outline joins by parent id')
+assert.ok(!tree.includes('map.set(code, '), 'snapshot nodes are never keyed by code alone')
 // The roots start open whichever source the tree came from: the expansion
 // the viewer chose is kept per source, not seeded once from the snapshot's
 // keys and left empty when the row ids arrive.

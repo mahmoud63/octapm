@@ -7840,7 +7840,7 @@ add(
   operation({
     tag: "Schedule Revisions",
     summary: "List staged schedule revisions.",
-    description: REVISION_FIGURES,
+    description: `${REVISION_FIGURES} Each listed revision carries snapshotActivityCount, the number of activities its stored snapshot holds (0 when none): a rollback can restore only a previous revision that stores some.`,
     operationId: "listScheduleRevisions",
     parameters: projectParams,
     permissions: modulePermission("schedule", "read"),
@@ -7928,7 +7928,7 @@ add(
   [
     "rollback",
     "rollbackScheduleRevision",
-    "Rollback an active schedule revision.",
+    "Rollback an active schedule revision: the previous active revision's stored snapshot activities are restored. Refused 409 ROLLBACK_TARGET_HAS_NO_ACTIVITIES when that revision stored none (GET /schedule/revisions gives each revision's snapshotActivityCount).",
     "approve",
     "revision.rollback",
     ref("RejectRequest"),
