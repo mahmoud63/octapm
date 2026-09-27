@@ -292,7 +292,10 @@ const callback = async ({ code, state, error = null, errorDescription = null }, 
     } else {
       if (user.orgId !== org.id) canProvision("membership");
       const role = user.orgId === org.id && ROLES.includes(user.role) ? user.role : org.ssoDefaultRole || "site_engineer";
-      const provisioned = await membershipService.ensureMembership({ tx: prisma, orgId: org.id, userId: user.id, role, isAdmin: user.orgId === org.id && Boolean(user.isCompanyAdmin) });
+      // In a transaction: the one-member rule's organisation-row lock lasts
+      // until the caller's transaction ends, so the seat check and the insert
+      // hold it together and a concurrent seat in a personal workspace waits.
+      const provisioned = await prisma.$transaction((tx) => membershipService.ensureMembership({ tx, orgId: org.id, userId: user.id, role, isAdmin: user.orgId === org.id && Boolean(user.isCompanyAdmin) }));
       if (provisioned) {
         membership = provisioned.membership;
         await membershipService.recordMembershipEvent({ tx: prisma, orgId: org.id, membership, action: "membership.created", context, metadata: { via: "sso", role: membership.role } });

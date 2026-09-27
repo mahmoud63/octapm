@@ -611,6 +611,17 @@ const changeMembership = async ({ tx = prisma, orgId, userId, actor = null, chan
   if (losesOwnership && (await countActiveOwners({ tx, orgId, excludeUserId: userId })) === 0) {
     throw new HttpError(409, "LAST_OWNER", "This workspace needs at least one active owner");
   }
+  // A member coming back from `left` takes a seat again — ensureMembership
+  // counts it the same way — so a personal workspace's one-member rule
+  // (ENT-6) decides it: reactivating a former member beside the one who
+  // holds the seat now would make a second member.
+  if (
+    membership.kind === MEMBERSHIP_KINDS.MEMBER &&
+    membership.status === MEMBERSHIP_STATUSES.LEFT &&
+    next.status !== MEMBERSHIP_STATUSES.LEFT
+  ) {
+    await assertWorkspaceAcceptsMember({ tx, orgId, userId, kind: MEMBERSHIP_KINDS.MEMBER });
+  }
 
   const now = new Date();
   const updated = await tx.organizationMembership.update({

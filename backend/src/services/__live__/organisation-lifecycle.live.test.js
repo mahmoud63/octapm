@@ -138,6 +138,50 @@ const bystanderMemberships = (orgId, userId) =>
     orderBy: { id: "asc" },
   });
 
+/**
+ * A pause at a seat's membership insert — after the one-member count, before
+ * the row. `client(tx)` wraps the seating path's own client so its
+ * organizationMembership.create waits for `release()`; `reached` settles when
+ * it gets there. Everything else on the client is untouched.
+ */
+const membershipInsertPause = () => {
+  let release;
+  const gate = new Promise((resolve) => {
+    release = resolve;
+  });
+  let arrived;
+  const reached = new Promise((resolve) => {
+    arrived = resolve;
+  });
+  const bound = (target, key) => (typeof target[key] === "function" ? target[key].bind(target) : target[key]);
+  const client = (tx) =>
+    new Proxy(tx, {
+      get: (target, key) =>
+        key === "organizationMembership"
+          ? new Proxy(target.organizationMembership, {
+              get: (delegate, name) =>
+                name === "create"
+                  ? async (args) => {
+                      arrived();
+                      await gate;
+                      return delegate.create(args);
+                    }
+                  : bound(delegate, name),
+            })
+          : bound(target, key),
+    });
+  return { client, reached, release };
+};
+
+/** A concurrent seat in a throwaway workspace (proved one first), on its own transaction; resolves to its refusal, or null when it was seated. */
+const rivalSeatIn = (orgId, userId) =>
+  requireLiveOrg(orgId)
+    .then(() => prisma.$transaction((tx) => membershipService.ensureMembership({ tx, orgId, userId, role: "qs" }), { timeout: 20_000, maxWait: 20_000 }))
+    .then(
+      () => null,
+      (error) => error,
+    );
+
 /** A stand-in OpenID provider: discovery, keys and a token endpoint answering whatever claims the test sets. */
 const fakeIdentityProvider = (issuer, clientId) => {
   const { publicKey, privateKey } = crypto.generateKeyPairSync("rsa", { modulusLength: 2048 });
@@ -594,37 +638,11 @@ liveDescribe("workspaces: personal at sign-up, a company beside it, conversion",
     });
     const rival = await createLiveUser(prisma, { orgId: company.orgId, name: "Live Late Rival", email: `live-late-rival-${tag}@octapm-live.test`, role: "qs" });
 
-    let release;
-    const gate = new Promise((resolve) => {
-      release = resolve;
-    });
-    let paused;
-    const atInsert = new Promise((resolve) => {
-      paused = resolve;
-    });
-    const bound = (target, key) => (typeof target[key] === "function" ? target[key].bind(target) : target[key]);
-    // The role edit's own client, paused at the membership insert — after the
-    // count, before the row — and otherwise untouched.
-    const pausedAtInsert = (client) =>
-      new Proxy(client, {
-        get: (target, key) =>
-          key === "organizationMembership"
-            ? new Proxy(target.organizationMembership, {
-                get: (delegate, name) =>
-                  name === "create"
-                    ? async (args) => {
-                        paused();
-                        await gate;
-                        return delegate.create(args);
-                      }
-                    : bound(delegate, name),
-              })
-            : bound(target, key),
-      });
+    const pause = membershipInsertPause();
     const realEnsureForUser = membershipService.ensureMembershipForUser;
     const spy = jest
       .spyOn(membershipService, "ensureMembershipForUser")
-      .mockImplementation((args) => realEnsureForUser({ ...args, tx: pausedAtInsert(args.tx) }));
+      .mockImplementation((args) => realEnsureForUser({ ...args, tx: pause.client(args.tx) }));
 
     let edit;
     let rivalSeat;
@@ -636,16 +654,16 @@ liveDescribe("workspaces: personal at sign-up, a company beside it, conversion",
           (value) => ({ value }),
           (error) => ({ error }),
         );
-      await atInsert;
-      rivalSeat = prisma
-        .$transaction((tx) => membershipService.ensureMembership({ tx, orgId: racing.id, userId: rival.id, role: "qs" }), { timeout: 20_000, maxWait: 20_000 })
-        .then(
-          () => null,
-          (error) => error,
-        );
+      await Promise.race([
+        pause.reached,
+        edit.then((early) => {
+          throw new Error(`the role edit ended before its seat insert: ${early.error?.code || early.error?.message || "seated"}`);
+        }),
+      ]);
+      rivalSeat = rivalSeatIn(racing.id, rival.id);
       await sleep(1_000);
     } finally {
-      release();
+      pause.release();
       spy.mockRestore();
     }
     const edited = await edit;
@@ -654,6 +672,98 @@ liveDescribe("workspaces: personal at sign-up, a company beside it, conversion",
     expect((await rivalSeat)?.code).toBe("PERSONAL_WORKSPACE_CONVERT_REQUIRED");
     const seats = await prisma.organizationMembership.findMany({ where: { orgId: racing.id, kind: "member" }, select: { userId: true, role: true } });
     expect(seats).toEqual([{ userId: homed.id, role: "planning_eng" }]);
+  });
+
+  it("reactivating a former member beside the seat holder is refused: coming back from left takes a seat", async () => {
+    // A personal workspace whose seat is held, and a person homed there whose
+    // member row is `left` — a former member. Reactivating it (POST
+    // /users/:id/activate) would make a second member; the one-member rule
+    // refuses it. (A former member homed elsewhere is not found here at all:
+    // they come back only by invitation, which the rule already refuses.)
+    const userService = require("../user.service");
+    const held = await prisma.organisation.create({ data: { name: `LiveTest ${crypto.randomUUID()}`, kind: "personal" } });
+    extraOrgIds.push(held.id);
+    await requireLiveOrg(held.id);
+    const holder = await prisma.user.create({
+      data: { orgId: held.id, name: "Live Seat Holder", email: `live-seat-holder-${tag}@octapm-live.test`, passwordHash: "x", role: "pm", isCompanyAdmin: true },
+    });
+    await prisma.organizationMembership.create({
+      data: { orgId: held.id, userId: holder.id, role: "pm", kind: "member", isAdmin: true, isOwner: true, status: "active", joinedAt: holder.createdAt },
+    });
+    const former = await prisma.user.create({
+      data: { orgId: held.id, name: "Live Former", email: `live-former-${tag}@octapm-live.test`, passwordHash: "x", role: "qs" },
+    });
+    await prisma.organizationMembership.create({
+      data: { orgId: held.id, userId: former.id, role: "qs", kind: "member", status: "left", joinedAt: new Date(), leftAt: new Date() },
+    });
+
+    await expect(
+      userService.activateUser({
+        orgId: held.id,
+        userId: former.id,
+        actor: { id: holder.id, orgId: held.id, role: "pm", isAdmin: true, isOwner: true, isCompanyAdmin: true },
+      }),
+    ).rejects.toMatchObject({ code: "PERSONAL_WORKSPACE_CONVERT_REQUIRED" });
+    const formerRow = await prisma.organizationMembership.findUnique({ where: { orgId_userId: { orgId: held.id, userId: former.id } } });
+    expect(formerRow).toMatchObject({ kind: "member", status: "left" });
+    const live = await prisma.organizationMembership.findMany({ where: { orgId: held.id, kind: "member", status: { not: "left" } }, select: { userId: true } });
+    expect(live).toEqual([{ userId: holder.id }]);
+  });
+
+  it("SSO provisioning of an existing identity holds the seat check until its insert: a concurrent seat is refused", async () => {
+    // An empty personal workspace with SSO auto-provisioning, and a person
+    // who already has an account elsewhere signing in through its IdP: the
+    // sign-in gives them its one seat. Paused between the check and the
+    // insert, a concurrent seat must wait and then be refused.
+    const ssoService = require("../sso.service");
+    const racing = await prisma.organisation.create({ data: { name: `LiveTest ${crypto.randomUUID()}`, kind: "personal" } });
+    extraOrgIds.push(racing.id);
+    await requireLiveOrg(racing.id);
+    const signer = await createLiveUser(prisma, { orgId: company.orgId, name: "Live SSO Existing", email: `live-sso-existing-${tag}@octapm-live.test`, role: "qs" });
+    const rival = await createLiveUser(prisma, { orgId: company.orgId, name: "Live SSO Rival", email: `live-sso-rival-${tag}@octapm-live.test`, role: "qs" });
+    const issuer = `https://idp-race-${tag}.octapm-live.test`;
+    const clientId = `octapm-race-${tag}`;
+    const idp = fakeIdentityProvider(issuer, clientId);
+    await ssoService.updateSettings({
+      orgId: racing.id,
+      payload: { issuer, clientId, clientSecret: "live-secret", enabled: true, autoProvision: true, defaultRole: "site_engineer" },
+      actor: null,
+    });
+    const started = await ssoService.start({ orgId: racing.id, fetchImpl: idp.fetchImpl });
+    const authorization = new URL(started.authorizationUrl);
+    idp.claims = { sub: `sso-race-${tag}`, email: signer.email, email_verified: true, name: signer.name, nonce: authorization.searchParams.get("nonce") };
+
+    const pause = membershipInsertPause();
+    const realEnsure = membershipService.ensureMembership;
+    const spy = jest
+      .spyOn(membershipService, "ensureMembership")
+      .mockImplementation((args) => realEnsure(args.orgId === racing.id && args.userId === signer.id ? { ...args, tx: pause.client(args.tx) } : args));
+
+    let signIn;
+    let rivalSeat;
+    try {
+      signIn = ssoService.callback({ code: "live-code", state: authorization.searchParams.get("state") }, {}, { fetchImpl: idp.fetchImpl });
+      await Promise.race([
+        pause.reached,
+        signIn.then((early) => {
+          throw new Error(`the sign-in ended before its seat insert: ${JSON.stringify(early)}`);
+        }),
+      ]);
+      rivalSeat = rivalSeatIn(racing.id, rival.id);
+      await sleep(1_000);
+    } finally {
+      pause.release();
+    }
+    let result;
+    try {
+      result = await signIn;
+    } finally {
+      spy.mockRestore();
+    }
+    expect(result.error).toBeNull();
+    expect((await rivalSeat)?.code).toBe("PERSONAL_WORKSPACE_CONVERT_REQUIRED");
+    const seats = await prisma.organizationMembership.findMany({ where: { orgId: racing.id, kind: "member" }, select: { userId: true } });
+    expect(seats).toEqual([{ userId: signer.id }]);
   });
 
   it("conversion is the owner's, of the session's workspace, and a company has nothing to convert", async () => {
