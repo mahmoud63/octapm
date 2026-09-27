@@ -16544,7 +16544,7 @@ const openApiSpec = {
     {
       name: "Realtime",
       description:
-        "Not a REST surface. Authenticated socket.io transport at the API origin: clients send `project:join { projectId }` (acknowledged after the same project access check as REST) and receive `domain.event` messages of type record.changed, approval.decided, notification.created, or job.progress. See docs/qa/realtime-events.md.",
+        "Not a REST surface. Authenticated socket.io transport at the API origin: a socket joins user:{userId}, org:{orgId} and member:{membershipId} rooms on connect (`realtime.ready` carries userId, orgId and membershipId); clients send `project:join { projectId }` (acknowledged after the same project access check as REST) and receive `domain.event` messages of type record.changed, approval.decided, notification.created, or job.progress. Events addressed to people are delivered to their member room in the event's workspace only, so a person connected in another workspace does not receive them. See docs/qa/realtime-events.md.",
     },
     {
       name: "Permissions",

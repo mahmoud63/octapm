@@ -1,4 +1,5 @@
 import { zodResolver } from '@hookform/resolvers/zod'
+import { useRouter } from 'expo-router'
 import * as WebBrowser from 'expo-web-browser'
 import { useEffect, useRef, useState } from 'react'
 import { Controller, useForm } from 'react-hook-form'
@@ -32,6 +33,7 @@ type Form = z.infer<typeof schema>
 export default function SignInScreen() {
   const theme = useTheme()
   const insets = useSafeAreaInsets()
+  const router = useRouter()
   const { isCompact } = useLayout()
   const status = useAuthStore((s) => s.status)
   const reason = useAuthStore((s) => s.lastSignOutReason)
@@ -56,7 +58,10 @@ export default function SignInScreen() {
   const submit = handleSubmit(async ({ email, password }) => {
     setFailure(null)
     try {
-      await signIn(email, password)
+      const outcome = await signIn(email, password)
+      // Several workspaces: the person chooses one before anything is shown (membership doc §6).
+      if (outcome.kind === 'chooseWorkspace') router.replace('/choose-workspace' as never)
+      else if (outcome.kind === 'noWorkspace') setFailure('Your account is not in any workspace yet. Ask for an invitation, or create a workspace on the OctaPM web platform.')
     } catch (error) {
       setFailure(userMessage(error))
     }

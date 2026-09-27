@@ -1,11 +1,14 @@
 import { useRouter } from 'expo-router'
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import { StyleSheet, View } from 'react-native'
+import { userMessage } from '@/api/errors'
 import { useProjects } from '@/api/hooks'
+import { switchWorkspace } from '@/auth/session'
+import { useAuthStore, workspaceLabel } from '@/auth/store'
 import { Screen } from '@/components/Screen'
 import { appRouteForRecord } from '@/navigation/links'
 import { Badge, Button, Card, EmptyState, Text, spacing, useTheme } from '@/design-system'
-import { discardItem, drainOutbox, retryItem, useOutbox, type OutboxItem } from '@/offline/outbox'
+import { discardItem, drainOutbox, inActiveWorkspace, retryItem, useOutbox, type OutboxItem } from '@/offline/outbox'
 import { useOutboxStatus } from '@/offline/useOutboxStatus'
 import { dateTime, humanise } from '@/utilities/format'
 
@@ -47,21 +50,54 @@ const openable = (item: OutboxItem): string | null => {
 export default function OutboxScreen() {
   const theme = useTheme()
   const router = useRouter()
-  const items = useOutbox((s) => s.items)
+  const allItems = useOutbox((s) => s.items)
   const status = useOutboxStatus()
   const projects = useProjects()
+  const memberships = useAuthStore((s) => s.memberships)
+  const active = useAuthStore((s) => s.workspace)
+  const switching = useAuthStore((s) => s.switching)
+  const [switchFailure, setSwitchFailure] = useState<string | null>(null)
   const projectName = (id: string) => projects.data?.find((p) => p.id === id)?.name ?? null
+  // This workspace's items are the ones this session can send; another
+  // workspace's wait here, under its name, until it is active again (§18).
+  const items = useMemo(() => allItems.filter((i) => inActiveWorkspace(i, status.activeOrgId)), [allItems, status.activeOrgId])
+  const elsewhere = useMemo(() => {
+    const byWorkspace = new Map<string, OutboxItem[]>()
+    for (const item of allItems) {
+      if (inActiveWorkspace(item, status.activeOrgId) || item.status === 'sent') continue
+      const key = item.orgId ?? ''
+      byWorkspace.set(key, [...(byWorkspace.get(key) ?? []), item])
+    }
+    return [...byWorkspace.entries()].map(([orgId, held]) => {
+      const membership = orgId ? (memberships.find((m) => m.orgId === orgId) ?? null) : null
+      // Only a workspace the person can still enter will ever send these;
+      // anything else — left, suspended, or never known (captured before
+      // workspaces) — can only be kept or discarded.
+      return { orgId, membership, reachable: membership?.status === 'active', items: held.sort((a, b) => a.createdAt.localeCompare(b.createdAt)) }
+    })
+  }, [allItems, memberships, status.activeOrgId])
   const groups = useMemo(() => {
     const order: OutboxItem['status'][] = ['attention', 'refused', 'sending', 'waiting', 'sent']
     return order.map((s) => ({ status: s, items: items.filter((i) => i.status === s).sort((a, b) => a.createdAt.localeCompare(b.createdAt)) })).filter((g) => g.items.length)
   }, [items])
 
+  const goTo = async (orgId: string) => {
+    setSwitchFailure(null)
+    try {
+      await switchWorkspace(orgId)
+      // The queue of that workspace drains as it is adopted; the screen stays on the outbox to show it.
+    } catch (error) {
+      setSwitchFailure(userMessage(error))
+    }
+  }
+
   return (
     <Screen title="Outbox" subtitle={status.offline ? 'Offline · items send when the signal returns' : status.locked ? 'Sign in again to send what is waiting' : status.waiting ? `${status.waiting} waiting` : 'Everything is sent'} contentStyle={styles.content} testID="screen-outbox">
-      {items.length === 0 ? (
+      {items.length === 0 && elsewhere.length === 0 ? (
         <EmptyState title="Nothing is waiting to send" />
       ) : (
         <>
+          {items.length === 0 ? <EmptyState title={`Nothing is waiting to send from ${workspaceLabel(active)}`} /> : null}
           {status.waiting > 0 && !status.offline && !status.locked ? <Button title="Send now" onPress={() => void drainOutbox('manual')} loading={status.draining} testID="outbox-send-now" /> : null}
           {groups.map((group) => (
             <Card key={group.status} edge={group.status === 'attention' || group.status === 'refused' ? theme.colors.error : undefined}>
@@ -109,6 +145,50 @@ export default function OutboxScreen() {
               </View>
             </Card>
           ))}
+          {elsewhere.map((group) => (
+            <Card key={group.orgId || 'unknown'} testID={`outbox-elsewhere-${group.orgId || 'unknown'}`}>
+              <View style={styles.stack}>
+                <Text variant="label" label tone="muted">
+                  {group.orgId ? `Waiting in ${workspaceLabel(group.membership)}` : 'Saved before workspaces'}
+                </Text>
+                <Text variant="caption" tone="muted">
+                  {group.orgId
+                    ? `${group.items.length} item${group.items.length === 1 ? '' : 's'} captured in ${workspaceLabel(group.membership)}. They are sent only from that workspace, never from ${workspaceLabel(active)}.`
+                    : `${group.items.length} item${group.items.length === 1 ? '' : 's'} captured before this app knew workspaces. This device cannot tell which workspace ${group.items.length === 1 ? 'it belongs' : 'they belong'} to, so ${group.items.length === 1 ? 'it is' : 'they are'} not sent from any.`}
+                </Text>
+                {group.items.map((item) => (
+                  <View key={item.id} style={[styles.item, { borderColor: theme.colors.border }]} testID={`outbox-item-${item.id}`}>
+                    <View style={styles.row}>
+                      <View style={styles.grow}>
+                        <Text>{item.summary}</Text>
+                        <Text variant="caption" tone="muted">
+                          {[KIND_LABELS[item.kind] ?? item.kind, `Captured ${dateTime(item.createdAt)}`].filter(Boolean).join(' · ')}
+                        </Text>
+                      </View>
+                      <Badge label="Held" tone="warning" />
+                    </View>
+                    {group.reachable ? null : (
+                      <View style={styles.actions}>
+                        <Button title="Discard" variant="danger" onPress={() => void discardItem(item.id)} testID={`outbox-discard-${item.id}`} />
+                      </View>
+                    )}
+                  </View>
+                ))}
+                {group.reachable && group.membership ? (
+                  <Button title={`Switch to ${workspaceLabel(group.membership)} to send`} variant="secondary" loading={switching} onPress={() => void goTo(group.orgId)} testID={`outbox-switch-${group.orgId}`} />
+                ) : group.orgId ? (
+                  <Text variant="caption" tone="muted">
+                    You no longer have access to that workspace on this account, so these cannot be sent. They stay on this device until you discard them.
+                  </Text>
+                ) : null}
+              </View>
+            </Card>
+          ))}
+          {switchFailure ? (
+            <Text tone="error" accessibilityRole="alert">
+              {switchFailure}
+            </Text>
+          ) : null}
           <Text variant="caption" tone="muted">
             Each item carries the key it was captured with, so sending it again after a lost reply counts once on the server. An item the server refused keeps what you captured until you discard it.
           </Text>

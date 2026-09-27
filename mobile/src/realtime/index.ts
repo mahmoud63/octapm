@@ -172,9 +172,16 @@ const disconnect = () => {
   useRealtimeStore.setState({ connected: false, room: null })
 }
 
+/**
+ * The socket follows the session. A workspace switch raises `switching`
+ * first: the socket is dropped and its rooms forgotten while the token is
+ * replaced, and when the flag falls a fresh socket connects with the new
+ * token and joins the new workspace's project — never the old one's room
+ * under the new token (workspace switching doc §3, steps 2 and 7).
+ */
 const follow = () => {
-  const { status, accessToken } = useAuthStore.getState()
-  if (status === 'signedIn' && accessToken) connect(accessToken)
+  const { status, accessToken, switching } = useAuthStore.getState()
+  if (status === 'signedIn' && accessToken && !switching) connect(accessToken)
   else disconnect()
 }
 

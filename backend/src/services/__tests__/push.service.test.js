@@ -156,3 +156,53 @@ describe("push service", () => {
     delete global.fetch;
   });
 });
+
+describe("ENT-5 — the push payload carries the workspace", () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    service.resetWorkspaceCache();
+    delete mockPrisma.organisation;
+    delete mockPrisma.organizationMembership;
+  });
+
+  it("names the notification's workspace and the recipient's membership in it, per identity device", async () => {
+    mockPrisma.organisation = { findUnique: jest.fn(async () => ({ slug: "acme" })) };
+    mockPrisma.organizationMembership = { findFirst: jest.fn(async ({ where }) => (where.userId === "user-1" ? { id: "mem-1", status: "active" } : null)) };
+    const notification = { id: "n1", orgId: "org-a", title: "t", message: "m", entityType: "rfi", entityId: "r1", projectId: "p", category: "workflow", priority: "normal" };
+    const payload = await service.buildPushPayload({ notification, userId: "user-1" });
+    expect(payload).toMatchObject({ orgId: "org-a", orgSlug: "acme", membershipId: "mem-1", entityType: "rfi", projectId: "p" });
+    expect(mockPrisma.organizationMembership.findFirst).toHaveBeenCalledWith({ where: { orgId: "org-a", userId: "user-1" }, select: { id: true, status: true } });
+    // Another recipient of the same workspace: the slug is remembered, the membership is theirs.
+    const other = await service.buildPushPayload({ notification, userId: "user-2" });
+    expect(other).toMatchObject({ orgId: "org-a", orgSlug: "acme", membershipId: null });
+    expect(mockPrisma.organisation.findUnique).toHaveBeenCalledTimes(1);
+    // The Expo message carries the three fields in its data.
+    const fetchMock = jest.fn(async () => ({ ok: true, json: async () => ({ data: [{ status: "ok" }] }) }));
+    global.fetch = fetchMock;
+    mockPrisma.pushSubscription.findMany.mockResolvedValue([device({ id: "exp-1", endpoint: "ExponentPushToken[one]", p256dh: "", auth: "", platform: "expo-android" })]);
+    delete process.env.VAPID_PRIVATE_KEY;
+    service.resetConfiguration();
+    await service.sendToUser({ userId: "user-1", payload });
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)[0].data).toMatchObject({ orgId: "org-a", orgSlug: "acme", membershipId: "mem-1" });
+    delete global.fetch;
+  });
+
+  it("a recipient whose membership in the workspace is not active gets no payload, and a queued push is skipped (§11)", async () => {
+    mockPrisma.organisation = { findUnique: jest.fn(async () => ({ slug: "acme" })) };
+    mockPrisma.organizationMembership = { findFirst: jest.fn(async () => ({ id: "mem-gone", status: "suspended" })) };
+    const notification = { id: "n3", orgId: "org-a", title: "t", message: "m", category: "workflow", priority: "normal" };
+    expect(await service.buildPushPayload({ notification, userId: "user-1" })).toBeNull();
+    expect(await service.workspaceFor({ orgId: "org-a", userId: "user-1" })).toMatchObject({ membershipId: null, revoked: true });
+    mockPrisma.notificationDeliveryAttempt.findMany.mockResolvedValue([{ id: "att-30", userId: "user-1", attemptNumber: 1, notification }]);
+    mockPrisma.notificationDeliveryAttempt.updateMany.mockResolvedValue({ count: 1 });
+    const result = await service.processPendingPushDeliveries({ now: new Date("2026-09-26T10:00:00Z") });
+    expect(result).toMatchObject({ skipped: 1, sent: 0, processed: 1 });
+    expect(mockPrisma.pushSubscription.findMany).not.toHaveBeenCalled();
+    expect(mockPrisma.notificationDeliveryAttempt.update).toHaveBeenCalledWith(expect.objectContaining({ where: { id: "att-30" }, data: expect.objectContaining({ status: "skipped", errorCode: "PUSH_RECIPIENT_NOT_MEMBER" }) }));
+  });
+
+  it("a client without the workspace models still gets the orgId", async () => {
+    const payload = await service.buildPushPayload({ notification: { id: "n2", orgId: "org-b", title: "t", message: "m" }, userId: "user-1" });
+    expect(payload).toMatchObject({ orgId: "org-b", orgSlug: null, membershipId: null });
+  });
+});

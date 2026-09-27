@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
-import { openModule } from './cert-helpers'
+import { currentProjectId, openModule } from './cert-helpers'
 
 /**
  * M2 on the web target: RFIs, tasks, documents and drawings.
@@ -104,7 +104,7 @@ test.describe('M2 on the web target', () => {
     const login = await request.post(`${apiBase}/auth/login`, { headers: { 'x-octapm-client': 'mobile' }, data: { email, password } })
     expect(login.status()).toBe(200)
     const token = ((await login.json()) as { data: { tokens: { accessToken: string } } }).data.tokens.accessToken
-    const projectId = await page.evaluate(() => sessionStorage.getItem('octapm.session.project'))
+    const projectId = await currentProjectId(page)
     expect(projectId).toBeTruthy()
     const created = await request.post(`${apiBase}/tasks`, { headers: { authorization: `Bearer ${token}`, 'x-octapm-client': 'mobile' }, data: { title: `E2E task ${Date.now()}`, projectId, priority: 'high', label: 'field' } })
     expect(created.status()).toBe(201)

@@ -132,4 +132,29 @@ describe('what the person sees', () => {
     await waitFor(() => expect(useOutbox.getState().items.find((i) => i.id === b.id)).toBeUndefined())
     expect(screen.queryByText('Timesheet for 2026-09-18')).toBeNull()
   })
+
+  it('held items of a workspace the person can no longer enter, or of none the device can tell, can be discarded; those of a workspace they can enter wait for the switch', async () => {
+    serve()
+    network.__reset(false)
+    const here = { orgId: 'o1', membershipId: 'm-1', slug: 'here', name: 'Here Build', kind: 'company', role: 'pm', isAdmin: true, isOwner: false, status: 'active' }
+    const open = { ...here, orgId: 'o-open', membershipId: 'm-open', slug: 'open', name: 'Open Works' }
+    const left = { ...here, orgId: 'o-left', membershipId: 'm-left', slug: 'left', name: 'Left Co', status: 'suspended' }
+    useAuthStore.setState({ workspace: here, memberships: [here, open, left] })
+    useOutbox.setState({ activeOrgId: 'o1', owner: 'u1', locked: false })
+    const inOpen = await enqueue({ projectId: 'p-open', kind: 'punch.create', summary: 'Open item', payload: {}, clientRequestId: 'k-open', orgId: 'o-open' })
+    const inLeft = await enqueue({ projectId: 'p-left', kind: 'punch.create', summary: 'Left item', payload: {}, clientRequestId: 'k-left', orgId: 'o-left' })
+    const unknown = await enqueue({ projectId: 'p-old', kind: 'punch.create', summary: 'Old item', payload: {}, clientRequestId: 'k-old', orgId: 'o1' })
+    useOutbox.setState((s) => ({ items: s.items.map((i) => (i.id === unknown.id ? { ...i, orgId: null, legacy: true } : i)) }))
+    await renderScreen(<OutboxScreen />)
+    expect(await screen.findByText('Waiting in Left Co')).toBeTruthy()
+    expect(screen.getByText('Saved before workspaces')).toBeTruthy()
+    // A workspace still open to the person: switch to send, nothing to discard here.
+    expect(screen.getByTestId('outbox-switch-o-open')).toBeTruthy()
+    expect(screen.queryByTestId(`outbox-discard-${inOpen.id}`)).toBeNull()
+    await fireEvent.press(screen.getByTestId(`outbox-discard-${inLeft.id}`))
+    await waitFor(() => expect(useOutbox.getState().items.find((i) => i.id === inLeft.id)).toBeUndefined())
+    await fireEvent.press(screen.getByTestId(`outbox-discard-${unknown.id}`))
+    await waitFor(() => expect(useOutbox.getState().items.find((i) => i.id === unknown.id)).toBeUndefined())
+    expect(useOutbox.getState().items.map((i) => i.id)).toEqual([inOpen.id])
+  })
 })

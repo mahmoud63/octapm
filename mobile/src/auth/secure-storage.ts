@@ -51,7 +51,9 @@ export const STORAGE_KEYS = {
   lastEmail: 'session.email',
   /** The last known profile, so the app can open while offline. Never a token. */
   profile: 'session.profile',
-  /** The project the person was working in, so the app reopens there. */
+  /** The workspace the identity last worked in, so a sign-in with several can skip the picker. Not a credential. */
+  lastWorkspace: 'session.workspace',
+  /** The project the person was working in, with its workspace, so the app reopens there. */
   currentProject: 'session.project',
   /** Favourite and recent drawing sheets on this device. */
   drawingPrefs: 'session.drawings',

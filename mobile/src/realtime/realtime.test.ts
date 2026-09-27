@@ -185,4 +185,36 @@ describe('realtime', () => {
     expect(sockets).toHaveLength(2)
     expect(sockets[1]!.auth).toEqual({ token: 'token-3' })
   })
+
+  it('drops the socket and its rooms while a workspace switch runs, and reconnects with the new token in the new workspace', () => {
+    useAuthStore.setState({ status: 'signedIn', accessToken: 'token-a', user })
+    useProjectStore.setState({ currentProjectId: P })
+    stop = startRealtime()
+    jest.advanceTimersByTime(1)
+    const inA = sockets[0]!
+    inA.emitted.find((e) => e.event === 'project:join')!.ack?.({ ok: true, projectId: P })
+    expect(__realtimeForTests.joined()).toBe(P)
+
+    // 1. freeze: the socket goes, the room is forgotten, nothing is joined under the old token.
+    useAuthStore.getState().setSwitching(true)
+    expect(inA.connected).toBe(false)
+    expect(__realtimeForTests.joined()).toBeNull()
+    expect(useRealtimeStore.getState()).toMatchObject({ connected: false, room: null })
+    // The new token and workspace arrive while frozen: still no socket.
+    useAuthStore.setState({ accessToken: 'token-b' })
+    useProjectStore.setState({ currentProjectId: null })
+    expect(sockets).toHaveLength(1)
+    // 7. unfreeze: a fresh socket with the new token; no project room is joined until the new workspace's project is chosen.
+    useAuthStore.getState().setSwitching(false)
+    jest.advanceTimersByTime(1)
+    expect(sockets).toHaveLength(2)
+    const inB = sockets[1]!
+    expect(inB.auth).toEqual({ token: 'token-b' })
+    expect(inB.emitted.some((e) => e.event === 'project:join')).toBe(false)
+    const other = 'b2153ef4-0bbb-4b9a-875c-44a0f69f9a12'
+    useProjectStore.setState({ currentProjectId: other })
+    expect(inB.emitted.filter((e) => e.event === 'project:join').pop()!.payload).toEqual({ projectId: other })
+    // The old socket was never asked to leave or join anything after the freeze.
+    expect(inA.emitted.filter((e) => e.event === 'project:join' || e.event === 'project:leave')).toHaveLength(1)
+  })
 })

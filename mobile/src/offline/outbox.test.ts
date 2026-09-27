@@ -1,15 +1,18 @@
 import { AppError } from '@/api/errors'
 import { network } from '@/api/network'
-import { __resetOutboxForTests, adoptOutboxOwner, backoffFor, discardItem, drainOutbox, enqueue, hydrateOutbox, lockOutbox, registerSender, retryItem, useOutbox, wipeOutbox, type OutboxItem } from '@/offline/outbox'
+import { __resetOutboxForTests, adoptOutboxOwner, backoffFor, discardItem, drainOutbox, enqueue, hydrateOutbox, lockOutbox, outboxCounts, registerSender, retryItem, useOutbox, wipeOutbox, type OutboxItem } from '@/offline/outbox'
 import { __useStoreForTests, memoryStore, type KeyValueStore } from '@/offline/storage'
 
+const ORG_A = 'org-a'
+const ORG_B = 'org-b'
+
 let store: KeyValueStore
-let sent: { kind: string; clientRequestId: string; parentResult: string | null }[]
+let sent: { kind: string; clientRequestId: string; parentResult: string | null; orgId: string | null }[]
 /** A scripted server: each call answers with the next script entry, or succeeds. */
 let script: (Error | { resultId: string | null })[]
 
 const sender = jest.fn(async (item: OutboxItem, parent: OutboxItem | null) => {
-  sent.push({ kind: item.kind, clientRequestId: item.clientRequestId, parentResult: parent?.resultId ?? null })
+  sent.push({ kind: item.kind, clientRequestId: item.clientRequestId, parentResult: parent?.resultId ?? null, orgId: item.orgId })
   const next = script.shift()
   if (next instanceof Error) throw next
   return next ?? { resultId: `srv-${item.clientRequestId}` }
@@ -33,6 +36,9 @@ beforeEach(async () => {
   registerSender('attachment.upload', sender)
   network.__reset(true)
   await hydrateOutbox()
+  // The queue belongs to a person in a workspace before anything is sent.
+  await adoptOutboxOwner('u1', ORG_A)
+  await settled()
 })
 
 afterAll(() => __useStoreForTests(null))
@@ -137,18 +143,17 @@ describe('the outbox', () => {
     await drainOutbox('test')
     expect(sent).toHaveLength(1)
     // Signing in unlocks the queue and starts a drain without making sign-in wait for it.
-    await adoptOutboxOwner('u1')
+    await adoptOutboxOwner('u1', ORG_A)
     await settled()
     await drainOutbox('test')
     expect(items().every((i) => i.status === 'sent')).toBe(true)
   })
 
   it('discards the queue when a different person signs in, and on sign-out', async () => {
-    await adoptOutboxOwner('u1')
     network.__reset(false)
     await queue({ clientRequestId: 'k1' })
     expect(items()).toHaveLength(1)
-    await adoptOutboxOwner('u2')
+    await adoptOutboxOwner('u2', ORG_A)
     expect(items()).toHaveLength(0)
     expect(await store.get('outbox:v1:owner')).toBe('u2')
     await queue({ clientRequestId: 'k2' })
@@ -165,5 +170,137 @@ describe('the outbox', () => {
     await hydrateOutbox()
     expect(statusOf(a.id)).toBe('waiting')
     expect(items()[0]!.clientRequestId).toBe('k1')
+  })
+})
+
+describe('the outbox across workspaces (workspace switching doc §4)', () => {
+  it('stamps every item with the workspace it was captured in', async () => {
+    const a = await queue({ clientRequestId: 'k1' })
+    expect(a.orgId).toBe(ORG_A)
+    expect(JSON.parse((await store.get('outbox:v1:items')) ?? '[]')[0].orgId).toBe(ORG_A)
+  })
+
+  it('sends nothing stamped with a workspace before a session has adopted the queue: the workspace the token names is unknown', async () => {
+    __resetOutboxForTests()
+    await hydrateOutbox()
+    network.__reset(true)
+    const a = await queue({ clientRequestId: 'k1', orgId: ORG_A })
+    await settled()
+    await drainOutbox('test')
+    expect(sent).toHaveLength(0)
+    expect(statusOf(a.id)).toBe('waiting')
+    // Adopted by the workspace it belongs to, it goes.
+    await adoptOutboxOwner('u1', ORG_A)
+    await settled()
+    expect(statusOf(a.id)).toBe('sent')
+  })
+
+  it('locks another workspace’s items: a switch never wipes them and never replays them under the new workspace', async () => {
+    // Captured in A while the signal was down.
+    network.__reset(false)
+    const inA = await queue({ clientRequestId: 'a1' })
+    // The switch: the queue holds still, then the same person adopts it in B.
+    lockOutbox()
+    network.__reset(true)
+    await drainOutbox('switching')
+    expect(sent).toHaveLength(0)
+    await adoptOutboxOwner('u1', ORG_B)
+    await settled()
+    await drainOutbox('in-b')
+    expect(sent).toHaveLength(0)
+    expect(statusOf(inA.id)).toBe('waiting')
+    expect(items()).toHaveLength(1)
+    // B's own item goes; A's still waits.
+    const inB = await queue({ clientRequestId: 'b1' })
+    await settled()
+    await drainOutbox('in-b')
+    expect(sent.map((s) => [s.clientRequestId, s.orgId])).toEqual([['b1', ORG_B]])
+    expect(statusOf(inB.id)).toBe('sent')
+    expect(statusOf(inA.id)).toBe('waiting')
+    expect(outboxCounts(items(), null, ORG_B)).toMatchObject({ waiting: 0, sent: 1, elsewhere: 1 })
+    // Back in A: A's item is replayed, once.
+    lockOutbox()
+    await adoptOutboxOwner('u1', ORG_A)
+    await settled()
+    await drainOutbox('back-in-a')
+    expect(sent.map((s) => s.clientRequestId)).toEqual(['b1', 'a1'])
+    expect(statusOf(inA.id)).toBe('sent')
+    expect(outboxCounts(items(), null, ORG_A)).toMatchObject({ waiting: 0, sent: 1, elsewhere: 0 })
+  })
+
+  it('a back-off retry due while another workspace is active waits for its own', async () => {
+    script = [new AppError('OFFLINE')]
+    const inA = await queue({ clientRequestId: 'a1' })
+    await settled()
+    expect(statusOf(inA.id)).toBe('waiting')
+    expect(items()[0]!.nextAttemptAt).toBeGreaterThan(Date.now())
+    lockOutbox()
+    await adoptOutboxOwner('u1', ORG_B)
+    await settled()
+    // Force the retry moment and drain as B: nothing of A goes.
+    useOutbox.setState((s) => ({ items: s.items.map((i) => ({ ...i, nextAttemptAt: Date.now() - 1 })) }))
+    await drainOutbox('backoff')
+    expect(sent).toHaveLength(1)
+    expect(statusOf(inA.id)).toBe('waiting')
+  })
+
+  // A queue written by the previous version: no orgId field on the items, the owner alone.
+  const previousVersionQueue = async () => {
+    await store.set('outbox:v1:items', JSON.stringify([{ id: 'old-1', projectId: 'p1', kind: 'punch.create', summary: 'Old', payload: {}, dependsOn: null, status: 'waiting', attempts: 0, nextAttemptAt: null, error: null, createdAt: '2026-01-01T00:00:00.000Z', sentAt: null, resultId: null, resultRef: null, clientRequestId: 'old' }]))
+    await store.set('outbox:v1:owner', 'u1')
+    __resetOutboxForTests()
+    network.__reset(false)
+    await hydrateOutbox()
+    expect(items()[0]).toMatchObject({ orgId: null, legacy: true })
+  }
+
+  it('stamps an item of the version before workspaces with the workspace it was captured in — not the one that adopts the queue first — once', async () => {
+    await previousVersionQueue()
+    // The person signs in to B; the device's old profile says the queue was A's.
+    await adoptOutboxOwner('u1', ORG_B, ORG_A)
+    expect(items()[0]!.orgId).toBe(ORG_A)
+    expect(items()[0]!.legacy).toBeUndefined()
+    expect(JSON.parse((await store.get('outbox:v1:items')) ?? '[]')[0].orgId).toBe(ORG_A)
+    network.__reset(true)
+    await drainOutbox('in-b')
+    expect(sent).toHaveLength(0)
+    // Back in A it goes, under A.
+    lockOutbox()
+    await adoptOutboxOwner('u1', ORG_A)
+    await settled()
+    expect(sent.map((s) => [s.clientRequestId, s.orgId])).toEqual([['old', ORG_A]])
+  })
+
+  it('holds an item of the version before workspaces when the device cannot tell its workspace: never sent, and never stamped by whichever comes first', async () => {
+    await previousVersionQueue()
+    await adoptOutboxOwner('u1', ORG_B)
+    network.__reset(true)
+    await drainOutbox('in-b')
+    lockOutbox()
+    await adoptOutboxOwner('u1', ORG_A)
+    await drainOutbox('in-a')
+    expect(sent).toHaveLength(0)
+    expect(items()[0]).toMatchObject({ orgId: null, legacy: true, status: 'waiting' })
+    expect(outboxCounts(items(), null, ORG_A)).toMatchObject({ waiting: 0, elsewhere: 1 })
+    // An item of this version queued before any session adopted the queue is the adopting session's.
+    __resetOutboxForTests()
+    await hydrateOutbox()
+    const early = await queue({ clientRequestId: 'early' })
+    expect(early.orgId).toBeNull()
+    await adoptOutboxOwner('u1', ORG_A)
+    expect(items().find((i) => i.id === early.id)?.orgId).toBe(ORG_A)
+  })
+
+  it('counts what waits here and what waits elsewhere apart, so a badge never promises another workspace’s items', async () => {
+    network.__reset(false)
+    await queue({ clientRequestId: 'a1' })
+    await queue({ clientRequestId: 'a2', projectId: 'p2' })
+    lockOutbox()
+    await adoptOutboxOwner('u1', ORG_B)
+    await queue({ clientRequestId: 'b1' })
+    expect(outboxCounts(items(), null, ORG_B)).toEqual({ waiting: 1, attention: 0, sent: 0, elsewhere: 2 })
+    expect(outboxCounts(items(), 'p1', ORG_A)).toEqual({ waiting: 1, attention: 0, sent: 0, elsewhere: 1 })
+    // Without a workspace the counts are the whole queue, as before.
+    expect(outboxCounts(items())).toEqual({ waiting: 3, attention: 0, sent: 0, elsewhere: 0 })
   })
 })

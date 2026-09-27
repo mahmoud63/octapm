@@ -17,8 +17,14 @@ const {
   attachRealtime,
   authenticateSocket,
   broadcastDomainEvent,
+  deliverDomainEvent,
+  disconnectMembership,
+  disconnectStanding,
   disconnectUser,
+  forgetMemberKeys,
   handleProjectJoin,
+  memberRoomKey,
+  resolveMemberKeys,
   targetRoomsFor,
 } = require("../socket");
 
@@ -168,7 +174,7 @@ describe("realtime project rooms", () => {
 });
 
 describe("realtime broadcast", () => {
-  it("routes record events to the project room and notifications to user rooms", () => {
+  it("routes record events to the project room and notifications to the recipients' member rooms in the event's workspace", () => {
     const { io, emits } = createFakeIo();
 
     broadcastDomainEvent(
@@ -192,10 +198,12 @@ describe("realtime broadcast", () => {
       }),
     );
 
+    // No membership model on this client: the legacy member key, which is
+    // the room a socket without a membership joins — still one workspace.
     expect(emits.map((entry) => entry.room)).toEqual([
       ROOMS.project(PROJECT_ID),
-      ROOMS.user("u1"),
-      ROOMS.user("u2"),
+      ROOMS.member(memberRoomKey({ orgId: "org-1", userId: "u1" })),
+      ROOMS.member(memberRoomKey({ orgId: "org-1", userId: "u2" })),
     ]);
     expect(emits[0].name).toBe("domain.event");
     expect(emits[0].payload).toEqual(
@@ -212,7 +220,7 @@ describe("realtime broadcast", () => {
     ).toEqual([]);
   });
 
-  it("subscribes to the bus when attached and fans out published events", () => {
+  it("subscribes to the bus when attached and fans out published events", async () => {
     const { io, emits } = createFakeIo();
     const handle = attachRealtime(io);
 
@@ -231,23 +239,30 @@ describe("realtime broadcast", () => {
       { delayMs: 0 },
     );
 
+    // The member rooms are resolved before the emit, so the fan-out lands a tick later.
+    await new Promise((resolve) => setImmediate(resolve));
     expect(emits).toHaveLength(1);
     handle.unsubscribe();
   });
 
-  it("joins org and user rooms on connection", () => {
+  it("joins org, user and member rooms on connection", () => {
     const { io } = createFakeIo();
     const handle = attachRealtime(io);
     const onConnection = io.on.mock.calls.find(
       ([name]) => name === "connection",
     )[1];
     const socket = createFakeSocket();
-    socket.data.user = { id: "user-1", orgId: "org-1", role: "pm" };
+    socket.data.user = { id: "user-1", orgId: "org-1", role: "pm", membershipId: "mem-1" };
 
     onConnection(socket);
 
     expect(socket.join).toHaveBeenCalledWith(ROOMS.org("org-1"));
     expect(socket.join).toHaveBeenCalledWith(ROOMS.user("user-1"));
+    expect(socket.join).toHaveBeenCalledWith(ROOMS.member("mem-1"));
+    expect(socket.emit).toHaveBeenCalledWith(
+      "realtime.ready",
+      expect.objectContaining({ membershipId: "mem-1" }),
+    );
     expect(socket.on).toHaveBeenCalledWith("project:join", expect.any(Function));
     expect(socket.emit).toHaveBeenCalledWith(
       "realtime.ready",
@@ -321,7 +336,67 @@ describe("Phase 21D — integrity (release challenge, eleventh pass)", () => {
     expect(emits[0].payload.entityType).toBe("cost_record");
     expect(emits[0].payload.payload.summary).toBeUndefined();
     expect(JSON.stringify(emits[0].payload)).not.toMatch(/budget|committed|actual/);
-    expect(emits[1].room).toBe(ROOMS.user("u1"));
+    expect(emits[1].room).toBe(ROOMS.member(memberRoomKey({ orgId: "org-1", userId: "u1" })));
     expect(emits[1].payload.payload.summary).toEqual({ title: "Approved" });
+  });
+});
+
+describe("ENT-5 — rooms keyed by membership", () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    forgetMemberKeys();
+    delete mockPrisma.organizationMembership;
+  });
+
+  it("a notification reaches the recipient's member room in its workspace, never the user room across workspaces", async () => {
+    mockPrisma.organizationMembership = {
+      findMany: jest.fn(async ({ where }) => (where.orgId === "org-a" ? [{ id: "mem-a", userId: "u1" }] : [])),
+      findFirst: jest.fn(),
+    };
+    const { io, emits } = createFakeIo();
+    const inA = bus.normalizeEvent({ type: bus.EVENT_TYPES.NOTIFICATION_CREATED, orgId: "org-a", recipientUserIds: ["u1", "u2"] });
+    const keys = await resolveMemberKeys(inA);
+    expect(keys.get("u1")).toBe("mem-a");
+    // u2 has no active membership in org-a: the legacy key, still scoped to org-a.
+    expect(keys.get("u2")).toBe(memberRoomKey({ orgId: "org-a", userId: "u2" }));
+    await deliverDomainEvent(io, inA);
+    expect(emits.map((entry) => entry.room)).toEqual([ROOMS.member("mem-a"), ROOMS.member("legacy:org-a:u2")]);
+    expect(emits.map((entry) => entry.room)).not.toContain(ROOMS.user("u1"));
+    // The same person in org-b: their org-b membership is looked up, the org-a key is not reused.
+    await deliverDomainEvent(io, bus.normalizeEvent({ type: bus.EVENT_TYPES.NOTIFICATION_CREATED, orgId: "org-b", recipientUserIds: ["u1"] }));
+    expect(emits[2].room).toBe(ROOMS.member("legacy:org-b:u1"));
+    // The key is remembered for a minute: a second event in org-a reads no row.
+    mockPrisma.organizationMembership.findMany.mockClear();
+    await deliverDomainEvent(io, inA);
+    expect(mockPrisma.organizationMembership.findMany).not.toHaveBeenCalled();
+  });
+
+  it("disconnectMembership drops one membership's sockets; disconnectStanding picks the room from the rows as they stand", async () => {
+    const disconnectSockets = jest.fn();
+    const io = { in: jest.fn(() => ({ disconnectSockets })) };
+    expect(disconnectMembership(io, "mem-a")).toBe(true);
+    expect(io.in).toHaveBeenCalledWith(ROOMS.member("mem-a"));
+    expect(disconnectSockets).toHaveBeenCalledWith(true);
+
+    // A membership change: only that membership's room.
+    io.in.mockClear();
+    mockPrisma.user.findUnique.mockResolvedValueOnce({ status: "active" });
+    mockPrisma.organizationMembership = { findFirst: jest.fn(async () => ({ id: "mem-a" })), findMany: jest.fn(async () => []) };
+    expect(await disconnectStanding(io, { orgId: "org-a", userId: "u1" })).toEqual({ dropped: "membership", membershipId: "mem-a" });
+    expect(io.in).toHaveBeenCalledTimes(1);
+    expect(io.in).toHaveBeenCalledWith(ROOMS.member("mem-a"));
+
+    // The identity closed (its last workspace deactivated it): every socket, in every workspace.
+    io.in.mockClear();
+    mockPrisma.user.findUnique.mockResolvedValueOnce({ status: "inactive" });
+    expect(await disconnectStanding(io, { orgId: "org-a", userId: "u1" })).toEqual({ dropped: "user" });
+    expect(io.in).toHaveBeenCalledWith(ROOMS.user("u1"));
+
+    // No membership row (a workspace seeded before memberships): the legacy member room of that workspace.
+    io.in.mockClear();
+    mockPrisma.user.findUnique.mockResolvedValueOnce({ status: "active" });
+    mockPrisma.organizationMembership.findFirst.mockResolvedValueOnce(null);
+    expect(await disconnectStanding(io, { orgId: "org-a", userId: "u1" })).toEqual({ dropped: "legacy" });
+    expect(io.in).toHaveBeenCalledWith(ROOMS.member("legacy:org-a:u1"));
   });
 });

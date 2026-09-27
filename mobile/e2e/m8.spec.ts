@@ -1,4 +1,5 @@
 import { expect, test, type APIRequestContext, type Locator, type Page } from '@playwright/test'
+import { currentProjectId } from './cert-helpers'
 
 /**
  * M8 on the web target: the wide layout. Master–detail on the tablet
@@ -70,7 +71,7 @@ test.describe('M8 on the web target', () => {
   test('a checklist signature is drawn on the pad and posted as a PNG with the signer', async ({ page, request }) => {
     const { headers } = await apiSession(request)
     await signIn(page)
-    const projectId = (await page.evaluate(() => sessionStorage.getItem('octapm.session.project')))!
+    const projectId = (await currentProjectId(page))!
     const listed = await request.get(`${apiBase}/projects/${projectId}/forms/templates?status=active`, { headers })
     let template = items<{ id: string; name: string }>(((await listed.json()) as { data: never }).data).find((t) => t.name === 'E2E signed ITP')
     if (!template) {
@@ -125,7 +126,7 @@ test.describe('M8 on the web target', () => {
     test.skip(!isWide(page), 'progress approval is a tablet decision')
     const { headers, userId } = await apiSession(request)
     await signIn(page)
-    const projectId = (await page.evaluate(() => sessionStorage.getItem('octapm.session.project')))!
+    const projectId = (await currentProjectId(page))!
     const stamp = Date.now()
     const created = await request.post(`${apiBase}/projects/${projectId}/activities`, { headers, data: { name: `E2E approval activity ${stamp}`, activityCode: `E2A-${stamp % 100000}`, category: 'structural', startDate: '2026-09-01', endDate: '2026-12-31', budget: 1000, engineerIds: [userId] } })
     expect(created.status()).toBe(201)

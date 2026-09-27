@@ -7,6 +7,7 @@ import type { Project } from '@/api/types'
 import { Freshness } from '@/components/Freshness'
 import { healthTone } from '@/components/HealthDimensions'
 import { Screen } from '@/components/Screen'
+import { WorkspaceSheet, WorkspaceStrip } from '@/components/WorkspaceSheet'
 import { EmptyState, ErrorState, Input, RecordRow, SkeletonList, Text, spacing } from '@/design-system'
 import { useProjectStore } from '@/projects/store'
 import { listPerformance } from '@/components/listProps'
@@ -24,6 +25,7 @@ export default function ProjectsScreen() {
   const current = useProjectStore((s) => s.currentProjectId)
   const select = useProjectStore((s) => s.select)
   const [filter, setFilter] = useState('')
+  const [choosingWorkspace, setChoosingWorkspace] = useState(false)
 
   const scores = useMemo(() => new Map((workspace.data?.projectHealth ?? []).map((row) => [row.id, row.overallScore])), [workspace.data])
   const rows = useMemo(() => {
@@ -45,6 +47,8 @@ export default function ProjectsScreen() {
         keyboardShouldPersistTaps="handled"
         ListHeaderComponent={
           <View style={styles.header}>
+            {/* The projects listed are the active workspace's; this row says which and switches it. */}
+            <WorkspaceStrip onPress={() => setChoosingWorkspace(true)} testID="workspace-switch-projects" />
             <Input label="Find a project" placeholder="Name, contract number, location" value={filter} onChangeText={setFilter} autoCapitalize="none" returnKeyType="search" testID="projects-filter" />
             <Freshness updatedAt={projects.dataUpdatedAt || undefined} isFetching={projects.isFetching} />
           </View>
@@ -87,6 +91,7 @@ export default function ProjectsScreen() {
         refreshing={false}
         contentContainerStyle={styles.list}
       />
+      <WorkspaceSheet visible={choosingWorkspace} onClose={() => setChoosingWorkspace(false)} />
     </Screen>
   )
 }

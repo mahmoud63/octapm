@@ -1,7 +1,7 @@
 /// <reference types="node" />
 import { readFileSync } from 'node:fs'
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test'
-import { openModule } from './cert-helpers'
+import { currentProjectId, openModule } from './cert-helpers'
 
 /**
  * M6 on the web target: an approval answered through the respond route on
@@ -58,7 +58,7 @@ test.describe('M6 on the web target', () => {
   test('an approval step is answered through the respond route and the change order moves', async ({ page, request }) => {
     const { headers } = await apiSession(request)
     await signIn(page)
-    const projectId = (await page.evaluate(() => sessionStorage.getItem('octapm.session.project')))!
+    const projectId = (await currentProjectId(page))!
     await ensureChangeOrderTemplate(request, headers, projectId)
     const stamp = Date.now() % 100000
     // The server refuses a submit without both impact summaries, an affected activity and a supporting document.
@@ -147,7 +147,7 @@ test.describe('M6 on the web target', () => {
   test('the procurement overview loads and an open lead-time alert, when there is one, is acknowledged', async ({ page, request }) => {
     const { headers } = await apiSession(request)
     await signIn(page)
-    const projectId = (await page.evaluate(() => sessionStorage.getItem('octapm.session.project')))!
+    const projectId = (await currentProjectId(page))!
     await openModule(page, 'procurement')
     await expect(page.getByTestId('screen-procurement')).toBeVisible()
     await expect(page.getByTestId('procurement-doors')).toBeVisible()
@@ -168,7 +168,7 @@ test.describe('M6 on the web target', () => {
   test('the order register opens an issued order and hands the delivery to inventory', async ({ page, request }) => {
     const { headers } = await apiSession(request)
     await signIn(page)
-    const projectId = (await page.evaluate(() => sessionStorage.getItem('octapm.session.project')))!
+    const projectId = (await currentProjectId(page))!
     const register = await request.get(`${apiBase}/projects/${projectId}/purchase-orders?status=issued`, { headers })
     const issued = items<{ id: string; ref: string }>(((await register.json()) as { data: never }).data)[0]
     expect(issued, 'an issued order on the end-to-end project').toBeTruthy()

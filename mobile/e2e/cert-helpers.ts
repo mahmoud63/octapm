@@ -78,7 +78,22 @@ export async function signOut(page: Page) {
   await expect(signInScreen(page)).toBeVisible()
 }
 
-export const currentProjectId = (page: Page) => page.evaluate(() => sessionStorage.getItem('octapm.session.project'))
+/**
+ * The project the app has chosen. The app stores it with the workspace it
+ * belongs to — `{ projectId, orgId }` (workspace switching doc §1) — and an
+ * older build stored the bare id; either way the id comes back.
+ */
+export const currentProjectId = async (page: Page): Promise<string | null> => {
+  const raw = await page.evaluate(() => sessionStorage.getItem('octapm.session.project'))
+  if (!raw) return null
+  try {
+    const parsed = JSON.parse(raw) as { projectId?: unknown } | string
+    if (typeof parsed === 'string') return parsed || null
+    return typeof parsed?.projectId === 'string' ? parsed.projectId : null
+  } catch {
+    return raw
+  }
+}
 
 /** The end-to-end organisation's first project (Riverside Tower). */
 export async function mainProject(request: APIRequestContext, headers: Headers) {
