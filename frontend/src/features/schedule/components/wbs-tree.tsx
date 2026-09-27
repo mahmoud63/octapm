@@ -16,10 +16,14 @@ import { useWbsNodes } from '@/features/controls/structure/hooks/use-structure'
  * The schedule's WBS tab.
  *
  * When the project has WbsNode rows (PC-1: populated at revision activation
- * and editable on the Structure page) the tree is those rows, joined by
- * parent id. Otherwise it falls back to the WBS the revision snapshot
- * carried, joined by the snapshot's own parent ids (an imported P6 or MS
- * Project WBS) and, for the generator's id-less nodes, by dotted code.
+ * and editable on the Structure page) the tree is always those rows, joined
+ * by parent id — for everyone who can read the schedule (owner decision D3:
+ * a schedule reader who may not read the BOQ receives the same outline).
+ * Only a project without WbsNode rows falls back to the WBS the revision
+ * snapshot carried, joined by the snapshot's own parent ids (an imported P6
+ * or MS Project WBS) and, for the generator's id-less nodes, by dotted code.
+ * Until the project's rows have been read nothing is drawn, so the snapshot
+ * never stands in for a canonical tree that exists.
  */
 
 type FlatWbsNode = {
@@ -290,7 +294,11 @@ export function WbsTree({
   nodes: FlatWbsNode[]
   projectId?: string
 }) {
-  const { data: structure } = useWbsNodes(projectId ?? '', {
+  const {
+    data: structure,
+    isLoading: structureLoading,
+    isError: structureFailed,
+  } = useWbsNodes(projectId ?? '', {
     enabled: Boolean(projectId),
   })
   const fromRows = Boolean(structure && structure.items.length > 0)
@@ -358,8 +366,25 @@ export function WbsTree({
     setExpanded(next)
   }
 
+  // The canonical tree decides: while it is being read, or if it cannot be
+  // read, the revision's snapshot is not offered in its place.
+  if (projectId && structureLoading) {
+    return (
+      <p className='p-6 text-center text-sm text-muted-foreground' data-testid='uat-schedule-wbs-loading'>
+        Loading the project WBS…
+      </p>
+    )
+  }
+  if (projectId && structureFailed) {
+    return (
+      <p className='p-6 text-center text-sm text-muted-foreground' data-testid='uat-schedule-wbs-error'>
+        The project WBS could not be loaded. Reload the page to try again.
+      </p>
+    )
+  }
+
   return (
-    <div className='space-y-4'>
+    <div className='space-y-4' data-testid='uat-schedule-wbs' data-source={fromRows ? 'wbs-nodes' : 'snapshot'}>
       <div className='flex flex-wrap items-center gap-2'>
         <Button
           size='sm'

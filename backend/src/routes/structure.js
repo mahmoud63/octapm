@@ -3,8 +3,9 @@ const { body, param, query } = require("express-validator");
 const { asyncHandler } = require("../utils/async-handler");
 const { sendSuccess } = require("../utils/api-response");
 const { authenticate } = require("../middleware/auth");
-const { getEffectiveRole, requirePermission } = require("../middleware/rbac");
+const { getEffectiveRole, hasPermission, requirePermission } = require("../middleware/rbac");
 const { validate } = require("../middleware/validate");
+const { boqFigureAccess, withheldWbsList } = require("../utils/boq-figures");
 const wbsService = require("../services/wbs.service");
 const uomService = require("../services/uom.service");
 
@@ -14,7 +15,8 @@ const uomService = require("../services/uom.service");
  *
  * Both are gated by the `boq` module — structure is what the bill and the
  * programme are grouped by, and the integration doc (§2) keeps the controls
- * pages on `boq` read/update rather than adding a catalogue module.
+ * pages on `boq` read/update rather than adding a catalogue module. The one
+ * exception is reading the WBS outline, open to schedule readers too (D3).
  */
 const router = express.Router({ mergeParams: true });
 router.use(authenticate);
@@ -43,9 +45,19 @@ const reasonValidators = [
 
 // ─── WBS ─────────────────────────────────────────────────────────────────────
 
+// The WBS outline is read by anyone who can read the schedule (owner
+// decision D3): the Schedule's WBS tab is built from it. A BOQ reader keeps
+// the whole answer exactly as before; a schedule reader who may not read the
+// BOQ gets the outline (utils/boq-figures withheldWbsList). Writes stay on
+// boq:update below.
+const wbsOutlineReader = (req, res, next) =>
+  req.user && hasPermission(req, "boq", "read")
+    ? next()
+    : requirePermission("schedule", "read")(req, res, next);
+
 router.get(
   "/wbs",
-  requirePermission("boq", "read"),
+  wbsOutlineReader,
   [query("includeArchived").optional().isBoolean().toBoolean(), validate],
   asyncHandler(async (req, res) => {
     const result = await wbsService.listWbsNodes({
@@ -53,7 +65,7 @@ router.get(
       projectId: req.params.projectId,
       query: req.query,
     });
-    return sendSuccess(res, result);
+    return sendSuccess(res, withheldWbsList(result, boqFigureAccess(req)));
   }),
 );
 

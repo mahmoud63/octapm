@@ -1,29 +1,38 @@
 import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
-import { test, expect, type APIRequestContext } from '@playwright/test'
+import { test, expect, type APIRequestContext, type Browser } from '@playwright/test'
 import { apiClient } from './support'
 import {
   apiJson,
   createProject,
   dropLiveOrg,
+  LIVE_PASSWORD,
   registerLiveOrg,
   signInForm,
   type LiveOrg,
 } from './support-workspaces'
 
 /**
- * PC-4 acceptance, round 1 — what the Overview, the Earned Value tab, the
- * Forecast tab, the WBS tab and the Revisions tab say, on screen.
+ * PC-4 acceptance — what the Overview, the Earned Value tab, the Forecast
+ * tab, the WBS tab and the Revisions tab say, on screen, with the owner's
+ * decisions of 2026-09-27:
  *
  *   §4 earned value: the S-curve plots EV only where it was measured (this
  *     report's cutoff and each locked period's), never a flat line written
- *     back into months nobody measured; the EV tab and the Overview state
- *     the same cutoff date; the Overview's cost figures say what they are
- *     and as of when, apart from the earned value
- *   forecast fallbacks: no cost records, an empty budget register, no CPI —
- *     each a dash or a stated basis, never USD 0 presented as a projection
- *   the forecast tile is judged against its own basis
- *   the WBS outline follows the snapshot's own parent ids
+ *     back into months nobody measured
+ *   D1 the EV cutoff is the end of the cutoff date in the project's time
+ *     zone; the EV tab, the Overview's health card and strip and the
+ *     Forecast tab state it one way — the date, the zone and the instant
+ *   D2 the Overview's "Forecast at completion" is the business-rule EAC
+ *     (revised BAC / CPI, or the revised BAC labelled "the budget — no cost
+ *     performance yet"), toned against that BAC, opening the Forecast tab,
+ *     which shows the same figure with the same label; a member who may not
+ *     see budget figures gets "—" and says why
+ *   C  a member without BOQ read is told the mapping details are
+ *     unavailable — no share, no counts
+ *   D3 the WBS tab builds from the project's own WBS rows when they exist,
+ *     for a BOQ reader and for a site engineer without BOQ read alike; the
+ *     snapshot outline (joined on its own parent ids) only when none exist
  *   a hand-entered bill's approval card sends to the page that approves it
  *   Rollback is offered only when there is something to restore
  *
@@ -107,13 +116,60 @@ const allocate = async (client: APIRequestContext, projectId: string, boqItemId:
 }
 
 /**
- * §4 on screen. A 100,000 bill allocated to one activity; approved cost
- * loading in June, July and August; 40% approved on 10 July and 90% on
- * 20 August; July's period locked (its snapshot stores EV 40,000), August's
- * open (EV 90,000). The service writes today's EV into every month up to the
- * cutoff; the tab must plot July's locked 40,000 and August's 90,000 only.
+ * A site engineer on the project whose permission template sets the BOQ tool
+ * to none (the site engineer has no cost tool either): a member who may read
+ * neither the bill nor the budget built from it.
  */
-test('earned value is plotted only where it was measured, the EV tab and the Overview state one cutoff, and the Overview says what its cost figures are', async ({ page }) => {
+const addNoBoqSiteEngineer = async (client: APIRequestContext, projectId: string) => {
+  const token = org!.adminToken
+  const email = `live-se-${crypto.randomUUID()}@octapm-live.test`
+  const created = await apiJson(client, 'post', '/users', {
+    token,
+    data: { name: 'pc4acc Site Engineer', email, role: 'site_engineer', password: LIVE_PASSWORD },
+  })
+  ok(created, 201, 'add the site engineer')
+  const id = created.body!.data!.id as string
+  ok(await apiJson(client, 'post', `/projects/${projectId}/team`, { token, data: { userId: id, role: 'site_engineer' } }), 201, 'join the project')
+  const template = await apiJson(client, 'post', '/permissions/templates', {
+    token,
+    data: { name: `No BOQ site engineer ${Date.now()}`, baseRole: 'site_engineer', tools: [{ module: 'boq', level: 'none' }] },
+  })
+  ok(template, 201, 'template')
+  ok(
+    await apiJson(client, 'put', `/projects/${projectId}/team/${id}/permissions`, { token, data: { templateId: template.body!.data!.id } }),
+    200,
+    'apply the template',
+  )
+  return email
+}
+
+const pageAs = async (browser: Browser, email: string) => {
+  const context = await browser.newContext({ timezoneId: 'America/Chicago' })
+  const page = await context.newPage()
+  await signInForm(page, email)
+  return { context, page }
+}
+
+/** The digits of a money figure as shown ("USD 125,000" and "125,000" read alike). */
+const digits = (text: string) => text.replace(/[^\d.-]/g, '')
+
+/**
+ * §4 on screen. A 100,000 bill allocated to one activity of a project in
+ * America/Chicago; approved cost loading in June, July and August; 40%
+ * approved on 10 July and 90% on 20 August; July's period locked (its
+ * snapshot stores EV 40,000), August's open (EV 90,000). The service writes
+ * today's EV into every month up to the cutoff; the tab must plot July's
+ * locked 40,000 and August's 90,000 only — July's cutoff instant is already
+ * 1 August in UTC, so the point is placed by its date in the project's zone.
+ *
+ * D1: August's cutoff is the end of 31 August in Chicago, 2026-09-01
+ * 04:59:59.999Z — stated the same way on the EV tab, the health card, the
+ * strip and the Forecast tab (never "Sep 1" in UTC). D2 without CPI: the
+ * strip's forecast at completion is the revised BAC, 100,000, labelled the
+ * budget with no cost performance yet, and opens the Forecast tab, which
+ * shows the same figure with the same label.
+ */
+test('earned value is plotted only where it was measured, every EV surface states one cutoff in the project zone, and the forecast at completion without CPI is the budget on the strip and the Forecast tab', async ({ page }) => {
   test.setTimeout(240_000)
   const client = await apiClient()
   const setup = await (async () => {
@@ -128,6 +184,7 @@ test('earned value is plotted only where it was measured, the EV tab and the Ove
         org.orgId,
         projectId,
         `
+        await prisma.project.update({ where: { id: projectId }, data: { timezone: 'America/Chicago' } });
         const common = { projectId, activityId: args.activity, status: 'approved', approvedAt: new Date('2026-06-01T12:00:00Z') };
         for (const [plannedDate, plannedValue] of [['2026-06-15', 30000], ['2026-07-15', 30000], ['2026-08-15', 40000]]) {
           await prisma.activityCostLoading.create({ data: { ...common, plannedDate: new Date(plannedDate + 'T12:00:00Z'), plannedValue } });
@@ -156,7 +213,22 @@ test('earned value is plotted only where it was measured, the EV tab and the Ove
       expect(locked.body!.data!.ev, 'July locked at 40% of the allocation').toBe(40000)
       const report = await apiJson(client, 'get', `/projects/${projectId}/reports/ev`, { token })
       ok(report, 200, 'EV report')
-      const data = report.body!.data as { ev: number; cpi: number | null; sCurve: { label: string; ev: number | null }[] }
+      const data = report.body!.data as {
+        ev: number
+        cpi: number | null
+        eac: number
+        totalBudget: number
+        reporting: { cutoffDate: string; cutoffLocalDate: string; timeZone: string }
+        sCurve: { label: string; ev: number | null }[]
+      }
+      // D1: the end of 31 August in Chicago (CDT), which is 1 September in UTC.
+      expect(data.reporting).toMatchObject({
+        cutoffDate: '2026-09-01T04:59:59.999Z',
+        cutoffLocalDate: '2026-08-31',
+        timeZone: 'America/Chicago',
+      })
+      // D2 without CPI: the EAC is the revised BAC.
+      expect([data.eac, data.totalBudget]).toEqual([100000, 100000])
       // The premise: the service backfills today's EV into the months before
       // the cutoff — the flat line the tab must not draw.
       expect(data.ev).toBe(90000)
@@ -181,62 +253,82 @@ test('earned value is plotted only where it was measured, the EV tab and the Ove
   await expect(page.getByTestId('uat-ev-scurve-history-note')).toContainText(
     'EV history is only available for locked periods; earlier months are not shown',
   )
+  // D1: one statement of the cutoff — the date in the project's zone, the
+  // zone, and the instant PV, EV and AC were selected against.
   const evCutoff = (await page.getByTestId('uat-ev-cutoff').innerText()).trim()
-  expect(evCutoff).toBe('Aug 31, 2026')
-  await expect(page.getByTestId('uat-ev-cutoff-instant')).toContainText('UTC')
-  // With no CPI the EAC is the budget, and says so.
-  await expect(page.getByText('Budget — no CPI yet')).toBeVisible()
-  await expect(page.getByText('Budget / CPI')).toHaveCount(0)
+  expect(evCutoff).toBe('end of Aug 31, 2026 (America/Chicago) · 2026-09-01 04:59:59 UTC')
+  // With no CPI the EAC is the budget, and says so (the Phase 22A wording).
+  await expect(page.getByText('The budget — no cost performance yet')).toBeVisible()
+  await expect(page.getByText('Revised budget / CPI')).toHaveCount(0)
 
   // The Overview: the same cutoff on the health card and in the strip's
-  // basis line; the strip's cost figures are the ledger's, as of today.
+  // basis line; the budget and actual are the register's and the ledger's.
   await page.goto(base)
   await expect(page.getByTestId('uat-controls-strip')).toBeVisible({ timeout: 30_000 })
   await expect(page.getByTestId('uat-health-cutoff')).toHaveText(`EV cutoff ${evCutoff}`, { timeout: 30_000 })
-  await expect(page.getByTestId('uat-controls-ev-cutoff')).toHaveText(evCutoff)
-  await expect(page.getByTestId('uat-health-provenance-cost')).toContainText(`through ${evCutoff}`)
+  await expect(page.getByTestId('uat-controls-ev-cutoff')).toHaveText(evCutoff, { timeout: 30_000 })
+  await expect(page.getByTestId('uat-health-provenance-cost')).toContainText('through Aug 31, 2026')
   await expect(page.getByTestId('uat-controls-figures-basis')).toContainText('budget register and cost ledger as of')
   // No cost records, no budget register: dashes with the reason — never USD 0.
   await expect(page.getByTestId('uat-controls-figure-budget-value')).toHaveText('—')
   await expect(page.getByTestId('uat-controls-figure-budget')).toContainText('no budget register yet')
-  for (const figure of ['actual', 'forecast']) {
-    await expect(page.getByTestId(`uat-controls-figure-${figure}-value`)).toHaveText('—')
-    await expect(page.getByTestId(`uat-controls-figure-${figure}`)).toContainText('no cost records yet')
-  }
+  await expect(page.getByTestId('uat-controls-figure-actual-value')).toHaveText('—')
+  await expect(page.getByTestId('uat-controls-figure-actual')).toContainText('no cost records yet')
   await expect(page.getByTestId('uat-controls-figures')).not.toContainText(/USD 0\b|\$0\b/)
+  // D2 without CPI: the forecast at completion is the revised BAC, labelled.
+  const forecastFigure = page.getByTestId('uat-controls-figure-forecast')
+  const stripValue = (await page.getByTestId('uat-controls-figure-forecast-value').innerText()).trim()
+  expect(digits(stripValue)).toBe('100000')
+  await expect(forecastFigure).toContainText('the budget — no cost performance yet')
+  await expect(forecastFigure).toHaveAttribute('data-tone', 'neutral')
 
-  // The Forecast tab: with no CPI the projected cost is the budget handed
-  // back, and says so beside the reason.
-  await page.goto(`${base}/schedule/forecast`)
-  const cost = page.getByTestId('uat-forecast-cost')
-  await expect(cost).toBeVisible({ timeout: 30_000 })
-  await expect(cost).toContainText('no cost performance yet')
-  await expect(cost).not.toContainText('Within the')
-  await expect(page.getByTestId('uat-forecast-cost-note')).toContainText('CPI is not available yet: no official cost-record actuals')
+  // It opens the Forecast tab, which shows the same figure with the same
+  // label, the CPI note beside it, and how the projected cost relates.
+  await forecastFigure.click()
+  await expect(page).toHaveURL(/\/schedule\/forecast$/, { timeout: 30_000 })
+  const eac = page.getByTestId('uat-forecast-eac')
+  await expect(eac).toBeVisible({ timeout: 30_000 })
+  await expect(eac).toContainText('the budget — no cost performance yet')
+  expect(digits(await eac.locator('p').nth(1).innerText())).toBe(digits(stripValue))
+  await expect(page.getByTestId('uat-forecast-eac-note')).toContainText('CPI is not available yet: no official cost-record actuals')
+  await expect(page.getByTestId('uat-forecast-cost-note')).toContainText('Projected cost = max(EAC, bottom-up)')
+  await expect(page.getByTestId('uat-forecast-ev-cutoff')).toHaveText(evCutoff)
 })
 
 /**
- * The forecast tile against its own basis: a register budget of 1,000,000
- * beside a forecast of 60,000 on 21,337 of allocated budget — heavily over
- * its own basis, well under the register. The tile reads "review", and it
- * opens the Cost overview, where its figure is stated.
+ * D2 with cost performance: a 100,000 bill on one activity, half the work
+ * approved, 62,500 spent through the cutoff — CPI 0.8, so the EAC is
+ * 100,000 / 0.8 = 125,000. A budget register of 1,000,000 stands beside it:
+ * the tile is toned against the revised BAC it was computed from (over),
+ * never against the register (well under). It opens the Forecast tab, which
+ * shows the same figure with the same label. A site engineer who may read
+ * neither the BOQ nor the budget gets "—" and the reason, and (C) is told the
+ * mapping details are unavailable — no share, no counts.
  */
-test('the forecast at completion is judged against its own basis and opens where its figure is stated; activities without a revision are a schedule', async ({ page }) => {
-  test.setTimeout(180_000)
+test('the forecast at completion is the budget over CPI, toned against that budget, the same on the Forecast tab; a member without budget read gets a dash and the mapping details are unavailable to them', async ({ page, browser }) => {
+  test.setTimeout(240_000)
   const client = await apiClient()
   const setup = await (async () => {
     try {
       if (!org) org = await registerLiveOrg(client, 'pc4acc')
       const token = org.adminToken
       const projectId = await createProject(client, token, `Forecast basis ${Date.now()}`)
-      const item = await createItem(client, token, projectId, { code: '1.1', description: 'Concrete in foundations', quantity: 100, unit: 'm3', rate: 213.37 })
-      const activity = await createActivity(client, projectId, { name: 'Pour foundations', activityCode: 'A100', startDate: '2026-02-02', endDate: '2026-02-06' })
+      const item = await createItem(client, token, projectId, { code: '1.1', description: 'Concrete frame', quantity: 100, unit: 'm3', rate: 1000 })
+      const activity = await createActivity(client, projectId, { name: 'Concrete frame', activityCode: 'A100', startDate: '2026-02-02', endDate: '2026-02-06' })
       await allocate(client, projectId, item, activity, 100)
-      const record = await apiJson(client, 'post', `/projects/${projectId}/cost/activity/${activity}`, {
-        token,
-        data: { budget: 21337, forecast: 60000 },
-      })
-      ok(record, 201, 'cost record')
+      seed(
+        org.orgId,
+        projectId,
+        `
+        await prisma.activityProgress.create({ data: { activityId: args.activity, pctComplete: 50, status: 'approved', approvedAt: new Date('2026-02-04T12:00:00Z'), updatedAt: new Date('2026-02-04T12:00:00Z') } });
+        await prisma.costRecord.upsert({
+          where: { projectId_activityId: { projectId, activityId: args.activity } },
+          create: { projectId, activityId: args.activity, actual: 62500, actualThroughDate: new Date('2026-02-05T12:00:00Z') },
+          update: { actual: 62500, actualThroughDate: new Date('2026-02-05T12:00:00Z') },
+        });
+        `,
+        { activity },
+      )
       const code = await apiJson(client, 'post', '/company/cost-codes', {
         token,
         data: { code: `LT-${Date.now()}`, name: 'Concrete works', category: 'material' },
@@ -252,11 +344,18 @@ test('the forecast at completion is judged against its own basis and opens where
         201,
         'budget line',
       )
-      const summary = await apiJson(client, 'get', `/projects/${projectId}/cost/summary`, { token })
-      const data = summary.body!.data as { budget: { revisedBudget: number; allocatedToActivities: number }; eac: { mostLikely: number } }
-      // The premise: register ≠ allocated, and the forecast over the allocated.
-      expect([data.budget.revisedBudget, data.budget.allocatedToActivities, data.eac.mostLikely]).toEqual([1000000, 21337, 60000])
-      return { projectId }
+      const [ev, forecast] = await Promise.all([
+        apiJson(client, 'get', `/projects/${projectId}/reports/ev`, { token }),
+        apiJson(client, 'get', `/projects/${projectId}/forecast`, { token }),
+      ])
+      const report = ev.body!.data as { ev: number; ac: number; totalBudget: number; eac: number }
+      const cost = (forecast.body!.data as { cost: { eac: number; bac: number; eacBasis: string } }).cost
+      // The premise: CPI 0.8 on a 100,000 BAC, the forecast carrying the EV report's EAC.
+      expect([report.totalBudget, report.ev, report.ac]).toEqual([100000, 50000, 62500])
+      expect(report.eac).toBeCloseTo(report.totalBudget / (report.ev / report.ac), 2)
+      expect(cost).toMatchObject({ eac: report.eac, bac: 100000, eacBasis: 'budget_over_cpi' })
+      const siteEngineer = await addNoBoqSiteEngineer(client, projectId)
+      return { projectId, eac: report.eac, siteEngineer }
     } finally {
       await client.dispose()
     }
@@ -269,24 +368,59 @@ test('the forecast at completion is judged against its own basis and opens where
   await expect(page.getByTestId('uat-controls-figure-budget-value')).toContainText('1,000,000')
   await expect(page.getByTestId('uat-controls-figure-budget')).toContainText('budget register, revised')
   const forecast = page.getByTestId('uat-controls-figure-forecast')
-  await expect(page.getByTestId('uat-controls-figure-forecast-value')).toContainText('60,000')
+  const forecastValue = page.getByTestId('uat-controls-figure-forecast-value')
+  await expect(forecastValue).toContainText('125,000', { timeout: 30_000 })
+  expect(Number(digits(await forecastValue.innerText()))).toBe(Math.round(setup.eac))
+  await expect(forecast).toContainText('revised budget ÷ CPI')
+  // Over the 100,000 it was computed from — under the 1,000,000 register.
   await expect(forecast).toHaveAttribute('data-tone', 'review')
   // One activity, entered without a revision: a schedule, and what to do next.
   await expect(page.getByTestId('uat-controls-schedule')).toHaveText('1 activity')
   await expect(page.getByTestId('uat-controls-schedule-tile')).toContainText('No revision')
+  // A BOQ reader sees the mapping share.
+  await expect(page.getByTestId('uat-controls-coverage-pct')).toHaveText('100%')
   await forecast.click()
-  await expect(page).toHaveURL(new RegExp(`${base.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/cost/overview$`), { timeout: 30_000 })
+  await expect(page).toHaveURL(new RegExp(`${base.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/schedule/forecast$`), { timeout: 30_000 })
+  const eac = page.getByTestId('uat-forecast-eac')
+  await expect(eac).toContainText('revised budget ÷ CPI', { timeout: 30_000 })
+  await expect(eac).toContainText('125,000')
+
+  // The site engineer: no budget figure, the reason instead; no mapping details.
+  const { context, page: sePage } = await pageAs(browser, setup.siteEngineer)
+  try {
+    await sePage.goto(base)
+    await expect(sePage.getByTestId('uat-controls-strip')).toBeVisible({ timeout: 30_000 })
+    await expect(sePage.getByTestId('uat-controls-figure-forecast-value')).toHaveText('—', { timeout: 30_000 })
+    await expect(sePage.getByTestId('uat-controls-figure-forecast')).toContainText('Cost figures are not available to you')
+    await expect(sePage.getByTestId('uat-controls-coverage-pct')).toHaveText('—')
+    await expect(sePage.getByTestId('uat-controls-coverage-withheld')).toHaveText('Mapping details unavailable to you')
+    await expect(sePage.getByTestId('uat-controls-figure-unmapped-value')).toHaveText('—')
+    await expect(sePage.getByTestId('uat-controls-figure-unmapped')).toContainText('Mapping details unavailable to you')
+    await expect(sePage.getByTestId('uat-controls-figures')).not.toContainText('125,000')
+    await sePage.goto(`${base}/schedule/forecast`)
+    const seEac = sePage.getByTestId('uat-forecast-eac')
+    await expect(seEac).toBeVisible({ timeout: 30_000 })
+    await expect(seEac).toContainText('—')
+    await expect(seEac).toContainText('Cost figures are not available to you')
+    await expect(sePage.getByTestId('uat-forecast')).not.toContainText('125,000')
+  } finally {
+    await context.close()
+  }
 })
 
 /**
  * An imported programme's WBS (XER-shaped: wbsId / parentWbsId, the short
  * code "FDN" under both CIV and MEP), a hand-entered bill, and two revisions:
  * the active one approved, rolled forward from one that stored no
- * activities. The WBS tab follows the snapshot's parents; the rows view has
- * no Budget column; the bill's approval card sends to the page that locks
- * the baseline; Rollback is offered only once there is something to restore.
+ * activities. With no WbsNode rows the WBS tab follows the snapshot's own
+ * parents. D3: once the project has its own WBS rows — a three-level tree
+ * whose second FDN is qualified "MEP.FDN", as an activation makes it — the
+ * tab builds from them alone, for the PM and for a site engineer without BOQ
+ * read alike, with no Budget column. The bill's approval card sends to the
+ * page that locks the baseline; Rollback is offered only once there is
+ * something to restore.
  */
-test('the WBS outline follows the snapshot parents, the hand-entered bill card opens the baseline lock, and Rollback needs something to restore', async ({ page }) => {
+test('the WBS tab builds from the project WBS for every schedule reader and from the snapshot parents only without one, the hand-entered bill card opens the baseline lock, and Rollback needs something to restore', async ({ page, browser }) => {
   test.setTimeout(240_000)
   const client = await apiClient()
   const setup = await (async () => {
@@ -326,17 +460,19 @@ test('the WBS outline follows the snapshot parents, the hand-entered bill card o
 
   // The WBS tab, from the module bar (offered once the schedule has a WBS,
   // so it is opened from there rather than by its address).
-  const openWbs = async () => {
-    await page.goto(`${base}/schedule/gantt`)
-    await expect(page.getByTestId('uat-project-content-schedule')).toBeVisible({ timeout: 30_000 })
-    await page.getByTestId('uat-module-tab-schedule').click()
-    await page.getByTestId('uat-module-menu-schedule').getByTestId('uat-module-child-schedule-wbs').click()
-    await expect(page).toHaveURL(/\/schedule\/wbs$/, { timeout: 30_000 })
+  const openWbs = async (on = page) => {
+    await on.goto(`${base}/schedule/gantt`)
+    await expect(on.getByTestId('uat-project-content-schedule')).toBeVisible({ timeout: 30_000 })
+    await on.getByTestId('uat-module-tab-schedule').click()
+    await on.getByTestId('uat-module-menu-schedule').getByTestId('uat-module-child-schedule-wbs').click()
+    await expect(on).toHaveURL(/\/schedule\/wbs$/, { timeout: 30_000 })
+    await expect(on.getByTestId('uat-schedule-wbs')).toBeVisible({ timeout: 30_000 })
+    await on.getByRole('button', { name: 'Expand All' }).click()
   }
   await openWbs()
-  await page.getByRole('button', { name: 'Expand All' }).click()
-  const outline = async () =>
-    page.locator('[data-testid^="uat-schedule-wbs-row-"]').evaluateAll((rows) =>
+  await expect(page.getByTestId('uat-schedule-wbs')).toHaveAttribute('data-source', 'snapshot')
+  const outline = async (on = page) =>
+    on.locator('[data-testid^="uat-schedule-wbs-row-"]').evaluateAll((rows) =>
       rows.map((row) => [
         row.getAttribute('data-testid')!.replace('uat-schedule-wbs-row-', ''),
         Number(row.getAttribute('data-depth')),
@@ -353,14 +489,52 @@ test('the WBS outline follows the snapshot parents, the hand-entered bill card o
     ['L3', 2, 'Plinths'],
   ])
 
-  // The project's own WBS rows: no Budget column, and the counts are direct.
+  // D3: the project's own WBS rows — three levels, the second FDN qualified
+  // as an activation qualifies it — and a site engineer without BOQ read.
   const client2 = await apiClient()
-  ok(await apiJson(client2, 'post', `/projects/${setup.projectId}/structure/wbs`, { token: org!.adminToken, data: { code: 'A', name: 'Substructure' } }), 201, 'wbs node')
+  const node = async (code: string, name: string, parentId: string | null = null) => {
+    const created = await apiJson(client2, 'post', `/projects/${setup.projectId}/structure/wbs`, {
+      token: org!.adminToken,
+      data: { code, name, parentId },
+    })
+    ok(created, 201, `wbs node ${code}`)
+    return created.body!.data!.id as string
+  }
+  const civ = await node('CIV', 'Civil works')
+  await node('PILE', 'Piles', await node('FDN', 'Civil foundations', civ))
+  const mep = await node('MEP', 'MEP works')
+  await node('PLI', 'Plinths', await node('MEP.FDN', 'MEP foundations', mep))
+  const siteEngineer = await addNoBoqSiteEngineer(client2, setup.projectId)
   await client2.dispose()
+  const canonical = [
+    ['CIV', 0, 'Civil works'],
+    ['FDN', 1, 'Civil foundations'],
+    ['PILE', 2, 'Piles'],
+    ['MEP', 0, 'MEP works'],
+    ['MEP.FDN', 1, 'MEP foundations'],
+    ['PLI', 2, 'Plinths'],
+  ]
   await openWbs()
-  await expect(page.getByTestId('uat-schedule-wbs-row-A')).toBeVisible({ timeout: 30_000 })
+  await expect(page.getByTestId('uat-schedule-wbs')).toHaveAttribute('data-source', 'wbs-nodes')
+  await expect(page.locator('[data-testid^="uat-schedule-wbs-row-"]')).toHaveCount(6, { timeout: 30_000 })
+  // The canonical tree alone: the snapshot's Superstructure is not drawn.
+  expect(await outline()).toEqual(canonical)
+  await expect(page.getByTestId('uat-schedule-wbs-row-SUP')).toHaveCount(0)
+  // No Budget column, and the counts are direct.
   const headers = await page.locator('thead th').allInnerTexts()
   expect(headers.map((text) => text.trim())).toEqual(['WBS Code', 'Name', 'Duration', 'Activities (direct)', 'Responsible'])
+  // The site engineer reads the same canonical outline.
+  const se = await pageAs(browser, siteEngineer)
+  try {
+    const answer = se.page.waitForResponse((r) => /\/structure\/wbs(\?|$)/.test(r.url()), { timeout: 60_000 })
+    await openWbs(se.page)
+    expect((await answer).status(), 'the site engineer reads the WBS outline').toBe(200)
+    await expect(se.page.getByTestId('uat-schedule-wbs')).toHaveAttribute('data-source', 'wbs-nodes')
+    await expect(se.page.locator('[data-testid^="uat-schedule-wbs-row-"]')).toHaveCount(6, { timeout: 30_000 })
+    expect(await outline(se.page)).toEqual(canonical)
+  } finally {
+    await se.context.close()
+  }
 
   // Revisions: Rev B is active, rolled forward from Rev A, which stored no
   // activities — nothing to restore, so no Rollback.

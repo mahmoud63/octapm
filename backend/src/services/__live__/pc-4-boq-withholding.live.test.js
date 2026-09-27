@@ -74,9 +74,11 @@ const BOQ_KEYS = [
 const BUDGET_KEYS = ["budget", "generatedBudget", "totalBudget", "generatedTotalBudget", "eac", "bottomUp", "bac"];
 // The forecast's money, where it sits (the cost block, each activity's cost,
 // each budget line).
-const FORECAST_COST_KEYS = ["budget", "eac", "bottomUp", "projected", "overrun", "overrunPct", "actual"];
+const FORECAST_COST_KEYS = ["budget", "bac", "eac", "bottomUp", "projected", "overrun", "overrunPct", "actual"];
 const FORECAST_ACTIVITY_COST_KEYS = ["budget", "actual", "committed", "projected", "overrun", "overrunPct", "reasons"];
 const FORECAST_LINE_KEYS = ["revised", "committed", "actual", "forecast", "overrun", "overrunPct"];
+// What a WBS node's outline carries (owner decision D3).
+const WBS_OUTLINE_KEYS = ["id", "projectId", "parentId", "code", "name", "path", "pathNames", "fullName", "depth", "sortOrder", "isPackage", "status", "archivedAt", "childCount", "activityCount"];
 // The bill's own records, whose history is the bill's.
 const BOQ_RECORD_TYPES = ["boq_item", "boq_revision", "activity_boq_allocation"];
 
@@ -324,6 +326,7 @@ liveDescribe("PC-4 §12: the Overview and the Schedule module carry no BOQ figur
   //   kind "workspace": per person too; compared with that member's own
   //     dashboard as the service builds it, the budget taken out of each
   //     project's row for a reader of neither the BOQ nor the cost module.
+  //   kind "wbs": the outline of the BOQ reader's answer (owner decision D3).
   //   cost: a cost reader's request, refused (403) to the site engineer.
   const reads = () => ({
     // The workspace home, which the browser loads right after sign-in and
@@ -385,9 +388,9 @@ liveDescribe("PC-4 §12: the Overview and the Schedule module carry no BOQ figur
     resources: { route: at("/schedule/resources"), kind: "sweep" },
     risks: { route: at("/risks"), kind: "sweep" },
     longLead: { route: at("/long-lead"), kind: "sweep" },
-    // The project's WBS rows are the structure module's, which the BOQ tool
-    // gates: refused to every member here (the tab then shows the revision's).
-    wbs: { route: at("/structure/wbs"), kind: "sweep", boq: true },
+    // The project's WBS outline (owner decision D3): every schedule reader
+    // reads it; a member without BOQ read receives the outline only.
+    wbs: { route: at("/structure/wbs"), kind: "wbs" },
     history: {
       route: at(`/audit?entityType=schedule_revision&entityId=${stagedRevision.id}&limit=20&order=desc`),
       kind: "audit",
@@ -566,6 +569,21 @@ liveDescribe("PC-4 §12: the Overview and the Schedule module carry no BOQ figur
           expect([viewer, name, mine]).toEqual([viewer, name, readsCost ? theirs : forecastWithoutMoney(theirs)]);
         } else if (kind === "ev") {
           expect([viewer, name, mine]).toEqual([viewer, name, evWithoutBill(theirs)]);
+        } else if (kind === "wbs") {
+          const outlineNode = (node) => ({
+            ...Object.fromEntries(Object.entries(node).filter(([key]) => WBS_OUTLINE_KEYS.includes(key))),
+            ...(node.children ? { children: node.children.map(outlineNode) } : {}),
+          });
+          expect([viewer, name, mine]).toEqual([
+            viewer,
+            name,
+            {
+              view: "outline",
+              items: theirs.items.map(outlineNode),
+              tree: theirs.tree.map(outlineNode),
+              summary: Object.fromEntries(Object.entries(theirs.summary).filter(([key]) => key !== "linkedBoqItems")),
+            },
+          ]);
         } else if (kind === "audit") {
           expect([viewer, name, mine]).toEqual([viewer, name, historyWithoutBill(theirs, readsCost)]);
         } else if (kind === "workspace") {

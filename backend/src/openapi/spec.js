@@ -2748,6 +2748,12 @@ const components = {
       ],
     },
     WbsNodeListResponse: objectSchema({
+      view: {
+        type: "string",
+        enum: ["outline"],
+        description:
+          "Present only for a caller admitted as a schedule reader who may not read the BOQ. Each node then carries only id, projectId, parentId, code, name, path, pathNames, fullName, depth, sortOrder, isPackage, status, archivedAt, childCount and activityCount (no boqItemCount, owner party, commitment, source or external id), and the summary has no linkedBoqItems. A BOQ reader's answer has no view key and is unchanged.",
+      },
       items: arrayOf(ref("WbsNodeRecord")),
       tree: arrayOf(ref("WbsNodeTreeNode")),
       summary: objectSchema({
@@ -12232,10 +12238,20 @@ add(
     method: "get",
     path: "/projects/{projectId}/structure/wbs",
     summary:
-      "List the project WBS (flat ordered rows plus nested tree, with linked activity and BOQ row counts).",
+      "List the project WBS (flat ordered rows plus nested tree, with linked activity and BOQ row counts). Readable by anyone who can read the schedule (owner decision D3): a BOQ reader receives the whole answer; a schedule reader who may not read the BOQ receives the outline (view: outline). Writes stay on boq:update.",
     operationId: "listWbsNodes",
     parameters: [...projectParams, includeArchivedParam],
-    permissions: modulePermission("boq", "read"),
+    permissions: {
+      ...modulePermission("schedule", "read"),
+      anyOf: [modulePermission("schedule", "read"), modulePermission("boq", "read")],
+      roles: [
+        ...new Set([
+          ...modulePermission("schedule", "read").roles,
+          ...modulePermission("boq", "read").roles,
+        ]),
+      ],
+      note: "schedule:read or boq:read. Without boq:read the answer is the outline (view: outline).",
+    },
     responseSchema: ref("WbsNodeListResponse"),
   },
   {

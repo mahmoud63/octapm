@@ -305,8 +305,62 @@ const withheldWorkspaceDashboard = (dashboard, accessFor) => {
     : { ...dashboard, projectHealth: rows };
 };
 
+// The WBS outline (owner decision D3): anyone who can read the schedule may
+// read the tree the programme is filed under — each node's id, code, name,
+// parent, depth, place, status and its own counts of children and
+// activities. The rest of a node belongs to the bill and the commercial
+// side: how many BOQ rows are filed under it, the package's owner party and
+// commitment, and its import provenance. A WBS node carries no money today;
+// should one ever carry a budget, it is not in this list and so is withheld.
+const WBS_OUTLINE_KEYS = [
+  "id",
+  "projectId",
+  "parentId",
+  "code",
+  "name",
+  "path",
+  "pathNames",
+  "fullName",
+  "depth",
+  "sortOrder",
+  "isPackage",
+  "status",
+  "archivedAt",
+  "childCount",
+  "activityCount",
+];
+const WBS_OUTLINE_SUMMARY_KEYS = ["total", "active", "archived", "packages", "roots", "maxDepth", "linkedActivities"];
+
+const pick = (value, keys) =>
+  value && typeof value === "object"
+    ? Object.fromEntries(keys.filter((key) => has(value, key)).map((key) => [key, value[key]]))
+    : value;
+
+const outlineNode = (node) => {
+  const outlined = pick(node, WBS_OUTLINE_KEYS);
+  if (node && Array.isArray(node.children)) outlined.children = node.children.map(outlineNode);
+  return outlined;
+};
+
+/**
+ * GET /projects/:id/structure/wbs as this caller may receive it. A BOQ
+ * reader receives the service's answer untouched (the same object); anyone
+ * else — admitted as a schedule reader — receives the outline, marked
+ * `view: "outline"`.
+ */
+const withheldWbsList = (list, access = FULL_ACCESS) => {
+  if (access.boq || !list || typeof list !== "object") return list;
+  return {
+    view: "outline",
+    items: mapList(list.items, outlineNode),
+    tree: mapList(list.tree, outlineNode),
+    summary: pick(list.summary, WBS_OUTLINE_SUMMARY_KEYS),
+  };
+};
+
 module.exports = {
   BOQ_FIGURE_KEYS,
+  WBS_OUTLINE_KEYS,
   boqFigureAccess,
   canReadBoq,
   forecastCostWithheld,
@@ -320,6 +374,7 @@ module.exports = {
   withheldRevision,
   withheldSchedule,
   withheldScheduleReadiness,
+  withheldWbsList,
   withheldWorkspaceDashboard,
   withoutBoqFigures,
 };

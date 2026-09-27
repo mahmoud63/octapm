@@ -42,6 +42,12 @@ export interface WbsTreeNode extends WbsNodeRecord {
 }
 
 export interface WbsListResponse {
+  /**
+   * 'outline' for a schedule reader who may not read the BOQ (owner decision
+   * D3): each node then carries its id, code, name, parent, depth, place,
+   * status and its child and activity counts only.
+   */
+  view?: 'outline'
   items: WbsNodeRecord[]
   tree: WbsTreeNode[]
   summary: {
