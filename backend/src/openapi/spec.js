@@ -2018,7 +2018,16 @@ const components = {
           ...arrayOf(ref("ProjectSetupItem")),
           description: "The offending records, capped at 50; `count` is the whole number.",
         },
-        count: { type: "integer" },
+        count: {
+          type: "integer",
+          description:
+            "Absent on a mapping issue (BOQ_MAPPING_RULE_UNSET, NO_APPROVED_ALLOCATIONS, UNALLOCATED_BOQ, OPTIONAL_UNALLOCATED, PENDING_ALLOCATIONS, SUGGESTIONS_PENDING, UNIT_MISMATCH_COUNT, LOCATION_MISMATCH_COUNT) for a caller who may not read the BOQ.",
+        },
+        mappingDetailsWithheld: {
+          type: "boolean",
+          description:
+            "Present and true on a mapping issue for a caller who may not read the BOQ: its count, the counting details and any count in its message are left out.",
+        },
         itemsWithheld: {
           type: "boolean",
           description:
@@ -2029,7 +2038,7 @@ const components = {
         actionLabel: { type: "string" },
         target: ref("ProjectSetupTarget"),
       },
-      ["code", "message", "severity", "items", "count"],
+      ["code", "message", "severity", "items"],
     ),
     ProjectSetupStep: objectSchema(
       {
@@ -2092,8 +2101,14 @@ const components = {
           enum: ["complete", "attention", "pending"],
           description: "pending when the thing it guides needs the bill or the schedule first.",
         },
-        count: { type: "integer", description: "What is in place, or what is still to file." },
+        count: {
+          type: "integer",
+          nullable: true,
+          description:
+            "What is in place, or what is still to file. null on mapping_readiness for a caller who may not read the BOQ (detailsWithheld true, detail \"Mapping details unavailable to you\").",
+        },
         detail: { type: "string" },
+        detailsWithheld: { type: "boolean" },
         target: ref("ProjectSetupTarget"),
         href: { type: "string", description: "The page under the project's workspace where it is done." },
       },
@@ -2109,8 +2124,14 @@ const components = {
         },
         label: { type: "string" },
         value: { type: "string", description: "As shown: PASS / FAIL, a percentage, a money figure, a count, or a state." },
-        tone: { type: "string", enum: ["done", "review", "blocked", "info"] },
+        tone: { type: "string", enum: ["done", "review", "blocked", "info", "neutral"] },
         raw: { description: "The figure behind the text, when there is one." },
+        withheld: {
+          type: "boolean",
+          description:
+            "Present and true on the mapping entry for a caller who may not read the BOQ: value is \"—\", tone neutral, raw null, and reason says the mapping details are unavailable to them.",
+        },
+        reason: { type: "string" },
       },
       ["key", "label", "value", "tone"],
     ),
@@ -2141,7 +2162,7 @@ const components = {
         coverage: {
           ...ref("AllocationCoverageSummary"),
           description:
-            "The §69 coverage totals as the coverage endpoint reports them, without the per-item rows. A caller who may not read the BOQ gets only coveragePct, rounded to a whole percent, and counts.",
+            "The §69 coverage totals as the coverage endpoint reports them, without the per-item rows. A caller who may not read the BOQ gets none of it — no coveragePct (rounded or not), no row counts, no value — only { withheld: true, reason: \"Mapping details unavailable to you\" }.",
         },
         context: {
           ...ref("GenericObject"),

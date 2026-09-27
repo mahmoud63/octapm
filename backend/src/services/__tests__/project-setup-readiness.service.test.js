@@ -459,22 +459,37 @@ describe("project setup readiness service", () => {
     });
 
     // A member who may not read the BOQ gets the same steps, statuses,
-    // codes, counts and gates — and none of the bill's rows, values,
-    // quantities or review trail.
+    // codes and gates — and none of the bill's rows, values, quantities or
+    // review trail, nor how many rows or allocations a mapping issue
+    // concerns (owner decision C). Every other issue keeps its count.
     const restricted = await setupReadinessService.getSetupReadiness({
       orgId: "org-1",
       projectId: "project-1",
       canReadBoq: false,
     });
-    const shape = (readiness) =>
-      readiness.steps.map((step) => [
+    const MAPPING_CODES = new Set([
+      "BOQ_MAPPING_RULE_UNSET",
+      "NO_APPROVED_ALLOCATIONS",
+      "UNALLOCATED_BOQ",
+      "OPTIONAL_UNALLOCATED",
+      "PENDING_ALLOCATIONS",
+      "SUGGESTIONS_PENDING",
+      "UNIT_MISMATCH_COUNT",
+      "LOCATION_MISMATCH_COUNT",
+    ]);
+    const shape = (readiness, { mappingCounts = true } = {}) => {
+      const entry = (issue) => [issue.code, !mappingCounts && MAPPING_CODES.has(issue.code) ? undefined : issue.count];
+      return readiness.steps.map((step) => [
         step.key,
         step.status,
-        step.blockers.map((issue) => [issue.code, issue.count]),
-        step.warnings.map((issue) => [issue.code, issue.count]),
-        step.advisories.map((issue) => [issue.code, issue.count]),
+        step.blockers.map(entry),
+        step.warnings.map(entry),
+        step.advisories.map(entry),
       ]);
-    expect(shape(restricted)).toEqual(shape(result));
+    };
+    expect(shape(restricted)).toEqual(shape(result, { mappingCounts: false }));
+    // ... and the full answer does count them, so the omission is real.
+    expect(result.steps.find((step) => step.key === "boq_approval").warnings.find((w) => w.code === "BOQ_MAPPING_RULE_UNSET").count).toBe(1);
     for (const name of ["baseline", "progress", "reporting"]) {
       expect(restricted.gates[name].ready).toBe(result.gates[name].ready);
       expect(restricted.gates[name].blockers.map((b) => b.code)).toEqual(
@@ -491,12 +506,32 @@ describe("project setup readiness service", () => {
     const restrictedUnallocated = restricted.steps
       .find((step) => step.key === "boq_allocation")
       .blockers.find((b) => b.code === "UNALLOCATED_BOQ");
-    expect(restrictedUnallocated).toMatchObject({ count: 2, items: [], itemsWithheld: true });
+    expect(restrictedUnallocated).toMatchObject({ items: [], itemsWithheld: true, mappingDetailsWithheld: true });
+    expect(restrictedUnallocated).not.toHaveProperty("count");
+    const restrictedRuleUnset = restricted.steps
+      .find((step) => step.key === "boq_approval")
+      .warnings.find((w) => w.code === "BOQ_MAPPING_RULE_UNSET");
+    expect(restrictedRuleUnset.message).toBe("Some BOQ rows have no mapping rule (required, optional or not applicable).");
+    expect(restrictedRuleUnset.details).toEqual({});
+    expect(restricted.steps.find((step) => step.key === "boq_approval").counts).not.toHaveProperty("itemsWithoutMappingRule");
     // Activities are not the bill's: they are still named.
     expect(
       restricted.steps.find((step) => step.key === "schedule_generation").advisories[0].items[0].id,
     ).toBe("activity-1");
-    expect(Object.keys(restricted.coverage).sort()).toEqual(["counts", "coveragePct"]);
+    // No share (rounded or not) and no row counts: the coverage is withheld.
+    expect(restricted.coverage).toEqual({ withheld: true, reason: "Mapping details unavailable to you" });
+    expect(restricted.summary.headline.find((entry) => entry.key === "mapping")).toEqual({
+      key: "mapping",
+      label: "Mapping",
+      value: "—",
+      tone: "neutral",
+      raw: null,
+      withheld: true,
+      reason: "Mapping details unavailable to you",
+    });
+    expect(
+      restricted.steps.find((step) => step.key === "structure_setup").guides.find((guide) => guide.key === "mapping_readiness"),
+    ).toMatchObject({ count: null, detail: "Mapping details unavailable to you", detailsWithheld: true });
     expect(restricted.context.boqRevision).not.toHaveProperty("totalAmount");
     expect(restricted.context.boqRevision).not.toHaveProperty("history");
     expect(restricted.context.boqRevision.validation).toEqual({ blockedCount: 1, blocked: [] });

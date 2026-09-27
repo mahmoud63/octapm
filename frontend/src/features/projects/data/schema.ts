@@ -198,12 +198,18 @@ export type ProjectSetupIssue = {
   details?: Record<string, unknown>
   /** The offending records, capped at 50; `count` is the whole number. */
   items?: ProjectSetupItem[]
+  /** Absent on a mapping issue for a caller who may not read the BOQ. */
   count?: number
   /**
    * True when the caller may not read the BOQ and the BOQ records behind
-   * the issue were left out of `items`; `count` is still the whole number.
+   * the issue were left out of `items`.
    */
   itemsWithheld?: boolean
+  /**
+   * True on a mapping issue for a caller who may not read the BOQ: how many
+   * rows or allocations it concerns is not given (owner decision C).
+   */
+  mappingDetailsWithheld?: boolean
   stepKey?: string
   stepLabel?: string
   actionLabel?: string
@@ -233,8 +239,10 @@ export type ProjectSetupGuide = {
   key: string
   label: string
   status: 'complete' | 'attention' | 'pending'
-  count: number
+  /** null on mapping_readiness for a caller who may not read the BOQ. */
+  count: number | null
   detail: string
+  detailsWithheld?: boolean
   target: ProjectSetupTarget
   href: string
 }
@@ -244,8 +252,11 @@ export type ProjectSetupHeadlineEntry = {
   key: string
   label: string
   value: string
-  tone: 'done' | 'review' | 'blocked' | 'info'
+  tone: 'done' | 'review' | 'blocked' | 'info' | 'neutral'
   raw?: unknown
+  /** On the mapping entry, for a caller who may not read the BOQ. */
+  withheld?: boolean
+  reason?: string
 }
 
 export type ProjectSetupStep = {
@@ -357,9 +368,12 @@ export type ProjectSetupReadiness = {
   /**
    * The §69 coverage totals, exactly as the coverage endpoint reports them
    * (PC-3) — the readiness check never recomputes them. A caller who may not
-   * read the BOQ gets only `coveragePct` and `counts`.
+   * read the BOQ gets none of it (owner decision C): `{ withheld: true,
+   * reason }`, no share and no counts.
    */
   coverage?: {
+    withheld?: boolean
+    reason?: string
     totalBoqAmount?: number
     allocatableBoqAmount?: number
     approvedAllocatedAmount?: number

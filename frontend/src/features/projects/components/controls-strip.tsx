@@ -250,7 +250,10 @@ export function ControlsStrip({
 
   const { summary, gates, coverage, context } = readiness
   // The readiness check leaves the bill's values out for a person who may
-  // not read the BOQ; the strip then shows the shares and counts only.
+  // not read the BOQ — and the mapping's share and row counts with them
+  // (owner decision C): the strip then says the details are unavailable,
+  // it never shows a figure it was not given.
+  const coverageWithheld = Boolean(coverage?.withheld)
   const coverageValuesShown = coverage?.totalBoqAmount != null
   const nextAction = summary.nextAction ?? summary.advisoryAction ?? null
   const stepCounts = (key: string) =>
@@ -293,7 +296,7 @@ export function ControlsStrip({
   const coveragePct = coverage?.coveragePct ?? null
   const counts = coverage?.counts
   const coverageTone: StatusTone =
-    coveragePct == null || coverage?.totalBoqAmount === 0
+    coverageWithheld || coveragePct == null || coverage?.totalBoqAmount === 0
       ? 'neutral'
       : coveragePct >= 99.995
         ? 'done'
@@ -441,16 +444,22 @@ export function ControlsStrip({
       <Tile
         icon={Link2}
         label='Allocation coverage'
-        value={formatPct(coveragePct)}
+        value={coverageWithheld ? '—' : formatPct(coveragePct)}
         valueTestId='uat-controls-coverage-pct'
         tone={coverageTone}
         badge={
-          counts
-            ? `${counts.complete} of ${counts.complete + counts.partial + counts.unmapped} rows covered`
-            : 'No bill'
+          coverageWithheld
+            ? 'Unavailable'
+            : counts
+              ? `${counts.complete} of ${counts.complete + counts.partial + counts.unmapped} rows covered`
+              : 'No bill'
         }
         detail={
-          !coverageValuesShown ? (
+          coverageWithheld ? (
+            <span data-testid='uat-controls-coverage-withheld'>
+              {coverage?.reason ?? 'Mapping details unavailable to you'}
+            </span>
+          ) : !coverageValuesShown ? (
             <span data-testid='uat-controls-coverage-values-withheld'>
               Values are shown to people who can open the BOQ
             </span>
@@ -628,9 +637,11 @@ export function ControlsStrip({
         value={unmappedRows == null ? '—' : unmappedRows.toLocaleString()}
         truth='derived'
         basis={
-          counts
-            ? `${counts.unmapped.toLocaleString()} unmapped · ${counts.partial.toLocaleString()} partial`
-            : 'no bill yet'
+          coverageWithheld
+            ? 'Mapping details unavailable to you'
+            : counts
+              ? `${counts.unmapped.toLocaleString()} unmapped · ${counts.partial.toLocaleString()} partial`
+              : 'no bill yet'
         }
         tone={unmappedRows != null && unmappedRows > 0 ? 'review' : 'neutral'}
         testId='uat-controls-figure-unmapped'
@@ -640,7 +651,7 @@ export function ControlsStrip({
         label='Quantity exceptions'
         value={overAllocatedRows == null ? '—' : overAllocatedRows.toLocaleString()}
         truth='derived'
-        basis='rows allocated over their quantity'
+        basis={coverageWithheld ? 'Mapping details unavailable to you' : 'rows allocated over their quantity'}
         tone={overAllocatedRows != null && overAllocatedRows > 0 ? 'blocked' : 'neutral'}
         testId='uat-controls-figure-exceptions'
         onClick={() => onNavigate(TARGETS.mapping)}

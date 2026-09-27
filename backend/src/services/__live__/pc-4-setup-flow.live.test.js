@@ -637,14 +637,28 @@ liveDescribe("PC-4: setup flow — structure and BOQ approval steps, per-item de
         });
       }
       const memberAuth = { authorization: `Bearer ${mintAccessToken(member)}` };
-      const shape = (result) =>
-        result.steps.map((entry) => [
+      // How many rows or allocations a mapping issue concerns is the bill's
+      // (owner decision C): the limited answer leaves those counts out.
+      const MAPPING_CODES = new Set([
+        "BOQ_MAPPING_RULE_UNSET",
+        "NO_APPROVED_ALLOCATIONS",
+        "UNALLOCATED_BOQ",
+        "OPTIONAL_UNALLOCATED",
+        "PENDING_ALLOCATIONS",
+        "SUGGESTIONS_PENDING",
+        "UNIT_MISMATCH_COUNT",
+        "LOCATION_MISMATCH_COUNT",
+      ]);
+      const shape = (result, { mappingCounts = true } = {}) => {
+        const entryOf = (issue) => [issue.code, !mappingCounts && MAPPING_CODES.has(issue.code) ? undefined : issue.count];
+        return result.steps.map((entry) => [
           entry.key,
           entry.status,
-          entry.blockers.map((issue) => [issue.code, issue.count]),
-          entry.warnings.map((issue) => [issue.code, issue.count]),
-          entry.advisories.map((issue) => [issue.code, issue.count]),
+          entry.blockers.map(entryOf),
+          entry.warnings.map(entryOf),
+          entry.advisories.map(entryOf),
         ]);
+      };
       const boqTypes = new Set(["boq_item", "allocation", "boq_revision", "unit"]);
       const issuesOf = (result) => result.steps.flatMap((entry) => [...entry.blockers, ...entry.warnings, ...entry.advisories]);
 
@@ -663,7 +677,7 @@ liveDescribe("PC-4: setup flow — structure and BOQ approval steps, per-item de
         const limited = response.body.data;
 
         // Everything that decides anything is the same for both callers.
-        expect(shape(limited)).toEqual(shape(full));
+        expect(shape(limited)).toEqual(shape(full, { mappingCounts: false }));
         for (const name of ["baseline", "progress", "reporting"]) {
           expect(limited.gates[name].ready).toBe(full.gates[name].ready);
           expect(limited.gates[name].blockers.map((b) => b.code)).toEqual(full.gates[name].blockers.map((b) => b.code));
@@ -675,9 +689,11 @@ liveDescribe("PC-4: setup flow — structure and BOQ approval steps, per-item de
         for (const issue of issuesOf(limited)) {
           for (const item of issue.items) expect(boqTypes.has(item.type)).toBe(false);
         }
-        expect(Object.keys(limited.coverage).sort()).toEqual(["counts", "coveragePct"]);
-        // The share, to a whole percent (default a): the counts are beside it.
-        expect(limited.coverage).toEqual({ coveragePct: Math.round(full.coverage.coveragePct), counts: full.coverage.counts });
+        // No share — rounded or not — and no row counts (owner decision C,
+        // which replaced round 1's whole percent).
+        expect(limited.coverage).toEqual({ withheld: true, reason: "Mapping details unavailable to you" });
+        expect(JSON.stringify(limited)).not.toMatch(/"coveragePct"/);
+        expect(limited.summary.headline.find((entry) => entry.key === "mapping")).toMatchObject({ value: "—", raw: null, withheld: true });
         const limitedHeadline = limited.summary.headline.map((entry) => entry.key);
         expect(limitedHeadline).not.toContain("unmapped_boq");
         expect(limitedHeadline).not.toContain("unmapped_quantity");
@@ -794,10 +810,11 @@ liveDescribe("PC-4: setup flow — structure and BOQ approval steps, per-item de
               expect([viewer, name, response.text.includes(secret)]).toEqual([viewer, name, false]);
             }
           }
-          // Withholding the figures moves no status, gate, check or issue count.
+          // Withholding the figures moves no status, gate, check or issue
+          // count — except the counts of a mapping issue, the bill's (decision C).
           const fullReadiness = await readiness(projectId);
           const viewerReadiness = (await api.get(`/api/v1/projects/${projectId}/setup-readiness`, viewerAuth)).body.data;
-          expect(shape(viewerReadiness)).toEqual(shape(fullReadiness));
+          expect(shape(viewerReadiness)).toEqual(shape(fullReadiness, { mappingCounts: false }));
           for (const name of ["baseline", "progress", "reporting"]) {
             expect(viewerReadiness.gates[name].ready).toBe(fullReadiness.gates[name].ready);
           }

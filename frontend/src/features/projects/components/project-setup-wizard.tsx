@@ -186,14 +186,23 @@ function IssueDetail({ issue }: { issue: ProjectSetupIssue }) {
           )}
         </ul>
       )}
-      {issue.itemsWithheld && (
+      {issue.mappingDetailsWithheld ? (
+        // How many rows or allocations a mapping issue concerns is the
+        // bill's (owner decision C): the server leaves it out.
+        <p
+          className='ms-3 text-[11px] text-muted-foreground'
+          data-testid={`uat-setup-issue-withheld-${issue.code}`}
+        >
+          Mapping details unavailable to you.
+        </p>
+      ) : issue.itemsWithheld ? (
         <p
           className='ms-3 text-[11px] text-muted-foreground'
           data-testid={`uat-setup-issue-withheld-${issue.code}`}
         >
           The BOQ records behind this are listed for people who can open the BOQ.
         </p>
-      )}
+      ) : null}
     </li>
   )
 }
@@ -532,9 +541,20 @@ function Headline({ entries }: { entries: ProjectSetupHeadlineEntry[] }) {
         <li key={entry.key} className='flex items-center gap-1' data-testid={`uat-setup-headline-${entry.key}`}>
           {index > 0 && <span aria-hidden className='text-muted-foreground'>·</span>}
           <span className='text-muted-foreground'>{entry.label}</span>
-          <span className={cn('octa-numeric font-semibold', statusIcon(entry.tone))}>
+          <span
+            className={cn('octa-numeric font-semibold', statusIcon(entry.tone))}
+            title={entry.withheld ? entry.reason : undefined}
+          >
             {entry.value}
           </span>
+          {entry.withheld && (
+            <span
+              className='text-[11px] text-muted-foreground'
+              data-testid={`uat-setup-headline-${entry.key}-withheld`}
+            >
+              ({entry.reason ?? 'unavailable to you'})
+            </span>
+          )}
         </li>
       ))}
     </ul>

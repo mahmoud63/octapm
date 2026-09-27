@@ -265,6 +265,73 @@ const withoutBoqDetail = (entry) => {
   return withheld.details ? { ...withheld, details: withoutBoqFigures(withheld.details) } : withheld;
 };
 
+// The mapping's coverage is the bill's too (owner decision C, 2026-09-27:
+// "a rounded percentage is still BOQ-derived"). A member who may not read
+// the BOQ is told that a mapping issue exists — its code, severity and
+// verdict, so every gate is the same for everyone — but not how many rows
+// or allocations it concerns: the count, the counting details and any
+// message that states a count are replaced. Nothing is rounded; the figure
+// is simply not there.
+const MAPPING_ISSUE_MESSAGES = Object.freeze({
+  BOQ_MAPPING_RULE_UNSET: "Some BOQ rows have no mapping rule (required, optional or not applicable).",
+  NO_APPROVED_ALLOCATIONS: null,
+  UNALLOCATED_BOQ: null,
+  OPTIONAL_UNALLOCATED: null,
+  PENDING_ALLOCATIONS: null,
+  SUGGESTIONS_PENDING: "Some accepted suggestions are still drafts.",
+  UNIT_MISMATCH_COUNT: "Some allocations measure the activity in a different unit from the BOQ row.",
+  LOCATION_MISMATCH_COUNT: "Some allocations link a BOQ row and an activity in different locations.",
+});
+// The step counts and issue details that count mapped, unmapped or
+// mismatched BOQ rows and allocations.
+const MAPPING_COUNT_KEYS = ["itemsWithoutMappingRule", "suggestionsPending", "unitMismatchCount", "locationMismatchCount"];
+const MAPPING_DETAILS_WITHHELD = "Mapping details unavailable to you";
+
+const withoutMappingCounts = (values) =>
+  values && typeof values === "object"
+    ? Object.fromEntries(Object.entries(values).filter(([key]) => !MAPPING_COUNT_KEYS.includes(key)))
+    : values;
+
+const withoutMappingDetail = (entry) => {
+  if (!entry || !Object.prototype.hasOwnProperty.call(MAPPING_ISSUE_MESSAGES, entry.code)) return entry;
+  const { count, ...rest } = entry;
+  return {
+    ...rest,
+    message: MAPPING_ISSUE_MESSAGES[entry.code] || entry.message,
+    ...(rest.details ? { details: withoutMappingCounts(rest.details) } : {}),
+    mappingDetailsWithheld: true,
+  };
+};
+
+/** A step as a member who may not read the BOQ receives it. */
+const withheldStepForNonBoqReader = (step) => {
+  const withheld = (entry) => withoutMappingDetail(withoutBoqDetail(entry));
+  const blockers = step.blockers.map(withheld);
+  const warnings = step.warnings.map(withheld);
+  // The step's message is its first blocker's or warning's: it goes the way
+  // of the issue it repeats.
+  const original = [...step.blockers, ...step.warnings];
+  const replaced = [...blockers, ...warnings];
+  const at = original.findIndex((entry) => entry.message === step.message);
+  return {
+    ...step,
+    message: at >= 0 ? replaced[at].message : step.message,
+    blockers,
+    warnings,
+    advisories: step.advisories.map(withheld),
+    counts: withoutMappingCounts(withoutBoqFigures(step.counts)),
+    ...(step.guides
+      ? {
+          guides: step.guides.map((guide) =>
+            guide.key === "mapping_readiness"
+              ? { ...guide, count: null, detail: MAPPING_DETAILS_WITHHELD, detailsWithheld: true }
+              : guide,
+          ),
+        }
+      : {}),
+  };
+};
+
 // The official reporting gate as the base shaped it: EV stores it in the
 // locked period's snapshot basis and in the override's audit metadata, so
 // the per-item detail (records, links under the workspace slug) stays on
@@ -1682,15 +1749,9 @@ const getSetupReadiness = async ({ orgId, projectId, canReadBoq = true }) => {
   // money in the step counts and the issue details. Statuses, codes and
   // issue counts are untouched, so the gates below — built from these same
   // steps — are identical for every caller, and carry no BOQ figure either.
-  const steps = canReadBoq
-    ? builtSteps
-    : builtSteps.map((step) => ({
-        ...step,
-        blockers: step.blockers.map(withoutBoqDetail),
-        warnings: step.warnings.map(withoutBoqDetail),
-        advisories: step.advisories.map(withoutBoqDetail),
-        counts: withoutBoqFigures(step.counts),
-      }));
+  // Nor the mapping's coverage: how many rows or allocations a mapping issue
+  // concerns, and the mapping guide's share and counts (decision C).
+  const steps = canReadBoq ? builtSteps : builtSteps.map(withheldStepForNonBoqReader);
 
   const baselineBlockers = addStepContext(
     steps.filter((step) => step.requiredFor.includes("baseline")),
@@ -1709,23 +1770,18 @@ const getSetupReadiness = async ({ orgId, projectId, canReadBoq = true }) => {
 
   // The §69 coverage totals, exactly as PC-3's summary reports them (the
   // per-item rows stay on the coverage endpoint). Never recomputed here.
-  // The coverage endpoint needs boq:read; without it only the share covered
-  // and the row counts are given — no quantity, value, earned or certified
-  // figure.
+  // The coverage endpoint needs boq:read; without it nothing of the coverage
+  // is given — no share (rounded or not), no count of mapped, unmapped,
+  // partial, over-allocated or not-applicable rows, no value (decision C).
+  // The answer says the details are withheld, so no screen reads a
+  // missing figure as zero.
   const coverage = canReadBoq
     ? Object.fromEntries(
         Object.entries(allocationSummary).filter(
           ([key]) => !["items", "groups"].includes(key),
         ),
       )
-    : {
-        // A whole percent: with the row counts beside it, a finer share
-        // would let the bill's proportions be read back (product owner's
-        // default a; output only).
-        coveragePct:
-          allocationSummary.coveragePct == null ? allocationSummary.coveragePct : Math.round(coveragePct),
-        counts: allocationSummary.counts,
-      };
+    : { withheld: true, reason: MAPPING_DETAILS_WITHHELD };
 
   // The §33 headline: one line a person reads before the cards — "BOQ
   // imported PASS · Schedule imported PASS · Mapping 83% · …". Every entry
@@ -1791,18 +1847,23 @@ const getSetupReadiness = async ({ orgId, projectId, canReadBoq = true }) => {
       scheduleImported ? "done" : "blocked",
       scheduleImported,
     ),
-    headlineItem(
-      "mapping",
-      "Mapping",
-      `${Math.round(coveragePct)}%`,
-      baselineBlockerCodes.has("UNALLOCATED_BOQ") ||
-        baselineBlockerCodes.has("NO_APPROVED_ALLOCATIONS")
-        ? "blocked"
-        : coveragePct >= 99.995
-          ? "done"
-          : "review",
-      canReadBoq ? coveragePct : Math.round(coveragePct),
-    ),
+    // The mapping share is the bill's (decision C): a member who may not
+    // read the BOQ is told the details are withheld — no figure, and no
+    // tone that would say whether the bill is fully covered.
+    canReadBoq
+      ? headlineItem(
+          "mapping",
+          "Mapping",
+          `${Math.round(coveragePct)}%`,
+          baselineBlockerCodes.has("UNALLOCATED_BOQ") ||
+            baselineBlockerCodes.has("NO_APPROVED_ALLOCATIONS")
+            ? "blocked"
+            : coveragePct >= 99.995
+              ? "done"
+              : "review",
+          coveragePct,
+        )
+      : { ...headlineItem("mapping", "Mapping", "—", "neutral", null), withheld: true, reason: MAPPING_DETAILS_WITHHELD },
     // The bill's quantities and value are for those who may read the BOQ.
     canReadBoq &&
       headlineItem(
