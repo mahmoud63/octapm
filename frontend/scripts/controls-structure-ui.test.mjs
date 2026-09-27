@@ -53,7 +53,11 @@ assert.ok(!/Owner party id|Commitment id/.test(page), 'no raw id inputs remain o
 
 // ── Schedule WBS tab reads WbsNode first ─────────────────────────────────
 const tree = read('src/features/schedule/components/wbs-tree.tsx')
-assert.match(tree, /useWbsNodes\(/, 'the WBS tab reads project WbsNode rows')
+assert.match(tree, /useScheduleWbsRows\(/, 'the WBS tab reads project WbsNode rows')
+// Every row, archived ones included: a tree whose nodes are all archived is
+// still the project's, never replaced by the snapshot (D3).
+const structureHooks = read('src/features/controls/structure/hooks/use-structure.ts')
+assert.match(structureHooks, /useWbsNodes\(projectId, \{ includeArchived: true/, 'the WBS tab reads archived rows too')
 assert.match(tree, /buildTreeFromSnapshot/, 'the snapshot fallback is kept for older revisions')
 // The snapshot's own parent ids come first (an imported P6 or MS Project
 // WBS); the dotted code only places the generator's id-less nodes.
