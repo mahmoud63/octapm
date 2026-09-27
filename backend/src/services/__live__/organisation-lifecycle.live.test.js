@@ -516,6 +516,146 @@ liveDescribe("workspaces: personal at sign-up, a company beside it, conversion",
     expect(seats).toEqual([{ userId: first.id }]);
   });
 
+  it("a direct add that loses the one seat to a concurrent one leaves no identity behind", async () => {
+    // POST /users for a new email checks the rule early (an empty personal
+    // workspace passes), then writes the identity and its seat. If somebody
+    // else takes the seat in between, the seat is refused — and the identity
+    // must go with it, not stay homed here with no membership.
+    const userService = require("../user.service");
+    const racing = await prisma.organisation.create({ data: { name: `LiveTest ${crypto.randomUUID()}`, kind: "personal" } });
+    extraOrgIds.push(racing.id);
+    const rival = await createLiveUser(prisma, { orgId: company.orgId, name: "Live Rival", email: `live-rival-${tag}@octapm-live.test`, role: "qs" });
+    const email = `live-direct-${tag}@octapm-live.test`;
+
+    const realEnsure = membershipService.ensureMembership;
+    const interleaved = jest.spyOn(membershipService, "ensureMembership").mockImplementation(async (args) => {
+      interleaved.mockRestore();
+      // The concurrent seat, committed on its own connection, in the same throwaway workspace.
+      await requireLiveOrg(racing.id);
+      await prisma.$transaction((tx) => realEnsure({ tx, orgId: racing.id, userId: rival.id, role: "qs" }));
+      return realEnsure(args);
+    });
+    try {
+      await expect(
+        userService.createUser({ orgId: racing.id, payload: { name: "Live Direct", email, password: PASSWORD, role: "qs" } }),
+      ).rejects.toMatchObject({ code: "PERSONAL_WORKSPACE_CONVERT_REQUIRED" });
+    } finally {
+      interleaved.mockRestore();
+    }
+    expect(await prisma.user.findUnique({ where: { email } })).toBeNull();
+    const seats = await prisma.organizationMembership.findMany({ where: { orgId: racing.id, kind: "member" }, select: { userId: true } });
+    expect(seats).toEqual([{ userId: rival.id }]);
+  });
+
+  it("a role edit does not seat a person homed in a personal workspace without a seat", async () => {
+    // Somebody homed in a personal workspace with no membership — one the
+    // backfill held back (reported, never seated), or an identity a refused
+    // sign-in left behind before that was fixed. PATCH /users/:id with a role
+    // writes the membership the User row implies; in a personal workspace
+    // that is a second member, and the one-member rule refuses it.
+    const userService = require("../user.service");
+    const held = await prisma.organisation.create({ data: { name: `LiveTest ${crypto.randomUUID()}`, kind: "personal" } });
+    extraOrgIds.push(held.id);
+    const heldOwner = await prisma.user.create({
+      data: { orgId: held.id, name: "Live Held Owner", email: `live-held-owner-${tag}@octapm-live.test`, passwordHash: "x", role: "pm", isCompanyAdmin: true },
+    });
+    await prisma.organizationMembership.create({
+      data: { orgId: held.id, userId: heldOwner.id, role: "pm", kind: "member", isAdmin: true, isOwner: true, status: "active", joinedAt: heldOwner.createdAt },
+    });
+    const stray = await prisma.user.create({
+      data: { orgId: held.id, name: "Live Stray", email: `live-stray-${tag}@octapm-live.test`, passwordHash: "x", role: "qs" },
+    });
+
+    await expect(
+      userService.updateUser({
+        orgId: held.id,
+        userId: stray.id,
+        actor: { id: heldOwner.id, orgId: held.id, role: "pm", isAdmin: true, isOwner: true, isCompanyAdmin: true },
+        payload: { role: "planning_eng" },
+      }),
+    ).rejects.toMatchObject({ code: "PERSONAL_WORKSPACE_CONVERT_REQUIRED" });
+    expect(await prisma.organizationMembership.count({ where: { orgId: held.id, userId: stray.id } })).toBe(0);
+    const seats = await prisma.organizationMembership.findMany({ where: { orgId: held.id, kind: "member" }, select: { userId: true } });
+    expect(seats).toEqual([{ userId: heldOwner.id }]);
+    expect((await prisma.user.findUnique({ where: { id: stray.id } })).role).toBe("qs");
+  });
+
+  it("a role edit that seats the one member holds the seat check until its insert: a concurrent seat is refused", async () => {
+    // An empty personal workspace and a person homed in it without a seat: a
+    // role edit may seat them (they would be its one member). The seat check
+    // and the insert must hold the organisation-row lock together — paused
+    // between the two, a concurrent seat must wait and then be refused, not
+    // count zero and take a second seat.
+    const userService = require("../user.service");
+    const racing = await prisma.organisation.create({ data: { name: `LiveTest ${crypto.randomUUID()}`, kind: "personal" } });
+    extraOrgIds.push(racing.id);
+    const homed = await prisma.user.create({
+      data: { orgId: racing.id, name: "Live Homed", email: `live-homed-${tag}@octapm-live.test`, passwordHash: "x", role: "qs" },
+    });
+    const rival = await createLiveUser(prisma, { orgId: company.orgId, name: "Live Late Rival", email: `live-late-rival-${tag}@octapm-live.test`, role: "qs" });
+
+    let release;
+    const gate = new Promise((resolve) => {
+      release = resolve;
+    });
+    let paused;
+    const atInsert = new Promise((resolve) => {
+      paused = resolve;
+    });
+    const bound = (target, key) => (typeof target[key] === "function" ? target[key].bind(target) : target[key]);
+    // The role edit's own client, paused at the membership insert — after the
+    // count, before the row — and otherwise untouched.
+    const pausedAtInsert = (client) =>
+      new Proxy(client, {
+        get: (target, key) =>
+          key === "organizationMembership"
+            ? new Proxy(target.organizationMembership, {
+                get: (delegate, name) =>
+                  name === "create"
+                    ? async (args) => {
+                        paused();
+                        await gate;
+                        return delegate.create(args);
+                      }
+                    : bound(delegate, name),
+              })
+            : bound(target, key),
+      });
+    const realEnsureForUser = membershipService.ensureMembershipForUser;
+    const spy = jest
+      .spyOn(membershipService, "ensureMembershipForUser")
+      .mockImplementation((args) => realEnsureForUser({ ...args, tx: pausedAtInsert(args.tx) }));
+
+    let edit;
+    let rivalSeat;
+    try {
+      await requireLiveOrg(racing.id);
+      edit = userService
+        .updateUser({ orgId: racing.id, userId: homed.id, actor: null, payload: { role: "planning_eng" } })
+        .then(
+          (value) => ({ value }),
+          (error) => ({ error }),
+        );
+      await atInsert;
+      rivalSeat = prisma
+        .$transaction((tx) => membershipService.ensureMembership({ tx, orgId: racing.id, userId: rival.id, role: "qs" }), { timeout: 20_000, maxWait: 20_000 })
+        .then(
+          () => null,
+          (error) => error,
+        );
+      await sleep(1_000);
+    } finally {
+      release();
+      spy.mockRestore();
+    }
+    const edited = await edit;
+    expect(edited.error).toBeUndefined();
+    expect(edited.value).toMatchObject({ id: homed.id });
+    expect((await rivalSeat)?.code).toBe("PERSONAL_WORKSPACE_CONVERT_REQUIRED");
+    const seats = await prisma.organizationMembership.findMany({ where: { orgId: racing.id, kind: "member" }, select: { userId: true, role: true } });
+    expect(seats).toEqual([{ userId: homed.id, role: "planning_eng" }]);
+  });
+
   it("conversion is the owner's, of the session's workspace, and a company has nothing to convert", async () => {
     const colleagueLogin = await login(colleague.email);
     expect(colleagueLogin.status).toBe(200);

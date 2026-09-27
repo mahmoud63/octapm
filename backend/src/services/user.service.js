@@ -298,37 +298,45 @@ const createUser = async ({ orgId, actor = null, payload, context = {} }) => {
   await membershipService.assertWorkspaceAcceptsMember({ tx: prisma, orgId });
   const passwordHash = await bcrypt.hash(payload.password, 12);
 
-  const user = await prisma.user.create({
-    data: {
-      orgId,
-      name: payload.name,
-      email,
-      phone: payload.phone ?? null,
-      passwordHash,
-      role,
-      status: "active",
-    },
-    include: withCount,
-  });
-
-  const ensured = await membershipService.ensureMembership({
-    tx: prisma,
-    orgId,
-    userId: user.id,
-    role,
-    invitedById: actor?.id || null,
-  });
-  if (ensured) {
-    await membershipService.recordMembershipEvent({
-      tx: prisma,
-      orgId,
-      membership: ensured.membership,
-      action: "membership.created",
-      actor,
-      context,
-      metadata: { role, existingIdentity: false },
+  // The identity and its seat in one transaction, as SSO provisioning and
+  // invitation acceptance do: the check above is a fast refusal, but the
+  // seat is decided under the organisation-row lock inside ensureMembership,
+  // and a seat taken meanwhile (409) must roll the new identity back with it
+  // rather than leave an account homed here with no membership.
+  const { user, ensured } = await prisma.$transaction(async (tx) => {
+    const created = await tx.user.create({
+      data: {
+        orgId,
+        name: payload.name,
+        email,
+        phone: payload.phone ?? null,
+        passwordHash,
+        role,
+        status: "active",
+      },
+      include: withCount,
     });
-  }
+
+    const seat = await membershipService.ensureMembership({
+      tx,
+      orgId,
+      userId: created.id,
+      role,
+      invitedById: actor?.id || null,
+    });
+    if (seat) {
+      await membershipService.recordMembershipEvent({
+        tx,
+        orgId,
+        membership: seat.membership,
+        action: "membership.created",
+        actor,
+        context,
+        metadata: { role, existingIdentity: false },
+      });
+    }
+    return { user: created, ensured: seat };
+  });
 
   return sanitizeUser(user, ensured?.membership || null);
 };
@@ -472,7 +480,11 @@ const updateUser = async ({ orgId, userId, actor = null, payload, context = {} }
   if (wantsStanding) {
     const membershipAware = membershipService.hasMembershipModel(prisma) && membershipService.isMembershipWriteEnabled();
     if (membershipAware) {
-      membership = await membershipService.ensureMembershipForUser({ tx: prisma, user, orgId });
+      // In a transaction: a missing seat is decided under the organisation-row
+      // lock the one-member rule takes, which lasts only until the caller's
+      // transaction ends — outside one, the count and the insert would not be
+      // serialised against a concurrent seat.
+      membership = await prisma.$transaction((tx) => membershipService.ensureMembershipForUser({ tx, user, orgId }));
     }
     if (membership) {
       const changed = await membershipService.changeMembership({

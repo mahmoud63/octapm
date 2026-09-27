@@ -518,6 +518,11 @@ const ensureMembershipForUser = async ({ tx = prisma, user, orgId }) => {
   if (existing) return existing;
   if (user.orgId !== orgId) return null;
   const implied = membershipFromUser(user);
+  // The implied row is a member seat, so a personal workspace's one-member
+  // rule (ENT-6) decides it like every other: a person homed there without a
+  // seat — one the backfill held back, or an identity a refused sign-in left
+  // behind — is not seated by a role edit behind the owner's back.
+  await assertWorkspaceAcceptsMember({ tx, orgId, userId: user.id, kind: implied.kind });
   return tx.organizationMembership.create({
     data: {
       ...implied,
