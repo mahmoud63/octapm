@@ -53,6 +53,10 @@ import { ResourcePlan } from './resource-plan'
 import { RevisionHistoryPanel } from './revision-history-panel'
 import { ScheduleReviewPanel } from './schedule-review-panel'
 import { WbsTree } from './wbs-tree'
+import {
+  scheduleHasWbs,
+  useScheduleWbsRows,
+} from '@/features/controls/structure/hooks/use-structure'
 
 interface Props {
   projectId: string
@@ -263,6 +267,10 @@ export function ScheduleDashboard({
   const { data: project } = useProject(projectId)
   const { data: procurementItems = [] } = useLongLeadItems(projectId)
   const { revision, activities } = schedule
+  // The WBS tab: the project's canonical WbsNode tree when it has one, the
+  // revision snapshot's WBS only for a project without (owner decision D3).
+  const { data: scheduleWbsRows } = useScheduleWbsRows(projectId)
+  const hasWbs = scheduleHasWbs(scheduleWbsRows, revision.wbs)
   const [nowMs] = useState(() => Date.now())
   const scheduleDataDate =
     schedule.dataDate ||
@@ -922,7 +930,7 @@ export function ScheduleDashboard({
             <TabsTrigger value='resources'>Resources</TabsTrigger>
             <TabsTrigger value='risks'>Risks</TabsTrigger>
             <TabsTrigger value='longLead'>Long Lead</TabsTrigger>
-            {(revision.wbs || []).length > 0 && (
+            {hasWbs && (
               <TabsTrigger value='wbs'>WBS</TabsTrigger>
             )}
             <TabsTrigger value='revisions'>Revisions</TabsTrigger>
@@ -1386,7 +1394,7 @@ export function ScheduleDashboard({
         </TabsContent>
 
         {/* WBS tab */}
-        {(revision.wbs || []).length > 0 && (
+        {hasWbs && (
           <TabsContent value='wbs' className='mt-4'>
             <WbsTree nodes={revision.wbs || []} projectId={projectId} />
           </TabsContent>

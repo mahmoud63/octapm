@@ -24,6 +24,12 @@ type Props = {
   currency?: string | null
   onNavigate: (target: ProjectSetupTarget) => void
   /**
+   * Whether this person is offered the page a target opens. A tile or
+   * figure whose page is not offered is drawn without its link — never an
+   * active button that does nothing when pressed.
+   */
+  canNavigate?: (target: ProjectSetupTarget) => boolean
+  /**
    * True until this person's permission matrix for the project has arrived.
    * Until then useCanPerform answers from the role alone, and a template may
    * still take cost or schedule away, so no figure request is fired.
@@ -73,16 +79,22 @@ function Figure({
   tone?: StatusTone
   testId: string
   title?: string
-  onClick: () => void
+  /** Absent when the page it would open is not offered to this person. */
+  onClick?: () => void
 }) {
+  const Root = onClick ? 'button' : 'div'
   return (
-    <button
-      type='button'
-      onClick={onClick}
+    <Root
+      {...(onClick ? { type: 'button' as const, onClick } : {})}
       data-testid={testId}
       data-tone={tone}
+      data-inert={onClick ? undefined : 'true'}
       title={title}
-      className='flex min-w-0 flex-col gap-0.5 rounded-md border bg-card px-3 py-2 text-start transition-colors hover:bg-accent/60 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none'
+      className={cn(
+        'flex min-w-0 flex-col gap-0.5 rounded-md border bg-card px-3 py-2 text-start',
+        onClick &&
+          'transition-colors hover:bg-accent/60 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none'
+      )}
     >
       <span className='truncate text-[11px] font-medium text-muted-foreground'>{label}</span>
       <span
@@ -103,7 +115,7 @@ function Figure({
         </span>
         {basis}
       </span>
-    </button>
+    </Root>
   )
 }
 
@@ -168,15 +180,21 @@ function Tile({
   badge: string
   detail: ReactNode
   action: string
-  onClick: () => void
+  /** Absent when the page it would open is not offered to this person. */
+  onClick?: () => void
   testId: string
 }) {
+  const Root = onClick ? 'button' : 'div'
   return (
-    <button
-      type='button'
-      onClick={onClick}
+    <Root
+      {...(onClick ? { type: 'button' as const, onClick } : {})}
       data-testid={testId}
-      className='group flex min-w-0 flex-col justify-between gap-2 rounded-md border bg-card p-3 text-start shadow-[var(--shadow-card)] transition-colors hover:bg-accent/60 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none'
+      data-inert={onClick ? undefined : 'true'}
+      className={cn(
+        'group flex min-w-0 flex-col justify-between gap-2 rounded-md border bg-card p-3 text-start shadow-[var(--shadow-card)]',
+        onClick &&
+          'transition-colors hover:bg-accent/60 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none'
+      )}
     >
       <div className='flex items-start justify-between gap-2'>
         <span className='flex items-center gap-1.5 text-xs font-medium text-muted-foreground'>
@@ -191,11 +209,13 @@ function Tile({
         {value}
       </div>
       <div className='text-[11px] leading-snug text-muted-foreground'>{detail}</div>
-      <span className='inline-flex items-center gap-1 text-[11px] font-medium text-primary'>
-        {action}
-        <ArrowRight className='h-3 w-3 transition-transform group-hover:translate-x-0.5' />
-      </span>
-    </button>
+      {onClick ? (
+        <span className='inline-flex items-center gap-1 text-[11px] font-medium text-primary'>
+          {action}
+          <ArrowRight className='h-3 w-3 transition-transform group-hover:translate-x-0.5' />
+        </span>
+      ) : null}
+    </Root>
   )
 }
 
@@ -216,8 +236,12 @@ export function ControlsStrip({
   isLoading,
   currency,
   onNavigate,
+  canNavigate = () => true,
   permissionsSettling = false,
 }: Props) {
+  // A tile's link, or none when its page is not offered to this person.
+  const linkTo = (target: ProjectSetupTarget) =>
+    canNavigate(target) ? () => onNavigate(target) : undefined
   // The money figures come from the cost summary (budget register, ledger
   // projections, EAC) and the forecast service, read only when the policy
   // lets this person open those modules: a hidden module never fires the
@@ -434,7 +458,7 @@ export function ControlsStrip({
           </>
         }
         action={nextAction ? nextAction.label : 'Review setup'}
-        onClick={() => onNavigate(nextAction?.target ?? TARGETS.overview)}
+        onClick={linkTo(nextAction?.target ?? TARGETS.overview)}
         testId='uat-controls-readiness'
       />
       <Tile
@@ -460,7 +484,7 @@ export function ControlsStrip({
               : 'Upload the bill to start'
         }
         action='Open BOQ'
-        onClick={() => onNavigate(TARGETS.boq)}
+        onClick={linkTo(TARGETS.boq)}
         testId='uat-controls-boq'
       />
       <Tile
@@ -498,7 +522,7 @@ export function ControlsStrip({
           )
         }
         action='Open mapping'
-        onClick={() => onNavigate(TARGETS.mapping)}
+        onClick={linkTo(TARGETS.mapping)}
         testId='uat-controls-coverage'
       />
       <Tile
@@ -520,7 +544,7 @@ export function ControlsStrip({
               : 'Generate or import a schedule'
         }
         action={scheduleRevision || activities === 0 ? 'Open revisions' : 'Create a revision'}
-        onClick={() => onNavigate(TARGETS.revisions)}
+        onClick={linkTo(TARGETS.revisions)}
         testId='uat-controls-schedule-tile'
       />
       <Tile
@@ -542,7 +566,7 @@ export function ControlsStrip({
             : 'Activities measure progress by percent until a method is set'
         }
         action='Configure methods'
-        onClick={() => onNavigate(TARGETS.progress)}
+        onClick={linkTo(TARGETS.progress)}
         testId='uat-controls-methods'
       />
     </section>
@@ -595,7 +619,7 @@ export function ControlsStrip({
                 : 'activity budgets'
         }
         testId='uat-controls-figure-budget'
-        onClick={() => onNavigate(TARGETS.budget)}
+        onClick={linkTo(TARGETS.budget)}
       />
       <Figure
         label='Actual'
@@ -609,7 +633,7 @@ export function ControlsStrip({
               : `cost ledger as of ${ledgerDate}`
         }
         testId='uat-controls-figure-actual'
-        onClick={() => onNavigate(TARGETS.cost)}
+        onClick={linkTo(TARGETS.cost)}
       />
       <Figure
         label='Forecast at completion'
@@ -624,7 +648,7 @@ export function ControlsStrip({
         tone={eac.over ? 'review' : 'neutral'}
         testId='uat-controls-figure-forecast'
         // The Forecast tab shows this figure with this label.
-        onClick={() => onNavigate(TARGETS.forecast)}
+        onClick={linkTo(TARGETS.forecast)}
       />
       <Figure
         label='Progress'
@@ -638,7 +662,7 @@ export function ControlsStrip({
               : forecast?.reason ?? 'no schedule yet'
         }
         testId='uat-controls-figure-progress'
-        onClick={() => onNavigate(TARGETS.progress)}
+        onClick={linkTo(TARGETS.progress)}
       />
       <Figure
         label='Critical activities'
@@ -651,7 +675,7 @@ export function ControlsStrip({
         }
         tone={criticalUnmapped != null && criticalUnmapped > 0 ? 'review' : 'neutral'}
         testId='uat-controls-figure-critical'
-        onClick={() => onNavigate(TARGETS.critical)}
+        onClick={linkTo(TARGETS.critical)}
       />
       <Figure
         label='Unmapped items'
@@ -666,7 +690,7 @@ export function ControlsStrip({
         }
         tone={unmappedRows != null && unmappedRows > 0 ? 'review' : 'neutral'}
         testId='uat-controls-figure-unmapped'
-        onClick={() => onNavigate(TARGETS.mapping)}
+        onClick={linkTo(TARGETS.mapping)}
       />
       <Figure
         label='Quantity exceptions'
@@ -675,7 +699,7 @@ export function ControlsStrip({
         basis={coverageWithheld ? 'Mapping details unavailable to you' : 'rows allocated over their quantity'}
         tone={overAllocatedRows != null && overAllocatedRows > 0 ? 'blocked' : 'neutral'}
         testId='uat-controls-figure-exceptions'
-        onClick={() => onNavigate(TARGETS.mapping)}
+        onClick={linkTo(TARGETS.mapping)}
       />
       <Figure
         label='Data-quality issues'
@@ -691,7 +715,7 @@ export function ControlsStrip({
         title={dataQuality.join('\n') || undefined}
         tone={dataQuality.length > 0 ? 'review' : 'neutral'}
         testId='uat-controls-figure-data-quality'
-        onClick={() => onNavigate(TARGETS.forecast)}
+        onClick={linkTo(TARGETS.forecast)}
       />
     </section>
     </div>

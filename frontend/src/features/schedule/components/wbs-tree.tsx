@@ -10,7 +10,7 @@ import {
 } from 'recharts'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { useWbsNodes } from '@/features/controls/structure/hooks/use-structure'
+import { useScheduleWbsRows } from '@/features/controls/structure/hooks/use-structure'
 
 /**
  * The schedule's WBS tab.
@@ -23,7 +23,11 @@ import { useWbsNodes } from '@/features/controls/structure/hooks/use-structure'
  * snapshot carried, joined by the snapshot's own parent ids (an imported P6
  * or MS Project WBS) and, for the generator's id-less nodes, by dotted code.
  * Until the project's rows have been read nothing is drawn, so the snapshot
- * never stands in for a canonical tree that exists.
+ * never stands in for a canonical tree that exists. Whether rows exist is
+ * decided by every row, archived ones included: a project whose nodes are
+ * all archived says so, and does not fall back to the snapshot. The rows
+ * keep the canonical sibling order the service gives them (sortOrder, then
+ * code); only the snapshot fallback is ordered by code.
  */
 
 type FlatWbsNode = {
@@ -183,7 +187,12 @@ const buildTreeFromSnapshot = (nodes: FlatWbsNode[]): WbsNode[] => {
   return roots
 }
 
-/** WbsNode rows carry ids and parent ids: the hierarchy is explicit. */
+/**
+ * WbsNode rows carry ids and parent ids: the hierarchy is explicit. The
+ * rows arrive in the canonical order (wbs.service: depth first, siblings by
+ * sortOrder, then code), and each list keeps the order its rows came in —
+ * no re-sort — so the tab shows the siblings as the Structure page does.
+ */
 const buildTreeFromRows = (nodes: FlatWbsNode[]): WbsNode[] => {
   const map = new Map<string, WbsNode>()
   nodes.forEach((node) => {
@@ -198,7 +207,6 @@ const buildTreeFromRows = (nodes: FlatWbsNode[]): WbsNode[] => {
     if (parent) parent.children.push(built)
     else roots.push(built)
   })
-  sortDeep(roots)
   return roots
 }
 
@@ -298,15 +306,21 @@ export function WbsTree({
     data: structure,
     isLoading: structureLoading,
     isError: structureFailed,
-  } = useWbsNodes(projectId ?? '', {
+  } = useScheduleWbsRows(projectId ?? '', {
     enabled: Boolean(projectId),
   })
+  // Any row, archived or not, makes the tree the project's own (D3).
   const fromRows = Boolean(structure && structure.items.length > 0)
+  const activeRows = useMemo(
+    () => (structure?.items ?? []).filter((row) => row.status !== 'archived'),
+    [structure]
+  )
+  const allArchived = fromRows && activeRows.length === 0
 
   const source = useMemo<FlatWbsNode[]>(
     () =>
       fromRows
-        ? structure!.items.map((row) => ({
+        ? activeRows.map((row) => ({
             id: row.id,
             parentId: row.parentId,
             code: row.code,
@@ -316,7 +330,7 @@ export function WbsTree({
             isPackage: row.isPackage,
           }))
         : nodes || [],
-    [fromRows, structure, nodes]
+    [fromRows, activeRows, nodes]
   )
 
   const tree = useMemo(
@@ -435,7 +449,14 @@ export function WbsTree({
                   colSpan={columnCount}
                   className='p-6 text-center text-muted-foreground'
                 >
-                  No WBS data available.
+                  {allArchived ? (
+                    <span data-testid='uat-schedule-wbs-all-archived'>
+                      All WBS nodes are archived. Restore or add nodes under
+                      Project Controls › Structure.
+                    </span>
+                  ) : (
+                    'No WBS data available.'
+                  )}
                 </td>
               </tr>
             ) : (

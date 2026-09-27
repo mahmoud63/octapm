@@ -9,6 +9,10 @@ import { projectControlsGroup } from '@/components/layout/data/sidebar-data'
 import { Main } from '@/components/layout/main'
 import { useMyProjectPermissions } from '@/features/permissions/hooks/use-permissions'
 import {
+  scheduleHasWbs,
+  useScheduleWbsRows,
+} from '@/features/controls/structure/hooks/use-structure'
+import {
   useProject,
   useProjectParties,
   useProjectSetupReadiness,
@@ -273,7 +277,28 @@ export function ProjectDetail({
       .length ?? 0
   const scheduleMilestonesCount =
     schedule?.activities?.filter((a) => a.isMilestone).length ?? 0
-  const hasWbs = (schedule?.revision?.wbs || []).length > 0
+  // The WBS tab is offered when the project has a canonical WbsNode tree —
+  // an in-product schedule's snapshot carries no WBS — or, for a project
+  // without one, when the revision snapshot carried a WBS (owner decision
+  // D3). Read only by someone offered the schedule.
+  const scheduleWbsRowsEnabled =
+    canLoadProjectModules &&
+    Boolean(permissionMatrix) &&
+    isModuleVisible(permissionMatrix, 'schedule')
+  const { data: scheduleWbsRows, isPending: scheduleWbsRowsPending } =
+    useScheduleWbsRows(projectId, { enabled: scheduleWbsRowsEnabled })
+  const hasWbs = scheduleHasWbs(scheduleWbsRows, schedule?.revision?.wbs)
+  // A link to the WBS tab waits for the schedule and the project's rows
+  // before the tab is judged not offered, so it is not sent to the Gantt
+  // while they load — nor before the project and the person's permissions,
+  // which enable those reads, have arrived. (Pending, not loading: in the
+  // render the rows query is first enabled it has not started fetching.)
+  const wbsSettling =
+    childSlug === 'wbs' &&
+    (!project ||
+      (!permissionMatrix && permissionsPending) ||
+      (scheduleLoading && !schedule) ||
+      (scheduleWbsRowsEnabled && scheduleWbsRowsPending))
 
   const menuItems = useMemo<MenuItem[]>(() => {
     const scheduleChildren: MenuChild[] = [
@@ -470,7 +495,7 @@ export function ProjectDetail({
     ? childState[visibleModule]
     : null
   useEffect(() => {
-    if (permissionsSettling || !menuItems.length) return
+    if (permissionsSettling || wbsSettling || !menuItems.length) return
     const moduleMismatch = visibleModule !== requestedModule
     const childMismatch =
       !moduleMismatch &&
@@ -495,6 +520,7 @@ export function ProjectDetail({
     }
   }, [
     permissionsSettling,
+    wbsSettling,
     menuItems.length,
     visibleModule,
     requestedModule,
@@ -550,9 +576,17 @@ export function ProjectDetail({
     goTo(item.key, childState[item.key])
   }
 
+  // Whether this person is offered the page a setup or strip target opens:
+  // the strip and the wizard draw a target that is not offered without its
+  // link, rather than a button that does nothing.
+  const canSetupNavigate = (target: ProjectSetupTarget) => {
+    const module = moduleFromSlug(target.module)
+    return Boolean(module && menuItems.some((item) => item.key === module))
+  }
+
   const handleSetupNavigate = (target: ProjectSetupTarget) => {
     const module = moduleFromSlug(target.module)
-    if (!module || !menuItems.some((item) => item.key === module)) return
+    if (!module || !canSetupNavigate(target)) return
     goTo(
       module,
       target.child && isModuleWithChildren(module) ? target.child : null
@@ -852,6 +886,7 @@ export function ProjectDetail({
                 isLoading={setupReadinessLoading}
                 currency={project.currency}
                 onNavigate={handleSetupNavigate}
+                canNavigate={canSetupNavigate}
                 // The strip mounts outside the module guard below; its
                 // figure requests wait for the permission matrix the same way.
                 permissionsSettling={permissionsSettling}
@@ -867,6 +902,7 @@ export function ProjectDetail({
                 isLoading={setupReadinessLoading}
                 currency={project.currency}
                 onNavigate={handleSetupNavigate}
+                canNavigate={canSetupNavigate}
                 collapsed={readinessCollapsed}
                 onCollapsedChange={setReadinessCollapsed}
               />

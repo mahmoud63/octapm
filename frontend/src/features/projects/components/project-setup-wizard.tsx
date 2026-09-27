@@ -37,6 +37,11 @@ type Props = {
   /** The project's currency, for the bill's value on the approval card. */
   currency?: string | null
   onNavigate: (target: ProjectSetupTarget) => void
+  /**
+   * Whether this person is offered the page a target opens; a button whose
+   * page is not offered is disabled and says so, never pressed to no effect.
+   */
+  canNavigate?: (target: ProjectSetupTarget) => boolean
   /** Collapsed to the compact status bar, for focus on the working area. */
   collapsed?: boolean
   onCollapsedChange?: (collapsed: boolean) => void
@@ -408,14 +413,18 @@ function RevisionDetail({
   )
 }
 
+const NOT_OFFERED = 'This page is not offered to you'
+
 function StepCard({
   step,
   onNavigate,
+  canNavigate = () => true,
   boqRevision,
   currency,
 }: {
   step: ProjectSetupStep
   onNavigate: (target: ProjectSetupTarget) => void
+  canNavigate?: (target: ProjectSetupTarget) => boolean
   boqRevision?: BoqRevisionContext | null
   currency?: string | null
 }) {
@@ -531,6 +540,8 @@ function StepCard({
           size='sm'
           className='h-8 px-2'
           onClick={() => onNavigate(step.action.target)}
+          disabled={!canNavigate(step.action.target)}
+          title={canNavigate(step.action.target) ? undefined : NOT_OFFERED}
         >
           {step.action.label}
           <ArrowRight className='h-3.5 w-3.5' />
@@ -582,6 +593,7 @@ export function ProjectSetupWizard({
   isLoading,
   currency,
   onNavigate,
+  canNavigate = () => true,
   collapsed = false,
   onCollapsedChange,
 }: Props) {
@@ -772,7 +784,10 @@ export function ProjectSetupWizard({
           <Button
             type='button'
             onClick={() => onNavigate(nextAction.target)}
+            disabled={!canNavigate(nextAction.target)}
+            title={canNavigate(nextAction.target) ? undefined : NOT_OFFERED}
             className='w-full sm:w-fit'
+            data-testid='uat-setup-next-action'
           >
             {nextAction.label}
             <ArrowRight className='h-4 w-4' />
@@ -783,6 +798,8 @@ export function ProjectSetupWizard({
             type='button'
             variant='outline'
             onClick={() => onNavigate(advisoryAction.target)}
+            disabled={!canNavigate(advisoryAction.target)}
+            title={canNavigate(advisoryAction.target) ? undefined : NOT_OFFERED}
             className='w-full sm:w-fit'
             data-testid='uat-setup-advisory-action'
           >
@@ -798,6 +815,7 @@ export function ProjectSetupWizard({
             key={step.key}
             step={step}
             onNavigate={onNavigate}
+            canNavigate={canNavigate}
             boqRevision={readiness.context?.boqRevision ?? null}
             currency={currency}
           />
