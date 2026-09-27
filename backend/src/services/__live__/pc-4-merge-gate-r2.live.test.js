@@ -249,8 +249,11 @@ liveDescribe("PC-4 merge gate round 2: date-only cutoff, locked forecast, refusa
       const past = await period(built, "P01", "2026-01-31");
       const future = await period(built, "F12", `${new Date().getUTCFullYear() + 1}-12-31`);
       expect((await built.get(`/reports/ev?periodId=${future.id}`)).basisWarnings).toContain(FUTURE_NOTE);
-      // The default basis is the latest period, the future one: said there too.
-      expect((await built.get("/reports/ev")).basisWarnings).toContain(FUTURE_NOTE);
+      // The default basis (owner decision D4) is the latest period whose
+      // cutoff has passed — the past one — so it carries no such note.
+      const byDefault = await built.get("/reports/ev");
+      expect(byDefault.reporting.period.id).toBe(past.id);
+      expect(byDefault.basisWarnings).not.toContain(FUTURE_NOTE);
       expect((await built.get(`/reports/ev?periodId=${past.id}`)).basisWarnings).not.toContain(FUTURE_NOTE);
     });
   });

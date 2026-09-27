@@ -11,10 +11,11 @@
  *   3. The health card's missing index: SPI / CPI null carry the server's
  *      reason and scoreBasis neutral_no_index (the score stays the frozen
  *      60), and the AC source says there are no official actual rows.
- *   4. The latest period's cutoff still ahead: the health card and the
- *      forecast carry the server's caveat (PV to the cutoff, EV and AC to
- *      today) beside an SPI that is left exactly as computed; a past cutoff
- *      carries none.
+ *   4. A period whose cutoff is still ahead, chosen explicitly, carries the
+ *      server's caveat (PV to the cutoff, EV and AC to today) beside an SPI
+ *      left exactly as computed; the health card and the forecast default
+ *      to the latest period whose cutoff has passed (owner decision D4,
+ *      round 4) and carry none.
  *   5. The EV report's S-curve gives EV only at the month of its cutoff, with
  *      the instant and the PV through that instant — never the report's EV
  *      written into earlier months — and a period locked afterwards stores
@@ -189,28 +190,35 @@ liveDescribe("PC-4 merge gate round 3: EV notes, narrative, health basis, future
     expect(health.pendingReview.metrics.every((row) => row.measuredThrough === "today")).toBe(true);
   });
 
-  it("4. a latest period whose cutoff is still ahead: the SPI stands and the health card and the forecast say PV runs to the cutoff while EV and AC stop at today", async () => {
+  it("4. a future period chosen explicitly keeps its SPI and says PV runs to the cutoff; the health card and the forecast default to the latest passed period and carry no caveat (D4)", async () => {
     const built = await newProject("future cutoff", { timezone: "America/Chicago" });
     const act = await activityWithBill(built, { code: "1.1", name: "Frame", quantity: 10 });
     const nextYear = new Date().getUTCFullYear() + 1;
     await loading(built, act.id, "2026-01-10", 1000);
     await loading(built, act.id, `${nextYear}-01-10`, 1000);
     await approvedProgress(act.id, 10, "2026-02-20T15:00:00Z");
-    await period(built, "P01", "2026-01-31");
+    const january = await period(built, "P01", "2026-01-31");
     const future = await period(built, "F01", `${nextYear}-01-25`);
 
+    const report = await built.get(`/reports/ev?periodId=${future.id}`);
+    // Chosen explicitly, the figures are the report's, unchanged: PV 2,000
+    // to the cutoff, EV 1,000 — and said.
+    expect([report.pv, report.ev, report.spi]).toEqual([2000, 1000, 0.5]);
+    expect(report.basisWarnings).toContain(NOTES.CUTOFF_NOT_REACHED);
+
+    // Owner decision D4: the health card and the forecast default to the
+    // latest period whose cutoff has passed — January — never the future
+    // one, so they carry January's SPI and no such caveat.
+    const januaryReport = await built.get(`/reports/ev?periodId=${january.id}`);
     const health = await built.get("/health");
     const forecast = await built.get("/forecast");
-    const report = await built.get(`/reports/ev?periodId=${future.id}`);
-    // The figures are the report's, unchanged: PV 2,000 to the cutoff, EV 1,000.
-    expect([report.pv, report.ev, report.spi]).toEqual([2000, 1000, 0.5]);
-    expect(scheduleDimension(health).detail.spi).toBe(0.5);
-    expect(forecast.schedule.spi).toBe(0.5);
-    // ... and said.
-    expect(health.dataFreshness.cutoffNotReachedNote).toBe(NOTES.CUTOFF_NOT_REACHED);
-    expect(scheduleDimension(health).detail.cutoffNotReachedNote).toBe(NOTES.CUTOFF_NOT_REACHED);
-    expect(costDimension(health).detail.cutoffNotReachedNote).toBe(NOTES.CUTOFF_NOT_REACHED);
-    expect(forecast.dataQuality).toContain(NOTES.CUTOFF_NOT_REACHED);
+    expect(health.dataFreshness.cutoffLocalDate).toBe("2026-01-31");
+    expect(scheduleDimension(health).detail.spi).toBe(januaryReport.spi);
+    expect(forecast.schedule.spi).toBe(januaryReport.spi);
+    expect(health.dataFreshness.cutoffNotReachedNote).toBeNull();
+    expect(scheduleDimension(health).detail.cutoffNotReachedNote).toBeNull();
+    expect(costDimension(health).detail.cutoffNotReachedNote).toBeNull();
+    expect(forecast.dataQuality).not.toContain(NOTES.CUTOFF_NOT_REACHED);
 
     // A project whose latest cutoff has passed carries no such note.
     const past = await newProject("past cutoff", { timezone: "America/Chicago" });

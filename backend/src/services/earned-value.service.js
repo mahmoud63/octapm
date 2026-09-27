@@ -376,13 +376,44 @@ const resolveReportingPeriod = async (
     return buildVirtualPeriod({ project, cutoffDate, zone });
   }
 
-  const latest = await tx.reportingPeriod.findFirst({
+  const periods = await tx.reportingPeriod.findMany({
     where: { projectId: project.id },
     orderBy: [{ cutoffDate: "desc" }, { createdAt: "desc" }],
     include: { evSnapshot: true },
   });
 
-  return latest || buildVirtualPeriod({ project, cutoffDate: new Date(), zone });
+  return (
+    pickDefaultReportingPeriod(periods, zone) ||
+    buildVirtualPeriod({ project, cutoffDate: new Date(), zone })
+  );
+};
+
+/**
+ * The default reporting period (owner decision D4): the latest period whose
+ * cutoff instant — as the reports cut it (describePeriodCutoff: a locked
+ * period's stored instant, an open one's reporting date ending in the zone
+ * resolved now) — has passed. A period whose cutoff is still ahead is never
+ * the default (PV would run to a future date while EV and AC stop at today);
+ * it stays selectable by id. No passed period: null, and the caller cuts an
+ * ad hoc report at today. `periods` arrive latest stored cutoff first; ties
+ * on the instant keep that order.
+ *
+ * Every default EV basis goes through this — the EV report, the health
+ * card, the forecast and the workspace home (resolveReportingPeriod).
+ */
+const pickDefaultReportingPeriod = (periods, zone, now = new Date()) => {
+  const nowMs = new Date(now).getTime();
+  let best = null;
+  let bestMs = -Infinity;
+  for (const period of periods || []) {
+    const at = new Date(describePeriodCutoff(period, zone).cutoffDate).getTime();
+    if (!Number.isFinite(at) || at > nowMs) continue;
+    if (at > bestMs) {
+      best = period;
+      bestMs = at;
+    }
+  }
+  return best;
 };
 
 const getApprovedBudgetRevisions = async (
@@ -1698,6 +1729,7 @@ module.exports = {
   computeEvMetrics,
   computeBudgetRevisionDelta,
   buildOfficialEvReport,
+  pickDefaultReportingPeriod,
   periodCutoffReader,
   listReportingPeriods,
   createReportingPeriod,

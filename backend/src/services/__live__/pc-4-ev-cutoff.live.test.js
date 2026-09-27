@@ -339,12 +339,17 @@ liveDescribe("PC-4 D1: the EV cutoff is the end of the cutoff date in the projec
     expect([forecast.status, forecast.body?.error]).toEqual([200, undefined]);
     expect(forecast.body.data.earnedValueCutoff).toMatchObject({ timeZone: "UTC", timeZoneNote: UTC_NOTE });
     expect(forecast.body.data.dataQuality).toContain(UTC_NOTE);
-    // ... and the workspace home's official cutoff (this organisation's one project).
+    // ... and the workspace home's official cutoff (this organisation's one
+    // project). Its default basis (owner decision D4) is P11 once 1 November
+    // has ended in UTC; until then P11's cutoff is still ahead, so the
+    // default is the ad hoc report cut at the end of today (UTC).
     const home = await api.get("/api/v1/projects/workspace-dashboard", built.auth);
     expect([home.status, home.body?.error]).toEqual([200, undefined]);
+    const p11Passed = Date.parse("2026-11-01T23:59:59.999Z") <= Date.now();
+    const defaultDate = p11Passed ? "2026-11-01" : new Date().toISOString().slice(0, 10);
     expect(home.body.data.dataFreshness).toMatchObject({
-      cutoffDate: "2026-11-01T23:59:59.999Z",
-      cutoffLocalDate: "2026-11-01",
+      cutoffDate: `${defaultDate}T23:59:59.999Z`,
+      cutoffLocalDate: defaultDate,
       cutoffTimeZone: "UTC",
       cutoffTimeZoneSource: "utc",
       cutoffTimeZoneNote: UTC_NOTE,
@@ -422,12 +427,27 @@ liveDescribe("PC-4 D1: the EV cutoff is the end of the cutoff date in the projec
   });
 
   it("the Overview's health card and the forecast state and use the same cutoff", async () => {
+    // The default EV basis (owner decision D4): the latest period whose
+    // cutoff has passed — P11b (2 November) once that day has ended in
+    // Chicago, P11 once 1 November has — else the ad hoc report cut at the
+    // end of today in Chicago. The health card and the forecast read it.
+    const byDefault = await report(chicago, "");
+    const now = Date.now();
+    const expectedDefault =
+      Date.parse("2026-11-03T05:59:59.999Z") <= now
+        ? { cutoffDate: "2026-11-03T05:59:59.999Z", cutoffLocalDate: "2026-11-02" }
+        : Date.parse("2026-11-02T04:59:59.999Z") <= now
+          ? { cutoffDate: "2026-11-02T04:59:59.999Z", cutoffLocalDate: "2026-11-01" }
+          : { cutoffLocalDate: new Intl.DateTimeFormat("en-CA", { timeZone: "America/Chicago" }).format(new Date(now)) };
+    expect(byDefault.reporting).toMatchObject(expectedDefault);
+    const cutoff = {
+      cutoffDate: byDefault.reporting.cutoffDate,
+      cutoffLocalDate: byDefault.reporting.cutoffLocalDate,
+    };
     const health = await api.get(chicago.at("/health"), chicago.auth);
     expect([health.status, health.body?.error]).toEqual([200, undefined]);
-    // The latest period (P11b, 2 November) is the health card's.
     expect(health.body.data.dataFreshness).toMatchObject({
-      cutoffDate: "2026-11-03T05:59:59.999Z",
-      cutoffLocalDate: "2026-11-02",
+      ...cutoff,
       cutoffTimeZone: "America/Chicago",
       cutoffTimeZoneSource: "project",
       cutoffTimeZoneNote: null,
@@ -435,8 +455,7 @@ liveDescribe("PC-4 D1: the EV cutoff is the end of the cutoff date in the projec
     const forecast = await api.get(chicago.at("/forecast"), chicago.auth);
     expect([forecast.status, forecast.body?.error]).toEqual([200, undefined]);
     expect(forecast.body.data.earnedValueCutoff).toEqual({
-      cutoffDate: "2026-11-03T05:59:59.999Z",
-      cutoffLocalDate: "2026-11-02",
+      ...cutoff,
       timeZone: "America/Chicago",
       timeZoneSource: "project",
       timeZoneNote: null,
