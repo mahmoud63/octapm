@@ -14,6 +14,12 @@ const {
 const { getEffectiveRole, requirePermission } = require('../middleware/rbac');
 const { validate } = require('../middleware/validate');
 const scheduleService = require('../services/schedule.service');
+const {
+  boqFigureAccess,
+  withheldRevision,
+  withheldSchedule,
+  withheldScheduleReadiness,
+} = require('../utils/boq-figures');
 const ganttLayoutService = require('../services/gantt-layout.service');
 const fileStorageService = require('../services/file-storage.service');
 const jobService = require('../jobs/job.service');
@@ -56,6 +62,27 @@ const upload = multer({
   },
 });
 
+/*
+ * The schedule is read by everyone who may read the programme; the bill's
+ * figures on it (each activity's approved allocation, the open value, the
+ * readiness check that states the bill's value) are for those who may read
+ * the BOQ, and its budgets for those who may read the BOQ or the cost
+ * module (§12). Every response that carries a revision or an activity goes
+ * through utils/boq-figures; a BOQ reader's answer is the service's own.
+ */
+// The lifecycle answers: a revision, or { revision, readiness?, ... }.
+const withheldLifecycle = (result, req) => {
+  const access = boqFigureAccess(req);
+  if (access.boq || !result || typeof result !== 'object') return result;
+  return {
+    ...result,
+    revision: withheldRevision(result.revision, access),
+    ...('readiness' in result
+      ? { readiness: withheldScheduleReadiness(result.readiness, access) }
+      : {}),
+  };
+};
+
 router.use(authenticate);
 
 // Disable caching for all schedule endpoints
@@ -73,7 +100,7 @@ router.get(
       orgId: req.user.orgId,
       projectId: req.params.projectId,
     });
-    return sendSuccess(res, result);
+    return sendSuccess(res, withheldSchedule(result, boqFigureAccess(req)));
   }),
 );
 
@@ -86,7 +113,8 @@ router.get(
       orgId: req.user.orgId,
       projectId: req.params.projectId,
     });
-    return sendSuccess(res, result);
+    const access = boqFigureAccess(req);
+    return sendSuccess(res, result.map((revision) => withheldRevision(revision, access)));
   }),
 );
 
@@ -101,7 +129,7 @@ router.get(
       projectId: req.params.projectId,
       revisionId: req.params.revisionId,
     });
-    return sendSuccess(res, result);
+    return sendSuccess(res, withheldScheduleReadiness(result, boqFigureAccess(req)));
   }),
 );
 
@@ -116,7 +144,7 @@ router.get(
       projectId: req.params.projectId,
       revisionId: req.params.revisionId,
     });
-    return sendSuccess(res, result);
+    return sendSuccess(res, withheldLifecycle(result, req));
   }),
 );
 
@@ -134,7 +162,7 @@ router.get(
     if (!result) {
       throw new HttpError(404, 'REVISION_NOT_FOUND', 'Revision not found');
     }
-    return sendSuccess(res, result);
+    return sendSuccess(res, withheldRevision(result, boqFigureAccess(req)));
   }),
 );
 
@@ -176,7 +204,7 @@ router.post(
       unmappedRemovals: req.body.unmappedRemovals || [],
       comment: req.body?.comment || null,
     });
-    return sendSuccess(res, result);
+    return sendSuccess(res, withheldLifecycle(result, req));
   }),
 );
 
@@ -199,7 +227,7 @@ router.post(
       userId: req.user.id,
       reason: req.body.reason,
     });
-    return sendSuccess(res, result);
+    return sendSuccess(res, withheldLifecycle(result, req));
   }),
 );
 
@@ -225,7 +253,7 @@ router.post(
       userRole: getEffectiveRole(req),
       comment: req.body?.comment || null,
     });
-    return sendSuccess(res, result);
+    return sendSuccess(res, withheldRevision(result, boqFigureAccess(req)));
   }),
 );
 
@@ -251,7 +279,7 @@ router.post(
       userRole: getEffectiveRole(req),
       comment: req.body?.comment || null,
     });
-    return sendSuccess(res, result);
+    return sendSuccess(res, withheldRevision(result, boqFigureAccess(req)));
   }),
 );
 
@@ -275,7 +303,7 @@ router.post(
       userRole: getEffectiveRole(req),
       reason: req.body.reason,
     });
-    return sendSuccess(res, result);
+    return sendSuccess(res, withheldRevision(result, boqFigureAccess(req)));
   }),
 );
 
@@ -301,7 +329,7 @@ router.post(
       userRole: getEffectiveRole(req),
       comment: req.body?.comment || null,
     });
-    return sendSuccess(res, result);
+    return sendSuccess(res, withheldLifecycle(result, req));
   }),
 );
 
@@ -327,7 +355,7 @@ router.post(
       userRole: getEffectiveRole(req),
       comment: req.body?.comment || null,
     });
-    return sendSuccess(res, result);
+    return sendSuccess(res, withheldLifecycle(result, req));
   }),
 );
 

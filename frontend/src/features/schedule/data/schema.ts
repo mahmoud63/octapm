@@ -248,7 +248,9 @@ export const scheduleActivitySchema = z.object({
   actualCost: z.number().nullable().optional(),
   actualStart: z.string().nullable().optional(),
   actualFinish: z.string().nullable().optional(),
-  budget: z.number(),
+  // The BOQ figures and the budget built from them are withheld (omitted)
+  // from a member who may not read the BOQ (the budget: nor the cost module).
+  budget: z.number().optional(),
   generatedBudget: z.number().optional(),
   allocatedBoqQuantity: z.number().optional(),
   allocatedBoqAmount: z.number().optional(),
@@ -307,7 +309,7 @@ export const scheduleRevisionSchema = z.object({
   label: z.string().nullable(),
   activityCount: z.number(),
   criticalCount: z.number(),
-  totalBudget: z.number(),
+  totalBudget: z.number().optional(),
   dataDate: z.string().nullable().optional(),
   generatedTotalBudget: z.number().optional(),
   unallocatedBoqAmount: z.number().optional(),

@@ -63,7 +63,8 @@ interface Props {
   initialTarget?: ProjectSetupTarget
 }
 
-const fmtUSD = (n: number) =>
+// A budget withheld from this member (no BOQ or cost access) reads as a dash.
+const fmtUSD = (n: number | null | undefined) =>
   n
     ? '$' + Number(n).toLocaleString('en-US', { maximumFractionDigits: 0 })
     : '—'

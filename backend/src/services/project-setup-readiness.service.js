@@ -5,6 +5,9 @@ const { workspacePath, workspaceSegment } = require("../utils/record-links");
 const { buildAllocationSummary } = require("./activity-boq-allocation.service");
 const { buildScheduleReadiness } = require("./schedule.service");
 const { resolveCalendar } = require("./cpm.service");
+// The bill's money (PC-3's coverage amounts) and the schedule check that
+// states it, as every endpoint that carries them withholds them (§12).
+const { withheldScheduleReadiness, withoutBoqFigures } = require("../utils/boq-figures");
 const { loadUnitIndex, normaliseWith, unitKey } = require("./uom.service");
 
 const RULESET_VERSION = "fb-015-v2";
@@ -250,25 +253,6 @@ const withoutBoqRecords = (entry) => {
     ? entry
     : { ...entry, items, itemsWithheld: true };
 };
-
-// The bill's money as the steps count it and the issues detail it: the
-// bill's value, what is allocatable, approved, pending, open, optional and
-// not applicable — PC-3's coverage amounts, which the coverage endpoint
-// refuses the same person. The shares and row counts stay.
-const BOQ_FIGURE_KEYS = new Set([
-  "totalBoqAmount",
-  "allocatableBoqAmount",
-  "approvedAllocatedAmount",
-  "pendingAllocatedAmount",
-  "unallocatedAmount",
-  "optionalUnallocatedAmount",
-  "notApplicableAmount",
-]);
-
-const withoutBoqFigures = (values) =>
-  values && typeof values === "object"
-    ? Object.fromEntries(Object.entries(values).filter(([key]) => !BOQ_FIGURE_KEYS.has(key)))
-    : values;
 
 const withoutBoqDetail = (entry) => {
   const withheld = withoutBoqRecords(entry);
@@ -1971,15 +1955,7 @@ const getSetupReadiness = async ({ orgId, projectId, canReadBoq = true }) => {
       // them; its allocations check states the bill's value in the same
       // seven figures the steps count, so a caller who cannot read the BOQ
       // gets each check's verdict and message without them.
-      scheduleReadiness:
-        canReadBoq || !scheduleReadiness
-          ? scheduleReadiness
-          : {
-              ...scheduleReadiness,
-              checks: scheduleReadiness.checks.map((check) =>
-                check.details ? { ...check, details: withoutBoqFigures(check.details) } : check,
-              ),
-            },
+      scheduleReadiness: withheldScheduleReadiness(scheduleReadiness, { boq: canReadBoq, budget: true }),
       officialEvInputs: OFFICIAL_EV_INPUTS,
     },
     steps,

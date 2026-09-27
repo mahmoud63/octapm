@@ -7,6 +7,11 @@ const { getEffectiveRole, requirePermission } = require('../middleware/rbac');
 const { validate } = require('../middleware/validate');
 const { moneyBody } = require('../utils/money');
 const activityService = require('../services/activity.service');
+// An activity's approved BOQ allocation (quantity, value, weight) is for
+// those who may read the BOQ, its budget for those who may read the BOQ or
+// the cost module (§12); every answer that carries an activity goes through
+// utils/boq-figures, and a BOQ reader's is the service's own.
+const { boqFigureAccess, withheldActivity } = require('../utils/boq-figures');
 const progressService = require('../services/progress.service');
 
 const VALID_CATEGORIES = [
@@ -47,7 +52,8 @@ router.get(
       orgId: req.user.orgId,
       projectId: req.params.projectId,
     });
-    return sendSuccess(res, result);
+    const access = boqFigureAccess(req);
+    return sendSuccess(res, result.map((activity) => withheldActivity(activity, access)));
   }),
 );
 
@@ -94,7 +100,7 @@ router.post(
       projectId: req.params.projectId,
       payload: req.body,
     });
-    return sendSuccess(res, result, 201);
+    return sendSuccess(res, withheldActivity(result, boqFigureAccess(req)), 201);
   }),
 );
 
@@ -169,7 +175,7 @@ router.get(
       projectId: req.params.projectId,
       activityId: req.params.id,
     });
-    return sendSuccess(res, result);
+    return sendSuccess(res, withheldActivity(result, boqFigureAccess(req)));
   }),
 );
 
@@ -216,7 +222,7 @@ router.patch(
       activityId: req.params.id,
       payload: req.body,
     });
-    return sendSuccess(res, result);
+    return sendSuccess(res, withheldActivity(result, boqFigureAccess(req)));
   }),
 );
 
@@ -332,7 +338,10 @@ router.post(
       userRole: getEffectiveRole(req),
       payload: req.body,
     });
-    return sendSuccess(res, result);
+    return sendSuccess(res, {
+      ...result,
+      activity: withheldActivity(result.activity, boqFigureAccess(req)),
+    });
   }),
 );
 

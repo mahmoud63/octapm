@@ -83,8 +83,11 @@ const DEFAULT_MILESTONES = [
 
 const PROGRESS_ASSIGNMENT_OVERRIDE_ROLES = new Set(['pm', 'planning_eng'])
 
-const fmtUSD = (n: number) =>
-  '$' + Number(n || 0).toLocaleString('en-US', { maximumFractionDigits: 0 })
+// A budget withheld from this member (no BOQ or cost access) reads as a dash.
+const fmtUSD = (n: number | undefined) =>
+  n === undefined
+    ? '—'
+    : '$' + Number(n || 0).toLocaleString('en-US', { maximumFractionDigits: 0 })
 
 const today = () => new Date().toISOString().slice(0, 10)
 
@@ -445,6 +448,12 @@ export function ProgressTab({ activities, projectId }: Props) {
 
     return { totalBudget, ev: evValue, pv, ac, spi, cpi, missingActualCount }
   }, [selectableActivities])
+  // The server withholds the activity budgets from a member who may read
+  // neither the BOQ nor the cost module; every estimate here is built from
+  // them, so none is shown rather than a row of zeros.
+  const budgetsWithheld = selectableActivities.some(
+    (activity) => activity.budget === undefined
+  )
 
   const draftFor = (activity: ScheduleActivity): RowDraft => ({
     ...buildDefaultDraft(activity),
@@ -472,36 +481,38 @@ export function ProgressTab({ activities, projectId }: Props) {
 
   return (
     <div className='space-y-4'>
-      <div className='grid grid-cols-2 gap-3 sm:grid-cols-5'>
-        <div className='rounded-lg border p-3 text-center'>
-          <p className='text-xs text-muted-foreground'>SPI Est.</p>
-          <p
-            className={`text-xl font-bold ${ev.spi < 0.9 ? 'text-red-600' : 'text-green-600'}`}
-          >
-            {ev.spi.toFixed(2)}
-          </p>
+      {!budgetsWithheld && (
+        <div className='grid grid-cols-2 gap-3 sm:grid-cols-5'>
+          <div className='rounded-lg border p-3 text-center'>
+            <p className='text-xs text-muted-foreground'>SPI Est.</p>
+            <p
+              className={`text-xl font-bold ${ev.spi < 0.9 ? 'text-red-600' : 'text-green-600'}`}
+            >
+              {ev.spi.toFixed(2)}
+            </p>
+          </div>
+          <div className='rounded-lg border p-3 text-center'>
+            <p className='text-xs text-muted-foreground'>CPI Est.</p>
+            <p
+              className={`text-xl font-bold ${ev.cpi < 0.9 ? 'text-red-600' : 'text-green-600'}`}
+            >
+              {ev.cpi.toFixed(2)}
+            </p>
+          </div>
+          <div className='rounded-lg border p-3 text-center'>
+            <p className='text-xs text-muted-foreground'>EV Est.</p>
+            <p className='text-xl font-bold'>{fmtUSD(ev.ev)}</p>
+          </div>
+          <div className='rounded-lg border p-3 text-center'>
+            <p className='text-xs text-muted-foreground'>PV Est.</p>
+            <p className='text-xl font-bold'>{fmtUSD(ev.pv)}</p>
+          </div>
+          <div className='rounded-lg border p-3 text-center'>
+            <p className='text-xs text-muted-foreground'>AC Est.</p>
+            <p className='text-xl font-bold'>{fmtUSD(ev.ac)}</p>
+          </div>
         </div>
-        <div className='rounded-lg border p-3 text-center'>
-          <p className='text-xs text-muted-foreground'>CPI Est.</p>
-          <p
-            className={`text-xl font-bold ${ev.cpi < 0.9 ? 'text-red-600' : 'text-green-600'}`}
-          >
-            {ev.cpi.toFixed(2)}
-          </p>
-        </div>
-        <div className='rounded-lg border p-3 text-center'>
-          <p className='text-xs text-muted-foreground'>EV Est.</p>
-          <p className='text-xl font-bold'>{fmtUSD(ev.ev)}</p>
-        </div>
-        <div className='rounded-lg border p-3 text-center'>
-          <p className='text-xs text-muted-foreground'>PV Est.</p>
-          <p className='text-xl font-bold'>{fmtUSD(ev.pv)}</p>
-        </div>
-        <div className='rounded-lg border p-3 text-center'>
-          <p className='text-xs text-muted-foreground'>AC Est.</p>
-          <p className='text-xl font-bold'>{fmtUSD(ev.ac)}</p>
-        </div>
-      </div>
+      )}
 
       {progressBlockers.length > 0 && (
         <div className='rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-900/40 dark:bg-amber-950/25 dark:text-amber-100'>
@@ -1002,12 +1013,14 @@ export function ProgressTab({ activities, projectId }: Props) {
         </div>
       </div>
 
-      <p className='text-xs text-muted-foreground'>
-        Live estimate only. Total budget considered: {fmtUSD(ev.totalBudget)}.
-        Missing actuals estimated for {ev.missingActualCount} activities;
-        official reports use approved progress, cost records, and cutoff
-        periods.
-      </p>
+      {!budgetsWithheld && (
+        <p className='text-xs text-muted-foreground'>
+          Live estimate only. Total budget considered: {fmtUSD(ev.totalBudget)}.
+          Missing actuals estimated for {ev.missingActualCount} activities;
+          official reports use approved progress, cost records, and cutoff
+          periods.
+        </p>
+      )}
     </div>
   )
 }

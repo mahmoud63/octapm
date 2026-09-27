@@ -615,12 +615,11 @@ liveDescribe("PC-4: setup flow — structure and BOQ approval steps, per-item de
       // cost summary and the forecast answer). The project that passes the
       // baseline gate joins the sweep: it has an approved schedule revision
       // and approved allocations, so every figure has somewhere to be.
-      // GET /schedule, which the landing reads for its module-bar counts
-      // only, is left out: it hands every schedule reader the approved
-      // allocation per activity (allocatedBoqAmount/Quantity/Weight), the
-      // revision's unallocatedBoqAmount and its readiness figures — an
-      // exposure that predates PC-4 (cb14ff4), that none of the Overview's
-      // cards render, and that the schedule's other reads share.
+      // GET /schedule, which the landing reads for its module-bar counts,
+      // joins the sweep too: it no longer hands a member without BOQ read
+      // the approved allocation per activity, the revision's open value or
+      // its readiness figures (pc-4-boq-withholding.live.test.js proves that
+      // endpoint and the schedule's other reads in full).
       expect(passingProjectId).toBeTruthy();
       const costController = await createLiveUser(prisma, {
         orgId: live.org.id,
@@ -687,6 +686,7 @@ liveDescribe("PC-4: setup flow — structure and BOQ approval steps, per-item de
         forecast: `/api/v1/projects/${projectId}/forecast`,
         assignments: `/api/v1/projects/${projectId}/assignments/mine`,
         health: `/api/v1/projects/${projectId}/health`,
+        schedule: `/api/v1/projects/${projectId}/schedule`,
       });
       // What each viewer is answered: the site engineer has no cost tool;
       // the cost controller is answered everywhere, so nothing is skipped.

@@ -122,7 +122,8 @@ export interface Activity {
   lateFinishDate: string | null
   totalFloat: number | null
   duration: number | null
-  budget: number | null
+  /** Absent for a member who may read neither the BOQ nor the cost module (§12). */
+  budget?: number | null
   isMilestone: boolean
   isCritical: boolean
   sortOrder: number | null

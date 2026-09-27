@@ -284,6 +284,13 @@ const signedMoney = {
     "Signed monetary value stored or computed at Decimal(18,2) precision.",
 };
 const nonNegativeNumber = { type: "number", minimum: 0 };
+// §12: the bill's figures on the schedule and the activities go only to a
+// caller who may read the BOQ; the budgets built from them to a caller who
+// may read the BOQ or the cost module. Absent (never zeroed) for anyone else.
+const BOQ_READERS_ONLY = " Present only for a caller who may read the BOQ (boq:read); omitted, not zeroed, for anyone else.";
+const BUDGET_READERS_ONLY = " Present only for a caller who may read the BOQ or the cost module (boq:read or cost:read); omitted for anyone else.";
+const boqFigure = (schema, what) => ({ ...schema, description: what + BOQ_READERS_ONLY });
+const budgetFigure = (what) => ({ ...money, description: what + BUDGET_READERS_ONLY });
 const percent = { type: "number", minimum: 0, maximum: 100 };
 
 const components = {
@@ -4702,11 +4709,11 @@ const components = {
       baselineFinishDate: nullableDateString,
       predecessors: { type: "string", nullable: true },
       dependencies: arrayOf(ref("ActivityDependency")),
-      budget: money,
-      generatedBudget: money,
-      allocatedBoqQuantity: nonNegativeNumber,
-      allocatedBoqAmount: money,
-      allocatedBoqWeight: nonNegativeNumber,
+      budget: budgetFigure("The activity budget: on GET /schedule, the approved BOQ allocation value; on the activity endpoints, the stored activity budget."),
+      generatedBudget: budgetFigure("The budget the generator or the import gave the activity (GET /schedule)."),
+      allocatedBoqQuantity: boqFigure(nonNegativeNumber, "Approved BOQ allocation quantity."),
+      allocatedBoqAmount: boqFigure(money, "Approved BOQ allocation value."),
+      allocatedBoqWeight: boqFigure(nonNegativeNumber, "Approved BOQ allocation weight (% of the bill)."),
       approvedAllocationCount: { type: "integer", minimum: 0 },
       procurementRiskSummary: {
         ...ref("ScheduleProcurementRiskSummary"),
@@ -4728,7 +4735,11 @@ const components = {
     }),
     ProjectSchedule: objectSchema({
       dataDate: nullableDateString,
-      revision: ref("GenericObject"),
+      revision: {
+        ...ref("GenericObject"),
+        description:
+          "The schedule revision. unallocatedBoqAmount, and the BOQ value figures in readiness.checks[].details (totalBoqAmount, allocatableBoqAmount, approvedAllocatedAmount, pendingAllocatedAmount, unallocatedAmount, optionalUnallocatedAmount, notApplicableAmount), are present only for a caller who may read the BOQ; totalBudget, generatedTotalBudget, projectSummary.totalBudget and wbs[].budget only for a caller who may read the BOQ or the cost module. Check keys, verdicts, messages, ready and blockingCount are the same for every caller.",
+      },
       activities: arrayOf(ref("Activity")),
     }),
     ProgressPayload: objectSchema({
@@ -7623,6 +7634,8 @@ add(
     tag: "Schedule",
     summary:
       "Get active project schedule, CPM rollups, and critical path explanations.",
+    description:
+      "Every schedule reader receives the programme. The bill's figures on it (each activity's allocatedBoqQuantity, allocatedBoqAmount and allocatedBoqWeight; the revision's unallocatedBoqAmount; the BOQ value figures in the allocations readiness check) are present only for a caller who may read the BOQ, and the budgets (activity budget and generatedBudget, revision totalBudget and generatedTotalBudget) only for a caller who may read the BOQ or the cost module. A withheld figure is omitted, never zeroed.",
     operationId: "getProjectSchedule",
     parameters: projectParams,
     permissions: modulePermission("schedule", "read"),
@@ -7803,12 +7816,17 @@ add(
   }),
 );
 
+// §12, as utils/boq-figures applies it to every answer that carries a revision.
+const REVISION_FIGURES =
+  "The BOQ value figures in readiness.checks[].details (and a revision's unallocatedBoqAmount) are present only for a caller who may read the BOQ; totalBudget and generatedTotalBudget only for a caller who may read the BOQ or the cost module. Check keys, verdicts and counts are the same for every caller.";
+
 add(
   "/projects/{projectId}/schedule/revisions",
   "get",
   operation({
     tag: "Schedule Revisions",
     summary: "List staged schedule revisions.",
+    description: REVISION_FIGURES,
     operationId: "listScheduleRevisions",
     parameters: projectParams,
     permissions: modulePermission("schedule", "read"),
@@ -7833,6 +7851,7 @@ add(
     operation({
       tag: "Schedule Revisions",
       summary,
+      description: REVISION_FIGURES,
       operationId,
       parameters: [
         ...projectParams,
@@ -7849,6 +7868,7 @@ add(
   operation({
     tag: "Schedule Revisions",
     summary: "Get a schedule revision.",
+    description: `${REVISION_FIGURES} The stored snapshot's boqRows are likewise present only for a caller who may read the BOQ.`,
     operationId: "getScheduleRevision",
     parameters: [
       ...projectParams,
@@ -7942,6 +7962,8 @@ add(
   operation({
     tag: "Activities",
     summary: "List project activities.",
+    description:
+      "allocatedBoqQuantity, allocatedBoqAmount and allocatedBoqWeight are present only for a caller who may read the BOQ; budget only for a caller who may read the BOQ or the cost module. The same holds for every endpoint here that answers with an activity.",
     operationId: "listActivities",
     parameters: projectParams,
     permissions: modulePermission("schedule", "read"),

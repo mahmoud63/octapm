@@ -4,7 +4,8 @@ const { asyncHandler } = require("../utils/async-handler");
 const { sendSuccess } = require("../utils/api-response");
 const { authenticate } = require("../middleware/auth");
 const { requireProjectAccess } = require("../middleware/project-access");
-const { hasPermission, requireRoles } = require("../middleware/rbac");
+const { requireRoles } = require("../middleware/rbac");
+const { canReadBoq } = require("../utils/boq-figures");
 const { validate } = require("../middleware/validate");
 const {
   enforceProjectLimit,
@@ -222,7 +223,7 @@ router.get(
       // Readiness is open to every project member; the bill's rows, values
       // and review trail in it are for those who may read the BOQ, as the
       // BOQ and coverage endpoints decide it (template, role or party).
-      canReadBoq: hasPermission(req, "boq", "read"),
+      canReadBoq: canReadBoq(req),
     });
 
     return sendSuccess(res, result);

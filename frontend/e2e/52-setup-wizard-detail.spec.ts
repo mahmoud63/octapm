@@ -4,6 +4,7 @@ import {
   apiJson,
   createProject,
   dropLiveOrg,
+  LIVE_PASSWORD,
   registerLiveOrg,
   signInForm,
   type LiveOrg,
@@ -405,4 +406,144 @@ test('the bill revision on the approval card, the strip figures as the services 
   await expect(approvedCard.getByTestId('uat-setup-boq-revision-history')).toContainText('Approved by pc4 Admin')
   await expect(page.getByTestId('uat-controls-boq-revision')).toHaveText('Rev 1')
   await expect(page.getByTestId('uat-controls-boq')).toContainText('Approved')
+})
+
+/**
+ * §12 on screen: a site engineer whose permission template sets the BOQ
+ * tool to none lands on the Overview, opens the Gantt and the Activities
+ * list, and every one of them renders without an error while the server
+ * hands this person no BOQ figure — the schedule's and the activities'
+ * answers carry no allocated quantity, value or weight, no open value and
+ * no budget (a site engineer has no cost tool either), and the Activities
+ * list reads the withheld BOQ value as a dash, not as 0.
+ */
+test('a member who cannot read the BOQ: the landing, the Gantt and the Activities list render without errors and without a BOQ figure', async ({ page }) => {
+  const client = await apiClient()
+  const setup = await (async () => {
+    try {
+      if (!org) org = await registerLiveOrg(client, 'pc4')
+      const token = org.adminToken
+      const projectId = await createProject(client, token, `BOQ withheld ${Date.now()}`)
+
+      // A site engineer on the project, under a template that takes the BOQ away.
+      const email = `live-se-${crypto.randomUUID()}@octapm-live.test`
+      const member = await apiJson(client, 'post', '/users', {
+        token,
+        data: { name: 'pc4 Site Engineer', email, role: 'site_engineer', password: LIVE_PASSWORD },
+      })
+      expect(member.status, `add the member -> ${JSON.stringify(member.body?.error)}`).toBe(201)
+      const memberId = member.body!.data!.id as string
+      const joined = await apiJson(client, 'post', `/projects/${projectId}/team`, {
+        token,
+        data: { userId: memberId, role: 'site_engineer' },
+      })
+      expect(joined.status, `put them on the project -> ${JSON.stringify(joined.body?.error)}`).toBe(201)
+      const template = await apiJson(client, 'post', '/permissions/templates', {
+        token,
+        data: { name: `No BOQ ${Date.now()}`, baseRole: 'site_engineer', tools: [{ module: 'boq', level: 'none' }] },
+      })
+      expect(template.status, `template -> ${JSON.stringify(template.body?.error)}`).toBe(201)
+      const applied = await apiJson(client, 'put', `/projects/${projectId}/team/${memberId}/permissions`, {
+        token,
+        data: { templateId: template.body!.data!.id },
+      })
+      expect(applied.status, `apply the template -> ${JSON.stringify(applied.body?.error)}`).toBe(200)
+
+      // One priced row, allocated in full and approved to one activity, so
+      // the activity carries the bill's value for a BOQ reader.
+      const row = await apiJson(client, 'post', `/projects/${projectId}/boq/items`, {
+        token,
+        data: { code: '1.1', description: 'Concrete in foundations', quantity: 100, unit: 'm3', rate: 213.37 },
+      })
+      expect(row.status, `create item -> ${JSON.stringify(row.body?.error)}`).toBe(201)
+      const activity = await apiJson(client, 'post', `/projects/${projectId}/activities`, {
+        token,
+        data: {
+          name: 'Pour foundations',
+          activityCode: 'A100',
+          duration: 5,
+          startDate: '2026-02-02',
+          endDate: '2026-02-06',
+          engineerIds: [org.adminId, memberId],
+        },
+      })
+      expect(activity.status, `create activity -> ${JSON.stringify(activity.body?.error)}`).toBe(201)
+      const allocation = await apiJson(client, 'post', `/projects/${projectId}/activity-boq-allocations`, {
+        token,
+        data: {
+          boqItemId: (row.body!.data as { item: { id: string } }).item.id,
+          activityId: activity.body!.data!.id,
+          quantity: 100,
+        },
+      })
+      expect(allocation.status, `allocate -> ${JSON.stringify(allocation.body?.error)}`).toBe(201)
+      for (const step of ['submit', 'approve']) {
+        const moved = await apiJson(
+          client,
+          'post',
+          `/projects/${projectId}/activity-boq-allocations/${allocation.body!.data!.id}/${step}`,
+          { token, data: {} }
+        )
+        expect(moved.status, `${step} -> ${JSON.stringify(moved.body?.error)}`).toBe(200)
+      }
+      const full = await apiJson(client, 'get', `/projects/${projectId}/schedule`, { token })
+      expect(JSON.stringify(full.body?.data), 'a BOQ reader gets the figure').toContain('"allocatedBoqAmount":21337')
+      return { projectId, email, activityId: activity.body!.data!.id as string }
+    } finally {
+      await client.dispose()
+    }
+  })()
+
+  const errors: string[] = []
+  page.on('pageerror', (error) => errors.push(error.message))
+  const withheld = /"(allocatedBoqAmount|allocatedBoqQuantity|allocatedBoqWeight|unallocatedBoqAmount|budget|totalBudget|generatedBudget|generatedTotalBudget|boqRows)"/
+  const answers: { url: string; leaked: boolean }[] = []
+  page.on('response', async (response) => {
+    const url = response.url()
+    if (!new RegExp(`/projects/${setup.projectId}/(schedule|activities)(\\?|$)`).test(url)) return
+    const text = await response.text().catch(() => '')
+    answers.push({ url, leaked: withheld.test(text) })
+  })
+
+  await signInForm(page, setup.email)
+  const base = `/o/${org!.segment}/projects/${setup.projectId}`
+
+  // The landing: the Overview, with the schedule asked for its counts.
+  const scheduleAnswer = page.waitForResponse((r) => /\/schedule(\?|$)/.test(r.url()), { timeout: 30_000 })
+  await page.goto(base)
+  await expect(page.getByTestId('uat-project-content-overview')).toBeVisible({ timeout: 30_000 })
+  await scheduleAnswer
+
+  // The Gantt.
+  await page.goto(`${base}/schedule`)
+  await expect(page.getByTestId('uat-project-content-schedule')).toBeVisible({ timeout: 30_000 })
+  await expect(page.getByTestId('primavera-gantt')).toBeVisible({ timeout: 30_000 })
+  await expect(page.getByTestId('primavera-gantt')).toContainText('Pour foundations')
+
+  // Progress: every live estimate there is built from the budgets, so with
+  // them withheld none is shown (no row of zeros); the activity reads a
+  // dash for its budget.
+  await page.goto(`${base}/schedule/progress`)
+  await expect(page.getByTestId('uat-project-content-schedule')).toBeVisible({ timeout: 30_000 })
+  await expect(page.getByText(/Budget —/).first()).toBeVisible({ timeout: 30_000 })
+  await expect(page.getByText('SPI Est.')).toHaveCount(0)
+  await expect(page.getByText(/Total budget considered/)).toHaveCount(0)
+
+  // The Activities list: the BOQ value column reads a dash.
+  const activitiesAnswer = page.waitForResponse((r) => /\/activities(\?|$)/.test(r.url()), { timeout: 30_000 })
+  await page.goto(`${base}/activities`)
+  await expect(page.getByTestId('uat-project-content-activities')).toBeVisible({ timeout: 30_000 })
+  await activitiesAnswer
+  const pourRow = page.locator('tr', { hasText: 'Pour foundations' })
+  await expect(pourRow).toBeVisible()
+  const boqColumn = await page.locator('thead th').evaluateAll((cells) =>
+    cells.findIndex((cell) => cell.textContent?.trim() === 'BOQ Value')
+  )
+  expect(boqColumn).toBeGreaterThanOrEqual(0)
+  await expect(pourRow.locator('td').nth(boqColumn)).toHaveText('—')
+
+  expect(answers.map((answer) => answer.url).join('\n'), 'the schedule and the activities were read').toMatch(/\/schedule/)
+  expect(answers.some((answer) => /\/activities(\?|$)/.test(answer.url))).toBe(true)
+  expect(answers.filter((answer) => answer.leaked).map((answer) => answer.url)).toEqual([])
+  expect(errors).toEqual([])
 })

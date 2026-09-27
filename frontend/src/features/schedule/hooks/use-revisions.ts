@@ -33,7 +33,8 @@ export interface ScheduleRevisionListItem {
   label: string | null
   activityCount: number
   criticalCount: number
-  totalBudget: number
+  /** Withheld from a member who may read neither the BOQ nor the cost module. */
+  totalBudget?: number
   source?: string | null
   isActive?: boolean
   status: ScheduleRevisionStatus

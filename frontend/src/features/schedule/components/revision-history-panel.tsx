@@ -28,7 +28,10 @@ interface Props {
   currentActivities: ScheduleActivity[]
 }
 
-function fmtUSD(n: number) {
+// A budget withheld from this member (no BOQ or cost access) is absent from
+// the answer and reads as a dash, never as $0.
+function fmtUSD(n: number | null | undefined) {
+  if (n === undefined) return '—'
   return (
     '$' + Number(n || 0).toLocaleString('en-US', { maximumFractionDigits: 0 })
   )
@@ -461,9 +464,13 @@ export function RevisionHistoryPanel({
                 <div className='rounded-md border bg-muted/20 p-2'>
                   <p className='text-xs text-muted-foreground'>Budget Delta</p>
                   <p className='text-lg font-semibold'>
-                    {fmtUSD(
-                      currentRevision.totalBudget - comparedRevision.totalBudget
-                    )}
+                    {currentRevision.totalBudget !== undefined &&
+                    comparedRevision.totalBudget !== undefined
+                      ? fmtUSD(
+                          currentRevision.totalBudget -
+                            comparedRevision.totalBudget
+                        )
+                      : '—'}
                   </p>
                 </div>
               </div>

@@ -37,6 +37,11 @@ const formatNumber = (value: number | null | undefined) =>
     maximumFractionDigits: 2,
   })
 
+// The approved BOQ figures are withheld (absent) from a member who may not
+// read the BOQ: a dash, never a 0 that would read as a fact.
+const formatBoqFigure = (value: number | undefined, suffix = '') =>
+  value === undefined ? '—' : `${formatNumber(value)}${suffix}`
+
 export function ActivitiesList({
   projectId,
   projectStartDate,
@@ -173,7 +178,7 @@ export function ActivitiesList({
                     </div>
                   </td>
                   <td className='p-3 text-right text-muted-foreground'>
-                    {formatNumber(activity.allocatedBoqAmount)}
+                    {formatBoqFigure(activity.allocatedBoqAmount)}
                   </td>
                   <td className='p-3'>
                     <ActivityStatusBadge status={activity.status} />
@@ -290,13 +295,13 @@ export function ActivitiesList({
                 <div>
                   <p className='text-muted-foreground'>Approved BOQ Value</p>
                   <p className='font-medium'>
-                    {formatNumber(selectedActivity.allocatedBoqAmount)}
+                    {formatBoqFigure(selectedActivity.allocatedBoqAmount)}
                   </p>
                 </div>
                 <div>
                   <p className='text-muted-foreground'>Approved BOQ Weight</p>
                   <p className='font-medium'>
-                    {formatNumber(selectedActivity.allocatedBoqWeight)}%
+                    {formatBoqFigure(selectedActivity.allocatedBoqWeight, '%')}
                   </p>
                 </div>
                 <div className='sm:col-span-2'>

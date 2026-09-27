@@ -20,7 +20,9 @@ export const activitySchema = z.object({
   category: z.string().nullable(),
   startDate: z.string().nullable(),
   endDate: z.string().nullable(),
-  budget: z.number(),
+  // Withheld (omitted) from a member who may read neither the BOQ nor the
+  // cost module; the allocated* figures from one who may not read the BOQ.
+  budget: z.number().optional(),
   allocatedBoqQuantity: z.number().optional(),
   allocatedBoqAmount: z.number().optional(),
   allocatedBoqWeight: z.number().optional(),
