@@ -119,7 +119,11 @@ const ISSUES_SHOWN = 3
 const ITEMS_SHOWN = 3
 
 const severityTone = (issue: ProjectSetupIssue) =>
-  issue.severity === 'blocking' ? ('blocked' as const) : ('review' as const)
+  issue.severity === 'blocking'
+    ? ('blocked' as const)
+    : issue.severity === 'advisory'
+      ? ('info' as const)
+      : ('review' as const)
 
 /**
  * A link to the record behind an issue. A real anchor — the address is
@@ -397,6 +401,11 @@ function StepCard({
   const issues = [...step.blockers, ...step.warnings]
   const shownIssues = issues.slice(0, ISSUES_SHOWN)
   const moreIssues = issues.length - shownIssues.length
+  // Advisories are information: listed apart, they never move the step's
+  // status or a gate (setup doc §91).
+  const advisories = step.advisories ?? []
+  const shownAdvisories = advisories.slice(0, ISSUES_SHOWN)
+  const moreAdvisories = advisories.length - shownAdvisories.length
 
   return (
     // Status reads from a leading stripe and a badge, not from flooding the
@@ -462,6 +471,24 @@ function StepCard({
               </li>
             )}
           </ul>
+        )}
+
+        {shownAdvisories.length > 0 && (
+          <div className='space-y-1.5 border-t pt-2' data-testid={`uat-setup-advisories-${step.key}`}>
+            <p className='text-[11px] font-medium text-muted-foreground'>
+              For information — does not hold this step
+            </p>
+            <ul className='space-y-1.5'>
+              {shownAdvisories.map((issue) => (
+                <IssueDetail key={issue.code} issue={issue} />
+              ))}
+              {moreAdvisories > 0 && (
+                <li className='text-[11px] text-muted-foreground'>
+                  and {moreAdvisories} more
+                </li>
+              )}
+            </ul>
+          </div>
         )}
       </div>
 

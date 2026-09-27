@@ -62,13 +62,20 @@ const loadBaseReadiness = () => {
   return loaded.exports;
 };
 // A gate as the base shaped it: the per-item detail PC-4 adds to each
-// blocker (`items`, `count`) is set aside, everything else must match; the
-// base's warnings must all still be there (PC-4 only adds warnings).
+// blocker and warning (`items`, `count`) is set aside, everything else
+// must match — the warnings too: PC-4's own checks are advisories, which
+// never enter a gate (the product owner's default b), so the reporting
+// gate EV freezes carries exactly the warnings it carried at cb14ff4.
+const withoutDetail = ({ items, count, itemsWithheld, ...entry }) => entry;
 const gateView = (gates) =>
   Object.fromEntries(
     Object.entries(gates).map(([name, { blockers, warnings, ...gate }]) => [
       name,
-      { ...gate, blockers: blockers.map(({ items, count, ...blocker }) => blocker) },
+      {
+        ...gate,
+        blockers: blockers.map(withoutDetail),
+        ...(warnings ? { warnings: warnings.map(withoutDetail) } : {}),
+      },
     ]),
   );
 const warningCodes = (gate) => (gate.warnings || []).map((warning) => warning.code);
@@ -120,8 +127,15 @@ const expectGatesAsBase = async (readiness, orgId) => {
   expect(baseResult.steps).toHaveLength(10);
   expect(gateView(gates)).toEqual(gateView(baseResult.gates));
   for (const name of Object.keys(baseResult.gates)) {
-    expect(warningCodes(gates[name])).toEqual(expect.arrayContaining(warningCodes(baseResult.gates[name])));
+    expect([name, warningCodes(gates[name])]).toEqual([name, warningCodes(baseResult.gates[name])]);
   }
+  // The ten original steps: the status and the warnings the base derived,
+  // step for step — PC-4's advisories never move them.
+  const originalSteps = (result) =>
+    result.steps
+      .filter((entry) => BASE_STEPS.includes(entry.key))
+      .map((entry) => [entry.key, entry.status, entry.message, entry.warnings.map((warning) => warning.code)]);
+  expect(originalSteps(readiness)).toEqual(originalSteps(baseResult));
   expect(readiness.summary).toMatchObject({
     status: baseResult.summary.status,
     readyForBaseline: baseResult.summary.readyForBaseline,
@@ -172,6 +186,7 @@ liveDescribe("PC-4: setup flow — structure and BOQ approval steps, per-item de
   };
   const step = (result, key) => result.steps.find((entry) => entry.key === key);
   const warning = (result, key, code) => step(result, key).warnings.find((entry) => entry.code === code);
+  const advisory = (result, key, code) => step(result, key).advisories.find((entry) => entry.code === code);
   const href = (projectId, path) => `/o/${segment}/projects/${projectId}${path}`;
 
   const createItem = async (payload, projectId = project.id) => {
@@ -261,6 +276,16 @@ liveDescribe("PC-4: setup flow — structure and BOQ approval steps, per-item de
       expect(step(result, "structure_setup").warnings.map((w) => w.code)).toEqual(["NO_LOCATIONS", "NO_PROJECT_COST_CODES"]);
       expect(step(result, "boq_approval").status).toBe("attention");
       expect(step(result, "boq_approval").warnings.map((w) => w.code)).toEqual(["BOQ_REVISION_NOT_APPROVED"]);
+      // A bill entered by hand has no revision to review: the card names
+      // what approves it — the schedule baseline lock — and sends there.
+      expect(warning(result, "boq_approval", "BOQ_REVISION_NOT_APPROVED").message).toBe(
+        "The bill was entered by hand; it is approved when the schedule baseline is locked (Schedule → Lock Baseline).",
+      );
+      expect(step(result, "boq_approval").action).toEqual({
+        label: "Lock schedule baseline",
+        target: { module: "schedule", child: "revisions" },
+      });
+      expect(result.summary.advisoryAction).toMatchObject({ stepKey: "structure_setup" });
       await expectGatesAsBase(result, live.org.id);
       // The existing steps keep their codes: nothing hard became soft either.
       expect(step(result, "boq_allocation").blockers.map((b) => b.code)).toEqual(["NO_APPROVED_ALLOCATIONS", "UNALLOCATED_BOQ"]);
@@ -303,15 +328,21 @@ liveDescribe("PC-4: setup flow — structure and BOQ approval steps, per-item de
     it("names the BOQ rows and activities behind each issue with the route that fixes them", async () => {
       const result = await readiness();
 
-      // Rows without a WBS node: 1.2 and P.1 (1.1 is filed), linked into the grid.
-      const withoutWbs = warning(result, "boq_upload", "BOQ_ITEMS_WITHOUT_WBS");
+      // Rows without a WBS node: 1.2 and P.1 (1.1 is filed), linked into the
+      // grid — reported on the Structure step as information: nothing in the
+      // product files a row yet, so it holds no step (the BOQ upload is
+      // complete, as the base had it).
+      expect(step(result, "boq_upload")).toMatchObject({ status: "complete", warnings: [] });
+      expect(step(result, "schedule_generation").warnings.map((w) => w.code)).not.toContain("ACTIVITIES_WITHOUT_WBS");
+      const withoutWbs = advisory(result, "structure_setup", "BOQ_ITEMS_WITHOUT_WBS");
+      expect(withoutWbs.severity).toBe("advisory");
       expect(withoutWbs.count).toBe(2);
       expect(withoutWbs.items).toEqual([
         { type: "boq_item", id: base.items.rebar.id, code: "1.2", label: "Reinforcement to foundations", missing: "WBS node", href: href(project.id, `/boq?recordId=${base.items.rebar.id}&source=boq_item`) },
         { type: "boq_item", id: base.items.prelims.id, code: "P.1", label: "Site establishment", missing: "WBS node", href: href(project.id, `/boq?recordId=${base.items.prelims.id}&source=boq_item`) },
       ]);
       // The activity without a WBS node, linked to the activities page.
-      const activitiesWithoutWbs = warning(result, "schedule_generation", "ACTIVITIES_WITHOUT_WBS");
+      const activitiesWithoutWbs = advisory(result, "structure_setup", "ACTIVITIES_WITHOUT_WBS");
       expect(activitiesWithoutWbs.count).toBe(1);
       expect(activitiesWithoutWbs.items).toEqual([
         { type: "activity", id: base.activities.fix.id, code: "A130", label: "Fix reinforcement", missing: "WBS node", href: href(project.id, `/activities?recordId=${base.activities.fix.id}&source=activity`) },
@@ -330,7 +361,7 @@ liveDescribe("PC-4: setup flow — structure and BOQ approval steps, per-item de
       expect(warning(result, "structure_setup", "NO_PROJECT_COST_CODES").items[0].href).toBe(href(project.id, "/cost/budget"));
       // Every issue on every step carries the two fields, whatever it is about.
       for (const entry of result.steps) {
-        for (const issue of [...entry.blockers, ...entry.warnings]) {
+        for (const issue of [...entry.blockers, ...entry.warnings, ...entry.advisories]) {
           expect(Array.isArray(issue.items)).toBe(true);
           expect(issue.count).toBeGreaterThanOrEqual(issue.items.length);
           for (const item of issue.items) expect(item.href.startsWith(`/o/${segment}/projects/${project.id}/`)).toBe(true);
@@ -381,12 +412,12 @@ liveDescribe("PC-4: setup flow — structure and BOQ approval steps, per-item de
   describe("warnings appear and disappear as the data is fixed", () => {
     it("an imported calendar left unmapped, then mapped", async () => {
       await prisma.activity.update({ where: { id: base.activities.fix.id }, data: { calendarId: "1" } });
-      const broken = warning(await readiness(), "schedule_generation", "IMPORTED_CALENDAR_UNMAPPED");
+      const broken = advisory(await readiness(), "schedule_generation", "IMPORTED_CALENDAR_UNMAPPED");
       expect(broken).toBeTruthy();
       expect(broken.items).toEqual([expect.objectContaining({ type: "activity", id: base.activities.fix.id, missing: 'Calendar "1" is not mapped' })]);
 
       await prisma.activity.update({ where: { id: base.activities.fix.id }, data: { calendarId: "five_day" } });
-      expect(warning(await readiness(), "schedule_generation", "IMPORTED_CALENDAR_UNMAPPED")).toBeUndefined();
+      expect(advisory(await readiness(), "schedule_generation", "IMPORTED_CALENDAR_UNMAPPED")).toBeUndefined();
     });
 
     it("a unit nobody recognises, then added to the organisation's list", async () => {
@@ -397,7 +428,7 @@ liveDescribe("PC-4: setup flow — structure and BOQ approval steps, per-item de
         expect.objectContaining({ type: "unit", code: "skidz", href: href(project.id, "/controls/structure") }),
       ]);
       expect(broken.structure.unitsUnresolved).toBe(1);
-      expect(warning(broken, "boq_upload", "BOQ_UNIT_UNRESOLVED").items).toEqual([
+      expect(advisory(broken, "boq_upload", "BOQ_UNIT_UNRESOLVED").items).toEqual([
         expect.objectContaining({ type: "boq_item", id: skids.id, code: "2.1", missing: 'Unit "skidz" is not recognised' }),
       ]);
 
@@ -405,7 +436,7 @@ liveDescribe("PC-4: setup flow — structure and BOQ approval steps, per-item de
       expect([unit.status, unit.body?.error]).toEqual([201, undefined]);
       const fixed = await readiness();
       expect(warning(fixed, "structure_setup", "UOM_UNRESOLVED")).toBeUndefined();
-      expect(warning(fixed, "boq_upload", "BOQ_UNIT_UNRESOLVED")).toBeUndefined();
+      expect(advisory(fixed, "boq_upload", "BOQ_UNIT_UNRESOLVED")).toBeUndefined();
       expect(fixed.structure.unitsUnresolved).toBe(0);
     });
 
@@ -417,16 +448,16 @@ liveDescribe("PC-4: setup flow — structure and BOQ approval steps, per-item de
       expect([draft.status, draft.body?.error]).toEqual([201, undefined]);
 
       const missingUnit = await readiness();
-      expect(warning(missingUnit, "progress_method_configuration", "QUANTITY_METHOD_WITHOUT_UNIT").items).toEqual([
+      expect(advisory(missingUnit, "progress_method_configuration", "QUANTITY_METHOD_WITHOUT_UNIT").items).toEqual([
         expect.objectContaining({ type: "activity", id: base.activities.pour.id, href: href(project.id, `/schedule/progress?recordId=${base.activities.pour.id}&source=activity`) }),
       ]);
-      expect(warning(missingUnit, "boq_allocation", "UNIT_MISMATCH_COUNT")).toBeUndefined();
+      expect(advisory(missingUnit, "boq_allocation", "UNIT_MISMATCH_COUNT")).toBeUndefined();
 
       const m2 = await put(route, { method: "quantity", plannedQuantity: 100, quantityUnit: "m2" });
       expect(m2.status).toBe(200);
       const mismatch = await readiness();
-      expect(warning(mismatch, "progress_method_configuration", "QUANTITY_METHOD_WITHOUT_UNIT")).toBeUndefined();
-      expect(warning(mismatch, "boq_allocation", "UNIT_MISMATCH_COUNT").items).toEqual([
+      expect(advisory(mismatch, "progress_method_configuration", "QUANTITY_METHOD_WITHOUT_UNIT")).toBeUndefined();
+      expect(advisory(mismatch, "boq_allocation", "UNIT_MISMATCH_COUNT").items).toEqual([
         expect.objectContaining({ type: "allocation", id: draft.body.data.id, label: "1.1 → 1.1", missing: 'BOQ unit "m3" vs progress unit "m2"' }),
       ]);
       expect(step(mismatch, "boq_allocation").counts.unitMismatchCount).toBe(1);
@@ -437,7 +468,7 @@ liveDescribe("PC-4: setup flow — structure and BOQ approval steps, per-item de
 
       const m3 = await put(route, { method: "quantity", plannedQuantity: 100, quantityUnit: "M3" });
       expect(m3.status).toBe(200);
-      expect(warning(await readiness(), "boq_allocation", "UNIT_MISMATCH_COUNT")).toBeUndefined();
+      expect(advisory(await readiness(), "boq_allocation", "UNIT_MISMATCH_COUNT")).toBeUndefined();
     });
 
     it("a row whose mapping rule is unset, then set", async () => {
@@ -520,6 +551,62 @@ liveDescribe("PC-4: setup flow — structure and BOQ approval steps, per-item de
       uploaded1 = { projectId: uploadProject.id, revisionId: revision.id };
     });
   });
+  describe("issues nobody can resolve yet hold no step (default b)", () => {
+    it("a bill uploaded through the product, with value and no other issue, completes the BOQ upload — its rows unfiled under the project's WBS are information on the Structure step", async () => {
+      const filedProject = await prisma.project.create({
+        data: { orgId: live.org.id, currency: "USD", name: "LiveTest PC-4 upload filed", startDate: new Date("2026-01-05"), endDate: new Date("2026-12-18") },
+      });
+      const node = await post(`/api/v1/projects/${filedProject.id}/structure/wbs`, { code: "A", name: "Substructure" });
+      expect([node.status, node.body?.error]).toEqual([201, undefined]);
+      const uploaded = await uploadWorkbook(`/api/v1/projects/${filedProject.id}/boq/upload`, [
+        ["Item No", "Description", "Qty", "Unit", "Rate"],
+        ["1.1", "Concrete", 10, "m3", 100],
+        ["1.2", "Formwork", 20, "m2", 50],
+      ]);
+      expect([uploaded.status, uploaded.body?.error, uploaded.body?.data?.mode]).toEqual([200, undefined, "imported"]);
+      // The product offers no way to file an uploaded row under a node: a
+      // PATCH that names one is answered, and the row stays unfiled.
+      const rows = await prisma.boqItem.findMany({ where: { projectId: filedProject.id, isActive: true }, select: { id: true, wbsNodeId: true } });
+      expect(rows).toHaveLength(2);
+      await patch(`/api/v1/projects/${filedProject.id}/boq/items/${rows[0].id}`, { wbsNodeId: node.body.data.id });
+      expect((await prisma.boqItem.findUnique({ where: { id: rows[0].id }, select: { wbsNodeId: true } })).wbsNodeId).toBeNull();
+
+      const result = await readiness(filedProject.id);
+      expect(step(result, "boq_upload")).toMatchObject({ status: "complete", blockers: [], warnings: [], message: "BOQ is loaded." });
+      expect(advisory(result, "structure_setup", "BOQ_ITEMS_WITHOUT_WBS")).toMatchObject({ severity: "advisory", count: 2 });
+      // Not in any gate, and the base service agrees on every original step.
+      for (const gate of Object.values(result.gates)) {
+        expect((gate.warnings || []).map((entry) => entry.code)).not.toContain("BOQ_ITEMS_WITHOUT_WBS");
+      }
+      await expectGatesAsBase(result, live.org.id);
+    });
+
+    it("a row or an activity filed under an archived WBS node counts as unfiled, and says why", async () => {
+      const retired = (await post(`/api/v1/projects/${project.id}/structure/wbs`, { code: "X", name: "Retired scope" })).body.data;
+      expect(retired?.id).toBeTruthy();
+      await prisma.boqItem.update({ where: { id: base.items.rebar.id }, data: { wbsNodeId: retired.id } });
+      await prisma.activity.update({ where: { id: base.activities.fix.id }, data: { wbsNodeId: retired.id } });
+      try {
+        const filed = await readiness();
+        expect(advisory(filed, "structure_setup", "BOQ_ITEMS_WITHOUT_WBS").items.map((item) => item.id)).not.toContain(base.items.rebar.id);
+        expect(advisory(filed, "structure_setup", "ACTIVITIES_WITHOUT_WBS")).toBeUndefined();
+
+        const archived = await post(`/api/v1/projects/${project.id}/structure/wbs/${retired.id}/archive`, { reason: "LiveTest: scope retired" });
+        expect([archived.status, archived.body?.error]).toEqual([200, undefined]);
+        const result = await readiness();
+        const rows = advisory(result, "structure_setup", "BOQ_ITEMS_WITHOUT_WBS");
+        expect(rows.items.find((item) => item.id === base.items.rebar.id)).toMatchObject({ missing: "Filed under an archived WBS node" });
+        expect(rows.message).toMatch(/\(1 filed under an archived node\)/);
+        const activities = advisory(result, "structure_setup", "ACTIVITIES_WITHOUT_WBS");
+        expect(activities.items).toEqual([expect.objectContaining({ id: base.activities.fix.id, missing: "Filed under an archived WBS node" })]);
+        expect(step(result, "structure_setup").guides.find((guide) => guide.key === "schedule_structure").detail).not.toBe("Every activity is filed");
+      } finally {
+        await prisma.boqItem.update({ where: { id: base.items.rebar.id }, data: { wbsNodeId: null } });
+        await prisma.activity.update({ where: { id: base.activities.fix.id }, data: { wbsNodeId: null } });
+      }
+    });
+  });
+
   describe("what readiness tells a member who may not read the BOQ", () => {
     it("the same steps, statuses, codes and gates — without the bill's rows, values, quantities or review trail", async () => {
       expect(uploaded1).toBeTruthy();
@@ -556,9 +643,10 @@ liveDescribe("PC-4: setup flow — structure and BOQ approval steps, per-item de
           entry.status,
           entry.blockers.map((issue) => [issue.code, issue.count]),
           entry.warnings.map((issue) => [issue.code, issue.count]),
+          entry.advisories.map((issue) => [issue.code, issue.count]),
         ]);
       const boqTypes = new Set(["boq_item", "allocation", "boq_revision", "unit"]);
-      const issuesOf = (result) => result.steps.flatMap((entry) => [...entry.blockers, ...entry.warnings]);
+      const issuesOf = (result) => result.steps.flatMap((entry) => [...entry.blockers, ...entry.warnings, ...entry.advisories]);
 
       // What the bill says that only a BOQ reader may see, per project: a
       // row's description on the main project, the approver's name and the
@@ -588,7 +676,8 @@ liveDescribe("PC-4: setup flow — structure and BOQ approval steps, per-item de
           for (const item of issue.items) expect(boqTypes.has(item.type)).toBe(false);
         }
         expect(Object.keys(limited.coverage).sort()).toEqual(["counts", "coveragePct"]);
-        expect(limited.coverage).toEqual({ coveragePct: full.coverage.coveragePct, counts: full.coverage.counts });
+        // The share, to a whole percent (default a): the counts are beside it.
+        expect(limited.coverage).toEqual({ coveragePct: Math.round(full.coverage.coveragePct), counts: full.coverage.counts });
         const limitedHeadline = limited.summary.headline.map((entry) => entry.key);
         expect(limitedHeadline).not.toContain("unmapped_boq");
         expect(limitedHeadline).not.toContain("unmapped_quantity");
@@ -715,7 +804,14 @@ liveDescribe("PC-4: setup flow — structure and BOQ approval steps, per-item de
           expect(checkView(viewerReadiness)).toEqual(checkView(fullReadiness));
           const fullHealth = (await get(`/api/v1/projects/${projectId}/health`)).body.data;
           const viewerHealth = (await api.get(`/api/v1/projects/${projectId}/health`, viewerAuth)).body.data;
-          expect(costDetail(viewerHealth)).toMatchObject({ cpi: costDetail(fullHealth).cpi, ev: costDetail(fullHealth).ev });
+          // The score and CPI are everyone's; earned value and actual cost
+          // only a reader of the BOQ or the cost module's.
+          expect(costDetail(viewerHealth)).toMatchObject({ cpi: costDetail(fullHealth).cpi });
+          if (viewer === "costController") {
+            expect(costDetail(viewerHealth)).toMatchObject({ ev: costDetail(fullHealth).ev, ac: costDetail(fullHealth).ac });
+          } else {
+            expect([viewer, "ev" in costDetail(viewerHealth), "ac" in costDetail(viewerHealth)]).toEqual([viewer, false, false]);
+          }
         }
       }
       // The same answers for a BOQ reader carry the figures the members are

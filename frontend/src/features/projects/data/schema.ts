@@ -193,7 +193,8 @@ export type ProjectSetupItem = {
 export type ProjectSetupIssue = {
   code: string
   message: string
-  severity: 'blocking' | 'warning' | string
+  /** 'advisory': information only — it never moves a step's status or a gate. */
+  severity: 'blocking' | 'warning' | 'advisory' | string
   details?: Record<string, unknown>
   /** The offending records, capped at 50; `count` is the whole number. */
   items?: ProjectSetupItem[]
@@ -257,6 +258,11 @@ export type ProjectSetupStep = {
   message: string
   blockers: ProjectSetupIssue[]
   warnings: ProjectSetupIssue[]
+  /**
+   * PC-4's filing and matching checks: listed with the step, never moving
+   * its status, its message or a gate.
+   */
+  advisories?: ProjectSetupIssue[]
   counts: Record<string, unknown>
   action: {
     label: string

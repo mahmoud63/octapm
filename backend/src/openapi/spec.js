@@ -2004,7 +2004,11 @@ const components = {
       {
         code: { type: "string" },
         message: { type: "string" },
-        severity: { type: "string", enum: ["blocking", "warning"] },
+        severity: {
+          type: "string",
+          enum: ["blocking", "warning", "advisory"],
+          description: "advisory: information only (a step's advisories list) — it never moves a step's status, its message or a gate.",
+        },
         details: {
           ...ref("GenericObject"),
           description:
@@ -2054,6 +2058,11 @@ const components = {
         message: { type: "string" },
         blockers: arrayOf(ref("ProjectSetupIssue")),
         warnings: arrayOf(ref("ProjectSetupIssue")),
+        advisories: {
+          ...arrayOf(ref("ProjectSetupIssue")),
+          description:
+            "PC-4's filing and matching checks, severity advisory: listed with the step, never moving its status or a gate, and never in gates.*.warnings. structure_setup lists the BOQ rows and activities without an active WBS node (a node that has been archived counts as none) and the rows without a cost code; boq_upload the rows with an unrecognised unit; schedule_generation the activities on an unmapped imported calendar; boq_allocation pending suggestions and unit or location mismatches; progress_method_configuration quantity methods without a unit.",
+        },
         counts: {
           ...ref("GenericObject"),
           description:
@@ -2132,7 +2141,7 @@ const components = {
         coverage: {
           ...ref("AllocationCoverageSummary"),
           description:
-            "The §69 coverage totals as the coverage endpoint reports them, without the per-item rows. A caller who may not read the BOQ gets only coveragePct and counts.",
+            "The §69 coverage totals as the coverage endpoint reports them, without the per-item rows. A caller who may not read the BOQ gets only coveragePct, rounded to a whole percent, and counts.",
         },
         context: {
           ...ref("GenericObject"),

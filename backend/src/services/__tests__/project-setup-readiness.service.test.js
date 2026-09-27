@@ -319,14 +319,21 @@ describe("project setup readiness service", () => {
       projectId: "project-1",
     });
 
+    // PC-4's filing and matching checks are advisories (default b): the
+    // original step completes as the base derived it, and what is filed
+    // under what is reported on the Structure step.
     const boqUpload = result.steps.find((step) => step.key === "boq_upload");
-    expect(boqUpload.status).toBe("attention");
-    expect(boqUpload.warnings.map((warning) => warning.code)).toEqual([
+    expect(boqUpload.status).toBe("complete");
+    expect(boqUpload.warnings).toEqual([]);
+    expect(boqUpload.advisories.map((advisory) => advisory.code)).toEqual(["BOQ_UNIT_UNRESOLVED"]);
+    const structureStep = result.steps.find((step) => step.key === "structure_setup");
+    expect(structureStep.advisories.map((advisory) => advisory.code)).toEqual([
       "BOQ_ITEMS_WITHOUT_WBS",
+      "ACTIVITIES_WITHOUT_WBS",
       "BOQ_ITEMS_WITHOUT_COST_CODE",
-      "BOQ_UNIT_UNRESOLVED",
     ]);
-    expect(boqUpload.warnings[0]).toEqual(
+    expect(structureStep.advisories.every((advisory) => advisory.severity === "advisory")).toBe(true);
+    expect(structureStep.advisories[0]).toEqual(
       expect.objectContaining({
         count: 1,
         items: [
@@ -395,11 +402,9 @@ describe("project setup readiness service", () => {
     );
 
     const schedule = result.steps.find((step) => step.key === "schedule_generation");
-    expect(schedule.warnings.map((warning) => warning.code)).toEqual([
-      "ACTIVITIES_WITHOUT_WBS",
-      "IMPORTED_CALENDAR_UNMAPPED",
-    ]);
-    expect(schedule.warnings[1].items[0]).toEqual(
+    expect(schedule.warnings).toEqual([]);
+    expect(schedule.advisories.map((advisory) => advisory.code)).toEqual(["IMPORTED_CALENDAR_UNMAPPED"]);
+    expect(schedule.advisories[0].items[0]).toEqual(
       expect.objectContaining({
         type: "activity",
         id: "activity-1",
@@ -467,6 +472,7 @@ describe("project setup readiness service", () => {
         step.status,
         step.blockers.map((issue) => [issue.code, issue.count]),
         step.warnings.map((issue) => [issue.code, issue.count]),
+        step.advisories.map((issue) => [issue.code, issue.count]),
       ]);
     expect(shape(restricted)).toEqual(shape(result));
     for (const name of ["baseline", "progress", "reporting"]) {
@@ -476,7 +482,7 @@ describe("project setup readiness service", () => {
       );
     }
     expect(restricted.summary.nextAction).toEqual(result.summary.nextAction);
-    const restrictedIssues = restricted.steps.flatMap((step) => [...step.blockers, ...step.warnings]);
+    const restrictedIssues = restricted.steps.flatMap((step) => [...step.blockers, ...step.warnings, ...step.advisories]);
     for (const issue of restrictedIssues) {
       for (const item of issue.items) {
         expect(["boq_item", "allocation", "boq_revision", "unit"]).not.toContain(item.type);
@@ -488,7 +494,7 @@ describe("project setup readiness service", () => {
     expect(restrictedUnallocated).toMatchObject({ count: 2, items: [], itemsWithheld: true });
     // Activities are not the bill's: they are still named.
     expect(
-      restricted.steps.find((step) => step.key === "schedule_generation").warnings[1].items[0].id,
+      restricted.steps.find((step) => step.key === "schedule_generation").advisories[0].items[0].id,
     ).toBe("activity-1");
     expect(Object.keys(restricted.coverage).sort()).toEqual(["counts", "coveragePct"]);
     expect(restricted.context.boqRevision).not.toHaveProperty("totalAmount");

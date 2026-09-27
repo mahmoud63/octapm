@@ -154,12 +154,17 @@ const buildStep = ({
   complete,
   blockers = [],
   warnings = [],
+  advisories = [],
   counts = {},
   guides,
   successMessage,
 }) => {
   const activeBlockers = blockers.filter(Boolean);
   const activeWarnings = warnings.filter(Boolean);
+  // Advisories (PC-4's filing and matching checks) are listed with the
+  // step but never move its status, its message or a gate: an original
+  // step completes exactly as the base derived it (setup doc §91).
+  const activeAdvisories = advisories.filter(Boolean);
   let status = STATUS.PENDING;
 
   if (activeBlockers.length > 0) {
@@ -188,6 +193,7 @@ const buildStep = ({
     message,
     blockers: activeBlockers,
     warnings: activeWarnings,
+    advisories: activeAdvisories,
     counts,
     action,
     // Only the structure step guides (§21); the others carry no list.
@@ -600,12 +606,21 @@ const getSetupReadiness = async ({ orgId, projectId, canReadBoq = true }) => {
   }));
 
   // Filing warnings only say something once the project has the structure
-  // to file under: without a WBS, NO_WBS already says it all.
-  const itemsWithoutWbs = wbsNodeCount > 0 ? boqItems.filter((item) => !item.wbsNodeId) : [];
+  // to file under: without a WBS, NO_WBS already says it all. A row or an
+  // activity whose node has been archived is filed under retired scope — the
+  // WBS tab shows it under no node — so it counts as unfiled, and says why.
+  const activeWbsNodeIds = new Set(wbsNodes.map((node) => node.id));
+  const isUnfiled = (record) => !record.wbsNodeId || !activeWbsNodeIds.has(record.wbsNodeId);
+  const filingMissing = (record) =>
+    record.wbsNodeId ? "Filed under an archived WBS node" : "WBS node";
+  const archivedNote = (records) => {
+    const archived = records.filter((record) => record.wbsNodeId).length;
+    return archived > 0 ? ` (${archived} filed under an archived node)` : "";
+  };
+  const itemsWithoutWbs = wbsNodeCount > 0 ? boqItems.filter(isUnfiled) : [];
   const itemsWithoutCostCode =
     projectCostCodeCount > 0 ? boqItems.filter((item) => !item.costCodeId) : [];
-  const activitiesWithoutWbs =
-    wbsNodeCount > 0 ? activities.filter((activity) => !activity.wbsNodeId) : [];
+  const activitiesWithoutWbs = wbsNodeCount > 0 ? activities.filter(isUnfiled) : [];
   const activitiesWithUnmappedCalendar = activities.filter(
     (activity) => !calendarResolves(activity.calendarId),
   );
@@ -903,28 +918,45 @@ const getSetupReadiness = async ({ orgId, projectId, canReadBoq = true }) => {
       totalBoqAmount <= MONEY_EPSILON &&
       issue("BOQ_HAS_NO_VALUE", "BOQ items have no measurable value."),
   ];
-  const boqWarnings = [
+  // PC-4's filing and matching checks are advisories (setup doc §91, and
+  // the product owner's default b): nothing in the product files a BOQ row
+  // under a WBS node yet (PC-5 builds that), so an issue nobody can resolve
+  // must not hold a step; and the ten original steps keep the statuses,
+  // warnings and gates the base derived — the reporting gate EV freezes
+  // carries exactly the warnings it carried before PC-4. What is filed
+  // under what is reported on the Structure step, as information.
+  const structureAdvisories = [
     itemsWithoutWbs.length > 0 &&
       issue(
         "BOQ_ITEMS_WITHOUT_WBS",
-        `${itemsWithoutWbs.length} BOQ row${itemsWithoutWbs.length === 1 ? " has" : "s have"} no WBS node.`,
-        "warning",
+        `${itemsWithoutWbs.length} BOQ row${itemsWithoutWbs.length === 1 ? " has" : "s have"} no WBS node${archivedNote(itemsWithoutWbs)}.`,
+        "advisory",
         { itemsWithoutWbs: itemsWithoutWbs.length },
-        itemsWithoutWbs.map((item) => boqItemItem(item, "WBS node")),
+        itemsWithoutWbs.map((item) => boqItemItem(item, filingMissing(item))),
+      ),
+    activitiesWithoutWbs.length > 0 &&
+      issue(
+        "ACTIVITIES_WITHOUT_WBS",
+        `${activitiesWithoutWbs.length} activit${activitiesWithoutWbs.length === 1 ? "y has" : "ies have"} no WBS node${archivedNote(activitiesWithoutWbs)}.`,
+        "advisory",
+        { activitiesWithoutWbs: activitiesWithoutWbs.length },
+        activitiesWithoutWbs.map((activity) => activityItem(activity, filingMissing(activity))),
       ),
     itemsWithoutCostCode.length > 0 &&
       issue(
         "BOQ_ITEMS_WITHOUT_COST_CODE",
         `${itemsWithoutCostCode.length} BOQ row${itemsWithoutCostCode.length === 1 ? " has" : "s have"} no cost code.`,
-        "warning",
+        "advisory",
         { itemsWithoutCostCode: itemsWithoutCostCode.length },
         itemsWithoutCostCode.map((item) => boqItemItem(item, "Cost code")),
       ),
+  ];
+  const boqAdvisories = [
     itemsWithUnresolvedUnit.length > 0 &&
       issue(
         "BOQ_UNIT_UNRESOLVED",
         `${itemsWithUnresolvedUnit.length} BOQ row${itemsWithUnresolvedUnit.length === 1 ? " carries" : "s carry"} a unit the organisation does not recognise.`,
-        "warning",
+        "advisory",
         { itemsWithUnresolvedUnit: itemsWithUnresolvedUnit.length },
         itemsWithUnresolvedUnit.map((item) =>
           boqItemItem(item, `Unit "${item.unit}" is not recognised`),
@@ -953,12 +985,13 @@ const getSetupReadiness = async ({ orgId, projectId, canReadBoq = true }) => {
               "BOQ_REVISION_NOT_APPROVED",
               currentBoqRevision
                 ? `BOQ revision ${currentBoqRevision.revisionNumber} has not been submitted for approval.`
-                : "The bill has no revision under review; rows entered by hand are approved by locking the BOQ baseline.",
+                : "The bill was entered by hand; it is approved when the schedule baseline is locked (Schedule → Lock Baseline).",
               "warning",
               { revisionId: currentBoqRevision?.id || null, revisionStatus: boqRevisionStatus },
               currentBoqRevision ? [boqRevisionItem(currentBoqRevision, "Submit and approve")] : [],
             ),
         ];
+  const handEnteredBillAwaitingLock = boqCount > 0 && !currentBoqRevision && !boqApproved;
   const mappingRuleWarnings = [
     itemsWithoutMappingRule.length > 0 &&
       issue(
@@ -1003,19 +1036,13 @@ const getSetupReadiness = async ({ orgId, projectId, canReadBoq = true }) => {
         "No critical path activities are marked yet.",
         "warning",
       ),
-    activitiesWithoutWbs.length > 0 &&
-      issue(
-        "ACTIVITIES_WITHOUT_WBS",
-        `${activitiesWithoutWbs.length} activit${activitiesWithoutWbs.length === 1 ? "y has" : "ies have"} no WBS node.`,
-        "warning",
-        { activitiesWithoutWbs: activitiesWithoutWbs.length },
-        activitiesWithoutWbs.map((activity) => activityItem(activity, "WBS node")),
-      ),
+  ];
+  const scheduleAdvisories = [
     activitiesWithUnmappedCalendar.length > 0 &&
       issue(
         "IMPORTED_CALENDAR_UNMAPPED",
         `${activitiesWithUnmappedCalendar.length} activit${activitiesWithUnmappedCalendar.length === 1 ? "y uses" : "ies use"} an imported calendar that is not mapped to a working calendar.`,
-        "warning",
+        "advisory",
         { activitiesWithUnmappedCalendar: activitiesWithUnmappedCalendar.length },
         activitiesWithUnmappedCalendar.map((activity) =>
           activityItem(activity, `Calendar "${activity.calendarId}" is not mapped`),
@@ -1091,11 +1118,13 @@ const getSetupReadiness = async ({ orgId, projectId, canReadBoq = true }) => {
           allocationItem(allocation, allocation.status === "draft" ? "Submit" : "Approve"),
         ),
       ),
+  ];
+  const allocationAdvisories = [
     suggestedDrafts.length > 0 &&
       issue(
         "SUGGESTIONS_PENDING",
         `${suggestedDrafts.length} accepted suggestion${suggestedDrafts.length === 1 ? " is" : "s are"} still a draft.`,
-        "warning",
+        "advisory",
         { suggestionsPending: suggestedDrafts.length },
         suggestedDrafts.map((allocation) =>
           allocationItem(allocation, `Suggested by ${allocation.suggestedBy}; submit it`),
@@ -1105,7 +1134,7 @@ const getSetupReadiness = async ({ orgId, projectId, canReadBoq = true }) => {
       issue(
         "UNIT_MISMATCH_COUNT",
         `${unitMismatches.length} allocation${unitMismatches.length === 1 ? "" : "s"} measure${unitMismatches.length === 1 ? "s" : ""} the activity in a different unit from the BOQ row.`,
-        "warning",
+        "advisory",
         { unitMismatchCount: unitMismatches.length },
         unitMismatches.map((allocation) => {
           const item = boqItemById.get(allocation.boqItemId);
@@ -1120,7 +1149,7 @@ const getSetupReadiness = async ({ orgId, projectId, canReadBoq = true }) => {
       issue(
         "LOCATION_MISMATCH_COUNT",
         `${locationMismatches.length} allocation${locationMismatches.length === 1 ? " links" : "s link"} a BOQ row and an activity in different locations.`,
-        "warning",
+        "advisory",
         { locationMismatchCount: locationMismatches.length },
         locationMismatches.map((allocation) =>
           allocationItem(allocation, "BOQ row and activity are in different locations"),
@@ -1261,12 +1290,12 @@ const getSetupReadiness = async ({ orgId, projectId, canReadBoq = true }) => {
         progressMethodItems,
       ),
   ];
-  const progressMethodWarnings = [
+  const progressMethodAdvisories = [
     quantityMethodsWithoutUnit.length > 0 &&
       issue(
         "QUANTITY_METHOD_WITHOUT_UNIT",
         `${quantityMethodsWithoutUnit.length} quantity-measured activit${quantityMethodsWithoutUnit.length === 1 ? "y has" : "ies have"} no unit.`,
-        "warning",
+        "advisory",
         { quantityMethodsWithoutUnit: quantityMethodsWithoutUnit.length },
         quantityMethodsWithoutUnit.map((activity) =>
           activityItem(activity, "Quantity unit", TARGETS.scheduleProgress),
@@ -1419,6 +1448,7 @@ const getSetupReadiness = async ({ orgId, projectId, canReadBoq = true }) => {
       action: { label: "Open Structure", target: TARGETS.structure },
       complete: structureWarnings.filter(Boolean).length === 0,
       warnings: structureWarnings,
+      advisories: structureAdvisories,
       counts: {
         wbsNodes: wbsNodeCount,
         locations: locationCount,
@@ -1436,7 +1466,7 @@ const getSetupReadiness = async ({ orgId, projectId, canReadBoq = true }) => {
       requiredFor: ["baseline", "progress", "reporting"],
       complete: boqBlockers.filter(Boolean).length === 0,
       blockers: boqBlockers,
-      warnings: boqWarnings,
+      advisories: boqAdvisories,
       counts: {
         boqItems: boqCount,
         totalBoqAmount,
@@ -1450,7 +1480,11 @@ const getSetupReadiness = async ({ orgId, projectId, canReadBoq = true }) => {
       key: "boq_approval",
       label: "BOQ Approval",
       description: "The current BOQ revision is reviewed, approved and locked.",
-      action: { label: "Review BOQ", target: TARGETS.boq },
+      // A bill entered by hand has no revision to review: what approves it
+      // is the schedule baseline lock, so the card sends there.
+      action: handEnteredBillAwaitingLock
+        ? { label: "Lock schedule baseline", target: TARGETS.scheduleRevisions }
+        : { label: "Review BOQ", target: TARGETS.boq },
       complete: boqCount > 0 && boqApproved,
       warnings: [...boqApprovalWarnings, ...mappingRuleWarnings],
       counts: {
@@ -1481,6 +1515,7 @@ const getSetupReadiness = async ({ orgId, projectId, canReadBoq = true }) => {
           toNumber(currentRevision?.activityCount) > 0),
       blockers: scheduleBlockers,
       warnings: scheduleWarnings,
+      advisories: scheduleAdvisories,
       counts: {
         revisionId: currentRevision?.id || null,
         revisionStatus: currentRevision ? revisionStatus : null,
@@ -1502,6 +1537,7 @@ const getSetupReadiness = async ({ orgId, projectId, canReadBoq = true }) => {
       complete: allocationBlockers.filter(Boolean).length === 0,
       blockers: allocationBlockers,
       warnings: allocationWarnings,
+      advisories: allocationAdvisories,
       counts: {
         totalBoqAmount: totalBoqFromSummary,
         allocatableBoqAmount,
@@ -1562,7 +1598,7 @@ const getSetupReadiness = async ({ orgId, projectId, canReadBoq = true }) => {
         progressActivityCount === 0 ||
         progressMethodCount >= progressActivityCount,
       blockers: progressMethodBlockers,
-      warnings: progressMethodWarnings,
+      advisories: progressMethodAdvisories,
       counts: {
         progressMethodCount,
         progressActivities: progressActivityCount,
@@ -1652,6 +1688,7 @@ const getSetupReadiness = async ({ orgId, projectId, canReadBoq = true }) => {
         ...step,
         blockers: step.blockers.map(withoutBoqDetail),
         warnings: step.warnings.map(withoutBoqDetail),
+        advisories: step.advisories.map(withoutBoqDetail),
         counts: withoutBoqFigures(step.counts),
       }));
 
@@ -1682,7 +1719,11 @@ const getSetupReadiness = async ({ orgId, projectId, canReadBoq = true }) => {
         ),
       )
     : {
-        coveragePct: allocationSummary.coveragePct,
+        // A whole percent: with the row counts beside it, a finer share
+        // would let the bill's proportions be read back (product owner's
+        // default a; output only).
+        coveragePct:
+          allocationSummary.coveragePct == null ? allocationSummary.coveragePct : Math.round(coveragePct),
         counts: allocationSummary.counts,
       };
 
@@ -1760,7 +1801,7 @@ const getSetupReadiness = async ({ orgId, projectId, canReadBoq = true }) => {
         : coveragePct >= 99.995
           ? "done"
           : "review",
-      coveragePct,
+      canReadBoq ? coveragePct : Math.round(coveragePct),
     ),
     // The bill's quantities and value are for those who may read the BOQ.
     canReadBoq &&
