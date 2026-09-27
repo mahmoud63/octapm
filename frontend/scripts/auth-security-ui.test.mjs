@@ -63,7 +63,13 @@ assert.match(companySecurity, /data-testid='uat-mfa-reset'/, 'reset a user')
 assert.match(companyNav, /href: '\/company\/security'/, 'company nav')
 for (const name of ['useCompanySecurity', 'useUpdateSso', 'useTestSso', 'useResetUserMfa']) assert.match(companyHooks, new RegExp(`export const ${name}\\b`), `${name} exported`)
 
-assert.match(authRoutes, /if \(result\.mfaRequired\) return sendSuccess\(res, result\)/, 'no session before the second factor')
+// ENT-2 widened the same early return: an identity with no single workspace to
+// enter gets no session either (chooseWorkspace / needsWorkspace).
+assert.match(
+  authRoutes,
+  /if \(result\.mfaRequired(?: \|\| result\.\w+)*\) \{?\s*return sendSuccess\(res, result\)/,
+  'no session before the second factor',
+)
 assert.match(authRoutes, /require\("\.\/auth-security"\)\.register\(router/, 'security routes on the auth router')
 assert.match(authSecurity, /"\/sso\/callback"/, 'callback route')
 assert.match(authSecurity, /"\/mfa\/verify"/, 'verify route')
