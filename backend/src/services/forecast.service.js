@@ -6,6 +6,7 @@ const scheduleService = require("./schedule.service");
 const evService = require("./earned-value.service");
 const budgetService = require("./budget.service");
 const { forecastCostWithheld, withheldForecast } = require("../utils/boq-figures");
+const { EAC_BASES, eacBasisOf } = require("../utils/eac-basis");
 
 /**
  * Schedule delay and cost overrun prediction (OCTA-AI-PREDICT-031).
@@ -88,7 +89,11 @@ const loadContext = async ({ orgId, projectId, asOf }) => {
   ]);
   let ev = null;
   try {
-    ev = await evService.buildOfficialEvReport({ orgId, projectId, useLockedSnapshot: false, includeReadiness: false });
+    // The same EV answer the health card and the EV tab read: the latest
+    // period, and when that period is locked its stored snapshot — stored
+    // SPI, CPI, EAC and the cutoff instant and zone recorded at the lock —
+    // never a live recomputation of a locked period.
+    ev = await evService.buildOfficialEvReport({ orgId, projectId, useLockedSnapshot: true, includeReadiness: false });
   } catch {
     ev = null;
   }
@@ -320,7 +325,7 @@ const buildForecast = async ({ orgId, projectId, asOf = new Date() }) => {
   // Which rule gave the EAC (the EV report's, unchanged): revised BAC / CPI
   // when there is cost performance, the revised BAC itself when there is
   // none — said, so no screen presents the budget as a projection.
-  const eacBasis = !ev || eac === null ? null : bac <= 0 ? "no_budget" : ev.cpi !== null && ev.cpi !== undefined && Number(ev.cpi) > 0 ? "budget_over_cpi" : "budget_no_cost_performance";
+  const eacBasis = !ev || eac === null ? null : eacBasisOf({ totalBudget: bac, cpi: ev.cpi });
   const earnedValueCutoff = ev && ev.reporting
     ? { cutoffDate: ev.reporting.cutoffDate || null, cutoffLocalDate: ev.reporting.cutoffLocalDate || null, timeZone: ev.reporting.timeZone || null, timeZoneSource: ev.reporting.timeZoneSource || null, timeZoneNote: ev.reporting.timeZoneNote ?? null }
     : null;
@@ -341,6 +346,7 @@ const buildForecast = async ({ orgId, projectId, asOf = new Date() }) => {
     // is the official cost-record actuals. Messages only — no figure moves.
     if (spi === null) dataQuality.push("SPI is not available yet: no approved time-phased cost loading through the cutoff, so there is no planned value to measure progress against.");
     if (cpi === null) dataQuality.push("CPI is not available yet: no official cost-record actuals through the cutoff, so the earned-value estimate at completion falls back to the budget.");
+    else if (eacBasis === EAC_BASES.CPI_ZERO) dataQuality.push("CPI is 0: actual cost has been recorded with no earned value through the cutoff, so budget ÷ CPI cannot be computed and the estimate at completion shows the budget.");
     // The EV report's own sentence when the project has no zone of its own.
     if (earnedValueCutoff?.timeZoneNote) dataQuality.push(earnedValueCutoff.timeZoneNote);
   }

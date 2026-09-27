@@ -24,6 +24,8 @@ const {
   resolveReportingTimeZone,
   storedValueForReportingDate,
 } = require("../utils/reporting-cutoff");
+// Which rule gave the EAC (budget / CPI, or the budget with CPI 0 or none).
+const { eacBasisOf } = require("../utils/eac-basis");
 
 const FORMULA_VERSION = "ev.v2";
 const APPROVED = "approved";
@@ -52,14 +54,14 @@ const OFFICIAL_DATA_INPUTS = Object.freeze([
 ]);
 
 const EV_FORMULAS = Object.freeze({
-  pv: "PV = sum(approved ActivityCostLoading.plannedValue where plannedDate <= cutoffDate)",
+  pv: "PV = sum(approved ActivityCostLoading.plannedValue where the plannedDate calendar date <= the cutoff date)",
   ev: "EV = sum(approved ActivityBoqAllocation.amount * latest approved ActivityProgress.pctComplete approved on/before cutoffDate / 100)",
-  ac: "AC = sum(latest CostRecord.actual by activity where CostRecord.actualThroughDate <= cutoffDate)",
+  ac: "AC = sum(latest CostRecord.actual by activity where the CostRecord.actualThroughDate calendar date <= the cutoff date)",
   spi: "SPI = EV / PV when PV > 0; otherwise null",
   cpi: "CPI = EV / AC when AC > 0; otherwise null",
   eac: "EAC = revised BAC / CPI when CPI > 0; otherwise revised BAC",
   cutoff:
-    "A reporting period cutoffDate is authoritative. It is a calendar date, kept as entered, that ends at the end of that date in the project time zone (Project.timezone, else the organisation default time zone, else UTC), computed for that date from the zone's own rules including daylight saving; PV, EV and AC are selected against that one instant. When the project has no time zone the report says which zone was used. A locked period keeps the instant and figures stored at the lock. Ad hoc cutoffDate is allowed for open calculations but is not a locked snapshot.",
+    "A reporting period cutoffDate is authoritative. It is a calendar date, kept as entered, that ends at the end of that date in the project time zone (Project.timezone, else the organisation default time zone, else UTC), computed for that date from the zone's own rules including daylight saving; PV, EV and AC are selected against that one cutoff. Real instants (progress approvedAt, budget-revision effectiveDate) are compared with the cutoff instant; calendar-date fields (cost-loading plannedDate, cost-record actualThroughDate, which a date input stores at 00:00 UTC of the date) count when their date is on or before the cutoff date, never the day after, in any zone. When the project has no time zone the report says which zone was used. A locked period keeps the instant and figures stored at the lock. Ad hoc cutoffDate is allowed for open calculations but is not a locked snapshot.",
   budgetRevisions:
     "Approved BudgetRevision rows effective on/before cutoffDate adjust revised BAC. PV still requires approved time-phased cost loading.",
   progressMethods:
@@ -116,6 +118,20 @@ const resolveCutoff = (value, zone) => {
     throw new HttpError(400, "INVALID_DATE", "cutoffDate is invalid");
   }
 };
+
+/**
+ * The bound a CALENDAR-DATE field is selected against (D1 date-only rule,
+ * 2026-09-27). plannedDate (cost loadings), actualThroughDate (cost records,
+ * fed by the ledger's incurredOn) and incurredOn are dates, not instants: a
+ * date input stores them at 00:00 UTC of the date. Such a row counts toward
+ * a period when its calendar date — the UTC calendar date of the stored
+ * value — is on or before the period's cutoff date, and a row dated the day
+ * after never counts, in any zone. Compared as instants against the end of
+ * the day in a zone west of UTC, the next date's 00:00 UTC would fall inside
+ * the period. The bound is the last millisecond of the cutoff date in UTC;
+ * for a project that resolves to UTC it is the cutoff instant itself.
+ */
+const calendarDateBound = (cutoff) => storedValueForReportingDate(cutoff.localDate);
 
 const isOnOrBefore = (value, cutoffDate) => {
   if (!value) return false;
@@ -482,20 +498,25 @@ const plannedFinishFromActivity = ({ project, activity }) => {
 const buildOfficialSCurveData = ({ costLoadings, cutoffDate, ev, zone }) => {
   if (!costLoadings.length) return [];
 
+  // plannedDate is a calendar date: its month is the month of its own date
+  // (the UTC calendar date of the stored value), and a month's PV takes the
+  // loadings dated through its last date — the same date-only rule as PV.
   const plannedDates = costLoadings.map((row) =>
     new Date(row.plannedDate).getTime(),
   );
-  const finish = monthKeyOf(Math.max(...plannedDates), zone);
+  const utc = { timeZone: "UTC" };
+  const finish = monthKeyOf(Math.max(...plannedDates), utc);
   const rows = [];
 
   for (
-    let month = monthKeyOf(Math.min(...plannedDates), zone);
+    let month = monthKeyOf(Math.min(...plannedDates), utc);
     month <= finish;
     month = nextMonthKey(month)
   ) {
     const monthEnd = endOfLocalDay(lastDateOfMonth(month), zone.timeZone);
+    const plannedThrough = storedValueForReportingDate(lastDateOfMonth(month));
     const pv = costLoadings
-      .filter((row) => new Date(row.plannedDate) <= monthEnd)
+      .filter((row) => new Date(row.plannedDate) <= plannedThrough)
       .reduce((sum, row) => addMoney(sum, row.plannedValue), 0);
 
     rows.push({
@@ -569,6 +590,11 @@ const snapshotToReport = ({ snapshot, period }) => {
     sv: snapshot.sv,
     cv: snapshot.cv,
     etc: snapshot.etc,
+    // The rule the stored EAC was given by, read from the stored figures.
+    eacBasis: eacBasisOf({
+      totalBudget: snapshot.totalBudget,
+      cpi: snapshot.cpi === null || snapshot.cpi === undefined ? null : Number(snapshot.cpi),
+    }),
     reporting: {
       // A snapshot locked before its date was recorded is labelled with the
       // period's reporting date; its instant and figures are as stored.
@@ -630,6 +656,9 @@ const buildOfficialEvReport = async ({
   // own rules for that date.
   const cutoff = describePeriodCutoff({ ...period, evSnapshot: null }, zone);
   const resolvedCutoffDate = cutoff.cutoffDate;
+  // Calendar-date fields (plannedDate, actualThroughDate) are selected by
+  // their date against the cutoff date; instants against the instant.
+  const calendarThrough = calendarDateBound(cutoff);
 
   const [
     activities,
@@ -662,8 +691,8 @@ const buildOfficialEvReport = async ({
     }),
     getApprovedActivityAllocationTotals({ projectId }, tx),
     buildAllocationSummary({ projectId }, tx),
-    getApprovedCostLoadings({ projectId, cutoffDate: resolvedCutoffDate }, tx),
-    getOfficialActualCostMap({ projectId, cutoffDate: resolvedCutoffDate }, tx),
+    getApprovedCostLoadings({ projectId, cutoffDate: calendarThrough }, tx),
+    getOfficialActualCostMap({ projectId, cutoffDate: calendarThrough }, tx),
     getApprovedBudgetRevisions(
       { projectId, cutoffDate: resolvedCutoffDate },
       tx,
@@ -809,6 +838,15 @@ const buildOfficialEvReport = async ({
     );
   }
 
+  // A cutoff that has not been reached yet: PV runs to the cutoff while EV
+  // and AC can only exist up to today, so SPI and SV compare a future plan
+  // with to-date work. Said, not changed.
+  if (resolvedCutoffDate.getTime() > Date.now()) {
+    basisWarnings.push(
+      "This period's cutoff has not been reached; EV and AC are measured through today while PV runs to the cutoff.",
+    );
+  }
+
   // The project has no zone of its own: say which one the cutoff was read
   // in (the organisation's default, or UTC).
   if (cutoff.timeZoneNote) basisWarnings.push(cutoff.timeZoneNote);
@@ -856,6 +894,8 @@ const buildOfficialEvReport = async ({
 
   return {
     ...metrics,
+    // Which rule gave the EAC (not money; every reader receives it).
+    eacBasis: eacBasisOf({ totalBudget: metrics.totalBudget, cpi: metrics.cpi }),
     reporting: {
       cutoffDay: resolveReportingCutoffDay(project),
       projectCalendar: project.projectCalendar || null,

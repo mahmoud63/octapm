@@ -18,15 +18,23 @@
  *
  * Each project has three activities with a 10,000 approved allocation each.
  * Every activity carries one approved cost loading (PV), one approved
- * progress row (EV) and one cost record (AC), all dated at the SAME instant:
+ * progress row (EV) and one cost record (AC), all on the SAME local moment:
  *
  *   early  — well inside the period
  *   late   — just inside: 23:30 local on the cutoff date (must count)
  *   after  — just outside: shortly after local midnight (must not)
  *
- * so PV, EV and AC each move together only if they share the cutoff. The
- * expected figures are recomputed here from those rows and the expected
- * cutoff instant, never read off the report.
+ * The progress approval carries that instant (approvedAt is a real
+ * timestamp). The cost loading's plannedDate and the cost record's
+ * actualThroughDate are CALENDAR DATES (D1 date-only rule, 2026-09-27): a
+ * date input stores them at 00:00 UTC of the date, so each carries the
+ * project-local date of its moment — the cutoff date for "late", the day
+ * after for "after". A date-only row counts when its date is on or before
+ * the cutoff date; in a zone west of UTC the day after's 00:00 UTC falls
+ * before the local end of the cutoff date, so an instant comparison would
+ * wrongly count it. PV, EV and AC therefore move together only if they share
+ * the cutoff. The expected figures are recomputed here from those rows and
+ * the expected cutoff, never read off the report.
  *
  * Everything lives in throwaway "LiveTest <uuid>" organisations dropped
  * afterwards; the only writes outside the API are to their own rows, one
@@ -37,6 +45,7 @@
 const { prisma } = require("../../config/db");
 const { createLiveOrg, dropLiveOrg, liveDescribe } = require("../../__live__/helpers");
 const { startApi } = require("./auth-live-kit");
+const { localDateOf } = require("../../utils/reporting-cutoff");
 
 const SERVER_TZ = "Asia/Kolkata";
 const BUDGET_PER_ACTIVITY = 10000;
@@ -51,14 +60,23 @@ const ROWS = {
   after: { pv: 4000, pct: 80, ac: 400 },
 };
 
-/** PV, EV and AC recomputed from the rows for a cutoff instant. */
+/** A calendar date as a date input stores it: 00:00 UTC of the date. */
+const storedDate = (localDate) => new Date(`${localDate}T00:00:00.000Z`);
+
+/**
+ * PV, EV and AC recomputed from the rows for a cutoff instant in the
+ * instants' zone: EV by the approval instant, PV and AC by the calendar date
+ * of their moment in that zone against the cutoff's date there.
+ */
 const expectedAt = (instants, cutoffIso) => {
   const cutoff = new Date(cutoffIso).getTime();
-  const counted = Object.entries(ROWS).filter(([key]) => new Date(instants[key]).getTime() <= cutoff);
+  const cutoffDate = localDateOf(cutoffIso, instants.zone);
+  const byInstant = Object.entries(ROWS).filter(([key]) => new Date(instants[key]).getTime() <= cutoff);
+  const byDate = Object.entries(ROWS).filter(([key]) => localDateOf(instants[key], instants.zone) <= cutoffDate);
   return {
-    pv: counted.reduce((sum, [, row]) => sum + row.pv, 0),
-    ev: counted.reduce((sum, [, row]) => sum + (BUDGET_PER_ACTIVITY * row.pct) / 100, 0),
-    ac: counted.reduce((sum, [, row]) => sum + row.ac, 0),
+    pv: byDate.reduce((sum, [, row]) => sum + row.pv, 0),
+    ev: byInstant.reduce((sum, [, row]) => sum + (BUDGET_PER_ACTIVITY * row.pct) / 100, 0),
+    ac: byDate.reduce((sum, [, row]) => sum + row.ac, 0),
   };
 };
 
@@ -135,16 +153,20 @@ liveDescribe("PC-4 D1: the EV cutoff is the end of the cutoff date in the projec
         for (const step of ["submit", "approve"]) await post(at(`/activity-boq-allocations/${allocation.id}/${step}`), {}, 200);
         activities[key] = activity.id;
       }
+      if (!instants.zone) throw new Error("instants.zone: the zone the moments are local to");
       for (const [key, row] of Object.entries(ROWS)) {
         const when = new Date(instants[key]);
+        // The moment's calendar date in the project's zone, as a date input
+        // stores it — plannedDate and actualThroughDate are dates.
+        const day = storedDate(localDateOf(when, instants.zone));
         await prisma.activityCostLoading.create({
-          data: { projectId: project.id, activityId: activities[key], plannedDate: when, plannedValue: row.pv, status: "approved", approvedBy: live.user.id, approvedAt: new Date("2026-01-10T12:00:00Z") },
+          data: { projectId: project.id, activityId: activities[key], plannedDate: day, plannedValue: row.pv, status: "approved", approvedBy: live.user.id, approvedAt: new Date("2026-01-10T12:00:00Z") },
         });
         await prisma.activityProgress.create({
           data: { activityId: activities[key], pctComplete: row.pct, status: "approved", approvedBy: live.user.id, approvedAt: when, updatedAt: when },
         });
         await prisma.costRecord.create({
-          data: { projectId: project.id, activityId: activities[key], actual: row.ac, actualThroughDate: when },
+          data: { projectId: project.id, activityId: activities[key], actual: row.ac, actualThroughDate: day },
         });
       }
     }
@@ -179,6 +201,7 @@ liveDescribe("PC-4 D1: the EV cutoff is the end of the cutoff date in the projec
   // 1 November 2026: the day daylight saving ends in Chicago (a 25-hour
   // day, CDT until 02:00 then CST). It ends at 2026-11-02T05:59:59.999Z.
   const CHICAGO_NOV1 = {
+    zone: "America/Chicago",
     early: "2026-10-15T17:00:00.000Z",
     late: "2026-11-02T05:30:00.000Z", // 23:30 CST, 1 November
     after: "2026-11-02T06:00:30.000Z", // 00:00:30 CST, 2 November
@@ -238,6 +261,7 @@ liveDescribe("PC-4 D1: the EV cutoff is the end of the cutoff date in the projec
   it("(c) an approval at 23:30 project-local time on the cutoff day is counted; one at 00:30 the next local day is in the next period (Asia/Dubai, a zone other than the server's)", async () => {
     // Dubai (+04:00, no DST): 31 July ends at 2026-07-31T19:59:59.999Z.
     const instants = {
+      zone: "Asia/Dubai",
       early: "2026-07-10T08:00:00.000Z",
       late: "2026-07-31T19:30:00.000Z", // 23:30 GST, 31 July
       after: "2026-07-31T20:30:00.000Z", // 00:30 GST, 1 August
@@ -259,6 +283,7 @@ liveDescribe("PC-4 D1: the EV cutoff is the end of the cutoff date in the projec
   it("(e) Organisation.defaultTimezone is used when the project has none, and the report says so", async () => {
     // Tokyo: 1 November ends at 2026-11-01T14:59:59.999Z.
     const instants = {
+      zone: "Asia/Tokyo",
       early: "2026-10-15T03:00:00.000Z",
       late: "2026-11-01T14:30:00.000Z", // 23:30 JST
       after: "2026-11-01T15:00:30.000Z", // 00:00:30 JST, 2 November
@@ -281,6 +306,7 @@ liveDescribe("PC-4 D1: the EV cutoff is the end of the cutoff date in the projec
   it("(f) UTC is the final fallback when neither the project nor the organisation has a zone, and every surface stating the cutoff carries the note \"Project timezone is not configured; UTC is being used\"", async () => {
     const plain = await newOrg(null);
     const instants = {
+      zone: "UTC",
       early: "2026-10-15T12:00:00.000Z",
       late: "2026-11-01T23:30:00.000Z",
       after: "2026-11-02T00:00:30.000Z",
@@ -327,6 +353,7 @@ liveDescribe("PC-4 D1: the EV cutoff is the end of the cutoff date in the projec
 
   it("(a) a cutoff date during daylight saving time (America/Chicago, 31 July 2026, CDT) ends at 2026-08-01T04:59:59.999Z: a row at 23:30 CDT counts, one at 00:30 CDT the next day does not", async () => {
     const instants = {
+      zone: "America/Chicago",
       early: "2026-07-15T17:00:00.000Z",
       late: "2026-08-01T04:30:00.000Z", // 23:30 CDT, 31 July
       after: "2026-08-01T05:30:00.000Z", // 00:30 CDT, 1 August
@@ -341,6 +368,7 @@ liveDescribe("PC-4 D1: the EV cutoff is the end of the cutoff date in the projec
 
   it("(b) a cutoff date outside daylight saving time (America/Chicago, 31 January 2026, CST) ends at 2026-02-01T05:59:59.999Z: a row at 05:30Z (23:30 CST) counts, one at 06:30Z does not", async () => {
     const instants = {
+      zone: "America/Chicago",
       early: "2026-01-15T18:00:00.000Z",
       late: "2026-02-01T05:30:00.000Z", // 23:30 CST, 31 January
       after: "2026-02-01T06:30:00.000Z", // 00:30 CST, 1 February
@@ -355,6 +383,7 @@ liveDescribe("PC-4 D1: the EV cutoff is the end of the cutoff date in the projec
 
   it("the end of the day is right on the day daylight saving begins (America/Chicago, 8 March 2026 — a 23-hour day ending in CDT)", async () => {
     const instants = {
+      zone: "America/Chicago",
       early: "2026-02-20T18:00:00.000Z",
       late: "2026-03-09T04:30:00.000Z", // 23:30 CDT, 8 March
       after: "2026-03-09T05:00:30.000Z", // 00:00:30 CDT, 9 March
@@ -370,6 +399,7 @@ liveDescribe("PC-4 D1: the EV cutoff is the end of the cutoff date in the projec
 
   it("(g) PV, EV and AC are selected against the identical cutoff instant (Pacific/Auckland, 31 July 2026 — NZST, ends 2026-07-31T11:59:59.999Z)", async () => {
     const instants = {
+      zone: "Pacific/Auckland",
       early: "2026-07-10T00:00:00.000Z",
       late: "2026-07-31T11:30:00.000Z", // 23:30 NZST, 31 July
       after: "2026-07-31T12:30:00.000Z", // 00:30 NZST, 1 August
@@ -425,16 +455,16 @@ liveDescribe("PC-4 D1: the EV cutoff is the end of the cutoff date in the projec
     const storedBefore = await prisma.evPeriodSnapshot.findUnique({ where: { reportingPeriodId: period.id } });
 
     // Afterwards: rows land just inside and just outside its cutoff in
-    // Chicago — a cost loading at 23:30 CDT on 31 October and one at 00:30
-    // CDT on 1 November; the late activity's cost record (one per activity,
-    // this test's own row by its unique key) now runs through 23:30 CDT on
-    // 31 October, the after activity's through 00:30 CDT on 1 November —
+    // Chicago — a cost loading planned for 31 October and one for 1 November
+    // (calendar dates, as a date input stores them); the late activity's
+    // cost record (one per activity, this test's own row by its unique key)
+    // now runs through 31 October, the after activity's through 1 November —
     // and a progress approval is backdated well inside it ...
-    const inside = new Date("2026-11-01T04:30:00.000Z");
-    const outside = new Date("2026-11-01T05:30:00.000Z");
+    const inside = storedDate("2026-10-31");
+    const outside = storedDate("2026-11-01");
     for (const when of [inside, outside]) {
       await prisma.activityCostLoading.create({
-        data: { projectId: chicago.project.id, activityId: chicago.activities.early, plannedDate: when, plannedValue: 500, status: "approved", approvedAt: when },
+        data: { projectId: chicago.project.id, activityId: chicago.activities.early, plannedDate: when, plannedValue: 500, status: "approved", approvedAt: new Date("2026-10-20T12:00:00Z") },
       });
     }
     await prisma.costRecord.update({

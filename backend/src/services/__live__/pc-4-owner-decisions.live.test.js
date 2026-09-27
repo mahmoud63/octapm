@@ -105,6 +105,11 @@ liveDescribe("PC-4 owner decisions D2, C and D3", () => {
     return { item: item.item, activity };
   };
 
+  const CPI_ZERO_NOTE =
+    "CPI is 0: actual cost has been recorded with no earned value through the cutoff, so budget ÷ CPI cannot be computed and the estimate at completion shows the budget.";
+  const CPI_MISSING_NOTE =
+    "CPI is not available yet: no official cost-record actuals through the cutoff, so the earned-value estimate at completion falls back to the budget.";
+
   describe("D2: the forecast at completion is the business-rule EAC", () => {
     it("with cost performance: revised BAC / CPI — the EV report's figure, carried by the forecast with its BAC and its rule", async () => {
       const built = await newProject("D2 cpi");
@@ -124,6 +129,8 @@ liveDescribe("PC-4 owner decisions D2, C and D3", () => {
       expect(expected).toBeCloseTo(125000, 2);
       expect(ev.eac).toBeCloseTo(expected, 2);
       expect(forecast.cost).toMatchObject({ eac: ev.eac, bac: ev.totalBudget, eacBasis: "budget_over_cpi" });
+      // The EV report names the same rule for the same figure.
+      expect(ev.eacBasis).toBe("budget_over_cpi");
       // The projected cost is max(EAC, bottom-up): never below the EAC.
       expect(forecast.cost.projected).toBeGreaterThanOrEqual(forecast.cost.eac);
     });
@@ -138,7 +145,30 @@ liveDescribe("PC-4 owner decisions D2, C and D3", () => {
       const forecast = (await built.get("/forecast")).body.data;
       expect([ev.cpi, ev.eac, ev.totalBudget]).toEqual([null, 100000, 100000]);
       expect(forecast.cost).toMatchObject({ eac: 100000, bac: 100000, eacBasis: "budget_no_cost_performance" });
+      expect(ev.eacBasis).toBe("budget_no_cost_performance");
       expect(forecast.schedule.cpi).toBeNull();
+      expect(forecast.dataQuality).toContain(CPI_MISSING_NOTE);
+      expect(forecast.dataQuality).not.toContain(CPI_ZERO_NOTE);
+    });
+
+    it("with actual cost and nothing earned (CPI 0): the revised BAC, named as its own rule on the EV report and the forecast, with the reason in the forecast's data quality", async () => {
+      const built = await newProject("D2 cpi zero");
+      const { activity } = await activityWithBill(built, { code: "1.1", name: "Concrete frame", quantity: 100, rate: 1000 });
+      // 62,500 spent through 5 February, no progress approved: EV 0, CPI 0.
+      await prisma.costRecord.create({
+        data: { projectId: built.project.id, activityId: activity.id, actual: 62500, actualThroughDate: new Date("2026-02-05T00:00:00Z") },
+      });
+      const ev = (await built.get("/reports/ev")).body.data;
+      const forecast = (await built.get("/forecast")).body.data;
+      // The certified figure is unchanged: CPI = EV / AC = 0, and with CPI
+      // not above 0 the EAC is the revised BAC itself.
+      expect([ev.ev, ev.ac, ev.cpi, ev.eac, ev.totalBudget]).toEqual([0, 62500, 0, 100000, 100000]);
+      // ... named for what it is: not "budget / CPI", not "no cost performance yet".
+      expect(ev.eacBasis).toBe("budget_cpi_zero");
+      expect(forecast.cost).toMatchObject({ eac: 100000, bac: 100000, actual: 62500, eacBasis: "budget_cpi_zero" });
+      expect(forecast.schedule.cpi).toBe(0);
+      expect(forecast.dataQuality).toContain(CPI_ZERO_NOTE);
+      expect(forecast.dataQuality).not.toContain(CPI_MISSING_NOTE);
     });
 
     it("a member who may read neither the BOQ nor the cost module receives no EAC, no BAC and no budget — the rule's name only", async () => {
@@ -152,6 +182,8 @@ liveDescribe("PC-4 owner decisions D2, C and D3", () => {
       const limited = await built.get("/forecast", seAuth());
       const cost = limited.body.data.cost;
       expect(["eac" in cost, "bac" in cost, "budget" in cost, "projected" in cost, cost.eacBasis]).toEqual([false, false, false, false, full.cost.eacBasis]);
+      // Actual cost and nothing earned: the rule is CPI 0's, for both readers.
+      expect(full.cost.eacBasis).toBe("budget_cpi_zero");
       expect(limited.text).not.toContain(String(full.cost.eac));
       expect(limited.text).not.toContain("100000");
     });
