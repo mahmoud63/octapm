@@ -16,6 +16,7 @@ const { validate } = require('../middleware/validate');
 const scheduleService = require('../services/schedule.service');
 const {
   boqFigureAccess,
+  withheldError,
   withheldRevision,
   withheldSchedule,
   withheldScheduleReadiness,
@@ -81,6 +82,18 @@ const withheldLifecycle = (result, req) => {
       ? { readiness: withheldScheduleReadiness(result.readiness, access) }
       : {}),
   };
+};
+
+// ... and so are their refusals: approval and baseline lock refuse a
+// schedule that is not ready (SCHEDULE_NOT_READY) with the whole readiness
+// as error.details, which goes the way of the readiness a success answer
+// carries. Status, code, message, ready and blockingCount stay.
+const withheldRefusals = (handler) => async (req, res) => {
+  try {
+    return await handler(req, res);
+  } catch (error) {
+    throw withheldError(error, boqFigureAccess(req));
+  }
 };
 
 router.use(authenticate);
@@ -194,7 +207,7 @@ router.post(
     }),
     validate,
   ],
-  asyncHandler(async (req, res) => {
+  asyncHandler(withheldRefusals(async (req, res) => {
     const result = await scheduleService.activateRevision({
       orgId: req.user.orgId,
       projectId: req.params.projectId,
@@ -205,7 +218,7 @@ router.post(
       comment: req.body?.comment || null,
     });
     return sendSuccess(res, withheldLifecycle(result, req));
-  }),
+  })),
 );
 
 // POST /projects/:projectId/schedule/revisions/:revisionId/rollback
@@ -219,7 +232,7 @@ router.post(
     body('reason').isString().trim().notEmpty().isLength({ max: 2000 }),
     validate,
   ],
-  asyncHandler(async (req, res) => {
+  asyncHandler(withheldRefusals(async (req, res) => {
     const result = await scheduleService.rollbackRevision({
       orgId: req.user.orgId,
       projectId: req.params.projectId,
@@ -228,7 +241,7 @@ router.post(
       reason: req.body.reason,
     });
     return sendSuccess(res, withheldLifecycle(result, req));
-  }),
+  })),
 );
 
 // POST /projects/:projectId/schedule/revisions/:revisionId/submit-review
@@ -244,7 +257,7 @@ router.post(
     }),
     validate,
   ],
-  asyncHandler(async (req, res) => {
+  asyncHandler(withheldRefusals(async (req, res) => {
     const result = await scheduleService.submitRevisionForReview({
       orgId: req.user.orgId,
       projectId: req.params.projectId,
@@ -254,7 +267,7 @@ router.post(
       comment: req.body?.comment || null,
     });
     return sendSuccess(res, withheldRevision(result, boqFigureAccess(req)));
-  }),
+  })),
 );
 
 // POST /projects/:projectId/schedule/revisions/:revisionId/approve
@@ -270,7 +283,7 @@ router.post(
     }),
     validate,
   ],
-  asyncHandler(async (req, res) => {
+  asyncHandler(withheldRefusals(async (req, res) => {
     const result = await scheduleService.approveRevision({
       orgId: req.user.orgId,
       projectId: req.params.projectId,
@@ -280,7 +293,7 @@ router.post(
       comment: req.body?.comment || null,
     });
     return sendSuccess(res, withheldRevision(result, boqFigureAccess(req)));
-  }),
+  })),
 );
 
 // POST /projects/:projectId/schedule/revisions/:revisionId/reject
@@ -294,7 +307,7 @@ router.post(
     body('reason').isString().trim().notEmpty().isLength({ max: 2000 }),
     validate,
   ],
-  asyncHandler(async (req, res) => {
+  asyncHandler(withheldRefusals(async (req, res) => {
     const result = await scheduleService.rejectRevision({
       orgId: req.user.orgId,
       projectId: req.params.projectId,
@@ -304,7 +317,7 @@ router.post(
       reason: req.body.reason,
     });
     return sendSuccess(res, withheldRevision(result, boqFigureAccess(req)));
-  }),
+  })),
 );
 
 // POST /projects/:projectId/schedule/revisions/:revisionId/baseline
@@ -320,7 +333,7 @@ router.post(
     }),
     validate,
   ],
-  asyncHandler(async (req, res) => {
+  asyncHandler(withheldRefusals(async (req, res) => {
     const result = await scheduleService.lockBaseline({
       orgId: req.user.orgId,
       projectId: req.params.projectId,
@@ -330,7 +343,7 @@ router.post(
       comment: req.body?.comment || null,
     });
     return sendSuccess(res, withheldLifecycle(result, req));
-  }),
+  })),
 );
 
 // POST /projects/:projectId/schedule/baseline
@@ -346,7 +359,7 @@ router.post(
     }),
     validate,
   ],
-  asyncHandler(async (req, res) => {
+  asyncHandler(withheldRefusals(async (req, res) => {
     const result = await scheduleService.lockBaseline({
       orgId: req.user.orgId,
       projectId: req.params.projectId,
@@ -356,7 +369,7 @@ router.post(
       comment: req.body?.comment || null,
     });
     return sendSuccess(res, withheldLifecycle(result, req));
-  }),
+  })),
 );
 
 // POST /projects/:projectId/schedule/generate — returns jobId immediately

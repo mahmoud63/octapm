@@ -229,13 +229,13 @@ function ActivityRow({
                 })}
               </p>
             )}
-            {activity.cost.overrun > 0 && (
+            {(activity.cost.overrun ?? 0) > 0 && (
               <p className='mt-1 text-muted-foreground'>
                 Cost: {money(activity.cost.actual)} spent of{' '}
                 {money(activity.cost.budget)}, projected{' '}
                 {money(activity.cost.projected)} ({money(activity.cost.overrun)}{' '}
                 over) —{' '}
-                {activity.cost.reasons.join('; ') || activity.cost.basis}
+                {activity.cost.reasons?.join('; ') || activity.cost.basis}
               </p>
             )}
           </td>
@@ -427,6 +427,10 @@ export function ForecastPanel({ projectId }: { projectId: string }) {
   }
 
   const { schedule, cost, summary } = forecast
+  // The cost view's money is withheld from someone who may read neither the
+  // BOQ nor the cost module (§12): each amount then reads as a dash, and the
+  // projected-cost card says why instead of calling the cost within budget.
+  const costFiguresShown = cost.budget !== undefined
   return (
     <div className='space-y-4' data-testid='uat-forecast'>
       <div className='flex flex-wrap items-center gap-2'>
@@ -507,9 +511,11 @@ export function ForecastPanel({ projectId }: { projectId: string }) {
           label='Projected cost'
           value={money(cost.projected)}
           sub={
-            cost.overrun > 0
-              ? `${money(cost.overrun)} over the ${money(cost.budget)} budget${cost.overrunPct !== null ? ` (${cost.overrunPct}%)` : ''}`
-              : `Within the ${money(cost.budget)} budget`
+            !costFiguresShown
+              ? 'Cost figures are not available to you'
+              : (cost.overrun ?? 0) > 0
+                ? `${money(cost.overrun)} over the ${money(cost.budget)} budget${cost.overrunPct != null ? ` (${cost.overrunPct}%)` : ''}`
+                : `Within the ${money(cost.budget)} budget`
           }
           level={summary?.costLevel}
           testId='uat-forecast-cost'
@@ -617,7 +623,7 @@ export function ForecastPanel({ projectId }: { projectId: string }) {
                       <td className='px-2 py-1.5'>
                         <span className='font-medium'>{activity.name}</span>
                         <span className='block text-xs text-muted-foreground'>
-                          {activity.cost.reasons.join('; ') ||
+                          {activity.cost.reasons?.join('; ') ||
                             `projected from ${activity.cost.basis}`}
                         </span>
                       </td>
@@ -632,9 +638,11 @@ export function ForecastPanel({ projectId }: { projectId: string }) {
                       </td>
                       <td className='px-2 py-1.5 text-right text-destructive tabular-nums'>
                         {money(activity.cost.overrun)}
-                        <span className='block text-[10px]'>
-                          {activity.cost.overrunPct}%
-                        </span>
+                        {activity.cost.overrunPct != null && (
+                          <span className='block text-[10px]'>
+                            {activity.cost.overrunPct}%
+                          </span>
+                        )}
                       </td>
                     </tr>
                   ))}
@@ -702,7 +710,7 @@ export function ForecastPanel({ projectId }: { projectId: string }) {
                       </td>
                       <td className='px-2 py-1.5 text-right text-destructive tabular-nums'>
                         {money(line.overrun)}
-                        {line.overrunPct !== null && (
+                        {line.overrunPct != null && (
                           <span className='block text-[10px]'>
                             {line.overrunPct}%
                           </span>

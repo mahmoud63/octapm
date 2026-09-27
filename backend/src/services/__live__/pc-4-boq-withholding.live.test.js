@@ -1,27 +1,34 @@
 /**
- * §12 on the schedule and the activities — proven against a real API
+ * §12 on the Overview and the Schedule module — proven against a real API
  * process and the real local Postgres.
  *
- * The Overview landing asks GET /schedule for its module-bar counts, the
- * Gantt and the schedule list read the same answer, the Activities list
- * reads GET /activities, and the revision panel reads the revisions, their
- * readiness and their mapping. Every one of them carried the bill's
- * figures to every schedule reader. utils/boq-figures now decides who
- * receives them:
+ * "A member without BOQ read permission must not receive BOQ figures
+ * through Project Controls Overview, Setup Readiness, boq_approval, related
+ * cards, API response backing those cards." Every request the Overview
+ * landing (controls strip, health card, setup wizard, needs-you panel,
+ * module bar) and every tab of the Schedule module (Gantt, Activities,
+ * Progress, Lookahead, Critical Path, Earned Value, Forecast, Milestones,
+ * Resources, Risks, Long Lead, WBS, Revisions) make is listed below — read
+ * off the frontend's hooks and checked against what the browser actually
+ * asks for (e2e/52, which fails if the list and the browser disagree) — and
+ * swept for four members whose permission template sets the BOQ tool to
+ * none. utils/boq-figures decides what each receives:
  *
  *   BOQ reader: exactly the service's answer, byte for byte.
  *   no BOQ read: no allocated quantity, value or weight on an activity, no
- *     open value on the revision, no BOQ value figure in any readiness
- *     check, no BOQ rows in a stored snapshot — omitted, not zeroed.
+ *     open or total bill value, no BOQ value figure in any readiness check,
+ *     reporting gate or not-ready refusal, no BOQ rows in a stored
+ *     snapshot, no history of the bill's records — omitted, not zeroed.
  *   neither BOQ nor cost read: nor the budgets built from the bill (the
- *     activity budget, the revision's totals, the generator's budgets).
+ *     activity budget, the revision's totals, the generator's budgets, the
+ *     forecast's money, a revision's total in its history).
  *
  * Everything else — statuses, codes, verdicts, counts, the approved
- * allocation count — is what the BOQ reader gets, key for key.
+ * allocation count, the forecast's levels — is what the BOQ reader gets.
  *
  * Everything lives in a throwaway "LiveTest <uuid>" organisation that is
- * dropped afterwards. The API is started on a free port with the job worker
- * off, so nothing calls a model.
+ * dropped afterwards. The API is started on a free port with no model
+ * provider, so the forecast's explanation is the deterministic one.
  *
  *   npm run test:live -- src/services/__live__/pc-4-boq-withholding.live.test.js
  */
@@ -36,6 +43,8 @@ const {
 const { normalizeMoneyTree } = require("../../utils/money");
 const scheduleService = require("../schedule.service");
 const activityService = require("../activity.service");
+const forecastService = require("../forecast.service");
+const evService = require("../earned-value.service");
 const { startApi } = require("./auth-live-kit");
 
 // What a member without BOQ read must never receive, wherever it sits.
@@ -54,8 +63,16 @@ const BOQ_KEYS = [
   "boqRows",
 ];
 // ... and what a member who reads neither the BOQ nor the cost module must
-// not receive either: the budgets built from the bill.
-const BUDGET_KEYS = ["budget", "generatedBudget", "totalBudget", "generatedTotalBudget"];
+// not receive either: the budgets built from the bill, and the forecast's
+// money built from them.
+const BUDGET_KEYS = ["budget", "generatedBudget", "totalBudget", "generatedTotalBudget", "eac", "bottomUp"];
+// The forecast's money, where it sits (the cost block, each activity's cost,
+// each budget line).
+const FORECAST_COST_KEYS = ["budget", "eac", "bottomUp", "projected", "overrun", "overrunPct", "actual"];
+const FORECAST_ACTIVITY_COST_KEYS = ["budget", "actual", "committed", "projected", "overrun", "overrunPct", "reasons"];
+const FORECAST_LINE_KEYS = ["revised", "committed", "actual", "forecast", "overrun", "overrunPct"];
+// The bill's own records, whose history is the bill's.
+const BOQ_RECORD_TYPES = ["boq_item", "boq_revision", "activity_boq_allocation"];
 
 const keyPaths = (value, keys, at = "") =>
   value && typeof value === "object"
@@ -65,60 +82,79 @@ const keyPaths = (value, keys, at = "") =>
       ])
     : [];
 
-// A BOQ reader's answer with the withheld keys taken out, wherever they sit:
-// what everyone else must receive, key for key.
-const without = (value, keys) =>
+// A BOQ reader's answer with the withheld keys taken out, wherever they sit
+// (except at the paths kept): what everyone else must receive, key for key.
+const without = (value, keys, keep = new Set(), at = "") =>
   Array.isArray(value)
-    ? value.map((entry) => without(entry, keys))
+    ? value.map((entry, index) => without(entry, keys, keep, `${at}[${index}]`))
     : value && typeof value === "object"
       ? Object.fromEntries(
           Object.entries(value)
-            .filter(([key]) => !keys.has(key))
-            .map(([key, inner]) => [key, without(inner, keys)]),
+            .filter(([key]) => !keys.has(key) || keep.has(`${at}.${key}`))
+            .map(([key, inner]) => [key, without(inner, keys, keep, `${at}.${key}`)]),
         )
       : value;
 
-// Readiness is stamped when it is built; nothing else in these answers moves.
-const unstamped = (text) => text.replace(/"checkedAt":"[^"]*"/g, '"checkedAt":"-"');
+const clone = (value) => JSON.parse(JSON.stringify(value));
+const drop = (object, keys) => {
+  if (object && typeof object === "object") for (const key of keys) delete object[key];
+};
 
-liveDescribe("PC-4 §12: the schedule and the activities carry no BOQ figure to a member who may not read the BOQ", () => {
+// Readiness is stamped when it is built, the forecast and the EV report when
+// they are computed, an error with its request id; nothing else moves.
+const unstamped = (text) =>
+  text
+    .replace(/"checkedAt":"[^"]*"/g, '"checkedAt":"-"')
+    .replace(/"asOf":"[^"]*"/g, '"asOf":"-"')
+    .replace(/"asOfDate":"[^"]*"/g, '"asOfDate":"-"')
+    .replace(/"requestId":"[^"]*"/g, '"requestId":"-"');
+const parsed = (text) => JSON.parse(unstamped(text));
+
+liveDescribe("PC-4 §12: the Overview and the Schedule module carry no BOQ figure to a member who may not read the BOQ", () => {
   let live;
   let api;
   let project;
   let activities;
   let stagedRevision;
   let activeRevision;
-  let siteEngineer;
-  let costController;
+  let lockedPeriod;
+  let openPeriod;
+  const members = {};
   const auth = () => ({ authorization: `Bearer ${live.token}` });
   const post = (route, body) => api.post(route, body, auth());
+  const as = (user) => ({ authorization: `Bearer ${mintAccessToken(user)}` });
 
   beforeAll(async () => {
     live = await createLiveOrg(prisma);
-    api = await startApi({ RATE_LIMIT_AI_MAX: "1000", RATE_LIMIT_UPLOAD_MAX: "1000" });
+    // No model provider: the forecast's explanation is built from the forecast.
+    api = await startApi({
+      RATE_LIMIT_AI_MAX: "1000",
+      RATE_LIMIT_UPLOAD_MAX: "1000",
+      ANTHROPIC_API_KEY: "",
+      OPENAI_API_KEY: "",
+      GEMINI_API_KEY: "",
+    });
     const tag = Date.now();
     project = await prisma.project.create({
       data: { orgId: live.org.id, name: "LiveTest §12 schedule", startDate: new Date("2026-01-05"), endDate: new Date("2026-12-18") },
     });
 
-    // Two members whose templates take the BOQ tool away: a site engineer
-    // (no cost tool either) and a cost controller (who keeps the cost tool).
-    siteEngineer = await createLiveUser(prisma, {
-      orgId: live.org.id,
-      name: "LiveTest Site Engineer",
-      email: `live-se-${tag}@octapm-live.test`,
-      role: "site_engineer",
-    });
-    costController = await createLiveUser(prisma, {
-      orgId: live.org.id,
-      name: "LiveTest Cost Controller",
-      email: `live-cc-${tag}@octapm-live.test`,
-      role: "cost_controller",
-    });
-    for (const [member, role] of [
-      [siteEngineer, "site_engineer"],
-      [costController, "cost_controller"],
+    // Four members whose templates take the BOQ tool away: a site engineer
+    // (no cost tool either), a cost controller, a planning engineer and a
+    // project manager (who keep the cost tool; the PM approves, baselines
+    // and locks periods).
+    for (const [key, role] of [
+      ["siteEngineer", "site_engineer"],
+      ["costController", "cost_controller"],
+      ["planningEngineer", "planning_eng"],
+      ["pm", "pm"],
     ]) {
+      const member = await createLiveUser(prisma, {
+        orgId: live.org.id,
+        name: `LiveTest ${key}`,
+        email: `live-${key.toLowerCase()}-${tag}@octapm-live.test`,
+        role,
+      });
       const template = await prisma.permissionTemplate.create({
         data: {
           orgId: live.org.id,
@@ -131,6 +167,7 @@ liveDescribe("PC-4 §12: the schedule and the activities carry no BOQ figure to 
       await prisma.projectUserPermission.create({
         data: { orgId: live.org.id, projectId: project.id, userId: member.id, templateId: template.id },
       });
+      members[key] = member;
     }
 
     // A bill of two priced rows with figures nothing else in these answers
@@ -142,7 +179,7 @@ liveDescribe("PC-4 §12: the schedule and the activities carry no BOQ figure to 
     };
     const createActivity = async (payload) => {
       const created = await post(`/api/v1/projects/${project.id}/activities`, {
-        engineerIds: [live.user.id, siteEngineer.id],
+        engineerIds: [live.user.id, members.siteEngineer.id],
         ...payload,
       });
       expect([created.status, created.body?.error]).toEqual([201, undefined]);
@@ -171,7 +208,8 @@ liveDescribe("PC-4 §12: the schedule and the activities carry no BOQ figure to 
 
     // The active revision, as a generated schedule stores it (the
     // generator's budgets and the BOQ rows it was built from), and a staged
-    // one awaiting review whose readiness was stored when it was submitted.
+    // one submitted for review through the API — which stores its readiness
+    // and records the transition, with the revision's total, in its history.
     const generatedSnapshot = (label) => ({
       projectSummary: { name: label, startDate: "2026-01-05", endDate: "2026-12-18", totalBudget: 69999.99 },
       wbs: [{ code: "A", level: 1, name: "Substructure", budget: 69999.99 }],
@@ -213,12 +251,24 @@ liveDescribe("PC-4 §12: the schedule and the activities carry no BOQ figure to 
         snapshotJson: generatedSnapshot("Rev B"),
       },
     });
-    const readiness = await api.get(`/api/v1/projects/${project.id}/schedule/revisions/${stagedRevision.id}/readiness`, auth());
-    expect([readiness.status, readiness.body?.error]).toEqual([200, undefined]);
-    await prisma.scheduleRevision.update({
-      where: { id: stagedRevision.id },
-      data: { readinessJson: readiness.body.data, status: "under_review", submittedAt: new Date() },
+    const submitted = await post(`/api/v1/projects/${project.id}/schedule/revisions/${stagedRevision.id}/submit-review`, {});
+    expect([submitted.status, submitted.body?.error]).toEqual([200, undefined]);
+    expect(submitted.body.data.status).toBe("under_review");
+
+    // Two reporting periods: one locked by the (BOQ-reading) PM over the
+    // readiness gate with a reason — its snapshot stores the gate with the
+    // bill's figures — and one left open.
+    const createPeriod = async (code, periodStart, periodEnd) => {
+      const created = await post(`/api/v1/projects/${project.id}/reports/periods`, { code, periodStart, periodEnd, cutoffDate: periodEnd });
+      expect([created.status, created.body?.error]).toEqual([201, undefined]);
+      return created.body.data;
+    };
+    lockedPeriod = await createPeriod("P01", "2026-01-01", "2026-01-31");
+    openPeriod = await createPeriod("P02", "2026-02-01", "2026-02-28");
+    const locked = await post(`/api/v1/projects/${project.id}/reports/periods/${lockedPeriod.id}/lock`, {
+      overrideReason: "LiveTest: lock over the readiness gate",
     });
+    expect([locked.status, locked.body?.error]).toEqual([200, undefined]);
   });
 
   afterAll(async () => {
@@ -232,50 +282,172 @@ liveDescribe("PC-4 §12: the schedule and the activities carry no BOQ figure to 
     await prisma.$disconnect();
   });
 
-  // Every read the Overview's module bar, the Gantt, the schedule list, the
-  // revision panel and the Activities list make that carries a revision or
-  // an activity — with the service call whose answer a BOQ reader receives.
+  const at = (route) => `/api/v1/projects/${project.id}${route}`;
+  const ids = () => ({ orgId: live.org.id, projectId: project.id });
+
+  // Every request the Overview landing and the Schedule module's tabs make
+  // (e2e/52 asserts the browser makes exactly these), with the service call
+  // whose answer a BOQ reader receives where this change touches the route.
+  //   kind "keys": the rest of the answer is the BOQ reader's, key for key.
+  //   kind "forecast" / "ev" / "audit": the rest is the BOQ reader's, with
+  //     the withheld figures taken out where they sit.
+  //   kind "sweep": the answer is per person (who is asking, what they may
+  //     do); it is swept, not compared.
+  //   cost: a cost reader's request, refused (403) to the site engineer.
   const reads = () => ({
+    // The Overview: identity, strip, wizard, health card, needs-you panel.
+    project: { route: at(""), kind: "sweep" },
+    parties: { route: at("/parties"), kind: "sweep" },
+    permissions: { route: `/api/v1/auth/me/permissions?projectId=${project.id}`, kind: "sweep" },
+    setupReadiness: { route: at("/setup-readiness"), kind: "sweep" },
+    health: { route: at("/health"), kind: "sweep" },
+    assignments: { route: at("/assignments/mine"), kind: "sweep" },
+    costSummary: { route: at("/cost/summary"), kind: "sweep", cost: true },
+    forecast: {
+      route: at("/forecast"),
+      kind: "forecast",
+      service: () => forecastService.buildForecast(ids()),
+    },
+    // The Schedule module: the dashboard, its tabs, and their panels.
     schedule: {
-      route: `/api/v1/projects/${project.id}/schedule`,
-      service: () => scheduleService.getProjectSchedule({ orgId: live.org.id, projectId: project.id }),
+      route: at("/schedule"),
+      kind: "keys",
+      service: () => scheduleService.getProjectSchedule(ids()),
     },
-    revisions: {
-      route: `/api/v1/projects/${project.id}/schedule/revisions`,
-      service: () => scheduleService.listRevisions({ orgId: live.org.id, projectId: project.id }),
-    },
-    activeReadiness: {
-      route: `/api/v1/projects/${project.id}/schedule/revisions/${activeRevision.id}/readiness`,
-      service: () => scheduleService.getScheduleReadiness({ orgId: live.org.id, projectId: project.id, revisionId: activeRevision.id }),
-    },
-    stagedReadiness: {
-      route: `/api/v1/projects/${project.id}/schedule/revisions/${stagedRevision.id}/readiness`,
-      service: () => scheduleService.getScheduleReadiness({ orgId: live.org.id, projectId: project.id, revisionId: stagedRevision.id }),
-    },
-    stagedRevision: {
-      route: `/api/v1/projects/${project.id}/schedule/revisions/${stagedRevision.id}`,
-      service: () => scheduleService.getRevision({ orgId: live.org.id, projectId: project.id, revisionId: stagedRevision.id }),
-    },
-    activeRevision: {
-      route: `/api/v1/projects/${project.id}/schedule/revisions/${activeRevision.id}`,
-      service: () => scheduleService.getRevision({ orgId: live.org.id, projectId: project.id, revisionId: activeRevision.id }),
-    },
-    mapping: {
-      route: `/api/v1/projects/${project.id}/schedule/revisions/${stagedRevision.id}/mapping`,
-      service: () => scheduleService.getRevisionMapping({ orgId: live.org.id, projectId: project.id, revisionId: stagedRevision.id }),
-    },
+    layouts: { route: at("/schedule/layouts"), kind: "sweep" },
     activities: {
-      route: `/api/v1/projects/${project.id}/activities`,
-      service: () => activityService.listActivities({ orgId: live.org.id, projectId: project.id }),
+      route: at("/activities"),
+      kind: "keys",
+      service: () => activityService.listActivities(ids()),
     },
     activity: {
-      route: `/api/v1/projects/${project.id}/activities/${activities.pour.id}`,
-      service: () => activityService.getActivityById({ orgId: live.org.id, projectId: project.id, activityId: activities.pour.id }),
+      route: at(`/activities/${activities.pour.id}`),
+      kind: "keys",
+      service: () => activityService.getActivityById({ ...ids(), activityId: activities.pour.id }),
+    },
+    progressSubmissions: { route: at("/activities/progress-submissions?status=submitted"), kind: "sweep" },
+    lookaheads: { route: at("/lookaheads"), kind: "sweep" },
+    lookaheadConstraints: { route: at("/lookaheads/constraints"), kind: "sweep" },
+    periods: { route: at("/reports/periods"), kind: "sweep", cost: true },
+    ev: {
+      route: at("/reports/ev"),
+      kind: "ev",
+      cost: true,
+      service: () => evService.buildOfficialEvReport(ids()),
+    },
+    lockedEv: {
+      route: at(`/reports/ev?periodId=${lockedPeriod.id}`),
+      kind: "ev",
+      cost: true,
+      service: () => evService.buildOfficialEvReport({ ...ids(), periodId: lockedPeriod.id }),
+    },
+    resources: { route: at("/schedule/resources"), kind: "sweep" },
+    risks: { route: at("/risks"), kind: "sweep" },
+    longLead: { route: at("/long-lead"), kind: "sweep" },
+    // The project's WBS rows are the structure module's, which the BOQ tool
+    // gates: refused to every member here (the tab then shows the revision's).
+    wbs: { route: at("/structure/wbs"), kind: "sweep", boq: true },
+    history: {
+      route: at(`/audit?entityType=schedule_revision&entityId=${stagedRevision.id}&limit=20&order=desc`),
+      kind: "audit",
+    },
+    // The same endpoint, asked for everything: the bill's history is not
+    // reached by leaving the filter off.
+    fullHistory: { route: at("/audit?limit=100"), kind: "audit" },
+    revisions: {
+      route: at("/schedule/revisions"),
+      kind: "keys",
+      service: () => scheduleService.listRevisions(ids()),
+    },
+    activeReadiness: {
+      route: at(`/schedule/revisions/${activeRevision.id}/readiness`),
+      kind: "keys",
+      service: () => scheduleService.getScheduleReadiness({ ...ids(), revisionId: activeRevision.id }),
+    },
+    stagedReadiness: {
+      route: at(`/schedule/revisions/${stagedRevision.id}/readiness`),
+      kind: "keys",
+      service: () => scheduleService.getScheduleReadiness({ ...ids(), revisionId: stagedRevision.id }),
+    },
+    stagedRevision: {
+      route: at(`/schedule/revisions/${stagedRevision.id}`),
+      kind: "keys",
+      service: () => scheduleService.getRevision({ ...ids(), revisionId: stagedRevision.id }),
+    },
+    activeRevision: {
+      route: at(`/schedule/revisions/${activeRevision.id}`),
+      kind: "keys",
+      service: () => scheduleService.getRevision({ ...ids(), revisionId: activeRevision.id }),
+    },
+    mapping: {
+      route: at(`/schedule/revisions/${stagedRevision.id}/mapping`),
+      kind: "keys",
+      service: () => scheduleService.getRevisionMapping({ ...ids(), revisionId: stagedRevision.id }),
     },
   });
 
+  // Who is swept, and what each may not receive.
+  const viewers = () => ({
+    // Neither the BOQ nor the cost module.
+    siteEngineer: {
+      user: members.siteEngineer,
+      readsCost: false,
+      withheld: new Set([...BOQ_KEYS, ...BUDGET_KEYS]),
+      secrets: ["71793.5", "30273.9", "21337", "20182.6", "41519.6", "69999.99", "50456.5", "213.37", "1009.13"],
+    },
+    // The cost module, not the BOQ: the budgets stay.
+    costController: { user: members.costController, readsCost: true, withheld: new Set(BOQ_KEYS), secrets: ["71793.5", "30273.9", "50456.5", "213.37", "1009.13"] },
+    planningEngineer: { user: members.planningEngineer, readsCost: true, withheld: new Set(BOQ_KEYS), secrets: ["71793.5", "30273.9", "50456.5", "213.37", "1009.13"] },
+    pm: { user: members.pm, readsCost: true, withheld: new Set(BOQ_KEYS), secrets: ["71793.5", "30273.9", "50456.5", "213.37", "1009.13"] },
+  });
+
+  // The EV report is a cost reader's, and so is its budget: the approved
+  // allocations' sum it states (top level and in its source summary) stays.
+  const EV_BUDGET_PATHS = new Set([".approvedAllocatedAmount", ".sourceSummary.budget.approvedAllocatedAmount"]);
+
+  // The forecast without its money, where the money sits.
+  const forecastWithoutMoney = (forecast) => {
+    const copy = clone(forecast);
+    const activityCost = (activity) => drop(activity?.cost, FORECAST_ACTIVITY_COST_KEYS);
+    (copy.activities || []).forEach(activityCost);
+    (copy.schedule?.topRisks || []).forEach(activityCost);
+    if (copy.cost) {
+      drop(copy.cost, FORECAST_COST_KEYS);
+      (copy.cost.topRisks || []).forEach(activityCost);
+      (copy.cost.budgetLines || []).forEach((line) => drop(line, FORECAST_LINE_KEYS));
+    }
+    return copy;
+  };
+
+  // The EV report without the bill's figures, where they sit.
+  const evWithoutBill = (report) => {
+    const copy = clone(report);
+    delete copy.unallocatedBoqAmount;
+    for (const list of ["blockers", "warnings"]) {
+      for (const entry of copy.readinessGate?.[list] || []) {
+        if (entry.details) drop(entry.details, BOQ_KEYS);
+      }
+    }
+    return copy;
+  };
+
+  // The history without the bill's records, and (for a reader of neither
+  // the BOQ nor the cost module) without a revision's totals.
+  const historyWithoutBill = (history, readsCost) => {
+    const copy = clone(history);
+    copy.events = copy.events.filter((event) => !BOQ_RECORD_TYPES.includes(event.recordType || event.entityType));
+    if (!readsCost) {
+      for (const event of copy.events) {
+        if ((event.recordType || event.entityType) !== "schedule_revision") continue;
+        for (const summary of ["oldSummary", "newSummary", "summary"]) drop(event[summary], ["totalBudget", "generatedTotalBudget"]);
+      }
+    }
+    return copy;
+  };
+
   it("a BOQ reader receives exactly the service's answer — the figures, byte for byte", async () => {
     for (const [name, { route, service }] of Object.entries(reads())) {
+      if (!service) continue;
       const response = await api.get(route, auth());
       expect([name, response.status, response.body?.error]).toEqual([name, 200, undefined]);
       const expected = JSON.stringify({ success: true, data: normalizeMoneyTree(await service()) });
@@ -294,50 +466,193 @@ liveDescribe("PC-4 §12: the schedule and the activities carry no BOQ figure to 
     const staged = (await api.get(reads().stagedRevision.route, auth())).body.data;
     expect(staged.snapshotJson.boqRows).toHaveLength(2);
     expect(staged.readiness.checks.find((check) => check.key === "allocations").details).toHaveProperty("totalBoqAmount");
+    // The forecast's money: the approved allocations as the activity budgets.
+    const forecast = (await api.get(reads().forecast.route, auth())).body.data;
+    expect(forecast.cost.budget).toBe(41519.6);
+    expect(forecast.activities.find((activity) => activity.id === activities.pour.id).cost.budget).toBe(21337);
+    // The EV report's open bill value and the readiness gate's bill figures,
+    // live and as the locked period stored them.
+    for (const name of ["ev", "lockedEv"]) {
+      const report = (await api.get(reads()[name].route, auth())).body.data;
+      expect([name, report.unallocatedBoqAmount]).toEqual([name, 30273.9]);
+      expect([name, keyPaths(report.readinessGate, new Set(["unallocatedAmount"])).length > 0]).toEqual([name, true]);
+    }
+    // The staged revision's history records its total; the bill's records have history.
+    const history = (await api.get(reads().history.route, auth())).body.data;
+    // (The summary stores the total as the Decimal it was, not as a number:
+    // the key is what is swept for.)
+    expect(history.events.some((event) => event.newSummary && "totalBudget" in event.newSummary)).toBe(true);
+    const fullHistory = (await api.get(reads().fullHistory.route, auth())).body.data;
+    expect(fullHistory.events.some((event) => BOQ_RECORD_TYPES.includes(event.recordType))).toBe(true);
   });
 
-  it("a member without BOQ read receives none of the bill's figures — and a member without cost read none of its budgets — and everything else unchanged", async () => {
-    const viewers = {
-      // Neither the BOQ nor the cost module.
-      siteEngineer: { user: siteEngineer, withheld: new Set([...BOQ_KEYS, ...BUDGET_KEYS]), secrets: ["71793.5", "30273.9", "21337", "20182.6", "41519.6", "69999.99", "50456.5"] },
-      // The cost module, not the BOQ: the budgets stay.
-      costController: { user: costController, withheld: new Set(BOQ_KEYS), secrets: ["71793.5", "30273.9", "50456.5"] },
-    };
-    for (const [viewer, { user, withheld, secrets }] of Object.entries(viewers)) {
-      const viewerAuth = { authorization: `Bearer ${mintAccessToken(user)}` };
+  it("the site engineer, the cost controller, the planning engineer and a PM, all without BOQ read, receive none of the bill's figures from any request of the Overview or the Schedule module — and everything else unchanged", async () => {
+    for (const [viewer, { user, readsCost, withheld, secrets }] of Object.entries(viewers())) {
+      const viewerAuth = as(user);
       // The BOQ endpoints refuse this member — the premise of §12.
-      expect([viewer, (await api.get(`/api/v1/projects/${project.id}/boq`, viewerAuth)).status]).toEqual([viewer, 403]);
-      for (const [name, { route }] of Object.entries(reads())) {
+      expect([viewer, (await api.get(at("/boq"), viewerAuth)).status]).toEqual([viewer, 403]);
+      for (const [name, { route, kind, cost, boq }] of Object.entries(reads())) {
         const [full, limited] = await Promise.all([api.get(route, auth()), api.get(route, viewerAuth)]);
+        expect([viewer, name, full.status]).toEqual([viewer, name, 200]);
+        if (boq || (cost && !readsCost)) {
+          // A cost reader's request: refused outright, in the envelope.
+          expect([viewer, name, limited.status, limited.body?.success, limited.body?.error?.code]).toEqual([viewer, name, 403, false, "FORBIDDEN"]);
+          continue;
+        }
         expect([viewer, name, limited.status, limited.body?.error]).toEqual([viewer, name, 200, undefined]);
-        // Not one withheld key, anywhere in the answer.
-        expect([viewer, name, keyPaths(limited.body.data, withheld)]).toEqual([viewer, name, []]);
+        // Not one withheld key, anywhere in the answer (the EV report's
+        // budget excepted for its cost reader) ...
+        const kept = kind === "ev" ? EV_BUDGET_PATHS : new Set();
+        const found = keyPaths(limited.body.data, withheld).filter((path) => !kept.has(path));
+        expect([viewer, name, found]).toEqual([viewer, name, []]);
+        // ... and not one of the bill's figures, whatever it is called.
         for (const secret of secrets) {
           expect([viewer, name, secret, limited.text.includes(secret)]).toEqual([viewer, name, secret, false]);
         }
-        // Everything else is the BOQ reader's answer, key for key: statuses,
-        // codes, verdicts, ready, blockingCount, counts, the allocation count.
-        const expected = without(JSON.parse(unstamped(full.text)).data, withheld);
-        expect([viewer, name, JSON.parse(unstamped(limited.text)).data]).toEqual([viewer, name, expected]);
+        // Everything else is the BOQ reader's answer.
+        const mine = parsed(limited.text).data;
+        const theirs = parsed(full.text).data;
+        if (kind === "keys") {
+          expect([viewer, name, mine]).toEqual([viewer, name, without(theirs, withheld)]);
+        } else if (kind === "forecast") {
+          expect([viewer, name, mine]).toEqual([viewer, name, readsCost ? theirs : forecastWithoutMoney(theirs)]);
+        } else if (kind === "ev") {
+          expect([viewer, name, mine]).toEqual([viewer, name, evWithoutBill(theirs)]);
+        } else if (kind === "audit") {
+          expect([viewer, name, mine]).toEqual([viewer, name, historyWithoutBill(theirs, readsCost)]);
+        }
       }
       const schedule = (await api.get(reads().schedule.route, viewerAuth)).body.data;
       const pour = schedule.activities.find((activity) => activity.id === activities.pour.id);
       expect(pour.approvedAllocationCount).toBe(1);
       const allocations = schedule.revision.readiness.checks.find((check) => check.key === "allocations");
       expect(allocations).toMatchObject({ key: "allocations", severity: "blocking", passed: false });
-      // The budget: the cost controller reads it in the Cost module already.
-      expect([viewer, "budget" in pour, pour.budget]).toEqual(
-        viewer === "costController" ? [viewer, true, 21337] : [viewer, false, undefined],
-      );
+      // The budget: a cost reader reads it in the Cost module already.
+      expect([viewer, "budget" in pour, pour.budget]).toEqual(readsCost ? [viewer, true, 21337] : [viewer, false, undefined]);
+      // The forecast: the levels and counts stay; the money only for a cost reader.
+      const forecast = (await api.get(reads().forecast.route, viewerAuth)).body.data;
+      expect([viewer, forecast.cost.budget, typeof forecast.cost.counts.lines, typeof forecast.summary.costLevel]).toEqual([
+        viewer,
+        readsCost ? 41519.6 : undefined,
+        "number",
+        "string",
+      ]);
+      for (const activity of forecast.activities) {
+        expect([viewer, Object.keys(activity.cost).sort()]).toEqual([
+          viewer,
+          readsCost ? ["actual", "basis", "budget", "committed", "level", "overrun", "overrunPct", "projected", "reasons"] : ["basis", "level"],
+        ]);
+      }
     }
   });
 
+  it("the forecast's explanation is written from the forecast its reader receives", async () => {
+    const full = await post(at("/forecast/explain"), {});
+    expect([full.status, full.body?.error, full.body.data.degraded]).toEqual([200, undefined, true]);
+    // A BOQ reader: the service's answer, byte for byte.
+    const service = await forecastService.explain({ ...ids(), user: { ...live.user, role: "pm" } });
+    expect(unstamped(full.text)).toBe(unstamped(JSON.stringify({ success: true, data: normalizeMoneyTree(service) })));
+    expect(full.body.data.narrative.cost).not.toMatch(/not available/);
+    for (const [viewer, { user, readsCost, secrets }] of Object.entries(viewers())) {
+      const explained = await api.post(at("/forecast/explain"), {}, as(user));
+      expect([viewer, explained.status, explained.body?.error]).toEqual([viewer, 200, undefined]);
+      for (const secret of secrets) {
+        expect([viewer, secret, explained.text.includes(secret)]).toEqual([viewer, secret, false]);
+      }
+      const mine = parsed(explained.text).data;
+      const theirs = parsed(full.text).data;
+      if (readsCost) {
+        expect([viewer, mine]).toEqual([viewer, theirs]);
+      } else {
+        expect(mine.forecast).toEqual(forecastWithoutMoney(theirs.forecast));
+        expect(mine.narrative.cost).toBe("The cost figures are not available to you on this project.");
+        expect(mine.narrative.headline).not.toMatch(/over budget/);
+      }
+    }
+  });
+
+  it("a PM without BOQ read, refused a lifecycle step or a period lock over readiness, is told why without the bill's figures", async () => {
+    const pmAuth = as(members.pm);
+    const refusals = {
+      approve: { route: at(`/schedule/revisions/${stagedRevision.id}/approve`), code: "SCHEDULE_NOT_READY", status: 400 },
+      baselineRevision: { route: at(`/schedule/revisions/${activeRevision.id}/baseline`), code: "SCHEDULE_NOT_READY", status: 400 },
+      baselineCurrent: { route: at("/schedule/baseline"), body: { revisionId: activeRevision.id }, code: "SCHEDULE_NOT_READY", status: 400 },
+      lock: { route: at(`/reports/periods/${openPeriod.id}/lock`), code: "REPORTING_READINESS_BLOCKED", status: 409 },
+    };
+    for (const [name, { route, body = {}, code, status }] of Object.entries(refusals)) {
+      const [full, limited] = [await api.post(route, body, auth()), await api.post(route, body, pmAuth)];
+      // The same refusal for both: status, code, message, and the verdicts.
+      expect([name, full.status, full.body?.error?.code]).toEqual([name, status, code]);
+      expect([name, limited.status, limited.body?.success, limited.body?.error?.code, limited.body?.error?.message]).toEqual([
+        name,
+        status,
+        false,
+        code,
+        full.body.error.message,
+      ]);
+      // The BOQ reader is told the bill's figures ...
+      expect([name, keyPaths(full.body.error.details, new Set(BOQ_KEYS)).length > 0]).toEqual([name, true]);
+      // ... the PM without BOQ read is not, and is told everything else.
+      expect([name, keyPaths(limited.body.error.details, new Set(BOQ_KEYS))]).toEqual([name, []]);
+      for (const secret of ["71793.5", "30273.9", "50456.5"]) {
+        expect([name, secret, limited.text.includes(secret)]).toEqual([name, secret, false]);
+      }
+      expect([name, parsed(limited.text).error.details]).toEqual([name, without(parsed(full.text).error.details, new Set(BOQ_KEYS))]);
+      if (code === "SCHEDULE_NOT_READY") {
+        expect([name, limited.body.error.details.ready, limited.body.error.details.blockingCount]).toEqual([
+          name,
+          false,
+          full.body.error.details.blockingCount,
+        ]);
+      }
+    }
+    // The BOQ reader's refusal is the service's own, byte for byte.
+    const thrown = await scheduleService
+      .approveRevision({ ...ids(), revisionId: stagedRevision.id, userId: live.user.id, userRole: "pm" })
+      .then(() => null, (error) => error);
+    expect(thrown?.code).toBe("SCHEDULE_NOT_READY");
+    const approveFull = await api.post(refusals.approve.route, {}, auth());
+    expect(unstamped(JSON.stringify(approveFull.body.error.details))).toBe(unstamped(JSON.stringify(normalizeMoneyTree(thrown.details))));
+    // Nothing moved: the revisions and the period are as they were.
+    const [staged, active, period] = await Promise.all([
+      prisma.scheduleRevision.findUnique({ where: { id: stagedRevision.id }, select: { status: true } }),
+      prisma.scheduleRevision.findUnique({ where: { id: activeRevision.id }, select: { status: true } }),
+      prisma.reportingPeriod.findUnique({ where: { id: openPeriod.id }, include: { evSnapshot: { select: { id: true } } } }),
+    ]);
+    expect([staged.status, active.status, period.evSnapshot]).toEqual(["under_review", "approved", null]);
+  });
+
+  it("a PM without BOQ read who locks a period over the gate is answered with the report without the bill's figures", async () => {
+    const locked = await api.post(at(`/reports/periods/${openPeriod.id}/lock`), { overrideReason: "LiveTest: PM without BOQ read" }, as(members.pm));
+    expect([locked.status, locked.body?.error]).toEqual([200, undefined]);
+    expect(keyPaths(locked.body.data, new Set(BOQ_KEYS)).filter((path) => !EV_BUDGET_PATHS.has(path))).toEqual([]);
+    for (const secret of ["71793.5", "30273.9", "50456.5"]) expect([secret, locked.text.includes(secret)]).toEqual([secret, false]);
+    // The same report the BOQ reader now reads for that period, without the bill.
+    const full = await api.get(at(`/reports/ev?periodId=${openPeriod.id}`), auth());
+    expect(full.body.data.unallocatedBoqAmount).toBe(30273.9);
+    expect(parsed(locked.text).data).toEqual(evWithoutBill(parsed(full.text).data));
+    // ... and the snapshot it stored is the whole one (output only).
+    const snapshot = await prisma.evPeriodSnapshot.findFirst({ where: { reportingPeriodId: openPeriod.id } });
+    expect(snapshot.basisJson.unallocatedBoqAmount).toBe(30273.9);
+  });
+
+  it("output only: the locked period's stored snapshot keeps the gate as it was frozen", async () => {
+    const snapshot = await prisma.evPeriodSnapshot.findFirst({ where: { reportingPeriodId: lockedPeriod.id } });
+    expect(snapshot).toBeTruthy();
+    expect(snapshot.basisJson.unallocatedBoqAmount).toBe(30273.9);
+    expect(keyPaths(snapshot.basisJson.readinessGate, new Set(["unallocatedAmount"])).length > 0).toBe(true);
+  });
+
   it("the progress a site engineer submits comes back without the activity's figures", async () => {
-    const viewerAuth = { authorization: `Bearer ${mintAccessToken(siteEngineer)}` };
-    const submitted = await api.post(`/api/v1/projects/${project.id}/activities/${activities.fix.id}/progress`, { pctComplete: 10, status: "submitted" }, viewerAuth);
+    const viewerAuth = as(members.siteEngineer);
+    const submitted = await api.post(at(`/activities/${activities.fix.id}/progress`), { pctComplete: 10, status: "submitted" }, viewerAuth);
     expect([submitted.status, submitted.body?.error]).toEqual([200, undefined]);
     expect(submitted.body.data.activity.id).toBe(activities.fix.id);
     expect(submitted.body.data.submission).toBeTruthy();
     expect(keyPaths(submitted.body.data, new Set([...BOQ_KEYS, ...BUDGET_KEYS]))).toEqual([]);
+    // ... and the Progress tab's list of submissions carries none either.
+    const listed = await api.get(at("/activities/progress-submissions?status=submitted"), viewerAuth);
+    expect([listed.status, listed.body.data.length > 0]).toEqual([200, true]);
+    expect(keyPaths(listed.body.data, new Set([...BOQ_KEYS, ...BUDGET_KEYS]))).toEqual([]);
   });
 });

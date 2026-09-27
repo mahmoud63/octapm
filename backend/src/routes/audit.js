@@ -6,11 +6,16 @@ const { authenticate } = require('../middleware/auth');
 const { requirePermission } = require('../middleware/rbac');
 const { validate } = require('../middleware/validate');
 const auditService = require('../services/audit.service');
+const { boqFigureAccess, withheldAuditHistory } = require('../utils/boq-figures');
 
 const router = express.Router({ mergeParams: true });
 
 router.use(authenticate);
 
+// The history is the project's, and every audit reader's — except the
+// bill's figures in it (§12, utils/boq-figures): the history of the BOQ's
+// records for those who may read the BOQ, a schedule revision's total budget
+// for those who may read the BOQ or the cost module.
 router.get(
   '/',
   requirePermission('audit', 'read'),
@@ -39,7 +44,7 @@ router.get(
       limit: req.query.limit || 50,
       order: req.query.order || 'asc',
     });
-    return sendSuccess(res, result);
+    return sendSuccess(res, withheldAuditHistory(result, boqFigureAccess(req)));
   }),
 );
 

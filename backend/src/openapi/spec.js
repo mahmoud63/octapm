@@ -7802,6 +7802,8 @@ add(
   operation({
     tag: "Schedule",
     summary: "Lock the approved current schedule as baseline.",
+    description:
+      "The BOQ value figures in the answer's readiness are present only for a caller who may read the BOQ. A schedule that is not ready is refused with 400 SCHEDULE_NOT_READY and the readiness in error.details, whose BOQ value figures are likewise present only for a caller who may read the BOQ; ready, blockingCount and the checks' verdicts are the same for every caller.",
     operationId: "baselineCurrentSchedule",
     parameters: projectParams,
     permissions: modulePermission("schedule", "baseline", "revision.baseline"),
@@ -7819,6 +7821,9 @@ add(
 // §12, as utils/boq-figures applies it to every answer that carries a revision.
 const REVISION_FIGURES =
   "The BOQ value figures in readiness.checks[].details (and a revision's unallocatedBoqAmount) are present only for a caller who may read the BOQ; totalBudget and generatedTotalBudget only for a caller who may read the BOQ or the cost module. Check keys, verdicts and counts are the same for every caller.";
+// ... and to the refusal that states the readiness.
+const NOT_READY_FIGURES =
+  "A schedule that is not ready is refused with 400 SCHEDULE_NOT_READY and the readiness in error.details, whose BOQ value figures are likewise present only for a caller who may read the BOQ; ready, blockingCount and the checks' verdicts are the same for every caller.";
 
 add(
   "/projects/{projectId}/schedule/revisions",
@@ -7926,6 +7931,7 @@ add(
     operation({
       tag: "Schedule Revisions",
       summary,
+      description: ["approve", "baseline"].includes(suffix) ? `${REVISION_FIGURES} ${NOT_READY_FIGURES}` : REVISION_FIGURES,
       operationId,
       parameters: [
         ...projectParams,
@@ -7943,6 +7949,7 @@ add(
   operation({
     tag: "Schedule Revisions",
     summary: "Activate an approved staged schedule revision.",
+    description: REVISION_FIGURES,
     operationId: "activateScheduleRevision",
     parameters: [
       ...projectParams,
@@ -8335,12 +8342,17 @@ add(
   }),
 );
 
+// §12, as utils/boq-figures applies it to the official EV report.
+const EV_REPORT_FIGURES =
+  "The report is a cost reader's: the budget (totalBudget, approvedAllocatedAmount) is every such caller's. unallocatedBoqAmount, and the BOQ value figures in readinessGate.blockers[].details and readinessGate.warnings[].details, are present only for a caller who may read the BOQ. Output only: a locked period's stored snapshot is not changed.";
+
 add(
   "/projects/{projectId}/reports/periods/{periodId}/lock",
   "post",
   operation({
     tag: "Reports",
     summary: "Lock a reporting period EV snapshot.",
+    description: `${EV_REPORT_FIGURES} A lock refused by the official-reporting readiness gate (409 REPORTING_READINESS_BLOCKED, 403 REPORTING_READINESS_OVERRIDE_FORBIDDEN) states the gate in error.details.gate, withheld the same way.`,
     operationId: "lockReportingPeriod",
     parameters: [
       ...projectParams,
@@ -8454,6 +8466,7 @@ add(
     tag: "Reports",
     summary:
       "Build official earned value report for a reporting period or cutoff date.",
+    description: EV_REPORT_FIGURES,
     operationId: "getEarnedValueReport",
     parameters: [
       ...projectParams,
@@ -10802,7 +10815,8 @@ addGenericRoute({
   path: "/projects/{projectId}/audit",
   method: "get",
   tag: "Audit",
-  summary: "List project audit events.",
+  summary:
+    "List project audit events. The history of the BOQ's records (boq_item, boq_revision, activity_boq_allocation) is present only for a caller who may read the BOQ, and a schedule_revision event's totalBudget in its summaries only for a caller who may read the BOQ or the cost module.",
   description:
     "Returns tenant-scoped centralized audit events. Each write also persists a compact redacted RecordHistorySnapshot row for contractual record history reconstruction.",
   operationId: "listProjectAuditEvents",
@@ -14904,13 +14918,16 @@ const dailyLogAiPhotoSchema = objectSchema({ id: uuid, ref: { type: "string" }, 
 
 // ─── Schedule delay and cost overrun prediction (OCTA-AI-PREDICT-031) ─────
 const forecastLevel = { type: "string", enum: ["high", "medium", "low"] };
+// §12, as utils/boq-figures applies it to the forecast.
+const FORECAST_FIGURES =
+  "The cost view's money (cost.budget, eac, bottomUp, projected, overrun, overrunPct and actual; each activity's cost.budget, actual, committed, projected, overrun, overrunPct and reasons; each budget line's revised, committed, actual, forecast, overrun and overrunPct) is present only for a caller who may read the BOQ or the cost module. Levels, bases and counts are the same for every caller.";
 const forecastBlockerSchema = objectSchema({ type: { type: "string", enum: ["rfi", "submittal", "long_lead"] }, id: uuid, ref: { type: "string", nullable: true }, title: { type: "string" }, status: { type: "string", nullable: true }, due: nullableDateString, overdue: { type: "boolean" } });
 const forecastActivitySchema = objectSchema({ id: uuid, name: { type: "string" }, code: { type: "string", nullable: true }, isCritical: { type: "boolean" }, isMilestone: { type: "boolean" }, status: { type: "string" }, pct: { type: "number" }, expectedPct: { type: "number", nullable: true }, gap: { type: "number" }, velocity: { type: "number", nullable: true, description: "% per day from approved progress in the last 45 days." }, lastProgressAt: nullableDateString, plannedStart: { type: "string", nullable: true }, plannedFinish: { type: "string", nullable: true }, projectedFinish: { type: "string", nullable: true }, basis: { type: "string", enum: ["complete", "planned", "velocity", "pace", "overdue", "late_start"] }, slipDays: { type: "integer" }, impactDays: { type: "number" }, float: { type: "number", nullable: true }, floatBreached: { type: "boolean" }, stalledDays: { type: "integer" }, blockers: arrayOf(forecastBlockerSchema), score: { type: "integer" }, level: forecastLevel, reasons: arrayOf({ type: "string" }), cost: objectSchema({ budget: { type: "number" }, actual: { type: "number" }, committed: { type: "number" }, projected: { type: "number", nullable: true }, basis: { type: "string", nullable: true }, overrun: { type: "number" }, overrunPct: { type: "number" }, level: forecastLevel, reasons: arrayOf({ type: "string" }) }) });
 const forecastSchema = objectSchema({ available: { type: "boolean" }, reason: { type: "string", nullable: true }, asOf: dateString, schedule: nullableRef("GenericObject"), cost: nullableRef("GenericObject"), summary: nullableRef("GenericObject"), dataQuality: arrayOf({ type: "string" }), activities: arrayOf(forecastActivitySchema) });
 const forecastActionSchema = objectSchema({ type: { type: "string", enum: ["create_risk", "create_task", "open"] }, label: { type: "string" }, activityId: nullableUuid, activityName: { type: "string", nullable: true }, title: { type: "string", nullable: true }, description: { type: "string", nullable: true }, probability: { ...forecastLevel, nullable: true }, impact: { ...forecastLevel, nullable: true }, mitigation: { type: "string", nullable: true } });
 [
-  { method: "get", path: "/projects/{projectId}/forecast", summary: "Schedule and cost forecast from the project's own records: per-activity velocity from approved progress, projected finish vs plan, float and critical path, recorded impacts (RFI / submittal / risk / weather links), open items holding the activity, burn-rate cost projection, budget lines over; project finish = later of EV-based and activity-based, cost = higher of EAC and bottom-up. No model call.", operationId: "getProjectForecast", parameters: projectParams, permissions: modulePermission("schedule", "read"), responseSchema: forecastSchema },
-  { method: "post", path: "/projects/{projectId}/forecast/explain", summary: "Plain-language narrative of the forecast with up to five draft actions (create_risk, create_task, open); built from the forecast itself when no provider answers (`degraded`). 409 FORECAST_UNAVAILABLE without a schedule.", operationId: "explainProjectForecast", parameters: projectParams, permissions: modulePermission("schedule", "read"), responseSchema: objectSchema({ degraded: { type: "boolean" }, reason: { type: "string", nullable: true }, forecast: forecastSchema, narrative: objectSchema({ headline: { type: "string" }, schedule: { type: "string" }, cost: { type: "string" }, watch: arrayOf({ type: "string" }), actions: arrayOf(forecastActionSchema) }), message: nullableRef("GenericObject") }) },
+  { method: "get", path: "/projects/{projectId}/forecast", summary: "Schedule and cost forecast from the project's own records: per-activity velocity from approved progress, projected finish vs plan, float and critical path, recorded impacts (RFI / submittal / risk / weather links), open items holding the activity, burn-rate cost projection, budget lines over; project finish = later of EV-based and activity-based, cost = higher of EAC and bottom-up. No model call. " + FORECAST_FIGURES, operationId: "getProjectForecast", parameters: projectParams, permissions: modulePermission("schedule", "read"), responseSchema: forecastSchema },
+  { method: "post", path: "/projects/{projectId}/forecast/explain", summary: "Plain-language narrative of the forecast with up to five draft actions (create_risk, create_task, open); built from the forecast itself when no provider answers (`degraded`). 409 FORECAST_UNAVAILABLE without a schedule. The explanation is written from the forecast this caller receives. " + FORECAST_FIGURES, operationId: "explainProjectForecast", parameters: projectParams, permissions: modulePermission("schedule", "read"), responseSchema: objectSchema({ degraded: { type: "boolean" }, reason: { type: "string", nullable: true }, forecast: forecastSchema, narrative: objectSchema({ headline: { type: "string" }, schedule: { type: "string" }, cost: { type: "string" }, watch: arrayOf({ type: "string" }), actions: arrayOf(forecastActionSchema) }), message: nullableRef("GenericObject") }) },
   { method: "post", path: "/projects/{projectId}/forecast/actions", summary: "Run a confirmed action: create_risk (risk register, linked to the activity; needs risk.create) or create_task (needs task.create).", operationId: "runProjectForecastAction", parameters: projectParams, permissions: modulePermission("schedule", "read"), requestBody: jsonBody(objectSchema({ action: forecastActionSchema }, ["action"]), "Action."), responseSchema: objectSchema({ type: { type: "string" }, record: ref("GenericObject"), url: { type: "string" } }), status: 201 },
 ].forEach((route) => addGenericRoute({ tag: "Assistant", ...route }));
 

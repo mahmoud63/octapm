@@ -5,6 +5,7 @@ const assistant = require("./assistant.service");
 const scheduleService = require("./schedule.service");
 const evService = require("./earned-value.service");
 const budgetService = require("./budget.service");
+const { forecastCostWithheld, withheldForecast } = require("../utils/boq-figures");
 
 /**
  * Schedule delay and cost overrun prediction (OCTA-AI-PREDICT-031).
@@ -374,6 +375,24 @@ Return ONLY a JSON object:
 
 const money = (value) => (value === null || value === undefined ? "—" : Number(value).toLocaleString("en-US", { maximumFractionDigits: 0 }));
 
+const costLines = (c) => [
+  `Cost: budget ${money(c.budget)}, EAC ${money(c.eac)}, bottom-up ${money(c.bottomUp)}, projected ${money(c.projected)} (${c.overrun > 0 ? `${money(c.overrun)} over` : "within budget"}); actual to date ${money(c.actual)}.`,
+  "Activities over budget:",
+  ...(c.topRisks.length ? c.topRisks.slice(0, 6).map((row) => `- [${row.id}] ${row.name} · budget ${money(row.cost.budget)} · actual ${money(row.cost.actual)} · projected ${money(row.cost.projected)} (${money(row.cost.overrun)} over, ${row.cost.overrunPct}%) · ${row.cost.reasons.join("; ") || row.cost.basis}`) : ["- none"]),
+  "Budget lines over:",
+  ...(c.budgetLines.length ? c.budgetLines.slice(0, 6).map((row) => `- ${row.costCode || ""} ${row.name} · revised ${money(row.revised)} · forecast ${money(row.forecast)} · committed ${money(row.committed)} · ${money(row.overrun)} over`) : ["- none"]),
+];
+
+// For a reader whose forecast carries no cost figure (§12, utils/boq-figures):
+// the levels and the names, and no amount for the model to repeat.
+const withheldCostLines = (c) => [
+  `Cost: the cost figures are not available to this reader; do not state or estimate any cost amount. Cost risk: ${c.counts.atRisk.high} high, ${c.counts.atRisk.medium} medium; ${c.counts.lines} budget lines over.`,
+  "Activities over budget:",
+  ...(c.topRisks.length ? c.topRisks.slice(0, 6).map((row) => `- [${row.id}] ${row.name} · cost risk ${row.cost.level}`) : ["- none"]),
+  "Budget lines over:",
+  ...(c.budgetLines.length ? c.budgetLines.slice(0, 6).map((row) => `- ${row.costCode || ""} ${row.name} · ${row.level}`) : ["- none"]),
+];
+
 const forecastBlock = (forecast, projectName) => {
   const s = forecast.schedule;
   const c = forecast.cost;
@@ -387,26 +406,34 @@ const forecastBlock = (forecast, projectName) => {
     "Activities most at risk:",
     ...(s.topRisks.length ? s.topRisks.slice(0, 8).map((row) => `- [${row.id}] ${row.name}${row.code ? ` (${row.code})` : ""} · score ${row.score} ${row.level} · ${row.pct}% done vs ${row.expectedPct ?? "—"}% expected · velocity ${row.velocity ?? "—"}%/day · planned ${row.plannedFinish || "—"} → projected ${row.projectedFinish || "—"} (${row.slipDays} days${row.impactDays ? ` + ${row.impactDays} impact` : ""}) · float ${row.float ?? "—"}${row.isCritical ? " · critical" : ""}\n  ${row.reasons.join("; ")}`) : ["- none"]),
     "",
-    `Cost: budget ${money(c.budget)}, EAC ${money(c.eac)}, bottom-up ${money(c.bottomUp)}, projected ${money(c.projected)} (${c.overrun > 0 ? `${money(c.overrun)} over` : "within budget"}); actual to date ${money(c.actual)}.`,
-    "Activities over budget:",
-    ...(c.topRisks.length ? c.topRisks.slice(0, 6).map((row) => `- [${row.id}] ${row.name} · budget ${money(row.cost.budget)} · actual ${money(row.cost.actual)} · projected ${money(row.cost.projected)} (${money(row.cost.overrun)} over, ${row.cost.overrunPct}%) · ${row.cost.reasons.join("; ") || row.cost.basis}`) : ["- none"]),
-    "Budget lines over:",
-    ...(c.budgetLines.length ? c.budgetLines.slice(0, 6).map((row) => `- ${row.costCode || ""} ${row.name} · revised ${money(row.revised)} · forecast ${money(row.forecast)} · committed ${money(row.committed)} · ${money(row.overrun)} over`) : ["- none"]),
+    ...(forecastCostWithheld(forecast) ? withheldCostLines(c) : costLines(c)),
     forecast.dataQuality.length ? `\nData notes: ${forecast.dataQuality.join(" ")}` : null,
   ];
   return lines.filter((line) => line !== null).join("\n");
 };
 
+const scheduleRiskActions = (top) =>
+  top.filter((row) => row.level === "high").slice(0, 2).map((row) => ({ type: "create_risk", label: `Register the risk on ${row.name}`, activityId: row.id, title: `Delay risk: ${row.name}`, description: row.reasons.join("; "), probability: "high", impact: row.isCritical ? "high" : "medium", mitigation: null }));
+
 const deterministicNarrative = (forecast) => {
   const s = forecast.schedule;
   const c = forecast.cost;
   const top = s.topRisks.slice(0, 3);
+  if (forecastCostWithheld(forecast)) {
+    return {
+      headline: s.slipDays ? `The project is projected to finish ${plural(s.slipDays, "day")} late.` : "The project is projected to finish on time.",
+      schedule: top.length ? `${top.map((row) => `${row.name}: ${row.reasons[0] || `${row.level} risk`}`).join(". ")}.` : "No activity shows a schedule risk from the records.",
+      cost: "The cost figures are not available to you on this project.",
+      watch: [...top.map((row) => row.name), ...c.budgetLines.slice(0, 2).map((row) => `${row.costCode || ""} ${row.name}`.trim())].slice(0, 5),
+      actions: scheduleRiskActions(top),
+    };
+  }
   return {
     headline: s.slipDays ? `The project is projected to finish ${plural(s.slipDays, "day")} late${c.overrun > 0 ? ` and ${money(c.overrun)} over budget` : ""}.` : c.overrun > 0 ? `The finish holds but the cost is projected ${money(c.overrun)} over budget.` : "The project is projected on time and within budget.",
     schedule: top.length ? `${top.map((row) => `${row.name}: ${row.reasons[0] || `${row.level} risk`}`).join(". ")}.` : "No activity shows a schedule risk from the records.",
     cost: c.topRisks.length ? `${c.topRisks.slice(0, 3).map((row) => `${row.name} projected ${money(row.cost.overrun)} over (${row.cost.reasons[0] || row.cost.basis})`).join("; ")}.` : "No activity or budget line is projected over budget.",
     watch: [...top.map((row) => row.name), ...c.budgetLines.slice(0, 2).map((row) => `${row.costCode || ""} ${row.name}`.trim())].slice(0, 5),
-    actions: top.filter((row) => row.level === "high").slice(0, 2).map((row) => ({ type: "create_risk", label: `Register the risk on ${row.name}`, activityId: row.id, title: `Delay risk: ${row.name}`, description: row.reasons.join("; "), probability: "high", impact: row.isCritical ? "high" : "medium", mitigation: null })),
+    actions: scheduleRiskActions(top),
   };
 };
 
@@ -429,8 +456,11 @@ const normalizeActions = (actions, forecast) => {
 const runMessage = (stored) => (stored?.message ? { id: stored.message.id, provider: stored.message.provider, model: stored.message.model, feedback: stored.message.feedback } : null);
 
 /** Plain-language narrative with draft actions; stored on the project as an assistant run. */
-const explain = async ({ orgId, projectId, user, transport = null, asOf = new Date() }) => {
-  const forecast = await buildForecast({ orgId, projectId, asOf });
+const explain = async ({ orgId, projectId, user, transport = null, asOf = new Date(), access }) => {
+  // Written from the forecast this caller may receive (§12): a reader of
+  // neither the BOQ nor the cost module gives the model no cost figure and
+  // gets none back.
+  const forecast = withheldForecast(await buildForecast({ orgId, projectId, asOf }), access);
   if (!forecast.available) throw new HttpError(409, "FORECAST_UNAVAILABLE", forecast.reason);
   const project = await prisma.project.findFirst({ where: { id: projectId, orgId }, select: { name: true } });
   const text = forecastBlock(forecast, project?.name || "Project");

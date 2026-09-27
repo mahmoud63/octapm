@@ -44,16 +44,18 @@ export interface ForecastActivity {
   score: number
   level: ForecastLevel
   reasons: string[]
+  // The money is present only for a reader of the BOQ or the cost module
+  // (§12); the level and the basis are everyone's.
   cost: {
-    budget: number
-    actual: number
-    committed: number
-    projected: number | null
+    budget?: number
+    actual?: number
+    committed?: number
+    projected?: number | null
     basis: string | null
-    overrun: number
-    overrunPct: number
+    overrun?: number
+    overrunPct?: number
     level: ForecastLevel
-    reasons: string[]
+    reasons?: string[]
   }
 }
 
@@ -62,12 +64,12 @@ export interface ForecastBudgetLine {
   costCode: string | null
   name: string
   costType: string | null
-  revised: number
-  committed: number
-  actual: number
-  forecast: number
-  overrun: number
-  overrunPct: number | null
+  revised?: number
+  committed?: number
+  actual?: number
+  forecast?: number
+  overrun?: number
+  overrunPct?: number | null
   level: ForecastLevel
 }
 
@@ -94,14 +96,15 @@ export interface ProjectForecast {
     }
     topRisks: ForecastActivity[]
   } | null
+  // As on each activity: the money only for a BOQ or cost reader (§12).
   cost: {
-    budget: number
-    eac: number | null
-    bottomUp: number
-    projected: number
-    overrun: number
-    overrunPct: number | null
-    actual: number
+    budget?: number
+    eac?: number | null
+    bottomUp?: number
+    projected?: number
+    overrun?: number
+    overrunPct?: number | null
+    actual?: number
     counts: { atRisk: Record<ForecastLevel, number>; lines: number }
     topRisks: ForecastActivity[]
     budgetLines: ForecastBudgetLine[]

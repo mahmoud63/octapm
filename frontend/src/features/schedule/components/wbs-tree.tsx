@@ -40,14 +40,17 @@ type WbsNode = {
   level: number
   name: string
   duration: number
-  budget: number
+  // Absent when the snapshot carried none, or when it is withheld from
+  // someone who may read neither the BOQ nor the cost module (§12): never
+  // read as 0.
+  budget?: number
   activities: number
   responsible: string
   isPackage: boolean
   children: WbsNode[]
 }
 
-const fmtUSD = (n: number) =>
+const fmtUSD = (n: number | undefined) =>
   n
     ? '$' + Number(n).toLocaleString('en-US', { maximumFractionDigits: 0 })
     : '—'
@@ -58,7 +61,10 @@ const toNode = (node: FlatWbsNode, key: string, level: number): WbsNode => ({
   level,
   name: String(node.name || 'Unnamed'),
   duration: Number(node.duration) || 0,
-  budget: Number(node.budget) || 0,
+  budget:
+    node.budget === undefined || node.budget === null
+      ? undefined
+      : Number(node.budget) || 0,
   activities: Number(node.activities) || 0,
   responsible: String(node.responsible || ''),
   isPackage: Boolean(node.isPackage),
@@ -236,6 +242,9 @@ export function WbsTree({
       })),
     [tree]
   )
+  // The rollup is a chart of budgets: with none to chart (none carried, or
+  // withheld) it is not drawn, rather than drawn as bars of $0k.
+  const hasBudgets = topLevelData.some((node) => node.budget !== undefined)
 
   const initialExpanded = useMemo(
     () => new Set(tree.map((node) => node.key)),
@@ -323,8 +332,11 @@ export function WbsTree({
         </table>
       </div>
 
-      {!fromRows && (
-        <div className='rounded-md border p-3'>
+      {!fromRows && hasBudgets && (
+        <div
+          className='rounded-md border p-3'
+          data-testid='uat-schedule-wbs-rollup'
+        >
           <p className='mb-2 text-sm font-semibold'>
             Top-Level WBS Budget Rollup
           </p>

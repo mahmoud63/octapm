@@ -1,3 +1,5 @@
+import { spawnSync } from 'node:child_process'
+import { fileURLToPath } from 'node:url'
 import { test, expect } from '@playwright/test'
 import { API, apiClient } from './support'
 import {
@@ -409,15 +411,112 @@ test('the bill revision on the approval card, the strip figures as the services 
 })
 
 /**
- * §12 on screen: a site engineer whose permission template sets the BOQ
- * tool to none lands on the Overview, opens the Gantt and the Activities
- * list, and every one of them renders without an error while the server
- * hands this person no BOQ figure — the schedule's and the activities'
- * answers carry no allocated quantity, value or weight, no open value and
- * no budget (a site engineer has no cost tool either), and the Activities
- * list reads the withheld BOQ value as a dash, not as 0.
+ * §12 on screen: two members whose permission template sets the BOQ tool to
+ * none — a site engineer (no cost tool either) and a cost controller (who
+ * keeps it) — land on the Overview and open every tab of the Schedule
+ * module. Every page renders without an error, a withheld figure reads as a
+ * dash (never 0, $0k or NaN), and not one answer the browser receives on the
+ * way carries a figure the server withholds from that person: no allocated
+ * quantity, value or weight, no open or total bill value, no BOQ rows — and,
+ * for the site engineer, no budget, EAC or projected cost built from the
+ * bill either.
+ *
+ * The project carries an active generated revision (the generator's budgets
+ * and BOQ rows in its snapshot, a WBS with a budget) and a staged one under
+ * review, written into the LiveTest organisation by a backend script that
+ * refuses any other organisation — the product only makes such revisions
+ * through the AI generator.
  */
-test('a member who cannot read the BOQ: the landing, the Gantt and the Activities list render without errors and without a BOQ figure', async ({ page }) => {
+const TABS = [
+  'gantt',
+  'activities',
+  'progress',
+  'lookahead',
+  'critical',
+  'ev',
+  'forecast',
+  'milestones',
+  'resources',
+  'risks',
+  'longLead',
+  'wbs',
+  'revisions',
+] as const
+
+// The bill's figures: withheld from both members.
+const BOQ_KEYS = [
+  'allocatedBoqAmount',
+  'allocatedBoqQuantity',
+  'allocatedBoqWeight',
+  'unallocatedBoqAmount',
+  'totalBoqAmount',
+  'allocatableBoqAmount',
+  'approvedAllocatedAmount',
+  'pendingAllocatedAmount',
+  'unallocatedAmount',
+  'optionalUnallocatedAmount',
+  'notApplicableAmount',
+  'boqRows',
+]
+// The budgets built from the bill, and the forecast's money built from them:
+// withheld from the member who reads neither the BOQ nor the cost module.
+const BUDGET_KEYS = ['budget', 'generatedBudget', 'totalBudget', 'generatedTotalBudget', 'eac', 'bottomUp']
+
+const keyPaths = (value: unknown, keys: Set<string>, at = ''): string[] =>
+  value && typeof value === 'object'
+    ? Object.entries(value as Record<string, unknown>).flatMap(([key, inner]) => [
+        ...(keys.has(key) ? [`${at}.${key}`] : []),
+        ...keyPaths(inner, keys, `${at}.${key}`),
+      ])
+    : []
+
+const backendDir = fileURLToPath(new URL('../../backend/', import.meta.url))
+
+// The two revisions a generated schedule leaves, written straight into the
+// LiveTest organisation's project: the script refuses any organisation not
+// named `LiveTest <uuid>` and any project outside it.
+const seedGeneratedRevisions = (orgId: string, projectId: string) => {
+  const script = `
+require('./src/utils/data-script-guard').exitUnlessDataScriptAllowed('e2e:pc4-generated-revisions');
+const { prisma } = require('./src/config/db');
+const [orgId, projectId] = process.argv.slice(1);
+const snapshot = (label) => ({
+  projectSummary: { name: label, startDate: '2026-01-05', endDate: '2026-12-18', totalBudget: 69999.99 },
+  wbs: [{ code: 'A', level: 1, name: 'Substructure', budget: 69999.99 }],
+  boqRows: [
+    { description: 'Concrete in foundations', qty: 100, unit: 'm3', rate: 213.37, amount: 21337 },
+    { description: 'Reinforcement to foundations', qty: 50, unit: 't', rate: 1009.13, amount: 50456.5 },
+  ],
+  activities: [
+    { id: 'A100', activityCode: 'A100', name: 'Pour foundations', duration: 5, earlyStart: 0, earlyFinish: 5, lateStart: 0, lateFinish: 5, totalFloat: 0, isCritical: true, budget: 21337 },
+    { id: 'A110', activityCode: 'A110', name: 'Fix reinforcement', duration: 6, earlyStart: 5, earlyFinish: 11, lateStart: 5, lateFinish: 11, totalFloat: 0, isCritical: true, predecessors: 'A100', budget: 48662.99 },
+  ],
+  source: 'ai',
+});
+(async () => {
+  const org = await prisma.organisation.findUnique({ where: { id: orgId }, select: { name: true } });
+  if (!org || !/^LiveTest [0-9a-f-]{36}$/.test(org.name)) throw new Error('refusing: not a LiveTest organisation');
+  const project = await prisma.project.findFirst({ where: { id: projectId, orgId }, select: { id: true } });
+  if (!project) throw new Error('refusing: the project is not in that organisation');
+  const common = { projectId, source: 'ai', activityCount: 2, criticalCount: 2, totalBudget: 69999.99 };
+  const active = await prisma.scheduleRevision.create({ data: { ...common, label: 'Rev A', status: 'approved', isActive: true, snapshotJson: snapshot('Rev A'), approvedAt: new Date(), activatedAt: new Date() } });
+  const staged = await prisma.scheduleRevision.create({ data: { ...common, label: 'Rev B', status: 'under_review', isActive: false, snapshotJson: snapshot('Rev B'), submittedAt: new Date() } });
+  process.stdout.write(JSON.stringify({ active: active.id, staged: staged.id }));
+})()
+  .catch((error) => { process.stderr.write(String(error && error.message)); process.exitCode = 1; })
+  .finally(() => prisma.$disconnect());
+`
+  const result = spawnSync(process.execPath, ['-e', script, orgId, projectId], {
+    cwd: backendDir,
+    env: process.env,
+    encoding: 'utf8',
+  })
+  if (result.status !== 0) throw new Error(`seed revisions (exit ${result.status}): ${result.stderr || result.stdout}`)
+  return JSON.parse(result.stdout) as { active: string; staged: string }
+}
+
+test('members who cannot read the BOQ: the Overview and every Schedule tab render without errors, and no answer carries a withheld figure', async ({ browser }) => {
+  test.setTimeout(600_000)
   const client = await apiClient()
   const setup = await (async () => {
     try {
@@ -425,125 +524,291 @@ test('a member who cannot read the BOQ: the landing, the Gantt and the Activitie
       const token = org.adminToken
       const projectId = await createProject(client, token, `BOQ withheld ${Date.now()}`)
 
-      // A site engineer on the project, under a template that takes the BOQ away.
-      const email = `live-se-${crypto.randomUUID()}@octapm-live.test`
-      const member = await apiJson(client, 'post', '/users', {
-        token,
-        data: { name: 'pc4 Site Engineer', email, role: 'site_engineer', password: LIVE_PASSWORD },
-      })
-      expect(member.status, `add the member -> ${JSON.stringify(member.body?.error)}`).toBe(201)
-      const memberId = member.body!.data!.id as string
-      const joined = await apiJson(client, 'post', `/projects/${projectId}/team`, {
-        token,
-        data: { userId: memberId, role: 'site_engineer' },
-      })
-      expect(joined.status, `put them on the project -> ${JSON.stringify(joined.body?.error)}`).toBe(201)
-      const template = await apiJson(client, 'post', '/permissions/templates', {
-        token,
-        data: { name: `No BOQ ${Date.now()}`, baseRole: 'site_engineer', tools: [{ module: 'boq', level: 'none' }] },
-      })
-      expect(template.status, `template -> ${JSON.stringify(template.body?.error)}`).toBe(201)
-      const applied = await apiJson(client, 'put', `/projects/${projectId}/team/${memberId}/permissions`, {
-        token,
-        data: { templateId: template.body!.data!.id },
-      })
-      expect(applied.status, `apply the template -> ${JSON.stringify(applied.body?.error)}`).toBe(200)
-
-      // One priced row, allocated in full and approved to one activity, so
-      // the activity carries the bill's value for a BOQ reader.
-      const row = await apiJson(client, 'post', `/projects/${projectId}/boq/items`, {
-        token,
-        data: { code: '1.1', description: 'Concrete in foundations', quantity: 100, unit: 'm3', rate: 213.37 },
-      })
-      expect(row.status, `create item -> ${JSON.stringify(row.body?.error)}`).toBe(201)
-      const activity = await apiJson(client, 'post', `/projects/${projectId}/activities`, {
-        token,
-        data: {
-          name: 'Pour foundations',
-          activityCode: 'A100',
-          duration: 5,
-          startDate: '2026-02-02',
-          endDate: '2026-02-06',
-          engineerIds: [org.adminId, memberId],
-        },
-      })
-      expect(activity.status, `create activity -> ${JSON.stringify(activity.body?.error)}`).toBe(201)
-      const allocation = await apiJson(client, 'post', `/projects/${projectId}/activity-boq-allocations`, {
-        token,
-        data: {
-          boqItemId: (row.body!.data as { item: { id: string } }).item.id,
-          activityId: activity.body!.data!.id,
-          quantity: 100,
-        },
-      })
-      expect(allocation.status, `allocate -> ${JSON.stringify(allocation.body?.error)}`).toBe(201)
-      for (const step of ['submit', 'approve']) {
-        const moved = await apiJson(
-          client,
-          'post',
-          `/projects/${projectId}/activity-boq-allocations/${allocation.body!.data!.id}/${step}`,
-          { token, data: {} }
-        )
-        expect(moved.status, `${step} -> ${JSON.stringify(moved.body?.error)}`).toBe(200)
+      // Two members on the project, each under a template that takes the BOQ away.
+      const member = async (role: 'site_engineer' | 'cost_controller', label: string) => {
+        const email = `live-${role.replace('_', '-')}-${crypto.randomUUID()}@octapm-live.test`
+        const created = await apiJson(client, 'post', '/users', {
+          token,
+          data: { name: `pc4 ${label}`, email, role, password: LIVE_PASSWORD },
+        })
+        expect(created.status, `add the ${label} -> ${JSON.stringify(created.body?.error)}`).toBe(201)
+        const id = created.body!.data!.id as string
+        const joined = await apiJson(client, 'post', `/projects/${projectId}/team`, { token, data: { userId: id, role } })
+        expect(joined.status, `put the ${label} on the project -> ${JSON.stringify(joined.body?.error)}`).toBe(201)
+        const template = await apiJson(client, 'post', '/permissions/templates', {
+          token,
+          data: { name: `No BOQ ${role} ${Date.now()}`, baseRole: role, tools: [{ module: 'boq', level: 'none' }] },
+        })
+        expect(template.status, `template -> ${JSON.stringify(template.body?.error)}`).toBe(201)
+        const applied = await apiJson(client, 'put', `/projects/${projectId}/team/${id}/permissions`, {
+          token,
+          data: { templateId: template.body!.data!.id },
+        })
+        expect(applied.status, `apply the template -> ${JSON.stringify(applied.body?.error)}`).toBe(200)
+        return { id, email }
       }
+      const siteEngineer = await member('site_engineer', 'Site Engineer')
+      const costController = await member('cost_controller', 'Cost Controller')
+
+      // Two priced rows; all the concrete approved onto the pour, two fifths
+      // of the steel onto the fixing — money on the activities, money open.
+      const item = async (code: string, description: string, quantity: number, unit: string, rate: number) => {
+        const row = await apiJson(client, 'post', `/projects/${projectId}/boq/items`, {
+          token,
+          data: { code, description, quantity, unit, rate },
+        })
+        expect(row.status, `create item ${code} -> ${JSON.stringify(row.body?.error)}`).toBe(201)
+        return (row.body!.data as { item: { id: string } }).item.id
+      }
+      const activity = async (activityCode: string, name: string, startDate: string, endDate: string) => {
+        const row = await apiJson(client, 'post', `/projects/${projectId}/activities`, {
+          token,
+          data: { name, activityCode, duration: 5, startDate, endDate, engineerIds: [org!.adminId, siteEngineer.id] },
+        })
+        expect(row.status, `create activity ${activityCode} -> ${JSON.stringify(row.body?.error)}`).toBe(201)
+        return row.body!.data!.id as string
+      }
+      const concrete = await item('1.1', 'Concrete in foundations', 100, 'm3', 213.37)
+      const rebar = await item('1.2', 'Reinforcement to foundations', 50, 't', 1009.13)
+      const pour = await activity('A100', 'Pour foundations', '2026-02-02', '2026-02-06')
+      const fix = await activity('A110', 'Fix reinforcement', '2026-01-26', '2026-02-01')
+      for (const [boqItemId, activityId, quantity] of [
+        [concrete, pour, 100],
+        [rebar, fix, 20],
+      ] as const) {
+        const allocation = await apiJson(client, 'post', `/projects/${projectId}/activity-boq-allocations`, {
+          token,
+          data: { boqItemId, activityId, quantity },
+        })
+        expect(allocation.status, `allocate -> ${JSON.stringify(allocation.body?.error)}`).toBe(201)
+        for (const step of ['submit', 'approve']) {
+          const moved = await apiJson(
+            client,
+            'post',
+            `/projects/${projectId}/activity-boq-allocations/${allocation.body!.data!.id}/${step}`,
+            { token, data: {} }
+          )
+          expect(moved.status, `${step} -> ${JSON.stringify(moved.body?.error)}`).toBe(200)
+        }
+      }
+      const revisions = seedGeneratedRevisions(org.orgId, projectId)
       const full = await apiJson(client, 'get', `/projects/${projectId}/schedule`, { token })
       expect(JSON.stringify(full.body?.data), 'a BOQ reader gets the figure').toContain('"allocatedBoqAmount":21337')
-      return { projectId, email, activityId: activity.body!.data!.id as string }
+      expect(full.body?.data?.revision, 'the generated revision is the active one').toMatchObject({ id: revisions.active })
+      return { projectId, siteEngineer, costController, revisions }
     } finally {
       await client.dispose()
     }
   })()
 
-  const errors: string[] = []
-  page.on('pageerror', (error) => errors.push(error.message))
-  const withheld = /"(allocatedBoqAmount|allocatedBoqQuantity|allocatedBoqWeight|unallocatedBoqAmount|budget|totalBudget|generatedBudget|generatedTotalBudget|boqRows)"/
-  const answers: { url: string; leaked: boolean }[] = []
-  page.on('response', async (response) => {
-    const url = response.url()
-    if (!new RegExp(`/projects/${setup.projectId}/(schedule|activities)(\\?|$)`).test(url)) return
-    const text = await response.text().catch(() => '')
-    answers.push({ url, leaked: withheld.test(text) })
-  })
+  const members = [
+    {
+      name: 'site engineer',
+      email: setup.siteEngineer.email,
+      readsCost: false,
+      withheld: new Set([...BOQ_KEYS, ...BUDGET_KEYS]),
+      // The bill's total, open value and second row; the allocations and the
+      // budgets built from them; the generator's total; the rates.
+      secrets: ['71793.5', '30273.9', '50456.5', '21337', '20182.6', '41519.6', '69999.99', '213.37', '1009.13'],
+    },
+    {
+      name: 'cost controller',
+      email: setup.costController.email,
+      readsCost: true,
+      withheld: new Set(BOQ_KEYS),
+      secrets: ['71793.5', '30273.9', '50456.5', '213.37', '1009.13'],
+    },
+  ]
 
-  await signInForm(page, setup.email)
-  const base = `/o/${org!.segment}/projects/${setup.projectId}`
+  for (const member of members) {
+    const context = await browser.newContext()
+    const page = await context.newPage()
+    const errors: string[] = []
+    page.on('pageerror', (error) => errors.push(error.message))
+    const answers: { url: string; status: number; paths: string[]; secrets: string[] }[] = []
+    const pending: Promise<void>[] = []
+    page.on('response', (response) => {
+      const url = response.url()
+      if (!url.includes('/api/v1/') || !(response.headers()['content-type'] ?? '').includes('json')) return
+      pending.push(
+        (async () => {
+          const text = await response.text().catch(() => '')
+          let body: unknown
+          try {
+            body = JSON.parse(text)
+          } catch {
+            body = null
+          }
+          // The EV report is a cost reader's, and so is its budget: the
+          // approved allocations' sum it is built on stays for the cost
+          // controller (the rule's budget); the bill's other figures do not.
+          const allowed = member.readsCost && /\/reports\/ev(\?|$)/.test(url)
+            ? new Set(['.data.approvedAllocatedAmount', '.data.sourceSummary.budget.approvedAllocatedAmount'])
+            : new Set<string>()
+          answers.push({
+            url: `${response.request().method()} ${url.replace(/^.*\/api\/v1/, '')}`,
+            status: response.status(),
+            paths: keyPaths(body, member.withheld).filter((path) => !allowed.has(path)),
+            secrets: member.secrets.filter((secret) => text.includes(secret)),
+          })
+        })()
+      )
+    })
 
-  // The landing: the Overview, with the schedule asked for its counts.
-  const scheduleAnswer = page.waitForResponse((r) => /\/schedule(\?|$)/.test(r.url()), { timeout: 30_000 })
-  await page.goto(base)
-  await expect(page.getByTestId('uat-project-content-overview')).toBeVisible({ timeout: 30_000 })
-  await scheduleAnswer
+    await signInForm(page, member.email)
+    const base = `/o/${org!.segment}/projects/${setup.projectId}`
+    const screenText = async () => (await page.locator('main').innerText()).replace(/\s+/g, ' ')
+    const noBrokenFigure = async (where: string) => {
+      const text = await screenText()
+      expect(text, `${member.name}, ${where}: a figure read as NaN`).not.toMatch(/NaN/)
+      // A chart of budgets the cost controller may read starts its axis at
+      // $0k; for the site engineer no such chart is drawn at all.
+      if (!member.readsCost) {
+        expect(text, `${member.name}, ${where}: a withheld figure read as $0k`).not.toMatch(/\$0k/)
+      }
+    }
 
-  // The Gantt.
-  await page.goto(`${base}/schedule`)
-  await expect(page.getByTestId('uat-project-content-schedule')).toBeVisible({ timeout: 30_000 })
-  await expect(page.getByTestId('primavera-gantt')).toBeVisible({ timeout: 30_000 })
-  await expect(page.getByTestId('primavera-gantt')).toContainText('Pour foundations')
+    // The landing: the Overview — the controls strip, the setup wizard, the
+    // health card, the module bar's counts.
+    const scheduleAnswer = page.waitForResponse((r) => /\/schedule(\?|$)/.test(r.url()), { timeout: 30_000 })
+    const forecastAnswer = page.waitForResponse((r) => /\/forecast(\?|$)/.test(r.url()), { timeout: 30_000 })
+    await page.goto(base)
+    await expect(page.getByTestId('uat-project-content-overview')).toBeVisible({ timeout: 30_000 })
+    await expect(page.getByTestId('uat-controls-strip')).toBeVisible({ timeout: 30_000 })
+    await scheduleAnswer
+    await forecastAnswer
+    await page.waitForLoadState('networkidle')
+    await noBrokenFigure('overview')
 
-  // Progress: every live estimate there is built from the budgets, so with
-  // them withheld none is shown (no row of zeros); the activity reads a
-  // dash for its budget.
-  await page.goto(`${base}/schedule/progress`)
-  await expect(page.getByTestId('uat-project-content-schedule')).toBeVisible({ timeout: 30_000 })
-  await expect(page.getByText(/Budget —/).first()).toBeVisible({ timeout: 30_000 })
-  await expect(page.getByText('SPI Est.')).toHaveCount(0)
-  await expect(page.getByText(/Total budget considered/)).toHaveCount(0)
+    for (const tab of TABS) {
+      if (tab === 'wbs') {
+        // The WBS tab is offered once the schedule says it has a WBS, so it
+        // is opened from the module bar rather than by its address.
+        await page.getByTestId('uat-module-tab-schedule').click()
+        await page.getByTestId('uat-module-menu-schedule').getByTestId('uat-module-child-schedule-wbs').click()
+        await expect(page).toHaveURL(/\/schedule\/wbs$/, { timeout: 30_000 })
+      } else {
+        await page.goto(`${base}/schedule/${tab}`)
+      }
+      await expect(page.getByTestId('uat-project-content-schedule')).toBeVisible({ timeout: 30_000 })
+      await expect(page.locator(`[role="tabpanel"][data-state="active"][id$="-content-${tab}"]`)).toBeVisible({
+        timeout: 30_000,
+      })
+      await page.waitForLoadState('networkidle')
 
-  // The Activities list: the BOQ value column reads a dash.
-  const activitiesAnswer = page.waitForResponse((r) => /\/activities(\?|$)/.test(r.url()), { timeout: 30_000 })
-  await page.goto(`${base}/activities`)
-  await expect(page.getByTestId('uat-project-content-activities')).toBeVisible({ timeout: 30_000 })
-  await activitiesAnswer
-  const pourRow = page.locator('tr', { hasText: 'Pour foundations' })
-  await expect(pourRow).toBeVisible()
-  const boqColumn = await page.locator('thead th').evaluateAll((cells) =>
-    cells.findIndex((cell) => cell.textContent?.trim() === 'BOQ Value')
-  )
-  expect(boqColumn).toBeGreaterThanOrEqual(0)
-  await expect(pourRow.locator('td').nth(boqColumn)).toHaveText('—')
+      if (tab === 'gantt') {
+        await expect(page.getByTestId('primavera-gantt')).toContainText('Pour foundations')
+      }
+      if (tab === 'activities') {
+        const pourRow = page.locator('tr', { hasText: 'Pour foundations' }).first()
+        await expect(pourRow).toBeVisible()
+      }
+      if (tab === 'progress' && !member.readsCost) {
+        // Every live estimate there is built from the budgets: with them
+        // withheld none is shown, and the activity reads a dash.
+        await expect(page.getByText(/Budget —/).first()).toBeVisible({ timeout: 30_000 })
+        await expect(page.getByText('SPI Est.')).toHaveCount(0)
+        await expect(page.getByText(/Total budget considered/)).toHaveCount(0)
+      }
+      if (tab === 'forecast') {
+        const cost = page.getByTestId('uat-forecast-cost')
+        await expect(cost).toBeVisible({ timeout: 30_000 })
+        if (member.readsCost) {
+          await expect(cost).not.toContainText('not available')
+        } else {
+          await expect(cost).toContainText('—')
+          await expect(cost).toContainText('Cost figures are not available to you')
+          await expect(cost).not.toContainText('Within the')
+        }
+        // The explanation is written from the forecast this person receives.
+        const explained = page.waitForResponse((r) => /\/forecast\/explain(\?|$)/.test(r.url()), { timeout: 60_000 })
+        await page.getByTestId('uat-forecast-explain').click()
+        expect((await explained).status()).toBe(200)
+        await page.waitForLoadState('networkidle')
+      }
+      if (tab === 'wbs') {
+        const row = page.getByTestId('uat-schedule-wbs-row-A')
+        await expect(row).toBeVisible({ timeout: 30_000 })
+        if (member.readsCost) {
+          await expect(row).toContainText('$70,000')
+          await expect(page.getByTestId('uat-schedule-wbs-rollup')).toBeVisible()
+        } else {
+          // No budget to show: a dash in the row, no rollup of $0k bars.
+          await expect(row.locator('td').nth(3)).toHaveText('—')
+          await expect(page.getByTestId('uat-schedule-wbs-rollup')).toHaveCount(0)
+        }
+      }
+      if (tab === 'revisions') {
+        // The staged revision: its row, then the revision itself, viewed.
+        const staged = page.locator('tr', { hasText: 'Rev B' }).first()
+        await expect(staged).toBeVisible({ timeout: 30_000 })
+        const viewed = page.waitForResponse(
+          (r) => r.url().endsWith(`/schedule/revisions/${setup.revisions.staged}`),
+          { timeout: 30_000 }
+        )
+        await staged.getByRole('button', { name: 'View' }).click()
+        expect((await viewed).status()).toBe(200)
+        await page.waitForLoadState('networkidle')
+        await noBrokenFigure('schedule/revisions, viewing Rev B')
+        await page.keyboard.press('Escape')
+      }
+      await noBrokenFigure(`schedule/${tab}`)
+    }
 
-  expect(answers.map((answer) => answer.url).join('\n'), 'the schedule and the activities were read').toMatch(/\/schedule/)
-  expect(answers.some((answer) => /\/activities(\?|$)/.test(answer.url))).toBe(true)
-  expect(answers.filter((answer) => answer.leaked).map((answer) => answer.url)).toEqual([])
-  expect(errors).toEqual([])
+    // The Activities list: the BOQ value column reads a dash.
+    await page.goto(`${base}/activities`)
+    await expect(page.getByTestId('uat-project-content-activities')).toBeVisible({ timeout: 30_000 })
+    const pourRow = page.locator('tr', { hasText: 'Pour foundations' })
+    await expect(pourRow).toBeVisible({ timeout: 30_000 })
+    const boqColumn = await page
+      .locator('thead th')
+      .evaluateAll((cells) => cells.findIndex((cell) => cell.textContent?.trim() === 'BOQ Value'))
+    expect(boqColumn).toBeGreaterThanOrEqual(0)
+    await expect(pourRow.locator('td').nth(boqColumn)).toHaveText('—')
+    await page.waitForLoadState('networkidle')
+
+    await Promise.all(pending)
+    const urls = [...new Set(answers.map((answer) => answer.url.replace(/\?.*$/, '')))].sort()
+    test.info().annotations.push({ type: `§12 ${member.name}`, description: `${answers.length} answers: ${urls.join(', ')}` })
+    expect(
+      answers.filter((answer) => answer.paths.length || answer.secrets.length),
+      `${member.name}: an answer carried a withheld figure`
+    ).toEqual([])
+    // Every project request these pages make — the Overview's strip, wizard,
+    // health card, needs-you panel and module bar, and the Schedule tabs —
+    // was made, and swept above (the live test sweeps the same list).
+    const project = `/projects/${setup.projectId}`
+    const expected = [
+      `GET ${project}`,
+      `GET ${project}/activities`,
+      `GET ${project}/activities/progress-submissions`,
+      `GET ${project}/assignments/mine`,
+      `GET ${project}/audit`,
+      `GET ${project}/forecast`,
+      `GET ${project}/health`,
+      `GET ${project}/long-lead`,
+      `GET ${project}/lookaheads`,
+      `GET ${project}/lookaheads/constraints`,
+      `GET ${project}/parties`,
+      `GET ${project}/reports/ev`,
+      `GET ${project}/reports/periods`,
+      `GET ${project}/risks`,
+      `GET ${project}/schedule`,
+      `GET ${project}/schedule/layouts`,
+      `GET ${project}/schedule/resources`,
+      `GET ${project}/schedule/revisions`,
+      `GET ${project}/schedule/revisions/${setup.revisions.staged}`,
+      `GET ${project}/setup-readiness`,
+      `GET ${project}/structure/wbs`,
+      `POST ${project}/forecast/explain`,
+      ...(member.readsCost ? [`GET ${project}/cost/summary`] : []),
+    ].sort()
+    expect(urls.filter((url) => url.startsWith(`GET ${project}`) || url.startsWith(`POST ${project}`))).toEqual(expected)
+    // The EV tab is the cost reader's: the report answers them, and refuses
+    // the site engineer outright.
+    const ev = answers.find((answer) => /\/reports\/ev(\?|$)/.test(answer.url))
+    expect(ev?.status, `${member.name}: the EV report`).toBe(member.readsCost ? 200 : 403)
+    expect(errors, `${member.name}: page errors`).toEqual([])
+    await context.close()
+  }
 })

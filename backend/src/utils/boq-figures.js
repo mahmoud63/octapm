@@ -23,6 +23,7 @@
  *   them here either.
  */
 const { hasPermission } = require("../middleware/rbac");
+const { HttpError } = require("./http-error");
 
 /** Whether the caller may read the BOQ, as the BOQ endpoints decide it. */
 const canReadBoq = (req) => hasPermission(req, "boq", "read");
@@ -144,11 +145,146 @@ const withheldSchedule = (schedule, access = FULL_ACCESS) => {
   };
 };
 
+// A gate's blockers and warnings (setup readiness's official reporting
+// gate, as EV reports it and stores it): each keeps its step, code and
+// message; its details lose the bill's money.
+const withoutDetailFigures = (entries) =>
+  Array.isArray(entries)
+    ? entries.map((entry) =>
+        entry && entry.details && typeof entry.details === "object"
+          ? { ...entry, details: withoutBoqFigures(entry.details) }
+          : entry,
+      )
+    : entries;
+
+/** A readiness gate ({ ready, message, blockers, warnings }) as this caller may receive it. */
+const withheldReadinessGate = (gate, access = FULL_ACCESS) => {
+  if (access.boq || !gate || typeof gate !== "object" || Array.isArray(gate)) return gate;
+  return {
+    ...gate,
+    ...(has(gate, "blockers") ? { blockers: withoutDetailFigures(gate.blockers) } : {}),
+    ...(has(gate, "warnings") ? { warnings: withoutDetailFigures(gate.warnings) } : {}),
+  };
+};
+
+/**
+ * The official EV report (GET /reports/ev, and a locked period's report) as
+ * this caller may receive it. The route admits cost readers only, so the
+ * budget — the approved allocations' sum, BAC, per-activity budgets — stays;
+ * a cost reader who may not read the BOQ loses the bill's open value and
+ * the bill's figures in the readiness gate's details. Output only: the
+ * stored snapshot's basis is not touched.
+ */
+const withheldEvReport = (report, access = FULL_ACCESS) => {
+  if (access.boq || !report || typeof report !== "object" || Array.isArray(report)) return report;
+  const result = { ...withoutKeys(report, ["unallocatedBoqAmount"]) };
+  if (has(result, "readinessGate")) result.readinessGate = withheldReadinessGate(result.readinessGate, access);
+  return result;
+};
+
+// The forecast's cost view is money from the budget (the approved
+// allocations) and the cost ledger. Someone who may read neither the BOQ
+// nor the cost module is given its levels, bases and counts, not its money:
+// each activity's budget, spend, commitments, projection and overrun (and
+// the reasons, which state them), the project's budget, EAC, bottom-up,
+// projection, overrun and spend, and each budget line's amounts.
+const FORECAST_ACTIVITY_COST_KEYS = ["budget", "actual", "committed", "projected", "overrun", "overrunPct", "reasons"];
+const FORECAST_COST_KEYS = ["budget", "eac", "bottomUp", "projected", "overrun", "overrunPct", "actual"];
+const FORECAST_LINE_KEYS = ["revised", "committed", "actual", "forecast", "overrun", "overrunPct"];
+
+const withheldForecastActivity = (activity) =>
+  activity && activity.cost && typeof activity.cost === "object"
+    ? { ...activity, cost: withoutKeys(activity.cost, FORECAST_ACTIVITY_COST_KEYS) }
+    : activity;
+
+const mapList = (list, fn) => (Array.isArray(list) ? list.map(fn) : list);
+
+/** GET /forecast (and the forecast inside its explanation) as this caller may receive it. */
+const withheldForecast = (forecast, access = FULL_ACCESS) => {
+  // The forecast carries no BOQ quantity or value of its own (its budgets
+  // are the approved allocations' amounts, the cost reader's budget): a
+  // cost reader receives it exactly as built.
+  if (access.budget || !forecast || typeof forecast !== "object") return forecast;
+  const result = { ...forecast, activities: mapList(forecast.activities, withheldForecastActivity) };
+  if (forecast.schedule && typeof forecast.schedule === "object") {
+    result.schedule = { ...forecast.schedule, topRisks: mapList(forecast.schedule.topRisks, withheldForecastActivity) };
+  }
+  if (forecast.cost && typeof forecast.cost === "object") {
+    result.cost = {
+      ...withoutKeys(forecast.cost, FORECAST_COST_KEYS),
+      topRisks: mapList(forecast.cost.topRisks, withheldForecastActivity),
+      budgetLines: mapList(forecast.cost.budgetLines, (line) => withoutKeys(line, FORECAST_LINE_KEYS)),
+    };
+  }
+  return result;
+};
+
+/** Whether a forecast's cost figures were withheld from this caller. */
+const forecastCostWithheld = (forecast) =>
+  Boolean(forecast && forecast.cost && typeof forecast.cost === "object" && !has(forecast.cost, "budget"));
+
+/**
+ * An error as this caller may receive it. A lifecycle step refused because
+ * the schedule is not ready (SCHEDULE_NOT_READY) states the whole readiness
+ * in error.details, and a period lock refused by the reporting gate states
+ * the gate: both go the way of their success answers. Status, code and
+ * message stay, and so do the readiness's `ready` and `blockingCount`.
+ */
+const withheldError = (error, access = FULL_ACCESS) => {
+  if (access.boq || !(error instanceof HttpError) || !error.details || typeof error.details !== "object") {
+    return error;
+  }
+  let details = error.details;
+  if (Array.isArray(details.checks)) details = withheldScheduleReadiness(details, access);
+  else if (has(details, "gate")) details = { ...details, gate: withheldReadinessGate(details.gate, access) };
+  if (details === error.details) return error;
+  const withheld = new HttpError(error.status, error.code, error.message, details);
+  withheld.stack = error.stack;
+  return withheld;
+};
+
+// The bill's own records: its rows, its revisions and the allocations of
+// its rows to activities. Their history is the bill's.
+const BOQ_RECORD_TYPES = new Set(["boq_item", "boq_revision", "activity_boq_allocation"]);
+
+const withoutRevisionTotals = (summary) => withoutKeys(summary, REVISION_BUDGET_KEYS);
+
+/**
+ * A project's history (GET /audit, which the schedule's status history
+ * reads) as this caller may receive it. Someone who may not read the BOQ is
+ * not given the history of the bill's records — their summaries state its
+ * rates, quantities and values. Someone who reads neither the BOQ nor the
+ * cost module is not given a schedule revision's total budget, which its
+ * transitions record in their summaries. Everything else is as built.
+ */
+const withheldAuditHistory = (history, access = FULL_ACCESS) => {
+  if (access.boq || !history || typeof history !== "object" || !Array.isArray(history.events)) return history;
+  const events = history.events
+    .filter((event) => !(event && BOQ_RECORD_TYPES.has(event.recordType || event.entityType)))
+    .map((event) =>
+      !access.budget && event && (event.recordType || event.entityType) === "schedule_revision"
+        ? {
+            ...event,
+            ...(has(event, "oldSummary") ? { oldSummary: withoutRevisionTotals(event.oldSummary) } : {}),
+            ...(has(event, "newSummary") ? { newSummary: withoutRevisionTotals(event.newSummary) } : {}),
+            ...(has(event, "summary") ? { summary: withoutRevisionTotals(event.summary) } : {}),
+          }
+        : event,
+    );
+  return { ...history, events };
+};
+
 module.exports = {
   BOQ_FIGURE_KEYS,
   boqFigureAccess,
   canReadBoq,
+  forecastCostWithheld,
   withheldActivity,
+  withheldAuditHistory,
+  withheldError,
+  withheldEvReport,
+  withheldForecast,
+  withheldReadinessGate,
   withheldRevision,
   withheldSchedule,
   withheldScheduleReadiness,
