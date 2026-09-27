@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
-import { openModule } from './cert-helpers'
+import { currentProjectId, openModule } from './cert-helpers'
 
 /**
  * M3 on the web target: the daily log, activities and progress, photos and
@@ -50,7 +50,7 @@ test.describe('M3 on the web target', () => {
     const login = await request.post(`${apiBase}/auth/login`, { headers: { 'x-octapm-client': 'mobile' }, data: { email, password } })
     const session = (await login.json()) as { data: { user: { id: string }; tokens: { accessToken: string } } }
     const token = session.data.tokens.accessToken
-    const projectId = await page.evaluate(() => sessionStorage.getItem('octapm.session.project'))
+    const projectId = await currentProjectId(page)
     const stamp = Date.now()
     const created = await request.post(`${apiBase}/projects/${projectId}/activities`, {
       headers: { authorization: `Bearer ${token}`, 'x-octapm-client': 'mobile' },
@@ -89,7 +89,7 @@ test.describe('M3 on the web target', () => {
     // Make sure the e2e project has a crew with a worker, through the API as the same person.
     const login = await request.post(`${apiBase}/auth/login`, { headers: { 'x-octapm-client': 'mobile' }, data: { email, password } })
     const token = ((await login.json()) as { data: { tokens: { accessToken: string } } }).data.tokens.accessToken
-    const projectId = await page.evaluate(() => sessionStorage.getItem('octapm.session.project'))
+    const projectId = await currentProjectId(page)
     const auth = { authorization: `Bearer ${token}`, 'x-octapm-client': 'mobile' }
     const workers = await request.get(`${apiBase}/projects/${projectId}/timesheets/workers`, { headers: auth })
     let items = ((await workers.json()) as { data: { items: { id: string; name: string }[] } }).data.items

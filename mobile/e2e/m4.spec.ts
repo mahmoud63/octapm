@@ -1,5 +1,5 @@
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test'
-import { openModule } from './cert-helpers'
+import { currentProjectId, openModule } from './cert-helpers'
 
 /**
  * M4 on the web target: inspections, the punch list, NCRs with closeout
@@ -41,7 +41,7 @@ const openQuality = async (page: Page) => {
 test.describe('M4 on the web target', () => {
   test('an inspection is started from a template, answered in one request and completed', async ({ page, request }) => {
     await signIn(page)
-    const projectId = await page.evaluate(() => sessionStorage.getItem('octapm.session.project'))
+    const projectId = await currentProjectId(page)
     const { headers } = await apiSession(request)
     // The end-to-end project has no templates of its own; make sure one exists, as the same person.
     const listed = await request.get(`${apiBase}/projects/${projectId}/forms/templates?status=active`, { headers })

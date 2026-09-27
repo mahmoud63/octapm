@@ -1,4 +1,5 @@
 import { expect, test, type APIRequestContext, type Locator, type Page } from '@playwright/test'
+import { currentProjectId } from './cert-helpers'
 
 /**
  * M9 on the web target: a web-platform record link opens the record in the
@@ -58,7 +59,7 @@ test.describe('M9 on the web target', () => {
   test('a web-platform record link opens the record in the app through the opener', async ({ page, request }) => {
     const { headers } = await apiSession(request)
     await signIn(page)
-    const projectId = (await page.evaluate(() => sessionStorage.getItem('octapm.session.project')))!
+    const projectId = (await currentProjectId(page))!
     const stamp = Date.now()
     const rfi = await raiseRfi(request, headers, projectId, `E2E deep link ${stamp}`)
 
@@ -80,7 +81,7 @@ test.describe('M9 on the web target', () => {
   test('a record raised through the API reaches the open list without a reload', async ({ page, request }) => {
     const { headers } = await apiSession(request)
     await signIn(page)
-    const projectId = (await page.evaluate(() => sessionStorage.getItem('octapm.session.project')))!
+    const projectId = (await currentProjectId(page))!
     await page.goto('/rfi')
     await expect(page.getByTestId('screen-rfis').first()).toBeVisible()
     await expect(page.getByTestId('freshness').first()).toBeVisible()
@@ -106,7 +107,7 @@ test.describe('M9 on the web target', () => {
   test('a photo is marked up before upload and the marked copy lands on the daily log', async ({ page, request }) => {
     const { headers } = await apiSession(request)
     await signIn(page)
-    const projectId = (await page.evaluate(() => sessionStorage.getItem('octapm.session.project')))!
+    const projectId = (await currentProjectId(page))!
     await page.goto('/photos')
     await expect(page.getByTestId('screen-photos').first()).toBeVisible()
     const chooser = page.waitForEvent('filechooser')

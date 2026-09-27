@@ -1,5 +1,5 @@
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test'
-import { openModule } from './cert-helpers'
+import { currentProjectId, openModule } from './cert-helpers'
 
 /**
  * M5 on the web target: scan, issue, goods receipt against a purchase order
@@ -90,7 +90,7 @@ test.describe('M5 on the web target', () => {
   test('a delivery is received against a fresh purchase order with a receipt number the server then treats as already posted', async ({ page, request }) => {
     const { headers } = await apiSession(request)
     await signIn(page)
-    const projectId = await page.evaluate(() => sessionStorage.getItem('octapm.session.project'))
+    const projectId = await currentProjectId(page)
     // A fresh order each run, through the procurement routes as the same person: draft, submit, approve, issue.
     const suppliers = await request.get(`${apiBase}/projects/${projectId}/procurement/suppliers`, { headers })
     const supplier = ((await suppliers.json()) as { data: { items?: { id: string }[] } | { id: string }[] }).data
