@@ -4,6 +4,7 @@ import {
   capitalise,
   eacBasisFrom,
   eacBasisLabel,
+  eacIsBudgetFallback,
   type EacBasis,
 } from '@/lib/eac-basis'
 import { apiClient } from '@/services/api/client'
@@ -99,7 +100,12 @@ type EvReportResponse = {
     cpiAlert?: boolean
   }
   reporting?: {
-    period?: Pick<ReportingPeriod, 'label' | 'code'> | null
+    period?:
+      | (Pick<ReportingPeriod, 'label' | 'code'> & {
+          id?: string | null
+          isVirtual?: boolean
+        })
+      | null
     cutoffDate?: string | null
     cutoffLocalDate?: string | null
     timeZone?: string | null
@@ -126,6 +132,9 @@ type EvReportResponse = {
     estimatedAc?: number | null
   }
 }
+
+/** The period picker's entry for the server's default basis (D4). */
+const DEFAULT_PERIOD = '__default__'
 
 function fmt(value: number | null | undefined) {
   if (value === null || value === undefined) return '—'
@@ -306,14 +315,16 @@ export function EvReport({ projectId, readiness, onNavigate }: Props) {
     [periodData]
   )
 
-  const effectivePeriodId = selectedPeriodId || periods[0]?.id || null
-
+  // No period chosen: the server's default basis (owner decision D4) — the
+  // latest period whose cutoff has passed, else an ad hoc report cut at
+  // today — the same basis the Overview and the Forecast tab read. A period
+  // whose cutoff is still ahead is only ever chosen here, explicitly.
   const { data, isLoading, error } = useQuery<EvReportResponse>({
-    queryKey: ['ev-report', projectId, effectivePeriodId],
+    queryKey: ['ev-report', projectId, selectedPeriodId],
     queryFn: () =>
       apiClient
         .get(`/projects/${projectId}/reports/ev`, {
-          params: effectivePeriodId ? { periodId: effectivePeriodId } : {},
+          params: selectedPeriodId ? { periodId: selectedPeriodId } : {},
         })
         .then((r) => r.data.data),
     refetchInterval: 60000,
@@ -360,6 +371,13 @@ export function EvReport({ projectId, readiness, onNavigate }: Props) {
     estimates,
   } = data
   const selectedPeriod = reporting?.period
+  // The picker shows the period the report was cut for: the one chosen, or
+  // the stored period the server defaulted to; an ad hoc default reads as
+  // the default entry.
+  const periodSelectValue =
+    selectedPeriodId ||
+    (selectedPeriod && !selectedPeriod.isVirtual && selectedPeriod.id) ||
+    DEFAULT_PERIOD
   const isSnapshot = Boolean(reporting?.isSnapshot)
   // The EAC's rule in the words the Overview and the Forecast tab use for the
   // same figure (lib/eac-basis): the server's basis, or for a report without
@@ -371,6 +389,18 @@ export function EvReport({ projectId, readiness, onNavigate }: Props) {
   // fallback, not an estimate) and so no ETC — shown as dashes, as the
   // Overview and the Forecast tab show them.
   const noBudget = eacBasis === 'no_budget'
+  // The EAC is the revised budget handed back (no CPI, or CPI 0): ETC would
+  // be budget less spend — negative once spend passes the budget — not an
+  // estimate to complete. Shown as a dash with the reason, as CV and SV are
+  // when they mean nothing; the report's etc is unchanged.
+  const etcNotProjected = eacIsBudgetFallback(eacBasis)
+  const etcSub = noBudget
+    ? 'No EAC without an approved budget'
+    : eacBasis === 'budget_cpi_zero'
+      ? 'Not projected — the EAC is the budget, nothing earned against the cost spent (CPI 0)'
+      : etcNotProjected
+        ? 'Not projected — the EAC is the budget, no cost performance yet'
+        : 'EAC - AC'
   // A variance needs both sides: CV with no official actual cost is EV less
   // nothing, and SV with no planned value is EV less nothing.
   const officialActualRows = sourceSummary?.ac?.officialActualActivities
@@ -419,13 +449,18 @@ export function EvReport({ projectId, readiness, onNavigate }: Props) {
           </Badge>
           {periods.length > 0 && (
             <Select
-              value={effectivePeriodId || ''}
-              onValueChange={(value) => setSelectedPeriodId(value)}
+              value={periodSelectValue}
+              onValueChange={(value) =>
+                setSelectedPeriodId(value === DEFAULT_PERIOD ? null : value)
+              }
             >
-              <SelectTrigger className='w-[220px]'>
+              <SelectTrigger className='w-[220px]' data-testid='uat-ev-period-select'>
                 <SelectValue placeholder='Select period' />
               </SelectTrigger>
               <SelectContent>
+                <SelectItem value={DEFAULT_PERIOD}>
+                  Default: latest cutoff passed
+                </SelectItem>
                 {periods
                   .filter((period) => period.id)
                   .map((period) => (
@@ -561,6 +596,7 @@ export function EvReport({ projectId, readiness, onNavigate }: Props) {
           value={spi !== null ? spi.toFixed(2) : '—'}
           sub='EV / PV'
           color={spi === null ? '' : spi < 0.9 ? 'text-error' : 'text-success'}
+          testId='uat-ev-spi'
         />
         <MetricCard
           label='CPI'
@@ -576,8 +612,8 @@ export function EvReport({ projectId, readiness, onNavigate }: Props) {
         />
         <MetricCard
           label='ETC'
-          value={noBudget ? '—' : fmt(etc)}
-          sub={noBudget ? 'No EAC without an approved budget' : 'EAC - AC'}
+          value={noBudget || etcNotProjected ? '—' : fmt(etc)}
+          sub={etcSub}
           testId='uat-ev-etc'
         />
       </div>

@@ -27,9 +27,9 @@ import {
  *      reason, CPI 0 is explained, and the EV tab's EAC and ETC are dashes
  *   progress with no actual cost: the health card's actual cost and the EV
  *      tab's cost variance are dashes with the reason, not USD 0 / +$50.0K
- *   a latest period whose cutoff is still ahead: the Overview (health card
- *      and strip) and the Forecast tab say PV runs to the cutoff while EV and
- *      AC stop at today
+ *   a period whose cutoff is still ahead, chosen on the EV tab, says PV
+ *      runs to the cutoff while EV and AC stop at today (since round 4 it is
+ *      never the default basis — owner decision D4, spec 57)
  *   the EV tab's S-curve draws a locked period's EV against the PV at that
  *      same cutoff, not the month-end PV
  *   a site engineer without the BOQ: the Structure step's guides to pages
@@ -312,11 +312,14 @@ test('progress with no actual cost: the health card and the EV tab show no actua
 })
 
 /**
- * America/Chicago; the latest period's cutoff is next January; 1,000 loaded
- * this January and 1,000 next; 10% of a 10,000 bill approved. SPI 0.5 stands
- * — and every EV surface says why it reads so.
+ * America/Chicago; the only period's cutoff is next January; 1,000 loaded
+ * this January and 1,000 next; 10% of a 10,000 bill approved. Owner decision
+ * D4: a period whose cutoff is still ahead is never the default basis, so the
+ * Overview reads the ad hoc report cut at today (PV 1,000, EV 1,000, SPI
+ * 1.00). Chosen on the EV tab, the future period gives SPI 0.5 exactly as
+ * before — and says why it reads so.
  */
-test('a latest period whose cutoff is still ahead: the Overview and the Forecast tab say PV runs to the cutoff while EV and AC stop at today', async ({ page }) => {
+test('a period whose cutoff is still ahead is not the default; chosen on the EV tab it says PV runs to the cutoff while EV and AC stop at today', async ({ page }) => {
   test.setTimeout(240_000)
   const client = await apiClient()
   const nextYear = new Date().getUTCFullYear() + 1
@@ -348,14 +351,18 @@ test('a latest period whose cutoff is still ahead: the Overview and the Forecast
   await signInForm(page, org!.adminEmail)
   const base = `/o/${org!.segment}/projects/${setup.projectId}`
   await page.goto(base)
-  await expect(page.getByTestId('uat-health-metric-schedule-spi')).toContainText('0.50', { timeout: 45_000 })
-  await expect(page.getByTestId('uat-health-cutoff-not-reached')).toHaveText(CUTOFF_NOTE)
-  await expect(page.getByTestId('uat-health-notes-schedule')).toContainText(CUTOFF_NOTE)
-  await expect(page.getByTestId('uat-controls-ev-cutoff-not-reached')).toHaveText(CUTOFF_NOTE)
+  // The default: the ad hoc report cut at today, never next January.
+  await expect(page.getByTestId('uat-health-metric-schedule-spi')).toContainText('1.00', { timeout: 45_000 })
+  await expect(page.getByTestId('uat-health-cutoff')).not.toContainText(`${nextYear}-01-26`)
+  await expect(page.getByTestId('uat-controls-ev-cutoff')).not.toContainText(`${nextYear}-01-26`)
 
-  await page.goto(`${base}/schedule/forecast`)
-  await expect(page.getByTestId('uat-forecast-indices-note')).toContainText(CUTOFF_NOTE, { timeout: 45_000 })
-  await expect(page.getByTestId('uat-forecast-data-quality')).toContainText(CUTOFF_NOTE)
+  await page.goto(`${base}/schedule/ev`)
+  await expect(page.getByTestId('uat-ev-spi')).toContainText('1.00', { timeout: 45_000 })
+  await page.getByTestId('uat-ev-period-select').click()
+  await page.getByRole('option', { name: 'F01' }).click()
+  await expect(page.getByTestId('uat-ev-cutoff')).toContainText(`${nextYear}-01-26 05:59:59 UTC`, { timeout: 30_000 })
+  await expect(page.getByTestId('uat-ev-spi')).toContainText('0.50')
+  await expect(page.getByText(CUTOFF_NOTE)).toBeVisible()
 })
 
 /**
