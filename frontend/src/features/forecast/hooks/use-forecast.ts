@@ -1,6 +1,11 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { apiClient } from '@/services/api/client'
 import type { EvCutoff } from '@/lib/ev-cutoff'
+import {
+  EAC_NO_COST_PERFORMANCE,
+  eacBasisLabel,
+  type EacBasis,
+} from '@/lib/eac-basis'
 
 /**
  * Schedule delay and cost overrun prediction (OCTA-AI-PREDICT-031). The
@@ -122,13 +127,9 @@ export interface ProjectForecast {
   activities: ForecastActivity[]
 }
 
-export type EacBasis =
-  | 'budget_over_cpi'
-  | 'budget_no_cost_performance'
-  | 'no_budget'
-
-/** The label the business-rule EAC carries when there is no cost performance (Phase 22A). */
-export const EAC_NO_COST_PERFORMANCE = 'the budget — no cost performance yet'
+// The basis and its words are shared with the EV tab (lib/eac-basis).
+export type { EacBasis }
+export { EAC_NO_COST_PERFORMANCE }
 export const COST_FIGURES_WITHHELD = 'Cost figures are not available to you'
 
 export type EacStatement = {
@@ -189,10 +190,7 @@ export function eacStatement(
       : cost.eac > cost.bac + 0.005
   return {
     value: cost.eac,
-    label:
-      cost.eacBasis === 'budget_over_cpi'
-        ? 'revised budget ÷ CPI'
-        : EAC_NO_COST_PERFORMANCE,
+    label: eacBasisLabel(cost.eacBasis) ?? EAC_NO_COST_PERFORMANCE,
     withheld: false,
     over,
   }

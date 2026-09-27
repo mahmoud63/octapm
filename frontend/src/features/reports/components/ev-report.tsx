@@ -1,5 +1,11 @@
 import { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
+import {
+  capitalise,
+  eacBasisFrom,
+  eacBasisLabel,
+  type EacBasis,
+} from '@/lib/eac-basis'
 import { apiClient } from '@/services/api/client'
 import { AlertTriangle, ArrowRight, CheckCircle2 } from 'lucide-react'
 import {
@@ -76,6 +82,8 @@ type EvReportResponse = {
   spi: number | null
   cpi: number | null
   eac: number | null
+  /** Which rule gave the EAC (backend utils/eac-basis); absent on old reports. */
+  eacBasis?: EacBasis | null
   sv: number
   cv: number
   etc: number | null
@@ -227,14 +235,16 @@ function MetricCard({
   value,
   sub,
   color,
+  testId,
 }: {
   label: string
   value: string
   sub?: string
   color?: string
+  testId?: string
 }) {
   return (
-    <div className='rounded-lg border p-3 text-center'>
+    <div className='rounded-lg border p-3 text-center' data-testid={testId}>
       <p className='text-xs text-muted-foreground'>{label}</p>
       <p className={`mt-1 text-xl font-bold ${color || ''}`}>{value}</p>
       {sub && <p className='text-xs text-muted-foreground'>{sub}</p>}
@@ -297,6 +307,7 @@ export function EvReport({ projectId, readiness, onNavigate }: Props) {
     spi,
     cpi,
     eac,
+    eacBasis: reportedEacBasis,
     sv,
     cv,
     etc,
@@ -313,6 +324,14 @@ export function EvReport({ projectId, readiness, onNavigate }: Props) {
   } = data
   const selectedPeriod = reporting?.period
   const isSnapshot = Boolean(reporting?.isSnapshot)
+  // The EAC's rule in the words the Overview and the Forecast tab use for the
+  // same figure (lib/eac-basis): the server's basis, or for a report without
+  // one the server's own rule — CPI > 0 is budget ÷ CPI, CPI 0 or none is
+  // the budget handed back.
+  const eacSub = capitalise(
+    eacBasisLabel(eacBasisFrom(reportedEacBasis, cpi, totalBudget)) ??
+      'no approved budget yet'
+  )
   const readinessGate =
     reportReadinessGate ||
     readiness?.gates.reporting ||
@@ -508,7 +527,8 @@ export function EvReport({ projectId, readiness, onNavigate }: Props) {
         <MetricCard
           label='EAC'
           value={fmt(eac)}
-          sub={cpi === null ? 'The budget — no cost performance yet' : 'Revised budget / CPI'}
+          sub={eacSub}
+          testId='uat-ev-eac'
         />
         <MetricCard label='ETC' value={fmt(etc)} sub='EAC - AC' />
       </div>

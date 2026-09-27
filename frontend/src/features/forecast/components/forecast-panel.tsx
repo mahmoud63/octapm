@@ -10,6 +10,7 @@ import {
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { evCutoffNote, formatEvCutoff } from '@/lib/ev-cutoff'
+import { capitalise, eacIsBudgetFallback } from '@/lib/eac-basis'
 import { FINANCIAL_TERMS } from '@/lib/financial-terms'
 import { getServerErrorMessage } from '@/lib/handle-server-error'
 import { useCanPerform } from '@/lib/permissions'
@@ -446,10 +447,19 @@ export function ForecastPanel({ projectId }: { projectId: string }) {
   // what it is (Phase 22A). The Overview's "Forecast at completion" is this
   // figure with this label, and links here.
   const eac = eacStatement(forecast)
-  const noCostPerformance = costFiguresShown && cost.eacBasis === 'budget_no_cost_performance'
-  const cpiNote = noCostPerformance
+  // The EAC is the revised budget handed back — no CPI, or CPI 0 (cost
+  // spent, nothing earned) — not a projection: the server's note says why.
+  const budgetFallback = costFiguresShown && eacIsBudgetFallback(cost.eacBasis)
+  const cpiZero = costFiguresShown && cost.eacBasis === 'budget_cpi_zero'
+  const cpiNote = budgetFallback
     ? (forecast.dataQuality.find((note) => note.startsWith('CPI ')) ?? null)
     : null
+  // When the projected cost is that same budget fallback, it is said to be
+  // the budget, never "within the budget" as if a projection had cleared it.
+  const projectedIsBudgetFallback =
+    budgetFallback &&
+    cost.eac != null &&
+    Math.abs((cost.projected ?? 0) - cost.eac) < 0.005
   // The projected cost is max(EAC, bottom-up): said, so the two figures are
   // never read as disagreeing.
   const projectedRelation = !costFiguresShown
@@ -572,10 +582,12 @@ export function ForecastPanel({ projectId }: { projectId: string }) {
               ? 'Cost figures are not available to you'
               : (cost.overrun ?? 0) > 0
                 ? `${money(cost.overrun)} over the ${money(cost.budget)} budget${cost.overrunPct != null ? ` (${cost.overrunPct}%)` : ''}`
-                : `Within the ${money(cost.budget)} budget`
+                : projectedIsBudgetFallback
+                  ? capitalise(eac.label)
+                  : `Within the ${money(cost.budget)} budget`
           }
           note={projectedRelation}
-          level={summary?.costLevel}
+          level={cpiZero ? 'medium' : summary?.costLevel}
           testId='uat-forecast-cost'
         />
         <Kpi
