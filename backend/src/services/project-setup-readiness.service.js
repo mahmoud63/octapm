@@ -55,6 +55,26 @@ const BOQ_CURRENT_REVISION_STATUSES = [
 ];
 const MAPPING_RULES = ["required", "optional", "not_applicable"];
 
+// The baseline blockers that say the bill's value is not mapped yet.
+const ALLOCATION_BLOCKER_CODES = new Set([
+  "NO_APPROVED_ALLOCATIONS",
+  "UNALLOCATED_BOQ",
+  "SCHEDULE_ALLOCATIONS_FAILED",
+]);
+
+// Owner decision D5, the greenfield order: upload and approve the BOQ,
+// import or generate a schedule, submit, approve, activate, map the bill's
+// value to the active activities, lock the baseline. What a staged revision
+// that is not approved yet still needs before its activities can be mapped.
+const STAGED_WAITING_MESSAGES = Object.freeze({
+  draft:
+    "Submit the schedule revision for review, approve it and activate it (Schedule › Revisions) before mapping allocations to its activities.",
+  under_review:
+    "Approve the schedule revision under review and activate it (Schedule › Revisions) before mapping allocations to its activities.",
+  rejected:
+    "Revise and resubmit the rejected schedule revision, then approve and activate it (Schedule › Revisions) before mapping allocations to its activities.",
+});
+
 const OFFICIAL_EV_INPUTS = [
   {
     key: "approved_allocations",
@@ -732,6 +752,15 @@ const getSetupReadiness = async ({ orgId, projectId, canReadBoq = true, canReadS
       activeActivityCount === 0 &&
       toNumber(currentRevision.activityCount) > 0,
   );
+  // A staged revision not approved yet (draft, under review or rejected):
+  // the mapping waits on its review, approval and activation (D5).
+  const stagedAwaitingApproval = Boolean(
+    currentRevision &&
+      !currentRevision.isActive &&
+      activeActivityCount === 0 &&
+      toNumber(currentRevision.activityCount) > 0 &&
+      Object.prototype.hasOwnProperty.call(STAGED_WAITING_MESSAGES, revisionStatus),
+  );
 
   // ── Structure (setup doc §2 b): what the rows and activities are filed
   // under. All of it is soft (§91): missing structure changes no figure.
@@ -1216,12 +1245,17 @@ const getSetupReadiness = async ({ orgId, projectId, canReadBoq = true, canReadS
         "ALLOCATION_WAITING_FOR_BOQ",
         "Upload BOQ items before mapping allocations.",
       ),
+    // Allocations go to active activities (owner decision D5): with a
+    // revision staged, the step says what comes before the mapping — its
+    // review, approval and activation — never "generate or import" again.
     activeActivityCount === 0 &&
       issue(
         "ALLOCATION_WAITING_FOR_SCHEDULE",
         awaitingActivation
           ? "Activate the approved schedule revision (Schedule › Revisions) before mapping allocations to its activities."
-          : "Generate or import a schedule before mapping allocations.",
+          : stagedAwaitingApproval
+            ? STAGED_WAITING_MESSAGES[revisionStatus]
+            : "Generate or import a schedule before mapping allocations.",
       ),
     boqCount > 0 &&
       requiredBoqAmount > MONEY_EPSILON &&
@@ -1396,7 +1430,11 @@ const getSetupReadiness = async ({ orgId, projectId, canReadBoq = true, canReadS
     .map((check) =>
       issue(
         `SCHEDULE_${check.key.toUpperCase()}_FAILED`,
-        check.message,
+        // The coverage the baseline lock needs (D5) is mapped on the
+        // mapping page, after the activation; the blocker says so.
+        check.key === "allocations"
+          ? `${String(check.message || "").trim().replace(/\.$/, "")}. Map it to the active activities on Project Controls › Mapping, then lock the baseline.`
+          : check.message,
         "blocking",
         { checkKey: check.key },
         itemsFromCheckDetails(check, activityById, (activity, missing) =>
@@ -1404,6 +1442,8 @@ const getSetupReadiness = async ({ orgId, projectId, canReadBoq = true, canReadS
         ),
       ),
     );
+  const allocationCoverageBlocksBaseline = scheduleApproved && !baselineLocked &&
+    readinessBlockers.some((blocker) => blocker.details?.checkKey === "allocations");
   const readinessWarnings = checksForBaseline
     .filter((check) => check.severity !== "blocking" && !check.passed)
     .map((check) =>
@@ -1708,7 +1748,16 @@ const getSetupReadiness = async ({ orgId, projectId, canReadBoq = true, canReadS
       key: "boq_allocation",
       label: "BOQ Allocation",
       description: "BOQ value is approved and linked to schedule activities.",
-      action: { label: "Map Allocations", target: TARGETS.boq },
+      // Waiting on a staged revision, the mapping cannot resolve the step:
+      // the action sends to where the revision is approved and activated
+      // (D5). With no schedule at all the step keeps the base's action —
+      // the schedule step before it is the next action then, and the gates
+      // keep the shape they had at cb14ff4.
+      action: awaitingActivation
+        ? { label: "Activate Revision", target: TARGETS.scheduleRevisions }
+        : stagedAwaitingApproval
+          ? { label: "Open Review", target: TARGETS.scheduleRevisions }
+          : { label: "Map Allocations", target: TARGETS.boq },
       requiredFor: ["baseline", "progress", "reporting"],
       complete: allocationBlockers.filter(Boolean).length === 0,
       blockers: allocationBlockers,
@@ -1801,10 +1850,13 @@ const getSetupReadiness = async ({ orgId, projectId, canReadBoq = true, canReadS
       key: "baseline_readiness",
       label: "Baseline Readiness",
       description: "Approved schedule passes baseline lock checks.",
-      action: {
-        label: awaitingActivation ? "Activate Revision" : "Lock Baseline",
-        target: TARGETS.scheduleRevisions,
-      },
+      // After the activation, unmapped coverage is resolved on the mapping
+      // page, not where the baseline is locked (D5).
+      action: awaitingActivation
+        ? { label: "Activate Revision", target: TARGETS.scheduleRevisions }
+        : allocationCoverageBlocksBaseline
+          ? { label: "Map Allocations", target: TARGETS.mapping }
+          : { label: "Lock Baseline", target: TARGETS.scheduleRevisions },
       requiredFor: ["baseline", "progress", "reporting"],
       complete: baselineLocked,
       blockers: scheduleApproved ? [...activationBlockers, ...readinessBlockers] : [],
@@ -1832,8 +1884,9 @@ const getSetupReadiness = async ({ orgId, projectId, canReadBoq = true, canReadS
       counts: {
         baselineLocked,
         baselinedRevisionId: baselinedRevision?.id || null,
-        readinessReady: Boolean(scheduleReadiness?.ready),
-        readinessBlockingCount: scheduleReadiness?.blockingCount ?? null,
+        // The baseline lock's verdict: every check, coverage included (D5).
+        readinessReady: Boolean(scheduleReadiness?.baselineReady),
+        readinessBlockingCount: scheduleReadiness?.baselineBlockingCount ?? null,
       },
       successMessage: "Baseline is locked.",
     }),
@@ -2052,7 +2105,11 @@ const getSetupReadiness = async ({ orgId, projectId, canReadBoq = true, canReadS
           ? "Baseline is already locked."
           : awaitingActivation
             ? "Activate the approved schedule revision (Schedule › Revisions) before locking the baseline."
-            : baselineBlockers.length > 0
+            : allocationCoverageBlocksBaseline
+              ? baselineBlockers.every((blocker) => ALLOCATION_BLOCKER_CODES.has(blocker.code))
+                ? "Map the bill's value to the active activities (Project Controls › Mapping) before locking the baseline."
+                : "Map the bill's value to the active activities (Project Controls › Mapping) and resolve the other baseline blockers before locking the baseline."
+              : baselineBlockers.length > 0
               ? "Resolve baseline blockers before locking the official baseline."
               : revisionStatus === "approved"
                 ? "Baseline can be locked."

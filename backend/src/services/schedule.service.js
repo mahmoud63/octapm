@@ -312,6 +312,19 @@ const buildPlannedDateFields = (activity, project) => {
   };
 };
 
+/**
+ * The failing blocking checks a gate needs ("approval" or "baseline"); with
+ * no gate, every failing blocking check. A check that names no gate (a
+ * readiness stored before D5) is needed by both.
+ */
+const failingChecksFor = (readiness, gate = null) =>
+  (readiness?.checks || []).filter(
+    (check) =>
+      check.severity === "blocking" &&
+      !check.passed &&
+      (!gate || !Array.isArray(check.requiredFor) || check.requiredFor.includes(gate)),
+  );
+
 const buildScheduleReadiness = ({
   project,
   revision,
@@ -430,6 +443,9 @@ const buildScheduleReadiness = ({
   const pendingAllocatedAmount = toNumber(
     allocationSummary?.pendingAllocatedAmount,
   );
+  // A stored revision that is not the active schedule yet: its activities
+  // live only in its snapshot, and nothing can be allocated to them.
+  const staged = Boolean(revision && revision.id && revision.isActive === false);
 
   const criticalActivities = activities.filter(
     (activity) => activity.isCritical && !activity.isMilestone,
@@ -496,6 +512,7 @@ const buildScheduleReadiness = ({
   const checks = [
     {
       key: "predecessors",
+      requiredFor: ["approval", "baseline"],
       label: "Predecessor logic",
       passed:
         activityCount > 0 &&
@@ -532,20 +549,32 @@ const buildScheduleReadiness = ({
       },
     },
     {
+      // Owner decision D5: allocations are made to ACTIVE activities, so
+      // coverage cannot exist before the revision is activated — and the
+      // activation needs the approval. The check therefore guards the
+      // baseline lock only; the approval judges the revision's own logic.
+      // A staged revision's coverage is not established yet (the summary
+      // is of the active activities, not of this revision's), so it is
+      // reported as the step that comes after the activation.
       key: "allocations",
       label: "BOQ allocations",
+      requiredFor: ["baseline"],
       passed:
         requiredBoqAmount <= 0.01 ||
-        (approvedAllocatedAmount > 0 && requiredUnallocatedAmount <= 0.01),
+        (!staged &&
+          approvedAllocatedAmount > 0 &&
+          requiredUnallocatedAmount <= 0.01),
       severity: allocatableBoqAmount <= 0 ? "warning" : "blocking",
       message:
         allocatableBoqAmount <= 0
           ? "No BOQ value found for allocation checks."
-          : requiredUnallocatedAmount > 0.01
-            ? "BOQ value remains unallocated to approved schedule activities."
-            : approvedAllocatedAmount <= 0
-              ? "Only optional BOQ value is unallocated; nothing blocks the baseline."
-              : "Approved allocations cover the BOQ value.",
+          : staged && requiredBoqAmount > 0.01
+            ? "BOQ value is mapped to this revision's activities after it is activated; the baseline lock needs it, the approval does not."
+            : requiredUnallocatedAmount > 0.01
+              ? "BOQ value remains unallocated to approved schedule activities."
+              : approvedAllocatedAmount <= 0
+                ? "Only optional BOQ value is unallocated; nothing blocks the baseline."
+                : "Approved allocations cover the BOQ value.",
       details: {
         totalBoqAmount,
         allocatableBoqAmount,
@@ -558,6 +587,7 @@ const buildScheduleReadiness = ({
     },
     {
       key: "critical_path",
+      requiredFor: ["approval", "baseline"],
       label: "Critical path",
       passed:
         activityCount > 0 &&
@@ -582,6 +612,7 @@ const buildScheduleReadiness = ({
     },
     {
       key: "date_sanity",
+      requiredFor: ["approval", "baseline"],
       label: "Date sanity",
       passed: invalidDateRows.length === 0,
       severity: "blocking",
@@ -598,16 +629,22 @@ const buildScheduleReadiness = ({
     },
   ];
 
-  const blockingFailures = checks.filter(
-    (check) => check.severity === "blocking" && !check.passed,
-  );
+  // Each gate is judged on the checks it needs (owner decision D5): the
+  // approval on the revision's own logic, the baseline lock on everything,
+  // BOQ allocation coverage included. `ready` and `blockingCount` answer
+  // for the approval; `baselineReady` and `baselineBlockingCount` for the
+  // baseline lock.
+  const approvalFailures = failingChecksFor({ checks }, "approval");
+  const baselineFailures = failingChecksFor({ checks }, "baseline");
 
   return {
     revisionId: revision?.id || null,
     status: normalizeRevisionStatus(revision?.status),
-    ready: blockingFailures.length === 0,
+    ready: approvalFailures.length === 0,
     checkedAt: new Date().toISOString(),
-    blockingCount: blockingFailures.length,
+    blockingCount: approvalFailures.length,
+    baselineReady: baselineFailures.length === 0,
+    baselineBlockingCount: baselineFailures.length,
     checks,
   };
 };
@@ -793,10 +830,8 @@ const READINESS_FIX_WHERE = Object.freeze({
  * reader; the readiness itself stays in error.details (withheld per reader
  * by utils/boq-figures withheldError).
  */
-const scheduleNotReadyMessage = (readiness, action) => {
-  const failing = (readiness?.checks || []).filter(
-    (check) => check.severity === "blocking" && !check.passed,
-  );
+const scheduleNotReadyMessage = (readiness, action, { gate = null } = {}) => {
+  const failing = failingChecksFor(readiness, gate);
   if (failing.length === 0) {
     return `Schedule readiness checks must pass before ${action}.`;
   }
@@ -3241,12 +3276,16 @@ const approveRevision = async ({
 
   assertAllowedStatus(revision, [REVISION_STATUS.UNDER_REVIEW], "approved");
 
+  // The approval judges the revision's own logic (owner decision D5): BOQ
+  // allocation coverage is not part of it — allocations are made to the
+  // active activities, which exist only after this approval and the
+  // activation that follows; the baseline lock requires the coverage.
   const readiness = await getReadinessForRevision({ project, revision });
   if (!readiness.ready) {
     throw new HttpError(
       400,
       "SCHEDULE_NOT_READY",
-      scheduleNotReadyMessage(readiness, "approval"),
+      scheduleNotReadyMessage(readiness, "approval", { gate: "approval" }),
       readiness,
     );
   }
@@ -3410,12 +3449,15 @@ const lockBaseline = async ({
     );
   }
 
+  // The baseline lock needs every check, BOQ allocation coverage of the
+  // active activities included (owner decision D5): the refusal names the
+  // unallocated coverage and Project Controls › Mapping, where it is mapped.
   const readiness = await getReadinessForRevision({ project, revision });
-  if (!readiness.ready) {
+  if (!readiness.baselineReady) {
     throw new HttpError(
       400,
       "SCHEDULE_NOT_READY",
-      scheduleNotReadyMessage(readiness, "baseline lock"),
+      scheduleNotReadyMessage(readiness, "baseline lock", { gate: "baseline" }),
       readiness,
     );
   }
@@ -3523,8 +3565,8 @@ const lockBaseline = async ({
       summary: {
         transition: "revision.baseline",
         lockedActivities: activities.length,
-        readinessReady: readiness.ready,
-        readinessBlockingCount: readiness.blockingCount,
+        readinessReady: readiness.baselineReady,
+        readinessBlockingCount: readiness.baselineBlockingCount,
       },
     });
     await approvalWorkflowService.recordTransition({
@@ -3540,8 +3582,8 @@ const lockBaseline = async ({
       comment,
       metadata: {
         lockedActivities: activities.length,
-        readinessReady: readiness.ready,
-        readinessBlockingCount: readiness.blockingCount,
+        readinessReady: readiness.baselineReady,
+        readinessBlockingCount: readiness.baselineBlockingCount,
       },
     });
 

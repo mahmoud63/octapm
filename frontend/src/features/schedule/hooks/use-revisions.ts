@@ -13,6 +13,8 @@ export type ScheduleRevisionStatus =
 export interface ScheduleReadinessCheck {
   key: string
   label: string
+  /** The gates the check guards ("approval", "baseline"); D5. */
+  requiredFor?: string[]
   passed: boolean
   severity: string
   message: string
@@ -25,6 +27,9 @@ export interface ScheduleReadiness {
   ready: boolean
   checkedAt: string
   blockingCount: number
+  /** The baseline lock's verdict: every check, BOQ coverage included (D5). */
+  baselineReady?: boolean
+  baselineBlockingCount?: number
   checks: ScheduleReadinessCheck[]
 }
 

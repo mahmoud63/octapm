@@ -202,7 +202,7 @@ describe('schedule revision lifecycle service', () => {
     );
   });
 
-  it('blocks approval when readiness checks fail', async () => {
+  it('approves with the BOQ still unallocated: coverage is a baseline check, not an approval check (D5)', async () => {
     mockCurrentRevision(revision);
     mockBuildAllocationSummary.mockResolvedValue({
       totalBoqAmount: 100,
@@ -210,6 +210,45 @@ describe('schedule revision lifecycle service', () => {
       pendingAllocatedAmount: 0,
       unallocatedAmount: 100,
     });
+
+    const result = await scheduleService.approveRevision({
+      orgId: 'org-1',
+      projectId: 'project-1',
+      revisionId: 'revision-1',
+      userId: 'user-1',
+    });
+    expect(result.status).toBe('approved');
+  });
+
+  it('refuses the baseline lock while BOQ value is unallocated, naming Project Controls › Mapping (D5)', async () => {
+    mockCurrentRevision({ ...revision, status: 'approved', isActive: true }, { active: true });
+    mockBuildAllocationSummary.mockResolvedValue({
+      totalBoqAmount: 100,
+      approvedAllocatedAmount: 0,
+      pendingAllocatedAmount: 0,
+      unallocatedAmount: 100,
+    });
+
+    await expect(
+      scheduleService.lockBaseline({
+        orgId: 'org-1',
+        projectId: 'project-1',
+        revisionId: 'revision-1',
+        userId: 'pm-1',
+      }),
+    ).rejects.toMatchObject({
+      code: 'SCHEDULE_NOT_READY',
+      message:
+        'Schedule readiness checks must pass before baseline lock: BOQ allocations — BOQ value remains unallocated to approved schedule activities (Project Controls › Mapping).',
+    });
+    expect(mockPrisma.activity.update).not.toHaveBeenCalled();
+  });
+
+  it('blocks approval when the revision\'s own logic fails', async () => {
+    mockCurrentRevision(revision);
+    mockPrisma.activity.findMany.mockResolvedValue(
+      readyActivities.map((activity) => ({ ...activity, predecessors: null })),
+    );
 
     await expect(
       scheduleService.approveRevision({

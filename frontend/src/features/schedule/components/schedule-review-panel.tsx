@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { Link } from '@tanstack/react-router'
 import {
   AlertTriangle,
   CheckCircle2,
@@ -76,10 +77,20 @@ const getApiErrorMessage = (error: unknown, fallback: string) =>
   (error as { response?: { data?: { error?: { message?: string } } } })
     ?.response?.data?.error?.message ?? fallback
 
+// The baseline blockers that say the bill's value is not mapped yet (D5):
+// after the activation they are resolved on Project Controls › Mapping.
+const ALLOCATION_BLOCKER_CODES = new Set([
+  'NO_APPROVED_ALLOCATIONS',
+  'UNALLOCATED_BOQ',
+  'SCHEDULE_ALLOCATIONS_FAILED',
+])
+
 function getNextActionLabel(
   status: ScheduleRevisionStatus,
   ready: boolean,
-  awaitingActivation: boolean
+  awaitingActivation: boolean,
+  baselineReady: boolean,
+  coverageBlocksBaseline: boolean
 ) {
   if (status === 'draft') return 'Next: submit for review'
   if (status === 'rejected') return 'Next: resubmit for review'
@@ -91,8 +102,15 @@ function getNextActionLabel(
   if (status === 'approved' && awaitingActivation) {
     return 'Next: activate this revision (Schedule › Revisions)'
   }
+  // Activated: the bill's value is mapped to the active activities, then
+  // the baseline is locked (owner decision D5).
+  if (status === 'approved' && coverageBlocksBaseline) {
+    return 'Next: map the BOQ to the active activities (Project Controls › Mapping), then lock baseline'
+  }
   if (status === 'approved') {
-    return ready ? 'Next: lock baseline' : 'Next: clear readiness blockers'
+    return baselineReady
+      ? 'Next: lock baseline'
+      : 'Next: clear readiness blockers'
   }
   if (status === 'baselined') return 'Baseline locked'
   return 'No action available'
@@ -193,11 +211,29 @@ export function ScheduleReviewPanel({ projectId, revision }: Props) {
   const readiness = revision.readiness ?? null
   const { data: setupReadiness } = useProjectSetupReadiness(projectId)
   const explanation = revision.criticalPathExplanation ?? null
+  // The approval judges the revision's own logic (ready); the baseline lock
+  // every check, BOQ allocation coverage included (baselineReady) — D5.
   const isReady = Boolean(readiness?.ready)
+  const isBaselineReady = Boolean(readiness?.baselineReady ?? readiness?.ready)
   // Staged: the server answers isActive false until the revision is activated.
-  const awaitingActivation = status === 'approved' && revision.isActive === false
+  const awaitingActivation =
+    status === 'approved' && revision.isActive === false
+  // Before approval and activation, the checks shown are the approval's.
+  const judgedForBaseline = status === 'approved' && !awaitingActivation
   const baselineGate = setupReadiness?.gates.baseline
   const baselineBlockers = baselineGate?.blockers ?? []
+  const coverageBlocksBaseline =
+    judgedForBaseline &&
+    (baselineBlockers.some((blocker) =>
+      ALLOCATION_BLOCKER_CODES.has(blocker.code)
+    ) ||
+      (readiness?.checks ?? []).some(
+        (check) =>
+          check.key === 'allocations' &&
+          check.severity === 'blocking' &&
+          !check.passed
+      ))
+  const canOpenMapping = useCanPerform('boq', 'read')
   const setupBaselineBlocked = Boolean(
     baselineGate && !baselineGate.ready && !baselineGate.alreadyLocked
   )
@@ -282,7 +318,7 @@ export function ScheduleReviewPanel({ projectId, revision }: Props) {
     canBaselineRevision &&
     status === 'approved' &&
     !awaitingActivation &&
-    isReady &&
+    isBaselineReady &&
     !setupBaselineBlocked
 
   return (
@@ -303,7 +339,13 @@ export function ScheduleReviewPanel({ projectId, revision }: Props) {
               className='text-xs text-muted-foreground'
               data-testid='uat-schedule-review-next'
             >
-              {getNextActionLabel(status, isReady, awaitingActivation)}
+              {getNextActionLabel(
+                status,
+                isReady,
+                awaitingActivation,
+                isBaselineReady,
+                coverageBlocksBaseline
+              )}
             </span>
           </div>
           <div className='flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground'>
@@ -381,9 +423,7 @@ export function ScheduleReviewPanel({ projectId, revision }: Props) {
             <AlertTriangle className='mt-0.5 h-4 w-4 shrink-0' />
             <div className='min-w-0'>
               <p className='font-semibold'>Baseline setup blockers</p>
-              <p className='mt-1 text-xs opacity-90'>
-                {baselineGate?.message}
-              </p>
+              <p className='mt-1 text-xs opacity-90'>{baselineGate?.message}</p>
               <ul className='mt-2 list-inside list-disc space-y-1 text-xs'>
                 {baselineBlockers.slice(0, 4).map((blocker) => (
                   <li key={`${blocker.stepKey}-${blocker.code}`}>
@@ -391,6 +431,23 @@ export function ScheduleReviewPanel({ projectId, revision }: Props) {
                   </li>
                 ))}
               </ul>
+              {coverageBlocksBaseline && canOpenMapping && (
+                <Button
+                  asChild
+                  variant='link'
+                  size='sm'
+                  className='mt-1 h-auto px-0 text-xs'
+                >
+                  <Link
+                    to='/projects/$projectId/$module/$child'
+                    params={{ projectId, module: 'controls', child: 'mapping' }}
+                    data-testid='uat-schedule-review-open-mapping'
+                  >
+                    Map the BOQ to the active activities (Project Controls ›
+                    Mapping)
+                  </Link>
+                </Button>
+              )}
             </div>
           </div>
         </div>
@@ -477,7 +534,7 @@ export function ScheduleReviewPanel({ projectId, revision }: Props) {
       <div className='mt-4 rounded-md border'>
         <div className='flex items-center justify-between border-b px-3 py-2'>
           <div className='flex items-center gap-2 text-xs font-semibold'>
-            {isReady ? (
+            {(judgedForBaseline ? isBaselineReady : isReady) ? (
               <CheckCircle2 className='h-4 w-4 text-emerald-600' />
             ) : (
               <AlertTriangle className='h-4 w-4 text-amber-600' />
@@ -488,34 +545,55 @@ export function ScheduleReviewPanel({ projectId, revision }: Props) {
             className='text-xs text-muted-foreground'
             data-testid='uat-schedule-review-blocking'
           >
-            {readiness ? `${readiness.blockingCount} blocking` : 'Not checked'}
+            {readiness
+              ? `${
+                  judgedForBaseline
+                    ? (readiness.baselineBlockingCount ??
+                      readiness.blockingCount)
+                    : readiness.blockingCount
+                } blocking`
+              : 'Not checked'}
           </span>
         </div>
         <div className='divide-y'>
-          {(readiness?.checks ?? []).map((check) => (
-            <div
-              key={check.key}
-              className='grid gap-2 px-3 py-2 text-sm md:grid-cols-[220px_1fr_auto] md:items-center'
-            >
-              <div className='flex items-center gap-2 font-medium'>
-                {check.passed ? (
-                  <CheckCircle2 className='h-4 w-4 text-emerald-600' />
-                ) : check.severity === 'warning' ? (
-                  <Clock3 className='h-4 w-4 text-amber-600' />
-                ) : (
-                  <AlertTriangle className='h-4 w-4 text-rose-600' />
-                )}
-                {check.label}
-              </div>
-              <p className='text-xs text-muted-foreground'>{check.message}</p>
-              <Badge
-                variant={check.passed ? 'outline' : 'secondary'}
-                className='w-fit'
+          {(readiness?.checks ?? []).map((check) => {
+            // A check the approval does not need (BOQ coverage, D5) is, until
+            // the revision is approved and active, the step before the lock.
+            const beforeBaseline =
+              !judgedForBaseline &&
+              !check.passed &&
+              Array.isArray(check.requiredFor) &&
+              !check.requiredFor.includes('approval')
+            return (
+              <div
+                key={check.key}
+                data-testid={`uat-schedule-review-check-${check.key}`}
+                className='grid gap-2 px-3 py-2 text-sm md:grid-cols-[220px_1fr_auto] md:items-center'
               >
-                {check.passed ? 'Passed' : check.severity}
-              </Badge>
-            </div>
-          ))}
+                <div className='flex items-center gap-2 font-medium'>
+                  {check.passed ? (
+                    <CheckCircle2 className='h-4 w-4 text-emerald-600' />
+                  ) : check.severity === 'warning' || beforeBaseline ? (
+                    <Clock3 className='h-4 w-4 text-amber-600' />
+                  ) : (
+                    <AlertTriangle className='h-4 w-4 text-rose-600' />
+                  )}
+                  {check.label}
+                </div>
+                <p className='text-xs text-muted-foreground'>{check.message}</p>
+                <Badge
+                  variant={check.passed ? 'outline' : 'secondary'}
+                  className='w-fit'
+                >
+                  {check.passed
+                    ? 'Passed'
+                    : beforeBaseline
+                      ? 'Before baseline'
+                      : check.severity}
+                </Badge>
+              </div>
+            )
+          })}
           {!readiness?.checks?.length && (
             <div className='px-3 py-3 text-sm text-muted-foreground'>
               Readiness unavailable.

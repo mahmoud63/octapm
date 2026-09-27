@@ -355,10 +355,15 @@ export const scheduleRevisionSchema = z.object({
       ready: z.boolean(),
       checkedAt: z.string(),
       blockingCount: z.number(),
+      // D5: ready/blockingCount answer for the approval; these for the
+      // baseline lock (BOQ allocation coverage included).
+      baselineReady: z.boolean().optional(),
+      baselineBlockingCount: z.number().optional(),
       checks: z.array(
         z.object({
           key: z.string(),
           label: z.string(),
+          requiredFor: z.array(z.string()).optional(),
           passed: z.boolean(),
           severity: z.string(),
           message: z.string(),

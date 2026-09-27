@@ -297,7 +297,15 @@ liveDescribe("PC-4 §12: the Overview and the Schedule module carry no BOQ figur
         activityCount: 2,
         criticalCount: 2,
         totalBudget: 69999.99,
-        snapshotJson: generatedSnapshot("Rev B"),
+        // Its pour has lost its predecessor: since owner decision D5 the
+        // approval judges the revision's own logic (BOQ coverage is a
+        // baseline-lock check), so this is what refuses its approval below
+        // — with the bill's figures still in the readiness it carries.
+        snapshotJson: (() => {
+          const snapshot = generatedSnapshot("Rev B");
+          snapshot.activities = snapshot.activities.map(({ predecessors, ...activity }) => activity);
+          return snapshot;
+        })(),
       },
     });
     const submitted = await post(`/api/v1/projects/${project.id}/schedule/revisions/${stagedRevision.id}/submit-review`, {});

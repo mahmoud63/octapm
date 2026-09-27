@@ -7384,7 +7384,7 @@ add(
     summary:
       "Get setup readiness gates for BOQ, schedule, allocations, baseline, and progress.",
     description:
-      "The §89 setup sequence as twelve steps — profile, structure, BOQ upload, BOQ approval, schedule, allocation, cost loading, engineers, progress methods, schedule approval, baseline, progress — each with its blockers and warnings and, on every issue, the offending records (`items`, capped at 50, `count` the whole number) with a link to fix each one. The three gates keep their shape and meaning; the structure and approval steps are advisory. `structure` counts the project's WBS nodes, locations, cost codes and unresolved units; `coverage` is the allocation coverage summary (never recomputed here).",
+      "The §89 setup sequence as twelve steps — profile, structure, BOQ upload, BOQ approval, schedule, allocation, cost loading, engineers, progress methods, schedule approval, baseline, progress — each with its blockers and warnings and, on every issue, the offending records (`items`, capped at 50, `count` the whole number) with a link to fix each one. The three gates keep their shape and meaning; the structure and approval steps are advisory. `structure` counts the project's WBS nodes, locations, cost codes and unresolved units; `coverage` is the allocation coverage summary (never recomputed here). Owner decision D5, the greenfield order — upload and approve the BOQ, import or generate a schedule, submit, approve, activate, map the bill's value to the active activities, lock the baseline: while a staged revision is not yet active, the allocation step's ALLOCATION_WAITING_FOR_SCHEDULE blocker names the revision step still missing (its review and approval, or its activation) and the step's action opens Schedule › Revisions; after the activation, unallocated coverage blocks the baseline step (SCHEDULE_ALLOCATIONS_FAILED, whose message names Project Controls › Mapping), whose action then opens the mapping. The schedule approval step never waits on allocations.",
     operationId: "getProjectSetupReadiness",
     parameters: projectParams,
     responseSchema: ref("ProjectSetupReadiness"),
@@ -7882,6 +7882,14 @@ add(
   }),
 );
 
+// Owner decision D5: which readiness checks each gate needs.
+const READINESS_GATES =
+  "readiness.ready and readiness.blockingCount answer for the approval, which judges the revision's own logic (predecessor logic, critical path, date sanity); readiness.baselineReady and readiness.baselineBlockingCount answer for the baseline lock, which also needs the BOQ allocation coverage of the active activities. Each check's requiredFor names the gates it guards (\"approval\", \"baseline\"); the BOQ allocations check guards the baseline only, and on a staged revision it says the bill's value is mapped after the activation.";
+const APPROVAL_WITHOUT_COVERAGE =
+  "Approval does not require BOQ allocations (owner decision D5): allocations are made to the active activities, which exist only once the approved revision is activated. SCHEDULE_NOT_READY at approval names only the revision's own failing checks.";
+const BASELINE_NEEDS_COVERAGE =
+  "The baseline lock of an activated revision whose required BOQ value is not allocated to approved active activities is refused with 400 SCHEDULE_NOT_READY, whose message names BOQ allocations and Project Controls › Mapping (\"Schedule readiness checks must pass before baseline lock: BOQ allocations — BOQ value remains unallocated to approved schedule activities (Project Controls › Mapping).\"), with no BOQ figure.";
+
 // The lifecycle refusals that name the step to take next.
 const BASELINE_NOT_ACTIVATED =
   "An approved revision that is still staged (not yet activated) is refused with 409 REVISION_NOT_ACTIVATED, whose message says to activate it on Schedule › Revisions first; its baseline is locked after that. With no active activity at all the refusal is 400 NO_ACTIVITIES, which likewise says to activate an approved revision first.";
@@ -7897,7 +7905,7 @@ add(
     tag: "Schedule",
     summary: "Lock the approved current schedule as baseline.",
     description:
-      `The BOQ value figures in the answer's readiness are present only for a caller who may read the BOQ. A schedule that is not ready is refused with 400 SCHEDULE_NOT_READY, whose error.message names each failing blocking check, what is wrong and where to put it right (for example \"Predecessor logic — at least one predecessor relationship is required (Schedule › Gantt)\") and carries no BOQ figure, and the readiness in error.details, whose BOQ value figures are likewise present only for a caller who may read the BOQ; ready, blockingCount and the checks' verdicts are the same for every caller. A step the revision's current status does not allow is refused with 409 INVALID_REVISION_STATUS, whose message names the status it is in now and the one the step needs, as the Revisions tab labels them (e.g. \"This schedule revision is now Rejected; it must be Under review before it can be rejected. Refresh to see its current status.\"). ${BASELINE_NOT_ACTIVATED} ${REVISION_NOT_CURRENT_NOTE}`,
+      `The BOQ value figures in the answer's readiness are present only for a caller who may read the BOQ. A schedule that is not ready is refused with 400 SCHEDULE_NOT_READY, whose error.message names each failing blocking check, what is wrong and where to put it right (for example \"Predecessor logic — at least one predecessor relationship is required (Schedule › Gantt)\") and carries no BOQ figure, and the readiness in error.details, whose BOQ value figures are likewise present only for a caller who may read the BOQ; ready, blockingCount and the checks' verdicts are the same for every caller. A step the revision's current status does not allow is refused with 409 INVALID_REVISION_STATUS, whose message names the status it is in now and the one the step needs, as the Revisions tab labels them (e.g. \"This schedule revision is now Rejected; it must be Under review before it can be rejected. Refresh to see its current status.\"). ${BASELINE_NOT_ACTIVATED} ${BASELINE_NEEDS_COVERAGE} ${READINESS_GATES} ${REVISION_NOT_CURRENT_NOTE}`,
     operationId: "baselineCurrentSchedule",
     parameters: projectParams,
     permissions: modulePermission("schedule", "baseline", "revision.baseline"),
@@ -7914,7 +7922,7 @@ add(
 
 // §12, as utils/boq-figures applies it to every answer that carries a revision.
 const REVISION_FIGURES =
-  "The BOQ value figures in readiness.checks[].details (and a revision's unallocatedBoqAmount) are present only for a caller who may read the BOQ; totalBudget and generatedTotalBudget only for a caller who may read the BOQ or the cost module. Check keys, verdicts and counts are the same for every caller.";
+  `The BOQ value figures in readiness.checks[].details (and a revision's unallocatedBoqAmount) are present only for a caller who may read the BOQ; totalBudget and generatedTotalBudget only for a caller who may read the BOQ or the cost module. Check keys, verdicts and counts are the same for every caller. ${READINESS_GATES}`;
 // ... and to the refusal that states the readiness.
 const NOT_READY_FIGURES =
   "A schedule that is not ready is refused with 400 SCHEDULE_NOT_READY, whose error.message names each failing blocking check, what is wrong and where to put it right (for example \"Predecessor logic — at least one predecessor relationship is required (Schedule › Gantt)\") and carries no BOQ figure, and the readiness in error.details, whose BOQ value figures are likewise present only for a caller who may read the BOQ; ready, blockingCount and the checks' verdicts are the same for every caller. A step the revision's current status does not allow is refused with 409 INVALID_REVISION_STATUS, whose message names the status it is in now and the one the step needs, as the Revisions tab labels them (e.g. \"This schedule revision is now Rejected; it must be Under review before it can be rejected. Refresh to see its current status.\").";
@@ -8028,7 +8036,9 @@ add(
       description: [
         REVISION_FIGURES,
         ["approve", "baseline"].includes(suffix) && NOT_READY_FIGURES,
+        suffix === "approve" && APPROVAL_WITHOUT_COVERAGE,
         suffix === "baseline" && BASELINE_NOT_ACTIVATED,
+        suffix === "baseline" && BASELINE_NEEDS_COVERAGE,
         suffix !== "rollback" && REVISION_NOT_CURRENT_NOTE,
         ["reject", "rollback"].includes(suffix) && REASON_REQUIRED_NOTE,
       ]
