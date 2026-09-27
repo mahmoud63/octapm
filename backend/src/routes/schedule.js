@@ -12,7 +12,7 @@ const {
   uploadLimiter,
 } = require('../middleware/rate-limit');
 const { getEffectiveRole, requirePermission } = require('../middleware/rbac');
-const { validate } = require('../middleware/validate');
+const { validate, validateWithReasons } = require('../middleware/validate');
 const scheduleService = require('../services/schedule.service');
 const {
   boqFigureAccess,
@@ -95,6 +95,29 @@ const withheldRefusals = (handler) => async (req, res) => {
     throw withheldError(error, boqFigureAccess(req));
   }
 };
+
+/*
+ * The lifecycle's own refusals say what is missing (validateWithReasons makes
+ * the first failing check's message the error's message), so an API client
+ * — mobile, which production answers without details — reads the reason the
+ * screen would give, never a bare "Validation failed".
+ */
+const reasonRequired = (requiredMessage, subject) => [
+  body('reason')
+    .isString()
+    .withMessage(requiredMessage)
+    .bail()
+    .trim()
+    .notEmpty()
+    .withMessage(requiredMessage)
+    .bail()
+    .isLength({ max: 2000 })
+    .withMessage(`${subject} can be at most 2,000 characters.`),
+];
+const ACTIVATION_MAPPINGS_REQUIRED =
+  'Activation needs the activity mappings: send "mappings" as a list pairing each active activity with its activity in this revision (an empty list when no schedule is active yet).';
+const ACTIVATION_MAPPING_INCOMPLETE =
+  'Each activity mapping needs both the active activity (oldActivityId) and its activity in this revision (newActivityKey).';
 
 router.use(authenticate);
 
@@ -187,9 +210,19 @@ router.post(
   }),
   [
     param('revisionId').isUUID(),
-    body('mappings').isArray(),
-    body('mappings.*.oldActivityId').isString().trim().notEmpty(),
-    body('mappings.*.newActivityKey').isString().trim().notEmpty(),
+    body('mappings').isArray().withMessage(ACTIVATION_MAPPINGS_REQUIRED),
+    body('mappings.*.oldActivityId')
+      .isString()
+      .withMessage(ACTIVATION_MAPPING_INCOMPLETE)
+      .trim()
+      .notEmpty()
+      .withMessage(ACTIVATION_MAPPING_INCOMPLETE),
+    body('mappings.*.newActivityKey')
+      .isString()
+      .withMessage(ACTIVATION_MAPPING_INCOMPLETE)
+      .trim()
+      .notEmpty()
+      .withMessage(ACTIVATION_MAPPING_INCOMPLETE),
     body('unmappedRemovals').optional({ nullable: true }).isArray(),
     body('unmappedRemovals.*.oldActivityId')
       .optional()
@@ -205,7 +238,7 @@ router.post(
     body('comment').optional({ nullable: true }).isString().trim().isLength({
       max: 2000,
     }),
-    validate,
+    validateWithReasons,
   ],
   asyncHandler(withheldRefusals(async (req, res) => {
     const result = await scheduleService.activateRevision({
@@ -229,8 +262,8 @@ router.post(
   }),
   [
     param('revisionId').isUUID(),
-    body('reason').isString().trim().notEmpty().isLength({ max: 2000 }),
-    validate,
+    ...reasonRequired('A rollback reason is required.', 'The rollback reason'),
+    validateWithReasons,
   ],
   asyncHandler(withheldRefusals(async (req, res) => {
     const result = await scheduleService.rollbackRevision({
@@ -304,8 +337,8 @@ router.post(
   }),
   [
     param('revisionId').isUUID(),
-    body('reason').isString().trim().notEmpty().isLength({ max: 2000 }),
-    validate,
+    ...reasonRequired('A rejection reason is required.', 'The rejection reason'),
+    validateWithReasons,
   ],
   asyncHandler(withheldRefusals(async (req, res) => {
     const result = await scheduleService.rejectRevision({

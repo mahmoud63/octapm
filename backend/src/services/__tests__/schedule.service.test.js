@@ -511,3 +511,34 @@ describe('schedule revision lifecycle service', () => {
     expect(mockPrisma.activityProgress.deleteMany).not.toHaveBeenCalled();
   });
 });
+
+describe('scheduleNotReadyMessage', () => {
+  const check = (key, label, message) => ({
+    key,
+    label,
+    message,
+    severity: 'blocking',
+    passed: false,
+  });
+
+  it('keeps an acronym that starts a check message, and lower-cases an ordinary first word mid-sentence', () => {
+    const message = scheduleService.scheduleNotReadyMessage(
+      {
+        checks: [
+          check('predecessors', 'Predecessor logic', 'At least one predecessor relationship is required.'),
+          check('allocations', 'BOQ allocations', 'BOQ value remains unallocated to approved schedule activities.'),
+          check('critical_path', 'Critical path', 'A critical path is required.'),
+          { key: 'date_sanity', label: 'Dates', message: 'Passed.', severity: 'blocking', passed: true },
+        ],
+      },
+      'approval',
+    );
+    expect(message).toBe(
+      'Schedule readiness checks must pass before approval: ' +
+        'Predecessor logic — at least one predecessor relationship is required (Schedule › Gantt); ' +
+        'BOQ allocations — BOQ value remains unallocated to approved schedule activities (Project Controls › Mapping); ' +
+        'Critical path — a critical path is required (Schedule › Critical Path).',
+    );
+    expect(message).not.toMatch(/\bbOQ\b/);
+  });
+});

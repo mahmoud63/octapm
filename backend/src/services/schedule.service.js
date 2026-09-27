@@ -683,7 +683,7 @@ const loadCurrentRevisionForLifecycle = async ({
     throw new HttpError(
       409,
       "REVISION_NOT_CURRENT",
-      "Only the active schedule revision or latest staged revision can move through review and baseline.",
+      "This schedule revision is no longer current: only the active revision or the latest staged revision can move through review and baseline. Refresh to see the current revision (Schedule › Revisions).",
     );
   }
 
@@ -773,6 +773,11 @@ const assertAllowedStatus = (revision, allowed, action) => {
   }
 };
 
+// An approved revision still staged: the one step before its baseline, in
+// the words the refusal and the setup readiness both use.
+const REVISION_NOT_ACTIVATED_MESSAGE =
+  "This approved schedule revision has not been activated yet. Activate it on Schedule › Revisions; its baseline can be locked after that.";
+
 // Where each blocking schedule-readiness check is put right.
 const READINESS_FIX_WHERE = Object.freeze({
   predecessors: "Schedule › Gantt",
@@ -797,7 +802,13 @@ const scheduleNotReadyMessage = (readiness, action) => {
   }
   const reasons = failing.map((check) => {
     const message = String(check.message || "").trim().replace(/\.$/, "");
-    const what = message ? message.charAt(0).toLowerCase() + message.slice(1) : "not passed";
+    // Mid-sentence, a check's message loses its capital — unless its first
+    // word is an acronym ("BOQ value remains…" never becomes "bOQ value…").
+    const what = !message
+      ? "not passed"
+      : /^[A-Z](?![A-Z0-9])/.test(message)
+        ? message.charAt(0).toLowerCase() + message.slice(1)
+        : message;
     const where = READINESS_FIX_WHERE[check.key];
     return `${check.label} — ${what}${where ? ` (${where})` : ""}`;
   });
@@ -3386,6 +3397,19 @@ const lockBaseline = async ({
 
   assertAllowedStatus(revision, [REVISION_STATUS.APPROVED], "baselined");
 
+  // An approved revision that is still staged (its activities live only in
+  // its snapshot) is not the schedule yet: the baseline would copy the dates
+  // of whatever is active instead — or of nothing. The step the PM is
+  // missing is the activation, so the refusal names it and where it is.
+  if (!revision.isActive && getSnapshotActivities(revision, project).length > 0) {
+    throw new HttpError(
+      409,
+      "REVISION_NOT_ACTIVATED",
+      REVISION_NOT_ACTIVATED_MESSAGE,
+      { revisionId: revision.id },
+    );
+  }
+
   const readiness = await getReadinessForRevision({ project, revision });
   if (!readiness.ready) {
     throw new HttpError(
@@ -3405,7 +3429,7 @@ const lockBaseline = async ({
     throw new HttpError(
       400,
       "NO_ACTIVITIES",
-      "No schedule activities are available for baseline lock.",
+      "No schedule activities are active for baseline lock. Activate an approved schedule revision first (Schedule › Revisions).",
     );
   }
 
@@ -3625,5 +3649,7 @@ module.exports = {
   lockBaseline,
   getResourcePlan,
   REVISION_STATUS,
+  REVISION_NOT_ACTIVATED_MESSAGE,
   buildScheduleReadiness,
+  scheduleNotReadyMessage,
 };

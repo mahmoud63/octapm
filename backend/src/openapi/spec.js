@@ -7882,6 +7882,14 @@ add(
   }),
 );
 
+// The lifecycle refusals that name the step to take next.
+const BASELINE_NOT_ACTIVATED =
+  "An approved revision that is still staged (not yet activated) is refused with 409 REVISION_NOT_ACTIVATED, whose message says to activate it on Schedule › Revisions first; its baseline is locked after that. With no active activity at all the refusal is 400 NO_ACTIVITIES, which likewise says to activate an approved revision first.";
+const REVISION_NOT_CURRENT_NOTE =
+  "A revision that is neither the active one nor the latest staged one (a newer import has superseded it) is refused with 409 REVISION_NOT_CURRENT, whose message says to refresh to see the current revision (Schedule › Revisions).";
+const REASON_REQUIRED_NOTE =
+  "A missing or blank reason is refused with 400 VALIDATION_ERROR whose error.message is the reason itself (\"A rejection reason is required.\" or \"A rollback reason is required.\"), in production too.";
+
 add(
   "/projects/{projectId}/schedule/baseline",
   "post",
@@ -7889,7 +7897,7 @@ add(
     tag: "Schedule",
     summary: "Lock the approved current schedule as baseline.",
     description:
-      "The BOQ value figures in the answer's readiness are present only for a caller who may read the BOQ. A schedule that is not ready is refused with 400 SCHEDULE_NOT_READY, whose error.message names each failing blocking check, what is wrong and where to put it right (for example \"Predecessor logic — at least one predecessor relationship is required (Schedule › Gantt)\") and carries no BOQ figure, and the readiness in error.details, whose BOQ value figures are likewise present only for a caller who may read the BOQ; ready, blockingCount and the checks' verdicts are the same for every caller. A step the revision's current status does not allow is refused with 409 INVALID_REVISION_STATUS, whose message names the status it is in now and the one the step needs, as the Revisions tab labels them (e.g. \"This schedule revision is now Rejected; it must be Under review before it can be rejected. Refresh to see its current status.\").",
+      `The BOQ value figures in the answer's readiness are present only for a caller who may read the BOQ. A schedule that is not ready is refused with 400 SCHEDULE_NOT_READY, whose error.message names each failing blocking check, what is wrong and where to put it right (for example \"Predecessor logic — at least one predecessor relationship is required (Schedule › Gantt)\") and carries no BOQ figure, and the readiness in error.details, whose BOQ value figures are likewise present only for a caller who may read the BOQ; ready, blockingCount and the checks' verdicts are the same for every caller. A step the revision's current status does not allow is refused with 409 INVALID_REVISION_STATUS, whose message names the status it is in now and the one the step needs, as the Revisions tab labels them (e.g. \"This schedule revision is now Rejected; it must be Under review before it can be rejected. Refresh to see its current status.\"). ${BASELINE_NOT_ACTIVATED} ${REVISION_NOT_CURRENT_NOTE}`,
     operationId: "baselineCurrentSchedule",
     parameters: projectParams,
     permissions: modulePermission("schedule", "baseline", "revision.baseline"),
@@ -8017,7 +8025,15 @@ add(
     operation({
       tag: "Schedule Revisions",
       summary,
-      description: ["approve", "baseline"].includes(suffix) ? `${REVISION_FIGURES} ${NOT_READY_FIGURES}` : REVISION_FIGURES,
+      description: [
+        REVISION_FIGURES,
+        ["approve", "baseline"].includes(suffix) && NOT_READY_FIGURES,
+        suffix === "baseline" && BASELINE_NOT_ACTIVATED,
+        suffix !== "rollback" && REVISION_NOT_CURRENT_NOTE,
+        ["reject", "rollback"].includes(suffix) && REASON_REQUIRED_NOTE,
+      ]
+        .filter(Boolean)
+        .join(" "),
       operationId,
       parameters: [
         ...projectParams,
@@ -8035,7 +8051,7 @@ add(
   operation({
     tag: "Schedule Revisions",
     summary: "Activate an approved staged schedule revision.",
-    description: REVISION_FIGURES,
+    description: `${REVISION_FIGURES} A body without a mappings list, or a mapping missing its oldActivityId or newActivityKey, is refused with 400 VALIDATION_ERROR whose error.message says what is missing, in production too; send an empty mappings list when no schedule is active yet.`,
     operationId: "activateScheduleRevision",
     parameters: [
       ...projectParams,

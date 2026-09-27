@@ -76,11 +76,20 @@ const getApiErrorMessage = (error: unknown, fallback: string) =>
   (error as { response?: { data?: { error?: { message?: string } } } })
     ?.response?.data?.error?.message ?? fallback
 
-function getNextActionLabel(status: ScheduleRevisionStatus, ready: boolean) {
+function getNextActionLabel(
+  status: ScheduleRevisionStatus,
+  ready: boolean,
+  awaitingActivation: boolean
+) {
   if (status === 'draft') return 'Next: submit for review'
   if (status === 'rejected') return 'Next: resubmit for review'
   if (status === 'under_review') {
     return ready ? 'Next: approve or reject' : 'Next: clear readiness blockers'
+  }
+  // An approved revision still staged is not the schedule yet: its baseline
+  // comes after it is activated, which is done on the Revisions tab.
+  if (status === 'approved' && awaitingActivation) {
+    return 'Next: activate this revision (Schedule › Revisions)'
   }
   if (status === 'approved') {
     return ready ? 'Next: lock baseline' : 'Next: clear readiness blockers'
@@ -185,6 +194,8 @@ export function ScheduleReviewPanel({ projectId, revision }: Props) {
   const { data: setupReadiness } = useProjectSetupReadiness(projectId)
   const explanation = revision.criticalPathExplanation ?? null
   const isReady = Boolean(readiness?.ready)
+  // Staged: the server answers isActive false until the revision is activated.
+  const awaitingActivation = status === 'approved' && revision.isActive === false
   const baselineGate = setupReadiness?.gates.baseline
   const baselineBlockers = baselineGate?.blockers ?? []
   const setupBaselineBlocked = Boolean(
@@ -268,7 +279,11 @@ export function ScheduleReviewPanel({ projectId, revision }: Props) {
   const canReview =
     status === 'under_review' && (canApproveRevision || canRejectRevision)
   const canBaseline =
-    canBaselineRevision && status === 'approved' && isReady && !setupBaselineBlocked
+    canBaselineRevision &&
+    status === 'approved' &&
+    !awaitingActivation &&
+    isReady &&
+    !setupBaselineBlocked
 
   return (
     <section
@@ -284,8 +299,11 @@ export function ScheduleReviewPanel({ projectId, revision }: Props) {
             <Badge variant='outline' className={meta.className}>
               {meta.label}
             </Badge>
-            <span className='text-xs text-muted-foreground'>
-              {getNextActionLabel(status, isReady)}
+            <span
+              className='text-xs text-muted-foreground'
+              data-testid='uat-schedule-review-next'
+            >
+              {getNextActionLabel(status, isReady, awaitingActivation)}
             </span>
           </div>
           <div className='flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground'>

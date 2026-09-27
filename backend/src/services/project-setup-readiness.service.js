@@ -3,7 +3,10 @@ const { HttpError } = require("../utils/http-error");
 const { addMoney } = require("../utils/money");
 const { workspacePath, workspaceSegment } = require("../utils/record-links");
 const { buildAllocationSummary } = require("./activity-boq-allocation.service");
-const { buildScheduleReadiness } = require("./schedule.service");
+const {
+  buildScheduleReadiness,
+  REVISION_NOT_ACTIVATED_MESSAGE,
+} = require("./schedule.service");
 const { resolveCalendar } = require("./cpm.service");
 // The bill's money (PC-3's coverage amounts) and the schedule check that
 // states it, as every endpoint that carries them withholds them (§12).
@@ -717,6 +720,18 @@ const getSetupReadiness = async ({ orgId, projectId, canReadBoq = true, canReadS
     baselinedRevision || revisionStatus === "baselined",
   );
   const scheduleApproved = ["approved", "baselined"].includes(revisionStatus);
+  // An approved revision that is still staged: its activities exist only in
+  // its snapshot, none is active, and the PM's next step is to activate it.
+  // Until then the checks below, run on the (absent) active activities,
+  // would say "No schedule activities exist" or "Generate or import a
+  // schedule" — true of the active schedule, but not what to do.
+  const awaitingActivation = Boolean(
+    currentRevision &&
+      revisionStatus === "approved" &&
+      !currentRevision.isActive &&
+      activeActivityCount === 0 &&
+      toNumber(currentRevision.activityCount) > 0,
+  );
 
   // ── Structure (setup doc §2 b): what the rows and activities are filed
   // under. All of it is soft (§91): missing structure changes no figure.
@@ -1204,7 +1219,9 @@ const getSetupReadiness = async ({ orgId, projectId, canReadBoq = true, canReadS
     activeActivityCount === 0 &&
       issue(
         "ALLOCATION_WAITING_FOR_SCHEDULE",
-        "Generate or import a schedule before mapping allocations.",
+        awaitingActivation
+          ? "Activate the approved schedule revision (Schedule › Revisions) before mapping allocations to its activities."
+          : "Generate or import a schedule before mapping allocations.",
       ),
     boqCount > 0 &&
       requiredBoqAmount > MONEY_EPSILON &&
@@ -1360,7 +1377,21 @@ const getSetupReadiness = async ({ orgId, projectId, canReadBoq = true, canReadS
       ),
   ];
 
-  const readinessBlockers = (scheduleReadiness?.checks || [])
+  // Awaiting activation, the baseline checks have no active activities to
+  // judge: the one blocker is the activation, said with where to do it.
+  const checksForBaseline = awaitingActivation ? [] : scheduleReadiness?.checks || [];
+  const activationBlockers = awaitingActivation
+    ? [
+        issue(
+          "REVISION_NOT_ACTIVATED",
+          REVISION_NOT_ACTIVATED_MESSAGE,
+          "blocking",
+          { revisionStatus },
+          [scheduleRevisionItem(currentRevision, "Activation")],
+        ),
+      ]
+    : [];
+  const readinessBlockers = checksForBaseline
     .filter((check) => check.severity === "blocking" && !check.passed)
     .map((check) =>
       issue(
@@ -1373,7 +1404,7 @@ const getSetupReadiness = async ({ orgId, projectId, canReadBoq = true, canReadS
         ),
       ),
     );
-  const readinessWarnings = (scheduleReadiness?.checks || [])
+  const readinessWarnings = checksForBaseline
     .filter((check) => check.severity !== "blocking" && !check.passed)
     .map((check) =>
       issue(
@@ -1770,10 +1801,13 @@ const getSetupReadiness = async ({ orgId, projectId, canReadBoq = true, canReadS
       key: "baseline_readiness",
       label: "Baseline Readiness",
       description: "Approved schedule passes baseline lock checks.",
-      action: { label: "Lock Baseline", target: TARGETS.scheduleRevisions },
+      action: {
+        label: awaitingActivation ? "Activate Revision" : "Lock Baseline",
+        target: TARGETS.scheduleRevisions,
+      },
       requiredFor: ["baseline", "progress", "reporting"],
       complete: baselineLocked,
-      blockers: scheduleApproved ? readinessBlockers : [],
+      blockers: scheduleApproved ? [...activationBlockers, ...readinessBlockers] : [],
       warnings: baselineLocked
         ? readinessWarnings
         : [
@@ -1784,6 +1818,7 @@ const getSetupReadiness = async ({ orgId, projectId, canReadBoq = true, canReadS
                 "warning",
               ),
             scheduleApproved &&
+              !awaitingActivation &&
               readinessBlockers.length === 0 &&
               issue(
                 "BASELINE_READY_TO_LOCK",
@@ -2015,11 +2050,13 @@ const getSetupReadiness = async ({ orgId, projectId, canReadBoq = true, canReadS
         blockers: baselineBlockers,
         message: baselineLocked
           ? "Baseline is already locked."
-          : baselineBlockers.length > 0
-            ? "Resolve baseline blockers before locking the official baseline."
-            : revisionStatus === "approved"
-              ? "Baseline can be locked."
-              : "Approve the schedule before locking the baseline.",
+          : awaitingActivation
+            ? "Activate the approved schedule revision (Schedule › Revisions) before locking the baseline."
+            : baselineBlockers.length > 0
+              ? "Resolve baseline blockers before locking the official baseline."
+              : revisionStatus === "approved"
+                ? "Baseline can be locked."
+                : "Approve the schedule before locking the baseline.",
       },
       progress: {
         mode: "warn",
