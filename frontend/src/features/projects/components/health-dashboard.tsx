@@ -1,5 +1,5 @@
 import { formatLongDate } from '@/lib/dates'
-import { formatEvCutoff, formatEvCutoffDate, type EvCutoff } from '@/lib/ev-cutoff'
+import { evCutoffNote, formatEvCutoff, formatEvCutoffDate, type EvCutoff } from '@/lib/ev-cutoff'
 import { statusBadge } from '@/lib/status'
 import { cn } from '@/lib/utils'
 import { Badge } from '@/components/ui/badge'
@@ -60,6 +60,7 @@ type HealthResponse = {
     cutoffLocalDate?: string | null
     cutoffTimeZone?: string | null
     cutoffTimeZoneSource?: string | null
+    cutoffTimeZoneNote?: string | null
     sourceUpdatedAt?: string | null
     note?: string
   }
@@ -359,7 +360,9 @@ export function HealthDashboard({ projectId, currency }: Props) {
     cutoffLocalDate: freshness?.cutoffLocalDate,
     timeZone: freshness?.cutoffTimeZone,
     timeZoneSource: freshness?.cutoffTimeZoneSource,
+    timeZoneNote: freshness?.cutoffTimeZoneNote,
   }
+  const cutoffNote = evCutoffNote(evCutoff)
   // A card's cutoff is the report's; any other date is shown as a date.
   const cutoffLabel = (value?: string | null) =>
     !value || value === freshness?.cutoffDate ? formatEvCutoffDate(evCutoff) : formatDate(value)
@@ -383,6 +386,11 @@ export function HealthDashboard({ projectId, currency }: Props) {
           <p className='mt-2 text-xs text-muted-foreground' data-testid='uat-health-cutoff'>
             EV cutoff {formatEvCutoff(evCutoff)}
           </p>
+          {cutoffNote && (
+            <p className='mt-1 text-xs text-muted-foreground' data-testid='uat-health-cutoff-zone-note'>
+              {cutoffNote}
+            </p>
+          )}
         </div>
 
         <div className='flex-1'>

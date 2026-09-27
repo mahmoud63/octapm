@@ -638,7 +638,9 @@ liveDescribe("PC-4: setup flow — structure and BOQ approval steps, per-item de
       }
       const memberAuth = { authorization: `Bearer ${mintAccessToken(member)}` };
       // How many rows or allocations a mapping issue concerns is the bill's
-      // (owner decision C): the limited answer leaves those counts out.
+      // (owner decision C), and so is how many BOQ rows a filing or unit
+      // issue concerns (the owner's rule on BOQ-derived counts): the limited
+      // answer leaves those counts out.
       const MAPPING_CODES = new Set([
         "BOQ_MAPPING_RULE_UNSET",
         "NO_APPROVED_ALLOCATIONS",
@@ -648,6 +650,10 @@ liveDescribe("PC-4: setup flow — structure and BOQ approval steps, per-item de
         "SUGGESTIONS_PENDING",
         "UNIT_MISMATCH_COUNT",
         "LOCATION_MISMATCH_COUNT",
+        "BOQ_ITEMS_WITHOUT_WBS",
+        "BOQ_ITEMS_WITHOUT_COST_CODE",
+        "BOQ_UNIT_UNRESOLVED",
+        "UOM_UNRESOLVED",
       ]);
       const shape = (result, { mappingCounts = true } = {}) => {
         const entryOf = (issue) => [issue.code, !mappingCounts && MAPPING_CODES.has(issue.code) ? undefined : issue.count];
@@ -704,11 +710,19 @@ liveDescribe("PC-4: setup flow — structure and BOQ approval steps, per-item de
           expect(limitedText).not.toContain(secret);
         }
       }
-      // The bill's revision: its number, status and counts, not its value or trail.
+      // The bill's revision: its number and status, not its row counts
+      // (BOQ-derived: the owner's rule), value or trail.
       const revision = (await api.get(`/api/v1/projects/${uploaded1.projectId}/setup-readiness`, memberAuth)).body.data.context.boqRevision;
-      expect(revision).toMatchObject({ id: uploaded1.revisionId, status: "approved", itemCount: 2, changes: { added: 2 } });
-      expect(revision).not.toHaveProperty("totalAmount");
-      expect(revision).not.toHaveProperty("history");
+      expect(revision).toMatchObject({
+        id: uploaded1.revisionId,
+        status: "approved",
+        countsWithheld: true,
+        reason: "BOQ details unavailable to you",
+        validation: { blocked: [] },
+      });
+      for (const key of ["itemCount", "changes", "totalAmount", "history"]) expect([key, key in revision]).toEqual([key, false]);
+      expect(revision.validation).not.toHaveProperty("blockedCount");
+      expect((await readiness(uploaded1.projectId)).context.boqRevision).toMatchObject({ itemCount: 2, changes: { added: 2 } });
 
       // §12: no BOQ figure reaches a member without BOQ read from anything
       // the Overview landing asks for — the controls strip, the setup cards

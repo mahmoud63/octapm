@@ -2021,12 +2021,21 @@ const components = {
         count: {
           type: "integer",
           description:
-            "Absent on a mapping issue (BOQ_MAPPING_RULE_UNSET, NO_APPROVED_ALLOCATIONS, UNALLOCATED_BOQ, OPTIONAL_UNALLOCATED, PENDING_ALLOCATIONS, SUGGESTIONS_PENDING, UNIT_MISMATCH_COUNT, LOCATION_MISMATCH_COUNT) for a caller who may not read the BOQ.",
+            "Absent on a mapping issue (BOQ_MAPPING_RULE_UNSET, NO_APPROVED_ALLOCATIONS, UNALLOCATED_BOQ, OPTIONAL_UNALLOCATED, PENDING_ALLOCATIONS, SUGGESTIONS_PENDING, UNIT_MISMATCH_COUNT, LOCATION_MISMATCH_COUNT) and on a BOQ row issue (BOQ_ITEMS_WITHOUT_WBS, BOQ_ITEMS_WITHOUT_COST_CODE, BOQ_UNIT_UNRESOLVED, UOM_UNRESOLVED) for a caller who may not read the BOQ.",
         },
         mappingDetailsWithheld: {
           type: "boolean",
           description:
             "Present and true on a mapping issue for a caller who may not read the BOQ: its count, the counting details and any count in its message are left out.",
+        },
+        boqDetailsWithheld: {
+          type: "boolean",
+          description:
+            "Present and true on a BOQ row issue (BOQ_ITEMS_WITHOUT_WBS, BOQ_ITEMS_WITHOUT_COST_CODE, BOQ_UNIT_UNRESOLVED, UOM_UNRESOLVED) for a caller who may not read the BOQ: code, severity and verdict stay; its count, the counting details and the number in its message are left out, and reason says why.",
+        },
+        reason: {
+          type: "string",
+          description: "With boqDetailsWithheld: \"BOQ details unavailable to you\".",
         },
         itemsWithheld: {
           type: "boolean",
@@ -2075,7 +2084,7 @@ const components = {
         counts: {
           ...ref("GenericObject"),
           description:
-            "The step's counts. Its BOQ value figures (totalBoqAmount and, on boq_allocation, the allocatable, approved, pending, unallocated, optional and not-applicable amounts) are left out for a caller who may not read the BOQ; row and activity counts stay.",
+            "The step's counts. For a caller who may not read the BOQ: its BOQ value figures (totalBoqAmount and, on boq_allocation, the allocatable, approved, pending, unallocated, optional and not-applicable amounts) are left out, and so is every count of BOQ rows or mapping — boqItems, itemsWithoutWbs, itemsWithoutCostCode, itemsWithUnresolvedUnit (boq_upload), unitsUnresolved (structure_setup), revisionItems, revisionChanges, revisionBlockedRows and itemsWithoutMappingRule (boq_approval), suggestionsPending, unitMismatchCount and locationMismatchCount (boq_allocation). Activity and other counts stay. A BOQ reader's counts are unchanged.",
         },
         action: objectSchema(
           { label: { type: "string" }, target: ref("ProjectSetupTarget") },
@@ -2105,7 +2114,7 @@ const components = {
           type: "integer",
           nullable: true,
           description:
-            "What is in place, or what is still to file. null on mapping_readiness for a caller who may not read the BOQ (detailsWithheld true, detail \"Mapping details unavailable to you\").",
+            "What is in place, or what is still to file. null for a caller who may not read the BOQ on mapping_readiness (detailsWithheld true, detail \"Mapping details unavailable to you\") and on boq_structure (detailsWithheld true, detail \"BOQ details unavailable to you\").",
         },
         detail: { type: "string" },
         detailsWithheld: { type: "boolean" },
@@ -2140,9 +2149,15 @@ const components = {
         wbsNodes: { type: "integer" },
         locations: { type: "integer" },
         projectCostCodes: { type: "integer" },
-        unitsUnresolved: { type: "integer", description: "Distinct unit spellings not in the organisation's unit list." },
+        unitsUnresolved: {
+          type: "integer",
+          description:
+            "Distinct unit spellings on the bill not in the organisation's unit list. Absent for a caller who may not read the BOQ (a BOQ-derived count): unitsUnresolvedWithheld true and reason \"BOQ details unavailable to you\" instead.",
+        },
+        unitsUnresolvedWithheld: { type: "boolean" },
+        reason: { type: "string" },
       },
-      ["wbsNodes", "locations", "projectCostCodes", "unitsUnresolved"],
+      ["wbsNodes", "locations", "projectCostCodes"],
     ),
     ProjectSetupReadiness: objectSchema(
       {
@@ -2167,7 +2182,7 @@ const components = {
         context: {
           ...ref("GenericObject"),
           description:
-            "workspace, currentRevision (schedule), boqRevision (revision, status, source, item count, value, `changes` from the upload comparison, `validation.blocked` rows each with code, description, reason (the machine code) and message (the sentence to show), `history` of workflow transitions with the actor named — value, blocked rows and history only for a caller who may read the BOQ), boqBaseline (source schedule_baseline before boq_revision, as GET /boq names it), progressMethods, allocationSummary (only for a caller who may read the BOQ), scheduleReadiness (the schedule's own checks; the allocations check's BOQ value figures only for a caller who may read the BOQ).",
+            "workspace, currentRevision (schedule), boqRevision (revision, status, source, item count, value, `changes` from the upload comparison, `validation.blocked` rows each with code, description, reason (the machine code) and message (the sentence to show), `history` of workflow transitions with the actor named — the item count, `changes`, validation.blockedCount, value, blocked rows and history only for a caller who may read the BOQ; anyone else gets countsWithheld true, reason \"BOQ details unavailable to you\" and validation.blocked empty), boqBaseline (source schedule_baseline before boq_revision, as GET /boq names it), progressMethods, allocationSummary (only for a caller who may read the BOQ), scheduleReadiness (the schedule's own checks; the allocations check's BOQ value figures only for a caller who may read the BOQ).",
         },
         steps: arrayOf(ref("ProjectSetupStep")),
       },
@@ -4893,7 +4908,7 @@ const components = {
         cutoffDate: {
           ...dateString,
           description:
-            "The period's cutoff date (defaults to periodEnd). A calendar date (YYYY-MM-DD) is that date; a date-time names the date it falls on in the project's reporting time zone. The cutoff ends at the END of that date in Project.timezone, else the organisation's defaultTimezone, else UTC — the stored cutoffDate is that instant, and PV, EV and AC are all selected against it.",
+            "The period's cutoff date (defaults to periodEnd). A calendar date (YYYY-MM-DD) is that date; a date-time names the date it falls on in the project's reporting time zone. What is kept is that reporting date, exactly as entered; it never moves when a time zone changes later. The cutoff instant is the END of that date in Project.timezone, else the organisation's defaultTimezone, else UTC — computed for that date from the zone's own rules, daylight saving included, never a fixed offset — whenever the period is read or locked, and PV, EV and AC are all selected against it. Responses give that computed instant as cutoffDate with cutoffLocalDate, timeZone, timeZoneSource and timeZoneNote, never the stored value.",
         },
       },
       ["periodStart", "periodEnd"],
@@ -5042,7 +5057,7 @@ const components = {
         reporting: {
           ...ref("GenericObject"),
           description:
-            "cutoffDate is the one instant PV (approved cost loading planned on or before it), EV (progress approved on or before it) and AC (cost records whose actualThroughDate is on or before it) are selected against: the end of cutoffLocalDate (YYYY-MM-DD) in timeZone (IANA), whose timeZoneSource says where the zone came from — project (Project.timezone), organisation (Organisation.defaultTimezone) or utc. A locked period answers with its stored snapshot (isSnapshot true), never recomputed; a snapshot stored before the zone was recorded carries no timeZone.",
+            "cutoffDate is the one instant PV (approved cost loading planned on or before it), EV (progress approved on or before it) and AC (cost records whose actualThroughDate is on or before it) are selected against: the end of cutoffLocalDate (YYYY-MM-DD) in timeZone (IANA), whose timeZoneSource says where the zone came from — project (Project.timezone), organisation (Organisation.defaultTimezone) or utc. The instant is computed for that date from the zone's own rules, daylight saving included (for America/Chicago a date in CDT ends at 04:59:59.999Z the next day, a date in CST at 05:59:59.999Z), never a fixed offset. timeZoneNote is null when the project's own zone applied, otherwise the sentence to show beside the cutoff: \"Project timezone is not configured; UTC is being used\" or \"Project timezone is not configured; the organisation default <zone> is being used\" (also appended to basisWarnings). sourceSummary.pv/ev/ac.selectedThrough state the instant each figure's rows were selected against — the same one. A locked period answers with its stored snapshot (isSnapshot true), never recomputed; its cutoffDate, zone and note are those recorded at the lock, and a snapshot stored before the zone was recorded carries no timeZone. An open period may move when records fall between an earlier cutoff and this one.",
         },
         basis: ref("GenericObject"),
         sourceSummary: ref("GenericObject"),
@@ -7182,7 +7197,7 @@ add(
     tag: "Projects",
     summary: "Get workspace-level construction health and workflow queues.",
     description:
-      "Aggregates all organization projects for PM users and only assigned projects for non-PM users. Returns officialKpis with sourceRule, sourceStatus, cutoffDate, and drill-through targets. Draft/rejected/cancelled records are excluded from official KPI cards; submitted/pending workflow values are returned separately under pendingReview. Each projectHealth row carries bac (the official EV budget: the approved BOQ allocations), eac (bac / CPI), ev (approved allocations × % complete), pv (approved cost loading) and ac (the cost ledger's official actuals) only for a caller who may read the BOQ or the cost module on that project, decided as that project's own routes decide it (permission template, role, party); otherwise those keys are absent, not zero. Scores, spi and cpi are the same for every caller.",
+      "Aggregates all organization projects for PM users and only assigned projects for non-PM users. Returns officialKpis with sourceRule, sourceStatus, cutoffDate, and drill-through targets. Draft/rejected/cancelled records are excluded from official KPI cards; submitted/pending workflow values are returned separately under pendingReview. Each projectHealth row carries bac (the official EV budget: the approved BOQ allocations), eac (bac / CPI), ev (approved allocations × % complete), pv (approved cost loading) and ac (the cost ledger's official actuals) only for a caller who may read the BOQ or the cost module on that project, decided as that project's own routes decide it (permission template, role, party); otherwise those keys are absent, not zero. Scores, spi and cpi are the same for every caller. dataFreshness.cutoffDate is the official cutoff (the latest project data date or EV cutoff); when it is a project's EV cutoff, dataFreshness also states cutoffLocalDate, cutoffTimeZone, cutoffTimeZoneSource and cutoffTimeZoneNote (null when that project's own zone applied, otherwise \"Project timezone is not configured; UTC is being used\" or the organisation default it names) — otherwise those are null.",
     operationId: "getWorkspaceDashboard",
     responseSchema: ref("GenericObject"),
   }),
@@ -8363,6 +8378,8 @@ add(
   operation({
     tag: "Reports",
     summary: "List earned value reporting periods.",
+    description:
+      "Each period's cutoffDate is the instant its figures are cut at, never the stored value: an open period's reporting date (cutoffLocalDate, as entered) ending in the project's reporting zone resolved now (timeZone, timeZoneSource, timeZoneNote); a locked period's the instant, date, zone and note its snapshot recorded. The list also states the zone open periods are read in today: timeZone, timeZoneSource and timeZoneNote (null when the project's own zone applies, otherwise \"Project timezone is not configured; UTC is being used\" or the organisation default it names).",
     operationId: "listReportingPeriods",
     parameters: projectParams,
     permissions: modulePermission("cost", "read"),
@@ -8375,6 +8392,8 @@ add(
   operation({
     tag: "Reports",
     summary: "Create an earned value reporting period.",
+    description:
+      "The reporting date is kept as entered. The created period answers with the computed cutoff instant as cutoffDate (the end of cutoffLocalDate in timeZone), timeZoneSource and timeZoneNote.",
     operationId: "createReportingPeriod",
     parameters: projectParams,
     permissions: modulePermission("cost", "create"),
@@ -11083,7 +11102,7 @@ addGenericRoute({
   tag: "Health",
   summary: "Get seven-dimension project health scoring.",
   description:
-    "Returns official project health dimensions with sourceRule, cutoffDate, and drill-through targets, plus a separate pendingReview block for submitted progress, IPC, change orders, and submittals that do not feed official scores. The cost dimension's unallocatedBoqAmount is given only to a caller who may read the BOQ; its ac and ev only to a caller who may read the BOQ or the cost module (absent, not zero, otherwise — the score and cpi stay). The schedule dimension's delayedActivities is counted as of today (the latest progress), not as of the cutoff. dataFreshness.cutoffDate is the earned-value cutoff instant: the end of dataFreshness.cutoffLocalDate in dataFreshness.cutoffTimeZone (the project's time zone, else the organisation's default, else UTC — cutoffTimeZoneSource says which); a locked period stored before the zone was recorded gives null for the zone.",
+    "Returns official project health dimensions with sourceRule, cutoffDate, and drill-through targets, plus a separate pendingReview block for submitted progress, IPC, change orders, and submittals that do not feed official scores. The cost dimension's unallocatedBoqAmount is given only to a caller who may read the BOQ; its ac and ev only to a caller who may read the BOQ or the cost module (absent, not zero, otherwise — the score and cpi stay). The schedule dimension's delayedActivities is counted as of today (the latest progress), not as of the cutoff. dataFreshness.cutoffDate is the earned-value cutoff instant: the end of dataFreshness.cutoffLocalDate in dataFreshness.cutoffTimeZone (the project's time zone, else the organisation's default, else UTC — cutoffTimeZoneSource says which); a locked period stored before the zone was recorded gives null for the zone. dataFreshness.cutoffTimeZoneNote is the EV report's timeZoneNote: null when the project's own zone applied, otherwise \"Project timezone is not configured; UTC is being used\" or \"Project timezone is not configured; the organisation default <zone> is being used\".",
   operationId: "getProjectHealth",
 });
 
@@ -14062,7 +14081,10 @@ const budgetSnapshotSchema = objectSchema({
   id: uuid,
   projectId: uuid,
   reportingPeriodId: nullableUuid,
-  reportingPeriod: nullableRef("GenericObject"),
+  reportingPeriod: {
+    ...nullableRef("GenericObject"),
+    description: "id, code, label, status and the period's cutoff as the EV reports use it: cutoffDate (the instant — a locked period's as its snapshot stored it), cutoffLocalDate, timeZone, timeZoneSource and timeZoneNote.",
+  },
   label: { type: "string" },
   takenBy: nullableUuid,
   takenAt: nullableDateString,
@@ -14978,7 +15000,7 @@ const dailyLogAiPhotoSchema = objectSchema({ id: uuid, ref: { type: "string" }, 
 const forecastLevel = { type: "string", enum: ["high", "medium", "low"] };
 // §12, as utils/boq-figures applies it to the forecast.
 const FORECAST_FIGURES =
-  "cost.eac is the official EV report's EAC — revised BAC / CPI when CPI > 0, otherwise the revised BAC — and cost.bac the revised BAC it was computed from (approved allocations plus approved budget revisions); cost.eacBasis says which rule applied (budget_over_cpi, budget_no_cost_performance, no_budget; null without an EV report). cost.projected is max(eac, bottomUp). earnedValueCutoff states the EV cutoff SPI, CPI and EAC were measured through: cutoffDate (the instant), cutoffLocalDate, timeZone and timeZoneSource. " +
+  "cost.eac is the official EV report's EAC — revised BAC / CPI when CPI > 0, otherwise the revised BAC — and cost.bac the revised BAC it was computed from (approved allocations plus approved budget revisions); cost.eacBasis says which rule applied (budget_over_cpi, budget_no_cost_performance, no_budget; null without an EV report). cost.projected is max(eac, bottomUp). earnedValueCutoff states the EV cutoff SPI, CPI and EAC were measured through: cutoffDate (the instant), cutoffLocalDate, timeZone, timeZoneSource and timeZoneNote (null when the project's own zone applied, otherwise the sentence also added to dataQuality: \"Project timezone is not configured; UTC is being used\" or the organisation default it names). " +
   "The cost view's money (cost.budget, bac, eac, bottomUp, projected, overrun, overrunPct and actual; each activity's cost.budget, actual, committed, projected, overrun, overrunPct and reasons; each budget line's revised, committed, actual, forecast, overrun and overrunPct) is present only for a caller who may read the BOQ or the cost module. Levels, bases and counts are the same for every caller.";
 const forecastBlockerSchema = objectSchema({ type: { type: "string", enum: ["rfi", "submittal", "long_lead"] }, id: uuid, ref: { type: "string", nullable: true }, title: { type: "string" }, status: { type: "string", nullable: true }, due: nullableDateString, overdue: { type: "boolean" } });
 const forecastActivitySchema = objectSchema({ id: uuid, name: { type: "string" }, code: { type: "string", nullable: true }, isCritical: { type: "boolean" }, isMilestone: { type: "boolean" }, status: { type: "string" }, pct: { type: "number" }, expectedPct: { type: "number", nullable: true }, gap: { type: "number" }, velocity: { type: "number", nullable: true, description: "% per day from approved progress in the last 45 days." }, lastProgressAt: nullableDateString, plannedStart: { type: "string", nullable: true }, plannedFinish: { type: "string", nullable: true }, projectedFinish: { type: "string", nullable: true }, basis: { type: "string", enum: ["complete", "planned", "velocity", "pace", "overdue", "late_start"] }, slipDays: { type: "integer" }, impactDays: { type: "number" }, float: { type: "number", nullable: true }, floatBreached: { type: "boolean" }, stalledDays: { type: "integer" }, blockers: arrayOf(forecastBlockerSchema), score: { type: "integer" }, level: forecastLevel, reasons: arrayOf({ type: "string" }), cost: objectSchema({ budget: { type: "number" }, actual: { type: "number" }, committed: { type: "number" }, projected: { type: "number", nullable: true }, basis: { type: "string", nullable: true }, overrun: { type: "number" }, overrunPct: { type: "number" }, level: forecastLevel, reasons: arrayOf({ type: "string" }) }) });

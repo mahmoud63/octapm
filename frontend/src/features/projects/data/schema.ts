@@ -210,6 +210,13 @@ export type ProjectSetupIssue = {
    * rows or allocations it concerns is not given (owner decision C).
    */
   mappingDetailsWithheld?: boolean
+  /**
+   * True on a BOQ filing or unit issue (BOQ_ITEMS_WITHOUT_WBS,
+   * BOQ_ITEMS_WITHOUT_COST_CODE, BOQ_UNIT_UNRESOLVED, UOM_UNRESOLVED) for a
+   * caller who may not read the BOQ: no count of rows, `reason` says why.
+   */
+  boqDetailsWithheld?: boolean
+  reason?: string
   stepKey?: string
   stepLabel?: string
   actionLabel?: string
@@ -239,7 +246,7 @@ export type ProjectSetupGuide = {
   key: string
   label: string
   status: 'complete' | 'attention' | 'pending'
-  /** null on mapping_readiness for a caller who may not read the BOQ. */
+  /** null on mapping_readiness and boq_structure for a caller who may not read the BOQ. */
   count: number | null
   detail: string
   detailsWithheld?: boolean
@@ -363,7 +370,10 @@ export type ProjectSetupReadiness = {
     wbsNodes: number
     locations: number
     projectCostCodes: number
-    unitsUnresolved: number
+    /** Absent for a caller who may not read the BOQ (unitsUnresolvedWithheld). */
+    unitsUnresolved?: number
+    unitsUnresolvedWithheld?: boolean
+    reason?: string
   }
   /**
    * The §69 coverage totals, exactly as the coverage endpoint reports them
@@ -410,7 +420,14 @@ export type ProjectSetupReadiness = {
       status: string
       baselineLocked: boolean
       lockedAt: string | null
-      itemCount: number
+      /**
+       * The revision's row counts (itemCount, changes, validation.blockedCount)
+       * are only for a caller who may read the BOQ; anyone else gets
+       * countsWithheld and the reason ("BOQ details unavailable to you").
+       */
+      itemCount?: number
+      countsWithheld?: boolean
+      reason?: string
       /** Only for a caller who may read the BOQ. */
       totalAmount?: number
       /** The upload's comparison against the bill before it (PC-2). */
@@ -423,7 +440,7 @@ export type ProjectSetupReadiness = {
       }
       /** The rows the comparison could not apply. */
       validation?: {
-        blockedCount: number
+        blockedCount?: number
         blocked: Array<{
           code: string | null
           description: string | null

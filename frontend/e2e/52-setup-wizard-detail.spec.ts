@@ -485,6 +485,22 @@ const BOQ_KEYS = [
   'boqRows',
   // The mapping share (owner decision C): withheld, not rounded.
   'coveragePct',
+  // ... and every count derived from the bill (the owner's rule): the
+  // mapping counts, and the number of BOQ rows, of rows without a WBS node
+  // or a cost code, of rows and unit spellings with an unknown unit, and a
+  // revision's row counts.
+  'itemsWithoutMappingRule',
+  'suggestionsPending',
+  'unitMismatchCount',
+  'locationMismatchCount',
+  'boqItems',
+  'itemsWithoutWbs',
+  'itemsWithoutCostCode',
+  'itemsWithUnresolvedUnit',
+  'unitsUnresolved',
+  'revisionItems',
+  'revisionChanges',
+  'revisionBlockedRows',
 ]
 // The budgets built from the bill, and the forecast's money built from them:
 // withheld from the member who reads neither the BOQ nor the cost module.

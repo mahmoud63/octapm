@@ -322,7 +322,7 @@ const buildForecast = async ({ orgId, projectId, asOf = new Date() }) => {
   // none — said, so no screen presents the budget as a projection.
   const eacBasis = !ev || eac === null ? null : bac <= 0 ? "no_budget" : ev.cpi !== null && ev.cpi !== undefined && Number(ev.cpi) > 0 ? "budget_over_cpi" : "budget_no_cost_performance";
   const earnedValueCutoff = ev && ev.reporting
-    ? { cutoffDate: ev.reporting.cutoffDate || null, cutoffLocalDate: ev.reporting.cutoffLocalDate || null, timeZone: ev.reporting.timeZone || null, timeZoneSource: ev.reporting.timeZoneSource || null }
+    ? { cutoffDate: ev.reporting.cutoffDate || null, cutoffLocalDate: ev.reporting.cutoffLocalDate || null, timeZone: ev.reporting.timeZone || null, timeZoneSource: ev.reporting.timeZoneSource || null, timeZoneNote: ev.reporting.timeZoneNote ?? null }
     : null;
 
   const scheduleRisks = open.filter((activity) => activity.score > 0).sort((a, b) => b.score - a.score || b.slipDays - a.slipDays).slice(0, 15);
@@ -341,6 +341,8 @@ const buildForecast = async ({ orgId, projectId, asOf = new Date() }) => {
     // is the official cost-record actuals. Messages only — no figure moves.
     if (spi === null) dataQuality.push("SPI is not available yet: no approved time-phased cost loading through the cutoff, so there is no planned value to measure progress against.");
     if (cpi === null) dataQuality.push("CPI is not available yet: no official cost-record actuals through the cutoff, so the earned-value estimate at completion falls back to the budget.");
+    // The EV report's own sentence when the project has no zone of its own.
+    if (earnedValueCutoff?.timeZoneNote) dataQuality.push(earnedValueCutoff.timeZoneNote);
   }
   if (!ctx.budgetLines.length) dataQuality.push("No budget lines by cost code; the cost view uses activity budgets only.");
 

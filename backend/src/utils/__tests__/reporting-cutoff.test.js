@@ -8,8 +8,11 @@
 const {
   endOfLocalDay,
   localDateOf,
+  reportingDateOfStoredCutoff,
+  reportingTimeZoneNote,
   resolveReportingCutoff,
   resolveReportingTimeZone,
+  storedValueForReportingDate,
 } = require("../reporting-cutoff");
 
 const iso = (date) => date.toISOString();
@@ -67,11 +70,53 @@ describe("reporting cutoff", () => {
       localDate: "2026-11-01",
       timeZone: "America/Chicago",
       timeZoneSource: "project",
+      timeZoneNote: null,
     });
-    // A stored cutoff reads back as itself.
-    const stored = new Date("2026-11-02T05:59:59.999Z");
-    expect(resolveReportingCutoff({ value: stored, timeZone: "America/Chicago", timeZoneSource: "project" }).cutoffDate).toEqual(stored);
+    // An instant ("now") names the date it falls on in the zone.
+    const now = new Date("2026-11-02T05:30:00.000Z");
+    expect(resolveReportingCutoff({ value: now, timeZone: "America/Chicago", timeZoneSource: "project" }).localDate).toBe("2026-11-01");
     expect(() => resolveReportingCutoff({ value: "2026-02-30", timeZone: "UTC" })).toThrow(RangeError);
     expect(() => resolveReportingCutoff({ value: "not a date", timeZone: "UTC" })).toThrow(RangeError);
+  });
+
+  it("ends a date by that date's own offset: a CDT date and a CST date in the same zone end at different UTC hours", () => {
+    // Not one fixed shift: 31 July (CDT, -05:00) and 31 January (CST, -06:00).
+    expect(iso(endOfLocalDay("2026-07-31", "America/Chicago"))).toBe("2026-08-01T04:59:59.999Z");
+    expect(iso(endOfLocalDay("2026-01-31", "America/Chicago"))).toBe("2026-02-01T05:59:59.999Z");
+    expect(iso(endOfLocalDay("2026-07-31", "Pacific/Auckland"))).toBe("2026-07-31T11:59:59.999Z"); // NZST +12
+    expect(iso(endOfLocalDay("2026-01-31", "Pacific/Auckland"))).toBe("2026-01-31T10:59:59.999Z"); // NZDT +13
+  });
+
+  it("says when the project had no zone of its own, naming the organisation default it used", () => {
+    expect(reportingTimeZoneNote({ timeZone: "America/Chicago", timeZoneSource: "project" })).toBeNull();
+    expect(reportingTimeZoneNote({ timeZone: "America/Chicago", timeZoneSource: "organisation" })).toBe(
+      "Project timezone is not configured; the organisation default America/Chicago is being used",
+    );
+    expect(reportingTimeZoneNote({ timeZone: "UTC", timeZoneSource: "utc" })).toBe(
+      "Project timezone is not configured; UTC is being used",
+    );
+    expect(resolveReportingCutoff({ value: "2026-11-01", timeZone: "UTC", timeZoneSource: "utc" }).timeZoneNote).toBe(
+      "Project timezone is not configured; UTC is being used",
+    );
+    // An unknown project zone name falls to UTC and says so.
+    expect(resolveReportingCutoff({ value: "2026-11-01", timeZone: "Mars/Olympus", timeZoneSource: "project" })).toMatchObject({
+      timeZone: "UTC",
+      timeZoneSource: "utc",
+      timeZoneNote: "Project timezone is not configured; UTC is being used",
+    });
+  });
+
+  it("reads a stored period's reporting date as the UTC calendar date of the stored value — legacy rows and new rows alike", () => {
+    // Legacy rows: the base code stored the typed date's 23:59:59.999 in
+    // the server's zone (America/Chicago) — 04:59:59.999Z in CDT and
+    // 05:59:59.999Z in CST, both ON the typed date.
+    expect(reportingDateOfStoredCutoff(new Date("2026-08-31T04:59:59.999Z"))).toBe("2026-08-31");
+    expect(reportingDateOfStoredCutoff(new Date("2026-01-31T05:59:59.999Z"))).toBe("2026-01-31");
+    // New rows: the date's last millisecond in UTC.
+    expect(iso(storedValueForReportingDate("2026-08-31"))).toBe("2026-08-31T23:59:59.999Z");
+    expect(reportingDateOfStoredCutoff(storedValueForReportingDate("2026-08-31"))).toBe("2026-08-31");
+    expect(reportingDateOfStoredCutoff(storedValueForReportingDate("2026-12-31"))).toBe("2026-12-31");
+    expect(() => storedValueForReportingDate("2026-02-30")).toThrow(RangeError);
+    expect(() => reportingDateOfStoredCutoff(null)).toThrow(RangeError);
   });
 });

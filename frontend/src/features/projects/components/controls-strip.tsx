@@ -7,7 +7,7 @@ import {
   GitBranch,
   Link2,
 } from 'lucide-react'
-import { formatEvCutoff, type EvCutoff } from '@/lib/ev-cutoff'
+import { evCutoffNote, formatEvCutoff, type EvCutoff } from '@/lib/ev-cutoff'
 import { useCanPerform } from '@/lib/permissions'
 import { statusBadge, statusIcon, type StatusTone } from '@/lib/status'
 import { cn } from '@/lib/utils'
@@ -237,6 +237,7 @@ export function ControlsStrip({
       cutoffDate?: string | null
       cutoffLocalDate?: string | null
       cutoffTimeZone?: string | null
+      cutoffTimeZoneNote?: string | null
     }
   }>(
     projectId,
@@ -276,24 +277,34 @@ export function ControlsStrip({
   // bill entered by hand has rows but no revision.
   const boqRevision = context?.boqRevision ?? null
   const boqLocked = Boolean(context?.boqBaseline?.locked)
-  const boqItems = Number(stepCounts('boq_upload').boqItems ?? 0)
+  // A member who may not read the BOQ is given no count of its rows: whether
+  // a bill exists is read from the upload step's NO_BOQ blocker instead.
+  const boqUploadStep = readiness.steps.find((step) => step.key === 'boq_upload')
+  const boqRowCount = stepCounts('boq_upload').boqItems
+  const boqRowsWithheld = Boolean(boqUploadStep) && boqRowCount === undefined
+  const boqItems = Number(boqRowCount ?? 0)
+  const hasBill = boqRowsWithheld
+    ? !(boqUploadStep?.blockers ?? []).some((blocker) => blocker.code === 'NO_BOQ')
+    : boqItems > 0
   const boqValue = boqRevision
     ? `Rev ${boqRevision.revisionNumber}`
-    : boqItems > 0
-      ? `${boqItems.toLocaleString()} rows`
+    : hasBill
+      ? boqRowsWithheld
+        ? 'Entered by hand'
+        : `${boqItems.toLocaleString()} rows`
       : 'No BOQ'
   const boqBadge = boqLocked
     ? 'Locked'
     : boqRevision
       ? (boqStatusLabel[boqRevision.status] ?? boqRevision.status)
-      : boqItems > 0
+      : hasBill
         ? 'Not reviewed'
         : 'Missing'
   const boqTone: StatusTone = boqLocked
     ? 'done'
     : boqRevision && ['approved', 'baselined'].includes(boqRevision.status)
       ? 'done'
-      : boqItems > 0
+      : hasBill
         ? 'review'
         : 'blocked'
 
@@ -380,8 +391,10 @@ export function ControlsStrip({
           cutoffDate: health.dataFreshness.cutoffDate,
           cutoffLocalDate: health.dataFreshness.cutoffLocalDate,
           timeZone: health.dataFreshness.cutoffTimeZone,
+          timeZoneNote: health.dataFreshness.cutoffTimeZoneNote,
         }
       : null
+  const evCutoffZoneNote = evCutoffNote(evCutoff)
   const criticalActivities = Number(stepCounts('schedule_generation').criticalActivities ?? 0)
   const criticalUnmapped = summary.criticalUnmappedActivities ?? null
   const unmappedRows = counts && !coverageWithheld ? counts.unmapped + counts.partial : null
@@ -434,13 +447,15 @@ export function ControlsStrip({
         detail={
           boqRevision
             ? [
-                `${boqRevision.itemCount.toLocaleString()} rows`,
+                boqRevision.itemCount != null
+                  ? `${boqRevision.itemCount.toLocaleString()} rows`
+                  : (boqRevision.reason ?? 'BOQ details unavailable to you'),
                 boqRevision.totalAmount != null && formatMoney(currency, boqRevision.totalAmount),
                 boqRevision.label,
               ]
                 .filter(Boolean)
                 .join(' · ')
-            : boqItems > 0
+            : hasBill
               ? 'Entered by hand; approved when the schedule baseline is locked'
               : 'Upload the bill to start'
         }
@@ -547,6 +562,12 @@ export function ControlsStrip({
           <>
             Forecast at completion and the health cards: earned value through the cutoff,{' '}
             <span data-testid='uat-controls-ev-cutoff'>{formatEvCutoff(evCutoff)}</span>.
+            {evCutoffZoneNote ? (
+              <>
+                {' '}
+                <span data-testid='uat-controls-ev-cutoff-zone-note'>{evCutoffZoneNote}.</span>
+              </>
+            ) : null}
           </>
         ) : null}
       </p>

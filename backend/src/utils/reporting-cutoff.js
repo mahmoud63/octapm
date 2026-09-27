@@ -158,10 +158,14 @@ const resolveReportingTimeZone = ({ project = null, organisation = null } = {}) 
 /**
  * THE cutoff instant for a reporting date. `value` is either a calendar date
  * (YYYY-MM-DD: that date) or an instant (a Date or a date-time: the date it
- * falls on in the zone — a stored period's cutoff, "now" for an ad hoc
- * report). Returns the end of that local day with what it was read in:
+ * falls on in the zone — "now" for an ad hoc report, a date-time a caller
+ * sent). A STORED period cutoff is not an instant: read its date with
+ * reportingDateOfStoredCutoff and pass that date. Returns the end of that
+ * local day — computed per date from the zone's own rules, daylight saving
+ * included, never a fixed offset — with what it was read in:
  *
- *   { cutoffDate: Date, localDate: "YYYY-MM-DD", timeZone, timeZoneSource }
+ *   { cutoffDate: Date, localDate: "YYYY-MM-DD", timeZone, timeZoneSource,
+ *     timeZoneNote: null | "Project timezone is not configured; ..." }
  *
  * Throws a RangeError for a value that is not a date.
  */
@@ -185,7 +189,53 @@ const resolveReportingCutoff = ({ value, timeZone = UTC, timeZoneSource = TIME_Z
     localDate,
     timeZone: zone,
     timeZoneSource: source,
+    timeZoneNote: reportingTimeZoneNote({ timeZone: zone, timeZoneSource: source }),
   };
+};
+
+/**
+ * What the reader is told when the project has no zone of its own (owner
+ * correction to D1, 2026-09-27). The server writes the sentence so the web
+ * and mobile say the same thing; null when the project's own zone applied.
+ */
+const reportingTimeZoneNote = ({ timeZone, timeZoneSource } = {}) => {
+  if (timeZoneSource === TIME_ZONE_SOURCES.PROJECT) return null;
+  if (timeZoneSource === TIME_ZONE_SOURCES.ORGANISATION && timeZone) {
+    return `Project timezone is not configured; the organisation default ${timeZone} is being used`;
+  }
+  return "Project timezone is not configured; UTC is being used";
+};
+
+/**
+ * A stored ReportingPeriod.cutoffDate is the period's REPORTING DATE, not
+ * its cutoff instant: the date is the UTC calendar date of the stored value.
+ *
+ * - A row written before D1 holds a date-only value the base code parsed as
+ *   UTC midnight and then moved to 23:59:59.999 in the server's own zone,
+ *   which leaves it on the same UTC calendar date whatever that zone was —
+ *   the date typed.
+ * - A row written now is stored at the last millisecond of its date in UTC
+ *   (storedValueForReportingDate), which carries the same date.
+ *
+ * So the date a user entered never drifts: not for a legacy row read in a
+ * zone west of UTC, not when the project's or organisation's zone changes
+ * later. The instant is always recomputed from this date in the zone
+ * resolved at the time (resolveReportingCutoff); a locked period answers
+ * with the instant its snapshot stored.
+ */
+const reportingDateOfStoredCutoff = (stored) => {
+  const date = stored instanceof Date ? stored : new Date(stored);
+  if (stored === null || stored === undefined || Number.isNaN(date.getTime())) {
+    throw new RangeError(`Not a stored reporting date: ${stored}`);
+  }
+  return date.toISOString().slice(0, 10);
+};
+
+/** The value a reporting date is stored as: the last millisecond of that date in UTC. */
+const storedValueForReportingDate = (localDate) => {
+  const parsed = parseDateKey(localDate);
+  if (!parsed) throw new RangeError(`Not a calendar date: ${localDate}`);
+  return new Date(Date.UTC(parsed.year, parsed.month - 1, parsed.day) + DAY_MS - 1);
 };
 
 module.exports = {
@@ -193,7 +243,10 @@ module.exports = {
   endOfLocalDay,
   isValidTimeZone,
   localDateOf,
+  reportingDateOfStoredCutoff,
+  reportingTimeZoneNote,
   resolveReportingCutoff,
   resolveReportingTimeZone,
+  storedValueForReportingDate,
   zoneOffsetMs,
 };

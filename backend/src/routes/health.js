@@ -675,6 +675,8 @@ router.get(
         cutoffLocalDate: evReport.reporting?.cutoffLocalDate || null,
         cutoffTimeZone: evReport.reporting?.timeZone || null,
         cutoffTimeZoneSource: evReport.reporting?.timeZoneSource || null,
+        // The report's own sentence when the project has no zone of its own.
+        cutoffTimeZoneNote: evReport.reporting?.timeZoneNote ?? null,
         sourceUpdatedAt: toIso(project.updatedAt),
         note: "Official health dimensions use approved or active source records through cutoff; pending-review metrics are displayed separately.",
       },

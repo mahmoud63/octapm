@@ -195,6 +195,15 @@ function IssueDetail({ issue }: { issue: ProjectSetupIssue }) {
         >
           Mapping details unavailable to you.
         </p>
+      ) : issue.boqDetailsWithheld ? (
+        // How many BOQ rows a filing or unit issue concerns is the bill's:
+        // the server leaves the number out and says why.
+        <p
+          className='ms-3 text-[11px] text-muted-foreground'
+          data-testid={`uat-setup-issue-withheld-${issue.code}`}
+        >
+          {issue.reason ?? 'BOQ details unavailable to you'}.
+        </p>
       ) : issue.itemsWithheld ? (
         <p
           className='ms-3 text-[11px] text-muted-foreground'
@@ -342,8 +351,15 @@ function RevisionDetail({
       <div className='flex flex-wrap gap-x-2 text-muted-foreground'>
         <dt className='sr-only'>Scope</dt>
         <dd className='octa-numeric' data-testid='uat-setup-boq-revision-scope'>
-          {revision.itemCount.toLocaleString()} rows
-          {/* The value is sent only to people who may read the BOQ. */}
+          {/* The row counts, like the value, are sent only to people who may
+              read the BOQ; anyone else is told why there is no number. */}
+          {revision.itemCount != null ? (
+            `${revision.itemCount.toLocaleString()} rows`
+          ) : (
+            <span data-testid='uat-setup-boq-revision-counts-withheld'>
+              {revision.reason ?? 'BOQ details unavailable to you'}
+            </span>
+          )}
           {revision.totalAmount != null ? ` · ${formatMoney(currency, revision.totalAmount)}` : ''}
         </dd>
         {changes && (

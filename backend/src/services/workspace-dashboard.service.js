@@ -804,6 +804,13 @@ async function getWorkspaceDashboard({
       ...projects.map((project) => project.dataDate),
       ...[...evReports.values()].map((report) => report?.reporting?.cutoffDate),
     ]) || generatedAt;
+  // When the official cutoff is a project's EV cutoff, it is stated as the EV
+  // screens state it: its calendar date, the zone it ends in, and the note
+  // when that project has no zone of its own (D1).
+  const cutoffReporting =
+    [...evReports.values()]
+      .map((report) => report?.reporting)
+      .find((reporting) => reporting?.cutoffDate && toIso(reporting.cutoffDate) === cutoffDate) || null;
   const sourceUpdatedAt =
     latestIso([
       ...projects.map((project) => project.updatedAt),
@@ -1877,6 +1884,10 @@ async function getWorkspaceDashboard({
     dataFreshness: {
       generatedAt,
       cutoffDate,
+      cutoffLocalDate: cutoffReporting?.cutoffLocalDate || null,
+      cutoffTimeZone: cutoffReporting?.timeZone || null,
+      cutoffTimeZoneSource: cutoffReporting?.timeZoneSource || null,
+      cutoffTimeZoneNote: cutoffReporting?.timeZoneNote ?? null,
       sourceUpdatedAt,
       note: "Official KPI cards use approved or active source records through cutoff; pending-review metrics are displayed separately.",
     },

@@ -461,7 +461,9 @@ describe("project setup readiness service", () => {
     // A member who may not read the BOQ gets the same steps, statuses,
     // codes and gates — and none of the bill's rows, values, quantities or
     // review trail, nor how many rows or allocations a mapping issue
-    // concerns (owner decision C). Every other issue keeps its count.
+    // concerns (owner decision C), nor how many BOQ rows a filing or unit
+    // issue concerns (the owner's rule on BOQ-derived counts). Every other
+    // issue keeps its count.
     const restricted = await setupReadinessService.getSetupReadiness({
       orgId: "org-1",
       projectId: "project-1",
@@ -476,6 +478,11 @@ describe("project setup readiness service", () => {
       "SUGGESTIONS_PENDING",
       "UNIT_MISMATCH_COUNT",
       "LOCATION_MISMATCH_COUNT",
+      // BOQ row counts.
+      "BOQ_ITEMS_WITHOUT_WBS",
+      "BOQ_ITEMS_WITHOUT_COST_CODE",
+      "BOQ_UNIT_UNRESOLVED",
+      "UOM_UNRESOLVED",
     ]);
     const shape = (readiness, { mappingCounts = true } = {}) => {
       const entry = (issue) => [issue.code, !mappingCounts && MAPPING_CODES.has(issue.code) ? undefined : issue.count];
@@ -534,7 +541,44 @@ describe("project setup readiness service", () => {
     ).toMatchObject({ count: null, detail: "Mapping details unavailable to you", detailsWithheld: true });
     expect(restricted.context.boqRevision).not.toHaveProperty("totalAmount");
     expect(restricted.context.boqRevision).not.toHaveProperty("history");
-    expect(restricted.context.boqRevision.validation).toEqual({ blockedCount: 1, blocked: [] });
+    // No count of the bill's rows anywhere: the revision's, the steps', the
+    // BOQ-structure guide's, the structure summary's, the issues'.
+    expect(restricted.context.boqRevision.validation).toEqual({ blocked: [] });
+    expect(restricted.context.boqRevision).toMatchObject({ countsWithheld: true, reason: "BOQ details unavailable to you" });
+    for (const key of ["itemCount", "changes"]) expect(restricted.context.boqRevision).not.toHaveProperty(key);
+    expect(result.context.boqRevision.validation.blockedCount).toBe(1);
+    expect(restricted.structure).toEqual({
+      wbsNodes: result.structure.wbsNodes,
+      locations: result.structure.locations,
+      projectCostCodes: result.structure.projectCostCodes,
+      unitsUnresolvedWithheld: true,
+      reason: "BOQ details unavailable to you",
+    });
+    const restrictedCounts = (key) => restricted.steps.find((step) => step.key === key).counts;
+    for (const key of ["boqItems", "itemsWithoutWbs", "itemsWithoutCostCode", "itemsWithUnresolvedUnit"]) {
+      expect(restrictedCounts("boq_upload")).not.toHaveProperty(key);
+    }
+    for (const key of ["revisionItems", "revisionChanges", "revisionBlockedRows"]) {
+      expect(restrictedCounts("boq_approval")).not.toHaveProperty(key);
+    }
+    expect(restrictedCounts("structure_setup")).not.toHaveProperty("unitsUnresolved");
+    expect(
+      restricted.steps.find((step) => step.key === "structure_setup").guides.find((guide) => guide.key === "boq_structure"),
+    ).toMatchObject({ count: null, detail: "BOQ details unavailable to you", detailsWithheld: true });
+    const restrictedWithoutWbs = restricted.steps
+      .find((step) => step.key === "structure_setup")
+      .advisories.find((a) => a.code === "BOQ_ITEMS_WITHOUT_WBS");
+    expect(restrictedWithoutWbs).toMatchObject({
+      severity: "advisory",
+      message: "Some BOQ rows have no WBS node.",
+      details: {},
+      boqDetailsWithheld: true,
+      reason: "BOQ details unavailable to you",
+    });
+    expect(restrictedWithoutWbs).not.toHaveProperty("count");
+    const restrictedUom = restricted.steps.find((step) => step.key === "structure_setup").warnings.find((w) => w.code === "UOM_UNRESOLVED");
+    expect(restrictedUom).toMatchObject({ severity: "warning", details: {}, boqDetailsWithheld: true });
+    expect(restrictedUom.message).not.toMatch(/\d/);
     const restrictedHeadline = restricted.summary.headline.map((entry) => entry.key);
     expect(restrictedHeadline).not.toContain("unmapped_boq");
     expect(restrictedHeadline).not.toContain("unmapped_quantity");

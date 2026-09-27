@@ -9,7 +9,7 @@ import {
   Sparkles,
 } from 'lucide-react'
 import { toast } from 'sonner'
-import { formatEvCutoff } from '@/lib/ev-cutoff'
+import { evCutoffNote, formatEvCutoff } from '@/lib/ev-cutoff'
 import { FINANCIAL_TERMS } from '@/lib/financial-terms'
 import { getServerErrorMessage } from '@/lib/handle-server-error'
 import { useCanPerform } from '@/lib/permissions'
@@ -461,6 +461,10 @@ export function ForecastPanel({ projectId }: { projectId: string }) {
           ? 'Projected cost = max(EAC, bottom-up): both are this figure.'
           : `Projected cost = max(EAC, bottom-up): the EAC, above the bottom-up ${money(cost.bottomUp)}.`
         : `Projected cost = max(EAC, bottom-up): the bottom-up, above the EAC ${money(cost.eac)}.`
+  // The server's note when the project has no zone of its own: shown beside
+  // the cutoff, so not repeated in the data-quality list.
+  const cutoffNote = evCutoffNote(forecast.earnedValueCutoff)
+  const otherDataQuality = forecast.dataQuality.filter((note) => note !== cutoffNote)
   return (
     <div className='space-y-4' data-testid='uat-forecast'>
       <div className='flex flex-wrap items-center gap-2'>
@@ -480,6 +484,12 @@ export function ForecastPanel({ projectId }: { projectId: string }) {
               .
             </p>
           ) : null}
+          {cutoffNote && (
+            // The server's sentence when the project has no zone of its own.
+            <p className='text-xs text-muted-foreground' data-testid='uat-forecast-ev-cutoff-zone-note'>
+              {cutoffNote}
+            </p>
+          )}
         </div>
         <div className='ml-auto flex gap-2'>
           <Button
@@ -773,13 +783,13 @@ export function ForecastPanel({ projectId }: { projectId: string }) {
         </section>
       </div>
 
-      {forecast.dataQuality.length > 0 && (
+      {otherDataQuality.length > 0 && (
         <Alert data-testid='uat-forecast-data-quality'>
           <AlertTriangle className='h-4 w-4' />
           <AlertTitle>What would sharpen this forecast</AlertTitle>
           <AlertDescription>
             <ul className='list-disc space-y-0.5 pl-4 text-xs'>
-              {forecast.dataQuality.map((note, index) => (
+              {otherDataQuality.map((note, index) => (
                 <li key={index}>{note}</li>
               ))}
             </ul>

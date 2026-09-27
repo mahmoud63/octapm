@@ -11,6 +11,12 @@
  * The calendar date is the server's `cutoffLocalDate` when it gives one; a
  * locked period stored before the zone was recorded has none, and its date
  * is then read in UTC and says the zone was not recorded.
+ *
+ * When the project has no zone of its own the server says so in
+ * `timeZoneNote` ("Project timezone is not configured; UTC is being used",
+ * or the organisation default it used); every surface shows that sentence
+ * beside the cutoff with evCutoffNote — the text is the server's, so web and
+ * mobile say the same thing.
  */
 import { formatLongDate } from '@/lib/dates'
 
@@ -20,6 +26,14 @@ export type EvCutoff = {
   /** IANA zone name, e.g. America/Chicago. */
   timeZone?: string | null
   timeZoneSource?: string | null
+  /** The server's note when the project's own zone did not apply; else null. */
+  timeZoneNote?: string | null
+}
+
+/** The server's note on the cutoff's zone, to show beside it; null when none. */
+export function evCutoffNote(cutoff: EvCutoff | null | undefined): string | null {
+  const note = cutoff?.timeZoneNote?.trim()
+  return note ? note : null
 }
 
 const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/

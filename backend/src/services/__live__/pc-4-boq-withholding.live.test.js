@@ -67,6 +67,25 @@ const BOQ_KEYS = [
   "optionalUnallocatedAmount",
   "notApplicableAmount",
   "boqRows",
+  // Counts derived from the bill (the owner's rule: no mapping percentage
+  // and no BOQ-derived count): the mapping share and counts, and the number
+  // of BOQ rows, of rows without a WBS node or a cost code, of rows and unit
+  // spellings with an unknown unit, and a revision's row counts.
+  ...[
+    "coveragePct",
+    "itemsWithoutMappingRule",
+    "suggestionsPending",
+    "unitMismatchCount",
+    "locationMismatchCount",
+    "boqItems",
+    "itemsWithoutWbs",
+    "itemsWithoutCostCode",
+    "itemsWithUnresolvedUnit",
+    "unitsUnresolved",
+    "revisionItems",
+    "revisionChanges",
+    "revisionBlockedRows",
+  ],
 ];
 // ... and what a member who reads neither the BOQ nor the cost module must
 // not receive either: the budgets built from the bill, and the forecast's
@@ -759,5 +778,69 @@ liveDescribe("PC-4 §12: the Overview and the Schedule module carry no BOQ figur
     const listed = await api.get(at("/activities/progress-submissions?status=submitted"), viewerAuth);
     expect([listed.status, listed.body.data.length > 0]).toEqual([200, true]);
     expect(keyPaths(listed.body.data, new Set([...BOQ_KEYS, ...BUDGET_KEYS]))).toEqual([]);
+  });
+
+  it("setup readiness gives a member without BOQ read no count of BOQ rows — each issue keeps its code, severity and verdict, the number is replaced by the withheld wording — and the BOQ reader's answer is the service's", async () => {
+    const BOQ_ROW_CODES = ["BOQ_ITEMS_WITHOUT_WBS", "BOQ_ITEMS_WITHOUT_COST_CODE", "BOQ_UNIT_UNRESOLVED", "UOM_UNRESOLVED"];
+    const issuesOf = (readiness) => readiness.steps.flatMap((step) => [...step.blockers, ...step.warnings, ...step.advisories].map((issue) => ({ step: step.key, issue })));
+    // Last in this file, so no earlier answer moves: give the bill rows the
+    // filing and unit checks can count — a WBS node (both rows now unfiled),
+    // a project cost code (both rows without one) and the steel row's unit
+    // respelt as one nobody recognises (its quantity and value unchanged).
+    const node = await post(at("/structure/wbs"), { code: "SUB", name: "Substructure" });
+    expect([node.status, node.body?.error]).toEqual([201, undefined]);
+    const costCode = await prisma.costCode.create({ data: { orgId: live.org.id, code: `LT-${Date.now()}`, name: "LiveTest concrete" } });
+    await prisma.projectCostCode.create({ data: { orgId: live.org.id, projectId: project.id, costCodeId: costCode.id } });
+    const steel = await prisma.boqItem.findFirst({ where: { projectId: project.id, code: "1.2" }, select: { id: true } });
+    await prisma.boqItem.update({ where: { id: steel.id }, data: { unit: "tonz-x", unitCode: null } });
+
+    const full = await api.get(at("/setup-readiness"), auth());
+    expect([full.status, full.body?.error]).toEqual([200, undefined]);
+    const reader = parsed(full.text).data;
+    // The BOQ reader's answer is the service's, byte for byte ...
+    const service = await require("../project-setup-readiness.service").getSetupReadiness({ ...ids(), canReadBoq: true });
+    expect(unstamped(full.text)).toBe(unstamped(JSON.stringify({ success: true, data: normalizeMoneyTree(service) })));
+    // ... and it counts the rows: two BOQ rows, neither filed under the WBS
+    // node or a cost code, one with an unknown unit.
+    const readerCounts = reader.steps.find((step) => step.key === "boq_upload").counts;
+    expect(readerCounts).toMatchObject({ boqItems: 2, itemsWithoutWbs: 2, itemsWithoutCostCode: 2, itemsWithUnresolvedUnit: 1 });
+    expect(reader.structure.unitsUnresolved).toBe(1);
+    const readerRowIssues = issuesOf(reader).filter(({ issue }) => BOQ_ROW_CODES.includes(issue.code));
+    expect(readerRowIssues.map(({ issue }) => [issue.code, issue.count]).sort()).toEqual([
+      ["BOQ_ITEMS_WITHOUT_COST_CODE", 2],
+      ["BOQ_ITEMS_WITHOUT_WBS", 2],
+      ["BOQ_UNIT_UNRESOLVED", 1],
+      ["UOM_UNRESOLVED", 1],
+    ]);
+    for (const [viewer, { user }] of Object.entries(viewers())) {
+      const limited = await api.get(at("/setup-readiness"), as(user));
+      expect([viewer, limited.status]).toEqual([viewer, 200]);
+      const mine = parsed(limited.text).data;
+      // Not one BOQ-derived count key anywhere in the answer.
+      expect([viewer, keyPaths(mine, new Set(BOQ_KEYS))]).toEqual([viewer, []]);
+      // Every BOQ row issue the reader sees, with its code, severity and step — no number.
+      const rowIssues = issuesOf(mine).filter(({ issue }) => BOQ_ROW_CODES.includes(issue.code));
+      expect([viewer, rowIssues.map(({ step, issue }) => [step, issue.code, issue.severity])]).toEqual([
+        viewer,
+        readerRowIssues.map(({ step, issue }) => [step, issue.code, issue.severity]),
+      ]);
+      for (const { issue } of rowIssues) {
+        expect([viewer, issue.code, "count" in issue, /\d/.test(issue.message), issue.boqDetailsWithheld, issue.reason]).toEqual([
+          viewer,
+          issue.code,
+          false,
+          false,
+          true,
+          "BOQ details unavailable to you",
+        ]);
+      }
+      // The statuses and gates are everyone's.
+      expect([viewer, mine.steps.map((step) => [step.key, step.status])]).toEqual([viewer, reader.steps.map((step) => [step.key, step.status])]);
+      expect([viewer, mine.gates.reporting.ready, mine.gates.baseline.ready]).toEqual([viewer, reader.gates.reporting.ready, reader.gates.baseline.ready]);
+      // No row count in the structure summary or the BOQ-structure guide.
+      expect([viewer, mine.structure.unitsUnresolved, mine.structure.unitsUnresolvedWithheld]).toEqual([viewer, undefined, true]);
+      const guide = mine.steps.find((step) => step.key === "structure_setup").guides.find((entry) => entry.key === "boq_structure");
+      expect([viewer, guide.count, guide.detail]).toEqual([viewer, null, "BOQ details unavailable to you"]);
+    }
   });
 });

@@ -303,9 +303,50 @@ const withoutMappingDetail = (entry) => {
   };
 };
 
+// Nor how many BOQ rows there are, or how many are unfiled or carry an
+// unknown unit (the owner's rule: no BOQ-derived count to a member without
+// boq:read). The issue stays — code, severity, verdict — with a sentence
+// that states no number; the step counts, the BOQ-structure guide, the
+// structure summary and the revision's row counts lose theirs.
+const BOQ_ROW_ISSUE_MESSAGES = Object.freeze({
+  BOQ_ITEMS_WITHOUT_WBS: "Some BOQ rows have no WBS node.",
+  BOQ_ITEMS_WITHOUT_COST_CODE: "Some BOQ rows have no cost code.",
+  BOQ_UNIT_UNRESOLVED: "Some BOQ rows carry a unit the organisation does not recognise.",
+  UOM_UNRESOLVED: "Some unit spellings on the bill are not in the organisation's unit list.",
+});
+const BOQ_ROW_COUNT_KEYS = [
+  "boqItems",
+  "itemsWithoutWbs",
+  "itemsWithoutCostCode",
+  "itemsWithUnresolvedUnit",
+  "unitsUnresolved",
+  "rows",
+  "revisionItems",
+  "revisionChanges",
+  "revisionBlockedRows",
+];
+const BOQ_DETAILS_WITHHELD = "BOQ details unavailable to you";
+
+const withoutBoqRowCounts = (values) =>
+  values && typeof values === "object"
+    ? Object.fromEntries(Object.entries(values).filter(([key]) => !BOQ_ROW_COUNT_KEYS.includes(key)))
+    : values;
+
+const withoutBoqRowDetail = (entry) => {
+  if (!entry || !Object.prototype.hasOwnProperty.call(BOQ_ROW_ISSUE_MESSAGES, entry.code)) return entry;
+  const { count, ...rest } = entry;
+  return {
+    ...rest,
+    message: BOQ_ROW_ISSUE_MESSAGES[entry.code],
+    ...(rest.details ? { details: withoutBoqRowCounts(rest.details) } : {}),
+    boqDetailsWithheld: true,
+    reason: BOQ_DETAILS_WITHHELD,
+  };
+};
+
 /** A step as a member who may not read the BOQ receives it. */
 const withheldStepForNonBoqReader = (step) => {
-  const withheld = (entry) => withoutMappingDetail(withoutBoqDetail(entry));
+  const withheld = (entry) => withoutBoqRowDetail(withoutMappingDetail(withoutBoqDetail(entry)));
   const blockers = step.blockers.map(withheld);
   const warnings = step.warnings.map(withheld);
   // The step's message is its first blocker's or warning's: it goes the way
@@ -319,13 +360,15 @@ const withheldStepForNonBoqReader = (step) => {
     blockers,
     warnings,
     advisories: step.advisories.map(withheld),
-    counts: withoutMappingCounts(withoutBoqFigures(step.counts)),
+    counts: withoutBoqRowCounts(withoutMappingCounts(withoutBoqFigures(step.counts))),
     ...(step.guides
       ? {
           guides: step.guides.map((guide) =>
             guide.key === "mapping_readiness"
               ? { ...guide, count: null, detail: MAPPING_DETAILS_WITHHELD, detailsWithheld: true }
-              : guide,
+              : guide.key === "boq_structure"
+                ? { ...guide, count: null, detail: BOQ_DETAILS_WITHHELD, detailsWithheld: true }
+                : guide,
           ),
         }
       : {}),
@@ -1976,7 +2019,10 @@ const getSetupReadiness = async ({ orgId, projectId, canReadBoq = true }) => {
       wbsNodes: wbsNodeCount,
       locations: locationCount,
       projectCostCodes: projectCostCodeCount,
-      unitsUnresolved: unresolvedUnitItems.length,
+      // The unit spellings typed on the bill's rows: a BOQ-derived count.
+      ...(canReadBoq
+        ? { unitsUnresolved: unresolvedUnitItems.length }
+        : { unitsUnresolvedWithheld: true, reason: BOQ_DETAILS_WITHHELD }),
     },
     coverage,
     context: {
@@ -2000,22 +2046,32 @@ const getSetupReadiness = async ({ orgId, projectId, canReadBoq = true }) => {
             status: currentBoqRevision.status,
             baselineLocked: Boolean(currentBoqRevision.baselineLocked),
             lockedAt: toIso(currentBoqRevision.lockedAt),
-            itemCount: currentBoqRevision.itemCount,
             // What the upload changed against the bill before it (PC-2's
             // comparison), the rows it could not apply, and its review
             // trail — the revision's own record, shown, not re-derived.
-            changes: {
-              added: currentBoqRevision.addedCount,
-              updated: currentBoqRevision.updatedCount,
-              removed: currentBoqRevision.removedCount,
-              unchanged: currentBoqRevision.unchangedCount,
-              blocked: currentBoqRevision.blockedCount,
-            },
-            validation: {
-              blockedCount: currentBoqRevision.blockedCount,
-              // The rows themselves (codes, descriptions) are the bill's.
-              blocked: canReadBoq ? boqRevisionBlockedRows : [],
-            },
+            // Every one of these is a count of BOQ rows: for those who may
+            // read the BOQ (the owner's rule on BOQ-derived counts).
+            ...(canReadBoq
+              ? {
+                  itemCount: currentBoqRevision.itemCount,
+                  changes: {
+                    added: currentBoqRevision.addedCount,
+                    updated: currentBoqRevision.updatedCount,
+                    removed: currentBoqRevision.removedCount,
+                    unchanged: currentBoqRevision.unchangedCount,
+                    blocked: currentBoqRevision.blockedCount,
+                  },
+                  validation: {
+                    blockedCount: currentBoqRevision.blockedCount,
+                    // The rows themselves (codes, descriptions) are the bill's.
+                    blocked: boqRevisionBlockedRows,
+                  },
+                }
+              : {
+                  countsWithheld: true,
+                  reason: BOQ_DETAILS_WITHHELD,
+                  validation: { blocked: [] },
+                }),
             // The value and the review trail (who approved, their
             // comments) are for those who may read the BOQ.
             ...(canReadBoq

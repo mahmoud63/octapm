@@ -257,6 +257,9 @@ test('earned value is plotted only where it was measured, every EV surface state
   // zone, and the instant PV, EV and AC were selected against.
   const evCutoff = (await page.getByTestId('uat-ev-cutoff').innerText()).trim()
   expect(evCutoff).toBe('end of Aug 31, 2026 (America/Chicago) · 2026-09-01 04:59:59 UTC')
+  // The project has its own zone: no fallback note anywhere.
+  await expect(page.getByTestId('uat-ev-cutoff-zone-note')).toHaveCount(0)
+  await expect(page.getByText(/Project timezone is not configured/)).toHaveCount(0)
   // With no CPI the EAC is the budget, and says so (the Phase 22A wording).
   await expect(page.getByText('The budget — no cost performance yet')).toBeVisible()
   await expect(page.getByText('Revised budget / CPI')).toHaveCount(0)
@@ -267,6 +270,8 @@ test('earned value is plotted only where it was measured, every EV surface state
   await expect(page.getByTestId('uat-controls-strip')).toBeVisible({ timeout: 30_000 })
   await expect(page.getByTestId('uat-health-cutoff')).toHaveText(`EV cutoff ${evCutoff}`, { timeout: 30_000 })
   await expect(page.getByTestId('uat-controls-ev-cutoff')).toHaveText(evCutoff, { timeout: 30_000 })
+  await expect(page.getByTestId('uat-health-cutoff-zone-note')).toHaveCount(0)
+  await expect(page.getByTestId('uat-controls-ev-cutoff-zone-note')).toHaveCount(0)
   await expect(page.getByTestId('uat-health-provenance-cost')).toContainText('through Aug 31, 2026')
   await expect(page.getByTestId('uat-controls-figures-basis')).toContainText('budget register and cost ledger as of')
   // No cost records, no budget register: dashes with the reason — never USD 0.
@@ -377,13 +382,26 @@ test('the forecast at completion is the budget over CPI, toned against that budg
   // One activity, entered without a revision: a schedule, and what to do next.
   await expect(page.getByTestId('uat-controls-schedule')).toHaveText('1 activity')
   await expect(page.getByTestId('uat-controls-schedule-tile')).toContainText('No revision')
-  // A BOQ reader sees the mapping share.
+  // A BOQ reader sees the mapping share, and the bill's row count.
   await expect(page.getByTestId('uat-controls-coverage-pct')).toHaveText('100%')
+  await expect(page.getByTestId('uat-controls-boq-revision')).toHaveText('1 rows')
+  // D1 (the owner's correction): this project and its workspace have no
+  // time zone, so the cutoff is read in UTC — and every EV surface says so,
+  // beside the cutoff, in the server's words.
+  const UTC_NOTE = 'Project timezone is not configured; UTC is being used'
+  await expect(page.getByTestId('uat-health-cutoff')).toContainText('(UTC)', { timeout: 30_000 })
+  await expect(page.getByTestId('uat-health-cutoff-zone-note')).toHaveText(UTC_NOTE)
+  await expect(page.getByTestId('uat-controls-ev-cutoff-zone-note')).toHaveText(`${UTC_NOTE}.`)
   await forecast.click()
   await expect(page).toHaveURL(new RegExp(`${base.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/schedule/forecast$`), { timeout: 30_000 })
   const eac = page.getByTestId('uat-forecast-eac')
   await expect(eac).toContainText('revised budget ÷ CPI', { timeout: 30_000 })
   await expect(eac).toContainText('125,000')
+  await expect(page.getByTestId('uat-forecast-ev-cutoff')).toContainText('(UTC)')
+  await expect(page.getByTestId('uat-forecast-ev-cutoff-zone-note')).toHaveText(UTC_NOTE)
+  await page.goto(`${base}/schedule/ev`)
+  await expect(page.getByTestId('uat-ev-cutoff')).toContainText('(UTC)', { timeout: 30_000 })
+  await expect(page.getByTestId('uat-ev-cutoff-zone-note')).toHaveText(UTC_NOTE)
 
   // The site engineer: no budget figure, the reason instead; no mapping details.
   const { context, page: sePage } = await pageAs(browser, setup.siteEngineer)
@@ -397,6 +415,10 @@ test('the forecast at completion is the budget over CPI, toned against that budg
     await expect(sePage.getByTestId('uat-controls-figure-unmapped-value')).toHaveText('—')
     await expect(sePage.getByTestId('uat-controls-figure-unmapped')).toContainText('Mapping details unavailable to you')
     await expect(sePage.getByTestId('uat-controls-figures')).not.toContainText('125,000')
+    // No count of the bill's rows either (the owner's rule on BOQ-derived
+    // counts): the tile says the bill exists, not how many rows it has.
+    await expect(sePage.getByTestId('uat-controls-boq-revision')).toHaveText('Entered by hand')
+    await expect(sePage.getByTestId('uat-controls-boq')).not.toContainText(/\d+ rows/)
     await sePage.goto(`${base}/schedule/forecast`)
     const seEac = sePage.getByTestId('uat-forecast-eac')
     await expect(seEac).toBeVisible({ timeout: 30_000 })

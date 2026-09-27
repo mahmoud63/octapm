@@ -16,9 +16,13 @@ const auditService = require("./audit.service");
 const setupReadinessService = require("./project-setup-readiness.service");
 const { normalizeRoleId } = require("../config/permissions");
 const {
-  isValidTimeZone,
+  endOfLocalDay,
+  localDateOf,
+  reportingDateOfStoredCutoff,
+  reportingTimeZoneNote,
   resolveReportingCutoff,
   resolveReportingTimeZone,
+  storedValueForReportingDate,
 } = require("../utils/reporting-cutoff");
 
 const FORMULA_VERSION = "ev.v2";
@@ -55,7 +59,7 @@ const EV_FORMULAS = Object.freeze({
   cpi: "CPI = EV / AC when AC > 0; otherwise null",
   eac: "EAC = revised BAC / CPI when CPI > 0; otherwise revised BAC",
   cutoff:
-    "A reporting period cutoffDate is authoritative. It is a calendar date that ends at the end of that date in the project time zone (Project.timezone, else the organisation default time zone, else UTC); PV, EV and AC are selected against that one instant. Ad hoc cutoffDate is allowed for open calculations but is not a locked snapshot.",
+    "A reporting period cutoffDate is authoritative. It is a calendar date, kept as entered, that ends at the end of that date in the project time zone (Project.timezone, else the organisation default time zone, else UTC), computed for that date from the zone's own rules including daylight saving; PV, EV and AC are selected against that one instant. When the project has no time zone the report says which zone was used. A locked period keeps the instant and figures stored at the lock. Ad hoc cutoffDate is allowed for open calculations but is not a locked snapshot.",
   budgetRevisions:
     "Approved BudgetRevision rows effective on/before cutoffDate adjust revised BAC. PV still requires approved time-phased cost loading.",
   progressMethods:
@@ -85,15 +89,13 @@ const toIso = (value) => (value ? new Date(value).toISOString() : null);
  * The zone a project's reporting cutoff is read in (owner decision D1):
  * Project.timezone, else the workspace's Organisation.defaultTimezone, else
  * UTC. The organisation row is read whole so a client generated before the
- * column existed simply finds none and falls back to UTC.
+ * column existed simply finds none and falls back to UTC. Both are handed to
+ * utils/reporting-cutoff, which alone decides the precedence.
  */
 const resolveProjectReportingZone = async (project, tx = prisma) => {
-  let organisation = null;
-  if (!isValidTimeZone(project?.timezone) && project?.orgId) {
-    organisation =
-      (await tx.organisation?.findUnique?.({ where: { id: project.orgId } })) ||
-      null;
-  }
+  const organisation = project?.orgId
+    ? (await tx.organisation?.findUnique?.({ where: { id: project.orgId } })) || null
+    : null;
   return resolveReportingTimeZone({ project, organisation });
 };
 
@@ -146,11 +148,27 @@ const selectApprovedProgressForCutoff = (rows = [], cutoffDate) => {
   };
 };
 
-const buildMonthStart = (date) =>
-  new Date(date.getFullYear(), date.getMonth(), 1);
+// The S-curve's months are the project's: a month is its calendar dates in
+// the reporting zone, and it ends where its last date ends there (the same
+// rule as the cutoff — never the server's own month end).
+const monthKeyOf = (instant, zone) => localDateOf(instant, zone.timeZone).slice(0, 7);
 
-const formatMonthLabel = (date) =>
-  date.toLocaleDateString("en-GB", { month: "short", year: "2-digit" });
+const nextMonthKey = (key) => {
+  const [year, month] = key.split("-").map(Number);
+  return month === 12 ? `${year + 1}-01` : `${year}-${String(month + 1).padStart(2, "0")}`;
+};
+
+const lastDateOfMonth = (key) => {
+  const [year, month] = key.split("-").map(Number);
+  return new Date(Date.UTC(year, month, 0)).toISOString().slice(0, 10);
+};
+
+const formatMonthLabel = (key) =>
+  new Date(`${key}-01T00:00:00.000Z`).toLocaleDateString("en-GB", {
+    month: "short",
+    year: "2-digit",
+    timeZone: "UTC",
+  });
 
 const addDays = (date, days) => {
   const next = new Date(date);
@@ -214,7 +232,63 @@ const ensureProject = async ({ orgId, projectId }, tx = prisma) => {
   return project;
 };
 
-const serializePeriod = (period) =>
+/**
+ * The cutoff a period answers with (D1 and the owner's correction):
+ *
+ * - a locked period with its snapshot: the instant the snapshot stored, with
+ *   the date and zone recorded at the lock — never re-read in a later zone;
+ * - any other stored period: its reporting date (the UTC calendar date of
+ *   the stored value — utils/reporting-cutoff) ending in the zone resolved
+ *   now;
+ * - an ad hoc period: the date it was built for, in the same zone.
+ *
+ * The raw stored value is never handed out as the instant.
+ */
+const describePeriodCutoff = (period, zone) => {
+  if (period?.evSnapshot?.cutoffDate) {
+    const recorded = period.evSnapshot.basisJson?.reporting || {};
+    return {
+      cutoffDate: new Date(period.evSnapshot.cutoffDate),
+      localDate:
+        recorded.cutoffLocalDate ||
+        (period.cutoffDate ? reportingDateOfStoredCutoff(period.cutoffDate) : null),
+      timeZone: recorded.timeZone || null,
+      timeZoneSource: recorded.timeZoneSource || null,
+      timeZoneNote: recorded.timeZoneNote ?? null,
+      fromSnapshot: true,
+    };
+  }
+  if (period?.isVirtual) return resolveCutoff(period.cutoffLocalDate, zone);
+  let reportingDate;
+  try {
+    reportingDate = reportingDateOfStoredCutoff(period?.cutoffDate);
+  } catch {
+    throw new HttpError(400, "INVALID_DATE", "cutoffDate is invalid");
+  }
+  return resolveCutoff(reportingDate, zone);
+};
+
+/**
+ * For a service outside EV that names a project's periods (the budget
+ * snapshots): a function giving each period's cutoff as the reports use it.
+ * The period should carry evSnapshot { cutoffDate, basisJson } when locked.
+ */
+const periodCutoffReader = async ({ orgId, projectId }, tx = prisma) => {
+  const project = await ensureProject({ orgId, projectId }, tx);
+  const zone = await resolveProjectReportingZone(project, tx);
+  return (period) => {
+    const cutoff = describePeriodCutoff(period, zone);
+    return {
+      cutoffDate: toIso(cutoff.cutoffDate),
+      cutoffLocalDate: cutoff.localDate || null,
+      timeZone: cutoff.timeZone || null,
+      timeZoneSource: cutoff.timeZoneSource || null,
+      timeZoneNote: cutoff.timeZoneNote ?? null,
+    };
+  };
+};
+
+const serializePeriod = (period, cutoff = null) =>
   period
     ? {
         id: period.id || null,
@@ -222,7 +296,12 @@ const serializePeriod = (period) =>
         label: period.label || period.code,
         periodStart: toIso(period.periodStart),
         periodEnd: toIso(period.periodEnd),
-        cutoffDate: toIso(period.cutoffDate),
+        // The instant the period's figures are cut at, never the stored value.
+        cutoffDate: toIso(cutoff?.cutoffDate || null),
+        cutoffLocalDate: cutoff?.localDate || null,
+        timeZone: cutoff?.timeZone || null,
+        timeZoneSource: cutoff?.timeZoneSource || null,
+        timeZoneNote: cutoff?.timeZoneNote ?? null,
         status: period.status || OPEN_PERIOD,
         lockedBy: period.lockedBy || null,
         lockedAt: toIso(period.lockedAt),
@@ -245,6 +324,9 @@ const buildVirtualPeriod = ({ project, cutoffDate, zone }) => {
     periodStart,
     periodEnd: cutoff.cutoffDate,
     cutoffDate: cutoff.cutoffDate,
+    // The date it was built for: describePeriodCutoff reads the instant back
+    // from this date, never from the instant.
+    cutoffLocalDate: cutoff.localDate,
     status: OPEN_PERIOD,
     isVirtual: true,
   };
@@ -397,30 +479,30 @@ const plannedFinishFromActivity = ({ project, activity }) => {
   return addDays(project.startDate, activity.earlyFinish);
 };
 
-const buildOfficialSCurveData = ({ costLoadings, cutoffDate, ev }) => {
+const buildOfficialSCurveData = ({ costLoadings, cutoffDate, ev, zone }) => {
   if (!costLoadings.length) return [];
 
   const plannedDates = costLoadings.map((row) =>
     new Date(row.plannedDate).getTime(),
   );
-  const start = buildMonthStart(new Date(Math.min(...plannedDates)));
-  const finish = buildMonthStart(new Date(Math.max(...plannedDates)));
+  const finish = monthKeyOf(Math.max(...plannedDates), zone);
   const rows = [];
-  const cursor = new Date(start);
 
-  while (cursor <= finish) {
-    const monthEnd = new Date(cursor.getFullYear(), cursor.getMonth() + 1, 0);
+  for (
+    let month = monthKeyOf(Math.min(...plannedDates), zone);
+    month <= finish;
+    month = nextMonthKey(month)
+  ) {
+    const monthEnd = endOfLocalDay(lastDateOfMonth(month), zone.timeZone);
     const pv = costLoadings
       .filter((row) => new Date(row.plannedDate) <= monthEnd)
       .reduce((sum, row) => addMoney(sum, row.plannedValue), 0);
 
     rows.push({
-      label: formatMonthLabel(cursor),
+      label: formatMonthLabel(month),
       pv,
       ev: monthEnd <= cutoffDate ? ev : null,
     });
-
-    cursor.setMonth(cursor.getMonth() + 1);
   }
 
   return rows;
@@ -476,6 +558,9 @@ const snapshotToReport = ({ snapshot, period }) => {
     ac: snapshot.ac,
   });
 
+  // The stored instant, and the date and zone recorded when it was locked.
+  const cutoff = describePeriodCutoff({ ...period, evSnapshot: snapshot });
+
   return {
     ...metrics,
     spi: snapshot.spi,
@@ -485,8 +570,11 @@ const snapshotToReport = ({ snapshot, period }) => {
     cv: snapshot.cv,
     etc: snapshot.etc,
     reporting: {
+      // A snapshot locked before its date was recorded is labelled with the
+      // period's reporting date; its instant and figures are as stored.
+      cutoffLocalDate: cutoff.localDate,
       ...(basisJson.reporting || {}),
-      period: serializePeriod(period),
+      period: serializePeriod(period, cutoff),
       cutoffDate: toIso(snapshot.cutoffDate),
       formulaVersion: snapshot.formulaVersion,
       isSnapshot: true,
@@ -537,8 +625,10 @@ const buildOfficialEvReport = async ({
   }
 
   // One instant for PV, EV, AC and the budget revisions in force: the end
-  // of the period's cutoff date in the project's reporting zone (D1).
-  const cutoff = resolveCutoff(period.cutoffDate, zone);
+  // of the period's reporting date in the project's reporting zone, as
+  // resolved now (D1) — the date as entered, the instant from the zone's
+  // own rules for that date.
+  const cutoff = describePeriodCutoff({ ...period, evSnapshot: null }, zone);
   const resolvedCutoffDate = cutoff.cutoffDate;
 
   const [
@@ -719,23 +809,32 @@ const buildOfficialEvReport = async ({
     );
   }
 
+  // The project has no zone of its own: say which one the cutoff was read
+  // in (the organisation's default, or UTC).
+  if (cutoff.timeZoneNote) basisWarnings.push(cutoff.timeZoneNote);
+
+  // The instant each figure's rows were selected against — one and the same.
+  const selectedThrough = toIso(resolvedCutoffDate);
   const sourceSummary = {
     pv: {
       source: "approved_time_phased_cost_loading",
       approvedRows: costLoadings.length,
       plannedValueThroughCutoff: pv,
+      selectedThrough,
     },
     ev: {
       source: "approved_progress_x_approved_allocations",
       approvedProgressActivities: approvedProgressCount,
       missingProgressActivities: missingProgressCount,
       legacyProgressDateFallbackActivities,
+      selectedThrough,
     },
     ac: {
       officialSourcePriority: ["cost_record.actual_through_date"],
       officialActualActivities,
       missingActualActivities,
       estimatesExcludedFromOfficialAc: true,
+      selectedThrough,
     },
     budget: {
       source: "approved_allocations_plus_approved_budget_revisions",
@@ -767,7 +866,10 @@ const buildOfficialEvReport = async ({
       cutoffLocalDate: cutoff.localDate,
       timeZone: cutoff.timeZone,
       timeZoneSource: cutoff.timeZoneSource,
-      period: serializePeriod(period),
+      // null when the project's own zone applied; otherwise the sentence
+      // every client shows beside the cutoff.
+      timeZoneNote: cutoff.timeZoneNote,
+      period: serializePeriod(period, cutoff),
       formulaVersion: FORMULA_VERSION,
       isSnapshot: false,
     },
@@ -791,6 +893,7 @@ const buildOfficialEvReport = async ({
       costLoadings,
       cutoffDate: resolvedCutoffDate,
       ev: metrics.ev,
+      zone: { timeZone: cutoff.timeZone, source: cutoff.timeZoneSource },
     }),
     activityBreakdown: activityRows
       .slice()
@@ -832,22 +935,27 @@ const listReportingPeriods = async ({ orgId, projectId }) => {
           spi: true,
           cpi: true,
           lockedAt: true,
+          // The instant the lock used and the date and zone it recorded.
+          cutoffDate: true,
+          basisJson: true,
         },
       },
     },
     orderBy: [{ cutoffDate: "desc" }, { createdAt: "desc" }],
   });
 
-  // Each period's cutoff date as the reports read it back: the calendar date
-  // its stored instant falls on in the project's reporting zone.
+  // Each period's cutoff as the reports use it: its reporting date (as
+  // entered) ending in the project's reporting zone resolved now, or, once
+  // locked, the instant its snapshot stored.
   const zone = await resolveProjectReportingZone(project);
   return {
+    // The zone an open period is read in today, and the note when the
+    // project has none of its own.
+    timeZone: zone.timeZone,
+    timeZoneSource: zone.source,
+    timeZoneNote: reportingTimeZoneNote({ timeZone: zone.timeZone, timeZoneSource: zone.source }),
     periods: rows.map((row) => ({
-      ...serializePeriod(row),
-      cutoffLocalDate: row.cutoffDate
-        ? resolveCutoff(row.cutoffDate, zone).localDate
-        : null,
-      timeZone: zone.timeZone,
+      ...serializePeriod(row, describePeriodCutoff(row, zone)),
       snapshot: row.evSnapshot
         ? {
             id: row.evSnapshot.id,
@@ -868,11 +976,13 @@ const createReportingPeriod = async ({ orgId, projectId, userId, payload }) => {
   const project = await ensureProject({ orgId, projectId });
   const periodStart = parseDate(payload.periodStart, "periodStart");
   const periodEnd = parseDate(payload.periodEnd, "periodEnd");
-  // The stored cutoff is the instant the period's cutoff date ends in the
-  // project's reporting zone (D1); a report reads the same date back from it.
+  // What is stored is the period's REPORTING DATE, exactly as entered
+  // (utils/reporting-cutoff storedValueForReportingDate: the date's last
+  // millisecond in UTC), so it never drifts when a zone changes later. The
+  // instant is computed from that date in the zone resolved whenever the
+  // period is read or locked.
   const zone = await resolveProjectReportingZone(project);
   const cutoff = resolveCutoff(payload.cutoffDate || payload.periodEnd, zone);
-  const cutoffDate = cutoff.cutoffDate;
 
   if (periodEnd < periodStart) {
     throw new HttpError(
@@ -884,17 +994,27 @@ const createReportingPeriod = async ({ orgId, projectId, userId, payload }) => {
 
   const code = payload.code?.trim() || cutoff.localDate.slice(0, 7);
 
-  return prisma.reportingPeriod.create({
+  const row = await prisma.reportingPeriod.create({
     data: {
       projectId,
       code,
       label: payload.label?.trim() || code,
       periodStart,
       periodEnd,
-      cutoffDate,
+      cutoffDate: storedValueForReportingDate(cutoff.localDate),
       createdBy: userId || null,
     },
   });
+  // The record as created, with the instant its figures will be cut at
+  // today — not the stored date value.
+  return {
+    ...row,
+    cutoffDate: toIso(cutoff.cutoffDate),
+    cutoffLocalDate: cutoff.localDate,
+    timeZone: cutoff.timeZone,
+    timeZoneSource: cutoff.timeZoneSource,
+    timeZoneNote: cutoff.timeZoneNote,
+  };
 };
 
 const ensurePeriodEditable = (period) => {
@@ -1513,6 +1633,7 @@ module.exports = {
   computeEvMetrics,
   computeBudgetRevisionDelta,
   buildOfficialEvReport,
+  periodCutoffReader,
   listReportingPeriods,
   createReportingPeriod,
   lockReportingPeriod,

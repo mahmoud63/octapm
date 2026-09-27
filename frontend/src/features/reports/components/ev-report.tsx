@@ -35,7 +35,7 @@ import type {
 } from '@/features/projects/data/schema'
 import { useProjectSetupReadiness } from '@/features/projects/hooks/use-projects'
 import { formatLongDate } from '@/lib/dates'
-import { formatEvCutoff } from '@/lib/ev-cutoff'
+import { evCutoffNote, formatEvCutoff } from '@/lib/ev-cutoff'
 
 interface Props {
   projectId: string
@@ -92,6 +92,7 @@ type EvReportResponse = {
     cutoffLocalDate?: string | null
     timeZone?: string | null
     timeZoneSource?: string | null
+    timeZoneNote?: string | null
     isSnapshot?: boolean
   }
   sourceSummary?: {
@@ -317,6 +318,11 @@ export function EvReport({ projectId, readiness, onNavigate }: Props) {
     readiness?.gates.reporting ||
     fetchedReadiness?.gates.reporting
   const readinessBlockers = readinessGate?.blockers ?? []
+  // Shown beside the cutoff, so not repeated among the basis warnings.
+  const cutoffNote = evCutoffNote(reporting)
+  const otherBasisWarnings = (basisWarnings || []).filter(
+    (warning: string) => warning !== cutoffNote
+  )
   const curve = shapeSCurve({
     sCurve,
     cutoffDate: reporting?.cutoffDate,
@@ -337,6 +343,12 @@ export function EvReport({ projectId, readiness, onNavigate }: Props) {
                 end of the cutoff date in the project's time zone. */}
             <span data-testid='uat-ev-cutoff'>{formatEvCutoff(reporting)}</span>
           </p>
+          {cutoffNote && (
+            // The server's sentence when the project has no zone of its own.
+            <p className='text-xs text-muted-foreground' data-testid='uat-ev-cutoff-zone-note'>
+              {cutoffNote}
+            </p>
+          )}
         </div>
         <div className='flex flex-wrap items-center gap-2'>
           <Badge variant={isSnapshot ? 'default' : 'secondary'}>
@@ -421,9 +433,9 @@ export function EvReport({ projectId, readiness, onNavigate }: Props) {
         </div>
       )}
 
-      {(basisWarnings || []).length > 0 && (
+      {otherBasisWarnings.length > 0 && (
         <div className='relative overflow-hidden rounded-lg border border-warning/40 bg-warning-soft p-3 ps-4 text-sm text-warning-foreground'>
-          {(basisWarnings || []).map((warning: string) => (
+          {otherBasisWarnings.map((warning: string) => (
             <p key={warning}>{warning}</p>
           ))}
         </div>
