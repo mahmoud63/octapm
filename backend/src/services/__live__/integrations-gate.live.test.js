@@ -30,10 +30,17 @@ liveDescribe("integrations: the OAuth callback is public, the rest is gated", ()
     if (res.status !== 201) throw new Error(`register: ${res.status} ${res.text}`);
     org = { orgId: res.body.data.user.orgId, token: res.body.data.tokens.accessToken };
     // A brand-new organisation is on a trial; this test is about the gate, not billing.
-    await prisma.subscription.updateMany({
+    // One row by its unique key (orgId is unique on Subscription): a missing
+    // id throws instead of re-pricing every subscription in the database.
+    if (typeof org.orgId !== "string" || !org.orgId) throw new Error("register: no organisation id in the response");
+    await prisma.subscription.update({
       where: { orgId: org.orgId },
       data: { plan: "business", status: "active", seats: 25, currentPeriodEnd: new Date(Date.now() + 30 * 86_400_000) },
     });
+    // Sign-up makes a personal workspace, which seats nobody but its owner
+    // (ENT-6); this test seats a member, so the workspace is converted first.
+    const converted = await api.post(`/api/v1/organisations/${org.orgId}/convert`, {}, bearer(org.token));
+    if (converted.status !== 200) throw new Error(`convert: ${converted.status} ${converted.text}`);
   }, 120_000);
 
   afterAll(async () => {

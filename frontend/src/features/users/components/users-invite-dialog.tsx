@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { z } from 'zod'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
@@ -25,6 +26,10 @@ import {
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { SelectDropdown } from '@/components/select-dropdown'
+import {
+  ConvertRequiredNotice,
+  isConvertRequiredError,
+} from '@/features/company/components/convert-required-notice'
 import {
   useProjectParties,
   useProjects,
@@ -59,6 +64,10 @@ export function UsersInviteDialog({
 }: UserInviteDialogProps) {
   const projectsQuery = useProjects()
   const inviteUser = useInviteUserMutation()
+  // A personal workspace refused a member invitation (ENT-6): the dialog
+  // shows the way to the conversion instead of an error toast. A party
+  // invitation (a guest) is still sent from here as before.
+  const [convertRequired, setConvertRequired] = useState(false)
   const form = useForm<UserInviteForm>({
     resolver: zodResolver(formSchema),
     defaultValues: {
@@ -93,6 +102,10 @@ export function UsersInviteDialog({
       toast.success(`Invitation sent to ${values.email}`)
       onOpenChange(false)
     } catch (error) {
+      if (isConvertRequiredError(error)) {
+        setConvertRequired(true)
+        return
+      }
       toast.error(getServerErrorMessage(error, 'Unable to send invitation.'))
     }
   }
@@ -120,6 +133,7 @@ export function UsersInviteDialog({
       open={open}
       onOpenChange={(state) => {
         form.reset()
+        setConvertRequired(false)
         onOpenChange(state)
       }}
     >
@@ -133,6 +147,9 @@ export function UsersInviteDialog({
             invitation. Assign a role to define their access level.
           </DialogDescription>
         </DialogHeader>
+        {convertRequired && (
+          <ConvertRequiredNotice onNavigate={() => onOpenChange(false)} />
+        )}
         <Form {...form}>
           <form
             id='user-invite-form'

@@ -98,6 +98,7 @@ import { Route as AuthenticatedOOrgSlugSettingsAppearanceRouteImport } from './r
 import { Route as AuthenticatedOOrgSlugSettingsAccountRouteImport } from './routes/_authenticated/o/$orgSlug/settings/account'
 import { Route as AuthenticatedOOrgSlugProjectsProjectIdRouteImport } from './routes/_authenticated/o/$orgSlug/projects/$projectId'
 import { Route as AuthenticatedOOrgSlugErrorsErrorRouteImport } from './routes/_authenticated/o/$orgSlug/errors/$error'
+import { Route as AuthenticatedOOrgSlugCompanyWorkspaceRouteImport } from './routes/_authenticated/o/$orgSlug/company/workspace'
 import { Route as AuthenticatedOOrgSlugCompanyWorkflowsRouteImport } from './routes/_authenticated/o/$orgSlug/company/workflows'
 import { Route as AuthenticatedOOrgSlugCompanyVendorsRouteImport } from './routes/_authenticated/o/$orgSlug/company/vendors'
 import { Route as AuthenticatedOOrgSlugCompanyTemplatesRouteImport } from './routes/_authenticated/o/$orgSlug/company/templates'
@@ -621,6 +622,12 @@ const AuthenticatedOOrgSlugErrorsErrorRoute =
     path: '/errors/$error',
     getParentRoute: () => AuthenticatedOOrgSlugRouteRoute,
   } as any)
+const AuthenticatedOOrgSlugCompanyWorkspaceRoute =
+  AuthenticatedOOrgSlugCompanyWorkspaceRouteImport.update({
+    id: '/workspace',
+    path: '/workspace',
+    getParentRoute: () => AuthenticatedOOrgSlugCompanyRouteRoute,
+  } as any)
 const AuthenticatedOOrgSlugCompanyWorkflowsRoute =
   AuthenticatedOOrgSlugCompanyWorkflowsRouteImport.update({
     id: '/workflows',
@@ -799,6 +806,7 @@ export interface FileRoutesByFullPath {
   '/o/$orgSlug/company/templates': typeof AuthenticatedOOrgSlugCompanyTemplatesRoute
   '/o/$orgSlug/company/vendors': typeof AuthenticatedOOrgSlugCompanyVendorsRoute
   '/o/$orgSlug/company/workflows': typeof AuthenticatedOOrgSlugCompanyWorkflowsRoute
+  '/o/$orgSlug/company/workspace': typeof AuthenticatedOOrgSlugCompanyWorkspaceRoute
   '/o/$orgSlug/errors/$error': typeof AuthenticatedOOrgSlugErrorsErrorRoute
   '/o/$orgSlug/projects/$projectId': typeof AuthenticatedOOrgSlugProjectsProjectIdRouteWithChildren
   '/o/$orgSlug/settings/account': typeof AuthenticatedOOrgSlugSettingsAccountRoute
@@ -899,6 +907,7 @@ export interface FileRoutesByTo {
   '/o/$orgSlug/company/templates': typeof AuthenticatedOOrgSlugCompanyTemplatesRoute
   '/o/$orgSlug/company/vendors': typeof AuthenticatedOOrgSlugCompanyVendorsRoute
   '/o/$orgSlug/company/workflows': typeof AuthenticatedOOrgSlugCompanyWorkflowsRoute
+  '/o/$orgSlug/company/workspace': typeof AuthenticatedOOrgSlugCompanyWorkspaceRoute
   '/o/$orgSlug/errors/$error': typeof AuthenticatedOOrgSlugErrorsErrorRoute
   '/o/$orgSlug/settings/account': typeof AuthenticatedOOrgSlugSettingsAccountRoute
   '/o/$orgSlug/settings/appearance': typeof AuthenticatedOOrgSlugSettingsAppearanceRoute
@@ -1006,6 +1015,7 @@ export interface FileRoutesById {
   '/_authenticated/o/$orgSlug/company/templates': typeof AuthenticatedOOrgSlugCompanyTemplatesRoute
   '/_authenticated/o/$orgSlug/company/vendors': typeof AuthenticatedOOrgSlugCompanyVendorsRoute
   '/_authenticated/o/$orgSlug/company/workflows': typeof AuthenticatedOOrgSlugCompanyWorkflowsRoute
+  '/_authenticated/o/$orgSlug/company/workspace': typeof AuthenticatedOOrgSlugCompanyWorkspaceRoute
   '/_authenticated/o/$orgSlug/errors/$error': typeof AuthenticatedOOrgSlugErrorsErrorRoute
   '/_authenticated/o/$orgSlug/projects/$projectId': typeof AuthenticatedOOrgSlugProjectsProjectIdRouteWithChildren
   '/_authenticated/o/$orgSlug/settings/account': typeof AuthenticatedOOrgSlugSettingsAccountRoute
@@ -1114,6 +1124,7 @@ export interface FileRouteTypes {
     | '/o/$orgSlug/company/templates'
     | '/o/$orgSlug/company/vendors'
     | '/o/$orgSlug/company/workflows'
+    | '/o/$orgSlug/company/workspace'
     | '/o/$orgSlug/errors/$error'
     | '/o/$orgSlug/projects/$projectId'
     | '/o/$orgSlug/settings/account'
@@ -1214,6 +1225,7 @@ export interface FileRouteTypes {
     | '/o/$orgSlug/company/templates'
     | '/o/$orgSlug/company/vendors'
     | '/o/$orgSlug/company/workflows'
+    | '/o/$orgSlug/company/workspace'
     | '/o/$orgSlug/errors/$error'
     | '/o/$orgSlug/settings/account'
     | '/o/$orgSlug/settings/appearance'
@@ -1320,6 +1332,7 @@ export interface FileRouteTypes {
     | '/_authenticated/o/$orgSlug/company/templates'
     | '/_authenticated/o/$orgSlug/company/vendors'
     | '/_authenticated/o/$orgSlug/company/workflows'
+    | '/_authenticated/o/$orgSlug/company/workspace'
     | '/_authenticated/o/$orgSlug/errors/$error'
     | '/_authenticated/o/$orgSlug/projects/$projectId'
     | '/_authenticated/o/$orgSlug/settings/account'
@@ -1992,6 +2005,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedOOrgSlugErrorsErrorRouteImport
       parentRoute: typeof AuthenticatedOOrgSlugRouteRoute
     }
+    '/_authenticated/o/$orgSlug/company/workspace': {
+      id: '/_authenticated/o/$orgSlug/company/workspace'
+      path: '/workspace'
+      fullPath: '/o/$orgSlug/company/workspace'
+      preLoaderRoute: typeof AuthenticatedOOrgSlugCompanyWorkspaceRouteImport
+      parentRoute: typeof AuthenticatedOOrgSlugCompanyRouteRoute
+    }
     '/_authenticated/o/$orgSlug/company/workflows': {
       id: '/_authenticated/o/$orgSlug/company/workflows'
       path: '/workflows'
@@ -2192,6 +2212,7 @@ interface AuthenticatedOOrgSlugCompanyRouteRouteChildren {
   AuthenticatedOOrgSlugCompanyTemplatesRoute: typeof AuthenticatedOOrgSlugCompanyTemplatesRoute
   AuthenticatedOOrgSlugCompanyVendorsRoute: typeof AuthenticatedOOrgSlugCompanyVendorsRoute
   AuthenticatedOOrgSlugCompanyWorkflowsRoute: typeof AuthenticatedOOrgSlugCompanyWorkflowsRoute
+  AuthenticatedOOrgSlugCompanyWorkspaceRoute: typeof AuthenticatedOOrgSlugCompanyWorkspaceRoute
   AuthenticatedOOrgSlugCompanyIndexRoute: typeof AuthenticatedOOrgSlugCompanyIndexRoute
 }
 
@@ -2221,6 +2242,8 @@ const AuthenticatedOOrgSlugCompanyRouteRouteChildren: AuthenticatedOOrgSlugCompa
       AuthenticatedOOrgSlugCompanyVendorsRoute,
     AuthenticatedOOrgSlugCompanyWorkflowsRoute:
       AuthenticatedOOrgSlugCompanyWorkflowsRoute,
+    AuthenticatedOOrgSlugCompanyWorkspaceRoute:
+      AuthenticatedOOrgSlugCompanyWorkspaceRoute,
     AuthenticatedOOrgSlugCompanyIndexRoute:
       AuthenticatedOOrgSlugCompanyIndexRoute,
   }

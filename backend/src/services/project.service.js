@@ -264,6 +264,26 @@ const createProject = async ({ orgId, userId, role, payload }) => {
     );
   }
   data.orgId = orgId;
+  // A new project starts from its workspace's defaults (ENT-6, acceptance
+  // §16) for what its creator did not name: the currency, and the time zone
+  // when the workspace chose one. Only at creation — an existing project is
+  // never rewritten when the workspace's defaults change.
+  // (A test double without the organisation model keeps the column defaults.)
+  if (
+    (data.currency === undefined || data.timezone === undefined) &&
+    prisma.organisation?.findUnique
+  ) {
+    const workspace = await prisma.organisation.findUnique({
+      where: { id: orgId },
+      select: { defaultCurrency: true, defaultTimezone: true },
+    });
+    if (data.currency === undefined && workspace?.defaultCurrency) {
+      data.currency = workspace.defaultCurrency;
+    }
+    if (data.timezone === undefined && workspace?.defaultTimezone) {
+      data.timezone = workspace.defaultTimezone;
+    }
+  }
 
   if (userId) {
     data.assignments = {

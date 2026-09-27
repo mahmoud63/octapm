@@ -45,10 +45,17 @@ liveDescribe("workspace links: notification paths and the legacy-link resolver",
     const { user, tokens: issued } = res.body.data;
     // A brand-new organisation is on a trial with no allowance; this test is
     // about links, not billing, so the throwaway organisation gets a plan.
-    await prisma.subscription.updateMany({
+    // One row by its unique key (orgId is unique on Subscription): a missing
+    // id throws instead of re-pricing every subscription in the database.
+    if (typeof user?.orgId !== "string" || !user.orgId) throw new Error(`register ${label}: no organisation id in the response`);
+    await prisma.subscription.update({
       where: { orgId: user.orgId },
       data: { plan: "business", status: "active", seats: 25, currentPeriodEnd: new Date(Date.now() + 30 * 86_400_000) },
     });
+    // Sign-up makes a personal workspace, which seats nobody but its owner
+    // (ENT-6); these are teams, so each is converted through the product's route.
+    const converted = await api.post(`/api/v1/organisations/${user.orgId}/convert`, {}, bearer(issued.accessToken));
+    if (converted.status !== 200) throw new Error(`convert ${label}: ${converted.status} ${converted.text}`);
     const org = await prisma.organisation.findUnique({ where: { id: user.orgId }, select: { slug: true } });
     return { label, orgId: user.orgId, slug: org.slug, admin: user, token: issued.accessToken };
   };

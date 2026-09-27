@@ -12,6 +12,8 @@
  *     organisation whose owner row was suspended by hand gets it back;
  *   - the tenant-column backfill fills the slug and the assignment orgId, and
  *     a dry run after it finds 0 changes;
+ *   - a personal workspace's guest keeps its guest row and a second person
+ *     homed there is held, never seated (ENT-6);
  *   - the report is clean on that organisation, and unscoped dry runs of both
  *     backfills and of the report find nothing left on any durable tenant —
  *     this test never applies an unscoped write: the database is shared with
@@ -154,6 +156,54 @@ liveDescribe("membership backfill (M2, M3) and the §50 report", () => {
     expect(settled.result).toMatchObject({ changes: 0, owners: [] });
     const report = await runScript("validate-membership-backfill.js", ["--org", org.id]);
     expect(report.result.rows.find((row) => row.check === "org_has_active_owner").status).toBe("ok");
+  });
+
+  test("a personal workspace keeps its guest a guest, and seats nobody but its owner", async () => {
+    // ENT-6: a party invitation to a new identity homes the person (User.orgId)
+    // in the workspace that invited them, seated as a guest; an SSO sign-in
+    // refused before the fix left an identity homed there with no seat at all.
+    // Mirroring either into a member row would give a personal workspace a
+    // second member behind the product's back.
+    const tag = crypto.randomUUID();
+    const personal = await prisma.organisation.create({ data: { name: `LiveTest ${tag}`, kind: "personal" } });
+    try {
+      const person = (label, role, extra = {}) =>
+        prisma.user.create({
+          data: { orgId: personal.id, name: `Live ${label}`, email: `live-${label}-${tag}@octapm-live.test`, passwordHash: "x", role, ...extra },
+        });
+      const owner = await person("owner", "pm", { isCompanyAdmin: true });
+      await prisma.organisation.update({ where: { id: personal.id }, data: { createdByUserId: owner.id } });
+      await prisma.organizationMembership.create({
+        data: { orgId: personal.id, userId: owner.id, role: "pm", kind: "member", isAdmin: true, isOwner: true, status: "active", joinedAt: owner.createdAt },
+      });
+      const guest = await person("guest", "site_engineer");
+      const guestRow = await prisma.organizationMembership.create({
+        data: { orgId: personal.id, userId: guest.id, role: "external_party", kind: "guest", isAdmin: false, isOwner: false, status: "active" },
+      });
+      const stray = await person("stray", "qs");
+
+      const dry = await runScript("backfill-memberships.js", ["--org", personal.id]);
+      expect(dry.code).toBe(0);
+      expect(dry.result).toMatchObject({ created: 0, updated: 0, changes: 0, pending: [] });
+      expect(dry.result.held).toEqual([
+        expect.objectContaining({ orgId: personal.id, userId: stray.id, reason: "PERSONAL_WORKSPACE_CONVERT_REQUIRED" }),
+      ]);
+
+      const applied = await runScript("backfill-memberships.js", ["--apply", "--org", personal.id]);
+      expect(applied.code).toBe(0);
+      expect(applied.result).toMatchObject({ created: 0, updated: 0, changes: 0 });
+      expect(await prisma.organizationMembership.findUnique({ where: { id: guestRow.id } })).toMatchObject({
+        kind: "guest",
+        role: "external_party",
+        isAdmin: false,
+        status: "active",
+      });
+      expect(await prisma.organizationMembership.count({ where: { orgId: personal.id, userId: stray.id } })).toBe(0);
+      const members = await prisma.organizationMembership.findMany({ where: { orgId: personal.id, kind: "member" }, select: { userId: true } });
+      expect(members).toEqual([{ userId: owner.id }]);
+    } finally {
+      await dropLiveOrg(prisma, personal.id);
+    }
   });
 
   test("the tenant-column backfill fills the slug; assignments already carry their organisation, so it finds nothing to fill", async () => {

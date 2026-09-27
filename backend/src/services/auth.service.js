@@ -18,7 +18,7 @@ const {
 } = require("../utils/tokens");
 const membershipService = require("./membership.service");
 const authAbuseService = require("./auth-abuse.service");
-const { ensureSubscription } = require("./subscription.service");
+const organisationService = require("./organisation.service");
 const { sendEmail, templates } = require("./email.service");
 const companyPartyService = require("./company-party.service");
 const { isPublicRegistrationOpen } = require("../config/registration");
@@ -263,40 +263,41 @@ const revokeSessionIfActive = async (tx, sessionId, now) => {
 };
 
 /**
- * The URL handle of a new workspace: the name slugified, suffixed when taken.
- * The backfill's helper decides the spelling so a workspace created here and
- * one backfilled from an old row are named the same way. A client that does
- * not know the column (a test double) gets no slug, as before.
- */
-const allocateWorkspaceSlug = async (tx, name) => {
-  if (!tx?.organisation?.findMany) return undefined;
-  // From src, not scripts/: the image ships src and not the scripts, and a
-  // failed require in here used to be swallowed into a workspace with no handle.
-  const { allocateSlug } = require("../utils/workspace-slug");
-  try {
-    return await allocateSlug(tx, name);
-  } catch {
-    return undefined;
-  }
-};
-
-/**
- * A new organisation with its first company administrator, its subscription
- * and its default permission templates — everything self-service sign-up and
- * the first-administrator bootstrap have in common. Runs inside the caller's
- * transaction; the caller decides how the password hash was produced.
+ * A new organisation with its first administrator, who owns it — everything
+ * self-service sign-up and the first-administrator bootstrap have in common.
+ * Sign-up makes a personal workspace (ENT-6: one member, the individual
+ * plan); bootstrap makes the deployment's company. The workspace's furniture
+ * — subscription, system permission templates, default units — and the
+ * ownership are organisation.service's, shared with POST /organisations, so
+ * a workspace is provisioned the same way whichever door it came through.
+ * Runs inside the caller's transaction; the caller decides how the password
+ * hash was produced.
  */
 const provisionOrganisation = async (
   tx,
-  { orgName, name, email, phone = null, passwordHash, kind = "company" },
+  {
+    orgName,
+    name,
+    email,
+    phone = null,
+    passwordHash,
+    kind = organisationService.WORKSPACE_KINDS.COMPANY,
+    currency = null,
+    timezone = null,
+  },
 ) => {
-  const workspaceName = orgName?.trim() || `${name.trim()} Organisation`;
-  const createdOrg = await tx.organisation.create({
-    data: {
-      name: workspaceName,
-      kind,
-      slug: await allocateWorkspaceSlug(tx, workspaceName),
-    },
+  // A personal workspace with no name given is the person's, not an
+  // "Organisation" — the header shows this name beside a Personal badge.
+  const fallbackName =
+    kind === organisationService.WORKSPACE_KINDS.PERSONAL
+      ? `${name.trim()}'s workspace`
+      : `${name.trim()} Organisation`;
+  const workspaceName = orgName?.trim() || fallbackName;
+  const createdOrg = await organisationService.createOrganisationRow(tx, {
+    name: workspaceName,
+    kind,
+    currency,
+    timezone,
   });
 
   const createdUser = await tx.user.create({
@@ -311,36 +312,11 @@ const provisionOrganisation = async (
     },
   });
 
-  // The person who created the workspace owns it: the one membership that
-  // sign-up may create with ownership (membership doc §1).
-  await tx.organisation.update({
-    where: { id: createdOrg.id },
-    data: { createdByUserId: createdUser.id },
-  });
-  await membershipService.ensureMembership({
+  await organisationService.provisionWorkspace({
     tx,
-    orgId: createdOrg.id,
-    userId: createdUser.id,
-    role: "pm",
-    isAdmin: true,
-    isOwner: true,
-  });
-  await recordAuthAuditEvent({
-    tx,
-    orgId: createdOrg.id,
-    userId: createdUser.id,
-    entityType: "organisation",
-    entityId: createdOrg.id,
-    action: "workspace.created",
+    org: createdOrg,
+    ownerUserId: createdUser.id,
     email,
-    metadata: { kind, name: workspaceName },
-  });
-
-  await ensureSubscription(createdOrg.id, tx);
-  // System permission templates (8 internal roles + 4 external party types).
-  await require("./permission-template.service").seedDefaultTemplates({
-    tx,
-    orgId: createdOrg.id,
   });
 
   return { org: createdOrg, user: createdUser };
@@ -354,7 +330,7 @@ const createRegistrationClosedError = () =>
   );
 
 const register = async (
-  { orgName, name, email, password, phone },
+  { orgName, name, email, password, phone, currency = null, timezone = null },
   context = {},
 ) => {
   // Checked before any account lookup, so a closed deployment reveals
@@ -382,9 +358,21 @@ const register = async (
   const passwordHash = await bcrypt.hash(password, 12);
 
   return prisma.$transaction(async (tx) => {
+    // Sign-up makes a personal workspace (ENT-6): one member, the owner, on
+    // the individual plan. A team comes with POST /organisations or a
+    // conversion; the public registration policy above is unchanged.
     const { org: createdOrg, user: createdUser } = await provisionOrganisation(
       tx,
-      { orgName, name, email: normalizedEmail, phone, passwordHash },
+      {
+        orgName,
+        name,
+        email: normalizedEmail,
+        phone,
+        passwordHash,
+        kind: organisationService.WORKSPACE_KINDS.PERSONAL,
+        currency,
+        timezone,
+      },
     );
     const authPayload = await createAuthSessionPayload(
       tx,
@@ -396,8 +384,11 @@ const register = async (
       organisation: {
         id: createdOrg.id,
         name: createdOrg.name,
+        kind: createdOrg.kind,
         plan: createdOrg.plan,
         status: createdOrg.status,
+        defaultCurrency: createdOrg.defaultCurrency ?? null,
+        defaultTimezone: createdOrg.defaultTimezone ?? null,
       },
       ...authPayload,
     };

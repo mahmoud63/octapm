@@ -292,39 +292,51 @@ const createUser = async ({ orgId, actor = null, payload, context = {} }) => {
   if (!payload.password) {
     throw new HttpError(400, "VALIDATION_ERROR", "A password is required for a new account");
   }
+  // Asked before the account exists: a personal workspace's one-member rule
+  // (ENT-6) refuses the seat, and must not leave an identity behind with no
+  // membership when it does.
+  await membershipService.assertWorkspaceAcceptsMember({ tx: prisma, orgId });
   const passwordHash = await bcrypt.hash(payload.password, 12);
 
-  const user = await prisma.user.create({
-    data: {
-      orgId,
-      name: payload.name,
-      email,
-      phone: payload.phone ?? null,
-      passwordHash,
-      role,
-      status: "active",
-    },
-    include: withCount,
-  });
-
-  const ensured = await membershipService.ensureMembership({
-    tx: prisma,
-    orgId,
-    userId: user.id,
-    role,
-    invitedById: actor?.id || null,
-  });
-  if (ensured) {
-    await membershipService.recordMembershipEvent({
-      tx: prisma,
-      orgId,
-      membership: ensured.membership,
-      action: "membership.created",
-      actor,
-      context,
-      metadata: { role, existingIdentity: false },
+  // The identity and its seat in one transaction, as SSO provisioning and
+  // invitation acceptance do: the check above is a fast refusal, but the
+  // seat is decided under the organisation-row lock inside ensureMembership,
+  // and a seat taken meanwhile (409) must roll the new identity back with it
+  // rather than leave an account homed here with no membership.
+  const { user, ensured } = await prisma.$transaction(async (tx) => {
+    const created = await tx.user.create({
+      data: {
+        orgId,
+        name: payload.name,
+        email,
+        phone: payload.phone ?? null,
+        passwordHash,
+        role,
+        status: "active",
+      },
+      include: withCount,
     });
-  }
+
+    const seat = await membershipService.ensureMembership({
+      tx,
+      orgId,
+      userId: created.id,
+      role,
+      invitedById: actor?.id || null,
+    });
+    if (seat) {
+      await membershipService.recordMembershipEvent({
+        tx,
+        orgId,
+        membership: seat.membership,
+        action: "membership.created",
+        actor,
+        context,
+        metadata: { role, existingIdentity: false },
+      });
+    }
+    return { user: created, ensured: seat };
+  });
 
   return sanitizeUser(user, ensured?.membership || null);
 };
@@ -468,7 +480,11 @@ const updateUser = async ({ orgId, userId, actor = null, payload, context = {} }
   if (wantsStanding) {
     const membershipAware = membershipService.hasMembershipModel(prisma) && membershipService.isMembershipWriteEnabled();
     if (membershipAware) {
-      membership = await membershipService.ensureMembershipForUser({ tx: prisma, user, orgId });
+      // In a transaction: a missing seat is decided under the organisation-row
+      // lock the one-member rule takes, which lasts only until the caller's
+      // transaction ends — outside one, the count and the insert would not be
+      // serialised against a concurrent seat.
+      membership = await prisma.$transaction((tx) => membershipService.ensureMembershipForUser({ tx, user, orgId }));
     }
     if (membership) {
       const changed = await membershipService.changeMembership({
@@ -628,6 +644,18 @@ const inviteUser = async ({ orgId, actor, payload, context = {} }) => {
     : Boolean(existingUser && existingUser.orgId === orgId && existingUser.status === "active");
   if (activeHere && !projectId && !companyId && !projectPartyId) {
     throw new HttpError(409, "ALREADY_MEMBER", "This person is already a member of the workspace");
+  }
+  // Acceptance seats a guest only for a party invitation (auth.service
+  // isPartyInvitation: a projectPartyId); every other invitation — a
+  // workspace, project or company-directory one — seats a member. A personal
+  // workspace refuses those before the invitation is minted (ENT-6), so
+  // nobody is sent a link that acceptance would refuse. The one exemption is
+  // somebody already holding a member seat here, who is only being assigned
+  // a project; an active guest is not, and accepting would take a seat.
+  const seatedMemberHere =
+    activeHere && existingMembership?.kind === membershipService.MEMBERSHIP_KINDS.MEMBER;
+  if (!projectPartyId && !seatedMemberHere) {
+    await membershipService.assertWorkspaceAcceptsMember({ tx: prisma, orgId, userId: existingUser?.id || null });
   }
 
   const rawToken = createAccountToken();

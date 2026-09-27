@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { z } from 'zod'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
@@ -24,6 +25,10 @@ import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
 import { PasswordInput } from '@/components/password-input'
 import { SelectDropdown } from '@/components/select-dropdown'
+import {
+  ConvertRequiredNotice,
+  isConvertRequiredError,
+} from '@/features/company/components/convert-required-notice'
 import { roles } from '../data/data'
 import { type User } from '../data/schema'
 import {
@@ -84,6 +89,7 @@ export function UsersActionDialog({
   const createUserMutation = useCreateUserMutation()
   const updateUserMutation = useUpdateUserMutation()
   const isPending = createUserMutation.isPending || updateUserMutation.isPending
+  const [convertRequired, setConvertRequired] = useState(false)
 
   const form = useForm<UserForm>({
     resolver: zodResolver(formSchema),
@@ -141,6 +147,12 @@ export function UsersActionDialog({
       })
       onOpenChange(false)
     } catch (error) {
+      // A personal workspace seats one member (ENT-6): the refusal shows the
+      // way to the conversion, not an error toast.
+      if (isConvertRequiredError(error)) {
+        setConvertRequired(true)
+        return
+      }
       toast.error(getServerErrorMessage(error))
     }
   }
@@ -151,6 +163,7 @@ export function UsersActionDialog({
       onOpenChange={(state) => {
         if (!state) {
           form.reset()
+          setConvertRequired(false)
         }
         onOpenChange(state)
       }}
@@ -164,6 +177,9 @@ export function UsersActionDialog({
               : 'Create a new engineer account and share credentials securely.'}
           </DialogDescription>
         </DialogHeader>
+        {convertRequired && (
+          <ConvertRequiredNotice onNavigate={() => onOpenChange(false)} />
+        )}
         <Form {...form}>
           <form
             id='user-form'

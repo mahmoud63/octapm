@@ -16,6 +16,15 @@
  * Idempotent: an existing row is updated only where a mirrored value differs,
  * and an organisation that already has an active owner keeps it — ownership
  * is never moved by a re-run. The User columns are never written.
+ *
+ * Two rules keep a re-run from seating anyone the product would refuse
+ * (ENT-6). An existing row's kind is never changed and a guest's row is left
+ * alone: a party member's User row may be homed in the workspace that invited
+ * them, and mirroring it would promote the guest to a member. And a personal
+ * workspace seats one member: only its seat holder (an existing member row,
+ * else the creator, else the owner rule) gets a row; any other person homed
+ * there is reported under `held` and never written — converting the
+ * workspace to a company first is the operator's decision, not this script's.
  * Reversal: DELETE FROM "OrganizationMembership".
  */
 require("../../src/utils/data-script-guard").exitUnlessDataScriptAllowed("enterprise:backfill-memberships");
@@ -24,7 +33,10 @@ const { prisma } = require("../../src/config/db");
 const { membershipFromUser, ownerRule } = require("../../src/services/membership.service");
 const { parseArgs, printCounts, printHeader, printResult } = require("./lib");
 
-const MIRRORED = ["role", "kind", "isAdmin", "isOwner", "status"];
+// `kind` is not mirrored: a row's kind (member or guest) is the product's
+// decision, and the User columns say nothing about it.
+const MIRRORED = ["role", "isAdmin", "isOwner", "status"];
+const PERSONAL = "personal";
 
 const differs = (existing, desired) => MIRRORED.some((field) => existing[field] !== desired[field]);
 
@@ -41,13 +53,34 @@ const counts = async (orgId) => {
 const planOrganisation = (org) => {
   const existingByUser = new Map(org.memberships.map((row) => [row.userId, row]));
   const existingOwner = org.memberships.find((row) => row.isOwner && row.status === "active");
-  const decision = existingOwner ? null : ownerRule(org.users);
+
+  // A personal workspace's one seat: whoever already holds a member row,
+  // else the person who created it, else whom the owner rule picks.
+  const personal = org.kind === PERSONAL;
+  const seatHolderId = personal
+    ? (org.memberships.find((row) => row.kind === "member" && row.status !== "left")?.userId ??
+      (org.users.some((user) => user.id === org.createdByUserId) ? org.createdByUserId : null) ??
+      ownerRule(org.users).ownerUserId)
+    : null;
+  const seatable = personal ? org.users.filter((user) => user.id === seatHolderId) : org.users;
+  const decision = existingOwner ? null : ownerRule(seatable);
 
   const creates = [];
   const updates = [];
+  const held = [];
   let unchanged = 0;
   for (const user of org.users) {
     const existing = existingByUser.get(user.id);
+    // A guest stays a guest, exactly as the product left it.
+    if (existing && existing.kind !== "member") {
+      unchanged += 1;
+      continue;
+    }
+    // A second member of a personal workspace is not seated by a backfill.
+    if (!existing && personal && user.id !== seatHolderId) {
+      held.push({ orgId: org.id, orgName: org.name, userId: user.id, reason: "PERSONAL_WORKSPACE_CONVERT_REQUIRED" });
+      continue;
+    }
     // Ownership already held is kept (a re-run never moves it); the decision
     // this run reports lands on its chosen person whether their row is being
     // created or already exists — an organisation whose only owner row was
@@ -62,7 +95,7 @@ const planOrganisation = (org) => {
       unchanged += 1;
     }
   }
-  return { creates, updates, unchanged, decision };
+  return { creates, updates, held, unchanged, decision };
 };
 
 const main = async () => {
@@ -78,6 +111,8 @@ const main = async () => {
     select: {
       id: true,
       name: true,
+      kind: true,
+      createdByUserId: true,
       users: {
         select: { id: true, orgId: true, role: true, isCompanyAdmin: true, status: true, createdAt: true },
         orderBy: [{ createdAt: "asc" }, { id: "asc" }],
@@ -97,9 +132,11 @@ const main = async () => {
   const owners = [];
   const ownerless = [];
   const pending = [];
+  const held = [];
 
   for (const org of orgs) {
     const plan = planOrganisation(org);
+    held.push(...plan.held);
     if (plan.decision) {
       if (plan.decision.ownerUserId) {
         const owner = org.users.find((user) => user.id === plan.decision.ownerUserId);
@@ -143,6 +180,9 @@ const main = async () => {
   for (const org of ownerless) {
     console.log(`   ${org.orgName.padEnd(40)} NO ACTIVE USER — no owner assigned`);
   }
+  for (const row of held) {
+    console.log(`   ${row.orgName.padEnd(40)} ${row.userId}  NOT SEATED — a personal workspace has one member; convert it first`);
+  }
 
   const after = await counts(args.orgId);
   console.log("");
@@ -161,6 +201,7 @@ const main = async () => {
     pending,
     owners,
     ownerless,
+    held,
   });
 };
 

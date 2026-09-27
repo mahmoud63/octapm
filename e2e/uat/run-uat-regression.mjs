@@ -434,12 +434,20 @@ async function bootstrapViaApi({ apiBaseUrl, runId, evidence }) {
   if (process.env.UAT_PM_EMAIL) {
     await pm.login(pmEmail, password);
   } else {
-    await pm.register({
+    const registered = await pm.register({
       orgName: `PMcopilots UAT ${suffix}`,
       name: "UAT Project Manager",
       email: pmEmail,
       password,
     });
+    // Sign-up makes a personal workspace, which seats nobody but its owner
+    // (ENT-6); the regression adds a team below, so the workspace is
+    // converted to a company through the product's own route first.
+    await pm.post(
+      `/organisations/${registered.organisation?.id || pm.user.orgId}/convert`,
+      {},
+      { expected: [200] },
+    );
   }
 
   const project = await pm.post(

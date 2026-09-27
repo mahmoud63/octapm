@@ -259,7 +259,24 @@ const callback = async ({ code, state, error = null, errorDescription = null }, 
     let membership = null;
     if (!user) {
       canProvision("account");
-      user = await prisma.user.create({ data: { orgId: org.id, name: trimOrNull(claims.name) || [claims.given_name, claims.family_name].filter(Boolean).join(" ") || email.split("@")[0], email, passwordHash: await bcrypt.hash(crypto.randomBytes(24).toString("base64url"), 12), role: org.ssoDefaultRole || "site_engineer", status: "active", ssoSubject: subject, ssoProvider: "oidc", ssoLinkedAt: new Date() } });
+      // The identity and its seat are written in one transaction (ENT-6): a
+      // seat the organisation refuses — a personal workspace already has its
+      // one member, 409 PERSONAL_WORKSPACE_CONVERT_REQUIRED — rolls the new
+      // identity back with it. Written separately, the refusal used to leave an
+      // active User homed in the workspace with no membership, which the legacy
+      // User.orgId fallback would later let in as a second member.
+      const defaultRole = org.ssoDefaultRole || "site_engineer";
+      const passwordHash = await bcrypt.hash(crypto.randomBytes(24).toString("base64url"), 12);
+      const provisioned = await prisma.$transaction(async (tx) => {
+        const created = await tx.user.create({ data: { orgId: org.id, name: trimOrNull(claims.name) || [claims.given_name, claims.family_name].filter(Boolean).join(" ") || email.split("@")[0], email, passwordHash, role: defaultRole, status: "active", ssoSubject: subject, ssoProvider: "oidc", ssoLinkedAt: new Date() } });
+        const seat = await membershipService.ensureMembership({ tx, orgId: org.id, userId: created.id, role: ROLES.includes(created.role) ? created.role : "site_engineer", isAdmin: false });
+        return { created, seat };
+      });
+      user = provisioned.created;
+      if (provisioned.seat) {
+        membership = provisioned.seat.membership;
+        await membershipService.recordMembershipEvent({ tx: prisma, orgId: org.id, membership, action: "membership.created", context, metadata: { via: "sso", role: membership.role } });
+      }
       if (prisma.authAuditEvent?.create) await prisma.authAuditEvent.create({ data: { orgId: org.id, userId: user.id, entityType: "user", entityId: user.id, action: "sso.user_provisioned", email, ipAddress: context.ipAddress || null, userAgent: context.userAgent || null, metadataJson: { issuer: org.ssoIssuer, role: user.role } } }).catch(() => null);
     } else if (user.status !== "active") throw new HttpError(403, "USER_INACTIVE", "Your account is not active");
     else if (user.ssoSubject && user.ssoSubject !== subject) throw new HttpError(403, "SSO_IDENTITY_CONFLICT", "This sign-in belongs to a different account");
@@ -269,13 +286,16 @@ const callback = async ({ code, state, error = null, errorDescription = null }, 
     // role — for an identity from another workspace only when the
     // organisation auto-provisions, since that is what "may this person join
     // us through the IdP" means here.
-    membership = await membershipService.findMembership({ tx: prisma, orgId: org.id, userId: user.id });
+    if (!membership) membership = await membershipService.findMembership({ tx: prisma, orgId: org.id, userId: user.id });
     if (membership) {
       if (membership.status !== "active") throw new HttpError(403, "USER_INACTIVE", "Your account is not active");
     } else {
       if (user.orgId !== org.id) canProvision("membership");
       const role = user.orgId === org.id && ROLES.includes(user.role) ? user.role : org.ssoDefaultRole || "site_engineer";
-      const provisioned = await membershipService.ensureMembership({ tx: prisma, orgId: org.id, userId: user.id, role, isAdmin: user.orgId === org.id && Boolean(user.isCompanyAdmin) });
+      // In a transaction: the one-member rule's organisation-row lock lasts
+      // until the caller's transaction ends, so the seat check and the insert
+      // hold it together and a concurrent seat in a personal workspace waits.
+      const provisioned = await prisma.$transaction((tx) => membershipService.ensureMembership({ tx, orgId: org.id, userId: user.id, role, isAdmin: user.orgId === org.id && Boolean(user.isCompanyAdmin) }));
       if (provisioned) {
         membership = provisioned.membership;
         await membershipService.recordMembershipEvent({ tx: prisma, orgId: org.id, membership, action: "membership.created", context, metadata: { via: "sso", role: membership.role } });
