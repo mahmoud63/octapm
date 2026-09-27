@@ -72,7 +72,10 @@ liveDescribe("workspaces: one identity, several organisations", () => {
     // A brand-new organisation is on a trial with no allowance and its
     // writes stop at the subscription gate (402); this test is about
     // memberships, not billing, so the throwaway organisation gets a plan.
-    await prisma.subscription.updateMany({
+    // One row by its unique key (orgId is unique on Subscription): a missing
+    // id throws instead of re-pricing every subscription in the database.
+    if (typeof user?.orgId !== "string" || !user.orgId) throw new Error(`register ${label}: no organisation id in the response`);
+    await prisma.subscription.update({
       where: { orgId: user.orgId },
       data: { plan: "business", status: "active", seats: 25, currentPeriodEnd: new Date(Date.now() + 30 * 86_400_000) },
     });

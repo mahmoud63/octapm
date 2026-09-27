@@ -90,11 +90,52 @@ const settledCounts = async (orgId) => {
   return previous;
 };
 
-/** A plan for a throwaway workspace: a brand-new one is on a trial with no allowance (402 on its first write). */
-const activate = (orgId) =>
-  prisma.subscription.updateMany({
+/** The name every throwaway organisation carries; nothing else is written to directly. */
+const LIVE_ORG_NAME = /^LiveTest [0-9a-f-]{36}$/;
+
+/** An id the test is about to write by: a non-empty string, or the write never happens. */
+const requireId = (value, label) => {
+  if (typeof value !== "string" || value.length === 0) {
+    throw new Error(`refusing a write: ${label} is ${JSON.stringify(value)}, not an id (did an earlier case fail?)`);
+  }
+  return value;
+};
+
+/** Proves, immediately before a direct write, that `orgId` names a throwaway LiveTest organisation. */
+const requireLiveOrg = async (orgId) => {
+  requireId(orgId, "orgId");
+  const org = await prisma.organisation.findUnique({ where: { id: orgId }, select: { id: true, name: true } });
+  if (!org) throw new Error(`refusing a write: no organisation ${orgId}`);
+  if (!LIVE_ORG_NAME.test(org.name)) throw new Error(`refusing a write to "${org.name}": not a LiveTest organisation`);
+  return org;
+};
+
+/**
+ * A plan for a throwaway workspace: a brand-new one is on a trial with no
+ * allowance (402 on its first write). One row, by its unique key — orgId is
+ * unique on Subscription — so a missing id throws instead of widening.
+ */
+const activate = async (orgId) => {
+  await requireLiveOrg(orgId);
+  return prisma.subscription.update({
     where: { orgId },
     data: { plan: "business", status: "active", seats: 25, currentPeriodEnd: new Date(Date.now() + 30 * 86_400_000) },
+  });
+};
+
+/**
+ * Role and updatedAt of every membership a one-row write must not touch:
+ * the rest of `orgId`'s rows, and every row of every organisation that is
+ * not a throwaway one (other suites' LiveTest organisations change
+ * concurrently and are left out).
+ */
+const bystanderMemberships = (orgId, userId) =>
+  prisma.organizationMembership.findMany({
+    where: {
+      OR: [{ orgId, userId: { not: userId } }, { org: { NOT: { name: { startsWith: "LiveTest " } } } }],
+    },
+    select: { id: true, orgId: true, userId: true, role: true, updatedAt: true },
+    orderBy: { id: "asc" },
   });
 
 /** A stand-in OpenID provider: discovery, keys and a token endpoint answering whatever claims the test sets. */
@@ -160,6 +201,18 @@ liveDescribe("workspaces: personal at sign-up, a company beside it, conversion",
     await dropLiveOrg(prisma, company.orgId);
     await dropLiveOrg(prisma, personal.orgId);
     await prisma.$disconnect();
+  });
+
+  it("the test's own writes refuse an id that is missing or not a throwaway organisation", async () => {
+    // Each refusal happens before any write; the unique-key form underneath
+    // would throw on a missing id as well, so this case writes nothing.
+    await expect(activate(undefined)).rejects.toThrow(/refusing a write: orgId is undefined/);
+    await expect(activate("")).rejects.toThrow(/refusing a write: orgId is ""/);
+    await expect(activate(crypto.randomUUID())).rejects.toThrow(/refusing a write: no organisation/);
+    expect(LIVE_ORG_NAME.test(`LiveTest ${crypto.randomUUID()}`)).toBe(true);
+    for (const name of ["OctaPM Demo Contracting", "PMcopilots UAT Fixtures", "OctaPM E2E", `LiveTest ${crypto.randomUUID()} x`, "LiveTest "]) {
+      expect({ name, live: LIVE_ORG_NAME.test(name) }).toEqual({ name, live: false });
+    }
   });
 
   it("sign-up makes a personal workspace: owner, individual plan, handle, templates, units and project defaults", async () => {
@@ -582,8 +635,30 @@ liveDescribe("workspaces: personal at sign-up, a company beside it, conversion",
     // The colleague becomes a PM in the (converted) workspace and the owner's
     // legacy User.role stops being pm — the old pick ("earliest pm") would now
     // name the colleague; the owner rule names the owner.
-    await prisma.organizationMembership.updateMany({ where: { orgId: personal.orgId, userId: colleague.id }, data: { role: "pm" } });
-    await prisma.user.update({ where: { id: owner.id }, data: { role: "finance" } });
+    //
+    // Exactly one row changes, named by its unique key: a missing id throws
+    // here instead of rewriting every membership in the database.
+    const orgId = requireId(personal.orgId, "personal.orgId");
+    const userId = requireId(colleague.id, "colleague.id");
+    await requireLiveOrg(orgId);
+    const key = { orgId_userId: { orgId, userId } };
+    const target = await prisma.organizationMembership.findUnique({ where: key });
+    expect(target).toMatchObject({ orgId, userId, kind: "member" });
+    const bystandersBefore = await bystanderMemberships(orgId, userId);
+    expect(bystandersBefore.some((row) => row.orgId === orgId)).toBe(true);
+    expect(bystandersBefore.some((row) => row.orgId !== orgId)).toBe(true);
+
+    await prisma.organizationMembership.update({ where: key, data: { role: "pm" } });
+
+    expect((await prisma.organizationMembership.findUnique({ where: key })).role).toBe("pm");
+    const bystandersAfter = new Map((await bystanderMemberships(orgId, userId)).map((row) => [row.id, row]));
+    const changed = bystandersBefore.filter((row) => {
+      const now = bystandersAfter.get(row.id);
+      return !now || now.role !== row.role || now.updatedAt.getTime() !== row.updatedAt.getTime();
+    });
+    expect(changed).toEqual([]);
+
+    await prisma.user.update({ where: { id: requireId(owner.id, "owner.id") }, data: { role: "finance" } });
     const recipient = await membershipService.findBillingRecipient({ orgId: personal.orgId });
     expect(recipient).toMatchObject({ id: owner.id, email: owner.email });
 
