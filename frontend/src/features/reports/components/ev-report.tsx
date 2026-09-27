@@ -496,7 +496,7 @@ export function EvReport({ projectId, readiness, onNavigate }: Props) {
         <MetricCard
           label='EAC'
           value={fmt(eac)}
-          sub={cpi === null ? 'Budget — no CPI yet' : 'Budget / CPI'}
+          sub={cpi === null ? 'The budget — no cost performance yet' : 'Revised budget / CPI'}
         />
         <MetricCard label='ETC' value={fmt(etc)} sub='EAC - AC' />
       </div>

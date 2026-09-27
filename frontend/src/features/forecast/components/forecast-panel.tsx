@@ -9,6 +9,7 @@ import {
   Sparkles,
 } from 'lucide-react'
 import { toast } from 'sonner'
+import { formatEvCutoff } from '@/lib/ev-cutoff'
 import { FINANCIAL_TERMS } from '@/lib/financial-terms'
 import { getServerErrorMessage } from '@/lib/handle-server-error'
 import { useCanPerform } from '@/lib/permissions'
@@ -19,6 +20,7 @@ import { Button } from '@/components/ui/button'
 import { AiRunFeedback } from '@/features/assistant/components/ai-run-feedback'
 import { workspaceLink } from '@/features/workflows/hooks/use-workflow-engine'
 import {
+  eacStatement,
   useExplainForecast,
   useForecast,
   useRunForecastAction,
@@ -439,12 +441,26 @@ export function ForecastPanel({ projectId }: { projectId: string }) {
   // BOQ nor the cost module (§12): each amount then reads as a dash, and the
   // projected-cost card says why instead of calling the cost within budget.
   const costFiguresShown = cost.budget !== undefined
-  // With no CPI the earned-value estimate at completion is the budget
-  // handed back (Phase 22A): the figure stays, and says what it is.
-  const noCostPerformance = costFiguresShown && schedule.cpi == null
+  // The business-rule EAC (owner decision D2): the official EV report's —
+  // revised BAC / CPI, or with no CPI the revised BAC itself, which says
+  // what it is (Phase 22A). The Overview's "Forecast at completion" is this
+  // figure with this label, and links here.
+  const eac = eacStatement(forecast)
+  const noCostPerformance = costFiguresShown && cost.eacBasis === 'budget_no_cost_performance'
   const cpiNote = noCostPerformance
     ? (forecast.dataQuality.find((note) => note.startsWith('CPI ')) ?? null)
     : null
+  // The projected cost is max(EAC, bottom-up): said, so the two figures are
+  // never read as disagreeing.
+  const projectedRelation = !costFiguresShown
+    ? null
+    : cost.eac == null
+      ? `Projected cost = the bottom-up ${money(cost.bottomUp)} (no EAC yet).`
+      : Math.abs((cost.projected ?? 0) - cost.eac) < 0.005
+        ? Math.abs((cost.bottomUp ?? 0) - cost.eac) < 0.005
+          ? 'Projected cost = max(EAC, bottom-up): both are this figure.'
+          : `Projected cost = max(EAC, bottom-up): the EAC, above the bottom-up ${money(cost.bottomUp)}.`
+        : `Projected cost = max(EAC, bottom-up): the bottom-up, above the EAC ${money(cost.eac)}.`
   return (
     <div className='space-y-4' data-testid='uat-forecast'>
       <div className='flex flex-wrap items-center gap-2'>
@@ -455,6 +471,15 @@ export function ForecastPanel({ projectId }: { projectId: string }) {
             burn rate — as of {formatDate(forecast.asOf)}. Nothing here is a
             model guess; the explanation below is.
           </p>
+          {forecast.earnedValueCutoff?.cutoffDate ? (
+            <p className='text-xs text-muted-foreground'>
+              SPI, CPI and EAC through the EV cutoff,{' '}
+              <span data-testid='uat-forecast-ev-cutoff'>
+                {formatEvCutoff(forecast.earnedValueCutoff)}
+              </span>
+              .
+            </p>
+          ) : null}
         </div>
         <div className='ml-auto flex gap-2'>
           <Button
@@ -485,7 +510,7 @@ export function ForecastPanel({ projectId }: { projectId: string }) {
         </div>
       </div>
 
-      <div className='grid gap-3 sm:grid-cols-2 lg:grid-cols-5'>
+      <div className='grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6'>
         <Kpi
           label='Projected finish'
           value={formatDate(schedule.projectedFinish)}
@@ -522,18 +547,24 @@ export function ForecastPanel({ projectId }: { projectId: string }) {
           }
         />
         <Kpi
+          label='Estimate at completion (EAC)'
+          value={money(eac.value)}
+          sub={eac.label}
+          note={cpiNote}
+          level={eac.over ? 'medium' : undefined}
+          testId='uat-forecast-eac'
+        />
+        <Kpi
           label='Projected cost'
           value={money(cost.projected)}
           sub={
             !costFiguresShown
               ? 'Cost figures are not available to you'
               : (cost.overrun ?? 0) > 0
-                ? `${money(cost.overrun)} over the ${money(cost.budget)} budget${cost.overrunPct != null ? ` (${cost.overrunPct}%)` : ''}${noCostPerformance ? ' · no cost performance yet' : ''}`
-                : noCostPerformance
-                  ? 'The budget — no cost performance yet'
-                  : `Within the ${money(cost.budget)} budget`
+                ? `${money(cost.overrun)} over the ${money(cost.budget)} budget${cost.overrunPct != null ? ` (${cost.overrunPct}%)` : ''}`
+                : `Within the ${money(cost.budget)} budget`
           }
-          note={cpiNote}
+          note={projectedRelation}
           level={summary?.costLevel}
           testId='uat-forecast-cost'
         />

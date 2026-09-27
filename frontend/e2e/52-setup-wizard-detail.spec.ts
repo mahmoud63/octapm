@@ -356,6 +356,7 @@ test('the bill revision on the approval card, the strip figures as the services 
   }
   type Forecast = {
     schedule?: { counts?: { complete: number; activities: number } }
+    cost?: { eac?: number | null; eacBasis?: string | null }
     dataQuality?: string[]
   }
   const summary = summaryResponse.body!.data as unknown as Summary
@@ -366,7 +367,11 @@ test('the bill revision on the approval card, the strip figures as the services 
   // not a budget — the strip says so instead of printing USD 0.
   expect(summary.budget).toMatchObject({ source: 'budget_register', revisedBudget: 0 })
   expect(summary.records.length, 'the fixture has one cost record').toBe(1)
-  expect(eac, 'the fixture keeps the forecast apart from the budget').toBe(6400)
+  expect(eac, 'the fixture keeps the ledger forecast apart from the budget').toBe(6400)
+  // D2: the forecast at completion is the business-rule EAC the forecast
+  // carries — here there is no approved allocation, so no revised BAC and
+  // no EAC to present; the cost ledger's 6,400 stays in the cost cockpit.
+  expect(forecast.cost?.eacBasis).toBe('no_budget')
   const money = (value: number) =>
     page.evaluate(
       ([code, amount]) =>
@@ -377,11 +382,10 @@ test('the bill revision on the approval card, the strip figures as the services 
   await expect(page.getByTestId('uat-controls-figure-budget')).toContainText('no budget register yet')
   await expect(page.getByTestId('uat-controls-figure-actual-value')).toHaveText(await money(summary.totals.actual))
   await expect(page.getByTestId('uat-controls-figure-actual')).toContainText('cost ledger as of')
-  await expect(page.getByTestId('uat-controls-figure-forecast-value')).toHaveText(await money(eac))
-  // A typed forecast above the (unallocated) activity's budget of 0: the
-  // estimate is over its own basis, and says it is the ledger's.
-  await expect(page.getByTestId('uat-controls-figure-forecast')).toHaveAttribute('data-tone', 'review')
-  await expect(page.getByTestId('uat-controls-figure-forecast')).toContainText('cost ledger: actual + cost to complete')
+  await expect(page.getByTestId('uat-controls-figure-forecast-value')).toHaveText('—')
+  await expect(page.getByTestId('uat-controls-figure-forecast')).toContainText('no approved budget yet')
+  await expect(page.getByTestId('uat-controls-figure-forecast')).toHaveAttribute('data-tone', 'neutral')
+  await expect(page.getByTestId('uat-controls-figures')).not.toContainText(await money(eac))
   await expect(page.getByTestId('uat-controls-figures-basis')).toContainText('budget register and cost ledger as of')
   const counts = forecast.schedule!.counts!
   await expect(page.getByTestId('uat-controls-figure-progress-value')).toHaveText(
@@ -479,6 +483,8 @@ const BOQ_KEYS = [
   'optionalUnallocatedAmount',
   'notApplicableAmount',
   'boqRows',
+  // The mapping share (owner decision C): withheld, not rounded.
+  'coveragePct',
 ]
 // The budgets built from the bill, and the forecast's money built from them:
 // withheld from the member who reads neither the BOQ nor the cost module.
@@ -747,6 +753,22 @@ test('members who cannot read the BOQ: the Overview and every Schedule tab rende
       await expect(page.getByTestId('uat-health-withheld-cost')).toContainText('BOQ or the cost module')
     }
     await expect(page.getByTestId('uat-health-dimension-cost')).not.toContainText('[object Object]')
+    // C: no mapping share and no counts — the strip says the details are
+    // unavailable, it never shows a figure it was not given.
+    await expect(page.getByTestId('uat-controls-coverage-pct')).toHaveText('—')
+    await expect(page.getByTestId('uat-controls-coverage-withheld')).toHaveText('Mapping details unavailable to you')
+    await expect(page.getByTestId('uat-controls-figure-unmapped-value')).toHaveText('—')
+    // D2: the forecast at completion is the business-rule EAC — without CPI
+    // the revised BAC (41,519.60), said to be the budget — for the cost
+    // reader; for the site engineer a dash and why.
+    const forecastFigure = page.getByTestId('uat-controls-figure-forecast')
+    if (member.readsCost) {
+      await expect(page.getByTestId('uat-controls-figure-forecast-value')).toContainText('41,520')
+      await expect(forecastFigure).toContainText('the budget — no cost performance yet')
+    } else {
+      await expect(page.getByTestId('uat-controls-figure-forecast-value')).toHaveText('—')
+      await expect(forecastFigure).toContainText('Cost figures are not available to you')
+    }
 
     for (const tab of TABS) {
       if (tab === 'wbs') {

@@ -7,13 +7,13 @@ import {
   GitBranch,
   Link2,
 } from 'lucide-react'
-import { formatLongDate } from '@/lib/dates'
+import { formatEvCutoff, type EvCutoff } from '@/lib/ev-cutoff'
 import { useCanPerform } from '@/lib/permissions'
 import { statusBadge, statusIcon, type StatusTone } from '@/lib/status'
 import { cn } from '@/lib/utils'
 import { Badge } from '@/components/ui/badge'
 import { useCostSummary } from '@/features/cost/hooks/use-cost'
-import { useForecast } from '@/features/forecast/hooks/use-forecast'
+import { eacStatement, useForecast } from '@/features/forecast/hooks/use-forecast'
 import { useProjectHealth } from '../hooks/use-project-health'
 import type { ProjectSetupReadiness, ProjectSetupTarget } from '../data/schema'
 
@@ -232,7 +232,13 @@ export function ControlsStrip({
   // The health card's earned-value cutoff (the same query the card below
   // makes, shared through the cache): the strip's ledger figures are stated
   // against it, so nobody reads the two actual costs as one.
-  const { data: health } = useProjectHealth<{ dataFreshness?: { cutoffDate?: string | null } }>(
+  const { data: health } = useProjectHealth<{
+    dataFreshness?: {
+      cutoffDate?: string | null
+      cutoffLocalDate?: string | null
+      cutoffTimeZone?: string | null
+    }
+  }>(
     projectId,
     { enabled: !permissionsSettling }
   )
@@ -337,17 +343,16 @@ export function ControlsStrip({
           : 'done'
         : 'review'
 
-  // The figures (§20): budget, actual and forecast as the cost summary
-  // states them; critical, unmapped, over-allocated and data-quality counts
-  // as the readiness check and the forecast already report them. Nothing
-  // here is computed a second time, and the projection says it is one.
+  // The figures (§20): budget and actual as the cost summary states them;
+  // the forecast at completion, critical, unmapped, over-allocated and
+  // data-quality counts as the readiness check and the forecast already
+  // report them. Nothing here is computed a second time, and the projection
+  // says it is one.
   //
-  // Their basis is said beside each: the budget register, and the cost
-  // ledger as of today — not the earned-value cutoff the health cards below
-  // report through. An empty register or an empty ledger is not a figure:
-  // it reads "—" with the reason, never 0 presented as a budget or a
-  // projection. (Which EAC this tile presents is the product owner's open
-  // question; the figure is the cost summary's, labelled as such.)
+  // Their basis is said beside each: the budget register and the cost
+  // ledger as of today; the forecast at completion through the earned-value
+  // cutoff. An empty register or an empty ledger is not a figure: it reads
+  // "—" with the reason, never 0 presented as a budget or a projection.
   const register = costSummary?.budget
   const fromRegister = register?.source === 'budget_register'
   const registerEmpty =
@@ -358,27 +363,29 @@ export function ControlsStrip({
     : (register?.revisedBudget ?? costSummary?.totals.budget ?? null)
   const hasLedger = (costSummary?.records?.length ?? 0) > 0
   const actualValue = hasLedger ? (costSummary?.totals.actual ?? null) : null
-  const eacValue = hasLedger ? (costSummary?.eac?.mostLikely ?? null) : null
-  // With nothing spent and no forecast typed, each record's estimate at
-  // completion is its budget: the figure is the budget, not a projection
-  // from performance, and says so.
-  const noCostPerformance =
-    hasLedger &&
-    Number(costSummary?.totals.actual ?? 0) === 0 &&
-    eacValue != null &&
-    allocatedToActivities != null &&
-    Math.abs(eacValue - allocatedToActivities) < 0.005
-  // The tone compares the forecast with its own basis — the budgets
-  // allocated to the activities it is summed over — never with the
-  // register's budget, which is another basis.
-  const forecastOver =
-    eacValue != null && allocatedToActivities != null && eacValue > allocatedToActivities + 0.005
+  // Forecast at completion (owner decision D2): the business-rule EAC —
+  // revised BAC / CPI, or the revised BAC with no CPI, labelled "the budget
+  // — no cost performance yet" — exactly the figure the Forecast tab shows,
+  // read from the same answer (the official EV report's, which the forecast
+  // carries). Its tone compares it with the revised BAC it was computed
+  // from. The cost ledger's own EAC stays in the cost cockpit.
+  const eac = eacStatement(forecast)
   const ledgerDate = formatToday()
-  const evCutoff = health?.dataFreshness?.cutoffDate ?? null
+  // The EV cutoff the EAC was measured through (the forecast's; the health
+  // card below reports through the same one).
+  const evCutoff: EvCutoff | null = forecast?.earnedValueCutoff?.cutoffDate
+    ? forecast.earnedValueCutoff
+    : health?.dataFreshness?.cutoffDate
+      ? {
+          cutoffDate: health.dataFreshness.cutoffDate,
+          cutoffLocalDate: health.dataFreshness.cutoffLocalDate,
+          timeZone: health.dataFreshness.cutoffTimeZone,
+        }
+      : null
   const criticalActivities = Number(stepCounts('schedule_generation').criticalActivities ?? 0)
   const criticalUnmapped = summary.criticalUnmappedActivities ?? null
-  const unmappedRows = counts ? counts.unmapped + counts.partial : null
-  const overAllocatedRows = counts?.over ?? null
+  const unmappedRows = counts && !coverageWithheld ? counts.unmapped + counts.partial : null
+  const overAllocatedRows = coverageWithheld ? null : (counts?.over ?? null)
   const dataQuality = forecast?.dataQuality ?? []
   const forecastCounts = forecast?.schedule?.counts ?? null
   const progressValue = forecastCounts
@@ -528,18 +535,20 @@ export function ControlsStrip({
     {/* What the figures below are measured against: the cost figures are
         the register's and the ledger's as of today; the health cards under
         the checklist report earned value through the reporting cutoff. */}
-    {canSeeCost && (
+    {(canSeeCost || canSeeSchedule) && (
       <p className='text-[11px] text-muted-foreground' data-testid='uat-controls-figures-basis'>
-        Budget, actual and forecast: budget register and cost ledger as of{' '}
-        <span data-testid='uat-controls-ledger-date'>{ledgerDate}</span>
+        {canSeeCost && (
+          <>
+            Budget and actual: budget register and cost ledger as of{' '}
+            <span data-testid='uat-controls-ledger-date'>{ledgerDate}</span>.{' '}
+          </>
+        )}
         {evCutoff ? (
           <>
-            {' '}
-            — not the earned-value cutoff (the health cards report earned value through{' '}
-            <span data-testid='uat-controls-ev-cutoff'>{formatLongDate(evCutoff)}</span>)
+            Forecast at completion and the health cards: earned value through the cutoff,{' '}
+            <span data-testid='uat-controls-ev-cutoff'>{formatEvCutoff(evCutoff)}</span>.
           </>
         ) : null}
-        .
       </p>
     )}
     <section
@@ -583,27 +592,18 @@ export function ControlsStrip({
       />
       <Figure
         label='Forecast at completion'
-        value={canSeeCost ? formatMoney(currency, eacValue) : '—'}
+        value={canSeeSchedule ? formatMoney(currency, eac.value) : '—'}
         truth='projection'
-        basis={
-          !canSeeCost
-            ? 'cost module not offered'
-            : !hasLedger
-              ? 'no cost records yet'
-              : noCostPerformance
-                ? 'the budget — no cost performance yet'
-                : `cost ledger: actual + cost to complete, as of ${ledgerDate}`
-        }
+        basis={canSeeSchedule ? eac.label : 'schedule module not offered'}
         title={
-          canSeeCost && hasLedger
-            ? 'The cost summary\'s estimate at completion, over the budgets allocated to the activities in the cost ledger; the Cost overview states it.'
+          canSeeSchedule && eac.value != null
+            ? 'The official earned-value estimate at completion: the revised budget ÷ CPI, or the revised budget itself while there is no cost performance. The Forecast tab states the same figure.'
             : undefined
         }
-        tone={forecastOver ? 'review' : 'neutral'}
+        tone={eac.over ? 'review' : 'neutral'}
         testId='uat-controls-figure-forecast'
-        // Its figure is the one the Cost overview states (the Forecast tab
-        // projects on another basis).
-        onClick={() => onNavigate(TARGETS.cost)}
+        // The Forecast tab shows this figure with this label.
+        onClick={() => onNavigate(TARGETS.forecast)}
       />
       <Figure
         label='Progress'
