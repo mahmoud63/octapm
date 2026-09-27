@@ -276,9 +276,12 @@ const withheldAuditHistory = (history, access = FULL_ACCESS) => {
 };
 
 // A project's row on the workspace dashboard states the official EV
-// report's budget (bac: the approved allocations' sum) and the estimate at
-// completion built from it (eac: bac / CPI). The scores, SPI and CPI stay.
-const PROJECT_HEALTH_BUDGET_KEYS = ["bac", "eac"];
+// report's budget (bac: the approved allocations' sum), the estimate at
+// completion built from it (eac: bac / CPI), and the report's money: earned
+// value (the allocations × % complete — a finished activity's budget),
+// planned value (the approved cost loading) and actual cost (the cost
+// ledger). The scores, SPI and CPI stay.
+const PROJECT_HEALTH_BUDGET_KEYS = ["bac", "eac", "ev", "pv", "ac"];
 
 /** A project's row on the workspace dashboard as this caller may receive it on that project. */
 const withheldProjectHealth = (row, access = FULL_ACCESS) =>

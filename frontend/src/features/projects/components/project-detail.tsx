@@ -762,7 +762,7 @@ export function ProjectDetail({
         return (
           <div className='space-y-4'>
             <NeedsYouPanel projectId={projectId} />
-            <HealthDashboard projectId={projectId} />
+            <HealthDashboard projectId={projectId} currency={project?.currency} />
             <ProjectOverview project={project} parties={activeProjectParties} />
           </div>
         )

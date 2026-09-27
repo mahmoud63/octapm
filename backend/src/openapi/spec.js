@@ -7138,7 +7138,7 @@ add(
     tag: "Projects",
     summary: "Get workspace-level construction health and workflow queues.",
     description:
-      "Aggregates all organization projects for PM users and only assigned projects for non-PM users. Returns officialKpis with sourceRule, sourceStatus, cutoffDate, and drill-through targets. Draft/rejected/cancelled records are excluded from official KPI cards; submitted/pending workflow values are returned separately under pendingReview. Each projectHealth row carries bac (the official EV budget: the approved BOQ allocations) and eac (bac / CPI) only for a caller who may read the BOQ or the cost module on that project, decided as that project's own routes decide it (permission template, role, party); otherwise both keys are absent, not zero. Scores, spi, cpi, ev, pv and ac are the same for every caller.",
+      "Aggregates all organization projects for PM users and only assigned projects for non-PM users. Returns officialKpis with sourceRule, sourceStatus, cutoffDate, and drill-through targets. Draft/rejected/cancelled records are excluded from official KPI cards; submitted/pending workflow values are returned separately under pendingReview. Each projectHealth row carries bac (the official EV budget: the approved BOQ allocations), eac (bac / CPI), ev (approved allocations × % complete), pv (approved cost loading) and ac (the cost ledger's official actuals) only for a caller who may read the BOQ or the cost module on that project, decided as that project's own routes decide it (permission template, role, party); otherwise those keys are absent, not zero. Scores, spi and cpi are the same for every caller.",
     operationId: "getWorkspaceDashboard",
     responseSchema: ref("GenericObject"),
   }),
@@ -11035,7 +11035,7 @@ addGenericRoute({
   tag: "Health",
   summary: "Get seven-dimension project health scoring.",
   description:
-    "Returns official project health dimensions with sourceRule, cutoffDate, and drill-through targets, plus a separate pendingReview block for submitted progress, IPC, change orders, and submittals that do not feed official scores. The cost dimension's unallocatedBoqAmount is given only to a caller who may read the BOQ.",
+    "Returns official project health dimensions with sourceRule, cutoffDate, and drill-through targets, plus a separate pendingReview block for submitted progress, IPC, change orders, and submittals that do not feed official scores. The cost dimension's unallocatedBoqAmount is given only to a caller who may read the BOQ; its ac and ev only to a caller who may read the BOQ or the cost module (absent, not zero, otherwise — the score and cpi stay). The schedule dimension's delayedActivities is counted as of today (the latest progress), not as of the cutoff.",
   operationId: "getProjectHealth",
 });
 

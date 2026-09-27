@@ -34,6 +34,7 @@ import type {
   ProjectSetupTarget,
 } from '@/features/projects/data/schema'
 import { useProjectSetupReadiness } from '@/features/projects/hooks/use-projects'
+import { formatLongDate } from '@/lib/dates'
 
 interface Props {
   projectId: string
@@ -47,6 +48,8 @@ type ReportingPeriod = {
   label: string
   cutoffDate: string
   status: string
+  /** A locked period's stored EV figures (GET /reports/periods). */
+  snapshot?: { ev?: number | string | null; lockedAt?: string | null } | null
 }
 
 type EvActivityBreakdownRow = {
@@ -115,6 +118,97 @@ function fmt(value: number | null | undefined) {
   return `${prefix}${abs.toFixed(0)}`
 }
 
+/**
+ * The reporting cutoff is a calendar date (the period's end): it is shown
+ * as that date, in UTC, exactly as the Overview's health card shows it, so
+ * the two never disagree by a day. The instant the figures were evaluated
+ * through is stated beside it, with its time zone.
+ */
+function formatCutoff(value: string | null | undefined) {
+  return value ? formatLongDate(value) : '-'
+}
+
+function formatCutoffInstant(value: string | null | undefined) {
+  if (!value) return null
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return null
+  return `${date.toISOString().slice(0, 19).replace('T', ' ')} UTC`
+}
+
+// The S-curve's months are labelled "Aug 26" (the server's month labels).
+const monthLabel = (value: string) =>
+  new Intl.DateTimeFormat('en-GB', {
+    month: 'short',
+    year: '2-digit',
+    timeZone: 'UTC',
+  }).format(new Date(value))
+
+const monthOrder = (label: string) => {
+  const parsed = Date.parse(`1 ${label.replace(/(\d{2})$/, '20$1')}`)
+  return Number.isNaN(parsed) ? Number.POSITIVE_INFINITY : parsed
+}
+
+type SCurvePoint = { label: string; pv: number | null; ev: number | null }
+
+/**
+ * The S-curve as it may be drawn (presentation only; PC-7a owns the
+ * service's series). The report carries one earned value — the one at its
+ * cutoff — and the service writes that figure into every month up to the
+ * cutoff, which draws a history nobody measured. So EV is plotted only
+ * where it was measured: at this report's cutoff, and at the cutoff of each
+ * locked period whose snapshot stored its own EV. Planned value is drawn as
+ * the service gives it.
+ */
+function shapeSCurve({
+  sCurve,
+  cutoffDate,
+  ev,
+  pv,
+  periods,
+}: {
+  sCurve?: Record<string, string | number | null>[]
+  cutoffDate?: string | null
+  ev: number | null
+  pv: number | null
+  periods: ReportingPeriod[]
+}): { points: SCurvePoint[]; earlierMonthsWithoutEv: boolean } {
+  const points: SCurvePoint[] = (sCurve || []).map((row) => ({
+    label: String(row.label ?? ''),
+    pv: row.pv === null || row.pv === undefined ? null : Number(row.pv),
+    ev: null,
+  }))
+  const reportCutoff = cutoffDate ? new Date(cutoffDate).getTime() : Number.POSITIVE_INFINITY
+  const measured = new Map<string, { at: number; ev: number }>()
+  const record = (at: string, value: number) => {
+    const time = new Date(at).getTime()
+    const label = monthLabel(at)
+    const current = measured.get(label)
+    if (!current || current.at <= time) measured.set(label, { at: time, ev: value })
+  }
+  for (const period of periods) {
+    const stored = period.snapshot?.ev
+    if (stored === null || stored === undefined || !period.cutoffDate) continue
+    if (new Date(period.cutoffDate).getTime() > reportCutoff) continue
+    record(period.cutoffDate, Number(stored))
+  }
+  if (cutoffDate && ev !== null && ev !== undefined) record(cutoffDate, ev)
+
+  const cutoffLabel = cutoffDate ? monthLabel(cutoffDate) : null
+  for (const [label, { ev: value }] of measured) {
+    const row = points.find((point) => point.label === label)
+    if (row) row.ev = value
+    else points.push({ label, pv: label === cutoffLabel ? pv : null, ev: value })
+  }
+  points.sort((a, b) => monthOrder(a.label) - monthOrder(b.label))
+  const cutoffIndex = cutoffLabel
+    ? points.findIndex((point) => point.label === cutoffLabel)
+    : points.length
+  const earlierMonthsWithoutEv = points
+    .slice(0, cutoffIndex < 0 ? points.length : cutoffIndex)
+    .some((point) => point.ev === null)
+  return { points, earlierMonthsWithoutEv }
+}
+
 function statusBadgeClass(status: string) {
   const normalized = status?.toLowerCase()
 
@@ -172,7 +266,7 @@ export function EvReport({ projectId, readiness, onNavigate }: Props) {
 
   const effectivePeriodId = selectedPeriodId || periods[0]?.id || null
 
-  const { data, isLoading } = useQuery<EvReportResponse>({
+  const { data, isLoading, error } = useQuery<EvReportResponse>({
     queryKey: ['ev-report', projectId, effectivePeriodId],
     queryFn: () =>
       apiClient
@@ -187,7 +281,19 @@ export function EvReport({ projectId, readiness, onNavigate }: Props) {
     return <p className='text-sm text-muted-foreground'>Loading EV data...</p>
   }
 
-  if (!data) return null
+  if (!data) {
+    // A refused or failed report says so rather than leaving the tab blank.
+    const status = (error as { response?: { status?: number } } | null)?.response?.status
+    return (
+      <p className='text-sm text-muted-foreground' data-testid='uat-ev-unavailable'>
+        {status === 403
+          ? 'The earned-value report is shown to people who can open the cost module.'
+          : error
+            ? 'The earned-value report could not be loaded.'
+            : 'No earned-value data yet.'}
+      </p>
+    )
+  }
 
   const {
     pv,
@@ -217,6 +323,14 @@ export function EvReport({ projectId, readiness, onNavigate }: Props) {
     readiness?.gates.reporting ||
     fetchedReadiness?.gates.reporting
   const readinessBlockers = readinessGate?.blockers ?? []
+  const cutoffInstant = formatCutoffInstant(reporting?.cutoffDate)
+  const curve = shapeSCurve({
+    sCurve,
+    cutoffDate: reporting?.cutoffDate,
+    ev,
+    pv,
+    periods,
+  })
 
   return (
     <div className='space-y-6'>
@@ -225,9 +339,13 @@ export function EvReport({ projectId, readiness, onNavigate }: Props) {
           <p className='text-sm font-semibold'>Official EV Basis</p>
           <p className='text-xs text-muted-foreground'>
             {selectedPeriod?.label || 'Ad hoc current cutoff'} - cutoff{' '}
-            {reporting?.cutoffDate
-              ? new Date(reporting.cutoffDate).toLocaleDateString()
-              : '-'}
+            <span data-testid='uat-ev-cutoff'>{formatCutoff(reporting?.cutoffDate)}</span>
+            {cutoffInstant && (
+              <span data-testid='uat-ev-cutoff-instant'>
+                {' '}
+                · figures through {cutoffInstant}
+              </span>
+            )}
           </p>
         </div>
         <div className='flex flex-wrap items-center gap-2'>
@@ -385,7 +503,11 @@ export function EvReport({ projectId, readiness, onNavigate }: Props) {
           sub='EV / AC'
           color={cpi !== null && cpi < 0.9 ? 'text-error' : 'text-success'}
         />
-        <MetricCard label='EAC' value={fmt(eac)} sub='Budget / CPI' />
+        <MetricCard
+          label='EAC'
+          value={fmt(eac)}
+          sub={cpi === null ? 'Budget — no CPI yet' : 'Budget / CPI'}
+        />
         <MetricCard label='ETC' value={fmt(etc)} sub='EAC - AC' />
       </div>
 
@@ -419,10 +541,28 @@ export function EvReport({ projectId, readiness, onNavigate }: Props) {
         </div>
       )}
 
-      <div className='rounded-lg border p-4'>
+      <div
+        className='rounded-lg border p-4'
+        data-testid='uat-ev-scurve'
+        data-ev-points={JSON.stringify(
+          curve.points
+            .filter((point) => point.ev !== null)
+            .map((point) => [point.label, point.ev])
+        )}
+      >
         <h3 className='mb-3 font-semibold'>S-Curve (Cumulative)</h3>
+        {curve.earlierMonthsWithoutEv && (
+          <p
+            className='mb-2 text-xs text-muted-foreground'
+            data-testid='uat-ev-scurve-history-note'
+          >
+            EV history is only available for locked periods; earlier months are
+            not shown. EV is plotted at this report's cutoff and at each locked
+            period's cutoff.
+          </p>
+        )}
         <ResponsiveContainer width='100%' height={300}>
-          <ComposedChart data={sCurve || []}>
+          <ComposedChart data={curve.points}>
             <CartesianGrid strokeDasharray='3 3' />
             <XAxis dataKey='label' tick={{ fontSize: 11 }} />
             <YAxis
@@ -449,7 +589,8 @@ export function EvReport({ projectId, readiness, onNavigate }: Props) {
               name='EV (Earned)'
               stroke='#22c55e'
               strokeWidth={2}
-              dot={false}
+              // A measured point may stand alone (one cutoff): it is drawn.
+              dot={{ r: 3 }}
               connectNulls={false}
             />
           </ComposedChart>
@@ -508,9 +649,7 @@ export function EvReport({ projectId, readiness, onNavigate }: Props) {
                   </TableCell>
                   <TableCell className='px-3 text-xs text-muted-foreground'>
                     {row.officialActualThroughDate
-                      ? new Date(
-                          row.officialActualThroughDate
-                        ).toLocaleDateString()
+                      ? formatLongDate(row.officialActualThroughDate)
                       : '-'}
                   </TableCell>
                   <TableCell className='px-3'>

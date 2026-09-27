@@ -219,6 +219,21 @@ liveDescribe("PC-4 §12: the Overview and the Schedule module carry no BOQ figur
       }
     }
 
+    // The pour is complete, approved inside the open period (P02, 1–28
+    // February): its earned value is its whole allocation — 21337, the
+    // budget itself — so EV on the health card and the workspace home is a
+    // figure the sweep can find (§12: EV that equals allocation × % complete).
+    await prisma.activityProgress.create({
+      data: {
+        activityId: activities.pour.id,
+        pctComplete: 100,
+        status: "approved",
+        approvedBy: live.user.id,
+        approvedAt: new Date("2026-02-15T12:00:00.000Z"),
+        updatedAt: new Date("2026-02-15T12:00:00.000Z"),
+      },
+    });
+
     // The active revision, as a generated schedule stores it (the
     // generator's budgets and the BOQ rows it was built from), and a staged
     // one submitted for review through the API — which stores its readiness
@@ -513,7 +528,10 @@ liveDescribe("PC-4 §12: the Overview and the Schedule module carry no BOQ figur
     expect(fullHistory.events.some((event) => BOQ_RECORD_TYPES.includes(event.recordType))).toBe(true);
     // The workspace home: the project's budget, the approved allocations' sum.
     const home = (await api.get(reads().workspaceDashboard.route, auth())).body.data;
-    expect(home.projectHealth.find((row) => row.id === project.id)).toMatchObject({ bac: 41519.6, eac: 41519.6 });
+    expect(home.projectHealth.find((row) => row.id === project.id)).toMatchObject({ bac: 41519.6, eac: 41519.6, ev: 21337 });
+    // The health card: EV is the complete pour's whole allocation.
+    const health = (await api.get(reads().health.route, auth())).body.data;
+    expect(health.dimensions.find((dimension) => dimension.key === "cost").detail).toMatchObject({ ev: 21337, ac: 0 });
   });
 
   it("the site engineer, the cost controller, the planning engineer and a PM, all without BOQ read, receive none of the bill's figures from any request of the Overview or the Schedule module — and everything else unchanged", async () => {
@@ -556,7 +574,7 @@ liveDescribe("PC-4 §12: the Overview and the Schedule module carry no BOQ figur
           const own = normalizeMoneyTree(
             await workspaceDashboardService.getWorkspaceDashboard({ orgId: live.org.id, userId: user.id, role: user.role, isCompanyAdmin: false }),
           );
-          if (!readsCost) own.projectHealth = own.projectHealth.map((row) => without(row, new Set(["bac", "eac"])));
+          if (!readsCost) own.projectHealth = own.projectHealth.map((row) => without(row, new Set(["bac", "eac", "ev", "pv", "ac"])));
           expect([viewer, name, JSON.parse(unstampedDashboard(limited.text)).data]).toEqual([
             viewer,
             name,
@@ -568,7 +586,7 @@ liveDescribe("PC-4 §12: the Overview and the Schedule module carry no BOQ figur
       // its budget only for a cost reader.
       const home = (await api.get(reads().workspaceDashboard.route, viewerAuth)).body.data;
       const row = home.projectHealth.find((entry) => entry.id === project.id);
-      expect([viewer, typeof row.overallScore, "spi" in row, "cpi" in row, "bac" in row, "eac" in row, row.bac]).toEqual([
+      expect([viewer, typeof row.overallScore, "spi" in row, "cpi" in row, "bac" in row, "eac" in row, row.bac, row.ev, "pv" in row, "ac" in row]).toEqual([
         viewer,
         "number",
         true,
@@ -576,6 +594,20 @@ liveDescribe("PC-4 §12: the Overview and the Schedule module carry no BOQ figur
         readsCost,
         readsCost,
         readsCost ? 41519.6 : undefined,
+        readsCost ? 21337 : undefined,
+        readsCost,
+        readsCost,
+      ]);
+      // The health card's cost dimension: the score and CPI for everyone,
+      // earned value and actual cost only for a reader of the BOQ or cost.
+      const health = (await api.get(reads().health.route, viewerAuth)).body.data;
+      const cost = health.dimensions.find((dimension) => dimension.key === "cost");
+      expect([viewer, typeof cost.score, "cpi" in cost.detail, cost.detail.ev, "ac" in cost.detail]).toEqual([
+        viewer,
+        "number",
+        true,
+        readsCost ? 21337 : undefined,
+        readsCost,
       ]);
       const schedule = (await api.get(reads().schedule.route, viewerAuth)).body.data;
       const pour = schedule.activities.find((activity) => activity.id === activities.pour.id);

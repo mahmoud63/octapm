@@ -1,9 +1,8 @@
-import { useQuery } from '@tanstack/react-query'
-import { apiClient } from '@/services/api/client'
 import { formatLongDate } from '@/lib/dates'
 import { statusBadge } from '@/lib/status'
 import { cn } from '@/lib/utils'
 import { Badge } from '@/components/ui/badge'
+import { useProjectHealth } from '../hooks/use-project-health'
 import {
   PolarAngleAxis,
   PolarGrid,
@@ -15,6 +14,8 @@ import {
 
 interface Props {
   projectId: string
+  /** The project's currency: the cards' money is stated in it. */
+  currency?: string | null
 }
 
 type HealthRisk = {
@@ -103,7 +104,9 @@ const METRIC_LABELS: Record<string, string> = {
   pv: 'Planned value',
   ac: 'Actual cost',
   eac: 'Forecast at completion',
-  delayedActivities: 'Delayed activities',
+  unallocatedBoqAmount: 'Open BOQ value',
+  // Counted today from the latest progress, not at the card's cutoff.
+  delayedActivities: 'Delayed activities (as of today)',
   criticalActivities: 'Critical activities',
   approvedChangeOrders: 'Approved change orders',
   pendingChangeOrders: 'Pending change orders',
@@ -122,7 +125,25 @@ const METRIC_LABELS: Record<string, string> = {
   overdueSubmittals: 'Overdue submittals',
 }
 
-const MONEY_KEYS = new Set(['ev', 'pv', 'ac', 'eac', 'budget', 'actualCost', 'forecast'])
+const MONEY_KEYS = new Set([
+  'ev',
+  'pv',
+  'ac',
+  'eac',
+  'budget',
+  'actualCost',
+  'forecast',
+  'unallocatedBoqAmount',
+])
+
+/**
+ * The figures a dimension states that the server leaves out for a member who
+ * may read neither the BOQ nor the cost module (§12): shown as a dash with
+ * the reason, never as 0.
+ */
+const WITHHELD_WHEN_ABSENT: Record<string, string[]> = {
+  cost: ['ac', 'ev'],
+}
 const RATIO_KEYS = new Set(['spi', 'cpi'])
 
 function labelForMetric(key: string) {
@@ -137,8 +158,15 @@ function labelForMetric(key: string) {
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}(T|$)/
 
-function formatMetricValue(key: string, value: unknown): string | null {
+function formatMetricValue(
+  key: string,
+  value: unknown,
+  currency?: string | null
+): string | null {
   if (value === null || value === undefined || value === '') return null
+  // A list or a record (the AC source summary, the basis warnings) is not a
+  // metric: printed as one it reads "[object Object]" or a run-on sentence.
+  if (typeof value === 'object') return null
   if (typeof value === 'boolean') return value ? 'Yes' : 'No'
 
   // A raw ISO timestamp is never something to show a project manager.
@@ -147,11 +175,10 @@ function formatMetricValue(key: string, value: unknown): string | null {
   const numeric = typeof value === 'number' ? value : Number(value)
   if (Number.isFinite(numeric)) {
     if (MONEY_KEYS.has(key)) {
-      return numeric.toLocaleString(undefined, {
-        style: 'currency',
-        currency: 'USD',
-        maximumFractionDigits: 0,
-      })
+      // In the project's currency, as the controls strip states money; a
+      // project without one gets the bare figure rather than a guessed "$".
+      const amount = numeric.toLocaleString(undefined, { maximumFractionDigits: 0 })
+      return currency ? `${currency} ${amount}` : amount
     }
     if (RATIO_KEYS.has(key)) return numeric.toFixed(2)
     if (/days$/i.test(key)) return `${numeric.toLocaleString()} ${numeric === 1 ? 'day' : 'days'}`
@@ -171,42 +198,61 @@ const NON_METRIC_KEYS = new Set([
   'generatedAt',
   'source',
   'sourceStatus',
+  'acSource',
+  'basisWarnings',
 ])
 
-function readableMetrics(detail: HealthDimensionDetail) {
-  return Object.entries(detail)
-    .filter(([key]) => !NON_METRIC_KEYS.has(key))
-    .map(([key, value]) => ({ key, label: labelForMetric(key), value: formatMetricValue(key, value) }))
-    .filter((metric): metric is { key: string; label: string; value: string } =>
-      Boolean(metric.value)
-    )
-    .slice(0, 4)
+type Metric = { key: string; label: string; value: string; withheld?: boolean }
+
+function readableMetrics(
+  dimensionKey: string,
+  detail: HealthDimensionDetail,
+  currency?: string | null
+): Metric[] {
+  const shown: Metric[] = []
+  for (const [key, value] of Object.entries(detail)) {
+    if (NON_METRIC_KEYS.has(key)) continue
+    const formatted = formatMetricValue(key, value, currency)
+    if (formatted) shown.push({ key, label: labelForMetric(key), value: formatted })
+  }
+  const withheld = (WITHHELD_WHEN_ABSENT[dimensionKey] ?? [])
+    .filter((key) => !(key in detail))
+    .map((key) => ({ key, label: labelForMetric(key), value: '—', withheld: true }))
+  return [...shown, ...withheld].slice(0, 4)
 }
 
+const WITHHELD_REASON = 'Shown to people who can open the BOQ or the cost module'
+
 function DimensionCard({
+  dimensionKey,
   label,
   score,
   detail,
   sourceRule,
   cutoffDate,
+  currency,
 }: {
+  dimensionKey: string
   label: string
   score: number
   detail: HealthDimensionDetail
   sourceRule?: HealthDimension['sourceRule']
   cutoffDate?: string | null
+  currency?: string | null
 }) {
   const color = scoreColor(score)
   const topRisks = Array.isArray(detail.topRisks)
     ? detail.topRisks.slice(0, 2)
     : []
-  const metrics = readableMetrics(detail)
+  const metrics = readableMetrics(dimensionKey, detail, currency)
+  const anyWithheld = metrics.some((metric) => metric.withheld)
   const provenance = `${sourceRule?.source || 'Official source'} through ${formatDate(cutoffDate)}`
 
   return (
     <div
       className='flex flex-col rounded-lg border bg-card p-3.5 shadow-[var(--shadow-card)]'
       title={provenance}
+      data-testid={`uat-health-dimension-${dimensionKey}`}
     >
       {/* Dimension, score and band on one line: the figure leads. */}
       <div className='flex items-baseline justify-between gap-2'>
@@ -240,6 +286,8 @@ function DimensionCard({
             <div
               key={metric.key}
               className='flex min-w-0 items-baseline justify-between gap-2 text-xs'
+              data-testid={`uat-health-metric-${dimensionKey}-${metric.key}`}
+              title={metric.withheld ? WITHHELD_REASON : undefined}
             >
               <dt className='min-w-0 truncate text-muted-foreground'>{metric.label}</dt>
               <dd className='min-w-0 truncate text-end font-medium tabular-nums text-foreground'>
@@ -249,8 +297,19 @@ function DimensionCard({
           ))}
         </dl>
       )}
+      {anyWithheld && (
+        <p
+          className='mt-1 text-[11px] text-muted-foreground'
+          data-testid={`uat-health-withheld-${dimensionKey}`}
+        >
+          {WITHHELD_REASON}.
+        </p>
+      )}
 
-      <p className='mt-3 truncate border-t pt-2 text-[11px] text-muted-foreground'>
+      <p
+        className='mt-3 truncate border-t pt-2 text-[11px] text-muted-foreground'
+        data-testid={`uat-health-provenance-${dimensionKey}`}
+      >
         {provenance}
       </p>
       {topRisks.length > 0 && (
@@ -273,13 +332,8 @@ function DimensionCard({
   )
 }
 
-export function HealthDashboard({ projectId }: Props) {
-  const { data, isLoading } = useQuery<HealthResponse>({
-    queryKey: ['health', projectId],
-    queryFn: () =>
-      apiClient.get(`/projects/${projectId}/health`).then((r) => r.data.data),
-    refetchInterval: 120000,
-  })
+export function HealthDashboard({ projectId, currency }: Props) {
+  const { data, isLoading } = useProjectHealth<HealthResponse>(projectId)
 
   if (isLoading) {
     return (
@@ -310,8 +364,8 @@ export function HealthDashboard({ projectId }: Props) {
           <p className='text-sm font-medium' style={{ color: overallColor }}>
             {scoreLabel(overallScore)}
           </p>
-          <p className='mt-2 text-xs text-muted-foreground'>
-            Cutoff {formatDate(freshness?.cutoffDate)}
+          <p className='mt-2 text-xs text-muted-foreground' data-testid='uat-health-cutoff'>
+            EV cutoff {formatDate(freshness?.cutoffDate)}
           </p>
         </div>
 
@@ -336,6 +390,8 @@ export function HealthDashboard({ projectId }: Props) {
         {dimensions.map((d) => (
           <DimensionCard
             key={d.key}
+            dimensionKey={d.key}
+            currency={currency}
             label={d.label}
             score={d.score}
             detail={d.detail || {}}

@@ -58,12 +58,15 @@ function Kpi({
   label,
   value,
   sub,
+  note,
   level,
   testId,
 }: {
   label: string
   value: string
   sub?: string | null
+  /** The server's own reason the figure is what it is, beside it. */
+  note?: string | null
   level?: ForecastLevel
   testId?: string
 }) {
@@ -82,6 +85,11 @@ function Kpi({
         {value}
       </p>
       {sub ? <p className='text-xs text-muted-foreground'>{sub}</p> : null}
+      {note ? (
+        <p className='mt-1 text-[11px] text-muted-foreground' data-testid={testId ? `${testId}-note` : undefined}>
+          {note}
+        </p>
+      ) : null}
     </div>
   )
 }
@@ -431,6 +439,12 @@ export function ForecastPanel({ projectId }: { projectId: string }) {
   // BOQ nor the cost module (§12): each amount then reads as a dash, and the
   // projected-cost card says why instead of calling the cost within budget.
   const costFiguresShown = cost.budget !== undefined
+  // With no CPI the earned-value estimate at completion is the budget
+  // handed back (Phase 22A): the figure stays, and says what it is.
+  const noCostPerformance = costFiguresShown && schedule.cpi == null
+  const cpiNote = noCostPerformance
+    ? (forecast.dataQuality.find((note) => note.startsWith('CPI ')) ?? null)
+    : null
   return (
     <div className='space-y-4' data-testid='uat-forecast'>
       <div className='flex flex-wrap items-center gap-2'>
@@ -514,9 +528,12 @@ export function ForecastPanel({ projectId }: { projectId: string }) {
             !costFiguresShown
               ? 'Cost figures are not available to you'
               : (cost.overrun ?? 0) > 0
-                ? `${money(cost.overrun)} over the ${money(cost.budget)} budget${cost.overrunPct != null ? ` (${cost.overrunPct}%)` : ''}`
-                : `Within the ${money(cost.budget)} budget`
+                ? `${money(cost.overrun)} over the ${money(cost.budget)} budget${cost.overrunPct != null ? ` (${cost.overrunPct}%)` : ''}${noCostPerformance ? ' · no cost performance yet' : ''}`
+                : noCostPerformance
+                  ? 'The budget — no cost performance yet'
+                  : `Within the ${money(cost.budget)} budget`
           }
+          note={cpiNote}
           level={summary?.costLevel}
           testId='uat-forecast-cost'
         />

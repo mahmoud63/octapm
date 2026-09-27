@@ -7,12 +7,14 @@ import {
   GitBranch,
   Link2,
 } from 'lucide-react'
+import { formatLongDate } from '@/lib/dates'
 import { useCanPerform } from '@/lib/permissions'
 import { statusBadge, statusIcon, type StatusTone } from '@/lib/status'
 import { cn } from '@/lib/utils'
 import { Badge } from '@/components/ui/badge'
 import { useCostSummary } from '@/features/cost/hooks/use-cost'
 import { useForecast } from '@/features/forecast/hooks/use-forecast'
+import { useProjectHealth } from '../hooks/use-project-health'
 import type { ProjectSetupReadiness, ProjectSetupTarget } from '../data/schema'
 
 type Props = {
@@ -78,6 +80,7 @@ function Figure({
       type='button'
       onClick={onClick}
       data-testid={testId}
+      data-tone={tone}
       title={title}
       className='flex min-w-0 flex-col gap-0.5 rounded-md border bg-card px-3 py-2 text-start transition-colors hover:bg-accent/60 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none'
     >
@@ -133,6 +136,11 @@ function formatMoney(currency: string | null | undefined, value: number | null |
   return `${currency ? `${currency} ` : ''}${Number(value).toLocaleString(undefined, {
     maximumFractionDigits: 0,
   })}`
+}
+
+/** Today, as the reader's calendar has it: the ledger's figures are as of now. */
+function formatToday() {
+  return new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' }).format(new Date())
 }
 
 function formatPct(value: number | null | undefined) {
@@ -221,6 +229,13 @@ export function ControlsStrip({
   const canSeeSchedule = useCanPerform('schedule', 'read') && !permissionsSettling
   const { data: costSummary } = useCostSummary(canSeeCost ? projectId : '')
   const { data: forecast } = useForecast(projectId, canSeeSchedule)
+  // The health card's earned-value cutoff (the same query the card below
+  // makes, shared through the cache): the strip's ledger figures are stated
+  // against it, so nobody reads the two actual costs as one.
+  const { data: health } = useProjectHealth<{ dataFreshness?: { cutoffDate?: string | null } }>(
+    projectId,
+    { enabled: !permissionsSettling }
+  )
 
   if (isLoading && !readiness) {
     return (
@@ -290,14 +305,18 @@ export function ControlsStrip({
   const scheduleRevision = context?.currentRevision ?? null
   const baselineLocked = gates.baseline.alreadyLocked
   const activities = Number(stepCounts('schedule_generation').activeActivities ?? 0)
+  // Activities entered or imported without a revision are a schedule too:
+  // "No schedule" is for a project with no activities at all.
   const scheduleValue = scheduleRevision
     ? (scheduleStatusLabel[scheduleRevision.status] ?? scheduleRevision.status)
-    : 'No schedule'
+    : activities > 0
+      ? `${activities.toLocaleString()} ${activities === 1 ? 'activity' : 'activities'}`
+      : 'No schedule'
   const scheduleTone: StatusTone = baselineLocked
     ? 'done'
     : scheduleRevision?.status === 'approved'
       ? 'info'
-      : scheduleRevision
+      : scheduleRevision || activities > 0
         ? 'review'
         : 'blocked'
 
@@ -319,10 +338,40 @@ export function ControlsStrip({
   // states them; critical, unmapped, over-allocated and data-quality counts
   // as the readiness check and the forecast already report them. Nothing
   // here is computed a second time, and the projection says it is one.
+  //
+  // Their basis is said beside each: the budget register, and the cost
+  // ledger as of today — not the earned-value cutoff the health cards below
+  // report through. An empty register or an empty ledger is not a figure:
+  // it reads "—" with the reason, never 0 presented as a budget or a
+  // projection. (Which EAC this tile presents is the product owner's open
+  // question; the figure is the cost summary's, labelled as such.)
   const register = costSummary?.budget
-  const budgetValue = register?.revisedBudget ?? costSummary?.totals.budget ?? null
-  const actualValue = costSummary?.totals.actual ?? null
-  const eacValue = costSummary?.eac?.mostLikely ?? null
+  const fromRegister = register?.source === 'budget_register'
+  const registerEmpty =
+    fromRegister && !Number(register?.revisedBudget) && !Number(register?.originalBudget)
+  const allocatedToActivities = register?.allocatedToActivities ?? costSummary?.totals.budget ?? null
+  const budgetValue = registerEmpty
+    ? null
+    : (register?.revisedBudget ?? costSummary?.totals.budget ?? null)
+  const hasLedger = (costSummary?.records?.length ?? 0) > 0
+  const actualValue = hasLedger ? (costSummary?.totals.actual ?? null) : null
+  const eacValue = hasLedger ? (costSummary?.eac?.mostLikely ?? null) : null
+  // With nothing spent and no forecast typed, each record's estimate at
+  // completion is its budget: the figure is the budget, not a projection
+  // from performance, and says so.
+  const noCostPerformance =
+    hasLedger &&
+    Number(costSummary?.totals.actual ?? 0) === 0 &&
+    eacValue != null &&
+    allocatedToActivities != null &&
+    Math.abs(eacValue - allocatedToActivities) < 0.005
+  // The tone compares the forecast with its own basis — the budgets
+  // allocated to the activities it is summed over — never with the
+  // register's budget, which is another basis.
+  const forecastOver =
+    eacValue != null && allocatedToActivities != null && eacValue > allocatedToActivities + 0.005
+  const ledgerDate = formatToday()
+  const evCutoff = health?.dataFreshness?.cutoffDate ?? null
   const criticalActivities = Number(stepCounts('schedule_generation').criticalActivities ?? 0)
   const criticalUnmapped = summary.criticalUnmappedActivities ?? null
   const unmappedRows = counts ? counts.unmapped + counts.partial : null
@@ -382,7 +431,7 @@ export function ControlsStrip({
                 .filter(Boolean)
                 .join(' · ')
             : boqItems > 0
-              ? 'Entered by hand; approved by locking the BOQ baseline'
+              ? 'Entered by hand; approved when the schedule baseline is locked'
               : 'Upload the bill to start'
         }
         action='Open BOQ'
@@ -435,9 +484,11 @@ export function ControlsStrip({
                   ? ` · locked ${new Date(scheduleRevision.baselinedAt).toLocaleDateString()}`
                   : ''
               }`
-            : 'Generate or import a schedule'
+            : activities > 0
+              ? 'No revision — import or generate one to review and baseline'
+              : 'Generate or import a schedule'
         }
-        action='Open revisions'
+        action={scheduleRevision || activities === 0 ? 'Open revisions' : 'Create a revision'}
         onClick={() => onNavigate(TARGETS.revisions)}
         testId='uat-controls-schedule-tile'
       />
@@ -465,6 +516,23 @@ export function ControlsStrip({
       />
     </section>
 
+    {/* What the figures below are measured against: the cost figures are
+        the register's and the ledger's as of today; the health cards under
+        the checklist report earned value through the reporting cutoff. */}
+    {canSeeCost && (
+      <p className='text-[11px] text-muted-foreground' data-testid='uat-controls-figures-basis'>
+        Budget, actual and forecast: budget register and cost ledger as of{' '}
+        <span data-testid='uat-controls-ledger-date'>{ledgerDate}</span>
+        {evCutoff ? (
+          <>
+            {' '}
+            — not the earned-value cutoff (the health cards report earned value through{' '}
+            <span data-testid='uat-controls-ev-cutoff'>{formatLongDate(evCutoff)}</span>)
+          </>
+        ) : null}
+        .
+      </p>
+    )}
     <section
       className='grid grid-cols-2 gap-2 md:grid-cols-4 xl:grid-cols-8'
       data-testid='uat-controls-figures'
@@ -473,13 +541,19 @@ export function ControlsStrip({
       <Figure
         label='Budget'
         value={canSeeCost ? formatMoney(currency, budgetValue) : '—'}
-        truth={register?.source === 'budget_register' ? 'source' : 'derived'}
+        truth={fromRegister ? 'source' : 'derived'}
         basis={
           !canSeeCost
             ? 'cost module not offered'
-            : register?.source === 'budget_register'
-              ? 'budget register, revised'
-              : 'activity budgets'
+            : registerEmpty
+              ? `no budget register yet${
+                  allocatedToActivities
+                    ? ` · ${formatMoney(currency, allocatedToActivities)} allocated to activities`
+                    : ''
+                }`
+              : fromRegister
+                ? 'budget register, revised'
+                : 'activity budgets'
         }
         testId='uat-controls-figure-budget'
         onClick={() => onNavigate(TARGETS.budget)}
@@ -488,7 +562,13 @@ export function ControlsStrip({
         label='Actual'
         value={canSeeCost ? formatMoney(currency, actualValue) : '—'}
         truth='derived'
-        basis={canSeeCost ? 'cost ledger to date' : 'cost module not offered'}
+        basis={
+          !canSeeCost
+            ? 'cost module not offered'
+            : !hasLedger
+              ? 'no cost records yet'
+              : `cost ledger as of ${ledgerDate}`
+        }
         testId='uat-controls-figure-actual'
         onClick={() => onNavigate(TARGETS.cost)}
       />
@@ -499,15 +579,22 @@ export function ControlsStrip({
         basis={
           !canSeeCost
             ? 'cost module not offered'
-            : costSummary?.eac?.basis === 'estimate_at_completion'
-              ? 'actual + cost to complete'
-              : 'most likely EAC'
+            : !hasLedger
+              ? 'no cost records yet'
+              : noCostPerformance
+                ? 'the budget — no cost performance yet'
+                : `cost ledger: actual + cost to complete, as of ${ledgerDate}`
         }
-        tone={
-          budgetValue != null && eacValue != null && eacValue > budgetValue ? 'review' : 'neutral'
+        title={
+          canSeeCost && hasLedger
+            ? 'The cost summary\'s estimate at completion, over the budgets allocated to the activities in the cost ledger; the Cost overview states it.'
+            : undefined
         }
+        tone={forecastOver ? 'review' : 'neutral'}
         testId='uat-controls-figure-forecast'
-        onClick={() => onNavigate(TARGETS.forecast)}
+        // Its figure is the one the Cost overview states (the Forecast tab
+        // projects on another basis).
+        onClick={() => onNavigate(TARGETS.cost)}
       />
       <Figure
         label='Progress'

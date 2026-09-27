@@ -19,6 +19,7 @@ import {
   AlertTriangle,
   CalendarRange,
   Coins,
+  FileDiff,
   History,
   Link2,
   Network,
@@ -69,6 +70,10 @@ export const projectControlsGroup: {
     { key: 'progress', title: 'Progress', module: 'schedule', child: 'progress', icon: Activity },
     { key: 'cost', title: 'Cost', module: 'cost', child: 'overview', icon: Coins },
     { key: 'forecast', title: 'Forecast', module: 'schedule', child: 'forecast', icon: TrendingUp },
+    // Change events and the change orders they become (PC-0 decision table,
+    // integration doc §2): the Commercial module's pages, opened at change
+    // events, and offered only when that page is.
+    { key: 'changes', title: 'Changes', module: 'commercial', child: 'change-events', icon: FileDiff },
     { key: 'resources', title: 'Resources', module: 'schedule', child: 'resources', icon: UsersRound },
     { key: 'risks', title: 'Risks', module: 'schedule', child: 'risks', icon: AlertTriangle },
     {
