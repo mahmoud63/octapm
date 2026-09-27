@@ -43,6 +43,11 @@ type HealthDimension = {
     officialOnly?: boolean
   }
   cutoffDate?: string | null
+  /**
+   * What the dimension is measured through: the EV cutoff (schedule, cost)
+   * or the records as they stand today (every other dimension).
+   */
+  measuredThrough?: 'ev_cutoff' | 'today'
   detail?: HealthDimensionDetail
   target?: {
     module: string
@@ -61,6 +66,8 @@ type HealthResponse = {
     cutoffTimeZone?: string | null
     cutoffTimeZoneSource?: string | null
     cutoffTimeZoneNote?: string | null
+    /** Set when the EV cutoff is still ahead: EV and AC stop at today. */
+    cutoffNotReachedNote?: string | null
     sourceUpdatedAt?: string | null
     note?: string
   }
@@ -74,6 +81,7 @@ type HealthResponse = {
       count: number
       source: string
       cutoffDate?: string | null
+      measuredThrough?: 'ev_cutoff' | 'today'
     }>
   }
 }
@@ -83,6 +91,10 @@ function scoreColor(score: number) {
   if (score >= 60) return '#f59e0b'
   return '#ef4444'
 }
+
+/** A score the rule gave because its index does not exist yet (health.js). */
+const NEUTRAL_COLOR = '#94a3b8'
+const NEUTRAL_LABEL = 'No index yet (neutral 60)'
 
 function scoreLabel(score: number) {
   if (score >= 80) return 'Good'
@@ -206,9 +218,29 @@ const NON_METRIC_KEYS = new Set([
   'sourceStatus',
   'acSource',
   'basisWarnings',
+  // The server's sentences, shown as notes under the figures they explain.
+  'spiNote',
+  'cpiNote',
+  'scoreBasis',
+  'cutoffNotReachedNote',
 ])
 
-type Metric = { key: string; label: string; value: string; withheld?: boolean }
+type Metric = {
+  key: string
+  label: string
+  value: string
+  withheld?: boolean
+  /** Why the figure is a dash, said beside it. */
+  reason?: string
+}
+
+/** How many activities have official actual cost through the cutoff. */
+const officialActualRows = (detail: HealthDimensionDetail) => {
+  const source = detail.acSource as { officialActualActivities?: number } | null | undefined
+  return typeof source?.officialActualActivities === 'number' ? source.officialActualActivities : null
+}
+
+const NO_COST_RECORDS = 'no official cost records through the cutoff'
 
 function readableMetrics(
   dimensionKey: string,
@@ -218,6 +250,23 @@ function readableMetrics(
   const shown: Metric[] = []
   for (const [key, value] of Object.entries(detail)) {
     if (NON_METRIC_KEYS.has(key)) continue
+    // A missing index is a dash with the server's reason, never a row that
+    // silently disappears.
+    if (RATIO_KEYS.has(key) && (value === null || value === undefined)) {
+      const reason = detail[`${key}Note`]
+      shown.push({
+        key,
+        label: labelForMetric(key),
+        value: '—',
+        reason: typeof reason === 'string' ? reason : undefined,
+      })
+      continue
+    }
+    // No official actual cost through the cutoff: AC is not "0 spent".
+    if (key === 'ac' && officialActualRows(detail) === 0) {
+      shown.push({ key, label: labelForMetric(key), value: '—', reason: NO_COST_RECORDS })
+      continue
+    }
     const formatted = formatMetricValue(key, value, currency)
     if (formatted) shown.push({ key, label: labelForMetric(key), value: formatted })
   }
@@ -236,6 +285,7 @@ function DimensionCard({
   detail,
   sourceRule,
   cutoffLabel,
+  measuredThrough,
   currency,
 }: {
   dimensionKey: string
@@ -245,15 +295,29 @@ function DimensionCard({
   sourceRule?: HealthDimension['sourceRule']
   /** The EV cutoff's calendar date, as the one formatter states it. */
   cutoffLabel: string
+  measuredThrough: 'ev_cutoff' | 'today'
   currency?: string | null
 }) {
-  const color = scoreColor(score)
+  // No index: the rule's neutral 60, said to be one — not a "Fair" verdict.
+  const neutral = detail.scoreBasis === 'neutral_no_index'
+  const color = neutral ? NEUTRAL_COLOR : scoreColor(score)
+  const band = neutral ? NEUTRAL_LABEL : scoreLabel(score)
+  // The server's reasons beside the figures: why an index is missing or 0,
+  // and that a cutoff still ahead compares a future plan with today's work.
+  const notes = [detail.spiNote, detail.cpiNote, detail.cutoffNotReachedNote].filter(
+    (note): note is string => typeof note === 'string' && note.length > 0
+  )
   const topRisks = Array.isArray(detail.topRisks)
     ? detail.topRisks.slice(0, 2)
     : []
   const metrics = readableMetrics(dimensionKey, detail, currency)
   const anyWithheld = metrics.some((metric) => metric.withheld)
-  const provenance = `${sourceRule?.source || 'Official source'} through ${cutoffLabel}`
+  // Schedule and cost are earned value through the EV cutoff; the other
+  // dimensions are the records as they stand today.
+  const provenance =
+    measuredThrough === 'today'
+      ? `${sourceRule?.source || 'Official source'} as of today`
+      : `${sourceRule?.source || 'Official source'} through ${cutoffLabel}`
 
   return (
     <div
@@ -279,8 +343,9 @@ function DimensionCard({
         <span
           className='shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-semibold'
           style={{ background: `${color}1f`, color }}
+          data-testid={`uat-health-band-${dimensionKey}`}
         >
-          {scoreLabel(score)}
+          {band}
         </span>
       </div>
 
@@ -294,15 +359,30 @@ function DimensionCard({
               key={metric.key}
               className='flex min-w-0 items-baseline justify-between gap-2 text-xs'
               data-testid={`uat-health-metric-${dimensionKey}-${metric.key}`}
-              title={metric.withheld ? WITHHELD_REASON : undefined}
+              title={metric.withheld ? WITHHELD_REASON : metric.reason}
             >
               <dt className='min-w-0 truncate text-muted-foreground'>{metric.label}</dt>
-              <dd className='min-w-0 truncate text-end font-medium tabular-nums text-foreground'>
+              <dd className='min-w-0 text-end font-medium tabular-nums text-foreground'>
                 {metric.value}
+                {metric.reason === NO_COST_RECORDS ? (
+                  <span className='ms-1 text-[11px] font-normal text-muted-foreground'>
+                    · {NO_COST_RECORDS}
+                  </span>
+                ) : null}
               </dd>
             </div>
           ))}
         </dl>
+      )}
+      {notes.length > 0 && (
+        <ul
+          className='mt-2 space-y-1 text-[11px] leading-snug text-muted-foreground'
+          data-testid={`uat-health-notes-${dimensionKey}`}
+        >
+          {notes.map((note) => (
+            <li key={note}>{note}</li>
+          ))}
+        </ul>
       )}
       {anyWithheld && (
         <p
@@ -391,6 +471,11 @@ export function HealthDashboard({ projectId, currency }: Props) {
               {cutoffNote}
             </p>
           )}
+          {freshness?.cutoffNotReachedNote && (
+            <p className='mt-1 text-xs font-medium text-warning' data-testid='uat-health-cutoff-not-reached'>
+              {freshness.cutoffNotReachedNote}
+            </p>
+          )}
         </div>
 
         <div className='flex-1'>
@@ -424,6 +509,9 @@ export function HealthDashboard({ projectId, currency }: Props) {
               (d.detail?.sourceRule as HealthDimension['sourceRule'])
             }
             cutoffLabel={cutoffLabel(d.cutoffDate || (d.detail?.cutoffDate as string | null))}
+            measuredThrough={
+              d.measuredThrough ?? (d.key === 'schedule' || d.key === 'cost' ? 'ev_cutoff' : 'today')
+            }
           />
         ))}
       </div>
@@ -433,7 +521,7 @@ export function HealthDashboard({ projectId, currency }: Props) {
           {pendingReview.map((metric) => (
             <div
               key={metric.key}
-              title={`${labelForMetric(metric.source)} through ${cutoffLabel(metric.cutoffDate)}`}
+              title={`${labelForMetric(metric.source)} as of today`}
               className='relative overflow-hidden rounded-md border bg-card p-3 shadow-[var(--shadow-card)]'
             >
               <span aria-hidden className='absolute inset-y-0 left-0 w-[3px] bg-warning' />
@@ -452,7 +540,7 @@ export function HealthDashboard({ projectId, currency }: Props) {
                 Pending review
               </Badge>
               <p className='mt-2 truncate text-[11px] text-muted-foreground'>
-                {labelForMetric(metric.source)} · {cutoffLabel(metric.cutoffDate)}
+                {labelForMetric(metric.source)} · as of today
               </p>
             </div>
           ))}

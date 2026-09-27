@@ -112,11 +112,14 @@ test('overview landing shows the controls strip; the wizard lists the offending 
   await expect(page.getByTestId('uat-controls-schedule-tile')).toContainText('No revision')
   await expect(page.getByTestId('uat-controls-progress-method')).toHaveText('0/2')
 
-  // §20: the figures row under the strip — each says which truth it is, and
-  // the forecast says it is a projection. Two priced rows are unmapped (the
-  // n/a row is not), nothing is over-allocated.
+  // §20: the figures row under the strip — each says which truth it is. No
+  // allocation is approved, so there is no approved budget and no estimate
+  // at completion: the forecast is tagged as no figure, never a projection
+  // (round 3). Two priced rows are unmapped (the n/a row is not), nothing
+  // is over-allocated.
   await expect(page.getByTestId('uat-controls-figures')).toBeVisible()
-  await expect(page.getByTestId('uat-controls-figure-forecast-truth')).toHaveText('projection')
+  await expect(page.getByTestId('uat-controls-figure-forecast-truth')).toHaveText('no figure')
+  await expect(page.getByTestId('uat-controls-figure-forecast-value')).toHaveText('—')
   await expect(page.getByTestId('uat-controls-figure-actual-truth')).toHaveText('derived')
   await expect(page.getByTestId('uat-controls-figure-unmapped-value')).toHaveText('2')
   await expect(page.getByTestId('uat-controls-figure-exceptions-value')).toHaveText('0')

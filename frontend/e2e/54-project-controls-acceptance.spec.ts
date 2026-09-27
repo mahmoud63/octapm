@@ -229,12 +229,11 @@ test('earned value is plotted only where it was measured, every EV surface state
       })
       // D2 without CPI: the EAC is the revised BAC.
       expect([data.eac, data.totalBudget]).toEqual([100000, 100000])
-      // The premise: the service backfills today's EV into the months before
-      // the cutoff — the flat line the tab must not draw.
+      // The service gives this report's EV only in the month of its cutoff
+      // (round 3) — never backfilled into the months before it; the tab adds
+      // July's locked 40,000 from the period's snapshot.
       expect(data.ev).toBe(90000)
-      expect(data.sCurve.filter((row) => row.ev === 90000).map((row) => row.label)).toEqual(
-        expect.arrayContaining(['Jun 26', 'Jul 26']),
-      )
+      expect(data.sCurve.filter((row) => row.ev !== null).map((row) => [row.label, row.ev])).toEqual([['Aug 26', 90000]])
       expect(data.cpi).toBeNull()
       return { projectId }
     } finally {

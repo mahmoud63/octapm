@@ -206,6 +206,13 @@ export type ProjectSetupIssue = {
    */
   itemsWithheld?: boolean
   /**
+   * True when the caller may not read the schedule and the activities and
+   * schedule revisions behind the issue were left out of `items`;
+   * `scheduleReason` says why.
+   */
+  scheduleItemsWithheld?: boolean
+  scheduleReason?: string
+  /**
    * True on a mapping issue for a caller who may not read the BOQ: how many
    * rows or allocations it concerns is not given (owner decision C).
    */

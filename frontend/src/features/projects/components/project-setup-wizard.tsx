@@ -123,6 +123,8 @@ function countChips(step: ProjectSetupStep) {
 const ISSUES_SHOWN = 3
 const ITEMS_SHOWN = 3
 
+const NOT_OFFERED = 'This page is not offered to you'
+
 const severityTone = (issue: ProjectSetupIssue) =>
   issue.severity === 'blocking'
     ? ('blocked' as const)
@@ -131,13 +133,46 @@ const severityTone = (issue: ProjectSetupIssue) =>
       : ('review' as const)
 
 /**
+ * The module page an address under the project opens
+ * (`…/projects/{id}/{module}[/{child}]`), so a link can be offered only
+ * where the member may go; null when the address names no module.
+ */
+function targetOfHref(href: string): ProjectSetupTarget | null {
+  const match = /\/projects\/[^/?#]+\/([^/?#]+)(?:\/([^/?#]+))?/.exec(href)
+  if (!match) return null
+  return match[2] ? { module: match[1], child: match[2] } : { module: match[1] }
+}
+
+/**
  * A link to the record behind an issue. A real anchor — the address is
  * visible and opens in a new tab — that the router follows in place: the
  * href already carries the project's workspace (`/o/{slug}/projects/…`).
+ * Where the page is not offered to this member it is plain text that says
+ * so, never an anchor that bounces them elsewhere.
  */
-function ItemLink({ item }: { item: ProjectSetupItem }) {
+function ItemLink({
+  item,
+  canNavigate,
+}: {
+  item: ProjectSetupItem
+  canNavigate: (target: ProjectSetupTarget) => boolean
+}) {
   const navigate = useNavigate()
   const name = [item.code, item.label].filter(Boolean).join(' · ') || item.type
+  const target = targetOfHref(item.href)
+  if (target && !canNavigate(target)) {
+    return (
+      <span
+        data-testid={`uat-setup-item-${item.type}-${item.id ?? item.code ?? 'project'}`}
+        data-inert='true'
+        title={NOT_OFFERED}
+        className='inline-flex max-w-full items-baseline gap-1 text-xs text-foreground'
+      >
+        <span className='truncate font-medium'>{name}</span>
+        <span className='shrink-0 text-muted-foreground'>— {item.missing}</span>
+      </span>
+    )
+  }
   return (
     <a
       href={item.href}
@@ -160,7 +195,13 @@ function ItemLink({ item }: { item: ProjectSetupItem }) {
  * are linked, the rest are counted, and the step's own action opens the
  * module where the whole list lives.
  */
-function IssueDetail({ issue }: { issue: ProjectSetupIssue }) {
+function IssueDetail({
+  issue,
+  canNavigate,
+}: {
+  issue: ProjectSetupIssue
+  canNavigate: (target: ProjectSetupTarget) => boolean
+}) {
   const items = issue.items ?? []
   const count = issue.count ?? items.length
   const shown = items.slice(0, ITEMS_SHOWN)
@@ -183,7 +224,7 @@ function IssueDetail({ issue }: { issue: ProjectSetupIssue }) {
         <ul className='ms-3 space-y-0.5'>
           {shown.map((item, index) => (
             <li key={`${item.type}-${item.id ?? item.code ?? index}`} className='flex'>
-              <ItemLink item={item} />
+              <ItemLink item={item} canNavigate={canNavigate} />
             </li>
           ))}
           {more > 0 && (
@@ -215,6 +256,16 @@ function IssueDetail({ issue }: { issue: ProjectSetupIssue }) {
           data-testid={`uat-setup-issue-withheld-${issue.code}`}
         >
           The BOQ records behind this are listed for people who can open the BOQ.
+        </p>
+      ) : null}
+      {issue.scheduleItemsWithheld ? (
+        // The activities behind the issue are the schedule's: the server
+        // leaves them out for a member who may not read the schedule.
+        <p
+          className='ms-3 text-[11px] text-muted-foreground'
+          data-testid={`uat-setup-issue-schedule-withheld-${issue.code}`}
+        >
+          {issue.scheduleReason ?? 'Schedule records are listed for people who can open the schedule'}.
         </p>
       ) : null}
     </li>
@@ -266,25 +317,51 @@ const guideTone = (guide: ProjectSetupGuide) =>
  * page where it is done, with what is still to file. The readiness check
  * derives every figure; this only lays them out.
  */
-function GuideList({ guides }: { guides: ProjectSetupGuide[] }) {
+function GuideList({
+  guides,
+  canNavigate,
+}: {
+  guides: ProjectSetupGuide[]
+  canNavigate: (target: ProjectSetupTarget) => boolean
+}) {
   return (
     <ul className='space-y-1 border-t pt-2' data-testid='uat-setup-guides'>
-      {guides.map((guide) => (
-        <li key={guide.key} className='flex items-start gap-1.5'>
-          <span
-            aria-hidden
-            className={cn('mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full', statusSolid(guideTone(guide)))}
-          />
-          <RouterLink
-            href={guide.href}
-            testId={`uat-setup-guide-${guide.key}`}
-            className='inline-flex min-w-0 flex-wrap items-baseline gap-x-1 text-xs underline-offset-2 hover:underline'
-          >
+      {guides.map((guide) => {
+        const body = (
+          <>
             <span className='font-medium text-foreground'>{guide.label}</span>
             <span className='text-muted-foreground'>— {guide.detail}</span>
-          </RouterLink>
-        </li>
-      ))}
+          </>
+        )
+        return (
+          <li key={guide.key} className='flex items-start gap-1.5'>
+            <span
+              aria-hidden
+              className={cn('mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full', statusSolid(guideTone(guide)))}
+            />
+            {canNavigate(guide.target) ? (
+              <RouterLink
+                href={guide.href}
+                testId={`uat-setup-guide-${guide.key}`}
+                className='inline-flex min-w-0 flex-wrap items-baseline gap-x-1 text-xs underline-offset-2 hover:underline'
+              >
+                {body}
+              </RouterLink>
+            ) : (
+              // The page is not offered to this member: the guide is read,
+              // not followed — no anchor that silently lands elsewhere.
+              <span
+                data-testid={`uat-setup-guide-${guide.key}`}
+                data-inert='true'
+                title={NOT_OFFERED}
+                className='inline-flex min-w-0 flex-wrap items-baseline gap-x-1 text-xs'
+              >
+                {body}
+              </span>
+            )}
+          </li>
+        )
+      })}
     </ul>
   )
 }
@@ -413,8 +490,6 @@ function RevisionDetail({
   )
 }
 
-const NOT_OFFERED = 'This page is not offered to you'
-
 function StepCard({
   step,
   onNavigate,
@@ -488,7 +563,9 @@ function StepCard({
           </div>
         )}
 
-        {step.guides && step.guides.length > 0 && <GuideList guides={step.guides} />}
+        {step.guides && step.guides.length > 0 && (
+          <GuideList guides={step.guides} canNavigate={canNavigate} />
+        )}
 
         {step.key === 'boq_approval' && boqRevision && (
           <RevisionDetail revision={boqRevision} currency={currency} />
@@ -497,7 +574,7 @@ function StepCard({
         {shownIssues.length > 0 && (
           <ul className='space-y-1.5 border-t pt-2' data-testid={`uat-setup-issues-${step.key}`}>
             {shownIssues.map((issue) => (
-              <IssueDetail key={issue.code} issue={issue} />
+              <IssueDetail key={issue.code} issue={issue} canNavigate={canNavigate} />
             ))}
             {moreIssues > 0 && (
               <li className='text-[11px] text-muted-foreground'>
@@ -514,7 +591,7 @@ function StepCard({
             </p>
             <ul className='space-y-1.5'>
               {shownAdvisories.map((issue) => (
-                <IssueDetail key={issue.code} issue={issue} />
+                <IssueDetail key={issue.code} issue={issue} canNavigate={canNavigate} />
               ))}
               {moreAdvisories > 0 && (
                 <li className='text-[11px] text-muted-foreground'>

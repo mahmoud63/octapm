@@ -460,9 +460,21 @@ export function ForecastPanel({ projectId }: { projectId: string }) {
     budgetFallback &&
     cost.eac != null &&
     Math.abs((cost.projected ?? 0) - cost.eac) < 0.005
+  // No approved budget: there is no EAC, and the projected cost the server
+  // gives is only the zero budgets summed — not a projection. Said as a dash.
+  const noBudget =
+    costFiguresShown && (cost.eacBasis === 'no_budget' || !((cost.budget ?? 0) > 0))
+  // The server's reasons beside SPI and CPI: why one is missing or 0, and a
+  // cutoff still ahead (PV to the cutoff, EV and AC to today).
+  const indexNotes = forecast.dataQuality.filter(
+    (note) =>
+      note.startsWith('SPI ') ||
+      note.startsWith('CPI ') ||
+      note.startsWith("This period's cutoff has not been reached")
+  )
   // The projected cost is max(EAC, bottom-up): said, so the two figures are
   // never read as disagreeing.
-  const projectedRelation = !costFiguresShown
+  const projectedRelation = !costFiguresShown || noBudget
     ? null
     : cost.eac == null
       ? `Projected cost = the bottom-up ${money(cost.bottomUp)} (no EAC yet).`
@@ -559,6 +571,8 @@ export function ForecastPanel({ projectId }: { projectId: string }) {
               ? 'Finish projected from SPI'
               : 'Finish projected from activities'
           }
+          note={indexNotes.length > 0 ? indexNotes.join(' ') : null}
+          testId='uat-forecast-indices'
           level={
             (schedule.spi !== null && schedule.spi < 0.9) ||
             (schedule.cpi !== null && schedule.cpi < 0.9)
@@ -576,18 +590,20 @@ export function ForecastPanel({ projectId }: { projectId: string }) {
         />
         <Kpi
           label='Projected cost'
-          value={money(cost.projected)}
+          value={noBudget ? '—' : money(cost.projected)}
           sub={
             !costFiguresShown
               ? 'Cost figures are not available to you'
-              : (cost.overrun ?? 0) > 0
+              : noBudget
+                ? 'No approved budget to project from'
+                : (cost.overrun ?? 0) > 0
                 ? `${money(cost.overrun)} over the ${money(cost.budget)} budget${cost.overrunPct != null ? ` (${cost.overrunPct}%)` : ''}`
                 : projectedIsBudgetFallback
                   ? capitalise(eac.label)
                   : `Within the ${money(cost.budget)} budget`
           }
           note={projectedRelation}
-          level={cpiZero ? 'medium' : summary?.costLevel}
+          level={noBudget ? undefined : cpiZero ? 'medium' : summary?.costLevel}
           testId='uat-forecast-cost'
         />
         <Kpi

@@ -7,6 +7,7 @@ import {
   GitBranch,
   Link2,
 } from 'lucide-react'
+import { eacIsBudgetFallback } from '@/lib/eac-basis'
 import { evCutoffNote, formatEvCutoff, type EvCutoff } from '@/lib/ev-cutoff'
 import { useCanPerform } from '@/lib/permissions'
 import { statusBadge, statusIcon, type StatusTone } from '@/lib/status'
@@ -51,15 +52,23 @@ const TARGETS = {
 
 /**
  * Which of the three truths a figure is (control model §3), said next to
- * it: a source fact, a value derived from source rows, or a projection.
+ * it: a source fact, a value derived from source rows, or a projection —
+ * and, for the estimate at completion, the budget handed back when nothing
+ * projects it (no CPI, or CPI 0), which is not a projection, or no figure
+ * at all.
  */
-type Truth = 'source' | 'derived' | 'projection'
+type Truth = 'source' | 'derived' | 'projection' | 'fallback' | 'none'
 
 const truthLabel: Record<Truth, string> = {
   source: 'source',
   derived: 'derived',
   projection: 'projection',
+  fallback: 'budget fallback',
+  none: 'no figure',
 }
+
+/** The server's sentence when the EV cutoff is still ahead (utils/ev-notes). */
+const CUTOFF_NOT_REACHED_PREFIX = "This period's cutoff has not been reached"
 
 /** One figure on the second row: label, value, its truth and where it lives. */
 function Figure({
@@ -103,7 +112,11 @@ function Figure({
       >
         {value}
       </span>
-      <span className='truncate text-[10px] text-muted-foreground'>
+      {/* The basis wraps: it says what the figure is, so none of it is cut. */}
+      <span
+        className='text-[10px] leading-snug break-words text-muted-foreground'
+        data-testid={`${testId}-basis`}
+      >
         <span
           className={cn(
             'me-1 rounded-sm px-1 py-px font-semibold tracking-wide uppercase',
@@ -262,6 +275,7 @@ export function ControlsStrip({
       cutoffLocalDate?: string | null
       cutoffTimeZone?: string | null
       cutoffTimeZoneNote?: string | null
+      cutoffNotReachedNote?: string | null
     }
   }>(
     projectId,
@@ -392,6 +406,9 @@ export function ControlsStrip({
   const fromRegister = register?.source === 'budget_register'
   const registerEmpty =
     fromRegister && !Number(register?.revisedBudget) && !Number(register?.originalBudget)
+  // The cost summary's total of the budgets on activities that have a cost
+  // record — not the revised BAC (approved allocations plus revisions),
+  // which the forecast states beside its EAC.
   const allocatedToActivities = register?.allocatedToActivities ?? costSummary?.totals.budget ?? null
   const budgetValue = registerEmpty
     ? null
@@ -419,6 +436,41 @@ export function ControlsStrip({
         }
       : null
   const evCutoffZoneNote = evCutoffNote(evCutoff)
+  // The EV cutoff still ahead: PV runs to it while EV and AC stop at today,
+  // so the forecast at completion and the health cards compare a future plan
+  // with to-date work. The server says so; the strip shows it.
+  const cutoffNotReachedNote =
+    health?.dataFreshness?.cutoffNotReachedNote ??
+    forecast?.dataQuality?.find((note) => note.startsWith(CUTOFF_NOT_REACHED_PREFIX)) ??
+    null
+  // What the forecast at completion is, in its tag: a projection only when
+  // it is the revised budget ÷ CPI; the budget handed back otherwise.
+  const eacFallback = eacIsBudgetFallback(forecast?.cost?.eacBasis)
+  const eacTruth: Truth = !canSeeSchedule || eac.value == null ? 'none' : eacFallback ? 'fallback' : 'projection'
+  // The revised budget the EAC was computed from (the forecast's bac), so
+  // "the budget" names a figure on the page.
+  const revisedBac = forecast?.cost?.bac ?? null
+  const eacBasisText = !canSeeSchedule
+    ? 'schedule module not offered'
+    : eac.value != null && revisedBac != null
+      ? `${eac.label} · revised budget ${formatMoney(currency, revisedBac)}`
+      : eac.label
+  // The server's reason CPI is missing or 0, said with the figure.
+  const cpiNote = forecast?.dataQuality?.find((note) => note.startsWith('CPI ')) ?? null
+  const eacTitle = canSeeSchedule
+    ? [
+        eac.value == null
+          ? `Forecast at completion: ${eac.label}.`
+          : eacFallback
+            ? `Forecast at completion: ${eac.label} — the revised budget${revisedBac != null ? ` (${formatMoney(currency, revisedBac)})` : ''} handed back, not a projection.`
+            : `Forecast at completion: ${eac.label}${revisedBac != null ? ` (revised budget ${formatMoney(currency, revisedBac)})` : ''}, the official earned-value estimate.`,
+        cpiNote,
+        cutoffNotReachedNote,
+        'The Forecast tab states the same figure.',
+      ]
+        .filter(Boolean)
+        .join('\n')
+    : undefined
   const criticalActivities = Number(stepCounts('schedule_generation').criticalActivities ?? 0)
   const criticalUnmapped = summary.criticalUnmappedActivities ?? null
   const unmappedRows = counts && !coverageWithheld ? counts.unmapped + counts.partial : null
@@ -592,6 +644,17 @@ export function ControlsStrip({
                 <span data-testid='uat-controls-ev-cutoff-zone-note'>{evCutoffZoneNote}.</span>
               </>
             ) : null}
+            {cutoffNotReachedNote ? (
+              <>
+                {' '}
+                <span
+                  className='font-medium text-warning'
+                  data-testid='uat-controls-ev-cutoff-not-reached'
+                >
+                  {cutoffNotReachedNote}
+                </span>
+              </>
+            ) : null}
           </>
         ) : null}
       </p>
@@ -611,7 +674,7 @@ export function ControlsStrip({
             : registerEmpty
               ? `no budget register yet${
                   allocatedToActivities
-                    ? ` · ${formatMoney(currency, allocatedToActivities)} allocated to activities`
+                    ? ` · ${formatMoney(currency, allocatedToActivities)} in budgets of activities with cost records`
                     : ''
                 }`
               : fromRegister
@@ -638,13 +701,9 @@ export function ControlsStrip({
       <Figure
         label='Forecast at completion'
         value={canSeeSchedule ? formatMoney(currency, eac.value) : '—'}
-        truth='projection'
-        basis={canSeeSchedule ? eac.label : 'schedule module not offered'}
-        title={
-          canSeeSchedule && eac.value != null
-            ? 'The official earned-value estimate at completion: the revised budget ÷ CPI, or the revised budget itself while there is no cost performance. The Forecast tab states the same figure.'
-            : undefined
-        }
+        truth={eacTruth}
+        basis={eacBasisText}
+        title={eacTitle}
         tone={eac.over ? 'review' : 'neutral'}
         testId='uat-controls-figure-forecast'
         // The Forecast tab shows this figure with this label.

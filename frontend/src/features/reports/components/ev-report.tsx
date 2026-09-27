@@ -58,7 +58,11 @@ type ReportingPeriod = {
   cutoffLocalDate?: string | null
   status: string
   /** A locked period's stored EV figures (GET /reports/periods). */
-  snapshot?: { ev?: number | string | null; lockedAt?: string | null } | null
+  snapshot?: {
+    ev?: number | string | null
+    pv?: number | string | null
+    lockedAt?: string | null
+  } | null
 }
 
 type EvActivityBreakdownRow = {
@@ -155,7 +159,10 @@ type SCurvePoint = { label: string; pv: number | null; ev: number | null }
  * cutoff, which draws a history nobody measured. So EV is plotted only
  * where it was measured: at this report's cutoff, and at the cutoff of each
  * locked period whose snapshot stored its own EV. Planned value is drawn as
- * the service gives it.
+ * the service gives it — the plan through each month's last date — except at
+ * a measured point, where it is the PV measured at that same cutoff (the
+ * locked snapshot's stored PV, or this report's PV): a period cut on the
+ * 15th is never drawn against the plan through the 31st.
  */
 function shapeSCurve({
   sCurve,
@@ -172,36 +179,66 @@ function shapeSCurve({
   ev: number | null
   pv: number | null
   periods: ReportingPeriod[]
-}): { points: SCurvePoint[]; earlierMonthsWithoutEv: boolean } {
+}): {
+  points: SCurvePoint[]
+  earlierMonthsWithoutEv: boolean
+  /** The months whose PV is the PV at the measured cutoff. */
+  measuredLabels: string[]
+} {
   const points: SCurvePoint[] = (sCurve || []).map((row) => ({
     label: String(row.label ?? ''),
     pv: row.pv === null || row.pv === undefined ? null : Number(row.pv),
     ev: null,
   }))
   const reportCutoff = cutoffDate ? new Date(cutoffDate).getTime() : Number.POSITIVE_INFINITY
-  const measured = new Map<string, { at: number; ev: number }>()
+  const measured = new Map<string, { at: number; ev: number; pv: number | null }>()
   // A cutoff belongs to the month of its calendar date in the project's
   // zone (the instant may already be the next month in UTC).
-  const record = (at: string, value: number, localDate?: string | null) => {
+  const record = (
+    at: string,
+    value: number,
+    plannedAtCutoff: number | null,
+    localDate?: string | null
+  ) => {
     const time = new Date(at).getTime()
     const label = monthLabel(localDate || at)
     const current = measured.get(label)
-    if (!current || current.at <= time) measured.set(label, { at: time, ev: value })
+    if (!current || current.at <= time) {
+      measured.set(label, { at: time, ev: value, pv: plannedAtCutoff })
+    }
   }
   for (const period of periods) {
     const stored = period.snapshot?.ev
     if (stored === null || stored === undefined || !period.cutoffDate) continue
     if (new Date(period.cutoffDate).getTime() > reportCutoff) continue
-    record(period.cutoffDate, Number(stored), period.cutoffLocalDate)
+    const storedPv = period.snapshot?.pv
+    record(
+      period.cutoffDate,
+      Number(stored),
+      storedPv === null || storedPv === undefined ? null : Number(storedPv),
+      period.cutoffLocalDate
+    )
   }
-  if (cutoffDate && ev !== null && ev !== undefined) record(cutoffDate, ev, cutoffLocalDate)
+  if (cutoffDate && ev !== null && ev !== undefined) {
+    record(cutoffDate, ev, pv ?? null, cutoffLocalDate)
+  }
 
-  const cutoffLabel = cutoffDate ? monthLabel(cutoffLocalDate || cutoffDate) : null
-  for (const [label, { ev: value }] of measured) {
+  const measuredLabels: string[] = []
+  for (const [label, { ev: value, pv: plannedAtCutoff }] of measured) {
     const row = points.find((point) => point.label === label)
-    if (row) row.ev = value
-    else points.push({ label, pv: label === cutoffLabel ? pv : null, ev: value })
+    if (row) {
+      row.ev = value
+      // EV against the PV at the same cutoff, like for like.
+      if (plannedAtCutoff !== null) {
+        row.pv = plannedAtCutoff
+        measuredLabels.push(label)
+      }
+    } else {
+      points.push({ label, pv: plannedAtCutoff, ev: value })
+      if (plannedAtCutoff !== null) measuredLabels.push(label)
+    }
   }
+  const cutoffLabel = cutoffDate ? monthLabel(cutoffLocalDate || cutoffDate) : null
   points.sort((a, b) => monthOrder(a.label) - monthOrder(b.label))
   const cutoffIndex = cutoffLabel
     ? points.findIndex((point) => point.label === cutoffLabel)
@@ -209,7 +246,7 @@ function shapeSCurve({
   const earlierMonthsWithoutEv = points
     .slice(0, cutoffIndex < 0 ? points.length : cutoffIndex)
     .some((point) => point.ev === null)
-  return { points, earlierMonthsWithoutEv }
+  return { points, earlierMonthsWithoutEv, measuredLabels }
 }
 
 function statusBadgeClass(status: string) {
@@ -328,10 +365,17 @@ export function EvReport({ projectId, readiness, onNavigate }: Props) {
   // same figure (lib/eac-basis): the server's basis, or for a report without
   // one the server's own rule — CPI > 0 is budget ÷ CPI, CPI 0 or none is
   // the budget handed back.
-  const eacSub = capitalise(
-    eacBasisLabel(eacBasisFrom(reportedEacBasis, cpi, totalBudget)) ??
-      'no approved budget yet'
-  )
+  const eacBasis = eacBasisFrom(reportedEacBasis, cpi, totalBudget)
+  const eacSub = capitalise(eacBasisLabel(eacBasis) ?? 'no approved budget yet')
+  // No approved budget: there is no EAC (the report's 0 is the formula's
+  // fallback, not an estimate) and so no ETC — shown as dashes, as the
+  // Overview and the Forecast tab show them.
+  const noBudget = eacBasis === 'no_budget'
+  // A variance needs both sides: CV with no official actual cost is EV less
+  // nothing, and SV with no planned value is EV less nothing.
+  const officialActualRows = sourceSummary?.ac?.officialActualActivities
+  const noActuals = officialActualRows === 0 || (officialActualRows === undefined && !ac)
+  const noPlannedValue = !pv
   const readinessGate =
     reportReadinessGate ||
     readiness?.gates.reporting ||
@@ -516,35 +560,42 @@ export function EvReport({ projectId, readiness, onNavigate }: Props) {
           label='SPI'
           value={spi !== null ? spi.toFixed(2) : '—'}
           sub='EV / PV'
-          color={spi !== null && spi < 0.9 ? 'text-error' : 'text-success'}
+          color={spi === null ? '' : spi < 0.9 ? 'text-error' : 'text-success'}
         />
         <MetricCard
           label='CPI'
           value={cpi !== null ? cpi.toFixed(2) : '—'}
           sub='EV / AC'
-          color={cpi !== null && cpi < 0.9 ? 'text-error' : 'text-success'}
+          color={cpi === null ? '' : cpi < 0.9 ? 'text-error' : 'text-success'}
         />
         <MetricCard
           label='EAC'
-          value={fmt(eac)}
+          value={noBudget ? '—' : fmt(eac)}
           sub={eacSub}
           testId='uat-ev-eac'
         />
-        <MetricCard label='ETC' value={fmt(etc)} sub='EAC - AC' />
+        <MetricCard
+          label='ETC'
+          value={noBudget ? '—' : fmt(etc)}
+          sub={noBudget ? 'No EAC without an approved budget' : 'EAC - AC'}
+          testId='uat-ev-etc'
+        />
       </div>
 
       <div className='grid grid-cols-1 gap-3 sm:grid-cols-2'>
         <MetricCard
           label='Schedule Variance (SV)'
-          value={fmt(sv)}
-          sub='EV - PV'
-          color={sv >= 0 ? 'text-success' : 'text-error'}
+          value={noPlannedValue ? '—' : fmt(sv)}
+          sub={noPlannedValue ? 'No planned value through the cutoff — SV not meaningful' : 'EV - PV'}
+          color={noPlannedValue ? '' : sv >= 0 ? 'text-success' : 'text-error'}
+          testId='uat-ev-sv'
         />
         <MetricCard
           label='Cost Variance (CV)'
-          value={fmt(cv)}
-          sub='EV - AC'
-          color={cv >= 0 ? 'text-success' : 'text-error'}
+          value={noActuals ? '—' : fmt(cv)}
+          sub={noActuals ? 'No actual cost recorded — CV not meaningful' : 'EV - AC'}
+          color={noActuals ? '' : cv >= 0 ? 'text-success' : 'text-error'}
+          testId='uat-ev-cv'
         />
       </div>
 
@@ -571,6 +622,11 @@ export function EvReport({ projectId, readiness, onNavigate }: Props) {
             .filter((point) => point.ev !== null)
             .map((point) => [point.label, point.ev])
         )}
+        data-pv-at-ev-points={JSON.stringify(
+          curve.points
+            .filter((point) => point.ev !== null)
+            .map((point) => [point.label, point.pv])
+        )}
       >
         <h3 className='mb-3 font-semibold'>S-Curve (Cumulative)</h3>
         {curve.earlierMonthsWithoutEv && (
@@ -581,6 +637,16 @@ export function EvReport({ projectId, readiness, onNavigate }: Props) {
             EV history is only available for locked periods; earlier months are
             not shown. EV is plotted at this report's cutoff and at each locked
             period's cutoff.
+          </p>
+        )}
+        {curve.measuredLabels.length > 0 && (
+          <p
+            className='mb-2 text-xs text-muted-foreground'
+            data-testid='uat-ev-scurve-pv-note'
+          >
+            Where EV is plotted, PV is the planned value at that same cutoff,
+            so the two compare like for like; elsewhere PV is the plan through
+            the month's last date.
           </p>
         )}
         <ResponsiveContainer width='100%' height={300}>
