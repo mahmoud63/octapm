@@ -156,7 +156,11 @@ liveDescribe("PC-4: setup flow — structure and BOQ approval steps, per-item de
   let segment;
   // The uploaded, approved bill from the §22 test, for the tests after it.
   let uploaded1 = null;
-  const auth = () => ({ authorization: `Bearer ${live.token}` });
+  // The project that passes the baseline gate: an approved schedule
+  // revision (so readiness carries the schedule's own checks) and approved
+  // allocations (so the bill's money is on its activities).
+  let passingProjectId = null;
+  const auth =() => ({ authorization: `Bearer ${live.token}` });
   const post = (route, body) => api.post(route, body, auth());
   const get = (route) => api.get(route, auth());
   const patch = (route, body) => api.request("PATCH", route, { body, headers: auth() });
@@ -280,6 +284,7 @@ liveDescribe("PC-4: setup flow — structure and BOQ approval steps, per-item de
         data: { projectId: passing.id, label: "Rev A", status: "approved", isActive: true, activityCount: 1, approvedAt: new Date(), activatedAt: new Date() },
       });
 
+      passingProjectId = passing.id;
       const result = await readiness(passing.id);
       expect(result.gates.baseline.blockers).toEqual([]);
       expect(result.gates.baseline.ready).toBe(true);
@@ -599,6 +604,135 @@ liveDescribe("PC-4: setup flow — structure and BOQ approval steps, per-item de
       expect(revision).toMatchObject({ id: uploaded1.revisionId, status: "approved", itemCount: 2, changes: { added: 2 } });
       expect(revision).not.toHaveProperty("totalAmount");
       expect(revision).not.toHaveProperty("history");
+
+      // §12: no BOQ figure reaches a member without BOQ read from anything
+      // the Overview landing asks for — the controls strip, the setup cards
+      // (the step count chips, the issues and the gates built from them, the
+      // schedule's own checks), the health cards — while a BOQ reader gets
+      // the same answers with the figures in. Two such members: this site
+      // engineer (no cost tool, so the strip's cost figures are refused),
+      // and a cost controller whose template takes only the BOQ away (so the
+      // cost summary and the forecast answer). The project that passes the
+      // baseline gate joins the sweep: it has an approved schedule revision
+      // and approved allocations, so every figure has somewhere to be.
+      // GET /schedule, which the landing reads for its module-bar counts
+      // only, is left out: it hands every schedule reader the approved
+      // allocation per activity (allocatedBoqAmount/Quantity/Weight), the
+      // revision's unallocatedBoqAmount and its readiness figures — an
+      // exposure that predates PC-4 (cb14ff4), that none of the Overview's
+      // cards render, and that the schedule's other reads share.
+      expect(passingProjectId).toBeTruthy();
+      const costController = await createLiveUser(prisma, {
+        orgId: live.org.id,
+        name: "LiveTest Cost Controller",
+        email: `live-cc-${tag}@octapm-live.test`,
+        role: "cost_controller",
+      });
+      const costTemplate = await prisma.permissionTemplate.create({
+        data: {
+          orgId: live.org.id,
+          name: `LiveTest cost, no BOQ ${tag}`,
+          baseRole: "cost_controller",
+          tools: { create: [{ module: "boq", level: "none" }] },
+        },
+      });
+      const sweepProjectIds = [...projectIds, passingProjectId];
+      await prisma.projectAssignment.create({
+        data: { projectId: passingProjectId, userId: member.id, role: "site_engineer", orgId: live.org.id },
+      });
+      await prisma.projectUserPermission.create({
+        data: { orgId: live.org.id, projectId: passingProjectId, userId: member.id, templateId: template.id },
+      });
+      for (const projectId of sweepProjectIds) {
+        await prisma.projectAssignment.create({
+          data: { projectId, userId: costController.id, role: "cost_controller", orgId: live.org.id },
+        });
+        await prisma.projectUserPermission.create({
+          data: { orgId: live.org.id, projectId, userId: costController.id, templateId: costTemplate.id },
+        });
+      }
+      const costAuth = { authorization: `Bearer ${mintAccessToken(costController)}` };
+      const viewers = { siteEngineer: memberAuth, costController: costAuth };
+
+      const BOQ_FIGURE_KEYS = new Set([
+        "totalBoqAmount",
+        "allocatableBoqAmount",
+        "approvedAllocatedAmount",
+        "pendingAllocatedAmount",
+        "unallocatedAmount",
+        "optionalUnallocatedAmount",
+        "notApplicableAmount",
+        "unallocatedBoqAmount",
+        "allocatedBoqAmount",
+        "allocatedBoqQuantity",
+        "allocatedBoqWeight",
+        "unallocatedQuantity",
+        "allocationSummary",
+        "totalAmount",
+        "rate",
+      ]);
+      const figurePaths = (value, at = "") =>
+        value && typeof value === "object"
+          ? Object.entries(value).flatMap(([key, inner]) => [
+              ...(BOQ_FIGURE_KEYS.has(key) ? [`${at}.${key}`] : []),
+              ...figurePaths(inner, `${at}.${key}`),
+            ])
+          : [];
+      const overviewRoutes = (projectId) => ({
+        project: `/api/v1/projects/${projectId}`,
+        parties: `/api/v1/projects/${projectId}/parties`,
+        permissions: `/api/v1/auth/me/permissions?projectId=${projectId}`,
+        readiness: `/api/v1/projects/${projectId}/setup-readiness`,
+        costSummary: `/api/v1/projects/${projectId}/cost/summary`,
+        forecast: `/api/v1/projects/${projectId}/forecast`,
+        assignments: `/api/v1/projects/${projectId}/assignments/mine`,
+        health: `/api/v1/projects/${projectId}/health`,
+      });
+      // What each viewer is answered: the site engineer has no cost tool;
+      // the cost controller is answered everywhere, so nothing is skipped.
+      const expectedStatus = { siteEngineer: { costSummary: 403 }, costController: {} };
+      const costDetail = (health) => health.dimensions.find((dimension) => dimension.key === "cost").detail;
+      const checkView = (result) =>
+        (result.context.scheduleReadiness?.checks || []).map((check) => [check.key, check.passed, check.message]);
+      for (const [viewer, viewerAuth] of Object.entries(viewers)) {
+        for (const projectId of sweepProjectIds) {
+          for (const [name, route] of Object.entries(overviewRoutes(projectId))) {
+            const response = await api.get(route, viewerAuth);
+            expect([viewer, name, response.status]).toEqual([viewer, name, expectedStatus[viewer][name] ?? 200]);
+            if (response.status !== 200) continue;
+            expect([viewer, name, figurePaths(response.body.data)]).toEqual([viewer, name, []]);
+            for (const secret of secrets[projectId] || []) {
+              expect([viewer, name, response.text.includes(secret)]).toEqual([viewer, name, false]);
+            }
+          }
+          // Withholding the figures moves no status, gate, check or issue count.
+          const fullReadiness = await readiness(projectId);
+          const viewerReadiness = (await api.get(`/api/v1/projects/${projectId}/setup-readiness`, viewerAuth)).body.data;
+          expect(shape(viewerReadiness)).toEqual(shape(fullReadiness));
+          for (const name of ["baseline", "progress", "reporting"]) {
+            expect(viewerReadiness.gates[name].ready).toBe(fullReadiness.gates[name].ready);
+          }
+          expect(checkView(viewerReadiness)).toEqual(checkView(fullReadiness));
+          const fullHealth = (await get(`/api/v1/projects/${projectId}/health`)).body.data;
+          const viewerHealth = (await api.get(`/api/v1/projects/${projectId}/health`, viewerAuth)).body.data;
+          expect(costDetail(viewerHealth)).toMatchObject({ cpi: costDetail(fullHealth).cpi, ev: costDetail(fullHealth).ev });
+        }
+      }
+      // The same answers for a BOQ reader carry the figures the members are
+      // spared — so the sweep above is looking where they would be.
+      for (const projectId of sweepProjectIds) {
+        const fullReadiness = await readiness(projectId);
+        expect(step(fullReadiness, "boq_upload").counts).toHaveProperty("totalBoqAmount");
+        expect(step(fullReadiness, "boq_allocation").counts).toHaveProperty("unallocatedAmount");
+        expect(fullReadiness.context).toHaveProperty("allocationSummary");
+        const fullHealth = (await get(`/api/v1/projects/${projectId}/health`)).body.data;
+        expect(costDetail(fullHealth)).toHaveProperty("unallocatedBoqAmount");
+      }
+      const passingChecks = (await readiness(passingProjectId)).context.scheduleReadiness.checks;
+      expect(passingChecks.find((check) => check.key === "allocations").details).toMatchObject({
+        totalBoqAmount: 20000,
+        approvedAllocatedAmount: 20000,
+      });
     });
   });
 

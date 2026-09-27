@@ -251,6 +251,30 @@ const withoutBoqRecords = (entry) => {
     : { ...entry, items, itemsWithheld: true };
 };
 
+// The bill's money as the steps count it and the issues detail it: the
+// bill's value, what is allocatable, approved, pending, open, optional and
+// not applicable — PC-3's coverage amounts, which the coverage endpoint
+// refuses the same person. The shares and row counts stay.
+const BOQ_FIGURE_KEYS = new Set([
+  "totalBoqAmount",
+  "allocatableBoqAmount",
+  "approvedAllocatedAmount",
+  "pendingAllocatedAmount",
+  "unallocatedAmount",
+  "optionalUnallocatedAmount",
+  "notApplicableAmount",
+]);
+
+const withoutBoqFigures = (values) =>
+  values && typeof values === "object"
+    ? Object.fromEntries(Object.entries(values).filter(([key]) => !BOQ_FIGURE_KEYS.has(key)))
+    : values;
+
+const withoutBoqDetail = (entry) => {
+  const withheld = withoutBoqRecords(entry);
+  return withheld.details ? { ...withheld, details: withoutBoqFigures(withheld.details) } : withheld;
+};
+
 // The official reporting gate as the base shaped it: EV stores it in the
 // locked period's snapshot basis and in the override's audit metadata, so
 // the per-item detail (records, links under the workspace slug) stays on
@@ -1634,14 +1658,17 @@ const getSetupReadiness = async ({ orgId, projectId, canReadBoq = true }) => {
     }),
   ];
   // The same steps for everyone; a caller who cannot read the BOQ gets them
-  // without the BOQ records named under each issue. Statuses, codes and
-  // counts are untouched, so the gates below are identical for every caller.
+  // without the BOQ records named under each issue and without the bill's
+  // money in the step counts and the issue details. Statuses, codes and
+  // issue counts are untouched, so the gates below — built from these same
+  // steps — are identical for every caller, and carry no BOQ figure either.
   const steps = canReadBoq
     ? builtSteps
     : builtSteps.map((step) => ({
         ...step,
-        blockers: step.blockers.map(withoutBoqRecords),
-        warnings: step.warnings.map(withoutBoqRecords),
+        blockers: step.blockers.map(withoutBoqDetail),
+        warnings: step.warnings.map(withoutBoqDetail),
+        counts: withoutBoqFigures(step.counts),
       }));
 
   const baselineBlockers = addStepContext(
@@ -1929,13 +1956,30 @@ const getSetupReadiness = async ({ orgId, projectId, canReadBoq = true }) => {
         byMethod: progressMethodsByMethod,
         quantityWithoutUnit: quantityMethodsWithoutUnit.length,
       },
-      allocationSummary: {
-        totalBoqAmount: totalBoqFromSummary,
-        approvedAllocatedAmount,
-        pendingAllocatedAmount,
-        unallocatedAmount,
-      },
-      scheduleReadiness,
+      // The bill's allocation totals, for those who may read the BOQ.
+      ...(canReadBoq
+        ? {
+            allocationSummary: {
+              totalBoqAmount: totalBoqFromSummary,
+              approvedAllocatedAmount,
+              pendingAllocatedAmount,
+              unallocatedAmount,
+            },
+          }
+        : {}),
+      // The schedule's own readiness checks, as the revision page reads
+      // them; its allocations check states the bill's value in the same
+      // seven figures the steps count, so a caller who cannot read the BOQ
+      // gets each check's verdict and message without them.
+      scheduleReadiness:
+        canReadBoq || !scheduleReadiness
+          ? scheduleReadiness
+          : {
+              ...scheduleReadiness,
+              checks: scheduleReadiness.checks.map((check) =>
+                check.details ? { ...check, details: withoutBoqFigures(check.details) } : check,
+              ),
+            },
       officialEvInputs: OFFICIAL_EV_INPUTS,
     },
     steps,

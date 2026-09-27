@@ -2,6 +2,7 @@ const express = require("express");
 const { asyncHandler } = require("../utils/async-handler");
 const { sendSuccess } = require("../utils/api-response");
 const { authenticate } = require("../middleware/auth");
+const { hasPermission } = require("../middleware/rbac");
 const { HttpError } = require("../utils/http-error");
 const { prisma } = require("../config/db");
 const evService = require("../services/earned-value.service");
@@ -491,9 +492,16 @@ router.get(
           cpi: cpi === null ? null : Number(cpi.toFixed(2)),
           ac: Number(ac.toFixed(0)),
           ev: Number(ev.toFixed(0)),
-          unallocatedBoqAmount: Number(
-            Number(evReport.unallocatedBoqAmount || 0).toFixed(0),
-          ),
+          // The bill's open value is for those who may read the BOQ (the
+          // BOQ and coverage endpoints refuse everyone else); the health
+          // card on the Overview landing is read by every project member.
+          ...(hasPermission(req, "boq", "read")
+            ? {
+                unallocatedBoqAmount: Number(
+                  Number(evReport.unallocatedBoqAmount || 0).toFixed(0),
+                ),
+              }
+            : {}),
           acSource: evReport.sourceSummary?.ac || null,
           sourceRule: KPI_SOURCE_RULES.cost,
           cutoffDate,

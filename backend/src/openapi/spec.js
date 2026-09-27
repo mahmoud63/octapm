@@ -1998,7 +1998,11 @@ const components = {
         code: { type: "string" },
         message: { type: "string" },
         severity: { type: "string", enum: ["blocking", "warning"] },
-        details: ref("GenericObject"),
+        details: {
+          ...ref("GenericObject"),
+          description:
+            "The figures behind the issue. The BOQ value figures (totalBoqAmount, allocatableBoqAmount, approved/pending/unallocated/optionalUnallocated/notApplicable amounts) are left out for a caller who may not read the BOQ.",
+        },
         items: {
           ...arrayOf(ref("ProjectSetupItem")),
           description: "The offending records, capped at 50; `count` is the whole number.",
@@ -2043,7 +2047,11 @@ const components = {
         message: { type: "string" },
         blockers: arrayOf(ref("ProjectSetupIssue")),
         warnings: arrayOf(ref("ProjectSetupIssue")),
-        counts: ref("GenericObject"),
+        counts: {
+          ...ref("GenericObject"),
+          description:
+            "The step's counts. Its BOQ value figures (totalBoqAmount and, on boq_allocation, the allocatable, approved, pending, unallocated, optional and not-applicable amounts) are left out for a caller who may not read the BOQ; row and activity counts stay.",
+        },
         action: objectSchema(
           { label: { type: "string" }, target: ref("ProjectSetupTarget") },
           ["label", "target"],
@@ -2122,7 +2130,7 @@ const components = {
         context: {
           ...ref("GenericObject"),
           description:
-            "workspace, currentRevision (schedule), boqRevision (revision, status, source, item count, value, `changes` from the upload comparison, `validation.blocked` rows each with code, description, reason (the machine code) and message (the sentence to show), `history` of workflow transitions with the actor named — value, blocked rows and history only for a caller who may read the BOQ), boqBaseline (source schedule_baseline before boq_revision, as GET /boq names it), progressMethods, allocationSummary.",
+            "workspace, currentRevision (schedule), boqRevision (revision, status, source, item count, value, `changes` from the upload comparison, `validation.blocked` rows each with code, description, reason (the machine code) and message (the sentence to show), `history` of workflow transitions with the actor named — value, blocked rows and history only for a caller who may read the BOQ), boqBaseline (source schedule_baseline before boq_revision, as GET /boq names it), progressMethods, allocationSummary (only for a caller who may read the BOQ), scheduleReadiness (the schedule's own checks; the allocations check's BOQ value figures only for a caller who may read the BOQ).",
         },
         steps: arrayOf(ref("ProjectSetupStep")),
       },
@@ -10991,7 +10999,7 @@ addGenericRoute({
   tag: "Health",
   summary: "Get seven-dimension project health scoring.",
   description:
-    "Returns official project health dimensions with sourceRule, cutoffDate, and drill-through targets, plus a separate pendingReview block for submitted progress, IPC, change orders, and submittals that do not feed official scores.",
+    "Returns official project health dimensions with sourceRule, cutoffDate, and drill-through targets, plus a separate pendingReview block for submitted progress, IPC, change orders, and submittals that do not feed official scores. The cost dimension's unallocatedBoqAmount is given only to a caller who may read the BOQ.",
   operationId: "getProjectHealth",
 });
 
