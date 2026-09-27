@@ -148,6 +148,9 @@ export function useScheduleRevisionMapping(
 export function useScheduleRevisionWorkflow(projectId: string) {
   const qc = useQueryClient()
 
+  // Re-read after every outcome: a refused step usually means the revision
+  // or its readiness changed since the page loaded, and the panel must show
+  // where it stands now and the blockers the server found.
   const invalidate = async () => {
     await Promise.all([
       qc.invalidateQueries({ queryKey: ['schedule', projectId] }),
@@ -157,6 +160,10 @@ export function useScheduleRevisionWorkflow(projectId: string) {
       qc.invalidateQueries({ queryKey: projectSetupReadinessKey(projectId) }),
     ])
   }
+
+  // The caller states the refusal (the panels' own toast), so the global
+  // mutation handler does not show it a second time.
+  const settle = { onSettled: invalidate, onError: () => undefined }
 
   const submitReview = useMutation({
     mutationFn: ({
@@ -171,7 +178,7 @@ export function useScheduleRevisionWorkflow(projectId: string) {
           comment,
         })
         .then((r) => r.data.data),
-    onSuccess: invalidate,
+    ...settle,
   })
 
   const approve = useMutation({
@@ -187,7 +194,7 @@ export function useScheduleRevisionWorkflow(projectId: string) {
           comment,
         })
         .then((r) => r.data.data),
-    onSuccess: invalidate,
+    ...settle,
   })
 
   const reject = useMutation({
@@ -203,7 +210,7 @@ export function useScheduleRevisionWorkflow(projectId: string) {
           reason,
         })
         .then((r) => r.data.data),
-    onSuccess: invalidate,
+    ...settle,
   })
 
   const baseline = useMutation({
@@ -219,7 +226,7 @@ export function useScheduleRevisionWorkflow(projectId: string) {
           comment,
         })
         .then((r) => r.data.data),
-    onSuccess: invalidate,
+    ...settle,
   })
 
   const activate = useMutation({
@@ -241,7 +248,7 @@ export function useScheduleRevisionWorkflow(projectId: string) {
           comment,
         })
         .then((r) => r.data.data),
-    onSuccess: invalidate,
+    ...settle,
   })
 
   const rollback = useMutation({
@@ -257,7 +264,7 @@ export function useScheduleRevisionWorkflow(projectId: string) {
           reason,
         })
         .then((r) => r.data.data),
-    onSuccess: invalidate,
+    ...settle,
   })
 
   return {

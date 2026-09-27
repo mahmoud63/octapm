@@ -256,7 +256,10 @@ export function ScheduleReviewPanel({ projectId, revision }: Props) {
       }
       closeDialog()
     } catch (error) {
+      // The server's reason, once (the workflow hook keeps the global handler
+      // quiet), and the panel re-reads the revision and its readiness.
       toast.error(getApiErrorMessage(error, 'Schedule workflow action failed'))
+      closeDialog()
     }
   }
 
@@ -268,7 +271,11 @@ export function ScheduleReviewPanel({ projectId, revision }: Props) {
     canBaselineRevision && status === 'approved' && isReady && !setupBaselineBlocked
 
   return (
-    <section className='rounded-lg border bg-card p-4'>
+    <section
+      className='rounded-lg border bg-card p-4'
+      data-testid='uat-schedule-review'
+      data-status={status}
+    >
       <div className='flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between'>
         <div className='min-w-0 space-y-2'>
           <div className='flex flex-wrap items-center gap-2'>
@@ -459,7 +466,10 @@ export function ScheduleReviewPanel({ projectId, revision }: Props) {
             )}
             Readiness
           </div>
-          <span className='text-xs text-muted-foreground'>
+          <span
+            className='text-xs text-muted-foreground'
+            data-testid='uat-schedule-review-blocking'
+          >
             {readiness ? `${readiness.blockingCount} blocking` : 'Not checked'}
           </span>
         </div>
