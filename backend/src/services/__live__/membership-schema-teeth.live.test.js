@@ -27,7 +27,9 @@ liveDescribe("OrganizationMembership schema teeth", () => {
       VALUES (${id}, ${org.id}, ${user.id}, ${role}, ${kind}, ${isAdmin}, ${isOwner}, 'active', now())`;
 
   beforeAll(async () => {
-    ({ org, user } = await createLiveOrg(prisma));
+    // A person without a membership row: every row this test needs it writes
+    // by hand, so the constraints alone decide what goes in.
+    ({ org, user } = await createLiveOrg(prisma, { legacy: true }));
   });
 
   afterAll(async () => {

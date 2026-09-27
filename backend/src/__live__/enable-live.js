@@ -4,3 +4,5 @@ require('dotenv').config({ path: require('path').resolve(__dirname, '..', '..', 
 // Live tests start real processes against the one local Postgres (100
 // connections). Keep each of them, and this test process, to a small pool.
 process.env.DATABASE_URL = require('./helpers').withConnectionLimit(process.env.DATABASE_URL, 5);
+// The database is shared: a bulk write whose filter came out empty must not run.
+require('./bulk-write-guard').installBulkWriteGuard();
