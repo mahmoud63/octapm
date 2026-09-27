@@ -2383,12 +2383,19 @@ const getProjectSchedule = async ({ orgId, projectId }) => {
 
   const snap = revision.snapshotJson || {};
 
-  const readiness = buildScheduleReadiness({
-    project,
-    revision,
-    activities,
-    allocationSummary,
-  });
+  // A staged revision (imported or generated, not yet activated) is judged
+  // on its own snapshot — the readiness submit, approve and baseline check
+  // (getReadinessForRevision) — never on the active activities, which only
+  // exist once it is activated, and activation needs the approval.
+  const readiness =
+    storedRevision && !storedRevision.isActive
+      ? await getReadinessForRevision({ project, revision: storedRevision })
+      : buildScheduleReadiness({
+          project,
+          revision,
+          activities,
+          allocationSummary,
+        });
   let criticalPathExplanation = null;
   try {
     criticalPathExplanation = buildCriticalPathExplanation(activities);

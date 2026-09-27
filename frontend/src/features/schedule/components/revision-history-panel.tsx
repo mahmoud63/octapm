@@ -275,11 +275,24 @@ export function RevisionHistoryPanel({
                       <span className='font-medium'>
                         {rev.label || 'AI Generated'}
                       </span>
-                      {(rev.isActive || rev.id === currentRevision.id) && (
-                        <span className='ms-2 rounded-full bg-primary/15 px-2 py-0.5 text-[10px] font-semibold text-primary'>
+                      {/* Active only once activated: a staged import or
+                          generation the page shows is labelled staged. */}
+                      {rev.isActive ? (
+                        <span
+                          className='ms-2 rounded-full bg-primary/15 px-2 py-0.5 text-[10px] font-semibold text-primary'
+                          data-testid='uat-revision-active-badge'
+                        >
                           Active
                         </span>
-                      )}
+                      ) : rev.id === currentRevision.id ? (
+                        <span
+                          className='ms-2 rounded-full bg-muted px-2 py-0.5 text-[10px] font-semibold text-muted-foreground'
+                          data-testid='uat-revision-staged-badge'
+                          title='Staged: not active until it is approved and activated'
+                        >
+                          Staged
+                        </span>
+                      ) : null}
                       {rev.rejectionReason && (
                         <p className='mt-1 max-w-72 truncate text-xs text-rose-600'>
                           {rev.rejectionReason}
