@@ -107,7 +107,9 @@ test('overview landing shows the controls strip; the wizard lists the offending 
   await expect(page.getByTestId('uat-controls-boq-revision')).toHaveText('3 rows')
   await expect(page.getByTestId('uat-controls-coverage-pct')).toHaveText('0%')
   await expect(page.getByTestId('uat-controls-na-amount')).toContainText('30,000')
-  await expect(page.getByTestId('uat-controls-schedule')).toHaveText('No schedule')
+  // Two activities and no revision: a schedule, not "No schedule".
+  await expect(page.getByTestId('uat-controls-schedule')).toHaveText('2 activities')
+  await expect(page.getByTestId('uat-controls-schedule-tile')).toContainText('No revision')
   await expect(page.getByTestId('uat-controls-progress-method')).toHaveText('0/2')
 
   // §20: the figures row under the strip — each says which truth it is, and
@@ -153,10 +155,12 @@ test('overview landing shows the controls strip; the wizard lists the offending 
   )
   expect(stepKeys.slice(0, 5)).toEqual(['project_profile', 'structure_setup', 'boq_upload', 'boq_approval', 'schedule_generation'])
 
-  // The BOQ upload step names the rows without a WBS node (all three, with
+  // The Structure step names the rows without a WBS node (all three, with
   // the count), each a link into the grid with the record in the URL, under
-  // the workspace.
-  const boqStep = page.getByTestId('uat-setup-step-boq_upload')
+  // the workspace — as information: nothing in the product files a row yet,
+  // so it holds no step, and the BOQ upload is complete as before PC-4.
+  await expect(page.getByTestId('uat-setup-step-boq_upload')).not.toContainText(/no WBS node/i)
+  const boqStep = structureStep.getByTestId('uat-setup-advisories-structure_setup')
   const withoutWbs = boqStep.getByTestId('uat-setup-issue-BOQ_ITEMS_WITHOUT_WBS')
   await expect(withoutWbs).toContainText(/no WBS node/i)
   await expect(withoutWbs).toContainText('(3)')
@@ -167,8 +171,8 @@ test('overview landing shows the controls strip; the wizard lists the offending 
   await expect(boqStep.getByTestId(`uat-setup-item-boq_item-${setup.concrete}`)).toBeVisible()
   await expect(boqStep.getByTestId(`uat-setup-item-boq_item-${setup.prelims}`)).toBeVisible()
 
-  // The schedule step names the activities without a node.
-  const scheduleStep = page.getByTestId('uat-setup-step-schedule_generation')
+  // ... and the activities without a node, beside them.
+  const scheduleStep = boqStep
   const fixLink = scheduleStep.getByTestId(`uat-setup-item-activity-${setup.fix}`)
   await expect(fixLink).toContainText('A130 · Fix reinforcement')
   await expect(fixLink).toHaveAttribute('href', `${base}/activities?recordId=${setup.fix}&source=activity`)
@@ -181,7 +185,7 @@ test('overview landing shows the controls strip; the wizard lists the offending 
   await expect(page.getByTestId('uat-project-content-boq')).toBeVisible({ timeout: 30_000 })
   await page.goBack()
   await expect(page.getByTestId('uat-project-content-overview')).toBeVisible({ timeout: 30_000 })
-  await page.getByTestId('uat-setup-step-schedule_generation').getByTestId(`uat-setup-item-activity-${setup.fix}`).click()
+  await page.getByTestId('uat-setup-step-structure_setup').getByTestId(`uat-setup-item-activity-${setup.fix}`).click()
   await expect(page).toHaveURL(new RegExp(`/activities\\?recordId=${setup.fix}&source=activity$`))
   await expect(page.getByTestId('uat-project-content-activities')).toBeVisible({ timeout: 30_000 })
 
@@ -215,6 +219,7 @@ test('overview landing shows the controls strip; the wizard lists the offending 
     'Progress',
     'Cost',
     'Forecast',
+    'Changes',
     'Resources',
     'Risks',
     'Baselines / Revisions',
@@ -226,6 +231,10 @@ test('overview landing shows the controls strip; the wizard lists the offending 
   await (await openControls()).getByTestId('uat-module-child-controls-progress').click()
   await expect(page).toHaveURL(new RegExp(`${escaped}/schedule/progress$`), { timeout: 30_000 })
   await expect(page.getByTestId('uat-project-content-schedule')).toBeVisible({ timeout: 30_000 })
+  // Changes opens the Commercial module at its change events.
+  await (await openControls()).getByTestId('uat-module-child-controls-changes').click()
+  await expect(page).toHaveURL(new RegExp(`${escaped}/commercial/change-events$`), { timeout: 30_000 })
+  await expect(page.getByTestId('uat-project-content-commercial')).toBeVisible({ timeout: 30_000 })
   await (await openControls()).getByTestId('uat-module-child-controls-structure').click()
   await expect(page).toHaveURL(new RegExp(`${escaped}/controls/structure$`), { timeout: 30_000 })
   await (await openControls()).getByTestId('uat-module-child-controls-overview').click()
@@ -340,7 +349,8 @@ test('the bill revision on the approval card, the strip figures as the services 
   ])
   await figuresClient.dispose()
   type Summary = {
-    budget?: { revisedBudget?: number | null }
+    records: unknown[]
+    budget?: { revisedBudget?: number | null; originalBudget?: number | null; source?: string | null }
     totals: { budget: number; actual: number }
     eac?: { mostLikely?: number | null }
   }
@@ -351,18 +361,28 @@ test('the bill revision on the approval card, the strip figures as the services 
   const summary = summaryResponse.body!.data as unknown as Summary
   const forecast = forecastResponse.body!.data as unknown as Forecast
   const currency = ((projectResponse.body!.data as { currency?: string | null }).currency ?? null) as string | null
-  const budget = summary.budget?.revisedBudget ?? summary.totals.budget
   const eac = summary.eac?.mostLikely as number
-  expect(eac, 'the fixture keeps the forecast apart from the budget').not.toBe(budget)
+  // The register has no lines: its revised budget comes back as 0, which is
+  // not a budget — the strip says so instead of printing USD 0.
+  expect(summary.budget).toMatchObject({ source: 'budget_register', revisedBudget: 0 })
+  expect(summary.records.length, 'the fixture has one cost record').toBe(1)
+  expect(eac, 'the fixture keeps the forecast apart from the budget').toBe(6400)
   const money = (value: number) =>
     page.evaluate(
       ([code, amount]) =>
         `${code ? `${code} ` : ''}${Number(amount).toLocaleString(undefined, { maximumFractionDigits: 0 })}`,
       [currency, value] as const,
     )
-  await expect(page.getByTestId('uat-controls-figure-budget-value')).toHaveText(await money(budget))
+  await expect(page.getByTestId('uat-controls-figure-budget-value')).toHaveText('—')
+  await expect(page.getByTestId('uat-controls-figure-budget')).toContainText('no budget register yet')
   await expect(page.getByTestId('uat-controls-figure-actual-value')).toHaveText(await money(summary.totals.actual))
+  await expect(page.getByTestId('uat-controls-figure-actual')).toContainText('cost ledger as of')
   await expect(page.getByTestId('uat-controls-figure-forecast-value')).toHaveText(await money(eac))
+  // A typed forecast above the (unallocated) activity's budget of 0: the
+  // estimate is over its own basis, and says it is the ledger's.
+  await expect(page.getByTestId('uat-controls-figure-forecast')).toHaveAttribute('data-tone', 'review')
+  await expect(page.getByTestId('uat-controls-figure-forecast')).toContainText('cost ledger: actual + cost to complete')
+  await expect(page.getByTestId('uat-controls-figures-basis')).toContainText('budget register and cost ledger as of')
   const counts = forecast.schedule!.counts!
   await expect(page.getByTestId('uat-controls-figure-progress-value')).toHaveText(
     `${counts.complete.toLocaleString()}/${counts.activities.toLocaleString()}`,
@@ -463,6 +483,10 @@ const BOQ_KEYS = [
 // The budgets built from the bill, and the forecast's money built from them:
 // withheld from the member who reads neither the BOQ nor the cost module.
 const BUDGET_KEYS = ['budget', 'generatedBudget', 'totalBudget', 'generatedTotalBudget', 'eac', 'bottomUp', 'bac']
+// ... and the earned-value report's money, where the health card and the
+// workspace home state it: EV is the allocations × % complete (a finished
+// activity's budget), PV the cost loading, AC the cost ledger.
+const EV_MONEY_KEYS = ['ev', 'pv', 'ac']
 
 const keyPaths = (value: unknown, keys: Set<string>, at = ''): string[] =>
   value && typeof value === 'object'
@@ -503,6 +527,10 @@ const snapshot = (label) => ({
   const common = { projectId, source: 'ai', activityCount: 2, criticalCount: 2, totalBudget: 69999.99 };
   const active = await prisma.scheduleRevision.create({ data: { ...common, label: 'Rev A', status: 'approved', isActive: true, snapshotJson: snapshot('Rev A'), approvedAt: new Date(), activatedAt: new Date() } });
   const staged = await prisma.scheduleRevision.create({ data: { ...common, label: 'Rev B', status: 'under_review', isActive: false, snapshotJson: snapshot('Rev B'), submittedAt: new Date() } });
+  // The pour is complete and approved: its earned value is its whole
+  // allocation (21337, its budget), on the health card and the workspace home.
+  const pour = await prisma.activity.findFirst({ where: { projectId, name: 'Pour foundations' }, select: { id: true } });
+  if (pour) await prisma.activityProgress.create({ data: { activityId: pour.id, pctComplete: 100, status: 'approved', approvedAt: new Date(Date.now() - 60000), updatedAt: new Date(Date.now() - 60000) } });
   process.stdout.write(JSON.stringify({ active: active.id, staged: staged.id }));
 })()
   .catch((error) => { process.stderr.write(String(error && error.message)); process.exitCode = 1; })
@@ -608,7 +636,7 @@ test('members who cannot read the BOQ: the Overview and every Schedule tab rende
       name: 'site engineer',
       email: setup.siteEngineer.email,
       readsCost: false,
-      withheld: new Set([...BOQ_KEYS, ...BUDGET_KEYS]),
+      withheld: new Set([...BOQ_KEYS, ...BUDGET_KEYS, ...EV_MONEY_KEYS]),
       // The bill's total, open value and second row; the allocations and the
       // budgets built from them; the generator's total; the rates.
       secrets: ['71793.5', '30273.9', '50456.5', '21337', '20182.6', '41519.6', '69999.99', '213.37', '1009.13'],
@@ -684,7 +712,10 @@ test('members who cannot read the BOQ: the Overview and every Schedule tab rende
       (row) => row.id === setup.projectId
     )
     expect(homeRow, `${member.name}: the project on the workspace home`).toBeTruthy()
-    expect(['bac' in homeRow!, 'eac' in homeRow!, typeof homeRow!.overallScore]).toEqual([
+    expect(['bac' in homeRow!, 'eac' in homeRow!, 'ev' in homeRow!, 'pv' in homeRow!, 'ac' in homeRow!, typeof homeRow!.overallScore]).toEqual([
+      member.readsCost,
+      member.readsCost,
+      member.readsCost,
       member.readsCost,
       member.readsCost,
       'number',
@@ -703,6 +734,19 @@ test('members who cannot read the BOQ: the Overview and every Schedule tab rende
     await forecastAnswer
     await page.waitForLoadState('networkidle')
     await noBrokenFigure('overview')
+    // The health card's earned value and actual cost: a dash with the
+    // reason for the site engineer, the figure for the cost controller.
+    const evMetric = page.getByTestId('uat-health-metric-cost-ev')
+    await expect(evMetric).toBeVisible({ timeout: 30_000 })
+    if (member.readsCost) {
+      await expect(evMetric).toContainText('21,337')
+      await expect(page.getByTestId('uat-health-withheld-cost')).toHaveCount(0)
+    } else {
+      await expect(evMetric.locator('dd')).toHaveText('—')
+      await expect(page.getByTestId('uat-health-metric-cost-ac').locator('dd')).toHaveText('—')
+      await expect(page.getByTestId('uat-health-withheld-cost')).toContainText('BOQ or the cost module')
+    }
+    await expect(page.getByTestId('uat-health-dimension-cost')).not.toContainText('[object Object]')
 
     for (const tab of TABS) {
       if (tab === 'wbs') {
@@ -738,7 +782,7 @@ test('members who cannot read the BOQ: the Overview and every Schedule tab rende
         const cost = page.getByTestId('uat-forecast-cost')
         await expect(cost).toBeVisible({ timeout: 30_000 })
         if (member.readsCost) {
-          await expect(cost).not.toContainText('not available')
+          await expect(cost).not.toContainText('Cost figures are not available to you')
         } else {
           await expect(cost).toContainText('—')
           await expect(cost).toContainText('Cost figures are not available to you')
