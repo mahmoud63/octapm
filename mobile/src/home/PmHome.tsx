@@ -13,7 +13,7 @@ import { Counts, PhotoStrip, Provenance, QuickActions, Section } from '@/home/se
 import type { CaptureAction } from '@/navigation/roleNav'
 import { destinationForTarget, openOnWeb } from '@/navigation/links'
 import { day, money } from '@/utilities/format'
-import { eacQualifier, forecastNotes } from '@/utilities/forecast'
+import { eacQualifier, evCutoffLine, forecastNotes } from '@/utilities/forecast'
 
 const localDay = (d = new Date()) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 const ratio = (v: number | null | undefined) => (v === null || v === undefined ? '—' : v.toFixed(2))
@@ -164,6 +164,9 @@ export function PmHome({ projectId, currency, actions }: { projectId: string; cu
           <KPI label="Actual" value={money(cost?.actual ?? null, currency)} />
           <KPI label="Forecast at completion" value={money(cost?.eac ?? null, currency)} qualifier={eacQualifier(forecast.data)} tone={(cost?.overrun ?? 0) > 0 ? 'error' : 'default'} />
         </View>
+        {/* The EV cutoff SPI and CPI were measured through (D1); the zone
+            note, when the project has none, is among the server's notes. */}
+        {evCutoffLine(forecast.data) ? <Provenance>{evCutoffLine(forecast.data)}</Provenance> : null}
         {forecastNotes(forecast.data).map((note) => (
           <Provenance key={note}>{note}</Provenance>
         ))}

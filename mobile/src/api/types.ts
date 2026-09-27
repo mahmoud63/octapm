@@ -125,6 +125,19 @@ export interface Forecast {
   summary: { scheduleLevel: string | null; costLevel: string | null } | null
   /** The server's plain-language notes on what its figures cannot yet include. */
   dataQuality?: string[]
+  /**
+   * The earned-value cutoff SPI, CPI and the EAC were measured through: the
+   * end of `cutoffLocalDate` in `timeZone` (the project's, else the
+   * organisation's, else UTC); `timeZoneNote` is the server's sentence when
+   * the project has no zone of its own.
+   */
+  earnedValueCutoff?: {
+    cutoffDate: string | null
+    cutoffLocalDate: string | null
+    timeZone: string | null
+    timeZoneSource?: string | null
+    timeZoneNote?: string | null
+  } | null
 }
 
 export interface ProjectHealthRow {
