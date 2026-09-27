@@ -738,16 +738,70 @@ const getReadinessForRevision = async ({ project, revision }) => {
   });
 };
 
+// A revision status as the Revisions tab shows it.
+const REVISION_STATUS_LABELS = Object.freeze({
+  [REVISION_STATUS.DRAFT]: "Draft",
+  [REVISION_STATUS.UNDER_REVIEW]: "Under review",
+  [REVISION_STATUS.APPROVED]: "Approved",
+  [REVISION_STATUS.REJECTED]: "Rejected",
+  [REVISION_STATUS.BASELINED]: "Baselined",
+  [REVISION_STATUS.SUPERSEDED]: "Superseded",
+});
+
+const revisionStatusLabel = (status) =>
+  REVISION_STATUS_LABELS[status] || String(status || "unknown").replace(/_/g, " ");
+
+const joinLabels = (statuses) => statuses.map(revisionStatusLabel).join(" or ");
+
+/**
+ * A refused lifecycle step, in the words the screen uses: the status the
+ * revision is in now (it may have changed since the page was loaded), the
+ * status the step needs, and that a refresh shows the current state.
+ */
+const invalidRevisionStatusMessage = ({ status, allowed, action }) =>
+  `This schedule revision is now ${revisionStatusLabel(status)}; it must be ${joinLabels(allowed)} before it can be ${action}. Refresh to see its current status.`;
+
 const assertAllowedStatus = (revision, allowed, action) => {
   const status = normalizeRevisionStatus(revision.status);
   if (!allowed.includes(status)) {
     throw new HttpError(
       409,
       "INVALID_REVISION_STATUS",
-      `Schedule revision must be ${allowed.join(" or ")} before it can be ${action}.`,
+      invalidRevisionStatusMessage({ status, allowed, action }),
       { status, allowed },
     );
   }
+};
+
+// Where each blocking schedule-readiness check is put right.
+const READINESS_FIX_WHERE = Object.freeze({
+  predecessors: "Schedule › Gantt",
+  allocations: "Project Controls › Mapping",
+  critical_path: "Schedule › Critical Path",
+  date_sanity: "Schedule › Activities",
+});
+
+/**
+ * SCHEDULE_NOT_READY in words a user can act on: each failing blocking
+ * check by its label, what is wrong and where to put it right. The checks'
+ * messages carry no BOQ figure, so the sentence is the same for every
+ * reader; the readiness itself stays in error.details (withheld per reader
+ * by utils/boq-figures withheldError).
+ */
+const scheduleNotReadyMessage = (readiness, action) => {
+  const failing = (readiness?.checks || []).filter(
+    (check) => check.severity === "blocking" && !check.passed,
+  );
+  if (failing.length === 0) {
+    return `Schedule readiness checks must pass before ${action}.`;
+  }
+  const reasons = failing.map((check) => {
+    const message = String(check.message || "").trim().replace(/\.$/, "");
+    const what = message ? message.charAt(0).toLowerCase() + message.slice(1) : "not passed";
+    const where = READINESS_FIX_WHERE[check.key];
+    return `${check.label} — ${what}${where ? ` (${where})` : ""}`;
+  });
+  return `Schedule readiness checks must pass before ${action}: ${reasons.join("; ")}.`;
 };
 
 const supersedeOpenScheduleRevisions = async (
@@ -2529,7 +2583,7 @@ async function activateRevisionSnapshot({
     throw new HttpError(
       409,
       "INVALID_REVISION_STATUS",
-      `Schedule revision must be ${allowedStatuses.join(" or ")} before activation.`,
+      `This schedule revision is now ${revisionStatusLabel(status)}; it must be ${joinLabels(allowedStatuses)} before it can be activated. Refresh to see its current status.`,
       { status, allowed: allowedStatuses },
     );
   }
@@ -3174,7 +3228,7 @@ const approveRevision = async ({
     throw new HttpError(
       400,
       "SCHEDULE_NOT_READY",
-      "Schedule readiness checks must pass before approval.",
+      scheduleNotReadyMessage(readiness, "approval"),
       readiness,
     );
   }
@@ -3330,7 +3384,7 @@ const lockBaseline = async ({
     throw new HttpError(
       400,
       "SCHEDULE_NOT_READY",
-      "Schedule readiness checks must pass before baseline lock.",
+      scheduleNotReadyMessage(readiness, "baseline lock"),
       readiness,
     );
   }

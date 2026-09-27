@@ -903,6 +903,39 @@ function refuseComparisonOnlyReview(revision) {
 }
 
 /**
+ * A review step (submit or approve) the revision's status no longer allows,
+ * refused in BOQ words before the generic workflow check: the revision may
+ * have been submitted, approved, locked or superseded by someone else since
+ * the page was loaded, so the sentence says where it stands and to refresh.
+ * The code stays the workflow's (APPROVAL_WORKFLOW_INVALID_TRANSITION) so
+ * clients that read it are unchanged; the details say the status.
+ */
+function refuseStaleBoqReviewStep(revision, step) {
+  const n = revision.revisionNumber;
+  const status = revision.status;
+  let message = null;
+  if (status === BOQ_REVISION_STATUS.BASELINED) {
+    message = `BOQ revision ${n} is already approved and locked as the baseline; refresh the BOQ page to see it.`;
+  } else if (status === BOQ_REVISION_STATUS.SUPERSEDED) {
+    message = `BOQ revision ${n} has been superseded by a later revision; refresh the BOQ page to see the current one.`;
+  } else if (step === 'approve' && status === BOQ_REVISION_STATUS.IMPORTED) {
+    message = `Submit BOQ revision ${n} for review before approving it.`;
+  } else if (status === BOQ_REVISION_STATUS.APPROVED) {
+    message = `BOQ revision ${n} is already approved; refresh the BOQ page — the next step is to lock it as the baseline.`;
+  } else if (step === 'submit' && status === BOQ_REVISION_STATUS.UNDER_REVIEW) {
+    message = `BOQ revision ${n} is already under review; refresh the BOQ page to see it.`;
+  }
+  if (!message) return;
+  throw new HttpError(409, 'APPROVAL_WORKFLOW_INVALID_TRANSITION', message, {
+    recordType: approvalWorkflowService.RECORD_TYPES.BOQ_REVISION,
+    revisionId: revision.id,
+    revisionNumber: n,
+    fromStatus: status,
+    toStatus: step === 'approve' ? BOQ_REVISION_STATUS.APPROVED : BOQ_REVISION_STATUS.UNDER_REVIEW,
+  });
+}
+
+/**
  * The revision under review must be the one whose rows are the bill.
  *
  * A later upload applies its rows over the earlier revision's, so signing
@@ -940,6 +973,7 @@ async function submitBoqRevision(projectId, revisionId, options = {}) {
     const revision = await findBoqRevisionInProject(projectId, revisionId, tx);
     refuseComparisonOnlyReview(revision);
     await assertBoqRevisionCurrent(tx, projectId, revision);
+    refuseStaleBoqReviewStep(revision, 'submit');
     return transitionBoqRevision(tx, {
       orgId: options.orgId,
       projectId,
@@ -960,6 +994,7 @@ async function approveBoqRevision(projectId, revisionId, options = {}) {
     const revision = await findBoqRevisionInProject(projectId, revisionId, tx);
     refuseComparisonOnlyReview(revision);
     await assertBoqRevisionCurrent(tx, projectId, revision);
+    refuseStaleBoqReviewStep(revision, 'approve');
     return transitionBoqRevision(tx, {
       orgId: options.orgId,
       projectId,
