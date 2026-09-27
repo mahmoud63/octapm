@@ -31,4 +31,17 @@ const eacBasisOf = ({ totalBudget, cpi }) => {
   return Number(cpi) > 0 ? EAC_BASES.BUDGET_OVER_CPI : EAC_BASES.CPI_ZERO;
 };
 
-module.exports = { EAC_BASES, eacBasisOf };
+// The words every screen gives each basis (frontend lib/eac-basis says the
+// same); the server's narrative and its prompt to a model use them too.
+const EAC_BASIS_LABELS = Object.freeze({
+  [EAC_BASES.BUDGET_OVER_CPI]: "revised budget ÷ CPI",
+  [EAC_BASES.CPI_ZERO]: "the budget — nothing earned against the cost spent (CPI 0)",
+  [EAC_BASES.NO_COST_PERFORMANCE]: "the budget — no cost performance yet",
+  [EAC_BASES.NO_BUDGET]: "no approved budget yet",
+});
+
+/** The EAC is the revised budget handed back (no CPI, or CPI 0), not a projection. */
+const eacIsBudgetFallback = (basis) =>
+  basis === EAC_BASES.CPI_ZERO || basis === EAC_BASES.NO_COST_PERFORMANCE;
+
+module.exports = { EAC_BASES, EAC_BASIS_LABELS, eacBasisOf, eacIsBudgetFallback };

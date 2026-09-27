@@ -375,6 +375,41 @@ const withheldStepForNonBoqReader = (step) => {
   };
 };
 
+// The schedule's records behind an issue — its activities and revisions —
+// go to those who may read the schedule (PC-4 merge gate round 3): a member
+// whose template takes the schedule away is refused the schedule and the
+// WBS, so readiness does not list them the activities either. The issue,
+// its code, message and count stay, so every gate is the same for everyone.
+const SCHEDULE_ITEM_TYPES = new Set(["activity", "schedule_revision"]);
+const SCHEDULE_DETAILS_WITHHELD = "Schedule records are listed for people who can open the schedule";
+
+const withoutScheduleRecords = (entry) => {
+  const items = (entry.items || []).filter((item) => !SCHEDULE_ITEM_TYPES.has(item.type));
+  return items.length === (entry.items || []).length
+    ? entry
+    : { ...entry, items, scheduleItemsWithheld: true, scheduleReason: SCHEDULE_DETAILS_WITHHELD };
+};
+
+/** A step as a member who may not read the schedule receives it. */
+const withheldStepForNonScheduleReader = (step) => ({
+  ...step,
+  blockers: step.blockers.map(withoutScheduleRecords),
+  warnings: step.warnings.map(withoutScheduleRecords),
+  advisories: step.advisories.map(withoutScheduleRecords),
+});
+
+// The schedule's own checks name activities in their details (cycles,
+// float mismatches, …): the verdicts and messages stay, the rows do not.
+const withheldScheduleChecks = (readiness) =>
+  readiness && Array.isArray(readiness.checks)
+    ? {
+        ...readiness,
+        checks: readiness.checks.map((check) =>
+          check && check.details ? { ...check, details: {}, detailsWithheld: true } : check,
+        ),
+      }
+    : readiness;
+
 // The official reporting gate as the base shaped it: EV stores it in the
 // locked period's snapshot basis and in the override's audit metadata, so
 // the per-item detail (records, links under the workspace slug) stays on
@@ -448,7 +483,7 @@ const itemsFromCheckDetails = (check, activityById, toActivityItem) => {
  * out the bill's rows, values and review trail that the BOQ and coverage
  * endpoints would refuse the same person.
  */
-const getSetupReadiness = async ({ orgId, projectId, canReadBoq = true }) => {
+const getSetupReadiness = async ({ orgId, projectId, canReadBoq = true, canReadSchedule = true }) => {
   const project = await prisma.project.findFirst({
     where: { id: projectId, orgId },
   });
@@ -1794,7 +1829,8 @@ const getSetupReadiness = async ({ orgId, projectId, canReadBoq = true }) => {
   // steps — are identical for every caller, and carry no BOQ figure either.
   // Nor the mapping's coverage: how many rows or allocations a mapping issue
   // concerns, and the mapping guide's share and counts (decision C).
-  const steps = canReadBoq ? builtSteps : builtSteps.map(withheldStepForNonBoqReader);
+  const boqSteps = canReadBoq ? builtSteps : builtSteps.map(withheldStepForNonBoqReader);
+  const steps = canReadSchedule ? boqSteps : boqSteps.map(withheldStepForNonScheduleReader);
 
   const baselineBlockers = addStepContext(
     steps.filter((step) => step.requiredFor.includes("baseline")),
@@ -2113,7 +2149,9 @@ const getSetupReadiness = async ({ orgId, projectId, canReadBoq = true }) => {
       // them; its allocations check states the bill's value in the same
       // seven figures the steps count, so a caller who cannot read the BOQ
       // gets each check's verdict and message without them.
-      scheduleReadiness: withheldScheduleReadiness(scheduleReadiness, { boq: canReadBoq, budget: true }),
+      scheduleReadiness: canReadSchedule
+        ? withheldScheduleReadiness(scheduleReadiness, { boq: canReadBoq, budget: true })
+        : withheldScheduleChecks(withheldScheduleReadiness(scheduleReadiness, { boq: canReadBoq, budget: true })),
       officialEvInputs: OFFICIAL_EV_INPUTS,
     },
     steps,

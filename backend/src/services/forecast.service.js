@@ -6,7 +6,8 @@ const scheduleService = require("./schedule.service");
 const evService = require("./earned-value.service");
 const budgetService = require("./budget.service");
 const { forecastCostWithheld, withheldForecast } = require("../utils/boq-figures");
-const { EAC_BASES, eacBasisOf } = require("../utils/eac-basis");
+const { EAC_BASES, EAC_BASIS_LABELS, eacBasisOf, eacIsBudgetFallback } = require("../utils/eac-basis");
+const { EV_NOTES, cpiNoteFor, spiNoteFor, cutoffNotReached } = require("../utils/ev-notes");
 
 /**
  * Schedule delay and cost overrun prediction (OCTA-AI-PREDICT-031).
@@ -344,9 +345,16 @@ const buildForecast = async ({ orgId, projectId, asOf = new Date() }) => {
     // One note per missing index, each with its own cause: SPI is EV / PV
     // and PV is the approved time-phased cost loading; CPI is EV / AC and AC
     // is the official cost-record actuals. Messages only — no figure moves.
-    if (spi === null) dataQuality.push("SPI is not available yet: no approved time-phased cost loading through the cutoff, so there is no planned value to measure progress against.");
-    if (cpi === null) dataQuality.push("CPI is not available yet: no official cost-record actuals through the cutoff, so the earned-value estimate at completion falls back to the budget.");
-    else if (eacBasis === EAC_BASES.CPI_ZERO) dataQuality.push("CPI is 0: actual cost has been recorded with no earned value through the cutoff, so budget ÷ CPI cannot be computed and the estimate at completion shows the budget.");
+    // CPI 0 has two causes: cost spent with nothing earned against a
+    // budget, or no approved budget to earn against at all (no_budget).
+    const spiNote = spiNoteFor({ spi });
+    const cpiNote = cpiNoteFor({ cpi, eacBasis });
+    if (spiNote) dataQuality.push(spiNote);
+    if (cpiNote) dataQuality.push(cpiNote);
+    // The latest period's cutoff still ahead: PV runs to it while EV and AC
+    // stop at today, so SPI (and the EV-based finish) compare a future plan
+    // with to-date work. Said beside them, never changed.
+    if (cutoffNotReached(earnedValueCutoff?.cutoffDate, asOf)) dataQuality.push(EV_NOTES.CUTOFF_NOT_REACHED);
     // The EV report's own sentence when the project has no zone of its own.
     if (earnedValueCutoff?.timeZoneNote) dataQuality.push(earnedValueCutoff.timeZoneNote);
   }
@@ -403,8 +411,32 @@ Return ONLY a JSON object:
 
 const money = (value) => (value === null || value === undefined ? "—" : Number(value).toLocaleString("en-US", { maximumFractionDigits: 0 }));
 
+/**
+ * The cost outlook in words when the EAC is not a projection — the budget
+ * handed back (no CPI, or CPI 0), or no approved budget at all; null when
+ * it is one (revised BAC ÷ CPI). The basis is the EV report's.
+ */
+const costOutlook = (c) => {
+  if (c.eacBasis === EAC_BASES.NO_BUDGET) {
+    return {
+      headline: "there is no approved budget yet, so the cost cannot be projected",
+      cost: "There is no approved budget to project the cost from: no estimate at completion yet.",
+    };
+  }
+  if (eacIsBudgetFallback(c.eacBasis)) {
+    const label = EAC_BASIS_LABELS[c.eacBasis];
+    return {
+      headline: `the cost outlook is ${label}, not a projection`,
+      cost: `The estimate at completion is ${label}: the budget handed back because there is no cost performance to project from, so it says nothing yet about whether the cost will stay within the budget.`,
+    };
+  }
+  return null;
+};
+
+// The EAC's rule goes to the model with the figure: a budget handed back is
+// never offered to it as a projection "within budget".
 const costLines = (c) => [
-  `Cost: budget ${money(c.budget)}, EAC ${money(c.eac)}, bottom-up ${money(c.bottomUp)}, projected ${money(c.projected)} (${c.overrun > 0 ? `${money(c.overrun)} over` : "within budget"}); actual to date ${money(c.actual)}.`,
+  `Cost: budget ${money(c.budget)}, EAC ${money(c.eac)} (${EAC_BASIS_LABELS[c.eacBasis] || "no earned-value report"}), bottom-up ${money(c.bottomUp)}, projected ${money(c.projected)} (${c.overrun > 0 ? `${money(c.overrun)} over` : costOutlook(c) ? `not a projection: ${costOutlook(c).headline}; do not call it within budget` : "within budget"}); actual to date ${money(c.actual)}.`,
   "Activities over budget:",
   ...(c.topRisks.length ? c.topRisks.slice(0, 6).map((row) => `- [${row.id}] ${row.name} · budget ${money(row.cost.budget)} · actual ${money(row.cost.actual)} · projected ${money(row.cost.projected)} (${money(row.cost.overrun)} over, ${row.cost.overrunPct}%) · ${row.cost.reasons.join("; ") || row.cost.basis}`) : ["- none"]),
   "Budget lines over:",
@@ -456,10 +488,18 @@ const deterministicNarrative = (forecast) => {
       actions: scheduleRiskActions(top),
     };
   }
+  // When nothing projects the cost (the budget handed back, or no budget),
+  // the narrative says so — never "within budget", as if a projection had
+  // cleared it. An overrun from the bottom-up is a projection and says so.
+  const outlook = c.overrun > 0 ? null : costOutlook(c);
+  const finish = s.slipDays ? `The project is projected to finish ${plural(s.slipDays, "day")} late` : "The project is projected to finish on time";
+  const activityRisks = c.topRisks.length ? `${c.topRisks.slice(0, 3).map((row) => `${row.name} projected ${money(row.cost.overrun)} over (${row.cost.reasons[0] || row.cost.basis})`).join("; ")}.` : null;
   return {
-    headline: s.slipDays ? `The project is projected to finish ${plural(s.slipDays, "day")} late${c.overrun > 0 ? ` and ${money(c.overrun)} over budget` : ""}.` : c.overrun > 0 ? `The finish holds but the cost is projected ${money(c.overrun)} over budget.` : "The project is projected on time and within budget.",
+    headline: outlook
+      ? `${finish}; ${outlook.headline}.`
+      : s.slipDays ? `${finish}${c.overrun > 0 ? ` and ${money(c.overrun)} over budget` : ""}.` : c.overrun > 0 ? `The finish holds but the cost is projected ${money(c.overrun)} over budget.` : "The project is projected on time and within budget.",
     schedule: top.length ? `${top.map((row) => `${row.name}: ${row.reasons[0] || `${row.level} risk`}`).join(". ")}.` : "No activity shows a schedule risk from the records.",
-    cost: c.topRisks.length ? `${c.topRisks.slice(0, 3).map((row) => `${row.name} projected ${money(row.cost.overrun)} over (${row.cost.reasons[0] || row.cost.basis})`).join("; ")}.` : "No activity or budget line is projected over budget.",
+    cost: outlook ? [outlook.cost, activityRisks].filter(Boolean).join(" ") : activityRisks || "No activity or budget line is projected over budget.",
     watch: [...top.map((row) => row.name), ...c.budgetLines.slice(0, 2).map((row) => `${row.costCode || ""} ${row.name}`.trim())].slice(0, 5),
     actions: scheduleRiskActions(top),
   };

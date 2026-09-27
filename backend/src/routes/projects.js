@@ -4,7 +4,7 @@ const { asyncHandler } = require("../utils/async-handler");
 const { sendSuccess } = require("../utils/api-response");
 const { authenticate } = require("../middleware/auth");
 const { requestForProject, requireProjectAccess } = require("../middleware/project-access");
-const { requireRoles } = require("../middleware/rbac");
+const { hasPermission, requireRoles } = require("../middleware/rbac");
 const { boqFigureAccess, canReadBoq, withheldWorkspaceDashboard } = require("../utils/boq-figures");
 const { validate } = require("../middleware/validate");
 const {
@@ -235,6 +235,9 @@ router.get(
       // and review trail in it are for those who may read the BOQ, as the
       // BOQ and coverage endpoints decide it (template, role or party).
       canReadBoq: canReadBoq(req),
+      // Nor the activities and schedule revisions named under an issue to
+      // a member whose template takes the schedule away.
+      canReadSchedule: hasPermission(req, "schedule", "read"),
     });
 
     return sendSuccess(res, result);

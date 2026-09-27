@@ -6,6 +6,7 @@ const { boqFigureAccess } = require("../utils/boq-figures");
 const { HttpError } = require("../utils/http-error");
 const { prisma } = require("../config/db");
 const evService = require("../services/earned-value.service");
+const { EV_NOTES, cpiNoteFor, spiNoteFor, cutoffNotReached } = require("../utils/ev-notes");
 const {
   summarizeProcurementRisks,
 } = require("../services/procurement-risk.service");
@@ -120,6 +121,8 @@ function pendingMetric({ key, label, count, source, target, cutoffDate }) {
     sourceStatus: "pending-review",
     excludedFromOfficialKpis: true,
     cutoffDate,
+    // Counted now: a pending queue has no EV cutoff.
+    measuredThrough: "today",
     target,
   };
 }
@@ -318,6 +321,17 @@ router.get(
     const cutoffDate =
       evReport.reporting?.cutoffDate || toIso(project.dataDate) || toIso(today);
     const generatedAt = new Date().toISOString();
+    // The latest period's cutoff still ahead: PV runs to it while EV and AC
+    // stop at today, so the SPI, the schedule score and the EAC compare a
+    // future plan with to-date work. The figures stand; this says so.
+    const cutoffNotReachedNote = cutoffNotReached(evReport.reporting?.cutoffDate, today)
+      ? EV_NOTES.CUTOFF_NOT_REACHED
+      : null;
+    // No index: the score is the neutral 60 the rule gives, not a measured
+    // assessment — the reason goes with it (messages only; the score rule
+    // is unchanged).
+    const spiNote = spiNoteFor({ spi });
+    const cpiNote = cpiNoteFor({ cpi, eacBasis: evReport.eacBasis });
     const pendingChangeOrders = changeOrders.filter(
       (row) => lower(row.status) === "pending",
     );
@@ -460,6 +474,8 @@ router.get(
       {
         key: "schedule",
         label: "Schedule",
+        // Earned value through the EV cutoff.
+        measuredThrough: "ev_cutoff",
         score: scheduleScore,
         sourceRule: KPI_SOURCE_RULES.schedule,
         cutoffDate,
@@ -475,6 +491,9 @@ router.get(
           spi: spi === null ? null : Number(spi.toFixed(2)),
           delayedActivities: delayedCount,
           basisWarnings: evReport.basisWarnings,
+          spiNote,
+          scoreBasis: spi === null ? "neutral_no_index" : "spi",
+          cutoffNotReachedNote,
           sourceRule: KPI_SOURCE_RULES.schedule,
           cutoffDate,
         },
@@ -482,6 +501,8 @@ router.get(
       {
         key: "cost",
         label: "Cost",
+        // Earned value through the EV cutoff.
+        measuredThrough: "ev_cutoff",
         score: costScore,
         sourceRule: KPI_SOURCE_RULES.cost,
         cutoffDate,
@@ -510,6 +531,9 @@ router.get(
               }
             : {}),
           acSource: evReport.sourceSummary?.ac || null,
+          cpiNote,
+          scoreBasis: cpi === null ? "neutral_no_index" : "cpi",
+          cutoffNotReachedNote,
           sourceRule: KPI_SOURCE_RULES.cost,
           cutoffDate,
         },
@@ -517,6 +541,8 @@ router.get(
       {
         key: "commercial",
         label: "Commercial",
+        // Counted from the records as they stand today, not at the EV cutoff.
+        measuredThrough: "today",
         score: commercialScore,
         sourceRule: KPI_SOURCE_RULES.commercial,
         cutoffDate,
@@ -535,6 +561,8 @@ router.get(
       {
         key: "supplyChain",
         label: "Supply Chain",
+        // Counted from the records as they stand today, not at the EV cutoff.
+        measuredThrough: "today",
         score: supplyChainScore,
         sourceRule: KPI_SOURCE_RULES.supplyChain,
         cutoffDate,
@@ -557,6 +585,8 @@ router.get(
       {
         key: "quality",
         label: "Quality",
+        // Counted from the records as they stand today, not at the EV cutoff.
+        measuredThrough: "today",
         score: qualityScore,
         sourceRule: KPI_SOURCE_RULES.quality,
         cutoffDate,
@@ -575,6 +605,8 @@ router.get(
       {
         key: "safety",
         label: "Safety",
+        // Counted from the records as they stand today, not at the EV cutoff.
+        measuredThrough: "today",
         score: safetyScore,
         sourceRule: KPI_SOURCE_RULES.safety,
         cutoffDate,
@@ -593,6 +625,8 @@ router.get(
       {
         key: "docControl",
         label: "Doc Control",
+        // Counted from the records as they stand today, not at the EV cutoff.
+        measuredThrough: "today",
         score: docControlScore,
         sourceRule: KPI_SOURCE_RULES.docControl,
         cutoffDate,
@@ -677,8 +711,10 @@ router.get(
         cutoffTimeZoneSource: evReport.reporting?.timeZoneSource || null,
         // The report's own sentence when the project has no zone of its own.
         cutoffTimeZoneNote: evReport.reporting?.timeZoneNote ?? null,
+        // Set when that cutoff is still ahead (EV and AC stop at today).
+        cutoffNotReachedNote,
         sourceUpdatedAt: toIso(project.updatedAt),
-        note: "Official health dimensions use approved or active source records through cutoff; pending-review metrics are displayed separately.",
+        note: "Schedule and cost use the official EV report through the EV cutoff; the other dimensions and the pending-review counts are the records as they stand today (measuredThrough on each dimension).",
       },
       kpiSourceRules: KPI_SOURCE_RULES,
       overallScore,

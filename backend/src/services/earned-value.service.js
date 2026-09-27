@@ -16,7 +16,6 @@ const auditService = require("./audit.service");
 const setupReadinessService = require("./project-setup-readiness.service");
 const { normalizeRoleId } = require("../config/permissions");
 const {
-  endOfLocalDay,
   localDateOf,
   reportingDateOfStoredCutoff,
   reportingTimeZoneNote,
@@ -26,6 +25,8 @@ const {
 } = require("../utils/reporting-cutoff");
 // Which rule gave the EAC (budget / CPI, or the budget with CPI 0 or none).
 const { eacBasisOf } = require("../utils/eac-basis");
+// The server's sentences beside an EV figure (a cutoff not yet reached).
+const { EV_NOTES, cutoffNotReached } = require("../utils/ev-notes");
 
 const FORMULA_VERSION = "ev.v2";
 const APPROVED = "approved";
@@ -495,7 +496,18 @@ const plannedFinishFromActivity = ({ project, activity }) => {
   return addDays(project.startDate, activity.earlyFinish);
 };
 
-const buildOfficialSCurveData = ({ costLoadings, cutoffDate, ev, zone }) => {
+// What the S-curve's EV points are (PC-4 merge gate round 3): EV is a
+// figure measured at a cutoff, so the series carries it only at the month of
+// this report's cutoff date — with the instant it was measured at and the PV
+// through that same instant — and null in every other month. The base wrote
+// this report's EV into every earlier month, a history nobody measured.
+// Each locked period's snapshot holds its own EV at its own cutoff.
+const S_CURVE_NOTE =
+  "EV is given only in the month of this report's cutoff, measured at the cutoff instant (evMeasuredAt) against the PV through that same instant (pvAtCutoff); other months carry no EV — each locked period's snapshot holds its own. A month's pv is the planned value through the month's last date.";
+const LEGACY_S_CURVE_NOTE =
+  "This locked snapshot stored its S-curve before EV was given only at the cutoff: its EV in earlier months repeats the EV at the cutoff and is not a measured history.";
+
+const buildOfficialSCurveData = ({ costLoadings, cutoffDate, cutoffLocalDate, ev, pv, zone }) => {
   if (!costLoadings.length) return [];
 
   // plannedDate is a calendar date: its month is the month of its own date
@@ -507,22 +519,27 @@ const buildOfficialSCurveData = ({ costLoadings, cutoffDate, ev, zone }) => {
   const utc = { timeZone: "UTC" };
   const finish = monthKeyOf(Math.max(...plannedDates), utc);
   const rows = [];
+  // The month the cutoff's calendar date falls in, in the reporting zone.
+  const cutoffMonth = cutoffLocalDate
+    ? String(cutoffLocalDate).slice(0, 7)
+    : monthKeyOf(cutoffDate, zone);
 
   for (
     let month = monthKeyOf(Math.min(...plannedDates), utc);
     month <= finish;
     month = nextMonthKey(month)
   ) {
-    const monthEnd = endOfLocalDay(lastDateOfMonth(month), zone.timeZone);
     const plannedThrough = storedValueForReportingDate(lastDateOfMonth(month));
-    const pv = costLoadings
+    const monthPv = costLoadings
       .filter((row) => new Date(row.plannedDate) <= plannedThrough)
       .reduce((sum, row) => addMoney(sum, row.plannedValue), 0);
 
+    const measured = month === cutoffMonth;
     rows.push({
       label: formatMonthLabel(month),
-      pv,
-      ev: monthEnd <= cutoffDate ? ev : null,
+      pv: monthPv,
+      ev: measured ? ev : null,
+      ...(measured ? { evMeasuredAt: toIso(cutoffDate), pvAtCutoff: pv } : {}),
     });
   }
 
@@ -619,6 +636,13 @@ const snapshotToReport = ({ snapshot, period }) => {
     approvedAllocatedAmount: basisJson.approvedAllocatedAmount || 0,
     approvedBudgetRevisionDelta: basisJson.approvedBudgetRevisionDelta || 0,
     sCurve: snapshot.sCurveJson || [],
+    // Said, never rewritten: a series stored before EV was given only at
+    // the cutoff repeats the cutoff's EV in earlier months.
+    sCurveNote: (snapshot.sCurveJson || []).some(
+      (row) => row && row.ev !== null && row.ev !== undefined && !row.evMeasuredAt,
+    )
+      ? LEGACY_S_CURVE_NOTE
+      : S_CURVE_NOTE,
     activityBreakdown: snapshot.activityBreakdownJson || [],
     alerts: basisJson.alerts || {
       spiAlert: snapshot.spi !== null && snapshot.spi < 0.9,
@@ -841,10 +865,8 @@ const buildOfficialEvReport = async ({
   // A cutoff that has not been reached yet: PV runs to the cutoff while EV
   // and AC can only exist up to today, so SPI and SV compare a future plan
   // with to-date work. Said, not changed.
-  if (resolvedCutoffDate.getTime() > Date.now()) {
-    basisWarnings.push(
-      "This period's cutoff has not been reached; EV and AC are measured through today while PV runs to the cutoff.",
-    );
+  if (cutoffNotReached(resolvedCutoffDate)) {
+    basisWarnings.push(EV_NOTES.CUTOFF_NOT_REACHED);
   }
 
   // The project has no zone of its own: say which one the cutoff was read
@@ -932,9 +954,12 @@ const buildOfficialEvReport = async ({
     sCurve: buildOfficialSCurveData({
       costLoadings,
       cutoffDate: resolvedCutoffDate,
+      cutoffLocalDate: cutoff.localDate,
       ev: metrics.ev,
+      pv: metrics.pv,
       zone: { timeZone: cutoff.timeZone, source: cutoff.timeZoneSource },
     }),
+    sCurveNote: S_CURVE_NOTE,
     activityBreakdown: activityRows
       .slice()
       .sort((a, b) => b.budget - a.budget)
