@@ -35,6 +35,7 @@ const boqFigureAccess = (req) => {
 };
 
 const FULL_ACCESS = Object.freeze({ boq: true, budget: true });
+const NO_ACCESS = Object.freeze({ boq: false, budget: false });
 
 // The bill's money as readiness counts it and details it: the bill's value,
 // what is allocatable, approved, pending, open, optional and not applicable
@@ -274,6 +275,33 @@ const withheldAuditHistory = (history, access = FULL_ACCESS) => {
   return { ...history, events };
 };
 
+// A project's row on the workspace dashboard states the official EV
+// report's budget (bac: the approved allocations' sum) and the estimate at
+// completion built from it (eac: bac / CPI). The scores, SPI and CPI stay.
+const PROJECT_HEALTH_BUDGET_KEYS = ["bac", "eac"];
+
+/** A project's row on the workspace dashboard as this caller may receive it on that project. */
+const withheldProjectHealth = (row, access = FULL_ACCESS) =>
+  access.budget ? row : withoutKeys(row, PROJECT_HEALTH_BUDGET_KEYS);
+
+/**
+ * GET /projects/workspace-dashboard as this caller may receive it: each
+ * project's row as the caller's access on that project allows —
+ * `accessFor(projectId)` is boqFigureAccess resolved as that project's own
+ * routes resolve it. The rest of the answer is scores, counts and other
+ * modules' records, as built. A row whose project's access is not known
+ * loses the budget.
+ */
+const withheldWorkspaceDashboard = (dashboard, accessFor) => {
+  if (!dashboard || typeof dashboard !== "object" || !Array.isArray(dashboard.projectHealth)) return dashboard;
+  const rows = dashboard.projectHealth.map((row) =>
+    withheldProjectHealth(row, accessFor(row && row.id) || NO_ACCESS),
+  );
+  return rows.every((row, index) => row === dashboard.projectHealth[index])
+    ? dashboard
+    : { ...dashboard, projectHealth: rows };
+};
+
 module.exports = {
   BOQ_FIGURE_KEYS,
   boqFigureAccess,
@@ -284,9 +312,11 @@ module.exports = {
   withheldError,
   withheldEvReport,
   withheldForecast,
+  withheldProjectHealth,
   withheldReadinessGate,
   withheldRevision,
   withheldSchedule,
   withheldScheduleReadiness,
+  withheldWorkspaceDashboard,
   withoutBoqFigures,
 };

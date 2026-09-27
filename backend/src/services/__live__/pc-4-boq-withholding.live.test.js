@@ -26,6 +26,11 @@
  * Everything else — statuses, codes, verdicts, counts, the approved
  * allocation count, the forecast's levels — is what the BOQ reader gets.
  *
+ * The workspace home the browser opens right after sign-in, before the
+ * Overview, is swept with them: each project's row there states the
+ * project's budget (bac, the approved allocations' sum) and the EAC built
+ * from it, which go the way of the schedule's budgets.
+ *
  * Everything lives in a throwaway "LiveTest <uuid>" organisation that is
  * dropped afterwards. The API is started on a free port with no model
  * provider, so the forecast's explanation is the deterministic one.
@@ -45,6 +50,7 @@ const scheduleService = require("../schedule.service");
 const activityService = require("../activity.service");
 const forecastService = require("../forecast.service");
 const evService = require("../earned-value.service");
+const workspaceDashboardService = require("../workspace-dashboard.service");
 const { startApi } = require("./auth-live-kit");
 
 // What a member without BOQ read must never receive, wherever it sits.
@@ -65,7 +71,7 @@ const BOQ_KEYS = [
 // ... and what a member who reads neither the BOQ nor the cost module must
 // not receive either: the budgets built from the bill, and the forecast's
 // money built from them.
-const BUDGET_KEYS = ["budget", "generatedBudget", "totalBudget", "generatedTotalBudget", "eac", "bottomUp"];
+const BUDGET_KEYS = ["budget", "generatedBudget", "totalBudget", "generatedTotalBudget", "eac", "bottomUp", "bac"];
 // The forecast's money, where it sits (the cost block, each activity's cost,
 // each budget line).
 const FORECAST_COST_KEYS = ["budget", "eac", "bottomUp", "projected", "overrun", "overrunPct", "actual"];
@@ -109,6 +115,13 @@ const unstamped = (text) =>
     .replace(/"asOfDate":"[^"]*"/g, '"asOfDate":"-"')
     .replace(/"requestId":"[^"]*"/g, '"requestId":"-"');
 const parsed = (text) => JSON.parse(unstamped(text));
+// The workspace home is also stamped with when it was built, and dates its
+// sources by the newest record it read.
+const unstampedDashboard = (text) =>
+  unstamped(text)
+    .replace(/"generatedAt":"[^"]*"/g, '"generatedAt":"-"')
+    .replace(/"cutoffDate":"[^"]*"/g, '"cutoffDate":"-"')
+    .replace(/"sourceUpdatedAt":"[^"]*"/g, '"sourceUpdatedAt":"-"');
 
 liveDescribe("PC-4 §12: the Overview and the Schedule module carry no BOQ figure to a member who may not read the BOQ", () => {
   let live;
@@ -293,8 +306,21 @@ liveDescribe("PC-4 §12: the Overview and the Schedule module carry no BOQ figur
   //     the withheld figures taken out where they sit.
   //   kind "sweep": the answer is per person (who is asking, what they may
   //     do); it is swept, not compared.
+  //   kind "workspace": per person too; compared with that member's own
+  //     dashboard as the service builds it, the budget taken out of each
+  //     project's row for a reader of neither the BOQ nor the cost module.
   //   cost: a cost reader's request, refused (403) to the site engineer.
   const reads = () => ({
+    // The workspace home, which the browser loads right after sign-in and
+    // before the Overview (features/home and features/dashboard). Its answer
+    // is per person (their projects, their queues); the service call is the
+    // BOQ reader's.
+    workspaceDashboard: {
+      route: "/api/v1/projects/workspace-dashboard",
+      kind: "workspace",
+      service: () =>
+        workspaceDashboardService.getWorkspaceDashboard({ orgId: live.org.id, userId: live.user.id, role: "pm", isCompanyAdmin: true }),
+    },
     // The Overview: identity, strip, wizard, health card, needs-you panel.
     project: { route: at(""), kind: "sweep" },
     parties: { route: at("/parties"), kind: "sweep" },
@@ -446,12 +472,13 @@ liveDescribe("PC-4 §12: the Overview and the Schedule module carry no BOQ figur
   };
 
   it("a BOQ reader receives exactly the service's answer — the figures, byte for byte", async () => {
-    for (const [name, { route, service }] of Object.entries(reads())) {
+    for (const [name, { route, kind, service }] of Object.entries(reads())) {
       if (!service) continue;
+      const stampless = kind === "workspace" ? unstampedDashboard : unstamped;
       const response = await api.get(route, auth());
       expect([name, response.status, response.body?.error]).toEqual([name, 200, undefined]);
       const expected = JSON.stringify({ success: true, data: normalizeMoneyTree(await service()) });
-      expect([name, unstamped(response.text)]).toEqual([name, unstamped(expected)]);
+      expect([name, stampless(response.text)]).toEqual([name, stampless(expected)]);
     }
     // ... and the figures are there to be withheld: the sweep below looks
     // where they are.
@@ -484,6 +511,9 @@ liveDescribe("PC-4 §12: the Overview and the Schedule module carry no BOQ figur
     expect(history.events.some((event) => event.newSummary && "totalBudget" in event.newSummary)).toBe(true);
     const fullHistory = (await api.get(reads().fullHistory.route, auth())).body.data;
     expect(fullHistory.events.some((event) => BOQ_RECORD_TYPES.includes(event.recordType))).toBe(true);
+    // The workspace home: the project's budget, the approved allocations' sum.
+    const home = (await api.get(reads().workspaceDashboard.route, auth())).body.data;
+    expect(home.projectHealth.find((row) => row.id === project.id)).toMatchObject({ bac: 41519.6, eac: 41519.6 });
   });
 
   it("the site engineer, the cost controller, the planning engineer and a PM, all without BOQ read, receive none of the bill's figures from any request of the Overview or the Schedule module — and everything else unchanged", async () => {
@@ -520,8 +550,33 @@ liveDescribe("PC-4 §12: the Overview and the Schedule module carry no BOQ figur
           expect([viewer, name, mine]).toEqual([viewer, name, evWithoutBill(theirs)]);
         } else if (kind === "audit") {
           expect([viewer, name, mine]).toEqual([viewer, name, historyWithoutBill(theirs, readsCost)]);
+        } else if (kind === "workspace") {
+          // Per person: this member's own dashboard as the service builds
+          // it, each project's row without the budget unless they read cost.
+          const own = normalizeMoneyTree(
+            await workspaceDashboardService.getWorkspaceDashboard({ orgId: live.org.id, userId: user.id, role: user.role, isCompanyAdmin: false }),
+          );
+          if (!readsCost) own.projectHealth = own.projectHealth.map((row) => without(row, new Set(["bac", "eac"])));
+          expect([viewer, name, JSON.parse(unstampedDashboard(limited.text)).data]).toEqual([
+            viewer,
+            name,
+            JSON.parse(unstampedDashboard(JSON.stringify(own))),
+          ]);
         }
       }
+      // The workspace home: the project is there with its scores and indices;
+      // its budget only for a cost reader.
+      const home = (await api.get(reads().workspaceDashboard.route, viewerAuth)).body.data;
+      const row = home.projectHealth.find((entry) => entry.id === project.id);
+      expect([viewer, typeof row.overallScore, "spi" in row, "cpi" in row, "bac" in row, "eac" in row, row.bac]).toEqual([
+        viewer,
+        "number",
+        true,
+        true,
+        readsCost,
+        readsCost,
+        readsCost ? 41519.6 : undefined,
+      ]);
       const schedule = (await api.get(reads().schedule.route, viewerAuth)).body.data;
       const pour = schedule.activities.find((activity) => activity.id === activities.pour.id);
       expect(pour.approvedAllocationCount).toBe(1);

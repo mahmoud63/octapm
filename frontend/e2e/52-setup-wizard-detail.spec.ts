@@ -414,7 +414,9 @@ test('the bill revision on the approval card, the strip figures as the services 
  * §12 on screen: two members whose permission template sets the BOQ tool to
  * none — a site engineer (no cost tool either) and a cost controller (who
  * keeps it) — land on the Overview and open every tab of the Schedule
- * module. Every page renders without an error, a withheld figure reads as a
+ * module — having first landed, as everyone does after signing in, on the
+ * workspace home, whose project rows state each project's budget (bac) and
+ * EAC. Every page renders without an error, a withheld figure reads as a
  * dash (never 0, $0k or NaN), and not one answer the browser receives on the
  * way carries a figure the server withholds from that person: no allocated
  * quantity, value or weight, no open or total bill value, no BOQ rows — and,
@@ -460,7 +462,7 @@ const BOQ_KEYS = [
 ]
 // The budgets built from the bill, and the forecast's money built from them:
 // withheld from the member who reads neither the BOQ nor the cost module.
-const BUDGET_KEYS = ['budget', 'generatedBudget', 'totalBudget', 'generatedTotalBudget', 'eac', 'bottomUp']
+const BUDGET_KEYS = ['budget', 'generatedBudget', 'totalBudget', 'generatedTotalBudget', 'eac', 'bottomUp', 'bac']
 
 const keyPaths = (value: unknown, keys: Set<string>, at = ''): string[] =>
   value && typeof value === 'object'
@@ -668,6 +670,28 @@ test('members who cannot read the BOQ: the Overview and every Schedule tab rende
       }
     }
 
+    // The workspace home, where signing in lands: its project rows carry
+    // the project's scores — and, for a reader of the BOQ or the cost
+    // module only, its budget and EAC.
+    const home = page.waitForResponse((r) => /\/projects\/workspace-dashboard(\?|$)/.test(r.url()), {
+      timeout: 30_000,
+    })
+    await page.goto(`/o/${org!.segment}`)
+    await expect(page.getByTestId('workspace-dashboard')).toBeVisible({ timeout: 30_000 })
+    const homeAnswer = await home
+    expect(homeAnswer.status(), `${member.name}: the workspace home`).toBe(200)
+    const homeRow = ((await homeAnswer.json()) as { data: { projectHealth: Record<string, unknown>[] } }).data.projectHealth.find(
+      (row) => row.id === setup.projectId
+    )
+    expect(homeRow, `${member.name}: the project on the workspace home`).toBeTruthy()
+    expect(['bac' in homeRow!, 'eac' in homeRow!, typeof homeRow!.overallScore]).toEqual([
+      member.readsCost,
+      member.readsCost,
+      'number',
+    ])
+    await page.waitForLoadState('networkidle')
+    await noBrokenFigure('workspace home')
+
     // The landing: the Overview — the controls strip, the setup wizard, the
     // health card, the module bar's counts.
     const scheduleAnswer = page.waitForResponse((r) => /\/schedule(\?|$)/.test(r.url()), { timeout: 30_000 })
@@ -804,6 +828,8 @@ test('members who cannot read the BOQ: the Overview and every Schedule tab rende
       ...(member.readsCost ? [`GET ${project}/cost/summary`] : []),
     ].sort()
     expect(urls.filter((url) => url.startsWith(`GET ${project}`) || url.startsWith(`POST ${project}`))).toEqual(expected)
+    // ... and the workspace home's answer before them (the live test sweeps it too).
+    expect(urls, `${member.name}: the workspace home was answered and swept`).toContain('GET /projects/workspace-dashboard')
     // The EV tab is the cost reader's: the report answers them, and refuses
     // the site engineer outright.
     const ev = answers.find((answer) => /\/reports\/ev(\?|$)/.test(answer.url))

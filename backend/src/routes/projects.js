@@ -3,9 +3,9 @@ const { body, param, query } = require("express-validator");
 const { asyncHandler } = require("../utils/async-handler");
 const { sendSuccess } = require("../utils/api-response");
 const { authenticate } = require("../middleware/auth");
-const { requireProjectAccess } = require("../middleware/project-access");
+const { requestForProject, requireProjectAccess } = require("../middleware/project-access");
 const { requireRoles } = require("../middleware/rbac");
-const { canReadBoq } = require("../utils/boq-figures");
+const { boqFigureAccess, canReadBoq, withheldWorkspaceDashboard } = require("../utils/boq-figures");
 const { validate } = require("../middleware/validate");
 const {
   enforceProjectLimit,
@@ -176,7 +176,18 @@ router.get(
       isCompanyAdmin: req.user.isCompanyAdmin,
     });
 
-    return sendSuccess(res, result);
+    // Each project's row states its budget (bac) and the EAC built from it:
+    // the approved allocations, which that project's schedule, forecast and
+    // history withhold from someone who may read neither the BOQ nor the
+    // cost module there (§12, utils/boq-figures). Decided per project, as
+    // that project's own routes decide it.
+    const rows = Array.isArray(result?.projectHealth) ? result.projectHealth : [];
+    const access = new Map(
+      await Promise.all(
+        rows.map(async (row) => [row.id, boqFigureAccess(await requestForProject(req, row.id))]),
+      ),
+    );
+    return sendSuccess(res, withheldWorkspaceDashboard(result, (projectId) => access.get(projectId)));
   }),
 );
 

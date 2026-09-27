@@ -7138,7 +7138,7 @@ add(
     tag: "Projects",
     summary: "Get workspace-level construction health and workflow queues.",
     description:
-      "Aggregates all organization projects for PM users and only assigned projects for non-PM users. Returns officialKpis with sourceRule, sourceStatus, cutoffDate, and drill-through targets. Draft/rejected/cancelled records are excluded from official KPI cards; submitted/pending workflow values are returned separately under pendingReview.",
+      "Aggregates all organization projects for PM users and only assigned projects for non-PM users. Returns officialKpis with sourceRule, sourceStatus, cutoffDate, and drill-through targets. Draft/rejected/cancelled records are excluded from official KPI cards; submitted/pending workflow values are returned separately under pendingReview. Each projectHealth row carries bac (the official EV budget: the approved BOQ allocations) and eac (bac / CPI) only for a caller who may read the BOQ or the cost module on that project, decided as that project's own routes decide it (permission template, role, party); otherwise both keys are absent, not zero. Scores, spi, cpi, ev, pv and ac are the same for every caller.",
     operationId: "getWorkspaceDashboard",
     responseSchema: ref("GenericObject"),
   }),
