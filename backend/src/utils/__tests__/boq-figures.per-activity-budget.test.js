@@ -3,7 +3,9 @@ jest.mock("../../middleware/rbac", () => ({ hasPermission: jest.fn() }));
 const {
   withheldAllocationSuggestion,
   withheldBudgetReconciliation,
+  withheldAuditHistory,
   withheldBudgetSnapshot,
+  withheldCostRecord,
   withheldCostRecords,
   withheldCostSummary,
   withheldEvReport,
@@ -144,10 +146,69 @@ describe("the Cost module's per-activity allocation (owner decision E1)", () => 
       { id: "c-a-2", activityId: "a-2", committed: 12000, actual: 0, forecast: 0, labour: 0 },
     ]);
     expect(rows.pagination).toEqual({ nextCursor: null });
-    const summary = withheldCostSummary({ records: [record("a-1", 21337)], totals: { budget: 21337, actual: 0 }, byPhase: [{ phase: "General", budget: 21337 }] }, COST);
-    expect(summary.records[0]).not.toHaveProperty("budget");
-    expect(summary.records[0]).not.toHaveProperty("generatedBudget");
-    expect(summary.totals).toEqual({ budget: 21337, actual: 0 });
+    // The answer to writing a record (POST /cost/activity/:id, PATCH
+    // /cost/:id): the record as written, without the budget it was written
+    // with (its activity's allocation).
+    const written = { id: "c-a-1", activityId: "a-1", budget: 21337, committed: 0, actual: 0, forecast: 0 };
+    expect(withheldCostRecord(written, COST)).toEqual({ id: "c-a-1", activityId: "a-1", committed: 0, actual: 0, forecast: 0 });
+    expect(withheldCostRecord(written, NEITHER)).toEqual({ id: "c-a-1", activityId: "a-1", committed: 0, actual: 0, forecast: 0 });
+    expect(withheldCostRecord(written, BOQ)).toBe(written);
+  });
+
+  // GET /cost/summary as cost.service builds it: one record, on the only
+  // activity of its category, so the category's budget, forecast and
+  // variance, the records' totals and the EAC are that activity's allocation.
+  const costSummary = () => ({
+    records: [record("a-1", 21337)],
+    byPhase: [{ phase: "demolition", budget: 21337, committed: 12000, actual: 0, forecast: 21337, variance: 0, variancePct: 0 }],
+    totals: { budget: 21337, committed: 12000, actual: 0, forecast: 21337 },
+    eac: { basis: "estimate_at_completion", actual: 0, toComplete: 21337, optimistic: 19203.3, mostLikely: 21337, pessimistic: 24537.55 },
+    budget: { originalBudget: 40000, approvedChanges: 0, revisions: 0, revisedBudget: 40000, source: "budget_register", allocatedToActivities: 21337 },
+  });
+
+  it("the cost summary gives a cost reader without BOQ read nothing built from the records' budgets — per category, in total, the forecast and EAC that fall back to them — and keeps the ledger, the commitments and the register", () => {
+    const built = costSummary();
+    const expected = {
+      records: [{ id: "c-a-1", activityId: "a-1", committed: 12000, actual: 0, forecast: 0, labour: 0 }],
+      byPhase: [{ phase: "demolition", committed: 12000, actual: 0 }],
+      totals: { committed: 12000, actual: 0 },
+      eac: { basis: "estimate_at_completion", actual: 0 },
+      budget: { originalBudget: 40000, approvedChanges: 0, revisions: 0, revisedBudget: 40000, source: "budget_register" },
+      activityBudgetsWithheld: true,
+      activityBudgetsReason: "Mapping details unavailable to you",
+    };
+    expect(withheldCostSummary(built, COST)).toEqual(expected);
+    expect(withheldCostSummary(built, NEITHER)).toEqual(expected);
+    expect(JSON.stringify(withheldCostSummary(built, COST))).not.toContain("21337");
+    // Output only: the service's answer is not changed.
+    expect(built).toEqual(costSummary());
+  });
+
+  it("the project history gives a member without BOQ read no cost record's budget — before, after, or in the event's own summary — and everything else as stored", () => {
+    const summary = (budget) => ({ activityId: "a-1", budget, committed: 0, actual: 0, forecast: 0 });
+    const history = () => ({
+      events: [
+        { id: "e-1", recordType: "cost_record", action: "created", oldSummary: null, newSummary: summary(43210.9), summary: { activityId: "a-1", forecast: 0 } },
+        { id: "e-2", recordType: "cost_record", action: "updated", oldSummary: summary(43210.9), newSummary: summary(43210.9), summary: { activityId: "a-1", budget: 43210.9 } },
+        { id: "e-3", recordType: "schedule_revision", action: "approved", newSummary: { status: "approved", totalBudget: 41519.6 } },
+      ],
+      nextCursor: null,
+    });
+    const built = history();
+    expect(withheldAuditHistory(built, BOQ)).toBe(built);
+    const withoutBudget = { activityId: "a-1", committed: 0, actual: 0, forecast: 0 };
+    for (const access of [COST, NEITHER]) {
+      const answer = withheldAuditHistory(built, access);
+      expect(answer.events.slice(0, 2)).toEqual([
+        { id: "e-1", recordType: "cost_record", action: "created", oldSummary: null, newSummary: withoutBudget, summary: { activityId: "a-1", forecast: 0 } },
+        { id: "e-2", recordType: "cost_record", action: "updated", oldSummary: withoutBudget, newSummary: withoutBudget, summary: { activityId: "a-1" } },
+      ]);
+      expect(JSON.stringify(answer)).not.toContain("43210.9");
+    }
+    // The revision's total stays for a cost reader, and goes for a reader of neither.
+    expect(withheldAuditHistory(built, COST).events[2]).toEqual(built.events[2]);
+    expect(withheldAuditHistory(built, NEITHER).events[2].newSummary).toEqual({ status: "approved" });
+    expect(built).toEqual(history());
   });
 
   it("the reconciliation keeps its totals and verdict and each activity's lines and changes, and no activity's allocation — it says so", () => {

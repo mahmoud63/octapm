@@ -11,6 +11,7 @@ const costReconciliation = require('../services/cost-reconciliation.service');
 const costMigration = require('../services/cost-migration.service');
 const {
   boqFigureAccess,
+  withheldCostRecord,
   withheldCostRecords,
   withheldCostSummary,
 } = require('../utils/boq-figures');
@@ -134,7 +135,9 @@ router.post(
       userId: req.user.id,
       userRole: req.user.role,
     });
-    return sendSuccess(res, result, 201);
+    // The record's budget, written from its activity's approved allocation
+    // when the record is made, goes the way of GET /cost (owner decision E1).
+    return sendSuccess(res, withheldCostRecord(result, boqFigureAccess(req)), 201);
   }),
 );
 
@@ -168,7 +171,7 @@ router.patch(
       userId: req.user.id,
       userRole: req.user.role,
     });
-    return sendSuccess(res, result);
+    return sendSuccess(res, withheldCostRecord(result, boqFigureAccess(req)));
   }),
 );
 

@@ -65,6 +65,8 @@ const activityService = require("../activity.service");
 const forecastService = require("../forecast.service");
 const evService = require("../earned-value.service");
 const workspaceDashboardService = require("../workspace-dashboard.service");
+const costService = require("../cost.service");
+const budgetService = require("../budget.service");
 const { startApi } = require("./auth-live-kit");
 
 // What a member without BOQ read must never receive, wherever it sits.
@@ -194,6 +196,7 @@ liveDescribe("PC-4 §12: the Overview and the Schedule module carry no BOQ figur
       ANTHROPIC_API_KEY: "",
       OPENAI_API_KEY: "",
       GEMINI_API_KEY: "",
+      DATABASE_CONNECTION_LIMIT: "4",
     });
     const tag = Date.now();
     project = await prisma.project.create({
@@ -579,6 +582,56 @@ liveDescribe("PC-4 §12: the Overview and the Schedule module carry no BOQ figur
     copy.activityBreakdownWithheld = true;
     copy.activityBreakdownReason = MAPPING_WITHHELD;
     return copy;
+  };
+
+  // Every answer the owner's differential (E1) names, as each member
+  // receives it — and the project's history, where a cost record's budget
+  // would sit. The EV report is also asked at an ad hoc cutoff after both
+  // periods (both are locked by the time the differentials run, and a locked
+  // period answers with its stored snapshot).
+  const differentialAnswers = () => [
+    ["schedule", "get", at("/schedule")],
+    ["activities", "get", at("/activities")],
+    ["forecast", "get", at("/forecast")],
+    ["forecast/explain", "post", at("/forecast/explain")],
+    ["EV report", "get", at("/reports/ev")],
+    ["EV report (ad hoc cutoff)", "get", at("/reports/ev?cutoffDate=2026-06-30")],
+    ["health", "get", at("/health")],
+    ["setup-readiness", "get", at("/setup-readiness")],
+    ["workspace home", "get", "/api/v1/projects/workspace-dashboard"],
+    // ... and the Cost module's own answers that state an activity's
+    // allocation, or add allocations up over the activities that have a
+    // cost record: each record's budget, the summary, the reconciliation.
+    ["cost records", "get", at("/cost")],
+    ["cost summary", "get", at("/cost/summary")],
+    ["budget reconciliation", "get", at("/budget/reconciliation")],
+    ["history", "get", at("/audit?limit=100")],
+  ];
+  const captureAnswers = async (answers, headers) => {
+    const result = {};
+    for (const [name, method, route] of answers) {
+      const response = method === "post" ? await api.post(route, {}, headers) : await api.get(route, headers);
+      result[name] = { status: response.status, text: response.text, body: JSON.parse(unstampedDashboard(response.text)) };
+    }
+    return result;
+  };
+  const withoutText = (captured) => Object.fromEntries(Object.entries(captured).map(([name, { status, body }]) => [name, { status, body }]));
+  // The Cost module's answers as the service builds them: what a BOQ reader
+  // receives, byte for byte.
+  const costServiceAnswers = async () => ({
+    "cost records": await costService.getCostRecords({ ...ids(), query: {} }),
+    "cost summary": await costService.getCostSummary(ids()),
+    "budget reconciliation": await budgetService.reconcile(ids()),
+  });
+  const expectServiceAnswers = async (captured, label) => {
+    for (const [name, answer] of Object.entries(await costServiceAnswers())) {
+      expect([label, name, captured[name].status]).toEqual([label, name, 200]);
+      expect([label, name, unstampedDashboard(captured[name].text)]).toEqual([
+        label,
+        name,
+        unstampedDashboard(JSON.stringify({ success: true, data: normalizeMoneyTree(answer) })),
+      ]);
+    }
   };
 
   // The history without the bill's records, and (for a reader of neither
@@ -1150,35 +1203,14 @@ liveDescribe("PC-4 §12: the Overview and the Schedule module carry no BOQ figur
       expect([step, moved.status, moved.body?.error]).toEqual([step, 200, undefined]);
     }
 
-    // Every answer the owner names, as each member receives it. The EV
-    // report is also asked at an ad hoc cutoff after both periods (both are
-    // locked by now, and a locked period answers with its stored snapshot).
+    // Every answer the owner names, as each member receives it (and the
+    // two activities' own answers).
     const answers = [
-      ["schedule", "get", at("/schedule")],
-      ["activities", "get", at("/activities")],
+      ...differentialAnswers(),
       ["activity (critical)", "get", at(`/activities/${critical}`)],
       ["activity (non-critical)", "get", at(`/activities/${floating}`)],
-      ["forecast", "get", at("/forecast")],
-      ["forecast/explain", "post", at("/forecast/explain")],
-      ["EV report", "get", at("/reports/ev")],
-      ["EV report (ad hoc cutoff)", "get", at("/reports/ev?cutoffDate=2026-06-30")],
-      ["health", "get", at("/health")],
-      ["setup-readiness", "get", at("/setup-readiness")],
-      ["workspace home", "get", "/api/v1/projects/workspace-dashboard"],
-      // ... and the Cost module's own answers that state an activity's
-      // allocation: each cost record's budget, the budget reconciliation.
-      ["cost records", "get", at("/cost")],
-      ["cost summary", "get", at("/cost/summary")],
-      ["budget reconciliation", "get", at("/budget/reconciliation")],
     ];
-    const capture = async (headers) => {
-      const result = {};
-      for (const [name, method, route] of answers) {
-        const response = method === "post" ? await api.post(route, {}, headers) : await api.get(route, headers);
-        result[name] = { status: response.status, body: JSON.parse(unstampedDashboard(response.text)) };
-      }
-      return result;
-    };
+    const capture = async (headers) => withoutText(await captureAnswers(answers, headers));
     const everyone = { reader: auth(), ...Object.fromEntries(Object.entries(viewers()).map(([viewer, { user }]) => [viewer, as(user)])) };
     const before = {};
     for (const [viewer, headers] of Object.entries(everyone)) before[viewer] = await capture(headers);
@@ -1235,5 +1267,179 @@ liveDescribe("PC-4 §12: the Overview and the Schedule module carry no BOQ figur
       expect([viewer, reconciliation.activities.filter((row) => "boqBudget" in row || "activityBudget" in row || "difference" in row)]).toEqual([viewer, []]);
     }
     expect(before.siteEngineer["cost records"].status).toBe(403);
+  });
+
+  it("the owner's differential in the Cost module: twins in different categories, only one with a cost record the cost controller wrote through the API — moving the allocation between them changes nothing a member without BOQ read receives, the cost-record write answers and the history included; the BOQ reader's cost answers are the service's, byte for byte (E1)", async () => {
+    // Last in this file. Two activities alike in dates, duration and
+    // progress (none), in different categories, each alone in its category:
+    // the civil twin has a cost record, the electrical twin none.
+    const twin = async (name, activityCode, category) => {
+      const created = await post(at("/activities"), {
+        name,
+        activityCode,
+        category,
+        duration: 5,
+        startDate: "2026-04-06",
+        endDate: "2026-04-10",
+        engineerIds: [live.user.id],
+      });
+      expect([created.status, created.body?.error]).toEqual([201, undefined]);
+      return created.body.data.id;
+    };
+    const withRecord = await twin("Break out north wall", "A150", "civil");
+    const withoutRecord = await twin("Light the south yard", "A160", "electrical");
+    // One approved allocation of a new row (37 m3 at 271.13 = 10031.81, a
+    // figure nothing else here states) to the twin that will have a record.
+    const SECRET = "10031.81";
+    const row = await post(at("/boq/items"), { code: "1.4", description: "Break out walls", quantity: 37, unit: "m3", rate: 271.13 });
+    expect([row.status, row.body?.error]).toEqual([201, undefined]);
+    const allocationsRoute = at("/activity-boq-allocations");
+    const allocation = await post(allocationsRoute, { boqItemId: row.body.data.item.id, activityId: withRecord, quantity: 37 });
+    expect([allocation.status, allocation.body?.error]).toEqual([201, undefined]);
+    for (const step of ["submit", "approve"]) {
+      const moved = await post(`${allocationsRoute}/${allocation.body.data.id}/${step}`, {});
+      expect([step, moved.status, moved.body?.error]).toEqual([step, 200, undefined]);
+    }
+
+    // The cost controller (no BOQ read) writes the record through the API:
+    // made with its activity's approved allocation as its budget, then
+    // edited. No forecast is set, so its estimate at completion is that
+    // budget — in the summary's category, its totals and its EAC.
+    const controller = as(members.costController);
+    const upsert = () => api.post(at(`/cost/activity/${withRecord}`), { committed: 0, forecast: 0 }, controller);
+    const firstUpsert = await upsert();
+    expect([firstUpsert.status, firstUpsert.body?.error]).toEqual([201, undefined]);
+    const recordId = firstUpsert.body.data.id;
+    const stored = await prisma.costRecord.findUnique({ where: { id: recordId }, select: { budget: true, activityId: true } });
+    expect([Number(stored.budget), stored.activityId]).toEqual([10031.81, withRecord]);
+    const patch = () => api.request("PATCH", at(`/cost/${recordId}`), { body: { forecast: 0 }, headers: controller });
+    const firstPatch = await patch();
+    expect([firstPatch.status, firstPatch.body?.error]).toEqual([200, undefined]);
+    // A BOQ reader's write is answered with the record exactly as written.
+    const readerPatch = await api.request("PATCH", at(`/cost/${recordId}`), { body: { forecast: 0 }, headers: auth() });
+    expect([readerPatch.status, readerPatch.body?.error, readerPatch.body.data.budget]).toEqual([200, undefined, 10031.81]);
+
+    const answers = [
+      ...differentialAnswers(),
+      ["activity (with a record)", "get", at(`/activities/${withRecord}`)],
+      ["activity (without a record)", "get", at(`/activities/${withoutRecord}`)],
+    ];
+    const everyone = { reader: auth(), ...Object.fromEntries(Object.entries(viewers()).map(([viewer, { user }]) => [viewer, as(user)])) };
+    const before = {};
+    for (const [viewer, headers] of Object.entries(everyone)) before[viewer] = await captureAnswers(answers, headers);
+    // The BOQ reader's cost answers are the service's own, byte for byte.
+    await expectServiceAnswers(before.reader, "before");
+
+    // The move: the one allocation, by its key, after proving it is this
+    // LiveTest organisation's (its project's organisation, by name).
+    const allocationRow = await prisma.activityBoqAllocation.findUnique({
+      where: { id: allocation.body.data.id },
+      select: { id: true, activityId: true, status: true, project: { select: { orgId: true, org: { select: { name: true } } } } },
+    });
+    expect([allocationRow.activityId, allocationRow.status, allocationRow.project.orgId, /^LiveTest [0-9a-f-]{36}$/.test(allocationRow.project.org.name)]).toEqual([
+      withRecord,
+      "approved",
+      live.org.id,
+      true,
+    ]);
+    await prisma.activityBoqAllocation.update({ where: { id: allocationRow.id }, data: { activityId: withoutRecord } });
+
+    const after = {};
+    for (const [viewer, headers] of Object.entries(everyone)) after[viewer] = await captureAnswers(answers, headers);
+    await expectServiceAnswers(after.reader, "after");
+    // The same writes again, after the move: the record is updated, not made.
+    const secondUpsert = await upsert();
+    const secondPatch = await patch();
+    expect([secondUpsert.status, secondPatch.status]).toEqual([201, 200]);
+    const finalHistory = await api.get(at("/audit?limit=100"), controller);
+    expect(finalHistory.status).toBe(200);
+
+    // The BOQ reader sees the move where it lands: the record's budget, its
+    // category's budget and forecast, the records' totals and the EAC.
+    const summaryOf = (capture) => capture["cost summary"].body.data;
+    const phase = (capture, name) => summaryOf(capture).byPhase.find((entry) => entry.phase === name);
+    expect([phase(before.reader, "civil").budget, phase(before.reader, "civil").forecast]).toEqual([10031.81, 10031.81]);
+    expect([phase(after.reader, "civil").budget, phase(after.reader, "civil").forecast]).toEqual([0, 0]);
+    expect(summaryOf(after.reader).totals.budget).toBeCloseTo(summaryOf(before.reader).totals.budget - 10031.81, 2);
+    expect(summaryOf(after.reader).eac.mostLikely).not.toBe(summaryOf(before.reader).eac.mostLikely);
+    const recordOf = (capture) => capture["cost records"].body.data.rows.find((record) => record.id === recordId);
+    expect([recordOf(before.reader).budget, recordOf(after.reader).budget, recordOf(after.reader).generatedBudget]).toEqual([10031.81, 0, 10031.81]);
+
+    // Awaiting the owner's decision (closure review, 2026-09-28), and so
+    // left as they are here: whether the forecast's bottom-up projection
+    // counts as a project total for a cost reader. It adds each activity's
+    // projection — its budget where no cost record projects it — so this
+    // move changes it, and with it the forecast's projected cost, overrun,
+    // the project's cost level and the narrative sentences that state them.
+    // Everything else in the forecast is held to the rule below.
+    const PENDING_FORECAST_COST = ["bottomUp", "projected", "overrun", "overrunPct"];
+    const heldToTheRule = (name, body) => {
+      const copy = clone(body);
+      const forecast = name === "forecast" ? copy.data : name === "forecast/explain" ? copy.data?.forecast : null;
+      if (forecast) {
+        drop(forecast.cost, PENDING_FORECAST_COST);
+        drop(forecast.summary, ["costLevel"]);
+      }
+      if (name === "forecast/explain") drop(copy.data?.narrative, ["headline", "cost"]);
+      return copy;
+    };
+    // Everyone without BOQ read: not one byte of any answer moves, and the
+    // allocation's figure (nor the row's rate) is nowhere in any of them.
+    for (const viewer of Object.keys(viewers())) {
+      for (const [name] of answers) {
+        expect([viewer, name, after[viewer][name].status, heldToTheRule(name, after[viewer][name].body)]).toEqual([
+          viewer,
+          name,
+          before[viewer][name].status,
+          heldToTheRule(name, before[viewer][name].body),
+        ]);
+        for (const capture of [before, after]) {
+          const text = JSON.stringify(heldToTheRule(name, capture[viewer][name].body));
+          expect([viewer, name, text.includes(SECRET), text.includes("271.13")]).toEqual([viewer, name, false, false]);
+        }
+      }
+    }
+    // The cost controller's writes: answered with the record as written,
+    // without the budget it was written with; the same before and after the
+    // move (the same record; only when it was last written differs).
+    const unstampedWrite = (response) => JSON.parse(unstampedDashboard(response.text).replace(/"updatedAt":"[^"]*"/g, '"updatedAt":"-"'));
+    for (const [name, response] of [
+      ["upsert (made)", firstUpsert],
+      ["patch", firstPatch],
+      ["upsert (after the move)", secondUpsert],
+      ["patch (after the move)", secondPatch],
+    ]) {
+      expect([name, response.text.includes(SECRET), keyPaths(response.body.data, new Set(["budget", "generatedBudget"]))]).toEqual([name, false, []]);
+    }
+    expect(unstampedWrite(secondUpsert)).toEqual(unstampedWrite(firstUpsert));
+    expect(unstampedWrite(secondPatch)).toEqual(unstampedWrite(firstPatch));
+    // The history has the record's four events, none with its budget.
+    expect(finalHistory.text.includes(SECRET)).toBe(false);
+    const costEvents = (events) => events.filter((event) => (event.recordType || event.entityType) === "cost_record" && event.entityId === recordId);
+    const controllerEvents = costEvents(finalHistory.body.data.events);
+    expect(controllerEvents.length).toBeGreaterThanOrEqual(4);
+    for (const event of controllerEvents) {
+      for (const summary of ["oldSummary", "newSummary", "summary"]) {
+        const held = event[summary];
+        expect([event.id, summary, Boolean(held && typeof held === "object" && ("budget" in held || "generatedBudget" in held))]).toEqual([event.id, summary, false]);
+      }
+    }
+    // ... while the BOQ reader's history keeps it as stored.
+    const readerEvents = costEvents((await api.get(at("/audit?limit=100"), auth())).body.data.events);
+    expect(readerEvents.some((event) => event.newSummary && Number(event.newSummary.budget) === 10031.81)).toBe(true);
+    // The cost summary says what it withholds and why.
+    for (const viewer of ["costController", "planningEngineer", "pm"]) {
+      const summary = summaryOf(before[viewer]);
+      expect([
+        viewer,
+        summary.activityBudgetsWithheld,
+        summary.activityBudgetsReason,
+        "budget" in summary.totals,
+        "forecast" in summary.totals,
+        "mostLikely" in summary.eac,
+        "allocatedToActivities" in summary.budget,
+      ]).toEqual([viewer, true, MAPPING_WITHHELD, false, false, false, false]);
+      expect([viewer, summary.byPhase.map((entry) => Object.keys(entry).sort())]).toEqual([viewer, summary.byPhase.map(() => ["actual", "committed", "phase"])]);
+    }
   });
 });

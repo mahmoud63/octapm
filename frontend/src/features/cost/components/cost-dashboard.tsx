@@ -147,6 +147,16 @@ export function CostDashboard({
   const totals = useMemo(() => summary?.totals, [summary?.totals])
   const eac = useMemo(() => summary?.eac, [summary?.eac])
   const budget = useMemo(() => summary?.budget, [summary?.budget])
+  // What the summary adds up from the records' budgets (each activity's
+  // approved BOQ allocation) — per phase, in total, and the forecast and EAC
+  // that fall back to them — is withheld by the server from a member who may
+  // not read the BOQ (owner decision E1): a dash and the server's reason,
+  // never a figure read against 0.
+  const activityBudgetsWithheld = Boolean(summary?.activityBudgetsWithheld)
+  const withheldReason =
+    summary?.activityBudgetsReason ?? MAPPING_DETAILS_WITHHELD
+  const summaryFigure = (value: number | undefined) =>
+    activityBudgetsWithheld || value === undefined ? '—' : fmtUSD(value)
 
   if (isLoading) {
     return (
@@ -238,8 +248,13 @@ export function CostDashboard({
           <div className='grid grid-cols-2 gap-3 sm:grid-cols-4'>
             <CostFigure
               label='Allocated to activities'
-              value={fmtUSD(totals?.budget || 0)}
-              hint='Budget carried on activity cost records'
+              value={summaryFigure(totals?.budget ?? 0)}
+              hint={
+                activityBudgetsWithheld
+                  ? withheldReason
+                  : 'Budget carried on activity cost records'
+              }
+              testId='uat-cost-allocated-to-activities'
             />
             <CostFigure
               label={FINANCIAL_TERMS.executedCommitments.label}
@@ -253,8 +268,13 @@ export function CostDashboard({
             />
             <CostFigure
               label='Forecast (EAC)'
-              value={fmtUSD(eac?.mostLikely ?? totals?.forecast ?? 0)}
-              hint='Estimate at completion on activity cost records — never below actual cost'
+              value={summaryFigure(eac?.mostLikely ?? totals?.forecast ?? 0)}
+              hint={
+                activityBudgetsWithheld
+                  ? withheldReason
+                  : 'Estimate at completion on activity cost records — never below actual cost'
+              }
+              testId='uat-cost-forecast-eac'
             />
           </div>
 
@@ -269,20 +289,24 @@ export function CostDashboard({
             <ScenarioCard
               tone='good'
               label='Optimistic EAC'
-              sub='cost to complete −10%'
-              value={fmtUSD(eac?.optimistic ?? 0)}
+              sub={activityBudgetsWithheld ? withheldReason : 'cost to complete −10%'}
+              value={summaryFigure(eac?.optimistic ?? 0)}
             />
             <ScenarioCard
               tone='neutral'
               label='Most likely EAC'
-              sub='actual to date + cost to complete'
-              value={fmtUSD(eac?.mostLikely ?? 0)}
+              sub={
+                activityBudgetsWithheld
+                  ? withheldReason
+                  : 'actual to date + cost to complete'
+              }
+              value={summaryFigure(eac?.mostLikely ?? 0)}
             />
             <ScenarioCard
               tone='risk'
               label='Pessimistic EAC'
-              sub='cost to complete +15%'
-              value={fmtUSD(eac?.pessimistic ?? 0)}
+              sub={activityBudgetsWithheld ? withheldReason : 'cost to complete +15%'}
+              value={summaryFigure(eac?.pessimistic ?? 0)}
             />
           </div>
         </TabsContent>
@@ -620,32 +644,62 @@ export function CostDashboard({
                 </tr>
               </thead>
               <tbody>
-                {byPhase.map((phase) => (
-                  <tr key={phase.phase} className='border-b hover:bg-muted/25'>
-                    <td className='p-2 font-medium'>{phase.phase}</td>
-                    <td className='p-2 text-right text-xs'>
-                      {fmtUSD(phase.budget)}
-                    </td>
-                    <td className='p-2 text-right text-xs'>
-                      {fmtUSD(phase.committed)}
-                    </td>
-                    <td className='p-2 text-right text-xs'>
-                      {fmtUSD(phase.actual)}
-                    </td>
-                    <td className='p-2 text-right text-xs'>
-                      {fmtUSD(phase.forecast)}
-                    </td>
-                    <td className='p-2 text-right text-xs'>
-                      {fmtUSD(phase.variance)}
-                    </td>
-                    <td className='p-2 text-right text-xs'>
-                      {phase.variancePct.toFixed(1)}%
-                    </td>
-                  </tr>
-                ))}
+                {byPhase.map((phase) => {
+                  // A phase's budget, forecast and variance are its
+                  // activities' approved allocations: withheld from a member
+                  // who may not read the BOQ (owner decision E1).
+                  const withheld =
+                    activityBudgetsWithheld || phase.budget === undefined
+                  const dash = (
+                    <span
+                      className='text-muted-foreground'
+                      title={withheldReason}
+                      data-testid='uat-cost-phase-withheld'
+                    >
+                      —
+                    </span>
+                  )
+                  return (
+                    <tr
+                      key={phase.phase}
+                      className='border-b hover:bg-muted/25'
+                    >
+                      <td className='p-2 font-medium'>{phase.phase}</td>
+                      <td className='p-2 text-right text-xs'>
+                        {withheld ? dash : fmtUSD(phase.budget ?? 0)}
+                      </td>
+                      <td className='p-2 text-right text-xs'>
+                        {fmtUSD(phase.committed)}
+                      </td>
+                      <td className='p-2 text-right text-xs'>
+                        {fmtUSD(phase.actual)}
+                      </td>
+                      <td className='p-2 text-right text-xs'>
+                        {withheld ? dash : fmtUSD(phase.forecast ?? 0)}
+                      </td>
+                      <td className='p-2 text-right text-xs'>
+                        {withheld ? dash : fmtUSD(phase.variance ?? 0)}
+                      </td>
+                      <td className='p-2 text-right text-xs'>
+                        {withheld
+                          ? dash
+                          : `${(phase.variancePct ?? 0).toFixed(1)}%`}
+                      </td>
+                    </tr>
+                  )
+                })}
               </tbody>
             </table>
           </div>
+          {activityBudgetsWithheld && (
+            <p
+              className='mt-2 text-xs text-muted-foreground'
+              data-testid='uat-cost-phase-withheld-reason'
+            >
+              — {withheldReason}: a phase&apos;s budget, forecast and
+              variance are its activities&apos; BOQ allocations.
+            </p>
+          )}
         </TabsContent>
 
         <TabsContent value='equipment' className='space-y-3'>
@@ -837,16 +891,19 @@ function CostFigure({
   value,
   hint,
   emphasis = false,
+  testId,
 }: {
   label: string
   value: string
   hint?: string
   emphasis?: boolean
+  testId?: string
 }) {
   return (
     <div
       className={emphasis ? 'rounded-lg border-2 border-primary/40 bg-card p-3' : 'rounded-lg border bg-card p-3'}
       title={hint}
+      data-testid={testId}
     >
       <p className='text-xs text-muted-foreground'>{label}</p>
       <p className='text-lg font-bold'>{value}</p>

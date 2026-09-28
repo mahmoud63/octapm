@@ -33,27 +33,32 @@ export interface CostRecord {
   }
 }
 
+// The figures the summary adds up from the records' budgets (each activity's
+// approved BOQ allocation) — per category, in total, and the forecast and EAC
+// that fall back to them — are omitted by the server for a member who may
+// not read the BOQ, cost readers included (owner decision E1), and the
+// answer says so (activityBudgetsWithheld, activityBudgetsReason).
 export interface CostSummary {
   records: CostRecord[]
   byPhase: Array<{
     phase: string
-    budget: number
+    budget?: number
     committed: number
     actual: number
-    forecast: number
-    variance: number
-    variancePct: number
+    forecast?: number
+    variance?: number
+    variancePct?: number
   }>
   totals: {
-    budget: number
+    budget?: number
     committed: number
     actual: number
-    forecast: number
+    forecast?: number
   }
   eac: {
-    optimistic: number
-    mostLikely: number
-    pessimistic: number
+    optimistic?: number
+    mostLikely?: number
+    pessimistic?: number
     /** Estimate at completion: actual to date + cost to complete (Phase 22A). */
     basis?: 'estimate_at_completion'
     actual?: number
@@ -65,9 +70,11 @@ export interface CostSummary {
     approvedChanges: number | null
     revisions: number | null
     revisedBudget: number | null
-    allocatedToActivities: number
+    allocatedToActivities?: number
     source: 'budget_register' | null
   }
+  activityBudgetsWithheld?: boolean
+  activityBudgetsReason?: string
 }
 
 export interface BurnRateSummary {

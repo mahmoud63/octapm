@@ -14,8 +14,9 @@ router.use(authenticate);
 
 // The history is the project's, and every audit reader's — except the
 // bill's figures in it (§12, utils/boq-figures): the history of the BOQ's
-// records for those who may read the BOQ, a schedule revision's total budget
-// for those who may read the BOQ or the cost module.
+// records and a cost record's budget (its activity's approved allocation,
+// owner decision E1) for those who may read the BOQ, a schedule revision's
+// total budget for those who may read the BOQ or the cost module.
 router.get(
   '/',
   requirePermission('audit', 'read'),

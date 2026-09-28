@@ -11046,7 +11046,7 @@ addGenericRoute({
   method: "get",
   tag: "Audit",
   summary:
-    "List project audit events. The history of the BOQ's records (boq_item, boq_revision, activity_boq_allocation) is present only for a caller who may read the BOQ, and a schedule_revision event's totalBudget in its summaries only for a caller who may read the BOQ or the cost module.",
+    "List project audit events. The history of the BOQ's records (boq_item, boq_revision, activity_boq_allocation) is present only for a caller who may read the BOQ, a cost_record event's budget (and generatedBudget) in its summaries — the budget written on the record, its activity's approved BOQ allocation when the record was made (owner decision E1) — only for a caller who may read the BOQ, and a schedule_revision event's totalBudget in its summaries only for a caller who may read the BOQ or the cost module. Output only: the stored events are not changed.",
   description:
     "Returns tenant-scoped centralized audit events. Each write also persists a compact redacted RecordHistorySnapshot row for contractual record history reconstruction.",
   operationId: "listProjectAuditEvents",
@@ -11635,7 +11635,7 @@ const COST_RECORD_BUDGETS =
     method: "get",
     path: "/projects/{projectId}/cost/summary",
     summary: "Get project cost summary.",
-    description: `${COST_RECORD_BUDGETS} The totals, byPhase, eac and budget (the budget register's) are the same for every cost reader.`,
+    description: `${COST_RECORD_BUDGETS} The summary's figures built from those budgets — they add up the approved allocations of the activities that have a cost record, per category and in total, and a record with no forecast counts its budget in the forecast — are present only for a caller who may read the BOQ: byPhase[].budget, forecast, variance and variancePct; totals.budget and totals.forecast; eac.toComplete, optimistic, mostLikely and pessimistic; budget.allocatedToActivities. Anyone else receives each byPhase row's phase, committed and actual, totals.committed and totals.actual, eac.basis and eac.actual, and the budget register's original, approved changes, revisions and revised budget, with activityBudgetsWithheld true and activityBudgetsReason "Mapping details unavailable to you". Moving an approved allocation between activities changes nothing such a caller receives (owner decision E1). The project's own totals — EV, PV, AC, SPI, CPI, EAC — are on the EV report and the forecast.`,
     operationId: "getCostSummary",
     permissions: modulePermission("cost", "read"),
   },
@@ -11710,6 +11710,7 @@ const COST_RECORD_BUDGETS =
     method: "post",
     path: "/projects/{projectId}/cost/activity/{activityId}",
     summary: "Create or update a cost record for an activity.",
+    description: `A record made here is written with its activity's approved BOQ allocation as its budget when none is given. ${COST_RECORD_BUDGETS} The answer is the record as written, without budget and generatedBudget for a caller who may not read the BOQ.`,
     operationId: "upsertActivityCostRecord",
     parameters: [...projectParams, activityIdParam],
     permissions: modulePermission("cost", "create", "activity_cost.upsert"),
@@ -11720,6 +11721,7 @@ const COST_RECORD_BUDGETS =
     method: "patch",
     path: "/projects/{projectId}/cost/{id}",
     summary: "Update an activity cost record.",
+    description: `${COST_RECORD_BUDGETS} The answer is the record as written, without budget and generatedBudget for a caller who may not read the BOQ.`,
     operationId: "updateCostRecord",
     parameters: projectRecordParams,
     permissions: modulePermission("cost", "update", "activity_cost.update"),

@@ -23,8 +23,11 @@
  *   basis, level) and the forecast's list and tally of the activities over
  *   budget, its row of the EV report's breakdown (budget, PV, EV, in an
  *   order set by the budget), its budget on the Cost module's records and in
- *   the budget reconciliation, and a budget line's spread suggested from the
- *   allocations. Reading the cost module does not change this
+ *   the budget reconciliation (in the answer to writing a record and in its
+ *   history too), what the cost summary adds up from those budgets over the
+ *   activities that have a record (per category and in total, with the
+ *   forecast and EAC that fall back to them), and a budget line's spread
+ *   suggested from the allocations. Reading the cost module does not change this
  *   (E1): a cost controller, a planning engineer or a PM without boq:read is
  *   given none of it either. Criticality itself (the flag, the float, the
  *   critical path) stays with the schedule's readers.
@@ -336,16 +339,29 @@ const withheldForecast = (forecast, access = FULL_ACCESS) => {
 // The Cost module's own answers state an activity's approved allocation too
 // (E1): a cost record's budget is that activity's approved allocation, and
 // beside it the budget first written on the record (the allocation when the
-// record was made); the budget reconciliation sets each activity's
-// allocation against the budget lines. A cost reader who may not read the
-// BOQ keeps the cost ledger's own figures on each record (the cost
-// categories, committed, actual, forecast) and every project total (the
-// summary's totals and EAC, the register, the reconciliation's totals and
-// verdict), and is given no activity's allocation: the record's budget is
-// omitted, and the reconciliation's per-activity rows keep only what the
-// budget lines and the approved change orders say of the activity.
+// record was made, or the figure its writer gave); the budget reconciliation
+// sets each activity's allocation against the budget lines. A cost reader
+// who may not read the BOQ keeps the cost ledger's own figures on each record
+// (the cost categories, committed, actual, the stored forecast) and every
+// true project total (the budget register, the ledger's actual, the
+// commitments, the reconciliation's totals and verdict), and is given no
+// activity's allocation: the record's budget is omitted — on the lists, in
+// the answer to writing a record, and in the record's history — and the
+// reconciliation's per-activity rows keep only what the budget lines and the
+// approved change orders say of the activity.
+//
+// The test is the owner's differential: moving one approved allocation
+// between any two activities changes nothing such a reader receives. The
+// cost summary's budget, forecast and EAC are sums over the activities that
+// have a cost record, split by the activity's category — a record's
+// estimate at completion falls back to its budget (its allocation) where no
+// forecast is set — so moving an allocation onto or off an activity with a
+// record, or between categories, moves them, and a category or a project
+// with one such activity states that activity's allocation exactly. They are
+// not the project's totals (the EV report's, the forecast's and the budget
+// register's are, and stay); each is omitted, and the summary says why.
 
-/** A cost record (GET /cost, /cost/summary) as this caller may receive it. */
+/** A cost record (GET /cost, /cost/summary, and the answer to writing one) as this caller may receive it. */
 const withheldCostRecord = (record, access = FULL_ACCESS) =>
   access.boq ? record : withoutKeys(record, ACTIVITY_BUDGET_KEYS);
 
@@ -355,10 +371,34 @@ const withheldCostRecords = (result, access = FULL_ACCESS) => {
   return { ...result, rows: result.rows.map((record) => withheldCostRecord(record, access)) };
 };
 
-/** GET /projects/:id/cost/summary as this caller may receive it: the records without their allocation. */
+// What the cost summary builds from the records' budgets (the approved
+// allocations of the activities with a record): each category's budget,
+// forecast (a record without a forecast counts its budget) and variance;
+// the records' budget and forecast totals; the EAC scenarios built from that
+// forecast; and the "allocated to activities" beside the register.
+const COST_SUMMARY_PHASE_KEYS = ["budget", "forecast", "variance", "variancePct"];
+const COST_SUMMARY_TOTAL_KEYS = ["budget", "forecast"];
+const COST_SUMMARY_EAC_KEYS = ["toComplete", "optimistic", "mostLikely", "pessimistic"];
+
+/**
+ * GET /projects/:id/cost/summary as this caller may receive it. A BOQ reader
+ * receives the service's answer untouched (the same object). Anyone else
+ * keeps each record without its allocation, each category's and the
+ * records' committed and actual, the EAC's basis and actual, and the budget
+ * register's figures; everything built from the records' budgets is
+ * omitted, and the answer says so and why (activityBudgetsWithheld).
+ */
 const withheldCostSummary = (summary, access = FULL_ACCESS) => {
-  if (access.boq || !summary || typeof summary !== "object" || !Array.isArray(summary.records)) return summary;
-  return { ...summary, records: summary.records.map((record) => withheldCostRecord(record, access)) };
+  if (access.boq || !summary || typeof summary !== "object" || Array.isArray(summary)) return summary;
+  const result = { ...summary };
+  if (Array.isArray(summary.records)) result.records = summary.records.map((record) => withheldCostRecord(record, access));
+  if (has(summary, "byPhase")) result.byPhase = mapList(summary.byPhase, (row) => withoutKeys(row, COST_SUMMARY_PHASE_KEYS));
+  if (has(summary, "totals")) result.totals = withoutKeys(summary.totals, COST_SUMMARY_TOTAL_KEYS);
+  if (has(summary, "eac")) result.eac = withoutKeys(summary.eac, COST_SUMMARY_EAC_KEYS);
+  if (has(summary, "budget")) result.budget = withoutKeys(summary.budget, ["allocatedToActivities"]);
+  result.activityBudgetsWithheld = true;
+  result.activityBudgetsReason = MAPPING_DETAILS_WITHHELD;
+  return result;
 };
 
 // A reconciliation row's figures that are the activity's approved
@@ -445,29 +485,38 @@ const withheldError = (error, access = FULL_ACCESS) => {
 const BOQ_RECORD_TYPES = new Set(["boq_item", "boq_revision", "activity_boq_allocation"]);
 
 const withoutRevisionTotals = (summary) => withoutKeys(summary, REVISION_BUDGET_KEYS);
+const withoutRecordBudget = (summary) => withoutKeys(summary, ACTIVITY_BUDGET_KEYS);
+
+// An event's summaries (before, after, and the event's own) with `strip`
+// applied to each one the event carries.
+const withSummaries = (event, strip) => ({
+  ...event,
+  ...(has(event, "oldSummary") ? { oldSummary: strip(event.oldSummary) } : {}),
+  ...(has(event, "newSummary") ? { newSummary: strip(event.newSummary) } : {}),
+  ...(has(event, "summary") ? { summary: strip(event.summary) } : {}),
+});
 
 /**
  * A project's history (GET /audit, which the schedule's status history
  * reads) as this caller may receive it. Someone who may not read the BOQ is
  * not given the history of the bill's records — their summaries state its
- * rates, quantities and values. Someone who reads neither the BOQ nor the
- * cost module is not given a schedule revision's total budget, which its
- * transitions record in their summaries. Everything else is as built.
+ * rates, quantities and values — nor a cost record's budget in its history:
+ * the budget written on a record is its activity's approved allocation when
+ * the record was made (E1), withheld here as it is on GET /cost. Someone who
+ * reads neither the BOQ nor the cost module is not given a schedule
+ * revision's total budget, which its transitions record in their summaries.
+ * Everything else is as built; the stored events are not changed.
  */
 const withheldAuditHistory = (history, access = FULL_ACCESS) => {
   if (access.boq || !history || typeof history !== "object" || !Array.isArray(history.events)) return history;
   const events = history.events
     .filter((event) => !(event && BOQ_RECORD_TYPES.has(event.recordType || event.entityType)))
-    .map((event) =>
-      !access.budget && event && (event.recordType || event.entityType) === "schedule_revision"
-        ? {
-            ...event,
-            ...(has(event, "oldSummary") ? { oldSummary: withoutRevisionTotals(event.oldSummary) } : {}),
-            ...(has(event, "newSummary") ? { newSummary: withoutRevisionTotals(event.newSummary) } : {}),
-            ...(has(event, "summary") ? { summary: withoutRevisionTotals(event.summary) } : {}),
-          }
-        : event,
-    );
+    .map((event) => {
+      const type = event && (event.recordType || event.entityType);
+      if (type === "cost_record") return withSummaries(event, withoutRecordBudget);
+      if (!access.budget && type === "schedule_revision") return withSummaries(event, withoutRevisionTotals);
+      return event;
+    });
   return { ...history, events };
 };
 
@@ -566,6 +615,7 @@ module.exports = {
   withheldAuditHistory,
   withheldBudgetReconciliation,
   withheldBudgetSnapshot,
+  withheldCostRecord,
   withheldCostRecords,
   withheldCostSummary,
   withheldError,

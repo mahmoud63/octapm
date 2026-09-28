@@ -684,7 +684,9 @@ export function ControlsStrip({
                 }`
               : fromRegister
                 ? 'budget register, revised'
-                : 'activity budgets'
+                : costSummary?.activityBudgetsWithheld
+                  ? `activity budgets · ${costSummary.activityBudgetsReason ?? 'Mapping details unavailable to you'}`
+                  : 'activity budgets'
         }
         testId='uat-controls-figure-budget'
         onClick={linkTo(TARGETS.budget)}
