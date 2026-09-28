@@ -202,7 +202,7 @@ describe('schedule revision lifecycle service', () => {
     );
   });
 
-  it('blocks approval when readiness checks fail', async () => {
+  it('approves with the BOQ still unallocated: coverage is a baseline check, not an approval check (D5)', async () => {
     mockCurrentRevision(revision);
     mockBuildAllocationSummary.mockResolvedValue({
       totalBoqAmount: 100,
@@ -210,6 +210,45 @@ describe('schedule revision lifecycle service', () => {
       pendingAllocatedAmount: 0,
       unallocatedAmount: 100,
     });
+
+    const result = await scheduleService.approveRevision({
+      orgId: 'org-1',
+      projectId: 'project-1',
+      revisionId: 'revision-1',
+      userId: 'user-1',
+    });
+    expect(result.status).toBe('approved');
+  });
+
+  it('refuses the baseline lock while BOQ value is unallocated, naming Project Controls › Mapping (D5)', async () => {
+    mockCurrentRevision({ ...revision, status: 'approved', isActive: true }, { active: true });
+    mockBuildAllocationSummary.mockResolvedValue({
+      totalBoqAmount: 100,
+      approvedAllocatedAmount: 0,
+      pendingAllocatedAmount: 0,
+      unallocatedAmount: 100,
+    });
+
+    await expect(
+      scheduleService.lockBaseline({
+        orgId: 'org-1',
+        projectId: 'project-1',
+        revisionId: 'revision-1',
+        userId: 'pm-1',
+      }),
+    ).rejects.toMatchObject({
+      code: 'SCHEDULE_NOT_READY',
+      message:
+        'Schedule readiness checks must pass before baseline lock: BOQ allocations — BOQ value remains unallocated to approved schedule activities (Project Controls › Mapping).',
+    });
+    expect(mockPrisma.activity.update).not.toHaveBeenCalled();
+  });
+
+  it('blocks approval when the revision\'s own logic fails', async () => {
+    mockCurrentRevision(revision);
+    mockPrisma.activity.findMany.mockResolvedValue(
+      readyActivities.map((activity) => ({ ...activity, predecessors: null })),
+    );
 
     await expect(
       scheduleService.approveRevision({
@@ -509,5 +548,64 @@ describe('schedule revision lifecycle service', () => {
 
     expect(mockPrisma.activity.update).not.toHaveBeenCalled();
     expect(mockPrisma.activityProgress.deleteMany).not.toHaveBeenCalled();
+  });
+});
+
+describe('scheduleNotReadyMessage', () => {
+  const check = (key, label, message) => ({
+    key,
+    label,
+    message,
+    severity: 'blocking',
+    passed: false,
+  });
+
+  it('keeps an acronym that starts a check message, and lower-cases an ordinary first word mid-sentence', () => {
+    const message = scheduleService.scheduleNotReadyMessage(
+      {
+        checks: [
+          check('predecessors', 'Predecessor logic', 'At least one predecessor relationship is required.'),
+          check('allocations', 'BOQ allocations', 'BOQ value remains unallocated to approved schedule activities.'),
+          check('critical_path', 'Critical path', 'A critical path is required.'),
+          { key: 'date_sanity', label: 'Dates', message: 'Passed.', severity: 'blocking', passed: true },
+        ],
+      },
+      'approval',
+    );
+    expect(message).toBe(
+      'Schedule readiness checks must pass before approval: ' +
+        'Predecessor logic — at least one predecessor relationship is required (Schedule › Gantt › Edit); ' +
+        'BOQ allocations — BOQ value remains unallocated to approved schedule activities (Project Controls › Mapping); ' +
+        'Critical path — a critical path is required (Schedule › More actions › Recalculate CPM).',
+    );
+    expect(message).not.toMatch(/\bbOQ\b/);
+    // The read-only Critical Path tab and the Activities table are never
+    // named as places to fix anything.
+    expect(message).not.toMatch(/Schedule › Critical Path|Schedule › Activities/);
+  });
+
+  it('a staged revision is never sent to a page that shows only the active schedule: its fix is the corrected import, or the rejection', () => {
+    const readiness = scheduleService.buildScheduleReadiness({
+      project: { id: 'p', startDate: new Date('2026-01-05'), endDate: new Date('2026-12-18') },
+      revision: { id: 'r', isActive: false, status: 'under_review' },
+      activities: [
+        { id: 'a', name: 'A', duration: 5, earlyStart: 0, earlyFinish: 5, totalFloat: 0, isCritical: true, predecessors: '' },
+        { id: 'b', name: 'B', duration: 5, earlyStart: 5, earlyFinish: 10, totalFloat: 0, isCritical: true, predecessors: '' },
+      ],
+      allocationSummary: {},
+    });
+    const message = scheduleService.scheduleNotReadyMessage(readiness, 'approval', { gate: 'approval' });
+    expect(message).toBe(
+      'Schedule readiness checks must pass before approval: Predecessor logic — at least one predecessor relationship is required. ' +
+        'A staged revision cannot be edited: correct the schedule at its source and import it again, or regenerate it from the BOQ (Schedule › Update Schedule) — the new revision replaces this one, or reject this revision (Schedule Review).',
+    );
+    expect(message).not.toMatch(/Gantt|Activities|Critical Path/);
+    // A reader who may not import is told who can.
+    const denied = scheduleService.scheduleNotReadyMessage(readiness, 'approval', {
+      gate: 'approval',
+      access: { can: () => false },
+    });
+    expect(denied).toBe(`${message} The step on Schedule › Update Schedule needs a member who can create schedules (import or generate); ask one of them.`);
+    expect(scheduleService.scheduleNotReadyMessage(readiness, 'approval', { gate: 'approval', access: { can: () => true } })).toBe(message);
   });
 });

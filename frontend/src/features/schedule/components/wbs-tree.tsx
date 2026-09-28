@@ -10,20 +10,35 @@ import {
 } from 'recharts'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { useWbsNodes } from '@/features/controls/structure/hooks/use-structure'
+import { useScheduleWbsRows } from '@/features/controls/structure/hooks/use-structure'
 
 /**
  * The schedule's WBS tab.
  *
  * When the project has WbsNode rows (PC-1: populated at revision activation
- * and editable on the Structure page) the tree is those rows, joined by
- * parent id. Otherwise it falls back to the WBS the revision snapshot
- * carried, split on "." as before — older projects keep their tab.
+ * and editable on the Structure page) the tree is always those rows, joined
+ * by parent id — for everyone who can read the schedule (owner decision D3:
+ * a schedule reader who may not read the BOQ receives the same outline).
+ * Only a project without WbsNode rows falls back to the WBS the revision
+ * snapshot carried, joined by the snapshot's own parent ids (an imported P6
+ * or MS Project WBS) and, for the generator's id-less nodes, by dotted code.
+ * Until the project's rows have been read nothing is drawn, so the snapshot
+ * never stands in for a canonical tree that exists. Whether rows exist is
+ * decided by every row, archived ones included: a project whose nodes are
+ * all archived says so, and does not fall back to the snapshot. The rows
+ * keep the canonical sibling order the service gives them (sortOrder, then
+ * code); only the snapshot fallback is ordered by code.
  */
 
 type FlatWbsNode = {
   id?: string
   parentId?: string | null
+  // The snapshot's own ids, as the parsers write them: XER / xlsx / MSPDI
+  // (wbsId, parentWbsId) and P6 XML (objectId, parentObjectId).
+  wbsId?: string | number | null
+  parentWbsId?: string | number | null
+  objectId?: string | number | null
+  parentObjectId?: string | number | null
   code?: string
   level?: number
   name?: string
@@ -40,14 +55,17 @@ type WbsNode = {
   level: number
   name: string
   duration: number
-  budget: number
+  // Absent when the snapshot carried none, or when it is withheld from
+  // someone who may read neither the BOQ nor the cost module (§12): never
+  // read as 0.
+  budget?: number
   activities: number
   responsible: string
   isPackage: boolean
   children: WbsNode[]
 }
 
-const fmtUSD = (n: number) =>
+const fmtUSD = (n: number | undefined) =>
   n
     ? '$' + Number(n).toLocaleString('en-US', { maximumFractionDigits: 0 })
     : '—'
@@ -58,38 +76,123 @@ const toNode = (node: FlatWbsNode, key: string, level: number): WbsNode => ({
   level,
   name: String(node.name || 'Unnamed'),
   duration: Number(node.duration) || 0,
-  budget: Number(node.budget) || 0,
+  budget:
+    node.budget === undefined || node.budget === null
+      ? undefined
+      : Number(node.budget) || 0,
   activities: Number(node.activities) || 0,
   responsible: String(node.responsible || ''),
   isPackage: Boolean(node.isPackage),
   children: [],
 })
 
-/** Snapshot nodes carry no ids: the dotted code is the hierarchy. */
-const buildTreeFromCodes = (nodes: FlatWbsNode[]): WbsNode[] => {
-  const sorted = [...nodes]
-    .filter((node) => node.code)
-    .sort((a, b) =>
-      String(a.code).localeCompare(String(b.code), undefined, { numeric: true })
-    )
+const idOf = (value: unknown) => {
+  const text = value === null || value === undefined ? '' : String(value).trim()
+  return text || null
+}
 
-  const map = new Map<string, WbsNode>()
-  sorted.forEach((node) => {
-    const code = String(node.code)
-    map.set(code, toNode(node, code, Number(node.level) || code.split('.').length))
+const byCode = (a: WbsNode, b: WbsNode) =>
+  a.code.localeCompare(b.code, undefined, { numeric: true })
+
+const sortDeep = (list: WbsNode[]) => {
+  list.sort(byCode)
+  list.forEach((node) => sortDeep(node.children))
+}
+
+/**
+ * The WBS a revision snapshot carried, as a tree — the same reading
+ * wbs.service's normalizeSnapshotNode gives it when the revision is
+ * activated. A node with an id (wbsId / objectId) is keyed by it and hangs
+ * under the node its parent id names; only a node without ids (the AI
+ * generator's { code, level, name }) is placed by its dotted code, or under
+ * the last node one level up. Nothing is keyed by code alone, so two nodes
+ * sharing a short code ("FDN" under "CIV" and under "MEP") both appear, each
+ * under its own parent.
+ */
+const buildTreeFromSnapshot = (nodes: FlatWbsNode[]): WbsNode[] => {
+  type Entry = {
+    key: string
+    parentKey: string | null
+    node: WbsNode
+    implicit: boolean
+    raw: FlatWbsNode
+  }
+  const entries: Entry[] = []
+  const keyById = new Map<string, string>()
+  nodes.forEach((raw, index) => {
+    const code = idOf(raw.code)
+    const id = idOf(raw.wbsId ?? raw.objectId ?? raw.id)
+    if (!code && !id) return
+    // A repeated id (never expected in one file) keeps its node, keyed by
+    // its place in the list.
+    const fresh = id !== null && !keyById.has(id)
+    const key = fresh ? `id:${id}` : `at:${index}`
+    if (fresh) keyById.set(id!, key)
+    const label = code ?? id!
+    const level = Number(raw.level) || label.split('.').length
+    entries.push({
+      key,
+      parentKey: null,
+      node: toNode({ ...raw, code: label }, key, level),
+      implicit: !id,
+      raw,
+    })
   })
 
+  // Parents by id first.
+  const firstKeyByCode = new Map<string, string>()
+  entries.forEach((entry) => {
+    if (entry.implicit && !firstKeyByCode.has(entry.node.code)) {
+      firstKeyByCode.set(entry.node.code, entry.key)
+    }
+  })
+  const lastAtLevel: Entry[] = []
+  for (const entry of entries) {
+    const raw = entry.raw
+    const parentId = entry.implicit
+      ? null
+      : idOf(raw.parentWbsId ?? raw.parentObjectId ?? raw.parentId)
+    if (parentId && keyById.has(parentId)) {
+      entry.parentKey = keyById.get(parentId)!
+    } else if (entry.implicit) {
+      const parts = entry.node.code.split('.')
+      const prefix = parts.slice(0, -1).join('.')
+      const above = entry.node.level > 1 ? lastAtLevel[entry.node.level - 2] : null
+      if (prefix && firstKeyByCode.has(prefix)) entry.parentKey = firstKeyByCode.get(prefix)!
+      else if (!prefix && above) entry.parentKey = above.key
+    }
+    lastAtLevel[entry.node.level - 1] = entry
+    lastAtLevel.length = entry.node.level
+  }
+
+  // Join, refusing any parent chain that loops back on itself.
+  const byKey = new Map(entries.map((entry) => [entry.key, entry]))
+  const loops = (entry: Entry) => {
+    const seen = new Set<string>([entry.key])
+    let parent = entry.parentKey ? byKey.get(entry.parentKey) : undefined
+    while (parent) {
+      if (seen.has(parent.key)) return true
+      seen.add(parent.key)
+      parent = parent.parentKey ? byKey.get(parent.parentKey) : undefined
+    }
+    return false
+  }
   const roots: WbsNode[] = []
-  map.forEach((node) => {
-    const parts = node.code.split('.')
-    const parent = parts.length > 1 ? map.get(parts.slice(0, -1).join('.')) : null
-    if (parent) parent.children.push(node)
-    else roots.push(node)
-  })
+  for (const entry of entries) {
+    const parent = entry.parentKey ? byKey.get(entry.parentKey) : undefined
+    if (parent && parent !== entry && !loops(entry)) parent.node.children.push(entry.node)
+    else roots.push(entry.node)
+  }
+  sortDeep(roots)
   return roots
 }
 
-/** WbsNode rows carry ids and parent ids: the hierarchy is explicit. */
+/**
+ * WbsNode rows carry ids and parent ids: the hierarchy is explicit. The
+ * rows arrive in the canonical order (wbs.service: depth first, siblings by
+ * sortOrder, then code), and each list keeps the order its rows came in —
+ * no re-sort — so the tab shows the siblings as the Structure page does.
+ */
 const buildTreeFromRows = (nodes: FlatWbsNode[]): WbsNode[] => {
   const map = new Map<string, WbsNode>()
   nodes.forEach((node) => {
@@ -104,13 +207,6 @@ const buildTreeFromRows = (nodes: FlatWbsNode[]): WbsNode[] => {
     if (parent) parent.children.push(built)
     else roots.push(built)
   })
-  const byCode = (a: WbsNode, b: WbsNode) =>
-    a.code.localeCompare(b.code, undefined, { numeric: true })
-  const sortDeep = (list: WbsNode[]) => {
-    list.sort(byCode)
-    list.forEach((node) => sortDeep(node.children))
-  }
-  sortDeep(roots)
   return roots
 }
 
@@ -129,9 +225,10 @@ type RowProps = {
   depth: number
   expanded: Set<string>
   toggle: (key: string) => void
+  showBudget: boolean
 }
 
-function WbsRow({ node, depth, expanded, toggle }: RowProps) {
+function WbsRow({ node, depth, expanded, toggle, showBudget }: RowProps) {
   const hasChildren = node.children.length > 0
   const isOpen = expanded.has(node.key)
 
@@ -140,6 +237,7 @@ function WbsRow({ node, depth, expanded, toggle }: RowProps) {
       <tr
         className='border-b hover:bg-muted/25'
         data-testid={`uat-schedule-wbs-row-${node.code}`}
+        data-depth={depth}
       >
         <td className='p-2' style={{ paddingLeft: `${depth * 20 + 8}px` }}>
           <div className='flex items-center gap-1'>
@@ -174,7 +272,7 @@ function WbsRow({ node, depth, expanded, toggle }: RowProps) {
         <td className='p-2 text-right text-xs'>
           {node.duration ? `${node.duration}d` : '—'}
         </td>
-        <td className='p-2 text-right text-xs'>{fmtUSD(node.budget)}</td>
+        {showBudget && <td className='p-2 text-right text-xs'>{fmtUSD(node.budget)}</td>}
         <td className='p-2 text-right text-xs'>{node.activities || '—'}</td>
         <td className='p-2 text-xs text-muted-foreground'>
           {node.responsible || '—'}
@@ -190,6 +288,7 @@ function WbsRow({ node, depth, expanded, toggle }: RowProps) {
             depth={depth + 1}
             expanded={expanded}
             toggle={toggle}
+            showBudget={showBudget}
           />
         ))}
     </>
@@ -203,15 +302,25 @@ export function WbsTree({
   nodes: FlatWbsNode[]
   projectId?: string
 }) {
-  const { data: structure } = useWbsNodes(projectId ?? '', {
+  const {
+    data: structure,
+    isLoading: structureLoading,
+    isError: structureFailed,
+  } = useScheduleWbsRows(projectId ?? '', {
     enabled: Boolean(projectId),
   })
+  // Any row, archived or not, makes the tree the project's own (D3).
   const fromRows = Boolean(structure && structure.items.length > 0)
+  const activeRows = useMemo(
+    () => (structure?.items ?? []).filter((row) => row.status !== 'archived'),
+    [structure]
+  )
+  const allArchived = fromRows && activeRows.length === 0
 
   const source = useMemo<FlatWbsNode[]>(
     () =>
       fromRows
-        ? structure!.items.map((row) => ({
+        ? activeRows.map((row) => ({
             id: row.id,
             parentId: row.parentId,
             code: row.code,
@@ -221,11 +330,11 @@ export function WbsTree({
             isPackage: row.isPackage,
           }))
         : nodes || [],
-    [fromRows, structure, nodes]
+    [fromRows, activeRows, nodes]
   )
 
   const tree = useMemo(
-    () => (fromRows ? buildTreeFromRows(source) : buildTreeFromCodes(source)),
+    () => (fromRows ? buildTreeFromRows(source) : buildTreeFromSnapshot(source)),
     [fromRows, source]
   )
   const topLevelData = useMemo(
@@ -236,6 +345,15 @@ export function WbsTree({
       })),
     [tree]
   )
+  // The rollup is a chart of budgets: with none to chart (none carried, or
+  // withheld) it is not drawn, rather than drawn as bars of $0k.
+  const hasBudgets = topLevelData.some((node) => node.budget !== undefined)
+  // The project's WbsNode rows carry no budget (nothing rolls one up, and a
+  // rolled-up budget is not a figure this tab may invent), so the rows view
+  // has no Budget column rather than a column of dashes that would read as
+  // "withheld" or "none". Its activity counts are each node's own.
+  const showBudget = !fromRows
+  const columnCount = showBudget ? 6 : 5
 
   const initialExpanded = useMemo(
     () => new Set(tree.map((node) => node.key)),
@@ -262,8 +380,25 @@ export function WbsTree({
     setExpanded(next)
   }
 
+  // The canonical tree decides: while it is being read, or if it cannot be
+  // read, the revision's snapshot is not offered in its place.
+  if (projectId && structureLoading) {
+    return (
+      <p className='p-6 text-center text-sm text-muted-foreground' data-testid='uat-schedule-wbs-loading'>
+        Loading the project WBS…
+      </p>
+    )
+  }
+  if (projectId && structureFailed) {
+    return (
+      <p className='p-6 text-center text-sm text-muted-foreground' data-testid='uat-schedule-wbs-error'>
+        The project WBS could not be loaded. Reload the page to try again.
+      </p>
+    )
+  }
+
   return (
-    <div className='space-y-4'>
+    <div className='space-y-4' data-testid='uat-schedule-wbs' data-source={fromRows ? 'wbs-nodes' : 'snapshot'}>
       <div className='flex flex-wrap items-center gap-2'>
         <Button
           size='sm'
@@ -293,8 +428,17 @@ export function WbsTree({
               <th className='p-2 text-left font-medium'>WBS Code</th>
               <th className='p-2 text-left font-medium'>Name</th>
               <th className='p-2 text-right font-medium'>Duration</th>
-              <th className='p-2 text-right font-medium'>Budget</th>
-              <th className='p-2 text-right font-medium'>Activities</th>
+              {showBudget && <th className='p-2 text-right font-medium'>Budget</th>}
+              <th
+                className='p-2 text-right font-medium'
+                title={
+                  fromRows
+                    ? 'Activities filed directly under the node, not under its children'
+                    : undefined
+                }
+              >
+                {fromRows ? 'Activities (direct)' : 'Activities'}
+              </th>
               <th className='p-2 text-left font-medium'>Responsible</th>
             </tr>
           </thead>
@@ -302,10 +446,17 @@ export function WbsTree({
             {tree.length === 0 ? (
               <tr>
                 <td
-                  colSpan={6}
+                  colSpan={columnCount}
                   className='p-6 text-center text-muted-foreground'
                 >
-                  No WBS data available.
+                  {allArchived ? (
+                    <span data-testid='uat-schedule-wbs-all-archived'>
+                      All WBS nodes are archived. Restore or add nodes under
+                      Project Controls › Structure.
+                    </span>
+                  ) : (
+                    'No WBS data available.'
+                  )}
                 </td>
               </tr>
             ) : (
@@ -316,6 +467,7 @@ export function WbsTree({
                   depth={0}
                   expanded={expanded}
                   toggle={toggle}
+                  showBudget={showBudget}
                 />
               ))
             )}
@@ -323,8 +475,11 @@ export function WbsTree({
         </table>
       </div>
 
-      {!fromRows && (
-        <div className='rounded-md border p-3'>
+      {!fromRows && hasBudgets && (
+        <div
+          className='rounded-md border p-3'
+          data-testid='uat-schedule-wbs-rollup'
+        >
           <p className='mb-2 text-sm font-semibold'>
             Top-Level WBS Budget Rollup
           </p>

@@ -28,7 +28,10 @@ import {
   useApproveActivityBoqAllocation,
   useSubmitActivityBoqAllocation,
 } from '@/features/boq/hooks/use-boq'
-import { useProject } from '@/features/projects/hooks/use-projects'
+import {
+  useProject,
+  useProjectSetupReadiness,
+} from '@/features/projects/hooks/use-projects'
 import {
   useAllocationCoverage,
   useMappingSuggestions,
@@ -53,6 +56,24 @@ import { MappingMatrix, type CellMode } from './mapping-matrix'
 
 type View = 'matrix' | 'list'
 
+/**
+ * Allocations go to the ACTIVE activities (owner decision D5): with a
+ * revision staged, the matrix says what the schedule is waiting on — its
+ * review and approval, or its activation — and where that is done.
+ */
+const stagedScheduleMessage = (
+  revision: { status: string; isActive: boolean } | null | undefined
+) => {
+  if (!revision || revision.isActive) return undefined
+  if (revision.status === 'approved') {
+    return 'The approved schedule revision is not active yet. Activate it on Schedule › Revisions, then map the BOQ rows to its activities here.'
+  }
+  if (['draft', 'under_review', 'rejected'].includes(revision.status)) {
+    return 'The schedule revision is not active yet. Submit it for review, approve it and activate it on Schedule › Revisions, then map the BOQ rows to its activities here.'
+  }
+  return undefined
+}
+
 const groupByOptions: Array<{ value: CoverageGroupBy; label: string }> = [
   { value: 'none', label: 'No grouping' },
   { value: 'wbs', label: 'By WBS' },
@@ -64,6 +85,10 @@ const groupByOptions: Array<{ value: CoverageGroupBy; label: string }> = [
 
 export function MappingPage({ projectId }: { projectId: string }) {
   const { data: project } = useProject(projectId)
+  const { data: setupReadiness } = useProjectSetupReadiness(projectId)
+  const emptyScheduleMessage = stagedScheduleMessage(
+    setupReadiness?.context?.currentRevision
+  )
   const currency = project?.currency ?? 'USD'
   const [view, setView] = useState<View>('matrix')
   const [groupBy, setGroupBy] = useState<CoverageGroupBy>('none')
@@ -252,6 +277,7 @@ export function MappingPage({ projectId }: { projectId: string }) {
               mode={mode}
               canCreate={canCreate}
               canUpdate={canUpdate}
+              emptyScheduleMessage={emptyScheduleMessage}
             />
           ) : (
             <MappingList

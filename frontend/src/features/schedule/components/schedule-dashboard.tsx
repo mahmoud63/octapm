@@ -53,6 +53,10 @@ import { ResourcePlan } from './resource-plan'
 import { RevisionHistoryPanel } from './revision-history-panel'
 import { ScheduleReviewPanel } from './schedule-review-panel'
 import { WbsTree } from './wbs-tree'
+import {
+  scheduleHasWbs,
+  useScheduleWbsRows,
+} from '@/features/controls/structure/hooks/use-structure'
 
 interface Props {
   projectId: string
@@ -63,7 +67,8 @@ interface Props {
   initialTarget?: ProjectSetupTarget
 }
 
-const fmtUSD = (n: number) =>
+// A budget withheld from this member (no BOQ or cost access) reads as a dash.
+const fmtUSD = (n: number | null | undefined) =>
   n
     ? '$' + Number(n).toLocaleString('en-US', { maximumFractionDigits: 0 })
     : '—'
@@ -262,6 +267,10 @@ export function ScheduleDashboard({
   const { data: project } = useProject(projectId)
   const { data: procurementItems = [] } = useLongLeadItems(projectId)
   const { revision, activities } = schedule
+  // The WBS tab: the project's canonical WbsNode tree when it has one, the
+  // revision snapshot's WBS only for a project without (owner decision D3).
+  const { data: scheduleWbsRows } = useScheduleWbsRows(projectId)
+  const hasWbs = scheduleHasWbs(scheduleWbsRows, revision.wbs)
   const [nowMs] = useState(() => Date.now())
   const scheduleDataDate =
     schedule.dataDate ||
@@ -743,6 +752,18 @@ export function ScheduleDashboard({
       )}
 
       <ScheduleReviewPanel projectId={projectId} revision={revision} />
+      {/* A newer revision staged beside the active one (a re-import after
+          the baseline): reviewed here, beside the schedule it would replace,
+          so it can be submitted, approved, rejected — and activated on the
+          Revisions tab — where it is seen. */}
+      {schedule.candidateRevision && (
+        <ScheduleReviewPanel
+          projectId={projectId}
+          revision={schedule.candidateRevision}
+          title={`Staged revision: ${schedule.candidateRevision.label || 'Schedule revision'}`}
+          testIdPrefix='uat-staged-review'
+        />
+      )}
       <AuditHistoryPanel
         projectId={projectId}
         entityType='schedule_revision'
@@ -921,7 +942,7 @@ export function ScheduleDashboard({
             <TabsTrigger value='resources'>Resources</TabsTrigger>
             <TabsTrigger value='risks'>Risks</TabsTrigger>
             <TabsTrigger value='longLead'>Long Lead</TabsTrigger>
-            {(revision.wbs || []).length > 0 && (
+            {hasWbs && (
               <TabsTrigger value='wbs'>WBS</TabsTrigger>
             )}
             <TabsTrigger value='revisions'>Revisions</TabsTrigger>
@@ -1385,7 +1406,7 @@ export function ScheduleDashboard({
         </TabsContent>
 
         {/* WBS tab */}
-        {(revision.wbs || []).length > 0 && (
+        {hasWbs && (
           <TabsContent value='wbs' className='mt-4'>
             <WbsTree nodes={revision.wbs || []} projectId={projectId} />
           </TabsContent>

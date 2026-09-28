@@ -6,6 +6,16 @@ import { ProjectDetail } from './project-detail'
  * ProjectDetail shell. Record deep-links (status, source, recordId) travel in
  * the search string so every module URL stays shareable.
  */
+/**
+ * The project landing, `/o/:workspace/projects/:id` (L3, workspace switching
+ * doc §7): the Overview module — controls strip, setup readiness, details —
+ * rather than a redirect to the Gantt.
+ */
+export function ProjectOverviewPage() {
+  const params = useParams({ strict: false }) as { projectId: string }
+  return <ProjectDetail projectId={params.projectId} module='overview' />
+}
+
 export function ProjectDetailPage() {
   const params = useParams({ strict: false }) as {
     projectId: string

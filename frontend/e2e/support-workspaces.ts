@@ -45,7 +45,7 @@ const liveOrgScript = (command: 'activate' | 'drop', orgId: string) => {
 
 export const apiJson = async (
   client: APIRequestContext,
-  method: 'get' | 'post' | 'patch' | 'delete',
+  method: 'get' | 'post' | 'put' | 'patch' | 'delete',
   route: string,
   { token, data }: { token?: string; data?: unknown } = {},
 ) => {

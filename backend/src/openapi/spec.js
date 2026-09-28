@@ -284,6 +284,13 @@ const signedMoney = {
     "Signed monetary value stored or computed at Decimal(18,2) precision.",
 };
 const nonNegativeNumber = { type: "number", minimum: 0 };
+// §12: the bill's figures on the schedule and the activities go only to a
+// caller who may read the BOQ; the budgets built from them to a caller who
+// may read the BOQ or the cost module. Absent (never zeroed) for anyone else.
+const BOQ_READERS_ONLY = " Present only for a caller who may read the BOQ (boq:read); omitted, not zeroed, for anyone else.";
+const BUDGET_READERS_ONLY = " Present only for a caller who may read the BOQ or the cost module (boq:read or cost:read); omitted for anyone else.";
+const boqFigure = (schema, what) => ({ ...schema, description: what + BOQ_READERS_ONLY });
+const budgetFigure = (what) => ({ ...money, description: what + BUDGET_READERS_ONLY });
 const percent = { type: "number", minimum: 0, maximum: 100 };
 
 const components = {
@@ -1944,9 +1951,18 @@ const components = {
       totalBoqQuantity: { type: "number" },
       totalBoqAmount: money,
       allocatableBoqAmount: money,
+      activeAllocatedQuantity: { type: "number" },
+      activeAllocatedAmount: money,
+      approvedAllocatedQuantity: { type: "number" },
       approvedAllocatedAmount: money,
       pendingAllocatedAmount: money,
+      scheduledQuantity: { type: "number" },
+      scheduledValue: money,
+      unscheduledQuantity: { type: "number" },
+      unscheduledValue: money,
+      unallocatedQuantity: { type: "number" },
       unallocatedAmount: money,
+      optionalUnallocatedQuantity: { type: "number" },
       optionalUnallocatedAmount: {
         ...money,
         description: "Remaining value of items whose mappingRule is optional: inside unallocatedAmount, reported apart because readiness warns about it instead of blocking on it.",
@@ -1955,6 +1971,7 @@ const components = {
         ...money,
         description: "Value of items whose mappingRule is not_applicable: BOQ total = approved allocated + unallocated + not applicable.",
       },
+      notApplicableQuantity: { type: "number" },
       earnedValue: money,
       certifiedValue: money,
       coveragePct: percent,
@@ -2004,6 +2021,234 @@ const components = {
       updated: { type: "integer" },
       itemIds: arrayOf(uuid),
     }),
+    // ── Setup readiness (PC-4): the twelve-step check with per-item detail ──
+    ProjectSetupTarget: objectSchema(
+      {
+        module: { type: "string" },
+        child: { type: "string" },
+      },
+      ["module"],
+    ),
+    ProjectSetupItem: objectSchema(
+      {
+        type: {
+          type: "string",
+          description:
+            "The record behind the issue: project, boq_item, boq_revision, activity, allocation, schedule_revision, unit, wbs, location or cost_code.",
+        },
+        id: { type: "string", nullable: true },
+        code: { type: "string", nullable: true },
+        label: { type: "string", nullable: true },
+        missing: { type: "string", description: "What the record lacks." },
+        href: {
+          type: "string",
+          nullable: true,
+          description: "Where to fix it: the module page under the project's workspace, with the record in the URL. null when no page resolves it yet (a BOQ row without a WBS node or a cost code: filing comes with the BOQ item detail) — named, not linked.",
+        },
+      },
+      ["type", "missing", "href"],
+    ),
+    ProjectSetupIssue: objectSchema(
+      {
+        code: { type: "string" },
+        message: { type: "string" },
+        severity: {
+          type: "string",
+          enum: ["blocking", "warning", "advisory"],
+          description: "advisory: information only (a step's advisories list) — it never moves a step's status, its message or a gate.",
+        },
+        details: {
+          ...ref("GenericObject"),
+          description:
+            "The figures behind the issue. The BOQ value figures (totalBoqAmount, allocatableBoqAmount, approved/pending/unallocated/optionalUnallocated/notApplicable amounts) are left out for a caller who may not read the BOQ.",
+        },
+        items: {
+          ...arrayOf(ref("ProjectSetupItem")),
+          description: "The offending records, capped at 50; `count` is the whole number.",
+        },
+        count: {
+          type: "integer",
+          description:
+            "Absent on a mapping issue (BOQ_MAPPING_RULE_UNSET, NO_APPROVED_ALLOCATIONS, UNALLOCATED_BOQ, OPTIONAL_UNALLOCATED, PENDING_ALLOCATIONS, SUGGESTIONS_PENDING, UNIT_MISMATCH_COUNT, LOCATION_MISMATCH_COUNT) and on a BOQ row issue (BOQ_ITEMS_WITHOUT_WBS, BOQ_ITEMS_WITHOUT_COST_CODE, BOQ_UNIT_UNRESOLVED, UOM_UNRESOLVED) for a caller who may not read the BOQ.",
+        },
+        mappingDetailsWithheld: {
+          type: "boolean",
+          description:
+            "Present and true on a mapping issue for a caller who may not read the BOQ: its count, the counting details and any count in its message are left out.",
+        },
+        boqDetailsWithheld: {
+          type: "boolean",
+          description:
+            "Present and true on a BOQ row issue (BOQ_ITEMS_WITHOUT_WBS, BOQ_ITEMS_WITHOUT_COST_CODE, BOQ_UNIT_UNRESOLVED, UOM_UNRESOLVED) for a caller who may not read the BOQ: code, severity and verdict stay; its count, the counting details and the number in its message are left out, and reason says why.",
+        },
+        reason: {
+          type: "string",
+          description: "With boqDetailsWithheld: \"BOQ details unavailable to you\".",
+        },
+        itemsWithheld: {
+          type: "boolean",
+          description:
+            "Present and true when the caller may not read the BOQ and the BOQ records behind the issue (rows, allocations, revisions, unit spellings) were left out of items; count is still the whole number.",
+        },
+        scheduleItemsWithheld: {
+          type: "boolean",
+          description:
+            "Present and true when the caller may not read the schedule and the schedule records behind the issue (activities, schedule revisions) were left out of items; count is still the whole number, and scheduleReason says why.",
+        },
+        scheduleReason: {
+          type: "string",
+          description: "With scheduleItemsWithheld: \"Schedule records are listed for people who can open the schedule\".",
+        },
+        stepKey: { type: "string" },
+        stepLabel: { type: "string" },
+        actionLabel: { type: "string" },
+        target: ref("ProjectSetupTarget"),
+      },
+      ["code", "message", "severity", "items"],
+    ),
+    ProjectSetupStep: objectSchema(
+      {
+        key: {
+          type: "string",
+          enum: [
+            "project_profile",
+            "structure_setup",
+            "boq_upload",
+            "boq_approval",
+            "schedule_generation",
+            "boq_allocation",
+            "cost_loading_review",
+            "engineer_assignment",
+            "progress_method_configuration",
+            "schedule_approval",
+            "baseline_readiness",
+            "progress_readiness",
+          ],
+        },
+        label: { type: "string" },
+        description: { type: "string" },
+        status: { type: "string", enum: ["complete", "attention", "blocked", "pending"] },
+        requiredFor: arrayOf({ type: "string", enum: ["baseline", "progress", "reporting"] }),
+        critical: { type: "boolean" },
+        message: { type: "string" },
+        blockers: arrayOf(ref("ProjectSetupIssue")),
+        warnings: arrayOf(ref("ProjectSetupIssue")),
+        advisories: {
+          ...arrayOf(ref("ProjectSetupIssue")),
+          description:
+            "PC-4's filing and matching checks, severity advisory: listed with the step, never moving its status or a gate, and never in gates.*.warnings. structure_setup lists the BOQ rows and activities without an active WBS node (a node that has been archived counts as none) and the rows without a cost code; boq_upload the rows with an unrecognised unit; schedule_generation the activities on an unmapped imported calendar; boq_allocation pending suggestions and unit or location mismatches; progress_method_configuration quantity methods without a unit; schedule_approval STAGED_REVISION_PENDING, a newer revision staged beside the active one, with its next step. The BOQ-row filing advisories (BOQ_ITEMS_WITHOUT_WBS, BOQ_ITEMS_WITHOUT_COST_CODE) link nowhere (items[].href null): no page files a row yet; it comes with the BOQ item detail.",
+        },
+        counts: {
+          ...ref("GenericObject"),
+          description:
+            "The step's counts. For a caller who may not read the BOQ: its BOQ value figures (totalBoqAmount and, on boq_allocation, the allocatable, approved, pending, unallocated, optional and not-applicable amounts) are left out, and so is every count of BOQ rows or mapping — boqItems, itemsWithoutWbs, itemsWithoutCostCode, itemsWithUnresolvedUnit (boq_upload), unitsUnresolved (structure_setup), revisionItems, revisionChanges, revisionBlockedRows and itemsWithoutMappingRule (boq_approval), suggestionsPending, unitMismatchCount and locationMismatchCount (boq_allocation). Activity and other counts stay. A BOQ reader's counts are unchanged.",
+        },
+        action: objectSchema(
+          { label: { type: "string" }, target: ref("ProjectSetupTarget") },
+          ["label", "target"],
+        ),
+        guides: {
+          ...arrayOf(ref("ProjectSetupGuide")),
+          description:
+            "On structure_setup only: WBS, locations, cost codes, BOQ structure, schedule structure and mapping readiness, each with its state and where it is done.",
+        },
+      },
+      ["key", "label", "status", "requiredFor", "critical", "message", "blockers", "warnings", "counts", "action"],
+    ),
+    ProjectSetupGuide: objectSchema(
+      {
+        key: {
+          type: "string",
+          enum: ["wbs", "locations", "cost_codes", "boq_structure", "schedule_structure", "mapping_readiness"],
+        },
+        label: { type: "string" },
+        status: {
+          type: "string",
+          enum: ["complete", "attention", "pending"],
+          description: "pending when the thing it guides needs the bill or the schedule first.",
+        },
+        count: {
+          type: "integer",
+          nullable: true,
+          description:
+            "What is in place, or what is still to file. null for a caller who may not read the BOQ on mapping_readiness (detailsWithheld true, detail \"Mapping details unavailable to you\") and on boq_structure (detailsWithheld true, detail \"BOQ details unavailable to you\").",
+        },
+        detail: { type: "string" },
+        detailsWithheld: { type: "boolean" },
+        target: { ...ref("ProjectSetupTarget"), nullable: true },
+        href: {
+          type: "string",
+          nullable: true,
+          description: "The page under the project's workspace where it is done. target and href are null when no page does it yet (boq_structure whose only open item is filing rows under WBS nodes).",
+        },
+      },
+      ["key", "label", "status", "count", "detail", "target", "href"],
+    ),
+    ProjectSetupHeadlineEntry: objectSchema(
+      {
+        key: {
+          type: "string",
+          enum: ["boq_imported", "schedule_imported", "mapping", "unmapped_quantity", "unmapped_boq", "critical_unmapped", "baseline", "cost_loading"],
+          description:
+            "unmapped_quantity and unmapped_boq are given only to a caller who may read the BOQ; unmapped_quantity lists the open quantity by unit (never added across units), the three units leaving most value open first.",
+        },
+        label: { type: "string" },
+        value: { type: "string", description: "As shown: PASS / FAIL, a percentage, a money figure, a count, or a state." },
+        tone: { type: "string", enum: ["done", "review", "blocked", "info", "neutral"] },
+        raw: { description: "The figure behind the text, when there is one." },
+        withheld: {
+          type: "boolean",
+          description:
+            "Present and true on the mapping entry for a caller who may not read the BOQ: value is \"—\", tone neutral, raw null, and reason says the mapping details are unavailable to them.",
+        },
+        reason: { type: "string" },
+      },
+      ["key", "label", "value", "tone"],
+    ),
+    ProjectSetupStructure: objectSchema(
+      {
+        wbsNodes: { type: "integer" },
+        locations: { type: "integer" },
+        projectCostCodes: { type: "integer" },
+        unitsUnresolved: {
+          type: "integer",
+          description:
+            "Distinct unit spellings on the bill not in the organisation's unit list. Absent for a caller who may not read the BOQ (a BOQ-derived count): unitsUnresolvedWithheld true and reason \"BOQ details unavailable to you\" instead.",
+        },
+        unitsUnresolvedWithheld: { type: "boolean" },
+        reason: { type: "string" },
+      },
+      ["wbsNodes", "locations", "projectCostCodes"],
+    ),
+    ProjectSetupReadiness: objectSchema(
+      {
+        projectId: uuid,
+        rulesetVersion: { type: "string" },
+        checkedAt: { type: "string", format: "date-time" },
+        summary: {
+          ...ref("GenericObject"),
+          description:
+            "Step counts, the three ready flags, nextAction (chosen from the ten original steps only, as before PC-4), advisoryAction (the first of the two advisory steps, structure_setup and boq_approval, still asking for something, or null), and `headline` — the §33 status line (BOQ imported, schedule imported, mapping %, unmapped BOQ quantity by unit, unmapped BOQ value, critical unmapped activities, baseline, cost loading), each entry a ProjectSetupHeadlineEntry.",
+        },
+        gates: {
+          ...ref("GenericObject"),
+          description: "baseline (block), progress (warn) and reporting (block, PM override) — unchanged by the structure and approval steps, which are advisory.",
+        },
+        structure: ref("ProjectSetupStructure"),
+        coverage: {
+          ...ref("AllocationCoverageSummary"),
+          description:
+            "The §69 coverage totals as the coverage endpoint reports them, without the per-item rows. A caller who may not read the BOQ gets none of it — no coveragePct (rounded or not), no row counts, no value — only { withheld: true, reason: \"Mapping details unavailable to you\" }.",
+        },
+        context: {
+          ...ref("GenericObject"),
+          description:
+            "workspace, currentRevision (schedule), boqRevision (revision, status, source, item count, value, `changes` from the upload comparison, `validation.blocked` rows each with code, description, reason (the machine code) and message (the sentence to show), `history` of workflow transitions with the actor named — the item count, `changes`, validation.blockedCount, value, blocked rows and history only for a caller who may read the BOQ; anyone else gets countsWithheld true, reason \"BOQ details unavailable to you\" and validation.blocked empty), boqBaseline (source schedule_baseline before boq_revision, as GET /boq names it), progressMethods, allocationSummary (only for a caller who may read the BOQ), scheduleReadiness (the schedule's own checks; the allocations check's BOQ value figures only for a caller who may read the BOQ).",
+        },
+        steps: arrayOf(ref("ProjectSetupStep")),
+      },
+      ["projectId", "rulesetVersion", "checkedAt", "summary", "gates", "structure", "coverage", "context", "steps"],
+    ),
     ActivityBoqAllocationBulkMutation: objectSchema(
       { allocations: arrayOf(ref("ActivityBoqAllocationMutation")) },
       ["allocations"],
@@ -2579,6 +2824,12 @@ const components = {
       ],
     },
     WbsNodeListResponse: objectSchema({
+      view: {
+        type: "string",
+        enum: ["outline"],
+        description:
+          "Present only for a caller admitted as a schedule reader who may not read the BOQ. Each node then carries only id, projectId, parentId, code, name, path, pathNames, fullName, depth, sortOrder, isPackage, status, archivedAt, childCount and activityCount (no boqItemCount, owner party, commitment, source or external id), and the summary has no linkedBoqItems. A BOQ reader's answer has no view key and is unchanged.",
+      },
       items: arrayOf(ref("WbsNodeRecord")),
       tree: arrayOf(ref("WbsNodeTreeNode")),
       summary: objectSchema({
@@ -4570,11 +4821,11 @@ const components = {
       baselineFinishDate: nullableDateString,
       predecessors: { type: "string", nullable: true },
       dependencies: arrayOf(ref("ActivityDependency")),
-      budget: money,
-      generatedBudget: money,
-      allocatedBoqQuantity: nonNegativeNumber,
-      allocatedBoqAmount: money,
-      allocatedBoqWeight: nonNegativeNumber,
+      budget: budgetFigure("The activity budget: on GET /schedule, the approved BOQ allocation value; on the activity endpoints, the stored activity budget."),
+      generatedBudget: budgetFigure("The budget the generator or the import gave the activity (GET /schedule)."),
+      allocatedBoqQuantity: boqFigure(nonNegativeNumber, "Approved BOQ allocation quantity."),
+      allocatedBoqAmount: boqFigure(money, "Approved BOQ allocation value."),
+      allocatedBoqWeight: boqFigure(nonNegativeNumber, "Approved BOQ allocation weight (% of the bill)."),
       approvedAllocationCount: { type: "integer", minimum: 0 },
       procurementRiskSummary: {
         ...ref("ScheduleProcurementRiskSummary"),
@@ -4596,7 +4847,17 @@ const components = {
     }),
     ProjectSchedule: objectSchema({
       dataDate: nullableDateString,
-      revision: ref("GenericObject"),
+      revision: {
+        ...ref("GenericObject"),
+        description:
+          "The schedule revision. unallocatedBoqAmount, and the BOQ value figures in readiness.checks[].details (totalBoqAmount, allocatableBoqAmount, approvedAllocatedAmount, pendingAllocatedAmount, unallocatedAmount, optionalUnallocatedAmount, notApplicableAmount), are present only for a caller who may read the BOQ; totalBudget, generatedTotalBudget, projectSummary.totalBudget and wbs[].budget only for a caller who may read the BOQ or the cost module. Check keys, verdicts, messages, ready and blockingCount are the same for every caller.",
+      },
+      candidateRevision: {
+        ...ref("GenericObject"),
+        nullable: true,
+        description:
+          "A newer revision staged beside the active one (imported or generated after it, not activated; the latest candidate the lifecycle accepts), with its own readiness judged on its snapshot, so it can be submitted, approved, rejected or activated where it is seen. null when there is none or no revision is active. Its figures are withheld as the revision's are.",
+      },
       activities: arrayOf(ref("Activity")),
     }),
     ProgressPayload: objectSchema({
@@ -4711,7 +4972,11 @@ const components = {
         label: { type: "string", maxLength: 120 },
         periodStart: dateString,
         periodEnd: dateString,
-        cutoffDate: dateString,
+        cutoffDate: {
+          ...dateString,
+          description:
+            "The period's cutoff date (defaults to periodEnd). A calendar date (YYYY-MM-DD) is that date; a date-time names the date it falls on in the project's reporting time zone. What is kept is that reporting date, exactly as entered; it never moves when a time zone changes later. The cutoff instant is the END of that date in Project.timezone, else the organisation's defaultTimezone, else UTC — computed for that date from the zone's own rules, daylight saving included, never a fixed offset — whenever the period is read or locked, and PV, EV and AC are all selected against it. Responses give that computed instant as cutoffDate with cutoffLocalDate, timeZone, timeZoneSource and timeZoneNote, never the stored value.",
+        },
       },
       ["periodStart", "periodEnd"],
     ),
@@ -4853,10 +5118,20 @@ const components = {
         spi: { type: "number", nullable: true },
         cpi: { type: "number", nullable: true },
         eac: money,
+        eacBasis: {
+          type: "string",
+          enum: ["budget_over_cpi", "budget_cpi_zero", "budget_no_cost_performance", "no_budget"],
+          description:
+            "Which rule gave eac (the formula is unchanged): budget_over_cpi = revised BAC / CPI (CPI > 0); budget_cpi_zero = the revised BAC, because CPI is 0 (actual cost recorded, nothing earned, so BAC / CPI cannot be computed); budget_no_cost_performance = the revised BAC, because there is no CPI (no official actual cost through the cutoff); no_budget = no revised BAC. A locked snapshot's basis is read from its stored figures. Not money: every reader of the report receives it.",
+        },
         sv: signedMoney,
         cv: signedMoney,
         etc: signedMoney,
-        reporting: ref("GenericObject"),
+        reporting: {
+          ...ref("GenericObject"),
+          description:
+            "cutoffDate is the one cutoff PV (approved cost loading whose plannedDate calendar date is on or before cutoffLocalDate), EV (progress approved on or before the cutoffDate instant) and AC (cost records whose actualThroughDate calendar date is on or before cutoffLocalDate) are selected against. plannedDate and actualThroughDate are calendar dates (a date input stores them at 00:00 UTC of the date; the date is the UTC calendar date of the stored value), so a row dated the day after the cutoff date never counts, in any zone; real instants (approvedAt, budget-revision effectiveDate) compare with the cutoffDate instant. The cutoffDate instant is the end of cutoffLocalDate (YYYY-MM-DD) in timeZone (IANA), whose timeZoneSource says where the zone came from — project (Project.timezone), organisation (Organisation.defaultTimezone) or utc. The instant is computed for that date from the zone's own rules, daylight saving included (for America/Chicago a date in CDT ends at 04:59:59.999Z the next day, a date in CST at 05:59:59.999Z), never a fixed offset. timeZoneNote is null when the project's own zone applied, otherwise the sentence to show beside the cutoff: \"Project timezone is not configured; UTC is being used\" or \"Project timezone is not configured; the organisation default <zone> is being used\" (also appended to basisWarnings). sourceSummary.pv/ev/ac.selectedThrough state the cutoff instant each figure is reported through — the same one. When the cutoffDate instant is still in the future, basisWarnings says so: EV and AC are measured through today while PV runs to the cutoff. A locked period answers with its stored snapshot (isSnapshot true), never recomputed; its cutoffDate, zone and note are those recorded at the lock, and a snapshot stored before the zone was recorded carries no timeZone. An open period may move when records fall between an earlier cutoff and this one.",
+        },
         basis: ref("GenericObject"),
         sourceSummary: ref("GenericObject"),
         estimates: ref("GenericObject"),
@@ -4870,7 +5145,15 @@ const components = {
         unallocatedBoqAmount: money,
         approvedAllocatedAmount: money,
         approvedBudgetRevisionDelta: signedMoney,
-        sCurve: arrayOf(ref("GenericObject")),
+        sCurve: {
+          ...arrayOf(ref("GenericObject")),
+          description:
+            "Monthly rows { label, pv, ev }: pv is the approved cost loading planned through the month's last date. ev is given only in the month of this report's cutoff date, with evMeasuredAt (the cutoff instant) and pvAtCutoff (the PV through that same instant); every other month's ev is null — EV is measured at a cutoff, and each locked period's snapshot holds its own. A snapshot locked before this rule keeps its stored series (sCurveNote says so).",
+        },
+        sCurveNote: {
+          type: "string",
+          description: "What the sCurve's EV points are; for a snapshot stored before EV was given only at the cutoff, that its earlier months repeat the cutoff's EV and are not a measured history.",
+        },
         activityBreakdown: arrayOf(ref("EarnedValueActivityBreakdown")),
         alerts: ref("GenericObject"),
         official: { type: "boolean", enum: [true] },
@@ -7021,6 +7304,10 @@ add(
   }),
 );
 
+// Owner decision D4: the one default EV basis every default reader uses.
+const DEFAULT_EV_PERIOD =
+  " With no period chosen, the earned-value basis is the latest reporting period whose cutoff instant has passed (cutoff <= now); a period whose cutoff is still ahead is never the default but can be requested by periodId (its report then notes that the cutoff has not been reached). With no such period, the basis is an ad hoc report cut at the end of today in the project's reporting time zone.";
+
 add(
   "/projects/workspace-dashboard",
   "get",
@@ -7028,7 +7315,7 @@ add(
     tag: "Projects",
     summary: "Get workspace-level construction health and workflow queues.",
     description:
-      "Aggregates all organization projects for PM users and only assigned projects for non-PM users. Returns officialKpis with sourceRule, sourceStatus, cutoffDate, and drill-through targets. Draft/rejected/cancelled records are excluded from official KPI cards; submitted/pending workflow values are returned separately under pendingReview.",
+      "Aggregates all organization projects for PM users and only assigned projects for non-PM users. Returns officialKpis with sourceRule, sourceStatus, cutoffDate, and drill-through targets. Draft/rejected/cancelled records are excluded from official KPI cards; submitted/pending workflow values are returned separately under pendingReview. Each projectHealth row carries bac (the official EV budget: the approved BOQ allocations), eac (bac / CPI), ev (approved allocations × % complete), pv (approved cost loading) and ac (the cost ledger's official actuals) only for a caller who may read the BOQ or the cost module on that project, decided as that project's own routes decide it (permission template, role, party); otherwise those keys are absent, not zero. Scores, spi and cpi are the same for every caller. dataFreshness.cutoffDate is the official cutoff: the latest EV cutoff among the projects' EV reports (each on its default basis), never a project data date — the answer's own time only when no project has an EV report; when it is a project's EV cutoff, dataFreshness also states cutoffLocalDate, cutoffTimeZone, cutoffTimeZoneSource and cutoffTimeZoneNote (null when that project's own zone applied, otherwise \"Project timezone is not configured; UTC is being used\" or the organisation default it names) — otherwise those are null." + DEFAULT_EV_PERIOD,
     operationId: "getWorkspaceDashboard",
     responseSchema: ref("GenericObject"),
   }),
@@ -7187,8 +7474,11 @@ add(
     tag: "Projects",
     summary:
       "Get setup readiness gates for BOQ, schedule, allocations, baseline, and progress.",
+    description:
+      "The §89 setup sequence as twelve steps — profile, structure, BOQ upload, BOQ approval, schedule, allocation, cost loading, engineers, progress methods, schedule approval, baseline, progress — each with its blockers and warnings and, on every issue, the offending records (`items`, capped at 50, `count` the whole number) with a link to fix each one. The three gates keep their shape and meaning; the structure and approval steps are advisory. `structure` counts the project's WBS nodes, locations, cost codes and unresolved units; `coverage` is the allocation coverage summary (never recomputed here). Owner decision D5, the greenfield order — upload and approve the BOQ, import or generate a schedule, submit, approve, activate, map the bill's value to the active activities, lock the baseline: while a staged revision is not yet active, the allocation step's ALLOCATION_WAITING_FOR_SCHEDULE blocker names the revision step still missing (its review and approval, or its activation) and the step's action opens Schedule › Revisions; after the activation, unallocated coverage blocks the baseline step (SCHEDULE_ALLOCATIONS_FAILED, whose message names Project Controls › Mapping), whose action then opens the mapping. The schedule approval step never waits on allocations.",
     operationId: "getProjectSetupReadiness",
     parameters: projectParams,
+    responseSchema: ref("ProjectSetupReadiness"),
   }),
 );
 
@@ -7521,6 +7811,8 @@ add(
     tag: "Schedule",
     summary:
       "Get active project schedule, CPM rollups, and critical path explanations.",
+    description:
+      "Every schedule reader receives the programme. The bill's figures on it (each activity's allocatedBoqQuantity, allocatedBoqAmount and allocatedBoqWeight; the revision's unallocatedBoqAmount; the BOQ value figures in the allocations readiness check) are present only for a caller who may read the BOQ, and the budgets (activity budget and generatedBudget, revision totalBudget and generatedTotalBudget) only for a caller who may read the BOQ or the cost module. A withheld figure is omitted, never zeroed.",
     operationId: "getProjectSchedule",
     parameters: projectParams,
     permissions: modulePermission("schedule", "read"),
@@ -7681,12 +7973,32 @@ add(
   }),
 );
 
+// Owner decision D5: which readiness checks each gate needs.
+const READINESS_GATES =
+  "readiness.ready and readiness.blockingCount answer for the approval, which judges the revision's own logic (predecessor logic, critical path, date sanity); readiness.baselineReady and readiness.baselineBlockingCount answer for the baseline lock, which also needs the BOQ allocation coverage of the active activities. Each check's requiredFor names the gates it guards (\"approval\", \"baseline\"); the BOQ allocations check guards the baseline only, and on a staged revision it says the bill's value is mapped after the activation. Each failing check carries fix { where, inline, next, text, permission } — what puts it right and the page that offers it, by where the revision stands: a staged revision's own logic is corrected at its source and imported again or regenerated (Schedule › Update Schedule) or, under review, rejected; an active revision's on Schedule › Gantt › Edit or by Recalculate CPM (Schedule › More actions); coverage on Project Controls › Mapping. permission is the module.action the step needs (schedule.create, schedule.update, schedule.approve, boq.create); a passing check has fix null.";
+const APPROVAL_WITHOUT_COVERAGE =
+  "Approval does not require BOQ allocations (owner decision D5): allocations are made to the active activities, which exist only once the approved revision is activated. SCHEDULE_NOT_READY at approval names only the revision's own failing checks.";
+const BASELINE_NEEDS_COVERAGE =
+  "The baseline lock of an activated revision whose required BOQ value is not allocated to approved active activities is refused with 400 SCHEDULE_NOT_READY, whose message names BOQ allocations and Project Controls › Mapping (\"Schedule readiness checks must pass before baseline lock: BOQ allocations — BOQ value remains unallocated to approved schedule activities (Project Controls › Mapping).\"), with no BOQ figure.";
+
+// The lifecycle refusals that name the step to take next.
+const BASELINE_NOT_ACTIVATED =
+  "An approved revision that is still staged (not yet activated) is refused with 409 REVISION_NOT_ACTIVATED, whose message says to activate it on Schedule › Revisions first; its baseline is locked after that. With no active activity at all the refusal is 400 NO_ACTIVITIES, which likewise says to activate an approved revision first.";
+const BASELINE_ALREADY_LOCKED =
+  "A revision whose baseline is already locked is refused with 409 INVALID_REVISION_STATUS, whose message says a new baseline comes from a new revision (import or generate one on Schedule › Update Schedule, take it through review and activation, then lock its baseline). With no schedule revision at all the refusal is 404 REVISION_NOT_FOUND, whose message says to import a P6/MSP schedule or generate one from the BOQ on the Schedule page.";
+const REVISION_NOT_CURRENT_NOTE =
+  "A revision that is neither the active one nor the latest staged one (a newer import has superseded it) is refused with 409 REVISION_NOT_CURRENT, whose message says to refresh to see the current revision (Schedule › Revisions).";
+const REASON_REQUIRED_NOTE =
+  "A missing or blank reason is refused with 400 VALIDATION_ERROR whose error.message is the reason itself (\"A rejection reason is required.\" or \"A rollback reason is required.\"), in production too.";
+
 add(
   "/projects/{projectId}/schedule/baseline",
   "post",
   operation({
     tag: "Schedule",
     summary: "Lock the approved current schedule as baseline.",
+    description:
+      `The BOQ value figures in the answer's readiness are present only for a caller who may read the BOQ. A schedule that is not ready is refused with 400 SCHEDULE_NOT_READY, whose error.message names each failing blocking check, what is wrong and where to put it right (for example, for an active revision, \"Predecessor logic — at least one predecessor relationship is required (Schedule › Gantt › Edit)\"; for a staged revision, which no page edits, the reasons followed by \"A staged revision cannot be edited: correct the schedule at its source and import it again, or regenerate it from the BOQ (Schedule › Update Schedule) — the new revision replaces this one, or reject this revision (Schedule Review).\"; never the read-only Critical Path tab), followed, when the caller may not take that step, by who can (\"Only members who can create schedules (import or generate) can take this step; ask one of them.\") and carries no BOQ figure, and the readiness in error.details, whose BOQ value figures are likewise present only for a caller who may read the BOQ; ready, blockingCount and the checks' verdicts are the same for every caller. A step the revision's current status does not allow is refused with 409 INVALID_REVISION_STATUS, whose message names the status it is in now and the one the step needs, as the Revisions tab labels them (e.g. \"This schedule revision is now Rejected; it must be Under review before it can be rejected. Refresh to see its current status.\"). ${BASELINE_NOT_ACTIVATED} ${BASELINE_NEEDS_COVERAGE} ${BASELINE_ALREADY_LOCKED} ${READINESS_GATES} ${REVISION_NOT_CURRENT_NOTE}`,
     operationId: "baselineCurrentSchedule",
     parameters: projectParams,
     permissions: modulePermission("schedule", "baseline", "revision.baseline"),
@@ -7701,12 +8013,20 @@ add(
   }),
 );
 
+// §12, as utils/boq-figures applies it to every answer that carries a revision.
+const REVISION_FIGURES =
+  `The BOQ value figures in readiness.checks[].details (and a revision's unallocatedBoqAmount) are present only for a caller who may read the BOQ; totalBudget and generatedTotalBudget only for a caller who may read the BOQ or the cost module. Check keys, verdicts and counts are the same for every caller. ${READINESS_GATES}`;
+// ... and to the refusal that states the readiness.
+const NOT_READY_FIGURES =
+  "A schedule that is not ready is refused with 400 SCHEDULE_NOT_READY, whose error.message names each failing blocking check, what is wrong and where to put it right (for example, for an active revision, \"Predecessor logic — at least one predecessor relationship is required (Schedule › Gantt › Edit)\"; for a staged revision, which no page edits, the reasons followed by \"A staged revision cannot be edited: correct the schedule at its source and import it again, or regenerate it from the BOQ (Schedule › Update Schedule) — the new revision replaces this one, or reject this revision (Schedule Review).\"; never the read-only Critical Path tab), followed, when the caller may not take that step, by who can (\"Only members who can create schedules (import or generate) can take this step; ask one of them.\") and carries no BOQ figure, and the readiness in error.details, whose BOQ value figures are likewise present only for a caller who may read the BOQ; ready, blockingCount and the checks' verdicts are the same for every caller. A step the revision's current status does not allow is refused with 409 INVALID_REVISION_STATUS, whose message names the status it is in now and the one the step needs, as the Revisions tab labels them (e.g. \"This schedule revision is now Rejected; it must be Under review before it can be rejected. Refresh to see its current status.\").";
+
 add(
   "/projects/{projectId}/schedule/revisions",
   "get",
   operation({
     tag: "Schedule Revisions",
     summary: "List staged schedule revisions.",
+    description: `${REVISION_FIGURES} Each listed revision carries snapshotActivityCount, the number of activities its stored snapshot holds (0 when none): a rollback can restore only a previous revision that stores some.`,
     operationId: "listScheduleRevisions",
     parameters: projectParams,
     permissions: modulePermission("schedule", "read"),
@@ -7731,6 +8051,7 @@ add(
     operation({
       tag: "Schedule Revisions",
       summary,
+      description: REVISION_FIGURES,
       operationId,
       parameters: [
         ...projectParams,
@@ -7747,6 +8068,7 @@ add(
   operation({
     tag: "Schedule Revisions",
     summary: "Get a schedule revision.",
+    description: `${REVISION_FIGURES} The stored snapshot's boqRows are likewise present only for a caller who may read the BOQ.`,
     operationId: "getScheduleRevision",
     parameters: [
       ...projectParams,
@@ -7792,7 +8114,7 @@ add(
   [
     "rollback",
     "rollbackScheduleRevision",
-    "Rollback an active schedule revision.",
+    "Rollback an active schedule revision: the previous active revision's stored snapshot activities are restored. Refused 409 ROLLBACK_TARGET_HAS_NO_ACTIVITIES when that revision stored none (GET /schedule/revisions gives each revision's snapshotActivityCount).",
     "approve",
     "revision.rollback",
     ref("RejectRequest"),
@@ -7804,6 +8126,18 @@ add(
     operation({
       tag: "Schedule Revisions",
       summary,
+      description: [
+        REVISION_FIGURES,
+        ["approve", "baseline"].includes(suffix) && NOT_READY_FIGURES,
+        suffix === "approve" && APPROVAL_WITHOUT_COVERAGE,
+        suffix === "baseline" && BASELINE_NOT_ACTIVATED,
+        suffix === "baseline" && BASELINE_NEEDS_COVERAGE,
+        suffix === "baseline" && BASELINE_ALREADY_LOCKED,
+        suffix !== "rollback" && REVISION_NOT_CURRENT_NOTE,
+        ["reject", "rollback"].includes(suffix) && REASON_REQUIRED_NOTE,
+      ]
+        .filter(Boolean)
+        .join(" "),
       operationId,
       parameters: [
         ...projectParams,
@@ -7821,6 +8155,7 @@ add(
   operation({
     tag: "Schedule Revisions",
     summary: "Activate an approved staged schedule revision.",
+    description: `${REVISION_FIGURES} A body without a mappings list, or a mapping missing its oldActivityId or newActivityKey, is refused with 400 VALIDATION_ERROR whose error.message says what is missing, in production too; send an empty mappings list when no schedule is active yet. A revision that is already active (activated elsewhere while the dialog was open) is refused with 409 REVISION_ALREADY_ACTIVE, whose message says to refresh Schedule › Revisions and names the next step (map the BOQ to its activities and lock the baseline, or that its baseline is locked). With a schedule already active, a body with no mapping and no removal is refused with 400 MAPPING_CONFIRMATION_REQUIRED, whose message says activation replaces the active schedule and that Schedule › Revisions › Activate proposes the mapping.`,
     operationId: "activateScheduleRevision",
     parameters: [
       ...projectParams,
@@ -7840,6 +8175,8 @@ add(
   operation({
     tag: "Activities",
     summary: "List project activities.",
+    description:
+      "allocatedBoqQuantity, allocatedBoqAmount and allocatedBoqWeight are present only for a caller who may read the BOQ; budget only for a caller who may read the BOQ or the cost module. The same holds for every endpoint here that answers with an activity.",
     operationId: "listActivities",
     parameters: projectParams,
     permissions: modulePermission("schedule", "read"),
@@ -8188,6 +8525,8 @@ add(
   operation({
     tag: "Reports",
     summary: "List earned value reporting periods.",
+    description:
+      "Each period's cutoffDate is the instant its figures are cut at, never the stored value: an open period's reporting date (cutoffLocalDate, as entered) ending in the project's reporting zone resolved now (timeZone, timeZoneSource, timeZoneNote); a locked period's the instant, date, zone and note its snapshot recorded. The list also states the zone open periods are read in today: timeZone, timeZoneSource and timeZoneNote (null when the project's own zone applies, otherwise \"Project timezone is not configured; UTC is being used\" or the organisation default it names).",
     operationId: "listReportingPeriods",
     parameters: projectParams,
     permissions: modulePermission("cost", "read"),
@@ -8200,6 +8539,8 @@ add(
   operation({
     tag: "Reports",
     summary: "Create an earned value reporting period.",
+    description:
+      "The reporting date is kept as entered. The created period answers with the computed cutoff instant as cutoffDate (the end of cutoffLocalDate in timeZone), timeZoneSource and timeZoneNote.",
     operationId: "createReportingPeriod",
     parameters: projectParams,
     permissions: modulePermission("cost", "create"),
@@ -8211,12 +8552,17 @@ add(
   }),
 );
 
+// §12, as utils/boq-figures applies it to the official EV report.
+const EV_REPORT_FIGURES =
+  "The report is a cost reader's: the budget (totalBudget, approvedAllocatedAmount) is every such caller's. unallocatedBoqAmount, and the BOQ value figures in readinessGate.blockers[].details and readinessGate.warnings[].details, are present only for a caller who may read the BOQ. Output only: a locked period's stored snapshot is not changed.";
+
 add(
   "/projects/{projectId}/reports/periods/{periodId}/lock",
   "post",
   operation({
     tag: "Reports",
     summary: "Lock a reporting period EV snapshot.",
+    description: `${EV_REPORT_FIGURES} A lock refused by the official-reporting readiness gate (409 REPORTING_READINESS_BLOCKED, 403 REPORTING_READINESS_OVERRIDE_FORBIDDEN) states the gate in error.details.gate, withheld the same way.`,
     operationId: "lockReportingPeriod",
     parameters: [
       ...projectParams,
@@ -8330,11 +8676,16 @@ add(
     tag: "Reports",
     summary:
       "Build official earned value report for a reporting period or cutoff date.",
+    description: EV_REPORT_FIGURES + DEFAULT_EV_PERIOD,
     operationId: "getEarnedValueReport",
     parameters: [
       ...projectParams,
       queryParam("periodId", "Optional reporting period UUID.", uuid),
-      queryParam("cutoffDate", "Optional ISO cutoff date.", dateString),
+      queryParam(
+        "cutoffDate",
+        "Optional ad hoc cutoff: a calendar date (YYYY-MM-DD) or a date-time (the date it falls on in the project's reporting time zone). The report runs to the end of that date in Project.timezone, else the organisation's defaultTimezone, else UTC.",
+        dateString,
+      ),
     ],
     permissions: modulePermission("cost", "read"),
   }),
@@ -10678,7 +11029,8 @@ addGenericRoute({
   path: "/projects/{projectId}/audit",
   method: "get",
   tag: "Audit",
-  summary: "List project audit events.",
+  summary:
+    "List project audit events. The history of the BOQ's records (boq_item, boq_revision, activity_boq_allocation) is present only for a caller who may read the BOQ, and a schedule_revision event's totalBudget in its summaries only for a caller who may read the BOQ or the cost module.",
   description:
     "Returns tenant-scoped centralized audit events. Each write also persists a compact redacted RecordHistorySnapshot row for contractual record history reconstruction.",
   operationId: "listProjectAuditEvents",
@@ -10897,7 +11249,7 @@ addGenericRoute({
   tag: "Health",
   summary: "Get seven-dimension project health scoring.",
   description:
-    "Returns official project health dimensions with sourceRule, cutoffDate, and drill-through targets, plus a separate pendingReview block for submitted progress, IPC, change orders, and submittals that do not feed official scores.",
+    "Returns official project health dimensions with sourceRule, cutoffDate, and drill-through targets, plus a separate pendingReview block for submitted progress, IPC, change orders, and submittals that do not feed official scores. The cost dimension's unallocatedBoqAmount is given only to a caller who may read the BOQ; its ac and ev only to a caller who may read the BOQ or the cost module (absent, not zero, otherwise — the score and cpi stay). The schedule dimension's delayedActivities is counted as of today (the latest progress), not as of the cutoff. dataFreshness.cutoffDate is the earned-value cutoff instant: the end of dataFreshness.cutoffLocalDate in dataFreshness.cutoffTimeZone (the project's time zone, else the organisation's default, else UTC — cutoffTimeZoneSource says which); a locked period stored before the zone was recorded gives null for the zone. dataFreshness.cutoffTimeZoneNote is the EV report's timeZoneNote: null when the project's own zone applied, otherwise \"Project timezone is not configured; UTC is being used\" or \"Project timezone is not configured; the organisation default <zone> is being used\". Each dimension's measuredThrough says what it is measured through: ev_cutoff (schedule and cost: the official EV report) or today (commercial, supply chain, quality, safety, doc control and every pendingReview metric: the records as they stand now). The schedule detail's spiNote and the cost detail's cpiNote are the server's reason when SPI or CPI is missing (or CPI is 0), null otherwise; scoreBasis is neutral_no_index when the index is missing and the score is the rule's neutral 60, otherwise spi or cpi; acSource.officialActualActivities counts the activities with official actual cost through the cutoff. dataFreshness.cutoffNotReachedNote (also on the schedule and cost details) is set when the EV cutoff is still ahead of now: PV runs to the cutoff while EV and AC are measured through today. Messages only — no score or figure changes." + DEFAULT_EV_PERIOD,
   operationId: "getProjectHealth",
 });
 
@@ -12052,10 +12404,20 @@ add(
     method: "get",
     path: "/projects/{projectId}/structure/wbs",
     summary:
-      "List the project WBS (flat ordered rows plus nested tree, with linked activity and BOQ row counts).",
+      "List the project WBS (flat ordered rows plus nested tree, with linked activity and BOQ row counts). Readable by anyone who can read the schedule (owner decision D3): a BOQ reader receives the whole answer; a schedule reader who may not read the BOQ receives the outline (view: outline). Writes stay on boq:update.",
     operationId: "listWbsNodes",
     parameters: [...projectParams, includeArchivedParam],
-    permissions: modulePermission("boq", "read"),
+    permissions: {
+      ...modulePermission("schedule", "read"),
+      anyOf: [modulePermission("schedule", "read"), modulePermission("boq", "read")],
+      roles: [
+        ...new Set([
+          ...modulePermission("schedule", "read").roles,
+          ...modulePermission("boq", "read").roles,
+        ]),
+      ],
+      note: "schedule:read or boq:read. Without boq:read the answer is the outline (view: outline).",
+    },
     responseSchema: ref("WbsNodeListResponse"),
   },
   {
@@ -13866,7 +14228,10 @@ const budgetSnapshotSchema = objectSchema({
   id: uuid,
   projectId: uuid,
   reportingPeriodId: nullableUuid,
-  reportingPeriod: nullableRef("GenericObject"),
+  reportingPeriod: {
+    ...nullableRef("GenericObject"),
+    description: "id, code, label, status and the period's cutoff as the EV reports use it: cutoffDate (the instant — a locked period's as its snapshot stored it), cutoffLocalDate, timeZone, timeZoneSource and timeZoneNote.",
+  },
   label: { type: "string" },
   takenBy: nullableUuid,
   takenAt: nullableDateString,
@@ -14780,13 +15145,17 @@ const dailyLogAiPhotoSchema = objectSchema({ id: uuid, ref: { type: "string" }, 
 
 // ─── Schedule delay and cost overrun prediction (OCTA-AI-PREDICT-031) ─────
 const forecastLevel = { type: "string", enum: ["high", "medium", "low"] };
+// §12, as utils/boq-figures applies it to the forecast.
+const FORECAST_FIGURES =
+  "cost.eac is the official EV report's EAC — revised BAC / CPI when CPI > 0, otherwise the revised BAC — and cost.bac the revised BAC it was computed from (approved allocations plus approved budget revisions); cost.eacBasis says which rule applied (budget_over_cpi, budget_cpi_zero — CPI 0: actual cost with nothing earned, so the EAC is the revised BAC and dataQuality says so —, budget_no_cost_performance, no_budget; null without an EV report). The EV figures are the same answer the health card and the EV report give for the latest reporting period: when that period is locked, its stored snapshot (SPI, CPI, EAC and the cutoff instant and zone recorded at the lock), never a live recomputation. cost.projected is max(eac, bottomUp). earnedValueCutoff states the EV cutoff SPI, CPI and EAC were measured through: cutoffDate (the instant), cutoffLocalDate, timeZone, timeZoneSource and timeZoneNote (null when the project's own zone applied, otherwise the sentence also added to dataQuality: \"Project timezone is not configured; UTC is being used\" or the organisation default it names). dataQuality also carries the server's reason when SPI or CPI is missing or CPI is 0 (with no_budget: that there is no approved budget to earn against), and, when the EV cutoff is still ahead of asOf, that EV and AC are measured through today while PV runs to the cutoff. The explanation never calls a budget handed back (budget_cpi_zero, budget_no_cost_performance) or a project with no budget \"within budget\". " +
+  "The cost view's money (cost.budget, bac, eac, bottomUp, projected, overrun, overrunPct and actual; each activity's cost.budget, actual, committed, projected, overrun, overrunPct and reasons; each budget line's revised, committed, actual, forecast, overrun and overrunPct) is present only for a caller who may read the BOQ or the cost module. Levels, bases and counts are the same for every caller.";
 const forecastBlockerSchema = objectSchema({ type: { type: "string", enum: ["rfi", "submittal", "long_lead"] }, id: uuid, ref: { type: "string", nullable: true }, title: { type: "string" }, status: { type: "string", nullable: true }, due: nullableDateString, overdue: { type: "boolean" } });
 const forecastActivitySchema = objectSchema({ id: uuid, name: { type: "string" }, code: { type: "string", nullable: true }, isCritical: { type: "boolean" }, isMilestone: { type: "boolean" }, status: { type: "string" }, pct: { type: "number" }, expectedPct: { type: "number", nullable: true }, gap: { type: "number" }, velocity: { type: "number", nullable: true, description: "% per day from approved progress in the last 45 days." }, lastProgressAt: nullableDateString, plannedStart: { type: "string", nullable: true }, plannedFinish: { type: "string", nullable: true }, projectedFinish: { type: "string", nullable: true }, basis: { type: "string", enum: ["complete", "planned", "velocity", "pace", "overdue", "late_start"] }, slipDays: { type: "integer" }, impactDays: { type: "number" }, float: { type: "number", nullable: true }, floatBreached: { type: "boolean" }, stalledDays: { type: "integer" }, blockers: arrayOf(forecastBlockerSchema), score: { type: "integer" }, level: forecastLevel, reasons: arrayOf({ type: "string" }), cost: objectSchema({ budget: { type: "number" }, actual: { type: "number" }, committed: { type: "number" }, projected: { type: "number", nullable: true }, basis: { type: "string", nullable: true }, overrun: { type: "number" }, overrunPct: { type: "number" }, level: forecastLevel, reasons: arrayOf({ type: "string" }) }) });
 const forecastSchema = objectSchema({ available: { type: "boolean" }, reason: { type: "string", nullable: true }, asOf: dateString, schedule: nullableRef("GenericObject"), cost: nullableRef("GenericObject"), summary: nullableRef("GenericObject"), dataQuality: arrayOf({ type: "string" }), activities: arrayOf(forecastActivitySchema) });
 const forecastActionSchema = objectSchema({ type: { type: "string", enum: ["create_risk", "create_task", "open"] }, label: { type: "string" }, activityId: nullableUuid, activityName: { type: "string", nullable: true }, title: { type: "string", nullable: true }, description: { type: "string", nullable: true }, probability: { ...forecastLevel, nullable: true }, impact: { ...forecastLevel, nullable: true }, mitigation: { type: "string", nullable: true } });
 [
-  { method: "get", path: "/projects/{projectId}/forecast", summary: "Schedule and cost forecast from the project's own records: per-activity velocity from approved progress, projected finish vs plan, float and critical path, recorded impacts (RFI / submittal / risk / weather links), open items holding the activity, burn-rate cost projection, budget lines over; project finish = later of EV-based and activity-based, cost = higher of EAC and bottom-up. No model call.", operationId: "getProjectForecast", parameters: projectParams, permissions: modulePermission("schedule", "read"), responseSchema: forecastSchema },
-  { method: "post", path: "/projects/{projectId}/forecast/explain", summary: "Plain-language narrative of the forecast with up to five draft actions (create_risk, create_task, open); built from the forecast itself when no provider answers (`degraded`). 409 FORECAST_UNAVAILABLE without a schedule.", operationId: "explainProjectForecast", parameters: projectParams, permissions: modulePermission("schedule", "read"), responseSchema: objectSchema({ degraded: { type: "boolean" }, reason: { type: "string", nullable: true }, forecast: forecastSchema, narrative: objectSchema({ headline: { type: "string" }, schedule: { type: "string" }, cost: { type: "string" }, watch: arrayOf({ type: "string" }), actions: arrayOf(forecastActionSchema) }), message: nullableRef("GenericObject") }) },
+  { method: "get", path: "/projects/{projectId}/forecast", summary: "Schedule and cost forecast from the project's own records: per-activity velocity from approved progress, projected finish vs plan, float and critical path, recorded impacts (RFI / submittal / risk / weather links), open items holding the activity, burn-rate cost projection, budget lines over; project finish = later of EV-based and activity-based, cost = higher of EAC and bottom-up. No model call. " + FORECAST_FIGURES + DEFAULT_EV_PERIOD, operationId: "getProjectForecast", parameters: projectParams, permissions: modulePermission("schedule", "read"), responseSchema: forecastSchema },
+  { method: "post", path: "/projects/{projectId}/forecast/explain", summary: "Plain-language narrative of the forecast with up to five draft actions (create_risk, create_task, open); built from the forecast itself when no provider answers (`degraded`). 409 FORECAST_UNAVAILABLE without a schedule. The explanation is written from the forecast this caller receives. " + FORECAST_FIGURES, operationId: "explainProjectForecast", parameters: projectParams, permissions: modulePermission("schedule", "read"), responseSchema: objectSchema({ degraded: { type: "boolean" }, reason: { type: "string", nullable: true }, forecast: forecastSchema, narrative: objectSchema({ headline: { type: "string" }, schedule: { type: "string" }, cost: { type: "string" }, watch: arrayOf({ type: "string" }), actions: arrayOf(forecastActionSchema) }), message: nullableRef("GenericObject") }) },
   { method: "post", path: "/projects/{projectId}/forecast/actions", summary: "Run a confirmed action: create_risk (risk register, linked to the activity; needs risk.create) or create_task (needs task.create).", operationId: "runProjectForecastAction", parameters: projectParams, permissions: modulePermission("schedule", "read"), requestBody: jsonBody(objectSchema({ action: forecastActionSchema }, ["action"]), "Action."), responseSchema: objectSchema({ type: { type: "string" }, record: ref("GenericObject"), url: { type: "string" } }), status: 201 },
 ].forEach((route) => addGenericRoute({ tag: "Assistant", ...route }));
 

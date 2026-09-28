@@ -3,8 +3,9 @@ const { body, param, query } = require("express-validator");
 const { asyncHandler } = require("../utils/async-handler");
 const { sendSuccess } = require("../utils/api-response");
 const { authenticate } = require("../middleware/auth");
-const { requireProjectAccess } = require("../middleware/project-access");
-const { requireRoles } = require("../middleware/rbac");
+const { requestForProject, requireProjectAccess } = require("../middleware/project-access");
+const { hasPermission, requireRoles } = require("../middleware/rbac");
+const { boqFigureAccess, canReadBoq, withheldWorkspaceDashboard } = require("../utils/boq-figures");
 const { validate } = require("../middleware/validate");
 const {
   enforceProjectLimit,
@@ -175,7 +176,18 @@ router.get(
       isCompanyAdmin: req.user.isCompanyAdmin,
     });
 
-    return sendSuccess(res, result);
+    // Each project's row states its budget (bac) and the EAC built from it:
+    // the approved allocations, which that project's schedule, forecast and
+    // history withhold from someone who may read neither the BOQ nor the
+    // cost module there (§12, utils/boq-figures). Decided per project, as
+    // that project's own routes decide it.
+    const rows = Array.isArray(result?.projectHealth) ? result.projectHealth : [];
+    const access = new Map(
+      await Promise.all(
+        rows.map(async (row) => [row.id, boqFigureAccess(await requestForProject(req, row.id))]),
+      ),
+    );
+    return sendSuccess(res, withheldWorkspaceDashboard(result, (projectId) => access.get(projectId)));
   }),
 );
 
@@ -219,6 +231,13 @@ router.get(
     const result = await setupReadinessService.getSetupReadiness({
       orgId: req.user.orgId,
       projectId: req.params.id,
+      // Readiness is open to every project member; the bill's rows, values
+      // and review trail in it are for those who may read the BOQ, as the
+      // BOQ and coverage endpoints decide it (template, role or party).
+      canReadBoq: canReadBoq(req),
+      // Nor the activities and schedule revisions named under an issue to
+      // a member whose template takes the schedule away.
+      canReadSchedule: hasPermission(req, "schedule", "read"),
     });
 
     return sendSuccess(res, result);

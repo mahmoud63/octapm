@@ -621,6 +621,38 @@ const resolveTransitionRule = ({ recordType, fromStatus, toStatus }) => {
   );
 };
 
+// A record type and a status in words, for a refusal a person reads.
+const RECORD_TYPE_LABELS = Object.freeze({
+  [RECORD_TYPES.BOQ_REVISION]: "BOQ revision",
+  [RECORD_TYPES.BOQ_ALLOCATION]: "BOQ allocation",
+  [RECORD_TYPES.SCHEDULE_REVISION]: "schedule revision",
+  [RECORD_TYPES.ACTIVITY_COST_LOADING]: "cost loading",
+  [RECORD_TYPES.RFI]: "RFI",
+  [RECORD_TYPES.SUBMITTAL]: "submittal",
+  [RECORD_TYPES.CHANGE_ORDER]: "change order",
+  [RECORD_TYPES.IPC_CERTIFICATE]: "payment certificate",
+  [RECORD_TYPES.EOT_CLAIM]: "extension-of-time claim",
+  [RECORD_TYPES.NCR]: "NCR",
+  [RECORD_TYPES.SAFETY_INCIDENT]: "safety incident",
+  [RECORD_TYPES.RISK]: "risk",
+  [RECORD_TYPES.PROCUREMENT_ORDER]: "procurement order",
+});
+
+const statusWords = (status) =>
+  status ? String(status).replace(/_/g, " ") : "new";
+
+/**
+ * The generic refusal of a step the record's status does not allow, in
+ * plain words: what the record is now, the status it cannot reach from
+ * there, and that a refresh shows where it stands (it may have been moved
+ * by someone else since the page was loaded). The code and the details
+ * (recordType, fromStatus, toStatus) are unchanged for clients.
+ */
+const invalidTransitionMessage = ({ recordType, fromStatus, toStatus }) => {
+  const what = RECORD_TYPE_LABELS[recordType] || statusWords(recordType);
+  return `This ${what} is ${statusWords(fromStatus)}; it cannot be moved to ${statusWords(toStatus || "none")} from there. Refresh to see its current status.`;
+};
+
 const assertAllowedTransition = ({
   recordType,
   fromStatus = null,
@@ -652,7 +684,11 @@ const assertAllowedTransition = ({
     throw new HttpError(
       409,
       "APPROVAL_WORKFLOW_INVALID_TRANSITION",
-      `Invalid ${normalizedRecordType} workflow transition from ${normalizedFrom || "new"} to ${normalizedTo || "none"}`,
+      invalidTransitionMessage({
+        recordType: normalizedRecordType,
+        fromStatus: normalizedFrom,
+        toStatus: normalizedTo,
+      }),
       {
         recordType: normalizedRecordType,
         fromStatus: normalizedFrom,

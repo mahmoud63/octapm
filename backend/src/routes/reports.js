@@ -7,6 +7,11 @@ const { getEffectiveRole, requirePermission } = require("../middleware/rbac");
 const { validate } = require("../middleware/validate");
 const { moneyBody } = require("../utils/money");
 const evService = require("../services/earned-value.service");
+const {
+  boqFigureAccess,
+  withheldError,
+  withheldEvReport,
+} = require("../utils/boq-figures");
 
 const router = express.Router({ mergeParams: true });
 
@@ -63,6 +68,11 @@ router.post(
   }),
 );
 
+// The EV report is a cost reader's (§12, utils/boq-figures): the budget —
+// the approved allocations' sum — stays; a cost reader who may not read the
+// BOQ loses the bill's open value and the bill's figures in the readiness
+// gate, on the report, on a locked period's report and on the gate a lock is
+// refused with. Output only: the stored snapshot keeps its basis.
 router.post(
   "/periods/:periodId/lock",
   requirePermission("cost", "approve", {
@@ -78,15 +88,21 @@ router.post(
     validate,
   ],
   asyncHandler(async (req, res) => {
-    const result = await evService.lockReportingPeriod({
-      orgId: req.user.orgId,
-      projectId: req.params.projectId,
-      periodId: req.params.periodId,
-      userId: req.user.id,
-      userRole: getEffectiveRole(req),
-      overrideReason: req.body?.overrideReason || null,
-    });
-    return sendSuccess(res, result);
+    const access = boqFigureAccess(req);
+    let result;
+    try {
+      result = await evService.lockReportingPeriod({
+        orgId: req.user.orgId,
+        projectId: req.params.projectId,
+        periodId: req.params.periodId,
+        userId: req.user.id,
+        userRole: getEffectiveRole(req),
+        overrideReason: req.body?.overrideReason || null,
+      });
+    } catch (error) {
+      throw withheldError(error, access);
+    }
+    return sendSuccess(res, withheldEvReport(result, access));
   }),
 );
 
@@ -224,7 +240,7 @@ router.get(
       periodId: req.query.periodId || null,
       cutoffDate: req.query.cutoffDate || null,
     });
-    return sendSuccess(res, result);
+    return sendSuccess(res, withheldEvReport(result, boqFigureAccess(req)));
   }),
 );
 

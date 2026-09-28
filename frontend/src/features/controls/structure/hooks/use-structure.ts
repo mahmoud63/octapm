@@ -42,6 +42,12 @@ export interface WbsTreeNode extends WbsNodeRecord {
 }
 
 export interface WbsListResponse {
+  /**
+   * 'outline' for a schedule reader who may not read the BOQ (owner decision
+   * D3): each node then carries its id, code, name, parent, depth, place,
+   * status and its child and activity counts only.
+   */
+  view?: 'outline'
   items: WbsNodeRecord[]
   tree: WbsTreeNode[]
   summary: {
@@ -140,6 +146,28 @@ export const useWbsNodes = (
     enabled: Boolean(projectId) && (options.enabled ?? true),
   })
 }
+
+/**
+ * The project's WbsNode rows as the Schedule's WBS tab reads them (owner
+ * decision D3): every row, archived ones included, so "the project has a
+ * canonical WBS" is decided by the existence of any row — a tree whose
+ * nodes are all archived is still the project's tree, never replaced by a
+ * revision snapshot's outline. One query key, shared by the module menu,
+ * the schedule's tab list and the tab itself.
+ */
+export const useScheduleWbsRows = (
+  projectId: string,
+  options: { enabled?: boolean } = {}
+) => useWbsNodes(projectId, { includeArchived: true, enabled: options.enabled })
+
+/**
+ * Whether the Schedule offers its WBS tab: the project has WbsNode rows, or
+ * (only for a project without them) the revision snapshot carried a WBS.
+ */
+export const scheduleHasWbs = (
+  rows: WbsListResponse | undefined,
+  snapshotWbs: readonly unknown[] | null | undefined
+) => (rows?.items.length ?? 0) > 0 || (snapshotWbs?.length ?? 0) > 0
 
 export const useCreateWbsNode = (projectId: string) => {
   const queryClient = useQueryClient()

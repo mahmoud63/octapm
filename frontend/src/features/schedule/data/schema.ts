@@ -248,7 +248,9 @@ export const scheduleActivitySchema = z.object({
   actualCost: z.number().nullable().optional(),
   actualStart: z.string().nullable().optional(),
   actualFinish: z.string().nullable().optional(),
-  budget: z.number(),
+  // The BOQ figures and the budget built from them are withheld (omitted)
+  // from a member who may not read the BOQ (the budget: nor the cost module).
+  budget: z.number().optional(),
   generatedBudget: z.number().optional(),
   allocatedBoqQuantity: z.number().optional(),
   allocatedBoqAmount: z.number().optional(),
@@ -307,7 +309,7 @@ export const scheduleRevisionSchema = z.object({
   label: z.string().nullable(),
   activityCount: z.number(),
   criticalCount: z.number(),
-  totalBudget: z.number(),
+  totalBudget: z.number().optional(),
   dataDate: z.string().nullable().optional(),
   generatedTotalBudget: z.number().optional(),
   unallocatedBoqAmount: z.number().optional(),
@@ -353,14 +355,33 @@ export const scheduleRevisionSchema = z.object({
       ready: z.boolean(),
       checkedAt: z.string(),
       blockingCount: z.number(),
+      // D5: ready/blockingCount answer for the approval; these for the
+      // baseline lock (BOQ allocation coverage included).
+      baselineReady: z.boolean().optional(),
+      baselineBlockingCount: z.number().optional(),
       checks: z.array(
         z.object({
           key: z.string(),
           label: z.string(),
+          requiredFor: z.array(z.string()).optional(),
           passed: z.boolean(),
           severity: z.string(),
           message: z.string(),
           details: z.record(z.string(), z.unknown()).optional(),
+          // What puts a failing check right, by where the revision stands
+          // (the server's words): the page (`where`, a parenthesis when
+          // `inline`), the step (`next`), the sentence (`text`) and the
+          // permission the step needs (`module.action`). null when passed.
+          fix: z
+            .object({
+              where: z.string(),
+              inline: z.boolean(),
+              next: z.string(),
+              text: z.string(),
+              permission: z.string(),
+            })
+            .nullable()
+            .optional(),
         })
       ),
     })
@@ -382,6 +403,9 @@ export const scheduleRevisionSchema = z.object({
 export const projectScheduleSchema = z.object({
   dataDate: z.string().nullable().optional(),
   revision: scheduleRevisionSchema,
+  // A newer revision staged beside the active one, reviewed on the page
+  // beside it (its own readiness, judged on its snapshot).
+  candidateRevision: scheduleRevisionSchema.nullable().optional(),
   activities: z.array(scheduleActivitySchema),
 })
 

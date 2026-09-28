@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { Link } from '@tanstack/react-router'
 import {
   AlertTriangle,
   CheckCircle2,
@@ -26,6 +27,7 @@ import {
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { useProjectSetupReadiness } from '@/features/projects/hooks/use-projects'
+import type { ProjectSetupIssue } from '@/features/projects/data/schema'
 import type { ScheduleRevision } from '../data/schema'
 import {
   useScheduleRevisionWorkflow,
@@ -35,6 +37,10 @@ import {
 interface Props {
   projectId: string
   revision: ScheduleRevision
+  /** The heading: 'Schedule Review', or the staged revision beside the active one. */
+  title?: string
+  /** The test ids' prefix, so a second panel on the page has its own. */
+  testIdPrefix?: string
 }
 
 type DialogMode = 'submit' | 'approve' | 'reject' | 'baseline' | null
@@ -76,14 +82,110 @@ const getApiErrorMessage = (error: unknown, fallback: string) =>
   (error as { response?: { data?: { error?: { message?: string } } } })
     ?.response?.data?.error?.message ?? fallback
 
-function getNextActionLabel(status: ScheduleRevisionStatus, ready: boolean) {
-  if (status === 'draft') return 'Next: submit for review'
-  if (status === 'rejected') return 'Next: resubmit for review'
+// The baseline blockers that say the bill's value is not mapped yet (D5):
+// after the activation they are resolved on Project Controls › Mapping.
+const ALLOCATION_BLOCKER_CODES = new Set([
+  'NO_APPROVED_ALLOCATIONS',
+  'UNALLOCATED_BOQ',
+  'SCHEDULE_ALLOCATIONS_FAILED',
+])
+
+// A setup step the baseline gate still waits on, before the schedule's own
+// checks and the mapping (which the labels below already name): what to do
+// and the page that offers it, so the next step never reads "lock
+// baseline" while the button beside it is refused.
+const SETUP_STEPS_BEFORE_BASELINE: Record<string, string> = {
+  project_profile: 'complete the project profile (Overview)',
+  boq_upload: 'upload the BOQ (BOQ page)',
+  schedule_generation: 'import or generate a schedule (Schedule)',
+  schedule_approval: 'approve this revision (Schedule › Revisions)',
+}
+
+const setupStepNext = (blocker: ProjectSetupIssue | null) =>
+  blocker?.stepKey && !ALLOCATION_BLOCKER_CODES.has(blocker.code)
+    ? (SETUP_STEPS_BEFORE_BASELINE[blocker.stepKey] ?? null)
+    : null
+
+type CheckFix = NonNullable<
+  NonNullable<ScheduleRevision['readiness']>['checks'][number]['fix']
+>
+
+// Who may take a fix, as the server names them (schedule.service
+// FIX_PERMISSIONS): said beside a fix this member is not offered.
+const FIX_WHO: Record<string, string> = {
+  'schedule.create': 'create schedules (import or generate)',
+  'schedule.update': 'edit the schedule',
+  'schedule.approve': 'approve and activate schedules',
+  'boq.create': 'map the BOQ to activities',
+}
+
+/**
+ * The next step, in the words and order of D5, naming the page that offers
+ * it. A revision failing its own checks is sent where its fix is (the
+ * server's check.fix): a staged one to the corrected import — no page edits
+ * it — and an active one to the Gantt's edit or Recalculate CPM.
+ */
+function getNextActionLabel({
+  status,
+  ready,
+  awaitingActivation,
+  baselineReady,
+  coverageBlocksBaseline,
+  staged,
+  approvalFix,
+  baselineFix,
+  setupBaselineBlocker,
+}: {
+  status: ScheduleRevisionStatus
+  ready: boolean
+  awaitingActivation: boolean
+  baselineReady: boolean
+  coverageBlocksBaseline: boolean
+  staged: boolean
+  approvalFix: CheckFix | null
+  baselineFix: CheckFix | null
+  /** The setup baseline gate's first blocker, when that gate refuses the lock. */
+  setupBaselineBlocker: ProjectSetupIssue | null
+}) {
+  if (status === 'draft') {
+    return approvalFix
+      ? `Next: ${approvalFix.next} — this revision fails its own checks`
+      : 'Next: submit for review'
+  }
+  if (status === 'rejected') {
+    if (approvalFix) {
+      return `Next: ${approvalFix.next} — this revision fails its own checks`
+    }
+    return staged
+      ? 'Next: import a corrected schedule (Schedule › Update Schedule), or resubmit for review'
+      : 'Next: correct the schedule (Schedule › Gantt › Edit) and resubmit for review'
+  }
   if (status === 'under_review') {
-    return ready ? 'Next: approve or reject' : 'Next: clear readiness blockers'
+    if (ready) return 'Next: approve or reject'
+    return approvalFix
+      ? `Next: ${approvalFix.next}`
+      : 'Next: reject this revision or correct its schedule'
+  }
+  // An approved revision still staged is not the schedule yet: its baseline
+  // comes after it is activated, which is done on the Revisions tab.
+  if (status === 'approved' && awaitingActivation) {
+    return 'Next: activate this revision (Schedule › Revisions)'
+  }
+  // Activated, but a setup step before the mapping is still open (a project
+  // with no bill, say): that step first — its blocker is listed below.
+  const setupNext =
+    status === 'approved' ? setupStepNext(setupBaselineBlocker) : null
+  if (setupNext) return `Next: ${setupNext}, then lock baseline`
+  // Activated: the bill's value is mapped to the active activities, then
+  // the baseline is locked (owner decision D5).
+  if (status === 'approved' && coverageBlocksBaseline) {
+    return 'Next: map the BOQ to the active activities (Project Controls › Mapping), then lock baseline'
   }
   if (status === 'approved') {
-    return ready ? 'Next: lock baseline' : 'Next: clear readiness blockers'
+    if (baselineReady && !setupBaselineBlocker) return 'Next: lock baseline'
+    return baselineFix
+      ? `Next: ${baselineFix.next}, then lock baseline`
+      : 'Next: clear the baseline blockers listed below'
   }
   if (status === 'baselined') return 'Baseline locked'
   return 'No action available'
@@ -179,14 +281,60 @@ function WorkflowDialog({
   )
 }
 
-export function ScheduleReviewPanel({ projectId, revision }: Props) {
+export function ScheduleReviewPanel({
+  projectId,
+  revision,
+  title = 'Schedule Review',
+  testIdPrefix = 'uat-schedule-review',
+}: Props) {
   const status = (revision.status || 'draft') as ScheduleRevisionStatus
   const readiness = revision.readiness ?? null
   const { data: setupReadiness } = useProjectSetupReadiness(projectId)
   const explanation = revision.criticalPathExplanation ?? null
+  // The approval judges the revision's own logic (ready); the baseline lock
+  // every check, BOQ allocation coverage included (baselineReady) — D5.
   const isReady = Boolean(readiness?.ready)
+  const isBaselineReady = Boolean(readiness?.baselineReady ?? readiness?.ready)
+  // Staged: the server answers isActive false until the revision is activated.
+  const awaitingActivation =
+    status === 'approved' && revision.isActive === false
+  // Before approval and activation, the checks shown are the approval's.
+  const judgedForBaseline = status === 'approved' && !awaitingActivation
   const baselineGate = setupReadiness?.gates.baseline
   const baselineBlockers = baselineGate?.blockers ?? []
+  const coverageBlocksBaseline =
+    judgedForBaseline &&
+    (baselineBlockers.some((blocker) =>
+      ALLOCATION_BLOCKER_CODES.has(blocker.code)
+    ) ||
+      (readiness?.checks ?? []).some(
+        (check) =>
+          check.key === 'allocations' &&
+          check.severity === 'blocking' &&
+          !check.passed
+      ))
+  const canOpenMapping = useCanPerform('boq', 'read')
+  // A staged revision (not activated): its checks are its snapshot's, and
+  // no page edits it — the server's fixes say so.
+  const staged = revision.isActive === false
+  const failingFix = (gate: 'approval' | 'baseline') =>
+    (readiness?.checks ?? []).find(
+      (check) =>
+        check.severity === 'blocking' &&
+        !check.passed &&
+        check.fix &&
+        (!Array.isArray(check.requiredFor) || check.requiredFor.includes(gate))
+    )?.fix ?? null
+  const approvalFix = failingFix('approval')
+  const baselineFix = failingFix('baseline')
+  // Whether this member is offered each fix's step; beside one they are
+  // not, the panel says who can.
+  const fixOffered: Record<string, boolean> = {
+    'schedule.create': useCanPerform('schedule', 'create'),
+    'schedule.update': useCanPerform('schedule', 'update'),
+    'schedule.approve': useCanPerform('schedule', 'approve', 'revision.activate'),
+    'boq.create': useCanPerform('boq', 'create', 'allocation.create'),
+  }
   const setupBaselineBlocked = Boolean(
     baselineGate && !baselineGate.ready && !baselineGate.alreadyLocked
   )
@@ -256,7 +404,10 @@ export function ScheduleReviewPanel({ projectId, revision }: Props) {
       }
       closeDialog()
     } catch (error) {
+      // The server's reason, once (the workflow hook keeps the global handler
+      // quiet), and the panel re-reads the revision and its readiness.
       toast.error(getApiErrorMessage(error, 'Schedule workflow action failed'))
+      closeDialog()
     }
   }
 
@@ -265,20 +416,43 @@ export function ScheduleReviewPanel({ projectId, revision }: Props) {
   const canReview =
     status === 'under_review' && (canApproveRevision || canRejectRevision)
   const canBaseline =
-    canBaselineRevision && status === 'approved' && isReady && !setupBaselineBlocked
+    canBaselineRevision &&
+    status === 'approved' &&
+    !awaitingActivation &&
+    isBaselineReady &&
+    !setupBaselineBlocked
 
   return (
-    <section className='rounded-lg border bg-card p-4'>
+    <section
+      className='rounded-lg border bg-card p-4'
+      data-testid={testIdPrefix}
+      data-status={status}
+    >
       <div className='flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between'>
         <div className='min-w-0 space-y-2'>
           <div className='flex flex-wrap items-center gap-2'>
             <ClipboardCheck className='h-4 w-4 text-primary' />
-            <h3 className='text-sm font-semibold'>Schedule Review</h3>
+            <h3 className='text-sm font-semibold'>{title}</h3>
             <Badge variant='outline' className={meta.className}>
               {meta.label}
             </Badge>
-            <span className='text-xs text-muted-foreground'>
-              {getNextActionLabel(status, isReady)}
+            <span
+              className='text-xs text-muted-foreground'
+              data-testid={`${testIdPrefix}-next`}
+            >
+              {getNextActionLabel({
+                status,
+                ready: isReady,
+                awaitingActivation,
+                baselineReady: isBaselineReady,
+                coverageBlocksBaseline,
+                staged,
+                approvalFix,
+                baselineFix,
+                setupBaselineBlocker: setupBaselineBlocked
+                  ? (baselineBlockers[0] ?? null)
+                  : null,
+              })}
             </span>
           </div>
           <div className='flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground'>
@@ -356,9 +530,7 @@ export function ScheduleReviewPanel({ projectId, revision }: Props) {
             <AlertTriangle className='mt-0.5 h-4 w-4 shrink-0' />
             <div className='min-w-0'>
               <p className='font-semibold'>Baseline setup blockers</p>
-              <p className='mt-1 text-xs opacity-90'>
-                {baselineGate?.message}
-              </p>
+              <p className='mt-1 text-xs opacity-90'>{baselineGate?.message}</p>
               <ul className='mt-2 list-inside list-disc space-y-1 text-xs'>
                 {baselineBlockers.slice(0, 4).map((blocker) => (
                   <li key={`${blocker.stepKey}-${blocker.code}`}>
@@ -366,6 +538,23 @@ export function ScheduleReviewPanel({ projectId, revision }: Props) {
                   </li>
                 ))}
               </ul>
+              {coverageBlocksBaseline && canOpenMapping && (
+                <Button
+                  asChild
+                  variant='link'
+                  size='sm'
+                  className='mt-1 h-auto px-0 text-xs'
+                >
+                  <Link
+                    to='/projects/$projectId/$module/$child'
+                    params={{ projectId, module: 'controls', child: 'mapping' }}
+                    data-testid={`${testIdPrefix}-open-mapping`}
+                  >
+                    Map the BOQ to the active activities (Project Controls ›
+                    Mapping)
+                  </Link>
+                </Button>
+              )}
             </div>
           </div>
         </div>
@@ -452,42 +641,81 @@ export function ScheduleReviewPanel({ projectId, revision }: Props) {
       <div className='mt-4 rounded-md border'>
         <div className='flex items-center justify-between border-b px-3 py-2'>
           <div className='flex items-center gap-2 text-xs font-semibold'>
-            {isReady ? (
+            {(judgedForBaseline ? isBaselineReady : isReady) ? (
               <CheckCircle2 className='h-4 w-4 text-emerald-600' />
             ) : (
               <AlertTriangle className='h-4 w-4 text-amber-600' />
             )}
             Readiness
           </div>
-          <span className='text-xs text-muted-foreground'>
-            {readiness ? `${readiness.blockingCount} blocking` : 'Not checked'}
+          <span
+            className='text-xs text-muted-foreground'
+            data-testid={`${testIdPrefix}-blocking`}
+          >
+            {readiness
+              ? `${
+                  judgedForBaseline
+                    ? (readiness.baselineBlockingCount ??
+                      readiness.blockingCount)
+                    : readiness.blockingCount
+                } blocking`
+              : 'Not checked'}
           </span>
         </div>
         <div className='divide-y'>
-          {(readiness?.checks ?? []).map((check) => (
-            <div
-              key={check.key}
-              className='grid gap-2 px-3 py-2 text-sm md:grid-cols-[220px_1fr_auto] md:items-center'
-            >
-              <div className='flex items-center gap-2 font-medium'>
-                {check.passed ? (
-                  <CheckCircle2 className='h-4 w-4 text-emerald-600' />
-                ) : check.severity === 'warning' ? (
-                  <Clock3 className='h-4 w-4 text-amber-600' />
-                ) : (
-                  <AlertTriangle className='h-4 w-4 text-rose-600' />
-                )}
-                {check.label}
-              </div>
-              <p className='text-xs text-muted-foreground'>{check.message}</p>
-              <Badge
-                variant={check.passed ? 'outline' : 'secondary'}
-                className='w-fit'
+          {(readiness?.checks ?? []).map((check) => {
+            // A check the approval does not need (BOQ coverage, D5) is, until
+            // the revision is approved and active, the step before the lock.
+            const beforeBaseline =
+              !judgedForBaseline &&
+              !check.passed &&
+              Array.isArray(check.requiredFor) &&
+              !check.requiredFor.includes('approval')
+            return (
+              <div
+                key={check.key}
+                data-testid={`${testIdPrefix}-check-${check.key}`}
+                className='grid gap-2 px-3 py-2 text-sm md:grid-cols-[220px_1fr_auto] md:items-center'
               >
-                {check.passed ? 'Passed' : check.severity}
-              </Badge>
-            </div>
-          ))}
+                <div className='flex items-center gap-2 font-medium'>
+                  {check.passed ? (
+                    <CheckCircle2 className='h-4 w-4 text-emerald-600' />
+                  ) : check.severity === 'warning' || beforeBaseline ? (
+                    <Clock3 className='h-4 w-4 text-amber-600' />
+                  ) : (
+                    <AlertTriangle className='h-4 w-4 text-rose-600' />
+                  )}
+                  {check.label}
+                </div>
+                <div className='min-w-0 space-y-0.5'>
+                  <p className='text-xs text-muted-foreground'>{check.message}</p>
+                  {/* What puts it right, and where (the server's words) —
+                      never a page that cannot; who can, when this member
+                      is not offered the step. */}
+                  {!check.passed && check.fix && !beforeBaseline && (
+                    <p
+                      className='text-xs text-foreground'
+                      data-testid={`${testIdPrefix}-fix-${check.key}`}
+                    >
+                      To fix: {check.fix.text}
+                      {fixOffered[check.fix.permission] === false &&
+                        ` Only members who can ${FIX_WHO[check.fix.permission] ?? 'take this step'} can do this; ask one of them.`}
+                    </p>
+                  )}
+                </div>
+                <Badge
+                  variant={check.passed ? 'outline' : 'secondary'}
+                  className='w-fit'
+                >
+                  {check.passed
+                    ? 'Passed'
+                    : beforeBaseline
+                      ? 'Before baseline'
+                      : check.severity}
+                </Badge>
+              </div>
+            )
+          })}
           {!readiness?.checks?.length && (
             <div className='px-3 py-3 text-sm text-muted-foreground'>
               Readiness unavailable.

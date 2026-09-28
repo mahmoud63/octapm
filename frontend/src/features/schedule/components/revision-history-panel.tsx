@@ -28,7 +28,10 @@ interface Props {
   currentActivities: ScheduleActivity[]
 }
 
-function fmtUSD(n: number) {
+// A budget withheld from this member (no BOQ or cost access) is absent from
+// the answer and reads as a dash, never as $0.
+function fmtUSD(n: number | null | undefined) {
+  if (n === undefined) return '—'
   return (
     '$' + Number(n || 0).toLocaleString('en-US', { maximumFractionDigits: 0 })
   )
@@ -116,6 +119,12 @@ export function RevisionHistoryPanel({
   const { data: activationMapping, isLoading: loadingActivationMapping } =
     useScheduleRevisionMapping(projectId, activateRevisionId)
   const workflow = useScheduleRevisionWorkflow(projectId)
+  // A rollback restores the previous revision's stored activities: offered
+  // only when that revision stored some (the server refuses it otherwise).
+  const canRestore = (rev: { previousActiveRevisionId?: string | null }) => {
+    const target = revisions?.find((entry) => entry.id === rev.previousActiveRevisionId)
+    return Boolean(target) && (target!.snapshotActivityCount ?? 0) > 0
+  }
 
   const currentNames = useMemo(() => {
     return new Set(
@@ -266,11 +275,24 @@ export function RevisionHistoryPanel({
                       <span className='font-medium'>
                         {rev.label || 'AI Generated'}
                       </span>
-                      {(rev.isActive || rev.id === currentRevision.id) && (
-                        <span className='ms-2 rounded-full bg-primary/15 px-2 py-0.5 text-[10px] font-semibold text-primary'>
+                      {/* Active only once activated: a staged import or
+                          generation the page shows is labelled staged. */}
+                      {rev.isActive ? (
+                        <span
+                          className='ms-2 rounded-full bg-primary/15 px-2 py-0.5 text-[10px] font-semibold text-primary'
+                          data-testid='uat-revision-active-badge'
+                        >
                           Active
                         </span>
-                      )}
+                      ) : rev.id === currentRevision.id ? (
+                        <span
+                          className='ms-2 rounded-full bg-muted px-2 py-0.5 text-[10px] font-semibold text-muted-foreground'
+                          data-testid='uat-revision-staged-badge'
+                          title='Staged: not active until it is approved and activated'
+                        >
+                          Staged
+                        </span>
+                      ) : null}
                       {rev.rejectionReason && (
                         <p className='mt-1 max-w-72 truncate text-xs text-rose-600'>
                           {rev.rejectionReason}
@@ -328,7 +350,8 @@ export function RevisionHistoryPanel({
                           )}
                         {canRollbackRevision &&
                           rev.isActive &&
-                          rev.previousActiveRevisionId && (
+                          rev.previousActiveRevisionId &&
+                          canRestore(rev) && (
                             <Button
                               size='sm'
                               variant='outline'
@@ -461,9 +484,13 @@ export function RevisionHistoryPanel({
                 <div className='rounded-md border bg-muted/20 p-2'>
                   <p className='text-xs text-muted-foreground'>Budget Delta</p>
                   <p className='text-lg font-semibold'>
-                    {fmtUSD(
-                      currentRevision.totalBudget - comparedRevision.totalBudget
-                    )}
+                    {currentRevision.totalBudget !== undefined &&
+                    comparedRevision.totalBudget !== undefined
+                      ? fmtUSD(
+                          currentRevision.totalBudget -
+                            comparedRevision.totalBudget
+                        )
+                      : '—'}
                   </p>
                 </div>
               </div>

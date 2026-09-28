@@ -176,11 +176,55 @@ export type Company = z.infer<typeof companySchema>
 export type ProjectParty = z.infer<typeof projectPartySchema>
 export type ProjectPartyRole = z.infer<typeof projectPartyRoleSchema>
 
+/**
+ * One record behind a readiness issue (PC-4): what it is, what it lacks and
+ * where to fix it — `href` is the module page under the project's workspace
+ * with the record in the URL, as notification links carry it.
+ */
+export type ProjectSetupItem = {
+  type: string
+  id: string | null
+  code: string | null
+  label: string | null
+  missing: string
+  /** null when no page resolves it yet: named, not linked. */
+  href: string | null
+}
+
 export type ProjectSetupIssue = {
   code: string
   message: string
-  severity: 'blocking' | 'warning' | string
+  /** 'advisory': information only — it never moves a step's status or a gate. */
+  severity: 'blocking' | 'warning' | 'advisory' | string
   details?: Record<string, unknown>
+  /** The offending records, capped at 50; `count` is the whole number. */
+  items?: ProjectSetupItem[]
+  /** Absent on a mapping issue for a caller who may not read the BOQ. */
+  count?: number
+  /**
+   * True when the caller may not read the BOQ and the BOQ records behind
+   * the issue were left out of `items`.
+   */
+  itemsWithheld?: boolean
+  /**
+   * True when the caller may not read the schedule and the activities and
+   * schedule revisions behind the issue were left out of `items`;
+   * `scheduleReason` says why.
+   */
+  scheduleItemsWithheld?: boolean
+  scheduleReason?: string
+  /**
+   * True on a mapping issue for a caller who may not read the BOQ: how many
+   * rows or allocations it concerns is not given (owner decision C).
+   */
+  mappingDetailsWithheld?: boolean
+  /**
+   * True on a BOQ filing or unit issue (BOQ_ITEMS_WITHOUT_WBS,
+   * BOQ_ITEMS_WITHOUT_COST_CODE, BOQ_UNIT_UNRESOLVED, UOM_UNRESOLVED) for a
+   * caller who may not read the BOQ: no count of rows, `reason` says why.
+   */
+  boqDetailsWithheld?: boolean
+  reason?: string
   stepKey?: string
   stepLabel?: string
   actionLabel?: string
@@ -201,6 +245,36 @@ export type ProjectSetupTarget = {
   new?: string
 }
 
+/**
+ * One thing the structure step guides (§21): WBS, locations, cost codes,
+ * BOQ structure, schedule structure or mapping readiness — its state, what
+ * is still to file, and where that is done.
+ */
+export type ProjectSetupGuide = {
+  key: string
+  label: string
+  status: 'complete' | 'attention' | 'pending'
+  /** null on mapping_readiness and boq_structure for a caller who may not read the BOQ. */
+  count: number | null
+  detail: string
+  detailsWithheld?: boolean
+  /** null when no page does it yet: the guide is read, not followed. */
+  target: ProjectSetupTarget | null
+  href: string | null
+}
+
+/** One entry of the §33 status line: "BOQ imported PASS", "Mapping 83%", … */
+export type ProjectSetupHeadlineEntry = {
+  key: string
+  label: string
+  value: string
+  tone: 'done' | 'review' | 'blocked' | 'info' | 'neutral'
+  raw?: unknown
+  /** On the mapping entry, for a caller who may not read the BOQ. */
+  withheld?: boolean
+  reason?: string
+}
+
 export type ProjectSetupStep = {
   key: string
   label: string
@@ -211,11 +285,33 @@ export type ProjectSetupStep = {
   message: string
   blockers: ProjectSetupIssue[]
   warnings: ProjectSetupIssue[]
+  /**
+   * PC-4's filing and matching checks: listed with the step, never moving
+   * its status, its message or a gate.
+   */
+  advisories?: ProjectSetupIssue[]
   counts: Record<string, unknown>
   action: {
     label: string
     target: ProjectSetupTarget
   }
+  /** On structure_setup only. */
+  guides?: ProjectSetupGuide[]
+}
+
+/** A transition the approval workflow recorded on a BOQ revision (PC-2). */
+export type BoqRevisionHistoryEntry = {
+  id: string
+  action: string
+  fromStatus: string | null
+  toStatus: string | null
+  actorId: string | null
+  actorName: string | null
+  actorRole: string | null
+  decision: string | null
+  reason: string | null
+  comment: string | null
+  at: string | null
 }
 
 export type ProjectSetupReadiness = {
@@ -233,7 +329,21 @@ export type ProjectSetupReadiness = {
     readyForBaseline: boolean
     readyForProgress: boolean
     readyForReporting?: boolean
+    /** The §33 status line, in reading order. */
+    headline?: ProjectSetupHeadlineEntry[]
+    criticalUnmappedActivities?: number
+    /** From the ten original steps only (setup doc §3: unchanged). */
     nextAction: {
+      stepKey: string
+      label: string
+      target: ProjectSetupTarget
+      message: string
+    } | null
+    /**
+     * The first of the two advisory steps (structure_setup, boq_approval)
+     * still asking for something, offered apart from nextAction.
+     */
+    advisoryAction?: {
       stepKey: string
       label: string
       target: ProjectSetupTarget
@@ -264,7 +374,108 @@ export type ProjectSetupReadiness = {
       message: string
     }
   }
-  context?: Record<string, unknown>
+  /** The structure dimension (PC-1) as the check found it. */
+  structure?: {
+    wbsNodes: number
+    locations: number
+    projectCostCodes: number
+    /** Absent for a caller who may not read the BOQ (unitsUnresolvedWithheld). */
+    unitsUnresolved?: number
+    unitsUnresolvedWithheld?: boolean
+    reason?: string
+  }
+  /**
+   * The §69 coverage totals, exactly as the coverage endpoint reports them
+   * (PC-3) — the readiness check never recomputes them. A caller who may not
+   * read the BOQ gets none of it (owner decision C): `{ withheld: true,
+   * reason }`, no share and no counts.
+   */
+  coverage?: {
+    withheld?: boolean
+    reason?: string
+    totalBoqAmount?: number
+    allocatableBoqAmount?: number
+    approvedAllocatedAmount?: number
+    pendingAllocatedAmount?: number
+    unallocatedAmount?: number
+    optionalUnallocatedAmount?: number
+    notApplicableAmount?: number
+    earnedValue?: number
+    certifiedValue?: number
+    coveragePct?: number
+    counts?: {
+      unmapped: number
+      partial: number
+      complete: number
+      over: number
+      notApplicable: number
+    }
+  }
+  context?: {
+    workspace?: { orgId: string; segment: string }
+    currentRevision?: {
+      id: string
+      label: string | null
+      status: string
+      isActive: boolean
+      approvedAt: string | null
+      baselinedAt: string | null
+    } | null
+    boqRevision?: {
+      id: string
+      revisionNumber: number
+      label: string | null
+      source?: string
+      status: string
+      baselineLocked: boolean
+      lockedAt: string | null
+      /**
+       * The revision's row counts (itemCount, changes, validation.blockedCount)
+       * are only for a caller who may read the BOQ; anyone else gets
+       * countsWithheld and the reason ("BOQ details unavailable to you").
+       */
+      itemCount?: number
+      countsWithheld?: boolean
+      reason?: string
+      /** Only for a caller who may read the BOQ. */
+      totalAmount?: number
+      /** The upload's comparison against the bill before it (PC-2). */
+      changes?: {
+        added: number
+        updated: number
+        removed: number
+        unchanged: number
+        blocked: number
+      }
+      /** The rows the comparison could not apply. */
+      validation?: {
+        blockedCount?: number
+        blocked: Array<{
+          code: string | null
+          description: string | null
+          /** The machine code PC-2 recorded, e.g. DUPLICATE_BOQ_ITEM_CODE. */
+          reason: string | null
+          /** The sentence to show. */
+          message?: string | null
+        }>
+      }
+      /** Only for a caller who may read the BOQ. */
+      history?: BoqRevisionHistoryEntry[]
+      createdAt?: string | null
+    } | null
+    boqBaseline?: {
+      locked: boolean
+      source: 'boq_revision' | 'schedule_baseline' | null
+      boqRevisionId: string | null
+    }
+    progressMethods?: {
+      configured: number
+      total: number
+      byMethod: Record<string, number>
+      quantityWithoutUnit: number
+    }
+    [key: string]: unknown
+  }
   steps: ProjectSetupStep[]
 }
 

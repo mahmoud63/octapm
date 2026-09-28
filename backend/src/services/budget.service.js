@@ -634,11 +634,15 @@ const reconcile = async ({ orgId, projectId }) => {
 
 // ─── Snapshots ─────────────────────────────────────────────────────────────
 
-const serializeSnapshot = (row, { withLines = false } = {}) => ({
+// A period's cutoff as the EV reports use it (the instant its figures are
+// cut at, with its date and zone), never the stored reporting-date value.
+const periodCutoffReader = ({ orgId, projectId }) => require("./earned-value.service").periodCutoffReader({ orgId, projectId });
+
+const serializeSnapshot = (row, { withLines = false, cutoffOf = null } = {}) => ({
   id: row.id,
   projectId: row.projectId,
   reportingPeriodId: row.reportingPeriodId || null,
-  reportingPeriod: row.reportingPeriod ? { id: row.reportingPeriod.id, code: row.reportingPeriod.code, label: row.reportingPeriod.label, cutoffDate: toIso(row.reportingPeriod.cutoffDate), status: row.reportingPeriod.status } : null,
+  reportingPeriod: row.reportingPeriod ? { id: row.reportingPeriod.id, code: row.reportingPeriod.code, label: row.reportingPeriod.label, ...(cutoffOf ? cutoffOf(row.reportingPeriod) : { cutoffDate: null }), status: row.reportingPeriod.status } : null,
   label: row.label,
   takenBy: row.takenBy || null,
   takenAt: toIso(row.takenAt),
@@ -647,7 +651,7 @@ const serializeSnapshot = (row, { withLines = false } = {}) => ({
   ...(withLines ? { lines: row.linesJson || [] } : { lineCount: Array.isArray(row.linesJson) ? row.linesJson.length : 0 }),
 });
 
-const snapshotInclude = { reportingPeriod: { select: { id: true, code: true, label: true, cutoffDate: true, status: true } } };
+const snapshotInclude = { reportingPeriod: { select: { id: true, code: true, label: true, cutoffDate: true, status: true, evSnapshot: { select: { cutoffDate: true, basisJson: true } } } } };
 
 const buildSnapshotPayload = async ({ orgId, projectId }) => {
   const [{ items, summary }, reconciliation] = await Promise.all([listBudgetLines({ orgId, projectId, query: { includeArchived: true } }), reconcile({ orgId, projectId })]);
@@ -669,7 +673,7 @@ const takeSnapshot = async ({ orgId, projectId, payload = {}, actor = null }) =>
     ? await prisma.budgetSnapshot.upsert({ where: { reportingPeriodId }, create: data, update: { label: data.label, takenBy: data.takenBy, takenAt: data.takenAt, totalsJson: data.totalsJson, linesJson: data.linesJson, reconciliationJson: data.reconciliationJson }, include: snapshotInclude })
     : await prisma.budgetSnapshot.create({ data, include: snapshotInclude });
   await auditService.recordEvent({ orgId, projectId, entityType: auditService.ENTITY_TYPES.BUDGET_SNAPSHOT, entityId: row.id, action: auditService.ACTIONS.CREATED, actorId: actor?.id || null, actorRole: actor?.role || null, summary: { label: row.label, reportingPeriodId: reportingPeriodId || null, balanced: body.reconciliation.balanced, budgetLines: body.totals.revisedBudget }, metadata: { source: "cost_control.budget" } });
-  return serializeSnapshot(row, { withLines: true });
+  return serializeSnapshot(row, { withLines: true, cutoffOf: await periodCutoffReader({ orgId, projectId }) });
 };
 
 /** Locking a reporting period freezes the budget with it (called inside the lock transaction). */
@@ -691,14 +695,15 @@ const snapshotForPeriod = async ({ tx = prisma, orgId, projectId, periodId, user
 const listSnapshots = async ({ orgId, projectId }) => {
   await ensureProject({ orgId, projectId });
   const rows = await prisma.budgetSnapshot.findMany({ where: { projectId }, include: snapshotInclude, orderBy: { takenAt: "desc" }, take: 100 });
-  return { items: rows.map((row) => serializeSnapshot(row)) };
+  const cutoffOf = await periodCutoffReader({ orgId, projectId });
+  return { items: rows.map((row) => serializeSnapshot(row, { cutoffOf })) };
 };
 
 const getSnapshot = async ({ orgId, projectId, snapshotId }) => {
   await ensureProject({ orgId, projectId });
   const row = await prisma.budgetSnapshot.findFirst({ where: { id: snapshotId, projectId }, include: snapshotInclude });
   if (!row) throw new HttpError(404, "BUDGET_SNAPSHOT_NOT_FOUND", "Snapshot not found");
-  return serializeSnapshot(row, { withLines: true });
+  return serializeSnapshot(row, { withLines: true, cutoffOf: await periodCutoffReader({ orgId, projectId }) });
 };
 
 module.exports = {

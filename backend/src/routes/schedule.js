@@ -11,9 +11,16 @@ const {
   aiGenerationLimiter,
   uploadLimiter,
 } = require('../middleware/rate-limit');
-const { getEffectiveRole, requirePermission } = require('../middleware/rbac');
-const { validate } = require('../middleware/validate');
+const { getEffectiveRole, hasPermission, requirePermission } = require('../middleware/rbac');
+const { validate, validateWithReasons } = require('../middleware/validate');
 const scheduleService = require('../services/schedule.service');
+const {
+  boqFigureAccess,
+  withheldError,
+  withheldRevision,
+  withheldSchedule,
+  withheldScheduleReadiness,
+} = require('../utils/boq-figures');
 const ganttLayoutService = require('../services/gantt-layout.service');
 const fileStorageService = require('../services/file-storage.service');
 const jobService = require('../jobs/job.service');
@@ -56,6 +63,95 @@ const upload = multer({
   },
 });
 
+/*
+ * The schedule is read by everyone who may read the programme; the bill's
+ * figures on it (each activity's approved allocation, the open value, the
+ * readiness check that states the bill's value) are for those who may read
+ * the BOQ, and its budgets for those who may read the BOQ or the cost
+ * module (§12). Every response that carries a revision or an activity goes
+ * through utils/boq-figures; a BOQ reader's answer is the service's own.
+ */
+// The lifecycle answers: a revision, or { revision, readiness?, ... }.
+const withheldLifecycle = (result, req) => {
+  const access = boqFigureAccess(req);
+  if (access.boq || !result || typeof result !== 'object') return result;
+  return {
+    ...result,
+    revision: withheldRevision(result.revision, access),
+    ...('readiness' in result
+      ? { readiness: withheldScheduleReadiness(result.readiness, access) }
+      : {}),
+  };
+};
+
+// ... and so are their refusals: approval and baseline lock refuse a
+// schedule that is not ready (SCHEDULE_NOT_READY) with the whole readiness
+// as error.details, which goes the way of the readiness a success answer
+// carries. Status, code, message, ready and blockingCount stay.
+const withheldRefusals = (handler) => async (req, res) => {
+  try {
+    return await handler(req, res);
+  } catch (error) {
+    throw withheldError(error, boqFigureAccess(req));
+  }
+};
+
+/*
+ * The lifecycle's own refusals say what is missing (validateWithReasons makes
+ * the first failing check's message the error's message), so an API client
+ * — mobile, which production answers without details — reads the reason the
+ * screen would give, never a bare "Validation failed".
+ */
+const reasonRequired = (requiredMessage, subject) => [
+  body('reason')
+    .isString()
+    .withMessage(requiredMessage)
+    .bail()
+    .trim()
+    .notEmpty()
+    .withMessage(requiredMessage)
+    .bail()
+    .isLength({ max: 2000 })
+    .withMessage(`${subject} can be at most 2,000 characters.`),
+];
+const ACTIVATION_MAPPINGS_REQUIRED =
+  'Activation needs the activity mappings: send "mappings" as a list pairing each active activity with its activity in this revision (an empty list when no schedule is active yet).';
+// A lifecycle comment: optional, at most 2,000 characters, refused in words.
+const optionalComment = (subject) =>
+  body('comment')
+    .optional({ nullable: true })
+    .isString()
+    .withMessage(`${subject} must be text.`)
+    .bail()
+    .trim()
+    .isLength({ max: 2000 })
+    .withMessage(`${subject} can be at most 2,000 characters.`);
+
+/*
+ * Whether this caller may take each fix a SCHEDULE_NOT_READY refusal names
+ * (schedule.service FIX_PERMISSIONS): the refusal says who can when the
+ * caller cannot, rather than sending them to a step they are not offered.
+ */
+const fixAccessFor = (req) => ({
+  can: (key) => {
+    const permission = scheduleService.FIX_PERMISSIONS[key];
+    return Boolean(
+      permission &&
+        hasPermission(req, permission.module, permission.action, {
+          transition: permission.transition,
+        }),
+    );
+  },
+});
+const REVISION_ID_INVALID =
+  'The schedule revision id is not valid: refresh Schedule › Revisions and try again.';
+const ACTIVATION_REMOVALS_LIST =
+  'Send "unmappedRemovals" as a list: one { oldActivityId, reason } for each active activity this revision leaves out.';
+const ACTIVATION_REMOVAL_INCOMPLETE =
+  'Each removal needs the active activity (oldActivityId) and the reason it is removed (reason).';
+const ACTIVATION_MAPPING_INCOMPLETE =
+  'Each activity mapping needs both the active activity (oldActivityId) and its activity in this revision (newActivityKey).';
+
 router.use(authenticate);
 
 // Disable caching for all schedule endpoints
@@ -73,7 +169,7 @@ router.get(
       orgId: req.user.orgId,
       projectId: req.params.projectId,
     });
-    return sendSuccess(res, result);
+    return sendSuccess(res, withheldSchedule(result, boqFigureAccess(req)));
   }),
 );
 
@@ -86,7 +182,8 @@ router.get(
       orgId: req.user.orgId,
       projectId: req.params.projectId,
     });
-    return sendSuccess(res, result);
+    const access = boqFigureAccess(req);
+    return sendSuccess(res, result.map((revision) => withheldRevision(revision, access)));
   }),
 );
 
@@ -101,7 +198,7 @@ router.get(
       projectId: req.params.projectId,
       revisionId: req.params.revisionId,
     });
-    return sendSuccess(res, result);
+    return sendSuccess(res, withheldScheduleReadiness(result, boqFigureAccess(req)));
   }),
 );
 
@@ -116,7 +213,7 @@ router.get(
       projectId: req.params.projectId,
       revisionId: req.params.revisionId,
     });
-    return sendSuccess(res, result);
+    return sendSuccess(res, withheldLifecycle(result, req));
   }),
 );
 
@@ -134,7 +231,7 @@ router.get(
     if (!result) {
       throw new HttpError(404, 'REVISION_NOT_FOUND', 'Revision not found');
     }
-    return sendSuccess(res, result);
+    return sendSuccess(res, withheldRevision(result, boqFigureAccess(req)));
   }),
 );
 
@@ -145,28 +242,44 @@ router.post(
     transition: 'revision.activate',
   }),
   [
-    param('revisionId').isUUID(),
-    body('mappings').isArray(),
-    body('mappings.*.oldActivityId').isString().trim().notEmpty(),
-    body('mappings.*.newActivityKey').isString().trim().notEmpty(),
-    body('unmappedRemovals').optional({ nullable: true }).isArray(),
+    param('revisionId').isUUID().withMessage(REVISION_ID_INVALID),
+    body('mappings').isArray().withMessage(ACTIVATION_MAPPINGS_REQUIRED),
+    body('mappings.*.oldActivityId')
+      .isString()
+      .withMessage(ACTIVATION_MAPPING_INCOMPLETE)
+      .trim()
+      .notEmpty()
+      .withMessage(ACTIVATION_MAPPING_INCOMPLETE),
+    body('mappings.*.newActivityKey')
+      .isString()
+      .withMessage(ACTIVATION_MAPPING_INCOMPLETE)
+      .trim()
+      .notEmpty()
+      .withMessage(ACTIVATION_MAPPING_INCOMPLETE),
+    body('unmappedRemovals')
+      .optional({ nullable: true })
+      .isArray()
+      .withMessage(ACTIVATION_REMOVALS_LIST),
     body('unmappedRemovals.*.oldActivityId')
       .optional()
       .isString()
+      .withMessage(ACTIVATION_REMOVAL_INCOMPLETE)
       .trim()
-      .notEmpty(),
+      .notEmpty()
+      .withMessage(ACTIVATION_REMOVAL_INCOMPLETE),
     body('unmappedRemovals.*.reason')
       .optional()
       .isString()
+      .withMessage(ACTIVATION_REMOVAL_INCOMPLETE)
       .trim()
       .notEmpty()
-      .isLength({ max: 2000 }),
-    body('comment').optional({ nullable: true }).isString().trim().isLength({
-      max: 2000,
-    }),
-    validate,
+      .withMessage(ACTIVATION_REMOVAL_INCOMPLETE)
+      .isLength({ max: 2000 })
+      .withMessage('A removal reason can be at most 2,000 characters.'),
+    optionalComment('The activation comment'),
+    validateWithReasons,
   ],
-  asyncHandler(async (req, res) => {
+  asyncHandler(withheldRefusals(async (req, res) => {
     const result = await scheduleService.activateRevision({
       orgId: req.user.orgId,
       projectId: req.params.projectId,
@@ -176,8 +289,8 @@ router.post(
       unmappedRemovals: req.body.unmappedRemovals || [],
       comment: req.body?.comment || null,
     });
-    return sendSuccess(res, result);
-  }),
+    return sendSuccess(res, withheldLifecycle(result, req));
+  })),
 );
 
 // POST /projects/:projectId/schedule/revisions/:revisionId/rollback
@@ -187,11 +300,11 @@ router.post(
     transition: 'revision.rollback',
   }),
   [
-    param('revisionId').isUUID(),
-    body('reason').isString().trim().notEmpty().isLength({ max: 2000 }),
-    validate,
+    param('revisionId').isUUID().withMessage(REVISION_ID_INVALID),
+    ...reasonRequired('A rollback reason is required.', 'The rollback reason'),
+    validateWithReasons,
   ],
-  asyncHandler(async (req, res) => {
+  asyncHandler(withheldRefusals(async (req, res) => {
     const result = await scheduleService.rollbackRevision({
       orgId: req.user.orgId,
       projectId: req.params.projectId,
@@ -199,8 +312,8 @@ router.post(
       userId: req.user.id,
       reason: req.body.reason,
     });
-    return sendSuccess(res, result);
-  }),
+    return sendSuccess(res, withheldLifecycle(result, req));
+  })),
 );
 
 // POST /projects/:projectId/schedule/revisions/:revisionId/submit-review
@@ -210,13 +323,11 @@ router.post(
     transition: 'revision.submit_review',
   }),
   [
-    param('revisionId').isUUID(),
-    body('comment').optional({ nullable: true }).isString().trim().isLength({
-      max: 2000,
-    }),
-    validate,
+    param('revisionId').isUUID().withMessage(REVISION_ID_INVALID),
+    optionalComment('The review comment'),
+    validateWithReasons,
   ],
-  asyncHandler(async (req, res) => {
+  asyncHandler(withheldRefusals(async (req, res) => {
     const result = await scheduleService.submitRevisionForReview({
       orgId: req.user.orgId,
       projectId: req.params.projectId,
@@ -225,8 +336,8 @@ router.post(
       userRole: getEffectiveRole(req),
       comment: req.body?.comment || null,
     });
-    return sendSuccess(res, result);
-  }),
+    return sendSuccess(res, withheldRevision(result, boqFigureAccess(req)));
+  })),
 );
 
 // POST /projects/:projectId/schedule/revisions/:revisionId/approve
@@ -236,14 +347,13 @@ router.post(
     transition: 'revision.approve',
   }),
   [
-    param('revisionId').isUUID(),
-    body('comment').optional({ nullable: true }).isString().trim().isLength({
-      max: 2000,
-    }),
-    validate,
+    param('revisionId').isUUID().withMessage(REVISION_ID_INVALID),
+    optionalComment('The approval comment'),
+    validateWithReasons,
   ],
-  asyncHandler(async (req, res) => {
+  asyncHandler(withheldRefusals(async (req, res) => {
     const result = await scheduleService.approveRevision({
+      fixAccess: fixAccessFor(req),
       orgId: req.user.orgId,
       projectId: req.params.projectId,
       revisionId: req.params.revisionId,
@@ -251,8 +361,8 @@ router.post(
       userRole: getEffectiveRole(req),
       comment: req.body?.comment || null,
     });
-    return sendSuccess(res, result);
-  }),
+    return sendSuccess(res, withheldRevision(result, boqFigureAccess(req)));
+  })),
 );
 
 // POST /projects/:projectId/schedule/revisions/:revisionId/reject
@@ -262,11 +372,11 @@ router.post(
     transition: 'revision.reject',
   }),
   [
-    param('revisionId').isUUID(),
-    body('reason').isString().trim().notEmpty().isLength({ max: 2000 }),
-    validate,
+    param('revisionId').isUUID().withMessage(REVISION_ID_INVALID),
+    ...reasonRequired('A rejection reason is required.', 'The rejection reason'),
+    validateWithReasons,
   ],
-  asyncHandler(async (req, res) => {
+  asyncHandler(withheldRefusals(async (req, res) => {
     const result = await scheduleService.rejectRevision({
       orgId: req.user.orgId,
       projectId: req.params.projectId,
@@ -275,8 +385,8 @@ router.post(
       userRole: getEffectiveRole(req),
       reason: req.body.reason,
     });
-    return sendSuccess(res, result);
-  }),
+    return sendSuccess(res, withheldRevision(result, boqFigureAccess(req)));
+  })),
 );
 
 // POST /projects/:projectId/schedule/revisions/:revisionId/baseline
@@ -286,14 +396,13 @@ router.post(
     transition: 'revision.baseline',
   }),
   [
-    param('revisionId').isUUID(),
-    body('comment').optional({ nullable: true }).isString().trim().isLength({
-      max: 2000,
-    }),
-    validate,
+    param('revisionId').isUUID().withMessage(REVISION_ID_INVALID),
+    optionalComment('The baseline comment'),
+    validateWithReasons,
   ],
-  asyncHandler(async (req, res) => {
+  asyncHandler(withheldRefusals(async (req, res) => {
     const result = await scheduleService.lockBaseline({
+      fixAccess: fixAccessFor(req),
       orgId: req.user.orgId,
       projectId: req.params.projectId,
       revisionId: req.params.revisionId,
@@ -301,8 +410,8 @@ router.post(
       userRole: getEffectiveRole(req),
       comment: req.body?.comment || null,
     });
-    return sendSuccess(res, result);
-  }),
+    return sendSuccess(res, withheldLifecycle(result, req));
+  })),
 );
 
 // POST /projects/:projectId/schedule/baseline
@@ -312,14 +421,13 @@ router.post(
     transition: 'revision.baseline',
   }),
   [
-    body('revisionId').optional({ nullable: true }).isUUID(),
-    body('comment').optional({ nullable: true }).isString().trim().isLength({
-      max: 2000,
-    }),
-    validate,
+    body('revisionId').optional({ nullable: true }).isUUID().withMessage(REVISION_ID_INVALID),
+    optionalComment('The baseline comment'),
+    validateWithReasons,
   ],
-  asyncHandler(async (req, res) => {
+  asyncHandler(withheldRefusals(async (req, res) => {
     const result = await scheduleService.lockBaseline({
+      fixAccess: fixAccessFor(req),
       orgId: req.user.orgId,
       projectId: req.params.projectId,
       revisionId: req.body?.revisionId || null,
@@ -327,8 +435,8 @@ router.post(
       userRole: getEffectiveRole(req),
       comment: req.body?.comment || null,
     });
-    return sendSuccess(res, result);
-  }),
+    return sendSuccess(res, withheldLifecycle(result, req));
+  })),
 );
 
 // POST /projects/:projectId/schedule/generate — returns jobId immediately

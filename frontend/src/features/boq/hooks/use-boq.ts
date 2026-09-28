@@ -453,8 +453,11 @@ export function useSubmitBoqRevision(projectId: string) {
       toast.success('BOQ revision submitted for review')
       await invalidateRevisionConsumers(qc, projectId)
     },
-    onError: (err: AxiosError<ApiErrorResponse>) => {
+    // A refusal usually means the revision moved on since the page loaded:
+    // the table is re-read so its buttons match where it stands.
+    onError: async (err: AxiosError<ApiErrorResponse>) => {
       toast.error(apiErrorMessage(err, 'Failed to submit revision'))
+      await invalidateRevisionConsumers(qc, projectId)
     },
   })
 }
@@ -468,8 +471,9 @@ export function useApproveBoqRevision(projectId: string) {
       toast.success('BOQ revision approved')
       await invalidateRevisionConsumers(qc, projectId)
     },
-    onError: (err: AxiosError<ApiErrorResponse>) => {
+    onError: async (err: AxiosError<ApiErrorResponse>) => {
       toast.error(apiErrorMessage(err, 'Failed to approve revision'))
+      await invalidateRevisionConsumers(qc, projectId)
     },
   })
 }
@@ -496,8 +500,9 @@ export function useLockBoqBaseline(projectId: string) {
       )
       await invalidateRevisionConsumers(qc, projectId)
     },
-    onError: (err: AxiosError<ApiErrorResponse>) => {
+    onError: async (err: AxiosError<ApiErrorResponse>) => {
       toast.error(apiErrorMessage(err, 'Failed to lock the BOQ baseline'))
+      await invalidateRevisionConsumers(qc, projectId)
     },
   })
 }

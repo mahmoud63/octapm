@@ -18,6 +18,7 @@ import {
   WalletCards,
 } from 'lucide-react'
 import { useAuthStore } from '@/stores/auth-store'
+import { evCutoffNote, formatEvCutoff, type EvCutoff } from '@/lib/ev-cutoff'
 import { statusBadge } from '@/lib/status'
 import { cn } from '@/lib/utils'
 import { Badge } from '@/components/ui/badge'
@@ -155,6 +156,12 @@ type WorkspaceDashboard = {
   dataFreshness?: {
     generatedAt: string
     cutoffDate: string | null
+    /** When the official cutoff is a project's EV cutoff: its date and zone. */
+    cutoffLocalDate?: string | null
+    cutoffTimeZone?: string | null
+    cutoffTimeZoneSource?: string | null
+    /** The server's note when that project has no zone of its own. */
+    cutoffTimeZoneNote?: string | null
     sourceUpdatedAt: string | null
     note: string
   }
@@ -947,6 +954,17 @@ export function Dashboard() {
   // A personal workspace shows its team sections only once it holds more
   // than one project (workspace switching doc §7).
   const showTeamSections = !personal || summary.totalProjects > 1
+  // The official cutoff, when it is a project's EV cutoff, is stated as the
+  // EV screens state it (lib/ev-cutoff): date, zone, instant, and the
+  // server's note when that project has no zone of its own.
+  const officialCutoff: EvCutoff = {
+    cutoffDate: data.dataFreshness?.cutoffDate,
+    cutoffLocalDate: data.dataFreshness?.cutoffLocalDate,
+    timeZone: data.dataFreshness?.cutoffTimeZone,
+    timeZoneSource: data.dataFreshness?.cutoffTimeZoneSource,
+    timeZoneNote: data.dataFreshness?.cutoffTimeZoneNote,
+  }
+  const officialCutoffNote = evCutoffNote(officialCutoff)
 
   return (
     <Main>
@@ -969,8 +987,13 @@ export function Dashboard() {
                 : 'Construction health, approval queues, and project risk signals.'}
             </p>
             <p className='mt-1 text-xs text-muted-foreground'>
-              Official cutoff {formatCutoff(data.dataFreshness?.cutoffDate)} |
-              refreshed{' '}
+              Official cutoff{' '}
+              <span data-testid='workspace-official-cutoff'>
+                {officialCutoff.timeZone
+                  ? formatEvCutoff(officialCutoff)
+                  : formatCutoff(data.dataFreshness?.cutoffDate)}
+              </span>{' '}
+              | refreshed{' '}
               {new Date(
                 data.dataFreshness?.generatedAt || data.generatedAt
               ).toLocaleTimeString([], {
@@ -978,6 +1001,14 @@ export function Dashboard() {
                 minute: '2-digit',
               })}
             </p>
+            {officialCutoffNote && (
+              <p
+                className='text-xs text-muted-foreground'
+                data-testid='workspace-official-cutoff-zone-note'
+              >
+                {officialCutoffNote}
+              </p>
+            )}
           </div>
           <Button asChild>
             <Link to='/projects'>

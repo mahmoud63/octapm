@@ -1,5 +1,11 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { apiClient } from '@/services/api/client'
+import type { EvCutoff } from '@/lib/ev-cutoff'
+import {
+  EAC_NO_COST_PERFORMANCE,
+  eacBasisLabel,
+  type EacBasis,
+} from '@/lib/eac-basis'
 
 /**
  * Schedule delay and cost overrun prediction (OCTA-AI-PREDICT-031). The
@@ -44,16 +50,18 @@ export interface ForecastActivity {
   score: number
   level: ForecastLevel
   reasons: string[]
+  // The money is present only for a reader of the BOQ or the cost module
+  // (§12); the level and the basis are everyone's.
   cost: {
-    budget: number
-    actual: number
-    committed: number
-    projected: number | null
+    budget?: number
+    actual?: number
+    committed?: number
+    projected?: number | null
     basis: string | null
-    overrun: number
-    overrunPct: number
+    overrun?: number
+    overrunPct?: number
     level: ForecastLevel
-    reasons: string[]
+    reasons?: string[]
   }
 }
 
@@ -62,12 +70,12 @@ export interface ForecastBudgetLine {
   costCode: string | null
   name: string
   costType: string | null
-  revised: number
-  committed: number
-  actual: number
-  forecast: number
-  overrun: number
-  overrunPct: number | null
+  revised?: number
+  committed?: number
+  actual?: number
+  forecast?: number
+  overrun?: number
+  overrunPct?: number | null
   level: ForecastLevel
 }
 
@@ -94,14 +102,22 @@ export interface ProjectForecast {
     }
     topRisks: ForecastActivity[]
   } | null
+  /** The EV cutoff SPI, CPI and EAC were measured through (lib/ev-cutoff). */
+  earnedValueCutoff?: EvCutoff | null
+  // As on each activity: the money only for a BOQ or cost reader (§12).
   cost: {
-    budget: number
-    eac: number | null
-    bottomUp: number
-    projected: number
-    overrun: number
-    overrunPct: number | null
-    actual: number
+    budget?: number
+    /** The revised BAC the EAC was computed from (the EV report's). */
+    bac?: number | null
+    /** The official EV report's EAC: revised BAC / CPI, else the revised BAC. */
+    eac?: number | null
+    /** Which rule gave the EAC; not money, so every reader receives it. */
+    eacBasis?: EacBasis | null
+    bottomUp?: number
+    projected?: number
+    overrun?: number
+    overrunPct?: number | null
+    actual?: number
     counts: { atRisk: Record<ForecastLevel, number>; lines: number }
     topRisks: ForecastActivity[]
     budgetLines: ForecastBudgetLine[]
@@ -109,6 +125,75 @@ export interface ProjectForecast {
   summary: { scheduleLevel: ForecastLevel; costLevel: ForecastLevel } | null
   dataQuality: string[]
   activities: ForecastActivity[]
+}
+
+// The basis and its words are shared with the EV tab (lib/eac-basis).
+export type { EacBasis }
+export { EAC_NO_COST_PERFORMANCE }
+export const COST_FIGURES_WITHHELD = 'Cost figures are not available to you'
+
+export type EacStatement = {
+  /** The EAC, or null when there is none to show (withheld, or no EV report). */
+  value: number | null
+  /** What the figure is, in words: its rule, or why there is none. */
+  label: string
+  withheld: boolean
+  /** EAC above the revised BAC it was computed from (same basis); null when unknown. */
+  over: boolean | null
+}
+
+/**
+ * The business-rule estimate at completion as every screen states it (owner
+ * decision D2): the server's figure (the official EV report's EAC, which the
+ * forecast carries), its rule, and whether it is above the revised BAC it was
+ * computed from. Nothing is computed here but that comparison.
+ */
+export function eacStatement(
+  forecast: ProjectForecast | null | undefined
+): EacStatement {
+  const cost = forecast?.cost
+  if (!cost) {
+    return {
+      value: null,
+      label: forecast?.reason ?? 'no forecast yet',
+      withheld: false,
+      over: null,
+    }
+  }
+  if (cost.budget === undefined) {
+    return {
+      value: null,
+      label: COST_FIGURES_WITHHELD,
+      withheld: true,
+      over: null,
+    }
+  }
+  if (cost.eac === null || cost.eac === undefined || !cost.eacBasis) {
+    return {
+      value: null,
+      label: 'no earned-value report yet',
+      withheld: false,
+      over: null,
+    }
+  }
+  if (cost.eacBasis === 'no_budget') {
+    return {
+      value: null,
+      label: 'no approved budget yet',
+      withheld: false,
+      over: null,
+    }
+  }
+  const over =
+    cost.bac === null || cost.bac === undefined
+      ? null
+      : cost.eac > cost.bac + 0.005
+  return {
+    value: cost.eac,
+    label: eacBasisLabel(cost.eacBasis) ?? EAC_NO_COST_PERFORMANCE,
+    withheld: false,
+    over,
+  }
 }
 
 export interface ForecastAction {

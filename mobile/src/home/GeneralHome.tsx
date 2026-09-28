@@ -7,11 +7,11 @@ import { AssignmentRow } from '@/components/AssignmentRow'
 import { Freshness } from '@/components/Freshness'
 import { HealthDimensions } from '@/components/HealthDimensions'
 import { EmptyState, ErrorState, SkeletonList, Text } from '@/design-system'
-import { Counts, QuickActions, Section } from '@/home/sections'
+import { Counts, Provenance, QuickActions, Section } from '@/home/sections'
 import { destinationForTarget, openOnWeb } from '@/navigation/links'
 import type { CaptureAction } from '@/navigation/roleNav'
 import { money } from '@/utilities/format'
-import { eacQualifier } from '@/utilities/forecast'
+import { eacQualifier, evCutoffLine, evCutoffZoneNote } from '@/utilities/forecast'
 
 const ratio = (v: number | null | undefined) => (v === null || v === undefined ? '—' : v.toFixed(2))
 
@@ -90,6 +90,10 @@ export function GeneralHome({ projectId, currency, actions, emphasis }: { projec
         <Section title={emphasis === 'commercial' ? 'The commercial position' : 'The programme'} action={{ title: 'Project', onPress: () => router.push('/project') }} testID="general-position">
           {emphasis === 'commercial' ? money_ : programme}
           {emphasis === 'commercial' ? programme : money_}
+          {/* The EV cutoff SPI and CPI were measured through, and the
+              server's note when the project has no zone of its own (D1). */}
+          {evCutoffLine(forecast.data) ? <Provenance>{evCutoffLine(forecast.data)}</Provenance> : null}
+          {evCutoffZoneNote(forecast.data) ? <Provenance>{evCutoffZoneNote(forecast.data)}</Provenance> : null}
         </Section>
       ) : null}
 

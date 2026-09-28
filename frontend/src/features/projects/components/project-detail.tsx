@@ -5,8 +5,13 @@ import { Link, useNavigate } from '@tanstack/react-router'
 import { formatShortDate } from '@/lib/dates'
 import { ProjectPermissionProvider } from '@/lib/permissions'
 import { useProjectRealtime } from '@/hooks/use-realtime'
+import { projectControlsGroup } from '@/components/layout/data/sidebar-data'
 import { Main } from '@/components/layout/main'
 import { useMyProjectPermissions } from '@/features/permissions/hooks/use-permissions'
+import {
+  scheduleHasWbs,
+  useScheduleWbsRows,
+} from '@/features/controls/structure/hooks/use-structure'
 import {
   useProject,
   useProjectParties,
@@ -25,6 +30,7 @@ import {
   type ModuleKey,
   type ModuleWithChildren,
 } from '../lib/project-modules'
+import { ControlsStrip } from './controls-strip'
 import { ProjectModuleBar } from './project-module-bar'
 import { ProjectSetupWizard } from './project-setup-wizard'
 import { ProjectStatusBadge } from './project-status-badge'
@@ -177,6 +183,12 @@ const CaptureHome = lazy(() =>
 type MenuChild = {
   key: string
   label: string
+  /**
+   * Where the entry opens when it is not a sub-tab of its own module: the
+   * Project Controls group lists the bill, the programme and the mapping
+   * together (§19), and most of those pages belong to other modules.
+   */
+  target?: { module: ModuleKey; child?: string }
 }
 
 type MenuItem = {
@@ -265,7 +277,28 @@ export function ProjectDetail({
       .length ?? 0
   const scheduleMilestonesCount =
     schedule?.activities?.filter((a) => a.isMilestone).length ?? 0
-  const hasWbs = (schedule?.revision?.wbs || []).length > 0
+  // The WBS tab is offered when the project has a canonical WbsNode tree —
+  // an in-product schedule's snapshot carries no WBS — or, for a project
+  // without one, when the revision snapshot carried a WBS (owner decision
+  // D3). Read only by someone offered the schedule.
+  const scheduleWbsRowsEnabled =
+    canLoadProjectModules &&
+    Boolean(permissionMatrix) &&
+    isModuleVisible(permissionMatrix, 'schedule')
+  const { data: scheduleWbsRows, isPending: scheduleWbsRowsPending } =
+    useScheduleWbsRows(projectId, { enabled: scheduleWbsRowsEnabled })
+  const hasWbs = scheduleHasWbs(scheduleWbsRows, schedule?.revision?.wbs)
+  // A link to the WBS tab waits for the schedule and the project's rows
+  // before the tab is judged not offered, so it is not sent to the Gantt
+  // while they load — nor before the project and the person's permissions,
+  // which enable those reads, have arrived. (Pending, not loading: in the
+  // render the rows query is first enabled it has not started fetching.)
+  const wbsSettling =
+    childSlug === 'wbs' &&
+    (!project ||
+      (!permissionMatrix && permissionsPending) ||
+      (scheduleLoading && !schedule) ||
+      (scheduleWbsRowsEnabled && scheduleWbsRowsPending))
 
   const menuItems = useMemo<MenuItem[]>(() => {
     const scheduleChildren: MenuChild[] = [
@@ -286,6 +319,27 @@ export function ProjectDetail({
     if (hasWbs) {
       scheduleChildren.splice(10, 0, { key: 'wbs', label: 'WBS' })
     }
+
+    // The Project Controls group (§19): Overview, Structure, Schedule, BOQ,
+    // Mapping, Progress, Cost, Forecast, Resources, Risks, Baselines. The
+    // group's own pages (structure, mapping) are its sub-tabs; every other
+    // entry opens the module that owns the page, and is offered only when
+    // that module is. Role shapes the list; the API decides what is allowed.
+    const controlsChildren: MenuChild[] = projectControlsGroup.items
+      .filter(
+        (entry) =>
+          isModuleVisible(permissionMatrix, entry.module) &&
+          (!entry.child || isChildVisible(permissionMatrix, entry.module, entry.child))
+      )
+      .map((entry) =>
+        entry.module === 'controls'
+          ? { key: entry.child ?? entry.key, label: entry.title }
+          : {
+              key: entry.key,
+              label: entry.title,
+              target: { module: entry.module, child: entry.child },
+            }
+      )
 
     return [
       { key: 'capture', label: 'Capture' },
@@ -363,10 +417,7 @@ export function ProjectDetail({
       {
         key: 'controls',
         label: 'Project Controls',
-        children: [
-          { key: 'structure', label: 'Structure' },
-          { key: 'mapping', label: 'Mapping' },
-        ],
+        children: controlsChildren,
       },
       { key: 'bim', label: 'BIM' },
       { key: 'activities', label: 'Activities' },
@@ -411,7 +462,10 @@ export function ProjectDetail({
   const childFor = useCallback(
     (module: ModuleWithChildren) => {
       const item = menuItems.find((entry) => entry.key === module)
-      const allowed = new Set(item?.children?.map((entry) => entry.key) ?? [])
+      // An entry that opens another module is not a sub-tab of this one.
+      const allowed = new Set(
+        item?.children?.filter((entry) => !entry.target).map((entry) => entry.key) ?? []
+      )
       const requested =
         module === visibleModule && childSlug && allowed.has(childSlug)
           ? childSlug
@@ -419,7 +473,7 @@ export function ProjectDetail({
       // the module's usual first tab, unless the policy hides it — then the first offered
       const fallback = allowed.has(DEFAULT_CHILD[module])
         ? DEFAULT_CHILD[module]
-        : (item?.children?.[0]?.key ?? DEFAULT_CHILD[module])
+        : (item?.children?.find((entry) => !entry.target)?.key ?? DEFAULT_CHILD[module])
       return requested ?? fallback
     },
     [childSlug, menuItems, visibleModule]
@@ -441,7 +495,7 @@ export function ProjectDetail({
     ? childState[visibleModule]
     : null
   useEffect(() => {
-    if (permissionsSettling || !menuItems.length) return
+    if (permissionsSettling || wbsSettling || !menuItems.length) return
     const moduleMismatch = visibleModule !== requestedModule
     const childMismatch =
       !moduleMismatch &&
@@ -466,6 +520,7 @@ export function ProjectDetail({
     }
   }, [
     permissionsSettling,
+    wbsSettling,
     menuItems.length,
     visibleModule,
     requestedModule,
@@ -497,6 +552,22 @@ export function ProjectDetail({
     [goTo]
   )
 
+  // A menu entry either is a sub-tab of its module or names the module that
+  // owns the page (the Project Controls group); both end in one address.
+  const selectChild = useCallback(
+    (module: ModuleKey, child: string) => {
+      const entry = menuItems
+        .find((item) => item.key === module)
+        ?.children?.find((candidate) => candidate.key === child)
+      if (entry?.target) {
+        goTo(entry.target.module, entry.target.child ?? null)
+        return
+      }
+      goTo(module, child)
+    },
+    [goTo, menuItems]
+  )
+
   const handleModuleSelect = (item: MenuItem) => {
     if (!item.children || !isModuleWithChildren(item.key)) {
       goTo(item.key)
@@ -505,9 +576,17 @@ export function ProjectDetail({
     goTo(item.key, childState[item.key])
   }
 
+  // Whether this person is offered the page a setup or strip target opens:
+  // the strip and the wizard draw a target that is not offered without its
+  // link, rather than a button that does nothing.
+  const canSetupNavigate = (target: ProjectSetupTarget) => {
+    const module = moduleFromSlug(target.module)
+    return Boolean(module && menuItems.some((item) => item.key === module))
+  }
+
   const handleSetupNavigate = (target: ProjectSetupTarget) => {
     const module = moduleFromSlug(target.module)
-    if (!module || !menuItems.some((item) => item.key === module)) return
+    if (!module || !canSetupNavigate(target)) return
     goTo(
       module,
       target.child && isModuleWithChildren(module) ? target.child : null
@@ -717,7 +796,7 @@ export function ProjectDetail({
         return (
           <div className='space-y-4'>
             <NeedsYouPanel projectId={projectId} />
-            <HealthDashboard projectId={projectId} />
+            <HealthDashboard projectId={projectId} currency={project?.currency} />
             <ProjectOverview project={project} parties={activeProjectParties} />
           </div>
         )
@@ -741,12 +820,7 @@ export function ProjectDetail({
               : undefined
           }
           onSelectModule={handleModuleSelect}
-          onSelectChild={(module: ModuleKey, child: string) =>
-            navigate({
-              to: '/projects/$projectId/$module/$child',
-              params: { projectId, module: slugForModule(module), child },
-            })
-          }
+          onSelectChild={selectChild}
         />
       )}
 
@@ -801,6 +875,24 @@ export function ProjectDetail({
               <ProjectStatusBadge status={project.status} />
             </div>
 
+            {/* The Overview is the project landing (L3): the controls strip
+                first — readiness, BOQ revision, coverage, schedule, progress
+                method, every figure from the readiness check's derived
+                services — then the setup checklist under it. */}
+            {visibleModule === 'overview' && (
+              <ControlsStrip
+                projectId={projectId}
+                readiness={setupReadiness}
+                isLoading={setupReadinessLoading}
+                currency={project.currency}
+                onNavigate={handleSetupNavigate}
+                canNavigate={canSetupNavigate}
+                // The strip mounts outside the module guard below; its
+                // figure requests wait for the permission matrix the same way.
+                permissionsSettling={permissionsSettling}
+              />
+            )}
+
             {/* Setup Readiness is a project setup checklist, so it belongs on
                 Overview. Carrying it into Budget, Gantt or Drawings would take
                 working space on every screen to say the same thing. */}
@@ -808,7 +900,9 @@ export function ProjectDetail({
               <ProjectSetupWizard
                 readiness={setupReadiness}
                 isLoading={setupReadinessLoading}
+                currency={project.currency}
                 onNavigate={handleSetupNavigate}
+                canNavigate={canSetupNavigate}
                 collapsed={readinessCollapsed}
                 onCollapsedChange={setReadinessCollapsed}
               />

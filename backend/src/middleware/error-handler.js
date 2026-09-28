@@ -40,9 +40,11 @@ const isPrismaKnownError = (err) =>
  *    message was written for the client says so with `err.expose = true`.
  * 2. Multer: its messages are fixed library text; an oversized file is a 413,
  *    anything else a 400 — today both were 500s.
- * 3. body-parser / http-errors 4xx marked `expose`: malformed JSON, a body over
- *    the limit. The status and message are meant for the client; the code is
- *    taken from the status.
+ * 3. body-parser / http-errors 4xx marked `expose`: a body over the limit.
+ *    The status and message are meant for the client; the code is taken
+ *    from the status. Malformed JSON is 400 VALIDATION_ERROR "The request
+ *    body is not valid JSON." — the parser's own sentence quotes positions
+ *    and tokens a client cannot act on.
  * 4. Prisma P2002 (unique) and P2025 (record not found) in every environment:
  *    they are the client's conflict or missing record, not a server fault.
  *    The Prisma text is kept only outside production, for developers.
@@ -69,6 +71,11 @@ const toClientError = (err) => {
   }
 
   const status = statusOf(err);
+  // A body that is not JSON: said in the client's terms, never as the
+  // parser's own sentence ("Expected property name or '}' in JSON at …").
+  if (err?.type === "entity.parse.failed" && status === 400) {
+    return new HttpError(400, "VALIDATION_ERROR", "The request body is not valid JSON.");
+  }
   if (err?.expose === true && status >= 400 && status < 500) {
     return new HttpError(status, null, err.message);
   }

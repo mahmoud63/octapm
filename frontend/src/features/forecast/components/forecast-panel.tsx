@@ -9,6 +9,8 @@ import {
   Sparkles,
 } from 'lucide-react'
 import { toast } from 'sonner'
+import { evCutoffNote, formatEvCutoff } from '@/lib/ev-cutoff'
+import { capitalise, eacIsBudgetFallback } from '@/lib/eac-basis'
 import { FINANCIAL_TERMS } from '@/lib/financial-terms'
 import { getServerErrorMessage } from '@/lib/handle-server-error'
 import { useCanPerform } from '@/lib/permissions'
@@ -19,6 +21,7 @@ import { Button } from '@/components/ui/button'
 import { AiRunFeedback } from '@/features/assistant/components/ai-run-feedback'
 import { workspaceLink } from '@/features/workflows/hooks/use-workflow-engine'
 import {
+  eacStatement,
   useExplainForecast,
   useForecast,
   useRunForecastAction,
@@ -58,12 +61,15 @@ function Kpi({
   label,
   value,
   sub,
+  note,
   level,
   testId,
 }: {
   label: string
   value: string
   sub?: string | null
+  /** The server's own reason the figure is what it is, beside it. */
+  note?: string | null
   level?: ForecastLevel
   testId?: string
 }) {
@@ -82,6 +88,11 @@ function Kpi({
         {value}
       </p>
       {sub ? <p className='text-xs text-muted-foreground'>{sub}</p> : null}
+      {note ? (
+        <p className='mt-1 text-[11px] text-muted-foreground' data-testid={testId ? `${testId}-note` : undefined}>
+          {note}
+        </p>
+      ) : null}
     </div>
   )
 }
@@ -229,13 +240,13 @@ function ActivityRow({
                 })}
               </p>
             )}
-            {activity.cost.overrun > 0 && (
+            {(activity.cost.overrun ?? 0) > 0 && (
               <p className='mt-1 text-muted-foreground'>
                 Cost: {money(activity.cost.actual)} spent of{' '}
                 {money(activity.cost.budget)}, projected{' '}
                 {money(activity.cost.projected)} ({money(activity.cost.overrun)}{' '}
                 over) —{' '}
-                {activity.cost.reasons.join('; ') || activity.cost.basis}
+                {activity.cost.reasons?.join('; ') || activity.cost.basis}
               </p>
             )}
           </td>
@@ -427,6 +438,55 @@ export function ForecastPanel({ projectId }: { projectId: string }) {
   }
 
   const { schedule, cost, summary } = forecast
+  // The cost view's money is withheld from someone who may read neither the
+  // BOQ nor the cost module (§12): each amount then reads as a dash, and the
+  // projected-cost card says why instead of calling the cost within budget.
+  const costFiguresShown = cost.budget !== undefined
+  // The business-rule EAC (owner decision D2): the official EV report's —
+  // revised BAC / CPI, or with no CPI the revised BAC itself, which says
+  // what it is (Phase 22A). The Overview's "Forecast at completion" is this
+  // figure with this label, and links here.
+  const eac = eacStatement(forecast)
+  // The EAC is the revised budget handed back — no CPI, or CPI 0 (cost
+  // spent, nothing earned) — not a projection: the server's note says why.
+  const budgetFallback = costFiguresShown && eacIsBudgetFallback(cost.eacBasis)
+  const cpiZero = costFiguresShown && cost.eacBasis === 'budget_cpi_zero'
+  const cpiNote = budgetFallback
+    ? (forecast.dataQuality.find((note) => note.startsWith('CPI ')) ?? null)
+    : null
+  // When the projected cost is that same budget fallback, it is said to be
+  // the budget, never "within the budget" as if a projection had cleared it.
+  const projectedIsBudgetFallback =
+    budgetFallback &&
+    cost.eac != null &&
+    Math.abs((cost.projected ?? 0) - cost.eac) < 0.005
+  // No approved budget: there is no EAC, and the projected cost the server
+  // gives is only the zero budgets summed — not a projection. Said as a dash.
+  const noBudget =
+    costFiguresShown && (cost.eacBasis === 'no_budget' || !((cost.budget ?? 0) > 0))
+  // The server's reasons beside SPI and CPI: why one is missing or 0, and a
+  // cutoff still ahead (PV to the cutoff, EV and AC to today).
+  const indexNotes = forecast.dataQuality.filter(
+    (note) =>
+      note.startsWith('SPI ') ||
+      note.startsWith('CPI ') ||
+      note.startsWith("This period's cutoff has not been reached")
+  )
+  // The projected cost is max(EAC, bottom-up): said, so the two figures are
+  // never read as disagreeing.
+  const projectedRelation = !costFiguresShown || noBudget
+    ? null
+    : cost.eac == null
+      ? `Projected cost = the bottom-up ${money(cost.bottomUp)} (no EAC yet).`
+      : Math.abs((cost.projected ?? 0) - cost.eac) < 0.005
+        ? Math.abs((cost.bottomUp ?? 0) - cost.eac) < 0.005
+          ? 'Projected cost = max(EAC, bottom-up): both are this figure.'
+          : `Projected cost = max(EAC, bottom-up): the EAC, above the bottom-up ${money(cost.bottomUp)}.`
+        : `Projected cost = max(EAC, bottom-up): the bottom-up, above the EAC ${money(cost.eac)}.`
+  // The server's note when the project has no zone of its own: shown beside
+  // the cutoff, so not repeated in the data-quality list.
+  const cutoffNote = evCutoffNote(forecast.earnedValueCutoff)
+  const otherDataQuality = forecast.dataQuality.filter((note) => note !== cutoffNote)
   return (
     <div className='space-y-4' data-testid='uat-forecast'>
       <div className='flex flex-wrap items-center gap-2'>
@@ -437,6 +497,21 @@ export function ForecastPanel({ projectId }: { projectId: string }) {
             burn rate — as of {formatDate(forecast.asOf)}. Nothing here is a
             model guess; the explanation below is.
           </p>
+          {forecast.earnedValueCutoff?.cutoffDate ? (
+            <p className='text-xs text-muted-foreground'>
+              SPI, CPI and EAC through the EV cutoff,{' '}
+              <span data-testid='uat-forecast-ev-cutoff'>
+                {formatEvCutoff(forecast.earnedValueCutoff)}
+              </span>
+              .
+            </p>
+          ) : null}
+          {cutoffNote && (
+            // The server's sentence when the project has no zone of its own.
+            <p className='text-xs text-muted-foreground' data-testid='uat-forecast-ev-cutoff-zone-note'>
+              {cutoffNote}
+            </p>
+          )}
         </div>
         <div className='ml-auto flex gap-2'>
           <Button
@@ -467,7 +542,7 @@ export function ForecastPanel({ projectId }: { projectId: string }) {
         </div>
       </div>
 
-      <div className='grid gap-3 sm:grid-cols-2 lg:grid-cols-5'>
+      <div className='grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6'>
         <Kpi
           label='Projected finish'
           value={formatDate(schedule.projectedFinish)}
@@ -496,6 +571,8 @@ export function ForecastPanel({ projectId }: { projectId: string }) {
               ? 'Finish projected from SPI'
               : 'Finish projected from activities'
           }
+          note={indexNotes.length > 0 ? indexNotes.join(' ') : null}
+          testId='uat-forecast-indices'
           level={
             (schedule.spi !== null && schedule.spi < 0.9) ||
             (schedule.cpi !== null && schedule.cpi < 0.9)
@@ -504,14 +581,29 @@ export function ForecastPanel({ projectId }: { projectId: string }) {
           }
         />
         <Kpi
+          label='Estimate at completion (EAC)'
+          value={money(eac.value)}
+          sub={eac.label}
+          note={cpiNote}
+          level={eac.over ? 'medium' : undefined}
+          testId='uat-forecast-eac'
+        />
+        <Kpi
           label='Projected cost'
-          value={money(cost.projected)}
+          value={noBudget ? '—' : money(cost.projected)}
           sub={
-            cost.overrun > 0
-              ? `${money(cost.overrun)} over the ${money(cost.budget)} budget${cost.overrunPct !== null ? ` (${cost.overrunPct}%)` : ''}`
-              : `Within the ${money(cost.budget)} budget`
+            !costFiguresShown
+              ? 'Cost figures are not available to you'
+              : noBudget
+                ? 'No approved budget to project from'
+                : (cost.overrun ?? 0) > 0
+                ? `${money(cost.overrun)} over the ${money(cost.budget)} budget${cost.overrunPct != null ? ` (${cost.overrunPct}%)` : ''}`
+                : projectedIsBudgetFallback
+                  ? capitalise(eac.label)
+                  : `Within the ${money(cost.budget)} budget`
           }
-          level={summary?.costLevel}
+          note={projectedRelation}
+          level={noBudget ? undefined : cpiZero ? 'medium' : summary?.costLevel}
           testId='uat-forecast-cost'
         />
         <Kpi
@@ -617,7 +709,7 @@ export function ForecastPanel({ projectId }: { projectId: string }) {
                       <td className='px-2 py-1.5'>
                         <span className='font-medium'>{activity.name}</span>
                         <span className='block text-xs text-muted-foreground'>
-                          {activity.cost.reasons.join('; ') ||
+                          {activity.cost.reasons?.join('; ') ||
                             `projected from ${activity.cost.basis}`}
                         </span>
                       </td>
@@ -632,9 +724,11 @@ export function ForecastPanel({ projectId }: { projectId: string }) {
                       </td>
                       <td className='px-2 py-1.5 text-right text-destructive tabular-nums'>
                         {money(activity.cost.overrun)}
-                        <span className='block text-[10px]'>
-                          {activity.cost.overrunPct}%
-                        </span>
+                        {activity.cost.overrunPct != null && (
+                          <span className='block text-[10px]'>
+                            {activity.cost.overrunPct}%
+                          </span>
+                        )}
                       </td>
                     </tr>
                   ))}
@@ -702,7 +796,7 @@ export function ForecastPanel({ projectId }: { projectId: string }) {
                       </td>
                       <td className='px-2 py-1.5 text-right text-destructive tabular-nums'>
                         {money(line.overrun)}
-                        {line.overrunPct !== null && (
+                        {line.overrunPct != null && (
                           <span className='block text-[10px]'>
                             {line.overrunPct}%
                           </span>
@@ -717,13 +811,13 @@ export function ForecastPanel({ projectId }: { projectId: string }) {
         </section>
       </div>
 
-      {forecast.dataQuality.length > 0 && (
+      {otherDataQuality.length > 0 && (
         <Alert data-testid='uat-forecast-data-quality'>
           <AlertTriangle className='h-4 w-4' />
           <AlertTitle>What would sharpen this forecast</AlertTitle>
           <AlertDescription>
             <ul className='list-disc space-y-0.5 pl-4 text-xs'>
-              {forecast.dataQuality.map((note, index) => (
+              {otherDataQuality.map((note, index) => (
                 <li key={index}>{note}</li>
               ))}
             </ul>

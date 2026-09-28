@@ -111,18 +111,33 @@ export interface Forecast {
     criticalDriver: { id: string; name: string; slipDays: number | null } | null
     counts: { activities: number; open: number; complete: number; critical: number; atRisk: { high: number; medium: number; low: number } }
   } | null
+  /** The money is present only for a reader of the BOQ or the cost module
+   * (§12); for anyone else it is absent — never 0 — and the counts stay. */
   cost: {
-    budget: number | null
-    eac: number | null
-    projected: number | null
-    overrun: number | null
-    overrunPct: number | null
-    actual: number | null
+    budget?: number | null
+    eac?: number | null
+    projected?: number | null
+    overrun?: number | null
+    overrunPct?: number | null
+    actual?: number | null
     counts?: { atRisk: { high: number; medium: number; low: number }; lines: number }
   } | null
   summary: { scheduleLevel: string | null; costLevel: string | null } | null
   /** The server's plain-language notes on what its figures cannot yet include. */
   dataQuality?: string[]
+  /**
+   * The earned-value cutoff SPI, CPI and the EAC were measured through: the
+   * end of `cutoffLocalDate` in `timeZone` (the project's, else the
+   * organisation's, else UTC); `timeZoneNote` is the server's sentence when
+   * the project has no zone of its own.
+   */
+  earnedValueCutoff?: {
+    cutoffDate: string | null
+    cutoffLocalDate: string | null
+    timeZone: string | null
+    timeZoneSource?: string | null
+    timeZoneNote?: string | null
+  } | null
 }
 
 export interface ProjectHealthRow {

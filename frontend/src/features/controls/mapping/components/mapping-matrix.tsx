@@ -53,6 +53,11 @@ type Props = {
   mode: CellMode
   canCreate: boolean
   canUpdate: boolean
+  /**
+   * What to say when no activity is active yet: the step the schedule is
+   * waiting on (its approval or its activation) when a revision is staged.
+   */
+  emptyScheduleMessage?: string
 }
 
 const UNGROUPED = '__none__'
@@ -104,6 +109,7 @@ export function MappingMatrix({
   mode,
   canCreate,
   canUpdate,
+  emptyScheduleMessage,
 }: Props) {
   const createAllocation = useCreateAllocationDraft(projectId)
   const updateAllocation = useUpdateAllocationDraft(projectId)
@@ -266,7 +272,8 @@ export function MappingMatrix({
   if (columns.length === 0) {
     return (
       <div className='p-6 text-sm text-muted-foreground' data-testid='uat-mapping-matrix'>
-        Create or import schedule activities before mapping BOQ rows to them.
+        {emptyScheduleMessage ??
+          'Create or import schedule activities before mapping BOQ rows to them.'}
       </div>
     )
   }
