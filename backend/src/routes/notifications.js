@@ -84,6 +84,7 @@ router.get(
     const data = await notificationService.getNotificationSummary({
       orgId: req.user.orgId,
       userId: req.user.id,
+      viewer: req.user,
     });
     return sendSuccess(res, data);
   }),
@@ -151,6 +152,7 @@ router.get(
     const data = await notificationService.listNotifications({
       orgId: req.user.orgId,
       userId: req.user.id,
+      viewer: req.user,
       query: req.query,
     });
     return sendSuccess(res, data);
@@ -205,6 +207,7 @@ router.get(
     const data = await notificationService.getNotificationForUser({
       orgId: req.user.orgId,
       userId: req.user.id,
+      viewer: req.user,
       notificationId: req.params.notificationId,
     });
     return sendSuccess(res, data);
@@ -222,6 +225,7 @@ router.patch(
     const data = await notificationService.markNotificationRead({
       orgId: req.user.orgId,
       userId: req.user.id,
+      viewer: req.user,
       notificationId: req.params.notificationId,
       read: req.body.read !== false,
     });
@@ -236,6 +240,7 @@ router.patch(
     const data = await notificationService.archiveNotification({
       orgId: req.user.orgId,
       userId: req.user.id,
+      viewer: req.user,
       notificationId: req.params.notificationId,
     });
     return sendSuccess(res, data);

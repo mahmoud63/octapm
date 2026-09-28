@@ -92,6 +92,8 @@ describe("notification routes", () => {
     expect(mockNotificationService.listNotifications).toHaveBeenCalledWith({
       orgId: "org-1",
       userId: "user-1",
+      // The reader, so a stored row is re-rendered as they may receive it.
+      viewer: expect.objectContaining({ id: "user-1", orgId: "org-1" }),
       query: expect.objectContaining({
         status: "unread",
         category: "approval",
@@ -148,6 +150,7 @@ describe("notification routes", () => {
       userId: "user-1",
       notificationId,
       read: true,
+      viewer: expect.objectContaining({ id: "user-1", orgId: "org-1" }),
     });
   });
 

@@ -221,7 +221,12 @@ const workspaceFor = async ({ orgId, userId }) => {
  */
 const buildPushPayload = async ({ notification, userId }) => {
   const workspace = await workspaceFor({ orgId: notification.orgId, userId });
-  return workspace.revoked ? null : payloadFor(notification, workspace);
+  if (workspace.revoked) return null;
+  // The push says what the in-app row says: a row stored before the
+  // no-identifier rule is re-rendered (notification.service), never sent
+  // with a raw id in its title or body.
+  const { readableNotification } = require("./notification.service");
+  return payloadFor(await readableNotification(notification), workspace);
 };
 
 /** Test hook: forget the remembered slugs. */

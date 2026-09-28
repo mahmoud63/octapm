@@ -671,6 +671,10 @@ const createNotifications = async ({
   entityId = null,
   dedupeKeyBase = null,
   metadata = {},
+  // Optional: (recipient) => ({ title, message }) for the one recipient, when
+  // the words depend on what that person may read. `title` and `message`
+  // stay the words everyone may read (the realtime badge event carries them).
+  personalize = null,
 }) => {
   if (!ensureNotificationModels(tx) || !event || !title || !message) {
     return { created: 0, recipients: [] };
@@ -719,6 +723,7 @@ const createNotifications = async ({
     if (!preference.inAppEnabled && !preference.emailEnabled) continue;
 
     try {
+      const own = personalize ? await personalize(recipient) : null;
       const notification = await tx.notification.create({
         data: {
           orgId,
@@ -728,8 +733,8 @@ const createNotifications = async ({
           type,
           category,
           event,
-          title,
-          message,
+          title: own?.title || title,
+          message: own?.message || message,
           priority,
           inAppVisible: preference.inAppEnabled,
           dueAt: dueAt ? new Date(dueAt) : null,
@@ -791,7 +796,7 @@ const createNotifications = async ({
       action: event,
       actorId,
       recipientUserIds: created.map((row) => row.recipientUserId),
-      payload: { count: created.length, category, title, event },
+      payload: { count: created.length, category, title: withoutIdentifiers(title), event },
     });
   }
 
@@ -801,24 +806,174 @@ const createNotifications = async ({
   };
 };
 
-const recordDisplay = (record = {}) =>
-  record.ref ||
-  record.period ||
-  record.label ||
-  record.title ||
-  record.subject ||
-  record.description ||
-  record.eventName ||
-  record.id;
+// ─── What a notification calls a record ─────────────────────────────────────
+//
+// A notification names its record in words a person reads: a ref, a title,
+// an activity code. A database identifier is never the fallback — not in the
+// title, not in the message, on the web or in the field app (they read the
+// same row). A record with nothing readable is named by its kind alone:
+// "BOQ allocation needs approval". The link (actionUrl) still carries the id;
+// that is where it belongs.
 
-const recordSubject = (record = {}) =>
-  record.subject ||
-  record.title ||
-  record.description ||
-  record.eventName ||
-  record.period ||
-  record.ref ||
-  "Workflow record";
+// A UUID-shaped token anywhere in a text, and the placeholder the subject
+// once fell back to. Either in a stored row means the row was written before
+// this rule and is re-rendered when it is read (the row itself is not
+// rewritten).
+const IDENTIFIER_TOKEN = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
+const IDENTIFIER_TOKENS = new RegExp(IDENTIFIER_TOKEN.source, "gi");
+const LEGACY_PLACEHOLDER = "Workflow record";
+
+/** A string worth showing: non-empty once trimmed, and not an identifier. */
+const readable = (value) => {
+  if (typeof value !== "string" && typeof value !== "number") return null;
+  const text = String(value).trim();
+  return text && !IDENTIFIER_TOKEN.test(text) ? text : null;
+};
+
+const firstReadable = (...values) => {
+  for (const value of values) {
+    const text = readable(value);
+    if (text) return text;
+  }
+  return null;
+};
+
+const activityCodePhrase = (activity) => {
+  const code = readable(activity?.activityCode);
+  return code ? `Activity ${code}` : null;
+};
+
+/**
+ * Record types with no human field of their own, and task (whose `label`
+ * column is a kind, "action", not a name): what to read the words from,
+ * and the words. `display` follows the label in a title ("BOQ allocation
+ * for Activity A120 needs approval"); `subject` names the record in the
+ * message. `include` is what loading the record adds for them.
+ *
+ * `access.boq` is whether the reader may read the BOQ on the record's
+ * project (utils/boq-figures: the bill's own records — its rows, revisions
+ * and allocations — are the bill's). A BOQ row's description is not a
+ * figure, but it is the bill's content, so it names an allocation only for
+ * a reader of the BOQ; anyone else reads the activity code, or the kind.
+ */
+const RECORD_WORDS = Object.freeze({
+  activity_boq_allocation: {
+    include: {
+      activity: { select: { activityCode: true } },
+      boqItem: { select: { description: true } },
+    },
+    words: (record, access) => {
+      const subject =
+        activityCodePhrase(record?.activity) ||
+        (access.boq ? readable(record?.boqItem?.description) : null);
+      return { display: subject ? `for ${subject}` : null, subject };
+    },
+  },
+  activity_cost_loading: {
+    include: { activity: { select: { activityCode: true, name: true } } },
+    words: (record) => {
+      const subject = activityCodePhrase(record?.activity) || readable(record?.activity?.name);
+      return { display: subject ? `for ${subject}` : null, subject };
+    },
+  },
+  boq_revision: {
+    words: (record) => {
+      const label = readable(record?.label);
+      const number = Number.isInteger(record?.revisionNumber) ? record.revisionNumber : null;
+      return {
+        display: label || (number !== null ? String(number) : null),
+        subject: label || (number !== null ? `Revision ${number}` : null),
+      };
+    },
+  },
+  schedule_revision: {
+    words: (record) => {
+      const label = readable(record?.label);
+      return { display: label, subject: label };
+    },
+  },
+  task: {
+    words: (record) => {
+      const title = readable(record?.title);
+      return { display: title, subject: title };
+    },
+  },
+});
+
+/** Every other record type names itself: ref, period, title, subject… — never its id. */
+const genericWords = (record = {}) => ({
+  display: firstReadable(
+    record.ref,
+    record.period,
+    record.label,
+    record.title,
+    record.subject,
+    record.description,
+    record.eventName,
+  ),
+  subject: firstReadable(
+    record.subject,
+    record.title,
+    record.description,
+    record.eventName,
+    record.period,
+    record.ref,
+  ),
+});
+
+const NO_BOQ = Object.freeze({ boq: false });
+const WITH_BOQ = Object.freeze({ boq: true });
+
+/** The words a notification uses for a record, as this reader may receive them. */
+const recordWords = (recordType, record, access = NO_BOQ) => {
+  const source = record || {};
+  const words = RECORD_WORDS[recordType]?.words;
+  return words ? words(source, access) : genericWords(source);
+};
+
+const sameWords = (a, b) => a.display === b.display && a.subject === b.subject;
+
+const recordDisplay = (recordType, record, access) => recordWords(recordType, record, access).display;
+
+const recordSubject = (recordType, record, access) => recordWords(recordType, record, access).subject;
+
+/** Takes any identifier (and the old placeholder) out of a text, and tidies what is left. */
+const withoutIdentifiers = (text) => {
+  if (typeof text !== "string") return text;
+  if (!IDENTIFIER_TOKEN.test(text) && !text.includes(LEGACY_PLACEHOLDER)) return text;
+  return text
+    .replace(IDENTIFIER_TOKENS, "")
+    .split(LEGACY_PLACEHOLDER)
+    .join("")
+    .replace(/:\s*\./g, ".")
+    .replace(/[ \t]{2,}/g, " ")
+    .replace(/ +([.,;:!?)])/g, "$1")
+    .replace(/\( *\)/g, "")
+    .trim();
+};
+
+/**
+ * Whether this person may read the BOQ on this project, decided the way the
+ * project's own routes decide it (template, role and party; utils/boq-figures).
+ * `viewer` is the signed-in person when it is them; otherwise their
+ * principal in the workspace is resolved. Anything unknown is a no.
+ */
+const mayReadBoq = async ({ orgId, userId, projectId, viewer = null }) => {
+  if (!orgId || !userId || !projectId) return false;
+  try {
+    const { resolveRequestPrincipal } = require("./membership.service");
+    const { requestForProject } = require("../middleware/project-access");
+    const { canReadBoq } = require("../utils/boq-figures");
+    const user =
+      viewer && viewer.id === userId && viewer.orgId === orgId
+        ? viewer
+        : await resolveRequestPrincipal({ tx: prisma, userId, orgId });
+    if (!user) return false;
+    return canReadBoq(await requestForProject({ user }, projectId));
+  } catch {
+    return false;
+  }
+};
 
 // Opens the record's own workspace module with the record pre-selected
 // (module routes, OCTA-FE-ROUTES-008).
@@ -873,7 +1028,7 @@ const workflowCategory = ({
 };
 
 const workflowTitle = ({ label, display, action }) => {
-  const base = `${label} ${display}`;
+  const base = display ? `${label} ${display}` : label;
   const titles = {
     created: `${base} assigned`,
     submitted: `${base} needs approval`,
@@ -891,15 +1046,22 @@ const workflowTitle = ({ label, display, action }) => {
   return titles[action] || `${base} updated`;
 };
 
-const workflowMessage = ({ record, event, label }) => {
-  const subject = recordSubject(record);
+/**
+ * The message's first sentence, naming the record: "BOQ allocation:
+ * Activity A120." — or, with nothing readable to name it by, the title
+ * itself ("BOQ allocation needs approval.").
+ */
+const subjectSentence = ({ label, subject, title }) =>
+  subject ? `${label}: ${subject}.` : `${title}.`;
+
+const workflowMessage = ({ subject, title, event, label }) => {
   const comment = trim(event.comment || event.reason);
   const statusText =
     event.toStatus && event.fromStatus !== event.toStatus
       ? ` Status moved to ${event.toStatus}.`
       : "";
   const commentText = comment ? ` ${comment}` : "";
-  return `${label}: ${subject}.${statusText}${commentText}`.trim();
+  return `${subjectSentence({ label, subject, title })}${statusText}${commentText}`.trim();
 };
 
 const loadWorkflowRecord = async ({ tx, projectId, recordType, recordId }) => {
@@ -907,10 +1069,30 @@ const loadWorkflowRecord = async ({ tx, projectId, recordType, recordId }) => {
   const model = config?.model ? tx?.[config.model] : null;
   if (!config || !model?.findFirst) return { config, record: null };
 
+  const include = RECORD_WORDS[recordType]?.include;
   const record = await model.findFirst({
     where: { id: recordId, projectId },
+    ...(include ? { include } : {}),
   });
   return { config, record };
+};
+
+/** A workflow notification's title and message, from the words a reader may receive. */
+const workflowTexts = ({ config, words, workflowEvent }) => {
+  const title = workflowTitle({
+    label: config.label,
+    display: words.display,
+    action: workflowEvent.action,
+  });
+  return {
+    title,
+    message: workflowMessage({
+      subject: words.subject,
+      title,
+      event: workflowEvent,
+      label: config.label,
+    }),
+  };
 };
 
 const createWorkflowNotifications = async ({ tx = prisma, workflowEvent }) => {
@@ -939,7 +1121,16 @@ const createWorkflowNotifications = async ({ tx = prisma, workflowEvent }) => {
     recordConfig: config,
     assignmentRefs,
   });
-  const display = recordDisplay(record || workflowEvent.metadata || {});
+  // Everyone receives the words anyone may read; where a BOQ row's
+  // description is the only readable name, a reader of the BOQ receives it
+  // and everyone else the kind alone (RECORD_WORDS).
+  const source = record || workflowEvent.metadata || {};
+  const plainWords = recordWords(workflowEvent.recordType, source, NO_BOQ);
+  const boqWords = recordWords(workflowEvent.recordType, source, WITH_BOQ);
+  const plain = workflowTexts({ config, words: plainWords, workflowEvent });
+  const withBoq = sameWords(plainWords, boqWords)
+    ? null
+    : workflowTexts({ config, words: boqWords, workflowEvent });
 
   return createNotifications({
     tx,
@@ -951,16 +1142,18 @@ const createWorkflowNotifications = async ({ tx = prisma, workflowEvent }) => {
     type: "workflow",
     category,
     event: `workflow.${workflowEvent.action}`,
-    title: workflowTitle({
-      label: config.label,
-      display,
-      action: workflowEvent.action,
-    }),
-    message: workflowMessage({
-      record: record || workflowEvent.metadata || {},
-      event: workflowEvent,
-      label: config.label,
-    }),
+    title: plain.title,
+    message: plain.message,
+    personalize: withBoq
+      ? async (recipient) =>
+          (await mayReadBoq({
+            orgId: workflowEvent.orgId,
+            userId: recipient.id,
+            projectId: workflowEvent.projectId,
+          }))
+            ? withBoq
+            : plain
+      : null,
     priority: isApprovalRequest ? "high" : "normal",
     actionUrl: actionUrlFor({
       projectId: workflowEvent.projectId,
@@ -1041,7 +1234,7 @@ const notificationWhereForStatus = (where, status) => {
   }
 };
 
-const listNotifications = async ({ orgId, userId, query = {} }) => {
+const listNotifications = async ({ orgId, userId, query = {}, viewer = null }) => {
   const listQuery = normalizeListQuery(query, {
     allowedSorts: ["created"],
     defaultSortBy: "created",
@@ -1076,7 +1269,7 @@ const listNotifications = async ({ orgId, userId, query = {} }) => {
   });
   const page = toCursorPage(rows, listQuery.limit);
   return {
-    rows: page.rows.map(serializeNotification),
+    rows: (await readableNotifications(page.rows, { viewer })).map(serializeNotification),
     pagination: page.pagination,
   };
 };
@@ -1104,7 +1297,7 @@ const getNotificationForUser = async ({ orgId, userId, notificationId }) => {
   return notification;
 };
 
-const getNotificationSummary = async ({ orgId, userId }) => {
+const getNotificationSummary = async ({ orgId, userId, viewer = null }) => {
   const [unread, read, archived, recent] = await Promise.all([
     prisma.notification.count({
       where: {
@@ -1148,7 +1341,7 @@ const getNotificationSummary = async ({ orgId, userId }) => {
     unread,
     read,
     archived,
-    recent: recent.map(serializeNotification),
+    recent: (await readableNotifications(recent, { viewer })).map(serializeNotification),
   };
 };
 
@@ -1157,6 +1350,7 @@ const markNotificationRead = async ({
   userId,
   notificationId,
   read = true,
+  viewer = null,
 }) => {
   await getNotificationForUser({ orgId, userId, notificationId });
   const notification = await prisma.notification.update({
@@ -1166,10 +1360,10 @@ const markNotificationRead = async ({
       deliveryAttempts: { orderBy: [{ createdAt: "desc" }], take: 3 },
     },
   });
-  return serializeNotification(notification);
+  return serializeNotification(await readableNotification(notification, { viewer }));
 };
 
-const archiveNotification = async ({ orgId, userId, notificationId }) => {
+const archiveNotification = async ({ orgId, userId, notificationId, viewer = null }) => {
   await getNotificationForUser({ orgId, userId, notificationId });
   const notification = await prisma.notification.update({
     where: { id: notificationId },
@@ -1178,7 +1372,7 @@ const archiveNotification = async ({ orgId, userId, notificationId }) => {
       deliveryAttempts: { orderBy: [{ createdAt: "desc" }], take: 3 },
     },
   });
-  return serializeNotification(notification);
+  return serializeNotification(await readableNotification(notification, { viewer }));
 };
 
 const markAllRead = async ({ orgId, userId }) => {
@@ -1276,7 +1470,9 @@ const processPendingEmailDeliveries = async ({
     // dies before recording the outcome the row is picked up again later.
     if (!(await claimDeliveryAttempt(attempt, now))) continue;
     result.processed += 1;
-    const notification = attempt.notification;
+    // The email says what the in-app row says, re-rendered if it was stored
+    // before the no-identifier rule.
+    const notification = attempt.notification ? await readableNotification(attempt.notification) : null;
     const to = notification?.recipient?.email;
 
     if (!notification || !to) {
@@ -1403,14 +1599,143 @@ const retryNotificationEmail = async ({ orgId, userId, notificationId }) => {
   return { queued: true, delivery };
 };
 
-const dueRecordTitle = ({ config, record, event }) =>
-  `${config.label} ${recordDisplay(record)} ${event === "overdue" ? "is overdue" : "is due soon"}`;
+const dueTitle = ({ label, display, event }) =>
+  `${display ? `${label} ${display}` : label} ${event === "overdue" ? "is overdue" : "is due soon"}`;
 
-const dueRecordMessage = ({ config, record, dueAt, event }) => {
+const dueRecordTitle = ({ config, recordType, record, event }) =>
+  dueTitle({ label: config.label, display: recordDisplay(recordType, record), event });
+
+const dueRecordMessage = ({ config, recordType, record, dueAt, event }) => {
   const dueText = new Date(dueAt).toISOString().slice(0, 10);
   const prefix = event === "overdue" ? "Overdue since" : "Due on";
-  return `${config.label}: ${recordSubject(record)}. ${prefix} ${dueText}.`;
+  const title = dueRecordTitle({ config, recordType, record, event });
+  return `${subjectSentence({ label: config.label, subject: recordSubject(recordType, record), title })} ${prefix} ${dueText}.`;
 };
+
+// ─── Stored rows written before the rule ────────────────────────────────────
+//
+// Rows are never rewritten. A row whose title or message carries an
+// identifier (or the old "Workflow record" placeholder) is re-rendered each
+// time it is read — the list, one notification, the summary, a read or
+// archive answer, an email, a push — through the builders above, from the
+// record it names as it is now and as the reader may receive it. Only the
+// title and message change; the link, the entity and the metadata are the
+// row's own.
+
+const carriesIdentifier = (text) =>
+  typeof text === "string" && (IDENTIFIER_TOKEN.test(text) || text.includes(LEGACY_PLACEHOLDER));
+
+const needsReadableText = (notification) =>
+  Boolean(notification) && (carriesIdentifier(notification.title) || carriesIdentifier(notification.message));
+
+const escapeRegExp = (value) => String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+/**
+ * A stored message with its record's words put back: the builders' first
+ * sentence ("<label>: <subject>.") replaces the old one ("<label>: Workflow
+ * record." or "<label>: <id>."), and the rest — the status it moved to, the
+ * reviewer's comment, the due date — is kept as written.
+ */
+const rewrittenMessage = ({ message, label, subject, title }) => {
+  if (typeof message !== "string") return message;
+  const oldFirst = new RegExp(
+    `^${escapeRegExp(label)}: (?:${escapeRegExp(LEGACY_PLACEHOLDER)}|${IDENTIFIER_TOKEN.source})\\.`,
+    "i",
+  );
+  if (oldFirst.test(message)) {
+    return message.replace(oldFirst, subjectSentence({ label, subject, title }));
+  }
+  return subject ? message.split(LEGACY_PLACEHOLDER).join(subject).replace(IDENTIFIER_TOKENS, subject) : message;
+};
+
+/** The records a batch of stored rows names, a record type at a time, from their own projects. */
+const recordsForRows = async (rows) => {
+  const byType = new Map();
+  for (const row of rows) {
+    if (!row.entityType || !row.entityId || !row.projectId || !DUE_RECORDS[row.entityType]) continue;
+    if (!IDENTIFIER_TOKEN.test(row.entityId)) continue;
+    const entry = byType.get(row.entityType) || { ids: new Set(), projectIds: new Set() };
+    entry.ids.add(row.entityId);
+    entry.projectIds.add(row.projectId);
+    byType.set(row.entityType, entry);
+  }
+  const records = new Map();
+  for (const [recordType, { ids, projectIds }] of byType) {
+    const model = prisma[DUE_RECORDS[recordType].model];
+    if (!model?.findMany) continue;
+    const include = RECORD_WORDS[recordType]?.include;
+    try {
+      const found = await model.findMany({
+        where: { id: { in: [...ids] }, projectId: { in: [...projectIds] } },
+        ...(include ? { include } : {}),
+      });
+      for (const record of found || []) records.set(`${recordType}:${record.projectId}:${record.id}`, record);
+    } catch {
+      // A record that cannot be read is named by its kind alone.
+    }
+  }
+  return records;
+};
+
+const readableTextFor = async ({ row, record, boqAccess }) => {
+  const config = DUE_RECORDS[row.entityType];
+  const kind = String(row.event || "").startsWith("workflow.")
+    ? "workflow"
+    : String(row.event || "").startsWith("due_date.")
+      ? "due"
+      : null;
+  if (!config || !kind) {
+    return { title: withoutIdentifiers(row.title), message: withoutIdentifiers(row.message) };
+  }
+  const plainWords = recordWords(row.entityType, record, NO_BOQ);
+  const boqWords = recordWords(row.entityType, record, WITH_BOQ);
+  const words = sameWords(plainWords, boqWords) || !(await boqAccess(row)) ? plainWords : boqWords;
+  const title =
+    kind === "workflow"
+      ? workflowTitle({
+          label: config.label,
+          display: words.display,
+          action: trim(row.metadataJson?.action) || String(row.event).slice("workflow.".length),
+        })
+      : dueTitle({ label: config.label, display: words.display, event: row.category });
+  return {
+    title: withoutIdentifiers(title),
+    message: withoutIdentifiers(
+      rewrittenMessage({ message: row.message, label: config.label, subject: words.subject, title }),
+    ),
+  };
+};
+
+/**
+ * Stored rows as their reader receives them: rows that carry an identifier
+ * re-rendered, every other row as it is (the same object). `viewer` is the
+ * signed-in person reading their own notifications, when there is one.
+ */
+const readableNotifications = async (rows, { viewer = null } = {}) => {
+  const list = Array.isArray(rows) ? rows : [];
+  if (!list.some(needsReadableText)) return list;
+  const records = await recordsForRows(list.filter(needsReadableText));
+  const boqByReader = new Map();
+  const boqAccess = (row) => {
+    const key = `${row.orgId}:${row.recipientUserId}:${row.projectId}`;
+    if (!boqByReader.has(key)) {
+      boqByReader.set(
+        key,
+        mayReadBoq({ orgId: row.orgId, userId: row.recipientUserId, projectId: row.projectId, viewer }),
+      );
+    }
+    return boqByReader.get(key);
+  };
+  return Promise.all(
+    list.map(async (row) => {
+      if (!needsReadableText(row)) return row;
+      const record = records.get(`${row.entityType}:${row.projectId}:${row.entityId}`) || null;
+      return { ...row, ...(await readableTextFor({ row, record, boqAccess })) };
+    }),
+  );
+};
+
+const readableNotification = async (row, options) => (await readableNotifications([row], options))[0];
 
 const isClosedRecord = (record, config) => {
   const field = config.statusField || "status";
@@ -1460,8 +1785,8 @@ const createDueNotificationsForProject = async ({
           type: "due_date",
           category,
           event: `due_date.${event}`,
-          title: dueRecordTitle({ config, record, event: category }),
-          message: dueRecordMessage({ config, record, dueAt, event: category }),
+          title: dueRecordTitle({ config, recordType, record, event: category }),
+          message: dueRecordMessage({ config, recordType, record, dueAt, event: category }),
           priority: event === "overdue" ? "urgent" : "high",
           dueAt,
           actionUrl: actionUrlFor({
@@ -1518,13 +1843,17 @@ module.exports = {
   createWorkflowNotifications,
   emitTaskNotification,
   getNotificationForUser: async (params) =>
-    serializeNotification(await getNotificationForUser(params)),
+    serializeNotification(
+      await readableNotification(await getNotificationForUser(params), { viewer: params.viewer }),
+    ),
   getNotificationSummary,
   getUserPreferences,
   listNotifications,
   markAllRead,
   markNotificationRead,
   processPendingEmailDeliveries,
+  readableNotification,
+  readableNotifications,
   retryNotificationEmail,
   runDueNotificationScan,
   updateUserPreferences,
