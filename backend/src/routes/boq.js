@@ -3,7 +3,7 @@ const crypto = require('crypto');
 const multer = require('multer');
 const path = require('path');
 const { body, param, query } = require('express-validator');
-const { validate } = require('../middleware/validate');
+const { validate, validateWithReasons } = require('../middleware/validate');
 const { asyncHandler } = require('../utils/async-handler');
 const { sendSuccess } = require('../utils/api-response');
 const { HttpError } = require('../utils/http-error');
@@ -282,12 +282,21 @@ router.get(
 // submit / approve actions; the lock is an approval too — the policy's
 // `baseline` action on the BOQ module names no role, so it cannot gate
 // anything yet. There is no unlock, as there is none for a schedule baseline.
-const revisionParams = [param('revisionId').isUUID()];
+// The review steps refuse in words (validateWithReasons): an API client —
+// mobile, which production answers without details — reads the reason.
+const revisionParams = [
+  param('revisionId')
+    .isUUID()
+    .withMessage('The BOQ revision id is not valid: refresh the BOQ page and try again.'),
+];
 const reviewComment = body('comment')
   .optional({ nullable: true })
   .isString()
+  .withMessage('The review comment must be text.')
+  .bail()
   .trim()
-  .isLength({ max: 2000 });
+  .isLength({ max: 2000 })
+  .withMessage('The review comment can be at most 2,000 characters.');
 const revisionOptions = (req) => ({
   orgId: req.user.orgId,
   userId: req.user.id,
@@ -300,7 +309,7 @@ router.get(
   '/revisions/:revisionId',
   authenticate,
   requirePermission('boq', 'read'),
-  [...revisionParams, validate],
+  [...revisionParams, validateWithReasons],
   asyncHandler(async (req, res) => {
     const revision = await boqService.getBoqRevision(
       req.params.projectId,
@@ -316,7 +325,7 @@ router.post(
   '/revisions/:revisionId/submit',
   authenticate,
   requirePermission('boq', 'submit'),
-  [...revisionParams, reviewComment, validate],
+  [...revisionParams, reviewComment, validateWithReasons],
   asyncHandler(async (req, res) => {
     const revision = await boqService.submitBoqRevision(
       req.params.projectId,
@@ -332,7 +341,7 @@ router.post(
   '/revisions/:revisionId/approve',
   authenticate,
   requirePermission('boq', 'approve'),
-  [...revisionParams, reviewComment, validate],
+  [...revisionParams, reviewComment, validateWithReasons],
   asyncHandler(async (req, res) => {
     const revision = await boqService.approveBoqRevision(
       req.params.projectId,
@@ -348,7 +357,7 @@ router.post(
   '/revisions/:revisionId/lock',
   authenticate,
   requirePermission('boq', 'approve'),
-  [...revisionParams, reviewComment, validate],
+  [...revisionParams, reviewComment, validateWithReasons],
   asyncHandler(async (req, res) => {
     const result = await boqService.lockBoqBaseline(
       req.params.projectId,

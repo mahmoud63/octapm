@@ -93,6 +93,7 @@ liveDescribe("error bodies", () => {
     });
     expect(malformed.status).toBe(400);
     expect(malformed.body.error.code).toBe("VALIDATION_ERROR");
+    expect(malformed.body.error.message).toBe("The request body is not valid JSON.");
 
     const tooLarge = await call(production.base, "/json", {
       method: "POST",
