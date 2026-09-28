@@ -23,8 +23,13 @@
  *     activity budget, the revision's totals, the generator's budgets, the
  *     forecast's money, a revision's total in its history).
  *
- * Everything else — statuses, codes, verdicts, counts, the approved
- * allocation count, the forecast's levels — is what the BOQ reader gets.
+ * Nor anything read off the mapping (owner decision, 2026-09-28): no
+ * approved allocation count on an activity, no count of critical activities
+ * without an approved allocation, no coverage share. Their criticality —
+ * the critical flag, the float, the count of critical activities — stays.
+ *
+ * Everything else — statuses, codes, verdicts, counts, the forecast's
+ * levels — is what the BOQ reader gets.
  *
  * The workspace home the browser opens right after sign-in, before the
  * Overview, is swept with them: each project's row there states the
@@ -86,6 +91,11 @@ const BOQ_KEYS = [
     "revisionChanges",
     "revisionBlockedRows",
   ],
+  // Read off the mapping (owner decision, 2026-09-28): an activity's
+  // approved allocation count (its mapping badge), and how many critical
+  // activities have no approved allocation.
+  "approvedAllocationCount",
+  "criticalUnmappedActivities",
 ];
 // ... and what a member who reads neither the BOQ nor the cost module must
 // not receive either: the budgets built from the bill, and the forecast's
@@ -656,7 +666,8 @@ liveDescribe("PC-4 §12: the Overview and the Schedule module carry no BOQ figur
       ]);
       const schedule = (await api.get(reads().schedule.route, viewerAuth)).body.data;
       const pour = schedule.activities.find((activity) => activity.id === activities.pour.id);
-      expect(pour.approvedAllocationCount).toBe(1);
+      // Its mapping badge is the bill's; its criticality is the schedule's.
+      expect([viewer, "approvedAllocationCount" in pour, typeof pour.isCritical]).toEqual([viewer, false, "boolean"]);
       const allocations = schedule.revision.readiness.checks.find((check) => check.key === "allocations");
       expect(allocations).toMatchObject({ key: "allocations", severity: "blocking", passed: false });
       // The budget: a cost reader reads it in the Cost module already.
@@ -854,6 +865,99 @@ liveDescribe("PC-4 §12: the Overview and the Schedule module carry no BOQ figur
       expect([viewer, mine.structure.unitsUnresolved, mine.structure.unitsUnresolvedWithheld]).toEqual([viewer, undefined, true]);
       const guide = mine.steps.find((step) => step.key === "structure_setup").guides.find((entry) => entry.key === "boq_structure");
       expect([viewer, guide.count, guide.detail]).toEqual([viewer, null, "BOQ details unavailable to you"]);
+    }
+  });
+
+  it("a critical activity without an approved allocation: the BOQ reader is told how many; a member without BOQ read is told the mapping details are withheld — no count, no tone, no badge — and sees the same critical path", async () => {
+    // Last in this file, so no earlier answer moves: a third activity with
+    // no allocation, on the critical path. It is flagged critical on zero
+    // float by its key (one known row in this LiveTest organisation), so the
+    // count does not rest on how CPM ranks three unlinked activities.
+    const created = await post(at("/activities"), {
+      name: "Strip formwork",
+      activityCode: "A120",
+      duration: 3,
+      startDate: "2026-02-09",
+      endDate: "2026-02-11",
+      engineerIds: [live.user.id],
+    });
+    expect([created.status, created.body?.error]).toEqual([201, undefined]);
+    const stripId = created.body.data.id;
+    await prisma.activity.update({ where: { id: stripId }, data: { isCritical: true, totalFloat: 0 } });
+
+    const MAPPING_KEYS = new Set(["criticalUnmappedActivities", "approvedAllocationCount", "coveragePct"]);
+    const MAPPING_HEADLINE = ["mapping", "unmapped_quantity", "unmapped_boq", "critical_unmapped"];
+    const criticalOf = (readiness) => readiness.steps.find((step) => step.key === "schedule_generation").counts.criticalActivities;
+    const criticalIds = (list) => list.filter((activity) => activity.isCritical).map((activity) => activity.id).sort();
+
+    // The BOQ reader: the count, in the summary and the headline, and the
+    // activity's mapping badge (no approved allocation).
+    const reader = parsed((await api.get(at("/setup-readiness"), auth())).text).data;
+    const unmapped = reader.summary.criticalUnmappedActivities;
+    expect(unmapped).toBeGreaterThanOrEqual(1);
+    expect(reader.summary.headline.find((entry) => entry.key === "critical_unmapped")).toMatchObject({
+      value: String(unmapped),
+      tone: "review",
+      raw: unmapped,
+    });
+    expect(reader.summary).not.toHaveProperty("criticalUnmappedWithheld");
+    const readerSchedule = (await api.get(at("/schedule"), auth())).body.data;
+    expect(readerSchedule.activities.find((activity) => activity.id === stripId)).toMatchObject({
+      isCritical: true,
+      totalFloat: 0,
+      approvedAllocationCount: 0,
+    });
+    const readerActivities = (await api.get(at("/activities"), auth())).body.data;
+    const readerList = Array.isArray(readerActivities) ? readerActivities : readerActivities.items;
+    expect(readerList.find((activity) => activity.id === stripId)).toMatchObject({ isCritical: true, approvedAllocationCount: 0 });
+
+    for (const [viewer, { user }] of Object.entries(viewers())) {
+      const viewerAuth = as(user);
+      const limited = await api.get(at("/setup-readiness"), viewerAuth);
+      expect([viewer, limited.status]).toEqual([viewer, 200]);
+      const mine = parsed(limited.text).data;
+      // Not one mapping-derived key anywhere in the answer ...
+      expect([viewer, keyPaths(mine, MAPPING_KEYS)]).toEqual([viewer, []]);
+      // ... the summary says the count is withheld, and why ...
+      expect([viewer, mine.summary.criticalUnmappedWithheld, mine.summary.criticalUnmappedReason]).toEqual([
+        viewer,
+        true,
+        "Mapping details unavailable to you",
+      ]);
+      // ... and so does the headline entry: a dash, a neutral tone, no raw figure.
+      expect([viewer, mine.summary.headline.find((entry) => entry.key === "critical_unmapped")]).toEqual([
+        viewer,
+        {
+          key: "critical_unmapped",
+          label: "Critical unmapped activities",
+          value: "—",
+          tone: "neutral",
+          raw: null,
+          withheld: true,
+          reason: "Mapping details unavailable to you",
+        },
+      ]);
+      // Every other entry of the status line, and the rest of the summary, is the reader's.
+      expect([viewer, mine.summary.headline.filter((entry) => !MAPPING_HEADLINE.includes(entry.key))]).toEqual([
+        viewer,
+        reader.summary.headline.filter((entry) => !MAPPING_HEADLINE.includes(entry.key)),
+      ]);
+      const summaryWithout = (summary, keys) => Object.fromEntries(Object.entries(summary).filter(([key]) => !keys.includes(key)));
+      expect([viewer, summaryWithout(mine.summary, ["headline", "criticalUnmappedWithheld", "criticalUnmappedReason"])]).toEqual([
+        viewer,
+        summaryWithout(reader.summary, ["headline", "criticalUnmappedActivities"]),
+      ]);
+      // The critical path is theirs: the same critical activities, counted
+      // the same, flagged the same on the schedule and the activities list.
+      expect([viewer, criticalOf(mine)]).toEqual([viewer, criticalOf(reader)]);
+      const schedule = (await api.get(at("/schedule"), viewerAuth)).body.data;
+      expect([viewer, criticalIds(schedule.activities)]).toEqual([viewer, criticalIds(readerSchedule.activities)]);
+      const strip = schedule.activities.find((activity) => activity.id === stripId);
+      expect([viewer, strip.isCritical, strip.totalFloat, "approvedAllocationCount" in strip]).toEqual([viewer, true, 0, false]);
+      const listed = (await api.get(at("/activities"), viewerAuth)).body.data;
+      const list = Array.isArray(listed) ? listed : listed.items;
+      expect([viewer, criticalIds(list)]).toEqual([viewer, criticalIds(readerList)]);
+      expect([viewer, keyPaths(list, MAPPING_KEYS)]).toEqual([viewer, []]);
     }
   });
 });

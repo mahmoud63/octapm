@@ -2210,13 +2210,23 @@ const getSetupReadiness = async ({ orgId, projectId, canReadBoq = true, canReadS
         unallocatedAmount > MONEY_EPSILON ? "review" : "done",
         unallocatedAmount,
       ),
-    headlineItem(
-      "critical_unmapped",
-      "Critical unmapped activities",
-      String(criticalUnmappedActivities.length),
-      criticalUnmappedActivities.length > 0 ? "review" : "done",
-      criticalUnmappedActivities.length,
-    ),
+    // How many critical activities have no approved allocation is read off
+    // the mapping (owner decision, 2026-09-28): a member who may not read
+    // the BOQ is told the details are withheld — no count, and no tone that
+    // would say whether there are any. The critical path itself is theirs.
+    canReadBoq
+      ? headlineItem(
+          "critical_unmapped",
+          "Critical unmapped activities",
+          String(criticalUnmappedActivities.length),
+          criticalUnmappedActivities.length > 0 ? "review" : "done",
+          criticalUnmappedActivities.length,
+        )
+      : {
+          ...headlineItem("critical_unmapped", "Critical unmapped activities", "—", "neutral", null),
+          withheld: true,
+          reason: MAPPING_DETAILS_WITHHELD,
+        },
     headlineItem(
       "baseline",
       "Baseline",
@@ -2253,7 +2263,11 @@ const getSetupReadiness = async ({ orgId, projectId, canReadBoq = true, canReadS
       readyForProgress: progressBlockerDetails.length === 0,
       readyForReporting: reportingBlockerDetails.length === 0,
       headline,
-      criticalUnmappedActivities: criticalUnmappedActivities.length,
+      // The same count, for those who may read the BOQ; anyone else is told
+      // it is withheld and why (never a 0 they could read as a fact).
+      ...(canReadBoq
+        ? { criticalUnmappedActivities: criticalUnmappedActivities.length }
+        : { criticalUnmappedWithheld: true, criticalUnmappedReason: MAPPING_DETAILS_WITHHELD }),
       nextAction: toAction(nextStep),
       advisoryAction: toAction(advisoryStep),
     },

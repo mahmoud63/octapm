@@ -506,6 +506,11 @@ const BOQ_KEYS = [
   'revisionItems',
   'revisionChanges',
   'revisionBlockedRows',
+  // ... and what is read off the mapping (owner decision, 2026-09-28): an
+  // activity's approved allocation count (its mapping badge), and how many
+  // critical activities have no approved allocation.
+  'approvedAllocationCount',
+  'criticalUnmappedActivities',
 ]
 // The budgets built from the bill, and the forecast's money built from them:
 // withheld from the member who reads neither the BOQ nor the cost module.
@@ -779,6 +784,19 @@ test('members who cannot read the BOQ: the Overview and every Schedule tab rende
     await expect(page.getByTestId('uat-controls-coverage-pct')).toHaveText('—')
     await expect(page.getByTestId('uat-controls-coverage-withheld')).toHaveText('Mapping details unavailable to you')
     await expect(page.getByTestId('uat-controls-figure-unmapped-value')).toHaveText('—')
+    // The critical activities are the schedule's, counted for everyone; how
+    // many have no approved allocation is read off the mapping (owner
+    // decision, 2026-09-28): the tile says it is unavailable, never a count.
+    await expect(page.getByTestId('uat-controls-figure-critical-value')).toHaveText(/^\d+$/)
+    await expect(page.getByTestId('uat-controls-figure-critical-basis')).toContainText('Mapping details unavailable to you')
+    await expect(page.getByTestId('uat-controls-figure-critical')).not.toContainText('without an approved allocation')
+    // ... and so does the setup checklist's status line.
+    const expandChecklist = page.getByTestId('uat-setup-readiness-expand')
+    if (await expandChecklist.isVisible().catch(() => false)) await expandChecklist.click()
+    await expect(page.getByTestId('uat-setup-headline-critical_unmapped')).toContainText('—')
+    await expect(page.getByTestId('uat-setup-headline-critical_unmapped-withheld')).toHaveText(
+      '(Mapping details unavailable to you)'
+    )
     // D2: the forecast at completion is the business-rule EAC — without CPI
     // the revised BAC (41,519.60), said to be the budget — for the cost
     // reader; for the site engineer a dash and why.

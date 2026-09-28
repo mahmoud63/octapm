@@ -270,7 +270,10 @@ export type ProjectSetupHeadlineEntry = {
   value: string
   tone: 'done' | 'review' | 'blocked' | 'info' | 'neutral'
   raw?: unknown
-  /** On the mapping entry, for a caller who may not read the BOQ. */
+  /**
+   * On the mapping and critical_unmapped entries, for a caller who may not
+   * read the BOQ: value "—", tone neutral, raw null, reason says why.
+   */
   withheld?: boolean
   reason?: string
 }
@@ -331,7 +334,15 @@ export type ProjectSetupReadiness = {
     readyForReporting?: boolean
     /** The §33 status line, in reading order. */
     headline?: ProjectSetupHeadlineEntry[]
+    /**
+     * Critical activities with no approved allocation: read off the
+     * mapping, so absent for a caller who may not read the BOQ —
+     * criticalUnmappedWithheld is true then, and criticalUnmappedReason
+     * says why ("Mapping details unavailable to you").
+     */
     criticalUnmappedActivities?: number
+    criticalUnmappedWithheld?: boolean
+    criticalUnmappedReason?: string
     /** From the ten original steps only (setup doc §3: unchanged). */
     nextAction: {
       stepKey: string

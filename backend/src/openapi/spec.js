@@ -2199,7 +2199,7 @@ const components = {
         withheld: {
           type: "boolean",
           description:
-            "Present and true on the mapping entry for a caller who may not read the BOQ: value is \"—\", tone neutral, raw null, and reason says the mapping details are unavailable to them.",
+            "Present and true on the mapping and critical_unmapped entries for a caller who may not read the BOQ: value is \"—\", tone neutral, raw null, and reason says the mapping details are unavailable to them.",
         },
         reason: { type: "string" },
       },
@@ -2228,7 +2228,7 @@ const components = {
         summary: {
           ...ref("GenericObject"),
           description:
-            "Step counts, the three ready flags, nextAction (chosen from the ten original steps only, as before PC-4), advisoryAction (the first of the two advisory steps, structure_setup and boq_approval, still asking for something, or null), and `headline` — the §33 status line (BOQ imported, schedule imported, mapping %, unmapped BOQ quantity by unit, unmapped BOQ value, critical unmapped activities, baseline, cost loading), each entry a ProjectSetupHeadlineEntry.",
+            "Step counts, the three ready flags, nextAction (chosen from the ten original steps only, as before PC-4), advisoryAction (the first of the two advisory steps, structure_setup and boq_approval, still asking for something, or null), and `headline` — the §33 status line (BOQ imported, schedule imported, mapping %, unmapped BOQ quantity by unit, unmapped BOQ value, critical unmapped activities, baseline, cost loading), each entry a ProjectSetupHeadlineEntry. criticalUnmappedActivities (critical activities with no approved BOQ allocation, read off the mapping) is present only for a caller who may read the BOQ; anyone else gets criticalUnmappedWithheld true and criticalUnmappedReason \"Mapping details unavailable to you\" instead, and the critical_unmapped headline entry withheld. The critical activities themselves (steps[schedule_generation].counts.criticalActivities) are every caller's.",
         },
         gates: {
           ...ref("GenericObject"),
@@ -4826,7 +4826,10 @@ const components = {
       allocatedBoqQuantity: boqFigure(nonNegativeNumber, "Approved BOQ allocation quantity."),
       allocatedBoqAmount: boqFigure(money, "Approved BOQ allocation value."),
       allocatedBoqWeight: boqFigure(nonNegativeNumber, "Approved BOQ allocation weight (% of the bill)."),
-      approvedAllocationCount: { type: "integer", minimum: 0 },
+      approvedAllocationCount: boqFigure(
+        { type: "integer", minimum: 0 },
+        "How many approved BOQ allocations the activity has (its mapping badge).",
+      ),
       procurementRiskSummary: {
         ...ref("ScheduleProcurementRiskSummary"),
         nullable: true,
@@ -7812,7 +7815,7 @@ add(
     summary:
       "Get active project schedule, CPM rollups, and critical path explanations.",
     description:
-      "Every schedule reader receives the programme. The bill's figures on it (each activity's allocatedBoqQuantity, allocatedBoqAmount and allocatedBoqWeight; the revision's unallocatedBoqAmount; the BOQ value figures in the allocations readiness check) are present only for a caller who may read the BOQ, and the budgets (activity budget and generatedBudget, revision totalBudget and generatedTotalBudget) only for a caller who may read the BOQ or the cost module. A withheld figure is omitted, never zeroed.",
+      "Every schedule reader receives the programme, its criticality included (isCritical, totalFloat, the critical path). The bill's figures on it (each activity's allocatedBoqQuantity, allocatedBoqAmount and allocatedBoqWeight, and its approvedAllocationCount — the mapping badge, read off the allocations; the revision's unallocatedBoqAmount; the BOQ value figures in the allocations readiness check) are present only for a caller who may read the BOQ, and the budgets (activity budget and generatedBudget, revision totalBudget and generatedTotalBudget) only for a caller who may read the BOQ or the cost module. A withheld figure is omitted, never zeroed.",
     operationId: "getProjectSchedule",
     parameters: projectParams,
     permissions: modulePermission("schedule", "read"),
@@ -8176,7 +8179,7 @@ add(
     tag: "Activities",
     summary: "List project activities.",
     description:
-      "allocatedBoqQuantity, allocatedBoqAmount and allocatedBoqWeight are present only for a caller who may read the BOQ; budget only for a caller who may read the BOQ or the cost module. The same holds for every endpoint here that answers with an activity.",
+      "allocatedBoqQuantity, allocatedBoqAmount, allocatedBoqWeight and approvedAllocationCount are present only for a caller who may read the BOQ; budget only for a caller who may read the BOQ or the cost module. The same holds for every endpoint here that answers with an activity.",
     operationId: "listActivities",
     parameters: projectParams,
     permissions: modulePermission("schedule", "read"),

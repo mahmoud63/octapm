@@ -14,7 +14,11 @@
  * Two readers are distinguished:
  *
  * - `boq`: may read the BOQ. Gets every payload exactly as it is built —
- *   the same object, untouched.
+ *   the same object, untouched. Anyone else is given nothing derived from
+ *   the mapping either (owner decision, 2026-09-28): no allocation count,
+ *   no coverage share, no count of critical activities without an approved
+ *   allocation — criticality itself (the flag, the float, the critical path)
+ *   stays with the schedule's readers.
  * - `budget`: may read the BOQ or the cost module. The activity budget on
  *   the schedule is the approved BOQ allocation, and the revision's total is
  *   their sum; a cost reader already sees these figures in the Cost module
@@ -68,9 +72,13 @@ const withoutBoqFigures = (values) =>
     : values;
 
 // What an activity carries of the bill: the approved allocation's quantity,
-// value and weight. The number of approved allocations stays — it is a
-// count, and the schedule's mapping badges read it.
-const ACTIVITY_BOQ_KEYS = ["allocatedBoqQuantity", "allocatedBoqAmount", "allocatedBoqWeight"];
+// value and weight — and how many approved allocations it has. That count
+// is the activity's mapping badge (mapped or not): BOQ-derived, so it goes
+// the way of the figures (owner decision, 2026-09-28: no allocation count,
+// per activity or in total, to a member who may not read the BOQ). The
+// activity's criticality — its critical flag and float — is the schedule's
+// and stays for every schedule reader.
+const ACTIVITY_BOQ_KEYS = ["allocatedBoqQuantity", "allocatedBoqAmount", "allocatedBoqWeight", "approvedAllocationCount"];
 // The activity's budget: on the schedule, the approved allocation's value;
 // beside it the budget the generator or the import gave the activity.
 const ACTIVITY_BUDGET_KEYS = ["budget", "generatedBudget"];

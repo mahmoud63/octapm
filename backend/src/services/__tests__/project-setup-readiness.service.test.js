@@ -539,6 +539,29 @@ describe("project setup readiness service", () => {
       withheld: true,
       reason: "Mapping details unavailable to you",
     });
+    // Nor how many critical activities have no approved allocation (owner
+    // decision, 2026-09-28): the reader's 1 is neither in the summary nor in
+    // the headline, whose entry says why — no count and no tone. The
+    // critical activities themselves (the schedule step's count) stay.
+    expect(restricted.summary).not.toHaveProperty("criticalUnmappedActivities");
+    expect(restricted.summary).toMatchObject({
+      criticalUnmappedWithheld: true,
+      criticalUnmappedReason: "Mapping details unavailable to you",
+    });
+    expect(result.summary).not.toHaveProperty("criticalUnmappedWithheld");
+    expect(restricted.summary.headline.find((entry) => entry.key === "critical_unmapped")).toEqual({
+      key: "critical_unmapped",
+      label: "Critical unmapped activities",
+      value: "—",
+      tone: "neutral",
+      raw: null,
+      withheld: true,
+      reason: "Mapping details unavailable to you",
+    });
+    const criticalActivitiesOf = (readiness) =>
+      readiness.steps.find((step) => step.key === "schedule_generation").counts.criticalActivities;
+    expect(criticalActivitiesOf(restricted)).toBe(criticalActivitiesOf(result));
+    expect(criticalActivitiesOf(result)).toBeGreaterThan(0);
     expect(
       restricted.steps.find((step) => step.key === "structure_setup").guides.find((guide) => guide.key === "mapping_readiness"),
     ).toMatchObject({ count: null, detail: "Mapping details unavailable to you", detailsWithheld: true });

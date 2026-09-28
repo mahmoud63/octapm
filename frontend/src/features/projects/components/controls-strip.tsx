@@ -472,7 +472,12 @@ export function ControlsStrip({
         .join('\n')
     : undefined
   const criticalActivities = Number(stepCounts('schedule_generation').criticalActivities ?? 0)
-  const criticalUnmapped = summary.criticalUnmappedActivities ?? null
+  // How many critical activities have no approved allocation is read off
+  // the mapping: a member who may not read the BOQ is not given it (the
+  // server says so), and the tile says the details are unavailable — the
+  // critical activities themselves are the schedule's and stay.
+  const criticalUnmappedWithheld = Boolean(summary.criticalUnmappedWithheld)
+  const criticalUnmapped = criticalUnmappedWithheld ? null : (summary.criticalUnmappedActivities ?? null)
   const unmappedRows = counts && !coverageWithheld ? counts.unmapped + counts.partial : null
   const overAllocatedRows = coverageWithheld ? null : (counts?.over ?? null)
   const dataQuality = forecast?.dataQuality ?? []
@@ -728,9 +733,11 @@ export function ControlsStrip({
         value={criticalActivities.toLocaleString()}
         truth='derived'
         basis={
-          criticalUnmapped != null && criticalUnmapped > 0
-            ? `${criticalUnmapped.toLocaleString()} without an approved allocation`
-            : 'on the critical path'
+          criticalUnmappedWithheld
+            ? `on the critical path · ${summary.criticalUnmappedReason ?? 'Mapping details unavailable to you'}`
+            : criticalUnmapped != null && criticalUnmapped > 0
+              ? `${criticalUnmapped.toLocaleString()} without an approved allocation`
+              : 'on the critical path'
         }
         tone={criticalUnmapped != null && criticalUnmapped > 0 ? 'review' : 'neutral'}
         testId='uat-controls-figure-critical'
