@@ -82,7 +82,10 @@ assert.ok(
   'uat-controls-figure-unmapped',
   'uat-controls-figure-exceptions',
   'uat-controls-figure-data-quality',
-  "truth='projection'",
+  // The forecast's tag is derived (a34e101): a projection only when CPI
+  // projects it, "fallback" when the revised budget is handed back.
+  'truth={eacTruth}',
+  "eacFallback ? 'fallback' : 'projection'",
   'criticalUnmappedActivities',
   'dataQuality',
 ].forEach((copy) => {
