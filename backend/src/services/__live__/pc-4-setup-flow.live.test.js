@@ -328,8 +328,8 @@ liveDescribe("PC-4: setup flow — structure and BOQ approval steps, per-item de
     it("names the BOQ rows and activities behind each issue with the route that fixes them", async () => {
       const result = await readiness();
 
-      // Rows without a WBS node: 1.2 and P.1 (1.1 is filed), linked into the
-      // grid — reported on the Structure step as information: nothing in the
+      // Rows without a WBS node: 1.2 and P.1 (1.1 is filed), named —
+      // reported on the Structure step as information: nothing in the
       // product files a row yet, so it holds no step (the BOQ upload is
       // complete, as the base had it).
       expect(step(result, "boq_upload")).toMatchObject({ status: "complete", warnings: [] });
@@ -337,9 +337,11 @@ liveDescribe("PC-4: setup flow — structure and BOQ approval steps, per-item de
       const withoutWbs = advisory(result, "structure_setup", "BOQ_ITEMS_WITHOUT_WBS");
       expect(withoutWbs.severity).toBe("advisory");
       expect(withoutWbs.count).toBe(2);
+      // Named, not linked: no page files a BOQ row under a WBS node yet (it
+      // comes with the BOQ item detail), so a link would be a dead end.
       expect(withoutWbs.items).toEqual([
-        { type: "boq_item", id: base.items.rebar.id, code: "1.2", label: "Reinforcement to foundations", missing: "WBS node", href: href(project.id, `/boq?recordId=${base.items.rebar.id}&source=boq_item`) },
-        { type: "boq_item", id: base.items.prelims.id, code: "P.1", label: "Site establishment", missing: "WBS node", href: href(project.id, `/boq?recordId=${base.items.prelims.id}&source=boq_item`) },
+        { type: "boq_item", id: base.items.rebar.id, code: "1.2", label: "Reinforcement to foundations", missing: "WBS node", href: null },
+        { type: "boq_item", id: base.items.prelims.id, code: "P.1", label: "Site establishment", missing: "WBS node", href: null },
       ]);
       // The activity without a WBS node, linked to the activities page.
       const activitiesWithoutWbs = advisory(result, "structure_setup", "ACTIVITIES_WITHOUT_WBS");
@@ -364,7 +366,12 @@ liveDescribe("PC-4: setup flow — structure and BOQ approval steps, per-item de
         for (const issue of [...entry.blockers, ...entry.warnings, ...entry.advisories]) {
           expect(Array.isArray(issue.items)).toBe(true);
           expect(issue.count).toBeGreaterThanOrEqual(issue.items.length);
-          for (const item of issue.items) expect(item.href.startsWith(`/o/${segment}/projects/${project.id}/`)).toBe(true);
+          for (const item of issue.items) {
+            // A BOQ row not filed under a WBS node or a cost code is named, not
+            // linked: no page files one yet.
+            if (["BOQ_ITEMS_WITHOUT_WBS", "BOQ_ITEMS_WITHOUT_COST_CODE"].includes(issue.code)) expect([issue.code, item.href]).toEqual([issue.code, null]);
+            else expect(item.href.startsWith(`/o/${segment}/projects/${project.id}/`)).toBe(true);
+          }
         }
       }
     });

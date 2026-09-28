@@ -1995,7 +1995,8 @@ const components = {
         missing: { type: "string", description: "What the record lacks." },
         href: {
           type: "string",
-          description: "Where to fix it: the module page under the project's workspace, with the record in the URL.",
+          nullable: true,
+          description: "Where to fix it: the module page under the project's workspace, with the record in the URL. null when no page resolves it yet (a BOQ row without a WBS node or a cost code: filing comes with the BOQ item detail) — named, not linked.",
         },
       },
       ["type", "missing", "href"],
@@ -2088,7 +2089,7 @@ const components = {
         advisories: {
           ...arrayOf(ref("ProjectSetupIssue")),
           description:
-            "PC-4's filing and matching checks, severity advisory: listed with the step, never moving its status or a gate, and never in gates.*.warnings. structure_setup lists the BOQ rows and activities without an active WBS node (a node that has been archived counts as none) and the rows without a cost code; boq_upload the rows with an unrecognised unit; schedule_generation the activities on an unmapped imported calendar; boq_allocation pending suggestions and unit or location mismatches; progress_method_configuration quantity methods without a unit.",
+            "PC-4's filing and matching checks, severity advisory: listed with the step, never moving its status or a gate, and never in gates.*.warnings. structure_setup lists the BOQ rows and activities without an active WBS node (a node that has been archived counts as none) and the rows without a cost code; boq_upload the rows with an unrecognised unit; schedule_generation the activities on an unmapped imported calendar; boq_allocation pending suggestions and unit or location mismatches; progress_method_configuration quantity methods without a unit; schedule_approval STAGED_REVISION_PENDING, a newer revision staged beside the active one, with its next step. The BOQ-row filing advisories (BOQ_ITEMS_WITHOUT_WBS, BOQ_ITEMS_WITHOUT_COST_CODE) link nowhere (items[].href null): no page files a row yet; it comes with the BOQ item detail.",
         },
         counts: {
           ...ref("GenericObject"),
@@ -2127,8 +2128,12 @@ const components = {
         },
         detail: { type: "string" },
         detailsWithheld: { type: "boolean" },
-        target: ref("ProjectSetupTarget"),
-        href: { type: "string", description: "The page under the project's workspace where it is done." },
+        target: { ...ref("ProjectSetupTarget"), nullable: true },
+        href: {
+          type: "string",
+          nullable: true,
+          description: "The page under the project's workspace where it is done. target and href are null when no page does it yet (boq_structure whose only open item is filing rows under WBS nodes).",
+        },
       },
       ["key", "label", "status", "count", "detail", "target", "href"],
     ),
@@ -4800,6 +4805,12 @@ const components = {
         description:
           "The schedule revision. unallocatedBoqAmount, and the BOQ value figures in readiness.checks[].details (totalBoqAmount, allocatableBoqAmount, approvedAllocatedAmount, pendingAllocatedAmount, unallocatedAmount, optionalUnallocatedAmount, notApplicableAmount), are present only for a caller who may read the BOQ; totalBudget, generatedTotalBudget, projectSummary.totalBudget and wbs[].budget only for a caller who may read the BOQ or the cost module. Check keys, verdicts, messages, ready and blockingCount are the same for every caller.",
       },
+      candidateRevision: {
+        ...ref("GenericObject"),
+        nullable: true,
+        description:
+          "A newer revision staged beside the active one (imported or generated after it, not activated; the latest candidate the lifecycle accepts), with its own readiness judged on its snapshot, so it can be submitted, approved, rejected or activated where it is seen. null when there is none or no revision is active. Its figures are withheld as the revision's are.",
+      },
       activities: arrayOf(ref("Activity")),
     }),
     ProgressPayload: objectSchema({
@@ -7224,7 +7235,7 @@ add(
     tag: "Projects",
     summary: "Get workspace-level construction health and workflow queues.",
     description:
-      "Aggregates all organization projects for PM users and only assigned projects for non-PM users. Returns officialKpis with sourceRule, sourceStatus, cutoffDate, and drill-through targets. Draft/rejected/cancelled records are excluded from official KPI cards; submitted/pending workflow values are returned separately under pendingReview. Each projectHealth row carries bac (the official EV budget: the approved BOQ allocations), eac (bac / CPI), ev (approved allocations × % complete), pv (approved cost loading) and ac (the cost ledger's official actuals) only for a caller who may read the BOQ or the cost module on that project, decided as that project's own routes decide it (permission template, role, party); otherwise those keys are absent, not zero. Scores, spi and cpi are the same for every caller. dataFreshness.cutoffDate is the official cutoff (the latest project data date or EV cutoff); when it is a project's EV cutoff, dataFreshness also states cutoffLocalDate, cutoffTimeZone, cutoffTimeZoneSource and cutoffTimeZoneNote (null when that project's own zone applied, otherwise \"Project timezone is not configured; UTC is being used\" or the organisation default it names) — otherwise those are null." + DEFAULT_EV_PERIOD,
+      "Aggregates all organization projects for PM users and only assigned projects for non-PM users. Returns officialKpis with sourceRule, sourceStatus, cutoffDate, and drill-through targets. Draft/rejected/cancelled records are excluded from official KPI cards; submitted/pending workflow values are returned separately under pendingReview. Each projectHealth row carries bac (the official EV budget: the approved BOQ allocations), eac (bac / CPI), ev (approved allocations × % complete), pv (approved cost loading) and ac (the cost ledger's official actuals) only for a caller who may read the BOQ or the cost module on that project, decided as that project's own routes decide it (permission template, role, party); otherwise those keys are absent, not zero. Scores, spi and cpi are the same for every caller. dataFreshness.cutoffDate is the official cutoff: the latest EV cutoff among the projects' EV reports (each on its default basis), never a project data date — the answer's own time only when no project has an EV report; when it is a project's EV cutoff, dataFreshness also states cutoffLocalDate, cutoffTimeZone, cutoffTimeZoneSource and cutoffTimeZoneNote (null when that project's own zone applied, otherwise \"Project timezone is not configured; UTC is being used\" or the organisation default it names) — otherwise those are null." + DEFAULT_EV_PERIOD,
     operationId: "getWorkspaceDashboard",
     responseSchema: ref("GenericObject"),
   }),
@@ -7884,7 +7895,7 @@ add(
 
 // Owner decision D5: which readiness checks each gate needs.
 const READINESS_GATES =
-  "readiness.ready and readiness.blockingCount answer for the approval, which judges the revision's own logic (predecessor logic, critical path, date sanity); readiness.baselineReady and readiness.baselineBlockingCount answer for the baseline lock, which also needs the BOQ allocation coverage of the active activities. Each check's requiredFor names the gates it guards (\"approval\", \"baseline\"); the BOQ allocations check guards the baseline only, and on a staged revision it says the bill's value is mapped after the activation.";
+  "readiness.ready and readiness.blockingCount answer for the approval, which judges the revision's own logic (predecessor logic, critical path, date sanity); readiness.baselineReady and readiness.baselineBlockingCount answer for the baseline lock, which also needs the BOQ allocation coverage of the active activities. Each check's requiredFor names the gates it guards (\"approval\", \"baseline\"); the BOQ allocations check guards the baseline only, and on a staged revision it says the bill's value is mapped after the activation. Each failing check carries fix { where, inline, next, text, permission } — what puts it right and the page that offers it, by where the revision stands: a staged revision's own logic is corrected at its source and imported again or regenerated (Schedule › Update Schedule) or, under review, rejected; an active revision's on Schedule › Gantt › Edit or by Recalculate CPM (Schedule › More actions); coverage on Project Controls › Mapping. permission is the module.action the step needs (schedule.create, schedule.update, schedule.approve, boq.create); a passing check has fix null.";
 const APPROVAL_WITHOUT_COVERAGE =
   "Approval does not require BOQ allocations (owner decision D5): allocations are made to the active activities, which exist only once the approved revision is activated. SCHEDULE_NOT_READY at approval names only the revision's own failing checks.";
 const BASELINE_NEEDS_COVERAGE =
@@ -7893,6 +7904,8 @@ const BASELINE_NEEDS_COVERAGE =
 // The lifecycle refusals that name the step to take next.
 const BASELINE_NOT_ACTIVATED =
   "An approved revision that is still staged (not yet activated) is refused with 409 REVISION_NOT_ACTIVATED, whose message says to activate it on Schedule › Revisions first; its baseline is locked after that. With no active activity at all the refusal is 400 NO_ACTIVITIES, which likewise says to activate an approved revision first.";
+const BASELINE_ALREADY_LOCKED =
+  "A revision whose baseline is already locked is refused with 409 INVALID_REVISION_STATUS, whose message says a new baseline comes from a new revision (import or generate one on Schedule › Update Schedule, take it through review and activation, then lock its baseline). With no schedule revision at all the refusal is 404 REVISION_NOT_FOUND, whose message says to import a P6/MSP schedule or generate one from the BOQ on the Schedule page.";
 const REVISION_NOT_CURRENT_NOTE =
   "A revision that is neither the active one nor the latest staged one (a newer import has superseded it) is refused with 409 REVISION_NOT_CURRENT, whose message says to refresh to see the current revision (Schedule › Revisions).";
 const REASON_REQUIRED_NOTE =
@@ -7905,7 +7918,7 @@ add(
     tag: "Schedule",
     summary: "Lock the approved current schedule as baseline.",
     description:
-      `The BOQ value figures in the answer's readiness are present only for a caller who may read the BOQ. A schedule that is not ready is refused with 400 SCHEDULE_NOT_READY, whose error.message names each failing blocking check, what is wrong and where to put it right (for example \"Predecessor logic — at least one predecessor relationship is required (Schedule › Gantt)\") and carries no BOQ figure, and the readiness in error.details, whose BOQ value figures are likewise present only for a caller who may read the BOQ; ready, blockingCount and the checks' verdicts are the same for every caller. A step the revision's current status does not allow is refused with 409 INVALID_REVISION_STATUS, whose message names the status it is in now and the one the step needs, as the Revisions tab labels them (e.g. \"This schedule revision is now Rejected; it must be Under review before it can be rejected. Refresh to see its current status.\"). ${BASELINE_NOT_ACTIVATED} ${BASELINE_NEEDS_COVERAGE} ${READINESS_GATES} ${REVISION_NOT_CURRENT_NOTE}`,
+      `The BOQ value figures in the answer's readiness are present only for a caller who may read the BOQ. A schedule that is not ready is refused with 400 SCHEDULE_NOT_READY, whose error.message names each failing blocking check, what is wrong and where to put it right (for example, for an active revision, \"Predecessor logic — at least one predecessor relationship is required (Schedule › Gantt › Edit)\"; for a staged revision, which no page edits, the reasons followed by \"A staged revision cannot be edited: correct the schedule at its source and import it again, or regenerate it from the BOQ (Schedule › Update Schedule) — the new revision replaces this one, or reject this revision (Schedule Review).\"; never the read-only Critical Path tab), followed, when the caller may not take that step, by who can (\"Only members who can create schedules (import or generate) can take this step; ask one of them.\") and carries no BOQ figure, and the readiness in error.details, whose BOQ value figures are likewise present only for a caller who may read the BOQ; ready, blockingCount and the checks' verdicts are the same for every caller. A step the revision's current status does not allow is refused with 409 INVALID_REVISION_STATUS, whose message names the status it is in now and the one the step needs, as the Revisions tab labels them (e.g. \"This schedule revision is now Rejected; it must be Under review before it can be rejected. Refresh to see its current status.\"). ${BASELINE_NOT_ACTIVATED} ${BASELINE_NEEDS_COVERAGE} ${BASELINE_ALREADY_LOCKED} ${READINESS_GATES} ${REVISION_NOT_CURRENT_NOTE}`,
     operationId: "baselineCurrentSchedule",
     parameters: projectParams,
     permissions: modulePermission("schedule", "baseline", "revision.baseline"),
@@ -7925,7 +7938,7 @@ const REVISION_FIGURES =
   `The BOQ value figures in readiness.checks[].details (and a revision's unallocatedBoqAmount) are present only for a caller who may read the BOQ; totalBudget and generatedTotalBudget only for a caller who may read the BOQ or the cost module. Check keys, verdicts and counts are the same for every caller. ${READINESS_GATES}`;
 // ... and to the refusal that states the readiness.
 const NOT_READY_FIGURES =
-  "A schedule that is not ready is refused with 400 SCHEDULE_NOT_READY, whose error.message names each failing blocking check, what is wrong and where to put it right (for example \"Predecessor logic — at least one predecessor relationship is required (Schedule › Gantt)\") and carries no BOQ figure, and the readiness in error.details, whose BOQ value figures are likewise present only for a caller who may read the BOQ; ready, blockingCount and the checks' verdicts are the same for every caller. A step the revision's current status does not allow is refused with 409 INVALID_REVISION_STATUS, whose message names the status it is in now and the one the step needs, as the Revisions tab labels them (e.g. \"This schedule revision is now Rejected; it must be Under review before it can be rejected. Refresh to see its current status.\").";
+  "A schedule that is not ready is refused with 400 SCHEDULE_NOT_READY, whose error.message names each failing blocking check, what is wrong and where to put it right (for example, for an active revision, \"Predecessor logic — at least one predecessor relationship is required (Schedule › Gantt › Edit)\"; for a staged revision, which no page edits, the reasons followed by \"A staged revision cannot be edited: correct the schedule at its source and import it again, or regenerate it from the BOQ (Schedule › Update Schedule) — the new revision replaces this one, or reject this revision (Schedule Review).\"; never the read-only Critical Path tab), followed, when the caller may not take that step, by who can (\"Only members who can create schedules (import or generate) can take this step; ask one of them.\") and carries no BOQ figure, and the readiness in error.details, whose BOQ value figures are likewise present only for a caller who may read the BOQ; ready, blockingCount and the checks' verdicts are the same for every caller. A step the revision's current status does not allow is refused with 409 INVALID_REVISION_STATUS, whose message names the status it is in now and the one the step needs, as the Revisions tab labels them (e.g. \"This schedule revision is now Rejected; it must be Under review before it can be rejected. Refresh to see its current status.\").";
 
 add(
   "/projects/{projectId}/schedule/revisions",
@@ -8039,6 +8052,7 @@ add(
         suffix === "approve" && APPROVAL_WITHOUT_COVERAGE,
         suffix === "baseline" && BASELINE_NOT_ACTIVATED,
         suffix === "baseline" && BASELINE_NEEDS_COVERAGE,
+        suffix === "baseline" && BASELINE_ALREADY_LOCKED,
         suffix !== "rollback" && REVISION_NOT_CURRENT_NOTE,
         ["reject", "rollback"].includes(suffix) && REASON_REQUIRED_NOTE,
       ]
@@ -8061,7 +8075,7 @@ add(
   operation({
     tag: "Schedule Revisions",
     summary: "Activate an approved staged schedule revision.",
-    description: `${REVISION_FIGURES} A body without a mappings list, or a mapping missing its oldActivityId or newActivityKey, is refused with 400 VALIDATION_ERROR whose error.message says what is missing, in production too; send an empty mappings list when no schedule is active yet.`,
+    description: `${REVISION_FIGURES} A body without a mappings list, or a mapping missing its oldActivityId or newActivityKey, is refused with 400 VALIDATION_ERROR whose error.message says what is missing, in production too; send an empty mappings list when no schedule is active yet. A revision that is already active (activated elsewhere while the dialog was open) is refused with 409 REVISION_ALREADY_ACTIVE, whose message says to refresh Schedule › Revisions and names the next step (map the BOQ to its activities and lock the baseline, or that its baseline is locked). With a schedule already active, a body with no mapping and no removal is refused with 400 MAPPING_CONFIRMATION_REQUIRED, whose message says activation replaces the active schedule and that Schedule › Revisions › Activate proposes the mapping.`,
     operationId: "activateScheduleRevision",
     parameters: [
       ...projectParams,

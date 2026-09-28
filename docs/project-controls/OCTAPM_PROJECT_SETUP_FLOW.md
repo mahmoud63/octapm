@@ -107,3 +107,47 @@ Tests: `backend/src/utils/__tests__/reporting-cutoff.test.js` covers the arithme
 - dates kept across zone changes.
 
 Each of these mutations fails the suite: a fixed -5 h or -6 h offset, the server-local end of day, swapped precedence, a removed note, a recomputed lock, legacy rows read in the project's zone, and new rows stored at the zone's end of day.
+
+## 8. Every refusal and next step on the approval and baseline path (owner decision D5, sweep 2026-09-27)
+
+The rule: each refusal, blocker and "Next:" label names the action that resolves it and a page that offers that action to this member, or, when the member is not offered it, who can. It never names a page that shows only the active schedule for a staged revision, and never the read-only Critical Path tab.
+
+Why the split: a **staged** revision (imported or generated, not activated) lives only in its snapshot. Schedule › Gantt, Activities and Critical Path show the **active** activities, so they are empty in greenfield and, with an active schedule, show the old activities. No page edits a staged revision. Its own logic is corrected at its source and imported again, or regenerated (Schedule › Update Schedule; the new revision supersedes it), or, under review, the revision is rejected. An **active** revision's activities are edited on Schedule › Gantt › Edit; its CPM is recalculated from Schedule › More actions.
+
+One source of words: `schedule.service` `readinessCheckFix` gives each failing readiness check a `fix` (`where`, `inline`, `next`, `text`, `permission`). The SCHEDULE_NOT_READY message, the setup readiness blockers and the review panel ("Next:" and "To fix:") all use it. The routes resolve whether the caller may take the fix (`FIX_PERMISSIONS`: schedule.create, schedule.update, schedule.approve, boq.create); when not, the refusal adds "Only members who can … can take this step; ask one of them." The panel says the same beside the fix.
+
+| Revision state | Refusal or label | Text (abridged) | Target |
+|---|---|---|---|
+| No revision | `POST /schedule/baseline` 404 REVISION_NOT_FOUND | "No schedule revision exists yet: import a P6/MSP schedule or generate one from the BOQ on the Schedule page." | Schedule page (upload zone) |
+| No revision | setup `schedule_approval` NO_SCHEDULE_REVISION; action | "No schedule revision is available." (kept as the base words: the gates carry this blocker exactly as cb14ff4 derived it); **Open Review** (and `baseline_readiness` keeps its base action, whose waiting warning the gates carry) | Schedule module, which shows its upload zone (import or generate) on every tab until a revision exists |
+| Staged draft, logic fails | readiness `checks[].fix`; panel "Next:" | "A staged revision cannot be edited: correct the schedule at its source and import it again, or regenerate it from the BOQ (Schedule › Update Schedule) — the new revision replaces this one." / "Next: import a corrected schedule or regenerate it (Schedule › Update Schedule) — this revision fails its own checks" | Schedule › Update Schedule |
+| Staged draft, logic fails | setup NO_APPROVED_SCHEDULE and ALLOCATION_WAITING_FOR_SCHEDULE | "The schedule revision fails its own checks (Predecessor logic). A staged revision cannot be edited: …" | Schedule › Revisions (the page carries Update Schedule) |
+| Staged draft | approve / baseline 409 INVALID_REVISION_STATUS | "This schedule revision is now Draft; it must be Under review before it can be approved. Refresh …" | Schedule Review panel (Submit Review) |
+| Staged draft, logic passes | setup NO_APPROVED_SCHEDULE; panel | "Submit the schedule revision for review, then approve it (Schedule Review, on Schedule › Revisions)." / "Next: submit for review" | Schedule Review panel |
+| Staged under review, logic fails | approve 400 SCHEDULE_NOT_READY | "Schedule readiness checks must pass before approval: Predecessor logic — at least one predecessor relationship is required. A staged revision cannot be edited: … — the new revision replaces this one, or reject this revision (Schedule Review)." | Update Schedule, or Reject on the panel |
+| Staged under review, logic passes | setup; panel | "Approve or reject the schedule revision under review (Schedule Review, on Schedule › Revisions)." / "Next: approve or reject" | Schedule Review panel |
+| Staged rejected | approve 409 INVALID_REVISION_STATUS; setup; panel | "…now Rejected; it must be Under review…"; "The schedule revision was rejected: import a corrected schedule or regenerate it (Schedule › Update Schedule), or resubmit it for review"; with its logic failing, the staged fix | Update Schedule, or Submit Review on the panel |
+| Older staged revision (superseded by a newer import) | any step 409 REVISION_NOT_CURRENT | "This schedule revision is no longer current … Refresh to see the current revision (Schedule › Revisions)." | Schedule › Revisions |
+| Staged approved | baseline 409 REVISION_NOT_ACTIVATED; setup action; panel | "This approved schedule revision has not been activated yet. Activate it on Schedule › Revisions …"; **Activate Revision**; "Next: activate this revision (Schedule › Revisions)" | Schedule › Revisions (Activate) |
+| Staged approved, a schedule already active | activate 400 MAPPING_CONFIRMATION_REQUIRED (API only; the dialog always sends the mapping) | "Activating this revision replaces the active schedule: confirm how its activities map … (Schedule › Revisions › Activate proposes the mapping) …" | Schedule › Revisions › Activate |
+| Active approved (activated elsewhere while the dialog was open) | activate 409 REVISION_ALREADY_ACTIVE | "This schedule revision is already active. Refresh Schedule › Revisions — the next step is to map the BOQ to its activities (Project Controls › Mapping) and lock the baseline." | Schedule › Revisions; Project Controls › Mapping |
+| Active approved, coverage open | baseline 400 SCHEDULE_NOT_READY; setup action; panel | "… BOQ allocations — BOQ value remains unallocated … (Project Controls › Mapping)."; **Map Allocations**; "Next: map the BOQ to the active activities (Project Controls › Mapping), then lock baseline" | Project Controls › Mapping |
+| Active approved, logic broken | baseline 400 SCHEDULE_NOT_READY; setup SCHEDULE_*_FAILED; action | "… Predecessor logic — … (Schedule › Gantt › Edit)." (critical path: "(Schedule › More actions › Recalculate CPM)"; dates: "(Schedule › Gantt › Edit)"); the blocker adds the fix sentence; **Correct the Schedule** | Schedule › Gantt › Edit, or More actions |
+| Active, no activity left | readiness fix; baseline 400 NO_ACTIVITIES | "No activity is active: import a P6/MSP schedule or generate one from the BOQ (Schedule › Update Schedule)." | Schedule › Update Schedule |
+| Active draft / under review (recorded before staging) | approve 400 SCHEDULE_NOT_READY; setup | "… (Schedule › Gantt › Edit)."; "The schedule revision fails its own checks (Predecessor logic). Add or correct the activities' predecessor links on Schedule › Gantt › Edit …" | Schedule › Gantt › Edit |
+| Active approved, ready | setup action; panel | **Lock Baseline**; "Next: lock baseline" | Schedule › Revisions (Lock Baseline on the panel) |
+| Active baselined | baseline 409 INVALID_REVISION_STATUS; activate 409 REVISION_ALREADY_ACTIVE | "This schedule revision's baseline is already locked. A new baseline comes from a new revision: import or generate one (Schedule › Update Schedule), take it through review and activation, then lock its baseline."; "… already active and its baseline is locked. Refresh …" | Schedule › Update Schedule |
+| Active baselined | rollback of a revision that is not active, 409 REVISION_NOT_ACTIVE | "Only the active schedule revision can be rolled back, and this one is not active. Refresh Schedule › Revisions …" | Schedule › Revisions |
+| Staged revision beside an active baselined one | `GET /schedule` `candidateRevision`; the Schedule page | A second review panel, "Staged revision: <label>", with its own readiness and Submit / Approve / Reject; Activate stays on the Revisions tab | Schedule page, beside the active schedule |
+| Staged revision beside an active baselined one | setup `schedule_approval` advisory STAGED_REVISION_PENDING | "A newer schedule revision, "<label>", is staged beside the active schedule and replaces it only once it is approved and activated. <its next step>" (an advisory: it moves no step or gate) | Schedule › Revisions |
+
+API-only validation refusals say what is wrong in words (`validateWithReasons`): an over-long comment ("The approval comment can be at most 2,000 characters."), a malformed activation body, a malformed revision id (schedule or BOQ), and a body that is not JSON ("The request body is not valid JSON.", from `middleware/error-handler`).
+
+Tests: `backend/src/services/__live__/pc-4-merge-gate-r7.live.test.js` walks the states above against a real API. It asserts each text and target, and that no answer on the path names Schedule › Critical Path, Schedule › Activities or a bare Schedule › Gantt. Each of these mutations fails it:
+- the staged fix reverted to the active pages;
+- the already-active guard removed;
+- no candidate revision on the Schedule page;
+- the baseline step pointing at the lock while the logic is broken;
+- the approval step back to its bare sentence;
+- the comment validator without its reason;
+- the JSON mapping removed.

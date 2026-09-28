@@ -574,10 +574,38 @@ describe('scheduleNotReadyMessage', () => {
     );
     expect(message).toBe(
       'Schedule readiness checks must pass before approval: ' +
-        'Predecessor logic — at least one predecessor relationship is required (Schedule › Gantt); ' +
+        'Predecessor logic — at least one predecessor relationship is required (Schedule › Gantt › Edit); ' +
         'BOQ allocations — BOQ value remains unallocated to approved schedule activities (Project Controls › Mapping); ' +
-        'Critical path — a critical path is required (Schedule › Critical Path).',
+        'Critical path — a critical path is required (Schedule › More actions › Recalculate CPM).',
     );
     expect(message).not.toMatch(/\bbOQ\b/);
+    // The read-only Critical Path tab and the Activities table are never
+    // named as places to fix anything.
+    expect(message).not.toMatch(/Schedule › Critical Path|Schedule › Activities/);
+  });
+
+  it('a staged revision is never sent to a page that shows only the active schedule: its fix is the corrected import, or the rejection', () => {
+    const readiness = scheduleService.buildScheduleReadiness({
+      project: { id: 'p', startDate: new Date('2026-01-05'), endDate: new Date('2026-12-18') },
+      revision: { id: 'r', isActive: false, status: 'under_review' },
+      activities: [
+        { id: 'a', name: 'A', duration: 5, earlyStart: 0, earlyFinish: 5, totalFloat: 0, isCritical: true, predecessors: '' },
+        { id: 'b', name: 'B', duration: 5, earlyStart: 5, earlyFinish: 10, totalFloat: 0, isCritical: true, predecessors: '' },
+      ],
+      allocationSummary: {},
+    });
+    const message = scheduleService.scheduleNotReadyMessage(readiness, 'approval', { gate: 'approval' });
+    expect(message).toBe(
+      'Schedule readiness checks must pass before approval: Predecessor logic — at least one predecessor relationship is required. ' +
+        'A staged revision cannot be edited: correct the schedule at its source and import it again, or regenerate it from the BOQ (Schedule › Update Schedule) — the new revision replaces this one, or reject this revision (Schedule Review).',
+    );
+    expect(message).not.toMatch(/Gantt|Activities|Critical Path/);
+    // A reader who may not import is told who can.
+    const denied = scheduleService.scheduleNotReadyMessage(readiness, 'approval', {
+      gate: 'approval',
+      access: { can: () => false },
+    });
+    expect(denied).toBe(`${message} The step on Schedule › Update Schedule needs a member who can create schedules (import or generate); ask one of them.`);
+    expect(scheduleService.scheduleNotReadyMessage(readiness, 'approval', { gate: 'approval', access: { can: () => true } })).toBe(message);
   });
 });

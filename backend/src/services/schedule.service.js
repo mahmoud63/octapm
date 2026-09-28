@@ -312,6 +312,134 @@ const buildPlannedDateFields = (activity, project) => {
   };
 };
 
+/*
+ * Where a failing schedule-readiness check is put right (owner decision D5,
+ * the sweep of every refusal and next step on the approval and baseline
+ * path): the action that resolves it and a page that offers that action —
+ * never a page that cannot.
+ *
+ * A staged revision (imported or generated, not activated yet) lives only in
+ * its snapshot. No page shows or edits its activities — Schedule › Gantt,
+ * Activities and Critical Path show the ACTIVE schedule, and an edit there
+ * never changes the snapshot — so its own logic is put right at its source
+ * and imported again, or regenerated from the BOQ (Schedule › Update
+ * Schedule; the new revision replaces this one), or, under review, the
+ * revision is rejected. An active revision's activities are edited on
+ * Schedule › Gantt (Edit); its CPM is recalculated from Schedule › More
+ * actions. The Critical Path tab is read-only and is never named as a place
+ * to fix anything.
+ *
+ * Each fix names the permission its action needs, so a refusal can say who
+ * may take it when the reader may not (FIX_PERMISSIONS; the routes resolve
+ * the reader's own answer, the review panel likewise).
+ */
+const FIX_PERMISSIONS = Object.freeze({
+  "schedule.create": {
+    module: "schedule",
+    action: "create",
+    transition: null,
+    who: "create schedules (import or generate)",
+  },
+  "schedule.update": {
+    module: "schedule",
+    action: "update",
+    transition: null,
+    who: "edit the schedule",
+  },
+  "schedule.approve": {
+    module: "schedule",
+    action: "approve",
+    transition: "revision.activate",
+    who: "approve and activate schedules",
+  },
+  "boq.create": {
+    module: "boq",
+    action: "create",
+    transition: "allocation.create",
+    who: "map the BOQ to activities",
+  },
+});
+
+// The checks the approval needs: the revision's own logic (D5).
+const APPROVAL_LOGIC_CHECKS = new Set(["predecessors", "critical_path", "date_sanity"]);
+
+const STAGED_CANNOT_BE_EDITED =
+  "A staged revision cannot be edited: correct the schedule at its source and import it again, or regenerate it from the BOQ (Schedule › Update Schedule) — the new revision replaces this one";
+
+/**
+ * The fix of one failing check: `where` (the page, a short parenthesis when
+ * `inline`), `next` (the step, for a "Next:" label), `text` (the sentence a
+ * refusal and the review panel give) and `permission` (a FIX_PERMISSIONS
+ * key). Null for a check that has no fix of its own.
+ */
+const readinessCheckFix = ({ key, staged, activityCount, status }) => {
+  if (key === "allocations") {
+    return staged
+      ? {
+          where: "Schedule › Revisions",
+          inline: false,
+          permission: "schedule.approve",
+          next: "approve and activate this revision (Schedule › Revisions), then map the BOQ to its activities (Project Controls › Mapping)",
+          text: "Once this revision is approved, activate it on Schedule › Revisions; then map the BOQ to its activities on Project Controls › Mapping.",
+        }
+      : {
+          where: "Project Controls › Mapping",
+          inline: true,
+          permission: "boq.create",
+          next: "map the BOQ to the active activities (Project Controls › Mapping)",
+          text: "Map the BOQ to the active activities and approve the allocations on Project Controls › Mapping.",
+        };
+  }
+  if (!APPROVAL_LOGIC_CHECKS.has(key)) return null;
+  if (staged) {
+    const reject =
+      status === REVISION_STATUS.UNDER_REVIEW
+        ? ", or reject this revision (Schedule Review)"
+        : "";
+    return {
+      where: "Schedule › Update Schedule",
+      inline: false,
+      permission: "schedule.create",
+      next: `import a corrected schedule or regenerate it (Schedule › Update Schedule)${reject}`,
+      text: `${STAGED_CANNOT_BE_EDITED}${reject}.`,
+    };
+  }
+  if (activityCount === 0) {
+    return {
+      where: "Schedule › Update Schedule",
+      inline: false,
+      permission: "schedule.create",
+      next: "import or generate a schedule (Schedule › Update Schedule)",
+      text: "No activity is active: import a P6/MSP schedule or generate one from the BOQ (Schedule › Update Schedule).",
+    };
+  }
+  if (key === "critical_path") {
+    return {
+      where: "Schedule › More actions › Recalculate CPM",
+      inline: true,
+      permission: "schedule.update",
+      next: "recalculate CPM (Schedule › More actions › Recalculate CPM)",
+      text: "Recalculate CPM (Schedule › More actions › Recalculate CPM), or correct the activities' logic on Schedule › Gantt › Edit.",
+    };
+  }
+  if (key === "predecessors") {
+    return {
+      where: "Schedule › Gantt › Edit",
+      inline: true,
+      permission: "schedule.update",
+      next: "correct the predecessor links (Schedule › Gantt › Edit)",
+      text: "Add or correct the activities' predecessor links on Schedule › Gantt › Edit (open an activity, Relationship Grid).",
+    };
+  }
+  return {
+    where: "Schedule › Gantt › Edit",
+    inline: true,
+    permission: "schedule.update",
+    next: "correct the activity dates (Schedule › Gantt › Edit)",
+    text: "Correct the activity's duration or start on Schedule › Gantt › Edit.",
+  };
+};
+
 /**
  * The failing blocking checks a gate needs ("approval" or "baseline"); with
  * no gate, every failing blocking check. A check that names no gate (a
@@ -634,6 +762,15 @@ const buildScheduleReadiness = ({
   // BOQ allocation coverage included. `ready` and `blockingCount` answer
   // for the approval; `baselineReady` and `baselineBlockingCount` for the
   // baseline lock.
+  // Each failing check names what puts it right, by where the revision
+  // stands (staged or active) — the words every refusal and next step use.
+  const revisionStatus = normalizeRevisionStatus(revision?.status);
+  for (const check of checks) {
+    check.fix = check.passed
+      ? null
+      : readinessCheckFix({ key: check.key, staged, activityCount, status: revisionStatus });
+  }
+
   const approvalFailures = failingChecksFor({ checks }, "approval");
   const baselineFailures = failingChecksFor({ checks }, "baseline");
 
@@ -699,8 +836,14 @@ const loadCurrentRevisionForLifecycle = async ({
   ]);
   const defaultRevision = latestCandidate || activeRevision;
 
-  if (!defaultRevision) {
-    throw new HttpError(404, "REVISION_NOT_FOUND", "Revision not found");
+  // No revision to act on: said as the step that creates one, on the page
+  // that offers it (the Schedule page imports or generates a schedule).
+  if (!defaultRevision && !revisionId) {
+    throw new HttpError(
+      404,
+      "REVISION_NOT_FOUND",
+      "No schedule revision exists yet: import a P6/MSP schedule or generate one from the BOQ on the Schedule page.",
+    );
   }
 
   const revision = revisionId
@@ -710,7 +853,11 @@ const loadCurrentRevisionForLifecycle = async ({
     : defaultRevision;
 
   if (!revision) {
-    throw new HttpError(404, "REVISION_NOT_FOUND", "Revision not found");
+    throw new HttpError(
+      404,
+      "REVISION_NOT_FOUND",
+      "This schedule revision was not found in this project. Refresh Schedule › Revisions to see the current revision.",
+    );
   }
 
   const currentIds = new Set(
@@ -796,7 +943,11 @@ const joinLabels = (statuses) => statuses.map(revisionStatusLabel).join(" or ");
  * status the step needs, and that a refresh shows the current state.
  */
 const invalidRevisionStatusMessage = ({ status, allowed, action }) =>
-  `This schedule revision is now ${revisionStatusLabel(status)}; it must be ${joinLabels(allowed)} before it can be ${action}. Refresh to see its current status.`;
+  // A baseline locked already is not locked twice: a new baseline comes
+  // from a new revision, and the refusal says how one is made.
+  status === REVISION_STATUS.BASELINED && action === "baselined"
+    ? "This schedule revision's baseline is already locked. A new baseline comes from a new revision: import or generate one (Schedule › Update Schedule), take it through review and activation, then lock its baseline. Refresh to see its current status."
+    : `This schedule revision is now ${revisionStatusLabel(status)}; it must be ${joinLabels(allowed)} before it can be ${action}. Refresh to see its current status.`;
 
 const assertAllowedStatus = (revision, allowed, action) => {
   const status = normalizeRevisionStatus(revision.status);
@@ -815,26 +966,41 @@ const assertAllowedStatus = (revision, allowed, action) => {
 const REVISION_NOT_ACTIVATED_MESSAGE =
   "This approved schedule revision has not been activated yet. Activate it on Schedule › Revisions; its baseline can be locked after that.";
 
-// Where each blocking schedule-readiness check is put right.
-const READINESS_FIX_WHERE = Object.freeze({
-  predecessors: "Schedule › Gantt",
-  allocations: "Project Controls › Mapping",
-  critical_path: "Schedule › Critical Path",
-  date_sanity: "Schedule › Activities",
-});
+/**
+ * Who may take a fix the reader may not: "" when `access` is not given (the
+ * sentence is then the same for every reader) or the reader may take every
+ * fix named; otherwise, for each fix they may not take, a sentence naming
+ * its page and who can take it.
+ */
+const fixWhoCanSentence = (fixes, access) => {
+  if (!access || typeof access.can !== "function") return "";
+  const sentences = [];
+  for (const fix of fixes) {
+    const permission = FIX_PERMISSIONS[fix?.permission];
+    if (!permission || access.can(fix.permission)) continue;
+    const sentence = ` The step on ${fix.where} needs a member who can ${permission.who}; ask one of them.`;
+    if (!sentences.includes(sentence)) sentences.push(sentence);
+  }
+  return sentences.join("");
+};
 
 /**
  * SCHEDULE_NOT_READY in words a user can act on: each failing blocking
- * check by its label, what is wrong and where to put it right. The checks'
- * messages carry no BOQ figure, so the sentence is the same for every
- * reader; the readiness itself stays in error.details (withheld per reader
- * by utils/boq-figures withheldError).
+ * check by its label and what is wrong, then what puts it right (the check's
+ * fix — a page in parentheses for an active revision's edit, one sentence
+ * for a staged revision, which no page edits) and, when the reader may not
+ * take that step, who can. The checks' messages carry no BOQ figure, so the
+ * sentence is the same for every reader with the same permissions; the
+ * readiness itself stays in error.details (withheld per reader by
+ * utils/boq-figures withheldError).
  */
-const scheduleNotReadyMessage = (readiness, action, { gate = null } = {}) => {
+const scheduleNotReadyMessage = (readiness, action, { gate = null, access = null } = {}) => {
   const failing = failingChecksFor(readiness, gate);
   if (failing.length === 0) {
     return `Schedule readiness checks must pass before ${action}.`;
   }
+  const sentences = [];
+  const fixes = [];
   const reasons = failing.map((check) => {
     const message = String(check.message || "").trim().replace(/\.$/, "");
     // Mid-sentence, a check's message loses its capital — unless its first
@@ -844,10 +1010,18 @@ const scheduleNotReadyMessage = (readiness, action, { gate = null } = {}) => {
       : /^[A-Z](?![A-Z0-9])/.test(message)
         ? message.charAt(0).toLowerCase() + message.slice(1)
         : message;
-    const where = READINESS_FIX_WHERE[check.key];
-    return `${check.label} — ${what}${where ? ` (${where})` : ""}`;
+    // A readiness built before the fixes existed is an active revision's.
+    const fix =
+      check.fix !== undefined
+        ? check.fix
+        : readinessCheckFix({ key: check.key, staged: false, activityCount: 1, status: null });
+    if (fix) fixes.push(fix);
+    if (fix && fix.inline) return `${check.label} — ${what} (${fix.where})`;
+    if (fix && fix.text && !sentences.includes(fix.text)) sentences.push(fix.text);
+    return `${check.label} — ${what}`;
   });
-  return `Schedule readiness checks must pass before ${action}: ${reasons.join("; ")}.`;
+  const after = sentences.length > 0 ? ` ${sentences.join(" ")}` : "";
+  return `Schedule readiness checks must pass before ${action}: ${reasons.join("; ")}.${after}${fixWhoCanSentence(fixes, access)}`;
 };
 
 const supersedeOpenScheduleRevisions = async (
@@ -2442,6 +2616,22 @@ const getProjectSchedule = async ({ orgId, projectId }) => {
           activities,
           allocationSummary,
         });
+  // A newer revision staged beside the active one (a re-import after the
+  // baseline): the page shows the active schedule, and this revision beside
+  // it with its own review — judged on its own snapshot — so it can be
+  // submitted, approved or rejected where it is seen. The same revision the
+  // lifecycle accepts (loadCurrentRevisionForLifecycle's latest candidate).
+  const candidate =
+    storedRevision && storedRevision.isActive
+      ? await getLatestCandidateRevision(projectId)
+      : null;
+  const candidateRevision = candidate
+    ? serializeRevision(candidate, {
+        readiness: await getReadinessForRevision({ project, revision: candidate }),
+        snapshotActivityCount: getSnapshotActivities(candidate, project).length,
+      })
+    : null;
+
   let criticalPathExplanation = null;
   try {
     criticalPathExplanation = buildCriticalPathExplanation(activities);
@@ -2458,6 +2648,7 @@ const getProjectSchedule = async ({ orgId, projectId }) => {
 
   return {
     dataDate: project.dataDate ?? null,
+    candidateRevision,
     revision: serializeRevision(revision, {
       dataDate: project.dataDate ?? null,
       totalBudget: allocationSummary.approvedAllocatedAmount,
@@ -2632,6 +2823,18 @@ async function activateRevisionSnapshot({
   transitionComment = "Schedule revision activated",
 }) {
   const status = normalizeRevisionStatus(revision.status);
+  // Activated already (elsewhere, while the Activate dialog was open): said
+  // as where it stands and what comes next, never as a mapping to confirm.
+  if (revision.isActive) {
+    throw new HttpError(
+      409,
+      "REVISION_ALREADY_ACTIVE",
+      status === REVISION_STATUS.BASELINED
+        ? "This schedule revision is already active and its baseline is locked. Refresh Schedule › Revisions to see where it stands."
+        : "This schedule revision is already active. Refresh Schedule › Revisions — the next step is to map the BOQ to its activities (Project Controls › Mapping) and lock the baseline.",
+      { status },
+    );
+  }
   if (!allowedStatuses.includes(status)) {
     throw new HttpError(
       409,
@@ -2646,7 +2849,7 @@ async function activateRevisionSnapshot({
     throw new HttpError(
       400,
       "NO_STAGED_ACTIVITIES",
-      "Revision snapshot does not contain staged activities to activate.",
+      "This revision stores no activities to activate: import a P6/MSP schedule or generate one from the BOQ instead (Schedule › Update Schedule).",
     );
   }
 
@@ -2678,7 +2881,7 @@ async function activateRevisionSnapshot({
     throw new HttpError(
       400,
       "MAPPING_CONFIRMATION_REQUIRED",
-      "Activity mapping confirmation is required before activating a staged revision.",
+      "Activating this revision replaces the active schedule: confirm how its activities map to the active ones (Schedule › Revisions › Activate proposes the mapping), with a removal reason for each active activity left out.",
     );
   }
 
@@ -3056,7 +3259,7 @@ const rollbackRevision = async ({
     throw new HttpError(
       409,
       "REVISION_NOT_ACTIVE",
-      "Only the active schedule revision can be rolled back.",
+      "Only the active schedule revision can be rolled back, and this one is not active. Refresh Schedule › Revisions to see which revision is active.",
     );
   }
 
@@ -3267,6 +3470,7 @@ const approveRevision = async ({
   userId,
   userRole = null,
   comment = null,
+  fixAccess = null,
 }) => {
   const { project, revision } = await loadCurrentRevisionForLifecycle({
     orgId,
@@ -3285,7 +3489,7 @@ const approveRevision = async ({
     throw new HttpError(
       400,
       "SCHEDULE_NOT_READY",
-      scheduleNotReadyMessage(readiness, "approval", { gate: "approval" }),
+      scheduleNotReadyMessage(readiness, "approval", { gate: "approval", access: fixAccess }),
       readiness,
     );
   }
@@ -3427,6 +3631,7 @@ const lockBaseline = async ({
   userId = null,
   userRole = null,
   comment = null,
+  fixAccess = null,
 }) => {
   const { project, revision } = await loadCurrentRevisionForLifecycle({
     orgId,
@@ -3457,7 +3662,7 @@ const lockBaseline = async ({
     throw new HttpError(
       400,
       "SCHEDULE_NOT_READY",
-      scheduleNotReadyMessage(readiness, "baseline lock", { gate: "baseline" }),
+      scheduleNotReadyMessage(readiness, "baseline lock", { gate: "baseline", access: fixAccess }),
       readiness,
     );
   }
@@ -3693,5 +3898,8 @@ module.exports = {
   REVISION_STATUS,
   REVISION_NOT_ACTIVATED_MESSAGE,
   buildScheduleReadiness,
+  buildReadinessActivitiesFromSnapshot,
+  FIX_PERMISSIONS,
+  readinessCheckFix,
   scheduleNotReadyMessage,
 };

@@ -287,7 +287,8 @@ liveDescribe("PC-4 merge gate round 2: date-only cutoff, locked forecast, refusa
       const notReady = await built.refused(route("approve"), {}, 400);
       expect(notReady.code).toBe("SCHEDULE_NOT_READY");
       expect(notReady.message).toBe(
-        "Schedule readiness checks must pass before approval: Predecessor logic — at least one predecessor relationship is required (Schedule › Gantt).",
+        // A staged revision: no page edits it; the fix is the corrected import, or the rejection (D5 sweep).
+        "Schedule readiness checks must pass before approval: Predecessor logic — at least one predecessor relationship is required. A staged revision cannot be edited: correct the schedule at its source and import it again, or regenerate it from the BOQ (Schedule › Update Schedule) — the new revision replaces this one, or reject this revision (Schedule Review).",
       );
 
       await built.post(route("reject"), { reason: "LiveTest r2: needs logic" }, 200);

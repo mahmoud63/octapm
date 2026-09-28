@@ -124,6 +124,8 @@ const ISSUES_SHOWN = 3
 const ITEMS_SHOWN = 3
 
 const NOT_OFFERED = 'This page is not offered to you'
+// No page resolves it yet (the server sends no link): read, not followed.
+const NOT_YET = 'No page does this yet'
 
 const severityTone = (issue: ProjectSetupIssue) =>
   issue.severity === 'blocking'
@@ -159,13 +161,14 @@ function ItemLink({
 }) {
   const navigate = useNavigate()
   const name = [item.code, item.label].filter(Boolean).join(' · ') || item.type
-  const target = targetOfHref(item.href)
-  if (target && !canNavigate(target)) {
+  const href = item.href
+  const target = href ? targetOfHref(href) : null
+  if (!href || (target && !canNavigate(target))) {
     return (
       <span
         data-testid={`uat-setup-item-${item.type}-${item.id ?? item.code ?? 'project'}`}
         data-inert='true'
-        title={NOT_OFFERED}
+        title={href ? NOT_OFFERED : NOT_YET}
         className='inline-flex max-w-full items-baseline gap-1 text-xs text-foreground'
       >
         <span className='truncate font-medium'>{name}</span>
@@ -175,13 +178,13 @@ function ItemLink({
   }
   return (
     <a
-      href={item.href}
+      href={href}
       data-testid={`uat-setup-item-${item.type}-${item.id ?? item.code ?? 'project'}`}
       className='inline-flex max-w-full items-baseline gap-1 text-xs text-foreground underline-offset-2 hover:underline'
       onClick={(event) => {
         if (event.metaKey || event.ctrlKey || event.shiftKey || event.button !== 0) return
         event.preventDefault()
-        void navigate({ href: item.href })
+        void navigate({ href })
       }}
     >
       <span className='truncate font-medium'>{name}</span>
@@ -339,7 +342,7 @@ function GuideList({
               aria-hidden
               className={cn('mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full', statusSolid(guideTone(guide)))}
             />
-            {canNavigate(guide.target) ? (
+            {guide.target && guide.href && canNavigate(guide.target) ? (
               <RouterLink
                 href={guide.href}
                 testId={`uat-setup-guide-${guide.key}`}
@@ -353,7 +356,7 @@ function GuideList({
               <span
                 data-testid={`uat-setup-guide-${guide.key}`}
                 data-inert='true'
-                title={NOT_OFFERED}
+                title={guide.href ? NOT_OFFERED : NOT_YET}
                 className='inline-flex min-w-0 flex-wrap items-baseline gap-x-1 text-xs'
               >
                 {body}

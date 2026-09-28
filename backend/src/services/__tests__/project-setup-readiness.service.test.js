@@ -343,11 +343,14 @@ describe("project setup readiness service", () => {
             code: "1.2",
             label: "Rebar",
             missing: "WBS node",
-            href: "/o/acme/projects/project-1/boq?recordId=boq-2&source=boq_item",
+            // No page files a BOQ row under a WBS node yet: named, not linked.
+            href: null,
           },
         ],
       }),
     );
+    expect(structureStep.advisories[0].message).toContain("it comes with the BOQ item detail");
+    expect(structureStep.advisories[2].items.every((item) => item.href === null)).toBe(true);
 
     const approval = result.steps.find((step) => step.key === "boq_approval");
     expect(approval.status).toBe("attention");
@@ -444,7 +447,7 @@ describe("project setup readiness service", () => {
     expect(structureGuides.find((guide) => guide.key === "boq_structure")).toMatchObject({
       status: "attention",
       count: 2,
-      detail: "1 row without a WBS node · 1 with an unknown unit",
+      detail: "1 row without a WBS node (filing comes with the BOQ item detail) · 1 with an unknown unit",
       href: "/o/acme/projects/project-1/boq",
     });
     expect(structureGuides.find((guide) => guide.key === "schedule_structure")).toMatchObject({

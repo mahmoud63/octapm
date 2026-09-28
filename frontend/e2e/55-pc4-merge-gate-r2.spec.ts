@@ -401,7 +401,8 @@ test('a stale Approve on the schedule review panel names the failing check once 
   await approve.click()
   await page.getByRole('dialog').getByRole('button', { name: 'Approve' }).click()
   expect((await refusal).status()).toBe(400)
-  const reason = 'Predecessor logic — at least one predecessor relationship is required (Schedule › Gantt)'
+  // An active revision: its logic is corrected on the Gantt's edit.
+  const reason = 'Predecessor logic — at least one predecessor relationship is required (Schedule › Gantt › Edit)'
   await expect(toasts(page, reason).first()).toBeVisible({ timeout: 15_000 })
   // Shown once — the global handler does not repeat it. Counted once, not
   // retried: a retried count would pass when a duplicate expires.

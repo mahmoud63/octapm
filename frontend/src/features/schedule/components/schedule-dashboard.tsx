@@ -752,6 +752,18 @@ export function ScheduleDashboard({
       )}
 
       <ScheduleReviewPanel projectId={projectId} revision={revision} />
+      {/* A newer revision staged beside the active one (a re-import after
+          the baseline): reviewed here, beside the schedule it would replace,
+          so it can be submitted, approved, rejected — and activated on the
+          Revisions tab — where it is seen. */}
+      {schedule.candidateRevision && (
+        <ScheduleReviewPanel
+          projectId={projectId}
+          revision={schedule.candidateRevision}
+          title={`Staged revision: ${schedule.candidateRevision.label || 'Schedule revision'}`}
+          testIdPrefix='uat-staged-review'
+        />
+      )}
       <AuditHistoryPanel
         projectId={projectId}
         entityType='schedule_revision'

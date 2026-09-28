@@ -11,7 +11,7 @@ const {
   aiGenerationLimiter,
   uploadLimiter,
 } = require('../middleware/rate-limit');
-const { getEffectiveRole, requirePermission } = require('../middleware/rbac');
+const { getEffectiveRole, hasPermission, requirePermission } = require('../middleware/rbac');
 const { validate, validateWithReasons } = require('../middleware/validate');
 const scheduleService = require('../services/schedule.service');
 const {
@@ -116,6 +116,39 @@ const reasonRequired = (requiredMessage, subject) => [
 ];
 const ACTIVATION_MAPPINGS_REQUIRED =
   'Activation needs the activity mappings: send "mappings" as a list pairing each active activity with its activity in this revision (an empty list when no schedule is active yet).';
+// A lifecycle comment: optional, at most 2,000 characters, refused in words.
+const optionalComment = (subject) =>
+  body('comment')
+    .optional({ nullable: true })
+    .isString()
+    .withMessage(`${subject} must be text.`)
+    .bail()
+    .trim()
+    .isLength({ max: 2000 })
+    .withMessage(`${subject} can be at most 2,000 characters.`);
+
+/*
+ * Whether this caller may take each fix a SCHEDULE_NOT_READY refusal names
+ * (schedule.service FIX_PERMISSIONS): the refusal says who can when the
+ * caller cannot, rather than sending them to a step they are not offered.
+ */
+const fixAccessFor = (req) => ({
+  can: (key) => {
+    const permission = scheduleService.FIX_PERMISSIONS[key];
+    return Boolean(
+      permission &&
+        hasPermission(req, permission.module, permission.action, {
+          transition: permission.transition,
+        }),
+    );
+  },
+});
+const REVISION_ID_INVALID =
+  'The schedule revision id is not valid: refresh Schedule › Revisions and try again.';
+const ACTIVATION_REMOVALS_LIST =
+  'Send "unmappedRemovals" as a list: one { oldActivityId, reason } for each active activity this revision leaves out.';
+const ACTIVATION_REMOVAL_INCOMPLETE =
+  'Each removal needs the active activity (oldActivityId) and the reason it is removed (reason).';
 const ACTIVATION_MAPPING_INCOMPLETE =
   'Each activity mapping needs both the active activity (oldActivityId) and its activity in this revision (newActivityKey).';
 
@@ -209,7 +242,7 @@ router.post(
     transition: 'revision.activate',
   }),
   [
-    param('revisionId').isUUID(),
+    param('revisionId').isUUID().withMessage(REVISION_ID_INVALID),
     body('mappings').isArray().withMessage(ACTIVATION_MAPPINGS_REQUIRED),
     body('mappings.*.oldActivityId')
       .isString()
@@ -223,21 +256,27 @@ router.post(
       .trim()
       .notEmpty()
       .withMessage(ACTIVATION_MAPPING_INCOMPLETE),
-    body('unmappedRemovals').optional({ nullable: true }).isArray(),
+    body('unmappedRemovals')
+      .optional({ nullable: true })
+      .isArray()
+      .withMessage(ACTIVATION_REMOVALS_LIST),
     body('unmappedRemovals.*.oldActivityId')
       .optional()
       .isString()
+      .withMessage(ACTIVATION_REMOVAL_INCOMPLETE)
       .trim()
-      .notEmpty(),
+      .notEmpty()
+      .withMessage(ACTIVATION_REMOVAL_INCOMPLETE),
     body('unmappedRemovals.*.reason')
       .optional()
       .isString()
+      .withMessage(ACTIVATION_REMOVAL_INCOMPLETE)
       .trim()
       .notEmpty()
-      .isLength({ max: 2000 }),
-    body('comment').optional({ nullable: true }).isString().trim().isLength({
-      max: 2000,
-    }),
+      .withMessage(ACTIVATION_REMOVAL_INCOMPLETE)
+      .isLength({ max: 2000 })
+      .withMessage('A removal reason can be at most 2,000 characters.'),
+    optionalComment('The activation comment'),
     validateWithReasons,
   ],
   asyncHandler(withheldRefusals(async (req, res) => {
@@ -261,7 +300,7 @@ router.post(
     transition: 'revision.rollback',
   }),
   [
-    param('revisionId').isUUID(),
+    param('revisionId').isUUID().withMessage(REVISION_ID_INVALID),
     ...reasonRequired('A rollback reason is required.', 'The rollback reason'),
     validateWithReasons,
   ],
@@ -284,11 +323,9 @@ router.post(
     transition: 'revision.submit_review',
   }),
   [
-    param('revisionId').isUUID(),
-    body('comment').optional({ nullable: true }).isString().trim().isLength({
-      max: 2000,
-    }),
-    validate,
+    param('revisionId').isUUID().withMessage(REVISION_ID_INVALID),
+    optionalComment('The review comment'),
+    validateWithReasons,
   ],
   asyncHandler(withheldRefusals(async (req, res) => {
     const result = await scheduleService.submitRevisionForReview({
@@ -310,14 +347,13 @@ router.post(
     transition: 'revision.approve',
   }),
   [
-    param('revisionId').isUUID(),
-    body('comment').optional({ nullable: true }).isString().trim().isLength({
-      max: 2000,
-    }),
-    validate,
+    param('revisionId').isUUID().withMessage(REVISION_ID_INVALID),
+    optionalComment('The approval comment'),
+    validateWithReasons,
   ],
   asyncHandler(withheldRefusals(async (req, res) => {
     const result = await scheduleService.approveRevision({
+      fixAccess: fixAccessFor(req),
       orgId: req.user.orgId,
       projectId: req.params.projectId,
       revisionId: req.params.revisionId,
@@ -336,7 +372,7 @@ router.post(
     transition: 'revision.reject',
   }),
   [
-    param('revisionId').isUUID(),
+    param('revisionId').isUUID().withMessage(REVISION_ID_INVALID),
     ...reasonRequired('A rejection reason is required.', 'The rejection reason'),
     validateWithReasons,
   ],
@@ -360,14 +396,13 @@ router.post(
     transition: 'revision.baseline',
   }),
   [
-    param('revisionId').isUUID(),
-    body('comment').optional({ nullable: true }).isString().trim().isLength({
-      max: 2000,
-    }),
-    validate,
+    param('revisionId').isUUID().withMessage(REVISION_ID_INVALID),
+    optionalComment('The baseline comment'),
+    validateWithReasons,
   ],
   asyncHandler(withheldRefusals(async (req, res) => {
     const result = await scheduleService.lockBaseline({
+      fixAccess: fixAccessFor(req),
       orgId: req.user.orgId,
       projectId: req.params.projectId,
       revisionId: req.params.revisionId,
@@ -386,14 +421,13 @@ router.post(
     transition: 'revision.baseline',
   }),
   [
-    body('revisionId').optional({ nullable: true }).isUUID(),
-    body('comment').optional({ nullable: true }).isString().trim().isLength({
-      max: 2000,
-    }),
-    validate,
+    body('revisionId').optional({ nullable: true }).isUUID().withMessage(REVISION_ID_INVALID),
+    optionalComment('The baseline comment'),
+    validateWithReasons,
   ],
   asyncHandler(withheldRefusals(async (req, res) => {
     const result = await scheduleService.lockBaseline({
+      fixAccess: fixAccessFor(req),
       orgId: req.user.orgId,
       projectId: req.params.projectId,
       revisionId: req.body?.revisionId || null,

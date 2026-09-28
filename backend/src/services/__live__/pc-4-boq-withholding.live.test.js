@@ -713,14 +713,19 @@ liveDescribe("PC-4 §12: the Overview and the Schedule module carry no BOQ figur
     };
     for (const [name, { route, body = {}, code, status }] of Object.entries(refusals)) {
       const [full, limited] = [await api.post(route, body, auth()), await api.post(route, body, pmAuth)];
-      // The same refusal for both: status, code, message, and the verdicts.
+      // The same refusal for both: status, code, message, and the verdicts —
+      // except that where the refusal names mapping the BOQ as the fix, the
+      // PM who may not map it is told who can (the D5 sweep); no figure.
       expect([name, full.status, full.body?.error?.code]).toEqual([name, status, code]);
+      const whoCan = full.body.error.message.includes("(Project Controls › Mapping)") && code === "SCHEDULE_NOT_READY"
+        ? " The step on Project Controls › Mapping needs a member who can map the BOQ to activities; ask one of them."
+        : "";
       expect([name, limited.status, limited.body?.success, limited.body?.error?.code, limited.body?.error?.message]).toEqual([
         name,
         status,
         false,
         code,
-        full.body.error.message,
+        `${full.body.error.message}${whoCan}`,
       ]);
       // The BOQ reader is told the bill's figures ...
       expect([name, keyPaths(full.body.error.details, new Set(BOQ_KEYS)).length > 0]).toEqual([name, true]);

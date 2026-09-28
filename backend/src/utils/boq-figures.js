@@ -140,6 +140,10 @@ const withheldSchedule = (schedule, access = FULL_ACCESS) => {
   return {
     ...schedule,
     revision: withheldRevision(schedule.revision, access),
+    // A revision staged beside the active one goes the same way.
+    ...(has(schedule, "candidateRevision")
+      ? { candidateRevision: withheldRevision(schedule.candidateRevision, access) }
+      : {}),
     activities: Array.isArray(schedule.activities)
       ? schedule.activities.map((activity) => withheldActivity(activity, access))
       : schedule.activities,

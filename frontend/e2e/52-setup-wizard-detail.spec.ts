@@ -151,7 +151,12 @@ test('overview landing shows the controls strip; the wizard lists the offending 
   await expect(wbsGuide).toHaveAttribute('href', `${base}/controls/structure`)
   await expect(structureStep.getByTestId('uat-setup-guide-locations')).toHaveAttribute('href', `${base}/locations`)
   await expect(structureStep.getByTestId('uat-setup-guide-cost_codes')).toHaveAttribute('href', `${base}/cost/budget`)
-  await expect(structureStep.getByTestId('uat-setup-guide-boq_structure')).toContainText('3 rows without a WBS node')
+  // Filing a BOQ row under a WBS node has no page yet: the guide says so and
+  // is read, not followed — no link to a page that cannot resolve it.
+  const boqGuide = structureStep.getByTestId('uat-setup-guide-boq_structure')
+  await expect(boqGuide).toContainText('3 rows without a WBS node (filing comes with the BOQ item detail)')
+  await expect(boqGuide).toHaveAttribute('data-inert', 'true')
+  await expect(boqGuide).not.toHaveAttribute('href', /.*/)
   await expect(structureStep.getByTestId('uat-setup-guide-mapping_readiness')).toContainText('0% covered')
   const stepKeys = await page.locator('[data-testid^="uat-setup-step-"]').evaluateAll((nodes) =>
     nodes.map((node) => node.getAttribute('data-testid')!.replace('uat-setup-step-', '')),
@@ -159,18 +164,21 @@ test('overview landing shows the controls strip; the wizard lists the offending 
   expect(stepKeys.slice(0, 5)).toEqual(['project_profile', 'structure_setup', 'boq_upload', 'boq_approval', 'schedule_generation'])
 
   // The Structure step names the rows without a WBS node (all three, with
-  // the count), each a link into the grid with the record in the URL, under
-  // the workspace — as information: nothing in the product files a row yet,
-  // so it holds no step, and the BOQ upload is complete as before PC-4.
+  // the count) — as information, named but not linked: nothing in the
+  // product files a row yet (it comes with the BOQ item detail), so it holds
+  // no step, the BOQ upload is complete as before PC-4, and no link sends the
+  // PM to the BOQ grid, which cannot file it.
   await expect(page.getByTestId('uat-setup-step-boq_upload')).not.toContainText(/no WBS node/i)
   const boqStep = structureStep.getByTestId('uat-setup-advisories-structure_setup')
   const withoutWbs = boqStep.getByTestId('uat-setup-issue-BOQ_ITEMS_WITHOUT_WBS')
   await expect(withoutWbs).toContainText(/no WBS node/i)
   await expect(withoutWbs).toContainText('(3)')
+  await expect(withoutWbs).toContainText('it comes with the BOQ item detail')
   const rebarLink = boqStep.getByTestId(`uat-setup-item-boq_item-${setup.rebar}`)
   await expect(rebarLink).toContainText('1.2 · Reinforcement to foundations')
   await expect(rebarLink).toContainText('WBS node')
-  await expect(rebarLink).toHaveAttribute('href', `${base}/boq?recordId=${setup.rebar}&source=boq_item`)
+  await expect(rebarLink).toHaveAttribute('data-inert', 'true')
+  await expect(rebarLink).not.toHaveAttribute('href', /.*/)
   await expect(boqStep.getByTestId(`uat-setup-item-boq_item-${setup.concrete}`)).toBeVisible()
   await expect(boqStep.getByTestId(`uat-setup-item-boq_item-${setup.prelims}`)).toBeVisible()
 
@@ -181,13 +189,7 @@ test('overview landing shows the controls strip; the wizard lists the offending 
   await expect(fixLink).toHaveAttribute('href', `${base}/activities?recordId=${setup.fix}&source=activity`)
   await expect(scheduleStep.getByTestId(`uat-setup-item-activity-${setup.pour}`)).toBeVisible()
 
-  // The links work: the BOQ row opens the BOQ module with the record in the
-  // URL, the activity opens the activities module.
-  await rebarLink.click()
-  await expect(page).toHaveURL(new RegExp(`/boq\\?recordId=${setup.rebar}&source=boq_item$`))
-  await expect(page.getByTestId('uat-project-content-boq')).toBeVisible({ timeout: 30_000 })
-  await page.goBack()
-  await expect(page.getByTestId('uat-project-content-overview')).toBeVisible({ timeout: 30_000 })
+  // The activity's link works: it opens the activities module.
   await page.getByTestId('uat-setup-step-structure_setup').getByTestId(`uat-setup-item-activity-${setup.fix}`).click()
   await expect(page).toHaveURL(new RegExp(`/activities\\?recordId=${setup.fix}&source=activity$`))
   await expect(page.getByTestId('uat-project-content-activities')).toBeVisible({ timeout: 30_000 })
@@ -797,7 +799,18 @@ test('members who cannot read the BOQ: the Overview and every Schedule tab rende
         await page.getByTestId('uat-module-menu-schedule').getByTestId('uat-module-child-schedule-wbs').click()
         await expect(page).toHaveURL(/\/schedule\/wbs$/, { timeout: 30_000 })
       } else {
+        // The Gantt reads its saved layouts after it renders, which can be
+        // after the network first goes idle: wait for that answer, so the
+        // next navigation cannot cancel it before it is recorded below.
+        const layoutsAnswer =
+          tab === 'gantt'
+            ? page.waitForResponse(
+                (r) => /\/schedule\/layouts(\?|$)/.test(r.url()) && r.request().method() === 'GET',
+                { timeout: 45_000 }
+              )
+            : null
         await page.goto(`${base}/schedule/${tab}`)
+        if (layoutsAnswer) expect((await layoutsAnswer).status()).toBe(200)
       }
       await expect(page.getByTestId('uat-project-content-schedule')).toBeVisible({ timeout: 30_000 })
       await expect(page.locator(`[role="tabpanel"][data-state="active"][id$="-content-${tab}"]`)).toBeVisible({

@@ -36,6 +36,10 @@ import {
 interface Props {
   projectId: string
   revision: ScheduleRevision
+  /** The heading: 'Schedule Review', or the staged revision beside the active one. */
+  title?: string
+  /** The test ids' prefix, so a second panel on the page has its own. */
+  testIdPrefix?: string
 }
 
 type DialogMode = 'submit' | 'approve' | 'reject' | 'baseline' | null
@@ -85,17 +89,62 @@ const ALLOCATION_BLOCKER_CODES = new Set([
   'SCHEDULE_ALLOCATIONS_FAILED',
 ])
 
-function getNextActionLabel(
-  status: ScheduleRevisionStatus,
-  ready: boolean,
-  awaitingActivation: boolean,
-  baselineReady: boolean,
+type CheckFix = NonNullable<
+  NonNullable<ScheduleRevision['readiness']>['checks'][number]['fix']
+>
+
+// Who may take a fix, as the server names them (schedule.service
+// FIX_PERMISSIONS): said beside a fix this member is not offered.
+const FIX_WHO: Record<string, string> = {
+  'schedule.create': 'create schedules (import or generate)',
+  'schedule.update': 'edit the schedule',
+  'schedule.approve': 'approve and activate schedules',
+  'boq.create': 'map the BOQ to activities',
+}
+
+/**
+ * The next step, in the words and order of D5, naming the page that offers
+ * it. A revision failing its own checks is sent where its fix is (the
+ * server's check.fix): a staged one to the corrected import — no page edits
+ * it — and an active one to the Gantt's edit or Recalculate CPM.
+ */
+function getNextActionLabel({
+  status,
+  ready,
+  awaitingActivation,
+  baselineReady,
+  coverageBlocksBaseline,
+  staged,
+  approvalFix,
+  baselineFix,
+}: {
+  status: ScheduleRevisionStatus
+  ready: boolean
+  awaitingActivation: boolean
+  baselineReady: boolean
   coverageBlocksBaseline: boolean
-) {
-  if (status === 'draft') return 'Next: submit for review'
-  if (status === 'rejected') return 'Next: resubmit for review'
+  staged: boolean
+  approvalFix: CheckFix | null
+  baselineFix: CheckFix | null
+}) {
+  if (status === 'draft') {
+    return approvalFix
+      ? `Next: ${approvalFix.next} — this revision fails its own checks`
+      : 'Next: submit for review'
+  }
+  if (status === 'rejected') {
+    if (approvalFix) {
+      return `Next: ${approvalFix.next} — this revision fails its own checks`
+    }
+    return staged
+      ? 'Next: import a corrected schedule (Schedule › Update Schedule), or resubmit for review'
+      : 'Next: correct the schedule (Schedule › Gantt › Edit) and resubmit for review'
+  }
   if (status === 'under_review') {
-    return ready ? 'Next: approve or reject' : 'Next: clear readiness blockers'
+    if (ready) return 'Next: approve or reject'
+    return approvalFix
+      ? `Next: ${approvalFix.next}`
+      : 'Next: reject this revision or correct its schedule'
   }
   // An approved revision still staged is not the schedule yet: its baseline
   // comes after it is activated, which is done on the Revisions tab.
@@ -108,9 +157,10 @@ function getNextActionLabel(
     return 'Next: map the BOQ to the active activities (Project Controls › Mapping), then lock baseline'
   }
   if (status === 'approved') {
-    return baselineReady
-      ? 'Next: lock baseline'
-      : 'Next: clear readiness blockers'
+    if (baselineReady) return 'Next: lock baseline'
+    return baselineFix
+      ? `Next: ${baselineFix.next}, then lock baseline`
+      : 'Next: clear the baseline blockers listed below'
   }
   if (status === 'baselined') return 'Baseline locked'
   return 'No action available'
@@ -206,7 +256,12 @@ function WorkflowDialog({
   )
 }
 
-export function ScheduleReviewPanel({ projectId, revision }: Props) {
+export function ScheduleReviewPanel({
+  projectId,
+  revision,
+  title = 'Schedule Review',
+  testIdPrefix = 'uat-schedule-review',
+}: Props) {
   const status = (revision.status || 'draft') as ScheduleRevisionStatus
   const readiness = revision.readiness ?? null
   const { data: setupReadiness } = useProjectSetupReadiness(projectId)
@@ -234,6 +289,27 @@ export function ScheduleReviewPanel({ projectId, revision }: Props) {
           !check.passed
       ))
   const canOpenMapping = useCanPerform('boq', 'read')
+  // A staged revision (not activated): its checks are its snapshot's, and
+  // no page edits it — the server's fixes say so.
+  const staged = revision.isActive === false
+  const failingFix = (gate: 'approval' | 'baseline') =>
+    (readiness?.checks ?? []).find(
+      (check) =>
+        check.severity === 'blocking' &&
+        !check.passed &&
+        check.fix &&
+        (!Array.isArray(check.requiredFor) || check.requiredFor.includes(gate))
+    )?.fix ?? null
+  const approvalFix = failingFix('approval')
+  const baselineFix = failingFix('baseline')
+  // Whether this member is offered each fix's step; beside one they are
+  // not, the panel says who can.
+  const fixOffered: Record<string, boolean> = {
+    'schedule.create': useCanPerform('schedule', 'create'),
+    'schedule.update': useCanPerform('schedule', 'update'),
+    'schedule.approve': useCanPerform('schedule', 'approve', 'revision.activate'),
+    'boq.create': useCanPerform('boq', 'create', 'allocation.create'),
+  }
   const setupBaselineBlocked = Boolean(
     baselineGate && !baselineGate.ready && !baselineGate.alreadyLocked
   )
@@ -324,28 +400,31 @@ export function ScheduleReviewPanel({ projectId, revision }: Props) {
   return (
     <section
       className='rounded-lg border bg-card p-4'
-      data-testid='uat-schedule-review'
+      data-testid={testIdPrefix}
       data-status={status}
     >
       <div className='flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between'>
         <div className='min-w-0 space-y-2'>
           <div className='flex flex-wrap items-center gap-2'>
             <ClipboardCheck className='h-4 w-4 text-primary' />
-            <h3 className='text-sm font-semibold'>Schedule Review</h3>
+            <h3 className='text-sm font-semibold'>{title}</h3>
             <Badge variant='outline' className={meta.className}>
               {meta.label}
             </Badge>
             <span
               className='text-xs text-muted-foreground'
-              data-testid='uat-schedule-review-next'
+              data-testid={`${testIdPrefix}-next`}
             >
-              {getNextActionLabel(
+              {getNextActionLabel({
                 status,
-                isReady,
+                ready: isReady,
                 awaitingActivation,
-                isBaselineReady,
-                coverageBlocksBaseline
-              )}
+                baselineReady: isBaselineReady,
+                coverageBlocksBaseline,
+                staged,
+                approvalFix,
+                baselineFix,
+              })}
             </span>
           </div>
           <div className='flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground'>
@@ -441,7 +520,7 @@ export function ScheduleReviewPanel({ projectId, revision }: Props) {
                   <Link
                     to='/projects/$projectId/$module/$child'
                     params={{ projectId, module: 'controls', child: 'mapping' }}
-                    data-testid='uat-schedule-review-open-mapping'
+                    data-testid={`${testIdPrefix}-open-mapping`}
                   >
                     Map the BOQ to the active activities (Project Controls ›
                     Mapping)
@@ -543,7 +622,7 @@ export function ScheduleReviewPanel({ projectId, revision }: Props) {
           </div>
           <span
             className='text-xs text-muted-foreground'
-            data-testid='uat-schedule-review-blocking'
+            data-testid={`${testIdPrefix}-blocking`}
           >
             {readiness
               ? `${
@@ -567,7 +646,7 @@ export function ScheduleReviewPanel({ projectId, revision }: Props) {
             return (
               <div
                 key={check.key}
-                data-testid={`uat-schedule-review-check-${check.key}`}
+                data-testid={`${testIdPrefix}-check-${check.key}`}
                 className='grid gap-2 px-3 py-2 text-sm md:grid-cols-[220px_1fr_auto] md:items-center'
               >
                 <div className='flex items-center gap-2 font-medium'>
@@ -580,7 +659,22 @@ export function ScheduleReviewPanel({ projectId, revision }: Props) {
                   )}
                   {check.label}
                 </div>
-                <p className='text-xs text-muted-foreground'>{check.message}</p>
+                <div className='min-w-0 space-y-0.5'>
+                  <p className='text-xs text-muted-foreground'>{check.message}</p>
+                  {/* What puts it right, and where (the server's words) —
+                      never a page that cannot; who can, when this member
+                      is not offered the step. */}
+                  {!check.passed && check.fix && !beforeBaseline && (
+                    <p
+                      className='text-xs text-foreground'
+                      data-testid={`${testIdPrefix}-fix-${check.key}`}
+                    >
+                      To fix: {check.fix.text}
+                      {fixOffered[check.fix.permission] === false &&
+                        ` Only members who can ${FIX_WHO[check.fix.permission] ?? 'take this step'} can do this; ask one of them.`}
+                    </p>
+                  )}
+                </div>
                 <Badge
                   variant={check.passed ? 'outline' : 'secondary'}
                   className='w-fit'

@@ -4,6 +4,7 @@ const { addMoney } = require("../utils/money");
 const { workspacePath, workspaceSegment } = require("../utils/record-links");
 const { buildAllocationSummary } = require("./activity-boq-allocation.service");
 const {
+  buildReadinessActivitiesFromSnapshot,
   buildScheduleReadiness,
   REVISION_NOT_ACTIVATED_MESSAGE,
 } = require("./schedule.service");
@@ -71,9 +72,70 @@ const STAGED_WAITING_MESSAGES = Object.freeze({
     "Submit the schedule revision for review, approve it and activate it (Schedule › Revisions) before mapping allocations to its activities.",
   under_review:
     "Approve the schedule revision under review and activate it (Schedule › Revisions) before mapping allocations to its activities.",
+  // A staged revision cannot be edited: a rejected one is replaced by a
+  // corrected import (or regeneration), or resubmitted as it is.
   rejected:
-    "Revise and resubmit the rejected schedule revision, then approve and activate it (Schedule › Revisions) before mapping allocations to its activities.",
+    "The schedule revision was rejected: import a corrected schedule or regenerate it (Schedule › Update Schedule), or resubmit it for review (Schedule › Revisions); approve and activate it before mapping allocations to its activities.",
 });
+
+// Filing a BOQ row under a WBS node or a cost code has no control in the
+// product yet: no page and no API writes BoqItem.wbsNodeId or costCodeId
+// (the BOQ row editor writes code, description, quantity, unit and rate).
+// It comes with the BOQ item detail (PC-5). Until then the advisories say
+// so and link nowhere.
+const BOQ_FILING_NOT_YET =
+  "Filing BOQ rows under a WBS node or a cost code is not available yet; it comes with the BOQ item detail. Nothing is blocked meanwhile.";
+
+// The approval's own failing checks (the revision's logic, D5) of a
+// schedule readiness: the checks that guard the approval.
+const failingApprovalChecks = (readiness) =>
+  (readiness?.checks || []).filter(
+    (check) =>
+      check.severity === "blocking" &&
+      !check.passed &&
+      (!Array.isArray(check.requiredFor) || check.requiredFor.includes("approval")),
+  );
+
+/**
+ * A revision that fails its own checks, said with what puts them right (the
+ * checks' fixes, schedule.service readinessCheckFix): for a staged revision,
+ * the corrected import or regeneration — no page edits it — and for an
+ * active one, the Gantt's edit or Recalculate CPM. Null when it passes.
+ */
+const failingLogicSentence = (readiness) => {
+  const failing = failingApprovalChecks(readiness);
+  if (failing.length === 0) return null;
+  const labels = failing.map((check) => check.label).join(", ");
+  const fixes = [];
+  for (const check of failing) {
+    if (check.fix?.text && !fixes.includes(check.fix.text)) fixes.push(check.fix.text);
+  }
+  return `The schedule revision fails its own checks (${labels}).${fixes.length ? ` ${fixes.join(" ")}` : ""}`;
+};
+
+/**
+ * Where a schedule revision that is not approved stands, and the step that
+ * moves it on, with the page that offers it (the D5 order: submit, approve,
+ * activate, map, lock). `readiness` is the revision's own — its snapshot's
+ * for a staged revision.
+ */
+const revisionApprovalStep = (revision, readiness) => {
+  const status = normalizeRevisionStatus(revision?.status);
+  const failing = failingLogicSentence(readiness);
+  if (failing && ["draft", "under_review", "rejected"].includes(status)) return failing;
+  if (status === "draft") {
+    return "Submit the schedule revision for review, then approve it (Schedule Review, on Schedule › Revisions).";
+  }
+  if (status === "under_review") {
+    return "Approve or reject the schedule revision under review (Schedule Review, on Schedule › Revisions).";
+  }
+  if (status === "rejected") {
+    return revision?.isActive
+      ? "The schedule revision was rejected: correct it on Schedule › Gantt › Edit and resubmit it for review (Schedule Review, on Schedule › Revisions)."
+      : "The schedule revision was rejected: import a corrected schedule or regenerate it (Schedule › Update Schedule), or resubmit it for review (Schedule Review, on Schedule › Revisions).";
+  }
+  return "No approved schedule revision is available for baseline/progress.";
+};
 
 const OFFICIAL_EV_INPUTS = [
   {
@@ -662,6 +724,10 @@ const getSetupReadiness = async ({ orgId, projectId, canReadBoq = true, canReadS
     missing,
     href: link(target, { type: "boq_item", id: item.id || item.boqItemId }),
   });
+  // A BOQ row not filed under a WBS node or a cost code: named, not linked.
+  // No page files a row yet (BOQ_FILING_NOT_YET), so a link would send the
+  // PM to a page that cannot resolve it.
+  const unfiledBoqItem = (item, missing) => ({ ...boqItemItem(item, missing), href: null });
   const projectItem = (missing) => ({
     type: "project",
     id: project.id,
@@ -681,6 +747,35 @@ const getSetupReadiness = async ({ orgId, projectId, canReadBoq = true, canReadS
         allocationSummary,
       })
     : null;
+  // A revision judged on its own activities: a staged one (imported or
+  // generated, not activated) on its snapshot, as the approval judges it —
+  // the active activities are not its own. Used for what its approval step
+  // says; the checks the baseline reads stay the active schedule's.
+  const ownReadiness = (revision) =>
+    revision && !revision.isActive
+      ? buildScheduleReadiness({
+          project,
+          revision,
+          activities: buildReadinessActivitiesFromSnapshot(revision, project),
+          allocationSummary,
+        })
+      : revision && revision.id === currentRevision?.id
+        ? scheduleReadiness
+        : null;
+  const currentRevisionReadiness = ownReadiness(currentRevision);
+  // A newer revision staged beside the active one (a re-import after the
+  // baseline): the Schedule page reviews it beside the active schedule, and
+  // the approval step names it — as an advisory, which moves no step or gate.
+  const candidateRevision =
+    activeRevision &&
+    latestRevision &&
+    latestRevision.id !== activeRevision.id &&
+    !latestRevision.isActive &&
+    ["draft", "under_review", "approved", "rejected"].includes(
+      normalizeRevisionStatus(latestRevision.status),
+    )
+      ? latestRevision
+      : null;
 
   const boqCount = boqItems.length;
   const totalBoqAmount = boqItems.reduce(
@@ -1118,10 +1213,10 @@ const getSetupReadiness = async ({ orgId, projectId, canReadBoq = true, canReadS
     itemsWithoutWbs.length > 0 &&
       issue(
         "BOQ_ITEMS_WITHOUT_WBS",
-        `${itemsWithoutWbs.length} BOQ row${itemsWithoutWbs.length === 1 ? " has" : "s have"} no WBS node${archivedNote(itemsWithoutWbs)}.`,
+        `${itemsWithoutWbs.length} BOQ row${itemsWithoutWbs.length === 1 ? " has" : "s have"} no WBS node${archivedNote(itemsWithoutWbs)}. ${BOQ_FILING_NOT_YET}`,
         "advisory",
         { itemsWithoutWbs: itemsWithoutWbs.length },
-        itemsWithoutWbs.map((item) => boqItemItem(item, filingMissing(item))),
+        itemsWithoutWbs.map((item) => unfiledBoqItem(item, filingMissing(item))),
       ),
     activitiesWithoutWbs.length > 0 &&
       issue(
@@ -1134,10 +1229,10 @@ const getSetupReadiness = async ({ orgId, projectId, canReadBoq = true, canReadS
     itemsWithoutCostCode.length > 0 &&
       issue(
         "BOQ_ITEMS_WITHOUT_COST_CODE",
-        `${itemsWithoutCostCode.length} BOQ row${itemsWithoutCostCode.length === 1 ? " has" : "s have"} no cost code.`,
+        `${itemsWithoutCostCode.length} BOQ row${itemsWithoutCostCode.length === 1 ? " has" : "s have"} no cost code. ${BOQ_FILING_NOT_YET}`,
         "advisory",
         { itemsWithoutCostCode: itemsWithoutCostCode.length },
-        itemsWithoutCostCode.map((item) => boqItemItem(item, "Cost code")),
+        itemsWithoutCostCode.map((item) => unfiledBoqItem(item, "Cost code")),
       ),
   ];
   const boqAdvisories = [
@@ -1254,7 +1349,11 @@ const getSetupReadiness = async ({ orgId, projectId, canReadBoq = true, canReadS
         awaitingActivation
           ? "Activate the approved schedule revision (Schedule › Revisions) before mapping allocations to its activities."
           : stagedAwaitingApproval
-            ? STAGED_WAITING_MESSAGES[revisionStatus]
+            ? // A staged revision that fails its own checks cannot be
+              // approved as it is: the step is the corrected import.
+              failingLogicSentence(currentRevisionReadiness)
+              ? `${failingLogicSentence(currentRevisionReadiness)} Its activities are mapped once a revision is approved and activated.`
+              : STAGED_WAITING_MESSAGES[revisionStatus]
             : "Generate or import a schedule before mapping allocations.",
       ),
     boqCount > 0 &&
@@ -1397,6 +1496,12 @@ const getSetupReadiness = async ({ orgId, projectId, canReadBoq = true, canReadS
     missing,
     href: link(TARGETS.scheduleRevisions, { type: "schedule_revision", id: revision.id }),
   });
+  // Each says the step that moves the revision on and the page that offers
+  // it (D5): a revision failing its own checks — the corrected import
+  // (staged) or the Gantt's edit (active); otherwise submit, approve or
+  // resubmit. With no revision the base's words and action stay (the gates
+  // carry them as the base derived them): the Schedule module shows its
+  // upload zone — import or generate — on every tab until one exists.
   const approvalBlockers = [
     !currentRevision &&
       issue("NO_SCHEDULE_REVISION", "No schedule revision is available."),
@@ -1404,10 +1509,26 @@ const getSetupReadiness = async ({ orgId, projectId, canReadBoq = true, canReadS
       !scheduleApproved &&
       issue(
         "NO_APPROVED_SCHEDULE",
-        "No approved schedule revision is available for baseline/progress.",
+        revisionApprovalStep(currentRevision, currentRevisionReadiness),
         "blocking",
         { revisionStatus },
         [scheduleRevisionItem(currentRevision, "Approval")],
+      ),
+  ];
+  // The staged revision beside the active one: named with its next step.
+  const candidateStatus = candidateRevision ? normalizeRevisionStatus(candidateRevision.status) : null;
+  const approvalAdvisories = [
+    candidateRevision &&
+      issue(
+        "STAGED_REVISION_PENDING",
+        `A newer schedule revision, "${candidateRevision.label || "Schedule revision"}", is staged beside the active schedule and replaces it only once it is approved and activated. ${
+          candidateStatus === "approved"
+            ? "Activate it on Schedule › Revisions; then map the BOQ to its activities and lock its baseline."
+            : revisionApprovalStep(candidateRevision, ownReadiness(candidateRevision))
+        }`,
+        "advisory",
+        { revisionId: candidateRevision.id, revisionStatus: candidateStatus },
+        [scheduleRevisionItem(candidateRevision, candidateStatus === "approved" ? "Activation" : "Review")],
       ),
   ];
 
@@ -1432,9 +1553,13 @@ const getSetupReadiness = async ({ orgId, projectId, canReadBoq = true, canReadS
         `SCHEDULE_${check.key.toUpperCase()}_FAILED`,
         // The coverage the baseline lock needs (D5) is mapped on the
         // mapping page, after the activation; the blocker says so.
+        // Any other check names its own fix: the Gantt's edit or
+        // Recalculate CPM for the active schedule, never a read-only tab.
         check.key === "allocations"
           ? `${String(check.message || "").trim().replace(/\.$/, "")}. Map it to the active activities on Project Controls › Mapping, then lock the baseline.`
-          : check.message,
+          : check.fix?.text
+            ? `${String(check.message || "").trim().replace(/\.$/, "")}. ${check.fix.text}`
+            : check.message,
         "blocking",
         { checkKey: check.key },
         itemsFromCheckDetails(check, activityById, (activity, missing) =>
@@ -1444,6 +1569,10 @@ const getSetupReadiness = async ({ orgId, projectId, canReadBoq = true, canReadS
     );
   const allocationCoverageBlocksBaseline = scheduleApproved && !baselineLocked &&
     readinessBlockers.some((blocker) => blocker.details?.checkKey === "allocations");
+  // The active schedule's own logic fails the baseline lock: it is put
+  // right on the Schedule page (the Gantt's edit, or Recalculate CPM).
+  const logicBlocksBaseline = scheduleApproved && !baselineLocked &&
+    readinessBlockers.some((blocker) => blocker.details?.checkKey && blocker.details.checkKey !== "allocations");
   const readinessWarnings = checksForBaseline
     .filter((check) => check.severity !== "blocking" && !check.passed)
     .map((check) =>
@@ -1531,7 +1660,8 @@ const getSetupReadiness = async ({ orgId, projectId, canReadBoq = true, canReadS
     count,
     detail,
     target,
-    href: link(target),
+    // A guide whose open item no page resolves yet is read, not followed.
+    href: target ? link(target) : null,
   });
   const guideStatus = (ready, prerequisite = true) =>
     !prerequisite ? STATUS.PENDING : ready ? STATUS.COMPLETE : STATUS.ATTENTION;
@@ -1579,13 +1709,23 @@ const getSetupReadiness = async ({ orgId, projectId, canReadBoq = true, canReadS
             ? "Rows cannot be filed until the WBS exists"
             : [
                 itemsWithoutWbs.length > 0 &&
-                  `${itemsWithoutWbs.length} row${itemsWithoutWbs.length === 1 ? "" : "s"} without a WBS node`,
+                  `${itemsWithoutWbs.length} row${itemsWithoutWbs.length === 1 ? "" : "s"} without a WBS node (filing comes with the BOQ item detail)`,
                 itemsWithUnresolvedUnit.length > 0 &&
                   `${itemsWithUnresolvedUnit.length} with an unknown unit`,
               ]
                 .filter(Boolean)
                 .join(" · ") || "Every row is filed",
-      target: TARGETS.boq,
+      // The bill is uploaded and its units corrected on the BOQ page, and
+      // the WBS is built on Structure; filing a row under a node has no
+      // page yet (BOQ_FILING_NOT_YET), so that alone links nowhere.
+      target:
+        boqCount === 0 || itemsWithUnresolvedUnit.length > 0
+          ? TARGETS.boq
+          : wbsNodeCount === 0
+            ? TARGETS.structure
+            : itemsWithoutWbs.length > 0
+              ? null
+              : TARGETS.boq,
     }),
     guide({
       key: "schedule_structure",
@@ -1835,10 +1975,13 @@ const getSetupReadiness = async ({ orgId, projectId, canReadBoq = true, canReadS
       key: "schedule_approval",
       label: "Schedule Approval",
       description: "Schedule revision has passed PM approval.",
+      // The review is on the Revisions tab, whose page also offers Update
+      // Schedule; with no revision the module shows its upload zone there.
       action: { label: "Open Review", target: TARGETS.scheduleRevisions },
       requiredFor: ["baseline", "progress", "reporting"],
       complete: approvalBlockers.filter(Boolean).length === 0,
       blockers: approvalBlockers,
+      advisories: approvalAdvisories,
       counts: {
         revisionId: currentRevision?.id || null,
         revisionStatus: currentRevision ? revisionStatus : null,
@@ -1852,11 +1995,18 @@ const getSetupReadiness = async ({ orgId, projectId, canReadBoq = true, canReadS
       description: "Approved schedule passes baseline lock checks.",
       // After the activation, unmapped coverage is resolved on the mapping
       // page, not where the baseline is locked (D5).
+      // After the approval, where each blocker is resolved; only then the
+      // lock itself. Before it, the base's action stays (the gates carry the
+      // step's waiting warning with it, as the base derived it): Schedule ›
+      // Revisions, where the review panel is — or, with no revision yet, the
+      // upload zone the Schedule module shows on every tab.
       action: awaitingActivation
         ? { label: "Activate Revision", target: TARGETS.scheduleRevisions }
-        : allocationCoverageBlocksBaseline
-          ? { label: "Map Allocations", target: TARGETS.mapping }
-          : { label: "Lock Baseline", target: TARGETS.scheduleRevisions },
+        : logicBlocksBaseline
+          ? { label: "Correct the Schedule", target: TARGETS.schedule }
+          : allocationCoverageBlocksBaseline
+            ? { label: "Map Allocations", target: TARGETS.mapping }
+            : { label: "Lock Baseline", target: TARGETS.scheduleRevisions },
       requiredFor: ["baseline", "progress", "reporting"],
       complete: baselineLocked,
       blockers: scheduleApproved ? [...activationBlockers, ...readinessBlockers] : [],

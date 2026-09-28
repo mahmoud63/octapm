@@ -187,7 +187,8 @@ export type ProjectSetupItem = {
   code: string | null
   label: string | null
   missing: string
-  href: string
+  /** null when no page resolves it yet: named, not linked. */
+  href: string | null
 }
 
 export type ProjectSetupIssue = {
@@ -257,8 +258,9 @@ export type ProjectSetupGuide = {
   count: number | null
   detail: string
   detailsWithheld?: boolean
-  target: ProjectSetupTarget
-  href: string
+  /** null when no page does it yet: the guide is read, not followed. */
+  target: ProjectSetupTarget | null
+  href: string | null
 }
 
 /** One entry of the §33 status line: "BOQ imported PASS", "Mapping 83%", … */
