@@ -1847,7 +1847,9 @@ const getSetupReadiness = async ({ orgId, projectId, canReadBoq = true, canReadS
         revisionId: currentBoqRevision?.id || null,
         revisionNumber: currentBoqRevision?.revisionNumber ?? null,
         revisionStatus: boqRevisionStatus,
-        baselineLocked: boqLocked,
+        // With no bill there is nothing locked: the schedule baseline
+        // is the lock of a bill that exists, never of an absent one.
+        baselineLocked: boqCount > 0 && boqLocked,
         itemsWithoutMappingRule: itemsWithoutMappingRule.length,
         revisionItems: currentBoqRevision?.itemCount ?? null,
         revisionChanges: currentBoqRevision
@@ -1857,7 +1859,17 @@ const getSetupReadiness = async ({ orgId, projectId, canReadBoq = true, canReadS
           : null,
         revisionBlockedRows: currentBoqRevision?.blockedCount ?? null,
       },
-      successMessage: boqLocked ? "BOQ baseline is locked." : "BOQ revision is approved.",
+      // buildStep falls back to this message when the step has no warning,
+      // so it says approved or locked only when the step is complete; with
+      // no bill it names the step before this one.
+      successMessage:
+        boqCount === 0
+          ? "Upload the BOQ first (BOQ page); it is then submitted, approved and locked here."
+          : !boqApproved
+            ? undefined
+            : boqLocked
+              ? "BOQ baseline is locked."
+              : "BOQ revision is approved.",
     }),
     buildStep({
       key: "schedule_generation",

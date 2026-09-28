@@ -27,6 +27,7 @@ import {
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { useProjectSetupReadiness } from '@/features/projects/hooks/use-projects'
+import type { ProjectSetupIssue } from '@/features/projects/data/schema'
 import type { ScheduleRevision } from '../data/schema'
 import {
   useScheduleRevisionWorkflow,
@@ -89,6 +90,22 @@ const ALLOCATION_BLOCKER_CODES = new Set([
   'SCHEDULE_ALLOCATIONS_FAILED',
 ])
 
+// A setup step the baseline gate still waits on, before the schedule's own
+// checks and the mapping (which the labels below already name): what to do
+// and the page that offers it, so the next step never reads "lock
+// baseline" while the button beside it is refused.
+const SETUP_STEPS_BEFORE_BASELINE: Record<string, string> = {
+  project_profile: 'complete the project profile (Overview)',
+  boq_upload: 'upload the BOQ (BOQ page)',
+  schedule_generation: 'import or generate a schedule (Schedule)',
+  schedule_approval: 'approve this revision (Schedule › Revisions)',
+}
+
+const setupStepNext = (blocker: ProjectSetupIssue | null) =>
+  blocker?.stepKey && !ALLOCATION_BLOCKER_CODES.has(blocker.code)
+    ? (SETUP_STEPS_BEFORE_BASELINE[blocker.stepKey] ?? null)
+    : null
+
 type CheckFix = NonNullable<
   NonNullable<ScheduleRevision['readiness']>['checks'][number]['fix']
 >
@@ -117,6 +134,7 @@ function getNextActionLabel({
   staged,
   approvalFix,
   baselineFix,
+  setupBaselineBlocker,
 }: {
   status: ScheduleRevisionStatus
   ready: boolean
@@ -126,6 +144,8 @@ function getNextActionLabel({
   staged: boolean
   approvalFix: CheckFix | null
   baselineFix: CheckFix | null
+  /** The setup baseline gate's first blocker, when that gate refuses the lock. */
+  setupBaselineBlocker: ProjectSetupIssue | null
 }) {
   if (status === 'draft') {
     return approvalFix
@@ -151,13 +171,18 @@ function getNextActionLabel({
   if (status === 'approved' && awaitingActivation) {
     return 'Next: activate this revision (Schedule › Revisions)'
   }
+  // Activated, but a setup step before the mapping is still open (a project
+  // with no bill, say): that step first — its blocker is listed below.
+  const setupNext =
+    status === 'approved' ? setupStepNext(setupBaselineBlocker) : null
+  if (setupNext) return `Next: ${setupNext}, then lock baseline`
   // Activated: the bill's value is mapped to the active activities, then
   // the baseline is locked (owner decision D5).
   if (status === 'approved' && coverageBlocksBaseline) {
     return 'Next: map the BOQ to the active activities (Project Controls › Mapping), then lock baseline'
   }
   if (status === 'approved') {
-    if (baselineReady) return 'Next: lock baseline'
+    if (baselineReady && !setupBaselineBlocker) return 'Next: lock baseline'
     return baselineFix
       ? `Next: ${baselineFix.next}, then lock baseline`
       : 'Next: clear the baseline blockers listed below'
@@ -424,6 +449,9 @@ export function ScheduleReviewPanel({
                 staged,
                 approvalFix,
                 baselineFix,
+                setupBaselineBlocker: setupBaselineBlocked
+                  ? (baselineBlockers[0] ?? null)
+                  : null,
               })}
             </span>
           </div>

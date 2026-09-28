@@ -890,6 +890,25 @@ liveDescribe("PC-4: setup flow — structure and BOQ approval steps, per-item de
       });
       expect(await compareLock()).toEqual({ locked: true, source: "schedule_baseline", boqRevisionId: revisionId });
     });
+
+    it("with no bill, the approval card names the upload — never 'approved' or 'locked', even after a schedule baseline", async () => {
+      const noBill = await prisma.project.create({
+        data: { orgId: live.org.id, name: "LiveTest PC-4 no bill", startDate: new Date("2026-01-05"), endDate: new Date("2026-12-18") },
+      });
+      const uploadFirst = "Upload the BOQ first (BOQ page); it is then submitted, approved and locked here.";
+      const before = step(await readiness(noBill.id), "boq_approval");
+      expect(before).toMatchObject({ status: "pending", warnings: [], message: uploadFirst });
+      expect(before.counts.baselineLocked).toBe(false);
+
+      // A schedule baseline is not the lock of a bill that does not exist.
+      await prisma.scheduleRevision.create({
+        data: { projectId: noBill.id, label: "Rev A", status: "baselined", isActive: true, activityCount: 0, approvedAt: new Date(), activatedAt: new Date(), baselinedAt: new Date() },
+      });
+      const after = await readiness(noBill.id);
+      expect(step(after, "boq_upload").status).toBe("blocked");
+      expect(step(after, "boq_approval")).toMatchObject({ status: "pending", warnings: [], message: uploadFirst });
+      expect(step(after, "boq_approval").counts.baselineLocked).toBe(false);
+    });
   });
 
   describe("the rows an upload could not apply (§22 validation)", () => {

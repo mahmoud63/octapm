@@ -16,7 +16,8 @@ import {
  * activate it on Schedule › Revisions. It no longer says "Next: lock
  * baseline", and the baseline blockers beside it name the activation instead
  * of "No schedule activities exist" or "Generate or import a schedule".
- * Activated, the next step is the baseline lock.
+ * Activated, the next step is what the baseline lock still waits on — for
+ * this project, which has no bill, the BOQ upload.
  *
  * Everything is built through the API in a throwaway "LiveTest <uuid>"
  * organisation, dropped afterwards.
@@ -103,6 +104,12 @@ test('an approved staged revision names its activation as the next step, and the
   }
   await page.reload()
   await expect(page.getByTestId('uat-schedule-review')).toHaveAttribute('data-status', 'approved', { timeout: 45_000 })
-  await expect(page.getByTestId('uat-schedule-review-next')).toHaveText('Next: lock baseline', { timeout: 30_000 })
+  // This project has no bill: the setup baseline gate's first blocker is the
+  // upload, so that is the next step — never "lock baseline" beside a
+  // refused Lock Baseline (spec 60 walks the no-bill project in full).
+  await expect(page.getByTestId('uat-schedule-review-next')).toHaveText(
+    'Next: upload the BOQ (BOQ page), then lock baseline',
+    { timeout: 30_000 },
+  )
   await expect(page.getByTestId('uat-schedule-review')).not.toContainText(ACTIVATION_BLOCKER)
 })
