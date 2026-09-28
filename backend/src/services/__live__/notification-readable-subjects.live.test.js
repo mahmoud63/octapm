@@ -273,4 +273,29 @@ liveDescribe("a notification names its record in words, never by its database id
       expect(await model.findFirst({ where: { id: row.entityId, projectId: project.id }, select: { id: true } })).toEqual({ id: row.entityId });
     }
   });
+
+  it("a cost loading rejected with a reason is rejected — its reason stored, its workflow event recorded, and its submitter told 'Cost loading for Activity A120 rejected'", async () => {
+    // Last in this file, so no earlier answer moves: a second loading on the
+    // coded activity, submitted by the admin and rejected by the reviewer.
+    // (Before the fix every reject answered 500 "rejectedReason is not
+    // defined" and wrote nothing.)
+    const base = `/projects/${project.id}/reports/cost-loading`;
+    const loading = await ok(people.admin, "POST", base, { activityId: records.coded.id, plannedDate: "2026-02-13", plannedValue: 500 }, 201);
+    await ok(people.admin, "POST", `${base}/${loading.id}/submit`, {});
+    const rejected = await ok(people.reviewer, "POST", `${base}/${loading.id}/reject`, { reason: "Wrong period" });
+    expect([rejected.id, rejected.status, rejected.rejectedBy, rejected.rejectedReason]).toEqual([loading.id, "rejected", people.reviewer.id, "Wrong period"]);
+    // Stored: the one row, by its key.
+    const stored = await prisma.activityCostLoading.findUnique({ where: { id: loading.id }, select: { status: true, rejectedBy: true, rejectedReason: true, rejectedAt: true } });
+    expect([stored.status, stored.rejectedBy, stored.rejectedReason, stored.rejectedAt instanceof Date]).toEqual(["rejected", people.reviewer.id, "Wrong period", true]);
+    // The workflow records the decision with its reason.
+    const events = await prisma.approvalWorkflowEvent.findMany({
+      where: { orgId: live.org.id, recordId: loading.id, toStatus: "rejected" },
+      select: { fromStatus: true, toStatus: true, reason: true },
+    });
+    expect(events).toEqual([{ fromStatus: "submitted", toStatus: "rejected", reason: "Wrong period" }]);
+    // The admin, who submitted it, hears of it — in words.
+    const heard = (await inbox(people.admin)).filter((row) => row.entityId === loading.id && row.event === "workflow.rejected");
+    expect(heard.map((row) => row.title)).toEqual(["Cost loading for Activity A120 rejected"]);
+    expect([heard[0].title, heard[0].message]).toEqual([expect.not.stringMatching(IDENTIFIER), expect.not.stringMatching(IDENTIFIER)]);
+  });
 });

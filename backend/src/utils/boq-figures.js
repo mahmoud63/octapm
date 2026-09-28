@@ -197,17 +197,31 @@ const withheldEvReport = (report, access = FULL_ACCESS) => {
 
 // The forecast's cost view is money from the budget (the approved
 // allocations) and the cost ledger. Someone who may read neither the BOQ
-// nor the cost module is given its levels, bases and counts, not its money:
-// each activity's budget, spend, commitments, projection and overrun (and
-// the reasons, which state them), the project's budget, EAC, bottom-up,
-// projection, overrun and spend, and each budget line's amounts.
-const FORECAST_ACTIVITY_COST_KEYS = ["budget", "actual", "committed", "projected", "overrun", "overrunPct", "reasons"];
+// nor the cost module is not given its money: each activity's budget,
+// spend, commitments, projection and overrun (and the reasons, which state
+// them), the project's budget, EAC, bottom-up, projection, overrun and
+// spend, and each budget line's amounts.
 const FORECAST_COST_KEYS = ["budget", "bac", "eac", "bottomUp", "projected", "overrun", "overrunPct", "actual"];
 const FORECAST_LINE_KEYS = ["revised", "committed", "actual", "forecast", "overrun", "overrunPct"];
+// Nor anything of the cost view that is read off the mapping (owner
+// decision, 2026-09-28). An activity's cost has a basis only when it has a
+// budget — an approved allocation — and a cost level above "low" only then
+// (nothing can be over a budget it does not have), so the basis, the level,
+// and a place among the activities over budget (and their tally by level)
+// are each the activity's mapping badge: beside its critical flag they count
+// the critical activities without an allocation. The EAC's basis says only
+// which rule gave a figure this reader is not given. Each is left out; an
+// activity's cost says it is withheld and why. Criticality, the schedule's
+// levels and bases, the budget lines' names and levels (the cost module's,
+// not the bill's), the project's cost verdict (summary.costLevel) and the
+// dataQuality sentences stay: none is per activity.
+const FORECAST_MAPPING_COST_KEYS = ["eacBasis", "topRisks"];
+const FORECAST_COST_WITHHELD_REASON = "Cost figures are not available to you";
+const WITHHELD_ACTIVITY_COST = Object.freeze({ withheld: true, reason: FORECAST_COST_WITHHELD_REASON });
 
 const withheldForecastActivity = (activity) =>
   activity && activity.cost && typeof activity.cost === "object"
-    ? { ...activity, cost: withoutKeys(activity.cost, FORECAST_ACTIVITY_COST_KEYS) }
+    ? { ...activity, cost: { ...WITHHELD_ACTIVITY_COST } }
     : activity;
 
 const mapList = (list, fn) => (Array.isArray(list) ? list.map(fn) : list);
@@ -224,9 +238,11 @@ const withheldForecast = (forecast, access = FULL_ACCESS) => {
   }
   if (forecast.cost && typeof forecast.cost === "object") {
     result.cost = {
-      ...withoutKeys(forecast.cost, FORECAST_COST_KEYS),
-      topRisks: mapList(forecast.cost.topRisks, withheldForecastActivity),
+      ...withoutKeys(forecast.cost, [...FORECAST_COST_KEYS, ...FORECAST_MAPPING_COST_KEYS]),
+      ...(has(forecast.cost, "counts") ? { counts: withoutKeys(forecast.cost.counts, ["atRisk"]) } : {}),
       budgetLines: mapList(forecast.cost.budgetLines, (line) => withoutKeys(line, FORECAST_LINE_KEYS)),
+      withheld: true,
+      reason: FORECAST_COST_WITHHELD_REASON,
     };
   }
   return result;

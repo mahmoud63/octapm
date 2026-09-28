@@ -120,7 +120,9 @@ export interface Forecast {
     overrun?: number | null
     overrunPct?: number | null
     actual?: number | null
-    counts?: { atRisk: { high: number; medium: number; low: number }; lines: number }
+    /** The tally of activities over budget is read off the mapping, so it too
+     * is present only for a BOQ or cost reader (owner decision, 2026-09-28). */
+    counts?: { atRisk?: { high: number; medium: number; low: number }; lines: number }
   } | null
   summary: { scheduleLevel: string | null; costLevel: string | null } | null
   /** The server's plain-language notes on what its figures cannot yet include. */

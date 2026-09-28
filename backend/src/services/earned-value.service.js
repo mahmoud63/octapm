@@ -1497,7 +1497,7 @@ const rejectCostLoading = async ({
         status: "rejected",
         rejectedBy: userId || null,
         rejectedAt: now,
-        rejectedReason,
+        rejectedReason: rejectionReason,
         updatedBy: userId || null,
       },
     });

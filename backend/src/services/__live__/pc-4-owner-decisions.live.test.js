@@ -171,7 +171,7 @@ liveDescribe("PC-4 owner decisions D2, C and D3", () => {
       expect(forecast.dataQuality).not.toContain(CPI_MISSING_NOTE);
     });
 
-    it("a member who may read neither the BOQ nor the cost module receives no EAC, no BAC and no budget — the rule's name only", async () => {
+    it("a member who may read neither the BOQ nor the cost module receives no EAC, no BAC, no budget and no EAC basis (which says whether a budget exists — read off the mapping, owner decision 2026-09-28)", async () => {
       const built = await newProject("D2 withheld");
       const { activity } = await activityWithBill(built, { code: "1.1", name: "Concrete frame", quantity: 100, rate: 1000 });
       await prisma.costRecord.create({
@@ -181,8 +181,8 @@ liveDescribe("PC-4 owner decisions D2, C and D3", () => {
       expect(full.cost).toHaveProperty("eac");
       const limited = await built.get("/forecast", seAuth());
       const cost = limited.body.data.cost;
-      expect(["eac" in cost, "bac" in cost, "budget" in cost, "projected" in cost, cost.eacBasis]).toEqual([false, false, false, false, full.cost.eacBasis]);
-      // Actual cost and nothing earned: the rule is CPI 0's, for both readers.
+      expect(["eac" in cost, "bac" in cost, "budget" in cost, "projected" in cost, "eacBasis" in cost, cost.withheld, cost.reason]).toEqual([false, false, false, false, false, true, "Cost figures are not available to you"]);
+      // Actual cost and nothing earned: the rule is CPI 0's, for the reader who may see the EAC.
       expect(full.cost.eacBasis).toBe("budget_cpi_zero");
       expect(limited.text).not.toContain(String(full.cost.eac));
       expect(limited.text).not.toContain("100000");

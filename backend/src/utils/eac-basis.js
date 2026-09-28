@@ -14,7 +14,9 @@
  *                              no official actual cost through the cutoff;
  * - no_budget                  no revised BAC to project from.
  *
- * Not money: every reader of the EAC's screen receives it.
+ * Not money, but it says whether an approved budget exists at all
+ * (no_budget), which is read off the BOQ mapping: it goes with the EAC, to a
+ * reader of the BOQ or the cost module only (utils/boq-figures).
  */
 
 const EAC_BASES = Object.freeze({

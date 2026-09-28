@@ -519,6 +519,18 @@ const BUDGET_KEYS = ['budget', 'generatedBudget', 'totalBudget', 'generatedTotal
 // workspace home state it: EV is the allocations × % complete (a finished
 // activity's budget), PV the cost loading, AC the cost ledger.
 const EV_MONEY_KEYS = ['ev', 'pv', 'ac']
+// ... and, from the forecast, what is read off the mapping (owner decision,
+// 2026-09-28): an activity's cost has a basis, and a level above low, only
+// when it has an approved allocation; only an activity with one can be
+// among those over budget; the EAC's basis labels a withheld figure.
+const FORECAST_ACTIVITY_MAPPING_KEYS = new Set(['basis', 'level'])
+const FORECAST_COST_MAPPING_KEYS = new Set(['topRisks', 'atRisk', 'eacBasis'])
+type ForecastRow = { id: string; isCritical?: boolean; cost?: Record<string, unknown> }
+type ForecastAnswer = {
+  activities?: ForecastRow[]
+  schedule?: { topRisks?: ForecastRow[] } | null
+  cost?: Record<string, unknown> | null
+}
 
 const keyPaths = (value: unknown, keys: Set<string>, at = ''): string[] =>
   value && typeof value === 'object'
@@ -533,11 +545,11 @@ const backendDir = fileURLToPath(new URL('../../backend/', import.meta.url))
 // The two revisions a generated schedule leaves, written straight into the
 // LiveTest organisation's project: the script refuses any organisation not
 // named `LiveTest <uuid>` and any project outside it.
-const seedGeneratedRevisions = (orgId: string, projectId: string) => {
+const seedGeneratedRevisions = (orgId: string, projectId: string, criticalUnmappedId: string) => {
   const script = `
 require('./src/utils/data-script-guard').exitUnlessDataScriptAllowed('e2e:pc4-generated-revisions');
 const { prisma } = require('./src/config/db');
-const [orgId, projectId] = process.argv.slice(1);
+const [orgId, projectId, criticalUnmappedId] = process.argv.slice(1);
 const snapshot = (label) => ({
   projectSummary: { name: label, startDate: '2026-01-05', endDate: '2026-12-18', totalBudget: 69999.99 },
   wbs: [{ code: 'A', level: 1, name: 'Substructure', budget: 69999.99 }],
@@ -563,12 +575,17 @@ const snapshot = (label) => ({
   // allocation (21337, its budget), on the health card and the workspace home.
   const pour = await prisma.activity.findFirst({ where: { projectId, name: 'Pour foundations' }, select: { id: true } });
   if (pour) await prisma.activityProgress.create({ data: { activityId: pour.id, pctComplete: 100, status: 'approved', approvedAt: new Date(Date.now() - 60000), updatedAt: new Date(Date.now() - 60000) } });
+  // A critical activity with no allocation (one known row of this project):
+  // the forecast must not let a member without BOQ read tell it from a mapped one.
+  const unmapped = await prisma.activity.findFirst({ where: { id: criticalUnmappedId, projectId }, select: { id: true } });
+  if (!unmapped) throw new Error('refusing: the activity is not in that project');
+  await prisma.activity.update({ where: { id: unmapped.id }, data: { isCritical: true, totalFloat: 0 } });
   process.stdout.write(JSON.stringify({ active: active.id, staged: staged.id }));
 })()
   .catch((error) => { process.stderr.write(String(error && error.message)); process.exitCode = 1; })
   .finally(() => prisma.$disconnect());
 `
-  const result = spawnSync(process.execPath, ['-e', script, orgId, projectId], {
+  const result = spawnSync(process.execPath, ['-e', script, orgId, projectId, criticalUnmappedId], {
     cwd: backendDir,
     env: process.env,
     encoding: 'utf8',
@@ -634,6 +651,8 @@ test('members who cannot read the BOQ: the Overview and every Schedule tab rende
       const rebar = await item('1.2', 'Reinforcement to foundations', 50, 't', 1009.13)
       const pour = await activity('A100', 'Pour foundations', '2026-02-02', '2026-02-06')
       const fix = await activity('A110', 'Fix reinforcement', '2026-01-26', '2026-02-01')
+      // ... and a third, critical, that nothing is allocated to.
+      const strip = await activity('A120', 'Strip formwork', '2026-02-09', '2026-02-13')
       for (const [boqItemId, activityId, quantity] of [
         [concrete, pour, 100],
         [rebar, fix, 20],
@@ -653,10 +672,16 @@ test('members who cannot read the BOQ: the Overview and every Schedule tab rende
           expect(moved.status, `${step} -> ${JSON.stringify(moved.body?.error)}`).toBe(200)
         }
       }
-      const revisions = seedGeneratedRevisions(org.orgId, projectId)
+      const revisions = seedGeneratedRevisions(org.orgId, projectId, strip)
       const full = await apiJson(client, 'get', `/projects/${projectId}/schedule`, { token })
       expect(JSON.stringify(full.body?.data), 'a BOQ reader gets the figure').toContain('"allocatedBoqAmount":21337')
       expect(full.body?.data?.revision, 'the generated revision is the active one').toMatchObject({ id: revisions.active })
+      // The forecast tells a reader of the BOQ which activities have an
+      // allocation: an activity's cost has a basis only when it has a budget.
+      const readerForecast = await apiJson(client, 'get', `/projects/${projectId}/forecast`, { token })
+      const readerActivities = (readerForecast.body?.data as unknown as ForecastAnswer).activities ?? []
+      expect(readerActivities.find((row) => row.id === strip), 'the unmapped activity, for the reader').toMatchObject({ isCritical: true, cost: { basis: null } })
+      expect(readerActivities.find((row) => row.id === pour)?.cost?.basis, 'the mapped activity, for the reader').toBeTruthy()
       return { projectId, siteEngineer, costController, revisions }
     } finally {
       await client.dispose()
@@ -763,7 +788,18 @@ test('members who cannot read the BOQ: the Overview and every Schedule tab rende
     await expect(page.getByTestId('uat-project-content-overview')).toBeVisible({ timeout: 30_000 })
     await expect(page.getByTestId('uat-controls-strip')).toBeVisible({ timeout: 30_000 })
     await scheduleAnswer
-    await forecastAnswer
+    const forecastBody = (await (await forecastAnswer).json()) as { data: ForecastAnswer }
+    if (!member.readsCost) {
+      // No activity's cost basis or level, no list or tally of the
+      // activities over budget, no EAC basis: nothing tells the critical
+      // activity with no allocation from the mapped ones.
+      const rows = [...(forecastBody.data.activities ?? []), ...(forecastBody.data.schedule?.topRisks ?? [])]
+      expect(rows.length, 'the forecast lists the activities').toBeGreaterThanOrEqual(3)
+      expect(keyPaths(rows.map((row) => row.cost), FORECAST_ACTIVITY_MAPPING_KEYS), `${member.name}: an activity's cost basis or level`).toEqual([])
+      expect(rows.every((row) => row.cost?.withheld === true && row.cost?.reason === 'Cost figures are not available to you')).toBe(true)
+      expect(keyPaths(forecastBody.data.cost, FORECAST_COST_MAPPING_KEYS), `${member.name}: the activities over budget`).toEqual([])
+      expect(forecastBody.data.cost).toMatchObject({ withheld: true, reason: 'Cost figures are not available to you' })
+    }
     await page.waitForLoadState('networkidle')
     await noBrokenFigure('overview')
     // The health card's earned value and actual cost: a dash with the
@@ -859,6 +895,10 @@ test('members who cannot read the BOQ: the Overview and every Schedule tab rende
           await expect(cost).toContainText('—')
           await expect(cost).toContainText('Cost figures are not available to you')
           await expect(cost).not.toContainText('Within the')
+          // Which activities are over budget is withheld too: a dash and why,
+          // never "No activity is projected over its budget."
+          await expect(page.getByTestId('uat-forecast-cost-risks-withheld')).toHaveText('— Cost figures are not available to you')
+          await expect(page.getByText('No activity is projected over its budget.')).toHaveCount(0)
         }
         // The explanation is written from the forecast this person receives.
         const explained = page.waitForResponse((r) => /\/forecast\/explain(\?|$)/.test(r.url()), { timeout: 60_000 })

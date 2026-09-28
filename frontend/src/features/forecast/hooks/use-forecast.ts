@@ -50,18 +50,22 @@ export interface ForecastActivity {
   score: number
   level: ForecastLevel
   reasons: string[]
-  // The money is present only for a reader of the BOQ or the cost module
-  // (§12); the level and the basis are everyone's.
+  // Present only for a reader of the BOQ or the cost module (§12). For
+  // anyone else the whole cost is withheld — its basis and level too, which
+  // say whether the activity has an approved allocation (owner decision,
+  // 2026-09-28) — and it carries only `withheld` and the server's reason.
   cost: {
     budget?: number
     actual?: number
     committed?: number
     projected?: number | null
-    basis: string | null
+    basis?: string | null
     overrun?: number
     overrunPct?: number
-    level: ForecastLevel
+    level?: ForecastLevel
     reasons?: string[]
+    withheld?: true
+    reason?: string
   }
 }
 
@@ -111,16 +115,21 @@ export interface ProjectForecast {
     bac?: number | null
     /** The official EV report's EAC: revised BAC / CPI, else the revised BAC. */
     eac?: number | null
-    /** Which rule gave the EAC; not money, so every reader receives it. */
+    /** Which rule gave the EAC; with the EAC, only for a BOQ or cost reader. */
     eacBasis?: EacBasis | null
     bottomUp?: number
     projected?: number
     overrun?: number
     overrunPct?: number | null
     actual?: number
-    counts: { atRisk: Record<ForecastLevel, number>; lines: number }
-    topRisks: ForecastActivity[]
+    // The activities over budget, and their tally by level, only for a BOQ
+    // or cost reader: an activity can be over only a budget it has, so the
+    // list is read off the mapping. Anyone else gets `withheld` and why.
+    counts: { atRisk?: Record<ForecastLevel, number>; lines: number }
+    topRisks?: ForecastActivity[]
     budgetLines: ForecastBudgetLine[]
+    withheld?: true
+    reason?: string
   } | null
   summary: { scheduleLevel: ForecastLevel; costLevel: ForecastLevel } | null
   dataQuality: string[]

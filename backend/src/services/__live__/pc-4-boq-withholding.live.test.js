@@ -25,8 +25,11 @@
  *
  * Nor anything read off the mapping (owner decision, 2026-09-28): no
  * approved allocation count on an activity, no count of critical activities
- * without an approved allocation, no coverage share. Their criticality —
- * the critical flag, the float, the count of critical activities — stays.
+ * without an approved allocation, no coverage share, and none of the
+ * forecast's cost view per activity (its basis and level say whether the
+ * activity has an allocation) for a member who reads neither the BOQ nor
+ * the cost module. Their criticality — the critical flag, the float, the
+ * count of critical activities — stays.
  *
  * Everything else — statuses, codes, verdicts, counts, the forecast's
  * levels — is what the BOQ reader gets.
@@ -101,11 +104,13 @@ const BOQ_KEYS = [
 // not receive either: the budgets built from the bill, and the forecast's
 // money built from them.
 const BUDGET_KEYS = ["budget", "generatedBudget", "totalBudget", "generatedTotalBudget", "eac", "bottomUp", "bac"];
-// The forecast's money, where it sits (the cost block, each activity's cost,
-// each budget line).
+// The forecast's money, where it sits (the cost block, each budget line) —
+// and each activity's whole cost, whose basis and level say whether it has
+// an approved allocation (owner decision, 2026-09-28), with the list and
+// tally of the activities over budget and the EAC's basis.
 const FORECAST_COST_KEYS = ["budget", "bac", "eac", "bottomUp", "projected", "overrun", "overrunPct", "actual"];
-const FORECAST_ACTIVITY_COST_KEYS = ["budget", "actual", "committed", "projected", "overrun", "overrunPct", "reasons"];
 const FORECAST_LINE_KEYS = ["revised", "committed", "actual", "forecast", "overrun", "overrunPct"];
+const FORECAST_COST_WITHHELD = "Cost figures are not available to you";
 // What a WBS node's outline carries (owner decision D3).
 const WBS_OUTLINE_KEYS = ["id", "projectId", "parentId", "code", "name", "path", "pathNames", "fullName", "depth", "sortOrder", "isPackage", "status", "archivedAt", "childCount", "activityCount"];
 // The bill's own records, whose history is the bill's.
@@ -486,16 +491,22 @@ liveDescribe("PC-4 §12: the Overview and the Schedule module carry no BOQ figur
   // allocations' sum it states (top level and in its source summary) stays.
   const EV_BUDGET_PATHS = new Set([".approvedAllocatedAmount", ".sourceSummary.budget.approvedAllocatedAmount"]);
 
-  // The forecast without its money, where the money sits.
+  // The forecast without its money, where the money sits, and without
+  // anything of the cost view read off the mapping: each activity's cost is
+  // withheld whole, the activities over budget and their tally and the
+  // EAC's basis are left out, and the cost block says it is withheld.
   const forecastWithoutMoney = (forecast) => {
     const copy = clone(forecast);
-    const activityCost = (activity) => drop(activity?.cost, FORECAST_ACTIVITY_COST_KEYS);
+    const activityCost = (activity) => {
+      if (activity?.cost) activity.cost = { withheld: true, reason: FORECAST_COST_WITHHELD };
+    };
     (copy.activities || []).forEach(activityCost);
     (copy.schedule?.topRisks || []).forEach(activityCost);
     if (copy.cost) {
-      drop(copy.cost, FORECAST_COST_KEYS);
-      (copy.cost.topRisks || []).forEach(activityCost);
+      drop(copy.cost, [...FORECAST_COST_KEYS, "eacBasis", "topRisks"]);
+      drop(copy.cost.counts, ["atRisk"]);
       (copy.cost.budgetLines || []).forEach((line) => drop(line, FORECAST_LINE_KEYS));
+      Object.assign(copy.cost, { withheld: true, reason: FORECAST_COST_WITHHELD });
     }
     return copy;
   };
@@ -672,7 +683,11 @@ liveDescribe("PC-4 §12: the Overview and the Schedule module carry no BOQ figur
       expect(allocations).toMatchObject({ key: "allocations", severity: "blocking", passed: false });
       // The budget: a cost reader reads it in the Cost module already.
       expect([viewer, "budget" in pour, pour.budget]).toEqual(readsCost ? [viewer, true, 21337] : [viewer, false, undefined]);
-      // The forecast: the levels and counts stay; the money only for a cost reader.
+      // The forecast: the schedule's levels and counts and the project's cost
+      // verdict stay; the money only for a cost reader — and, for anyone
+      // else, no activity's cost basis or level (each says whether the
+      // activity has an approved allocation), no list or tally of the
+      // activities over budget, no EAC basis.
       const forecast = (await api.get(reads().forecast.route, viewerAuth)).body.data;
       expect([viewer, forecast.cost.budget, typeof forecast.cost.counts.lines, typeof forecast.summary.costLevel]).toEqual([
         viewer,
@@ -680,10 +695,13 @@ liveDescribe("PC-4 §12: the Overview and the Schedule module carry no BOQ figur
         "number",
         "string",
       ]);
-      for (const activity of forecast.activities) {
+      expect([viewer, "eacBasis" in forecast.cost, "topRisks" in forecast.cost, "atRisk" in forecast.cost.counts, forecast.cost.withheld, forecast.cost.reason]).toEqual(
+        readsCost ? [viewer, true, true, true, undefined, undefined] : [viewer, false, false, false, true, FORECAST_COST_WITHHELD],
+      );
+      for (const activity of [...forecast.activities, ...forecast.schedule.topRisks]) {
         expect([viewer, Object.keys(activity.cost).sort()]).toEqual([
           viewer,
-          readsCost ? ["actual", "basis", "budget", "committed", "level", "overrun", "overrunPct", "projected", "reasons"] : ["basis", "level"],
+          readsCost ? ["actual", "basis", "budget", "committed", "level", "overrun", "overrunPct", "projected", "reasons"] : ["reason", "withheld"],
         ]);
       }
     }
@@ -910,8 +928,18 @@ liveDescribe("PC-4 §12: the Overview and the Schedule module carry no BOQ figur
     const readerActivities = (await api.get(at("/activities"), auth())).body.data;
     const readerList = Array.isArray(readerActivities) ? readerActivities : readerActivities.items;
     expect(readerList.find((activity) => activity.id === stripId)).toMatchObject({ isCritical: true, approvedAllocationCount: 0 });
+    // The forecast gives the reader the same badge in another form: an
+    // activity's cost has a basis only when it has a budget (an approved
+    // allocation) — so the critical activities whose basis is null are the
+    // critical unmapped ones, counted exactly.
+    const readerForecast = (await api.get(at("/forecast"), auth())).body.data;
+    const unmappedOffForecast = (forecast) =>
+      forecast.activities.filter((activity) => activity.isCritical && activity.cost && "basis" in activity.cost && activity.cost.basis === null).length;
+    expect(readerForecast.activities.find((activity) => activity.id === stripId)).toMatchObject({ isCritical: true, cost: { basis: null } });
+    expect(readerForecast.activities.find((activity) => activity.id === activities.pour.id).cost.basis).not.toBeNull();
+    expect(unmappedOffForecast(readerForecast)).toBe(unmapped);
 
-    for (const [viewer, { user }] of Object.entries(viewers())) {
+    for (const [viewer, { user, readsCost }] of Object.entries(viewers())) {
       const viewerAuth = as(user);
       const limited = await api.get(at("/setup-readiness"), viewerAuth);
       expect([viewer, limited.status]).toEqual([viewer, 200]);
@@ -958,6 +986,21 @@ liveDescribe("PC-4 §12: the Overview and the Schedule module carry no BOQ figur
       const list = Array.isArray(listed) ? listed : listed.items;
       expect([viewer, criticalIds(list)]).toEqual([viewer, criticalIds(readerList)]);
       expect([viewer, keyPaths(list, MAPPING_KEYS)]).toEqual([viewer, []]);
+      // The forecast: the same critical path; for a member who reads neither
+      // the BOQ nor the cost module, no activity's cost basis or level, no
+      // list of the activities over budget and no EAC basis — nothing the
+      // count could be read off. (A cost reader keeps each activity's budget,
+      // the Cost module's figure, by the owner's budget tier.)
+      const forecast = (await api.get(at("/forecast"), viewerAuth)).body.data;
+      expect([viewer, criticalIds(forecast.activities)]).toEqual([viewer, criticalIds(readerForecast.activities)]);
+      if (!readsCost) {
+        const costs = [...forecast.activities, ...forecast.schedule.topRisks].map((activity) => activity.cost);
+        expect([viewer, keyPaths(costs, new Set(["basis", "level"]))]).toEqual([viewer, []]);
+        expect([viewer, costs.every((cost) => cost.withheld === true && cost.reason === FORECAST_COST_WITHHELD)]).toEqual([viewer, true]);
+        expect([viewer, keyPaths(forecast.cost, new Set(["topRisks", "eacBasis", "atRisk"]))]).toEqual([viewer, []]);
+        expect([viewer, unmappedOffForecast(forecast)]).toEqual([viewer, 0]);
+        expect([viewer, forecast.cost.withheld, forecast.cost.reason]).toEqual([viewer, true, FORECAST_COST_WITHHELD]);
+      }
     }
   });
 });

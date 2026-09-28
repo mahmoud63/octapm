@@ -111,7 +111,7 @@ export function PmHome({ projectId, currency, actions }: { projectId: string; cu
                 items={[
                   { id: 'critical', label: 'On the critical path', value: String(schedule?.counts.critical ?? '—'), tone: (schedule?.counts.critical ?? 0) > 0 ? 'warning' : 'default', onPress: () => router.push('/activities') },
                   { id: 'at-risk', label: 'Activities at high risk', value: String(schedule?.counts.atRisk.high ?? '—'), tone: (schedule?.counts.atRisk.high ?? 0) > 0 ? 'error' : 'default', onPress: () => router.push('/activities') },
-                  { id: 'cost-risk', label: 'Cost lines at risk', value: String(cost?.counts?.atRisk.high ?? '—'), tone: (cost?.counts?.atRisk.high ?? 0) > 0 ? 'error' : 'default' },
+                  { id: 'cost-risk', label: 'Cost lines at risk', value: String(cost?.counts?.atRisk?.high ?? '—'), tone: (cost?.counts?.atRisk?.high ?? 0) > 0 ? 'error' : 'default' },
                 ]}
               />
               {schedule?.criticalDriver ? (

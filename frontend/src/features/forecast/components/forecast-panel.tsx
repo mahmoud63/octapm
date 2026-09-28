@@ -21,6 +21,7 @@ import { Button } from '@/components/ui/button'
 import { AiRunFeedback } from '@/features/assistant/components/ai-run-feedback'
 import { workspaceLink } from '@/features/workflows/hooks/use-workflow-engine'
 import {
+  COST_FIGURES_WITHHELD,
   eacStatement,
   useExplainForecast,
   useForecast,
@@ -675,7 +676,16 @@ export function ForecastPanel({ projectId }: { projectId: string }) {
       <div className='grid gap-4 lg:grid-cols-2'>
         <section className='space-y-2'>
           <h4 className='text-sm font-semibold'>Activities over budget</h4>
-          {cost.topRisks.length === 0 ? (
+          {!cost.topRisks ? (
+            // Withheld by the server (§12): which activities are over budget
+            // says which have one. A dash and the reason — never "none".
+            <p
+              className='text-sm text-muted-foreground'
+              data-testid='uat-forecast-cost-risks-withheld'
+            >
+              — {cost.reason ?? COST_FIGURES_WITHHELD}
+            </p>
+          ) : cost.topRisks.length === 0 ? (
             <p className='text-sm text-muted-foreground'>
               No activity is projected over its budget.
             </p>

@@ -444,11 +444,11 @@ const costLines = (c) => [
 ];
 
 // For a reader whose forecast carries no cost figure (§12, utils/boq-figures):
-// the levels and the names, and no amount for the model to repeat.
+// the budget lines' names and levels, no amount for the model to repeat, and
+// nothing per activity — which activities are over budget, or at which cost
+// level, is read off the mapping and is not in this reader's forecast.
 const withheldCostLines = (c) => [
-  `Cost: the cost figures are not available to this reader; do not state or estimate any cost amount. Cost risk: ${c.counts.atRisk.high} high, ${c.counts.atRisk.medium} medium; ${c.counts.lines} budget lines over.`,
-  "Activities over budget:",
-  ...(c.topRisks.length ? c.topRisks.slice(0, 6).map((row) => `- [${row.id}] ${row.name} · cost risk ${row.cost.level}`) : ["- none"]),
+  `Cost: the cost figures are not available to this reader; do not state or estimate any cost amount, and do not say which activities are over budget. ${c.counts.lines} budget lines over.`,
   "Budget lines over:",
   ...(c.budgetLines.length ? c.budgetLines.slice(0, 6).map((row) => `- ${row.costCode || ""} ${row.name} · ${row.level}`) : ["- none"]),
 ];

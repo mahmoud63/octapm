@@ -76,6 +76,27 @@ describe('Home', () => {
     expect(screen.getByText(/Unitised facade installation/)).toBeTruthy()
   })
 
+  it('a forecast whose cost is withheld (§12) reads a dash for the cost lines at risk — the tally is read off the mapping, so it is not sent', async () => {
+    fakeServer({
+      ...routes,
+      'GET /projects/p1/forecast': () => ({
+        status: 200,
+        body: envelope({
+          available: true,
+          asOf: '2026-09-19',
+          schedule: { plannedFinish: '2026-12-31', projectedFinish: '2027-03-02', slipDays: 61, basis: 'activities', spi: null, cpi: 0.74, criticalDriver: null, counts: { activities: 70, open: 69, complete: 1, critical: 3, atRisk: { high: 2, medium: 13, low: 0 } } },
+          // What the server sends a member who reads neither the BOQ nor the cost module.
+          cost: { counts: { lines: 5 }, budgetLines: [], withheld: true, reason: 'Cost figures are not available to you' },
+          summary: { scheduleLevel: 'high', costLevel: 'high' },
+        }),
+      }),
+    })
+    await renderScreen(<HomeScreen />)
+    const costRisk = await screen.findByTestId('count-cost-risk')
+    expect(costRisk).toHaveTextContent(/—/)
+    expect(screen.getByTestId('count-critical')).toHaveTextContent(/3/)
+  })
+
   it("reports the site's own totals, which the app never recomputes", async () => {
     fakeServer(routes)
     await renderScreen(<HomeScreen />)
