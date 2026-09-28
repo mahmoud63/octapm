@@ -382,6 +382,25 @@ const processPendingPushDeliveries = async ({ limit = 50, now = new Date(), user
     if (!(await claimDeliveryAttempt(attempt, now))) continue;
     result.processed += 1;
     const notification = attempt.notification;
+    // A BOQ record's notice stored before the reader rule, for someone who
+    // may not read that BOQ, is not pushed (notification.service).
+    const { mayReceive } = require("./notification.service");
+    if (
+      notification &&
+      !(await mayReceive({
+        orgId: notification.orgId,
+        userId: attempt.userId,
+        projectId: notification.projectId,
+        entityType: notification.entityType,
+      }))
+    ) {
+      await prisma.notificationDeliveryAttempt.update({
+        where: { id: attempt.id },
+        data: { nextAttemptAt: attempt.nextAttemptAt ?? null, status: "skipped", errorCode: "RECIPIENT_MAY_NOT_READ_RECORD", errorMessage: "The recipient may not read the record this notification is about" },
+      });
+      result.skipped += 1;
+      continue;
+    }
     // Every device of the person gets the same payload: the device belongs to
     // the identity, the payload names the workspace (fan-out per identity).
     const payload = notification ? await buildPushPayload({ notification, userId: attempt.userId }) : null;

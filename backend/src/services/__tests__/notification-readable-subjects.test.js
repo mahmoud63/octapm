@@ -7,6 +7,9 @@
  *   an allocation with no code: the BOQ row's description — for a reader of
  *     the BOQ only (utils/boq-figures); anyone else the kind alone
  *   nothing readable: the kind alone, "BOQ allocation needs approval"
+ *   a notice about one of the bill's own records (an allocation, a BOQ
+ *     revision) reaches only a reader of the BOQ on its project; a row
+ *     stored before that rule is left out of what anyone else reads
  *   a row stored before the rule is re-rendered where it is read (list,
  *     summary, one row, read/archive answers, email, push) and never
  *     rewritten; its link is its own
@@ -120,6 +123,7 @@ describe("a notification names its record in words, never by its id", () => {
   });
 
   it("an allocation with an activity code: 'BOQ allocation for Activity A120 needs approval', link unchanged", async () => {
+    mockBoqReaders.add("pm-1").add("pm-2");
     mockPrisma.activityBoqAllocation.findFirst.mockResolvedValue({
       id: ALLOCATION,
       projectId: PROJECT,
@@ -148,7 +152,7 @@ describe("a notification names its record in words, never by its id", () => {
     }
   });
 
-  it("an allocation with no activity code: the BOQ row's description for a reader of the BOQ, the kind alone for anyone else", async () => {
+  it("an allocation with no activity code: the BOQ row's description for a reader of the BOQ, and nothing for anyone else", async () => {
     mockBoqReaders.add("pm-1");
     mockPrisma.activityBoqAllocation.findFirst.mockResolvedValue({
       id: ALLOCATION,
@@ -165,16 +169,44 @@ describe("a notification names its record in words, never by its id", () => {
     const rows = byRecipient();
     expect(rows["pm-1"].title).toBe("BOQ allocation for Concrete Foundations needs approval");
     expect(rows["pm-1"].message).toBe("BOQ allocation: Concrete Foundations. Status moved to submitted.");
-    // pm-2 may not read the BOQ: the bill's content is not theirs to read.
-    expect(rows["pm-2"].title).toBe("BOQ allocation needs approval");
-    expect(rows["pm-2"].message).toBe("BOQ allocation needs approval. Status moved to submitted.");
-    // The realtime event every recipient hears carries the words anyone may read.
+    // pm-2 may not read the BOQ: no notice at all, and no realtime badge.
+    expect(Object.keys(rows)).toEqual(["pm-1"]);
     expect(mockPublish).toHaveBeenCalledWith(
-      expect.objectContaining({ payload: expect.objectContaining({ title: "BOQ allocation needs approval" }) }),
+      expect.objectContaining({ recipientUserIds: ["pm-1"], payload: expect.objectContaining({ title: "BOQ allocation needs approval" }) }),
     );
   });
 
+  it("a member who may not read the BOQ receives no notice about an allocation or a BOQ revision, nor its realtime badge", async () => {
+    mockPrisma.activityBoqAllocation.findFirst.mockResolvedValue({
+      id: ALLOCATION,
+      projectId: PROJECT,
+      activity: { activityCode: "C900" },
+      boqItem: { description: "Concrete Foundations" },
+    });
+
+    await notificationService.createWorkflowNotifications({ tx: mockPrisma, workflowEvent: submitted("activity_boq_allocation", ALLOCATION) });
+    await notificationService.createWorkflowNotifications({ tx: mockPrisma, workflowEvent: submitted("boq_revision", REVISION) });
+    // Neither project manager reads the BOQ: nothing is written, nothing published.
+    expect(created()).toEqual([]);
+    expect(mockPublish).not.toHaveBeenCalled();
+
+    // The one who does is told; the other is not.
+    mockBoqReaders.add("pm-2");
+    await notificationService.createWorkflowNotifications({
+      tx: mockPrisma,
+      workflowEvent: submitted("activity_boq_allocation", ALLOCATION, { id: "event-2" }),
+    });
+    expect(created().map((row) => [row.recipientUserId, row.title])).toEqual([["pm-2", "BOQ allocation for Activity C900 needs approval"]]);
+    expect(mockPublish.mock.calls.map(([event]) => event.recipientUserIds)).toEqual([["pm-2"]]);
+
+    // Any other record's notice reaches both, as before.
+    mockPrisma.scheduleRevision.findFirst.mockResolvedValue({ id: REVISION, projectId: PROJECT, label: "Rev 3" });
+    await notificationService.createWorkflowNotifications({ tx: mockPrisma, workflowEvent: submitted("schedule_revision", REVISION) });
+    expect(created().filter((row) => row.entityType === "schedule_revision").map((row) => row.recipientUserId).sort()).toEqual(["pm-1", "pm-2"]);
+  });
+
   it("nothing readable (the record is gone): the kind alone, 'BOQ allocation needs approval'", async () => {
+    mockBoqReaders.add("pm-1").add("pm-2");
     mockPrisma.activityBoqAllocation.findFirst.mockResolvedValue(null);
 
     await notificationService.createWorkflowNotifications({
@@ -189,6 +221,7 @@ describe("a notification names its record in words, never by its id", () => {
   });
 
   it("an activity code of nothing but spaces, or one shaped like an id, is not a name", async () => {
+    mockBoqReaders.add("pm-2");
     mockPrisma.activityBoqAllocation.findFirst
       .mockResolvedValueOnce({ id: ALLOCATION, projectId: PROJECT, activity: { activityCode: "   " }, boqItem: null })
       .mockResolvedValueOnce({ id: ALLOCATION, projectId: PROJECT, activity: { activityCode: ALLOCATION }, boqItem: { description: LOADING } });
@@ -278,6 +311,8 @@ describe("a notification stored before the rule is re-rendered where it is read,
   beforeEach(() => {
     jest.clearAllMocks();
     mockBoqReaders.clear();
+    // user-1 reads the BOQ unless a test says otherwise.
+    mockBoqReaders.add("user-1");
     mockPrisma.activityBoqAllocation.findMany.mockResolvedValue([
       { id: ALLOCATION, projectId: PROJECT, activity: { activityCode: "A120" }, boqItem: { description: "Concrete Foundations" } },
     ]);
@@ -319,21 +354,75 @@ describe("a notification stored before the rule is re-rendered where it is read,
       where: { id: { in: [ALLOCATION] }, projectId: { in: [PROJECT] } },
       include: { activity: { select: { activityCode: true } }, boqItem: { select: { description: true } } },
     });
-    // A row with nothing to re-render costs no read.
-    expect(mockPrisma.notification.findMany).toHaveBeenCalledTimes(1);
+    // One read of the projects their BOQ-record rows are on, then the page;
+    // a row with nothing to re-render costs no further read.
+    expect(mockPrisma.notification.findMany).toHaveBeenCalledTimes(2);
+    expect(mockPrisma.notification.findMany.mock.calls[0][0]).toEqual({
+      where: { orgId: "org-1", recipientUserId: "user-1", entityType: { in: ["boq_revision", "activity_boq_allocation"] } },
+      distinct: ["projectId"],
+      select: { projectId: true },
+    });
+    // user-1 reads the BOQ there: the page is not narrowed.
+    expect(mockPrisma.notification.findMany.mock.calls[1][0].where).not.toHaveProperty("AND");
   });
 
-  it("a stored allocation whose activity has no code: the description for a BOQ reader, the kind for anyone else", async () => {
+  it("a stored allocation whose activity has no code: the description for a BOQ reader", async () => {
     mockPrisma.activityBoqAllocation.findMany.mockResolvedValue([
       { id: ALLOCATION, projectId: PROJECT, activity: { activityCode: null }, boqItem: { description: "Concrete Foundations" } },
     ]);
     mockPrisma.notification.findMany.mockResolvedValue([legacy()]);
-    const read = async () =>
-      (await notificationService.listNotifications({ orgId: "org-1", userId: "user-1", viewer: { id: "user-1", orgId: "org-1" } })).rows[0].title;
+    const { rows } = await notificationService.listNotifications({ orgId: "org-1", userId: "user-1", viewer: { id: "user-1", orgId: "org-1" } });
 
-    expect(await read()).toBe("BOQ allocation needs approval");
-    mockBoqReaders.add("user-1");
-    expect(await read()).toBe("BOQ allocation for Concrete Foundations needs approval");
+    expect(rows[0].title).toBe("BOQ allocation for Concrete Foundations needs approval");
+  });
+
+  it("a stored BOQ-record row for someone who may not read that BOQ is left out of the list, the summary, one notification and mark-all-read", async () => {
+    const OTHER = "9d0c0de0-0000-4000-8000-000000000000";
+    const boqFigures = jest.requireMock("../../utils/boq-figures");
+    // Their BOQ-record rows are on two projects; they read the BOQ on OTHER only.
+    boqFigures.canReadBoq.mockImplementation((req) => req?.params?.projectId === OTHER);
+    mockPrisma.notification.findMany.mockImplementation(async (args) =>
+      args.distinct ? [{ projectId: PROJECT }, { projectId: OTHER }] : [],
+    );
+    mockPrisma.notification.count.mockResolvedValue(0);
+    mockPrisma.notification.findFirst.mockResolvedValue(null);
+    mockPrisma.notification.updateMany.mockResolvedValue({ count: 0 });
+    const viewer = { id: "user-1", orgId: "org-1" };
+    const kept = {
+      OR: [
+        { entityType: null },
+        { entityType: { notIn: ["boq_revision", "activity_boq_allocation"] } },
+        { projectId: { notIn: [PROJECT] } },
+      ],
+    };
+
+    try {
+      await notificationService.listNotifications({ orgId: "org-1", userId: "user-1", viewer });
+      await notificationService.getNotificationSummary({ orgId: "org-1", userId: "user-1", viewer });
+      await expect(
+        notificationService.getNotificationForUser({ orgId: "org-1", userId: "user-1", viewer, notificationId: "not-legacy-1" }),
+      ).rejects.toMatchObject({ status: 404, code: "NOTIFICATION_NOT_FOUND" });
+      await notificationService.markAllRead({ orgId: "org-1", userId: "user-1", viewer });
+
+      const pages = mockPrisma.notification.findMany.mock.calls.map(([args]) => args).filter((args) => !args.distinct);
+      expect(pages.map((args) => args.where.AND)).toEqual([[kept], [kept]]);
+      expect(mockPrisma.notification.count.mock.calls.map(([args]) => args.where.AND)).toEqual([[kept], [kept], [kept]]);
+      expect(mockPrisma.notification.findFirst.mock.calls[0][0].where.AND).toEqual([kept]);
+      // Mark-all-read is the one write, and it is scoped to what they read.
+      expect(mockPrisma.notification.updateMany.mock.calls[0][0].where).toEqual({
+        orgId: "org-1",
+        recipientUserId: "user-1",
+        inAppVisible: true,
+        readAt: null,
+        archivedAt: null,
+        AND: [kept],
+      });
+    } finally {
+      boqFigures.canReadBoq.mockImplementation((req) => Boolean(req?.user && mockBoqReaders.has(req.user.id)));
+      mockPrisma.notification.findMany.mockReset();
+      // The afterEach guard is for reading; this test's one write is asserted above.
+      mockPrisma.notification.updateMany.mockClear();
+    }
   });
 
   it("a stored row whose record is gone reads as its kind", async () => {

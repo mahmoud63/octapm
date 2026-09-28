@@ -20,6 +20,13 @@
  * it is mapped the planning engineer locks. A baseline locked before the rule
  * is left exactly as it was.
  *
+ * The schedule's readiness says what the lock says (closure review,
+ * 2026-09-28): on a project with no bill, baselineReady is false and its
+ * first failing check is "boq_present", whose fix is the upload on the BOQ
+ * page — never baselineReady true beside a lock that is refused. The
+ * approval's own verdict (ready) is unchanged, and setup readiness does not
+ * repeat the check (its BOQ step names the upload).
+ *
  * Proven against a real API process and the real local Postgres, through the
  * product's own API. Everything lives in a throwaway "LiveTest <uuid>"
  * organisation dropped afterwards; the only writes outside the API are the
@@ -187,9 +194,28 @@ liveDescribe("PC-4: no schedule baseline without a BOQ (owner decision 2026-09-2
 
     // ── Active and approved, its own logic sound: the D5 coverage check
     // passes on an empty bill, and the lock is still refused for the bill.
+    // The readiness says so too: the approval's verdict stands, the
+    // baseline's is false, and its first failing step is the upload.
     await built.post(`/schedule/revisions/${revisionId}/activate`, { mappings: [] });
     const readiness = (await built.get("/schedule")).revision.readiness;
-    expect([readiness.ready, readiness.baselineReady]).toEqual([true, true]);
+    expect([readiness.ready, readiness.baselineReady, readiness.baselineBlockingCount]).toEqual([true, false, 1]);
+    expect(readiness.checks[0]).toEqual({
+      key: "boq_present",
+      label: "BOQ",
+      requiredFor: ["baseline"],
+      passed: false,
+      severity: "blocking",
+      message: "No BOQ has been uploaded; a baseline locks a BOQ mapped to the schedule.",
+      details: {},
+      fix: {
+        where: "BOQ page",
+        inline: true,
+        permission: "boq.create",
+        next: "upload the BOQ (BOQ page)",
+        text: "Upload the BOQ on the BOQ page, then map it to the schedule's activities (Project Controls › Mapping) and lock the baseline.",
+      },
+    });
+    expect(readiness.checks.filter((check) => check.severity === "blocking" && !check.passed).map((check) => check.key)).toEqual(["boq_present"]);
     await expectBoqRequired(built, "active approved", revisionId);
 
     // Nothing is written by any of those refusals: the revision is approved
@@ -198,12 +224,19 @@ liveDescribe("PC-4: no schedule baseline without a BOQ (owner decision 2026-09-2
     expect(await lockWrites(projectId)).toEqual(NOTHING);
     const row = await prisma.scheduleRevision.findUnique({ where: { id: revisionId } });
     expect([row.status, row.isActive, row.baselinedBy, row.baselinedAt, row.baselineComment]).toEqual(["approved", true, null, null, null]);
-    // The setup readiness agrees: the baseline gate is not ready.
-    expect((await built.get("/setup-readiness")).gates.baseline.ready).toBe(false);
+    // The setup readiness agrees: the baseline gate is not ready — and its
+    // BOQ step names the upload; the schedule's BOQ check is not repeated
+    // as a schedule correction.
+    const setup = await built.get("/setup-readiness");
+    expect(setup.gates.baseline.ready).toBe(false);
+    expect(setup.gates.baseline.blockers.map((blocker) => blocker.code)).not.toContain("SCHEDULE_BOQ_PRESENT_FAILED");
 
     // ── The bill, entered by hand through the BOQ API: the refusal moves on
     // to the next step, the mapping (D5) — still nothing written.
     const item = (await built.post("/boq/items", { code: "1.1", description: "Excavation", quantity: 10, unit: "m3", rate: 100 }, 201)).item;
+    const mappingNext = (await built.get("/schedule")).revision.readiness;
+    expect(mappingNext.checks[0]).toMatchObject({ key: "boq_present", passed: true, fix: null });
+    expect([mappingNext.baselineReady, mappingNext.checks.filter((check) => check.severity === "blocking" && !check.passed).map((check) => check.key)]).toEqual([false, ["allocations"]]);
     const coverage = await built.refused("/schedule/baseline", {});
     expect([coverage.status, coverage.code]).toEqual([400, "SCHEDULE_NOT_READY"]);
     expect(coverage.message).toContain("BOQ allocations");
@@ -214,6 +247,8 @@ liveDescribe("PC-4: no schedule baseline without a BOQ (owner decision 2026-09-2
     const [first] = await prisma.activity.findMany({ where: { projectId, isActive: true }, orderBy: { sortOrder: "asc" } });
     const allocation = await built.post("/activity-boq-allocations", { boqItemId: item.id, activityId: first.id, quantity: 10 }, 201);
     for (const step of ["submit", "approve"]) await built.post(`/activity-boq-allocations/${allocation.id}/${step}`, {});
+    // Every check the baseline needs now passes, and the lock succeeds.
+    expect((await built.get("/schedule")).revision.readiness).toMatchObject({ ready: true, baselineReady: true, baselineBlockingCount: 0 });
     const locked = await built.post(`/schedule/revisions/${revisionId}/baseline`, {}, 200, plannerAuth());
     expect([locked.locked, locked.revision.status]).toEqual([2, "baselined"]);
     expect(await prisma.activity.count({ where: { projectId, isActive: true, baselineStart: null } })).toBe(0);

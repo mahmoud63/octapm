@@ -20,6 +20,8 @@ import {
  *   the server refuses a direct lock the same way, on both baseline routes,
  *      with 400 BOQ_REQUIRED_FOR_BASELINE, and writes nothing (owner decision
  *      2026-09-28)
+ *   the schedule's readiness says it too: one blocking check, the BOQ, with
+ *      the upload as its fix — never "0 blocking" beside a refused lock
  *
  * Everything is built through the API in a throwaway "LiveTest <uuid>"
  * organisation, dropped afterwards.
@@ -87,6 +89,15 @@ test('no bill: the review panel and the BOQ Approval card name the upload, not t
     'Next: upload the BOQ (BOQ page), then lock baseline',
   )
   await expect(panel.getByRole('button', { name: 'Lock Baseline' })).toBeDisabled()
+  // The readiness the panel shows is the server's: the BOQ check fails, first,
+  // and is the one blocker; its fix is the upload on the BOQ page.
+  await expect(page.getByTestId('uat-schedule-review-blocking')).toHaveText('1 blocking')
+  await expect(page.getByTestId('uat-schedule-review-check-boq_present')).toContainText(
+    'No BOQ has been uploaded; a baseline locks a BOQ mapped to the schedule.',
+  )
+  await expect(page.getByTestId('uat-schedule-review-fix-boq_present')).toContainText(
+    "To fix: Upload the BOQ on the BOQ page, then map it to the schedule's activities (Project Controls › Mapping) and lock the baseline.",
+  )
 
   // ── A direct call is refused by the server with the same step, on both
   // baseline routes, and the revision is still approved (nothing written).

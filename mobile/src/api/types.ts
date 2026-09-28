@@ -123,6 +123,9 @@ export interface Forecast {
     /** The tally of activities over budget is read off the mapping, so it too
      * is present only for a BOQ or cost reader (owner decision, 2026-09-28). */
     counts?: { atRisk?: { high: number; medium: number; low: number }; lines: number }
+    /** Set, with the server's sentence, when the money above was withheld. */
+    withheld?: boolean
+    reason?: string
   } | null
   summary: { scheduleLevel: string | null; costLevel: string | null } | null
   /** The server's plain-language notes on what its figures cannot yet include. */

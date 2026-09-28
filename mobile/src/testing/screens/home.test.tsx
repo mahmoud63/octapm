@@ -74,9 +74,15 @@ describe('Home', () => {
     expect(screen.getAllByText('—').length).toBeGreaterThan(0)
     expect(screen.getByTestId('pm-critical-driver')).toBeTruthy()
     expect(screen.getByText(/Unitised facade installation/)).toBeTruthy()
+    // "Cost lines at risk" counts the budget lines projected over (5), not
+    // the activities over budget (atRisk.high, 3).
+    expect(screen.getByTestId('count-cost-risk')).toHaveTextContent(/^5Cost lines at risk$/)
+    // A reader who receives the money is told no reason for a withholding.
+    expect(screen.queryByTestId('pm-status-cost-withheld')).toBeNull()
+    expect(screen.queryByTestId('pm-pulse-cost-withheld')).toBeNull()
   })
 
-  it('a forecast whose cost is withheld (§12) reads a dash for the cost lines at risk — the tally is read off the mapping, so it is not sent', async () => {
+  it("a forecast whose cost is withheld (§12) reads a dash and the server's reason for the money — never an unexplained blank", async () => {
     fakeServer({
       ...routes,
       'GET /projects/p1/forecast': () => ({
@@ -92,9 +98,15 @@ describe('Home', () => {
       }),
     })
     await renderScreen(<HomeScreen />)
+    // The budget lines over are the cost module's own and still sent.
     const costRisk = await screen.findByTestId('count-cost-risk')
-    expect(costRisk).toHaveTextContent(/—/)
+    expect(costRisk).toHaveTextContent(/^5Cost lines at risk$/)
     expect(screen.getByTestId('count-critical')).toHaveTextContent(/3/)
+    // The overrun is a dash, with the reason beside it…
+    expect(await screen.findByText('Overrun')).toBeTruthy()
+    expect(await screen.findByTestId('pm-status-cost-withheld')).toHaveTextContent('— Cost figures are not available to you')
+    // …and so are the actual cost and the forecast at completion.
+    expect(screen.getByTestId('pm-pulse-cost-withheld')).toHaveTextContent('— Cost figures are not available to you')
   })
 
   it("reports the site's own totals, which the app never recomputes", async () => {

@@ -7979,7 +7979,7 @@ add(
 
 // Owner decision D5: which readiness checks each gate needs.
 const READINESS_GATES =
-  "readiness.ready and readiness.blockingCount answer for the approval, which judges the revision's own logic (predecessor logic, critical path, date sanity); readiness.baselineReady and readiness.baselineBlockingCount answer for the baseline lock, which also needs the BOQ allocation coverage of the active activities. Each check's requiredFor names the gates it guards (\"approval\", \"baseline\"); the BOQ allocations check guards the baseline only, and on a staged revision it says the bill's value is mapped after the activation. Each failing check carries fix { where, inline, next, text, permission } — what puts it right and the page that offers it, by where the revision stands: a staged revision's own logic is corrected at its source and imported again or regenerated (Schedule › Update Schedule) or, under review, rejected; an active revision's on Schedule › Gantt › Edit or by Recalculate CPM (Schedule › More actions); coverage on Project Controls › Mapping. permission is the module.action the step needs (schedule.create, schedule.update, schedule.approve, boq.create); a passing check has fix null. The readiness judges the schedule and its coverage only: baselineReady does not cover the rule that a baseline needs a BOQ. On a project with no active BOQ item the coverage check passes vacuously, so baselineReady can be true while every lock is refused with 400 BOQ_REQUIRED_FOR_BASELINE; GET /projects/{projectId}/setup-readiness gates.baseline covers both (its BOQ step names the upload first).";
+  "readiness.ready and readiness.blockingCount answer for the approval, which judges the revision's own logic (predecessor logic, critical path, date sanity); readiness.baselineReady and readiness.baselineBlockingCount answer for the baseline lock, which also needs a BOQ and its allocation coverage of the active activities. Each check's requiredFor names the gates it guards (\"approval\", \"baseline\"); the BOQ allocations check guards the baseline only, and on a staged revision it says the bill's value is mapped after the activation. Each failing check carries fix { where, inline, next, text, permission } — what puts it right and the page that offers it, by where the revision stands: a staged revision's own logic is corrected at its source and imported again or regenerated (Schedule › Update Schedule) or, under review, rejected; an active revision's on Schedule › Gantt › Edit or by Recalculate CPM (Schedule › More actions); coverage on Project Controls › Mapping; the BOQ itself on the BOQ page. permission is the module.action the step needs (schedule.create, schedule.update, schedule.approve, boq.create); a passing check has fix null. The first check, boq_present (label \"BOQ\", requiredFor [\"baseline\"], details {}), is the rule the lock enforces with 400 BOQ_REQUIRED_FOR_BASELINE: on a project with no active BOQ item it fails, so baselineReady is false and baselineBlockingCount counts it, and its fix is { where: \"BOQ page\", next: \"upload the BOQ (BOQ page)\", permission: \"boq.create\" } — named before any schedule or mapping step (the coverage check, which passes vacuously on an empty bill, no longer stands alone). It says only whether a bill exists, never a count or a value, and ready (the approval) does not include it. GET /projects/{projectId}/setup-readiness does not repeat it as a schedule blocker: its BOQ step names the upload.";
 const APPROVAL_WITHOUT_COVERAGE =
   "Approval does not require BOQ allocations (owner decision D5): allocations are made to the active activities, which exist only once the approved revision is activated. SCHEDULE_NOT_READY at approval names only the revision's own failing checks.";
 const BASELINE_NEEDS_COVERAGE =
@@ -12001,6 +12001,11 @@ add(
   }),
 );
 
+// Owner rule 2026-09-28: a member without boq:read receives no BOQ-derived
+// information, notifications included.
+const BOQ_RECORD_NOTICES =
+  "A notification about one of the bill's own records (entityType activity_boq_allocation or boq_revision) is written only for a recipient who may read the BOQ on its project (the project's template, role and party decide it, as on the BOQ routes): a member without boq:read is not told that an allocation or a revision exists, in-app, by email, by push or by the realtime badge. Such a row stored for them before this rule is left out of the list, the summary and its counts (unread, read, archived), is untouched by mark-all-read, and answers 404 NOTIFICATION_NOT_FOUND when opened, marked, archived or retried; the stored row itself is never rewritten.";
+
 const notificationIdParam = pathParam(
   "notificationId",
   "Notification UUID scoped to the authenticated user.",
@@ -12012,6 +12017,7 @@ add(
   operation({
     tag: "Notifications",
     summary: "Get notification counts and recent items.",
+    description: BOQ_RECORD_NOTICES,
     operationId: "getNotificationSummary",
     responseSchema: ref("NotificationSummary"),
     permissions: authenticatedOnly,
@@ -12136,6 +12142,7 @@ add(
   operation({
     tag: "Notifications",
     summary: "List in-app notifications for the authenticated user.",
+    description: BOQ_RECORD_NOTICES,
     operationId: "listNotifications",
     parameters: [
       ...cursorParams,
@@ -12170,6 +12177,7 @@ add(
   operation({
     tag: "Notifications",
     summary: "Mark all visible notifications as read.",
+    description: BOQ_RECORD_NOTICES,
     operationId: "markAllNotificationsRead",
     responseSchema: ref("NotificationMarkAllReadResponse"),
     permissions: authenticatedOnly,
@@ -12220,6 +12228,7 @@ add(
   operation({
     tag: "Notifications",
     summary: "Get a notification and delivery audit attempts.",
+    description: BOQ_RECORD_NOTICES,
     operationId: "getNotification",
     parameters: [notificationIdParam],
     responseSchema: ref("Notification"),

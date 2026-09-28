@@ -39,6 +39,11 @@ export function PmHome({ projectId, currency, actions }: { projectId: string; cu
   const summary = assignments.data?.summary
   const schedule = forecast.data?.schedule ?? null
   const cost = forecast.data?.cost ?? null
+  // The server withholds the cost view's money from a member who reads
+  // neither the BOQ nor the cost module (§12). Each amount is then a dash,
+  // and the server's reason is said beside it, never an unexplained blank.
+  const costWithheld = cost?.withheld === true
+  const costReason = costWithheld ? (cost?.reason ?? 'Cost figures are not available to you') : null
   const totals = log.data?.totals ?? null
   const recent = useMemo(() => (photos.data?.items ?? []).slice(0, 12), [photos.data])
 
@@ -69,6 +74,7 @@ export function PmHome({ projectId, currency, actions }: { projectId: string; cu
                 <KPI label="Slip" value={schedule?.slipDays != null ? `${schedule.slipDays} d` : '—'} tone={(schedule?.slipDays ?? 0) > 0 ? 'error' : 'default'} />
                 <KPI label="Overrun" value={cost?.overrunPct != null ? `${cost.overrunPct}%` : '—'} tone={(cost?.overrunPct ?? 0) > 0 ? 'error' : 'default'} />
               </View>
+              {costReason ? <Text variant="caption" tone="muted" testID="pm-status-cost-withheld">— {costReason}</Text> : null}
               <HealthDimensions dimensions={health.data.dimensions} />
             </View>
           </Card>
@@ -111,7 +117,10 @@ export function PmHome({ projectId, currency, actions }: { projectId: string; cu
                 items={[
                   { id: 'critical', label: 'On the critical path', value: String(schedule?.counts.critical ?? '—'), tone: (schedule?.counts.critical ?? 0) > 0 ? 'warning' : 'default', onPress: () => router.push('/activities') },
                   { id: 'at-risk', label: 'Activities at high risk', value: String(schedule?.counts.atRisk.high ?? '—'), tone: (schedule?.counts.atRisk.high ?? 0) > 0 ? 'error' : 'default', onPress: () => router.push('/activities') },
-                  { id: 'cost-risk', label: 'Cost lines at risk', value: String(cost?.counts?.atRisk?.high ?? '—'), tone: (cost?.counts?.atRisk?.high ?? 0) > 0 ? 'error' : 'default' },
+                  // The budget lines by cost code projected over (the cost
+                  // module's own, which every reader of the forecast gets) —
+                  // not cost.counts.atRisk, which tallies activities.
+                  { id: 'cost-risk', label: 'Cost lines at risk', value: String(cost?.counts?.lines ?? '—'), tone: (cost?.counts?.lines ?? 0) > 0 ? 'error' : 'default' },
                 ]}
               />
               {schedule?.criticalDriver ? (
@@ -164,6 +173,7 @@ export function PmHome({ projectId, currency, actions }: { projectId: string; cu
           <KPI label="Actual" value={money(cost?.actual ?? null, currency)} />
           <KPI label="Forecast at completion" value={money(cost?.eac ?? null, currency)} qualifier={eacQualifier(forecast.data)} tone={(cost?.overrun ?? 0) > 0 ? 'error' : 'default'} />
         </View>
+        {costReason ? <Text variant="caption" tone="muted" testID="pm-pulse-cost-withheld">— {costReason}</Text> : null}
         {/* The EV cutoff SPI and CPI were measured through (D1); the zone
             note, when the project has none, is among the server's notes. */}
         {evCutoffLine(forecast.data) ? <Provenance>{evCutoffLine(forecast.data)}</Provenance> : null}

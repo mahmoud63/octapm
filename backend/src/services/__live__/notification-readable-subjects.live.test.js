@@ -6,8 +6,9 @@
  *
  *   An allocation whose activity has a code is "BOQ allocation for Activity
  *   A120 needs approval"; one whose activity has none is named by its BOQ
- *   row's description for a reader of the BOQ, and by its kind alone for a
- *   project manager whose template takes the BOQ away (utils/boq-figures).
+ *   row's description. A project manager whose template takes the BOQ away
+ *   (utils/boq-figures) receives no allocation notice at all
+ *   (notification-boq-readers.live.test.js).
  *   A cost loading is named by its activity's code.
  *
  *   A row stored before the rule (title "<kind> <uuid> …", message
@@ -169,14 +170,15 @@ liveDescribe("a notification names its record in words, never by its database id
     const id = records.codedAllocation.id;
     const fresh = (rows) => rows.filter((row) => row.entityId === id && !row.id.startsWith(legacyRows.allocation.id));
     expect(fresh(await inbox(people.reviewer)).map((row) => row.title)).toContain("BOQ allocation for Activity A120 needs approval");
-    expect(fresh(await inbox(people.noBoqPm)).map((row) => row.title)).toEqual(["BOQ allocation for Activity A120 needs approval"]);
+    // The project manager without BOQ read is not told of the bill's records at all.
+    expect(fresh(await inbox(people.noBoqPm)).map((row) => row.title)).toEqual([]);
     // The reviewer approved; the admin, who submitted it, hears of it.
     const admin = (await inbox(people.admin)).filter((row) => row.entityId === id);
     expect(admin.map((row) => row.title)).toEqual(["BOQ allocation for Activity A120 approved"]);
     expect(admin[0].message).toBe("BOQ allocation: Activity A120. Status moved to approved.");
   });
 
-  it("an allocation with no activity code: its BOQ row's description for a reader of the BOQ, its kind for anyone else", async () => {
+  it("an allocation with no activity code: its BOQ row's description for a reader of the BOQ, nothing for anyone else", async () => {
     const id = records.uncodedAllocation.id;
     const newest = (rows) => rows.filter((row) => row.entityId === id && row.event === "workflow.submitted");
     const reviewer = newest(await inbox(people.reviewer));
@@ -184,15 +186,13 @@ liveDescribe("a notification names its record in words, never by its database id
     expect(reviewer.map((row) => [row.title, row.message])).toEqual([
       ["BOQ allocation for Rebar to Foundations needs approval", "BOQ allocation: Rebar to Foundations. Status moved to submitted."],
     ]);
-    expect(noBoq.map((row) => [row.title, row.message])).toEqual([
-      ["BOQ allocation needs approval", "BOQ allocation needs approval. Status moved to submitted."],
-    ]);
-    // Stored that way, per recipient: nothing is hidden in the browser.
+    expect(noBoq).toEqual([]);
+    // Not written for them at all: nothing is hidden in the browser.
     const stored = await prisma.notification.findMany({
       where: { orgId: live.org.id, entityId: id, event: "workflow.submitted", recipientUserId: people.noBoqPm.id },
       select: { title: true, message: true },
     });
-    expect(stored).toEqual([{ title: "BOQ allocation needs approval", message: "BOQ allocation needs approval. Status moved to submitted." }]);
+    expect(stored).toEqual([]);
   });
 
   it("a cost loading is named by its activity's code", async () => {
@@ -210,9 +210,9 @@ liveDescribe("a notification names its record in words, never by its database id
     expect(byId.get(legacyRows.uncodedForReviewer.id).title).toBe("BOQ allocation for Rebar to Foundations approved");
     expect(byId.get(legacyRows.loading.id).title).toBe("Cost loading for Activity A120 approved");
     expect(byId.get(legacyRows.loading.id).message).toBe("Cost loading: Activity A120. Status moved to approved.");
-    // The same row for the member who may not read the BOQ names it by its kind.
-    const noBoq = (await inbox(people.noBoqPm)).find((row) => row.id === legacyRows.uncodedForNoBoq.id);
-    expect([noBoq.title, noBoq.message]).toEqual(["BOQ allocation approved", "BOQ allocation approved. Status moved to approved."]);
+    // The same kind of row stored for the member who may not read the BOQ is
+    // left out of what they read (and, below, left as it was stored).
+    expect((await inbox(people.noBoqPm)).map((row) => row.id)).not.toContain(legacyRows.uncodedForNoBoq.id);
 
     const one = await ok(people.reviewer, "GET", `/notifications/${legacyRows.allocation.id}`);
     expect(one.title).toBe("BOQ allocation for Activity A120 needs approval");

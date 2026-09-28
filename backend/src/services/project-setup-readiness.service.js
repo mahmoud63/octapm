@@ -1534,7 +1534,12 @@ const getSetupReadiness = async ({ orgId, projectId, canReadBoq = true, canReadS
 
   // Awaiting activation, the baseline checks have no active activities to
   // judge: the one blocker is the activation, said with where to do it.
-  const checksForBaseline = awaitingActivation ? [] : scheduleReadiness?.checks || [];
+  // The schedule readiness's own BOQ check (boq_present) is not repeated
+  // here: the BOQ step's blockers already name the upload, first, and it is
+  // never a schedule correction.
+  const checksForBaseline = awaitingActivation
+    ? []
+    : (scheduleReadiness?.checks || []).filter((check) => check.key !== "boq_present");
   const activationBlockers = awaitingActivation
     ? [
         issue(

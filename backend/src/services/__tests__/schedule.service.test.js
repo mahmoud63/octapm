@@ -659,3 +659,60 @@ describe('scheduleNotReadyMessage', () => {
     expect(scheduleService.scheduleNotReadyMessage(readiness, 'approval', { gate: 'approval', access: { can: () => true } })).toBe(message);
   });
 });
+
+describe('the baseline readiness says what the lock says: no BOQ, no baseline', () => {
+  // A sound, active schedule: its own logic passes both gates.
+  const sound = (allocationSummary) =>
+    scheduleService.buildScheduleReadiness({
+      project: { id: 'p', startDate: new Date('2026-01-05'), endDate: new Date('2026-12-18') },
+      revision: { id: 'r', isActive: true, status: 'approved' },
+      activities: [
+        { id: 'a', name: 'A', activityCode: 'A', duration: 5, earlyStart: 0, earlyFinish: 5, totalFloat: 0, isCritical: true, predecessors: '' },
+        { id: 'b', name: 'B', activityCode: 'B', duration: 5, earlyStart: 5, earlyFinish: 10, totalFloat: 0, isCritical: true, predecessors: 'A' },
+      ],
+      allocationSummary,
+    });
+
+  it('with no BOQ row the baseline is not ready, and its first failing step is the upload on the BOQ page', () => {
+    const readiness = sound({ items: [], totalBoqAmount: 0 });
+
+    // The approval's verdict is the revision's own logic, unchanged.
+    expect([readiness.ready, readiness.blockingCount]).toEqual([true, 0]);
+    expect([readiness.baselineReady, readiness.baselineBlockingCount]).toEqual([false, 1]);
+    expect(readiness.checks[0]).toEqual({
+      key: 'boq_present',
+      label: 'BOQ',
+      requiredFor: ['baseline'],
+      passed: false,
+      severity: 'blocking',
+      message: 'No BOQ has been uploaded; a baseline locks a BOQ mapped to the schedule.',
+      details: {},
+      fix: {
+        where: 'BOQ page',
+        inline: true,
+        permission: 'boq.create',
+        next: 'upload the BOQ (BOQ page)',
+        text: "Upload the BOQ on the BOQ page, then map it to the schedule's activities (Project Controls › Mapping) and lock the baseline.",
+      },
+    });
+    // Said as the lock's refusal is said, with the page that offers the step.
+    expect(scheduleService.scheduleNotReadyMessage(readiness, 'baseline lock', { gate: 'baseline' })).toBe(
+      'Schedule readiness checks must pass before baseline lock: BOQ — no BOQ has been uploaded; a baseline locks a BOQ mapped to the schedule (BOQ page).',
+    );
+  });
+
+  it('with a BOQ the check passes and names nothing; the mapping is the next step', () => {
+    const readiness = sound({ items: [{ id: 'i1' }], totalBoqAmount: 1000, allocatableBoqAmount: 1000, unallocatedAmount: 1000, approvedAllocatedAmount: 0 });
+
+    expect(readiness.checks[0]).toMatchObject({ key: 'boq_present', passed: true, fix: null, details: {} });
+    expect(readiness.checks.filter((check) => !check.passed).map((check) => check.key)).toEqual(['allocations']);
+    expect(readiness.baselineReady).toBe(false);
+
+    const mapped = sound({ items: [{ id: 'i1' }], totalBoqAmount: 1000, unallocatedAmount: 0, approvedAllocatedAmount: 1000 });
+    expect([mapped.ready, mapped.baselineReady, mapped.baselineBlockingCount]).toEqual([true, true, 0]);
+  });
+
+  it('a summary that does not list the rows says nothing about the BOQ (no check is invented)', () => {
+    expect(sound({}).checks.map((check) => check.key)).toEqual(['predecessors', 'allocations', 'critical_path', 'date_sanity']);
+  });
+});

@@ -680,14 +680,23 @@ const createNotifications = async ({
     return { created: 0, recipients: [] };
   }
 
-  const recipients = await resolveNotificationRecipients({
-    tx,
+  // A notice about one of the bill's own records (an allocation, a BOQ
+  // revision) reaches only a person who may read the BOQ on its project:
+  // even its kind and its activity tell a member without BOQ read that a
+  // mapping exists and how many there are (owner, 2026-09-28).
+  const recipients = await recipientsWhoMayRead({
     orgId,
     projectId,
-    actorId,
-    recipientUserIds,
-    recipientRoles,
-    assignmentRefs,
+    entityType,
+    recipients: await resolveNotificationRecipients({
+      tx,
+      orgId,
+      projectId,
+      actorId,
+      recipientUserIds,
+      recipientRoles,
+      assignmentRefs,
+    }),
   });
   if (!recipients.length) return { created: 0, recipients: [] };
 
@@ -975,6 +984,71 @@ const mayReadBoq = async ({ orgId, userId, projectId, viewer = null }) => {
   }
 };
 
+// ─── The bill's own records reach only a reader of the BOQ ──────────────────
+//
+// A notification about a BOQ revision or an allocation (the bill's own
+// records, utils/boq-figures) is written only for a person who may read the
+// BOQ on its project (createNotifications). A row stored before that rule,
+// for someone who may not, is left out of what they read — the list, one
+// notification, the summary and its unread count, mark-all-read, an email or
+// a push — and is never rewritten.
+
+const BOQ_RECORD_TYPES = Object.freeze(["boq_revision", "activity_boq_allocation"]);
+
+const isBoqRecord = (entityType) => BOQ_RECORD_TYPES.includes(entityType);
+
+/** Whether this person may receive a notification about this record. */
+const mayReceive = async ({ orgId, userId, projectId, entityType, viewer = null }) =>
+  !isBoqRecord(entityType) || mayReadBoq({ orgId, userId, projectId, viewer });
+
+/** The recipients who may receive a notification about this record, in order. */
+const recipientsWhoMayRead = async ({ orgId, projectId, entityType, recipients }) => {
+  if (!isBoqRecord(entityType)) return recipients;
+  const kept = [];
+  // One at a time: the caller may hold a transaction's connection.
+  for (const recipient of recipients) {
+    if (await mayReadBoq({ orgId, userId: recipient.id, projectId })) kept.push(recipient);
+  }
+  return kept;
+};
+
+/**
+ * The filter that keeps a reader's stored BOQ-record notifications out of
+ * what they read, on each project whose BOQ they may not read (and wherever
+ * such a row has no project) — or null when there is nothing to keep out.
+ * Decided per project as the project's own routes decide it (mayReadBoq).
+ */
+const readableRowsFilter = async ({ orgId, userId, viewer = null }) => {
+  if (!orgId || !userId || typeof prisma.notification?.findMany !== "function") return null;
+  const projects = await prisma.notification.findMany({
+    where: { orgId, recipientUserId: userId, entityType: { in: [...BOQ_RECORD_TYPES] } },
+    distinct: ["projectId"],
+    select: { projectId: true },
+  });
+  const denied = [];
+  let unscoped = false;
+  for (const { projectId } of projects || []) {
+    if (!projectId) unscoped = true;
+    else if (!(await mayReadBoq({ orgId, userId, projectId, viewer }))) denied.push(projectId);
+  }
+  if (!denied.length && !unscoped) return null;
+  // Kept: any row that is not a BOQ record's (entityType null counts, as SQL
+  // would otherwise drop it), or one on a project whose BOQ they may read.
+  return {
+    OR: [
+      { entityType: null },
+      { entityType: { notIn: [...BOQ_RECORD_TYPES] } },
+      denied.length ? { projectId: { notIn: denied } } : { projectId: { not: null } },
+    ],
+  };
+};
+
+/** A notification `where` for one reader, with their unreadable BOQ-record rows left out. */
+const readerWhere = async ({ orgId, userId, viewer = null }, where) => {
+  const filter = await readableRowsFilter({ orgId, userId, viewer });
+  return filter ? { ...where, AND: [...(where.AND || []), filter] } : where;
+};
+
 // Opens the record's own workspace module with the record pre-selected
 // (module routes, OCTA-FE-ROUTES-008).
 const actionUrlFor = ({ projectId, recordType, recordId }) =>
@@ -1256,7 +1330,7 @@ const listNotifications = async ({ orgId, userId, query = {}, viewer = null }) =
   if (projectId) where.projectId = projectId;
 
   const rows = await prisma.notification.findMany({
-    where,
+    where: await readerWhere({ orgId, userId, viewer }, where),
     take: listQuery.limit + 1,
     orderBy: [{ createdAt: "desc" }, { id: "desc" }],
     ...cursorArgs(listQuery.cursor),
@@ -1274,13 +1348,18 @@ const listNotifications = async ({ orgId, userId, query = {}, viewer = null }) =
   };
 };
 
-const getNotificationForUser = async ({ orgId, userId, notificationId }) => {
+const getNotificationForUser = async ({ orgId, userId, notificationId, viewer = null }) => {
+  // A BOQ record's notice they may not read is not theirs to open, mark or
+  // archive: it answers as if it did not exist.
   const notification = await prisma.notification.findFirst({
-    where: {
-      id: notificationId,
-      orgId,
-      recipientUserId: userId,
-    },
+    where: await readerWhere(
+      { orgId, userId, viewer },
+      {
+        id: notificationId,
+        orgId,
+        recipientUserId: userId,
+      },
+    ),
     include: {
       deliveryAttempts: { orderBy: [{ createdAt: "desc" }, { id: "desc" }] },
     },
@@ -1298,40 +1377,27 @@ const getNotificationForUser = async ({ orgId, userId, notificationId }) => {
 };
 
 const getNotificationSummary = async ({ orgId, userId, viewer = null }) => {
+  // The counts and the recent rows leave out what the reader may not read.
+  const filter = await readableRowsFilter({ orgId, userId, viewer });
+  const mine = (where) => ({
+    orgId,
+    recipientUserId: userId,
+    inAppVisible: true,
+    ...where,
+    ...(filter ? { AND: [filter] } : {}),
+  });
   const [unread, read, archived, recent] = await Promise.all([
     prisma.notification.count({
-      where: {
-        orgId,
-        recipientUserId: userId,
-        inAppVisible: true,
-        readAt: null,
-        archivedAt: null,
-      },
+      where: mine({ readAt: null, archivedAt: null }),
     }),
     prisma.notification.count({
-      where: {
-        orgId,
-        recipientUserId: userId,
-        inAppVisible: true,
-        readAt: { not: null },
-        archivedAt: null,
-      },
+      where: mine({ readAt: { not: null }, archivedAt: null }),
     }),
     prisma.notification.count({
-      where: {
-        orgId,
-        recipientUserId: userId,
-        inAppVisible: true,
-        archivedAt: { not: null },
-      },
+      where: mine({ archivedAt: { not: null } }),
     }),
     prisma.notification.findMany({
-      where: {
-        orgId,
-        recipientUserId: userId,
-        inAppVisible: true,
-        archivedAt: null,
-      },
+      where: mine({ archivedAt: null }),
       orderBy: [{ createdAt: "desc" }, { id: "desc" }],
       take: 5,
     }),
@@ -1352,7 +1418,7 @@ const markNotificationRead = async ({
   read = true,
   viewer = null,
 }) => {
-  await getNotificationForUser({ orgId, userId, notificationId });
+  await getNotificationForUser({ orgId, userId, notificationId, viewer });
   const notification = await prisma.notification.update({
     where: { id: notificationId },
     data: { readAt: read ? new Date() : null },
@@ -1364,7 +1430,7 @@ const markNotificationRead = async ({
 };
 
 const archiveNotification = async ({ orgId, userId, notificationId, viewer = null }) => {
-  await getNotificationForUser({ orgId, userId, notificationId });
+  await getNotificationForUser({ orgId, userId, notificationId, viewer });
   const notification = await prisma.notification.update({
     where: { id: notificationId },
     data: { archivedAt: new Date() },
@@ -1375,15 +1441,20 @@ const archiveNotification = async ({ orgId, userId, notificationId, viewer = nul
   return serializeNotification(await readableNotification(notification, { viewer }));
 };
 
-const markAllRead = async ({ orgId, userId }) => {
+const markAllRead = async ({ orgId, userId, viewer = null }) => {
+  if (!orgId || !userId) return { updated: 0 };
+  // Only what they read: a hidden row keeps its readAt.
   const result = await prisma.notification.updateMany({
-    where: {
-      orgId,
-      recipientUserId: userId,
-      inAppVisible: true,
-      readAt: null,
-      archivedAt: null,
-    },
+    where: await readerWhere(
+      { orgId, userId, viewer },
+      {
+        orgId,
+        recipientUserId: userId,
+        inAppVisible: true,
+        readAt: null,
+        archivedAt: null,
+      },
+    ),
     data: { readAt: new Date() },
   });
   return { updated: result.count };
@@ -1474,6 +1545,28 @@ const processPendingEmailDeliveries = async ({
     // before the no-identifier rule.
     const notification = attempt.notification ? await readableNotification(attempt.notification) : null;
     const to = notification?.recipient?.email;
+
+    // A BOQ record's notice stored before the reader rule, for someone who
+    // may not read that BOQ, is not sent (the row itself is left as it is).
+    if (notification && !(await mayReceive({
+      orgId: notification.orgId,
+      userId: notification.recipientUserId,
+      projectId: notification.projectId,
+      entityType: notification.entityType,
+    }))) {
+      await prisma.notificationDeliveryAttempt.update({
+        where: { id: attempt.id },
+        data: {
+          nextAttemptAt: attempt.nextAttemptAt ?? null,
+          status: "skipped",
+          errorCode: "RECIPIENT_MAY_NOT_READ_RECORD",
+          errorMessage: "The recipient may not read the record this notification is about",
+          metadataJson: { skippedAt: now.toISOString() },
+        },
+      });
+      result.skipped += 1;
+      continue;
+    }
 
     if (!notification || !to) {
       await prisma.notificationDeliveryAttempt.update({
@@ -1838,6 +1931,7 @@ module.exports = {
   CATEGORY_ORDER,
   NOTIFICATION_CATEGORIES,
   archiveNotification,
+  BOQ_RECORD_TYPES,
   createDueNotificationsForProject,
   createNotifications,
   createWorkflowNotifications,
@@ -1851,6 +1945,7 @@ module.exports = {
   listNotifications,
   markAllRead,
   markNotificationRead,
+  mayReceive,
   processPendingEmailDeliveries,
   readableNotification,
   readableNotifications,

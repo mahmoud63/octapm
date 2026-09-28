@@ -374,6 +374,17 @@ const STAGED_CANNOT_BE_EDITED =
  * key). Null for a check that has no fix of its own.
  */
 const readinessCheckFix = ({ key, staged, activityCount, status }) => {
+  // No bill at all: the upload comes before any schedule or mapping step,
+  // in the words the BOQ_REQUIRED_FOR_BASELINE refusal uses.
+  if (key === "boq_present") {
+    return {
+      where: "BOQ page",
+      inline: true,
+      permission: "boq.create",
+      next: "upload the BOQ (BOQ page)",
+      text: "Upload the BOQ on the BOQ page, then map it to the schedule's activities (Project Controls › Mapping) and lock the baseline.",
+    };
+  }
   if (key === "allocations") {
     return staged
       ? {
@@ -638,7 +649,37 @@ const buildScheduleReadiness = ({
     }
   }
 
+  // Whether the project has a bill at all: its active BOQ rows, as the
+  // allocation summary lists them (null when the caller's summary does not
+  // say). A baseline is the lock of a bill mapped to a schedule (owner,
+  // 2026-09-28), and the coverage check passes vacuously on an empty bill,
+  // so the baseline lock has its own check — the same rule the lock
+  // enforces (assertBoqForBaseline: 400 BOQ_REQUIRED_FOR_BASELINE). Only
+  // whether a bill exists is said: no count, no value.
+  const boqItemCount = Array.isArray(allocationSummary?.items)
+    ? allocationSummary.items.length
+    : null;
+  const boqPresentCheck =
+    boqItemCount === null
+      ? []
+      : [
+          {
+            key: "boq_present",
+            label: "BOQ",
+            requiredFor: ["baseline"],
+            passed: boqItemCount > 0,
+            severity: "blocking",
+            message:
+              boqItemCount > 0
+                ? "The project has a BOQ."
+                : "No BOQ has been uploaded; a baseline locks a BOQ mapped to the schedule.",
+            details: {},
+          },
+        ];
+
   const checks = [
+    // First: in the greenfield order the BOQ comes before any schedule step.
+    ...boqPresentCheck,
     {
       key: "predecessors",
       requiredFor: ["approval", "baseline"],
@@ -760,9 +801,9 @@ const buildScheduleReadiness = ({
 
   // Each gate is judged on the checks it needs (owner decision D5): the
   // approval on the revision's own logic, the baseline lock on everything,
-  // BOQ allocation coverage included. `ready` and `blockingCount` answer
-  // for the approval; `baselineReady` and `baselineBlockingCount` for the
-  // baseline lock.
+  // the BOQ's presence and its allocation coverage included. `ready` and
+  // `blockingCount` answer for the approval; `baselineReady` and
+  // `baselineBlockingCount` for the baseline lock.
   // Each failing check names what puts it right, by where the revision
   // stands (staged or active) — the words every refusal and next step use.
   const revisionStatus = normalizeRevisionStatus(revision?.status);
