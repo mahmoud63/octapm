@@ -862,6 +862,7 @@ const components = {
         "BOQ_REVISION_NOT_APPROVED",
         "BOQ_REVISION_NOT_CURRENT",
         "BOQ_REVISION_NOT_FOUND",
+        "BOQ_REQUIRED_FOR_BASELINE",
         "BOQ_VALIDATION_FAILED",
         "CARD_DECLINED",
         "CHANGE_ORDER_APPROVED_LOCKED",
@@ -7984,6 +7985,10 @@ const APPROVAL_WITHOUT_COVERAGE =
 const BASELINE_NEEDS_COVERAGE =
   "The baseline lock of an activated revision whose required BOQ value is not allocated to approved active activities is refused with 400 SCHEDULE_NOT_READY, whose message names BOQ allocations and Project Controls › Mapping (\"Schedule readiness checks must pass before baseline lock: BOQ allocations — BOQ value remains unallocated to approved schedule activities (Project Controls › Mapping).\"), with no BOQ figure.";
 
+// Owner decision 2026-09-28: no baseline without a bill.
+const BASELINE_NEEDS_BOQ =
+  "A project with no BOQ item is refused the baseline lock with 400 BOQ_REQUIRED_FOR_BASELINE (\"BOQ required before baseline lock: upload the BOQ (BOQ page), then map it to the schedule and lock the baseline.\"): in integrated Project Controls the steps run project structure, BOQ, schedule, mapping, validation, baseline lock, and the BOQ is named before any schedule refusal (REVISION_NOT_FOUND, INVALID_REVISION_STATUS, REVISION_NOT_ACTIVATED, SCHEDULE_NOT_READY, NO_ACTIVITIES). Nothing is written. Baselines locked before this rule are unchanged.";
+
 // The lifecycle refusals that name the step to take next.
 const BASELINE_NOT_ACTIVATED =
   "An approved revision that is still staged (not yet activated) is refused with 409 REVISION_NOT_ACTIVATED, whose message says to activate it on Schedule › Revisions first; its baseline is locked after that. With no active activity at all the refusal is 400 NO_ACTIVITIES, which likewise says to activate an approved revision first.";
@@ -8001,7 +8006,7 @@ add(
     tag: "Schedule",
     summary: "Lock the approved current schedule as baseline.",
     description:
-      `The BOQ value figures in the answer's readiness are present only for a caller who may read the BOQ. A schedule that is not ready is refused with 400 SCHEDULE_NOT_READY, whose error.message names each failing blocking check, what is wrong and where to put it right (for example, for an active revision, \"Predecessor logic — at least one predecessor relationship is required (Schedule › Gantt › Edit)\"; for a staged revision, which no page edits, the reasons followed by \"A staged revision cannot be edited: correct the schedule at its source and import it again, or regenerate it from the BOQ (Schedule › Update Schedule) — the new revision replaces this one, or reject this revision (Schedule Review).\"; never the read-only Critical Path tab), followed, when the caller may not take that step, by who can (\"Only members who can create schedules (import or generate) can take this step; ask one of them.\") and carries no BOQ figure, and the readiness in error.details, whose BOQ value figures are likewise present only for a caller who may read the BOQ; ready, blockingCount and the checks' verdicts are the same for every caller. A step the revision's current status does not allow is refused with 409 INVALID_REVISION_STATUS, whose message names the status it is in now and the one the step needs, as the Revisions tab labels them (e.g. \"This schedule revision is now Rejected; it must be Under review before it can be rejected. Refresh to see its current status.\"). ${BASELINE_NOT_ACTIVATED} ${BASELINE_NEEDS_COVERAGE} ${BASELINE_ALREADY_LOCKED} ${READINESS_GATES} ${REVISION_NOT_CURRENT_NOTE}`,
+      `The BOQ value figures in the answer's readiness are present only for a caller who may read the BOQ. A schedule that is not ready is refused with 400 SCHEDULE_NOT_READY, whose error.message names each failing blocking check, what is wrong and where to put it right (for example, for an active revision, \"Predecessor logic — at least one predecessor relationship is required (Schedule › Gantt › Edit)\"; for a staged revision, which no page edits, the reasons followed by \"A staged revision cannot be edited: correct the schedule at its source and import it again, or regenerate it from the BOQ (Schedule › Update Schedule) — the new revision replaces this one, or reject this revision (Schedule Review).\"; never the read-only Critical Path tab), followed, when the caller may not take that step, by who can (\"Only members who can create schedules (import or generate) can take this step; ask one of them.\") and carries no BOQ figure, and the readiness in error.details, whose BOQ value figures are likewise present only for a caller who may read the BOQ; ready, blockingCount and the checks' verdicts are the same for every caller. A step the revision's current status does not allow is refused with 409 INVALID_REVISION_STATUS, whose message names the status it is in now and the one the step needs, as the Revisions tab labels them (e.g. \"This schedule revision is now Rejected; it must be Under review before it can be rejected. Refresh to see its current status.\"). ${BASELINE_NEEDS_BOQ} ${BASELINE_NOT_ACTIVATED} ${BASELINE_NEEDS_COVERAGE} ${BASELINE_ALREADY_LOCKED} ${READINESS_GATES} ${REVISION_NOT_CURRENT_NOTE}`,
     operationId: "baselineCurrentSchedule",
     parameters: projectParams,
     permissions: modulePermission("schedule", "baseline", "revision.baseline"),
@@ -8133,6 +8138,7 @@ add(
         REVISION_FIGURES,
         ["approve", "baseline"].includes(suffix) && NOT_READY_FIGURES,
         suffix === "approve" && APPROVAL_WITHOUT_COVERAGE,
+        suffix === "baseline" && BASELINE_NEEDS_BOQ,
         suffix === "baseline" && BASELINE_NOT_ACTIVATED,
         suffix === "baseline" && BASELINE_NEEDS_COVERAGE,
         suffix === "baseline" && BASELINE_ALREADY_LOCKED,

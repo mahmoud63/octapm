@@ -17,6 +17,9 @@ import {
  *      first blocker) — never "lock baseline" beside a refused Lock Baseline
  *   the Overview's BOQ Approval card names the upload too — never "approved"
  *      or "locked" under a BOQ Upload card that says nothing was uploaded
+ *   the server refuses a direct lock the same way, on both baseline routes,
+ *      with 400 BOQ_REQUIRED_FOR_BASELINE, and writes nothing (owner decision
+ *      2026-09-28)
  *
  * Everything is built through the API in a throwaway "LiveTest <uuid>"
  * organisation, dropped afterwards.
@@ -53,6 +56,7 @@ test('no bill: the review panel and the BOQ Approval card name the upload, not t
   test.setTimeout(240_000)
   const client = await apiClient()
   let projectId: string
+  let revisionId: string
   try {
     org = await registerLiveOrg(client, 'pc4nobill')
     projectId = await createProject(client, org.adminToken, `No bill ${Date.now()}`)
@@ -62,7 +66,7 @@ test('no bill: the review panel and the BOQ Approval card name the upload, not t
     })
     const body = await imported.json()
     expect(imported.status(), JSON.stringify(body?.error)).toBe(201)
-    const revisionId = body.data.revisionId as string
+    revisionId = body.data.revisionId as string
     for (const step of ['submit-review', 'approve', 'activate']) {
       await post(client, projectId, `/schedule/revisions/${revisionId}/${step}`, step === 'activate' ? { mappings: [] } : {})
     }
@@ -83,6 +87,25 @@ test('no bill: the review panel and the BOQ Approval card name the upload, not t
     'Next: upload the BOQ (BOQ page), then lock baseline',
   )
   await expect(panel.getByRole('button', { name: 'Lock Baseline' })).toBeDisabled()
+
+  // ── A direct call is refused by the server with the same step, on both
+  // baseline routes, and the revision is still approved (nothing written).
+  const direct = await apiClient()
+  try {
+    for (const route of [`/schedule/revisions/${revisionId!}/baseline`, '/schedule/baseline']) {
+      const refused = await apiJson(direct, 'post', `/projects/${projectId!}${route}`, { token: org!.adminToken, data: {} })
+      expect([route, refused.status, refused.body?.error?.code, refused.body?.error?.message]).toEqual([
+        route,
+        400,
+        'BOQ_REQUIRED_FOR_BASELINE',
+        'BOQ required before baseline lock: upload the BOQ (BOQ page), then map it to the schedule and lock the baseline.',
+      ])
+    }
+  } finally {
+    await direct.dispose()
+  }
+  await page.reload()
+  await expect(panel).toHaveAttribute('data-status', 'approved', { timeout: 45_000 })
 
   // ── The Overview: the approval card names the upload, not an approval.
   await page.goto(base)

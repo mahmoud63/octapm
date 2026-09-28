@@ -118,6 +118,7 @@ One source of words: `schedule.service` `readinessCheckFix` gives each failing r
 
 | Revision state | Refusal or label | Text (abridged) | Target |
 |---|---|---|---|
+| Any state, the project has no BOQ item | both baseline routes 400 BOQ_REQUIRED_FOR_BASELINE, before every row below; setup gate and panel | "BOQ required before baseline lock: upload the BOQ (BOQ page), then map it to the schedule and lock the baseline."; "Next: upload the BOQ (BOQ page), then lock baseline" | BOQ page |
 | No revision | `POST /schedule/baseline` 404 REVISION_NOT_FOUND | "No schedule revision exists yet: import a P6/MSP schedule or generate one from the BOQ on the Schedule page." | Schedule page (upload zone) |
 | No revision | setup `schedule_approval` NO_SCHEDULE_REVISION; action | "No schedule revision is available." (kept as the base words: the gates carry this blocker exactly as cb14ff4 derived it); **Open Review** (and `baseline_readiness` keeps its base action, whose waiting warning the gates carry) | Schedule module, which shows its upload zone (import or generate) on every tab until a revision exists |
 | Staged draft, logic fails | readiness `checks[].fix`; panel "Next:" | "A staged revision cannot be edited: correct the schedule at its source and import it again, or regenerate it from the BOQ (Schedule › Update Schedule) — the new revision replaces this one." / "Next: import a corrected schedule or regenerate it (Schedule › Update Schedule) — this revision fails its own checks" | Schedule › Update Schedule |
@@ -151,3 +152,9 @@ Tests: `backend/src/services/__live__/pc-4-merge-gate-r7.live.test.js` walks the
 - the approval step back to its bare sentence;
 - the comment validator without its reason;
 - the JSON mapping removed.
+
+### 8.1 No baseline without a BOQ (owner decision, 2026-09-28)
+
+In integrated Project Controls the steps run project structure → BOQ → schedule → mapping → validation → baseline lock. The UI already refused a lock on a project with no BOQ (the setup baseline gate; the review panel's "Next: upload the BOQ (BOQ page), then lock baseline"); the server now refuses it too. `schedule.service` `lockBaseline` — behind both `POST /schedule/baseline` and `POST /schedule/revisions/:id/baseline`, the only paths that mark a revision baselined or copy activity baseline dates — counts the project's active BOQ items after confirming the project is the caller's organisation's, and with none refuses 400 BOQ_REQUIRED_FOR_BASELINE (error catalogue, `utils/error-codes`). It is the first step, so it is named before REVISION_NOT_FOUND, INVALID_REVISION_STATUS (a draft, or a revision already baselined), REVISION_NOT_ACTIVATED, SCHEDULE_NOT_READY (D5 coverage passes vacuously on an empty bill) and NO_ACTIVITIES. The count is asked again inside the lock's transaction before its first write. Nothing is written on refusal, and baselines locked before the rule are untouched (rollback re-activates a revision with its existing status and copies no baseline dates). There is no bypass flag: a schedule-only mode would be an explicit product mode.
+
+Tests: `pc-4-baseline-needs-boq.live.test.js` (both routes, the PM and a planning engineer granted the lock, every schedule stage, nothing written, then the bill → the mapping → the lock; a pre-rule baseline left exactly as it was); spec 60 asserts the server's refusal beside the refused button. Fixtures that lock a baseline (r5, r7, spec 59) enter a one-row bill through `POST /boq/items` and map it after activation.

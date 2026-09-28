@@ -2,6 +2,7 @@ const Anthropic = require("@anthropic-ai/sdk");
 const XLSX = require("@e965/xlsx");
 const { prisma } = require("../config/db");
 const { HttpError } = require("../utils/http-error");
+const { catalogEntryFor } = require("../utils/error-codes");
 const { addMoney, multiplyMoney, toMoneyNumber } = require("../utils/money");
 const {
   buildAllocationSummary,
@@ -965,6 +966,32 @@ const assertAllowedStatus = (revision, allowed, action) => {
 // the words the refusal and the setup readiness both use.
 const REVISION_NOT_ACTIVATED_MESSAGE =
   "This approved schedule revision has not been activated yet. Activate it on Schedule › Revisions; its baseline can be locked after that.";
+
+/*
+ * Owner decision (2026-09-28): in integrated Project Controls a baseline is
+ * the lock of a bill mapped to a schedule, taken in order — project
+ * structure, BOQ, schedule, mapping, validation, baseline lock. A project
+ * with no BOQ item has nothing to map, and the coverage check (D5) passes
+ * vacuously on an empty bill, so the lock is refused on its own: the BOQ is
+ * the first unmet step, named before any schedule step. A schedule-only
+ * mode, if the product ever has one, is an explicit product mode — never a
+ * flag on this call. Existing baselines are not touched.
+ */
+const BOQ_REQUIRED_FOR_BASELINE_MESSAGE =
+  catalogEntryFor("BOQ_REQUIRED_FOR_BASELINE").message;
+
+const assertBoqForBaseline = async (projectId, db = prisma) => {
+  const boqItems = await db.boqItem.count({
+    where: { projectId, isActive: true },
+  });
+  if (boqItems === 0) {
+    throw new HttpError(
+      400,
+      "BOQ_REQUIRED_FOR_BASELINE",
+      BOQ_REQUIRED_FOR_BASELINE_MESSAGE,
+    );
+  }
+};
 
 /**
  * Who may take a fix the reader may not: "" when `access` is not given (the
@@ -3633,6 +3660,12 @@ const lockBaseline = async ({
   comment = null,
   fixAccess = null,
 }) => {
+  // The project first (another organisation's is not found, and learns
+  // nothing of its bill), then the BOQ: the step before every schedule step,
+  // so it is named before a missing, unapproved or staged revision.
+  await ensureProject(orgId, projectId);
+  await assertBoqForBaseline(projectId);
+
   const { project, revision } = await loadCurrentRevisionForLifecycle({
     orgId,
     projectId,
@@ -3682,6 +3715,10 @@ const lockBaseline = async ({
 
   const at = new Date();
   const result = await prisma.$transaction(async (tx) => {
+    // The bill is asked again inside the lock's transaction, before its
+    // first write: one removed since the check above refuses the lock whole.
+    await assertBoqForBaseline(projectId, tx);
+
     const previouslyBaselined = await tx.scheduleRevision.findMany({
       where: {
         projectId,
@@ -3897,6 +3934,7 @@ module.exports = {
   getResourcePlan,
   REVISION_STATUS,
   REVISION_NOT_ACTIVATED_MESSAGE,
+  BOQ_REQUIRED_FOR_BASELINE_MESSAGE,
   buildScheduleReadiness,
   buildReadinessActivitiesFromSnapshot,
   FIX_PERMISSIONS,

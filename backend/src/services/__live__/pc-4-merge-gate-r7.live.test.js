@@ -19,6 +19,11 @@
  * the setup readiness), the workspace home's official cutoff (an EV cutoff,
  * never a data date), and the lifecycle validation refusals in words.
  *
+ * The greenfield walk starts with the no-bill refusal (BOQ_REQUIRED_FOR_BASELINE,
+ * owner decision 2026-09-28), then enters a one-row bill through the BOQ API
+ * and maps it once the revision is active, so every later state is judged on
+ * the schedule alone.
+ *
  * Everything lives in a throwaway "LiveTest <uuid>" organisation dropped
  * afterwards; the only writes outside the API are to its own rows.
  *
@@ -130,7 +135,18 @@ liveDescribe("PC-4 merge gate round 7: every approval and baseline refusal names
       expect([response.status, body?.error, body?.data?.staged]).toEqual([201, undefined, true]);
       return body.data.revisionId;
     };
-    return { project, at, auth, post, refused, get, setup, importXer };
+    // The bill, entered by hand through the BOQ API: no baseline is locked
+    // without one (owner decision 2026-09-28, BOQ_REQUIRED_FOR_BASELINE).
+    const enterBill = async () =>
+      (await post("/boq/items", { code: "1.1", description: "Excavation", quantity: 10, unit: "m3", rate: 100 }, 201)).item;
+    // ... and its value mapped to the first active activity, approved: the
+    // coverage the lock needs once the revision is active (D5).
+    const mapBill = async (item) => {
+      const [first] = await prisma.activity.findMany({ where: { projectId: project.id, isActive: true }, orderBy: { sortOrder: "asc" } });
+      const allocation = await post("/activity-boq-allocations", { boqItemId: item.id, activityId: first.id, quantity: 10 }, 201);
+      for (const step of ["submit", "approve"]) await post(`/activity-boq-allocations/${allocation.id}/${step}`, {});
+    };
+    return { project, at, auth, post, refused, get, setup, importXer, enterBill, mapBill };
   };
 
   const stepOf = (readiness, key) => readiness.steps.find((step) => step.key === key);
@@ -150,6 +166,15 @@ liveDescribe("PC-4 merge gate round 7: every approval and baseline refusal names
 
   it("walks a greenfield project through every revision state: each refusal and next step names the action that resolves it and the page that offers it", async () => {
     const built = await newProject("greenfield walk");
+
+    // ── No bill: the BOQ is the first step, named before the schedule
+    // (owner decision 2026-09-28). The walk then goes on with a bill.
+    expect(await built.refused("/schedule/baseline")).toEqual({
+      status: 400,
+      code: "BOQ_REQUIRED_FOR_BASELINE",
+      message: "BOQ required before baseline lock: upload the BOQ (BOQ page), then map it to the schedule and lock the baseline.",
+    });
+    const item = await built.enterBill();
 
     // ── No revision: the Schedule page imports or generates one.
     const none = await built.refused("/schedule/baseline");
@@ -269,6 +294,8 @@ liveDescribe("PC-4 merge gate round 7: every approval and baseline refusal names
       message:
         "This schedule revision is already active. Refresh Schedule › Revisions — the next step is to map the BOQ to its activities (Project Controls › Mapping) and lock the baseline.",
     });
+    // The step it names: the bill mapped to the active activities (D5).
+    await built.mapBill(item);
     const readyToLock = await built.setup();
     expect(stepOf(readyToLock, "baseline_readiness").action).toEqual({ label: "Lock Baseline", target: { module: "schedule", child: "revisions" } });
 

@@ -592,6 +592,15 @@ const ERROR_CODE_CATALOG = Object.freeze({
     category: "system",
     message: "The job carries no organisation",
   },
+  // Owner decision 2026-09-28: in integrated Project Controls the schedule
+  // baseline is locked only on a project with a BOQ (structure → BOQ →
+  // schedule → mapping → validation → baseline lock).
+  BOQ_REQUIRED_FOR_BASELINE: {
+    status: 400,
+    category: "boq",
+    message:
+      "BOQ required before baseline lock: upload the BOQ (BOQ page), then map it to the schedule and lock the baseline.",
+  },
   // BOQ ↔ activity mapping (PC-3).
   MAPPING_NOT_APPLICABLE: {
     status: 409,

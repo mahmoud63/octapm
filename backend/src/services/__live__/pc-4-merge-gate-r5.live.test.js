@@ -19,6 +19,11 @@
  *      are refused with the reason itself as the message — in production
  *      too, where the details are dropped — never a bare "Validation failed".
  *
+ * Projects 1 and 2 carry a one-row bill entered through the BOQ API: a
+ * project with no BOQ is refused every baseline with BOQ_REQUIRED_FOR_BASELINE
+ * before any schedule step (owner decision 2026-09-28; its own file is
+ * pc-4-baseline-needs-boq), and project 1 maps it before the lock (D5).
+ *
  * Everything lives in a throwaway "LiveTest <uuid>" organisation dropped
  * afterwards; the only writes outside the API are to its own rows.
  *
@@ -115,7 +120,18 @@ liveDescribe("PC-4 merge gate round 5: the schedule lifecycle names the next ste
       await post(`/schedule/revisions/${revisionId}/approve`, {});
     };
     const setup = () => get(`/api/v1/projects/${project.id}/setup-readiness`);
-    return { project, at, post, refused, get, importXer, approve, setup };
+    // The bill, entered by hand through the BOQ API: no baseline is locked
+    // without one (owner decision 2026-09-28, BOQ_REQUIRED_FOR_BASELINE).
+    const enterBill = async () =>
+      (await post("/boq/items", { code: "1.1", description: "Excavation", quantity: 10, unit: "m3", rate: 100 }, 201)).item;
+    // ... and its value mapped to the first active activity, approved: the
+    // coverage the lock needs once the revision is active (D5).
+    const mapBill = async (item) => {
+      const [first] = await prisma.activity.findMany({ where: { projectId: project.id, isActive: true }, orderBy: { sortOrder: "asc" } });
+      const allocation = await post("/activity-boq-allocations", { boqItemId: item.id, activityId: first.id, quantity: 10 }, 201);
+      for (const step of ["submit", "approve"]) await post(`/activity-boq-allocations/${allocation.id}/${step}`, {});
+    };
+    return { project, at, post, refused, get, importXer, approve, setup, enterBill, mapBill };
   };
 
   const stepOf = (readiness, key) => readiness.steps.find((step) => step.key === key);
@@ -128,6 +144,7 @@ liveDescribe("PC-4 merge gate round 5: the schedule lifecycle names the next ste
 
   it("1. approved but not activated: the baseline refusal and the setup readiness say to activate on Schedule › Revisions; once activated, the baseline locks", async () => {
     const built = await newProject("staged approved");
+    const item = await built.enterBill();
     const revisionId = await built.importXer("A");
     await built.approve(revisionId);
     expect(await prisma.activity.count({ where: { projectId: built.project.id, isActive: true } })).toBe(0);
@@ -160,8 +177,10 @@ liveDescribe("PC-4 merge gate round 5: the schedule lifecycle names the next ste
     }
     expect((await prisma.scheduleRevision.findUnique({ where: { id: revisionId } })).status).toBe("approved");
 
-    // Activated, the refusal is gone and the baseline locks its two activities.
+    // Activated (and the bill mapped to it, D5), the refusal is gone and the
+    // baseline locks its two activities.
     await built.post(`/schedule/revisions/${revisionId}/activate`, { mappings: [] });
+    await built.mapBill(item);
     const after = await built.setup();
     expect(everyMessage(after)).not.toContain(REVISION_NOT_ACTIVATED_MESSAGE);
     expect(stepOf(after, "baseline_readiness").action.label).toBe("Lock Baseline");
@@ -172,6 +191,7 @@ liveDescribe("PC-4 merge gate round 5: the schedule lifecycle names the next ste
 
   it("2. with an older revision active, a staged approved revision's baseline is refused and writes nothing; a superseded one is told to refresh", async () => {
     const built = await newProject("active and staged");
+    await built.enterBill();
     const first = await built.importXer("A");
     await built.approve(first);
     await built.post(`/schedule/revisions/${first}/activate`, { mappings: [] });

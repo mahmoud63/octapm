@@ -109,9 +109,27 @@ test('a revision staged beside the baselined schedule is reviewed on the Schedul
   const { projectId, beside } = await withApi(async (client) => {
     if (!org) org = await registerLiveOrg(client, 'pc4r7')
     const project = await createProject(client, org.adminToken, `Staged beside ${Date.now()}`)
+    // No baseline without a bill (owner decision 2026-09-28): a one-row bill
+    // entered through the BOQ API, mapped to the active schedule before the
+    // lock (D5).
+    const bill = await post(client, project, '/boq/items', { code: '1.1', description: 'Excavation', quantity: 10, unit: 'm3', rate: 100 }, 201)
     const first = await importXer(client, project, true)
     for (const step of ['submit-review', 'approve']) await post(client, project, `/schedule/revisions/${first}/${step}`, {})
     await post(client, project, `/schedule/revisions/${first}/activate`, { mappings: [] })
+    const activities = await apiJson(client, 'get', `/projects/${project}/activities`, { token: org!.adminToken })
+    expect(activities.status).toBe(200)
+    type Row = { id: string; activityCode?: string | null; p6ActivityId?: string | null }
+    const data = activities.body!.data as unknown as Row[] | { activities?: Row[]; items?: Row[] }
+    const list: Row[] = Array.isArray(data) ? data : (data.activities ?? data.items ?? [])
+    const g100 = list.find((row) => (row.activityCode || row.p6ActivityId) === 'G100')!.id
+    const allocation = await post(
+      client,
+      project,
+      '/activity-boq-allocations',
+      { boqItemId: (bill as { item: { id: string } }).item.id, activityId: g100, quantity: 10 },
+      201,
+    )
+    for (const step of ['submit', 'approve']) await post(client, project, `/activity-boq-allocations/${String(allocation.id)}/${step}`, {})
     await post(client, project, `/schedule/revisions/${first}/baseline`, {})
     const next = await importXer(client, project, true)
     return { projectId: project, beside: next }

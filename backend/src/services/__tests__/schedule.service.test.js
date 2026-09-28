@@ -1,6 +1,7 @@
 const mockPrisma = {
   $transaction: jest.fn((fn) => fn(mockPrisma)),
   project: { findFirst: jest.fn() },
+  boqItem: { count: jest.fn() },
   scheduleRevision: {
     findFirst: jest.fn(),
     findMany: jest.fn(),
@@ -138,6 +139,9 @@ describe('schedule revision lifecycle service', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     mockPrisma.project.findFirst.mockResolvedValue(project);
+    // A bill exists unless a test says otherwise (reset, so a queued answer
+    // a failing test left behind never reaches the next one).
+    mockPrisma.boqItem.count.mockReset().mockResolvedValue(2);
     mockPrisma.activity.findMany.mockResolvedValue(readyActivities);
     mockPrisma.activity.update.mockResolvedValue({});
     mockPrisma.activity.create.mockImplementation(({ data }) =>
@@ -291,6 +295,52 @@ describe('schedule revision lifecycle service', () => {
         }),
       }),
     );
+  });
+
+  it('refuses the baseline lock of a project with no BOQ item, before any schedule step, and writes nothing', async () => {
+    mockPrisma.boqItem.count.mockResolvedValue(0);
+
+    await expect(
+      scheduleService.lockBaseline({
+        orgId: 'org-1',
+        projectId: 'project-1',
+        revisionId: 'revision-1',
+        userId: 'pm-1',
+      }),
+    ).rejects.toMatchObject({
+      status: 400,
+      code: 'BOQ_REQUIRED_FOR_BASELINE',
+      message:
+        'BOQ required before baseline lock: upload the BOQ (BOQ page), then map it to the schedule and lock the baseline.',
+    });
+
+    expect(mockPrisma.boqItem.count).toHaveBeenCalledWith({
+      where: { projectId: 'project-1', isActive: true },
+    });
+    // Named before the revision is even looked up, and nothing is written.
+    expect(mockPrisma.scheduleRevision.findFirst).not.toHaveBeenCalled();
+    expect(mockPrisma.$transaction).not.toHaveBeenCalled();
+    expect(mockPrisma.activity.update).not.toHaveBeenCalled();
+    expect(mockPrisma.scheduleRevision.update).not.toHaveBeenCalled();
+    expect(mockAuditService.recordEvent).not.toHaveBeenCalled();
+  });
+
+  it('refuses the baseline lock when the bill is removed before the lock writes, inside its transaction', async () => {
+    mockCurrentRevision({ ...revision, status: 'approved', isActive: true }, { active: true });
+    mockPrisma.boqItem.count.mockResolvedValueOnce(2).mockResolvedValueOnce(0);
+
+    await expect(
+      scheduleService.lockBaseline({
+        orgId: 'org-1',
+        projectId: 'project-1',
+        revisionId: 'revision-1',
+        userId: 'pm-1',
+      }),
+    ).rejects.toMatchObject({ code: 'BOQ_REQUIRED_FOR_BASELINE' });
+
+    expect(mockPrisma.$transaction).toHaveBeenCalledTimes(1);
+    expect(mockPrisma.activity.update).not.toHaveBeenCalled();
+    expect(mockPrisma.scheduleRevision.update).not.toHaveBeenCalled();
   });
 
   it('does not baseline a draft revision', async () => {
