@@ -116,6 +116,8 @@ const FIX_WHO: Record<string, string> = {
   'schedule.create': 'create schedules (import or generate)',
   'schedule.update': 'edit the schedule',
   'schedule.approve': 'approve and activate schedules',
+  'boq.upload': 'upload the BOQ',
+  'boq.edit': "edit the BOQ's rows",
   'boq.create': 'map the BOQ to activities',
   'boq.update': "set the BOQ's mapping rules",
 }
@@ -334,8 +336,14 @@ export function ScheduleReviewPanel({
     'schedule.create': useCanPerform('schedule', 'create'),
     'schedule.update': useCanPerform('schedule', 'update'),
     'schedule.approve': useCanPerform('schedule', 'approve', 'revision.activate'),
+    // The upload is the BOQ's own create (routes/boq.js), not a mapping step.
+    'boq.upload': useCanPerform('boq', 'create'),
+    // Pricing a row is the BOQ's own update (PATCH …/boq/items/:id).
+    'boq.edit': useCanPerform('boq', 'update'),
     'boq.create': useCanPerform('boq', 'create', 'allocation.create'),
-    'boq.update': useCanPerform('boq', 'update'),
+    // A row's mapping rule is set through the allocation update (the
+    // mapping-rules route's gate).
+    'boq.update': useCanPerform('boq', 'update', 'allocation.update'),
   }
   const setupBaselineBlocked = Boolean(
     baselineGate && !baselineGate.ready && !baselineGate.alreadyLocked

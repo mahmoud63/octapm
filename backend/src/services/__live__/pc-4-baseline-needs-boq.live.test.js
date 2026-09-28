@@ -42,6 +42,20 @@
  * (BOQ_NO_IN_SCOPE_VALUE on the BOQ step) say the same; a mixed bill —
  * in-scope rows fully mapped beside not-applicable rows — locks.
  *
+ * Each refusal names the step that is missing (closure review, 2026-09-28):
+ * a bill none of whose rows is priced — uploaded at rate 0 through the BOQ
+ * page's own route, or a row edited back to 0 — is not told to mark its
+ * (already required) rows as required, but to price them:
+ *
+ *   400 BOQ_VALUE_REQUIRED_FOR_BASELINE — "BOQ required before baseline
+ *   lock: the bill has no value to map; price its rows (BOQ page), map them
+ *   to the schedule, then lock the baseline."
+ *
+ * with the readiness's boq_present fix { where "BOQ page", permission
+ * "boq.edit" } and the setup gate's BOQ_HAS_NO_VALUE in the same words. The
+ * no-bill fix names the upload's own permission (boq.upload), not the
+ * mapping's.
+ *
  * Proven against a real API process and the real local Postgres, through the
  * product's own API. Everything lives in a throwaway "LiveTest <uuid>"
  * organisation dropped afterwards; the only writes outside the API are the
@@ -64,6 +78,13 @@ const BOQ_SCOPE_REQUIRED = {
   code: "BOQ_SCOPE_REQUIRED_FOR_BASELINE",
   message:
     "BOQ required before baseline lock: the bill has no in-scope value to map; mark the rows that belong to the schedule as required (Project Controls › Mapping), map them, then lock the baseline.",
+};
+
+const BOQ_VALUE_REQUIRED = {
+  status: 400,
+  code: "BOQ_VALUE_REQUIRED_FOR_BASELINE",
+  message:
+    "BOQ required before baseline lock: the bill has no value to map; price its rows (BOQ page), map them to the schedule, then lock the baseline.",
 };
 
 /** A two-activity XER (an FS link between them). */
@@ -231,7 +252,7 @@ liveDescribe("PC-4: no schedule baseline without a BOQ (owner decision 2026-09-2
       fix: {
         where: "BOQ page",
         inline: true,
-        permission: "boq.create",
+        permission: "boq.upload",
         next: "upload the BOQ (BOQ page)",
         text: "Upload the BOQ on the BOQ page, then map it to the schedule's activities (Project Controls › Mapping) and lock the baseline.",
       },
@@ -302,7 +323,10 @@ liveDescribe("PC-4: no schedule baseline without a BOQ (owner decision 2026-09-2
     for (const rule of ["not_applicable", "optional"]) {
       await setRule(rule, [token.id]);
       const readiness = (await built.get("/schedule")).revision.readiness;
-      expect([rule, readiness.checks.find((check) => check.key === "allocations").passed]).toEqual([rule, true]);
+      // The coverage check passes vacuously, and says so without telling the
+      // reader that nothing blocks the baseline (boq_present does).
+      const allocations = readiness.checks.find((check) => check.key === "allocations");
+      expect([rule, allocations.passed, allocations.message]).toEqual([rule, true, "No in-scope BOQ value to allocate yet."]);
       expect([rule, readiness.ready, readiness.baselineReady, readiness.baselineBlockingCount]).toEqual([rule, true, false, 1]);
       expect([rule, readiness.checks[0]]).toEqual([
         rule,
@@ -356,6 +380,98 @@ liveDescribe("PC-4: no schedule baseline without a BOQ (owner decision 2026-09-2
     expect(setup.gates.baseline.blockers.map((blocker) => blocker.code)).not.toContain("BOQ_NO_IN_SCOPE_VALUE");
     const locked = await built.post(`/schedule/revisions/${revisionId}/baseline`, {}, 200, plannerAuth());
     expect([locked.locked, locked.revision.status]).toEqual([2, "baselined"]);
+  });
+
+  it("an unpriced bill — uploaded at rate 0 the canonical way, or a row edited to 0 — is refused with the pricing step on every baseline path, readiness and the setup gate say the same, nothing is written; priced, the refusal moves on to the mapping (E2)", async () => {
+    const built = await newProject("unpriced bill");
+    const projectId = built.project.id;
+    // The bill uploaded through the BOQ page's own route: two rows at rate 0,
+    // in scope by rule (required), so it has no value to map.
+    const XLSX = require("@e965/xlsx");
+    const book = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(
+      book,
+      XLSX.utils.aoa_to_sheet([
+        ["code", "description", "quantity", "unit", "rate"],
+        ["1.1", "Excavation", 10, "m3", 0],
+        ["1.2", "Concrete", 5, "m3", 0],
+      ]),
+      "BOQ",
+    );
+    const form = new FormData();
+    form.append(
+      "file",
+      new Blob([XLSX.write(book, { type: "buffer", bookType: "xlsx" })], {
+        type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      }),
+      "unpriced.xlsx",
+    );
+    const uploaded = await fetch(`${api.base}${built.at("/boq/upload")}`, { method: "POST", headers: pmAuth(), body: form });
+    const uploadBody = await uploaded.json();
+    expect([uploaded.status, uploadBody?.error]).toEqual([200, undefined]);
+    const rows = await prisma.boqItem.findMany({ where: { projectId, isActive: true }, orderBy: { code: "asc" }, select: { id: true, code: true, amount: true, mappingRule: true } });
+    expect(rows.map((row) => [row.code, Number(row.amount), row.mappingRule])).toEqual([
+      ["1.1", 0, "required"],
+      ["1.2", 0, "required"],
+    ]);
+
+    const UNPRICED_MESSAGE = "The bill has no value to map: none of its rows is priced; a baseline locks a BOQ mapped to the schedule.";
+    const PRICING_FIX = {
+      where: "BOQ page",
+      inline: true,
+      permission: "boq.edit",
+      next: "price the BOQ's rows (BOQ page)",
+      text: "Price the BOQ's rows on the BOQ page, then map them to the schedule's activities (Project Controls › Mapping) and lock the baseline.",
+    };
+    const expectUnpriced = async (label, revisionId) => {
+      await expectBoqRequired(built, label, revisionId, BOQ_VALUE_REQUIRED);
+      // (No schedule yet: GET /schedule answers null.)
+      const readiness = (await built.get("/schedule"))?.revision?.readiness;
+      if (readiness) {
+        expect([label, readiness.checks[0]]).toEqual([
+          label,
+          { key: "boq_present", label: "BOQ", requiredFor: ["baseline"], passed: false, severity: "blocking", message: UNPRICED_MESSAGE, details: {}, fix: PRICING_FIX },
+        ]);
+        const allocations = readiness.checks.find((check) => check.key === "allocations");
+        expect([label, allocations.message]).toEqual([label, "No in-scope BOQ value to allocate yet."]);
+      }
+      // The setup baseline gate names the same step, in the refusal's words.
+      const setup = await built.get("/setup-readiness");
+      const codes = setup.gates.baseline.blockers.map((blocker) => blocker.code);
+      expect([label, setup.gates.baseline.ready, codes.includes("BOQ_HAS_NO_VALUE"), codes.includes("BOQ_NO_IN_SCOPE_VALUE")]).toEqual([label, false, true, false]);
+      expect(setup.gates.baseline.blockers.find((blocker) => blocker.code === "BOQ_HAS_NO_VALUE")).toMatchObject({
+        stepKey: "boq_upload",
+        message: "The bill has no value to map: none of its rows is priced. Price its rows (BOQ page), map them to the schedule, then lock the baseline.",
+      });
+    };
+
+    // ── No revision, then the schedule imported, approved and activated:
+    // the pricing, named before every schedule refusal, on every path.
+    await expectUnpriced("unpriced, no revision", null);
+    const revisionId = await built.importXer();
+    await expectUnpriced("unpriced, staged draft", revisionId);
+    for (const step of ["submit-review", "approve"]) await built.post(`/schedule/revisions/${revisionId}/${step}`, {});
+    await built.post(`/schedule/revisions/${revisionId}/activate`, { mappings: [] });
+    await expectUnpriced("unpriced, active approved", revisionId);
+    expect(await lockWrites(projectId)).toEqual(NOTHING);
+
+    // ── One row priced through the BOQ page's edit: the refusal moves on to
+    // the mapping (D5) — still nothing written.
+    const edit = async (itemId, rate) => {
+      const response = await api.request("PATCH", built.at(`/boq/items/${itemId}`), { body: { rate }, headers: pmAuth() });
+      expect([rate, response.status, response.body?.error]).toEqual([rate, 200, undefined]);
+    };
+    await edit(rows[0].id, 120);
+    const priced = (await built.get("/schedule")).revision.readiness;
+    expect(priced.checks[0]).toMatchObject({ key: "boq_present", passed: true, fix: null });
+    const coverage = await built.refused("/schedule/baseline", {});
+    expect([coverage.status, coverage.code]).toEqual([400, "SCHEDULE_NOT_READY"]);
+    // ── ... and edited back to 0: the pricing is the missing step again.
+    await edit(rows[0].id, 0);
+    await expectUnpriced("a row edited back to 0, active approved", revisionId);
+    expect(await lockWrites(projectId)).toEqual(NOTHING);
+    const row = await prisma.scheduleRevision.findUnique({ where: { id: revisionId } });
+    expect([row.status, row.isActive, row.baselinedBy, row.baselinedAt]).toEqual(["approved", true, null, null]);
   });
 
   it("a baseline locked before the rule, on a project with no BOQ, is left exactly as it was", async () => {

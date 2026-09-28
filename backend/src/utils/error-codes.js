@@ -601,9 +601,18 @@ const ERROR_CODE_CATALOG = Object.freeze({
     message:
       "BOQ required before baseline lock: upload the BOQ (BOQ page), then map it to the schedule and lock the baseline.",
   },
-  // Owner decision E2 (2026-09-28): its sibling — a bill exists, but none
-  // of its priced rows is in scope for mapping (every one is not applicable
-  // or optional), so there is nothing to map and nothing to lock.
+  // Owner decision E2 (2026-09-28): its siblings, one per missing step. A
+  // bill exists but no row of it is priced (every amount is 0), so there is
+  // no value to map: the rows are priced first.
+  BOQ_VALUE_REQUIRED_FOR_BASELINE: {
+    status: 400,
+    category: "boq",
+    message:
+      "BOQ required before baseline lock: the bill has no value to map; price its rows (BOQ page), map them to the schedule, then lock the baseline.",
+  },
+  // ... or it is priced, but none of its priced rows is in scope for mapping
+  // (every one is not applicable or optional), so there is nothing to map
+  // and nothing to lock.
   BOQ_SCOPE_REQUIRED_FOR_BASELINE: {
     status: 400,
     category: "boq",

@@ -829,7 +829,9 @@ const getSetupReadiness = async ({ orgId, projectId, canReadBoq = true, canReadS
   );
   // The value the baseline must cover: the allocatable value less what the
   // optional rows still leave open. A bill that is optional throughout has
-  // nothing that must be approved.
+  // nothing here that must be approved — but it has no in-scope value, and
+  // the BOQ step refuses the baseline for it (BOQ_NO_IN_SCOPE_VALUE, owner
+  // decision E2).
   const requiredBoqAmount = Math.max(
     0,
     allocatableBoqAmount - optionalUnallocatedAmount,
@@ -1201,9 +1203,16 @@ const getSetupReadiness = async ({ orgId, projectId, canReadBoq = true, canReadS
 
   const boqBlockers = [
     boqCount === 0 && issue("NO_BOQ", "No BOQ items have been uploaded."),
+    // A bill none of whose rows is priced has no value to map: the rows are
+    // priced first, in the words of the lock's refusal
+    // (BOQ_VALUE_REQUIRED_FOR_BASELINE) and the schedule readiness's
+    // boq_present check.
     boqCount > 0 &&
       totalBoqAmount <= MONEY_EPSILON &&
-      issue("BOQ_HAS_NO_VALUE", "BOQ items have no measurable value."),
+      issue(
+        "BOQ_HAS_NO_VALUE",
+        "The bill has no value to map: none of its rows is priced. Price its rows (BOQ page), map them to the schedule, then lock the baseline.",
+      ),
     // Owner decision E2 (2026-09-28): a bill whose priced rows are all out
     // of scope for mapping (not applicable or optional) has nothing to map,
     // and the baseline lock refuses it like no bill
