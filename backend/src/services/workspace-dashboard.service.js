@@ -799,18 +799,21 @@ async function getWorkspaceDashboard({
       return { items: [], summary: { total: 0, overdue: 0, ballInCourt: 0, byType: {} } };
     });
   const generatedAt = new Date().toISOString();
-  const cutoffDate =
-    latestIso([
-      ...projects.map((project) => project.dataDate),
-      ...[...evReports.values()].map((report) => report?.reporting?.cutoffDate),
-    ]) || generatedAt;
-  // When the official cutoff is a project's EV cutoff, it is stated as the EV
-  // screens state it: its calendar date, the zone it ends in, and the note
-  // when that project has no zone of its own (D1).
-  const cutoffReporting =
-    [...evReports.values()]
-      .map((report) => report?.reporting)
-      .find((reporting) => reporting?.cutoffDate && toIso(reporting.cutoffDate) === cutoffDate) || null;
+  // The official cutoff is the latest EV cutoff among the projects' EV
+  // reports (each on its own default basis, D4) — never a project's data
+  // date, which is neither an EV cutoff nor an instant with a zone. It is
+  // stated as the EV screens state it: its calendar date, the zone it ends
+  // in, and the note when that project has no zone of its own (D1). With no
+  // EV report at all, the answer's own time stands in, as before.
+  const evCutoffIso = latestIso(
+    [...evReports.values()].map((report) => report?.reporting?.cutoffDate),
+  );
+  const cutoffDate = evCutoffIso || generatedAt;
+  const cutoffReporting = evCutoffIso
+    ? [...evReports.values()]
+        .map((report) => report?.reporting)
+        .find((reporting) => reporting?.cutoffDate && toIso(reporting.cutoffDate) === evCutoffIso) || null
+    : null;
   const sourceUpdatedAt =
     latestIso([
       ...projects.map((project) => project.updatedAt),
