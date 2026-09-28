@@ -117,6 +117,7 @@ const FIX_WHO: Record<string, string> = {
   'schedule.update': 'edit the schedule',
   'schedule.approve': 'approve and activate schedules',
   'boq.create': 'map the BOQ to activities',
+  'boq.update': "set the BOQ's mapping rules",
 }
 
 /**
@@ -334,6 +335,7 @@ export function ScheduleReviewPanel({
     'schedule.update': useCanPerform('schedule', 'update'),
     'schedule.approve': useCanPerform('schedule', 'approve', 'revision.activate'),
     'boq.create': useCanPerform('boq', 'create', 'allocation.create'),
+    'boq.update': useCanPerform('boq', 'update'),
   }
   const setupBaselineBlocked = Boolean(
     baselineGate && !baselineGate.ready && !baselineGate.alreadyLocked

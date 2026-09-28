@@ -9,6 +9,11 @@ const { moneyBody } = require('../utils/money');
 const costService = require('../services/cost.service');
 const costReconciliation = require('../services/cost-reconciliation.service');
 const costMigration = require('../services/cost-migration.service');
+const {
+  boqFigureAccess,
+  withheldCostRecords,
+  withheldCostSummary,
+} = require('../utils/boq-figures');
 
 const router = express.Router({ mergeParams: true });
 router.use(authenticate);
@@ -45,7 +50,9 @@ router.get(
       projectId: req.params.projectId,
       query: req.query,
     });
-    return sendSuccess(res, result);
+    // A record's budget is its activity's approved BOQ allocation: withheld
+    // from a caller who may not read the BOQ (owner decision E1).
+    return sendSuccess(res, withheldCostRecords(result, boqFigureAccess(req)));
   }),
 );
 
@@ -57,7 +64,7 @@ router.get(
       orgId: req.user.orgId,
       projectId: req.params.projectId,
     });
-    return sendSuccess(res, result);
+    return sendSuccess(res, withheldCostSummary(result, boqFigureAccess(req)));
   }),
 );
 

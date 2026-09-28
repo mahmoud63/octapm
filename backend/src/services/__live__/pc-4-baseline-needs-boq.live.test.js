@@ -27,6 +27,21 @@
  * approval's own verdict (ready) is unchanged, and setup readiness does not
  * repeat the check (its BOQ step names the upload).
  *
+ * Owner decision E2 (2026-09-28): the lock needs REAL in-scope BOQ value —
+ * at least one active row in scope for mapping (its rule neither
+ * not_applicable nor optional) with an amount above zero, fully allocated to
+ * active activities. A token bill (one not-applicable row; one optional row)
+ * is refused like no bill on every baseline path, with nothing written:
+ *
+ *   400 BOQ_SCOPE_REQUIRED_FOR_BASELINE — "BOQ required before baseline
+ *   lock: the bill has no in-scope value to map; mark the rows that belong
+ *   to the schedule as required (Project Controls › Mapping), map them, then
+ *   lock the baseline."
+ *
+ * The readiness's boq_present check and the setup baseline gate
+ * (BOQ_NO_IN_SCOPE_VALUE on the BOQ step) say the same; a mixed bill —
+ * in-scope rows fully mapped beside not-applicable rows — locks.
+ *
  * Proven against a real API process and the real local Postgres, through the
  * product's own API. Everything lives in a throwaway "LiveTest <uuid>"
  * organisation dropped afterwards; the only writes outside the API are the
@@ -43,6 +58,12 @@ const BOQ_REQUIRED = {
   status: 400,
   code: "BOQ_REQUIRED_FOR_BASELINE",
   message: "BOQ required before baseline lock: upload the BOQ (BOQ page), then map it to the schedule and lock the baseline.",
+};
+const BOQ_SCOPE_REQUIRED = {
+  status: 400,
+  code: "BOQ_SCOPE_REQUIRED_FOR_BASELINE",
+  message:
+    "BOQ required before baseline lock: the bill has no in-scope value to map; mark the rows that belong to the schedule as required (Project Controls › Mapping), map them, then lock the baseline.",
 };
 
 /** A two-activity XER (an FS link between them). */
@@ -142,7 +163,7 @@ liveDescribe("PC-4: no schedule baseline without a BOQ (owner decision 2026-09-2
   };
 
   // Both routes, as each member who may lock: every one is refused alike.
-  const expectBoqRequired = async (built, label, revisionId) => {
+  const expectBoqRequired = async (built, label, revisionId, refusal = BOQ_REQUIRED) => {
     const routes = [
       ...(revisionId ? [[`/schedule/revisions/${revisionId}/baseline`, {}]] : []),
       ["/schedule/baseline", revisionId ? { revisionId } : {}],
@@ -150,7 +171,7 @@ liveDescribe("PC-4: no schedule baseline without a BOQ (owner decision 2026-09-2
     ];
     for (const [who, headers] of [["pm", pmAuth()], ["planner", plannerAuth()]]) {
       for (const [route, body] of routes) {
-        expect([label, who, route, await built.refused(route, body, headers)]).toEqual([label, who, route, BOQ_REQUIRED]);
+        expect([label, who, route, await built.refused(route, body, headers)]).toEqual([label, who, route, refusal]);
       }
     }
   };
@@ -252,6 +273,89 @@ liveDescribe("PC-4: no schedule baseline without a BOQ (owner decision 2026-09-2
     const locked = await built.post(`/schedule/revisions/${revisionId}/baseline`, {}, 200, plannerAuth());
     expect([locked.locked, locked.revision.status]).toEqual([2, "baselined"]);
     expect(await prisma.activity.count({ where: { projectId, isActive: true, baselineStart: null } })).toBe(0);
+  });
+
+  it("a token bill — one not-applicable row, then one optional row — is refused like no bill on every baseline path at every stage, readiness and the setup gate say why, nothing is written; a mixed bill with its in-scope rows fully mapped locks (E2)", async () => {
+    const built = await newProject("token bill");
+    const projectId = built.project.id;
+    const setRule = async (rule, itemIds) => {
+      const response = await api.request("PATCH", built.at("/activity-boq-allocations/mapping-rules"), { body: { rule, itemIds }, headers: pmAuth() });
+      expect([rule, response.status, response.body?.error]).toEqual([rule, 200, undefined]);
+    };
+    // The token bill: one priced row, marked not applicable.
+    const token = (await built.post("/boq/items", { code: "P.1", description: "Preliminaries", quantity: 1, unit: "item", rate: 5000 }, 201)).item;
+    await setRule("not_applicable", [token.id]);
+    expect(await prisma.boqItem.findUnique({ where: { id: token.id }, select: { mappingRule: true, amount: true } })).toMatchObject({ mappingRule: "not_applicable" });
+
+    // ── No revision, a staged draft, approved but staged: the bill's scope,
+    // named before every schedule refusal, as the missing bill is.
+    await expectBoqRequired(built, "token bill, no revision", null, BOQ_SCOPE_REQUIRED);
+    const revisionId = await built.importXer();
+    await expectBoqRequired(built, "token bill, staged draft", revisionId, BOQ_SCOPE_REQUIRED);
+    for (const step of ["submit-review", "approve"]) await built.post(`/schedule/revisions/${revisionId}/${step}`, {});
+    await expectBoqRequired(built, "token bill, staged approved", revisionId, BOQ_SCOPE_REQUIRED);
+
+    // ── Active and approved, its own logic sound, and the coverage check
+    // passing vacuously on a bill with nothing to map: still refused, for
+    // the not-applicable row and then for the optional one.
+    await built.post(`/schedule/revisions/${revisionId}/activate`, { mappings: [] });
+    for (const rule of ["not_applicable", "optional"]) {
+      await setRule(rule, [token.id]);
+      const readiness = (await built.get("/schedule")).revision.readiness;
+      expect([rule, readiness.checks.find((check) => check.key === "allocations").passed]).toEqual([rule, true]);
+      expect([rule, readiness.ready, readiness.baselineReady, readiness.baselineBlockingCount]).toEqual([rule, true, false, 1]);
+      expect([rule, readiness.checks[0]]).toEqual([
+        rule,
+        {
+          key: "boq_present",
+          label: "BOQ",
+          requiredFor: ["baseline"],
+          passed: false,
+          severity: "blocking",
+          message:
+            "The bill has no in-scope value to map: every priced row is marked not applicable or optional; a baseline locks a BOQ mapped to the schedule.",
+          details: {},
+          fix: {
+            where: "Project Controls › Mapping",
+            inline: true,
+            permission: "boq.update",
+            next: "mark the rows that belong to the schedule as required (Project Controls › Mapping)",
+            text: "Mark the BOQ rows that belong to the schedule as required on Project Controls › Mapping, map them to the schedule's activities and lock the baseline.",
+          },
+        },
+      ]);
+      await expectBoqRequired(built, `token bill (${rule}), active approved`, revisionId, BOQ_SCOPE_REQUIRED);
+      // The setup baseline gate agrees, on its BOQ step, in the refusal's words.
+      const setup = await built.get("/setup-readiness");
+      expect([rule, setup.gates.baseline.ready, setup.summary.readyForBaseline]).toEqual([rule, false, false]);
+      const codes = setup.gates.baseline.blockers.map((blocker) => blocker.code);
+      expect([rule, codes.includes("BOQ_NO_IN_SCOPE_VALUE"), codes.includes("SCHEDULE_BOQ_PRESENT_FAILED")]).toEqual([rule, true, false]);
+      expect(setup.gates.baseline.blockers.find((blocker) => blocker.code === "BOQ_NO_IN_SCOPE_VALUE")).toMatchObject({
+        stepKey: "boq_upload",
+        message:
+          "The bill has no in-scope value to map: every priced row is marked not applicable or optional. Mark the rows that belong to the schedule as required (Project Controls › Mapping), map them, then lock the baseline.",
+      });
+    }
+    // Nothing is written by any refusal.
+    expect(await lockWrites(projectId)).toEqual(NOTHING);
+    const row = await prisma.scheduleRevision.findUnique({ where: { id: revisionId } });
+    expect([row.status, row.isActive, row.baselinedBy, row.baselinedAt]).toEqual(["approved", true, null, null]);
+
+    // ── A mixed bill: the token row back to not applicable, and an in-scope
+    // row fully mapped to an active activity. The not-applicable row needs no
+    // mapping (D5), and the planning engineer granted the lock locks it.
+    await setRule("not_applicable", [token.id]);
+    const works = (await built.post("/boq/items", { code: "1.1", description: "Excavation", quantity: 10, unit: "m3", rate: 100 }, 201)).item;
+    const [first] = await prisma.activity.findMany({ where: { projectId, isActive: true }, orderBy: { sortOrder: "asc" } });
+    const allocation = await built.post("/activity-boq-allocations", { boqItemId: works.id, activityId: first.id, quantity: 10 }, 201);
+    for (const step of ["submit", "approve"]) await built.post(`/activity-boq-allocations/${allocation.id}/${step}`, {});
+    const mixed = (await built.get("/schedule")).revision.readiness;
+    expect(mixed.checks[0]).toMatchObject({ key: "boq_present", passed: true, fix: null });
+    expect(mixed).toMatchObject({ ready: true, baselineReady: true, baselineBlockingCount: 0 });
+    const setup = await built.get("/setup-readiness");
+    expect(setup.gates.baseline.blockers.map((blocker) => blocker.code)).not.toContain("BOQ_NO_IN_SCOPE_VALUE");
+    const locked = await built.post(`/schedule/revisions/${revisionId}/baseline`, {}, 200, plannerAuth());
+    expect([locked.locked, locked.revision.status]).toEqual([2, "baselined"]);
   });
 
   it("a baseline locked before the rule, on a project with no BOQ, is left exactly as it was", async () => {

@@ -325,9 +325,63 @@ describe('schedule revision lifecycle service', () => {
     expect(mockAuditService.recordEvent).not.toHaveBeenCalled();
   });
 
+  it('refuses the baseline lock of a project whose bill has no in-scope value (every priced row not applicable or optional), before any schedule step, and writes nothing (E2)', async () => {
+    // A bill of two rows; none in scope for mapping with value.
+    mockPrisma.boqItem.count.mockResolvedValueOnce(2).mockResolvedValueOnce(0);
+
+    await expect(
+      scheduleService.lockBaseline({
+        orgId: 'org-1',
+        projectId: 'project-1',
+        revisionId: 'revision-1',
+        userId: 'pm-1',
+      }),
+    ).rejects.toMatchObject({
+      status: 400,
+      code: 'BOQ_SCOPE_REQUIRED_FOR_BASELINE',
+      message:
+        'BOQ required before baseline lock: the bill has no in-scope value to map; mark the rows that belong to the schedule as required (Project Controls › Mapping), map them, then lock the baseline.',
+    });
+
+    // In scope: a rule neither not applicable nor optional, and an amount above zero.
+    expect(mockPrisma.boqItem.count).toHaveBeenCalledWith({
+      where: {
+        projectId: 'project-1',
+        isActive: true,
+        amount: { gt: 0 },
+        mappingRule: { notIn: ['not_applicable', 'optional'] },
+      },
+    });
+    expect(mockPrisma.scheduleRevision.findFirst).not.toHaveBeenCalled();
+    expect(mockPrisma.$transaction).not.toHaveBeenCalled();
+    expect(mockPrisma.activity.update).not.toHaveBeenCalled();
+    expect(mockPrisma.scheduleRevision.update).not.toHaveBeenCalled();
+    expect(mockAuditService.recordEvent).not.toHaveBeenCalled();
+  });
+
+  it('refuses the baseline lock when the in-scope value is marked out of scope before the lock writes, inside its transaction (E2)', async () => {
+    mockCurrentRevision({ ...revision, status: 'approved', isActive: true }, { active: true });
+    // Before the transaction: in scope. Inside it: the bill is there, its value is not.
+    mockPrisma.boqItem.count.mockResolvedValueOnce(2).mockResolvedValueOnce(2).mockResolvedValueOnce(2).mockResolvedValueOnce(0);
+
+    await expect(
+      scheduleService.lockBaseline({
+        orgId: 'org-1',
+        projectId: 'project-1',
+        revisionId: 'revision-1',
+        userId: 'pm-1',
+      }),
+    ).rejects.toMatchObject({ code: 'BOQ_SCOPE_REQUIRED_FOR_BASELINE' });
+
+    expect(mockPrisma.$transaction).toHaveBeenCalledTimes(1);
+    expect(mockPrisma.activity.update).not.toHaveBeenCalled();
+    expect(mockPrisma.scheduleRevision.update).not.toHaveBeenCalled();
+  });
+
   it('refuses the baseline lock when the bill is removed before the lock writes, inside its transaction', async () => {
     mockCurrentRevision({ ...revision, status: 'approved', isActive: true }, { active: true });
-    mockPrisma.boqItem.count.mockResolvedValueOnce(2).mockResolvedValueOnce(0);
+    // Before the transaction: a bill, in scope. Inside it: no bill.
+    mockPrisma.boqItem.count.mockResolvedValueOnce(2).mockResolvedValueOnce(2).mockResolvedValueOnce(0);
 
     await expect(
       scheduleService.lockBaseline({
@@ -702,14 +756,64 @@ describe('the baseline readiness says what the lock says: no BOQ, no baseline', 
   });
 
   it('with a BOQ the check passes and names nothing; the mapping is the next step', () => {
-    const readiness = sound({ items: [{ id: 'i1' }], totalBoqAmount: 1000, allocatableBoqAmount: 1000, unallocatedAmount: 1000, approvedAllocatedAmount: 0 });
+    const readiness = sound({ items: [{ id: 'i1', mappingRule: 'required', amount: 1000 }], totalBoqAmount: 1000, allocatableBoqAmount: 1000, unallocatedAmount: 1000, approvedAllocatedAmount: 0 });
 
     expect(readiness.checks[0]).toMatchObject({ key: 'boq_present', passed: true, fix: null, details: {} });
     expect(readiness.checks.filter((check) => !check.passed).map((check) => check.key)).toEqual(['allocations']);
     expect(readiness.baselineReady).toBe(false);
 
-    const mapped = sound({ items: [{ id: 'i1' }], totalBoqAmount: 1000, unallocatedAmount: 0, approvedAllocatedAmount: 1000 });
+    const mapped = sound({ items: [{ id: 'i1', mappingRule: 'required', amount: 1000 }], totalBoqAmount: 1000, unallocatedAmount: 0, approvedAllocatedAmount: 1000 });
     expect([mapped.ready, mapped.baselineReady, mapped.baselineBlockingCount]).toEqual([true, true, 0]);
+  });
+
+  it('a token bill — only a not-applicable row, or only an optional row — fails the check like no bill, and its fix is the mapping rule (E2)', () => {
+    for (const [name, row, summary] of [
+      ['not applicable', { id: 'i1', mappingRule: 'not_applicable', amount: 500 }, { totalBoqAmount: 500, notApplicableAmount: 500, unallocatedAmount: 0 }],
+      ['optional', { id: 'i1', mappingRule: 'optional', amount: 500 }, { totalBoqAmount: 500, unallocatedAmount: 500, optionalUnallocatedAmount: 500 }],
+    ]) {
+      const readiness = sound({ items: [row], approvedAllocatedAmount: 0, ...summary });
+      // The coverage check passes vacuously on such a bill; this one does not.
+      expect([name, readiness.checks.find((check) => check.key === 'allocations').passed]).toEqual([name, true]);
+      expect([name, readiness.ready, readiness.baselineReady, readiness.baselineBlockingCount]).toEqual([name, true, false, 1]);
+      expect([name, readiness.checks[0]]).toEqual([
+        name,
+        {
+          key: 'boq_present',
+          label: 'BOQ',
+          requiredFor: ['baseline'],
+          passed: false,
+          severity: 'blocking',
+          message:
+            'The bill has no in-scope value to map: every priced row is marked not applicable or optional; a baseline locks a BOQ mapped to the schedule.',
+          details: {},
+          fix: {
+            where: 'Project Controls › Mapping',
+            inline: true,
+            permission: 'boq.update',
+            next: 'mark the rows that belong to the schedule as required (Project Controls › Mapping)',
+            text: "Mark the BOQ rows that belong to the schedule as required on Project Controls › Mapping, map them to the schedule's activities and lock the baseline.",
+          },
+        },
+      ]);
+    }
+    // A required row with no value is no in-scope value either.
+    expect(sound({ items: [{ id: 'i1', mappingRule: 'required', amount: 0 }], totalBoqAmount: 0 }).checks[0].passed).toBe(false);
+  });
+
+  it('a mixed bill — in-scope rows fully mapped beside not-applicable rows — passes, and the baseline is ready (E2)', () => {
+    const readiness = sound({
+      items: [
+        { id: 'i1', mappingRule: 'required', amount: 1000 },
+        { id: 'i2', mappingRule: '', amount: 200 },
+        { id: 'i3', mappingRule: 'not_applicable', amount: 500 },
+      ],
+      totalBoqAmount: 1700,
+      notApplicableAmount: 500,
+      unallocatedAmount: 0,
+      approvedAllocatedAmount: 1200,
+    });
+    expect(readiness.checks[0]).toMatchObject({ key: 'boq_present', passed: true, fix: null });
+    expect([readiness.ready, readiness.baselineReady, readiness.baselineBlockingCount]).toEqual([true, true, 0]);
   });
 
   it('a summary that does not list the rows says nothing about the BOQ (no check is invented)', () => {

@@ -33,8 +33,11 @@ describe("an activity's mapping (owner decision, 2026-09-28)", () => {
       expect(answer).not.toHaveProperty("approvedAllocationCount");
       expect(answer).toMatchObject({ id: "a-1", isCritical: true, totalFloat: 0 });
     }
-    // The cost reader keeps the budget (the Cost module shows it already).
-    expect(withheldActivity(activity("a-1"), COST).budget).toBe(21337);
+    // Nor its budget: reading the cost module does not override the
+    // withholding of a per-activity figure read off the mapping (E1).
+    for (const access of [COST, NEITHER]) {
+      expect(Object.keys(withheldActivity(activity("a-1"), access)).sort()).toEqual(["id", "isCritical", "name", "totalFloat"]);
+    }
   });
 
   it("the schedule's activities go the same way, and the service's object is not touched", () => {

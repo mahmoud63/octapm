@@ -55,6 +55,9 @@ const BOQ_CURRENT_REVISION_STATUSES = [
   "baselined",
 ];
 const MAPPING_RULES = ["required", "optional", "not_applicable"];
+// The rules that take a row out of scope for mapping (owner decision E2):
+// the baseline lock needs in-scope value (schedule.service).
+const OUT_OF_SCOPE_MAPPING_RULES = ["not_applicable", "optional"];
 
 // The baseline blockers that say the bill's value is not mapped yet.
 const ALLOCATION_BLOCKER_CODES = new Set([
@@ -1201,6 +1204,22 @@ const getSetupReadiness = async ({ orgId, projectId, canReadBoq = true, canReadS
     boqCount > 0 &&
       totalBoqAmount <= MONEY_EPSILON &&
       issue("BOQ_HAS_NO_VALUE", "BOQ items have no measurable value."),
+    // Owner decision E2 (2026-09-28): a bill whose priced rows are all out
+    // of scope for mapping (not applicable or optional) has nothing to map,
+    // and the baseline lock refuses it like no bill
+    // (BOQ_SCOPE_REQUIRED_FOR_BASELINE) — the step says so, in the words
+    // of that refusal. Whether there is any is said, never how much.
+    boqCount > 0 &&
+      totalBoqAmount > MONEY_EPSILON &&
+      !boqItems.some(
+        (item) =>
+          !OUT_OF_SCOPE_MAPPING_RULES.includes(item.mappingRule || "required") &&
+          toNumber(item.amount) > 0,
+      ) &&
+      issue(
+        "BOQ_NO_IN_SCOPE_VALUE",
+        "The bill has no in-scope value to map: every priced row is marked not applicable or optional. Mark the rows that belong to the schedule as required (Project Controls › Mapping), map them, then lock the baseline.",
+      ),
   ];
   // PC-4's filing and matching checks are advisories (setup doc §91, and
   // the product owner's default b): nothing in the product files a BOQ row

@@ -191,8 +191,15 @@ export function BudgetPanel({ projectId }: { projectId: string }) {
               Σ activity budgets{' '}
               {formatMoney(reconciliation.totals.activityBudget)} · Σ budget
               lines {formatMoney(reconciliation.totals.budgetLines)}
-              {reconciliation.mismatches.length
+              {reconciliation.mismatches?.length
                 ? ` · ${reconciliation.mismatches.length} activit${reconciliation.mismatches.length === 1 ? 'y' : 'ies'} differ`
+                : ''}
+              {/* Which activities differ is read off each one's BOQ
+                  allocation: withheld by the server from a member who may
+                  not read the BOQ (owner decision E1) — said, not shown as
+                  none. */}
+              {reconciliation.activityBudgetsWithheld
+                ? ` · activity budgets: — ${reconciliation.activityBudgetsReason ?? 'Mapping details unavailable to you'}`
                 : ''}
               {data?.summary.underAllocated
                 ? ` · ${data.summary.underAllocated} line${data.summary.underAllocated === 1 ? '' : 's'} under-allocated`

@@ -438,10 +438,17 @@ const costOutlook = (c) => {
 const costLines = (c) => [
   `Cost: budget ${money(c.budget)}, EAC ${money(c.eac)} (${EAC_BASIS_LABELS[c.eacBasis] || "no earned-value report"}), bottom-up ${money(c.bottomUp)}, projected ${money(c.projected)} (${c.overrun > 0 ? `${money(c.overrun)} over` : costOutlook(c) ? `not a projection: ${costOutlook(c).headline}; do not call it within budget` : "within budget"}); actual to date ${money(c.actual)}.`,
   "Activities over budget:",
-  ...(c.topRisks.length ? c.topRisks.slice(0, 6).map((row) => `- [${row.id}] ${row.name} · budget ${money(row.cost.budget)} · actual ${money(row.cost.actual)} · projected ${money(row.cost.projected)} (${money(row.cost.overrun)} over, ${row.cost.overrunPct}%) · ${row.cost.reasons.join("; ") || row.cost.basis}`) : ["- none"]),
+  ...(!Array.isArray(c.topRisks) ? [ACTIVITY_COST_WITHHELD_LINE] : c.topRisks.length ? c.topRisks.slice(0, 6).map((row) => `- [${row.id}] ${row.name} · budget ${money(row.cost.budget)} · actual ${money(row.cost.actual)} · projected ${money(row.cost.projected)} (${money(row.cost.overrun)} over, ${row.cost.overrunPct}%) · ${row.cost.reasons.join("; ") || row.cost.basis}`) : ["- none"]),
   "Budget lines over:",
   ...(c.budgetLines.length ? c.budgetLines.slice(0, 6).map((row) => `- ${row.costCode || ""} ${row.name} · revised ${money(row.revised)} · forecast ${money(row.forecast)} · committed ${money(row.committed)} · ${money(row.overrun)} over`) : ["- none"]),
 ];
+
+// For a cost reader who may not read the BOQ (E1, utils/boq-figures): the
+// project's cost is theirs, but which activities are over budget is read off
+// the mapping and is not in their forecast; the model is told not to say.
+const ACTIVITY_COST_WITHHELD_LINE =
+  "- not available to this reader (mapping details): do not say which activities are over budget or state any activity's budget or cost";
+const ACTIVITY_COST_WITHHELD_SENTENCE = "Which activities are over budget is not available to you (mapping details).";
 
 // For a reader whose forecast carries no cost figure (§12, utils/boq-figures):
 // the budget lines' names and levels, no amount for the model to repeat, and
@@ -493,7 +500,10 @@ const deterministicNarrative = (forecast) => {
   // cleared it. An overrun from the bottom-up is a projection and says so.
   const outlook = c.overrun > 0 ? null : costOutlook(c);
   const finish = s.slipDays ? `The project is projected to finish ${plural(s.slipDays, "day")} late` : "The project is projected to finish on time";
-  const activityRisks = c.topRisks.length ? `${c.topRisks.slice(0, 3).map((row) => `${row.name} projected ${money(row.cost.overrun)} over (${row.cost.reasons[0] || row.cost.basis})`).join("; ")}.` : null;
+  // A cost reader who may not read the BOQ has the project's cost but not
+  // which activities are over budget (E1): the narrative says so, never "no
+  // activity is over budget".
+  const activityRisks = !Array.isArray(c.topRisks) ? ACTIVITY_COST_WITHHELD_SENTENCE : c.topRisks.length ? `${c.topRisks.slice(0, 3).map((row) => `${row.name} projected ${money(row.cost.overrun)} over (${row.cost.reasons[0] || row.cost.basis})`).join("; ")}.` : null;
   return {
     headline: outlook
       ? `${finish}; ${outlook.headline}.`

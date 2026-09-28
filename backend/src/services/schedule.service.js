@@ -359,6 +359,14 @@ const FIX_PERMISSIONS = Object.freeze({
     transition: "allocation.create",
     who: "map the BOQ to activities",
   },
+  // A row's mapping rule (required, optional, not applicable) is set on
+  // Project Controls › Mapping (PATCH …/activity-boq-allocations/mapping-rules).
+  "boq.update": {
+    module: "boq",
+    action: "update",
+    transition: null,
+    who: "set the BOQ's mapping rules",
+  },
 });
 
 // The checks the approval needs: the revision's own logic (D5).
@@ -373,7 +381,19 @@ const STAGED_CANNOT_BE_EDITED =
  * refusal and the review panel give) and `permission` (a FIX_PERMISSIONS
  * key). Null for a check that has no fix of its own.
  */
-const readinessCheckFix = ({ key, staged, activityCount, status }) => {
+const readinessCheckFix = ({ key, staged, activityCount, status, boqItemCount = 0 }) => {
+  // A bill whose every priced row is out of scope for mapping (not
+  // applicable or optional): the rows that belong to the schedule are marked
+  // required, in the words the BOQ_SCOPE_REQUIRED_FOR_BASELINE refusal uses.
+  if (key === "boq_present" && boqItemCount > 0) {
+    return {
+      where: "Project Controls › Mapping",
+      inline: true,
+      permission: "boq.update",
+      next: "mark the rows that belong to the schedule as required (Project Controls › Mapping)",
+      text: "Mark the BOQ rows that belong to the schedule as required on Project Controls › Mapping, map them to the schedule's activities and lock the baseline.",
+    };
+  }
   // No bill at all: the upload comes before any schedule or mapping step,
   // in the words the BOQ_REQUIRED_FOR_BASELINE refusal uses.
   if (key === "boq_present") {
@@ -656,9 +676,19 @@ const buildScheduleReadiness = ({
   // so the baseline lock has its own check — the same rule the lock
   // enforces (assertBoqForBaseline: 400 BOQ_REQUIRED_FOR_BASELINE). Only
   // whether a bill exists is said: no count, no value.
+  // A bill must also have value in scope for mapping (owner decision E2,
+  // 2026-09-28): at least one row whose mapping rule is neither not
+  // applicable nor optional, with an amount above zero. A bill made only of
+  // such rows maps nothing, and the coverage check passes vacuously on it,
+  // so it fails this check like no bill — the same rule the lock enforces
+  // (400 BOQ_SCOPE_REQUIRED_FOR_BASELINE). Whether it has any is said; how
+  // much, or how many rows, is not.
   const boqItemCount = Array.isArray(allocationSummary?.items)
     ? allocationSummary.items.length
     : null;
+  const boqInScope =
+    boqItemCount !== null &&
+    allocationSummary.items.some((item) => isInScopeBoqValue(item));
   const boqPresentCheck =
     boqItemCount === null
       ? []
@@ -667,11 +697,12 @@ const buildScheduleReadiness = ({
             key: "boq_present",
             label: "BOQ",
             requiredFor: ["baseline"],
-            passed: boqItemCount > 0,
+            passed: boqInScope,
             severity: "blocking",
-            message:
-              boqItemCount > 0
-                ? "The project has a BOQ."
+            message: boqInScope
+              ? "The project has a BOQ."
+              : boqItemCount > 0
+                ? "The bill has no in-scope value to map: every priced row is marked not applicable or optional; a baseline locks a BOQ mapped to the schedule."
                 : "No BOQ has been uploaded; a baseline locks a BOQ mapped to the schedule.",
             details: {},
           },
@@ -810,7 +841,7 @@ const buildScheduleReadiness = ({
   for (const check of checks) {
     check.fix = check.passed
       ? null
-      : readinessCheckFix({ key: check.key, staged, activityCount, status: revisionStatus });
+      : readinessCheckFix({ key: check.key, staged, activityCount, status: revisionStatus, boqItemCount: boqItemCount || 0 });
   }
 
   const approvalFailures = failingChecksFor({ checks }, "approval");
@@ -1021,6 +1052,26 @@ const REVISION_NOT_ACTIVATED_MESSAGE =
 const BOQ_REQUIRED_FOR_BASELINE_MESSAGE =
   catalogEntryFor("BOQ_REQUIRED_FOR_BASELINE").message;
 
+/*
+ * Owner decision E2 (2026-09-28): the lock needs real in-scope BOQ value —
+ * at least one active row in scope for mapping (its mapping rule neither
+ * not_applicable nor optional; an unset rule counts as required, as the
+ * allocation summary reads it) with an amount above zero, and that value
+ * fully allocated to active activities (D5, the allocations check). A bill
+ * made only of not-applicable or optional rows maps nothing and passes the
+ * coverage check vacuously, so it is refused like no bill, with its own
+ * message naming the missing step.
+ */
+const BOQ_SCOPE_REQUIRED_FOR_BASELINE_MESSAGE =
+  catalogEntryFor("BOQ_SCOPE_REQUIRED_FOR_BASELINE").message;
+const OUT_OF_SCOPE_MAPPING_RULES = ["not_applicable", "optional"];
+
+/** Whether an allocation summary row is in-scope BOQ value (E2). */
+const isInScopeBoqValue = (item) =>
+  Boolean(item) &&
+  !OUT_OF_SCOPE_MAPPING_RULES.includes(item.mappingRule || "required") &&
+  toNumber(item.amount) > 0;
+
 const assertBoqForBaseline = async (projectId, db = prisma) => {
   const boqItems = await db.boqItem.count({
     where: { projectId, isActive: true },
@@ -1030,6 +1081,21 @@ const assertBoqForBaseline = async (projectId, db = prisma) => {
       400,
       "BOQ_REQUIRED_FOR_BASELINE",
       BOQ_REQUIRED_FOR_BASELINE_MESSAGE,
+    );
+  }
+  const inScopeItems = await db.boqItem.count({
+    where: {
+      projectId,
+      isActive: true,
+      amount: { gt: 0 },
+      mappingRule: { notIn: OUT_OF_SCOPE_MAPPING_RULES },
+    },
+  });
+  if (inScopeItems === 0) {
+    throw new HttpError(
+      400,
+      "BOQ_SCOPE_REQUIRED_FOR_BASELINE",
+      BOQ_SCOPE_REQUIRED_FOR_BASELINE_MESSAGE,
     );
   }
 };

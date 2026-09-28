@@ -6,6 +6,12 @@ const { authenticate } = require("../middleware/auth");
 const { requirePermission, getEffectiveRole } = require("../middleware/rbac");
 const { validate } = require("../middleware/validate");
 const budgetService = require("../services/budget.service");
+const {
+  boqFigureAccess,
+  withheldAllocationSuggestion,
+  withheldBudgetReconciliation,
+  withheldBudgetSnapshot,
+} = require("../utils/boq-figures");
 
 /** Budget by cost code (OCTA-FIN-COSTCODE-019): `/projects/:projectId/budget`. */
 const router = express.Router({ mergeParams: true });
@@ -91,13 +97,15 @@ router.post(
 router.get(
   "/reconciliation",
   requirePermission("cost", "read"),
-  asyncHandler(async (req, res) => sendSuccess(res, await budgetService.reconcile(scope(req)))),
+  // Each activity's approved BOQ allocation is withheld from a caller who may
+  // not read the BOQ (owner decision E1, utils/boq-figures).
+  asyncHandler(async (req, res) => sendSuccess(res, withheldBudgetReconciliation(await budgetService.reconcile(scope(req)), boqFigureAccess(req)))),
 );
 
 router.get(
   "/snapshots",
   requirePermission("cost", "read"),
-  asyncHandler(async (req, res) => sendSuccess(res, await budgetService.listSnapshots(scope(req)))),
+  asyncHandler(async (req, res) => sendSuccess(res, withheldBudgetSnapshot(await budgetService.listSnapshots(scope(req)), boqFigureAccess(req)))),
 );
 
 router.post(
@@ -111,7 +119,7 @@ router.get(
   "/snapshots/:snapshotId",
   requirePermission("cost", "read"),
   [param("snapshotId").isUUID(), validate],
-  asyncHandler(async (req, res) => sendSuccess(res, await budgetService.getSnapshot({ ...scope(req), snapshotId: req.params.snapshotId }))),
+  asyncHandler(async (req, res) => sendSuccess(res, withheldBudgetSnapshot(await budgetService.getSnapshot({ ...scope(req), snapshotId: req.params.snapshotId }), boqFigureAccess(req)))),
 );
 
 router.put(
@@ -164,7 +172,7 @@ router.get(
   "/lines/:lineId/allocations/suggest",
   requirePermission("cost", "read"),
   [param("lineId").isUUID(), validate],
-  asyncHandler(async (req, res) => sendSuccess(res, await budgetService.suggestAllocations({ ...scope(req), lineId: req.params.lineId }))),
+  asyncHandler(async (req, res) => sendSuccess(res, withheldAllocationSuggestion(await budgetService.suggestAllocations({ ...scope(req), lineId: req.params.lineId }), boqFigureAccess(req)))),
 );
 
 router.post(

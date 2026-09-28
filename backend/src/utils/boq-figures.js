@@ -15,16 +15,26 @@
  *
  * - `boq`: may read the BOQ. Gets every payload exactly as it is built —
  *   the same object, untouched. Anyone else is given nothing derived from
- *   the mapping either (owner decision, 2026-09-28): no allocation count,
+ *   the mapping either (owner decisions, 2026-09-28): no allocation count,
  *   no coverage share, no count of critical activities without an approved
- *   allocation — criticality itself (the flag, the float, the critical path)
- *   stays with the schedule's readers.
- * - `budget`: may read the BOQ or the cost module. The activity budget on
- *   the schedule is the approved BOQ allocation, and the revision's total is
- *   their sum; a cost reader already sees these figures in the Cost module
- *   (the budget lines, the EV basis), so the budget stays for them. Someone
- *   who holds neither has no other road to these figures, and is not given
- *   them here either.
+ *   allocation, and no figure an allocation gives one activity — its budget
+ *   on the schedule and the activities (the approved allocation, and the
+ *   generator's budget beside it), its forecast cost (budget, projection,
+ *   basis, level) and the forecast's list and tally of the activities over
+ *   budget, its row of the EV report's breakdown (budget, PV, EV, in an
+ *   order set by the budget), its budget on the Cost module's records and in
+ *   the budget reconciliation, and a budget line's spread suggested from the
+ *   allocations. Reading the cost module does not change this
+ *   (E1): a cost controller, a planning engineer or a PM without boq:read is
+ *   given none of it either. Criticality itself (the flag, the float, the
+ *   critical path) stays with the schedule's readers.
+ * - `budget`: may read the BOQ or the cost module. What the approved
+ *   allocations add up to for the whole project — the revision's total
+ *   budget, the EV report's and the health card's BAC, PV, EV, AC, SPI, CPI
+ *   and EAC, the forecast's project cost, the workspace home's row — is the
+ *   Cost module's own figure (the budget register, the cost ledger, the
+ *   commitments), so these totals stay for a cost reader. Someone who holds
+ *   neither has no other road to them, and is not given them here either.
  */
 const { hasPermission } = require("../middleware/rbac");
 const { HttpError } = require("./http-error");
@@ -32,7 +42,11 @@ const { HttpError } = require("./http-error");
 /** Whether the caller may read the BOQ, as the BOQ endpoints decide it. */
 const canReadBoq = (req) => hasPermission(req, "boq", "read");
 
-/** What the caller may receive: the bill's figures, and the budget built from them. */
+/**
+ * What the caller may receive: the bill's figures and every per-activity
+ * figure read off the mapping (`boq`), and the project's totals built from
+ * the approved allocations (`budget`).
+ */
 const boqFigureAccess = (req) => {
   const boq = canReadBoq(req);
   return { boq, budget: boq || hasPermission(req, "cost", "read") };
@@ -80,17 +94,23 @@ const withoutBoqFigures = (values) =>
 // and stays for every schedule reader.
 const ACTIVITY_BOQ_KEYS = ["allocatedBoqQuantity", "allocatedBoqAmount", "allocatedBoqWeight", "approvedAllocationCount"];
 // The activity's budget: on the schedule, the approved allocation's value;
-// beside it the budget the generator or the import gave the activity.
+// beside it the budget the generator or the import gave the activity (the
+// bill spread over the programme). Per activity, so read off the mapping:
+// withheld from everyone who may not read the BOQ, cost readers included
+// (owner decision E1, 2026-09-28) — which activity carries money says which
+// activity is mapped.
 const ACTIVITY_BUDGET_KEYS = ["budget", "generatedBudget"];
 // The revision's totals of the same: the approved allocations' sum and the
-// generated schedule's total.
+// generated schedule's total. Project totals: a cost reader's.
 const REVISION_BUDGET_KEYS = ["totalBudget", "generatedTotalBudget"];
+
+/** The server's reason beside a per-activity figure it withholds. */
+const MAPPING_DETAILS_WITHHELD = "Mapping details unavailable to you";
 
 /** An activity as this caller may receive it. */
 const withheldActivity = (activity, access = FULL_ACCESS) => {
   if (access.boq || !activity || typeof activity !== "object") return activity;
-  const withoutBill = withoutKeys(activity, ACTIVITY_BOQ_KEYS);
-  return access.budget ? withoutBill : withoutKeys(withoutBill, ACTIVITY_BUDGET_KEYS);
+  return withoutKeys(activity, [...ACTIVITY_BOQ_KEYS, ...ACTIVITY_BUDGET_KEYS]);
 };
 
 /**
@@ -111,13 +131,23 @@ const withheldScheduleReadiness = (readiness, access = FULL_ACCESS) => {
   };
 };
 
-// The generator's budgets: per activity, per WBS node, the project total.
-const withoutGeneratedBudgets = (holder) => {
+// The generator's budgets per activity and per WBS node: the bill spread
+// over the programme, one package or activity at a time (a node with one
+// activity states that activity's budget). Withheld from everyone who may
+// not read the BOQ (E1).
+const withoutGeneratedActivityBudgets = (holder) => {
   const result = { ...holder };
   if (Array.isArray(result.activities)) {
     result.activities = result.activities.map((activity) => withoutKeys(activity, ["budget"]));
   }
   if (Array.isArray(result.wbs)) result.wbs = result.wbs.map((node) => withoutKeys(node, ["budget"]));
+  return result;
+};
+
+// ... and the generated project total, a total: withheld only from someone
+// who reads neither the BOQ nor the cost module.
+const withoutGeneratedBudgets = (holder) => {
+  const result = withoutGeneratedActivityBudgets(holder);
   if (result.projectSummary) result.projectSummary = withoutKeys(result.projectSummary, ["totalBudget"]);
   return result;
 };
@@ -127,7 +157,7 @@ const withoutGeneratedBudgets = (holder) => {
 const withheldSnapshot = (snapshot, access) => {
   if (!snapshot || typeof snapshot !== "object" || Array.isArray(snapshot)) return snapshot;
   const withoutRows = withoutKeys(snapshot, ["boqRows"]);
-  return access.budget ? withoutRows : withoutGeneratedBudgets(withoutRows);
+  return access.budget ? withoutGeneratedActivityBudgets(withoutRows) : withoutGeneratedBudgets(withoutRows);
 };
 
 /** A schedule revision (as serialised for the API) as this caller may receive it. */
@@ -137,8 +167,11 @@ const withheldRevision = (revision, access = FULL_ACCESS) => {
   if (has(result, "readiness")) result.readiness = withheldScheduleReadiness(result.readiness, access);
   if (has(result, "snapshotJson")) result.snapshotJson = withheldSnapshot(result.snapshotJson, access);
   // GET /schedule spreads the snapshot's projectSummary and wbs onto the
-  // revision; they go the way of the revision's own totals.
-  if (!access.budget) result = withoutGeneratedBudgets(withoutKeys(result, REVISION_BUDGET_KEYS));
+  // revision: the per-node budgets go for everyone without BOQ read, the
+  // totals the way of the revision's own totals.
+  result = access.budget
+    ? withoutGeneratedActivityBudgets(result)
+    : withoutGeneratedBudgets(withoutKeys(result, REVISION_BUDGET_KEYS));
   return result;
 };
 
@@ -183,15 +216,25 @@ const withheldReadinessGate = (gate, access = FULL_ACCESS) => {
 /**
  * The official EV report (GET /reports/ev, and a locked period's report) as
  * this caller may receive it. The route admits cost readers only, so the
- * budget — the approved allocations' sum, BAC, per-activity budgets — stays;
- * a cost reader who may not read the BOQ loses the bill's open value and
- * the bill's figures in the readiness gate's details. Output only: the
- * stored snapshot's basis is not touched.
+ * project's totals — the approved allocations' sum, BAC, PV, EV, AC, SPI,
+ * CPI, EAC, the S-curve — stay; a cost reader who may not read the BOQ
+ * loses the bill's open value, the bill's figures in the readiness gate's
+ * details, and the per-activity breakdown (E1): each row's budget is its
+ * approved allocation, its EV that allocation × % complete, and the rows are
+ * the twenty largest allocations in the order of their size — which activity
+ * carries which share of the bill. The breakdown is left out, and the
+ * report says it is withheld and why. Output only: the stored snapshot's
+ * basis and breakdown are not touched.
  */
 const withheldEvReport = (report, access = FULL_ACCESS) => {
   if (access.boq || !report || typeof report !== "object" || Array.isArray(report)) return report;
   const result = { ...withoutKeys(report, ["unallocatedBoqAmount"]) };
   if (has(result, "readinessGate")) result.readinessGate = withheldReadinessGate(result.readinessGate, access);
+  if (has(result, "activityBreakdown")) {
+    delete result.activityBreakdown;
+    result.activityBreakdownWithheld = true;
+    result.activityBreakdownReason = MAPPING_DETAILS_WITHHELD;
+  }
   return result;
 };
 
@@ -214,7 +257,9 @@ const FORECAST_LINE_KEYS = ["revised", "committed", "actual", "forecast", "overr
 // activity's cost says it is withheld and why. Criticality, the schedule's
 // levels and bases, the budget lines' names and levels (the cost module's,
 // not the bill's), the project's cost verdict (summary.costLevel) and the
-// dataQuality sentences stay: none is per activity.
+// dataQuality sentences stay: none is per activity. (A cost reader who may
+// not read the BOQ loses the per-activity part of this too, and keeps the
+// money and the EAC's basis — withheldMappedForecast below.)
 const FORECAST_MAPPING_COST_KEYS = ["eacBasis", "topRisks"];
 const FORECAST_COST_WITHHELD_REASON = "Cost figures are not available to you";
 const WITHHELD_ACTIVITY_COST = Object.freeze({ withheld: true, reason: FORECAST_COST_WITHHELD_REASON });
@@ -224,14 +269,54 @@ const withheldForecastActivity = (activity) =>
     ? { ...activity, cost: { ...WITHHELD_ACTIVITY_COST } }
     : activity;
 
+// A cost reader who may not read the BOQ (E1): an activity's budget in the
+// forecast is its approved allocation, and its projection, overrun, basis,
+// level and reasons are each built from that budget — per activity, so read
+// off the mapping. What the cost ledger says of the activity (its spend and
+// commitments) is the Cost module's own, and stays. The activities over
+// budget (only an activity with a budget can be one) and their tally by
+// level go; the project's cost — budget, BAC, EAC and its basis, bottom-up,
+// projection, overrun, spend — and the budget lines (the budget register)
+// stay.
+const mappedActivityCost = (activity) =>
+  activity && activity.cost && typeof activity.cost === "object"
+    ? {
+        ...activity,
+        cost: {
+          ...(has(activity.cost, "actual") ? { actual: activity.cost.actual } : {}),
+          ...(has(activity.cost, "committed") ? { committed: activity.cost.committed } : {}),
+          withheld: true,
+          reason: MAPPING_DETAILS_WITHHELD,
+        },
+      }
+    : activity;
+
 const mapList = (list, fn) => (Array.isArray(list) ? list.map(fn) : list);
+
+/** A cost reader's forecast when they may not read the BOQ: nothing per activity read off the mapping. */
+const withheldMappedForecast = (forecast) => {
+  const result = { ...forecast, activities: mapList(forecast.activities, mappedActivityCost) };
+  if (forecast.schedule && typeof forecast.schedule === "object") {
+    result.schedule = { ...forecast.schedule, topRisks: mapList(forecast.schedule.topRisks, mappedActivityCost) };
+  }
+  if (forecast.cost && typeof forecast.cost === "object") {
+    result.cost = {
+      ...withoutKeys(forecast.cost, ["topRisks"]),
+      ...(has(forecast.cost, "counts") ? { counts: withoutKeys(forecast.cost.counts, ["atRisk"]) } : {}),
+      activityCostWithheld: true,
+      activityCostReason: MAPPING_DETAILS_WITHHELD,
+    };
+  }
+  return result;
+};
 
 /** GET /forecast (and the forecast inside its explanation) as this caller may receive it. */
 const withheldForecast = (forecast, access = FULL_ACCESS) => {
-  // The forecast carries no BOQ quantity or value of its own (its budgets
-  // are the approved allocations' amounts, the cost reader's budget): a
-  // cost reader receives it exactly as built.
-  if (access.budget || !forecast || typeof forecast !== "object") return forecast;
+  // A BOQ reader receives the forecast exactly as built.
+  if (access.boq || !forecast || typeof forecast !== "object") return forecast;
+  // A cost reader keeps the project's cost, and nothing per activity that
+  // an allocation gives (E1).
+  if (access.budget) return withheldMappedForecast(forecast);
   const result = { ...forecast, activities: mapList(forecast.activities, withheldForecastActivity) };
   if (forecast.schedule && typeof forecast.schedule === "object") {
     result.schedule = { ...forecast.schedule, topRisks: mapList(forecast.schedule.topRisks, withheldForecastActivity) };
@@ -246,6 +331,89 @@ const withheldForecast = (forecast, access = FULL_ACCESS) => {
     };
   }
   return result;
+};
+
+// The Cost module's own answers state an activity's approved allocation too
+// (E1): a cost record's budget is that activity's approved allocation, and
+// beside it the budget first written on the record (the allocation when the
+// record was made); the budget reconciliation sets each activity's
+// allocation against the budget lines. A cost reader who may not read the
+// BOQ keeps the cost ledger's own figures on each record (the cost
+// categories, committed, actual, forecast) and every project total (the
+// summary's totals and EAC, the register, the reconciliation's totals and
+// verdict), and is given no activity's allocation: the record's budget is
+// omitted, and the reconciliation's per-activity rows keep only what the
+// budget lines and the approved change orders say of the activity.
+
+/** A cost record (GET /cost, /cost/summary) as this caller may receive it. */
+const withheldCostRecord = (record, access = FULL_ACCESS) =>
+  access.boq ? record : withoutKeys(record, ACTIVITY_BUDGET_KEYS);
+
+/** GET /projects/:id/cost ({ rows, pagination }) as this caller may receive it. */
+const withheldCostRecords = (result, access = FULL_ACCESS) => {
+  if (access.boq || !result || typeof result !== "object" || !Array.isArray(result.rows)) return result;
+  return { ...result, rows: result.rows.map((record) => withheldCostRecord(record, access)) };
+};
+
+/** GET /projects/:id/cost/summary as this caller may receive it: the records without their allocation. */
+const withheldCostSummary = (summary, access = FULL_ACCESS) => {
+  if (access.boq || !summary || typeof summary !== "object" || !Array.isArray(summary.records)) return summary;
+  return { ...summary, records: summary.records.map((record) => withheldCostRecord(record, access)) };
+};
+
+// A reconciliation row's figures that are the activity's approved
+// allocation, or are built from it.
+const RECONCILIATION_ACTIVITY_KEYS = ["boqBudget", "activityBudget", "difference"];
+
+/**
+ * The budget reconciliation (GET /budget/reconciliation, and the one a
+ * budget snapshot stored) as this caller may receive it: for a caller who
+ * may not read the BOQ each activity keeps its name and what the budget
+ * lines and the approved change orders give it; the lists of activities
+ * that differ, or have a budget and no line, are omitted; the answer says
+ * the activity figures are withheld and why. The totals and the verdict are
+ * the project's and stay. Output only: a stored snapshot is not changed.
+ */
+const withheldBudgetReconciliation = (reconciliation, access = FULL_ACCESS) => {
+  if (access.boq || !reconciliation || typeof reconciliation !== "object" || Array.isArray(reconciliation)) {
+    return reconciliation;
+  }
+  if (!["activities", "mismatches", "activitiesWithoutLines"].some((key) => has(reconciliation, key))) return reconciliation;
+  const result = withoutKeys(reconciliation, ["mismatches", "activitiesWithoutLines"]);
+  return {
+    ...result,
+    ...(has(reconciliation, "activities")
+      ? { activities: mapList(reconciliation.activities, (row) => withoutKeys(row, RECONCILIATION_ACTIVITY_KEYS)) }
+      : {}),
+    activityBudgetsWithheld: true,
+    activityBudgetsReason: MAPPING_DETAILS_WITHHELD,
+  };
+};
+
+/** A budget snapshot (or GET /budget/snapshots' { items }) as this caller may receive it. */
+const withheldBudgetSnapshot = (snapshot, access = FULL_ACCESS) => {
+  if (access.boq || !snapshot || typeof snapshot !== "object") return snapshot;
+  if (Array.isArray(snapshot.items)) return { ...snapshot, items: snapshot.items.map((item) => withheldBudgetSnapshot(item, access)) };
+  if (!has(snapshot, "reconciliation")) return snapshot;
+  const reconciliation = withheldBudgetReconciliation(snapshot.reconciliation, access);
+  return reconciliation === snapshot.reconciliation ? snapshot : { ...snapshot, reconciliation };
+};
+
+/**
+ * A budget line's suggested spread over the activities
+ * (GET /budget/lines/:lineId/allocations/suggest). Its basis is the approved
+ * BOQ allocations — each activity's amount and its share of them, and which
+ * activities have any — so a caller who may not read the BOQ is given no
+ * suggestion: no items, and the reason.
+ */
+const withheldAllocationSuggestion = (suggestion, access = FULL_ACCESS) => {
+  if (access.boq || !suggestion || typeof suggestion !== "object") return suggestion;
+  return {
+    ...withoutKeys(suggestion, ["basis"]),
+    items: [],
+    withheld: true,
+    reason: MAPPING_DETAILS_WITHHELD,
+  };
 };
 
 /** Whether a forecast's cost figures were withheld from this caller. */
@@ -388,12 +556,18 @@ const withheldWbsList = (list, access = FULL_ACCESS) => {
 
 module.exports = {
   BOQ_FIGURE_KEYS,
+  MAPPING_DETAILS_WITHHELD,
   WBS_OUTLINE_KEYS,
   boqFigureAccess,
   canReadBoq,
   forecastCostWithheld,
   withheldActivity,
+  withheldAllocationSuggestion,
   withheldAuditHistory,
+  withheldBudgetReconciliation,
+  withheldBudgetSnapshot,
+  withheldCostRecords,
+  withheldCostSummary,
   withheldError,
   withheldEvReport,
   withheldForecast,

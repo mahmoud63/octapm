@@ -19,17 +19,23 @@
  *     open or total bill value, no BOQ value figure in any readiness check,
  *     reporting gate or not-ready refusal, no BOQ rows in a stored
  *     snapshot, no history of the bill's records — omitted, not zeroed.
- *   neither BOQ nor cost read: nor the budgets built from the bill (the
- *     activity budget, the revision's totals, the generator's budgets, the
- *     forecast's money, a revision's total in its history).
+ *     And, cost readers included (owner decision E1, 2026-09-28), no
+ *     per-activity figure an allocation gives: no activity budget (nor the
+ *     generator's per-activity or per-WBS-node budget), no forecast cost per
+ *     activity (budget, projection, basis, level) and no list or tally of
+ *     the activities over budget, no EV breakdown per activity, no
+ *     allocation on a cost record or in the budget reconciliation.
+ *   neither BOQ nor cost read: nor the project totals built from the bill
+ *     (the revision's totals, the generator's total, the forecast's money,
+ *     EV, PV, AC, BAC and EAC, a revision's total in its history).
  *
  * Nor anything read off the mapping (owner decision, 2026-09-28): no
  * approved allocation count on an activity, no count of critical activities
- * without an approved allocation, no coverage share, and none of the
- * forecast's cost view per activity (its basis and level say whether the
- * activity has an allocation) for a member who reads neither the BOQ nor
- * the cost module. Their criticality — the critical flag, the float, the
- * count of critical activities — stays.
+ * without an approved allocation, no coverage share. Their criticality —
+ * the critical flag, the float, the count of critical activities — stays.
+ * The last case is the reviewer's differential test: one approved
+ * allocation moved from a critical to a non-critical activity changes
+ * nothing in any answer a member without BOQ read receives.
  *
  * Everything else — statuses, codes, verdicts, counts, the forecast's
  * levels — is what the BOQ reader gets.
@@ -104,6 +110,12 @@ const BOQ_KEYS = [
 // not receive either: the budgets built from the bill, and the forecast's
 // money built from them.
 const BUDGET_KEYS = ["budget", "generatedBudget", "totalBudget", "generatedTotalBudget", "eac", "bottomUp", "bac"];
+// A per-activity budget read off the mapping, withheld from a cost reader
+// without BOQ read too (owner decision E1): on every answer but the cost
+// module's own and the forecast's and EV report's (whose project cost is
+// also called "budget"; they are compared shape for shape below).
+const ACTIVITY_BUDGET_KEYS = ["budget", "generatedBudget"];
+const MAPPING_WITHHELD = "Mapping details unavailable to you";
 // The forecast's money, where it sits (the cost block, each budget line) —
 // and each activity's whole cost, whose basis and level say whether it has
 // an approved allocation (owner decision, 2026-09-28), with the list and
@@ -255,20 +267,24 @@ liveDescribe("PC-4 §12: the Overview and the Schedule module carry no BOQ figur
       }
     }
 
-    // The pour is complete, approved inside the open period (P02, 1–28
-    // February): its earned value is its whole allocation — 21337, the
-    // budget itself — so EV on the health card and the workspace home is a
-    // figure the sweep can find (§12: EV that equals allocation × % complete).
-    await prisma.activityProgress.create({
-      data: {
-        activityId: activities.pour.id,
-        pctComplete: 100,
-        status: "approved",
-        approvedBy: live.user.id,
-        approvedAt: new Date("2026-02-15T12:00:00.000Z"),
-        updatedAt: new Date("2026-02-15T12:00:00.000Z"),
-      },
-    });
+    // The pour is complete and the fixing half done, both approved inside
+    // the open period (P02, 1–28 February): the pour's earned value is its
+    // whole allocation (21337, its budget) and the fixing's half of its
+    // (10091.3), so EV on the health card and the workspace home — 31428.3,
+    // a project total — is a figure the sweep can find (§12: EV that equals
+    // allocation × % complete), and no activity's own figure is the total.
+    for (const [activity, pctComplete] of [[activities.pour, 100], [activities.fix, 50]]) {
+      await prisma.activityProgress.create({
+        data: {
+          activityId: activity.id,
+          pctComplete,
+          status: "approved",
+          approvedBy: live.user.id,
+          approvedAt: new Date("2026-02-15T12:00:00.000Z"),
+          updatedAt: new Date("2026-02-15T12:00:00.000Z"),
+        },
+      });
+    }
 
     // The active revision, as a generated schedule stores it (the
     // generator's budgets and the BOQ rows it was built from), and a staged
@@ -479,13 +495,30 @@ liveDescribe("PC-4 §12: the Overview and the Schedule module carry no BOQ figur
       user: members.siteEngineer,
       readsCost: false,
       withheld: new Set([...BOQ_KEYS, ...BUDGET_KEYS]),
-      secrets: ["71793.5", "30273.9", "21337", "20182.6", "41519.6", "69999.99", "50456.5", "213.37", "1009.13"],
+      secrets: ["71793.5", "30273.9", "21337", "20182.6", "10091.3", "48662.99", "31428", "41519.6", "69999.99", "50456.5", "213.37", "1009.13"],
     },
-    // The cost module, not the BOQ: the budgets stay.
-    costController: { user: members.costController, readsCost: true, withheld: new Set(BOQ_KEYS), secrets: ["71793.5", "30273.9", "50456.5", "213.37", "1009.13"] },
-    planningEngineer: { user: members.planningEngineer, readsCost: true, withheld: new Set(BOQ_KEYS), secrets: ["71793.5", "30273.9", "50456.5", "213.37", "1009.13"] },
-    pm: { user: members.pm, readsCost: true, withheld: new Set(BOQ_KEYS), secrets: ["71793.5", "30273.9", "50456.5", "213.37", "1009.13"] },
+    // The cost module, not the BOQ: the project's totals stay — and no
+    // activity's own figure, whichever answer carries it (owner decision
+    // E1): the pour's allocation and EV (21337), the fixing's allocation
+    // (20182.6) and EV (10091.3), the generator's budget for the fixing
+    // (48662.99).
+    ...Object.fromEntries(
+      ["costController", "planningEngineer", "pm"].map((key) => [
+        key,
+        {
+          user: members[key],
+          readsCost: true,
+          withheld: new Set(BOQ_KEYS),
+          secrets: ["71793.5", "30273.9", "50456.5", "213.37", "1009.13", "21337", "20182.6", "10091.3", "48662.99"],
+        },
+      ]),
+    ),
   });
+  // What a viewer may not receive on one answer: a cost reader's
+  // per-activity budgets are withheld everywhere but the cost module's own
+  // answers and the forecast's and EV report's (compared shape for shape).
+  const withheldOn = ({ withheld, readsCost }, { kind, cost }) =>
+    readsCost && !cost && kind !== "forecast" && kind !== "ev" ? new Set([...withheld, ...ACTIVITY_BUDGET_KEYS]) : withheld;
 
   // The EV report is a cost reader's, and so is its budget: the approved
   // allocations' sum it states (top level and in its source summary) stays.
@@ -511,7 +544,29 @@ liveDescribe("PC-4 §12: the Overview and the Schedule module carry no BOQ figur
     return copy;
   };
 
-  // The EV report without the bill's figures, where they sit.
+  // A cost reader's forecast without the BOQ (owner decision E1): the
+  // project's cost and the budget lines stay; each activity's cost keeps its
+  // spend and commitments (the cost ledger's) and says the rest is withheld;
+  // the activities over budget and their tally go.
+  const forecastWithoutMapping = (forecast) => {
+    const copy = clone(forecast);
+    const activityCost = (activity) => {
+      if (activity?.cost) {
+        activity.cost = { actual: activity.cost.actual, committed: activity.cost.committed, withheld: true, reason: MAPPING_WITHHELD };
+      }
+    };
+    (copy.activities || []).forEach(activityCost);
+    (copy.schedule?.topRisks || []).forEach(activityCost);
+    if (copy.cost) {
+      drop(copy.cost, ["topRisks"]);
+      drop(copy.cost.counts, ["atRisk"]);
+      Object.assign(copy.cost, { activityCostWithheld: true, activityCostReason: MAPPING_WITHHELD });
+    }
+    return copy;
+  };
+
+  // The EV report without the bill's figures, where they sit — and without
+  // its per-activity breakdown (owner decision E1), which it says is withheld.
   const evWithoutBill = (report) => {
     const copy = clone(report);
     delete copy.unallocatedBoqAmount;
@@ -520,6 +575,9 @@ liveDescribe("PC-4 §12: the Overview and the Schedule module carry no BOQ figur
         if (entry.details) drop(entry.details, BOQ_KEYS);
       }
     }
+    delete copy.activityBreakdown;
+    copy.activityBreakdownWithheld = true;
+    copy.activityBreakdownReason = MAPPING_WITHHELD;
     return copy;
   };
 
@@ -579,18 +637,28 @@ liveDescribe("PC-4 §12: the Overview and the Schedule module carry no BOQ figur
     expect(fullHistory.events.some((event) => BOQ_RECORD_TYPES.includes(event.recordType))).toBe(true);
     // The workspace home: the project's budget, the approved allocations' sum.
     const home = (await api.get(reads().workspaceDashboard.route, auth())).body.data;
-    expect(home.projectHealth.find((row) => row.id === project.id)).toMatchObject({ bac: 41519.6, eac: 41519.6, ev: 21337 });
-    // The health card: EV is the complete pour's whole allocation.
+    expect(home.projectHealth.find((row) => row.id === project.id)).toMatchObject({ bac: 41519.6, eac: 41519.6, ev: 31428.3 });
+    // The health card: EV is the complete pour's whole allocation and half
+    // the fixing's.
     const health = (await api.get(reads().health.route, auth())).body.data;
-    expect(health.dimensions.find((dimension) => dimension.key === "cost").detail).toMatchObject({ ev: 21337, ac: 0 });
+    expect(health.dimensions.find((dimension) => dimension.key === "cost").detail).toMatchObject({ ev: 31428, ac: 0 });
+    // The EV report's breakdown: each activity's allocation and EV.
+    const ev = (await api.get(reads().ev.route, auth())).body.data;
+    expect(ev.activityBreakdown.map((row) => [row.activityId, row.budget, row.ev])).toEqual([
+      ["A100", 21337, 21337],
+      ["A110", 20182.6, 10091.3],
+    ]);
   });
 
   it("the site engineer, the cost controller, the planning engineer and a PM, all without BOQ read, receive none of the bill's figures from any request of the Overview or the Schedule module — and everything else unchanged", async () => {
-    for (const [viewer, { user, readsCost, withheld, secrets }] of Object.entries(viewers())) {
+    for (const [viewer, who] of Object.entries(viewers())) {
+      const { user, readsCost, secrets } = who;
       const viewerAuth = as(user);
       // The BOQ endpoints refuse this member — the premise of §12.
       expect([viewer, (await api.get(at("/boq"), viewerAuth)).status]).toEqual([viewer, 403]);
-      for (const [name, { route, kind, cost, boq }] of Object.entries(reads())) {
+      for (const [name, read] of Object.entries(reads())) {
+        const { route, kind, cost, boq } = read;
+        const withheld = withheldOn(who, read);
         const [full, limited] = await Promise.all([api.get(route, auth()), api.get(route, viewerAuth)]);
         expect([viewer, name, full.status]).toEqual([viewer, name, 200]);
         if (boq || (cost && !readsCost)) {
@@ -614,7 +682,7 @@ liveDescribe("PC-4 §12: the Overview and the Schedule module carry no BOQ figur
         if (kind === "keys") {
           expect([viewer, name, mine]).toEqual([viewer, name, without(theirs, withheld)]);
         } else if (kind === "forecast") {
-          expect([viewer, name, mine]).toEqual([viewer, name, readsCost ? theirs : forecastWithoutMoney(theirs)]);
+          expect([viewer, name, mine]).toEqual([viewer, name, readsCost ? forecastWithoutMapping(theirs) : forecastWithoutMoney(theirs)]);
         } else if (kind === "ev") {
           expect([viewer, name, mine]).toEqual([viewer, name, evWithoutBill(theirs)]);
         } else if (kind === "wbs") {
@@ -660,7 +728,7 @@ liveDescribe("PC-4 §12: the Overview and the Schedule module carry no BOQ figur
         readsCost,
         readsCost,
         readsCost ? 41519.6 : undefined,
-        readsCost ? 21337 : undefined,
+        readsCost ? 31428.3 : undefined,
         readsCost,
         readsCost,
       ]);
@@ -672,7 +740,7 @@ liveDescribe("PC-4 §12: the Overview and the Schedule module carry no BOQ figur
         viewer,
         "number",
         true,
-        readsCost ? 21337 : undefined,
+        readsCost ? 31428 : undefined,
         readsCost,
       ]);
       const schedule = (await api.get(reads().schedule.route, viewerAuth)).body.data;
@@ -681,13 +749,17 @@ liveDescribe("PC-4 §12: the Overview and the Schedule module carry no BOQ figur
       expect([viewer, "approvedAllocationCount" in pour, typeof pour.isCritical]).toEqual([viewer, false, "boolean"]);
       const allocations = schedule.revision.readiness.checks.find((check) => check.key === "allocations");
       expect(allocations).toMatchObject({ key: "allocations", severity: "blocking", passed: false });
-      // The budget: a cost reader reads it in the Cost module already.
-      expect([viewer, "budget" in pour, pour.budget]).toEqual(readsCost ? [viewer, true, 21337] : [viewer, false, undefined]);
+      // The activity's budget is its approved allocation: withheld from every
+      // member without BOQ read, cost readers included (owner decision E1).
+      // The revision's total — the project's — stays for a cost reader.
+      expect([viewer, "budget" in pour, "generatedBudget" in pour]).toEqual([viewer, false, false]);
+      expect([viewer, schedule.revision.totalBudget]).toEqual([viewer, readsCost ? 41519.6 : undefined]);
       // The forecast: the schedule's levels and counts and the project's cost
-      // verdict stay; the money only for a cost reader — and, for anyone
-      // else, no activity's cost basis or level (each says whether the
-      // activity has an approved allocation), no list or tally of the
-      // activities over budget, no EAC basis.
+      // verdict stay; the project's money only for a cost reader — and, for
+      // everyone without BOQ read, no activity's budget, projection, cost
+      // basis or level (each says whether the activity has an approved
+      // allocation), no list or tally of the activities over budget; for a
+      // reader of neither, no EAC basis either.
       const forecast = (await api.get(reads().forecast.route, viewerAuth)).body.data;
       expect([viewer, forecast.cost.budget, typeof forecast.cost.counts.lines, typeof forecast.summary.costLevel]).toEqual([
         viewer,
@@ -695,13 +767,38 @@ liveDescribe("PC-4 §12: the Overview and the Schedule module carry no BOQ figur
         "number",
         "string",
       ]);
-      expect([viewer, "eacBasis" in forecast.cost, "topRisks" in forecast.cost, "atRisk" in forecast.cost.counts, forecast.cost.withheld, forecast.cost.reason]).toEqual(
-        readsCost ? [viewer, true, true, true, undefined, undefined] : [viewer, false, false, false, true, FORECAST_COST_WITHHELD],
+      expect([
+        viewer,
+        "eacBasis" in forecast.cost,
+        "topRisks" in forecast.cost,
+        "atRisk" in forecast.cost.counts,
+        forecast.cost.withheld,
+        forecast.cost.reason,
+        forecast.cost.activityCostWithheld,
+        forecast.cost.activityCostReason,
+      ]).toEqual(
+        readsCost
+          ? [viewer, true, false, false, undefined, undefined, true, MAPPING_WITHHELD]
+          : [viewer, false, false, false, true, FORECAST_COST_WITHHELD, undefined, undefined],
       );
       for (const activity of [...forecast.activities, ...forecast.schedule.topRisks]) {
-        expect([viewer, Object.keys(activity.cost).sort()]).toEqual([
+        expect([viewer, Object.keys(activity.cost).sort(), activity.cost.reason]).toEqual([
           viewer,
-          readsCost ? ["actual", "basis", "budget", "committed", "level", "overrun", "overrunPct", "projected", "reasons"] : ["reason", "withheld"],
+          readsCost ? ["actual", "committed", "reason", "withheld"] : ["reason", "withheld"],
+          readsCost ? MAPPING_WITHHELD : FORECAST_COST_WITHHELD,
+        ]);
+      }
+      // The EV report (a cost reader's): the totals, and no per-activity
+      // breakdown — it says it is withheld and why.
+      if (readsCost) {
+        const ev = (await api.get(reads().ev.route, viewerAuth)).body.data;
+        expect([viewer, ev.totalBudget, ev.ev, "activityBreakdown" in ev, ev.activityBreakdownWithheld, ev.activityBreakdownReason]).toEqual([
+          viewer,
+          41519.6,
+          31428.3,
+          false,
+          true,
+          MAPPING_WITHHELD,
         ]);
       }
     }
@@ -723,7 +820,16 @@ liveDescribe("PC-4 §12: the Overview and the Schedule module carry no BOQ figur
       const mine = parsed(explained.text).data;
       const theirs = parsed(full.text).data;
       if (readsCost) {
-        expect([viewer, mine]).toEqual([viewer, theirs]);
+        // The forecast without its per-activity cost (E1); the narrative the
+        // BOQ reader's, except that its cost paragraph says which activities
+        // are over budget is not available — never "no activity is".
+        expect([viewer, mine.forecast]).toEqual([viewer, forecastWithoutMapping(theirs.forecast)]);
+        expect([viewer, { ...mine.narrative, cost: undefined }]).toEqual([viewer, { ...theirs.narrative, cost: undefined }]);
+        expect([viewer, mine.narrative.cost]).toEqual([
+          viewer,
+          `${theirs.narrative.cost} Which activities are over budget is not available to you (mapping details).`,
+        ]);
+        expect([viewer, mine.degraded, mine.reason, mine.message]).toEqual([viewer, theirs.degraded, theirs.reason, theirs.message]);
       } else {
         expect(mine.forecast).toEqual(forecastWithoutMoney(theirs.forecast));
         expect(mine.narrative.cost).toBe("The cost figures are not available to you on this project.");
@@ -986,21 +1092,148 @@ liveDescribe("PC-4 §12: the Overview and the Schedule module carry no BOQ figur
       const list = Array.isArray(listed) ? listed : listed.items;
       expect([viewer, criticalIds(list)]).toEqual([viewer, criticalIds(readerList)]);
       expect([viewer, keyPaths(list, MAPPING_KEYS)]).toEqual([viewer, []]);
-      // The forecast: the same critical path; for a member who reads neither
-      // the BOQ nor the cost module, no activity's cost basis or level, no
-      // list of the activities over budget and no EAC basis — nothing the
-      // count could be read off. (A cost reader keeps each activity's budget,
-      // the Cost module's figure, by the owner's budget tier.)
+      // The forecast: the same critical path; for every member without BOQ
+      // read — cost readers included (owner decision E1) — no activity's
+      // budget, cost basis or level and no list or tally of the activities
+      // over budget: nothing the count could be read off. A reader of
+      // neither the BOQ nor the cost module loses the EAC basis too.
       const forecast = (await api.get(at("/forecast"), viewerAuth)).body.data;
       expect([viewer, criticalIds(forecast.activities)]).toEqual([viewer, criticalIds(readerForecast.activities)]);
-      if (!readsCost) {
-        const costs = [...forecast.activities, ...forecast.schedule.topRisks].map((activity) => activity.cost);
-        expect([viewer, keyPaths(costs, new Set(["basis", "level"]))]).toEqual([viewer, []]);
-        expect([viewer, costs.every((cost) => cost.withheld === true && cost.reason === FORECAST_COST_WITHHELD)]).toEqual([viewer, true]);
-        expect([viewer, keyPaths(forecast.cost, new Set(["topRisks", "eacBasis", "atRisk"]))]).toEqual([viewer, []]);
-        expect([viewer, unmappedOffForecast(forecast)]).toEqual([viewer, 0]);
-        expect([viewer, forecast.cost.withheld, forecast.cost.reason]).toEqual([viewer, true, FORECAST_COST_WITHHELD]);
-      }
+      const costs = [...forecast.activities, ...forecast.schedule.topRisks].map((activity) => activity.cost);
+      expect([viewer, keyPaths(costs, new Set(["basis", "level", "budget", "projected", "overrun"]))]).toEqual([viewer, []]);
+      const reason = readsCost ? MAPPING_WITHHELD : FORECAST_COST_WITHHELD;
+      expect([viewer, costs.every((cost) => cost.withheld === true && cost.reason === reason)]).toEqual([viewer, true]);
+      expect([viewer, keyPaths(forecast.cost, new Set(readsCost ? ["topRisks", "atRisk"] : ["topRisks", "eacBasis", "atRisk"]))]).toEqual([viewer, []]);
+      expect([viewer, unmappedOffForecast(forecast)]).toEqual([viewer, 0]);
+      expect([viewer, forecast.cost.withheld, forecast.cost.reason, forecast.cost.activityCostWithheld]).toEqual(
+        readsCost ? [viewer, undefined, undefined, true] : [viewer, true, FORECAST_COST_WITHHELD, undefined],
+      );
+      // Nor the schedule's per-activity budget, which is as good a badge.
+      expect([viewer, keyPaths(schedule.activities, new Set(ACTIVITY_BUDGET_KEYS))]).toEqual([viewer, []]);
     }
+  });
+
+  it("the reviewer's differential: one approved allocation moved from a critical to a non-critical activity changes nothing in any answer a member without BOQ read receives — cost readers included — while the BOQ reader sees it move (E1)", async () => {
+    // Last in this file. Two activities alike in everything but their
+    // criticality — the same dates, duration, progress (none), engineers and
+    // cost-ledger row (committed 12000, nothing spent) — so no project total
+    // depends on which of them carries the allocation.
+    const twin = async (name, activityCode) => {
+      const created = await post(at("/activities"), {
+        name,
+        activityCode,
+        duration: 5,
+        startDate: "2026-03-02",
+        endDate: "2026-03-06",
+        engineerIds: [live.user.id, members.siteEngineer.id],
+      });
+      expect([created.status, created.body?.error]).toEqual([201, undefined]);
+      return created.body.data.id;
+    };
+    const critical = await twin("Pour slab west", "A130");
+    const floating = await twin("Pour slab east", "A140");
+    // Criticality set by key on these two rows of this LiveTest organisation.
+    await prisma.activity.update({ where: { id: critical }, data: { isCritical: true, totalFloat: 0 } });
+    await prisma.activity.update({ where: { id: floating }, data: { isCritical: false, totalFloat: 5 } });
+    for (const activityId of [critical, floating]) {
+      await prisma.costRecord.create({ data: { projectId: project.id, activityId, committed: 12000, budget: 0, forecast: 0 } });
+    }
+    // One approved allocation of a new row (40 m3 at 250 = 10000) to the
+    // critical activity: under the commitments, so it is also over budget.
+    const slab = await post(at("/boq/items"), { code: "1.3", description: "Concrete in slab", quantity: 40, unit: "m3", rate: 250 });
+    expect([slab.status, slab.body?.error]).toEqual([201, undefined]);
+    const allocationsRoute = at("/activity-boq-allocations");
+    const allocation = await post(allocationsRoute, { boqItemId: slab.body.data.item.id, activityId: critical, quantity: 40 });
+    expect([allocation.status, allocation.body?.error]).toEqual([201, undefined]);
+    for (const step of ["submit", "approve"]) {
+      const moved = await post(`${allocationsRoute}/${allocation.body.data.id}/${step}`, {});
+      expect([step, moved.status, moved.body?.error]).toEqual([step, 200, undefined]);
+    }
+
+    // Every answer the owner names, as each member receives it. The EV
+    // report is also asked at an ad hoc cutoff after both periods (both are
+    // locked by now, and a locked period answers with its stored snapshot).
+    const answers = [
+      ["schedule", "get", at("/schedule")],
+      ["activities", "get", at("/activities")],
+      ["activity (critical)", "get", at(`/activities/${critical}`)],
+      ["activity (non-critical)", "get", at(`/activities/${floating}`)],
+      ["forecast", "get", at("/forecast")],
+      ["forecast/explain", "post", at("/forecast/explain")],
+      ["EV report", "get", at("/reports/ev")],
+      ["EV report (ad hoc cutoff)", "get", at("/reports/ev?cutoffDate=2026-06-30")],
+      ["health", "get", at("/health")],
+      ["setup-readiness", "get", at("/setup-readiness")],
+      ["workspace home", "get", "/api/v1/projects/workspace-dashboard"],
+      // ... and the Cost module's own answers that state an activity's
+      // allocation: each cost record's budget, the budget reconciliation.
+      ["cost records", "get", at("/cost")],
+      ["cost summary", "get", at("/cost/summary")],
+      ["budget reconciliation", "get", at("/budget/reconciliation")],
+    ];
+    const capture = async (headers) => {
+      const result = {};
+      for (const [name, method, route] of answers) {
+        const response = method === "post" ? await api.post(route, {}, headers) : await api.get(route, headers);
+        result[name] = { status: response.status, body: JSON.parse(unstampedDashboard(response.text)) };
+      }
+      return result;
+    };
+    const everyone = { reader: auth(), ...Object.fromEntries(Object.entries(viewers()).map(([viewer, { user }]) => [viewer, as(user)])) };
+    const before = {};
+    for (const [viewer, headers] of Object.entries(everyone)) before[viewer] = await capture(headers);
+
+    // The move: the one allocation, by its key, after proving it is this
+    // LiveTest organisation's (its project's organisation, by name).
+    const row = await prisma.activityBoqAllocation.findUnique({
+      where: { id: allocation.body.data.id },
+      select: { id: true, activityId: true, status: true, project: { select: { orgId: true, org: { select: { name: true } } } } },
+    });
+    expect([row.activityId, row.status, row.project.orgId, /^LiveTest [0-9a-f-]{36}$/.test(row.project.org.name)]).toEqual([
+      critical,
+      "approved",
+      live.org.id,
+      true,
+    ]);
+    await prisma.activityBoqAllocation.update({ where: { id: row.id }, data: { activityId: floating } });
+
+    const after = {};
+    for (const [viewer, headers] of Object.entries(everyone)) after[viewer] = await capture(headers);
+
+    // The BOQ reader sees the allocation move: the budget changes activity,
+    // and so does the activity over budget.
+    const budgetOf = (capture, id) => capture.schedule.body.data.activities.find((activity) => activity.id === id).budget;
+    expect([budgetOf(before.reader, critical), budgetOf(before.reader, floating)]).toEqual([10000, 0]);
+    expect([budgetOf(after.reader, critical), budgetOf(after.reader, floating)]).toEqual([0, 10000]);
+    const overBudget = (capture) => capture.forecast.body.data.cost.topRisks.map((activity) => activity.id);
+    expect([overBudget(before.reader), overBudget(after.reader)]).toEqual([[critical], [floating]]);
+    expect(before.reader["EV report (ad hoc cutoff)"].body).not.toEqual(after.reader["EV report (ad hoc cutoff)"].body);
+    const recordBudgetOf = (capture, id) => capture["cost records"].body.data.rows.find((record) => record.activityId === id).budget;
+    expect([recordBudgetOf(before.reader, critical), recordBudgetOf(after.reader, critical), recordBudgetOf(after.reader, floating)]).toEqual([10000, 0, 10000]);
+    const reconciledOf = (capture, id) => capture["budget reconciliation"].body.data.activities.find((row) => row.activityId === id).boqBudget;
+    expect([reconciledOf(before.reader, critical), reconciledOf(after.reader, floating)]).toEqual([10000, 10000]);
+
+    // Everyone without BOQ read: not one byte of any answer moves.
+    for (const viewer of Object.keys(viewers())) {
+      for (const [name] of answers) {
+        expect([viewer, name, after[viewer][name]]).toEqual([viewer, name, before[viewer][name]]);
+      }
+      // (and the answers were answers: the cost reader's EV report included)
+      expect([viewer, before[viewer].schedule.status, before[viewer].forecast.status]).toEqual([viewer, 200, 200]);
+    }
+    expect(before.costController["EV report (ad hoc cutoff)"].status).toBe(200);
+    expect(before.siteEngineer["EV report (ad hoc cutoff)"].status).toBe(403);
+    // The Cost module's answers to a cost reader without BOQ read: the
+    // records without their budget, the reconciliation without any
+    // activity's allocation — and saying so.
+    for (const viewer of ["costController", "planningEngineer", "pm"]) {
+      const { rows } = before[viewer]["cost records"].body.data;
+      expect([viewer, rows.length > 0, rows.filter((record) => "budget" in record || "generatedBudget" in record)]).toEqual([viewer, true, []]);
+      expect([viewer, before[viewer]["cost summary"].body.data.records.filter((record) => "budget" in record)]).toEqual([viewer, []]);
+      const reconciliation = before[viewer]["budget reconciliation"].body.data;
+      expect([viewer, reconciliation.activityBudgetsWithheld, reconciliation.activityBudgetsReason, "mismatches" in reconciliation]).toEqual([viewer, true, MAPPING_WITHHELD, false]);
+      expect([viewer, reconciliation.activities.filter((row) => "boqBudget" in row || "activityBudget" in row || "difference" in row)]).toEqual([viewer, []]);
+    }
+    expect(before.siteEngineer["cost records"].status).toBe(403);
   });
 });

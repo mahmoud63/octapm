@@ -683,7 +683,7 @@ export function ForecastPanel({ projectId }: { projectId: string }) {
               className='text-sm text-muted-foreground'
               data-testid='uat-forecast-cost-risks-withheld'
             >
-              — {cost.reason ?? COST_FIGURES_WITHHELD}
+              — {cost.activityCostReason ?? cost.reason ?? COST_FIGURES_WITHHELD}
             </p>
           ) : cost.topRisks.length === 0 ? (
             <p className='text-sm text-muted-foreground'>

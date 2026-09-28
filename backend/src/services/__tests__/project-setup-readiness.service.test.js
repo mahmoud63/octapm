@@ -835,4 +835,72 @@ describe("project setup readiness service", () => {
       ]),
     );
   });
+
+  // Owner decision E2 (2026-09-28): the baseline gate agrees with the lock —
+  // a bill with no in-scope value is refused like no bill.
+  const approvedWithBill = (rows, summary) => {
+    const approvedRevision = {
+      id: "revision-2",
+      label: "Rev A",
+      status: "approved",
+      isActive: true,
+      activityCount: 1,
+      approvedAt: new Date("2026-02-01T00:00:00.000Z"),
+      baselinedAt: null,
+    };
+    mockPrisma.boqItem.findMany.mockResolvedValue(rows);
+    mockBuildAllocationSummary.mockResolvedValue(summary);
+    mockPrisma.activity.findMany.mockResolvedValue([
+      {
+        id: "activity-1",
+        name: "Foundations",
+        isMilestone: false,
+        isCritical: true,
+        assignments: [{ id: "assignment-1" }],
+        progressMethod: { id: "method-1", method: "quantity" },
+        predecessorLinks: [],
+      },
+    ]);
+    mockPrisma.scheduleRevision.findFirst.mockReset();
+    mockPrisma.scheduleRevision.findFirst
+      .mockResolvedValueOnce(approvedRevision)
+      .mockResolvedValueOnce(approvedRevision)
+      .mockResolvedValueOnce(null);
+    mockPrisma.costRecord.count.mockResolvedValue(1);
+    mockPrisma.activityCostLoading.count.mockResolvedValue(1);
+    mockPrisma.reportingPeriod.count.mockResolvedValue(1);
+    return setupReadinessService.getSetupReadiness({ orgId: "org-1", projectId: "project-1" });
+  };
+
+  it("keeps the baseline gate shut on a token bill — only a not-applicable row, or only an optional row — naming the missing step (E2)", async () => {
+    for (const [rule, summary] of [
+      ["not_applicable", { totalBoqAmount: 100, notApplicableAmount: 100, approvedAllocatedAmount: 0, pendingAllocatedAmount: 0, unallocatedAmount: 0 }],
+      ["optional", { totalBoqAmount: 100, approvedAllocatedAmount: 0, pendingAllocatedAmount: 0, unallocatedAmount: 100, optionalUnallocatedAmount: 100 }],
+    ]) {
+      const result = await approvedWithBill([{ id: "boq-1", qty: 10, amount: 100, mappingRule: rule }], summary);
+      expect([rule, result.gates.baseline.ready, result.summary.readyForBaseline]).toEqual([rule, false, false]);
+      const blocker = result.gates.baseline.blockers.find((entry) => entry.code === "BOQ_NO_IN_SCOPE_VALUE");
+      expect([rule, blocker]).toEqual([
+        rule,
+        expect.objectContaining({
+          stepKey: "boq_upload",
+          severity: "blocking",
+          message:
+            "The bill has no in-scope value to map: every priced row is marked not applicable or optional. Mark the rows that belong to the schedule as required (Project Controls › Mapping), map them, then lock the baseline.",
+        }),
+      ]);
+    }
+  });
+
+  it("opens the baseline gate on a mixed bill — the in-scope row fully mapped beside a not-applicable row (E2)", async () => {
+    const result = await approvedWithBill(
+      [
+        { id: "boq-1", qty: 10, amount: 100, mappingRule: "required" },
+        { id: "boq-2", qty: 1, amount: 50, mappingRule: "not_applicable" },
+      ],
+      { totalBoqAmount: 150, notApplicableAmount: 50, approvedAllocatedAmount: 100, pendingAllocatedAmount: 0, unallocatedAmount: 0 },
+    );
+    expect(result.gates.baseline.blockers.map((entry) => entry.code)).toEqual([]);
+    expect(result.gates.baseline.ready).toBe(true);
+  });
 });

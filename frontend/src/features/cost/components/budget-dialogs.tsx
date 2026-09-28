@@ -313,11 +313,19 @@ export function BudgetAllocationDialog({
               if (!line) return
               try {
                 const suggestion = await suggest.mutateAsync(line.id)
+                // Read off the BOQ allocations: withheld by the server from
+                // a member who may not read the BOQ (owner decision E1).
+                if (suggestion.withheld) {
+                  toast.info(
+                    `No suggestion: ${suggestion.reason ?? 'Mapping details unavailable to you'}`
+                  )
+                  return
+                }
                 setRows(
                   suggestion.items.map((item) => ({
                     activityId: item.activityId,
                     weight: String(item.weight),
-                    source: suggestion.basis,
+                    source: suggestion.basis ?? 'manual',
                   }))
                 )
                 toast.success(
@@ -947,6 +955,19 @@ export function BudgetReconciliationDialog({
                   : `Off by ${formatMoney(data.totals.difference)}`}
               </Badge>
             </div>
+            {data.activityBudgetsWithheld && (
+              // Each activity's BOQ allocation, and the budget and
+              // difference built from it, are withheld by the server from a
+              // member who may not read the BOQ (owner decision E1).
+              <p
+                className='text-xs text-muted-foreground'
+                data-testid='uat-budget-reconciliation-activities-withheld'
+              >
+                BOQ budget, activity budget and difference: —{' '}
+                {data.activityBudgetsReason ??
+                  'Mapping details unavailable to you'}
+              </p>
+            )}
             <div className='overflow-x-auto rounded-md border'>
               <table className='w-full text-xs'>
                 <thead className='bg-muted/40'>
@@ -964,7 +985,7 @@ export function BudgetReconciliationDialog({
                     <tr
                       key={row.activityId}
                       className={
-                        Math.abs(row.difference) > 0.01
+                        Math.abs(row.difference ?? 0) > 0.01
                           ? 'bg-destructive/5'
                           : ''
                       }
@@ -976,21 +997,27 @@ export function BudgetReconciliationDialog({
                         {row.name}
                       </td>
                       <td className='p-2 text-right tabular-nums'>
-                        {formatMoney(row.boqBudget)}
+                        {row.boqBudget === undefined
+                          ? '—'
+                          : formatMoney(row.boqBudget)}
                       </td>
                       <td className='p-2 text-right tabular-nums'>
                         {formatMoney(row.approvedChanges)}
                       </td>
                       <td className='p-2 text-right tabular-nums'>
-                        {formatMoney(row.activityBudget)}
+                        {row.activityBudget === undefined
+                          ? '—'
+                          : formatMoney(row.activityBudget)}
                       </td>
                       <td className='p-2 text-right tabular-nums'>
                         {formatMoney(row.budgetFromLines)}
                       </td>
                       <td
-                        className={`p-2 text-right tabular-nums ${Math.abs(row.difference) > 0.01 ? 'font-medium text-destructive' : ''}`}
+                        className={`p-2 text-right tabular-nums ${Math.abs(row.difference ?? 0) > 0.01 ? 'font-medium text-destructive' : ''}`}
                       >
-                        {formatMoney(row.difference)}
+                        {row.difference === undefined
+                          ? '—'
+                          : formatMoney(row.difference)}
                       </td>
                     </tr>
                   ))}

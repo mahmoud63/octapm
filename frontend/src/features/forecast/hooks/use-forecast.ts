@@ -50,10 +50,12 @@ export interface ForecastActivity {
   score: number
   level: ForecastLevel
   reasons: string[]
-  // Present only for a reader of the BOQ or the cost module (§12). For
-  // anyone else the whole cost is withheld — its basis and level too, which
-  // say whether the activity has an approved allocation (owner decision,
-  // 2026-09-28) — and it carries only `withheld` and the server's reason.
+  // Whole only for a reader of the BOQ (§12): the budget is the activity's
+  // approved allocation, and the projection, overrun, basis and level are
+  // built from it. A cost reader without BOQ read keeps only `actual` and
+  // `committed` (the cost ledger's), with `withheld` and the server's reason
+  // (owner decision E1, 2026-09-28); anyone else gets `withheld` and the
+  // reason alone.
   cost: {
     budget?: number
     actual?: number
@@ -108,7 +110,8 @@ export interface ProjectForecast {
   } | null
   /** The EV cutoff SPI, CPI and EAC were measured through (lib/ev-cutoff). */
   earnedValueCutoff?: EvCutoff | null
-  // As on each activity: the money only for a BOQ or cost reader (§12).
+  // The project's money only for a BOQ or cost reader (§12); what each
+  // activity is given, as on ForecastActivity above.
   cost: {
     budget?: number
     /** The revised BAC the EAC was computed from (the EV report's). */
@@ -123,13 +126,16 @@ export interface ProjectForecast {
     overrunPct?: number | null
     actual?: number
     // The activities over budget, and their tally by level, only for a BOQ
-    // or cost reader: an activity can be over only a budget it has, so the
-    // list is read off the mapping. Anyone else gets `withheld` and why.
+    // reader: an activity can be over only a budget it has, so the list is
+    // read off the mapping. A cost reader without BOQ read gets
+    // `activityCostWithheld` and why (E1); anyone else `withheld` and why.
     counts: { atRisk?: Record<ForecastLevel, number>; lines: number }
     topRisks?: ForecastActivity[]
     budgetLines: ForecastBudgetLine[]
     withheld?: true
     reason?: string
+    activityCostWithheld?: true
+    activityCostReason?: string
   } | null
   summary: { scheduleLevel: ForecastLevel; costLevel: ForecastLevel } | null
   dataQuality: string[]

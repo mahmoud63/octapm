@@ -55,11 +55,33 @@ const COST = { boq: false, budget: true };
 const NEITHER = { boq: false, budget: false };
 
 describe("the forecast's cost view and the mapping (owner decision, 2026-09-28)", () => {
-  it("a BOQ or cost reader receives the forecast exactly as built — the same object", () => {
-    for (const access of [BOQ, COST]) {
-      const forecast = built();
-      expect(withheldForecast(forecast, access)).toBe(forecast);
+  it("a BOQ reader receives the forecast exactly as built — the same object", () => {
+    const forecast = built();
+    expect(withheldForecast(forecast, BOQ)).toBe(forecast);
+  });
+
+  it("a cost reader without BOQ read keeps the project's cost and the budget lines, and no activity's budget, projection, basis or level, nor the list or tally of the activities over budget (E1)", () => {
+    const forecast = built();
+    const answer = withheldForecast(forecast, COST);
+    for (const row of [...answer.activities, ...answer.schedule.topRisks]) {
+      const own = forecast.activities.find((activity) => activity.id === row.id);
+      expect([row.id, row.cost]).toEqual([
+        row.id,
+        { actual: own.cost.actual, committed: own.cost.committed, withheld: true, reason: "Mapping details unavailable to you" },
+      ]);
     }
+    const { topRisks, counts, ...projectCost } = forecast.cost;
+    expect(answer.cost).toEqual({
+      ...projectCost,
+      counts: { lines: 1 },
+      activityCostWithheld: true,
+      activityCostReason: "Mapping details unavailable to you",
+    });
+    // Nothing tells a mapped activity from an unmapped one.
+    expect(answer.activities.filter((row) => row.isCritical && "basis" in row.cost)).toEqual([]);
+    expect(answer.schedule.counts).toEqual(forecast.schedule.counts);
+    expect(forecastCostWithheld(answer)).toBe(false);
+    expect(forecast).toEqual(built());
   });
 
   it("a member who reads neither is given no activity's cost basis or level — nothing that tells a mapped activity from an unmapped one", () => {

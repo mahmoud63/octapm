@@ -47,6 +47,9 @@ const fmtUSD = (value: number) =>
 
 const toNum = (value: string) => Number(value) || 0
 
+// The server's reason beside a record budget it withholds (owner decision E1).
+const MAPPING_DETAILS_WITHHELD = 'Mapping details unavailable to you'
+
 const editableFields: Array<
   | 'labour'
   | 'material'
@@ -395,6 +398,12 @@ export function CostDashboard({
                   const current = isEditing
                     ? ({ ...row, ...draft } as CostRecord)
                     : row
+                  // The record's budget is its activity's approved BOQ
+                  // allocation: withheld by the server from a member who may
+                  // not read the BOQ (owner decision E1). A dash and why —
+                  // and no variance built from a budget this member was not
+                  // given, never one read against 0.
+                  const budgetWithheld = row.budget === undefined
                   const variance =
                     (Number(current.budget) || 0) -
                     (Number(current.forecast) || 0)
@@ -413,7 +422,14 @@ export function CostDashboard({
                       {editableFields.map((field) => (
                         <Fragment key={field}>
                           <td className='p-2 text-right'>
-                            {isEditing &&
+                            {field === 'budget' && budgetWithheld ? (
+                              <span
+                                className='text-xs text-muted-foreground'
+                                data-testid='uat-cost-record-budget-withheld'
+                              >
+                                — {MAPPING_DETAILS_WITHHELD}
+                              </span>
+                            ) : isEditing &&
                             field !== 'actual' &&
                             !(field === 'committed' && row.committedDerived) ? (
                               <Input
@@ -463,11 +479,17 @@ export function CostDashboard({
                           )}
                         </Fragment>
                       ))}
-                      <td
-                        className={`p-2 text-right text-xs font-semibold ${variance < 0 ? 'text-red-600' : 'text-green-600'}`}
-                      >
-                        {fmtUSD(variance)}
-                      </td>
+                      {budgetWithheld ? (
+                        <td className='p-2 text-right text-xs text-muted-foreground'>
+                          —
+                        </td>
+                      ) : (
+                        <td
+                          className={`p-2 text-right text-xs font-semibold ${variance < 0 ? 'text-red-600' : 'text-green-600'}`}
+                        >
+                          {fmtUSD(variance)}
+                        </td>
+                      )}
                       {canUpdateCost && (
                         <td className='p-2 text-right'>
                           {isEditing ? (

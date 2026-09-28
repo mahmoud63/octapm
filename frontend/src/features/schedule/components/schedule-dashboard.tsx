@@ -67,7 +67,11 @@ interface Props {
   initialTarget?: ProjectSetupTarget
 }
 
-// A budget withheld from this member (no BOQ or cost access) reads as a dash.
+// A budget withheld from this member reads as a dash: an activity's budget
+// when they may not read the BOQ (owner decision E1), with the server's
+// reason beside it; the revision's total when they read neither the BOQ nor
+// the cost module.
+const MAPPING_DETAILS_WITHHELD = 'Mapping details unavailable to you'
 const fmtUSD = (n: number | null | undefined) =>
   n
     ? '$' + Number(n).toLocaleString('en-US', { maximumFractionDigits: 0 })
@@ -1139,7 +1143,20 @@ export function ScheduleDashboard({
                       {formatActivityDependencies(a)}
                     </td>
                     <td className='p-2 text-right text-xs'>
-                      {a.budget ? fmtUSD(a.budget) : '—'}
+                      {a.budget === undefined ? (
+                        // Withheld by the server from a member who may not
+                        // read the BOQ, cost readers included (E1).
+                        <span
+                          className='text-muted-foreground'
+                          data-testid='uat-schedule-activity-budget-withheld'
+                        >
+                          — {MAPPING_DETAILS_WITHHELD}
+                        </span>
+                      ) : a.budget ? (
+                        fmtUSD(a.budget)
+                      ) : (
+                        '—'
+                      )}
                     </td>
                     <td className='p-2 text-center'>
                       <ActivityStatusBadge status={a.status} />

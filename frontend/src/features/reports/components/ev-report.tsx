@@ -95,6 +95,11 @@ type EvReportResponse = {
   totalBudget: number | null
   sCurve?: Record<string, string | number | null>[]
   activityBreakdown?: EvActivityBreakdownRow[]
+  // Withheld by the server from a member who may not read the BOQ, cost
+  // readers included (owner decision E1): each row's budget is the
+  // activity's approved allocation and the rows are ordered by it.
+  activityBreakdownWithheld?: true
+  activityBreakdownReason?: string
   alerts: {
     spiAlert?: boolean
     cpiAlert?: boolean
@@ -362,6 +367,8 @@ export function EvReport({ projectId, readiness, onNavigate }: Props) {
     totalBudget,
     sCurve,
     activityBreakdown,
+    activityBreakdownWithheld,
+    activityBreakdownReason,
     alerts,
     reporting,
     sourceSummary,
@@ -723,88 +730,100 @@ export function EvReport({ projectId, readiness, onNavigate }: Props) {
 
       <div>
         <h3 className='mb-2 font-semibold'>Top Activities by Budget</h3>
-        <div className='rounded-lg border'>
-          <Table>
-            <TableHeader className='bg-muted/50'>
-              <TableRow>
-                {[
-                  'ID',
-                  'Name',
-                  'Budget',
-                  'PV',
-                  'EV',
-                  'AC',
-                  'Actual Through',
-                  'AC Source',
-                  '%',
-                  'Status',
-                  'Critical',
-                ].map((h) => (
-                  <TableHead key={h} className='px-3'>
-                    {h}
-                  </TableHead>
-                ))}
-              </TableRow>
-            </TableHeader>
-
-            <TableBody>
-              {(activityBreakdown || []).map((row) => (
-                <TableRow
-                  key={row.activityId}
-                  className={
-                    row.isCritical
-                      ? 'bg-destructive/10 hover:bg-destructive/15'
-                      : ''
-                  }
-                >
-                  <TableCell className='px-3 font-mono text-xs'>
-                    {row.activityId}
-                  </TableCell>
-                  <TableCell className='max-w-[220px] truncate px-3'>
-                    {row.name}
-                  </TableCell>
-                  <TableCell className='px-3'>{fmt(row.budget)}</TableCell>
-                  <TableCell className='px-3'>{fmt(row.pv)}</TableCell>
-                  <TableCell className='px-3 text-primary'>
-                    {fmt(row.ev)}
-                  </TableCell>
-                  <TableCell className='px-3 text-muted-foreground'>
-                    {fmt(row.ac)}
-                  </TableCell>
-                  <TableCell className='px-3 text-xs text-muted-foreground'>
-                    {row.officialActualThroughDate
-                      ? formatLongDate(row.officialActualThroughDate)
-                      : '-'}
-                  </TableCell>
-                  <TableCell className='px-3'>
-                    <Badge variant='outline' className='text-xs'>
-                      {row.actualCostSource ===
-                      'cost_record.actual_through_date'
-                        ? 'official'
-                        : 'missing'}
-                    </Badge>
-                  </TableCell>
-                  <TableCell className='px-3'>{row.pct}%</TableCell>
-                  <TableCell className='px-3'>
-                    <Badge
-                      variant='outline'
-                      className={statusBadgeClass(row.status)}
-                    >
-                      {row.status}
-                    </Badge>
-                  </TableCell>
-                  <TableCell className='px-3'>
-                    {row.isCritical ? (
-                      <Badge variant='destructive'>Yes</Badge>
-                    ) : (
-                      '—'
-                    )}
-                  </TableCell>
+        {activityBreakdownWithheld ? (
+          // Withheld by the server (owner decision E1): which activities
+          // carry the budget is read off the BOQ mapping. A dash and the
+          // reason — never an empty table that reads as "none".
+          <p
+            className='text-sm text-muted-foreground'
+            data-testid='uat-ev-activity-breakdown-withheld'
+          >
+            — {activityBreakdownReason ?? 'Mapping details unavailable to you'}
+          </p>
+        ) : (
+          <div className='rounded-lg border'>
+            <Table>
+              <TableHeader className='bg-muted/50'>
+                <TableRow>
+                  {[
+                    'ID',
+                    'Name',
+                    'Budget',
+                    'PV',
+                    'EV',
+                    'AC',
+                    'Actual Through',
+                    'AC Source',
+                    '%',
+                    'Status',
+                    'Critical',
+                  ].map((h) => (
+                    <TableHead key={h} className='px-3'>
+                      {h}
+                    </TableHead>
+                  ))}
                 </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </div>
+              </TableHeader>
+
+              <TableBody>
+                {(activityBreakdown || []).map((row) => (
+                  <TableRow
+                    key={row.activityId}
+                    className={
+                      row.isCritical
+                        ? 'bg-destructive/10 hover:bg-destructive/15'
+                        : ''
+                    }
+                  >
+                    <TableCell className='px-3 font-mono text-xs'>
+                      {row.activityId}
+                    </TableCell>
+                    <TableCell className='max-w-[220px] truncate px-3'>
+                      {row.name}
+                    </TableCell>
+                    <TableCell className='px-3'>{fmt(row.budget)}</TableCell>
+                    <TableCell className='px-3'>{fmt(row.pv)}</TableCell>
+                    <TableCell className='px-3 text-primary'>
+                      {fmt(row.ev)}
+                    </TableCell>
+                    <TableCell className='px-3 text-muted-foreground'>
+                      {fmt(row.ac)}
+                    </TableCell>
+                    <TableCell className='px-3 text-xs text-muted-foreground'>
+                      {row.officialActualThroughDate
+                        ? formatLongDate(row.officialActualThroughDate)
+                        : '-'}
+                    </TableCell>
+                    <TableCell className='px-3'>
+                      <Badge variant='outline' className='text-xs'>
+                        {row.actualCostSource ===
+                        'cost_record.actual_through_date'
+                          ? 'official'
+                          : 'missing'}
+                      </Badge>
+                    </TableCell>
+                    <TableCell className='px-3'>{row.pct}%</TableCell>
+                    <TableCell className='px-3'>
+                      <Badge
+                        variant='outline'
+                        className={statusBadgeClass(row.status)}
+                      >
+                        {row.status}
+                      </Badge>
+                    </TableCell>
+                    <TableCell className='px-3'>
+                      {row.isCritical ? (
+                        <Badge variant='destructive'>Yes</Badge>
+                      ) : (
+                        '—'
+                      )}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+        )}
       </div>
     </div>
   )

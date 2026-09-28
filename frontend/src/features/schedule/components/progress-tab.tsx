@@ -83,7 +83,8 @@ const DEFAULT_MILESTONES = [
 
 const PROGRESS_ASSIGNMENT_OVERRIDE_ROLES = new Set(['pm', 'planning_eng'])
 
-// A budget withheld from this member (no BOQ or cost access) reads as a dash.
+// A budget withheld from this member (no BOQ read — owner decision E1) reads
+// as a dash, with the server's reason beside it where a row states it.
 const fmtUSD = (n: number | undefined) =>
   n === undefined
     ? '—'
@@ -448,9 +449,9 @@ export function ProgressTab({ activities, projectId }: Props) {
 
     return { totalBudget, ev: evValue, pv, ac, spi, cpi, missingActualCount }
   }, [selectableActivities])
-  // The server withholds the activity budgets from a member who may read
-  // neither the BOQ nor the cost module; every estimate here is built from
-  // them, so none is shown rather than a row of zeros.
+  // The server withholds the activity budgets from a member who may not
+  // read the BOQ, cost readers included (owner decision E1); every estimate
+  // here is built from them, so none is shown rather than a row of zeros.
   const budgetsWithheld = selectableActivities.some(
     (activity) => activity.budget === undefined
   )
@@ -666,7 +667,10 @@ export function ProgressTab({ activities, projectId }: Props) {
                   </div>
                   <p className='text-xs text-muted-foreground'>
                     {activity.category || '-'} - {activity.duration}d - Budget{' '}
-                    {fmtUSD(activity.budget)} - Approved {activity.pctComplete}%
+                    {fmtUSD(activity.budget)}
+                    {activity.budget === undefined &&
+                      ' (Mapping details unavailable to you)'}{' '}
+                    - Approved {activity.pctComplete}%
                   </p>
                 </div>
 

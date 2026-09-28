@@ -601,6 +601,15 @@ const ERROR_CODE_CATALOG = Object.freeze({
     message:
       "BOQ required before baseline lock: upload the BOQ (BOQ page), then map it to the schedule and lock the baseline.",
   },
+  // Owner decision E2 (2026-09-28): its sibling — a bill exists, but none
+  // of its priced rows is in scope for mapping (every one is not applicable
+  // or optional), so there is nothing to map and nothing to lock.
+  BOQ_SCOPE_REQUIRED_FOR_BASELINE: {
+    status: 400,
+    category: "boq",
+    message:
+      "BOQ required before baseline lock: the bill has no in-scope value to map; mark the rows that belong to the schedule as required (Project Controls › Mapping), map them, then lock the baseline.",
+  },
   // BOQ ↔ activity mapping (PC-3).
   MAPPING_NOT_APPLICABLE: {
     status: 409,

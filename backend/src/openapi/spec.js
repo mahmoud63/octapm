@@ -284,13 +284,13 @@ const signedMoney = {
     "Signed monetary value stored or computed at Decimal(18,2) precision.",
 };
 const nonNegativeNumber = { type: "number", minimum: 0 };
-// §12: the bill's figures on the schedule and the activities go only to a
-// caller who may read the BOQ; the budgets built from them to a caller who
-// may read the BOQ or the cost module. Absent (never zeroed) for anyone else.
+// §12: the bill's figures on the schedule and the activities — and every
+// per-activity budget built from them, cost readers included (owner decision
+// E1, 2026-09-28) — go only to a caller who may read the BOQ. Absent (never
+// zeroed) for anyone else. The project's totals built from them are stated
+// where they sit (a caller who may read the BOQ or the cost module).
 const BOQ_READERS_ONLY = " Present only for a caller who may read the BOQ (boq:read); omitted, not zeroed, for anyone else.";
-const BUDGET_READERS_ONLY = " Present only for a caller who may read the BOQ or the cost module (boq:read or cost:read); omitted for anyone else.";
 const boqFigure = (schema, what) => ({ ...schema, description: what + BOQ_READERS_ONLY });
-const budgetFigure = (what) => ({ ...money, description: what + BUDGET_READERS_ONLY });
 const percent = { type: "number", minimum: 0, maximum: 100 };
 
 const components = {
@@ -863,6 +863,7 @@ const components = {
         "BOQ_REVISION_NOT_CURRENT",
         "BOQ_REVISION_NOT_FOUND",
         "BOQ_REQUIRED_FOR_BASELINE",
+        "BOQ_SCOPE_REQUIRED_FOR_BASELINE",
         "BOQ_VALIDATION_FAILED",
         "CARD_DECLINED",
         "CHANGE_ORDER_APPROVED_LOCKED",
@@ -4822,8 +4823,8 @@ const components = {
       baselineFinishDate: nullableDateString,
       predecessors: { type: "string", nullable: true },
       dependencies: arrayOf(ref("ActivityDependency")),
-      budget: budgetFigure("The activity budget: on GET /schedule, the approved BOQ allocation value; on the activity endpoints, the stored activity budget."),
-      generatedBudget: budgetFigure("The budget the generator or the import gave the activity (GET /schedule)."),
+      budget: boqFigure(money, "The activity budget: on GET /schedule, the approved BOQ allocation value; on the activity endpoints, the stored activity budget. Per activity and read off the mapping, so withheld from a cost reader without boq:read too (owner decision E1, 2026-09-28)."),
+      generatedBudget: boqFigure(money, "The budget the generator or the import gave the activity (GET /schedule); withheld like budget."),
       allocatedBoqQuantity: boqFigure(nonNegativeNumber, "Approved BOQ allocation quantity."),
       allocatedBoqAmount: boqFigure(money, "Approved BOQ allocation value."),
       allocatedBoqWeight: boqFigure(nonNegativeNumber, "Approved BOQ allocation weight (% of the bill)."),
@@ -4854,7 +4855,7 @@ const components = {
       revision: {
         ...ref("GenericObject"),
         description:
-          "The schedule revision. unallocatedBoqAmount, and the BOQ value figures in readiness.checks[].details (totalBoqAmount, allocatableBoqAmount, approvedAllocatedAmount, pendingAllocatedAmount, unallocatedAmount, optionalUnallocatedAmount, notApplicableAmount), are present only for a caller who may read the BOQ; totalBudget, generatedTotalBudget, projectSummary.totalBudget and wbs[].budget only for a caller who may read the BOQ or the cost module. Check keys, verdicts, messages, ready and blockingCount are the same for every caller.",
+          "The schedule revision. unallocatedBoqAmount, and the BOQ value figures in readiness.checks[].details (totalBoqAmount, allocatableBoqAmount, approvedAllocatedAmount, pendingAllocatedAmount, unallocatedAmount, optionalUnallocatedAmount, notApplicableAmount), are present only for a caller who may read the BOQ, and so are the generator's per-activity and per-WBS-node budgets (snapshotJson.activities[].budget, wbs[].budget); the project totals totalBudget, generatedTotalBudget and projectSummary.totalBudget only for a caller who may read the BOQ or the cost module. Check keys, verdicts, messages, ready and blockingCount are the same for every caller.",
       },
       candidateRevision: {
         ...ref("GenericObject"),
@@ -5158,7 +5159,12 @@ const components = {
           type: "string",
           description: "What the sCurve's EV points are; for a snapshot stored before EV was given only at the cutoff, that its earlier months repeat the cutoff's EV and are not a measured history.",
         },
-        activityBreakdown: arrayOf(ref("EarnedValueActivityBreakdown")),
+        activityBreakdown: {
+          ...arrayOf(ref("EarnedValueActivityBreakdown")),
+          description: "The twenty activities with the largest approved allocation, by size. Present only for a caller who may read the BOQ (owner decision E1, 2026-09-28); omitted for anyone else, with activityBreakdownWithheld and activityBreakdownReason.",
+        },
+        activityBreakdownWithheld: { type: "boolean", enum: [true], description: "Present (true) when activityBreakdown is withheld from this caller." },
+        activityBreakdownReason: { type: "string", description: "Why activityBreakdown is withheld: \"Mapping details unavailable to you\"." },
         alerts: ref("GenericObject"),
         official: { type: "boolean", enum: [true] },
       },
@@ -5177,7 +5183,6 @@ const components = {
         "sourceSummary",
         "basisWarnings",
         "officialDataInputs",
-        "activityBreakdown",
         "alerts",
         "official",
       ],
@@ -7816,7 +7821,7 @@ add(
     summary:
       "Get active project schedule, CPM rollups, and critical path explanations.",
     description:
-      "Every schedule reader receives the programme, its criticality included (isCritical, totalFloat, the critical path). The bill's figures on it (each activity's allocatedBoqQuantity, allocatedBoqAmount and allocatedBoqWeight, and its approvedAllocationCount — the mapping badge, read off the allocations; the revision's unallocatedBoqAmount; the BOQ value figures in the allocations readiness check) are present only for a caller who may read the BOQ, and the budgets (activity budget and generatedBudget, revision totalBudget and generatedTotalBudget) only for a caller who may read the BOQ or the cost module. A withheld figure is omitted, never zeroed.",
+      "Every schedule reader receives the programme, its criticality included (isCritical, totalFloat, the critical path). The bill's figures on it (each activity's allocatedBoqQuantity, allocatedBoqAmount and allocatedBoqWeight, and its approvedAllocationCount — the mapping badge, read off the allocations; the revision's unallocatedBoqAmount; the BOQ value figures in the allocations readiness check) are present only for a caller who may read the BOQ, and so are the per-activity budgets built from the mapping (each activity's budget and generatedBudget, the generator's per-activity and per-WBS-node budgets) — reading the cost module does not override this (owner decision E1, 2026-09-28). The project totals (revision totalBudget and generatedTotalBudget) go to a caller who may read the BOQ or the cost module. A withheld figure is omitted, never zeroed.",
     operationId: "getProjectSchedule",
     parameters: projectParams,
     permissions: modulePermission("schedule", "read"),
@@ -7979,7 +7984,7 @@ add(
 
 // Owner decision D5: which readiness checks each gate needs.
 const READINESS_GATES =
-  "readiness.ready and readiness.blockingCount answer for the approval, which judges the revision's own logic (predecessor logic, critical path, date sanity); readiness.baselineReady and readiness.baselineBlockingCount answer for the baseline lock, which also needs a BOQ and its allocation coverage of the active activities. Each check's requiredFor names the gates it guards (\"approval\", \"baseline\"); the BOQ allocations check guards the baseline only, and on a staged revision it says the bill's value is mapped after the activation. Each failing check carries fix { where, inline, next, text, permission } — what puts it right and the page that offers it, by where the revision stands: a staged revision's own logic is corrected at its source and imported again or regenerated (Schedule › Update Schedule) or, under review, rejected; an active revision's on Schedule › Gantt › Edit or by Recalculate CPM (Schedule › More actions); coverage on Project Controls › Mapping; the BOQ itself on the BOQ page. permission is the module.action the step needs (schedule.create, schedule.update, schedule.approve, boq.create); a passing check has fix null. The first check, boq_present (label \"BOQ\", requiredFor [\"baseline\"], details {}), is the rule the lock enforces with 400 BOQ_REQUIRED_FOR_BASELINE: on a project with no active BOQ item it fails, so baselineReady is false and baselineBlockingCount counts it, and its fix is { where: \"BOQ page\", next: \"upload the BOQ (BOQ page)\", permission: \"boq.create\" } — named before any schedule or mapping step (the coverage check, which passes vacuously on an empty bill, no longer stands alone). It says only whether a bill exists, never a count or a value, and ready (the approval) does not include it. GET /projects/{projectId}/setup-readiness does not repeat it as a schedule blocker: its BOQ step names the upload.";
+  "readiness.ready and readiness.blockingCount answer for the approval, which judges the revision's own logic (predecessor logic, critical path, date sanity); readiness.baselineReady and readiness.baselineBlockingCount answer for the baseline lock, which also needs a BOQ and its allocation coverage of the active activities. Each check's requiredFor names the gates it guards (\"approval\", \"baseline\"); the BOQ allocations check guards the baseline only, and on a staged revision it says the bill's value is mapped after the activation. Each failing check carries fix { where, inline, next, text, permission } — what puts it right and the page that offers it, by where the revision stands: a staged revision's own logic is corrected at its source and imported again or regenerated (Schedule › Update Schedule) or, under review, rejected; an active revision's on Schedule › Gantt › Edit or by Recalculate CPM (Schedule › More actions); coverage on Project Controls › Mapping; the BOQ itself on the BOQ page. permission is the module.action the step needs (schedule.create, schedule.update, schedule.approve, boq.create); a passing check has fix null. The first check, boq_present (label \"BOQ\", requiredFor [\"baseline\"], details {}), is the rule the lock enforces with 400 BOQ_REQUIRED_FOR_BASELINE: on a project with no active BOQ item it fails, so baselineReady is false and baselineBlockingCount counts it, and its fix is { where: \"BOQ page\", next: \"upload the BOQ (BOQ page)\", permission: \"boq.create\" } — named before any schedule or mapping step (the coverage check, which passes vacuously on an empty bill, no longer stands alone). It also fails, with the rule the lock enforces with 400 BOQ_SCOPE_REQUIRED_FOR_BASELINE (owner decision E2, 2026-09-28), when the bill has no in-scope value: no active row whose mapping rule is neither not_applicable nor optional with an amount above zero. Its message then says the bill has no in-scope value to map, and its fix is { where: \"Project Controls › Mapping\", next: \"mark the rows that belong to the schedule as required (Project Controls › Mapping)\", permission: \"boq.update\" }. It says only whether such a bill exists, never a count or a value, and ready (the approval) does not include it. GET /projects/{projectId}/setup-readiness does not repeat it as a schedule blocker: its BOQ step names the upload (NO_BOQ) or the missing in-scope value (BOQ_NO_IN_SCOPE_VALUE).";
 const APPROVAL_WITHOUT_COVERAGE =
   "Approval does not require BOQ allocations (owner decision D5): allocations are made to the active activities, which exist only once the approved revision is activated. SCHEDULE_NOT_READY at approval names only the revision's own failing checks.";
 const BASELINE_NEEDS_COVERAGE =
@@ -7987,7 +7992,7 @@ const BASELINE_NEEDS_COVERAGE =
 
 // Owner decision 2026-09-28: no baseline without a bill.
 const BASELINE_NEEDS_BOQ =
-  "A project with no BOQ item is refused the baseline lock with 400 BOQ_REQUIRED_FOR_BASELINE (\"BOQ required before baseline lock: upload the BOQ (BOQ page), then map it to the schedule and lock the baseline.\"): in integrated Project Controls the steps run project structure, BOQ, schedule, mapping, validation, baseline lock, and the BOQ is named before any schedule refusal (REVISION_NOT_FOUND, INVALID_REVISION_STATUS, REVISION_NOT_ACTIVATED, SCHEDULE_NOT_READY, NO_ACTIVITIES). Nothing is written. Baselines locked before this rule are unchanged.";
+  "A project with no BOQ item is refused the baseline lock with 400 BOQ_REQUIRED_FOR_BASELINE (\"BOQ required before baseline lock: upload the BOQ (BOQ page), then map it to the schedule and lock the baseline.\"): in integrated Project Controls the steps run project structure, BOQ, schedule, mapping, validation, baseline lock, and the BOQ is named before any schedule refusal (REVISION_NOT_FOUND, INVALID_REVISION_STATUS, REVISION_NOT_ACTIVATED, SCHEDULE_NOT_READY, NO_ACTIVITIES). A project whose bill has no in-scope value — every active row is not_applicable or optional, or has no amount above zero — is refused the same way with 400 BOQ_SCOPE_REQUIRED_FOR_BASELINE (\"BOQ required before baseline lock: the bill has no in-scope value to map; mark the rows that belong to the schedule as required (Project Controls › Mapping), map them, then lock the baseline.\"; owner decision E2, 2026-09-28); a bill with in-scope rows fully mapped beside not-applicable rows locks. Nothing is written. Baselines locked before this rule are unchanged.";
 
 // The lifecycle refusals that name the step to take next.
 const BASELINE_NOT_ACTIVATED =
@@ -8185,7 +8190,7 @@ add(
     tag: "Activities",
     summary: "List project activities.",
     description:
-      "allocatedBoqQuantity, allocatedBoqAmount, allocatedBoqWeight and approvedAllocationCount are present only for a caller who may read the BOQ; budget only for a caller who may read the BOQ or the cost module. The same holds for every endpoint here that answers with an activity.",
+      "allocatedBoqQuantity, allocatedBoqAmount, allocatedBoqWeight, approvedAllocationCount and the per-activity budget and generatedBudget are present only for a caller who may read the BOQ; reading the cost module does not override this (owner decision E1, 2026-09-28). The same holds for every endpoint here that answers with an activity.",
     operationId: "listActivities",
     parameters: projectParams,
     permissions: modulePermission("schedule", "read"),
@@ -8563,7 +8568,7 @@ add(
 
 // §12, as utils/boq-figures applies it to the official EV report.
 const EV_REPORT_FIGURES =
-  "The report is a cost reader's: the budget (totalBudget, approvedAllocatedAmount) is every such caller's. unallocatedBoqAmount, and the BOQ value figures in readinessGate.blockers[].details and readinessGate.warnings[].details, are present only for a caller who may read the BOQ. Output only: a locked period's stored snapshot is not changed.";
+  "The report is a cost reader's: the project totals (totalBudget, approvedAllocatedAmount, pv, ev, ac, spi, cpi, eac, the S-curve) are every such caller's. unallocatedBoqAmount, and the BOQ value figures in readinessGate.blockers[].details and readinessGate.warnings[].details, are present only for a caller who may read the BOQ, and so is activityBreakdown (owner decision E1, 2026-09-28): each row's budget is the activity's approved allocation, its pv and ev are built from it, and the rows are the largest allocations in order of size. For a cost reader without boq:read activityBreakdown is omitted and the report carries activityBreakdownWithheld: true and activityBreakdownReason \"Mapping details unavailable to you\". Output only: a locked period's stored snapshot is not changed.";
 
 add(
   "/projects/{projectId}/reports/periods/{periodId}/lock",
@@ -10653,6 +10658,7 @@ const addGenericRoute = ({
   method,
   tag,
   summary,
+  description,
   operationId,
   parameters = projectParams,
   permissions = authenticatedOnly,
@@ -10668,6 +10674,7 @@ const addGenericRoute = ({
     operation({
       tag,
       summary,
+      description,
       operationId,
       parameters,
       permissions,
@@ -11609,11 +11616,16 @@ const costRecordListParams = [
   }),
 ];
 
+// Owner decision E1 (2026-09-28), as utils/boq-figures applies it to the Cost module.
+const COST_RECORD_BUDGETS =
+  "Each record's budget is its activity's approved BOQ allocation, and generatedBudget the budget first written on the record: both are present only for a caller who may read the BOQ — reading the cost module does not override this (owner decision E1, 2026-09-28). The cost ledger's own figures on each record (the cost categories, committed, actual, actualThroughDate, forecast) are every cost reader's.";
+
 [
   {
     method: "get",
     path: "/projects/{projectId}/cost",
     summary: "List activity cost records.",
+    description: COST_RECORD_BUDGETS,
     operationId: "listCostRecords",
     parameters: costRecordListParams,
     permissions: modulePermission("cost", "read"),
@@ -11623,6 +11635,7 @@ const costRecordListParams = [
     method: "get",
     path: "/projects/{projectId}/cost/summary",
     summary: "Get project cost summary.",
+    description: `${COST_RECORD_BUDGETS} The totals, byPhase, eac and budget (the budget register's) are the same for every cost reader.`,
     operationId: "getCostSummary",
     permissions: modulePermission("cost", "read"),
   },
@@ -14241,7 +14254,12 @@ const budgetReconciliationSchema = objectSchema({
   mismatches: arrayOf(ref("GenericObject")),
   underAllocatedLines: arrayOf(ref("GenericObject")),
   activitiesWithoutLines: arrayOf(ref("GenericObject")),
+  activityBudgetsWithheld: { type: "boolean", enum: [true], description: "Present (true) when each activity's allocation is withheld from this caller (owner decision E1)." },
+  activityBudgetsReason: { type: "string", description: "Why: \"Mapping details unavailable to you\"." },
 });
+// Owner decision E1 (2026-09-28), as utils/boq-figures applies it to the reconciliation.
+const BUDGET_RECONCILIATION_FIGURES =
+  "Each activity's boqBudget is its approved BOQ allocation, and its activityBudget and difference are built from it; they, mismatches and activitiesWithoutLines are present only for a caller who may read the BOQ — reading the cost module does not override this (owner decision E1, 2026-09-28). For anyone else each activity keeps activityId, name, code, approvedChanges and budgetFromLines, and the answer carries activityBudgetsWithheld: true and activityBudgetsReason \"Mapping details unavailable to you\". generatedAt, balanced, totals and underAllocatedLines are every cost reader's.";
 const budgetSnapshotSchema = objectSchema({
   id: uuid,
   projectId: uuid,
@@ -14331,6 +14349,7 @@ const budgetChangeOrderIdParam = pathParam("changeOrderId", "Change order UUID."
     method: "get",
     path: "/projects/{projectId}/budget/reconciliation",
     summary: "Σ activity budgets (approved BOQ allocations + approved change-order impacts) against Σ budget lines and their activity allocations.",
+    description: BUDGET_RECONCILIATION_FIGURES,
     operationId: "getBudgetReconciliation",
     parameters: projectParams,
     permissions: modulePermission("cost", "read"),
@@ -14340,6 +14359,7 @@ const budgetChangeOrderIdParam = pathParam("changeOrderId", "Change order UUID."
     method: "get",
     path: "/projects/{projectId}/budget/snapshots",
     summary: "Budget snapshots, newest first.",
+    description: `Each snapshot's reconciliation is answered as GET /budget/reconciliation answers it. ${BUDGET_RECONCILIATION_FIGURES}`,
     operationId: "listBudgetSnapshots",
     parameters: projectParams,
     permissions: modulePermission("cost", "read"),
@@ -14360,6 +14380,7 @@ const budgetChangeOrderIdParam = pathParam("changeOrderId", "Change order UUID."
     method: "get",
     path: "/projects/{projectId}/budget/snapshots/{snapshotId}",
     summary: "One snapshot with its frozen lines.",
+    description: `Its reconciliation is answered as GET /budget/reconciliation answers it. ${BUDGET_RECONCILIATION_FIGURES}`,
     operationId: "getBudgetSnapshot",
     parameters: [...projectParams, budgetSnapshotIdParam],
     permissions: modulePermission("cost", "read"),
@@ -14417,10 +14438,11 @@ const budgetChangeOrderIdParam = pathParam("changeOrderId", "Change order UUID."
     method: "get",
     path: "/projects/{projectId}/budget/lines/{lineId}/allocations/suggest",
     summary: "Suggested weights from approved BOQ allocations (items whose code starts with the cost code; else every allocated activity by approved budget).",
+    description: "The suggestion is read off the approved BOQ allocations — each activity's amount, its share, and which activities have any — so a caller who may not read the BOQ receives no suggestion (owner decision E1, 2026-09-28): items is empty, basis is omitted, and the answer carries withheld: true and reason \"Mapping details unavailable to you\".",
     operationId: "suggestBudgetLineAllocations",
     parameters: [...projectParams, budgetLineIdParam],
     permissions: modulePermission("cost", "read"),
-    responseSchema: objectSchema({ lineId: uuid, basis: { type: "string", enum: ["boq", "even"] }, items: arrayOf(objectSchema({ activityId: uuid, activity: nullableRef("GenericObject"), basisAmount: budgetMoney, weight: { type: "number" }, source: { type: "string" } })) }),
+    responseSchema: objectSchema({ lineId: uuid, basis: { type: "string", enum: ["boq", "even"] }, items: arrayOf(objectSchema({ activityId: uuid, activity: nullableRef("GenericObject"), basisAmount: budgetMoney, weight: { type: "number" }, source: { type: "string" } })), withheld: { type: "boolean", enum: [true], description: "Present (true) when the suggestion is withheld from this caller." }, reason: { type: "string", description: "Why the suggestion is withheld." } }),
   },
   {
     method: "post",
@@ -15166,7 +15188,7 @@ const forecastLevel = { type: "string", enum: ["high", "medium", "low"] };
 // §12, as utils/boq-figures applies it to the forecast.
 const FORECAST_FIGURES =
   "cost.eac is the official EV report's EAC — revised BAC / CPI when CPI > 0, otherwise the revised BAC — and cost.bac the revised BAC it was computed from (approved allocations plus approved budget revisions); cost.eacBasis says which rule applied (budget_over_cpi, budget_cpi_zero — CPI 0: actual cost with nothing earned, so the EAC is the revised BAC and dataQuality says so —, budget_no_cost_performance, no_budget; null without an EV report). The EV figures are the same answer the health card and the EV report give for the latest reporting period: when that period is locked, its stored snapshot (SPI, CPI, EAC and the cutoff instant and zone recorded at the lock), never a live recomputation. cost.projected is max(eac, bottomUp). earnedValueCutoff states the EV cutoff SPI, CPI and EAC were measured through: cutoffDate (the instant), cutoffLocalDate, timeZone, timeZoneSource and timeZoneNote (null when the project's own zone applied, otherwise the sentence also added to dataQuality: \"Project timezone is not configured; UTC is being used\" or the organisation default it names). dataQuality also carries the server's reason when SPI or CPI is missing or CPI is 0 (with no_budget: that there is no approved budget to earn against), and, when the EV cutoff is still ahead of asOf, that EV and AC are measured through today while PV runs to the cutoff. The explanation never calls a budget handed back (budget_cpi_zero, budget_no_cost_performance) or a project with no budget \"within budget\". " +
-  "The cost view's money (cost.budget, bac, eac, bottomUp, projected, overrun, overrunPct and actual; each activity's cost.budget, actual, committed, projected, overrun, overrunPct and reasons; each budget line's revised, committed, actual, forecast, overrun and overrunPct) is present only for a caller who may read the BOQ or the cost module. For anyone else nothing of the cost view that is read off the BOQ mapping is given either (owner decision, 2026-09-28): an activity has a cost basis, and a cost level above low, only when it has a budget (an approved allocation), so each activity's cost (in activities and schedule.topRisks) is replaced by { withheld: true, reason: \"Cost figures are not available to you\" }; cost.topRisks, cost.counts.atRisk and cost.eacBasis are omitted, and cost carries withheld: true and the same reason. The schedule view (levels, bases, counts, criticality), each budget line's name and level, cost.counts.lines, summary and dataQuality are the same for every caller.";
+  "The cost view's money (cost.budget, bac, eac, bottomUp, projected, overrun, overrunPct and actual; each activity's cost.budget, actual, committed, projected, overrun, overrunPct and reasons; each budget line's revised, committed, actual, forecast, overrun and overrunPct) is present only for a caller who may read the BOQ or the cost module. For anyone else nothing of the cost view that is read off the BOQ mapping is given either (owner decision, 2026-09-28): an activity has a cost basis, and a cost level above low, only when it has a budget (an approved allocation), so each activity's cost (in activities and schedule.topRisks) is replaced by { withheld: true, reason: \"Cost figures are not available to you\" }; cost.topRisks, cost.counts.atRisk and cost.eacBasis are omitted, and cost carries withheld: true and the same reason. A cost reader who may not read the BOQ keeps the project's cost (cost.budget, bac, eac, eacBasis, bottomUp, projected, overrun, overrunPct, actual) and the budget lines, but nothing per activity that an approved allocation gives (owner decision E1, 2026-09-28): each activity's cost (in activities and schedule.topRisks) keeps only actual and committed (the cost ledger's) with { withheld: true, reason: \"Mapping details unavailable to you\" }; cost.topRisks and cost.counts.atRisk are omitted, and cost carries activityCostWithheld: true and activityCostReason with the same reason. The schedule view (levels, bases, counts, criticality), each budget line's name and level, cost.counts.lines, summary and dataQuality are the same for every caller.";
 const forecastBlockerSchema = objectSchema({ type: { type: "string", enum: ["rfi", "submittal", "long_lead"] }, id: uuid, ref: { type: "string", nullable: true }, title: { type: "string" }, status: { type: "string", nullable: true }, due: nullableDateString, overdue: { type: "boolean" } });
 const forecastActivitySchema = objectSchema({ id: uuid, name: { type: "string" }, code: { type: "string", nullable: true }, isCritical: { type: "boolean" }, isMilestone: { type: "boolean" }, status: { type: "string" }, pct: { type: "number" }, expectedPct: { type: "number", nullable: true }, gap: { type: "number" }, velocity: { type: "number", nullable: true, description: "% per day from approved progress in the last 45 days." }, lastProgressAt: nullableDateString, plannedStart: { type: "string", nullable: true }, plannedFinish: { type: "string", nullable: true }, projectedFinish: { type: "string", nullable: true }, basis: { type: "string", enum: ["complete", "planned", "velocity", "pace", "overdue", "late_start"] }, slipDays: { type: "integer" }, impactDays: { type: "number" }, float: { type: "number", nullable: true }, floatBreached: { type: "boolean" }, stalledDays: { type: "integer" }, blockers: arrayOf(forecastBlockerSchema), score: { type: "integer" }, level: forecastLevel, reasons: arrayOf({ type: "string" }), cost: objectSchema({ budget: { type: "number" }, actual: { type: "number" }, committed: { type: "number" }, projected: { type: "number", nullable: true }, basis: { type: "string", nullable: true, description: "burn, forecast, commitments or budget; null when the activity has no budget. Omitted for a caller who reads neither the BOQ nor the cost module." }, overrun: { type: "number" }, overrunPct: { type: "number" }, level: { ...forecastLevel, description: "Omitted for a caller who reads neither the BOQ nor the cost module." }, reasons: arrayOf({ type: "string" }), withheld: { type: "boolean", description: "true when the activity's cost is withheld from this caller (it then carries only withheld and reason)." }, reason: { type: "string", description: "Why the cost is withheld." } }) });
 const forecastSchema = objectSchema({ available: { type: "boolean" }, reason: { type: "string", nullable: true }, asOf: dateString, schedule: nullableRef("GenericObject"), cost: nullableRef("GenericObject"), summary: nullableRef("GenericObject"), dataQuality: arrayOf({ type: "string" }), activities: arrayOf(forecastActivitySchema) });

@@ -12,7 +12,11 @@ export interface CostRecord {
   indirect: number
   overhead: number
   contingency: number
-  budget: number
+  // The activity's approved BOQ allocation, and the budget first written on
+  // the record: omitted by the server for a member who may not read the BOQ,
+  // cost readers included (owner decision E1, 2026-09-28).
+  budget?: number
+  generatedBudget?: number
   committed: number
   actual: number
   actualThroughDate: string | null

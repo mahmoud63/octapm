@@ -144,17 +144,23 @@ export interface BudgetReconciliation {
     unallocatedLines: number
     difference: number
   }
+  // Each activity's approved BOQ allocation (boqBudget), and the budget and
+  // difference built from it, with the lists read off them, are omitted by
+  // the server for a member who may not read the BOQ — cost readers included
+  // (owner decision E1) — who is told so (activityBudgetsWithheld, reason).
   activities: Array<{
     activityId: string
     name: string
     code: string | null
-    boqBudget: number
+    boqBudget?: number
     approvedChanges: number
-    activityBudget: number
+    activityBudget?: number
     budgetFromLines: number
-    difference: number
+    difference?: number
   }>
-  mismatches: Array<{ activityId: string; name: string; difference: number }>
+  mismatches?: Array<{ activityId: string; name: string; difference: number }>
+  activityBudgetsWithheld?: true
+  activityBudgetsReason?: string
   underAllocatedLines: Array<{
     id: string
     code: string | null
@@ -163,7 +169,7 @@ export interface BudgetReconciliation {
     allocatedWeight: number
     unallocatedAmount: number
   }>
-  activitiesWithoutLines: Array<{
+  activitiesWithoutLines?: Array<{
     activityId: string
     name: string
     code: string | null
@@ -193,7 +199,11 @@ export interface BudgetSnapshot {
 
 export interface AllocationSuggestion {
   lineId: string
-  basis: 'boq' | 'even'
+  // Omitted, with no items, when the suggestion (read off the BOQ
+  // allocations) is withheld from this member (owner decision E1).
+  basis?: 'boq' | 'even'
+  withheld?: true
+  reason?: string
   items: Array<{
     activityId: string
     activity: { id: string; name: string; code: string | null } | null

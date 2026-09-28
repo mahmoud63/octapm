@@ -448,9 +448,13 @@ test('the bill revision on the approval card, the strip figures as the services 
  * EAC. Every page renders without an error, a withheld figure reads as a
  * dash (never 0, $0k or NaN), and not one answer the browser receives on the
  * way carries a figure the server withholds from that person: no allocated
- * quantity, value or weight, no open or total bill value, no BOQ rows — and,
- * for the site engineer, no budget, EAC or projected cost built from the
- * bill either.
+ * quantity, value or weight, no open or total bill value, no BOQ rows, and —
+ * the cost controller included (owner decision E1, 2026-09-28) — no figure an
+ * allocation gives one activity: its budget, the generator's per-activity or
+ * per-WBS-node budget, its forecast cost, its row of the EV breakdown; each
+ * screen shows a dash and "Mapping details unavailable to you". For the site
+ * engineer, no project budget, EAC or projected cost built from the bill
+ * either.
  *
  * The project carries an active generated revision (the generator's budgets
  * and BOQ rows in its snapshot, a WBS with a budget) and a staged one under
@@ -525,6 +529,10 @@ const EV_MONEY_KEYS = ['ev', 'pv', 'ac']
 // among those over budget; the EAC's basis labels a withheld figure.
 const FORECAST_ACTIVITY_MAPPING_KEYS = new Set(['basis', 'level'])
 const FORECAST_COST_MAPPING_KEYS = new Set(['topRisks', 'atRisk', 'eacBasis'])
+// ... and, for a cost reader without BOQ read (owner decision E1): each
+// activity's budget and what is built from it; the project's cost stays.
+const FORECAST_ACTIVITY_BUDGET_KEYS = new Set(['budget', 'projected', 'overrun', 'overrunPct', 'basis', 'level', 'reasons'])
+const MAPPING_DETAILS_WITHHELD = 'Mapping details unavailable to you'
 type ForecastRow = { id: string; isCritical?: boolean; cost?: Record<string, unknown> }
 type ForecastAnswer = {
   activities?: ForecastRow[]
@@ -702,8 +710,12 @@ test('members who cannot read the BOQ: the Overview and every Schedule tab rende
       name: 'cost controller',
       email: setup.costController.email,
       readsCost: true,
-      withheld: new Set(BOQ_KEYS),
-      secrets: ['71793.5', '30273.9', '50456.5', '213.37', '1009.13'],
+      // ... and the generator's per-activity budget (owner decision E1).
+      withheld: new Set([...BOQ_KEYS, 'generatedBudget']),
+      // The fixing's allocation (20182.6) and the generator's budget for it
+      // (48662.99) are that activity's own figures (E1); the project's EV —
+      // the complete pour's allocation, 21337 — and the totals stay.
+      secrets: ['71793.5', '30273.9', '50456.5', '213.37', '1009.13', '20182.6', '48662.99'],
     },
   ]
 
@@ -714,6 +726,27 @@ test('members who cannot read the BOQ: the Overview and every Schedule tab rende
     page.on('pageerror', (error) => errors.push(error.message))
     const answers: { url: string; status: number; paths: string[]; secrets: string[] }[] = []
     const pending: Promise<void>[] = []
+    // The API requests still in flight. A tab's reads can start after the
+    // network first goes idle (a lazily loaded panel), and the next
+    // navigation would cancel them — seen as aborted requests in the API
+    // log — so the sweep would miss them. Each tab is left only once none
+    // has been in flight for a quiet second.
+    const inFlight = new Set<unknown>()
+    const isApi = (url: string) => url.includes('/api/v1/')
+    page.on('request', (request) => {
+      if (isApi(request.url())) inFlight.add(request)
+    })
+    page.on('requestfinished', (request) => inFlight.delete(request))
+    page.on('requestfailed', (request) => inFlight.delete(request))
+    const apiSettled = async () => {
+      let quietSince = Date.now()
+      const deadline = Date.now() + 30_000
+      while (Date.now() < deadline) {
+        if (inFlight.size) quietSince = Date.now()
+        else if (Date.now() - quietSince >= 1_000) return
+        await page.waitForTimeout(100)
+      }
+    }
     page.on('response', (response) => {
       const url = response.url()
       if (!url.includes('/api/v1/') || !(response.headers()['content-type'] ?? '').includes('json')) return
@@ -799,6 +832,17 @@ test('members who cannot read the BOQ: the Overview and every Schedule tab rende
       expect(rows.every((row) => row.cost?.withheld === true && row.cost?.reason === 'Cost figures are not available to you')).toBe(true)
       expect(keyPaths(forecastBody.data.cost, FORECAST_COST_MAPPING_KEYS), `${member.name}: the activities over budget`).toEqual([])
       expect(forecastBody.data.cost).toMatchObject({ withheld: true, reason: 'Cost figures are not available to you' })
+    } else {
+      // A cost reader without BOQ read (owner decision E1): the project's
+      // cost, and no activity's budget, projection, basis or level — each
+      // activity keeps the cost ledger's spend and commitments — and no list
+      // or tally of the activities over budget.
+      const rows = [...(forecastBody.data.activities ?? []), ...(forecastBody.data.schedule?.topRisks ?? [])]
+      expect(rows.length, 'the forecast lists the activities').toBeGreaterThanOrEqual(3)
+      expect(keyPaths(rows.map((row) => row.cost), FORECAST_ACTIVITY_BUDGET_KEYS), `${member.name}: an activity's budget`).toEqual([])
+      expect(rows.every((row) => row.cost?.withheld === true && row.cost?.reason === MAPPING_DETAILS_WITHHELD)).toBe(true)
+      expect(keyPaths(forecastBody.data.cost, new Set(['topRisks', 'atRisk'])), `${member.name}: the activities over budget`).toEqual([])
+      expect(forecastBody.data.cost).toMatchObject({ budget: 41519.6, activityCostWithheld: true, activityCostReason: MAPPING_DETAILS_WITHHELD })
     }
     await page.waitForLoadState('networkidle')
     await noBrokenFigure('overview')
@@ -871,6 +915,7 @@ test('members who cannot read the BOQ: the Overview and every Schedule tab rende
         timeout: 30_000,
       })
       await page.waitForLoadState('networkidle')
+      await apiSettled()
 
       if (tab === 'gantt') {
         await expect(page.getByTestId('primavera-gantt')).toContainText('Pour foundations')
@@ -878,19 +923,33 @@ test('members who cannot read the BOQ: the Overview and every Schedule tab rende
       if (tab === 'activities') {
         const pourRow = page.locator('tr', { hasText: 'Pour foundations' }).first()
         await expect(pourRow).toBeVisible()
+        // The activity's budget is its approved allocation: a dash and why,
+        // for both members (owner decision E1), never the figure or $0.
+        await expect(pourRow.getByTestId('uat-schedule-activity-budget-withheld')).toHaveText(`— ${MAPPING_DETAILS_WITHHELD}`)
+        await expect(pourRow).not.toContainText('21,337')
       }
-      if (tab === 'progress' && !member.readsCost) {
-        // Every live estimate there is built from the budgets: with them
-        // withheld none is shown, and the activity reads a dash.
-        await expect(page.getByText(/Budget —/).first()).toBeVisible({ timeout: 30_000 })
+      if (tab === 'progress') {
+        // Every live estimate there is built from the activity budgets,
+        // withheld from both members (owner decision E1): none is shown,
+        // and the activity reads a dash and why.
+        await expect(page.getByText(/Budget — \(Mapping details unavailable to you\)/).first()).toBeVisible({ timeout: 30_000 })
         await expect(page.getByText('SPI Est.')).toHaveCount(0)
         await expect(page.getByText(/Total budget considered/)).toHaveCount(0)
+      }
+      if (tab === 'ev' && member.readsCost) {
+        // The EV report's totals stay the cost reader's; its breakdown per
+        // activity is built from the allocations (owner decision E1): a
+        // dash and why, never an empty table.
+        await expect(page.getByTestId('uat-ev-activity-breakdown-withheld')).toHaveText(`— ${MAPPING_DETAILS_WITHHELD}`, { timeout: 30_000 })
       }
       if (tab === 'forecast') {
         const cost = page.getByTestId('uat-forecast-cost')
         await expect(cost).toBeVisible({ timeout: 30_000 })
         if (member.readsCost) {
           await expect(cost).not.toContainText('Cost figures are not available to you')
+          // Which activities are over budget is read off the mapping (E1).
+          await expect(page.getByTestId('uat-forecast-cost-risks-withheld')).toHaveText(`— ${MAPPING_DETAILS_WITHHELD}`)
+          await expect(page.getByText('No activity is projected over its budget.')).toHaveCount(0)
         } else {
           await expect(cost).toContainText('—')
           await expect(cost).toContainText('Cost figures are not available to you')
@@ -909,14 +968,11 @@ test('members who cannot read the BOQ: the Overview and every Schedule tab rende
       if (tab === 'wbs') {
         const row = page.getByTestId('uat-schedule-wbs-row-A')
         await expect(row).toBeVisible({ timeout: 30_000 })
-        if (member.readsCost) {
-          await expect(row).toContainText('$70,000')
-          await expect(page.getByTestId('uat-schedule-wbs-rollup')).toBeVisible()
-        } else {
-          // No budget to show: a dash in the row, no rollup of $0k bars.
-          await expect(row.locator('td').nth(3)).toHaveText('—')
-          await expect(page.getByTestId('uat-schedule-wbs-rollup')).toHaveCount(0)
-        }
+        // The generator's per-node budget is the bill spread over the
+        // programme, withheld from both members (owner decision E1): a dash
+        // in the row, no rollup of $0k bars.
+        await expect(row.locator('td').nth(3)).toHaveText('—')
+        await expect(page.getByTestId('uat-schedule-wbs-rollup')).toHaveCount(0)
       }
       if (tab === 'revisions') {
         // The staged revision: its row, then the revision itself, viewed.
@@ -933,6 +989,7 @@ test('members who cannot read the BOQ: the Overview and every Schedule tab rende
         await page.keyboard.press('Escape')
       }
       await noBrokenFigure(`schedule/${tab}`)
+      await apiSettled()
     }
 
     // The Activities list: the BOQ value column reads a dash.

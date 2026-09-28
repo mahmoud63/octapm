@@ -120,8 +120,9 @@ export interface Forecast {
     overrun?: number | null
     overrunPct?: number | null
     actual?: number | null
-    /** The tally of activities over budget is read off the mapping, so it too
-     * is present only for a BOQ or cost reader (owner decision, 2026-09-28). */
+    /** The tally of activities over budget is read off the mapping, so it is
+     * present only for a BOQ reader — a cost reader without BOQ read gets
+     * activityCostWithheld instead (owner decisions, 2026-09-28, E1). */
     counts?: { atRisk?: { high: number; medium: number; low: number }; lines: number }
     /** Set, with the server's sentence, when the money above was withheld. */
     withheld?: boolean
