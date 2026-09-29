@@ -6,6 +6,7 @@ const { normalizeBoqCode } = require('../utils/boq-code');
 const { addMoney, toMoneyNumber } = require('../utils/money');
 const approvalWorkflowService = require('./approval-workflow.service');
 const allocationService = require('./activity-boq-allocation.service');
+const { inBulkTransaction } = require('./notification.service');
 
 /**
  * Mapping-file import (mapping doc §5).
@@ -379,6 +380,9 @@ const applyImport = async ({ orgId, projectId, userId, file }) => {
   const batchId = crypto.randomUUID();
 
   const { plan, created, failed } = await prisma.$transaction(async (tx) => {
+    // One draft per row, inside one transaction: a bulk step's
+    // (notification.service inBulkTransaction).
+    inBulkTransaction(tx);
     const planned = await planImport({ projectId, rows }, tx);
     const done = [];
     const refused = [];
@@ -429,6 +433,11 @@ const applyImport = async ({ orgId, projectId, userId, file }) => {
  */
 const undoImportBatch = async ({ orgId, projectId, userId, batchId }) =>
   prisma.$transaction(async (tx) => {
+    // Two workflow transitions per draft row, each notifying the project's
+    // PMs, inside one transaction bounded by its timeout: who each notice
+    // reaches is read once for the whole undo (notification.service
+    // inBulkTransaction).
+    inBulkTransaction(tx);
     await ensureProject({ orgId, projectId }, tx);
     const rows = await tx.activityBoqAllocation.findMany({
       where: { projectId, importBatchId: batchId },

@@ -389,6 +389,38 @@ const serializeNotification = (notification) => ({
 const ensureNotificationModels = (tx) =>
   tx?.notification?.create && tx?.notificationPreference?.findMany;
 
+/*
+ * A bulk step's transaction — an import batch applied or undone, one
+ * workflow transition per row inside ONE interactive transaction, bounded by
+ * Prisma's timeout — fans a notice out for every row, and each fan-out read
+ * the same things again: the project's PMs, the people a row names (its
+ * creator, its submitter), their notification preferences and push devices,
+ * and whether each may read the BOQ. Such a step marks its transaction
+ * (inBulkTransaction), and inside it each of those is read once for the
+ * whole transaction: a transaction is one moment, and a bulk step changes
+ * none of them (closure review, 2026-09-28 — the undo of a 100-row batch ran
+ * past the timeout). Any other transaction reads them per fan-out, as before.
+ */
+const bulkTransactionMemos = new WeakMap();
+
+/** Marks `tx` (an interactive transaction's client) as a bulk step's; returns it. */
+const inBulkTransaction = (tx) => {
+  if (tx && typeof tx === "object" && tx !== prisma && !bulkTransactionMemos.has(tx)) {
+    bulkTransactionMemos.set(tx, new Map());
+  }
+  return tx;
+};
+
+/** `load()` once per key inside a bulk step's transaction; every time elsewhere. */
+const onceInBulkTransaction = (tx, key, load) => {
+  const memo = tx && typeof tx === "object" ? bulkTransactionMemos.get(tx) : null;
+  if (!memo) return load();
+  if (!memo.has(key)) memo.set(key, load());
+  return memo.get(key);
+};
+
+const idsKey = (ids) => [...ids].sort().join(",");
+
 const preferenceMapForUsers = async ({
   tx = prisma,
   orgId,
@@ -397,9 +429,11 @@ const preferenceMapForUsers = async ({
 }) => {
   if (!tx.notificationPreference?.findMany || !userIds.length) return new Map();
 
-  const rows = await tx.notificationPreference.findMany({
-    where: { orgId, userId: { in: userIds }, category },
-  });
+  const rows = await onceInBulkTransaction(tx, `preferences|${orgId}|${category}|${idsKey(userIds)}`, () =>
+    tx.notificationPreference.findMany({
+      where: { orgId, userId: { in: userIds }, category },
+    }),
+  );
 
   return rows.reduce((acc, row) => {
     acc.set(row.userId, serializePreference(row));
@@ -561,10 +595,12 @@ const resolveNotificationRecipients = async ({
       : { ...where, orgId };
 
   if (directIds.length) {
-    const users = await tx.user.findMany({
-      where: inThisWorkspace({ id: { in: directIds }, status: "active" }),
-      select,
-    });
+    const users = await onceInBulkTransaction(tx, `users|${orgId}|${idsKey(directIds)}`, () =>
+      tx.user.findMany({
+        where: inThisWorkspace({ id: { in: directIds }, status: "active" }),
+        select,
+      }),
+    );
     addUsersToMap(recipients, users, actorId);
   }
 
@@ -572,35 +608,41 @@ const resolveNotificationRecipients = async ({
   // are never matched, so a typo can no longer notify the wrong person.
   const refIds = refs.filter((ref) => isUuidLike(ref) && !directIds.includes(ref));
   if (refIds.length) {
-    const users = await tx.user.findMany({
-      where: inThisWorkspace({ status: "active", id: { in: refIds } }),
-      select,
-    });
+    const users = await onceInBulkTransaction(tx, `users|${orgId}|${idsKey(refIds)}`, () =>
+      tx.user.findMany({
+        where: inThisWorkspace({ status: "active", id: { in: refIds } }),
+        select,
+      }),
+    );
     addUsersToMap(recipients, users, actorId);
   }
 
   if (roleSet.size) {
     const roles = [...roleSet];
-    const orgRoleUsers = await tx.user.findMany({
-      where: homeInGoodStanding({ status: "active", role: { in: roles } }),
-      select,
-    });
+    const orgRoleUsers = await onceInBulkTransaction(tx, `roles|${orgId}|${idsKey(roles)}`, () =>
+      tx.user.findMany({
+        where: homeInGoodStanding({ status: "active", role: { in: roles } }),
+        select,
+      }),
+    );
     addUsersToMap(recipients, orgRoleUsers, actorId);
 
     if (projectId) {
-      const projectRoleUsers = await tx.user.findMany({
-        where: homeInGoodStanding({
-          status: "active",
-          projectAssignments: { some: { projectId } },
-        }),
-        select: {
-          ...select,
-          projectAssignments: {
-            where: { projectId },
-            select: { role: true },
+      const projectRoleUsers = await onceInBulkTransaction(tx, `project-members|${orgId}|${projectId}`, () =>
+        tx.user.findMany({
+          where: homeInGoodStanding({
+            status: "active",
+            projectAssignments: { some: { projectId } },
+          }),
+          select: {
+            ...select,
+            projectAssignments: {
+              where: { projectId },
+              select: { role: true },
+            },
           },
-        },
-      });
+        }),
+      );
       addUsersToMap(
         recipients,
         projectRoleUsers.filter((user) =>
@@ -675,6 +717,9 @@ const createNotifications = async ({
   // the words depend on what that person may read. `title` and `message`
   // stay the words everyone may read (the realtime badge event carries them).
   personalize = null,
+  // Who may read the BOQ, decided once per (person, project) for this
+  // fan-out (boqReaderFor); a caller that asks it too passes its own.
+  boqReader = boqReaderFor(tx),
 }) => {
   if (!ensureNotificationModels(tx) || !event || !title || !message) {
     return { created: 0, recipients: [] };
@@ -688,6 +733,7 @@ const createNotifications = async ({
     orgId,
     projectId,
     entityType,
+    boqReader,
     recipients: await resolveNotificationRecipients({
       tx,
       orgId,
@@ -718,10 +764,12 @@ const createNotifications = async ({
     .filter((id) => (preferenceByUser.get(id) || defaultPreferenceFor(category)).pushEnabled !== false);
   const pushDevices = new Set();
   if (pushCandidates.length && tx.pushSubscription?.findMany) {
-    const rows = await tx.pushSubscription.findMany({
-      where: { userId: { in: pushCandidates } },
-      select: { userId: true },
-    });
+    const rows = await onceInBulkTransaction(tx, `push|${idsKey(pushCandidates)}`, () =>
+      tx.pushSubscription.findMany({
+        where: { userId: { in: pushCandidates } },
+        select: { userId: true },
+      }),
+    );
     for (const row of rows) pushDevices.add(row.userId);
   }
 
@@ -1001,13 +1049,32 @@ const isBoqRecord = (entityType) => BOQ_RECORD_TYPES.includes(entityType);
 const mayReceive = async ({ orgId, userId, projectId, entityType, viewer = null }) =>
   !isBoqRecord(entityType) || mayReadBoq({ orgId, userId, projectId, viewer });
 
+/*
+ * Who may read the BOQ, decided once per (person, project) per fan-out — the
+ * recipients and their words ask the same answer — and once for the whole
+ * transaction inside a bulk step's (inBulkTransaction). Each answer resolves
+ * the person's principal and project access (a few queries); d52deae asked
+ * it for every recipient of every transition, twice, and a bulk undo ran out
+ * of its transaction's time (closure review, 2026-09-28).
+ */
+const boqReaderFor = (tx) => {
+  const answers = new Map();
+  return ({ orgId, userId, projectId }) => {
+    const key = `${orgId}|${userId}|${projectId}`;
+    if (!answers.has(key)) {
+      answers.set(key, onceInBulkTransaction(tx, `boq-read|${key}`, () => mayReadBoq({ orgId, userId, projectId })));
+    }
+    return answers.get(key);
+  };
+};
+
 /** The recipients who may receive a notification about this record, in order. */
-const recipientsWhoMayRead = async ({ orgId, projectId, entityType, recipients }) => {
+const recipientsWhoMayRead = async ({ orgId, projectId, entityType, recipients, boqReader = boqReaderFor(null) }) => {
   if (!isBoqRecord(entityType)) return recipients;
   const kept = [];
   // One at a time: the caller may hold a transaction's connection.
   for (const recipient of recipients) {
-    if (await mayReadBoq({ orgId, userId: recipient.id, projectId })) kept.push(recipient);
+    if (await boqReader({ orgId, userId: recipient.id, projectId })) kept.push(recipient);
   }
   return kept;
 };
@@ -1205,6 +1272,8 @@ const createWorkflowNotifications = async ({ tx = prisma, workflowEvent }) => {
   const withBoq = sameWords(plainWords, boqWords)
     ? null
     : workflowTexts({ config, words: boqWords, workflowEvent });
+  // One answer per recipient for the filter and the words alike.
+  const boqReader = boqReaderFor(tx);
 
   return createNotifications({
     tx,
@@ -1218,9 +1287,10 @@ const createWorkflowNotifications = async ({ tx = prisma, workflowEvent }) => {
     event: `workflow.${workflowEvent.action}`,
     title: plain.title,
     message: plain.message,
+    boqReader,
     personalize: withBoq
       ? async (recipient) =>
-          (await mayReadBoq({
+          (await boqReader({
             orgId: workflowEvent.orgId,
             userId: recipient.id,
             projectId: workflowEvent.projectId,
@@ -1946,6 +2016,7 @@ module.exports = {
   markAllRead,
   markNotificationRead,
   mayReceive,
+  inBulkTransaction,
   processPendingEmailDeliveries,
   readableNotification,
   readableNotifications,
