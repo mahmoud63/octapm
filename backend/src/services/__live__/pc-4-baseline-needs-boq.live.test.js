@@ -359,6 +359,12 @@ liveDescribe("PC-4: no schedule baseline without a BOQ (owner decision 2026-09-2
         message:
           "The bill has no in-scope value to map: every priced row is marked not applicable or optional. Mark the rows that belong to the schedule as required (Project Controls › Mapping), map them, then lock the baseline.",
       });
+      // The Overview's BOQ Upload card sends to where that step is taken —
+      // Project Controls › Mapping — not to the BOQ the project already has.
+      expect([rule, setup.steps.find((step) => step.key === "boq_upload").action]).toEqual([
+        rule,
+        { label: "Open Mapping", target: { module: "controls", child: "mapping" } },
+      ]);
     }
     // Nothing is written by any refusal.
     expect(await lockWrites(projectId)).toEqual(NOTHING);
@@ -443,6 +449,8 @@ liveDescribe("PC-4: no schedule baseline without a BOQ (owner decision 2026-09-2
         stepKey: "boq_upload",
         message: "The bill has no value to map: none of its rows is priced. Price its rows (BOQ page), map them to the schedule, then lock the baseline.",
       });
+      // Its card still opens the BOQ page, where the rows are priced.
+      expect([label, setup.steps.find((step) => step.key === "boq_upload").action.label]).toEqual([label, "Open BOQ"]);
     };
 
     // ── No revision, then the schedule imported, approved and activated:

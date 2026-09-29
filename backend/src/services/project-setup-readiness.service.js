@@ -1848,7 +1848,14 @@ const getSetupReadiness = async ({ orgId, projectId, canReadBoq = true, canReadS
       key: "boq_upload",
       label: "BOQ Upload",
       description: "Measured BOQ rows are loaded for schedule and cost setup.",
-      action: { label: "Open BOQ", target: TARGETS.boq },
+      // A bill whose priced rows are all out of scope for mapping is put right
+      // on Project Controls › Mapping, where the rows that belong to the
+      // schedule are marked required (BOQ_NO_IN_SCOPE_VALUE, owner decision
+      // E2) — the card sends there, not to the BOQ it already has.
+      action:
+        boqValueState === BOQ_STATE.OUT_OF_SCOPE
+          ? { label: "Open Mapping", target: TARGETS.mapping }
+          : { label: "Open BOQ", target: TARGETS.boq },
       requiredFor: ["baseline", "progress", "reporting"],
       complete: boqBlockers.filter(Boolean).length === 0,
       blockers: boqBlockers,
