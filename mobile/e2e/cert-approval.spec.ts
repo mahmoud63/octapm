@@ -144,6 +144,11 @@ test.describe('certification: the approval carries its own consequence', () => {
     await expect(page.getByTestId('workflow-respond-approve'), 'no approve button without the figure').toHaveCount(0)
     await expect(page.getByTestId('workflow-respond-reject'), 'and no reject either').toHaveCount(0)
     expect((await page.getByTestId('workflow-review-on-web').last().innerText()).replace(/\s+/g, ' ')).toContain('Review it on the web platform')
+    // The app may refetch the instance as the test ends; a handler still reading
+    // its fetched response when the context closes would throw 'Response has
+    // been disposed' in teardown (seen once in a full-suite run). Stop
+    // intercepting before teardown and drop any handler error from then on.
+    await page.unrouteAll({ behavior: 'ignoreErrors' })
   })
 
   test('the server decides who may answer, whatever the app shows', async ({ request }) => {
