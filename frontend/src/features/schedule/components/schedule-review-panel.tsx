@@ -101,10 +101,33 @@ const SETUP_STEPS_BEFORE_BASELINE: Record<string, string> = {
   schedule_approval: 'approve this revision (Schedule › Revisions)',
 }
 
-const setupStepNext = (blocker: ProjectSetupIssue | null) =>
-  blocker?.stepKey && !ALLOCATION_BLOCKER_CODES.has(blocker.code)
-    ? (SETUP_STEPS_BEFORE_BASELINE[blocker.stepKey] ?? null)
-    : null
+// The BOQ step's blockers each name their own step, in the words of the
+// schedule readiness's boq_present fix and of the lock's refusal: only a
+// project with no bill (NO_BOQ) is sent to the upload; a bill with no priced
+// row has its rows priced, and a bill whose priced rows are all out of scope
+// has the rows that belong to the schedule marked required (owner decision
+// E2) — never "upload the BOQ" for a bill the project already has.
+const BOQ_STEP_BY_BLOCKER: Record<string, string> = {
+  NO_BOQ: 'upload the BOQ (BOQ page)',
+  BOQ_HAS_NO_VALUE: "price the BOQ's rows (BOQ page)",
+  BOQ_NO_IN_SCOPE_VALUE:
+    'mark the rows that belong to the schedule as required (Project Controls › Mapping)',
+}
+
+const setupStepNext = (
+  blocker: ProjectSetupIssue | null,
+  boqPresentFix: CheckFix | null
+) => {
+  if (!blocker?.stepKey || ALLOCATION_BLOCKER_CODES.has(blocker.code)) {
+    return null
+  }
+  if (blocker.stepKey === 'boq_upload') {
+    // The server's own fix for the bill first; an unknown BOQ blocker falls
+    // through to the failing check's fix below, never to the upload.
+    return boqPresentFix?.next ?? BOQ_STEP_BY_BLOCKER[blocker.code] ?? null
+  }
+  return SETUP_STEPS_BEFORE_BASELINE[blocker.stepKey] ?? null
+}
 
 type CheckFix = NonNullable<
   NonNullable<ScheduleRevision['readiness']>['checks'][number]['fix']
@@ -137,6 +160,7 @@ function getNextActionLabel({
   staged,
   approvalFix,
   baselineFix,
+  boqPresentFix,
   setupBaselineBlocker,
 }: {
   status: ScheduleRevisionStatus
@@ -147,6 +171,8 @@ function getNextActionLabel({
   staged: boolean
   approvalFix: CheckFix | null
   baselineFix: CheckFix | null
+  /** The failing boq_present check's fix: the bill's own missing step. */
+  boqPresentFix: CheckFix | null
   /** The setup baseline gate's first blocker, when that gate refuses the lock. */
   setupBaselineBlocker: ProjectSetupIssue | null
 }) {
@@ -177,7 +203,9 @@ function getNextActionLabel({
   // Activated, but a setup step before the mapping is still open (a project
   // with no bill, say): that step first — its blocker is listed below.
   const setupNext =
-    status === 'approved' ? setupStepNext(setupBaselineBlocker) : null
+    status === 'approved'
+      ? setupStepNext(setupBaselineBlocker, boqPresentFix)
+      : null
   if (setupNext) return `Next: ${setupNext}, then lock baseline`
   // Activated: the bill's value is mapped to the active activities, then
   // the baseline is locked (owner decision D5).
@@ -330,6 +358,10 @@ export function ScheduleReviewPanel({
     )?.fix ?? null
   const approvalFix = failingFix('approval')
   const baselineFix = failingFix('baseline')
+  const boqPresentFix =
+    (readiness?.checks ?? []).find(
+      (check) => check.key === 'boq_present' && !check.passed && check.fix
+    )?.fix ?? null
   // Whether this member is offered each fix's step; beside one they are
   // not, the panel says who can.
   const fixOffered: Record<string, boolean> = {
@@ -459,6 +491,7 @@ export function ScheduleReviewPanel({
                 staged,
                 approvalFix,
                 baselineFix,
+                boqPresentFix,
                 setupBaselineBlocker: setupBaselineBlocked
                   ? (baselineBlockers[0] ?? null)
                   : null,
