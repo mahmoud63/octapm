@@ -127,6 +127,11 @@ export interface Forecast {
     /** Set, with the server's sentence, when the money above was withheld. */
     withheld?: boolean
     reason?: string
+    /** Set, with the server's sentence ("Mapping details unavailable to
+     * you"), for a cost reader without BOQ read: the project's money stays,
+     * each activity's cost and the activities over budget do not (E1). */
+    activityCostWithheld?: boolean
+    activityCostReason?: string
   } | null
   summary: { scheduleLevel: string | null; costLevel: string | null } | null
   /** The server's plain-language notes on what its figures cannot yet include. */

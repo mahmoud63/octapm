@@ -74,10 +74,50 @@ describe('Home', () => {
     expect(screen.getAllByText('—').length).toBeGreaterThan(0)
     expect(screen.getByTestId('pm-critical-driver')).toBeTruthy()
     expect(screen.getByText(/Unitised facade installation/)).toBeTruthy()
-    // "Cost lines at risk" counts the budget lines projected over (5), not
-    // the activities over budget (atRisk.high, 3).
-    expect(screen.getByTestId('count-cost-risk')).toHaveTextContent(/^5Cost lines at risk$/)
+    // Each count under its own accurate label (F3): the activities at high
+    // cost risk (atRisk.high, 3) and the budget lines projected over (5).
+    expect(screen.getByTestId('count-cost-risk')).toHaveTextContent(/^3Activities at high cost risk$/)
+    expect(screen.getByTestId('count-budget-lines')).toHaveTextContent(/^5Budget lines over budget$/)
     // A reader who receives the money is told no reason for a withholding.
+    expect(screen.queryByTestId('pm-status-cost-withheld')).toBeNull()
+    expect(screen.queryByTestId('pm-pulse-cost-withheld')).toBeNull()
+    expect(screen.queryByTestId('pm-cost-risk-withheld')).toBeNull()
+  })
+
+  // Marina Bay's forecast as the server sends it (owner F3, 2026-09-28): one
+  // activity at high cost risk, ten budget lines projected over.
+  const marinaBay = (cost: Record<string, unknown>) => ({
+    ...routes,
+    'GET /projects/p1/forecast': () => ({
+      status: 200,
+      body: envelope({
+        available: true,
+        asOf: '2026-09-28',
+        schedule: { plannedFinish: '2027-06-30', projectedFinish: '2027-07-21', slipDays: 21, basis: 'activities', spi: 0.93, cpi: 0.88, criticalDriver: null, counts: { activities: 64, open: 50, complete: 14, critical: 9, atRisk: { high: 4, medium: 6, low: 2 } } },
+        cost,
+        summary: { scheduleLevel: 'high', costLevel: 'high' },
+      }),
+    }),
+  })
+
+  it('a BOQ reader on Marina Bay sees 1 activity at high cost risk and 10 budget lines over budget, each under its own label (F3)', async () => {
+    fakeServer(marinaBay({ budget: 41200000, eac: 44900000, projected: 44900000, overrun: 3700000, overrunPct: 9, actual: 12800000, counts: { atRisk: { high: 1, medium: 2, low: 0 }, lines: 10 } }))
+    await renderScreen(<HomeScreen />)
+    expect(await screen.findByTestId('count-cost-risk')).toHaveTextContent(/^1Activities at high cost risk$/)
+    expect(screen.getByTestId('count-budget-lines')).toHaveTextContent(/^10Budget lines over budget$/)
+    expect(screen.getByTestId('count-at-risk')).toHaveTextContent(/^4Activities at high risk$/)
+    expect(screen.queryByTestId('pm-cost-risk-withheld')).toBeNull()
+  })
+
+  it("a cost reader without BOQ read on Marina Bay: the activity tile is a dash with the server's reason; the budget lines and the money stay (F3, E1)", async () => {
+    // What the server sends a cost reader who may not read the BOQ: no
+    // atRisk tally, activityCostWithheld and its sentence.
+    fakeServer(marinaBay({ budget: 41200000, eac: 44900000, projected: 44900000, overrun: 3700000, overrunPct: 9, actual: 12800000, counts: { lines: 10 }, activityCostWithheld: true, activityCostReason: 'Mapping details unavailable to you' }))
+    await renderScreen(<HomeScreen />)
+    expect(await screen.findByTestId('count-cost-risk')).toHaveTextContent(/^—Activities at high cost risk$/)
+    expect(screen.getByTestId('pm-cost-risk-withheld')).toHaveTextContent('— Mapping details unavailable to you')
+    expect(screen.getByTestId('count-budget-lines')).toHaveTextContent(/^10Budget lines over budget$/)
+    // The project's money is theirs: no reason is given for it.
     expect(screen.queryByTestId('pm-status-cost-withheld')).toBeNull()
     expect(screen.queryByTestId('pm-pulse-cost-withheld')).toBeNull()
   })
@@ -98,9 +138,11 @@ describe('Home', () => {
       }),
     })
     await renderScreen(<HomeScreen />)
-    // The budget lines over are the cost module's own and still sent.
-    const costRisk = await screen.findByTestId('count-cost-risk')
-    expect(costRisk).toHaveTextContent(/^5Cost lines at risk$/)
+    // The budget lines over are the cost module's own and still sent…
+    expect(await screen.findByTestId('count-budget-lines')).toHaveTextContent(/^5Budget lines over budget$/)
+    // …the activities at high cost risk are not: a dash, and the reason.
+    expect(screen.getByTestId('count-cost-risk')).toHaveTextContent(/^—Activities at high cost risk$/)
+    expect(screen.getByTestId('pm-cost-risk-withheld')).toHaveTextContent('— Cost figures are not available to you')
     expect(screen.getByTestId('count-critical')).toHaveTextContent(/3/)
     // The overrun is a dash, with the reason beside it…
     expect(await screen.findByText('Overrun')).toBeTruthy()

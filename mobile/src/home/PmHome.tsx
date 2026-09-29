@@ -44,6 +44,13 @@ export function PmHome({ projectId, currency, actions }: { projectId: string; cu
   // and the server's reason is said beside it, never an unexplained blank.
   const costWithheld = cost?.withheld === true
   const costReason = costWithheld ? (cost?.reason ?? 'Cost figures are not available to you') : null
+  // The activities at high cost risk are read off the BOQ mapping (each
+  // activity's budget is its approved allocation), so the server sends the
+  // tally only to a BOQ reader. A cost reader without BOQ read is told
+  // activityCostWithheld and why (E1); a member who reads neither, withheld
+  // and why. The tile is then a dash with the server's reason (F3).
+  const activityCostReason = cost?.activityCostWithheld === true ? (cost.activityCostReason ?? null) : costWithheld ? costReason : null
+  const activityCostHigh = activityCostReason ? null : (cost?.counts?.atRisk?.high ?? null)
   const totals = log.data?.totals ?? null
   const recent = useMemo(() => (photos.data?.items ?? []).slice(0, 12), [photos.data])
 
@@ -117,12 +124,19 @@ export function PmHome({ projectId, currency, actions }: { projectId: string; cu
                 items={[
                   { id: 'critical', label: 'On the critical path', value: String(schedule?.counts.critical ?? '—'), tone: (schedule?.counts.critical ?? 0) > 0 ? 'warning' : 'default', onPress: () => router.push('/activities') },
                   { id: 'at-risk', label: 'Activities at high risk', value: String(schedule?.counts.atRisk.high ?? '—'), tone: (schedule?.counts.atRisk.high ?? 0) > 0 ? 'error' : 'default', onPress: () => router.push('/activities') },
-                  // The budget lines by cost code projected over (the cost
-                  // module's own, which every reader of the forecast gets) —
-                  // not cost.counts.atRisk, which tallies activities.
-                  { id: 'cost-risk', label: 'Cost lines at risk', value: String(cost?.counts?.lines ?? '—'), tone: (cost?.counts?.lines ?? 0) > 0 ? 'error' : 'default' },
+                  // The activities over budget at a high level (cost.counts.
+                  // atRisk.high) — a BOQ reader's figure (F3).
+                  { id: 'cost-risk', label: 'Activities at high cost risk', value: activityCostHigh == null ? '—' : String(activityCostHigh), tone: (activityCostHigh ?? 0) > 0 ? 'error' : 'default' },
+                  // The budget lines by cost code projected over: the cost
+                  // module's own, which every reader of the forecast gets.
+                  { id: 'budget-lines', label: 'Budget lines over budget', value: String(cost?.counts?.lines ?? '—'), tone: (cost?.counts?.lines ?? 0) > 0 ? 'error' : 'default' },
                 ]}
               />
+              {activityCostReason ? (
+                <Text variant="caption" tone="muted" testID="pm-cost-risk-withheld">
+                  — {activityCostReason}
+                </Text>
+              ) : null}
               {schedule?.criticalDriver ? (
                 <Text testID="pm-critical-driver">
                   Longest slip: <Text style={styles.strong}>{schedule.criticalDriver.name}</Text>
