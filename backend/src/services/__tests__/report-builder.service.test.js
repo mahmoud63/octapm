@@ -236,4 +236,41 @@ describe("Phase 21D — integrity (release challenge, fifth pass)", () => {
     const admin = await service.getRunFile({ orgId: "org-1", user: { ...pm, isCompanyAdmin: true }, runId: "run-2", format: "pdf" });
     expect(admin.buffer.toString()).toBe("%PDF-private");
   });
+
+  it("withholds a cost record's budget, variance and CPI on a project where the caller may not read the BOQ — as cells, filters, sorts and aggregates — and leaves a BOQ reader's run as it was (E1)", async () => {
+    // p2's permission template takes the BOQ tool away; p1 is a BOQ reader's.
+    mockTemplates.resolveTemplateContext.mockImplementation(async ({ projectId }) => (projectId === "p2" ? { compiled: { noBoq: true } } : null));
+    mockTemplates.templateAllows.mockImplementation((template, { module }) => (template?.noBoq && module === "boq" ? false : null));
+    const record = (id, projectId, name) => ({ id, projectId, budget: 10000, forecast: 4000, actual: 5000, committed: 0, project: { id: projectId, name, currency: "USD" }, activity: { id: `a-${id}`, name: `Activity ${id}`, activityCode: null, wbsCode: null } });
+    mockPrisma.costRecord.findMany.mockResolvedValue([record("c1", "p1", "Tower"), record("c2", "p2", "Bridge")]);
+    const definition = { source: "cost_record", columns: ["activity.name", "budget", "forecast", "variance", "cpi"], sort: { field: "budget", dir: "desc" }, groupBy: "project.name", aggregates: [{ fn: "count" }, { fn: "sum", field: "budget" }, { fn: "max", field: "variance" }] };
+    const result = await service.runQuery({ orgId: "org-1", user: pm, definition });
+    const byId = Object.fromEntries(result.rows.map((row) => [row.id, row]));
+    expect(byId.c1).toEqual({ id: "c1", projectId: "p1", projectName: "Tower", "activity.name": "Activity c1", budget: 10000, forecast: 4000, variance: 6000, cpi: 2, "project.name": "Tower" });
+    expect(byId.c2).toEqual({ id: "c2", projectId: "p2", projectName: "Bridge", "activity.name": "Activity c2", budget: null, forecast: 4000, variance: null, cpi: null, "project.name": "Bridge", withheldColumns: ["budget", "variance", "cpi"] });
+    expect(result.groups).toEqual([
+      { key: "Bridge", label: "Bridge", count: 1, sum_budget: null, max_variance: null },
+      { key: "Tower", label: "Tower", count: 1, sum_budget: 10000, max_variance: 6000 },
+    ]);
+    expect(result.totals).toEqual({ count: 2, sum_budget: null, max_variance: null });
+    expect(result.withheld).toEqual({ columns: ["budget", "variance", "cpi"], reason: "Mapping details unavailable to you", projects: 1 });
+    expect(result.columns.filter((column) => column.withheld).map((column) => [column.key, column.withheldReason])).toEqual([["budget", "Mapping details unavailable to you"], ["variance", "Mapping details unavailable to you"], ["cpi", "Mapping details unavailable to you"]]);
+
+    // A filter on the budget is not sent to the database: it sees the withheld value.
+    mockPrisma.costRecord.findMany.mockClear();
+    const filtered = await service.runQuery({ orgId: "org-1", user: pm, definition: { ...definition, filters: [{ field: "budget", op: "gt", value: 0 }] } });
+    expect(mockPrisma.costRecord.findMany.mock.calls[0][0].where.AND).toEqual([]);
+    expect(filtered.rows.map((row) => row.id)).toEqual(["c1"]);
+
+    // A BOQ reader everywhere: the run as it always was.
+    mockTemplates.resolveTemplateContext.mockResolvedValue(null);
+    mockTemplates.templateAllows.mockReturnValue(null);
+    mockPrisma.costRecord.findMany.mockClear();
+    const reader = await service.runQuery({ orgId: "org-1", user: pm, definition: { ...definition, filters: [{ field: "budget", op: "gt", value: 0 }] } });
+    expect(mockPrisma.costRecord.findMany.mock.calls[0][0].where.AND).toEqual([{ budget: { gt: 0 } }]);
+    expect(reader.rows.every((row) => row.budget === 10000 && row.cpi === 2 && !("withheldColumns" in row))).toBe(true);
+    expect(reader.totals).toEqual({ count: 2, sum_budget: 20000, max_variance: 6000 });
+    expect("withheld" in reader).toBe(false);
+    expect(reader.columns.every((column) => !("withheld" in column))).toBe(true);
+  });
 });

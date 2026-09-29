@@ -24,7 +24,10 @@
  *     generator's per-activity or per-WBS-node budget), no forecast cost per
  *     activity (budget, projection, basis, level) and no list or tally of
  *     the activities over budget, no EV breakdown per activity, no
- *     allocation on a cost record or in the budget reconciliation.
+ *     allocation on a cost record or in the budget reconciliation — nor
+ *     through the report builder (an activity's budget; a cost record's
+ *     budget, variance and CPI: null, and said so, as cells, filters, sorts,
+ *     groupings, aggregates, exports and saved reports' runs).
  *   neither BOQ nor cost read: nor the project totals built from the bill
  *     (the revision's totals, the generator's total, the forecast's money,
  *     EV, PV, AC, BAC and EAC, a revision's total in its history).
@@ -68,6 +71,7 @@ const workspaceDashboardService = require("../workspace-dashboard.service");
 const costService = require("../cost.service");
 const budgetService = require("../budget.service");
 const { startApi } = require("./auth-live-kit");
+const ExcelJS = require("exceljs");
 
 // What a member without BOQ read must never receive, wherever it sits.
 const BOQ_KEYS = [
@@ -1476,6 +1480,206 @@ liveDescribe("PC-4 §12: the Overview and the Schedule module carry no BOQ figur
       // The activity itself — its name, its criticality — is every schedule reader's.
       const theirs = limited.body.data.activities.find((activity) => activity.id === mintedActivity.id);
       expect([viewer, theirs?.name, typeof theirs?.isCritical]).toEqual([viewer, "Minted pour", "boolean"]);
+    }
+  });
+
+  // The report builder reads the same records straight from the database:
+  // an activity's stored budget (a BOQ row's amount for the activity the row
+  // created, the generator's per-activity budget) and a cost record's stored
+  // budget (its activity's approved allocation when the record was made),
+  // with the variance and CPI computed from it (E1).
+  const reportDefinitions = () => ({
+    "activity budgets": { source: "activity", columns: ["name", "isCritical", "budget"], sort: { field: "name", dir: "asc" } },
+    "activity budget by criticality": { source: "activity", columns: ["name", "isCritical"], groupBy: "isCritical", aggregates: [{ fn: "count" }, { fn: "sum", field: "budget" }, { fn: "max", field: "budget" }] },
+    "activities with a budget": { source: "activity", columns: ["name", "isCritical"], filters: [{ field: "budget", op: "gt", value: 0 }], sort: { field: "name", dir: "asc" } },
+    "activities by budget": { source: "activity", columns: ["name", "isCritical"], sort: { field: "budget", dir: "desc" } },
+    "cost records": { source: "cost_record", columns: ["activity.name", "budget", "forecast", "variance", "cpi"], sort: { field: "activity.name", dir: "asc" } },
+    "cost records by budget": { source: "cost_record", columns: ["activity.name", "forecast"], sort: { field: "budget", dir: "desc" }, filters: [{ field: "variance", op: "not_empty" }], groupBy: "activity.name", aggregates: [{ fn: "count" }, { fn: "sum", field: "variance" }, { fn: "max", field: "budget" }, { fn: "avg", field: "cpi" }] },
+  });
+  const runReports = async (headers) => {
+    const result = {};
+    for (const [name, definition] of Object.entries(reportDefinitions())) {
+      const response = await api.post("/api/v1/reports/preview", { ...definition, projectId: project.id }, headers);
+      const body = JSON.parse(response.text.replace(/"generatedAt":"[^"]*"/g, '"generatedAt":"-"'));
+      result[name] = { status: response.status, text: response.text, body };
+    }
+    return result;
+  };
+  // An export's cells, read back from the workbook.
+  const exportedCells = async (definition, headers) => {
+    const response = await fetch(`${api.base}/api/v1/reports/export`, {
+      method: "POST",
+      headers: { "content-type": "application/json", ...headers },
+      body: JSON.stringify({ ...definition, projectId: project.id, format: "xlsx", name: "LiveTest export" }),
+    });
+    expect(response.status).toBe(200);
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.load(Buffer.from(await response.arrayBuffer()));
+    const cells = [];
+    workbook.eachSheet((sheet) => sheet.eachRow((row) => row.eachCell((cell) => cells.push(String(cell.value)))));
+    return cells;
+  };
+
+  it("the report builder gives no member without BOQ read an activity's budget, nor a cost record's budget, variance or CPI — not as a column, a filter, a sort, a grouping, an aggregate, an export or a saved report's run — and the BOQ reader's reports carry them (E1)", async () => {
+    // An activity a BOQ row creates through the API (29 m3 at 313.37 =
+    // 9087.73, a figure nothing else here states), and its cost record
+    // written by the cost controller (no BOQ read) — made with that budget.
+    const SECRET = "9087.73";
+    const minted = await post(at("/boq/items"), { code: "9.2", description: "Report probe slab", quantity: 29, unit: "m3", rate: 313.37, activityName: "Report probe pour" });
+    expect([minted.status, minted.body?.error]).toEqual([201, undefined]);
+    const activity = await prisma.activity.findFirst({ where: { projectId: project.id, mintedByBoqItemId: minted.body.data.item.id }, select: { id: true, budget: true } });
+    expect(Number(activity.budget)).toBe(9087.73);
+    // The allocation the row made, approved: the record is made with it as its budget.
+    const mintedAllocation = await prisma.activityBoqAllocation.findFirst({ where: { boqItemId: minted.body.data.item.id, activityId: activity.id }, select: { id: true } });
+    for (const step of ["submit", "approve"]) {
+      const moved = await post(at(`/activity-boq-allocations/${mintedAllocation.id}/${step}`), {});
+      expect([step, moved.status, moved.body?.error]).toEqual([step, 200, undefined]);
+    }
+    const written = await api.post(at(`/cost/activity/${activity.id}`), { committed: 0, forecast: 1000 }, as(members.costController));
+    expect([written.status, written.body?.error]).toEqual([201, undefined]);
+    const stored = await prisma.costRecord.findUnique({ where: { id: written.body.data.id }, select: { budget: true, actual: true } });
+    expect(Number(stored.budget)).toBeGreaterThan(0);
+    const recordBudget = String(Number(stored.budget));
+    const variance = String(Math.round((Number(stored.budget) - 1000) * 100) / 100);
+
+    // The BOQ reader's reports state them.
+    const reader = await runReports(auth());
+    const readerActivity = reader["activity budgets"].body.data.rows.find((row) => row.id === activity.id);
+    expect([reader["activity budgets"].status, readerActivity.budget, "withheldColumns" in readerActivity, "withheld" in reader["activity budgets"].body.data]).toEqual([200, 9087.73, false, false]);
+    expect(reader["activities with a budget"].body.data.rows.map((row) => row.id)).toContain(activity.id);
+    const readerRecord = reader["cost records"].body.data.rows.find((row) => row["activity.name"] === "Report probe pour");
+    expect([readerRecord.budget, readerRecord.variance]).toEqual([Number(stored.budget), Number(variance)]);
+    expect(reader["cost records"].text.includes(recordBudget)).toBe(true);
+
+    for (const [viewer, { user, readsCost }] of Object.entries(viewers())) {
+      const headers = as(user);
+      const mine = await runReports(headers);
+      for (const [name, { status, text, body }] of Object.entries(mine)) {
+        expect([viewer, name, status, body.error]).toEqual([viewer, name, 200, undefined]);
+        // Not the activity's budget, the record's, nor its variance, anywhere.
+        for (const secret of [SECRET, recordBudget, variance, "233.31"]) {
+          expect([viewer, name, secret, text.includes(secret)]).toEqual([viewer, name, secret, false]);
+        }
+        const data = body.data;
+        const costSource = reportDefinitions()[name].source === "cost_record";
+        if (costSource && !readsCost) {
+          // The site engineer does not read the cost module: no project, no rows.
+          expect([viewer, name, data.projects.denied, data.rows]).toEqual([viewer, name, 1, []]);
+          continue;
+        }
+        // Each row names the withheld columns and carries null for them; the
+        // answer says which and why.
+        expect([viewer, name, data.withheld?.reason, data.withheld?.projects]).toEqual([viewer, name, MAPPING_WITHHELD, 1]);
+        const keys = costSource ? ["budget", "variance", "cpi"] : ["budget"];
+        for (const row of data.rows) {
+          for (const key of keys.filter((key) => key in row)) expect([viewer, name, key, row[key]]).toEqual([viewer, name, key, null]);
+        }
+        for (const column of data.columns.filter((column) => keys.includes(column.key))) {
+          expect([viewer, name, column.key, column.withheld, column.withheldReason]).toEqual([viewer, name, column.key, true, MAPPING_WITHHELD]);
+        }
+        for (const group of [...(data.groups || []), data.totals]) {
+          for (const [key, value] of Object.entries(group)) {
+            if (keys.some((withheld) => key.endsWith(`_${withheld}`))) expect([viewer, name, key, value]).toEqual([viewer, name, key, null]);
+          }
+        }
+      }
+      // A budget filter is no mapping badge: it matches none of the rows.
+      expect([viewer, mine["activities with a budget"].body.data.rows]).toEqual([viewer, []]);
+      // The export and a saved report's run go the same way.
+      const cells = await exportedCells(reportDefinitions()["cost records"], headers);
+      for (const secret of [recordBudget, variance]) expect([viewer, secret, cells.includes(secret)]).toEqual([viewer, secret, false]);
+      const saved = await api.post("/api/v1/reports", { ...reportDefinitions()["activity budgets"], projectId: project.id, name: `LiveTest ${viewer} budgets` }, headers);
+      if (saved.status === 201) {
+        const run = await api.post(`/api/v1/reports/${saved.body.data.id}/run`, {}, headers);
+        expect([viewer, run.status, run.text.includes(SECRET)]).toEqual([viewer, 200, false]);
+      } else {
+        expect([viewer, saved.status]).toEqual([viewer, 403]);
+      }
+    }
+    // The BOQ reader's export states the record's budget.
+    expect((await exportedCells(reportDefinitions()["cost records"], auth())).includes(recordBudget)).toBe(true);
+  });
+
+  it("the reviewer's differential on the report builder: one approved allocation moved from a critical to a non-critical activity — with the stored budgets it gives — changes nothing in any report a member without BOQ read runs, while the BOQ reader's reports move (E1)", async () => {
+    // Last in this file. Two activities alike in everything but their
+    // criticality, and one approved allocation (40 m3 at 263.19 = 10527.6).
+    const twin = async (name, activityCode) => {
+      const created = await post(at("/activities"), { name, activityCode, duration: 5, startDate: "2026-05-04", endDate: "2026-05-08", engineerIds: [live.user.id] });
+      expect([created.status, created.body?.error]).toEqual([201, undefined]);
+      return created.body.data.id;
+    };
+    const critical = await twin("Report twin critical", "A170");
+    const floating = await twin("Report twin floating", "A180");
+    await prisma.activity.update({ where: { id: critical }, data: { isCritical: true, totalFloat: 0 } });
+    await prisma.activity.update({ where: { id: floating }, data: { isCritical: false, totalFloat: 5 } });
+    const item = await post(at("/boq/items"), { code: "9.3", description: "Report twin slab", quantity: 40, unit: "m3", rate: 263.19 });
+    expect([item.status, item.body?.error]).toEqual([201, undefined]);
+    const allocationsRoute = at("/activity-boq-allocations");
+    const allocation = await post(allocationsRoute, { boqItemId: item.body.data.item.id, activityId: critical, quantity: 40 });
+    expect([allocation.status, allocation.body?.error]).toEqual([201, undefined]);
+    for (const step of ["submit", "approve"]) {
+      const moved = await post(`${allocationsRoute}/${allocation.body.data.id}/${step}`, {});
+      expect([step, moved.status, moved.body?.error]).toEqual([step, 200, undefined]);
+    }
+    // Each twin's cost record, written through the API by the cost
+    // controller: the critical one's made with the allocation as its budget.
+    const records = {};
+    for (const activityId of [critical, floating]) {
+      const written = await api.post(at(`/cost/activity/${activityId}`), { committed: 0, forecast: 500 }, as(members.costController));
+      expect([written.status, written.body?.error]).toEqual([201, undefined]);
+      records[activityId] = written.body.data.id;
+    }
+    // The activity's stored budget as a mint or the generator writes it:
+    // the allocation's amount (by key, on this LiveTest organisation's row).
+    await prisma.activity.update({ where: { id: critical }, data: { budget: 10527.6 } });
+    const storedBudgets = async () =>
+      Promise.all([critical, floating].map(async (id) => [
+        Number((await prisma.activity.findUnique({ where: { id }, select: { budget: true } })).budget),
+        Number((await prisma.costRecord.findUnique({ where: { id: records[id] }, select: { budget: true } })).budget),
+      ]));
+    expect(await storedBudgets()).toEqual([[10527.6, 10527.6], [0, 0]]);
+
+    const everyone = { reader: auth(), ...Object.fromEntries(Object.entries(viewers()).map(([viewer, { user }]) => [viewer, as(user)])) };
+    const capture = async () => {
+      const result = {};
+      for (const [viewer, headers] of Object.entries(everyone)) {
+        result[viewer] = Object.fromEntries(Object.entries(await runReports(headers)).map(([name, { status, body }]) => [name, { status, body }]));
+      }
+      return result;
+    };
+    const before = await capture();
+
+    // The move: the allocation, by its key, after proving it is this
+    // LiveTest organisation's — and the stored budgets it gives, moved with
+    // it (each row by its key): the activity's budget, and the cost record's
+    // budget as the record would have been made with the allocation there.
+    const row = await prisma.activityBoqAllocation.findUnique({
+      where: { id: allocation.body.data.id },
+      select: { id: true, activityId: true, status: true, project: { select: { orgId: true, org: { select: { name: true } } } } },
+    });
+    expect([row.activityId, row.status, row.project.orgId, /^LiveTest [0-9a-f-]{36}$/.test(row.project.org.name)]).toEqual([critical, "approved", live.org.id, true]);
+    await prisma.activityBoqAllocation.update({ where: { id: row.id }, data: { activityId: floating } });
+    await prisma.activity.update({ where: { id: critical }, data: { budget: 0 } });
+    await prisma.activity.update({ where: { id: floating }, data: { budget: 10527.6 } });
+    await prisma.costRecord.update({ where: { id: records[critical] }, data: { budget: 0 } });
+    await prisma.costRecord.update({ where: { id: records[floating] }, data: { budget: 10527.6 } });
+    expect(await storedBudgets()).toEqual([[0, 0], [10527.6, 10527.6]]);
+
+    const after = await capture();
+
+    // The BOQ reader's reports move with it.
+    const budgetOf = (captured, id) => captured.reader["activity budgets"].body.data.rows.find((entry) => entry.id === id).budget;
+    expect([budgetOf(before, critical), budgetOf(before, floating), budgetOf(after, critical), budgetOf(after, floating)]).toEqual([10527.6, 0, 0, 10527.6]);
+    for (const name of Object.keys(reportDefinitions())) {
+      expect([name, after.reader[name].body]).not.toEqual([name, before.reader[name].body]);
+    }
+    // Everyone without BOQ read: not one byte of any report moves.
+    for (const viewer of Object.keys(viewers())) {
+      for (const name of Object.keys(reportDefinitions())) {
+        expect([viewer, name, after[viewer][name]]).toEqual([viewer, name, before[viewer][name]]);
+        expect([viewer, name, before[viewer][name].status]).toEqual([viewer, name, 200]);
+        expect([viewer, name, JSON.stringify(before[viewer][name].body).includes("10527.6")]).toEqual([viewer, name, false]);
+      }
     }
   });
 });

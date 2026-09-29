@@ -26,8 +26,10 @@
  *   the budget reconciliation (in the answer to writing a record and in its
  *   history too), what the cost summary adds up from those budgets over the
  *   activities that have a record (per category and in total, with the
- *   forecast and EAC that fall back to them), and a budget line's spread
- *   suggested from the allocations. Reading the cost module does not change this
+ *   forecast and EAC that fall back to them), a budget line's spread
+ *   suggested from the allocations, and the report builder's columns that
+ *   state any of these (an activity's budget; a cost record's budget,
+ *   variance and CPI). Reading the cost module does not change this
  *   (E1): a cost controller, a planning engineer or a PM without boq:read is
  *   given none of it either. Criticality itself (the flag, the float, the
  *   critical path) stays with the schedule's readers.
@@ -608,9 +610,58 @@ const withheldWbsList = (list, access = FULL_ACCESS) => {
   };
 };
 
+// The report builder (POST /reports/preview, /export, /ask, /narrate, a
+// saved report's run and export, and a scheduled run — every one of them
+// services/report-builder.service's runQuery) reads the same records
+// straight from the database, so its columns go the same way (E1). A
+// source's columns that state a figure an allocation gives one activity:
+// - activity.budget: the activity's stored budget — the BOQ row's amount
+//   for an activity the row created (POST /boq/items with an activity
+//   name), the generator's per-activity budget for a generated schedule —
+//   withheld on the schedule and the activities as `budget` and
+//   `generatedBudget`.
+// - cost_record.budget: the budget written on the record, its activity's
+//   approved allocation when the record was made — withheld on GET /cost,
+//   the write answers and /audit — and the two figures computed from it,
+//   variance (budget − forecast) and cpi (budget ÷ actual).
+// No other source states one: the budget lines are the budget register
+// (the Cost module's own, a cost reader's), the other money columns are
+// their own registers', and no source reads an allocation, a coverage share
+// or a mapped count. For a row of a project where the caller may not read
+// the BOQ each such column is null — the same row, the same place — and the
+// row names the columns withheld from it; a filter, sort, grouping or
+// aggregate over the column sees that null, never the figure.
+const REPORT_MAPPING_COLUMNS = Object.freeze({
+  activity: Object.freeze(["budget"]),
+  cost_record: Object.freeze(["budget", "variance", "cpi"]),
+});
+
+/** The columns of a report source that state a figure an allocation gives one activity. */
+const reportMappingColumns = (sourceKey) => REPORT_MAPPING_COLUMNS[sourceKey] || [];
+
+/**
+ * A report row (flattened: { id, projectId, projectName, <column>: value })
+ * as this caller may receive it on the row's project: for a caller who may
+ * not read the BOQ each of `keys` the row carries is null, and
+ * `withheldColumns` names them. A BOQ reader's row is returned untouched
+ * (the same object).
+ */
+const withheldReportRow = (row, keys, access = FULL_ACCESS) => {
+  if (access.boq || !row || typeof row !== "object") return row;
+  const present = (keys || []).filter((key) => has(row, key));
+  if (!present.length) return row;
+  const result = { ...row };
+  for (const key of present) result[key] = null;
+  result.withheldColumns = present;
+  return result;
+};
+
 module.exports = {
   BOQ_FIGURE_KEYS,
   MAPPING_DETAILS_WITHHELD,
+  REPORT_MAPPING_COLUMNS,
+  reportMappingColumns,
+  withheldReportRow,
   WBS_OUTLINE_KEYS,
   boqFigureAccess,
   canReadBoq,

@@ -14955,16 +14955,30 @@ const reportDefinitionSchema = objectSchema({
 });
 const reportResultSchema = objectSchema({
   source: objectSchema({ key: { type: "string" }, label: { type: "string" }, module: { type: "string" } }),
-  columns: arrayOf(objectSchema({ key: { type: "string" }, label: { type: "string" }, type: { type: "string" } })),
-  rows: arrayOf(ref("GenericObject")),
+  columns: arrayOf(objectSchema({
+    key: { type: "string" },
+    label: { type: "string" },
+    type: { type: "string" },
+    withheld: { type: "boolean", description: "Present (true) only when this column was withheld on at least one project of the run — see `withheld`." },
+    withheldReason: { type: "string", description: "Present with `withheld`: \"Mapping details unavailable to you\"." },
+  })),
+  rows: { ...arrayOf(ref("GenericObject")), description: "Flattened rows: id, projectId, projectName and one value per column. A row of a project where the caller may not read the BOQ carries null for each withheld column and names them in `withheldColumns`." },
   rowCount: { type: "integer" },
   total: { type: "integer" },
   truncated: { type: "boolean" },
   groupBy: nullableRef("GenericObject"),
   aggregates: arrayOf(ref("GenericObject")),
-  groups: { type: "array", nullable: true, items: ref("GenericObject") },
+  groups: { type: "array", nullable: true, items: ref("GenericObject"), description: "An aggregate over a withheld column is null in a group holding a withheld row (and in the totals)." },
   totals: ref("GenericObject"),
   projects: objectSchema({ inScope: { type: "integer" }, queried: { type: "integer" }, denied: { type: "integer", description: "Projects skipped because the caller cannot read the source there." } }),
+  withheld: {
+    ...objectSchema({
+      columns: arrayOf({ type: "string" }),
+      reason: { type: "string" },
+      projects: { type: "integer", description: "Projects of the run where the caller may not read the BOQ." },
+    }),
+    description: "Present only when the run uses a column that states a figure an allocation gives one activity (activity: budget; cost_record: budget, variance, cpi) and the caller may not read the BOQ on at least one of its projects (owner decision E1: cost read does not override it). Those columns are null on that project's rows, and filters, sorts, groupings and aggregates over them see the null, never the figure. Exports (XLSX, PDF), saved reports' runs, scheduled runs and /reports/ask and /reports/narrate follow the same rule; a file says so on its About sheet or header. A BOQ reader's result carries no such key.",
+  },
   generatedAt: dateString,
 });
 const reportScheduleInput = objectSchema({

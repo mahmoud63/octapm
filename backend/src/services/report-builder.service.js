@@ -10,6 +10,7 @@ const auditService = require("./audit.service");
 const notificationService = require("./notification.service");
 const sources = require("./report-sources");
 const customFields = require("./custom-field.service");
+const boqFigures = require("../utils/boq-figures");
 
 /** Which custom-field record type each source reads (OCTA-PLAT-FIELDS-025). */
 const SOURCE_RECORD_TYPES = Object.freeze({
@@ -314,12 +315,15 @@ const matchesInMemory = (column, filter, value) => {
   }
 };
 
-const splitFilters = (source, filters) => {
+// `inMemory`: columns a filter must see as the caller receives them (a
+// column withheld on some project is filtered after it is withheld, never on
+// the stored figure in the database).
+const splitFilters = (source, filters, inMemory = new Set()) => {
   const db = [];
   const memory = [];
   for (const filter of filters) {
     const column = sources.columnByKey(source, filter.field);
-    if (column.computed || column.json) memory.push({ column, filter });
+    if (column.computed || column.json || inMemory.has(column.key)) memory.push({ column, filter });
     else {
       const condition = prismaCondition(column, filter);
       if (condition) db.push(nest(column.path, condition));
@@ -378,19 +382,29 @@ const runQuery = async ({ orgId, user, definition, limit = PREVIEW_LIMIT, offset
   const cap = Math.min(Math.max(1, Number(limit) || PREVIEW_LIMIT), EXPORT_LIMIT);
 
   const projects = (await accessibleProjects({ orgId, user, projectId: definition.projectId || null })).filter((project) => !keyProjects || keyProjects.includes(project.id));
+  // The source's columns that state a figure an allocation gives one
+  // activity (E1): withheld on every project where the caller may not read
+  // the BOQ — decided per project as the BOQ endpoints decide it, and for an
+  // API key only with a scope on the BOQ too.
+  const mappingKeys = boqFigures.reportMappingColumns(source.key);
+  const keyReadsBoq = !apiClient || require("./api-client.service").scopeAllows(apiClient, "boq", "read");
   const contexts = [];
   let denied = 0;
   for (const project of projects) {
     try {
       const context = await resolveProjectContext({ orgId, user, projectId: project.id });
-      if (canReadModule({ user, access: context.access, template: context.template, moduleName: source.module })) contexts.push({ project, ...context });
-      else denied += 1;
+      if (canReadModule({ user, access: context.access, template: context.template, moduleName: source.module })) {
+        const boq = !mappingKeys.length || (keyReadsBoq && canReadModule({ user, access: context.access, template: context.template, moduleName: "boq" }));
+        contexts.push({ project, ...context, boq });
+      } else denied += 1;
     } catch {
       denied += 1;
     }
   }
+  const withheldProjectIds = new Set(contexts.filter((context) => !context.boq).map((context) => context.project.id));
+  const withholding = withheldProjectIds.size ? new Set(mappingKeys) : new Set();
 
-  const { db: dbFilters, memory: memoryFilters } = splitFilters(source, filters);
+  const { db: dbFilters, memory: memoryFilters } = splitFilters(source, filters, withholding);
   const groups = new Map();
   for (const context of contexts) {
     const viewer = { id: user.id, projectAccess: context.access };
@@ -417,12 +431,18 @@ const runQuery = async ({ orgId, user, definition, limit = PREVIEW_LIMIT, offset
   let flat = raw.map((row) => {
     const values = { id: row.id, projectId: row.projectId || row.dailyLog?.projectId || null, projectName: projectNameOf(row, source) };
     for (const column of allColumns) values[column.key] = cellValue(column, row);
-    return values;
+    return withheldProjectIds.has(values.projectId) ? boqFigures.withheldReportRow(values, mappingKeys, { boq: false }) : values;
   });
+  // The withheld columns this run uses (shown, sorted, grouped, filtered or aggregated).
+  const withheldKeys = allColumns.map((column) => column.key).filter((key) => withholding.has(key));
   for (const { column, filter } of memoryFilters) flat = flat.filter((row) => matchesInMemory(column, filter, row[column.key]));
   if (sort) {
     const column = columnFor(sort.field);
-    flat.sort((a, b) => compareValues(column, a[sort.field], b[sort.field]) * (sort.dir === "desc" ? -1 : 1));
+    // Sorted on a withheld column, the withheld rows tie; they are then put
+    // in the order of their ids — not the database's, which an update of the
+    // stored figure can change.
+    const tieBreak = withholding.has(sort.field) ? (a, b) => String(a.id).localeCompare(String(b.id)) : () => 0;
+    flat.sort((a, b) => compareValues(column, a[sort.field], b[sort.field]) * (sort.dir === "desc" ? -1 : 1) || tieBreak(a, b));
   }
 
   const total = flat.length;
@@ -431,9 +451,16 @@ const runQuery = async ({ orgId, user, definition, limit = PREVIEW_LIMIT, offset
     const result = { count: rows.length };
     for (const item of aggregates) {
       if (item.fn === "count") continue;
+      const key = `${item.fn}_${item.field}`;
+      // Over a column withheld from any of the rows (or over no rows, when
+      // the column is withheld on some project): no figure — not a sum of
+      // the rest, not a zero.
+      if (withholding.has(item.field) && (!rows.length || rows.some((row) => row.withheldColumns && row.withheldColumns.includes(item.field)))) {
+        result[key] = null;
+        continue;
+      }
       const values = rows.map((row) => row[item.field]).filter((value) => value !== null && value !== undefined);
       const numbers = values.map(Number).filter(Number.isFinite);
-      const key = `${item.fn}_${item.field}`;
       if (item.fn === "sum") result[key] = Math.round(numbers.reduce((sum, value) => sum + value, 0) * 100) / 100;
       else if (item.fn === "avg") result[key] = numbers.length ? Math.round((numbers.reduce((sum, value) => sum + value, 0) / numbers.length) * 100) / 100 : null;
       else if (item.fn === "min") result[key] = values.length ? values.reduce((min, value) => (compareValues(columnFor(item.field), value, min) < 0 ? value : min)) : null;
@@ -454,9 +481,21 @@ const runQuery = async ({ orgId, user, definition, limit = PREVIEW_LIMIT, offset
     groupRows = [...byKey.values()].map((entry) => ({ key: entry.key, label: entry.label, ...aggregate(entry.rows) })).sort((a, b) => b.count - a.count || a.label.localeCompare(b.label));
   }
 
+  // Said once for the run, and on each column it touches, only when a
+  // column this run uses was withheld on some project: a BOQ reader's
+  // answer carries none of it.
+  const withheld = withheldKeys.length
+    ? { columns: withheldKeys, reason: boqFigures.MAPPING_DETAILS_WITHHELD, projects: withheldProjectIds.size }
+    : null;
+  const describeColumn = (column) => ({
+    key: column.key,
+    label: column.label,
+    type: column.type,
+    ...(withheld && withheldKeys.includes(column.key) ? { withheld: true, withheldReason: withheld.reason } : {}),
+  });
   return {
     source: { key: source.key, label: source.label, module: source.module },
-    columns: columns.map((column) => ({ key: column.key, label: column.label, type: column.type })),
+    columns: columns.map(describeColumn),
     rows: page,
     rowCount: page.length,
     total,
@@ -466,6 +505,7 @@ const runQuery = async ({ orgId, user, definition, limit = PREVIEW_LIMIT, offset
     groups: groupRows,
     totals: aggregate(flat),
     projects: { inScope: projects.length, queried: contexts.length, denied },
+    ...(withheld ? { withheld } : {}),
     generatedAt: new Date().toISOString(),
   };
 };
@@ -495,6 +535,12 @@ const describeFilters = (source, filters) =>
     const value = Array.isArray(filter.value) ? filter.value.map((item) => (item instanceof Date ? item.toISOString().slice(0, 10) : item)).join(", ") : filter.value instanceof Date ? filter.value.toISOString().slice(0, 10) : filter.value;
     return `${label} ${filter.op.replace(/_/g, " ")}${value === null || value === undefined ? "" : ` ${value}`}`;
   });
+
+// What a file says of the columns withheld from its reader (left blank in its cells).
+const withheldNote = (result) => {
+  const labels = result.withheld.columns.map((key) => sources.columnByKey(sources.getSource(result.source.key), key)?.label || key);
+  return `${labels.join(", ")} — ${result.withheld.reason} (left blank on ${result.withheld.projects} project${result.withheld.projects === 1 ? "" : "s"})`;
+};
 
 const renderXlsx = async ({ report, result, user, project = null }) => {
   const workbook = new ExcelJS.Workbook();
@@ -540,6 +586,7 @@ const renderXlsx = async ({ report, result, user, project = null }) => {
     { field: "Filters", value: describeFilters(sources.getSource(result.source.key), report.filters).join("; ") || "none" },
     { field: "Rows", value: `${result.total}${result.truncated ? " (truncated)" : ""}` },
     { field: "Projects", value: `${result.projects.queried} queried, ${result.projects.denied} not permitted` },
+    ...(result.withheld ? [{ field: "Withheld", value: withheldNote(result) }] : []),
     { field: "Generated", value: `${result.generatedAt} by ${user?.name || user?.email || user?.id || "system"}` },
   ]);
   brandWorkbook(workbook, {
@@ -559,6 +606,7 @@ const renderPdf = ({ report, result, user, project = null }) => {
     ["Filters", describeFilters(sources.getSource(result.source.key), report.filters).join("; ") || "none"],
     ["Rows", `${result.total}${result.truncated ? " (truncated)" : ""} · ${result.projects.queried} project${result.projects.queried === 1 ? "" : "s"}${result.projects.denied ? ` (${result.projects.denied} not permitted)` : ""}`],
     ["Generated", `${result.generatedAt.slice(0, 16).replace("T", " ")} UTC · ${user?.name || user?.email || "scheduled"}`],
+    ...(result.withheld ? [["Withheld", withheldNote(result)]] : []),
   ]);
   if (report.description) pdf.paragraph(report.description);
   if (result.groups) {
