@@ -122,6 +122,28 @@
  * ids, a refused transition's statuses, the permission refused and the
  * request fields that failed validation. The billing routes
  * (prime-contract) refuse with no details at all.
+ *
+ * Nor does the bill reach anyone through a stored AI run (owner check,
+ * 2026-09-29). A run keeps its prompt and answer, served back to the person
+ * who made it: GET /assistant/conversations/:id (under a project too), the
+ * answer to POST /messages/:id/feedback, and the history a follow-up
+ * question sends the model — the web and the mobile app read the same
+ * routes; runs have no export. Three kinds are built from the bill: the
+ * scope-gap review (scope_gap: the uncovered rows' codes and descriptions
+ * and the BOQ counts, stored for every member before 6468eb0), the forecast
+ * narrative (forecast: each activity's budget, its approved allocation) and
+ * the report narrative over a source with mapping columns (report_narrative
+ * titled after the Activities or cost-record source). Owning the run is no
+ * exemption: when the reader may not read the BOQ on the run's project now
+ * (decided per request, as that project's routes decide it), the content —
+ * prompt, answer, citations, sources, actions — is left out and
+ * `contentWithheld` says why; the metadata (id, title, kind, when, provider,
+ * model, rating) stays. Nothing stored is rewritten or deleted. A run built
+ * without the bill (a member without boq:read, since this check) is marked
+ * so on its prompt message and served as it is; a run with no project
+ * cannot be decided per project and is withheld unless so marked. The
+ * specification conflict check (spec_conflict) never sent the model a BOQ
+ * row — the section, the sheets' text and the RFIs — and is not withheld.
  */
 const { hasPermission } = require("../middleware/rbac");
 const { HttpError } = require("./http-error");

@@ -182,6 +182,20 @@ describe("schedule delay and cost overrun prediction", () => {
     expect(plain.narrative.watch).toEqual(["MEP first fix", "Level 3 slab", "03-30 Concrete"]);
     expect(plain.narrative.actions.map((action) => [action.type, action.activityId, action.probability, action.impact])).toEqual([["create_risk", "a-mep", "high", "medium"], ["create_risk", "a-slab", "high", "high"]]);
     expect(store.conversations).toHaveLength(1);
+    // A BOQ reader's run carries each activity's budget and no marker.
+    const prompt = store.messages.find((message) => message.conversationId === store.conversations[0].id && message.role === "user");
+    expect(prompt).not.toHaveProperty("usageJson");
+  });
+
+  it("marks the run of a reader who may not read the BOQ as built without the bill (owner check, 2026-09-29)", async () => {
+    const transport = jest.fn(async () => ({ text: JSON.stringify({ headline: "h", schedule: "s", cost: "c", watch: [], actions: [] }) }));
+    const before = store.conversations.length;
+    await service.explain({ orgId: "org-1", projectId: "p1", user, transport, asOf: ASOF, access: { boq: false, budget: true } });
+    const conversation = store.conversations[before];
+    expect(conversation).toMatchObject({ kind: "forecast" });
+    const prompt = store.messages.find((message) => message.conversationId === conversation.id && message.role === "user");
+    expect(prompt.usageJson).toEqual({ builtWithoutBoq: true });
+    expect(prompt.content).not.toMatch(/\[a-slab\].*budget/);
   });
 
   it("runs confirmed actions through the risk and task services", async () => {

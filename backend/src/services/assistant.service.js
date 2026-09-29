@@ -35,6 +35,17 @@ Return ONLY a JSON object with this shape (no markdown fences):
 {"answer": "...markdown allowed, cite like [1]...", "citations": [1, 2], "actions": [{"type": "create_rfi", "label": "Raise RFI about …", "subject": "...", "question": "...", "sourceN": 1}, {"type": "create_task", "label": "...", "title": "...", "description": "...", "sourceN": 2}, {"type": "open", "label": "Open RFI-012", "sourceN": 3}]}
 "actions" may be empty. Keep at most three actions.`;
 
+// A stored run's prompt message records `{ builtWithoutBoq: true }` in its
+// usageJson when the service built the run without the bill (storeRun's
+// `builtWithoutBoq`). Bookkeeping, not usage: it is never served.
+const BUILT_WITHOUT_BOQ = "builtWithoutBoq";
+const usageOf = (row) => {
+  const usage = row.usageJson;
+  if (!usage || typeof usage !== "object" || Array.isArray(usage) || !Object.prototype.hasOwnProperty.call(usage, BUILT_WITHOUT_BOQ)) return usage || null;
+  const { [BUILT_WITHOUT_BOQ]: _marker, ...rest } = usage;
+  return Object.keys(rest).length ? rest : null;
+};
+
 const serializeMessage = (row) => ({
   id: row.id,
   role: row.role,
@@ -42,7 +53,7 @@ const serializeMessage = (row) => ({
   citations: Array.isArray(row.citationsJson) ? row.citationsJson : [],
   actions: Array.isArray(row.actionsJson) ? row.actionsJson : [],
   sources: Array.isArray(row.sourcesJson) ? row.sourcesJson : [],
-  usage: row.usageJson || null,
+  usage: usageOf(row),
   provider: row.provider || null,
   model: row.model || null,
   feedback: row.feedback || null,
@@ -62,6 +73,53 @@ const serializeConversation = (row, { withMessages = false } = {}) => ({
   ...(withMessages ? { messages: (row.messages || []).map(serializeMessage) } : {}),
 });
 
+/*
+ * Stored runs built from the bill (owner check, 2026-09-29; see the header
+ * of utils/boq-figures.js). A run's prompt and answer are served back to
+ * the person who made it — the conversation read, the answer to rating it,
+ * and the history a follow-up question sends the model. Some kinds are
+ * built from the BOQ's rows or the mapping: the scope-gap review (the
+ * uncovered rows, their codes and descriptions, the BOQ counts — stored
+ * for every member before 6468eb0), the forecast narrative (each activity's
+ * budget, its approved allocation, for a BOQ reader), and the report
+ * narrative over a source whose columns state an allocation's budget
+ * (sample rows, groups and totals). Owning the run is not an exemption:
+ * when the reader may not read the BOQ on the run's project now, its
+ * content — prompt, answer, citations, sources and actions — is withheld
+ * and the metadata stays (id, title, kind, when, provider, model, rating).
+ * Nothing stored is rewritten or deleted. A run the service built without
+ * the bill says so on its prompt message (BUILT_WITHOUT_BOQ) and is served
+ * as it is; a run with no project (a report narrative across projects)
+ * cannot be decided per project and is withheld unless it says so.
+ */
+const BOQ_BEARING_KINDS = new Set(["scope_gap", "forecast"]);
+const ASSISTANT_RUN_BOQ_WITHHELD = "This AI run was built from the BOQ's rows or the mapping, available only to members who may read the BOQ";
+let mappingNarrativeTitles = null;
+const isMappingNarrative = (title) => {
+  if (!mappingNarrativeTitles) {
+    const { SOURCES } = require("./report-sources");
+    const { reportMappingColumns } = require("../utils/boq-figures");
+    mappingNarrativeTitles = new Set(Object.values(SOURCES).filter((source) => reportMappingColumns(source.key).length).map((source) => `Narrative: ${source.label}`.slice(0, 120)));
+  }
+  return mappingNarrativeTitles.has(title);
+};
+const bearsBoq = (row) => BOQ_BEARING_KINDS.has(row.kind) || (row.kind === "report_narrative" && isMappingNarrative(row.title));
+const builtWithoutBoq = (messages = []) => messages.some((message) => message.role === "user" && message.usageJson && message.usageJson[BUILT_WITHOUT_BOQ] === true);
+/** The reader may read nothing of the bill unless a caller says otherwise. */
+const READS_NO_BOQ = async () => false;
+
+/** Whether this reader is given the run's content (`row` with its messages). */
+const withholdsRun = async (row, readsBoq = READS_NO_BOQ) => {
+  if (!bearsBoq(row) || builtWithoutBoq(row.messages)) return false;
+  if (!row.projectId) return true;
+  return !(await readsBoq(row.projectId));
+};
+
+const withheldMessage = (message) => {
+  const { content, citations, actions, sources, ...kept } = message;
+  return { ...kept, contentWithheld: { reason: ASSISTANT_RUN_BOQ_WITHHELD } };
+};
+
 const status = () => ({ ...aiProvider.describe(), embeddings: require("./embedding.service").describe() });
 
 /** Only chats are listed in Ask OctaPM; AI runs stored on records (OCTA-AI-RFI-029) have their own kind. */
@@ -76,10 +134,10 @@ const listConversations = async ({ orgId, user, projectId = null, limit = 30 }) 
  * response, a summary) as a conversation of `kind` with the prompt and the
  * answer, so it can be audited and rated like a chat answer.
  */
-const storeRun = async ({ orgId, user, projectId = null, kind, recordType = null, recordId = null, title, prompt, answer, citations = [], sources = [], usage = null, provider = null, model = null }) => {
+const storeRun = async ({ orgId, user, projectId = null, kind, recordType = null, recordId = null, title, prompt, answer, citations = [], sources = [], usage = null, provider = null, model = null, builtWithoutBoq: withoutBoq = false }) => {
   if (!tablesReady()) return null;
   const conversation = await prisma.assistantConversation.create({ data: { orgId, projectId, userId: user.id, kind, recordType, recordId, title: String(title || kind).slice(0, 120), lastMessageAt: new Date() } });
-  await prisma.assistantMessage.create({ data: { orgId, conversationId: conversation.id, role: "user", content: String(prompt || "").slice(0, 20000) } });
+  await prisma.assistantMessage.create({ data: { orgId, conversationId: conversation.id, role: "user", content: String(prompt || "").slice(0, 20000), ...(withoutBoq === true ? { usageJson: { [BUILT_WITHOUT_BOQ]: true } } : {}) } });
   const message = await prisma.assistantMessage.create({ data: { orgId, conversationId: conversation.id, role: "assistant", content: String(answer || ""), citationsJson: citations, sourcesJson: sources.map((source) => ({ n: source.n, id: source.id, type: source.type, title: source.title, ref: source.ref, projectId: source.projectId, url: source.url })), usageJson: usage, provider, model } });
   return { conversationId: conversation.id, message: serializeMessage(message) };
 };
@@ -90,7 +148,17 @@ const loadConversation = async ({ orgId, user, conversationId }) => {
   return row;
 };
 
-const getConversation = async ({ orgId, user, conversationId }) => serializeConversation(await loadConversation({ orgId, user, conversationId }), { withMessages: true });
+/**
+ * One conversation with its messages. `readsBoq(projectId)` says whether
+ * the reader may read the BOQ on a project now; a stored run built from
+ * the bill is served without its content otherwise (see above).
+ */
+const getConversation = async ({ orgId, user, conversationId, readsBoq = READS_NO_BOQ }) => {
+  const row = await loadConversation({ orgId, user, conversationId });
+  const conversation = serializeConversation(row, { withMessages: true });
+  if (!(await withholdsRun(row, readsBoq))) return conversation;
+  return { ...conversation, kind: row.kind, contentWithheld: { reason: ASSISTANT_RUN_BOQ_WITHHELD }, messages: conversation.messages.map(withheldMessage) };
+};
 
 const deleteConversation = async ({ orgId, user, conversationId }) => {
   const row = await loadConversation({ orgId, user, conversationId });
@@ -137,7 +205,7 @@ const buildMessages = ({ history, question, sources, projects }) => {
  * Answers a question inside a conversation (new when `conversationId` is
  * null). `transport` lets tests inject a fake model.
  */
-const ask = async ({ orgId, user, projectId = null, conversationId = null, question, projectAccess = null, transport = null }) => {
+const ask = async ({ orgId, user, projectId = null, conversationId = null, question, projectAccess = null, transport = null, readsBoq = READS_NO_BOQ }) => {
   const text = trimOrNull(question);
   if (!text) throw new HttpError(400, "ASSISTANT_QUESTION_REQUIRED", "Ask a question");
   if (text.length > MAX_QUESTION) throw new HttpError(400, "ASSISTANT_QUESTION_TOO_LONG", `Keep the question under ${MAX_QUESTION} characters`);
@@ -147,7 +215,9 @@ const ask = async ({ orgId, user, projectId = null, conversationId = null, quest
   if (!conversation) {
     conversation = await prisma.assistantConversation.create({ data: { orgId, projectId: scopeProjectId, userId: user.id, kind: "chat", title: text.slice(0, 120), lastMessageAt: new Date() }, include: { project: { select: { id: true, name: true } }, messages: true } });
   }
-  const history = (conversation.messages || []).slice(-MAX_HISTORY).map((message) => ({ role: message.role, content: message.content }));
+  // A follow-up on a stored run this reader is not given (built from the
+  // bill) sends the model none of it.
+  const history = (await withholdsRun(conversation, readsBoq)) ? [] : (conversation.messages || []).slice(-MAX_HISTORY).map((message) => ({ role: message.role, content: message.content }));
   const userMessage = await prisma.assistantMessage.create({ data: { orgId, conversationId: conversation.id, role: "user", content: text } });
 
   const retrieved = await retrieval.retrieve({ orgId, user, projectId: scopeProjectId, query: text, projectAccess });
@@ -193,11 +263,14 @@ const ask = async ({ orgId, user, projectId = null, conversationId = null, quest
   };
 };
 
-const feedback = async ({ orgId, user, messageId, rating, note = null }) => {
+const feedback = async ({ orgId, user, messageId, rating, note = null, readsBoq = READS_NO_BOQ }) => {
   if (!["up", "down", null].includes(rating)) throw new HttpError(400, "ASSISTANT_FEEDBACK", "Rating must be up, down or null");
   const row = await prisma.assistantMessage.findFirst({ where: { id: messageId, orgId, conversation: { userId: user.id } } });
   if (!row) throw new HttpError(404, "ASSISTANT_MESSAGE_NOT_FOUND", "Message not found");
   const updated = await prisma.assistantMessage.update({ where: { id: row.id }, data: { feedback: rating, feedbackNote: trimOrNull(note)?.slice(0, 1000) || null } });
+  // The rating is kept either way; the answer to it is the message as this reader may read it.
+  const conversation = await prisma.assistantConversation.findFirst({ where: { id: row.conversationId, orgId }, select: { kind: true, title: true, projectId: true, messages: { where: { role: "user" }, select: { role: true, usageJson: true } } } });
+  if (conversation && (await withholdsRun(conversation, readsBoq))) return withheldMessage(serializeMessage(updated));
   return serializeMessage(updated);
 };
 
@@ -225,4 +298,4 @@ const executeAction = async ({ orgId, user, projectId, action = {}, projectAcces
   throw new HttpError(400, "ASSISTANT_ACTION_UNKNOWN", "Unknown action");
 };
 
-module.exports = { SYSTEM_PROMPT, ACTION_TYPES, status, listConversations, getConversation, deleteConversation, ask, feedback, executeAction, normalizeActions, citationsFrom, storeRun, serializeMessage };
+module.exports = { SYSTEM_PROMPT, ACTION_TYPES, ASSISTANT_RUN_BOQ_WITHHELD, BOQ_BEARING_KINDS, status, listConversations, getConversation, deleteConversation, ask, feedback, executeAction, normalizeActions, citationsFrom, storeRun, serializeMessage };

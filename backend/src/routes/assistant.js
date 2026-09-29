@@ -7,6 +7,18 @@ const { authenticate } = require("../middleware/auth");
 const { requirePermission, hasPermission, noApiKey } = require("../middleware/rbac");
 const { validate } = require("../middleware/validate");
 const service = require("../services/assistant.service");
+const { requestForProject } = require("../middleware/project-access");
+const { canReadBoq } = require("../utils/boq-figures");
+
+/**
+ * Whether the caller may read the BOQ on a project now, as that project's
+ * own routes decide it (template, role and party) — for a stored run built
+ * from the bill, whose owner is given its content only then (owner check,
+ * 2026-09-29; assistant.service). Decided on the run's own project, never
+ * on the project the route is mounted under.
+ */
+const readsBoqFor = (req) => async (projectId) =>
+  canReadBoq(await requestForProject(req, projectId));
 
 /**
  * Project knowledge assistant (OCTA-AI-ASSIST-028). Mounted twice: under a
@@ -50,6 +62,7 @@ const build = ({ withActions }) => {
           conversationId: req.body.conversationId || null,
           question: req.body.question,
           projectAccess: req.projectAccess || null,
+          readsBoq: readsBoqFor(req),
         }),
       ),
     ),
@@ -82,6 +95,7 @@ const build = ({ withActions }) => {
           orgId: req.user.orgId,
           user: user(req),
           conversationId: req.params.conversationId,
+          readsBoq: readsBoqFor(req),
         }),
       ),
     ),
@@ -127,6 +141,7 @@ const build = ({ withActions }) => {
           messageId: req.params.messageId,
           rating: req.body.rating,
           note: req.body.note || null,
+          readsBoq: readsBoqFor(req),
         }),
       ),
     ),

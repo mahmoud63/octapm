@@ -554,7 +554,7 @@ const explain = async ({ orgId, projectId, user, transport = null, asOf = new Da
   const parsed = aiProvider.parseJsonAnswer(completion.text);
   const plain = deterministicNarrative(forecast);
   const narrative = { headline: clip(parsed?.headline, 300) || plain.headline, schedule: clip(parsed?.schedule, 2000) || plain.schedule, cost: clip(parsed?.cost, 2000) || plain.cost, watch: (Array.isArray(parsed?.watch) ? parsed.watch : plain.watch).map((item) => clip(item, 200)).filter(Boolean).slice(0, 6), actions: normalizeActions(parsed?.actions, forecast) };
-  const stored = await assistant.storeRun({ orgId, user, projectId, kind: "forecast", recordType: "project", recordId: projectId, title: `Forecast ${forecast.asOf.slice(0, 10)}`, prompt: text, answer: JSON.stringify(narrative), usage: completion.usage || null, provider: completion.provider || null, model: completion.model || null }).catch(() => null);
+  const stored = await assistant.storeRun({ orgId, user, projectId, kind: "forecast", recordType: "project", recordId: projectId, title: `Forecast ${forecast.asOf.slice(0, 10)}`, prompt: text, answer: JSON.stringify(narrative), usage: completion.usage || null, provider: completion.provider || null, model: completion.model || null, builtWithoutBoq: access?.boq === false }).catch(() => null);
   return { degraded: false, forecast, narrative, message: runMessage(stored) };
 };
 

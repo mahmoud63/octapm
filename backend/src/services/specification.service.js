@@ -591,7 +591,7 @@ const explainScopeGaps = async ({ orgId, projectId, user, access = BOQ_READER, t
   }
   const parsed = aiProvider.parseJsonAnswer(completion.text) || {};
   const review = { headline: clip(parsed.headline, 300) || fallback.headline, narrative: clip(parsed.narrative, 6000) || fallback.narrative, actions: normalizeActions(parsed.actions) };
-  const stored = await assistant.storeRun({ orgId, user, projectId, kind: "scope_gap", recordType: "project", recordId: projectId, title: "Scope coverage review", prompt: JSON.stringify(digest).slice(0, 8000), answer: review.narrative, usage: completion.usage || null, provider: completion.provider || null, model: completion.model || null }).catch(() => null);
+  const stored = await assistant.storeRun({ orgId, user, projectId, kind: "scope_gap", recordType: "project", recordId: projectId, title: "Scope coverage review", prompt: JSON.stringify(digest).slice(0, 8000), answer: review.narrative, usage: completion.usage || null, provider: completion.provider || null, model: completion.model || null, builtWithoutBoq: Boolean(gaps.boqWithheld) }).catch(() => null);
   return { degraded: false, gaps, review, message: stored?.message ? { id: stored.message.id, provider: stored.message.provider, model: stored.message.model, feedback: stored.message.feedback } : null };
 };
 
