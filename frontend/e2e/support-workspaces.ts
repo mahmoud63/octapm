@@ -32,8 +32,8 @@ type Json = { success?: boolean; data?: Record<string, unknown>; error?: { code?
 
 const backendDir = () => fileURLToPath(new URL('../../backend/', import.meta.url))
 
-const liveOrgScript = (command: 'activate' | 'drop', orgId: string) => {
-  const result = spawnSync(process.execPath, [path.join('scripts', 'e2e', 'live-org.js'), command, orgId], {
+const liveOrgScript = (command: 'activate' | 'drop' | 'plan', orgId: string, ...rest: string[]) => {
+  const result = spawnSync(process.execPath, [path.join('scripts', 'e2e', 'live-org.js'), command, orgId, ...rest], {
     cwd: backendDir(),
     env: process.env,
     encoding: 'utf8',
@@ -97,6 +97,15 @@ export async function registerLiveOrg(
     adminId: user.id,
     adminToken: tokens.accessToken,
   }
+}
+
+/**
+ * Puts a throwaway workspace's one subscription row on a plan — a catalogue
+ * plan, or any plain token to exercise the unknown-plan configuration fault.
+ * The script refuses every organisation that is not a LiveTest one.
+ */
+export function setLivePlan(orgId: string, plan: string) {
+  liveOrgScript('plan', orgId, plan)
 }
 
 export function dropLiveOrg(orgId: string) {

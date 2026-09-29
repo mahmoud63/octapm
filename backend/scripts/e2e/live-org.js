@@ -15,6 +15,11 @@
  *
  *   node scripts/e2e/live-org.js activate <orgId>   # business plan, 25 seats
  *   node scripts/e2e/live-org.js drop <orgId>       # delete it and its rows
+ *   node scripts/e2e/live-org.js plan <orgId> <plan> # set its one subscription's plan
+ *
+ * `plan` writes one row by its unique orgId; any plain token is accepted, so
+ * a suite can put its own workspace on a plan outside the catalogue and see
+ * the configuration fault the product shows for it.
  *
  * Like the E2E reset, it runs only against a database on this machine unless
  * ALLOW_DATA_SCRIPT names another.
@@ -23,9 +28,10 @@ const path = require("path");
 
 require("../../src/utils/data-script-guard").exitUnlessDataScriptAllowed("e2e:live-org");
 
-const [command, orgId] = process.argv.slice(2);
-if (!["activate", "drop"].includes(command) || !orgId) {
-  process.stderr.write("usage: node scripts/e2e/live-org.js <activate|drop> <orgId>\n");
+const [command, orgId, planArg] = process.argv.slice(2);
+const PLAN_TOKEN = /^[a-z0-9_-]{1,32}$/;
+if (!["activate", "drop", "plan"].includes(command) || !orgId || (command === "plan" && !PLAN_TOKEN.test(planArg || ""))) {
+  process.stderr.write("usage: node scripts/e2e/live-org.js <activate|drop> <orgId> | plan <orgId> <plan>\n");
   process.exit(2);
 }
 
@@ -49,6 +55,11 @@ const main = async () => {
       await prisma.subscription.create({ data: { orgId, plan: "business", status: "active", seats: 25, currentPeriodEnd } });
     }
     process.stdout.write(`${org.name}: subscription active\n`);
+    return;
+  }
+  if (command === "plan") {
+    await prisma.subscription.update({ where: { orgId: org.id }, data: { plan: planArg } });
+    process.stdout.write(`${org.name}: subscription plan ${planArg}\n`);
     return;
   }
   await dropLiveOrg(prisma, orgId);

@@ -3,6 +3,7 @@ import { useNavigate } from '@tanstack/react-router'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
+import type { Subscription } from '@/services/billing/types'
 import { useSubscription, useTransactions } from '../hooks/use-billing'
 import { CancelSubscriptionDialog } from './cancel-subscription-dialog'
 
@@ -26,9 +27,7 @@ export function BillingSettings() {
           </div>
         </CardHeader>
         <CardContent className='space-y-3'>
-          <div className='text-lg font-semibold'>
-            {sub.planName}{sub.billingCycle ? ` · ${sub.billingCycle}` : ''}
-          </div>
+          <PlanSummary sub={sub} />
           {sub.status === 'trialing' && sub.trialEndsAt && (
             <p className='text-muted-foreground text-sm'>
               Trial ends {new Date(sub.trialEndsAt).toLocaleDateString()}
@@ -94,9 +93,54 @@ export function BillingSettings() {
       <CancelSubscriptionDialog
         open={cancelOpen}
         onOpenChange={setCancelOpen}
-        planName={sub.planName}
+        planName={sub.planName ?? 'current'}
         periodEnd={sub.currentPeriodEnd}
       />
+    </div>
+  )
+}
+
+const limitLabel = (limit: number | null, noun: string) =>
+  limit === null ? `Unlimited ${noun}` : `Up to ${limit} ${noun}`
+
+/**
+ * The plan and its limits, as the server read them. A plan the catalogue
+ * does not contain is a configuration issue — shown as one, with no limits
+ * and no tier name, never as a trial (docs/qa/OCTAPM_ISSUE_PLAN-CATALOGUE-UAT.md).
+ */
+export function PlanSummary({ sub }: { sub: Subscription }) {
+  if (!sub.recognized || !sub.limits) {
+    return (
+      <div className='space-y-1' data-testid='subscription-plan-fault'>
+        <div className='text-destructive text-lg font-semibold' data-testid='subscription-plan'>
+          Subscription plan: configuration issue
+        </div>
+        {sub.plan && (
+          <p className='text-muted-foreground text-sm'>
+            Stored plan: <code>{sub.plan}</code>
+          </p>
+        )}
+        <p className='text-sm' data-testid='subscription-limits'>
+          Limits unavailable — contact your administrator.
+        </p>
+        {sub.configurationError?.message && (
+          <p className='text-muted-foreground text-sm'>{sub.configurationError.message}</p>
+        )}
+      </div>
+    )
+  }
+  return (
+    <div className='space-y-1'>
+      <div className='text-lg font-semibold' data-testid='subscription-plan'>
+        {sub.planName}{sub.billingCycle ? ` · ${sub.billingCycle}` : ''}
+      </div>
+      <p className='text-muted-foreground text-sm' data-testid='subscription-limits'>
+        {limitLabel(sub.limits.projectLimit, 'live projects')}
+        {' · '}
+        {sub.limits.aiLimit === null
+          ? 'Unlimited AI generations'
+          : `${sub.aiGenerationsUsed} of ${sub.limits.aiLimit} AI generations used this period`}
+      </p>
     </div>
   )
 }
