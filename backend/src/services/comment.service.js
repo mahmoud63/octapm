@@ -170,7 +170,19 @@ const RECORD_SOURCES = Object.freeze({
     label: "Delivery",
     title: ["receiptNumber"],
   },
-  cost_record: { model: "costRecord", label: "Cost record", title: ["id"] },
+  // A cost record has no name of its own: it is its activity's, and is
+  // named by that activity ("Cost record for Activity A120") — never by its
+  // database id, which a notification would carry as its subject.
+  cost_record: {
+    model: "costRecord",
+    label: "Cost record",
+    include: { activity: { select: { activityCode: true, name: true } } },
+    titleFor: (record) => {
+      const code = trimOrNull(record?.activity?.activityCode);
+      const name = trimOrNull(record?.activity?.name);
+      return code ? `for Activity ${code}` : name ? `for ${name}` : null;
+    },
+  },
   boq_item: { model: "boqItem", label: "BOQ item", title: ["code", "description"] },
   location: { model: "location", label: "Location", title: ["code", "name"] },
   project: { model: "project", label: "Project", title: ["name"], refs: false },
@@ -233,6 +245,7 @@ const ensureProject = async ({ orgId, projectId }) => {
 };
 
 const recordTitle = (config, record) => {
+  if (typeof config.titleFor === "function") return config.titleFor(record);
   const parts = config.title
     .map((field) => {
       const value = record?.[field];
@@ -257,7 +270,7 @@ const loadRecord = async ({ orgId, projectId, recordType, recordId }) => {
   if (recordType === "project") {
     record = id === projectId ? await prisma.project.findFirst({ where: { id, orgId } }) : null;
   } else if (model?.findFirst) {
-    record = await model.findFirst({ where: { id, projectId } });
+    record = await model.findFirst({ where: { id, projectId }, ...(config.include ? { include: config.include } : {}) });
   } else {
     // Model missing from a partial client (tests): trust the caller.
     record = { id };

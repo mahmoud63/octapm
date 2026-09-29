@@ -298,4 +298,30 @@ liveDescribe("a notification names its record in words, never by its database id
     expect(heard.map((row) => row.title)).toEqual(["Cost loading for Activity A120 rejected"]);
     expect([heard[0].title, heard[0].message]).toEqual([expect.not.stringMatching(IDENTIFIER), expect.not.stringMatching(IDENTIFIER)]);
   });
+
+  it("a mention on a cost record is written naming the record by its activity — 'Cost record for Activity A120' — never its id, in the stored row as in what is read", async () => {
+    // Last in this file. The admin's cost record on the coded activity, and
+    // a comment on it mentioning the reviewer.
+    const record = await ok(people.admin, "POST", `/projects/${project.id}/cost/activity/${records.coded.id}`, { committed: 0, forecast: 0 }, 201);
+    await ok(people.admin, "POST", `/projects/${project.id}/comments`, {
+      recordType: "cost_record",
+      recordId: record.id,
+      body: "Please check the committed figure",
+      mentionUserIds: [people.reviewer.id],
+    }, 201);
+    // Stored: the words, written as they are read — no identifier to strip.
+    const stored = await prisma.notification.findMany({
+      where: { orgId: live.org.id, recipientUserId: people.reviewer.id, entityType: "cost_record" },
+      select: { title: true, message: true },
+    });
+    const onRecord = stored.filter((row) => row.title.includes("Cost record"));
+    expect(onRecord.length).toBeGreaterThanOrEqual(1);
+    for (const row of onRecord) {
+      expect([row.title, IDENTIFIER.test(row.title), IDENTIFIER.test(row.message)]).toEqual([row.title, false, false]);
+      expect(row.title).toMatch(/mentioned you on Cost record for Activity A120$/);
+    }
+    // ... and read the same through the API.
+    const read = (await inbox(people.reviewer)).filter((row) => row.title.includes("Cost record"));
+    expect(read.map((row) => row.title).sort()).toEqual(onRecord.map((row) => row.title).sort());
+  });
 });
