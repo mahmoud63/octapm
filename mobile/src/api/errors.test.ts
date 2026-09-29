@@ -42,6 +42,22 @@ describe('errors shown to a person', () => {
     expect(fromStatus(500, undefined).retryable).toBe(true)
   })
 
+  it('says a subscription plan outside the catalogue is a configuration issue, not a retry and not a limit', () => {
+    const fault = fromStatus(500, {
+      code: 'SUBSCRIPTION_PLAN_UNKNOWN',
+      message: 'Subscription plan: configuration issue. This organisation\'s subscription names a plan called "standard", which is not in the plan catalogue, so its limits are unavailable.',
+    })
+    expect(fault.code).toBe('SERVER_ERROR')
+    expect(fault.serverCode).toBe('SUBSCRIPTION_PLAN_UNKNOWN')
+    expect(fault.userMessage).toMatch(/^Subscription plan: configuration issue\./)
+    expect(fault.userMessage).toMatch(/limits are unavailable/)
+    expect(fault.userMessage).toMatch(/contact your administrator/)
+    expect(fault.userMessage).not.toMatch(/trial|upgrade|try again/i)
+    expect(fault.retryable).toBe(false)
+    // Any other server fault is still the passing kind.
+    expect(fromStatus(500, { code: 'INTERNAL_ERROR' }).retryable).toBe(true)
+  })
+
   it('has a sentence for anything thrown', () => {
     expect(userMessage(new AppError('CONFLICT'))).toMatch(/somebody else changed/i)
     expect(userMessage('nonsense')).toMatch(/try again/i)

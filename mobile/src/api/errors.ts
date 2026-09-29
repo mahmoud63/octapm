@@ -20,6 +20,11 @@ export type AppErrorCode =
   | 'SERVER_ERROR'
   | 'UNKNOWN'
 
+/** The server's code for a stored subscription plan outside the catalogue. */
+export const SUBSCRIPTION_PLAN_UNKNOWN = 'SUBSCRIPTION_PLAN_UNKNOWN'
+export const SUBSCRIPTION_PLAN_UNKNOWN_MESSAGE =
+  'Subscription plan: configuration issue. This organisation’s plan limits are unavailable — contact your administrator.'
+
 export interface ServerErrorBody {
   code?: string
   message?: string
@@ -48,7 +53,9 @@ export class AppError extends Error {
     this.requestId = options.requestId
     this.details = options.details
     this.userMessage = describe(code, options.message, options.serverCode, options.details)
-    this.retryable = code === 'OFFLINE' || code === 'TIMEOUT' || code === 'SERVER_ERROR' || code === 'RATE_LIMITED'
+    this.retryable =
+      code === 'OFFLINE' || code === 'TIMEOUT' || code === 'RATE_LIMITED' ||
+      (code === 'SERVER_ERROR' && options.serverCode !== SUBSCRIPTION_PLAN_UNKNOWN)
   }
 
   /** A short line for a support conversation: the code and, if the server gave one, the request id. */
@@ -95,6 +102,10 @@ function describe(code: AppErrorCode, message: string | undefined, serverCode?: 
     case 'RATE_LIMITED':
       return 'Too many attempts in a short time. Wait a moment and try again.'
     case 'SERVER_ERROR':
+      // A subscription plan outside the catalogue is a configuration fault,
+      // not a passing server hiccup: retrying cannot help, and it is not a
+      // limit the organisation reached (PLAN-CATALOGUE-UAT).
+      if (serverCode === SUBSCRIPTION_PLAN_UNKNOWN) return SUBSCRIPTION_PLAN_UNKNOWN_MESSAGE
       return 'OctaPM had a problem on the server. Nothing you entered has been lost; try again in a moment.'
     default:
       return 'Something went wrong. Try again, and tell support what you were doing if it keeps happening.'
