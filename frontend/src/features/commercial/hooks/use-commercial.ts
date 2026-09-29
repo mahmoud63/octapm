@@ -117,8 +117,10 @@ export interface ActivityTraceLink {
 
 export interface AllocationTraceLink {
   id?: string
-  allocationId: string | null
-  boqItemId: string | null
+  // Absent, with boqWithheld beside them, for a member who may not read the BOQ.
+  allocationId?: string | null
+  boqItemId?: string | null
+  boqWithheld?: { keys: string[]; reason: string }
   quantity?: number
   amount?: number
   workDoneAmount?: number

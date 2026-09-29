@@ -22,6 +22,7 @@ const {
   deleteRfi,
 } = require("../services/rfi.service");
 const rfiWorkflow = require("../services/rfi-workflow.service");
+const { boqFigureAccess, withheldAllocationLinks } = require("../utils/boq-figures");
 
 const router = express.Router({ mergeParams: true });
 router.use(authenticate);
@@ -277,13 +278,12 @@ router.post(
     body("value").optional({ nullable: true }).isFloat({ min: 0 }),
     validate,
   ],
-  asyncHandler(async (req, res) =>
-    sendSuccess(
-      res,
-      await rfiWorkflow.convertToChangeEvent({ orgId: req.user.orgId, projectId: req.params.projectId, rfiId: req.params.rfiId, payload: req.body, userId: req.user.id, userRole: getEffectiveRole(req) }),
-      201,
-    ),
-  ),
+  asyncHandler(async (req, res) => {
+    const converted = await rfiWorkflow.convertToChangeEvent({ orgId: req.user.orgId, projectId: req.params.projectId, rfiId: req.params.rfiId, payload: req.body, userId: req.user.id, userRole: getEffectiveRole(req) });
+    // The change order it answers with is the register's own serializer: its
+    // allocation links go without their BOQ row to a caller who may not read the BOQ.
+    return sendSuccess(res, { ...converted, changeOrder: withheldAllocationLinks(converted.changeOrder, boqFigureAccess(req)) }, 201);
+  }),
 );
 
 router.post(

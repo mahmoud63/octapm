@@ -8820,6 +8820,18 @@ add(
   }),
 );
 
+// A change order's and a sub valuation's allocation links point at a BOQ
+// row and its allocation; a caller without boq:read is given each link
+// without them (utils/boq-figures withheldAllocationLinks).
+const allocationLinkWithholding = (ownFigures) =>
+  "Each of `allocationLinks` carries the BOQ row it points at (boqItemId, boqItem: id, code, ref, description, unit, qty, rate, amount) and its allocation (allocationId, allocation: id, quantity, amount, weight, status, with the row and its activity). A caller who may not read the BOQ (boq:read) is given each link without those four keys and `boqWithheld: { keys, reason }` in their place; the link's own " +
+  ownFigures +
+  ", its notes, and every figure of the record itself are returned to every reader, and boq:read is not needed to read or work the record.";
+const changeOrderLinkWithholding = allocationLinkWithholding("quantity and amount");
+const subValuationLinkWithholding = allocationLinkWithholding(
+  "quantity, workDoneAmount, materialsOnSiteAmount and retentionAmount",
+);
+
 add(
   "/projects/{projectId}/change-orders",
   "get",
@@ -8827,6 +8839,7 @@ add(
     tag: "Commercial",
     summary:
       "List change orders with activity, BOQ allocation, correspondence, and attachment traceability.",
+    description: changeOrderLinkWithholding,
     operationId: "listChangeOrders",
     parameters: [
       ...projectParams,
@@ -8846,6 +8859,7 @@ add(
   operation({
     tag: "Commercial",
     summary: "Create a change order.",
+    description: changeOrderLinkWithholding,
     operationId: "createChangeOrder",
     parameters: projectParams,
     permissions: rolesPermission("pm", "qs"),
@@ -8860,6 +8874,7 @@ add(
   operation({
     tag: "Commercial",
     summary: "Update a change order.",
+    description: changeOrderLinkWithholding,
     operationId: "updateChangeOrder",
     parameters: projectRecordParams,
     permissions: rolesPermission("pm", "qs"),
@@ -8878,6 +8893,7 @@ add(
     tag: "Commercial",
     summary:
       "Submit a draft change order for PM approval after impact proof is complete.",
+    description: changeOrderLinkWithholding,
     operationId: "submitChangeOrder",
     parameters: projectRecordParams,
     permissions: modulePermission(
@@ -8899,6 +8915,7 @@ add(
   operation({
     tag: "Commercial",
     summary: "Approve a change order through the canonical PM workflow.",
+    description: changeOrderLinkWithholding,
     operationId: "approveChangeOrder",
     parameters: projectRecordParams,
     permissions: modulePermission(
@@ -8920,6 +8937,7 @@ add(
   operation({
     tag: "Commercial",
     summary: "Reject a change order through the canonical PM workflow.",
+    description: changeOrderLinkWithholding,
     operationId: "rejectChangeOrder",
     parameters: projectRecordParams,
     permissions: modulePermission(
@@ -8940,6 +8958,7 @@ add(
   operation({
     tag: "Commercial",
     summary: "Disapprove a change order through the canonical PM workflow.",
+    description: changeOrderLinkWithholding,
     operationId: "disapproveChangeOrder",
     parameters: projectRecordParams,
     permissions: modulePermission(
@@ -8960,6 +8979,7 @@ add(
   operation({
     tag: "Commercial",
     summary: "Reopen a rejected change order to draft for rework.",
+    description: changeOrderLinkWithholding,
     operationId: "reopenChangeOrder",
     parameters: projectRecordParams,
     permissions: modulePermission(
@@ -9319,6 +9339,7 @@ add(
     tag: "Commercial",
     summary:
       "List legacy subcontractor valuations. Superseded by payment applications against a subcontract commitment (OCTA-FIN-SUBVAL-064): these name their subcontractor in free text, hold no schedule of values and post nothing to the cost ledger — they reach the project through cash flow only, and only once certified or paid. Existing rows are retained and readable; no new ones are accepted.",
+    description: subValuationLinkWithholding,
     operationId: "listSubValuations",
     parameters: projectParams,
   }),
@@ -9356,6 +9377,7 @@ add(
     tag: "Commercial",
     summary:
       "Update a legacy valuation so an in-flight one can be finished, and attribute it to a company with `companyId`. `subcontractor` is immutable (409 SUB_VALUATION_NAME_IMMUTABLE): it records who was billed at the time, and attribution goes beside it rather than over it.",
+    description: subValuationLinkWithholding,
     operationId: "updateSubValuation",
     parameters: projectRecordParams,
     requestBody: jsonBody(
@@ -13751,6 +13773,7 @@ const rfiResponseIdParam = pathParam("responseId", "Response UUID.");
     method: "post",
     path: "/projects/{projectId}/rfi/{rfiId}/convert-to-change",
     summary: "Create a draft change order from the RFI (subject, question, official response, activity, cost / schedule impact) and link it back.",
+    description: `\`changeOrder\` is the change order as the register returns it. ${changeOrderLinkWithholding}`,
     operationId: "convertRfiToChangeEvent",
     parameters: [projectIdParam, rfiUpgradeIdParam],
     permissions: modulePermission("change_order", "create"),

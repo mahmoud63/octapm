@@ -665,16 +665,19 @@ export function ChangeOrderRegister({
                           key={link.id || link.allocationId || link.boqItemId}
                           className='max-w-56 truncate text-muted-foreground'
                           title={
+                            link.boqWithheld?.reason ||
                             link.boqItem?.description ||
                             link.allocation?.boqItem?.description ||
                             ''
                           }
                         >
                           BOQ:{' '}
-                          {link.boqItem?.code ||
-                            link.allocation?.boqItem?.code ||
-                            link.boqItemId ||
-                            'Uncoded'}{' '}
+                          {link.boqWithheld
+                            ? '—'
+                            : link.boqItem?.code ||
+                              link.allocation?.boqItem?.code ||
+                              link.boqItemId ||
+                              'Uncoded'}{' '}
                           / {fmtUSD(link.amount || 0)}
                         </span>
                       ))}

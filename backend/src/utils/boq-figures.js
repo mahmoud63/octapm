@@ -144,6 +144,14 @@
  * cannot be decided per project and is withheld unless so marked. The
  * specification conflict check (spec_conflict) never sent the model a BOQ
  * row — the section, the sheets' text and the RFIs — and is not withheld.
+ *
+ * A change order's and a sub valuation's allocation links (change_order:read,
+ * sub_pay_app:read) point at a BoqItem row and its allocation, which the
+ * links carried nested — the row's code, description, quantity, rate and
+ * amount, the allocation's quantity, amount and weight. For a caller who
+ * may not read the BOQ the links keep their own figures and lose those
+ * (withheldAllocationLinks); the change order and the valuation are the
+ * commercial module's own records and are not withheld.
  */
 const { hasPermission } = require("../middleware/rbac");
 const { HttpError } = require("./http-error");
@@ -900,7 +908,47 @@ const withheldIpcItem = (item, access = FULL_ACCESS) => {
   return { id: item.id, itemWithheld: { reason: IPC_LINES_WITHHELD } };
 };
 
+const ALLOCATION_LINK_WITHHELD =
+  "The linked BOQ row and its allocation are available only to members who may read the BOQ";
+
+// What a change order's or a sub valuation's allocation link
+// (ChangeOrderAllocationLink, SubValuationAllocationLink) carries of the
+// bill rather than of itself: the BoqItem row it points at (id, code, ref,
+// description, unit, qty, rate, amount) and the allocation (id, quantity,
+// amount, weight, status, with that row again and its activity) — nested,
+// and as the ids beside them.
+const ALLOCATION_LINK_BOQ_KEYS = ["allocationId", "boqItemId", "allocation", "boqItem"];
+
+const withheldAllocationLink = (link) => {
+  if (!link || typeof link !== "object" || Array.isArray(link)) return link;
+  const keys = ALLOCATION_LINK_BOQ_KEYS.filter((key) => has(link, key));
+  if (!keys.length) return link;
+  return { ...withoutKeys(link, keys), boqWithheld: { keys, reason: ALLOCATION_LINK_WITHHELD } };
+};
+
+/**
+ * A change order or a sub valuation (change-order.service — the register's
+ * rows and the order every write and transition answers with;
+ * sub-valuation.service — the list's rows and the answer to editing one) as
+ * this caller may receive it: for a caller who may not read the BOQ, each
+ * allocation link without the BOQ row and the allocation it points at, and
+ * `boqWithheld: { keys, reason }` on the link names those left out and why.
+ * The link's own figures — a change order's quantity and amount, a
+ * valuation's quantity, work done, materials on site and retention — its
+ * notes, and every figure of the record itself stay. Nothing about the
+ * workflow depends on it. A BOQ reader's record, and one without allocation
+ * links, is returned untouched (the same object).
+ */
+const withheldAllocationLinks = (record, access = FULL_ACCESS) => {
+  if (access.boq || !record || typeof record !== "object" || Array.isArray(record)) return record;
+  if (!Array.isArray(record.allocationLinks) || !record.allocationLinks.length) return record;
+  return { ...record, allocationLinks: record.allocationLinks.map(withheldAllocationLink) };
+};
+
 module.exports = {
+  ALLOCATION_LINK_BOQ_KEYS,
+  ALLOCATION_LINK_WITHHELD,
+  withheldAllocationLinks,
   BILLING_LINES_WITHHELD,
   withheldBillingStatement,
   IPC_BOQ_KEYS,

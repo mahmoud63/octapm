@@ -6,6 +6,10 @@ const { requirePermission, hasPermission } = require("../middleware/rbac");
 const { sendSuccess } = require("../utils/api-response");
 const { moneyBody } = require("../utils/money");
 const {
+  boqFigureAccess,
+  withheldAllocationLinks,
+} = require("../utils/boq-figures");
+const {
   listSubValuations,
   createSubValuation,
   updateSubValuation,
@@ -30,7 +34,12 @@ router.get(
       projectAccess: req.projectAccess || null,
     });
 
-    return sendSuccess(res, data);
+    // A link's BOQ row and allocation go only to a BOQ reader.
+    const access = boqFigureAccess(req);
+    return sendSuccess(res, {
+      ...data,
+      rows: data.rows.map((row) => withheldAllocationLinks(row, access)),
+    });
   }),
 );
 
@@ -119,7 +128,7 @@ router.patch(
       projectAccess: req.projectAccess || null,
     });
 
-    return sendSuccess(res, row);
+    return sendSuccess(res, withheldAllocationLinks(row, boqFigureAccess(req)));
   }),
 );
 

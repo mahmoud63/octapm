@@ -11,6 +11,10 @@ const {
 const { validate } = require("../middleware/validate");
 const { moneyBody } = require("../utils/money");
 const changeOrderService = require("../services/change-order.service");
+const {
+  boqFigureAccess,
+  withheldAllocationLinks,
+} = require("../utils/boq-figures");
 
 const router = express.Router({ mergeParams: true });
 router.use(authenticate);
@@ -34,7 +38,12 @@ router.get(
       projectId: req.params.projectId,
       query: req.query,
     });
-    return sendSuccess(res, result);
+    // A link's BOQ row and allocation go only to a BOQ reader.
+    const access = boqFigureAccess(req);
+    return sendSuccess(res, {
+      ...result,
+      orders: result.orders.map((order) => withheldAllocationLinks(order, access)),
+    });
   }),
 );
 
@@ -140,7 +149,7 @@ router.post(
       userRole: getEffectiveRole(req),
       payload: req.body,
     });
-    return sendSuccess(res, result, 201);
+    return sendSuccess(res, withheldAllocationLinks(result, boqFigureAccess(req)), 201);
   }),
 );
 
@@ -250,7 +259,7 @@ router.patch(
       userRole: getEffectiveRole(req),
       payload: req.body,
     });
-    return sendSuccess(res, result);
+    return sendSuccess(res, withheldAllocationLinks(result, boqFigureAccess(req)));
   }),
 );
 
@@ -275,7 +284,7 @@ router.post(
       userRole: getEffectiveRole(req),
       comment: req.body.comment,
     });
-    return sendSuccess(res, result);
+    return sendSuccess(res, withheldAllocationLinks(result, boqFigureAccess(req)));
   }),
 );
 
@@ -300,7 +309,7 @@ router.post(
       userRole: getEffectiveRole(req),
       comment: req.body.comment,
     });
-    return sendSuccess(res, result);
+    return sendSuccess(res, withheldAllocationLinks(result, boqFigureAccess(req)));
   }),
 );
 
@@ -313,7 +322,7 @@ const rejectChangeOrderRoute = asyncHandler(async (req, res) => {
     userRole: getEffectiveRole(req),
     reason: req.body.reason,
   });
-  return sendSuccess(res, result);
+  return sendSuccess(res, withheldAllocationLinks(result, boqFigureAccess(req)));
 });
 
 const rejectChangeOrderValidators = [
@@ -361,7 +370,7 @@ router.post(
       userRole: getEffectiveRole(req),
       comment: req.body.comment,
     });
-    return sendSuccess(res, result);
+    return sendSuccess(res, withheldAllocationLinks(result, boqFigureAccess(req)));
   }),
 );
 
