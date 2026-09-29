@@ -366,6 +366,22 @@ describe("a notification stored before the rule is re-rendered where it is read,
     expect(mockPrisma.notification.findMany.mock.calls[1][0].where).not.toHaveProperty("AND");
   });
 
+  it("an id in the reviewer's own words is taken out, never replaced by this record's name — the rest is kept as written", async () => {
+    const OTHER = "61807fe6-bf4e-4a3c-9215-17ad0761da04";
+    mockPrisma.notification.findMany.mockResolvedValue([
+      // Written in words, with a reason naming another allocation.
+      legacy({ id: "reason-1", event: "workflow.rejected", title: "BOQ allocation for Activity A120 rejected", message: `BOQ allocation: Activity A120. Status moved to rejected. Duplicate of allocation ${OTHER}` }),
+      // Stored before the rule, with the same reason.
+      legacy({ id: "reason-2", event: "workflow.rejected", title: `BOQ allocation ${ALLOCATION} rejected`, message: `BOQ allocation: Workflow record. Status moved to rejected. Duplicate of allocation ${OTHER}.` }),
+    ]);
+    const { rows } = await notificationService.listNotifications({ orgId: "org-1", userId: "user-1", viewer: { id: "user-1", orgId: "org-1" } });
+    expect(rows.map((row) => row.message)).toEqual([
+      "BOQ allocation: Activity A120. Status moved to rejected. Duplicate of allocation",
+      "BOQ allocation: Activity A120. Status moved to rejected. Duplicate of allocation.",
+    ]);
+    for (const row of rows) expect(row.message).not.toMatch(/Duplicate of allocation Activity A120/);
+  });
+
   it("a stored allocation whose activity has no code: the description for a BOQ reader", async () => {
     mockPrisma.activityBoqAllocation.findMany.mockResolvedValue([
       { id: ALLOCATION, projectId: PROJECT, activity: { activityCode: null }, boqItem: { description: "Concrete Foundations" } },

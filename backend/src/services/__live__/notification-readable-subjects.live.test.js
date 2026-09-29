@@ -324,4 +324,58 @@ liveDescribe("a notification names its record in words, never by its database id
     const read = (await inbox(people.reviewer)).filter((row) => row.title.includes("Cost record"));
     expect(read.map((row) => row.title).sort()).toEqual(onRecord.map((row) => row.title).sort());
   });
+
+  it("a mention on a progress submission is written naming it by its activity — 'Progress submission for Activity A120' — never its id", async () => {
+    // Last in this file. The admin submits progress on the coded activity
+    // and mentions the reviewer on the submission.
+    await ok(people.admin, "POST", `/projects/${project.id}/activities/${records.coded.id}/progress`, { pctComplete: 20 });
+    const submission = await prisma.progressSubmission.findFirst({
+      where: { projectId: project.id, activityId: records.coded.id },
+      orderBy: { createdAt: "desc" },
+      select: { id: true },
+    });
+    expect(submission).not.toBeNull();
+    await ok(people.admin, "POST", `/projects/${project.id}/comments`, {
+      recordType: "progress_submission",
+      recordId: submission.id,
+      body: "Please check the quantity",
+      mentionUserIds: [people.reviewer.id],
+    }, 201);
+    const stored = await prisma.notification.findMany({
+      where: { orgId: live.org.id, recipientUserId: people.reviewer.id, entityType: "progress_submission", entityId: submission.id },
+      select: { title: true, message: true },
+    });
+    expect(stored.length).toBeGreaterThanOrEqual(1);
+    for (const row of stored) {
+      expect([row.title, IDENTIFIER.test(row.title), IDENTIFIER.test(row.message)]).toEqual([row.title, false, false]);
+      expect(row.title).toMatch(/on Progress submission for Activity A120$/);
+    }
+    const read = (await inbox(people.reviewer)).filter((row) => row.entityId === submission.id);
+    expect(read.map((row) => row.title).sort()).toEqual(stored.map((row) => row.title).sort());
+  });
+
+  it("a reviewer's reason that names another record by its id reads back without that id — never with this record's name in its place — and the stored row is left as written", async () => {
+    // Last in this file. The reviewer rejects the uncoded allocation (still
+    // submitted), saying it duplicates the coded one — by its id.
+    const other = records.codedAllocation.id;
+    const id = records.uncodedAllocation.id;
+    await ok(people.reviewer, "POST", `/projects/${project.id}/activity-boq-allocations/${id}/reject`, { reason: `Duplicate of allocation ${other}` });
+    const stored = await prisma.notification.findMany({
+      where: { orgId: live.org.id, recipientUserId: people.admin.id, entityId: id, event: "workflow.rejected" },
+      select: { id: true, message: true },
+    });
+    expect(stored.length).toBe(1);
+    // The reason is stored as the reviewer wrote it.
+    expect(stored[0].message).toContain(`Duplicate of allocation ${other}`);
+    const [heard] = (await inbox(people.admin)).filter((row) => row.id === stored[0].id);
+    expect(heard.title).toBe("BOQ allocation for Rebar to Foundations rejected");
+    // The id is taken out; the allocation is not said to duplicate itself.
+    expect(heard.message).not.toMatch(IDENTIFIER);
+    expect(heard.message).not.toContain("Duplicate of allocation Rebar to Foundations");
+    expect(heard.message).toMatch(/^BOQ allocation: Rebar to Foundations. .*Duplicate of allocation.?$/);
+    const one = await ok(people.admin, "GET", `/notifications/${stored[0].id}`);
+    expect(one.message).toBe(heard.message);
+    // Reading never rewrites the row.
+    expect(await prisma.notification.findUnique({ where: { id: stored[0].id }, select: { message: true } })).toEqual({ message: stored[0].message });
+  });
 });

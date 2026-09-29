@@ -1802,7 +1802,11 @@ const escapeRegExp = (value) => String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\
  * A stored message with its record's words put back: the builders' first
  * sentence ("<label>: <subject>.") replaces the old one ("<label>: Workflow
  * record." or "<label>: <id>."), and the rest — the status it moved to, the
- * reviewer's comment, the due date — is kept as written.
+ * reviewer's comment, the due date — is kept as written. The subject goes
+ * only where the builders put the record: an id anywhere else is someone's
+ * own words about another record ("Duplicate of allocation <id>"), never
+ * this one, so it is not replaced by this record's name — the caller
+ * strips it (withoutIdentifiers), leaving "Duplicate of allocation".
  */
 const rewrittenMessage = ({ message, label, subject, title }) => {
   if (typeof message !== "string") return message;
@@ -1813,7 +1817,7 @@ const rewrittenMessage = ({ message, label, subject, title }) => {
   if (oldFirst.test(message)) {
     return message.replace(oldFirst, subjectSentence({ label, subject, title }));
   }
-  return subject ? message.split(LEGACY_PLACEHOLDER).join(subject).replace(IDENTIFIER_TOKENS, subject) : message;
+  return subject ? message.split(LEGACY_PLACEHOLDER).join(subject) : message;
 };
 
 /** The records a batch of stored rows names, a record type at a time, from their own projects. */

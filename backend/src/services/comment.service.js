@@ -117,10 +117,14 @@ const RECORD_SOURCES = Object.freeze({
     label: "Daily log",
     title: ["date"],
   },
+  // A progress submission has no name of its own either: it is its
+  // activity's, and is named by that activity ("Progress submission for
+  // Activity A120"), as a cost record is — never by its database id.
   progress_submission: {
     model: "progressSubmission",
     label: "Progress submission",
-    title: ["id"],
+    include: { activity: { select: { activityCode: true, name: true } } },
+    titleFor: (record) => forItsActivity(record),
   },
   activity: {
     model: "activity",
@@ -177,11 +181,7 @@ const RECORD_SOURCES = Object.freeze({
     model: "costRecord",
     label: "Cost record",
     include: { activity: { select: { activityCode: true, name: true } } },
-    titleFor: (record) => {
-      const code = trimOrNull(record?.activity?.activityCode);
-      const name = trimOrNull(record?.activity?.name);
-      return code ? `for Activity ${code}` : name ? `for ${name}` : null;
-    },
+    titleFor: (record) => forItsActivity(record),
   },
   boq_item: { model: "boqItem", label: "BOQ item", title: ["code", "description"] },
   location: { model: "location", label: "Location", title: ["code", "name"] },
@@ -197,6 +197,14 @@ const trimOrNull = (value) => {
   const text = String(value).trim();
   return text || null;
 };
+
+// A record named by its activity: "for Activity <code>", else "for <name>",
+// else nothing (the kind alone).
+function forItsActivity(record) {
+  const code = trimOrNull(record?.activity?.activityCode);
+  const name = trimOrNull(record?.activity?.name);
+  return code ? `for Activity ${code}` : name ? `for ${name}` : null;
+}
 
 const unique = (values) => [
   ...new Set((Array.isArray(values) ? values : []).map(trimOrNull).filter(Boolean)),
