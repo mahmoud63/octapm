@@ -4,9 +4,11 @@ const { BILLING_LINES_WITHHELD, withheldBillingStatement } = require("../boq-fig
 
 // A statement as prime-contract.service buildStatement builds it: the
 // commercial module's own records, and the schedule of values read off the
-// BOQ's rows.
+// BOQ's rows. Its original value was entered through the contract, so it is
+// established (the contract value's own withholding is tested in
+// boq-figures.contract-value.test.js).
 const statement = () => ({
-  contract: { id: "pc-1", ref: "PC-1", originalValue: 250000, revisedValue: 250000 },
+  contract: { id: "pc-1", ref: "PC-1", originalValue: 250000, originalValueSource: "contract_entry", revisedValue: 250000 },
   summary: { originalValue: 250000, currentCertified: 0, totalDue: 0 },
   current: { id: "ipc-1", period: "P01", status: "draft", totalCert: 0 },
   periods: [{ id: "ipc-1", period: "P01", status: "draft", totalCert: 0 }],

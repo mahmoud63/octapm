@@ -85,9 +85,11 @@
  * invoices, receipts and the advance. The contract, receivables and
  * advances reads carry no BOQ row and are not touched. (The contract's
  * original value is seeded once, when the contract is first read, from the
- * project's contract value or else the bill's total; from then on it is the
- * contract's own stored figure, changed only through contract.manage and
- * approved change orders, and it is not withheld.)
+ * project's contract value or else the bill's total. Owner decisions 1-3,
+ * 2026-09-29: while it is that unconfirmed BOQ total, or its source is not
+ * established, it is withheld from a member who may not read the BOQ — the
+ * contract, the statement and the contract.manage history alike; see
+ * withheldPrimeContract.)
  *
  * The payment certificate beside it (GET /ipc/:period, admitted on the same
  * ipc:read) listed the same rows: each certificate line carried its BoqItem
@@ -644,6 +646,103 @@ const withSummaries = (event, strip) => ({
 const IPC_EVENT_BOQ_KEYS = ["certificationReview", "progressLinks"];
 const IPC_EVENT_PARTS = ["oldSummary", "newSummary", "summary", "metadata"];
 
+// ─── the client contract's original value (owner decisions 1-3, 2026-09-29) ──
+//
+// ensureContract seeds a contract's original value from the project's own
+// contract value or, when the project has none, from the active BOQ's total
+// (prime-contract.service; PrimeContract.originalValueSource says which). A
+// project value, and a value a contract manager entered or confirmed
+// (contract_entry), are the commercial module's own, established amounts:
+// every IPC / contract reader receives them. A BOQ fallback nobody has
+// confirmed is the bill's total under another name, and a value whose source
+// is not established (NULL: written before the column) may be; for a caller
+// who may not read the BOQ on the project the amount is left out — the
+// original value, the revised value (original + approved changes, which
+// stay), the remaining to certify (revised − certified), and the agreed
+// advance when it is a rate of the value (advanceRate > 0) — never zeroed,
+// and `valueWithheld: { keys, source, reason }` says why. Certificates,
+// invoices, payments, retention, the advance received and recovered, and the
+// change orders' totals are independently authorized and stay.
+const CONTRACT_VALUE_ESTABLISHED = new Set(["project_value", "contract_entry"]);
+const CONTRACT_VALUE_WITHHELD = Object.freeze({
+  boq_fallback:
+    "The original value is the BOQ's total, not yet confirmed as the contract value: it is available only to members who may read the BOQ until a contract manager enters or confirms it",
+  unestablished:
+    "Where the original value came from is not established: it is available only to members who may read the BOQ until a contract manager enters or confirms it",
+});
+const CONTRACT_EVENT_VALUE_WITHHELD =
+  "The original value recorded here was not an established contract value: it is available only to members who may read the BOQ";
+const CONTRACT_VALUE_KEYS = ["originalValue", "revisedValue"];
+const STATEMENT_VALUE_KEYS = ["originalValue", "revisedValue", "remainingToCertify"];
+
+const contractValueSourceOf = (source) => source || "unestablished";
+
+/** Whether this caller is refused a contract's original value from `source`. */
+const contractValueWithheld = (source, access = FULL_ACCESS) =>
+  !access.boq && !CONTRACT_VALUE_ESTABLISHED.has(contractValueSourceOf(source));
+
+const contractValueReason = (source) =>
+  CONTRACT_VALUE_WITHHELD[source] || CONTRACT_VALUE_WITHHELD.unestablished;
+
+// The keys of `holder` that state the amount: `base`, and the agreed advance
+// when it is a rate of the value.
+const contractValueKeys = (holder, base, advanceRate) =>
+  [...base, ...(Number(advanceRate) > 0 ? ["advanceAmount"] : [])].filter((key) => has(holder, key));
+
+const withoutContractValue = (holder, base, source, advanceRate) => {
+  const keys = contractValueKeys(holder, base, advanceRate);
+  if (!keys.length) return holder;
+  return { ...withoutKeys(holder, keys), valueWithheld: { keys, source, reason: contractValueReason(source) } };
+};
+
+/**
+ * A client contract (prime-contract.service serializeContract — GET, PATCH
+ * and POST /advances on /prime-contract answer with it) as this caller may
+ * receive it. A BOQ reader's contract, and one whose value is established,
+ * is returned untouched (the same object).
+ */
+const withheldPrimeContract = (contract, access = FULL_ACCESS) => {
+  if (access.boq || !contract || typeof contract !== "object" || Array.isArray(contract)) return contract;
+  if (!contractValueWithheld(contract.originalValueSource, access)) return contract;
+  const source = contractValueSourceOf(contract.originalValueSource);
+  return withoutContractValue(contract, CONTRACT_VALUE_KEYS, source, contract.advanceRate);
+};
+
+const isContractManageEvent = (event) =>
+  Boolean(
+    event &&
+      (event.recordType || event.entityType) === "project" &&
+      event.summary &&
+      typeof event.summary === "object" &&
+      event.summary.transition === "contract.manage",
+  );
+
+/**
+ * A contract.manage event (prime-contract.service updateContract) records the
+ * original value before and after. Each summary states its own source (since
+ * owner decisions 1-3); one written earlier states none, and is taken as a
+ * project value only when the contract's source now is project_value — a
+ * contract whose original value was never entered — and otherwise as
+ * unestablished. An amount that is not established is left out of that
+ * summary, and `valueWithheld` names the summaries. The rest of the event —
+ * who, when, the rates — stays.
+ */
+const withheldContractManageEvent = (event, contractValueSource) => {
+  const legacySource = contractValueSource === "project_value" ? "project_value" : "unestablished";
+  const parts = [];
+  const copy = { ...event };
+  for (const part of ["oldSummary", "newSummary", "summary"]) {
+    const value = event[part];
+    if (!value || typeof value !== "object" || !has(value, "originalValue")) continue;
+    const source = has(value, "originalValueSource") ? contractValueSourceOf(value.originalValueSource) : legacySource;
+    if (CONTRACT_VALUE_ESTABLISHED.has(source)) continue;
+    copy[part] = withoutKeys(value, ["originalValue"]);
+    parts.push(part);
+  }
+  if (!parts.length) return event;
+  return { ...copy, valueWithheld: { parts, keys: ["originalValue"], reason: CONTRACT_EVENT_VALUE_WITHHELD } };
+};
+
 const withheldIpcCertificateEvent = (event) => {
   const strip = (value) => withoutKeys(value, IPC_EVENT_BOQ_KEYS);
   const stripped = withSummaries(event, strip);
@@ -664,14 +763,18 @@ const withheldIpcCertificateEvent = (event) => {
  * Nor is a payment certificate's certification review, which its
  * certification records in the audit summary and the approval metadata:
  * the event stays, without it, and `boqWithheld` says why.
+ * Nor is the client contract's original value where it is not established
+ * (withheldContractManageEvent below): `contractValueSource` is the project's
+ * contract's source now (prime-contract.service contractValueSource).
  * Everything else is as built; the stored events are not changed.
  */
-const withheldAuditHistory = (history, access = FULL_ACCESS) => {
+const withheldAuditHistory = (history, access = FULL_ACCESS, { contractValueSource = null } = {}) => {
   if (access.boq || !history || typeof history !== "object" || !Array.isArray(history.events)) return history;
   const events = history.events
     .filter((event) => !(event && BOQ_RECORD_TYPES.has(event.recordType || event.entityType)))
     .map((event) => {
       const type = event && (event.recordType || event.entityType);
+      if (isContractManageEvent(event)) return withheldContractManageEvent(event, contractValueSource);
       if (type === "cost_record") return withSummaries(event, withoutRecordBudget);
       if (type === "ipc_certificate") return withheldIpcCertificateEvent(event);
       if (!access.budget && type === "schedule_revision") return withSummaries(event, withoutRevisionTotals);
@@ -849,12 +952,30 @@ const BILLING_LINES_WITHHELD =
  * readers included — the statement without its schedule of values (`lines`,
  * the BOQ rows), and `linesWithheld` says why. The contract, the summary,
  * the current certificate and the periods are the commercial module's own
- * and stay as built. A BOQ reader's statement is returned untouched (the
- * same object).
+ * and stay as built — except the contract's original value where it is not
+ * established (see withheldPrimeContract): the contract and the summary then
+ * lose the amount and every figure stating it, each with `valueWithheld`. A
+ * BOQ reader's statement is returned untouched (the same object).
  */
 const withheldBillingStatement = (statement, access = FULL_ACCESS) => {
-  if (access.boq || !statement || typeof statement !== "object" || !has(statement, "lines")) return statement;
-  return { ...withoutKeys(statement, ["lines"]), linesWithheld: { reason: BILLING_LINES_WITHHELD } };
+  if (access.boq || !statement || typeof statement !== "object" || Array.isArray(statement)) return statement;
+  let answer = statement;
+  if (has(statement, "lines")) {
+    answer = { ...withoutKeys(statement, ["lines"]), linesWithheld: { reason: BILLING_LINES_WITHHELD } };
+  }
+  const contract = statement.contract;
+  if (contract && typeof contract === "object" && contractValueWithheld(contract.originalValueSource, access)) {
+    const source = contractValueSourceOf(contract.originalValueSource);
+    const withheldContract = withheldPrimeContract(contract, access);
+    const summary =
+      statement.summary && typeof statement.summary === "object"
+        ? withoutContractValue(statement.summary, STATEMENT_VALUE_KEYS, source, contract.advanceRate)
+        : statement.summary;
+    if (withheldContract !== contract || summary !== statement.summary) {
+      answer = { ...answer, contract: withheldContract, summary };
+    }
+  }
+  return answer;
 };
 
 const IPC_LINES_WITHHELD =
@@ -951,6 +1072,10 @@ module.exports = {
   withheldAllocationLinks,
   BILLING_LINES_WITHHELD,
   withheldBillingStatement,
+  CONTRACT_EVENT_VALUE_WITHHELD,
+  CONTRACT_VALUE_WITHHELD,
+  contractValueWithheld,
+  withheldPrimeContract,
   IPC_BOQ_KEYS,
   IPC_LINES_WITHHELD,
   IPC_REVIEW_REFUSALS,

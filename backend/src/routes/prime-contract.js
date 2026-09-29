@@ -7,7 +7,12 @@ const { requirePermission } = require("../middleware/rbac");
 const { validate } = require("../middleware/validate");
 const { moneyBody } = require("../utils/money");
 const service = require("../services/prime-contract.service");
-const { boqFigureAccess, withheldBillingStatement } = require("../utils/boq-figures");
+const {
+  boqFigureAccess,
+  canReadBoq,
+  withheldBillingStatement,
+  withheldPrimeContract,
+} = require("../utils/boq-figures");
 
 /**
  * The client contract and what it bills (OCTA-COM-PRIME-051).
@@ -15,6 +20,13 @@ const { boqFigureAccess, withheldBillingStatement } = require("../utils/boq-figu
  * Sits under the `ipc` permission module: whoever may see a payment
  * certificate may see the contract it is measured against, and whoever
  * certifies may record what the client paid.
+ *
+ * The contract's original value is established — the project's own value, or
+ * one a contract manager entered or confirmed — or it is the BOQ's total
+ * nobody has confirmed (or of a source not established). The latter is the
+ * bill's figure: every answer here that states it goes through
+ * withheldPrimeContract / withheldBillingStatement (utils/boq-figures), and
+ * only the server classifies it (owner decisions 1-3, 2026-09-29).
  */
 const router = express.Router({ mergeParams: true });
 router.use(authenticate);
@@ -31,7 +43,7 @@ router.get(
       projectId: req.params.projectId,
       userId: req.user.id,
     });
-    return sendSuccess(res, service.serializeContract(contract));
+    return sendSuccess(res, withheldPrimeContract(service.serializeContract(contract), boqFigureAccess(req)));
   })
 );
 
@@ -56,17 +68,29 @@ router.patch(
     body("startDate").optional({ nullable: true }).isISO8601(),
     body("completionDate").optional({ nullable: true }).isISO8601(),
     body("notes").optional({ nullable: true }).isString().trim().isLength({ max: 4000 }),
+    // Confirms the stored original value as it stands (the BOQ fallback, or
+    // a value of unestablished source); the service also requires boq:read.
+    body("confirmOriginalValue").optional().isBoolean({ strict: true }).toBoolean(true),
+    // Where the original value came from is the server's to say.
+    body("originalValueSource")
+      .not()
+      .exists()
+      .withMessage("originalValueSource is set by the server and cannot be sent"),
     validate,
   ],
   asyncHandler(async (req, res) =>
     sendSuccess(
       res,
-      await service.updateContract({
-        orgId: req.user.orgId,
-        projectId: req.params.projectId,
-        userId: req.user.id,
-        payload: req.body,
-      })
+      withheldPrimeContract(
+        await service.updateContract({
+          orgId: req.user.orgId,
+          projectId: req.params.projectId,
+          userId: req.user.id,
+          payload: req.body,
+          canConfirmFallback: canReadBoq(req),
+        }),
+        boqFigureAccess(req)
+      )
     )
   )
 );
@@ -134,12 +158,16 @@ router.post(
   asyncHandler(async (req, res) =>
     sendSuccess(
       res,
-      await service.recordAdvancePayment({
-        orgId: req.user.orgId,
-        projectId: req.params.projectId,
-        userId: req.user.id,
-        payload: req.body,
-      }),
+      withheldPrimeContract(
+        await service.recordAdvancePayment({
+          orgId: req.user.orgId,
+          projectId: req.params.projectId,
+          userId: req.user.id,
+          payload: req.body,
+          canReadBoq: canReadBoq(req),
+        }),
+        boqFigureAccess(req)
+      ),
       201
     )
   )

@@ -36,6 +36,37 @@ const APPROVED_CHANGE_STATUSES = ["approved"];
 /** Raised, not yet decided: shown separately so a forecast can see it coming. */
 const PENDING_CHANGE_STATUSES = ["draft", "pending"];
 
+/**
+ * Where the contract's original value came from (PrimeContract.
+ * originalValueSource; owner decisions 1-3, 2026-09-29). Set by the server
+ * only — never read off a request:
+ *
+ * - project_value: ensureContract took the project's own contract value;
+ * - boq_fallback: the project had none, so ensureContract took the active
+ *   BOQ's total — the bill's figure, not yet the contract's;
+ * - contract_entry: a contract manager entered a different original value,
+ *   or one who may also read the BOQ confirmed the fallback as it stands;
+ * - unestablished: NULL, a row written before the column whose source cannot
+ *   be shown.
+ *
+ * The first and third are established amounts. The other two are withheld
+ * from a member who may not read the BOQ (utils/boq-figures).
+ */
+const VALUE_SOURCES = Object.freeze({
+  PROJECT_VALUE: "project_value",
+  CONTRACT_ENTRY: "contract_entry",
+  BOQ_FALLBACK: "boq_fallback",
+  UNESTABLISHED: "unestablished",
+});
+const ESTABLISHED_VALUE_SOURCES = Object.freeze([
+  VALUE_SOURCES.PROJECT_VALUE,
+  VALUE_SOURCES.CONTRACT_ENTRY,
+]);
+
+const valueSourceOf = (contract) =>
+  (contract && contract.originalValueSource) || VALUE_SOURCES.UNESTABLISHED;
+const valueEstablished = (contract) => ESTABLISHED_VALUE_SOURCES.includes(valueSourceOf(contract));
+
 const CONTRACT_TYPES = ["lump_sum", "remeasured", "cost_plus", "gmp"];
 const CONTRACT_STATUSES = ["draft", "active", "closed"];
 const ADVANCE_KINDS = ["payment", "recovery"];
@@ -62,6 +93,7 @@ const serializeContract = (contract, extra = {}) => ({
   contractType: contract.contractType,
   currency: contract.currency,
   originalValue: num(contract.originalValue),
+  originalValueSource: valueSourceOf(contract),
   approvedChangesValue: num(contract.approvedChangesValue),
   pendingChangesValue: num(contract.pendingChangesValue),
   revisedValue: num(contract.revisedValue),
@@ -129,7 +161,13 @@ const ensureContract = async ({ orgId, projectId, userId = null }) => {
     _sum: { amount: true },
   });
   const boqTotal = num(boq._sum?.amount);
-  const originalValue = num(project.contractValue) || boqTotal;
+  const projectValue = num(project.contractValue);
+  const originalValue = projectValue || boqTotal;
+  // Which of the two it was, recorded once, here: nothing a client sends
+  // decides it.
+  const originalValueSource = projectValue
+    ? VALUE_SOURCES.PROJECT_VALUE
+    : VALUE_SOURCES.BOQ_FALLBACK;
 
   // The reference is unique per organisation, so fall back off the contract
   // number to a count when two projects share one (or have none).
@@ -169,6 +207,7 @@ const ensureContract = async ({ orgId, projectId, userId = null }) => {
         : "lump_sum",
       currency: project.currency || "USD",
       originalValue,
+      originalValueSource,
       approvedChangesValue,
       pendingChangesValue,
       revisedValue: addMoney(originalValue, approvedChangesValue),
@@ -229,9 +268,54 @@ const EDITABLE = [
   "clientCompanyId",
 ];
 
-const updateContract = async ({ orgId, projectId, userId, payload = {} }) => {
+/**
+ * Saves the contract's terms, and is the one road to an established original
+ * value (owner decisions 1-3, 2026-09-29). Admitted on ipc:update
+ * contract.manage.
+ *
+ * - Entering an original value that differs from the stored one records it as
+ *   contract_entry. Sending the stored value back (a form saving its terms)
+ *   changes nothing about where the value came from.
+ * - `confirmOriginalValue: true` confirms the stored BOQ fallback (or an
+ *   unestablished value) as the contract's, unchanged. That reveals the
+ *   bill's total, so the caller must also be able to read the BOQ on the
+ *   project (`canConfirmFallback`, decided by the route); it cannot be
+ *   combined with entering a value, and an established value has nothing to
+ *   confirm.
+ *
+ * Either is recorded by the existing contract.manage audit event — its
+ * actor and time, the source before and after, and which it was.
+ */
+const updateContract = async ({ orgId, projectId, userId, payload = {}, canConfirmFallback = false }) => {
   const contract = await ensureContract({ orgId, projectId, userId });
   const data = { updatedBy: userId };
+  let valueConfirmation = null;
+
+  if (payload.confirmOriginalValue === true) {
+    if (payload.originalValue !== undefined) {
+      throw new HttpError(
+        400,
+        "CONTRACT_VALUE_CONFIRM_CONFLICT",
+        "Confirm the stored original value or enter a new one, not both"
+      );
+    }
+    if (!canConfirmFallback) {
+      throw new HttpError(
+        403,
+        "CONTRACT_VALUE_CONFIRM_FORBIDDEN",
+        "Confirming the original value as it stands needs BOQ read access on this project; enter the contract value instead"
+      );
+    }
+    if (valueEstablished(contract)) {
+      throw new HttpError(
+        409,
+        "CONTRACT_VALUE_ALREADY_ESTABLISHED",
+        "The original value is already established; there is nothing to confirm"
+      );
+    }
+    data.originalValueSource = VALUE_SOURCES.CONTRACT_ENTRY;
+    valueConfirmation = "confirmed";
+  }
 
   for (const field of EDITABLE) {
     if (payload[field] === undefined) continue;
@@ -251,6 +335,11 @@ const updateContract = async ({ orgId, projectId, userId, payload = {} }) => {
     }
     data.originalValue = value;
     data.revisedValue = addMoney(value, num(contract.approvedChangesValue));
+    // A different amount is an entry; the stored amount sent back is a save.
+    if (round2(value) !== round2(num(contract.originalValue))) {
+      data.originalValueSource = VALUE_SOURCES.CONTRACT_ENTRY;
+      valueConfirmation = "entered";
+    }
   }
 
   for (const [field, code] of [
@@ -316,15 +405,21 @@ const updateContract = async ({ orgId, projectId, userId, payload = {} }) => {
     entityId: projectId,
     action: auditService.ACTIONS.UPDATED,
     actorId: userId,
-    summary: { transition: "contract.manage", ref: updated.ref },
+    summary: {
+      transition: "contract.manage",
+      ref: updated.ref,
+      ...(valueConfirmation ? { originalValueConfirmation: valueConfirmation } : {}),
+    },
     oldSummary: {
       originalValue: num(contract.originalValue),
+      originalValueSource: valueSourceOf(contract),
       retentionRate: contract.retentionRate,
       advanceRate: contract.advanceRate,
       taxRate: contract.taxRate,
     },
     newSummary: {
       originalValue: num(updated.originalValue),
+      originalValueSource: valueSourceOf(updated),
       retentionRate: updated.retentionRate,
       advanceRate: updated.advanceRate,
       taxRate: updated.taxRate,
@@ -332,6 +427,19 @@ const updateContract = async ({ orgId, projectId, userId, payload = {} }) => {
   }).catch(() => null);
 
   return serializeContract(updated);
+};
+
+/**
+ * Where the project's contract value came from, without creating the
+ * contract: null when the project has none yet. The project history reads it
+ * to decide the contract.manage events' amounts (utils/boq-figures).
+ */
+const contractValueSource = async ({ orgId, projectId }) => {
+  const contract = await prisma.primeContract.findFirst({
+    where: { projectId, project: { orgId } },
+    select: { originalValueSource: true },
+  });
+  return contract ? valueSourceOf(contract) : null;
 };
 
 // ─── the advance ───────────────────────────────────────────────────────────
@@ -353,7 +461,7 @@ const nextAdvanceReference = async (tx, { projectId, prefix }) =>
   });
 
 /** The client pays the advance. */
-const recordAdvancePayment = async ({ orgId, projectId, userId, payload = {} }) => {
+const recordAdvancePayment = async ({ orgId, projectId, userId, payload = {}, canReadBoq = false }) => {
   const contract = await ensureContract({ orgId, projectId, userId });
   const amount = num(payload.amount);
   if (amount <= 0) {
@@ -372,10 +480,15 @@ const recordAdvancePayment = async ({ orgId, projectId, userId, payload = {} }) 
     const receivedSoFar = num(held?.advancePaidAmount ?? contract.advancePaidAmount);
     const paid = addMoney(receivedSoFar, amount);
     if (agreed > 0 && paid > agreed + MONEY_EPSILON) {
+      // The agreed advance is a rate of the original value: while that value
+      // is withheld from the caller (utils/boq-figures), so is the figure.
+      const agreedWithheld = !canReadBoq && !valueEstablished(contract) && Number(contract.advanceRate) > 0;
       throw new HttpError(
         409,
         "ADVANCE_OVER_AGREED",
-        `The advance agreed is ${agreed}; ${receivedSoFar} has already been received`
+        agreedWithheld
+          ? `This receipt would take the advance over the amount agreed; ${receivedSoFar} has already been received`
+          : `The advance agreed is ${agreed}; ${receivedSoFar} has already been received`
       );
     }
 
@@ -781,10 +894,13 @@ module.exports = {
   ADVANCE_KINDS,
   CONTRACT_STATUSES,
   CONTRACT_TYPES,
+  ESTABLISHED_VALUE_SOURCES,
+  VALUE_SOURCES,
   advanceOutstanding,
   applyAdvanceRecovery,
   buildStatement,
   certificateFinancials,
+  contractValueSource,
   ensureContract,
   listAdvances,
   receivables,

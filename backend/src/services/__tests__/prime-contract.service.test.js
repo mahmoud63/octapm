@@ -229,6 +229,8 @@ describe("creating the contract", () => {
     expect(created.approvedChangesValue).toBe(3_000_000);
     expect(created.revisedValue).toBe(12_290_000);
     expect(created.pendingChangesValue).toBe(1_075_500);
+    // The project's own value: established, and recorded as such.
+    expect(created.originalValueSource).toBe("project_value");
   });
 
   it("falls back to the BOQ when the project carries no contract value", async () => {
@@ -254,6 +256,75 @@ describe("creating the contract", () => {
     expect(created.originalValue).toBe(7_727_000);
     expect(created.retentionRate).toBe(5);
     expect(created.contractType).toBe("lump_sum");
+    // The bill's total: recorded as the fallback, which nobody has confirmed.
+    expect(created.originalValueSource).toBe("boq_fallback");
+  });
+});
+
+describe("where the original value came from (owner decisions 1-3)", () => {
+  const stored = (over = {}) =>
+    contract({
+      ref: "PC-1",
+      originalValue: 7_727_000,
+      originalValueSource: "boq_fallback",
+      approvedChangesValue: 0,
+      advanceRate: 0,
+      ...over,
+    });
+  let written;
+  beforeEach(() => {
+    jest.clearAllMocks();
+    written = null;
+    mockPrisma.primeContract.update.mockImplementation(async ({ data }) => {
+      written = { ...(written || {}), ...data };
+      return data;
+    });
+    mockPrisma.changeOrder.aggregate.mockResolvedValue({ _sum: { value: 0 } });
+  });
+  const run = async (current, payload, extra = {}) => {
+    mockPrisma.primeContract.findFirst.mockResolvedValue(current);
+    mockPrisma.primeContract.findUnique = jest.fn(async () => ({ ...current, ...written }));
+    return service.updateContract({ orgId: "org-1", projectId: "project-1", userId: "user-1", payload, ...extra });
+  };
+
+  it("a save without an original value, or with the stored one sent back, leaves the fallback a fallback", async () => {
+    for (const payload of [{ taxRate: 5 }, { originalValue: 7_727_000 }, { originalValue: "7727000.00" }]) {
+      const answer = await run(stored(), payload);
+      expect([payload, written.originalValueSource, answer.originalValueSource]).toEqual([payload, undefined, "boq_fallback"]);
+    }
+  });
+
+  it("a different original value is an entry, recorded by the audit event", async () => {
+    const audit = require("../audit.service");
+    const answer = await run(stored(), { originalValue: 8_000_000 });
+    expect(written.originalValueSource).toBe("contract_entry");
+    expect(answer.originalValueSource).toBe("contract_entry");
+    const event = audit.recordEvent.mock.calls.at(-1)[0];
+    expect(event.actorId).toBe("user-1");
+    expect(event.summary).toEqual({ transition: "contract.manage", ref: "PC-1", originalValueConfirmation: "entered" });
+    expect(event.oldSummary).toMatchObject({ originalValue: 7_727_000, originalValueSource: "boq_fallback" });
+    expect(event.newSummary).toMatchObject({ originalValue: 8_000_000, originalValueSource: "contract_entry" });
+  });
+
+  it("a client never sets the source itself", async () => {
+    await run(stored(), { originalValueSource: "project_value", taxRate: 5 });
+    expect(written.originalValueSource).toBeUndefined();
+  });
+
+  it("confirming the fallback as it stands needs BOQ read, stands alone, and only confirms what is not established", async () => {
+    await expect(run(stored(), { confirmOriginalValue: true })).rejects.toMatchObject({ status: 403, code: "CONTRACT_VALUE_CONFIRM_FORBIDDEN" });
+    expect(written).toBeNull();
+    await expect(run(stored(), { confirmOriginalValue: true, originalValue: 7_727_000 }, { canConfirmFallback: true })).rejects.toMatchObject({ status: 400, code: "CONTRACT_VALUE_CONFIRM_CONFLICT" });
+    await expect(run(stored({ originalValueSource: "project_value" }), { confirmOriginalValue: true }, { canConfirmFallback: true })).rejects.toMatchObject({ status: 409, code: "CONTRACT_VALUE_ALREADY_ESTABLISHED" });
+    expect(written).toBeNull();
+
+    const audit = require("../audit.service");
+    for (const source of ["boq_fallback", null]) {
+      written = null;
+      const answer = await run(stored({ originalValueSource: source }), { confirmOriginalValue: true }, { canConfirmFallback: true });
+      expect([source, written.originalValueSource, written.originalValue, answer.originalValue]).toEqual([source, "contract_entry", undefined, 7_727_000]);
+      expect(audit.recordEvent.mock.calls.at(-1)[0].summary.originalValueConfirmation).toBe("confirmed");
+    }
   });
 });
 

@@ -225,6 +225,22 @@ const ERROR_CODE_CATALOG = Object.freeze({
     category: "ipc",
     message: "Only a Project Manager can override over-limit IPC certification",
   },
+  CONTRACT_VALUE_CONFIRM_CONFLICT: {
+    status: 400,
+    category: "commercial",
+    message: "Confirm the stored original value or enter a new one, not both",
+  },
+  CONTRACT_VALUE_CONFIRM_FORBIDDEN: {
+    status: 403,
+    category: "commercial",
+    message:
+      "Confirming the original value as it stands needs BOQ read access on this project; enter the contract value instead",
+  },
+  CONTRACT_VALUE_ALREADY_ESTABLISHED: {
+    status: 409,
+    category: "commercial",
+    message: "The original value is already established; there is nothing to confirm",
+  },
   EOT_WORKFLOW_ACTION_REQUIRED: {
     status: 400,
     category: "commercial",

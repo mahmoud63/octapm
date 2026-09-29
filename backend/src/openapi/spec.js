@@ -877,6 +877,9 @@ const components = {
         "COMPANY_REQUIRED",
         "CONFIG_ERROR",
         "CONFLICT",
+        "CONTRACT_VALUE_ALREADY_ESTABLISHED",
+        "CONTRACT_VALUE_CONFIRM_CONFLICT",
+        "CONTRACT_VALUE_CONFIRM_FORBIDDEN",
         "COST_RECORD_NOT_FOUND",
         "CPM_DEPENDENCY_CYCLE",
         "DAILY_REPORT_LINK_INVALID",
@@ -1260,6 +1263,14 @@ const components = {
             reason: { type: "string" },
           },
           ["keys", "reason"],
+        ),
+        valueWithheld: objectSchema(
+          {
+            parts: arrayOf({ type: "string" }),
+            keys: arrayOf({ type: "string" }),
+            reason: { type: "string" },
+          },
+          ["parts", "keys", "reason"],
         ),
         createdAt: dateString,
       },
@@ -9018,7 +9029,8 @@ add(
     summary:
       "The client contract: original value, approved and pending change orders, revised value, and the terms that turn certified work into money.",
     description:
-      "Created on first read from the project's own contract metadata and BOQ total, so nothing has to be re-keyed.",
+      "Created on first read from the project's own contract metadata and BOQ total, so nothing has to be re-keyed. " +
+      "The original value is classified by the server only (`originalValueSource`: project_value — the project's own contract value at creation; boq_fallback — the active BOQ's total, used when the project had none; contract_entry — entered or confirmed under contract.manage; unestablished — a row written before the classification). While it is boq_fallback or unestablished, a caller who may not read the BOQ (boq:read) is given the contract without originalValue, revisedValue and — when advanceRate > 0, since it is then a rate of the value — advanceAmount, and `valueWithheld: { keys, source, reason }` in their place (never zero); an established value, and everything else, is returned to every ipc reader.",
     operationId: "getPrimeContract",
     parameters: projectParams,
     permissions: modulePermission("ipc", "read"),
@@ -9056,8 +9068,13 @@ add(
         startDate: { type: "string", format: "date-time", nullable: true },
         completionDate: { type: "string", format: "date-time", nullable: true },
         notes: { type: "string", nullable: true },
+        confirmOriginalValue: {
+          type: "boolean",
+          description:
+            "true confirms the stored original value as it stands (a boq_fallback or unestablished value) as the contract's: originalValueSource becomes contract_entry and the contract.manage audit event records who and when (summary.originalValueConfirmation = confirmed). Needs boq:read on the project as well (403 CONTRACT_VALUE_CONFIRM_FORBIDDEN), cannot be sent with originalValue (400 CONTRACT_VALUE_CONFIRM_CONFLICT), and an established value has nothing to confirm (409 CONTRACT_VALUE_ALREADY_ESTABLISHED).",
+        },
       }),
-      "Contract fields to change. The advance amount follows the advance rate unless it is given explicitly.",
+      "Contract fields to change. The advance amount follows the advance rate unless it is given explicitly. An originalValue different from the stored one is an entry (originalValueSource becomes contract_entry; summary.originalValueConfirmation = entered); the stored value sent back, or a save without originalValue, never changes the source. originalValueSource cannot be sent (400 VALIDATION_ERROR). The answer is the contract, withheld as GET withholds it.",
       false,
     ),
   }),
@@ -9071,7 +9088,7 @@ add(
     summary:
       "The client billing statement: contract, approved changes, previously certified, this period, retention, advance recovery, deductions, tax, total due — and the same story per BOQ line.",
     description:
-      "`lines` (the schedule of values) are the project's live BOQ rows — boqItemId, code, section, description, unit, quantity, rate, contractAmount — with what the period certified against each. A caller who may not read the BOQ (boq:read) is given the statement without `lines`, and `linesWithheld: { reason }` in their place; the contract, summary, current certificate and periods are the commercial module's own records and are returned to every ipc reader.",
+      "`lines` (the schedule of values) are the project's live BOQ rows — boqItemId, code, section, description, unit, quantity, rate, contractAmount — with what the period certified against each. A caller who may not read the BOQ (boq:read) is given the statement without `lines`, and `linesWithheld: { reason }` in their place; the contract, summary, current certificate and periods are the commercial module's own records and are returned to every ipc reader — except the contract's original value while it is boq_fallback or unestablished (see getPrimeContract): such a caller is given the contract and the summary without originalValue, revisedValue, remainingToCertify (summary) and, when advanceRate > 0, advanceAmount, each with `valueWithheld: { keys, source, reason }`.",
     operationId: "getClientBillingStatement",
     parameters: [
       ...projectParams,
@@ -9125,7 +9142,7 @@ add(
         occurredAt: { type: "string", format: "date-time", nullable: true },
         note: { type: "string", nullable: true },
       }),
-      "The advance received. Refused if it takes the total past the agreed advance.",
+      "The advance received. Refused if it takes the total past the agreed advance (409 ADVANCE_OVER_AGREED; the message states the agreed figure only to a caller who may receive it). The answer is the contract, withheld as GET /prime-contract withholds it.",
     ),
     status: 201,
   }),
@@ -11193,7 +11210,7 @@ addGenericRoute({
   method: "get",
   tag: "Audit",
   summary:
-    "List project audit events. The history of the BOQ's records (boq_item, boq_revision, activity_boq_allocation) is present only for a caller who may read the BOQ, a cost_record event's budget (and generatedBudget) in its summaries — the budget written on the record, its activity's approved BOQ allocation when the record was made (owner decision E1) — only for a caller who may read the BOQ, and a schedule_revision event's totalBudget in its summaries only for a caller who may read the BOQ or the cost module. An ipc_certificate event's certificationReview and progressLinks (the review of the certificate's lines — the BOQ rows and their allocations — recorded at certification in the audit summary and the approval metadata: approvedLimitAmount, earnedAmount, overEarnedAmount, overApprovedLimitAmount, overApprovedQuantity, overrideLineCount …) are present only for a caller who may read the BOQ; anyone else is given the event without them and `boqWithheld: { keys, reason }` — who certified, when, the status, the certificate's totals and the override reason stay. Output only: the stored events are not changed.",
+    "List project audit events. The history of the BOQ's records (boq_item, boq_revision, activity_boq_allocation) is present only for a caller who may read the BOQ, a cost_record event's budget (and generatedBudget) in its summaries — the budget written on the record, its activity's approved BOQ allocation when the record was made (owner decision E1) — only for a caller who may read the BOQ, and a schedule_revision event's totalBudget in its summaries only for a caller who may read the BOQ or the cost module. An ipc_certificate event's certificationReview and progressLinks (the review of the certificate's lines — the BOQ rows and their allocations — recorded at certification in the audit summary and the approval metadata: approvedLimitAmount, earnedAmount, overEarnedAmount, overApprovedLimitAmount, overApprovedQuantity, overrideLineCount …) are present only for a caller who may read the BOQ; anyone else is given the event without them and `boqWithheld: { keys, reason }` — who certified, when, the status, the certificate's totals and the override reason stay. A project event recording contract.manage (summary.transition) states the client contract's original value before and after (oldSummary / newSummary, each with its originalValueSource; an event written before that states none and is taken as project_value only while the contract is project_value now): for a caller who may not read the BOQ an original value that was not established (boq_fallback or unestablished) is left out of that summary and `valueWithheld: { parts, keys, reason }` names it; who, when and the rates stay. Output only: the stored events are not changed.",
   description:
     "Returns tenant-scoped centralized audit events. Each write also persists a compact redacted RecordHistorySnapshot row for contractual record history reconstruction.",
   operationId: "listProjectAuditEvents",

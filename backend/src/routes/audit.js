@@ -6,6 +6,7 @@ const { authenticate } = require('../middleware/auth');
 const { requirePermission } = require('../middleware/rbac');
 const { validate } = require('../middleware/validate');
 const auditService = require('../services/audit.service');
+const primeContractService = require('../services/prime-contract.service');
 const { boqFigureAccess, withheldAuditHistory } = require('../utils/boq-figures');
 
 const router = express.Router({ mergeParams: true });
@@ -19,7 +20,9 @@ router.use(authenticate);
 // total budget for those who may read the BOQ or the cost module, and a
 // payment certificate's certification review (worked from the BOQ's rows
 // and their allocations, recorded when it is certified) for those who may
-// read the BOQ.
+// read the BOQ — and the client contract's original value in its
+// contract.manage events while that value is an unconfirmed BOQ total or of a
+// source not established (owner decisions 1-3, 2026-09-29).
 router.get(
   '/',
   requirePermission('audit', 'read'),
@@ -48,7 +51,14 @@ router.get(
       limit: req.query.limit || 50,
       order: req.query.order || 'asc',
     });
-    return sendSuccess(res, withheldAuditHistory(result, boqFigureAccess(req)));
+    const access = boqFigureAccess(req);
+    const contractValueSource = access.boq
+      ? null
+      : await primeContractService.contractValueSource({
+          orgId: req.user.orgId,
+          projectId: req.params.projectId,
+        });
+    return sendSuccess(res, withheldAuditHistory(result, access, { contractValueSource }));
   }),
 );
 
