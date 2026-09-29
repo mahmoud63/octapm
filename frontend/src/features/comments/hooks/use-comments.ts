@@ -13,6 +13,17 @@ export interface CommentMention {
   email?: string | null
 }
 
+/**
+ * On a create or edit answer only, when someone mentioned was not notified:
+ * a comment on a BOQ record notifies only people who may read the BOQ on the
+ * project (owner F1). Names only; the server writes the message.
+ */
+export interface CommentNotNotified {
+  reason: 'NO_BOQ_ACCESS'
+  people: { userId: string; name: string }[]
+  message: string
+}
+
 export interface RecordComment {
   id: string
   projectId: string
@@ -29,6 +40,7 @@ export interface RecordComment {
   updatedAt: string
   canEdit: boolean
   canDelete: boolean
+  notNotified?: CommentNotNotified
 }
 
 export interface CommentPage {

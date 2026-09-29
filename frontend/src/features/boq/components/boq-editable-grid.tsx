@@ -5,6 +5,7 @@ import {
   Plus,
   Trash2,
   Lock,
+  MessageSquare,
   MoreHorizontal,
 } from 'lucide-react'
 import { toast } from 'sonner'
@@ -17,11 +18,20 @@ import {
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
+import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
+import { CommentThread } from '@/features/comments/components/comment-thread'
 import type { BoqItemWithActivities, BoqFinancialSummary } from '../data/schema'
 import {
   useUpdateBoqItem,
@@ -171,6 +181,11 @@ export function BoqEditableGrid({
     null
   )
   const [showAddRow, setShowAddRow] = useState(false)
+  // The BOQ row whose discussion is open (comments and @mentions; only
+  // readers of the BOQ are notified — the thread says who was not).
+  const [discussItem, setDiscussItem] = useState<BoqItemWithActivities | null>(
+    null
+  )
 
   const updateItem = useUpdateBoqItem(projectId)
   const deleteItem = useDeleteBoqItem(projectId)
@@ -405,6 +420,14 @@ export function BoqEditableGrid({
                     </Button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align='end'>
+                    <DropdownMenuItem
+                      onClick={() => setDiscussItem(item)}
+                      data-testid='boq-row-discussion'
+                    >
+                      <MessageSquare className='mr-2 h-4 w-4' />
+                      Discussion
+                    </DropdownMenuItem>
+                    <DropdownMenuSeparator />
                     {baselineLocked ? (
                       <DropdownMenuItem disabled>
                         <Lock className='mr-2 h-4 w-4' />
@@ -639,6 +662,31 @@ export function BoqEditableGrid({
         onOpenChange={setShowAddRow}
         projectId={projectId}
       />
+
+      <Dialog
+        open={!!discussItem}
+        onOpenChange={(open) => !open && setDiscussItem(null)}
+      >
+        <DialogContent className='max-h-[85vh] max-w-2xl overflow-y-auto'>
+          <DialogHeader>
+            <DialogTitle>
+              BOQ row {discussItem?.code}
+              {discussItem?.description ? ` – ${discussItem.description}` : ''}
+            </DialogTitle>
+            <DialogDescription>
+              Only people who may read the BOQ are notified of comments and
+              @mentions here.
+            </DialogDescription>
+          </DialogHeader>
+          {discussItem && (
+            <CommentThread
+              projectId={projectId}
+              recordType='boq_item'
+              recordId={discussItem.id}
+            />
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

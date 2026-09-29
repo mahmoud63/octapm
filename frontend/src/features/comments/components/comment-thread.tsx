@@ -550,6 +550,10 @@ export function CommentThread({
   const [value, setValue] = useState('')
   const [mentions, setMentions] = useState<MentionMap>(new Map())
   const [replyTo, setReplyTo] = useState<RecordComment | null>(null)
+  // The server's word on mentioned people it did not notify (a BOQ record's
+  // discussion reaches only readers of the BOQ): shown until dismissed or
+  // the next comment.
+  const [notNotified, setNotNotified] = useState<string | null>(null)
 
   const comments = useMemo(() => data?.items ?? [], [data?.items])
   const authorById = useMemo(
@@ -580,10 +584,11 @@ export function CommentThread({
         parentId: replyTo?.id ?? null,
       },
       {
-        onSuccess: () => {
+        onSuccess: (saved) => {
           setValue('')
           setMentions(new Map())
           setReplyTo(null)
+          setNotNotified(saved.notNotified?.message ?? null)
         },
         onError: (error) => toast.error(getServerErrorMessage(error)),
       }
@@ -675,6 +680,24 @@ export function CommentThread({
         )}
       </div>
       <div className='border-t px-3 py-3'>
+        {notNotified && (
+          <div
+            role='status'
+            className='mb-2 flex items-start gap-2 rounded-md border border-amber-300 bg-amber-50 px-2 py-1.5 text-xs text-amber-900 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-200'
+            data-testid='comment-not-notified'
+          >
+            <BellOff className='mt-0.5 h-3.5 w-3.5 shrink-0' />
+            <span className='flex-1'>{notNotified}</span>
+            <button
+              type='button'
+              className='rounded-sm opacity-70 hover:opacity-100'
+              aria-label='Dismiss'
+              onClick={() => setNotNotified(null)}
+            >
+              <X className='h-3 w-3' />
+            </button>
+          </div>
+        )}
         {replyTo && (
           <div className='mb-2 flex items-center gap-2 text-xs text-muted-foreground'>
             <CornerDownRight className='h-3 w-3' />
