@@ -84,6 +84,14 @@ const ERROR_CODE_CATALOG = Object.freeze({
     category: "billing",
     message: "Subscription access is required",
   },
+  // A stored Subscription.plan outside the catalogue (config/plans.js): our
+  // configuration, not the customer's limit. Never a tier, never a trial.
+  SUBSCRIPTION_PLAN_UNKNOWN: {
+    status: 500,
+    category: "billing",
+    message:
+      "Subscription plan: configuration issue. This organisation's plan is not in the plan catalogue, so its limits are unavailable — contact your administrator.",
+  },
   FORBIDDEN: {
     status: 403,
     category: "authz",

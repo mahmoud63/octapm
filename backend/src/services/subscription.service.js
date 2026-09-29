@@ -3,6 +3,7 @@ const { HttpError } = require('../utils/http-error');
 const { getStripe } = require('../config/stripe');
 const {
   PLANS, planRank, getPrice, getStripePriceId, getVisiblePlanIds,
+  recognizedPlan, storedPlanIdentifier, planConfigurationError,
 } = require('../config/plans');
 const { sendEmail, templates } = require('./email.service');
 
@@ -30,19 +31,39 @@ function isExpired(sub) {
   return false;
 }
 
+const finite = (limit) => (limit === Infinity ? null : limit);
+
+/**
+ * A subscription as the billing screens read it.
+ *
+ * A plan outside the catalogue is a configuration fault, never the lowest
+ * tier: it used to be shown as `PLANS.trial` — one project, three AI
+ * generations — while the project gate refused every project with 500
+ * SUBSCRIPTION_PLAN_UNKNOWN, so the screen and the gate disagreed and the
+ * organisation was told it was on a trial it was not on. Now it reads
+ * `recognized: false`, no plan name, `limits: null` (the flat projectLimit /
+ * aiLimit are left out, because null there means "unlimited"), and the
+ * configuration error the gates answer with. The stored identifier is kept
+ * when it is a plain token (config/plans.js storedPlanIdentifier).
+ */
 function serializeSubscription(sub, paymentMethod = null) {
   if (!sub) return null;
-  const plan = PLANS[sub.plan] ?? PLANS.trial;
+  const plan = recognizedPlan(sub.plan);
+  const limits = plan
+    ? { projectLimit: finite(plan.projectLimit), aiLimit: finite(plan.aiLimit) }
+    : null;
   return {
     id: sub.id,
-    plan: sub.plan,
-    planName: plan.name,
+    plan: plan ? sub.plan : storedPlanIdentifier(sub.plan),
+    recognized: Boolean(plan),
+    planName: plan ? plan.name : null,
     billingCycle: sub.billingCycle,
     status: sub.status,
     hasAccess: !isExpired(sub),
     seats: sub.seats,
-    projectLimit: plan.projectLimit === Infinity ? null : plan.projectLimit,
-    aiLimit: plan.aiLimit === Infinity ? null : plan.aiLimit,
+    ...(limits ?? {}),
+    limits,
+    configurationError: plan ? null : planConfigurationError(sub.plan),
     aiGenerationsUsed: sub.aiGenerationsUsed,
     trialEndsAt: sub.trialEndsAt,
     currentPeriodEnd: sub.currentPeriodEnd,

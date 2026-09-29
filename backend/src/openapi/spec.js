@@ -1084,6 +1084,7 @@ const components = {
         "SUBMITTAL_REVIEW_COMMENT_REQUIRED",
         "SUBMITTAL_REVISION_REQUIRED",
         "SUBSCRIPTION_REQUIRED",
+        "SUBSCRIPTION_PLAN_UNKNOWN",
         "SUPPLIER_NOT_FOUND",
         "TOKEN_EXPIRED",
         "TRANSMITTAL_NOT_FOUND",
@@ -1489,14 +1490,50 @@ const components = {
       expMonth: { type: "integer", nullable: true },
       expYear: { type: "integer", nullable: true },
     }),
+    BillingSubscriptionLimits: objectSchema(
+      {
+        projectLimit: {
+          type: "integer",
+          minimum: 1,
+          nullable: true,
+          description: "Live projects the plan allows; null means unlimited.",
+        },
+        aiLimit: {
+          type: "integer",
+          minimum: 1,
+          nullable: true,
+          description: "AI generations per period; null means unlimited.",
+        },
+      },
+      ["projectLimit", "aiLimit"],
+    ),
+    BillingPlanConfigurationError: objectSchema(
+      {
+        code: { type: "string", enum: ["SUBSCRIPTION_PLAN_UNKNOWN"] },
+        message: { type: "string" },
+      },
+      ["code", "message"],
+    ),
     BillingSubscription: objectSchema(
       {
         id: uuid,
         plan: {
           type: "string",
-          enum: ["trial", "individual", "business", "enterprise"],
+          nullable: true,
+          description:
+            "The stored plan. One of trial, individual, business or enterprise when `recognized` is true. " +
+            "Any other stored value is a configuration fault (`recognized` false): it is echoed when it is a plain token " +
+            "and null otherwise, and it is never a tier.",
         },
-        planName: { type: "string" },
+        recognized: {
+          type: "boolean",
+          description: "Whether the stored plan is in the plan catalogue.",
+        },
+        planName: {
+          type: "string",
+          nullable: true,
+          description: "The plan's display name; null when the plan is not recognized.",
+        },
         billingCycle: {
           type: "string",
           enum: ["monthly", "annual"],
@@ -1515,15 +1552,47 @@ const components = {
         },
         hasAccess: { type: "boolean" },
         seats: { type: "integer", minimum: 1 },
-        projectLimit: { type: "integer", minimum: 1, nullable: true },
-        aiLimit: { type: "integer", minimum: 1, nullable: true },
+        projectLimit: {
+          type: "integer",
+          minimum: 1,
+          nullable: true,
+          description:
+            "Same as limits.projectLimit (null means unlimited). Absent when the plan is not recognized — its limits are unavailable.",
+        },
+        aiLimit: {
+          type: "integer",
+          minimum: 1,
+          nullable: true,
+          description:
+            "Same as limits.aiLimit (null means unlimited). Absent when the plan is not recognized — its limits are unavailable.",
+        },
+        limits: {
+          ...ref("BillingSubscriptionLimits"),
+          nullable: true,
+          description: "The plan's limits; null when the plan is not recognized.",
+        },
+        configurationError: {
+          ...ref("BillingPlanConfigurationError"),
+          nullable: true,
+          description:
+            "Set when the plan is not recognized: the fault the project and AI gates answer with (500 SUBSCRIPTION_PLAN_UNKNOWN).",
+        },
         aiGenerationsUsed: { type: "integer", minimum: 0 },
         trialEndsAt: nullableDateString,
         currentPeriodEnd: nullableDateString,
         cancelAtPeriodEnd: { type: "boolean" },
         paymentMethod: { ...ref("BillingPaymentMethod"), nullable: true },
       },
-      ["id", "plan", "planName", "status", "hasAccess"],
+      [
+        "id",
+        "plan",
+        "recognized",
+        "planName",
+        "status",
+        "hasAccess",
+        "limits",
+        "configurationError",
+      ],
     ),
     BillingPlan: objectSchema(
       {

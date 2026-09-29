@@ -29,13 +29,18 @@ const mockStripe = {
 };
 jest.mock("../../config/db", () => ({ prisma: mockPrisma }));
 jest.mock("../../config/stripe", () => ({ getStripe: () => mockStripe }));
-jest.mock("../../config/plans", () => ({
-  PLANS: { trial: { name: "Trial", projectLimit: 1, aiLimit: 1 }, individual: { name: "Individual", projectLimit: 3, aiLimit: 10 }, business: { name: "Business", projectLimit: Infinity, aiLimit: Infinity } },
-  planRank: (plan) => ({ trial: 0, individual: 1, business: 2 }[plan] ?? 0),
-  getPrice: () => 10,
-  getStripePriceId: () => "price_1",
-  getVisiblePlanIds: () => ["individual", "business"],
-}));
+jest.mock("../../config/plans", () => {
+  const PLANS = { trial: { name: "Trial", projectLimit: 1, aiLimit: 1 }, individual: { name: "Individual", projectLimit: 3, aiLimit: 10 }, business: { name: "Business", projectLimit: Infinity, aiLimit: Infinity } };
+  return {
+    ...jest.requireActual("../../config/plans"),
+    PLANS,
+    recognizedPlan: (plan) => (Object.prototype.hasOwnProperty.call(PLANS, plan) ? PLANS[plan] : null),
+    planRank: (plan) => ({ trial: 0, individual: 1, business: 2 }[plan] ?? 0),
+    getPrice: () => 10,
+    getStripePriceId: () => "price_1",
+    getVisiblePlanIds: () => ["individual", "business"],
+  };
+});
 jest.mock("../email.service", () => ({ sendEmail: jest.fn(async () => ({})), templates: {} }));
 
 const service = require("../subscription.service");

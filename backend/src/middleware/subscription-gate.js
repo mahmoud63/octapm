@@ -1,7 +1,19 @@
 const { prisma } = require('../config/db');
 const { HttpError } = require('../utils/http-error');
-const { PLANS } = require('../config/plans');
+const { recognizedPlan, planConfigurationError } = require('../config/plans');
 const { ensureSubscription, isExpired } = require('../services/subscription.service');
+
+// An unknown plan is our data being wrong, and every gate says so the same
+// way (docs/qa/OCTAPM_ISSUE_PLAN-CATALOGUE-UAT.md): 500
+// SUBSCRIPTION_PLAN_UNKNOWN with the configuration sentence the billing
+// screen shows, marked for the client so production does not replace it with
+// "Unexpected server error".
+function unknownPlanError(sub) {
+  const fault = planConfigurationError(sub.plan);
+  const error = new HttpError(500, fault.code, fault.message);
+  error.expose = true;
+  return error;
+}
 
 const subscriptionGate = async (req, res, next) => {
   try {
@@ -30,7 +42,7 @@ const subscriptionGate = async (req, res, next) => {
 const enforceProjectLimit = async (req, res, next) => {
   try {
     const sub = await ensureSubscription(req.user.orgId);
-    const plan = PLANS[sub.plan];
+    const plan = recognizedPlan(sub.plan);
     // A plan we do not recognise is our data being wrong, not a customer who
     // has used their allowance (OCTA-BILL-PLAN-072). Falling back to `?? 0`
     // silently turned an unknown plan id into a limit of nought — and since
@@ -38,15 +50,7 @@ const enforceProjectLimit = async (req, res, next) => {
     // project again, while being told to upgrade. The demo and UAT
     // organisations were in exactly that state, on a plan called "standard"
     // that the catalogue has never contained.
-    if (!plan) {
-      return next(
-        new HttpError(
-          500,
-          'SUBSCRIPTION_PLAN_UNKNOWN',
-          `This organisation is on a plan called "${sub.plan}", which does not exist. That is a configuration fault on our side, not a limit you have reached.`,
-        ),
-      );
-    }
+    if (!plan) return next(unknownPlanError(sub));
     const limit = plan.projectLimit;
     if (limit !== Infinity) {
       // Archived projects do not spend the allowance. Deleting a project
@@ -74,7 +78,12 @@ const enforceProjectLimit = async (req, res, next) => {
 
 async function assertAiQuota(orgId) {
   const sub = await ensureSubscription(orgId);
-  const limit = PLANS[sub.plan]?.aiLimit ?? 0;
+  const plan = recognizedPlan(sub.plan);
+  // `?? 0` made an unknown plan a tier with no AI allowance ("Your plan allows
+  // 0 AI generations … Upgrade") while the billing screen showed it trial's
+  // three. It is the configuration fault the project gate answers with.
+  if (!plan) throw unknownPlanError(sub);
+  const limit = plan.aiLimit;
   if (limit === Infinity) return;
   if (sub.aiGenerationsUsed >= limit) {
     throw new HttpError(
