@@ -5,6 +5,7 @@ const { pdfPages } = require("../utils/document-text");
 const aiProvider = require("./ai-provider.service");
 const assistant = require("./assistant.service");
 const auditService = require("./audit.service");
+const { SPEC_BOQ_WITHHELD } = require("../utils/boq-figures");
 
 /**
  * Specifications and scope intelligence (OCTA-AI-SPEC-036).
@@ -22,7 +23,18 @@ const auditService = require("./audit.service");
  *  - Conflicts: one section's text against the text layers of its related
  *    sheets and its RFIs, read by the model; conflicts and gaps are
  *    proposals — an RFI is raised only when the person asks.
+ *
+ * The BOQ side of all this is the BOQ's, not the specification's (owner
+ * check, 2026-09-29): the routes admit document_control:read and pass the
+ * caller's boq-figures access. A member who may not read the BOQ gets a
+ * check run without loading the bill — no BOQ row, row count, uncovered
+ * row, "no_boq" gap or BOQ count, in the answer or in the model's prompt —
+ * and `boqWithheld` / `boqItemsWithheld` with the reason.
  */
+
+/** Everything, as the service has always answered a BOQ reader. */
+const BOQ_READER = Object.freeze({ boq: true });
+const boqWithheld = () => ({ reason: SPEC_BOQ_WITHHELD });
 
 const trimOrNull = (value) => {
   if (value === null || value === undefined) return null;
@@ -373,9 +385,10 @@ const sectionOut = (row) => ({
   path: recordWorkspacePath({ projectId: row.projectId, recordType: "spec_section", recordId: row.id }),
 });
 
-const loadContext = async ({ orgId, projectId }) => {
+// `withBoq: false` does not read the bill at all (a member who may not read the BOQ).
+const loadContext = async ({ orgId, projectId, withBoq = true }) => {
   const [boqItems, sheets, activities, rfis] = await Promise.all([
-    prisma.boqItem.findMany({ where: { projectId, isActive: true }, select: { id: true, code: true, description: true, unit: true, qty: true, section: true }, orderBy: { sortOrder: "asc" }, take: 5000 }),
+    !withBoq ? [] : prisma.boqItem.findMany({ where: { projectId, isActive: true }, select: { id: true, code: true, description: true, unit: true, qty: true, section: true }, orderBy: { sortOrder: "asc" }, take: 5000 }),
     prisma.sheet.findMany({ where: { orgId, projectId, status: "current" }, select: { id: true, number: true, title: true, discipline: true, currentRevisionId: true }, orderBy: { sortKey: "asc" }, take: 3000 }),
     prisma.activity.findMany({ where: { projectId }, select: { id: true, name: true, activityCode: true, wbsCode: true }, take: 5000 }),
     prisma.rfi.findMany({ where: { projectId, archivedAt: null }, select: { id: true, ref: true, subject: true, question: true, response: true, specSection: true, status: true }, take: 2000 }),
@@ -457,20 +470,51 @@ const listSections = async ({ orgId, projectId, q = null, division = null, docum
   return { items: rows.map(sectionOut), divisions, total: divisions.reduce((sum, row) => sum + row.count, 0) };
 };
 
-const getSection = async ({ orgId, projectId, sectionId, maxChars = 20000 }) => {
+/** A section's related records as this caller may receive them: no BOQ rows for a member who may not read the BOQ. */
+const relatedFor = (related, access) => {
+  if (access.boq) return related;
+  const { boqItems, ...rest } = related;
+  return { ...rest, boqItemsWithheld: boqWithheld() };
+};
+
+const getSection = async ({ orgId, projectId, sectionId, maxChars = 20000, access = BOQ_READER }) => {
   const row = await prisma.specSection.findFirst({ where: { id: sectionId, orgId, projectId }, include: { document: { select: { id: true, title: true, originalName: true, text: { select: { text: true } } } } } });
   if (!row) throw new HttpError(404, "SPEC_SECTION_NOT_FOUND", "Specification section not found");
   const full = String(row.document?.text?.text || "").slice(row.charStart, row.charEnd);
-  const context = await loadContext({ orgId, projectId });
-  return { ...sectionOut(row), text: full.slice(0, maxChars), truncated: full.length > maxChars, totalChars: full.length, related: relateSection(row, context) };
+  const context = await loadContext({ orgId, projectId, withBoq: access.boq });
+  return { ...sectionOut(row), text: full.slice(0, maxChars), truncated: full.length > maxChars, totalChars: full.length, related: relatedFor(relateSection(row, context), access) };
 };
 
 // ─── Scope gaps ───────────────────────────────────────────────────────────
 
-const scopeGaps = async ({ orgId, projectId }) => {
+const BOQ_EMPTY_NOTE = "The BOQ is empty, so BOQ coverage cannot be checked.";
+
+/**
+ * The check as this caller may receive it. Run without the bill for a
+ * member who may not read the BOQ (no "no_boq" gap can arise, so withGaps
+ * counts drawing and activity gaps only); then every BOQ key is left out —
+ * the section's BOQ count, the summary's noBoq, boqItems and uncoveredBoq,
+ * the uncovered rows and the "BOQ is empty" note — and boqWithheld says why.
+ */
+const withoutBoqCoverage = (gaps) => {
+  const { uncoveredBoq, ...rest } = gaps;
+  const { noBoq, boqItems, uncoveredBoq: uncoveredCount, ...summary } = gaps.summary;
+  return {
+    ...rest,
+    sections: gaps.sections.map(({ counts, ...section }) => {
+      const { boq, ...kept } = counts;
+      return { ...section, counts: kept };
+    }),
+    summary,
+    notes: gaps.notes.filter((note) => note !== BOQ_EMPTY_NOTE),
+    boqWithheld: boqWithheld(),
+  };
+};
+
+const scopeGaps = async ({ orgId, projectId, access = BOQ_READER }) => {
   const [rows, context] = await Promise.all([
     prisma.specSection.findMany({ where: { orgId, projectId }, include: { document: { select: { id: true, title: true, originalName: true } } }, orderBy: [{ division: "asc" }, { codeKey: "asc" }] }),
-    loadContext({ orgId, projectId }),
+    loadContext({ orgId, projectId, withBoq: access.boq }),
   ]);
   const coveredBoq = new Set();
   const sections = rows.map((row) => {
@@ -493,10 +537,10 @@ const scopeGaps = async ({ orgId, projectId }) => {
   const uncoveredBoq = rows.length ? context.boqItems.filter((item) => !coveredBoq.has(item.id)) : [];
   const notes = [];
   if (!rows.length) notes.push("No specification has been indexed yet — pick the specification documents and index them.");
-  if (!context.boqItems.length) notes.push("The BOQ is empty, so BOQ coverage cannot be checked.");
+  if (!context.boqItems.length) notes.push(BOQ_EMPTY_NOTE);
   if (!context.sheets.length) notes.push("No sheets are published, so drawing coverage cannot be checked.");
   if (!context.activities.length) notes.push("The schedule has no activities, so activity coverage cannot be checked.");
-  return {
+  const gaps = {
     sections,
     summary: { sections: sections.length, withGaps: sections.filter((section) => section.gaps.length).length, noBoq: sections.filter((section) => section.gaps.includes("no_boq")).length, noDrawings: sections.filter((section) => section.gaps.includes("no_drawings")).length, noActivities: sections.filter((section) => section.gaps.includes("no_activities")).length, boqItems: context.boqItems.length, uncoveredBoq: uncoveredBoq.length, sheets: context.sheets.length, activities: context.activities.length },
     uncoveredBoq: uncoveredBoq.slice(0, 200).map((item) => ({ id: item.id, code: item.code, description: item.description, unit: item.unit, qty: item.qty })),
@@ -504,6 +548,7 @@ const scopeGaps = async ({ orgId, projectId }) => {
     notes,
     computedAt: new Date().toISOString(),
   };
+  return access.boq ? gaps : withoutBoqCoverage(gaps);
 };
 
 const GAP_PROMPT = `You are a construction commercial / technical reviewer. You get a scope-coverage check of a project's specification against its BOQ, drawings and schedule (computed by keyword and code matching — treat matches as indicative). Write a short review for the project manager: what looks genuinely missing, what is probably a naming mismatch rather than a gap, and what to do first. Be concrete, name sections and items, no padding.
@@ -512,7 +557,8 @@ Return ONLY a JSON object: {"headline": "one sentence", "narrative": "markdown, 
 const deterministicGapNarrative = (gaps) => {
   const lines = [];
   const { summary } = gaps;
-  lines.push(`${summary.sections} specification section${summary.sections === 1 ? "" : "s"} checked: ${summary.noBoq} without BOQ items, ${summary.noDrawings} without drawings, ${summary.noActivities} without schedule activities.`);
+  const boqPart = gaps.boqWithheld ? "" : `${summary.noBoq} without BOQ items, `;
+  lines.push(`${summary.sections} specification section${summary.sections === 1 ? "" : "s"} checked: ${boqPart}${summary.noDrawings} without drawings, ${summary.noActivities} without schedule activities.`);
   if (summary.uncoveredBoq) lines.push(`${summary.uncoveredBoq} of ${summary.boqItems} BOQ items match no specification section — check whether they are covered by a section under another name.`);
   for (const discipline of gaps.uncoveredDisciplines) lines.push(`${discipline.sheets} ${discipline.discipline} sheet${discipline.sheets === 1 ? "" : "s"} but no specification section for that discipline.`);
   for (const section of gaps.sections.filter((row) => row.gaps.length).slice(0, 8)) lines.push(`- ${section.code} ${section.title}: ${section.gaps.map((gap) => ({ no_boq: "no BOQ items", no_drawings: "no drawings", no_activities: "no activities" })[gap]).join(", ")}`);
@@ -530,12 +576,12 @@ const normalizeActions = (actions) =>
     .filter(Boolean)
     .slice(0, 4);
 
-const explainScopeGaps = async ({ orgId, projectId, user, transport = null }) => {
-  const gaps = await scopeGaps({ orgId, projectId });
+const explainScopeGaps = async ({ orgId, projectId, user, access = BOQ_READER, transport = null }) => {
+  const gaps = await scopeGaps({ orgId, projectId, access });
   const fallback = { headline: `${gaps.summary.withGaps} of ${gaps.summary.sections} sections have a coverage gap`, narrative: deterministicGapNarrative(gaps), actions: [] };
   const provider = aiProvider.describe();
   if (!transport && !provider.enabled) return { degraded: true, reason: "No AI provider is configured — showing the computed review.", gaps, review: fallback, message: null };
-  const digest = { summary: gaps.summary, notes: gaps.notes, uncoveredDisciplines: gaps.uncoveredDisciplines, sectionsWithGaps: gaps.sections.filter((section) => section.gaps.length).slice(0, 40).map((section) => ({ code: section.code, title: section.title, division: section.divisionLabel, gaps: section.gaps, keywords: section.keywords })), uncoveredBoq: gaps.uncoveredBoq.slice(0, 40).map((item) => `${item.code || ""} ${item.description}`.trim()) };
+  const digest = { summary: gaps.summary, notes: gaps.notes, uncoveredDisciplines: gaps.uncoveredDisciplines, sectionsWithGaps: gaps.sections.filter((section) => section.gaps.length).slice(0, 40).map((section) => ({ code: section.code, title: section.title, division: section.divisionLabel, gaps: section.gaps, keywords: section.keywords })), ...(gaps.boqWithheld ? { boqCoverage: "not part of this check — do not comment on BOQ coverage" } : { uncoveredBoq: gaps.uncoveredBoq.slice(0, 40).map((item) => `${item.code || ""} ${item.description}`.trim()) }) };
   let completion;
   try {
     completion = await aiProvider.complete({ system: GAP_PROMPT, messages: [{ role: "user", content: JSON.stringify(digest) }], maxTokens: 1200, temperature: 0.2, transport });
@@ -563,8 +609,8 @@ const sectionWindow = (text) => {
   return text.slice(0, limit);
 };
 
-const findConflicts = async ({ orgId, projectId, sectionId, user, payload = {}, transport = null }) => {
-  const section = await getSection({ orgId, projectId, sectionId, maxChars: 200000 });
+const findConflicts = async ({ orgId, projectId, sectionId, user, payload = {}, access = BOQ_READER, transport = null }) => {
+  const section = await getSection({ orgId, projectId, sectionId, maxChars: 200000, access });
   const requested = Array.isArray(payload.sheetIds) && payload.sheetIds.length ? new Set(payload.sheetIds) : null;
   const candidates = requested ? section.related.sheets.filter((sheet) => requested.has(sheet.id)) : section.related.sheets;
   const sheets = candidates.filter((sheet) => sheet.currentRevisionId).slice(0, SPEC_SHEETS());

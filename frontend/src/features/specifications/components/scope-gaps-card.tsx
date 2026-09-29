@@ -14,6 +14,11 @@ import {
   type SpecGapReview,
 } from '../hooks/use-specifications'
 
+/** A BOQ figure the server withheld: "—", with the server's reason on hover. */
+function Withheld({ reason }: { reason: string }) {
+  return <span title={reason}>—</span>
+}
+
 const GAP_LABEL: Record<SpecGap, string> = {
   no_boq: 'no BOQ items',
   no_drawings: 'no drawings',
@@ -56,16 +61,19 @@ export function ScopeGapsCard({
   }
 
   const withGaps = data.sections.filter((section) => section.gaps.length)
-  const tiles: Array<[string, number, string]> = [
+  // The server leaves the BOQ side out for a member who may not read the
+  // BOQ (boqWithheld); its reason is shown, never a figure.
+  const boqReason = data.boqWithheld?.reason ?? null
+  const tiles: Array<[string, number | null, string]> = [
     ['Sections', data.summary.sections, 'indexed'],
     ['With a gap', data.summary.withGaps, 'need a look'],
-    ['No BOQ', data.summary.noBoq, 'sections unpriced?'],
+    ['No BOQ', data.summary.noBoq ?? null, 'sections unpriced?'],
     ['No drawings', data.summary.noDrawings, 'sections undrawn?'],
     ['No activities', data.summary.noActivities, 'sections unscheduled?'],
     [
       'BOQ uncovered',
-      data.summary.uncoveredBoq,
-      `of ${data.summary.boqItems} items`,
+      data.summary.uncoveredBoq ?? null,
+      boqReason ? 'of the BOQ' : `of ${data.summary.boqItems} items`,
     ],
   ]
 
@@ -111,11 +119,22 @@ export function ScopeGapsCard({
         {tiles.map(([label, value, hint]) => (
           <div key={label} className='rounded border p-3'>
             <p className='text-xs text-muted-foreground'>{label}</p>
-            <p className='text-2xl font-bold tabular-nums'>{value}</p>
+            <p className='text-2xl font-bold tabular-nums'>
+              {value === null ? <Withheld reason={boqReason ?? ''} /> : value}
+            </p>
             <p className='text-[11px] text-muted-foreground'>{hint}</p>
           </div>
         ))}
       </div>
+
+      {boqReason && (
+        <p
+          className='text-xs text-muted-foreground'
+          data-testid='uat-scope-gaps-boq-withheld'
+        >
+          BOQ coverage — {boqReason}
+        </p>
+      )}
 
       {data.notes.length > 0 && (
         <ul className='space-y-0.5 rounded-md border border-dashed p-3 text-xs text-muted-foreground'>
@@ -189,7 +208,9 @@ export function ScopeGapsCard({
                     {section.title}
                   </td>
                   <td className='px-2 py-1 text-right tabular-nums'>
-                    {section.counts.boq}
+                    {section.counts.boq ?? (
+                      <Withheld reason={boqReason ?? ''} />
+                    )}
                   </td>
                   <td className='px-2 py-1 text-right tabular-nums'>
                     {section.counts.sheets}
@@ -230,10 +251,10 @@ export function ScopeGapsCard({
         </div>
       )}
 
-      {(data.uncoveredBoq.length > 0 ||
+      {((data.uncoveredBoq?.length ?? 0) > 0 ||
         data.uncoveredDisciplines.length > 0) && (
         <div className='grid gap-3 md:grid-cols-2'>
-          {data.uncoveredBoq.length > 0 && (
+          {data.uncoveredBoq && data.uncoveredBoq.length > 0 && (
             <div className='rounded-md border p-3 text-sm'>
               <p className='mb-1 text-xs font-medium text-muted-foreground'>
                 BOQ items no section covers · {data.summary.uncoveredBoq}

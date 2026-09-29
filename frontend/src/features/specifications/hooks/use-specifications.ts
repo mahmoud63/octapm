@@ -49,8 +49,17 @@ export interface SpecSection {
   path: string
 }
 
+/**
+ * The server's reason for leaving the BOQ side of the specification check
+ * out — for a member who may not read the BOQ (boq-figures.js, §12).
+ */
+export interface SpecBoqWithheld {
+  reason: string
+}
+
 export interface SpecRelated {
-  boqItems: Array<{
+  /** Absent for a member who may not read the BOQ; boqItemsWithheld says why. */
+  boqItems?: Array<{
     id: string
     code: string | null
     description: string
@@ -88,6 +97,7 @@ export interface SpecRelated {
   }>
   keywords: string[]
   disciplines: string[]
+  boqItemsWithheld?: SpecBoqWithheld
 }
 
 export interface SpecSectionDetail extends SpecSection {
@@ -101,7 +111,8 @@ export interface SpecScopeGaps {
   sections: Array<
     SpecSection & {
       counts: {
-        boq: number
+        /** Absent when boqWithheld. */
+        boq?: number
         sheets: number
         sheetsByDiscipline: number
         activities: number
@@ -114,15 +125,16 @@ export interface SpecScopeGaps {
   summary: {
     sections: number
     withGaps: number
-    noBoq: number
+    /** noBoq, boqItems and uncoveredBoq are absent when boqWithheld. */
+    noBoq?: number
     noDrawings: number
     noActivities: number
-    boqItems: number
-    uncoveredBoq: number
+    boqItems?: number
+    uncoveredBoq?: number
     sheets: number
     activities: number
   }
-  uncoveredBoq: Array<{
+  uncoveredBoq?: Array<{
     id: string
     code: string | null
     description: string
@@ -132,6 +144,8 @@ export interface SpecScopeGaps {
   uncoveredDisciplines: Array<{ discipline: string; sheets: number }>
   notes: string[]
   computedAt: string
+  /** The BOQ side withheld by the server, and why. */
+  boqWithheld?: SpecBoqWithheld
 }
 
 export interface AiRunMessage {

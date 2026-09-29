@@ -6,6 +6,7 @@ const { authenticate } = require("../middleware/auth");
 const { getEffectiveRole, requirePermission } = require("../middleware/rbac");
 const { validate } = require("../middleware/validate");
 const service = require("../services/specification.service");
+const { boqFigureAccess } = require("../utils/boq-figures");
 
 /** Specifications and scope intelligence (OCTA-AI-SPEC-036): `/projects/:projectId/specifications`. */
 const router = express.Router({ mergeParams: true });
@@ -13,6 +14,9 @@ router.use(authenticate);
 
 const scope = (req) => ({ orgId: req.user.orgId, projectId: req.params.projectId });
 const user = (req) => ({ ...req.user, role: getEffectiveRole(req) });
+// The BOQ coverage, the related BOQ rows and the prompt's BOQ lines go only
+// to a member who may read the BOQ (boq-figures.js; owner check 2026-09-29).
+const access = (req) => boqFigureAccess(req);
 
 router.get(
   "/status",
@@ -43,21 +47,21 @@ router.get(
 router.get(
   "/scope-gaps",
   requirePermission("document_control", "read"),
-  asyncHandler(async (req, res) => sendSuccess(res, await service.scopeGaps(scope(req)))),
+  asyncHandler(async (req, res) => sendSuccess(res, await service.scopeGaps({ ...scope(req), access: access(req) }))),
 );
 
 router.post(
   "/scope-gaps/explain",
   requirePermission("assistant", "read"),
   requirePermission("document_control", "read"),
-  asyncHandler(async (req, res) => sendSuccess(res, await service.explainScopeGaps({ ...scope(req), user: user(req) }))),
+  asyncHandler(async (req, res) => sendSuccess(res, await service.explainScopeGaps({ ...scope(req), user: user(req), access: access(req) }))),
 );
 
 router.get(
   "/:sectionId",
   requirePermission("document_control", "read"),
   [param("sectionId").isUUID(), query("maxChars").optional().isInt({ min: 500, max: 200000 }).toInt(), validate],
-  asyncHandler(async (req, res) => sendSuccess(res, await service.getSection({ ...scope(req), sectionId: req.params.sectionId, maxChars: req.query.maxChars || undefined }))),
+  asyncHandler(async (req, res) => sendSuccess(res, await service.getSection({ ...scope(req), sectionId: req.params.sectionId, maxChars: req.query.maxChars || undefined, access: access(req) }))),
 );
 
 router.post(
@@ -65,7 +69,7 @@ router.post(
   requirePermission("assistant", "read"),
   requirePermission("document_control", "read"),
   [param("sectionId").isUUID(), body("sheetIds").optional().isArray({ max: 12 }), body("sheetIds.*").isUUID(), validate],
-  asyncHandler(async (req, res) => sendSuccess(res, await service.findConflicts({ ...scope(req), sectionId: req.params.sectionId, user: user(req), payload: req.body }))),
+  asyncHandler(async (req, res) => sendSuccess(res, await service.findConflicts({ ...scope(req), sectionId: req.params.sectionId, user: user(req), payload: req.body, access: access(req) }))),
 );
 
 router.post(

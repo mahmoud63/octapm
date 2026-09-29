@@ -267,6 +267,42 @@ describe("specifications and scope intelligence", () => {
       expect(store.conversations[0]).toMatchObject({ kind: "scope_gap", recordType: "project", recordId: "p1" });
       expect(result.message.id).toMatch(/^msg-/);
     });
+
+    it("gives a member who may not read the BOQ no BOQ row, count or gap — in the check, the section or the model's prompt", async () => {
+      const noBoq = { boq: false, budget: false };
+      const secrets = ["boq-1", "boq-2", "Concrete C40 to slabs", "Cable tray", "26.1", "no_boq", "\"noBoq\"", "\"boqItems\"", "\"uncoveredBoq\""];
+      const clean = (value) => secrets.filter((secret) => (typeof value === "string" ? value : JSON.stringify(value)).includes(secret));
+
+      mockPrisma.boqItem.findMany.mockClear();
+      const gaps = await service.scopeGaps({ ...scope, access: noBoq });
+      expect(mockPrisma.boqItem.findMany).not.toHaveBeenCalled();
+      expect(clean(gaps)).toEqual([]);
+      expect(gaps.boqWithheld).toEqual({ reason: "BOQ coverage is worked from the BOQ's rows, available only to members who may read the BOQ" });
+      expect(gaps.summary).toEqual({ sections: 3, withGaps: 2, noDrawings: 1, noActivities: 2, sheets: 2, activities: 2 });
+      expect(Object.keys(gaps.sections[0].counts)).toEqual(["sheets", "sheetsByDiscipline", "activities", "rfis"]);
+      expect(gaps.notes).toEqual([]);
+
+      const degraded = await service.explainScopeGaps({ ...scope, user, access: noBoq });
+      expect(clean(degraded)).toEqual([]);
+      expect(degraded.review.narrative).toContain("3 specification sections checked: 1 without drawings, 2 without schedule activities.");
+
+      const prompts = [];
+      const transport = jest.fn(async ({ messages }) => {
+        prompts.push(messages[0].content);
+        return { text: JSON.stringify({ headline: "h", narrative: "n", actions: [] }) };
+      });
+      await service.explainScopeGaps({ ...scope, user, access: noBoq, transport });
+      expect(prompts).toHaveLength(1);
+      expect(clean(prompts[0])).toEqual([]);
+      expect(clean(store.messages)).toEqual([]);
+
+      const concreteId = store.sections.find((row) => row.code === "03 30 00").id;
+      const section = await service.getSection({ ...scope, sectionId: concreteId, access: noBoq });
+      expect(clean(section)).toEqual([]);
+      expect(section.related.boqItemsWithheld).toEqual(gaps.boqWithheld);
+      expect(section.related.rfis.map((row) => row.ref)).toEqual(["RFI-001"]);
+      expect(mockPrisma.boqItem.findMany).not.toHaveBeenCalled();
+    });
   });
 
   describe("conflicts and RFIs", () => {

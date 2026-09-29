@@ -83,13 +83,17 @@ function RelatedLists({ related }: { related: SpecRelated }) {
     label: string
     empty: string
     items: React.ReactNode[]
+    /** Withheld by the server: no count is shown, only its reason. */
+    withheld?: boolean
   }> = [
     {
       key: 'boq',
       label: 'BOQ items',
-      empty:
-        'No BOQ item matches this section — a pricing gap or a naming mismatch.',
-      items: related.boqItems.slice(0, 12).map((item) => (
+      withheld: Boolean(related.boqItemsWithheld),
+      empty: related.boqItemsWithheld
+        ? `— ${related.boqItemsWithheld.reason}`
+        : 'No BOQ item matches this section — a pricing gap or a naming mismatch.',
+      items: (related.boqItems ?? []).slice(0, 12).map((item) => (
         <li key={item.id} className='flex flex-wrap items-baseline gap-1'>
           <span className='font-mono text-xs'>{item.code ?? '—'}</span>
           <span className='min-w-0 flex-1'>{item.description}</span>
@@ -151,12 +155,21 @@ function RelatedLists({ related }: { related: SpecRelated }) {
       {blocks.map((block) => (
         <div key={block.key} className='rounded-md border p-3 text-sm'>
           <p className='mb-1 text-xs font-medium text-muted-foreground'>
-            {block.label} · {block.items.length}
+            {block.label} · {block.withheld ? '—' : block.items.length}
           </p>
           {block.items.length ? (
             <ul className='space-y-1'>{block.items}</ul>
           ) : (
-            <p className='text-xs text-muted-foreground'>{block.empty}</p>
+            <p
+              className='text-xs text-muted-foreground'
+              data-testid={
+                block.withheld
+                  ? `uat-spec-related-${block.key}-withheld`
+                  : undefined
+              }
+            >
+              {block.empty}
+            </p>
           )}
         </div>
       ))}

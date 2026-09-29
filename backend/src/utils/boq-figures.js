@@ -41,6 +41,24 @@
  *   commitments), so these totals stay for a cost reader. Someone who holds
  *   neither has no other road to them, and is not given them here either.
  *
+ * The specification check (GET /specifications/scope-gaps, POST
+ * /scope-gaps/explain, GET /specifications/:sectionId and POST
+ * /:sectionId/conflicts — admitted on document_control:read) was a road
+ * round the BOQ endpoints (owner check, 2026-09-29): it read the bill's
+ * rows to match them to the sections and handed every specification
+ * reader the row count (summary.boqItems), the rows no section covers
+ * (uncoveredBoq[] — id, code, description, unit, quantity) and their count,
+ * the sections with no row (summary.noBoq, the "no_boq" gap, counts.boq),
+ * and each section's related rows (related.boqItems); /explain put the
+ * uncovered rows and the counts in the model's prompt, so the answer could
+ * repeat them. None of it is the specification's own — it is the BOQ's.
+ * For a member who may not read the BOQ the service does not load the bill
+ * at all: the check runs against the sheets and the schedule only, every
+ * BOQ key above is left out (not zeroed), `boqWithheld` /
+ * `boqItemsWithheld` says why, and the prompt carries no row and no count.
+ * The sections, their text, keywords, sheets, activities and RFIs are the
+ * specification reader's and stay.
+ *
  * Not withheld, and not a gap in the EV breakdown's withholding: activity
  * cost loadings (ActivityCostLoading, GET/POST /reports/cost-loading), per
  * activity though they are (orchestrator ruling G1, 2026-09-29). A cost
@@ -126,6 +144,13 @@ const REVISION_BUDGET_KEYS = ["totalBudget", "generatedTotalBudget"];
 
 /** The server's reason beside a per-activity figure it withholds. */
 const MAPPING_DETAILS_WITHHELD = "Mapping details unavailable to you";
+
+/**
+ * The server's reason beside the specification check's BOQ coverage, which
+ * specification.service leaves out for a member who may not read the BOQ
+ * (it runs the check without loading the bill; see the header).
+ */
+const SPEC_BOQ_WITHHELD = "BOQ coverage is worked from the BOQ's rows, available only to members who may read the BOQ";
 
 /** An activity as this caller may receive it. */
 const withheldActivity = (activity, access = FULL_ACCESS) => {
@@ -703,6 +728,7 @@ module.exports = {
   BOQ_FIGURE_KEYS,
   MAPPING_DETAILS_WITHHELD,
   REPORT_MAPPING_COLUMNS,
+  SPEC_BOQ_WITHHELD,
   reportMappingColumns,
   withheldReportRow,
   WBS_OUTLINE_KEYS,
