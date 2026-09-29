@@ -1133,6 +1133,7 @@ const components = {
         // BOQ ↔ activity mapping (PC-3).
         "MAPPING_NOT_APPLICABLE",
         "MAPPING_RULE_HAS_APPROVED_ALLOCATION",
+        "BOQ_ITEM_BELOW_ALLOCATIONS",
         "INVALID_MAPPING_RULE",
         "INVALID_ALLOCATION_BASIS",
         "INVALID_SUGGESTION_SOURCE",
@@ -7761,6 +7762,8 @@ add(
   operation({
     tag: "BOQ",
     summary: "Update a BOQ item.",
+    description:
+      "A rate or quantity change recomputes the row's amount. When the row's active allocations to activities would then exceed its new quantity or amount, the edit is refused with 409 BOQ_ITEM_BELOW_ALLOCATIONS (details: boqItemId, exceeded \"quantity\" or \"amount\"): reduce or reject the allocations first (Project Controls › Mapping).",
     operationId: "updateBoqItem",
     parameters: projectRecordParams,
     permissions: rolesPermission("pm", "planning_eng", "qs"),

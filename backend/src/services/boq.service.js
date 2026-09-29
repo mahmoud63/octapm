@@ -141,6 +141,32 @@ function duplicateBoqActivityCodeError(code) {
   );
 }
 
+// The database refuses a BOQ row whose new quantity or amount falls below
+// what its active allocations to activities already take (trigger
+// validate_boq_item_allocation_capacity, migration 20260608170000: RAISE,
+// SQLSTATE P0001). Prisma surfaces it as an unknown request error carrying
+// the trigger's text, which reached the client as a 500 INTERNAL_ERROR. The
+// E2 refusals send a user to price the bill's rows (BOQ page), and repricing
+// an allocated row is part of that: it is a business refusal with a way out.
+const BOQ_ALLOCATION_CAPACITY_TRIGGER = Object.freeze([
+  ['Existing BOQ activity allocations exceed the new BOQ item quantity', 'quantity'],
+  ['Existing BOQ activity allocations exceed the new BOQ item amount', 'amount'],
+]);
+
+function handleBoqAllocationCapacityError(error, boqItemId) {
+  const text = `${error?.message || ''} ${error?.meta?.message || ''}`;
+  const hit = BOQ_ALLOCATION_CAPACITY_TRIGGER.find(([message]) => text.includes(message));
+  if (!hit) return;
+  const [, exceeded] = hit;
+  const refusal = new HttpError(
+    409,
+    'BOQ_ITEM_BELOW_ALLOCATIONS',
+    `This BOQ row's allocations to activities exceed its new ${exceeded}. Reduce or reject them first (Project Controls › Mapping), then change the row's ${exceeded === 'amount' ? 'rate or quantity' : 'quantity'}.`,
+  );
+  refusal.details = { boqItemId, exceeded };
+  throw refusal;
+}
+
 function handleBoqUniqueError(error) {
   if (error?.code !== 'P2002') throw error;
 
@@ -2103,6 +2129,7 @@ async function updateBoqItem(projectId, itemId, data, options = {}) {
       return row;
     });
   } catch (error) {
+    handleBoqAllocationCapacityError(error, itemId);
     handleBoqUniqueError(error);
   }
 

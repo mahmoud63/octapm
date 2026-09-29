@@ -633,6 +633,14 @@ const ERROR_CODE_CATALOG = Object.freeze({
     message:
       "An item with an approved allocation cannot be marked not applicable until the allocation is rejected",
   },
+  // A BOQ row's rate or quantity edit that would leave its active
+  // allocations above the row (the database's capacity trigger).
+  BOQ_ITEM_BELOW_ALLOCATIONS: {
+    status: 409,
+    category: "conflict",
+    message:
+      "This BOQ row's allocations to activities exceed its new quantity or amount; reduce or reject them first (Project Controls › Mapping)",
+  },
   INVALID_MAPPING_RULE: {
     status: 400,
     category: "validation",
