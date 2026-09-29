@@ -7,6 +7,7 @@ const { authenticate } = require("../middleware/auth");
 const { hasPermission } = require("../middleware/rbac");
 const { validate } = require("../middleware/validate");
 const jobService = require("../jobs/job.service");
+const { boqFigureAccess, withheldJob } = require("../utils/boq-figures");
 
 /**
  * Project background jobs (durable queue).
@@ -50,6 +51,12 @@ const canReadJob = (req, job) => {
   return Boolean(moduleName) && hasPermission(req, moduleName, "read");
 };
 
+// A job as this caller may receive it: a job whose input is the uploaded
+// bill (schedule.generate) comes without the bill to a member who may not
+// read the BOQ (§12) — utils/boq-figures decides. Every answer that carries
+// a serialized job goes through here: the list, one job, retry and cancel.
+const jobView = (req, job) => withheldJob(job, boqFigureAccess(req));
+
 const assertCanManageJob = (req, job) => {
   const moduleName = moduleOfJob(job);
   // The same decision every write goes through — role, project template,
@@ -81,7 +88,9 @@ router.get(
       projectId: req.params.projectId,
       query: req.query,
     });
-    const items = (result.items || []).filter((job) => canReadJob(req, job));
+    const items = (result.items || [])
+      .filter((job) => canReadJob(req, job))
+      .map((job) => jobView(req, job));
     return sendSuccess(res, { ...result, items });
   }),
 );
@@ -98,7 +107,7 @@ router.get(
     if (!job || !canReadJob(req, job)) {
       throw new HttpError(404, "JOB_NOT_FOUND", "Job not found or expired");
     }
-    return sendSuccess(res, job);
+    return sendSuccess(res, jobView(req, job));
   }),
 );
 
@@ -122,7 +131,7 @@ router.post(
       jobId: req.params.jobId,
       userId: req.user.id,
     });
-    return sendSuccess(res, result, 202);
+    return sendSuccess(res, jobView(req, result), 202);
   }),
 );
 
@@ -146,7 +155,7 @@ router.post(
       jobId: req.params.jobId,
       userId: req.user.id,
     });
-    return sendSuccess(res, result);
+    return sendSuccess(res, jobView(req, result));
   }),
 );
 

@@ -1682,4 +1682,83 @@ liveDescribe("PC-4 §12: the Overview and the Schedule module carry no BOQ figur
       }
     }
   });
+
+  // The Schedule module's generation job keeps the uploaded bill as its
+  // input (payload.rawText, which Pass 1 structures), and the upload itself
+  // is stored as the generation's source — both under schedule:read. The
+  // review of the Round-4 closure patch read a bill's rows off GET /jobs as
+  // a site engineer and a planning engineer who were refused GET /boq.
+  it("the Schedule module's generation job and its stored source: a member without BOQ read is given the job without the uploaded bill — listed, read, cancelled and retried alike — and is refused the source file; the BOQ reader gets both", async () => {
+    const secrets = ["SECRETGROUT", "4321.87", "30253.09"];
+    const bill = ["Item,Description,Qty,Unit,Rate,Amount", "9.1,SECRETGROUT under baseplates,7,m3,4321.87,30253.09", ""].join("\n");
+    const form = new FormData();
+    form.append("file", new Blob([bill], { type: "text/csv" }), "generation-bill.csv");
+    form.append("label", "LiveTest generation");
+    const response = await fetch(`${api.base}${at("/schedule/generate")}`, { method: "POST", headers: auth(), body: form });
+    const started = await response.json();
+    expect([response.status, started.error]).toEqual([202, undefined]);
+    const { jobId } = started.data;
+    // This API runs no job worker, but another process on the shared
+    // database may: the job is held out of every worker's reach (runAfter
+    // far ahead) so it stays queued with its input while it is read. One
+    // known row of this LiveTest organisation, proven before the write.
+    const holdJob = async () => {
+      const row = await prisma.backgroundJob.findUnique({ where: { id: jobId }, select: { id: true, orgId: true, projectId: true } });
+      const org = await prisma.organisation.findUnique({ where: { id: row.orgId }, select: { name: true } });
+      expect([row.orgId, row.projectId, /^LiveTest [0-9a-f-]{36}$/.test(org.name)]).toEqual([live.org.id, project.id, true]);
+      const held = await prisma.backgroundJob.update({ where: { id: row.id }, data: { runAfter: new Date("2099-01-01T00:00:00.000Z") } });
+      expect(held.status).toBe("queued");
+    };
+    await holdJob();
+    const documentId = started.data.document.documentId;
+    const jobRoute = at(`/jobs/${jobId}`);
+    const listRoute = at("/jobs?type=schedule.generate");
+    const sourceRoute = at(`/schedule/uploads/${documentId}`);
+
+    // The BOQ reader: the job with the bill, and the bill's file.
+    const readerJob = await api.get(jobRoute, auth());
+    expect([readerJob.status, readerJob.body.data.payload.rawText.includes("SECRETGROUT"), "payloadWithheld" in readerJob.body.data]).toEqual([200, true, false]);
+    expect(readerJob.body.data.payload).toMatchObject({ label: "LiveTest generation", fileName: "generation-bill.csv" });
+    const readerList = await api.get(listRoute, auth());
+    expect(readerList.body.data.items.find((job) => job.id === jobId)).toEqual(readerJob.body.data);
+    const readerSource = await api.get(sourceRoute, auth());
+    expect([readerSource.status, readerSource.text.includes("SECRETGROUT")]).toEqual([200, true]);
+
+    // Everyone without BOQ read: the same job, without the bill, and said so.
+    const { rawText, ...withoutBill } = readerJob.body.data.payload;
+    expect(rawText).toContain("30253.09");
+    const expected = {
+      ...readerJob.body.data,
+      payload: withoutBill,
+      payloadWithheld: { keys: ["rawText"], reason: "The uploaded bill is available only to members who may read the BOQ" },
+    };
+    for (const [viewer, { user }] of Object.entries(viewers())) {
+      const viewerAuth = as(user);
+      expect([viewer, (await api.get(at("/boq"), viewerAuth)).status]).toEqual([viewer, 403]);
+      const job = await api.get(jobRoute, viewerAuth);
+      expect([viewer, job.status, job.body.data]).toEqual([viewer, 200, expected]);
+      const list = await api.get(listRoute, viewerAuth);
+      expect([viewer, list.status, list.body.data.items.find((entry) => entry.id === jobId)]).toEqual([viewer, 200, expected]);
+      const source = await api.get(sourceRoute, viewerAuth);
+      expect([viewer, source.status, source.body?.error?.code, source.body?.error?.details?.module]).toEqual([viewer, 403, "FORBIDDEN", "boq"]);
+      for (const [name, answer] of [["job", job], ["list", list], ["source", source]]) {
+        for (const secret of secrets) expect([viewer, name, secret, answer.text.includes(secret)]).toEqual([viewer, name, secret, false]);
+      }
+    }
+
+    // A PM without BOQ read manages the job (schedule:update): the answers
+    // to cancelling and retrying it carry no bill either.
+    const pmAuth = as(members.pm);
+    const cancelled = await api.post(`${jobRoute}/cancel`, {}, pmAuth);
+    const retried = await api.post(`${jobRoute}/retry`, {}, pmAuth);
+    await holdJob();
+    for (const [name, answer, status] of [["cancel", cancelled, 200], ["retry", retried, 202]]) {
+      expect([name, answer.status, answer.body?.error]).toEqual([name, status, undefined]);
+      expect([name, answer.body.data.payload, answer.body.data.payloadWithheld]).toEqual([name, withoutBill, expected.payloadWithheld]);
+      for (const secret of secrets) expect([name, secret, answer.text.includes(secret)]).toEqual([name, secret, false]);
+    }
+    // Withheld from the answer, not from the job: the BOQ reader still reads the bill.
+    const after = await api.get(jobRoute, auth());
+    expect([after.status, after.body.data.payload.rawText]).toEqual([200, rawText]);
+  });
 });

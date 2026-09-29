@@ -666,7 +666,40 @@ const withheldReportRow = (row, keys, access = FULL_ACCESS) => {
   return result;
 };
 
+// A background job whose input is the bill itself. The Schedule module's
+// generation job (schedule.generate) keeps the uploaded bill's text as
+// `rawText` — every row's description, quantity, rate and amount — which
+// Pass 1, "Structuring BOQ", reads. The job is the schedule's, read under
+// schedule:read on /jobs; the bill is the BOQ's, the same rows a stored
+// revision snapshot withholds as `boqRows`. The review of the Round-4
+// closure patch read the rows off GET /jobs as a site engineer and a
+// planning engineer who were refused GET /boq.
+const JOB_BILL_PAYLOAD_KEYS = Object.freeze({
+  "schedule.generate": Object.freeze(["rawText"]),
+});
+const JOB_BILL_WITHHELD = "The uploaded bill is available only to members who may read the BOQ";
+
+/**
+ * A serialized background job (jobs/job.service serializeJob) as this caller
+ * may receive it: for a caller who may not read the BOQ, the job's input
+ * without the bill — its label and file name stay — and `payloadWithheld`
+ * names the keys left out and why. A BOQ reader's job, and every job whose
+ * input carries no bill, is returned untouched (the same object).
+ */
+const withheldJob = (job, access = FULL_ACCESS) => {
+  if (access.boq || !job || typeof job !== "object") return job;
+  const payload = job.payload;
+  if (!payload || typeof payload !== "object") return job;
+  const present = (JOB_BILL_PAYLOAD_KEYS[job.type] || []).filter((key) => has(payload, key));
+  if (!present.length) return job;
+  const kept = { ...payload };
+  for (const key of present) delete kept[key];
+  return { ...job, payload: kept, payloadWithheld: { keys: present, reason: JOB_BILL_WITHHELD } };
+};
+
 module.exports = {
+  JOB_BILL_WITHHELD,
+  withheldJob,
   BOQ_FIGURE_KEYS,
   MAPPING_DETAILS_WITHHELD,
   REPORT_MAPPING_COLUMNS,

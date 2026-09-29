@@ -484,9 +484,14 @@ router.post(
   }),
 );
 
+// The stored source of a schedule generation is the uploaded bill — every
+// row's description, quantity, rate and amount — so it is served to a member
+// who may read both the schedule and the BOQ (§12), as the BOQ's own
+// uploads are under the BOQ's permission.
 router.get(
   '/uploads/:documentId',
   requirePermission('schedule', 'read'),
+  requirePermission('boq', 'read'),
   asyncHandler(async (req, res) => {
     const file = await fileStorageService.getScheduleGenerationFile({
       orgId: req.user.orgId,

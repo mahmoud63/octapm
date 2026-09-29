@@ -2964,7 +2964,13 @@ const components = {
       priority: { type: "integer" },
       attempts: { type: "integer" },
       maxAttempts: { type: "integer" },
-      payload: freeObject("Job input; never contains secrets."),
+      payload: freeObject(
+        "Job input; never contains secrets. A schedule.generate job's input carries the uploaded bill as rawText, which is left out for a caller who may not read the BOQ (see payloadWithheld).",
+      ),
+      payloadWithheld: objectSchema({
+        keys: arrayOf({ type: "string" }),
+        reason: { type: "string" },
+      }),
       progress: freeObject(
         "Progress fields: step, currentStep, totalSteps, steps, progress (0-100), message.",
       ),
@@ -7872,12 +7878,22 @@ add(
   operation({
     tag: "Schedule",
     summary: "Download a stored schedule-generation source upload.",
+    description:
+      "The source is the uploaded bill (every row's description, quantity, rate and amount), so it is served only to a member who may read both the schedule and the BOQ; anyone else is refused 403 FORBIDDEN (details.module \"boq\").",
     operationId: "downloadScheduleGenerationSource",
     parameters: [
       ...projectParams,
       pathParam("documentId", "ProjectDocument UUID for the source upload."),
     ],
-    permissions: modulePermission("schedule", "read"),
+    permissions: {
+      auth: "bearer",
+      module: "schedule",
+      action: "read",
+      roles: modulePermission("schedule", "read").roles.filter((role) =>
+        modulePermission("boq", "read").roles.includes(role),
+      ),
+      note: "Requires schedule:read and boq:read (§12: the source upload is the bill).",
+    },
     responses: {
       200: binaryResponse(
         "Schedule source upload stream when local storage is used.",
@@ -12561,7 +12577,7 @@ const projectJobParams = [projectIdParam, backgroundJobIdParam];
   {
     method: "get",
     path: "/projects/{projectId}/jobs",
-    summary: "List durable background jobs for a project (newest first).",
+    summary: "List durable background jobs for a project (newest first): only the jobs of modules the caller may read, and a schedule.generate job without its uploaded bill (payload.rawText) for a caller without boq:read (payloadWithheld says so).",
     operationId: "listProjectJobs",
     parameters: [
       ...projectParams,
@@ -12592,7 +12608,7 @@ const projectJobParams = [projectIdParam, backgroundJobIdParam];
   {
     method: "get",
     path: "/projects/{projectId}/jobs/{jobId}",
-    summary: "Read one background job.",
+    summary: "Read one background job. Read under the read permission of the job's module; a schedule.generate job comes without its uploaded bill (payload.rawText) to a caller without boq:read, and payloadWithheld names what was left out and why.",
     operationId: "getProjectJob",
     parameters: projectJobParams,
     permissions: authenticatedOnly,
