@@ -16,7 +16,10 @@ router.use(authenticate);
 // bill's figures in it (§12, utils/boq-figures): the history of the BOQ's
 // records and a cost record's budget (its activity's approved allocation,
 // owner decision E1) for those who may read the BOQ, a schedule revision's
-// total budget for those who may read the BOQ or the cost module.
+// total budget for those who may read the BOQ or the cost module, and a
+// payment certificate's certification review (worked from the BOQ's rows
+// and their allocations, recorded when it is certified) for those who may
+// read the BOQ.
 router.get(
   '/',
   requirePermission('audit', 'read'),

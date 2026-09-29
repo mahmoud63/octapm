@@ -602,6 +602,26 @@ const withSummaries = (event, strip) => ({
   ...(has(event, "summary") ? { summary: strip(event.summary) } : {}),
 });
 
+// A payment certificate's certification (ipc.service certifyIpcPeriod)
+// records, in its audit event's summary and its approval event's metadata,
+// the certification review worked over the certificate's lines — the BOQ's
+// rows and their allocations: the approved limit (the allocations' amount),
+// earned value, the amounts over earned and over the limit, the quantity
+// over the allocation, the lines needing an override and those missing
+// progress evidence — and the count of those lines linked to progress
+// evidence. Who certified, when, the status, the certificate's own totals
+// and the override reason stay.
+const IPC_EVENT_BOQ_KEYS = ["certificationReview", "progressLinks"];
+const IPC_EVENT_PARTS = ["oldSummary", "newSummary", "summary", "metadata"];
+
+const withheldIpcCertificateEvent = (event) => {
+  const strip = (value) => withoutKeys(value, IPC_EVENT_BOQ_KEYS);
+  const stripped = withSummaries(event, strip);
+  if (has(event, "metadata")) stripped.metadata = strip(event.metadata);
+  if (IPC_EVENT_PARTS.every((key) => stripped[key] === event[key])) return event;
+  return { ...stripped, boqWithheld: { keys: IPC_EVENT_BOQ_KEYS, reason: IPC_REVIEW_WITHHELD } };
+};
+
 /**
  * A project's history (GET /audit, which the schedule's status history
  * reads) as this caller may receive it. Someone who may not read the BOQ is
@@ -611,6 +631,9 @@ const withSummaries = (event, strip) => ({
  * the record was made (E1), withheld here as it is on GET /cost. Someone who
  * reads neither the BOQ nor the cost module is not given a schedule
  * revision's total budget, which its transitions record in their summaries.
+ * Nor is a payment certificate's certification review, which its
+ * certification records in the audit summary and the approval metadata:
+ * the event stays, without it, and `boqWithheld` says why.
  * Everything else is as built; the stored events are not changed.
  */
 const withheldAuditHistory = (history, access = FULL_ACCESS) => {
@@ -620,6 +643,7 @@ const withheldAuditHistory = (history, access = FULL_ACCESS) => {
     .map((event) => {
       const type = event && (event.recordType || event.entityType);
       if (type === "cost_record") return withSummaries(event, withoutRecordBudget);
+      if (type === "ipc_certificate") return withheldIpcCertificateEvent(event);
       if (!access.budget && type === "schedule_revision") return withSummaries(event, withoutRevisionTotals);
       return event;
     });

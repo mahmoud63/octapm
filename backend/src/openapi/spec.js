@@ -1254,6 +1254,13 @@ const components = {
         summary: freeObject("Compact event summary for timeline display."),
         attachments: arrayOf(ref("GenericObject")),
         metadata: freeObject("Compact redacted audit metadata."),
+        boqWithheld: objectSchema(
+          {
+            keys: arrayOf({ type: "string" }),
+            reason: { type: "string" },
+          },
+          ["keys", "reason"],
+        ),
         createdAt: dateString,
       },
       [
@@ -11164,7 +11171,7 @@ addGenericRoute({
   method: "get",
   tag: "Audit",
   summary:
-    "List project audit events. The history of the BOQ's records (boq_item, boq_revision, activity_boq_allocation) is present only for a caller who may read the BOQ, a cost_record event's budget (and generatedBudget) in its summaries — the budget written on the record, its activity's approved BOQ allocation when the record was made (owner decision E1) — only for a caller who may read the BOQ, and a schedule_revision event's totalBudget in its summaries only for a caller who may read the BOQ or the cost module. Output only: the stored events are not changed.",
+    "List project audit events. The history of the BOQ's records (boq_item, boq_revision, activity_boq_allocation) is present only for a caller who may read the BOQ, a cost_record event's budget (and generatedBudget) in its summaries — the budget written on the record, its activity's approved BOQ allocation when the record was made (owner decision E1) — only for a caller who may read the BOQ, and a schedule_revision event's totalBudget in its summaries only for a caller who may read the BOQ or the cost module. An ipc_certificate event's certificationReview and progressLinks (the review of the certificate's lines — the BOQ rows and their allocations — recorded at certification in the audit summary and the approval metadata: approvedLimitAmount, earnedAmount, overEarnedAmount, overApprovedLimitAmount, overApprovedQuantity, overrideLineCount …) are present only for a caller who may read the BOQ; anyone else is given the event without them and `boqWithheld: { keys, reason }` — who certified, when, the status, the certificate's totals and the override reason stay. Output only: the stored events are not changed.",
   description:
     "Returns tenant-scoped centralized audit events. Each write also persists a compact redacted RecordHistorySnapshot row for contractual record history reconstruction.",
   operationId: "listProjectAuditEvents",
