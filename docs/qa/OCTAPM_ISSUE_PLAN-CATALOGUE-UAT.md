@@ -138,6 +138,11 @@ inconsistency is confined to the UAT fixture. That is why the severity is P2, no
    `standard` → `COMPANY`, any other value classified and reported, never guessed); move reads and
    writes to `workspaceType`; keep `Organisation.plan` for compatibility while needed; remove it only
    after every consumer and the migration are certified. No destructive one-step rename.
+   **Known legacy value for this backfill (owner, 2026-09-29):** `Organisation.plan = 'business'` — a
+   subscription-plan word in the workspace-label column — is present on `PMcopilots UAT Fixtures`
+   (79312790…; it predates the 2026-09-29 reseed, which keeps an existing value). The M8/M9 classification
+   must include `business` explicitly: map it by the organisation's actual workspace kind (a company
+   workspace → `COMPANY`), report every such row, and never infer the subscription plan from it.
 5. **Workspace type and subscription plan never mix:** "ABC Construction" = `COMPANY` +
    `business`; "Mohamed's Workspace" = `PERSONAL` + `individual`.
 6. **An unknown plan is a configuration fault, never the lowest tier.** Display: "Subscription plan:
