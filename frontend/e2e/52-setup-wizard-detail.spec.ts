@@ -690,7 +690,7 @@ test('members who cannot read the BOQ: the Overview and every Schedule tab rende
       const readerActivities = (readerForecast.body?.data as unknown as ForecastAnswer).activities ?? []
       expect(readerActivities.find((row) => row.id === strip), 'the unmapped activity, for the reader').toMatchObject({ isCritical: true, cost: { basis: null } })
       expect(readerActivities.find((row) => row.id === pour)?.cost?.basis, 'the mapped activity, for the reader').toBeTruthy()
-      return { projectId, siteEngineer, costController, revisions }
+      return { projectId, siteEngineer, costController, revisions, fix }
     } finally {
       await client.dispose()
     }
@@ -733,8 +733,25 @@ test('members who cannot read the BOQ: the Overview and every Schedule tab rende
     // has been in flight for a quiet second.
     const inFlight = new Set<unknown>()
     const isApi = (url: string) => url.includes('/api/v1/')
+    // A request the page issues just as a page.goto replaces its document
+    // (the app's GET /auth/me after signing in, the moment the test opens
+    // the workspace home) is reported by Playwright as a 'request' and then
+    // never as finished or failed: Chromium drops it unsent with the old
+    // document. Left in the set, it kept every later apiSettled() of that
+    // member waiting its full 30 s, twice per tab, until the test ran out of
+    // time (the Part-4 gate, 2026-09-28). No answer can reach a replaced
+    // document, so once a new document commits in the main frame the old
+    // one's requests are forgotten; a same-document route change (the WBS
+    // tab, opened from the module bar) keeps them.
+    let newDocument = false
     page.on('request', (request) => {
+      if (request.isNavigationRequest() && request.frame() === page.mainFrame()) newDocument = true
       if (isApi(request.url())) inFlight.add(request)
+    })
+    page.on('framenavigated', (frame) => {
+      if (frame !== page.mainFrame() || !newDocument) return
+      newDocument = false
+      inFlight.clear()
     })
     page.on('requestfinished', (request) => inFlight.delete(request))
     page.on('requestfailed', (request) => inFlight.delete(request))
@@ -1047,6 +1064,45 @@ test('members who cannot read the BOQ: the Overview and every Schedule tab rende
     // the site engineer outright.
     const ev = answers.find((answer) => /\/reports\/ev(\?|$)/.test(answer.url))
     expect(ev?.status, `${member.name}: the EV report`).toBe(member.readsCost ? 200 : 403)
+    if (member.readsCost) {
+      // The Cost module (after the list above, which is the Overview's and
+      // the Schedule's): what the cost summary adds up from the records'
+      // budgets — each activity's BOQ allocation — is withheld (owner
+      // decision E1): the cockpit's "allocated to activities" and EAC, and
+      // each phase's budget, forecast and variance, read as a dash with the
+      // server's reason; the ledger's figures stay.
+      // A cost record on the fixing, written by the admin: it is made with
+      // the fixing's approved allocation (20182.6, a secret above) as its
+      // budget, alone in its phase — so the summary's phase budget, its
+      // totals and its EAC would state that allocation exactly.
+      const admin = await apiClient()
+      try {
+        const record = await apiJson(admin, 'post', `/projects/${setup.projectId}/cost/activity/${setup.fix}`, {
+          token: org!.adminToken,
+          data: { committed: 0, forecast: 0 },
+        })
+        expect(record.status, `cost record -> ${JSON.stringify(record.body?.error)}`).toBe(201)
+        expect(JSON.stringify(record.body?.data), 'the admin (a BOQ reader) is answered with its budget').toContain('20182.6')
+      } finally {
+        await admin.dispose()
+      }
+      const summarySeen = answers.length
+      await page.goto(`${base}/cost/overview`)
+      await expect(page.getByTestId('uat-cost-allocated-to-activities')).toContainText('—', { timeout: 30_000 })
+      await expect(page.getByTestId('uat-cost-allocated-to-activities')).toContainText(MAPPING_DETAILS_WITHHELD)
+      await expect(page.getByTestId('uat-cost-forecast-eac')).toContainText('—')
+      await page.goto(`${base}/cost/phase`)
+      await expect(page.getByTestId('uat-cost-phase-withheld-reason')).toContainText(MAPPING_DETAILS_WITHHELD, { timeout: 30_000 })
+      await expect(page.getByTestId('uat-cost-phase-withheld').first()).toHaveText('—')
+      await page.waitForLoadState('networkidle')
+      await Promise.all(pending)
+      expect(answers.length, `${member.name}: the Cost module was answered`).toBeGreaterThan(summarySeen)
+      expect(
+        answers.slice(summarySeen).filter((answer) => answer.paths.length || answer.secrets.length),
+        `${member.name}: a Cost module answer carried a withheld figure`
+      ).toEqual([])
+      await noBrokenFigure('cost/phase')
+    }
     expect(errors, `${member.name}: page errors`).toEqual([])
     await context.close()
   }
