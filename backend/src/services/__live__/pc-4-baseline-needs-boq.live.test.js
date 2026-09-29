@@ -474,6 +474,56 @@ liveDescribe("PC-4: no schedule baseline without a BOQ (owner decision 2026-09-2
     expect([row.status, row.isActive, row.baselinedBy, row.baselinedAt]).toEqual(["approved", true, null, null]);
   });
 
+  // Closure review (2026-09-29): one threshold for value. A bill whose only
+  // in-scope value is one cent is no value — the coverage check cannot tell
+  // it covered from uncovered, its remainder being within the cent
+  // tolerance — and every path says so alike: the lock refuses it on both
+  // routes, the schedule readiness is not baseline-ready, the setup gate
+  // names the same step. Before, the setup gate refused it
+  // (BOQ_HAS_NO_VALUE) while the readiness passed and POST /schedule/baseline
+  // locked it with nothing mapped.
+  it("a bill worth one cent, unmapped, is refused on both routes with the pricing step and nothing written; beside a priced not-applicable row, with the scope step — never \"nothing blocks the baseline\" (closure review)", async () => {
+    const built = await newProject("one cent");
+    const projectId = built.project.id;
+    const cent = (await built.post("/boq/items", { code: "1.1", description: "Token pour", quantity: 1, unit: "m3", rate: 0.01 }, 201)).item;
+    expect(Number(cent.amount)).toBe(0.01);
+    const revisionId = await built.importXer();
+    for (const step of ["submit-review", "approve"]) await built.post(`/schedule/revisions/${revisionId}/${step}`, {});
+    await built.post(`/schedule/revisions/${revisionId}/activate`, { mappings: [] });
+
+    // ── The cent alone: no value — the pricing step, everywhere.
+    const readiness = (await built.get("/schedule")).revision.readiness;
+    expect([readiness.ready, readiness.baselineReady]).toEqual([true, false]);
+    expect(readiness.checks[0]).toMatchObject({
+      key: "boq_present",
+      passed: false,
+      message: "The bill has no value to map: none of its rows is priced; a baseline locks a BOQ mapped to the schedule.",
+    });
+    await expectBoqRequired(built, "one cent, active approved", revisionId, BOQ_VALUE_REQUIRED);
+    const setup = await built.get("/setup-readiness");
+    expect([setup.gates.baseline.ready, setup.gates.baseline.blockers.map((blocker) => blocker.code).includes("BOQ_HAS_NO_VALUE")]).toEqual([false, true]);
+    expect(await lockWrites(projectId)).toEqual(NOTHING);
+    expect(await prisma.activityBoqAllocation.count({ where: { boqItemId: cent.id } })).toBe(0);
+
+    // ── Beside a $250,000 row marked not applicable: the bill is priced, its
+    // in-scope value a cent — the scope step, everywhere, and the refusal
+    // never says nothing blocks the baseline.
+    const prelims = (await built.post("/boq/items", { code: "P.1", description: "Preliminaries", quantity: 1, unit: "item", rate: 250000 }, 201)).item;
+    const ruled = await api.request("PATCH", built.at("/activity-boq-allocations/mapping-rules"), { body: { rule: "not_applicable", itemIds: [prelims.id] }, headers: pmAuth() });
+    expect([ruled.status, ruled.body?.error]).toEqual([200, undefined]);
+    const beside = (await built.get("/schedule")).revision.readiness;
+    expect(beside.baselineReady).toBe(false);
+    expect(beside.checks[0]).toMatchObject({ key: "boq_present", passed: false });
+    for (const check of beside.checks) expect([check.key, check.message]).not.toEqual([check.key, expect.stringMatching(/nothing blocks the baseline/)]);
+    await expectBoqRequired(built, "one cent beside not applicable, active approved", revisionId, BOQ_SCOPE_REQUIRED);
+    const besideSetup = await built.get("/setup-readiness");
+    const codes = besideSetup.gates.baseline.blockers.map((blocker) => blocker.code);
+    expect([besideSetup.gates.baseline.ready, codes.includes("BOQ_NO_IN_SCOPE_VALUE"), codes.includes("BOQ_HAS_NO_VALUE")]).toEqual([false, true, false]);
+    expect(await lockWrites(projectId)).toEqual(NOTHING);
+    const row = await prisma.scheduleRevision.findUnique({ where: { id: revisionId } });
+    expect([row.status, row.isActive, row.baselinedBy, row.baselinedAt]).toEqual(["approved", true, null, null]);
+  });
+
   it("a baseline locked before the rule, on a project with no BOQ, is left exactly as it was", async () => {
     const built = await newProject("pre-rule baseline");
     const projectId = built.project.id;

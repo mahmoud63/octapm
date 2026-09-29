@@ -1,7 +1,7 @@
 const mockPrisma = {
   $transaction: jest.fn((fn) => fn(mockPrisma)),
   project: { findFirst: jest.fn() },
-  boqItem: { count: jest.fn() },
+  boqItem: { count: jest.fn(), aggregate: jest.fn() },
   scheduleRevision: {
     findFirst: jest.fn(),
     findMany: jest.fn(),
@@ -128,22 +128,24 @@ const readyAllocationSummary = {
   unallocatedAmount: 0,
 };
 
-// The bill as the lock counts it, one state per check the lock makes
-// (before its transaction, then inside it): its active rows, the priced ones
-// (amount above zero) and the in-scope ones (priced, and a rule neither not
-// applicable nor optional). Each check starts with the rows' count, which
-// moves to the next state.
+// The bill as the lock reads it, one state per check the lock makes
+// (before its transaction, then inside it): how many active rows it has, the
+// value of its priced rows (the sum of the amounts above zero) and the value
+// of its in-scope ones (priced, and a rule neither not applicable nor
+// optional). Each check starts with the rows' count, which moves to the next
+// state.
 function mockBill(...states) {
   let check = -1;
-  mockPrisma.boqItem.count.mockImplementation(({ where }) => {
-    if (!where.amount && !where.mappingRule) check += 1;
-    const state = states[Math.min(Math.max(check, 0), states.length - 1)];
-    if (where.mappingRule) return Promise.resolve(state.inScope);
-    if (where.amount) return Promise.resolve(state.priced);
-    return Promise.resolve(state.items);
+  const current = () => states[Math.min(Math.max(check, 0), states.length - 1)];
+  mockPrisma.boqItem.count.mockImplementation(() => {
+    check += 1;
+    return Promise.resolve(current().items);
   });
+  mockPrisma.boqItem.aggregate.mockImplementation(({ where }) =>
+    Promise.resolve({ _sum: { amount: where.mappingRule ? current().inScope : current().priced } }),
+  );
 }
-const IN_SCOPE_BILL = { items: 2, priced: 2, inScope: 2 };
+const IN_SCOPE_BILL = { items: 2, priced: 200, inScope: 200 };
 
 function mockCurrentRevision(row = revision, { active = false } = {}) {
   mockPrisma.scheduleRevision.findFirst
@@ -159,6 +161,7 @@ describe('schedule revision lifecycle service', () => {
     // A bill exists unless a test says otherwise (reset, so a queued answer
     // a failing test left behind never reaches the next one).
     mockPrisma.boqItem.count.mockReset().mockResolvedValue(2);
+    mockPrisma.boqItem.aggregate.mockReset().mockResolvedValue({ _sum: { amount: 200 } });
     mockPrisma.activity.findMany.mockResolvedValue(readyActivities);
     mockPrisma.activity.update.mockResolvedValue({});
     mockPrisma.activity.create.mockImplementation(({ data }) =>
@@ -360,9 +363,10 @@ describe('schedule revision lifecycle service', () => {
         'BOQ required before baseline lock: the bill has no value to map; price its rows (BOQ page), map them to the schedule, then lock the baseline.',
     });
 
-    // Priced: an active row with an amount above zero.
-    expect(mockPrisma.boqItem.count).toHaveBeenCalledWith({
+    // Priced: the value of the active rows with an amount above zero.
+    expect(mockPrisma.boqItem.aggregate).toHaveBeenCalledWith({
       where: { projectId: 'project-1', isActive: true, amount: { gt: 0 } },
+      _sum: { amount: true },
     });
     expect(mockPrisma.scheduleRevision.findFirst).not.toHaveBeenCalled();
     expect(mockPrisma.$transaction).not.toHaveBeenCalled();
@@ -389,17 +393,44 @@ describe('schedule revision lifecycle service', () => {
         'BOQ required before baseline lock: the bill has no in-scope value to map; mark the rows that belong to the schedule as required (Project Controls › Mapping), map them, then lock the baseline.',
     });
 
-    // In scope: a rule neither not applicable nor optional, and an amount above zero.
-    expect(mockPrisma.boqItem.count).toHaveBeenCalledWith({
+    // In scope: the value of the rows whose rule is neither not applicable
+    // nor optional, with an amount above zero.
+    expect(mockPrisma.boqItem.aggregate).toHaveBeenCalledWith({
       where: {
         projectId: 'project-1',
         isActive: true,
         amount: { gt: 0 },
         mappingRule: { notIn: ['not_applicable', 'optional'] },
       },
+      _sum: { amount: true },
     });
     expect(mockPrisma.scheduleRevision.findFirst).not.toHaveBeenCalled();
     expect(mockPrisma.$transaction).not.toHaveBeenCalled();
+    expect(mockPrisma.activity.update).not.toHaveBeenCalled();
+    expect(mockPrisma.scheduleRevision.update).not.toHaveBeenCalled();
+    expect(mockAuditService.recordEvent).not.toHaveBeenCalled();
+  });
+
+  it('counts a bill worth one cent as no value, and one whose in-scope rows are worth one cent as out of scope — refused before any schedule step, nothing written (closure review)', async () => {
+    // One required row at one cent, nothing mapped: the coverage check cannot
+    // tell it covered (its remainder is within the cent tolerance), so it is
+    // no value, as the setup gate says (BOQ_HAS_NO_VALUE).
+    mockBill({ items: 1, priced: 0.01, inScope: 0.01 });
+    await expect(
+      scheduleService.lockBaseline({ orgId: 'org-1', projectId: 'project-1', revisionId: 'revision-1', userId: 'pm-1' }),
+    ).rejects.toMatchObject({ status: 400, code: 'BOQ_VALUE_REQUIRED_FOR_BASELINE' });
+    // ... and beside a priced not-applicable row, the in-scope cent is no
+    // in-scope value.
+    mockBill({ items: 2, priced: 250000.01, inScope: 0.01 });
+    await expect(
+      scheduleService.lockBaseline({ orgId: 'org-1', projectId: 'project-1', revisionId: 'revision-1', userId: 'pm-1' }),
+    ).rejects.toMatchObject({ status: 400, code: 'BOQ_SCOPE_REQUIRED_FOR_BASELINE' });
+    // Two cents are value.
+    mockBill({ items: 1, priced: 0.02, inScope: 0.02 });
+    mockCurrentRevision({ ...revision, status: 'draft' });
+    await expect(
+      scheduleService.lockBaseline({ orgId: 'org-1', projectId: 'project-1', revisionId: 'revision-1', userId: 'pm-1' }),
+    ).rejects.not.toMatchObject({ code: expect.stringMatching(/^BOQ_/) });
     expect(mockPrisma.activity.update).not.toHaveBeenCalled();
     expect(mockPrisma.scheduleRevision.update).not.toHaveBeenCalled();
     expect(mockAuditService.recordEvent).not.toHaveBeenCalled();
@@ -409,7 +440,7 @@ describe('schedule revision lifecycle service', () => {
     mockCurrentRevision({ ...revision, status: 'approved', isActive: true }, { active: true });
     // Before the transaction: in scope. Inside it: the bill is there and
     // priced, its value out of scope.
-    mockBill(IN_SCOPE_BILL, { items: 2, priced: 2, inScope: 0 });
+    mockBill(IN_SCOPE_BILL, { items: 2, priced: 200, inScope: 0 });
 
     await expect(
       scheduleService.lockBaseline({
@@ -929,5 +960,62 @@ describe('the baseline readiness says what the lock says: no BOQ, no baseline', 
 
   it('a summary that does not list the rows says nothing about the BOQ (no check is invented)', () => {
     expect(sound({}).checks.map((check) => check.key)).toEqual(['predecessors', 'allocations', 'critical_path', 'date_sanity']);
+  });
+});
+
+describe("one threshold for value, and no vacuous coverage on an in-scope bill (closure review, 2026-09-29)", () => {
+  const sound = (allocationSummary) =>
+    scheduleService.buildScheduleReadiness({
+      project: { id: "p", startDate: new Date("2026-01-05"), endDate: new Date("2026-12-18") },
+      revision: { id: "r", isActive: true, status: "approved" },
+      activities: [
+        { id: "a", name: "A", activityCode: "A", duration: 5, earlyStart: 0, earlyFinish: 5, totalFloat: 0, isCritical: true, predecessors: "" },
+        { id: "b", name: "B", activityCode: "B", duration: 5, earlyStart: 5, earlyFinish: 10, totalFloat: 0, isCritical: true, predecessors: "A" },
+      ],
+      allocationSummary,
+    });
+  const check = (readiness, key) => readiness.checks.find((entry) => entry.key === key);
+
+  it("a bill whose only value is one required cent, unmapped, is not baseline-ready: it is unpriced, as the lock and the setup gate say", () => {
+    const readiness = sound({ items: [{ amount: 0.01, mappingRule: "required" }], totalBoqAmount: 0.01, approvedAllocatedAmount: 0, pendingAllocatedAmount: 0, unallocatedAmount: 0.01 });
+    expect(readiness.baselineReady).toBe(false);
+    expect(check(readiness, "boq_present")).toMatchObject({ passed: false, message: "The bill has no value to map: none of its rows is priced; a baseline locks a BOQ mapped to the schedule." });
+  });
+
+  it("a required cent beside a $250,000 not-applicable row: no in-scope value, and no sentence that nothing blocks the baseline", () => {
+    const readiness = sound({
+      items: [{ amount: 0.01, mappingRule: "required" }, { amount: 250000, mappingRule: "not_applicable" }],
+      totalBoqAmount: 250000.01, notApplicableAmount: 250000, approvedAllocatedAmount: 0, pendingAllocatedAmount: 0, unallocatedAmount: 0.01, optionalUnallocatedAmount: 0,
+    });
+    expect(readiness.baselineReady).toBe(false);
+    expect(check(readiness, "boq_present")).toMatchObject({ passed: false });
+    // Money is subtracted in cents: the allocatable value is the cent itself.
+    expect(check(readiness, "allocations").details.allocatableBoqAmount).toBe(0.01);
+    const message = scheduleService.scheduleNotReadyMessage(readiness, "baseline", { gate: "baseline" });
+    expect(message).not.toMatch(/nothing blocks the baseline/);
+  });
+
+  it("on an in-scope bill the coverage check never passes without approved allocations — and a refusal always names the mapping", () => {
+    // In scope by its rows; the summary says nothing is left unallocated
+    // (pending allocations cover it) and nothing is approved.
+    const readiness = sound({
+      items: [{ amount: 100, mappingRule: "required" }],
+      totalBoqAmount: 100, approvedAllocatedAmount: 0, pendingAllocatedAmount: 100, unallocatedAmount: 0,
+    });
+    expect(check(readiness, "boq_present")).toMatchObject({ passed: true });
+    expect(check(readiness, "allocations")).toMatchObject({ passed: false, message: "No approved BOQ allocation covers the in-scope BOQ value yet." });
+    const message = scheduleService.scheduleNotReadyMessage(readiness, "baseline", { gate: "baseline" });
+    expect(message).toContain("BOQ allocations");
+    expect(message).toContain("Project Controls › Mapping");
+    expect(message).not.toMatch(/nothing blocks the baseline/);
+    // Even when the summary's amounts say there is nothing to cover.
+    const vacuous = sound({ items: [{ amount: 100, mappingRule: "required" }], totalBoqAmount: 0, approvedAllocatedAmount: 0, pendingAllocatedAmount: 0, unallocatedAmount: 0 });
+    expect(check(vacuous, "allocations").passed).toBe(false);
+    expect(vacuous.baselineReady).toBe(false);
+  });
+
+  it("covered by approved allocations, the check passes", () => {
+    const readiness = sound({ items: [{ amount: 100, mappingRule: "required" }], totalBoqAmount: 100, approvedAllocatedAmount: 100, pendingAllocatedAmount: 0, unallocatedAmount: 0 });
+    expect(check(readiness, "allocations")).toMatchObject({ passed: true, message: "Approved allocations cover the BOQ value." });
   });
 });

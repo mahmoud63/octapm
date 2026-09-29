@@ -903,4 +903,22 @@ describe("project setup readiness service", () => {
     expect(result.gates.baseline.blockers.map((entry) => entry.code)).toEqual([]);
     expect(result.gates.baseline.ready).toBe(true);
   });
+
+  it("counts a bill worth one cent as no value, and in-scope rows worth one cent as no in-scope value — the rule the lock and the schedule readiness use (closure review)", async () => {
+    // One required row at one cent, nothing mapped.
+    const cent = await approvedWithBill([{ id: "boq-1", qty: 1, amount: 0.01, mappingRule: "required" }], {
+      totalBoqAmount: 0.01, approvedAllocatedAmount: 0, pendingAllocatedAmount: 0, unallocatedAmount: 0.01,
+    });
+    expect([cent.gates.baseline.ready, cent.gates.baseline.blockers.map((entry) => entry.code)]).toEqual([false, expect.arrayContaining(["BOQ_HAS_NO_VALUE"])]);
+    // ... beside a priced not-applicable row: no in-scope value.
+    const beside = await approvedWithBill(
+      [
+        { id: "boq-1", qty: 1, amount: 0.01, mappingRule: "required" },
+        { id: "boq-2", qty: 1, amount: 250000, mappingRule: "not_applicable" },
+      ],
+      { totalBoqAmount: 250000.01, notApplicableAmount: 250000, approvedAllocatedAmount: 0, pendingAllocatedAmount: 0, unallocatedAmount: 0.01 },
+    );
+    const codes = beside.gates.baseline.blockers.map((entry) => entry.code);
+    expect([beside.gates.baseline.ready, codes.includes("BOQ_NO_IN_SCOPE_VALUE"), codes.includes("BOQ_HAS_NO_VALUE")]).toEqual([false, true, false]);
+  });
 });

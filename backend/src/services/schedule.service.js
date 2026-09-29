@@ -3,7 +3,13 @@ const XLSX = require("@e965/xlsx");
 const { prisma } = require("../config/db");
 const { HttpError } = require("../utils/http-error");
 const { catalogEntryFor } = require("../utils/error-codes");
-const { addMoney, multiplyMoney, toMoneyNumber } = require("../utils/money");
+const { addMoney, multiplyMoney, subtractMoney, toMoneyNumber } = require("../utils/money");
+const {
+  BOQ_STATE,
+  BOQ_VALUE_EPSILON,
+  OUT_OF_SCOPE_MAPPING_RULES,
+  boqStateOf,
+} = require("../utils/boq-value");
 const {
   buildAllocationSummary,
   getApprovedActivityAllocationTotals,
@@ -607,7 +613,9 @@ const buildScheduleReadiness = ({
   // but does not fail the check (mapping §3).
   const totalBoqAmount = toNumber(allocationSummary?.totalBoqAmount);
   const notApplicableAmount = toNumber(allocationSummary?.notApplicableAmount);
-  const allocatableBoqAmount = Math.max(0, totalBoqAmount - notApplicableAmount);
+  // Differences of money in money (cents), never in floating point: a
+  // remainder at the cent tolerance must compare as the cent it is.
+  const allocatableBoqAmount = Math.max(0, subtractMoney(totalBoqAmount, notApplicableAmount));
   const unallocatedAmount = toNumber(
     allocationSummary?.unallocatedAmount ?? allocationSummary?.unscheduledValue,
   );
@@ -616,7 +624,7 @@ const buildScheduleReadiness = ({
   );
   const requiredUnallocatedAmount = Math.max(
     0,
-    unallocatedAmount - optionalUnallocatedAmount,
+    subtractMoney(unallocatedAmount, optionalUnallocatedAmount),
   );
   // What the baseline must cover: the allocatable value less the optional
   // remainder. On a bill that is optional throughout this check has nothing
@@ -624,7 +632,7 @@ const buildScheduleReadiness = ({
   // refuses the baseline for it (owner decision E2).
   const requiredBoqAmount = Math.max(
     0,
-    allocatableBoqAmount - optionalUnallocatedAmount,
+    subtractMoney(allocatableBoqAmount, optionalUnallocatedAmount),
   );
   const approvedAllocatedAmount = toNumber(
     allocationSummary?.approvedAllocatedAmount ??
@@ -708,9 +716,10 @@ const buildScheduleReadiness = ({
   // whether a bill exists is said: no count, no value.
   // A bill must also have value in scope for mapping (owner decision E2,
   // 2026-09-28): at least one row whose mapping rule is neither not
-  // applicable nor optional, with an amount above zero. A bill made only of
-  // such rows maps nothing, and the coverage check passes vacuously on it,
-  // so it fails this check like no bill — the same rule the lock enforces
+  // applicable nor optional, their priced amounts together worth more than a
+  // cent (utils/boq-value). A bill made only of such rows maps nothing,
+  // and the coverage check passes vacuously on it, so it fails this check
+  // like no bill — the same rule the lock enforces
   // (400 BOQ_SCOPE_REQUIRED_FOR_BASELINE). Whether it has any is said; how
   // much, or how many rows, is not.
   // Which step is missing is said in the refusal's words: no bill (upload
@@ -736,6 +745,22 @@ const buildScheduleReadiness = ({
             details: {},
           },
         ];
+
+  // The D5 coverage check. On a bill with in-scope value (boq_present
+  // passes) it never passes vacuously: the active activities must carry
+  // approved allocations and leave no required value open — a bill whose
+  // required remainder sits at the tolerance with nothing approved is not
+  // covered (closure review, 2026-09-29). Without in-scope value
+  // boq_present refuses the baseline, and without the bill's rows (a caller
+  // that gives no summary items) the check judges the amounts alone, as
+  // before.
+  const coveredByApprovedAllocations =
+    !staged &&
+    approvedAllocatedAmount > 0 &&
+    requiredUnallocatedAmount <= BOQ_VALUE_EPSILON;
+  const allocationsPassed = boqInScope
+    ? coveredByApprovedAllocations
+    : requiredBoqAmount <= BOQ_VALUE_EPSILON || coveredByApprovedAllocations;
 
   const checks = [
     // First: in the greenfield order the BOQ comes before any schedule step.
@@ -789,24 +814,26 @@ const buildScheduleReadiness = ({
       key: "allocations",
       label: "BOQ allocations",
       requiredFor: ["baseline"],
-      passed:
-        requiredBoqAmount <= 0.01 ||
-        (!staged &&
-          approvedAllocatedAmount > 0 &&
-          requiredUnallocatedAmount <= 0.01),
-      severity: allocatableBoqAmount <= 0 ? "warning" : "blocking",
+      passed: allocationsPassed,
+      // In scope, it always blocks: a bill with value to map is never locked
+      // over a warning.
+      severity: boqInScope || allocatableBoqAmount > 0 ? "blocking" : "warning",
+      // A failing check always names a step on the mapping; the sentence
+      // that nothing blocks the baseline is said only of a passing one.
       message:
         boqState !== null && !boqInScope
           ? "No in-scope BOQ value to allocate yet."
           : allocatableBoqAmount <= 0
           ? "No BOQ value found for allocation checks."
-          : staged && requiredBoqAmount > 0.01
+          : staged && !allocationsPassed
             ? "BOQ value is mapped to this revision's activities after it is activated; the baseline lock needs it, the approval does not."
-            : requiredUnallocatedAmount > 0.01
+            : requiredUnallocatedAmount > BOQ_VALUE_EPSILON
               ? "BOQ value remains unallocated to approved schedule activities."
-              : approvedAllocatedAmount <= 0
-                ? "Only optional BOQ value is unallocated; nothing blocks the baseline."
-                : "Approved allocations cover the BOQ value.",
+              : !allocationsPassed
+                ? "No approved BOQ allocation covers the in-scope BOQ value yet."
+                : approvedAllocatedAmount <= 0
+                  ? "Only optional BOQ value is unallocated; nothing blocks the baseline."
+                  : "Approved allocations cover the BOQ value.",
       details: {
         totalBoqAmount,
         allocatableBoqAmount,
@@ -1087,8 +1114,9 @@ const BOQ_REQUIRED_FOR_BASELINE_MESSAGE =
  * Owner decision E2 (2026-09-28): the lock needs real in-scope BOQ value —
  * at least one active row in scope for mapping (its mapping rule neither
  * not_applicable nor optional; an unset rule counts as required, as the
- * allocation summary reads it) with an amount above zero, and that value
- * fully allocated to active activities (D5, the allocations check). A bill
+ * allocation summary reads it) with an amount above zero, those rows worth
+ * more than a cent together (utils/boq-value), and that value fully
+ * allocated to active activities (D5, the allocations check). A bill
  * made only of not-applicable or optional rows maps nothing and passes the
  * coverage check vacuously, so it is refused like no bill, with its own
  * message naming the missing step.
@@ -1107,14 +1135,6 @@ const BOQ_SCOPE_REQUIRED_FOR_BASELINE_MESSAGE =
  */
 const BOQ_VALUE_REQUIRED_FOR_BASELINE_MESSAGE =
   catalogEntryFor("BOQ_VALUE_REQUIRED_FOR_BASELINE").message;
-const OUT_OF_SCOPE_MAPPING_RULES = ["not_applicable", "optional"];
-
-const BOQ_STATE = Object.freeze({
-  NONE: "none",
-  UNPRICED: "unpriced",
-  OUT_OF_SCOPE: "out_of_scope",
-  IN_SCOPE: "in_scope",
-});
 
 // The readiness check's message for each state, in the words of the
 // refusal the lock gives for it.
@@ -1127,19 +1147,10 @@ const BOQ_PRESENT_MESSAGES = Object.freeze({
   [BOQ_STATE.IN_SCOPE]: "The project has a BOQ.",
 });
 
-/** Whether an allocation summary row is in-scope BOQ value (E2). */
-const isInScopeBoqValue = (item) =>
-  Boolean(item) &&
-  !OUT_OF_SCOPE_MAPPING_RULES.includes(item.mappingRule || "required") &&
-  toNumber(item.amount) > 0;
-
-/** Where a bill (its active rows, as the allocation summary lists them) stands for the baseline (E2). */
-const boqStateOf = (items) => {
-  if (!Array.isArray(items) || items.length === 0) return BOQ_STATE.NONE;
-  if (items.some((item) => isInScopeBoqValue(item))) return BOQ_STATE.IN_SCOPE;
-  if (!items.some((item) => item && toNumber(item.amount) > 0)) return BOQ_STATE.UNPRICED;
-  return BOQ_STATE.OUT_OF_SCOPE;
-};
+// Where a bill stands (boqStateOf) and what counts as its value — more
+// than a cent, BOQ_VALUE_EPSILON — live in utils/boq-value, shared with the
+// setup baseline gate: the readiness check, the lock and the gate agree on
+// every bill (closure review, 2026-09-29).
 
 const assertBoqForBaseline = async (projectId, db = prisma) => {
   const boqItems = await db.boqItem.count({
@@ -1152,25 +1163,28 @@ const assertBoqForBaseline = async (projectId, db = prisma) => {
       BOQ_REQUIRED_FOR_BASELINE_MESSAGE,
     );
   }
-  const pricedItems = await db.boqItem.count({
+  // Value, as boqStateOf counts it: the priced rows' sum, above a cent.
+  const priced = await db.boqItem.aggregate({
     where: { projectId, isActive: true, amount: { gt: 0 } },
+    _sum: { amount: true },
   });
-  if (pricedItems === 0) {
+  if (toMoneyNumber(priced?._sum?.amount) <= BOQ_VALUE_EPSILON) {
     throw new HttpError(
       400,
       "BOQ_VALUE_REQUIRED_FOR_BASELINE",
       BOQ_VALUE_REQUIRED_FOR_BASELINE_MESSAGE,
     );
   }
-  const inScopeItems = await db.boqItem.count({
+  const inScope = await db.boqItem.aggregate({
     where: {
       projectId,
       isActive: true,
       amount: { gt: 0 },
       mappingRule: { notIn: OUT_OF_SCOPE_MAPPING_RULES },
     },
+    _sum: { amount: true },
   });
-  if (inScopeItems === 0) {
+  if (toMoneyNumber(inScope?._sum?.amount) <= BOQ_VALUE_EPSILON) {
     throw new HttpError(
       400,
       "BOQ_SCOPE_REQUIRED_FOR_BASELINE",
@@ -4122,6 +4136,8 @@ module.exports = {
   REVISION_NOT_ACTIVATED_MESSAGE,
   BOQ_REQUIRED_FOR_BASELINE_MESSAGE,
   BOQ_STATE,
+  BOQ_VALUE_EPSILON,
+  boqStateOf,
   buildScheduleReadiness,
   buildReadinessActivitiesFromSnapshot,
   FIX_PERMISSIONS,

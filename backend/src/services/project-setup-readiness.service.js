@@ -1,6 +1,7 @@
 const { prisma } = require("../config/db");
 const { HttpError } = require("../utils/http-error");
-const { addMoney } = require("../utils/money");
+const { addMoney, subtractMoney } = require("../utils/money");
+const { BOQ_STATE, boqStateOf } = require("../utils/boq-value");
 const { workspacePath, workspaceSegment } = require("../utils/record-links");
 const { buildAllocationSummary } = require("./activity-boq-allocation.service");
 const {
@@ -55,9 +56,6 @@ const BOQ_CURRENT_REVISION_STATUSES = [
   "baselined",
 ];
 const MAPPING_RULES = ["required", "optional", "not_applicable"];
-// The rules that take a row out of scope for mapping (owner decision E2):
-// the baseline lock needs in-scope value (schedule.service).
-const OUT_OF_SCOPE_MAPPING_RULES = ["not_applicable", "optional"];
 
 // The baseline blockers that say the bill's value is not mapped yet.
 const ALLOCATION_BLOCKER_CODES = new Set([
@@ -806,9 +804,12 @@ const getSetupReadiness = async ({ orgId, projectId, canReadBoq = true, canReadS
   // are never scheduled: the allocation step judges the allocatable value
   // and the summary already keeps them out of "unallocated" (PC-3).
   const notApplicableAmount = toNumber(allocationSummary.notApplicableAmount);
+  // Differences of money are taken in money (cents), as the schedule's
+  // coverage check takes them: a remainder at the cent tolerance compares
+  // as the cent it is, never as a float just above it.
   const allocatableBoqAmount = Math.max(
     0,
-    totalBoqFromSummary - notApplicableAmount,
+    subtractMoney(totalBoqFromSummary, notApplicableAmount),
   );
   const approvedAllocatedAmount = toNumber(
     allocationSummary.approvedAllocatedAmount,
@@ -825,7 +826,7 @@ const getSetupReadiness = async ({ orgId, projectId, canReadBoq = true, canReadS
   );
   const requiredUnallocatedAmount = Math.max(
     0,
-    unallocatedAmount - optionalUnallocatedAmount,
+    subtractMoney(unallocatedAmount, optionalUnallocatedAmount),
   );
   // The value the baseline must cover: the allocatable value less what the
   // optional rows still leave open. A bill that is optional throughout has
@@ -834,7 +835,7 @@ const getSetupReadiness = async ({ orgId, projectId, canReadBoq = true, canReadS
   // decision E2).
   const requiredBoqAmount = Math.max(
     0,
-    allocatableBoqAmount - optionalUnallocatedAmount,
+    subtractMoney(allocatableBoqAmount, optionalUnallocatedAmount),
   );
   const baselineLocked = Boolean(
     baselinedRevision || revisionStatus === "baselined",
@@ -1201,14 +1202,16 @@ const getSetupReadiness = async ({ orgId, projectId, canReadBoq = true, canReadS
       ),
   ];
 
+  const boqValueState = boqStateOf(boqItems);
   const boqBlockers = [
     boqCount === 0 && issue("NO_BOQ", "No BOQ items have been uploaded."),
     // A bill none of whose rows is priced has no value to map: the rows are
     // priced first, in the words of the lock's refusal
     // (BOQ_VALUE_REQUIRED_FOR_BASELINE) and the schedule readiness's
     // boq_present check.
-    boqCount > 0 &&
-      totalBoqAmount <= MONEY_EPSILON &&
+    // Value is the schedule's rule (boqStateOf): the priced rows' sum above
+    // a cent — one threshold for this gate, the readiness check and the lock.
+    boqValueState === BOQ_STATE.UNPRICED &&
       issue(
         "BOQ_HAS_NO_VALUE",
         "The bill has no value to map: none of its rows is priced. Price its rows (BOQ page), map them to the schedule, then lock the baseline.",
@@ -1218,13 +1221,7 @@ const getSetupReadiness = async ({ orgId, projectId, canReadBoq = true, canReadS
     // and the baseline lock refuses it like no bill
     // (BOQ_SCOPE_REQUIRED_FOR_BASELINE) — the step says so, in the words
     // of that refusal. Whether there is any is said, never how much.
-    boqCount > 0 &&
-      totalBoqAmount > MONEY_EPSILON &&
-      !boqItems.some(
-        (item) =>
-          !OUT_OF_SCOPE_MAPPING_RULES.includes(item.mappingRule || "required") &&
-          toNumber(item.amount) > 0,
-      ) &&
+    boqValueState === BOQ_STATE.OUT_OF_SCOPE &&
       issue(
         "BOQ_NO_IN_SCOPE_VALUE",
         "The bill has no in-scope value to map: every priced row is marked not applicable or optional. Mark the rows that belong to the schedule as required (Project Controls › Mapping), map them, then lock the baseline.",
