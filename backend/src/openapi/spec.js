@@ -8145,7 +8145,7 @@ add(
   [
     "rollback",
     "rollbackScheduleRevision",
-    "Rollback an active schedule revision: the previous active revision's stored snapshot activities are restored. Refused 409 ROLLBACK_TARGET_HAS_NO_ACTIVITIES when that revision stored none (GET /schedule/revisions gives each revision's snapshotActivityCount).",
+    "Rollback an active schedule revision: the previous active revision's stored snapshot activities are restored. Refused 409 ROLLBACK_TARGET_HAS_NO_ACTIVITIES when that revision stored none (GET /schedule/revisions gives each revision's snapshotActivityCount). A rollback whose target revision is baselined re-establishes a schedule baseline, so it is a baseline path (owner decision E2, ruling G2 2026-09-29): before any write it is refused with the baseline lock's own refusal when the bill has no in-scope priced value (400 BOQ_REQUIRED_FOR_BASELINE, BOQ_VALUE_REQUIRED_FOR_BASELINE or BOQ_SCOPE_REQUIRED_FOR_BASELINE, in the lock's words), and with 400 SCHEDULE_NOT_READY naming the BOQ allocations check and Project Controls › Mapping when that value is not fully allocated to the activities the rollback keeps (allocations to activities it retires do not count); the refusal carries no BOQ figure. A rollback to an approved, never-baselined revision is not a baseline path.",
     "approve",
     "revision.rollback",
     ref("RejectRequest"),

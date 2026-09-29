@@ -742,10 +742,13 @@ const groupOfItem = ({ item, groupBy, labels }) => {
  * holds on every project. `groupBy` adds the same figures per WBS node,
  * section, location, cost code or package; `cutoffDate` reads the
  * allocations as they stood on that date (rows created after it are not
- * counted, and a row approved after it counts as pending).
+ * counted, and a row approved after it counts as pending). `activityIds`,
+ * when given (an array), counts only the allocations to those active
+ * activities: a rollback to a baselined revision asks what coverage the
+ * activities it keeps would carry, before it writes anything.
  */
 const buildAllocationSummary = async (
-  { projectId, groupBy = 'none', cutoffDate = null },
+  { projectId, groupBy = 'none', cutoffDate = null, activityIds = null },
   tx = prisma,
 ) => {
   const group = GROUP_BY_OPTIONS.includes(groupBy) ? groupBy : 'none';
@@ -777,7 +780,9 @@ const buildAllocationSummary = async (
       where: {
         projectId,
         isActive: true,
-        activity: { isActive: true },
+        activity: Array.isArray(activityIds)
+          ? { isActive: true, id: { in: activityIds } }
+          : { isActive: true },
         ...(cutoff ? { createdAt: { lte: cutoff } } : {}),
       },
       select: {

@@ -3468,6 +3468,49 @@ const activateRevision = async ({
   });
 };
 
+/*
+ * G2's coverage half: the bill's in-scope value fully allocated to the
+ * activities a rollback to a baselined revision leaves active. The rollback
+ * keeps (updates in place) the active activities it maps to the target's and
+ * retires the rest, whose allocations then no longer count; so the coverage
+ * is read from the allocations to the kept activities alone, judged by the
+ * baseline's own BOQ allocations check, before anything is written. Refused
+ * as the lock refuses uncovered value (400 SCHEDULE_NOT_READY, naming the
+ * check and Project Controls › Mapping), with no figure in the answer.
+ */
+const assertRollbackBaselineCovered = async ({
+  project,
+  targetRevision,
+  keptActivityIds,
+}) => {
+  const allocationSummary = await buildAllocationSummary({
+    projectId: project.id,
+    activityIds: keptActivityIds,
+  });
+  const readiness = buildScheduleReadiness({
+    project,
+    // Judged as the active schedule it would become, not as a staged one.
+    revision: { ...targetRevision, isActive: true },
+    activities: buildReadinessActivitiesFromSnapshot(targetRevision, project),
+    allocationSummary,
+  });
+  const coverage = readiness.checks.filter(
+    (check) => check.key === "allocations" && check.severity === "blocking" && !check.passed,
+  );
+  if (coverage.length > 0) {
+    throw new HttpError(
+      400,
+      "SCHEDULE_NOT_READY",
+      scheduleNotReadyMessage(
+        { checks: coverage },
+        "a rollback to a baselined revision",
+        { gate: "baseline" },
+      ),
+      { targetRevisionId: targetRevision.id },
+    );
+  }
+};
+
 const rollbackRevision = async ({
   orgId,
   projectId,
@@ -3519,6 +3562,21 @@ const rollbackRevision = async ({
     );
   }
 
+  // Orchestrator ruling G2 (2026-09-29, under owner decision E2): a rollback
+  // whose target revision is BASELINED re-establishes a schedule baseline,
+  // so it is a baseline path. Its bill must have real in-scope value — the
+  // lock's own refusals (BOQ_REQUIRED_FOR_BASELINE,
+  // BOQ_VALUE_REQUIRED_FOR_BASELINE, BOQ_SCOPE_REQUIRED_FOR_BASELINE), named
+  // first as the lock names them — and, below, that value fully allocated
+  // to the activities the rollback keeps (D5). Both are asked before any
+  // write. A rollback to an approved (never baselined) revision is not a
+  // baseline path and is unchanged.
+  const targetBaselined =
+    normalizeRevisionStatus(targetRevision.status) === REVISION_STATUS.BASELINED;
+  if (targetBaselined) {
+    await assertBoqForBaseline(projectId);
+  }
+
   // A rollback restores the previous revision's stored activities; a
   // revision stored without any (one recorded by hand, or before snapshots
   // kept them) has nothing to restore. Said as what it means to the person
@@ -3541,6 +3599,16 @@ const rollbackRevision = async ({
     oldActivityId: activity.id,
     reason: rollbackReason,
   }));
+
+  if (targetBaselined) {
+    await assertRollbackBaselineCovered({
+      project,
+      targetRevision,
+      keptActivityIds: mapping.suggestedMappings.map(
+        (suggestion) => suggestion.oldActivityId,
+      ),
+    });
+  }
 
   const activated = await activateRevisionSnapshot({
     project,
