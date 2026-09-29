@@ -19,6 +19,31 @@ export const CONTRACT_TYPE_LABEL: Record<ContractType, string> = {
   gmp: 'Guaranteed maximum price',
 }
 
+/**
+ * Where the contract's original value came from — decided by the server
+ * only. project_value and contract_entry are established; boq_fallback (the
+ * BOQ's total, nobody has confirmed it) and unestablished are withheld from a
+ * member who may not read the BOQ.
+ */
+export type OriginalValueSource =
+  | 'project_value'
+  | 'contract_entry'
+  | 'boq_fallback'
+  | 'unestablished'
+
+/**
+ * The server left these keys out (never zeroed) and says why: the original
+ * value is an unconfirmed BOQ total, or of a source not established, and the
+ * reader may not read the BOQ.
+ */
+export type ValueWithheld = {
+  keys: string[]
+  source: OriginalValueSource
+  reason: string
+}
+
+export const ESTABLISHED_VALUE_SOURCES: OriginalValueSource[] = ['project_value', 'contract_entry']
+
 export type PrimeContract = {
   id: string
   projectId: string
@@ -28,14 +53,18 @@ export type PrimeContract = {
   client: string | null
   contractType: ContractType
   currency: string
-  originalValue: number
+  /** Absent when withheld (see valueWithheld). */
+  originalValue?: number
+  originalValueSource: OriginalValueSource
   approvedChangesValue: number
   pendingChangesValue: number
-  revisedValue: number
+  /** Absent when withheld (see valueWithheld). */
+  revisedValue?: number
   retentionRate: number
   retentionCapRate: number | null
   advanceRate: number
-  advanceAmount: number
+  /** Absent when withheld: it is then a rate of a withheld value. */
+  advanceAmount?: number
   advancePaidAmount: number
   advanceRecoveryRate: number
   advanceRecoveredAmount: number
@@ -47,6 +76,7 @@ export type PrimeContract = {
   completionDate: string | null
   status: 'draft' | 'active' | 'closed'
   notes: string | null
+  valueWithheld?: ValueWithheld
 }
 
 export type StatementLine = {
@@ -66,17 +96,20 @@ export type StatementLine = {
 }
 
 export type StatementSummary = {
-  originalValue: number
+  /** Absent when withheld (see valueWithheld). */
+  originalValue?: number
   approvedChangesValue: number
   pendingChangesValue: number
-  revisedValue: number
+  /** Absent when withheld (see valueWithheld). */
+  revisedValue?: number
   previousCertified: number
   currentCertified: number
   materialsOnSite: number
   grossThisPeriod: number
   retentionThisPeriod: number
   retentionCumulative: number
-  advanceAmount: number
+  /** Absent when withheld (see valueWithheld). */
+  advanceAmount?: number
   advancePaid: number
   advanceRecoveredToDate: number
   advanceRecoveryThisPeriod: number
@@ -86,10 +119,12 @@ export type StatementSummary = {
   taxAmount: number
   totalDue: number
   cumulativeCertified: number
-  remainingToCertify: number
+  /** Absent when withheld (see valueWithheld). */
+  remainingToCertify?: number
   invoiced: number
   received: number
   outstanding: number
+  valueWithheld?: ValueWithheld
 }
 
 export type ClientStatement = {
@@ -218,7 +253,13 @@ const invalidate = (queryClient: ReturnType<typeof useQueryClient>, projectId: s
 export function useUpdatePrimeContract(projectId: string) {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: (payload: Partial<PrimeContract>) =>
+    // confirmOriginalValue confirms the stored (BOQ) value as it stands; the
+    // server also requires BOQ read. originalValueSource is never sent.
+    mutationFn: (
+      payload: Partial<Omit<PrimeContract, 'originalValueSource' | 'valueWithheld'>> & {
+        confirmOriginalValue?: boolean
+      }
+    ) =>
       apiClient.patch(base(projectId), payload).then(unwrap<PrimeContract>),
     onSuccess: () => invalidate(queryClient, projectId),
   })

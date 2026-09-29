@@ -109,12 +109,20 @@ function ContractTermsForm({
   const set = (patch: Partial<ReturnType<typeof toForm>>) =>
     setForm((current) => ({ ...current, ...patch }))
 
+  // The original value is sent only when it was changed: sending the stored
+  // one back is a save, but an entered value becomes the contract's own
+  // (the server records it as entered). A withheld value starts empty and is
+  // sent only if something is typed.
+  const stored = toForm(contract).originalValue
+  const originalValueChanged =
+    form.originalValue.trim() !== '' && form.originalValue.trim() !== stored
+
   const submit = () => {
     update.mutate(
       {
         title: form.title.trim(),
         contractType: form.contractType,
-        originalValue: Number(form.originalValue) || 0,
+        ...(originalValueChanged ? { originalValue: Number(form.originalValue) || 0 } : {}),
         retentionRate: Number(form.retentionRate) || 0,
         retentionCapRate: form.retentionCapRate === '' ? null : Number(form.retentionCapRate),
         advanceRate: Number(form.advanceRate) || 0,
@@ -187,6 +195,15 @@ function ContractTermsForm({
               <p className='text-[11px] text-muted-foreground'>
                 Approved change orders are added on top; they are never typed here.
               </p>
+              {contract.valueWithheld && (
+                <p
+                  className='text-[11px] text-warning-foreground'
+                  data-testid='uat-contract-original-value-withheld'
+                >
+                  Current value: — {contract.valueWithheld.reason} Leave this empty to keep
+                  it, or enter the contract value.
+                </p>
+              )}
             </div>
             <div className='grid gap-1.5'>
               <Label htmlFor='contract-terms-days'>Payment terms</Label>
@@ -284,7 +301,7 @@ function ContractTermsForm({
 const toForm = (contract: PrimeContract) => ({
   title: contract.title,
   contractType: contract.contractType,
-  originalValue: String(contract.originalValue),
+  originalValue: contract.originalValue == null ? '' : String(contract.originalValue),
   retentionRate: String(contract.retentionRate),
   retentionCapRate: contract.retentionCapRate == null ? '' : String(contract.retentionCapRate),
   advanceRate: String(contract.advanceRate),
@@ -329,8 +346,10 @@ function RecordAdvanceForm({
   onDone: () => void
 }) {
   const record = useRecordAdvance(projectId)
-  const remaining = Math.max(0, contract.advanceAmount - contract.advancePaidAmount)
-  const [amount, setAmount] = useState(String(remaining))
+  // The agreed advance is withheld with the original value it is a rate of.
+  const agreed = contract.advanceAmount
+  const remaining = agreed == null ? null : Math.max(0, agreed - contract.advancePaidAmount)
+  const [amount, setAmount] = useState(remaining == null ? '' : String(remaining))
   const [note, setNote] = useState('')
 
   return (
@@ -338,8 +357,9 @@ function RecordAdvanceForm({
         <DialogHeader>
           <DialogTitle className='font-display'>Record an advance payment</DialogTitle>
           <DialogDescription>
-            The advance agreed is {contract.advanceAmount.toLocaleString()}, of which{' '}
-            {contract.advancePaidAmount.toLocaleString()} has been received. Each
+            The advance agreed is{' '}
+            {agreed == null ? `— (${contract.valueWithheld?.reason ?? 'withheld'})` : agreed.toLocaleString()}
+            , of which {contract.advancePaidAmount.toLocaleString()} has been received. Each
             certificate then recovers {contract.advanceRecoveryRate}% of its gross until
             it is repaid.
           </DialogDescription>

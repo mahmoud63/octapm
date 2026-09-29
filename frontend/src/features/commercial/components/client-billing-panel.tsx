@@ -1,14 +1,19 @@
 import { useState } from 'react'
 import { Loader2 } from 'lucide-react'
+import { toast } from 'sonner'
+import { getServerErrorMessage } from '@/lib/handle-server-error'
 import { useCanPerform } from '@/lib/permissions'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import {
+  ESTABLISHED_VALUE_SOURCES,
   useClientStatement,
   usePrimeContract,
   useReceivables,
+  useUpdatePrimeContract,
   type StatementLine,
+  type ValueWithheld,
 } from '../hooks/use-prime-contract'
 import { ContractTermsDialog, RecordAdvanceDialog } from './client-billing-dialogs'
 
@@ -80,6 +85,22 @@ function Row({
   )
 }
 
+/**
+ * A figure the server withheld: "—" and the server's reason, never a zero
+ * (utils/boq-figures on the server decides; the page only shows it).
+ */
+function Withheld({ reason }: { reason: string }) {
+  return (
+    <span className='inline-flex flex-col' data-testid='uat-contract-value-withheld'>
+      <span className='font-mono'>—</span>
+      <span className='text-[11px] font-normal text-muted-foreground'>{reason}</span>
+    </span>
+  )
+}
+
+const withheldKey = (withheld: ValueWithheld | undefined, key: string) =>
+  withheld?.keys.includes(key) ? withheld : null
+
 export function ClientBillingPanel({ projectId }: { projectId: string }) {
   const [termsOpen, setTermsOpen] = useState(false)
   const [advanceOpen, setAdvanceOpen] = useState(false)
@@ -90,6 +111,7 @@ export function ClientBillingPanel({ projectId }: { projectId: string }) {
 
   const canManage = useCanPerform('ipc', 'update', 'contract.manage')
   const canRecordAdvance = useCanPerform('ipc', 'create', 'advance.record')
+  const update = useUpdatePrimeContract(projectId)
 
   if (statement.isPending || contract.isPending) {
     return (
@@ -112,6 +134,22 @@ export function ClientBillingPanel({ projectId }: { projectId: string }) {
   const lines = statement.data.lines ?? []
   const c = contract.data
   const ar = receivables.data
+  // The original value is established (the project's own, or entered or
+  // confirmed under the contract) or it is the BOQ's total nobody has
+  // confirmed. The server withholds the latter from a member who may not
+  // read the BOQ; one who may, and who manages the contract, may confirm it.
+  const unconfirmed = !ESTABLISHED_VALUE_SOURCES.includes(c.originalValueSource)
+  const canConfirm = canManage && unconfirmed && !c.valueWithheld
+  const advanceWithheld = withheldKey(summary.valueWithheld, 'advanceAmount')
+  const hasAdvance = (c.advanceAmount ?? 0) > 0 || Boolean(advanceWithheld)
+  const confirm = () =>
+    update.mutate(
+      { confirmOriginalValue: true },
+      {
+        onSuccess: () => toast.success('Original value confirmed as the contract value'),
+        onError: (error) => toast.error(getServerErrorMessage(error)),
+      }
+    )
 
   return (
     <div className='space-y-4' data-testid='uat-client-billing'>
@@ -127,7 +165,7 @@ export function ClientBillingPanel({ projectId }: { projectId: string }) {
               </p>
             </div>
             <div className='flex gap-2'>
-              {canRecordAdvance && c.advanceAmount > 0 && (
+              {canRecordAdvance && hasAdvance && (
                 <Button
                   variant='outline'
                   size='sm'
@@ -152,22 +190,51 @@ export function ClientBillingPanel({ projectId }: { projectId: string }) {
         </CardHeader>
         <CardContent>
           <div className='grid gap-3 sm:grid-cols-2 lg:grid-cols-4'>
-            {[
-              ['Original contract', summary.originalValue],
-              ['Approved changes', summary.approvedChangesValue],
-              ['Revised contract', summary.revisedValue],
-              ['Remaining to certify', summary.remainingToCertify],
-            ].map(([label, value]) => (
-              <div key={label as string} className='rounded-md border px-3 py-2'>
-                <p className='text-[11px] tracking-wide text-muted-foreground uppercase'>
-                  {label}
-                </p>
-                <p className='font-display mt-0.5 text-lg font-bold tabular-nums'>
-                  {money(value as number, c.currency)}
-                </p>
-              </div>
-            ))}
+            {(
+              [
+                ['Original contract', 'originalValue', summary.originalValue],
+                ['Approved changes', 'approvedChangesValue', summary.approvedChangesValue],
+                ['Revised contract', 'revisedValue', summary.revisedValue],
+                ['Remaining to certify', 'remainingToCertify', summary.remainingToCertify],
+              ] as const
+            ).map(([label, key, value]) => {
+              const withheld = withheldKey(summary.valueWithheld, key)
+              return (
+                <div key={key} className='rounded-md border px-3 py-2'>
+                  <p className='text-[11px] tracking-wide text-muted-foreground uppercase'>
+                    {label}
+                  </p>
+                  <p className='font-display mt-0.5 text-lg font-bold tabular-nums'>
+                    {withheld ? <Withheld reason={withheld.reason} /> : money(value ?? 0, c.currency)}
+                  </p>
+                </div>
+              )
+            })}
           </div>
+          {unconfirmed && !c.valueWithheld && (
+            <div
+              className='mt-2 flex flex-wrap items-center justify-between gap-2 text-xs text-warning-foreground'
+              data-testid='uat-contract-value-unconfirmed'
+            >
+              <span>
+                {c.originalValueSource === 'boq_fallback'
+                  ? 'The original value is the BOQ total, taken because the project had no contract value. It is not yet confirmed as the contract value, so members who may not read the BOQ do not see it.'
+                  : 'Where the original value came from is not established, so members who may not read the BOQ do not see it.'}
+              </span>
+              {canConfirm && (
+                <Button
+                  variant='outline'
+                  size='sm'
+                  disabled={update.isPending}
+                  onClick={confirm}
+                  data-testid='uat-contract-value-confirm'
+                >
+                  {update.isPending && <Loader2 className='me-1.5 size-4 animate-spin' />}
+                  Confirm as contract value
+                </Button>
+              )}
+            </div>
+          )}
           {summary.pendingChangesValue > 0 && (
             <p className='mt-2 text-xs text-warning-foreground'>
               {money(summary.pendingChangesValue, c.currency)} of change orders are
@@ -304,7 +371,7 @@ export function ClientBillingPanel({ projectId }: { projectId: string }) {
               </p>
             )}
 
-            {c.advanceAmount > 0 && (
+            {hasAdvance && (
               <div className='mt-4 rounded-md border px-3 py-2' data-testid='uat-advance-state'>
                 <p className='text-[11px] tracking-wide text-muted-foreground uppercase'>
                   Advance payment
@@ -312,7 +379,11 @@ export function ClientBillingPanel({ projectId }: { projectId: string }) {
                 <div className='mt-1 flex flex-wrap gap-x-6 gap-y-1 text-sm'>
                   <span>
                     Agreed{' '}
-                    <span className='font-mono tabular-nums'>{exact(summary.advanceAmount)}</span>
+                    {advanceWithheld ? (
+                      <Withheld reason={advanceWithheld.reason} />
+                    ) : (
+                      <span className='font-mono tabular-nums'>{exact(summary.advanceAmount ?? 0)}</span>
+                    )}
                   </span>
                   <span>
                     Received{' '}
