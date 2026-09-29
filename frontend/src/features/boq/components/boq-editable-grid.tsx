@@ -415,7 +415,13 @@ export function BoqEditableGrid({
                 </Button>
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
-                    <Button variant='ghost' size='icon' className='size-7'>
+                    <Button
+                      variant='ghost'
+                      size='icon'
+                      className='size-7'
+                      aria-label={`Row actions for ${item.code}`}
+                      data-testid='boq-row-actions'
+                    >
                       <MoreHorizontal className='h-4 w-4' />
                     </Button>
                   </DropdownMenuTrigger>
