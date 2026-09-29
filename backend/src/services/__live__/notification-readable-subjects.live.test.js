@@ -378,4 +378,26 @@ liveDescribe("a notification names its record in words, never by its database id
     // Reading never rewrites the row.
     expect(await prisma.notification.findUnique({ where: { id: stored[0].id }, select: { message: true } })).toEqual({ message: stored[0].message });
   });
+
+  it("paging the list returns every notification exactly once — none lost at a page boundary", async () => {
+    // A list no longer than a page proves nothing: someone's must cross
+    // several boundaries.
+    let longest = 0;
+    for (const person of Object.values(people)) {
+      const all = (await inbox(person)).map((row) => row.id);
+      longest = Math.max(longest, all.length);
+      for (const limit of [1, 2, 3]) {
+        const seen = [];
+        let cursor = null;
+        for (let guard = 0; guard < 200; guard += 1) {
+          const page = await ok(person, "GET", `/notifications?status=all&limit=${limit}${cursor ? `&cursor=${cursor}` : ""}`);
+          seen.push(...page.rows.map((row) => row.id));
+          if (!page.pagination.nextCursor) break;
+          cursor = page.pagination.nextCursor;
+        }
+        expect([person.id, limit, seen]).toEqual([person.id, limit, all]);
+      }
+    }
+    expect(longest).toBeGreaterThan(3);
+  });
 });

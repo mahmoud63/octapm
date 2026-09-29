@@ -43,6 +43,12 @@ const normalizeListQuery = (
   };
 };
 
+// Prisma's cursor is inclusive: the next page starts AT the cursor row, and
+// skip: 1 steps over it. So the cursor must be the last row a page RETURNED
+// — not the look-ahead row (fetched by take: limit + 1 only to tell whether
+// another page exists), which skip: 1 would step over and no page would
+// ever return: one row lost at every page boundary (closure review,
+// 2026-09-29; the same class as OCTA-API-PAGING-110).
 const cursorArgs = (cursor) =>
   cursor
     ? {
@@ -56,7 +62,8 @@ const toCursorPage = (records, limit) => {
   let nextCursor = null;
 
   if (rows.length > limit) {
-    nextCursor = rows.pop()?.id || null;
+    rows.pop();
+    nextCursor = rows[rows.length - 1]?.id || null;
   }
 
   return {

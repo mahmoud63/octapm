@@ -114,7 +114,9 @@ describe("large list API pagination, filtering, search, and sorting", () => {
       }),
     );
     expect(result.rows).toHaveLength(2);
-    expect(result.pagination).toEqual({ limit: 2, nextCursor: "rfi-3" });
+    // The cursor is the last row returned (Prisma's cursor is inclusive and
+    // the next page skips it), never the look-ahead row.
+    expect(result.pagination).toEqual({ limit: 2, nextCursor: "rfi-2" });
     expect(result.summary).toEqual({
       draft: 0,
       open: 8,
@@ -185,7 +187,9 @@ describe("large list API pagination, filtering, search, and sorting", () => {
       }),
     );
     expect(result.rows).toEqual([{ id: "sub-1", status: "under_review" }]);
-    expect(result.pagination).toEqual({ limit: 1, nextCursor: "sub-2" });
+    // The cursor is the last row returned (Prisma's cursor is inclusive and
+    // the next page skips it), never the look-ahead row.
+    expect(result.pagination).toEqual({ limit: 1, nextCursor: "sub-1" });
     expect(result.summary).toEqual({
       pending: 0,
       underReview: 5,
@@ -276,6 +280,8 @@ describe("large list API pagination, filtering, search, and sorting", () => {
         budget: 2000,
       }),
     ]);
-    expect(result.pagination).toEqual({ limit: 2, nextCursor: "cost-3" });
+    // The cursor is the last row returned (Prisma's cursor is inclusive and
+    // the next page skips it), never the look-ahead row.
+    expect(result.pagination).toEqual({ limit: 2, nextCursor: "cost-2" });
   });
 });
