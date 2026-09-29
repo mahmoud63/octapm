@@ -8615,6 +8615,8 @@ add(
   operation({
     tag: "Reports",
     summary: "List approved or draft activity cost-loading rows.",
+    description:
+      "Cost loadings are the Cost module's own per-activity record: each row's plannedValue is typed in by the person who creates it (source \"manual\" by default; source is a label, never a calculation), not a figure derived from a BOQ allocation. They are therefore returned to every member who may read the cost module, with or without BOQ read access (orchestrator ruling G1, 2026-09-29): moving an approved BOQ allocation between activities changes no cost loading, so this list is not covered by the withholding of allocation-derived per-activity figures (owner decision E1) — the EV report's activityBreakdown, the schedule's and activities' budgets, the forecast's per-activity cost — and is not a gap in it.",
     operationId: "listCostLoadings",
     parameters: [
       ...projectParams,

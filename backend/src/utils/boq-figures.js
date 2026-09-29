@@ -40,6 +40,16 @@
  *   Cost module's own figure (the budget register, the cost ledger, the
  *   commitments), so these totals stay for a cost reader. Someone who holds
  *   neither has no other road to them, and is not given them here either.
+ *
+ * Not withheld, and not a gap in the EV breakdown's withholding: activity
+ * cost loadings (ActivityCostLoading, GET/POST /reports/cost-loading), per
+ * activity though they are (orchestrator ruling G1, 2026-09-29). A cost
+ * loading is the Cost module's own record — its planned value typed in by
+ * the person who creates it (source "manual" by default; the source is a
+ * label, never a calculation), not a figure derived from an allocation.
+ * E1's own test holds for it: moving an approved allocation between
+ * activities changes no cost loading. It stays visible to cost readers, and
+ * this module does not touch it; reviewers do not report it as an E1 leak.
  */
 const { hasPermission } = require("../middleware/rbac");
 const { HttpError } = require("./http-error");
