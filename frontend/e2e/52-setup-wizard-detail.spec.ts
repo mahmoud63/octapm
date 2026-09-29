@@ -515,6 +515,9 @@ const BOQ_KEYS = [
   // critical activities have no approved allocation.
   'approvedAllocationCount',
   'criticalUnmappedActivities',
+  // ... and the BOQ row that created an activity (GET /schedule carried it
+  // off the activity's row): a per-activity link to the bill.
+  'mintedByBoqItemId',
 ]
 // The budgets built from the bill, and the forecast's money built from them:
 // withheld from the member who reads neither the BOQ nor the cost module.
@@ -553,11 +556,11 @@ const backendDir = fileURLToPath(new URL('../../backend/', import.meta.url))
 // The two revisions a generated schedule leaves, written straight into the
 // LiveTest organisation's project: the script refuses any organisation not
 // named `LiveTest <uuid>` and any project outside it.
-const seedGeneratedRevisions = (orgId: string, projectId: string, criticalUnmappedId: string) => {
+const seedGeneratedRevisions = (orgId: string, projectId: string, criticalUnmappedId: string, mintedById: string) => {
   const script = `
 require('./src/utils/data-script-guard').exitUnlessDataScriptAllowed('e2e:pc4-generated-revisions');
 const { prisma } = require('./src/config/db');
-const [orgId, projectId, criticalUnmappedId] = process.argv.slice(1);
+const [orgId, projectId, criticalUnmappedId, mintedById] = process.argv.slice(1);
 const snapshot = (label) => ({
   projectSummary: { name: label, startDate: '2026-01-05', endDate: '2026-12-18', totalBudget: 69999.99 },
   wbs: [{ code: 'A', level: 1, name: 'Substructure', budget: 69999.99 }],
@@ -588,12 +591,19 @@ const snapshot = (label) => ({
   const unmapped = await prisma.activity.findFirst({ where: { id: criticalUnmappedId, projectId }, select: { id: true } });
   if (!unmapped) throw new Error('refusing: the activity is not in that project');
   await prisma.activity.update({ where: { id: unmapped.id }, data: { isCritical: true, totalFloat: 0 } });
+  // The pour stands for an activity its BOQ row created (POST /boq/items with
+  // an activity name mints the activity and allocates the whole row to it,
+  // which is what the concrete is to the pour): it names the row (one known
+  // row of this project, and a BOQ row of the same project).
+  const row = await prisma.boqItem.findFirst({ where: { id: mintedById, projectId }, select: { id: true } });
+  if (!row || !pour) throw new Error('refusing: the BOQ row or the pour is not in that project');
+  await prisma.activity.update({ where: { id: pour.id }, data: { mintedByBoqItemId: row.id } });
   process.stdout.write(JSON.stringify({ active: active.id, staged: staged.id }));
 })()
   .catch((error) => { process.stderr.write(String(error && error.message)); process.exitCode = 1; })
   .finally(() => prisma.$disconnect());
 `
-  const result = spawnSync(process.execPath, ['-e', script, orgId, projectId, criticalUnmappedId], {
+  const result = spawnSync(process.execPath, ['-e', script, orgId, projectId, criticalUnmappedId, mintedById], {
     cwd: backendDir,
     env: process.env,
     encoding: 'utf8',
@@ -680,9 +690,10 @@ test('members who cannot read the BOQ: the Overview and every Schedule tab rende
           expect(moved.status, `${step} -> ${JSON.stringify(moved.body?.error)}`).toBe(200)
         }
       }
-      const revisions = seedGeneratedRevisions(org.orgId, projectId, strip)
+      const revisions = seedGeneratedRevisions(org.orgId, projectId, strip, concrete)
       const full = await apiJson(client, 'get', `/projects/${projectId}/schedule`, { token })
       expect(JSON.stringify(full.body?.data), 'a BOQ reader gets the figure').toContain('"allocatedBoqAmount":21337')
+      expect(JSON.stringify(full.body?.data), 'a BOQ reader gets the row that made the pour').toContain(`"mintedByBoqItemId":"${concrete}"`)
       expect(full.body?.data?.revision, 'the generated revision is the active one').toMatchObject({ id: revisions.active })
       // The forecast tells a reader of the BOQ which activities have an
       // allocation: an activity's cost has a basis only when it has a budget.
@@ -1009,7 +1020,8 @@ test('members who cannot read the BOQ: the Overview and every Schedule tab rende
       await apiSettled()
     }
 
-    // The Activities list: the BOQ value column reads a dash.
+    // The Activities list: the BOQ value column reads a dash and why — the
+    // server withholds the figure, as the Schedule table says it.
     await page.goto(`${base}/activities`)
     await expect(page.getByTestId('uat-project-content-activities')).toBeVisible({ timeout: 30_000 })
     const pourRow = page.locator('tr', { hasText: 'Pour foundations' })
@@ -1018,7 +1030,9 @@ test('members who cannot read the BOQ: the Overview and every Schedule tab rende
       .locator('thead th')
       .evaluateAll((cells) => cells.findIndex((cell) => cell.textContent?.trim() === 'BOQ Value'))
     expect(boqColumn).toBeGreaterThanOrEqual(0)
-    await expect(pourRow.locator('td').nth(boqColumn)).toHaveText('—')
+    await expect(pourRow.locator('td').nth(boqColumn)).toHaveText(`— ${MAPPING_DETAILS_WITHHELD}`)
+    await expect(pourRow.getByTestId('uat-activity-boq-value-withheld')).toHaveText(`— ${MAPPING_DETAILS_WITHHELD}`)
+    await expect(pourRow).not.toContainText('21,337')
     await page.waitForLoadState('networkidle')
 
     await Promise.all(pending)
@@ -1103,6 +1117,16 @@ test('members who cannot read the BOQ: the Overview and every Schedule tab rende
       ).toEqual([])
       await noBrokenFigure('cost/phase')
     }
+    // The activity's detail (opened last: its materials panel reads more
+    // than the pages listed above): its approved BOQ value and weight read a
+    // dash and why, never a figure.
+    await page.goto(`${base}/activities`)
+    const detailRow = page.locator('tr', { hasText: 'Pour foundations' })
+    await expect(detailRow).toBeVisible({ timeout: 30_000 })
+    await detailRow.locator('td').first().click()
+    await expect(page.getByTestId('uat-activity-detail-boq-value-withheld')).toHaveText(`— ${MAPPING_DETAILS_WITHHELD}`, { timeout: 30_000 })
+    await expect(page.getByTestId('uat-activity-detail-boq-weight-withheld')).toHaveText(`— ${MAPPING_DETAILS_WITHHELD}`)
+    await page.keyboard.press('Escape')
     expect(errors, `${member.name}: page errors`).toEqual([])
     await context.close()
   }

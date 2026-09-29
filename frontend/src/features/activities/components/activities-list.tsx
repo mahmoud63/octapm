@@ -37,10 +37,29 @@ const formatNumber = (value: number | null | undefined) =>
     maximumFractionDigits: 2,
   })
 
-// The approved BOQ figures are withheld (absent) from a member who may not
-// read the BOQ: a dash, never a 0 that would read as a fact.
-const formatBoqFigure = (value: number | undefined, suffix = '') =>
-  value === undefined ? '—' : `${formatNumber(value)}${suffix}`
+// The server withholds (omits) the approved BOQ figures from a member who
+// may not read the BOQ (utils/boq-figures): a dash and why, as the Schedule
+// table says it — never a 0 that would read as a fact.
+const MAPPING_DETAILS_WITHHELD = 'Mapping details unavailable to you'
+
+function BoqFigure({
+  value,
+  suffix = '',
+  testId,
+}: {
+  value: number | undefined
+  suffix?: string
+  testId: string
+}) {
+  if (value === undefined) {
+    return (
+      <span className='text-xs text-muted-foreground' data-testid={testId}>
+        — {MAPPING_DETAILS_WITHHELD}
+      </span>
+    )
+  }
+  return <>{`${formatNumber(value)}${suffix}`}</>
+}
 
 export function ActivitiesList({
   projectId,
@@ -178,7 +197,10 @@ export function ActivitiesList({
                     </div>
                   </td>
                   <td className='p-3 text-right text-muted-foreground'>
-                    {formatBoqFigure(activity.allocatedBoqAmount)}
+                    <BoqFigure
+                      value={activity.allocatedBoqAmount}
+                      testId='uat-activity-boq-value-withheld'
+                    />
                   </td>
                   <td className='p-3'>
                     <ActivityStatusBadge status={activity.status} />
@@ -295,13 +317,20 @@ export function ActivitiesList({
                 <div>
                   <p className='text-muted-foreground'>Approved BOQ Value</p>
                   <p className='font-medium'>
-                    {formatBoqFigure(selectedActivity.allocatedBoqAmount)}
+                    <BoqFigure
+                      value={selectedActivity.allocatedBoqAmount}
+                      testId='uat-activity-detail-boq-value-withheld'
+                    />
                   </p>
                 </div>
                 <div>
                   <p className='text-muted-foreground'>Approved BOQ Weight</p>
                   <p className='font-medium'>
-                    {formatBoqFigure(selectedActivity.allocatedBoqWeight, '%')}
+                    <BoqFigure
+                      value={selectedActivity.allocatedBoqWeight}
+                      suffix='%'
+                      testId='uat-activity-detail-boq-weight-withheld'
+                    />
                   </p>
                 </div>
                 <div className='sm:col-span-2'>
