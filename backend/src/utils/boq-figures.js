@@ -94,8 +94,13 @@ const withoutBoqFigures = (values) =>
 // the way of the figures (owner decision, 2026-09-28: no allocation count,
 // per activity or in total, to a member who may not read the BOQ). The
 // activity's criticality — its critical flag and float — is the schedule's
-// and stays for every schedule reader.
-const ACTIVITY_BOQ_KEYS = ["allocatedBoqQuantity", "allocatedBoqAmount", "allocatedBoqWeight", "approvedAllocationCount"];
+// and stays for every schedule reader. mintedByBoqItemId — the BOQ row
+// that created the activity (POST /boq/items with an activity name creates
+// the activity and its allocation together), which GET /schedule carries off
+// the activity's row — is a per-activity link to the bill: beside the
+// critical flag it says which critical activities the bill is allocated to,
+// so it goes the same way.
+const ACTIVITY_BOQ_KEYS = ["allocatedBoqQuantity", "allocatedBoqAmount", "allocatedBoqWeight", "approvedAllocationCount", "mintedByBoqItemId"];
 // The activity's budget: on the schedule, the approved allocation's value;
 // beside it the budget the generator or the import gave the activity (the
 // bill spread over the programme). Per activity, so read off the mapping:

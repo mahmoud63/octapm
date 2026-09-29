@@ -107,6 +107,10 @@ const BOQ_KEYS = [
   // activities have no approved allocation.
   "approvedAllocationCount",
   "criticalUnmappedActivities",
+  // The BOQ row that created an activity (POST /boq/items with an activity
+  // name), which GET /schedule carried off the activity's row: a
+  // per-activity link to the bill, a mapping badge by another name.
+  "mintedByBoqItemId",
 ];
 // ... and what a member who reads neither the BOQ nor the cost module must
 // not receive either: the budgets built from the bill, and the forecast's
@@ -182,6 +186,7 @@ liveDescribe("PC-4 §12: the Overview and the Schedule module carry no BOQ figur
   let activeRevision;
   let lockedPeriod;
   let openPeriod;
+  let pourMintedBy;
   const members = {};
   const auth = () => ({ authorization: `Bearer ${live.token}` });
   const post = (route, body) => api.post(route, body, auth());
@@ -269,6 +274,14 @@ liveDescribe("PC-4 §12: the Overview and the Schedule module carry no BOQ figur
         expect([step, moved.status, moved.body?.error]).toEqual([step, 200, undefined]);
       }
     }
+    // The pour stands for an activity its BOQ row created (POST /boq/items
+    // with an activity name mints the activity and allocates the whole row
+    // to it — which is what the concrete is to the pour here): it carries the
+    // row's id, so the sweep below looks for mintedByBoqItemId on every
+    // schedule answer. One known row of this LiveTest organisation; the last
+    // case mints one through the API.
+    await prisma.activity.update({ where: { id: activities.pour.id }, data: { mintedByBoqItemId: concrete.id } });
+    pourMintedBy = concrete.id;
 
     // The pour is complete and the fixing half done, both approved inside
     // the open period (P02, 1–28 February): the pour's earned value is its
@@ -661,7 +674,7 @@ liveDescribe("PC-4 §12: the Overview and the Schedule module carry no BOQ figur
     // where they are.
     const schedule = (await api.get(reads().schedule.route, auth())).body.data;
     const pour = schedule.activities.find((activity) => activity.id === activities.pour.id);
-    expect(pour).toMatchObject({ allocatedBoqAmount: 21337, allocatedBoqQuantity: 100, budget: 21337, approvedAllocationCount: 1 });
+    expect(pour).toMatchObject({ allocatedBoqAmount: 21337, allocatedBoqQuantity: 100, budget: 21337, approvedAllocationCount: 1, mintedByBoqItemId: pourMintedBy });
     expect(schedule.revision).toMatchObject({ unallocatedBoqAmount: 30273.9, totalBudget: 41519.6, generatedTotalBudget: 69999.99 });
     expect(schedule.revision.readiness.checks.find((check) => check.key === "allocations").details).toMatchObject({
       totalBoqAmount: 71793.5,
@@ -799,7 +812,7 @@ liveDescribe("PC-4 §12: the Overview and the Schedule module carry no BOQ figur
       const schedule = (await api.get(reads().schedule.route, viewerAuth)).body.data;
       const pour = schedule.activities.find((activity) => activity.id === activities.pour.id);
       // Its mapping badge is the bill's; its criticality is the schedule's.
-      expect([viewer, "approvedAllocationCount" in pour, typeof pour.isCritical]).toEqual([viewer, false, "boolean"]);
+      expect([viewer, "approvedAllocationCount" in pour, "mintedByBoqItemId" in pour, typeof pour.isCritical]).toEqual([viewer, false, false, "boolean"]);
       const allocations = schedule.revision.readiness.checks.find((check) => check.key === "allocations");
       expect(allocations).toMatchObject({ key: "allocations", severity: "blocking", passed: false });
       // The activity's budget is its approved allocation: withheld from every
@@ -1440,6 +1453,29 @@ liveDescribe("PC-4 §12: the Overview and the Schedule module carry no BOQ figur
         "allocatedToActivities" in summary.budget,
       ]).toEqual([viewer, true, MAPPING_WITHHELD, false, false, false, false]);
       expect([viewer, summary.byPhase.map((entry) => Object.keys(entry).sort())]).toEqual([viewer, summary.byPhase.map(() => ["actual", "committed", "phase"])]);
+    }
+  });
+
+  // Last, because it adds a row to the bill: an activity minted through the
+  // API, as the reviewer's probe made it (POST /boq/items with an activity
+  // name creates the activity and allocates the row to it in one step).
+  it("an activity a BOQ row created through the API: the BOQ reader's schedule names the row; no member without BOQ read receives its id, key or value", async () => {
+    const minted = await post(at("/boq/items"), { code: "9.1", description: "Minted pour slab", quantity: 3, unit: "m3", rate: 77.77, activityName: "Minted pour" });
+    expect([minted.status, minted.body?.error]).toEqual([201, undefined]);
+    const rowId = minted.body.data.item.id;
+    const full = (await api.get(at("/schedule"), auth())).body.data;
+    const mintedActivity = full.activities.find((activity) => activity.name === "Minted pour");
+    expect(mintedActivity).toMatchObject({ mintedByBoqItemId: rowId });
+    // An activity made by hand names no row, to anyone.
+    expect(full.activities.find((activity) => activity.id === activities.fix.id)).toMatchObject({ mintedByBoqItemId: null });
+    for (const [viewer, { user }] of Object.entries(viewers())) {
+      const limited = await api.get(at("/schedule"), as(user));
+      expect([viewer, limited.status, limited.body?.error]).toEqual([viewer, 200, undefined]);
+      expect([viewer, keyPaths(limited.body.data, new Set(["mintedByBoqItemId"]))]).toEqual([viewer, []]);
+      expect([viewer, limited.text.includes(rowId)]).toEqual([viewer, false]);
+      // The activity itself — its name, its criticality — is every schedule reader's.
+      const theirs = limited.body.data.activities.find((activity) => activity.id === mintedActivity.id);
+      expect([viewer, theirs?.name, typeof theirs?.isCritical]).toEqual([viewer, "Minted pour", "boolean"]);
     }
   });
 });

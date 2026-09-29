@@ -4846,6 +4846,10 @@ const components = {
         { type: "integer", minimum: 0 },
         "How many approved BOQ allocations the activity has (its mapping badge).",
       ),
+      mintedByBoqItemId: boqFigure(
+        { ...uuid, nullable: true },
+        "On GET /schedule: the BOQ row that created the activity (POST /boq/items with an activityName creates the activity and allocates the row to it), or null for an activity made any other way. A per-activity link to the bill.",
+      ),
       procurementRiskSummary: {
         ...ref("ScheduleProcurementRiskSummary"),
         nullable: true,
@@ -7835,7 +7839,7 @@ add(
     summary:
       "Get active project schedule, CPM rollups, and critical path explanations.",
     description:
-      "Every schedule reader receives the programme, its criticality included (isCritical, totalFloat, the critical path). The bill's figures on it (each activity's allocatedBoqQuantity, allocatedBoqAmount and allocatedBoqWeight, and its approvedAllocationCount — the mapping badge, read off the allocations; the revision's unallocatedBoqAmount; the BOQ value figures in the allocations readiness check) are present only for a caller who may read the BOQ, and so are the per-activity budgets built from the mapping (each activity's budget and generatedBudget, the generator's per-activity and per-WBS-node budgets) — reading the cost module does not override this (owner decision E1, 2026-09-28). The project totals (revision totalBudget and generatedTotalBudget) go to a caller who may read the BOQ or the cost module. A withheld figure is omitted, never zeroed.",
+      "Every schedule reader receives the programme, its criticality included (isCritical, totalFloat, the critical path). The bill's figures on it (each activity's allocatedBoqQuantity, allocatedBoqAmount and allocatedBoqWeight, its approvedAllocationCount — the mapping badge, read off the allocations — and its mintedByBoqItemId, the BOQ row that created it, if one did; the revision's unallocatedBoqAmount; the BOQ value figures in the allocations readiness check) are present only for a caller who may read the BOQ, and so are the per-activity budgets built from the mapping (each activity's budget and generatedBudget, the generator's per-activity and per-WBS-node budgets) — reading the cost module does not override this (owner decision E1, 2026-09-28). The project totals (revision totalBudget and generatedTotalBudget) go to a caller who may read the BOQ or the cost module. A withheld figure is omitted, never zeroed.",
     operationId: "getProjectSchedule",
     parameters: projectParams,
     permissions: modulePermission("schedule", "read"),
