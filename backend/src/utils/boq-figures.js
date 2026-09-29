@@ -103,6 +103,25 @@
  * retention release), and `boqWithheld` names them; the answer to editing a
  * line names the line and nothing of it (`itemWithheld`). The certificate's
  * own totals, invoices, payments and releases stay.
+ *
+ * Nor does the review reach such a member through a refusal (owner check,
+ * 2026-09-29). When certifying needs a PM override — the period claims more
+ * than approved progress earned, or more than the approved allocation or
+ * its quantity — POST /ipc/:period/certify (ipc:certify: the PM, finance)
+ * refuses with 400 IPC_PM_OVERRIDE_REASON_REQUIRED or 403
+ * IPC_PM_OVERRIDE_REQUIRED and the whole review as error.details
+ * (currentClaimedAmount, earnedAmount, approvedLimitAmount — the
+ * allocation's amount —, overEarnedAmount, overApprovedQuantity,
+ * overrideLineCount …), which every non-production API sends. The IPC
+ * router passes each refusal through withheldError: for a caller who may
+ * not read the BOQ those two refusals carry `boqWithheld` in place of the
+ * review; status, code and message — the business reason, and so what to do
+ * next — stay. The other details these routes and their services refuse
+ * with are not the BOQ's and stay: the certificate's own balance due and
+ * retained balance (a payment or a release over them), a running workflow's
+ * ids, a refused transition's statuses, the permission refused and the
+ * request fields that failed validation. The billing routes
+ * (prime-contract) refuse with no details at all.
  */
 const { hasPermission } = require("../middleware/rbac");
 const { HttpError } = require("./http-error");
@@ -537,19 +556,29 @@ const withheldAllocationSuggestion = (suggestion, access = FULL_ACCESS) => {
 const forecastCostWithheld = (forecast) =>
   Boolean(forecast && forecast.cost && typeof forecast.cost === "object" && !has(forecast.cost, "budget"));
 
+// The refusals of an IPC certification that needs a PM override: their
+// details are the certification review (ipc.service certifyIpcPeriod).
+const IPC_REVIEW_REFUSALS = new Set(["IPC_PM_OVERRIDE_REASON_REQUIRED", "IPC_PM_OVERRIDE_REQUIRED"]);
+const IPC_REVIEW_WITHHELD =
+  "The certification review is worked from the BOQ's rows and their allocations, available only to members who may read the BOQ";
+
 /**
  * An error as this caller may receive it. A lifecycle step refused because
  * the schedule is not ready (SCHEDULE_NOT_READY) states the whole readiness
  * in error.details, and a period lock refused by the reporting gate states
  * the gate: both go the way of their success answers. Status, code and
- * message stay, and so do the readiness's `ready` and `blockingCount`.
+ * message stay, and so do the readiness's `ready` and `blockingCount`. An
+ * IPC certification refused for want of a PM override states the
+ * certification review, worked from the BOQ's rows and their allocations:
+ * it is left out whole, and `boqWithheld` says why.
  */
 const withheldError = (error, access = FULL_ACCESS) => {
   if (access.boq || !(error instanceof HttpError) || !error.details || typeof error.details !== "object") {
     return error;
   }
   let details = error.details;
-  if (Array.isArray(details.checks)) details = withheldScheduleReadiness(details, access);
+  if (IPC_REVIEW_REFUSALS.has(error.code)) details = { boqWithheld: { keys: ["certificationReview"], reason: IPC_REVIEW_WITHHELD } };
+  else if (Array.isArray(details.checks)) details = withheldScheduleReadiness(details, access);
   else if (has(details, "gate")) details = { ...details, gate: withheldReadinessGate(details.gate, access) };
   if (details === error.details) return error;
   const withheld = new HttpError(error.status, error.code, error.message, details);
@@ -830,6 +859,8 @@ module.exports = {
   withheldBillingStatement,
   IPC_BOQ_KEYS,
   IPC_LINES_WITHHELD,
+  IPC_REVIEW_REFUSALS,
+  IPC_REVIEW_WITHHELD,
   withheldIpcCertificate,
   withheldIpcItem,
   JOB_BILL_WITHHELD,

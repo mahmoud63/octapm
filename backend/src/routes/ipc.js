@@ -7,7 +7,7 @@ const { getEffectiveRole, requirePermission } = require("../middleware/rbac");
 const { validate } = require("../middleware/validate");
 const { moneyBody } = require("../utils/money");
 const ipcService = require("../services/ipc.service");
-const { boqFigureAccess, withheldIpcCertificate, withheldIpcItem } = require("../utils/boq-figures");
+const { boqFigureAccess, withheldError, withheldIpcCertificate, withheldIpcItem } = require("../utils/boq-figures");
 
 // A certificate's lines are the BOQ's rows and their allocations: a member
 // who may not read the BOQ is given every certificate without them, and the
@@ -275,5 +275,13 @@ router.post(
     return sendSuccess(res, withheldCertificateIn(result, req), 201);
   }),
 );
+
+// ... and so are its refusals. Certifying a period that needs a PM override
+// is refused (IPC_PM_OVERRIDE_REASON_REQUIRED, IPC_PM_OVERRIDE_REQUIRED) with
+// the certification review as error.details — the allocations' amounts and
+// what approved progress earned against them. Every refusal of this router
+// goes through withheldError, which leaves the review out for a caller who
+// may not read the BOQ; status, code and message stay.
+router.use((error, req, res, next) => next(withheldError(error, boqFigureAccess(req))));
 
 module.exports = router;

@@ -9224,14 +9224,16 @@ add(
     "certify",
     "period.certify",
     ref("IpcCertifyRequest"),
+    "A period that claims more than approved progress earned, or more than the approved allocation or its quantity, needs a PM override: without an overrideReason it is refused with 400 IPC_PM_OVERRIDE_REASON_REQUIRED, and by anyone but a PM with 403 IPC_PM_OVERRIDE_REQUIRED. Outside production error.details on those refusals is the certification review, worked from the BOQ rows and their allocations (currentClaimedAmount, earnedAmount, approvedLimitAmount, overEarnedAmount, overApprovedQuantity, overrideLineCount …) — for a caller who may read the BOQ (boq:read); anyone else is given `{ boqWithheld: { keys: [\"certificationReview\"], reason } }` in its place, and the same code and message.",
   ],
-].forEach(([suffix, operationId, summary, action, transition, bodySchema]) => {
+].forEach(([suffix, operationId, summary, action, transition, bodySchema, description]) => {
   add(
     `/projects/{projectId}/ipc/{period}/${suffix}`,
     "post",
     operation({
       tag: "Commercial",
       summary,
+      description,
       operationId,
       parameters: [
         ...projectParams,
