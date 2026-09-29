@@ -2397,6 +2397,14 @@ model PrimeContract {
   contractType           String    @default("lump_sum") // lump_sum, remeasured, cost_plus, gmp
   currency               String    @default("USD")
   originalValue          Decimal   @default(0) @db.Decimal(18, 2)
+  // Where originalValue came from (owner decisions 1 + 4, 2026-09-29):
+  // project_value (the project's established contract value, taken when the
+  // contract was first built), contract_entry (entered or confirmed through
+  // the authorised contract process), boq_fallback (the automatic BOQ total,
+  // used when the project had no value), unestablished (a historical row whose
+  // source cannot be reliably shown). NULL predates this column: treat it as
+  // unestablished.
+  originalValueSource    String?
   approvedChangesValue   Decimal   @default(0) @db.Decimal(18, 2)
   pendingChangesValue    Decimal   @default(0) @db.Decimal(18, 2)
   revisedValue           Decimal   @default(0) @db.Decimal(18, 2)
