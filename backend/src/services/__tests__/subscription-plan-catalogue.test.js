@@ -59,6 +59,33 @@ describe("the official Subscription.plan catalogue", () => {
   });
 });
 
+/**
+ * The canonical UAT seed makes a normal paying company (owner decision 2).
+ * The live proof that the reseeded row is business / active is
+ * subscription-plans.live.test.js; this pins the seed's own intent, so a
+ * seed that drifts back to "standard" fails here before anyone reseeds.
+ */
+describe("the UAT fixture seed", () => {
+  const source = require("fs").readFileSync(require("path").resolve(__dirname, "../../../../e2e/uat/seed-uat-fixtures.mjs"), "utf8");
+
+  it("writes Subscription.plan business, status active — a plan in the catalogue", () => {
+    const literal = source.match(/const UAT_SUBSCRIPTION = (\{[^}]*\})/);
+    expect(literal).not.toBeNull();
+    // eslint-disable-next-line no-new-func
+    const written = Function(`return (${literal[1]})`)();
+    expect(written).toEqual({ plan: "business", status: "active" });
+    expect(isRecognizedPlan(written.plan)).toBe(true);
+  });
+
+  it("the subscription upsert writes that and nothing else", () => {
+    const upsert = source.match(/prisma\.subscription\.upsert\(\{[\s\S]*?\n {2}\}\)/);
+    expect(upsert).not.toBeNull();
+    expect(upsert[0]).toMatch(/create: \{ orgId, \.\.\.UAT_SUBSCRIPTION \}/);
+    expect(upsert[0]).toMatch(/update: \{ \.\.\.UAT_SUBSCRIPTION \}/);
+    expect(upsert[0]).not.toMatch(/plan:|standard/);
+  });
+});
+
 describe("serializeSubscription", () => {
   it("a recognised plan carries its name and its limits", () => {
     const business = serializeSubscription(row("business"));

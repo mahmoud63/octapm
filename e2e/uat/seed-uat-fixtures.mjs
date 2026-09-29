@@ -61,20 +61,22 @@ async function findOrCreateOrganisation() {
   })
 }
 
+// The UAT organisation is a normal paying company: business / active (owner
+// decision, docs/qa/OCTAPM_ISSUE_PLAN-CATALOGUE-UAT.md). "standard" is not a
+// subscription plan — the catalogue (backend/src/config/plans.js) is trial,
+// individual, business and enterprise — and a plan outside it is a
+// configuration fault the product refuses to create projects on. The
+// organisation's own `plan` column above is a workspace label (M8/M9 moves
+// it to workspaceType) and is deliberately not touched here.
+const UAT_SUBSCRIPTION = { plan: 'business', status: 'active' }
+
 async function ensureSubscription(orgId) {
   if (!prisma.subscription?.upsert) return null
 
   return prisma.subscription.upsert({
     where: { orgId },
-    create: {
-      orgId,
-      status: 'active',
-      plan: 'standard',
-    },
-    update: {
-      status: 'active',
-      plan: 'standard',
-    },
+    create: { orgId, ...UAT_SUBSCRIPTION },
+    update: { ...UAT_SUBSCRIPTION },
   })
 }
 
@@ -127,10 +129,13 @@ async function findOrCreateProject(orgId, name, data) {
   })
 }
 
-async function upsertProjectAssignment({ projectId, userId, role }) {
+// ProjectAssignment carries its project's orgId (ENT-3, NOT NULL since M7,
+// part of the composite key to the project and the membership); without it
+// Prisma refuses the upsert before it reaches the database.
+async function upsertProjectAssignment({ orgId, projectId, userId, role }) {
   return prisma.projectAssignment.upsert({
     where: { projectId_userId: { projectId, userId } },
-    create: { projectId, userId, role },
+    create: { orgId, projectId, userId, role },
     update: { role },
   })
 }
@@ -404,6 +409,7 @@ async function main() {
   await Promise.all(
     Object.entries(users).map(([, user]) =>
       upsertProjectAssignment({
+        orgId: org.id,
         projectId: project.id,
         userId: user.id,
         role: user.role,
@@ -411,6 +417,7 @@ async function main() {
     )
   )
   await upsertProjectAssignment({
+    orgId: org.id,
     projectId: restrictedProject.id,
     userId: users.pm.id,
     role: 'pm',
