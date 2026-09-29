@@ -169,11 +169,21 @@ export type ReportRow = Record<string, unknown> & {
   id: string
   projectId: string | null
   projectName: string | null
+  /** Columns the server withheld on this row's project (null in the row). */
+  withheldColumns?: string[]
 }
 
 export interface ReportResult {
   source: { key: string; label: string; module: string }
-  columns: Array<{ key: string; label: string; type: ReportColumnType }>
+  columns: Array<{
+    key: string
+    label: string
+    type: ReportColumnType
+    withheld?: boolean
+    withheldReason?: string
+  }>
+  /** Present only when a column this run uses was withheld on some project (E1). */
+  withheld?: { columns: string[]; reason: string; projects: number }
   rows: ReportRow[]
   rowCount: number
   total: number

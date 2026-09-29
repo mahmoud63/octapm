@@ -102,6 +102,15 @@ const formatCell = (
   return String(value)
 }
 
+/** A value the server withheld: a dash, with the server's reason beside it. */
+function WithheldCell({ reason }: { reason: string }) {
+  return (
+    <span title={reason} data-testid='report-withheld-cell'>
+      —<span className='sr-only'> {reason}</span>
+    </span>
+  )
+}
+
 function FilterRow({
   filter,
   source,
@@ -326,6 +335,13 @@ export function ReportEditor({
   )
   const columnByKey = (key: string) =>
     source?.columns.find((column) => column.key === key)
+  // An aggregate the server left out over a withheld column (null, never a figure).
+  const withheldAggregate = (field: string | null, value: unknown) =>
+    Boolean(
+      field &&
+      (value === null || value === undefined) &&
+      preview?.withheld?.columns.includes(field)
+    )
   const currency =
     projects.find((project) => project.id === draft.projectId)?.currency ?? null
   const numericColumns =
@@ -974,6 +990,16 @@ export function ReportEditor({
             {preview.truncated && (
               <Badge variant='destructive'>truncated at 5,000 rows</Badge>
             )}
+            {preview.withheld && (
+              <span data-testid='report-withheld-note'>
+                {preview.withheld.columns
+                  .map((key) => columnByKey(key)?.label ?? key)
+                  .join(', ')}{' '}
+                shown as — on {preview.withheld.projects} project
+                {preview.withheld.projects === 1 ? '' : 's'}:{' '}
+                {preview.withheld.reason}
+              </span>
+            )}
             <span className='ml-auto'>
               {new Date(preview.generatedAt).toLocaleTimeString()}
             </span>
@@ -1010,10 +1036,14 @@ export function ReportEditor({
                             key={item.key}
                             className='p-1 text-right tabular-nums'
                           >
-                            {formatCell(
-                              columnByKey(item.field!)?.type ?? 'number',
-                              group[item.key],
-                              currency
+                            {withheldAggregate(item.field, group[item.key]) ? (
+                              <WithheldCell reason={preview.withheld!.reason} />
+                            ) : (
+                              formatCell(
+                                columnByKey(item.field!)?.type ?? 'number',
+                                group[item.key],
+                                currency
+                              )
                             )}
                           </td>
                         ))}
@@ -1031,10 +1061,17 @@ export function ReportEditor({
                           key={item.key}
                           className='p-1 text-right tabular-nums'
                         >
-                          {formatCell(
-                            columnByKey(item.field!)?.type ?? 'number',
-                            preview.totals[item.key],
-                            currency
+                          {withheldAggregate(
+                            item.field,
+                            preview.totals[item.key]
+                          ) ? (
+                            <WithheldCell reason={preview.withheld!.reason} />
+                          ) : (
+                            formatCell(
+                              columnByKey(item.field!)?.type ?? 'number',
+                              preview.totals[item.key],
+                              currency
+                            )
                           )}
                         </td>
                       ))}
@@ -1090,7 +1127,17 @@ export function ReportEditor({
                             'text-right tabular-nums'
                         )}
                       >
-                        {formatCell(column.type, row[column.key], currency)}
+                        {row.withheldColumns?.includes(column.key) ? (
+                          <WithheldCell
+                            reason={
+                              column.withheldReason ??
+                              preview.withheld?.reason ??
+                              'Mapping details unavailable to you'
+                            }
+                          />
+                        ) : (
+                          formatCell(column.type, row[column.key], currency)
+                        )}
                       </td>
                     ))}
                   </tr>
