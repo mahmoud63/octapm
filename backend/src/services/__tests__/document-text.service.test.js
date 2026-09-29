@@ -158,7 +158,7 @@ describe("document text service", () => {
       mockFileStorage.getProjectDocumentFile.mockResolvedValue({ redirectUrl: "https://files.example/doc.txt" });
       global.fetch = jest.fn(async () => ({
         ok: true,
-        arrayBuffer: async () => Buffer.from("Rebar spacing 200mm").buffer,
+        arrayBuffer: async () => Uint8Array.from(Buffer.from("Rebar spacing 200mm")).buffer,
       }));
       mockEmbeddings.isEnabled.mockReturnValue(true);
       mockEmbeddings.describe.mockReturnValue({ enabled: true, provider: "openai", model: "text-embedding-3-small" });
