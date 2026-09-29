@@ -22,8 +22,12 @@ import {
  *     freshly submitted allocation, and a row stored before the rule (title
  *     "BOQ allocation <uuid> …", message "…: Workflow record. …") in words
  *     too — no UUID-shaped token anywhere in the list
- *   clicking the notification lands on the record's page for that project:
- *     the project's workspace page with the allocation pre-selected by id
+ *   clicking the notification lands on the record's page for that project,
+ *     with the record visible and selected: the stored link names the project
+ *     root (`?recordId=…&source=…`, kept as it is), and the project route
+ *     opens an allocation on Project Controls › Mapping (the list, its row
+ *     selected) and a cost loading on Schedule › Earned Value (the
+ *     cost-loading rows, its row selected) — not the Overview
  *
  * Everything is built in a throwaway "LiveTest <uuid>" organisation through
  * the API; the one stored legacy row is written by a backend script that
@@ -96,6 +100,14 @@ const build = async (client: APIRequestContext) => {
   ok(allocation, 201, 'allocation')
   const allocationId = allocation.body!.data!.id as string
   ok(await apiJson(client, 'post', `/projects/${projectId}/activity-boq-allocations/${allocationId}/submit`, { token, data: {} }), 200, 'submit')
+  // A cost loading on the same activity, submitted: the reviewer is asked to approve it too.
+  const loading = await apiJson(client, 'post', `/projects/${projectId}/reports/cost-loading`, {
+    token,
+    data: { activityId: activity.body!.data!.id, plannedDate: '2026-08-05', plannedValue: 750 },
+  })
+  ok(loading, 201, 'cost loading')
+  const costLoadingId = loading.body!.data!.id as string
+  ok(await apiJson(client, 'post', `/projects/${projectId}/reports/cost-loading/${costLoadingId}/submit`, { token, data: {} }), 200, 'submit cost loading')
 
   // A row as the shared database holds 714 of them, written before the rule.
   const legacy = storeLegacyRow(org.orgId, projectId, {
@@ -113,7 +125,7 @@ const build = async (client: APIRequestContext) => {
     metadataJson: { action: 'approved', toStatus: 'approved' },
     createdAt: new Date(Date.now() - 60_000).toISOString(),
   })
-  return { projectId, projectName, allocationId, reviewerEmail, legacyId: legacy.id }
+  return { projectId, projectName, allocationId, costLoadingId, reviewerEmail, legacyId: legacy.id }
 }
 
 test('the bell names a BOQ allocation by its activity, never its id, and opens the record on its project', async ({ page }) => {
@@ -139,15 +151,48 @@ test('the bell names a BOQ allocation by its activity, never its id, and opens t
   expect(shown).not.toMatch(IDENTIFIER)
   expect(shown).not.toContain('Workflow record')
 
-  // The link is the record's: the project's page, the allocation pre-selected.
+  // The stored link is as it was: the project root, the record named by id and type.
   await expect(fresh).toHaveAttribute(
     'href',
     new RegExp(`^/o/[^/]+/projects/${built.projectId}\\?recordId=${built.allocationId}&source=activity_boq_allocation$`),
   )
+  // Clicking it opens the allocation itself: Project Controls › Mapping,
+  // the list, the allocation's row visible and selected.
   await fresh.click()
   await page.waitForURL(
-    (url) => url.pathname.endsWith(`/projects/${built.projectId}`) && url.searchParams.get('recordId') === built.allocationId,
+    (url) =>
+      url.pathname.endsWith(`/projects/${built.projectId}/controls/mapping`) &&
+      url.searchParams.get('recordId') === built.allocationId &&
+      url.searchParams.get('source') === 'activity_boq_allocation',
     { timeout: 45_000 },
   )
   await expect(page.getByText(new RegExp(escapeRegExp(built.projectName))).first()).toBeVisible({ timeout: 30_000 })
+  const allocationRow = page.getByTestId(`uat-mapping-row-${built.allocationId}`)
+  await expect(allocationRow).toBeVisible({ timeout: 30_000 })
+  await expect(allocationRow).toHaveAttribute('data-selected', 'true')
+  await expect(allocationRow).toContainText('A120')
+  await expect(allocationRow).toBeInViewport()
+
+  // The cost loading's notice opens the cost loading: Schedule › Earned
+  // Value, its row visible and selected.
+  await bell.click()
+  const loading = page.getByRole('menu').getByRole('link', { name: /Cost loading for Activity A120 needs approval/ })
+  await expect(loading).toBeVisible()
+  await expect(loading).toHaveAttribute(
+    'href',
+    new RegExp(`^/o/[^/]+/projects/${built.projectId}\\?recordId=${built.costLoadingId}&source=activity_cost_loading$`),
+  )
+  await loading.click()
+  await page.waitForURL(
+    (url) =>
+      url.pathname.endsWith(`/projects/${built.projectId}/schedule/ev`) &&
+      url.searchParams.get('recordId') === built.costLoadingId &&
+      url.searchParams.get('source') === 'activity_cost_loading',
+    { timeout: 45_000 },
+  )
+  const loadingRow = page.getByTestId(`uat-cost-loading-row-${built.costLoadingId}`)
+  await expect(loadingRow).toBeVisible({ timeout: 30_000 })
+  await expect(loadingRow).toHaveAttribute('data-selected', 'true')
+  await expect(loadingRow).toContainText('A120')
+  await expect(loadingRow).toContainText('750')
 })

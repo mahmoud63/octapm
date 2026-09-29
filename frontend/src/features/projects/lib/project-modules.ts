@@ -96,6 +96,23 @@ export const moduleFromSlug = (
 export const slugForModule = (module: ModuleKey) => MODULE_SLUGS[module]
 
 /**
+ * Where a record link on the project root opens the record. Notification
+ * links stored for these types name the project root with the record's type
+ * and id (`/projects/:id?recordId=…&source=…`) — the server's
+ * recordWorkspacePath has no page for them, and a stored link is never
+ * rewritten — so the project route sends them on to the record's own view
+ * with the record selected: an allocation to Project Controls › Mapping, a
+ * cost loading to Schedule › Earned Value's cost-loading rows.
+ */
+export const RECORD_SOURCE_VIEWS: Record<
+  string,
+  { module: ModuleWithChildren; child: string }
+> = {
+  activity_boq_allocation: { module: 'controls', child: 'mapping' },
+  activity_cost_loading: { module: 'schedule', child: 'ev' },
+}
+
+/**
  * Which permission modules back each workspace module. A workspace module is
  * hidden when the resolved permission matrix marks every backing module as
  * not visible (level `none`). Modules with no entry are always shown.

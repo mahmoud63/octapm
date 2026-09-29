@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Check, Pencil, Send, X } from 'lucide-react'
 import { toast } from 'sonner'
 import {
@@ -55,6 +55,8 @@ type Props = {
   allocations: MappingAllocation[]
   currency: string
   isLoading: boolean
+  /** The allocation a link opened the page for: shown selected and scrolled to. */
+  selectedId?: string
 }
 
 const fmtMoney = (currency: string, value: number) =>
@@ -84,6 +86,7 @@ export function MappingList({
   allocations,
   currency,
   isLoading,
+  selectedId,
 }: Props) {
   const updateAllocation = useUpdateActivityBoqAllocation(projectId)
   const submitAllocation = useSubmitActivityBoqAllocation(projectId)
@@ -100,6 +103,14 @@ export function MappingList({
   const [editing, setEditing] = useState<EditState | null>(null)
   const [rejecting, setRejecting] = useState<MappingAllocation | null>(null)
   const [reason, setReason] = useState('')
+  const selectedRow = useRef<HTMLTableRowElement | null>(null)
+  const selectedListed = Boolean(
+    selectedId && allocations.some((row) => row.id === selectedId)
+  )
+  // The row a link opened the page for is brought into view once it is listed.
+  useEffect(() => {
+    if (selectedListed) selectedRow.current?.scrollIntoView({ block: 'center' })
+  }, [selectedListed])
 
   const rows = useMemo(
     () =>
@@ -231,7 +242,13 @@ export function MappingList({
                 return (
                   <tr
                     key={row.id}
-                    className='border-b last:border-b-0'
+                    ref={row.id === selectedId ? selectedRow : undefined}
+                    className={cn(
+                      'border-b last:border-b-0',
+                      row.id === selectedId && 'bg-primary/10 ring-2 ring-primary/40 ring-inset'
+                    )}
+                    aria-selected={row.id === selectedId ? true : undefined}
+                    data-selected={row.id === selectedId ? 'true' : undefined}
                     data-testid={`uat-mapping-row-${row.id}`}
                   >
                     <td className='max-w-64 px-3 py-2'>

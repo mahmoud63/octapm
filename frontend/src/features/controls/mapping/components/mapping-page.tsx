@@ -83,14 +83,21 @@ const groupByOptions: Array<{ value: CoverageGroupBy; label: string }> = [
   { value: 'package', label: 'By package' },
 ]
 
-export function MappingPage({ projectId }: { projectId: string }) {
+export function MappingPage({
+  projectId,
+  selectedAllocationId,
+}: {
+  projectId: string
+  /** An allocation to open with (a notification's link): the list, that row selected. */
+  selectedAllocationId?: string
+}) {
   const { data: project } = useProject(projectId)
   const { data: setupReadiness } = useProjectSetupReadiness(projectId)
   const emptyScheduleMessage = stagedScheduleMessage(
     setupReadiness?.context?.currentRevision
   )
   const currency = project?.currency ?? 'USD'
-  const [view, setView] = useState<View>('matrix')
+  const [view, setView] = useState<View>(selectedAllocationId ? 'list' : 'matrix')
   const [groupBy, setGroupBy] = useState<CoverageGroupBy>('none')
   const [selectedGroupKey, setSelectedGroupKey] = useState<string | null>(null)
   const [mode, setMode] = useState<CellMode>('amount')
@@ -285,6 +292,7 @@ export function MappingPage({ projectId }: { projectId: string }) {
               allocations={allocations}
               currency={currency}
               isLoading={allocationsLoading}
+              selectedId={selectedAllocationId}
             />
           )}
         </div>

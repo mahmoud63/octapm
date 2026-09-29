@@ -39,6 +39,7 @@ import {
   useProject,
 } from '@/features/projects/hooks/use-projects'
 import { EvReport } from '@/features/reports/components/ev-report'
+import { CostLoadingPanel } from '@/features/reports/components/cost-loading-panel'
 import { RisksTable } from '@/features/risks/components/risks-table'
 import type { ProjectSchedule, ScheduleActivity } from '../data/schema'
 import { useGenerateSchedule } from '../hooks/use-schedule'
@@ -1193,7 +1194,17 @@ export function ScheduleDashboard({
           />
         </TabsContent>
 
-        <TabsContent value='ev' className='mt-4'>
+        <TabsContent value='ev' className='mt-4 space-y-4'>
+          {/* A cost loading's link (a notification) opens its row here,
+              selected, above the report it feeds (PV). */}
+          {initialTarget?.source === 'activity_cost_loading' &&
+            initialTarget.recordId && (
+              <CostLoadingPanel
+                projectId={projectId}
+                selectedId={initialTarget.recordId}
+                activities={schedule.activities}
+              />
+            )}
           <EvReport projectId={projectId} />
         </TabsContent>
 

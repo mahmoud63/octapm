@@ -3,6 +3,7 @@ import {
   DEFAULT_CHILD,
   isModuleWithChildren,
   moduleFromSlug,
+  RECORD_SOURCE_VIEWS,
   slugForModule,
 } from '@/features/projects/lib/project-modules'
 
@@ -34,8 +35,30 @@ export const Route = createFileRoute('/_authenticated/o/$orgSlug/projects/$proje
     date: typeof search.date === 'string' ? search.date : undefined,
     new: typeof search.new === 'string' ? search.new : undefined,
   }),
-  beforeLoad: ({ params, search }) => {
+  beforeLoad: ({ params, search, location }) => {
     const module = moduleFromSlug(search.module)
+    // A record link on the project root itself (a notification's stored
+    // actionUrl for an allocation or a cost loading) opens the record's own
+    // view with the record selected, not the Overview. Only on the root:
+    // the module routes below this one carry the same search.
+    const onRoot = /\/projects\/[^/]+\/?$/.test(location.pathname)
+    const recordView =
+      !module && onRoot && search.recordId && search.source
+        ? RECORD_SOURCE_VIEWS[search.source]
+        : undefined
+    if (recordView) {
+      throw redirect({
+        to: '/o/$orgSlug/projects/$projectId/$module/$child',
+        params: {
+          orgSlug: params.orgSlug,
+          projectId: params.projectId,
+          module: slugForModule(recordView.module),
+          child: recordView.child,
+        },
+        search: { source: search.source, recordId: search.recordId },
+        replace: true,
+      })
+    }
     if (!module) return
     const child =
       search.child ??

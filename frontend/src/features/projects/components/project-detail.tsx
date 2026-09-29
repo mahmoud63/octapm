@@ -757,7 +757,14 @@ export function ProjectDetail({
         // Structure (PC-1) and mapping (PC-3); exceptions follow in a later
         // project-controls wave and pick their child here.
         return childState.controls === 'mapping' ? (
-          <MappingPage projectId={projectId} />
+          <MappingPage
+            projectId={projectId}
+            selectedAllocationId={
+              initialTarget?.source === 'activity_boq_allocation'
+                ? initialTarget.recordId
+                : undefined
+            }
+          />
         ) : (
           <StructurePage projectId={projectId} />
         )

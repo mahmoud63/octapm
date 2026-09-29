@@ -72,6 +72,12 @@ const RECORD_WORKSPACE = Object.freeze({
   photo: { module: "photos" },
   project: { module: "overview" },
   task: { path: "/tasks" },
+  // A BOQ allocation and a cost loading are left out on purpose: every link
+  // stored for them names the project root with the record's type and id,
+  // and a stored link is never rewritten, so new ones keep that shape. The
+  // web project route opens them (RECORD_SOURCE_VIEWS, project-modules.ts):
+  // an allocation on Project Controls › Mapping, a cost loading on Schedule ›
+  // Earned Value, each with its row selected.
 });
 
 const encode = (value) => encodeURIComponent(String(value));
