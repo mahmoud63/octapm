@@ -426,6 +426,13 @@ async function getWorkspaceDashboard({
   // Portfolio snapshots (OCTA-RPT-BUILDER-023) need every project's health,
   // not just the six most at risk.
   allProjects = false,
+  // What the caller may be shown of each project's IPC queue, as the IPC
+  // routes decide it: async (projectId) => ({ certificates, lines }). A
+  // certificate line is a BOQ row's claim (one per approved allocation,
+  // valued off the row), so `lines` implies `certificates`. Omitted (a
+  // company-wide read such as the portfolio snapshot), every project's
+  // queue is counted.
+  ipcAccessFor = null,
 }) {
   const projects = await prisma.project.findMany({
     where: {
@@ -455,6 +462,25 @@ async function getWorkspaceDashboard({
   const projectIdFilter = { in: projectIds };
   const today = new Date();
   const projectById = new Map(projects.map((project) => [project.id, project]));
+
+  // The IPC queue counts and lists only what the caller may read: a
+  // project's certificates where they may read its IPC, and its certificate
+  // lines only where they may also read its BOQ.
+  let ipcCertificateProjectIds = projectIds;
+  let ipcLineProjectIds = projectIds;
+  if (typeof ipcAccessFor === "function") {
+    const ipcAccess = await Promise.all(
+      projectIds.map(async (id) => [id, (await ipcAccessFor(id)) || {}]),
+    );
+    ipcCertificateProjectIds = ipcAccess
+      .filter(([, access]) => access.certificates)
+      .map(([id]) => id);
+    ipcLineProjectIds = ipcAccess
+      .filter(([, access]) => access.certificates && access.lines)
+      .map(([id]) => id);
+  }
+  const ipcCertificateProjectFilter = { in: ipcCertificateProjectIds };
+  const ipcLineProjectFilter = { in: ipcLineProjectIds };
 
   const [
     activities,
@@ -543,13 +569,13 @@ async function getWorkspaceDashboard({
       where: { projectId: projectIdFilter, status: "submitted" },
     }),
     prisma.ipcCertificate.count({
-      where: { projectId: projectIdFilter, status: "submitted" },
+      where: { projectId: ipcCertificateProjectFilter, status: "submitted" },
     }),
     prisma.ipcItem.count({
-      where: { projectId: projectIdFilter, status: "submitted" },
+      where: { projectId: ipcLineProjectFilter, status: "submitted" },
     }),
     prisma.ipcCertificate.findMany({
-      where: { projectId: projectIdFilter, status: "submitted" },
+      where: { projectId: ipcCertificateProjectFilter, status: "submitted" },
       take: ACTION_LIMIT,
       orderBy: [{ submittedAt: "desc" }, { updatedAt: "desc" }],
       select: {
@@ -563,7 +589,7 @@ async function getWorkspaceDashboard({
       },
     }),
     prisma.ipcItem.findMany({
-      where: { projectId: projectIdFilter, status: "submitted" },
+      where: { projectId: ipcLineProjectFilter, status: "submitted" },
       take: ACTION_LIMIT,
       orderBy: [{ updatedAt: "desc" }],
       select: {
@@ -576,7 +602,7 @@ async function getWorkspaceDashboard({
     }),
     prisma.ipcCertificate.count({
       where: {
-        projectId: projectIdFilter,
+        projectId: ipcCertificateProjectFilter,
         status: { in: ["certified", "paid"] },
         OR: [
           { paymentStatus: { in: ["unpaid", "partially_paid"] } },
@@ -586,7 +612,7 @@ async function getWorkspaceDashboard({
     }),
     prisma.ipcCertificate.findMany({
       where: {
-        projectId: projectIdFilter,
+        projectId: ipcCertificateProjectFilter,
         status: { in: ["certified", "paid"] },
         OR: [
           { paymentStatus: { in: ["unpaid", "partially_paid"] } },

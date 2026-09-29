@@ -169,11 +169,29 @@ router.get(
 router.get(
   "/workspace-dashboard",
   asyncHandler(async (req, res) => {
+    // The caller as each project's own routes see them (template, role,
+    // party), resolved once per project.
+    const views = new Map();
+    const viewFor = (projectId) => {
+      if (!views.has(projectId)) views.set(projectId, requestForProject(req, projectId));
+      return views.get(projectId);
+    };
+
     const result = await workspaceDashboardService.getWorkspaceDashboard({
       orgId: req.user.orgId,
       userId: req.user.id,
       role: req.user.role,
       isCompanyAdmin: req.user.isCompanyAdmin,
+      // The IPC queue, as the IPC routes admit it: a project's certificates
+      // only to a member who may read its IPC (ipc:read, the guard on
+      // GET /ipc), and its certificate lines — one per BOQ row allocated,
+      // valued off it — only to one who may also read its BOQ, as
+      // GET /ipc/:period withholds them (utils/boq-figures).
+      ipcAccessFor: async (projectId) => {
+        const view = await viewFor(projectId);
+        const certificates = hasPermission(view, "ipc", "read");
+        return { certificates, lines: certificates && canReadBoq(view) };
+      },
     });
 
     // Each project's row states its budget (bac) and the EAC built from it:
@@ -184,7 +202,7 @@ router.get(
     const rows = Array.isArray(result?.projectHealth) ? result.projectHealth : [];
     const access = new Map(
       await Promise.all(
-        rows.map(async (row) => [row.id, boqFigureAccess(await requestForProject(req, row.id))]),
+        rows.map(async (row) => [row.id, boqFigureAccess(await viewFor(row.id))]),
       ),
     );
     return sendSuccess(res, withheldWorkspaceDashboard(result, (projectId) => access.get(projectId)));
