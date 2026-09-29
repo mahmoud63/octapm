@@ -358,7 +358,7 @@ describe("a notification stored before the rule is re-rendered where it is read,
     // a row with nothing to re-render costs no further read.
     expect(mockPrisma.notification.findMany).toHaveBeenCalledTimes(2);
     expect(mockPrisma.notification.findMany.mock.calls[0][0]).toEqual({
-      where: { orgId: "org-1", recipientUserId: "user-1", entityType: { in: ["boq_revision", "activity_boq_allocation"] } },
+      where: { orgId: "org-1", recipientUserId: "user-1", entityType: { in: ["boq_revision", "activity_boq_allocation", "boq_item"] } },
       distinct: ["projectId"],
       select: { projectId: true },
     });
@@ -391,7 +391,7 @@ describe("a notification stored before the rule is re-rendered where it is read,
     const kept = {
       OR: [
         { entityType: null },
-        { entityType: { notIn: ["boq_revision", "activity_boq_allocation"] } },
+        { entityType: { notIn: ["boq_revision", "activity_boq_allocation", "boq_item"] } },
         { projectId: { notIn: [PROJECT] } },
       ],
     };

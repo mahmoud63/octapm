@@ -2,6 +2,7 @@ const mockPrisma = {
   $transaction: jest.fn((fn) => fn(mockPrisma)),
   project: { findFirst: jest.fn() },
   rfi: { findFirst: jest.fn() },
+  boqItem: { findFirst: jest.fn() },
   ncrRecord: { findFirst: jest.fn() },
   user: { findMany: jest.fn() },
   comment: {
@@ -20,6 +21,9 @@ const mockPrisma = {
 const mockNotifications = {
   NOTIFICATION_CATEGORIES: { MENTION: "mention", COMMENT: "comment" },
   createNotifications: jest.fn(async () => ({ created: 0, recipients: [] })),
+  // The BOQ-record rule (notification.service): who may read the BOQ.
+  isBoqRecord: (entityType) => ["boq_revision", "activity_boq_allocation", "boq_item"].includes(entityType),
+  boqReaderFor: jest.fn(() => async ({ userId }) => !String(userId).startsWith("user-no-boq")),
 };
 const mockAssertProjectAccess = jest.fn();
 const mockBus = {
@@ -36,7 +40,7 @@ jest.mock("../project-authorization.service", () => ({
   assertProjectAccess: (...args) => mockAssertProjectAccess(...args),
 }));
 jest.mock("../attachment.service", () => ({
-  RECORD_TYPE_MODULES: { rfi: "rfi", ncr: "ncr", ipc: "ipc", project: "project_parties" },
+  RECORD_TYPE_MODULES: { rfi: "rfi", ncr: "ncr", ipc: "ipc", boq_item: "boq", project: "project_parties" },
 }));
 jest.mock("../../events/bus", () => mockBus);
 
@@ -174,6 +178,68 @@ describe("comment service", () => {
           canDelete: true,
         }),
       );
+    });
+
+    it("on a BOQ item, saves every mention and tells the author, by name, who cannot read the BOQ (owner F1)", async () => {
+      const BOQ_ITEM = "boq-item-1";
+      mockPrisma.boqItem.findFirst.mockResolvedValue({ id: BOQ_ITEM, code: "9.1", description: "Blinding concrete" });
+      const people = [
+        { id: MENTIONED, name: "Bilal" },
+        { id: "user-no-boq-1", name: "Jane Doe" },
+        { id: "user-no-boq-2", name: "Omar Ali" },
+      ];
+      mockPrisma.user.findMany.mockResolvedValue(people.map((person) => ({ ...person, email: null, role: "cost_controller", isCompanyAdmin: false })));
+      mockPrisma.comment.create.mockImplementation(({ data }) =>
+        Promise.resolve(
+          storedComment({
+            recordType: "boq_item",
+            recordId: BOQ_ITEM,
+            body: data.body,
+            mentions: data.mentions.create.map((row) => ({ userId: row.userId, user: people.find((person) => person.id === row.userId) })),
+          }),
+        ),
+      );
+      mockPrisma.recordSubscription.findMany.mockResolvedValue([]);
+
+      const result = await service.createComment({
+        orgId: ORG,
+        projectId: PROJECT,
+        recordType: "boq_item",
+        recordId: BOQ_ITEM,
+        body: "@Bilal @Jane Doe @Omar Ali please check this rate",
+        mentionUserIds: people.map((person) => person.id),
+        actor: AUTHOR,
+      });
+
+      // Every mention is saved…
+      expect(mockPrisma.comment.create.mock.calls[0][0].data.mentions.create.map((row) => row.userId)).toEqual(people.map((person) => person.id));
+      // …the notice goes out through the BOQ-record rule with the same reader
+      // the answer asked…
+      const [mention] = mockNotifications.createNotifications.mock.calls.map(([args]) => args);
+      expect(mention).toEqual(expect.objectContaining({ entityType: "boq_item", recipientUserIds: people.map((person) => person.id) }));
+      expect(mention.boqReader).toBe(await mockNotifications.boqReaderFor.mock.results[0].value);
+      // …and the author is told, by name only, who will not hear of it.
+      expect(result.notNotified).toEqual({
+        reason: "NO_BOQ_ACCESS",
+        people: [
+          { userId: "user-no-boq-1", name: "Jane Doe" },
+          { userId: "user-no-boq-2", name: "Omar Ali" },
+        ],
+        message: "Saved. Not notified (no BOQ access): Jane Doe, Omar Ali.",
+      });
+    });
+
+    it("anywhere else, the answer carries no notNotified", async () => {
+      const result = await service.createComment({
+        orgId: ORG,
+        projectId: PROJECT,
+        recordType: "rfi",
+        recordId: RFI_ID,
+        body: "@Bilal hello",
+        mentionUserIds: [MENTIONED],
+        actor: AUTHOR,
+      });
+      expect(result).not.toHaveProperty("notNotified");
     });
 
     it("rejects records that are not on the project and unknown record types", async () => {

@@ -726,9 +726,10 @@ const createNotifications = async ({
   }
 
   // A notice about one of the bill's own records (an allocation, a BOQ
-  // revision) reaches only a person who may read the BOQ on its project:
-  // even its kind and its activity tell a member without BOQ read that a
-  // mapping exists and how many there are (owner, 2026-09-28).
+  // revision, a BOQ item) reaches only a person who may read the BOQ on its
+  // project: even its kind and its activity tell a member without BOQ read
+  // that a mapping exists and how many there are, and a BOQ item's names its
+  // code and description (owner, 2026-09-28; F1).
   const recipients = await recipientsWhoMayRead({
     orgId,
     projectId,
@@ -1034,14 +1035,18 @@ const mayReadBoq = async ({ orgId, userId, projectId, viewer = null }) => {
 
 // ─── The bill's own records reach only a reader of the BOQ ──────────────────
 //
-// A notification about a BOQ revision or an allocation (the bill's own
-// records, utils/boq-figures) is written only for a person who may read the
-// BOQ on its project (createNotifications). A row stored before that rule,
-// for someone who may not, is left out of what they read — the list, one
-// notification, the summary and its unread count, mark-all-read, an email or
-// a push — and is never rewritten.
+// A notification about a BOQ revision, an allocation or a BOQ item (the
+// bill's own records, utils/boq-figures) is written only for a person who
+// may read the BOQ on its project (createNotifications) — a workflow step, a
+// comment or an @mention alike: a BOQ item's notice names its code and
+// description, which the BOQ page refuses the same person (owner F1,
+// 2026-09-28). A row stored before that rule, for someone who may not, is
+// left out of what they read — the list, one notification, the summary and
+// its unread count, mark-all-read, an email or a push — and is never
+// rewritten. Every record type a comment files under the "boq" module is one
+// of these (comment.service test).
 
-const BOQ_RECORD_TYPES = Object.freeze(["boq_revision", "activity_boq_allocation"]);
+const BOQ_RECORD_TYPES = Object.freeze(["boq_revision", "activity_boq_allocation", "boq_item"]);
 
 const isBoqRecord = (entityType) => BOQ_RECORD_TYPES.includes(entityType);
 
@@ -2002,6 +2007,7 @@ module.exports = {
   NOTIFICATION_CATEGORIES,
   archiveNotification,
   BOQ_RECORD_TYPES,
+  boqReaderFor,
   createDueNotificationsForProject,
   createNotifications,
   createWorkflowNotifications,
@@ -2012,6 +2018,7 @@ module.exports = {
     ),
   getNotificationSummary,
   getUserPreferences,
+  isBoqRecord,
   listNotifications,
   markAllRead,
   markNotificationRead,

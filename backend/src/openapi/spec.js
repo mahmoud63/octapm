@@ -3505,7 +3505,20 @@ const components = {
         type: "boolean",
         description: "True for the author, project managers and company admins.",
       },
+      notNotified: {
+        ...ref("CommentNotNotified"),
+        description:
+          "Only on a create or edit answer, and only when someone mentioned was not notified: a comment on a BOQ record (boq_item) notifies only people who may read the BOQ on the project. The comment and its mentions are saved either way.",
+      },
     }),
+    CommentNotNotified: objectSchema(
+      {
+        reason: { type: "string", enum: ["NO_BOQ_ACCESS"], description: "Why they were not notified: they may not read the BOQ on this project." },
+        people: arrayOf(objectSchema({ userId: uuid, name: { type: "string" } }, ["userId", "name"])),
+        message: { type: "string", description: 'For the author, e.g. "Saved. Not notified (no BOQ access): Jane Doe, Omar Ali." Names only: no figure, no record detail.' },
+      },
+      ["reason", "people", "message"],
+    ),
     CommentListResponse: objectSchema({
       items: arrayOf(ref("Comment")),
       pagination: objectSchema({
@@ -12020,7 +12033,7 @@ add(
 // Owner rule 2026-09-28: a member without boq:read receives no BOQ-derived
 // information, notifications included.
 const BOQ_RECORD_NOTICES =
-  "A notification about one of the bill's own records (entityType activity_boq_allocation or boq_revision) is written only for a recipient who may read the BOQ on its project (the project's template, role and party decide it, as on the BOQ routes): a member without boq:read is not told that an allocation or a revision exists, in-app, by email, by push or by the realtime badge. Such a row stored for them before this rule is left out of the list, the summary and its counts (unread, read, archived), is untouched by mark-all-read, and answers 404 NOTIFICATION_NOT_FOUND when opened, marked, archived or retried; the stored row itself is never rewritten.";
+  "A notification about one of the bill's own records (entityType activity_boq_allocation, boq_revision or boq_item — a workflow step, a comment or an @mention alike) is written only for a recipient who may read the BOQ on its project (the project's template, role and party decide it, as on the BOQ routes): a member without boq:read is not told that an allocation, a revision or a BOQ item's discussion exists, in-app, by email, by push or by the realtime badge. Such a row stored for them before this rule is left out of the list, the summary and its counts (unread, read, archived), is untouched by mark-all-read, and answers 404 NOTIFICATION_NOT_FOUND when opened, marked, archived or retried; the stored row itself is never rewritten.";
 
 const notificationIdParam = pathParam(
   "notificationId",
@@ -13132,7 +13145,7 @@ add(
   operation({
     tag: "Comments",
     summary:
-      "Comment on any record. @mentions notify the named users (category `mention`); other followers get a `comment` notification. The author and mentioned users start following the record.",
+      "Comment on any record. @mentions notify the named users (category `mention`); other followers get a `comment` notification. The author and mentioned users start following the record. On a BOQ record (boq_item) only people who may read the BOQ on the project are notified; the answer's notNotified names the others (names only).",
     operationId: "createComment",
     parameters: projectParams,
     permissions: commentRecordPermission,
@@ -13147,7 +13160,7 @@ add(
   "patch",
   operation({
     tag: "Comments",
-    summary: "Edit your own comment (marks it edited; newly mentioned users are notified).",
+    summary: "Edit your own comment (marks it edited; newly mentioned users are notified — on a BOQ record only those who may read the BOQ, the rest named in notNotified).",
     operationId: "updateComment",
     parameters: [projectIdParam, commentIdParam],
     permissions: commentRecordPermission,

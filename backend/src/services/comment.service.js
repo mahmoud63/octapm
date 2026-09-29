@@ -511,6 +511,46 @@ const publishCommentEvent = async ({
   }
 };
 
+// ─── Mentions on a BOQ record ───────────────────────────────────────────────
+//
+// A notice about one of the bill's own records — a BOQ item among them —
+// reaches only a person who may read the BOQ on its project (owner F1,
+// 2026-09-28; notification.service BOQ_RECORD_TYPES). The comment and its
+// mentions are still saved; the author is told, by name only, who was not
+// notified and why, so nobody waits on a reply from someone who never heard.
+
+const NOT_NOTIFIED_REASON = "NO_BOQ_ACCESS";
+
+/** The mentioned people a BOQ record's notice will not reach, in mention order. */
+const mentionsWithoutBoqRead = async ({ orgId, projectId, recordType, mentionIds, boqReader }) => {
+  if (!mentionIds.length || !notificationService.isBoqRecord(recordType)) return [];
+  const withheld = [];
+  // One at a time, as the notice's own recipient filter asks.
+  for (const userId of mentionIds) {
+    if (!(await boqReader({ orgId, userId, projectId }))) withheld.push(userId);
+  }
+  return withheld;
+};
+
+/**
+ * What the comment's answer tells its author about the people it did not
+ * notify — or null when everyone mentioned was notified. Names only: no
+ * figure, no record detail.
+ */
+const notNotifiedAnswer = (userIds, mentions) => {
+  if (!userIds.length) return null;
+  const nameOf = new Map((mentions || []).map((mention) => [mention.userId, mention.user?.name || mention.name || null]));
+  const people = userIds.map((userId) => ({ userId, name: nameOf.get(userId) || "Unnamed member" }));
+  return {
+    reason: NOT_NOTIFIED_REASON,
+    people,
+    message: `Saved. Not notified (no BOQ access): ${people.map((person) => person.name).join(", ")}.`,
+  };
+};
+
+const withNotNotified = (serialized, notNotified) => (notNotified ? { ...serialized, notNotified } : serialized);
+
+/** Notifies the mentioned and the followers; answers the mentioned people it could not notify. */
 const notifyForComment = async ({
   orgId,
   projectId,
@@ -525,6 +565,10 @@ const notifyForComment = async ({
   const actionUrl = recordWorkspacePath({ projectId, recordType, recordId });
   const authorName = author?.name || "Someone";
   const text = excerpt(comment.body);
+  // One answer per (person, project) for the whole comment: the author's
+  // answer and both fan-outs ask the same question.
+  const boqReader = notificationService.boqReaderFor(null);
+  const notNotified = await mentionsWithoutBoqRead({ orgId, projectId, recordType, mentionIds, boqReader });
 
   if (mentionIds.length) {
     await notificationService.createNotifications({
@@ -543,17 +587,18 @@ const notifyForComment = async ({
       entityId: recordId,
       dedupeKeyBase: `comment:${comment.id}:mention`,
       metadata: { commentId: comment.id, recordType, recordId },
+      boqReader,
     });
   }
 
-  if (isEdit) return;
+  if (isEdit) return notNotified;
 
   const subscribers = await listSubscribers({ orgId, projectId, recordType, recordId });
   const mentioned = new Set(mentionIds);
   const recipientUserIds = subscribers
     .map((row) => row.userId)
     .filter((userId) => userId !== author?.id && !mentioned.has(userId));
-  if (!recipientUserIds.length) return;
+  if (!recipientUserIds.length) return notNotified;
 
   await notificationService.createNotifications({
     orgId,
@@ -571,7 +616,9 @@ const notifyForComment = async ({
     entityId: recordId,
     dedupeKeyBase: `comment:${comment.id}:follow`,
     metadata: { commentId: comment.id, recordType, recordId },
+    boqReader,
   });
+  return notNotified;
 };
 
 const listComments = async ({
@@ -699,7 +746,7 @@ const createComment = async ({
     return comment;
   });
 
-  await notifyForComment({
+  const notNotified = await notifyForComment({
     orgId,
     projectId,
     recordType,
@@ -710,7 +757,7 @@ const createComment = async ({
     mentionIds,
   });
 
-  return serializeComment(created, actor);
+  return withNotNotified(serializeComment(created, actor), notNotifiedAnswer(notNotified, created.mentions));
 };
 
 const updateComment = async ({ orgId, projectId, commentId, body, mentionUserIds, actor }) => {
@@ -778,6 +825,7 @@ const updateComment = async ({ orgId, projectId, commentId, body, mentionUserIds
     return row;
   });
 
+  let notNotified = [];
   if (addedMentions.length) {
     const { display } = await loadRecord({
       orgId,
@@ -785,7 +833,7 @@ const updateComment = async ({ orgId, projectId, commentId, body, mentionUserIds
       recordType: existing.recordType,
       recordId: existing.recordId,
     });
-    await notifyForComment({
+    notNotified = await notifyForComment({
       orgId,
       projectId,
       recordType: existing.recordType,
@@ -798,7 +846,7 @@ const updateComment = async ({ orgId, projectId, commentId, body, mentionUserIds
     });
   }
 
-  return serializeComment(updated, actor);
+  return withNotNotified(serializeComment(updated, actor), notNotifiedAnswer(notNotified, updated.mentions));
 };
 
 const deleteComment = async ({ orgId, projectId, commentId, actor }) => {
@@ -912,6 +960,7 @@ module.exports = {
   handleRecordEvent,
   listComments,
   listMySubscriptions,
+  NOT_NOTIFIED_REASON,
   listSubscribers,
   loadRecord,
   moduleForRecordType,
