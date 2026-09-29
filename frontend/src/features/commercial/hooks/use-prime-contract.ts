@@ -120,7 +120,12 @@ export type ClientStatement = {
     amountPaid: number
     balanceDue: number
   }>
-  lines: StatementLine[]
+  /**
+   * The schedule of values: the BOQ's rows. Omitted by the server for a
+   * member who may not read the BOQ, with `linesWithheld` saying why.
+   */
+  lines?: StatementLine[]
+  linesWithheld?: { reason: string }
 }
 
 export type AgeingBucket = {

@@ -283,7 +283,13 @@ export interface IpcRetentionRelease {
 }
 
 export interface IpcPeriodDetail extends IpcCertificate {
-  items: Array<{
+  /**
+   * The certificate's lines: the BOQ's rows and their allocations. Omitted by
+   * the server, with the certification review, for a member who may not read
+   * the BOQ — `boqWithheld` names what was left out and why.
+   */
+  boqWithheld?: { keys: string[]; reason: string }
+  items?: Array<{
     id: string
     boqItemId: string
     allocationId: string | null

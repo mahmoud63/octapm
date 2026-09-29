@@ -9043,6 +9043,8 @@ add(
     tag: "Commercial",
     summary:
       "The client billing statement: contract, approved changes, previously certified, this period, retention, advance recovery, deductions, tax, total due — and the same story per BOQ line.",
+    description:
+      "`lines` (the schedule of values) are the project's live BOQ rows — boqItemId, code, section, description, unit, quantity, rate, contractAmount — with what the period certified against each. A caller who may not read the BOQ (boq:read) is given the statement without `lines`, and `linesWithheld: { reason }` in their place; the contract, summary, current certificate and periods are the commercial module's own records and are returned to every ipc reader.",
     operationId: "getClientBillingStatement",
     parameters: [
       ...projectParams,
@@ -9108,6 +9110,8 @@ add(
   operation({
     tag: "Commercial",
     summary: "List IPC certificates.",
+    description:
+      "A caller who may not read the BOQ (boq:read) is given each certificate without the certification review stamped on it from the BOQ rows and their allocations (earnedValueAtCertification, approvedLimitAtCertification, overCertificationAmount); `boqWithheld: { keys, reason }` names what was left out.",
     operationId: "listIpcCertificates",
     parameters: projectParams,
     permissions: modulePermission("ipc", "read"),
@@ -9138,6 +9142,8 @@ add(
   operation({
     tag: "Commercial",
     summary: "Get an IPC period with certification items.",
+    description:
+      "`items` are the certificate's lines — each a live BOQ row (boqItem: id, code, ref, description, unit, qty, rate) with its allocation and progress link — and `certificationReview` is worked over them. A caller who may not read the BOQ (boq:read) is given the certificate without `items`, `certificationReview` and the review stamped at certification, and `boqWithheld: { keys, reason }` in their place; the certificate's own totals, invoices, payments and retention releases are returned to every ipc reader. The certificate answered by create, adjustments, submit, certify, a payment and a retention release is withheld the same way.",
     operationId: "getIpcPeriod",
     parameters: [
       ...projectParams,
@@ -9153,6 +9159,8 @@ add(
   operation({
     tag: "Commercial",
     summary: "Update an IPC item.",
+    description:
+      "Answers with the line as written — its BOQ row, allocation and progress link included. A caller who may not read the BOQ (boq:read) is given only the line's id and `itemWithheld: { reason }`.",
     operationId: "updateIpcItem",
     parameters: [
       ...projectParams,

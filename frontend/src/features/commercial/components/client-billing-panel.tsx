@@ -106,7 +106,10 @@ export function ClientBillingPanel({ projectId }: { projectId: string }) {
     )
   }
 
-  const { summary, current, lines } = statement.data
+  const { summary, current, linesWithheld } = statement.data
+  // A member who may not read the BOQ is sent no line: the server withholds
+  // the rows and says why, and the table says so instead of showing any.
+  const lines = statement.data.lines ?? []
   const c = contract.data
   const ar = receivables.data
 
@@ -392,7 +395,15 @@ export function ClientBillingPanel({ projectId }: { projectId: string }) {
                     </td>
                   </tr>
                 ))}
-                {lines.length === 0 && (
+                {linesWithheld && (
+                  <tr data-testid='uat-contract-sov-withheld'>
+                    <td colSpan={7} className='px-3 py-8 text-center text-muted-foreground'>
+                      <p className='font-mono'>—</p>
+                      <p>{linesWithheld.reason}</p>
+                    </td>
+                  </tr>
+                )}
+                {!linesWithheld && lines.length === 0 && (
                   <tr>
                     <td colSpan={7} className='px-3 py-8 text-center text-muted-foreground'>
                       The BOQ is empty, so there is nothing to certify against.

@@ -110,6 +110,10 @@ export function IpcWorkbook({
     selectedPeriod || dashboardPeriod || periods[0]?.period || ''
 
   const { data: detail } = useIpcPeriod(projectId, activePeriod)
+  // A member who may not read the BOQ is sent no line and no review: the
+  // server withholds them and says why, and the workbook says so instead.
+  const boqWithheld = detail?.boqWithheld
+  const items = detail?.items ?? []
 
   const totals = useMemo(
     () => ({
@@ -282,38 +286,46 @@ export function IpcWorkbook({
         </div>
       )}
 
-      {detail && certificationReview && (
+      {detail && (certificationReview || boqWithheld) && (
         <div className='grid gap-3 rounded-md border p-3 lg:grid-cols-[repeat(5,minmax(0,1fr))]'>
           <div className='text-xs'>
             <p className='text-muted-foreground'>Earned Value Basis</p>
             <p className='text-lg font-semibold'>
-              {fmtUSD(certificationReview.earnedAmount)}
+              {certificationReview ? fmtUSD(certificationReview.earnedAmount) : '—'}
             </p>
           </div>
           <div className='text-xs'>
             <p className='text-muted-foreground'>Current Claimed</p>
             <p className='text-lg font-semibold'>
-              {fmtUSD(certificationReview.currentClaimedAmount)}
+              {certificationReview ? fmtUSD(certificationReview.currentClaimedAmount) : '—'}
             </p>
           </div>
           <div className='text-xs'>
             <p className='text-muted-foreground'>Approved Limit</p>
             <p className='text-lg font-semibold'>
-              {fmtUSD(certificationReview.approvedLimitAmount)}
+              {certificationReview ? fmtUSD(certificationReview.approvedLimitAmount) : '—'}
             </p>
           </div>
           <div className='text-xs'>
             <p className='text-muted-foreground'>Over Earned</p>
             <p className='text-lg font-semibold text-amber-600'>
-              {fmtUSD(certificationReview.overEarnedAmount)}
+              {certificationReview ? fmtUSD(certificationReview.overEarnedAmount) : '—'}
             </p>
           </div>
           <div className='text-xs'>
             <p className='text-muted-foreground'>Over Approved</p>
             <p className='text-lg font-semibold text-rose-600'>
-              {fmtUSD(certificationReview.overApprovedLimitAmount)}
+              {certificationReview ? fmtUSD(certificationReview.overApprovedLimitAmount) : '—'}
             </p>
           </div>
+          {boqWithheld && (
+            <p
+              className='text-xs text-muted-foreground lg:col-span-5'
+              data-testid='ipc-review-withheld'
+            >
+              {boqWithheld.reason}
+            </p>
+          )}
           {detail.status === 'submitted' && (
             <div className='space-y-2 lg:col-span-5'>
               {hasReviewWarning && (
@@ -337,7 +349,7 @@ export function IpcWorkbook({
                   placeholder='PM override reason'
                   value={overrideReason}
                   onChange={(e) => setOverrideReason(e.target.value)}
-                  disabled={!requiresOverride}
+                  disabled={!requiresOverride && !boqWithheld}
                 />
               </div>
             </div>
@@ -663,7 +675,17 @@ export function IpcWorkbook({
             </tr>
           </thead>
           <tbody>
-            {!detail || detail.items.length === 0 ? (
+            {detail && boqWithheld ? (
+              <tr data-testid='ipc-lines-withheld'>
+                <td
+                  colSpan={16}
+                  className='p-6 text-center text-muted-foreground'
+                >
+                  <p className='font-mono'>—</p>
+                  <p>{boqWithheld.reason}</p>
+                </td>
+              </tr>
+            ) : !detail || items.length === 0 ? (
               <tr>
                 <td
                   colSpan={16}
@@ -675,7 +697,7 @@ export function IpcWorkbook({
                 </td>
               </tr>
             ) : (
-              detail.items.map((item) => (
+              items.map((item) => (
                 <tr key={item.id} className='border-b hover:bg-muted/25'>
                   <td className='p-2 font-mono text-xs'>
                     {item.boqItem.ref || '—'}
@@ -797,7 +819,7 @@ export function IpcWorkbook({
             )}
           </tbody>
 
-          {detail && detail.items.length > 0 && (
+          {detail && items.length > 0 && (
             <tfoot>
               <tr className='bg-muted/40'>
                 <td

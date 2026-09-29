@@ -7,6 +7,16 @@ const { getEffectiveRole, requirePermission } = require("../middleware/rbac");
 const { validate } = require("../middleware/validate");
 const { moneyBody } = require("../utils/money");
 const ipcService = require("../services/ipc.service");
+const { boqFigureAccess, withheldIpcCertificate, withheldIpcItem } = require("../utils/boq-figures");
+
+// A certificate's lines are the BOQ's rows and their allocations: a member
+// who may not read the BOQ is given every certificate without them, and the
+// answer to editing a line without the line (utils/boq-figures).
+const withheldCertificateIn = (result, req) => {
+  const access = boqFigureAccess(req);
+  if (access.boq || !result || typeof result !== "object" || !result.certificate) return result;
+  return { ...result, certificate: withheldIpcCertificate(result.certificate, access) };
+};
 
 const router = express.Router({ mergeParams: true });
 router.use(authenticate);
@@ -19,7 +29,8 @@ router.get(
       orgId: req.user.orgId,
       projectId: req.params.projectId,
     });
-    return sendSuccess(res, result);
+    const access = boqFigureAccess(req);
+    return sendSuccess(res, result.map((row) => withheldIpcCertificate(row, access)));
   }),
 );
 
@@ -37,7 +48,7 @@ router.post(
       userId: req.user.id,
       userRole: getEffectiveRole(req),
     });
-    return sendSuccess(res, result, 201);
+    return sendSuccess(res, withheldIpcCertificate(result, boqFigureAccess(req)), 201);
   }),
 );
 
@@ -51,7 +62,7 @@ router.get(
       projectId: req.params.projectId,
       period: req.params.period,
     });
-    return sendSuccess(res, result);
+    return sendSuccess(res, withheldIpcCertificate(result, boqFigureAccess(req)));
   }),
 );
 
@@ -78,7 +89,7 @@ router.patch(
       itemId: req.params.id,
       payload: req.body,
     });
-    return sendSuccess(res, result);
+    return sendSuccess(res, withheldIpcItem(result, boqFigureAccess(req)));
   }),
 );
 
@@ -114,7 +125,7 @@ router.patch(
       payload: req.body,
       userId: req.user.id,
     });
-    return sendSuccess(res, result);
+    return sendSuccess(res, withheldIpcCertificate(result, boqFigureAccess(req)));
   }),
 );
 
@@ -132,7 +143,7 @@ router.post(
       userId: req.user.id,
       userRole: getEffectiveRole(req),
     });
-    return sendSuccess(res, result);
+    return sendSuccess(res, withheldIpcCertificate(result, boqFigureAccess(req)));
   }),
 );
 
@@ -165,7 +176,7 @@ router.post(
       comment: req.body?.comment || null,
       overrideReason: req.body?.overrideReason || null,
     });
-    return sendSuccess(res, result);
+    return sendSuccess(res, withheldIpcCertificate(result, boqFigureAccess(req)));
   }),
 );
 
@@ -229,7 +240,7 @@ router.post(
       userId: req.user.id,
       userRole: getEffectiveRole(req),
     });
-    return sendSuccess(res, result, 201);
+    return sendSuccess(res, withheldCertificateIn(result, req), 201);
   }),
 );
 
@@ -261,7 +272,7 @@ router.post(
       userId: req.user.id,
       userRole: getEffectiveRole(req),
     });
-    return sendSuccess(res, result, 201);
+    return sendSuccess(res, withheldCertificateIn(result, req), 201);
   }),
 );
 

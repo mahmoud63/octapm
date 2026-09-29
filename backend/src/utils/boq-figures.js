@@ -68,6 +68,41 @@
  * E1's own test holds for it: moving an approved allocation between
  * activities changes no cost loading. It stays visible to cost readers, and
  * this module does not touch it; reviewers do not report it as an E1 leak.
+ *
+ * The client billing statement (GET /prime-contract/statement, admitted on
+ * ipc:read — a QS, a cost controller, finance, a PM) is withheld in part
+ * (owner check, 2026-09-29). Its schedule of values is not a record the
+ * commercial module keeps: each line is a live BoqItem row — its id, code,
+ * section, description, unit, quantity, rate and amount (as contractAmount)
+ * — read off the bill when the statement is built, beside what the period's
+ * IPC items certified against that row, with the remaining value and the
+ * share complete worked from the row's amount. So a member who may not read
+ * the BOQ is given no line at all (the rows, their count and their total go
+ * together): `lines` is omitted and `linesWithheld` says why. What stays is
+ * the commercial module's own: the client contract (PrimeContract — its
+ * value and terms, maintained under ipc:update contract.manage and moved by
+ * approved change orders), the certificates' totals (IpcCertificate), the
+ * invoices, receipts and the advance. The contract, receivables and
+ * advances reads carry no BOQ row and are not touched. (The contract's
+ * original value is seeded once, when the contract is first read, from the
+ * project's contract value or else the bill's total; from then on it is the
+ * contract's own stored figure, changed only through contract.manage and
+ * approved change orders, and it is not withheld.)
+ *
+ * The payment certificate beside it (GET /ipc/:period, admitted on the same
+ * ipc:read) listed the same rows: each certificate line carried its BoqItem
+ * row (id, code, ref, description, unit, quantity, rate), its allocation
+ * (id, quantity, amount, weight, activity) and its progress link, and the
+ * certification review worked over them (earned value, approved limit,
+ * over-certification, lines needing an override) — stamped on the
+ * certificate as earnedValueAtCertification, approvedLimitAtCertification
+ * and overCertificationAmount when it is certified. For a member who may
+ * not read the BOQ those keys are left out of every certificate the IPC
+ * routes answer with (the period read, the list, create, adjustments,
+ * submit, certify, and the certificate returned with a payment or a
+ * retention release), and `boqWithheld` names them; the answer to editing a
+ * line names the line and nothing of it (`itemWithheld`). The certificate's
+ * own totals, invoices, payments and releases stay.
  */
 const { hasPermission } = require("../middleware/rbac");
 const { HttpError } = require("./http-error");
@@ -722,7 +757,81 @@ const withheldJob = (job, access = FULL_ACCESS) => {
   return { ...job, payload: kept, payloadWithheld: { keys: present, reason: JOB_BILL_WITHHELD } };
 };
 
+const BILLING_LINES_WITHHELD =
+  "The schedule of values is the BOQ's rows, available only to members who may read the BOQ";
+
+/**
+ * The client billing statement (prime-contract.service buildStatement) as
+ * this caller may receive it: for a caller who may not read the BOQ — cost
+ * readers included — the statement without its schedule of values (`lines`,
+ * the BOQ rows), and `linesWithheld` says why. The contract, the summary,
+ * the current certificate and the periods are the commercial module's own
+ * and stay as built. A BOQ reader's statement is returned untouched (the
+ * same object).
+ */
+const withheldBillingStatement = (statement, access = FULL_ACCESS) => {
+  if (access.boq || !statement || typeof statement !== "object" || !has(statement, "lines")) return statement;
+  return { ...withoutKeys(statement, ["lines"]), linesWithheld: { reason: BILLING_LINES_WITHHELD } };
+};
+
+const IPC_LINES_WITHHELD =
+  "The certificate's lines are the BOQ's rows and their allocations, available only to members who may read the BOQ";
+
+// What a payment certificate (IpcCertificate) carries that is worked from
+// the BOQ's rows and their allocations rather than kept by the certificate:
+// its lines (`items` — each one a BoqItem row with its allocation and the
+// progress behind it), the certification review worked over those lines
+// (earned value, approved limit, over-certification, the count of lines
+// needing an override), and that review as stamped on the certificate when
+// it was certified.
+const IPC_BOQ_KEYS = [
+  "items",
+  "certificationReview",
+  "earnedValueAtCertification",
+  "approvedLimitAtCertification",
+  "overCertificationAmount",
+];
+
+/**
+ * A payment certificate (ipc.service — the period read, the list's rows,
+ * and the certificate every IPC write answers with) as this caller may
+ * receive it: for a caller who may not read the BOQ, the certificate without
+ * the keys above, and `boqWithheld` names those left out and why. The
+ * certificate's own record — period, status, totals certified, retained and
+ * payable, invoices, payments, retention releases — stays. A BOQ reader's
+ * certificate, and one that carries none of the keys, is returned untouched
+ * (the same object).
+ */
+const withheldIpcCertificate = (certificate, access = FULL_ACCESS) => {
+  if (access.boq || !certificate || typeof certificate !== "object" || Array.isArray(certificate)) {
+    return certificate;
+  }
+  const keys = IPC_BOQ_KEYS.filter((key) => has(certificate, key));
+  if (!keys.length) return certificate;
+  return { ...withoutKeys(certificate, keys), boqWithheld: { keys, reason: IPC_LINES_WITHHELD } };
+};
+
+/**
+ * One certificate line (ipc.service updateIpcItem — the answer to editing
+ * it) as this caller may receive it. A line is a BoqItem row certified: its
+ * row (code, description, unit, quantity, rate), its allocation and its
+ * progress link, and its own quantity, rate and money worked from them. A
+ * caller who may not read the BOQ is told which line was written (its id)
+ * and nothing of it — `itemWithheld` says why. A BOQ reader's line is
+ * returned untouched (the same object).
+ */
+const withheldIpcItem = (item, access = FULL_ACCESS) => {
+  if (access.boq || !item || typeof item !== "object" || Array.isArray(item)) return item;
+  return { id: item.id, itemWithheld: { reason: IPC_LINES_WITHHELD } };
+};
+
 module.exports = {
+  BILLING_LINES_WITHHELD,
+  withheldBillingStatement,
+  IPC_BOQ_KEYS,
+  IPC_LINES_WITHHELD,
+  withheldIpcCertificate,
+  withheldIpcItem,
   JOB_BILL_WITHHELD,
   withheldJob,
   BOQ_FIGURE_KEYS,

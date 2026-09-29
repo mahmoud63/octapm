@@ -7,6 +7,7 @@ const { requirePermission } = require("../middleware/rbac");
 const { validate } = require("../middleware/validate");
 const { moneyBody } = require("../utils/money");
 const service = require("../services/prime-contract.service");
+const { boqFigureAccess, withheldBillingStatement } = require("../utils/boq-figures");
 
 /**
  * The client contract and what it bills (OCTA-COM-PRIME-051).
@@ -70,21 +71,24 @@ router.patch(
   )
 );
 
-/** The client billing statement: the summary block and the SOV table. */
+/**
+ * The client billing statement: the summary block and the SOV table.
+ *
+ * The SOV table is the BOQ's rows, read live: a member who may not read the
+ * BOQ is given the statement without it (utils/boq-figures).
+ */
 router.get(
   "/statement",
   requirePermission("ipc", "read"),
   [query("period").optional().isString().trim().isLength({ max: 40 }), validate],
-  asyncHandler(async (req, res) =>
-    sendSuccess(
-      res,
-      await service.buildStatement({
-        orgId: req.user.orgId,
-        projectId: req.params.projectId,
-        period: req.query.period ?? null,
-      })
-    )
-  )
+  asyncHandler(async (req, res) => {
+    const statement = await service.buildStatement({
+      orgId: req.user.orgId,
+      projectId: req.params.projectId,
+      period: req.query.period ?? null,
+    });
+    return sendSuccess(res, withheldBillingStatement(statement, boqFigureAccess(req)));
+  })
 );
 
 /** What the client owes, and how late it is. */
