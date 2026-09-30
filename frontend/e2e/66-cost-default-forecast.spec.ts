@@ -25,9 +25,16 @@ import {
  *   a cost controller who may not read the BOQ: the default forecast is a dash
  *      with the server's reason — never a figure, never 0 — and the entered
  *      one is shown
+ *   editing: emptying the Forecast field sends nothing — the record stays a
+ *      default (it used to be sent as 0 and stored as an entered 0)
+ *   By Phase: the column is "Projected final cost (cost records)", not "Forecast"
+ *   the member without BOQ access, sorting by Forecast: the default rows follow
+ *      the others whatever the direction, with the server's reason; and they
+ *      can replace a default they are not shown with a forecast of their own
  */
 
-const DEFAULT_BASIS = 'Default forecast: the larger of budget and actual when it was set (no forecast was entered)'
+const DEFAULT_BASIS =
+  'Default forecast: the larger of the budget and the actual cost as they stood when it was set; it does not follow them afterwards (no forecast was entered)'
 const ENTERED_BASIS = 'Entered forecast'
 
 let org: LiveOrg | null = null
@@ -96,7 +103,7 @@ const build = async (client: APIRequestContext) => {
   return { projectId, acts, readerEmail, ids: { byDefault: byDefault.body!.data!.id as string, entered: entered.body!.data!.id as string } }
 }
 
-test('a default cost forecast carries its marker and basis, an entered 0 is a forecast, and a member without BOQ access sees a dash with the reason', async ({
+test('a default cost forecast carries its marker and basis, an entered 0 is a forecast, an emptied forecast field is not sent, and a member without BOQ access sees a dash with the reason and no order of it', async ({
   page,
   browser,
 }) => {
@@ -132,6 +139,31 @@ test('a default cost forecast carries its marker and basis, an entered 0 is a fo
   await expect(enteredForecast).toHaveText('$0')
   await expect(enteredRow.getByTestId('cost-record-forecast-default')).toHaveCount(0)
   await expect(page.getByTestId('cost-record-forecast-withheld')).toHaveCount(0)
+
+  // ── Editing: emptying the Forecast field is "no forecast typed". Nothing is
+  // sent, and the record stays a default — it is not turned into an entered 0.
+  await defaultRow.getByRole('button', { name: 'Edit' }).click()
+  const forecastInput = defaultRow.getByTestId('cost-record-forecast-input')
+  await expect(forecastInput).toHaveValue('12333.51')
+  await forecastInput.fill('')
+  await defaultRow.getByRole('button', { name: 'Save' }).click()
+  await expect(page.getByText('The forecast was left as it was')).toBeVisible()
+  await expect(defaultRow.getByTestId('cost-record-forecast-default')).toHaveText('Default')
+  await expect(defaultRow.getByTestId('cost-record-forecast')).toContainText('$12,334')
+  {
+    const check = await apiClient()
+    try {
+      const listed = await apiJson(check, 'get', `/projects/${built.projectId}/cost?limit=100`, { token: org!.adminToken })
+      const stored = (listed.body!.data as { rows: Array<{ id: string; forecast: number; forecastSource: string }> }).rows.find((row) => row.id === built.ids.byDefault)
+      expect([stored?.forecast, stored?.forecastSource]).toEqual([12333.51, 'default'])
+    } finally {
+      await check.dispose()
+    }
+  }
+
+  // ── By Phase: the summary's projection under its own name, not "Forecast".
+  await page.goto(`${base}/cost/phase`)
+  await expect(page.getByTestId('cost-phase-projected-header')).toHaveText('Projected final cost (cost records)', { timeout: 45_000 })
 
   // ── Cost overview: not called the EAC, and the mix is stated.
   await page.goto(`${base}/cost/overview`)
@@ -191,9 +223,40 @@ test('a default cost forecast carries its marker and basis, an entered 0 is a fo
     await expect(readerFigure).toContainText('available only to members who may read the BOQ')
     await expect(readerFigure.locator('[data-value]')).toHaveCount(0)
     await reader.waitForLoadState('networkidle')
+    // Sorted by Forecast, the withheld default does not take part in the
+    // order: it follows the entered forecast in both directions (the BOQ
+    // reader's descending order puts 12,333.51 first), and the server's reason
+    // is on the screen.
+    await reader.goto(`${base}/cost/activity`)
+    await expect(reader.locator('tr', { hasText: 'Pour byDefault' })).toBeVisible({ timeout: 45_000 })
+    await reader.getByTestId('cost-sort-by').click()
+    await reader.getByRole('option', { name: 'Forecast' }).click()
+    await expect(reader.getByTestId('cost-sort-withheld')).toContainText('not ordered by it')
+    await expect(reader.locator('tbody tr').first()).toContainText('Pour entered')
+    await reader.getByTestId('cost-sort-dir').click()
+    await reader.getByRole('option', { name: 'Desc' }).click()
+    await expect(reader.getByTestId('cost-sort-withheld')).toBeVisible()
+    await expect(reader.locator('tbody tr').nth(1)).toContainText('Pour byDefault')
+    await expect(reader.locator('tbody tr').first()).toContainText('Pour entered')
+    await reader.waitForLoadState('networkidle')
+
     // No answer this member received states the allocation the default was built from.
     expect(answers.length).toBeGreaterThan(0)
     expect(answers.filter((text) => text.includes('12333.51'))).toEqual([])
+
+    // They may update cost: the withheld default opens as an empty field, and
+    // a forecast of their own replaces it — entered, and shown to them.
+    const theirDefault = reader.locator('tr', { hasText: 'Pour byDefault' })
+    await theirDefault.getByRole('button', { name: 'Edit' }).click()
+    const theirInput = theirDefault.getByTestId('cost-record-forecast-input')
+    await expect(theirInput).toHaveValue('')
+    await expect(theirInput).toHaveAttribute('title', /available only to members who may read the BOQ/)
+    await theirInput.fill('777')
+    await theirDefault.getByRole('button', { name: 'Save' }).click()
+    const theirs = theirDefault.getByTestId('cost-record-forecast')
+    await expect(theirs).toHaveText('$777', { timeout: 45_000 })
+    await expect(theirs).toHaveAttribute('data-forecast-source', 'entered')
+    await expect(theirDefault.getByTestId('cost-record-forecast-withheld')).toHaveCount(0)
   } finally {
     await context.close()
   }

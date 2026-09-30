@@ -23,8 +23,8 @@ export interface CostRecord {
   actual: number
   actualThroughDate: string | null
   // The stored forecast and where it came from (owner decision R5-2): entered
-  // by a caller, the server's initial default (the larger of budget and
-  // actual when it was set), or null — not recorded, a row older than the
+  // by a caller, the server's initial default (the larger of the budget and
+  // the actual cost as they stood when it was set), or null — not recorded, a row older than the
   // column. The server alone sets the source. A DEFAULT forecast is built
   // from the record's budget, so the server omits it (forecastWithheld, with
   // its reason) for a member who may not read the BOQ.
@@ -162,6 +162,12 @@ export interface CostRecordListQuery {
 export interface CostRecordPage {
   rows: CostRecord[]
   pagination?: CursorPagination
+  /**
+   * Present when the list was asked in the order of a figure the server
+   * withholds from this member on some rows (sortBy=forecast without BOQ
+   * access): those rows are not ordered by it, and the server says why (R5-2).
+   */
+  sortWithheld?: { sortBy: string; reason: string }
 }
 
 const costKey = (projectId: string) => ['cost-records', projectId]
