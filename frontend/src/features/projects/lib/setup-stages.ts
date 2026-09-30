@@ -208,6 +208,23 @@ const stageStatus = (views: StageStepView[], memberCount: number): StageStatus =
   return worst
 }
 
+/** The mildest status a stage may show under its own Continue. */
+const GATE_FLOOR: Partial<Record<ContinueMode, CheckedStatus>> = {
+  block: 'blocked',
+  warn: 'attention',
+}
+
+/**
+ * A stage's status is never milder than its own gate: the baseline step
+ * reads 'attention' while it waits for the approval, yet the baseline gate
+ * already refuses the lock — the stage reads Blocked, as its Continue does.
+ */
+const flooredByGate = (status: StageStatus, mode: ContinueMode): StageStatus => {
+  const floor = GATE_FLOOR[mode]
+  if (!floor) return status
+  return status === 'not_checked' ? floor : worstStatus([status, floor])
+}
+
 const baselineContinue = (readiness: ProjectSetupReadiness) => {
   const gate = readiness.gates.baseline
   if (gate.alreadyLocked) {
@@ -313,7 +330,7 @@ export function buildSetupStages(readiness: ProjectSetupReadiness): SetupStage[]
       number: definition.number,
       key: definition.key,
       label: definition.label,
-      status,
+      status: flooredByGate(status, continueMode),
       steps: views,
       blockers,
       warnings,

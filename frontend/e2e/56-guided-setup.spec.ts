@@ -145,11 +145,17 @@ test('guided setup walks the readiness engine: warnings continue, the baseline g
   await expect(page.getByTestId('setup-guide-blockers-NO_BOQ')).toBeVisible()
   await expectStripIsEngine(page, projectId)
 
-  // The baseline stage refuses Continue: its gate blocks.
+  // The baseline stage refuses Continue: its gate blocks. Its badge says so
+  // too, though the engine's baseline step is only waiting (a warning): a
+  // stage never reads milder than its own gate.
   await stage(page, 'baseline').click()
   await expect(panel(page)).toHaveAttribute('data-stage', 'baseline')
   await expect(page.getByTestId('setup-guide-continue')).toHaveAttribute('data-mode', 'block')
   await expect(page.getByTestId('setup-guide-continue')).toBeDisabled()
+  await expect(page.getByTestId('setup-guide-member-baseline_readiness')).toHaveAttribute('data-status', 'attention')
+  await expect(stage(page, 'baseline')).toHaveAttribute('data-status', 'blocked')
+  await expect(stage(page, 'baseline')).toContainText('Blocked')
+  await expect(page.getByTestId('setup-guide-panel-status')).toHaveText('Blocked')
 
   // A warning stage offers Continue with warning, and Continue moves on.
   await stage(page, 'locations').click()

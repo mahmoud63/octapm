@@ -6,6 +6,7 @@ import {
   buildSetupStages,
   currentStageIndex,
   SETUP_STAGES,
+  STAGE_STATUS_LABEL,
   worstStatus,
 } from '../src/features/projects/lib/setup-stages.ts'
 
@@ -165,6 +166,39 @@ assert.equal(worstStatus([]), 'complete')
   const stages = buildSetupStages(readinessOf(steps))
   assert.equal(stages.find((stage) => stage.key === 'boq').status, 'pending')
   assert.equal(stages[currentStageIndex(stages)].key, 'schedule')
+}
+
+// The badge is never milder than the stage's own gate. Before the approval
+// the engine's baseline step is 'attention' (only the waiting warning), yet
+// the baseline gate (block mode, not ready) refuses Continue: the stage reads
+// Blocked on the stepper, while the member row keeps the step's own verdict.
+{
+  const waiting = fullSteps().map((entry) =>
+    entry.key === 'baseline_readiness'
+      ? { ...entry, status: 'attention', blockers: [], warnings: [issue('BASELINE_WAITING_FOR_APPROVAL')] }
+      : entry
+  )
+  const baseline = buildSetupStages(readinessOf(waiting)).find((stage) => stage.key === 'baseline')
+  assert.equal(baseline.continueMode, 'block')
+  assert.equal(baseline.status, 'blocked')
+  assert.equal(STAGE_STATUS_LABEL[baseline.status], 'Blocked')
+  assert.equal(baseline.steps[0].status, 'attention')
+  // Without the step at all, the gate still decides the badge: Blocked.
+  const withoutStep = fullSteps().filter((entry) => entry.key !== 'baseline_readiness')
+  const unanswered = buildSetupStages(readinessOf(withoutStep)).find((stage) => stage.key === 'baseline')
+  assert.equal(unanswered.continueMode, 'block')
+  assert.equal(unanswered.status, 'blocked')
+  // Ready to lock: the gate warns, and the badge is the step's Warning.
+  const ready = fullSteps().map((entry) =>
+    entry.key === 'baseline_readiness'
+      ? { ...entry, status: 'attention', blockers: [], warnings: [issue('BASELINE_READY_TO_LOCK')] }
+      : entry
+  )
+  const lockable = buildSetupStages(
+    readinessOf(ready, { baseline: { ready: true, blockers: [], message: 'Baseline can be locked.' } })
+  ).find((stage) => stage.key === 'baseline')
+  assert.equal(lockable.continueMode, 'warn')
+  assert.equal(lockable.status, 'attention')
 }
 
 // Gate ready but not locked: Continue past the baseline is a warning (the
