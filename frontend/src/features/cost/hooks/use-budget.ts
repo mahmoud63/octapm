@@ -337,6 +337,14 @@ export const useImportBudgetLines = (projectId: string) => {
               created: number
               updated: number
               missingCodes: string[]
+              // Existing lines whose original budget is locked (PC-7a): their
+              // description was written, their original kept.
+              lockedLines?: Array<{
+                code: string
+                costType: string
+                existing: number
+                proposed: number
+              }>
             }
         ),
     onSuccess: () => invalidateBudget(qc, projectId),

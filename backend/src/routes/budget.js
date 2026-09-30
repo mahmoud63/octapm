@@ -136,6 +136,8 @@ router.get(
   asyncHandler(async (req, res) => sendSuccess(res, await budgetService.getBudgetLine({ ...scope(req), lineId: req.params.lineId }))),
 );
 
+// originalBudget is validated here as a number; whether it may still move is
+// the service's one Original Budget guard (409 BUDGET_ORIGINAL_LOCKED, PC-7a).
 router.patch(
   "/lines/:lineId",
   requirePermission("cost", "update"),

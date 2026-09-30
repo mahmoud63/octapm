@@ -19,6 +19,44 @@ originalBudget = BudgetLine.originalBudget          (stored)
 
 Set when the budget is created or imported. **Never moved by a change order.**
 
+#### 1.1.1 Clarification — when Original Budget stops moving (PC-7a, owner decision 2026-09-29)
+
+This states the certified rule precisely; no formula changes. A budget line's
+`originalBudget` is immutable from the **first** of these, **for that line**
+(one locked line does not lock its siblings):
+
+1. the line is included in an approved financial/budget baseline — **no such
+   record exists in the codebase today** (`BudgetRevision` is a project-level
+   ledger from `Project.contractValue` with no budget-line link), so this
+   condition is inert until one is built;
+2. an approved change stands on the line — any `BudgetLineChange` row: an
+   approved change order posted at approval, a revision or a transfer (both
+   need `cost.approve` and take effect when written);
+3. an **executed** commitment references it — as `commitment.service
+   recomputeCommitted` posts committed cost: a commitment in `executed` or
+   `closed` whose SOV lines or approved CCO lines name the line (by id, or by
+   cost code for an active line of the commitment's cost type), or
+   `committedFromCommitments ≠ 0`;
+4. the cost ledger posts to it — any `CostLedgerEntry` on the line (openings
+   and reversals included), or a non-zero `actual` projection;
+5. the line is in the budget snapshot of a **locked** reporting period.
+
+Never a lock: a schedule baseline approval (the schedule baseline and the
+financial budget are separate controls), an ad-hoc budget snapshot, or the
+snapshot of a period that is still open.
+
+After the lock a changed required amount is a budget revision
+(`POST /budget/lines/{lineId}/revisions`) and flows into Revised Budget:
+original 100,000 + an approved revision of +50,000 reads **revised 150,000,
+original 100,000** — never original 150,000. The one guard is
+`budget.service assertOriginalBudgetWritable`, used by every write path:
+
+| Path | After the lock |
+|---|---|
+| `PATCH /budget/lines/{lineId}` | 409 `BUDGET_ORIGINAL_LOCKED`, naming the condition(s) and pointing to revisions; nothing written. Sending the stored figure back (|Δ| ≤ 0.005) is an echo and passes. |
+| `POST /budget/lines/import` | the existing line's description/status are written, its original is kept, and it is listed in `lockedLines [{ code, costType, existing, proposed, conditions }]`; new lines are created as before |
+| `POST /budget/lines` re-activating an archived line | the line **always** keeps its original, locked or not (a re-activation is never an Original Budget edit); `originalBudgetKept` reports a differing payload |
+
 ### 1.2 Budget Changes
 
 ```

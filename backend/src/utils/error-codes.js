@@ -259,6 +259,16 @@ const ERROR_CODE_CATALOG = Object.freeze({
     message:
       "The contract terms were not saved because their audit record could not be written; try again",
   },
+  // PC-7a (owner decision 2026-09-29): a budget line's Original Budget is
+  // immutable once an approved change, an executed commitment, a ledger
+  // posting or a locked period's snapshot stands on it; a new amount is a
+  // budget revision that flows into Revised Budget.
+  BUDGET_ORIGINAL_LOCKED: {
+    status: 409,
+    category: "cost",
+    message:
+      "The original budget of this line is locked; record the change as a budget revision, which flows into the revised budget",
+  },
   EOT_WORKFLOW_ACTION_REQUIRED: {
     status: 400,
     category: "commercial",

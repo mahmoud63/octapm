@@ -771,6 +771,15 @@ export function BudgetImportDialog({
                 toast.success(
                   `${result.created} created, ${result.updated} updated${result.missingCodes.length ? `; unknown codes without a name: ${result.missingCodes.join(', ')}` : ''}`
                 )
+                const locked = result.lockedLines ?? []
+                const amount = (value: number) =>
+                  value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+                if (locked.length) {
+                  // The server kept these originals; say so rather than let the import look complete.
+                  toast.warning(
+                    `Original budget kept on ${locked.length} locked line${locked.length === 1 ? '' : 's'} (${locked.map((row) => `${row.code} ${row.costType}: ${amount(row.existing)}, not ${amount(row.proposed)}`).join('; ')}). Record the difference as a budget revision.`
+                  )
+                }
                 setCsv('')
                 onOpenChange(false)
               } catch (error) {

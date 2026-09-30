@@ -866,6 +866,8 @@ const components = {
         "BOQ_SCOPE_REQUIRED_FOR_BASELINE",
         "BOQ_VALIDATION_FAILED",
         "BOQ_VALUE_REQUIRED_FOR_BASELINE",
+        // PC-7a: a budget line's Original Budget cannot move once a lock condition stands on it.
+        "BUDGET_ORIGINAL_LOCKED",
         "CARD_DECLINED",
         "CHANGE_ORDER_APPROVED_LOCKED",
         "CHANGE_ORDER_ARCHIVED",
@@ -14429,6 +14431,10 @@ const budgetReconciliationSchema = objectSchema({
   activityBudgetsReason: { type: "string", description: "Why: \"Mapping details unavailable to you\"." },
 });
 // Owner decision E1 (2026-09-28), as utils/boq-figures applies it to the reconciliation.
+// PC-7a (owner decision 2026-09-29): when a line's Original Budget stops moving.
+const BUDGET_ORIGINAL_LOCK_RULE =
+  "A line's originalBudget is locked once the first of these stands on that line (per line — a sibling stays editable): (1) an approved financial/budget baseline including it — none exists yet, so this condition is inert; (2) an approved change on it (any budget-line change: an approved change order, a revision or a transfer); (3) an executed or closed commitment whose SOV lines or approved commitment change-order lines name it (by id, or by cost code for an active line of the commitment's cost type), or committedFromCommitments ≠ 0; (4) a cost-ledger entry posted to it (or a non-zero actual); (5) the budget snapshot of a LOCKED reporting period including it. An ad-hoc snapshot, an open period's snapshot and a schedule baseline approval never lock it. After the lock a changed amount is a budget revision (POST /budget/lines/{lineId}/revisions), which flows into revisedBudget while originalBudget stays — original 100,000 + an approved revision of +50,000 reads revised 150,000, original 100,000.";
+
 const BUDGET_RECONCILIATION_FIGURES =
   "Each activity's boqBudget is its approved BOQ allocation, and its activityBudget and difference are built from it; they, mismatches and activitiesWithoutLines are present only for a caller who may read the BOQ — reading the cost module does not override this (owner decision E1, 2026-09-28). For anyone else each activity keeps activityId, name, code, approvedChanges and budgetFromLines, and the answer carries activityBudgetsWithheld: true and activityBudgetsReason \"Mapping details unavailable to you\". generatedAt, balanced, totals and underAllocatedLines are every cost reader's.";
 const budgetSnapshotSchema = objectSchema({
@@ -14488,6 +14494,7 @@ const budgetChangeOrderIdParam = pathParam("changeOrderId", "Change order UUID."
     method: "post",
     path: "/projects/{projectId}/budget/lines",
     summary: "Create a budget line (selects the cost code for the project when needed). One line per cost code and cost type.",
+    description: `An archived line for the same cost code and cost type is re-activated instead, and it keeps the originalBudget it has whatever the request says (a re-activation is never an Original Budget edit): when the two differ the answer adds originalBudgetKept { existing, proposed, locked, conditions } (conditions: [{ condition, number, reason }]); change the amount afterwards with PATCH while the line is unlocked, or with a budget revision once it is locked. ${BUDGET_ORIGINAL_LOCK_RULE}`,
     operationId: "createBudgetLine",
     parameters: projectParams,
     permissions: modulePermission("cost", "create"),
@@ -14499,11 +14506,12 @@ const budgetChangeOrderIdParam = pathParam("changeOrderId", "Change order UUID."
     method: "post",
     path: "/projects/{projectId}/budget/lines/import",
     summary: "Import lines as rows of { code, name?, costType, originalBudget, description }. Unknown codes with a name are created in the organisation; existing lines are updated.",
+    description: `An existing line whose originalBudget is locked is never overwritten: its description and status are written, its originalBudget stays, it is not counted in updated, and it is listed in lockedLines [{ code, costType, existing, proposed, conditions }] — raise a budget revision for the difference. A row that sends a locked line's stored amount back is an ordinary update. New lines are created as before. ${BUDGET_ORIGINAL_LOCK_RULE}`,
     operationId: "importBudgetLines",
     parameters: projectParams,
     permissions: modulePermission("cost", "create"),
     requestBody: jsonBody(objectSchema({ rows: arrayOf(objectSchema({ code: { type: "string" }, name: { type: "string", nullable: true }, costType: { type: "string", enum: budgetCostTypes }, originalBudget: budgetMoney, description: { type: "string", nullable: true } })) }, ["rows"]), "Rows."),
-    responseSchema: objectSchema({ created: { type: "integer" }, updated: { type: "integer" }, missingCodes: arrayOf({ type: "string" }) }),
+    responseSchema: objectSchema({ created: { type: "integer" }, updated: { type: "integer" }, missingCodes: arrayOf({ type: "string" }), lockedLines: arrayOf(objectSchema({ code: { type: "string" }, costType: { type: "string", enum: budgetCostTypes }, existing: budgetMoney, proposed: budgetMoney, conditions: arrayOf(objectSchema({ condition: { type: "string", enum: ["approved_budget_baseline", "approved_change", "executed_commitment", "ledger_posting", "locked_period_snapshot"] }, number: { type: "integer" }, reason: { type: "string" } })) })) }),
     status: 201,
   },
   {
@@ -14580,6 +14588,7 @@ const budgetChangeOrderIdParam = pathParam("changeOrderId", "Change order UUID."
     method: "patch",
     path: "/projects/{projectId}/budget/lines/{lineId}",
     summary: "Edit a line (original budget, committed, actual, forecast, description, cost type, status). Allocation amounts follow the revised budget.",
+    description: `originalBudget is refused with 409 BUDGET_ORIGINAL_LOCKED (the message names the lock conditions and points to the line's revisions; nothing is written) once the line is locked; sending the stored amount back (|Δ| ≤ 0.005) is an echo and passes. ${BUDGET_ORIGINAL_LOCK_RULE}`,
     operationId: "updateBudgetLine",
     parameters: [...projectParams, budgetLineIdParam],
     permissions: modulePermission("cost", "update"),
