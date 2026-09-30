@@ -10,6 +10,7 @@ import {
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { evCutoffNote, formatEvCutoff } from '@/lib/ev-cutoff'
+import { formatShortDate } from '@/lib/dates'
 import { capitalise, eacIsBudgetFallback } from '@/lib/eac-basis'
 import { FINANCIAL_TERMS } from '@/lib/financial-terms'
 import { getServerErrorMessage } from '@/lib/handle-server-error'
@@ -37,7 +38,12 @@ const money = (value: number | null | undefined) =>
   value === null || value === undefined
     ? '—'
     : Number(value).toLocaleString('en-US', { maximumFractionDigits: 0 })
-const formatDate = (value: string | null | undefined) =>
+// The forecast's planned and projected finishes are calendar dates
+// (YYYY-MM-DD): shown as that date in every timezone, never the day before
+// for a reader west of UTC. Only `asOf` is an instant, read in local time.
+const formatDay = (value: string | null | undefined) =>
+  value ? formatShortDate(value) : '—'
+const formatInstantDay = (value: string | null | undefined) =>
   value ? new Date(value).toLocaleDateString() : '—'
 const levelVariant = (level: ForecastLevel) =>
   level === 'high'
@@ -168,11 +174,17 @@ function ActivityRow({
         <td className='px-2 py-1.5 tabular-nums'>
           {activity.velocity === null ? '—' : `${activity.velocity}%/d`}
         </td>
-        <td className='px-2 py-1.5 tabular-nums'>
-          {formatDate(activity.plannedFinish)}
+        <td
+          className='px-2 py-1.5 tabular-nums'
+          data-testid='uat-forecast-activity-planned'
+        >
+          {formatDay(activity.plannedFinish)}
         </td>
-        <td className='px-2 py-1.5 tabular-nums'>
-          {formatDate(activity.projectedFinish)}
+        <td
+          className='px-2 py-1.5 tabular-nums'
+          data-testid='uat-forecast-activity-projected'
+        >
+          {formatDay(activity.projectedFinish)}
         </td>
         <td
           className={cn(
@@ -500,7 +512,7 @@ export function ForecastPanel({ projectId }: { projectId: string }) {
           <h3 className='text-base font-semibold'>Forecast</h3>
           <p className='text-xs text-muted-foreground'>
             From approved progress, float, recorded impacts, open items and the
-            burn rate — as of {formatDate(forecast.asOf)}. Nothing here is a
+            burn rate — as of {formatInstantDay(forecast.asOf)}. Nothing here is a
             model guess; the explanation below is.
           </p>
           {forecast.earnedValueCutoff?.cutoffDate ? (
@@ -551,11 +563,11 @@ export function ForecastPanel({ projectId }: { projectId: string }) {
       <div className='grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6'>
         <Kpi
           label='Projected finish'
-          value={formatDate(schedule.projectedFinish)}
+          value={formatDay(schedule.projectedFinish)}
           sub={
             schedule.slipDays > 0
-              ? `${schedule.slipDays} days after the plan (${formatDate(schedule.plannedFinish)})`
-              : `On the planned ${formatDate(schedule.plannedFinish)}`
+              ? `${schedule.slipDays} days after the plan (${formatDay(schedule.plannedFinish)})`
+              : `On the planned ${formatDay(schedule.plannedFinish)}`
           }
           level={summary?.scheduleLevel}
           testId='uat-forecast-finish'
