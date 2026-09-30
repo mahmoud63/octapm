@@ -841,6 +841,7 @@ const components = {
     ErrorCode: {
       type: "string",
       enum: [
+        "ACTIVITY_IN_USE",
         "ACTIVITY_NOT_FOUND",
         "ACTIVITY_PROGRESS_ASSIGNMENT_REQUIRED",
         "AI_LIMIT_REACHED",
