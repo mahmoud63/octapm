@@ -84,6 +84,36 @@ describe('Home', () => {
     expect(screen.queryByTestId('pm-cost-risk-withheld')).toBeNull()
   })
 
+  // Owner decision R5-1: the forecast's slip is a projection and every
+  // surface says so — rendered, beside the figure, not only in the source.
+  it("calls the slip projected on the PM home: the status tile beside its 61 d, the driver line and the finish (R5-1)", async () => {
+    fakeServer(routes)
+    await renderScreen(<HomeScreen />)
+
+    // The status tile: the label, then the server's 61 days.
+    const status = await screen.findByTestId('pm-status')
+    await waitFor(() => expect(status).toHaveTextContent(/Projected slip61 d/))
+    // The driver line and the finish under the risks.
+    expect(await screen.findByTestId('pm-critical-driver')).toHaveTextContent(/^Longest projected slip: Unitised facade installation — 61 days$/)
+    expect(screen.getByText(/^Projected finish .+ against a planned .+$/)).toBeTruthy()
+    // Never a bare "Slip", which reads as a fact, and never an extension of time.
+    expect(screen.queryByText('Slip')).toBeNull()
+    expect(screen.queryByText(/extension of time|\bEOT\b|approved delay|granted/i)).toBeNull()
+  })
+
+  it("calls the slip projected on the general home: a planning engineer's programme tile reads 61 d under Projected slip (R5-1)", async () => {
+    useAuthStore.setState({ status: 'signedIn', user: { ...user, role: 'planning_eng', isCompanyAdmin: false }, accessToken: 'access-1', accessExpiresAt: Date.now() + 900_000 })
+    fakeServer(routes)
+    await renderScreen(<HomeScreen />)
+
+    expect(await screen.findByTestId('general-position')).toBeTruthy()
+    // The tile: the server's figure, then its label.
+    expect(screen.getByTestId('count-slip')).toHaveTextContent(/^61 dProjected slip$/)
+    expect(screen.queryByText('Slip')).toBeNull()
+    // The PM home is not what this person was shown.
+    expect(screen.queryByTestId('pm-status')).toBeNull()
+  })
+
   // Marina Bay's forecast as the server sends it (owner F3, 2026-09-28): one
   // activity at high cost risk, ten budget lines projected over.
   const marinaBay = (cost: Record<string, unknown>) => ({
