@@ -835,6 +835,17 @@ const buildSnapshotPayload = async ({ orgId, projectId }) => {
   return { totals: { ...summary.totals, byType: summary.byType, lines: summary.lines }, lines: items.map(withoutTruth), reconciliation };
 };
 
+// A locked period's snapshot is the budget frozen with it: the period's
+// history, and Original Budget lock condition 5, which reads its lines. Only
+// the lock itself writes it (snapshotForPeriod, inside the lock
+// transaction); re-taking it by hand would rewrite that history and pull
+// every line added since into the lock (PC-7a review). Nothing is written.
+const assertPeriodSnapshotWritable = (period) => {
+  if (period?.status === "locked") {
+    throw new HttpError(409, "REPORTING_PERIOD_LOCKED", `Reporting period ${period.code} is locked: its budget snapshot was taken at the lock and cannot be replaced; take a snapshot without a period instead`);
+  }
+};
+
 const takeSnapshot = async ({ orgId, projectId, payload = {}, actor = null }) => {
   await ensureProject({ orgId, projectId });
   const reportingPeriodId = trimOrNull(payload.reportingPeriodId);
@@ -842,12 +853,20 @@ const takeSnapshot = async ({ orgId, projectId, payload = {}, actor = null }) =>
   if (reportingPeriodId) {
     period = await prisma.reportingPeriod.findFirst({ where: { id: reportingPeriodId, projectId } });
     if (!period) throw new HttpError(404, "REPORTING_PERIOD_NOT_FOUND", "Reporting period not found");
+    assertPeriodSnapshotWritable(period);
   }
   const label = trimOrNull(payload.label) || (period ? `Period ${period.code}` : `Budget as of ${new Date().toISOString().slice(0, 10)}`);
   const body = await buildSnapshotPayload({ orgId, projectId });
   const data = { orgId, projectId, reportingPeriodId: reportingPeriodId || null, label: label.slice(0, 160), takenBy: actor?.id || null, takenAt: new Date(), totalsJson: body.totals, linesJson: body.lines, reconciliationJson: body.reconciliation };
   const row = reportingPeriodId
-    ? await prisma.budgetSnapshot.upsert({ where: { reportingPeriodId }, create: data, update: { label: data.label, takenBy: data.takenBy, takenAt: data.takenAt, totalsJson: data.totalsJson, linesJson: data.linesJson, reconciliationJson: data.reconciliationJson }, include: snapshotInclude })
+    ? await prisma.$transaction(async (tx) => {
+        // Checked again under a share lock on the period: a lock committing
+        // meanwhile (it updates the period row) either waits for this write,
+        // then takes its own snapshot over it, or has committed and is seen.
+        const [held] = await tx.$queryRaw`SELECT "status", "code" FROM "ReportingPeriod" WHERE "id" = ${reportingPeriodId} FOR SHARE`;
+        assertPeriodSnapshotWritable(held || period);
+        return tx.budgetSnapshot.upsert({ where: { reportingPeriodId }, create: data, update: { label: data.label, takenBy: data.takenBy, takenAt: data.takenAt, totalsJson: data.totalsJson, linesJson: data.linesJson, reconciliationJson: data.reconciliationJson }, include: snapshotInclude });
+      })
     : await prisma.budgetSnapshot.create({ data, include: snapshotInclude });
   await auditService.recordEvent({ orgId, projectId, entityType: auditService.ENTITY_TYPES.BUDGET_SNAPSHOT, entityId: row.id, action: auditService.ACTIONS.CREATED, actorId: actor?.id || null, actorRole: actor?.role || null, summary: { label: row.label, reportingPeriodId: reportingPeriodId || null, balanced: body.reconciliation.balanced, budgetLines: body.totals.revisedBudget }, metadata: { source: "cost_control.budget" } });
   return serializeSnapshot(row, { withLines: true, cutoffOf: await periodCutoffReader({ orgId, projectId }) });

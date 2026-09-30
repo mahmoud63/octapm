@@ -163,6 +163,43 @@ liveDescribe("PC-7a: the Original Budget cannot be rewritten once changes, posti
     expect(again.body.data.originalBudget).toBe(45000);
   });
 
+  it("condition 2 — an approved change order posted to the line locks it (revised = original + the order), not its sibling; a transfer locks both lines it moves between, not a third", async () => {
+    const line = await newLine(live, "GUARD", "COL", "material", 70000);
+    const sibling = await newLine(live, "GUARD", "COL", "labour", 30000);
+    const order = await api.post(at("GUARD", "/change-orders"), {
+      description: "LiveTest PC-7a posting",
+      category: "variation",
+      value: 12500.5,
+      budgetLineId: line.id,
+      scheduleImpactSummary: "LiveTest none",
+      costImpactSummary: "LiveTest priced",
+      activityLinks: [{ activityId, relationType: "affected", scheduleImpactDays: 0 }],
+      attachmentRefs: [{ fileName: "LiveTest proof.pdf", fileUrl: "https://example.test/proof.pdf" }],
+    }, auth());
+    ok(order, 201);
+    // Raised and submitted, not approved: nothing stands on the line yet.
+    ok(await api.post(at("GUARD", `/change-orders/${order.body.data.id}/submit`), {}, auth()));
+    ok(await patchLine("GUARD", line.id, { originalBudget: 75000 }));
+    ok(await api.post(at("GUARD", `/change-orders/${order.body.data.id}/approve`), { comment: "LiveTest" }, auth()));
+    const postings = await prisma.budgetLineChange.findMany({ where: { projectId: projects.GUARD.id, budgetLineId: line.id }, select: { kind: true, amount: true, changeOrderId: true } });
+    expect(postings.map((row) => [row.kind, row.amount.toString(), row.changeOrderId])).toEqual([["change_order", "12500.5", order.body.data.id]]);
+    const refused = await expectLocked("GUARD", line.id, 80000, 2);
+    expect(refused.body.error.message).toContain("an approved change order stands on it");
+    const read = await getLine("GUARD", line.id);
+    expect([read.originalBudget, read.revisedBudget]).toEqual([75000, 87500.5]);
+    ok(await patchLine("GUARD", sibling.id, { originalBudget: 31000 }));
+
+    const from = await newLine(live, "GUARD", "TRF", "material", 20000);
+    const to = await newLine(live, "GUARD", "TRF", "labour", 5000);
+    const third = await newLine(live, "GUARD", "TRF", "equipment", 1000);
+    ok(await api.post(at("GUARD", "/budget/transfers"), { fromLineId: from.id, toLineId: to.id, amount: 2500, note: "LiveTest move" }, auth()));
+    expect((await expectLocked("GUARD", from.id, 21000, 2)).body.error.message).toContain("a budget transfer out of it");
+    expect((await expectLocked("GUARD", to.id, 6000, 2)).body.error.message).toContain("a budget transfer into it");
+    const [fromRead, toRead] = [await getLine("GUARD", from.id), await getLine("GUARD", to.id)];
+    expect([fromRead.originalBudget, fromRead.revisedBudget, toRead.originalBudget, toRead.revisedBudget]).toEqual([20000, 17500, 5000, 7500]);
+    ok(await patchLine("GUARD", third.id, { originalBudget: 1200 }));
+  });
+
   it("condition 3 — an executed commitment against the line locks it, not its sibling", async () => {
     const line = await newLine(live, "GUARD", "SUB", "subcontract", 80000);
     const sibling = await newLine(live, "GUARD", "SUB", "equipment", 20000);
@@ -244,6 +281,21 @@ liveDescribe("PC-7a: the Original Budget cannot be rewritten once changes, posti
     await expectLocked("PERIOD", line.id, 55000, 5);
     const later = await newLine(live, "PERIOD", "PER", "labour", 9000);
     ok(await patchLine("PERIOD", later.id, { originalBudget: 9500 }));
+
+    // The locked period's snapshot is its frozen history: taking it again by
+    // hand is refused and writes nothing — not the snapshot, not its audit —
+    // so the line added since stays outside the lock and editable.
+    const frozen = JSON.stringify(await prisma.budgetSnapshot.findUnique({ where: { reportingPeriodId: periodId } }));
+    const auditBefore = await prisma.auditEvent.count({ where: { projectId: projects.PERIOD.id } });
+    const retaken = await api.post(at("PERIOD", "/budget/snapshots"), { label: "LiveTest re-take", reportingPeriodId: periodId }, auth());
+    expect([retaken.status, retaken.body.error?.code]).toEqual([409, "REPORTING_PERIOD_LOCKED"]);
+    expect(JSON.stringify(await prisma.budgetSnapshot.findUnique({ where: { reportingPeriodId: periodId } }))).toBe(frozen);
+    expect(await prisma.budgetSnapshot.count({ where: { projectId: projects.PERIOD.id } })).toBe(1);
+    expect(await prisma.auditEvent.count({ where: { projectId: projects.PERIOD.id } })).toBe(auditBefore);
+    ok(await patchLine("PERIOD", later.id, { originalBudget: 9600 }));
+    // A snapshot without a period is still taken, and locks nothing.
+    ok(await api.post(at("PERIOD", "/budget/snapshots"), { label: "LiveTest ad hoc after the lock" }, auth()), 201);
+    ok(await patchLine("PERIOD", later.id, { originalBudget: 9700 }));
     lockedPeriodId = periodId;
   });
 
@@ -316,12 +368,9 @@ liveDescribe("PC-7a: the Original Budget cannot be rewritten once changes, posti
     // Forecast cost block.
     const forecast = await api.get(at("GUARD", "/forecast"), auth());
     ok(forecast);
-    if (forecast.body.data.cost) {
-      expect(forecast.body.data.cost.truth).toMatchObject({ budget: "derived", bac: "derived", actual: "derived", eac: "projection:eacBasis", projected: "projection:greater_of_eac_and_bottom_up" });
-    } else {
-      // No schedule: no cost block to label (the service answers available: false).
-      expect(forecast.body.data.available).toBe(false);
-    }
+    // GUARD has a scheduled activity, so the forecast has a cost block to label.
+    expect(forecast.body.data.cost).toBeTruthy();
+    expect(forecast.body.data.cost.truth).toMatchObject({ budget: "derived", bac: "derived", actual: "derived", eac: "projection:eacBasis", projected: "projection:greater_of_eac_and_bottom_up" });
   });
 
   it("three truths — a purchase order summary's orderValue is order value, not committed cost; committed stays as its alias and the register ignores it", async () => {
@@ -376,8 +425,10 @@ liveDescribe("PC-7a: the Original Budget cannot be rewritten once changes, posti
     const register = await api.get(at("GUARD", "/budget/lines"), auth());
     ok(register);
     expect(cents(register.body.data.summary.totals.committed)).toBe(cents(30000));
-    // One revision, one ledger entry: nothing was posted twice.
-    expect(await prisma.budgetLineChange.count({ where: { projectId } })).toBe(1);
+    // One revision, one change-order posting, one transfer (its two legs),
+    // one ledger entry: nothing was posted twice.
+    const changes = await prisma.budgetLineChange.groupBy({ by: ["kind"], where: { projectId }, _count: { _all: true }, orderBy: { kind: "asc" } });
+    expect(changes.map((row) => [row.kind, row._count._all])).toEqual([["change_order", 1], ["revision", 1], ["transfer_in", 1], ["transfer_out", 1]]);
     expect(await prisma.costLedgerEntry.count({ where: { projectId } })).toBe(1);
   });
 

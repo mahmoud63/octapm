@@ -1041,6 +1041,8 @@ const components = {
         "SAFETY_NOT_READY_FOR_REOPEN",
         "SAFETY_REOPEN_REASON_REQUIRED",
         "SAFETY_WORKFLOW_ACTION_REQUIRED",
+        // PC-7a review: a locked period's EV cost loading or budget snapshot cannot be written again.
+        "REPORTING_PERIOD_LOCKED",
         "REVISION_NOT_FOUND",
         "RECEIPT_LINE_NOT_FOUND",
         "RECEIPT_LINES_REQUIRED",
@@ -14604,6 +14606,8 @@ const budgetChangeOrderIdParam = pathParam("changeOrderId", "Change order UUID."
     method: "post",
     path: "/projects/{projectId}/budget/snapshots",
     summary: "Freeze the budget (lines, allocations, reconciliation); with `reportingPeriodId` it is the period's one snapshot. Locking a period takes one automatically.",
+    description:
+      "With the `reportingPeriodId` of an open period the snapshot replaces that period's earlier one. A LOCKED period's snapshot was taken at the lock and is its frozen budget history (and Original Budget lock condition 5 reads its lines): it is refused with 409 REPORTING_PERIOD_LOCKED and nothing is written; take a snapshot without a period instead.",
     operationId: "createBudgetSnapshot",
     parameters: projectParams,
     permissions: modulePermission("cost", "approve"),

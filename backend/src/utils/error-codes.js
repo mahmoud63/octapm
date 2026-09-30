@@ -277,6 +277,14 @@ const ERROR_CODE_CATALOG = Object.freeze({
     category: "cost",
     message: "Every cost record figure must be an amount of 0 or more",
   },
+  // PC-7a review: a locked reporting period's figures (its EV cost loading,
+  // its budget snapshot taken at the lock) cannot be written again; the code
+  // was already answered by earned-value.service and is registered here.
+  REPORTING_PERIOD_LOCKED: {
+    status: 409,
+    category: "cost",
+    message: "Reporting period is locked",
+  },
   EOT_WORKFLOW_ACTION_REQUIRED: {
     status: 400,
     category: "commercial",
