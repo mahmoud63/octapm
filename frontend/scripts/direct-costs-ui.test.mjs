@@ -64,6 +64,41 @@ assert.match(ledger, /costRecord\.update\(\{\s*where: \{ id: record\.id \},\s*da
 assert.doesNotMatch(service, /actual: \{ (increment|decrement)/, 'the service never writes actual cost itself, around the ledger')
 assert.match(service, /costLedger\.reverse\(\{ tx, orgId, projectId, sourceType: "direct_cost", sourceId: directCostId,/, 'void reverses the posting')
 assert.match(ledger, /amount: round2\(-num\(original\.amount\)\),[\s\S]*?reversalOfId: original\.id,[\s\S]*?await applyToProjections\(\{ tx, entry \}\);/, 'a reversal is a negative mirror applied to the same projections')
+// The pieces above are tied together, so none of them can be cut out of the
+// path on its own: post() resolves the budget line, keeps it and the caller's
+// activity on the entry it creates and applies that entry to the projections
+// before reporting it posted; the first posting to an activity creates its
+// cost record with the amount; and reverse() mirrors each of the source's
+// originals onto the same budget line and activity and applies the mirror.
+const ledgerSection = (from, to) => {
+  const start = ledger.indexOf(from)
+  const end = ledger.indexOf(to, start)
+  assert.ok(start >= 0 && end > start, `the ledger's ${from} body is found`)
+  return ledger.slice(start, end)
+}
+const ledgerApply = ledgerSection('const applyToProjections = async', 'const post = async')
+const ledgerPost = ledgerSection('const post = async', 'const reverse = async')
+const ledgerReverse = ledgerSection('const reverse = async', 'const postedTotalFor = async')
+assert.match(ledgerApply, /if \(entry\.budgetLineId\) \{\s*await tx\.budgetLine\.update\(\{\s*where: \{ id: entry\.budgetLineId \},/, "an entry with a budget line moves that line's actual")
+assert.match(ledgerApply, /costRecord\.findFirst\(\{\s*where: \{ projectId: entry\.projectId, activityId: entry\.activityId \},/, "an entry with an activity finds that activity's cost record")
+assert.match(ledgerApply, /costRecord\.create\(\{\s*data: \{\s*projectId: entry\.projectId,\s*activityId: entry\.activityId,\s*actual: amount,/, 'the first posting to an activity creates its cost record with the amount')
+assert.match(ledgerPost, /const line = await resolveBudgetLine\(\{\s*tx,\s*projectId,\s*budgetLineId,\s*costCodeId,\s*costType: resolvedType,\s*\}\);/, 'post resolves the budget line from the one named, else the cost code and type')
+const entryData = ledgerPost.match(/entry = await tx\.costLedgerEntry\.create\(\{\s*data: \{([^}]*)\},\s*\}\);/)
+assert.ok(entryData, 'post creates the ledger entry')
+assert.match(entryData[1], /\n\s*activityId,\r?\n/, 'the posted entry keeps the activity')
+assert.match(entryData[1], /\n\s*budgetLineId: line\?\.id \|\| null,\r?\n/, 'the posted entry keeps the resolved budget line')
+assert.match(entryData[1], /\n\s*amount: value,\r?\n/, 'the posted entry keeps the amount')
+assert.match(ledgerPost, /\n\s*await applyToProjections\(\{ tx, entry \}\);\s*return \{ entry, posted: true \};/, 'the posted entry is applied to its projections before post reports it posted')
+assert.match(ledgerReverse, /costLedgerEntry\.findMany\(\{\s*where: \{ orgId, projectId, sourceType, sourceId, reversalOfId: null \},/, "reverse mirrors this source's originals")
+// The mirror's sourceKey is a template literal with braces in it, so its body
+// is taken up to the line that closes the object.
+const mirror = ledgerReverse.match(/const mirror = \{([\s\S]*?)\r?\n\s*\};/)
+assert.ok(mirror, 'reverse builds a mirror of each original')
+assert.match(mirror[1], /\n\s*activityId: original\.activityId,\r?\n/, 'the mirror carries the original activity')
+assert.match(mirror[1], /\n\s*budgetLineId: original\.budgetLineId,\r?\n/, 'the mirror carries the original budget line')
+assert.match(mirror[1], /\n\s*amount: round2\(-num\(original\.amount\)\),\r?\n/, 'the mirror is the negative of the original')
+assert.match(mirror[1], /\n\s*reversalOfId: original\.id,\r?\n/, 'the mirror names the original it reverses')
+assert.match(ledgerReverse, /const entry = await tx\.costLedgerEntry\.create\(\{ data: mirror \}\);\s*await applyToProjections\(\{ tx, entry \}\);/, 'the mirror is written and applied to the same projections')
 assert.match(service, /DIRECT_COST_DUPLICATE_INVOICE/, 'duplicate invoices refused')
 assert.match(cashFlow, /directCostPayment\.findMany/, 'payments are cash-flow outflows')
 assert.match(reportSources, /direct_cost: \{/, 'report source')
