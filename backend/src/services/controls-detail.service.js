@@ -31,6 +31,7 @@ const { HttpError } = require("../utils/http-error");
 const { addMoney, toMoneyNumber } = require("../utils/money");
 const { recordWorkspacePath } = require("../utils/record-links");
 const { DETAIL_ALL_ROWS } = require("../utils/boq-figures");
+const { forecastBasisOf, withForecastBasis } = require("../utils/cost-forecast");
 const allocationService = require("./activity-boq-allocation.service");
 const boqService = require("./boq.service");
 const activityService = require("./activity.service");
@@ -744,8 +745,13 @@ const getActivityDetail = async ({
   if (can("cost")) {
     const record = await prisma.costRecord.findFirst({
       where: { projectId, activityId },
-      select: { id: true, committed: true, actual: true, forecast: true, actualThroughDate: true },
+      select: { id: true, committed: true, actual: true, forecast: true, forecastSource: true, actualThroughDate: true },
     });
+    // The stored forecast says where it came from (owner decision R5-2): its
+    // basis is entered, the initial default, or not recorded — never a default
+    // presented as entered. utils/boq-figures withholds a default from a
+    // member who may not read the BOQ (it is built from the allocation).
+    const forecastSource = record ? withForecastBasis(record).forecastSource : null;
     sections.cost = {
       allowed: true,
       committed: fig(record ? toMoneyNumber(record.committed) : 0, "derived", "CostRecord.committed — written only by commitment.service recomputeCommitted (SOV lines and approved CCO lines on executed commitments)", [
@@ -756,7 +762,7 @@ const getActivityDetail = async ({
       ]),
       forecast:
         record && record.forecast != null
-          ? fig(toMoneyNumber(record.forecast), "projection", "CostRecord.forecast as the cost module stores it", [{ type: "cost_record", id: record.id }])
+          ? { ...fig(toMoneyNumber(record.forecast), "projection", forecastBasisOf(forecastSource), [{ type: "cost_record", id: record.id }]), forecastSource }
           : notAvailable("PC-7", "No forecast is stored for this activity; forecast intelligence is PC-7"),
       actualThroughDate: iso(record?.actualThroughDate),
       // The cost module's By Activity table: it has no deep link to one

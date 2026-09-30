@@ -387,6 +387,9 @@ const runQuery = async ({ orgId, user, definition, limit = PREVIEW_LIMIT, offset
   // the BOQ — decided per project as the BOQ endpoints decide it, and for an
   // API key only with a scope on the BOQ too.
   const mappingKeys = boqFigures.reportMappingColumns(source.key);
+  // A cost record's DEFAULT forecast (R5-2) is built from the record's budget:
+  // withheld on those rows only, on the same projects.
+  const defaultForecastKeys = boqFigures.reportDefaultForecastColumns(source.key);
   // The certificate source's cap-limited totals (PC-7a review): withheld on a
   // certificate not yet certified where the caller may not read the BOQ and
   // the contract's value is unestablished under a retention cap — as GET
@@ -399,7 +402,7 @@ const runQuery = async ({ orgId, user, definition, limit = PREVIEW_LIMIT, offset
     try {
       const context = await resolveProjectContext({ orgId, user, projectId: project.id });
       if (canReadModule({ user, access: context.access, template: context.template, moduleName: source.module })) {
-        const boq = (!mappingKeys.length && !capKeys.length) || (keyReadsBoq && canReadModule({ user, access: context.access, template: context.template, moduleName: "boq" }));
+        const boq = (!mappingKeys.length && !capKeys.length && !defaultForecastKeys.length) || (keyReadsBoq && canReadModule({ user, access: context.access, template: context.template, moduleName: "boq" }));
         contexts.push({ project, ...context, boq });
       } else denied += 1;
     } catch {
@@ -416,7 +419,7 @@ const runQuery = async ({ orgId, user, definition, limit = PREVIEW_LIMIT, offset
       if (boqFigures.retentionCapWithheld(terms, { boq: false, budget: false })) capTerms.set(projectId, terms);
     }
   }
-  const withholding = new Set([...(withheldProjectIds.size ? mappingKeys : []), ...(capTerms.size ? capKeys : [])]);
+  const withholding = new Set([...(withheldProjectIds.size ? [...mappingKeys, ...defaultForecastKeys] : []), ...(capTerms.size ? capKeys : [])]);
 
   const { db: dbFilters, memory: memoryFilters } = splitFilters(source, filters, withholding);
   const groups = new Map();
@@ -445,12 +448,17 @@ const runQuery = async ({ orgId, user, definition, limit = PREVIEW_LIMIT, offset
   let flat = raw.map((row) => {
     const values = { id: row.id, projectId: row.projectId || row.dailyLog?.projectId || null, projectName: projectNameOf(row, source) };
     for (const column of allColumns) values[column.key] = cellValue(column, row);
-    const mapped = withheldProjectIds.has(values.projectId) ? boqFigures.withheldReportRow(values, mappingKeys, { boq: false }) : values;
+    const rowKeys = boqFigures.rowHasDefaultForecast(row) ? [...mappingKeys, ...defaultForecastKeys] : mappingKeys;
+    const mapped = withheldProjectIds.has(values.projectId) ? boqFigures.withheldReportRow(values, rowKeys, { boq: false }) : values;
     const terms = capTerms.get(values.projectId);
     return terms ? boqFigures.withheldReportCertificateRow(mapped, { status: row.status, keys: capKeys, terms, access: { boq: false, budget: false } }) : mapped;
   });
   // The withheld columns this run uses (shown, sorted, grouped, filtered or aggregated).
-  const withheldKeys = allColumns.map((column) => column.key).filter((key) => withholding.has(key));
+  // A default-forecast column is named withheld only when a row's was (R5-2).
+  const rowWithheld = (key) => flat.some((row) => row.withheldColumns && row.withheldColumns.includes(key));
+  const withheldKeys = allColumns
+    .map((column) => column.key)
+    .filter((key) => withholding.has(key) && (!defaultForecastKeys.includes(key) || mappingKeys.includes(key) || rowWithheld(key)));
   for (const { column, filter } of memoryFilters) flat = flat.filter((row) => matchesInMemory(column, filter, row[column.key]));
   if (sort) {
     const column = columnFor(sort.field);

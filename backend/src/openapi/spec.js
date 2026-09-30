@@ -5223,8 +5223,61 @@ const components = {
         description:
           "Accounting cutoff date for the cumulative actual amount. Official EV AC includes only cost records whose actualThroughDate is on or before the selected reporting cutoff.",
       },
-      forecast: money,
+      forecast: {
+        ...money,
+        nullable: true,
+        description:
+          "The record's forecast, stored as given and marked forecastSource \"entered\" — 0 and \"0\" are forecasts, never missing (owner decision R5-2). Omitted or null: a new record gets the initial default (the larger of its budget and actual, forecastSource \"default\"); an existing record keeps its forecast, except that a default is re-derived when this write changes the budget. A value that is not an amount of 0 or more is refused (400). forecastSource itself is set by the server only: a request that sends it is refused with 400 VALIDATION_ERROR.",
+      },
     }),
+    CostRecord: {
+      type: "object",
+      additionalProperties: true,
+      description:
+        "An activity cost record as a read (GET /cost rows, /cost/summary records) or a write's answer returns it. budget and generatedBudget are present only for a caller who may read the BOQ (owner decision E1).",
+      properties: {
+        id: uuid,
+        projectId: uuid,
+        activityId: uuid,
+        labour: money,
+        material: money,
+        equipment: money,
+        subcontract: money,
+        indirect: money,
+        overhead: money,
+        contingency: money,
+        budget: money,
+        generatedBudget: money,
+        committed: money,
+        actual: signedMoney,
+        actualThroughDate: nullableDateString,
+        forecast: {
+          ...money,
+          description:
+            "The stored forecast — a projection, not the earned-value EAC (revised budget ÷ CPI). Absent, with forecastWithheld true, when forecastSource is \"default\" and the caller may not read the BOQ: a default is built from the record's budget, the activity's approved allocation.",
+        },
+        forecastSource: {
+          type: "string",
+          enum: ["entered", "default"],
+          nullable: true,
+          description:
+            "Where the stored forecast came from (owner decision R5-2), set by the server only: \"entered\" — a caller supplied it; it is never overwritten by an unrelated edit, a ledger posting or a commitment recompute. \"default\" — none was supplied when the record was made, so the initial default max(0, budget, actual) was stored; only a write that changes the budget re-derives it. null — the row predates the column: the source was not recorded; it is treated as entered.",
+        },
+        forecastBasis: {
+          type: "string",
+          enum: [
+            "Entered forecast",
+            "Default forecast: the larger of budget and actual when it was set (no forecast was entered)",
+            "Stored forecast (its source was not recorded)",
+          ],
+          description: "The basis text a screen shows beside the forecast, by forecastSource.",
+        },
+        forecastWithheld: { type: "boolean", description: "True when a default forecast was withheld from a caller who may not read the BOQ." },
+        forecastWithheldReason: { type: "string" },
+        committedDerived: { type: "boolean" },
+        updatedAt: dateString,
+      },
+    },
     ActivityEquipmentUsage: objectSchema({
       id: uuid,
       projectId: uuid,
@@ -8470,7 +8523,7 @@ add(
     tag: "Activities",
     summary: "Activity detail: the activity's story across the modules (PC-5).",
     description:
-      "Composed read-only from the services that own each figure: header (dates, float, critical flag), structure (WBS, location; an activity has no cost code of its own), mapping (BOQ allocations with links to each BOQ item, mapped quantity, budget = Σ approved allocations, generated budget as a projection, EV derived as of now = the allocation summary's per-allocation EV scoped to this activity) — for BOQ readers only, cost readers included (owner decision E1), otherwise { allowed: false, module: \"boq\" } —; for a member who may not read the BOQ, a change order reached only through an allocation link is left out, every listed order carries no allocationLinks and boqWithheld: { keys: [\"allocationLinks\"], reason }, and changes.changeOrders and history carry boqWithheld: { reason } (always, with no count) — their pages and totals leave out what is withheld over every row, not only the first 50 —, progress (progress:read; method, approved history, progress source, submissions), cost (cost:read; CostRecord committed and actual, stored forecast), certification (ipc:read and BOQ read; the certified or paid lines on the activity's approved, active allocations — the BOQ item detail's and the allocation summary's certified basis — listed and summed), changes (change orders and change events), procurement, quality (NCR, ITP, punch), constraints (logic ties and open lookahead constraints), documents and photos (a linked RFI or submittal only where its own register lists it to the viewer — routed to a party-scoped member's company, an RFI draft to its author or manager — and a linked punch item never to a party-scoped member), and history (audit:read; progress-submission, allocation-approval, change-order and schedule-revision events — activities have no audit trail of their own). Another organisation's activity, or a missing one, is 404 ACTIVITY_NOT_FOUND.",
+      "Composed read-only from the services that own each figure: header (dates, float, critical flag), structure (WBS, location; an activity has no cost code of its own), mapping (BOQ allocations with links to each BOQ item, mapped quantity, budget = Σ approved allocations, generated budget as a projection, EV derived as of now = the allocation summary's per-allocation EV scoped to this activity) — for BOQ readers only, cost readers included (owner decision E1), otherwise { allowed: false, module: \"boq\" } —; for a member who may not read the BOQ, a change order reached only through an allocation link is left out, every listed order carries no allocationLinks and boqWithheld: { keys: [\"allocationLinks\"], reason }, and changes.changeOrders and history carry boqWithheld: { reason } (always, with no count) — their pages and totals leave out what is withheld over every row, not only the first 50 —, progress (progress:read; method, approved history, progress source, submissions), cost (cost:read; CostRecord committed and actual, stored forecast — its basis says entered, the initial default or not recorded, and forecast.forecastSource names it; a default is { value: null, withheld: true } with the reason for a member who may not read the BOQ, owner decision R5-2), certification (ipc:read and BOQ read; the certified or paid lines on the activity's approved, active allocations — the BOQ item detail's and the allocation summary's certified basis — listed and summed), changes (change orders and change events), procurement, quality (NCR, ITP, punch), constraints (logic ties and open lookahead constraints), documents and photos (a linked RFI or submittal only where its own register lists it to the viewer — routed to a party-scoped member's company, an RFI draft to its author or manager — and a linked punch item never to a party-scoped member), and history (audit:read; progress-submission, allocation-approval, change-order and schedule-revision events — activities have no audit trail of their own). Another organisation's activity, or a missing one, is 404 ACTIVITY_NOT_FOUND.",
     operationId: "getActivityDetail",
     parameters: projectRecordParams,
     permissions: modulePermission("schedule", "read"),
@@ -11908,9 +11961,9 @@ const costRecordListParams = [
 // Owner decision E1 (2026-09-28), as utils/boq-figures applies it to the Cost module.
 const COST_RECORD_BUDGETS =
   "Each record's budget is its activity's approved BOQ allocation, and generatedBudget the budget first written on the record: both are present only for a caller who may read the BOQ — reading the cost module does not override this (owner decision E1, 2026-09-28). The cost ledger's own figures on each record (the cost categories, committed, actual, actualThroughDate, forecast) are every cost reader's.";
-// PC-7a 3d (owner, 2026-09-29): the forecast a cost record is written with when its writer gives none.
+// Owner decision R5-2 (2026-09-30), refining PC-7a 3d: the forecast a cost record is written with, and its source.
 const COST_RECORD_FORECAST_DEFAULT_NOTE =
-  "When no forecast is given and the record is created, or its budget is written, the forecast stored is the larger of the record's budget and its actual (a projection — the cost summary's own estimate at completion for a record without a forecast; never below 0, never below actual). A figure the service would write below 0 is refused with 400 COST_RECORD_MONEY_INVALID naming the field; nothing is written.";
+  "Forecast (owner decision R5-2): a supplied forecast — 0 and \"0\" included — is stored as given and the record's forecastSource becomes \"entered\". A record created without one gets the initial default, the larger of its budget and its actual (never below 0), with forecastSource \"default\". An edit that supplies no forecast never changes an entered forecast, nor one whose source was not recorded (forecastSource null, rows older than the column, treated as entered); a default is re-derived — the larger of the new budget and the current actual, still \"default\" — only when the edit changes the budget. Category, committed and actualThroughDate edits, ledger postings and commitment recomputes never change forecast or forecastSource. forecastSource is the server's: a request that sends it is refused with 400 VALIDATION_ERROR. A supplied forecast that is not an amount of 0 or more is refused (400; COST_RECORD_MONEY_INVALID when it reaches the service), and a figure the service would write below 0 is refused with 400 COST_RECORD_MONEY_INVALID naming the field; nothing is written. The answer carries forecastSource and forecastBasis; for a caller who may not read the BOQ a default forecast is omitted (forecastWithheld true, forecastWithheldReason), since it is built from the activity's allocation.";
 
 [
   {
@@ -11920,6 +11973,7 @@ const COST_RECORD_FORECAST_DEFAULT_NOTE =
     description: COST_RECORD_BUDGETS,
     operationId: "listCostRecords",
     parameters: costRecordListParams,
+    // rows[] are CostRecord (#/components/schemas/CostRecord): each carries forecastSource and forecastBasis (R5-2).
     permissions: modulePermission("cost", "read"),
     responseSchema: ref("RowsCursorPage"),
   },
@@ -11927,7 +11981,7 @@ const COST_RECORD_FORECAST_DEFAULT_NOTE =
     method: "get",
     path: "/projects/{projectId}/cost/summary",
     summary: "Get project cost summary.",
-    description: `${COST_RECORD_BUDGETS} The summary's figures built from those budgets — they add up the approved allocations of the activities that have a cost record, per category and in total, and a record with no forecast counts its budget in the forecast — are present only for a caller who may read the BOQ: byPhase[].budget, forecast, variance and variancePct; totals.budget and totals.forecast; eac.toComplete, optimistic, mostLikely and pessimistic; budget.allocatedToActivities. Anyone else receives each byPhase row's phase, committed and actual, totals.committed and totals.actual, eac.basis and eac.actual, and the budget register's original, approved changes, revisions and revised budget, with activityBudgetsWithheld true and activityBudgetsReason "Mapping details unavailable to you". Moving an approved allocation between activities changes nothing such a caller receives (owner decision E1). The project's own totals — EV, PV, AC, SPI, CPI, EAC — are on the EV report and the forecast. PC-7a three truths (labels only, the same words for every project and caller): budget.label is "Budget" (the budget register; derived) and truth says what each figure is — truth.budget (derived, with otherBudgets naming "Budget at completion (EV basis)" on the EV report and "Contract value + approved changes" on the budget revisions waterfall), truth.allocatedToActivities (derived), truth.totals (budget, committed, actual derived; forecast "projection:estimate_at_completion"), truth.records.forecast (a record's stored forecast: typed, or when none is given the default the larger of the record's budget and its actual — a projection, "projection:typed_or_greater_of_budget_and_actual"; PC-7a 3d replaced budget + 1.1 × (actual − budget), which was below 0 before any actual) and truth.eac (a projection). A label is present even where the figure it describes is withheld.`,
+    description: `${COST_RECORD_BUDGETS} The summary's figures built from those budgets — they add up the approved allocations of the activities that have a cost record, per category and in total, and a record with no forecast counts its budget in the forecast — are present only for a caller who may read the BOQ: byPhase[].budget, forecast, variance and variancePct; totals.budget and totals.forecast; eac.toComplete, optimistic, mostLikely and pessimistic; budget.allocatedToActivities. Anyone else receives each byPhase row's phase, committed and actual, totals.committed and totals.actual, eac.basis and eac.actual, and the budget register's original, approved changes, revisions and revised budget, with activityBudgetsWithheld true and activityBudgetsReason "Mapping details unavailable to you". Moving an approved allocation between activities changes nothing such a caller receives (owner decision E1). The project's own totals — EV, PV, AC, SPI, CPI, EAC — are on the EV report and the forecast. PC-7a three truths (labels only, the same words for every project and caller): budget.label is "Budget" (the budget register; derived) and truth says what each figure is — truth.budget (derived, with otherBudgets naming "Budget at completion (EV basis)" on the EV report and "Contract value + approved changes" on the budget revisions waterfall), truth.allocatedToActivities (derived), truth.totals (budget, committed, actual derived; forecast "projection:estimate_at_completion"), truth.records.forecast ("projection:entered_or_default_per_record": each record says its own basis in forecastSource and forecastBasis — entered, the initial default the larger of the record's budget and its actual as they were when it was set, or not recorded; truth.records.basis gives the three texts) and truth.eac (a projection). forecastSources counts the records by source ({ entered, default, notRecorded, total }; owner decision R5-2), so the forecast total is never presented as the default rule for every record. totals.forecast and eac are the cost records' projected final cost (truth.totals.labels.forecast and truth.eac.label: "Projected final cost (cost records)") — not the earned-value EAC (revised budget ÷ CPI, owner decision D2), which reads no cost record's forecast. A label is present even where the figure it describes is withheld.`,
     operationId: "getCostSummary",
     permissions: modulePermission("cost", "read"),
   },
@@ -12007,6 +12061,7 @@ const COST_RECORD_FORECAST_DEFAULT_NOTE =
     parameters: [...projectParams, activityIdParam],
     permissions: modulePermission("cost", "create", "activity_cost.upsert"),
     requestBody: jsonBody(ref("CostRecordRequest"), "Activity cost payload."),
+    responseSchema: ref("CostRecord"),
     status: 201,
   },
   {
@@ -12017,6 +12072,7 @@ const COST_RECORD_FORECAST_DEFAULT_NOTE =
     operationId: "updateCostRecord",
     parameters: projectRecordParams,
     permissions: modulePermission("cost", "update", "activity_cost.update"),
+    responseSchema: ref("CostRecord"),
     requestBody: jsonBody(
       ref("CostRecordRequest"),
       "Partial cost payload.",

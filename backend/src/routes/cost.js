@@ -16,6 +16,14 @@ const {
   withheldCostSummary,
 } = require('../utils/boq-figures');
 
+// Where a record's forecast came from is the server's to say (owner decision
+// R5-2): a client that sends forecastSource is refused, as PrimeContract's
+// originalValueSource is.
+const forecastSourceIsTheServers = body('forecastSource')
+  .not()
+  .exists()
+  .withMessage('forecastSource is set by the server and cannot be sent');
+
 const router = express.Router({ mergeParams: true });
 router.use(authenticate);
 
@@ -124,6 +132,7 @@ router.post(
     moneyBody('actual'),
     body('actualThroughDate').optional({ nullable: true }).isISO8601(),
     moneyBody('forecast'),
+    forecastSourceIsTheServers,
     validate,
   ],
   asyncHandler(async (req, res) => {
@@ -160,6 +169,7 @@ router.patch(
     moneyBody('actual'),
     body('actualThroughDate').optional({ nullable: true }).isISO8601(),
     moneyBody('forecast'),
+    forecastSourceIsTheServers,
     validate,
   ],
   asyncHandler(async (req, res) => {

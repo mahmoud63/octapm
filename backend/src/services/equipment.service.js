@@ -2,6 +2,7 @@ const { prisma } = require('../config/db');
 const { HttpError } = require('../utils/http-error');
 const auditService = require('./audit.service');
 const { addMoney, multiplyMoney, toMoneyNumber } = require('../utils/money');
+const { forecastOnCreate } = require('../utils/cost-forecast');
 
 const RATE_TYPES = ['hourly', 'daily'];
 const DAY_RATE_HOURS = 8;
@@ -58,6 +59,7 @@ const costRecordSummary = (record) => ({
   actual: toMoneyNumber(record.actual),
   actualThroughDate: toIso(record.actualThroughDate),
   forecast: toMoneyNumber(record.forecast),
+  forecastSource: record.forecastSource ?? null,
 });
 
 const usageSummary = (usage) => ({
@@ -284,7 +286,10 @@ const postEquipmentCostImpact = async ({
   });
 
   // The ledger has already created or advanced the activity's record; what is
-  // left is the equipment category and the forecast the record derives.
+  // left is the equipment category. The forecast is not this posting's: an
+  // equipment charge is actual cost arriving, and under owner decision R5-2 it
+  // never writes the record's forecast or forecastSource (it used to raise the
+  // forecast to max(forecast, budget, actual) — over an entered one too).
   const existing = await tx.costRecord.findFirst({
     where: { projectId, activityId: report.activityId },
   });
@@ -295,10 +300,6 @@ const postEquipmentCostImpact = async ({
   const nextEquipment = posting.posted
     ? addMoney(existing?.equipment || 0, equipmentCost)
     : toMoneyNumber(existing?.equipment || 0);
-  const nextActual = toMoneyNumber(existing?.actual || 0);
-  const existingForecast = toMoneyNumber(existing?.forecast || 0);
-  const existingBudget = toMoneyNumber(existing?.budget || 0);
-  const nextForecast = Math.max(existingForecast, existingBudget, nextActual);
 
   const data = {
     projectId,
@@ -313,12 +314,13 @@ const postEquipmentCostImpact = async ({
     budget: toMoneyNumber(existing?.budget || 0),
     committed: toMoneyNumber(existing?.committed || 0),
     actualThroughDate,
-    forecast: nextForecast,
   };
 
+  // Created here only if the ledger made none: no forecast supplied, so the
+  // initial default max(0, budget, actual 0), marked 'default' (R5-2).
   const record = existing
     ? await tx.costRecord.update({ where: { id: existing.id }, data })
-    : await tx.costRecord.create({ data: { ...data, actual: 0 } });
+    : await tx.costRecord.create({ data: { ...data, actual: 0, ...forecastOnCreate({ budget: data.budget, actual: 0 }) } });
 
   await auditService.recordEvent({
     tx,

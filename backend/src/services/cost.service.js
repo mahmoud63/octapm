@@ -24,9 +24,18 @@ const {
   TRUTHS,
   projection,
   BUDGET_LABELS,
-  COST_RECORD_FORECAST_DEFAULT_BASIS,
+  COST_RECORD_FORECAST_BASIS_PER_RECORD,
   COST_RECORD_FORECAST_DEFAULT_RULE,
+  COST_RECORD_PROJECTED_FINAL_COST_LABEL,
 } = require('../utils/figure-truth');
+// Where a record's stored forecast came from (owner decision R5-2).
+const {
+  FORECAST_BASIS,
+  forecastOnCreate,
+  forecastOnUpdate,
+  forecastSourceMix,
+  withForecastBasis,
+} = require('../utils/cost-forecast');
 
 // What each figure of the cost summary is, and from what. The same words for
 // every project and reader; they describe keys, never values, so a figure
@@ -53,22 +62,32 @@ const COST_SUMMARY_TRUTH = Object.freeze({
     committed: TRUTHS.DERIVED,
     actual: TRUTHS.DERIVED,
     forecast: projection('estimate_at_completion'),
+    // Owner decision R5-2: this is the cost records' own projection, not the
+    // earned-value EAC (revised budget ÷ CPI, D2) — the label says so.
+    labels: { forecast: COST_RECORD_PROJECTED_FINAL_COST_LABEL },
     derivedFrom: {
       budget: "Each cost record's approved allocation",
       committed: 'Executed commitments and approved commitment change orders (commitment.service)',
       actual: 'The cost ledger (CostLedgerEntry)',
-      forecast: "Σ each record's estimate at completion: its forecast when set and not below actual, otherwise the larger of its budget and actual",
+      forecast:
+        "Σ each record's projected final cost: its stored forecast (entered, default or not recorded — forecastSources counts each) when above 0 and not below actual, otherwise the larger of its budget and actual. Not the earned-value EAC (revised budget ÷ CPI)",
     },
   },
   records: {
-    forecast: projection(`typed_or_${COST_RECORD_FORECAST_DEFAULT_BASIS}`),
+    // Each record says its own basis (forecastSource, forecastBasis); the
+    // summary's forecastSources counts them. No record's forecast is presented
+    // as the default rule unless it is one (R5-2).
+    forecast: projection(COST_RECORD_FORECAST_BASIS_PER_RECORD),
     derivedFrom: {
-      forecast: `Typed on the record, or when its writer gave none: ${COST_RECORD_FORECAST_DEFAULT_RULE}`,
+      forecast: `Per record, as its forecastSource says: entered on the record; the initial default when none was entered — ${COST_RECORD_FORECAST_DEFAULT_RULE}, as they were when it was set; or not recorded (written before the source was kept, treated as entered)`,
     },
+    basis: FORECAST_BASIS,
   },
   eac: {
     truth: projection('estimate_at_completion'),
-    derivedFrom: 'Actual + the cost to complete (most likely − actual): optimistic × 0.9, pessimistic × 1.15',
+    label: `${COST_RECORD_PROJECTED_FINAL_COST_LABEL}: scenarios`,
+    derivedFrom:
+      'Actual + the cost to complete (most likely − actual): optimistic × 0.9, pessimistic × 1.15. Built from the cost records, not the earned-value EAC (revised budget ÷ CPI)',
   },
 });
 
@@ -178,7 +197,9 @@ const attachApprovedBudgets = async ({ projectId, records }) => {
   const { activitiesWithExecutedCommitments } = require('./commitment.service');
   const derived = await activitiesWithExecutedCommitments({ projectId });
 
-  return records.map((record) => ({
+  // Each record carries its forecast's source and basis (R5-2), so a default
+  // is never read as an entered forecast.
+  return records.map((record) => withForecastBasis({
     ...record,
     generatedBudget: record.budget,
     budget: allocationTotals.get(record.activityId)?.amount || 0,
@@ -297,6 +318,9 @@ const getCostSummary = async ({ orgId, projectId }) => {
     totals,
     eac,
     budget: { ...budget, label: BUDGET_LABELS.register, allocatedToActivities: totals.budget },
+    // How many records' forecasts were entered, are the initial default, or
+    // were not recorded (R5-2): the total above mixes them, and says so.
+    forecastSources: forecastSourceMix(records),
     truth: COST_SUMMARY_TRUTH,
   };
 };
@@ -309,6 +333,12 @@ const getCostSummary = async ({ orgId, projectId }) => {
  * per-record forecasts, many of them unset, and sat below actual-to-date
  * while the optimistic and pessimistic cards were plain budget multiples
  * (Phase 22A, from the Phase 22 audit UX22-02).
+ *
+ * Labelled "Projected final cost (cost records)", never "the EAC": the EAC is
+ * the earned-value report's revised budget ÷ CPI (owner decision D2), which
+ * reads no cost record's forecast (R5-2). Unchanged by R5-2: a stored forecast
+ * of 0 still falls back here, even when it was entered (label only; the
+ * formula is not the follow-up's to change).
  */
 const estimateAtCompletion = (record) => {
   const actual = toMoneyNumber(record.actual);
@@ -351,25 +381,13 @@ const canonicalBudget = async ({ orgId, projectId }) => {
   }
 };
 
-// A record's stored forecast. A typed forecast stands as typed; without one
-// the default below is a projection, labelled on the cost summary
-// (truth.records.forecast: COST_RECORD_FORECAST_DEFAULT_RULE) — it is never
-// a source figure and never feeds a certified one.
-//
-// PC-7a 3d (owner, 2026-09-29): the default is the larger of budget and
-// actual — the same estimate at completion the cost summary already gives a
-// record without a forecast (estimateAtCompletion), so the stored default and
-// the summary state one rule. The former budget + 1.1 × (actual − budget)
-// was −0.1 × budget with no actual yet: the CostRecord money check refused
-// the write and every cost record created without a forecast on an allocated
-// activity answered 500.
-const resolveForecast = ({ budget, actual, payloadForecast }) => {
-  if (payloadForecast !== undefined && payloadForecast !== null) {
-    return Number(payloadForecast) || 0;
-  }
-
-  return Math.max(0, toMoneyNumber(budget), toMoneyNumber(actual));
-};
+// A record's stored forecast (owner decision R5-2, utils/cost-forecast). A
+// supplied forecast — 0 and "0" included — is stored as given and marked
+// 'entered'. Only a record created without one gets the initial default, the
+// larger of budget and actual (PC-7a 3d), marked 'default'; an edit re-derives
+// that default only when it changes the budget, and never touches an entered
+// or not-recorded forecast. It is a projection, never a source figure, and
+// never feeds a certified one or the earned-value EAC.
 
 const COST_RECORD_MONEY_FIELDS = ['labour', 'material', 'equipment', 'subcontract', 'indirect', 'overhead', 'contingency', 'budget', 'committed', 'actual', 'forecast'];
 
@@ -416,6 +434,8 @@ const costRecordSummary = (record) => ({
   actual: toMoneyNumber(record.actual),
   actualThroughDate: dateSummary(record.actualThroughDate),
   forecast: toMoneyNumber(record.forecast),
+  // Where the forecast came from (R5-2) — the history says a default is one.
+  forecastSource: record.forecastSource ?? null,
 });
 
 const burnRateSummary = (entry) => ({
@@ -460,8 +480,7 @@ const assertCommittedIsTheCommitments = async ({ tx, payload, existing, projectI
  * the lock was written back over fields the caller never mentioned, and two
  * editors of different fields erased each other's work (Phase 21D, CX21-497);
  * budget, actual, its through-date and committed each have their own owner.
- * The forecast follows the budget when the budget is set and no forecast is
- * given.
+ * The forecast is decided apart (forecastFields), by R5-2's rules.
  */
 const suppliedCostFields = ({ payload, existing }) => {
   const data = {};
@@ -477,13 +496,19 @@ const suppliedCostFields = ({ payload, existing }) => {
   }
   const actualThroughDate = resolveActualThroughDate({ payload });
   if (actualThroughDate !== undefined) data.actualThroughDate = actualThroughDate;
-  if (payload.forecast !== undefined && payload.forecast !== null) {
-    data.forecast = Number(payload.forecast) || 0;
-  } else if (data.budget !== undefined) {
-    data.forecast = resolveForecast({ budget: data.budget, actual: toMoneyNumber(existing?.actual ?? 0) });
-  }
   return data;
 };
+
+/**
+ * The forecast an edit of an existing row writes, and its source (owner
+ * decision R5-2): a supplied forecast is stored as given ('entered'); without
+ * one an entered or not-recorded forecast is never touched, and a default is
+ * re-derived — max(0, new budget, the row's actual) — only when this edit
+ * changes the budget. `data` is what suppliedCostFields will write. A
+ * client's forecastSource is refused at the route and never read here.
+ */
+const forecastFields = ({ payload, existing, data }) =>
+  forecastOnUpdate({ payloadForecast: payload.forecast, existing, budget: data.budget });
 
 const upsertCostRecord = async ({
   orgId,
@@ -523,6 +548,7 @@ const upsertCostRecord = async ({
     if (existing) {
       // A row found under the lock keeps the committed a commitment gave it
       // (Phase 21D, CX21-482) and every figure the caller did not mention.
+      Object.assign(data, forecastFields({ payload, existing, data }));
       assertCostRecordMoney(data);
       record = await tx.costRecord.update({ where: { id: existing.id }, data });
     } else {
@@ -531,7 +557,9 @@ const upsertCostRecord = async ({
         committed: 0,
         ...data,
         budget,
-        forecast: data.forecast ?? resolveForecast({ budget, actual: 0 }),
+        // Supplied → stored as given, 'entered'; missing → the initial
+        // default max(0, budget, actual), 'default' (R5-2).
+        ...forecastOnCreate({ payloadForecast: payload.forecast, budget, actual: 0 }),
       };
       assertCostRecordMoney(created);
       record = await tx.costRecord.create({
@@ -561,11 +589,12 @@ const upsertCostRecord = async ({
         actual: toMoneyNumber(record.actual),
         committed: toMoneyNumber(record.committed),
         forecast: toMoneyNumber(record.forecast),
+        forecastSource: record.forecastSource ?? null,
       },
       metadata: { source: 'cost_control' },
     });
 
-    return record;
+    return withForecastBasis(record);
   });
 };
 
@@ -599,6 +628,7 @@ const updateCostRecord = async ({
     await assertCommittedIsTheCommitments({ tx, payload, existing, projectId, activityId: existing.activityId });
 
     const data = suppliedCostFields({ payload, existing });
+    Object.assign(data, forecastFields({ payload, existing, data }));
     assertCostRecordMoney(data);
     const record = await tx.costRecord.update({ where: { id: costRecordId }, data });
 
@@ -618,11 +648,12 @@ const updateCostRecord = async ({
         actual: toMoneyNumber(record.actual),
         committed: toMoneyNumber(record.committed),
         forecast: toMoneyNumber(record.forecast),
+        forecastSource: record.forecastSource ?? null,
       },
       metadata: { source: 'cost_control' },
     });
 
-    return record;
+    return withForecastBasis(record);
   });
 };
 

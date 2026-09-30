@@ -503,6 +503,12 @@ describe('daily report service', () => {
       expect.objectContaining({ sourceType: "equipment", amount: 400, activityId: "activity-1", projectId: "project-1" }),
     );
     expect(mockPrisma.costRecord.update).not.toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ actual: expect.anything() }) }));
+    // R5-2: an equipment posting never writes the record's forecast or its source
+    // (it used to raise the forecast to max(forecast, budget, actual)).
+    for (const [call] of mockPrisma.costRecord.update.mock.calls) {
+      expect(Object.keys(call.data)).not.toEqual(expect.arrayContaining(["forecast"]));
+      expect(Object.keys(call.data)).not.toEqual(expect.arrayContaining(["forecastSource"]));
+    }
     expect(mockPrisma.auditEvent.create).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({

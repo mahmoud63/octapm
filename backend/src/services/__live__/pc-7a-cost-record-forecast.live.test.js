@@ -149,7 +149,8 @@ liveDescribe("PC-7a 3d: a cost record written without a forecast gets a sensible
     // fresh 10,000 + under 10,000 + over 17,500 (typed, above actual)
     expect(summary.body.data.totals.forecast).toBe(37_500);
     expect(summary.body.data.eac.mostLikely).toBe(37_500);
-    expect(summary.body.data.truth.records.forecast).toBe("projection:typed_or_greater_of_budget_and_actual");
+    // R5-2: labelled per record (forecastSource), not as the default rule for every record.
+    expect(summary.body.data.truth.records.forecast).toBe("projection:entered_or_default_per_record");
 
     const recon = await api.get(at("/cost/reconciliation"), auth());
     expect(recon.status).toBe(200);

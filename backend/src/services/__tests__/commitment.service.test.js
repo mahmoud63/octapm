@@ -111,7 +111,8 @@ describe("commitments", () => {
     expect(mockPrisma.budgetLine.update).toHaveBeenCalledWith({ where: { id: "bl-x" }, data: { committedFromCommitments: 7000 } });
     expect(mockPrisma.budgetLine.update).toHaveBeenCalledWith({ where: { id: "bl-mat" }, data: { committedFromCommitments: 0 } });
     expect(mockPrisma.costRecord.update).toHaveBeenCalledWith({ where: { id: "cr-1" }, data: { committed: 5000 } });
-    expect(mockPrisma.costRecord.create).toHaveBeenCalledWith({ data: { projectId: "project-1", activityId: "act-2", committed: 7000 } });
+    // R5-2: created with no forecast supplied → the initial default, marked default
+    expect(mockPrisma.costRecord.create).toHaveBeenCalledWith({ data: { projectId: "project-1", activityId: "act-2", committed: 7000, forecast: 0, forecastSource: "default" } });
     expect(mockNotifications.createNotifications).toHaveBeenCalledWith(expect.objectContaining({ event: "commitment.executed", recipientUserIds: expect.arrayContaining(["sub-user"]) }));
   });
 

@@ -515,9 +515,25 @@ const withheldForecast = (forecast, access = FULL_ACCESS) => {
 // not the project's totals (the EV report's, the forecast's and the budget
 // register's are, and stay); each is omitted, and the summary says why.
 
+// A record's DEFAULT forecast (CostRecord.forecastSource 'default', owner
+// decision R5-2) is max(0, budget, actual) of the budget written on the record
+// — its activity's approved allocation when the record was made. With no
+// actual yet it IS that allocation, so it goes the way of the budget: omitted
+// for a member who may not read the BOQ, with the reason beside it. An entered
+// forecast is the cost module's own figure and stays. A forecast whose source
+// was not recorded (a row older than the column) is treated as entered, as
+// before; see docs/finance/OCTAPM_COST_POSTING_MODEL.md §1.6.1.
+const DEFAULT_FORECAST_WITHHELD =
+  "A default forecast is worked from the activity's approved BOQ allocation; it is available only to members who may read the BOQ";
+const isDefaultForecast = (value) => Boolean(value && typeof value === "object" && value.forecastSource === "default");
+
 /** A cost record (GET /cost, /cost/summary, and the answer to writing one) as this caller may receive it. */
-const withheldCostRecord = (record, access = FULL_ACCESS) =>
-  access.boq ? record : withoutKeys(record, ACTIVITY_BUDGET_KEYS);
+const withheldCostRecord = (record, access = FULL_ACCESS) => {
+  if (access.boq) return record;
+  const result = withoutKeys(record, ACTIVITY_BUDGET_KEYS);
+  if (!isDefaultForecast(record)) return result;
+  return { ...withoutKeys(result, ["forecast"]), forecastWithheld: true, forecastWithheldReason: DEFAULT_FORECAST_WITHHELD };
+};
 
 /** GET /projects/:id/cost ({ rows, pagination }) as this caller may receive it. */
 const withheldCostRecords = (result, access = FULL_ACCESS) => {
@@ -649,7 +665,13 @@ const withheldError = (error, access = FULL_ACCESS) => {
 const BOQ_RECORD_TYPES = new Set(["boq_item", "boq_revision", "activity_boq_allocation"]);
 
 const withoutRevisionTotals = (summary) => withoutKeys(summary, REVISION_BUDGET_KEYS);
-const withoutRecordBudget = (summary) => withoutKeys(summary, ACTIVITY_BUDGET_KEYS);
+// A cost record's summary in its history: without the budget, and without a
+// default forecast (which is built from it; R5-2) — the summary names its
+// forecastSource from 2026-10 on, so an older event's forecast stays as before.
+const withoutRecordBudget = (summary) => {
+  const result = withoutKeys(summary, ACTIVITY_BUDGET_KEYS);
+  return isDefaultForecast(summary) ? withoutKeys(result, ["forecast"]) : result;
+};
 
 // An event's summaries (before, after, and the event's own) with `strip`
 // applied to each one the event carries.
@@ -1077,6 +1099,21 @@ const REPORT_MAPPING_COLUMNS = Object.freeze({
 /** The columns of a report source that state a figure an allocation gives one activity. */
 const reportMappingColumns = (sourceKey) => REPORT_MAPPING_COLUMNS[sourceKey] || [];
 
+// The cost record's stored forecast, where it is the DEFAULT (R5-2): built
+// from the record's budget, so withheld row by row — only on the rows whose
+// forecastSource is 'default' — where the caller may not read the BOQ. The
+// report builder treats the column as withheld for filtering and sorting
+// (in memory, over the null) on those projects.
+const REPORT_DEFAULT_FORECAST_COLUMNS = Object.freeze({
+  cost_record: Object.freeze(["forecast"]),
+});
+
+/** The columns of a report source withheld on a row whose forecast is the default. */
+const reportDefaultForecastColumns = (sourceKey) => REPORT_DEFAULT_FORECAST_COLUMNS[sourceKey] || [];
+
+/** Whether a source row's stored forecast is the default (the raw row, before flattening). */
+const rowHasDefaultForecast = (row) => isDefaultForecast(row);
+
 /**
  * A report row (flattened: { id, projectId, projectName, <column>: value })
  * as this caller may receive it on the row's project: for a caller who may
@@ -1323,6 +1360,14 @@ const withheldActivityDetail = (detail, access = FULL_ACCESS) => {
   const sections = { ...detail.sections };
   if (has(sections, "mapping")) sections.mapping = boqSectionWithheld();
   if (sections.certification && sections.certification.allowed) sections.certification = boqSectionWithheld(IPC_LINES_WITHHELD);
+  // The cost record's default forecast is built from the allocation (R5-2):
+  // a dash and the reason, never the figure.
+  if (sections.cost && sections.cost.allowed && isDefaultForecast(sections.cost.forecast)) {
+    sections.cost = {
+      ...sections.cost,
+      forecast: { value: null, truth: null, withheld: true, forecastSource: "default", basis: DEFAULT_FORECAST_WITHHELD, derivedFrom: [] },
+    };
+  }
 
   const droppedOrderIds = new Set();
   const orders = sections.changes && sections.changes.changeOrders;
@@ -1408,6 +1453,11 @@ module.exports = {
   SPEC_BOQ_WITHHELD,
   reportMappingColumns,
   withheldReportRow,
+  // R5-2: a cost record's default forecast, withheld row by row.
+  DEFAULT_FORECAST_WITHHELD,
+  REPORT_DEFAULT_FORECAST_COLUMNS,
+  reportDefaultForecastColumns,
+  rowHasDefaultForecast,
   WBS_OUTLINE_KEYS,
   boqFigureAccess,
   canReadBoq,

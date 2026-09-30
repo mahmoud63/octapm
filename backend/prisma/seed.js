@@ -1389,6 +1389,8 @@ async function upsertProgressAndCost({ orgId, projectId, activities, userId }) {
       budget,
       committed: Math.round(budget * 0.86),
       forecast: Math.round(budget * 1.02),
+      // The seed supplies the forecast, so it is an entered one (R5-2).
+      forecastSource: 'entered',
     };
 
     const existingCost = await prisma.costRecord.findFirst({

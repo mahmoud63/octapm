@@ -32,6 +32,7 @@ const approvalWorkflowService = require("./approval-workflow.service");
 const wbsService = require("./wbs.service");
 const { summarizeRiskActivityLinks } = require("./risk.service");
 const jobService = require("../jobs/job.service");
+const { forecastOnCreate } = require("../utils/cost-forecast");
 const { JobError, isTransientError } = require("../jobs/errors");
 
 const PROCUREMENT_SEVERITY_RANK = {
@@ -3298,7 +3299,9 @@ async function activateRevisionSnapshot({
         contingency: (staged.budget || 0) * 0.02,
         committed: 0,
         actual: 0,
-        forecast: staged.budget || 0,
+        // No forecast supplied: the initial default max(0, budget, actual 0),
+        // marked 'default' (owner decision R5-2).
+        ...forecastOnCreate({ budget: staged.budget || 0, actual: 0 }),
       }));
     if (costRows.length > 0) {
       await tx.costRecord.createMany({ data: costRows });

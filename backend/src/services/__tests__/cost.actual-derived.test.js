@@ -111,11 +111,15 @@ describe('Phase 21D — integrity (release challenge, ninth pass)', () => {
     const lock = mockPrisma.$executeRaw.mock.calls.find(([strings, ...values]) => Array.isArray(strings) && strings.join('?').includes('pg_advisory_xact_lock') && values.includes('cost-record:p1:act-1'));
     expect(lock).toBeDefined();
     expect(mockPrisma.costRecord.findFirst.mock.invocationCallOrder.at(-1)).toBeGreaterThan(mockPrisma.$executeRaw.mock.invocationCallOrder[0]);
-    // the forecast follows a budget that is set, from the row's own actual
+    // R5-2: a budget edit never touches a forecast whose source was not recorded (this row's) or was entered
     mockPrisma.costRecord.update.mockClear();
     await service.updateCostRecord({ orgId: 'org-1', projectId: 'p1', costRecordId: 'cr-1', payload: { budget: 2000 } });
-    // PC-7a 3d: the larger of budget and actual (was 2000 + (400 − 2000) × 1.1 = 240, below the 400 already spent)
-    expect(written()).toEqual({ budget: 2000, forecast: 2000 });
+    expect(written()).toEqual({ budget: 2000 });
+    // a default forecast follows a budget that changes, from the row's own actual — the larger of the two (PC-7a 3d)
+    mockPrisma.costRecord.findFirst.mockResolvedValueOnce({ id: 'cr-1', projectId: 'p1', activityId: 'act-1' }).mockResolvedValueOnce({ id: 'cr-1', projectId: 'p1', activityId: 'act-1', budget: 1000, actual: 2400, committed: 0, forecast: 2400, forecastSource: 'default' });
+    mockPrisma.costRecord.update.mockClear();
+    await service.updateCostRecord({ orgId: 'org-1', projectId: 'p1', costRecordId: 'cr-1', payload: { budget: 3000 } });
+    expect(written()).toEqual({ budget: 3000, forecast: 3000, forecastSource: 'default' });
   });
 
   it('CX21-497: an upsert on an existing row that names one category leaves the budget and the rest alone', async () => {

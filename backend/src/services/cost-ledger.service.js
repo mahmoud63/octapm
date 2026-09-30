@@ -2,6 +2,7 @@ const { prisma } = require("../config/db");
 const { HttpError } = require("../utils/http-error");
 const { addMoney, toMoneyNumber } = require("../utils/money");
 const { localDateOf, resolveReportingTimeZone } = require("../utils/reporting-cutoff");
+const { forecastOnCreate } = require("../utils/cost-forecast");
 
 /**
  * The cost ledger (OCTA-FIN-LEDGER-059).
@@ -173,6 +174,10 @@ const applyToProjections = async ({ tx, entry }) => {
       const [held] = tx.$queryRaw ? await tx.$queryRaw`SELECT "actualThroughDate" FROM "CostRecord" WHERE id = ${record.id} FOR NO KEY UPDATE` : [];
       const current = held ? held.actualThroughDate : record.actualThroughDate;
       const advance = !current || new Date(current) < incurredOn;
+      // A posting moves actual and its through-date only. It never writes the
+      // record's forecast or forecastSource (owner decision R5-2): an entered
+      // forecast stands, and a default is re-derived only by a write that
+      // changes the budget — not by actual cost arriving.
       await tx.costRecord.update({
         where: { id: record.id },
         data: {
@@ -181,12 +186,16 @@ const applyToProjections = async ({ tx, entry }) => {
         },
       });
     } else {
+      // The posting creates the record, with no forecast supplied: it gets
+      // the initial default max(0, budget 0, this actual), marked 'default'
+      // (R5-2) — not the column's 0 below the cost it was created to carry.
       await tx.costRecord.create({
         data: {
           projectId: entry.projectId,
           activityId: entry.activityId,
           actual: amount,
           actualThroughDate: incurredOn,
+          ...forecastOnCreate({ budget: 0, actual: amount }),
         },
       });
     }

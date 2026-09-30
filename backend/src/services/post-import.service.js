@@ -1,4 +1,5 @@
 const { prisma } = require('../config/db');
+const { forecastOnCreate } = require('../utils/cost-forecast');
 
 const PROCUREMENT_KEYWORDS = [
   'procure',
@@ -63,7 +64,9 @@ async function seedCostRecords(projectId) {
       budget: 0,
       committed: 0,
       actual: 0,
-      forecast: 0,
+      // No forecast supplied: the initial default max(0, budget 0, actual 0)
+      // = 0, marked 'default' (owner decision R5-2).
+      ...forecastOnCreate({ budget: 0, actual: 0 }),
     })),
     skipDuplicates: true,
   });
