@@ -9,6 +9,8 @@
 export type ProgressImportRowStatus =
   | 'submit'
   | 'approve'
+  | 'hold'
+  | 'refuse'
   | 'submitted'
   | 'draft'
   | 'approved'
@@ -28,6 +30,8 @@ export type ProgressImportRow = {
   status: ProgressImportRowStatus
   submissionId: string | null
   progressId: string | null
+  /** For already_pending: where the open submission waits. */
+  waitingStatus?: 'draft' | 'submitted' | null
   reason: { code: string; message: string } | null
 }
 
@@ -45,6 +49,8 @@ export type ProgressImportResult = {
   refused: number
   wouldSubmit?: number
   wouldApprove?: number
+  wouldHold?: number
+  wouldRefuse?: number
   rows: ProgressImportRow[]
   message: string
 }
@@ -55,6 +61,8 @@ export const PROGRESS_IMPORT_ROW_LABEL: Record<
 > = {
   submit: 'Will be submitted for approval',
   approve: 'Will be approved',
+  hold: 'Will be held',
+  refuse: 'Will be refused',
   submitted: 'Submitted for approval',
   draft: 'Kept as draft',
   approved: 'Approved',
@@ -62,6 +70,17 @@ export const PROGRESS_IMPORT_ROW_LABEL: Record<
   unchanged: 'Already official',
   already_pending: 'Already pending',
   refused: 'Refused',
+}
+
+/**
+ * The row's label: the status's, except that a figure already waiting as a
+ * draft is said to await evidence — it is not in the approval queue.
+ */
+export function progressImportRowLabel(row: ProgressImportRow): string {
+  if (row.status === 'already_pending' && row.waitingStatus === 'draft') {
+    return 'Already a draft (awaiting evidence)'
+  }
+  return PROGRESS_IMPORT_ROW_LABEL[row.status]
 }
 
 // The gates' refusal codes, in words (the row keeps the server's message).
@@ -81,21 +100,44 @@ const reasonsOf = (rows: ProgressImportRow[]) =>
     ),
   ].join(', ')
 
-/** The one-line outcome, in the server's terms. */
+const clause = (count: number, text: string) =>
+  count > 0 ? `; ${count} ${text}` : ''
+
+/**
+ * The one-line outcome, in the server's terms. Only what is in an
+ * approver's queue counts as "submitted for approval": a draft waits for
+ * evidence and a refused row was not written, and each is said separately.
+ */
 export function progressImportHeadline(result: ProgressImportResult): string {
+  const held = (statuses: ProgressImportRowStatus[]) =>
+    result.rows.filter((row) => statuses.includes(row.status))
   if (result.dryRun) {
+    const wouldHold = result.wouldHold ?? 0
+    const wouldRefuse = result.wouldRefuse ?? 0
     return result.authority.canApprove
-      ? `${result.wouldApprove ?? 0} rows will be approved for you through the progress approval gates`
-      : `${result.wouldSubmit ?? 0} rows will be submitted for approval — not official until approved`
+      ? `${result.wouldApprove ?? 0} rows will be approved for you through the progress approval gates` +
+          clause(
+            wouldHold,
+            `will be left pending (${reasonsOf(held(['hold']))})`
+          ) +
+          clause(wouldRefuse, 'will be refused')
+      : `${result.wouldSubmit ?? 0} rows will be submitted for approval — not official until approved` +
+          clause(wouldHold, 'will be kept as draft (evidence required)') +
+          clause(wouldRefuse, 'will be refused')
   }
   if (result.authority.canApprove) {
-    const held = result.rows.filter(
-      (row) => row.status === 'pending' || row.status === 'draft'
-    )
     const pending = result.pending + result.draft
-    return `${result.approved} approved${
-      pending ? `, ${pending} left pending (${reasonsOf(held)})` : ''
-    }`
+    return (
+      `${result.approved} approved` +
+      (pending
+        ? `, ${pending} left pending (${reasonsOf(held(['pending', 'draft']))})`
+        : '') +
+      clause(result.refused, 'refused')
+    )
   }
-  return `${result.submitted + result.draft} rows submitted for approval — not official until approved`
+  return (
+    `${result.submitted} rows submitted for approval — not official until approved` +
+    clause(result.draft, 'kept as draft (evidence required)') +
+    clause(result.refused, 'refused')
+  )
 }

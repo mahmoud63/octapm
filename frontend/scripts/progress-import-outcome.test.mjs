@@ -9,6 +9,7 @@ import { resolve } from 'node:path'
 import {
   PROGRESS_IMPORT_ROW_LABEL,
   progressImportHeadline,
+  progressImportRowLabel,
 } from '../src/features/schedule/lib/progress-import-outcome.ts'
 
 const root = resolve(import.meta.dirname, '..')
@@ -46,12 +47,46 @@ const result = (overrides) => ({
   ...overrides,
 })
 
-// A submit-only person: pending, and said to be not official.
+// A submit-only person: pending, and said to be not official. Only what is
+// in an approver's queue is "submitted for approval": a draft waits for
+// evidence and a refused row was not written, and each is said separately —
+// the headline must not count them as submitted.
 assert.equal(
   progressImportHeadline(
-    result({ submitted: 3, draft: 1, rows: [row('submitted'), row('draft')] })
+    result({
+      submitted: 3,
+      draft: 1,
+      refused: 1,
+      rows: [
+        row('submitted'),
+        row('draft', 'PROGRESS_EVIDENCE_REQUIRED'),
+        row('refused', 'ACTIVITY_PROGRESS_ASSIGNMENT_REQUIRED'),
+      ],
+    })
   ),
-  '4 rows submitted for approval — not official until approved'
+  '3 rows submitted for approval — not official until approved; 1 kept as draft (evidence required); 1 refused'
+)
+assert.equal(
+  progressImportHeadline(result({ submitted: 4, rows: [row('submitted')] })),
+  '4 rows submitted for approval — not official until approved',
+  'nothing held: no clause'
+)
+// The preview says what the server's reading of the writer's rules will do.
+assert.equal(
+  progressImportHeadline(
+    result({
+      dryRun: true,
+      wouldSubmit: 3,
+      wouldHold: 1,
+      wouldRefuse: 1,
+      rows: [
+        row('submit'),
+        row('hold', 'PROGRESS_EVIDENCE_REQUIRED'),
+        row('refuse', 'ACTIVITY_PROGRESS_ASSIGNMENT_REQUIRED'),
+      ],
+    })
+  ),
+  '3 rows will be submitted for approval — not official until approved; 1 will be kept as draft (evidence required); 1 will be refused'
 )
 assert.equal(
   progressImportHeadline(
@@ -62,6 +97,22 @@ assert.equal(
     })
   ),
   '5 rows will be submitted for approval — not official until approved'
+)
+assert.equal(
+  progressImportHeadline(
+    result({
+      dryRun: true,
+      authority: { canApprove: true, outcome: 'approved' },
+      wouldApprove: 3,
+      wouldHold: 2,
+      rows: [
+        row('approve'),
+        row('hold', 'PROGRESS_EVIDENCE_REQUIRED'),
+        row('hold', 'ITP_HOLD_POINT_OPEN'),
+      ],
+    })
+  ),
+  '3 rows will be approved for you through the progress approval gates; 2 will be left pending (evidence required, ITP hold point open)'
 )
 
 // An approver: approved, with what held the rest and why.
@@ -106,6 +157,38 @@ assert.equal(
 assert.equal(
   progressImportHeadline(
     result({
+      authority: { canApprove: true, outcome: 'approved' },
+      approved: 4,
+      refused: 1,
+      rows: [row('approved'), row('refused', 'SOMETHING')],
+    })
+  ),
+  '4 approved; 1 refused',
+  'an approver is told what the writer refused'
+)
+
+// A figure already waiting as a draft is said to await evidence — it is not
+// in the approval queue — where one already submitted is simply pending.
+assert.equal(
+  progressImportRowLabel(
+    row('already_pending', 'PROGRESS_ALREADY_PENDING', {
+      waitingStatus: 'draft',
+    })
+  ),
+  'Already a draft (awaiting evidence)'
+)
+assert.equal(
+  progressImportRowLabel(
+    row('already_pending', 'PROGRESS_ALREADY_PENDING', {
+      waitingStatus: 'submitted',
+    })
+  ),
+  'Already pending'
+)
+assert.equal(progressImportRowLabel(row('approved')), 'Approved')
+assert.equal(
+  progressImportHeadline(
+    result({
       dryRun: true,
       authority: { canApprove: true, outcome: 'approved' },
       wouldApprove: 5,
@@ -130,6 +213,8 @@ assert.equal(
 for (const status of [
   'submit',
   'approve',
+  'hold',
+  'refuse',
   'submitted',
   'draft',
   'approved',
@@ -157,8 +242,36 @@ assert.ok(
 )
 assert.ok(
   dialog.includes('{row.reason.message}') &&
-    dialog.includes('PROGRESS_IMPORT_ROW_LABEL[row.status]'),
+    dialog.includes('{progressImportRowLabel(row)}'),
   'the dialog lists each held row with the gate\'s reason'
+)
+// After a real import the dialog refreshes everything an import can move —
+// the same set progress-tab's refreshProgress invalidates — so an approver's
+// import shows in the EV report and the audit history beside it.
+const progressTab = read('src/features/schedule/components/progress-tab.tsx')
+const refreshProgress = progressTab.slice(
+  progressTab.indexOf('const refreshProgress = async'),
+  progressTab.indexOf('const saveMethod')
+)
+const importSuccess = dialog.slice(
+  dialog.indexOf('mutationFn: () => send(false)'),
+  dialog.indexOf('toast.success(progressImportHeadline(data))')
+)
+const invalidated = (source) =>
+  [...source.matchAll(/queryKey: (\[?'[a-z-]+'|projectSetupReadinessKey)/g)].map(
+    (match) => match[1]
+  )
+const expectedKeys = invalidated(refreshProgress)
+assert.ok(
+  expectedKeys.includes("['ev-report'") &&
+    expectedKeys.includes("['audit-events'") &&
+    expectedKeys.includes('projectSetupReadinessKey'),
+  'the reference set is read from progress-tab'
+)
+assert.deepEqual(
+  new Set(invalidated(importSuccess)),
+  new Set(expectedKeys),
+  'the import dialog invalidates the same queries as refreshProgress'
 )
 assert.ok(
   dialog.includes("'Import and approve'") &&

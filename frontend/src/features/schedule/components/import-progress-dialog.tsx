@@ -13,9 +13,10 @@ import {
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { projectSetupReadinessKey } from '@/features/projects/hooks/use-projects'
 import {
-  PROGRESS_IMPORT_ROW_LABEL,
   progressImportHeadline,
+  progressImportRowLabel,
   type ProgressImportResult,
   type ProgressImportRowStatus,
 } from '../lib/progress-import-outcome'
@@ -34,6 +35,8 @@ const ROW_VARIANT: Record<
 > = {
   submit: 'secondary',
   approve: 'default',
+  hold: 'outline',
+  refuse: 'destructive',
   submitted: 'secondary',
   draft: 'outline',
   approved: 'default',
@@ -84,11 +87,25 @@ export function ImportProgressDialog({ projectId, open, onOpenChange }: Props) {
     mutationFn: () => send(false),
     onSuccess: async (data) => {
       setResult(data)
+      // Everything an import can move — the same set the progress tab
+      // refreshes after an approval: an approver's import made figures
+      // official, so the EV report, the audit history and the readiness
+      // headline beside this dialog must not stay stale.
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ['schedule', projectId] }),
         queryClient.invalidateQueries({ queryKey: ['activities', projectId] }),
+        queryClient.invalidateQueries({ queryKey: ['ev-report', projectId] }),
         queryClient.invalidateQueries({
           queryKey: ['progress-submissions', projectId],
+        }),
+        queryClient.invalidateQueries({
+          queryKey: ['daily-reports', projectId],
+        }),
+        queryClient.invalidateQueries({
+          queryKey: ['audit-events', projectId],
+        }),
+        queryClient.invalidateQueries({
+          queryKey: projectSetupReadinessKey(projectId),
         }),
       ])
       toast.success(progressImportHeadline(data))
@@ -153,7 +170,27 @@ export function ImportProgressDialog({ projectId, open, onOpenChange }: Props) {
                 <dd>{shown.matched}</dd>
                 <dt>Not matched</dt>
                 <dd>{shown.notMatched}</dd>
-                {shown.dryRun ? null : (
+                {shown.dryRun ? (
+                  <>
+                    {shown.authority.canApprove ? (
+                      <>
+                        <dt>Will be approved</dt>
+                        <dd>{shown.wouldApprove ?? 0}</dd>
+                        <dt>Will be left pending (a gate refuses)</dt>
+                        <dd>{shown.wouldHold ?? 0}</dd>
+                      </>
+                    ) : (
+                      <>
+                        <dt>Will be submitted for approval</dt>
+                        <dd>{shown.wouldSubmit ?? 0}</dd>
+                        <dt>Will be kept as draft (evidence required)</dt>
+                        <dd>{shown.wouldHold ?? 0}</dd>
+                      </>
+                    )}
+                    <dt>Will be refused</dt>
+                    <dd>{shown.wouldRefuse ?? 0}</dd>
+                  </>
+                ) : (
                   <>
                     <dt>Submitted for approval</dt>
                     <dd>{shown.submitted}</dd>
@@ -187,7 +224,7 @@ export function ImportProgressDialog({ projectId, open, onOpenChange }: Props) {
                         {row.p6ActivityId} · {row.name} · {row.pctComplete}%
                       </span>
                       <Badge variant={ROW_VARIANT[row.status]}>
-                        {PROGRESS_IMPORT_ROW_LABEL[row.status]}
+                        {progressImportRowLabel(row)}
                       </Badge>
                     </div>
                     {row.reason && (
