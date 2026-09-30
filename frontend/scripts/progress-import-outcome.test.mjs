@@ -9,7 +9,9 @@ import { resolve } from 'node:path'
 import {
   PROGRESS_IMPORT_ROW_LABEL,
   progressImportHeadline,
+  progressImportRowFigure,
   progressImportRowLabel,
+  progressImportSupersededNote,
 } from '../src/features/schedule/lib/progress-import-outcome.ts'
 
 const root = resolve(import.meta.dirname, '..')
@@ -41,7 +43,10 @@ const result = (overrides) => ({
   pending: 0,
   unchanged: 0,
   alreadyPending: 0,
+  skipped: 0,
   refused: 0,
+  supersededPending: 0,
+  supersededPendingSubmissions: [],
   rows: [],
   message: '',
   ...overrides,
@@ -209,6 +214,112 @@ assert.equal(
   '0 approved, 1 left pending (SOMETHING_NEW)'
 )
 
+// A row the file named without a percentage was skipped, and the headline
+// says so for either person, before and after writing; a full-programme
+// export's unchanged 0% rows are counted, not announced.
+assert.equal(
+  progressImportHeadline(
+    result({ submitted: 2, skipped: 3, unchanged: 40, rows: [row('submitted')] })
+  ),
+  '2 rows submitted for approval — not official until approved; 3 skipped (no percentage)'
+)
+assert.equal(
+  progressImportHeadline(
+    result({
+      authority: { canApprove: true, outcome: 'approved' },
+      approved: 1,
+      skipped: 1,
+      unchanged: 40,
+    })
+  ),
+  '1 approved; 1 skipped (no percentage)'
+)
+assert.equal(
+  progressImportHeadline(
+    result({ dryRun: true, wouldSubmit: 2, skipped: 1, unchanged: 40 })
+  ),
+  '2 rows will be submitted for approval — not official until approved; 1 skipped (no percentage)'
+)
+assert.equal(
+  progressImportHeadline(
+    result({
+      dryRun: true,
+      authority: { canApprove: true, outcome: 'approved' },
+      wouldApprove: 2,
+      skipped: 1,
+    })
+  ),
+  '2 rows will be approved for you through the progress approval gates; 1 skipped (no percentage)'
+)
+assert.equal(
+  progressImportRowLabel(
+    row('skipped', 'PROGRESS_PERCENT_MISSING', { pctComplete: null })
+  ),
+  'Skipped (no percentage)'
+)
+assert.equal(
+  progressImportRowFigure(
+    row('skipped', 'PROGRESS_PERCENT_MISSING', { pctComplete: null })
+  ),
+  'no %'
+)
+assert.equal(progressImportRowFigure(row('approved')), '10%')
+
+// An approver's import of a figure already in the queue approved that
+// submission as it stood; the row says so.
+assert.equal(
+  progressImportRowLabel(
+    row('approved', null, { approvesPending: true, submissionId: 's1' })
+  ),
+  'Approved (was already pending)'
+)
+assert.equal(
+  progressImportRowLabel(
+    row('approve', null, { approvesPending: true, submissionId: 's1' })
+  ),
+  'Will be approved (already pending)'
+)
+assert.equal(
+  progressImportRowLabel(
+    row('pending', 'ITP_HOLD_POINT_OPEN', { approvesPending: true })
+  ),
+  'Left pending',
+  'a gate that held the already-pending row reads as any held row'
+)
+
+// Older pending submissions at another figure the import left in the
+// queue are named, never silently: the import does not reject them.
+assert.equal(progressImportSupersededNote(result({})), '')
+const superseded = (p6ActivityId, pctComplete, importedPctComplete) => ({
+  activityId: p6ActivityId,
+  p6ActivityId,
+  name: p6ActivityId,
+  submissionId: `s-${p6ActivityId}`,
+  pctComplete,
+  importedPctComplete,
+})
+assert.equal(
+  progressImportSupersededNote(
+    result({
+      supersededPending: 1,
+      supersededPendingSubmissions: [superseded('P400', 40, 70)],
+    })
+  ),
+  '1 older pending import submission at another figure is still in the approval queue (P400 at 40%) — reject there if no longer wanted.'
+)
+assert.equal(
+  progressImportSupersededNote(
+    result({
+      supersededPending: 2,
+      supersededPendingSubmissions: [
+        superseded('P300', 30, 35),
+        superseded('P400', 40, 45),
+      ],
+    })
+  ),
+  '2 older pending import submissions at another figure are still in the approval queue (P300 at 30%, P400 at 40%) — reject there if no longer wanted.'
+)
+
 // Every row status the API can answer has a label.
 for (const status of [
   'submit',
@@ -221,6 +332,7 @@ for (const status of [
   'pending',
   'unchanged',
   'already_pending',
+  'skipped',
   'refused',
 ]) {
   assert.ok(PROGRESS_IMPORT_ROW_LABEL[status], `label for ${status}`)
@@ -244,6 +356,22 @@ assert.ok(
   dialog.includes('{row.reason.message}') &&
     dialog.includes('{progressImportRowLabel(row)}'),
   'the dialog lists each held row with the gate\'s reason'
+)
+// The counts a full-programme export produces are shown, the skipped and
+// superseded ones included, and the older pending figures are named so the
+// approver can reject them; a skipped row shows no figure.
+assert.ok(
+  dialog.includes('{shown.skipped ?? 0}') &&
+    dialog.includes('{shown.supersededPending ?? 0}') &&
+    dialog.includes('progressImportSupersededNote(shown)') &&
+    dialog.includes("data-testid='progress-import-superseded'") &&
+    dialog.includes('{progressImportRowFigure(row)}') &&
+    !dialog.includes('{row.pctComplete}%'),
+  'the dialog shows the skipped and superseded counts, the superseded note, and the row figure through the outcome module'
+)
+assert.ok(
+  dialog.includes("row.status !== 'unchanged'"),
+  'unchanged rows (a full-programme export has one per unstarted activity) are counted, not listed'
 )
 // After a real import the dialog refreshes everything an import can move —
 // the same set progress-tab's refreshProgress invalidates — so an approver's

@@ -17,21 +17,43 @@ export type ProgressImportRowStatus =
   | 'pending'
   | 'unchanged'
   | 'already_pending'
+  | 'skipped'
   | 'refused'
+
+/** An older pending import submission at another figure, left in the queue. */
+export type ProgressImportSuperseded = {
+  submissionId: string
+  pctComplete: number
+}
+
+export type ProgressImportSupersededSubmission = ProgressImportSuperseded & {
+  activityId: string
+  p6ActivityId: string
+  name: string
+  importedPctComplete: number
+}
 
 export type ProgressImportRow = {
   activityId: string
   p6ActivityId: string
   name: string
-  pctComplete: number
+  /** Null for a skipped row: the file names the activity without one. */
+  pctComplete: number | null
   officialPctComplete: number | null
   activityMethod: string
   methodMismatch: boolean
   status: ProgressImportRowStatus
   submissionId: string | null
   progressId: string | null
-  /** For already_pending: where the open submission waits. */
+  /** For already_pending (and approvesPending): where the open submission waits. */
   waitingStatus?: 'draft' | 'submitted' | null
+  /**
+   * An approver's import found this figure already submitted and approved
+   * (or would approve) that submission itself — submissionId is its id.
+   */
+  approvesPending?: boolean
+  /** An older pending import submission at another figure this row leaves in the queue. */
+  superseded?: ProgressImportSuperseded | null
   reason: { code: string; message: string } | null
 }
 
@@ -46,7 +68,12 @@ export type ProgressImportResult = {
   pending: number
   unchanged: number
   alreadyPending: number
+  /** Rows the file names without a percentage; nothing written. */
+  skipped: number
   refused: number
+  /** Older pending import submissions at another figure left in the queue. */
+  supersededPending: number
+  supersededPendingSubmissions: ProgressImportSupersededSubmission[]
   wouldSubmit?: number
   wouldApprove?: number
   wouldHold?: number
@@ -69,18 +96,54 @@ export const PROGRESS_IMPORT_ROW_LABEL: Record<
   pending: 'Left pending',
   unchanged: 'Already official',
   already_pending: 'Already pending',
+  skipped: 'Skipped (no percentage)',
   refused: 'Refused',
 }
 
 /**
  * The row's label: the status's, except that a figure already waiting as a
- * draft is said to await evidence — it is not in the approval queue.
+ * draft is said to await evidence — it is not in the approval queue — and
+ * a row an approver's import approved as it already stood in the queue
+ * says so.
  */
 export function progressImportRowLabel(row: ProgressImportRow): string {
   if (row.status === 'already_pending' && row.waitingStatus === 'draft') {
     return 'Already a draft (awaiting evidence)'
   }
+  if (row.approvesPending && row.status === 'approved') {
+    return 'Approved (was already pending)'
+  }
+  if (row.approvesPending && row.status === 'approve') {
+    return 'Will be approved (already pending)'
+  }
   return PROGRESS_IMPORT_ROW_LABEL[row.status]
+}
+
+/**
+ * The figure a row shows: the file's, or "no %" for a skipped row.
+ */
+export function progressImportRowFigure(row: ProgressImportRow): string {
+  return row.pctComplete === null ? 'no %' : `${row.pctComplete}%`
+}
+
+/**
+ * The line under the headline about older pending submissions this import
+ * left in the queue at another figure — the import never rejects them, so
+ * the approver is told where they are. Empty when there are none.
+ */
+export function progressImportSupersededNote(
+  result: ProgressImportResult
+): string {
+  const count = result.supersededPending ?? 0
+  if (!count) return ''
+  const names = (result.supersededPendingSubmissions ?? [])
+    .map((row) => `${row.p6ActivityId} at ${row.pctComplete}%`)
+    .join(', ')
+  return (
+    `${count} older pending import ${count === 1 ? 'submission' : 'submissions'} at another figure ${count === 1 ? 'is' : 'are'} still in the approval queue` +
+    (names ? ` (${names})` : '') +
+    ' — reject there if no longer wanted.'
+  )
 }
 
 // The gates' refusal codes, in words (the row keeps the server's message).
@@ -107,10 +170,13 @@ const clause = (count: number, text: string) =>
  * The one-line outcome, in the server's terms. Only what is in an
  * approver's queue counts as "submitted for approval": a draft waits for
  * evidence and a refused row was not written, and each is said separately.
+ * A row without a percentage was skipped and is said so; a row already at
+ * the official figure is not news and stays in the counts below.
  */
 export function progressImportHeadline(result: ProgressImportResult): string {
   const held = (statuses: ProgressImportRowStatus[]) =>
     result.rows.filter((row) => statuses.includes(row.status))
+  const skipped = clause(result.skipped ?? 0, 'skipped (no percentage)')
   if (result.dryRun) {
     const wouldHold = result.wouldHold ?? 0
     const wouldRefuse = result.wouldRefuse ?? 0
@@ -120,10 +186,12 @@ export function progressImportHeadline(result: ProgressImportResult): string {
             wouldHold,
             `will be left pending (${reasonsOf(held(['hold']))})`
           ) +
-          clause(wouldRefuse, 'will be refused')
+          clause(wouldRefuse, 'will be refused') +
+          skipped
       : `${result.wouldSubmit ?? 0} rows will be submitted for approval — not official until approved` +
           clause(wouldHold, 'will be kept as draft (evidence required)') +
-          clause(wouldRefuse, 'will be refused')
+          clause(wouldRefuse, 'will be refused') +
+          skipped
   }
   if (result.authority.canApprove) {
     const pending = result.pending + result.draft
@@ -132,12 +200,14 @@ export function progressImportHeadline(result: ProgressImportResult): string {
       (pending
         ? `, ${pending} left pending (${reasonsOf(held(['pending', 'draft']))})`
         : '') +
-      clause(result.refused, 'refused')
+      clause(result.refused, 'refused') +
+      skipped
     )
   }
   return (
     `${result.submitted} rows submitted for approval — not official until approved` +
     clause(result.draft, 'kept as draft (evidence required)') +
-    clause(result.refused, 'refused')
+    clause(result.refused, 'refused') +
+    skipped
   )
 }

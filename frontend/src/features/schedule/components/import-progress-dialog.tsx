@@ -16,7 +16,9 @@ import { Label } from '@/components/ui/label'
 import { projectSetupReadinessKey } from '@/features/projects/hooks/use-projects'
 import {
   progressImportHeadline,
+  progressImportRowFigure,
   progressImportRowLabel,
+  progressImportSupersededNote,
   type ProgressImportResult,
   type ProgressImportRowStatus,
 } from '../lib/progress-import-outcome'
@@ -43,6 +45,7 @@ const ROW_VARIANT: Record<
   pending: 'outline',
   unchanged: 'outline',
   already_pending: 'outline',
+  skipped: 'outline',
   refused: 'destructive',
 }
 
@@ -122,9 +125,21 @@ export function ImportProgressDialog({ projectId, open, onOpenChange }: Props) {
   }
 
   const shown = result ?? preview
+  // What a reviewer reads: rows a gate or the writer said something about,
+  // rows measured another way, rows approved as they already stood in the
+  // queue, and rows that left an older pending figure behind. A row that
+  // was skipped or is already official carries its reason and is listed
+  // too; a plain unchanged 0% row from a full-programme export is not.
   const reportedRows = shown
-    ? shown.rows.filter((row) => row.reason || row.methodMismatch)
+    ? shown.rows.filter(
+        (row) =>
+          (row.reason && row.status !== 'unchanged') ||
+          row.methodMismatch ||
+          row.approvesPending ||
+          row.superseded
+      )
     : []
+  const supersededNote = shown ? progressImportSupersededNote(shown) : ''
 
   return (
     <Dialog
@@ -165,6 +180,14 @@ export function ImportProgressDialog({ projectId, open, onOpenChange }: Props) {
               <p className='mt-1 text-xs text-muted-foreground'>
                 {shown.message}
               </p>
+              {supersededNote && (
+                <p
+                  className='mt-1 text-xs'
+                  data-testid='progress-import-superseded'
+                >
+                  {supersededNote}
+                </p>
+              )}
               <dl className='mt-2 grid grid-cols-2 gap-x-4 gap-y-1 text-xs'>
                 <dt>Matched</dt>
                 <dd>{shown.matched}</dd>
@@ -204,10 +227,14 @@ export function ImportProgressDialog({ projectId, open, onOpenChange }: Props) {
                     <dd>{shown.refused}</dd>
                   </>
                 )}
-                <dt>Already official</dt>
+                <dt>Already official (unchanged)</dt>
                 <dd>{shown.unchanged}</dd>
                 <dt>Already pending</dt>
                 <dd>{shown.alreadyPending}</dd>
+                <dt>Skipped (no percentage)</dt>
+                <dd>{shown.skipped ?? 0}</dd>
+                <dt>Older pending left in the queue</dt>
+                <dd>{shown.supersededPending ?? 0}</dd>
               </dl>
             </div>
 
@@ -221,7 +248,8 @@ export function ImportProgressDialog({ projectId, open, onOpenChange }: Props) {
                   >
                     <div className='flex items-center justify-between gap-2'>
                       <span className='font-medium'>
-                        {row.p6ActivityId} · {row.name} · {row.pctComplete}%
+                        {row.p6ActivityId} · {row.name} ·{' '}
+                        {progressImportRowFigure(row)}
                       </span>
                       <Badge variant={ROW_VARIANT[row.status]}>
                         {progressImportRowLabel(row)}
@@ -236,6 +264,13 @@ export function ImportProgressDialog({ projectId, open, onOpenChange }: Props) {
                       <span className='text-muted-foreground'>
                         Measured by {row.activityMethod}; the file gives a
                         percentage, recorded as a percent submission.
+                      </span>
+                    )}
+                    {row.superseded && (
+                      <span className='text-muted-foreground'>
+                        An older import submission at{' '}
+                        {row.superseded.pctComplete}% is still in the approval
+                        queue; reject it there if no longer wanted.
                       </span>
                     )}
                   </li>
