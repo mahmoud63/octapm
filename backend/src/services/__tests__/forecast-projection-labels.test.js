@@ -4,7 +4,10 @@
  * shows them says so. A source check over those surfaces — the forecast
  * service's text builders, the web Forecast panel, and the mobile PM home,
  * general home and project screen — plus the narrative the service builds.
- * Static: no database, no browser.
+ * Static: no database, no browser. The rendered text is held elsewhere: the
+ * mobile screens by mobile/src/testing/screens/home.test.tsx and
+ * project.test.tsx, the web panel by
+ * frontend/e2e/64-forecast-panel-dates.spec.ts.
  */
 const fs = require("fs");
 const path = require("path");
@@ -16,7 +19,7 @@ const NOT_A_FORECAST = /extension of time|\beot\b|approved delay|granted/i;
 // Each surface, and the projection wording it must carry.
 const SURFACES = [
   ["backend/src/services/forecast.service.js", ["projected to finish", "projected ${s.projectedFinish"]],
-  ["frontend/src/features/forecast/components/forecast-panel.tsx", ["Projected finish", ">Projected slip<", "days of projected slip"]],
+  ["frontend/src/features/forecast/components/forecast-panel.tsx", ["Projected finish", ">Projected slip<", "days of projected slip", "+{activity.impactDays} d recorded impact", "{RECORDED_IMPACT_LEGEND}"]],
   ["mobile/src/home/PmHome.tsx", ['label="Projected slip"', "Longest projected slip", "Projected finish"]],
   ["mobile/src/home/GeneralHome.tsx", ["label: 'Projected slip'"]],
   ["mobile/app/(app)/project.tsx", ['label="Projected slip"', "Longest projected slip", "Projected finish"]],
@@ -29,6 +32,21 @@ describe("R5-1: the forecast is labelled a projection, never an extension of tim
     for (const text of wording) expect(source).toContain(text);
     // A bare "Slip" label beside a projected figure reads as a fact.
     expect(source).not.toMatch(/label[=:]\s*['"]Slip['"]|>Slip</);
+  });
+
+  it("the web panel says what the second figure under Projected slip is — never a bare (+N)", () => {
+    const source = fs.readFileSync(path.join(ROOT, "frontend/src/features/forecast/components/forecast-panel.tsx"), "utf8");
+    // The bare bracket read as an unexplained second slip beside "—".
+    expect(source).not.toContain("(+${activity.impactDays})");
+    expect(source).not.toContain("(+{activity.impactDays})");
+    const legend = source.match(/const RECORDED_IMPACT_LEGEND =\s*'([^']+)'/)?.[1] || "";
+    expect(legend).toContain("recorded impact");
+    expect(legend).toContain("projected slip plus its recorded impact");
+    expect(legend).not.toMatch(NOT_A_FORECAST);
+    // Shown under the table and as the figure's tooltip.
+    expect(source).toContain("title={RECORDED_IMPACT_LEGEND}");
+    expect(source).toContain("data-testid='uat-forecast-slip-legend'");
+    expect(source.match(/\{RECORDED_IMPACT_LEGEND\}/g)).toHaveLength(2);
   });
 
   it("the narrative and the model's text call the finish projected", () => {

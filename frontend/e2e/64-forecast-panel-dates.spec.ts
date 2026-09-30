@@ -16,6 +16,11 @@ import { apiJson, createProject, dropLiveOrg, registerLiveOrg, signInForm, type 
  * not depend on the day it runs. `asOf` is an instant and stays in the
  * reader's own time.
  *
+ * Under "Projected slip" the row's second figure is said in words — "+60 d
+ * recorded impact", never a bare "(+60)" beside a slip of nothing — and the
+ * note under the table says what the two figures are and how they make the
+ * main driver's days.
+ *
  * Built in a throwaway "LiveTest <uuid>" organisation through the API: two
  * activities and one approved change order with 60 days on the first.
  */
@@ -33,7 +38,7 @@ type ForecastActivity = { id: string; name: string; plannedFinish: string | null
 type Forecast = {
   available: boolean
   asOf: string
-  schedule: { plannedFinish: string; projectedFinish: string; slipDays: number; topRisks: ForecastActivity[] }
+  schedule: { plannedFinish: string; projectedFinish: string; slipDays: number; criticalDriver: { id: string; name: string; slipDays: number } | null; topRisks: ForecastActivity[] }
 }
 
 const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/
@@ -98,10 +103,19 @@ const openForecast = async (page: Page, projectId: string) => {
   return forecast
 }
 
+let built: { projectId: string; wallsId: string } | null = null
+/** The fixture, built once for the file. */
+const fixture = async () => {
+  if (!built) {
+    const client = await apiClient()
+    built = await build(client).finally(() => client.dispose())
+  }
+  return built
+}
+
 test('a reader west of UTC sees the calendar dates the server sent, not the day before', async ({ page }) => {
   test.setTimeout(240_000)
-  const client = await apiClient()
-  const { projectId, wallsId } = await build(client).finally(() => client.dispose())
+  const { projectId, wallsId } = await fixture()
 
   await page.routeWebSocket(/socket\.io/, () => {})
   await signInForm(page, org!.adminEmail)
@@ -133,4 +147,40 @@ test('a reader west of UTC sees the calendar dates the server sent, not the day 
   // Chicago), not as the UTC calendar date (1 January).
   expect(forecast.asOf).toBe(AS_OF)
   await expect(page.getByTestId('uat-forecast')).toContainText('as of 12/31/2026.')
+})
+
+test('the recorded impact under "Projected slip" is said in words, with a note that reconciles it with the main driver', async ({ page }) => {
+  test.setTimeout(240_000)
+  const { projectId, wallsId } = await fixture()
+
+  await page.routeWebSocket(/socket\.io/, () => {})
+  await signInForm(page, org!.adminEmail)
+  const { schedule } = await openForecast(page, projectId)
+  const index = schedule.topRisks.findIndex((activity) => activity.id === wallsId)
+  expect(index).toBeGreaterThanOrEqual(0)
+  const walls = schedule.topRisks[index]
+  // The approved change order's 60 days, as the server counts them.
+  expect(walls.impactDays).toBe(60)
+
+  const rows = page.getByTestId('uat-forecast-activity')
+  await expect(rows).toHaveCount(schedule.topRisks.length)
+  const impact = rows.nth(index).getByTestId('uat-forecast-activity-impact')
+  await expect(impact).toHaveText('+60 d recorded impact')
+  await expect(rows.nth(index)).not.toContainText('(+60)')
+  // The same sentence is the figure's tooltip and the note under the table.
+  const legend = page.getByTestId('uat-forecast-slip-legend')
+  await expect(legend).toContainText('“+N d recorded impact” is the days recorded against the activity')
+  await expect(legend).toContainText('The main driver’s days are its projected slip plus its recorded impact.')
+  await expect(impact).toHaveAttribute('title', (await legend.innerText()).trim())
+  // A row without a recorded impact says nothing about one.
+  for (const [other, activity] of schedule.topRisks.entries()) {
+    if (activity.impactDays === 0) await expect(rows.nth(other).getByTestId('uat-forecast-activity-impact')).toHaveCount(0)
+  }
+  // What the note says is what the server did: the driver's days are its
+  // projected slip plus its recorded impact. No figure is changed here.
+  expect(schedule.criticalDriver?.id).toBe(wallsId)
+  expect(schedule.criticalDriver?.slipDays).toBe(walls.slipDays + walls.impactDays)
+  await expect(page.getByTestId('uat-forecast')).toContainText(`${walls.slipDays + walls.impactDays} days of projected slip`)
+  // Still a projection, never an extension of time.
+  expect(await page.getByTestId('uat-forecast').innerText()).not.toMatch(/extension of time|\bEOT\b|approved delay|granted/i)
 })

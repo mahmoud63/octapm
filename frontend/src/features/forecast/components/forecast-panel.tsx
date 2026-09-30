@@ -45,6 +45,10 @@ const formatDay = (value: string | null | undefined) =>
   value ? formatShortDate(value) : '—'
 const formatInstantDay = (value: string | null | undefined) =>
   value ? new Date(value).toLocaleDateString() : '—'
+// What the two figures of the "Projected slip" column are, and how they
+// reach the main driver's days and the project's finish. Wording only.
+const RECORDED_IMPACT_LEGEND =
+  'Projected slip is the activity’s own projected finish against its planned finish. “+N d recorded impact” is the days recorded against the activity by approved change orders, RFIs, submittals, risks and weather: they are not in its projected date, and are added to it when the project’s finish is projected. The main driver’s days are its projected slip plus its recorded impact.'
 const levelVariant = (level: ForecastLevel) =>
   level === 'high'
     ? 'destructive'
@@ -193,7 +197,17 @@ function ActivityRow({
           )}
         >
           {activity.slipDays > 0 ? `+${activity.slipDays}d` : '—'}
-          {activity.impactDays > 0 ? ` (+${activity.impactDays})` : ''}
+          {activity.impactDays > 0 ? (
+            // Said in words: a bare "(+60)" beside a slip of nothing read as
+            // an unexplained second slip. The figure is the server's.
+            <span
+              className='block text-[11px] font-normal whitespace-nowrap text-muted-foreground'
+              title={RECORDED_IMPACT_LEGEND}
+              data-testid='uat-forecast-activity-impact'
+            >
+              +{activity.impactDays} d recorded impact
+            </span>
+          ) : null}
         </td>
         <td className='px-2 py-1.5 tabular-nums'>
           {activity.float === null ? '—' : `${activity.float}d`}
@@ -689,6 +703,12 @@ export function ForecastPanel({ projectId }: { projectId: string }) {
             .map(([, label]) => label)
             .join(', ')}
           . Click a row for the reasons.
+        </p>
+        <p
+          className='text-[11px] text-muted-foreground'
+          data-testid='uat-forecast-slip-legend'
+        >
+          {RECORDED_IMPACT_LEGEND}
         </p>
       </section>
 
