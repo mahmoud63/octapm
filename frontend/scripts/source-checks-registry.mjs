@@ -48,6 +48,65 @@ export const listCheckFiles = () =>
     .filter((name) => name.endsWith('.test.mjs'))
     .sort()
 
+// The one workflow a RUNTIME check's `ci` job may live in.
+export const CI_WORKFLOW = '.github/workflows/quality-gates.yml'
+const EXCLUDED_FROM_CI = /^excluded:\s*(\S.*)$/s
+
+export const loadWorkflow = () =>
+  readFileSync(new URL(`../../${CI_WORKFLOW}`, import.meta.url), 'utf8')
+
+// The jobs of a GitHub Actions workflow, read as text: job id -> that job's
+// own lines. Enough to tell whether a job exists and what its steps run.
+export const workflowJobs = (text) => {
+  const jobs = new Map()
+  let inJobs = false
+  let current = null
+  for (const line of text.split(/\r?\n/)) {
+    if (/^\s*(#.*)?$/.test(line)) continue
+    if (/^jobs:\s*(#.*)?$/.test(line)) {
+      inJobs = true
+      continue
+    }
+    if (/^\S/.test(line)) {
+      inJobs = false
+      current = null
+    }
+    if (!inJobs) continue
+    const job = /^ {2}([A-Za-z_][\w-]*):\s*(#.*)?$/.exec(line)
+    if (job) {
+      current = job[1]
+      jobs.set(current, [])
+    } else if (current) jobs.get(current).push(line)
+  }
+  return new Map([...jobs].map(([id, lines]) => [id, lines.join('\n')]))
+}
+
+// Does this job run the check: by file name, or through an npm script whose
+// command runs the file? The static runner's job never does; it runs the
+// static list only.
+const jobRunsCheck = (jobText, file, scripts) =>
+  jobText.includes(`scripts/${file}`) ||
+  Object.entries(scripts).some(
+    ([name, command]) =>
+      String(command).includes(`scripts/${file}`) &&
+      jobText
+        .split(`npm run ${name}`)
+        .slice(1)
+        .some((rest) => !/^[\w:.-]/.test(rest))
+  )
+
+// One line per RUNTIME check for the runner's output: the static runner does
+// not run it, and this says where it runs instead, or that it runs nowhere.
+export const describeRuntimeCheck = ({ file, needs, ci }) => {
+  const excluded = EXCLUDED_FROM_CI.exec(String(ci ?? '').trim())
+  return (
+    `NOT RUN  ${file}  runtime (needs ${(needs ?? []).join(', ') || '?'}); ` +
+    (excluded
+      ? `EXCLUDED from CI: ${excluded[1].trim()}`
+      : `runs in CI job "${ci}" (${CI_WORKFLOW})`)
+  )
+}
+
 // The static import specifiers of a module's source (`import ... from 'x'`,
 // `import 'x'`, `export ... from 'x'`) and any `require('x')`.
 export const importSpecifiers = (source) => {
@@ -70,6 +129,8 @@ export const validateRegistry = ({
   scripts = loadPackageScripts(),
   readCheck = (name) =>
     readFileSync(new URL(`./${name}`, import.meta.url), 'utf8'),
+  // The CI workflow's text; read only when a runtime entry names a job.
+  readWorkflow = loadWorkflow,
 } = {}) => {
   const errors = []
   const staticList = Array.isArray(registry.static) ? registry.static : null
@@ -81,6 +142,7 @@ export const validateRegistry = ({
     )
   if (!staticList || !runtimeList) return errors
 
+  let ciJobs = null
   const seen = new Map()
   const note = (file, list) => {
     if (seen.has(file))
@@ -118,10 +180,37 @@ export const validateRegistry = ({
         errors.push(`runtime ${file} names an unknown need "${need}"`)
     if (typeof entry.reason !== 'string' || entry.reason.trim() === '')
       errors.push(`runtime ${file} must say why it is not static (reason)`)
-    if (typeof entry.ci !== 'string' || entry.ci.trim() === '')
+    // `ci` is either "excluded: <why>" or a job of the CI workflow whose steps
+    // run this file. Any other text would take a check out of the static run
+    // and run it nowhere.
+    const ci = typeof entry.ci === 'string' ? entry.ci.trim() : ''
+    if (ci === '') {
       errors.push(
         `runtime ${file} must name the isolated CI job that runs it, or "excluded: <why>" (ci)`
       )
+    } else if (/^excluded\b/i.test(ci)) {
+      if (!EXCLUDED_FROM_CI.test(ci))
+        errors.push(
+          `runtime ${file} is excluded from CI without a reason; write "excluded: <why>" (ci)`
+        )
+    } else {
+      try {
+        ciJobs ??= workflowJobs(readWorkflow())
+      } catch (error) {
+        errors.push(
+          `runtime ${file} names CI job "${ci}", but ${CI_WORKFLOW} cannot be read (${error.message})`
+        )
+        continue
+      }
+      if (!ciJobs.has(ci))
+        errors.push(
+          `runtime ${file} names CI job "${ci}", which is not a job in ${CI_WORKFLOW} (jobs: ${[...ciJobs.keys()].join(', ') || 'none'}); name the isolated job that runs it, or "excluded: <why>"`
+        )
+      else if (!jobRunsCheck(ciJobs.get(ci), file, scripts))
+        errors.push(
+          `runtime ${file} names CI job "${ci}", but that job does not run it: its steps mention neither scripts/${file} nor an npm script that runs it`
+        )
+    }
   }
 
   const present = new Set(files)
